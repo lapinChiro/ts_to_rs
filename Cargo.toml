@@ -1,0 +1,22 @@
+[package]
+name = "ts_to_rs"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "ts_to_rs"
+path = "src/main.rs"
+
+[lib]
+name = "ts_to_rs"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+swc_common = "19"
+swc_ecma_ast = "21"
+swc_ecma_parser = "35"
+
+[dev-dependencies]
+insta = "1"

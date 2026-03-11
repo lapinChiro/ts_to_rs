@@ -64,26 +64,9 @@ TypeScriptコードを等価なRustコードに変換するCLIツール。
 
 ### ディレクトリ構成
 
-```
-ts_to_rs/
-├── src/
-│   ├── main.rs             # CLIエントリポイント
-│   ├── lib.rs              # ライブラリエントリポイント
-│   ├── parser.rs           # SWCでTSファイルをAST化
-│   ├── transformer/
-│   │   ├── mod.rs          # AST → IR 変換のエントリ
-│   │   ├── types.rs        # 型変換 (TS型 → Rust型)
-│   │   ├── functions.rs    # 関数変換
-│   │   ├── statements.rs   # 文の変換
-│   │   └── expressions.rs  # 式の変換
-│   ├── generator.rs        # IR → Rust ソースコード生成
-│   └── ir.rs               # 中間表現の型定義
-├── tests/
-│   ├── fixtures/           # 変換テスト用の .ts / .rs ペア
-│   │   ├── basic-types.input.ts
-│   │   ├── basic-types.expected.rs
-│   │   └── ...
-│   └── integration_test.rs # E2Eテスト
+[README.md](README.md#ディレクトリ構成) を参照。
+
+追加ファイル:
 ├── Cargo.toml
 ├── CLAUDE.md
 └── plan.md
@@ -95,42 +78,54 @@ ts_to_rs/
 - [x] CLAUDE.md をRust用に書き換え
 - [x] `.claude/rules/` をRust用に書き換え（testing.md, quality-check.md, tdd.md）
 
-#### Step 1: プロジェクト基盤セットアップ
-- [ ] Cargo.toml（swc_ecma_parser, swc_ecma_ast, clap, insta, anyhow 等）
-- [ ] `src/main.rs`, `src/lib.rs` の雛形作成
-- [ ] `cargo build` が通ることを確認
-- [ ] `.gitignore` にRust用設定を追加
+#### Step 1: プロジェクト基盤セットアップ ✅ 完了
+- [x] Cargo.toml（swc_ecma_parser 35, swc_ecma_ast 21, swc_common 19, clap 4, insta 1, anyhow 1）
+- [x] `src/main.rs`, `src/lib.rs` の雛形作成
+- [x] `cargo build` が通ることを確認
+- [x] `.gitignore` にRust用設定を追加
 
-#### Step 2: IR（中間表現）の型定義 — RED → GREEN
-- [ ] Rustコードを表現するための IR 型を定義（enum / struct）
-- [ ] テスト: IR型が必要な構造を表現できることを確認
+#### Step 2: IR（中間表現）の型定義 ✅ 完了
+- [x] Rustコードを表現するための IR 型を定義（enum / struct）
+  - `RustType`: String, F64, Bool, Option, Vec, Named（ユーザー定義型用に追加）
+  - `Item`: Struct, Enum, Fn
+  - `Stmt`: Let, If, Return, Expr
+  - `Expr`: NumberLit, BoolLit, StringLit, Ident, FormatMacro, BinaryOp
+- [x] テスト: IR型が必要な構造を表現できることを確認（15テスト）
 
-#### Step 3: 型変換 — RED → GREEN
-- [ ] テスト: `interface Foo { name: string; age: number; }` → `struct Foo { name: String, age: f64 }`
-- [ ] SWC AST の型宣言ノード → IR 変換を実装
-- [ ] プリミティブ型マッピング
-- [ ] Optional (`?` / `| null`) → `Option<T>`
+#### Step 3: 型変換 ✅ 完了
+- [x] テスト: `interface Foo { name: string; age: number; }` → `struct Foo { name: String, age: f64 }`
+- [x] SWC AST の型宣言ノード → IR 変換を実装
+- [x] プリミティブ型マッピング（string→String, number→f64, boolean→bool）
+- [x] Optional (`?` / `| null` / `| undefined`) → `Option<T>`（二重ラップ防止込み）
+- [x] 配列型 `T[]` / `Array<T>` → `Vec<T>`
+- [x] ユーザー定義型参照 → `RustType::Named`
 
-#### Step 4: 関数変換 — RED → GREEN
-- [ ] テスト: `function add(a: number, b: number): number { return a + b; }` → `fn add(a: f64, b: f64) -> f64 { a + b }`
-- [ ] 関数シグネチャの変換
-- [ ] 基本的な式・文の変換（return, 変数宣言, if/else）
+#### Step 4: 関数変換 ✅ 完了
+- [x] テスト: `function add(a: number, b: number): number { return a + b; }` → `fn add(a: f64, b: f64) -> f64 { a + b }`
+- [x] 関数シグネチャの変換
+- [x] 基本的な式・文の変換（return, 変数宣言, if/else）
+- [x] 二項演算（算術・比較・論理演算子）
+- [x] テンプレートリテラル → `format!()`
 
-#### Step 5: コード生成 — RED → GREEN
-- [ ] テスト: IR → Rust ソースコード文字列
-- [ ] インデント、セミコロン、ブレースの整形
+#### Step 5: コード生成 ✅ 完了
+- [x] テスト: IR → Rust ソースコード文字列（29テスト）
+- [x] インデント（4スペース）、セミコロン、ブレースの整形
+- [x] 関数末尾の return を Rust の末尾式（セミコロンなし）に変換
 
-#### Step 6: E2Eパイプライン結合
-- [ ] テスト: `.ts` ファイル入力 → `.rs` ファイル出力
-- [ ] fixture ベースのスナップショットテスト（insta）
+#### Step 6: E2Eパイプライン結合 ✅ 完了
+- [x] `lib.rs` に `transpile()` 公開関数を追加（parse → transform → generate）
+- [x] `export` 宣言の処理を追加
+- [x] テスト: `.ts` ファイル入力 → `.rs` ファイル出力
+- [x] fixture ベースのスナップショットテスト（insta、4 fixture）
 
-#### Step 7: CLI実装
-- [ ] `ts-to-rs <input.ts> -o <output.rs>` コマンド（clap）
-- [ ] エラーメッセージ、ヘルプ表示
+#### Step 7: CLI実装 ✅ 完了
+- [x] `ts-to-rs <input.ts> -o <output.rs>` コマンド（clap）
+- [x] `-o` 省略時はデフォルトで `<input>.rs` に出力
+- [x] エラーメッセージ（anyhow の Context 付き）、ヘルプ表示
 
-#### Step 8: 品質チェック・リリース準備
-- [ ] clippy 0警告、テスト全パス
-- [ ] README.md 更新
+#### Step 8: 品質チェック・リリース準備 ✅ 完了
+- [x] clippy 0警告、fmt 0エラー、95テスト全パス
+- [x] README.md 更新
 
 ## フェーズ2以降（将来）
 

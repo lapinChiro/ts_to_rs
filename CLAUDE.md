@@ -24,23 +24,9 @@ cargo fmt --all --check    # フォーマットチェック
 
 ## Architecture
 
-```txt
-src/
-├── main.rs             # CLIエントリポイント
-├── lib.rs              # ライブラリエントリポイント
-├── parser.rs           # SWCでTSファイルをAST化
-├── transformer/        # AST → IR 変換
-│   ├── mod.rs
-│   ├── types.rs        # 型変換 (TS型 → Rust型)
-│   ├── functions.rs    # 関数変換
-│   ├── statements.rs   # 文の変換
-│   └── expressions.rs  # 式の変換
-├── generator.rs        # IR → Rust ソースコード生成
-└── ir.rs               # 中間表現の型定義
-tests/
-├── fixtures/           # 変換テスト用 .ts / .rs ペア
-└── integration_test.rs # E2Eテスト
-```
+ディレクトリ構成は [README.md](README.md#ディレクトリ構成) を参照。
+
+変換パイプライン: TS source → `parser` (SWC AST) → `transformer` (IR) → `generator` (Rust source)
 
 ## Core Principles
 
@@ -60,6 +46,15 @@ tests/
 ## Quality Standards
 
 全ての変更に対し **0エラー・0警告** を維持すること。詳細は `.claude/rules/quality-check.md` を参照。
+
+## 自発的改善の原則
+
+問題や不整合を発見したら、ユーザーに指摘される前に自発的に調査・修正すること。これはツール固有の話ではなく、開発全般に適用される原則である:
+
+- 警告・エラー・不整合を「一時的な問題」として安易に無視しない
+- 問題の根本原因を特定してから対処する
+- 開発環境・ツールチェインの問題も自分の責任範囲として扱う
+- 「動いているから良い」ではなく「正しい状態か」を基準にする
 
 ## 学習プロトコル
 

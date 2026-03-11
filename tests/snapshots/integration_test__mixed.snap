@@ -1,0 +1,12 @@
+---
+source: tests/integration_test.rs
+expression: output
+---
+pub struct Point {
+    pub x: f64,
+    pub y: f64,
+}
+
+pub fn distance(a: Point, b: Point) -> f64 {
+    0.0
+}
