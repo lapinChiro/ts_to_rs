@@ -1,6 +1,6 @@
 //! Code generator: converts IR into Rust source code strings.
 
-use crate::ir::{Expr, Item, Method, RustType, Stmt, Visibility};
+use crate::ir::{EnumValue, EnumVariant, Expr, Item, Method, RustType, Stmt, Visibility};
 
 /// Generates Rust source code from a list of IR items.
 pub fn generate(items: &[Item]) -> String {
@@ -88,15 +88,7 @@ fn generate_item(item: &Item) -> String {
             vis,
             name,
             variants,
-        } => {
-            let vis_str = generate_vis(vis);
-            let mut out = format!("{vis_str}enum {name} {{\n");
-            for variant in variants {
-                out.push_str(&format!("    {variant},\n"));
-            }
-            out.push('}');
-            out
-        }
+        } => generate_enum(vis, name, variants),
         Item::Impl {
             struct_name,
             methods,
@@ -173,6 +165,75 @@ fn generate_method(method: &Method) -> String {
         out.push('\n');
     }
     out.push_str("    }\n");
+    out
+}
+
+/// Determines whether all enum variants have numeric values (or no values).
+fn is_numeric_enum(variants: &[EnumVariant]) -> bool {
+    variants
+        .iter()
+        .all(|v| matches!(v.value, None | Some(EnumValue::Number(_))))
+}
+
+/// Generates a Rust enum definition from IR.
+///
+/// - Numeric enums get `#[repr(i64)]` and discriminant values.
+/// - String enums get an `as_str()` impl block.
+/// - Enums without values are treated as numeric enums with auto-incrementing values.
+fn generate_enum(vis: &Visibility, name: &str, variants: &[EnumVariant]) -> String {
+    let vis_str = generate_vis(vis);
+    let numeric = is_numeric_enum(variants);
+
+    let mut out = String::new();
+    out.push_str("#[derive(Debug, Clone, Copy, PartialEq, Eq)]\n");
+    if numeric {
+        out.push_str("#[repr(i64)]\n");
+    }
+    out.push_str(&format!("{vis_str}enum {name} {{\n"));
+
+    if numeric {
+        let mut next_value: i64 = 0;
+        for variant in variants {
+            let value = match &variant.value {
+                Some(EnumValue::Number(n)) => {
+                    next_value = *n + 1;
+                    *n
+                }
+                None => {
+                    let v = next_value;
+                    next_value += 1;
+                    v
+                }
+                _ => unreachable!(),
+            };
+            out.push_str(&format!("    {} = {},\n", variant.name, value));
+        }
+    } else {
+        for variant in variants {
+            out.push_str(&format!("    {},\n", variant.name));
+        }
+    }
+
+    out.push('}');
+
+    // Generate as_str() impl for string enums
+    if !numeric {
+        out.push_str(&format!("\n\nimpl {name} {{\n"));
+        out.push_str("    pub fn as_str(&self) -> &str {\n");
+        out.push_str("        match self {\n");
+        for variant in variants {
+            if let Some(EnumValue::Str(s)) = &variant.value {
+                out.push_str(&format!(
+                    "            {name}::{} => \"{s}\",\n",
+                    variant.name
+                ));
+            }
+        }
+        out.push_str("        }\n");
+        out.push_str("    }\n");
+        out.push('}');
+    }
+
     out
 }
 
@@ -433,7 +494,8 @@ fn indent_str(level: usize) -> String {
 mod tests {
     use super::*;
     use crate::ir::{
-        ClosureBody, Expr, Item, Method, Param, RustType, Stmt, StructField, Visibility,
+        ClosureBody, EnumValue, EnumVariant, Expr, Item, Method, Param, RustType, Stmt,
+        StructField, Visibility,
     };
 
     // --- Item::Use tests ---
@@ -751,18 +813,109 @@ struct Bar {
     // --- Item::Enum tests ---
 
     #[test]
-    fn test_generate_enum_public() {
+    fn test_generate_enum_numeric_auto() {
+        let item = Item::Enum {
+            vis: Visibility::Public,
+            name: "Color".to_string(),
+            variants: vec![
+                EnumVariant {
+                    name: "Red".to_string(),
+                    value: None,
+                },
+                EnumVariant {
+                    name: "Green".to_string(),
+                    value: None,
+                },
+                EnumVariant {
+                    name: "Blue".to_string(),
+                    value: None,
+                },
+            ],
+        };
+        let expected = "\
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(i64)]
+pub enum Color {
+    Red = 0,
+    Green = 1,
+    Blue = 2,
+}";
+        assert_eq!(generate(&[item]), expected);
+    }
+
+    #[test]
+    fn test_generate_enum_numeric_explicit() {
+        let item = Item::Enum {
+            vis: Visibility::Public,
+            name: "Status".to_string(),
+            variants: vec![
+                EnumVariant {
+                    name: "Active".to_string(),
+                    value: Some(EnumValue::Number(1)),
+                },
+                EnumVariant {
+                    name: "Inactive".to_string(),
+                    value: Some(EnumValue::Number(0)),
+                },
+            ],
+        };
+        let expected = "\
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(i64)]
+pub enum Status {
+    Active = 1,
+    Inactive = 0,
+}";
+        assert_eq!(generate(&[item]), expected);
+    }
+
+    #[test]
+    fn test_generate_enum_string() {
         let item = Item::Enum {
             vis: Visibility::Public,
             name: "Direction".to_string(),
-            variants: vec!["North".to_string(), "South".to_string()],
+            variants: vec![
+                EnumVariant {
+                    name: "Up".to_string(),
+                    value: Some(EnumValue::Str("UP".to_string())),
+                },
+                EnumVariant {
+                    name: "Down".to_string(),
+                    value: Some(EnumValue::Str("DOWN".to_string())),
+                },
+            ],
         };
         let expected = "\
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Direction {
-    North,
-    South,
+    Up,
+    Down,
+}
+
+impl Direction {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Direction::Up => \"UP\",
+            Direction::Down => \"DOWN\",
+        }
+    }
 }";
         assert_eq!(generate(&[item]), expected);
+    }
+
+    #[test]
+    fn test_generate_enum_private() {
+        let item = Item::Enum {
+            vis: Visibility::Private,
+            name: "Color".to_string(),
+            variants: vec![EnumVariant {
+                name: "Red".to_string(),
+                value: None,
+            }],
+        };
+        let result = generate(&[item]);
+        assert!(!result.contains("pub enum"));
+        assert!(result.contains("enum Color"));
     }
 
     // --- Item::Fn tests ---

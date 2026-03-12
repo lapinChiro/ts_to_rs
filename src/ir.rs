@@ -48,6 +48,24 @@ pub enum Visibility {
     Private,
 }
 
+/// A value associated with an enum variant.
+#[derive(Debug, Clone, PartialEq)]
+pub enum EnumValue {
+    /// A numeric discriminant (e.g., `Active = 1`)
+    Number(i64),
+    /// A string value (e.g., `Up = "UP"`)
+    Str(String),
+}
+
+/// A variant of an enum, with an optional value.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EnumVariant {
+    /// Variant name
+    pub name: String,
+    /// Optional discriminant or string value
+    pub value: Option<EnumValue>,
+}
+
 /// A named field in a struct.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StructField {
@@ -104,14 +122,14 @@ pub enum Item {
         /// Named fields
         fields: Vec<StructField>,
     },
-    /// An `enum` with unit (string-like) variants.
+    /// An `enum` with variants that may have numeric or string values.
     Enum {
         /// Visibility
         vis: Visibility,
         /// Enum name
         name: String,
-        /// Variant names
-        variants: Vec<String>,
+        /// Enum variants
+        variants: Vec<EnumVariant>,
     },
     /// An `impl` block for a struct.
     Impl {
@@ -329,16 +347,75 @@ mod tests {
     }
 
     #[test]
-    fn test_item_enum() {
+    fn test_item_enum_no_values() {
         let item = Item::Enum {
             vis: Visibility::Public,
-            name: "Direction".to_string(),
-            variants: vec!["North".to_string(), "South".to_string()],
+            name: "Color".to_string(),
+            variants: vec![
+                EnumVariant {
+                    name: "Red".to_string(),
+                    value: None,
+                },
+                EnumVariant {
+                    name: "Green".to_string(),
+                    value: None,
+                },
+            ],
         };
         match item {
             Item::Enum { name, variants, .. } => {
-                assert_eq!(name, "Direction");
+                assert_eq!(name, "Color");
                 assert_eq!(variants.len(), 2);
+                assert!(variants[0].value.is_none());
+            }
+            _ => panic!("expected Enum"),
+        }
+    }
+
+    #[test]
+    fn test_item_enum_numeric_values() {
+        let item = Item::Enum {
+            vis: Visibility::Public,
+            name: "Status".to_string(),
+            variants: vec![
+                EnumVariant {
+                    name: "Active".to_string(),
+                    value: Some(EnumValue::Number(1)),
+                },
+                EnumVariant {
+                    name: "Inactive".to_string(),
+                    value: Some(EnumValue::Number(0)),
+                },
+            ],
+        };
+        match &item {
+            Item::Enum { variants, .. } => {
+                assert_eq!(variants[0].value, Some(EnumValue::Number(1)));
+                assert_eq!(variants[1].value, Some(EnumValue::Number(0)));
+            }
+            _ => panic!("expected Enum"),
+        }
+    }
+
+    #[test]
+    fn test_item_enum_string_values() {
+        let item = Item::Enum {
+            vis: Visibility::Public,
+            name: "Direction".to_string(),
+            variants: vec![
+                EnumVariant {
+                    name: "Up".to_string(),
+                    value: Some(EnumValue::Str("UP".to_string())),
+                },
+                EnumVariant {
+                    name: "Down".to_string(),
+                    value: Some(EnumValue::Str("DOWN".to_string())),
+                },
+            ],
+        };
+        match &item {
+            Item::Enum { variants, .. } => {
+                assert_eq!(variants[0].value, Some(EnumValue::Str("UP".to_string())));
             }
             _ => panic!("expected Enum"),
         }

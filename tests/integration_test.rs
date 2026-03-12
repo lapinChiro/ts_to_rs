@@ -77,3 +77,10 @@ fn test_mixed() {
     let output = transpile(&input).unwrap();
     insta::assert_snapshot!(output);
 }
+
+#[test]
+fn test_enum() {
+    let input = fs::read_to_string("tests/fixtures/enum.input.ts").unwrap();
+    let output = transpile(&input).unwrap();
+    insta::assert_snapshot!(output);
+}

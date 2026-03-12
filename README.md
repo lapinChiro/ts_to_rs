@@ -42,6 +42,8 @@ ts-to-rs input.ts -o output.rs
 | `while (cond) { ... }` | `while cond { ... }` |
 | `for (const x of items) { ... }` | `for x in items { ... }` |
 | `for (let i = 0; i < n; i++)` | `for i in 0..n { ... }` |
+| `enum` (数値) | `enum` + `#[repr(i64)]` |
+| `enum` (文字列) | `enum` + `as_str()` メソッド |
 | `export` | `pub` |
 
 ## 例

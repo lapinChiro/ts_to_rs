@@ -1,0 +1,45 @@
+---
+source: tests/integration_test.rs
+expression: output
+---
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(i64)]
+enum Color {
+    Red = 0,
+    Green = 1,
+    Blue = 2,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(i64)]
+enum Status {
+    Active = 1,
+    Inactive = 0,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Direction {
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
+impl Direction {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Direction::Up => "UP",
+            Direction::Down => "DOWN",
+            Direction::Left => "LEFT",
+            Direction::Right => "RIGHT",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(i64)]
+pub enum Visibility {
+    Public = 0,
+    Private = 1,
+    Protected = 2,
+}
