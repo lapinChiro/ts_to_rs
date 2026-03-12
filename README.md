@@ -62,6 +62,23 @@ pub fn greet(user: User) -> String {
 }
 ```
 
+## 技術的アプローチ
+
+**AST-to-AST変換** を採用している。
+
+1. TSの解析: [SWC](https://swc.rs/) の Rust クレートで TS ソースを AST 化
+2. 変換: SWC AST → 独自 IR（中間表現）
+3. コード生成: IR → Rust ソースコード文字列
+
+| 項目 | 技術 |
+|------|------|
+| 言語 | Rust |
+| TS解析 | swc_ecma_parser + swc_ecma_ast |
+| CLI | clap |
+| テスト | cargo test + insta (スナップショット) |
+| Lint | clippy |
+| フォーマット | rustfmt |
+
 ## ディレクトリ構成
 
 ```
