@@ -24,17 +24,17 @@ named import を `use crate::...` に変換、`export` の有無で `pub` / 非 
 
 依存関係と価値の大きさに基づいて以下の順序で進める。
 
-#### 1. CI — `backlog/ci.md`
+#### ~~1. CI~~ — 完了
 
-**理由**: 全ての開発の品質ゲート。先にやることで以降の変更が安全になる。スコープが小さく即完了できる。
+GitHub Actions で `cargo fmt --check` / `cargo clippy` / `cargo test` を自動実行。`main` への push と PR で品質ゲートを適用。
 
-#### 2. rustfmt 連携 — `backlog/rustfmt-integration.md`
+#### ~~2. rustfmt 連携~~ — 完了
 
-**理由**: CI と並行可能。生成コードの品質を底上げし、generator 拡張時のフォーマット負荷を減らす。スコープが小さい。
+CLI の出力 `.rs` ファイルに `rustfmt` を自動適用。`rustfmt` がない環境では警告を出して続行。
 
-#### 3. クラス → struct + impl — `backlog/class-conversion.md`
+#### ~~3. クラス → struct + impl~~ — 完了
 
-**理由**: 実際の TS プロジェクトで最も頻出する未対応構文。対応可能な TS コードの範囲が大幅に広がる。
+クラス宣言を `struct` + `impl` に変換。プロパティ→フィールド、`constructor`→`new()`、メソッド→`&self` メソッド、`this`→`self`。
 
 #### 4. ジェネリクス — `backlog/generics.md`
 

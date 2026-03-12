@@ -1,5 +1,6 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use anyhow::{Context, Result};
 use clap::Parser;
@@ -28,8 +29,30 @@ fn main() -> Result<()> {
     }
 }
 
+/// Runs `rustfmt` on the given files. Prints a warning and continues if `rustfmt` is not available.
+fn run_rustfmt(paths: &[PathBuf]) {
+    if paths.is_empty() {
+        return;
+    }
+
+    let result = Command::new("rustfmt").args(paths).status();
+
+    match result {
+        Ok(status) if status.success() => {}
+        Ok(status) => {
+            eprintln!("Warning: rustfmt exited with status {status}; output may not be formatted");
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            eprintln!("Warning: rustfmt not found; output will not be formatted");
+        }
+        Err(e) => {
+            eprintln!("Warning: failed to run rustfmt: {e}; output may not be formatted");
+        }
+    }
+}
+
 /// Transpiles a single TypeScript file to Rust.
-fn transpile_file(input: &std::path::Path, output: Option<&std::path::Path>) -> Result<()> {
+fn transpile_file(input: &Path, output: Option<&Path>) -> Result<()> {
     let ts_source = fs::read_to_string(input)
         .with_context(|| format!("failed to read input file: {}", input.display()))?;
 
@@ -43,15 +66,14 @@ fn transpile_file(input: &std::path::Path, output: Option<&std::path::Path>) -> 
     fs::write(&output_path, &rs_source)
         .with_context(|| format!("failed to write output file: {}", output_path.display()))?;
 
+    run_rustfmt(std::slice::from_ref(&output_path));
+
     eprintln!("Wrote {}", output_path.display());
     Ok(())
 }
 
 /// Transpiles all `.ts` files in a directory to Rust.
-fn transpile_directory(
-    input_dir: &std::path::Path,
-    output: Option<&std::path::Path>,
-) -> Result<()> {
+fn transpile_directory(input_dir: &Path, output: Option<&Path>) -> Result<()> {
     let ts_files = directory::collect_ts_files(input_dir)?;
     directory::validate_has_ts_files(&ts_files, input_dir)?;
 
@@ -66,6 +88,7 @@ fn transpile_directory(
     });
 
     let mut converted = 0;
+    let mut rs_paths = Vec::new();
 
     for ts_path in &ts_files {
         let rs_path = directory::compute_output_path(ts_path, input_dir, &output_dir)?;
@@ -85,6 +108,7 @@ fn transpile_directory(
             .with_context(|| format!("failed to write: {}", rs_path.display()))?;
 
         eprintln!("Wrote {}", rs_path.display());
+        rs_paths.push(rs_path);
         converted += 1;
     }
 
@@ -96,8 +120,11 @@ fn transpile_directory(
             fs::write(&mod_rs_path, &content)
                 .with_context(|| format!("failed to write: {}", mod_rs_path.display()))?;
             eprintln!("Wrote {}", mod_rs_path.display());
+            rs_paths.push(mod_rs_path);
         }
     }
+
+    run_rustfmt(&rs_paths);
 
     eprintln!("Converted {converted} file(s)");
     Ok(())

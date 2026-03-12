@@ -1,0 +1,23 @@
+---
+source: tests/integration_test.rs
+expression: output
+---
+pub struct User {
+    pub name: String,
+    pub age: f64,
+}
+
+impl User {
+    pub fn new(name: String, age: f64) -> Self {
+        Self { name, age }
+    }
+
+    pub fn get_age(&self) -> f64 {
+        self.age
+    }
+}
+
+struct Point {
+    x: f64,
+    y: f64,
+}

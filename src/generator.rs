@@ -1,6 +1,6 @@
 //! Code generator: converts IR into Rust source code strings.
 
-use crate::ir::{Expr, Item, RustType, Stmt, Visibility};
+use crate::ir::{Expr, Item, Method, RustType, Stmt, Visibility};
 
 /// Generates Rust source code from a list of IR items.
 pub fn generate(items: &[Item]) -> String {
@@ -63,6 +63,20 @@ fn generate_item(item: &Item) -> String {
             out.push('}');
             out
         }
+        Item::Impl {
+            struct_name,
+            methods,
+        } => {
+            let mut out = format!("impl {struct_name} {{\n");
+            for (i, method) in methods.iter().enumerate() {
+                if i > 0 {
+                    out.push('\n');
+                }
+                out.push_str(&generate_method(method));
+            }
+            out.push('}');
+            out
+        }
         Item::Fn {
             vis,
             name,
@@ -91,6 +105,39 @@ fn generate_item(item: &Item) -> String {
             out
         }
     }
+}
+
+/// Generates a method inside an `impl` block.
+fn generate_method(method: &Method) -> String {
+    let vis_str = generate_vis(&method.vis);
+    let self_param = if method.has_self { "&self" } else { "" };
+    let other_params = method
+        .params
+        .iter()
+        .map(|p| format!("{}: {}", p.name, generate_type(&p.ty)))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let params_str = if method.has_self && !other_params.is_empty() {
+        format!("{self_param}, {other_params}")
+    } else if method.has_self {
+        self_param.to_string()
+    } else {
+        other_params
+    };
+    let ret_str = match &method.return_type {
+        Some(ty) => format!(" -> {}", generate_type(ty)),
+        None => String::new(),
+    };
+    let name = &method.name;
+    let mut out = format!("    {vis_str}fn {name}({params_str}){ret_str} {{\n");
+    let body_len = method.body.len();
+    for (i, stmt) in method.body.iter().enumerate() {
+        let is_last = i == body_len - 1;
+        out.push_str(&generate_stmt(stmt, 2, is_last));
+        out.push('\n');
+    }
+    out.push_str("    }\n");
+    out
 }
 
 /// Generates the visibility prefix string.
@@ -199,6 +246,45 @@ fn generate_expr(expr: &Expr) -> String {
                 format!("format!(\"{template}\", {args_str})")
             }
         }
+        Expr::MethodCall {
+            object,
+            method,
+            args,
+        } => {
+            let args_str = args
+                .iter()
+                .map(generate_expr)
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("{}.{method}({args_str})", generate_expr(object))
+        }
+        Expr::StructInit { name, fields } => {
+            if fields
+                .iter()
+                .all(|(f, v)| matches!(v, Expr::Ident(i) if i == f))
+            {
+                // Shorthand: `Self { x, y }` when field name == value name
+                let fields_str = fields
+                    .iter()
+                    .map(|(f, _)| f.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{name} {{ {fields_str} }}")
+            } else {
+                let fields_str = fields
+                    .iter()
+                    .map(|(f, v)| format!("{f}: {}", generate_expr(v)))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{name} {{ {fields_str} }}")
+            }
+        }
+        Expr::Assign { target, value } => {
+            format!("{} = {}", generate_expr(target), generate_expr(value))
+        }
+        Expr::FieldAccess { object, field } => {
+            format!("{}.{field}", generate_expr(object))
+        }
         Expr::BinaryOp { left, op, right } => {
             format!("{} {op} {}", generate_expr(left), generate_expr(right))
         }
@@ -213,7 +299,7 @@ fn indent_str(level: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ir::{Expr, Item, Param, RustType, Stmt, StructField, Visibility};
+    use crate::ir::{Expr, Item, Method, Param, RustType, Stmt, StructField, Visibility};
 
     // --- Item::Use tests ---
 
@@ -313,6 +399,15 @@ mod tests {
             right: Box::new(Expr::Ident("b".to_string())),
         };
         assert_eq!(generate_expr(&expr), "a + b");
+    }
+
+    #[test]
+    fn test_generate_expr_field_access() {
+        let expr = Expr::FieldAccess {
+            object: Box::new(Expr::Ident("self".to_string())),
+            field: "name".to_string(),
+        };
+        assert_eq!(generate_expr(&expr), "self.name");
     }
 
     #[test]
@@ -615,6 +710,58 @@ fn f() -> f64 {
     }
 
     // --- Multiple items ---
+
+    // --- Item::Impl tests ---
+
+    #[test]
+    fn test_generate_impl_new() {
+        let item = Item::Impl {
+            struct_name: "Foo".to_string(),
+            methods: vec![Method {
+                vis: Visibility::Public,
+                name: "new".to_string(),
+                has_self: false,
+                params: vec![Param {
+                    name: "x".to_string(),
+                    ty: RustType::F64,
+                }],
+                return_type: Some(RustType::Named("Self".to_string())),
+                body: vec![Stmt::Return(Some(Expr::Ident("Self { x }".to_string())))],
+            }],
+        };
+        let expected = "\
+impl Foo {
+    pub fn new(x: f64) -> Self {
+        Self { x }
+    }
+}";
+        assert_eq!(generate(&[item]), expected);
+    }
+
+    #[test]
+    fn test_generate_impl_self_method() {
+        let item = Item::Impl {
+            struct_name: "Foo".to_string(),
+            methods: vec![Method {
+                vis: Visibility::Public,
+                name: "get_name".to_string(),
+                has_self: true,
+                params: vec![],
+                return_type: Some(RustType::String),
+                body: vec![Stmt::Return(Some(Expr::FieldAccess {
+                    object: Box::new(Expr::Ident("self".to_string())),
+                    field: "name".to_string(),
+                }))],
+            }],
+        };
+        let expected = "\
+impl Foo {
+    pub fn get_name(&self) -> String {
+        self.name
+    }
+}";
+        assert_eq!(generate(&[item]), expected);
+    }
 
     #[test]
     fn test_generate_multiple_items_separated_by_blank_line() {

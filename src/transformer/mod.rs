@@ -3,6 +3,7 @@
 //! This module converts SWC TypeScript AST nodes into the IR representation
 //! defined in [`crate::ir`].
 
+pub mod classes;
 pub mod expressions;
 pub mod functions;
 pub mod statements;
@@ -28,14 +29,10 @@ pub fn transform_module(module: &Module) -> Result<Vec<Item>> {
     for module_item in &module.body {
         match module_item {
             ModuleItem::Stmt(Stmt::Decl(decl)) => {
-                if let Some(item) = transform_decl(decl, Visibility::Private)? {
-                    items.push(item);
-                }
+                items.extend(transform_decl(decl, Visibility::Private)?);
             }
             ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(export)) => {
-                if let Some(item) = transform_decl(&export.decl, Visibility::Public)? {
-                    items.push(item);
-                }
+                items.extend(transform_decl(&export.decl, Visibility::Public)?);
             }
             ModuleItem::ModuleDecl(ModuleDecl::Import(import_decl)) => {
                 if let Some(item) = transform_import(import_decl) {
@@ -92,25 +89,26 @@ fn convert_relative_path_to_crate_path(rel_path: &str) -> String {
     format!("crate::{}", parts.join("::"))
 }
 
-/// Transforms a single declaration into an IR [`Item`], if supported.
+/// Transforms a single declaration into IR [`Item`]s, if supported.
 ///
-/// Returns `Ok(None)` for unsupported declarations (e.g., variable declarations).
-fn transform_decl(decl: &Decl, vis: Visibility) -> Result<Option<Item>> {
+/// Returns `Ok` with an empty vec for unsupported declarations.
+fn transform_decl(decl: &Decl, vis: Visibility) -> Result<Vec<Item>> {
     match decl {
         Decl::TsInterface(interface_decl) => {
             let item = types::convert_interface(interface_decl, vis)?;
-            Ok(Some(item))
+            Ok(vec![item])
         }
         Decl::TsTypeAlias(type_alias_decl) => {
             let item = types::convert_type_alias(type_alias_decl, vis)?;
-            Ok(Some(item))
+            Ok(vec![item])
         }
         Decl::Fn(fn_decl) => {
             let item = functions::convert_fn_decl(fn_decl, vis)?;
-            Ok(Some(item))
+            Ok(vec![item])
         }
+        Decl::Class(class_decl) => classes::convert_class_decl(class_decl, vis),
         // Unsupported declarations are silently skipped for now
-        _ => Ok(None),
+        _ => Ok(vec![]),
     }
 }
 

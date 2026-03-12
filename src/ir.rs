@@ -47,6 +47,23 @@ pub struct Param {
     pub ty: RustType,
 }
 
+/// A method inside an `impl` block.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Method {
+    /// Visibility
+    pub vis: Visibility,
+    /// Method name
+    pub name: String,
+    /// Whether this method takes `&self` (false for associated functions like `new`)
+    pub has_self: bool,
+    /// Parameters (excluding `self`)
+    pub params: Vec<Param>,
+    /// Return type (`None` means `()`)
+    pub return_type: Option<RustType>,
+    /// Method body
+    pub body: Vec<Stmt>,
+}
+
 /// Top-level item in a Rust file or module.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Item {
@@ -74,6 +91,13 @@ pub enum Item {
         name: String,
         /// Variant names
         variants: Vec<String>,
+    },
+    /// An `impl` block for a struct.
+    Impl {
+        /// Struct name this impl is for
+        struct_name: String,
+        /// Methods in the impl block
+        methods: Vec<Method>,
     },
     /// A `fn` declaration.
     Fn {
@@ -136,6 +160,36 @@ pub enum Expr {
         template: String,
         /// Format arguments
         args: Vec<Expr>,
+    },
+    /// A field access: `object.field`
+    FieldAccess {
+        /// The object expression (e.g., `self`)
+        object: Box<Expr>,
+        /// The field name
+        field: String,
+    },
+    /// A method call: `expr.method(args)`
+    MethodCall {
+        /// The receiver expression
+        object: Box<Expr>,
+        /// Method name
+        method: String,
+        /// Arguments
+        args: Vec<Expr>,
+    },
+    /// A struct initializer: `Self { field1: val1, field2: val2 }`
+    StructInit {
+        /// Struct name (e.g., `Self`)
+        name: String,
+        /// Field name-value pairs
+        fields: Vec<(String, Expr)>,
+    },
+    /// An assignment: `<target> = <value>`
+    Assign {
+        /// Assignment target
+        target: Box<Expr>,
+        /// Assigned value
+        value: Box<Expr>,
     },
     /// A binary operation: `<left> <op> <right>`
     BinaryOp {
