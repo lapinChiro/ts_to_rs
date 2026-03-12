@@ -6,6 +6,7 @@ use anyhow::{anyhow, Result};
 use swc_ecma_ast as ast;
 
 use crate::ir::{Expr, Item, Method, Param, RustType, Stmt, StructField, Visibility};
+use crate::registry::TypeRegistry;
 use crate::transformer::expressions::convert_expr;
 use crate::transformer::statements::convert_stmt;
 use crate::transformer::types::convert_ts_type;
@@ -18,7 +19,11 @@ use crate::transformer::types::convert_ts_type;
 /// # Errors
 ///
 /// Returns an error if unsupported class members are encountered.
-pub fn convert_class_decl(class_decl: &ast::ClassDecl, vis: Visibility) -> Result<Vec<Item>> {
+pub fn convert_class_decl(
+    class_decl: &ast::ClassDecl,
+    vis: Visibility,
+    reg: &TypeRegistry,
+) -> Result<Vec<Item>> {
     let name = class_decl.ident.sym.to_string();
     let mut fields = Vec::new();
     let mut methods = Vec::new();
@@ -30,11 +35,11 @@ pub fn convert_class_decl(class_decl: &ast::ClassDecl, vis: Visibility) -> Resul
                 fields.push(field);
             }
             ast::ClassMember::Constructor(ctor) => {
-                let method = convert_constructor(ctor, &vis)?;
+                let method = convert_constructor(ctor, &vis, reg)?;
                 methods.push(method);
             }
             ast::ClassMember::Method(method) => {
-                let m = convert_class_method(method, &vis)?;
+                let m = convert_class_method(method, &vis, reg)?;
                 methods.push(m);
             }
             _ => {
@@ -81,7 +86,11 @@ fn convert_class_prop(prop: &ast::ClassProp) -> Result<StructField> {
 }
 
 /// Converts a constructor to a `new()` associated function.
-fn convert_constructor(ctor: &ast::Constructor, vis: &Visibility) -> Result<Method> {
+fn convert_constructor(
+    ctor: &ast::Constructor,
+    vis: &Visibility,
+    reg: &TypeRegistry,
+) -> Result<Method> {
     let mut params = Vec::new();
     for param in &ctor.params {
         match param {
@@ -96,7 +105,7 @@ fn convert_constructor(ctor: &ast::Constructor, vis: &Visibility) -> Result<Meth
     }
 
     let body = match &ctor.body {
-        Some(block) => convert_constructor_body(&block.stmts)?,
+        Some(block) => convert_constructor_body(&block.stmts, reg)?,
         None => vec![],
     };
 
@@ -118,16 +127,16 @@ fn convert_constructor(ctor: &ast::Constructor, vis: &Visibility) -> Result<Meth
 /// Recognizes the pattern of `this.field = value` assignments and converts them
 /// into a `Self { field: value, ... }` tail expression. Statements that don't
 /// match this pattern are converted as normal statements.
-fn convert_constructor_body(stmts: &[ast::Stmt]) -> Result<Vec<Stmt>> {
+fn convert_constructor_body(stmts: &[ast::Stmt], reg: &TypeRegistry) -> Result<Vec<Stmt>> {
     let mut fields = Vec::new();
     let mut other_stmts = Vec::new();
 
     for stmt in stmts {
         if let Some((field_name, value_expr)) = try_extract_this_assignment(stmt) {
-            let value = convert_expr(value_expr, None)?;
+            let value = convert_expr(value_expr, reg, None)?;
             fields.push((field_name, value));
         } else {
-            other_stmts.push(convert_stmt(stmt, None)?);
+            other_stmts.push(convert_stmt(stmt, reg, None)?);
         }
     }
 
@@ -170,7 +179,11 @@ fn try_extract_this_assignment(stmt: &ast::Stmt) -> Option<(String, &ast::Expr)>
 }
 
 /// Converts a class method to an impl method with `&self`.
-fn convert_class_method(method: &ast::ClassMethod, vis: &Visibility) -> Result<Method> {
+fn convert_class_method(
+    method: &ast::ClassMethod,
+    vis: &Visibility,
+    reg: &TypeRegistry,
+) -> Result<Method> {
     let name = match &method.key {
         ast::PropName::Ident(ident) => ident.sym.to_string(),
         _ => return Err(anyhow!("unsupported method key (only identifiers)")),
@@ -193,7 +206,7 @@ fn convert_class_method(method: &ast::ClassMethod, vis: &Visibility) -> Result<M
         Some(block) => {
             let mut stmts = Vec::new();
             for stmt in &block.stmts {
-                stmts.push(convert_stmt(stmt, return_type.as_ref())?);
+                stmts.push(convert_stmt(stmt, reg, return_type.as_ref())?);
             }
             stmts
         }
@@ -234,6 +247,7 @@ mod tests {
     use super::*;
     use crate::ir::{Item, Param, RustType, StructField, Visibility};
     use crate::parser::parse_typescript;
+    use crate::registry::TypeRegistry;
     use swc_ecma_ast::{Decl, ModuleItem};
 
     /// Helper: parse TS source and extract the first ClassDecl.
@@ -248,7 +262,7 @@ mod tests {
     #[test]
     fn test_convert_class_properties_only() {
         let decl = parse_class_decl("class Foo { x: number; y: string; }");
-        let items = convert_class_decl(&decl, Visibility::Private).unwrap();
+        let items = convert_class_decl(&decl, Visibility::Private, &TypeRegistry::new()).unwrap();
 
         assert_eq!(items.len(), 1);
         assert_eq!(
@@ -275,7 +289,7 @@ mod tests {
     fn test_convert_class_constructor() {
         let decl =
             parse_class_decl("class Foo { x: number; constructor(x: number) { this.x = x; } }");
-        let items = convert_class_decl(&decl, Visibility::Private).unwrap();
+        let items = convert_class_decl(&decl, Visibility::Private, &TypeRegistry::new()).unwrap();
 
         assert_eq!(items.len(), 2);
         match &items[1] {
@@ -310,7 +324,7 @@ mod tests {
     fn test_convert_class_method_with_self() {
         let decl =
             parse_class_decl("class Foo { name: string; greet(): string { return this.name; } }");
-        let items = convert_class_decl(&decl, Visibility::Private).unwrap();
+        let items = convert_class_decl(&decl, Visibility::Private, &TypeRegistry::new()).unwrap();
 
         assert_eq!(items.len(), 2);
         match &items[1] {
@@ -327,7 +341,7 @@ mod tests {
     #[test]
     fn test_convert_class_export_visibility() {
         let decl = parse_class_decl("class Foo { x: number; greet(): string { return this.x; } }");
-        let items = convert_class_decl(&decl, Visibility::Public).unwrap();
+        let items = convert_class_decl(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
 
         match &items[0] {
             Item::Struct { vis, .. } => assert_eq!(*vis, Visibility::Public),
@@ -346,7 +360,7 @@ mod tests {
         let decl = parse_class_decl(
             "class Foo { name: string; constructor(name: string) { this.name = name; } }",
         );
-        let items = convert_class_decl(&decl, Visibility::Private).unwrap();
+        let items = convert_class_decl(&decl, Visibility::Private, &TypeRegistry::new()).unwrap();
 
         match &items[1] {
             Item::Impl { methods, .. } => {

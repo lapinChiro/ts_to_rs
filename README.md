@@ -44,6 +44,9 @@ ts-to-rs input.ts -o output.rs
 | `for (let i = 0; i < n; i++)` | `for i in 0..n { ... }` |
 | `[1, 2, 3]` (配列リテラル) | `vec![1.0, 2.0, 3.0]` |
 | `{ x: 1, y: 2 }` (型注記付きオブジェクトリテラル) | `Point { x: 1.0, y: 2.0 }` |
+| `{ origin: { x: 0, y: 0 } }` (ネストしたオブジェクト) | `Rect { origin: Origin { x: 0.0, y: 0.0 } }` |
+| `draw({ x: 0, y: 0 })` (関数引数のオブジェクト) | `draw(Point { x: 0.0, y: 0.0 })` |
+| `Color.Red` (enum メンバーアクセス) | `Color::Red` |
 | `const s: string = "hello"` | `let s: String = "hello".to_string()` |
 | `enum` (数値) | `enum` + `#[repr(i64)]` |
 | `enum` (文字列) | `enum` + `as_str()` メソッド |
@@ -103,6 +106,7 @@ src/
 ├── main.rs             # CLIエントリポイント
 ├── lib.rs              # ライブラリエントリポイント（transpile 関数）
 ├── parser.rs           # SWCでTSファイルをAST化
+├── registry.rs         # TypeRegistry（型定義の事前収集）
 ├── transformer/        # AST → IR 変換
 │   ├── mod.rs          # 変換エントリポイント
 │   ├── types.rs        # 型変換 (TS型 → Rust型)

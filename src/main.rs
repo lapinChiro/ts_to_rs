@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -6,6 +7,7 @@ use anyhow::{Context, Result};
 use clap::Parser;
 
 use ts_to_rs::directory;
+use ts_to_rs::registry::{build_registry, TypeRegistry};
 
 /// TypeScript to Rust transpiler CLI tool.
 #[derive(Parser, Debug)]
@@ -73,6 +75,9 @@ fn transpile_file(input: &Path, output: Option<&Path>) -> Result<()> {
 }
 
 /// Transpiles all `.ts` files in a directory to Rust.
+///
+/// Pre-scans all files to build a shared [`TypeRegistry`], enabling cross-file
+/// type resolution (e.g., imported interfaces used in object literals).
 fn transpile_directory(input_dir: &Path, output: Option<&Path>) -> Result<()> {
     let ts_files = directory::collect_ts_files(input_dir)?;
     directory::validate_has_ts_files(&ts_files, input_dir)?;
@@ -87,16 +92,35 @@ fn transpile_directory(input_dir: &Path, output: Option<&Path>) -> Result<()> {
         input_dir.with_file_name(name)
     });
 
+    // Pass 1: pre-scan all files and build per-file registries
+    let mut file_registries: HashMap<PathBuf, TypeRegistry> = HashMap::new();
+    let mut file_sources: HashMap<PathBuf, String> = HashMap::new();
+    for ts_path in &ts_files {
+        let ts_source = fs::read_to_string(ts_path)
+            .with_context(|| format!("failed to read: {}", ts_path.display()))?;
+        if let Ok(module) = ts_to_rs::parser::parse_typescript(&ts_source) {
+            let reg = build_registry(&module);
+            file_registries.insert(ts_path.clone(), reg);
+        }
+        file_sources.insert(ts_path.clone(), ts_source);
+    }
+
+    // Build a merged registry containing all files' type definitions
+    let mut shared_registry = TypeRegistry::new();
+    for reg in file_registries.values() {
+        shared_registry.merge(reg);
+    }
+
     let mut converted = 0;
     let mut rs_paths = Vec::new();
 
+    // Pass 2: transpile each file with the shared registry
     for ts_path in &ts_files {
         let rs_path = directory::compute_output_path(ts_path, input_dir, &output_dir)?;
 
-        let ts_source = fs::read_to_string(ts_path)
-            .with_context(|| format!("failed to read: {}", ts_path.display()))?;
+        let ts_source = &file_sources[ts_path];
 
-        let rs_source = ts_to_rs::transpile(&ts_source)
+        let rs_source = ts_to_rs::transpile_with_registry(ts_source, &shared_registry)
             .with_context(|| format!("failed to transpile: {}", ts_path.display()))?;
 
         if let Some(parent) = rs_path.parent() {

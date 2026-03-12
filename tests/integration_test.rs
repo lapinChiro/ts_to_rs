@@ -100,6 +100,13 @@ fn test_object_literal() {
 }
 
 #[test]
+fn test_type_registry() {
+    let input = fs::read_to_string("tests/fixtures/type-registry.input.ts").unwrap();
+    let output = transpile(&input).unwrap();
+    insta::assert_snapshot!(output);
+}
+
+#[test]
 fn test_string_to_string() {
     let input = fs::read_to_string("tests/fixtures/string-to-string.input.ts").unwrap();
     let output = transpile(&input).unwrap();

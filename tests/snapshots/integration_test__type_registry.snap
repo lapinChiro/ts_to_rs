@@ -1,0 +1,45 @@
+---
+source: tests/integration_test.rs
+expression: output
+---
+struct Origin {
+    x: f64,
+    y: f64,
+}
+
+struct Size {
+    w: f64,
+    h: f64,
+}
+
+struct Rect {
+    origin: Origin,
+    size: Size,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(i64)]
+enum Color {
+    Red = 0,
+    Green = 1,
+    Blue = 2,
+}
+
+fn drawPoint(p: Origin) -> bool {
+    true
+}
+
+fn createRect() -> Rect {
+    let r: Rect = Rect { origin: Origin { x: 0.0, y: 0.0 }, size: Size { w: 10.0, h: 20.0 } };
+    r
+}
+
+fn useEnum() -> f64 {
+    let c: Color = Color::Red;
+    0.0
+}
+
+fn callWithObject() -> bool {
+    drawPoint(Origin { x: 5.0, y: 10.0 });
+    true
+}

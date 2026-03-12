@@ -13,6 +13,7 @@ use anyhow::Result;
 use swc_ecma_ast::{Decl, ImportSpecifier, Module, ModuleDecl, ModuleItem, Stmt};
 
 use crate::ir::{EnumValue, EnumVariant, Item, Visibility};
+use crate::registry::TypeRegistry;
 use crate::transformer::expressions::convert_expr;
 use crate::transformer::types::convert_ts_type;
 
@@ -25,16 +26,16 @@ use crate::transformer::types::convert_ts_type;
 /// # Errors
 ///
 /// Returns an error if a supported declaration fails to convert.
-pub fn transform_module(module: &Module) -> Result<Vec<Item>> {
+pub fn transform_module(module: &Module, reg: &TypeRegistry) -> Result<Vec<Item>> {
     let mut items = Vec::new();
 
     for module_item in &module.body {
         match module_item {
             ModuleItem::Stmt(Stmt::Decl(decl)) => {
-                items.extend(transform_decl(decl, Visibility::Private)?);
+                items.extend(transform_decl(decl, Visibility::Private, reg)?);
             }
             ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(export)) => {
-                items.extend(transform_decl(&export.decl, Visibility::Public)?);
+                items.extend(transform_decl(&export.decl, Visibility::Public, reg)?);
             }
             ModuleItem::ModuleDecl(ModuleDecl::Import(import_decl)) => {
                 if let Some(item) = transform_import(import_decl) {
@@ -94,7 +95,7 @@ fn convert_relative_path_to_crate_path(rel_path: &str) -> String {
 /// Transforms a single declaration into IR [`Item`]s, if supported.
 ///
 /// Returns `Ok` with an empty vec for unsupported declarations.
-fn transform_decl(decl: &Decl, vis: Visibility) -> Result<Vec<Item>> {
+fn transform_decl(decl: &Decl, vis: Visibility, reg: &TypeRegistry) -> Result<Vec<Item>> {
     match decl {
         Decl::TsInterface(interface_decl) => {
             let item = types::convert_interface(interface_decl, vis)?;
@@ -105,11 +106,11 @@ fn transform_decl(decl: &Decl, vis: Visibility) -> Result<Vec<Item>> {
             Ok(vec![item])
         }
         Decl::Fn(fn_decl) => {
-            let item = functions::convert_fn_decl(fn_decl, vis)?;
+            let item = functions::convert_fn_decl(fn_decl, vis, reg)?;
             Ok(vec![item])
         }
-        Decl::Class(class_decl) => classes::convert_class_decl(class_decl, vis),
-        Decl::Var(var_decl) => convert_var_decl_arrow_fns(var_decl, vis),
+        Decl::Class(class_decl) => classes::convert_class_decl(class_decl, vis, reg),
+        Decl::Var(var_decl) => convert_var_decl_arrow_fns(var_decl, vis, reg),
         Decl::TsEnum(ts_enum) => convert_ts_enum(ts_enum, vis),
         // Unsupported declarations are silently skipped for now
         _ => Ok(vec![]),
@@ -125,6 +126,7 @@ fn transform_decl(decl: &Decl, vis: Visibility) -> Result<Vec<Item>> {
 fn convert_var_decl_arrow_fns(
     var_decl: &swc_ecma_ast::VarDecl,
     vis: Visibility,
+    reg: &TypeRegistry,
 ) -> Result<Vec<Item>> {
     let mut items = Vec::new();
     for decl in &var_decl.decls {
@@ -143,7 +145,7 @@ fn convert_var_decl_arrow_fns(
         };
 
         // Convert the arrow to a closure IR, then extract parts for Item::Fn
-        let closure = convert_expr(init, None)?;
+        let closure = convert_expr(init, reg, None)?;
         match closure {
             crate::ir::Expr::Closure {
                 params,
@@ -229,11 +231,12 @@ mod tests {
     use crate::ir::Stmt;
     use crate::ir::{Expr, Param, RustType, StructField, Visibility};
     use crate::parser::parse_typescript;
+    use crate::registry::TypeRegistry;
 
     #[test]
     fn test_transform_module_empty() {
         let module = parse_typescript("").expect("parse failed");
-        let items = transform_module(&module).unwrap();
+        let items = transform_module(&module, &TypeRegistry::new()).unwrap();
         assert!(items.is_empty());
     }
 
@@ -241,7 +244,7 @@ mod tests {
     fn test_transform_module_import_single() {
         let source = r#"import { Foo } from "./bar";"#;
         let module = parse_typescript(source).expect("parse failed");
-        let items = transform_module(&module).unwrap();
+        let items = transform_module(&module, &TypeRegistry::new()).unwrap();
 
         assert_eq!(items.len(), 1);
         assert_eq!(
@@ -257,7 +260,7 @@ mod tests {
     fn test_transform_module_import_multiple() {
         let source = r#"import { A, B } from "./bar";"#;
         let module = parse_typescript(source).expect("parse failed");
-        let items = transform_module(&module).unwrap();
+        let items = transform_module(&module, &TypeRegistry::new()).unwrap();
 
         assert_eq!(items.len(), 1);
         assert_eq!(
@@ -273,7 +276,7 @@ mod tests {
     fn test_transform_module_import_nested_path() {
         let source = r#"import { Foo } from "./sub/bar";"#;
         let module = parse_typescript(source).expect("parse failed");
-        let items = transform_module(&module).unwrap();
+        let items = transform_module(&module, &TypeRegistry::new()).unwrap();
 
         assert_eq!(items.len(), 1);
         assert_eq!(
@@ -289,7 +292,7 @@ mod tests {
     fn test_transform_module_import_external_skipped() {
         let source = r#"import { Foo } from "lodash";"#;
         let module = parse_typescript(source).expect("parse failed");
-        let items = transform_module(&module).unwrap();
+        let items = transform_module(&module, &TypeRegistry::new()).unwrap();
 
         assert!(items.is_empty());
     }
@@ -298,7 +301,7 @@ mod tests {
     fn test_transform_module_non_exported_is_private() {
         let source = "interface Foo { name: string; }";
         let module = parse_typescript(source).expect("parse failed");
-        let items = transform_module(&module).unwrap();
+        let items = transform_module(&module, &TypeRegistry::new()).unwrap();
 
         assert_eq!(items.len(), 1);
         match &items[0] {
@@ -311,7 +314,7 @@ mod tests {
     fn test_transform_module_exported_is_public() {
         let source = "export interface Foo { name: string; }";
         let module = parse_typescript(source).expect("parse failed");
-        let items = transform_module(&module).unwrap();
+        let items = transform_module(&module, &TypeRegistry::new()).unwrap();
 
         assert_eq!(items.len(), 1);
         match &items[0] {
@@ -324,7 +327,7 @@ mod tests {
     fn test_transform_module_single_interface() {
         let source = "interface Foo { name: string; age: number; }";
         let module = parse_typescript(source).expect("parse failed");
-        let items = transform_module(&module).unwrap();
+        let items = transform_module(&module, &TypeRegistry::new()).unwrap();
 
         assert_eq!(items.len(), 1);
         assert_eq!(
@@ -354,7 +357,7 @@ mod tests {
             interface Bar { count: number; }
         "#;
         let module = parse_typescript(source).expect("parse failed");
-        let items = transform_module(&module).unwrap();
+        let items = transform_module(&module, &TypeRegistry::new()).unwrap();
 
         assert_eq!(items.len(), 2);
     }
@@ -363,7 +366,7 @@ mod tests {
     fn test_transform_module_type_alias_object() {
         let source = "type Point = { x: number; y: number; };";
         let module = parse_typescript(source).expect("parse failed");
-        let items = transform_module(&module).unwrap();
+        let items = transform_module(&module, &TypeRegistry::new()).unwrap();
 
         assert_eq!(items.len(), 1);
         match &items[0] {
@@ -379,7 +382,7 @@ mod tests {
             interface Foo { name: string; }
         "#;
         let module = parse_typescript(source).expect("parse failed");
-        let items = transform_module(&module).unwrap();
+        let items = transform_module(&module, &TypeRegistry::new()).unwrap();
 
         // const x = 42 is skipped, only Foo is converted
         assert_eq!(items.len(), 1);
@@ -389,7 +392,7 @@ mod tests {
     fn test_transform_module_function_declaration() {
         let source = "function add(a: number, b: number): number { return a + b; }";
         let module = parse_typescript(source).expect("parse failed");
-        let items = transform_module(&module).unwrap();
+        let items = transform_module(&module, &TypeRegistry::new()).unwrap();
 
         assert_eq!(items.len(), 1);
         assert_eq!(
@@ -425,7 +428,7 @@ mod tests {
             function greet(name: string): string { return name; }
         "#;
         let module = parse_typescript(source).expect("parse failed");
-        let items = transform_module(&module).unwrap();
+        let items = transform_module(&module, &TypeRegistry::new()).unwrap();
 
         assert_eq!(items.len(), 2);
         match &items[0] {
@@ -442,7 +445,7 @@ mod tests {
     fn test_transform_enum_numeric_auto_values() {
         let source = "enum Color { Red, Green, Blue }";
         let module = parse_typescript(source).expect("parse failed");
-        let items = transform_module(&module).unwrap();
+        let items = transform_module(&module, &TypeRegistry::new()).unwrap();
 
         assert_eq!(items.len(), 1);
         match &items[0] {
@@ -467,7 +470,7 @@ mod tests {
     fn test_transform_enum_numeric_explicit_values() {
         let source = "enum Status { Active = 1, Inactive = 0 }";
         let module = parse_typescript(source).expect("parse failed");
-        let items = transform_module(&module).unwrap();
+        let items = transform_module(&module, &TypeRegistry::new()).unwrap();
 
         assert_eq!(items.len(), 1);
         match &items[0] {
@@ -485,7 +488,7 @@ mod tests {
     fn test_transform_enum_string_values() {
         let source = r#"enum Direction { Up = "UP", Down = "DOWN" }"#;
         let module = parse_typescript(source).expect("parse failed");
-        let items = transform_module(&module).unwrap();
+        let items = transform_module(&module, &TypeRegistry::new()).unwrap();
 
         assert_eq!(items.len(), 1);
         match &items[0] {
@@ -509,7 +512,7 @@ mod tests {
     fn test_transform_enum_export_is_public() {
         let source = "export enum Color { Red, Green }";
         let module = parse_typescript(source).expect("parse failed");
-        let items = transform_module(&module).unwrap();
+        let items = transform_module(&module, &TypeRegistry::new()).unwrap();
 
         assert_eq!(items.len(), 1);
         match &items[0] {
@@ -522,7 +525,7 @@ mod tests {
     fn test_transform_enum_empty() {
         let source = "enum Empty { }";
         let module = parse_typescript(source).expect("parse failed");
-        let items = transform_module(&module).unwrap();
+        let items = transform_module(&module, &TypeRegistry::new()).unwrap();
 
         assert_eq!(items.len(), 1);
         match &items[0] {
@@ -535,7 +538,7 @@ mod tests {
     fn test_transform_enum_single_member() {
         let source = "enum Single { Only = -1 }";
         let module = parse_typescript(source).expect("parse failed");
-        let items = transform_module(&module).unwrap();
+        let items = transform_module(&module, &TypeRegistry::new()).unwrap();
 
         assert_eq!(items.len(), 1);
         match &items[0] {

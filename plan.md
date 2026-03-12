@@ -2,8 +2,7 @@
 
 ## 次のタスク
 
-1. [type-registry](backlog/type-registry.md) — TypeRegistry（ネストしたオブジェクト、関数引数オブジェクト、enum メンバーアクセス、外部モジュール型解決）
-2. [ternary-operator](backlog/ternary-operator.md) — 三項演算子 → `if` 式
+1. [ternary-operator](backlog/ternary-operator.md) — 三項演算子 → `if` 式
 3. [unsupported-syntax-detection](backlog/unsupported-syntax-detection.md) — 未対応構文の検出・JSON レポート
 4. [break-continue](backlog/break-continue.md) — break/continue（ラベル付き含む）
 5. [class-inheritance](backlog/class-inheritance.md) — クラス継承（extends → trait + struct）

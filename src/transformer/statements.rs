@@ -6,6 +6,7 @@ use anyhow::{anyhow, Result};
 use swc_ecma_ast as ast;
 
 use crate::ir::{Expr, RustType, Stmt};
+use crate::registry::TypeRegistry;
 use crate::transformer::expressions::convert_expr;
 use crate::transformer::types::convert_ts_type;
 
@@ -25,26 +26,30 @@ use crate::transformer::types::convert_ts_type;
 /// # Errors
 ///
 /// Returns an error for unsupported statement types.
-pub fn convert_stmt(stmt: &ast::Stmt, return_type: Option<&RustType>) -> Result<Stmt> {
+pub fn convert_stmt(
+    stmt: &ast::Stmt,
+    reg: &TypeRegistry,
+    return_type: Option<&RustType>,
+) -> Result<Stmt> {
     match stmt {
         ast::Stmt::Return(ret) => {
             let expr = ret
                 .arg
                 .as_ref()
-                .map(|e| convert_expr(e, return_type))
+                .map(|e| convert_expr(e, reg, return_type))
                 .transpose()?;
             Ok(Stmt::Return(expr))
         }
-        ast::Stmt::Decl(ast::Decl::Var(var_decl)) => convert_var_decl(var_decl),
-        ast::Stmt::If(if_stmt) => convert_if_stmt(if_stmt, return_type),
+        ast::Stmt::Decl(ast::Decl::Var(var_decl)) => convert_var_decl(var_decl, reg),
+        ast::Stmt::If(if_stmt) => convert_if_stmt(if_stmt, reg, return_type),
         ast::Stmt::Expr(expr_stmt) => {
-            let expr = convert_expr(&expr_stmt.expr, None)?;
+            let expr = convert_expr(&expr_stmt.expr, reg, None)?;
             Ok(Stmt::Expr(expr))
         }
-        ast::Stmt::Throw(throw_stmt) => convert_throw_stmt(throw_stmt),
-        ast::Stmt::While(while_stmt) => convert_while_stmt(while_stmt, return_type),
-        ast::Stmt::ForOf(for_of) => convert_for_of_stmt(for_of, return_type),
-        ast::Stmt::For(for_stmt) => convert_for_stmt(for_stmt, return_type),
+        ast::Stmt::Throw(throw_stmt) => convert_throw_stmt(throw_stmt, reg),
+        ast::Stmt::While(while_stmt) => convert_while_stmt(while_stmt, reg, return_type),
+        ast::Stmt::ForOf(for_of) => convert_for_of_stmt(for_of, reg, return_type),
+        ast::Stmt::For(for_stmt) => convert_for_stmt(for_stmt, reg, return_type),
         _ => Err(anyhow!("unsupported statement: {:?}", stmt)),
     }
 }
@@ -53,7 +58,7 @@ pub fn convert_stmt(stmt: &ast::Stmt, return_type: Option<&RustType>) -> Result<
 ///
 /// - `const` → immutable (`let`)
 /// - `let` / `var` → mutable (`let mut`)
-fn convert_var_decl(var_decl: &ast::VarDecl) -> Result<Stmt> {
+fn convert_var_decl(var_decl: &ast::VarDecl, reg: &TypeRegistry) -> Result<Stmt> {
     // We only handle single-declarator variable declarations
     if var_decl.decls.len() != 1 {
         return Err(anyhow!(
@@ -81,7 +86,7 @@ fn convert_var_decl(var_decl: &ast::VarDecl) -> Result<Stmt> {
     let init = declarator
         .init
         .as_ref()
-        .map(|e| convert_expr(e, ty.as_ref()))
+        .map(|e| convert_expr(e, reg, ty.as_ref()))
         .transpose()?;
 
     Ok(Stmt::Let {
@@ -93,15 +98,19 @@ fn convert_var_decl(var_decl: &ast::VarDecl) -> Result<Stmt> {
 }
 
 /// Converts an if statement to an IR `Stmt::If`.
-fn convert_if_stmt(if_stmt: &ast::IfStmt, return_type: Option<&RustType>) -> Result<Stmt> {
-    let condition = convert_expr(&if_stmt.test, None)?;
+fn convert_if_stmt(
+    if_stmt: &ast::IfStmt,
+    reg: &TypeRegistry,
+    return_type: Option<&RustType>,
+) -> Result<Stmt> {
+    let condition = convert_expr(&if_stmt.test, reg, None)?;
 
-    let then_body = convert_block_or_stmt(&if_stmt.cons, return_type)?;
+    let then_body = convert_block_or_stmt(&if_stmt.cons, reg, return_type)?;
 
     let else_body = if_stmt
         .alt
         .as_ref()
-        .map(|alt| convert_block_or_stmt(alt, return_type))
+        .map(|alt| convert_block_or_stmt(alt, reg, return_type))
         .transpose()?;
 
     Ok(Stmt::If {
@@ -116,7 +125,11 @@ fn convert_if_stmt(if_stmt: &ast::IfStmt, return_type: Option<&RustType>) -> Res
 /// Pattern: `for (let i = start; i < end; i++)` → `for i in start..end`
 ///
 /// Only `i++` and `i += 1` are recognized as increment expressions.
-fn convert_for_stmt(for_stmt: &ast::ForStmt, return_type: Option<&RustType>) -> Result<Stmt> {
+fn convert_for_stmt(
+    for_stmt: &ast::ForStmt,
+    reg: &TypeRegistry,
+    return_type: Option<&RustType>,
+) -> Result<Stmt> {
     // Extract: let <var> = <start>
     let (var, start) = match &for_stmt.init {
         Some(ast::VarDeclOrExpr::VarDecl(var_decl)) => {
@@ -132,7 +145,7 @@ fn convert_for_stmt(for_stmt: &ast::ForStmt, return_type: Option<&RustType>) -> 
                 .init
                 .as_ref()
                 .ok_or_else(|| anyhow!("unsupported for loop: no initializer"))?;
-            let start_expr = convert_expr(init, None)?;
+            let start_expr = convert_expr(init, reg, None)?;
             (name, start_expr)
         }
         _ => {
@@ -153,7 +166,7 @@ fn convert_for_stmt(for_stmt: &ast::ForStmt, return_type: Option<&RustType>) -> 
                 if left_name != var {
                     return Err(anyhow!("unsupported for loop: condition var mismatch"));
                 }
-                convert_expr(&bin.right, None)?
+                convert_expr(&bin.right, reg, None)?
             }
             _ => return Err(anyhow!("unsupported for loop: non-simple condition")),
         },
@@ -181,7 +194,7 @@ fn convert_for_stmt(for_stmt: &ast::ForStmt, return_type: Option<&RustType>) -> 
         None => return Err(anyhow!("unsupported for loop: no update expression")),
     }
 
-    let body = convert_block_or_stmt(&for_stmt.body, return_type)?;
+    let body = convert_block_or_stmt(&for_stmt.body, reg, return_type)?;
     Ok(Stmt::ForIn {
         var,
         iterable: Expr::Range {
@@ -195,7 +208,11 @@ fn convert_for_stmt(for_stmt: &ast::ForStmt, return_type: Option<&RustType>) -> 
 /// Converts a `for...of` statement to `Stmt::ForIn`.
 ///
 /// `for (const item of items) { ... }` → `for item in items { ... }`
-fn convert_for_of_stmt(for_of: &ast::ForOfStmt, return_type: Option<&RustType>) -> Result<Stmt> {
+fn convert_for_of_stmt(
+    for_of: &ast::ForOfStmt,
+    reg: &TypeRegistry,
+    return_type: Option<&RustType>,
+) -> Result<Stmt> {
     let var = match &for_of.left {
         ast::ForHead::VarDecl(var_decl) => {
             if var_decl.decls.len() != 1 {
@@ -210,8 +227,8 @@ fn convert_for_of_stmt(for_of: &ast::ForOfStmt, return_type: Option<&RustType>) 
         }
         _ => return Err(anyhow!("unsupported for...of left-hand side")),
     };
-    let iterable = convert_expr(&for_of.right, None)?;
-    let body = convert_block_or_stmt(&for_of.body, return_type)?;
+    let iterable = convert_expr(&for_of.right, reg, None)?;
+    let body = convert_block_or_stmt(&for_of.body, reg, return_type)?;
     Ok(Stmt::ForIn {
         var,
         iterable,
@@ -220,9 +237,13 @@ fn convert_for_of_stmt(for_of: &ast::ForOfStmt, return_type: Option<&RustType>) 
 }
 
 /// Converts a `while` statement to `Stmt::While`.
-fn convert_while_stmt(while_stmt: &ast::WhileStmt, return_type: Option<&RustType>) -> Result<Stmt> {
-    let condition = convert_expr(&while_stmt.test, None)?;
-    let body = convert_block_or_stmt(&while_stmt.body, return_type)?;
+fn convert_while_stmt(
+    while_stmt: &ast::WhileStmt,
+    reg: &TypeRegistry,
+    return_type: Option<&RustType>,
+) -> Result<Stmt> {
+    let condition = convert_expr(&while_stmt.test, reg, None)?;
+    let body = convert_block_or_stmt(&while_stmt.body, reg, return_type)?;
     Ok(Stmt::While { condition, body })
 }
 
@@ -231,8 +252,8 @@ fn convert_while_stmt(while_stmt: &ast::WhileStmt, return_type: Option<&RustType
 /// - `throw new Error("msg")` → `return Err("msg".to_string())`
 /// - `throw "msg"` → `return Err("msg".to_string())`
 /// - Other throw expressions → `return Err(expr.to_string())`
-fn convert_throw_stmt(throw_stmt: &ast::ThrowStmt) -> Result<Stmt> {
-    let err_arg = extract_error_message(&throw_stmt.arg);
+fn convert_throw_stmt(throw_stmt: &ast::ThrowStmt, reg: &TypeRegistry) -> Result<Stmt> {
+    let err_arg = extract_error_message(&throw_stmt.arg, reg);
     let err_expr = Expr::MethodCall {
         object: Box::new(err_arg),
         method: "to_string".to_string(),
@@ -249,20 +270,20 @@ fn convert_throw_stmt(throw_stmt: &ast::ThrowStmt) -> Result<Stmt> {
 /// - `new Error("msg")` → `StringLit("msg")`
 /// - `"msg"` → `StringLit("msg")`
 /// - Other → converts as generic expression
-fn extract_error_message(expr: &ast::Expr) -> Expr {
+fn extract_error_message(expr: &ast::Expr, reg: &TypeRegistry) -> Expr {
     match expr {
         ast::Expr::New(new_expr) => {
             // `throw new Error("msg")` → extract "msg"
             if let Some(args) = &new_expr.args {
                 if let Some(first) = args.first() {
-                    if let Ok(e) = convert_expr(&first.expr, None) {
+                    if let Ok(e) = convert_expr(&first.expr, reg, None) {
                         return e;
                     }
                 }
             }
             Expr::StringLit("unknown error".to_string())
         }
-        other => convert_expr(other, None)
+        other => convert_expr(other, reg, None)
             .unwrap_or_else(|_| Expr::StringLit("unknown error".to_string())),
     }
 }
@@ -271,20 +292,24 @@ fn extract_error_message(expr: &ast::Expr) -> Expr {
 ///
 /// `try { stmts... } catch (e) { ... }` is expanded to just the try body statements.
 /// The catch block is dropped (throw statements in the try body are already converted to `return Err(...)`).
-pub fn convert_stmt_list(stmts: &[ast::Stmt], return_type: Option<&RustType>) -> Result<Vec<Stmt>> {
+pub fn convert_stmt_list(
+    stmts: &[ast::Stmt],
+    reg: &TypeRegistry,
+    return_type: Option<&RustType>,
+) -> Result<Vec<Stmt>> {
     let mut result = Vec::new();
     for stmt in stmts {
         match stmt {
             ast::Stmt::Try(try_stmt) => {
                 // Expand try body inline
                 for s in &try_stmt.block.stmts {
-                    result.push(convert_stmt(s, return_type)?);
+                    result.push(convert_stmt(s, reg, return_type)?);
                 }
                 // catch block is dropped — throw is already Err(), and ? propagation
                 // requires function call support which is not yet available
             }
             other => {
-                result.push(convert_stmt(other, return_type)?);
+                result.push(convert_stmt(other, reg, return_type)?);
             }
         }
     }
@@ -292,17 +317,21 @@ pub fn convert_stmt_list(stmts: &[ast::Stmt], return_type: Option<&RustType>) ->
 }
 
 /// Converts a block statement or single statement into a `Vec<Stmt>`.
-fn convert_block_or_stmt(stmt: &ast::Stmt, return_type: Option<&RustType>) -> Result<Vec<Stmt>> {
+fn convert_block_or_stmt(
+    stmt: &ast::Stmt,
+    reg: &TypeRegistry,
+    return_type: Option<&RustType>,
+) -> Result<Vec<Stmt>> {
     match stmt {
         ast::Stmt::Block(block) => {
             let mut stmts = Vec::new();
             for s in &block.stmts {
-                stmts.push(convert_stmt(s, return_type)?);
+                stmts.push(convert_stmt(s, reg, return_type)?);
             }
             Ok(stmts)
         }
         other => {
-            let s = convert_stmt(other, return_type)?;
+            let s = convert_stmt(other, reg, return_type)?;
             Ok(vec![s])
         }
     }
@@ -313,6 +342,7 @@ mod tests {
     use super::*;
     use crate::ir::{Expr, RustType, Stmt};
     use crate::parser::parse_typescript;
+    use crate::registry::TypeRegistry;
     use swc_ecma_ast::{Decl, ModuleItem};
 
     /// Helper: parse TS source containing a function and return its body statements.
@@ -333,21 +363,21 @@ mod tests {
     #[test]
     fn test_convert_stmt_return_expr() {
         let stmts = parse_fn_body("function f() { return 42; }");
-        let result = convert_stmt(&stmts[0], None).unwrap();
+        let result = convert_stmt(&stmts[0], &TypeRegistry::new(), None).unwrap();
         assert_eq!(result, Stmt::Return(Some(Expr::NumberLit(42.0))));
     }
 
     #[test]
     fn test_convert_stmt_return_no_value() {
         let stmts = parse_fn_body("function f() { return; }");
-        let result = convert_stmt(&stmts[0], None).unwrap();
+        let result = convert_stmt(&stmts[0], &TypeRegistry::new(), None).unwrap();
         assert_eq!(result, Stmt::Return(None));
     }
 
     #[test]
     fn test_convert_stmt_const_decl() {
         let stmts = parse_fn_body("function f() { const x = 1; }");
-        let result = convert_stmt(&stmts[0], None).unwrap();
+        let result = convert_stmt(&stmts[0], &TypeRegistry::new(), None).unwrap();
         assert_eq!(
             result,
             Stmt::Let {
@@ -362,7 +392,7 @@ mod tests {
     #[test]
     fn test_convert_stmt_let_decl_mutable() {
         let stmts = parse_fn_body("function f() { let x = 1; }");
-        let result = convert_stmt(&stmts[0], None).unwrap();
+        let result = convert_stmt(&stmts[0], &TypeRegistry::new(), None).unwrap();
         assert_eq!(
             result,
             Stmt::Let {
@@ -377,7 +407,7 @@ mod tests {
     #[test]
     fn test_convert_stmt_const_with_type_annotation() {
         let stmts = parse_fn_body("function f() { const x: number = 1; }");
-        let result = convert_stmt(&stmts[0], None).unwrap();
+        let result = convert_stmt(&stmts[0], &TypeRegistry::new(), None).unwrap();
         assert_eq!(
             result,
             Stmt::Let {
@@ -392,7 +422,7 @@ mod tests {
     #[test]
     fn test_convert_stmt_if_no_else() {
         let stmts = parse_fn_body("function f() { if (true) { return 1; } }");
-        let result = convert_stmt(&stmts[0], None).unwrap();
+        let result = convert_stmt(&stmts[0], &TypeRegistry::new(), None).unwrap();
         assert_eq!(
             result,
             Stmt::If {
@@ -406,7 +436,7 @@ mod tests {
     #[test]
     fn test_convert_stmt_if_else() {
         let stmts = parse_fn_body("function f() { if (true) { return 1; } else { return 2; } }");
-        let result = convert_stmt(&stmts[0], None).unwrap();
+        let result = convert_stmt(&stmts[0], &TypeRegistry::new(), None).unwrap();
         assert_eq!(
             result,
             Stmt::If {
@@ -420,7 +450,7 @@ mod tests {
     #[test]
     fn test_convert_stmt_for_counter_zero_to_n() {
         let stmts = parse_fn_body("function f(n: number) { for (let i = 0; i < n; i++) { i; } }");
-        let result = convert_stmt(&stmts[0], None).unwrap();
+        let result = convert_stmt(&stmts[0], &TypeRegistry::new(), None).unwrap();
         assert_eq!(
             result,
             Stmt::ForIn {
@@ -437,7 +467,7 @@ mod tests {
     #[test]
     fn test_convert_stmt_for_counter_start_to_literal() {
         let stmts = parse_fn_body("function f() { for (let i = 1; i < 10; i++) { i; } }");
-        let result = convert_stmt(&stmts[0], None).unwrap();
+        let result = convert_stmt(&stmts[0], &TypeRegistry::new(), None).unwrap();
         assert_eq!(
             result,
             Stmt::ForIn {
@@ -454,7 +484,7 @@ mod tests {
     #[test]
     fn test_convert_stmt_for_of() {
         let stmts = parse_fn_body("function f() { for (const item of items) { item; } }");
-        let result = convert_stmt(&stmts[0], None).unwrap();
+        let result = convert_stmt(&stmts[0], &TypeRegistry::new(), None).unwrap();
         assert_eq!(
             result,
             Stmt::ForIn {
@@ -468,7 +498,7 @@ mod tests {
     #[test]
     fn test_convert_stmt_while() {
         let stmts = parse_fn_body("function f() { while (x > 0) { x = x - 1; } }");
-        let result = convert_stmt(&stmts[0], None).unwrap();
+        let result = convert_stmt(&stmts[0], &TypeRegistry::new(), None).unwrap();
         assert_eq!(
             result,
             Stmt::While {
@@ -495,7 +525,7 @@ mod tests {
             "function f() { try { const x = 1; return x; } catch (e) { return 0; } }",
         );
         // try/catch is expanded: try body is inlined, catch is dropped
-        let result = convert_stmt_list(&stmts, None).unwrap();
+        let result = convert_stmt_list(&stmts, &TypeRegistry::new(), None).unwrap();
         assert_eq!(result.len(), 2);
         assert_eq!(
             result[0],
@@ -512,7 +542,7 @@ mod tests {
     #[test]
     fn test_convert_stmt_list_try_catch_empty_catch() {
         let stmts = parse_fn_body("function f() { try { const x = 1; } catch (e) { } }");
-        let result = convert_stmt_list(&stmts, None).unwrap();
+        let result = convert_stmt_list(&stmts, &TypeRegistry::new(), None).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(
             result[0],
@@ -528,7 +558,7 @@ mod tests {
     #[test]
     fn test_convert_stmt_throw_new_error_string() {
         let stmts = parse_fn_body("function f() { throw new Error(\"something went wrong\"); }");
-        let result = convert_stmt(&stmts[0], None).unwrap();
+        let result = convert_stmt(&stmts[0], &TypeRegistry::new(), None).unwrap();
         // throw new Error("msg") → return Err("msg".to_string())
         assert_eq!(
             result,
@@ -546,7 +576,7 @@ mod tests {
     #[test]
     fn test_convert_stmt_throw_string_literal() {
         let stmts = parse_fn_body("function f() { throw \"error msg\"; }");
-        let result = convert_stmt(&stmts[0], None).unwrap();
+        let result = convert_stmt(&stmts[0], &TypeRegistry::new(), None).unwrap();
         // throw "msg" → return Err("msg".to_string())
         assert_eq!(
             result,
@@ -566,7 +596,7 @@ mod tests {
     #[test]
     fn test_convert_stmt_var_decl_object_literal_with_type_annotation() {
         let stmts = parse_fn_body("function f() { const p: Point = { x: 1, y: 2 }; }");
-        let result = convert_stmt(&stmts[0], None).unwrap();
+        let result = convert_stmt(&stmts[0], &TypeRegistry::new(), None).unwrap();
         assert_eq!(
             result,
             Stmt::Let {
@@ -590,7 +620,7 @@ mod tests {
     #[test]
     fn test_convert_stmt_expression_statement() {
         let stmts = parse_fn_body("function f() { foo; }");
-        let result = convert_stmt(&stmts[0], None).unwrap();
+        let result = convert_stmt(&stmts[0], &TypeRegistry::new(), None).unwrap();
         assert_eq!(result, Stmt::Expr(Expr::Ident("foo".to_string())));
     }
 
@@ -599,7 +629,7 @@ mod tests {
     #[test]
     fn test_convert_stmt_var_decl_string_type_annotation_adds_to_string() {
         let stmts = parse_fn_body(r#"function f() { const s: string = "hello"; }"#);
-        let result = convert_stmt(&stmts[0], None).unwrap();
+        let result = convert_stmt(&stmts[0], &TypeRegistry::new(), None).unwrap();
         assert_eq!(
             result,
             Stmt::Let {
@@ -618,7 +648,7 @@ mod tests {
     #[test]
     fn test_convert_stmt_var_decl_string_array_type_annotation() {
         let stmts = parse_fn_body(r#"function f() { const a: string[] = ["a", "b"]; }"#);
-        let result = convert_stmt(&stmts[0], None).unwrap();
+        let result = convert_stmt(&stmts[0], &TypeRegistry::new(), None).unwrap();
         assert_eq!(
             result,
             Stmt::Let {
@@ -646,7 +676,8 @@ mod tests {
     #[test]
     fn test_convert_stmt_return_string_with_string_return_type() {
         let stmts = parse_fn_body(r#"function f(): string { return "ok"; }"#);
-        let result = convert_stmt(&stmts[0], Some(&RustType::String)).unwrap();
+        let result =
+            convert_stmt(&stmts[0], &TypeRegistry::new(), Some(&RustType::String)).unwrap();
         assert_eq!(
             result,
             Stmt::Return(Some(Expr::MethodCall {
@@ -660,7 +691,7 @@ mod tests {
     #[test]
     fn test_convert_stmt_return_number_with_f64_return_type_unchanged() {
         let stmts = parse_fn_body("function f(): number { return 42; }");
-        let result = convert_stmt(&stmts[0], Some(&RustType::F64)).unwrap();
+        let result = convert_stmt(&stmts[0], &TypeRegistry::new(), Some(&RustType::F64)).unwrap();
         assert_eq!(result, Stmt::Return(Some(Expr::NumberLit(42.0))));
     }
 }

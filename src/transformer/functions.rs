@@ -6,6 +6,7 @@ use anyhow::{anyhow, Result};
 use swc_ecma_ast as ast;
 
 use crate::ir::{Expr, Item, Param, RustType, Stmt, Visibility};
+use crate::registry::TypeRegistry;
 use crate::transformer::statements::convert_stmt_list;
 use crate::transformer::types::{convert_ts_type, extract_type_params};
 
@@ -18,7 +19,7 @@ use crate::transformer::types::{convert_ts_type, extract_type_params};
 ///
 /// Returns an error if parameter patterns are unsupported, type annotations
 /// are missing, or body statements fail to convert.
-pub fn convert_fn_decl(fn_decl: &ast::FnDecl, vis: Visibility) -> Result<Item> {
+pub fn convert_fn_decl(fn_decl: &ast::FnDecl, vis: Visibility, reg: &TypeRegistry) -> Result<Item> {
     let name = fn_decl.ident.sym.to_string();
 
     let mut params = Vec::new();
@@ -35,7 +36,7 @@ pub fn convert_fn_decl(fn_decl: &ast::FnDecl, vis: Visibility) -> Result<Item> {
         .transpose()?;
 
     let body = match &fn_decl.function.body {
-        Some(block) => convert_stmt_list(&block.stmts, return_type.as_ref())?,
+        Some(block) => convert_stmt_list(&block.stmts, reg, return_type.as_ref())?,
         None => Vec::new(),
     };
 
@@ -158,6 +159,7 @@ mod tests {
     use super::*;
     use crate::ir::{Expr, Item, Param, RustType, Stmt, Visibility};
     use crate::parser::parse_typescript;
+    use crate::registry::TypeRegistry;
     use swc_ecma_ast::{Decl, ModuleItem};
 
     /// Helper: parse TS source and extract the first FnDecl.
@@ -172,7 +174,7 @@ mod tests {
     #[test]
     fn test_convert_fn_decl_add() {
         let fn_decl = parse_fn_decl("function add(a: number, b: number): number { return a + b; }");
-        let item = convert_fn_decl(&fn_decl, Visibility::Public).unwrap();
+        let item = convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new()).unwrap();
         assert_eq!(
             item,
             Item::Fn {
@@ -202,7 +204,7 @@ mod tests {
     #[test]
     fn test_convert_fn_decl_no_return_type() {
         let fn_decl = parse_fn_decl("function greet(name: string) { return name; }");
-        let item = convert_fn_decl(&fn_decl, Visibility::Public).unwrap();
+        let item = convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new()).unwrap();
         match item {
             Item::Fn {
                 name, return_type, ..
@@ -217,7 +219,7 @@ mod tests {
     #[test]
     fn test_convert_fn_decl_no_params() {
         let fn_decl = parse_fn_decl("function noop(): boolean { return true; }");
-        let item = convert_fn_decl(&fn_decl, Visibility::Public).unwrap();
+        let item = convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new()).unwrap();
         match item {
             Item::Fn { params, body, .. } => {
                 assert!(params.is_empty());
@@ -232,7 +234,7 @@ mod tests {
         let fn_decl = parse_fn_decl(
             "function calc(x: number): number { const result = x + 1; return result; }",
         );
-        let item = convert_fn_decl(&fn_decl, Visibility::Public).unwrap();
+        let item = convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new()).unwrap();
         match item {
             Item::Fn { body, .. } => {
                 assert_eq!(body.len(), 2);
@@ -258,7 +260,7 @@ mod tests {
     #[test]
     fn test_convert_fn_decl_generic_single_param() {
         let fn_decl = parse_fn_decl("function identity<T>(x: T): T { return x; }");
-        let item = convert_fn_decl(&fn_decl, Visibility::Public).unwrap();
+        let item = convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new()).unwrap();
         match item {
             Item::Fn { type_params, .. } => {
                 assert_eq!(type_params, vec!["T".to_string()]);
@@ -270,7 +272,7 @@ mod tests {
     #[test]
     fn test_convert_fn_decl_generic_multiple_params() {
         let fn_decl = parse_fn_decl("function pair<A, B>(a: A, b: B): A { return a; }");
-        let item = convert_fn_decl(&fn_decl, Visibility::Public).unwrap();
+        let item = convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new()).unwrap();
         match item {
             Item::Fn { type_params, .. } => {
                 assert_eq!(type_params, vec!["A".to_string(), "B".to_string()]);
@@ -283,7 +285,7 @@ mod tests {
     fn test_convert_fn_decl_throw_wraps_return_type_in_result() {
         let fn_decl =
             parse_fn_decl("function validate(x: number): string { if (x < 0) { throw new Error(\"negative\"); } return \"ok\"; }");
-        let item = convert_fn_decl(&fn_decl, Visibility::Public).unwrap();
+        let item = convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new()).unwrap();
         match item {
             Item::Fn { return_type, .. } => {
                 assert_eq!(
@@ -302,7 +304,7 @@ mod tests {
     fn test_convert_fn_decl_throw_wraps_return_in_ok() {
         let fn_decl =
             parse_fn_decl("function validate(x: number): string { if (x < 0) { throw new Error(\"negative\"); } return \"ok\"; }");
-        let item = convert_fn_decl(&fn_decl, Visibility::Public).unwrap();
+        let item = convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new()).unwrap();
         match item {
             Item::Fn { body, .. } => {
                 // The last statement should be return Ok("ok".to_string())
@@ -326,7 +328,7 @@ mod tests {
     #[test]
     fn test_convert_fn_decl_throw_no_return_type_becomes_result_unit() {
         let fn_decl = parse_fn_decl("function fail() { throw new Error(\"boom\"); }");
-        let item = convert_fn_decl(&fn_decl, Visibility::Public).unwrap();
+        let item = convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new()).unwrap();
         match item {
             Item::Fn { return_type, .. } => {
                 assert_eq!(
@@ -347,7 +349,7 @@ mod tests {
     #[test]
     fn test_convert_fn_decl_missing_param_type_annotation() {
         let fn_decl = parse_fn_decl("function bad(x) { return x; }");
-        let result = convert_fn_decl(&fn_decl, Visibility::Public);
+        let result = convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new());
         assert!(result.is_err());
     }
 }
