@@ -280,6 +280,11 @@ pub enum Expr {
         /// Closure body
         body: ClosureBody,
     },
+    /// A vec macro: `vec![a, b, c]`
+    Vec {
+        /// Elements of the vec
+        elements: Vec<Expr>,
+    },
 }
 
 /// The body of a closure expression.

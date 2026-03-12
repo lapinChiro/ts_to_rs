@@ -84,3 +84,10 @@ fn test_enum() {
     let output = transpile(&input).unwrap();
     insta::assert_snapshot!(output);
 }
+
+#[test]
+fn test_array_literal() {
+    let input = fs::read_to_string("tests/fixtures/array-literal.input.ts").unwrap();
+    let output = transpile(&input).unwrap();
+    insta::assert_snapshot!(output);
+}

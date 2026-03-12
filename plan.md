@@ -2,13 +2,11 @@
 
 ## 次のタスク
 
-1. [generator-split](backlog/generator-split.md) — generator.rs のモジュール分割
-2. [array-literal](backlog/array-literal.md) — 配列リテラル → `vec![...]` 変換
-3. [object-literal](backlog/object-literal.md) — 型注記付きオブジェクトリテラル → 構造体初期化式
-4. [ternary-operator](backlog/ternary-operator.md) — 三項演算子 → `if` 式
-5. [unsupported-syntax-detection](backlog/unsupported-syntax-detection.md) — 未対応構文の検出・JSON レポート
-6. [break-continue](backlog/break-continue.md) — break/continue（ラベル付き含む）
-7. [class-inheritance](backlog/class-inheritance.md) — クラス継承（extends → trait + struct）
+1. [object-literal](backlog/object-literal.md) — 型注記付きオブジェクトリテラル → 構造体初期化式
+2. [ternary-operator](backlog/ternary-operator.md) — 三項演算子 → `if` 式
+3. [unsupported-syntax-detection](backlog/unsupported-syntax-detection.md) — 未対応構文の検出・JSON レポート
+4. [break-continue](backlog/break-continue.md) — break/continue（ラベル付き含む）
+5. [class-inheritance](backlog/class-inheritance.md) — クラス継承（extends → trait + struct）
 
 ## 未設計の項目
 

@@ -42,6 +42,7 @@ ts-to-rs input.ts -o output.rs
 | `while (cond) { ... }` | `while cond { ... }` |
 | `for (const x of items) { ... }` | `for x in items { ... }` |
 | `for (let i = 0; i < n; i++)` | `for i in 0..n { ... }` |
+| `[1, 2, 3]` (配列リテラル) | `vec![1.0, 2.0, 3.0]` |
 | `enum` (数値) | `enum` + `#[repr(i64)]` |
 | `enum` (文字列) | `enum` + `as_str()` メソッド |
 | `export` | `pub` |
@@ -107,7 +108,11 @@ src/
 │   ├── classes.rs      # クラス変換
 │   ├── statements.rs   # 文の変換
 │   └── expressions.rs  # 式の変換
-├── generator.rs        # IR → Rust ソースコード生成
+├── generator/          # IR → Rust ソースコード生成
+│   ├── mod.rs          # 公開 API + Item 生成
+│   ├── types.rs        # 型の生成
+│   ├── statements.rs   # 文の生成
+│   └── expressions.rs  # 式の生成
 └── ir.rs               # 中間表現の型定義
 tests/
 ├── fixtures/           # 変換テスト用 .ts 入力ファイル

@@ -15,6 +15,9 @@
 - enum: computed member（`1 << 0` 等の式による値指定）
 - enum: 数値と文字列が混在する heterogeneous enum
 - enum メンバーへのアクセス式（`Color.Red` → `Color::Red`）の変換
+- 配列: 文字列リテラル要素の `.to_string()` 付与
+  - `vec!["alice", "bob"]` は `Vec<&str>` になるが、型注記が `Vec<String>` の場合 `.to_string()` が必要
+  - `Expr::StringLit` が常に `"..."` を生成する設計に起因する。文脈に応じて `"...".to_string()` を生成する仕組みが必要
 - 配列: スプレッド構文（`[...arr, 4]`）
 - 配列: 分割代入（`const [a, b] = arr`）
 - 配列: 空配列の型推論（`[]` 単体で型が決まらないケース）
@@ -59,6 +62,11 @@
 
 
 ## コード品質
+
+- カスタム clippy lint プラグイン: ファイル行数の上限チェック
+  - `rustfmt` / 標準 `clippy` にはファイル行数制限の機能がない
+  - clippy の lint プラグイン（`dylint` または `clippy::declare_lint!`）として実装し、閾値超過を警告として検出する
+  - **保留理由**: clippy プラグインの開発コストが高い（proc-macro + rustc internal API）。まずは refactoring.md ルールによる運用で対応し、頻繁に閾値超過が発生するようになったら着手する
 
 ## 拡張性
 

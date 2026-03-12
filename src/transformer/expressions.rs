@@ -36,6 +36,7 @@ pub fn convert_expr(expr: &ast::Expr) -> Result<Expr> {
         ast::Expr::Arrow(arrow) => convert_arrow_expr(arrow),
         ast::Expr::Call(call) => convert_call_expr(call),
         ast::Expr::New(new_expr) => convert_new_expr(new_expr),
+        ast::Expr::Array(array_lit) => convert_array_lit(array_lit),
         _ => Err(anyhow!("unsupported expression: {:?}", expr)),
     }
 }
@@ -238,6 +239,17 @@ fn convert_template_literal(tpl: &ast::Tpl) -> Result<Expr> {
     }
 
     Ok(Expr::FormatMacro { template, args })
+}
+
+/// Converts an SWC array literal to an IR `Expr::Vec`.
+fn convert_array_lit(array_lit: &ast::ArrayLit) -> Result<Expr> {
+    let elements = array_lit
+        .elems
+        .iter()
+        .filter_map(|elem| elem.as_ref())
+        .map(|elem| convert_expr(&elem.expr))
+        .collect::<Result<Vec<_>>>()?;
+    Ok(Expr::Vec { elements })
 }
 
 #[cfg(test)]
@@ -564,6 +576,75 @@ mod tests {
             Expr::FormatMacro {
                 template: "hello world".to_string(),
                 args: vec![],
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_expr_array_numbers() {
+        let expr = parse_var_init("const a = [1, 2, 3];");
+        let result = convert_expr(&expr).unwrap();
+        assert_eq!(
+            result,
+            Expr::Vec {
+                elements: vec![
+                    Expr::NumberLit(1.0),
+                    Expr::NumberLit(2.0),
+                    Expr::NumberLit(3.0),
+                ],
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_expr_array_strings() {
+        let expr = parse_var_init(r#"const a = ["x", "y"];"#);
+        let result = convert_expr(&expr).unwrap();
+        assert_eq!(
+            result,
+            Expr::Vec {
+                elements: vec![
+                    Expr::StringLit("x".to_string()),
+                    Expr::StringLit("y".to_string()),
+                ],
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_expr_array_empty() {
+        let expr = parse_var_init("const a = [];");
+        let result = convert_expr(&expr).unwrap();
+        assert_eq!(result, Expr::Vec { elements: vec![] });
+    }
+
+    #[test]
+    fn test_convert_expr_array_single_element() {
+        let expr = parse_var_init("const a = [42];");
+        let result = convert_expr(&expr).unwrap();
+        assert_eq!(
+            result,
+            Expr::Vec {
+                elements: vec![Expr::NumberLit(42.0)],
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_expr_array_nested() {
+        let expr = parse_var_init("const a = [[1, 2], [3]];");
+        let result = convert_expr(&expr).unwrap();
+        assert_eq!(
+            result,
+            Expr::Vec {
+                elements: vec![
+                    Expr::Vec {
+                        elements: vec![Expr::NumberLit(1.0), Expr::NumberLit(2.0)],
+                    },
+                    Expr::Vec {
+                        elements: vec![Expr::NumberLit(3.0)],
+                    },
+                ],
             }
         );
     }
