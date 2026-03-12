@@ -46,6 +46,7 @@ pub fn convert_class_decl(class_decl: &ast::ClassDecl, vis: Visibility) -> Resul
     let mut items = vec![Item::Struct {
         vis: vis.clone(),
         name: name.clone(),
+        type_params: vec![],
         fields,
     }];
 
@@ -104,7 +105,10 @@ fn convert_constructor(ctor: &ast::Constructor, vis: &Visibility) -> Result<Meth
         name: "new".to_string(),
         has_self: false,
         params,
-        return_type: Some(RustType::Named("Self".to_string())),
+        return_type: Some(RustType::Named {
+            name: "Self".to_string(),
+            type_args: vec![],
+        }),
         body,
     })
 }
@@ -252,6 +256,7 @@ mod tests {
             Item::Struct {
                 vis: Visibility::Private,
                 name: "Foo".to_string(),
+                type_params: vec![],
                 fields: vec![
                     StructField {
                         name: "x".to_string(),
@@ -284,7 +289,10 @@ mod tests {
                 assert!(!methods[0].has_self);
                 assert_eq!(
                     methods[0].return_type,
-                    Some(RustType::Named("Self".to_string()))
+                    Some(RustType::Named {
+                        name: "Self".to_string(),
+                        type_args: vec![]
+                    })
                 );
                 assert_eq!(
                     methods[0].params,

@@ -5,7 +5,9 @@
 use anyhow::{anyhow, Result};
 use swc_ecma_ast as ast;
 
-use crate::ir::Expr;
+use crate::ir::{ClosureBody, Expr, Param};
+use crate::transformer::statements::convert_stmt;
+use crate::transformer::types::convert_ts_type;
 
 /// Converts an SWC [`ast::Expr`] into an IR [`Expr`].
 ///
@@ -31,6 +33,7 @@ pub fn convert_expr(expr: &ast::Expr) -> Result<Expr> {
         ast::Expr::Member(member) => convert_member_expr(member),
         ast::Expr::This(_) => Ok(Expr::Ident("self".to_string())),
         ast::Expr::Assign(assign) => convert_assign_expr(assign),
+        ast::Expr::Arrow(arrow) => convert_arrow_expr(arrow),
         _ => Err(anyhow!("unsupported expression: {:?}", expr)),
     }
 }
@@ -107,6 +110,57 @@ fn convert_assign_expr(assign: &ast::AssignExpr) -> Result<Expr> {
     Ok(Expr::Assign {
         target: Box::new(target),
         value: Box::new(value),
+    })
+}
+
+/// Converts an arrow function expression to `Expr::Closure`.
+///
+/// - Expression body: `(x: number) => x + 1` → `|x: f64| x + 1`
+/// - Block body: `(x: number) => { return x + 1; }` → `|x: f64| { x + 1 }`
+fn convert_arrow_expr(arrow: &ast::ArrowExpr) -> Result<Expr> {
+    let mut params = Vec::new();
+    for param in &arrow.params {
+        match param {
+            ast::Pat::Ident(ident) => {
+                let name = ident.id.sym.to_string();
+                let ty = ident
+                    .type_ann
+                    .as_ref()
+                    .ok_or_else(|| anyhow!("arrow parameter '{}' has no type annotation", name))?;
+                let rust_type = convert_ts_type(&ty.type_ann)?;
+                params.push(Param {
+                    name,
+                    ty: rust_type,
+                });
+            }
+            _ => return Err(anyhow!("unsupported arrow parameter pattern")),
+        }
+    }
+
+    let return_type = arrow
+        .return_type
+        .as_ref()
+        .map(|ann| convert_ts_type(&ann.type_ann))
+        .transpose()?;
+
+    let body = match arrow.body.as_ref() {
+        ast::BlockStmtOrExpr::Expr(expr) => {
+            let ir_expr = convert_expr(expr)?;
+            ClosureBody::Expr(Box::new(ir_expr))
+        }
+        ast::BlockStmtOrExpr::BlockStmt(block) => {
+            let mut stmts = Vec::new();
+            for stmt in &block.stmts {
+                stmts.push(convert_stmt(stmt)?);
+            }
+            ClosureBody::Block(stmts)
+        }
+    };
+
+    Ok(Expr::Closure {
+        params,
+        return_type,
+        body,
     })
 }
 
@@ -271,6 +325,62 @@ mod tests {
                 field: "field".to_string(),
             }
         );
+    }
+
+    // -- Arrow function (closure) tests --
+
+    #[test]
+    fn test_convert_expr_arrow_expr_body() {
+        // `(x: number) => x + 1`
+        let swc_expr = parse_var_init("const f = (x: number) => x + 1;");
+        let result = convert_expr(&swc_expr).unwrap();
+        match result {
+            Expr::Closure {
+                params,
+                return_type,
+                body,
+            } => {
+                assert_eq!(params.len(), 1);
+                assert_eq!(params[0].name, "x");
+                assert_eq!(params[0].ty, crate::ir::RustType::F64);
+                assert!(return_type.is_none());
+                assert!(matches!(body, crate::ir::ClosureBody::Expr(_)));
+            }
+            _ => panic!("expected Expr::Closure"),
+        }
+    }
+
+    #[test]
+    fn test_convert_expr_arrow_block_body() {
+        // `(x: number): number => { return x + 1; }`
+        let swc_expr = parse_var_init("const f = (x: number): number => { return x + 1; };");
+        let result = convert_expr(&swc_expr).unwrap();
+        match result {
+            Expr::Closure {
+                params,
+                return_type,
+                body,
+            } => {
+                assert_eq!(params.len(), 1);
+                assert!(return_type.is_some());
+                assert_eq!(return_type.unwrap(), crate::ir::RustType::F64);
+                assert!(matches!(body, crate::ir::ClosureBody::Block(_)));
+            }
+            _ => panic!("expected Expr::Closure"),
+        }
+    }
+
+    #[test]
+    fn test_convert_expr_arrow_no_params() {
+        let swc_expr = parse_var_init("const f = () => 42;");
+        let result = convert_expr(&swc_expr).unwrap();
+        match result {
+            Expr::Closure { params, body, .. } => {
+                assert!(params.is_empty());
+                assert!(matches!(body, crate::ir::ClosureBody::Expr(_)));
+            }
+            _ => panic!("expected Expr::Closure"),
+        }
     }
 
     #[test]

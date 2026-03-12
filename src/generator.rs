@@ -19,7 +19,32 @@ pub fn generate_type(ty: &RustType) -> String {
         RustType::Bool => "bool".to_string(),
         RustType::Option(inner) => format!("Option<{}>", generate_type(inner)),
         RustType::Vec(inner) => format!("Vec<{}>", generate_type(inner)),
-        RustType::Named(name) => name.clone(),
+        RustType::Fn {
+            params,
+            return_type,
+        } => {
+            let params_str = params
+                .iter()
+                .map(generate_type)
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!(
+                "Box<dyn Fn({params_str}) -> {}>",
+                generate_type(return_type)
+            )
+        }
+        RustType::Named { name, type_args } => {
+            if type_args.is_empty() {
+                name.clone()
+            } else {
+                let args = type_args
+                    .iter()
+                    .map(generate_type)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{name}<{args}>")
+            }
+        }
     }
 }
 
@@ -33,9 +58,15 @@ fn generate_item(item: &Item) -> String {
                 format!("use {}::{{{}}};", path, names.join(", "))
             }
         }
-        Item::Struct { vis, name, fields } => {
+        Item::Struct {
+            vis,
+            name,
+            type_params,
+            fields,
+        } => {
             let vis_str = generate_vis(vis);
-            let mut out = format!("{vis_str}struct {name} {{\n");
+            let generics = generate_type_params(type_params);
+            let mut out = format!("{vis_str}struct {name}{generics} {{\n");
             for field in fields {
                 let field_vis = match vis {
                     Visibility::Public => "pub ",
@@ -80,11 +111,13 @@ fn generate_item(item: &Item) -> String {
         Item::Fn {
             vis,
             name,
+            type_params,
             params,
             return_type,
             body,
         } => {
             let vis_str = generate_vis(vis);
+            let generics = generate_type_params(type_params);
             let params_str = params
                 .iter()
                 .map(|p| format!("{}: {}", p.name, generate_type(&p.ty)))
@@ -94,7 +127,7 @@ fn generate_item(item: &Item) -> String {
                 Some(ty) => format!(" -> {}", generate_type(ty)),
                 None => String::new(),
             };
-            let mut out = format!("{vis_str}fn {name}({params_str}){ret_str} {{\n");
+            let mut out = format!("{vis_str}fn {name}{generics}({params_str}){ret_str} {{\n");
             let body_len = body.len();
             for (i, stmt) in body.iter().enumerate() {
                 let is_last = i == body_len - 1;
@@ -145,6 +178,17 @@ fn generate_vis(vis: &Visibility) -> &'static str {
     match vis {
         Visibility::Public => "pub ",
         Visibility::Private => "",
+    }
+}
+
+/// Generates the generic type parameters string (e.g., `<T, U>`).
+///
+/// Returns an empty string if there are no type parameters.
+fn generate_type_params(type_params: &[String]) -> String {
+    if type_params.is_empty() {
+        String::new()
+    } else {
+        format!("<{}>", type_params.join(", "))
     }
 }
 
@@ -279,6 +323,11 @@ fn generate_expr(expr: &Expr) -> String {
                 format!("{name} {{ {fields_str} }}")
             }
         }
+        Expr::Closure {
+            params,
+            return_type,
+            body,
+        } => generate_closure(params, return_type.as_ref(), body),
         Expr::Assign { target, value } => {
             format!("{} = {}", generate_expr(target), generate_expr(value))
         }
@@ -291,6 +340,39 @@ fn generate_expr(expr: &Expr) -> String {
     }
 }
 
+/// Generates a closure expression.
+fn generate_closure(
+    params: &[crate::ir::Param],
+    return_type: Option<&RustType>,
+    body: &crate::ir::ClosureBody,
+) -> String {
+    let params_str = params
+        .iter()
+        .map(|p| format!("{}: {}", p.name, generate_type(&p.ty)))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let ret_str = match return_type {
+        Some(ty) => format!(" -> {}", generate_type(ty)),
+        None => String::new(),
+    };
+    match body {
+        crate::ir::ClosureBody::Expr(expr) => {
+            format!("|{params_str}|{ret_str} {}", generate_expr(expr))
+        }
+        crate::ir::ClosureBody::Block(stmts) => {
+            let mut out = format!("|{params_str}|{ret_str} {{\n");
+            let body_len = stmts.len();
+            for (i, stmt) in stmts.iter().enumerate() {
+                let is_last = i == body_len - 1;
+                out.push_str(&generate_stmt(stmt, 1, is_last));
+                out.push('\n');
+            }
+            out.push('}');
+            out
+        }
+    }
+}
+
 /// Returns the indentation string for the given level (4 spaces per level).
 fn indent_str(level: usize) -> String {
     "    ".repeat(level)
@@ -299,7 +381,9 @@ fn indent_str(level: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ir::{Expr, Item, Method, Param, RustType, Stmt, StructField, Visibility};
+    use crate::ir::{
+        ClosureBody, Expr, Item, Method, Param, RustType, Stmt, StructField, Visibility,
+    };
 
     // --- Item::Use tests ---
 
@@ -354,6 +438,107 @@ mod tests {
     fn test_generate_type_nested() {
         let ty = RustType::Option(Box::new(RustType::Vec(Box::new(RustType::Bool))));
         assert_eq!(generate_type(&ty), "Option<Vec<bool>>");
+    }
+
+    #[test]
+    fn test_generate_type_fn_single_param() {
+        let ty = RustType::Fn {
+            params: vec![RustType::F64],
+            return_type: Box::new(RustType::F64),
+        };
+        assert_eq!(generate_type(&ty), "Box<dyn Fn(f64) -> f64>");
+    }
+
+    #[test]
+    fn test_generate_type_fn_multiple_params() {
+        let ty = RustType::Fn {
+            params: vec![RustType::String, RustType::F64],
+            return_type: Box::new(RustType::Bool),
+        };
+        assert_eq!(generate_type(&ty), "Box<dyn Fn(String, f64) -> bool>");
+    }
+
+    #[test]
+    fn test_generate_type_fn_no_params() {
+        let ty = RustType::Fn {
+            params: vec![],
+            return_type: Box::new(RustType::F64),
+        };
+        assert_eq!(generate_type(&ty), "Box<dyn Fn() -> f64>");
+    }
+
+    #[test]
+    fn test_generate_type_named_no_type_args() {
+        let ty = RustType::Named {
+            name: "Point".to_string(),
+            type_args: vec![],
+        };
+        assert_eq!(generate_type(&ty), "Point");
+    }
+
+    #[test]
+    fn test_generate_type_named_with_single_type_arg() {
+        let ty = RustType::Named {
+            name: "Box".to_string(),
+            type_args: vec![RustType::String],
+        };
+        assert_eq!(generate_type(&ty), "Box<String>");
+    }
+
+    #[test]
+    fn test_generate_type_named_with_multiple_type_args() {
+        let ty = RustType::Named {
+            name: "HashMap".to_string(),
+            type_args: vec![RustType::String, RustType::F64],
+        };
+        assert_eq!(generate_type(&ty), "HashMap<String, f64>");
+    }
+
+    // --- Closure Expr tests ---
+
+    #[test]
+    fn test_generate_closure_expr_body() {
+        let expr = Expr::Closure {
+            params: vec![Param {
+                name: "x".to_string(),
+                ty: RustType::F64,
+            }],
+            return_type: None,
+            body: ClosureBody::Expr(Box::new(Expr::BinaryOp {
+                left: Box::new(Expr::Ident("x".to_string())),
+                op: "+".to_string(),
+                right: Box::new(Expr::NumberLit(1.0)),
+            })),
+        };
+        assert_eq!(generate_expr(&expr), "|x: f64| x + 1.0");
+    }
+
+    #[test]
+    fn test_generate_closure_block_body() {
+        let expr = Expr::Closure {
+            params: vec![Param {
+                name: "x".to_string(),
+                ty: RustType::F64,
+            }],
+            return_type: Some(RustType::F64),
+            body: ClosureBody::Block(vec![Stmt::Return(Some(Expr::BinaryOp {
+                left: Box::new(Expr::Ident("x".to_string())),
+                op: "+".to_string(),
+                right: Box::new(Expr::NumberLit(1.0)),
+            }))]),
+        };
+        let expected = "|x: f64| -> f64 {\n    x + 1.0\n}";
+        assert_eq!(generate_expr(&expr), expected);
+    }
+
+    #[test]
+    fn test_generate_closure_no_params() {
+        let expr = Expr::Closure {
+            params: vec![],
+            return_type: None,
+            body: ClosureBody::Expr(Box::new(Expr::NumberLit(42.0))),
+        };
+        assert_eq!(generate_expr(&expr), "|| 42.0");
     }
 
     // --- Expr tests ---
@@ -435,6 +620,7 @@ mod tests {
         let item = Item::Struct {
             vis: Visibility::Public,
             name: "Foo".to_string(),
+            type_params: vec![],
             fields: vec![
                 StructField {
                     name: "name".to_string(),
@@ -459,6 +645,7 @@ pub struct Foo {
         let item = Item::Struct {
             vis: Visibility::Private,
             name: "Bar".to_string(),
+            type_params: vec![],
             fields: vec![StructField {
                 name: "x".to_string(),
                 ty: RustType::Bool,
@@ -495,6 +682,7 @@ pub enum Direction {
         let item = Item::Fn {
             vis: Visibility::Public,
             name: "add".to_string(),
+            type_params: vec![],
             params: vec![
                 Param {
                     name: "a".to_string(),
@@ -524,6 +712,7 @@ pub fn add(a: f64, b: f64) -> f64 {
         let item = Item::Fn {
             vis: Visibility::Private,
             name: "greet".to_string(),
+            type_params: vec![],
             params: vec![Param {
                 name: "name".to_string(),
                 ty: RustType::String,
@@ -543,6 +732,7 @@ fn greet(name: String) {
         let item = Item::Fn {
             vis: Visibility::Public,
             name: "get_value".to_string(),
+            type_params: vec![],
             params: vec![],
             return_type: Some(RustType::F64),
             body: vec![Stmt::Return(Some(Expr::NumberLit(42.0)))],
@@ -554,6 +744,53 @@ pub fn get_value() -> f64 {
         assert_eq!(generate(&[item]), expected);
     }
 
+    #[test]
+    fn test_generate_struct_with_type_params() {
+        let item = Item::Struct {
+            vis: Visibility::Public,
+            name: "Container".to_string(),
+            type_params: vec!["T".to_string()],
+            fields: vec![StructField {
+                name: "value".to_string(),
+                ty: RustType::Named {
+                    name: "T".to_string(),
+                    type_args: vec![],
+                },
+            }],
+        };
+        let expected = "\
+pub struct Container<T> {
+    pub value: T,
+}";
+        assert_eq!(generate(&[item]), expected);
+    }
+
+    #[test]
+    fn test_generate_fn_with_type_params() {
+        let item = Item::Fn {
+            vis: Visibility::Public,
+            name: "identity".to_string(),
+            type_params: vec!["T".to_string()],
+            params: vec![Param {
+                name: "x".to_string(),
+                ty: RustType::Named {
+                    name: "T".to_string(),
+                    type_args: vec![],
+                },
+            }],
+            return_type: Some(RustType::Named {
+                name: "T".to_string(),
+                type_args: vec![],
+            }),
+            body: vec![Stmt::Return(Some(Expr::Ident("x".to_string())))],
+        };
+        let expected = "\
+pub fn identity<T>(x: T) -> T {
+    x
+}";
+        assert_eq!(generate(&[item]), expected);
+    }
+
     // --- Stmt::Let tests ---
 
     #[test]
@@ -561,6 +798,7 @@ pub fn get_value() -> f64 {
         let item = Item::Fn {
             vis: Visibility::Private,
             name: "f".to_string(),
+            type_params: vec![],
             params: vec![],
             return_type: None,
             body: vec![Stmt::Let {
@@ -582,6 +820,7 @@ fn f() {
         let item = Item::Fn {
             vis: Visibility::Private,
             name: "f".to_string(),
+            type_params: vec![],
             params: vec![],
             return_type: None,
             body: vec![Stmt::Let {
@@ -603,6 +842,7 @@ fn f() {
         let item = Item::Fn {
             vis: Visibility::Private,
             name: "f".to_string(),
+            type_params: vec![],
             params: vec![],
             return_type: None,
             body: vec![Stmt::Let {
@@ -626,6 +866,7 @@ fn f() {
         let item = Item::Fn {
             vis: Visibility::Private,
             name: "f".to_string(),
+            type_params: vec![],
             params: vec![],
             return_type: None,
             body: vec![Stmt::If {
@@ -648,6 +889,7 @@ fn f() {
         let item = Item::Fn {
             vis: Visibility::Private,
             name: "f".to_string(),
+            type_params: vec![],
             params: vec![],
             return_type: None,
             body: vec![Stmt::If {
@@ -674,6 +916,7 @@ fn f() {
         let item = Item::Fn {
             vis: Visibility::Private,
             name: "f".to_string(),
+            type_params: vec![],
             params: vec![],
             return_type: None,
             body: vec![
@@ -694,6 +937,7 @@ fn f() {
         let item = Item::Fn {
             vis: Visibility::Private,
             name: "f".to_string(),
+            type_params: vec![],
             params: vec![],
             return_type: Some(RustType::F64),
             body: vec![
@@ -725,7 +969,10 @@ fn f() -> f64 {
                     name: "x".to_string(),
                     ty: RustType::F64,
                 }],
-                return_type: Some(RustType::Named("Self".to_string())),
+                return_type: Some(RustType::Named {
+                    name: "Self".to_string(),
+                    type_args: vec![],
+                }),
                 body: vec![Stmt::Return(Some(Expr::Ident("Self { x }".to_string())))],
             }],
         };
@@ -769,11 +1016,13 @@ impl Foo {
             Item::Struct {
                 vis: Visibility::Public,
                 name: "A".to_string(),
+                type_params: vec![],
                 fields: vec![],
             },
             Item::Struct {
                 vis: Visibility::Public,
                 name: "B".to_string(),
+                type_params: vec![],
                 fields: vec![],
             },
         ];

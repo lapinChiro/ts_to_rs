@@ -1,0 +1,21 @@
+---
+source: tests/integration_test.rs
+assertion_line: 43
+expression: output
+---
+pub struct Container<T> {
+    pub value: T,
+}
+
+pub struct Pair<A, B> {
+    pub first: A,
+    pub second: B,
+}
+
+pub fn identity<T>(x: T) -> T {
+    x
+}
+
+pub struct UserList {
+    pub users: Container<String>,
+}

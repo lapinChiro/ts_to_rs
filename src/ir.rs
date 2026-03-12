@@ -16,8 +16,20 @@ pub enum RustType {
     Option(Box<RustType>),
     /// `Vec<T>`
     Vec(Box<RustType>),
-    /// A user-defined named type (e.g., `Point`)
-    Named(String),
+    /// A function type: `impl Fn(T1, T2) -> R`
+    Fn {
+        /// Parameter types
+        params: Vec<RustType>,
+        /// Return type
+        return_type: Box<RustType>,
+    },
+    /// A user-defined named type, optionally with generic type arguments (e.g., `Point`, `Box<T>`)
+    Named {
+        /// Type name
+        name: String,
+        /// Generic type arguments (empty if not generic)
+        type_args: Vec<RustType>,
+    },
 }
 
 /// Visibility modifier for items.
@@ -80,6 +92,8 @@ pub enum Item {
         vis: Visibility,
         /// Struct name
         name: String,
+        /// Generic type parameters (e.g., `["T", "U"]`)
+        type_params: Vec<String>,
         /// Named fields
         fields: Vec<StructField>,
     },
@@ -105,6 +119,8 @@ pub enum Item {
         vis: Visibility,
         /// Function name
         name: String,
+        /// Generic type parameters (e.g., `["T", "U"]`)
+        type_params: Vec<String>,
         /// Parameters
         params: Vec<Param>,
         /// Return type (`None` means `()`)
@@ -200,6 +216,24 @@ pub enum Expr {
         /// Right operand
         right: Box<Expr>,
     },
+    /// A closure: `|params| body` or `|params| { body }`
+    Closure {
+        /// Closure parameters
+        params: Vec<Param>,
+        /// Optional return type annotation
+        return_type: Option<RustType>,
+        /// Closure body
+        body: ClosureBody,
+    },
+}
+
+/// The body of a closure expression.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ClosureBody {
+    /// A single expression: `|x| x + 1`
+    Expr(Box<Expr>),
+    /// A block body: `|x| { let y = x + 1; y }`
+    Block(Vec<Stmt>),
 }
 
 #[cfg(test)]
@@ -236,6 +270,7 @@ mod tests {
         let item = Item::Struct {
             vis: Visibility::Public,
             name: "Point".to_string(),
+            type_params: vec![],
             fields: vec![
                 StructField {
                     name: "x".to_string(),
@@ -277,6 +312,7 @@ mod tests {
         let item = Item::Fn {
             vis: Visibility::Public,
             name: "add".to_string(),
+            type_params: vec![],
             params: vec![
                 Param {
                     name: "a".to_string(),

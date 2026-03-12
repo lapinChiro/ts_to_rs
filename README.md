@@ -30,6 +30,10 @@ ts-to-rs input.ts -o output.rs
 | `const` / `let` | `let` / `let mut` |
 | `if` / `else` | `if` / `else` |
 | テンプレートリテラル | `format!()` |
+| ジェネリクス (`<T>`, `<A, B>`) | ジェネリクス (`<T>`, `<A, B>`) |
+| `class` | `struct` + `impl` |
+| アロー関数 (`(x) => x + 1`) | クロージャ (`\|x\| x + 1`) / `fn` |
+| 関数型 (`(x: number) => number`) | `Box<dyn Fn(f64) -> f64>` |
 | `export` | `pub` |
 
 ## 例
@@ -90,6 +94,7 @@ src/
 │   ├── mod.rs          # 変換エントリポイント
 │   ├── types.rs        # 型変換 (TS型 → Rust型)
 │   ├── functions.rs    # 関数変換
+│   ├── classes.rs      # クラス変換
 │   ├── statements.rs   # 文の変換
 │   └── expressions.rs  # 式の変換
 ├── generator.rs        # IR → Rust ソースコード生成

@@ -7,7 +7,7 @@ use swc_ecma_ast as ast;
 
 use crate::ir::{Item, Param, Visibility};
 use crate::transformer::statements::convert_stmt;
-use crate::transformer::types::convert_ts_type;
+use crate::transformer::types::{convert_ts_type, extract_type_params};
 
 /// Converts an SWC [`ast::FnDecl`] into an IR [`Item::Fn`].
 ///
@@ -45,9 +45,12 @@ pub fn convert_fn_decl(fn_decl: &ast::FnDecl, vis: Visibility) -> Result<Item> {
         None => Vec::new(),
     };
 
+    let type_params = extract_type_params(fn_decl.function.type_params.as_deref());
+
     Ok(Item::Fn {
         vis,
         name,
+        type_params,
         params,
         return_type,
         body,
@@ -98,6 +101,7 @@ mod tests {
             Item::Fn {
                 vis: Visibility::Public,
                 name: "add".to_string(),
+                type_params: vec![],
                 params: vec![
                     Param {
                         name: "a".to_string(),
@@ -169,6 +173,30 @@ mod tests {
                     }
                     _ => panic!("expected Stmt::Let"),
                 }
+            }
+            _ => panic!("expected Item::Fn"),
+        }
+    }
+
+    #[test]
+    fn test_convert_fn_decl_generic_single_param() {
+        let fn_decl = parse_fn_decl("function identity<T>(x: T): T { return x; }");
+        let item = convert_fn_decl(&fn_decl, Visibility::Public).unwrap();
+        match item {
+            Item::Fn { type_params, .. } => {
+                assert_eq!(type_params, vec!["T".to_string()]);
+            }
+            _ => panic!("expected Item::Fn"),
+        }
+    }
+
+    #[test]
+    fn test_convert_fn_decl_generic_multiple_params() {
+        let fn_decl = parse_fn_decl("function pair<A, B>(a: A, b: B): A { return a; }");
+        let item = convert_fn_decl(&fn_decl, Visibility::Public).unwrap();
+        match item {
+            Item::Fn { type_params, .. } => {
+                assert_eq!(type_params, vec!["A".to_string(), "B".to_string()]);
             }
             _ => panic!("expected Item::Fn"),
         }

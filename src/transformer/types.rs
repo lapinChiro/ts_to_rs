@@ -42,6 +42,9 @@ pub fn convert_ts_type(ts_type: &TsType) -> Result<RustType> {
             swc_ecma_ast::TsUnionOrIntersectionType::TsUnionType(union),
         ) => convert_union_type(union),
         TsType::TsParenthesizedType(paren) => convert_ts_type(&paren.type_ann),
+        TsType::TsFnOrConstructorType(swc_ecma_ast::TsFnOrConstructorType::TsFnType(fn_type)) => {
+            convert_fn_type(fn_type)
+        }
         _ => Err(anyhow!("unsupported type: {:?}", ts_type)),
     }
 }
@@ -65,8 +68,21 @@ fn convert_type_ref(type_ref: &swc_ecma_ast::TsTypeRef) -> Result<RustType> {
             let inner = convert_ts_type(&params.params[0])?;
             Ok(RustType::Vec(Box::new(inner)))
         }
-        // User-defined types: pass through as Named
-        other => Ok(RustType::Named(other.to_string())),
+        // User-defined types: pass through as Named, with any generic type arguments
+        other => {
+            let type_args = match &type_ref.type_params {
+                Some(params) => params
+                    .params
+                    .iter()
+                    .map(|p| convert_ts_type(p))
+                    .collect::<Result<Vec<_>>>()?,
+                None => vec![],
+            };
+            Ok(RustType::Named {
+                name: other.to_string(),
+                type_args,
+            })
+        }
     }
 }
 
@@ -131,7 +147,14 @@ pub fn convert_interface(decl: &TsInterfaceDecl, vis: Visibility) -> Result<Item
         }
     }
 
-    Ok(Item::Struct { vis, name, fields })
+    let type_params = extract_type_params(decl.type_params.as_deref());
+
+    Ok(Item::Struct {
+        vis,
+        name,
+        type_params,
+        fields,
+    })
 }
 
 /// Converts a [`TsTypeAliasDecl`] with an object type literal body into an IR [`Item::Struct`].
@@ -158,11 +181,57 @@ pub fn convert_type_alias(decl: &TsTypeAliasDecl, vis: Visibility) -> Result<Ite
                     }
                 }
             }
-            Ok(Item::Struct { vis, name, fields })
+            let type_params = extract_type_params(decl.type_params.as_deref());
+
+            Ok(Item::Struct {
+                vis,
+                name,
+                type_params,
+                fields,
+            })
         }
         _ => Err(anyhow!(
             "unsupported type alias body (only object type literals are supported)"
         )),
+    }
+}
+
+/// Converts a TS function type (`(x: number) => string`) into `RustType::Fn`.
+fn convert_fn_type(fn_type: &swc_ecma_ast::TsFnType) -> Result<RustType> {
+    let params = fn_type
+        .params
+        .iter()
+        .map(|p| {
+            let type_ann = match p {
+                swc_ecma_ast::TsFnParam::Ident(ident) => ident
+                    .type_ann
+                    .as_ref()
+                    .ok_or_else(|| anyhow!("function type parameter has no type annotation"))?,
+                _ => return Err(anyhow!("unsupported function type parameter pattern")),
+            };
+            convert_ts_type(&type_ann.type_ann)
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    let return_type = convert_ts_type(&fn_type.type_ann.type_ann)?;
+
+    Ok(RustType::Fn {
+        params,
+        return_type: Box::new(return_type),
+    })
+}
+
+/// Extracts type parameter names from an optional [`TsTypeParamDecl`].
+///
+/// Returns an empty vec if there are no type parameters.
+pub fn extract_type_params(type_params: Option<&swc_ecma_ast::TsTypeParamDecl>) -> Vec<String> {
+    match type_params {
+        Some(params) => params
+            .params
+            .iter()
+            .map(|p| p.name.sym.to_string())
+            .collect(),
+        None => vec![],
     }
 }
 
@@ -305,9 +374,15 @@ mod tests {
         let item = convert_interface(&decl, Visibility::Public).unwrap();
 
         match item {
-            Item::Struct { vis, name, fields } => {
+            Item::Struct {
+                vis,
+                name,
+                type_params,
+                fields,
+            } => {
                 assert_eq!(vis, Visibility::Public);
                 assert_eq!(name, "Foo");
+                assert!(type_params.is_empty());
                 assert_eq!(fields.len(), 2);
                 assert_eq!(fields[0].name, "name");
                 assert_eq!(fields[0].ty, RustType::String);
@@ -359,6 +434,32 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_convert_interface_with_type_params() {
+        let decl = parse_interface("interface Container<T> { value: T; }");
+        let item = convert_interface(&decl, Visibility::Public).unwrap();
+
+        match item {
+            Item::Struct { type_params, .. } => {
+                assert_eq!(type_params, vec!["T".to_string()]);
+            }
+            _ => panic!("expected Item::Struct"),
+        }
+    }
+
+    #[test]
+    fn test_convert_interface_with_multiple_type_params() {
+        let decl = parse_interface("interface Pair<A, B> { first: A; second: B; }");
+        let item = convert_interface(&decl, Visibility::Public).unwrap();
+
+        match item {
+            Item::Struct { type_params, .. } => {
+                assert_eq!(type_params, vec!["A".to_string(), "B".to_string()]);
+            }
+            _ => panic!("expected Item::Struct"),
+        }
+    }
+
     // -- convert_type_alias tests --
 
     #[test]
@@ -377,6 +478,110 @@ mod tests {
             }
             _ => panic!("expected Item::Struct"),
         }
+    }
+
+    #[test]
+    fn test_convert_type_alias_with_type_params() {
+        let decl = parse_type_alias("type Pair<A, B> = { first: A; second: B; };");
+        let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+
+        match item {
+            Item::Struct { type_params, .. } => {
+                assert_eq!(type_params, vec!["A".to_string(), "B".to_string()]);
+            }
+            _ => panic!("expected Item::Struct"),
+        }
+    }
+
+    // -- convert_ts_type: generic type arguments --
+
+    #[test]
+    fn test_convert_ts_type_named_with_type_args() {
+        // `Container<string>` should become Named { name: "Container", type_args: [String] }
+        let decl = parse_interface("interface T { x: Container<string>; }");
+        let prop = match &decl.body.body[0] {
+            TsTypeElement::TsPropertySignature(p) => p,
+            _ => panic!("expected property signature"),
+        };
+        let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann).unwrap();
+        assert_eq!(
+            ty,
+            RustType::Named {
+                name: "Container".to_string(),
+                type_args: vec![RustType::String],
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_ts_type_named_with_multiple_type_args() {
+        let decl = parse_interface("interface T { x: Pair<string, number>; }");
+        let prop = match &decl.body.body[0] {
+            TsTypeElement::TsPropertySignature(p) => p,
+            _ => panic!("expected property signature"),
+        };
+        let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann).unwrap();
+        assert_eq!(
+            ty,
+            RustType::Named {
+                name: "Pair".to_string(),
+                type_args: vec![RustType::String, RustType::F64],
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_ts_type_named_without_type_args() {
+        let decl = parse_interface("interface T { x: Point; }");
+        let prop = match &decl.body.body[0] {
+            TsTypeElement::TsPropertySignature(p) => p,
+            _ => panic!("expected property signature"),
+        };
+        let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann).unwrap();
+        assert_eq!(
+            ty,
+            RustType::Named {
+                name: "Point".to_string(),
+                type_args: vec![],
+            }
+        );
+    }
+
+    // -- convert_ts_type: function types --
+
+    #[test]
+    fn test_convert_ts_type_fn_type() {
+        // `callback: (x: number) => string` → Fn { params: [F64], return_type: String }
+        let decl = parse_interface("interface T { callback: (x: number) => string; }");
+        let prop = match &decl.body.body[0] {
+            TsTypeElement::TsPropertySignature(p) => p,
+            _ => panic!("expected property signature"),
+        };
+        let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann).unwrap();
+        assert_eq!(
+            ty,
+            RustType::Fn {
+                params: vec![RustType::F64],
+                return_type: Box::new(RustType::String),
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_ts_type_fn_type_no_params() {
+        let decl = parse_interface("interface T { callback: () => boolean; }");
+        let prop = match &decl.body.body[0] {
+            TsTypeElement::TsPropertySignature(p) => p,
+            _ => panic!("expected property signature"),
+        };
+        let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann).unwrap();
+        assert_eq!(
+            ty,
+            RustType::Fn {
+                params: vec![],
+                return_type: Box::new(RustType::Bool),
+            }
+        );
     }
 
     #[test]

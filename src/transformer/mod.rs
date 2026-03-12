@@ -13,6 +13,8 @@ use anyhow::Result;
 use swc_ecma_ast::{Decl, ImportSpecifier, Module, ModuleDecl, ModuleItem, Stmt};
 
 use crate::ir::{Item, Visibility};
+use crate::transformer::expressions::convert_expr;
+use crate::transformer::types::convert_ts_type;
 
 /// Transforms an SWC [`Module`] into a list of IR [`Item`]s.
 ///
@@ -107,9 +109,74 @@ fn transform_decl(decl: &Decl, vis: Visibility) -> Result<Vec<Item>> {
             Ok(vec![item])
         }
         Decl::Class(class_decl) => classes::convert_class_decl(class_decl, vis),
+        Decl::Var(var_decl) => convert_var_decl_arrow_fns(var_decl, vis),
         // Unsupported declarations are silently skipped for now
         _ => Ok(vec![]),
     }
+}
+
+/// Converts `const` variable declarations with arrow function initializers into `Item::Fn`.
+///
+/// `const double = (x: number): number => x * 2;`
+/// becomes `fn double(x: f64) -> f64 { x * 2.0 }`
+///
+/// Non-arrow-function variable declarations are skipped.
+fn convert_var_decl_arrow_fns(
+    var_decl: &swc_ecma_ast::VarDecl,
+    vis: Visibility,
+) -> Result<Vec<Item>> {
+    let mut items = Vec::new();
+    for decl in &var_decl.decls {
+        let init = match &decl.init {
+            Some(init) => init,
+            None => continue,
+        };
+        // Only handle arrow function initializers
+        let arrow = match init.as_ref() {
+            swc_ecma_ast::Expr::Arrow(arrow) => arrow,
+            _ => continue,
+        };
+        let name = match &decl.name {
+            swc_ecma_ast::Pat::Ident(ident) => ident.id.sym.to_string(),
+            _ => continue,
+        };
+
+        // Convert the arrow to a closure IR, then extract parts for Item::Fn
+        let closure = convert_expr(init)?;
+        match closure {
+            crate::ir::Expr::Closure {
+                params,
+                return_type,
+                body,
+            } => {
+                // If the arrow has no explicit return type annotation, try the variable's
+                let ret = return_type.or_else(|| {
+                    arrow
+                        .return_type
+                        .as_ref()
+                        .and_then(|ann| convert_ts_type(&ann.type_ann).ok())
+                });
+                let fn_body = match body {
+                    crate::ir::ClosureBody::Expr(expr) => {
+                        vec![crate::ir::Stmt::Return(Some(*expr))]
+                    }
+                    crate::ir::ClosureBody::Block(stmts) => stmts,
+                };
+                let type_params =
+                    crate::transformer::types::extract_type_params(arrow.type_params.as_deref());
+                items.push(Item::Fn {
+                    vis: vis.clone(),
+                    name,
+                    type_params,
+                    params,
+                    return_type: ret,
+                    body: fn_body,
+                });
+            }
+            _ => continue,
+        }
+    }
+    Ok(items)
 }
 
 #[cfg(test)]
@@ -221,6 +288,7 @@ mod tests {
             Item::Struct {
                 vis: Visibility::Private,
                 name: "Foo".to_string(),
+                type_params: vec![],
                 fields: vec![
                     StructField {
                         name: "name".to_string(),
@@ -285,6 +353,7 @@ mod tests {
             Item::Fn {
                 vis: Visibility::Private,
                 name: "add".to_string(),
+                type_params: vec![],
                 params: vec![
                     Param {
                         name: "a".to_string(),

@@ -1,0 +1,21 @@
+---
+source: tests/integration_test.rs
+assertion_line: 43
+expression: output
+---
+pub fn double(x: f64) -> f64 {
+    x * 2.0
+}
+
+pub fn greet(name: String) -> String {
+    format!("Hello, {}", name)
+}
+
+pub fn getFortyTwo() -> f64 {
+    42.0
+}
+
+pub struct Processor {
+    pub transform: Box<dyn Fn(f64) -> f64>,
+    pub callback: Box<dyn Fn(String, f64) -> bool>,
+}

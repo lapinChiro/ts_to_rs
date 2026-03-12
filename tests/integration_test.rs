@@ -37,6 +37,20 @@ fn test_classes() {
 }
 
 #[test]
+fn test_closures() {
+    let input = fs::read_to_string("tests/fixtures/closures.input.ts").unwrap();
+    let output = transpile(&input).unwrap();
+    insta::assert_snapshot!(output);
+}
+
+#[test]
+fn test_generics() {
+    let input = fs::read_to_string("tests/fixtures/generics.input.ts").unwrap();
+    let output = transpile(&input).unwrap();
+    insta::assert_snapshot!(output);
+}
+
+#[test]
 fn test_mixed() {
     let input = fs::read_to_string("tests/fixtures/mixed.input.ts").unwrap();
     let output = transpile(&input).unwrap();
