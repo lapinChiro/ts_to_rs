@@ -1,5 +1,5 @@
 use std::fs;
-use ts_to_rs::transpile;
+use ts_to_rs::{transpile, transpile_collecting};
 
 #[test]
 fn test_import_export() {
@@ -118,4 +118,23 @@ fn test_ternary() {
     let input = fs::read_to_string("tests/fixtures/ternary.input.ts").unwrap();
     let output = transpile(&input).unwrap();
     insta::assert_snapshot!(output);
+}
+
+#[test]
+fn test_unsupported_syntax_collecting_output() {
+    let input = fs::read_to_string("tests/fixtures/unsupported-syntax.input.ts").unwrap();
+    let (output, unsupported) = transpile_collecting(&input).unwrap();
+    insta::assert_snapshot!("unsupported_syntax_rust_output", output);
+    let json = serde_json::to_string_pretty(&unsupported).unwrap();
+    insta::assert_snapshot!("unsupported_syntax_json_report", json);
+}
+
+#[test]
+fn test_unsupported_syntax_default_errors() {
+    let input = fs::read_to_string("tests/fixtures/unsupported-syntax.input.ts").unwrap();
+    let result = transpile(&input);
+    assert!(
+        result.is_err(),
+        "transpile should error on unsupported syntax by default"
+    );
 }

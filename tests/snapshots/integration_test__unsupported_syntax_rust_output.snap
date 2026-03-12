@@ -1,0 +1,12 @@
+---
+source: tests/integration_test.rs
+expression: output
+---
+struct User {
+    name: String,
+    age: f64,
+}
+
+fn greet(user: User) -> String {
+    format!("Hello, {}", user.name)
+}

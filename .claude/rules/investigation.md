@@ -10,8 +10,8 @@
    - ソースコード: 関連するモジュールを全文読む（部分的な読み取りで済ませない）
    - ドキュメント: README, CLAUDE.md, TODO, plan.md, backlog/ を確認する
    - 外部リソース: 必要に応じて Web 検索・ドキュメント取得を行う
-2. 調査結果を `report.<テーマ名>.md` に保存する
-   - テーマ名はケバブケースで、調査内容が推測できる名前にする（例: `report.design-issues.md`, `report.swc-api-changes.md`）
+2. 調査結果を `report/<テーマ名>.md` に保存する
+   - テーマ名はケバブケースで、調査内容が推測できる名前にする（例: `report/design-issues.md`, `report/swc-api-changes.md`）
    - レポートには調査日、要約、詳細な分析、根拠となるコード箇所・ドキュメントの参照を含める
 3. 調査結果の要約をユーザーに報告する
 

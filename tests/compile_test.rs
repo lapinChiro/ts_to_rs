@@ -2,7 +2,7 @@ use std::fs;
 use std::process::Command;
 
 use tempfile::TempDir;
-use ts_to_rs::transpile;
+use ts_to_rs::transpile_collecting;
 
 /// Strips `use` statements from generated Rust code for single-file compilation.
 ///
@@ -75,7 +75,7 @@ fn test_all_fixtures_compile() {
 
         let ts_source = fs::read_to_string(&path)
             .unwrap_or_else(|_| panic!("failed to read fixture: {}", path.display()));
-        let rs_source = transpile(&ts_source)
+        let (rs_source, _unsupported) = transpile_collecting(&ts_source)
             .unwrap_or_else(|_| panic!("failed to transpile fixture: {}", path.display()));
 
         assert_compiles(&rs_source, fixture_name);

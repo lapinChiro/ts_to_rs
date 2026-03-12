@@ -16,6 +16,17 @@ ts-to-rs input.ts
 
 # 出力先を指定
 ts-to-rs input.ts -o output.rs
+
+# 未対応構文を検出して JSON レポートを stdout に出力
+ts-to-rs input.ts --report-unsupported
+```
+
+`--report-unsupported` を指定すると、未対応構文でエラー終了せず全ファイルを処理し、未対応構文の一覧を JSON で出力します:
+
+```json
+[
+  { "kind": "ExportDefaultExpr", "location": "input.ts:8:1" }
+]
 ```
 
 ## 対応する変換

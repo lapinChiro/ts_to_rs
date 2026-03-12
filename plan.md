@@ -2,9 +2,8 @@
 
 ## 次のタスク
 
-1. [unsupported-syntax-detection](backlog/unsupported-syntax-detection.md) — 未対応構文の検出・JSON レポート
-2. [break-continue](backlog/break-continue.md) — break/continue（ラベル付き含む）
-3. [class-inheritance](backlog/class-inheritance.md) — クラス継承（extends → trait + struct）
+1. [break-continue](backlog/break-continue.md) — break/continue（ラベル付き含む）
+2. [class-inheritance](backlog/class-inheritance.md) — クラス継承（extends → trait + struct）
 
 ## 未設計の項目
 

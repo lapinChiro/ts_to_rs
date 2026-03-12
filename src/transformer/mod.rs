@@ -10,6 +10,7 @@ pub mod statements;
 pub mod types;
 
 use anyhow::Result;
+use swc_common::Spanned;
 use swc_ecma_ast::{Decl, ImportSpecifier, Module, ModuleDecl, ModuleItem, Stmt};
 
 use crate::ir::{EnumValue, EnumVariant, Item, Visibility};
@@ -17,38 +18,88 @@ use crate::registry::TypeRegistry;
 use crate::transformer::expressions::convert_expr;
 use crate::transformer::types::convert_ts_type;
 
+/// Error type for unsupported TypeScript syntax encountered during transformation.
+///
+/// Used to distinguish unsupported-syntax errors from other transformation errors,
+/// enabling collection mode to gather all unsupported items without aborting.
+#[derive(Debug, Clone)]
+pub struct UnsupportedSyntaxError {
+    /// The SWC AST node kind (e.g., `"ExportDefaultExpr"`, `"TsModuleDecl"`)
+    pub kind: String,
+    /// Byte offset (SWC `BytePos`) of the syntax in the source
+    pub byte_pos: u32,
+}
+
+impl std::fmt::Display for UnsupportedSyntaxError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "unsupported syntax: {}", self.kind)
+    }
+}
+
+impl std::error::Error for UnsupportedSyntaxError {}
+
 /// Transforms an SWC [`Module`] into a list of IR [`Item`]s.
 ///
-/// Iterates over the module's top-level items and converts supported
-/// declarations (interfaces, type aliases) into IR items. Unsupported
-/// items are skipped with a warning (currently silent).
+/// Returns an error on unsupported syntax. Use [`transform_module_collecting`]
+/// to collect unsupported items instead of aborting.
 ///
 /// # Errors
 ///
-/// Returns an error if a supported declaration fails to convert.
+/// Returns an error if transformation fails or unsupported syntax is encountered.
 pub fn transform_module(module: &Module, reg: &TypeRegistry) -> Result<Vec<Item>> {
     let mut items = Vec::new();
 
     for module_item in &module.body {
-        match module_item {
-            ModuleItem::Stmt(Stmt::Decl(decl)) => {
-                items.extend(transform_decl(decl, Visibility::Private, reg)?);
-            }
-            ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(export)) => {
-                items.extend(transform_decl(&export.decl, Visibility::Public, reg)?);
-            }
-            ModuleItem::ModuleDecl(ModuleDecl::Import(import_decl)) => {
-                if let Some(item) = transform_import(import_decl) {
-                    items.push(item);
-                }
-            }
-            _ => {
-                // Unsupported module items are silently skipped
-            }
-        }
+        items.extend(transform_module_item(module_item, reg)?);
     }
 
     Ok(items)
+}
+
+/// Transforms an SWC [`Module`], collecting unsupported syntax instead of aborting.
+///
+/// Returns the converted items and a list of unsupported syntax entries.
+/// Non-unsupported errors (e.g., conversion failures in supported syntax) still propagate.
+///
+/// # Errors
+///
+/// Returns an error for non-unsupported transformation failures.
+pub fn transform_module_collecting(
+    module: &Module,
+    reg: &TypeRegistry,
+) -> Result<(Vec<Item>, Vec<UnsupportedSyntaxError>)> {
+    let mut items = Vec::new();
+    let mut unsupported = Vec::new();
+
+    for module_item in &module.body {
+        match transform_module_item(module_item, reg) {
+            Ok(converted) => items.extend(converted),
+            Err(e) => match e.downcast::<UnsupportedSyntaxError>() {
+                Ok(unsup) => unsupported.push(unsup),
+                Err(other) => return Err(other),
+            },
+        }
+    }
+
+    Ok((items, unsupported))
+}
+
+/// Transforms a single module item into IR [`Item`]s.
+fn transform_module_item(module_item: &ModuleItem, reg: &TypeRegistry) -> Result<Vec<Item>> {
+    match module_item {
+        ModuleItem::Stmt(Stmt::Decl(decl)) => transform_decl(decl, Visibility::Private, reg),
+        ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(export)) => {
+            transform_decl(&export.decl, Visibility::Public, reg)
+        }
+        ModuleItem::ModuleDecl(ModuleDecl::Import(import_decl)) => {
+            Ok(transform_import(import_decl).into_iter().collect())
+        }
+        _ => Err(UnsupportedSyntaxError {
+            kind: format_module_item_kind(module_item),
+            byte_pos: module_item.span().lo.0,
+        }
+        .into()),
+    }
 }
 
 /// Transforms an import declaration into an IR [`Item::Use`], if applicable.
@@ -92,9 +143,11 @@ fn convert_relative_path_to_crate_path(rel_path: &str) -> String {
     format!("crate::{}", parts.join("::"))
 }
 
-/// Transforms a single declaration into IR [`Item`]s, if supported.
+/// Transforms a single declaration into IR [`Item`]s.
 ///
-/// Returns `Ok` with an empty vec for unsupported declarations.
+/// # Errors
+///
+/// Returns an [`UnsupportedSyntaxError`] for unhandled declaration types.
 fn transform_decl(decl: &Decl, vis: Visibility, reg: &TypeRegistry) -> Result<Vec<Item>> {
     match decl {
         Decl::TsInterface(interface_decl) => {
@@ -112,8 +165,11 @@ fn transform_decl(decl: &Decl, vis: Visibility, reg: &TypeRegistry) -> Result<Ve
         Decl::Class(class_decl) => classes::convert_class_decl(class_decl, vis, reg),
         Decl::Var(var_decl) => convert_var_decl_arrow_fns(var_decl, vis, reg),
         Decl::TsEnum(ts_enum) => convert_ts_enum(ts_enum, vis),
-        // Unsupported declarations are silently skipped for now
-        _ => Ok(vec![]),
+        _ => Err(UnsupportedSyntaxError {
+            kind: format_decl_kind(decl),
+            byte_pos: decl.span().lo.0,
+        }
+        .into()),
     }
 }
 
@@ -223,6 +279,32 @@ fn convert_ts_enum(ts_enum: &swc_ecma_ast::TsEnumDecl, vis: Visibility) -> Resul
         name,
         variants,
     }])
+}
+
+/// Returns a human-readable kind name for a module-level item.
+fn format_module_item_kind(item: &ModuleItem) -> String {
+    match item {
+        ModuleItem::ModuleDecl(decl) => match decl {
+            ModuleDecl::ExportDefaultDecl(_) => "ExportDefaultDecl".to_string(),
+            ModuleDecl::ExportDefaultExpr(_) => "ExportDefaultExpr".to_string(),
+            ModuleDecl::ExportAll(_) => "ExportAll".to_string(),
+            ModuleDecl::ExportNamed(_) => "ExportNamed".to_string(),
+            ModuleDecl::TsImportEquals(_) => "TsImportEquals".to_string(),
+            ModuleDecl::TsExportAssignment(_) => "TsExportAssignment".to_string(),
+            ModuleDecl::TsNamespaceExport(_) => "TsNamespaceExport".to_string(),
+            _ => format!("ModuleDecl({decl:?})"),
+        },
+        ModuleItem::Stmt(stmt) => format!("Stmt({stmt:?})"),
+    }
+}
+
+/// Returns a human-readable kind name for a declaration.
+fn format_decl_kind(decl: &Decl) -> String {
+    match decl {
+        Decl::TsModule(_) => "TsModuleDecl".to_string(),
+        Decl::Using(_) => "UsingDecl".to_string(),
+        _ => format!("Decl({decl:?})"),
+    }
 }
 
 #[cfg(test)]
