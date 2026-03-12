@@ -160,6 +160,22 @@ pub enum Stmt {
         /// Optional else branch body
         else_body: Option<Vec<Stmt>>,
     },
+    /// `while <condition> { ... }`
+    While {
+        /// Loop condition
+        condition: Expr,
+        /// Loop body
+        body: Vec<Stmt>,
+    },
+    /// `for <var> in <iterable> { ... }`
+    ForIn {
+        /// Loop variable name
+        var: String,
+        /// Iterable expression (e.g., a range or collection)
+        iterable: Expr,
+        /// Loop body
+        body: Vec<Stmt>,
+    },
     /// `return [<expr>];`
     Return(Option<Expr>),
     /// A bare expression statement (e.g., a function call).
@@ -222,6 +238,13 @@ pub enum Expr {
         op: String,
         /// Right operand
         right: Box<Expr>,
+    },
+    /// A range expression: `start..end`
+    Range {
+        /// Start of range (inclusive)
+        start: Box<Expr>,
+        /// End of range (exclusive)
+        end: Box<Expr>,
     },
     /// A function call: `name(args)` (e.g., `Ok(x)`, `Err("msg".to_string())`)
     FnCall {
@@ -449,6 +472,60 @@ mod tests {
                 assert_eq!(*err, RustType::String);
             }
             _ => panic!("expected Result"),
+        }
+    }
+
+    #[test]
+    fn test_stmt_while() {
+        let stmt = Stmt::While {
+            condition: Expr::BoolLit(true),
+            body: vec![Stmt::Expr(Expr::Ident("x".to_string()))],
+        };
+        match stmt {
+            Stmt::While { condition, body } => {
+                assert_eq!(condition, Expr::BoolLit(true));
+                assert_eq!(body.len(), 1);
+            }
+            _ => panic!("expected While"),
+        }
+    }
+
+    #[test]
+    fn test_stmt_for_in() {
+        let stmt = Stmt::ForIn {
+            var: "i".to_string(),
+            iterable: Expr::Range {
+                start: Box::new(Expr::NumberLit(0.0)),
+                end: Box::new(Expr::NumberLit(10.0)),
+            },
+            body: vec![],
+        };
+        match stmt {
+            Stmt::ForIn {
+                var,
+                iterable,
+                body,
+            } => {
+                assert_eq!(var, "i");
+                assert!(matches!(iterable, Expr::Range { .. }));
+                assert!(body.is_empty());
+            }
+            _ => panic!("expected ForIn"),
+        }
+    }
+
+    #[test]
+    fn test_expr_range() {
+        let expr = Expr::Range {
+            start: Box::new(Expr::NumberLit(0.0)),
+            end: Box::new(Expr::NumberLit(5.0)),
+        };
+        match expr {
+            Expr::Range { start, end } => {
+                assert_eq!(*start, Expr::NumberLit(0.0));
+                assert_eq!(*end, Expr::NumberLit(5.0));
+            }
+            _ => panic!("expected Range"),
         }
     }
 

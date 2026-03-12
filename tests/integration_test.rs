@@ -65,6 +65,13 @@ fn test_error_handling() {
 }
 
 #[test]
+fn test_loops() {
+    let input = fs::read_to_string("tests/fixtures/loops.input.ts").unwrap();
+    let output = transpile(&input).unwrap();
+    insta::assert_snapshot!(output);
+}
+
+#[test]
 fn test_mixed() {
     let input = fs::read_to_string("tests/fixtures/mixed.input.ts").unwrap();
     let output = transpile(&input).unwrap();

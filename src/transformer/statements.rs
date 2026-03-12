@@ -34,6 +34,9 @@ pub fn convert_stmt(stmt: &ast::Stmt) -> Result<Stmt> {
             Ok(Stmt::Expr(expr))
         }
         ast::Stmt::Throw(throw_stmt) => convert_throw_stmt(throw_stmt),
+        ast::Stmt::While(while_stmt) => convert_while_stmt(while_stmt),
+        ast::Stmt::ForOf(for_of) => convert_for_of_stmt(for_of),
+        ast::Stmt::For(for_stmt) => convert_for_stmt(for_stmt),
         _ => Err(anyhow!("unsupported statement: {:?}", stmt)),
     }
 }
@@ -98,6 +101,121 @@ fn convert_if_stmt(if_stmt: &ast::IfStmt) -> Result<Stmt> {
         then_body,
         else_body,
     })
+}
+
+/// Converts a C-style `for` statement to `Stmt::ForIn` if it matches the simple counter pattern.
+///
+/// Pattern: `for (let i = start; i < end; i++)` → `for i in start..end`
+///
+/// Only `i++` and `i += 1` are recognized as increment expressions.
+fn convert_for_stmt(for_stmt: &ast::ForStmt) -> Result<Stmt> {
+    // Extract: let <var> = <start>
+    let (var, start) = match &for_stmt.init {
+        Some(ast::VarDeclOrExpr::VarDecl(var_decl)) => {
+            if var_decl.decls.len() != 1 {
+                return Err(anyhow!("unsupported for loop: multiple declarators"));
+            }
+            let decl = &var_decl.decls[0];
+            let name = match &decl.name {
+                ast::Pat::Ident(ident) => ident.id.sym.to_string(),
+                _ => return Err(anyhow!("unsupported for loop: non-ident binding")),
+            };
+            let init = decl
+                .init
+                .as_ref()
+                .ok_or_else(|| anyhow!("unsupported for loop: no initializer"))?;
+            let start_expr = convert_expr(init)?;
+            (name, start_expr)
+        }
+        _ => {
+            return Err(anyhow!(
+                "unsupported for loop: no variable declaration init"
+            ))
+        }
+    };
+
+    // Extract: <var> < <end>
+    let end = match &for_stmt.test {
+        Some(test) => match test.as_ref() {
+            ast::Expr::Bin(bin) if bin.op == ast::BinaryOp::Lt => {
+                let left_name = match bin.left.as_ref() {
+                    ast::Expr::Ident(ident) => ident.sym.to_string(),
+                    _ => return Err(anyhow!("unsupported for loop: non-ident in condition")),
+                };
+                if left_name != var {
+                    return Err(anyhow!("unsupported for loop: condition var mismatch"));
+                }
+                convert_expr(&bin.right)?
+            }
+            _ => return Err(anyhow!("unsupported for loop: non-simple condition")),
+        },
+        None => return Err(anyhow!("unsupported for loop: no test expression")),
+    };
+
+    // Verify: <var>++ or <var> += 1
+    match &for_stmt.update {
+        Some(update) => {
+            let valid = match update.as_ref() {
+                ast::Expr::Update(up) => {
+                    up.op == ast::UpdateOp::PlusPlus
+                        && matches!(up.arg.as_ref(), ast::Expr::Ident(ident) if ident.sym.as_ref() == var)
+                }
+                ast::Expr::Assign(assign) => {
+                    matches!(&assign.left, ast::AssignTarget::Simple(ast::SimpleAssignTarget::Ident(ident)) if ident.id.sym.as_ref() == var)
+                        && matches!(assign.right.as_ref(), ast::Expr::Lit(ast::Lit::Num(n)) if n.value == 1.0)
+                }
+                _ => false,
+            };
+            if !valid {
+                return Err(anyhow!("unsupported for loop: non-simple increment"));
+            }
+        }
+        None => return Err(anyhow!("unsupported for loop: no update expression")),
+    }
+
+    let body = convert_block_or_stmt(&for_stmt.body)?;
+    Ok(Stmt::ForIn {
+        var,
+        iterable: Expr::Range {
+            start: Box::new(start),
+            end: Box::new(end),
+        },
+        body,
+    })
+}
+
+/// Converts a `for...of` statement to `Stmt::ForIn`.
+///
+/// `for (const item of items) { ... }` → `for item in items { ... }`
+fn convert_for_of_stmt(for_of: &ast::ForOfStmt) -> Result<Stmt> {
+    let var = match &for_of.left {
+        ast::ForHead::VarDecl(var_decl) => {
+            if var_decl.decls.len() != 1 {
+                return Err(anyhow!(
+                    "for...of with multiple declarators is not supported"
+                ));
+            }
+            match &var_decl.decls[0].name {
+                ast::Pat::Ident(ident) => ident.id.sym.to_string(),
+                _ => return Err(anyhow!("unsupported for...of binding pattern")),
+            }
+        }
+        _ => return Err(anyhow!("unsupported for...of left-hand side")),
+    };
+    let iterable = convert_expr(&for_of.right)?;
+    let body = convert_block_or_stmt(&for_of.body)?;
+    Ok(Stmt::ForIn {
+        var,
+        iterable,
+        body,
+    })
+}
+
+/// Converts a `while` statement to `Stmt::While`.
+fn convert_while_stmt(while_stmt: &ast::WhileStmt) -> Result<Stmt> {
+    let condition = convert_expr(&while_stmt.test)?;
+    let body = convert_block_or_stmt(&while_stmt.body)?;
+    Ok(Stmt::While { condition, body })
 }
 
 /// Converts a `throw` statement into `return Err(...)`.
@@ -288,6 +406,78 @@ mod tests {
                 condition: Expr::BoolLit(true),
                 then_body: vec![Stmt::Return(Some(Expr::NumberLit(1.0)))],
                 else_body: Some(vec![Stmt::Return(Some(Expr::NumberLit(2.0)))]),
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_stmt_for_counter_zero_to_n() {
+        let stmts = parse_fn_body("function f(n: number) { for (let i = 0; i < n; i++) { i; } }");
+        let result = convert_stmt(&stmts[0]).unwrap();
+        assert_eq!(
+            result,
+            Stmt::ForIn {
+                var: "i".to_string(),
+                iterable: Expr::Range {
+                    start: Box::new(Expr::NumberLit(0.0)),
+                    end: Box::new(Expr::Ident("n".to_string())),
+                },
+                body: vec![Stmt::Expr(Expr::Ident("i".to_string()))],
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_stmt_for_counter_start_to_literal() {
+        let stmts = parse_fn_body("function f() { for (let i = 1; i < 10; i++) { i; } }");
+        let result = convert_stmt(&stmts[0]).unwrap();
+        assert_eq!(
+            result,
+            Stmt::ForIn {
+                var: "i".to_string(),
+                iterable: Expr::Range {
+                    start: Box::new(Expr::NumberLit(1.0)),
+                    end: Box::new(Expr::NumberLit(10.0)),
+                },
+                body: vec![Stmt::Expr(Expr::Ident("i".to_string()))],
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_stmt_for_of() {
+        let stmts = parse_fn_body("function f() { for (const item of items) { item; } }");
+        let result = convert_stmt(&stmts[0]).unwrap();
+        assert_eq!(
+            result,
+            Stmt::ForIn {
+                var: "item".to_string(),
+                iterable: Expr::Ident("items".to_string()),
+                body: vec![Stmt::Expr(Expr::Ident("item".to_string()))],
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_stmt_while() {
+        let stmts = parse_fn_body("function f() { while (x > 0) { x = x - 1; } }");
+        let result = convert_stmt(&stmts[0]).unwrap();
+        assert_eq!(
+            result,
+            Stmt::While {
+                condition: Expr::BinaryOp {
+                    left: Box::new(Expr::Ident("x".to_string())),
+                    op: ">".to_string(),
+                    right: Box::new(Expr::NumberLit(0.0)),
+                },
+                body: vec![Stmt::Expr(Expr::Assign {
+                    target: Box::new(Expr::Ident("x".to_string())),
+                    value: Box::new(Expr::BinaryOp {
+                        left: Box::new(Expr::Ident("x".to_string())),
+                        op: "-".to_string(),
+                        right: Box::new(Expr::NumberLit(1.0)),
+                    }),
+                })],
             }
         );
     }

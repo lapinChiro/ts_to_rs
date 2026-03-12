@@ -248,6 +248,28 @@ fn generate_stmt(stmt: &Stmt, indent: usize, is_last_in_fn: bool) -> String {
             }
             out
         }
+        Stmt::While { condition, body } => {
+            let mut out = format!("{pad}while {} {{\n", generate_expr(condition));
+            for s in body {
+                out.push_str(&generate_stmt(s, indent + 1, false));
+                out.push('\n');
+            }
+            out.push_str(&format!("{pad}}}"));
+            out
+        }
+        Stmt::ForIn {
+            var,
+            iterable,
+            body,
+        } => {
+            let mut out = format!("{pad}for {var} in {} {{\n", generate_expr(iterable));
+            for s in body {
+                out.push_str(&generate_stmt(s, indent + 1, false));
+                out.push('\n');
+            }
+            out.push_str(&format!("{pad}}}"));
+            out
+        }
         Stmt::Return(expr) => {
             if is_last_in_fn {
                 match expr {
@@ -264,6 +286,17 @@ fn generate_stmt(stmt: &Stmt, indent: usize, is_last_in_fn: bool) -> String {
         Stmt::Expr(expr) => {
             format!("{pad}{};", generate_expr(expr))
         }
+    }
+}
+
+/// Generates a range bound expression, outputting integer literals without `.0` suffix.
+///
+/// Rust's `Range<f64>` does not implement `Iterator`, so numeric literals in ranges
+/// must be emitted as integers (e.g., `0..n` instead of `0.0..n`).
+fn generate_range_bound(expr: &Expr) -> String {
+    match expr {
+        Expr::NumberLit(n) if n.fract() == 0.0 => format!("{}", *n as i64),
+        _ => format!("{} as i64", generate_expr(expr)),
     }
 }
 
@@ -325,6 +358,13 @@ fn generate_expr(expr: &Expr) -> String {
                     .join(", ");
                 format!("{name} {{ {fields_str} }}")
             }
+        }
+        Expr::Range { start, end } => {
+            format!(
+                "{}..{}",
+                generate_range_bound(start),
+                generate_range_bound(end)
+            )
         }
         Expr::FnCall { name, args } => {
             let args_str = args
@@ -954,6 +994,81 @@ fn f() {
         a;
     } else {
         b;
+    }
+}";
+        assert_eq!(generate(&[item]), expected);
+    }
+
+    // --- Stmt::While tests ---
+
+    #[test]
+    fn test_generate_while() {
+        let item = Item::Fn {
+            vis: Visibility::Private,
+            name: "f".to_string(),
+            type_params: vec![],
+            params: vec![],
+            return_type: None,
+            body: vec![Stmt::While {
+                condition: Expr::BoolLit(true),
+                body: vec![Stmt::Expr(Expr::Ident("x".to_string()))],
+            }],
+        };
+        let expected = "\
+fn f() {
+    while true {
+        x;
+    }
+}";
+        assert_eq!(generate(&[item]), expected);
+    }
+
+    // --- Stmt::ForIn tests ---
+
+    #[test]
+    fn test_generate_for_in_range() {
+        let item = Item::Fn {
+            vis: Visibility::Private,
+            name: "f".to_string(),
+            type_params: vec![],
+            params: vec![],
+            return_type: None,
+            body: vec![Stmt::ForIn {
+                var: "i".to_string(),
+                iterable: Expr::Range {
+                    start: Box::new(Expr::NumberLit(0.0)),
+                    end: Box::new(Expr::Ident("n".to_string())),
+                },
+                body: vec![Stmt::Expr(Expr::Ident("x".to_string()))],
+            }],
+        };
+        let expected = "\
+fn f() {
+    for i in 0..n as i64 {
+        x;
+    }
+}";
+        assert_eq!(generate(&[item]), expected);
+    }
+
+    #[test]
+    fn test_generate_for_in_iterable() {
+        let item = Item::Fn {
+            vis: Visibility::Private,
+            name: "f".to_string(),
+            type_params: vec![],
+            params: vec![],
+            return_type: None,
+            body: vec![Stmt::ForIn {
+                var: "item".to_string(),
+                iterable: Expr::Ident("items".to_string()),
+                body: vec![Stmt::Expr(Expr::Ident("item".to_string()))],
+            }],
+        };
+        let expected = "\
+fn f() {
+    for item in items {
+        item;
     }
 }";
         assert_eq!(generate(&[item]), expected);

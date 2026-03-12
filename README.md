@@ -39,6 +39,9 @@ ts-to-rs input.ts -o output.rs
 | `new Foo(x)` | `Foo::new(x)` |
 | `throw new Error("msg")` | `return Err("msg".to_string())` |
 | `try { ... } catch (e) { ... }` | try ブロック本体を展開 |
+| `while (cond) { ... }` | `while cond { ... }` |
+| `for (const x of items) { ... }` | `for x in items { ... }` |
+| `for (let i = 0; i < n; i++)` | `for i in 0..n { ... }` |
 | `export` | `pub` |
 
 ## 例

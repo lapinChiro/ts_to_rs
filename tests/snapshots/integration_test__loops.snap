@@ -1,0 +1,35 @@
+---
+source: tests/integration_test.rs
+expression: output
+---
+pub fn countdown(n: f64) -> f64 {
+    let mut count: f64 = n;
+    while count > 0.0 {
+        count = count - 1.0;
+    }
+    count
+}
+
+pub fn sumArray(items: Vec<f64>) -> f64 {
+    let mut total: f64 = 0.0;
+    for item in items {
+        total = total + item;
+    }
+    total
+}
+
+pub fn repeatN(n: f64) -> f64 {
+    let mut count: f64 = 0.0;
+    for i in 0..n as i64 {
+        count = count + 1.0;
+    }
+    count
+}
+
+pub fn countFive() -> f64 {
+    let mut count: f64 = 0.0;
+    for i in 0..5 {
+        count = count + 1.0;
+    }
+    count
+}
