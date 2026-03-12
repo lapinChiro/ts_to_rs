@@ -112,4 +112,6 @@ cargo build          # ビルド
 cargo test           # テスト実行
 cargo clippy         # lint
 cargo fmt --check    # フォーマットチェック
+cargo llvm-cov --fail-under-lines 85   # カバレッジ計測（閾値85%）
+cargo llvm-cov --html                  # HTMLレポート（target/llvm-cov/html/）
 ```

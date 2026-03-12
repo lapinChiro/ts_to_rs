@@ -20,6 +20,8 @@ cargo check                # 高速な型チェック
 cargo test                 # 全テスト実行
 cargo clippy --all-targets --all-features -- -D warnings  # lint
 cargo fmt --all --check    # フォーマットチェック
+cargo llvm-cov --fail-under-lines 85   # カバレッジ計測（閾値85%）
+cargo llvm-cov --html                  # HTMLレポート生成（target/llvm-cov/html/）
 ```
 
 ## Architecture
