@@ -59,6 +59,9 @@ ts-to-rs input.ts --report-unsupported
 | `draw({ x: 0, y: 0 })` (関数引数のオブジェクト) | `draw(Point { x: 0.0, y: 0.0 })` |
 | `Color.Red` (enum メンバーアクセス) | `Color::Red` |
 | `a > 0 ? a : b` (三項演算子) | `if a > 0.0 { a } else { b }` |
+| `break` / `continue` | `break` / `continue` |
+| `break label` / `continue label` | `break 'label` / `continue 'label` |
+| `label: for` / `label: while` (ラベル付きループ) | `'label: for` / `'label: while` |
 | `const s: string = "hello"` | `let s: String = "hello".to_string()` |
 | `enum` (数値) | `enum` + `#[repr(i64)]` |
 | `enum` (文字列) | `enum` + `as_str()` メソッド |

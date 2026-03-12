@@ -178,21 +178,35 @@ pub enum Stmt {
         /// Optional else branch body
         else_body: Option<Vec<Stmt>>,
     },
-    /// `while <condition> { ... }`
+    /// `['label:] while <condition> { ... }`
     While {
+        /// Optional loop label (e.g., `'outer`)
+        label: Option<String>,
         /// Loop condition
         condition: Expr,
         /// Loop body
         body: Vec<Stmt>,
     },
-    /// `for <var> in <iterable> { ... }`
+    /// `['label:] for <var> in <iterable> { ... }`
     ForIn {
+        /// Optional loop label (e.g., `'outer`)
+        label: Option<String>,
         /// Loop variable name
         var: String,
         /// Iterable expression (e.g., a range or collection)
         iterable: Expr,
         /// Loop body
         body: Vec<Stmt>,
+    },
+    /// `break ['label];`
+    Break {
+        /// Optional target label
+        label: Option<String>,
+    },
+    /// `continue ['label];`
+    Continue {
+        /// Optional target label
+        label: Option<String>,
     },
     /// `return [<expr>];`
     Return(Option<Expr>),
@@ -569,11 +583,14 @@ mod tests {
     #[test]
     fn test_stmt_while() {
         let stmt = Stmt::While {
+            label: None,
             condition: Expr::BoolLit(true),
             body: vec![Stmt::Expr(Expr::Ident("x".to_string()))],
         };
         match stmt {
-            Stmt::While { condition, body } => {
+            Stmt::While {
+                condition, body, ..
+            } => {
                 assert_eq!(condition, Expr::BoolLit(true));
                 assert_eq!(body.len(), 1);
             }
@@ -584,6 +601,7 @@ mod tests {
     #[test]
     fn test_stmt_for_in() {
         let stmt = Stmt::ForIn {
+            label: None,
             var: "i".to_string(),
             iterable: Expr::Range {
                 start: Box::new(Expr::NumberLit(0.0)),
@@ -596,6 +614,7 @@ mod tests {
                 var,
                 iterable,
                 body,
+                ..
             } => {
                 assert_eq!(var, "i");
                 assert!(matches!(iterable, Expr::Range { .. }));

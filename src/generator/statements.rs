@@ -58,8 +58,16 @@ pub(super) fn generate_stmt(stmt: &Stmt, indent: usize, is_last_in_fn: bool) -> 
             }
             out
         }
-        Stmt::While { condition, body } => {
-            let mut out = format!("{pad}while {} {{\n", generate_expr(condition));
+        Stmt::While {
+            label,
+            condition,
+            body,
+        } => {
+            let label_prefix = label
+                .as_ref()
+                .map(|l| format!("'{l}: "))
+                .unwrap_or_default();
+            let mut out = format!("{pad}{label_prefix}while {} {{\n", generate_expr(condition));
             for s in body {
                 out.push_str(&generate_stmt(s, indent + 1, false));
                 out.push('\n');
@@ -68,11 +76,19 @@ pub(super) fn generate_stmt(stmt: &Stmt, indent: usize, is_last_in_fn: bool) -> 
             out
         }
         Stmt::ForIn {
+            label,
             var,
             iterable,
             body,
         } => {
-            let mut out = format!("{pad}for {var} in {} {{\n", generate_expr(iterable));
+            let label_prefix = label
+                .as_ref()
+                .map(|l| format!("'{l}: "))
+                .unwrap_or_default();
+            let mut out = format!(
+                "{pad}{label_prefix}for {var} in {} {{\n",
+                generate_expr(iterable)
+            );
             for s in body {
                 out.push_str(&generate_stmt(s, indent + 1, false));
                 out.push('\n');
@@ -80,6 +96,14 @@ pub(super) fn generate_stmt(stmt: &Stmt, indent: usize, is_last_in_fn: bool) -> 
             out.push_str(&format!("{pad}}}"));
             out
         }
+        Stmt::Break { label } => match label {
+            Some(l) => format!("{pad}break '{l};"),
+            None => format!("{pad}break;"),
+        },
+        Stmt::Continue { label } => match label {
+            Some(l) => format!("{pad}continue '{l};"),
+            None => format!("{pad}continue;"),
+        },
         Stmt::Return(expr) => {
             if is_last_in_fn {
                 match expr {
@@ -234,6 +258,7 @@ fn f() {
             params: vec![],
             return_type: None,
             body: vec![Stmt::While {
+                label: None,
                 condition: Expr::BoolLit(true),
                 body: vec![Stmt::Expr(Expr::Ident("x".to_string()))],
             }],
@@ -256,6 +281,7 @@ fn f() {
             params: vec![],
             return_type: None,
             body: vec![Stmt::ForIn {
+                label: None,
                 var: "i".to_string(),
                 iterable: Expr::Range {
                     start: Box::new(Expr::NumberLit(0.0)),
@@ -282,6 +308,7 @@ fn f() {
             params: vec![],
             return_type: None,
             body: vec![Stmt::ForIn {
+                label: None,
                 var: "item".to_string(),
                 iterable: Expr::Ident("items".to_string()),
                 body: vec![Stmt::Expr(Expr::Ident("item".to_string()))],

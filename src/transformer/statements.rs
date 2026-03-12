@@ -50,6 +50,15 @@ pub fn convert_stmt(
         ast::Stmt::While(while_stmt) => convert_while_stmt(while_stmt, reg, return_type),
         ast::Stmt::ForOf(for_of) => convert_for_of_stmt(for_of, reg, return_type),
         ast::Stmt::For(for_stmt) => convert_for_stmt(for_stmt, reg, return_type),
+        ast::Stmt::Break(break_stmt) => {
+            let label = break_stmt.label.as_ref().map(|l| l.sym.to_string());
+            Ok(Stmt::Break { label })
+        }
+        ast::Stmt::Continue(cont_stmt) => {
+            let label = cont_stmt.label.as_ref().map(|l| l.sym.to_string());
+            Ok(Stmt::Continue { label })
+        }
+        ast::Stmt::Labeled(labeled_stmt) => convert_labeled_stmt(labeled_stmt, reg, return_type),
         _ => Err(anyhow!("unsupported statement: {:?}", stmt)),
     }
 }
@@ -196,6 +205,7 @@ fn convert_for_stmt(
 
     let body = convert_block_or_stmt(&for_stmt.body, reg, return_type)?;
     Ok(Stmt::ForIn {
+        label: None,
         var,
         iterable: Expr::Range {
             start: Box::new(start),
@@ -230,10 +240,51 @@ fn convert_for_of_stmt(
     let iterable = convert_expr(&for_of.right, reg, None)?;
     let body = convert_block_or_stmt(&for_of.body, reg, return_type)?;
     Ok(Stmt::ForIn {
+        label: None,
         var,
         iterable,
         body,
     })
+}
+
+/// Converts a labeled statement by attaching the label to the inner loop.
+///
+/// `label: for ...` → `'label: for ...`
+/// `label: while ...` → `'label: while ...`
+fn convert_labeled_stmt(
+    labeled: &ast::LabeledStmt,
+    reg: &TypeRegistry,
+    return_type: Option<&RustType>,
+) -> Result<Stmt> {
+    let label_name = labeled.label.sym.to_string();
+    match labeled.body.as_ref() {
+        ast::Stmt::While(while_stmt) => {
+            let condition = convert_expr(&while_stmt.test, reg, None)?;
+            let body = convert_block_or_stmt(&while_stmt.body, reg, return_type)?;
+            Ok(Stmt::While {
+                label: Some(label_name),
+                condition,
+                body,
+            })
+        }
+        ast::Stmt::ForOf(for_of) => {
+            let mut stmt = convert_for_of_stmt(for_of, reg, return_type)?;
+            if let Stmt::ForIn { ref mut label, .. } = stmt {
+                *label = Some(label_name);
+            }
+            Ok(stmt)
+        }
+        ast::Stmt::For(for_stmt) => {
+            let mut stmt = convert_for_stmt(for_stmt, reg, return_type)?;
+            if let Stmt::ForIn { ref mut label, .. } = stmt {
+                *label = Some(label_name);
+            }
+            Ok(stmt)
+        }
+        _ => Err(anyhow!(
+            "unsupported labeled statement: label on non-loop statement"
+        )),
+    }
 }
 
 /// Converts a `while` statement to `Stmt::While`.
@@ -244,7 +295,11 @@ fn convert_while_stmt(
 ) -> Result<Stmt> {
     let condition = convert_expr(&while_stmt.test, reg, None)?;
     let body = convert_block_or_stmt(&while_stmt.body, reg, return_type)?;
-    Ok(Stmt::While { condition, body })
+    Ok(Stmt::While {
+        label: None,
+        condition,
+        body,
+    })
 }
 
 /// Converts a `throw` statement into `return Err(...)`.
@@ -454,6 +509,7 @@ mod tests {
         assert_eq!(
             result,
             Stmt::ForIn {
+                label: None,
                 var: "i".to_string(),
                 iterable: Expr::Range {
                     start: Box::new(Expr::NumberLit(0.0)),
@@ -471,6 +527,7 @@ mod tests {
         assert_eq!(
             result,
             Stmt::ForIn {
+                label: None,
                 var: "i".to_string(),
                 iterable: Expr::Range {
                     start: Box::new(Expr::NumberLit(1.0)),
@@ -488,6 +545,7 @@ mod tests {
         assert_eq!(
             result,
             Stmt::ForIn {
+                label: None,
                 var: "item".to_string(),
                 iterable: Expr::Ident("items".to_string()),
                 body: vec![Stmt::Expr(Expr::Ident("item".to_string()))],
@@ -502,6 +560,7 @@ mod tests {
         assert_eq!(
             result,
             Stmt::While {
+                label: None,
                 condition: Expr::BinaryOp {
                     left: Box::new(Expr::Ident("x".to_string())),
                     op: ">".to_string(),
@@ -693,5 +752,81 @@ mod tests {
         let stmts = parse_fn_body("function f(): number { return 42; }");
         let result = convert_stmt(&stmts[0], &TypeRegistry::new(), Some(&RustType::F64)).unwrap();
         assert_eq!(result, Stmt::Return(Some(Expr::NumberLit(42.0))));
+    }
+
+    // -- break / continue tests --
+
+    #[test]
+    fn test_convert_stmt_break_no_label() {
+        let stmts = parse_fn_body("function f() { while (true) { break; } }");
+        let result = convert_stmt(&stmts[0], &TypeRegistry::new(), None).unwrap();
+        match result {
+            Stmt::While { body, .. } => {
+                assert_eq!(body[0], Stmt::Break { label: None });
+            }
+            _ => panic!("expected While"),
+        }
+    }
+
+    #[test]
+    fn test_convert_stmt_continue_no_label() {
+        let stmts = parse_fn_body("function f() { while (true) { continue; } }");
+        let result = convert_stmt(&stmts[0], &TypeRegistry::new(), None).unwrap();
+        match result {
+            Stmt::While { body, .. } => {
+                assert_eq!(body[0], Stmt::Continue { label: None });
+            }
+            _ => panic!("expected While"),
+        }
+    }
+
+    #[test]
+    fn test_convert_stmt_break_with_label() {
+        let stmts = parse_fn_body("function f() { outer: while (true) { break outer; } }");
+        let result = convert_stmt(&stmts[0], &TypeRegistry::new(), None).unwrap();
+        match result {
+            Stmt::While { label, body, .. } => {
+                assert_eq!(label, Some("outer".to_string()));
+                assert_eq!(
+                    body[0],
+                    Stmt::Break {
+                        label: Some("outer".to_string())
+                    }
+                );
+            }
+            _ => panic!("expected labeled While"),
+        }
+    }
+
+    #[test]
+    fn test_convert_stmt_continue_with_label() {
+        let stmts =
+            parse_fn_body("function f() { outer: for (const x of items) { continue outer; } }");
+        let result = convert_stmt(&stmts[0], &TypeRegistry::new(), None).unwrap();
+        match result {
+            Stmt::ForIn { label, body, .. } => {
+                assert_eq!(label, Some("outer".to_string()));
+                assert_eq!(
+                    body[0],
+                    Stmt::Continue {
+                        label: Some("outer".to_string())
+                    }
+                );
+            }
+            _ => panic!("expected labeled ForIn"),
+        }
+    }
+
+    #[test]
+    fn test_convert_stmt_labeled_for_range() {
+        let stmts =
+            parse_fn_body("function f() { outer: for (let i = 0; i < 10; i++) { break outer; } }");
+        let result = convert_stmt(&stmts[0], &TypeRegistry::new(), None).unwrap();
+        match result {
+            Stmt::ForIn { label, .. } => {
+                assert_eq!(label, Some("outer".to_string()));
+            }
+            _ => panic!("expected labeled ForIn"),
+        }
     }
 }

@@ -2,8 +2,7 @@
 
 ## 次のタスク
 
-1. [break-continue](backlog/break-continue.md) — break/continue（ラベル付き含む）
-2. [class-inheritance](backlog/class-inheritance.md) — クラス継承（extends → trait + struct）
+1. [class-inheritance](backlog/class-inheritance.md) — クラス継承（extends → trait + struct）
 
 ## 未設計の項目
 
