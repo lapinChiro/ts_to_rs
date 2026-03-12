@@ -124,10 +124,10 @@ fn convert_constructor_body(stmts: &[ast::Stmt]) -> Result<Vec<Stmt>> {
 
     for stmt in stmts {
         if let Some((field_name, value_expr)) = try_extract_this_assignment(stmt) {
-            let value = convert_expr(value_expr)?;
+            let value = convert_expr(value_expr, None)?;
             fields.push((field_name, value));
         } else {
-            other_stmts.push(convert_stmt(stmt)?);
+            other_stmts.push(convert_stmt(stmt, None)?);
         }
     }
 
@@ -193,7 +193,7 @@ fn convert_class_method(method: &ast::ClassMethod, vis: &Visibility) -> Result<M
         Some(block) => {
             let mut stmts = Vec::new();
             for stmt in &block.stmts {
-                stmts.push(convert_stmt(stmt)?);
+                stmts.push(convert_stmt(stmt, return_type.as_ref())?);
             }
             stmts
         }

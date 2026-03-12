@@ -1,0 +1,18 @@
+---
+source: tests/integration_test.rs
+expression: output
+---
+struct Config {
+    name: String,
+    label: String,
+}
+
+fn greet() -> String {
+    let s: String = "hello".to_string();
+    s
+}
+
+fn getNames() -> Vec<String> {
+    let names: Vec<String> = vec!["alice".to_string(), "bob".to_string()];
+    names
+}

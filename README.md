@@ -44,6 +44,7 @@ ts-to-rs input.ts -o output.rs
 | `for (let i = 0; i < n; i++)` | `for i in 0..n { ... }` |
 | `[1, 2, 3]` (配列リテラル) | `vec![1.0, 2.0, 3.0]` |
 | `{ x: 1, y: 2 }` (型注記付きオブジェクトリテラル) | `Point { x: 1.0, y: 2.0 }` |
+| `const s: string = "hello"` | `let s: String = "hello".to_string()` |
 | `enum` (数値) | `enum` + `#[repr(i64)]` |
 | `enum` (文字列) | `enum` + `as_str()` メソッド |
 | `export` | `pub` |

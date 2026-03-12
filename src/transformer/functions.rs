@@ -35,7 +35,7 @@ pub fn convert_fn_decl(fn_decl: &ast::FnDecl, vis: Visibility) -> Result<Item> {
         .transpose()?;
 
     let body = match &fn_decl.function.body {
-        Some(block) => convert_stmt_list(&block.stmts)?,
+        Some(block) => convert_stmt_list(&block.stmts, return_type.as_ref())?,
         None => Vec::new(),
     };
 
@@ -130,11 +130,9 @@ fn wrap_stmt_return(stmt: Stmt) -> Stmt {
             if matches!(&expr, Expr::FnCall { name, .. } if name == "Err") {
                 Stmt::Return(Some(expr))
             } else {
-                // String literals need .to_string() to convert &str to String
-                let wrapped_expr = ensure_owned_string(expr);
                 Stmt::Return(Some(Expr::FnCall {
                     name: "Ok".to_string(),
-                    args: vec![wrapped_expr],
+                    args: vec![expr],
                 }))
             }
         }
@@ -150,20 +148,6 @@ fn wrap_stmt_return(stmt: Stmt) -> Stmt {
             condition,
             then_body: wrap_returns_in_ok(then_body),
             else_body: else_body.map(wrap_returns_in_ok),
-        },
-        other => other,
-    }
-}
-
-/// Wraps a `StringLit` expression in `.to_string()` to ensure it produces an owned `String`.
-///
-/// Other expression types are returned as-is.
-fn ensure_owned_string(expr: Expr) -> Expr {
-    match expr {
-        Expr::StringLit(_) => Expr::MethodCall {
-            object: Box::new(expr),
-            method: "to_string".to_string(),
-            args: vec![],
         },
         other => other,
     }

@@ -143,7 +143,7 @@ fn convert_var_decl_arrow_fns(
         };
 
         // Convert the arrow to a closure IR, then extract parts for Item::Fn
-        let closure = convert_expr(init)?;
+        let closure = convert_expr(init, None)?;
         match closure {
             crate::ir::Expr::Closure {
                 params,

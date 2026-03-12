@@ -5,58 +5,58 @@
 use anyhow::{anyhow, Result};
 use swc_ecma_ast as ast;
 
-use crate::ir::{ClosureBody, Expr, Param};
+use crate::ir::{ClosureBody, Expr, Param, RustType};
 use crate::transformer::statements::convert_stmt;
 use crate::transformer::types::convert_ts_type;
 
-/// Converts an SWC [`ast::Expr`] into an IR [`Expr`].
+/// Converts an SWC [`ast::Expr`] into an IR [`Expr`], with an optional expected type.
 ///
-/// # Supported conversions
-///
-/// - Identifiers → `Expr::Ident`
-/// - Number literals → `Expr::NumberLit`
-/// - String literals → `Expr::StringLit`
-/// - Boolean literals → `Expr::BoolLit`
-/// - Template literals → `Expr::FormatMacro`
-/// - Binary expressions → `Expr::BinaryOp`
-/// - Object literals (with type hint) → `Expr::StructInit`
+/// The `expected` type is used for:
+/// - Object literals: determines the struct name from `RustType::Named`
+/// - String literals: adds `.to_string()` when `RustType::String` is expected
+/// - Array literals: propagates element type from `RustType::Vec`
 ///
 /// # Errors
 ///
 /// Returns an error for unsupported expression types.
-pub fn convert_expr(expr: &ast::Expr) -> Result<Expr> {
-    convert_expr_with_type_hint(expr, None)
-}
-
-/// Converts an SWC [`ast::Expr`] into an IR [`Expr`], with an optional type hint.
-///
-/// The `type_hint` is used for object literals to determine the struct name.
-/// When a variable declaration has a type annotation (e.g., `const p: Point = { x: 1, y: 2 }`),
-/// the type name `"Point"` is passed as the hint.
-pub fn convert_expr_with_type_hint(expr: &ast::Expr, type_hint: Option<&str>) -> Result<Expr> {
+pub fn convert_expr(expr: &ast::Expr, expected: Option<&RustType>) -> Result<Expr> {
     match expr {
         ast::Expr::Ident(ident) => Ok(Expr::Ident(ident.sym.to_string())),
-        ast::Expr::Lit(lit) => convert_lit(lit),
+        ast::Expr::Lit(lit) => convert_lit(lit, expected),
         ast::Expr::Bin(bin) => convert_bin_expr(bin),
         ast::Expr::Tpl(tpl) => convert_template_literal(tpl),
-        ast::Expr::Paren(paren) => convert_expr_with_type_hint(&paren.expr, type_hint),
+        ast::Expr::Paren(paren) => convert_expr(&paren.expr, expected),
         ast::Expr::Member(member) => convert_member_expr(member),
         ast::Expr::This(_) => Ok(Expr::Ident("self".to_string())),
         ast::Expr::Assign(assign) => convert_assign_expr(assign),
         ast::Expr::Arrow(arrow) => convert_arrow_expr(arrow),
         ast::Expr::Call(call) => convert_call_expr(call),
         ast::Expr::New(new_expr) => convert_new_expr(new_expr),
-        ast::Expr::Array(array_lit) => convert_array_lit(array_lit),
-        ast::Expr::Object(obj_lit) => convert_object_lit(obj_lit, type_hint),
+        ast::Expr::Array(array_lit) => convert_array_lit(array_lit, expected),
+        ast::Expr::Object(obj_lit) => convert_object_lit(obj_lit, expected),
         _ => Err(anyhow!("unsupported expression: {:?}", expr)),
     }
 }
 
 /// Converts an SWC literal to an IR expression.
-fn convert_lit(lit: &ast::Lit) -> Result<Expr> {
+///
+/// When `expected` is `RustType::String`, string literals are wrapped with `.to_string()`
+/// to produce an owned `String` instead of `&str`.
+fn convert_lit(lit: &ast::Lit, expected: Option<&RustType>) -> Result<Expr> {
     match lit {
         ast::Lit::Num(n) => Ok(Expr::NumberLit(n.value)),
-        ast::Lit::Str(s) => Ok(Expr::StringLit(s.value.to_string_lossy().into_owned())),
+        ast::Lit::Str(s) => {
+            let expr = Expr::StringLit(s.value.to_string_lossy().into_owned());
+            if matches!(expected, Some(RustType::String)) {
+                Ok(Expr::MethodCall {
+                    object: Box::new(expr),
+                    method: "to_string".to_string(),
+                    args: vec![],
+                })
+            } else {
+                Ok(expr)
+            }
+        }
         ast::Lit::Bool(b) => Ok(Expr::BoolLit(b.value)),
         _ => Err(anyhow!("unsupported literal: {:?}", lit)),
     }
@@ -64,8 +64,8 @@ fn convert_lit(lit: &ast::Lit) -> Result<Expr> {
 
 /// Converts an SWC binary expression to an IR `BinaryOp`.
 fn convert_bin_expr(bin: &ast::BinExpr) -> Result<Expr> {
-    let left = convert_expr(&bin.left)?;
-    let right = convert_expr(&bin.right)?;
+    let left = convert_expr(&bin.left, None)?;
+    let right = convert_expr(&bin.right, None)?;
     let op = convert_binary_op(bin.op)?;
     Ok(Expr::BinaryOp {
         left: Box::new(left),
@@ -99,7 +99,7 @@ fn convert_binary_op(op: ast::BinaryOp) -> Result<String> {
 ///
 /// `this.x` becomes `self.x`.
 fn convert_member_expr(member: &ast::MemberExpr) -> Result<Expr> {
-    let object = convert_expr(&member.obj)?;
+    let object = convert_expr(&member.obj, None)?;
     let field = match &member.prop {
         ast::MemberProp::Ident(ident) => ident.sym.to_string(),
         _ => return Err(anyhow!("unsupported member property (only identifiers)")),
@@ -120,7 +120,7 @@ fn convert_assign_expr(assign: &ast::AssignExpr) -> Result<Expr> {
         },
         _ => return Err(anyhow!("unsupported assignment target pattern")),
     };
-    let value = convert_expr(&assign.right)?;
+    let value = convert_expr(&assign.right, None)?;
     Ok(Expr::Assign {
         target: Box::new(target),
         value: Box::new(value),
@@ -159,13 +159,13 @@ fn convert_arrow_expr(arrow: &ast::ArrowExpr) -> Result<Expr> {
 
     let body = match arrow.body.as_ref() {
         ast::BlockStmtOrExpr::Expr(expr) => {
-            let ir_expr = convert_expr(expr)?;
+            let ir_expr = convert_expr(expr, return_type.as_ref())?;
             ClosureBody::Expr(Box::new(ir_expr))
         }
         ast::BlockStmtOrExpr::BlockStmt(block) => {
             let mut stmts = Vec::new();
             for stmt in &block.stmts {
-                stmts.push(convert_stmt(stmt)?);
+                stmts.push(convert_stmt(stmt, return_type.as_ref())?);
             }
             ClosureBody::Block(stmts)
         }
@@ -192,7 +192,7 @@ fn convert_call_expr(call: &ast::CallExpr) -> Result<Expr> {
                 args,
             }),
             ast::Expr::Member(member) => {
-                let object = convert_expr(&member.obj)?;
+                let object = convert_expr(&member.obj, None)?;
                 let method = match &member.prop {
                     ast::MemberProp::Ident(ident) => ident.sym.to_string(),
                     _ => return Err(anyhow!("unsupported call target member property")),
@@ -229,7 +229,9 @@ fn convert_new_expr(new_expr: &ast::NewExpr) -> Result<Expr> {
 
 /// Converts call arguments from SWC `ExprOrSpread` to IR `Expr`.
 fn convert_call_args(args: &[ast::ExprOrSpread]) -> Result<Vec<Expr>> {
-    args.iter().map(|arg| convert_expr(&arg.expr)).collect()
+    args.iter()
+        .map(|arg| convert_expr(&arg.expr, None))
+        .collect()
 }
 
 /// Converts a template literal to `Expr::FormatMacro`.
@@ -244,7 +246,7 @@ fn convert_template_literal(tpl: &ast::Tpl) -> Result<Expr> {
         template.push_str(&quasi.raw);
         if i < tpl.exprs.len() {
             template.push_str("{}");
-            let arg = convert_expr(&tpl.exprs[i])?;
+            let arg = convert_expr(&tpl.exprs[i], None)?;
             args.push(arg);
         }
     }
@@ -254,14 +256,21 @@ fn convert_template_literal(tpl: &ast::Tpl) -> Result<Expr> {
 
 /// Converts an SWC object literal to an IR `Expr::StructInit`.
 ///
-/// Requires a type hint (struct name) from the enclosing context (e.g., a variable declaration's
-/// type annotation). Without a type hint, returns an error because Rust requires a named struct.
+/// Requires an expected type (`RustType::Named`) from the enclosing context (e.g., a variable
+/// declaration's type annotation). Without a named type, returns an error because Rust requires
+/// a named struct.
 ///
-/// `{ x: 1, y: 2 }` with type hint `"Point"` → `Expr::StructInit { name: "Point", fields: [...] }`
-fn convert_object_lit(obj_lit: &ast::ObjectLit, type_hint: Option<&str>) -> Result<Expr> {
-    let struct_name = type_hint.ok_or_else(|| {
-        anyhow!("object literal requires a type annotation to determine struct name")
-    })?;
+/// `{ x: 1, y: 2 }` with expected `RustType::Named { name: "Point" }` →
+/// `Expr::StructInit { name: "Point", fields: [...] }`
+fn convert_object_lit(obj_lit: &ast::ObjectLit, expected: Option<&RustType>) -> Result<Expr> {
+    let struct_name = match expected {
+        Some(RustType::Named { name, .. }) => name.as_str(),
+        _ => {
+            return Err(anyhow!(
+                "object literal requires a type annotation to determine struct name"
+            ))
+        }
+    };
 
     let mut fields = Vec::new();
     for prop in &obj_lit.props {
@@ -273,7 +282,7 @@ fn convert_object_lit(obj_lit: &ast::ObjectLit, type_hint: Option<&str>) -> Resu
                         ast::PropName::Str(s) => s.value.to_string_lossy().into_owned(),
                         _ => return Err(anyhow!("unsupported object literal key")),
                     };
-                    let value = convert_expr(&kv.value)?;
+                    let value = convert_expr(&kv.value, None)?;
                     fields.push((key, value));
                 }
                 _ => {
@@ -295,12 +304,18 @@ fn convert_object_lit(obj_lit: &ast::ObjectLit, type_hint: Option<&str>) -> Resu
 }
 
 /// Converts an SWC array literal to an IR `Expr::Vec`.
-fn convert_array_lit(array_lit: &ast::ArrayLit) -> Result<Expr> {
+///
+/// When `expected` is `RustType::Vec(inner)`, the inner type is propagated to each element.
+fn convert_array_lit(array_lit: &ast::ArrayLit, expected: Option<&RustType>) -> Result<Expr> {
+    let element_type = match expected {
+        Some(RustType::Vec(inner)) => Some(inner.as_ref()),
+        _ => None,
+    };
     let elements = array_lit
         .elems
         .iter()
         .filter_map(|elem| elem.as_ref())
-        .map(|elem| convert_expr(&elem.expr))
+        .map(|elem| convert_expr(&elem.expr, element_type))
         .collect::<Result<Vec<_>>>()?;
     Ok(Expr::Vec { elements })
 }
@@ -335,42 +350,42 @@ mod tests {
     #[test]
     fn test_convert_expr_identifier() {
         let swc_expr = parse_expr("foo;");
-        let result = convert_expr(&swc_expr).unwrap();
+        let result = convert_expr(&swc_expr, None).unwrap();
         assert_eq!(result, Expr::Ident("foo".to_string()));
     }
 
     #[test]
     fn test_convert_expr_number_literal() {
         let swc_expr = parse_expr("42;");
-        let result = convert_expr(&swc_expr).unwrap();
+        let result = convert_expr(&swc_expr, None).unwrap();
         assert_eq!(result, Expr::NumberLit(42.0));
     }
 
     #[test]
     fn test_convert_expr_string_literal() {
         let swc_expr = parse_expr("\"hello\";");
-        let result = convert_expr(&swc_expr).unwrap();
+        let result = convert_expr(&swc_expr, None).unwrap();
         assert_eq!(result, Expr::StringLit("hello".to_string()));
     }
 
     #[test]
     fn test_convert_expr_bool_true() {
         let swc_expr = parse_expr("true;");
-        let result = convert_expr(&swc_expr).unwrap();
+        let result = convert_expr(&swc_expr, None).unwrap();
         assert_eq!(result, Expr::BoolLit(true));
     }
 
     #[test]
     fn test_convert_expr_bool_false() {
         let swc_expr = parse_expr("false;");
-        let result = convert_expr(&swc_expr).unwrap();
+        let result = convert_expr(&swc_expr, None).unwrap();
         assert_eq!(result, Expr::BoolLit(false));
     }
 
     #[test]
     fn test_convert_expr_binary_add() {
         let swc_expr = parse_var_init("const x = a + b;");
-        let result = convert_expr(&swc_expr).unwrap();
+        let result = convert_expr(&swc_expr, None).unwrap();
         assert_eq!(
             result,
             Expr::BinaryOp {
@@ -384,7 +399,7 @@ mod tests {
     #[test]
     fn test_convert_expr_binary_greater_than() {
         let swc_expr = parse_var_init("const x = a > b;");
-        let result = convert_expr(&swc_expr).unwrap();
+        let result = convert_expr(&swc_expr, None).unwrap();
         assert_eq!(
             result,
             Expr::BinaryOp {
@@ -398,7 +413,7 @@ mod tests {
     #[test]
     fn test_convert_expr_binary_strict_equals() {
         let swc_expr = parse_var_init("const x = a === b;");
-        let result = convert_expr(&swc_expr).unwrap();
+        let result = convert_expr(&swc_expr, None).unwrap();
         assert_eq!(
             result,
             Expr::BinaryOp {
@@ -412,7 +427,7 @@ mod tests {
     #[test]
     fn test_convert_expr_template_literal() {
         let swc_expr = parse_var_init("const x = `Hello ${name}`;");
-        let result = convert_expr(&swc_expr).unwrap();
+        let result = convert_expr(&swc_expr, None).unwrap();
         assert_eq!(
             result,
             Expr::FormatMacro {
@@ -425,7 +440,7 @@ mod tests {
     #[test]
     fn test_convert_expr_member_this_field() {
         let swc_expr = parse_expr("this.name;");
-        let result = convert_expr(&swc_expr).unwrap();
+        let result = convert_expr(&swc_expr, None).unwrap();
         assert_eq!(
             result,
             Expr::FieldAccess {
@@ -438,7 +453,7 @@ mod tests {
     #[test]
     fn test_convert_expr_member_non_this() {
         let swc_expr = parse_expr("obj.field;");
-        let result = convert_expr(&swc_expr).unwrap();
+        let result = convert_expr(&swc_expr, None).unwrap();
         assert_eq!(
             result,
             Expr::FieldAccess {
@@ -454,7 +469,7 @@ mod tests {
     fn test_convert_expr_arrow_expr_body() {
         // `(x: number) => x + 1`
         let swc_expr = parse_var_init("const f = (x: number) => x + 1;");
-        let result = convert_expr(&swc_expr).unwrap();
+        let result = convert_expr(&swc_expr, None).unwrap();
         match result {
             Expr::Closure {
                 params,
@@ -475,7 +490,7 @@ mod tests {
     fn test_convert_expr_arrow_block_body() {
         // `(x: number): number => { return x + 1; }`
         let swc_expr = parse_var_init("const f = (x: number): number => { return x + 1; };");
-        let result = convert_expr(&swc_expr).unwrap();
+        let result = convert_expr(&swc_expr, None).unwrap();
         match result {
             Expr::Closure {
                 params,
@@ -494,7 +509,7 @@ mod tests {
     #[test]
     fn test_convert_expr_arrow_no_params() {
         let swc_expr = parse_var_init("const f = () => 42;");
-        let result = convert_expr(&swc_expr).unwrap();
+        let result = convert_expr(&swc_expr, None).unwrap();
         match result {
             Expr::Closure { params, body, .. } => {
                 assert!(params.is_empty());
@@ -509,7 +524,7 @@ mod tests {
     #[test]
     fn test_convert_expr_call_simple() {
         let swc_expr = parse_expr("foo(x, y);");
-        let result = convert_expr(&swc_expr).unwrap();
+        let result = convert_expr(&swc_expr, None).unwrap();
         assert_eq!(
             result,
             Expr::FnCall {
@@ -522,7 +537,7 @@ mod tests {
     #[test]
     fn test_convert_expr_call_no_args() {
         let swc_expr = parse_expr("foo();");
-        let result = convert_expr(&swc_expr).unwrap();
+        let result = convert_expr(&swc_expr, None).unwrap();
         assert_eq!(
             result,
             Expr::FnCall {
@@ -535,7 +550,7 @@ mod tests {
     #[test]
     fn test_convert_expr_call_nested() {
         let swc_expr = parse_expr("foo(bar(x));");
-        let result = convert_expr(&swc_expr).unwrap();
+        let result = convert_expr(&swc_expr, None).unwrap();
         assert_eq!(
             result,
             Expr::FnCall {
@@ -551,7 +566,7 @@ mod tests {
     #[test]
     fn test_convert_expr_method_call() {
         let swc_expr = parse_expr("obj.method(x);");
-        let result = convert_expr(&swc_expr).unwrap();
+        let result = convert_expr(&swc_expr, None).unwrap();
         assert_eq!(
             result,
             Expr::MethodCall {
@@ -565,7 +580,7 @@ mod tests {
     #[test]
     fn test_convert_expr_method_call_this() {
         let swc_expr = parse_expr("this.doSomething(x);");
-        let result = convert_expr(&swc_expr).unwrap();
+        let result = convert_expr(&swc_expr, None).unwrap();
         assert_eq!(
             result,
             Expr::MethodCall {
@@ -579,7 +594,7 @@ mod tests {
     #[test]
     fn test_convert_expr_method_chain() {
         let swc_expr = parse_expr("a.b().c();");
-        let result = convert_expr(&swc_expr).unwrap();
+        let result = convert_expr(&swc_expr, None).unwrap();
         assert_eq!(
             result,
             Expr::MethodCall {
@@ -597,7 +612,7 @@ mod tests {
     #[test]
     fn test_convert_expr_new() {
         let swc_expr = parse_expr("new Foo(x, y);");
-        let result = convert_expr(&swc_expr).unwrap();
+        let result = convert_expr(&swc_expr, None).unwrap();
         assert_eq!(
             result,
             Expr::FnCall {
@@ -610,7 +625,7 @@ mod tests {
     #[test]
     fn test_convert_expr_new_no_args() {
         let swc_expr = parse_expr("new Foo();");
-        let result = convert_expr(&swc_expr).unwrap();
+        let result = convert_expr(&swc_expr, None).unwrap();
         assert_eq!(
             result,
             Expr::FnCall {
@@ -623,7 +638,7 @@ mod tests {
     #[test]
     fn test_convert_expr_template_literal_no_exprs() {
         let swc_expr = parse_var_init("const x = `hello world`;");
-        let result = convert_expr(&swc_expr).unwrap();
+        let result = convert_expr(&swc_expr, None).unwrap();
         assert_eq!(
             result,
             Expr::FormatMacro {
@@ -636,7 +651,7 @@ mod tests {
     #[test]
     fn test_convert_expr_array_numbers() {
         let expr = parse_var_init("const a = [1, 2, 3];");
-        let result = convert_expr(&expr).unwrap();
+        let result = convert_expr(&expr, None).unwrap();
         assert_eq!(
             result,
             Expr::Vec {
@@ -652,7 +667,7 @@ mod tests {
     #[test]
     fn test_convert_expr_array_strings() {
         let expr = parse_var_init(r#"const a = ["x", "y"];"#);
-        let result = convert_expr(&expr).unwrap();
+        let result = convert_expr(&expr, None).unwrap();
         assert_eq!(
             result,
             Expr::Vec {
@@ -667,14 +682,14 @@ mod tests {
     #[test]
     fn test_convert_expr_array_empty() {
         let expr = parse_var_init("const a = [];");
-        let result = convert_expr(&expr).unwrap();
+        let result = convert_expr(&expr, None).unwrap();
         assert_eq!(result, Expr::Vec { elements: vec![] });
     }
 
     #[test]
     fn test_convert_expr_array_single_element() {
         let expr = parse_var_init("const a = [42];");
-        let result = convert_expr(&expr).unwrap();
+        let result = convert_expr(&expr, None).unwrap();
         assert_eq!(
             result,
             Expr::Vec {
@@ -687,9 +702,13 @@ mod tests {
 
     #[test]
     fn test_convert_expr_object_literal_with_type_hint_basic() {
-        // { x: 1, y: 2 } with type hint "Point"
+        // { x: 1, y: 2 } with expected Named("Point")
         let swc_expr = parse_var_init("const p: Point = { x: 1, y: 2 };");
-        let result = convert_expr_with_type_hint(&swc_expr, Some("Point")).unwrap();
+        let expected = RustType::Named {
+            name: "Point".to_string(),
+            type_args: vec![],
+        };
+        let result = convert_expr(&swc_expr, Some(&expected)).unwrap();
         assert_eq!(
             result,
             Expr::StructInit {
@@ -706,7 +725,11 @@ mod tests {
     fn test_convert_expr_object_literal_mixed_field_types() {
         let swc_expr =
             parse_var_init(r#"const c: Config = { name: "foo", count: 42, active: true };"#);
-        let result = convert_expr_with_type_hint(&swc_expr, Some("Config")).unwrap();
+        let expected = RustType::Named {
+            name: "Config".to_string(),
+            type_args: vec![],
+        };
+        let result = convert_expr(&swc_expr, Some(&expected)).unwrap();
         assert_eq!(
             result,
             Expr::StructInit {
@@ -723,7 +746,11 @@ mod tests {
     #[test]
     fn test_convert_expr_object_literal_single_field() {
         let swc_expr = parse_var_init("const w: Wrapper = { value: 10 };");
-        let result = convert_expr_with_type_hint(&swc_expr, Some("Wrapper")).unwrap();
+        let expected = RustType::Named {
+            name: "Wrapper".to_string(),
+            type_args: vec![],
+        };
+        let result = convert_expr(&swc_expr, Some(&expected)).unwrap();
         assert_eq!(
             result,
             Expr::StructInit {
@@ -736,7 +763,11 @@ mod tests {
     #[test]
     fn test_convert_expr_object_literal_empty() {
         let swc_expr = parse_var_init("const e: Empty = {};");
-        let result = convert_expr_with_type_hint(&swc_expr, Some("Empty")).unwrap();
+        let expected = RustType::Named {
+            name: "Empty".to_string(),
+            type_args: vec![],
+        };
+        let result = convert_expr(&swc_expr, Some(&expected)).unwrap();
         assert_eq!(
             result,
             Expr::StructInit {
@@ -749,14 +780,14 @@ mod tests {
     #[test]
     fn test_convert_expr_object_literal_without_type_hint_errors() {
         let swc_expr = parse_var_init("const obj = { x: 1 };");
-        let result = convert_expr(&swc_expr);
+        let result = convert_expr(&swc_expr, None);
         assert!(result.is_err());
     }
 
     #[test]
     fn test_convert_expr_array_nested() {
         let expr = parse_var_init("const a = [[1, 2], [3]];");
-        let result = convert_expr(&expr).unwrap();
+        let result = convert_expr(&expr, None).unwrap();
         assert_eq!(
             result,
             Expr::Vec {
@@ -768,6 +799,79 @@ mod tests {
                         elements: vec![Expr::NumberLit(3.0)],
                     },
                 ],
+            }
+        );
+    }
+
+    // -- Expected type propagation tests --
+
+    #[test]
+    fn test_convert_expr_string_lit_with_string_expected_adds_to_string() {
+        let swc_expr = parse_expr("\"hello\";");
+        let result = convert_expr(&swc_expr, Some(&RustType::String)).unwrap();
+        assert_eq!(
+            result,
+            Expr::MethodCall {
+                object: Box::new(Expr::StringLit("hello".to_string())),
+                method: "to_string".to_string(),
+                args: vec![],
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_expr_string_lit_without_expected_unchanged() {
+        let swc_expr = parse_expr("\"hello\";");
+        let result = convert_expr(&swc_expr, None).unwrap();
+        assert_eq!(result, Expr::StringLit("hello".to_string()));
+    }
+
+    #[test]
+    fn test_convert_expr_string_lit_with_f64_expected_unchanged() {
+        let swc_expr = parse_expr("\"hello\";");
+        let result = convert_expr(&swc_expr, Some(&RustType::F64)).unwrap();
+        assert_eq!(result, Expr::StringLit("hello".to_string()));
+    }
+
+    #[test]
+    fn test_convert_expr_array_string_with_vec_string_expected() {
+        let expr = parse_var_init(r#"const a = ["a", "b"];"#);
+        let expected = RustType::Vec(Box::new(RustType::String));
+        let result = convert_expr(&expr, Some(&expected)).unwrap();
+        assert_eq!(
+            result,
+            Expr::Vec {
+                elements: vec![
+                    Expr::MethodCall {
+                        object: Box::new(Expr::StringLit("a".to_string())),
+                        method: "to_string".to_string(),
+                        args: vec![],
+                    },
+                    Expr::MethodCall {
+                        object: Box::new(Expr::StringLit("b".to_string())),
+                        method: "to_string".to_string(),
+                        args: vec![],
+                    },
+                ],
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_expr_array_nested_vec_string_expected() {
+        let expr = parse_var_init(r#"const a = [["a"]];"#);
+        let expected = RustType::Vec(Box::new(RustType::Vec(Box::new(RustType::String))));
+        let result = convert_expr(&expr, Some(&expected)).unwrap();
+        assert_eq!(
+            result,
+            Expr::Vec {
+                elements: vec![Expr::Vec {
+                    elements: vec![Expr::MethodCall {
+                        object: Box::new(Expr::StringLit("a".to_string())),
+                        method: "to_string".to_string(),
+                        args: vec![],
+                    }],
+                }],
             }
         );
     }

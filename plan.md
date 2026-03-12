@@ -2,9 +2,8 @@
 
 ## 次のタスク
 
-1. [expected-type-propagation](backlog/expected-type-propagation.md) — 期待型の伝播（StringLit `.to_string()` 自動付与、ワークアラウンド統合）
-2. [type-registry](backlog/type-registry.md) — TypeRegistry（ネストしたオブジェクト、関数引数オブジェクト、enum メンバーアクセス、外部モジュール型解決）
-3. [ternary-operator](backlog/ternary-operator.md) — 三項演算子 → `if` 式
+1. [type-registry](backlog/type-registry.md) — TypeRegistry（ネストしたオブジェクト、関数引数オブジェクト、enum メンバーアクセス、外部モジュール型解決）
+2. [ternary-operator](backlog/ternary-operator.md) — 三項演算子 → `if` 式
 3. [unsupported-syntax-detection](backlog/unsupported-syntax-detection.md) — 未対応構文の検出・JSON レポート
 4. [break-continue](backlog/break-continue.md) — break/continue（ラベル付き含む）
 5. [class-inheritance](backlog/class-inheritance.md) — クラス継承（extends → trait + struct）
