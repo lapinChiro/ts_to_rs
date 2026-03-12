@@ -285,6 +285,15 @@ pub enum Expr {
         /// Elements of the vec
         elements: Vec<Expr>,
     },
+    /// An `if` expression: `if cond { then } else { else }`
+    If {
+        /// Condition expression
+        condition: Box<Expr>,
+        /// Then branch expression
+        then_expr: Box<Expr>,
+        /// Else branch expression
+        else_expr: Box<Expr>,
+    },
 }
 
 /// The body of a closure expression.

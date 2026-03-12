@@ -47,6 +47,7 @@ ts-to-rs input.ts -o output.rs
 | `{ origin: { x: 0, y: 0 } }` (ネストしたオブジェクト) | `Rect { origin: Origin { x: 0.0, y: 0.0 } }` |
 | `draw({ x: 0, y: 0 })` (関数引数のオブジェクト) | `draw(Point { x: 0.0, y: 0.0 })` |
 | `Color.Red` (enum メンバーアクセス) | `Color::Red` |
+| `a > 0 ? a : b` (三項演算子) | `if a > 0.0 { a } else { b }` |
 | `const s: string = "hello"` | `let s: String = "hello".to_string()` |
 | `enum` (数値) | `enum` + `#[repr(i64)]` |
 | `enum` (文字列) | `enum` + `as_str()` メソッド |

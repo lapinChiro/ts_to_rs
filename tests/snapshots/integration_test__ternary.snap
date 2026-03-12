@@ -1,0 +1,20 @@
+---
+source: tests/integration_test.rs
+expression: output
+---
+fn abs(a: f64) -> f64 {
+    let result = if a > 0.0 { a } else { 0.0 };
+    result
+}
+
+fn sign(x: f64) -> String {
+    if x > 0.0 { "positive".to_string() } else { "negative".to_string() }
+}
+
+fn signOrZero(x: f64) -> String {
+    if x > 0.0 { "positive".to_string() } else { if x < 0.0 { "negative".to_string() } else { "zero".to_string() } }
+}
+
+fn pick(flag: bool, a: f64, b: f64) -> f64 {
+    if flag { a } else { b }
+}

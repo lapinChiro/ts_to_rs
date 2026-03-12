@@ -2,10 +2,9 @@
 
 ## 次のタスク
 
-1. [ternary-operator](backlog/ternary-operator.md) — 三項演算子 → `if` 式
-3. [unsupported-syntax-detection](backlog/unsupported-syntax-detection.md) — 未対応構文の検出・JSON レポート
-4. [break-continue](backlog/break-continue.md) — break/continue（ラベル付き含む）
-5. [class-inheritance](backlog/class-inheritance.md) — クラス継承（extends → trait + struct）
+1. [unsupported-syntax-detection](backlog/unsupported-syntax-detection.md) — 未対応構文の検出・JSON レポート
+2. [break-continue](backlog/break-continue.md) — break/continue（ラベル付き含む）
+3. [class-inheritance](backlog/class-inheritance.md) — クラス継承（extends → trait + struct）
 
 ## 未設計の項目
 

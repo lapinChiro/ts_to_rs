@@ -101,6 +101,18 @@ pub(super) fn generate_expr(expr: &Expr) -> String {
                 .join(", ");
             format!("vec![{elems_str}]")
         }
+        Expr::If {
+            condition,
+            then_expr,
+            else_expr,
+        } => {
+            format!(
+                "if {} {{ {} }} else {{ {} }}",
+                generate_expr(condition),
+                generate_expr(then_expr),
+                generate_expr(else_expr)
+            )
+        }
     }
 }
 
@@ -310,6 +322,57 @@ mod tests {
             elements: vec![Expr::StringLit("hello".to_string())],
         };
         assert_eq!(generate_expr(&expr), "vec![\"hello\"]");
+    }
+
+    // -- If expression tests --
+
+    #[test]
+    fn test_generate_expr_if_basic() {
+        let expr = Expr::If {
+            condition: Box::new(Expr::Ident("flag".to_string())),
+            then_expr: Box::new(Expr::Ident("x".to_string())),
+            else_expr: Box::new(Expr::Ident("y".to_string())),
+        };
+        assert_eq!(generate_expr(&expr), "if flag { x } else { y }");
+    }
+
+    #[test]
+    fn test_generate_expr_if_with_literals() {
+        let expr = Expr::If {
+            condition: Box::new(Expr::BinaryOp {
+                left: Box::new(Expr::Ident("a".to_string())),
+                op: ">".to_string(),
+                right: Box::new(Expr::NumberLit(0.0)),
+            }),
+            then_expr: Box::new(Expr::NumberLit(1.0)),
+            else_expr: Box::new(Expr::NumberLit(2.0)),
+        };
+        assert_eq!(generate_expr(&expr), "if a > 0.0 { 1.0 } else { 2.0 }");
+    }
+
+    #[test]
+    fn test_generate_expr_if_nested() {
+        let expr = Expr::If {
+            condition: Box::new(Expr::BinaryOp {
+                left: Box::new(Expr::Ident("x".to_string())),
+                op: ">".to_string(),
+                right: Box::new(Expr::NumberLit(0.0)),
+            }),
+            then_expr: Box::new(Expr::StringLit("positive".to_string())),
+            else_expr: Box::new(Expr::If {
+                condition: Box::new(Expr::BinaryOp {
+                    left: Box::new(Expr::Ident("x".to_string())),
+                    op: "<".to_string(),
+                    right: Box::new(Expr::NumberLit(0.0)),
+                }),
+                then_expr: Box::new(Expr::StringLit("negative".to_string())),
+                else_expr: Box::new(Expr::StringLit("zero".to_string())),
+            }),
+        };
+        assert_eq!(
+            generate_expr(&expr),
+            "if x > 0.0 { \"positive\" } else { if x < 0.0 { \"negative\" } else { \"zero\" } }"
+        );
     }
 
     #[test]

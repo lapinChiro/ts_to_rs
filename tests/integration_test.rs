@@ -112,3 +112,10 @@ fn test_string_to_string() {
     let output = transpile(&input).unwrap();
     insta::assert_snapshot!(output);
 }
+
+#[test]
+fn test_ternary() {
+    let input = fs::read_to_string("tests/fixtures/ternary.input.ts").unwrap();
+    let output = transpile(&input).unwrap();
+    insta::assert_snapshot!(output);
+}

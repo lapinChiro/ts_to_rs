@@ -39,6 +39,7 @@ pub fn convert_expr(
         ast::Expr::New(new_expr) => convert_new_expr(new_expr, reg),
         ast::Expr::Array(array_lit) => convert_array_lit(array_lit, reg, expected),
         ast::Expr::Object(obj_lit) => convert_object_lit(obj_lit, reg, expected),
+        ast::Expr::Cond(cond) => convert_cond_expr(cond, reg, expected),
         _ => Err(anyhow!("unsupported expression: {:?}", expr)),
     }
 }
@@ -290,6 +291,24 @@ fn convert_template_literal(tpl: &ast::Tpl, reg: &TypeRegistry) -> Result<Expr> 
     }
 
     Ok(Expr::FormatMacro { template, args })
+}
+
+/// Converts an SWC conditional (ternary) expression to `Expr::If`.
+///
+/// `condition ? consequent : alternate` → `if condition { consequent } else { alternate }`
+fn convert_cond_expr(
+    cond: &ast::CondExpr,
+    reg: &TypeRegistry,
+    expected: Option<&RustType>,
+) -> Result<Expr> {
+    let condition = convert_expr(&cond.test, reg, None)?;
+    let then_expr = convert_expr(&cond.cons, reg, expected)?;
+    let else_expr = convert_expr(&cond.alt, reg, expected)?;
+    Ok(Expr::If {
+        condition: Box::new(condition),
+        then_expr: Box::new(then_expr),
+        else_expr: Box::new(else_expr),
+    })
 }
 
 /// Converts an SWC object literal to an IR `Expr::StructInit`.
@@ -1041,6 +1060,82 @@ mod tests {
                     ),
                     ("w".to_string(), Expr::NumberLit(10.0)),
                 ],
+            }
+        );
+    }
+
+    // -- Ternary (conditional) expression tests --
+
+    #[test]
+    fn test_convert_expr_ternary_basic_identifiers() {
+        let swc_expr = parse_var_init("const x = flag ? a : b;");
+        let result = convert_expr(&swc_expr, &TypeRegistry::new(), None).unwrap();
+        assert_eq!(
+            result,
+            Expr::If {
+                condition: Box::new(Expr::Ident("flag".to_string())),
+                then_expr: Box::new(Expr::Ident("a".to_string())),
+                else_expr: Box::new(Expr::Ident("b".to_string())),
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_expr_ternary_with_comparison_condition() {
+        let swc_expr = parse_var_init("const x = a > 0 ? a : b;");
+        let result = convert_expr(&swc_expr, &TypeRegistry::new(), None).unwrap();
+        assert_eq!(
+            result,
+            Expr::If {
+                condition: Box::new(Expr::BinaryOp {
+                    left: Box::new(Expr::Ident("a".to_string())),
+                    op: ">".to_string(),
+                    right: Box::new(Expr::NumberLit(0.0)),
+                }),
+                then_expr: Box::new(Expr::Ident("a".to_string())),
+                else_expr: Box::new(Expr::Ident("b".to_string())),
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_expr_ternary_with_string_literals() {
+        let swc_expr = parse_var_init(r#"const x = flag ? "yes" : "no";"#);
+        let result = convert_expr(&swc_expr, &TypeRegistry::new(), None).unwrap();
+        assert_eq!(
+            result,
+            Expr::If {
+                condition: Box::new(Expr::Ident("flag".to_string())),
+                then_expr: Box::new(Expr::StringLit("yes".to_string())),
+                else_expr: Box::new(Expr::StringLit("no".to_string())),
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_expr_ternary_nested() {
+        // x > 0 ? "positive" : x < 0 ? "negative" : "zero"
+        let swc_expr =
+            parse_var_init(r#"const s = x > 0 ? "positive" : x < 0 ? "negative" : "zero";"#);
+        let result = convert_expr(&swc_expr, &TypeRegistry::new(), None).unwrap();
+        assert_eq!(
+            result,
+            Expr::If {
+                condition: Box::new(Expr::BinaryOp {
+                    left: Box::new(Expr::Ident("x".to_string())),
+                    op: ">".to_string(),
+                    right: Box::new(Expr::NumberLit(0.0)),
+                }),
+                then_expr: Box::new(Expr::StringLit("positive".to_string())),
+                else_expr: Box::new(Expr::If {
+                    condition: Box::new(Expr::BinaryOp {
+                        left: Box::new(Expr::Ident("x".to_string())),
+                        op: "<".to_string(),
+                        right: Box::new(Expr::NumberLit(0.0)),
+                    }),
+                    then_expr: Box::new(Expr::StringLit("negative".to_string())),
+                    else_expr: Box::new(Expr::StringLit("zero".to_string())),
+                }),
             }
         );
     }
