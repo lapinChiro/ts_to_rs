@@ -19,17 +19,27 @@ use crate::transformer::types::convert_ts_type;
 /// - Boolean literals → `Expr::BoolLit`
 /// - Template literals → `Expr::FormatMacro`
 /// - Binary expressions → `Expr::BinaryOp`
+/// - Object literals (with type hint) → `Expr::StructInit`
 ///
 /// # Errors
 ///
 /// Returns an error for unsupported expression types.
 pub fn convert_expr(expr: &ast::Expr) -> Result<Expr> {
+    convert_expr_with_type_hint(expr, None)
+}
+
+/// Converts an SWC [`ast::Expr`] into an IR [`Expr`], with an optional type hint.
+///
+/// The `type_hint` is used for object literals to determine the struct name.
+/// When a variable declaration has a type annotation (e.g., `const p: Point = { x: 1, y: 2 }`),
+/// the type name `"Point"` is passed as the hint.
+pub fn convert_expr_with_type_hint(expr: &ast::Expr, type_hint: Option<&str>) -> Result<Expr> {
     match expr {
         ast::Expr::Ident(ident) => Ok(Expr::Ident(ident.sym.to_string())),
         ast::Expr::Lit(lit) => convert_lit(lit),
         ast::Expr::Bin(bin) => convert_bin_expr(bin),
         ast::Expr::Tpl(tpl) => convert_template_literal(tpl),
-        ast::Expr::Paren(paren) => convert_expr(&paren.expr),
+        ast::Expr::Paren(paren) => convert_expr_with_type_hint(&paren.expr, type_hint),
         ast::Expr::Member(member) => convert_member_expr(member),
         ast::Expr::This(_) => Ok(Expr::Ident("self".to_string())),
         ast::Expr::Assign(assign) => convert_assign_expr(assign),
@@ -37,6 +47,7 @@ pub fn convert_expr(expr: &ast::Expr) -> Result<Expr> {
         ast::Expr::Call(call) => convert_call_expr(call),
         ast::Expr::New(new_expr) => convert_new_expr(new_expr),
         ast::Expr::Array(array_lit) => convert_array_lit(array_lit),
+        ast::Expr::Object(obj_lit) => convert_object_lit(obj_lit, type_hint),
         _ => Err(anyhow!("unsupported expression: {:?}", expr)),
     }
 }
@@ -239,6 +250,48 @@ fn convert_template_literal(tpl: &ast::Tpl) -> Result<Expr> {
     }
 
     Ok(Expr::FormatMacro { template, args })
+}
+
+/// Converts an SWC object literal to an IR `Expr::StructInit`.
+///
+/// Requires a type hint (struct name) from the enclosing context (e.g., a variable declaration's
+/// type annotation). Without a type hint, returns an error because Rust requires a named struct.
+///
+/// `{ x: 1, y: 2 }` with type hint `"Point"` → `Expr::StructInit { name: "Point", fields: [...] }`
+fn convert_object_lit(obj_lit: &ast::ObjectLit, type_hint: Option<&str>) -> Result<Expr> {
+    let struct_name = type_hint.ok_or_else(|| {
+        anyhow!("object literal requires a type annotation to determine struct name")
+    })?;
+
+    let mut fields = Vec::new();
+    for prop in &obj_lit.props {
+        match prop {
+            ast::PropOrSpread::Prop(prop) => match prop.as_ref() {
+                ast::Prop::KeyValue(kv) => {
+                    let key = match &kv.key {
+                        ast::PropName::Ident(ident) => ident.sym.to_string(),
+                        ast::PropName::Str(s) => s.value.to_string_lossy().into_owned(),
+                        _ => return Err(anyhow!("unsupported object literal key")),
+                    };
+                    let value = convert_expr(&kv.value)?;
+                    fields.push((key, value));
+                }
+                _ => {
+                    return Err(anyhow!(
+                        "unsupported object literal property (only key-value pairs)"
+                    ))
+                }
+            },
+            ast::PropOrSpread::Spread(_) => {
+                return Err(anyhow!("spread in object literal is not supported"));
+            }
+        }
+    }
+
+    Ok(Expr::StructInit {
+        name: struct_name.to_string(),
+        fields,
+    })
 }
 
 /// Converts an SWC array literal to an IR `Expr::Vec`.
@@ -628,6 +681,76 @@ mod tests {
                 elements: vec![Expr::NumberLit(42.0)],
             }
         );
+    }
+
+    // -- Object literal tests --
+
+    #[test]
+    fn test_convert_expr_object_literal_with_type_hint_basic() {
+        // { x: 1, y: 2 } with type hint "Point"
+        let swc_expr = parse_var_init("const p: Point = { x: 1, y: 2 };");
+        let result = convert_expr_with_type_hint(&swc_expr, Some("Point")).unwrap();
+        assert_eq!(
+            result,
+            Expr::StructInit {
+                name: "Point".to_string(),
+                fields: vec![
+                    ("x".to_string(), Expr::NumberLit(1.0)),
+                    ("y".to_string(), Expr::NumberLit(2.0)),
+                ],
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_expr_object_literal_mixed_field_types() {
+        let swc_expr =
+            parse_var_init(r#"const c: Config = { name: "foo", count: 42, active: true };"#);
+        let result = convert_expr_with_type_hint(&swc_expr, Some("Config")).unwrap();
+        assert_eq!(
+            result,
+            Expr::StructInit {
+                name: "Config".to_string(),
+                fields: vec![
+                    ("name".to_string(), Expr::StringLit("foo".to_string())),
+                    ("count".to_string(), Expr::NumberLit(42.0)),
+                    ("active".to_string(), Expr::BoolLit(true)),
+                ],
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_expr_object_literal_single_field() {
+        let swc_expr = parse_var_init("const w: Wrapper = { value: 10 };");
+        let result = convert_expr_with_type_hint(&swc_expr, Some("Wrapper")).unwrap();
+        assert_eq!(
+            result,
+            Expr::StructInit {
+                name: "Wrapper".to_string(),
+                fields: vec![("value".to_string(), Expr::NumberLit(10.0))],
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_expr_object_literal_empty() {
+        let swc_expr = parse_var_init("const e: Empty = {};");
+        let result = convert_expr_with_type_hint(&swc_expr, Some("Empty")).unwrap();
+        assert_eq!(
+            result,
+            Expr::StructInit {
+                name: "Empty".to_string(),
+                fields: vec![],
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_expr_object_literal_without_type_hint_errors() {
+        let swc_expr = parse_var_init("const obj = { x: 1 };");
+        let result = convert_expr(&swc_expr);
+        assert!(result.is_err());
     }
 
     #[test]

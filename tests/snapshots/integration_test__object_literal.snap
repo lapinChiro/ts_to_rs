@@ -1,0 +1,23 @@
+---
+source: tests/integration_test.rs
+expression: output
+---
+struct Point {
+    x: f64,
+    y: f64,
+}
+
+struct Config {
+    count: f64,
+    active: bool,
+}
+
+fn createPoint() -> Point {
+    let p: Point = Point { x: 1.0, y: 2.0 };
+    p
+}
+
+fn createConfig() -> Config {
+    let c: Config = Config { count: 0.0, active: true };
+    c
+}

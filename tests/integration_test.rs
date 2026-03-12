@@ -91,3 +91,10 @@ fn test_array_literal() {
     let output = transpile(&input).unwrap();
     insta::assert_snapshot!(output);
 }
+
+#[test]
+fn test_object_literal() {
+    let input = fs::read_to_string("tests/fixtures/object-literal.input.ts").unwrap();
+    let output = transpile(&input).unwrap();
+    insta::assert_snapshot!(output);
+}

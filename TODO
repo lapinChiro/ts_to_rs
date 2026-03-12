@@ -15,12 +15,17 @@
 - enum: computed member（`1 << 0` 等の式による値指定）
 - enum: 数値と文字列が混在する heterogeneous enum
 - enum メンバーへのアクセス式（`Color.Red` → `Color::Red`）の変換
+  - → [type-registry](backlog/type-registry.md) で対応予定
 - 配列: 文字列リテラル要素の `.to_string()` 付与
   - `vec!["alice", "bob"]` は `Vec<&str>` になるが、型注記が `Vec<String>` の場合 `.to_string()` が必要
-  - `Expr::StringLit` が常に `"..."` を生成する設計に起因する。文脈に応じて `"...".to_string()` を生成する仕組みが必要
+  - → [expected-type-propagation](backlog/expected-type-propagation.md) で対応予定
 - 配列: スプレッド構文（`[...arr, 4]`）
 - 配列: 分割代入（`const [a, b] = arr`）
 - 配列: 空配列の型推論（`[]` 単体で型が決まらないケース）
+- オブジェクトリテラル: 関数引数での型推論（`draw({ x: 0, y: 0 })` で関数定義のパラメータ型から構造体名を解決）
+  - → [type-registry](backlog/type-registry.md) で対応予定
+- オブジェクトリテラル: ネストしたオブジェクト（`{ origin: { x: 0, y: 0 } }` で内側のフィールド型を解決）
+  - → [type-registry](backlog/type-registry.md) で対応予定
 - オブジェクトリテラル: 型注記なし（`const obj = { x: 1 }`、匿名構造体 or HashMap への変換）
 - オブジェクトリテラル: shorthand property（`{ x }` = `{ x: x }`）
 - オブジェクトリテラル: computed property（`{ [key]: value }`）
@@ -67,6 +72,18 @@
   - `rustfmt` / 標準 `clippy` にはファイル行数制限の機能がない
   - clippy の lint プラグイン（`dylint` または `clippy::declare_lint!`）として実装し、閾値超過を警告として検出する
   - **保留理由**: clippy プラグインの開発コストが高い（proc-macro + rustc internal API）。まずは refactoring.md ルールによる運用で対応し、頻繁に閾値超過が発生するようになったら着手する
+
+## TypeRegistry の将来課題
+
+- 外部パッケージ（`node_modules`）の型定義解決
+  - TypeRegistry は同一プロジェクト内の `.ts` ファイルのみ対象。npm パッケージの `.d.ts` からの型情報取得は未対応
+  - **保留理由**: `.d.ts` のパース・型定義の構造が多様で設計コストが高い。実際のプロジェクト変換時にどの程度必要かを見てから判断
+- ジェネリック型の具体化（`Container<string>` のフィールド型を `String` に解決する等）
+  - **保留理由**: ジェネリクス自体の変換が未実装。ジェネリクス対応後に TypeRegistry の拡張として検討
+- re-export（`export { Foo } from "./bar"`）の追跡
+  - **保留理由**: import の基本解決を先に実装し、実際のプロジェクトで re-export がどの程度使われるかを見てから判断
+- 型の構造的一致による推論（TypeScript の structural typing のエミュレーション）
+  - **保留理由**: Rust は名前的型付けであり、構造的型付けのエミュレーションは本質的に困難。初版では対応しない
 
 ## 拡張性
 

@@ -5,8 +5,8 @@
 use anyhow::{anyhow, Result};
 use swc_ecma_ast as ast;
 
-use crate::ir::{Expr, Stmt};
-use crate::transformer::expressions::convert_expr;
+use crate::ir::{Expr, RustType, Stmt};
+use crate::transformer::expressions::{convert_expr, convert_expr_with_type_hint};
 use crate::transformer::types::convert_ts_type;
 
 /// Converts an SWC [`ast::Stmt`] into an IR [`Stmt`].
@@ -70,10 +70,11 @@ fn convert_var_decl(var_decl: &ast::VarDecl) -> Result<Stmt> {
         _ => None,
     };
 
+    let type_hint = extract_named_type_hint(&ty);
     let init = declarator
         .init
         .as_ref()
-        .map(|e| convert_expr(e))
+        .map(|e| convert_expr_with_type_hint(e, type_hint.as_deref()))
         .transpose()?;
 
     Ok(Stmt::Let {
@@ -282,6 +283,16 @@ pub fn convert_stmt_list(stmts: &[ast::Stmt]) -> Result<Vec<Stmt>> {
         }
     }
     Ok(result)
+}
+
+/// Extracts the type name from a `RustType::Named` for use as a type hint.
+///
+/// Returns `Some("Point")` for `RustType::Named { name: "Point", .. }`, `None` otherwise.
+fn extract_named_type_hint(ty: &Option<RustType>) -> Option<String> {
+    match ty {
+        Some(RustType::Named { name, .. }) => Some(name.clone()),
+        _ => None,
+    }
 }
 
 /// Converts a block statement or single statement into a `Vec<Stmt>`.
@@ -551,6 +562,32 @@ mod tests {
                     args: vec![],
                 }],
             }))
+        );
+    }
+
+    // -- Object literal in variable declaration tests --
+
+    #[test]
+    fn test_convert_stmt_var_decl_object_literal_with_type_annotation() {
+        let stmts = parse_fn_body("function f() { const p: Point = { x: 1, y: 2 }; }");
+        let result = convert_stmt(&stmts[0]).unwrap();
+        assert_eq!(
+            result,
+            Stmt::Let {
+                mutable: false,
+                name: "p".to_string(),
+                ty: Some(RustType::Named {
+                    name: "Point".to_string(),
+                    type_args: vec![],
+                }),
+                init: Some(Expr::StructInit {
+                    name: "Point".to_string(),
+                    fields: vec![
+                        ("x".to_string(), Expr::NumberLit(1.0)),
+                        ("y".to_string(), Expr::NumberLit(2.0)),
+                    ],
+                }),
+            }
         );
     }
 
