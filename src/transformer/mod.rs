@@ -9,9 +9,9 @@ pub mod statements;
 pub mod types;
 
 use anyhow::Result;
-use swc_ecma_ast::{Decl, Module, ModuleDecl, ModuleItem, Stmt};
+use swc_ecma_ast::{Decl, ImportSpecifier, Module, ModuleDecl, ModuleItem, Stmt};
 
-use crate::ir::Item;
+use crate::ir::{Item, Visibility};
 
 /// Transforms an SWC [`Module`] into a list of IR [`Item`]s.
 ///
@@ -28,13 +28,17 @@ pub fn transform_module(module: &Module) -> Result<Vec<Item>> {
     for module_item in &module.body {
         match module_item {
             ModuleItem::Stmt(Stmt::Decl(decl)) => {
-                if let Some(item) = transform_decl(decl)? {
+                if let Some(item) = transform_decl(decl, Visibility::Private)? {
                     items.push(item);
                 }
             }
             ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(export)) => {
-                if let Some(item) = transform_decl(&export.decl)? {
-                    // Export declarations keep Public visibility (already default)
+                if let Some(item) = transform_decl(&export.decl, Visibility::Public)? {
+                    items.push(item);
+                }
+            }
+            ModuleItem::ModuleDecl(ModuleDecl::Import(import_decl)) => {
+                if let Some(item) = transform_import(import_decl) {
                     items.push(item);
                 }
             }
@@ -47,21 +51,62 @@ pub fn transform_module(module: &Module) -> Result<Vec<Item>> {
     Ok(items)
 }
 
+/// Transforms an import declaration into an IR [`Item::Use`], if applicable.
+///
+/// Only relative path imports with named specifiers are converted.
+/// External package imports and non-named specifiers are skipped.
+fn transform_import(import_decl: &swc_ecma_ast::ImportDecl) -> Option<Item> {
+    let src = import_decl.src.value.to_string_lossy().into_owned();
+
+    // Only handle relative imports
+    if !src.starts_with("./") && !src.starts_with("../") {
+        return None;
+    }
+
+    // Collect named specifiers only
+    let names: Vec<String> = import_decl
+        .specifiers
+        .iter()
+        .filter_map(|spec| match spec {
+            ImportSpecifier::Named(named) => Some(named.local.sym.to_string()),
+            _ => None,
+        })
+        .collect();
+
+    if names.is_empty() {
+        return None;
+    }
+
+    let path = convert_relative_path_to_crate_path(&src);
+    Some(Item::Use { path, names })
+}
+
+/// Converts a relative TS import path to a Rust crate path.
+///
+/// Examples:
+/// - `./foo` → `crate::foo`
+/// - `./sub/bar` → `crate::sub::bar`
+fn convert_relative_path_to_crate_path(rel_path: &str) -> String {
+    let stripped = rel_path.strip_prefix("./").unwrap_or(rel_path);
+    let parts: Vec<&str> = stripped.split('/').collect();
+    format!("crate::{}", parts.join("::"))
+}
+
 /// Transforms a single declaration into an IR [`Item`], if supported.
 ///
 /// Returns `Ok(None)` for unsupported declarations (e.g., variable declarations).
-fn transform_decl(decl: &Decl) -> Result<Option<Item>> {
+fn transform_decl(decl: &Decl, vis: Visibility) -> Result<Option<Item>> {
     match decl {
         Decl::TsInterface(interface_decl) => {
-            let item = types::convert_interface(interface_decl)?;
+            let item = types::convert_interface(interface_decl, vis)?;
             Ok(Some(item))
         }
         Decl::TsTypeAlias(type_alias_decl) => {
-            let item = types::convert_type_alias(type_alias_decl)?;
+            let item = types::convert_type_alias(type_alias_decl, vis)?;
             Ok(Some(item))
         }
         Decl::Fn(fn_decl) => {
-            let item = functions::convert_fn_decl(fn_decl)?;
+            let item = functions::convert_fn_decl(fn_decl, vis)?;
             Ok(Some(item))
         }
         // Unsupported declarations are silently skipped for now
@@ -84,6 +129,89 @@ mod tests {
     }
 
     #[test]
+    fn test_transform_module_import_single() {
+        let source = r#"import { Foo } from "./bar";"#;
+        let module = parse_typescript(source).expect("parse failed");
+        let items = transform_module(&module).unwrap();
+
+        assert_eq!(items.len(), 1);
+        assert_eq!(
+            items[0],
+            Item::Use {
+                path: "crate::bar".to_string(),
+                names: vec!["Foo".to_string()],
+            }
+        );
+    }
+
+    #[test]
+    fn test_transform_module_import_multiple() {
+        let source = r#"import { A, B } from "./bar";"#;
+        let module = parse_typescript(source).expect("parse failed");
+        let items = transform_module(&module).unwrap();
+
+        assert_eq!(items.len(), 1);
+        assert_eq!(
+            items[0],
+            Item::Use {
+                path: "crate::bar".to_string(),
+                names: vec!["A".to_string(), "B".to_string()],
+            }
+        );
+    }
+
+    #[test]
+    fn test_transform_module_import_nested_path() {
+        let source = r#"import { Foo } from "./sub/bar";"#;
+        let module = parse_typescript(source).expect("parse failed");
+        let items = transform_module(&module).unwrap();
+
+        assert_eq!(items.len(), 1);
+        assert_eq!(
+            items[0],
+            Item::Use {
+                path: "crate::sub::bar".to_string(),
+                names: vec!["Foo".to_string()],
+            }
+        );
+    }
+
+    #[test]
+    fn test_transform_module_import_external_skipped() {
+        let source = r#"import { Foo } from "lodash";"#;
+        let module = parse_typescript(source).expect("parse failed");
+        let items = transform_module(&module).unwrap();
+
+        assert!(items.is_empty());
+    }
+
+    #[test]
+    fn test_transform_module_non_exported_is_private() {
+        let source = "interface Foo { name: string; }";
+        let module = parse_typescript(source).expect("parse failed");
+        let items = transform_module(&module).unwrap();
+
+        assert_eq!(items.len(), 1);
+        match &items[0] {
+            Item::Struct { vis, .. } => assert_eq!(*vis, Visibility::Private),
+            _ => panic!("expected Struct"),
+        }
+    }
+
+    #[test]
+    fn test_transform_module_exported_is_public() {
+        let source = "export interface Foo { name: string; }";
+        let module = parse_typescript(source).expect("parse failed");
+        let items = transform_module(&module).unwrap();
+
+        assert_eq!(items.len(), 1);
+        match &items[0] {
+            Item::Struct { vis, .. } => assert_eq!(*vis, Visibility::Public),
+            _ => panic!("expected Struct"),
+        }
+    }
+
+    #[test]
     fn test_transform_module_single_interface() {
         let source = "interface Foo { name: string; age: number; }";
         let module = parse_typescript(source).expect("parse failed");
@@ -93,7 +221,7 @@ mod tests {
         assert_eq!(
             items[0],
             Item::Struct {
-                vis: Visibility::Public,
+                vis: Visibility::Private,
                 name: "Foo".to_string(),
                 fields: vec![
                     StructField {
@@ -157,7 +285,7 @@ mod tests {
         assert_eq!(
             items[0],
             Item::Fn {
-                vis: Visibility::Public,
+                vis: Visibility::Private,
                 name: "add".to_string(),
                 params: vec![
                     Param {

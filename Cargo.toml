@@ -20,3 +20,4 @@ swc_ecma_parser = "35"
 
 [dev-dependencies]
 insta = "1"
+tempfile = "3"

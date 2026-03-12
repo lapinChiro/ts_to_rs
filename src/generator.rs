@@ -26,6 +26,13 @@ pub fn generate_type(ty: &RustType) -> String {
 /// Generates a single IR item as Rust source code.
 fn generate_item(item: &Item) -> String {
     match item {
+        Item::Use { path, names } => {
+            if names.len() == 1 {
+                format!("use {}::{};", path, names[0])
+            } else {
+                format!("use {}::{{{}}};", path, names.join(", "))
+            }
+        }
         Item::Struct { vis, name, fields } => {
             let vis_str = generate_vis(vis);
             let mut out = format!("{vis_str}struct {name} {{\n");
@@ -207,6 +214,26 @@ fn indent_str(level: usize) -> String {
 mod tests {
     use super::*;
     use crate::ir::{Expr, Item, Param, RustType, Stmt, StructField, Visibility};
+
+    // --- Item::Use tests ---
+
+    #[test]
+    fn test_generate_use_single() {
+        let item = Item::Use {
+            path: "crate::bar".to_string(),
+            names: vec!["Foo".to_string()],
+        };
+        assert_eq!(generate(&[item]), "use crate::bar::Foo;");
+    }
+
+    #[test]
+    fn test_generate_use_multiple() {
+        let item = Item::Use {
+            path: "crate::bar".to_string(),
+            names: vec!["A".to_string(), "B".to_string()],
+        };
+        assert_eq!(generate(&[item]), "use crate::bar::{A, B};");
+    }
 
     // --- RustType tests ---
 

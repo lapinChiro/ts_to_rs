@@ -113,7 +113,7 @@ fn convert_union_type(union: &swc_ecma_ast::TsUnionType) -> Result<RustType> {
 ///
 /// Returns an error if a property has an unsupported type or is not a
 /// property signature.
-pub fn convert_interface(decl: &TsInterfaceDecl) -> Result<Item> {
+pub fn convert_interface(decl: &TsInterfaceDecl, vis: Visibility) -> Result<Item> {
     let name = decl.id.sym.to_string();
     let mut fields = Vec::new();
 
@@ -131,11 +131,7 @@ pub fn convert_interface(decl: &TsInterfaceDecl) -> Result<Item> {
         }
     }
 
-    Ok(Item::Struct {
-        vis: Visibility::Public,
-        name,
-        fields,
-    })
+    Ok(Item::Struct { vis, name, fields })
 }
 
 /// Converts a [`TsTypeAliasDecl`] with an object type literal body into an IR [`Item::Struct`].
@@ -143,7 +139,7 @@ pub fn convert_interface(decl: &TsInterfaceDecl) -> Result<Item> {
 /// # Errors
 ///
 /// Returns an error if the type alias body is not an object type literal.
-pub fn convert_type_alias(decl: &TsTypeAliasDecl) -> Result<Item> {
+pub fn convert_type_alias(decl: &TsTypeAliasDecl, vis: Visibility) -> Result<Item> {
     let name = decl.id.sym.to_string();
 
     match decl.type_ann.as_ref() {
@@ -162,11 +158,7 @@ pub fn convert_type_alias(decl: &TsTypeAliasDecl) -> Result<Item> {
                     }
                 }
             }
-            Ok(Item::Struct {
-                vis: Visibility::Public,
-                name,
-                fields,
-            })
+            Ok(Item::Struct { vis, name, fields })
         }
         _ => Err(anyhow!(
             "unsupported type alias body (only object type literals are supported)"
@@ -310,7 +302,7 @@ mod tests {
     #[test]
     fn test_convert_interface_basic() {
         let decl = parse_interface("interface Foo { name: string; age: number; }");
-        let item = convert_interface(&decl).unwrap();
+        let item = convert_interface(&decl, Visibility::Public).unwrap();
 
         match item {
             Item::Struct { vis, name, fields } => {
@@ -329,7 +321,7 @@ mod tests {
     #[test]
     fn test_convert_interface_optional_field() {
         let decl = parse_interface("interface Bar { label?: string; }");
-        let item = convert_interface(&decl).unwrap();
+        let item = convert_interface(&decl, Visibility::Public).unwrap();
 
         match item {
             Item::Struct { fields, .. } => {
@@ -344,7 +336,7 @@ mod tests {
     fn test_convert_interface_optional_union_null_no_double_wrap() {
         // `name?: string | null` should be `Option<String>`, not `Option<Option<String>>`
         let decl = parse_interface("interface Baz { name?: string | null; }");
-        let item = convert_interface(&decl).unwrap();
+        let item = convert_interface(&decl, Visibility::Public).unwrap();
 
         match item {
             Item::Struct { fields, .. } => {
@@ -357,7 +349,7 @@ mod tests {
     #[test]
     fn test_convert_interface_vec_field() {
         let decl = parse_interface("interface Qux { items: number[]; }");
-        let item = convert_interface(&decl).unwrap();
+        let item = convert_interface(&decl, Visibility::Public).unwrap();
 
         match item {
             Item::Struct { fields, .. } => {
@@ -372,7 +364,7 @@ mod tests {
     #[test]
     fn test_convert_type_alias_object_literal() {
         let decl = parse_type_alias("type Point = { x: number; y: number; };");
-        let item = convert_type_alias(&decl).unwrap();
+        let item = convert_type_alias(&decl, Visibility::Public).unwrap();
 
         match item {
             Item::Struct { name, fields, .. } => {
@@ -390,7 +382,7 @@ mod tests {
     #[test]
     fn test_convert_type_alias_non_object_returns_error() {
         let decl = parse_type_alias("type Name = string;");
-        let result = convert_type_alias(&decl);
+        let result = convert_type_alias(&decl, Visibility::Public);
         assert!(result.is_err());
     }
 }

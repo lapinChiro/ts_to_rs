@@ -2,10 +2,10 @@
 source: tests/integration_test.rs
 expression: output
 ---
-pub fn add(a: f64, b: f64) -> f64 {
+fn add(a: f64, b: f64) -> f64 {
     a + b
 }
 
-pub fn isPositive(n: f64) -> bool {
+fn isPositive(n: f64) -> bool {
     n > 0.0
 }

@@ -3,6 +3,7 @@
 //! This library provides the core transformation pipeline:
 //! TypeScript source → SWC AST → IR → Rust source.
 
+pub mod directory;
 pub mod generator;
 pub mod ir;
 pub mod parser;

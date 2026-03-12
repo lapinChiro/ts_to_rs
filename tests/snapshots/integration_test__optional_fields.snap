@@ -2,9 +2,9 @@
 source: tests/integration_test.rs
 expression: output
 ---
-pub struct Config {
-    pub host: String,
-    pub port: f64,
-    pub debug: Option<bool>,
-    pub label: Option<String>,
+struct Config {
+    host: String,
+    port: f64,
+    debug: Option<bool>,
+    label: Option<String>,
 }

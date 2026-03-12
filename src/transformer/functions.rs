@@ -18,7 +18,7 @@ use crate::transformer::types::convert_ts_type;
 ///
 /// Returns an error if parameter patterns are unsupported, type annotations
 /// are missing, or body statements fail to convert.
-pub fn convert_fn_decl(fn_decl: &ast::FnDecl) -> Result<Item> {
+pub fn convert_fn_decl(fn_decl: &ast::FnDecl, vis: Visibility) -> Result<Item> {
     let name = fn_decl.ident.sym.to_string();
 
     let mut params = Vec::new();
@@ -46,7 +46,7 @@ pub fn convert_fn_decl(fn_decl: &ast::FnDecl) -> Result<Item> {
     };
 
     Ok(Item::Fn {
-        vis: Visibility::Public,
+        vis,
         name,
         params,
         return_type,
@@ -92,7 +92,7 @@ mod tests {
     #[test]
     fn test_convert_fn_decl_add() {
         let fn_decl = parse_fn_decl("function add(a: number, b: number): number { return a + b; }");
-        let item = convert_fn_decl(&fn_decl).unwrap();
+        let item = convert_fn_decl(&fn_decl, Visibility::Public).unwrap();
         assert_eq!(
             item,
             Item::Fn {
@@ -121,7 +121,7 @@ mod tests {
     #[test]
     fn test_convert_fn_decl_no_return_type() {
         let fn_decl = parse_fn_decl("function greet(name: string) { return name; }");
-        let item = convert_fn_decl(&fn_decl).unwrap();
+        let item = convert_fn_decl(&fn_decl, Visibility::Public).unwrap();
         match item {
             Item::Fn {
                 name, return_type, ..
@@ -136,7 +136,7 @@ mod tests {
     #[test]
     fn test_convert_fn_decl_no_params() {
         let fn_decl = parse_fn_decl("function noop(): boolean { return true; }");
-        let item = convert_fn_decl(&fn_decl).unwrap();
+        let item = convert_fn_decl(&fn_decl, Visibility::Public).unwrap();
         match item {
             Item::Fn { params, body, .. } => {
                 assert!(params.is_empty());
@@ -151,7 +151,7 @@ mod tests {
         let fn_decl = parse_fn_decl(
             "function calc(x: number): number { const result = x + 1; return result; }",
         );
-        let item = convert_fn_decl(&fn_decl).unwrap();
+        let item = convert_fn_decl(&fn_decl, Visibility::Public).unwrap();
         match item {
             Item::Fn { body, .. } => {
                 assert_eq!(body.len(), 2);
@@ -177,7 +177,7 @@ mod tests {
     #[test]
     fn test_convert_fn_decl_missing_param_type_annotation() {
         let fn_decl = parse_fn_decl("function bad(x) { return x; }");
-        let result = convert_fn_decl(&fn_decl);
+        let result = convert_fn_decl(&fn_decl, Visibility::Public);
         assert!(result.is_err());
     }
 }

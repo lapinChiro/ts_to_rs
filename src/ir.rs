@@ -50,6 +50,13 @@ pub struct Param {
 /// Top-level item in a Rust file or module.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Item {
+    /// A `use` statement: `use path::{names};`
+    Use {
+        /// Module path (e.g., `crate::bar`)
+        path: String,
+        /// Imported names (e.g., `["Foo", "Bar"]`)
+        names: Vec<String>,
+    },
     /// A `struct` with named fields.
     Struct {
         /// Visibility

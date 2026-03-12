@@ -1,0 +1,89 @@
+use std::fs;
+use std::process::Command;
+
+use tempfile::TempDir;
+use ts_to_rs::transpile;
+
+/// Strips `use` statements from generated Rust code for single-file compilation.
+///
+/// Cross-module imports cannot be resolved when compiling a single file in isolation.
+/// The `use` statement generation is tested separately via snapshot tests.
+fn strip_use_statements(rs_source: &str) -> String {
+    rs_source
+        .lines()
+        .filter(|line| !line.starts_with("use "))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Compiles the given Rust source code with `rustc` and returns the result.
+///
+/// Uses `--edition 2021 --crate-type lib` to compile without requiring a `main` function.
+/// `use` statements are stripped since cross-module references cannot be resolved
+/// in single-file compilation.
+fn assert_compiles(rs_source: &str, fixture_name: &str) {
+    let tmp_dir = TempDir::new().expect("failed to create temp dir");
+    let compilable_source = strip_use_statements(rs_source);
+    let rs_path = tmp_dir.path().join(format!("{fixture_name}.rs"));
+    fs::write(&rs_path, compilable_source).expect("failed to write temp file");
+
+    // Use a sanitized crate name (replace non-alphanumeric chars with '_')
+    let crate_name: String = fixture_name
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { '_' })
+        .collect();
+
+    let output = Command::new("rustc")
+        .args(["--edition", "2021", "--crate-type", "lib", "--crate-name"])
+        .arg(&crate_name)
+        .arg(&rs_path)
+        .arg("-o")
+        .arg(tmp_dir.path().join("out.rlib"))
+        .output()
+        .expect("failed to execute rustc");
+
+    assert!(
+        output.status.success(),
+        "rustc failed for fixture '{fixture_name}':\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn test_all_fixtures_compile() {
+    let fixture_dir = "tests/fixtures";
+    let mut fixture_count = 0;
+
+    let mut entries: Vec<_> = fs::read_dir(fixture_dir)
+        .expect("failed to read fixtures directory")
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            e.path()
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.ends_with(".input.ts"))
+        })
+        .collect();
+    entries.sort_by_key(|e| e.path());
+
+    for entry in entries {
+        let path = entry.path();
+        let fixture_name = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .expect("invalid fixture filename");
+
+        let ts_source = fs::read_to_string(&path)
+            .unwrap_or_else(|_| panic!("failed to read fixture: {}", path.display()));
+        let rs_source = transpile(&ts_source)
+            .unwrap_or_else(|_| panic!("failed to transpile fixture: {}", path.display()));
+
+        assert_compiles(&rs_source, fixture_name);
+        fixture_count += 1;
+    }
+
+    assert!(
+        fixture_count > 0,
+        "no fixtures found in {fixture_dir} — test is vacuously passing"
+    );
+}

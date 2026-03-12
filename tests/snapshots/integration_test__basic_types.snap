@@ -2,8 +2,8 @@
 source: tests/integration_test.rs
 expression: output
 ---
-pub struct User {
-    pub name: String,
-    pub age: f64,
-    pub active: bool,
+struct User {
+    name: String,
+    age: f64,
+    active: bool,
 }
