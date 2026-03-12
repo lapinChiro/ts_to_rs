@@ -1,0 +1,21 @@
+---
+source: tests/integration_test.rs
+expression: output
+---
+pub fn validateAge(age: f64) -> Result<String, String> {
+    if age < 0.0 {
+        return Err("age must be non-negative".to_string());
+    }
+    Ok("valid".to_string())
+}
+
+fn riskyOperation() -> Result<f64, String> {
+    Err("not implemented".to_string())
+}
+
+pub fn safeDivide(a: f64, b: f64) -> Result<f64, String> {
+    if b == 0.0 {
+        return Err("division by zero".to_string());
+    }
+    Ok(a / b)
+}

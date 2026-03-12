@@ -34,6 +34,8 @@ pub fn convert_expr(expr: &ast::Expr) -> Result<Expr> {
         ast::Expr::This(_) => Ok(Expr::Ident("self".to_string())),
         ast::Expr::Assign(assign) => convert_assign_expr(assign),
         ast::Expr::Arrow(arrow) => convert_arrow_expr(arrow),
+        ast::Expr::Call(call) => convert_call_expr(call),
+        ast::Expr::New(new_expr) => convert_new_expr(new_expr),
         _ => Err(anyhow!("unsupported expression: {:?}", expr)),
     }
 }
@@ -162,6 +164,60 @@ fn convert_arrow_expr(arrow: &ast::ArrowExpr) -> Result<Expr> {
         return_type,
         body,
     })
+}
+
+/// Converts a function/method call expression.
+///
+/// - `foo(x, y)` → `Expr::FnCall { name: "foo", args }`
+/// - `obj.method(x)` → `Expr::MethodCall { object, method, args }`
+fn convert_call_expr(call: &ast::CallExpr) -> Result<Expr> {
+    let args = convert_call_args(&call.args)?;
+
+    match call.callee {
+        ast::Callee::Expr(ref callee) => match callee.as_ref() {
+            ast::Expr::Ident(ident) => Ok(Expr::FnCall {
+                name: ident.sym.to_string(),
+                args,
+            }),
+            ast::Expr::Member(member) => {
+                let object = convert_expr(&member.obj)?;
+                let method = match &member.prop {
+                    ast::MemberProp::Ident(ident) => ident.sym.to_string(),
+                    _ => return Err(anyhow!("unsupported call target member property")),
+                };
+                Ok(Expr::MethodCall {
+                    object: Box::new(object),
+                    method,
+                    args,
+                })
+            }
+            _ => Err(anyhow!("unsupported call target expression")),
+        },
+        _ => Err(anyhow!("unsupported callee type")),
+    }
+}
+
+/// Converts a `new` expression to a `ClassName::new(args)` call.
+///
+/// `new Foo(x, y)` → `Expr::FnCall { name: "Foo::new", args }`
+fn convert_new_expr(new_expr: &ast::NewExpr) -> Result<Expr> {
+    let class_name = match new_expr.callee.as_ref() {
+        ast::Expr::Ident(ident) => ident.sym.to_string(),
+        _ => return Err(anyhow!("unsupported new expression target")),
+    };
+    let args = match &new_expr.args {
+        Some(args) => convert_call_args(args)?,
+        None => vec![],
+    };
+    Ok(Expr::FnCall {
+        name: format!("{class_name}::new"),
+        args,
+    })
+}
+
+/// Converts call arguments from SWC `ExprOrSpread` to IR `Expr`.
+fn convert_call_args(args: &[ast::ExprOrSpread]) -> Result<Vec<Expr>> {
+    args.iter().map(|arg| convert_expr(&arg.expr)).collect()
 }
 
 /// Converts a template literal to `Expr::FormatMacro`.
@@ -381,6 +437,122 @@ mod tests {
             }
             _ => panic!("expected Expr::Closure"),
         }
+    }
+
+    // -- Function call tests --
+
+    #[test]
+    fn test_convert_expr_call_simple() {
+        let swc_expr = parse_expr("foo(x, y);");
+        let result = convert_expr(&swc_expr).unwrap();
+        assert_eq!(
+            result,
+            Expr::FnCall {
+                name: "foo".to_string(),
+                args: vec![Expr::Ident("x".to_string()), Expr::Ident("y".to_string()),],
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_expr_call_no_args() {
+        let swc_expr = parse_expr("foo();");
+        let result = convert_expr(&swc_expr).unwrap();
+        assert_eq!(
+            result,
+            Expr::FnCall {
+                name: "foo".to_string(),
+                args: vec![],
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_expr_call_nested() {
+        let swc_expr = parse_expr("foo(bar(x));");
+        let result = convert_expr(&swc_expr).unwrap();
+        assert_eq!(
+            result,
+            Expr::FnCall {
+                name: "foo".to_string(),
+                args: vec![Expr::FnCall {
+                    name: "bar".to_string(),
+                    args: vec![Expr::Ident("x".to_string())],
+                }],
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_expr_method_call() {
+        let swc_expr = parse_expr("obj.method(x);");
+        let result = convert_expr(&swc_expr).unwrap();
+        assert_eq!(
+            result,
+            Expr::MethodCall {
+                object: Box::new(Expr::Ident("obj".to_string())),
+                method: "method".to_string(),
+                args: vec![Expr::Ident("x".to_string())],
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_expr_method_call_this() {
+        let swc_expr = parse_expr("this.doSomething(x);");
+        let result = convert_expr(&swc_expr).unwrap();
+        assert_eq!(
+            result,
+            Expr::MethodCall {
+                object: Box::new(Expr::Ident("self".to_string())),
+                method: "doSomething".to_string(),
+                args: vec![Expr::Ident("x".to_string())],
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_expr_method_chain() {
+        let swc_expr = parse_expr("a.b().c();");
+        let result = convert_expr(&swc_expr).unwrap();
+        assert_eq!(
+            result,
+            Expr::MethodCall {
+                object: Box::new(Expr::MethodCall {
+                    object: Box::new(Expr::Ident("a".to_string())),
+                    method: "b".to_string(),
+                    args: vec![],
+                }),
+                method: "c".to_string(),
+                args: vec![],
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_expr_new() {
+        let swc_expr = parse_expr("new Foo(x, y);");
+        let result = convert_expr(&swc_expr).unwrap();
+        assert_eq!(
+            result,
+            Expr::FnCall {
+                name: "Foo::new".to_string(),
+                args: vec![Expr::Ident("x".to_string()), Expr::Ident("y".to_string()),],
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_expr_new_no_args() {
+        let swc_expr = parse_expr("new Foo();");
+        let result = convert_expr(&swc_expr).unwrap();
+        assert_eq!(
+            result,
+            Expr::FnCall {
+                name: "Foo::new".to_string(),
+                args: vec![],
+            }
+        );
     }
 
     #[test]

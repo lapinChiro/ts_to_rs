@@ -19,6 +19,9 @@ pub fn generate_type(ty: &RustType) -> String {
         RustType::Bool => "bool".to_string(),
         RustType::Option(inner) => format!("Option<{}>", generate_type(inner)),
         RustType::Vec(inner) => format!("Vec<{}>", generate_type(inner)),
+        RustType::Result { ok, err } => {
+            format!("Result<{}, {}>", generate_type(ok), generate_type(err))
+        }
         RustType::Fn {
             params,
             return_type,
@@ -323,6 +326,14 @@ fn generate_expr(expr: &Expr) -> String {
                 format!("{name} {{ {fields_str} }}")
             }
         }
+        Expr::FnCall { name, args } => {
+            let args_str = args
+                .iter()
+                .map(generate_expr)
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("{name}({args_str})")
+        }
         Expr::Closure {
             params,
             return_type,
@@ -465,6 +476,45 @@ mod tests {
             return_type: Box::new(RustType::F64),
         };
         assert_eq!(generate_type(&ty), "Box<dyn Fn() -> f64>");
+    }
+
+    #[test]
+    fn test_generate_type_result() {
+        let ty = RustType::Result {
+            ok: Box::new(RustType::String),
+            err: Box::new(RustType::String),
+        };
+        assert_eq!(generate_type(&ty), "Result<String, String>");
+    }
+
+    #[test]
+    fn test_generate_type_result_unit_ok() {
+        let ty = RustType::Result {
+            ok: Box::new(RustType::Named {
+                name: "()".to_string(),
+                type_args: vec![],
+            }),
+            err: Box::new(RustType::String),
+        };
+        assert_eq!(generate_type(&ty), "Result<(), String>");
+    }
+
+    #[test]
+    fn test_generate_expr_fn_call_err() {
+        let expr = Expr::FnCall {
+            name: "Err".to_string(),
+            args: vec![Expr::StringLit("error".to_string())],
+        };
+        assert_eq!(generate_expr(&expr), "Err(\"error\")");
+    }
+
+    #[test]
+    fn test_generate_expr_fn_call_ok() {
+        let expr = Expr::FnCall {
+            name: "Ok".to_string(),
+            args: vec![Expr::NumberLit(42.0)],
+        };
+        assert_eq!(generate_expr(&expr), "Ok(42.0)");
     }
 
     #[test]

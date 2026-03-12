@@ -6,10 +6,33 @@
 
 - async/await → tokio 変換
   - **保留理由**: 生成コードに tokio 依存を入れるか、生成先の `Cargo.toml` をどう管理するかの設計判断が未決定。plan.md の判断保留事項 #3（エラー表現）とも関連する
-- エラーハンドリング（try/catch → Result）
-  - **保留理由**: plan.md の判断保留事項 #3「`throw` → `panic!` か `Result` か」が未決定。方針決定後に PRD 化する
 - 所有権推論（clone 削減）
   - **保留理由**: plan.md の判断保留事項 #4。変換の基本機能が十分に揃い、実際の TS プロジェクトで試した後に取り組むべき最適化。現時点では判断材料が不足
+
+## 未対応の TS 構文
+
+- ループ（`for`, `while`, `for...of`）
+- enum 変換（TS `enum` → Rust `enum`。IR には既に enum サポートあり）
+- 配列リテラル（`[1, 2, 3]`）
+- オブジェクトリテラル（`{ x: 1, y: 2 }`）
+- 三項演算子（`condition ? a : b`）
+- クラス継承（`extends`）
+
+## 関数呼び出しの将来課題
+
+- `console.log(x)` → `println!("{:?}", x)` 等の組み込み API の特殊変換
+  - `console.log` / `console.error` / `console.warn` は TS コードで頻出する
+  - Rust には対応する `println!` / `eprintln!` マクロがあるが、引数のフォーマットが異なる
+  - TS: `console.log("value:", x)` → Rust: `println!("value: {:?}", x)` のような変換が必要
+  - 複数引数の場合の `format!` 組み立て、オブジェクトの Debug 表示（`{:?}`）等、考慮事項が多い
+  - 他の組み込み API（`Math.floor()` → `f64::floor()`, `Array.prototype.map` → `.iter().map()` 等）も同様に個別対応が必要
+  - まずは 1:1 の素朴な変換を完成させ、実際の変換結果を見てから優先度を判断する
+
+## エラーハンドリングの将来課題
+
+- `anyhow::Error` や独自エラー型への対応（現在は `String` 固定）
+- `finally` ブロックの変換
+- ネストした try/catch の変換
 
 ## 開発基盤
 

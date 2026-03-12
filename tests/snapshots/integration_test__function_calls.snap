@@ -1,0 +1,16 @@
+---
+source: tests/integration_test.rs
+expression: output
+---
+fn square(n: f64) -> f64 {
+    n * n
+}
+
+fn sumOfSquares(a: f64, b: f64) -> f64 {
+    square(a) + square(b)
+}
+
+pub fn main() -> f64 {
+    let result = sumOfSquares(3.0, 4.0);
+    result
+}

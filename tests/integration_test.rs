@@ -51,6 +51,20 @@ fn test_generics() {
 }
 
 #[test]
+fn test_function_calls() {
+    let input = fs::read_to_string("tests/fixtures/function_calls.input.ts").unwrap();
+    let output = transpile(&input).unwrap();
+    insta::assert_snapshot!(output);
+}
+
+#[test]
+fn test_error_handling() {
+    let input = fs::read_to_string("tests/fixtures/error_handling.input.ts").unwrap();
+    let output = transpile(&input).unwrap();
+    insta::assert_snapshot!(output);
+}
+
+#[test]
 fn test_mixed() {
     let input = fs::read_to_string("tests/fixtures/mixed.input.ts").unwrap();
     let output = transpile(&input).unwrap();

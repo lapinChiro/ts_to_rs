@@ -34,6 +34,11 @@ ts-to-rs input.ts -o output.rs
 | `class` | `struct` + `impl` |
 | アロー関数 (`(x) => x + 1`) | クロージャ (`\|x\| x + 1`) / `fn` |
 | 関数型 (`(x: number) => number`) | `Box<dyn Fn(f64) -> f64>` |
+| `foo(x, y)` | `foo(x, y)` |
+| `obj.method(x)` | `obj.method(x)` |
+| `new Foo(x)` | `Foo::new(x)` |
+| `throw new Error("msg")` | `return Err("msg".to_string())` |
+| `try { ... } catch (e) { ... }` | try ブロック本体を展開 |
 | `export` | `pub` |
 
 ## 例

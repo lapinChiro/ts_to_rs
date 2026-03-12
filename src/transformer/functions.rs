@@ -5,8 +5,8 @@
 use anyhow::{anyhow, Result};
 use swc_ecma_ast as ast;
 
-use crate::ir::{Item, Param, Visibility};
-use crate::transformer::statements::convert_stmt;
+use crate::ir::{Expr, Item, Param, RustType, Stmt, Visibility};
+use crate::transformer::statements::convert_stmt_list;
 use crate::transformer::types::{convert_ts_type, extract_type_params};
 
 /// Converts an SWC [`ast::FnDecl`] into an IR [`Item::Fn`].
@@ -35,17 +35,33 @@ pub fn convert_fn_decl(fn_decl: &ast::FnDecl, vis: Visibility) -> Result<Item> {
         .transpose()?;
 
     let body = match &fn_decl.function.body {
-        Some(block) => {
-            let mut stmts = Vec::new();
-            for stmt in &block.stmts {
-                stmts.push(convert_stmt(stmt)?);
-            }
-            stmts
-        }
+        Some(block) => convert_stmt_list(&block.stmts)?,
         None => Vec::new(),
     };
 
     let type_params = extract_type_params(fn_decl.function.type_params.as_deref());
+
+    // If the function body contains `throw`, wrap return type in Result and returns in Ok()
+    let has_throw = fn_decl
+        .function
+        .body
+        .as_ref()
+        .is_some_and(|block| contains_throw(&block.stmts));
+
+    let (return_type, body) = if has_throw {
+        let ok_type = return_type.unwrap_or_else(|| RustType::Named {
+            name: "()".to_string(),
+            type_args: vec![],
+        });
+        let result_type = RustType::Result {
+            ok: Box::new(ok_type),
+            err: Box::new(RustType::String),
+        };
+        let wrapped_body = wrap_returns_in_ok(body);
+        (Some(result_type), wrapped_body)
+    } else {
+        (return_type, body)
+    };
 
     Ok(Item::Fn {
         vis,
@@ -73,6 +89,83 @@ fn convert_param(pat: &ast::Pat) -> Result<Param> {
             })
         }
         _ => Err(anyhow!("unsupported parameter pattern")),
+    }
+}
+
+/// Checks whether a list of SWC statements contains a `throw` statement (shallow scan).
+fn contains_throw(stmts: &[ast::Stmt]) -> bool {
+    stmts.iter().any(|stmt| match stmt {
+        ast::Stmt::Throw(_) => true,
+        ast::Stmt::If(if_stmt) => {
+            let then_has = match if_stmt.cons.as_ref() {
+                ast::Stmt::Block(block) => contains_throw(&block.stmts),
+                ast::Stmt::Throw(_) => true,
+                _ => false,
+            };
+            let else_has = if_stmt.alt.as_ref().is_some_and(|alt| match alt.as_ref() {
+                ast::Stmt::Block(block) => contains_throw(&block.stmts),
+                ast::Stmt::Throw(_) => true,
+                _ => false,
+            });
+            then_has || else_has
+        }
+        ast::Stmt::Block(block) => contains_throw(&block.stmts),
+        _ => false,
+    })
+}
+
+/// Wraps `return expr` statements in `Ok(expr)` for functions that use `Result`.
+///
+/// `throw` statements are already converted to `return Err(...)` by `convert_stmt`,
+/// so only non-Err returns need wrapping.
+fn wrap_returns_in_ok(stmts: Vec<Stmt>) -> Vec<Stmt> {
+    stmts.into_iter().map(wrap_stmt_return).collect()
+}
+
+/// Recursively wraps return expressions in `Ok(...)`.
+fn wrap_stmt_return(stmt: Stmt) -> Stmt {
+    match stmt {
+        Stmt::Return(Some(expr)) => {
+            // Don't wrap if already an Err(...) call
+            if matches!(&expr, Expr::FnCall { name, .. } if name == "Err") {
+                Stmt::Return(Some(expr))
+            } else {
+                // String literals need .to_string() to convert &str to String
+                let wrapped_expr = ensure_owned_string(expr);
+                Stmt::Return(Some(Expr::FnCall {
+                    name: "Ok".to_string(),
+                    args: vec![wrapped_expr],
+                }))
+            }
+        }
+        Stmt::Return(None) => Stmt::Return(Some(Expr::FnCall {
+            name: "Ok".to_string(),
+            args: vec![Expr::Ident("()".to_string())],
+        })),
+        Stmt::If {
+            condition,
+            then_body,
+            else_body,
+        } => Stmt::If {
+            condition,
+            then_body: wrap_returns_in_ok(then_body),
+            else_body: else_body.map(wrap_returns_in_ok),
+        },
+        other => other,
+    }
+}
+
+/// Wraps a `StringLit` expression in `.to_string()` to ensure it produces an owned `String`.
+///
+/// Other expression types are returned as-is.
+fn ensure_owned_string(expr: Expr) -> Expr {
+    match expr {
+        Expr::StringLit(_) => Expr::MethodCall {
+            object: Box::new(expr),
+            method: "to_string".to_string(),
+            args: vec![],
+        },
+        other => other,
     }
 }
 
@@ -197,6 +290,71 @@ mod tests {
         match item {
             Item::Fn { type_params, .. } => {
                 assert_eq!(type_params, vec!["A".to_string(), "B".to_string()]);
+            }
+            _ => panic!("expected Item::Fn"),
+        }
+    }
+
+    #[test]
+    fn test_convert_fn_decl_throw_wraps_return_type_in_result() {
+        let fn_decl =
+            parse_fn_decl("function validate(x: number): string { if (x < 0) { throw new Error(\"negative\"); } return \"ok\"; }");
+        let item = convert_fn_decl(&fn_decl, Visibility::Public).unwrap();
+        match item {
+            Item::Fn { return_type, .. } => {
+                assert_eq!(
+                    return_type,
+                    Some(RustType::Result {
+                        ok: Box::new(RustType::String),
+                        err: Box::new(RustType::String),
+                    })
+                );
+            }
+            _ => panic!("expected Item::Fn"),
+        }
+    }
+
+    #[test]
+    fn test_convert_fn_decl_throw_wraps_return_in_ok() {
+        let fn_decl =
+            parse_fn_decl("function validate(x: number): string { if (x < 0) { throw new Error(\"negative\"); } return \"ok\"; }");
+        let item = convert_fn_decl(&fn_decl, Visibility::Public).unwrap();
+        match item {
+            Item::Fn { body, .. } => {
+                // The last statement should be return Ok("ok".to_string())
+                let last = body.last().unwrap();
+                assert_eq!(
+                    *last,
+                    Stmt::Return(Some(Expr::FnCall {
+                        name: "Ok".to_string(),
+                        args: vec![Expr::MethodCall {
+                            object: Box::new(Expr::StringLit("ok".to_string())),
+                            method: "to_string".to_string(),
+                            args: vec![],
+                        }],
+                    }))
+                );
+            }
+            _ => panic!("expected Item::Fn"),
+        }
+    }
+
+    #[test]
+    fn test_convert_fn_decl_throw_no_return_type_becomes_result_unit() {
+        let fn_decl = parse_fn_decl("function fail() { throw new Error(\"boom\"); }");
+        let item = convert_fn_decl(&fn_decl, Visibility::Public).unwrap();
+        match item {
+            Item::Fn { return_type, .. } => {
+                assert_eq!(
+                    return_type,
+                    Some(RustType::Result {
+                        ok: Box::new(RustType::Named {
+                            name: "()".to_string(),
+                            type_args: vec![],
+                        }),
+                        err: Box::new(RustType::String),
+                    })
+                );
             }
             _ => panic!("expected Item::Fn"),
         }

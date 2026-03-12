@@ -23,6 +23,13 @@ pub enum RustType {
         /// Return type
         return_type: Box<RustType>,
     },
+    /// `Result<T, E>`
+    Result {
+        /// Ok type
+        ok: Box<RustType>,
+        /// Err type
+        err: Box<RustType>,
+    },
     /// A user-defined named type, optionally with generic type arguments (e.g., `Point`, `Box<T>`)
     Named {
         /// Type name
@@ -215,6 +222,13 @@ pub enum Expr {
         op: String,
         /// Right operand
         right: Box<Expr>,
+    },
+    /// A function call: `name(args)` (e.g., `Ok(x)`, `Err("msg".to_string())`)
+    FnCall {
+        /// Function name
+        name: String,
+        /// Arguments
+        args: Vec<Expr>,
     },
     /// A closure: `|params| body` or `|params| { body }`
     Closure {
@@ -420,6 +434,51 @@ mod tests {
                 assert_eq!(args.len(), 1);
             }
             _ => panic!("expected FormatMacro"),
+        }
+    }
+
+    #[test]
+    fn test_rust_type_result() {
+        let ty = RustType::Result {
+            ok: Box::new(RustType::String),
+            err: Box::new(RustType::String),
+        };
+        match ty {
+            RustType::Result { ok, err } => {
+                assert_eq!(*ok, RustType::String);
+                assert_eq!(*err, RustType::String);
+            }
+            _ => panic!("expected Result"),
+        }
+    }
+
+    #[test]
+    fn test_expr_fn_call_err() {
+        let expr = Expr::FnCall {
+            name: "Err".to_string(),
+            args: vec![Expr::StringLit("something went wrong".to_string())],
+        };
+        match expr {
+            Expr::FnCall { name, args } => {
+                assert_eq!(name, "Err");
+                assert_eq!(args.len(), 1);
+            }
+            _ => panic!("expected FnCall"),
+        }
+    }
+
+    #[test]
+    fn test_expr_fn_call_ok() {
+        let expr = Expr::FnCall {
+            name: "Ok".to_string(),
+            args: vec![Expr::NumberLit(42.0)],
+        };
+        match expr {
+            Expr::FnCall { name, args } => {
+                assert_eq!(name, "Ok");
+                assert_eq!(args.len(), 1);
+            }
+            _ => panic!("expected FnCall"),
         }
     }
 

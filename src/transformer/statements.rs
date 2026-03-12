@@ -5,7 +5,7 @@
 use anyhow::{anyhow, Result};
 use swc_ecma_ast as ast;
 
-use crate::ir::Stmt;
+use crate::ir::{Expr, Stmt};
 use crate::transformer::expressions::convert_expr;
 use crate::transformer::types::convert_ts_type;
 
@@ -33,6 +33,7 @@ pub fn convert_stmt(stmt: &ast::Stmt) -> Result<Stmt> {
             let expr = convert_expr(&expr_stmt.expr)?;
             Ok(Stmt::Expr(expr))
         }
+        ast::Stmt::Throw(throw_stmt) => convert_throw_stmt(throw_stmt),
         _ => Err(anyhow!("unsupported statement: {:?}", stmt)),
     }
 }
@@ -97,6 +98,72 @@ fn convert_if_stmt(if_stmt: &ast::IfStmt) -> Result<Stmt> {
         then_body,
         else_body,
     })
+}
+
+/// Converts a `throw` statement into `return Err(...)`.
+///
+/// - `throw new Error("msg")` → `return Err("msg".to_string())`
+/// - `throw "msg"` → `return Err("msg".to_string())`
+/// - Other throw expressions → `return Err(expr.to_string())`
+fn convert_throw_stmt(throw_stmt: &ast::ThrowStmt) -> Result<Stmt> {
+    let err_arg = extract_error_message(&throw_stmt.arg);
+    let err_expr = Expr::MethodCall {
+        object: Box::new(err_arg),
+        method: "to_string".to_string(),
+        args: vec![],
+    };
+    Ok(Stmt::Return(Some(Expr::FnCall {
+        name: "Err".to_string(),
+        args: vec![err_expr],
+    })))
+}
+
+/// Extracts the error message expression from a `throw` argument.
+///
+/// - `new Error("msg")` → `StringLit("msg")`
+/// - `"msg"` → `StringLit("msg")`
+/// - Other → converts as generic expression
+fn extract_error_message(expr: &ast::Expr) -> Expr {
+    match expr {
+        ast::Expr::New(new_expr) => {
+            // `throw new Error("msg")` → extract "msg"
+            if let Some(args) = &new_expr.args {
+                if let Some(first) = args.first() {
+                    if let Ok(e) = convert_expr(&first.expr) {
+                        return e;
+                    }
+                }
+            }
+            Expr::StringLit("unknown error".to_string())
+        }
+        other => {
+            convert_expr(other).unwrap_or_else(|_| Expr::StringLit("unknown error".to_string()))
+        }
+    }
+}
+
+/// Converts a list of SWC statements into IR statements, expanding `try/catch` blocks inline.
+///
+/// `try { stmts... } catch (e) { ... }` is expanded to just the try body statements.
+/// The catch block is dropped (throw statements in the try body are already converted to `return Err(...)`).
+pub fn convert_stmt_list(stmts: &[ast::Stmt]) -> Result<Vec<Stmt>> {
+    let mut result = Vec::new();
+    for stmt in stmts {
+        match stmt {
+            ast::Stmt::Try(try_stmt) => {
+                // Expand try body inline
+                for s in &try_stmt.block.stmts {
+                    result.push(convert_stmt(s)?);
+                }
+                // catch block is dropped — throw is already Err(), and ? propagation
+                // requires function call support which is not yet available
+            }
+            other => {
+                result.push(convert_stmt(other)?);
+            }
+        }
+    }
+    Ok(result)
 }
 
 /// Converts a block statement or single statement into a `Vec<Stmt>`.
@@ -222,6 +289,78 @@ mod tests {
                 then_body: vec![Stmt::Return(Some(Expr::NumberLit(1.0)))],
                 else_body: Some(vec![Stmt::Return(Some(Expr::NumberLit(2.0)))]),
             }
+        );
+    }
+
+    #[test]
+    fn test_convert_stmt_list_try_catch_expands_try_body() {
+        let stmts = parse_fn_body(
+            "function f() { try { const x = 1; return x; } catch (e) { return 0; } }",
+        );
+        // try/catch is expanded: try body is inlined, catch is dropped
+        let result = convert_stmt_list(&stmts).unwrap();
+        assert_eq!(result.len(), 2);
+        assert_eq!(
+            result[0],
+            Stmt::Let {
+                mutable: false,
+                name: "x".to_string(),
+                ty: None,
+                init: Some(Expr::NumberLit(1.0)),
+            }
+        );
+        assert_eq!(result[1], Stmt::Return(Some(Expr::Ident("x".to_string()))));
+    }
+
+    #[test]
+    fn test_convert_stmt_list_try_catch_empty_catch() {
+        let stmts = parse_fn_body("function f() { try { const x = 1; } catch (e) { } }");
+        let result = convert_stmt_list(&stmts).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(
+            result[0],
+            Stmt::Let {
+                mutable: false,
+                name: "x".to_string(),
+                ty: None,
+                init: Some(Expr::NumberLit(1.0)),
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_stmt_throw_new_error_string() {
+        let stmts = parse_fn_body("function f() { throw new Error(\"something went wrong\"); }");
+        let result = convert_stmt(&stmts[0]).unwrap();
+        // throw new Error("msg") → return Err("msg".to_string())
+        assert_eq!(
+            result,
+            Stmt::Return(Some(Expr::FnCall {
+                name: "Err".to_string(),
+                args: vec![Expr::MethodCall {
+                    object: Box::new(Expr::StringLit("something went wrong".to_string())),
+                    method: "to_string".to_string(),
+                    args: vec![],
+                }],
+            }))
+        );
+    }
+
+    #[test]
+    fn test_convert_stmt_throw_string_literal() {
+        let stmts = parse_fn_body("function f() { throw \"error msg\"; }");
+        let result = convert_stmt(&stmts[0]).unwrap();
+        // throw "msg" → return Err("msg".to_string())
+        assert_eq!(
+            result,
+            Stmt::Return(Some(Expr::FnCall {
+                name: "Err".to_string(),
+                args: vec![Expr::MethodCall {
+                    object: Box::new(Expr::StringLit("error msg".to_string())),
+                    method: "to_string".to_string(),
+                    args: vec![],
+                }],
+            }))
         );
     }
 
