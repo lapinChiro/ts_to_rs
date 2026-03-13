@@ -6,6 +6,8 @@
 /// Represents a Rust type.
 #[derive(Debug, Clone, PartialEq)]
 pub enum RustType {
+    /// `()` (unit type, corresponds to TypeScript `void`)
+    Unit,
     /// `String`
     String,
     /// `f64`
@@ -80,8 +82,8 @@ pub struct StructField {
 pub struct Param {
     /// Parameter name
     pub name: String,
-    /// Parameter type
-    pub ty: RustType,
+    /// Parameter type (`None` for closures where type inference applies)
+    pub ty: Option<RustType>,
 }
 
 /// A method inside an `impl` block.
@@ -153,6 +155,8 @@ pub enum Item {
     Fn {
         /// Visibility
         vis: Visibility,
+        /// Whether this is an `async fn`
+        is_async: bool,
         /// Function name
         name: String,
         /// Generic type parameters (e.g., `["T", "U"]`)
@@ -340,6 +344,22 @@ pub enum Expr {
         /// Arguments
         args: Vec<Expr>,
     },
+    /// An await expression: `expr.await`
+    Await(Box<Expr>),
+    /// An index access expression: `object[index]`
+    Index {
+        /// The object expression (e.g., `arr`)
+        object: Box<Expr>,
+        /// The index expression (e.g., `0`)
+        index: Box<Expr>,
+    },
+    /// A type cast expression: `expr as target_type`
+    Cast {
+        /// The expression being cast
+        expr: Box<Expr>,
+        /// The target type as a string (e.g., `"f64"`, `"i64"`)
+        target: String,
+    },
 }
 
 /// The body of a closure expression.
@@ -485,16 +505,17 @@ mod tests {
     fn test_item_fn() {
         let item = Item::Fn {
             vis: Visibility::Public,
+            is_async: false,
             name: "add".to_string(),
             type_params: vec![],
             params: vec![
                 Param {
                     name: "a".to_string(),
-                    ty: RustType::F64,
+                    ty: Some(RustType::F64),
                 },
                 Param {
                     name: "b".to_string(),
-                    ty: RustType::F64,
+                    ty: Some(RustType::F64),
                 },
             ],
             return_type: Some(RustType::F64),

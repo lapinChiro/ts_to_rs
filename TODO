@@ -2,128 +2,191 @@
 
 未整理のアイデア・やりたいこと。整理できたら backlog/ に PRD として移動する。
 
+各項目の状態:
+- **PRD 化可能** — 保留理由なし、または Discovery で解決可能な設計課題のみ
+- **保留** — 正当な保留理由あり（前提機能未整備、実績データ必要、外部意思決定待ち等）
+
+## マイルストーン: Hono フレームワークの変換
+
+最初の大きな目標として、TypeScript の Web フレームワーク [Hono](https://hono.dev/) のソースコードを Rust にコンバートできるようにする。
+
+達成に向けて必要な調査・検討事項:
+
+- Hono の依存関係の調査（外部ライブラリ、Node.js API への依存等）
+- Hono のソースコードに出現する TS 構文の網羅的な洗い出し（現在未対応のものを特定）
+- 複雑な依存関係を持つプロジェクトの変換戦略の設計
+  - 外部パッケージの型定義解決（`node_modules` の `.d.ts`）
+  - TS の `import` を Rust の `use` / 外部 crate にどうマッピングするか
+  - Hono に対応する Rust Web フレームワーク（actix-web, axum 等）への API マッピング
+- 段階的な変換計画の策定（どの部分から着手するか）
+
+**保留**: まず基本変換機能を十分に揃え、Hono のソースコードの調査を行ってからロードマップを策定する
+
 ## 変換機能の拡張
 
-- async/await → tokio 変換
-  - **保留理由**: 生成コードに tokio 依存を入れるか、生成先の `Cargo.toml` をどう管理するかの設計判断が未決定。plan.md の判断保留事項 #3（エラー表現）とも関連する
 - 所有権推論（clone 削減）
-  - **保留理由**: plan.md の判断保留事項 #4。変換の基本機能が十分に揃い、実際の TS プロジェクトで試した後に取り組むべき最適化。現時点では判断材料が不足
+  - **保留**: 変換の基本機能が揃い、実際の TS プロジェクトで試した後に取り組むべき最適化。実績データが必要
 
 ## 未対応の TS 構文
 
-- enum: const enum（コンパイル時インライン展開される TS 固有の最適化）
-- enum: computed member（`1 << 0` 等の式による値指定）
-- enum: 数値と文字列が混在する heterogeneous enum
-- 配列: スプレッド構文（`[...arr, 4]`）
-- 配列: 分割代入（`const [a, b] = arr`）
+### enum
+
+- const enum **[PRD 化可能]**
+  - 通常 enum と同じ出力にするか、`const` 定義にインライン展開するかは Discovery で判断
+- computed member（`1 << 0` 等の式による値指定）**[PRD 化可能]**
+  - `BinaryOp` で表現可能。既存の enum 変換の拡張
+- heterogeneous enum（数値と文字列が混在）
+  - **保留**: Rust に直接対応がなく、TS でも非推奨パターン。需要が低い
+
+### 配列
+
+- スプレッド構文（`[...arr, 4]`）**[PRD 化可能]**
+  - `Vec` の `extend` + `push` 等への展開。設計は Discovery で解決可能
+- 分割代入の拡張パターン **[PRD 化可能]**
   - スキップ: `const [a, , b] = arr`
   - rest: `const [first, ...rest] = arr`
   - ネスト: `const [[a], [b]] = arr`
-- 配列: 空配列の型推論（`[]` 単体で型が決まらないケース）
-- オブジェクトリテラル: 型注記なし（`const obj = { x: 1 }`、匿名構造体 or HashMap への変換）
-- オブジェクトリテラル: computed property（`{ [key]: value }`）
-- オブジェクトリテラル: spread（`{ ...obj, x: 1 }`）
-- オブジェクトリテラル: 分割代入の拡張パターン
+  - 基本パターン（`const [a, b] = arr`）は実装済み。拡張パターンの設計は Discovery で解決可能
+- 空配列の型推論（`[]` 単体で型が決まらないケース）
+  - **保留**: 型推論インフラの整備が前提。現行は型注記があれば動作し、なければエラー
+
+### オブジェクトリテラル
+
+- 型注記なし（`const obj = { x: 1 }`）
+  - **保留**: 匿名構造体か HashMap かの判断に、実際の TS プロジェクトでの使用パターンの実績データが必要
+- computed property（`{ [key]: value }`）
+  - **保留**: HashMap への変換は型システム全体の設計に影響。型注記なしオブジェクトの方針決定が前提
+- spread（`{ ...obj, x: 1 }`）**[PRD 化可能]**
+  - Rust の struct update syntax (`Foo { x: 1, ..other }`) に対応可能。設計は Discovery で解決可能
+- 分割代入の拡張パターン
+  - 関数パラメータ: `function foo({ x, y }: Point) {}` **[PRD 化可能]**
+    - 頻出パターン。既存の分割代入の延長で実装可能
   - デフォルト値: `const { x = 10 } = obj`
   - ネスト: `const { a: { b } } = obj`
-  - 関数パラメータ: `function foo({ x, y }: Point) {}`
   - rest: `const { x, ...rest } = obj`
-- クラス: `implements`（interface の実装 → trait impl）
-- クラス: `abstract class`（抽象クラス → trait 化）
-- クラス: `protected` メンバー（Rust に直接対応なし、pub(crate) 等の検討）
+  - **保留**（デフォルト値・ネスト・rest）: 基本分割代入パターンの実績が前提
+
+### 単項演算子の拡張
+
+- `+x`（数値変換）
+  - **保留**: TS の型情報がないと正確な変換が困難。型推論インフラが前提
+- `typeof x`（型チェック）
+  - **保留**: `typeof x === "string"` のような型ガードとセットで設計が必要。型ガードの変換戦略の方針決定が前提
+- `~x`（ビット反転）
+  - **保留**: 使用頻度が低い。需要が発生してから対応
+- `void x`（undefined 返却）
+  - **保留**: モダン TS ではほぼ使われない。需要が発生してから対応
+- `delete obj.prop`（プロパティ削除）
+  - **保留**: Rust に対応する概念がない。HashMap ベースのオブジェクト表現の方針決定が前提
+
+### クラス
+
+- `implements`（interface の実装 → trait impl）**[PRD 化可能]**
+  - class-inheritance で `impl Trait for Struct` パターンは実装済み
+- `abstract class`（抽象クラス → trait 化）**[PRD 化可能]**
+  - trait パターンは class-inheritance で実装済み。abstract method → trait メソッド宣言
+- `protected` メンバー **[PRD 化可能]**
+  - `pub(crate)` への変換等、Discovery で判断可能
+
+### キーワード型
+
+- `any` 型 **[PRD 化可能]**
+  - TS で非常に頻出。`Box<dyn std::any::Any>` か、ジェネリクス化か、設計判断が必要
+  - `convert_ts_type` の keyword 分岐に `TsAnyKeyword` を追加
+- `unknown` 型 **[PRD 化可能]**
+  - モダン TS で `any` の型安全な代替として使用が増加。変換先は `any` と同じになる可能性が高い
+- `never` 型 **[PRD 化可能]**
+  - 関数の戻り値型（`fn foo() -> !`）や exhaustive check で使用。Rust の `!` 型（never 型）に対応
+
+### 型構文
+
+- string literal union 型（`type Direction = "up" | "down" | "left" | "right"`）**[PRD 化可能]**
+  - Rust の enum への変換が自然。頻出パターン。`convert_union_type` の拡張が必要
+- tuple 型（`[string, number]`）**[PRD 化可能]**
+  - Rust のタプル `(String, f64)` に直接対応。`TsTupleType` のハンドリングを追加
+- intersection 型（`A & B`）
+  - **保留**: Rust に直接対応がない。フィールドの統合は構造的型付けの問題と関連し、設計コストが高い
+- type assertion（`x as Type`）**[PRD 化可能]**
+  - `TsAsExpr` のハンドリング。Rust では型が一致すればそのまま、数値キャストなら `as` を使用
 
 ## ループの将来課題
 
 - `for...in`（オブジェクトキー列挙）
-  - TS でも `for...of` や `Object.keys()` の使用が推奨されており、`for...in` は非推奨パターン
-  - Rust に直接対応する構文がない（HashMap のイテレーションとも意味が異なる）
-  - 需要が低いため対応を見送り
-- `do...while` ループ
-  - Rust に `do...while` がなく、`loop { body; if !cond { break; } }` に変換する必要がある
-  - 使用頻度が低いため優先度は低い
+  - **保留**: TS でも非推奨パターン。Rust に直接対応なし。需要が低い
 
 ## 組み込み API の特殊変換
 
-- console API 以外の組み込み API（console.log/error/warn は実装済み）
-- `Math.floor(x)` → `x.floor()`, `Math.ceil(x)` → `x.ceil()`, `Math.abs(x)` → `x.abs()`, `Math.max(a,b)` → `a.max(b)`, `Math.min(a,b)` → `a.min(b)`, `Math.round(x)` → `x.round()`, `Math.sqrt(x)` → `x.sqrt()`, `Math.pow(x,y)` → `x.powf(y)`
-- `parseInt(s)` → `s.parse::<i64>()`, `parseFloat(s)` → `s.parse::<f64>()`
-- `typeof x === "string"` 等の型ガード（Rust に直接対応なし、要設計）
+- Math.random() **[PRD 化可能]**
+  - 外部クレート `rand` への依存が必要だが、Cargo.toml 生成は決定済み
+- Math 定数（`Math.PI`, `Math.E`）**[PRD 化可能]**
+  - `std::f64::consts::PI`, `std::f64::consts::E` への定数マッピング
+- Math.sign/trunc/log 等 **[PRD 化可能]**
+  - `x.signum()`, `x.trunc()`, `x.ln()` 等。基本 Math API と同じパターン
+- `Number.isInteger(x)` **[PRD 化可能]**
+  - `x.fract() == 0.0` への変換
+- `typeof x === "string"` 等の型ガード
+  - **保留**: Rust に直接対応なし。型ガードの変換戦略全体の方針決定が前提
 
 ## 文字列メソッドの特殊変換
 
-- `.length` → `.len()`
-- `.includes(s)` → `.contains(s)`
-- `.indexOf(s)` → `.find(s)` (Option 化が必要)
-- `.startsWith(s)` / `.endsWith(s)` → `.starts_with(s)` / `.ends_with(s)`
-- `.trim()` → `.trim()` (同名だが &str 返却)
-- `.split(s)` → `.split(s).collect::<Vec<&str>>()`
-- `.replace(s, r)` → `.replace(s, r)` (正規表現の場合は別途検討)
-- `.substring(a, b)` / `.slice(a, b)` → `&s[a..b]` (UTF-8 境界の問題あり)
-- `.toLowerCase()` / `.toUpperCase()` → `.to_lowercase()` / `.to_uppercase()`
+基本メソッドは実装済み（string-methods PRD 完了）
+
+対象外として残る項目:
+- `.indexOf(s)` → `.find(s)` (Option 化が必要) **[PRD 化可能]**
+- `.substring(a, b)` / `.slice(a, b)` → `&s[a..b]`
+  - **保留**: UTF-8 バイト境界の問題があり、安全な変換の設計が前提
 
 ## 配列メソッドの特殊変換
 
-- `.push(x)` → `.push(x)`
-- `.pop()` → `.pop()`
-- `.length` → `.len()`
-- `.map(fn)` → `.iter().map(fn).collect()`
-- `.filter(fn)` → `.iter().filter(fn).collect()`
-- `.find(fn)` → `.iter().find(fn)`
-- `.some(fn)` → `.iter().any(fn)`
-- `.every(fn)` → `.iter().all(fn)`
-- `.includes(x)` → `.contains(&x)`
-- `.join(s)` → `.join(s)`
-- `.reverse()` → `.reverse()` (in-place) / `.iter().rev().collect()` (new)
-- `.forEach(fn)` → `for item in &arr { fn(item) }`
-- `.reduce(fn, init)` → `.iter().fold(init, fn)`
+基本メソッドは実装済み（array-methods PRD 完了）
+
+対象外として残る項目:
+- `.reduce(fn, init)` → `.iter().fold(init, fn)` **[PRD 化可能]**
+  - クロージャの引数順序が異なるため設計が必要
+- `.reverse()` → `.reverse()` (in-place) / `.iter().rev().collect()` (new) **[PRD 化可能]**
+- `.sort()` — 比較関数の変換が必要 **[PRD 化可能]**
+- `.splice()`, `.slice()` — 複雑な引数パターン **[PRD 化可能]**
 
 ## エラーハンドリングの将来課題
 
-- `anyhow::Error` や独自エラー型への対応（現在は `String` 固定）
-- `finally` ブロックの変換
-- ネストした try/catch の変換
-
+- `anyhow::Error` や独自エラー型への対応
+  - **保留**: plan.md で初版は `String` 固定と決定。実際のプロジェクト変換の実績データが必要
+- `finally` ブロックの変換 **[PRD 化可能]**
+  - drop guard パターン等への変換。設計は Discovery で解決可能
+- ネストした try/catch の変換 **[PRD 化可能]**
+  - 現行の try body 展開パターンの再帰適用
 
 ## リファクタリング候補
 
-- transformer 内の AST パターン抽出の重複解消
-  - `Pat::Ident` から識別子名を取り出すパターンが `convert_var_decl`, `convert_for_stmt`, `convert_for_of_stmt`, `convert_for_stmt_as_loop`, `try_convert_object_destructuring` の 5 箇所に重複している
-  - `extract_ident_name(pat: &ast::Pat, context: &str) -> Result<String>` のようなヘルパーに共通化できる
-  - 知識の重複であり、SWC API 変更時に全箇所の修正が必要になるリスクがある
-- transformer/expressions.rs のモジュール分割検討
-  - 現在 1,354 行。責務は一貫しているが、call 系・literal 系・member 系で分割の余地がある
-  - 即座に分割が必要な規模ではないが、今後の機能追加で肥大化する場合は検討する
-- TS の単項演算子（`!x`, `-x`, `typeof x`）の変換
-  - 現在 `Expr::UnaryOp` は IR・generator に定義済みだが、transformer での `ast::Expr::Unary` → `Expr::UnaryOp` 変換は未実装
-  - `convert_for_stmt_as_loop` 内でのみ手動で `UnaryOp` を生成している
+- `functions.rs:convert_param` と `classes.rs:convert_param_pat` の統合 **[PRD 化可能]**
+  - 同一ロジック（`Pat::Ident` から名前+型注記を取得して `Param` を構築）の知識の重複。`transformer/mod.rs` にヘルパーとして抽出可能
+- transformer/expressions.rs のモジュール分割検討 **[PRD 化可能]**
+  - 現在 2,348 行。テストが約半分を占めるが、実装部分も増加傾向。メソッドマッピング（`map_method_call`）、組み込み API 変換（`convert_math_call`, `convert_number_static_call`, `convert_global_builtin`）、コンソール API 等を別モジュールに分離する候補
 
 ## コード品質
 
 - カスタム clippy lint プラグイン: ファイル行数の上限チェック
-  - `rustfmt` / 標準 `clippy` にはファイル行数制限の機能がない
-  - clippy の lint プラグイン（`dylint` または `clippy::declare_lint!`）として実装し、閾値超過を警告として検出する
-  - **保留理由**: clippy プラグインの開発コストが高い（proc-macro + rustc internal API）。まずは refactoring.md ルールによる運用で対応し、頻繁に閾値超過が発生するようになったら着手する
+  - **保留**: clippy プラグインの開発コストが高い（proc-macro + rustc internal API）。頻繁に閾値超過が発生するようになったら着手
 
 ## TypeRegistry の将来課題
 
 - 外部パッケージ（`node_modules`）の型定義解決
-  - TypeRegistry は同一プロジェクト内の `.ts` ファイルのみ対象。npm パッケージの `.d.ts` からの型情報取得は未対応
-  - **保留理由**: `.d.ts` のパース・型定義の構造が多様で設計コストが高い。実際のプロジェクト変換時にどの程度必要かを見てから判断
+  - **保留**: `.d.ts` のパース・型定義の構造が多様で設計コストが高い。実際のプロジェクト変換時の実績データが必要
 - ジェネリック型の具体化（`Container<string>` のフィールド型を `String` に解決する等）
-  - **保留理由**: ジェネリクス自体の変換が未実装。ジェネリクス対応後に TypeRegistry の拡張として検討
+  - **保留**: ジェネリクスの変換機能が前提
 - re-export（`export { Foo } from "./bar"`）の追跡
-  - **保留理由**: import の基本解決を先に実装し、実際のプロジェクトで re-export がどの程度使われるかを見てから判断
+  - **保留**: import の基本解決機能が前提
 - 型の構造的一致による推論（TypeScript の structural typing のエミュレーション）
-  - **保留理由**: Rust は名前的型付けであり、構造的型付けのエミュレーションは本質的に困難。初版では対応しない
+  - **保留**: Rust は名前的型付けであり、本質的に困難。初版では対応しない
 
 ## 拡張性
 
 - カスタム変換ルールの注入機能
-  - **保留理由**: 基本構文変換の整備が優先。ルールエンジンの設計には、どの粒度（型マッピング/API変換/構文変換）でカスタマイズを許すかの判断が必要で、実際のユースケースが揃ってから設計すべき
+  - **保留**: 判断材料不足。実際の TS プロジェクトを変換し、デフォルト変換では対応できないケースを 3 件以上収集する必要がある
 
 ## 開発基盤
 
 - Docker ベースの開発環境
-  - **保留理由**: 現状ローカル Rust ツールチェインで問題なく動作しており、CI 導入で環境差異の問題は軽減される。複数人開発が始まった時点で再評価する
+  - **保留**: 複数人開発が始まった時点で再評価
 - Watch モード
-  - **保留理由**: `cargo-watch` 等で実現可能だが、開発者の DX 改善であり機能開発に比べて優先度が低い。変換機能が十分に揃った後に検討する
+  - **保留**: 変換機能が十分に揃った後に検討

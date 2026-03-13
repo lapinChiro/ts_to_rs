@@ -2,8 +2,22 @@
 
 use crate::ir::{ClosureBody, Expr, Param, RustType};
 
+use super::generate_param;
 use super::statements::generate_stmt;
 use super::types::generate_type;
+
+/// Returns `true` if the expression needs parentheses when used as the receiver
+/// of a method call or field access (i.e., before `.method()` or `.field`).
+fn needs_parens_as_receiver(expr: &Expr) -> bool {
+    matches!(
+        expr,
+        Expr::BinaryOp { .. }
+            | Expr::UnaryOp { .. }
+            | Expr::Cast { .. }
+            | Expr::Assign { .. }
+            | Expr::If { .. }
+    )
+}
 
 /// Generates an expression as a Rust source string.
 pub(super) fn generate_expr(expr: &Expr) -> String {
@@ -41,7 +55,12 @@ pub(super) fn generate_expr(expr: &Expr) -> String {
                 .map(generate_expr)
                 .collect::<Vec<_>>()
                 .join(", ");
-            format!("{}.{method}({args_str})", generate_expr(object))
+            let obj_str = generate_expr(object);
+            if needs_parens_as_receiver(object) {
+                format!("({obj_str}).{method}({args_str})")
+            } else {
+                format!("{obj_str}.{method}({args_str})")
+            }
         }
         Expr::StructInit { name, fields } => {
             if fields
@@ -88,7 +107,12 @@ pub(super) fn generate_expr(expr: &Expr) -> String {
             format!("{} = {}", generate_expr(target), generate_expr(value))
         }
         Expr::FieldAccess { object, field } => {
-            format!("{}.{field}", generate_expr(object))
+            let obj_str = generate_expr(object);
+            if needs_parens_as_receiver(object) {
+                format!("({obj_str}).{field}")
+            } else {
+                format!("{obj_str}.{field}")
+            }
         }
         Expr::UnaryOp { op, operand } => {
             let needs_parens = matches!(
@@ -125,6 +149,16 @@ pub(super) fn generate_expr(expr: &Expr) -> String {
             )
         }
         Expr::MacroCall { name, args } => generate_macro_call(name, args),
+        Expr::Await(expr) => format!("{}.await", generate_expr(expr)),
+        Expr::Index { object, index } => {
+            // Index values must be usize in Rust; emit integer literals without .0
+            let index_str = match index.as_ref() {
+                Expr::NumberLit(n) if n.fract() == 0.0 => format!("{}", *n as usize),
+                _ => generate_expr(index),
+            };
+            format!("{}[{index_str}]", generate_expr(object))
+        }
+        Expr::Cast { expr, target } => format!("{} as {target}", generate_expr(expr)),
     }
 }
 
@@ -182,7 +216,7 @@ fn generate_closure(
 ) -> String {
     let params_str = params
         .iter()
-        .map(|p| format!("{}: {}", p.name, generate_type(&p.ty)))
+        .map(generate_param)
         .collect::<Vec<_>>()
         .join(", ");
     let ret_str = match return_type {
@@ -305,7 +339,7 @@ mod tests {
         let expr = Expr::Closure {
             params: vec![Param {
                 name: "x".to_string(),
-                ty: RustType::F64,
+                ty: Some(RustType::F64),
             }],
             return_type: None,
             body: ClosureBody::Expr(Box::new(Expr::BinaryOp {
@@ -322,7 +356,7 @@ mod tests {
         let expr = Expr::Closure {
             params: vec![Param {
                 name: "x".to_string(),
-                ty: RustType::F64,
+                ty: Some(RustType::F64),
             }],
             return_type: Some(RustType::F64),
             body: ClosureBody::Block(vec![Stmt::Return(Some(Expr::BinaryOp {
@@ -343,6 +377,23 @@ mod tests {
             body: ClosureBody::Expr(Box::new(Expr::NumberLit(42.0))),
         };
         assert_eq!(generate_expr(&expr), "|| 42.0");
+    }
+
+    #[test]
+    fn test_generate_closure_param_no_type_annotation() {
+        let expr = Expr::Closure {
+            params: vec![Param {
+                name: "x".to_string(),
+                ty: None,
+            }],
+            return_type: None,
+            body: ClosureBody::Expr(Box::new(Expr::BinaryOp {
+                left: Box::new(Expr::Ident("x".to_string())),
+                op: "+".to_string(),
+                right: Box::new(Expr::NumberLit(1.0)),
+            })),
+        };
+        assert_eq!(generate_expr(&expr), "|x| x + 1.0");
     }
 
     #[test]
@@ -470,6 +521,88 @@ mod tests {
             args: vec![Expr::Ident("err".to_string())],
         };
         assert_eq!(generate_expr(&expr), "eprintln!(\"{:?}\", err)");
+    }
+
+    #[test]
+    fn test_generate_method_call_binary_op_receiver_needs_parens() {
+        // (a + b).sqrt() — BinaryOp needs parens
+        let expr = Expr::MethodCall {
+            object: Box::new(Expr::BinaryOp {
+                left: Box::new(Expr::Ident("a".to_string())),
+                op: "+".to_string(),
+                right: Box::new(Expr::Ident("b".to_string())),
+            }),
+            method: "sqrt".to_string(),
+            args: vec![],
+        };
+        assert_eq!(generate_expr(&expr), "(a + b).sqrt()");
+    }
+
+    #[test]
+    fn test_generate_method_call_unary_op_receiver_needs_parens() {
+        // (-x).abs() — UnaryOp needs parens
+        let expr = Expr::MethodCall {
+            object: Box::new(Expr::UnaryOp {
+                op: "-".to_string(),
+                operand: Box::new(Expr::Ident("x".to_string())),
+            }),
+            method: "abs".to_string(),
+            args: vec![],
+        };
+        assert_eq!(generate_expr(&expr), "(-x).abs()");
+    }
+
+    #[test]
+    fn test_generate_method_call_cast_receiver_needs_parens() {
+        // (x as f64).abs() — Cast needs parens
+        let expr = Expr::MethodCall {
+            object: Box::new(Expr::Cast {
+                expr: Box::new(Expr::Ident("x".to_string())),
+                target: "f64".to_string(),
+            }),
+            method: "abs".to_string(),
+            args: vec![],
+        };
+        assert_eq!(generate_expr(&expr), "(x as f64).abs()");
+    }
+
+    #[test]
+    fn test_generate_method_call_ident_receiver_no_parens() {
+        let expr = Expr::MethodCall {
+            object: Box::new(Expr::Ident("x".to_string())),
+            method: "abs".to_string(),
+            args: vec![],
+        };
+        assert_eq!(generate_expr(&expr), "x.abs()");
+    }
+
+    #[test]
+    fn test_generate_method_call_chain_no_parens() {
+        // x.foo().bar() — MethodCall chain, no parens needed
+        let expr = Expr::MethodCall {
+            object: Box::new(Expr::MethodCall {
+                object: Box::new(Expr::Ident("x".to_string())),
+                method: "foo".to_string(),
+                args: vec![],
+            }),
+            method: "bar".to_string(),
+            args: vec![],
+        };
+        assert_eq!(generate_expr(&expr), "x.foo().bar()");
+    }
+
+    #[test]
+    fn test_generate_method_call_fn_call_receiver_no_parens() {
+        // foo().bar() — FnCall, no parens needed
+        let expr = Expr::MethodCall {
+            object: Box::new(Expr::FnCall {
+                name: "foo".to_string(),
+                args: vec![],
+            }),
+            method: "bar".to_string(),
+            args: vec![],
+        };
+        assert_eq!(generate_expr(&expr), "foo().bar()");
     }
 
     #[test]

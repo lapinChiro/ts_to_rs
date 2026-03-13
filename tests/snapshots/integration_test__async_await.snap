@@ -1,0 +1,15 @@
+---
+source: tests/integration_test.rs
+expression: output
+---
+async fn fetchNumber() -> f64 {
+    42.0
+}
+
+async fn fetchMessage() -> String {
+    "done".to_string()
+}
+
+async fn noReturnType() {
+    return;
+}

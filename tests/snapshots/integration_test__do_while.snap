@@ -1,0 +1,14 @@
+---
+source: tests/integration_test.rs
+expression: output
+---
+fn countdown(n: f64) -> f64 {
+    let mut x: f64 = n;
+    loop {
+        x = x - 1.0;
+        if !(x > 0.0) {
+            break;
+        }
+    }
+    x
+}

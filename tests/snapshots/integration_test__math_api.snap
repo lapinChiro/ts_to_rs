@@ -1,0 +1,27 @@
+---
+source: tests/integration_test.rs
+expression: output
+---
+fn roundDown(x: f64) -> f64 {
+    x.floor()
+}
+
+fn roundUp(x: f64) -> f64 {
+    x.ceil()
+}
+
+fn absolute(x: f64) -> f64 {
+    x.abs()
+}
+
+fn bigger(a: f64, b: f64) -> f64 {
+    a.max(b)
+}
+
+fn power(x: f64, y: f64) -> f64 {
+    x.powf(y)
+}
+
+fn rootOf(x: f64) -> f64 {
+    x.sqrt()
+}

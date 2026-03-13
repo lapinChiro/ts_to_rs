@@ -1,0 +1,14 @@
+---
+source: tests/integration_test.rs
+expression: output
+---
+fn getFirst(arr: Vec<f64>) -> f64 {
+    let a = arr[0];
+    a
+}
+
+fn swap(arr: Vec<f64>) -> Vec<f64> {
+    let a = arr[0];
+    let b = arr[1];
+    vec![b, a]
+}

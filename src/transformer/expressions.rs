@@ -40,6 +40,11 @@ pub fn convert_expr(
         ast::Expr::Array(array_lit) => convert_array_lit(array_lit, reg, expected),
         ast::Expr::Object(obj_lit) => convert_object_lit(obj_lit, reg, expected),
         ast::Expr::Cond(cond) => convert_cond_expr(cond, reg, expected),
+        ast::Expr::Unary(unary) => convert_unary_expr(unary, reg),
+        ast::Expr::Await(await_expr) => {
+            let inner = convert_expr(&await_expr.arg, reg, None)?;
+            Ok(Expr::Await(Box::new(inner)))
+        }
         _ => Err(anyhow!("unsupported expression: {:?}", expr)),
     }
 }
@@ -118,6 +123,20 @@ fn convert_member_expr(member: &ast::MemberExpr, reg: &TypeRegistry) -> Result<E
         }
     }
 
+    // .length → .len() as f64 (TS number is f64, Rust len() returns usize)
+    if field == "length" {
+        let object = convert_expr(&member.obj, reg, None)?;
+        let len_call = Expr::MethodCall {
+            object: Box::new(object),
+            method: "len".to_string(),
+            args: vec![],
+        };
+        return Ok(Expr::Cast {
+            expr: Box::new(len_call),
+            target: "f64".to_string(),
+        });
+    }
+
     let object = convert_expr(&member.obj, reg, None)?;
     Ok(Expr::FieldAccess {
         object: Box::new(object),
@@ -178,11 +197,11 @@ fn convert_arrow_expr(arrow: &ast::ArrowExpr, reg: &TypeRegistry) -> Result<Expr
         match param {
             ast::Pat::Ident(ident) => {
                 let name = ident.id.sym.to_string();
-                let ty = ident
+                let rust_type = ident
                     .type_ann
                     .as_ref()
-                    .ok_or_else(|| anyhow!("arrow parameter '{}' has no type annotation", name))?;
-                let rust_type = convert_ts_type(&ty.type_ann)?;
+                    .map(|ann| convert_ts_type(&ann.type_ann))
+                    .transpose()?;
                 params.push(Param {
                     name,
                     ty: rust_type,
@@ -228,6 +247,14 @@ fn convert_call_expr(call: &ast::CallExpr, reg: &TypeRegistry) -> Result<Expr> {
         ast::Callee::Expr(ref callee) => match callee.as_ref() {
             ast::Expr::Ident(ident) => {
                 let fn_name = ident.sym.to_string();
+
+                // parseInt(s) → s.parse::<f64>().unwrap()
+                // parseFloat(s) → s.parse::<f64>().unwrap()
+                // isNaN(x) → x.is_nan()
+                if let Some(result) = convert_global_builtin(&fn_name, &call.args, reg)? {
+                    return Ok(result);
+                }
+
                 // Look up function parameter types from the registry
                 let param_types = reg.get(&fn_name).and_then(|def| match def {
                     TypeDef::Function { params, .. } => Some(params.as_slice()),
@@ -245,8 +272,8 @@ fn convert_call_expr(call: &ast::CallExpr, reg: &TypeRegistry) -> Result<Expr> {
                     _ => return Err(anyhow!("unsupported call target member property")),
                 };
 
-                // console.log/error/warn → println!/eprintln!
                 if let ast::Expr::Ident(obj_ident) = member.obj.as_ref() {
+                    // console.log/error/warn → println!/eprintln!
                     if obj_ident.sym.as_ref() == "console" {
                         let macro_name = match method.as_str() {
                             "log" => "println",
@@ -259,15 +286,22 @@ fn convert_call_expr(call: &ast::CallExpr, reg: &TypeRegistry) -> Result<Expr> {
                             args,
                         });
                     }
+
+                    // Math.method(args) → first_arg.method(rest_args)
+                    if obj_ident.sym.as_ref() == "Math" {
+                        return convert_math_call(&method, &call.args, reg);
+                    }
+
+                    // Number.isNaN(x) → x.is_nan(), Number.isFinite(x) → x.is_finite()
+                    if obj_ident.sym.as_ref() == "Number" {
+                        return convert_number_static_call(&method, &call.args, reg);
+                    }
                 }
 
                 let object = convert_expr(&member.obj, reg, None)?;
                 let args = convert_call_args(&call.args, reg)?;
-                Ok(Expr::MethodCall {
-                    object: Box::new(object),
-                    method,
-                    args,
-                })
+                let method_call = map_method_call(object, &method, args);
+                Ok(method_call)
             }
             _ => Err(anyhow!("unsupported call target expression")),
         },
@@ -279,6 +313,273 @@ fn convert_call_expr(call: &ast::CallExpr, reg: &TypeRegistry) -> Result<Expr> {
             })
         }
         _ => Err(anyhow!("unsupported callee type")),
+    }
+}
+
+/// Maps TypeScript method names to Rust equivalents.
+///
+/// Handles simple renames, methods that need wrapping (e.g., `trim` → `trim().to_string()`),
+/// and methods that need chaining (e.g., `split` → `split(s).collect::<Vec<&str>>()`).
+fn map_method_call(object: Expr, method: &str, args: Vec<Expr>) -> Expr {
+    match method {
+        // Simple name mappings
+        "includes" => Expr::MethodCall {
+            object: Box::new(object),
+            method: "contains".to_string(),
+            args,
+        },
+        "startsWith" => Expr::MethodCall {
+            object: Box::new(object),
+            method: "starts_with".to_string(),
+            args,
+        },
+        "endsWith" => Expr::MethodCall {
+            object: Box::new(object),
+            method: "ends_with".to_string(),
+            args,
+        },
+        "toLowerCase" => Expr::MethodCall {
+            object: Box::new(object),
+            method: "to_lowercase".to_string(),
+            args,
+        },
+        "toUpperCase" => Expr::MethodCall {
+            object: Box::new(object),
+            method: "to_uppercase".to_string(),
+            args,
+        },
+        // trim() returns &str, wrap with .to_string()
+        "trim" => Expr::MethodCall {
+            object: Box::new(Expr::MethodCall {
+                object: Box::new(object),
+                method: "trim".to_string(),
+                args,
+            }),
+            method: "to_string".to_string(),
+            args: vec![],
+        },
+        // split() returns an iterator, chain .collect::<Vec<&str>>()
+        "split" => Expr::MethodCall {
+            object: Box::new(Expr::MethodCall {
+                object: Box::new(object),
+                method: "split".to_string(),
+                args,
+            }),
+            method: "collect::<Vec<&str>>".to_string(),
+            args: vec![],
+        },
+        // Iterator methods that collect: .map(fn) / .filter(fn) → .iter().method(fn).collect()
+        "map" | "filter" => {
+            let iter_call = Expr::MethodCall {
+                object: Box::new(object),
+                method: "iter".to_string(),
+                args: vec![],
+            };
+            let method_call = Expr::MethodCall {
+                object: Box::new(iter_call),
+                method: method.to_string(),
+                args,
+            };
+            Expr::MethodCall {
+                object: Box::new(method_call),
+                method: "collect::<Vec<_>>".to_string(),
+                args: vec![],
+            }
+        }
+        // Iterator methods without collect: .find(fn), .some(fn), .every(fn)
+        "find" => {
+            let iter_call = Expr::MethodCall {
+                object: Box::new(object),
+                method: "iter".to_string(),
+                args: vec![],
+            };
+            Expr::MethodCall {
+                object: Box::new(iter_call),
+                method: "find".to_string(),
+                args,
+            }
+        }
+        "some" => {
+            let iter_call = Expr::MethodCall {
+                object: Box::new(object),
+                method: "iter".to_string(),
+                args: vec![],
+            };
+            Expr::MethodCall {
+                object: Box::new(iter_call),
+                method: "any".to_string(),
+                args,
+            }
+        }
+        "every" => {
+            let iter_call = Expr::MethodCall {
+                object: Box::new(object),
+                method: "iter".to_string(),
+                args: vec![],
+            };
+            Expr::MethodCall {
+                object: Box::new(iter_call),
+                method: "all".to_string(),
+                args,
+            }
+        }
+        // forEach → .iter().for_each(fn)
+        "forEach" => {
+            let iter_call = Expr::MethodCall {
+                object: Box::new(object),
+                method: "iter".to_string(),
+                args: vec![],
+            };
+            Expr::MethodCall {
+                object: Box::new(iter_call),
+                method: "for_each".to_string(),
+                args,
+            }
+        }
+        // No mapping needed — pass through unchanged
+        _ => Expr::MethodCall {
+            object: Box::new(object),
+            method: method.to_string(),
+            args,
+        },
+    }
+}
+
+/// Converts global built-in functions (`parseInt`, `parseFloat`, `isNaN`) to Rust equivalents.
+///
+/// Returns `Ok(Some(expr))` if the function is a known built-in, `Ok(None)` otherwise.
+fn convert_global_builtin(
+    fn_name: &str,
+    args: &[ast::ExprOrSpread],
+    reg: &TypeRegistry,
+) -> Result<Option<Expr>> {
+    match fn_name {
+        // parseInt(s) → s.parse::<f64>().unwrap()
+        "parseInt" => {
+            let converted = convert_call_args(args, reg)?;
+            if converted.len() != 1 {
+                return Err(anyhow!("parseInt expects 1 argument"));
+            }
+            let arg = converted.into_iter().next().unwrap();
+            Ok(Some(Expr::MethodCall {
+                object: Box::new(Expr::MethodCall {
+                    object: Box::new(arg),
+                    method: "parse::<f64>".to_string(),
+                    args: vec![],
+                }),
+                method: "unwrap".to_string(),
+                args: vec![],
+            }))
+        }
+        // parseFloat(s) → s.parse::<f64>().unwrap()
+        "parseFloat" => {
+            let converted = convert_call_args(args, reg)?;
+            if converted.len() != 1 {
+                return Err(anyhow!("parseFloat expects 1 argument"));
+            }
+            let arg = converted.into_iter().next().unwrap();
+            Ok(Some(Expr::MethodCall {
+                object: Box::new(Expr::MethodCall {
+                    object: Box::new(arg),
+                    method: "parse::<f64>".to_string(),
+                    args: vec![],
+                }),
+                method: "unwrap".to_string(),
+                args: vec![],
+            }))
+        }
+        // isNaN(x) → x.is_nan()
+        "isNaN" => {
+            let converted = convert_call_args(args, reg)?;
+            if converted.len() != 1 {
+                return Err(anyhow!("isNaN expects 1 argument"));
+            }
+            let arg = converted.into_iter().next().unwrap();
+            Ok(Some(Expr::MethodCall {
+                object: Box::new(arg),
+                method: "is_nan".to_string(),
+                args: vec![],
+            }))
+        }
+        _ => Ok(None),
+    }
+}
+
+/// Converts `Number.method(x)` static calls to Rust `f64` method calls.
+///
+/// - `Number.isNaN(x)` → `x.is_nan()`
+/// - `Number.isFinite(x)` → `x.is_finite()`
+fn convert_number_static_call(
+    method: &str,
+    args: &[ast::ExprOrSpread],
+    reg: &TypeRegistry,
+) -> Result<Expr> {
+    let converted = convert_call_args(args, reg)?;
+    if converted.len() != 1 {
+        return Err(anyhow!("Number.{method} expects 1 argument"));
+    }
+    let arg = converted.into_iter().next().unwrap();
+    let rust_method = match method {
+        "isNaN" => "is_nan",
+        "isFinite" => "is_finite",
+        _ => return Err(anyhow!("unsupported Number method: {method}")),
+    };
+    Ok(Expr::MethodCall {
+        object: Box::new(arg),
+        method: rust_method.to_string(),
+        args: vec![],
+    })
+}
+
+/// Converts `Math.method(args)` to Rust `f64` method calls.
+///
+/// - 1-arg methods: `Math.floor(x)` → `x.floor()`
+/// - 2-arg methods: `Math.max(a, b)` → `a.max(b)`
+/// - `Math.pow(x, y)` → `x.powf(y)`
+fn convert_math_call(method: &str, args: &[ast::ExprOrSpread], reg: &TypeRegistry) -> Result<Expr> {
+    let converted_args = convert_call_args(args, reg)?;
+    match method {
+        // 1-arg methods: first arg becomes receiver
+        "floor" | "ceil" | "round" | "abs" | "sqrt" => {
+            if converted_args.len() != 1 {
+                return Err(anyhow!("Math.{method} expects 1 argument"));
+            }
+            let receiver = converted_args.into_iter().next().unwrap();
+            Ok(Expr::MethodCall {
+                object: Box::new(receiver),
+                method: method.to_string(),
+                args: vec![],
+            })
+        }
+        // 2-arg methods: first arg is receiver, second is argument
+        "max" | "min" => {
+            if converted_args.len() != 2 {
+                return Err(anyhow!("Math.{method} expects 2 arguments"));
+            }
+            let mut iter = converted_args.into_iter();
+            let receiver = iter.next().unwrap();
+            let arg = iter.next().unwrap();
+            Ok(Expr::MethodCall {
+                object: Box::new(receiver),
+                method: method.to_string(),
+                args: vec![arg],
+            })
+        }
+        // pow → powf
+        "pow" => {
+            if converted_args.len() != 2 {
+                return Err(anyhow!("Math.pow expects 2 arguments"));
+            }
+            let mut iter = converted_args.into_iter();
+            let receiver = iter.next().unwrap();
+            let arg = iter.next().unwrap();
+            Ok(Expr::MethodCall {
+                object: Box::new(receiver),
+                method: "powf".to_string(),
+                args: vec![arg],
+            })
+        }
+        _ => Err(anyhow!("unsupported Math method: {method}")),
     }
 }
 
@@ -452,6 +753,22 @@ fn convert_array_lit(
     Ok(Expr::Vec { elements })
 }
 
+/// Converts an SWC unary expression to an IR `UnaryOp`.
+///
+/// Supported operators: `!` (logical NOT), `-` (negation).
+fn convert_unary_expr(unary: &ast::UnaryExpr, reg: &TypeRegistry) -> Result<Expr> {
+    let op = match unary.op {
+        ast::UnaryOp::Bang => "!",
+        ast::UnaryOp::Minus => "-",
+        _ => return Err(anyhow!("unsupported unary operator: {:?}", unary.op)),
+    };
+    let operand = convert_expr(&unary.arg, reg, None)?;
+    Ok(Expr::UnaryOp {
+        op: op.to_string(),
+        operand: Box::new(operand),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -611,7 +928,7 @@ mod tests {
             } => {
                 assert_eq!(params.len(), 1);
                 assert_eq!(params[0].name, "x");
-                assert_eq!(params[0].ty, crate::ir::RustType::F64);
+                assert_eq!(params[0].ty, Some(crate::ir::RustType::F64));
                 assert!(return_type.is_none());
                 assert!(matches!(body, crate::ir::ClosureBody::Expr(_)));
             }
@@ -647,6 +964,35 @@ mod tests {
             Expr::Closure { params, body, .. } => {
                 assert!(params.is_empty());
                 assert!(matches!(body, crate::ir::ClosureBody::Expr(_)));
+            }
+            _ => panic!("expected Expr::Closure"),
+        }
+    }
+
+    #[test]
+    fn test_convert_expr_arrow_no_type_annotation_param_ty_is_none() {
+        let swc_expr = parse_var_init("const f = (x) => x + 1;");
+        let result = convert_expr(&swc_expr, &TypeRegistry::new(), None).unwrap();
+        match result {
+            Expr::Closure { params, .. } => {
+                assert_eq!(params.len(), 1);
+                assert_eq!(params[0].name, "x");
+                assert_eq!(params[0].ty, None);
+            }
+            _ => panic!("expected Expr::Closure"),
+        }
+    }
+
+    #[test]
+    fn test_convert_expr_arrow_mixed_type_annotations() {
+        // Only first param has type annotation
+        let swc_expr = parse_var_init("const f = (x: number, y) => x + y;");
+        let result = convert_expr(&swc_expr, &TypeRegistry::new(), None).unwrap();
+        match result {
+            Expr::Closure { params, .. } => {
+                assert_eq!(params.len(), 2);
+                assert_eq!(params[0].ty, Some(crate::ir::RustType::F64));
+                assert_eq!(params[1].ty, None);
             }
             _ => panic!("expected Expr::Closure"),
         }
@@ -1348,6 +1694,654 @@ mod tests {
                         args: vec![],
                     }],
                 }],
+            }
+        );
+    }
+
+    // -- Unary operator tests --
+
+    #[test]
+    fn test_convert_expr_unary_not_bool_literal() {
+        let expr = parse_expr("!true;");
+        let result = convert_expr(&expr, &TypeRegistry::new(), None).unwrap();
+        assert_eq!(
+            result,
+            Expr::UnaryOp {
+                op: "!".to_string(),
+                operand: Box::new(Expr::BoolLit(true)),
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_expr_unary_not_ident() {
+        let expr = parse_expr("!x;");
+        let result = convert_expr(&expr, &TypeRegistry::new(), None).unwrap();
+        assert_eq!(
+            result,
+            Expr::UnaryOp {
+                op: "!".to_string(),
+                operand: Box::new(Expr::Ident("x".to_string())),
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_expr_unary_minus_ident() {
+        let expr = parse_expr("-x;");
+        let result = convert_expr(&expr, &TypeRegistry::new(), None).unwrap();
+        assert_eq!(
+            result,
+            Expr::UnaryOp {
+                op: "-".to_string(),
+                operand: Box::new(Expr::Ident("x".to_string())),
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_expr_unary_minus_number_literal() {
+        let expr = parse_expr("-42;");
+        let result = convert_expr(&expr, &TypeRegistry::new(), None).unwrap();
+        assert_eq!(
+            result,
+            Expr::UnaryOp {
+                op: "-".to_string(),
+                operand: Box::new(Expr::NumberLit(42.0)),
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_expr_unary_not_complex_expr() {
+        let expr = parse_expr("!(a > b);");
+        let result = convert_expr(&expr, &TypeRegistry::new(), None).unwrap();
+        assert_eq!(
+            result,
+            Expr::UnaryOp {
+                op: "!".to_string(),
+                operand: Box::new(Expr::BinaryOp {
+                    left: Box::new(Expr::Ident("a".to_string())),
+                    op: ">".to_string(),
+                    right: Box::new(Expr::Ident("b".to_string())),
+                }),
+            }
+        );
+    }
+
+    // -- Await expression tests --
+
+    #[test]
+    fn test_convert_expr_await_simple() {
+        let expr = parse_expr("await fetch();");
+        let result = convert_expr(&expr, &TypeRegistry::new(), None).unwrap();
+        assert_eq!(
+            result,
+            Expr::Await(Box::new(Expr::FnCall {
+                name: "fetch".to_string(),
+                args: vec![],
+            }))
+        );
+    }
+
+    #[test]
+    fn test_convert_expr_await_ident() {
+        let expr = parse_expr("await promise;");
+        let result = convert_expr(&expr, &TypeRegistry::new(), None).unwrap();
+        assert_eq!(
+            result,
+            Expr::Await(Box::new(Expr::Ident("promise".to_string())))
+        );
+    }
+
+    // -- String method conversion tests --
+
+    #[test]
+    fn test_convert_expr_string_length_to_len_as_f64() {
+        let expr = parse_expr("s.length;");
+        let result = convert_expr(&expr, &TypeRegistry::new(), None).unwrap();
+        assert_eq!(
+            result,
+            Expr::Cast {
+                expr: Box::new(Expr::MethodCall {
+                    object: Box::new(Expr::Ident("s".to_string())),
+                    method: "len".to_string(),
+                    args: vec![],
+                }),
+                target: "f64".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_expr_string_includes_to_contains() {
+        let expr = parse_expr(r#"s.includes("x");"#);
+        let result = convert_expr(&expr, &TypeRegistry::new(), None).unwrap();
+        assert_eq!(
+            result,
+            Expr::MethodCall {
+                object: Box::new(Expr::Ident("s".to_string())),
+                method: "contains".to_string(),
+                args: vec![Expr::StringLit("x".to_string())],
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_expr_string_starts_with() {
+        let expr = parse_expr(r#"s.startsWith("a");"#);
+        let result = convert_expr(&expr, &TypeRegistry::new(), None).unwrap();
+        assert_eq!(
+            result,
+            Expr::MethodCall {
+                object: Box::new(Expr::Ident("s".to_string())),
+                method: "starts_with".to_string(),
+                args: vec![Expr::StringLit("a".to_string())],
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_expr_string_ends_with() {
+        let expr = parse_expr(r#"s.endsWith("z");"#);
+        let result = convert_expr(&expr, &TypeRegistry::new(), None).unwrap();
+        assert_eq!(
+            result,
+            Expr::MethodCall {
+                object: Box::new(Expr::Ident("s".to_string())),
+                method: "ends_with".to_string(),
+                args: vec![Expr::StringLit("z".to_string())],
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_expr_string_trim_adds_to_string() {
+        let expr = parse_expr("s.trim();");
+        let result = convert_expr(&expr, &TypeRegistry::new(), None).unwrap();
+        assert_eq!(
+            result,
+            Expr::MethodCall {
+                object: Box::new(Expr::MethodCall {
+                    object: Box::new(Expr::Ident("s".to_string())),
+                    method: "trim".to_string(),
+                    args: vec![],
+                }),
+                method: "to_string".to_string(),
+                args: vec![],
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_expr_string_to_lower_case() {
+        let expr = parse_expr("s.toLowerCase();");
+        let result = convert_expr(&expr, &TypeRegistry::new(), None).unwrap();
+        assert_eq!(
+            result,
+            Expr::MethodCall {
+                object: Box::new(Expr::Ident("s".to_string())),
+                method: "to_lowercase".to_string(),
+                args: vec![],
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_expr_string_to_upper_case() {
+        let expr = parse_expr("s.toUpperCase();");
+        let result = convert_expr(&expr, &TypeRegistry::new(), None).unwrap();
+        assert_eq!(
+            result,
+            Expr::MethodCall {
+                object: Box::new(Expr::Ident("s".to_string())),
+                method: "to_uppercase".to_string(),
+                args: vec![],
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_expr_string_split() {
+        let expr = parse_expr(r#"s.split(",");"#);
+        let result = convert_expr(&expr, &TypeRegistry::new(), None).unwrap();
+        // s.split(",") → s.split(",").collect::<Vec<&str>>()
+        assert_eq!(
+            result,
+            Expr::MethodCall {
+                object: Box::new(Expr::MethodCall {
+                    object: Box::new(Expr::Ident("s".to_string())),
+                    method: "split".to_string(),
+                    args: vec![Expr::StringLit(",".to_string())],
+                }),
+                method: "collect::<Vec<&str>>".to_string(),
+                args: vec![],
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_expr_string_replace() {
+        let expr = parse_expr(r#"s.replace("a", "b");"#);
+        let result = convert_expr(&expr, &TypeRegistry::new(), None).unwrap();
+        assert_eq!(
+            result,
+            Expr::MethodCall {
+                object: Box::new(Expr::Ident("s".to_string())),
+                method: "replace".to_string(),
+                args: vec![
+                    Expr::StringLit("a".to_string()),
+                    Expr::StringLit("b".to_string()),
+                ],
+            }
+        );
+    }
+
+    // -- Array method conversion tests --
+
+    #[test]
+    fn test_convert_expr_array_map_to_iter_map_collect() {
+        let expr = parse_expr("arr.map((x: number) => x + 1);");
+        let result = convert_expr(&expr, &TypeRegistry::new(), None).unwrap();
+        // arr.map((x: number) => x + 1) → arr.iter().map(|x| x + 1).collect()
+        assert_eq!(
+            result,
+            Expr::MethodCall {
+                object: Box::new(Expr::MethodCall {
+                    object: Box::new(Expr::MethodCall {
+                        object: Box::new(Expr::Ident("arr".to_string())),
+                        method: "iter".to_string(),
+                        args: vec![],
+                    }),
+                    method: "map".to_string(),
+                    args: vec![Expr::Closure {
+                        params: vec![Param {
+                            name: "x".to_string(),
+                            ty: Some(RustType::F64),
+                        }],
+                        return_type: None,
+                        body: ClosureBody::Expr(Box::new(Expr::BinaryOp {
+                            left: Box::new(Expr::Ident("x".to_string())),
+                            op: "+".to_string(),
+                            right: Box::new(Expr::NumberLit(1.0)),
+                        })),
+                    }],
+                }),
+                method: "collect::<Vec<_>>".to_string(),
+                args: vec![],
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_expr_array_filter_to_iter_filter_collect() {
+        let expr = parse_expr("arr.filter((x: number) => x > 0);");
+        let result = convert_expr(&expr, &TypeRegistry::new(), None).unwrap();
+        // arr.filter((x: number) => x > 0) → arr.iter().filter(|x| x > 0).collect()
+        assert_eq!(
+            result,
+            Expr::MethodCall {
+                object: Box::new(Expr::MethodCall {
+                    object: Box::new(Expr::MethodCall {
+                        object: Box::new(Expr::Ident("arr".to_string())),
+                        method: "iter".to_string(),
+                        args: vec![],
+                    }),
+                    method: "filter".to_string(),
+                    args: vec![Expr::Closure {
+                        params: vec![Param {
+                            name: "x".to_string(),
+                            ty: Some(RustType::F64),
+                        }],
+                        return_type: None,
+                        body: ClosureBody::Expr(Box::new(Expr::BinaryOp {
+                            left: Box::new(Expr::Ident("x".to_string())),
+                            op: ">".to_string(),
+                            right: Box::new(Expr::NumberLit(0.0)),
+                        })),
+                    }],
+                }),
+                method: "collect::<Vec<_>>".to_string(),
+                args: vec![],
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_expr_array_find_to_iter_find() {
+        let expr = parse_expr("arr.find((x: number) => x > 0);");
+        let result = convert_expr(&expr, &TypeRegistry::new(), None).unwrap();
+        // arr.find((x: number) => x > 0) → arr.iter().find(|x| x > 0)
+        assert_eq!(
+            result,
+            Expr::MethodCall {
+                object: Box::new(Expr::MethodCall {
+                    object: Box::new(Expr::Ident("arr".to_string())),
+                    method: "iter".to_string(),
+                    args: vec![],
+                }),
+                method: "find".to_string(),
+                args: vec![Expr::Closure {
+                    params: vec![Param {
+                        name: "x".to_string(),
+                        ty: Some(RustType::F64),
+                    }],
+                    return_type: None,
+                    body: ClosureBody::Expr(Box::new(Expr::BinaryOp {
+                        left: Box::new(Expr::Ident("x".to_string())),
+                        op: ">".to_string(),
+                        right: Box::new(Expr::NumberLit(0.0)),
+                    })),
+                }],
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_expr_array_some_to_iter_any() {
+        let expr = parse_expr("arr.some((x: number) => x > 0);");
+        let result = convert_expr(&expr, &TypeRegistry::new(), None).unwrap();
+        // arr.some((x: number) => x > 0) → arr.iter().any(|x| x > 0)
+        assert_eq!(
+            result,
+            Expr::MethodCall {
+                object: Box::new(Expr::MethodCall {
+                    object: Box::new(Expr::Ident("arr".to_string())),
+                    method: "iter".to_string(),
+                    args: vec![],
+                }),
+                method: "any".to_string(),
+                args: vec![Expr::Closure {
+                    params: vec![Param {
+                        name: "x".to_string(),
+                        ty: Some(RustType::F64),
+                    }],
+                    return_type: None,
+                    body: ClosureBody::Expr(Box::new(Expr::BinaryOp {
+                        left: Box::new(Expr::Ident("x".to_string())),
+                        op: ">".to_string(),
+                        right: Box::new(Expr::NumberLit(0.0)),
+                    })),
+                }],
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_expr_array_every_to_iter_all() {
+        let expr = parse_expr("arr.every((x: number) => x > 0);");
+        let result = convert_expr(&expr, &TypeRegistry::new(), None).unwrap();
+        // arr.every((x: number) => x > 0) → arr.iter().all(|x| x > 0)
+        assert_eq!(
+            result,
+            Expr::MethodCall {
+                object: Box::new(Expr::MethodCall {
+                    object: Box::new(Expr::Ident("arr".to_string())),
+                    method: "iter".to_string(),
+                    args: vec![],
+                }),
+                method: "all".to_string(),
+                args: vec![Expr::Closure {
+                    params: vec![Param {
+                        name: "x".to_string(),
+                        ty: Some(RustType::F64),
+                    }],
+                    return_type: None,
+                    body: ClosureBody::Expr(Box::new(Expr::BinaryOp {
+                        left: Box::new(Expr::Ident("x".to_string())),
+                        op: ">".to_string(),
+                        right: Box::new(Expr::NumberLit(0.0)),
+                    })),
+                }],
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_expr_array_foreach_to_for_loop() {
+        // forEach は式→文の変換なので、statement レベルで別途テストする
+        // ここではメソッド呼び出しとしての変換を確認
+        let expr = parse_expr("arr.forEach((x: number) => console.log(x));");
+        let result = convert_expr(&expr, &TypeRegistry::new(), None).unwrap();
+        // forEach は map_method_call で ForEach 用の IR に変換される
+        // 初版: arr.iter().for_each(|x| ...) に変換
+        assert_eq!(
+            result,
+            Expr::MethodCall {
+                object: Box::new(Expr::MethodCall {
+                    object: Box::new(Expr::Ident("arr".to_string())),
+                    method: "iter".to_string(),
+                    args: vec![],
+                }),
+                method: "for_each".to_string(),
+                args: vec![Expr::Closure {
+                    params: vec![Param {
+                        name: "x".to_string(),
+                        ty: Some(RustType::F64),
+                    }],
+                    return_type: None,
+                    body: ClosureBody::Expr(Box::new(Expr::MacroCall {
+                        name: "println".to_string(),
+                        args: vec![Expr::Ident("x".to_string())],
+                    })),
+                }],
+            }
+        );
+    }
+
+    // -- Math API conversion tests --
+
+    #[test]
+    fn test_convert_expr_math_floor() {
+        let expr = parse_expr("Math.floor(3.7);");
+        let result = convert_expr(&expr, &TypeRegistry::new(), None).unwrap();
+        assert_eq!(
+            result,
+            Expr::MethodCall {
+                object: Box::new(Expr::NumberLit(3.7)),
+                method: "floor".to_string(),
+                args: vec![],
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_expr_math_ceil() {
+        let expr = parse_expr("Math.ceil(x);");
+        let result = convert_expr(&expr, &TypeRegistry::new(), None).unwrap();
+        assert_eq!(
+            result,
+            Expr::MethodCall {
+                object: Box::new(Expr::Ident("x".to_string())),
+                method: "ceil".to_string(),
+                args: vec![],
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_expr_math_round() {
+        let expr = parse_expr("Math.round(x);");
+        let result = convert_expr(&expr, &TypeRegistry::new(), None).unwrap();
+        assert_eq!(
+            result,
+            Expr::MethodCall {
+                object: Box::new(Expr::Ident("x".to_string())),
+                method: "round".to_string(),
+                args: vec![],
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_expr_math_abs() {
+        let expr = parse_expr("Math.abs(x);");
+        let result = convert_expr(&expr, &TypeRegistry::new(), None).unwrap();
+        assert_eq!(
+            result,
+            Expr::MethodCall {
+                object: Box::new(Expr::Ident("x".to_string())),
+                method: "abs".to_string(),
+                args: vec![],
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_expr_math_sqrt() {
+        let expr = parse_expr("Math.sqrt(x);");
+        let result = convert_expr(&expr, &TypeRegistry::new(), None).unwrap();
+        assert_eq!(
+            result,
+            Expr::MethodCall {
+                object: Box::new(Expr::Ident("x".to_string())),
+                method: "sqrt".to_string(),
+                args: vec![],
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_expr_math_max() {
+        let expr = parse_expr("Math.max(a, b);");
+        let result = convert_expr(&expr, &TypeRegistry::new(), None).unwrap();
+        assert_eq!(
+            result,
+            Expr::MethodCall {
+                object: Box::new(Expr::Ident("a".to_string())),
+                method: "max".to_string(),
+                args: vec![Expr::Ident("b".to_string())],
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_expr_math_min() {
+        let expr = parse_expr("Math.min(a, b);");
+        let result = convert_expr(&expr, &TypeRegistry::new(), None).unwrap();
+        assert_eq!(
+            result,
+            Expr::MethodCall {
+                object: Box::new(Expr::Ident("a".to_string())),
+                method: "min".to_string(),
+                args: vec![Expr::Ident("b".to_string())],
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_expr_math_pow() {
+        let expr = parse_expr("Math.pow(x, 2);");
+        let result = convert_expr(&expr, &TypeRegistry::new(), None).unwrap();
+        assert_eq!(
+            result,
+            Expr::MethodCall {
+                object: Box::new(Expr::Ident("x".to_string())),
+                method: "powf".to_string(),
+                args: vec![Expr::NumberLit(2.0)],
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_expr_math_nested() {
+        let expr = parse_expr("Math.floor(Math.sqrt(x));");
+        let result = convert_expr(&expr, &TypeRegistry::new(), None).unwrap();
+        assert_eq!(
+            result,
+            Expr::MethodCall {
+                object: Box::new(Expr::MethodCall {
+                    object: Box::new(Expr::Ident("x".to_string())),
+                    method: "sqrt".to_string(),
+                    args: vec![],
+                }),
+                method: "floor".to_string(),
+                args: vec![],
+            }
+        );
+    }
+
+    // -- Number/parse API conversion tests --
+
+    #[test]
+    fn test_convert_expr_parse_int() {
+        let expr = parse_expr(r#"parseInt("42");"#);
+        let result = convert_expr(&expr, &TypeRegistry::new(), None).unwrap();
+        // parseInt("42") → "42".parse::<f64>().unwrap()
+        assert_eq!(
+            result,
+            Expr::MethodCall {
+                object: Box::new(Expr::MethodCall {
+                    object: Box::new(Expr::StringLit("42".to_string())),
+                    method: "parse::<f64>".to_string(),
+                    args: vec![],
+                }),
+                method: "unwrap".to_string(),
+                args: vec![],
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_expr_parse_float() {
+        let expr = parse_expr(r#"parseFloat("3.14");"#);
+        let result = convert_expr(&expr, &TypeRegistry::new(), None).unwrap();
+        // parseFloat("3.14") → "3.14".parse::<f64>().unwrap()
+        assert_eq!(
+            result,
+            Expr::MethodCall {
+                object: Box::new(Expr::MethodCall {
+                    object: Box::new(Expr::StringLit("3.14".to_string())),
+                    method: "parse::<f64>".to_string(),
+                    args: vec![],
+                }),
+                method: "unwrap".to_string(),
+                args: vec![],
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_expr_is_nan_global() {
+        let expr = parse_expr("isNaN(x);");
+        let result = convert_expr(&expr, &TypeRegistry::new(), None).unwrap();
+        // isNaN(x) → x.is_nan()
+        assert_eq!(
+            result,
+            Expr::MethodCall {
+                object: Box::new(Expr::Ident("x".to_string())),
+                method: "is_nan".to_string(),
+                args: vec![],
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_expr_number_is_nan() {
+        let expr = parse_expr("Number.isNaN(x);");
+        let result = convert_expr(&expr, &TypeRegistry::new(), None).unwrap();
+        // Number.isNaN(x) → x.is_nan()
+        assert_eq!(
+            result,
+            Expr::MethodCall {
+                object: Box::new(Expr::Ident("x".to_string())),
+                method: "is_nan".to_string(),
+                args: vec![],
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_expr_number_is_finite() {
+        let expr = parse_expr("Number.isFinite(x);");
+        let result = convert_expr(&expr, &TypeRegistry::new(), None).unwrap();
+        // Number.isFinite(x) → x.is_finite()
+        assert_eq!(
+            result,
+            Expr::MethodCall {
+                object: Box::new(Expr::Ident("x".to_string())),
+                method: "is_finite".to_string(),
+                args: vec![],
             }
         );
     }

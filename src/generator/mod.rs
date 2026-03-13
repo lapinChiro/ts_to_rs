@@ -5,10 +5,18 @@ pub mod types;
 mod expressions;
 mod statements;
 
-use crate::ir::{EnumValue, EnumVariant, Item, Method, Visibility};
+use crate::ir::{EnumValue, EnumVariant, Item, Method, Param, Visibility};
 
 use statements::generate_stmt;
 use types::generate_type;
+
+/// Generates a parameter as `name: Type` or just `name` if the type is `None`.
+pub(super) fn generate_param(p: &Param) -> String {
+    match &p.ty {
+        Some(ty) => format!("{}: {}", p.name, generate_type(ty)),
+        None => p.name.clone(),
+    }
+}
 
 /// Generates Rust source code from a list of IR items.
 pub fn generate(items: &[Item]) -> String {
@@ -87,6 +95,7 @@ fn generate_item(item: &Item) -> String {
         }
         Item::Fn {
             vis,
+            is_async,
             name,
             type_params,
             params,
@@ -94,17 +103,19 @@ fn generate_item(item: &Item) -> String {
             body,
         } => {
             let vis_str = generate_vis(vis);
+            let async_str = if *is_async { "async " } else { "" };
             let generics = generate_type_params(type_params);
             let params_str = params
                 .iter()
-                .map(|p| format!("{}: {}", p.name, generate_type(&p.ty)))
+                .map(generate_param)
                 .collect::<Vec<_>>()
                 .join(", ");
             let ret_str = match return_type {
                 Some(ty) => format!(" -> {}", generate_type(ty)),
                 None => String::new(),
             };
-            let mut out = format!("{vis_str}fn {name}{generics}({params_str}){ret_str} {{\n");
+            let mut out =
+                format!("{vis_str}{async_str}fn {name}{generics}({params_str}){ret_str} {{\n");
             let body_len = body.len();
             for (i, stmt) in body.iter().enumerate() {
                 let is_last = i == body_len - 1;
@@ -123,7 +134,7 @@ fn generate_trait_method_sig(method: &Method) -> String {
     let other_params = method
         .params
         .iter()
-        .map(|p| format!("{}: {}", p.name, generate_type(&p.ty)))
+        .map(generate_param)
         .collect::<Vec<_>>()
         .join(", ");
     let params_str = if method.has_self && !other_params.is_empty() {
@@ -147,7 +158,7 @@ fn generate_method(method: &Method) -> String {
     let other_params = method
         .params
         .iter()
-        .map(|p| format!("{}: {}", p.name, generate_type(&p.ty)))
+        .map(generate_param)
         .collect::<Vec<_>>()
         .join(", ");
     let params_str = if method.has_self && !other_params.is_empty() {
@@ -468,16 +479,17 @@ impl Direction {
     fn test_generate_fn_simple_return() {
         let item = Item::Fn {
             vis: Visibility::Public,
+            is_async: false,
             name: "add".to_string(),
             type_params: vec![],
             params: vec![
                 Param {
                     name: "a".to_string(),
-                    ty: RustType::F64,
+                    ty: Some(RustType::F64),
                 },
                 Param {
                     name: "b".to_string(),
-                    ty: RustType::F64,
+                    ty: Some(RustType::F64),
                 },
             ],
             return_type: Some(RustType::F64),
@@ -498,11 +510,12 @@ pub fn add(a: f64, b: f64) -> f64 {
     fn test_generate_fn_no_return_type() {
         let item = Item::Fn {
             vis: Visibility::Private,
+            is_async: false,
             name: "greet".to_string(),
             type_params: vec![],
             params: vec![Param {
                 name: "name".to_string(),
-                ty: RustType::String,
+                ty: Some(RustType::String),
             }],
             return_type: None,
             body: vec![Stmt::Expr(Expr::Ident("println!".to_string()))],
@@ -518,6 +531,7 @@ fn greet(name: String) {
     fn test_generate_fn_no_params() {
         let item = Item::Fn {
             vis: Visibility::Public,
+            is_async: false,
             name: "get_value".to_string(),
             type_params: vec![],
             params: vec![],
@@ -535,14 +549,15 @@ pub fn get_value() -> f64 {
     fn test_generate_fn_with_type_params() {
         let item = Item::Fn {
             vis: Visibility::Public,
+            is_async: false,
             name: "identity".to_string(),
             type_params: vec!["T".to_string()],
             params: vec![Param {
                 name: "x".to_string(),
-                ty: RustType::Named {
+                ty: Some(RustType::Named {
                     name: "T".to_string(),
                     type_args: vec![],
-                },
+                }),
             }],
             return_type: Some(RustType::Named {
                 name: "T".to_string(),
@@ -570,7 +585,7 @@ pub fn identity<T>(x: T) -> T {
                 has_self: false,
                 params: vec![Param {
                     name: "x".to_string(),
-                    ty: RustType::F64,
+                    ty: Some(RustType::F64),
                 }],
                 return_type: Some(RustType::Named {
                     name: "Self".to_string(),

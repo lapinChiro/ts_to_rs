@@ -46,6 +46,7 @@ ts-to-rs input.ts --report-unsupported
 | `class Child extends Parent` | `struct` + `trait` + `impl Trait for Struct` |
 | `super(args)` | 親フィールドの初期化 |
 | アロー関数 (`(x) => x + 1`) | クロージャ (`\|x\| x + 1`) / `fn` |
+| アロー関数 型注釈なし (`(x) => x + 1`) | `\|x\| x + 1` (型推論) |
 | 関数型 (`(x: number) => number`) | `Box<dyn Fn(f64) -> f64>` |
 | `foo(x, y)` | `foo(x, y)` |
 | `obj.method(x)` | `obj.method(x)` |
@@ -56,11 +57,13 @@ ts-to-rs input.ts --report-unsupported
 | `for (const x of items) { ... }` | `for x in items { ... }` |
 | `for (let i = 0; i < n; i++)` | `for i in 0..n { ... }` |
 | `for (let i = n; i >= 0; i--)` (一般形) | `loop { if !(cond) { break; } ... }` |
+| `do { body } while (cond)` | `loop { body; if !(cond) { break; } }` |
 | `[1, 2, 3]` (配列リテラル) | `vec![1.0, 2.0, 3.0]` |
 | `{ x: 1, y: 2 }` (型注記付きオブジェクトリテラル) | `Point { x: 1.0, y: 2.0 }` |
 | `{ x, y }` (shorthand property) | `Point { x, y }` |
 | `const { x, y } = obj` (分割代入) | `let x = obj.x; let y = obj.y;` |
 | `const { x: newX } = obj` (リネーム) | `let newX = obj.x;` |
+| `const [a, b] = arr` (配列分割代入) | `let a = arr[0]; let b = arr[1];` |
 | `{ origin: { x: 0, y: 0 } }` (ネストしたオブジェクト) | `Rect { origin: Origin { x: 0.0, y: 0.0 } }` |
 | `draw({ x: 0, y: 0 })` (関数引数のオブジェクト) | `draw(Point { x: 0.0, y: 0.0 })` |
 | `Color.Red` (enum メンバーアクセス) | `Color::Red` |
@@ -71,8 +74,32 @@ ts-to-rs input.ts --report-unsupported
 | `const s: string = "hello"` | `let s: String = "hello".to_string()` |
 | `enum` (数値) | `enum` + `#[repr(i64)]` |
 | `enum` (文字列) | `enum` + `as_str()` メソッド |
+| `!x` / `-x` (単項演算子) | `!x` / `-x` |
+| `function foo(): void {}` | `fn foo() {}` (戻り値型省略) |
+| `(x: number) => void` (コールバック型) | `Box<dyn Fn(f64)>` |
+| `async function foo(): Promise<T>` | `async fn foo() -> T` |
+| `await expr` | `expr.await` |
 | `console.log(x)` | `println!("{:?}", x)` |
 | `console.error(x)` / `console.warn(x)` | `eprintln!("{:?}", x)` |
+| `s.length` | `s.len() as f64` |
+| `s.includes(x)` | `s.contains(x)` |
+| `s.startsWith(x)` / `s.endsWith(x)` | `s.starts_with(x)` / `s.ends_with(x)` |
+| `s.trim()` | `s.trim().to_string()` |
+| `s.toLowerCase()` / `s.toUpperCase()` | `s.to_lowercase()` / `s.to_uppercase()` |
+| `s.split(x)` | `s.split(x).collect::<Vec<&str>>()` |
+| `s.replace(a, b)` | `s.replace(a, b)` |
+| `arr.map(fn)` | `arr.iter().map(fn).collect::<Vec<_>>()` |
+| `arr.filter(fn)` | `arr.iter().filter(fn).collect::<Vec<_>>()` |
+| `arr.find(fn)` | `arr.iter().find(fn)` |
+| `arr.some(fn)` / `arr.every(fn)` | `arr.iter().any(fn)` / `arr.iter().all(fn)` |
+| `arr.forEach(fn)` | `arr.iter().for_each(fn)` |
+| `Math.floor(x)` / `Math.ceil(x)` / `Math.round(x)` | `x.floor()` / `x.ceil()` / `x.round()` |
+| `Math.abs(x)` / `Math.sqrt(x)` | `x.abs()` / `x.sqrt()` |
+| `Math.max(a, b)` / `Math.min(a, b)` | `a.max(b)` / `a.min(b)` |
+| `Math.pow(x, y)` | `x.powf(y)` |
+| `parseInt(s)` / `parseFloat(s)` | `s.parse::<f64>().unwrap()` |
+| `isNaN(x)` / `Number.isNaN(x)` | `x.is_nan()` |
+| `Number.isFinite(x)` | `x.is_finite()` |
 | `export` | `pub` |
 
 ## 例

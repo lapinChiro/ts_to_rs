@@ -9,6 +9,7 @@ use crate::ir::{Expr, RustType, Stmt};
 use crate::registry::TypeRegistry;
 use crate::transformer::expressions::convert_expr;
 use crate::transformer::types::convert_ts_type;
+use crate::transformer::{extract_pat_ident_name, extract_prop_name, single_declarator};
 
 /// Converts an SWC [`ast::Stmt`] into an IR [`Stmt`].
 ///
@@ -59,6 +60,7 @@ pub fn convert_stmt(
             Ok(Stmt::Continue { label })
         }
         ast::Stmt::Labeled(labeled_stmt) => convert_labeled_stmt(labeled_stmt, reg, return_type),
+        ast::Stmt::DoWhile(do_while) => convert_do_while_stmt(do_while, reg, return_type),
         _ => Err(anyhow!("unsupported statement: {:?}", stmt)),
     }
 }
@@ -69,17 +71,9 @@ pub fn convert_stmt(
 /// - `let` / `var` → mutable (`let mut`)
 fn convert_var_decl(var_decl: &ast::VarDecl, reg: &TypeRegistry) -> Result<Stmt> {
     // We only handle single-declarator variable declarations
-    if var_decl.decls.len() != 1 {
-        return Err(anyhow!(
-            "multiple variable declarators in one statement are not supported"
-        ));
-    }
-    let declarator = &var_decl.decls[0];
+    let declarator = single_declarator(var_decl)?;
 
-    let name = match &declarator.name {
-        ast::Pat::Ident(ident) => ident.id.sym.to_string(),
-        _ => return Err(anyhow!("unsupported variable binding pattern")),
-    };
+    let name = extract_pat_ident_name(&declarator.name)?;
 
     let mutable = !matches!(var_decl.kind, ast::VarDeclKind::Const);
 
@@ -142,14 +136,10 @@ fn convert_for_stmt(
     // Extract: let <var> = <start>
     let (var, start) = match &for_stmt.init {
         Some(ast::VarDeclOrExpr::VarDecl(var_decl)) => {
-            if var_decl.decls.len() != 1 {
-                return Err(anyhow!("unsupported for loop: multiple declarators"));
-            }
-            let decl = &var_decl.decls[0];
-            let name = match &decl.name {
-                ast::Pat::Ident(ident) => ident.id.sym.to_string(),
-                _ => return Err(anyhow!("unsupported for loop: non-ident binding")),
-            };
+            let decl = single_declarator(var_decl)
+                .map_err(|_| anyhow!("unsupported for loop: multiple declarators"))?;
+            let name = extract_pat_ident_name(&decl.name)
+                .map_err(|_| anyhow!("unsupported for loop: non-ident binding"))?;
             let init = decl
                 .init
                 .as_ref()
@@ -225,15 +215,10 @@ fn convert_for_of_stmt(
 ) -> Result<Stmt> {
     let var = match &for_of.left {
         ast::ForHead::VarDecl(var_decl) => {
-            if var_decl.decls.len() != 1 {
-                return Err(anyhow!(
-                    "for...of with multiple declarators is not supported"
-                ));
-            }
-            match &var_decl.decls[0].name {
-                ast::Pat::Ident(ident) => ident.id.sym.to_string(),
-                _ => return Err(anyhow!("unsupported for...of binding pattern")),
-            }
+            let decl = single_declarator(var_decl)
+                .map_err(|_| anyhow!("for...of with multiple declarators is not supported"))?;
+            extract_pat_ident_name(&decl.name)
+                .map_err(|_| anyhow!("unsupported for...of binding pattern"))?
         }
         _ => return Err(anyhow!("unsupported for...of left-hand side")),
     };
@@ -366,6 +351,8 @@ pub fn convert_stmt_list(
             ast::Stmt::Decl(ast::Decl::Var(var_decl)) => {
                 if let Some(expanded) = try_convert_object_destructuring(var_decl, reg)? {
                     result.extend(expanded);
+                } else if let Some(expanded) = try_convert_array_destructuring(var_decl, reg)? {
+                    result.extend(expanded);
                 } else {
                     result.push(convert_stmt(stmt, reg, return_type)?);
                 }
@@ -397,10 +384,10 @@ fn try_convert_object_destructuring(
     var_decl: &ast::VarDecl,
     reg: &TypeRegistry,
 ) -> Result<Option<Vec<Stmt>>> {
-    if var_decl.decls.len() != 1 {
-        return Ok(None);
-    }
-    let declarator = &var_decl.decls[0];
+    let declarator = match single_declarator(var_decl) {
+        Ok(d) => d,
+        Err(_) => return Ok(None),
+    };
 
     let obj_pat = match &declarator.name {
         ast::Pat::Object(obj_pat) => obj_pat,
@@ -433,14 +420,10 @@ fn try_convert_object_destructuring(
             }
             ast::ObjectPatProp::KeyValue(kv) => {
                 // { x: newX } — rename
-                let field_name = match &kv.key {
-                    ast::PropName::Ident(ident) => ident.sym.to_string(),
-                    _ => return Err(anyhow!("unsupported destructuring key")),
-                };
-                let binding_name = match kv.value.as_ref() {
-                    ast::Pat::Ident(ident) => ident.id.sym.to_string(),
-                    _ => return Err(anyhow!("unsupported destructuring value pattern")),
-                };
+                let field_name = extract_prop_name(&kv.key)
+                    .map_err(|_| anyhow!("unsupported destructuring key"))?;
+                let binding_name = extract_pat_ident_name(kv.value.as_ref())
+                    .map_err(|_| anyhow!("unsupported destructuring value pattern"))?;
                 stmts.push(Stmt::Let {
                     mutable,
                     name: binding_name,
@@ -455,6 +438,88 @@ fn try_convert_object_destructuring(
                 return Err(anyhow!("rest pattern in destructuring is not supported"));
             }
         }
+    }
+
+    Ok(Some(stmts))
+}
+
+/// Converts a `do...while` statement to `loop { body; if !(cond) { break; } }`.
+fn convert_do_while_stmt(
+    do_while: &ast::DoWhileStmt,
+    reg: &TypeRegistry,
+    return_type: Option<&RustType>,
+) -> Result<Stmt> {
+    let body_stmts = match do_while.body.as_ref() {
+        ast::Stmt::Block(block) => convert_stmt_list(&block.stmts, reg, return_type)?,
+        single => vec![convert_stmt(single, reg, return_type)?],
+    };
+
+    let condition = convert_expr(&do_while.test, reg, None)?;
+    let break_check = Stmt::If {
+        condition: Expr::UnaryOp {
+            op: "!".to_string(),
+            operand: Box::new(condition),
+        },
+        then_body: vec![Stmt::Break { label: None }],
+        else_body: None,
+    };
+
+    let mut loop_body = body_stmts;
+    loop_body.push(break_check);
+
+    Ok(Stmt::Loop {
+        label: None,
+        body: loop_body,
+    })
+}
+
+/// Expands array destructuring into individual indexed `let` bindings.
+///
+/// `const [a, b] = arr` → `[let a = arr[0], let b = arr[1]]`
+///
+/// Returns `None` if the declaration is not an array destructuring pattern.
+fn try_convert_array_destructuring(
+    var_decl: &ast::VarDecl,
+    reg: &TypeRegistry,
+) -> Result<Option<Vec<Stmt>>> {
+    let declarator = match single_declarator(var_decl) {
+        Ok(d) => d,
+        Err(_) => return Ok(None),
+    };
+
+    let arr_pat = match &declarator.name {
+        ast::Pat::Array(arr_pat) => arr_pat,
+        _ => return Ok(None),
+    };
+
+    let source = declarator
+        .init
+        .as_ref()
+        .ok_or_else(|| anyhow!("array destructuring requires an initializer"))?;
+    let source_expr = convert_expr(source, reg, None)?;
+
+    let mutable = !matches!(var_decl.kind, ast::VarDeclKind::Const);
+    let mut stmts = Vec::new();
+
+    for (i, elem) in arr_pat.elems.iter().enumerate() {
+        let pat = match elem {
+            Some(pat) => pat,
+            None => {
+                return Err(anyhow!(
+                    "skipping elements in array destructuring is not supported"
+                ))
+            }
+        };
+        let name = extract_pat_ident_name(pat)?;
+        stmts.push(Stmt::Let {
+            mutable,
+            name,
+            ty: None,
+            init: Some(Expr::Index {
+                object: Box::new(source_expr.clone()),
+                index: Box::new(Expr::NumberLit(i as f64)),
+            }),
+        });
     }
 
     Ok(Some(stmts))
@@ -475,14 +540,10 @@ fn convert_for_stmt_as_loop(
     // 1. Extract init → Stmt::Let { mutable: true, ... }
     match &for_stmt.init {
         Some(ast::VarDeclOrExpr::VarDecl(var_decl)) => {
-            if var_decl.decls.len() != 1 {
-                return Err(anyhow!("unsupported for loop: multiple declarators"));
-            }
-            let decl = &var_decl.decls[0];
-            let name = match &decl.name {
-                ast::Pat::Ident(ident) => ident.id.sym.to_string(),
-                _ => return Err(anyhow!("unsupported for loop: non-ident binding")),
-            };
+            let decl = single_declarator(var_decl)
+                .map_err(|_| anyhow!("unsupported for loop: multiple declarators"))?;
+            let name = extract_pat_ident_name(&decl.name)
+                .map_err(|_| anyhow!("unsupported for loop: non-ident binding"))?;
             let init_expr = decl
                 .init
                 .as_ref()
@@ -1127,5 +1188,107 @@ mod tests {
             }
             _ => panic!("expected labeled ForIn"),
         }
+    }
+
+    // -- Array destructuring tests --
+
+    #[test]
+    fn test_convert_stmt_list_array_destructuring_basic() {
+        let stmts = parse_fn_body("function f(arr: number[]) { const [a, b] = arr; }");
+        let result = convert_stmt_list(&stmts, &TypeRegistry::new(), None).unwrap();
+        assert_eq!(result.len(), 2);
+        assert_eq!(
+            result[0],
+            Stmt::Let {
+                mutable: false,
+                name: "a".to_string(),
+                ty: None,
+                init: Some(Expr::Index {
+                    object: Box::new(Expr::Ident("arr".to_string())),
+                    index: Box::new(Expr::NumberLit(0.0)),
+                }),
+            }
+        );
+        assert_eq!(
+            result[1],
+            Stmt::Let {
+                mutable: false,
+                name: "b".to_string(),
+                ty: None,
+                init: Some(Expr::Index {
+                    object: Box::new(Expr::Ident("arr".to_string())),
+                    index: Box::new(Expr::NumberLit(1.0)),
+                }),
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_stmt_list_array_destructuring_let_mutable() {
+        let stmts = parse_fn_body("function f(arr: number[]) { let [x, y] = arr; }");
+        let result = convert_stmt_list(&stmts, &TypeRegistry::new(), None).unwrap();
+        assert_eq!(result.len(), 2);
+        assert!(matches!(&result[0], Stmt::Let { mutable: true, name, .. } if name == "x"));
+        assert!(matches!(&result[1], Stmt::Let { mutable: true, name, .. } if name == "y"));
+    }
+
+    #[test]
+    fn test_convert_stmt_list_array_destructuring_single_element() {
+        let stmts = parse_fn_body("function f(arr: number[]) { const [a] = arr; }");
+        let result = convert_stmt_list(&stmts, &TypeRegistry::new(), None).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(
+            result[0],
+            Stmt::Let {
+                mutable: false,
+                name: "a".to_string(),
+                ty: None,
+                init: Some(Expr::Index {
+                    object: Box::new(Expr::Ident("arr".to_string())),
+                    index: Box::new(Expr::NumberLit(0.0)),
+                }),
+            }
+        );
+    }
+
+    // -- do...while tests --
+
+    #[test]
+    fn test_convert_stmt_do_while_basic() {
+        let stmts = parse_fn_body("function f(x: number) { do { x = x + 1; } while (x < 10); }");
+        let result = convert_stmt_list(&stmts, &TypeRegistry::new(), None).unwrap();
+        assert_eq!(result.len(), 1);
+        match &result[0] {
+            Stmt::Loop { label, body } => {
+                assert!(label.is_none());
+                // body should have: x = x + 1, then if !(x < 10) { break; }
+                assert_eq!(body.len(), 2);
+                assert!(matches!(&body[0], Stmt::Expr(Expr::Assign { .. })));
+                match &body[1] {
+                    Stmt::If {
+                        condition,
+                        then_body,
+                        else_body,
+                    } => {
+                        assert!(matches!(condition, Expr::UnaryOp { op, .. } if op == "!"));
+                        assert_eq!(then_body.len(), 1);
+                        assert!(matches!(&then_body[0], Stmt::Break { label: None }));
+                        assert!(else_body.is_none());
+                    }
+                    _ => panic!("expected If statement for break condition"),
+                }
+            }
+            _ => panic!("expected Loop"),
+        }
+    }
+
+    #[test]
+    fn test_convert_stmt_list_array_destructuring_three_elements() {
+        let stmts = parse_fn_body("function f(arr: number[]) { const [a, b, c] = arr; }");
+        let result = convert_stmt_list(&stmts, &TypeRegistry::new(), None).unwrap();
+        assert_eq!(result.len(), 3);
+        assert!(matches!(&result[0], Stmt::Let { name, .. } if name == "a"));
+        assert!(matches!(&result[1], Stmt::Let { name, .. } if name == "b"));
+        assert!(matches!(&result[2], Stmt::Let { name, .. } if name == "c"));
     }
 }

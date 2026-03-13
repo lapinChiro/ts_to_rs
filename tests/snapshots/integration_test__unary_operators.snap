@@ -1,0 +1,18 @@
+---
+source: tests/integration_test.rs
+expression: output
+---
+fn negate(x: bool) -> bool {
+    !x
+}
+
+fn abs(x: f64) -> f64 {
+    if x < 0.0 {
+        return -x;
+    }
+    x
+}
+
+fn isInRange(x: f64, min: f64, max: f64) -> bool {
+    !(x < min) && !(x > max)
+}

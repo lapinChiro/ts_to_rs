@@ -165,6 +165,69 @@ fn test_unsupported_syntax_collecting_output() {
 }
 
 #[test]
+fn test_string_methods() {
+    let input = fs::read_to_string("tests/fixtures/string-methods.input.ts").unwrap();
+    let output = transpile(&input).unwrap();
+    insta::assert_snapshot!(output);
+}
+
+#[test]
+fn test_array_methods() {
+    let input = fs::read_to_string("tests/fixtures/array-methods.input.ts").unwrap();
+    let output = transpile(&input).unwrap();
+    insta::assert_snapshot!(output);
+}
+
+#[test]
+fn test_do_while() {
+    let input = fs::read_to_string("tests/fixtures/do-while.input.ts").unwrap();
+    let output = transpile(&input).unwrap();
+    insta::assert_snapshot!(output);
+}
+
+#[test]
+fn test_array_destructuring() {
+    let input = fs::read_to_string("tests/fixtures/array-destructuring.input.ts").unwrap();
+    let output = transpile(&input).unwrap();
+    insta::assert_snapshot!(output);
+}
+
+#[test]
+fn test_number_parse_api() {
+    let input = fs::read_to_string("tests/fixtures/number-parse-api.input.ts").unwrap();
+    let output = transpile(&input).unwrap();
+    insta::assert_snapshot!(output);
+}
+
+#[test]
+fn test_math_api() {
+    let input = fs::read_to_string("tests/fixtures/math-api.input.ts").unwrap();
+    let output = transpile(&input).unwrap();
+    insta::assert_snapshot!(output);
+}
+
+#[test]
+fn test_async_await() {
+    let input = fs::read_to_string("tests/fixtures/async-await.input.ts").unwrap();
+    let output = transpile(&input).unwrap();
+    insta::assert_snapshot!(output);
+}
+
+#[test]
+fn test_unary_operators() {
+    let input = fs::read_to_string("tests/fixtures/unary-operators.input.ts").unwrap();
+    let output = transpile(&input).unwrap();
+    insta::assert_snapshot!(output);
+}
+
+#[test]
+fn test_void_type() {
+    let input = fs::read_to_string("tests/fixtures/void-type.input.ts").unwrap();
+    let output = transpile(&input).unwrap();
+    insta::assert_snapshot!(output);
+}
+
+#[test]
 fn test_unsupported_syntax_default_errors() {
     let input = fs::read_to_string("tests/fixtures/unsupported-syntax.input.ts").unwrap();
     let result = transpile(&input);

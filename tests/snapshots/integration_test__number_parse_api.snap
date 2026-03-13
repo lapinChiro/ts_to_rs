@@ -1,0 +1,19 @@
+---
+source: tests/integration_test.rs
+expression: output
+---
+fn toInt(s: String) -> f64 {
+    s.parse::<f64>().unwrap()
+}
+
+fn toFloat(s: String) -> f64 {
+    s.parse::<f64>().unwrap()
+}
+
+fn checkNaN(x: f64) -> bool {
+    x.is_nan()
+}
+
+fn checkFinite(x: f64) -> bool {
+    x.is_finite()
+}

@@ -152,6 +152,7 @@ mod tests {
     fn test_generate_let_simple() {
         let item = Item::Fn {
             vis: Visibility::Private,
+            is_async: false,
             name: "f".to_string(),
             type_params: vec![],
             params: vec![],
@@ -174,6 +175,7 @@ fn f() {
     fn test_generate_let_mut_with_type() {
         let item = Item::Fn {
             vis: Visibility::Private,
+            is_async: false,
             name: "f".to_string(),
             type_params: vec![],
             params: vec![],
@@ -196,6 +198,7 @@ fn f() {
     fn test_generate_let_no_init() {
         let item = Item::Fn {
             vis: Visibility::Private,
+            is_async: false,
             name: "f".to_string(),
             type_params: vec![],
             params: vec![],
@@ -218,6 +221,7 @@ fn f() {
     fn test_generate_if_no_else() {
         let item = Item::Fn {
             vis: Visibility::Private,
+            is_async: false,
             name: "f".to_string(),
             type_params: vec![],
             params: vec![],
@@ -241,6 +245,7 @@ fn f() {
     fn test_generate_if_with_else() {
         let item = Item::Fn {
             vis: Visibility::Private,
+            is_async: false,
             name: "f".to_string(),
             type_params: vec![],
             params: vec![],
@@ -266,6 +271,7 @@ fn f() {
     fn test_generate_while() {
         let item = Item::Fn {
             vis: Visibility::Private,
+            is_async: false,
             name: "f".to_string(),
             type_params: vec![],
             params: vec![],
@@ -289,6 +295,7 @@ fn f() {
     fn test_generate_for_in_range() {
         let item = Item::Fn {
             vis: Visibility::Private,
+            is_async: false,
             name: "f".to_string(),
             type_params: vec![],
             params: vec![],
@@ -316,6 +323,7 @@ fn f() {
     fn test_generate_for_in_iterable() {
         let item = Item::Fn {
             vis: Visibility::Private,
+            is_async: false,
             name: "f".to_string(),
             type_params: vec![],
             params: vec![],
@@ -340,6 +348,7 @@ fn f() {
     fn test_generate_loop_basic() {
         let item = Item::Fn {
             vis: Visibility::Private,
+            is_async: false,
             name: "f".to_string(),
             type_params: vec![],
             params: vec![],
@@ -362,6 +371,7 @@ fn f() {
     fn test_generate_return_bare() {
         let item = Item::Fn {
             vis: Visibility::Private,
+            is_async: false,
             name: "f".to_string(),
             type_params: vec![],
             params: vec![],
@@ -383,6 +393,7 @@ fn f() {
     fn test_generate_return_not_last_uses_return_keyword() {
         let item = Item::Fn {
             vis: Visibility::Private,
+            is_async: false,
             name: "f".to_string(),
             type_params: vec![],
             params: vec![],

@@ -22,6 +22,40 @@ use crate::transformer::classes::ClassInfo;
 use crate::transformer::expressions::convert_expr;
 use crate::transformer::types::convert_ts_type;
 
+/// Extracts the identifier name from a [`ast::Pat::Ident`] pattern.
+///
+/// Returns an error if the pattern is not an identifier binding.
+pub fn extract_pat_ident_name(pat: &ast::Pat) -> Result<String> {
+    match pat {
+        ast::Pat::Ident(ident) => Ok(ident.id.sym.to_string()),
+        _ => Err(anyhow::anyhow!("unsupported pattern: expected identifier")),
+    }
+}
+
+/// Extracts the single declarator from a [`ast::VarDecl`].
+///
+/// Returns an error if the declaration contains zero or more than one declarator.
+pub fn single_declarator(var_decl: &ast::VarDecl) -> Result<&ast::VarDeclarator> {
+    if var_decl.decls.len() != 1 {
+        return Err(anyhow::anyhow!(
+            "multiple variable declarators in one statement are not supported"
+        ));
+    }
+    Ok(&var_decl.decls[0])
+}
+
+/// Extracts the property name string from a [`ast::PropName::Ident`].
+///
+/// Returns an error if the property name is not a simple identifier.
+pub fn extract_prop_name(prop_name: &ast::PropName) -> Result<String> {
+    match prop_name {
+        ast::PropName::Ident(ident) => Ok(ident.sym.to_string()),
+        _ => Err(anyhow::anyhow!(
+            "unsupported property name (only identifiers)"
+        )),
+    }
+}
+
 /// Error type for unsupported TypeScript syntax encountered during transformation.
 ///
 /// Used to distinguish unsupported-syntax errors from other transformation errors,
@@ -281,9 +315,9 @@ fn convert_var_decl_arrow_fns(
             swc_ecma_ast::Expr::Arrow(arrow) => arrow,
             _ => continue,
         };
-        let name = match &decl.name {
-            swc_ecma_ast::Pat::Ident(ident) => ident.id.sym.to_string(),
-            _ => continue,
+        let name = match extract_pat_ident_name(&decl.name) {
+            Ok(n) => n,
+            Err(_) => continue,
         };
 
         // Convert the arrow to a closure IR, then extract parts for Item::Fn
@@ -311,6 +345,7 @@ fn convert_var_decl_arrow_fns(
                     crate::transformer::types::extract_type_params(arrow.type_params.as_deref());
                 items.push(Item::Fn {
                     vis: vis.clone(),
+                    is_async: arrow.is_async,
                     name,
                     type_params,
                     params,
@@ -567,16 +602,17 @@ mod tests {
             items[0],
             Item::Fn {
                 vis: Visibility::Private,
+                is_async: false,
                 name: "add".to_string(),
                 type_params: vec![],
                 params: vec![
                     Param {
                         name: "a".to_string(),
-                        ty: RustType::F64,
+                        ty: Some(RustType::F64),
                     },
                     Param {
                         name: "b".to_string(),
-                        ty: RustType::F64,
+                        ty: Some(RustType::F64),
                     },
                 ],
                 return_type: Some(RustType::F64),

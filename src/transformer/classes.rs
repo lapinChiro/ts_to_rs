@@ -8,6 +8,7 @@ use swc_ecma_ast as ast;
 use crate::ir::{Expr, Item, Method, Param, RustType, Stmt, StructField, Visibility};
 use crate::registry::TypeRegistry;
 use crate::transformer::expressions::convert_expr;
+use crate::transformer::extract_prop_name;
 use crate::transformer::statements::convert_stmt;
 use crate::transformer::types::convert_ts_type;
 
@@ -316,10 +317,8 @@ fn try_extract_super_call(stmt: &Stmt) -> Option<Vec<Expr>> {
 
 /// Converts a class property to a struct field.
 fn convert_class_prop(prop: &ast::ClassProp) -> Result<StructField> {
-    let field_name = match &prop.key {
-        ast::PropName::Ident(ident) => ident.sym.to_string(),
-        _ => return Err(anyhow!("unsupported class property key (only identifiers)")),
-    };
+    let field_name = extract_prop_name(&prop.key)
+        .map_err(|_| anyhow!("unsupported class property key (only identifiers)"))?;
 
     let type_ann = prop
         .type_ann
@@ -433,10 +432,8 @@ fn convert_class_method(
     vis: &Visibility,
     reg: &TypeRegistry,
 ) -> Result<Method> {
-    let name = match &method.key {
-        ast::PropName::Ident(ident) => ident.sym.to_string(),
-        _ => return Err(anyhow!("unsupported method key (only identifiers)")),
-    };
+    let name = extract_prop_name(&method.key)
+        .map_err(|_| anyhow!("unsupported method key (only identifiers)"))?;
 
     let mut params = Vec::new();
     for param in &method.function.params {
@@ -450,6 +447,15 @@ fn convert_class_method(
         .as_ref()
         .map(|ann| convert_ts_type(&ann.type_ann))
         .transpose()?;
+
+    // void → None (Rust omits `-> ()`)
+    let return_type = return_type.and_then(|ty| {
+        if matches!(ty, RustType::Unit) {
+            None
+        } else {
+            Some(ty)
+        }
+    });
 
     let body = match &method.function.body {
         Some(block) => {
@@ -484,7 +490,7 @@ fn convert_param_pat(pat: &ast::Pat) -> Result<Param> {
             let rust_type = convert_ts_type(&ty.type_ann)?;
             Ok(Param {
                 name,
-                ty: rust_type,
+                ty: Some(rust_type),
             })
         }
         _ => Err(anyhow!("unsupported parameter pattern")),
@@ -562,7 +568,7 @@ mod tests {
                     methods[0].params,
                     vec![Param {
                         name: "x".to_string(),
-                        ty: RustType::F64,
+                        ty: Some(RustType::F64),
                     }]
                 );
             }

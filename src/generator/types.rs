@@ -5,6 +5,7 @@ use crate::ir::RustType;
 /// Generates the Rust type syntax for a [`RustType`].
 pub fn generate_type(ty: &RustType) -> String {
     match ty {
+        RustType::Unit => "()".to_string(),
         RustType::String => "String".to_string(),
         RustType::F64 => "f64".to_string(),
         RustType::Bool => "bool".to_string(),
@@ -22,10 +23,14 @@ pub fn generate_type(ty: &RustType) -> String {
                 .map(generate_type)
                 .collect::<Vec<_>>()
                 .join(", ");
-            format!(
-                "Box<dyn Fn({params_str}) -> {}>",
-                generate_type(return_type)
-            )
+            if matches!(return_type.as_ref(), RustType::Unit) {
+                format!("Box<dyn Fn({params_str})>")
+            } else {
+                format!(
+                    "Box<dyn Fn({params_str}) -> {}>",
+                    generate_type(return_type)
+                )
+            }
         }
         RustType::Named { name, type_args } => {
             if type_args.is_empty() {
@@ -153,5 +158,28 @@ mod tests {
             type_args: vec![RustType::String, RustType::F64],
         };
         assert_eq!(generate_type(&ty), "HashMap<String, f64>");
+    }
+
+    #[test]
+    fn test_generate_type_unit() {
+        assert_eq!(generate_type(&RustType::Unit), "()");
+    }
+
+    #[test]
+    fn test_generate_type_fn_void_return_single_param() {
+        let ty = RustType::Fn {
+            params: vec![RustType::F64],
+            return_type: Box::new(RustType::Unit),
+        };
+        assert_eq!(generate_type(&ty), "Box<dyn Fn(f64)>");
+    }
+
+    #[test]
+    fn test_generate_type_fn_void_return_no_params() {
+        let ty = RustType::Fn {
+            params: vec![],
+            return_type: Box::new(RustType::Unit),
+        };
+        assert_eq!(generate_type(&ty), "Box<dyn Fn()>");
     }
 }

@@ -31,6 +31,7 @@ pub fn convert_ts_type(ts_type: &TsType) -> Result<RustType> {
             TsKeywordTypeKind::TsStringKeyword => Ok(RustType::String),
             TsKeywordTypeKind::TsNumberKeyword => Ok(RustType::F64),
             TsKeywordTypeKind::TsBooleanKeyword => Ok(RustType::Bool),
+            TsKeywordTypeKind::TsVoidKeyword => Ok(RustType::Unit),
             other => Err(anyhow!("unsupported keyword type: {:?}", other)),
         },
         TsType::TsArrayType(arr) => {
@@ -589,5 +590,24 @@ mod tests {
         let decl = parse_type_alias("type Name = string;");
         let result = convert_type_alias(&decl, Visibility::Public);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_convert_ts_type_void_returns_unit() {
+        let decl = parse_interface("interface T { callback: () => void; }");
+        let prop = match &decl.body.body[0] {
+            TsTypeElement::TsPropertySignature(p) => p,
+            _ => panic!("expected property signature"),
+        };
+        // The callback type is `() => void`, which is a TsFnType
+        // whose return type is void. We check the return type is Unit.
+        let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann).unwrap();
+        assert_eq!(
+            ty,
+            RustType::Fn {
+                params: vec![],
+                return_type: Box::new(RustType::Unit),
+            }
+        );
     }
 }

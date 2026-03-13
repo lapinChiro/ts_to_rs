@@ -28,12 +28,31 @@ pub fn convert_fn_decl(fn_decl: &ast::FnDecl, vis: Visibility, reg: &TypeRegistr
         params.push(p);
     }
 
+    let is_async = fn_decl.function.is_async;
+
     let return_type = fn_decl
         .function
         .return_type
         .as_ref()
         .map(|ann| convert_ts_type(&ann.type_ann))
         .transpose()?;
+
+    // void → None (Rust omits `-> ()`)
+    let return_type = return_type.and_then(|ty| {
+        if matches!(ty, RustType::Unit) {
+            None
+        } else {
+            Some(ty)
+        }
+    });
+
+    // Unwrap Promise<T> → T for async functions (before body conversion
+    // so that return type context propagates correctly)
+    let return_type = if is_async {
+        return_type.and_then(unwrap_promise_type)
+    } else {
+        return_type
+    };
 
     let body = match &fn_decl.function.body {
         Some(block) => convert_stmt_list(&block.stmts, reg, return_type.as_ref())?,
@@ -66,6 +85,7 @@ pub fn convert_fn_decl(fn_decl: &ast::FnDecl, vis: Visibility, reg: &TypeRegistr
 
     Ok(Item::Fn {
         vis,
+        is_async,
         name,
         type_params,
         params,
@@ -86,10 +106,24 @@ fn convert_param(pat: &ast::Pat) -> Result<Param> {
             let rust_type = convert_ts_type(&ty.type_ann)?;
             Ok(Param {
                 name,
-                ty: rust_type,
+                ty: Some(rust_type),
             })
         }
         _ => Err(anyhow!("unsupported parameter pattern")),
+    }
+}
+
+/// Unwraps `Promise<T>` to `T` for async function return types.
+///
+/// If the type is `Named { name: "Promise", type_args: [T] }`, returns `Some(T)`.
+/// Otherwise returns the type unchanged.
+fn unwrap_promise_type(ty: RustType) -> Option<RustType> {
+    match ty {
+        RustType::Named {
+            ref name,
+            ref type_args,
+        } if name == "Promise" && type_args.len() == 1 => Some(type_args[0].clone()),
+        other => Some(other),
     }
 }
 
@@ -179,16 +213,17 @@ mod tests {
             item,
             Item::Fn {
                 vis: Visibility::Public,
+                is_async: false,
                 name: "add".to_string(),
                 type_params: vec![],
                 params: vec![
                     Param {
                         name: "a".to_string(),
-                        ty: RustType::F64,
+                        ty: Some(RustType::F64),
                     },
                     Param {
                         name: "b".to_string(),
-                        ty: RustType::F64,
+                        ty: Some(RustType::F64),
                     },
                 ],
                 return_type: Some(RustType::F64),
@@ -351,5 +386,54 @@ mod tests {
         let fn_decl = parse_fn_decl("function bad(x) { return x; }");
         let result = convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new());
         assert!(result.is_err());
+    }
+
+    // -- async function tests --
+
+    #[test]
+    fn test_convert_fn_decl_async_is_async() {
+        let fn_decl = parse_fn_decl("async function fetchData(): Promise<number> { return 42; }");
+        let item = convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new()).unwrap();
+        match item {
+            Item::Fn {
+                is_async,
+                return_type,
+                ..
+            } => {
+                assert!(is_async);
+                // Promise<number> should unwrap to f64
+                assert_eq!(return_type, Some(RustType::F64));
+            }
+            _ => panic!("expected Item::Fn"),
+        }
+    }
+
+    #[test]
+    fn test_convert_fn_decl_async_no_return_type() {
+        let fn_decl = parse_fn_decl("async function doWork() { return; }");
+        let item = convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new()).unwrap();
+        match item {
+            Item::Fn {
+                is_async,
+                return_type,
+                ..
+            } => {
+                assert!(is_async);
+                assert_eq!(return_type, None);
+            }
+            _ => panic!("expected Item::Fn"),
+        }
+    }
+
+    #[test]
+    fn test_convert_fn_decl_sync_is_not_async() {
+        let fn_decl = parse_fn_decl("function add(a: number, b: number): number { return a + b; }");
+        let item = convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new()).unwrap();
+        match item {
+            Item::Fn { is_async, .. } => {
+                assert!(!is_async);
+            }
+            _ => panic!("expected Item::Fn"),
+        }
     }
 }
