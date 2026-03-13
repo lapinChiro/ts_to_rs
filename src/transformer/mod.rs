@@ -87,10 +87,12 @@ impl std::error::Error for UnsupportedSyntaxError {}
 pub fn transform_module(module: &Module, reg: &TypeRegistry) -> Result<Vec<Item>> {
     // Pre-scan: collect class info for inheritance resolution
     let class_map = pre_scan_classes(module, reg);
+    let iface_methods = pre_scan_interface_methods(module);
 
     let mut items = Vec::new();
     for module_item in &module.body {
-        let (converted, _warnings) = transform_module_item(module_item, reg, &class_map, false)?;
+        let (converted, _warnings) =
+            transform_module_item(module_item, reg, &class_map, &iface_methods, false)?;
         items.extend(converted);
     }
 
@@ -112,12 +114,13 @@ pub fn transform_module_collecting(
     reg: &TypeRegistry,
 ) -> Result<(Vec<Item>, Vec<UnsupportedSyntaxError>)> {
     let class_map = pre_scan_classes(module, reg);
+    let iface_methods = pre_scan_interface_methods(module);
 
     let mut items = Vec::new();
     let mut unsupported = Vec::new();
 
     for module_item in &module.body {
-        match transform_module_item(module_item, reg, &class_map, true) {
+        match transform_module_item(module_item, reg, &class_map, &iface_methods, true) {
             Ok((converted, warnings)) => {
                 items.extend(converted);
                 for warning in warnings {
@@ -172,6 +175,49 @@ fn pre_scan_classes(module: &Module, reg: &TypeRegistry) -> HashMap<String, Clas
     map
 }
 
+/// Pre-scans all interface declarations to collect method names per interface.
+///
+/// Used by `implements` processing to determine which class methods belong to
+/// which trait impl block.
+fn pre_scan_interface_methods(module: &Module) -> HashMap<String, Vec<String>> {
+    let mut map = HashMap::new();
+
+    for module_item in &module.body {
+        let decl = match module_item {
+            ModuleItem::Stmt(Stmt::Decl(Decl::TsInterface(d))) => d,
+            ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(export)) => {
+                if let Decl::TsInterface(d) = &export.decl {
+                    d
+                } else {
+                    continue;
+                }
+            }
+            _ => continue,
+        };
+
+        let name = decl.id.sym.to_string();
+        let method_names: Vec<String> = decl
+            .body
+            .body
+            .iter()
+            .filter_map(|member| {
+                if let swc_ecma_ast::TsTypeElement::TsMethodSignature(method) = member {
+                    if let swc_ecma_ast::Expr::Ident(ident) = method.key.as_ref() {
+                        return Some(ident.sym.to_string());
+                    }
+                }
+                None
+            })
+            .collect();
+
+        if !method_names.is_empty() {
+            map.insert(name, method_names);
+        }
+    }
+
+    map
+}
+
 /// Identifies which classes are parents (are extended by another class).
 fn find_parent_class_names(
     class_map: &HashMap<String, ClassInfo>,
@@ -190,15 +236,26 @@ fn transform_module_item(
     module_item: &ModuleItem,
     reg: &TypeRegistry,
     class_map: &HashMap<String, ClassInfo>,
+    iface_methods: &HashMap<String, Vec<String>>,
     resilient: bool,
 ) -> Result<(Vec<Item>, Vec<String>)> {
     match module_item {
-        ModuleItem::Stmt(Stmt::Decl(decl)) => {
-            transform_decl(decl, Visibility::Private, reg, class_map, resilient)
-        }
-        ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(export)) => {
-            transform_decl(&export.decl, Visibility::Public, reg, class_map, resilient)
-        }
+        ModuleItem::Stmt(Stmt::Decl(decl)) => transform_decl(
+            decl,
+            Visibility::Private,
+            reg,
+            class_map,
+            iface_methods,
+            resilient,
+        ),
+        ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(export)) => transform_decl(
+            &export.decl,
+            Visibility::Public,
+            reg,
+            class_map,
+            iface_methods,
+            resilient,
+        ),
         ModuleItem::ModuleDecl(ModuleDecl::Import(import_decl)) => {
             let items: Vec<Item> = transform_import(import_decl).into_iter().collect();
             Ok((items, vec![]))
@@ -322,6 +379,7 @@ fn transform_decl(
     vis: Visibility,
     reg: &TypeRegistry,
     class_map: &HashMap<String, ClassInfo>,
+    iface_methods: &HashMap<String, Vec<String>>,
     resilient: bool,
 ) -> Result<(Vec<Item>, Vec<String>)> {
     match decl {
@@ -338,7 +396,8 @@ fn transform_decl(
             Ok((vec![item], warnings))
         }
         Decl::Class(class_decl) => {
-            let items = transform_class_with_inheritance(class_decl, vis, reg, class_map)?;
+            let items =
+                transform_class_with_inheritance(class_decl, vis, reg, class_map, iface_methods)?;
             Ok((items, vec![]))
         }
         Decl::Var(var_decl) => convert_var_decl_arrow_fns(var_decl, vis, reg, resilient),
@@ -354,16 +413,18 @@ fn transform_decl(
     }
 }
 
-/// Transforms a class declaration, handling inheritance if applicable.
+/// Transforms a class declaration, handling inheritance and `implements` if applicable.
 ///
 /// - If the class is a parent (extended by another class): generates struct + trait + impls
 /// - If the class is a child (extends another class): generates struct + impl + trait impl
+/// - If the class implements interfaces: generates struct + impl + impl Trait for Struct
 /// - Otherwise: generates struct + impl (no trait)
 fn transform_class_with_inheritance(
     class_decl: &ast::ClassDecl,
     vis: Visibility,
     reg: &TypeRegistry,
     class_map: &HashMap<String, ClassInfo>,
+    iface_methods: &HashMap<String, Vec<String>>,
 ) -> Result<Vec<Item>> {
     let info = classes::extract_class_info(class_decl, vis, reg)?;
     let parent_names = find_parent_class_names(class_map);
@@ -375,10 +436,81 @@ fn transform_class_with_inheritance(
         // This class is a child — generate struct + impl + trait impl
         let parent_info = class_map.get(parent_name);
         classes::generate_items_for_class(&info, parent_info)
+    } else if !info.implements.is_empty() {
+        // Class implements interfaces — split methods into trait impls
+        generate_class_with_implements(&info, iface_methods)
     } else {
         // Standalone class — no inheritance
         classes::generate_items_for_class(&info, None)
     }
+}
+
+/// Generates IR items for a class that implements one or more interfaces.
+///
+/// Methods matching interface method names go into `impl Trait for Struct`.
+/// Remaining methods (including constructor) go into `impl Struct`.
+fn generate_class_with_implements(
+    info: &ClassInfo,
+    iface_methods: &HashMap<String, Vec<String>>,
+) -> Result<Vec<Item>> {
+    use crate::ir::Method;
+
+    let mut items = vec![Item::Struct {
+        vis: info.vis.clone(),
+        name: info.name.clone(),
+        type_params: vec![],
+        fields: info.fields.clone(),
+    }];
+
+    // Collect method names that belong to each interface
+    let mut claimed_methods: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    for iface_name in &info.implements {
+        if let Some(method_names) = iface_methods.get(iface_name) {
+            let trait_methods: Vec<Method> = info
+                .methods
+                .iter()
+                .filter(|m| method_names.contains(&m.name))
+                .map(|m| Method {
+                    vis: Visibility::Private, // trait impl methods have no visibility
+                    ..m.clone()
+                })
+                .collect();
+
+            if !trait_methods.is_empty() {
+                for m in &trait_methods {
+                    claimed_methods.insert(m.name.clone());
+                }
+                items.push(Item::Impl {
+                    struct_name: info.name.clone(),
+                    for_trait: Some(iface_name.clone()),
+                    methods: trait_methods,
+                });
+            }
+        }
+    }
+
+    // Remaining methods + constructor go into impl Struct
+    let mut own_methods: Vec<Method> = Vec::new();
+    if let Some(ctor) = &info.constructor {
+        own_methods.push(ctor.clone());
+    }
+    own_methods.extend(
+        info.methods
+            .iter()
+            .filter(|m| !claimed_methods.contains(&m.name))
+            .cloned(),
+    );
+
+    if !own_methods.is_empty() {
+        items.push(Item::Impl {
+            struct_name: info.name.clone(),
+            for_trait: None,
+            methods: own_methods,
+        });
+    }
+
+    Ok(items)
 }
 
 /// Converts `const` variable declarations with arrow function initializers into `Item::Fn`.
@@ -968,6 +1100,138 @@ export { Foo };
                 assert_eq!(variants[0].value, Some(crate::ir::EnumValue::Number(-1)));
             }
             _ => panic!("expected Enum"),
+        }
+    }
+
+    #[test]
+    fn test_transform_module_class_implements_single_interface() {
+        let source = r#"
+interface Greeter { greet(): string; }
+class Foo implements Greeter { greet(): string { return "hi"; } }
+"#;
+        let module = parse_typescript(source).expect("parse failed");
+        let items = transform_module(&module, &TypeRegistry::new()).unwrap();
+
+        // Expect: Trait(Greeter) + Struct(Foo) + Impl(Foo for Greeter)
+        let has_trait = items
+            .iter()
+            .any(|i| matches!(i, Item::Trait { name, .. } if name == "Greeter"));
+        assert!(has_trait, "should have Greeter trait, got: {items:?}");
+
+        let has_struct = items
+            .iter()
+            .any(|i| matches!(i, Item::Struct { name, .. } if name == "Foo"));
+        assert!(has_struct, "should have Foo struct, got: {items:?}");
+
+        let has_trait_impl = items.iter().any(|i| {
+            matches!(
+                i,
+                Item::Impl {
+                    struct_name,
+                    for_trait: Some(trait_name),
+                    ..
+                } if struct_name == "Foo" && trait_name == "Greeter"
+            )
+        });
+        assert!(
+            has_trait_impl,
+            "should have impl Greeter for Foo, got: {items:?}"
+        );
+    }
+
+    #[test]
+    fn test_transform_module_class_implements_multiple_interfaces() {
+        let source = r#"
+interface A { foo(): void; }
+interface B { bar(): void; }
+class Foo implements A, B {
+    foo(): void {}
+    bar(): void {}
+}
+"#;
+        let module = parse_typescript(source).expect("parse failed");
+        let items = transform_module(&module, &TypeRegistry::new()).unwrap();
+
+        let has_impl_a = items.iter().any(|i| {
+            matches!(
+                i,
+                Item::Impl {
+                    struct_name,
+                    for_trait: Some(trait_name),
+                    ..
+                } if struct_name == "Foo" && trait_name == "A"
+            )
+        });
+        assert!(has_impl_a, "should have impl A for Foo, got: {items:?}");
+
+        let has_impl_b = items.iter().any(|i| {
+            matches!(
+                i,
+                Item::Impl {
+                    struct_name,
+                    for_trait: Some(trait_name),
+                    ..
+                } if struct_name == "Foo" && trait_name == "B"
+            )
+        });
+        assert!(has_impl_b, "should have impl B for Foo, got: {items:?}");
+    }
+
+    #[test]
+    fn test_transform_module_class_implements_with_own_methods() {
+        let source = r#"
+interface Greeter { greet(): string; }
+class Foo implements Greeter {
+    greet(): string { return "hi"; }
+    helper(): void {}
+}
+"#;
+        let module = parse_typescript(source).expect("parse failed");
+        let items = transform_module(&module, &TypeRegistry::new()).unwrap();
+
+        // greet should be in impl Greeter for Foo
+        let trait_impl = items.iter().find(|i| {
+            matches!(
+                i,
+                Item::Impl {
+                    for_trait: Some(t),
+                    ..
+                } if t == "Greeter"
+            )
+        });
+        assert!(trait_impl.is_some(), "should have impl Greeter for Foo");
+        if let Some(Item::Impl { methods, .. }) = trait_impl {
+            assert!(
+                methods.iter().any(|m| m.name == "greet"),
+                "trait impl should contain greet"
+            );
+            assert!(
+                !methods.iter().any(|m| m.name == "helper"),
+                "trait impl should NOT contain helper"
+            );
+        }
+
+        // helper should be in impl Foo
+        let own_impl = items.iter().find(|i| {
+            matches!(
+                i,
+                Item::Impl {
+                    for_trait: None,
+                    struct_name,
+                    ..
+                } if struct_name == "Foo"
+            )
+        });
+        assert!(own_impl.is_some(), "should have impl Foo");
+        if let Some(Item::Impl { methods, .. }) = own_impl {
+            assert!(
+                methods.iter().any(|m| m.name == "helper"),
+                "own impl should contain helper"
+            );
+            assert!(
+                !methods.iter().any(|m| m.name == "greet"),
+                "own impl should NOT contain greet"
+            );
         }
     }
 }

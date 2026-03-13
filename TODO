@@ -28,8 +28,9 @@
 - `static` メンバーの完全対応 **[PRD 化可能]**
   - static プロパティ（`static readonly MAX = 100` 等）の変換。メソッドのバグ修正とは別件
   - static メソッド内の `this` アクセスの変換（TS では `this` がクラス自体を指す）
-- `implements`（interface の実装 → trait impl）**[PRD 化可能]**
-  - `impl Trait for Struct` パターンは class-inheritance で実装済み
+- `extends` と `implements` の併用（`class Child extends Parent implements Greeter`）**[PRD 化可能]**
+  - `extends` の `ParentTrait` と `implements` の trait の間でメソッドが重複する可能性があり、振り分けロジックが複雑
+  - `implements` 単独は実装済み
 - `abstract class`（抽象クラス → trait 化）**[PRD 化可能]**
   - trait パターンは class-inheritance で実装済み
 - `protected` メンバー **[PRD 化可能]**
@@ -42,9 +43,6 @@
   - 型エイリアスとしての `TsTypeLit` は対応済みだが、パラメータ型注記の位置では未対応
 - デフォルト引数値の拡張（複雑な式: `= new Map()`, `= someFunction()` 等）
   - **保留**: リテラル値と空オブジェクト `= {}` は対応済み。需要が発生してから対応
-
-## モジュール
-
 
 ## enum
 
@@ -98,6 +96,7 @@
 - `.reduce(fn, init)` → `.iter().fold(init, fn)` **[PRD 化可能]**
 - `.reverse()` → `.reverse()` / `.iter().rev().collect()` **[PRD 化可能]**
 - `.sort()` — 比較関数の変換が必要 **[PRD 化可能]**
+- `.join(separator)` → `.join(separator)` **[PRD 化可能]**
 - `.splice()`, `.slice()` — **[PRD 化可能]**
 - `.substring(a, b)` / `.slice(a, b)` → `&s[a..b]`
   - **保留**: UTF-8 バイト境界の問題
@@ -124,6 +123,10 @@
   - 同一ロジックの知識の重複
 - transformer/expressions.rs のモジュール分割検討 **[PRD 化可能]**
   - 現在 2,635 行。メソッドマッピング、組み込み API 変換等を別モジュールに分離する候補
+- `generate_class_with_implements` の `classes.rs` への移動 **[PRD 化可能]**
+  - クラスから IR アイテムを生成するロジックだが、`iface_methods` 引数の都合で `mod.rs:452-500` に配置されている。`classes.rs` の他の生成関数（`generate_standalone_class`, `generate_child_class` 等）と同レベルの責務
+- `main.rs` のディレクトリ変換ロジック重複の共通化 **[PRD 化可能]**
+  - `transpile_directory`（211-289行）と `transpile_directory_collecting`（125-209行）で Pass1/Pass2/mod.rs生成の ~80行が類似。差異は変換関数の呼び出しと結果収集方法のみ
 
 ## 開発基盤・将来課題
 

@@ -27,6 +27,8 @@ pub struct ClassInfo {
     pub methods: Vec<Method>,
     /// Visibility
     pub vis: Visibility,
+    /// Interface names from `implements` clause
+    pub implements: Vec<String>,
 }
 
 /// Extracts [`ClassInfo`] from an SWC class declaration without generating IR items.
@@ -45,6 +47,19 @@ pub fn extract_class_info(
             None
         }
     });
+
+    let implements: Vec<String> = class_decl
+        .class
+        .implements
+        .iter()
+        .filter_map(|impl_clause| {
+            if let ast::Expr::Ident(ident) = impl_clause.expr.as_ref() {
+                Some(ident.sym.to_string())
+            } else {
+                None
+            }
+        })
+        .collect();
 
     let mut fields = Vec::new();
     let mut constructor = None;
@@ -72,6 +87,7 @@ pub fn extract_class_info(
         constructor,
         methods,
         vis,
+        implements,
     })
 }
 
@@ -672,6 +688,31 @@ mod tests {
             }
             _ => panic!("expected Item::Impl"),
         }
+    }
+
+    #[test]
+    fn test_extract_class_info_implements_single() {
+        let decl =
+            parse_class_decl("class Foo implements Greeter { greet(): string { return 'hi'; } }");
+        let info = extract_class_info(&decl, Visibility::Private, &TypeRegistry::new()).unwrap();
+
+        assert_eq!(info.implements, vec!["Greeter".to_string()]);
+    }
+
+    #[test]
+    fn test_extract_class_info_implements_multiple() {
+        let decl = parse_class_decl("class Foo implements A, B { foo(): void {} bar(): void {} }");
+        let info = extract_class_info(&decl, Visibility::Private, &TypeRegistry::new()).unwrap();
+
+        assert_eq!(info.implements, vec!["A".to_string(), "B".to_string()]);
+    }
+
+    #[test]
+    fn test_extract_class_info_no_implements() {
+        let decl = parse_class_decl("class Foo { x: number; }");
+        let info = extract_class_info(&decl, Visibility::Private, &TypeRegistry::new()).unwrap();
+
+        assert!(info.implements.is_empty());
     }
 
     #[test]
