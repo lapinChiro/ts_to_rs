@@ -30,11 +30,15 @@ pub fn generate(items: &[Item]) -> String {
 /// Generates a single IR item as Rust source code.
 fn generate_item(item: &Item) -> String {
     match item {
-        Item::Use { path, names } => {
+        Item::Use { vis, path, names } => {
+            let vis_prefix = match vis {
+                Visibility::Public => "pub ",
+                Visibility::Private => "",
+            };
             if names.len() == 1 {
-                format!("use {}::{};", path, names[0])
+                format!("{vis_prefix}use {}::{};", path, names[0])
             } else {
-                format!("use {}::{{{}}};", path, names.join(", "))
+                format!("{vis_prefix}use {}::{{{}}};", path, names.join(", "))
             }
         }
         Item::Struct {
@@ -305,6 +309,7 @@ mod tests {
     #[test]
     fn test_generate_use_single() {
         let item = Item::Use {
+            vis: Visibility::Private,
             path: "crate::bar".to_string(),
             names: vec!["Foo".to_string()],
         };
@@ -314,10 +319,31 @@ mod tests {
     #[test]
     fn test_generate_use_multiple() {
         let item = Item::Use {
+            vis: Visibility::Private,
             path: "crate::bar".to_string(),
             names: vec!["A".to_string(), "B".to_string()],
         };
         assert_eq!(generate(&[item]), "use crate::bar::{A, B};");
+    }
+
+    #[test]
+    fn test_generate_pub_use_single() {
+        let item = Item::Use {
+            vis: Visibility::Public,
+            path: "crate::bar".to_string(),
+            names: vec!["Foo".to_string()],
+        };
+        assert_eq!(generate(&[item]), "pub use crate::bar::Foo;");
+    }
+
+    #[test]
+    fn test_generate_pub_use_multiple() {
+        let item = Item::Use {
+            vis: Visibility::Public,
+            path: "crate::baz".to_string(),
+            names: vec!["A".to_string(), "B".to_string()],
+        };
+        assert_eq!(generate(&[item]), "pub use crate::baz::{A, B};");
     }
 
     // --- Item::Struct tests ---

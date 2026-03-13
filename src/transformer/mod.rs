@@ -203,6 +203,10 @@ fn transform_module_item(
             let items: Vec<Item> = transform_import(import_decl).into_iter().collect();
             Ok((items, vec![]))
         }
+        ModuleItem::ModuleDecl(ModuleDecl::ExportNamed(export)) => {
+            let items: Vec<Item> = transform_export_named(export).into_iter().collect();
+            Ok((items, vec![]))
+        }
         _ => Err(UnsupportedSyntaxError {
             kind: format_module_item_kind(module_item),
             byte_pos: module_item.span().lo.0,
@@ -238,7 +242,54 @@ fn transform_import(import_decl: &swc_ecma_ast::ImportDecl) -> Option<Item> {
     }
 
     let path = convert_relative_path_to_crate_path(&src);
-    Some(Item::Use { path, names })
+    Some(Item::Use {
+        vis: Visibility::Private,
+        path,
+        names,
+    })
+}
+
+/// Transforms a named export into an IR [`Item::Use`] with public visibility.
+///
+/// - Re-exports (`export { Foo } from "./bar"`) become `pub use bar::Foo;`
+/// - Local name exports (`export { Foo }`) are skipped (declarations are already `pub`)
+fn transform_export_named(export: &swc_ecma_ast::NamedExport) -> Option<Item> {
+    // Local name exports (no source path) are skipped
+    let src = export.src.as_ref()?;
+    let src_str = src.value.to_string_lossy().into_owned();
+
+    // Only handle relative imports
+    if !src_str.starts_with("./") && !src_str.starts_with("../") {
+        return None;
+    }
+
+    let names: Vec<String> = export
+        .specifiers
+        .iter()
+        .filter_map(|spec| match spec {
+            swc_ecma_ast::ExportSpecifier::Named(named) => {
+                // Use the original name (not the renamed alias)
+                match &named.orig {
+                    swc_ecma_ast::ModuleExportName::Ident(ident) => Some(ident.sym.to_string()),
+                    swc_ecma_ast::ModuleExportName::Str(s) => {
+                        Some(s.value.to_string_lossy().into_owned())
+                    }
+                }
+            }
+            _ => None,
+        })
+        .collect();
+
+    if names.is_empty() {
+        return None;
+    }
+
+    let path = convert_relative_path_to_crate_path(&src_str);
+    Some(Item::Use {
+        vis: Visibility::Public,
+        path,
+        names,
+    })
 }
 
 /// Converts a relative TS import path to a Rust crate path.
@@ -381,6 +432,28 @@ fn convert_var_decl_arrow_fns(
                     }
                     crate::ir::ClosureBody::Block(stmts) => stmts,
                 };
+                // Check for untyped parameters — these produce invalid Rust in Item::Fn
+                let mut checked_params = Vec::new();
+                for p in params {
+                    if p.ty.is_none() {
+                        if resilient {
+                            fallback_warnings
+                                .push(format!("parameter '{}' has no type annotation", p.name));
+                            checked_params.push(crate::ir::Param {
+                                name: p.name,
+                                ty: Some(crate::ir::RustType::Any),
+                            });
+                        } else {
+                            return Err(anyhow::anyhow!(
+                                "parameter '{}' has no type annotation",
+                                p.name
+                            ));
+                        }
+                    } else {
+                        checked_params.push(p);
+                    }
+                }
+
                 let type_params =
                     crate::transformer::types::extract_type_params(arrow.type_params.as_deref());
                 items.push(Item::Fn {
@@ -388,7 +461,7 @@ fn convert_var_decl_arrow_fns(
                     is_async: arrow.is_async,
                     name,
                     type_params,
-                    params,
+                    params: checked_params,
                     return_type: ret,
                     body: fn_body,
                 });
@@ -494,6 +567,7 @@ mod tests {
         assert_eq!(
             items[0],
             Item::Use {
+                vis: Visibility::Private,
                 path: "crate::bar".to_string(),
                 names: vec!["Foo".to_string()],
             }
@@ -510,6 +584,7 @@ mod tests {
         assert_eq!(
             items[0],
             Item::Use {
+                vis: Visibility::Private,
                 path: "crate::bar".to_string(),
                 names: vec!["A".to_string(), "B".to_string()],
             }
@@ -526,6 +601,7 @@ mod tests {
         assert_eq!(
             items[0],
             Item::Use {
+                vis: Visibility::Private,
                 path: "crate::sub::bar".to_string(),
                 names: vec!["Foo".to_string()],
             }
@@ -542,6 +618,7 @@ mod tests {
         assert_eq!(
             items[0],
             Item::Use {
+                vis: Visibility::Private,
                 path: "crate::hono_base".to_string(),
                 names: vec!["Foo".to_string()],
             }
@@ -558,6 +635,7 @@ mod tests {
         assert_eq!(
             items[0],
             Item::Use {
+                vis: Visibility::Private,
                 path: "crate::utils::http_status".to_string(),
                 names: vec!["StatusCode".to_string()],
             }
@@ -574,10 +652,59 @@ mod tests {
         assert_eq!(
             items[0],
             Item::Use {
+                vis: Visibility::Private,
                 path: "crate::my_long_name".to_string(),
                 names: vec!["Foo".to_string()],
             }
         );
+    }
+
+    #[test]
+    fn test_transform_module_export_named_reexport_single() {
+        let source = r#"export { Foo } from "./bar";"#;
+        let module = parse_typescript(source).expect("parse failed");
+        let items = transform_module(&module, &TypeRegistry::new()).unwrap();
+
+        assert_eq!(items.len(), 1);
+        assert_eq!(
+            items[0],
+            Item::Use {
+                vis: Visibility::Public,
+                path: "crate::bar".to_string(),
+                names: vec!["Foo".to_string()],
+            }
+        );
+    }
+
+    #[test]
+    fn test_transform_module_export_named_reexport_multiple() {
+        let source = r#"export { Foo, Bar } from "./baz";"#;
+        let module = parse_typescript(source).expect("parse failed");
+        let items = transform_module(&module, &TypeRegistry::new()).unwrap();
+
+        assert_eq!(items.len(), 1);
+        assert_eq!(
+            items[0],
+            Item::Use {
+                vis: Visibility::Public,
+                path: "crate::baz".to_string(),
+                names: vec!["Foo".to_string(), "Bar".to_string()],
+            }
+        );
+    }
+
+    #[test]
+    fn test_transform_module_export_named_local_skipped() {
+        let source = r#"
+interface Foo { name: string; }
+export { Foo };
+"#;
+        let module = parse_typescript(source).expect("parse failed");
+        let items = transform_module(&module, &TypeRegistry::new()).unwrap();
+
+        // Only the interface should be converted; the export { Foo } should be skipped
+        assert_eq!(items.len(), 1);
+        assert!(matches!(&items[0], Item::Struct { name, .. } if name == "Foo"));
     }
 
     #[test]

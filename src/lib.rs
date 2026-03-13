@@ -320,4 +320,34 @@ function bar(x: Map = new Map()) { return x; }
         let result = transpile_collecting(source);
         assert!(result.is_err(), "parse errors should still propagate");
     }
+
+    #[test]
+    fn test_transpile_arrow_untyped_param_errors_in_default_mode() {
+        // Arrow function with untyped param should error in strict mode
+        let source = "export const f = (c) => c;";
+        let result = transpile(source);
+        assert!(
+            result.is_err(),
+            "untyped arrow param should error in strict mode"
+        );
+    }
+
+    #[test]
+    fn test_transpile_collecting_arrow_untyped_param_fallback_to_any() {
+        // Arrow function with untyped param should fallback to Any in collecting mode
+        let source = "export const f = (c) => c;";
+        let (output, unsupported) = transpile_collecting(source).unwrap();
+        assert!(
+            output.contains("fn f"),
+            "function should still be converted, got: {output}"
+        );
+        assert!(
+            output.contains("Box<dyn std::any::Any>"),
+            "untyped param should fallback to Any, got: {output}"
+        );
+        assert!(
+            !unsupported.is_empty(),
+            "untyped param should be reported as unsupported"
+        );
+    }
 }

@@ -114,8 +114,10 @@ pub struct Method {
 /// Top-level item in a Rust file or module.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Item {
-    /// A `use` statement: `use path::{names};`
+    /// A `use` statement: `use path::{names};` or `pub use path::{names};`
     Use {
+        /// Visibility (`Private` for `use`, `Public` for `pub use`)
+        vis: Visibility,
         /// Module path (e.g., `crate::bar`)
         path: String,
         /// Imported names (e.g., `["Foo", "Bar"]`)

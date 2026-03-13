@@ -490,8 +490,8 @@ fn convert_class_method(
     Ok(Method {
         vis: vis.clone(),
         name,
-        has_self: true,
-        has_mut_self: needs_mut,
+        has_self: !method.is_static,
+        has_mut_self: !method.is_static && needs_mut,
         params,
         return_type,
         body,
@@ -647,6 +647,30 @@ mod tests {
                 assert_eq!(methods[0].vis, Visibility::Public);
             }
             _ => panic!("expected Impl"),
+        }
+    }
+
+    #[test]
+    fn test_convert_class_static_method_has_no_self() {
+        let decl = parse_class_decl("class Foo { x: number; static bar(): number { return 1; } }");
+        let items = convert_class_decl(&decl, Visibility::Private, &TypeRegistry::new()).unwrap();
+
+        assert_eq!(items.len(), 2);
+        match &items[1] {
+            Item::Impl { methods, .. } => {
+                assert_eq!(methods.len(), 1);
+                assert_eq!(methods[0].name, "bar");
+                assert!(
+                    !methods[0].has_self,
+                    "static method should not have self, got has_self=true"
+                );
+                assert!(
+                    !methods[0].has_mut_self,
+                    "static method should not have mut self"
+                );
+                assert_eq!(methods[0].return_type, Some(RustType::F64));
+            }
+            _ => panic!("expected Item::Impl"),
         }
     }
 
