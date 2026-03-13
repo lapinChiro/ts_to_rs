@@ -43,6 +43,8 @@ ts-to-rs input.ts --report-unsupported
 | テンプレートリテラル | `format!()` |
 | ジェネリクス (`<T>`, `<A, B>`) | ジェネリクス (`<T>`, `<A, B>`) |
 | `class` | `struct` + `impl` |
+| `class Child extends Parent` | `struct` + `trait` + `impl Trait for Struct` |
+| `super(args)` | 親フィールドの初期化 |
 | アロー関数 (`(x) => x + 1`) | クロージャ (`\|x\| x + 1`) / `fn` |
 | 関数型 (`(x: number) => number`) | `Box<dyn Fn(f64) -> f64>` |
 | `foo(x, y)` | `foo(x, y)` |

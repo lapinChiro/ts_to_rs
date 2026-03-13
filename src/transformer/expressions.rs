@@ -228,6 +228,13 @@ fn convert_call_expr(call: &ast::CallExpr, reg: &TypeRegistry) -> Result<Expr> {
             }
             _ => Err(anyhow!("unsupported call target expression")),
         },
+        ast::Callee::Super(_) => {
+            let args = convert_call_args(&call.args, reg)?;
+            Ok(Expr::FnCall {
+                name: "super".to_string(),
+                args,
+            })
+        }
         _ => Err(anyhow!("unsupported callee type")),
     }
 }

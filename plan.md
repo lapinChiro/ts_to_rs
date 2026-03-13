@@ -2,7 +2,7 @@
 
 ## 次のタスク
 
-1. [class-inheritance](backlog/class-inheritance.md) — クラス継承（extends → trait + struct）
+（現在 backlog にタスクなし）
 
 ## 未設計の項目
 

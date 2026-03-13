@@ -131,10 +131,21 @@ pub enum Item {
         /// Enum variants
         variants: Vec<EnumVariant>,
     },
-    /// An `impl` block for a struct.
+    /// A `trait` definition.
+    Trait {
+        /// Visibility
+        vis: Visibility,
+        /// Trait name (e.g., `AnimalTrait`)
+        name: String,
+        /// Method signatures (body is empty — signatures only)
+        methods: Vec<Method>,
+    },
+    /// An `impl` block for a struct, optionally implementing a trait.
     Impl {
         /// Struct name this impl is for
         struct_name: String,
+        /// If `Some`, this is a trait impl: `impl TraitName for StructName`
+        for_trait: Option<String>,
         /// Methods in the impl block
         methods: Vec<Method>,
     },

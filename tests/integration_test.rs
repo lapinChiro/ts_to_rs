@@ -121,6 +121,13 @@ fn test_ternary() {
 }
 
 #[test]
+fn test_class_inheritance() {
+    let input = fs::read_to_string("tests/fixtures/class-inheritance.input.ts").unwrap();
+    let output = transpile(&input).unwrap();
+    insta::assert_snapshot!(output);
+}
+
+#[test]
 fn test_break_continue() {
     let input = fs::read_to_string("tests/fixtures/break-continue.input.ts").unwrap();
     let output = transpile(&input).unwrap();

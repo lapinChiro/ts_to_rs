@@ -1,0 +1,43 @@
+---
+source: tests/integration_test.rs
+expression: output
+---
+struct Animal {
+    name: String,
+}
+
+trait AnimalTrait {
+    fn speak(&self) -> String;
+}
+
+impl Animal {
+    fn new(name: String) -> Self {
+        Self { name }
+    }
+}
+
+impl AnimalTrait for Animal {
+    fn speak(&self) -> String {
+        format!("{}", self.name)
+    }
+}
+
+struct Dog {
+    name: String,
+}
+
+impl Dog {
+    fn new(name: String) -> Self {
+        Self { name }
+    }
+
+    fn bark(&self) -> String {
+        self.speak() + " barks"
+    }
+}
+
+impl AnimalTrait for Dog {
+    fn speak(&self) -> String {
+        format!("{}", self.name)
+    }
+}

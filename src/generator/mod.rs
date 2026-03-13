@@ -57,11 +57,25 @@ fn generate_item(item: &Item) -> String {
             name,
             variants,
         } => generate_enum(vis, name, variants),
+        Item::Trait { vis, name, methods } => {
+            let vis_str = generate_vis(vis);
+            let mut out = format!("{vis_str}trait {name} {{\n");
+            for method in methods {
+                out.push_str(&generate_trait_method_sig(method));
+            }
+            out.push('}');
+            out
+        }
         Item::Impl {
             struct_name,
+            for_trait,
             methods,
         } => {
-            let mut out = format!("impl {struct_name} {{\n");
+            let header = match for_trait {
+                Some(trait_name) => format!("impl {trait_name} for {struct_name}"),
+                None => format!("impl {struct_name}"),
+            };
+            let mut out = format!("{header} {{\n");
             for (i, method) in methods.iter().enumerate() {
                 if i > 0 {
                     out.push('\n');
@@ -101,6 +115,29 @@ fn generate_item(item: &Item) -> String {
             out
         }
     }
+}
+
+/// Generates a trait method signature (no body).
+fn generate_trait_method_sig(method: &Method) -> String {
+    let self_param = if method.has_self { "&self" } else { "" };
+    let other_params = method
+        .params
+        .iter()
+        .map(|p| format!("{}: {}", p.name, generate_type(&p.ty)))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let params_str = if method.has_self && !other_params.is_empty() {
+        format!("{self_param}, {other_params}")
+    } else if method.has_self {
+        self_param.to_string()
+    } else {
+        other_params
+    };
+    let ret_str = match &method.return_type {
+        Some(ty) => format!(" -> {}", generate_type(ty)),
+        None => String::new(),
+    };
+    format!("    fn {}({params_str}){ret_str};\n", method.name)
 }
 
 /// Generates a method inside an `impl` block.
@@ -526,6 +563,7 @@ pub fn identity<T>(x: T) -> T {
     fn test_generate_impl_new() {
         let item = Item::Impl {
             struct_name: "Foo".to_string(),
+            for_trait: None,
             methods: vec![Method {
                 vis: Visibility::Public,
                 name: "new".to_string(),
@@ -554,6 +592,7 @@ impl Foo {
     fn test_generate_impl_self_method() {
         let item = Item::Impl {
             struct_name: "Foo".to_string(),
+            for_trait: None,
             methods: vec![Method {
                 vis: Visibility::Public,
                 name: "get_name".to_string(),
@@ -600,5 +639,54 @@ pub struct A {
 pub struct B {
 }";
         assert_eq!(generate(&items), expected);
+    }
+
+    // --- Item::Trait tests ---
+
+    #[test]
+    fn test_generate_trait() {
+        let item = Item::Trait {
+            vis: Visibility::Public,
+            name: "AnimalTrait".to_string(),
+            methods: vec![Method {
+                vis: Visibility::Private,
+                name: "speak".to_string(),
+                has_self: true,
+                params: vec![],
+                return_type: Some(RustType::String),
+                body: vec![],
+            }],
+        };
+        let expected = "\
+pub trait AnimalTrait {
+    fn speak(&self) -> String;
+}";
+        assert_eq!(generate(&[item]), expected);
+    }
+
+    #[test]
+    fn test_generate_impl_for_trait() {
+        let item = Item::Impl {
+            struct_name: "Dog".to_string(),
+            for_trait: Some("AnimalTrait".to_string()),
+            methods: vec![Method {
+                vis: Visibility::Private,
+                name: "speak".to_string(),
+                has_self: true,
+                params: vec![],
+                return_type: Some(RustType::String),
+                body: vec![Stmt::Return(Some(Expr::FieldAccess {
+                    object: Box::new(Expr::Ident("self".to_string())),
+                    field: "name".to_string(),
+                }))],
+            }],
+        };
+        let expected = "\
+impl AnimalTrait for Dog {
+    fn speak(&self) -> String {
+        self.name
+    }
+}";
+        assert_eq!(generate(&[item]), expected);
     }
 }

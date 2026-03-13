@@ -11,10 +11,14 @@ pub mod types;
 
 use anyhow::Result;
 use swc_common::Spanned;
+use swc_ecma_ast as ast;
 use swc_ecma_ast::{Decl, ImportSpecifier, Module, ModuleDecl, ModuleItem, Stmt};
+
+use std::collections::HashMap;
 
 use crate::ir::{EnumValue, EnumVariant, Item, Visibility};
 use crate::registry::TypeRegistry;
+use crate::transformer::classes::ClassInfo;
 use crate::transformer::expressions::convert_expr;
 use crate::transformer::types::convert_ts_type;
 
@@ -47,10 +51,12 @@ impl std::error::Error for UnsupportedSyntaxError {}
 ///
 /// Returns an error if transformation fails or unsupported syntax is encountered.
 pub fn transform_module(module: &Module, reg: &TypeRegistry) -> Result<Vec<Item>> {
-    let mut items = Vec::new();
+    // Pre-scan: collect class info for inheritance resolution
+    let class_map = pre_scan_classes(module, reg);
 
+    let mut items = Vec::new();
     for module_item in &module.body {
-        items.extend(transform_module_item(module_item, reg)?);
+        items.extend(transform_module_item(module_item, reg, &class_map)?);
     }
 
     Ok(items)
@@ -68,11 +74,13 @@ pub fn transform_module_collecting(
     module: &Module,
     reg: &TypeRegistry,
 ) -> Result<(Vec<Item>, Vec<UnsupportedSyntaxError>)> {
+    let class_map = pre_scan_classes(module, reg);
+
     let mut items = Vec::new();
     let mut unsupported = Vec::new();
 
     for module_item in &module.body {
-        match transform_module_item(module_item, reg) {
+        match transform_module_item(module_item, reg, &class_map) {
             Ok(converted) => items.extend(converted),
             Err(e) => match e.downcast::<UnsupportedSyntaxError>() {
                 Ok(unsup) => unsupported.push(unsup),
@@ -84,12 +92,56 @@ pub fn transform_module_collecting(
     Ok((items, unsupported))
 }
 
+/// Pre-scans all class declarations in the module to collect inheritance info.
+///
+/// Returns a map from class name to [`ClassInfo`]. Only classes that can be
+/// successfully parsed are included; parse failures are silently skipped
+/// (they will be reported during the main transformation pass).
+fn pre_scan_classes(module: &Module, reg: &TypeRegistry) -> HashMap<String, ClassInfo> {
+    let mut map = HashMap::new();
+
+    for module_item in &module.body {
+        let (decl, vis) = match module_item {
+            ModuleItem::Stmt(Stmt::Decl(Decl::Class(cd))) => (cd, Visibility::Private),
+            ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(export)) => {
+                if let Decl::Class(cd) = &export.decl {
+                    (cd, Visibility::Public)
+                } else {
+                    continue;
+                }
+            }
+            _ => continue,
+        };
+        if let Ok(info) = classes::extract_class_info(decl, vis, reg) {
+            map.insert(info.name.clone(), info);
+        }
+    }
+
+    map
+}
+
+/// Identifies which classes are parents (are extended by another class).
+fn find_parent_class_names(
+    class_map: &HashMap<String, ClassInfo>,
+) -> std::collections::HashSet<String> {
+    class_map
+        .values()
+        .filter_map(|info| info.parent.clone())
+        .collect()
+}
+
 /// Transforms a single module item into IR [`Item`]s.
-fn transform_module_item(module_item: &ModuleItem, reg: &TypeRegistry) -> Result<Vec<Item>> {
+fn transform_module_item(
+    module_item: &ModuleItem,
+    reg: &TypeRegistry,
+    class_map: &HashMap<String, ClassInfo>,
+) -> Result<Vec<Item>> {
     match module_item {
-        ModuleItem::Stmt(Stmt::Decl(decl)) => transform_decl(decl, Visibility::Private, reg),
+        ModuleItem::Stmt(Stmt::Decl(decl)) => {
+            transform_decl(decl, Visibility::Private, reg, class_map)
+        }
         ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(export)) => {
-            transform_decl(&export.decl, Visibility::Public, reg)
+            transform_decl(&export.decl, Visibility::Public, reg, class_map)
         }
         ModuleItem::ModuleDecl(ModuleDecl::Import(import_decl)) => {
             Ok(transform_import(import_decl).into_iter().collect())
@@ -148,7 +200,12 @@ fn convert_relative_path_to_crate_path(rel_path: &str) -> String {
 /// # Errors
 ///
 /// Returns an [`UnsupportedSyntaxError`] for unhandled declaration types.
-fn transform_decl(decl: &Decl, vis: Visibility, reg: &TypeRegistry) -> Result<Vec<Item>> {
+fn transform_decl(
+    decl: &Decl,
+    vis: Visibility,
+    reg: &TypeRegistry,
+    class_map: &HashMap<String, ClassInfo>,
+) -> Result<Vec<Item>> {
     match decl {
         Decl::TsInterface(interface_decl) => {
             let item = types::convert_interface(interface_decl, vis)?;
@@ -162,7 +219,9 @@ fn transform_decl(decl: &Decl, vis: Visibility, reg: &TypeRegistry) -> Result<Ve
             let item = functions::convert_fn_decl(fn_decl, vis, reg)?;
             Ok(vec![item])
         }
-        Decl::Class(class_decl) => classes::convert_class_decl(class_decl, vis, reg),
+        Decl::Class(class_decl) => {
+            transform_class_with_inheritance(class_decl, vis, reg, class_map)
+        }
         Decl::Var(var_decl) => convert_var_decl_arrow_fns(var_decl, vis, reg),
         Decl::TsEnum(ts_enum) => convert_ts_enum(ts_enum, vis),
         _ => Err(UnsupportedSyntaxError {
@@ -170,6 +229,33 @@ fn transform_decl(decl: &Decl, vis: Visibility, reg: &TypeRegistry) -> Result<Ve
             byte_pos: decl.span().lo.0,
         }
         .into()),
+    }
+}
+
+/// Transforms a class declaration, handling inheritance if applicable.
+///
+/// - If the class is a parent (extended by another class): generates struct + trait + impls
+/// - If the class is a child (extends another class): generates struct + impl + trait impl
+/// - Otherwise: generates struct + impl (no trait)
+fn transform_class_with_inheritance(
+    class_decl: &ast::ClassDecl,
+    vis: Visibility,
+    reg: &TypeRegistry,
+    class_map: &HashMap<String, ClassInfo>,
+) -> Result<Vec<Item>> {
+    let info = classes::extract_class_info(class_decl, vis, reg)?;
+    let parent_names = find_parent_class_names(class_map);
+
+    if parent_names.contains(&info.name) {
+        // This class is a parent — generate struct + trait + impls
+        classes::generate_parent_class_items(&info)
+    } else if let Some(parent_name) = &info.parent {
+        // This class is a child — generate struct + impl + trait impl
+        let parent_info = class_map.get(parent_name);
+        classes::generate_items_for_class(&info, parent_info)
+    } else {
+        // Standalone class — no inheritance
+        classes::generate_items_for_class(&info, None)
     }
 }
 
