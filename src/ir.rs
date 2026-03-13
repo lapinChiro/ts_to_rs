@@ -209,6 +209,13 @@ pub enum Stmt {
         /// Loop body
         body: Vec<Stmt>,
     },
+    /// `['label:] loop { ... }`
+    Loop {
+        /// Optional loop label (e.g., `'outer`)
+        label: Option<String>,
+        /// Loop body
+        body: Vec<Stmt>,
+    },
     /// `break ['label];`
     Break {
         /// Optional target label
@@ -273,6 +280,13 @@ pub enum Expr {
         /// Assigned value
         value: Box<Expr>,
     },
+    /// A unary operation: `<op><operand>` (e.g., `!x`, `-x`)
+    UnaryOp {
+        /// Operator (e.g., `!`, `-`)
+        op: String,
+        /// Operand
+        operand: Box<Expr>,
+    },
     /// A binary operation: `<left> <op> <right>`
     BinaryOp {
         /// Left operand
@@ -318,6 +332,13 @@ pub enum Expr {
         then_expr: Box<Expr>,
         /// Else branch expression
         else_expr: Box<Expr>,
+    },
+    /// A macro call: `name!(args)` (e.g., `println!("{:?}", x)`)
+    MacroCall {
+        /// Macro name (without `!`)
+        name: String,
+        /// Arguments
+        args: Vec<Expr>,
     },
 }
 

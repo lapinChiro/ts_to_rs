@@ -96,6 +96,19 @@ pub(super) fn generate_stmt(stmt: &Stmt, indent: usize, is_last_in_fn: bool) -> 
             out.push_str(&format!("{pad}}}"));
             out
         }
+        Stmt::Loop { label, body } => {
+            let label_prefix = label
+                .as_ref()
+                .map(|l| format!("'{l}: "))
+                .unwrap_or_default();
+            let mut out = format!("{pad}{label_prefix}loop {{\n");
+            for s in body {
+                out.push_str(&generate_stmt(s, indent + 1, false));
+                out.push('\n');
+            }
+            out.push_str(&format!("{pad}}}"));
+            out
+        }
         Stmt::Break { label } => match label {
             Some(l) => format!("{pad}break '{l};"),
             None => format!("{pad}break;"),
@@ -318,6 +331,28 @@ fn f() {
 fn f() {
     for item in items {
         item;
+    }
+}";
+        assert_eq!(generate(&[item]), expected);
+    }
+
+    #[test]
+    fn test_generate_loop_basic() {
+        let item = Item::Fn {
+            vis: Visibility::Private,
+            name: "f".to_string(),
+            type_params: vec![],
+            params: vec![],
+            return_type: None,
+            body: vec![Stmt::Loop {
+                label: None,
+                body: vec![Stmt::Break { label: None }],
+            }],
+        };
+        let expected = "\
+fn f() {
+    loop {
+        break;
     }
 }";
         assert_eq!(generate(&[item]), expected);

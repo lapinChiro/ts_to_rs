@@ -135,7 +135,33 @@ fn convert_assign_expr(assign: &ast::AssignExpr, reg: &TypeRegistry) -> Result<E
         },
         _ => return Err(anyhow!("unsupported assignment target pattern")),
     };
-    let value = convert_expr(&assign.right, reg, None)?;
+    let right = convert_expr(&assign.right, reg, None)?;
+
+    // For compound assignment (+=, -=, *=, /=), desugar to target = target op value
+    let value = match assign.op {
+        ast::AssignOp::Assign => right,
+        ast::AssignOp::AddAssign => Expr::BinaryOp {
+            left: Box::new(target.clone()),
+            op: "+".to_string(),
+            right: Box::new(right),
+        },
+        ast::AssignOp::SubAssign => Expr::BinaryOp {
+            left: Box::new(target.clone()),
+            op: "-".to_string(),
+            right: Box::new(right),
+        },
+        ast::AssignOp::MulAssign => Expr::BinaryOp {
+            left: Box::new(target.clone()),
+            op: "*".to_string(),
+            right: Box::new(right),
+        },
+        ast::AssignOp::DivAssign => Expr::BinaryOp {
+            left: Box::new(target.clone()),
+            op: "/".to_string(),
+            right: Box::new(right),
+        },
+        _ => return Err(anyhow!("unsupported compound assignment operator")),
+    };
     Ok(Expr::Assign {
         target: Box::new(target),
         value: Box::new(value),
@@ -214,11 +240,28 @@ fn convert_call_expr(call: &ast::CallExpr, reg: &TypeRegistry) -> Result<Expr> {
                 })
             }
             ast::Expr::Member(member) => {
-                let object = convert_expr(&member.obj, reg, None)?;
                 let method = match &member.prop {
                     ast::MemberProp::Ident(ident) => ident.sym.to_string(),
                     _ => return Err(anyhow!("unsupported call target member property")),
                 };
+
+                // console.log/error/warn → println!/eprintln!
+                if let ast::Expr::Ident(obj_ident) = member.obj.as_ref() {
+                    if obj_ident.sym.as_ref() == "console" {
+                        let macro_name = match method.as_str() {
+                            "log" => "println",
+                            "error" | "warn" => "eprintln",
+                            _ => return Err(anyhow!("unsupported console method: {}", method)),
+                        };
+                        let args = convert_call_args(&call.args, reg)?;
+                        return Ok(Expr::MacroCall {
+                            name: macro_name.to_string(),
+                            args,
+                        });
+                    }
+                }
+
+                let object = convert_expr(&member.obj, reg, None)?;
                 let args = convert_call_args(&call.args, reg)?;
                 Ok(Expr::MethodCall {
                     object: Box::new(object),
@@ -362,9 +405,17 @@ fn convert_object_lit(
                     let value = convert_expr(&kv.value, reg, field_expected)?;
                     fields.push((key, value));
                 }
+                ast::Prop::Shorthand(ident) => {
+                    let key = ident.sym.to_string();
+                    let field_expected = struct_fields
+                        .and_then(|fs| fs.iter().find(|(name, _)| name == &key).map(|(_, ty)| ty));
+                    let value =
+                        convert_expr(&ast::Expr::Ident(ident.clone()), reg, field_expected)?;
+                    fields.push((key, value));
+                }
                 _ => {
                     return Err(anyhow!(
-                        "unsupported object literal property (only key-value pairs)"
+                        "unsupported object literal property (only key-value pairs and shorthand)"
                     ))
                 }
             },
@@ -1143,6 +1194,141 @@ mod tests {
                     then_expr: Box::new(Expr::StringLit("negative".to_string())),
                     else_expr: Box::new(Expr::StringLit("zero".to_string())),
                 }),
+            }
+        );
+    }
+
+    // -- console.log/error/warn → MacroCall tests --
+
+    #[test]
+    fn test_convert_expr_console_log_single_arg() {
+        let swc_expr = parse_expr("console.log(x);");
+        let result = convert_expr(&swc_expr, &TypeRegistry::new(), None).unwrap();
+        assert_eq!(
+            result,
+            Expr::MacroCall {
+                name: "println".to_string(),
+                args: vec![Expr::Ident("x".to_string())],
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_expr_console_error() {
+        let swc_expr = parse_expr("console.error(x);");
+        let result = convert_expr(&swc_expr, &TypeRegistry::new(), None).unwrap();
+        assert_eq!(
+            result,
+            Expr::MacroCall {
+                name: "eprintln".to_string(),
+                args: vec![Expr::Ident("x".to_string())],
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_expr_console_warn() {
+        let swc_expr = parse_expr("console.warn(x);");
+        let result = convert_expr(&swc_expr, &TypeRegistry::new(), None).unwrap();
+        assert_eq!(
+            result,
+            Expr::MacroCall {
+                name: "eprintln".to_string(),
+                args: vec![Expr::Ident("x".to_string())],
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_expr_console_log_no_args() {
+        let swc_expr = parse_expr("console.log();");
+        let result = convert_expr(&swc_expr, &TypeRegistry::new(), None).unwrap();
+        assert_eq!(
+            result,
+            Expr::MacroCall {
+                name: "println".to_string(),
+                args: vec![],
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_expr_console_log_multiple_args() {
+        let swc_expr = parse_expr("console.log(x, y);");
+        let result = convert_expr(&swc_expr, &TypeRegistry::new(), None).unwrap();
+        assert_eq!(
+            result,
+            Expr::MacroCall {
+                name: "println".to_string(),
+                args: vec![Expr::Ident("x".to_string()), Expr::Ident("y".to_string()),],
+            }
+        );
+    }
+
+    // -- Shorthand property tests --
+
+    #[test]
+    fn test_convert_expr_object_shorthand_single() {
+        // const p: Foo = { x }  →  Foo { x: x }
+        let swc_expr = parse_var_init("const p: Foo = { x };");
+        let expected = RustType::Named {
+            name: "Foo".to_string(),
+            type_args: vec![],
+        };
+        let result = convert_expr(&swc_expr, &TypeRegistry::new(), Some(&expected)).unwrap();
+        assert_eq!(
+            result,
+            Expr::StructInit {
+                name: "Foo".to_string(),
+                fields: vec![("x".to_string(), Expr::Ident("x".to_string()))],
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_expr_object_shorthand_mixed_with_key_value() {
+        // const p: Foo = { x, y: 2 }  →  Foo { x: x, y: 2.0 }
+        let swc_expr = parse_var_init("const p: Foo = { x, y: 2 };");
+        let expected = RustType::Named {
+            name: "Foo".to_string(),
+            type_args: vec![],
+        };
+        let result = convert_expr(&swc_expr, &TypeRegistry::new(), Some(&expected)).unwrap();
+        assert_eq!(
+            result,
+            Expr::StructInit {
+                name: "Foo".to_string(),
+                fields: vec![
+                    ("x".to_string(), Expr::Ident("x".to_string())),
+                    ("y".to_string(), Expr::NumberLit(2.0)),
+                ],
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_expr_object_shorthand_with_registry_field_type() {
+        // const u: User = { name }  where name: String → User { name: name }
+        // (Ident values don't get .to_string() — only string literals do)
+        let swc_expr = parse_var_init("const u: User = { name };");
+        let expected = RustType::Named {
+            name: "User".to_string(),
+            type_args: vec![],
+        };
+        let mut reg = TypeRegistry::new();
+        use crate::registry::TypeDef;
+        reg.register(
+            "User".to_string(),
+            TypeDef::Struct {
+                fields: vec![("name".to_string(), RustType::String)],
+            },
+        );
+        let result = convert_expr(&swc_expr, &reg, Some(&expected)).unwrap();
+        assert_eq!(
+            result,
+            Expr::StructInit {
+                name: "User".to_string(),
+                fields: vec![("name".to_string(), Expr::Ident("name".to_string()))],
             }
         );
     }

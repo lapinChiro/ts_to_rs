@@ -90,6 +90,17 @@ pub(super) fn generate_expr(expr: &Expr) -> String {
         Expr::FieldAccess { object, field } => {
             format!("{}.{field}", generate_expr(object))
         }
+        Expr::UnaryOp { op, operand } => {
+            let needs_parens = matches!(
+                operand.as_ref(),
+                Expr::BinaryOp { .. } | Expr::Assign { .. } | Expr::UnaryOp { .. }
+            );
+            if needs_parens {
+                format!("{op}({})", generate_expr(operand))
+            } else {
+                format!("{op}{}", generate_expr(operand))
+            }
+        }
         Expr::BinaryOp { left, op, right } => {
             format!("{} {op} {}", generate_expr(left), generate_expr(right))
         }
@@ -113,7 +124,43 @@ pub(super) fn generate_expr(expr: &Expr) -> String {
                 generate_expr(else_expr)
             )
         }
+        Expr::MacroCall { name, args } => generate_macro_call(name, args),
     }
+}
+
+/// Generates a macro call expression (e.g., `println!("{:?}", x)`).
+///
+/// For `println!`/`eprintln!`, constructs a format string based on argument types:
+/// - No args → `name!()`
+/// - Single string literal → `name!("the string")`
+/// - Other args → `name!("{:?} {:?}", arg1, arg2)` (string literals use `{}`)
+fn generate_macro_call(name: &str, args: &[Expr]) -> String {
+    if args.is_empty() {
+        return format!("{name}!()");
+    }
+
+    // Single string literal: output directly without format placeholders
+    if args.len() == 1 {
+        if let Expr::StringLit(s) = &args[0] {
+            return format!("{name}!(\"{s}\")");
+        }
+    }
+
+    // Build format string with placeholders
+    let placeholders: Vec<&str> = args
+        .iter()
+        .map(|arg| match arg {
+            Expr::StringLit(_) => "{}",
+            _ => "{:?}",
+        })
+        .collect();
+    let format_str = placeholders.join(" ");
+    let args_str = args
+        .iter()
+        .map(generate_expr)
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("{name}!(\"{format_str}\", {args_str})")
 }
 
 /// Generates a range bound expression, outputting integer literals without `.0` suffix.
@@ -373,6 +420,56 @@ mod tests {
             generate_expr(&expr),
             "if x > 0.0 { \"positive\" } else { if x < 0.0 { \"negative\" } else { \"zero\" } }"
         );
+    }
+
+    // -- MacroCall tests --
+
+    #[test]
+    fn test_generate_expr_macro_call_no_args() {
+        let expr = Expr::MacroCall {
+            name: "println".to_string(),
+            args: vec![],
+        };
+        assert_eq!(generate_expr(&expr), "println!()");
+    }
+
+    #[test]
+    fn test_generate_expr_macro_call_single_string_literal() {
+        let expr = Expr::MacroCall {
+            name: "println".to_string(),
+            args: vec![Expr::StringLit("hello".to_string())],
+        };
+        assert_eq!(generate_expr(&expr), "println!(\"hello\")");
+    }
+
+    #[test]
+    fn test_generate_expr_macro_call_single_ident() {
+        let expr = Expr::MacroCall {
+            name: "println".to_string(),
+            args: vec![Expr::Ident("x".to_string())],
+        };
+        assert_eq!(generate_expr(&expr), "println!(\"{:?}\", x)");
+    }
+
+    #[test]
+    fn test_generate_expr_macro_call_multiple_args() {
+        let expr = Expr::MacroCall {
+            name: "println".to_string(),
+            args: vec![
+                Expr::StringLit("value:".to_string()),
+                Expr::Ident("x".to_string()),
+            ],
+        };
+        assert_eq!(generate_expr(&expr), "println!(\"{} {:?}\", \"value:\", x)");
+    }
+
+    #[test]
+    fn test_generate_expr_macro_call_eprintln() {
+        let expr = Expr::MacroCall {
+            name: "eprintln".to_string(),
+            args: vec![Expr::Ident("err".to_string())],
+        };
+        assert_eq!(generate_expr(&expr), "eprintln!(\"{:?}\", err)");
     }
 
     #[test]

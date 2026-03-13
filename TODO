@@ -14,33 +14,26 @@
 - enum: const enum（コンパイル時インライン展開される TS 固有の最適化）
 - enum: computed member（`1 << 0` 等の式による値指定）
 - enum: 数値と文字列が混在する heterogeneous enum
-- enum メンバーへのアクセス式（`Color.Red` → `Color::Red`）の変換
-  - → [type-registry](backlog/type-registry.md) で対応予定
-- 配列: 文字列リテラル要素の `.to_string()` 付与
-  - `vec!["alice", "bob"]` は `Vec<&str>` になるが、型注記が `Vec<String>` の場合 `.to_string()` が必要
-  - → [expected-type-propagation](backlog/expected-type-propagation.md) で対応予定
 - 配列: スプレッド構文（`[...arr, 4]`）
 - 配列: 分割代入（`const [a, b] = arr`）
+  - スキップ: `const [a, , b] = arr`
+  - rest: `const [first, ...rest] = arr`
+  - ネスト: `const [[a], [b]] = arr`
 - 配列: 空配列の型推論（`[]` 単体で型が決まらないケース）
-- オブジェクトリテラル: 関数引数での型推論（`draw({ x: 0, y: 0 })` で関数定義のパラメータ型から構造体名を解決）
-  - → [type-registry](backlog/type-registry.md) で対応予定
-- オブジェクトリテラル: ネストしたオブジェクト（`{ origin: { x: 0, y: 0 } }` で内側のフィールド型を解決）
-  - → [type-registry](backlog/type-registry.md) で対応予定
 - オブジェクトリテラル: 型注記なし（`const obj = { x: 1 }`、匿名構造体 or HashMap への変換）
-- オブジェクトリテラル: shorthand property（`{ x }` = `{ x: x }`）
 - オブジェクトリテラル: computed property（`{ [key]: value }`）
 - オブジェクトリテラル: spread（`{ ...obj, x: 1 }`）
-- オブジェクトリテラル: 分割代入（`const { x, y } = obj`）
+- オブジェクトリテラル: 分割代入の拡張パターン
+  - デフォルト値: `const { x = 10 } = obj`
+  - ネスト: `const { a: { b } } = obj`
+  - 関数パラメータ: `function foo({ x, y }: Point) {}`
+  - rest: `const { x, ...rest } = obj`
 - クラス: `implements`（interface の実装 → trait impl）
 - クラス: `abstract class`（抽象クラス → trait 化）
 - クラス: `protected` メンバー（Rust に直接対応なし、pub(crate) 等の検討）
 
 ## ループの将来課題
 
-- 一般形の C スタイル for（`for (init; cond; update)` の任意の組み合わせ）
-  - Rust に直接対応する構文がなく、`loop { if !cond { break; } body; update; }` のようなパターンに変換する必要がある
-  - 初期化式・条件式・更新式の組み合わせが多様で、パターンマッチの網羅が困難
-  - まずは単純カウンタパターン（`for (let i = start; i < end; i++)`）のみ対応し、実際の変換結果を見てから拡張を判断する
 - `for...in`（オブジェクトキー列挙）
   - TS でも `for...of` や `Object.keys()` の使用が推奨されており、`for...in` は非推奨パターン
   - Rust に直接対応する構文がない（HashMap のイテレーションとも意味が異なる）
@@ -49,15 +42,40 @@
   - Rust に `do...while` がなく、`loop { body; if !cond { break; } }` に変換する必要がある
   - 使用頻度が低いため優先度は低い
 
-## 関数呼び出しの将来課題
+## 組み込み API の特殊変換
 
-- `console.log(x)` → `println!("{:?}", x)` 等の組み込み API の特殊変換
-  - `console.log` / `console.error` / `console.warn` は TS コードで頻出する
-  - Rust には対応する `println!` / `eprintln!` マクロがあるが、引数のフォーマットが異なる
-  - TS: `console.log("value:", x)` → Rust: `println!("value: {:?}", x)` のような変換が必要
-  - 複数引数の場合の `format!` 組み立て、オブジェクトの Debug 表示（`{:?}`）等、考慮事項が多い
-  - 他の組み込み API（`Math.floor()` → `f64::floor()`, `Array.prototype.map` → `.iter().map()` 等）も同様に個別対応が必要
-  - まずは 1:1 の素朴な変換を完成させ、実際の変換結果を見てから優先度を判断する
+- console API 以外の組み込み API（console.log/error/warn は実装済み）
+- `Math.floor(x)` → `x.floor()`, `Math.ceil(x)` → `x.ceil()`, `Math.abs(x)` → `x.abs()`, `Math.max(a,b)` → `a.max(b)`, `Math.min(a,b)` → `a.min(b)`, `Math.round(x)` → `x.round()`, `Math.sqrt(x)` → `x.sqrt()`, `Math.pow(x,y)` → `x.powf(y)`
+- `parseInt(s)` → `s.parse::<i64>()`, `parseFloat(s)` → `s.parse::<f64>()`
+- `typeof x === "string"` 等の型ガード（Rust に直接対応なし、要設計）
+
+## 文字列メソッドの特殊変換
+
+- `.length` → `.len()`
+- `.includes(s)` → `.contains(s)`
+- `.indexOf(s)` → `.find(s)` (Option 化が必要)
+- `.startsWith(s)` / `.endsWith(s)` → `.starts_with(s)` / `.ends_with(s)`
+- `.trim()` → `.trim()` (同名だが &str 返却)
+- `.split(s)` → `.split(s).collect::<Vec<&str>>()`
+- `.replace(s, r)` → `.replace(s, r)` (正規表現の場合は別途検討)
+- `.substring(a, b)` / `.slice(a, b)` → `&s[a..b]` (UTF-8 境界の問題あり)
+- `.toLowerCase()` / `.toUpperCase()` → `.to_lowercase()` / `.to_uppercase()`
+
+## 配列メソッドの特殊変換
+
+- `.push(x)` → `.push(x)`
+- `.pop()` → `.pop()`
+- `.length` → `.len()`
+- `.map(fn)` → `.iter().map(fn).collect()`
+- `.filter(fn)` → `.iter().filter(fn).collect()`
+- `.find(fn)` → `.iter().find(fn)`
+- `.some(fn)` → `.iter().any(fn)`
+- `.every(fn)` → `.iter().all(fn)`
+- `.includes(x)` → `.contains(&x)`
+- `.join(s)` → `.join(s)`
+- `.reverse()` → `.reverse()` (in-place) / `.iter().rev().collect()` (new)
+- `.forEach(fn)` → `for item in &arr { fn(item) }`
+- `.reduce(fn, init)` → `.iter().fold(init, fn)`
 
 ## エラーハンドリングの将来課題
 
@@ -65,6 +83,19 @@
 - `finally` ブロックの変換
 - ネストした try/catch の変換
 
+
+## リファクタリング候補
+
+- transformer 内の AST パターン抽出の重複解消
+  - `Pat::Ident` から識別子名を取り出すパターンが `convert_var_decl`, `convert_for_stmt`, `convert_for_of_stmt`, `convert_for_stmt_as_loop`, `try_convert_object_destructuring` の 5 箇所に重複している
+  - `extract_ident_name(pat: &ast::Pat, context: &str) -> Result<String>` のようなヘルパーに共通化できる
+  - 知識の重複であり、SWC API 変更時に全箇所の修正が必要になるリスクがある
+- transformer/expressions.rs のモジュール分割検討
+  - 現在 1,354 行。責務は一貫しているが、call 系・literal 系・member 系で分割の余地がある
+  - 即座に分割が必要な規模ではないが、今後の機能追加で肥大化する場合は検討する
+- TS の単項演算子（`!x`, `-x`, `typeof x`）の変換
+  - 現在 `Expr::UnaryOp` は IR・generator に定義済みだが、transformer での `ast::Expr::Unary` → `Expr::UnaryOp` 変換は未実装
+  - `convert_for_stmt_as_loop` 内でのみ手動で `UnaryOp` を生成している
 
 ## コード品質
 

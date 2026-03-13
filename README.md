@@ -55,8 +55,12 @@ ts-to-rs input.ts --report-unsupported
 | `while (cond) { ... }` | `while cond { ... }` |
 | `for (const x of items) { ... }` | `for x in items { ... }` |
 | `for (let i = 0; i < n; i++)` | `for i in 0..n { ... }` |
+| `for (let i = n; i >= 0; i--)` (一般形) | `loop { if !(cond) { break; } ... }` |
 | `[1, 2, 3]` (配列リテラル) | `vec![1.0, 2.0, 3.0]` |
 | `{ x: 1, y: 2 }` (型注記付きオブジェクトリテラル) | `Point { x: 1.0, y: 2.0 }` |
+| `{ x, y }` (shorthand property) | `Point { x, y }` |
+| `const { x, y } = obj` (分割代入) | `let x = obj.x; let y = obj.y;` |
+| `const { x: newX } = obj` (リネーム) | `let newX = obj.x;` |
 | `{ origin: { x: 0, y: 0 } }` (ネストしたオブジェクト) | `Rect { origin: Origin { x: 0.0, y: 0.0 } }` |
 | `draw({ x: 0, y: 0 })` (関数引数のオブジェクト) | `draw(Point { x: 0.0, y: 0.0 })` |
 | `Color.Red` (enum メンバーアクセス) | `Color::Red` |
@@ -67,6 +71,8 @@ ts-to-rs input.ts --report-unsupported
 | `const s: string = "hello"` | `let s: String = "hello".to_string()` |
 | `enum` (数値) | `enum` + `#[repr(i64)]` |
 | `enum` (文字列) | `enum` + `as_str()` メソッド |
+| `console.log(x)` | `println!("{:?}", x)` |
+| `console.error(x)` / `console.warn(x)` | `eprintln!("{:?}", x)` |
 | `export` | `pub` |
 
 ## 例

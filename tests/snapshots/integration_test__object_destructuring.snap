@@ -1,0 +1,26 @@
+---
+source: tests/integration_test.rs
+expression: output
+---
+struct Point {
+    x: f64,
+    y: f64,
+}
+
+fn getCoords(p: Point) -> f64 {
+    let x = p.x;
+    let y = p.y;
+    x + y
+}
+
+fn getMutableCoords(p: Point) -> f64 {
+    let mut x = p.x;
+    let mut y = p.y;
+    x = x + 1.0;
+    x + y
+}
+
+fn getRenamedCoord(p: Point) -> f64 {
+    let posX = p.x;
+    posX
+}

@@ -135,6 +135,27 @@ fn test_break_continue() {
 }
 
 #[test]
+fn test_object_destructuring() {
+    let input = fs::read_to_string("tests/fixtures/object-destructuring.input.ts").unwrap();
+    let output = transpile(&input).unwrap();
+    insta::assert_snapshot!(output);
+}
+
+#[test]
+fn test_console_api() {
+    let input = fs::read_to_string("tests/fixtures/console-api.input.ts").unwrap();
+    let output = transpile(&input).unwrap();
+    insta::assert_snapshot!(output);
+}
+
+#[test]
+fn test_general_for_loop() {
+    let input = fs::read_to_string("tests/fixtures/general-for-loop.input.ts").unwrap();
+    let output = transpile(&input).unwrap();
+    insta::assert_snapshot!(output);
+}
+
+#[test]
 fn test_unsupported_syntax_collecting_output() {
     let input = fs::read_to_string("tests/fixtures/unsupported-syntax.input.ts").unwrap();
     let (output, unsupported) = transpile_collecting(&input).unwrap();

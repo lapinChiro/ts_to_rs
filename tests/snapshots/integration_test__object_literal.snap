@@ -21,3 +21,13 @@ fn createConfig() -> Config {
     let c: Config = Config { count: 0.0, active: true };
     c
 }
+
+fn createPointShorthand(x: f64, y: f64) -> Point {
+    let p: Point = Point { x, y };
+    p
+}
+
+fn createMixed(x: f64) -> Point {
+    let p: Point = Point { x: x, y: 10.0 };
+    p
+}

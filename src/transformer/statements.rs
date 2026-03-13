@@ -363,12 +363,214 @@ pub fn convert_stmt_list(
                 // catch block is dropped — throw is already Err(), and ? propagation
                 // requires function call support which is not yet available
             }
+            ast::Stmt::Decl(ast::Decl::Var(var_decl)) => {
+                if let Some(expanded) = try_convert_object_destructuring(var_decl, reg)? {
+                    result.extend(expanded);
+                } else {
+                    result.push(convert_stmt(stmt, reg, return_type)?);
+                }
+            }
+            ast::Stmt::For(for_stmt) => {
+                // Try simple counter pattern first; fall back to loop
+                match convert_for_stmt(for_stmt, reg, return_type) {
+                    Ok(s) => result.push(s),
+                    Err(_) => {
+                        result.extend(convert_for_stmt_as_loop(for_stmt, reg, return_type)?);
+                    }
+                }
+            }
             other => {
                 result.push(convert_stmt(other, reg, return_type)?);
             }
         }
     }
     Ok(result)
+}
+
+/// Tries to convert a variable declaration with object destructuring pattern.
+///
+/// `const { x, y } = obj` → `[let x = obj.x, let y = obj.y]`
+///
+/// Returns `None` if the declaration is not an object destructuring pattern,
+/// allowing the caller to fall back to normal processing.
+fn try_convert_object_destructuring(
+    var_decl: &ast::VarDecl,
+    reg: &TypeRegistry,
+) -> Result<Option<Vec<Stmt>>> {
+    if var_decl.decls.len() != 1 {
+        return Ok(None);
+    }
+    let declarator = &var_decl.decls[0];
+
+    let obj_pat = match &declarator.name {
+        ast::Pat::Object(obj_pat) => obj_pat,
+        _ => return Ok(None),
+    };
+
+    let source = declarator
+        .init
+        .as_ref()
+        .ok_or_else(|| anyhow!("object destructuring requires an initializer"))?;
+    let source_expr = convert_expr(source, reg, None)?;
+
+    let mutable = !matches!(var_decl.kind, ast::VarDeclKind::Const);
+    let mut stmts = Vec::new();
+
+    for prop in &obj_pat.props {
+        match prop {
+            ast::ObjectPatProp::Assign(assign) => {
+                // { x } — shorthand, key and binding name are the same
+                let field_name = assign.key.sym.to_string();
+                stmts.push(Stmt::Let {
+                    mutable,
+                    name: field_name.clone(),
+                    ty: None,
+                    init: Some(Expr::FieldAccess {
+                        object: Box::new(source_expr.clone()),
+                        field: field_name,
+                    }),
+                });
+            }
+            ast::ObjectPatProp::KeyValue(kv) => {
+                // { x: newX } — rename
+                let field_name = match &kv.key {
+                    ast::PropName::Ident(ident) => ident.sym.to_string(),
+                    _ => return Err(anyhow!("unsupported destructuring key")),
+                };
+                let binding_name = match kv.value.as_ref() {
+                    ast::Pat::Ident(ident) => ident.id.sym.to_string(),
+                    _ => return Err(anyhow!("unsupported destructuring value pattern")),
+                };
+                stmts.push(Stmt::Let {
+                    mutable,
+                    name: binding_name,
+                    ty: None,
+                    init: Some(Expr::FieldAccess {
+                        object: Box::new(source_expr.clone()),
+                        field: field_name,
+                    }),
+                });
+            }
+            ast::ObjectPatProp::Rest(_) => {
+                return Err(anyhow!("rest pattern in destructuring is not supported"));
+            }
+        }
+    }
+
+    Ok(Some(stmts))
+}
+
+/// Converts a general C-style `for` statement to `[Stmt::Let, Stmt::Loop]` pattern.
+///
+/// Handles any `for` loop that doesn't match the simple counter pattern:
+/// - `for (let i = n; i >= 0; i--)` → `let mut i = n; loop { if !(i >= 0) { break; } body; i -= 1; }`
+/// - `for (let i = 0; i < n; i += 2)` → `let mut i = 0; loop { if !(i < n) { break; } body; i += 2; }`
+fn convert_for_stmt_as_loop(
+    for_stmt: &ast::ForStmt,
+    reg: &TypeRegistry,
+    return_type: Option<&RustType>,
+) -> Result<Vec<Stmt>> {
+    let mut result = Vec::new();
+
+    // 1. Extract init → Stmt::Let { mutable: true, ... }
+    match &for_stmt.init {
+        Some(ast::VarDeclOrExpr::VarDecl(var_decl)) => {
+            if var_decl.decls.len() != 1 {
+                return Err(anyhow!("unsupported for loop: multiple declarators"));
+            }
+            let decl = &var_decl.decls[0];
+            let name = match &decl.name {
+                ast::Pat::Ident(ident) => ident.id.sym.to_string(),
+                _ => return Err(anyhow!("unsupported for loop: non-ident binding")),
+            };
+            let init_expr = decl
+                .init
+                .as_ref()
+                .map(|e| convert_expr(e, reg, None))
+                .transpose()?;
+            result.push(Stmt::Let {
+                mutable: true,
+                name,
+                ty: None,
+                init: init_expr,
+            });
+        }
+        Some(ast::VarDeclOrExpr::Expr(expr)) => {
+            let e = convert_expr(expr, reg, None)?;
+            result.push(Stmt::Expr(e));
+        }
+        None => {}
+    }
+
+    // 2. Build loop body
+    let mut loop_body = Vec::new();
+
+    // 2a. Condition → if !(condition) { break; }
+    if let Some(test) = &for_stmt.test {
+        let condition = convert_expr(test, reg, None)?;
+        loop_body.push(Stmt::If {
+            condition: Expr::UnaryOp {
+                op: "!".to_string(),
+                operand: Box::new(condition),
+            },
+            then_body: vec![Stmt::Break { label: None }],
+            else_body: None,
+        });
+    }
+
+    // 2b. Original body
+    let body_stmts = convert_block_or_stmt(&for_stmt.body, reg, return_type)?;
+    loop_body.extend(body_stmts);
+
+    // 2c. Update expression
+    if let Some(update) = &for_stmt.update {
+        let update_stmt = convert_update_to_stmt(update, reg)?;
+        loop_body.push(update_stmt);
+    }
+
+    result.push(Stmt::Loop {
+        label: None,
+        body: loop_body,
+    });
+
+    Ok(result)
+}
+
+/// Converts a for-loop update expression to an IR statement.
+///
+/// - `i++` → `i = i + 1.0`
+/// - `i--` → `i = i - 1.0`
+/// - `i += n` → `i = i + n`
+/// - Other expressions → `Stmt::Expr`
+fn convert_update_to_stmt(expr: &ast::Expr, reg: &TypeRegistry) -> Result<Stmt> {
+    match expr {
+        ast::Expr::Update(up) => {
+            let name = match up.arg.as_ref() {
+                ast::Expr::Ident(ident) => ident.sym.to_string(),
+                _ => return Err(anyhow!("unsupported update expression")),
+            };
+            let op = match up.op {
+                ast::UpdateOp::PlusPlus => "+",
+                ast::UpdateOp::MinusMinus => "-",
+            };
+            Ok(Stmt::Expr(Expr::Assign {
+                target: Box::new(Expr::Ident(name.clone())),
+                value: Box::new(Expr::BinaryOp {
+                    left: Box::new(Expr::Ident(name)),
+                    op: op.to_string(),
+                    right: Box::new(Expr::NumberLit(1.0)),
+                }),
+            }))
+        }
+        ast::Expr::Assign(assign) => {
+            let e = convert_expr(&ast::Expr::Assign(assign.clone()), reg, None)?;
+            Ok(Stmt::Expr(e))
+        }
+        other => {
+            let e = convert_expr(other, reg, None)?;
+            Ok(Stmt::Expr(e))
+        }
+    }
 }
 
 /// Converts a block statement or single statement into a `Vec<Stmt>`.
@@ -815,6 +1017,103 @@ mod tests {
             }
             _ => panic!("expected labeled ForIn"),
         }
+    }
+
+    // -- General for loop (loop fallback) tests --
+
+    #[test]
+    fn test_convert_stmt_list_for_decrement_becomes_loop() {
+        let stmts = parse_fn_body(
+            "function f(n: number) { for (let i = n; i >= 0; i--) { console.log(i); } }",
+        );
+        let result = convert_stmt_list(&stmts, &TypeRegistry::new(), None).unwrap();
+        // Should produce: let mut i = n; loop { if !(i >= 0) { break; } body; i--; }
+        assert_eq!(result.len(), 2); // init + loop
+        assert!(matches!(&result[0], Stmt::Let { mutable: true, name, .. } if name == "i"));
+        assert!(matches!(&result[1], Stmt::Loop { .. }));
+    }
+
+    #[test]
+    fn test_convert_stmt_list_for_step_by_two_becomes_loop() {
+        let stmts = parse_fn_body(
+            "function f(n: number) { for (let i = 0; i < n; i += 2) { console.log(i); } }",
+        );
+        let result = convert_stmt_list(&stmts, &TypeRegistry::new(), None).unwrap();
+        assert_eq!(result.len(), 2);
+        assert!(matches!(&result[0], Stmt::Let { mutable: true, name, .. } if name == "i"));
+        assert!(matches!(&result[1], Stmt::Loop { .. }));
+    }
+
+    #[test]
+    fn test_convert_stmt_for_simple_counter_unchanged() {
+        // Existing simple counter pattern should still produce ForIn
+        let stmts = parse_fn_body(
+            "function f(n: number) { for (let i = 0; i < n; i++) { console.log(i); } }",
+        );
+        let result = convert_stmt_list(&stmts, &TypeRegistry::new(), None).unwrap();
+        assert_eq!(result.len(), 1);
+        assert!(matches!(&result[0], Stmt::ForIn { .. }));
+    }
+
+    // -- Object destructuring tests --
+
+    #[test]
+    fn test_convert_stmt_list_object_destructuring_basic() {
+        let stmts = parse_fn_body("function f() { const { x, y } = obj; }");
+        let result = convert_stmt_list(&stmts, &TypeRegistry::new(), None).unwrap();
+        assert_eq!(result.len(), 2);
+        assert_eq!(
+            result[0],
+            Stmt::Let {
+                mutable: false,
+                name: "x".to_string(),
+                ty: None,
+                init: Some(Expr::FieldAccess {
+                    object: Box::new(Expr::Ident("obj".to_string())),
+                    field: "x".to_string(),
+                }),
+            }
+        );
+        assert_eq!(
+            result[1],
+            Stmt::Let {
+                mutable: false,
+                name: "y".to_string(),
+                ty: None,
+                init: Some(Expr::FieldAccess {
+                    object: Box::new(Expr::Ident("obj".to_string())),
+                    field: "y".to_string(),
+                }),
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_stmt_list_object_destructuring_let_mutable() {
+        let stmts = parse_fn_body("function f() { let { x, y } = obj; }");
+        let result = convert_stmt_list(&stmts, &TypeRegistry::new(), None).unwrap();
+        assert_eq!(result.len(), 2);
+        assert!(matches!(&result[0], Stmt::Let { mutable: true, name, .. } if name == "x"));
+        assert!(matches!(&result[1], Stmt::Let { mutable: true, name, .. } if name == "y"));
+    }
+
+    #[test]
+    fn test_convert_stmt_list_object_destructuring_rename() {
+        let stmts = parse_fn_body("function f() { const { x: newX } = obj; }");
+        let result = convert_stmt_list(&stmts, &TypeRegistry::new(), None).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(
+            result[0],
+            Stmt::Let {
+                mutable: false,
+                name: "newX".to_string(),
+                ty: None,
+                init: Some(Expr::FieldAccess {
+                    object: Box::new(Expr::Ident("obj".to_string())),
+                    field: "x".to_string(),
+                }),
+            }
+        );
     }
 
     #[test]

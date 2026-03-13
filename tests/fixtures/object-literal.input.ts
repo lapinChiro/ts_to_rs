@@ -17,3 +17,13 @@ function createConfig(): Config {
   const c: Config = { count: 0, active: true };
   return c;
 }
+
+function createPointShorthand(x: number, y: number): Point {
+  const p: Point = { x, y };
+  return p;
+}
+
+function createMixed(x: number): Point {
+  const p: Point = { x, y: 10 };
+  return p;
+}
