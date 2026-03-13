@@ -5,11 +5,11 @@
 
 use anyhow::{anyhow, Result};
 use swc_ecma_ast::{
-    Expr, TsInterfaceDecl, TsKeywordTypeKind, TsPropertySignature, TsType, TsTypeAliasDecl,
-    TsTypeElement,
+    Expr, TsInterfaceDecl, TsKeywordTypeKind, TsMethodSignature, TsPropertySignature, TsType,
+    TsTypeAliasDecl, TsTypeElement,
 };
 
-use crate::ir::{EnumValue, EnumVariant, Item, RustType, StructField, Visibility};
+use crate::ir::{EnumValue, EnumVariant, Item, Method, Param, RustType, StructField, Visibility};
 
 /// Converts a SWC [`TsType`] into an IR [`RustType`].
 ///
@@ -21,6 +21,7 @@ use crate::ir::{EnumValue, EnumVariant, Item, RustType, StructField, Visibility}
 /// - `T[]` -> `Vec<T>`
 /// - `Array<T>` -> `Vec<T>`
 /// - `T | null` / `T | undefined` -> `Option<T>`
+/// - `[T, U, ...]` -> `(T, U, ...)`
 ///
 /// # Errors
 ///
@@ -49,6 +50,14 @@ pub fn convert_ts_type(ts_type: &TsType) -> Result<RustType> {
         TsType::TsParenthesizedType(paren) => convert_ts_type(&paren.type_ann),
         TsType::TsFnOrConstructorType(swc_ecma_ast::TsFnOrConstructorType::TsFnType(fn_type)) => {
             convert_fn_type(fn_type)
+        }
+        TsType::TsTupleType(tuple) => {
+            let elems = tuple
+                .elem_types
+                .iter()
+                .map(|elem| convert_ts_type(&elem.ty))
+                .collect::<Result<Vec<_>>>()?;
+            Ok(RustType::Tuple(elems))
         }
         _ => Err(anyhow!("unsupported type: {:?}", ts_type)),
     }
@@ -125,17 +134,38 @@ fn convert_union_type(union: &swc_ecma_ast::TsUnionType) -> Result<RustType> {
     }
 }
 
-/// Converts a [`TsInterfaceDecl`] into an IR [`Item::Struct`].
+/// Converts a [`TsInterfaceDecl`] into an IR [`Item::Struct`] or [`Item::Trait`].
 ///
-/// Each property signature becomes a struct field. Optional properties
-/// (marked with `?`) are wrapped in `Option<T>`.
+/// - Properties-only interface → `Item::Struct` (each property becomes a field)
+/// - Interface with method signatures → `Item::Trait` (each method becomes a trait method)
 ///
 /// # Errors
 ///
-/// Returns an error if a property has an unsupported type or is not a
-/// property signature.
+/// Returns an error if a member has an unsupported type or pattern.
 pub fn convert_interface(decl: &TsInterfaceDecl, vis: Visibility) -> Result<Item> {
     let name = decl.id.sym.to_string();
+    let type_params = extract_type_params(decl.type_params.as_deref());
+
+    let has_methods = decl
+        .body
+        .body
+        .iter()
+        .any(|m| matches!(m, TsTypeElement::TsMethodSignature(_)));
+
+    if has_methods {
+        convert_interface_as_trait(decl, vis, &name, type_params)
+    } else {
+        convert_interface_as_struct(decl, vis, &name, type_params)
+    }
+}
+
+/// Converts an interface with only property signatures into an IR [`Item::Struct`].
+fn convert_interface_as_struct(
+    decl: &TsInterfaceDecl,
+    vis: Visibility,
+    name: &str,
+    type_params: Vec<String>,
+) -> Result<Item> {
     let mut fields = Vec::new();
 
     for member in &decl.body.body {
@@ -152,21 +182,109 @@ pub fn convert_interface(decl: &TsInterfaceDecl, vis: Visibility) -> Result<Item
         }
     }
 
-    let type_params = extract_type_params(decl.type_params.as_deref());
-
     Ok(Item::Struct {
         vis,
-        name,
+        name: name.to_string(),
         type_params,
         fields,
     })
 }
 
-/// Converts a [`TsTypeAliasDecl`] with an object type literal body into an IR [`Item::Struct`].
+/// Converts an interface with method signatures into an IR [`Item::Trait`].
+fn convert_interface_as_trait(
+    decl: &TsInterfaceDecl,
+    vis: Visibility,
+    name: &str,
+    type_params: Vec<String>,
+) -> Result<Item> {
+    let mut methods = Vec::new();
+
+    for member in &decl.body.body {
+        match member {
+            TsTypeElement::TsMethodSignature(method_sig) => {
+                let method = convert_method_signature(method_sig)?;
+                methods.push(method);
+            }
+            TsTypeElement::TsPropertySignature(_) => {
+                // Properties in a trait interface are skipped for now.
+                // Trait cannot have fields in Rust.
+            }
+            _ => {
+                return Err(anyhow!(
+                    "unsupported interface member (only property and method signatures are supported)"
+                ));
+            }
+        }
+    }
+
+    // type_params are not directly on Trait in current IR, so we ignore them for now.
+    // TODO: Add type_params to Item::Trait when needed.
+    let _ = type_params;
+
+    Ok(Item::Trait {
+        vis,
+        name: name.to_string(),
+        methods,
+    })
+}
+
+/// Converts a [`TsMethodSignature`] into an IR [`Method`] (signature only, no body).
+fn convert_method_signature(sig: &TsMethodSignature) -> Result<Method> {
+    let name = match sig.key.as_ref() {
+        swc_ecma_ast::Expr::Ident(ident) => ident.sym.to_string(),
+        _ => {
+            return Err(anyhow!(
+                "unsupported method signature key (only identifiers)"
+            ))
+        }
+    };
+
+    let mut params = Vec::new();
+    for param in &sig.params {
+        match param {
+            swc_ecma_ast::TsFnParam::Ident(ident) => {
+                let param_name = ident.id.sym.to_string();
+                let ty = ident
+                    .type_ann
+                    .as_ref()
+                    .map(|ann| convert_ts_type(&ann.type_ann))
+                    .transpose()?;
+                params.push(Param {
+                    name: param_name,
+                    ty,
+                });
+            }
+            _ => return Err(anyhow!("unsupported method parameter pattern")),
+        }
+    }
+
+    let return_type = sig
+        .type_ann
+        .as_ref()
+        .map(|ann| convert_ts_type(&ann.type_ann))
+        .transpose()?
+        .and_then(|ty| if ty == RustType::Unit { None } else { Some(ty) });
+
+    Ok(Method {
+        vis: Visibility::Public,
+        name,
+        has_self: true,
+        has_mut_self: false,
+        params,
+        return_type,
+        body: vec![],
+    })
+}
+
+/// Converts a [`TsTypeAliasDecl`] into an IR item.
+///
+/// - String literal union → `Item::Enum`
+/// - Function type → `Item::TypeAlias` with `RustType::Fn`
+/// - Object type literal → `Item::Struct`
 ///
 /// # Errors
 ///
-/// Returns an error if the type alias body is not an object type literal.
+/// Returns an error if the type alias body is not a supported form.
 pub fn convert_type_alias(decl: &TsTypeAliasDecl, vis: Visibility) -> Result<Item> {
     let name = decl.id.sym.to_string();
 
@@ -177,6 +295,16 @@ pub fn convert_type_alias(decl: &TsTypeAliasDecl, vis: Visibility) -> Result<Ite
 
     // Single string literal: `type X = "only"` → enum with one variant
     if let Some(item) = try_convert_single_string_literal(decl, vis.clone())? {
+        return Ok(item);
+    }
+
+    // Function type: `type Fn = (x: T) => U` → type alias
+    if let Some(item) = try_convert_function_type_alias(decl, vis.clone())? {
+        return Ok(item);
+    }
+
+    // Tuple type: `type Pair = [string, number]` → type alias
+    if let Some(item) = try_convert_tuple_type_alias(decl, vis.clone())? {
         return Ok(item);
     }
 
@@ -209,6 +337,76 @@ pub fn convert_type_alias(decl: &TsTypeAliasDecl, vis: Visibility) -> Result<Ite
             "unsupported type alias body (only object type literals are supported)"
         )),
     }
+}
+
+/// Tries to convert a type alias with a function type body.
+///
+/// Returns `Ok(Some(Item::TypeAlias))` if the body is a `TsFnType`, `Ok(None)` otherwise.
+fn try_convert_function_type_alias(
+    decl: &TsTypeAliasDecl,
+    vis: Visibility,
+) -> Result<Option<Item>> {
+    let fn_type = match decl.type_ann.as_ref() {
+        TsType::TsFnOrConstructorType(swc_ecma_ast::TsFnOrConstructorType::TsFnType(f)) => f,
+        _ => return Ok(None),
+    };
+
+    let mut param_types = Vec::new();
+    for param in &fn_type.params {
+        match param {
+            swc_ecma_ast::TsFnParam::Ident(ident) => {
+                let ty = ident
+                    .type_ann
+                    .as_ref()
+                    .map(|ann| convert_ts_type(&ann.type_ann))
+                    .transpose()?
+                    .unwrap_or(RustType::Any);
+                param_types.push(ty);
+            }
+            _ => return Err(anyhow!("unsupported function type parameter pattern")),
+        }
+    }
+
+    let return_type = convert_ts_type(&fn_type.type_ann.type_ann)?;
+
+    let name = decl.id.sym.to_string();
+    let type_params = extract_type_params(decl.type_params.as_deref());
+
+    Ok(Some(Item::TypeAlias {
+        vis,
+        name,
+        type_params,
+        ty: RustType::Fn {
+            params: param_types,
+            return_type: Box::new(return_type),
+        },
+    }))
+}
+
+/// Tries to convert a type alias with a tuple type body.
+///
+/// Returns `Ok(Some(Item::TypeAlias))` if the body is a `TsTupleType`, `Ok(None)` otherwise.
+fn try_convert_tuple_type_alias(decl: &TsTypeAliasDecl, vis: Visibility) -> Result<Option<Item>> {
+    let tuple = match decl.type_ann.as_ref() {
+        TsType::TsTupleType(t) => t,
+        _ => return Ok(None),
+    };
+
+    let elems = tuple
+        .elem_types
+        .iter()
+        .map(|elem| convert_ts_type(&elem.ty))
+        .collect::<Result<Vec<_>>>()?;
+
+    let name = decl.id.sym.to_string();
+    let type_params = extract_type_params(decl.type_params.as_deref());
+
+    Ok(Some(Item::TypeAlias {
+        vis,
+        name,
+        type_params,
+        ty: RustType::Tuple(elems),
+    }))
 }
 
 /// Tries to convert a type alias with a union body where all members are string literals.
@@ -556,6 +754,86 @@ mod tests {
         }
     }
 
+    // -- convert_interface with method signatures --
+
+    #[test]
+    fn test_convert_interface_method_only_generates_trait() {
+        let decl = parse_interface("interface Greeter { greet(name: string): string; }");
+        let item = convert_interface(&decl, Visibility::Public).unwrap();
+
+        match item {
+            Item::Trait { vis, name, methods } => {
+                assert_eq!(vis, Visibility::Public);
+                assert_eq!(name, "Greeter");
+                assert_eq!(methods.len(), 1);
+                assert_eq!(methods[0].name, "greet");
+                assert!(methods[0].has_self);
+                assert_eq!(methods[0].params.len(), 1);
+                assert_eq!(methods[0].params[0].name, "name");
+                assert_eq!(methods[0].params[0].ty, Some(RustType::String));
+                assert_eq!(methods[0].return_type, Some(RustType::String));
+            }
+            _ => panic!("expected Item::Trait, got {:?}", item),
+        }
+    }
+
+    #[test]
+    fn test_convert_interface_method_no_args_void_return() {
+        let decl = parse_interface("interface Runner { run(): void; }");
+        let item = convert_interface(&decl, Visibility::Public).unwrap();
+
+        match item {
+            Item::Trait { methods, .. } => {
+                assert_eq!(methods[0].name, "run");
+                assert!(methods[0].has_self);
+                assert!(methods[0].params.is_empty());
+                assert_eq!(methods[0].return_type, None);
+            }
+            _ => panic!("expected Item::Trait"),
+        }
+    }
+
+    #[test]
+    fn test_convert_interface_method_multiple_params() {
+        let decl = parse_interface("interface Math { add(a: number, b: number): number; }");
+        let item = convert_interface(&decl, Visibility::Public).unwrap();
+
+        match item {
+            Item::Trait { methods, .. } => {
+                assert_eq!(methods[0].params.len(), 2);
+                assert_eq!(methods[0].params[0].name, "a");
+                assert_eq!(methods[0].params[1].name, "b");
+                assert_eq!(methods[0].return_type, Some(RustType::F64));
+            }
+            _ => panic!("expected Item::Trait"),
+        }
+    }
+
+    #[test]
+    fn test_convert_interface_properties_only_still_struct() {
+        let decl = parse_interface("interface Point { x: number; y: number; }");
+        let item = convert_interface(&decl, Visibility::Public).unwrap();
+
+        assert!(matches!(item, Item::Struct { .. }));
+    }
+
+    #[test]
+    fn test_convert_interface_method_with_type_params() {
+        let decl =
+            parse_interface("interface Repo<T> { find(id: string): T; save(item: T): void; }");
+        let item = convert_interface(&decl, Visibility::Public).unwrap();
+
+        match item {
+            Item::Trait { name, methods, .. } => {
+                assert_eq!(name, "Repo");
+                assert_eq!(methods.len(), 2);
+                assert_eq!(methods[0].name, "find");
+                assert_eq!(methods[1].name, "save");
+            }
+            _ => panic!("expected Item::Trait"),
+        }
+    }
+
     // -- convert_type_alias tests --
 
     #[test]
@@ -809,5 +1087,184 @@ mod tests {
                 return_type: Box::new(RustType::Unit),
             }
         );
+    }
+
+    // -- convert_type_alias: function type body --
+
+    #[test]
+    fn test_convert_type_alias_function_type_single_param() {
+        let decl = parse_type_alias("type Handler = (req: Request) => Response;");
+        let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+
+        match item {
+            Item::TypeAlias {
+                vis,
+                name,
+                type_params,
+                ty,
+            } => {
+                assert_eq!(vis, Visibility::Public);
+                assert_eq!(name, "Handler");
+                assert!(type_params.is_empty());
+                assert_eq!(
+                    ty,
+                    RustType::Fn {
+                        params: vec![RustType::Named {
+                            name: "Request".to_string(),
+                            type_args: vec![],
+                        }],
+                        return_type: Box::new(RustType::Named {
+                            name: "Response".to_string(),
+                            type_args: vec![],
+                        }),
+                    }
+                );
+            }
+            _ => panic!("expected Item::TypeAlias, got {:?}", item),
+        }
+    }
+
+    #[test]
+    fn test_convert_type_alias_function_type_no_params() {
+        let decl = parse_type_alias("type Factory = () => Widget;");
+        let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+
+        match item {
+            Item::TypeAlias { ty, .. } => {
+                assert_eq!(
+                    ty,
+                    RustType::Fn {
+                        params: vec![],
+                        return_type: Box::new(RustType::Named {
+                            name: "Widget".to_string(),
+                            type_args: vec![],
+                        }),
+                    }
+                );
+            }
+            _ => panic!("expected Item::TypeAlias"),
+        }
+    }
+
+    #[test]
+    fn test_convert_type_alias_function_type_void_return() {
+        let decl = parse_type_alias("type Callback = (x: number) => void;");
+        let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+
+        match item {
+            Item::TypeAlias { ty, .. } => {
+                assert_eq!(
+                    ty,
+                    RustType::Fn {
+                        params: vec![RustType::F64],
+                        return_type: Box::new(RustType::Unit),
+                    }
+                );
+            }
+            _ => panic!("expected Item::TypeAlias"),
+        }
+    }
+
+    #[test]
+    fn test_convert_type_alias_function_type_multiple_params() {
+        let decl = parse_type_alias("type ErrorHandler = (err: string, ctx: Context) => Response;");
+        let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+
+        match item {
+            Item::TypeAlias { ty, .. } => match ty {
+                RustType::Fn { params, .. } => {
+                    assert_eq!(params.len(), 2);
+                    assert_eq!(params[0], RustType::String);
+                }
+                _ => panic!("expected RustType::Fn"),
+            },
+            _ => panic!("expected Item::TypeAlias"),
+        }
+    }
+
+    // -- convert_ts_type: tuple types --
+
+    #[test]
+    fn test_convert_ts_type_tuple_two_elements() {
+        let decl = parse_interface("interface T { x: [string, number]; }");
+        let prop = match &decl.body.body[0] {
+            TsTypeElement::TsPropertySignature(p) => p,
+            _ => panic!("expected property signature"),
+        };
+        let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann).unwrap();
+        assert_eq!(ty, RustType::Tuple(vec![RustType::String, RustType::F64]));
+    }
+
+    #[test]
+    fn test_convert_ts_type_tuple_single_element() {
+        let decl = parse_interface("interface T { x: [boolean]; }");
+        let prop = match &decl.body.body[0] {
+            TsTypeElement::TsPropertySignature(p) => p,
+            _ => panic!("expected property signature"),
+        };
+        let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann).unwrap();
+        assert_eq!(ty, RustType::Tuple(vec![RustType::Bool]));
+    }
+
+    #[test]
+    fn test_convert_ts_type_tuple_empty() {
+        let decl = parse_interface("interface T { x: []; }");
+        let prop = match &decl.body.body[0] {
+            TsTypeElement::TsPropertySignature(p) => p,
+            _ => panic!("expected property signature"),
+        };
+        let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann).unwrap();
+        assert_eq!(ty, RustType::Tuple(vec![]));
+    }
+
+    #[test]
+    fn test_convert_ts_type_tuple_nested() {
+        let decl = parse_interface("interface T { x: [[string, number], boolean]; }");
+        let prop = match &decl.body.body[0] {
+            TsTypeElement::TsPropertySignature(p) => p,
+            _ => panic!("expected property signature"),
+        };
+        let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann).unwrap();
+        assert_eq!(
+            ty,
+            RustType::Tuple(vec![
+                RustType::Tuple(vec![RustType::String, RustType::F64]),
+                RustType::Bool,
+            ])
+        );
+    }
+
+    #[test]
+    fn test_convert_type_alias_tuple_type() {
+        let decl = parse_type_alias("type Pair = [string, number];");
+        let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+
+        match item {
+            Item::TypeAlias {
+                vis,
+                name,
+                type_params,
+                ty,
+            } => {
+                assert_eq!(vis, Visibility::Public);
+                assert_eq!(name, "Pair");
+                assert!(type_params.is_empty());
+                assert_eq!(ty, RustType::Tuple(vec![RustType::String, RustType::F64]));
+            }
+            _ => panic!("expected Item::TypeAlias, got {:?}", item),
+        }
+    }
+
+    #[test]
+    fn test_convert_type_alias_function_type_with_generics() {
+        let decl = parse_type_alias("type Mapper<T, U> = (item: T) => U;");
+        let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+
+        match item {
+            Item::TypeAlias { type_params, .. } => {
+                assert_eq!(type_params, vec!["T".to_string(), "U".to_string()]);
+            }
+            _ => panic!("expected Item::TypeAlias"),
+        }
     }
 }

@@ -38,6 +38,7 @@ ts-to-rs input.ts --report-unsupported
 | `T \| null` / `T \| undefined` / `?` | `Option<T>` |
 | `T[]` / `Array<T>` | `Vec<T>` |
 | 関数宣言 | `fn` |
+| デフォルト引数 (`x: number = 0`) | `Option<T>` + `unwrap_or(値)` |
 | `const` / `let` | `let` / `let mut` |
 | `if` / `else` | `if` / `else` |
 | テンプレートリテラル | `format!()` |
@@ -104,6 +105,7 @@ ts-to-rs input.ts --report-unsupported
 | `parseInt(s)` / `parseFloat(s)` | `s.parse::<f64>().unwrap()` |
 | `isNaN(x)` / `Number.isNaN(x)` | `x.is_nan()` |
 | `Number.isFinite(x)` | `x.is_finite()` |
+| `[string, number]` (tuple 型) | `(String, f64)` |
 | `type X = "a" \| "b"` (string literal union) | `enum X { A, B }` + `as_str()` |
 | `any` / `unknown` | `Box<dyn std::any::Any>` |
 | `never` | `!` |

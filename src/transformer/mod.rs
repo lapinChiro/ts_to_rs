@@ -19,7 +19,7 @@ use std::collections::HashMap;
 use crate::ir::{EnumValue, EnumVariant, Item, Visibility};
 use crate::registry::TypeRegistry;
 use crate::transformer::classes::ClassInfo;
-use crate::transformer::expressions::convert_expr;
+use crate::transformer::expressions::convert_arrow_expr;
 use crate::transformer::types::convert_ts_type;
 
 /// Extracts the identifier name from a [`ast::Pat::Ident`] pattern.
@@ -90,7 +90,8 @@ pub fn transform_module(module: &Module, reg: &TypeRegistry) -> Result<Vec<Item>
 
     let mut items = Vec::new();
     for module_item in &module.body {
-        items.extend(transform_module_item(module_item, reg, &class_map)?);
+        let (converted, _warnings) = transform_module_item(module_item, reg, &class_map, false)?;
+        items.extend(converted);
     }
 
     Ok(items)
@@ -116,8 +117,16 @@ pub fn transform_module_collecting(
     let mut unsupported = Vec::new();
 
     for module_item in &module.body {
-        match transform_module_item(module_item, reg, &class_map) {
-            Ok(converted) => items.extend(converted),
+        match transform_module_item(module_item, reg, &class_map, true) {
+            Ok((converted, warnings)) => {
+                items.extend(converted);
+                for warning in warnings {
+                    unsupported.push(UnsupportedSyntaxError {
+                        kind: warning,
+                        byte_pos: module_item.span().lo.0,
+                    });
+                }
+            }
             Err(e) => match e.downcast::<UnsupportedSyntaxError>() {
                 Ok(unsup) => unsupported.push(unsup),
                 Err(other) => {
@@ -174,20 +183,25 @@ fn find_parent_class_names(
 }
 
 /// Transforms a single module item into IR [`Item`]s.
+///
+/// When `resilient` is true, type conversion failures in function parameters and
+/// return types fall back to `RustType::Any` instead of aborting.
 fn transform_module_item(
     module_item: &ModuleItem,
     reg: &TypeRegistry,
     class_map: &HashMap<String, ClassInfo>,
-) -> Result<Vec<Item>> {
+    resilient: bool,
+) -> Result<(Vec<Item>, Vec<String>)> {
     match module_item {
         ModuleItem::Stmt(Stmt::Decl(decl)) => {
-            transform_decl(decl, Visibility::Private, reg, class_map)
+            transform_decl(decl, Visibility::Private, reg, class_map, resilient)
         }
         ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(export)) => {
-            transform_decl(&export.decl, Visibility::Public, reg, class_map)
+            transform_decl(&export.decl, Visibility::Public, reg, class_map, resilient)
         }
         ModuleItem::ModuleDecl(ModuleDecl::Import(import_decl)) => {
-            Ok(transform_import(import_decl).into_iter().collect())
+            let items: Vec<Item> = transform_import(import_decl).into_iter().collect();
+            Ok((items, vec![]))
         }
         _ => Err(UnsupportedSyntaxError {
             kind: format_module_item_kind(module_item),
@@ -229,16 +243,25 @@ fn transform_import(import_decl: &swc_ecma_ast::ImportDecl) -> Option<Item> {
 
 /// Converts a relative TS import path to a Rust crate path.
 ///
+/// Hyphens in path segments are replaced with underscores to produce valid Rust identifiers.
+///
 /// Examples:
 /// - `./foo` → `crate::foo`
 /// - `./sub/bar` → `crate::sub::bar`
+/// - `./hono-base` → `crate::hono_base`
 fn convert_relative_path_to_crate_path(rel_path: &str) -> String {
     let stripped = rel_path.strip_prefix("./").unwrap_or(rel_path);
-    let parts: Vec<&str> = stripped.split('/').collect();
+    let parts: Vec<String> = stripped
+        .split('/')
+        .map(|seg| seg.replace('-', "_"))
+        .collect();
     format!("crate::{}", parts.join("::"))
 }
 
 /// Transforms a single declaration into IR [`Item`]s.
+///
+/// When `resilient` is true, type conversion failures in functions fall back to
+/// `RustType::Any` instead of aborting.
 ///
 /// # Errors
 ///
@@ -248,25 +271,30 @@ fn transform_decl(
     vis: Visibility,
     reg: &TypeRegistry,
     class_map: &HashMap<String, ClassInfo>,
-) -> Result<Vec<Item>> {
+    resilient: bool,
+) -> Result<(Vec<Item>, Vec<String>)> {
     match decl {
         Decl::TsInterface(interface_decl) => {
             let item = types::convert_interface(interface_decl, vis)?;
-            Ok(vec![item])
+            Ok((vec![item], vec![]))
         }
         Decl::TsTypeAlias(type_alias_decl) => {
             let item = types::convert_type_alias(type_alias_decl, vis)?;
-            Ok(vec![item])
+            Ok((vec![item], vec![]))
         }
         Decl::Fn(fn_decl) => {
-            let item = functions::convert_fn_decl(fn_decl, vis, reg)?;
-            Ok(vec![item])
+            let (item, warnings) = functions::convert_fn_decl(fn_decl, vis, reg, resilient)?;
+            Ok((vec![item], warnings))
         }
         Decl::Class(class_decl) => {
-            transform_class_with_inheritance(class_decl, vis, reg, class_map)
+            let items = transform_class_with_inheritance(class_decl, vis, reg, class_map)?;
+            Ok((items, vec![]))
         }
-        Decl::Var(var_decl) => convert_var_decl_arrow_fns(var_decl, vis, reg),
-        Decl::TsEnum(ts_enum) => convert_ts_enum(ts_enum, vis),
+        Decl::Var(var_decl) => convert_var_decl_arrow_fns(var_decl, vis, reg, resilient),
+        Decl::TsEnum(ts_enum) => {
+            let items = convert_ts_enum(ts_enum, vis)?;
+            Ok((items, vec![]))
+        }
         _ => Err(UnsupportedSyntaxError {
             kind: format_decl_kind(decl),
             byte_pos: decl.span().lo.0,
@@ -312,8 +340,10 @@ fn convert_var_decl_arrow_fns(
     var_decl: &swc_ecma_ast::VarDecl,
     vis: Visibility,
     reg: &TypeRegistry,
-) -> Result<Vec<Item>> {
+    resilient: bool,
+) -> Result<(Vec<Item>, Vec<String>)> {
     let mut items = Vec::new();
+    let mut all_warnings = Vec::new();
     for decl in &var_decl.decls {
         let init = match &decl.init {
             Some(init) => init,
@@ -330,7 +360,8 @@ fn convert_var_decl_arrow_fns(
         };
 
         // Convert the arrow to a closure IR, then extract parts for Item::Fn
-        let closure = convert_expr(init, reg, None)?;
+        let mut fallback_warnings = Vec::new();
+        let closure = convert_arrow_expr(arrow, reg, resilient, &mut fallback_warnings)?;
         match closure {
             crate::ir::Expr::Closure {
                 params,
@@ -361,11 +392,12 @@ fn convert_var_decl_arrow_fns(
                     return_type: ret,
                     body: fn_body,
                 });
+                all_warnings.extend(fallback_warnings);
             }
             _ => continue,
         }
     }
-    Ok(items)
+    Ok((items, all_warnings))
 }
 
 /// Converts a TS enum declaration into an IR [`Item::Enum`].
@@ -495,6 +527,54 @@ mod tests {
             items[0],
             Item::Use {
                 path: "crate::sub::bar".to_string(),
+                names: vec!["Foo".to_string()],
+            }
+        );
+    }
+
+    #[test]
+    fn test_transform_module_import_hyphen_to_underscore() {
+        let source = r#"import { Foo } from "./hono-base";"#;
+        let module = parse_typescript(source).expect("parse failed");
+        let items = transform_module(&module, &TypeRegistry::new()).unwrap();
+
+        assert_eq!(items.len(), 1);
+        assert_eq!(
+            items[0],
+            Item::Use {
+                path: "crate::hono_base".to_string(),
+                names: vec!["Foo".to_string()],
+            }
+        );
+    }
+
+    #[test]
+    fn test_transform_module_import_nested_hyphen_path() {
+        let source = r#"import { StatusCode } from "./utils/http-status";"#;
+        let module = parse_typescript(source).expect("parse failed");
+        let items = transform_module(&module, &TypeRegistry::new()).unwrap();
+
+        assert_eq!(items.len(), 1);
+        assert_eq!(
+            items[0],
+            Item::Use {
+                path: "crate::utils::http_status".to_string(),
+                names: vec!["StatusCode".to_string()],
+            }
+        );
+    }
+
+    #[test]
+    fn test_transform_module_import_multiple_hyphens() {
+        let source = r#"import { Foo } from "./my-long-name";"#;
+        let module = parse_typescript(source).expect("parse failed");
+        let items = transform_module(&module, &TypeRegistry::new()).unwrap();
+
+        assert_eq!(items.len(), 1);
+        assert_eq!(
+            items[0],
+            Item::Use {
+                path: "crate::my_long_name".to_string(),
                 names: vec!["Foo".to_string()],
             }
         );

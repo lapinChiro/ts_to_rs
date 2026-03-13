@@ -32,6 +32,8 @@ pub enum RustType {
         /// Err type
         err: Box<RustType>,
     },
+    /// A tuple type: `(T1, T2, ...)`
+    Tuple(Vec<RustType>),
     /// `Box<dyn std::any::Any>` (corresponds to TypeScript `any` and `unknown`)
     Any,
     /// `!` (never type, corresponds to TypeScript `never`)
@@ -156,6 +158,17 @@ pub enum Item {
         for_trait: Option<String>,
         /// Methods in the impl block
         methods: Vec<Method>,
+    },
+    /// A `type` alias: `type Foo = Bar;`
+    TypeAlias {
+        /// Visibility
+        vis: Visibility,
+        /// Alias name
+        name: String,
+        /// Generic type parameters (e.g., `["T", "U"]`)
+        type_params: Vec<String>,
+        /// The aliased type
+        ty: RustType,
     },
     /// A `fn` declaration.
     Fn {

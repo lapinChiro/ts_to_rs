@@ -12,7 +12,12 @@ pub fn generate_type(ty: &RustType) -> String {
         RustType::Option(inner) => format!("Option<{}>", generate_type(inner)),
         RustType::Vec(inner) => format!("Vec<{}>", generate_type(inner)),
         RustType::Result { ok, err } => {
-            format!("Result<{}, {}>", generate_type(ok), generate_type(err))
+            let ok_str = if matches!(ok.as_ref(), RustType::Never) {
+                "std::convert::Infallible".to_string()
+            } else {
+                generate_type(ok)
+            };
+            format!("Result<{ok_str}, {}>", generate_type(err))
         }
         RustType::Fn {
             params,
@@ -30,6 +35,18 @@ pub fn generate_type(ty: &RustType) -> String {
                     "Box<dyn Fn({params_str}) -> {}>",
                     generate_type(return_type)
                 )
+            }
+        }
+        RustType::Tuple(elems) => {
+            let inner = elems
+                .iter()
+                .map(generate_type)
+                .collect::<Vec<_>>()
+                .join(", ");
+            if elems.len() == 1 {
+                format!("({inner},)")
+            } else {
+                format!("({inner})")
             }
         }
         RustType::Any => "Box<dyn std::any::Any>".to_string(),
@@ -133,6 +150,18 @@ mod tests {
             err: Box::new(RustType::String),
         };
         assert_eq!(generate_type(&ty), "Result<(), String>");
+    }
+
+    #[test]
+    fn test_generate_type_result_never_ok_uses_infallible() {
+        let ty = RustType::Result {
+            ok: Box::new(RustType::Never),
+            err: Box::new(RustType::String),
+        };
+        assert_eq!(
+            generate_type(&ty),
+            "Result<std::convert::Infallible, String>"
+        );
     }
 
     #[test]

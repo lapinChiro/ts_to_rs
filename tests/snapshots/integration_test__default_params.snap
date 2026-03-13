@@ -1,0 +1,18 @@
+---
+source: tests/integration_test.rs
+expression: output
+---
+fn greet(name: Option<String>) -> String {
+    let name = name.unwrap_or("world".to_string());
+    name
+}
+
+fn add(a: f64, b: Option<f64>) -> f64 {
+    let b = b.unwrap_or(0.0);
+    a + b
+}
+
+fn toggle(flag: Option<bool>) -> bool {
+    let flag = flag.unwrap_or(false);
+    !flag
+}

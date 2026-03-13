@@ -182,9 +182,9 @@ export default 42;
 
     #[test]
     fn test_transpile_collecting_transformer_internal_error_collected() {
-        // Default parameter value triggers an error inside convert_param,
+        // Unsupported default value (new Map()) triggers an error inside convert_param,
         // which is a transformer-internal error (not UnsupportedSyntaxError).
-        let source = "function foo(x: number = 0) { return x; }";
+        let source = "function foo(x: Map = new Map()) { return x; }";
         let result = transpile_collecting(source);
         assert!(result.is_ok(), "should not be a fatal error: {result:?}");
         let (_output, unsupported) = result.unwrap();
@@ -196,10 +196,10 @@ export default 42;
 
     #[test]
     fn test_transpile_collecting_mixed_supported_and_internal_error() {
-        // interface is convertible, function with default param is not
+        // interface is convertible, function with unsupported default value is not
         let source = r#"
 interface Foo { name: string; }
-function bar(x: number = 0) { return x; }
+function bar(x: Map = new Map()) { return x; }
 "#;
         let result = transpile_collecting(source);
         assert!(result.is_ok(), "should not be a fatal error: {result:?}");
@@ -211,6 +211,105 @@ function bar(x: number = 0) { return x; }
         assert!(
             !unsupported.is_empty(),
             "unconvertible function should be in unsupported list"
+        );
+    }
+
+    #[test]
+    fn test_transpile_collecting_default_param_converts_successfully() {
+        // Default parameter with literal value should now convert successfully
+        let source = "function foo(x: number = 0) { return x; }";
+        let (output, unsupported) = transpile_collecting(source).unwrap();
+        assert!(
+            output.contains("fn foo"),
+            "function with default param should be converted, got: {output}"
+        );
+        assert!(
+            unsupported.is_empty(),
+            "literal default param should not be unsupported"
+        );
+    }
+
+    #[test]
+    fn test_transpile_collecting_unsupported_param_type_fallback_to_any() {
+        // Non-nullable union type is unsupported; function should still be converted
+        // with the unsupported type falling back to Box<dyn std::any::Any>
+        let source = "export function foo(x: string | number): void { }";
+        let (output, _unsupported) = transpile_collecting(source).unwrap();
+        assert!(
+            output.contains("fn foo"),
+            "function should be converted even with unsupported param type, got: {output}"
+        );
+        assert!(
+            output.contains("Box<dyn std::any::Any>"),
+            "unsupported param type should fallback to Any, got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_transpile_collecting_mixed_param_types_fallback() {
+        // Supported param type + unsupported param type in the same function
+        let source = "export function bar(a: string, b: string | number): void { }";
+        let (output, _unsupported) = transpile_collecting(source).unwrap();
+        assert!(
+            output.contains("fn bar"),
+            "function should be converted, got: {output}"
+        );
+        assert!(
+            output.contains("a: String"),
+            "supported param should have normal type, got: {output}"
+        );
+        assert!(
+            output.contains("Box<dyn std::any::Any>"),
+            "unsupported param should fallback to Any, got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_transpile_collecting_unsupported_return_type_fallback_to_any() {
+        // Non-nullable union return type should fallback to Box<dyn std::any::Any>
+        let source = "export function baz(x: number): string | number { return x; }";
+        let (output, _unsupported) = transpile_collecting(source).unwrap();
+        assert!(
+            output.contains("fn baz"),
+            "function should be converted, got: {output}"
+        );
+        assert!(
+            output.contains("Box<dyn std::any::Any>"),
+            "unsupported return type should fallback to Any, got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_transpile_collecting_unsupported_type_reported() {
+        // Even though the function is converted with fallback, the unsupported type
+        // should still appear in the unsupported report
+        let source = "export function foo(x: string | number): void { }";
+        let (output, unsupported) = transpile_collecting(source).unwrap();
+        assert!(
+            output.contains("fn foo"),
+            "function should be converted with fallback"
+        );
+        assert!(
+            !unsupported.is_empty(),
+            "unsupported type should be reported"
+        );
+        let has_type_report = unsupported
+            .iter()
+            .any(|u| u.kind.contains("non-nullable union"));
+        assert!(
+            has_type_report,
+            "report should mention the unsupported type, got: {unsupported:?}"
+        );
+    }
+
+    #[test]
+    fn test_transpile_default_unsupported_param_type_still_errors() {
+        // Default (strict) mode should still error on unsupported param type
+        let source = "function foo(x: string | number): void { }";
+        let result = transpile(source);
+        assert!(
+            result.is_err(),
+            "strict mode should error on unsupported param type"
         );
     }
 

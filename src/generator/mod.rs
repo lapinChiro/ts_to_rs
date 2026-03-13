@@ -65,6 +65,16 @@ fn generate_item(item: &Item) -> String {
             name,
             variants,
         } => generate_enum(vis, name, variants),
+        Item::TypeAlias {
+            vis,
+            name,
+            type_params,
+            ty,
+        } => {
+            let vis_str = generate_vis(vis);
+            let generics = generate_type_params(type_params);
+            format!("{vis_str}type {name}{generics} = {};", generate_type(ty))
+        }
         Item::Trait { vis, name, methods } => {
             let vis_str = generate_vis(vis);
             let mut out = format!("{vis_str}trait {name} {{\n");

@@ -16,24 +16,40 @@
 
 → **Hono コアファイルの変換試行を開始可能**
 
-### Hono 対応開始後に必要な調査 **[PRD 化可能]**
-
-- Hono の依存関係の調査（外部ライブラリ、Node.js API への依存等）
-- 外部パッケージの型定義解決（`node_modules` の `.d.ts`）
-- TS の `import` を Rust の `use` / 外部 crate にどうマッピングするか
-- Hono に対応する Rust Web フレームワーク（actix-web, axum 等）への API マッピング
-
-## 型の互換性
-
-- `Result<!, String>` が安定版 Rust でコンパイルできない **[PRD 化可能]**
-  - `!`（never 型）は戻り値位置（`fn foo() -> !`）では安定版で使えるが、型引数位置（`Result<!, String>`）では nightly 限定（`#![feature(never_type)]` が必要）
-  - `throw` を含む関数が `Result<never, String>` を返す場合に発生する
-  - 対応案: `Result` の ok 位置が `!` の場合は `std::convert::Infallible` に置換する
-
 ## 変換機能の拡張
 
 - 所有権推論（clone 削減）
   - **保留**: 変換の基本機能が揃い、実際の TS プロジェクトで試した後に取り組むべき最適化。実績データが必要
+
+## Hono 変換試行で発見された課題
+
+詳細は `report/hono-core-conversion-trial.md` を参照。
+
+### 型エイリアスの後続タスク（function type 以外）
+
+function type は上記 PRD で対応。以下は function type の実装後に段階的に対応する:
+
+- conditional type（`type Foo = T extends U ? X : Y`）**[PRD 化可能]**
+  - Rust に直接対応がないが、特定パターン（`T extends string ? A : B`）は trait の associated type で表現可能な場合がある
+  - Hono の `types.ts` で多用。段階的に対応パターンを増やす
+- mapped type（`type Foo = { [K in keyof T]: V }`）**[PRD 化可能]**
+  - Rust のマクロや generics で部分的に表現可能。スコープの絞り込みが必要
+- template literal type（`` type Foo = `prefix_${T}` ``）
+  - **保留**: Rust に対応する型レベル文字列操作がない。需要が発生してから対応
+- non-nullable union type（`type Foo = A | B` で null/undefined を含まない）**[PRD 化可能]**
+  - Rust の `enum` で表現可能。判別 union として変換する方針が候補
+
+### その他の未 PRD 化課題
+
+- 型注記なしパラメータのフォールバック **[PRD 化可能]**
+  - `(c) => { ... }` のような型注記なしパラメータが `fn f(c)` と出力され Rust として不正
+  - フォールバック型の生成またはエラー報告が必要
+- TsIndexedAccessType（`E['Bindings']`）**[PRD 化可能]**
+  - ジェネリクスの関連型アクセス。`context.ts` で 2 件
+- ExportNamed（`export { ... }`）**[PRD 化可能]**
+  - re-export ではない名前付きエクスポート。`hono-base.ts` で 1 件
+- spread の非先頭位置 **[PRD 化可能]**
+  - `{ key: value, ...rest }` のように spread が先頭以外にある場合の対応
 
 ## 未対応の TS 構文
 
@@ -63,8 +79,6 @@
 - computed property（`{ [key]: value }`）
   - **保留**: HashMap への変換は型システム全体の設計に影響。型注記なしオブジェクトの方針決定が前提
 - 分割代入の拡張パターン
-  - 関数パラメータ: `function foo({ x, y }: Point) {}` **[PRD 化可能]**
-    - 頻出パターン。既存の分割代入の延長で実装可能
   - デフォルト値: `const { x = 10 } = obj`
   - ネスト: `const { a: { b } } = obj`
   - rest: `const { x, ...rest } = obj`
@@ -85,9 +99,8 @@
 
 ### 関数パラメータ
 
-- デフォルト引数値（`= {}`, `= 500` 等）**[PRD 化可能]**
-  - `constructor(options: HonoOptions<E> = {})` のようなパターン。Hono コアで頻出
-  - Rust では `Option<T>` + `unwrap_or_default()` や `Default` trait への変換が候補
+- デフォルト引数値の拡張（複雑な式: `= new Map()`, `= someFunction()` 等）
+  - **保留**: 初版ではリテラル値と空オブジェクト `= {}` のみ対応済み。需要が発生してから対応
 - パラメータ位置のインラインオブジェクト型リテラル **[PRD 化可能]**
   - `constructor(init: { routers: Router<T>[] })` のようなパターン
   - 型エイリアスとしての `TsTypeLit` は対応済みだが、パラメータ型注記の位置では未対応
@@ -115,8 +128,6 @@
 
 ### 型構文
 
-- tuple 型（`[string, number]`）**[PRD 化可能]**
-  - Rust のタプル `(String, f64)` に直接対応。`TsTupleType` のハンドリングを追加
 - intersection 型（`A & B`）
   - **保留**: Rust に直接対応がない。フィールドの統合は構造的型付けの問題と関連し、設計コストが高い
 

@@ -7,8 +7,8 @@ use swc_ecma_ast as ast;
 
 use crate::ir::{self, ClosureBody, Expr, Param, RustType};
 use crate::registry::{TypeDef, TypeRegistry};
+use crate::transformer::functions::convert_ts_type_with_fallback;
 use crate::transformer::statements::convert_stmt;
-use crate::transformer::types::convert_ts_type;
 
 /// Converts an SWC [`ast::Expr`] into an IR [`Expr`], with an optional expected type.
 ///
@@ -34,7 +34,7 @@ pub fn convert_expr(
         ast::Expr::Member(member) => convert_member_expr(member, reg),
         ast::Expr::This(_) => Ok(Expr::Ident("self".to_string())),
         ast::Expr::Assign(assign) => convert_assign_expr(assign, reg),
-        ast::Expr::Arrow(arrow) => convert_arrow_expr(arrow, reg),
+        ast::Expr::Arrow(arrow) => convert_arrow_expr(arrow, reg, false, &mut Vec::new()),
         ast::Expr::Call(call) => convert_call_expr(call, reg),
         ast::Expr::New(new_expr) => convert_new_expr(new_expr, reg),
         ast::Expr::Array(array_lit) => convert_array_lit(array_lit, reg, expected),
@@ -295,11 +295,19 @@ fn convert_assign_expr(assign: &ast::AssignExpr, reg: &TypeRegistry) -> Result<E
     })
 }
 
-/// Converts an arrow function expression to `Expr::Closure`.
+/// Converts an arrow expression into an IR [`Expr::Closure`].
 ///
 /// - Expression body: `(x: number) => x + 1` → `|x: f64| x + 1`
 /// - Block body: `(x: number) => { return x + 1; }` → `|x: f64| { x + 1 }`
-fn convert_arrow_expr(arrow: &ast::ArrowExpr, reg: &TypeRegistry) -> Result<Expr> {
+///
+/// When `resilient` is true, unsupported types fall back to [`RustType::Any`] and
+/// the error message is appended to `fallback_warnings`.
+pub fn convert_arrow_expr(
+    arrow: &ast::ArrowExpr,
+    reg: &TypeRegistry,
+    resilient: bool,
+    fallback_warnings: &mut Vec<String>,
+) -> Result<Expr> {
     let mut params = Vec::new();
     for param in &arrow.params {
         match param {
@@ -308,7 +316,9 @@ fn convert_arrow_expr(arrow: &ast::ArrowExpr, reg: &TypeRegistry) -> Result<Expr
                 let rust_type = ident
                     .type_ann
                     .as_ref()
-                    .map(|ann| convert_ts_type(&ann.type_ann))
+                    .map(|ann| {
+                        convert_ts_type_with_fallback(&ann.type_ann, resilient, fallback_warnings)
+                    })
                     .transpose()?;
                 params.push(Param {
                     name,
@@ -322,7 +332,7 @@ fn convert_arrow_expr(arrow: &ast::ArrowExpr, reg: &TypeRegistry) -> Result<Expr
     let return_type = arrow
         .return_type
         .as_ref()
-        .map(|ann| convert_ts_type(&ann.type_ann))
+        .map(|ann| convert_ts_type_with_fallback(&ann.type_ann, resilient, fallback_warnings))
         .transpose()?;
 
     let body = match arrow.body.as_ref() {
