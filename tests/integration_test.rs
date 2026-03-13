@@ -228,6 +228,13 @@ fn test_void_type() {
 }
 
 #[test]
+fn test_string_literal_union() {
+    let input = fs::read_to_string("tests/fixtures/string-literal-union.input.ts").unwrap();
+    let output = transpile(&input).unwrap();
+    insta::assert_snapshot!(output);
+}
+
+#[test]
 fn test_unsupported_syntax_default_errors() {
     let input = fs::read_to_string("tests/fixtures/unsupported-syntax.input.ts").unwrap();
     let result = transpile(&input);

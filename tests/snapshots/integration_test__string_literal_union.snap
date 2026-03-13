@@ -1,0 +1,37 @@
+---
+source: tests/integration_test.rs
+expression: output
+---
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Direction {
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
+impl Direction {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Direction::Up => "up",
+            Direction::Down => "down",
+            Direction::Left => "left",
+            Direction::Right => "right",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Status {
+    Active,
+    Inactive,
+}
+
+impl Status {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Status::Active => "active",
+            Status::Inactive => "inactive",
+        }
+    }
+}

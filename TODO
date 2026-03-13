@@ -100,8 +100,6 @@
 
 ### 型構文
 
-- string literal union 型（`type Direction = "up" | "down" | "left" | "right"`）**[PRD 化可能]**
-  - Rust の enum への変換が自然。頻出パターン。`convert_union_type` の拡張が必要
 - tuple 型（`[string, number]`）**[PRD 化可能]**
   - Rust のタプル `(String, f64)` に直接対応。`TsTupleType` のハンドリングを追加
 - intersection 型（`A & B`）

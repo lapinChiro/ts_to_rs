@@ -100,6 +100,7 @@ ts-to-rs input.ts --report-unsupported
 | `parseInt(s)` / `parseFloat(s)` | `s.parse::<f64>().unwrap()` |
 | `isNaN(x)` / `Number.isNaN(x)` | `x.is_nan()` |
 | `Number.isFinite(x)` | `x.is_finite()` |
+| `type X = "a" \| "b"` (string literal union) | `enum X { A, B }` + `as_str()` |
 | `export` | `pub` |
 
 ## 例

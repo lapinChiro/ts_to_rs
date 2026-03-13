@@ -9,7 +9,7 @@ use swc_ecma_ast::{
     TsTypeElement,
 };
 
-use crate::ir::{Item, RustType, StructField, Visibility};
+use crate::ir::{EnumValue, EnumVariant, Item, RustType, StructField, Visibility};
 
 /// Converts a SWC [`TsType`] into an IR [`RustType`].
 ///
@@ -166,6 +166,16 @@ pub fn convert_interface(decl: &TsInterfaceDecl, vis: Visibility) -> Result<Item
 pub fn convert_type_alias(decl: &TsTypeAliasDecl, vis: Visibility) -> Result<Item> {
     let name = decl.id.sym.to_string();
 
+    // String literal union: `type X = "a" | "b" | "c"` → enum
+    if let Some(item) = try_convert_string_literal_union(decl, vis.clone())? {
+        return Ok(item);
+    }
+
+    // Single string literal: `type X = "only"` → enum with one variant
+    if let Some(item) = try_convert_single_string_literal(decl, vis.clone())? {
+        return Ok(item);
+    }
+
     match decl.type_ann.as_ref() {
         TsType::TsTypeLit(lit) => {
             let mut fields = Vec::new();
@@ -195,6 +205,87 @@ pub fn convert_type_alias(decl: &TsTypeAliasDecl, vis: Visibility) -> Result<Ite
             "unsupported type alias body (only object type literals are supported)"
         )),
     }
+}
+
+/// Tries to convert a type alias with a union body where all members are string literals.
+///
+/// Returns `Ok(Some(Item::Enum))` if the union is all string literals, `Ok(None)` otherwise.
+fn try_convert_string_literal_union(
+    decl: &TsTypeAliasDecl,
+    vis: Visibility,
+) -> Result<Option<Item>> {
+    let union = match decl.type_ann.as_ref() {
+        TsType::TsUnionOrIntersectionType(
+            swc_ecma_ast::TsUnionOrIntersectionType::TsUnionType(u),
+        ) => u,
+        _ => return Ok(None),
+    };
+
+    let mut variants = Vec::new();
+    for ty in &union.types {
+        match ty.as_ref() {
+            TsType::TsLitType(lit) => match &lit.lit {
+                swc_ecma_ast::TsLit::Str(s) => {
+                    let value = s.value.to_string_lossy().into_owned();
+                    variants.push(EnumVariant {
+                        name: string_to_pascal_case(&value),
+                        value: Some(EnumValue::Str(value)),
+                    });
+                }
+                _ => return Ok(None), // Non-string literal → not a string literal union
+            },
+            _ => return Ok(None), // Non-literal member → not a string literal union
+        }
+    }
+
+    Ok(Some(Item::Enum {
+        vis,
+        name: decl.id.sym.to_string(),
+        variants,
+    }))
+}
+
+/// Tries to convert a type alias with a single string literal body.
+///
+/// Handles `type X = "only"` as a single-variant enum.
+fn try_convert_single_string_literal(
+    decl: &TsTypeAliasDecl,
+    vis: Visibility,
+) -> Result<Option<Item>> {
+    match decl.type_ann.as_ref() {
+        TsType::TsLitType(lit) => match &lit.lit {
+            swc_ecma_ast::TsLit::Str(s) => {
+                let value = s.value.to_string_lossy().into_owned();
+                Ok(Some(Item::Enum {
+                    vis,
+                    name: decl.id.sym.to_string(),
+                    variants: vec![EnumVariant {
+                        name: string_to_pascal_case(&value),
+                        value: Some(EnumValue::Str(value)),
+                    }],
+                }))
+            }
+            _ => Ok(None),
+        },
+        _ => Ok(None),
+    }
+}
+
+/// Converts a string value to PascalCase for use as an enum variant name.
+///
+/// Examples: `"up"` → `"Up"`, `"foo-bar"` → `"FooBar"`, `"UPPER_CASE"` → `"UpperCase"`
+fn string_to_pascal_case(s: &str) -> String {
+    s.split(['-', '_', ' '])
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            let lower = part.to_lowercase();
+            let mut chars = lower.chars();
+            match chars.next() {
+                Some(c) => c.to_uppercase().to_string() + chars.as_str(),
+                None => String::new(),
+            }
+        })
+        .collect()
 }
 
 /// Converts a TS function type (`(x: number) => string`) into `RustType::Fn`.
@@ -583,6 +674,80 @@ mod tests {
                 return_type: Box::new(RustType::Bool),
             }
         );
+    }
+
+    // -- convert_type_alias: string literal union --
+
+    #[test]
+    fn test_convert_type_alias_string_literal_union_produces_enum() {
+        let decl = parse_type_alias(r#"type Direction = "up" | "down" | "left" | "right";"#);
+        let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+        match item {
+            Item::Enum {
+                vis,
+                name,
+                variants,
+            } => {
+                assert_eq!(vis, Visibility::Public);
+                assert_eq!(name, "Direction");
+                assert_eq!(variants.len(), 4);
+                assert_eq!(variants[0].name, "Up");
+                assert_eq!(
+                    variants[0].value,
+                    Some(crate::ir::EnumValue::Str("up".to_string()))
+                );
+                assert_eq!(variants[1].name, "Down");
+                assert_eq!(variants[2].name, "Left");
+                assert_eq!(variants[3].name, "Right");
+            }
+            _ => panic!("expected Item::Enum, got {:?}", item),
+        }
+    }
+
+    #[test]
+    fn test_convert_type_alias_string_literal_union_two_members() {
+        let decl = parse_type_alias(r#"type Status = "active" | "inactive";"#);
+        let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+        match item {
+            Item::Enum {
+                name, variants, ..
+            } => {
+                assert_eq!(name, "Status");
+                assert_eq!(variants.len(), 2);
+                assert_eq!(variants[0].name, "Active");
+                assert_eq!(variants[1].name, "Inactive");
+            }
+            _ => panic!("expected Item::Enum"),
+        }
+    }
+
+    #[test]
+    fn test_convert_type_alias_string_literal_union_single_member() {
+        let decl = parse_type_alias(r#"type Only = "only";"#);
+        let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+        match item {
+            Item::Enum {
+                name, variants, ..
+            } => {
+                assert_eq!(name, "Only");
+                assert_eq!(variants.len(), 1);
+                assert_eq!(variants[0].name, "Only");
+            }
+            _ => panic!("expected Item::Enum"),
+        }
+    }
+
+    #[test]
+    fn test_convert_type_alias_string_literal_union_kebab_case() {
+        let decl = parse_type_alias(r#"type X = "foo-bar" | "baz-qux";"#);
+        let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+        match item {
+            Item::Enum { variants, .. } => {
+                assert_eq!(variants[0].name, "FooBar");
+                assert_eq!(variants[1].name, "BazQux");
+            }
+            _ => panic!("expected Item::Enum"),
+        }
     }
 
     #[test]
