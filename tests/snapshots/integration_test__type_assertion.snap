@@ -1,0 +1,15 @@
+---
+source: tests/integration_test.rs
+expression: output
+---
+fn passThrough(x: Box<dyn std::any::Any>) -> Box<dyn std::any::Any> {
+    x
+}
+
+fn assertString(x: String) -> String {
+    x
+}
+
+fn assertNumber(x: f64) -> f64 {
+    x
+}

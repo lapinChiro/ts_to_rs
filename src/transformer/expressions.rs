@@ -41,6 +41,8 @@ pub fn convert_expr(
         ast::Expr::Object(obj_lit) => convert_object_lit(obj_lit, reg, expected),
         ast::Expr::Cond(cond) => convert_cond_expr(cond, reg, expected),
         ast::Expr::Unary(unary) => convert_unary_expr(unary, reg),
+        ast::Expr::TsAs(ts_as) => convert_expr(&ts_as.expr, reg, expected),
+        ast::Expr::OptChain(opt_chain) => convert_opt_chain_expr(opt_chain, reg),
         ast::Expr::Await(await_expr) => {
             let inner = convert_expr(&await_expr.arg, reg, None)?;
             Ok(Expr::Await(Box::new(inner)))
@@ -75,6 +77,21 @@ fn convert_lit(lit: &ast::Lit, expected: Option<&RustType>) -> Result<Expr> {
 
 /// Converts an SWC binary expression to an IR `BinaryOp`.
 fn convert_bin_expr(bin: &ast::BinExpr, reg: &TypeRegistry) -> Result<Expr> {
+    // `x ?? y` → `x.unwrap_or_else(|| y)`
+    if bin.op == ast::BinaryOp::NullishCoalescing {
+        let left = convert_expr(&bin.left, reg, None)?;
+        let right = convert_expr(&bin.right, reg, None)?;
+        return Ok(Expr::MethodCall {
+            object: Box::new(left),
+            method: "unwrap_or_else".to_string(),
+            args: vec![Expr::Closure {
+                params: vec![],
+                return_type: None,
+                body: ClosureBody::Expr(Box::new(right)),
+            }],
+        });
+    }
+
     let left = convert_expr(&bin.left, reg, None)?;
     let right = convert_expr(&bin.right, reg, None)?;
     let op = convert_binary_op(bin.op)?;
@@ -104,6 +121,97 @@ fn convert_binary_op(op: ast::BinaryOp) -> Result<String> {
         _ => return Err(anyhow!("unsupported binary operator: {:?}", op)),
     };
     Ok(s.to_string())
+}
+
+/// Converts an optional chaining expression (`x?.y`) to `x.as_ref().map(|_v| _v.y)`.
+///
+/// Supports property access, method calls, and computed access.
+/// Chained optional chaining (`x?.y?.z`) is handled recursively.
+fn convert_opt_chain_expr(opt_chain: &ast::OptChainExpr, reg: &TypeRegistry) -> Result<Expr> {
+    match opt_chain.base.as_ref() {
+        ast::OptChainBase::Member(member) => {
+            let object = convert_expr(&member.obj, reg, None)?;
+            let body_expr = match &member.prop {
+                ast::MemberProp::Ident(ident) => Expr::FieldAccess {
+                    object: Box::new(Expr::Ident("_v".to_string())),
+                    field: ident.sym.to_string(),
+                },
+                ast::MemberProp::Computed(computed) => {
+                    let index = convert_expr(&computed.expr, reg, None)?;
+                    Expr::Index {
+                        object: Box::new(Expr::Ident("_v".to_string())),
+                        index: Box::new(index),
+                    }
+                }
+                _ => return Err(anyhow!("unsupported optional chaining property")),
+            };
+            Ok(Expr::MethodCall {
+                object: Box::new(Expr::MethodCall {
+                    object: Box::new(object),
+                    method: "as_ref".to_string(),
+                    args: vec![],
+                }),
+                method: "map".to_string(),
+                args: vec![Expr::Closure {
+                    params: vec![Param {
+                        name: "_v".to_string(),
+                        ty: None,
+                    }],
+                    return_type: None,
+                    body: ClosureBody::Expr(Box::new(body_expr)),
+                }],
+            })
+        }
+        ast::OptChainBase::Call(opt_call) => {
+            let args: Vec<Expr> = opt_call
+                .args
+                .iter()
+                .map(|arg| convert_expr(&arg.expr, reg, None))
+                .collect::<Result<_>>()?;
+            let (object, method) = extract_method_from_callee(&opt_call.callee, reg)?;
+            let body_expr = Expr::MethodCall {
+                object: Box::new(Expr::Ident("_v".to_string())),
+                method,
+                args,
+            };
+            Ok(Expr::MethodCall {
+                object: Box::new(Expr::MethodCall {
+                    object: Box::new(object),
+                    method: "as_ref".to_string(),
+                    args: vec![],
+                }),
+                method: "map".to_string(),
+                args: vec![Expr::Closure {
+                    params: vec![Param {
+                        name: "_v".to_string(),
+                        ty: None,
+                    }],
+                    return_type: None,
+                    body: ClosureBody::Expr(Box::new(body_expr)),
+                }],
+            })
+        }
+    }
+}
+
+/// Extracts the object and method name from an optional call's callee.
+///
+/// Handles both `x.method` (`Member`) and `x?.method` (`OptChain(Member)`) patterns.
+fn extract_method_from_callee(callee: &ast::Expr, reg: &TypeRegistry) -> Result<(Expr, String)> {
+    let member = match callee {
+        ast::Expr::Member(member) => member,
+        ast::Expr::OptChain(opt) => match opt.base.as_ref() {
+            ast::OptChainBase::Member(member) => member,
+            _ => return Err(anyhow!("unsupported optional call callee")),
+        },
+        _ => return Err(anyhow!("unsupported optional call callee: {:?}", callee)),
+    };
+    let object = convert_expr(&member.obj, reg, None)?;
+    let method = match &member.prop {
+        ast::MemberProp::Ident(ident) => ident.sym.to_string(),
+        _ => return Err(anyhow!("unsupported optional call property")),
+    };
+    Ok((object, method))
 }
 
 /// Converts a member expression (`obj.field`) to `Expr::FieldAccess`.
@@ -2342,6 +2450,51 @@ mod tests {
                 object: Box::new(Expr::Ident("x".to_string())),
                 method: "is_finite".to_string(),
                 args: vec![],
+            }
+        );
+    }
+
+    // -- Nullish coalescing tests --
+
+    #[test]
+    fn test_convert_expr_nullish_coalescing_basic() {
+        // `a ?? b` → `a.unwrap_or_else(|| b)`
+        let expr = parse_expr("a ?? b;");
+        let result = convert_expr(&expr, &TypeRegistry::new(), None).unwrap();
+        assert_eq!(
+            result,
+            Expr::MethodCall {
+                object: Box::new(Expr::Ident("a".to_string())),
+                method: "unwrap_or_else".to_string(),
+                args: vec![Expr::Closure {
+                    params: vec![],
+                    return_type: None,
+                    body: ClosureBody::Expr(Box::new(Expr::Ident("b".to_string()))),
+                }],
+            }
+        );
+    }
+
+    // -- Type assertion tests --
+
+    #[test]
+    fn test_convert_expr_type_assertion_strips_assertion() {
+        // `x as number` → just `x` (assertion removed)
+        let expr = parse_expr("x as number;");
+        let result = convert_expr(&expr, &TypeRegistry::new(), None).unwrap();
+        assert_eq!(result, Expr::Ident("x".to_string()));
+    }
+
+    #[test]
+    fn test_convert_expr_type_assertion_nested() {
+        // `(obj as Foo).bar` → `obj.bar`
+        let expr = parse_expr("(obj as Foo).bar;");
+        let result = convert_expr(&expr, &TypeRegistry::new(), None).unwrap();
+        assert_eq!(
+            result,
+            Expr::FieldAccess {
+                object: Box::new(Expr::Ident("obj".to_string())),
+                field: "bar".to_string(),
             }
         );
     }

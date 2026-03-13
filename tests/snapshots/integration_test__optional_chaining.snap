@@ -1,0 +1,16 @@
+---
+source: tests/integration_test.rs
+expression: output
+---
+struct Item {
+    name: String,
+    value: f64,
+}
+
+fn propertyAccess(x: Option<Item>) -> Option<f64> {
+    x.as_ref().map(|_v| _v.value)
+}
+
+fn computedAccess(x: Option<Vec<f64>>) -> Option<f64> {
+    x.as_ref().map(|_v| _v[0])
+}

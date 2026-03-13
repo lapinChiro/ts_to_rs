@@ -1,0 +1,16 @@
+---
+source: tests/integration_test.rs
+expression: output
+---
+fn acceptAny(x: Box<dyn std::any::Any>) -> Box<dyn std::any::Any> {
+    x
+}
+
+fn acceptUnknown(x: Box<dyn std::any::Any>) {
+    return;
+}
+
+struct Flexible {
+    data: Box<dyn std::any::Any>,
+    value: Box<dyn std::any::Any>,
+}

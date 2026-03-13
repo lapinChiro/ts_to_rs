@@ -4,6 +4,17 @@
 
 （backlog は現在空。TODO から次の PRD を選定する）
 
+## Hono 対応の開始条件
+
+以下の 6 構文を実装したら Hono コアファイルの変換試行を開始する（詳細は `report/hono-syntax-analysis.md`）:
+
+1. type assertion (`x as T`)
+2. `any` / `unknown` 型
+3. optional chaining (`x?.y`)
+4. nullish coalescing (`x ?? y`)
+5. spread 構文 (`...`)
+6. getter/setter
+
 ## 未設計の項目
 
 以下は `TODO` に記載。保留理由も `TODO` に明記。

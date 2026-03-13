@@ -32,6 +32,10 @@ pub enum RustType {
         /// Err type
         err: Box<RustType>,
     },
+    /// `Box<dyn std::any::Any>` (corresponds to TypeScript `any` and `unknown`)
+    Any,
+    /// `!` (never type, corresponds to TypeScript `never`)
+    Never,
     /// A user-defined named type, optionally with generic type arguments (e.g., `Point`, `Box<T>`)
     Named {
         /// Type name

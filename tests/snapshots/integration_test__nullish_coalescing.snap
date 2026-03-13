@@ -1,0 +1,7 @@
+---
+source: tests/integration_test.rs
+expression: output
+---
+fn withDefault(x: Option<f64>) -> f64 {
+    x.unwrap_or_else(|| 0.0)
+}

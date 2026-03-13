@@ -32,6 +32,10 @@ pub fn convert_ts_type(ts_type: &TsType) -> Result<RustType> {
             TsKeywordTypeKind::TsNumberKeyword => Ok(RustType::F64),
             TsKeywordTypeKind::TsBooleanKeyword => Ok(RustType::Bool),
             TsKeywordTypeKind::TsVoidKeyword => Ok(RustType::Unit),
+            TsKeywordTypeKind::TsAnyKeyword | TsKeywordTypeKind::TsUnknownKeyword => {
+                Ok(RustType::Any)
+            }
+            TsKeywordTypeKind::TsNeverKeyword => Ok(RustType::Never),
             other => Err(anyhow!("unsupported keyword type: {:?}", other)),
         },
         TsType::TsArrayType(arr) => {
@@ -676,6 +680,41 @@ mod tests {
         );
     }
 
+    // -- convert_ts_type: keyword types (any, unknown, never) --
+
+    #[test]
+    fn test_convert_ts_type_any() {
+        let decl = parse_interface("interface T { x: any; }");
+        let prop = match &decl.body.body[0] {
+            TsTypeElement::TsPropertySignature(p) => p,
+            _ => panic!("expected property signature"),
+        };
+        let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann).unwrap();
+        assert_eq!(ty, RustType::Any);
+    }
+
+    #[test]
+    fn test_convert_ts_type_unknown() {
+        let decl = parse_interface("interface T { x: unknown; }");
+        let prop = match &decl.body.body[0] {
+            TsTypeElement::TsPropertySignature(p) => p,
+            _ => panic!("expected property signature"),
+        };
+        let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann).unwrap();
+        assert_eq!(ty, RustType::Any);
+    }
+
+    #[test]
+    fn test_convert_ts_type_never() {
+        let decl = parse_interface("interface T { x: never; }");
+        let prop = match &decl.body.body[0] {
+            TsTypeElement::TsPropertySignature(p) => p,
+            _ => panic!("expected property signature"),
+        };
+        let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann).unwrap();
+        assert_eq!(ty, RustType::Never);
+    }
+
     // -- convert_type_alias: string literal union --
 
     #[test]
@@ -709,9 +748,7 @@ mod tests {
         let decl = parse_type_alias(r#"type Status = "active" | "inactive";"#);
         let item = convert_type_alias(&decl, Visibility::Public).unwrap();
         match item {
-            Item::Enum {
-                name, variants, ..
-            } => {
+            Item::Enum { name, variants, .. } => {
                 assert_eq!(name, "Status");
                 assert_eq!(variants.len(), 2);
                 assert_eq!(variants[0].name, "Active");
@@ -726,9 +763,7 @@ mod tests {
         let decl = parse_type_alias(r#"type Only = "only";"#);
         let item = convert_type_alias(&decl, Visibility::Public).unwrap();
         match item {
-            Item::Enum {
-                name, variants, ..
-            } => {
+            Item::Enum { name, variants, .. } => {
                 assert_eq!(name, "Only");
                 assert_eq!(variants.len(), 1);
                 assert_eq!(variants[0].name, "Only");

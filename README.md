@@ -101,6 +101,11 @@ ts-to-rs input.ts --report-unsupported
 | `isNaN(x)` / `Number.isNaN(x)` | `x.is_nan()` |
 | `Number.isFinite(x)` | `x.is_finite()` |
 | `type X = "a" \| "b"` (string literal union) | `enum X { A, B }` + `as_str()` |
+| `any` / `unknown` | `Box<dyn std::any::Any>` |
+| `never` | `!` |
+| `x as T` (type assertion) | `x`（assertion 除去） |
+| `x ?? y` (nullish coalescing) | `x.unwrap_or_else(\|\| y)` |
+| `x?.y` (optional chaining) | `x.as_ref().map(\|_v\| _v.y)` |
 | `export` | `pub` |
 
 ## 例

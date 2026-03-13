@@ -32,6 +32,8 @@ pub fn generate_type(ty: &RustType) -> String {
                 )
             }
         }
+        RustType::Any => "Box<dyn std::any::Any>".to_string(),
+        RustType::Never => "!".to_string(),
         RustType::Named { name, type_args } => {
             if type_args.is_empty() {
                 name.clone()
@@ -163,6 +165,16 @@ mod tests {
     #[test]
     fn test_generate_type_unit() {
         assert_eq!(generate_type(&RustType::Unit), "()");
+    }
+
+    #[test]
+    fn test_generate_type_any() {
+        assert_eq!(generate_type(&RustType::Any), "Box<dyn std::any::Any>");
+    }
+
+    #[test]
+    fn test_generate_type_never() {
+        assert_eq!(generate_type(&RustType::Never), "!");
     }
 
     #[test]

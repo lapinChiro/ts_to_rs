@@ -228,6 +228,34 @@ fn test_void_type() {
 }
 
 #[test]
+fn test_nullish_coalescing() {
+    let input = fs::read_to_string("tests/fixtures/nullish-coalescing.input.ts").unwrap();
+    let output = transpile(&input).unwrap();
+    insta::assert_snapshot!(output);
+}
+
+#[test]
+fn test_type_assertion() {
+    let input = fs::read_to_string("tests/fixtures/type-assertion.input.ts").unwrap();
+    let output = transpile(&input).unwrap();
+    insta::assert_snapshot!(output);
+}
+
+#[test]
+fn test_optional_chaining() {
+    let input = fs::read_to_string("tests/fixtures/optional-chaining.input.ts").unwrap();
+    let output = transpile(&input).unwrap();
+    insta::assert_snapshot!(output);
+}
+
+#[test]
+fn test_keyword_types() {
+    let input = fs::read_to_string("tests/fixtures/keyword-types.input.ts").unwrap();
+    let output = transpile(&input).unwrap();
+    insta::assert_snapshot!(output);
+}
+
+#[test]
 fn test_string_literal_union() {
     let input = fs::read_to_string("tests/fixtures/string-literal-union.input.ts").unwrap();
     let output = transpile(&input).unwrap();
