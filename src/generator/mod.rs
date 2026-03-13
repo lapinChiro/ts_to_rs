@@ -210,29 +210,59 @@ fn generate_method(method: &Method) -> String {
 }
 
 /// Determines whether all enum variants have numeric values (or no values).
+/// Checks if any variant has data (tuple-like variant).
+fn has_data_variants(variants: &[EnumVariant]) -> bool {
+    variants.iter().any(|v| v.data.is_some())
+}
+
 fn is_numeric_enum(variants: &[EnumVariant]) -> bool {
-    variants
-        .iter()
-        .all(|v| matches!(v.value, None | Some(EnumValue::Number(_))))
+    !has_data_variants(variants)
+        && variants
+            .iter()
+            .all(|v| matches!(v.value, None | Some(EnumValue::Number(_))))
 }
 
 /// Generates a Rust enum definition from IR.
 ///
+/// - Data enums have tuple-like variants (e.g., `String(String)`, `F64(f64)`).
 /// - Numeric enums get `#[repr(i64)]` and discriminant values.
 /// - String enums get an `as_str()` impl block.
 /// - Enums without values are treated as numeric enums with auto-incrementing values.
 fn generate_enum(vis: &Visibility, name: &str, variants: &[EnumVariant]) -> String {
     let vis_str = generate_vis(vis);
+    let data_enum = has_data_variants(variants);
     let numeric = is_numeric_enum(variants);
 
     let mut out = String::new();
-    out.push_str("#[derive(Debug, Clone, Copy, PartialEq, Eq)]\n");
+
+    if data_enum {
+        out.push_str("#[derive(Debug, Clone, PartialEq)]\n");
+    } else {
+        out.push_str("#[derive(Debug, Clone, Copy, PartialEq, Eq)]\n");
+    }
     if numeric {
         out.push_str("#[repr(i64)]\n");
     }
     out.push_str(&format!("{vis_str}enum {name} {{\n"));
 
-    if numeric {
+    if data_enum {
+        for variant in variants {
+            if let Some(data_ty) = &variant.data {
+                out.push_str(&format!(
+                    "    {}({}),\n",
+                    variant.name,
+                    generate_type(data_ty)
+                ));
+            } else if let Some(EnumValue::Number(n)) = &variant.value {
+                // Numeric literal in a mixed union — unit variant with comment
+                out.push_str(&format!("    {}, // = {}\n", variant.name, n));
+            } else if let Some(EnumValue::Str(s)) = &variant.value {
+                out.push_str(&format!("    {}, // = \"{}\"\n", variant.name, s));
+            } else {
+                out.push_str(&format!("    {},\n", variant.name));
+            }
+        }
+    } else if numeric {
         let mut next_value: i64 = 0;
         for variant in variants {
             let value = match &variant.value {
@@ -258,7 +288,7 @@ fn generate_enum(vis: &Visibility, name: &str, variants: &[EnumVariant]) -> Stri
     out.push('}');
 
     // Generate as_str() impl for string enums
-    if !numeric {
+    if !numeric && !data_enum {
         out.push_str(&format!("\n\nimpl {name} {{\n"));
         out.push_str("    pub fn as_str(&self) -> &str {\n");
         out.push_str("        match self {\n");
@@ -423,14 +453,17 @@ pub struct Container<T> {
                 EnumVariant {
                     name: "Red".to_string(),
                     value: None,
+                    data: None,
                 },
                 EnumVariant {
                     name: "Green".to_string(),
                     value: None,
+                    data: None,
                 },
                 EnumVariant {
                     name: "Blue".to_string(),
                     value: None,
+                    data: None,
                 },
             ],
         };
@@ -454,10 +487,12 @@ pub enum Color {
                 EnumVariant {
                     name: "Active".to_string(),
                     value: Some(EnumValue::Number(1)),
+                    data: None,
                 },
                 EnumVariant {
                     name: "Inactive".to_string(),
                     value: Some(EnumValue::Number(0)),
+                    data: None,
                 },
             ],
         };
@@ -480,10 +515,12 @@ pub enum Status {
                 EnumVariant {
                     name: "Up".to_string(),
                     value: Some(EnumValue::Str("UP".to_string())),
+                    data: None,
                 },
                 EnumVariant {
                     name: "Down".to_string(),
                     value: Some(EnumValue::Str("DOWN".to_string())),
+                    data: None,
                 },
             ],
         };
@@ -513,11 +550,45 @@ impl Direction {
             variants: vec![EnumVariant {
                 name: "Red".to_string(),
                 value: None,
+                data: None,
             }],
         };
         let result = generate(&[item]);
         assert!(!result.contains("pub enum"));
         assert!(result.contains("enum Color"));
+    }
+
+    #[test]
+    fn test_generate_enum_data_variants() {
+        let item = Item::Enum {
+            vis: Visibility::Public,
+            name: "Value".to_string(),
+            variants: vec![
+                EnumVariant {
+                    name: "String".to_string(),
+                    value: None,
+                    data: Some(RustType::String),
+                },
+                EnumVariant {
+                    name: "F64".to_string(),
+                    value: None,
+                    data: Some(RustType::F64),
+                },
+                EnumVariant {
+                    name: "Bool".to_string(),
+                    value: None,
+                    data: Some(RustType::Bool),
+                },
+            ],
+        };
+        let expected = "\
+#[derive(Debug, Clone, PartialEq)]
+pub enum Value {
+    String(String),
+    F64(f64),
+    Bool(bool),
+}";
+        assert_eq!(generate(&[item]), expected);
     }
 
     // --- Item::Fn tests ---

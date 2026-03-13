@@ -107,6 +107,8 @@ ts-to-rs input.ts --report-unsupported
 | `Number.isFinite(x)` | `x.is_finite()` |
 | `[string, number]` (tuple 型) | `(String, f64)` |
 | `type X = "a" \| "b"` (string literal union) | `enum X { A, B }` + `as_str()` |
+| `type X = 200 \| 404` (numeric literal union) | `enum X { V200 = 200, V404 = 404 }` |
+| `type X = string \| number` (primitive union) | `enum X { String(String), F64(f64) }` |
 | `any` / `unknown` | `Box<dyn std::any::Any>` |
 | `never` | `!` |
 | `x as T` (type assertion) | `x`（assertion 除去） |

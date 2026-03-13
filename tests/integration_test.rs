@@ -299,3 +299,10 @@ fn test_unsupported_syntax_default_errors() {
         "transpile should error on unsupported syntax by default"
     );
 }
+
+#[test]
+fn test_union_type() {
+    let input = fs::read_to_string("tests/fixtures/union-type.input.ts").unwrap();
+    let output = transpile(&input).unwrap();
+    insta::assert_snapshot!(output);
+}

@@ -1,8 +1,16 @@
 # ts_to_rs 開発計画
 
-## 次のタスク
+## 次のタスク（Hono 変換ブロッカー優先）
 
-（backlog/ が空のため、TODO から次の PRD を選定する）
+以下の順序で消化する。依存関係と影響範囲の小さいものから着手し、後続の作業を安定させる。
+
+1. `backlog/optional-chaining-member-bug.md` — バグ修正。影響範囲が小さく独立性が高い
+2. `backlog/ts-indexed-access-type.md` — 型変換の追加。小規模で独立性が高い
+3. `backlog/builtin-api-batch.md` — 組み込み API 10 カテゴリの一括追加。既存パターンの拡張
+4. `backlog/spread-non-first-position.md` — 既存機能の拡張。既存テストとの整合性を保つ
+5. `backlog/inline-type-literal-param.md` — 変換パイプラインの拡張が必要。設計コストが中程度
+6. `backlog/conditional-type-tier1.md` — 新しい型構文カテゴリ。IR 拡張を含む大きめの作業
+7. `backlog/conditional-type-tier2-fallback.md` — Tier 1 の実装が前提
 
 ## Hono 対応の開始条件
 

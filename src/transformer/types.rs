@@ -298,6 +298,11 @@ pub fn convert_type_alias(decl: &TsTypeAliasDecl, vis: Visibility) -> Result<Ite
         return Ok(item);
     }
 
+    // General union type: `type X = 200 | 404` or `type X = string | number` → enum
+    if let Some(item) = try_convert_general_union(decl, vis.clone())? {
+        return Ok(item);
+    }
+
     // Function type: `type Fn = (x: T) => U` → type alias
     if let Some(item) = try_convert_function_type_alias(decl, vis.clone())? {
         return Ok(item);
@@ -432,6 +437,7 @@ fn try_convert_string_literal_union(
                     variants.push(EnumVariant {
                         name: string_to_pascal_case(&value),
                         value: Some(EnumValue::Str(value)),
+                        data: None,
                     });
                 }
                 _ => return Ok(None), // Non-string literal → not a string literal union
@@ -464,6 +470,7 @@ fn try_convert_single_string_literal(
                     variants: vec![EnumVariant {
                         name: string_to_pascal_case(&value),
                         value: Some(EnumValue::Str(value)),
+                        data: None,
                     }],
                 }))
             }
@@ -488,6 +495,110 @@ fn string_to_pascal_case(s: &str) -> String {
             }
         })
         .collect()
+}
+
+/// Tries to convert a type alias with a union type body into an enum.
+///
+/// Handles numeric literal unions (`type Code = 200 | 404`) and
+/// primitive type unions (`type Value = string | number`).
+/// Returns `None` if the type alias body is not a union type.
+fn try_convert_general_union(decl: &TsTypeAliasDecl, vis: Visibility) -> Result<Option<Item>> {
+    let union = match decl.type_ann.as_ref() {
+        TsType::TsUnionOrIntersectionType(
+            swc_ecma_ast::TsUnionOrIntersectionType::TsUnionType(u),
+        ) => u,
+        _ => return Ok(None),
+    };
+
+    // Filter out null/undefined members
+    let mut non_null_types: Vec<&TsType> = Vec::new();
+    let mut has_null_or_undefined = false;
+    for ty in &union.types {
+        match ty.as_ref() {
+            TsType::TsKeywordType(kw)
+                if kw.kind == TsKeywordTypeKind::TsNullKeyword
+                    || kw.kind == TsKeywordTypeKind::TsUndefinedKeyword =>
+            {
+                has_null_or_undefined = true;
+            }
+            other => non_null_types.push(other),
+        }
+    }
+
+    // If all members are string literals, `try_convert_string_literal_union` handles it
+    if non_null_types.iter().all(|t| {
+        matches!(
+            t,
+            TsType::TsLitType(lit) if matches!(lit.lit, swc_ecma_ast::TsLit::Str(_))
+        )
+    }) {
+        return Ok(None);
+    }
+
+    let mut variants = Vec::new();
+    for ty in &non_null_types {
+        match *ty {
+            TsType::TsLitType(lit) => match &lit.lit {
+                swc_ecma_ast::TsLit::Number(n) => {
+                    let value = n.value as i64;
+                    variants.push(EnumVariant {
+                        name: format!(
+                            "V{}",
+                            if value < 0 {
+                                format!("Neg{}", -value)
+                            } else {
+                                value.to_string()
+                            }
+                        ),
+                        value: Some(EnumValue::Number(value)),
+                        data: None,
+                    });
+                }
+                swc_ecma_ast::TsLit::Str(s) => {
+                    let value = s.value.to_string_lossy().into_owned();
+                    variants.push(EnumVariant {
+                        name: string_to_pascal_case(&value),
+                        value: Some(EnumValue::Str(value)),
+                        data: None,
+                    });
+                }
+                _ => return Err(anyhow!("unsupported literal type in union")),
+            },
+            TsType::TsKeywordType(kw) => {
+                let (variant_name, rust_type) = match kw.kind {
+                    TsKeywordTypeKind::TsStringKeyword => ("String".to_string(), RustType::String),
+                    TsKeywordTypeKind::TsNumberKeyword => ("F64".to_string(), RustType::F64),
+                    TsKeywordTypeKind::TsBooleanKeyword => ("Bool".to_string(), RustType::Bool),
+                    _ => return Err(anyhow!("unsupported keyword type in union: {:?}", kw.kind)),
+                };
+                variants.push(EnumVariant {
+                    name: variant_name,
+                    value: None,
+                    data: Some(rust_type),
+                });
+            }
+            _ => return Err(anyhow!("unsupported type in union")),
+        }
+    }
+
+    if variants.is_empty() {
+        return Err(anyhow!("empty union type"));
+    }
+
+    let enum_item = Item::Enum {
+        vis: vis.clone(),
+        name: decl.id.sym.to_string(),
+        variants,
+    };
+
+    if has_null_or_undefined {
+        // Wrap in Option: `type X = string | number | null` → `Option<EnumName>`
+        // We still emit the enum, but we'd need a TypeAlias wrapping it in Option.
+        // For now, just return the enum (nullable wrapping is a separate concern)
+        Ok(Some(enum_item))
+    } else {
+        Ok(Some(enum_item))
+    }
 }
 
 /// Converts a TS function type (`(x: number) => string`) into `RustType::Fn`.
@@ -1060,6 +1171,121 @@ mod tests {
                 assert_eq!(variants[1].name, "BazQux");
             }
             _ => panic!("expected Item::Enum"),
+        }
+    }
+
+    #[test]
+    fn test_convert_type_alias_numeric_literal_union_produces_enum() {
+        let decl = parse_type_alias("type Code = 200 | 404 | 500;");
+        let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+        match item {
+            Item::Enum {
+                vis,
+                name,
+                variants,
+            } => {
+                assert_eq!(vis, Visibility::Public);
+                assert_eq!(name, "Code");
+                assert_eq!(variants.len(), 3);
+                assert_eq!(variants[0].name, "V200");
+                assert_eq!(variants[0].value, Some(EnumValue::Number(200)));
+                assert!(variants[0].data.is_none());
+                assert_eq!(variants[1].name, "V404");
+                assert_eq!(variants[1].value, Some(EnumValue::Number(404)));
+                assert_eq!(variants[2].name, "V500");
+                assert_eq!(variants[2].value, Some(EnumValue::Number(500)));
+            }
+            _ => panic!("expected Item::Enum, got {:?}", item),
+        }
+    }
+
+    #[test]
+    fn test_convert_type_alias_numeric_literal_union_two_members() {
+        let decl = parse_type_alias("type Code = 200 | 404;");
+        let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+        match item {
+            Item::Enum { name, variants, .. } => {
+                assert_eq!(name, "Code");
+                assert_eq!(variants.len(), 2);
+            }
+            _ => panic!("expected Item::Enum"),
+        }
+    }
+
+    // -- convert_type_alias: primitive union --
+
+    #[test]
+    fn test_convert_type_alias_primitive_union_two_types() {
+        let decl = parse_type_alias("type Value = string | number;");
+        let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+        match item {
+            Item::Enum {
+                vis,
+                name,
+                variants,
+            } => {
+                assert_eq!(vis, Visibility::Public);
+                assert_eq!(name, "Value");
+                assert_eq!(variants.len(), 2);
+                assert_eq!(variants[0].name, "String");
+                assert_eq!(variants[0].data, Some(RustType::String));
+                assert!(variants[0].value.is_none());
+                assert_eq!(variants[1].name, "F64");
+                assert_eq!(variants[1].data, Some(RustType::F64));
+            }
+            _ => panic!("expected Item::Enum, got {:?}", item),
+        }
+    }
+
+    #[test]
+    fn test_convert_type_alias_primitive_union_three_types() {
+        let decl = parse_type_alias("type Any = string | number | boolean;");
+        let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+        match item {
+            Item::Enum { name, variants, .. } => {
+                assert_eq!(name, "Any");
+                assert_eq!(variants.len(), 3);
+                assert_eq!(variants[0].name, "String");
+                assert_eq!(variants[1].name, "F64");
+                assert_eq!(variants[2].name, "Bool");
+            }
+            _ => panic!("expected Item::Enum"),
+        }
+    }
+
+    // -- convert_type_alias: mixed union --
+
+    #[test]
+    fn test_convert_type_alias_mixed_union_string_and_number_literal() {
+        let decl = parse_type_alias(r#"type Mixed = "ok" | 404;"#);
+        let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+        match item {
+            Item::Enum { name, variants, .. } => {
+                assert_eq!(name, "Mixed");
+                assert_eq!(variants.len(), 2);
+                assert_eq!(variants[0].name, "Ok");
+                assert_eq!(variants[0].value, Some(EnumValue::Str("ok".to_string())));
+                assert!(variants[0].data.is_none());
+                assert_eq!(variants[1].name, "V404");
+                assert_eq!(variants[1].value, Some(EnumValue::Number(404)));
+            }
+            _ => panic!("expected Item::Enum, got {:?}", item),
+        }
+    }
+
+    #[test]
+    fn test_convert_type_alias_nullable_union_with_multiple_types() {
+        // `type Opt = string | number | null` → enum (nullable wrapping is future work)
+        let decl = parse_type_alias("type Opt = string | number | null;");
+        let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+        match item {
+            Item::Enum { name, variants, .. } => {
+                assert_eq!(name, "Opt");
+                assert_eq!(variants.len(), 2);
+                assert_eq!(variants[0].name, "String");
+                assert_eq!(variants[1].name, "F64");
+            }
+            _ => panic!("expected Item::Enum, got {:?}", item),
         }
     }
 

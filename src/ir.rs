@@ -72,6 +72,8 @@ pub struct EnumVariant {
     pub name: String,
     /// Optional discriminant or string value
     pub value: Option<EnumValue>,
+    /// Optional data type for tuple-like variants (e.g., `String(String)`, `F64(f64)`)
+    pub data: Option<RustType>,
 }
 
 /// A named field in a struct.
@@ -470,10 +472,12 @@ mod tests {
                 EnumVariant {
                     name: "Red".to_string(),
                     value: None,
+                    data: None,
                 },
                 EnumVariant {
                     name: "Green".to_string(),
                     value: None,
+                    data: None,
                 },
             ],
         };
@@ -496,10 +500,12 @@ mod tests {
                 EnumVariant {
                     name: "Active".to_string(),
                     value: Some(EnumValue::Number(1)),
+                    data: None,
                 },
                 EnumVariant {
                     name: "Inactive".to_string(),
                     value: Some(EnumValue::Number(0)),
+                    data: None,
                 },
             ],
         };
@@ -521,10 +527,12 @@ mod tests {
                 EnumVariant {
                     name: "Up".to_string(),
                     value: Some(EnumValue::Str("UP".to_string())),
+                    data: None,
                 },
                 EnumVariant {
                     name: "Down".to_string(),
                     value: Some(EnumValue::Str("DOWN".to_string())),
+                    data: None,
                 },
             ],
         };

@@ -10,18 +10,25 @@
 
 ## 型構文
 
-- non-nullable union type（`type Foo = A | B`）**[PRD 化可能]**
-  - Rust の `enum` で表現可能。Hono で多用
-- conditional type（`type Foo = T extends U ? X : Y`）**[PRD 化可能]**
-  - 特定パターンは trait の associated type で表現可能。Hono `types.ts` で多用
+- discriminated union（`type Event = { kind: "click", x: number } | { kind: "hover", y: number }`）
+  - **保留**: 各バリアントの型定義解析が必要で複雑度が高い。non-nullable union type の実績を見てから着手
+- conditional type — Tier 3: 高度パターンの変換研究（Hono 固有の 24 件）
+  - 詳細分析: `report/tier3-conditional-types-rust-approaches.md`
+  - 以下の 4 グループに分類。多くは TypeScript 固有の制約への対処であり、Rust では別の手段で同じ目的を達成できる
+  - **Group A: テンプレートリテラル型（10 件）** — パス文字列からパラメータ型を自動導出する目的。Rust では Extractor パターン（Axum 方式）が確立済み。proc macro による直接実現も技術的に可能
+    - **保留**: proc macro による変換は ts_to_rs のスコープ（ソースコード変換）を超える可能性がある。Extractor パターンへの変換戦略を検討する必要あり
+  - **Group B: 再帰的条件型（4 件）** — 半分（SimplifyDeepArray, InterfaceToType）は IDE 表示改善目的で Rust では不要。IntersectNonAnyTypes は `FromRef` トレイトが代替。PathToChain はコード生成で実現可能
+    - **保留**: 不要な型の検出（出力から除外）と、代替パターンへの変換の設計が必要
+  - **Group C: 高階型操作（3 件）** — Equal/NotEqual はテスト用で `static_assertions` が代替。UnionToIntersection は Rust ではユニオン型がないため問題自体が異なる
+    - **保留**: 問題の構造が TS と Rust で異なるため、「何に変換するか」の設計判断が必要
+  - **Group D: 複雑ネスト条件型（7 件）** — Hono のルーティングパイプラインの型追跡システム。複雑さの原因は TS 固有の制約（any の扱い、構造的型付け、マクロ不在、serde 不在）。Rust では IntoResponse + serde + proc macro で同じ目的を達成可能
+    - **保留**: Hono のルーティング型システム全体の Rust 設計が前提。個別の型変換では解決しない
 - mapped type（`type Foo = { [K in keyof T]: V }`）**[PRD 化可能]**
   - Rust のマクロや generics で部分的に表現可能。スコープの絞り込みが必要
 - intersection 型（`A & B`）
   - **保留**: フィールドの統合は構造的型付けの問題と関連し、設計コストが高い
 - template literal type（`` type Foo = `prefix_${T}` ``）
   - **保留**: Rust に対応する型レベル文字列操作がない。需要が低い
-- TsIndexedAccessType（`E['Bindings']`）**[PRD 化可能]**
-  - ジェネリクスの関連型アクセス。Hono `context.ts` で使用
 
 ## クラス
 
@@ -38,9 +45,6 @@
 
 ## 関数パラメータ
 
-- パラメータ位置のインラインオブジェクト型リテラル **[PRD 化可能]**
-  - `constructor(init: { routers: Router<T>[] })` のようなパターン
-  - 型エイリアスとしての `TsTypeLit` は対応済みだが、パラメータ型注記の位置では未対応
 - デフォルト引数値の拡張（複雑な式: `= new Map()`, `= someFunction()` 等）
   - **保留**: リテラル値と空オブジェクト `= {}` は対応済み。需要が発生してから対応
 
@@ -54,11 +58,6 @@
 
 ## 演算子
 
-- optional chaining 内のメンバーアクセスで特殊変換が効かない **[PRD 化可能]**
-  - `.length` → `.len() as f64` 等が optional chaining 内では動作しない
-  - 原因: `convert_opt_chain_expr` が `convert_member_expr` を経由していない
-- spread の非先頭位置 **[PRD 化可能]**
-  - `{ key: value, ...rest }` のように spread が先頭以外にある場合
 - `in` 演算子（`"prop" in obj`）
   - **保留**: HashMap ベースのオブジェクト表現の方針決定が前提
 - optional chaining の `Option` ネスト問題
@@ -88,16 +87,7 @@
 
 ## 組み込み API の特殊変換
 
-- Math 定数（`Math.PI`, `Math.E`）→ `std::f64::consts::*` **[PRD 化可能]**
-- Math.sign/trunc/log 等 → `x.signum()`, `x.trunc()`, `x.ln()` **[PRD 化可能]**
 - Math.random() → `rand` クレート **[PRD 化可能]**
-- `Number.isInteger(x)` → `x.fract() == 0.0` **[PRD 化可能]**
-- `.indexOf(s)` → `.find(s)` (Option 化が必要) **[PRD 化可能]**
-- `.reduce(fn, init)` → `.iter().fold(init, fn)` **[PRD 化可能]**
-- `.reverse()` → `.reverse()` / `.iter().rev().collect()` **[PRD 化可能]**
-- `.sort()` — 比較関数の変換が必要 **[PRD 化可能]**
-- `.join(separator)` → `.join(separator)` **[PRD 化可能]**
-- `.splice()`, `.slice()` — **[PRD 化可能]**
 - `.substring(a, b)` / `.slice(a, b)` → `&s[a..b]`
   - **保留**: UTF-8 バイト境界の問題
 - `typeof x === "string"` 等の型ガード

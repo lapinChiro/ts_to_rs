@@ -638,6 +638,7 @@ fn convert_ts_enum(ts_enum: &swc_ecma_ast::TsEnumDecl, vis: Visibility) -> Resul
         variants.push(EnumVariant {
             name: variant_name,
             value,
+            data: None,
         });
     }
 

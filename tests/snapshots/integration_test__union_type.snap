@@ -1,0 +1,43 @@
+---
+source: tests/integration_test.rs
+expression: output
+---
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Direction {
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
+impl Direction {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Direction::Up => "up",
+            Direction::Down => "down",
+            Direction::Left => "left",
+            Direction::Right => "right",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(i64)]
+enum StatusCode {
+    V200 = 200,
+    V404 = 404,
+    V500 = 500,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum Value {
+    String(String),
+    F64(f64),
+    Bool(bool),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum StringOrNumber {
+    String(String),
+    F64(f64),
+}
