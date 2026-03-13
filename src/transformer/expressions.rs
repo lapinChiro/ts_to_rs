@@ -123,6 +123,44 @@ fn convert_binary_op(op: ast::BinaryOp) -> Result<String> {
     Ok(s.to_string())
 }
 
+/// Resolves a member access expression, applying special conversions for known fields.
+///
+/// - `.length` → `.len() as f64`
+/// - enum member access → `EnumName::Variant`
+/// - otherwise → `object.field`
+fn resolve_member_access(
+    object: &Expr,
+    field: &str,
+    ts_obj: &ast::Expr,
+    reg: &TypeRegistry,
+) -> Result<Expr> {
+    // Check if the TS object is an identifier referring to an enum
+    if let ast::Expr::Ident(ident) = ts_obj {
+        let name = ident.sym.as_ref();
+        if let Some(TypeDef::Enum { .. }) = reg.get(name) {
+            return Ok(Expr::Ident(format!("{name}::{field}")));
+        }
+    }
+
+    // .length → .len() as f64
+    if field == "length" {
+        let len_call = Expr::MethodCall {
+            object: Box::new(object.clone()),
+            method: "len".to_string(),
+            args: vec![],
+        };
+        return Ok(Expr::Cast {
+            expr: Box::new(len_call),
+            target: "f64".to_string(),
+        });
+    }
+
+    Ok(Expr::FieldAccess {
+        object: Box::new(object.clone()),
+        field: field.to_string(),
+    })
+}
+
 /// Converts an optional chaining expression (`x?.y`) to `x.as_ref().map(|_v| _v.y)`.
 ///
 /// Supports property access, method calls, and computed access.
@@ -132,10 +170,10 @@ fn convert_opt_chain_expr(opt_chain: &ast::OptChainExpr, reg: &TypeRegistry) -> 
         ast::OptChainBase::Member(member) => {
             let object = convert_expr(&member.obj, reg, None)?;
             let body_expr = match &member.prop {
-                ast::MemberProp::Ident(ident) => Expr::FieldAccess {
-                    object: Box::new(Expr::Ident("_v".to_string())),
-                    field: ident.sym.to_string(),
-                },
+                ast::MemberProp::Ident(ident) => {
+                    let field = ident.sym.to_string();
+                    resolve_member_access(&Expr::Ident("_v".to_string()), &field, &member.obj, reg)?
+                }
                 ast::MemberProp::Computed(computed) => {
                     let index = convert_expr(&computed.expr, reg, None)?;
                     Expr::Index {
@@ -223,33 +261,8 @@ fn convert_member_expr(member: &ast::MemberExpr, reg: &TypeRegistry) -> Result<E
         _ => return Err(anyhow!("unsupported member property (only identifiers)")),
     };
 
-    // Check if the object is an identifier referring to an enum in the registry
-    if let ast::Expr::Ident(ident) = member.obj.as_ref() {
-        let name = ident.sym.as_ref();
-        if let Some(TypeDef::Enum { .. }) = reg.get(name) {
-            return Ok(Expr::Ident(format!("{name}::{field}")));
-        }
-    }
-
-    // .length → .len() as f64 (TS number is f64, Rust len() returns usize)
-    if field == "length" {
-        let object = convert_expr(&member.obj, reg, None)?;
-        let len_call = Expr::MethodCall {
-            object: Box::new(object),
-            method: "len".to_string(),
-            args: vec![],
-        };
-        return Ok(Expr::Cast {
-            expr: Box::new(len_call),
-            target: "f64".to_string(),
-        });
-    }
-
     let object = convert_expr(&member.obj, reg, None)?;
-    Ok(Expr::FieldAccess {
-        object: Box::new(object),
-        field,
-    })
+    resolve_member_access(&object, &field, &member.obj, reg)
 }
 
 /// Converts an assignment expression (`target = value`) to `Expr::Assign`.
@@ -2629,6 +2642,68 @@ mod tests {
             Expr::FieldAccess {
                 object: Box::new(Expr::Ident("obj".to_string())),
                 field: "bar".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_opt_chain_length_returns_len_as_f64() {
+        let expr = parse_expr("x?.length;");
+        let result = convert_expr(&expr, &TypeRegistry::new(), None).unwrap();
+        // x?.length → x.as_ref().map(|_v| _v.len() as f64)
+        assert_eq!(
+            result,
+            Expr::MethodCall {
+                object: Box::new(Expr::MethodCall {
+                    object: Box::new(Expr::Ident("x".to_string())),
+                    method: "as_ref".to_string(),
+                    args: vec![],
+                }),
+                method: "map".to_string(),
+                args: vec![Expr::Closure {
+                    params: vec![Param {
+                        name: "_v".to_string(),
+                        ty: None,
+                    }],
+                    return_type: None,
+                    body: ClosureBody::Expr(Box::new(Expr::Cast {
+                        expr: Box::new(Expr::MethodCall {
+                            object: Box::new(Expr::Ident("_v".to_string())),
+                            method: "len".to_string(),
+                            args: vec![],
+                        }),
+                        target: "f64".to_string(),
+                    })),
+                }],
+            }
+        );
+    }
+
+    #[test]
+    fn test_convert_opt_chain_normal_field_unchanged() {
+        let expr = parse_expr("x?.y;");
+        let result = convert_expr(&expr, &TypeRegistry::new(), None).unwrap();
+        // x?.y → x.as_ref().map(|_v| _v.y) — 既存動作が壊れないこと
+        assert_eq!(
+            result,
+            Expr::MethodCall {
+                object: Box::new(Expr::MethodCall {
+                    object: Box::new(Expr::Ident("x".to_string())),
+                    method: "as_ref".to_string(),
+                    args: vec![],
+                }),
+                method: "map".to_string(),
+                args: vec![Expr::Closure {
+                    params: vec![Param {
+                        name: "_v".to_string(),
+                        ty: None,
+                    }],
+                    return_type: None,
+                    body: ClosureBody::Expr(Box::new(Expr::FieldAccess {
+                        object: Box::new(Expr::Ident("_v".to_string())),
+                        field: "y".to_string(),
+                    })),
+                }],
             }
         );
     }
