@@ -45,6 +45,8 @@ ts-to-rs input.ts --report-unsupported
 | `class` | `struct` + `impl` |
 | `class Child extends Parent` | `struct` + `trait` + `impl Trait for Struct` |
 | `super(args)` | 親フィールドの初期化 |
+| `get foo(): T { ... }` | `fn foo(&self) -> T { ... }` |
+| `set foo(v: T) { ... }` | `fn set_foo(&mut self, v: T) { ... }` |
 | アロー関数 (`(x) => x + 1`) | クロージャ (`\|x\| x + 1`) / `fn` |
 | アロー関数 型注釈なし (`(x) => x + 1`) | `\|x\| x + 1` (型推論) |
 | 関数型 (`(x: number) => number`) | `Box<dyn Fn(f64) -> f64>` |
@@ -66,6 +68,8 @@ ts-to-rs input.ts --report-unsupported
 | `const [a, b] = arr` (配列分割代入) | `let a = arr[0]; let b = arr[1];` |
 | `{ origin: { x: 0, y: 0 } }` (ネストしたオブジェクト) | `Rect { origin: Origin { x: 0.0, y: 0.0 } }` |
 | `draw({ x: 0, y: 0 })` (関数引数のオブジェクト) | `draw(Point { x: 0.0, y: 0.0 })` |
+| `[...arr, 4]` (配列 spread) | `let mut v = Vec::new(); v.extend(arr...); v.push(4.0);` |
+| `{...p, x: 10}` (オブジェクト spread、型注記付き) | `Point { x: 10.0, y: p.y }` |
 | `Color.Red` (enum メンバーアクセス) | `Color::Red` |
 | `a > 0 ? a : b` (三項演算子) | `if a > 0.0 { a } else { b }` |
 | `break` / `continue` | `break` / `continue` |

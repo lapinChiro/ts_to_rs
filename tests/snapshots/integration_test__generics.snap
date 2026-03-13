@@ -1,6 +1,5 @@
 ---
 source: tests/integration_test.rs
-assertion_line: 43
 expression: output
 ---
 pub struct Container<T> {

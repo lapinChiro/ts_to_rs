@@ -128,9 +128,20 @@ fn generate_item(item: &Item) -> String {
     }
 }
 
+/// Returns the `self` parameter string for a method.
+fn self_param_str(method: &Method) -> &'static str {
+    if method.has_mut_self {
+        "&mut self"
+    } else if method.has_self {
+        "&self"
+    } else {
+        ""
+    }
+}
+
 /// Generates a trait method signature (no body).
 fn generate_trait_method_sig(method: &Method) -> String {
-    let self_param = if method.has_self { "&self" } else { "" };
+    let self_param = self_param_str(method);
     let other_params = method
         .params
         .iter()
@@ -154,7 +165,7 @@ fn generate_trait_method_sig(method: &Method) -> String {
 /// Generates a method inside an `impl` block.
 fn generate_method(method: &Method) -> String {
     let vis_str = generate_vis(&method.vis);
-    let self_param = if method.has_self { "&self" } else { "" };
+    let self_param = self_param_str(method);
     let other_params = method
         .params
         .iter()
@@ -583,6 +594,7 @@ pub fn identity<T>(x: T) -> T {
                 vis: Visibility::Public,
                 name: "new".to_string(),
                 has_self: false,
+                has_mut_self: false,
                 params: vec![Param {
                     name: "x".to_string(),
                     ty: Some(RustType::F64),
@@ -612,6 +624,7 @@ impl Foo {
                 vis: Visibility::Public,
                 name: "get_name".to_string(),
                 has_self: true,
+                has_mut_self: false,
                 params: vec![],
                 return_type: Some(RustType::String),
                 body: vec![Stmt::Return(Some(Expr::FieldAccess {
@@ -667,6 +680,7 @@ pub struct B {
                 vis: Visibility::Private,
                 name: "speak".to_string(),
                 has_self: true,
+                has_mut_self: false,
                 params: vec![],
                 return_type: Some(RustType::String),
                 body: vec![],
@@ -688,6 +702,7 @@ pub trait AnimalTrait {
                 vis: Visibility::Private,
                 name: "speak".to_string(),
                 has_self: true,
+                has_mut_self: false,
                 params: vec![],
                 return_type: Some(RustType::String),
                 body: vec![Stmt::Return(Some(Expr::FieldAccess {

@@ -5,7 +5,7 @@
 use anyhow::{anyhow, Result};
 use swc_ecma_ast as ast;
 
-use crate::ir::{ClosureBody, Expr, Param, RustType};
+use crate::ir::{self, ClosureBody, Expr, Param, RustType};
 use crate::registry::{TypeDef, TypeRegistry};
 use crate::transformer::statements::convert_stmt;
 use crate::transformer::types::convert_ts_type;
@@ -799,7 +799,9 @@ fn convert_object_lit(
     });
 
     let mut fields = Vec::new();
-    for prop in &obj_lit.props {
+    let mut base: Option<Box<Expr>> = None;
+
+    for (i, prop) in obj_lit.props.iter().enumerate() {
         match prop {
             ast::PropOrSpread::Prop(prop) => match prop.as_ref() {
                 ast::Prop::KeyValue(kv) => {
@@ -828,8 +830,36 @@ fn convert_object_lit(
                     ))
                 }
             },
-            ast::PropOrSpread::Spread(_) => {
-                return Err(anyhow!("spread in object literal is not supported"));
+            ast::PropOrSpread::Spread(spread_elem) => {
+                if i != 0 {
+                    return Err(anyhow!(
+                        "spread in object literal must be the first element"
+                    ));
+                }
+                let spread_expr = convert_expr(&spread_elem.expr, reg, None)?;
+                base = Some(Box::new(spread_expr));
+            }
+        }
+    }
+
+    // When spread is present, expand remaining struct fields from the base expression
+    if let Some(base_expr) = base {
+        let all_fields = struct_fields.ok_or_else(|| {
+            anyhow!(
+                "spread in object literal requires struct '{}' to be registered in TypeRegistry",
+                struct_name
+            )
+        })?;
+        let explicit_keys: Vec<String> = fields.iter().map(|(k, _)| k.clone()).collect();
+        for (field_name, _) in all_fields {
+            if !explicit_keys.iter().any(|k| k == field_name) {
+                fields.push((
+                    field_name.clone(),
+                    Expr::FieldAccess {
+                        object: base_expr.clone(),
+                        field: field_name.clone(),
+                    },
+                ));
             }
         }
     }
@@ -840,9 +870,10 @@ fn convert_object_lit(
     })
 }
 
-/// Converts an SWC array literal to an IR `Expr::Vec`.
+/// Converts an SWC array literal to an IR `Expr::Vec` or `Expr::VecSpread`.
 ///
 /// When `expected` is `RustType::Vec(inner)`, the inner type is propagated to each element.
+/// If any element uses spread syntax (`...expr`), produces `Expr::VecSpread`.
 fn convert_array_lit(
     array_lit: &ast::ArrayLit,
     reg: &TypeRegistry,
@@ -852,13 +883,37 @@ fn convert_array_lit(
         Some(RustType::Vec(inner)) => Some(inner.as_ref()),
         _ => None,
     };
-    let elements = array_lit
+
+    let has_spread = array_lit
         .elems
         .iter()
         .filter_map(|elem| elem.as_ref())
-        .map(|elem| convert_expr(&elem.expr, reg, element_type))
+        .any(|elem| elem.spread.is_some());
+
+    if !has_spread {
+        let elements = array_lit
+            .elems
+            .iter()
+            .filter_map(|elem| elem.as_ref())
+            .map(|elem| convert_expr(&elem.expr, reg, element_type))
+            .collect::<Result<Vec<_>>>()?;
+        return Ok(Expr::Vec { elements });
+    }
+
+    let segments = array_lit
+        .elems
+        .iter()
+        .filter_map(|elem| elem.as_ref())
+        .map(|elem| {
+            let expr = convert_expr(&elem.expr, reg, element_type)?;
+            if elem.spread.is_some() {
+                Ok(ir::VecSegment::Spread(expr))
+            } else {
+                Ok(ir::VecSegment::Element(expr))
+            }
+        })
         .collect::<Result<Vec<_>>>()?;
-    Ok(Expr::Vec { elements })
+    Ok(Expr::VecSpread { segments })
 }
 
 /// Converts an SWC unary expression to an IR `UnaryOp`.
@@ -1369,6 +1424,75 @@ mod tests {
         let swc_expr = parse_var_init("const obj = { x: 1 };");
         let result = convert_expr(&swc_expr, &TypeRegistry::new(), None);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_convert_expr_object_spread_not_first_errors() {
+        let swc_expr = parse_var_init("const p: Point = { x: 1, ...other };");
+        let expected = RustType::Named {
+            name: "Point".to_string(),
+            type_args: vec![],
+        };
+        let result = convert_expr(&swc_expr, &TypeRegistry::new(), Some(&expected));
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("must be the first element"));
+    }
+
+    #[test]
+    fn test_convert_expr_object_spread_multiple_errors() {
+        // {...a, ...b} — second spread at index 1 triggers "must be the first element"
+        let swc_expr = parse_var_init("const p: Point = { ...a, ...b };");
+        let expected = RustType::Named {
+            name: "Point".to_string(),
+            type_args: vec![],
+        };
+        let result = convert_expr(&swc_expr, &TypeRegistry::new(), Some(&expected));
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("must be the first element"));
+    }
+
+    #[test]
+    fn test_convert_expr_object_spread_with_override() {
+        let swc_expr = parse_var_init("const p: Point = { ...other, x: 10 };");
+        let expected = RustType::Named {
+            name: "Point".to_string(),
+            type_args: vec![],
+        };
+        let mut reg = TypeRegistry::new();
+        use crate::registry::TypeDef;
+        reg.register(
+            "Point".to_string(),
+            TypeDef::Struct {
+                fields: vec![
+                    ("x".to_string(), RustType::F64),
+                    ("y".to_string(), RustType::F64),
+                ],
+            },
+        );
+        let result = convert_expr(&swc_expr, &reg, Some(&expected)).unwrap();
+        // Spread expands to field-by-field access: x is overridden, y from base
+        assert_eq!(
+            result,
+            Expr::StructInit {
+                name: "Point".to_string(),
+                fields: vec![
+                    ("x".to_string(), Expr::NumberLit(10.0)),
+                    (
+                        "y".to_string(),
+                        Expr::FieldAccess {
+                            object: Box::new(Expr::Ident("other".to_string())),
+                            field: "y".to_string(),
+                        }
+                    ),
+                ],
+            }
+        );
     }
 
     #[test]

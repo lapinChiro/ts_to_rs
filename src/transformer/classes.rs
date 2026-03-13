@@ -128,6 +128,7 @@ pub fn generate_parent_class_items(info: &ClassInfo) -> Result<Vec<Item>> {
             vis: Visibility::Private, // trait methods have no visibility
             name: m.name.clone(),
             has_self: m.has_self,
+            has_mut_self: m.has_mut_self,
             params: m.params.clone(),
             return_type: m.return_type.clone(),
             body: vec![], // signature only
@@ -282,7 +283,9 @@ fn rewrite_super_constructor(ctor: &Method, parent: &ClassInfo) -> Method {
         new_body = new_body
             .into_iter()
             .map(|s| match s {
-                Stmt::Return(Some(Expr::StructInit { name, mut fields })) => {
+                Stmt::Return(Some(Expr::StructInit {
+                    name, mut fields, ..
+                })) => {
                     let mut merged = super_fields.clone();
                     merged.append(&mut fields);
                     Stmt::Return(Some(Expr::StructInit {
@@ -361,6 +364,7 @@ fn convert_constructor(
         vis: vis.clone(),
         name: "new".to_string(),
         has_self: false,
+        has_mut_self: false,
         params,
         return_type: Some(RustType::Named {
             name: "Self".to_string(),
@@ -426,14 +430,26 @@ fn try_extract_this_assignment(stmt: &ast::Stmt) -> Option<(String, &ast::Expr)>
     Some((field_name, assign.right.as_ref()))
 }
 
-/// Converts a class method to an impl method with `&self`.
+/// Converts a class method (including getters/setters) to an impl method.
+///
+/// - `MethodKind::Getter` → `fn name(&self) -> T { ... }`
+/// - `MethodKind::Setter` → `fn set_name(&mut self, v: T) { ... }`
+/// - `MethodKind::Method` → `fn name(&self, ...) -> T { ... }`
 fn convert_class_method(
     method: &ast::ClassMethod,
     vis: &Visibility,
     reg: &TypeRegistry,
 ) -> Result<Method> {
-    let name = extract_prop_name(&method.key)
+    let raw_name = extract_prop_name(&method.key)
         .map_err(|_| anyhow!("unsupported method key (only identifiers)"))?;
+
+    let is_setter = method.kind == ast::MethodKind::Setter;
+
+    let name = if is_setter {
+        format!("set_{raw_name}")
+    } else {
+        raw_name
+    };
 
     let mut params = Vec::new();
     for param in &method.function.params {
@@ -468,14 +484,37 @@ fn convert_class_method(
         None => Vec::new(),
     };
 
+    // Setter or method that assigns to `this.field` needs `&mut self`
+    let needs_mut = is_setter || body_has_self_assignment(&body);
+
     Ok(Method {
         vis: vis.clone(),
         name,
         has_self: true,
+        has_mut_self: needs_mut,
         params,
         return_type,
         body,
     })
+}
+
+/// Returns `true` if the method body contains an assignment to `self.field`.
+fn body_has_self_assignment(body: &[Stmt]) -> bool {
+    body.iter().any(|stmt| match stmt {
+        Stmt::Expr(Expr::Assign { target, .. }) => is_self_field_access(target),
+        _ => false,
+    })
+}
+
+/// Returns `true` if the expression is `self.field`.
+fn is_self_field_access(expr: &Expr) -> bool {
+    matches!(
+        expr,
+        Expr::FieldAccess {
+            object,
+            ..
+        } if matches!(object.as_ref(), Expr::Ident(name) if name == "self")
+    )
 }
 
 /// Converts a parameter pattern into an IR [`Param`].

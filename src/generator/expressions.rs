@@ -1,6 +1,6 @@
 //! Expression generation: converts IR expressions into Rust source strings.
 
-use crate::ir::{ClosureBody, Expr, Param, RustType};
+use crate::ir::{ClosureBody, Expr, Param, RustType, VecSegment};
 
 use super::generate_param;
 use super::statements::generate_stmt;
@@ -62,7 +62,7 @@ pub(super) fn generate_expr(expr: &Expr) -> String {
                 format!("{obj_str}.{method}({args_str})")
             }
         }
-        Expr::StructInit { name, fields } => {
+        Expr::StructInit { name, fields, .. } => {
             if fields
                 .iter()
                 .all(|(f, v)| matches!(v, Expr::Ident(i) if i == f))
@@ -158,8 +158,42 @@ pub(super) fn generate_expr(expr: &Expr) -> String {
             };
             format!("{}[{index_str}]", generate_expr(object))
         }
+        Expr::VecSpread { segments } => generate_vec_spread(segments),
         Expr::Cast { expr, target } => format!("{} as {target}", generate_expr(expr)),
     }
+}
+
+/// Generates a vec with spread syntax as a block expression.
+///
+/// Special case: `[...arr]` (single spread, no other elements) generates `arr.clone()`.
+/// General case: generates a block with `Vec::new()` + `extend`/`push` calls.
+fn generate_vec_spread(segments: &[VecSegment]) -> String {
+    // Optimization: [...arr] → arr.clone()
+    if segments.len() == 1 {
+        if let VecSegment::Spread(expr) = &segments[0] {
+            return format!("{}.clone()", generate_expr(expr));
+        }
+    }
+
+    let mut lines = Vec::new();
+    lines.push("let mut __spread_vec = Vec::new();".to_string());
+
+    for seg in segments {
+        match seg {
+            VecSegment::Element(expr) => {
+                lines.push(format!("__spread_vec.push({});", generate_expr(expr)));
+            }
+            VecSegment::Spread(expr) => {
+                lines.push(format!(
+                    "__spread_vec.extend({}.iter().cloned());",
+                    generate_expr(expr)
+                ));
+            }
+        }
+    }
+
+    lines.push("__spread_vec".to_string());
+    format!("{{\n    {}\n}}", lines.join("\n    "))
 }
 
 /// Generates a macro call expression (e.g., `println!("{:?}", x)`).

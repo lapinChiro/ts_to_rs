@@ -10,36 +10,18 @@
 
 最初の大きな目標として、TypeScript の Web フレームワーク [Hono](https://hono.dev/) のソースコードを Rust にコンバートできるようにする。
 
-### 構文調査結果（2026-03-13）
-
-Hono `src/` 185 ファイルを分析済み。詳細は `report/hono-syntax-analysis.md` を参照。
-
 ### Hono 対応の開始条件
 
-以下の 6 構文を実装したら Hono 対応（コアファイルの変換試行）を開始する:
+前提 6 構文はすべて実装済み: type assertion, any/unknown 型, optional chaining, nullish coalescing, spread 構文, getter/setter
 
-1. **type assertion (`x as T`)** — 490 回出現。コアで 36 回
-2. **`any` / `unknown` 型** — 570 回出現。型レベルだが無視できない頻度
-3. **optional chaining (`x?.y`)** — 162 回出現。コアで 5 回
-4. **nullish coalescing (`x ?? y`)** — 70 回出現。コアで 13 回
-5. **spread 構文 (`...`)** — 250 回出現。コアで 21 回
-6. **getter/setter** — コアで 29 回。Context クラスの API 定義に不可欠
+→ **Hono コアファイルの変換試行を開始可能**
 
-### Hono 対応開始後に必要な調査
+### Hono 対応開始後に必要な調査 **[PRD 化可能]**
 
 - Hono の依存関係の調査（外部ライブラリ、Node.js API への依存等）
 - 外部パッケージの型定義解決（`node_modules` の `.d.ts`）
 - TS の `import` を Rust の `use` / 外部 crate にどうマッピングするか
 - Hono に対応する Rust Web フレームワーク（actix-web, axum 等）への API マッピング
-
-**保留**: 上記 6 構文の実装が前提
-
-## バグ
-
-- `--report-unsupported` が transformer レベルのエラーでクラッシュする **[PRD 化可能]**
-  - 再現手順: `cargo run -- /tmp/hono/src/hono-base.ts --report-unsupported` → `unsupported parameter pattern` でエラー終了
-  - 原因: `transpile_collecting` は `transform_module_collecting` で未対応のトップレベル宣言をスキップするが、関数・クラス内部の未対応パターン（分割代入パラメータ等）は `convert_fn_decl` → `convert_param` の中でエラーになり、キャッチされずに全体が失敗する
-  - 期待動作: 未対応パターンを含む関数/クラスは `UnsupportedItem` として報告し、変換可能な部分は出力する
 
 ## 型の互換性
 
@@ -66,8 +48,6 @@ Hono `src/` 185 ファイルを分析済み。詳細は `report/hono-syntax-anal
 
 ### 配列
 
-- スプレッド構文（`[...arr, 4]`）**[PRD 化可能]**
-  - `Vec` の `extend` + `push` 等への展開。設計は Discovery で解決可能
 - 分割代入の拡張パターン **[PRD 化可能]**
   - スキップ: `const [a, , b] = arr`
   - rest: `const [first, ...rest] = arr`
@@ -82,8 +62,6 @@ Hono `src/` 185 ファイルを分析済み。詳細は `report/hono-syntax-anal
   - **保留**: 匿名構造体か HashMap かの判断に、実際の TS プロジェクトでの使用パターンの実績データが必要
 - computed property（`{ [key]: value }`）
   - **保留**: HashMap への変換は型システム全体の設計に影響。型注記なしオブジェクトの方針決定が前提
-- spread（`{ ...obj, x: 1 }`）**[PRD 化可能]**
-  - Rust の struct update syntax (`Foo { x: 1, ..other }`) に対応可能。設計は Discovery で解決可能
 - 分割代入の拡張パターン
   - 関数パラメータ: `function foo({ x, y }: Point) {}` **[PRD 化可能]**
     - 頻出パターン。既存の分割代入の延長で実装可能
@@ -105,14 +83,24 @@ Hono `src/` 185 ファイルを分析済み。詳細は `report/hono-syntax-anal
 - `delete obj.prop`（プロパティ削除）
   - **保留**: Rust に対応する概念がない。HashMap ベースのオブジェクト表現の方針決定が前提
 
+### 関数パラメータ
+
+- デフォルト引数値（`= {}`, `= 500` 等）**[PRD 化可能]**
+  - `constructor(options: HonoOptions<E> = {})` のようなパターン。Hono コアで頻出
+  - Rust では `Option<T>` + `unwrap_or_default()` や `Default` trait への変換が候補
+- パラメータ位置のインラインオブジェクト型リテラル **[PRD 化可能]**
+  - `constructor(init: { routers: Router<T>[] })` のようなパターン
+  - 型エイリアスとしての `TsTypeLit` は対応済みだが、パラメータ型注記の位置では未対応
+
 ### 演算子
 
+- `in` 演算子（`"prop" in obj`）
+  - **保留**: Rust に直接対応する概念がない。HashMap ベースのオブジェクト表現の方針決定が前提
 - optional chaining の `Option` ネスト問題（`and_then` / `map` の使い分け）
   - **保留**: 型推論インフラの整備が前提
 - optional chaining 内のメンバーアクセスで特殊変換（`.length` → `.len() as f64` 等）が効かない **[PRD 化可能]**
   - 原因: `convert_opt_chain_expr` が `convert_member_expr` を経由せず直接 `FieldAccess` を構築している
   - `convert_member_expr` の特殊処理ロジックを共有可能にするリファクタリングが必要
-- nullish coalescing — 実装済み（`x.unwrap_or_else(|| y)` 方式）
 
 ### クラス
 
@@ -122,14 +110,8 @@ Hono `src/` 185 ファイルを分析済み。詳細は `report/hono-syntax-anal
   - trait パターンは class-inheritance で実装済み。abstract method → trait メソッド宣言
 - `protected` メンバー **[PRD 化可能]**
   - `pub(crate)` への変換等、Discovery で判断可能
-- getter/setter **[PRD 化可能]** 【Hono 前提】
-  - `get foo() { ... }` → `pub fn foo(&self) -> T { ... }` メソッド化。Hono コアで 29 回出現
 - `static` メンバー **[PRD 化可能]**
   - `static method()` → `impl` ブロック内の関連関数（`self` なし）
-
-### キーワード型
-
-`any` / `unknown` / `never` は実装済み。
 
 ### 型構文
 
@@ -137,7 +119,6 @@ Hono `src/` 185 ファイルを分析済み。詳細は `report/hono-syntax-anal
   - Rust のタプル `(String, f64)` に直接対応。`TsTupleType` のハンドリングを追加
 - intersection 型（`A & B`）
   - **保留**: Rust に直接対応がない。フィールドの統合は構造的型付けの問題と関連し、設計コストが高い
-- type assertion — 実装済み（assertion を剥がす方式）
 
 ## ループの将来課題
 
@@ -191,7 +172,7 @@ Hono `src/` 185 ファイルを分析済み。詳細は `report/hono-syntax-anal
 - `functions.rs:convert_param` と `classes.rs:convert_param_pat` の統合 **[PRD 化可能]**
   - 同一ロジック（`Pat::Ident` から名前+型注記を取得して `Param` を構築）の知識の重複。`transformer/mod.rs` にヘルパーとして抽出可能
 - transformer/expressions.rs のモジュール分割検討 **[PRD 化可能]**
-  - 現在 2,348 行。テストが約半分を占めるが、実装部分も増加傾向。メソッドマッピング（`map_method_call`）、組み込み API 変換（`convert_math_call`, `convert_number_static_call`, `convert_global_builtin`）、コンソール API 等を別モジュールに分離する候補
+  - 現在 2,625 行。テストが約半分を占めるが、実装部分も増加傾向。メソッドマッピング（`map_method_call`）、組み込み API 変換（`convert_math_call`, `convert_number_static_call`, `convert_global_builtin`）、コンソール API 等を別モジュールに分離する候補
 
 ## コード品質
 

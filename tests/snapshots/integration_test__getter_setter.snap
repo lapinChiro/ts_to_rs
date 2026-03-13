@@ -1,0 +1,52 @@
+---
+source: tests/integration_test.rs
+assertion_line: 283
+expression: output
+---
+struct Counter {
+    _count: f64,
+}
+
+impl Counter {
+    fn count(&self) -> f64 {
+        self._count
+    }
+}
+
+struct Writer {
+    _name: String,
+}
+
+impl Writer {
+    fn set_name(&mut self, value: String) {
+        self._name = value;
+    }
+}
+
+struct Person {
+    _age: f64,
+}
+
+impl Person {
+    fn age(&self) -> f64 {
+        self._age
+    }
+
+    fn set_age(&mut self, value: f64) {
+        self._age = value;
+    }
+}
+
+struct Config {
+    _debug: bool,
+}
+
+impl Config {
+    fn debug(&self) -> bool {
+        self._debug
+    }
+
+    fn toggle(&mut self) {
+        self._debug = !self._debug;
+    }
+}

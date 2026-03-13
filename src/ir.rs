@@ -97,8 +97,10 @@ pub struct Method {
     pub vis: Visibility,
     /// Method name
     pub name: String,
-    /// Whether this method takes `&self` (false for associated functions like `new`)
+    /// Whether this method takes `&self` or `&mut self` (false for associated functions like `new`)
     pub has_self: bool,
+    /// Whether this method takes `&mut self` instead of `&self` (e.g., setters)
+    pub has_mut_self: bool,
     /// Parameters (excluding `self`)
     pub params: Vec<Param>,
     /// Return type (`None` means `()`)
@@ -332,6 +334,11 @@ pub enum Expr {
         /// Elements of the vec
         elements: Vec<Expr>,
     },
+    /// A vec built with spread: `[...arr, 1, 2]`
+    VecSpread {
+        /// Segments of the vec (elements and spreads)
+        segments: Vec<VecSegment>,
+    },
     /// An `if` expression: `if cond { then } else { else }`
     If {
         /// Condition expression
@@ -364,6 +371,15 @@ pub enum Expr {
         /// The target type as a string (e.g., `"f64"`, `"i64"`)
         target: String,
     },
+}
+
+/// A segment in a vec with spread syntax.
+#[derive(Debug, Clone, PartialEq)]
+pub enum VecSegment {
+    /// A single element (e.g., `1` in `[1, ...arr]`)
+    Element(Expr),
+    /// A spread expression (e.g., `...arr` in `[1, ...arr]`)
+    Spread(Expr),
 }
 
 /// The body of a closure expression.

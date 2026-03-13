@@ -1,0 +1,36 @@
+---
+source: tests/integration_test.rs
+expression: output
+---
+fn cloneArray(arr: Vec<f64>) -> Vec<f64> {
+    arr.clone()
+}
+
+fn appendToArray(arr: Vec<f64>) -> Vec<f64> {
+    let mut __spread_vec = Vec::new();
+    __spread_vec.extend(arr.iter().cloned());
+    __spread_vec.push(4.0);
+    __spread_vec
+}
+
+fn prependToArray(arr: Vec<f64>) -> Vec<f64> {
+    let mut __spread_vec = Vec::new();
+    __spread_vec.push(1.0);
+    __spread_vec.extend(arr.iter().cloned());
+    __spread_vec
+}
+
+fn surroundArray(arr: Vec<f64>) -> Vec<f64> {
+    let mut __spread_vec = Vec::new();
+    __spread_vec.push(1.0);
+    __spread_vec.extend(arr.iter().cloned());
+    __spread_vec.push(2.0);
+    __spread_vec
+}
+
+fn concatArrays(arr1: Vec<f64>, arr2: Vec<f64>) -> Vec<f64> {
+    let mut __spread_vec = Vec::new();
+    __spread_vec.extend(arr1.iter().cloned());
+    __spread_vec.extend(arr2.iter().cloned());
+    __spread_vec
+}

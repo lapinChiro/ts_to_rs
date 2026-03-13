@@ -2,18 +2,20 @@
 
 ## 次のタスク
 
-（backlog は現在空。TODO から次の PRD を選定する）
+（なし — `backlog/` が空）
 
 ## Hono 対応の開始条件
 
-以下の 6 構文を実装したら Hono コアファイルの変換試行を開始する（詳細は `report/hono-syntax-analysis.md`）:
+前提 6 構文はすべて実装済み（詳細は `report/hono-syntax-analysis.md`）:
 
-1. type assertion (`x as T`)
-2. `any` / `unknown` 型
-3. optional chaining (`x?.y`)
-4. nullish coalescing (`x ?? y`)
-5. spread 構文 (`...`)
-6. getter/setter
+1. ~~type assertion (`x as T`)~~
+2. ~~`any` / `unknown` 型~~
+3. ~~optional chaining (`x?.y`)~~
+4. ~~nullish coalescing (`x ?? y`)~~
+5. ~~spread 構文 (`...`)~~
+6. ~~getter/setter~~
+
+→ **Hono コアファイルの変換試行を開始可能**
 
 ## 未設計の項目
 

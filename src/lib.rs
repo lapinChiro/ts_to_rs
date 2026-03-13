@@ -179,4 +179,46 @@ export default 42;
         let err_msg = result.unwrap_err().to_string();
         assert!(err_msg.contains("unsupported syntax"));
     }
+
+    #[test]
+    fn test_transpile_collecting_transformer_internal_error_collected() {
+        // Default parameter value triggers an error inside convert_param,
+        // which is a transformer-internal error (not UnsupportedSyntaxError).
+        let source = "function foo(x: number = 0) { return x; }";
+        let result = transpile_collecting(source);
+        assert!(result.is_ok(), "should not be a fatal error: {result:?}");
+        let (_output, unsupported) = result.unwrap();
+        assert!(
+            !unsupported.is_empty(),
+            "should report the function as unsupported"
+        );
+    }
+
+    #[test]
+    fn test_transpile_collecting_mixed_supported_and_internal_error() {
+        // interface is convertible, function with default param is not
+        let source = r#"
+interface Foo { name: string; }
+function bar(x: number = 0) { return x; }
+"#;
+        let result = transpile_collecting(source);
+        assert!(result.is_ok(), "should not be a fatal error: {result:?}");
+        let (output, unsupported) = result.unwrap();
+        assert!(
+            output.contains("struct Foo"),
+            "convertible items should still appear in output"
+        );
+        assert!(
+            !unsupported.is_empty(),
+            "unconvertible function should be in unsupported list"
+        );
+    }
+
+    #[test]
+    fn test_transpile_collecting_parse_error_still_returns_err() {
+        // Invalid TypeScript syntax should still be a fatal error
+        let source = "function {{{";
+        let result = transpile_collecting(source);
+        assert!(result.is_err(), "parse errors should still propagate");
+    }
 }

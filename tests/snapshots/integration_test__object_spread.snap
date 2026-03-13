@@ -1,0 +1,23 @@
+---
+source: tests/integration_test.rs
+expression: output
+---
+struct Point {
+    x: f64,
+    y: f64,
+}
+
+fn overrideX(p: Point) -> Point {
+    let p2: Point = Point { x: 10.0, y: p.y };
+    p2
+}
+
+fn overrideMultiple(p: Point) -> Point {
+    let p2: Point = Point { x: 10.0, y: 20.0 };
+    p2
+}
+
+fn clonePoint(p: Point) -> Point {
+    let p2: Point = Point { x: p.x, y: p.y };
+    p2
+}

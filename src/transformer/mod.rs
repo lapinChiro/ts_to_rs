@@ -99,11 +99,13 @@ pub fn transform_module(module: &Module, reg: &TypeRegistry) -> Result<Vec<Item>
 /// Transforms an SWC [`Module`], collecting unsupported syntax instead of aborting.
 ///
 /// Returns the converted items and a list of unsupported syntax entries.
-/// Non-unsupported errors (e.g., conversion failures in supported syntax) still propagate.
+/// All transformation errors — both [`UnsupportedSyntaxError`] and transformer-internal
+/// errors (e.g., unsupported parameter patterns inside functions/classes) — are collected
+/// at the top-level item granularity rather than propagated.
 ///
 /// # Errors
 ///
-/// Returns an error for non-unsupported transformation failures.
+/// Returns an error only if pre-processing (e.g., class pre-scan) fails fatally.
 pub fn transform_module_collecting(
     module: &Module,
     reg: &TypeRegistry,
@@ -118,7 +120,14 @@ pub fn transform_module_collecting(
             Ok(converted) => items.extend(converted),
             Err(e) => match e.downcast::<UnsupportedSyntaxError>() {
                 Ok(unsup) => unsupported.push(unsup),
-                Err(other) => return Err(other),
+                Err(other) => {
+                    // Transformer-internal errors (e.g. unsupported parameter patterns
+                    // inside functions/classes) are collected instead of aborting.
+                    unsupported.push(UnsupportedSyntaxError {
+                        kind: other.to_string(),
+                        byte_pos: module_item.span().lo.0,
+                    });
+                }
             },
         }
     }

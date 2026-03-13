@@ -1,6 +1,6 @@
 //! Statement generation: converts IR statements into Rust source strings.
 
-use crate::ir::Stmt;
+use crate::ir::{Expr, Stmt, VecSegment};
 
 use super::expressions::generate_expr;
 use super::types::generate_type;
@@ -18,6 +18,16 @@ pub(super) fn generate_stmt(stmt: &Stmt, indent: usize, is_last_in_fn: bool) -> 
             ty,
             init,
         } => {
+            // VecSpread in let init: expand to multiple statements
+            if let Some(Expr::VecSpread { segments }) = init {
+                return generate_vec_spread_let_stmts(
+                    name,
+                    *mutable,
+                    ty.as_ref(),
+                    segments,
+                    indent,
+                );
+            }
             let mut out = format!("{pad}let ");
             if *mutable {
                 out.push_str("mut ");
@@ -118,6 +128,9 @@ pub(super) fn generate_stmt(stmt: &Stmt, indent: usize, is_last_in_fn: bool) -> 
             None => format!("{pad}continue;"),
         },
         Stmt::Return(expr) => {
+            if let Some(Expr::VecSpread { segments }) = expr {
+                return generate_vec_spread_stmts(segments, indent, is_last_in_fn);
+            }
             if is_last_in_fn {
                 match expr {
                     Some(e) => format!("{pad}{}", generate_expr(e)),
@@ -134,6 +147,98 @@ pub(super) fn generate_stmt(stmt: &Stmt, indent: usize, is_last_in_fn: bool) -> 
             format!("{pad}{};", generate_expr(expr))
         }
     }
+}
+
+/// Expands a `VecSpread` in a `let` binding into multiple statements.
+///
+/// For `[...arr]` (single spread only), generates `let name = arr.clone();`.
+/// For general cases, generates `let mut name = Vec::new();` + `extend`/`push`.
+fn generate_vec_spread_let_stmts(
+    name: &str,
+    _mutable: bool,
+    ty: Option<&crate::ir::RustType>,
+    segments: &[VecSegment],
+    indent: usize,
+) -> String {
+    let pad = indent_str(indent);
+    let ty_str = ty
+        .map(|t| format!(": {}", generate_type(t)))
+        .unwrap_or_default();
+
+    // Optimization: [...arr] → let name = arr.clone();
+    if segments.len() == 1 {
+        if let VecSegment::Spread(expr) = &segments[0] {
+            return format!("{pad}let {name}{ty_str} = {}.clone();", generate_expr(expr));
+        }
+    }
+
+    let mut lines = Vec::new();
+    lines.push(format!("{pad}let mut {name}{ty_str} = Vec::new();"));
+
+    for seg in segments {
+        match seg {
+            VecSegment::Element(expr) => {
+                lines.push(format!("{pad}{name}.push({});", generate_expr(expr)));
+            }
+            VecSegment::Spread(expr) => {
+                lines.push(format!(
+                    "{pad}{name}.extend({}.iter().cloned());",
+                    generate_expr(expr)
+                ));
+            }
+        }
+    }
+
+    lines.join("\n")
+}
+
+/// Expands a `VecSpread` into multiple statements with proper indentation.
+///
+/// For `[...arr]` (single spread only), generates `arr.clone()` as a tail expression or return.
+/// For general cases, generates `let mut` + `extend`/`push` + tail/return.
+fn generate_vec_spread_stmts(
+    segments: &[VecSegment],
+    indent: usize,
+    is_last_in_fn: bool,
+) -> String {
+    let pad = indent_str(indent);
+
+    // Optimization: [...arr] → arr.clone()
+    if segments.len() == 1 {
+        if let VecSegment::Spread(expr) = &segments[0] {
+            let clone_expr = format!("{}.clone()", generate_expr(expr));
+            return if is_last_in_fn {
+                format!("{pad}{clone_expr}")
+            } else {
+                format!("{pad}return {clone_expr};")
+            };
+        }
+    }
+
+    let mut lines = Vec::new();
+    lines.push(format!("{pad}let mut __spread_vec = Vec::new();"));
+
+    for seg in segments {
+        match seg {
+            VecSegment::Element(expr) => {
+                lines.push(format!("{pad}__spread_vec.push({});", generate_expr(expr)));
+            }
+            VecSegment::Spread(expr) => {
+                lines.push(format!(
+                    "{pad}__spread_vec.extend({}.iter().cloned());",
+                    generate_expr(expr)
+                ));
+            }
+        }
+    }
+
+    if is_last_in_fn {
+        lines.push(format!("{pad}__spread_vec"));
+    } else {
+        lines.push(format!("{pad}return __spread_vec;"));
+    }
+
+    lines.join("\n")
 }
 
 /// Returns the indentation string for the given level (4 spaces per level).

@@ -1,6 +1,5 @@
 ---
 source: tests/integration_test.rs
-assertion_line: 43
 expression: output
 ---
 pub fn double(x: f64) -> f64 {

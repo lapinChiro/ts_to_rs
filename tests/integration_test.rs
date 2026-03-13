@@ -256,8 +256,29 @@ fn test_keyword_types() {
 }
 
 #[test]
+fn test_array_spread() {
+    let input = fs::read_to_string("tests/fixtures/array-spread.input.ts").unwrap();
+    let output = transpile(&input).unwrap();
+    insta::assert_snapshot!(output);
+}
+
+#[test]
+fn test_object_spread() {
+    let input = fs::read_to_string("tests/fixtures/object-spread.input.ts").unwrap();
+    let output = transpile(&input).unwrap();
+    insta::assert_snapshot!(output);
+}
+
+#[test]
 fn test_string_literal_union() {
     let input = fs::read_to_string("tests/fixtures/string-literal-union.input.ts").unwrap();
+    let output = transpile(&input).unwrap();
+    insta::assert_snapshot!(output);
+}
+
+#[test]
+fn test_getter_setter() {
+    let input = fs::read_to_string("tests/fixtures/getter-setter.input.ts").unwrap();
     let output = transpile(&input).unwrap();
     insta::assert_snapshot!(output);
 }
