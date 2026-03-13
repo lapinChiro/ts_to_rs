@@ -39,7 +39,7 @@
 
 ### 影響範囲
 
-- `src/transformer/expressions.rs` — オブジェクトリテラル変換の spread 処理部分
+- `src/transformer/expressions/mod.rs` — オブジェクトリテラル変換の spread 処理部分
 
 ## 作業ステップ
 

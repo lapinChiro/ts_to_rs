@@ -23,6 +23,9 @@
     - **保留**: 問題の構造が TS と Rust で異なるため、「何に変換するか」の設計判断が必要
   - **Group D: 複雑ネスト条件型（7 件）** — Hono のルーティングパイプラインの型追跡システム。複雑さの原因は TS 固有の制約（any の扱い、構造的型付け、マクロ不在、serde 不在）。Rust では IntoResponse + serde + proc macro で同じ目的を達成可能
     - **保留**: Hono のルーティング型システム全体の Rust 設計が前提。個別の型変換では解決しない
+- indexed access type（`T['Key']` → `T::Key`）のコンパイルテスト除外 **[PRD 化可能]**
+  - `T::Key` は Rust では trait の associated type 構文だが、現在の変換は trait 定義を生成しないため rustc でコンパイルできない。fixture をコンパイルテストから除外している（`tests/compile_test.rs` の `skip_compile`）
+  - 将来的には interface を trait に変換する際に associated type を生成するか、別の変換戦略が必要
 - mapped type（`type Foo = { [K in keyof T]: V }`）**[PRD 化可能]**
   - Rust のマクロや generics で部分的に表現可能。スコープの絞り込みが必要
 - intersection 型（`A & B`）
@@ -62,6 +65,10 @@
   - **保留**: HashMap ベースのオブジェクト表現の方針決定が前提
 - optional chaining の `Option` ネスト問題
   - **保留**: 型推論インフラの整備が前提
+- optional chaining 内の特殊変換テスト補強 **[PRD 化可能]**
+  - `resolve_member_access` ヘルパーによる `.length` / enum 変換は実装済みだが、以下のテストケースが未実施:
+    - `x?.y?.length` — チェーンされた optional chaining 内での `.length` 変換
+    - `x?.y.length` — optional chaining と通常メンバーアクセスの混在
 
 ## 単項演算子の拡張
 
@@ -109,10 +116,10 @@
 
 ## リファクタリング候補
 
-- `functions.rs:convert_param` と `classes.rs:convert_param_pat` の統合 **[PRD 化可能]**
+- `functions/mod.rs:convert_param` と `classes.rs:convert_param_pat` の統合 **[PRD 化可能]**
   - 同一ロジックの知識の重複
-- transformer/expressions.rs のモジュール分割検討 **[PRD 化可能]**
-  - 現在 2,635 行。メソッドマッピング、組み込み API 変換等を別モジュールに分離する候補
+- transformer/expressions/mod.rs の本体コードのモジュール分割検討 **[PRD 化可能]**
+  - テスト分離後も本体 959 行。メソッドマッピング、組み込み API 変換等を別モジュールに分離する候補
 - `generate_class_with_implements` の `classes.rs` への移動 **[PRD 化可能]**
   - クラスから IR アイテムを生成するロジックだが、`iface_methods` 引数の都合で `mod.rs:452-500` に配置されている。`classes.rs` の他の生成関数（`generate_standalone_class`, `generate_child_class` 等）と同レベルの責務
 - `main.rs` のディレクトリ変換ロジック重複の共通化 **[PRD 化可能]**

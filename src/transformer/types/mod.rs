@@ -1,0 +1,709 @@
+//! Type conversion from SWC TypeScript AST to IR.
+//!
+//! Handles conversion of TypeScript type declarations (interfaces, type aliases)
+//! and type annotations into the IR representation.
+
+use anyhow::{anyhow, Result};
+use swc_ecma_ast::{
+    Expr, TsInterfaceDecl, TsKeywordTypeKind, TsMethodSignature, TsPropertySignature, TsType,
+    TsTypeAliasDecl, TsTypeElement,
+};
+
+use crate::ir::{EnumValue, EnumVariant, Item, Method, Param, RustType, StructField, Visibility};
+
+/// Converts a SWC [`TsType`] into an IR [`RustType`].
+///
+/// # Supported conversions
+///
+/// - `string` -> `String`
+/// - `number` -> `f64`
+/// - `boolean` -> `bool`
+/// - `T[]` -> `Vec<T>`
+/// - `Array<T>` -> `Vec<T>`
+/// - `T | null` / `T | undefined` -> `Option<T>`
+/// - `[T, U, ...]` -> `(T, U, ...)`
+///
+/// # Errors
+///
+/// Returns an error for unsupported type constructs.
+pub fn convert_ts_type(ts_type: &TsType) -> Result<RustType> {
+    match ts_type {
+        TsType::TsKeywordType(kw) => match kw.kind {
+            TsKeywordTypeKind::TsStringKeyword => Ok(RustType::String),
+            TsKeywordTypeKind::TsNumberKeyword => Ok(RustType::F64),
+            TsKeywordTypeKind::TsBooleanKeyword => Ok(RustType::Bool),
+            TsKeywordTypeKind::TsVoidKeyword => Ok(RustType::Unit),
+            TsKeywordTypeKind::TsAnyKeyword | TsKeywordTypeKind::TsUnknownKeyword => {
+                Ok(RustType::Any)
+            }
+            TsKeywordTypeKind::TsNeverKeyword => Ok(RustType::Never),
+            other => Err(anyhow!("unsupported keyword type: {:?}", other)),
+        },
+        TsType::TsArrayType(arr) => {
+            let inner = convert_ts_type(&arr.elem_type)?;
+            Ok(RustType::Vec(Box::new(inner)))
+        }
+        TsType::TsTypeRef(type_ref) => convert_type_ref(type_ref),
+        TsType::TsUnionOrIntersectionType(
+            swc_ecma_ast::TsUnionOrIntersectionType::TsUnionType(union),
+        ) => convert_union_type(union),
+        TsType::TsParenthesizedType(paren) => convert_ts_type(&paren.type_ann),
+        TsType::TsFnOrConstructorType(swc_ecma_ast::TsFnOrConstructorType::TsFnType(fn_type)) => {
+            convert_fn_type(fn_type)
+        }
+        TsType::TsTupleType(tuple) => {
+            let elems = tuple
+                .elem_types
+                .iter()
+                .map(|elem| convert_ts_type(&elem.ty))
+                .collect::<Result<Vec<_>>>()?;
+            Ok(RustType::Tuple(elems))
+        }
+        TsType::TsIndexedAccessType(indexed) => convert_indexed_access_type(indexed),
+        _ => Err(anyhow!("unsupported type: {:?}", ts_type)),
+    }
+}
+
+/// Converts a type reference like `Array<T>`.
+fn convert_type_ref(type_ref: &swc_ecma_ast::TsTypeRef) -> Result<RustType> {
+    let name = match &type_ref.type_name {
+        swc_ecma_ast::TsEntityName::Ident(ident) => ident.sym.to_string(),
+        _ => return Err(anyhow!("unsupported qualified type name")),
+    };
+
+    match name.as_str() {
+        "Array" => {
+            let params = type_ref
+                .type_params
+                .as_ref()
+                .ok_or_else(|| anyhow!("Array requires a type parameter"))?;
+            if params.params.len() != 1 {
+                return Err(anyhow!("Array expects exactly one type parameter"));
+            }
+            let inner = convert_ts_type(&params.params[0])?;
+            Ok(RustType::Vec(Box::new(inner)))
+        }
+        // User-defined types: pass through as Named, with any generic type arguments
+        other => {
+            let type_args = match &type_ref.type_params {
+                Some(params) => params
+                    .params
+                    .iter()
+                    .map(|p| convert_ts_type(p))
+                    .collect::<Result<Vec<_>>>()?,
+                None => vec![],
+            };
+            Ok(RustType::Named {
+                name: other.to_string(),
+                type_args,
+            })
+        }
+    }
+}
+
+/// Converts a union type. Handles `T | null` and `T | undefined` as `Option<T>`.
+fn convert_union_type(union: &swc_ecma_ast::TsUnionType) -> Result<RustType> {
+    let mut non_null_types: Vec<&TsType> = Vec::new();
+    let mut has_null_or_undefined = false;
+
+    for ty in &union.types {
+        match ty.as_ref() {
+            TsType::TsKeywordType(kw)
+                if kw.kind == TsKeywordTypeKind::TsNullKeyword
+                    || kw.kind == TsKeywordTypeKind::TsUndefinedKeyword =>
+            {
+                has_null_or_undefined = true;
+            }
+            other => {
+                non_null_types.push(other);
+            }
+        }
+    }
+
+    if has_null_or_undefined && non_null_types.len() == 1 {
+        let inner = convert_ts_type(non_null_types[0])?;
+        Ok(RustType::Option(Box::new(inner)))
+    } else if has_null_or_undefined && non_null_types.is_empty() {
+        // `null | undefined` — treat as Option of unit, but we don't have unit type
+        Err(anyhow!("union of only null/undefined is not supported"))
+    } else if !has_null_or_undefined {
+        Err(anyhow!("non-nullable union types are not supported"))
+    } else {
+        Err(anyhow!(
+            "union with multiple non-null types is not supported"
+        ))
+    }
+}
+
+/// Converts a [`TsInterfaceDecl`] into an IR [`Item::Struct`] or [`Item::Trait`].
+///
+/// - Properties-only interface → `Item::Struct` (each property becomes a field)
+/// - Interface with method signatures → `Item::Trait` (each method becomes a trait method)
+///
+/// # Errors
+///
+/// Returns an error if a member has an unsupported type or pattern.
+pub fn convert_interface(decl: &TsInterfaceDecl, vis: Visibility) -> Result<Item> {
+    let name = decl.id.sym.to_string();
+    let type_params = extract_type_params(decl.type_params.as_deref());
+
+    let has_methods = decl
+        .body
+        .body
+        .iter()
+        .any(|m| matches!(m, TsTypeElement::TsMethodSignature(_)));
+
+    if has_methods {
+        convert_interface_as_trait(decl, vis, &name, type_params)
+    } else {
+        convert_interface_as_struct(decl, vis, &name, type_params)
+    }
+}
+
+/// Converts an interface with only property signatures into an IR [`Item::Struct`].
+fn convert_interface_as_struct(
+    decl: &TsInterfaceDecl,
+    vis: Visibility,
+    name: &str,
+    type_params: Vec<String>,
+) -> Result<Item> {
+    let mut fields = Vec::new();
+
+    for member in &decl.body.body {
+        match member {
+            TsTypeElement::TsPropertySignature(prop) => {
+                let field = convert_property_signature(prop)?;
+                fields.push(field);
+            }
+            _ => {
+                return Err(anyhow!(
+                    "unsupported interface member (only property signatures are supported)"
+                ));
+            }
+        }
+    }
+
+    Ok(Item::Struct {
+        vis,
+        name: name.to_string(),
+        type_params,
+        fields,
+    })
+}
+
+/// Converts an interface with method signatures into an IR [`Item::Trait`].
+fn convert_interface_as_trait(
+    decl: &TsInterfaceDecl,
+    vis: Visibility,
+    name: &str,
+    type_params: Vec<String>,
+) -> Result<Item> {
+    let mut methods = Vec::new();
+
+    for member in &decl.body.body {
+        match member {
+            TsTypeElement::TsMethodSignature(method_sig) => {
+                let method = convert_method_signature(method_sig)?;
+                methods.push(method);
+            }
+            TsTypeElement::TsPropertySignature(_) => {
+                // Properties in a trait interface are skipped for now.
+                // Trait cannot have fields in Rust.
+            }
+            _ => {
+                return Err(anyhow!(
+                    "unsupported interface member (only property and method signatures are supported)"
+                ));
+            }
+        }
+    }
+
+    // type_params are not directly on Trait in current IR, so we ignore them for now.
+    // TODO: Add type_params to Item::Trait when needed.
+    let _ = type_params;
+
+    Ok(Item::Trait {
+        vis,
+        name: name.to_string(),
+        methods,
+    })
+}
+
+/// Converts a [`TsMethodSignature`] into an IR [`Method`] (signature only, no body).
+fn convert_method_signature(sig: &TsMethodSignature) -> Result<Method> {
+    let name = match sig.key.as_ref() {
+        swc_ecma_ast::Expr::Ident(ident) => ident.sym.to_string(),
+        _ => {
+            return Err(anyhow!(
+                "unsupported method signature key (only identifiers)"
+            ))
+        }
+    };
+
+    let mut params = Vec::new();
+    for param in &sig.params {
+        match param {
+            swc_ecma_ast::TsFnParam::Ident(ident) => {
+                let param_name = ident.id.sym.to_string();
+                let ty = ident
+                    .type_ann
+                    .as_ref()
+                    .map(|ann| convert_ts_type(&ann.type_ann))
+                    .transpose()?;
+                params.push(Param {
+                    name: param_name,
+                    ty,
+                });
+            }
+            _ => return Err(anyhow!("unsupported method parameter pattern")),
+        }
+    }
+
+    let return_type = sig
+        .type_ann
+        .as_ref()
+        .map(|ann| convert_ts_type(&ann.type_ann))
+        .transpose()?
+        .and_then(|ty| if ty == RustType::Unit { None } else { Some(ty) });
+
+    Ok(Method {
+        vis: Visibility::Public,
+        name,
+        has_self: true,
+        has_mut_self: false,
+        params,
+        return_type,
+        body: vec![],
+    })
+}
+
+/// Converts a [`TsTypeAliasDecl`] into an IR item.
+///
+/// - String literal union → `Item::Enum`
+/// - Function type → `Item::TypeAlias` with `RustType::Fn`
+/// - Object type literal → `Item::Struct`
+///
+/// # Errors
+///
+/// Returns an error if the type alias body is not a supported form.
+pub fn convert_type_alias(decl: &TsTypeAliasDecl, vis: Visibility) -> Result<Item> {
+    let name = decl.id.sym.to_string();
+
+    // String literal union: `type X = "a" | "b" | "c"` → enum
+    if let Some(item) = try_convert_string_literal_union(decl, vis.clone())? {
+        return Ok(item);
+    }
+
+    // Single string literal: `type X = "only"` → enum with one variant
+    if let Some(item) = try_convert_single_string_literal(decl, vis.clone())? {
+        return Ok(item);
+    }
+
+    // General union type: `type X = 200 | 404` or `type X = string | number` → enum
+    if let Some(item) = try_convert_general_union(decl, vis.clone())? {
+        return Ok(item);
+    }
+
+    // Function type: `type Fn = (x: T) => U` → type alias
+    if let Some(item) = try_convert_function_type_alias(decl, vis.clone())? {
+        return Ok(item);
+    }
+
+    // Tuple type: `type Pair = [string, number]` → type alias
+    if let Some(item) = try_convert_tuple_type_alias(decl, vis.clone())? {
+        return Ok(item);
+    }
+
+    match decl.type_ann.as_ref() {
+        TsType::TsTypeLit(lit) => {
+            let mut fields = Vec::new();
+            for member in &lit.members {
+                match member {
+                    TsTypeElement::TsPropertySignature(prop) => {
+                        let field = convert_property_signature(prop)?;
+                        fields.push(field);
+                    }
+                    _ => {
+                        return Err(anyhow!(
+                            "unsupported type literal member (only property signatures are supported)"
+                        ));
+                    }
+                }
+            }
+            let type_params = extract_type_params(decl.type_params.as_deref());
+
+            Ok(Item::Struct {
+                vis,
+                name,
+                type_params,
+                fields,
+            })
+        }
+        _ => Err(anyhow!(
+            "unsupported type alias body (only object type literals are supported)"
+        )),
+    }
+}
+
+/// Tries to convert a type alias with a function type body.
+///
+/// Returns `Ok(Some(Item::TypeAlias))` if the body is a `TsFnType`, `Ok(None)` otherwise.
+fn try_convert_function_type_alias(
+    decl: &TsTypeAliasDecl,
+    vis: Visibility,
+) -> Result<Option<Item>> {
+    let fn_type = match decl.type_ann.as_ref() {
+        TsType::TsFnOrConstructorType(swc_ecma_ast::TsFnOrConstructorType::TsFnType(f)) => f,
+        _ => return Ok(None),
+    };
+
+    let mut param_types = Vec::new();
+    for param in &fn_type.params {
+        match param {
+            swc_ecma_ast::TsFnParam::Ident(ident) => {
+                let ty = ident
+                    .type_ann
+                    .as_ref()
+                    .map(|ann| convert_ts_type(&ann.type_ann))
+                    .transpose()?
+                    .unwrap_or(RustType::Any);
+                param_types.push(ty);
+            }
+            _ => return Err(anyhow!("unsupported function type parameter pattern")),
+        }
+    }
+
+    let return_type = convert_ts_type(&fn_type.type_ann.type_ann)?;
+
+    let name = decl.id.sym.to_string();
+    let type_params = extract_type_params(decl.type_params.as_deref());
+
+    Ok(Some(Item::TypeAlias {
+        vis,
+        name,
+        type_params,
+        ty: RustType::Fn {
+            params: param_types,
+            return_type: Box::new(return_type),
+        },
+    }))
+}
+
+/// Tries to convert a type alias with a tuple type body.
+///
+/// Returns `Ok(Some(Item::TypeAlias))` if the body is a `TsTupleType`, `Ok(None)` otherwise.
+fn try_convert_tuple_type_alias(decl: &TsTypeAliasDecl, vis: Visibility) -> Result<Option<Item>> {
+    let tuple = match decl.type_ann.as_ref() {
+        TsType::TsTupleType(t) => t,
+        _ => return Ok(None),
+    };
+
+    let elems = tuple
+        .elem_types
+        .iter()
+        .map(|elem| convert_ts_type(&elem.ty))
+        .collect::<Result<Vec<_>>>()?;
+
+    let name = decl.id.sym.to_string();
+    let type_params = extract_type_params(decl.type_params.as_deref());
+
+    Ok(Some(Item::TypeAlias {
+        vis,
+        name,
+        type_params,
+        ty: RustType::Tuple(elems),
+    }))
+}
+
+/// Tries to convert a type alias with a union body where all members are string literals.
+///
+/// Returns `Ok(Some(Item::Enum))` if the union is all string literals, `Ok(None)` otherwise.
+fn try_convert_string_literal_union(
+    decl: &TsTypeAliasDecl,
+    vis: Visibility,
+) -> Result<Option<Item>> {
+    let union = match decl.type_ann.as_ref() {
+        TsType::TsUnionOrIntersectionType(
+            swc_ecma_ast::TsUnionOrIntersectionType::TsUnionType(u),
+        ) => u,
+        _ => return Ok(None),
+    };
+
+    let mut variants = Vec::new();
+    for ty in &union.types {
+        match ty.as_ref() {
+            TsType::TsLitType(lit) => match &lit.lit {
+                swc_ecma_ast::TsLit::Str(s) => {
+                    let value = s.value.to_string_lossy().into_owned();
+                    variants.push(EnumVariant {
+                        name: string_to_pascal_case(&value),
+                        value: Some(EnumValue::Str(value)),
+                        data: None,
+                    });
+                }
+                _ => return Ok(None), // Non-string literal → not a string literal union
+            },
+            _ => return Ok(None), // Non-literal member → not a string literal union
+        }
+    }
+
+    Ok(Some(Item::Enum {
+        vis,
+        name: decl.id.sym.to_string(),
+        variants,
+    }))
+}
+
+/// Tries to convert a type alias with a single string literal body.
+///
+/// Handles `type X = "only"` as a single-variant enum.
+fn try_convert_single_string_literal(
+    decl: &TsTypeAliasDecl,
+    vis: Visibility,
+) -> Result<Option<Item>> {
+    match decl.type_ann.as_ref() {
+        TsType::TsLitType(lit) => match &lit.lit {
+            swc_ecma_ast::TsLit::Str(s) => {
+                let value = s.value.to_string_lossy().into_owned();
+                Ok(Some(Item::Enum {
+                    vis,
+                    name: decl.id.sym.to_string(),
+                    variants: vec![EnumVariant {
+                        name: string_to_pascal_case(&value),
+                        value: Some(EnumValue::Str(value)),
+                        data: None,
+                    }],
+                }))
+            }
+            _ => Ok(None),
+        },
+        _ => Ok(None),
+    }
+}
+
+/// Converts a string value to PascalCase for use as an enum variant name.
+///
+/// Examples: `"up"` → `"Up"`, `"foo-bar"` → `"FooBar"`, `"UPPER_CASE"` → `"UpperCase"`
+fn string_to_pascal_case(s: &str) -> String {
+    s.split(['-', '_', ' '])
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            let lower = part.to_lowercase();
+            let mut chars = lower.chars();
+            match chars.next() {
+                Some(c) => c.to_uppercase().to_string() + chars.as_str(),
+                None => String::new(),
+            }
+        })
+        .collect()
+}
+
+/// Tries to convert a type alias with a union type body into an enum.
+///
+/// Handles numeric literal unions (`type Code = 200 | 404`) and
+/// primitive type unions (`type Value = string | number`).
+/// Returns `None` if the type alias body is not a union type.
+fn try_convert_general_union(decl: &TsTypeAliasDecl, vis: Visibility) -> Result<Option<Item>> {
+    let union = match decl.type_ann.as_ref() {
+        TsType::TsUnionOrIntersectionType(
+            swc_ecma_ast::TsUnionOrIntersectionType::TsUnionType(u),
+        ) => u,
+        _ => return Ok(None),
+    };
+
+    // Filter out null/undefined members
+    let mut non_null_types: Vec<&TsType> = Vec::new();
+    let mut has_null_or_undefined = false;
+    for ty in &union.types {
+        match ty.as_ref() {
+            TsType::TsKeywordType(kw)
+                if kw.kind == TsKeywordTypeKind::TsNullKeyword
+                    || kw.kind == TsKeywordTypeKind::TsUndefinedKeyword =>
+            {
+                has_null_or_undefined = true;
+            }
+            other => non_null_types.push(other),
+        }
+    }
+
+    // If all members are string literals, `try_convert_string_literal_union` handles it
+    if non_null_types.iter().all(|t| {
+        matches!(
+            t,
+            TsType::TsLitType(lit) if matches!(lit.lit, swc_ecma_ast::TsLit::Str(_))
+        )
+    }) {
+        return Ok(None);
+    }
+
+    let mut variants = Vec::new();
+    for ty in &non_null_types {
+        match *ty {
+            TsType::TsLitType(lit) => match &lit.lit {
+                swc_ecma_ast::TsLit::Number(n) => {
+                    let value = n.value as i64;
+                    variants.push(EnumVariant {
+                        name: format!(
+                            "V{}",
+                            if value < 0 {
+                                format!("Neg{}", -value)
+                            } else {
+                                value.to_string()
+                            }
+                        ),
+                        value: Some(EnumValue::Number(value)),
+                        data: None,
+                    });
+                }
+                swc_ecma_ast::TsLit::Str(s) => {
+                    let value = s.value.to_string_lossy().into_owned();
+                    variants.push(EnumVariant {
+                        name: string_to_pascal_case(&value),
+                        value: Some(EnumValue::Str(value)),
+                        data: None,
+                    });
+                }
+                _ => return Err(anyhow!("unsupported literal type in union")),
+            },
+            TsType::TsKeywordType(kw) => {
+                let (variant_name, rust_type) = match kw.kind {
+                    TsKeywordTypeKind::TsStringKeyword => ("String".to_string(), RustType::String),
+                    TsKeywordTypeKind::TsNumberKeyword => ("F64".to_string(), RustType::F64),
+                    TsKeywordTypeKind::TsBooleanKeyword => ("Bool".to_string(), RustType::Bool),
+                    _ => return Err(anyhow!("unsupported keyword type in union: {:?}", kw.kind)),
+                };
+                variants.push(EnumVariant {
+                    name: variant_name,
+                    value: None,
+                    data: Some(rust_type),
+                });
+            }
+            _ => return Err(anyhow!("unsupported type in union")),
+        }
+    }
+
+    if variants.is_empty() {
+        return Err(anyhow!("empty union type"));
+    }
+
+    let enum_item = Item::Enum {
+        vis: vis.clone(),
+        name: decl.id.sym.to_string(),
+        variants,
+    };
+
+    if has_null_or_undefined {
+        // Wrap in Option: `type X = string | number | null` → `Option<EnumName>`
+        // We still emit the enum, but we'd need a TypeAlias wrapping it in Option.
+        // For now, just return the enum (nullable wrapping is a separate concern)
+        Ok(Some(enum_item))
+    } else {
+        Ok(Some(enum_item))
+    }
+}
+
+/// Converts a TS function type (`(x: number) => string`) into `RustType::Fn`.
+fn convert_fn_type(fn_type: &swc_ecma_ast::TsFnType) -> Result<RustType> {
+    let params = fn_type
+        .params
+        .iter()
+        .map(|p| {
+            let type_ann = match p {
+                swc_ecma_ast::TsFnParam::Ident(ident) => ident
+                    .type_ann
+                    .as_ref()
+                    .ok_or_else(|| anyhow!("function type parameter has no type annotation"))?,
+                _ => return Err(anyhow!("unsupported function type parameter pattern")),
+            };
+            convert_ts_type(&type_ann.type_ann)
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    let return_type = convert_ts_type(&fn_type.type_ann.type_ann)?;
+
+    Ok(RustType::Fn {
+        params,
+        return_type: Box::new(return_type),
+    })
+}
+
+/// Converts a TS indexed access type (`T['Key']`) into `RustType::Named { name: "T::Key" }`.
+///
+/// Only string literal keys are supported.
+fn convert_indexed_access_type(indexed: &swc_ecma_ast::TsIndexedAccessType) -> Result<RustType> {
+    // Extract the base type name
+    let obj_name = match indexed.obj_type.as_ref() {
+        TsType::TsTypeRef(type_ref) => match &type_ref.type_name {
+            swc_ecma_ast::TsEntityName::Ident(ident) => ident.sym.to_string(),
+            _ => return Err(anyhow!("unsupported indexed access base type")),
+        },
+        _ => return Err(anyhow!("unsupported indexed access base type")),
+    };
+
+    // Extract the string literal key
+    let key = match indexed.index_type.as_ref() {
+        TsType::TsLitType(lit) => match &lit.lit {
+            swc_ecma_ast::TsLit::Str(s) => s.value.to_string_lossy().into_owned(),
+            _ => {
+                return Err(anyhow!(
+                    "unsupported indexed access key: only string literals are supported"
+                ))
+            }
+        },
+        _ => {
+            return Err(anyhow!(
+                "unsupported indexed access key: only string literals are supported"
+            ))
+        }
+    };
+
+    Ok(RustType::Named {
+        name: format!("{obj_name}::{key}"),
+        type_args: vec![],
+    })
+}
+
+/// Extracts type parameter names from an optional [`TsTypeParamDecl`].
+///
+/// Returns an empty vec if there are no type parameters.
+pub fn extract_type_params(type_params: Option<&swc_ecma_ast::TsTypeParamDecl>) -> Vec<String> {
+    match type_params {
+        Some(params) => params
+            .params
+            .iter()
+            .map(|p| p.name.sym.to_string())
+            .collect(),
+        None => vec![],
+    }
+}
+
+/// Converts a property signature into an IR [`StructField`].
+fn convert_property_signature(prop: &TsPropertySignature) -> Result<StructField> {
+    let field_name = match prop.key.as_ref() {
+        Expr::Ident(ident) => ident.sym.to_string(),
+        _ => return Err(anyhow!("unsupported property key (only identifiers)")),
+    };
+
+    let type_ann = prop
+        .type_ann
+        .as_ref()
+        .ok_or_else(|| anyhow!("property '{}' has no type annotation", field_name))?;
+
+    let mut ty = convert_ts_type(&type_ann.type_ann)?;
+
+    // Optional properties (`?`) become Option<T>
+    if prop.optional {
+        // Avoid double-wrapping if the type is already Option (e.g., `name?: string | null`)
+        if !matches!(ty, RustType::Option(_)) {
+            ty = RustType::Option(Box::new(ty));
+        }
+    }
+
+    Ok(StructField {
+        name: field_name,
+        ty,
+    })
+}
+
+#[cfg(test)]
+mod tests;

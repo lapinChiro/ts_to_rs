@@ -1,0 +1,7 @@
+---
+source: tests/integration_test.rs
+expression: output
+---
+fn getBindings(b: Env::Bindings) -> Env::Bindings {
+    b
+}

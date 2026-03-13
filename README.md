@@ -173,11 +173,11 @@ src/
 ├── registry.rs         # TypeRegistry（型定義の事前収集）
 ├── transformer/        # AST → IR 変換
 │   ├── mod.rs          # 変換エントリポイント
-│   ├── types.rs        # 型変換 (TS型 → Rust型)
-│   ├── functions.rs    # 関数変換
+│   ├── types/          # 型変換 (TS型 → Rust型)
+│   ├── functions/      # 関数変換
 │   ├── classes.rs      # クラス変換
-│   ├── statements.rs   # 文の変換
-│   └── expressions.rs  # 式の変換
+│   ├── statements/     # 文の変換
+│   └── expressions/    # 式の変換
 ├── generator/          # IR → Rust ソースコード生成
 │   ├── mod.rs          # 公開 API + Item 生成
 │   ├── types.rs        # 型の生成

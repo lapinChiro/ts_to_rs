@@ -48,7 +48,7 @@ IR への影響:
 
 ### 影響範囲
 
-- `src/transformer/types.rs` — `convert_conditional_type` のフォールバックパス
+- `src/transformer/types/mod.rs` — `convert_conditional_type` のフォールバックパス
 - `src/ir.rs` — コメント付加の仕組み（必要に応じて）
 - `src/generator/mod.rs` — コメント付き Item の出力
 

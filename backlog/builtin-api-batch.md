@@ -38,14 +38,14 @@ Hono のソースコードでは `.reduce()`, `.indexOf()`, `.join()`, `.reverse
 
 既存のアーキテクチャに従い、以下の 2 つの拡張ポイントに変換ルールを追加する:
 
-1. **`map_method_call`**（`expressions.rs:441`）: `.reduce`, `.indexOf`, `.join`, `.reverse`, `.sort`, `.slice`, `.splice` の match arm を追加
-2. **`convert_math_call`**（`expressions.rs:657`）: `sign`, `trunc`, `log` の match arm を追加
+1. **`map_method_call`**（`expressions/mod.rs:454`）: `.reduce`, `.indexOf`, `.join`, `.reverse`, `.sort`, `.slice`, `.splice` の match arm を追加
+2. **`convert_math_call`**（`expressions/mod.rs:670`）: `sign`, `trunc`, `log` の match arm を追加
 3. **`convert_call_expr`** のメンバーアクセス部分: `Math.PI` 等の定数参照を検出し `std::f64::consts::PI` に変換
 4. **`convert_number_method`**: `isInteger` の match arm を追加
 
 ### 影響範囲
 
-- `src/transformer/expressions.rs` — `map_method_call`, `convert_math_call`, `convert_call_expr`, `convert_number_method` の拡張
+- `src/transformer/expressions/mod.rs` — `map_method_call`, `convert_math_call`, `convert_call_expr`, `convert_number_method` の拡張
 
 ## 作業ステップ
 

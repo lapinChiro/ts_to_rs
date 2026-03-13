@@ -43,8 +43,8 @@ pub fn foo(opts: FooOpts) {}
 
 ### 影響範囲
 
-- `src/transformer/types.rs` — `TsTypeLit` → struct フィールドの変換ヘルパー追加
-- `src/transformer/functions.rs` — `convert_param` でインライン型リテラルを検出し struct 生成
+- `src/transformer/types/mod.rs` — `TsTypeLit` → struct フィールドの変換ヘルパー追加
+- `src/transformer/functions/mod.rs` — `convert_param` でインライン型リテラルを検出し struct 生成
 - `src/transformer/mod.rs` — 生成された追加 Item の出力への統合
 
 ## 作業ステップ

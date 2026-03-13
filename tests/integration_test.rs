@@ -306,3 +306,10 @@ fn test_union_type() {
     let output = transpile(&input).unwrap();
     insta::assert_snapshot!(output);
 }
+
+#[test]
+fn test_indexed_access_type() {
+    let input = fs::read_to_string("tests/fixtures/indexed-access-type.input.ts").unwrap();
+    let output = transpile(&input).unwrap();
+    insta::assert_snapshot!(output);
+}

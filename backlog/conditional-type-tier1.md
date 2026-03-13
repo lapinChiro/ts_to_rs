@@ -55,7 +55,7 @@ Hono のソースコードには約 37 件の conditional type（`T extends X ? 
 
 ### 影響範囲
 
-- `src/transformer/types.rs` — `convert_conditional_type` 関数追加、`convert_type_alias` からの呼び出し
+- `src/transformer/types/mod.rs` — `convert_conditional_type` 関数追加、`convert_type_alias` からの呼び出し
 - `src/ir.rs` — 必要に応じて associated type の IR 表現を追加
 - `src/generator/mod.rs` — associated type の生成
 
