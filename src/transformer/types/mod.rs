@@ -143,7 +143,13 @@ fn convert_union_type(union: &swc_ecma_ast::TsUnionType) -> Result<RustType> {
 /// # Errors
 ///
 /// Returns an error if a member has an unsupported type or pattern.
-pub fn convert_interface(decl: &TsInterfaceDecl, vis: Visibility) -> Result<Item> {
+/// Converts an interface declaration into one or more IR items.
+///
+/// - Properties only → `[Struct]`
+/// - Methods only → `[Trait]`
+/// - Call signatures only → `[TypeAlias]` (fn type)
+/// - Properties + Methods mixed → `[Struct, Trait, Impl]`
+pub fn convert_interface_items(decl: &TsInterfaceDecl, vis: Visibility) -> Result<Vec<Item>> {
     let name = decl.id.sym.to_string();
     let type_params = extract_type_params(decl.type_params.as_deref());
 
@@ -152,12 +158,39 @@ pub fn convert_interface(decl: &TsInterfaceDecl, vis: Visibility) -> Result<Item
         .body
         .iter()
         .any(|m| matches!(m, TsTypeElement::TsMethodSignature(_)));
+    let has_properties = decl
+        .body
+        .body
+        .iter()
+        .any(|m| matches!(m, TsTypeElement::TsPropertySignature(_)));
+    let has_call_signatures = decl
+        .body
+        .body
+        .iter()
+        .any(|m| matches!(m, TsTypeElement::TsCallSignatureDecl(_)));
+
+    if has_call_signatures && !has_methods && !has_properties {
+        let item = convert_interface_as_fn_type(decl, vis, &name, type_params)?;
+        return Ok(vec![item]);
+    }
+
+    if has_methods && has_properties {
+        return convert_interface_as_struct_and_trait(decl, vis, &name, type_params);
+    }
 
     if has_methods {
-        convert_interface_as_trait(decl, vis, &name, type_params)
-    } else {
-        convert_interface_as_struct(decl, vis, &name, type_params)
+        let item = convert_interface_as_trait(decl, vis, &name, type_params)?;
+        return Ok(vec![item]);
     }
+
+    let item = convert_interface_as_struct(decl, vis, &name, type_params)?;
+    Ok(vec![item])
+}
+
+/// Converts an interface into a single IR item (legacy API, delegates to `convert_interface_items`).
+pub fn convert_interface(decl: &TsInterfaceDecl, vis: Visibility) -> Result<Item> {
+    let items = convert_interface_items(decl, vis)?;
+    Ok(items.into_iter().next().unwrap())
 }
 
 /// Converts an interface with only property signatures into an IR [`Item::Struct`].
@@ -189,6 +222,119 @@ fn convert_interface_as_struct(
         type_params,
         fields,
     })
+}
+
+/// Converts a call-signature-only interface into a fn type alias.
+///
+/// `interface Foo { (x: number): string }` → `type Foo = fn(f64) -> String`
+///
+/// When multiple call signatures exist (overloads), uses the one with the most parameters.
+fn convert_interface_as_fn_type(
+    decl: &TsInterfaceDecl,
+    vis: Visibility,
+    name: &str,
+    type_params: Vec<String>,
+) -> Result<Item> {
+    let call_sigs: Vec<&swc_ecma_ast::TsCallSignatureDecl> = decl
+        .body
+        .body
+        .iter()
+        .filter_map(|m| match m {
+            TsTypeElement::TsCallSignatureDecl(sig) => Some(sig),
+            _ => None,
+        })
+        .collect();
+
+    // Pick the signature with the most parameters (for overload resolution)
+    let sig = call_sigs
+        .iter()
+        .max_by_key(|s| s.params.len())
+        .ok_or_else(|| anyhow!("no call signatures found"))?;
+
+    let mut param_types = Vec::new();
+    for param in &sig.params {
+        match param {
+            swc_ecma_ast::TsFnParam::Ident(ident) => {
+                let ty = ident
+                    .type_ann
+                    .as_ref()
+                    .map(|ann| convert_ts_type(&ann.type_ann))
+                    .transpose()?
+                    .unwrap_or(RustType::Any);
+                param_types.push(ty);
+            }
+            _ => return Err(anyhow!("unsupported call signature parameter pattern")),
+        }
+    }
+
+    let return_type = sig
+        .type_ann
+        .as_ref()
+        .map(|ann| convert_ts_type(&ann.type_ann))
+        .transpose()?
+        .unwrap_or(RustType::Unit);
+
+    Ok(Item::TypeAlias {
+        vis,
+        name: name.to_string(),
+        type_params,
+        ty: RustType::Fn {
+            params: param_types,
+            return_type: Box::new(return_type),
+        },
+    })
+}
+
+/// Converts a mixed interface (properties + methods) into struct + trait + impl.
+///
+/// - Properties → `Item::Struct`
+/// - Methods → `Item::Trait` (named `{Name}Trait`)
+/// - Impl block → `Item::Impl` (implements `{Name}Trait` for `{Name}`)
+fn convert_interface_as_struct_and_trait(
+    decl: &TsInterfaceDecl,
+    vis: Visibility,
+    name: &str,
+    type_params: Vec<String>,
+) -> Result<Vec<Item>> {
+    let mut fields = Vec::new();
+    let mut methods = Vec::new();
+
+    for member in &decl.body.body {
+        match member {
+            TsTypeElement::TsPropertySignature(prop) => {
+                fields.push(convert_property_signature(prop)?);
+            }
+            TsTypeElement::TsMethodSignature(method_sig) => {
+                methods.push(convert_method_signature(method_sig)?);
+            }
+            _ => {
+                // Skip unsupported members in mixed interfaces
+            }
+        }
+    }
+
+    let trait_name = format!("{name}Trait");
+
+    let struct_item = Item::Struct {
+        vis: vis.clone(),
+        name: name.to_string(),
+        type_params: type_params.clone(),
+        fields,
+    };
+
+    let trait_item = Item::Trait {
+        vis: vis.clone(),
+        name: trait_name.clone(),
+        methods: methods.clone(),
+    };
+
+    let impl_item = Item::Impl {
+        struct_name: name.to_string(),
+        for_trait: Some(trait_name),
+        methods,
+    };
+
+    Ok(vec![struct_item, trait_item, impl_item])
 }
 
 /// Converts an interface with method signatures into an IR [`Item::Trait`].

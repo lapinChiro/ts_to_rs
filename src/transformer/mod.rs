@@ -384,8 +384,8 @@ fn transform_decl(
 ) -> Result<(Vec<Item>, Vec<String>)> {
     match decl {
         Decl::TsInterface(interface_decl) => {
-            let item = types::convert_interface(interface_decl, vis)?;
-            Ok((vec![item], vec![]))
+            let items = types::convert_interface_items(interface_decl, vis)?;
+            Ok((items, vec![]))
         }
         Decl::TsTypeAlias(type_alias_decl) => {
             let items = types::convert_type_alias_items(type_alias_decl, vis)?;

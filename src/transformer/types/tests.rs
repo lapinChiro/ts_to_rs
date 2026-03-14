@@ -1054,3 +1054,96 @@ fn test_convert_type_alias_union_without_common_discriminant_falls_through() {
         assert_eq!(serde_tag, None);
     }
 }
+
+#[test]
+fn test_convert_interface_call_signature_single_generates_fn_type_alias() {
+    let decl = parse_interface("interface Callback { (x: number): string }");
+    let items = convert_interface_items(&decl, Visibility::Public).unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(
+        items[0],
+        Item::TypeAlias {
+            vis: Visibility::Public,
+            name: "Callback".to_string(),
+            type_params: vec![],
+            ty: RustType::Fn {
+                params: vec![RustType::F64],
+                return_type: Box::new(RustType::String),
+            },
+        }
+    );
+}
+
+#[test]
+fn test_convert_interface_call_signature_overload_uses_longest() {
+    let decl = parse_interface(
+        "interface Overloaded { (x: number): string; (x: number, y: string): boolean }",
+    );
+    let items = convert_interface_items(&decl, Visibility::Public).unwrap();
+    assert_eq!(items.len(), 1);
+    match &items[0] {
+        Item::TypeAlias { ty, .. } => match ty {
+            RustType::Fn { params, .. } => {
+                assert_eq!(params.len(), 2);
+            }
+            _ => panic!("expected RustType::Fn"),
+        },
+        _ => panic!("expected Item::TypeAlias"),
+    }
+}
+
+#[test]
+fn test_convert_interface_call_signature_no_params_generates_fn_type() {
+    let decl = parse_interface("interface Factory { (): void }");
+    let items = convert_interface_items(&decl, Visibility::Public).unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(
+        items[0],
+        Item::TypeAlias {
+            vis: Visibility::Public,
+            name: "Factory".to_string(),
+            type_params: vec![],
+            ty: RustType::Fn {
+                params: vec![],
+                return_type: Box::new(RustType::Unit),
+            },
+        }
+    );
+}
+
+#[test]
+fn test_convert_interface_mixed_props_and_methods_generates_struct_and_trait() {
+    let decl = parse_interface("interface Ctx { name: string; greet(msg: string): void }");
+    let items = convert_interface_items(&decl, Visibility::Public).unwrap();
+    assert_eq!(items.len(), 3);
+    // First: struct with properties
+    match &items[0] {
+        Item::Struct { name, fields, .. } => {
+            assert_eq!(name, "Ctx");
+            assert_eq!(fields.len(), 1);
+            assert_eq!(fields[0].name, "name");
+        }
+        _ => panic!("expected Item::Struct, got {:?}", items[0]),
+    }
+    // Second: trait with methods
+    match &items[1] {
+        Item::Trait { name, methods, .. } => {
+            assert_eq!(name, "CtxTrait");
+            assert_eq!(methods.len(), 1);
+            assert_eq!(methods[0].name, "greet");
+        }
+        _ => panic!("expected Item::Trait, got {:?}", items[1]),
+    }
+    // Third: impl trait for struct
+    match &items[2] {
+        Item::Impl {
+            struct_name,
+            for_trait,
+            ..
+        } => {
+            assert_eq!(struct_name, "Ctx");
+            assert_eq!(for_trait.as_deref(), Some("CtxTrait"));
+        }
+        _ => panic!("expected Item::Impl, got {:?}", items[2]),
+    }
+}
