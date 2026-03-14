@@ -327,6 +327,7 @@ fn test_transform_enum_numeric_auto_values() {
             vis,
             name,
             variants,
+            ..
         } => {
             assert_eq!(*vis, Visibility::Private);
             assert_eq!(name, "Color");

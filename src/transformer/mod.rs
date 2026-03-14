@@ -639,12 +639,14 @@ fn convert_ts_enum(ts_enum: &swc_ecma_ast::TsEnumDecl, vis: Visibility) -> Resul
             name: variant_name,
             value,
             data: None,
+            fields: vec![],
         });
     }
 
     Ok(vec![Item::Enum {
         vis,
         name,
+        serde_tag: None,
         variants,
     }])
 }

@@ -64,6 +64,9 @@ fn test_all_fixtures_compile() {
         // Conditional types produce type aliases with unused type params and references to
         // traits (e.g., `<T as Promise>::Output`) not defined in the generated code.
         "conditional-type",
+        // Discriminated unions use serde derive macros (Serialize, Deserialize) not available
+        // without the serde dependency.
+        "discriminated-union",
     ];
 
     let mut entries: Vec<_> = fs::read_dir(fixture_dir)

@@ -329,6 +329,13 @@ fn test_inline_type_literal_param() {
 }
 
 #[test]
+fn test_discriminated_union() {
+    let input = fs::read_to_string("tests/fixtures/discriminated-union.input.ts").unwrap();
+    let output = transpile(&input).unwrap();
+    insta::assert_snapshot!(output);
+}
+
+#[test]
 fn test_conditional_type() {
     let input = fs::read_to_string("tests/fixtures/conditional-type.input.ts").unwrap();
     let output = transpile(&input).unwrap();

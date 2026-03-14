@@ -10,8 +10,12 @@
 
 ## 型構文
 
-- discriminated union（`type Event = { kind: "click", x: number } | { kind: "hover", y: number }`）
-  - **保留**: 各バリアントの型定義解析が必要で複雑度が高い。non-nullable union type の実績を見てから着手
+- discriminated union の拡張パターン
+  - **保留**: 基本パターン（文字列リテラル discriminant）の実績を見てから着手
+  - 数値リテラル discriminant（`{ type: 0 } | { type: 1 }`）— Rust enum では数値の `serde(rename)` が必要で、文字列とは異なる生成パスが必要
+  - 部分的共通フィールド（discriminant 以外に共通フィールドがある場合の扱い）— 共通フィールドを各バリアントに複製するか、trait に抽出するかの設計判断が必要
+  - ネストした discriminated union（`{ kind: "a", sub: { type: "x" } | { type: "y" } }`）— 再帰的な enum 生成が必要
+  - nullable discriminated union（`Event | null`）— `Option<Event>` へのラップ。既存の nullable union の仕組みとの統合が必要
 - conditional type — Tier 3: 高度パターンの変換研究（Hono 固有の 24 件）
   - 詳細分析: `report/tier3-conditional-types-rust-approaches.md`
   - 以下の 4 グループに分類。多くは TypeScript 固有の制約への対処であり、Rust では別の手段で同じ目的を達成できる

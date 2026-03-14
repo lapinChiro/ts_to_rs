@@ -72,8 +72,9 @@ fn generate_item(item: &Item) -> String {
         Item::Enum {
             vis,
             name,
+            serde_tag,
             variants,
-        } => generate_enum(vis, name, variants),
+        } => generate_enum(vis, name, serde_tag, variants),
         Item::TypeAlias {
             vis,
             name,
@@ -233,7 +234,17 @@ fn is_numeric_enum(variants: &[EnumVariant]) -> bool {
 /// - Numeric enums get `#[repr(i64)]` and discriminant values.
 /// - String enums get an `as_str()` impl block.
 /// - Enums without values are treated as numeric enums with auto-incrementing values.
-fn generate_enum(vis: &Visibility, name: &str, variants: &[EnumVariant]) -> String {
+fn generate_enum(
+    vis: &Visibility,
+    name: &str,
+    serde_tag: &Option<String>,
+    variants: &[EnumVariant],
+) -> String {
+    // Discriminated union with serde tag
+    if let Some(tag) = serde_tag {
+        return generate_serde_tagged_enum(vis, name, tag, variants);
+    }
+
     let vis_str = generate_vis(vis);
     let data_enum = has_data_variants(variants);
     let numeric = is_numeric_enum(variants);
@@ -310,6 +321,45 @@ fn generate_enum(vis: &Visibility, name: &str, variants: &[EnumVariant]) -> Stri
         out.push('}');
     }
 
+    out
+}
+
+/// Generates a serde-tagged enum for discriminated unions.
+///
+/// Produces `#[serde(tag = "...")]` on the enum and `#[serde(rename = "...")]` on each variant.
+fn generate_serde_tagged_enum(
+    vis: &Visibility,
+    name: &str,
+    tag: &str,
+    variants: &[EnumVariant],
+) -> String {
+    let vis_str = generate_vis(vis);
+    let mut out = String::new();
+
+    out.push_str("#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]\n");
+    out.push_str(&format!("#[serde(tag = \"{tag}\")]\n"));
+    out.push_str(&format!("{vis_str}enum {name} {{\n"));
+
+    for variant in variants {
+        if let Some(EnumValue::Str(s)) = &variant.value {
+            out.push_str(&format!("    #[serde(rename = \"{s}\")]\n"));
+        }
+        if variant.fields.is_empty() {
+            out.push_str(&format!("    {},\n", variant.name));
+        } else {
+            out.push_str(&format!("    {} {{\n", variant.name));
+            for field in &variant.fields {
+                out.push_str(&format!(
+                    "        pub {}: {},\n",
+                    field.name,
+                    generate_type(&field.ty)
+                ));
+            }
+            out.push_str("    },\n");
+        }
+    }
+
+    out.push('}');
     out
 }
 
@@ -454,21 +504,25 @@ pub struct Container<T> {
         let item = Item::Enum {
             vis: Visibility::Public,
             name: "Color".to_string(),
+            serde_tag: None,
             variants: vec![
                 EnumVariant {
                     name: "Red".to_string(),
                     value: None,
                     data: None,
+                    fields: vec![],
                 },
                 EnumVariant {
                     name: "Green".to_string(),
                     value: None,
                     data: None,
+                    fields: vec![],
                 },
                 EnumVariant {
                     name: "Blue".to_string(),
                     value: None,
                     data: None,
+                    fields: vec![],
                 },
             ],
         };
@@ -488,16 +542,19 @@ pub enum Color {
         let item = Item::Enum {
             vis: Visibility::Public,
             name: "Status".to_string(),
+            serde_tag: None,
             variants: vec![
                 EnumVariant {
                     name: "Active".to_string(),
                     value: Some(EnumValue::Number(1)),
                     data: None,
+                    fields: vec![],
                 },
                 EnumVariant {
                     name: "Inactive".to_string(),
                     value: Some(EnumValue::Number(0)),
                     data: None,
+                    fields: vec![],
                 },
             ],
         };
@@ -516,16 +573,19 @@ pub enum Status {
         let item = Item::Enum {
             vis: Visibility::Public,
             name: "Direction".to_string(),
+            serde_tag: None,
             variants: vec![
                 EnumVariant {
                     name: "Up".to_string(),
                     value: Some(EnumValue::Str("UP".to_string())),
                     data: None,
+                    fields: vec![],
                 },
                 EnumVariant {
                     name: "Down".to_string(),
                     value: Some(EnumValue::Str("DOWN".to_string())),
                     data: None,
+                    fields: vec![],
                 },
             ],
         };
@@ -552,10 +612,12 @@ impl Direction {
         let item = Item::Enum {
             vis: Visibility::Private,
             name: "Color".to_string(),
+            serde_tag: None,
             variants: vec![EnumVariant {
                 name: "Red".to_string(),
                 value: None,
                 data: None,
+                fields: vec![],
             }],
         };
         let result = generate(&[item]);
@@ -568,21 +630,25 @@ impl Direction {
         let item = Item::Enum {
             vis: Visibility::Public,
             name: "Value".to_string(),
+            serde_tag: None,
             variants: vec![
                 EnumVariant {
                     name: "String".to_string(),
                     value: None,
                     data: Some(RustType::String),
+                    fields: vec![],
                 },
                 EnumVariant {
                     name: "F64".to_string(),
                     value: None,
                     data: Some(RustType::F64),
+                    fields: vec![],
                 },
                 EnumVariant {
                     name: "Bool".to_string(),
                     value: None,
                     data: Some(RustType::Bool),
+                    fields: vec![],
                 },
             ],
         };

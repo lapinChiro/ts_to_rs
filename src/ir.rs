@@ -74,6 +74,8 @@ pub struct EnumVariant {
     pub value: Option<EnumValue>,
     /// Optional data type for tuple-like variants (e.g., `String(String)`, `F64(f64)`)
     pub data: Option<RustType>,
+    /// Named fields for struct-like variants (discriminated unions)
+    pub fields: Vec<StructField>,
 }
 
 /// A named field in a struct.
@@ -144,6 +146,8 @@ pub enum Item {
         vis: Visibility,
         /// Enum name
         name: String,
+        /// Optional serde tag field name for discriminated unions (e.g., `"kind"`)
+        serde_tag: Option<String>,
         /// Enum variants
         variants: Vec<EnumVariant>,
     },
@@ -470,16 +474,19 @@ mod tests {
         let item = Item::Enum {
             vis: Visibility::Public,
             name: "Color".to_string(),
+            serde_tag: None,
             variants: vec![
                 EnumVariant {
                     name: "Red".to_string(),
                     value: None,
                     data: None,
+                    fields: vec![],
                 },
                 EnumVariant {
                     name: "Green".to_string(),
                     value: None,
                     data: None,
+                    fields: vec![],
                 },
             ],
         };
@@ -498,16 +505,19 @@ mod tests {
         let item = Item::Enum {
             vis: Visibility::Public,
             name: "Status".to_string(),
+            serde_tag: None,
             variants: vec![
                 EnumVariant {
                     name: "Active".to_string(),
                     value: Some(EnumValue::Number(1)),
                     data: None,
+                    fields: vec![],
                 },
                 EnumVariant {
                     name: "Inactive".to_string(),
                     value: Some(EnumValue::Number(0)),
                     data: None,
+                    fields: vec![],
                 },
             ],
         };
@@ -525,16 +535,19 @@ mod tests {
         let item = Item::Enum {
             vis: Visibility::Public,
             name: "Direction".to_string(),
+            serde_tag: None,
             variants: vec![
                 EnumVariant {
                     name: "Up".to_string(),
                     value: Some(EnumValue::Str("UP".to_string())),
                     data: None,
+                    fields: vec![],
                 },
                 EnumVariant {
                     name: "Down".to_string(),
                     value: Some(EnumValue::Str("DOWN".to_string())),
                     data: None,
+                    fields: vec![],
                 },
             ],
         };
