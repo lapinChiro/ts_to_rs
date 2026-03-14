@@ -1147,3 +1147,182 @@ fn test_convert_interface_mixed_props_and_methods_generates_struct_and_trait() {
         _ => panic!("expected Item::Impl, got {:?}", items[2]),
     }
 }
+
+// -- convert_type_alias: union with type references --
+
+#[test]
+fn test_convert_type_alias_union_type_refs_generates_data_enum() {
+    let decl = parse_type_alias("type R = Success | Failure;");
+    let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+    match item {
+        Item::Enum {
+            vis,
+            name,
+            variants,
+            ..
+        } => {
+            assert_eq!(vis, Visibility::Public);
+            assert_eq!(name, "R");
+            assert_eq!(variants.len(), 2);
+            assert_eq!(variants[0].name, "Success");
+            assert_eq!(
+                variants[0].data,
+                Some(RustType::Named {
+                    name: "Success".to_string(),
+                    type_args: vec![],
+                })
+            );
+            assert!(variants[0].value.is_none());
+            assert_eq!(variants[1].name, "Failure");
+            assert_eq!(
+                variants[1].data,
+                Some(RustType::Named {
+                    name: "Failure".to_string(),
+                    type_args: vec![],
+                })
+            );
+        }
+        _ => panic!("expected Item::Enum, got {:?}", item),
+    }
+}
+
+#[test]
+fn test_convert_type_alias_union_type_ref_and_keyword_generates_data_enum() {
+    let decl = parse_type_alias("type V = string | MyType;");
+    let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+    match item {
+        Item::Enum { name, variants, .. } => {
+            assert_eq!(name, "V");
+            assert_eq!(variants.len(), 2);
+            assert_eq!(variants[0].name, "String");
+            assert_eq!(variants[0].data, Some(RustType::String));
+            assert_eq!(variants[1].name, "MyType");
+            assert_eq!(
+                variants[1].data,
+                Some(RustType::Named {
+                    name: "MyType".to_string(),
+                    type_args: vec![],
+                })
+            );
+        }
+        _ => panic!("expected Item::Enum, got {:?}", item),
+    }
+}
+
+#[test]
+fn test_convert_type_alias_union_generic_type_ref_generates_data_enum() {
+    let decl = parse_type_alias("type R = Response | Promise<Response>;");
+    let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+    match item {
+        Item::Enum { name, variants, .. } => {
+            assert_eq!(name, "R");
+            assert_eq!(variants.len(), 2);
+            assert_eq!(variants[0].name, "Response");
+            assert_eq!(
+                variants[0].data,
+                Some(RustType::Named {
+                    name: "Response".to_string(),
+                    type_args: vec![],
+                })
+            );
+            assert_eq!(variants[1].name, "Promise");
+            assert_eq!(
+                variants[1].data,
+                Some(RustType::Named {
+                    name: "Promise".to_string(),
+                    type_args: vec![RustType::Named {
+                        name: "Response".to_string(),
+                        type_args: vec![],
+                    }],
+                })
+            );
+        }
+        _ => panic!("expected Item::Enum, got {:?}", item),
+    }
+}
+
+// -- intersection type tests --
+
+#[test]
+fn test_convert_type_alias_intersection_two_type_lits_generates_struct() {
+    let decl = parse_type_alias("type Combined = { name: string } & { age: number };");
+    let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+    match item {
+        Item::Struct { name, fields, .. } => {
+            assert_eq!(name, "Combined");
+            assert_eq!(fields.len(), 2);
+            assert_eq!(fields[0].name, "name");
+            assert_eq!(fields[0].ty, RustType::String);
+            assert_eq!(fields[1].name, "age");
+            assert_eq!(fields[1].ty, RustType::F64);
+        }
+        _ => panic!("expected Item::Struct, got {:?}", item),
+    }
+}
+
+#[test]
+fn test_convert_type_alias_intersection_three_type_lits_generates_struct() {
+    let decl = parse_type_alias("type C = { a: string } & { b: number } & { c: boolean };");
+    let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+    match item {
+        Item::Struct { name, fields, .. } => {
+            assert_eq!(name, "C");
+            assert_eq!(fields.len(), 3);
+            assert_eq!(fields[0].name, "a");
+            assert_eq!(fields[1].name, "b");
+            assert_eq!(fields[2].name, "c");
+        }
+        _ => panic!("expected Item::Struct, got {:?}", item),
+    }
+}
+
+#[test]
+fn test_convert_type_alias_intersection_optional_field_generates_option() {
+    let decl = parse_type_alias("type C = { name: string } & { nick?: string };");
+    let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+    match item {
+        Item::Struct { fields, .. } => {
+            assert_eq!(fields.len(), 2);
+            assert_eq!(fields[0].name, "name");
+            assert_eq!(fields[0].ty, RustType::String);
+            assert_eq!(fields[1].name, "nick");
+            assert_eq!(fields[1].ty, RustType::Option(Box::new(RustType::String)));
+        }
+        _ => panic!("expected Item::Struct, got {:?}", item),
+    }
+}
+
+#[test]
+fn test_convert_type_alias_intersection_duplicate_field_returns_error() {
+    let decl = parse_type_alias("type C = { x: string } & { x: number };");
+    let result = convert_type_alias(&decl, Visibility::Public);
+    assert!(result.is_err());
+    let err_msg = result.unwrap_err().to_string();
+    assert!(
+        err_msg.contains("duplicate field"),
+        "expected 'duplicate field' in error, got: {err_msg}"
+    );
+}
+
+#[test]
+fn test_convert_type_alias_intersection_type_ref_returns_error() {
+    let decl = parse_type_alias("type C = Foo & Bar;");
+    let result = convert_type_alias(&decl, Visibility::Public);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_convert_ts_type_intersection_returns_error_with_clear_message() {
+    let decl = parse_interface("interface T { x: { a: string } & { b: number }; }");
+    let prop = match &decl.body.body[0] {
+        TsTypeElement::TsPropertySignature(p) => p,
+        _ => panic!("expected property signature"),
+    };
+    let result = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann);
+    assert!(result.is_err());
+    let err_msg = result.unwrap_err().to_string();
+    assert!(
+        err_msg.contains("intersection"),
+        "expected 'intersection' in error, got: {err_msg}"
+    );
+}

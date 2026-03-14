@@ -29,6 +29,8 @@ pub struct ClassInfo {
     pub vis: Visibility,
     /// Interface names from `implements` clause
     pub implements: Vec<String>,
+    /// Whether this class is abstract
+    pub is_abstract: bool,
 }
 
 /// Extracts [`ClassInfo`] from an SWC class declaration without generating IR items.
@@ -88,6 +90,7 @@ pub fn extract_class_info(
         methods,
         vis,
         implements,
+        is_abstract: class_decl.class.is_abstract,
     })
 }
 
@@ -105,7 +108,11 @@ pub fn convert_class_decl(
     reg: &TypeRegistry,
 ) -> Result<Vec<Item>> {
     let info = extract_class_info(class_decl, vis, reg)?;
-    generate_items_for_class(&info, None)
+    if info.is_abstract {
+        generate_abstract_class_items(&info)
+    } else {
+        generate_items_for_class(&info, None)
+    }
 }
 
 /// Generates IR items for a class, optionally with a parent class for inheritance.
@@ -180,6 +187,75 @@ pub fn generate_parent_class_items(info: &ClassInfo) -> Result<Vec<Item>> {
             struct_name: info.name.clone(),
             for_trait: Some(trait_name),
             methods: trait_impl_methods,
+        });
+    }
+
+    Ok(items)
+}
+
+/// Generates IR items for an abstract class as a trait.
+///
+/// Abstract methods become trait method signatures (no body).
+/// Concrete methods become default implementations.
+pub fn generate_abstract_class_items(info: &ClassInfo) -> Result<Vec<Item>> {
+    let methods: Vec<Method> = info
+        .methods
+        .iter()
+        .map(|m| Method {
+            vis: Visibility::Private, // trait methods have no visibility modifier
+            has_self: true,
+            has_mut_self: m.has_mut_self,
+            ..m.clone()
+        })
+        .collect();
+
+    Ok(vec![Item::Trait {
+        vis: info.vis.clone(),
+        name: info.name.clone(),
+        methods,
+    }])
+}
+
+/// Generates IR items for a concrete class that extends an abstract class.
+///
+/// Produces: struct + impl (constructor + own non-override methods) + impl Trait for Struct
+pub fn generate_child_of_abstract(
+    info: &ClassInfo,
+    abstract_trait_name: &str,
+) -> Result<Vec<Item>> {
+    let mut items = Vec::new();
+
+    // 1. Struct
+    items.push(Item::Struct {
+        vis: info.vis.clone(),
+        name: info.name.clone(),
+        type_params: vec![],
+        fields: info.fields.clone(),
+    });
+
+    // 2. impl (constructor only)
+    if let Some(ctor) = &info.constructor {
+        items.push(Item::Impl {
+            struct_name: info.name.clone(),
+            for_trait: None,
+            methods: vec![ctor.clone()],
+        });
+    }
+
+    // 3. impl AbstractTrait for Struct (all methods)
+    if !info.methods.is_empty() {
+        let trait_methods: Vec<Method> = info
+            .methods
+            .iter()
+            .map(|m| Method {
+                vis: Visibility::Private, // trait impl methods have no visibility
+                ..m.clone()
+            })
+            .collect();
+        items.push(Item::Impl {
+            struct_name: info.name.clone(),
+            for_trait: Some(abstract_trait_name.to_string()),
+            methods: trait_methods,
         });
     }
 
@@ -729,6 +805,73 @@ mod tests {
                 assert!(!methods[0].body.is_empty());
             }
             _ => panic!("expected Impl"),
+        }
+    }
+
+    #[test]
+    fn test_extract_class_info_abstract_flag_is_true() {
+        let decl = parse_class_decl("abstract class Shape { abstract area(): number; }");
+        let info = extract_class_info(&decl, Visibility::Private, &TypeRegistry::new()).unwrap();
+        assert!(info.is_abstract);
+    }
+
+    #[test]
+    fn test_convert_abstract_class_abstract_only_generates_trait() {
+        let decl = parse_class_decl("abstract class Shape { abstract area(): number; }");
+        let items = convert_class_decl(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
+        // Should produce a single Trait item, not Struct + Impl
+        assert_eq!(items.len(), 1);
+        match &items[0] {
+            Item::Trait {
+                vis, name, methods, ..
+            } => {
+                assert_eq!(*vis, Visibility::Public);
+                assert_eq!(name, "Shape");
+                assert_eq!(methods.len(), 1);
+                assert_eq!(methods[0].name, "area");
+                assert!(
+                    methods[0].body.is_empty(),
+                    "abstract method should have no body"
+                );
+                assert_eq!(methods[0].return_type, Some(RustType::F64));
+            }
+            _ => panic!("expected Item::Trait, got {:?}", items[0]),
+        }
+    }
+
+    #[test]
+    fn test_convert_abstract_class_mixed_generates_trait_with_defaults() {
+        let decl = parse_class_decl(
+            "abstract class Shape { abstract area(): number; describe(): string { return \"shape\"; } }",
+        );
+        let items = convert_class_decl(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
+        assert_eq!(items.len(), 1);
+        match &items[0] {
+            Item::Trait { methods, .. } => {
+                assert_eq!(methods.len(), 2);
+                // abstract method: no body
+                assert_eq!(methods[0].name, "area");
+                assert!(methods[0].body.is_empty());
+                // concrete method: has body (default impl)
+                assert_eq!(methods[1].name, "describe");
+                assert!(!methods[1].body.is_empty());
+            }
+            _ => panic!("expected Item::Trait, got {:?}", items[0]),
+        }
+    }
+
+    #[test]
+    fn test_convert_abstract_class_concrete_only_generates_trait_with_defaults() {
+        let decl = parse_class_decl("abstract class Foo { bar(): number { return 1; } }");
+        let items = convert_class_decl(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
+        assert_eq!(items.len(), 1);
+        match &items[0] {
+            Item::Trait { methods, .. } => {
+                assert_eq!(methods.len(), 1);
+                assert_eq!(methods[0].name, "bar");
+                assert!(!methods[0].body.is_empty());
+            }
+            _ => panic!("expected Item::Trait, got {:?}", items[0]),
         }
     }
 }

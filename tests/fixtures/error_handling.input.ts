@@ -15,3 +15,29 @@ export function safeDivide(a: number, b: number): number {
     }
     return a / b;
 }
+
+function withTryCatch(): void {
+    try {
+        riskyOperation();
+    } catch (e) {
+        console.error(e);
+    }
+}
+
+function withTryFinally(): void {
+    try {
+        riskyOperation();
+    } finally {
+        console.log("cleanup");
+    }
+}
+
+function withTryCatchFinally(): void {
+    try {
+        riskyOperation();
+    } catch (e) {
+        console.error(e);
+    } finally {
+        console.log("done");
+    }
+}

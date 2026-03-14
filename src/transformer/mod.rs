@@ -429,13 +429,21 @@ fn transform_class_with_inheritance(
     let info = classes::extract_class_info(class_decl, vis, reg)?;
     let parent_names = find_parent_class_names(class_map);
 
-    if parent_names.contains(&info.name) {
+    if info.is_abstract {
+        // Abstract class — generate trait (not struct)
+        classes::generate_abstract_class_items(&info)
+    } else if parent_names.contains(&info.name) {
         // This class is a parent — generate struct + trait + impls
         classes::generate_parent_class_items(&info)
     } else if let Some(parent_name) = &info.parent {
-        // This class is a child — generate struct + impl + trait impl
         let parent_info = class_map.get(parent_name);
-        classes::generate_items_for_class(&info, parent_info)
+        if parent_info.is_some_and(|p| p.is_abstract) {
+            // Parent is abstract — generate struct + impl AbstractParent for Child
+            classes::generate_child_of_abstract(&info, parent_name)
+        } else {
+            // This class is a child — generate struct + impl + trait impl
+            classes::generate_items_for_class(&info, parent_info)
+        }
     } else if !info.implements.is_empty() {
         // Class implements interfaces — split methods into trait impls
         generate_class_with_implements(&info, iface_methods)

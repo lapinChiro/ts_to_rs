@@ -1,0 +1,26 @@
+---
+source: tests/integration_test.rs
+expression: output
+---
+trait Shape {
+    fn area(&self) -> f64;
+    fn describe(&self) -> String {
+        "I am a shape".to_string()
+    }
+}
+
+struct Circle {
+    radius: f64,
+}
+
+impl Circle {
+    fn new(radius: f64) -> Self {
+        Self { radius }
+    }
+}
+
+impl Shape for Circle {
+    fn area(&self) -> f64 {
+        3.14 * self.radius * self.radius
+    }
+}

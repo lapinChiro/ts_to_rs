@@ -146,6 +146,51 @@ pub(super) fn generate_stmt(stmt: &Stmt, indent: usize, is_last_in_fn: bool) -> 
         Stmt::Expr(expr) => {
             format!("{pad}{};", generate_expr(expr))
         }
+        Stmt::TryCatch {
+            try_body,
+            catch_param,
+            catch_body,
+            finally_body,
+        } => {
+            let mut lines = Vec::new();
+            let inner_pad = "    ".repeat(indent + 1);
+
+            // Emit scopeguard for finally block
+            if let Some(finally_stmts) = finally_body {
+                lines.push(format!(
+                    "{pad}let _finally_guard = scopeguard::guard((), |_| {{"
+                ));
+                for s in finally_stmts {
+                    lines.push(generate_stmt(s, indent + 1, false));
+                }
+                lines.push(format!("{pad}}});"));
+            }
+
+            // Emit try/catch as immediately-invoked closure + match
+            if let Some(catch_stmts) = catch_body {
+                let param_name = catch_param.as_deref().unwrap_or("_e");
+                lines.push(format!("{pad}match (|| -> Result<(), String> {{"));
+                for s in try_body {
+                    lines.push(generate_stmt(s, indent + 1, false));
+                }
+                lines.push(format!("{inner_pad}Ok(())"));
+                lines.push(format!("{pad}}})() {{"));
+                lines.push(format!("{inner_pad}Err({param_name}) => {{"));
+                for s in catch_stmts {
+                    lines.push(generate_stmt(s, indent + 2, false));
+                }
+                lines.push(format!("{inner_pad}}}"));
+                lines.push(format!("{inner_pad}_ => {{}}"));
+                lines.push(format!("{pad}}}"));
+            } else {
+                // No catch block — just emit try body inline
+                for s in try_body {
+                    lines.push(generate_stmt(s, indent, false));
+                }
+            }
+
+            lines.join("\n")
+        }
     }
 }
 
@@ -492,6 +537,139 @@ fn f() {
     return;
 }";
         assert_eq!(generate(&[item]), expected);
+    }
+
+    #[test]
+    fn test_generate_stmt_try_catch_generates_closure_match() {
+        let item = Item::Fn {
+            vis: Visibility::Private,
+            is_async: false,
+            name: "f".to_string(),
+            type_params: vec![],
+            params: vec![],
+            return_type: None,
+            body: vec![Stmt::TryCatch {
+                try_body: vec![Stmt::Expr(Expr::FnCall {
+                    name: "do_something".to_string(),
+                    args: vec![],
+                })],
+                catch_param: Some("e".to_string()),
+                catch_body: Some(vec![Stmt::Expr(Expr::MacroCall {
+                    name: "eprintln".to_string(),
+                    args: vec![
+                        Expr::StringLit("{}".to_string()),
+                        Expr::Ident("e".to_string()),
+                    ],
+                })]),
+                finally_body: None,
+            }],
+        };
+        let output = generate(&[item]);
+        assert!(
+            output.contains("match (|| -> Result<(), String> {"),
+            "expected closure match, got:\n{output}"
+        );
+        assert!(
+            output.contains("do_something()"),
+            "expected try body, got:\n{output}"
+        );
+        assert!(
+            output.contains("Err(e) => {"),
+            "expected catch arm, got:\n{output}"
+        );
+        assert!(
+            output.contains("eprintln!"),
+            "expected catch body, got:\n{output}"
+        );
+        assert!(
+            !output.contains("scopeguard"),
+            "should not contain scopeguard without finally, got:\n{output}"
+        );
+    }
+
+    #[test]
+    fn test_generate_stmt_try_finally_generates_scopeguard() {
+        let item = Item::Fn {
+            vis: Visibility::Private,
+            is_async: false,
+            name: "f".to_string(),
+            type_params: vec![],
+            params: vec![],
+            return_type: None,
+            body: vec![Stmt::TryCatch {
+                try_body: vec![Stmt::Expr(Expr::FnCall {
+                    name: "do_something".to_string(),
+                    args: vec![],
+                })],
+                catch_param: None,
+                catch_body: None,
+                finally_body: Some(vec![Stmt::Expr(Expr::FnCall {
+                    name: "cleanup".to_string(),
+                    args: vec![],
+                })]),
+            }],
+        };
+        let output = generate(&[item]);
+        assert!(
+            output.contains("scopeguard::guard((), |_|"),
+            "expected scopeguard, got:\n{output}"
+        );
+        assert!(
+            output.contains("cleanup()"),
+            "expected finally body, got:\n{output}"
+        );
+        assert!(
+            output.contains("do_something()"),
+            "expected try body, got:\n{output}"
+        );
+        assert!(
+            !output.contains("match (||"),
+            "should not contain match without catch, got:\n{output}"
+        );
+    }
+
+    #[test]
+    fn test_generate_stmt_try_catch_finally_generates_both() {
+        let item = Item::Fn {
+            vis: Visibility::Private,
+            is_async: false,
+            name: "f".to_string(),
+            type_params: vec![],
+            params: vec![],
+            return_type: None,
+            body: vec![Stmt::TryCatch {
+                try_body: vec![Stmt::Expr(Expr::FnCall {
+                    name: "do_something".to_string(),
+                    args: vec![],
+                })],
+                catch_param: Some("e".to_string()),
+                catch_body: Some(vec![Stmt::Expr(Expr::FnCall {
+                    name: "handle_error".to_string(),
+                    args: vec![Expr::Ident("e".to_string())],
+                })]),
+                finally_body: Some(vec![Stmt::Expr(Expr::FnCall {
+                    name: "cleanup".to_string(),
+                    args: vec![],
+                })]),
+            }],
+        };
+        let output = generate(&[item]);
+        assert!(
+            output.contains("scopeguard::guard((), |_|"),
+            "expected scopeguard, got:\n{output}"
+        );
+        assert!(
+            output.contains("match (|| -> Result<(), String> {"),
+            "expected closure match, got:\n{output}"
+        );
+        assert!(
+            output.contains("cleanup()"),
+            "expected finally body in scopeguard, got:\n{output}"
+        );
+        assert!(
+            output.contains("Err(e) => {"),
+            "expected catch arm, got:\n{output}"
+        );
     }
 
     #[test]

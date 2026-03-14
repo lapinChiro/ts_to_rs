@@ -183,38 +183,123 @@ fn test_convert_stmt_while() {
 }
 
 #[test]
-fn test_convert_stmt_list_try_catch_expands_try_body() {
+fn test_convert_stmt_list_try_catch_generates_try_catch_ir() {
     let stmts =
         parse_fn_body("function f() { try { const x = 1; return x; } catch (e) { return 0; } }");
-    // try/catch is expanded: try body is inlined, catch is dropped
     let result = convert_stmt_list(&stmts, &TypeRegistry::new(), None).unwrap();
-    assert_eq!(result.len(), 2);
-    assert_eq!(
-        result[0],
-        Stmt::Let {
-            mutable: false,
-            name: "x".to_string(),
-            ty: None,
-            init: Some(Expr::NumberLit(1.0)),
+    assert_eq!(result.len(), 1);
+    match &result[0] {
+        Stmt::TryCatch {
+            try_body,
+            catch_param,
+            catch_body,
+            finally_body,
+        } => {
+            assert_eq!(try_body.len(), 2);
+            assert_eq!(catch_param, &Some("e".to_string()));
+            assert!(catch_body.is_some());
+            assert_eq!(catch_body.as_ref().unwrap().len(), 1);
+            assert!(finally_body.is_none());
         }
-    );
-    assert_eq!(result[1], Stmt::Return(Some(Expr::Ident("x".to_string()))));
+        _ => panic!("expected Stmt::TryCatch, got {:?}", result[0]),
+    }
 }
 
 #[test]
-fn test_convert_stmt_list_try_catch_empty_catch() {
+fn test_convert_stmt_list_try_catch_empty_catch_generates_try_catch_ir() {
     let stmts = parse_fn_body("function f() { try { const x = 1; } catch (e) { } }");
     let result = convert_stmt_list(&stmts, &TypeRegistry::new(), None).unwrap();
     assert_eq!(result.len(), 1);
-    assert_eq!(
-        result[0],
-        Stmt::Let {
-            mutable: false,
-            name: "x".to_string(),
-            ty: None,
-            init: Some(Expr::NumberLit(1.0)),
+    match &result[0] {
+        Stmt::TryCatch {
+            try_body,
+            catch_param,
+            catch_body,
+            finally_body,
+        } => {
+            assert_eq!(try_body.len(), 1);
+            assert_eq!(catch_param, &Some("e".to_string()));
+            assert!(catch_body.is_some());
+            assert_eq!(catch_body.as_ref().unwrap().len(), 0);
+            assert!(finally_body.is_none());
         }
+        _ => panic!("expected Stmt::TryCatch, got {:?}", result[0]),
+    }
+}
+
+#[test]
+fn test_convert_stmt_list_try_finally_generates_try_catch_ir() {
+    let stmts = parse_fn_body("function f() { try { const x = 1; } finally { const y = 2; } }");
+    let result = convert_stmt_list(&stmts, &TypeRegistry::new(), None).unwrap();
+    assert_eq!(result.len(), 1);
+    match &result[0] {
+        Stmt::TryCatch {
+            try_body,
+            catch_param,
+            catch_body,
+            finally_body,
+        } => {
+            assert_eq!(try_body.len(), 1);
+            assert!(catch_param.is_none());
+            assert!(catch_body.is_none());
+            assert!(finally_body.is_some());
+            assert_eq!(finally_body.as_ref().unwrap().len(), 1);
+        }
+        _ => panic!("expected Stmt::TryCatch, got {:?}", result[0]),
+    }
+}
+
+#[test]
+fn test_convert_stmt_list_try_catch_finally_generates_try_catch_ir() {
+    let stmts = parse_fn_body(
+        "function f() { try { const x = 1; } catch (e) { const y = 2; } finally { const z = 3; } }",
     );
+    let result = convert_stmt_list(&stmts, &TypeRegistry::new(), None).unwrap();
+    assert_eq!(result.len(), 1);
+    match &result[0] {
+        Stmt::TryCatch {
+            try_body,
+            catch_param,
+            catch_body,
+            finally_body,
+        } => {
+            assert_eq!(try_body.len(), 1);
+            assert_eq!(catch_param, &Some("e".to_string()));
+            assert!(catch_body.is_some());
+            assert!(finally_body.is_some());
+        }
+        _ => panic!("expected Stmt::TryCatch, got {:?}", result[0]),
+    }
+}
+
+#[test]
+fn test_convert_stmt_nested_try_catch_generates_nested_try_catch_ir() {
+    let stmts = parse_fn_body(
+        "function f() { try { try { x(); } catch (inner) { y(); } } catch (outer) { z(); } }",
+    );
+    let result = convert_stmt_list(&stmts, &TypeRegistry::new(), None).unwrap();
+    assert_eq!(result.len(), 1);
+    match &result[0] {
+        Stmt::TryCatch {
+            try_body,
+            catch_param,
+            ..
+        } => {
+            assert_eq!(catch_param, &Some("outer".to_string()));
+            // The inner try/catch should be inside try_body
+            assert_eq!(try_body.len(), 1);
+            match &try_body[0] {
+                Stmt::TryCatch {
+                    catch_param: inner_param,
+                    ..
+                } => {
+                    assert_eq!(inner_param, &Some("inner".to_string()));
+                }
+                _ => panic!("expected inner Stmt::TryCatch, got {:?}", try_body[0]),
+            }
+        }
+        _ => panic!("expected Stmt::TryCatch, got {:?}", result[0]),
+    }
 }
 
 #[test]

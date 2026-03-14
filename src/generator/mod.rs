@@ -179,7 +179,22 @@ fn generate_trait_method_sig(method: &Method) -> String {
         Some(ty) => format!(" -> {}", generate_type(ty)),
         None => String::new(),
     };
-    format!("    fn {}({params_str}){ret_str};\n", method.name)
+
+    if method.body.is_empty() {
+        // Abstract method — signature only
+        format!("    fn {}({params_str}){ret_str};\n", method.name)
+    } else {
+        // Default implementation
+        let mut out = format!("    fn {}({params_str}){ret_str} {{\n", method.name);
+        let stmts_len = method.body.len();
+        for (i, stmt) in method.body.iter().enumerate() {
+            let is_last = i == stmts_len - 1;
+            out.push_str(&generate_stmt(stmt, 2, is_last));
+            out.push('\n');
+        }
+        out.push_str("    }\n");
+        out
+    }
 }
 
 /// Generates a method inside an `impl` block.

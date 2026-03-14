@@ -343,6 +343,20 @@ fn test_discriminated_union() {
 }
 
 #[test]
+fn test_intersection_type() {
+    let input = fs::read_to_string("tests/fixtures/intersection-type.input.ts").unwrap();
+    let output = transpile(&input).unwrap();
+    insta::assert_snapshot!(output);
+}
+
+#[test]
+fn test_abstract_class() {
+    let input = fs::read_to_string("tests/fixtures/abstract-class.input.ts").unwrap();
+    let output = transpile(&input).unwrap();
+    insta::assert_snapshot!(output);
+}
+
+#[test]
 fn test_conditional_type() {
     let input = fs::read_to_string("tests/fixtures/conditional-type.input.ts").unwrap();
     let output = transpile(&input).unwrap();

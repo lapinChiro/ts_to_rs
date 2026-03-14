@@ -8,6 +8,48 @@
 
 ---
 
+## 設計上の負債（デザインレビュー report/design-review.md より）
+
+### 要対応
+
+- classes.rs: 5 つのクラス生成関数の統一 **[PRD 化可能]**
+  - `generate_standalone_class`, `generate_parent_class_items`, `generate_child_class`, `generate_abstract_class_items`, `generate_child_of_abstract` が同じ 3 ステップ（struct → trait → impl）を個別実装している
+  - 新パターン追加（abstract + implements 等）のたびにコピペが増える構造。共通ビルダー関数への統一が必要
+  - 詳細: `report/design-review.md` #1
+- classes.rs: super() リライトの positional マッピング修正 **[PRD 化可能]**
+  - `super(arg1, arg2)` を親フィールドにインデックスで対応づけるため、引数数とフィールド数の不一致で未初期化フィールドが発生する
+  - 生成コードが rustc でコンパイルエラーになるケースがある
+  - 詳細: `report/design-review.md` #2
+- ir.rs: BinaryOp/UnaryOp の演算子を enum 化 **[PRD 化可能]**
+  - `op: String` で型安全性がない。generator で演算子優先順位の判定ができず、ネストした演算子でカッコが正しく挿入されない可能性がある
+  - `enum BinaryOp { Add, Sub, Mul, Eq, ... }` に変更し、優先順位テーブルで必要時にカッコ挿入する
+  - 詳細: `report/design-review.md` #3
+
+### 改善推奨
+
+- types/mod.rs: type alias 位置での nullable union の Option ラップ **[PRD 化可能]**
+  - `convert_union_type`（型注記位置）では `T | null` → `Option<T>` が動作するが、`try_convert_general_union`（type alias 位置）では nullable 判定結果が使われていない（TODO コメントあり）
+  - `type MaybeResult = Success | Failure | null` が `Option<enum>` ではなく素の `enum` になる
+  - 詳細: `report/design-review.md` #4
+- ir.rs: TryCatch のエラー型パラメータ化 **[PRD 化可能]**
+  - `Stmt::TryCatch` にエラー型フィールドがなく、generator が `Result<(), String>` をハードコード。try body が値を返す場合に返り値が失われる
+  - 詳細: `report/design-review.md` #5
+- ir.rs: Cast の target を RustType に変更 **[PRD 化可能]**
+  - `Expr::Cast { target: String }` → `Expr::Cast { target: RustType }` にして型安全性を確保
+  - 詳細: `report/design-review.md` #6
+- ir.rs: Method.body を Option に変更 **[PRD 化可能]**
+  - `body: Vec<Stmt>` が trait シグネチャ（空）とデフォルト実装（非空）を兼用。`Option<Vec<Stmt>>` にして `None` = シグネチャ、`Some` = 実装を明確化
+  - 詳細: `report/design-review.md` #7
+- statements/mod.rs: convert_stmt と convert_stmt_list の責務整理 **[PRD 化可能]**
+  - `convert_stmt_list` が分割代入展開・for ループ特殊パターンを前処理し `convert_stmt` に fallback。`convert_stmt` を直接呼ぶと分割代入が処理されない
+  - 詳細: `report/design-review.md` #8
+- functions/mod.rs: デフォルト引数内 extra_items の破棄修正 **[PRD 化可能]**
+  - `convert_default_param` 内の再帰呼び出しでインライン型リテラルから生成される struct 定義が `_extra` として破棄される
+  - 詳細: `report/design-review.md` #9
+- generator: VecSpread 展開・tail expression 判定を transformer へ移動 **[PRD 化可能]**
+  - VecSpread の展開（let 束縛 → 複数文）と tail expression 判定（最後の文で return 省略）が generator の責務になっている。transformer で IR に落とすべき
+  - 詳細: `report/design-review.md` #10
+
 ## 型構文
 
 - discriminated union の拡張パターン
@@ -32,8 +74,15 @@
   - 将来的には interface を trait に変換する際に associated type を生成するか、別の変換戦略が必要
 - mapped type（`type Foo = { [K in keyof T]: V }`）**[PRD 化可能]**
   - Rust のマクロや generics で部分的に表現可能。スコープの絞り込みが必要
-- intersection 型（`A & B`）
-  - **保留**: フィールドの統合は構造的型付けの問題と関連し、設計コストが高い
+- intersection 型の拡張パターン
+  - 名前付き型参照を含む intersection（`type X = Foo & Bar`）— TypeRegistry でフィールド解決が必要。`TsTypeLit` 同士の基本パターンは実装済み
+    - **保留**: TypeRegistry の型解決機能拡張が前提。現在 TypeRegistry は struct のフィールド一覧を保持しているが、intersection のフィールド統合に使う API がない
+  - `TsKeywordType` を含む intersection（`type X = string & { length: number }`）— TS でプリミティブ型にプロパティを追加するパターン。Rust では直接表現できない
+    - **保留**: 需要が低い。Rust では newtype パターンが代替だが、自動変換の設計が未定
+  - intersection + union の複合型（`(A & B) | C`）— intersection と union の両処理を組み合わせる必要がある
+    - 前提の intersection 基本パターンと union 型参照バリアントは実装済み。PRD 化可能な状態
+  - 型注記位置での intersection（`param: A & B`）— type alias 経由でなく直接型注記に書かれるケース。Rust では inline struct を表現できないため、事前に型定義が必要
+    - **保留**: 型注記位置での匿名 struct 生成の設計が必要。intersection 基本パターンの実績を見てから
 - template literal type（`` type Foo = `prefix_${T}` ``）
   - **保留**: Rust に対応する型レベル文字列操作がない。需要が低い
 
@@ -45,8 +94,6 @@
 - `extends` と `implements` の併用（`class Child extends Parent implements Greeter`）**[PRD 化可能]**
   - `extends` の `ParentTrait` と `implements` の trait の間でメソッドが重複する可能性があり、振り分けロジックが複雑
   - `implements` 単独は実装済み
-- `abstract class`（抽象クラス → trait 化）**[PRD 化可能]**
-  - trait パターンは class-inheritance で実装済み
 - `protected` メンバー **[PRD 化可能]**
   - `pub(crate)` への変換等、Discovery で判断可能
 
@@ -57,8 +104,6 @@
 
 ## enum
 
-- const enum **[PRD 化可能]**
-  - 通常 enum と同じ出力にするか、`const` 定義にインライン展開するかは Discovery で判断
 - computed member（`1 << 0` 等の式による値指定）**[PRD 化可能]**
 - heterogeneous enum（数値と文字列が混在）
   - **保留**: Rust に直接対応がなく、TS でも非推奨パターン。需要が低い
@@ -106,8 +151,6 @@
 
 ## エラーハンドリング
 
-- `finally` ブロックの変換 **[PRD 化可能]**
-- ネストした try/catch の変換 **[PRD 化可能]**
 - `anyhow::Error` や独自エラー型への対応
   - **保留**: 初版は `String` 固定。実績データが必要
 
@@ -123,11 +166,11 @@
 - `functions/mod.rs:convert_param` と `classes.rs:convert_param_pat` の統合 **[PRD 化可能]**
   - 同一ロジックの知識の重複
 - transformer/expressions/mod.rs の本体コードのモジュール分割検討 **[PRD 化可能]**
-  - テスト分離後も本体 959 行。メソッドマッピング、組み込み API 変換等を別モジュールに分離する候補
+  - テスト分離後も本体 1,142 行。メソッドマッピング、組み込み API 変換等を別モジュールに分離する候補
 - `generate_class_with_implements` の `classes.rs` への移動 **[PRD 化可能]**
-  - クラスから IR アイテムを生成するロジックだが、`iface_methods` 引数の都合で `mod.rs:452-500` に配置されている。`classes.rs` の他の生成関数（`generate_standalone_class`, `generate_child_class` 等）と同レベルの責務
+  - クラスから IR アイテムを生成するロジックだが、`iface_methods` 引数の都合で `mod.rs:452-500` に配置されている。`classes.rs` の他の生成関数と同レベルの責務
 - `main.rs` のディレクトリ変換ロジック重複の共通化 **[PRD 化可能]**
-  - `transpile_directory`（211-289行）と `transpile_directory_collecting`（125-209行）で Pass1/Pass2/mod.rs生成の ~80行が類似。差異は変換関数の呼び出しと結果収集方法のみ
+  - `transpile_directory` と `transpile_directory_collecting` で Pass1/Pass2/mod.rs 生成の ~80 行が類似。差異は変換関数の呼び出しと結果収集方法のみ
 
 ## 開発基盤・将来課題
 

@@ -19,3 +19,37 @@ pub fn safeDivide(a: f64, b: f64) -> Result<f64, String> {
     }
     Ok(a / b)
 }
+
+fn withTryCatch() {
+    match (|| -> Result<(), String> {
+        riskyOperation();
+        Ok(())
+    })() {
+        Err(e) => {
+            eprintln!("{:?}", e);
+        }
+        _ => {}
+    }
+}
+
+fn withTryFinally() {
+    let _finally_guard = scopeguard::guard((), |_| {
+        println!("cleanup");
+    });
+    riskyOperation();
+}
+
+fn withTryCatchFinally() {
+    let _finally_guard = scopeguard::guard((), |_| {
+        println!("done");
+    });
+    match (|| -> Result<(), String> {
+        riskyOperation();
+        Ok(())
+    })() {
+        Err(e) => {
+            eprintln!("{:?}", e);
+        }
+        _ => {}
+    }
+}

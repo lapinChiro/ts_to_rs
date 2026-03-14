@@ -1,0 +1,19 @@
+---
+source: tests/integration_test.rs
+expression: output
+---
+struct Combined {
+    name: String,
+    age: f64,
+}
+
+struct Triple {
+    a: String,
+    b: f64,
+    c: bool,
+}
+
+struct WithOptional {
+    name: String,
+    nick: Option<String>,
+}

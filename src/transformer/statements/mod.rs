@@ -61,6 +61,7 @@ pub fn convert_stmt(
         }
         ast::Stmt::Labeled(labeled_stmt) => convert_labeled_stmt(labeled_stmt, reg, return_type),
         ast::Stmt::DoWhile(do_while) => convert_do_while_stmt(do_while, reg, return_type),
+        ast::Stmt::Try(try_stmt) => convert_try_stmt(try_stmt, reg, return_type),
         _ => Err(anyhow!("unsupported statement: {:?}", stmt)),
     }
 }
@@ -287,6 +288,54 @@ fn convert_while_stmt(
     })
 }
 
+/// Converts a `try` statement into `Stmt::TryCatch`.
+fn convert_try_stmt(
+    try_stmt: &ast::TryStmt,
+    reg: &TypeRegistry,
+    return_type: Option<&RustType>,
+) -> Result<Stmt> {
+    let try_body: Vec<Stmt> = try_stmt
+        .block
+        .stmts
+        .iter()
+        .map(|s| convert_stmt(s, reg, return_type))
+        .collect::<Result<Vec<_>>>()?;
+
+    let (catch_param, catch_body) = if let Some(handler) = &try_stmt.handler {
+        let param_name = handler.param.as_ref().and_then(|p| match p {
+            swc_ecma_ast::Pat::Ident(ident) => Some(ident.id.sym.to_string()),
+            _ => None,
+        });
+        let body: Vec<Stmt> = handler
+            .body
+            .stmts
+            .iter()
+            .map(|s| convert_stmt(s, reg, return_type))
+            .collect::<Result<Vec<_>>>()?;
+        (param_name, Some(body))
+    } else {
+        (None, None)
+    };
+
+    let finally_body = if let Some(finalizer) = &try_stmt.finalizer {
+        let body: Vec<Stmt> = finalizer
+            .stmts
+            .iter()
+            .map(|s| convert_stmt(s, reg, return_type))
+            .collect::<Result<Vec<_>>>()?;
+        Some(body)
+    } else {
+        None
+    };
+
+    Ok(Stmt::TryCatch {
+        try_body,
+        catch_param,
+        catch_body,
+        finally_body,
+    })
+}
+
 /// Converts a `throw` statement into `return Err(...)`.
 ///
 /// - `throw new Error("msg")` → `return Err("msg".to_string())`
@@ -328,10 +377,10 @@ fn extract_error_message(expr: &ast::Expr, reg: &TypeRegistry) -> Expr {
     }
 }
 
-/// Converts a list of SWC statements into IR statements, expanding `try/catch` blocks inline.
+/// Converts a list of SWC statements into IR statements.
 ///
-/// `try { stmts... } catch (e) { ... }` is expanded to just the try body statements.
-/// The catch block is dropped (throw statements in the try body are already converted to `return Err(...)`).
+/// Handles special cases like `try/catch` blocks, variable destructuring,
+/// and labeled statements that need expansion at the list level.
 pub fn convert_stmt_list(
     stmts: &[ast::Stmt],
     reg: &TypeRegistry,
@@ -341,12 +390,7 @@ pub fn convert_stmt_list(
     for stmt in stmts {
         match stmt {
             ast::Stmt::Try(try_stmt) => {
-                // Expand try body inline
-                for s in &try_stmt.block.stmts {
-                    result.push(convert_stmt(s, reg, return_type)?);
-                }
-                // catch block is dropped — throw is already Err(), and ? propagation
-                // requires function call support which is not yet available
+                result.push(convert_try_stmt(try_stmt, reg, return_type)?);
             }
             ast::Stmt::Decl(ast::Decl::Var(var_decl)) => {
                 if let Some(expanded) = try_convert_object_destructuring(var_decl, reg)? {

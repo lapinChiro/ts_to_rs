@@ -41,3 +41,36 @@ enum StringOrNumber {
     String(String),
     F64(f64),
 }
+
+struct Success {
+}
+
+struct Failure {
+}
+
+struct MyType {
+}
+
+struct Response {
+}
+
+struct Promise<T> {
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum Result {
+    Success(Success),
+    Failure(Failure),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum Mixed {
+    String(String),
+    MyType(MyType),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum AsyncResult {
+    Response(Response),
+    Promise(Promise<Response>),
+}

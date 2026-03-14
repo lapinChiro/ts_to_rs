@@ -47,6 +47,11 @@ pub fn convert_ts_type(ts_type: &TsType) -> Result<RustType> {
         TsType::TsUnionOrIntersectionType(
             swc_ecma_ast::TsUnionOrIntersectionType::TsUnionType(union),
         ) => convert_union_type(union),
+        TsType::TsUnionOrIntersectionType(
+            swc_ecma_ast::TsUnionOrIntersectionType::TsIntersectionType(_),
+        ) => Err(anyhow!(
+            "intersection types are not supported in type annotation position"
+        )),
         TsType::TsParenthesizedType(paren) => convert_ts_type(&paren.type_ann),
         TsType::TsFnOrConstructorType(swc_ecma_ast::TsFnOrConstructorType::TsFnType(fn_type)) => {
             convert_fn_type(fn_type)
@@ -491,6 +496,11 @@ pub fn convert_type_alias(decl: &TsTypeAliasDecl, vis: Visibility) -> Result<Ite
 
     // General union type: `type X = 200 | 404` or `type X = string | number` → enum
     if let Some(item) = try_convert_general_union(decl, vis.clone())? {
+        return Ok(item);
+    }
+
+    // Intersection type: `type X = { a: T } & { b: U }` → struct with merged fields
+    if let Some(item) = try_convert_intersection_type(decl, vis.clone())? {
         return Ok(item);
     }
 
@@ -948,8 +958,9 @@ fn string_to_pascal_case(s: &str) -> String {
 
 /// Tries to convert a type alias with a union type body into an enum.
 ///
-/// Handles numeric literal unions (`type Code = 200 | 404`) and
-/// primitive type unions (`type Value = string | number`).
+/// Handles numeric literal unions (`type Code = 200 | 404`),
+/// primitive type unions (`type Value = string | number`), and
+/// type reference unions (`type R = Success | Failure`).
 /// Returns `None` if the type alias body is not a union type.
 fn try_convert_general_union(decl: &TsTypeAliasDecl, vis: Visibility) -> Result<Option<Item>> {
     let union = match decl.type_ann.as_ref() {
@@ -1029,6 +1040,19 @@ fn try_convert_general_union(decl: &TsTypeAliasDecl, vis: Visibility) -> Result<
                     fields: vec![],
                 });
             }
+            TsType::TsTypeRef(type_ref) => {
+                let rust_type = convert_type_ref(type_ref)?;
+                let variant_name = match &type_ref.type_name {
+                    swc_ecma_ast::TsEntityName::Ident(ident) => ident.sym.to_string(),
+                    _ => return Err(anyhow!("unsupported qualified type name in union")),
+                };
+                variants.push(EnumVariant {
+                    name: variant_name,
+                    value: None,
+                    data: Some(rust_type),
+                    fields: vec![],
+                });
+            }
             _ => return Err(anyhow!("unsupported type in union")),
         }
     }
@@ -1044,14 +1068,66 @@ fn try_convert_general_union(decl: &TsTypeAliasDecl, vis: Visibility) -> Result<
         variants,
     };
 
-    if has_null_or_undefined {
-        // Wrap in Option: `type X = string | number | null` → `Option<EnumName>`
-        // We still emit the enum, but we'd need a TypeAlias wrapping it in Option.
-        // For now, just return the enum (nullable wrapping is a separate concern)
-        Ok(Some(enum_item))
-    } else {
-        Ok(Some(enum_item))
+    // TODO: nullable union (`type X = string | number | null`) should wrap in Option.
+    // Currently we just emit the enum; nullable wrapping is a separate concern.
+    let _ = has_null_or_undefined;
+    Ok(Some(enum_item))
+}
+
+/// Tries to convert a type alias with an intersection type body into a struct.
+///
+/// Handles intersections of object type literals (`{ a: T } & { b: U }`) by merging
+/// all fields into a single struct. Returns `None` if the type alias body is not
+/// an intersection type.
+fn try_convert_intersection_type(decl: &TsTypeAliasDecl, vis: Visibility) -> Result<Option<Item>> {
+    let intersection = match decl.type_ann.as_ref() {
+        TsType::TsUnionOrIntersectionType(
+            swc_ecma_ast::TsUnionOrIntersectionType::TsIntersectionType(i),
+        ) => i,
+        _ => return Ok(None),
+    };
+
+    let mut fields = Vec::new();
+    for ty in &intersection.types {
+        match ty.as_ref() {
+            TsType::TsTypeLit(lit) => {
+                for member in &lit.members {
+                    match member {
+                        TsTypeElement::TsPropertySignature(prop) => {
+                            let field = convert_property_signature(prop)?;
+                            // Check for duplicate field names
+                            if fields.iter().any(|f: &StructField| f.name == field.name) {
+                                return Err(anyhow!(
+                                    "duplicate field '{}' in intersection type",
+                                    field.name
+                                ));
+                            }
+                            fields.push(field);
+                        }
+                        _ => {
+                            return Err(anyhow!(
+                                "unsupported intersection member (only property signatures are supported)"
+                            ));
+                        }
+                    }
+                }
+            }
+            _ => {
+                return Err(anyhow!(
+                    "unsupported intersection member type (only object type literals are supported)"
+                ));
+            }
+        }
     }
+
+    let type_params = extract_type_params(decl.type_params.as_deref());
+
+    Ok(Some(Item::Struct {
+        vis,
+        name: decl.id.sym.to_string(),
+        type_params,
+        fields,
+    }))
 }
 
 /// Converts a TS function type (`(x: number) => string`) into `RustType::Fn`.

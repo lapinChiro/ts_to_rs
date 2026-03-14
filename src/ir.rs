@@ -263,6 +263,20 @@ pub enum Stmt {
     Return(Option<Expr>),
     /// A bare expression statement (e.g., a function call).
     Expr(Expr),
+    /// `try { ... } catch (e) { ... } finally { ... }`
+    ///
+    /// Converted to an immediately-invoked closure + match for try/catch,
+    /// and `scopeguard::guard` for finally.
+    TryCatch {
+        /// Statements inside the `try` block
+        try_body: Vec<Stmt>,
+        /// Catch parameter name (e.g., `e` in `catch (e)`)
+        catch_param: Option<String>,
+        /// Statements inside the `catch` block
+        catch_body: Option<Vec<Stmt>>,
+        /// Statements inside the `finally` block
+        finally_body: Option<Vec<Stmt>>,
+    },
 }
 
 /// An expression.
