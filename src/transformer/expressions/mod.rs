@@ -1007,7 +1007,7 @@ fn convert_object_lit(
     let mut fields = Vec::new();
     let mut base: Option<Box<Expr>> = None;
 
-    for (i, prop) in obj_lit.props.iter().enumerate() {
+    for prop in &obj_lit.props {
         match prop {
             ast::PropOrSpread::Prop(prop) => match prop.as_ref() {
                 ast::Prop::KeyValue(kv) => {
@@ -1037,9 +1037,9 @@ fn convert_object_lit(
                 }
             },
             ast::PropOrSpread::Spread(spread_elem) => {
-                if i != 0 {
+                if base.is_some() {
                     return Err(anyhow!(
-                        "spread in object literal must be the first element"
+                        "multiple spreads in object literal are not supported"
                     ));
                 }
                 let spread_expr = convert_expr(&spread_elem.expr, reg, None)?;

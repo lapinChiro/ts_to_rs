@@ -116,6 +116,8 @@ pub struct Method {
 /// Top-level item in a Rust file or module.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Item {
+    /// A comment block. Each line is prefixed with `// ` in the generated output.
+    Comment(String),
     /// A `use` statement: `use path::{names};` or `pub use path::{names};`
     Use {
         /// Visibility (`Private` for `use`, `Public` for `pub use`)

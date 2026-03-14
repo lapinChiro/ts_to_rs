@@ -490,23 +490,86 @@ fn test_convert_expr_object_literal_without_type_hint_errors() {
 }
 
 #[test]
-fn test_convert_expr_object_spread_not_first_errors() {
-    let swc_expr = parse_var_init("const p: Point = { x: 1, ...other };");
+fn test_convert_expr_object_spread_last_position_expands_remaining_fields() {
+    // { x: 10, ...rest } → Point { x: 10.0, y: rest.y }
+    let swc_expr = parse_var_init("const p: Point = { x: 10, ...rest };");
     let expected = RustType::Named {
         name: "Point".to_string(),
         type_args: vec![],
     };
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), Some(&expected));
-    assert!(result.is_err());
-    assert!(result
-        .unwrap_err()
-        .to_string()
-        .contains("must be the first element"));
+    let mut reg = TypeRegistry::new();
+    use crate::registry::TypeDef;
+    reg.register(
+        "Point".to_string(),
+        TypeDef::Struct {
+            fields: vec![
+                ("x".to_string(), RustType::F64),
+                ("y".to_string(), RustType::F64),
+            ],
+        },
+    );
+    let result = convert_expr(&swc_expr, &reg, Some(&expected)).unwrap();
+    assert_eq!(
+        result,
+        Expr::StructInit {
+            name: "Point".to_string(),
+            fields: vec![
+                ("x".to_string(), Expr::NumberLit(10.0)),
+                (
+                    "y".to_string(),
+                    Expr::FieldAccess {
+                        object: Box::new(Expr::Ident("rest".to_string())),
+                        field: "y".to_string(),
+                    }
+                ),
+            ],
+        }
+    );
+}
+
+#[test]
+fn test_convert_expr_object_spread_middle_position_expands_remaining_fields() {
+    // { a: 1, ...rest, c: 3 } → S { a: 1.0, c: 3.0, b: rest.b }
+    let swc_expr = parse_var_init("const s: S = { a: 1, ...rest, c: 3 };");
+    let expected = RustType::Named {
+        name: "S".to_string(),
+        type_args: vec![],
+    };
+    let mut reg = TypeRegistry::new();
+    use crate::registry::TypeDef;
+    reg.register(
+        "S".to_string(),
+        TypeDef::Struct {
+            fields: vec![
+                ("a".to_string(), RustType::F64),
+                ("b".to_string(), RustType::F64),
+                ("c".to_string(), RustType::F64),
+            ],
+        },
+    );
+    let result = convert_expr(&swc_expr, &reg, Some(&expected)).unwrap();
+    assert_eq!(
+        result,
+        Expr::StructInit {
+            name: "S".to_string(),
+            fields: vec![
+                ("a".to_string(), Expr::NumberLit(1.0)),
+                ("c".to_string(), Expr::NumberLit(3.0)),
+                (
+                    "b".to_string(),
+                    Expr::FieldAccess {
+                        object: Box::new(Expr::Ident("rest".to_string())),
+                        field: "b".to_string(),
+                    }
+                ),
+            ],
+        }
+    );
 }
 
 #[test]
 fn test_convert_expr_object_spread_multiple_errors() {
-    // {...a, ...b} — second spread at index 1 triggers "must be the first element"
+    // {...a, ...b} — multiple spreads are not supported
     let swc_expr = parse_var_init("const p: Point = { ...a, ...b };");
     let expected = RustType::Named {
         name: "Point".to_string(),
@@ -514,10 +577,7 @@ fn test_convert_expr_object_spread_multiple_errors() {
     };
     let result = convert_expr(&swc_expr, &TypeRegistry::new(), Some(&expected));
     assert!(result.is_err());
-    assert!(result
-        .unwrap_err()
-        .to_string()
-        .contains("must be the first element"));
+    assert!(result.unwrap_err().to_string().contains("multiple spreads"));
 }
 
 #[test]

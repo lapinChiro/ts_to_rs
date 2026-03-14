@@ -277,6 +277,45 @@ fn convert_method_signature(sig: &TsMethodSignature) -> Result<Method> {
     })
 }
 
+/// Converts a [`TsTypeAliasDecl`] into one or more IR items.
+///
+/// Most type aliases produce a single item. Conditional type fallbacks produce
+/// a `Comment` item followed by a placeholder `TypeAlias`.
+pub fn convert_type_alias_items(decl: &TsTypeAliasDecl, vis: Visibility) -> Result<Vec<Item>> {
+    // Conditional type may produce multiple items (comment + placeholder)
+    if let TsType::TsConditionalType(cond) = decl.type_ann.as_ref() {
+        let name = decl.id.sym.to_string();
+        let type_params = extract_type_params(decl.type_params.as_deref());
+
+        match convert_conditional_type(cond) {
+            Ok(ty) => {
+                return Ok(vec![Item::TypeAlias {
+                    vis,
+                    name,
+                    type_params,
+                    ty,
+                }]);
+            }
+            Err(_) => {
+                let comment =
+                    format!("TODO: Conditional type not auto-converted\nOriginal TS: type {name}",);
+                return Ok(vec![
+                    Item::Comment(comment),
+                    Item::TypeAlias {
+                        vis,
+                        name,
+                        type_params,
+                        ty: RustType::Unit,
+                    },
+                ]);
+            }
+        }
+    }
+
+    let item = convert_type_alias(decl, vis)?;
+    Ok(vec![item])
+}
+
 /// Converts a [`TsTypeAliasDecl`] into an IR item.
 ///
 /// - String literal union → `Item::Enum`
@@ -413,6 +452,97 @@ fn try_convert_tuple_type_alias(decl: &TsTypeAliasDecl, vis: Visibility) -> Resu
         type_params,
         ty: RustType::Tuple(elems),
     }))
+}
+
+/// Converts a conditional type expression to a [`RustType`].
+///
+/// Detects patterns and converts accordingly:
+/// - `infer` extraction: `T extends Foo<infer U> ? U : never` → `<T as Foo>::Output`
+/// - Type predicate (`true`/`false` branches): `T extends X ? true : false` → `bool`
+/// - Other patterns: returns the true branch type
+fn convert_conditional_type(cond: &swc_ecma_ast::TsConditionalType) -> Result<RustType> {
+    // Pattern: infer extraction — `T extends Foo<infer U> ? U : never`
+    if let Some(ty) = try_convert_infer_pattern(cond)? {
+        return Ok(ty);
+    }
+
+    // Pattern: type predicate — `T extends X ? true : false`
+    if is_true_false_literal(&cond.true_type, &cond.false_type) {
+        return Ok(RustType::Bool);
+    }
+
+    // Default: use the true branch type
+    convert_ts_type(&cond.true_type)
+}
+
+/// Checks if the true/false branches are `true` and `false` literal types.
+fn is_true_false_literal(true_type: &TsType, false_type: &TsType) -> bool {
+    let is_true_lit = matches!(
+        true_type,
+        TsType::TsLitType(lit) if matches!(&lit.lit, swc_ecma_ast::TsLit::Bool(b) if b.value)
+    );
+    let is_false_lit = matches!(
+        false_type,
+        TsType::TsLitType(lit) if matches!(&lit.lit, swc_ecma_ast::TsLit::Bool(b) if !b.value)
+    );
+    is_true_lit && is_false_lit
+}
+
+/// Tries to detect the `infer` extraction pattern:
+/// `T extends Foo<infer U> ? U : never` → `<T as Foo>::Output`
+///
+/// Returns `Some(RustType)` if the pattern matches, `None` otherwise.
+fn try_convert_infer_pattern(cond: &swc_ecma_ast::TsConditionalType) -> Result<Option<RustType>> {
+    // false_type must be `never`
+    if !matches!(
+        cond.false_type.as_ref(),
+        TsType::TsKeywordType(kw) if kw.kind == TsKeywordTypeKind::TsNeverKeyword
+    ) {
+        return Ok(None);
+    }
+
+    // extends_type must contain an `infer` type parameter
+    let (container_name, _infer_param) = match extract_infer_info(&cond.extends_type) {
+        Some(info) => info,
+        None => return Ok(None),
+    };
+
+    // check_type should be a type reference (T)
+    let check_name = match cond.check_type.as_ref() {
+        TsType::TsTypeRef(type_ref) => match &type_ref.type_name {
+            swc_ecma_ast::TsEntityName::Ident(ident) => ident.sym.to_string(),
+            _ => return Ok(None),
+        },
+        _ => return Ok(None),
+    };
+
+    // Generate `<T as Foo>::Output`
+    Ok(Some(RustType::Named {
+        name: format!("<{check_name} as {container_name}>::Output"),
+        type_args: vec![],
+    }))
+}
+
+/// Extracts container name and infer parameter name from a type like `Foo<infer U>`.
+///
+/// Returns `Some((container_name, infer_param_name))` if the pattern matches.
+fn extract_infer_info(extends_type: &TsType) -> Option<(String, String)> {
+    let type_ref = match extends_type {
+        TsType::TsTypeRef(r) => r,
+        _ => return None,
+    };
+    let container_name = match &type_ref.type_name {
+        swc_ecma_ast::TsEntityName::Ident(ident) => ident.sym.to_string(),
+        _ => return None,
+    };
+    let params = type_ref.type_params.as_ref()?;
+    for param in &params.params {
+        if let TsType::TsInferType(infer) = param.as_ref() {
+            let infer_name = infer.type_param.name.sym.to_string();
+            return Some((container_name, infer_name));
+        }
+    }
+    None
 }
 
 /// Tries to convert a type alias with a union body where all members are string literals.
@@ -678,7 +808,7 @@ pub fn extract_type_params(type_params: Option<&swc_ecma_ast::TsTypeParamDecl>) 
 }
 
 /// Converts a property signature into an IR [`StructField`].
-fn convert_property_signature(prop: &TsPropertySignature) -> Result<StructField> {
+pub(crate) fn convert_property_signature(prop: &TsPropertySignature) -> Result<StructField> {
     let field_name = match prop.key.as_ref() {
         Expr::Ident(ident) => ident.sym.to_string(),
         _ => return Err(anyhow!("unsupported property key (only identifiers)")),

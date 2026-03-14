@@ -1,0 +1,20 @@
+---
+source: tests/integration_test.rs
+expression: output
+---
+pub type StringOnly<T> = T;
+
+pub type ToNumber<T> = f64;
+
+pub type IsArray<T> = bool;
+
+pub type Unwrap<T> = <T as Promise>::Output;
+
+// TODO: Conditional type not auto-converted
+// Original TS: type Nested
+
+pub type Nested<T> = ();
+
+pub struct AfterFallback {
+    pub x: f64,
+}

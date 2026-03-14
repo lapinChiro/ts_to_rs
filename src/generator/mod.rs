@@ -30,6 +30,11 @@ pub fn generate(items: &[Item]) -> String {
 /// Generates a single IR item as Rust source code.
 fn generate_item(item: &Item) -> String {
     match item {
+        Item::Comment(text) => text
+            .lines()
+            .map(|line| format!("// {line}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
         Item::Use { vis, path, names } => {
             let vis_prefix = match vis {
                 Visibility::Public => "pub ",

@@ -388,12 +388,12 @@ fn transform_decl(
             Ok((vec![item], vec![]))
         }
         Decl::TsTypeAlias(type_alias_decl) => {
-            let item = types::convert_type_alias(type_alias_decl, vis)?;
-            Ok((vec![item], vec![]))
+            let items = types::convert_type_alias_items(type_alias_decl, vis)?;
+            Ok((items, vec![]))
         }
         Decl::Fn(fn_decl) => {
-            let (item, warnings) = functions::convert_fn_decl(fn_decl, vis, reg, resilient)?;
-            Ok((vec![item], warnings))
+            let (items, warnings) = functions::convert_fn_decl(fn_decl, vis, reg, resilient)?;
+            Ok((items, warnings))
         }
         Decl::Class(class_decl) => {
             let items =

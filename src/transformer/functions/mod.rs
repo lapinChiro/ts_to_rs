@@ -8,7 +8,7 @@ use swc_ecma_ast as ast;
 use crate::ir::{Expr, Item, Param, RustType, Stmt, Visibility};
 use crate::registry::TypeRegistry;
 use crate::transformer::statements::convert_stmt_list;
-use crate::transformer::types::{convert_ts_type, extract_type_params};
+use crate::transformer::types::{convert_property_signature, convert_ts_type, extract_type_params};
 use crate::transformer::{extract_pat_ident_name, extract_prop_name};
 
 /// Converts an SWC [`ast::FnDecl`] into an IR [`Item::Fn`].
@@ -25,16 +25,24 @@ pub fn convert_fn_decl(
     vis: Visibility,
     reg: &TypeRegistry,
     resilient: bool,
-) -> Result<(Item, Vec<String>)> {
+) -> Result<(Vec<Item>, Vec<String>)> {
     let name = fn_decl.ident.sym.to_string();
     let mut fallback_warnings = Vec::new();
+    let mut extra_items = Vec::new();
 
     let mut params = Vec::new();
     let mut destructuring_stmts = Vec::new();
     for param in &fn_decl.function.params {
-        let (p, stmts) = convert_param(&param.pat, resilient, &mut fallback_warnings)?;
+        let (p, stmts, extra) = convert_param(
+            &param.pat,
+            &name,
+            vis.clone(),
+            resilient,
+            &mut fallback_warnings,
+        )?;
         params.push(p);
         destructuring_stmts.extend(stmts);
+        extra_items.extend(extra);
     }
 
     let is_async = fn_decl.function.is_async;
@@ -100,18 +108,17 @@ pub fn convert_fn_decl(
         (return_type, body)
     };
 
-    Ok((
-        Item::Fn {
-            vis,
-            is_async,
-            name,
-            type_params,
-            params,
-            return_type,
-            body,
-        },
-        fallback_warnings,
-    ))
+    extra_items.push(Item::Fn {
+        vis,
+        is_async,
+        name,
+        type_params,
+        params,
+        return_type,
+        body,
+    });
+
+    Ok((extra_items, fallback_warnings))
 }
 
 /// Converts a TypeScript type to an IR type, falling back to [`RustType::Any`] when
@@ -145,28 +152,75 @@ pub(crate) fn convert_ts_type_with_fallback(
 /// When `resilient` is true, unsupported type annotations fall back to [`RustType::Any`].
 fn convert_param(
     pat: &ast::Pat,
+    fn_name: &str,
+    vis: Visibility,
     resilient: bool,
     fallback_warnings: &mut Vec<String>,
-) -> Result<(Param, Vec<Stmt>)> {
+) -> Result<(Param, Vec<Stmt>, Vec<Item>)> {
     match pat {
         ast::Pat::Ident(ident) => {
-            let name = ident.id.sym.to_string();
+            let param_name = ident.id.sym.to_string();
             let ty = ident
                 .type_ann
                 .as_ref()
-                .ok_or_else(|| anyhow!("parameter '{}' has no type annotation", name))?;
+                .ok_or_else(|| anyhow!("parameter '{}' has no type annotation", param_name))?;
+
+            // Check if the type annotation is an inline type literal
+            if let ast::TsType::TsTypeLit(type_lit) = ty.type_ann.as_ref() {
+                let struct_name = to_pascal_case(&format!("{fn_name}_{param_name}"));
+                let mut fields = Vec::new();
+                for member in &type_lit.members {
+                    match member {
+                        ast::TsTypeElement::TsPropertySignature(prop) => {
+                            fields.push(convert_property_signature(prop)?);
+                        }
+                        _ => {
+                            return Err(anyhow!(
+                                "unsupported inline type literal member (only property signatures)"
+                            ))
+                        }
+                    }
+                }
+                let struct_item = Item::Struct {
+                    vis,
+                    name: struct_name.clone(),
+                    type_params: vec![],
+                    fields,
+                };
+                let rust_type = RustType::Named {
+                    name: struct_name,
+                    type_args: vec![],
+                };
+                return Ok((
+                    Param {
+                        name: param_name,
+                        ty: Some(rust_type),
+                    },
+                    vec![],
+                    vec![struct_item],
+                ));
+            }
+
             let rust_type =
                 convert_ts_type_with_fallback(&ty.type_ann, resilient, fallback_warnings)?;
             Ok((
                 Param {
-                    name,
+                    name: param_name,
                     ty: Some(rust_type),
                 },
                 vec![],
+                vec![],
             ))
         }
-        ast::Pat::Object(obj_pat) => convert_object_destructuring_param(obj_pat),
-        ast::Pat::Assign(assign) => convert_default_param(assign, resilient, fallback_warnings),
+        ast::Pat::Object(obj_pat) => {
+            let (param, stmts) = convert_object_destructuring_param(obj_pat)?;
+            Ok((param, stmts, vec![]))
+        }
+        ast::Pat::Assign(assign) => {
+            let (param, stmts) =
+                convert_default_param(assign, fn_name, vis, resilient, fallback_warnings)?;
+            Ok((param, stmts, vec![]))
+        }
         _ => Err(anyhow!("unsupported parameter pattern")),
     }
 }
@@ -177,11 +231,16 @@ fn convert_param(
 /// Example: `(x: number = 0)` → param `x: Option<f64>` + `let x = x.unwrap_or(0.0);`
 fn convert_default_param(
     assign: &ast::AssignPat,
+    fn_name: &str,
+    vis: Visibility,
     resilient: bool,
     fallback_warnings: &mut Vec<String>,
 ) -> Result<(Param, Vec<Stmt>)> {
     // Recursively convert the inner parameter (left side)
-    let (inner_param, mut stmts) = convert_param(&assign.left, resilient, fallback_warnings)?;
+    // Note: extra items from inline type literals in default params are not expected,
+    // but we accept and discard them for API consistency.
+    let (inner_param, mut stmts, _extra) =
+        convert_param(&assign.left, fn_name, vis, resilient, fallback_warnings)?;
     let param_name = inner_param.name.clone();
 
     // Wrap the type in Option<T>
@@ -318,6 +377,24 @@ fn convert_object_destructuring_param(obj_pat: &ast::ObjectPat) -> Result<(Param
     }
 
     Ok((param, stmts))
+}
+
+/// Converts a snake_case name to PascalCase.
+///
+/// Example: `"foo_opts"` → `"FooOpts"`, `"bar_config"` → `"BarConfig"`
+fn to_pascal_case(name: &str) -> String {
+    name.split('_')
+        .map(|part| {
+            let mut chars = part.chars();
+            match chars.next() {
+                Some(c) => {
+                    let upper: String = c.to_uppercase().collect();
+                    upper + chars.as_str()
+                }
+                None => String::new(),
+            }
+        })
+        .collect()
 }
 
 /// Converts a PascalCase name to snake_case.

@@ -848,3 +848,101 @@ fn test_convert_ts_type_indexed_access_non_string_key_returns_error() {
     let result = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann);
     assert!(result.is_err());
 }
+
+#[test]
+fn test_convert_type_alias_conditional_filter_returns_type_alias_with_true_branch() {
+    let decl = parse_type_alias("type Filter<T> = T extends string ? T : never;");
+    let items = convert_type_alias_items(&decl, Visibility::Public).unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(
+        items[0],
+        Item::TypeAlias {
+            vis: Visibility::Public,
+            name: "Filter".to_string(),
+            type_params: vec!["T".to_string()],
+            ty: RustType::Named {
+                name: "T".to_string(),
+                type_args: vec![],
+            },
+        }
+    );
+}
+
+#[test]
+fn test_convert_type_alias_conditional_simple_returns_type_alias_with_true_branch() {
+    let decl = parse_type_alias("type ToNum<T> = T extends string ? number : boolean;");
+    let items = convert_type_alias_items(&decl, Visibility::Public).unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(
+        items[0],
+        Item::TypeAlias {
+            vis: Visibility::Public,
+            name: "ToNum".to_string(),
+            type_params: vec!["T".to_string()],
+            ty: RustType::F64,
+        }
+    );
+}
+
+#[test]
+fn test_convert_type_alias_conditional_predicate_returns_bool() {
+    let decl = parse_type_alias("type IsString<T> = T extends string ? true : false;");
+    let items = convert_type_alias_items(&decl, Visibility::Public).unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(
+        items[0],
+        Item::TypeAlias {
+            vis: Visibility::Public,
+            name: "IsString".to_string(),
+            type_params: vec!["T".to_string()],
+            ty: RustType::Bool,
+        }
+    );
+}
+
+#[test]
+fn test_convert_type_alias_conditional_infer_returns_associated_type() {
+    let decl = parse_type_alias("type Unwrap<T> = T extends Promise<infer U> ? U : never;");
+    let items = convert_type_alias_items(&decl, Visibility::Public).unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(
+        items[0],
+        Item::TypeAlias {
+            vis: Visibility::Public,
+            name: "Unwrap".to_string(),
+            type_params: vec!["T".to_string()],
+            ty: RustType::Named {
+                name: "<T as Promise>::Output".to_string(),
+                type_args: vec![],
+            },
+        }
+    );
+}
+
+#[test]
+fn test_convert_type_alias_conditional_nested_generates_comment_and_placeholder() {
+    // Nested conditional types are not supported by Tier 1 — should produce fallback
+    let decl = parse_type_alias(
+        "type Foo<T> = T extends string ? T extends \"a\" ? number : boolean : never;",
+    );
+    let items = convert_type_alias_items(&decl, Visibility::Public).unwrap();
+    assert_eq!(items.len(), 2);
+    // First item should be a comment containing original TS info
+    match &items[0] {
+        Item::Comment(text) => {
+            assert!(text.contains("TODO"));
+            assert!(text.contains("Foo"));
+        }
+        _ => panic!("expected Item::Comment, got {:?}", items[0]),
+    }
+    // Second item should be a placeholder TypeAlias with Unit type
+    assert_eq!(
+        items[1],
+        Item::TypeAlias {
+            vis: Visibility::Public,
+            name: "Foo".to_string(),
+            type_params: vec!["T".to_string()],
+            ty: RustType::Unit,
+        }
+    );
+}

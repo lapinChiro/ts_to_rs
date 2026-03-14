@@ -320,3 +320,17 @@ fn test_builtin_api_batch() {
     let output = transpile(&input).unwrap();
     insta::assert_snapshot!(output);
 }
+
+#[test]
+fn test_inline_type_literal_param() {
+    let input = fs::read_to_string("tests/fixtures/inline-type-literal-param.input.ts").unwrap();
+    let output = transpile(&input).unwrap();
+    insta::assert_snapshot!(output);
+}
+
+#[test]
+fn test_conditional_type() {
+    let input = fs::read_to_string("tests/fixtures/conditional-type.input.ts").unwrap();
+    let output = transpile(&input).unwrap();
+    insta::assert_snapshot!(output);
+}

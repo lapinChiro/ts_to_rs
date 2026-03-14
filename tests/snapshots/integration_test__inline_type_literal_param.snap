@@ -1,0 +1,20 @@
+---
+source: tests/integration_test.rs
+expression: output
+---
+pub struct CreateUserOpts {
+    pub name: String,
+    pub age: f64,
+}
+
+pub fn createUser(opts: CreateUserOpts) {
+    let n: String = opts.name;
+}
+
+pub struct GreetOpts {
+    pub loud: bool,
+}
+
+pub fn greet(greeting: String, opts: GreetOpts) {
+    let l: bool = opts.loud;
+}
