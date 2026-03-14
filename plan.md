@@ -2,22 +2,20 @@
 
 ## 次のタスク
 
-### フェーズ 1: IR の型安全性強化（設計負債の解消）
+### 実行順序（Hono 変換率 57% → 目標 65%+）
 
-IR の変更は transformer と generator の両方に波及するため、機能追加の前にまとめて行う。
-個別に進めると同じファイルを何度も変更することになり非効率。
+Hono 再評価（`report/hono-rescan-2025-03.md`）と依存関係に基づく実行順序。
 
-### フェーズ 2: 変換精度の向上（機能追加）
-
-フェーズ 1 完了。IR が安定したため、変換率を上げる機能を追加する。
-
-### Tier 1: 正確性・変換率に直結
-
-1. `extends` と `implements` の併用
-2. `protected` メンバー
-3. 配列分割代入の拡張
-4. intersection + union の複合型
-5. computed member（enum）
+1. `backlog/object-keyword-type.md` — `object` keyword 対応（Hono 2件、工数極小）
+2. `backlog/protected-members.md` — `protected` → `pub(crate)`（工数小、#4 の前提）
+3. `backlog/non-nullable-union-annotation.md` — 非 nullable union 型注記（Hono 7件、#8 の前提）
+4. `backlog/extends-implements.md` — `extends` + `implements` 併用
+5. `backlog/computed-enum-member.md` — enum computed member
+6. `backlog/nested-function-decl.md` — ネスト関数宣言（Hono 1件）
+7. `backlog/array-destructuring-ext.md` — 配列分割代入の拡張
+8. `backlog/intersection-union-complex.md` — intersection + union 複合型（#3 の後）
+9. `backlog/stmt-responsibility.md` — convert_stmt 責務整理
+10. `backlog/default-param-extra-items.md` — extra_items 破棄修正
 
 ## Hono 対応の開始条件
 

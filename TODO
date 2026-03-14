@@ -8,70 +8,92 @@
 
 ---
 
+## 変換の論理的正当性チェック
+
+変換によって仕様や挙動が変わっていないかの検証。機能追加の前に、既存の変換結果に対して以下の観点で論理的なチェックを行う必要がある:
+
+- **型の等価性**: TS の型が Rust の型に正しく対応しているか。情報が欠落・追加されていないか
+  - 例: `number` → `f64` は精度の変化（TS の number は IEEE 754 double なので正確だが、整数コンテキストで `i64` を期待するケースがある）
+  - 例: `string | null` → `Option<String>` は正確だが、`string | number` → `enum { String(String), F64(f64) }` は TS のランタイム挙動（typeof 判定等）を保持するか
+- **セマンティクスの保持**: 変換後のコードが元のコードと同じ振る舞いをするか
+  - 例: `try/catch/finally` → scopeguard + 即時実行クロージャは、例外フローのセマンティクスを正しく再現しているか。特に catch 内の return が元の関数の return として機能するか
+  - 例: `throw new Error("msg")` → `return Err("msg".to_string())` は、catch ブロックが `Err` を受け取れる構造になっているか（即時実行クロージャ内で `return Err(...)` すると、クロージャの返り値になるが外側の関数からは return しない）
+  - 例: `super()` → positional field mapping は、TS のコンストラクタチェーンの挙動を正しく再現するか
+- **生成コードのコンパイル可能性**: 生成された Rust コードが rustc でコンパイルできるか
+  - compile_test で一部の fixture は検証済みだが、skip_compile に入っているものは未検証
+  - Hono の変換結果は未検証
+- **エッジケースの網羅**: 境界値や特殊ケースで変換が壊れないか
+  - 空の try/catch、空のクラス、型パラメータなしのジェネリクス等
+
+**[PRD 化可能]** — 調査・テスト強化タスクとして PRD 化可能
+
 ## PRD 化可能（優先度順）
 
-優先度の判断軸: 正確性 > 変換率（実プロジェクトでの効果） > 保守性 > 工数の小ささ
+優先度の判断軸: 正確性 > 変換率（Hono 実測に基づく） > 保守性 > 工数の小ささ
 
-### Tier 1: 正確性・変換率に直結
+### Tier 1: Hono 変換率に直結（report/hono-rescan-2025-03.md より）
 
-1. **`extends` と `implements` の併用** — クラス
-   - `class Child extends Parent implements Greeter` パターン。実プロジェクトで頻出
-   - `implements` 単独・`extends` 単独は実装済み。組み合わせの dispatch ロジック追加
+1. **`object` keyword の型変換対応** — 型構文（Hono 2件解消）
+   - `type Bindings = object` が未対応。`convert_ts_type` に `TsObjectKeyword` 処理を追加
+   - `Box<dyn Any>` または `serde_json::Value` 等への変換。工数小
 
-2. **`protected` メンバー** — クラス
-   - `pub(crate)` への変換。工数小。TS プロジェクトで頻出
+2. **非 nullable union の型注記位置対応** — 型構文（Hono 7件解消）
+   - `Response | Promise<Response>` のような null/undefined を含まない union が型注記位置で出現
+   - `convert_union_type` が `T | null` パターンのみ対応。非 nullable union を enum 的に処理する拡張が必要
+   - 型注記位置での匿名 enum 生成の設計が必要
 
-3. **配列分割代入の拡張** — 分割代入
-   - スキップ `[a, , b]`、rest `[first, ...rest]`、ネスト `[[a], [b]]`
-   - 基本パターン `[a, b]` は実装済み
+3. **`extends` と `implements` の併用** — クラス
+   - `class Child extends Parent implements Greeter` パターン。PRD 化済み（`backlog/extends-implements.md`）
 
-4. **intersection + union の複合型** — 型構文
-   - `(A & B) | C` パターン。前提の intersection・union 両方が実装済み
+4. **`protected` メンバー** — クラス
+   - `pub(crate)` への変換。PRD 化済み（`backlog/protected-members.md`）
 
-5. **computed member（enum）** — enum
-   - `1 << 0` 等のビット演算による値指定。工数小
+5. **名前付き型参照の intersection 対応拡張** — 型構文（Hono 4件解消）
+   - `Response & TypedResponse<T>` のような型参照同士の intersection（型注記位置 2件 + type alias 位置 2件）
+   - TypeRegistry でフィールドを解決するか、フォールバックとして一方の型を採用する設計が必要
+
+### Tier 1.5: 変換率向上（中工数）
+
+6. **配列分割代入の拡張** — 分割代入
+   - PRD 化済み（`backlog/array-destructuring-ext.md`）
+
+7. **intersection + union の複合型** — 型構文
+   - PRD 化済み（`backlog/intersection-union-complex.md`）
+
+8. **computed member（enum）** — enum
+   - PRD 化済み（`backlog/computed-enum-member.md`）
+
+9. **ネスト関数宣言** — 文（Hono 1件）
+   - `compose.ts` 内の `async function dispatch()` がクロージャ内で宣言されている
+   - `convert_stmt` に `Decl::Fn` の処理を追加。ローカル関数としてクロージャに変換
 
 ### Tier 2: 保守性・アーキテクチャ改善
 
-6. **convert_stmt / convert_stmt_list の責務整理** — 設計負債
-   - `convert_stmt` を直接呼ぶと分割代入が処理されない内部 API の安全性問題
-   - 詳細: `report/design-review.md` #8
+10. **convert_stmt / convert_stmt_list の責務整理** — 設計負債
+    - PRD 化済み（`backlog/stmt-responsibility.md`）
 
-7. **デフォルト引数内 extra_items の破棄修正** — 設計負債
-   - `convert_default_param` でインライン型リテラルの struct 定義が `_extra` として破棄される
-   - エッジケースのバグ。詳細: `report/design-review.md` #9
+11. **デフォルト引数内 extra_items の破棄修正** — 設計負債
+    - PRD 化済み（`backlog/default-param-extra-items.md`）
 
-8. **expressions/mod.rs のモジュール分割** — リファクタリング
-   - 1,142 行。メソッドマッピング・組み込み API 変換等を別モジュールに分離
+12. **expressions/mod.rs のモジュール分割** — リファクタリング
+    - 1,142 行。メソッドマッピング・組み込み API 変換等を別モジュールに分離
 
-9. **VecSpread 展開・tail expression 判定を transformer へ移動** — 設計負債
-   - generator が意味的な変換を行っている。transformer で IR に落とすべき
-   - 工数大。詳細: `report/design-review.md` #10
+13. **VecSpread 展開・tail expression 判定を transformer へ移動** — 設計負債
+    - generator が意味的な変換を行っている。工数大
 
 ### Tier 3: あれば便利
 
-10. **optional chaining 内の特殊変換テスト補強** — 演算子
-    - `x?.y?.length` 等のテストケース未実施
-
-11. **Math.random() → `rand` クレート** — 組み込み API
-    - 外部クレート依存が増える点はスコープ判断が必要
-
-12. **indexed access type のコンパイルテスト改善** — 型構文
-    - trait の associated type 生成が必要。工数中〜大
-
-13. **mapped type** — 型構文
-    - `{ [K in keyof T]: V }`。Rust のマクロや generics で部分的に表現可能。スコープ絞り込みが必要
-
-14. **TryCatch のエラー型パラメータ化** — 設計負債
-    - 現時点では実害なし。将来 anyhow 対応時に必要。詳細: `report/design-review.md` #5
+14. **optional chaining 内の特殊変換テスト補強** — 演算子
+15. **Math.random() → `rand` クレート** — 組み込み API
+16. **indexed access type のコンパイルテスト改善** — 型構文
+17. **mapped type** — 型構文
+18. **TryCatch のエラー型パラメータ化** — 設計負債
 
 ## 保留
 
 ### 前提機能の実装待ち
 
 - discriminated union の拡張パターン — 基本パターンの実績を見てから
-- 名前付き型参照の intersection（`Foo & Bar`）— TypeRegistry 拡張が前提
-- 型注記位置での intersection — 匿名 struct 生成の設計が必要
 - optional chaining の `Option` ネスト問題 — 型推論インフラが前提
 - `+x`（数値変換）— 型推論インフラが前提
 - `typeof x`（型チェック）— 型ガード戦略が前提
@@ -96,7 +118,7 @@
 
 ### 需要が低い・スコープ外
 
-- conditional type Tier 3（Hono 固有 24 件）— 各 Group ごとに保留理由あり。詳細: `report/tier3-conditional-types-rust-approaches.md`
+- conditional type Tier 3（Hono 固有 24 件）— 詳細: `report/tier3-conditional-types-rust-approaches.md`
 - heterogeneous enum（数値と文字列の混在）— TS でも非推奨
 - `TsKeywordType` を含む intersection — 需要が低い
 - template literal type — Rust に対応なし
