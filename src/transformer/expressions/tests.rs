@@ -1718,6 +1718,282 @@ fn test_convert_opt_chain_length_returns_len_as_f64() {
 }
 
 #[test]
+fn test_convert_expr_number_is_integer_to_fract() {
+    // Number.isInteger(x) → x.fract() == 0.0
+    let expr = parse_expr("Number.isInteger(x);");
+    let result = convert_expr(&expr, &TypeRegistry::new(), None).unwrap();
+    assert_eq!(
+        result,
+        Expr::BinaryOp {
+            left: Box::new(Expr::MethodCall {
+                object: Box::new(Expr::Ident("x".to_string())),
+                method: "fract".to_string(),
+                args: vec![],
+            }),
+            op: "==".to_string(),
+            right: Box::new(Expr::NumberLit(0.0)),
+        }
+    );
+}
+
+#[test]
+fn test_convert_expr_math_sign_to_signum() {
+    // Math.sign(x) → x.signum()
+    let expr = parse_expr("Math.sign(x);");
+    let result = convert_expr(&expr, &TypeRegistry::new(), None).unwrap();
+    assert_eq!(
+        result,
+        Expr::MethodCall {
+            object: Box::new(Expr::Ident("x".to_string())),
+            method: "signum".to_string(),
+            args: vec![],
+        }
+    );
+}
+
+#[test]
+fn test_convert_expr_math_trunc() {
+    // Math.trunc(x) → x.trunc()
+    let expr = parse_expr("Math.trunc(x);");
+    let result = convert_expr(&expr, &TypeRegistry::new(), None).unwrap();
+    assert_eq!(
+        result,
+        Expr::MethodCall {
+            object: Box::new(Expr::Ident("x".to_string())),
+            method: "trunc".to_string(),
+            args: vec![],
+        }
+    );
+}
+
+#[test]
+fn test_convert_expr_math_log_to_ln() {
+    // Math.log(x) → x.ln()
+    let expr = parse_expr("Math.log(x);");
+    let result = convert_expr(&expr, &TypeRegistry::new(), None).unwrap();
+    assert_eq!(
+        result,
+        Expr::MethodCall {
+            object: Box::new(Expr::Ident("x".to_string())),
+            method: "ln".to_string(),
+            args: vec![],
+        }
+    );
+}
+
+#[test]
+fn test_convert_expr_math_pi_to_consts() {
+    // Math.PI → std::f64::consts::PI
+    let expr = parse_expr("Math.PI;");
+    let result = convert_expr(&expr, &TypeRegistry::new(), None).unwrap();
+    assert_eq!(result, Expr::Ident("std::f64::consts::PI".to_string()));
+}
+
+#[test]
+fn test_convert_expr_math_e_to_consts() {
+    // Math.E → std::f64::consts::E
+    let expr = parse_expr("Math.E;");
+    let result = convert_expr(&expr, &TypeRegistry::new(), None).unwrap();
+    assert_eq!(result, Expr::Ident("std::f64::consts::E".to_string()));
+}
+
+#[test]
+fn test_convert_expr_slice_to_range_to_vec() {
+    // arr.slice(1, 3) → arr[1..3].to_vec()
+    let expr = parse_expr("arr.slice(1, 3);");
+    let result = convert_expr(&expr, &TypeRegistry::new(), None).unwrap();
+    assert_eq!(
+        result,
+        Expr::MethodCall {
+            object: Box::new(Expr::Index {
+                object: Box::new(Expr::Ident("arr".to_string())),
+                index: Box::new(Expr::Range {
+                    start: Box::new(Expr::NumberLit(1.0)),
+                    end: Box::new(Expr::NumberLit(3.0)),
+                }),
+            }),
+            method: "to_vec".to_string(),
+            args: vec![],
+        }
+    );
+}
+
+#[test]
+fn test_convert_expr_splice_to_drain_collect() {
+    // arr.splice(1, 2) → arr.drain(1..3).collect::<Vec<_>>()
+    let expr = parse_expr("arr.splice(1, 2);");
+    let result = convert_expr(&expr, &TypeRegistry::new(), None).unwrap();
+    assert_eq!(
+        result,
+        Expr::MethodCall {
+            object: Box::new(Expr::MethodCall {
+                object: Box::new(Expr::Ident("arr".to_string())),
+                method: "drain".to_string(),
+                args: vec![Expr::Range {
+                    start: Box::new(Expr::NumberLit(1.0)),
+                    end: Box::new(Expr::BinaryOp {
+                        left: Box::new(Expr::NumberLit(1.0)),
+                        op: "+".to_string(),
+                        right: Box::new(Expr::NumberLit(2.0)),
+                    }),
+                }],
+            }),
+            method: "collect::<Vec<_>>".to_string(),
+            args: vec![],
+        }
+    );
+}
+
+#[test]
+fn test_convert_expr_reverse_unchanged() {
+    // arr.reverse() → arr.reverse() (same name, in-place)
+    let expr = parse_expr("arr.reverse();");
+    let result = convert_expr(&expr, &TypeRegistry::new(), None).unwrap();
+    assert_eq!(
+        result,
+        Expr::MethodCall {
+            object: Box::new(Expr::Ident("arr".to_string())),
+            method: "reverse".to_string(),
+            args: vec![],
+        }
+    );
+}
+
+#[test]
+fn test_convert_expr_sort_no_args_unchanged() {
+    // arr.sort() → arr.sort() (same name)
+    let expr = parse_expr("arr.sort();");
+    let result = convert_expr(&expr, &TypeRegistry::new(), None).unwrap();
+    assert_eq!(
+        result,
+        Expr::MethodCall {
+            object: Box::new(Expr::Ident("arr".to_string())),
+            method: "sort".to_string(),
+            args: vec![],
+        }
+    );
+}
+
+#[test]
+fn test_convert_expr_sort_with_comparator_to_sort_by() {
+    // arr.sort((a, b) => a - b) → arr.sort_by(|a, b| a - b)
+    let expr = parse_expr("arr.sort((a, b) => a - b);");
+    let result = convert_expr(&expr, &TypeRegistry::new(), None).unwrap();
+    assert_eq!(
+        result,
+        Expr::MethodCall {
+            object: Box::new(Expr::Ident("arr".to_string())),
+            method: "sort_by".to_string(),
+            args: vec![Expr::Closure {
+                params: vec![
+                    Param {
+                        name: "a".to_string(),
+                        ty: None,
+                    },
+                    Param {
+                        name: "b".to_string(),
+                        ty: None,
+                    },
+                ],
+                return_type: None,
+                body: ClosureBody::Expr(Box::new(Expr::BinaryOp {
+                    left: Box::new(Expr::Ident("a".to_string())),
+                    op: "-".to_string(),
+                    right: Box::new(Expr::Ident("b".to_string())),
+                })),
+            }],
+        }
+    );
+}
+
+#[test]
+fn test_convert_expr_index_of_to_iter_position() {
+    // arr.indexOf(x) → arr.iter().position(|item| *item == x)
+    let expr = parse_expr("arr.indexOf(x);");
+    let result = convert_expr(&expr, &TypeRegistry::new(), None).unwrap();
+    assert_eq!(
+        result,
+        Expr::MethodCall {
+            object: Box::new(Expr::MethodCall {
+                object: Box::new(Expr::Ident("arr".to_string())),
+                method: "iter".to_string(),
+                args: vec![],
+            }),
+            method: "position".to_string(),
+            args: vec![Expr::Closure {
+                params: vec![Param {
+                    name: "item".to_string(),
+                    ty: None,
+                }],
+                return_type: None,
+                body: ClosureBody::Expr(Box::new(Expr::BinaryOp {
+                    left: Box::new(Expr::UnaryOp {
+                        op: "*".to_string(),
+                        operand: Box::new(Expr::Ident("item".to_string())),
+                    }),
+                    op: "==".to_string(),
+                    right: Box::new(Expr::Ident("x".to_string())),
+                })),
+            }],
+        }
+    );
+}
+
+#[test]
+fn test_convert_expr_join_unchanged() {
+    // arr.join(",") → arr.join(",") (same name)
+    let expr = parse_expr("arr.join(\",\");");
+    let result = convert_expr(&expr, &TypeRegistry::new(), None).unwrap();
+    assert_eq!(
+        result,
+        Expr::MethodCall {
+            object: Box::new(Expr::Ident("arr".to_string())),
+            method: "join".to_string(),
+            args: vec![Expr::StringLit(",".to_string())],
+        }
+    );
+}
+
+#[test]
+fn test_convert_expr_reduce_with_init_to_iter_fold() {
+    // arr.reduce((acc, x) => acc + x, 0) → arr.iter().fold(0, |acc, x| acc + x)
+    let expr = parse_expr("arr.reduce((acc, x) => acc + x, 0);");
+    let result = convert_expr(&expr, &TypeRegistry::new(), None).unwrap();
+    assert_eq!(
+        result,
+        Expr::MethodCall {
+            object: Box::new(Expr::MethodCall {
+                object: Box::new(Expr::Ident("arr".to_string())),
+                method: "iter".to_string(),
+                args: vec![],
+            }),
+            method: "fold".to_string(),
+            args: vec![
+                Expr::NumberLit(0.0),
+                Expr::Closure {
+                    params: vec![
+                        Param {
+                            name: "acc".to_string(),
+                            ty: None,
+                        },
+                        Param {
+                            name: "x".to_string(),
+                            ty: None,
+                        },
+                    ],
+                    return_type: None,
+                    body: ClosureBody::Expr(Box::new(Expr::BinaryOp {
+                        left: Box::new(Expr::Ident("acc".to_string())),
+                        op: "+".to_string(),
+                        right: Box::new(Expr::Ident("x".to_string())),
+                    })),
+                },
+            ],
+        }
+    );
+}
+
+#[test]
 fn test_convert_opt_chain_normal_field_unchanged() {
     let expr = parse_expr("x?.y;");
     let result = convert_expr(&expr, &TypeRegistry::new(), None).unwrap();

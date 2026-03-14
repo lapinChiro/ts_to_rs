@@ -313,3 +313,10 @@ fn test_indexed_access_type() {
     let output = transpile(&input).unwrap();
     insta::assert_snapshot!(output);
 }
+
+#[test]
+fn test_builtin_api_batch() {
+    let input = fs::read_to_string("tests/fixtures/builtin-api-batch.input.ts").unwrap();
+    let output = transpile(&input).unwrap();
+    insta::assert_snapshot!(output);
+}

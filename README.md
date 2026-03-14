@@ -98,13 +98,21 @@ ts-to-rs input.ts --report-unsupported
 | `arr.find(fn)` | `arr.iter().find(fn)` |
 | `arr.some(fn)` / `arr.every(fn)` | `arr.iter().any(fn)` / `arr.iter().all(fn)` |
 | `arr.forEach(fn)` | `arr.iter().for_each(fn)` |
+| `arr.reduce(fn, init)` | `arr.iter().fold(init, fn)` |
+| `arr.indexOf(x)` | `arr.iter().position(\|item\| *item == x)` |
+| `arr.sort(fn)` | `arr.sort_by(fn)` |
+| `arr.slice(a, b)` | `arr[a..b].to_vec()` |
+| `arr.splice(a, n)` | `arr.drain(a..a+n).collect::<Vec<_>>()` |
 | `Math.floor(x)` / `Math.ceil(x)` / `Math.round(x)` | `x.floor()` / `x.ceil()` / `x.round()` |
-| `Math.abs(x)` / `Math.sqrt(x)` | `x.abs()` / `x.sqrt()` |
+| `Math.abs(x)` / `Math.sqrt(x)` / `Math.trunc(x)` | `x.abs()` / `x.sqrt()` / `x.trunc()` |
 | `Math.max(a, b)` / `Math.min(a, b)` | `a.max(b)` / `a.min(b)` |
 | `Math.pow(x, y)` | `x.powf(y)` |
+| `Math.sign(x)` / `Math.log(x)` | `x.signum()` / `x.ln()` |
+| `Math.PI` / `Math.E` | `std::f64::consts::PI` / `std::f64::consts::E` |
 | `parseInt(s)` / `parseFloat(s)` | `s.parse::<f64>().unwrap()` |
 | `isNaN(x)` / `Number.isNaN(x)` | `x.is_nan()` |
 | `Number.isFinite(x)` | `x.is_finite()` |
+| `Number.isInteger(x)` | `x.fract() == 0.0` |
 | `[string, number]` (tuple 型) | `(String, f64)` |
 | `type X = "a" \| "b"` (string literal union) | `enum X { A, B }` + `as_str()` |
 | `type X = 200 \| 404` (numeric literal union) | `enum X { V200 = 200, V404 = 404 }` |

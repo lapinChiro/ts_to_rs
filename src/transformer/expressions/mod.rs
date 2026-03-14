@@ -142,6 +142,25 @@ fn resolve_member_access(
         }
     }
 
+    // Math.PI, Math.E etc. → std::f64::consts::PI, std::f64::consts::E
+    if let ast::Expr::Ident(ident) = ts_obj {
+        if ident.sym.as_ref() == "Math" {
+            let const_name = match field {
+                "PI" => Some("PI"),
+                "E" => Some("E"),
+                "LN2" => Some("LN_2"),
+                "LN10" => Some("LN_10"),
+                "LOG2E" => Some("LOG2_E"),
+                "LOG10E" => Some("LOG10_E"),
+                "SQRT2" => Some("SQRT_2"),
+                _ => None,
+            };
+            if let Some(name) = const_name {
+                return Ok(Expr::Ident(format!("std::f64::consts::{name}")));
+            }
+        }
+    }
+
     // .length → .len() as f64
     if field == "length" {
         let len_call = Expr::MethodCall {
@@ -450,7 +469,9 @@ fn convert_call_expr(call: &ast::CallExpr, reg: &TypeRegistry) -> Result<Expr> {
 /// Maps TypeScript method names to Rust equivalents.
 ///
 /// Handles simple renames, methods that need wrapping (e.g., `trim` → `trim().to_string()`),
-/// and methods that need chaining (e.g., `split` → `split(s).collect::<Vec<&str>>()`).
+/// methods that need chaining (e.g., `split` → `split(s).collect::<Vec<&str>>()`),
+/// and array methods (e.g., `reduce` → `iter().fold()`, `indexOf` → `iter().position()`,
+/// `slice` → `[a..b].to_vec()`, `splice` → `drain().collect()`).
 fn map_method_call(object: Expr, method: &str, args: Vec<Expr>) -> Expr {
     match method {
         // Simple name mappings
@@ -554,6 +575,134 @@ fn map_method_call(object: Expr, method: &str, args: Vec<Expr>) -> Expr {
                 args,
             }
         }
+        // slice(start, end) → [start..end].to_vec()
+        "slice" => {
+            if args.len() != 2 {
+                return Expr::MethodCall {
+                    object: Box::new(object),
+                    method: method.to_string(),
+                    args,
+                };
+            }
+            let mut iter = args.into_iter();
+            let start = iter.next().unwrap();
+            let end = iter.next().unwrap();
+            Expr::MethodCall {
+                object: Box::new(Expr::Index {
+                    object: Box::new(object),
+                    index: Box::new(Expr::Range {
+                        start: Box::new(start),
+                        end: Box::new(end),
+                    }),
+                }),
+                method: "to_vec".to_string(),
+                args: vec![],
+            }
+        }
+        // splice(start, count) → .drain(start..start+count).collect::<Vec<_>>()
+        "splice" => {
+            if args.len() != 2 {
+                return Expr::MethodCall {
+                    object: Box::new(object),
+                    method: method.to_string(),
+                    args,
+                };
+            }
+            let mut iter = args.into_iter();
+            let start = iter.next().unwrap();
+            let count = iter.next().unwrap();
+            let end = Expr::BinaryOp {
+                left: Box::new(start.clone()),
+                op: "+".to_string(),
+                right: Box::new(count),
+            };
+            let drain_call = Expr::MethodCall {
+                object: Box::new(object),
+                method: "drain".to_string(),
+                args: vec![Expr::Range {
+                    start: Box::new(start),
+                    end: Box::new(end),
+                }],
+            };
+            Expr::MethodCall {
+                object: Box::new(drain_call),
+                method: "collect::<Vec<_>>".to_string(),
+                args: vec![],
+            }
+        }
+        // sort(fn) → .sort_by(fn) when comparator provided, otherwise passthrough
+        "sort" => {
+            if args.is_empty() {
+                return Expr::MethodCall {
+                    object: Box::new(object),
+                    method: "sort".to_string(),
+                    args,
+                };
+            }
+            Expr::MethodCall {
+                object: Box::new(object),
+                method: "sort_by".to_string(),
+                args,
+            }
+        }
+        // indexOf(x) → .iter().position(|item| *item == x)
+        "indexOf" => {
+            if args.len() != 1 {
+                return Expr::MethodCall {
+                    object: Box::new(object),
+                    method: method.to_string(),
+                    args,
+                };
+            }
+            let search_value = args.into_iter().next().unwrap();
+            let iter_call = Expr::MethodCall {
+                object: Box::new(object),
+                method: "iter".to_string(),
+                args: vec![],
+            };
+            Expr::MethodCall {
+                object: Box::new(iter_call),
+                method: "position".to_string(),
+                args: vec![Expr::Closure {
+                    params: vec![Param {
+                        name: "item".to_string(),
+                        ty: None,
+                    }],
+                    return_type: None,
+                    body: ClosureBody::Expr(Box::new(Expr::BinaryOp {
+                        left: Box::new(Expr::UnaryOp {
+                            op: "*".to_string(),
+                            operand: Box::new(Expr::Ident("item".to_string())),
+                        }),
+                        op: "==".to_string(),
+                        right: Box::new(search_value),
+                    })),
+                }],
+            }
+        }
+        // reduce(fn, init) → .iter().fold(init, fn)
+        "reduce" => {
+            if args.len() != 2 {
+                return Expr::MethodCall {
+                    object: Box::new(object),
+                    method: method.to_string(),
+                    args,
+                };
+            }
+            let mut iter = args.into_iter();
+            let callback = iter.next().unwrap();
+            let init = iter.next().unwrap();
+            let iter_call = Expr::MethodCall {
+                object: Box::new(object),
+                method: "iter".to_string(),
+                args: vec![],
+            };
+            Expr::MethodCall {
+                object: Box::new(iter_call),
+                method: "fold".to_string(),
+                args: vec![init, callback],
+            }
+        }
         // forEach → .iter().for_each(fn)
         "forEach" => {
             let iter_call = Expr::MethodCall {
@@ -640,6 +789,7 @@ fn convert_global_builtin(
 ///
 /// - `Number.isNaN(x)` → `x.is_nan()`
 /// - `Number.isFinite(x)` → `x.is_finite()`
+/// - `Number.isInteger(x)` → `x.fract() == 0.0`
 fn convert_number_static_call(
     method: &str,
     args: &[ast::ExprOrSpread],
@@ -650,28 +800,44 @@ fn convert_number_static_call(
         return Err(anyhow!("Number.{method} expects 1 argument"));
     }
     let arg = converted.into_iter().next().unwrap();
-    let rust_method = match method {
-        "isNaN" => "is_nan",
-        "isFinite" => "is_finite",
-        _ => return Err(anyhow!("unsupported Number method: {method}")),
-    };
-    Ok(Expr::MethodCall {
-        object: Box::new(arg),
-        method: rust_method.to_string(),
-        args: vec![],
-    })
+    match method {
+        "isNaN" | "isFinite" => {
+            let rust_method = match method {
+                "isNaN" => "is_nan",
+                "isFinite" => "is_finite",
+                _ => unreachable!(),
+            };
+            Ok(Expr::MethodCall {
+                object: Box::new(arg),
+                method: rust_method.to_string(),
+                args: vec![],
+            })
+        }
+        // Number.isInteger(x) → x.fract() == 0.0
+        "isInteger" => Ok(Expr::BinaryOp {
+            left: Box::new(Expr::MethodCall {
+                object: Box::new(arg),
+                method: "fract".to_string(),
+                args: vec![],
+            }),
+            op: "==".to_string(),
+            right: Box::new(Expr::NumberLit(0.0)),
+        }),
+        _ => Err(anyhow!("unsupported Number method: {method}")),
+    }
 }
 
 /// Converts `Math.method(args)` to Rust `f64` method calls.
 ///
-/// - 1-arg methods: `Math.floor(x)` → `x.floor()`
+/// - 1-arg methods (same name): `Math.floor(x)` → `x.floor()`, `Math.trunc(x)` → `x.trunc()`
+/// - 1-arg methods (renamed): `Math.sign(x)` → `x.signum()`, `Math.log(x)` → `x.ln()`
 /// - 2-arg methods: `Math.max(a, b)` → `a.max(b)`
 /// - `Math.pow(x, y)` → `x.powf(y)`
 fn convert_math_call(method: &str, args: &[ast::ExprOrSpread], reg: &TypeRegistry) -> Result<Expr> {
     let converted_args = convert_call_args(args, reg)?;
     match method {
-        // 1-arg methods: first arg becomes receiver
-        "floor" | "ceil" | "round" | "abs" | "sqrt" => {
+        // 1-arg methods: first arg becomes receiver (same name)
+        "floor" | "ceil" | "round" | "abs" | "sqrt" | "trunc" => {
             if converted_args.len() != 1 {
                 return Err(anyhow!("Math.{method} expects 1 argument"));
             }
@@ -679,6 +845,23 @@ fn convert_math_call(method: &str, args: &[ast::ExprOrSpread], reg: &TypeRegistr
             Ok(Expr::MethodCall {
                 object: Box::new(receiver),
                 method: method.to_string(),
+                args: vec![],
+            })
+        }
+        // 1-arg methods with name mapping: first arg becomes receiver
+        "sign" | "log" => {
+            if converted_args.len() != 1 {
+                return Err(anyhow!("Math.{method} expects 1 argument"));
+            }
+            let receiver = converted_args.into_iter().next().unwrap();
+            let rust_method = match method {
+                "sign" => "signum",
+                "log" => "ln",
+                _ => unreachable!(),
+            };
+            Ok(Expr::MethodCall {
+                object: Box::new(receiver),
+                method: rust_method.to_string(),
                 args: vec![],
             })
         }
