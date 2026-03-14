@@ -1,3 +1,9 @@
+---
+name: prd-template
+description: backlog/ に新しい PRD を作成するときのテンプレートと手順。Discovery（明確化質問）→ PRD 起草の順で進める
+user-invocable: true
+---
+
 # PRD テンプレート
 
 ## トリガー

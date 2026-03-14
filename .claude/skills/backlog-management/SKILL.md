@@ -1,3 +1,9 @@
+---
+name: backlog-management
+description: backlog/、TODO、plan.md のいずれかを変更するときの管理ルール。三層構造（plan.md / backlog/ / TODO）のフローと整合性を維持する
+user-invocable: true
+---
+
 # バックログ管理
 
 ## トリガー

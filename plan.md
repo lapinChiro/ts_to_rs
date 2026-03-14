@@ -4,8 +4,7 @@
 
 以下の順序で消化する。依存関係と影響範囲の小さいものから着手し、後続の作業を安定させる。
 
-1. `backlog/claude-rules-optimization.md` — .claude/rules/ のコンテキスト効率最適化。機能コードに影響なし
-2. `backlog/spread-non-first-position.md` — 既存機能の拡張。既存テストとの整合性を保つ
+1. `backlog/spread-non-first-position.md` — 既存機能の拡張。既存テストとの整合性を保つ
 2. `backlog/inline-type-literal-param.md` — 変換パイプラインの拡張が必要。設計コストが中程度
 3. `backlog/conditional-type-tier1.md` — 新しい型構文カテゴリ。IR 拡張を含む大きめの作業
 4. `backlog/conditional-type-tier2-fallback.md` — Tier 1 の実装が前提

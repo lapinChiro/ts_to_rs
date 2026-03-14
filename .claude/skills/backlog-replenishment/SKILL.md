@@ -1,3 +1,9 @@
+---
+name: backlog-replenishment
+description: backlog/ が空の状態でユーザーから作業依頼を受けたときの補充手順。TODO から PRD 化可能な項目を判定し、Discovery を経て PRD を作成する
+user-invocable: true
+---
+
 # backlog の補充
 
 ## トリガー
@@ -11,7 +17,7 @@
 3. 保留理由がある項目について、解消の可能性を自分で評価し、可能性が高い順に最大 2 つまで選ぶ
 4. 選んだ項目について、1 つずつ順番にユーザーに確認する（一度にまとめて聞かない）
 5. ユーザーが「解消済み」と判断した項目は PRD 化の対象に含める
-6. PRD テンプレート（`.claude/rules/prd-template.md`）に従い、Discovery → PRD 起草の順で進める
+6. PRD テンプレート（/prd-template）に従い、Discovery → PRD 起草の順で進める
 7. 作成した PRD を `backlog/` に配置し、`TODO` から該当項目を削除する
 8. `plan.md` の消化順序に新アイテムを挿入する
 

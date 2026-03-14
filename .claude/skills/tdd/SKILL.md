@@ -1,3 +1,9 @@
+---
+name: tdd
+description: 新機能の追加またはバグ修正に着手するときの TDD 開発手順。テスト設計 → RED → GREEN → REFACTOR の順序で実装する
+user-invocable: true
+---
+
 # TDD 開発手順
 
 ## トリガー

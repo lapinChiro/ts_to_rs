@@ -1,3 +1,9 @@
+---
+name: todo-replenishment
+description: TODO が空の状態でユーザーから作業依頼を受けたときの補充手順。現在の実装を分析し、具体的な提案とともにユーザーにヒヤリングする
+user-invocable: true
+---
+
 # TODO の補充
 
 ## トリガー

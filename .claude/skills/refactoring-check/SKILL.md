@@ -1,3 +1,9 @@
+---
+name: refactoring-check
+description: 機能追加・変更の完了後にリファクタリング候補を評価・記録する手順
+user-invocable: true
+---
+
 # リファクタリング候補の記録
 
 ## トリガー

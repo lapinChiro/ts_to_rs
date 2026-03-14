@@ -1,3 +1,9 @@
+---
+name: rule-writing
+description: ルールを新規作成・更新するときの書き方ガイド。手続きルールと制約ルールの2類型、必須セクション、原則を定める
+user-invocable: true
+---
+
 # ルールの書き方
 
 ## トリガー

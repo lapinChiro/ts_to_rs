@@ -1,3 +1,9 @@
+---
+name: quality-check
+description: 作業完了時（コミット前）の品質チェック手順。cargo fmt, clippy, test を全て実行し 0 エラー・0 警告を確認する
+user-invocable: true
+---
+
 # 作業完了時の品質チェック
 
 ## トリガー

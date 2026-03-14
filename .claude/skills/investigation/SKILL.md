@@ -1,3 +1,9 @@
+---
+name: investigation
+description: ユーザーから調査・分析を依頼されたときの実施手順。ソースコード・ドキュメント・Web リソースを徹底的に読み込み、report/ にレポートを保存する
+user-invocable: true
+---
+
 # 調査タスクの実施
 
 ## トリガー
