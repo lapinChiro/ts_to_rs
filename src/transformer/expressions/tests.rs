@@ -67,7 +67,7 @@ fn test_convert_expr_binary_add() {
         result,
         Expr::BinaryOp {
             left: Box::new(Expr::Ident("a".to_string())),
-            op: "+".to_string(),
+            op: BinOp::Add,
             right: Box::new(Expr::Ident("b".to_string())),
         }
     );
@@ -81,7 +81,7 @@ fn test_convert_expr_binary_greater_than() {
         result,
         Expr::BinaryOp {
             left: Box::new(Expr::Ident("a".to_string())),
-            op: ">".to_string(),
+            op: BinOp::Gt,
             right: Box::new(Expr::Ident("b".to_string())),
         }
     );
@@ -95,7 +95,7 @@ fn test_convert_expr_binary_strict_equals() {
         result,
         Expr::BinaryOp {
             left: Box::new(Expr::Ident("a".to_string())),
-            op: "==".to_string(),
+            op: BinOp::Eq,
             right: Box::new(Expr::Ident("b".to_string())),
         }
     );
@@ -847,7 +847,7 @@ fn test_convert_expr_ternary_with_comparison_condition() {
         Expr::If {
             condition: Box::new(Expr::BinaryOp {
                 left: Box::new(Expr::Ident("a".to_string())),
-                op: ">".to_string(),
+                op: BinOp::Gt,
                 right: Box::new(Expr::NumberLit(0.0)),
             }),
             then_expr: Box::new(Expr::Ident("a".to_string())),
@@ -880,14 +880,14 @@ fn test_convert_expr_ternary_nested() {
         Expr::If {
             condition: Box::new(Expr::BinaryOp {
                 left: Box::new(Expr::Ident("x".to_string())),
-                op: ">".to_string(),
+                op: BinOp::Gt,
                 right: Box::new(Expr::NumberLit(0.0)),
             }),
             then_expr: Box::new(Expr::StringLit("positive".to_string())),
             else_expr: Box::new(Expr::If {
                 condition: Box::new(Expr::BinaryOp {
                     left: Box::new(Expr::Ident("x".to_string())),
-                    op: "<".to_string(),
+                    op: BinOp::Lt,
                     right: Box::new(Expr::NumberLit(0.0)),
                 }),
                 then_expr: Box::new(Expr::StringLit("negative".to_string())),
@@ -1060,7 +1060,7 @@ fn test_convert_expr_unary_not_bool_literal() {
     assert_eq!(
         result,
         Expr::UnaryOp {
-            op: "!".to_string(),
+            op: UnOp::Not,
             operand: Box::new(Expr::BoolLit(true)),
         }
     );
@@ -1073,7 +1073,7 @@ fn test_convert_expr_unary_not_ident() {
     assert_eq!(
         result,
         Expr::UnaryOp {
-            op: "!".to_string(),
+            op: UnOp::Not,
             operand: Box::new(Expr::Ident("x".to_string())),
         }
     );
@@ -1086,7 +1086,7 @@ fn test_convert_expr_unary_minus_ident() {
     assert_eq!(
         result,
         Expr::UnaryOp {
-            op: "-".to_string(),
+            op: UnOp::Neg,
             operand: Box::new(Expr::Ident("x".to_string())),
         }
     );
@@ -1099,7 +1099,7 @@ fn test_convert_expr_unary_minus_number_literal() {
     assert_eq!(
         result,
         Expr::UnaryOp {
-            op: "-".to_string(),
+            op: UnOp::Neg,
             operand: Box::new(Expr::NumberLit(42.0)),
         }
     );
@@ -1112,10 +1112,10 @@ fn test_convert_expr_unary_not_complex_expr() {
     assert_eq!(
         result,
         Expr::UnaryOp {
-            op: "!".to_string(),
+            op: UnOp::Not,
             operand: Box::new(Expr::BinaryOp {
                 left: Box::new(Expr::Ident("a".to_string())),
-                op: ">".to_string(),
+                op: BinOp::Gt,
                 right: Box::new(Expr::Ident("b".to_string())),
             }),
         }
@@ -1161,7 +1161,7 @@ fn test_convert_expr_string_length_to_len_as_f64() {
                 method: "len".to_string(),
                 args: vec![],
             }),
-            target: "f64".to_string(),
+            target: RustType::F64,
         }
     );
 }
@@ -1315,7 +1315,7 @@ fn test_convert_expr_array_map_to_iter_map_collect() {
                     return_type: None,
                     body: ClosureBody::Expr(Box::new(Expr::BinaryOp {
                         left: Box::new(Expr::Ident("x".to_string())),
-                        op: "+".to_string(),
+                        op: BinOp::Add,
                         right: Box::new(Expr::NumberLit(1.0)),
                     })),
                 }],
@@ -1349,7 +1349,7 @@ fn test_convert_expr_array_filter_to_iter_filter_collect() {
                     return_type: None,
                     body: ClosureBody::Expr(Box::new(Expr::BinaryOp {
                         left: Box::new(Expr::Ident("x".to_string())),
-                        op: ">".to_string(),
+                        op: BinOp::Gt,
                         right: Box::new(Expr::NumberLit(0.0)),
                     })),
                 }],
@@ -1382,7 +1382,7 @@ fn test_convert_expr_array_find_to_iter_find() {
                 return_type: None,
                 body: ClosureBody::Expr(Box::new(Expr::BinaryOp {
                     left: Box::new(Expr::Ident("x".to_string())),
-                    op: ">".to_string(),
+                    op: BinOp::Gt,
                     right: Box::new(Expr::NumberLit(0.0)),
                 })),
             }],
@@ -1412,7 +1412,7 @@ fn test_convert_expr_array_some_to_iter_any() {
                 return_type: None,
                 body: ClosureBody::Expr(Box::new(Expr::BinaryOp {
                     left: Box::new(Expr::Ident("x".to_string())),
-                    op: ">".to_string(),
+                    op: BinOp::Gt,
                     right: Box::new(Expr::NumberLit(0.0)),
                 })),
             }],
@@ -1442,7 +1442,7 @@ fn test_convert_expr_array_every_to_iter_all() {
                 return_type: None,
                 body: ClosureBody::Expr(Box::new(Expr::BinaryOp {
                     left: Box::new(Expr::Ident("x".to_string())),
-                    op: ">".to_string(),
+                    op: BinOp::Gt,
                     right: Box::new(Expr::NumberLit(0.0)),
                 })),
             }],
@@ -1770,7 +1770,7 @@ fn test_convert_opt_chain_length_returns_len_as_f64() {
                         method: "len".to_string(),
                         args: vec![],
                     }),
-                    target: "f64".to_string(),
+                    target: RustType::F64,
                 })),
             }],
         }
@@ -1790,7 +1790,7 @@ fn test_convert_expr_number_is_integer_to_fract() {
                 method: "fract".to_string(),
                 args: vec![],
             }),
-            op: "==".to_string(),
+            op: BinOp::Eq,
             right: Box::new(Expr::NumberLit(0.0)),
         }
     );
@@ -1893,7 +1893,7 @@ fn test_convert_expr_splice_to_drain_collect() {
                     start: Box::new(Expr::NumberLit(1.0)),
                     end: Box::new(Expr::BinaryOp {
                         left: Box::new(Expr::NumberLit(1.0)),
-                        op: "+".to_string(),
+                        op: BinOp::Add,
                         right: Box::new(Expr::NumberLit(2.0)),
                     }),
                 }],
@@ -1958,7 +1958,7 @@ fn test_convert_expr_sort_with_comparator_to_sort_by() {
                 return_type: None,
                 body: ClosureBody::Expr(Box::new(Expr::BinaryOp {
                     left: Box::new(Expr::Ident("a".to_string())),
-                    op: "-".to_string(),
+                    op: BinOp::Sub,
                     right: Box::new(Expr::Ident("b".to_string())),
                 })),
             }],
@@ -1987,11 +1987,8 @@ fn test_convert_expr_index_of_to_iter_position() {
                 }],
                 return_type: None,
                 body: ClosureBody::Expr(Box::new(Expr::BinaryOp {
-                    left: Box::new(Expr::UnaryOp {
-                        op: "*".to_string(),
-                        operand: Box::new(Expr::Ident("item".to_string())),
-                    }),
-                    op: "==".to_string(),
+                    left: Box::new(Expr::Ident("*item".to_string())),
+                    op: BinOp::Eq,
                     right: Box::new(Expr::Ident("x".to_string())),
                 })),
             }],
@@ -2044,7 +2041,7 @@ fn test_convert_expr_reduce_with_init_to_iter_fold() {
                     return_type: None,
                     body: ClosureBody::Expr(Box::new(Expr::BinaryOp {
                         left: Box::new(Expr::Ident("acc".to_string())),
-                        op: "+".to_string(),
+                        op: BinOp::Add,
                         right: Box::new(Expr::Ident("x".to_string())),
                     })),
                 },

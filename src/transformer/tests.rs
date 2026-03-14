@@ -1,6 +1,6 @@
 use super::*;
 use crate::ir::Stmt;
-use crate::ir::{Expr, Param, RustType, StructField, Visibility};
+use crate::ir::{BinOp, Expr, Param, RustType, StructField, Visibility};
 use crate::parser::parse_typescript;
 use crate::registry::TypeRegistry;
 
@@ -288,7 +288,7 @@ fn test_transform_module_function_declaration() {
             return_type: Some(RustType::F64),
             body: vec![Stmt::Return(Some(Expr::BinaryOp {
                 left: Box::new(Expr::Ident("a".to_string())),
-                op: "+".to_string(),
+                op: BinOp::Add,
                 right: Box::new(Expr::Ident("b".to_string())),
             }))],
         }

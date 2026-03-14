@@ -7,6 +7,7 @@ mod statements;
 
 use crate::ir::{EnumValue, EnumVariant, Item, Method, Param, Visibility};
 
+use expressions::generate_expr;
 use statements::generate_stmt;
 use types::generate_type;
 
@@ -97,6 +98,7 @@ fn generate_item(item: &Item) -> String {
         Item::Impl {
             struct_name,
             for_trait,
+            consts,
             methods,
         } => {
             let header = match for_trait {
@@ -104,10 +106,25 @@ fn generate_item(item: &Item) -> String {
                 None => format!("impl {struct_name}"),
             };
             let mut out = format!("{header} {{\n");
-            for (i, method) in methods.iter().enumerate() {
-                if i > 0 {
+            let mut first = true;
+            for constant in consts {
+                if !first {
                     out.push('\n');
                 }
+                first = false;
+                let vis_str = generate_vis(&constant.vis);
+                let ty_str = generate_type(&constant.ty);
+                let val_str = generate_expr(&constant.value);
+                out.push_str(&format!(
+                    "    {vis_str}const {}: {ty_str} = {val_str};\n",
+                    constant.name
+                ));
+            }
+            for method in methods {
+                if !first {
+                    out.push('\n');
+                }
+                first = false;
                 out.push_str(&generate_method(method));
             }
             out.push('}');
@@ -180,20 +197,23 @@ fn generate_trait_method_sig(method: &Method) -> String {
         None => String::new(),
     };
 
-    if method.body.is_empty() {
-        // Abstract method — signature only
-        format!("    fn {}({params_str}){ret_str};\n", method.name)
-    } else {
-        // Default implementation
-        let mut out = format!("    fn {}({params_str}){ret_str} {{\n", method.name);
-        let stmts_len = method.body.len();
-        for (i, stmt) in method.body.iter().enumerate() {
-            let is_last = i == stmts_len - 1;
-            out.push_str(&generate_stmt(stmt, 2, is_last));
-            out.push('\n');
+    match &method.body {
+        None => {
+            // Abstract method — signature only
+            format!("    fn {}({params_str}){ret_str};\n", method.name)
         }
-        out.push_str("    }\n");
-        out
+        Some(body) => {
+            // Default implementation
+            let mut out = format!("    fn {}({params_str}){ret_str} {{\n", method.name);
+            let stmts_len = body.len();
+            for (i, stmt) in body.iter().enumerate() {
+                let is_last = i == stmts_len - 1;
+                out.push_str(&generate_stmt(stmt, 2, is_last));
+                out.push('\n');
+            }
+            out.push_str("    }\n");
+            out
+        }
     }
 }
 
@@ -220,8 +240,9 @@ fn generate_method(method: &Method) -> String {
     };
     let name = &method.name;
     let mut out = format!("    {vis_str}fn {name}({params_str}){ret_str} {{\n");
-    let body_len = method.body.len();
-    for (i, stmt) in method.body.iter().enumerate() {
+    let body = method.body.as_deref().unwrap_or(&[]);
+    let body_len = body.len();
+    for (i, stmt) in body.iter().enumerate() {
         let is_last = i == body_len - 1;
         out.push_str(&generate_stmt(stmt, 2, is_last));
         out.push('\n');
@@ -401,7 +422,8 @@ fn generate_type_params(type_params: &[String]) -> String {
 mod tests {
     use super::*;
     use crate::ir::{
-        EnumValue, EnumVariant, Expr, Item, Method, Param, RustType, Stmt, StructField, Visibility,
+        BinOp, EnumValue, EnumVariant, Expr, Item, Method, Param, RustType, Stmt, StructField,
+        Visibility,
     };
 
     // --- Item::Use tests ---
@@ -699,7 +721,7 @@ pub enum Value {
             return_type: Some(RustType::F64),
             body: vec![Stmt::Return(Some(Expr::BinaryOp {
                 left: Box::new(Expr::Ident("a".to_string())),
-                op: "+".to_string(),
+                op: BinOp::Add,
                 right: Box::new(Expr::Ident("b".to_string())),
             }))],
         };
@@ -783,6 +805,7 @@ pub fn identity<T>(x: T) -> T {
         let item = Item::Impl {
             struct_name: "Foo".to_string(),
             for_trait: None,
+            consts: vec![],
             methods: vec![Method {
                 vis: Visibility::Public,
                 name: "new".to_string(),
@@ -796,7 +819,9 @@ pub fn identity<T>(x: T) -> T {
                     name: "Self".to_string(),
                     type_args: vec![],
                 }),
-                body: vec![Stmt::Return(Some(Expr::Ident("Self { x }".to_string())))],
+                body: Some(vec![Stmt::Return(Some(Expr::Ident(
+                    "Self { x }".to_string(),
+                )))]),
             }],
         };
         let expected = "\
@@ -813,6 +838,7 @@ impl Foo {
         let item = Item::Impl {
             struct_name: "Foo".to_string(),
             for_trait: None,
+            consts: vec![],
             methods: vec![Method {
                 vis: Visibility::Public,
                 name: "get_name".to_string(),
@@ -820,10 +846,10 @@ impl Foo {
                 has_mut_self: false,
                 params: vec![],
                 return_type: Some(RustType::String),
-                body: vec![Stmt::Return(Some(Expr::FieldAccess {
+                body: Some(vec![Stmt::Return(Some(Expr::FieldAccess {
                     object: Box::new(Expr::Ident("self".to_string())),
                     field: "name".to_string(),
-                }))],
+                }))]),
             }],
         };
         let expected = "\
@@ -876,7 +902,7 @@ pub struct B {
                 has_mut_self: false,
                 params: vec![],
                 return_type: Some(RustType::String),
-                body: vec![],
+                body: None,
             }],
         };
         let expected = "\
@@ -891,6 +917,7 @@ pub trait AnimalTrait {
         let item = Item::Impl {
             struct_name: "Dog".to_string(),
             for_trait: Some("AnimalTrait".to_string()),
+            consts: vec![],
             methods: vec![Method {
                 vis: Visibility::Private,
                 name: "speak".to_string(),
@@ -898,10 +925,10 @@ pub trait AnimalTrait {
                 has_mut_self: false,
                 params: vec![],
                 return_type: Some(RustType::String),
-                body: vec![Stmt::Return(Some(Expr::FieldAccess {
+                body: Some(vec![Stmt::Return(Some(Expr::FieldAccess {
                     object: Box::new(Expr::Ident("self".to_string())),
                     field: "name".to_string(),
-                }))],
+                }))]),
             }],
         };
         let expected = "\

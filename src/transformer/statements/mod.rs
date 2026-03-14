@@ -5,7 +5,7 @@
 use anyhow::{anyhow, Result};
 use swc_ecma_ast as ast;
 
-use crate::ir::{Expr, RustType, Stmt};
+use crate::ir::{BinOp, Expr, RustType, Stmt, UnOp};
 use crate::registry::TypeRegistry;
 use crate::transformer::expressions::convert_expr;
 use crate::transformer::types::convert_ts_type;
@@ -501,7 +501,7 @@ fn convert_do_while_stmt(
     let condition = convert_expr(&do_while.test, reg, None)?;
     let break_check = Stmt::If {
         condition: Expr::UnaryOp {
-            op: "!".to_string(),
+            op: UnOp::Not,
             operand: Box::new(condition),
         },
         then_body: vec![Stmt::Break { label: None }],
@@ -615,7 +615,7 @@ fn convert_for_stmt_as_loop(
         let condition = convert_expr(test, reg, None)?;
         loop_body.push(Stmt::If {
             condition: Expr::UnaryOp {
-                op: "!".to_string(),
+                op: UnOp::Not,
                 operand: Box::new(condition),
             },
             then_body: vec![Stmt::Break { label: None }],
@@ -655,14 +655,14 @@ fn convert_update_to_stmt(expr: &ast::Expr, reg: &TypeRegistry) -> Result<Stmt> 
                 _ => return Err(anyhow!("unsupported update expression")),
             };
             let op = match up.op {
-                ast::UpdateOp::PlusPlus => "+",
-                ast::UpdateOp::MinusMinus => "-",
+                ast::UpdateOp::PlusPlus => BinOp::Add,
+                ast::UpdateOp::MinusMinus => BinOp::Sub,
             };
             Ok(Stmt::Expr(Expr::Assign {
                 target: Box::new(Expr::Ident(name.clone())),
                 value: Box::new(Expr::BinaryOp {
                     left: Box::new(Expr::Ident(name)),
-                    op: op.to_string(),
+                    op,
                     right: Box::new(Expr::NumberLit(1.0)),
                 }),
             }))

@@ -44,6 +44,23 @@ pub fn single_declarator(var_decl: &ast::VarDecl) -> Result<&ast::VarDeclarator>
     Ok(&var_decl.decls[0])
 }
 
+/// Converts an identifier parameter pattern into an IR [`Param`].
+///
+/// Extracts name and type annotation from a `BindingIdent`, converts the type,
+/// and returns a `Param`. Used by both function and class method parameter conversion.
+pub fn convert_ident_to_param(ident: &ast::BindingIdent) -> Result<crate::ir::Param> {
+    let name = ident.id.sym.to_string();
+    let ty = ident
+        .type_ann
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("parameter '{}' has no type annotation", name))?;
+    let rust_type = types::convert_ts_type(&ty.type_ann)?;
+    Ok(crate::ir::Param {
+        name,
+        ty: Some(rust_type),
+    })
+}
+
 /// Extracts the property name string from a [`ast::PropName::Ident`].
 ///
 /// Returns an error if the property name is not a simple identifier.
@@ -446,79 +463,11 @@ fn transform_class_with_inheritance(
         }
     } else if !info.implements.is_empty() {
         // Class implements interfaces — split methods into trait impls
-        generate_class_with_implements(&info, iface_methods)
+        classes::generate_class_with_implements(&info, iface_methods)
     } else {
         // Standalone class — no inheritance
         classes::generate_items_for_class(&info, None)
     }
-}
-
-/// Generates IR items for a class that implements one or more interfaces.
-///
-/// Methods matching interface method names go into `impl Trait for Struct`.
-/// Remaining methods (including constructor) go into `impl Struct`.
-fn generate_class_with_implements(
-    info: &ClassInfo,
-    iface_methods: &HashMap<String, Vec<String>>,
-) -> Result<Vec<Item>> {
-    use crate::ir::Method;
-
-    let mut items = vec![Item::Struct {
-        vis: info.vis.clone(),
-        name: info.name.clone(),
-        type_params: vec![],
-        fields: info.fields.clone(),
-    }];
-
-    // Collect method names that belong to each interface
-    let mut claimed_methods: std::collections::HashSet<String> = std::collections::HashSet::new();
-
-    for iface_name in &info.implements {
-        if let Some(method_names) = iface_methods.get(iface_name) {
-            let trait_methods: Vec<Method> = info
-                .methods
-                .iter()
-                .filter(|m| method_names.contains(&m.name))
-                .map(|m| Method {
-                    vis: Visibility::Private, // trait impl methods have no visibility
-                    ..m.clone()
-                })
-                .collect();
-
-            if !trait_methods.is_empty() {
-                for m in &trait_methods {
-                    claimed_methods.insert(m.name.clone());
-                }
-                items.push(Item::Impl {
-                    struct_name: info.name.clone(),
-                    for_trait: Some(iface_name.clone()),
-                    methods: trait_methods,
-                });
-            }
-        }
-    }
-
-    // Remaining methods + constructor go into impl Struct
-    let mut own_methods: Vec<Method> = Vec::new();
-    if let Some(ctor) = &info.constructor {
-        own_methods.push(ctor.clone());
-    }
-    own_methods.extend(
-        info.methods
-            .iter()
-            .filter(|m| !claimed_methods.contains(&m.name))
-            .cloned(),
-    );
-
-    if !own_methods.is_empty() {
-        items.push(Item::Impl {
-            struct_name: info.name.clone(),
-            for_trait: None,
-            methods: own_methods,
-        });
-    }
-
-    Ok(items)
 }
 
 /// Converts `const` variable declarations with arrow function initializers into `Item::Fn`.

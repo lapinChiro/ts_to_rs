@@ -5,7 +5,7 @@
 use anyhow::{anyhow, Result};
 use swc_ecma_ast as ast;
 
-use crate::ir::{Expr, Item, Method, Param, RustType, Stmt, StructField, Visibility};
+use crate::ir::{AssocConst, Expr, Item, Method, Param, RustType, Stmt, StructField, Visibility};
 use crate::registry::TypeRegistry;
 use crate::transformer::expressions::convert_expr;
 use crate::transformer::extract_prop_name;
@@ -31,6 +31,8 @@ pub struct ClassInfo {
     pub implements: Vec<String>,
     /// Whether this class is abstract
     pub is_abstract: bool,
+    /// Static properties (converted to associated constants)
+    pub static_consts: Vec<AssocConst>,
 }
 
 /// Extracts [`ClassInfo`] from an SWC class declaration without generating IR items.
@@ -64,11 +66,17 @@ pub fn extract_class_info(
         .collect();
 
     let mut fields = Vec::new();
+    let mut static_consts = Vec::new();
     let mut constructor = None;
     let mut methods = Vec::new();
 
     for member in &class_decl.class.body {
         match member {
+            ast::ClassMember::ClassProp(prop) if prop.is_static => {
+                if let Some(ac) = convert_static_prop(prop, &vis)? {
+                    static_consts.push(ac);
+                }
+            }
             ast::ClassMember::ClassProp(prop) => {
                 fields.push(convert_class_prop(prop)?);
             }
@@ -91,6 +99,7 @@ pub fn extract_class_info(
         vis,
         implements,
         is_abstract: class_decl.class.is_abstract,
+        static_consts,
     })
 }
 
@@ -115,6 +124,57 @@ pub fn convert_class_decl(
     }
 }
 
+// --- Helpers for class item generation ---
+
+/// Creates an `Item::Struct` from a name, visibility, and fields.
+pub(crate) fn make_struct(name: &str, vis: &Visibility, fields: Vec<StructField>) -> Item {
+    Item::Struct {
+        vis: vis.clone(),
+        name: name.to_string(),
+        type_params: vec![],
+        fields,
+    }
+}
+
+/// Strips visibility from methods for use in trait impl blocks.
+pub(crate) fn strip_method_visibility(methods: &[Method]) -> Vec<Method> {
+    methods
+        .iter()
+        .map(|m| Method {
+            vis: Visibility::Private,
+            ..m.clone()
+        })
+        .collect()
+}
+
+/// Creates an `Item::Impl` block from constants, constructor, and/or methods.
+///
+/// Returns `None` if constants, constructor, and methods are all empty.
+pub(crate) fn make_impl(
+    struct_name: &str,
+    for_trait: Option<&str>,
+    consts: Vec<AssocConst>,
+    ctor: Option<&Method>,
+    methods: Vec<Method>,
+) -> Option<Item> {
+    let mut all_methods = Vec::new();
+    if let Some(c) = ctor {
+        all_methods.push(c.clone());
+    }
+    all_methods.extend(methods);
+
+    if all_methods.is_empty() && consts.is_empty() {
+        return None;
+    }
+
+    Some(Item::Impl {
+        struct_name: struct_name.to_string(),
+        for_trait: for_trait.map(|s| s.to_string()),
+        consts,
+        methods: all_methods,
+    })
+}
+
 /// Generates IR items for a class, optionally with a parent class for inheritance.
 ///
 /// When `parent` is `Some`, the class is treated as a child:
@@ -133,62 +193,41 @@ pub fn generate_items_for_class(info: &ClassInfo, parent: Option<&ClassInfo>) ->
 /// Produces: struct + trait + impl (constructor) + impl trait for struct
 pub fn generate_parent_class_items(info: &ClassInfo) -> Result<Vec<Item>> {
     let trait_name = format!("{}Trait", info.name);
-    let mut items = Vec::new();
+    let mut items = vec![make_struct(&info.name, &info.vis, info.fields.clone())];
 
-    // 1. Struct
-    items.push(Item::Struct {
-        vis: info.vis.clone(),
-        name: info.name.clone(),
-        type_params: vec![],
-        fields: info.fields.clone(),
-    });
-
-    // 2. Trait with method signatures
+    // Trait with method signatures (no bodies)
     let trait_methods: Vec<Method> = info
         .methods
         .iter()
         .map(|m| Method {
-            vis: Visibility::Private, // trait methods have no visibility
-            name: m.name.clone(),
-            has_self: m.has_self,
-            has_mut_self: m.has_mut_self,
-            params: m.params.clone(),
-            return_type: m.return_type.clone(),
-            body: vec![], // signature only
+            vis: Visibility::Private,
+            body: None,
+            ..m.clone()
         })
         .collect();
-
     items.push(Item::Trait {
         vis: info.vis.clone(),
         name: trait_name.clone(),
         methods: trait_methods,
     });
 
-    // 3. impl (constructor only)
-    if let Some(ctor) = &info.constructor {
-        items.push(Item::Impl {
-            struct_name: info.name.clone(),
-            for_trait: None,
-            methods: vec![ctor.clone()],
-        });
-    }
+    // impl (constructor + static consts)
+    items.extend(make_impl(
+        &info.name,
+        None,
+        info.static_consts.clone(),
+        info.constructor.as_ref(),
+        vec![],
+    ));
 
-    // 4. impl Trait for Struct (method bodies)
-    if !info.methods.is_empty() {
-        let trait_impl_methods: Vec<Method> = info
-            .methods
-            .iter()
-            .map(|m| Method {
-                vis: Visibility::Private,
-                ..m.clone()
-            })
-            .collect();
-        items.push(Item::Impl {
-            struct_name: info.name.clone(),
-            for_trait: Some(trait_name),
-            methods: trait_impl_methods,
-        });
-    }
+    // impl Trait for Struct (method bodies)
+    items.extend(make_impl(
+        &info.name,
+        Some(&trait_name),
+        vec![],
+        None,
+        strip_method_visibility(&info.methods),
+    ));
 
     Ok(items)
 }
@@ -202,7 +241,7 @@ pub fn generate_abstract_class_items(info: &ClassInfo) -> Result<Vec<Item>> {
         .methods
         .iter()
         .map(|m| Method {
-            vis: Visibility::Private, // trait methods have no visibility modifier
+            vis: Visibility::Private,
             has_self: true,
             has_mut_self: m.has_mut_self,
             ..m.clone()
@@ -218,72 +257,42 @@ pub fn generate_abstract_class_items(info: &ClassInfo) -> Result<Vec<Item>> {
 
 /// Generates IR items for a concrete class that extends an abstract class.
 ///
-/// Produces: struct + impl (constructor + own non-override methods) + impl Trait for Struct
+/// Produces: struct + impl (constructor) + impl Trait for Struct (methods)
 pub fn generate_child_of_abstract(
     info: &ClassInfo,
     abstract_trait_name: &str,
 ) -> Result<Vec<Item>> {
-    let mut items = Vec::new();
+    let mut items = vec![make_struct(&info.name, &info.vis, info.fields.clone())];
 
-    // 1. Struct
-    items.push(Item::Struct {
-        vis: info.vis.clone(),
-        name: info.name.clone(),
-        type_params: vec![],
-        fields: info.fields.clone(),
-    });
-
-    // 2. impl (constructor only)
-    if let Some(ctor) = &info.constructor {
-        items.push(Item::Impl {
-            struct_name: info.name.clone(),
-            for_trait: None,
-            methods: vec![ctor.clone()],
-        });
-    }
-
-    // 3. impl AbstractTrait for Struct (all methods)
-    if !info.methods.is_empty() {
-        let trait_methods: Vec<Method> = info
-            .methods
-            .iter()
-            .map(|m| Method {
-                vis: Visibility::Private, // trait impl methods have no visibility
-                ..m.clone()
-            })
-            .collect();
-        items.push(Item::Impl {
-            struct_name: info.name.clone(),
-            for_trait: Some(abstract_trait_name.to_string()),
-            methods: trait_methods,
-        });
-    }
+    items.extend(make_impl(
+        &info.name,
+        None,
+        info.static_consts.clone(),
+        info.constructor.as_ref(),
+        vec![],
+    ));
+    items.extend(make_impl(
+        &info.name,
+        Some(abstract_trait_name),
+        vec![],
+        None,
+        strip_method_visibility(&info.methods),
+    ));
 
     Ok(items)
 }
 
 /// Generates IR items for a standalone class (no inheritance).
 fn generate_standalone_class(info: &ClassInfo) -> Result<Vec<Item>> {
-    let mut items = vec![Item::Struct {
-        vis: info.vis.clone(),
-        name: info.name.clone(),
-        type_params: vec![],
-        fields: info.fields.clone(),
-    }];
+    let mut items = vec![make_struct(&info.name, &info.vis, info.fields.clone())];
 
-    let mut all_methods = Vec::new();
-    if let Some(ctor) = &info.constructor {
-        all_methods.push(ctor.clone());
-    }
-    all_methods.extend(info.methods.clone());
-
-    if !all_methods.is_empty() {
-        items.push(Item::Impl {
-            struct_name: info.name.clone(),
-            for_trait: None,
-            methods: all_methods,
-        });
-    }
+    items.extend(make_impl(
+        &info.name,
+        None,
+        info.static_consts.clone(),
+        info.constructor.as_ref(),
+        info.methods.clone(),
+    ));
 
     Ok(items)
 }
@@ -293,51 +302,89 @@ fn generate_standalone_class(info: &ClassInfo) -> Result<Vec<Item>> {
 /// Produces: struct (with parent fields) + impl (constructor + own methods) + impl trait
 fn generate_child_class(info: &ClassInfo, parent: &ClassInfo) -> Result<Vec<Item>> {
     let trait_name = format!("{}Trait", parent.name);
-    let mut items = Vec::new();
 
-    // 1. Struct with parent fields copied
+    // Struct with parent + child fields
     let mut fields = parent.fields.clone();
     fields.extend(info.fields.clone());
-    items.push(Item::Struct {
-        vis: info.vis.clone(),
-        name: info.name.clone(),
-        type_params: vec![],
-        fields,
-    });
+    let mut items = vec![make_struct(&info.name, &info.vis, fields)];
 
-    // 2. impl (constructor + own methods)
-    let mut own_methods = Vec::new();
-    if let Some(ctor) = &info.constructor {
-        // Rewrite super() calls in constructor body
-        let rewritten_ctor = rewrite_super_constructor(ctor, parent);
-        own_methods.push(rewritten_ctor);
-    }
-    own_methods.extend(info.methods.clone());
+    // impl (rewritten constructor + own methods + static consts)
+    let ctor = info
+        .constructor
+        .as_ref()
+        .map(|c| rewrite_super_constructor(c, parent))
+        .transpose()?;
+    items.extend(make_impl(
+        &info.name,
+        None,
+        info.static_consts.clone(),
+        ctor.as_ref(),
+        info.methods.clone(),
+    ));
 
-    if !own_methods.is_empty() {
-        items.push(Item::Impl {
-            struct_name: info.name.clone(),
-            for_trait: None,
-            methods: own_methods,
-        });
+    // impl ParentTrait for Child (parent method bodies)
+    items.extend(make_impl(
+        &info.name,
+        Some(&trait_name),
+        vec![],
+        None,
+        strip_method_visibility(&parent.methods),
+    ));
+
+    Ok(items)
+}
+
+/// Generates IR items for a class that implements one or more interfaces.
+///
+/// Methods matching interface method names go into `impl Trait for Struct`.
+/// Remaining methods (including constructor) go into `impl Struct`.
+pub fn generate_class_with_implements(
+    info: &ClassInfo,
+    iface_methods: &std::collections::HashMap<String, Vec<String>>,
+) -> Result<Vec<Item>> {
+    let mut items = vec![make_struct(&info.name, &info.vis, info.fields.clone())];
+
+    let mut claimed_methods: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    for iface_name in &info.implements {
+        if let Some(method_names) = iface_methods.get(iface_name) {
+            let trait_methods = strip_method_visibility(
+                &info
+                    .methods
+                    .iter()
+                    .filter(|m| method_names.contains(&m.name))
+                    .cloned()
+                    .collect::<Vec<_>>(),
+            );
+
+            if !trait_methods.is_empty() {
+                for m in &trait_methods {
+                    claimed_methods.insert(m.name.clone());
+                }
+                items.extend(make_impl(
+                    &info.name,
+                    Some(iface_name),
+                    vec![],
+                    None,
+                    trait_methods,
+                ));
+            }
+        }
     }
 
-    // 3. impl ParentTrait for Child (copy parent method bodies)
-    if !parent.methods.is_empty() {
-        let trait_impl_methods: Vec<Method> = parent
-            .methods
-            .iter()
-            .map(|m| Method {
-                vis: Visibility::Private,
-                ..m.clone()
-            })
-            .collect();
-        items.push(Item::Impl {
-            struct_name: info.name.clone(),
-            for_trait: Some(trait_name),
-            methods: trait_impl_methods,
-        });
-    }
+    let unclaimed: Vec<_> = info
+        .methods
+        .iter()
+        .filter(|m| !claimed_methods.contains(&m.name))
+        .cloned()
+        .collect();
+    items.extend(make_impl(
+        &info.name,
+        None,
+        info.static_consts.clone(),
+        info.constructor.as_ref(),
+        unclaimed,
+    ));
 
     Ok(items)
 }
@@ -346,18 +393,24 @@ fn generate_child_class(info: &ClassInfo, parent: &ClassInfo) -> Result<Vec<Item
 ///
 /// `super(args)` in the child constructor is removed, and the parent's field
 /// initialization pattern from the constructor arguments is applied.
-fn rewrite_super_constructor(ctor: &Method, parent: &ClassInfo) -> Method {
+fn rewrite_super_constructor(ctor: &Method, parent: &ClassInfo) -> Result<Method> {
     let mut new_body = Vec::new();
     let mut super_fields = Vec::new();
 
     // Extract super() call arguments and map to parent fields
-    for stmt in &ctor.body {
+    let body_stmts = ctor.body.as_deref().unwrap_or(&[]);
+    for stmt in body_stmts {
         if let Some(args) = try_extract_super_call(stmt) {
-            // Map super(arg1, arg2, ...) to parent field initialization
-            for (i, field) in parent.fields.iter().enumerate() {
-                if let Some(arg) = args.get(i) {
-                    super_fields.push((field.name.clone(), arg.clone()));
-                }
+            if args.len() != parent.fields.len() {
+                return Err(anyhow!(
+                    "super() has {} arguments but parent '{}' has {} fields",
+                    args.len(),
+                    parent.name,
+                    parent.fields.len(),
+                ));
+            }
+            for (field, arg) in parent.fields.iter().zip(args.iter()) {
+                super_fields.push((field.name.clone(), arg.clone()));
             }
         } else {
             new_body.push(stmt.clone());
@@ -396,10 +449,10 @@ fn rewrite_super_constructor(ctor: &Method, parent: &ClassInfo) -> Method {
         })));
     }
 
-    Method {
-        body: new_body,
+    Ok(Method {
+        body: Some(new_body),
         ..ctor.clone()
-    }
+    })
 }
 
 /// Tries to extract arguments from a `super(args)` call statement.
@@ -408,6 +461,32 @@ fn try_extract_super_call(stmt: &Stmt) -> Option<Vec<Expr>> {
         Stmt::Expr(Expr::FnCall { name, args }) if name == "super" => Some(args.clone()),
         _ => None,
     }
+}
+
+/// Converts a static class property to an associated constant.
+///
+/// Returns `None` if the property has no initializer (cannot become a const without a value).
+fn convert_static_prop(prop: &ast::ClassProp, vis: &Visibility) -> Result<Option<AssocConst>> {
+    let name = extract_prop_name(&prop.key)
+        .map_err(|_| anyhow!("unsupported static property key (only identifiers)"))?;
+
+    let type_ann = prop
+        .type_ann
+        .as_ref()
+        .ok_or_else(|| anyhow!("static property '{}' has no type annotation", name))?;
+    let ty = convert_ts_type(&type_ann.type_ann)?;
+
+    let value = match &prop.value {
+        Some(init) => convert_expr(init, &crate::registry::TypeRegistry::new(), None)?,
+        None => return Ok(None), // No initializer — skip
+    };
+
+    Ok(Some(AssocConst {
+        vis: vis.clone(),
+        name,
+        ty,
+        value,
+    }))
 }
 
 /// Converts a class property to a struct field.
@@ -448,8 +527,8 @@ fn convert_constructor(
     }
 
     let body = match &ctor.body {
-        Some(block) => convert_constructor_body(&block.stmts, reg)?,
-        None => vec![],
+        Some(block) => Some(convert_constructor_body(&block.stmts, reg)?),
+        None => None,
     };
 
     Ok(Method {
@@ -571,13 +650,14 @@ fn convert_class_method(
             for stmt in &block.stmts {
                 stmts.push(convert_stmt(stmt, reg, return_type.as_ref())?);
             }
-            stmts
+            Some(stmts)
         }
-        None => Vec::new(),
+        None => None,
     };
 
     // Setter or method that assigns to `this.field` needs `&mut self`
-    let needs_mut = is_setter || body_has_self_assignment(&body);
+    let body_stmts = body.as_deref().unwrap_or(&[]);
+    let needs_mut = is_setter || body_has_self_assignment(body_stmts);
 
     Ok(Method {
         vis: vis.clone(),
@@ -612,18 +692,7 @@ fn is_self_field_access(expr: &Expr) -> bool {
 /// Converts a parameter pattern into an IR [`Param`].
 fn convert_param_pat(pat: &ast::Pat) -> Result<Param> {
     match pat {
-        ast::Pat::Ident(ident) => {
-            let name = ident.id.sym.to_string();
-            let ty = ident
-                .type_ann
-                .as_ref()
-                .ok_or_else(|| anyhow!("parameter '{}' has no type annotation", name))?;
-            let rust_type = convert_ts_type(&ty.type_ann)?;
-            Ok(Param {
-                name,
-                ty: Some(rust_type),
-            })
-        }
+        ast::Pat::Ident(ident) => crate::transformer::convert_ident_to_param(ident),
         _ => Err(anyhow!("unsupported parameter pattern")),
     }
 }
@@ -802,7 +871,7 @@ mod tests {
             Item::Impl { methods, .. } => {
                 // Constructor body should contain `self.name = name`
                 // which would be an Expr statement with assignment
-                assert!(!methods[0].body.is_empty());
+                assert!(methods[0].body.as_ref().is_some_and(|b| !b.is_empty()));
             }
             _ => panic!("expected Impl"),
         }
@@ -830,7 +899,7 @@ mod tests {
                 assert_eq!(methods.len(), 1);
                 assert_eq!(methods[0].name, "area");
                 assert!(
-                    methods[0].body.is_empty(),
+                    methods[0].body.is_none(),
                     "abstract method should have no body"
                 );
                 assert_eq!(methods[0].return_type, Some(RustType::F64));
@@ -851,10 +920,10 @@ mod tests {
                 assert_eq!(methods.len(), 2);
                 // abstract method: no body
                 assert_eq!(methods[0].name, "area");
-                assert!(methods[0].body.is_empty());
+                assert!(methods[0].body.is_none());
                 // concrete method: has body (default impl)
                 assert_eq!(methods[1].name, "describe");
-                assert!(!methods[1].body.is_empty());
+                assert!(methods[1].body.as_ref().is_some_and(|b| !b.is_empty()));
             }
             _ => panic!("expected Item::Trait, got {:?}", items[0]),
         }
@@ -869,9 +938,103 @@ mod tests {
             Item::Trait { methods, .. } => {
                 assert_eq!(methods.len(), 1);
                 assert_eq!(methods[0].name, "bar");
-                assert!(!methods[0].body.is_empty());
+                assert!(methods[0].body.as_ref().is_some_and(|b| !b.is_empty()));
             }
             _ => panic!("expected Item::Trait, got {:?}", items[0]),
+        }
+    }
+
+    #[test]
+    fn test_rewrite_super_constructor_arg_count_mismatch_returns_error() {
+        // Parent has 2 fields but child's super() only passes 1 arg
+        let parent_info = ClassInfo {
+            name: "Parent".to_string(),
+            parent: None,
+            fields: vec![
+                StructField {
+                    name: "a".to_string(),
+                    ty: RustType::F64,
+                },
+                StructField {
+                    name: "b".to_string(),
+                    ty: RustType::String,
+                },
+            ],
+            constructor: None,
+            methods: vec![],
+            vis: Visibility::Private,
+            implements: vec![],
+            is_abstract: false,
+            static_consts: vec![],
+        };
+
+        let child_ctor = Method {
+            vis: Visibility::Public,
+            name: "new".to_string(),
+            has_self: false,
+            has_mut_self: false,
+            params: vec![Param {
+                name: "x".to_string(),
+                ty: Some(RustType::F64),
+            }],
+            return_type: Some(RustType::Named {
+                name: "Self".to_string(),
+                type_args: vec![],
+            }),
+            body: Some(vec![Stmt::Expr(Expr::FnCall {
+                name: "super".to_string(),
+                args: vec![Expr::Ident("x".to_string())], // only 1 arg, parent has 2 fields
+            })]),
+        };
+
+        let result = rewrite_super_constructor(&child_ctor, &parent_info);
+        assert!(
+            result.is_err(),
+            "expected error for arg count mismatch, got: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_convert_class_static_prop_generates_assoc_const() {
+        let decl = parse_class_decl(
+            "class Config { static readonly MAX_SIZE: number = 100; value: number; }",
+        );
+        let items = convert_class_decl(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
+        // Should have: Struct (only value field) + Impl (with const MAX_SIZE)
+        match &items[0] {
+            Item::Struct { fields, .. } => {
+                assert_eq!(
+                    fields.len(),
+                    1,
+                    "static prop should not be in struct fields"
+                );
+                assert_eq!(fields[0].name, "value");
+            }
+            _ => panic!("expected Item::Struct, got {:?}", items[0]),
+        }
+        match &items[1] {
+            Item::Impl { consts, .. } => {
+                assert_eq!(consts.len(), 1);
+                assert_eq!(consts[0].name, "MAX_SIZE");
+                assert_eq!(consts[0].ty, RustType::F64);
+                assert_eq!(consts[0].value, Expr::NumberLit(100.0));
+            }
+            _ => panic!("expected Item::Impl, got {:?}", items[1]),
+        }
+    }
+
+    #[test]
+    fn test_convert_class_static_string_prop_generates_assoc_const() {
+        let decl = parse_class_decl("class Foo { static NAME: string = \"hello\"; x: number; }");
+        let items = convert_class_decl(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
+        match &items[1] {
+            Item::Impl { consts, .. } => {
+                assert_eq!(consts.len(), 1);
+                assert_eq!(consts[0].name, "NAME");
+                assert_eq!(consts[0].ty, RustType::String);
+            }
+            _ => panic!("expected Item::Impl, got {:?}", items[1]),
         }
     }
 }

@@ -5,7 +5,7 @@
 use anyhow::{anyhow, Result};
 use swc_ecma_ast as ast;
 
-use crate::ir::{self, ClosureBody, Expr, Param, RustType};
+use crate::ir::{self, BinOp, ClosureBody, Expr, Param, RustType, UnOp};
 use crate::registry::{TypeDef, TypeRegistry};
 use crate::transformer::functions::convert_ts_type_with_fallback;
 use crate::transformer::statements::convert_stmt;
@@ -102,25 +102,24 @@ fn convert_bin_expr(bin: &ast::BinExpr, reg: &TypeRegistry) -> Result<Expr> {
     })
 }
 
-/// Converts an SWC binary operator to its Rust string representation.
-fn convert_binary_op(op: ast::BinaryOp) -> Result<String> {
-    let s = match op {
-        ast::BinaryOp::Add => "+",
-        ast::BinaryOp::Sub => "-",
-        ast::BinaryOp::Mul => "*",
-        ast::BinaryOp::Div => "/",
-        ast::BinaryOp::Mod => "%",
-        ast::BinaryOp::EqEq | ast::BinaryOp::EqEqEq => "==",
-        ast::BinaryOp::NotEq | ast::BinaryOp::NotEqEq => "!=",
-        ast::BinaryOp::Lt => "<",
-        ast::BinaryOp::LtEq => "<=",
-        ast::BinaryOp::Gt => ">",
-        ast::BinaryOp::GtEq => ">=",
-        ast::BinaryOp::LogicalAnd => "&&",
-        ast::BinaryOp::LogicalOr => "||",
-        _ => return Err(anyhow!("unsupported binary operator: {:?}", op)),
-    };
-    Ok(s.to_string())
+/// Converts an SWC binary operator to an IR [`BinOp`].
+fn convert_binary_op(op: ast::BinaryOp) -> Result<BinOp> {
+    match op {
+        ast::BinaryOp::Add => Ok(BinOp::Add),
+        ast::BinaryOp::Sub => Ok(BinOp::Sub),
+        ast::BinaryOp::Mul => Ok(BinOp::Mul),
+        ast::BinaryOp::Div => Ok(BinOp::Div),
+        ast::BinaryOp::Mod => Ok(BinOp::Mod),
+        ast::BinaryOp::EqEq | ast::BinaryOp::EqEqEq => Ok(BinOp::Eq),
+        ast::BinaryOp::NotEq | ast::BinaryOp::NotEqEq => Ok(BinOp::NotEq),
+        ast::BinaryOp::Lt => Ok(BinOp::Lt),
+        ast::BinaryOp::LtEq => Ok(BinOp::LtEq),
+        ast::BinaryOp::Gt => Ok(BinOp::Gt),
+        ast::BinaryOp::GtEq => Ok(BinOp::GtEq),
+        ast::BinaryOp::LogicalAnd => Ok(BinOp::LogicalAnd),
+        ast::BinaryOp::LogicalOr => Ok(BinOp::LogicalOr),
+        _ => Err(anyhow!("unsupported binary operator: {:?}", op)),
+    }
 }
 
 /// Resolves a member access expression, applying special conversions for known fields.
@@ -170,7 +169,7 @@ fn resolve_member_access(
         };
         return Ok(Expr::Cast {
             expr: Box::new(len_call),
-            target: "f64".to_string(),
+            target: RustType::F64,
         });
     }
 
@@ -301,22 +300,22 @@ fn convert_assign_expr(assign: &ast::AssignExpr, reg: &TypeRegistry) -> Result<E
         ast::AssignOp::Assign => right,
         ast::AssignOp::AddAssign => Expr::BinaryOp {
             left: Box::new(target.clone()),
-            op: "+".to_string(),
+            op: BinOp::Add,
             right: Box::new(right),
         },
         ast::AssignOp::SubAssign => Expr::BinaryOp {
             left: Box::new(target.clone()),
-            op: "-".to_string(),
+            op: BinOp::Sub,
             right: Box::new(right),
         },
         ast::AssignOp::MulAssign => Expr::BinaryOp {
             left: Box::new(target.clone()),
-            op: "*".to_string(),
+            op: BinOp::Mul,
             right: Box::new(right),
         },
         ast::AssignOp::DivAssign => Expr::BinaryOp {
             left: Box::new(target.clone()),
-            op: "/".to_string(),
+            op: BinOp::Div,
             right: Box::new(right),
         },
         _ => return Err(anyhow!("unsupported compound assignment operator")),
@@ -613,7 +612,7 @@ fn map_method_call(object: Expr, method: &str, args: Vec<Expr>) -> Expr {
             let count = iter.next().unwrap();
             let end = Expr::BinaryOp {
                 left: Box::new(start.clone()),
-                op: "+".to_string(),
+                op: BinOp::Add,
                 right: Box::new(count),
             };
             let drain_call = Expr::MethodCall {
@@ -670,11 +669,8 @@ fn map_method_call(object: Expr, method: &str, args: Vec<Expr>) -> Expr {
                     }],
                     return_type: None,
                     body: ClosureBody::Expr(Box::new(Expr::BinaryOp {
-                        left: Box::new(Expr::UnaryOp {
-                            op: "*".to_string(),
-                            operand: Box::new(Expr::Ident("item".to_string())),
-                        }),
-                        op: "==".to_string(),
+                        left: Box::new(Expr::Ident("*item".to_string())),
+                        op: BinOp::Eq,
                         right: Box::new(search_value),
                     })),
                 }],
@@ -820,7 +816,7 @@ fn convert_number_static_call(
                 method: "fract".to_string(),
                 args: vec![],
             }),
-            op: "==".to_string(),
+            op: BinOp::Eq,
             right: Box::new(Expr::NumberLit(0.0)),
         }),
         _ => Err(anyhow!("unsupported Number method: {method}")),
@@ -1127,13 +1123,13 @@ fn convert_array_lit(
 /// Supported operators: `!` (logical NOT), `-` (negation).
 fn convert_unary_expr(unary: &ast::UnaryExpr, reg: &TypeRegistry) -> Result<Expr> {
     let op = match unary.op {
-        ast::UnaryOp::Bang => "!",
-        ast::UnaryOp::Minus => "-",
+        ast::UnaryOp::Bang => UnOp::Not,
+        ast::UnaryOp::Minus => UnOp::Neg,
         _ => return Err(anyhow!("unsupported unary operator: {:?}", unary.op)),
     };
     let operand = convert_expr(&unary.arg, reg, None)?;
     Ok(Expr::UnaryOp {
-        op: op.to_string(),
+        op,
         operand: Box::new(operand),
     })
 }

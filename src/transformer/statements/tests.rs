@@ -1,5 +1,5 @@
 use super::*;
-use crate::ir::{Expr, RustType, Stmt};
+use crate::ir::{BinOp, Expr, RustType, Stmt, UnOp};
 use crate::parser::parse_typescript;
 use crate::registry::TypeRegistry;
 use swc_ecma_ast::{Decl, ModuleItem};
@@ -167,14 +167,14 @@ fn test_convert_stmt_while() {
             label: None,
             condition: Expr::BinaryOp {
                 left: Box::new(Expr::Ident("x".to_string())),
-                op: ">".to_string(),
+                op: BinOp::Gt,
                 right: Box::new(Expr::NumberLit(0.0)),
             },
             body: vec![Stmt::Expr(Expr::Assign {
                 target: Box::new(Expr::Ident("x".to_string())),
                 value: Box::new(Expr::BinaryOp {
                     left: Box::new(Expr::Ident("x".to_string())),
-                    op: "-".to_string(),
+                    op: BinOp::Sub,
                     right: Box::new(Expr::NumberLit(1.0)),
                 }),
             })],
@@ -691,7 +691,7 @@ fn test_convert_stmt_do_while_basic() {
                     then_body,
                     else_body,
                 } => {
-                    assert!(matches!(condition, Expr::UnaryOp { op, .. } if op == "!"));
+                    assert!(matches!(condition, Expr::UnaryOp { op, .. } if *op == UnOp::Not));
                     assert_eq!(then_body.len(), 1);
                     assert!(matches!(&then_body[0], Stmt::Break { label: None }));
                     assert!(else_body.is_none());

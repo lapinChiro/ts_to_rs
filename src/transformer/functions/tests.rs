@@ -1,5 +1,5 @@
 use super::*;
-use crate::ir::{Expr, Item, Param, RustType, Stmt, StructField, Visibility};
+use crate::ir::{BinOp, Expr, Item, Param, RustType, Stmt, StructField, Visibility};
 use crate::parser::parse_typescript;
 use crate::registry::TypeRegistry;
 use swc_ecma_ast::{Decl, ModuleItem};
@@ -40,7 +40,7 @@ fn test_convert_fn_decl_add() {
             return_type: Some(RustType::F64),
             body: vec![Stmt::Return(Some(Expr::BinaryOp {
                 left: Box::new(Expr::Ident("a".to_string())),
-                op: "+".to_string(),
+                op: BinOp::Add,
                 right: Box::new(Expr::Ident("b".to_string())),
             }))],
         }

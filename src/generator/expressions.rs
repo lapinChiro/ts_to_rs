@@ -1,6 +1,6 @@
 //! Expression generation: converts IR expressions into Rust source strings.
 
-use crate::ir::{ClosureBody, Expr, Param, RustType, VecSegment};
+use crate::ir::{BinOp, ClosureBody, Expr, Param, RustType, VecSegment};
 
 use super::generate_param;
 use super::statements::generate_stmt;
@@ -17,6 +17,19 @@ fn needs_parens_as_receiver(expr: &Expr) -> bool {
             | Expr::Assign { .. }
             | Expr::If { .. }
     )
+}
+
+/// Returns `true` if a child expression needs parentheses when used as an operand
+/// of a binary expression with the given parent operator.
+///
+/// Parentheses are needed when the child is also a `BinaryOp` with lower precedence
+/// than the parent operator.
+fn needs_parens_in_binop(child: &Expr, parent_op: BinOp) -> bool {
+    if let Expr::BinaryOp { op: child_op, .. } = child {
+        child_op.precedence() < parent_op.precedence()
+    } else {
+        false
+    }
 }
 
 /// Generates an expression as a Rust source string.
@@ -115,18 +128,30 @@ pub(super) fn generate_expr(expr: &Expr) -> String {
             }
         }
         Expr::UnaryOp { op, operand } => {
+            let op_str = op.as_str();
             let needs_parens = matches!(
                 operand.as_ref(),
                 Expr::BinaryOp { .. } | Expr::Assign { .. } | Expr::UnaryOp { .. }
             );
             if needs_parens {
-                format!("{op}({})", generate_expr(operand))
+                format!("{op_str}({})", generate_expr(operand))
             } else {
-                format!("{op}{}", generate_expr(operand))
+                format!("{op_str}{}", generate_expr(operand))
             }
         }
         Expr::BinaryOp { left, op, right } => {
-            format!("{} {op} {}", generate_expr(left), generate_expr(right))
+            let op_str = op.as_str();
+            let left_str = if needs_parens_in_binop(left, *op) {
+                format!("({})", generate_expr(left))
+            } else {
+                generate_expr(left)
+            };
+            let right_str = if needs_parens_in_binop(right, *op) {
+                format!("({})", generate_expr(right))
+            } else {
+                generate_expr(right)
+            };
+            format!("{left_str} {op_str} {right_str}")
         }
         Expr::Vec { elements } => {
             let elems_str = elements
@@ -159,7 +184,9 @@ pub(super) fn generate_expr(expr: &Expr) -> String {
             format!("{}[{index_str}]", generate_expr(object))
         }
         Expr::VecSpread { segments } => generate_vec_spread(segments),
-        Expr::Cast { expr, target } => format!("{} as {target}", generate_expr(expr)),
+        Expr::Cast { expr, target } => {
+            format!("{} as {}", generate_expr(expr), generate_type(target))
+        }
     }
 }
 
@@ -278,7 +305,7 @@ fn generate_closure(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ir::{ClosureBody, Expr, Param, RustType, Stmt};
+    use crate::ir::{BinOp, ClosureBody, Expr, Param, RustType, Stmt, UnOp};
 
     #[test]
     fn test_generate_expr_number_whole() {
@@ -317,7 +344,7 @@ mod tests {
     fn test_generate_expr_binary_op() {
         let expr = Expr::BinaryOp {
             left: Box::new(Expr::Ident("a".to_string())),
-            op: "+".to_string(),
+            op: BinOp::Add,
             right: Box::new(Expr::Ident("b".to_string())),
         };
         assert_eq!(generate_expr(&expr), "a + b");
@@ -378,7 +405,7 @@ mod tests {
             return_type: None,
             body: ClosureBody::Expr(Box::new(Expr::BinaryOp {
                 left: Box::new(Expr::Ident("x".to_string())),
-                op: "+".to_string(),
+                op: BinOp::Add,
                 right: Box::new(Expr::NumberLit(1.0)),
             })),
         };
@@ -395,7 +422,7 @@ mod tests {
             return_type: Some(RustType::F64),
             body: ClosureBody::Block(vec![Stmt::Return(Some(Expr::BinaryOp {
                 left: Box::new(Expr::Ident("x".to_string())),
-                op: "+".to_string(),
+                op: BinOp::Add,
                 right: Box::new(Expr::NumberLit(1.0)),
             }))]),
         };
@@ -423,7 +450,7 @@ mod tests {
             return_type: None,
             body: ClosureBody::Expr(Box::new(Expr::BinaryOp {
                 left: Box::new(Expr::Ident("x".to_string())),
-                op: "+".to_string(),
+                op: BinOp::Add,
                 right: Box::new(Expr::NumberLit(1.0)),
             })),
         };
@@ -473,7 +500,7 @@ mod tests {
         let expr = Expr::If {
             condition: Box::new(Expr::BinaryOp {
                 left: Box::new(Expr::Ident("a".to_string())),
-                op: ">".to_string(),
+                op: BinOp::Gt,
                 right: Box::new(Expr::NumberLit(0.0)),
             }),
             then_expr: Box::new(Expr::NumberLit(1.0)),
@@ -487,14 +514,14 @@ mod tests {
         let expr = Expr::If {
             condition: Box::new(Expr::BinaryOp {
                 left: Box::new(Expr::Ident("x".to_string())),
-                op: ">".to_string(),
+                op: BinOp::Gt,
                 right: Box::new(Expr::NumberLit(0.0)),
             }),
             then_expr: Box::new(Expr::StringLit("positive".to_string())),
             else_expr: Box::new(Expr::If {
                 condition: Box::new(Expr::BinaryOp {
                     left: Box::new(Expr::Ident("x".to_string())),
-                    op: "<".to_string(),
+                    op: BinOp::Lt,
                     right: Box::new(Expr::NumberLit(0.0)),
                 }),
                 then_expr: Box::new(Expr::StringLit("negative".to_string())),
@@ -563,7 +590,7 @@ mod tests {
         let expr = Expr::MethodCall {
             object: Box::new(Expr::BinaryOp {
                 left: Box::new(Expr::Ident("a".to_string())),
-                op: "+".to_string(),
+                op: BinOp::Add,
                 right: Box::new(Expr::Ident("b".to_string())),
             }),
             method: "sqrt".to_string(),
@@ -577,7 +604,7 @@ mod tests {
         // (-x).abs() — UnaryOp needs parens
         let expr = Expr::MethodCall {
             object: Box::new(Expr::UnaryOp {
-                op: "-".to_string(),
+                op: UnOp::Neg,
                 operand: Box::new(Expr::Ident("x".to_string())),
             }),
             method: "abs".to_string(),
@@ -592,7 +619,7 @@ mod tests {
         let expr = Expr::MethodCall {
             object: Box::new(Expr::Cast {
                 expr: Box::new(Expr::Ident("x".to_string())),
-                target: "f64".to_string(),
+                target: RustType::F64,
             }),
             method: "abs".to_string(),
             args: vec![],

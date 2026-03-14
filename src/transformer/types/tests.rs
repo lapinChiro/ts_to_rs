@@ -1326,3 +1326,50 @@ fn test_convert_ts_type_intersection_returns_error_with_clear_message() {
         "expected 'intersection' in error, got: {err_msg}"
     );
 }
+
+// -- nullable union type alias tests --
+
+#[test]
+fn test_convert_type_alias_nullable_single_keyword_generates_option_alias() {
+    let decl = parse_type_alias("type MaybeString = string | null;");
+    let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+    match item {
+        Item::TypeAlias { name, ty, .. } => {
+            assert_eq!(name, "MaybeString");
+            assert_eq!(ty, RustType::Option(Box::new(RustType::String)));
+        }
+        _ => panic!("expected Item::TypeAlias, got {:?}", item),
+    }
+}
+
+#[test]
+fn test_convert_type_alias_nullable_single_type_ref_generates_option_alias() {
+    let decl = parse_type_alias("type MaybeUser = MyType | null;");
+    let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+    match item {
+        Item::TypeAlias { name, ty, .. } => {
+            assert_eq!(name, "MaybeUser");
+            assert_eq!(
+                ty,
+                RustType::Option(Box::new(RustType::Named {
+                    name: "MyType".to_string(),
+                    type_args: vec![],
+                }))
+            );
+        }
+        _ => panic!("expected Item::TypeAlias, got {:?}", item),
+    }
+}
+
+#[test]
+fn test_convert_type_alias_nullable_undefined_generates_option_alias() {
+    let decl = parse_type_alias("type MaybeNum = number | undefined;");
+    let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+    match item {
+        Item::TypeAlias { name, ty, .. } => {
+            assert_eq!(name, "MaybeNum");
+            assert_eq!(ty, RustType::Option(Box::new(RustType::F64)));
+        }
+        _ => panic!("expected Item::TypeAlias, got {:?}", item),
+    }
+}

@@ -336,6 +336,7 @@ fn convert_interface_as_struct_and_trait(
     let impl_item = Item::Impl {
         struct_name: name.to_string(),
         for_trait: Some(trait_name),
+        consts: vec![],
         methods,
     };
 
@@ -424,7 +425,7 @@ fn convert_method_signature(sig: &TsMethodSignature) -> Result<Method> {
         has_mut_self: false,
         params,
         return_type,
-        body: vec![],
+        body: None,
     })
 }
 
@@ -985,6 +986,18 @@ fn try_convert_general_union(decl: &TsTypeAliasDecl, vis: Visibility) -> Result<
         }
     }
 
+    // Nullable union with single non-null type: `type X = T | null` → `type X = Option<T>`
+    if has_null_or_undefined && non_null_types.len() == 1 {
+        let inner_type = convert_ts_type(non_null_types[0])?;
+        let type_params = extract_type_params(decl.type_params.as_deref());
+        return Ok(Some(Item::TypeAlias {
+            vis,
+            name: decl.id.sym.to_string(),
+            type_params,
+            ty: RustType::Option(Box::new(inner_type)),
+        }));
+    }
+
     // If all members are string literals, `try_convert_string_literal_union` handles it
     if non_null_types.iter().all(|t| {
         matches!(
@@ -1068,9 +1081,8 @@ fn try_convert_general_union(decl: &TsTypeAliasDecl, vis: Visibility) -> Result<
         variants,
     };
 
-    // TODO: nullable union (`type X = string | number | null`) should wrap in Option.
-    // Currently we just emit the enum; nullable wrapping is a separate concern.
-    let _ = has_null_or_undefined;
+    // For multi-type nullable unions (`type X = string | number | null`), we emit
+    // the enum as-is. Single-type nullable (`T | null`) is handled above as Option<T>.
     Ok(Some(enum_item))
 }
 

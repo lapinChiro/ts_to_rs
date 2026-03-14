@@ -7,16 +7,17 @@
 IR の変更は transformer と generator の両方に波及するため、機能追加の前にまとめて行う。
 個別に進めると同じファイルを何度も変更することになり非効率。
 
-1. IR 型安全性の一括改善 — BinaryOp/UnaryOp の enum 化 + Cast の target を RustType に + Method.body を Option に
-2. classes.rs 5 関数の統一リファクタリング
-3. super() リライトの修正（引数数・フィールド数の不一致検出）
-
 ### フェーズ 2: 変換精度の向上（機能追加）
 
-IR が安定した後、変換率を上げる機能を追加する。
+フェーズ 1 完了。IR が安定したため、変換率を上げる機能を追加する。
 
-4. nullable union の Option ラップ（type alias 位置）
-5. TryCatch のエラー型パラメータ化
+### Tier 1: 正確性・変換率に直結
+
+1. `extends` と `implements` の併用
+2. `protected` メンバー
+3. 配列分割代入の拡張
+4. intersection + union の複合型
+5. computed member（enum）
 
 ## Hono 対応の開始条件
 

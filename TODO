@@ -8,174 +8,99 @@
 
 ---
 
-## 設計上の負債（デザインレビュー report/design-review.md より）
+## PRD 化可能（優先度順）
 
-### 要対応
+優先度の判断軸: 正確性 > 変換率（実プロジェクトでの効果） > 保守性 > 工数の小ささ
 
-- classes.rs: 5 つのクラス生成関数の統一 **[PRD 化可能]**
-  - `generate_standalone_class`, `generate_parent_class_items`, `generate_child_class`, `generate_abstract_class_items`, `generate_child_of_abstract` が同じ 3 ステップ（struct → trait → impl）を個別実装している
-  - 新パターン追加（abstract + implements 等）のたびにコピペが増える構造。共通ビルダー関数への統一が必要
-  - 詳細: `report/design-review.md` #1
-- classes.rs: super() リライトの positional マッピング修正 **[PRD 化可能]**
-  - `super(arg1, arg2)` を親フィールドにインデックスで対応づけるため、引数数とフィールド数の不一致で未初期化フィールドが発生する
-  - 生成コードが rustc でコンパイルエラーになるケースがある
-  - 詳細: `report/design-review.md` #2
-- ir.rs: BinaryOp/UnaryOp の演算子を enum 化 **[PRD 化可能]**
-  - `op: String` で型安全性がない。generator で演算子優先順位の判定ができず、ネストした演算子でカッコが正しく挿入されない可能性がある
-  - `enum BinaryOp { Add, Sub, Mul, Eq, ... }` に変更し、優先順位テーブルで必要時にカッコ挿入する
-  - 詳細: `report/design-review.md` #3
+### Tier 1: 正確性・変換率に直結
 
-### 改善推奨
+1. **`extends` と `implements` の併用** — クラス
+   - `class Child extends Parent implements Greeter` パターン。実プロジェクトで頻出
+   - `implements` 単独・`extends` 単独は実装済み。組み合わせの dispatch ロジック追加
 
-- types/mod.rs: type alias 位置での nullable union の Option ラップ **[PRD 化可能]**
-  - `convert_union_type`（型注記位置）では `T | null` → `Option<T>` が動作するが、`try_convert_general_union`（type alias 位置）では nullable 判定結果が使われていない（TODO コメントあり）
-  - `type MaybeResult = Success | Failure | null` が `Option<enum>` ではなく素の `enum` になる
-  - 詳細: `report/design-review.md` #4
-- ir.rs: TryCatch のエラー型パラメータ化 **[PRD 化可能]**
-  - `Stmt::TryCatch` にエラー型フィールドがなく、generator が `Result<(), String>` をハードコード。try body が値を返す場合に返り値が失われる
-  - 詳細: `report/design-review.md` #5
-- ir.rs: Cast の target を RustType に変更 **[PRD 化可能]**
-  - `Expr::Cast { target: String }` → `Expr::Cast { target: RustType }` にして型安全性を確保
-  - 詳細: `report/design-review.md` #6
-- ir.rs: Method.body を Option に変更 **[PRD 化可能]**
-  - `body: Vec<Stmt>` が trait シグネチャ（空）とデフォルト実装（非空）を兼用。`Option<Vec<Stmt>>` にして `None` = シグネチャ、`Some` = 実装を明確化
-  - 詳細: `report/design-review.md` #7
-- statements/mod.rs: convert_stmt と convert_stmt_list の責務整理 **[PRD 化可能]**
-  - `convert_stmt_list` が分割代入展開・for ループ特殊パターンを前処理し `convert_stmt` に fallback。`convert_stmt` を直接呼ぶと分割代入が処理されない
-  - 詳細: `report/design-review.md` #8
-- functions/mod.rs: デフォルト引数内 extra_items の破棄修正 **[PRD 化可能]**
-  - `convert_default_param` 内の再帰呼び出しでインライン型リテラルから生成される struct 定義が `_extra` として破棄される
-  - 詳細: `report/design-review.md` #9
-- generator: VecSpread 展開・tail expression 判定を transformer へ移動 **[PRD 化可能]**
-  - VecSpread の展開（let 束縛 → 複数文）と tail expression 判定（最後の文で return 省略）が generator の責務になっている。transformer で IR に落とすべき
-  - 詳細: `report/design-review.md` #10
+2. **`protected` メンバー** — クラス
+   - `pub(crate)` への変換。工数小。TS プロジェクトで頻出
 
-## 型構文
+3. **配列分割代入の拡張** — 分割代入
+   - スキップ `[a, , b]`、rest `[first, ...rest]`、ネスト `[[a], [b]]`
+   - 基本パターン `[a, b]` は実装済み
 
-- discriminated union の拡張パターン
-  - **保留**: 基本パターン（文字列リテラル discriminant）の実績を見てから着手
-  - 数値リテラル discriminant（`{ type: 0 } | { type: 1 }`）— Rust enum では数値の `serde(rename)` が必要で、文字列とは異なる生成パスが必要
-  - 部分的共通フィールド（discriminant 以外に共通フィールドがある場合の扱い）— 共通フィールドを各バリアントに複製するか、trait に抽出するかの設計判断が必要
-  - ネストした discriminated union（`{ kind: "a", sub: { type: "x" } | { type: "y" } }`）— 再帰的な enum 生成が必要
-  - nullable discriminated union（`Event | null`）— `Option<Event>` へのラップ。既存の nullable union の仕組みとの統合が必要
-- conditional type — Tier 3: 高度パターンの変換研究（Hono 固有の 24 件）
-  - 詳細分析: `report/tier3-conditional-types-rust-approaches.md`
-  - 以下の 4 グループに分類。多くは TypeScript 固有の制約への対処であり、Rust では別の手段で同じ目的を達成できる
-  - **Group A: テンプレートリテラル型（10 件）** — パス文字列からパラメータ型を自動導出する目的。Rust では Extractor パターン（Axum 方式）が確立済み。proc macro による直接実現も技術的に可能
-    - **保留**: proc macro による変換は ts_to_rs のスコープ（ソースコード変換）を超える可能性がある。Extractor パターンへの変換戦略を検討する必要あり
-  - **Group B: 再帰的条件型（4 件）** — 半分（SimplifyDeepArray, InterfaceToType）は IDE 表示改善目的で Rust では不要。IntersectNonAnyTypes は `FromRef` トレイトが代替。PathToChain はコード生成で実現可能
-    - **保留**: 不要な型の検出（出力から除外）と、代替パターンへの変換の設計が必要
-  - **Group C: 高階型操作（3 件）** — Equal/NotEqual はテスト用で `static_assertions` が代替。UnionToIntersection は Rust ではユニオン型がないため問題自体が異なる
-    - **保留**: 問題の構造が TS と Rust で異なるため、「何に変換するか」の設計判断が必要
-  - **Group D: 複雑ネスト条件型（7 件）** — Hono のルーティングパイプラインの型追跡システム。複雑さの原因は TS 固有の制約（any の扱い、構造的型付け、マクロ不在、serde 不在）。Rust では IntoResponse + serde + proc macro で同じ目的を達成可能
-    - **保留**: Hono のルーティング型システム全体の Rust 設計が前提。個別の型変換では解決しない
-- indexed access type（`T['Key']` → `T::Key`）のコンパイルテスト除外 **[PRD 化可能]**
-  - `T::Key` は Rust では trait の associated type 構文だが、現在の変換は trait 定義を生成しないため rustc でコンパイルできない。fixture をコンパイルテストから除外している（`tests/compile_test.rs` の `skip_compile`）
-  - 将来的には interface を trait に変換する際に associated type を生成するか、別の変換戦略が必要
-- mapped type（`type Foo = { [K in keyof T]: V }`）**[PRD 化可能]**
-  - Rust のマクロや generics で部分的に表現可能。スコープの絞り込みが必要
-- intersection 型の拡張パターン
-  - 名前付き型参照を含む intersection（`type X = Foo & Bar`）— TypeRegistry でフィールド解決が必要。`TsTypeLit` 同士の基本パターンは実装済み
-    - **保留**: TypeRegistry の型解決機能拡張が前提。現在 TypeRegistry は struct のフィールド一覧を保持しているが、intersection のフィールド統合に使う API がない
-  - `TsKeywordType` を含む intersection（`type X = string & { length: number }`）— TS でプリミティブ型にプロパティを追加するパターン。Rust では直接表現できない
-    - **保留**: 需要が低い。Rust では newtype パターンが代替だが、自動変換の設計が未定
-  - intersection + union の複合型（`(A & B) | C`）— intersection と union の両処理を組み合わせる必要がある
-    - 前提の intersection 基本パターンと union 型参照バリアントは実装済み。PRD 化可能な状態
-  - 型注記位置での intersection（`param: A & B`）— type alias 経由でなく直接型注記に書かれるケース。Rust では inline struct を表現できないため、事前に型定義が必要
-    - **保留**: 型注記位置での匿名 struct 生成の設計が必要。intersection 基本パターンの実績を見てから
-- template literal type（`` type Foo = `prefix_${T}` ``）
-  - **保留**: Rust に対応する型レベル文字列操作がない。需要が低い
+4. **intersection + union の複合型** — 型構文
+   - `(A & B) | C` パターン。前提の intersection・union 両方が実装済み
 
-## クラス
+5. **computed member（enum）** — enum
+   - `1 << 0` 等のビット演算による値指定。工数小
 
-- `static` メンバーの完全対応 **[PRD 化可能]**
-  - static プロパティ（`static readonly MAX = 100` 等）の変換。メソッドのバグ修正とは別件
-  - static メソッド内の `this` アクセスの変換（TS では `this` がクラス自体を指す）
-- `extends` と `implements` の併用（`class Child extends Parent implements Greeter`）**[PRD 化可能]**
-  - `extends` の `ParentTrait` と `implements` の trait の間でメソッドが重複する可能性があり、振り分けロジックが複雑
-  - `implements` 単独は実装済み
-- `protected` メンバー **[PRD 化可能]**
-  - `pub(crate)` への変換等、Discovery で判断可能
+### Tier 2: 保守性・アーキテクチャ改善
 
-## 関数パラメータ
+6. **convert_stmt / convert_stmt_list の責務整理** — 設計負債
+   - `convert_stmt` を直接呼ぶと分割代入が処理されない内部 API の安全性問題
+   - 詳細: `report/design-review.md` #8
 
-- デフォルト引数値の拡張（複雑な式: `= new Map()`, `= someFunction()` 等）
-  - **保留**: リテラル値と空オブジェクト `= {}` は対応済み。需要が発生してから対応
+7. **デフォルト引数内 extra_items の破棄修正** — 設計負債
+   - `convert_default_param` でインライン型リテラルの struct 定義が `_extra` として破棄される
+   - エッジケースのバグ。詳細: `report/design-review.md` #9
 
-## enum
+8. **expressions/mod.rs のモジュール分割** — リファクタリング
+   - 1,142 行。メソッドマッピング・組み込み API 変換等を別モジュールに分離
 
-- computed member（`1 << 0` 等の式による値指定）**[PRD 化可能]**
-- heterogeneous enum（数値と文字列が混在）
-  - **保留**: Rust に直接対応がなく、TS でも非推奨パターン。需要が低い
+9. **VecSpread 展開・tail expression 判定を transformer へ移動** — 設計負債
+   - generator が意味的な変換を行っている。transformer で IR に落とすべき
+   - 工数大。詳細: `report/design-review.md` #10
 
-## 演算子
+### Tier 3: あれば便利
 
-- `in` 演算子（`"prop" in obj`）
-  - **保留**: HashMap ベースのオブジェクト表現の方針決定が前提
-- optional chaining の `Option` ネスト問題
-  - **保留**: 型推論インフラの整備が前提
-- optional chaining 内の特殊変換テスト補強 **[PRD 化可能]**
-  - `resolve_member_access` ヘルパーによる `.length` / enum 変換は実装済みだが、以下のテストケースが未実施:
-    - `x?.y?.length` — チェーンされた optional chaining 内での `.length` 変換
-    - `x?.y.length` — optional chaining と通常メンバーアクセスの混在
+10. **optional chaining 内の特殊変換テスト補強** — 演算子
+    - `x?.y?.length` 等のテストケース未実施
 
-## 単項演算子の拡張
+11. **Math.random() → `rand` クレート** — 組み込み API
+    - 外部クレート依存が増える点はスコープ判断が必要
 
-- `+x`（数値変換） — **保留**: 型推論インフラが前提
-- `typeof x`（型チェック） — **保留**: 型ガードの変換戦略の方針決定が前提
-- `~x`, `void x`, `delete obj.prop` — **保留**: 需要が低い、または前提機能が未整備
+12. **indexed access type のコンパイルテスト改善** — 型構文
+    - trait の associated type 生成が必要。工数中〜大
 
-## 分割代入の拡張
+13. **mapped type** — 型構文
+    - `{ [K in keyof T]: V }`。Rust のマクロや generics で部分的に表現可能。スコープ絞り込みが必要
 
-- 配列: スキップ `[a, , b]`、rest `[first, ...rest]`、ネスト `[[a], [b]]` **[PRD 化可能]**
-  - 基本パターン（`[a, b]`）は実装済み
-- オブジェクト: デフォルト値、ネスト、rest
-  - **保留**: 基本分割代入パターンの実績が前提
-- 空配列の型推論
-  - **保留**: 型推論インフラが前提
+14. **TryCatch のエラー型パラメータ化** — 設計負債
+    - 現時点では実害なし。将来 anyhow 対応時に必要。詳細: `report/design-review.md` #5
 
-## オブジェクトリテラル
+## 保留
 
-- 型注記なし（`const obj = { x: 1 }`）
-  - **保留**: 匿名構造体か HashMap かの判断に実績データが必要
-- computed property（`{ [key]: value }`）
-  - **保留**: 型注記なしオブジェクトの方針決定が前提
+### 前提機能の実装待ち
 
-## 組み込み API の特殊変換
+- discriminated union の拡張パターン — 基本パターンの実績を見てから
+- 名前付き型参照の intersection（`Foo & Bar`）— TypeRegistry 拡張が前提
+- 型注記位置での intersection — 匿名 struct 生成の設計が必要
+- optional chaining の `Option` ネスト問題 — 型推論インフラが前提
+- `+x`（数値変換）— 型推論インフラが前提
+- `typeof x`（型チェック）— 型ガード戦略が前提
+- オブジェクト分割代入（デフォルト値、ネスト、rest）— 基本パターンの実績が前提
+- 空配列の型推論 — 型推論インフラが前提
+- computed property — 型注記なしオブジェクト方針が前提
+- `.substring` / `.slice` → `&s[a..b]` — UTF-8 境界問題
+- 型ガード（`typeof x === "string"`）— 型ガード戦略全体の方針が前提
+- `in` 演算子 — HashMap 方針決定が前提
+- ジェネリック型の具体化 — ジェネリクス変換が前提
+- re-export の追跡 — import 基本解決が前提
 
-- Math.random() → `rand` クレート **[PRD 化可能]**
-- `.substring(a, b)` / `.slice(a, b)` → `&s[a..b]`
-  - **保留**: UTF-8 バイト境界の問題
-- `typeof x === "string"` 等の型ガード
-  - **保留**: 型ガードの変換戦略全体の方針決定が前提
+### 実績データ・外部判断待ち
 
-## エラーハンドリング
+- デフォルト引数値の拡張（複雑な式）— 需要が発生してから
+- `anyhow::Error` や独自エラー型 — 初版は `String` 固定。実績データが必要
+- 型注記なしオブジェクトリテラル — 匿名構造体か HashMap かの判断に実績データが必要
+- 所有権推論（clone 削減）— 実績データが必要
+- カスタム変換ルールの注入 — 判断材料不足
+- 外部パッケージの型定義解決 — 設計コストが高い
+- 型の構造的一致による推論 — 初版では対応しない
 
-- `anyhow::Error` や独自エラー型への対応
-  - **保留**: 初版は `String` 固定。実績データが必要
+### 需要が低い・スコープ外
 
-## TypeRegistry
-
-- 外部パッケージ（`node_modules`）の型定義解決 — **保留**: 設計コストが高い
-- ジェネリック型の具体化 — **保留**: ジェネリクス変換が前提
-- re-export（`export { Foo } from "./bar"`）の追跡 — **保留**: import の基本解決が前提
-- 型の構造的一致による推論 — **保留**: 本質的に困難。初版では対応しない
-
-## リファクタリング候補
-
-- `functions/mod.rs:convert_param` と `classes.rs:convert_param_pat` の統合 **[PRD 化可能]**
-  - 同一ロジックの知識の重複
-- transformer/expressions/mod.rs の本体コードのモジュール分割検討 **[PRD 化可能]**
-  - テスト分離後も本体 1,142 行。メソッドマッピング、組み込み API 変換等を別モジュールに分離する候補
-- `generate_class_with_implements` の `classes.rs` への移動 **[PRD 化可能]**
-  - クラスから IR アイテムを生成するロジックだが、`iface_methods` 引数の都合で `mod.rs:452-500` に配置されている。`classes.rs` の他の生成関数と同レベルの責務
-- `main.rs` のディレクトリ変換ロジック重複の共通化 **[PRD 化可能]**
-  - `transpile_directory` と `transpile_directory_collecting` で Pass1/Pass2/mod.rs 生成の ~80 行が類似。差異は変換関数の呼び出しと結果収集方法のみ
-
-## 開発基盤・将来課題
-
-- 所有権推論（clone 削減） — **保留**: 実績データが必要
-- Docker ベースの開発環境 — **保留**: 複数人開発が始まった時点で再評価
-- Watch モード — **保留**: 変換機能が十分に揃った後
-- カスタム変換ルールの注入 — **保留**: 判断材料不足
-- `for...in`（オブジェクトキー列挙） — **保留**: TS でも非推奨、需要が低い
+- conditional type Tier 3（Hono 固有 24 件）— 各 Group ごとに保留理由あり。詳細: `report/tier3-conditional-types-rust-approaches.md`
+- heterogeneous enum（数値と文字列の混在）— TS でも非推奨
+- `TsKeywordType` を含む intersection — 需要が低い
+- template literal type — Rust に対応なし
+- `~x`, `void x`, `delete obj.prop` — 需要が低い
+- `for...in`（オブジェクトキー列挙）— TS でも非推奨
+- Docker ベースの開発環境 — 複数人開発時に再評価
+- Watch モード — 変換機能が十分に揃った後

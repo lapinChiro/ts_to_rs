@@ -96,6 +96,19 @@ pub struct Param {
     pub ty: Option<RustType>,
 }
 
+/// An associated constant inside an `impl` block (e.g., `pub const MAX: f64 = 100.0;`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct AssocConst {
+    /// Visibility
+    pub vis: Visibility,
+    /// Constant name
+    pub name: String,
+    /// Type
+    pub ty: RustType,
+    /// Value expression
+    pub value: Expr,
+}
+
 /// A method inside an `impl` block.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Method {
@@ -111,8 +124,8 @@ pub struct Method {
     pub params: Vec<Param>,
     /// Return type (`None` means `()`)
     pub return_type: Option<RustType>,
-    /// Method body
-    pub body: Vec<Stmt>,
+    /// Method body (`None` for trait method signatures, `Some` for implementations)
+    pub body: Option<Vec<Stmt>>,
 }
 
 /// Top-level item in a Rust file or module.
@@ -166,6 +179,8 @@ pub enum Item {
         struct_name: String,
         /// If `Some`, this is a trait impl: `impl TraitName for StructName`
         for_trait: Option<String>,
+        /// Associated constants (e.g., `pub const MAX: f64 = 100.0;`)
+        consts: Vec<AssocConst>,
         /// Methods in the impl block
         methods: Vec<Method>,
     },
@@ -329,8 +344,8 @@ pub enum Expr {
     },
     /// A unary operation: `<op><operand>` (e.g., `!x`, `-x`)
     UnaryOp {
-        /// Operator (e.g., `!`, `-`)
-        op: String,
+        /// Operator
+        op: UnOp,
         /// Operand
         operand: Box<Expr>,
     },
@@ -338,8 +353,8 @@ pub enum Expr {
     BinaryOp {
         /// Left operand
         left: Box<Expr>,
-        /// Operator (e.g., `+`, `-`, `==`, `>`)
-        op: String,
+        /// Operator
+        op: BinOp,
         /// Right operand
         right: Box<Expr>,
     },
@@ -405,9 +420,95 @@ pub enum Expr {
     Cast {
         /// The expression being cast
         expr: Box<Expr>,
-        /// The target type as a string (e.g., `"f64"`, `"i64"`)
-        target: String,
+        /// The target type
+        target: RustType,
     },
+}
+
+/// Binary operators supported in the IR.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BinOp {
+    /// `+`
+    Add,
+    /// `-`
+    Sub,
+    /// `*`
+    Mul,
+    /// `/`
+    Div,
+    /// `%`
+    Mod,
+    /// `==`
+    Eq,
+    /// `!=`
+    NotEq,
+    /// `<`
+    Lt,
+    /// `<=`
+    LtEq,
+    /// `>`
+    Gt,
+    /// `>=`
+    GtEq,
+    /// `&&`
+    LogicalAnd,
+    /// `||`
+    LogicalOr,
+}
+
+impl BinOp {
+    /// Returns the Rust source representation of this operator.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            BinOp::Add => "+",
+            BinOp::Sub => "-",
+            BinOp::Mul => "*",
+            BinOp::Div => "/",
+            BinOp::Mod => "%",
+            BinOp::Eq => "==",
+            BinOp::NotEq => "!=",
+            BinOp::Lt => "<",
+            BinOp::LtEq => "<=",
+            BinOp::Gt => ">",
+            BinOp::GtEq => ">=",
+            BinOp::LogicalAnd => "&&",
+            BinOp::LogicalOr => "||",
+        }
+    }
+
+    /// Returns the precedence level (higher = binds tighter).
+    ///
+    /// Based on Rust operator precedence:
+    /// <https://doc.rust-lang.org/reference/expressions.html#expression-precedence>
+    pub fn precedence(self) -> u8 {
+        match self {
+            BinOp::LogicalOr => 3,
+            BinOp::LogicalAnd => 4,
+            BinOp::Eq | BinOp::NotEq => 5,
+            BinOp::Lt | BinOp::LtEq | BinOp::Gt | BinOp::GtEq => 6,
+            BinOp::Add | BinOp::Sub => 8,
+            BinOp::Mul | BinOp::Div | BinOp::Mod => 9,
+        }
+    }
+}
+
+/// Unary operators supported in the IR.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnOp {
+    /// `!` (logical NOT)
+    Not,
+    /// `-` (negation)
+    Neg,
+}
+
+impl UnOp {
+    /// Returns the Rust source representation of this operator.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            UnOp::Not => "!",
+            UnOp::Neg => "-",
+        }
+    }
 }
 
 /// A segment in a vec with spread syntax.
