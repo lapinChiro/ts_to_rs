@@ -1376,24 +1376,201 @@ fn test_convert_type_alias_intersection_type_ref_unresolved_generates_embedded_s
 
 #[test]
 fn test_convert_ts_type_intersection_annotation_returns_first_type() {
-    // 型注記位置の intersection はフォールバック（最初の型を返す）
+    // 型注記位置の intersection は合成 struct を生成する
     let decl = parse_interface("interface T { x: Foo & Bar; }");
     let prop = match &decl.body.body[0] {
         TsTypeElement::TsPropertySignature(p) => p,
         _ => panic!("expected property signature"),
     };
-    let result = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new());
+    let mut extra = Vec::new();
+    let result = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut extra);
     assert!(
         result.is_ok(),
         "intersection in annotation should not error, got: {result:?}"
     );
     let ty = result.unwrap();
-    assert_eq!(
-        ty,
-        RustType::Named {
-            name: "Foo".to_string(),
-            type_args: vec![],
+    // 合成 struct の Named が返される
+    match &ty {
+        RustType::Named { name, .. } => {
+            assert!(
+                name.starts_with("_Intersection"),
+                "expected _IntersectionN, got: {name}"
+            );
         }
+        other => panic!("expected Named, got: {other:?}"),
+    }
+    // extra_items に struct が追加される
+    assert_eq!(extra.len(), 1);
+    match &extra[0] {
+        Item::Struct { fields, .. } => {
+            // Foo, Bar は TypeRegistry 未登録なので embedded フィールドになる
+            assert_eq!(fields.len(), 2);
+        }
+        other => panic!("expected Struct, got: {other:?}"),
+    }
+}
+
+// -- TsTypeLit in annotation position tests --
+
+#[test]
+fn test_convert_ts_type_type_lit_single_field_generates_struct() {
+    let decl = parse_interface("interface T { x: { a: string }; }");
+    let prop = match &decl.body.body[0] {
+        TsTypeElement::TsPropertySignature(p) => p,
+        _ => panic!("expected property signature"),
+    };
+    let mut extra = Vec::new();
+    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut extra).unwrap();
+
+    match &ty {
+        RustType::Named { name, .. } => {
+            assert!(
+                name.starts_with("_TypeLit"),
+                "expected _TypeLitN, got: {name}"
+            );
+        }
+        other => panic!("expected Named, got: {other:?}"),
+    }
+    assert_eq!(extra.len(), 1);
+    match &extra[0] {
+        Item::Struct { name, fields, .. } => {
+            assert!(name.starts_with("_TypeLit"));
+            assert_eq!(fields.len(), 1);
+            assert_eq!(fields[0].name, "a");
+            assert_eq!(fields[0].ty, RustType::String);
+        }
+        other => panic!("expected Struct, got: {other:?}"),
+    }
+}
+
+#[test]
+fn test_convert_ts_type_type_lit_multiple_fields_generates_struct() {
+    let decl = parse_interface("interface T { x: { a: string, b: number }; }");
+    let prop = match &decl.body.body[0] {
+        TsTypeElement::TsPropertySignature(p) => p,
+        _ => panic!("expected property signature"),
+    };
+    let mut extra = Vec::new();
+    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut extra).unwrap();
+
+    match &ty {
+        RustType::Named { name, .. } => {
+            assert!(name.starts_with("_TypeLit"));
+        }
+        other => panic!("expected Named, got: {other:?}"),
+    }
+    assert_eq!(extra.len(), 1);
+    match &extra[0] {
+        Item::Struct { fields, .. } => {
+            assert_eq!(fields.len(), 2);
+            assert_eq!(fields[0].name, "a");
+            assert_eq!(fields[0].ty, RustType::String);
+            assert_eq!(fields[1].name, "b");
+            assert_eq!(fields[1].ty, RustType::F64);
+        }
+        other => panic!("expected Struct, got: {other:?}"),
+    }
+}
+
+#[test]
+fn test_convert_ts_type_type_lit_optional_field_generates_option() {
+    let decl = parse_interface("interface T { x: { a: string, b?: number }; }");
+    let prop = match &decl.body.body[0] {
+        TsTypeElement::TsPropertySignature(p) => p,
+        _ => panic!("expected property signature"),
+    };
+    let mut extra = Vec::new();
+    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut extra).unwrap();
+
+    assert!(matches!(ty, RustType::Named { .. }));
+    assert_eq!(extra.len(), 1);
+    match &extra[0] {
+        Item::Struct { fields, .. } => {
+            assert_eq!(fields.len(), 2);
+            assert_eq!(fields[0].name, "a");
+            assert_eq!(fields[0].ty, RustType::String);
+            assert_eq!(fields[1].name, "b");
+            assert_eq!(fields[1].ty, RustType::Option(Box::new(RustType::F64)));
+        }
+        other => panic!("expected Struct, got: {other:?}"),
+    }
+}
+
+// -- intersection in annotation position tests --
+
+#[test]
+fn test_convert_ts_type_intersection_type_lits_generates_merged_struct() {
+    let decl = parse_interface("interface T { x: { a: string } & { b: number }; }");
+    let prop = match &decl.body.body[0] {
+        TsTypeElement::TsPropertySignature(p) => p,
+        _ => panic!("expected property signature"),
+    };
+    let mut extra = Vec::new();
+    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut extra).unwrap();
+
+    match &ty {
+        RustType::Named { name, .. } => {
+            assert!(
+                name.starts_with("_Intersection"),
+                "expected _IntersectionN, got: {name}"
+            );
+        }
+        other => panic!("expected Named, got: {other:?}"),
+    }
+    assert_eq!(extra.len(), 1);
+    match &extra[0] {
+        Item::Struct { fields, .. } => {
+            assert_eq!(fields.len(), 2);
+            assert_eq!(fields[0].name, "a");
+            assert_eq!(fields[0].ty, RustType::String);
+            assert_eq!(fields[1].name, "b");
+            assert_eq!(fields[1].ty, RustType::F64);
+        }
+        other => panic!("expected Struct, got: {other:?}"),
+    }
+}
+
+#[test]
+fn test_convert_ts_type_intersection_type_ref_and_type_lit_generates_struct() {
+    let decl = parse_interface("interface T { x: Foo & { c: number }; }");
+    let prop = match &decl.body.body[0] {
+        TsTypeElement::TsPropertySignature(p) => p,
+        _ => panic!("expected property signature"),
+    };
+    let mut extra = Vec::new();
+    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut extra).unwrap();
+
+    match &ty {
+        RustType::Named { name, .. } => {
+            assert!(name.starts_with("_Intersection"));
+        }
+        other => panic!("expected Named, got: {other:?}"),
+    }
+    assert_eq!(extra.len(), 1);
+    match &extra[0] {
+        Item::Struct { fields, .. } => {
+            // Foo は TypeRegistry 未登録なので embedded フィールド _0: Foo
+            assert_eq!(fields.len(), 2);
+            assert_eq!(fields[0].name, "_0");
+            assert_eq!(fields[1].name, "c");
+            assert_eq!(fields[1].ty, RustType::F64);
+        }
+        other => panic!("expected Struct, got: {other:?}"),
+    }
+}
+
+#[test]
+fn test_convert_ts_type_intersection_duplicate_field_returns_error() {
+    let decl = parse_interface("interface T { x: { a: string } & { a: number }; }");
+    let prop = match &decl.body.body[0] {
+        TsTypeElement::TsPropertySignature(p) => p,
+        _ => panic!("expected property signature"),
+    };
+    let result = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new());
+    assert!(result.is_err(), "duplicate field should error");
+    assert!(
+        result.unwrap_err().to_string().contains("duplicate field"),
+        "error should mention duplicate field"
     );
 }
 

@@ -9,8 +9,19 @@ use swc_ecma_ast::{
     TsTypeAliasDecl, TsTypeElement,
 };
 
+use std::sync::atomic::{AtomicU32, Ordering};
+
 use crate::ir::{EnumValue, EnumVariant, Item, Method, Param, RustType, StructField, Visibility};
 use crate::registry::TypeRegistry;
+
+/// Counter for generating unique synthetic struct names.
+static SYNTHETIC_COUNTER: AtomicU32 = AtomicU32::new(0);
+
+/// Generates a unique synthetic struct name with the given prefix (e.g., `_TypeLit0`, `_Intersection1`).
+fn generate_synthetic_name(prefix: &str) -> String {
+    let id = SYNTHETIC_COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("_{prefix}{id}")
+}
 
 /// Converts a SWC [`TsType`] into an IR [`RustType`].
 ///
@@ -54,17 +65,7 @@ pub fn convert_ts_type(ts_type: &TsType, extra_items: &mut Vec<Item>) -> Result<
         ) => convert_union_type(union, extra_items),
         TsType::TsUnionOrIntersectionType(
             swc_ecma_ast::TsUnionOrIntersectionType::TsIntersectionType(intersection),
-        ) => {
-            // Fallback: use the first type of the intersection (information loss)
-            // TODO: intersection in annotation position should generate a merged struct
-            convert_ts_type(
-                intersection
-                    .types
-                    .first()
-                    .ok_or_else(|| anyhow!("empty intersection type"))?,
-                extra_items,
-            )
-        }
+        ) => convert_intersection_in_annotation(intersection, extra_items),
         TsType::TsParenthesizedType(paren) => convert_ts_type(&paren.type_ann, extra_items),
         TsType::TsFnOrConstructorType(swc_ecma_ast::TsFnOrConstructorType::TsFnType(fn_type)) => {
             convert_fn_type(fn_type, extra_items)
@@ -78,6 +79,7 @@ pub fn convert_ts_type(ts_type: &TsType, extra_items: &mut Vec<Item>) -> Result<
             Ok(RustType::Tuple(elems))
         }
         TsType::TsIndexedAccessType(indexed) => convert_indexed_access_type(indexed, extra_items),
+        TsType::TsTypeLit(type_lit) => convert_type_lit_in_annotation(type_lit, extra_items),
         _ => Err(anyhow!("unsupported type: {:?}", ts_type)),
     }
 }
@@ -1369,6 +1371,95 @@ fn try_convert_intersection_type(
         type_params,
         fields,
     }))
+}
+
+/// Converts an inline type literal in annotation position into a synthetic struct.
+///
+/// Example: `x: { a: string, b: number }` generates `struct _TypeLit0 { pub a: String, pub b: f64 }`
+/// and returns `RustType::Named { name: "_TypeLit0" }`.
+fn convert_type_lit_in_annotation(
+    type_lit: &swc_ecma_ast::TsTypeLit,
+    extra_items: &mut Vec<Item>,
+) -> Result<RustType> {
+    let mut fields = Vec::new();
+    for member in &type_lit.members {
+        match member {
+            TsTypeElement::TsPropertySignature(prop) => {
+                fields.push(convert_property_signature(prop, extra_items)?);
+            }
+            _ => return Err(anyhow!("unsupported type literal member")),
+        }
+    }
+    let struct_name = generate_synthetic_name("TypeLit");
+    extra_items.push(Item::Struct {
+        vis: Visibility::Public,
+        name: struct_name.clone(),
+        type_params: vec![],
+        fields,
+    });
+    Ok(RustType::Named {
+        name: struct_name,
+        type_args: vec![],
+    })
+}
+
+/// Converts an intersection type in annotation position into a synthetic merged struct.
+///
+/// Reuses the same merging logic as `try_convert_intersection_type` (type alias position),
+/// but generates a synthetic name since no explicit name is available.
+fn convert_intersection_in_annotation(
+    intersection: &swc_ecma_ast::TsIntersectionType,
+    extra_items: &mut Vec<Item>,
+) -> Result<RustType> {
+    let mut fields = Vec::new();
+    for (i, ty) in intersection.types.iter().enumerate() {
+        match ty.as_ref() {
+            TsType::TsTypeLit(lit) => {
+                for member in &lit.members {
+                    match member {
+                        TsTypeElement::TsPropertySignature(prop) => {
+                            let field = convert_property_signature(prop, extra_items)?;
+                            if fields.iter().any(|f: &StructField| f.name == field.name) {
+                                return Err(anyhow!(
+                                    "duplicate field '{}' in intersection type",
+                                    field.name
+                                ));
+                            }
+                            fields.push(field);
+                        }
+                        _ => {
+                            return Err(anyhow!(
+                                "unsupported intersection member (only property signatures are supported)"
+                            ));
+                        }
+                    }
+                }
+            }
+            TsType::TsTypeRef(type_ref) => {
+                let rust_type = convert_type_ref(type_ref, extra_items)?;
+                fields.push(StructField {
+                    vis: None,
+                    name: format!("_{i}"),
+                    ty: rust_type,
+                });
+            }
+            _ => {
+                return Err(anyhow!("unsupported intersection member type"));
+            }
+        }
+    }
+
+    let struct_name = generate_synthetic_name("Intersection");
+    extra_items.push(Item::Struct {
+        vis: Visibility::Public,
+        name: struct_name.clone(),
+        type_params: vec![],
+        fields,
+    });
+    Ok(RustType::Named {
+        name: struct_name,
+        type_args: vec![],
+    })
 }
 
 /// Converts a TS function type (`(x: number) => string`) into `RustType::Fn`.
