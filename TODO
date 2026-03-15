@@ -21,7 +21,7 @@
    - `findIndex` → `position()` は `Option<usize>` を返すが `f64` として扱われる
    - `sort`/`reverse` → `&mut self` が必要だがパラメータは immutable
    - `fold` → クロージャパラメータが `&f64` だが `f64` として生成される
-   - TypeEnv 導入後に対応可能な部分あり（`&mut self` の判定）
+   - TypeEnv を使った `&mut self` 判定が可能になった
 
 2. **intersection 型注記位置での struct 生成** — 型変換正確性
    - `x: { a: string } & { b: number }` が型注記位置にある場合、現在は最初の型のみ使用（情報損失）
@@ -62,21 +62,24 @@
 
 ### Tier 3: 文・式の網羅性
 
-11. **ネスト async 関数** — 文（Hono 1件解消）
+11. **switch 文の変換** — 文（工数中）
+    - `switch(x) { case 1: ... }` が未対応（`contains_throw` での検出は対応済み）
+    - Rust の `match` 式に変換。fall-through は `|` パターンで対応
+
+12. **ネスト async 関数** — 文（Hono 1件解消）
     - `async function dispatch()` がネスト位置で未対応
     - closure + async block で対応
 
-12. **オブジェクト分割代入の拡張（デフォルト値、ネスト、rest）** — 分割代入
+13. **オブジェクト分割代入の拡張（デフォルト値、ネスト、rest）** — 分割代入
     - 基本パターン・リネームは実装済み
     - デフォルト値、ネスト、rest が未対応
 
-13. **生成コードの Cargo.toml への依存クレート追加** — コード生成
+14. **生成コードの Cargo.toml への依存クレート追加** — コード生成
     - `serde_json`（any/unknown 変換）、`scopeguard`（finally 変換）を生成コードの Cargo.toml に含める機能が必要
 
 ### Tier 4: あれば便利
 
-14. **非プリミティブ type assertion のコメント保持** — type assertion
-15. **optional chaining 内の特殊変換テスト補強** — 演算子
+15. **非プリミティブ type assertion のコメント保持** — type assertion
 16. **Math.random() → `rand` クレート** — 組み込み API
 17. **indexed access type の非文字列キー対応** — 型構文（Hono 2件）
 18. **TryCatch のエラー型パラメータ化** — 設計負債
@@ -86,7 +89,7 @@
 ### Tier 5: 保守性・アーキテクチャ改善
 
 21. **expressions/mod.rs のモジュール分割** — リファクタリング
-    - 1,142 行。メソッドマッピング・組み込み API 変換等を別モジュールに分離
+    - 1,290 行。メソッドマッピング・組み込み API 変換等を別モジュールに分離
 
 22. **VecSpread 展開・tail expression 判定を transformer へ移動** — 設計負債
     - generator が意味的な変換を行っている
@@ -95,13 +98,11 @@
 
 ## 保留
 
-### 前提機能の実装待ち（TypeEnv が前提 — `backlog/type-env-*.md` で対応予定）
+### 前提機能の実装待ち（TypeEnv 導入済み — 変換ロジック未実装）
 
-- optional chaining / nullish coalescing の非 Option 型対応 — `backlog/type-env-opt-chain.md` で対応
-- optional chaining の `Option` ネスト問題 — `backlog/type-env-opt-chain.md` で対応
-- `+x`（数値変換）— TypeEnv 導入後に対応
+- `+x`（数値変換）— TypeEnv で型判定は可能だが、変換パターンの設計が必要
 - `typeof x`（型チェック）— TypeEnv + 型ガード戦略が前提
-- 空配列の型推論 — TypeEnv 導入後に対応
+- 空配列の型推論 — TypeEnv で変数型は取得可能だが、推論ロジック未実装
 - const のミュータビリティ（使用箇所ベースの解析）— TypeEnv + 前方スキャンが前提
 
 ### 前提機能の実装待ち（その他）

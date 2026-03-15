@@ -9,6 +9,7 @@ use crate::ir::{self, BinOp, ClosureBody, Expr, Param, RustType, UnOp};
 use crate::registry::{TypeDef, TypeRegistry};
 use crate::transformer::functions::convert_ts_type_with_fallback;
 use crate::transformer::statements::convert_stmt;
+use crate::transformer::TypeEnv;
 
 /// Converts an SWC [`ast::Expr`] into an IR [`Expr`], with an optional expected type.
 ///
@@ -24,27 +25,28 @@ pub fn convert_expr(
     expr: &ast::Expr,
     reg: &TypeRegistry,
     expected: Option<&RustType>,
+    type_env: &TypeEnv,
 ) -> Result<Expr> {
     match expr {
         ast::Expr::Ident(ident) => Ok(Expr::Ident(ident.sym.to_string())),
         ast::Expr::Lit(lit) => convert_lit(lit, expected),
-        ast::Expr::Bin(bin) => convert_bin_expr(bin, reg),
-        ast::Expr::Tpl(tpl) => convert_template_literal(tpl, reg),
-        ast::Expr::Paren(paren) => convert_expr(&paren.expr, reg, expected),
-        ast::Expr::Member(member) => convert_member_expr(member, reg),
+        ast::Expr::Bin(bin) => convert_bin_expr(bin, reg, type_env),
+        ast::Expr::Tpl(tpl) => convert_template_literal(tpl, reg, type_env),
+        ast::Expr::Paren(paren) => convert_expr(&paren.expr, reg, expected, type_env),
+        ast::Expr::Member(member) => convert_member_expr(member, reg, type_env),
         ast::Expr::This(_) => Ok(Expr::Ident("self".to_string())),
-        ast::Expr::Assign(assign) => convert_assign_expr(assign, reg),
-        ast::Expr::Arrow(arrow) => convert_arrow_expr(arrow, reg, false, &mut Vec::new()),
-        ast::Expr::Call(call) => convert_call_expr(call, reg),
-        ast::Expr::New(new_expr) => convert_new_expr(new_expr, reg),
-        ast::Expr::Array(array_lit) => convert_array_lit(array_lit, reg, expected),
-        ast::Expr::Object(obj_lit) => convert_object_lit(obj_lit, reg, expected),
-        ast::Expr::Cond(cond) => convert_cond_expr(cond, reg, expected),
-        ast::Expr::Unary(unary) => convert_unary_expr(unary, reg),
-        ast::Expr::TsAs(ts_as) => convert_ts_as_expr(ts_as, reg, expected),
-        ast::Expr::OptChain(opt_chain) => convert_opt_chain_expr(opt_chain, reg),
+        ast::Expr::Assign(assign) => convert_assign_expr(assign, reg, type_env),
+        ast::Expr::Arrow(arrow) => convert_arrow_expr(arrow, reg, false, &mut Vec::new(), type_env),
+        ast::Expr::Call(call) => convert_call_expr(call, reg, type_env),
+        ast::Expr::New(new_expr) => convert_new_expr(new_expr, reg, type_env),
+        ast::Expr::Array(array_lit) => convert_array_lit(array_lit, reg, expected, type_env),
+        ast::Expr::Object(obj_lit) => convert_object_lit(obj_lit, reg, expected, type_env),
+        ast::Expr::Cond(cond) => convert_cond_expr(cond, reg, expected, type_env),
+        ast::Expr::Unary(unary) => convert_unary_expr(unary, reg, type_env),
+        ast::Expr::TsAs(ts_as) => convert_ts_as_expr(ts_as, reg, expected, type_env),
+        ast::Expr::OptChain(opt_chain) => convert_opt_chain_expr(opt_chain, reg, type_env),
         ast::Expr::Await(await_expr) => {
-            let inner = convert_expr(&await_expr.arg, reg, None)?;
+            let inner = convert_expr(&await_expr.arg, reg, None, type_env)?;
             Ok(Expr::Await(Box::new(inner)))
         }
         _ => Err(anyhow!("unsupported expression: {:?}", expr)),
@@ -76,11 +78,20 @@ fn convert_lit(lit: &ast::Lit, expected: Option<&RustType>) -> Result<Expr> {
 }
 
 /// Converts an SWC binary expression to an IR `BinaryOp`.
-fn convert_bin_expr(bin: &ast::BinExpr, reg: &TypeRegistry) -> Result<Expr> {
-    // `x ?? y` → `x.unwrap_or_else(|| y)`
+fn convert_bin_expr(bin: &ast::BinExpr, reg: &TypeRegistry, type_env: &TypeEnv) -> Result<Expr> {
+    // `x ?? y` → `x.unwrap_or_else(|| y)` (Option) or `x` (non-Option)
     if bin.op == ast::BinaryOp::NullishCoalescing {
-        let left = convert_expr(&bin.left, reg, None)?;
-        let right = convert_expr(&bin.right, reg, None)?;
+        let left_type = resolve_expr_type(&bin.left, type_env, reg);
+        let is_option = left_type
+            .as_ref()
+            .is_some_and(|ty| matches!(ty, RustType::Option(_)));
+
+        let left = convert_expr(&bin.left, reg, None, type_env)?;
+        if !is_option && left_type.is_some() {
+            // Non-Option type: nullish coalescing is a no-op, return left as-is
+            return Ok(left);
+        }
+        let right = convert_expr(&bin.right, reg, None, type_env)?;
         return Ok(Expr::MethodCall {
             object: Box::new(left),
             method: "unwrap_or_else".to_string(),
@@ -92,8 +103,8 @@ fn convert_bin_expr(bin: &ast::BinExpr, reg: &TypeRegistry) -> Result<Expr> {
         });
     }
 
-    let left = convert_expr(&bin.left, reg, None)?;
-    let right = convert_expr(&bin.right, reg, None)?;
+    let left = convert_expr(&bin.left, reg, None, type_env)?;
+    let right = convert_expr(&bin.right, reg, None, type_env)?;
     let op = convert_binary_op(bin.op)?;
     Ok(Expr::BinaryOp {
         left: Box::new(left),
@@ -187,25 +198,26 @@ fn convert_ts_as_expr(
     ts_as: &ast::TsAsExpr,
     reg: &TypeRegistry,
     expected: Option<&RustType>,
+    type_env: &TypeEnv,
 ) -> Result<Expr> {
     use crate::transformer::types::convert_ts_type;
     match convert_ts_type(&ts_as.type_ann, &mut Vec::new()) {
         Ok(target_ty) => {
             let is_primitive_cast = matches!(target_ty, RustType::F64 | RustType::Bool);
             if is_primitive_cast {
-                let inner = convert_expr(&ts_as.expr, reg, Some(&target_ty))?;
+                let inner = convert_expr(&ts_as.expr, reg, Some(&target_ty), type_env)?;
                 Ok(Expr::Cast {
                     expr: Box::new(inner),
                     target: target_ty,
                 })
             } else {
                 // Pass the assertion type as expected to help type inference
-                convert_expr(&ts_as.expr, reg, expected.or(Some(&target_ty)))
+                convert_expr(&ts_as.expr, reg, expected.or(Some(&target_ty)), type_env)
             }
         }
         Err(_) => {
             // If we can't convert the type, just ignore the assertion
-            convert_expr(&ts_as.expr, reg, expected)
+            convert_expr(&ts_as.expr, reg, expected, type_env)
         }
     }
 }
@@ -214,17 +226,31 @@ fn convert_ts_as_expr(
 ///
 /// Supports property access, method calls, and computed access.
 /// Chained optional chaining (`x?.y?.z`) is handled recursively.
-fn convert_opt_chain_expr(opt_chain: &ast::OptChainExpr, reg: &TypeRegistry) -> Result<Expr> {
+fn convert_opt_chain_expr(
+    opt_chain: &ast::OptChainExpr,
+    reg: &TypeRegistry,
+    type_env: &TypeEnv,
+) -> Result<Expr> {
     match opt_chain.base.as_ref() {
         ast::OptChainBase::Member(member) => {
-            let object = convert_expr(&member.obj, reg, None)?;
+            let obj_type = resolve_expr_type(&member.obj, type_env, reg);
+            let is_option = obj_type
+                .as_ref()
+                .is_some_and(|ty| matches!(ty, RustType::Option(_)));
+
+            // Non-Option type with known type: plain member access
+            if !is_option && obj_type.is_some() {
+                return convert_member_expr(member, reg, type_env);
+            }
+
+            let object = convert_expr(&member.obj, reg, None, type_env)?;
             let body_expr = match &member.prop {
                 ast::MemberProp::Ident(ident) => {
                     let field = ident.sym.to_string();
                     resolve_member_access(&Expr::Ident("_v".to_string()), &field, &member.obj, reg)?
                 }
                 ast::MemberProp::Computed(computed) => {
-                    let index = convert_expr(&computed.expr, reg, None)?;
+                    let index = convert_expr(&computed.expr, reg, None, type_env)?;
                     Expr::Index {
                         object: Box::new(Expr::Ident("_v".to_string())),
                         index: Box::new(index),
@@ -232,13 +258,26 @@ fn convert_opt_chain_expr(opt_chain: &ast::OptChainExpr, reg: &TypeRegistry) -> 
                 }
                 _ => return Err(anyhow!("unsupported optional chaining property")),
             };
+
+            // If the field type is Option, use and_then to avoid Option<Option<T>>
+            let field_type = resolve_field_type(
+                obj_type.as_ref().unwrap_or(&RustType::Any),
+                &member.prop,
+                reg,
+            );
+            let method_name = if field_type.is_some_and(|ty| matches!(ty, RustType::Option(_))) {
+                "and_then"
+            } else {
+                "map"
+            };
+
             Ok(Expr::MethodCall {
                 object: Box::new(Expr::MethodCall {
                     object: Box::new(object),
                     method: "as_ref".to_string(),
                     args: vec![],
                 }),
-                method: "map".to_string(),
+                method: method_name.to_string(),
                 args: vec![Expr::Closure {
                     params: vec![Param {
                         name: "_v".to_string(),
@@ -250,12 +289,35 @@ fn convert_opt_chain_expr(opt_chain: &ast::OptChainExpr, reg: &TypeRegistry) -> 
             })
         }
         ast::OptChainBase::Call(opt_call) => {
+            // Check if the callee object is a non-Option type
+            let callee_obj_type = match opt_call.callee.as_ref() {
+                ast::Expr::Member(m) => resolve_expr_type(&m.obj, type_env, reg),
+                ast::Expr::OptChain(oc) => match oc.base.as_ref() {
+                    ast::OptChainBase::Member(m) => resolve_expr_type(&m.obj, type_env, reg),
+                    _ => None,
+                },
+                _ => None,
+            };
+            let is_option = callee_obj_type
+                .as_ref()
+                .is_some_and(|ty| matches!(ty, RustType::Option(_)));
+
             let args: Vec<Expr> = opt_call
                 .args
                 .iter()
-                .map(|arg| convert_expr(&arg.expr, reg, None))
+                .map(|arg| convert_expr(&arg.expr, reg, None, type_env))
                 .collect::<Result<_>>()?;
-            let (object, method) = extract_method_from_callee(&opt_call.callee, reg)?;
+            let (object, method) = extract_method_from_callee(&opt_call.callee, reg, type_env)?;
+
+            // Non-Option type: plain method call
+            if !is_option && callee_obj_type.is_some() {
+                return Ok(Expr::MethodCall {
+                    object: Box::new(object),
+                    method,
+                    args,
+                });
+            }
+
             let body_expr = Expr::MethodCall {
                 object: Box::new(Expr::Ident("_v".to_string())),
                 method,
@@ -284,7 +346,11 @@ fn convert_opt_chain_expr(opt_chain: &ast::OptChainExpr, reg: &TypeRegistry) -> 
 /// Extracts the object and method name from an optional call's callee.
 ///
 /// Handles both `x.method` (`Member`) and `x?.method` (`OptChain(Member)`) patterns.
-fn extract_method_from_callee(callee: &ast::Expr, reg: &TypeRegistry) -> Result<(Expr, String)> {
+fn extract_method_from_callee(
+    callee: &ast::Expr,
+    reg: &TypeRegistry,
+    type_env: &TypeEnv,
+) -> Result<(Expr, String)> {
     let member = match callee {
         ast::Expr::Member(member) => member,
         ast::Expr::OptChain(opt) => match opt.base.as_ref() {
@@ -293,7 +359,7 @@ fn extract_method_from_callee(callee: &ast::Expr, reg: &TypeRegistry) -> Result<
         },
         _ => return Err(anyhow!("unsupported optional call callee: {:?}", callee)),
     };
-    let object = convert_expr(&member.obj, reg, None)?;
+    let object = convert_expr(&member.obj, reg, None, type_env)?;
     let method = match &member.prop {
         ast::MemberProp::Ident(ident) => ident.sym.to_string(),
         _ => return Err(anyhow!("unsupported optional call property")),
@@ -304,27 +370,35 @@ fn extract_method_from_callee(callee: &ast::Expr, reg: &TypeRegistry) -> Result<
 /// Converts a member expression (`obj.field`) to `Expr::FieldAccess`.
 ///
 /// `this.x` becomes `self.x`.
-fn convert_member_expr(member: &ast::MemberExpr, reg: &TypeRegistry) -> Result<Expr> {
+fn convert_member_expr(
+    member: &ast::MemberExpr,
+    reg: &TypeRegistry,
+    type_env: &TypeEnv,
+) -> Result<Expr> {
     let field = match &member.prop {
         ast::MemberProp::Ident(ident) => ident.sym.to_string(),
         _ => return Err(anyhow!("unsupported member property (only identifiers)")),
     };
 
-    let object = convert_expr(&member.obj, reg, None)?;
+    let object = convert_expr(&member.obj, reg, None, type_env)?;
     resolve_member_access(&object, &field, &member.obj, reg)
 }
 
 /// Converts an assignment expression (`target = value`) to `Expr::Assign`.
-fn convert_assign_expr(assign: &ast::AssignExpr, reg: &TypeRegistry) -> Result<Expr> {
+fn convert_assign_expr(
+    assign: &ast::AssignExpr,
+    reg: &TypeRegistry,
+    type_env: &TypeEnv,
+) -> Result<Expr> {
     let target = match &assign.left {
         ast::AssignTarget::Simple(simple) => match simple {
-            ast::SimpleAssignTarget::Member(member) => convert_member_expr(member, reg)?,
+            ast::SimpleAssignTarget::Member(member) => convert_member_expr(member, reg, type_env)?,
             ast::SimpleAssignTarget::Ident(ident) => Expr::Ident(ident.id.sym.to_string()),
             _ => return Err(anyhow!("unsupported assignment target")),
         },
         _ => return Err(anyhow!("unsupported assignment target pattern")),
     };
-    let right = convert_expr(&assign.right, reg, None)?;
+    let right = convert_expr(&assign.right, reg, None, type_env)?;
 
     // For compound assignment (+=, -=, *=, /=), desugar to target = target op value
     let value = match assign.op {
@@ -369,6 +443,7 @@ pub fn convert_arrow_expr(
     reg: &TypeRegistry,
     resilient: bool,
     fallback_warnings: &mut Vec<String>,
+    type_env: &TypeEnv,
 ) -> Result<Expr> {
     let mut params = Vec::new();
     for param in &arrow.params {
@@ -411,13 +486,19 @@ pub fn convert_arrow_expr(
 
     let body = match arrow.body.as_ref() {
         ast::BlockStmtOrExpr::Expr(expr) => {
-            let ir_expr = convert_expr(expr, reg, return_type.as_ref())?;
+            let ir_expr = convert_expr(expr, reg, return_type.as_ref(), type_env)?;
             ClosureBody::Expr(Box::new(ir_expr))
         }
         ast::BlockStmtOrExpr::BlockStmt(block) => {
+            let mut inner_env = type_env.clone();
             let mut stmts = Vec::new();
             for stmt in &block.stmts {
-                stmts.extend(convert_stmt(stmt, reg, return_type.as_ref())?);
+                stmts.extend(convert_stmt(
+                    stmt,
+                    reg,
+                    return_type.as_ref(),
+                    &mut inner_env,
+                )?);
             }
             ClosureBody::Block(stmts)
         }
@@ -434,7 +515,7 @@ pub fn convert_arrow_expr(
 ///
 /// - `foo(x, y)` → `Expr::FnCall { name: "foo", args }`
 /// - `obj.method(x)` → `Expr::MethodCall { object, method, args }`
-fn convert_call_expr(call: &ast::CallExpr, reg: &TypeRegistry) -> Result<Expr> {
+fn convert_call_expr(call: &ast::CallExpr, reg: &TypeRegistry, type_env: &TypeEnv) -> Result<Expr> {
     match call.callee {
         ast::Callee::Expr(ref callee) => match callee.as_ref() {
             ast::Expr::Ident(ident) => {
@@ -443,7 +524,7 @@ fn convert_call_expr(call: &ast::CallExpr, reg: &TypeRegistry) -> Result<Expr> {
                 // parseInt(s) → s.parse::<f64>().unwrap()
                 // parseFloat(s) → s.parse::<f64>().unwrap()
                 // isNaN(x) → x.is_nan()
-                if let Some(result) = convert_global_builtin(&fn_name, &call.args, reg)? {
+                if let Some(result) = convert_global_builtin(&fn_name, &call.args, reg, type_env)? {
                     return Ok(result);
                 }
 
@@ -452,7 +533,7 @@ fn convert_call_expr(call: &ast::CallExpr, reg: &TypeRegistry) -> Result<Expr> {
                     TypeDef::Function { params, .. } => Some(params.as_slice()),
                     _ => None,
                 });
-                let args = convert_call_args_with_types(&call.args, reg, param_types)?;
+                let args = convert_call_args_with_types(&call.args, reg, param_types, type_env)?;
                 Ok(Expr::FnCall {
                     name: fn_name,
                     args,
@@ -472,7 +553,7 @@ fn convert_call_expr(call: &ast::CallExpr, reg: &TypeRegistry) -> Result<Expr> {
                             "error" | "warn" => "eprintln",
                             _ => return Err(anyhow!("unsupported console method: {}", method)),
                         };
-                        let args = convert_call_args(&call.args, reg)?;
+                        let args = convert_call_args(&call.args, reg, type_env)?;
                         return Ok(Expr::MacroCall {
                             name: macro_name.to_string(),
                             args,
@@ -481,24 +562,24 @@ fn convert_call_expr(call: &ast::CallExpr, reg: &TypeRegistry) -> Result<Expr> {
 
                     // Math.method(args) → first_arg.method(rest_args)
                     if obj_ident.sym.as_ref() == "Math" {
-                        return convert_math_call(&method, &call.args, reg);
+                        return convert_math_call(&method, &call.args, reg, type_env);
                     }
 
                     // Number.isNaN(x) → x.is_nan(), Number.isFinite(x) → x.is_finite()
                     if obj_ident.sym.as_ref() == "Number" {
-                        return convert_number_static_call(&method, &call.args, reg);
+                        return convert_number_static_call(&method, &call.args, reg, type_env);
                     }
                 }
 
-                let object = convert_expr(&member.obj, reg, None)?;
-                let args = convert_call_args(&call.args, reg)?;
+                let object = convert_expr(&member.obj, reg, None, type_env)?;
+                let args = convert_call_args(&call.args, reg, type_env)?;
                 let method_call = map_method_call(object, &method, args);
                 Ok(method_call)
             }
             _ => Err(anyhow!("unsupported call target expression")),
         },
         ast::Callee::Super(_) => {
-            let args = convert_call_args(&call.args, reg)?;
+            let args = convert_call_args(&call.args, reg, type_env)?;
             Ok(Expr::FnCall {
                 name: "super".to_string(),
                 args,
@@ -771,11 +852,12 @@ fn convert_global_builtin(
     fn_name: &str,
     args: &[ast::ExprOrSpread],
     reg: &TypeRegistry,
+    type_env: &TypeEnv,
 ) -> Result<Option<Expr>> {
     match fn_name {
         // parseInt(s) → s.parse::<f64>().unwrap_or(f64::NAN)
         "parseInt" => {
-            let converted = convert_call_args(args, reg)?;
+            let converted = convert_call_args(args, reg, type_env)?;
             if converted.len() != 1 {
                 return Err(anyhow!("parseInt expects 1 argument"));
             }
@@ -792,7 +874,7 @@ fn convert_global_builtin(
         }
         // parseFloat(s) → s.parse::<f64>().unwrap_or(f64::NAN)
         "parseFloat" => {
-            let converted = convert_call_args(args, reg)?;
+            let converted = convert_call_args(args, reg, type_env)?;
             if converted.len() != 1 {
                 return Err(anyhow!("parseFloat expects 1 argument"));
             }
@@ -809,7 +891,7 @@ fn convert_global_builtin(
         }
         // isNaN(x) → x.is_nan()
         "isNaN" => {
-            let converted = convert_call_args(args, reg)?;
+            let converted = convert_call_args(args, reg, type_env)?;
             if converted.len() != 1 {
                 return Err(anyhow!("isNaN expects 1 argument"));
             }
@@ -833,8 +915,9 @@ fn convert_number_static_call(
     method: &str,
     args: &[ast::ExprOrSpread],
     reg: &TypeRegistry,
+    type_env: &TypeEnv,
 ) -> Result<Expr> {
-    let converted = convert_call_args(args, reg)?;
+    let converted = convert_call_args(args, reg, type_env)?;
     if converted.len() != 1 {
         return Err(anyhow!("Number.{method} expects 1 argument"));
     }
@@ -872,8 +955,13 @@ fn convert_number_static_call(
 /// - 1-arg methods (renamed): `Math.sign(x)` → `x.signum()`, `Math.log(x)` → `x.ln()`
 /// - 2-arg methods: `Math.max(a, b)` → `a.max(b)`
 /// - `Math.pow(x, y)` → `x.powf(y)`
-fn convert_math_call(method: &str, args: &[ast::ExprOrSpread], reg: &TypeRegistry) -> Result<Expr> {
-    let converted_args = convert_call_args(args, reg)?;
+fn convert_math_call(
+    method: &str,
+    args: &[ast::ExprOrSpread],
+    reg: &TypeRegistry,
+    type_env: &TypeEnv,
+) -> Result<Expr> {
+    let converted_args = convert_call_args(args, reg, type_env)?;
     match method {
         // 1-arg methods: first arg becomes receiver (same name)
         "floor" | "ceil" | "round" | "abs" | "sqrt" | "trunc" => {
@@ -941,13 +1029,17 @@ fn convert_math_call(method: &str, args: &[ast::ExprOrSpread], reg: &TypeRegistr
 /// Converts a `new` expression to a `ClassName::new(args)` call.
 ///
 /// `new Foo(x, y)` → `Expr::FnCall { name: "Foo::new", args }`
-fn convert_new_expr(new_expr: &ast::NewExpr, reg: &TypeRegistry) -> Result<Expr> {
+fn convert_new_expr(
+    new_expr: &ast::NewExpr,
+    reg: &TypeRegistry,
+    type_env: &TypeEnv,
+) -> Result<Expr> {
     let class_name = match new_expr.callee.as_ref() {
         ast::Expr::Ident(ident) => ident.sym.to_string(),
         _ => return Err(anyhow!("unsupported new expression target")),
     };
     let args = match &new_expr.args {
-        Some(args) => convert_call_args(args, reg)?,
+        Some(args) => convert_call_args(args, reg, type_env)?,
         None => vec![],
     };
     Ok(Expr::FnCall {
@@ -957,8 +1049,12 @@ fn convert_new_expr(new_expr: &ast::NewExpr, reg: &TypeRegistry) -> Result<Expr>
 }
 
 /// Converts call arguments from SWC `ExprOrSpread` to IR `Expr`.
-fn convert_call_args(args: &[ast::ExprOrSpread], reg: &TypeRegistry) -> Result<Vec<Expr>> {
-    convert_call_args_with_types(args, reg, None)
+fn convert_call_args(
+    args: &[ast::ExprOrSpread],
+    reg: &TypeRegistry,
+    type_env: &TypeEnv,
+) -> Result<Vec<Expr>> {
+    convert_call_args_with_types(args, reg, None, type_env)
 }
 
 /// Converts call arguments with optional parameter type information from the registry.
@@ -969,12 +1065,13 @@ fn convert_call_args_with_types(
     args: &[ast::ExprOrSpread],
     reg: &TypeRegistry,
     param_types: Option<&[(String, RustType)]>,
+    type_env: &TypeEnv,
 ) -> Result<Vec<Expr>> {
     args.iter()
         .enumerate()
         .map(|(i, arg)| {
             let expected = param_types.and_then(|params| params.get(i).map(|(_, ty)| ty));
-            convert_expr(&arg.expr, reg, expected)
+            convert_expr(&arg.expr, reg, expected, type_env)
         })
         .collect()
 }
@@ -982,7 +1079,11 @@ fn convert_call_args_with_types(
 /// Converts a template literal to `Expr::FormatMacro`.
 ///
 /// `` `Hello ${name}` `` becomes `format!("Hello {}", name)`.
-fn convert_template_literal(tpl: &ast::Tpl, reg: &TypeRegistry) -> Result<Expr> {
+fn convert_template_literal(
+    tpl: &ast::Tpl,
+    reg: &TypeRegistry,
+    type_env: &TypeEnv,
+) -> Result<Expr> {
     let mut template = String::new();
     let mut args = Vec::new();
 
@@ -991,7 +1092,7 @@ fn convert_template_literal(tpl: &ast::Tpl, reg: &TypeRegistry) -> Result<Expr> 
         template.push_str(&quasi.raw);
         if i < tpl.exprs.len() {
             template.push_str("{}");
-            let arg = convert_expr(&tpl.exprs[i], reg, None)?;
+            let arg = convert_expr(&tpl.exprs[i], reg, None, type_env)?;
             args.push(arg);
         }
     }
@@ -1006,10 +1107,11 @@ fn convert_cond_expr(
     cond: &ast::CondExpr,
     reg: &TypeRegistry,
     expected: Option<&RustType>,
+    type_env: &TypeEnv,
 ) -> Result<Expr> {
-    let condition = convert_expr(&cond.test, reg, None)?;
-    let then_expr = convert_expr(&cond.cons, reg, expected)?;
-    let else_expr = convert_expr(&cond.alt, reg, expected)?;
+    let condition = convert_expr(&cond.test, reg, None, type_env)?;
+    let then_expr = convert_expr(&cond.cons, reg, expected, type_env)?;
+    let else_expr = convert_expr(&cond.alt, reg, expected, type_env)?;
     Ok(Expr::If {
         condition: Box::new(condition),
         then_expr: Box::new(then_expr),
@@ -1029,6 +1131,7 @@ fn convert_object_lit(
     obj_lit: &ast::ObjectLit,
     reg: &TypeRegistry,
     expected: Option<&RustType>,
+    type_env: &TypeEnv,
 ) -> Result<Expr> {
     let struct_name = match expected {
         Some(RustType::Named { name, .. }) => name.as_str(),
@@ -1060,15 +1163,19 @@ fn convert_object_lit(
                     // Resolve the expected type for this field from the registry
                     let field_expected = struct_fields
                         .and_then(|fs| fs.iter().find(|(name, _)| name == &key).map(|(_, ty)| ty));
-                    let value = convert_expr(&kv.value, reg, field_expected)?;
+                    let value = convert_expr(&kv.value, reg, field_expected, type_env)?;
                     fields.push((key, value));
                 }
                 ast::Prop::Shorthand(ident) => {
                     let key = ident.sym.to_string();
                     let field_expected = struct_fields
                         .and_then(|fs| fs.iter().find(|(name, _)| name == &key).map(|(_, ty)| ty));
-                    let value =
-                        convert_expr(&ast::Expr::Ident(ident.clone()), reg, field_expected)?;
+                    let value = convert_expr(
+                        &ast::Expr::Ident(ident.clone()),
+                        reg,
+                        field_expected,
+                        type_env,
+                    )?;
                     fields.push((key, value));
                 }
                 _ => {
@@ -1083,7 +1190,7 @@ fn convert_object_lit(
                         "multiple spreads in object literal are not supported"
                     ));
                 }
-                let spread_expr = convert_expr(&spread_elem.expr, reg, None)?;
+                let spread_expr = convert_expr(&spread_elem.expr, reg, None, type_env)?;
                 base = Some(Box::new(spread_expr));
             }
         }
@@ -1125,6 +1232,7 @@ fn convert_array_lit(
     array_lit: &ast::ArrayLit,
     reg: &TypeRegistry,
     expected: Option<&RustType>,
+    type_env: &TypeEnv,
 ) -> Result<Expr> {
     let element_type = match expected {
         Some(RustType::Vec(inner)) => Some(inner.as_ref()),
@@ -1142,7 +1250,7 @@ fn convert_array_lit(
             .elems
             .iter()
             .filter_map(|elem| elem.as_ref())
-            .map(|elem| convert_expr(&elem.expr, reg, element_type))
+            .map(|elem| convert_expr(&elem.expr, reg, element_type, type_env))
             .collect::<Result<Vec<_>>>()?;
         return Ok(Expr::Vec { elements });
     }
@@ -1152,7 +1260,7 @@ fn convert_array_lit(
         .iter()
         .filter_map(|elem| elem.as_ref())
         .map(|elem| {
-            let expr = convert_expr(&elem.expr, reg, element_type)?;
+            let expr = convert_expr(&elem.expr, reg, element_type, type_env)?;
             if elem.spread.is_some() {
                 Ok(ir::VecSegment::Spread(expr))
             } else {
@@ -1166,17 +1274,73 @@ fn convert_array_lit(
 /// Converts an SWC unary expression to an IR `UnaryOp`.
 ///
 /// Supported operators: `!` (logical NOT), `-` (negation).
-fn convert_unary_expr(unary: &ast::UnaryExpr, reg: &TypeRegistry) -> Result<Expr> {
+fn convert_unary_expr(
+    unary: &ast::UnaryExpr,
+    reg: &TypeRegistry,
+    type_env: &TypeEnv,
+) -> Result<Expr> {
     let op = match unary.op {
         ast::UnaryOp::Bang => UnOp::Not,
         ast::UnaryOp::Minus => UnOp::Neg,
         _ => return Err(anyhow!("unsupported unary operator: {:?}", unary.op)),
     };
-    let operand = convert_expr(&unary.arg, reg, None)?;
+    let operand = convert_expr(&unary.arg, reg, None, type_env)?;
     Ok(Expr::UnaryOp {
         op,
         operand: Box::new(operand),
     })
+}
+
+/// 式の型を解決する。解決できない場合は None を返す。
+///
+/// TypeEnv からローカル変数の型を、TypeRegistry からフィールドの型を解決する。
+/// メソッド呼び出しの戻り値型や型パラメータの具体化は対象外。
+pub fn resolve_expr_type(
+    expr: &ast::Expr,
+    type_env: &TypeEnv,
+    reg: &TypeRegistry,
+) -> Option<RustType> {
+    match expr {
+        ast::Expr::Ident(ident) => type_env.get(ident.sym.as_ref()).cloned(),
+        ast::Expr::Member(member) => {
+            let obj_type = resolve_expr_type(&member.obj, type_env, reg)?;
+            resolve_field_type(&obj_type, &member.prop, reg)
+        }
+        ast::Expr::Paren(paren) => resolve_expr_type(&paren.expr, type_env, reg),
+        ast::Expr::TsAs(ts_as) => {
+            use crate::transformer::types::convert_ts_type;
+            convert_ts_type(&ts_as.type_ann, &mut Vec::new()).ok()
+        }
+        _ => None,
+    }
+}
+
+/// Named 型のフィールド型を TypeRegistry から解決する。
+fn resolve_field_type(
+    obj_type: &RustType,
+    prop: &ast::MemberProp,
+    reg: &TypeRegistry,
+) -> Option<RustType> {
+    let type_name = match obj_type {
+        RustType::Named { name, .. } => name,
+        RustType::Option(inner) => match inner.as_ref() {
+            RustType::Named { name, .. } => name,
+            _ => return None,
+        },
+        _ => return None,
+    };
+    let field_name = match prop {
+        ast::MemberProp::Ident(ident) => ident.sym.to_string(),
+        _ => return None,
+    };
+    let type_def = reg.get(type_name)?;
+    match type_def {
+        crate::registry::TypeDef::Struct { fields } => fields
+            .iter()
+            .find(|(name, _)| name == &field_name)
+            .map(|(_, ty)| ty.clone()),
+        _ => None,
+    }
 }
 
 #[cfg(test)]

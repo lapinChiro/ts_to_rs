@@ -194,9 +194,48 @@ fn convert_union_type(
             type_args: vec![],
         })
     } else {
-        Err(anyhow!(
-            "union with multiple non-null types is not supported"
-        ))
+        // has_null_or_undefined && non_null_types.len() > 1
+        // e.g., string | number | null → Option<StringOrF64>
+        let mut rust_types = Vec::new();
+        for ty in &non_null_types {
+            let rust_type = convert_ts_type(ty, extra_items)?;
+            let unwrapped = unwrap_promise(rust_type);
+            if !rust_types.contains(&unwrapped) {
+                rust_types.push(unwrapped);
+            }
+        }
+
+        // After dedup, if only one type remains (e.g., null | undefined | T)
+        if rust_types.len() == 1 {
+            return Ok(RustType::Option(Box::new(
+                rust_types.into_iter().next().unwrap(),
+            )));
+        }
+
+        // Generate an enum and wrap in Option
+        let mut variants = Vec::new();
+        let mut name_parts = Vec::new();
+        for rust_type in &rust_types {
+            let variant_name = variant_name_from_type(rust_type);
+            name_parts.push(variant_name.clone());
+            variants.push(EnumVariant {
+                name: variant_name,
+                value: None,
+                data: Some(rust_type.clone()),
+                fields: vec![],
+            });
+        }
+        let enum_name = name_parts.join("Or");
+        extra_items.push(Item::Enum {
+            vis: Visibility::Public,
+            name: enum_name.clone(),
+            serde_tag: None,
+            variants,
+        });
+        Ok(RustType::Option(Box::new(RustType::Named {
+            name: enum_name,
+            type_args: vec![],
+        })))
     }
 }
 

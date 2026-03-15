@@ -692,3 +692,82 @@ fn test_convert_fn_decl_default_param_inline_type_generates_struct() {
         "inline type literal in default param should generate struct, got: {items:?}"
     );
 }
+
+// --- contains_throw recursion tests ---
+
+/// Helper: check if the function's return type is Result
+fn fn_returns_result(source: &str) -> bool {
+    let fn_decl = parse_fn_decl(source);
+    let items = convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new(), false)
+        .unwrap()
+        .0;
+    let item = items.last().unwrap();
+    matches!(
+        item,
+        Item::Fn {
+            return_type: Some(RustType::Result { .. }),
+            ..
+        }
+    )
+}
+
+#[test]
+fn test_contains_throw_in_for_loop_wraps_result() {
+    assert!(fn_returns_result(
+        "function f(n: number) { for (let i = 0; i < n; i++) { throw new Error(\"x\"); } }"
+    ));
+}
+
+#[test]
+fn test_contains_throw_in_while_loop_wraps_result() {
+    assert!(fn_returns_result(
+        "function f() { while (true) { throw new Error(\"x\"); } }"
+    ));
+}
+
+#[test]
+fn test_contains_throw_in_do_while_wraps_result() {
+    assert!(fn_returns_result(
+        "function f() { do { throw new Error(\"x\"); } while (true); }"
+    ));
+}
+
+#[test]
+fn test_contains_throw_in_switch_detected() {
+    // switch is not yet supported by convert_stmt, so test contains_throw directly
+    let fn_decl =
+        parse_fn_decl("function f(x: number) { switch(x) { case 1: throw new Error(\"x\"); } }");
+    let block = fn_decl.function.body.as_ref().unwrap();
+    assert!(
+        contains_throw(&block.stmts),
+        "should detect throw inside switch case"
+    );
+}
+
+#[test]
+fn test_contains_throw_in_for_of_wraps_result() {
+    assert!(fn_returns_result(
+        "function f(arr: string[]) { for (const x of arr) { throw new Error(\"x\"); } }"
+    ));
+}
+
+#[test]
+fn test_contains_throw_in_try_block_excluded() {
+    assert!(!fn_returns_result(
+        "function f() { try { throw new Error(\"x\"); } catch(e) {} }"
+    ));
+}
+
+#[test]
+fn test_contains_throw_in_catch_block_wraps_result() {
+    assert!(fn_returns_result(
+        "function f() { try { } catch(e) { throw new Error(\"rethrow\"); } }"
+    ));
+}
+
+#[test]
+fn test_contains_throw_in_labeled_wraps_result() {
+    assert!(fn_returns_result(
+        "function f() { outer: while(true) { throw new Error(\"x\"); } }"
+    ));
+}

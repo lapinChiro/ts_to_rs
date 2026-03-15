@@ -9,7 +9,7 @@ use crate::ir::{Expr, Item, Param, RustType, Stmt, Visibility};
 use crate::registry::TypeRegistry;
 use crate::transformer::statements::convert_stmt_list;
 use crate::transformer::types::{convert_property_signature, convert_ts_type, extract_type_params};
-use crate::transformer::{extract_pat_ident_name, extract_prop_name};
+use crate::transformer::{extract_pat_ident_name, extract_prop_name, TypeEnv};
 
 /// Converts an SWC [`ast::FnDecl`] into an IR [`Item::Fn`].
 ///
@@ -78,8 +78,17 @@ pub fn convert_fn_decl(
         return_type
     };
 
+    let mut fn_type_env = TypeEnv::new();
+    for p in &params {
+        if let Some(ty) = &p.ty {
+            fn_type_env.insert(p.name.clone(), ty.clone());
+        }
+    }
+
     let body_stmts = match &fn_decl.function.body {
-        Some(block) => convert_stmt_list(&block.stmts, reg, return_type.as_ref())?,
+        Some(block) => {
+            convert_stmt_list(&block.stmts, reg, return_type.as_ref(), &mut fn_type_env)?
+        }
         None => Vec::new(),
     };
     // Prepend destructuring expansion statements
@@ -439,26 +448,52 @@ fn unwrap_promise_type(ty: RustType) -> Option<RustType> {
     }
 }
 
-/// Checks whether a list of SWC statements contains a `throw` statement (shallow scan).
+/// Checks whether a list of SWC statements contains a `throw` statement.
+///
+/// Recursively scans all control flow structures. `try` block throw is excluded
+/// (caught by `catch`), but `catch` block throw is included (re-throw).
 fn contains_throw(stmts: &[ast::Stmt]) -> bool {
     stmts.iter().any(|stmt| match stmt {
         ast::Stmt::Throw(_) => true,
         ast::Stmt::If(if_stmt) => {
-            let then_has = match if_stmt.cons.as_ref() {
-                ast::Stmt::Block(block) => contains_throw(&block.stmts),
-                ast::Stmt::Throw(_) => true,
-                _ => false,
-            };
-            let else_has = if_stmt.alt.as_ref().is_some_and(|alt| match alt.as_ref() {
-                ast::Stmt::Block(block) => contains_throw(&block.stmts),
-                ast::Stmt::Throw(_) => true,
-                _ => false,
-            });
-            then_has || else_has
+            stmt_contains_throw(&if_stmt.cons)
+                || if_stmt
+                    .alt
+                    .as_ref()
+                    .is_some_and(|alt| stmt_contains_throw(alt))
         }
         ast::Stmt::Block(block) => contains_throw(&block.stmts),
+        ast::Stmt::While(w) => stmt_contains_throw(&w.body),
+        ast::Stmt::DoWhile(dw) => stmt_contains_throw(&dw.body),
+        ast::Stmt::For(f) => stmt_contains_throw(&f.body),
+        ast::Stmt::ForOf(fo) => stmt_contains_throw(&fo.body),
+        ast::Stmt::ForIn(fi) => stmt_contains_throw(&fi.body),
+        ast::Stmt::Labeled(l) => stmt_contains_throw(&l.body),
+        ast::Stmt::Switch(s) => s.cases.iter().any(|c| contains_throw(&c.cons)),
+        ast::Stmt::Try(t) => {
+            // try block throw is excluded (caught by catch)
+            // catch block throw is included (re-throw escapes the function)
+            let catch_has = t
+                .handler
+                .as_ref()
+                .is_some_and(|h| contains_throw(&h.body.stmts));
+            let finally_has = t
+                .finalizer
+                .as_ref()
+                .is_some_and(|f| contains_throw(&f.stmts));
+            catch_has || finally_has
+        }
         _ => false,
     })
+}
+
+/// Checks whether a single statement contains a `throw`.
+fn stmt_contains_throw(stmt: &ast::Stmt) -> bool {
+    match stmt {
+        ast::Stmt::Block(block) => contains_throw(&block.stmts),
+        ast::Stmt::Throw(_) => true,
+        other => contains_throw(std::slice::from_ref(other)),
+    }
 }
 
 /// Wraps `return expr` statements in `Ok(expr)` for functions that use `Result`.

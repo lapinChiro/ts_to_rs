@@ -7,7 +7,7 @@ mod statements;
 
 use crate::ir::{EnumValue, EnumVariant, Item, Method, Param, Visibility};
 
-use expressions::generate_expr;
+use expressions::{escape_ident, generate_expr};
 use statements::generate_stmt;
 use types::generate_type;
 
@@ -57,7 +57,7 @@ fn generate_item(item: &Item) -> String {
                 let field_vis = generate_vis(field.vis.as_ref().unwrap_or(vis));
                 out.push_str(&format!(
                     "    {field_vis}{}: {},\n",
-                    field.name,
+                    escape_ident(&field.name),
                     generate_type(&field.ty)
                 ));
             }
@@ -145,6 +145,7 @@ fn generate_item(item: &Item) -> String {
                 Some(ty) => format!(" -> {}", generate_type(ty)),
                 None => String::new(),
             };
+            let name = escape_ident(name);
             let mut out =
                 format!("{vis_str}{async_str}fn {name}{generics}({params_str}){ret_str} {{\n");
             let body_len = body.len();
@@ -941,5 +942,42 @@ impl AnimalTrait for Dog {
     }
 }";
         assert_eq!(generate(&[item]), expected);
+    }
+
+    #[test]
+    fn test_escape_ident_fn_name_reserved_word_adds_r_hash() {
+        let item = Item::Fn {
+            vis: Visibility::Public,
+            is_async: false,
+            name: "match".to_string(),
+            type_params: vec![],
+            params: vec![],
+            return_type: None,
+            body: vec![],
+        };
+        let output = generate(&[item]);
+        assert!(
+            output.contains("fn r#match()"),
+            "expected r#match in: {output}"
+        );
+    }
+
+    #[test]
+    fn test_escape_ident_struct_field_reserved_word_adds_r_hash() {
+        let item = Item::Struct {
+            vis: Visibility::Public,
+            name: "Foo".to_string(),
+            type_params: vec![],
+            fields: vec![StructField {
+                vis: Some(Visibility::Public),
+                name: "type".to_string(),
+                ty: RustType::String,
+            }],
+        };
+        let output = generate(&[item]);
+        assert!(
+            output.contains("r#type: String"),
+            "expected r#type in: {output}"
+        );
     }
 }

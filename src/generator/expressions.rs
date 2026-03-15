@@ -6,6 +6,29 @@ use super::generate_param;
 use super::statements::generate_stmt;
 use super::types::generate_type;
 
+/// Rust の予約語一覧（strict + reserved keywords）。
+const RUST_KEYWORDS: &[&str] = &[
+    "as", "break", "const", "continue", "crate", "else", "enum", "extern", "false", "fn", "for",
+    "if", "impl", "in", "let", "loop", "match", "mod", "move", "mut", "pub", "ref", "return",
+    "static", "struct", "super", "trait", "true", "type", "unsafe", "use", "where", "while",
+    "async", "await", "dyn", "abstract", "become", "box", "do", "final", "macro", "override",
+    "priv", "typeof", "unsized", "virtual", "yield", "try",
+];
+
+/// 識別子が Rust の予約語と衝突する場合に `r#` プレフィックスを付ける。
+///
+/// `self` / `Self` は Rust で有効な識別子として使われるためエスケープしない。
+pub(crate) fn escape_ident(name: &str) -> String {
+    if name == "self" || name == "Self" {
+        return name.to_string();
+    }
+    if RUST_KEYWORDS.contains(&name) {
+        format!("r#{name}")
+    } else {
+        name.to_string()
+    }
+}
+
 /// Returns `true` if the expression needs parentheses when used as the receiver
 /// of a method call or field access (i.e., before `.method()` or `.field`).
 fn needs_parens_as_receiver(expr: &Expr) -> bool {
@@ -45,7 +68,7 @@ pub(super) fn generate_expr(expr: &Expr) -> String {
         }
         Expr::BoolLit(b) => format!("{b}"),
         Expr::StringLit(s) => format!("\"{s}\""),
-        Expr::Ident(name) => name.clone(),
+        Expr::Ident(name) => escape_ident(name),
         Expr::FormatMacro { template, args } => {
             if args.is_empty() {
                 format!("format!(\"{template}\")")
@@ -69,6 +92,7 @@ pub(super) fn generate_expr(expr: &Expr) -> String {
                 .collect::<Vec<_>>()
                 .join(", ");
             let obj_str = generate_expr(object);
+            let method = escape_ident(method);
             if needs_parens_as_receiver(object) {
                 format!("({obj_str}).{method}({args_str})")
             } else {
@@ -122,6 +146,7 @@ pub(super) fn generate_expr(expr: &Expr) -> String {
         }
         Expr::FieldAccess { object, field } => {
             let obj_str = generate_expr(object);
+            let field = escape_ident(field);
             if needs_parens_as_receiver(object) {
                 format!("({obj_str}).{field}")
             } else {
@@ -684,5 +709,57 @@ mod tests {
             ],
         };
         assert_eq!(generate_expr(&expr), "vec![vec![1.0], vec![2.0]]");
+    }
+
+    // --- Rust reserved word escape tests ---
+
+    #[test]
+    fn test_escape_ident_method_call_reserved_word_adds_r_hash() {
+        let expr = Expr::MethodCall {
+            object: Box::new(Expr::Ident("obj".to_string())),
+            method: "match".to_string(),
+            args: vec![Expr::Ident("x".to_string())],
+        };
+        assert_eq!(generate_expr(&expr), "obj.r#match(x)");
+    }
+
+    #[test]
+    fn test_escape_ident_let_reserved_word_adds_r_hash() {
+        let stmt = Stmt::Let {
+            mutable: false,
+            name: "type".to_string(),
+            ty: None,
+            init: Some(Expr::NumberLit(1.0)),
+        };
+        let result = generate_stmt(&stmt, 0, true);
+        assert!(result.contains("r#type"), "expected r#type in: {result}");
+    }
+
+    #[test]
+    fn test_escape_ident_field_access_reserved_word_adds_r_hash() {
+        let expr = Expr::FieldAccess {
+            object: Box::new(Expr::Ident("obj".to_string())),
+            field: "match".to_string(),
+        };
+        assert_eq!(generate_expr(&expr), "obj.r#match");
+    }
+
+    #[test]
+    fn test_escape_ident_non_reserved_word_unchanged() {
+        let expr = Expr::MethodCall {
+            object: Box::new(Expr::Ident("obj".to_string())),
+            method: "foo".to_string(),
+            args: vec![Expr::Ident("x".to_string())],
+        };
+        assert_eq!(generate_expr(&expr), "obj.foo(x)");
+    }
+
+    #[test]
+    fn test_escape_ident_self_not_escaped() {
+        let expr = Expr::FieldAccess {
+            object: Box::new(Expr::Ident("self".to_string())),
+            field: "x".to_string(),
+        };
+        assert_eq!(generate_expr(&expr), "self.x");
     }
 }

@@ -11,6 +11,7 @@ use crate::transformer::expressions::convert_expr;
 use crate::transformer::extract_prop_name;
 use crate::transformer::statements::convert_stmt;
 use crate::transformer::types::convert_ts_type;
+use crate::transformer::TypeEnv;
 
 /// Extracted class information for resolving inheritance relationships.
 #[derive(Debug, Clone)]
@@ -538,7 +539,12 @@ fn convert_static_prop(prop: &ast::ClassProp, vis: &Visibility) -> Result<Option
     let ty = convert_ts_type(&type_ann.type_ann, &mut Vec::new())?;
 
     let value = match &prop.value {
-        Some(init) => convert_expr(init, &crate::registry::TypeRegistry::new(), None)?,
+        Some(init) => convert_expr(
+            init,
+            &crate::registry::TypeRegistry::new(),
+            None,
+            &TypeEnv::new(),
+        )?,
         None => return Ok(None), // No initializer — skip
     };
 
@@ -590,7 +596,7 @@ fn convert_constructor(
     }
 
     let body = match &ctor.body {
-        Some(block) => Some(convert_constructor_body(&block.stmts, reg)?),
+        Some(block) => Some(convert_constructor_body(&block.stmts, reg, &params)?),
         None => None,
     };
 
@@ -613,16 +619,26 @@ fn convert_constructor(
 /// Recognizes the pattern of `this.field = value` assignments and converts them
 /// into a `Self { field: value, ... }` tail expression. Statements that don't
 /// match this pattern are converted as normal statements.
-fn convert_constructor_body(stmts: &[ast::Stmt], reg: &TypeRegistry) -> Result<Vec<Stmt>> {
+fn convert_constructor_body(
+    stmts: &[ast::Stmt],
+    reg: &TypeRegistry,
+    params: &[Param],
+) -> Result<Vec<Stmt>> {
+    let mut type_env = TypeEnv::new();
+    for p in params {
+        if let Some(ty) = &p.ty {
+            type_env.insert(p.name.clone(), ty.clone());
+        }
+    }
     let mut fields = Vec::new();
     let mut other_stmts = Vec::new();
 
     for stmt in stmts {
         if let Some((field_name, value_expr)) = try_extract_this_assignment(stmt) {
-            let value = convert_expr(value_expr, reg, None)?;
+            let value = convert_expr(value_expr, reg, None, &type_env)?;
             fields.push((field_name, value));
         } else {
-            other_stmts.extend(convert_stmt(stmt, reg, None)?);
+            other_stmts.extend(convert_stmt(stmt, reg, None, &mut type_env)?);
         }
     }
 
@@ -709,9 +725,20 @@ fn convert_class_method(
 
     let body = match &method.function.body {
         Some(block) => {
+            let mut method_env = TypeEnv::new();
+            for p in &params {
+                if let Some(ty) = &p.ty {
+                    method_env.insert(p.name.clone(), ty.clone());
+                }
+            }
             let mut stmts = Vec::new();
             for stmt in &block.stmts {
-                stmts.extend(convert_stmt(stmt, reg, return_type.as_ref())?);
+                stmts.extend(convert_stmt(
+                    stmt,
+                    reg,
+                    return_type.as_ref(),
+                    &mut method_env,
+                )?);
             }
             Some(stmts)
         }

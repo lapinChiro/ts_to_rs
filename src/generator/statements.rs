@@ -2,7 +2,7 @@
 
 use crate::ir::{Expr, Stmt, VecSegment};
 
-use super::expressions::generate_expr;
+use super::expressions::{escape_ident, generate_expr};
 use super::types::generate_type;
 
 /// Generates a statement with the given indentation level.
@@ -32,7 +32,7 @@ pub(super) fn generate_stmt(stmt: &Stmt, indent: usize, is_last_in_fn: bool) -> 
             if *mutable {
                 out.push_str("mut ");
             }
-            out.push_str(name);
+            out.push_str(&escape_ident(name));
             if let Some(ty) = ty {
                 out.push_str(&format!(": {}", generate_type(ty)));
             }

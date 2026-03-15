@@ -9,6 +9,7 @@ use crate::ir::{BinOp, ClosureBody, Expr, Param, RustType, Stmt, UnOp};
 use crate::registry::TypeRegistry;
 use crate::transformer::expressions::convert_expr;
 use crate::transformer::types::convert_ts_type;
+use crate::transformer::TypeEnv;
 use crate::transformer::{extract_pat_ident_name, extract_prop_name, single_declarator};
 
 /// Converts an SWC [`ast::Stmt`] into an IR [`Stmt`].
@@ -31,36 +32,48 @@ pub fn convert_stmt(
     stmt: &ast::Stmt,
     reg: &TypeRegistry,
     return_type: Option<&RustType>,
+    type_env: &mut TypeEnv,
 ) -> Result<Vec<Stmt>> {
     match stmt {
         ast::Stmt::Return(ret) => {
             let expr = ret
                 .arg
                 .as_ref()
-                .map(|e| convert_expr(e, reg, return_type))
+                .map(|e| convert_expr(e, reg, return_type, type_env))
                 .transpose()?;
             Ok(vec![Stmt::Return(expr)])
         }
         ast::Stmt::Decl(ast::Decl::Var(var_decl)) => {
-            if let Some(expanded) = try_convert_object_destructuring(var_decl, reg)? {
+            if let Some(expanded) = try_convert_object_destructuring(var_decl, reg, type_env)? {
                 Ok(expanded)
-            } else if let Some(expanded) = try_convert_array_destructuring(var_decl, reg)? {
+            } else if let Some(expanded) = try_convert_array_destructuring(var_decl, reg, type_env)?
+            {
                 Ok(expanded)
             } else {
-                Ok(vec![convert_var_decl(var_decl, reg)?])
+                Ok(vec![convert_var_decl(var_decl, reg, type_env)?])
             }
         }
-        ast::Stmt::If(if_stmt) => Ok(vec![convert_if_stmt(if_stmt, reg, return_type)?]),
+        ast::Stmt::If(if_stmt) => Ok(vec![convert_if_stmt(if_stmt, reg, return_type, type_env)?]),
         ast::Stmt::Expr(expr_stmt) => {
-            let expr = convert_expr(&expr_stmt.expr, reg, None)?;
+            let expr = convert_expr(&expr_stmt.expr, reg, None, type_env)?;
             Ok(vec![Stmt::Expr(expr)])
         }
-        ast::Stmt::Throw(throw_stmt) => Ok(vec![convert_throw_stmt(throw_stmt, reg)?]),
-        ast::Stmt::While(while_stmt) => Ok(vec![convert_while_stmt(while_stmt, reg, return_type)?]),
-        ast::Stmt::ForOf(for_of) => Ok(vec![convert_for_of_stmt(for_of, reg, return_type)?]),
-        ast::Stmt::For(for_stmt) => match convert_for_stmt(for_stmt, reg, return_type) {
+        ast::Stmt::Throw(throw_stmt) => Ok(vec![convert_throw_stmt(throw_stmt, reg, type_env)?]),
+        ast::Stmt::While(while_stmt) => Ok(vec![convert_while_stmt(
+            while_stmt,
+            reg,
+            return_type,
+            type_env,
+        )?]),
+        ast::Stmt::ForOf(for_of) => Ok(vec![convert_for_of_stmt(
+            for_of,
+            reg,
+            return_type,
+            type_env,
+        )?]),
+        ast::Stmt::For(for_stmt) => match convert_for_stmt(for_stmt, reg, return_type, type_env) {
             Ok(s) => Ok(vec![s]),
-            Err(_) => convert_for_stmt_as_loop(for_stmt, reg, return_type),
+            Err(_) => convert_for_stmt_as_loop(for_stmt, reg, return_type, type_env),
         },
         ast::Stmt::Break(break_stmt) => {
             let label = break_stmt.label.as_ref().map(|l| l.sym.to_string());
@@ -70,13 +83,24 @@ pub fn convert_stmt(
             let label = cont_stmt.label.as_ref().map(|l| l.sym.to_string());
             Ok(vec![Stmt::Continue { label }])
         }
-        ast::Stmt::Labeled(labeled_stmt) => {
-            Ok(vec![convert_labeled_stmt(labeled_stmt, reg, return_type)?])
-        }
-        ast::Stmt::DoWhile(do_while) => {
-            Ok(vec![convert_do_while_stmt(do_while, reg, return_type)?])
-        }
-        ast::Stmt::Try(try_stmt) => Ok(vec![convert_try_stmt(try_stmt, reg, return_type)?]),
+        ast::Stmt::Labeled(labeled_stmt) => Ok(vec![convert_labeled_stmt(
+            labeled_stmt,
+            reg,
+            return_type,
+            type_env,
+        )?]),
+        ast::Stmt::DoWhile(do_while) => Ok(vec![convert_do_while_stmt(
+            do_while,
+            reg,
+            return_type,
+            type_env,
+        )?]),
+        ast::Stmt::Try(try_stmt) => Ok(vec![convert_try_stmt(
+            try_stmt,
+            reg,
+            return_type,
+            type_env,
+        )?]),
         ast::Stmt::Decl(ast::Decl::Fn(fn_decl)) => Ok(vec![convert_nested_fn_decl(fn_decl, reg)?]),
         _ => Err(anyhow!("unsupported statement: {:?}", stmt)),
     }
@@ -88,7 +112,11 @@ pub fn convert_stmt(
 /// - `const` with object/struct type → mutable (`let mut`), because TS `const` allows
 ///   field mutation while Rust `let` does not
 /// - `let` / `var` → mutable (`let mut`)
-fn convert_var_decl(var_decl: &ast::VarDecl, reg: &TypeRegistry) -> Result<Stmt> {
+fn convert_var_decl(
+    var_decl: &ast::VarDecl,
+    reg: &TypeRegistry,
+    type_env: &TypeEnv,
+) -> Result<Stmt> {
     // We only handle single-declarator variable declarations
     let declarator = single_declarator(var_decl)?;
 
@@ -113,7 +141,7 @@ fn convert_var_decl(var_decl: &ast::VarDecl, reg: &TypeRegistry) -> Result<Stmt>
     let init = declarator
         .init
         .as_ref()
-        .map(|e| convert_expr(e, reg, ty.as_ref()))
+        .map(|e| convert_expr(e, reg, ty.as_ref(), type_env))
         .transpose()?;
 
     Ok(Stmt::Let {
@@ -135,15 +163,16 @@ fn convert_if_stmt(
     if_stmt: &ast::IfStmt,
     reg: &TypeRegistry,
     return_type: Option<&RustType>,
+    type_env: &mut TypeEnv,
 ) -> Result<Stmt> {
-    let condition = convert_expr(&if_stmt.test, reg, None)?;
+    let condition = convert_expr(&if_stmt.test, reg, None, type_env)?;
 
-    let then_body = convert_block_or_stmt(&if_stmt.cons, reg, return_type)?;
+    let then_body = convert_block_or_stmt(&if_stmt.cons, reg, return_type, type_env)?;
 
     let else_body = if_stmt
         .alt
         .as_ref()
-        .map(|alt| convert_block_or_stmt(alt, reg, return_type))
+        .map(|alt| convert_block_or_stmt(alt, reg, return_type, type_env))
         .transpose()?;
 
     Ok(Stmt::If {
@@ -162,6 +191,7 @@ fn convert_for_stmt(
     for_stmt: &ast::ForStmt,
     reg: &TypeRegistry,
     return_type: Option<&RustType>,
+    type_env: &mut TypeEnv,
 ) -> Result<Stmt> {
     // Extract: let <var> = <start>
     let (var, start) = match &for_stmt.init {
@@ -174,7 +204,7 @@ fn convert_for_stmt(
                 .init
                 .as_ref()
                 .ok_or_else(|| anyhow!("unsupported for loop: no initializer"))?;
-            let start_expr = convert_expr(init, reg, None)?;
+            let start_expr = convert_expr(init, reg, None, type_env)?;
             (name, start_expr)
         }
         _ => {
@@ -195,7 +225,7 @@ fn convert_for_stmt(
                 if left_name != var {
                     return Err(anyhow!("unsupported for loop: condition var mismatch"));
                 }
-                convert_expr(&bin.right, reg, None)?
+                convert_expr(&bin.right, reg, None, type_env)?
             }
             _ => return Err(anyhow!("unsupported for loop: non-simple condition")),
         },
@@ -223,7 +253,7 @@ fn convert_for_stmt(
         None => return Err(anyhow!("unsupported for loop: no update expression")),
     }
 
-    let body = convert_block_or_stmt(&for_stmt.body, reg, return_type)?;
+    let body = convert_block_or_stmt(&for_stmt.body, reg, return_type, type_env)?;
     Ok(Stmt::ForIn {
         label: None,
         var,
@@ -242,6 +272,7 @@ fn convert_for_of_stmt(
     for_of: &ast::ForOfStmt,
     reg: &TypeRegistry,
     return_type: Option<&RustType>,
+    type_env: &mut TypeEnv,
 ) -> Result<Stmt> {
     let var = match &for_of.left {
         ast::ForHead::VarDecl(var_decl) => {
@@ -252,8 +283,8 @@ fn convert_for_of_stmt(
         }
         _ => return Err(anyhow!("unsupported for...of left-hand side")),
     };
-    let iterable = convert_expr(&for_of.right, reg, None)?;
-    let body = convert_block_or_stmt(&for_of.body, reg, return_type)?;
+    let iterable = convert_expr(&for_of.right, reg, None, type_env)?;
+    let body = convert_block_or_stmt(&for_of.body, reg, return_type, type_env)?;
     Ok(Stmt::ForIn {
         label: None,
         var,
@@ -270,12 +301,13 @@ fn convert_labeled_stmt(
     labeled: &ast::LabeledStmt,
     reg: &TypeRegistry,
     return_type: Option<&RustType>,
+    type_env: &mut TypeEnv,
 ) -> Result<Stmt> {
     let label_name = labeled.label.sym.to_string();
     match labeled.body.as_ref() {
         ast::Stmt::While(while_stmt) => {
-            let condition = convert_expr(&while_stmt.test, reg, None)?;
-            let body = convert_block_or_stmt(&while_stmt.body, reg, return_type)?;
+            let condition = convert_expr(&while_stmt.test, reg, None, type_env)?;
+            let body = convert_block_or_stmt(&while_stmt.body, reg, return_type, type_env)?;
             Ok(Stmt::While {
                 label: Some(label_name),
                 condition,
@@ -283,14 +315,14 @@ fn convert_labeled_stmt(
             })
         }
         ast::Stmt::ForOf(for_of) => {
-            let mut stmt = convert_for_of_stmt(for_of, reg, return_type)?;
+            let mut stmt = convert_for_of_stmt(for_of, reg, return_type, type_env)?;
             if let Stmt::ForIn { ref mut label, .. } = stmt {
                 *label = Some(label_name);
             }
             Ok(stmt)
         }
         ast::Stmt::For(for_stmt) => {
-            let mut stmt = convert_for_stmt(for_stmt, reg, return_type)?;
+            let mut stmt = convert_for_stmt(for_stmt, reg, return_type, type_env)?;
             if let Stmt::ForIn { ref mut label, .. } = stmt {
                 *label = Some(label_name);
             }
@@ -307,9 +339,10 @@ fn convert_while_stmt(
     while_stmt: &ast::WhileStmt,
     reg: &TypeRegistry,
     return_type: Option<&RustType>,
+    type_env: &mut TypeEnv,
 ) -> Result<Stmt> {
-    let condition = convert_expr(&while_stmt.test, reg, None)?;
-    let body = convert_block_or_stmt(&while_stmt.body, reg, return_type)?;
+    let condition = convert_expr(&while_stmt.test, reg, None, type_env)?;
+    let body = convert_block_or_stmt(&while_stmt.body, reg, return_type, type_env)?;
     Ok(Stmt::While {
         label: None,
         condition,
@@ -322,22 +355,28 @@ fn convert_try_stmt(
     try_stmt: &ast::TryStmt,
     reg: &TypeRegistry,
     return_type: Option<&RustType>,
+    type_env: &mut TypeEnv,
 ) -> Result<Stmt> {
-    let try_body = convert_stmt_list(&try_stmt.block.stmts, reg, return_type)?;
+    let try_body = convert_stmt_list(&try_stmt.block.stmts, reg, return_type, type_env)?;
 
     let (catch_param, catch_body) = if let Some(handler) = &try_stmt.handler {
         let param_name = handler.param.as_ref().and_then(|p| match p {
             swc_ecma_ast::Pat::Ident(ident) => Some(ident.id.sym.to_string()),
             _ => None,
         });
-        let body = convert_stmt_list(&handler.body.stmts, reg, return_type)?;
+        let body = convert_stmt_list(&handler.body.stmts, reg, return_type, type_env)?;
         (param_name, Some(body))
     } else {
         (None, None)
     };
 
     let finally_body = if let Some(finalizer) = &try_stmt.finalizer {
-        Some(convert_stmt_list(&finalizer.stmts, reg, return_type)?)
+        Some(convert_stmt_list(
+            &finalizer.stmts,
+            reg,
+            return_type,
+            type_env,
+        )?)
     } else {
         None
     };
@@ -355,8 +394,12 @@ fn convert_try_stmt(
 /// - `throw new Error("msg")` → `return Err("msg".to_string())`
 /// - `throw "msg"` → `return Err("msg".to_string())`
 /// - Other throw expressions → `return Err(expr.to_string())`
-fn convert_throw_stmt(throw_stmt: &ast::ThrowStmt, reg: &TypeRegistry) -> Result<Stmt> {
-    let err_arg = extract_error_message(&throw_stmt.arg, reg);
+fn convert_throw_stmt(
+    throw_stmt: &ast::ThrowStmt,
+    reg: &TypeRegistry,
+    type_env: &TypeEnv,
+) -> Result<Stmt> {
+    let err_arg = extract_error_message(&throw_stmt.arg, reg, type_env);
     let err_expr = Expr::MethodCall {
         object: Box::new(err_arg),
         method: "to_string".to_string(),
@@ -373,20 +416,20 @@ fn convert_throw_stmt(throw_stmt: &ast::ThrowStmt, reg: &TypeRegistry) -> Result
 /// - `new Error("msg")` → `StringLit("msg")`
 /// - `"msg"` → `StringLit("msg")`
 /// - Other → converts as generic expression
-fn extract_error_message(expr: &ast::Expr, reg: &TypeRegistry) -> Expr {
+fn extract_error_message(expr: &ast::Expr, reg: &TypeRegistry, type_env: &TypeEnv) -> Expr {
     match expr {
         ast::Expr::New(new_expr) => {
             // `throw new Error("msg")` → extract "msg"
             if let Some(args) = &new_expr.args {
                 if let Some(first) = args.first() {
-                    if let Ok(e) = convert_expr(&first.expr, reg, None) {
+                    if let Ok(e) = convert_expr(&first.expr, reg, None, type_env) {
                         return e;
                     }
                 }
             }
             Expr::StringLit("unknown error".to_string())
         }
-        other => convert_expr(other, reg, None)
+        other => convert_expr(other, reg, None, type_env)
             .unwrap_or_else(|_| Expr::StringLit("unknown error".to_string())),
     }
 }
@@ -399,10 +442,20 @@ pub fn convert_stmt_list(
     stmts: &[ast::Stmt],
     reg: &TypeRegistry,
     return_type: Option<&RustType>,
+    type_env: &mut TypeEnv,
 ) -> Result<Vec<Stmt>> {
     let mut result = Vec::new();
     for stmt in stmts {
-        result.extend(convert_stmt(stmt, reg, return_type)?);
+        let converted = convert_stmt(stmt, reg, return_type, type_env)?;
+        for s in &converted {
+            if let Stmt::Let {
+                name, ty: Some(ty), ..
+            } = s
+            {
+                type_env.insert(name.clone(), ty.clone());
+            }
+        }
+        result.extend(converted);
     }
     Ok(result)
 }
@@ -416,6 +469,7 @@ pub fn convert_stmt_list(
 fn try_convert_object_destructuring(
     var_decl: &ast::VarDecl,
     reg: &TypeRegistry,
+    type_env: &TypeEnv,
 ) -> Result<Option<Vec<Stmt>>> {
     let declarator = match single_declarator(var_decl) {
         Ok(d) => d,
@@ -431,7 +485,7 @@ fn try_convert_object_destructuring(
         .init
         .as_ref()
         .ok_or_else(|| anyhow!("object destructuring requires an initializer"))?;
-    let source_expr = convert_expr(source, reg, None)?;
+    let source_expr = convert_expr(source, reg, None, type_env)?;
 
     let mutable = !matches!(var_decl.kind, ast::VarDeclKind::Const);
     let mut stmts = Vec::new();
@@ -481,13 +535,14 @@ fn convert_do_while_stmt(
     do_while: &ast::DoWhileStmt,
     reg: &TypeRegistry,
     return_type: Option<&RustType>,
+    type_env: &mut TypeEnv,
 ) -> Result<Stmt> {
     let body_stmts = match do_while.body.as_ref() {
-        ast::Stmt::Block(block) => convert_stmt_list(&block.stmts, reg, return_type)?,
-        single => convert_stmt(single, reg, return_type)?,
+        ast::Stmt::Block(block) => convert_stmt_list(&block.stmts, reg, return_type, type_env)?,
+        single => convert_stmt(single, reg, return_type, type_env)?,
     };
 
-    let condition = convert_expr(&do_while.test, reg, None)?;
+    let condition = convert_expr(&do_while.test, reg, None, type_env)?;
     let break_check = Stmt::If {
         condition: Expr::UnaryOp {
             op: UnOp::Not,
@@ -514,6 +569,7 @@ fn convert_do_while_stmt(
 fn try_convert_array_destructuring(
     var_decl: &ast::VarDecl,
     reg: &TypeRegistry,
+    type_env: &TypeEnv,
 ) -> Result<Option<Vec<Stmt>>> {
     let declarator = match single_declarator(var_decl) {
         Ok(d) => d,
@@ -529,7 +585,7 @@ fn try_convert_array_destructuring(
         .init
         .as_ref()
         .ok_or_else(|| anyhow!("array destructuring requires an initializer"))?;
-    let source_expr = convert_expr(source, reg, None)?;
+    let source_expr = convert_expr(source, reg, None, type_env)?;
 
     let mutable = !matches!(var_decl.kind, ast::VarDeclKind::Const);
     let mut stmts = Vec::new();
@@ -586,6 +642,7 @@ fn convert_for_stmt_as_loop(
     for_stmt: &ast::ForStmt,
     reg: &TypeRegistry,
     return_type: Option<&RustType>,
+    type_env: &mut TypeEnv,
 ) -> Result<Vec<Stmt>> {
     let mut result = Vec::new();
 
@@ -599,7 +656,7 @@ fn convert_for_stmt_as_loop(
             let init_expr = decl
                 .init
                 .as_ref()
-                .map(|e| convert_expr(e, reg, None))
+                .map(|e| convert_expr(e, reg, None, type_env))
                 .transpose()?;
             result.push(Stmt::Let {
                 mutable: true,
@@ -609,7 +666,7 @@ fn convert_for_stmt_as_loop(
             });
         }
         Some(ast::VarDeclOrExpr::Expr(expr)) => {
-            let e = convert_expr(expr, reg, None)?;
+            let e = convert_expr(expr, reg, None, type_env)?;
             result.push(Stmt::Expr(e));
         }
         None => {}
@@ -620,7 +677,7 @@ fn convert_for_stmt_as_loop(
 
     // 2a. Condition → if !(condition) { break; }
     if let Some(test) = &for_stmt.test {
-        let condition = convert_expr(test, reg, None)?;
+        let condition = convert_expr(test, reg, None, type_env)?;
         loop_body.push(Stmt::If {
             condition: Expr::UnaryOp {
                 op: UnOp::Not,
@@ -632,12 +689,12 @@ fn convert_for_stmt_as_loop(
     }
 
     // 2b. Original body
-    let body_stmts = convert_block_or_stmt(&for_stmt.body, reg, return_type)?;
+    let body_stmts = convert_block_or_stmt(&for_stmt.body, reg, return_type, type_env)?;
     loop_body.extend(body_stmts);
 
     // 2c. Update expression
     if let Some(update) = &for_stmt.update {
-        let update_stmt = convert_update_to_stmt(update, reg)?;
+        let update_stmt = convert_update_to_stmt(update, reg, type_env)?;
         loop_body.push(update_stmt);
     }
 
@@ -655,7 +712,11 @@ fn convert_for_stmt_as_loop(
 /// - `i--` → `i = i - 1.0`
 /// - `i += n` → `i = i + n`
 /// - Other expressions → `Stmt::Expr`
-fn convert_update_to_stmt(expr: &ast::Expr, reg: &TypeRegistry) -> Result<Stmt> {
+fn convert_update_to_stmt(
+    expr: &ast::Expr,
+    reg: &TypeRegistry,
+    type_env: &TypeEnv,
+) -> Result<Stmt> {
     match expr {
         ast::Expr::Update(up) => {
             let name = match up.arg.as_ref() {
@@ -676,11 +737,11 @@ fn convert_update_to_stmt(expr: &ast::Expr, reg: &TypeRegistry) -> Result<Stmt> 
             }))
         }
         ast::Expr::Assign(assign) => {
-            let e = convert_expr(&ast::Expr::Assign(assign.clone()), reg, None)?;
+            let e = convert_expr(&ast::Expr::Assign(assign.clone()), reg, None, type_env)?;
             Ok(Stmt::Expr(e))
         }
         other => {
-            let e = convert_expr(other, reg, None)?;
+            let e = convert_expr(other, reg, None, type_env)?;
             Ok(Stmt::Expr(e))
         }
     }
@@ -691,10 +752,11 @@ fn convert_block_or_stmt(
     stmt: &ast::Stmt,
     reg: &TypeRegistry,
     return_type: Option<&RustType>,
+    type_env: &mut TypeEnv,
 ) -> Result<Vec<Stmt>> {
     match stmt {
-        ast::Stmt::Block(block) => convert_stmt_list(&block.stmts, reg, return_type),
-        other => convert_stmt(other, reg, return_type),
+        ast::Stmt::Block(block) => convert_stmt_list(&block.stmts, reg, return_type, type_env),
+        other => convert_stmt(other, reg, return_type, type_env),
     }
 }
 
@@ -736,8 +798,17 @@ fn convert_nested_fn_decl(fn_decl: &ast::FnDecl, reg: &TypeRegistry) -> Result<S
             }
         });
 
+    let mut fn_type_env = TypeEnv::new();
+    for param in &params {
+        if let Some(ty) = &param.ty {
+            fn_type_env.insert(param.name.clone(), ty.clone());
+        }
+    }
+
     let body = match &fn_decl.function.body {
-        Some(block) => convert_stmt_list(&block.stmts, reg, return_type.as_ref())?,
+        Some(block) => {
+            convert_stmt_list(&block.stmts, reg, return_type.as_ref(), &mut fn_type_env)?
+        }
         None => Vec::new(),
     };
 

@@ -676,3 +676,29 @@ fn test_transform_enum_computed_member_bitshift() {
         _ => panic!("expected Enum"),
     }
 }
+
+// --- TypeEnv tests ---
+
+#[test]
+fn test_type_env_insert_and_get_returns_registered_type() {
+    let mut env = TypeEnv::new();
+    env.insert("x".to_string(), RustType::F64);
+
+    assert_eq!(env.get("x"), Some(&RustType::F64));
+}
+
+#[test]
+fn test_type_env_get_unregistered_returns_none() {
+    let env = TypeEnv::new();
+
+    assert_eq!(env.get("x"), None);
+}
+
+#[test]
+fn test_type_env_insert_same_name_overwrites_shadowing() {
+    let mut env = TypeEnv::new();
+    env.insert("x".to_string(), RustType::F64);
+    env.insert("x".to_string(), RustType::String);
+
+    assert_eq!(env.get("x"), Some(&RustType::String));
+}

@@ -1553,3 +1553,78 @@ fn test_convert_type_alias_intersection_union_complex_generates_enum() {
         _ => panic!("expected Item::Enum, got {:?}", item),
     }
 }
+
+// --- nullable + multi-type union tests ---
+
+#[test]
+fn test_convert_ts_type_nullable_multi_type_generates_option_enum() {
+    let decl = parse_interface("interface T { x: string | number | null; }");
+    let prop = match &decl.body.body[0] {
+        TsTypeElement::TsPropertySignature(p) => p,
+        _ => panic!("expected property signature"),
+    };
+    let mut extra = Vec::new();
+    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut extra).unwrap();
+
+    match &ty {
+        RustType::Option(inner) => match inner.as_ref() {
+            RustType::Named { name, .. } => {
+                assert_eq!(name, "StringOrF64");
+            }
+            other => panic!("expected Named inside Option, got: {other:?}"),
+        },
+        other => panic!("expected Option, got: {other:?}"),
+    }
+
+    assert_eq!(extra.len(), 1, "expected 1 extra item, got: {extra:?}");
+    match &extra[0] {
+        Item::Enum { name, variants, .. } => {
+            assert_eq!(name, "StringOrF64");
+            assert_eq!(variants.len(), 2);
+        }
+        other => panic!("expected Enum, got: {other:?}"),
+    }
+}
+
+#[test]
+fn test_convert_ts_type_nullable_null_undefined_dedup_returns_option() {
+    let decl = parse_interface("interface T { x: string | null | undefined; }");
+    let prop = match &decl.body.body[0] {
+        TsTypeElement::TsPropertySignature(p) => p,
+        _ => panic!("expected property signature"),
+    };
+    let mut extra = Vec::new();
+    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut extra).unwrap();
+
+    assert_eq!(ty, RustType::Option(Box::new(RustType::String)));
+    assert!(extra.is_empty(), "no extra items expected for single type");
+}
+
+#[test]
+fn test_convert_ts_type_nullable_three_types_generates_option_enum() {
+    let decl = parse_interface("interface T { x: boolean | string | number | null; }");
+    let prop = match &decl.body.body[0] {
+        TsTypeElement::TsPropertySignature(p) => p,
+        _ => panic!("expected property signature"),
+    };
+    let mut extra = Vec::new();
+    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut extra).unwrap();
+
+    match &ty {
+        RustType::Option(inner) => match inner.as_ref() {
+            RustType::Named { name, .. } => {
+                assert_eq!(name, "BoolOrStringOrF64");
+            }
+            other => panic!("expected Named inside Option, got: {other:?}"),
+        },
+        other => panic!("expected Option, got: {other:?}"),
+    }
+
+    assert_eq!(extra.len(), 1);
+    match &extra[0] {
+        Item::Enum { variants, .. } => {
+            assert_eq!(variants.len(), 3);
+        }
+        other => panic!("expected Enum, got: {other:?}"),
+    }
+}

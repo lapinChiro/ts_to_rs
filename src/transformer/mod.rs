@@ -16,11 +16,36 @@ use swc_ecma_ast::{Decl, ImportSpecifier, Module, ModuleDecl, ModuleItem, Stmt};
 
 use std::collections::HashMap;
 
-use crate::ir::{EnumValue, EnumVariant, Item, Visibility};
+use crate::ir::{EnumValue, EnumVariant, Item, RustType, Visibility};
 use crate::registry::TypeRegistry;
 use crate::transformer::classes::ClassInfo;
 use crate::transformer::expressions::convert_arrow_expr;
 use crate::transformer::types::convert_ts_type;
+
+/// ローカル変数の型情報を保持する型環境。
+///
+/// 変数宣言時にエントリを追加し、後続の式変換で参照する。
+#[derive(Debug, Clone, Default)]
+pub struct TypeEnv {
+    vars: HashMap<String, RustType>,
+}
+
+impl TypeEnv {
+    /// 新しい空の型環境を作成する。
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// 変数の型を登録する。同名の変数が既にある場合は上書き（シャドウイング）。
+    pub fn insert(&mut self, name: String, ty: RustType) {
+        self.vars.insert(name, ty);
+    }
+
+    /// 変数名から型を取得する。
+    pub fn get(&self, name: &str) -> Option<&RustType> {
+        self.vars.get(name)
+    }
+}
 
 /// Extracts the identifier name from a [`ast::Pat::Ident`] pattern.
 ///
@@ -504,7 +529,13 @@ fn convert_var_decl_arrow_fns(
 
         // Convert the arrow to a closure IR, then extract parts for Item::Fn
         let mut fallback_warnings = Vec::new();
-        let closure = convert_arrow_expr(arrow, reg, resilient, &mut fallback_warnings)?;
+        let closure = convert_arrow_expr(
+            arrow,
+            reg,
+            resilient,
+            &mut fallback_warnings,
+            &TypeEnv::new(),
+        )?;
         match closure {
             crate::ir::Expr::Closure {
                 params,

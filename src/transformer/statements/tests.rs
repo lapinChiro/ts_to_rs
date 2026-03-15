@@ -2,6 +2,7 @@ use super::*;
 use crate::ir::{BinOp, Expr, RustType, Stmt, UnOp};
 use crate::parser::parse_typescript;
 use crate::registry::TypeRegistry;
+use crate::transformer::TypeEnv;
 use swc_ecma_ast::{Decl, ModuleItem};
 
 /// Helper: convert a single statement and assert exactly one IR statement is produced.
@@ -10,7 +11,7 @@ fn convert_single_stmt(
     reg: &TypeRegistry,
     return_type: Option<&RustType>,
 ) -> Stmt {
-    let mut stmts = convert_stmt(stmt, reg, return_type).unwrap();
+    let mut stmts = convert_stmt(stmt, reg, return_type, &mut TypeEnv::new()).unwrap();
     assert_eq!(stmts.len(), 1, "expected single statement, got {stmts:?}");
     stmts.remove(0)
 }
@@ -197,7 +198,8 @@ fn test_convert_stmt_while() {
 fn test_convert_stmt_list_try_catch_generates_try_catch_ir() {
     let stmts =
         parse_fn_body("function f() { try { const x = 1; return x; } catch (e) { return 0; } }");
-    let result = convert_stmt_list(&stmts, &TypeRegistry::new(), None).unwrap();
+    let result =
+        convert_stmt_list(&stmts, &TypeRegistry::new(), None, &mut TypeEnv::new()).unwrap();
     assert_eq!(result.len(), 1);
     match &result[0] {
         Stmt::TryCatch {
@@ -219,7 +221,8 @@ fn test_convert_stmt_list_try_catch_generates_try_catch_ir() {
 #[test]
 fn test_convert_stmt_list_try_catch_empty_catch_generates_try_catch_ir() {
     let stmts = parse_fn_body("function f() { try { const x = 1; } catch (e) { } }");
-    let result = convert_stmt_list(&stmts, &TypeRegistry::new(), None).unwrap();
+    let result =
+        convert_stmt_list(&stmts, &TypeRegistry::new(), None, &mut TypeEnv::new()).unwrap();
     assert_eq!(result.len(), 1);
     match &result[0] {
         Stmt::TryCatch {
@@ -241,7 +244,8 @@ fn test_convert_stmt_list_try_catch_empty_catch_generates_try_catch_ir() {
 #[test]
 fn test_convert_stmt_list_try_finally_generates_try_catch_ir() {
     let stmts = parse_fn_body("function f() { try { const x = 1; } finally { const y = 2; } }");
-    let result = convert_stmt_list(&stmts, &TypeRegistry::new(), None).unwrap();
+    let result =
+        convert_stmt_list(&stmts, &TypeRegistry::new(), None, &mut TypeEnv::new()).unwrap();
     assert_eq!(result.len(), 1);
     match &result[0] {
         Stmt::TryCatch {
@@ -265,7 +269,8 @@ fn test_convert_stmt_list_try_catch_finally_generates_try_catch_ir() {
     let stmts = parse_fn_body(
         "function f() { try { const x = 1; } catch (e) { const y = 2; } finally { const z = 3; } }",
     );
-    let result = convert_stmt_list(&stmts, &TypeRegistry::new(), None).unwrap();
+    let result =
+        convert_stmt_list(&stmts, &TypeRegistry::new(), None, &mut TypeEnv::new()).unwrap();
     assert_eq!(result.len(), 1);
     match &result[0] {
         Stmt::TryCatch {
@@ -288,7 +293,8 @@ fn test_convert_stmt_nested_try_catch_generates_nested_try_catch_ir() {
     let stmts = parse_fn_body(
         "function f() { try { try { x(); } catch (inner) { y(); } } catch (outer) { z(); } }",
     );
-    let result = convert_stmt_list(&stmts, &TypeRegistry::new(), None).unwrap();
+    let result =
+        convert_stmt_list(&stmts, &TypeRegistry::new(), None, &mut TypeEnv::new()).unwrap();
     assert_eq!(result.len(), 1);
     match &result[0] {
         Stmt::TryCatch {
@@ -522,7 +528,8 @@ fn test_convert_stmt_continue_with_label() {
 fn test_convert_stmt_list_for_decrement_becomes_loop() {
     let stmts =
         parse_fn_body("function f(n: number) { for (let i = n; i >= 0; i--) { console.log(i); } }");
-    let result = convert_stmt_list(&stmts, &TypeRegistry::new(), None).unwrap();
+    let result =
+        convert_stmt_list(&stmts, &TypeRegistry::new(), None, &mut TypeEnv::new()).unwrap();
     // Should produce: let mut i = n; loop { if !(i >= 0) { break; } body; i--; }
     assert_eq!(result.len(), 2); // init + loop
     assert!(matches!(&result[0], Stmt::Let { mutable: true, name, .. } if name == "i"));
@@ -534,7 +541,8 @@ fn test_convert_stmt_list_for_step_by_two_becomes_loop() {
     let stmts = parse_fn_body(
         "function f(n: number) { for (let i = 0; i < n; i += 2) { console.log(i); } }",
     );
-    let result = convert_stmt_list(&stmts, &TypeRegistry::new(), None).unwrap();
+    let result =
+        convert_stmt_list(&stmts, &TypeRegistry::new(), None, &mut TypeEnv::new()).unwrap();
     assert_eq!(result.len(), 2);
     assert!(matches!(&result[0], Stmt::Let { mutable: true, name, .. } if name == "i"));
     assert!(matches!(&result[1], Stmt::Loop { .. }));
@@ -545,7 +553,8 @@ fn test_convert_stmt_for_simple_counter_unchanged() {
     // Existing simple counter pattern should still produce ForIn
     let stmts =
         parse_fn_body("function f(n: number) { for (let i = 0; i < n; i++) { console.log(i); } }");
-    let result = convert_stmt_list(&stmts, &TypeRegistry::new(), None).unwrap();
+    let result =
+        convert_stmt_list(&stmts, &TypeRegistry::new(), None, &mut TypeEnv::new()).unwrap();
     assert_eq!(result.len(), 1);
     assert!(matches!(&result[0], Stmt::ForIn { .. }));
 }
@@ -555,7 +564,8 @@ fn test_convert_stmt_for_simple_counter_unchanged() {
 #[test]
 fn test_convert_stmt_list_object_destructuring_basic() {
     let stmts = parse_fn_body("function f() { const { x, y } = obj; }");
-    let result = convert_stmt_list(&stmts, &TypeRegistry::new(), None).unwrap();
+    let result =
+        convert_stmt_list(&stmts, &TypeRegistry::new(), None, &mut TypeEnv::new()).unwrap();
     assert_eq!(result.len(), 2);
     assert_eq!(
         result[0],
@@ -586,7 +596,8 @@ fn test_convert_stmt_list_object_destructuring_basic() {
 #[test]
 fn test_convert_stmt_list_object_destructuring_let_mutable() {
     let stmts = parse_fn_body("function f() { let { x, y } = obj; }");
-    let result = convert_stmt_list(&stmts, &TypeRegistry::new(), None).unwrap();
+    let result =
+        convert_stmt_list(&stmts, &TypeRegistry::new(), None, &mut TypeEnv::new()).unwrap();
     assert_eq!(result.len(), 2);
     assert!(matches!(&result[0], Stmt::Let { mutable: true, name, .. } if name == "x"));
     assert!(matches!(&result[1], Stmt::Let { mutable: true, name, .. } if name == "y"));
@@ -595,7 +606,8 @@ fn test_convert_stmt_list_object_destructuring_let_mutable() {
 #[test]
 fn test_convert_stmt_list_object_destructuring_rename() {
     let stmts = parse_fn_body("function f() { const { x: newX } = obj; }");
-    let result = convert_stmt_list(&stmts, &TypeRegistry::new(), None).unwrap();
+    let result =
+        convert_stmt_list(&stmts, &TypeRegistry::new(), None, &mut TypeEnv::new()).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(
         result[0],
@@ -629,7 +641,8 @@ fn test_convert_stmt_labeled_for_range() {
 #[test]
 fn test_convert_stmt_list_array_destructuring_basic() {
     let stmts = parse_fn_body("function f(arr: number[]) { const [a, b] = arr; }");
-    let result = convert_stmt_list(&stmts, &TypeRegistry::new(), None).unwrap();
+    let result =
+        convert_stmt_list(&stmts, &TypeRegistry::new(), None, &mut TypeEnv::new()).unwrap();
     assert_eq!(result.len(), 2);
     assert_eq!(
         result[0],
@@ -660,7 +673,8 @@ fn test_convert_stmt_list_array_destructuring_basic() {
 #[test]
 fn test_convert_stmt_list_array_destructuring_let_mutable() {
     let stmts = parse_fn_body("function f(arr: number[]) { let [x, y] = arr; }");
-    let result = convert_stmt_list(&stmts, &TypeRegistry::new(), None).unwrap();
+    let result =
+        convert_stmt_list(&stmts, &TypeRegistry::new(), None, &mut TypeEnv::new()).unwrap();
     assert_eq!(result.len(), 2);
     assert!(matches!(&result[0], Stmt::Let { mutable: true, name, .. } if name == "x"));
     assert!(matches!(&result[1], Stmt::Let { mutable: true, name, .. } if name == "y"));
@@ -669,7 +683,8 @@ fn test_convert_stmt_list_array_destructuring_let_mutable() {
 #[test]
 fn test_convert_stmt_list_array_destructuring_single_element() {
     let stmts = parse_fn_body("function f(arr: number[]) { const [a] = arr; }");
-    let result = convert_stmt_list(&stmts, &TypeRegistry::new(), None).unwrap();
+    let result =
+        convert_stmt_list(&stmts, &TypeRegistry::new(), None, &mut TypeEnv::new()).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(
         result[0],
@@ -690,7 +705,8 @@ fn test_convert_stmt_list_array_destructuring_single_element() {
 #[test]
 fn test_convert_stmt_do_while_basic() {
     let stmts = parse_fn_body("function f(x: number) { do { x = x + 1; } while (x < 10); }");
-    let result = convert_stmt_list(&stmts, &TypeRegistry::new(), None).unwrap();
+    let result =
+        convert_stmt_list(&stmts, &TypeRegistry::new(), None, &mut TypeEnv::new()).unwrap();
     assert_eq!(result.len(), 1);
     match &result[0] {
         Stmt::Loop { label, body } => {
@@ -719,7 +735,8 @@ fn test_convert_stmt_do_while_basic() {
 #[test]
 fn test_convert_stmt_list_array_destructuring_three_elements() {
     let stmts = parse_fn_body("function f(arr: number[]) { const [a, b, c] = arr; }");
-    let result = convert_stmt_list(&stmts, &TypeRegistry::new(), None).unwrap();
+    let result =
+        convert_stmt_list(&stmts, &TypeRegistry::new(), None, &mut TypeEnv::new()).unwrap();
     assert_eq!(result.len(), 3);
     assert!(matches!(&result[0], Stmt::Let { name, .. } if name == "a"));
     assert!(matches!(&result[1], Stmt::Let { name, .. } if name == "b"));
@@ -729,7 +746,8 @@ fn test_convert_stmt_list_array_destructuring_three_elements() {
 #[test]
 fn test_convert_stmt_list_array_destructuring_skip_element() {
     let stmts = parse_fn_body("function f(arr: number[]) { const [a, , b] = arr; }");
-    let result = convert_stmt_list(&stmts, &TypeRegistry::new(), None).unwrap();
+    let result =
+        convert_stmt_list(&stmts, &TypeRegistry::new(), None, &mut TypeEnv::new()).unwrap();
     assert_eq!(result.len(), 2);
     assert!(matches!(&result[0], Stmt::Let { name, .. } if name == "a"));
     assert!(matches!(&result[1], Stmt::Let { name, .. } if name == "b"));
@@ -748,7 +766,8 @@ fn test_convert_stmt_list_array_destructuring_skip_element() {
 #[test]
 fn test_convert_stmt_list_array_destructuring_rest() {
     let stmts = parse_fn_body("function f(arr: number[]) { const [first, ...rest] = arr; }");
-    let result = convert_stmt_list(&stmts, &TypeRegistry::new(), None).unwrap();
+    let result =
+        convert_stmt_list(&stmts, &TypeRegistry::new(), None, &mut TypeEnv::new()).unwrap();
     assert_eq!(result.len(), 2);
     assert!(matches!(&result[0], Stmt::Let { name, .. } if name == "first"));
     assert!(matches!(&result[1], Stmt::Let { name, .. } if name == "rest"));
@@ -758,7 +777,8 @@ fn test_convert_stmt_list_array_destructuring_rest() {
 fn test_convert_stmt_nested_fn_decl_generates_closure_let() {
     let stmts =
         parse_fn_body("function outer() { function inner(x: number): number { return x; } }");
-    let result = convert_stmt_list(&stmts, &TypeRegistry::new(), None).unwrap();
+    let result =
+        convert_stmt_list(&stmts, &TypeRegistry::new(), None, &mut TypeEnv::new()).unwrap();
     assert_eq!(result.len(), 1);
     match &result[0] {
         Stmt::Let {
@@ -774,4 +794,28 @@ fn test_convert_stmt_nested_fn_decl_generates_closure_let() {
         }
         other => panic!("expected Let with Closure, got: {other:?}"),
     }
+}
+
+#[test]
+fn test_type_env_stmt_list_registers_let_binding_type() {
+    let source = "const x: number = 1;";
+    let module = parse_typescript(source).expect("parse failed");
+    let stmts: Vec<&ast::Stmt> = module
+        .body
+        .iter()
+        .filter_map(|item| match item {
+            ModuleItem::Stmt(s) => Some(s),
+            _ => None,
+        })
+        .collect();
+    let stmts_ref: Vec<ast::Stmt> = stmts.into_iter().cloned().collect();
+
+    let mut type_env = TypeEnv::new();
+    let _result = convert_stmt_list(&stmts_ref, &TypeRegistry::new(), None, &mut type_env).unwrap();
+
+    assert_eq!(
+        type_env.get("x"),
+        Some(&RustType::F64),
+        "convert_stmt_list should register Let binding types in TypeEnv"
+    );
 }
