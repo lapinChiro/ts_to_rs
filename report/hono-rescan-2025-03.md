@@ -116,6 +116,10 @@ interface の call signature `(req: Request): Response` のパラメータが未
 | 前回（1c0280e） | 57% | 62/108 | 46 |
 | 今回（95eec90） | **66%** | **71/108** | **37** |
 
-## 補足: router.ts の `match` 予約語問題
+## 補足: Phase 1 で解消された項目
 
-router.ts の変換で `match` が Rust の予約語と衝突し、rustfmt がエラーを返す。TS の `match` メソッド名を `r#match` にエスケープする対応が必要（TODO に記載なし、軽微）。
+- **router.ts の `match` 予約語問題** → `rust-reserved-word-escape` で修正済み。`r#match` にエスケープされる
+- **union with multiple non-null types（1件）** → `nullable-multi-type-union` で修正済み。`Option<Enum>` に変換される
+- **optional chaining / nullish coalescing の非 Option 型対応** → `type-env-opt-chain` で修正済み
+
+次回 Hono 再スキャンで変換率の更新が必要。

@@ -2,9 +2,13 @@
 
 ## 次のタスク
 
-backlog/ が空のため、TODO から PRD 化して backlog/ に配置する。
+### 割れ窓修正
 
-Phase 2 以降の優先順位案（TODO の Tier 順）:
+1. `backlog/generator-semantic-extraction.md` — Generator から意味的変換を transformer へ移動
+
+### Phase 2 以降
+
+割れ窓修正後に TODO から PRD 化する。詳細は `TODO` を参照。
 
 - Phase 2: 変換正確性（builtin API 参照モデル、intersection 型注記、複数スプレッド）
 - Phase 3: 型構文の網羅性（TsLitType, TsConditionalType, mapped type 等）
