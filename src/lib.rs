@@ -230,8 +230,8 @@ function bar(x: Map = new Map()) { return x; }
     }
 
     #[test]
-    fn test_transpile_collecting_non_nullable_union_param_uses_first_type() {
-        // Non-nullable union type falls back to the first member type
+    fn test_transpile_collecting_non_nullable_union_param_generates_enum() {
+        // Non-nullable union type generates an enum and references it
         let source = "export function foo(x: string | number): void { }";
         let (output, _unsupported) = transpile_collecting(source).unwrap();
         assert!(
@@ -239,13 +239,17 @@ function bar(x: Map = new Map()) { return x; }
             "function should be converted, got: {output}"
         );
         assert!(
-            output.contains("x: String"),
-            "non-nullable union param should use first type, got: {output}"
+            output.contains("x: StringOrF64"),
+            "non-nullable union param should reference generated enum, got: {output}"
+        );
+        assert!(
+            output.contains("enum StringOrF64"),
+            "generated enum should be in output, got: {output}"
         );
     }
 
     #[test]
-    fn test_transpile_collecting_mixed_param_types_union_uses_first() {
+    fn test_transpile_collecting_mixed_param_types_union_generates_enum() {
         // Supported param type + non-nullable union param type in the same function
         let source = "export function bar(a: string, b: string | number): void { }";
         let (output, _unsupported) = transpile_collecting(source).unwrap();
@@ -258,14 +262,14 @@ function bar(x: Map = new Map()) { return x; }
             "supported param should have normal type, got: {output}"
         );
         assert!(
-            output.contains("b: String"),
-            "non-nullable union param should use first type, got: {output}"
+            output.contains("b: StringOrF64"),
+            "non-nullable union param should reference generated enum, got: {output}"
         );
     }
 
     #[test]
-    fn test_transpile_collecting_non_nullable_union_return_type_uses_first() {
-        // Non-nullable union return type should use the first member type
+    fn test_transpile_collecting_non_nullable_union_return_type_generates_enum() {
+        // Non-nullable union return type generates an enum
         let source = "export function baz(x: number): string | number { return x; }";
         let (output, _unsupported) = transpile_collecting(source).unwrap();
         assert!(
@@ -273,8 +277,8 @@ function bar(x: Map = new Map()) { return x; }
             "function should be converted, got: {output}"
         );
         assert!(
-            output.contains("-> String"),
-            "non-nullable union return type should use first type, got: {output}"
+            output.contains("-> StringOrF64"),
+            "non-nullable union return type should reference generated enum, got: {output}"
         );
     }
 

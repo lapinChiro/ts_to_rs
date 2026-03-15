@@ -54,7 +54,7 @@ pub fn convert_ident_to_param(ident: &ast::BindingIdent) -> Result<crate::ir::Pa
         .type_ann
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("parameter '{}' has no type annotation", name))?;
-    let rust_type = types::convert_ts_type(&ty.type_ann)?;
+    let rust_type = types::convert_ts_type(&ty.type_ann, &mut Vec::new())?;
     Ok(crate::ir::Param {
         name,
         ty: Some(rust_type),
@@ -405,7 +405,7 @@ fn transform_decl(
             Ok((items, vec![]))
         }
         Decl::TsTypeAlias(type_alias_decl) => {
-            let items = types::convert_type_alias_items(type_alias_decl, vis)?;
+            let items = types::convert_type_alias_items(type_alias_decl, vis, reg)?;
             Ok((items, vec![]))
         }
         Decl::Fn(fn_decl) => {
@@ -516,7 +516,7 @@ fn convert_var_decl_arrow_fns(
                     arrow
                         .return_type
                         .as_ref()
-                        .and_then(|ann| convert_ts_type(&ann.type_ann).ok())
+                        .and_then(|ann| convert_ts_type(&ann.type_ann, &mut Vec::new()).ok())
                 });
                 let fn_body = match body {
                     crate::ir::ClosureBody::Expr(expr) => {

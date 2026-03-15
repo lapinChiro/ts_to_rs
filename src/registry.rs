@@ -176,7 +176,7 @@ fn collect_property_signature(prop: &ast::TsPropertySignature) -> Option<(String
     let ty = prop
         .type_ann
         .as_ref()
-        .and_then(|ann| convert_ts_type(&ann.type_ann).ok())?;
+        .and_then(|ann| convert_ts_type(&ann.type_ann, &mut Vec::new()).ok())?;
 
     // Optional fields are wrapped in Option
     let ty = if prop.optional {
@@ -213,7 +213,7 @@ fn collect_fn_def(func: &ast::Function) -> Result<TypeDef> {
         if let ast::Pat::Ident(ident) = &param.pat {
             let name = ident.id.sym.to_string();
             if let Some(ann) = &ident.type_ann {
-                if let Ok(ty) = convert_ts_type(&ann.type_ann) {
+                if let Ok(ty) = convert_ts_type(&ann.type_ann, &mut Vec::new()) {
                     params.push((name, ty));
                 }
             }
@@ -223,7 +223,7 @@ fn collect_fn_def(func: &ast::Function) -> Result<TypeDef> {
     let return_type = func
         .return_type
         .as_ref()
-        .and_then(|ann| convert_ts_type(&ann.type_ann).ok());
+        .and_then(|ann| convert_ts_type(&ann.type_ann, &mut Vec::new()).ok());
 
     Ok(TypeDef::Function {
         params,
@@ -238,7 +238,7 @@ fn collect_arrow_def(arrow: &ast::ArrowExpr) -> Result<TypeDef> {
         if let ast::Pat::Ident(ident) = param {
             let name = ident.id.sym.to_string();
             if let Some(ann) = &ident.type_ann {
-                if let Ok(ty) = convert_ts_type(&ann.type_ann) {
+                if let Ok(ty) = convert_ts_type(&ann.type_ann, &mut Vec::new()) {
                     params.push((name, ty));
                 }
             }
@@ -248,7 +248,7 @@ fn collect_arrow_def(arrow: &ast::ArrowExpr) -> Result<TypeDef> {
     let return_type = arrow
         .return_type
         .as_ref()
-        .and_then(|ann| convert_ts_type(&ann.type_ann).ok());
+        .and_then(|ann| convert_ts_type(&ann.type_ann, &mut Vec::new()).ok());
 
     Ok(TypeDef::Function {
         params,

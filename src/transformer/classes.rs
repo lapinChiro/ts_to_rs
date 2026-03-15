@@ -535,7 +535,7 @@ fn convert_static_prop(prop: &ast::ClassProp, vis: &Visibility) -> Result<Option
         .type_ann
         .as_ref()
         .ok_or_else(|| anyhow!("static property '{}' has no type annotation", name))?;
-    let ty = convert_ts_type(&type_ann.type_ann)?;
+    let ty = convert_ts_type(&type_ann.type_ann, &mut Vec::new())?;
 
     let value = match &prop.value {
         Some(init) => convert_expr(init, &crate::registry::TypeRegistry::new(), None)?,
@@ -560,7 +560,7 @@ fn convert_class_prop(prop: &ast::ClassProp, class_vis: &Visibility) -> Result<S
         .as_ref()
         .ok_or_else(|| anyhow!("class property '{}' has no type annotation", field_name))?;
 
-    let ty = convert_ts_type(&type_ann.type_ann)?;
+    let ty = convert_ts_type(&type_ann.type_ann, &mut Vec::new())?;
     let member_vis = resolve_member_visibility(prop.accessibility, class_vis);
 
     Ok(StructField {
@@ -695,7 +695,7 @@ fn convert_class_method(
         .function
         .return_type
         .as_ref()
-        .map(|ann| convert_ts_type(&ann.type_ann))
+        .map(|ann| convert_ts_type(&ann.type_ann, &mut Vec::new()))
         .transpose()?;
 
     // void → None (Rust omits `-> ()`)

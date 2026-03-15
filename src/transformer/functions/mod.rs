@@ -51,7 +51,14 @@ pub fn convert_fn_decl(
         .function
         .return_type
         .as_ref()
-        .map(|ann| convert_ts_type_with_fallback(&ann.type_ann, resilient, &mut fallback_warnings))
+        .map(|ann| {
+            convert_ts_type_with_fallback(
+                &ann.type_ann,
+                resilient,
+                &mut fallback_warnings,
+                &mut extra_items,
+            )
+        })
         .transpose()?;
 
     // void → None (Rust omits `-> ()`)
@@ -129,8 +136,9 @@ pub(crate) fn convert_ts_type_with_fallback(
     ts_type: &swc_ecma_ast::TsType,
     resilient: bool,
     fallback_warnings: &mut Vec<String>,
+    extra_items: &mut Vec<Item>,
 ) -> Result<RustType> {
-    match convert_ts_type(ts_type) {
+    match convert_ts_type(ts_type, extra_items) {
         Ok(ty) => Ok(ty),
         Err(e) => {
             if resilient {
@@ -172,7 +180,7 @@ fn convert_param(
                 for member in &type_lit.members {
                     match member {
                         ast::TsTypeElement::TsPropertySignature(prop) => {
-                            fields.push(convert_property_signature(prop)?);
+                            fields.push(convert_property_signature(prop, &mut Vec::new())?);
                         }
                         _ => {
                             return Err(anyhow!(
@@ -201,15 +209,20 @@ fn convert_param(
                 ));
             }
 
-            let rust_type =
-                convert_ts_type_with_fallback(&ty.type_ann, resilient, fallback_warnings)?;
+            let mut type_extra_items = Vec::new();
+            let rust_type = convert_ts_type_with_fallback(
+                &ty.type_ann,
+                resilient,
+                fallback_warnings,
+                &mut type_extra_items,
+            )?;
             Ok((
                 Param {
                     name: param_name,
                     ty: Some(rust_type),
                 },
                 vec![],
-                vec![],
+                type_extra_items,
             ))
         }
         ast::Pat::Object(obj_pat) => {
@@ -319,7 +332,7 @@ fn convert_object_destructuring_param(obj_pat: &ast::ObjectPat) -> Result<(Param
         .type_ann
         .as_ref()
         .ok_or_else(|| anyhow!("object destructuring parameter requires a type annotation"))?;
-    let rust_type = convert_ts_type(&type_ann.type_ann)?;
+    let rust_type = convert_ts_type(&type_ann.type_ann, &mut Vec::new())?;
 
     // Generate parameter name from type name (PascalCase → snake_case)
     let param_name = match &rust_type {

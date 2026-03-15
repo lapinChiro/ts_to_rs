@@ -1,6 +1,7 @@
 use super::*;
 use crate::ir::StructField;
 use crate::parser::parse_typescript;
+use crate::registry::TypeRegistry;
 use swc_ecma_ast::{Decl, ModuleItem, Stmt};
 
 /// Helper: parse TS source and extract the first TsInterfaceDecl.
@@ -30,7 +31,7 @@ fn test_convert_ts_type_string() {
         TsTypeElement::TsPropertySignature(p) => p,
         _ => panic!("expected property signature"),
     };
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann).unwrap();
+    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
     assert_eq!(ty, RustType::String);
 }
 
@@ -41,7 +42,7 @@ fn test_convert_ts_type_number() {
         TsTypeElement::TsPropertySignature(p) => p,
         _ => panic!("expected property signature"),
     };
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann).unwrap();
+    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
     assert_eq!(ty, RustType::F64);
 }
 
@@ -52,7 +53,7 @@ fn test_convert_ts_type_boolean() {
         TsTypeElement::TsPropertySignature(p) => p,
         _ => panic!("expected property signature"),
     };
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann).unwrap();
+    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
     assert_eq!(ty, RustType::Bool);
 }
 
@@ -63,7 +64,7 @@ fn test_convert_ts_type_array_bracket() {
         TsTypeElement::TsPropertySignature(p) => p,
         _ => panic!("expected property signature"),
     };
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann).unwrap();
+    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
     assert_eq!(ty, RustType::Vec(Box::new(RustType::String)));
 }
 
@@ -74,7 +75,7 @@ fn test_convert_ts_type_array_generic() {
         TsTypeElement::TsPropertySignature(p) => p,
         _ => panic!("expected property signature"),
     };
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann).unwrap();
+    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
     assert_eq!(ty, RustType::Vec(Box::new(RustType::F64)));
 }
 
@@ -85,7 +86,7 @@ fn test_convert_ts_type_union_null() {
         TsTypeElement::TsPropertySignature(p) => p,
         _ => panic!("expected property signature"),
     };
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann).unwrap();
+    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
     assert_eq!(ty, RustType::Option(Box::new(RustType::String)));
 }
 
@@ -96,7 +97,7 @@ fn test_convert_ts_type_union_undefined() {
         TsTypeElement::TsPropertySignature(p) => p,
         _ => panic!("expected property signature"),
     };
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann).unwrap();
+    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
     assert_eq!(ty, RustType::Option(Box::new(RustType::F64)));
 }
 
@@ -278,7 +279,7 @@ fn test_convert_interface_method_with_type_params() {
 #[test]
 fn test_convert_type_alias_object_literal() {
     let decl = parse_type_alias("type Point = { x: number; y: number; };");
-    let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+    let item = convert_type_alias(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
 
     match item {
         Item::Struct { name, fields, .. } => {
@@ -296,7 +297,7 @@ fn test_convert_type_alias_object_literal() {
 #[test]
 fn test_convert_type_alias_with_type_params() {
     let decl = parse_type_alias("type Pair<A, B> = { first: A; second: B; };");
-    let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+    let item = convert_type_alias(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
 
     match item {
         Item::Struct { type_params, .. } => {
@@ -316,7 +317,7 @@ fn test_convert_ts_type_named_with_type_args() {
         TsTypeElement::TsPropertySignature(p) => p,
         _ => panic!("expected property signature"),
     };
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann).unwrap();
+    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
     assert_eq!(
         ty,
         RustType::Named {
@@ -333,7 +334,7 @@ fn test_convert_ts_type_named_with_multiple_type_args() {
         TsTypeElement::TsPropertySignature(p) => p,
         _ => panic!("expected property signature"),
     };
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann).unwrap();
+    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
     assert_eq!(
         ty,
         RustType::Named {
@@ -350,7 +351,7 @@ fn test_convert_ts_type_named_without_type_args() {
         TsTypeElement::TsPropertySignature(p) => p,
         _ => panic!("expected property signature"),
     };
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann).unwrap();
+    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
     assert_eq!(
         ty,
         RustType::Named {
@@ -370,7 +371,7 @@ fn test_convert_ts_type_fn_type() {
         TsTypeElement::TsPropertySignature(p) => p,
         _ => panic!("expected property signature"),
     };
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann).unwrap();
+    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
     assert_eq!(
         ty,
         RustType::Fn {
@@ -387,7 +388,7 @@ fn test_convert_ts_type_fn_type_no_params() {
         TsTypeElement::TsPropertySignature(p) => p,
         _ => panic!("expected property signature"),
     };
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann).unwrap();
+    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
     assert_eq!(
         ty,
         RustType::Fn {
@@ -406,7 +407,7 @@ fn test_convert_ts_type_any() {
         TsTypeElement::TsPropertySignature(p) => p,
         _ => panic!("expected property signature"),
     };
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann).unwrap();
+    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
     assert_eq!(ty, RustType::Any);
 }
 
@@ -417,7 +418,7 @@ fn test_convert_ts_type_unknown() {
         TsTypeElement::TsPropertySignature(p) => p,
         _ => panic!("expected property signature"),
     };
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann).unwrap();
+    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
     assert_eq!(ty, RustType::Any);
 }
 
@@ -428,7 +429,7 @@ fn test_convert_ts_type_never() {
         TsTypeElement::TsPropertySignature(p) => p,
         _ => panic!("expected property signature"),
     };
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann).unwrap();
+    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
     assert_eq!(ty, RustType::Never);
 }
 
@@ -437,7 +438,7 @@ fn test_convert_ts_type_never() {
 #[test]
 fn test_convert_type_alias_string_literal_union_produces_enum() {
     let decl = parse_type_alias(r#"type Direction = "up" | "down" | "left" | "right";"#);
-    let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+    let item = convert_type_alias(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
     match item {
         Item::Enum {
             vis,
@@ -464,7 +465,7 @@ fn test_convert_type_alias_string_literal_union_produces_enum() {
 #[test]
 fn test_convert_type_alias_string_literal_union_two_members() {
     let decl = parse_type_alias(r#"type Status = "active" | "inactive";"#);
-    let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+    let item = convert_type_alias(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
     match item {
         Item::Enum { name, variants, .. } => {
             assert_eq!(name, "Status");
@@ -479,7 +480,7 @@ fn test_convert_type_alias_string_literal_union_two_members() {
 #[test]
 fn test_convert_type_alias_string_literal_union_single_member() {
     let decl = parse_type_alias(r#"type Only = "only";"#);
-    let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+    let item = convert_type_alias(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
     match item {
         Item::Enum { name, variants, .. } => {
             assert_eq!(name, "Only");
@@ -493,7 +494,7 @@ fn test_convert_type_alias_string_literal_union_single_member() {
 #[test]
 fn test_convert_type_alias_string_literal_union_kebab_case() {
     let decl = parse_type_alias(r#"type X = "foo-bar" | "baz-qux";"#);
-    let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+    let item = convert_type_alias(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
     match item {
         Item::Enum { variants, .. } => {
             assert_eq!(variants[0].name, "FooBar");
@@ -506,7 +507,7 @@ fn test_convert_type_alias_string_literal_union_kebab_case() {
 #[test]
 fn test_convert_type_alias_numeric_literal_union_produces_enum() {
     let decl = parse_type_alias("type Code = 200 | 404 | 500;");
-    let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+    let item = convert_type_alias(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
     match item {
         Item::Enum {
             vis,
@@ -532,7 +533,7 @@ fn test_convert_type_alias_numeric_literal_union_produces_enum() {
 #[test]
 fn test_convert_type_alias_numeric_literal_union_two_members() {
     let decl = parse_type_alias("type Code = 200 | 404;");
-    let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+    let item = convert_type_alias(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
     match item {
         Item::Enum { name, variants, .. } => {
             assert_eq!(name, "Code");
@@ -547,7 +548,7 @@ fn test_convert_type_alias_numeric_literal_union_two_members() {
 #[test]
 fn test_convert_type_alias_primitive_union_two_types() {
     let decl = parse_type_alias("type Value = string | number;");
-    let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+    let item = convert_type_alias(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
     match item {
         Item::Enum {
             vis,
@@ -571,7 +572,7 @@ fn test_convert_type_alias_primitive_union_two_types() {
 #[test]
 fn test_convert_type_alias_primitive_union_three_types() {
     let decl = parse_type_alias("type Any = string | number | boolean;");
-    let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+    let item = convert_type_alias(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
     match item {
         Item::Enum { name, variants, .. } => {
             assert_eq!(name, "Any");
@@ -589,7 +590,7 @@ fn test_convert_type_alias_primitive_union_three_types() {
 #[test]
 fn test_convert_type_alias_mixed_union_string_and_number_literal() {
     let decl = parse_type_alias(r#"type Mixed = "ok" | 404;"#);
-    let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+    let item = convert_type_alias(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
     match item {
         Item::Enum { name, variants, .. } => {
             assert_eq!(name, "Mixed");
@@ -608,7 +609,7 @@ fn test_convert_type_alias_mixed_union_string_and_number_literal() {
 fn test_convert_type_alias_nullable_union_with_multiple_types() {
     // `type Opt = string | number | null` → enum (nullable wrapping is future work)
     let decl = parse_type_alias("type Opt = string | number | null;");
-    let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+    let item = convert_type_alias(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
     match item {
         Item::Enum { name, variants, .. } => {
             assert_eq!(name, "Opt");
@@ -623,7 +624,7 @@ fn test_convert_type_alias_nullable_union_with_multiple_types() {
 #[test]
 fn test_convert_type_alias_keyword_type_returns_type_alias() {
     let decl = parse_type_alias("type Name = string;");
-    let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+    let item = convert_type_alias(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
     match item {
         Item::TypeAlias { name, ty, .. } => {
             assert_eq!(name, "Name");
@@ -642,7 +643,7 @@ fn test_convert_ts_type_void_returns_unit() {
     };
     // The callback type is `() => void`, which is a TsFnType
     // whose return type is void. We check the return type is Unit.
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann).unwrap();
+    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
     assert_eq!(
         ty,
         RustType::Fn {
@@ -657,7 +658,7 @@ fn test_convert_ts_type_void_returns_unit() {
 #[test]
 fn test_convert_type_alias_function_type_single_param() {
     let decl = parse_type_alias("type Handler = (req: Request) => Response;");
-    let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+    let item = convert_type_alias(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
 
     match item {
         Item::TypeAlias {
@@ -690,7 +691,7 @@ fn test_convert_type_alias_function_type_single_param() {
 #[test]
 fn test_convert_type_alias_function_type_no_params() {
     let decl = parse_type_alias("type Factory = () => Widget;");
-    let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+    let item = convert_type_alias(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
 
     match item {
         Item::TypeAlias { ty, .. } => {
@@ -712,7 +713,7 @@ fn test_convert_type_alias_function_type_no_params() {
 #[test]
 fn test_convert_type_alias_function_type_void_return() {
     let decl = parse_type_alias("type Callback = (x: number) => void;");
-    let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+    let item = convert_type_alias(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
 
     match item {
         Item::TypeAlias { ty, .. } => {
@@ -731,7 +732,7 @@ fn test_convert_type_alias_function_type_void_return() {
 #[test]
 fn test_convert_type_alias_function_type_multiple_params() {
     let decl = parse_type_alias("type ErrorHandler = (err: string, ctx: Context) => Response;");
-    let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+    let item = convert_type_alias(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
 
     match item {
         Item::TypeAlias { ty, .. } => match ty {
@@ -754,7 +755,7 @@ fn test_convert_ts_type_tuple_two_elements() {
         TsTypeElement::TsPropertySignature(p) => p,
         _ => panic!("expected property signature"),
     };
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann).unwrap();
+    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
     assert_eq!(ty, RustType::Tuple(vec![RustType::String, RustType::F64]));
 }
 
@@ -765,7 +766,7 @@ fn test_convert_ts_type_tuple_single_element() {
         TsTypeElement::TsPropertySignature(p) => p,
         _ => panic!("expected property signature"),
     };
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann).unwrap();
+    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
     assert_eq!(ty, RustType::Tuple(vec![RustType::Bool]));
 }
 
@@ -776,7 +777,7 @@ fn test_convert_ts_type_tuple_empty() {
         TsTypeElement::TsPropertySignature(p) => p,
         _ => panic!("expected property signature"),
     };
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann).unwrap();
+    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
     assert_eq!(ty, RustType::Tuple(vec![]));
 }
 
@@ -787,7 +788,7 @@ fn test_convert_ts_type_tuple_nested() {
         TsTypeElement::TsPropertySignature(p) => p,
         _ => panic!("expected property signature"),
     };
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann).unwrap();
+    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
     assert_eq!(
         ty,
         RustType::Tuple(vec![
@@ -800,7 +801,7 @@ fn test_convert_ts_type_tuple_nested() {
 #[test]
 fn test_convert_type_alias_tuple_type() {
     let decl = parse_type_alias("type Pair = [string, number];");
-    let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+    let item = convert_type_alias(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
 
     match item {
         Item::TypeAlias {
@@ -821,7 +822,7 @@ fn test_convert_type_alias_tuple_type() {
 #[test]
 fn test_convert_type_alias_function_type_with_generics() {
     let decl = parse_type_alias("type Mapper<T, U> = (item: T) => U;");
-    let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+    let item = convert_type_alias(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
 
     match item {
         Item::TypeAlias { type_params, .. } => {
@@ -838,7 +839,7 @@ fn test_convert_ts_type_indexed_access_string_key_returns_associated_type() {
         TsTypeElement::TsPropertySignature(p) => p,
         _ => panic!("expected property signature"),
     };
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann).unwrap();
+    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
     assert_eq!(
         ty,
         RustType::Named {
@@ -855,14 +856,14 @@ fn test_convert_ts_type_indexed_access_non_string_key_returns_error() {
         TsTypeElement::TsPropertySignature(p) => p,
         _ => panic!("expected property signature"),
     };
-    let result = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann);
+    let result = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new());
     assert!(result.is_err());
 }
 
 #[test]
 fn test_convert_type_alias_conditional_filter_returns_type_alias_with_true_branch() {
     let decl = parse_type_alias("type Filter<T> = T extends string ? T : never;");
-    let items = convert_type_alias_items(&decl, Visibility::Public).unwrap();
+    let items = convert_type_alias_items(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
     assert_eq!(items.len(), 1);
     assert_eq!(
         items[0],
@@ -881,7 +882,7 @@ fn test_convert_type_alias_conditional_filter_returns_type_alias_with_true_branc
 #[test]
 fn test_convert_type_alias_conditional_simple_returns_type_alias_with_true_branch() {
     let decl = parse_type_alias("type ToNum<T> = T extends string ? number : boolean;");
-    let items = convert_type_alias_items(&decl, Visibility::Public).unwrap();
+    let items = convert_type_alias_items(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
     assert_eq!(items.len(), 1);
     assert_eq!(
         items[0],
@@ -897,7 +898,7 @@ fn test_convert_type_alias_conditional_simple_returns_type_alias_with_true_branc
 #[test]
 fn test_convert_type_alias_conditional_predicate_returns_bool() {
     let decl = parse_type_alias("type IsString<T> = T extends string ? true : false;");
-    let items = convert_type_alias_items(&decl, Visibility::Public).unwrap();
+    let items = convert_type_alias_items(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
     assert_eq!(items.len(), 1);
     assert_eq!(
         items[0],
@@ -913,7 +914,7 @@ fn test_convert_type_alias_conditional_predicate_returns_bool() {
 #[test]
 fn test_convert_type_alias_conditional_infer_returns_associated_type() {
     let decl = parse_type_alias("type Unwrap<T> = T extends Promise<infer U> ? U : never;");
-    let items = convert_type_alias_items(&decl, Visibility::Public).unwrap();
+    let items = convert_type_alias_items(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
     assert_eq!(items.len(), 1);
     assert_eq!(
         items[0],
@@ -935,7 +936,7 @@ fn test_convert_type_alias_conditional_nested_generates_comment_and_placeholder(
     let decl = parse_type_alias(
         "type Foo<T> = T extends string ? T extends \"a\" ? number : boolean : never;",
     );
-    let items = convert_type_alias_items(&decl, Visibility::Public).unwrap();
+    let items = convert_type_alias_items(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
     assert_eq!(items.len(), 2);
     // First item should be a comment containing original TS info
     match &items[0] {
@@ -962,7 +963,7 @@ fn test_convert_type_alias_discriminated_union_two_variants_generates_serde_tagg
     let decl = parse_type_alias(
         r#"type Event = { kind: "click", x: number } | { kind: "hover", y: number };"#,
     );
-    let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+    let item = convert_type_alias(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
     assert_eq!(
         item,
         Item::Enum {
@@ -1000,7 +1001,7 @@ fn test_convert_type_alias_discriminated_union_three_variants_generates_serde_ta
     let decl = parse_type_alias(
         r#"type Shape = { tag: "circle", r: number } | { tag: "rect", w: number, h: number } | { tag: "line" };"#,
     );
-    let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+    let item = convert_type_alias(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
     match &item {
         Item::Enum {
             serde_tag,
@@ -1023,7 +1024,7 @@ fn test_convert_type_alias_discriminated_union_three_variants_generates_serde_ta
 #[test]
 fn test_convert_type_alias_discriminated_union_no_extra_fields_generates_unit_variants() {
     let decl = parse_type_alias(r#"type Status = { kind: "active" } | { kind: "inactive" };"#);
-    let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+    let item = convert_type_alias(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
     match &item {
         Item::Enum {
             serde_tag,
@@ -1042,7 +1043,7 @@ fn test_convert_type_alias_discriminated_union_tag_field_type_generates_serde_ta
     let decl = parse_type_alias(
         r#"type Msg = { type: "text", body: string } | { type: "image", url: string };"#,
     );
-    let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+    let item = convert_type_alias(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
     match &item {
         Item::Enum { serde_tag, .. } => {
             assert_eq!(serde_tag, &Some("type".to_string()));
@@ -1055,7 +1056,7 @@ fn test_convert_type_alias_discriminated_union_tag_field_type_generates_serde_ta
 fn test_convert_type_alias_union_without_common_discriminant_falls_through() {
     // No common string literal field → should fall through to existing union handling
     let decl = parse_type_alias(r#"type Mixed = { x: number } | { y: string };"#);
-    let result = convert_type_alias(&decl, Visibility::Public);
+    let result = convert_type_alias(&decl, Visibility::Public, &TypeRegistry::new());
     // This should not produce a discriminated union — it may error or produce a different Item
     // The key assertion is that it does NOT produce an Enum with serde_tag
     if let Ok(Item::Enum { serde_tag, .. }) = result {
@@ -1161,7 +1162,7 @@ fn test_convert_interface_mixed_props_and_methods_generates_struct_and_trait() {
 #[test]
 fn test_convert_type_alias_union_type_refs_generates_data_enum() {
     let decl = parse_type_alias("type R = Success | Failure;");
-    let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+    let item = convert_type_alias(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
     match item {
         Item::Enum {
             vis,
@@ -1197,7 +1198,7 @@ fn test_convert_type_alias_union_type_refs_generates_data_enum() {
 #[test]
 fn test_convert_type_alias_union_type_ref_and_keyword_generates_data_enum() {
     let decl = parse_type_alias("type V = string | MyType;");
-    let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+    let item = convert_type_alias(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
     match item {
         Item::Enum { name, variants, .. } => {
             assert_eq!(name, "V");
@@ -1220,7 +1221,7 @@ fn test_convert_type_alias_union_type_ref_and_keyword_generates_data_enum() {
 #[test]
 fn test_convert_type_alias_union_generic_type_ref_generates_data_enum() {
     let decl = parse_type_alias("type R = Response | Promise<Response>;");
-    let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+    let item = convert_type_alias(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
     match item {
         Item::Enum { name, variants, .. } => {
             assert_eq!(name, "R");
@@ -1254,7 +1255,7 @@ fn test_convert_type_alias_union_generic_type_ref_generates_data_enum() {
 #[test]
 fn test_convert_type_alias_intersection_two_type_lits_generates_struct() {
     let decl = parse_type_alias("type Combined = { name: string } & { age: number };");
-    let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+    let item = convert_type_alias(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
     match item {
         Item::Struct { name, fields, .. } => {
             assert_eq!(name, "Combined");
@@ -1271,7 +1272,7 @@ fn test_convert_type_alias_intersection_two_type_lits_generates_struct() {
 #[test]
 fn test_convert_type_alias_intersection_three_type_lits_generates_struct() {
     let decl = parse_type_alias("type C = { a: string } & { b: number } & { c: boolean };");
-    let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+    let item = convert_type_alias(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
     match item {
         Item::Struct { name, fields, .. } => {
             assert_eq!(name, "C");
@@ -1287,7 +1288,7 @@ fn test_convert_type_alias_intersection_three_type_lits_generates_struct() {
 #[test]
 fn test_convert_type_alias_intersection_optional_field_generates_option() {
     let decl = parse_type_alias("type C = { name: string } & { nick?: string };");
-    let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+    let item = convert_type_alias(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
     match item {
         Item::Struct { fields, .. } => {
             assert_eq!(fields.len(), 2);
@@ -1303,7 +1304,7 @@ fn test_convert_type_alias_intersection_optional_field_generates_option() {
 #[test]
 fn test_convert_type_alias_intersection_duplicate_field_returns_error() {
     let decl = parse_type_alias("type C = { x: string } & { x: number };");
-    let result = convert_type_alias(&decl, Visibility::Public);
+    let result = convert_type_alias(&decl, Visibility::Public, &TypeRegistry::new());
     assert!(result.is_err());
     let err_msg = result.unwrap_err().to_string();
     assert!(
@@ -1313,25 +1314,85 @@ fn test_convert_type_alias_intersection_duplicate_field_returns_error() {
 }
 
 #[test]
-fn test_convert_type_alias_intersection_type_ref_returns_error() {
+fn test_convert_type_alias_intersection_type_ref_resolved_generates_merged_struct() {
+    // TypeRegistry に Foo, Bar のフィールド情報がある場合、フィールド統合 struct を生成
+    let mut reg = TypeRegistry::new();
+    reg.register(
+        "Foo".to_string(),
+        crate::registry::TypeDef::Struct {
+            fields: vec![("a".to_string(), RustType::String)],
+        },
+    );
+    reg.register(
+        "Bar".to_string(),
+        crate::registry::TypeDef::Struct {
+            fields: vec![("b".to_string(), RustType::F64)],
+        },
+    );
     let decl = parse_type_alias("type C = Foo & Bar;");
-    let result = convert_type_alias(&decl, Visibility::Public);
-    assert!(result.is_err());
+    let item = convert_type_alias(&decl, Visibility::Public, &reg).unwrap();
+    match item {
+        Item::Struct { name, fields, .. } => {
+            assert_eq!(name, "C");
+            assert_eq!(fields.len(), 2);
+            let names: Vec<&str> = fields.iter().map(|f| f.name.as_str()).collect();
+            assert!(names.contains(&"a"));
+            assert!(names.contains(&"b"));
+        }
+        _ => panic!("expected Struct, got: {item:?}"),
+    }
 }
 
 #[test]
-fn test_convert_ts_type_intersection_returns_error_with_clear_message() {
-    let decl = parse_interface("interface T { x: { a: string } & { b: number }; }");
+fn test_convert_type_alias_intersection_type_ref_unresolved_generates_embedded_struct() {
+    // TypeRegistry にない型参照の intersection → 型埋め込み struct
+    let decl = parse_type_alias("type C = Foo & Bar;");
+    let item = convert_type_alias(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
+    match item {
+        Item::Struct { name, fields, .. } => {
+            assert_eq!(name, "C");
+            assert_eq!(fields.len(), 2);
+            assert_eq!(fields[0].name, "_0");
+            assert_eq!(
+                fields[0].ty,
+                RustType::Named {
+                    name: "Foo".to_string(),
+                    type_args: vec![],
+                }
+            );
+            assert_eq!(fields[1].name, "_1");
+            assert_eq!(
+                fields[1].ty,
+                RustType::Named {
+                    name: "Bar".to_string(),
+                    type_args: vec![],
+                }
+            );
+        }
+        _ => panic!("expected Struct, got: {item:?}"),
+    }
+}
+
+#[test]
+fn test_convert_ts_type_intersection_annotation_returns_first_type() {
+    // 型注記位置の intersection はフォールバック（最初の型を返す）
+    let decl = parse_interface("interface T { x: Foo & Bar; }");
     let prop = match &decl.body.body[0] {
         TsTypeElement::TsPropertySignature(p) => p,
         _ => panic!("expected property signature"),
     };
-    let result = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann);
-    assert!(result.is_err());
-    let err_msg = result.unwrap_err().to_string();
+    let result = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new());
     assert!(
-        err_msg.contains("intersection"),
-        "expected 'intersection' in error, got: {err_msg}"
+        result.is_ok(),
+        "intersection in annotation should not error, got: {result:?}"
+    );
+    let ty = result.unwrap();
+    assert_eq!(
+        ty,
+        RustType::Named {
+            name: "Foo".to_string(),
+            type_args: vec![],
+        }
     );
 }
 
@@ -1340,7 +1401,7 @@ fn test_convert_ts_type_intersection_returns_error_with_clear_message() {
 #[test]
 fn test_convert_type_alias_nullable_single_keyword_generates_option_alias() {
     let decl = parse_type_alias("type MaybeString = string | null;");
-    let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+    let item = convert_type_alias(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
     match item {
         Item::TypeAlias { name, ty, .. } => {
             assert_eq!(name, "MaybeString");
@@ -1353,7 +1414,7 @@ fn test_convert_type_alias_nullable_single_keyword_generates_option_alias() {
 #[test]
 fn test_convert_type_alias_nullable_single_type_ref_generates_option_alias() {
     let decl = parse_type_alias("type MaybeUser = MyType | null;");
-    let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+    let item = convert_type_alias(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
     match item {
         Item::TypeAlias { name, ty, .. } => {
             assert_eq!(name, "MaybeUser");
@@ -1372,7 +1433,7 @@ fn test_convert_type_alias_nullable_single_type_ref_generates_option_alias() {
 #[test]
 fn test_convert_type_alias_nullable_undefined_generates_option_alias() {
     let decl = parse_type_alias("type MaybeNum = number | undefined;");
-    let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+    let item = convert_type_alias(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
     match item {
         Item::TypeAlias { name, ty, .. } => {
             assert_eq!(name, "MaybeNum");
@@ -1389,7 +1450,7 @@ fn test_convert_ts_type_object_keyword_returns_serde_json_value() {
         TsTypeElement::TsPropertySignature(p) => p,
         _ => panic!("expected property signature"),
     };
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann).unwrap();
+    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
     assert_eq!(
         ty,
         RustType::Named {
@@ -1402,7 +1463,7 @@ fn test_convert_ts_type_object_keyword_returns_serde_json_value() {
 #[test]
 fn test_convert_type_alias_object_keyword_returns_serde_json_value() {
     let decl = parse_type_alias("type X = object;");
-    let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+    let item = convert_type_alias(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
     match item {
         Item::TypeAlias { name, ty, .. } => {
             assert_eq!(name, "X");
@@ -1419,20 +1480,37 @@ fn test_convert_type_alias_object_keyword_returns_serde_json_value() {
 }
 
 #[test]
-fn test_convert_ts_type_non_nullable_union_returns_first_type() {
+fn test_convert_ts_type_non_nullable_union_generates_enum_in_extra_items() {
     let decl = parse_interface("interface T { x: string | number; }");
     let prop = match &decl.body.body[0] {
         TsTypeElement::TsPropertySignature(p) => p,
         _ => panic!("expected property signature"),
     };
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann).unwrap();
-    assert_eq!(ty, RustType::String);
+    let mut extra = Vec::new();
+    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut extra).unwrap();
+    // The return type should be a Named reference to the generated enum
+    assert!(
+        matches!(ty, RustType::Named { .. }),
+        "expected Named type referencing generated enum, got: {ty:?}"
+    );
+    // An enum Item should be added to extra_items
+    assert_eq!(
+        extra.len(),
+        1,
+        "expected 1 extra item (enum), got: {extra:?}"
+    );
+    match &extra[0] {
+        Item::Enum { variants, .. } => {
+            assert_eq!(variants.len(), 2);
+        }
+        _ => panic!("expected Enum in extra_items, got: {:?}", extra[0]),
+    }
 }
 
 #[test]
 fn test_convert_type_alias_intersection_union_complex_generates_enum() {
     let decl = parse_type_alias("type X = { a: string } & { b: number } | { c: boolean };");
-    let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+    let item = convert_type_alias(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
     match item {
         Item::Enum { name, variants, .. } => {
             assert_eq!(name, "X");

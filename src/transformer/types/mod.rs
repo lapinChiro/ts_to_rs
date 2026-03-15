@@ -10,6 +10,7 @@ use swc_ecma_ast::{
 };
 
 use crate::ir::{EnumValue, EnumVariant, Item, Method, Param, RustType, StructField, Visibility};
+use crate::registry::TypeRegistry;
 
 /// Converts a SWC [`TsType`] into an IR [`RustType`].
 ///
@@ -26,7 +27,7 @@ use crate::ir::{EnumValue, EnumVariant, Item, Method, Param, RustType, StructFie
 /// # Errors
 ///
 /// Returns an error for unsupported type constructs.
-pub fn convert_ts_type(ts_type: &TsType) -> Result<RustType> {
+pub fn convert_ts_type(ts_type: &TsType, extra_items: &mut Vec<Item>) -> Result<RustType> {
     match ts_type {
         TsType::TsKeywordType(kw) => match kw.kind {
             TsKeywordTypeKind::TsStringKeyword => Ok(RustType::String),
@@ -44,37 +45,48 @@ pub fn convert_ts_type(ts_type: &TsType) -> Result<RustType> {
             other => Err(anyhow!("unsupported keyword type: {:?}", other)),
         },
         TsType::TsArrayType(arr) => {
-            let inner = convert_ts_type(&arr.elem_type)?;
+            let inner = convert_ts_type(&arr.elem_type, extra_items)?;
             Ok(RustType::Vec(Box::new(inner)))
         }
-        TsType::TsTypeRef(type_ref) => convert_type_ref(type_ref),
+        TsType::TsTypeRef(type_ref) => convert_type_ref(type_ref, extra_items),
         TsType::TsUnionOrIntersectionType(
             swc_ecma_ast::TsUnionOrIntersectionType::TsUnionType(union),
-        ) => convert_union_type(union),
+        ) => convert_union_type(union, extra_items),
         TsType::TsUnionOrIntersectionType(
-            swc_ecma_ast::TsUnionOrIntersectionType::TsIntersectionType(_),
-        ) => Err(anyhow!(
-            "intersection types are not supported in type annotation position"
-        )),
-        TsType::TsParenthesizedType(paren) => convert_ts_type(&paren.type_ann),
+            swc_ecma_ast::TsUnionOrIntersectionType::TsIntersectionType(intersection),
+        ) => {
+            // Fallback: use the first type of the intersection (information loss)
+            // TODO: intersection in annotation position should generate a merged struct
+            convert_ts_type(
+                intersection
+                    .types
+                    .first()
+                    .ok_or_else(|| anyhow!("empty intersection type"))?,
+                extra_items,
+            )
+        }
+        TsType::TsParenthesizedType(paren) => convert_ts_type(&paren.type_ann, extra_items),
         TsType::TsFnOrConstructorType(swc_ecma_ast::TsFnOrConstructorType::TsFnType(fn_type)) => {
-            convert_fn_type(fn_type)
+            convert_fn_type(fn_type, extra_items)
         }
         TsType::TsTupleType(tuple) => {
             let elems = tuple
                 .elem_types
                 .iter()
-                .map(|elem| convert_ts_type(&elem.ty))
+                .map(|elem| convert_ts_type(&elem.ty, extra_items))
                 .collect::<Result<Vec<_>>>()?;
             Ok(RustType::Tuple(elems))
         }
-        TsType::TsIndexedAccessType(indexed) => convert_indexed_access_type(indexed),
+        TsType::TsIndexedAccessType(indexed) => convert_indexed_access_type(indexed, extra_items),
         _ => Err(anyhow!("unsupported type: {:?}", ts_type)),
     }
 }
 
 /// Converts a type reference like `Array<T>`.
-fn convert_type_ref(type_ref: &swc_ecma_ast::TsTypeRef) -> Result<RustType> {
+fn convert_type_ref(
+    type_ref: &swc_ecma_ast::TsTypeRef,
+    extra_items: &mut Vec<Item>,
+) -> Result<RustType> {
     let name = match &type_ref.type_name {
         swc_ecma_ast::TsEntityName::Ident(ident) => ident.sym.to_string(),
         _ => return Err(anyhow!("unsupported qualified type name")),
@@ -89,7 +101,7 @@ fn convert_type_ref(type_ref: &swc_ecma_ast::TsTypeRef) -> Result<RustType> {
             if params.params.len() != 1 {
                 return Err(anyhow!("Array expects exactly one type parameter"));
             }
-            let inner = convert_ts_type(&params.params[0])?;
+            let inner = convert_ts_type(&params.params[0], extra_items)?;
             Ok(RustType::Vec(Box::new(inner)))
         }
         // User-defined types: pass through as Named, with any generic type arguments
@@ -98,7 +110,7 @@ fn convert_type_ref(type_ref: &swc_ecma_ast::TsTypeRef) -> Result<RustType> {
                 Some(params) => params
                     .params
                     .iter()
-                    .map(|p| convert_ts_type(p))
+                    .map(|p| convert_ts_type(p, extra_items))
                     .collect::<Result<Vec<_>>>()?,
                 None => vec![],
             };
@@ -111,7 +123,10 @@ fn convert_type_ref(type_ref: &swc_ecma_ast::TsTypeRef) -> Result<RustType> {
 }
 
 /// Converts a union type. Handles `T | null` and `T | undefined` as `Option<T>`.
-fn convert_union_type(union: &swc_ecma_ast::TsUnionType) -> Result<RustType> {
+fn convert_union_type(
+    union: &swc_ecma_ast::TsUnionType,
+    extra_items: &mut Vec<Item>,
+) -> Result<RustType> {
     let mut non_null_types: Vec<&TsType> = Vec::new();
     let mut has_null_or_undefined = false;
 
@@ -130,15 +145,37 @@ fn convert_union_type(union: &swc_ecma_ast::TsUnionType) -> Result<RustType> {
     }
 
     if has_null_or_undefined && non_null_types.len() == 1 {
-        let inner = convert_ts_type(non_null_types[0])?;
+        let inner = convert_ts_type(non_null_types[0], extra_items)?;
         Ok(RustType::Option(Box::new(inner)))
     } else if has_null_or_undefined && non_null_types.is_empty() {
         // `null | undefined` — treat as Option of unit, but we don't have unit type
         Err(anyhow!("union of only null/undefined is not supported"))
     } else if !has_null_or_undefined {
-        // Fallback: use the first type of the union (information loss)
-        // TODO: anonymous enums are not expressible in Rust type annotation position
-        convert_ts_type(non_null_types[0])
+        // Generate an enum for non-nullable union in type annotation position
+        let mut variants = Vec::new();
+        let mut name_parts = Vec::new();
+        for ty in &non_null_types {
+            let rust_type = convert_ts_type(ty, extra_items)?;
+            let variant_name = variant_name_from_type(&rust_type);
+            name_parts.push(variant_name.clone());
+            variants.push(EnumVariant {
+                name: variant_name,
+                value: None,
+                data: Some(rust_type),
+                fields: vec![],
+            });
+        }
+        let enum_name = name_parts.join("Or");
+        extra_items.push(Item::Enum {
+            vis: Visibility::Public,
+            name: enum_name.clone(),
+            serde_tag: None,
+            variants,
+        });
+        Ok(RustType::Named {
+            name: enum_name,
+            type_args: vec![],
+        })
     } else {
         Err(anyhow!(
             "union with multiple non-null types is not supported"
@@ -216,7 +253,7 @@ fn convert_interface_as_struct(
     for member in &decl.body.body {
         match member {
             TsTypeElement::TsPropertySignature(prop) => {
-                let field = convert_property_signature(prop)?;
+                let field = convert_property_signature(prop, &mut Vec::new())?;
                 fields.push(field);
             }
             _ => {
@@ -269,7 +306,7 @@ fn convert_interface_as_fn_type(
                 let ty = ident
                     .type_ann
                     .as_ref()
-                    .map(|ann| convert_ts_type(&ann.type_ann))
+                    .map(|ann| convert_ts_type(&ann.type_ann, &mut Vec::new()))
                     .transpose()?
                     .unwrap_or(RustType::Any);
                 param_types.push(ty);
@@ -281,7 +318,7 @@ fn convert_interface_as_fn_type(
     let return_type = sig
         .type_ann
         .as_ref()
-        .map(|ann| convert_ts_type(&ann.type_ann))
+        .map(|ann| convert_ts_type(&ann.type_ann, &mut Vec::new()))
         .transpose()?
         .unwrap_or(RustType::Unit);
 
@@ -313,7 +350,7 @@ fn convert_interface_as_struct_and_trait(
     for member in &decl.body.body {
         match member {
             TsTypeElement::TsPropertySignature(prop) => {
-                fields.push(convert_property_signature(prop)?);
+                fields.push(convert_property_signature(prop, &mut Vec::new())?);
             }
             TsTypeElement::TsMethodSignature(method_sig) => {
                 methods.push(convert_method_signature(method_sig)?);
@@ -406,7 +443,7 @@ fn convert_method_signature(sig: &TsMethodSignature) -> Result<Method> {
                 let ty = ident
                     .type_ann
                     .as_ref()
-                    .map(|ann| convert_ts_type(&ann.type_ann))
+                    .map(|ann| convert_ts_type(&ann.type_ann, &mut Vec::new()))
                     .transpose()?;
                 params.push(Param {
                     name: param_name,
@@ -420,7 +457,7 @@ fn convert_method_signature(sig: &TsMethodSignature) -> Result<Method> {
     let return_type = sig
         .type_ann
         .as_ref()
-        .map(|ann| convert_ts_type(&ann.type_ann))
+        .map(|ann| convert_ts_type(&ann.type_ann, &mut Vec::new()))
         .transpose()?
         .and_then(|ty| if ty == RustType::Unit { None } else { Some(ty) });
 
@@ -439,13 +476,17 @@ fn convert_method_signature(sig: &TsMethodSignature) -> Result<Method> {
 ///
 /// Most type aliases produce a single item. Conditional type fallbacks produce
 /// a `Comment` item followed by a placeholder `TypeAlias`.
-pub fn convert_type_alias_items(decl: &TsTypeAliasDecl, vis: Visibility) -> Result<Vec<Item>> {
+pub fn convert_type_alias_items(
+    decl: &TsTypeAliasDecl,
+    vis: Visibility,
+    reg: &TypeRegistry,
+) -> Result<Vec<Item>> {
     // Conditional type may produce multiple items (comment + placeholder)
     if let TsType::TsConditionalType(cond) = decl.type_ann.as_ref() {
         let name = decl.id.sym.to_string();
         let type_params = extract_type_params(decl.type_params.as_deref());
 
-        match convert_conditional_type(cond) {
+        match convert_conditional_type(cond, &mut Vec::new()) {
             Ok(ty) => {
                 return Ok(vec![Item::TypeAlias {
                     vis,
@@ -470,7 +511,7 @@ pub fn convert_type_alias_items(decl: &TsTypeAliasDecl, vis: Visibility) -> Resu
         }
     }
 
-    let item = convert_type_alias(decl, vis)?;
+    let item = convert_type_alias(decl, vis, reg)?;
     Ok(vec![item])
 }
 
@@ -483,7 +524,11 @@ pub fn convert_type_alias_items(decl: &TsTypeAliasDecl, vis: Visibility) -> Resu
 /// # Errors
 ///
 /// Returns an error if the type alias body is not a supported form.
-pub fn convert_type_alias(decl: &TsTypeAliasDecl, vis: Visibility) -> Result<Item> {
+pub fn convert_type_alias(
+    decl: &TsTypeAliasDecl,
+    vis: Visibility,
+    reg: &TypeRegistry,
+) -> Result<Item> {
     let name = decl.id.sym.to_string();
 
     // String literal union: `type X = "a" | "b" | "c"` → enum
@@ -497,27 +542,27 @@ pub fn convert_type_alias(decl: &TsTypeAliasDecl, vis: Visibility) -> Result<Ite
     }
 
     // Discriminated union: `type X = { kind: "a", ... } | { kind: "b", ... }` → serde-tagged enum
-    if let Some(item) = try_convert_discriminated_union(decl, vis.clone())? {
+    if let Some(item) = try_convert_discriminated_union(decl, vis.clone(), &mut Vec::new())? {
         return Ok(item);
     }
 
     // General union type: `type X = 200 | 404` or `type X = string | number` → enum
-    if let Some(item) = try_convert_general_union(decl, vis.clone())? {
+    if let Some(item) = try_convert_general_union(decl, vis.clone(), &mut Vec::new())? {
         return Ok(item);
     }
 
     // Intersection type: `type X = { a: T } & { b: U }` → struct with merged fields
-    if let Some(item) = try_convert_intersection_type(decl, vis.clone())? {
+    if let Some(item) = try_convert_intersection_type(decl, vis.clone(), reg, &mut Vec::new())? {
         return Ok(item);
     }
 
     // Function type: `type Fn = (x: T) => U` → type alias
-    if let Some(item) = try_convert_function_type_alias(decl, vis.clone())? {
+    if let Some(item) = try_convert_function_type_alias(decl, vis.clone(), &mut Vec::new())? {
         return Ok(item);
     }
 
     // Tuple type: `type Pair = [string, number]` → type alias
-    if let Some(item) = try_convert_tuple_type_alias(decl, vis.clone())? {
+    if let Some(item) = try_convert_tuple_type_alias(decl, vis.clone(), &mut Vec::new())? {
         return Ok(item);
     }
 
@@ -527,7 +572,7 @@ pub fn convert_type_alias(decl: &TsTypeAliasDecl, vis: Visibility) -> Result<Ite
             for member in &lit.members {
                 match member {
                     TsTypeElement::TsPropertySignature(prop) => {
-                        let field = convert_property_signature(prop)?;
+                        let field = convert_property_signature(prop, &mut Vec::new())?;
                         fields.push(field);
                     }
                     _ => {
@@ -547,7 +592,7 @@ pub fn convert_type_alias(decl: &TsTypeAliasDecl, vis: Visibility) -> Result<Ite
             })
         }
         TsType::TsKeywordType(_) => {
-            let ty = convert_ts_type(decl.type_ann.as_ref())?;
+            let ty = convert_ts_type(decl.type_ann.as_ref(), &mut Vec::new())?;
             let type_params = extract_type_params(decl.type_params.as_deref());
             Ok(Item::TypeAlias {
                 vis,
@@ -569,6 +614,7 @@ pub fn convert_type_alias(decl: &TsTypeAliasDecl, vis: Visibility) -> Result<Ite
 fn try_convert_function_type_alias(
     decl: &TsTypeAliasDecl,
     vis: Visibility,
+    extra_items: &mut Vec<Item>,
 ) -> Result<Option<Item>> {
     let fn_type = match decl.type_ann.as_ref() {
         TsType::TsFnOrConstructorType(swc_ecma_ast::TsFnOrConstructorType::TsFnType(f)) => f,
@@ -582,7 +628,7 @@ fn try_convert_function_type_alias(
                 let ty = ident
                     .type_ann
                     .as_ref()
-                    .map(|ann| convert_ts_type(&ann.type_ann))
+                    .map(|ann| convert_ts_type(&ann.type_ann, extra_items))
                     .transpose()?
                     .unwrap_or(RustType::Any);
                 param_types.push(ty);
@@ -591,7 +637,7 @@ fn try_convert_function_type_alias(
         }
     }
 
-    let return_type = convert_ts_type(&fn_type.type_ann.type_ann)?;
+    let return_type = convert_ts_type(&fn_type.type_ann.type_ann, extra_items)?;
 
     let name = decl.id.sym.to_string();
     let type_params = extract_type_params(decl.type_params.as_deref());
@@ -610,7 +656,11 @@ fn try_convert_function_type_alias(
 /// Tries to convert a type alias with a tuple type body.
 ///
 /// Returns `Ok(Some(Item::TypeAlias))` if the body is a `TsTupleType`, `Ok(None)` otherwise.
-fn try_convert_tuple_type_alias(decl: &TsTypeAliasDecl, vis: Visibility) -> Result<Option<Item>> {
+fn try_convert_tuple_type_alias(
+    decl: &TsTypeAliasDecl,
+    vis: Visibility,
+    extra_items: &mut Vec<Item>,
+) -> Result<Option<Item>> {
     let tuple = match decl.type_ann.as_ref() {
         TsType::TsTupleType(t) => t,
         _ => return Ok(None),
@@ -619,7 +669,7 @@ fn try_convert_tuple_type_alias(decl: &TsTypeAliasDecl, vis: Visibility) -> Resu
     let elems = tuple
         .elem_types
         .iter()
-        .map(|elem| convert_ts_type(&elem.ty))
+        .map(|elem| convert_ts_type(&elem.ty, extra_items))
         .collect::<Result<Vec<_>>>()?;
 
     let name = decl.id.sym.to_string();
@@ -639,7 +689,10 @@ fn try_convert_tuple_type_alias(decl: &TsTypeAliasDecl, vis: Visibility) -> Resu
 /// - `infer` extraction: `T extends Foo<infer U> ? U : never` → `<T as Foo>::Output`
 /// - Type predicate (`true`/`false` branches): `T extends X ? true : false` → `bool`
 /// - Other patterns: returns the true branch type
-fn convert_conditional_type(cond: &swc_ecma_ast::TsConditionalType) -> Result<RustType> {
+fn convert_conditional_type(
+    cond: &swc_ecma_ast::TsConditionalType,
+    extra_items: &mut Vec<Item>,
+) -> Result<RustType> {
     // Pattern: infer extraction — `T extends Foo<infer U> ? U : never`
     if let Some(ty) = try_convert_infer_pattern(cond)? {
         return Ok(ty);
@@ -651,7 +704,7 @@ fn convert_conditional_type(cond: &swc_ecma_ast::TsConditionalType) -> Result<Ru
     }
 
     // Default: use the true branch type
-    convert_ts_type(&cond.true_type)
+    convert_ts_type(&cond.true_type, extra_items)
 }
 
 /// Checks if the true/false branches are `true` and `false` literal types.
@@ -740,6 +793,7 @@ fn extract_infer_info(extends_type: &TsType) -> Option<(String, String)> {
 fn try_convert_discriminated_union(
     decl: &TsTypeAliasDecl,
     vis: Visibility,
+    extra_items: &mut Vec<Item>,
 ) -> Result<Option<Item>> {
     let union = match decl.type_ann.as_ref() {
         TsType::TsUnionOrIntersectionType(
@@ -773,7 +827,7 @@ fn try_convert_discriminated_union(
     let mut variants = Vec::new();
     for type_lit in &type_lits {
         let (discriminant_value, other_fields) =
-            extract_variant_info(type_lit, &discriminant_field)?;
+            extract_variant_info(type_lit, &discriminant_field, extra_items)?;
         variants.push(EnumVariant {
             name: string_to_pascal_case(&discriminant_value),
             value: Some(EnumValue::Str(discriminant_value)),
@@ -849,6 +903,7 @@ fn is_string_literal_type(ty: &TsType) -> bool {
 fn extract_variant_info(
     type_lit: &swc_ecma_ast::TsTypeLit,
     discriminant_field: &str,
+    extra_items: &mut Vec<Item>,
 ) -> Result<(String, Vec<StructField>)> {
     let mut discriminant_value = None;
     let mut fields = Vec::new();
@@ -878,7 +933,7 @@ fn extract_variant_info(
                     }
                 } else {
                     // Regular field
-                    let field = convert_property_signature(prop)?;
+                    let field = convert_property_signature(prop, extra_items)?;
                     fields.push(field);
                 }
             }
@@ -974,13 +1029,35 @@ fn string_to_pascal_case(s: &str) -> String {
         .collect()
 }
 
+/// Generates a PascalCase variant name from a [`RustType`].
+fn variant_name_from_type(ty: &RustType) -> String {
+    match ty {
+        RustType::String => "String".to_string(),
+        RustType::F64 => "F64".to_string(),
+        RustType::Bool => "Bool".to_string(),
+        RustType::Unit => "Unit".to_string(),
+        RustType::Any => "Any".to_string(),
+        RustType::Never => "Never".to_string(),
+        RustType::Named { name, .. } => name.clone(),
+        RustType::Vec(inner) => format!("Vec{}", variant_name_from_type(inner)),
+        RustType::Option(inner) => format!("Option{}", variant_name_from_type(inner)),
+        RustType::Tuple(_) => "Tuple".to_string(),
+        RustType::Fn { .. } => "Fn".to_string(),
+        RustType::Result { .. } => "Result".to_string(),
+    }
+}
+
 /// Tries to convert a type alias with a union type body into an enum.
 ///
 /// Handles numeric literal unions (`type Code = 200 | 404`),
 /// primitive type unions (`type Value = string | number`), and
 /// type reference unions (`type R = Success | Failure`).
 /// Returns `None` if the type alias body is not a union type.
-fn try_convert_general_union(decl: &TsTypeAliasDecl, vis: Visibility) -> Result<Option<Item>> {
+fn try_convert_general_union(
+    decl: &TsTypeAliasDecl,
+    vis: Visibility,
+    extra_items: &mut Vec<Item>,
+) -> Result<Option<Item>> {
     let union = match decl.type_ann.as_ref() {
         TsType::TsUnionOrIntersectionType(
             swc_ecma_ast::TsUnionOrIntersectionType::TsUnionType(u),
@@ -1005,7 +1082,7 @@ fn try_convert_general_union(decl: &TsTypeAliasDecl, vis: Visibility) -> Result<
 
     // Nullable union with single non-null type: `type X = T | null` → `type X = Option<T>`
     if has_null_or_undefined && non_null_types.len() == 1 {
-        let inner_type = convert_ts_type(non_null_types[0])?;
+        let inner_type = convert_ts_type(non_null_types[0], extra_items)?;
         let type_params = extract_type_params(decl.type_params.as_deref());
         return Ok(Some(Item::TypeAlias {
             vis,
@@ -1071,7 +1148,7 @@ fn try_convert_general_union(decl: &TsTypeAliasDecl, vis: Visibility) -> Result<
                 });
             }
             TsType::TsTypeRef(type_ref) => {
-                let rust_type = convert_type_ref(type_ref)?;
+                let rust_type = convert_type_ref(type_ref, extra_items)?;
                 let variant_name = match &type_ref.type_name {
                     swc_ecma_ast::TsEntityName::Ident(ident) => ident.sym.to_string(),
                     _ => return Err(anyhow!("unsupported qualified type name in union")),
@@ -1087,7 +1164,7 @@ fn try_convert_general_union(decl: &TsTypeAliasDecl, vis: Visibility) -> Result<
                 let mut fields = Vec::new();
                 for member in &lit.members {
                     if let TsTypeElement::TsPropertySignature(prop) = member {
-                        fields.push(convert_property_signature(prop)?);
+                        fields.push(convert_property_signature(prop, extra_items)?);
                     }
                 }
                 variants.push(EnumVariant {
@@ -1105,7 +1182,7 @@ fn try_convert_general_union(decl: &TsTypeAliasDecl, vis: Visibility) -> Result<
                     if let TsType::TsTypeLit(lit) = member_ty.as_ref() {
                         for member in &lit.members {
                             if let TsTypeElement::TsPropertySignature(prop) = member {
-                                fields.push(convert_property_signature(prop)?);
+                                fields.push(convert_property_signature(prop, extra_items)?);
                             }
                         }
                     }
@@ -1142,7 +1219,12 @@ fn try_convert_general_union(decl: &TsTypeAliasDecl, vis: Visibility) -> Result<
 /// Handles intersections of object type literals (`{ a: T } & { b: U }`) by merging
 /// all fields into a single struct. Returns `None` if the type alias body is not
 /// an intersection type.
-fn try_convert_intersection_type(decl: &TsTypeAliasDecl, vis: Visibility) -> Result<Option<Item>> {
+fn try_convert_intersection_type(
+    decl: &TsTypeAliasDecl,
+    vis: Visibility,
+    reg: &TypeRegistry,
+    extra_items: &mut Vec<Item>,
+) -> Result<Option<Item>> {
     let intersection = match decl.type_ann.as_ref() {
         TsType::TsUnionOrIntersectionType(
             swc_ecma_ast::TsUnionOrIntersectionType::TsIntersectionType(i),
@@ -1151,14 +1233,13 @@ fn try_convert_intersection_type(decl: &TsTypeAliasDecl, vis: Visibility) -> Res
     };
 
     let mut fields = Vec::new();
-    for ty in &intersection.types {
+    for (i, ty) in intersection.types.iter().enumerate() {
         match ty.as_ref() {
             TsType::TsTypeLit(lit) => {
                 for member in &lit.members {
                     match member {
                         TsTypeElement::TsPropertySignature(prop) => {
-                            let field = convert_property_signature(prop)?;
-                            // Check for duplicate field names
+                            let field = convert_property_signature(prop, extra_items)?;
                             if fields.iter().any(|f: &StructField| f.name == field.name) {
                                 return Err(anyhow!(
                                     "duplicate field '{}' in intersection type",
@@ -1175,10 +1256,38 @@ fn try_convert_intersection_type(decl: &TsTypeAliasDecl, vis: Visibility) -> Res
                     }
                 }
             }
+            TsType::TsTypeRef(type_ref) => {
+                let type_name = match &type_ref.type_name {
+                    swc_ecma_ast::TsEntityName::Ident(ident) => ident.sym.to_string(),
+                    _ => return Err(anyhow!("unsupported qualified type name in intersection")),
+                };
+                // Try to resolve fields from TypeRegistry
+                if let Some(crate::registry::TypeDef::Struct {
+                    fields: resolved_fields,
+                }) = reg.get(&type_name)
+                {
+                    for (name, ty) in resolved_fields {
+                        if fields.iter().any(|f: &StructField| f.name == *name) {
+                            return Err(anyhow!("duplicate field '{}' in intersection type", name));
+                        }
+                        fields.push(StructField {
+                            vis: None,
+                            name: name.clone(),
+                            ty: ty.clone(),
+                        });
+                    }
+                } else {
+                    // Unresolved type reference — embed as a named field
+                    let rust_type = convert_type_ref(type_ref, extra_items)?;
+                    fields.push(StructField {
+                        vis: None,
+                        name: format!("_{i}"),
+                        ty: rust_type,
+                    });
+                }
+            }
             _ => {
-                return Err(anyhow!(
-                    "unsupported intersection member type (only object type literals are supported)"
-                ));
+                return Err(anyhow!("unsupported intersection member type"));
             }
         }
     }
@@ -1194,7 +1303,10 @@ fn try_convert_intersection_type(decl: &TsTypeAliasDecl, vis: Visibility) -> Res
 }
 
 /// Converts a TS function type (`(x: number) => string`) into `RustType::Fn`.
-fn convert_fn_type(fn_type: &swc_ecma_ast::TsFnType) -> Result<RustType> {
+fn convert_fn_type(
+    fn_type: &swc_ecma_ast::TsFnType,
+    extra_items: &mut Vec<Item>,
+) -> Result<RustType> {
     let params = fn_type
         .params
         .iter()
@@ -1206,11 +1318,11 @@ fn convert_fn_type(fn_type: &swc_ecma_ast::TsFnType) -> Result<RustType> {
                     .ok_or_else(|| anyhow!("function type parameter has no type annotation"))?,
                 _ => return Err(anyhow!("unsupported function type parameter pattern")),
             };
-            convert_ts_type(&type_ann.type_ann)
+            convert_ts_type(&type_ann.type_ann, extra_items)
         })
         .collect::<Result<Vec<_>>>()?;
 
-    let return_type = convert_ts_type(&fn_type.type_ann.type_ann)?;
+    let return_type = convert_ts_type(&fn_type.type_ann.type_ann, extra_items)?;
 
     Ok(RustType::Fn {
         params,
@@ -1221,7 +1333,10 @@ fn convert_fn_type(fn_type: &swc_ecma_ast::TsFnType) -> Result<RustType> {
 /// Converts a TS indexed access type (`T['Key']`) into `RustType::Named { name: "T::Key" }`.
 ///
 /// Only string literal keys are supported.
-fn convert_indexed_access_type(indexed: &swc_ecma_ast::TsIndexedAccessType) -> Result<RustType> {
+fn convert_indexed_access_type(
+    indexed: &swc_ecma_ast::TsIndexedAccessType,
+    _extra_items: &mut Vec<Item>,
+) -> Result<RustType> {
     // Extract the base type name
     let obj_name = match indexed.obj_type.as_ref() {
         TsType::TsTypeRef(type_ref) => match &type_ref.type_name {
@@ -1269,7 +1384,10 @@ pub fn extract_type_params(type_params: Option<&swc_ecma_ast::TsTypeParamDecl>) 
 }
 
 /// Converts a property signature into an IR [`StructField`].
-pub(crate) fn convert_property_signature(prop: &TsPropertySignature) -> Result<StructField> {
+pub(crate) fn convert_property_signature(
+    prop: &TsPropertySignature,
+    extra_items: &mut Vec<Item>,
+) -> Result<StructField> {
     let field_name = match prop.key.as_ref() {
         Expr::Ident(ident) => ident.sym.to_string(),
         _ => return Err(anyhow!("unsupported property key (only identifiers)")),
@@ -1280,7 +1398,7 @@ pub(crate) fn convert_property_signature(prop: &TsPropertySignature) -> Result<S
         .as_ref()
         .ok_or_else(|| anyhow!("property '{}' has no type annotation", field_name))?;
 
-    let mut ty = convert_ts_type(&type_ann.type_ann)?;
+    let mut ty = convert_ts_type(&type_ann.type_ann, extra_items)?;
 
     // Optional properties (`?`) become Option<T>
     if prop.optional {

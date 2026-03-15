@@ -348,7 +348,12 @@ pub fn convert_arrow_expr(
                     .type_ann
                     .as_ref()
                     .map(|ann| {
-                        convert_ts_type_with_fallback(&ann.type_ann, resilient, fallback_warnings)
+                        convert_ts_type_with_fallback(
+                            &ann.type_ann,
+                            resilient,
+                            fallback_warnings,
+                            &mut Vec::new(),
+                        )
                     })
                     .transpose()?;
                 params.push(Param {
@@ -363,7 +368,14 @@ pub fn convert_arrow_expr(
     let return_type = arrow
         .return_type
         .as_ref()
-        .map(|ann| convert_ts_type_with_fallback(&ann.type_ann, resilient, fallback_warnings))
+        .map(|ann| {
+            convert_ts_type_with_fallback(
+                &ann.type_ann,
+                resilient,
+                fallback_warnings,
+                &mut Vec::new(),
+            )
+        })
         .transpose()?;
 
     let body = match arrow.body.as_ref() {
