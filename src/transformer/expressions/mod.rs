@@ -724,6 +724,7 @@ fn map_method_call(object: Expr, method: &str, args: Vec<Expr>) -> Expr {
             }
         }
         // splice(start, count) → .drain(start..start+count).collect::<Vec<_>>()
+        // Pre-compute end when both are numeric literals to avoid float range issues
         "splice" => {
             if args.len() != 2 {
                 return Expr::MethodCall {
@@ -735,10 +736,14 @@ fn map_method_call(object: Expr, method: &str, args: Vec<Expr>) -> Expr {
             let mut iter = args.into_iter();
             let start = iter.next().unwrap();
             let count = iter.next().unwrap();
-            let end = Expr::BinaryOp {
-                left: Box::new(start.clone()),
-                op: BinOp::Add,
-                right: Box::new(count),
+            // Pre-compute end = start + count when both are numeric literals
+            let end = match (&start, &count) {
+                (Expr::NumberLit(s), Expr::NumberLit(c)) => Expr::NumberLit(s + c),
+                _ => Expr::BinaryOp {
+                    left: Box::new(start.clone()),
+                    op: BinOp::Add,
+                    right: Box::new(count),
+                },
             };
             let drain_call = Expr::MethodCall {
                 object: Box::new(object),
@@ -754,22 +759,55 @@ fn map_method_call(object: Expr, method: &str, args: Vec<Expr>) -> Expr {
                 args: vec![],
             }
         }
-        // sort(fn) → .sort_by(fn) when comparator provided, otherwise passthrough
+        // sort() → .sort_by(|a, b| a.partial_cmp(b).unwrap())
+        // sort(fn) → .sort_by(fn) with type annotations stripped
         "sort" => {
             if args.is_empty() {
+                // f64 doesn't implement Ord, so use partial_cmp
+                let cmp_closure = Expr::Closure {
+                    params: vec![
+                        Param {
+                            name: "a".to_string(),
+                            ty: None,
+                        },
+                        Param {
+                            name: "b".to_string(),
+                            ty: None,
+                        },
+                    ],
+                    return_type: None,
+                    body: ClosureBody::Expr(Box::new(Expr::MethodCall {
+                        object: Box::new(Expr::MethodCall {
+                            object: Box::new(Expr::Ident("a".to_string())),
+                            method: "partial_cmp".to_string(),
+                            args: vec![Expr::Ident("b".to_string())],
+                        }),
+                        method: "unwrap".to_string(),
+                        args: vec![],
+                    })),
+                };
                 return Expr::MethodCall {
                     object: Box::new(object),
-                    method: "sort".to_string(),
-                    args,
+                    method: "sort_by".to_string(),
+                    args: vec![cmp_closure],
                 };
             }
+            // With comparator: strip type annotations and wrap body in partial_cmp
+            // TS comparator returns number (negative/zero/positive), Rust needs Ordering
+            let args = args
+                .into_iter()
+                .map(|arg| {
+                    let stripped = strip_closure_type_annotations(arg);
+                    wrap_sort_comparator_body(stripped)
+                })
+                .collect();
             Expr::MethodCall {
                 object: Box::new(object),
                 method: "sort_by".to_string(),
                 args,
             }
         }
-        // indexOf(x) → .iter().position(|item| *item == x)
+        // indexOf(x) → .iter().position(|item| *item == x).map(|i| i as f64).unwrap_or(-1.0)
         "indexOf" => {
             if args.len() != 1 {
                 return Expr::MethodCall {
@@ -784,7 +822,7 @@ fn map_method_call(object: Expr, method: &str, args: Vec<Expr>) -> Expr {
                 method: "iter".to_string(),
                 args: vec![],
             };
-            Expr::MethodCall {
+            let position_call = Expr::MethodCall {
                 object: Box::new(iter_call),
                 method: "position".to_string(),
                 args: vec![Expr::Closure {
@@ -799,9 +837,31 @@ fn map_method_call(object: Expr, method: &str, args: Vec<Expr>) -> Expr {
                         right: Box::new(search_value),
                     })),
                 }],
+            };
+            // .map(|i| i as f64).unwrap_or(-1.0)
+            let map_call = Expr::MethodCall {
+                object: Box::new(position_call),
+                method: "map".to_string(),
+                args: vec![Expr::Closure {
+                    params: vec![Param {
+                        name: "i".to_string(),
+                        ty: None,
+                    }],
+                    return_type: None,
+                    body: ClosureBody::Expr(Box::new(Expr::Cast {
+                        expr: Box::new(Expr::Ident("i".to_string())),
+                        target: RustType::F64,
+                    })),
+                }],
+            };
+            Expr::MethodCall {
+                object: Box::new(map_call),
+                method: "unwrap_or".to_string(),
+                args: vec![Expr::NumberLit(-1.0)],
             }
         }
         // reduce(fn, init) → .iter().fold(init, fn)
+        // Strip closure param type annotations (iter() yields &T, Rust infers correctly)
         "reduce" => {
             if args.len() != 2 {
                 return Expr::MethodCall {
@@ -811,7 +871,7 @@ fn map_method_call(object: Expr, method: &str, args: Vec<Expr>) -> Expr {
                 };
             }
             let mut iter = args.into_iter();
-            let callback = iter.next().unwrap();
+            let callback = strip_closure_type_annotations(iter.next().unwrap());
             let init = iter.next().unwrap();
             let iter_call = Expr::MethodCall {
                 object: Box::new(object),
@@ -837,12 +897,96 @@ fn map_method_call(object: Expr, method: &str, args: Vec<Expr>) -> Expr {
                 args,
             }
         }
+        // join(sep) → join(&sep) — Rust's join takes &str, not String
+        "join" => {
+            let args = args
+                .into_iter()
+                .map(|arg| match arg {
+                    // Variable: &sep
+                    Expr::Ident(name) => Expr::Ident(format!("&{name}")),
+                    // String literal: already &str in Rust, pass through
+                    lit @ Expr::StringLit(_) => lit,
+                    // Other expressions: call .as_str() — but wrap in parens via method call
+                    other => Expr::MethodCall {
+                        object: Box::new(other),
+                        method: "as_str".to_string(),
+                        args: vec![],
+                    },
+                })
+                .collect();
+            Expr::MethodCall {
+                object: Box::new(object),
+                method: "join".to_string(),
+                args,
+            }
+        }
         // No mapping needed — pass through unchanged
         _ => Expr::MethodCall {
             object: Box::new(object),
             method: method.to_string(),
             args,
         },
+    }
+}
+
+/// Strips type annotations from closure parameters.
+///
+/// Used for iterator method closures (`fold`, `sort_by`, etc.) where Rust's type
+/// inference handles `&T` references correctly without explicit annotations.
+fn strip_closure_type_annotations(expr: Expr) -> Expr {
+    match expr {
+        Expr::Closure {
+            params,
+            return_type,
+            body,
+        } => Expr::Closure {
+            params: params
+                .into_iter()
+                .map(|p| Param {
+                    name: p.name,
+                    ty: None,
+                })
+                .collect(),
+            return_type,
+            body,
+        },
+        other => other,
+    }
+}
+
+/// Wraps a TS sort comparator closure body with `partial_cmp(&0.0).unwrap()`.
+///
+/// TS comparators return a number (negative/zero/positive), but Rust's `sort_by`
+/// expects `Ordering`. This wraps the body expression: `body` → `body.partial_cmp(&0.0).unwrap()`.
+fn wrap_sort_comparator_body(expr: Expr) -> Expr {
+    match expr {
+        Expr::Closure {
+            params,
+            return_type,
+            body,
+        } => {
+            let new_body = match body {
+                ClosureBody::Expr(inner) => {
+                    let wrapped = Expr::MethodCall {
+                        object: Box::new(Expr::MethodCall {
+                            object: inner,
+                            method: "partial_cmp".to_string(),
+                            args: vec![Expr::Ident("&0.0".to_string())],
+                        }),
+                        method: "unwrap".to_string(),
+                        args: vec![],
+                    };
+                    ClosureBody::Expr(Box::new(wrapped))
+                }
+                other => other, // Block bodies — don't attempt to wrap
+            };
+            Expr::Closure {
+                params,
+                return_type,
+                body: new_body,
+            }
+        }
+        other => other,
     }
 }
 

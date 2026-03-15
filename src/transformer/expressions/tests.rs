@@ -1997,11 +1997,7 @@ fn test_convert_expr_splice_to_drain_collect() {
                 method: "drain".to_string(),
                 args: vec![Expr::Range {
                     start: Some(Box::new(Expr::NumberLit(1.0))),
-                    end: Some(Box::new(Expr::BinaryOp {
-                        left: Box::new(Expr::NumberLit(1.0)),
-                        op: BinOp::Add,
-                        right: Box::new(Expr::NumberLit(2.0)),
-                    })),
+                    end: Some(Box::new(Expr::NumberLit(3.0))),
                 }],
             }),
             method: "collect::<Vec<_>>".to_string(),
@@ -2026,24 +2022,9 @@ fn test_convert_expr_reverse_unchanged() {
 }
 
 #[test]
-fn test_convert_expr_sort_no_args_unchanged() {
-    // arr.sort() → arr.sort() (same name)
+fn test_convert_expr_sort_no_args_generates_sort_by_partial_cmp() {
+    // arr.sort() → arr.sort_by(|a, b| a.partial_cmp(b).unwrap())
     let expr = parse_expr("arr.sort();");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
-    assert_eq!(
-        result,
-        Expr::MethodCall {
-            object: Box::new(Expr::Ident("arr".to_string())),
-            method: "sort".to_string(),
-            args: vec![],
-        }
-    );
-}
-
-#[test]
-fn test_convert_expr_sort_with_comparator_to_sort_by() {
-    // arr.sort((a, b) => a - b) → arr.sort_by(|a, b| a - b)
-    let expr = parse_expr("arr.sort((a, b) => a - b);");
     let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
     assert_eq!(
         result,
@@ -2062,10 +2043,14 @@ fn test_convert_expr_sort_with_comparator_to_sort_by() {
                     },
                 ],
                 return_type: None,
-                body: ClosureBody::Expr(Box::new(Expr::BinaryOp {
-                    left: Box::new(Expr::Ident("a".to_string())),
-                    op: BinOp::Sub,
-                    right: Box::new(Expr::Ident("b".to_string())),
+                body: ClosureBody::Expr(Box::new(Expr::MethodCall {
+                    object: Box::new(Expr::MethodCall {
+                        object: Box::new(Expr::Ident("a".to_string())),
+                        method: "partial_cmp".to_string(),
+                        args: vec![Expr::Ident("b".to_string())],
+                    }),
+                    method: "unwrap".to_string(),
+                    args: vec![],
                 })),
             }],
         }
@@ -2073,38 +2058,79 @@ fn test_convert_expr_sort_with_comparator_to_sort_by() {
 }
 
 #[test]
+fn test_convert_expr_sort_with_comparator_to_sort_by() {
+    // arr.sort((a, b) => a - b) → arr.sort_by(|a, b| (a - b).partial_cmp(&0.0).unwrap())
+    let expr = parse_expr("arr.sort((a, b) => a - b);");
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    if let Expr::MethodCall { method, args, .. } = &result {
+        assert_eq!(method, "sort_by");
+        if let Some(Expr::Closure { params, body, .. }) = args.first() {
+            assert_eq!(params.len(), 2);
+            assert!(params[0].ty.is_none());
+            // Body should be (a - b).partial_cmp(&0.0).unwrap()
+            if let ClosureBody::Expr(body_expr) = body {
+                assert!(
+                    matches!(body_expr.as_ref(), Expr::MethodCall { method, .. } if method == "unwrap"),
+                    "expected .unwrap() at top level, got: {body_expr:?}"
+                );
+                return;
+            }
+        }
+    }
+    panic!("expected sort_by with partial_cmp closure, got: {result:?}");
+}
+
+#[test]
 fn test_convert_expr_index_of_to_iter_position() {
-    // arr.indexOf(x) → arr.iter().position(|item| *item == x)
+    // arr.indexOf(x) → arr.iter().position(|item| *item == x).map(|i| i as f64).unwrap_or(-1.0)
     let expr = parse_expr("arr.indexOf(x);");
     let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
     assert_eq!(
         result,
         Expr::MethodCall {
             object: Box::new(Expr::MethodCall {
-                object: Box::new(Expr::Ident("arr".to_string())),
-                method: "iter".to_string(),
-                args: vec![],
-            }),
-            method: "position".to_string(),
-            args: vec![Expr::Closure {
-                params: vec![Param {
-                    name: "item".to_string(),
-                    ty: None,
+                object: Box::new(Expr::MethodCall {
+                    object: Box::new(Expr::MethodCall {
+                        object: Box::new(Expr::Ident("arr".to_string())),
+                        method: "iter".to_string(),
+                        args: vec![],
+                    }),
+                    method: "position".to_string(),
+                    args: vec![Expr::Closure {
+                        params: vec![Param {
+                            name: "item".to_string(),
+                            ty: None,
+                        }],
+                        return_type: None,
+                        body: ClosureBody::Expr(Box::new(Expr::BinaryOp {
+                            left: Box::new(Expr::Ident("*item".to_string())),
+                            op: BinOp::Eq,
+                            right: Box::new(Expr::Ident("x".to_string())),
+                        })),
+                    }],
+                }),
+                method: "map".to_string(),
+                args: vec![Expr::Closure {
+                    params: vec![Param {
+                        name: "i".to_string(),
+                        ty: None,
+                    }],
+                    return_type: None,
+                    body: ClosureBody::Expr(Box::new(Expr::Cast {
+                        expr: Box::new(Expr::Ident("i".to_string())),
+                        target: RustType::F64,
+                    })),
                 }],
-                return_type: None,
-                body: ClosureBody::Expr(Box::new(Expr::BinaryOp {
-                    left: Box::new(Expr::Ident("*item".to_string())),
-                    op: BinOp::Eq,
-                    right: Box::new(Expr::Ident("x".to_string())),
-                })),
-            }],
+            }),
+            method: "unwrap_or".to_string(),
+            args: vec![Expr::NumberLit(-1.0)],
         }
     );
 }
 
 #[test]
-fn test_convert_expr_join_unchanged() {
-    // arr.join(",") → arr.join(",") (same name)
+fn test_convert_expr_join_string_literal_passes_through() {
+    // arr.join(",") → arr.join(",") — string literals are already &str in Rust
     let expr = parse_expr("arr.join(\",\");");
     let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
     assert_eq!(
@@ -2154,6 +2180,142 @@ fn test_convert_expr_reduce_with_init_to_iter_fold() {
             ],
         }
     );
+}
+
+#[test]
+fn test_map_method_reduce_typed_closure_strips_type_annotations() {
+    // arr.reduce((acc: number, x: number) => acc + x, 0)
+    // → fold closure params should have NO type annotation (Rust infers &T from iter())
+    let expr = parse_expr("arr.reduce((acc: number, x: number) => acc + x, 0);");
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    // Extract the closure from fold args
+    if let Expr::MethodCall { args, .. } = &result {
+        if let Some(Expr::Closure { params, .. }) = args.get(1) {
+            assert!(
+                params[0].ty.is_none(),
+                "fold closure param 'acc' should have no type annotation, got: {:?}",
+                params[0].ty
+            );
+            assert!(
+                params[1].ty.is_none(),
+                "fold closure param 'x' should have no type annotation, got: {:?}",
+                params[1].ty
+            );
+            return;
+        }
+    }
+    panic!("expected MethodCall with fold closure, got: {result:?}");
+}
+
+#[test]
+fn test_map_method_indexof_position_returns_f64_with_unwrap() {
+    // arr.indexOf(target) → arr.iter().position(...).map(|i| i as f64).unwrap_or(-1.0)
+    let expr = parse_expr("arr.indexOf(target);");
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    // Should end with .unwrap_or(-1.0)
+    if let Expr::MethodCall { method, args, .. } = &result {
+        assert_eq!(method, "unwrap_or", "expected unwrap_or, got: {result:?}");
+        assert_eq!(
+            args,
+            &[Expr::NumberLit(-1.0)],
+            "expected unwrap_or(-1.0), got: {args:?}"
+        );
+        return;
+    }
+    panic!("expected MethodCall with unwrap_or, got: {result:?}");
+}
+
+#[test]
+fn test_map_method_join_passes_borrowed_arg() {
+    // arr.join(sep) → arr.join(&sep)
+    let expr = parse_expr("arr.join(sep);");
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    if let Expr::MethodCall { method, args, .. } = &result {
+        assert_eq!(method, "join");
+        // The argument should be a reference: &sep
+        assert_eq!(
+            args,
+            &[Expr::Ident("&sep".to_string())],
+            "expected &sep, got: {args:?}"
+        );
+        return;
+    }
+    panic!("expected MethodCall join, got: {result:?}");
+}
+
+#[test]
+fn test_map_method_sort_no_args_uses_partial_cmp() {
+    // arr.sort() → arr.sort_by(|a, b| a.partial_cmp(b).unwrap())
+    let expr = parse_expr("arr.sort();");
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    if let Expr::MethodCall { method, .. } = &result {
+        assert_eq!(
+            method, "sort_by",
+            "expected sort_by for no-arg sort, got: {result:?}"
+        );
+        return;
+    }
+    panic!("expected sort_by, got: {result:?}");
+}
+
+#[test]
+fn test_map_method_sort_with_comparator_strips_type_annotations() {
+    // arr.sort((a: number, b: number) => b - a) → sort_by closure params have no type annotation
+    let expr = parse_expr("arr.sort((a: number, b: number) => b - a);");
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    if let Expr::MethodCall { method, args, .. } = &result {
+        assert_eq!(method, "sort_by");
+        if let Some(Expr::Closure { params, .. }) = args.first() {
+            assert!(
+                params[0].ty.is_none(),
+                "sort_by closure param should have no type, got: {:?}",
+                params[0].ty
+            );
+            return;
+        }
+    }
+    panic!("expected sort_by with untyped closure, got: {result:?}");
+}
+
+#[test]
+fn test_map_method_splice_generates_integer_range() {
+    // arr.splice(1, 2) → arr.drain(1..3).collect::<Vec<_>>()
+    // The range should use integer literals, not float
+    let expr = parse_expr("arr.splice(1, 2);");
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    // Drill into: MethodCall { object: MethodCall { method: "drain", args: [Range { start, end }] }, method: "collect..." }
+    if let Expr::MethodCall {
+        object,
+        method: collect_method,
+        ..
+    } = &result
+    {
+        assert!(
+            collect_method.starts_with("collect"),
+            "expected collect, got: {result:?}"
+        );
+        if let Expr::MethodCall { method, args, .. } = object.as_ref() {
+            assert_eq!(method, "drain");
+            if let Some(Expr::Range {
+                start: Some(s),
+                end: Some(e),
+            }) = args.first()
+            {
+                // Start should be integer-like (NumberLit 1.0 is ok, generator handles it)
+                // End should be 3 (1+2), not a BinaryOp
+                assert!(
+                    matches!(e.as_ref(), Expr::NumberLit(n) if *n == 3.0),
+                    "expected end=3.0 (pre-computed), got: {e:?}"
+                );
+                assert!(
+                    matches!(s.as_ref(), Expr::NumberLit(n) if *n == 1.0),
+                    "expected start=1.0, got: {s:?}"
+                );
+                return;
+            }
+        }
+    }
+    panic!("expected drain(1..3).collect(), got: {result:?}");
 }
 
 #[test]

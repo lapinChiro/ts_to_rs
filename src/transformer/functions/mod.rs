@@ -125,6 +125,12 @@ pub fn convert_fn_decl(
     };
 
     convert_last_return_to_tail(&mut body);
+    let mut_rebindings = mark_mut_params_from_body(&body, &params);
+    if !mut_rebindings.is_empty() {
+        let mut new_body = mut_rebindings;
+        new_body.extend(body);
+        body = new_body;
+    }
 
     extra_items.push(Item::Fn {
         vis,
@@ -459,6 +465,78 @@ pub(crate) fn convert_last_return_to_tail(body: &mut Vec<Stmt>) {
         if let Some(Stmt::Return(Some(expr))) = body.pop() {
             body.push(Stmt::TailExpr(expr));
         }
+    }
+}
+
+/// Methods that require `&mut self` on the receiver.
+const MUTATING_METHODS: &[&str] = &[
+    "reverse", "sort", "sort_by", "drain", "push", "pop", "remove", "insert", "clear", "truncate",
+    "retain",
+];
+
+/// Scans function body for method calls that require `&mut self` and inserts
+/// `let mut name = name;` rebinding statements at the start of the body.
+fn mark_mut_params_from_body(body: &[Stmt], params: &[Param]) -> Vec<Stmt> {
+    let mut needs_mut = std::collections::HashSet::new();
+    collect_mut_receivers(body, &mut needs_mut);
+
+    let mut rebindings = Vec::new();
+    for param in params {
+        if needs_mut.contains(&param.name) {
+            rebindings.push(Stmt::Let {
+                mutable: true,
+                name: param.name.clone(),
+                ty: None,
+                init: Some(Expr::Ident(param.name.clone())),
+            });
+        }
+    }
+    rebindings
+}
+
+/// Recursively collects variable names that are receivers of mutating method calls.
+fn collect_mut_receivers(stmts: &[Stmt], receivers: &mut std::collections::HashSet<String>) {
+    for stmt in stmts {
+        match stmt {
+            Stmt::Expr(expr) | Stmt::TailExpr(expr) => {
+                collect_mut_receivers_from_expr(expr, receivers);
+            }
+            Stmt::Let {
+                init: Some(expr), ..
+            } => {
+                collect_mut_receivers_from_expr(expr, receivers);
+            }
+            Stmt::Return(Some(expr)) => {
+                collect_mut_receivers_from_expr(expr, receivers);
+            }
+            Stmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                collect_mut_receivers(then_body, receivers);
+                if let Some(els) = else_body {
+                    collect_mut_receivers(els, receivers);
+                }
+            }
+            Stmt::While { body, .. } | Stmt::ForIn { body, .. } | Stmt::Loop { body, .. } => {
+                collect_mut_receivers(body, receivers);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Checks if an expression contains a mutating method call and collects the receiver name.
+fn collect_mut_receivers_from_expr(expr: &Expr, receivers: &mut std::collections::HashSet<String>) {
+    if let Expr::MethodCall { object, method, .. } = expr {
+        if MUTATING_METHODS.contains(&method.as_str()) {
+            if let Expr::Ident(name) = object.as_ref() {
+                receivers.insert(name.clone());
+            }
+        }
+        // Also recurse into chained calls (e.g., arr.drain(...).collect())
+        collect_mut_receivers_from_expr(object, receivers);
     }
 }
 

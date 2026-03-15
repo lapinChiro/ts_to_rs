@@ -3,27 +3,30 @@ source: tests/integration_test.rs
 expression: output
 ---
 fn sumArray(arr: Vec<f64>) -> f64 {
-    arr.iter().fold(0.0, |acc: f64, x: f64| acc + x)
+    arr.iter().fold(0.0, |acc, x| acc + x)
 }
 
 fn findIndex(arr: Vec<f64>, target: f64) -> f64 {
-    arr.iter().position(|item| *item == target)
+    arr.iter().position(|item| *item == target).map(|i| i as f64).unwrap_or(-1.0)
 }
 
 fn joinWords(arr: Vec<String>, sep: String) -> String {
-    arr.join(sep)
+    arr.join(&sep)
 }
 
 fn reverseArray(arr: Vec<f64>) {
+    let mut arr = arr;
     arr.reverse();
 }
 
 fn sortArray(arr: Vec<f64>) {
-    arr.sort();
+    let mut arr = arr;
+    arr.sort_by(|a, b| a.partial_cmp(b).unwrap());
 }
 
 fn sortDescending(arr: Vec<f64>) {
-    arr.sort_by(|a: f64, b: f64| b - a);
+    let mut arr = arr;
+    arr.sort_by(|a, b| (b - a).partial_cmp(&0.0).unwrap());
 }
 
 fn sliceArray(arr: Vec<f64>) -> Vec<f64> {
@@ -31,7 +34,8 @@ fn sliceArray(arr: Vec<f64>) -> Vec<f64> {
 }
 
 fn spliceArray(arr: Vec<f64>) -> Vec<f64> {
-    arr.drain(1..1.0 + 2.0 as i64).collect::<Vec<_>>()
+    let mut arr = arr;
+    arr.drain(1..3).collect::<Vec<_>>()
 }
 
 fn circleArea(r: f64) -> f64 {
