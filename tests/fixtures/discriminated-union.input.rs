@@ -1,18 +1,10 @@
----
-source: tests/integration_test.rs
-expression: output
----
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind")]
 pub enum Event {
     #[serde(rename = "click")]
-    Click {
-        x: f64,
-    },
+    Click { pub x: f64 },
     #[serde(rename = "hover")]
-    Hover {
-        y: f64,
-    },
+    Hover { pub y: f64 },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -379,7 +379,7 @@ fn generate_serde_tagged_enum(
             out.push_str(&format!("    {} {{\n", variant.name));
             for field in &variant.fields {
                 out.push_str(&format!(
-                    "        pub {}: {},\n",
+                    "        {}: {},\n",
                     field.name,
                     generate_type(&field.ty)
                 ));

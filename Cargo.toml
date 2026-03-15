@@ -1,3 +1,6 @@
+[workspace]
+exclude = ["tests/compile-check"]
+
 [package]
 name = "ts_to_rs"
 version = "0.1.0"
