@@ -13,36 +13,42 @@
 
 ## PRD 化可能（優先度順）
 
-優先度の判断軸: **変換の正確性** > 変換率（Hono 実測） > 保守性 > 工数の小ささ
+優先度の判断軸:
 
-### Tier 1: 変換正確性 — 生成コードの構文的・意味的正確性
+1. **直接的な価値**: 変換の正確性 > 変換率（Hono 実測） > 保守性 > 工数の小ささ
+2. **相乗効果**: 解決すると他の課題も副次的に解消・簡素化する度合い
+3. **伝播防止**: 未解決のまま放置すると今後の開発に悪影響が蓄積する度合い
 
-1. **try/catch 内の break/continue** — Critical（コンパイル不可）
+### Tier 1: 基盤確立 — 伝播リスクが高く、他の課題の前提となる
+
+> **#1 整数コンテキスト**: 調査の結果、配列インデックス・ループ範囲は実装済み。残る splice 範囲式バグは #2 に吸収。
+> **#2 builtin API + Math.max + splice バグ**: → `backlog/builtin-api-reference-model.md` に PRD 化済み
+
+1. **`Math.max` 3引数以上の対応** — 式変換正確性
+   - `f64::max` は 2 引数のみ。3 引数以上でコンパイル不可
+   - `a.max(b).max(c)` のチェーンに変換
+   - `report/conversion-correctness-audit.md` S-9
+   - ※ builtin API PRD の次のイテレーションで対応
+
+### Tier 2: 変換正確性 — 直接的な価値が高い
+
+2. **try/catch 内の break/continue** — Critical（コンパイル不可）
    - try/catch は即時実行クロージャに変換されるため、内部の `break`/`continue` がコンパイル不可になる
    - labeled block + break value パターン、または try/catch の変換戦略自体の見直しが必要
    - `report/conversion-correctness-audit.md` S-3
+   - 伝播リスク低: try/catch 内に限定された孤立した問題
 
-2. **`number` → `f64` の整数コンテキスト対応** — Critical（コンパイル不可）
-   - 配列インデックス `arr[idx]` で `idx: f64` になり `usize` が必要な箇所でコンパイル不可
-   - TypeEnv を使って使用箇所の型コンテキストから `as usize` の自動挿入が可能
-   - `report/conversion-correctness-audit.md` T-1
-
-3. **builtin API の参照モデル修正** — 変換正確性
-   - `findIndex` → `position()` は `Option<usize>` を返すが `f64` として扱われる
-   - `sort`/`reverse` → `&mut self` が必要だがパラメータは immutable
-   - `fold` → クロージャパラメータが `&f64` だが `f64` として生成される
-   - TypeEnv を使った `&mut self` 判定が可能になった
-
-4. **intersection 型注記位置での struct 生成** — 型変換正確性
+3. **intersection 型注記 + TsTypeLit 型注記位置での struct 生成** — 型変換正確性
    - `x: { a: string } & { b: number }` が型注記位置にある場合、現在は最初の型のみ使用（情報損失）
-   - type alias 位置では既にフィールド統合 struct が生成されるが、型注記位置では匿名 struct の命名規則の設計が必要
-   - `extra_items` に struct を追加し Named 参照を返す方式で対応可能
+   - `{ env?: E['Bindings'] }` のようなインライン型リテラルが型注記位置で未対応
+   - `extra_items` に struct を追加し Named 参照を返す方式で対応可能（type alias 位置では実装済み）
+   - 🔗 相乗: 両方とも `extra_items` 伝搬で inline struct を生成する同一パターン。片方の実装がもう片方をほぼそのまま解決。Hono 計 4 件解消
 
-5. **複数オブジェクトスプレッドの対応** — 式変換正確性
+4. **複数オブジェクトスプレッドの対応** — 式変換正確性
    - `{...a, ...b}` で 2 つ目以降のスプレッドがエラー
    - IR の `StructInit` に `Vec<base>` を持たせ、generator で `let mut _obj = a.clone(); _obj.extend(b);` パターンを生成
 
-5.5. **式中ネスト位置の配列スプレッド対応** — 式変換正確性
+5. **式中ネスト位置の配列スプレッド対応** — 式変換正確性
    - `foo([...arr, 1])` のように関数引数等の式中にスプレッド配列がある場合、現在はエラーになる
    - 配列スプレッドは文レベル（let/return/expr文）でのみ SWC AST 検出・展開しており、式中ネストは未対応
    - 対応方針: 一時変数にホイストして展開する前処理を `convert_stmt` に追加
@@ -62,79 +68,69 @@
    - `report/conversion-correctness-audit.md` T-5
 
 9. **super() の位置ベースフィールドマッピング** — 式変換正確性
-   - `super(arg1, arg2)` が親クラスのフィールド宣言順と引数の順序が一致する前提でマッピングしている
-   - 順序不一致の場合に誤ったフィールドに値が代入される
-   - `report/conversion-correctness-audit.md` S-11
+    - `super(arg1, arg2)` が親クラスのフィールド宣言順と引数の順序が一致する前提でマッピングしている
+    - 順序不一致の場合に誤ったフィールドに値が代入される
+    - `report/conversion-correctness-audit.md` S-11
 
-### Tier 2: 型構文の網羅性 — 未対応の型パターン
+### Tier 3: 型構文の網羅性 — 未対応の型パターン
 
-10. **TsLitType の型注記位置対応** — 型構文（Hono 4件解消、工数小）
+11. **TsLitType + call signature パラメータの対応** — 型構文（Hono 計 7 件解消、工数小）
     - 文字列リテラル型 `'Content-Type'`、真偽値リテラル型 `false` が型注記位置で未対応
-    - `convert_ts_type` に `TsLitType` アームを追加
+    - interface の call signature のパラメータパターンが未対応
+    - `convert_ts_type` に新しい match arm を追加
+    - 🔗 相乗: 両方とも `convert_ts_type` への arm 追加。バッチで対応可能
 
-11. **TsConditionalType の型注記位置対応** — 型構文（Hono 3件解消、工数中）
+12. **TsConditionalType の型注記位置対応** — 型構文（Hono 3件解消、工数中）
     - `T extends string ? Response : Promise<Response>` のような conditional type が型注記位置で未対応
     - `convert_ts_type` に `TsConditionalType` アーム追加
 
-12. **mapped type の基本対応** — 型構文（Hono 3件解消、工数中）
+13. **mapped type の基本対応** — 型構文（Hono 3件解消、工数中）
     - `{ [P in keyof T]: ... }` が type alias body で未対応
     - `HashMap<String, V>` にフォールバック
 
-13. **call signature パラメータの対応** — 型構文（Hono 3件解消、工数小）
-    - interface の call signature のパラメータパターンが未対応
-
-14. **TsTypeLit の型注記位置対応** — 型構文（Hono 2件解消、工数中）
-    - `{ env?: E['Bindings'] }` のようなインライン型リテラルが型注記位置で未対応
-    - `extra_items` 伝搬の仕組みを活用して struct を生成
-
-15. **union 内の未対応型** — 型構文（Hono 2件）
+14. **union 内の未対応型** — 型構文（Hono 2件）
     - タプル配列 `[string, string][]`、ネストしたタプル/配列構造が union メンバーとして未対応
 
-16. **タプルの optional 要素** — 型構文
+15. **タプルの optional 要素** — 型構文
     - `[string, number?]` → `(String, f64)` になり `Option` にならない
     - `report/conversion-correctness-audit.md` T-8
 
-17. **conditional type フォールバック値の改善** — 型変換正確性
+16. **conditional type フォールバック値の改善** — 型変換正確性
     - 変換失敗時に `RustType::Unit`（`()`）のプレースホルダーが生成される。コンパイルは通るが意味的に誤り
     - `report/conversion-correctness-audit.md` T-6
 
-### Tier 3: 文・式の網羅性
+### Tier 4: 文・式の網羅性
 
-18. **switch 文の変換** — 文（工数中）
+17. **switch 文の変換** — 文（工数中）
     - `switch(x) { case 1: ... }` が未対応（`contains_throw` での検出は対応済み）
     - Rust の `match` 式に変換。fall-through は `|` パターンで対応
 
-19. **ネスト async 関数** — 文（Hono 1件解消）
+18. **ネスト async 関数** — 文（Hono 1件解消）
     - `async function dispatch()` がネスト位置で未対応
     - closure + async block で対応
 
-20. **オブジェクト分割代入の拡張（デフォルト値、ネスト、rest）** — 分割代入
+19. **オブジェクト分割代入の拡張（デフォルト値、ネスト、rest）** — 分割代入
     - 基本パターン・リネームは実装済み
     - デフォルト値、ネスト、rest が未対応
 
-21. **生成コードの Cargo.toml への依存クレート追加** — コード生成
+20. **生成コードの Cargo.toml への依存クレート追加** — コード生成
     - `serde_json`（any/unknown 変換）、`scopeguard`（finally 変換）を生成コードの Cargo.toml に含める機能が必要
 
-22. **`Math.max(a, b, c)` 3引数以上の対応** — 式変換正確性
-    - `f64::max` は 2 引数のみ。3 引数以上でコンパイル不可
-    - `a.max(b).max(c)` のチェーンに変換
-    - `report/conversion-correctness-audit.md` S-9
+### Tier 5: あれば便利
 
-### Tier 4: あれば便利
+21. **非プリミティブ type assertion のコメント保持** — type assertion
+22. **Math.random() → `rand` クレート** — 組み込み API
+23. **indexed access type の非文字列キー対応** — 型構文（Hono 2件）
+24. **TryCatch のエラー型パラメータ化** — 設計負債
+25. **qualified type name (`A.B` 形式)** — 型構文（Hono 1件）
+26. **型リテラルメンバーのメソッドシグネチャ対応** — 型構文（Hono 1件）
 
-23. **非プリミティブ type assertion のコメント保持** — type assertion
-24. **Math.random() → `rand` クレート** — 組み込み API
-25. **indexed access type の非文字列キー対応** — 型構文（Hono 2件）
-26. **TryCatch のエラー型パラメータ化** — 設計負債
-27. **qualified type name (`A.B` 形式)** — 型構文（Hono 1件）
-28. **型リテラルメンバーのメソッドシグネチャ対応** — 型構文（Hono 1件）
+### Tier 6: 保守性・アーキテクチャ改善
 
-### Tier 5: 保守性・アーキテクチャ改善
-
-29. **expressions/mod.rs のモジュール分割** — リファクタリング
+27. **expressions/mod.rs のモジュール分割** — リファクタリング
     - 1,290 行。メソッドマッピング・組み込み API 変換等を別モジュールに分離
 
-30. **コンパイルテストのスキップ解消** — テスト品質
+28. **コンパイルテストのスキップ解消** — テスト品質
     - 51 個の統合テストのうち 7 個（13.7%）がコンパイルテストをスキップしている
     - 各スキップの根本原因（derive マクロ不足、クレート依存、空メソッド本体等）を個別に解消する
     - `report/conversion-correctness-audit.md` Q-1, Q-2

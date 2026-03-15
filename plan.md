@@ -1,14 +1,12 @@
 # ts_to_rs 開発計画
 
+PRD 化済みタスクの消化順序。次のタスクから順に着手する。
+
 ## 次のタスク
 
-### Phase 2 以降
+1. `backlog/builtin-api-reference-model.md` — builtin API の参照モデル修正（コンパイルテストスキップ解消）
 
-割れ窓修正後に TODO から PRD 化する。詳細は `TODO` を参照。
-
-- Phase 2: 変換正確性（builtin API 参照モデル、intersection 型注記、複数スプレッド）
-- Phase 3: 型構文の網羅性（TsLitType, TsConditionalType, mapped type 等）
-- Phase 4: 文・式の網羅性（switch 文、ネスト async、分割代入拡張、Cargo.toml 生成）
+以降の優先順位は `TODO` を参照。
 
 ## 判断保留事項
 
