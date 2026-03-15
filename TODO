@@ -5,7 +5,8 @@
 各項目の状態:
 
 - **PRD 化可能** — 保留理由なし、または Discovery で解決可能な設計課題のみ
-- **保留** — 正当な保留理由あり（前提機能未整備、実績データ必要、外部意思決定待ち等）
+- **保留** — 正当な保留理由あり（前提タスク未完了、またはユーザーの設計方針決定が必要）
+- **スコープ外** — 明示的に対象外。需要発生時に再評価
 
 件数は Hono コアファイル 7 個の変換結果（`report/hono-rescan-2025-03.md`、変換率 66%）に基づく。
 
@@ -19,167 +20,138 @@
 2. **相乗効果**: 解決すると他の課題も副次的に解消・簡素化する度合い
 3. **伝播防止**: 未解決のまま放置すると今後の開発に悪影響が蓄積する度合い
 
-### Tier 1: 基盤確立 — 伝播リスクが高く、他の課題の前提となる
+### Tier 1: 高優先度 — 伝播リスクが高い、または ROI が極めて高い
 
-> **#1 整数コンテキスト**: 調査の結果、配列インデックス・ループ範囲は実装済み。残る splice 範囲式バグは #2 に吸収。
-> **#2 builtin API + Math.max + splice バグ**: → `backlog/builtin-api-reference-model.md` に PRD 化済み
+1. **`Expr::Ident` の Rust 構文フラグメント濫用の解消** — IR 設計改善
+   - `Expr::Ident("*item")`, `Expr::Ident("&sep")`, `Expr::Ident("&0.0")`, `Expr::Ident("()")` のように、`Ident` に Rust 構文フラグメントを埋め込んでいる
+   - IR に `Expr::Deref` / `Expr::Ref` / `Expr::Unit` を追加する
+   - ⚠️ 伝播: builtin API マッピング追加のたびに `*item` ハックが増える
+   - 🔗 相乗: #2 の IntLit 追加と同時に IR 式バリアント拡充として対応可能
 
-1. **`Math.max` 3引数以上の対応** — 式変換正確性
-   - `f64::max` は 2 引数のみ。3 引数以上でコンパイル不可
-   - `a.max(b).max(c)` のチェーンに変換
-   - `report/conversion-correctness-audit.md` S-9
-   - ※ builtin API PRD の次のイテレーションで対応
+2. **IR に整数リテラル `Expr::IntLit(i64)` を追加** — IR 設計改善
+   - Generator の `generate_range_bound` / `Expr::Index` が型変換を担当しており 1:1 レンダリング原則に違反
+   - 🔗 相乗: #1 と同時に IR 式バリアント拡充として対応可能
 
-### Tier 2: 変換正確性 — 直接的な価値が高い
+3. **TsLitType + call signature パラメータの対応** — 型構文（Hono 計 7 件解消、工数小）
+   - 文字列リテラル型・真偽値リテラル型が型注記位置で未対応
+   - `convert_ts_type` に新しい match arm を追加するだけ
+   - 🔗 相乗: バッチで対応可能
 
-2. **try/catch 内の break/continue** — Critical（コンパイル不可）
-   - try/catch は即時実行クロージャに変換されるため、内部の `break`/`continue` がコンパイル不可になる
-   - labeled block + break value パターン、または try/catch の変換戦略自体の見直しが必要
-   - `report/conversion-correctness-audit.md` S-3
-   - 伝播リスク低: try/catch 内に限定された孤立した問題
-
-3. **intersection 型注記 + TsTypeLit 型注記位置での struct 生成** — 型変換正確性
-   - `x: { a: string } & { b: number }` が型注記位置にある場合、現在は最初の型のみ使用（情報損失）
-   - `{ env?: E['Bindings'] }` のようなインライン型リテラルが型注記位置で未対応
-   - `extra_items` に struct を追加し Named 参照を返す方式で対応可能（type alias 位置では実装済み）
-   - 🔗 相乗: 両方とも `extra_items` 伝搬で inline struct を生成する同一パターン。片方の実装がもう片方をほぼそのまま解決。Hono 計 4 件解消
+### Tier 2: 中優先度 — 直接的な価値が高い
 
 4. **複数オブジェクトスプレッドの対応** — 式変換正確性
    - `{...a, ...b}` で 2 つ目以降のスプレッドがエラー
-   - IR の `StructInit` に `Vec<base>` を持たせ、generator で `let mut _obj = a.clone(); _obj.extend(b);` パターンを生成
 
-5. **式中ネスト位置の配列スプレッド対応** — 式変換正確性
-   - `foo([...arr, 1])` のように関数引数等の式中にスプレッド配列がある場合、現在はエラーになる
-   - 配列スプレッドは文レベル（let/return/expr文）でのみ SWC AST 検出・展開しており、式中ネストは未対応
-   - 対応方針: 一時変数にホイストして展開する前処理を `convert_stmt` に追加
+5. **switch 文の変換** — 文（TS で頻出パターン）
+   - Rust の `match` 式に変換。fall-through は `|` パターンで対応
 
-6. **条件内代入式の対応** — 式変換正確性
-   - `while (x = getValue())` がコンパイル不可
-   - `loop { let x = f(); if !x { break; } ... }` パターンへの変換
+6. **式中ネスト位置の配列スプレッド対応** — 式変換正確性
+   - `foo([...arr, 1])` が式中にある場合エラー。一時変数にホイスト
 
-7. **三項演算子の分岐型不一致** — 式変換正確性
-   - `cond ? "text" : 123` → `if cond { "text" } else { 123 }` で Rust の if 式が型不一致エラーになる
-   - enum でラッピングするか、共通の型への変換が必要
-   - `report/conversion-correctness-audit.md` S-13
+7. **TsConditionalType の型注記位置対応** — 型構文（Hono 3件解消）
 
-8. **`Promise<T>` の union 内展開** — 型変換正確性
-   - async 関数返り値では `Promise<T>` → `T` に展開されるが、type alias や union 内では未展開
-   - `Response | Promise<Response>` で enum の片方が空の `Promise` struct になる
-   - `report/conversion-correctness-audit.md` T-5
+8. **mapped type の基本対応** — 型構文（Hono 3件解消）
+   - `HashMap<String, V>` にフォールバック
 
-9. **super() の位置ベースフィールドマッピング** — 式変換正確性
-    - `super(arg1, arg2)` が親クラスのフィールド宣言順と引数の順序が一致する前提でマッピングしている
-    - 順序不一致の場合に誤ったフィールドに値が代入される
-    - `report/conversion-correctness-audit.md` S-11
+9. **条件内代入式の対応** — 式変換正確性
+   - `while (x = getValue())` → `loop` パターンへ変換
 
-### Tier 3: 型構文の網羅性 — 未対応の型パターン
+10. **三項演算子の分岐型不一致** — 式変換正確性
 
-11. **TsLitType + call signature パラメータの対応** — 型構文（Hono 計 7 件解消、工数小）
-    - 文字列リテラル型 `'Content-Type'`、真偽値リテラル型 `false` が型注記位置で未対応
-    - interface の call signature のパラメータパターンが未対応
-    - `convert_ts_type` に新しい match arm を追加
-    - 🔗 相乗: 両方とも `convert_ts_type` への arm 追加。バッチで対応可能
+11. **`Promise<T>` の union 内展開** — 型変換正確性
 
-12. **TsConditionalType の型注記位置対応** — 型構文（Hono 3件解消、工数中）
-    - `T extends string ? Response : Promise<Response>` のような conditional type が型注記位置で未対応
-    - `convert_ts_type` に `TsConditionalType` アーム追加
+12. **super() の位置ベースフィールドマッピング** — 式変換正確性
 
-13. **mapped type の基本対応** — 型構文（Hono 3件解消、工数中）
-    - `{ [P in keyof T]: ... }` が type alias body で未対応
-    - `HashMap<String, V>` にフォールバック
+13. **オブジェクト分割代入の拡張（デフォルト値、ネスト、rest）** — 分割代入
 
-14. **union 内の未対応型** — 型構文（Hono 2件）
-    - タプル配列 `[string, string][]`、ネストしたタプル/配列構造が union メンバーとして未対応
+14. **`+x`（単項プラス / 数値変換）** — 式変換
+    - TypeEnv で型判定可能。`+x` → 型に応じて `x` / `x.parse::<f64>()` 等に変換
 
-15. **タプルの optional 要素** — 型構文
-    - `[string, number?]` → `(String, f64)` になり `Option` にならない
-    - `report/conversion-correctness-audit.md` T-8
+15. **空配列の型推論改善** — 型推論
+    - `const arr: number[] = []` は動作するが、型注記なし `const arr = []` は型情報なし
+    - `expected` 型伝搬の改善で対応
 
-16. **conditional type フォールバック値の改善** — 型変換正確性
-    - 変換失敗時に `RustType::Unit`（`()`）のプレースホルダーが生成される。コンパイルは通るが意味的に誤り
-    - `report/conversion-correctness-audit.md` T-6
+16. **const のミュータビリティ解析改善** — 変換正確性
+    - `mark_mut_params_from_body` パターンを `convert_var_decl` にも適用し、body 内で変更される const を `let mut` にする
 
-### Tier 4: 文・式の網羅性
+17. **re-export の追跡** — import/export
+    - `transform_import` / `transform_export_named` は実装済み
+    - re-export チェーン（`export { X } from "./a"` → `export { X } from "./b"`）の追跡が未対応
 
-17. **switch 文の変換** — 文（工数中）
-    - `switch(x) { case 1: ... }` が未対応（`contains_throw` での検出は対応済み）
-    - Rust の `match` 式に変換。fall-through は `|` パターンで対応
+18. **`.substring`/`.slice` → Rust の文字列スライス** — builtin API
+    - UTF-8 境界問題があるが、`chars().skip(n).take(m).collect::<String>()` 等で対応可能
 
-18. **ネスト async 関数** — 文（Hono 1件解消）
-    - `async function dispatch()` がネスト位置で未対応
-    - closure + async block で対応
+19. **discriminated union の拡張パターン** — 型変換
+    - 基本パターンは実装済み。複雑なパターン（ネスト、複数判別フィールド等）を対応
 
-19. **オブジェクト分割代入の拡張（デフォルト値、ネスト、rest）** — 分割代入
-    - 基本パターン・リネームは実装済み
-    - デフォルト値、ネスト、rest が未対応
+20. **async void のセマンティクス差異対応** — 変換正確性
+    - TS の async void は即座に返るが Rust は Future。差異の警告 or ドキュメント化
 
-20. **生成コードの Cargo.toml への依存クレート追加** — コード生成
-    - `serde_json`（any/unknown 変換）、`scopeguard`（finally 変換）を生成コードの Cargo.toml に含める機能が必要
+21. **型注記なしパラメータ** — 型推論（Hono 1件）
+    - Arrow 関数パラメータに型注記がない場合の型推論
 
-### Tier 5: あれば便利
+22. **constructor パラメータプロパティ** — クラス変換（Hono 2件）
+    - `constructor(public x: number)` の TsParamProp 対応
 
-21. **非プリミティブ type assertion のコメント保持** — type assertion
-22. **Math.random() → `rand` クレート** — 組み込み API
-23. **indexed access type の非文字列キー対応** — 型構文（Hono 2件）
-24. **TryCatch のエラー型パラメータ化** — 設計負債
-25. **qualified type name (`A.B` 形式)** — 型構文（Hono 1件）
-26. **型リテラルメンバーのメソッドシグネチャ対応** — 型構文（Hono 1件）
+23. **外部パッケージの型定義解決** — 型解決
+    - 外部パッケージの `.d.ts` ファイルから型情報を読み込む
 
-### Tier 6: 保守性・アーキテクチャ改善
+24. **高度な conditional type の変換戦略** — 型変換（Hono 完全変換に必須）
+    - テンプレートリテラル型、再帰的条件型、高階型操作、複雑ネスト条件型
+    - TS 固有の問題への対処コード（IDE 表示改善等）→ Rust では不要、コメント/スキップ生成
+    - Rust に代替パターンがあるもの → Rust イディオム（Extractor, IntoResponse, serde, proc macro）に変換
+    - 調査済み: `report/tier3-conditional-types-rust-approaches.md` に Group A〜D の分析あり
 
-27. **expressions/mod.rs のモジュール分割** — リファクタリング
-    - 1,290 行。メソッドマッピング・組み込み API 変換等を別モジュールに分離
+### Tier 3: 低優先度
 
-28. **コンパイルテストのスキップ解消** — テスト品質
-    - 51 個の統合テストのうち 7 個（13.7%）がコンパイルテストをスキップしている
-    - 各スキップの根本原因（derive マクロ不足、クレート依存、空メソッド本体等）を個別に解消する
-    - `report/conversion-correctness-audit.md` Q-1, Q-2
+25. **union 内の未対応型** — 型構文（Hono 2件）
+26. **タプルの optional 要素** — 型構文
+27. **conditional type フォールバック値の改善** — 型変換正確性
+28. **ネスト async 関数** — 文（Hono 1件解消）
+29. **生成コードの Cargo.toml への依存クレート追加** — コード生成
+30. **expressions/mod.rs のモジュール分割** — リファクタリング（1,483 行）
+31. **コンパイルテストのスキップ解消** — テスト品質（7/51 がスキップ中）
+32. **非プリミティブ type assertion のコメント保持** — type assertion
+33. **Math.random() → `rand` クレート** — 組み込み API
+34. **indexed access type の非文字列キー対応** — 型構文（Hono 2件）
+35. **TryCatch のエラー型パラメータ化** — 設計負債
+36. **qualified type name (`A.B` 形式)** — 型構文（Hono 1件）
+37. **型リテラルメンバーのメソッドシグネチャ対応** — 型構文（Hono 1件）
 
 
 ---
 
 ## 保留
 
-### 前提機能の実装待ち（TypeEnv 導入済み — 変換ロジック未実装）
+### 前提タスクの完了待ち
 
-- `+x`（数値変換）— TypeEnv で型判定は可能だが、変換パターンの設計が必要
-- `typeof x`（型チェック）— TypeEnv + 型ガード戦略が前提
-- 空配列の型推論 — TypeEnv で変数型は取得可能だが、推論ロジック未実装
-- const のミュータビリティ（使用箇所ベースの解析）— TypeEnv + 前方スキャンが前提
-
-### 前提機能の実装待ち（その他）
-
-- discriminated union の拡張パターン — 基本パターンの実績を見てから
-- computed property（Hono 3件）— 型注記なしオブジェクト方針が前提
-- `.substring` / `.slice` → `&s[a..b]` — UTF-8 境界問題
-- 型ガード（`typeof x === "string"`）— 型ガード戦略全体の方針 + TypeEnv が前提
-- `in` 演算子（Hono 1件）— HashMap 方針決定が前提
-- ジェネリック型の具体化 — ジェネリクス変換が前提
+- ジェネリック型の具体化 — ジェネリクス変換（大テーマ）が前提
 - ジェネリック型を含む intersection（Hono 1件）— ジェネリック型の展開が前提
-- re-export の追跡 — import 基本解決が前提
 - spread（TypeRegistry 未登録、Hono 1件）— 外部型の TypeRegistry 登録が前提
 
-### 実績データ・外部判断待ち
+### 設計方針の決定待ち
 
-- `any`/`unknown` の実用的な変換先 — 現在の `Box<dyn std::any::Any>` は式中で直接使用不可（`x + 1` 等）。実用的な代替は `serde_json::Value` 等だが、用途による。`report/conversion-correctness-audit.md` T-2
-- `object` → `serde_json::Value` の適切性 — JSON 文脈以外で不適切だが、初版として許容。`report/conversion-correctness-audit.md` T-4
-- async void のセマンティクス差異 — TS の async void は即座に返るが Rust の async fn は Future。実際の影響範囲の評価が必要。`report/conversion-correctness-audit.md` S-15
-- デフォルト引数値の拡張（複雑な式）— 需要が発生してから
-- `anyhow::Error` や独自エラー型 — 初版は `String` 固定。実績データが必要
-- 型注記なしオブジェクトリテラル — 匿名構造体か HashMap かの判断に実績データが必要
-- 所有権推論（clone 削減）— 実績データが必要
-- カスタム変換ルールの注入 — 判断材料不足
-- 外部パッケージの型定義解決 — 設計コストが高い
-- 型の構造的一致による推論 — 初版では対応しない
-- 型注記なしパラメータ（Hono 1件）— Arrow 関数の型推論方針が前提
-- constructor パラメータパターン（Hono 2件）— TsParamProp 等の対応方針が前提
+以下はユーザーの設計方針決定が必要。個別の技術課題ではなく、横断的な戦略の選択が前提。
 
-### 需要が低い・スコープ外
+- **型ガード戦略**（`typeof x`, `instanceof`, ユーザー定義型ガード）— 型 narrowing を含む包括的な方針が必要。部分実装はかえって混乱を招く
+- **オブジェクトリテラルの扱い方針**（computed property, `in` 演算子, 型注記なしオブジェクト）— 匿名 struct / HashMap / serde_json::Value のいずれを採用するかの横断的決定が必要
+- **`any`/`unknown` の実用的な変換先** — `Box<dyn Any>` は式中で使用不可。`serde_json::Value` 等の選択はユースケース依存
+- **エラー型戦略**（`anyhow::Error` / 独自型）— 初版は `String` 固定。変更はユーザー判断
+- **所有権推論**（clone 削減）— 初版は全 clone。最適化はユーザー判断
 
-- conditional type Tier 3（Hono 固有の高度な型）— 詳細: `report/tier3-conditional-types-rust-approaches.md`
+
+---
+
+## スコープ外
+
+明示的に対象外とするもの。需要発生時に再評価する。
+
 - heterogeneous enum（数値と文字列の混在）— TS でも非推奨
-- template literal type（Hono 1件）— Rust に直接対応する構文がない
+- template literal type — Rust に直接対応する構文がない
 - `~x`, `void x`, `delete obj.prop` — 需要が低い
 - `for...in`（オブジェクトキー列挙）— TS でも非推奨
 - Docker ベースの開発環境 — 複数人開発時に再評価
 - Watch モード — 変換機能が十分に揃った後
+- デフォルト引数値の拡張（複雑な式）— 需要発生時に対応
+- カスタム変換ルールの注入 — 具体的な需要なし
+- 型の構造的一致による推論 — 初版では対応しない
