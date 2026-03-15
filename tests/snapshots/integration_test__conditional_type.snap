@@ -13,7 +13,7 @@ pub type Unwrap<T> = <T as Promise>::Output;
 // TODO: Conditional type not auto-converted
 // Original TS: type Nested
 
-pub type Nested<T> = ();
+pub type Nested<T> = serde_json::Value;
 
 pub struct AfterFallback {
     pub x: f64,

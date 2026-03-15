@@ -946,14 +946,15 @@ fn test_convert_type_alias_conditional_nested_generates_comment_and_placeholder(
         }
         _ => panic!("expected Item::Comment, got {:?}", items[0]),
     }
-    // Second item should be a placeholder TypeAlias with Unit type
+    // Second item should be a placeholder TypeAlias with true branch fallback
+    // (Any since the true branch is also an unsupported nested conditional)
     assert_eq!(
         items[1],
         Item::TypeAlias {
             vis: Visibility::Public,
             name: "Foo".to_string(),
             type_params: vec!["T".to_string()],
-            ty: RustType::Unit,
+            ty: RustType::Any,
         }
     );
 }
@@ -1505,6 +1506,30 @@ fn test_convert_ts_type_non_nullable_union_generates_enum_in_extra_items() {
         }
         _ => panic!("expected Enum in extra_items, got: {:?}", extra[0]),
     }
+}
+
+#[test]
+fn test_convert_ts_type_union_never_simplified_to_single_type() {
+    // string | never → string (never should be removed)
+    let decl = parse_interface("interface X { x: string | never; }");
+    let prop = match &decl.body.body[0] {
+        TsTypeElement::TsPropertySignature(p) => p,
+        _ => panic!("expected property signature"),
+    };
+    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
+    assert_eq!(ty, RustType::String);
+}
+
+#[test]
+fn test_convert_ts_type_union_void_treated_as_nullable() {
+    // string | void → Option<String> (void treated like null/undefined)
+    let decl = parse_interface("interface X { x: string | void; }");
+    let prop = match &decl.body.body[0] {
+        TsTypeElement::TsPropertySignature(p) => p,
+        _ => panic!("expected property signature"),
+    };
+    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
+    assert_eq!(ty, RustType::Option(Box::new(RustType::String)));
 }
 
 #[test]

@@ -41,7 +41,7 @@ pub fn convert_expr(
         ast::Expr::Object(obj_lit) => convert_object_lit(obj_lit, reg, expected),
         ast::Expr::Cond(cond) => convert_cond_expr(cond, reg, expected),
         ast::Expr::Unary(unary) => convert_unary_expr(unary, reg),
-        ast::Expr::TsAs(ts_as) => convert_expr(&ts_as.expr, reg, expected),
+        ast::Expr::TsAs(ts_as) => convert_ts_as_expr(ts_as, reg, expected),
         ast::Expr::OptChain(opt_chain) => convert_opt_chain_expr(opt_chain, reg),
         ast::Expr::Await(await_expr) => {
             let inner = convert_expr(&await_expr.arg, reg, None)?;
@@ -177,6 +177,37 @@ fn resolve_member_access(
         object: Box::new(object.clone()),
         field: field.to_string(),
     })
+}
+
+/// Converts a TypeScript type assertion (`x as T`).
+///
+/// - Primitive types (f64, i64, bool): generates `x as T` cast
+/// - Other types: passes the assertion type as `expected` to the inner expression
+fn convert_ts_as_expr(
+    ts_as: &ast::TsAsExpr,
+    reg: &TypeRegistry,
+    expected: Option<&RustType>,
+) -> Result<Expr> {
+    use crate::transformer::types::convert_ts_type;
+    match convert_ts_type(&ts_as.type_ann, &mut Vec::new()) {
+        Ok(target_ty) => {
+            let is_primitive_cast = matches!(target_ty, RustType::F64 | RustType::Bool);
+            if is_primitive_cast {
+                let inner = convert_expr(&ts_as.expr, reg, Some(&target_ty))?;
+                Ok(Expr::Cast {
+                    expr: Box::new(inner),
+                    target: target_ty,
+                })
+            } else {
+                // Pass the assertion type as expected to help type inference
+                convert_expr(&ts_as.expr, reg, expected.or(Some(&target_ty)))
+            }
+        }
+        Err(_) => {
+            // If we can't convert the type, just ignore the assertion
+            convert_expr(&ts_as.expr, reg, expected)
+        }
+    }
 }
 
 /// Converts an optional chaining expression (`x?.y`) to `x.as_ref().map(|_v| _v.y)`.
@@ -742,7 +773,7 @@ fn convert_global_builtin(
     reg: &TypeRegistry,
 ) -> Result<Option<Expr>> {
     match fn_name {
-        // parseInt(s) → s.parse::<f64>().unwrap()
+        // parseInt(s) → s.parse::<f64>().unwrap_or(f64::NAN)
         "parseInt" => {
             let converted = convert_call_args(args, reg)?;
             if converted.len() != 1 {
@@ -755,11 +786,11 @@ fn convert_global_builtin(
                     method: "parse::<f64>".to_string(),
                     args: vec![],
                 }),
-                method: "unwrap".to_string(),
-                args: vec![],
+                method: "unwrap_or".to_string(),
+                args: vec![Expr::Ident("f64::NAN".to_string())],
             }))
         }
-        // parseFloat(s) → s.parse::<f64>().unwrap()
+        // parseFloat(s) → s.parse::<f64>().unwrap_or(f64::NAN)
         "parseFloat" => {
             let converted = convert_call_args(args, reg)?;
             if converted.len() != 1 {
@@ -772,8 +803,8 @@ fn convert_global_builtin(
                     method: "parse::<f64>".to_string(),
                     args: vec![],
                 }),
-                method: "unwrap".to_string(),
-                args: vec![],
+                method: "unwrap_or".to_string(),
+                args: vec![Expr::Ident("f64::NAN".to_string())],
             }))
         }
         // isNaN(x) → x.is_nan()
@@ -873,19 +904,21 @@ fn convert_math_call(method: &str, args: &[ast::ExprOrSpread], reg: &TypeRegistr
                 args: vec![],
             })
         }
-        // 2-arg methods: first arg is receiver, second is argument
+        // variadic methods: chain calls for 2+ args: Math.max(a,b,c) → a.max(b).max(c)
         "max" | "min" => {
-            if converted_args.len() != 2 {
-                return Err(anyhow!("Math.{method} expects 2 arguments"));
+            if converted_args.len() < 2 {
+                return Err(anyhow!("Math.{method} expects at least 2 arguments"));
             }
             let mut iter = converted_args.into_iter();
-            let receiver = iter.next().unwrap();
-            let arg = iter.next().unwrap();
-            Ok(Expr::MethodCall {
-                object: Box::new(receiver),
-                method: method.to_string(),
-                args: vec![arg],
-            })
+            let mut result = iter.next().unwrap();
+            for arg in iter {
+                result = Expr::MethodCall {
+                    object: Box::new(result),
+                    method: method.to_string(),
+                    args: vec![arg],
+                };
+            }
+            Ok(result)
         }
         // pow → powf
         "pow" => {

@@ -134,10 +134,13 @@ fn convert_union_type(
         match ty.as_ref() {
             TsType::TsKeywordType(kw)
                 if kw.kind == TsKeywordTypeKind::TsNullKeyword
-                    || kw.kind == TsKeywordTypeKind::TsUndefinedKeyword =>
+                    || kw.kind == TsKeywordTypeKind::TsUndefinedKeyword
+                    || kw.kind == TsKeywordTypeKind::TsVoidKeyword =>
             {
                 has_null_or_undefined = true;
             }
+            // never is the bottom type — remove from unions (T | never = T)
+            TsType::TsKeywordType(kw) if kw.kind == TsKeywordTypeKind::TsNeverKeyword => {}
             other => {
                 non_null_types.push(other);
             }
@@ -151,17 +154,31 @@ fn convert_union_type(
         // `null | undefined` — treat as Option of unit, but we don't have unit type
         Err(anyhow!("union of only null/undefined is not supported"))
     } else if !has_null_or_undefined {
+        // Convert all members, unwrapping Promise<T> → T
+        let mut rust_types = Vec::new();
+        for ty in &non_null_types {
+            let rust_type = convert_ts_type(ty, extra_items)?;
+            let unwrapped = unwrap_promise(rust_type);
+            if !rust_types.contains(&unwrapped) {
+                rust_types.push(unwrapped);
+            }
+        }
+
+        // After dedup, if only one type remains, return it directly
+        if rust_types.len() == 1 {
+            return Ok(rust_types.into_iter().next().unwrap());
+        }
+
         // Generate an enum for non-nullable union in type annotation position
         let mut variants = Vec::new();
         let mut name_parts = Vec::new();
-        for ty in &non_null_types {
-            let rust_type = convert_ts_type(ty, extra_items)?;
-            let variant_name = variant_name_from_type(&rust_type);
+        for rust_type in &rust_types {
+            let variant_name = variant_name_from_type(rust_type);
             name_parts.push(variant_name.clone());
             variants.push(EnumVariant {
                 name: variant_name,
                 value: None,
-                data: Some(rust_type),
+                data: Some(rust_type.clone()),
                 fields: vec![],
             });
         }
@@ -180,6 +197,16 @@ fn convert_union_type(
         Err(anyhow!(
             "union with multiple non-null types is not supported"
         ))
+    }
+}
+
+/// Unwraps `Promise<T>` to `T`. Returns the type unchanged for non-Promise types.
+fn unwrap_promise(ty: RustType) -> RustType {
+    match &ty {
+        RustType::Named { name, type_args } if name == "Promise" && type_args.len() == 1 => {
+            type_args[0].clone()
+        }
+        _ => ty,
     }
 }
 
@@ -496,6 +523,9 @@ pub fn convert_type_alias_items(
                 }]);
             }
             Err(_) => {
+                // Fallback: use the true branch type, or serde_json::Value if that also fails
+                let fallback_ty =
+                    convert_ts_type(&cond.true_type, &mut Vec::new()).unwrap_or(RustType::Any);
                 let comment =
                     format!("TODO: Conditional type not auto-converted\nOriginal TS: type {name}",);
                 return Ok(vec![
@@ -504,7 +534,7 @@ pub fn convert_type_alias_items(
                         vis,
                         name,
                         type_params,
-                        ty: RustType::Unit,
+                        ty: fallback_ty,
                     },
                 ]);
             }

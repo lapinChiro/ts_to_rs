@@ -151,6 +151,19 @@ fn collect_output_dirs_recursive(dir: &Path, dirs: &mut Vec<PathBuf>) -> Result<
     Ok(())
 }
 
+/// Compute default output directory path by appending `_rs` suffix.
+///
+/// Example: `"path/to/src"` → `"path/to/src_rs"`
+pub fn default_output_dir(input_dir: &Path) -> PathBuf {
+    let mut name = input_dir
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned();
+    name.push_str("_rs");
+    input_dir.with_file_name(name)
+}
+
 /// Validates that a directory input has at least one `.ts` file to convert.
 ///
 /// # Errors
@@ -317,6 +330,18 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let result = generate_mod_rs(tmp.path()).unwrap();
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_default_output_dir_appends_rs_suffix() {
+        let result = default_output_dir(Path::new("path/to/src"));
+        assert_eq!(result, PathBuf::from("path/to/src_rs"));
+    }
+
+    #[test]
+    fn test_default_output_dir_root_path() {
+        let result = default_output_dir(Path::new("/"));
+        assert_eq!(result, PathBuf::from("/_rs"));
     }
 
     #[test]

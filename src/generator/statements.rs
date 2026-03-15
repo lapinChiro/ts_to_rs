@@ -166,21 +166,21 @@ pub(super) fn generate_stmt(stmt: &Stmt, indent: usize, is_last_in_fn: bool) -> 
                 lines.push(format!("{pad}}});"));
             }
 
-            // Emit try/catch as immediately-invoked closure + match
+            // Emit try/catch as labeled block + if let Err
             if let Some(catch_stmts) = catch_body {
                 let param_name = catch_param.as_deref().unwrap_or("_e");
-                lines.push(format!("{pad}match (|| -> Result<(), String> {{"));
+                lines.push(format!(
+                    "{pad}let _try_result: Result<(), String> = 'try_block: {{"
+                ));
                 for s in try_body {
-                    lines.push(generate_stmt(s, indent + 1, false));
+                    lines.push(generate_try_body_stmt(s, indent + 1));
                 }
                 lines.push(format!("{inner_pad}Ok(())"));
-                lines.push(format!("{pad}}})() {{"));
-                lines.push(format!("{inner_pad}Err({param_name}) => {{"));
+                lines.push(format!("{pad}}};"));
+                lines.push(format!("{pad}if let Err({param_name}) = _try_result {{"));
                 for s in catch_stmts {
-                    lines.push(generate_stmt(s, indent + 2, false));
+                    lines.push(generate_stmt(s, indent + 1, false));
                 }
-                lines.push(format!("{inner_pad}}}"));
-                lines.push(format!("{inner_pad}_ => {{}}"));
                 lines.push(format!("{pad}}}"));
             } else {
                 // No catch block — just emit try body inline
@@ -192,6 +192,45 @@ pub(super) fn generate_stmt(stmt: &Stmt, indent: usize, is_last_in_fn: bool) -> 
             lines.join("\n")
         }
     }
+}
+
+/// Generates a statement inside a try block's labeled block.
+///
+/// Rewrites `return Err(...)` (from throw conversion) to `break 'try_block Err(...)`,
+/// so the error exits the labeled block rather than the enclosing function.
+fn generate_try_body_stmt(stmt: &Stmt, indent: usize) -> String {
+    let pad = indent_str(indent);
+    match stmt {
+        Stmt::Return(Some(expr)) if is_err_call(expr) => {
+            format!("{pad}break 'try_block {};", generate_expr(expr))
+        }
+        // Recurse into nested blocks (if/else, loops, etc.)
+        Stmt::If {
+            condition,
+            then_body,
+            else_body,
+        } => {
+            let mut lines = Vec::new();
+            lines.push(format!("{pad}if {} {{", generate_expr(condition)));
+            for s in then_body {
+                lines.push(generate_try_body_stmt(s, indent + 1));
+            }
+            if let Some(else_stmts) = else_body {
+                lines.push(format!("{pad}}} else {{"));
+                for s in else_stmts {
+                    lines.push(generate_try_body_stmt(s, indent + 1));
+                }
+            }
+            lines.push(format!("{pad}}}"));
+            lines.join("\n")
+        }
+        other => generate_stmt(other, indent, false),
+    }
+}
+
+/// Checks if an expression is an `Err(...)` call.
+fn is_err_call(expr: &Expr) -> bool {
+    matches!(expr, Expr::FnCall { name, .. } if name == "Err")
 }
 
 /// Expands a `VecSpread` in a `let` binding into multiple statements.
@@ -540,7 +579,7 @@ fn f() {
     }
 
     #[test]
-    fn test_generate_stmt_try_catch_generates_closure_match() {
+    fn test_generate_stmt_try_catch_generates_labeled_block() {
         let item = Item::Fn {
             vis: Visibility::Private,
             is_async: false,
@@ -566,16 +605,16 @@ fn f() {
         };
         let output = generate(&[item]);
         assert!(
-            output.contains("match (|| -> Result<(), String> {"),
-            "expected closure match, got:\n{output}"
+            output.contains("let _try_result: Result<(), String> = 'try_block: {"),
+            "expected labeled block, got:\n{output}"
         );
         assert!(
             output.contains("do_something()"),
             "expected try body, got:\n{output}"
         );
         assert!(
-            output.contains("Err(e) => {"),
-            "expected catch arm, got:\n{output}"
+            output.contains("if let Err(e) = _try_result {"),
+            "expected if let Err, got:\n{output}"
         );
         assert!(
             output.contains("eprintln!"),
@@ -659,16 +698,16 @@ fn f() {
             "expected scopeguard, got:\n{output}"
         );
         assert!(
-            output.contains("match (|| -> Result<(), String> {"),
-            "expected closure match, got:\n{output}"
+            output.contains("let _try_result: Result<(), String> = 'try_block: {"),
+            "expected labeled block, got:\n{output}"
         );
         assert!(
             output.contains("cleanup()"),
             "expected finally body in scopeguard, got:\n{output}"
         );
         assert!(
-            output.contains("Err(e) => {"),
-            "expected catch arm, got:\n{output}"
+            output.contains("if let Err(e) = _try_result {"),
+            "expected if let Err, got:\n{output}"
         );
     }
 

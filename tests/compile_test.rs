@@ -75,6 +75,10 @@ fn test_all_fixtures_compile() {
         // Error handling fixture uses scopeguard crate which is not available in single-file
         // compilation.
         "error_handling",
+        // Fixtures using any/unknown generate serde_json::Value which requires the serde_json
+        // crate not available in single-file compilation.
+        "keyword-types",
+        "type-assertion",
     ];
 
     let mut entries: Vec<_> = fs::read_dir(fixture_dir)

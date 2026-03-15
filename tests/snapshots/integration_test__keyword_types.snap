@@ -2,15 +2,15 @@
 source: tests/integration_test.rs
 expression: output
 ---
-fn acceptAny(x: Box<dyn std::any::Any>) -> Box<dyn std::any::Any> {
+fn acceptAny(x: serde_json::Value) -> serde_json::Value {
     x
 }
 
-fn acceptUnknown(x: Box<dyn std::any::Any>) {
+fn acceptUnknown(x: serde_json::Value) {
     return;
 }
 
 struct Flexible {
-    data: Box<dyn std::any::Any>,
-    value: Box<dyn std::any::Any>,
+    data: serde_json::Value,
+    value: serde_json::Value,
 }

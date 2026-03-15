@@ -11,91 +11,171 @@
 
 ---
 
-## 変換の論理的正当性チェック
+## 根本課題: 型環境（TypeEnv）の導入
 
-**実施済み**: `report/conversion-correctness-audit.md` に 29 件の問題を記録。全件を PRD 化し `backlog/` に配置済み。
+現在のトランスフォーマーは **式の型を解決する仕組みを持たない**。各文は独立に変換され、`const x: Foo = ...` の後も `x` の型は追跡されない。関数パラメータの型も本体変換に伝播されない。
+
+この欠如が以下の問題群の共通原因:
+
+- optional chaining / nullish coalescing の非 Option 型対応（式の型が不明）
+- optional chaining の `Option` ネスト問題（中間式の型が不明）
+- builtin API の参照周り（`sort`, `reverse`, `fold` のクロージャパラメータ型）
+- const のミュータビリティ解析（使用箇所の分析が不可能）
+- `typeof x` 型ガード（変数の型が不明）
+- `+x` 数値変換（式の型が不明）
+- 空配列の型推論（使用先の型が不明）
+
+### 設計方針
+
+1. **TypeEnv**: 変数名 → RustType のスコープ付きマップ。`convert_stmt_list` が管理し、`let` 文の処理時にエントリを追加
+2. **関数パラメータの登録**: `convert_fn_decl` がパラメータの型を TypeEnv に登録してから本体を変換
+3. **式の型解決関数**: `resolve_expr_type(expr, type_env, registry) -> Option<RustType>` — TypeEnv + TypeRegistry + フィールド連鎖で式の型を解決
+4. **段階的導入**: TypeEnv を `convert_stmt_list` のシグネチャに追加し、まず optional chaining の型判定で使用。他の用途は順次拡張
+
+### 影響を受ける課題（TypeEnv 導入で解決可能になるもの）
+
+- optional chaining / nullish coalescing の非 Option 型対応
+- optional chaining の `Option` ネスト問題
+- `typeof x` 型ガード
+- `+x` 数値変換
+- 空配列の型推論
+- builtin API の `&mut self` 判定
+- const の使用箇所ベースのミュータビリティ解析
+
+---
 
 ## PRD 化可能（優先度順）
 
-優先度の判断軸: 正確性 > 変換率（Hono 実測） > 保守性 > 工数の小ささ
+優先度の判断軸: **変換の正確性** > 変換率（Hono 実測） > 保守性 > 工数の小ささ
 
-### Tier 1: Hono 変換率に直結（実測に基づく）
+### Tier 0: 基盤 — 正確な変換の前提条件
 
-1. **TsLitType の型注記位置対応** — 型構文（Hono 4件解消、工数小）
-   - 文字列リテラル型 `'Content-Type'`、真偽値リテラル型 `false` が型注記位置で未対応
-   - `convert_ts_type` に `TsLitType` アームを追加。文字列リテラル → `String`、真偽値リテラル → `bool` にフォールバック
+1. **TypeEnv（型環境）の導入** — アーキテクチャ
+   - 上記「根本課題」参照
+   - `convert_stmt_list` に `TypeEnv` を追加し、`let` 文の処理時にエントリを登録
+   - 関数パラメータの型を本体変換前に登録
+   - 式の型解決関数を追加
 
-2. **TsConditionalType の型注記位置対応** — 型構文（Hono 3件解消、工数中）
-   - `T extends string ? Response : Promise<Response>` のような conditional type が型注記位置で未対応
-   - `convert_ts_type` に `TsConditionalType` アーム追加。true branch にフォールバックする方針は type alias 位置と同様
+2. **`contains_throw` の全構文再帰化** — 変換正確性
+   - 現在 `contains_throw` は if/block 内のみ再帰。for/while/switch 内の throw は検出されず、関数の Result ラッピングが適用されない
+   - throw が存在する関数で Result ラッピングが欠落すると、生成コードがコンパイル不可になる
 
-3. **mapped type の基本対応** — 型構文（Hono 3件解消、工数中）
-   - `{ [P in keyof T]: ... }` が type alias body で未対応
-   - TypeRegistry から元の型のフィールドを解決して struct を生成するか、`HashMap<String, V>` にフォールバック
-
-4. **call signature パラメータの対応** — 型構文（Hono 3件解消、工数小）
-   - interface の call signature `(req: Request): Response` のパラメータパターンが未対応
-   - `convert_interface` の call signature 処理で non-ident パラメータを処理
-
-5. **ネスト async 関数** — 文（Hono 1件解消）
-   - 同期ネスト関数は実装済み。`async function dispatch()` が未対応
-   - stable Rust では async closure がないため、closure + async block で対応
-
-6. **TsTypeLit の型注記位置対応** — 型構文（Hono 2件解消、工数中）
-   - `{ env?: E['Bindings'] }` のようなインライン型リテラルが型注記位置で未対応
-   - `extra_items` 伝搬の仕組みを活用して struct を生成
-
-7. **Rust 予約語のエスケープ** — コード生成（Hono 1件、工数小）
+3. **Rust 予約語のエスケープ** — コード生成正確性（Hono 1件、工数小）
    - `match` メソッド名が Rust の予約語と衝突。`r#match` にエスケープする処理を generator に追加
+   - 正確性の問題: 予約語を含むコードが無条件にコンパイル不可
 
-### Tier 1.5: 変換率向上（Hono 以外にも汎用）
-
-8. **オブジェクト分割代入の拡張（デフォルト値、ネスト、rest）** — 分割代入
-   - 基本パターン・リネームは実装済み
-   - デフォルト値、ネスト、rest が未対応
-
-9. **nullable + 複数非null型の union** — 型構文（Hono 1件）
+4. **nullable + 複数非null型の union** — 型構文正確性（Hono 1件）
    - `string | number | null` のような union。現在エラー
-   - enum + `Option` の組み合わせで表現可能
+   - `Option<StringOrF64>` — enum + `Option` の組み合わせで表現可能
+   - 正確性の問題: 有効な TS 型がエラーになる
 
-10. **union 内の未対応型** — 型構文（Hono 2件）
+### Tier 1: 変換正確性 — 生成コードの構文的・意味的正確性
+
+5. **builtin API の参照モデル修正** — 変換正確性
+   - `findIndex` → `position()` は `Option<usize>` を返すが `f64` として扱われる
+   - `sort`/`reverse` → `&mut self` が必要だがパラメータは immutable
+   - `fold` → クロージャパラメータが `&f64` だが `f64` として生成される
+   - TypeEnv 導入後に対応可能な部分あり（`&mut self` の判定）
+
+6. **intersection 型注記位置での struct 生成** — 型変換正確性
+   - `x: { a: string } & { b: number }` が型注記位置にある場合、現在は最初の型のみ使用（情報損失）
+   - type alias 位置では既にフィールド統合 struct が生成されるが、型注記位置では匿名 struct の命名規則の設計が必要
+   - `extra_items` に struct を追加し Named 参照を返す方式で対応可能
+
+7. **複数オブジェクトスプレッドの対応** — 式変換正確性
+   - `{...a, ...b}` で 2 つ目以降のスプレッドがエラー
+   - IR の `StructInit` に `Vec<base>` を持たせ、generator で `let mut _obj = a.clone(); _obj.extend(b);` パターンを生成
+
+8. **条件内代入式の対応** — 式変換正確性
+   - `while (x = getValue())` がコンパイル不可
+   - `loop { let x = f(); if !x { break; } ... }` パターンへの変換
+
+### Tier 2: 型構文の網羅性 — 未対応の型パターン
+
+9. **TsLitType の型注記位置対応** — 型構文（Hono 4件解消、工数小）
+   - 文字列リテラル型 `'Content-Type'`、真偽値リテラル型 `false` が型注記位置で未対応
+   - `convert_ts_type` に `TsLitType` アームを追加
+
+10. **TsConditionalType の型注記位置対応** — 型構文（Hono 3件解消、工数中）
+    - `T extends string ? Response : Promise<Response>` のような conditional type が型注記位置で未対応
+    - `convert_ts_type` に `TsConditionalType` アーム追加
+
+11. **mapped type の基本対応** — 型構文（Hono 3件解消、工数中）
+    - `{ [P in keyof T]: ... }` が type alias body で未対応
+    - `HashMap<String, V>` にフォールバック
+
+12. **call signature パラメータの対応** — 型構文（Hono 3件解消、工数小）
+    - interface の call signature のパラメータパターンが未対応
+
+13. **TsTypeLit の型注記位置対応** — 型構文（Hono 2件解消、工数中）
+    - `{ env?: E['Bindings'] }` のようなインライン型リテラルが型注記位置で未対応
+    - `extra_items` 伝搬の仕組みを活用して struct を生成
+
+14. **union 内の未対応型** — 型構文（Hono 2件）
     - タプル配列 `[string, string][]`、ネストしたタプル/配列構造が union メンバーとして未対応
 
-### Tier 2: 保守性・アーキテクチャ改善
+### Tier 3: 文・式の網羅性
 
-11. **expressions/mod.rs のモジュール分割** — リファクタリング
+15. **ネスト async 関数** — 文（Hono 1件解消）
+    - `async function dispatch()` がネスト位置で未対応
+    - closure + async block で対応
+
+16. **オブジェクト分割代入の拡張（デフォルト値、ネスト、rest）** — 分割代入
+    - 基本パターン・リネームは実装済み
+    - デフォルト値、ネスト、rest が未対応
+
+17. **生成コードの Cargo.toml への依存クレート追加** — コード生成
+    - `serde_json`（any/unknown 変換）、`scopeguard`（finally 変換）を生成コードの Cargo.toml に含める機能が必要
+
+### Tier 4: あれば便利
+
+18. **非プリミティブ type assertion のコメント保持** — type assertion
+    - `(x as Foo)` → `x /* as Foo */` のようなコメント生成。コンパイルには影響しない
+
+19. **optional chaining 内の特殊変換テスト補強** — 演算子
+
+20. **Math.random() → `rand` クレート** — 組み込み API
+
+21. **indexed access type の非文字列キー対応** — 型構文（Hono 2件）
+    - 型パラメータキー `T[K]` 等。文字列リテラルキーのみ対応済み
+
+22. **TryCatch のエラー型パラメータ化** — 設計負債
+
+23. **qualified type name (`A.B` 形式)** — 型構文（Hono 1件）
+    - `Response.Body` のようなドット区切りの型名が未対応
+
+24. **型リテラルメンバーのメソッドシグネチャ対応** — 型構文（Hono 1件）
+
+### Tier 5: 保守性・アーキテクチャ改善
+
+25. **expressions/mod.rs のモジュール分割** — リファクタリング
     - 1,142 行。メソッドマッピング・組み込み API 変換等を別モジュールに分離
 
-12. **VecSpread 展開・tail expression 判定を transformer へ移動** — 設計負債
-    - generator が意味的な変換を行っている。工数大
+26. **VecSpread 展開・tail expression 判定を transformer へ移動** — 設計負債
+    - generator が意味的な変換を行っている
 
-### Tier 3: あれば便利
-
-13. **optional chaining 内の特殊変換テスト補強** — 演算子
-14. **Math.random() → `rand` クレート** — 組み込み API
-15. **indexed access type の非文字列キー対応** — 型構文（Hono 2件）
-    - 型パラメータキー `T[K]` 等。文字列リテラルキーのみ対応済み
-16. **TryCatch のエラー型パラメータ化** — 設計負債
-17. **qualified type name (`A.B` 形式)** — 型構文（Hono 1件）
-    - `Response.Body` のようなドット区切りの型名が未対応
-18. **型リテラルメンバーのメソッドシグネチャ対応** — 型構文（Hono 1件）
-    - 型リテラル内のメソッドシグネチャが未対応（プロパティシグネチャのみ対応済み）
+---
 
 ## 保留
 
-### 前提機能の実装待ち
+### 前提機能の実装待ち（TypeEnv が前提）
+
+- optional chaining / nullish coalescing の非 Option 型対応 — TypeEnv 導入後に対応
+- optional chaining の `Option` ネスト問題 — TypeEnv 導入後に対応
+- `+x`（数値変換）— TypeEnv 導入後に対応
+- `typeof x`（型チェック）— TypeEnv + 型ガード戦略が前提
+- 空配列の型推論 — TypeEnv 導入後に対応
+- const のミュータビリティ（使用箇所ベースの解析）— TypeEnv + 前方スキャンが前提
+
+### 前提機能の実装待ち（その他）
 
 - discriminated union の拡張パターン — 基本パターンの実績を見てから
-- optional chaining の `Option` ネスト問題 — 型推論インフラが前提
-- `+x`（数値変換）— 型推論インフラが前提
-- `typeof x`（型チェック）— 型ガード戦略が前提
-- 空配列の型推論 — 型推論インフラが前提
-- computed property（Hono 3件）— 型注記なしオブジェクト方針が前提。`obj[Symbol.for('...')]` 等
+- computed property（Hono 3件）— 型注記なしオブジェクト方針が前提
 - `.substring` / `.slice` → `&s[a..b]` — UTF-8 境界問題
-- 型ガード（`typeof x === "string"`）— 型ガード戦略全体の方針が前提
+- 型ガード（`typeof x === "string"`）— 型ガード戦略全体の方針 + TypeEnv が前提
 - `in` 演算子（Hono 1件）— HashMap 方針決定が前提
 - ジェネリック型の具体化 — ジェネリクス変換が前提
-- ジェネリック型を含む intersection（Hono 1件）— `Required<Omit<...>> & { ... }` のようなパターン。ジェネリック型の展開が前提
+- ジェネリック型を含む intersection（Hono 1件）— ジェネリック型の展開が前提
 - re-export の追跡 — import 基本解決が前提
 - spread（TypeRegistry 未登録、Hono 1件）— 外部型の TypeRegistry 登録が前提
 
@@ -113,7 +193,7 @@
 
 ### 需要が低い・スコープ外
 
-- conditional type Tier 3（Hono 固有の高度な型、3件は Tier 1 で対応）— 詳細: `report/tier3-conditional-types-rust-approaches.md`
+- conditional type Tier 3（Hono 固有の高度な型）— 詳細: `report/tier3-conditional-types-rust-approaches.md`
 - heterogeneous enum（数値と文字列の混在）— TS でも非推奨
 - template literal type（Hono 1件）— Rust に直接対応する構文がない
 - `~x`, `void x`, `delete obj.prop` — 需要が低い

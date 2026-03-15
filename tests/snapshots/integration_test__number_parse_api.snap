@@ -3,11 +3,11 @@ source: tests/integration_test.rs
 expression: output
 ---
 fn toInt(s: String) -> f64 {
-    s.parse::<f64>().unwrap()
+    s.parse::<f64>().unwrap_or(f64::NAN)
 }
 
 fn toFloat(s: String) -> f64 {
-    s.parse::<f64>().unwrap()
+    s.parse::<f64>().unwrap_or(f64::NAN)
 }
 
 fn checkNaN(x: f64) -> bool {

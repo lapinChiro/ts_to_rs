@@ -49,7 +49,7 @@ pub fn generate_type(ty: &RustType) -> String {
                 format!("({inner})")
             }
         }
-        RustType::Any => "Box<dyn std::any::Any>".to_string(),
+        RustType::Any => "serde_json::Value".to_string(),
         RustType::Never => "!".to_string(),
         RustType::Named { name, type_args } => {
             if type_args.is_empty() {
@@ -198,7 +198,7 @@ mod tests {
 
     #[test]
     fn test_generate_type_any() {
-        assert_eq!(generate_type(&RustType::Any), "Box<dyn std::any::Any>");
+        assert_eq!(generate_type(&RustType::Any), "serde_json::Value");
     }
 
     #[test]

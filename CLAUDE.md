@@ -20,7 +20,7 @@ cargo check                # 高速な型チェック
 cargo test                 # 全テスト実行
 cargo clippy --all-targets --all-features -- -D warnings  # lint
 cargo fmt --all --check    # フォーマットチェック
-cargo llvm-cov --fail-under-lines 85   # カバレッジ計測（閾値85%）
+cargo llvm-cov --ignore-filename-regex 'main\.rs' --fail-under-lines 89  # カバレッジ計測（閾値89%、main.rs除外）
 cargo llvm-cov --html                  # HTMLレポート生成（target/llvm-cov/html/）
 ```
 
@@ -48,6 +48,8 @@ cargo llvm-cov --html                  # HTMLレポート生成（target/llvm-co
 ## Quality Standards
 
 全ての変更に対し **0エラー・0警告** を維持すること。作業完了時は /quality-check を実行する。
+
+カバレッジ閾値のラチェット運用: 実測値が閾値を 2pt 以上上回ったら、閾値を 1pt 引き上げる。
 
 ## 行動規範
 

@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -7,7 +6,7 @@ use anyhow::{Context, Result};
 use clap::Parser;
 
 use ts_to_rs::directory;
-use ts_to_rs::registry::{build_registry, TypeRegistry};
+use ts_to_rs::registry::TypeRegistry;
 use ts_to_rs::UnsupportedSyntax;
 
 /// TypeScript to Rust transpiler CLI tool.
@@ -136,41 +135,27 @@ where
     let ts_files = directory::collect_ts_files(input_dir)?;
     directory::validate_has_ts_files(&ts_files, input_dir)?;
 
-    let output_dir = output.map(PathBuf::from).unwrap_or_else(|| {
-        let mut name = input_dir
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .into_owned();
-        name.push_str("_rs");
-        input_dir.with_file_name(name)
-    });
+    let output_dir = output
+        .map(PathBuf::from)
+        .unwrap_or_else(|| directory::default_output_dir(input_dir));
 
-    // Pass 1: pre-scan all files and build shared registry
-    let mut file_registries: HashMap<PathBuf, TypeRegistry> = HashMap::new();
-    let mut file_sources: HashMap<PathBuf, String> = HashMap::new();
+    // Pass 1: read all files and build shared registry
+    let mut file_sources = Vec::new();
     for ts_path in &ts_files {
         let ts_source = fs::read_to_string(ts_path)
             .with_context(|| format!("failed to read: {}", ts_path.display()))?;
-        if let Ok(module) = ts_to_rs::parser::parse_typescript(&ts_source) {
-            let reg = build_registry(&module);
-            file_registries.insert(ts_path.clone(), reg);
-        }
-        file_sources.insert(ts_path.clone(), ts_source);
+        file_sources.push((ts_path.clone(), ts_source));
     }
 
-    let mut shared_registry = TypeRegistry::new();
-    for reg in file_registries.values() {
-        shared_registry.merge(reg);
-    }
+    let source_strs: Vec<&str> = file_sources.iter().map(|(_, s)| s.as_str()).collect();
+    let shared_registry = ts_to_rs::build_shared_registry(&source_strs);
 
     // Pass 2: transpile each file
     let mut all_unsupported = Vec::new();
     let mut rs_paths = Vec::new();
 
-    for ts_path in &ts_files {
+    for (ts_path, ts_source) in &file_sources {
         let rs_path = directory::compute_output_path(ts_path, input_dir, &output_dir)?;
-        let ts_source = &file_sources[ts_path];
 
         let (rs_source, unsupported) = transpile_file(ts_source, &shared_registry)
             .with_context(|| format!("failed to transpile: {}", ts_path.display()))?;

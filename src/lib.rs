@@ -25,6 +25,21 @@ pub struct UnsupportedSyntax {
     pub location: String,
 }
 
+/// Build a shared [`TypeRegistry`] from multiple TypeScript sources.
+///
+/// Each source is parsed independently; sources that fail to parse are silently skipped.
+/// The resulting registry contains type information from all successfully parsed sources.
+pub fn build_shared_registry(sources: &[&str]) -> TypeRegistry {
+    let mut shared = TypeRegistry::new();
+    for source in sources {
+        if let Ok(module) = parser::parse_typescript(source) {
+            let reg = build_registry(&module);
+            shared.merge(&reg);
+        }
+    }
+    shared
+}
+
 /// Transpiles TypeScript source code to Rust source code.
 ///
 /// Chains the full pipeline: parse → build registry → transform → generate.
@@ -141,6 +156,44 @@ mod tests {
     #[test]
     fn test_byte_pos_to_line_col_zero_returns_1_1() {
         assert_eq!(byte_pos_to_line_col("hello", 0), (1, 1));
+    }
+
+    #[test]
+    fn test_build_shared_registry_single_source_registers_type() {
+        let sources = vec!["interface Foo { x: string; }"];
+        let reg = build_shared_registry(&sources);
+        assert!(reg.get("Foo").is_some(), "Foo should be in the registry");
+    }
+
+    #[test]
+    fn test_build_shared_registry_multiple_sources_cross_reference() {
+        let sources = vec![
+            "interface Foo { x: string; }",
+            "interface Bar { y: number; }",
+        ];
+        let reg = build_shared_registry(&sources);
+        assert!(reg.get("Foo").is_some(), "Foo should be in the registry");
+        assert!(reg.get("Bar").is_some(), "Bar should be in the registry");
+    }
+
+    #[test]
+    fn test_build_shared_registry_invalid_source_skipped() {
+        let sources = vec!["{{{invalid", "interface Valid { x: string; }"];
+        let reg = build_shared_registry(&sources);
+        assert!(
+            reg.get("Valid").is_some(),
+            "Valid should be in the registry despite invalid source"
+        );
+    }
+
+    #[test]
+    fn test_build_shared_registry_empty_sources_returns_empty() {
+        let sources: Vec<&str> = vec![];
+        let reg = build_shared_registry(&sources);
+        assert!(
+            reg.get("Foo").is_none(),
+            "empty registry should not contain any types"
+        );
     }
 
     #[test]
@@ -336,8 +389,8 @@ function bar(x: Map = new Map()) { return x; }
             "function should still be converted, got: {output}"
         );
         assert!(
-            output.contains("Box<dyn std::any::Any>"),
-            "untyped param should fallback to Any, got: {output}"
+            output.contains("serde_json::Value"),
+            "untyped param should fallback to serde_json::Value, got: {output}"
         );
         assert!(
             !unsupported.is_empty(),

@@ -21,14 +21,12 @@ pub fn safeDivide(a: f64, b: f64) -> Result<f64, String> {
 }
 
 fn withTryCatch() {
-    match (|| -> Result<(), String> {
+    let _try_result: Result<(), String> = 'try_block: {
         riskyOperation();
         Ok(())
-    })() {
-        Err(e) => {
-            eprintln!("{:?}", e);
-        }
-        _ => {}
+    };
+    if let Err(e) = _try_result {
+        eprintln!("{:?}", e);
     }
 }
 
@@ -43,13 +41,39 @@ fn withTryCatchFinally() {
     let _finally_guard = scopeguard::guard((), |_| {
         println!("done");
     });
-    match (|| -> Result<(), String> {
+    let _try_result: Result<(), String> = 'try_block: {
         riskyOperation();
         Ok(())
-    })() {
-        Err(e) => {
+    };
+    if let Err(e) = _try_result {
+        eprintln!("{:?}", e);
+    }
+}
+
+fn withThrowInTryCatch(x: f64) {
+    let _try_result: Result<(), String> = 'try_block: {
+        if x < 0.0 {
+            break 'try_block Err("negative".to_string());
+        }
+        println!("ok");
+        Ok(())
+    };
+    if let Err(e) = _try_result {
+        eprintln!("{:?}", e);
+    }
+}
+
+fn withBreakInTryCatch(items: Vec<f64>) {
+    for item in items {
+        let _try_result: Result<(), String> = 'try_block: {
+            if item < 0.0 {
+                break;
+            }
+            riskyOperation();
+            Ok(())
+        };
+        if let Err(e) = _try_result {
             eprintln!("{:?}", e);
         }
-        _ => {}
     }
 }

@@ -41,3 +41,27 @@ function withTryCatchFinally(): void {
         console.log("done");
     }
 }
+
+function withThrowInTryCatch(x: number): void {
+    try {
+        if (x < 0) {
+            throw new Error("negative");
+        }
+        console.log("ok");
+    } catch (e) {
+        console.error(e);
+    }
+}
+
+function withBreakInTryCatch(items: number[]): void {
+    for (const item of items) {
+        try {
+            if (item < 0) {
+                break;
+            }
+            riskyOperation();
+        } catch (e) {
+            console.error(e);
+        }
+    }
+}

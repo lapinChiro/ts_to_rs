@@ -353,12 +353,13 @@ fn test_convert_stmt_throw_string_literal() {
 
 #[test]
 fn test_convert_stmt_var_decl_object_literal_with_type_annotation() {
+    // const + Named type → let mut (TS const allows field mutation)
     let stmts = parse_fn_body("function f() { const p: Point = { x: 1, y: 2 }; }");
     let result = convert_single_stmt(&stmts[0], &TypeRegistry::new(), None);
     assert_eq!(
         result,
         Stmt::Let {
-            mutable: false,
+            mutable: true,
             name: "p".to_string(),
             ty: Some(RustType::Named {
                 name: "Point".to_string(),
@@ -405,12 +406,13 @@ fn test_convert_stmt_var_decl_string_type_annotation_adds_to_string() {
 
 #[test]
 fn test_convert_stmt_var_decl_string_array_type_annotation() {
+    // const + Vec type → let mut (TS const allows push/pop)
     let stmts = parse_fn_body(r#"function f() { const a: string[] = ["a", "b"]; }"#);
     let result = convert_single_stmt(&stmts[0], &TypeRegistry::new(), None);
     assert_eq!(
         result,
         Stmt::Let {
-            mutable: false,
+            mutable: true,
             name: "a".to_string(),
             ty: Some(RustType::Vec(Box::new(RustType::String))),
             init: Some(Expr::Vec {

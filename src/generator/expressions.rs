@@ -177,10 +177,14 @@ pub(super) fn generate_expr(expr: &Expr) -> String {
         Expr::MacroCall { name, args } => generate_macro_call(name, args),
         Expr::Await(expr) => format!("{}.await", generate_expr(expr)),
         Expr::Index { object, index } => {
-            // Index values must be usize in Rust; emit integer literals without .0
+            // Index values must be usize in Rust; emit integer literals without .0,
+            // and cast variable expressions with `as usize`.
+            // Range expressions (for slicing) are passed through unchanged.
             let index_str = match index.as_ref() {
                 Expr::NumberLit(n) if n.fract() == 0.0 => format!("{}", *n as usize),
-                _ => generate_expr(index),
+                Expr::NumberLit(n) => format!("{n} as usize"),
+                Expr::Range { .. } => generate_expr(index),
+                _ => format!("{} as usize", generate_expr(index)),
             };
             format!("{}[{index_str}]", generate_expr(object))
         }

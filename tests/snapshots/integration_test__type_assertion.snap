@@ -2,7 +2,7 @@
 source: tests/integration_test.rs
 expression: output
 ---
-fn passThrough(x: Box<dyn std::any::Any>) -> Box<dyn std::any::Any> {
+fn passThrough(x: serde_json::Value) -> serde_json::Value {
     x
 }
 
@@ -11,5 +11,5 @@ fn assertString(x: String) -> String {
 }
 
 fn assertNumber(x: f64) -> f64 {
-    x
+    x as f64
 }

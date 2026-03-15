@@ -13,6 +13,6 @@ fn greet() -> String {
 }
 
 fn getNames() -> Vec<String> {
-    let names: Vec<String> = vec!["alice".to_string(), "bob".to_string()];
+    let mut names: Vec<String> = vec!["alice".to_string(), "bob".to_string()];
     names
 }

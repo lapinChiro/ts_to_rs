@@ -30,12 +30,12 @@ fn drawPoint(p: Origin) -> bool {
 }
 
 fn createRect() -> Rect {
-    let r: Rect = Rect { origin: Origin { x: 0.0, y: 0.0 }, size: Size { w: 10.0, h: 20.0 } };
+    let mut r: Rect = Rect { origin: Origin { x: 0.0, y: 0.0 }, size: Size { w: 10.0, h: 20.0 } };
     r
 }
 
 fn useEnum() -> f64 {
-    let c: Color = Color::Red;
+    let mut c: Color = Color::Red;
     0.0
 }
 

@@ -84,15 +84,15 @@ pub fn convert_stmt(
 
 /// Converts a variable declaration to an IR `Stmt::Let`.
 ///
-/// - `const` → immutable (`let`)
+/// - `const` with primitive type → immutable (`let`)
+/// - `const` with object/struct type → mutable (`let mut`), because TS `const` allows
+///   field mutation while Rust `let` does not
 /// - `let` / `var` → mutable (`let mut`)
 fn convert_var_decl(var_decl: &ast::VarDecl, reg: &TypeRegistry) -> Result<Stmt> {
     // We only handle single-declarator variable declarations
     let declarator = single_declarator(var_decl)?;
 
     let name = extract_pat_ident_name(&declarator.name)?;
-
-    let mutable = !matches!(var_decl.kind, ast::VarDeclKind::Const);
 
     let ty = match &declarator.name {
         ast::Pat::Ident(ident) => ident
@@ -101,6 +101,13 @@ fn convert_var_decl(var_decl: &ast::VarDecl, reg: &TypeRegistry) -> Result<Stmt>
             .map(|ann| convert_ts_type(&ann.type_ann, &mut Vec::new()))
             .transpose()?,
         _ => None,
+    };
+
+    let mutable = if matches!(var_decl.kind, ast::VarDeclKind::Const) {
+        // const + object type → let mut (TS const allows field mutation)
+        ty.as_ref().is_some_and(is_object_type)
+    } else {
+        true
     };
 
     let init = declarator
@@ -115,6 +122,12 @@ fn convert_var_decl(var_decl: &ast::VarDecl, reg: &TypeRegistry) -> Result<Stmt>
         ty,
         init,
     })
+}
+
+/// Returns true if the type is an object/struct type that may need mutability
+/// for field assignment in Rust (TS `const` allows field mutation).
+fn is_object_type(ty: &RustType) -> bool {
+    matches!(ty, RustType::Named { .. } | RustType::Vec(_))
 }
 
 /// Converts an if statement to an IR `Stmt::If`.

@@ -897,6 +897,40 @@ fn test_convert_expr_ternary_nested() {
     );
 }
 
+#[test]
+fn test_convert_expr_ternary_heterogeneous_branches_produces_if() {
+    // cond ? "a" : 1 → if-else with different types (no type coercion)
+    let swc_expr = parse_var_init(r#"const x = flag ? "a" : 1;"#);
+    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None).unwrap();
+    assert_eq!(
+        result,
+        Expr::If {
+            condition: Box::new(Expr::Ident("flag".to_string())),
+            then_expr: Box::new(Expr::StringLit("a".to_string())),
+            else_expr: Box::new(Expr::NumberLit(1.0)),
+        }
+    );
+}
+
+#[test]
+fn test_convert_expr_math_max_three_args_chains() {
+    // Math.max(a, b, c) → a.max(b).max(c)
+    let expr = parse_expr("Math.max(a, b, c);");
+    let result = convert_expr(&expr, &TypeRegistry::new(), None).unwrap();
+    assert_eq!(
+        result,
+        Expr::MethodCall {
+            object: Box::new(Expr::MethodCall {
+                object: Box::new(Expr::Ident("a".to_string())),
+                method: "max".to_string(),
+                args: vec![Expr::Ident("b".to_string())],
+            }),
+            method: "max".to_string(),
+            args: vec![Expr::Ident("c".to_string())],
+        }
+    );
+}
+
 // -- console.log/error/warn → MacroCall tests --
 
 #[test]
@@ -1620,7 +1654,7 @@ fn test_convert_expr_math_nested() {
 fn test_convert_expr_parse_int() {
     let expr = parse_expr(r#"parseInt("42");"#);
     let result = convert_expr(&expr, &TypeRegistry::new(), None).unwrap();
-    // parseInt("42") → "42".parse::<f64>().unwrap()
+    // parseInt("42") → "42".parse::<f64>().unwrap_or(f64::NAN)
     assert_eq!(
         result,
         Expr::MethodCall {
@@ -1629,8 +1663,8 @@ fn test_convert_expr_parse_int() {
                 method: "parse::<f64>".to_string(),
                 args: vec![],
             }),
-            method: "unwrap".to_string(),
-            args: vec![],
+            method: "unwrap_or".to_string(),
+            args: vec![Expr::Ident("f64::NAN".to_string())],
         }
     );
 }
@@ -1639,7 +1673,7 @@ fn test_convert_expr_parse_int() {
 fn test_convert_expr_parse_float() {
     let expr = parse_expr(r#"parseFloat("3.14");"#);
     let result = convert_expr(&expr, &TypeRegistry::new(), None).unwrap();
-    // parseFloat("3.14") → "3.14".parse::<f64>().unwrap()
+    // parseFloat("3.14") → "3.14".parse::<f64>().unwrap_or(f64::NAN)
     assert_eq!(
         result,
         Expr::MethodCall {
@@ -1648,8 +1682,8 @@ fn test_convert_expr_parse_float() {
                 method: "parse::<f64>".to_string(),
                 args: vec![],
             }),
-            method: "unwrap".to_string(),
-            args: vec![],
+            method: "unwrap_or".to_string(),
+            args: vec![Expr::Ident("f64::NAN".to_string())],
         }
     );
 }
@@ -1723,11 +1757,17 @@ fn test_convert_expr_nullish_coalescing_basic() {
 // -- Type assertion tests --
 
 #[test]
-fn test_convert_expr_type_assertion_strips_assertion() {
-    // `x as number` → just `x` (assertion removed)
+fn test_convert_expr_type_assertion_primitive_generates_cast() {
+    // `x as number` → `x as f64` (primitive cast preserved)
     let expr = parse_expr("x as number;");
     let result = convert_expr(&expr, &TypeRegistry::new(), None).unwrap();
-    assert_eq!(result, Expr::Ident("x".to_string()));
+    assert_eq!(
+        result,
+        Expr::Cast {
+            expr: Box::new(Expr::Ident("x".to_string())),
+            target: RustType::F64,
+        }
+    );
 }
 
 #[test]

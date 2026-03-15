@@ -32,4 +32,4 @@ jobs:
         run: cargo clippy --all-targets --all-features -- -D warnings
 
       - name: Test with coverage
-        run: cargo llvm-cov --fail-under-lines 85
+        run: cargo llvm-cov --ignore-filename-regex 'main\.rs' --fail-under-lines 89
