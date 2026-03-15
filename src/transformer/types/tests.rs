@@ -31,7 +31,12 @@ fn test_convert_ts_type_string() {
         TsTypeElement::TsPropertySignature(p) => p,
         _ => panic!("expected property signature"),
     };
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
+    let ty = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut Vec::new(),
+        &TypeRegistry::new(),
+    )
+    .unwrap();
     assert_eq!(ty, RustType::String);
 }
 
@@ -42,7 +47,12 @@ fn test_convert_ts_type_number() {
         TsTypeElement::TsPropertySignature(p) => p,
         _ => panic!("expected property signature"),
     };
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
+    let ty = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut Vec::new(),
+        &TypeRegistry::new(),
+    )
+    .unwrap();
     assert_eq!(ty, RustType::F64);
 }
 
@@ -53,7 +63,12 @@ fn test_convert_ts_type_boolean() {
         TsTypeElement::TsPropertySignature(p) => p,
         _ => panic!("expected property signature"),
     };
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
+    let ty = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut Vec::new(),
+        &TypeRegistry::new(),
+    )
+    .unwrap();
     assert_eq!(ty, RustType::Bool);
 }
 
@@ -64,7 +79,12 @@ fn test_convert_ts_type_array_bracket() {
         TsTypeElement::TsPropertySignature(p) => p,
         _ => panic!("expected property signature"),
     };
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
+    let ty = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut Vec::new(),
+        &TypeRegistry::new(),
+    )
+    .unwrap();
     assert_eq!(ty, RustType::Vec(Box::new(RustType::String)));
 }
 
@@ -75,7 +95,12 @@ fn test_convert_ts_type_array_generic() {
         TsTypeElement::TsPropertySignature(p) => p,
         _ => panic!("expected property signature"),
     };
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
+    let ty = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut Vec::new(),
+        &TypeRegistry::new(),
+    )
+    .unwrap();
     assert_eq!(ty, RustType::Vec(Box::new(RustType::F64)));
 }
 
@@ -86,7 +111,12 @@ fn test_convert_ts_type_union_null() {
         TsTypeElement::TsPropertySignature(p) => p,
         _ => panic!("expected property signature"),
     };
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
+    let ty = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut Vec::new(),
+        &TypeRegistry::new(),
+    )
+    .unwrap();
     assert_eq!(ty, RustType::Option(Box::new(RustType::String)));
 }
 
@@ -97,7 +127,12 @@ fn test_convert_ts_type_union_undefined() {
         TsTypeElement::TsPropertySignature(p) => p,
         _ => panic!("expected property signature"),
     };
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
+    let ty = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut Vec::new(),
+        &TypeRegistry::new(),
+    )
+    .unwrap();
     assert_eq!(ty, RustType::Option(Box::new(RustType::F64)));
 }
 
@@ -106,7 +141,7 @@ fn test_convert_ts_type_union_undefined() {
 #[test]
 fn test_convert_interface_basic() {
     let decl = parse_interface("interface Foo { name: string; age: number; }");
-    let item = convert_interface(&decl, Visibility::Public).unwrap();
+    let item = convert_interface(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
 
     match item {
         Item::Struct {
@@ -131,7 +166,7 @@ fn test_convert_interface_basic() {
 #[test]
 fn test_convert_interface_optional_field() {
     let decl = parse_interface("interface Bar { label?: string; }");
-    let item = convert_interface(&decl, Visibility::Public).unwrap();
+    let item = convert_interface(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
 
     match item {
         Item::Struct { fields, .. } => {
@@ -146,7 +181,7 @@ fn test_convert_interface_optional_field() {
 fn test_convert_interface_optional_union_null_no_double_wrap() {
     // `name?: string | null` should be `Option<String>`, not `Option<Option<String>>`
     let decl = parse_interface("interface Baz { name?: string | null; }");
-    let item = convert_interface(&decl, Visibility::Public).unwrap();
+    let item = convert_interface(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
 
     match item {
         Item::Struct { fields, .. } => {
@@ -159,7 +194,7 @@ fn test_convert_interface_optional_union_null_no_double_wrap() {
 #[test]
 fn test_convert_interface_vec_field() {
     let decl = parse_interface("interface Qux { items: number[]; }");
-    let item = convert_interface(&decl, Visibility::Public).unwrap();
+    let item = convert_interface(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
 
     match item {
         Item::Struct { fields, .. } => {
@@ -172,7 +207,7 @@ fn test_convert_interface_vec_field() {
 #[test]
 fn test_convert_interface_with_type_params() {
     let decl = parse_interface("interface Container<T> { value: T; }");
-    let item = convert_interface(&decl, Visibility::Public).unwrap();
+    let item = convert_interface(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
 
     match item {
         Item::Struct { type_params, .. } => {
@@ -185,7 +220,7 @@ fn test_convert_interface_with_type_params() {
 #[test]
 fn test_convert_interface_with_multiple_type_params() {
     let decl = parse_interface("interface Pair<A, B> { first: A; second: B; }");
-    let item = convert_interface(&decl, Visibility::Public).unwrap();
+    let item = convert_interface(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
 
     match item {
         Item::Struct { type_params, .. } => {
@@ -200,7 +235,7 @@ fn test_convert_interface_with_multiple_type_params() {
 #[test]
 fn test_convert_interface_method_only_generates_trait() {
     let decl = parse_interface("interface Greeter { greet(name: string): string; }");
-    let item = convert_interface(&decl, Visibility::Public).unwrap();
+    let item = convert_interface(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
 
     match item {
         Item::Trait { vis, name, methods } => {
@@ -221,7 +256,7 @@ fn test_convert_interface_method_only_generates_trait() {
 #[test]
 fn test_convert_interface_method_no_args_void_return() {
     let decl = parse_interface("interface Runner { run(): void; }");
-    let item = convert_interface(&decl, Visibility::Public).unwrap();
+    let item = convert_interface(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
 
     match item {
         Item::Trait { methods, .. } => {
@@ -237,7 +272,7 @@ fn test_convert_interface_method_no_args_void_return() {
 #[test]
 fn test_convert_interface_method_multiple_params() {
     let decl = parse_interface("interface Math { add(a: number, b: number): number; }");
-    let item = convert_interface(&decl, Visibility::Public).unwrap();
+    let item = convert_interface(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
 
     match item {
         Item::Trait { methods, .. } => {
@@ -253,7 +288,7 @@ fn test_convert_interface_method_multiple_params() {
 #[test]
 fn test_convert_interface_properties_only_still_struct() {
     let decl = parse_interface("interface Point { x: number; y: number; }");
-    let item = convert_interface(&decl, Visibility::Public).unwrap();
+    let item = convert_interface(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
 
     assert!(matches!(item, Item::Struct { .. }));
 }
@@ -261,7 +296,7 @@ fn test_convert_interface_properties_only_still_struct() {
 #[test]
 fn test_convert_interface_method_with_type_params() {
     let decl = parse_interface("interface Repo<T> { find(id: string): T; save(item: T): void; }");
-    let item = convert_interface(&decl, Visibility::Public).unwrap();
+    let item = convert_interface(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
 
     match item {
         Item::Trait { name, methods, .. } => {
@@ -317,7 +352,12 @@ fn test_convert_ts_type_named_with_type_args() {
         TsTypeElement::TsPropertySignature(p) => p,
         _ => panic!("expected property signature"),
     };
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
+    let ty = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut Vec::new(),
+        &TypeRegistry::new(),
+    )
+    .unwrap();
     assert_eq!(
         ty,
         RustType::Named {
@@ -334,7 +374,12 @@ fn test_convert_ts_type_named_with_multiple_type_args() {
         TsTypeElement::TsPropertySignature(p) => p,
         _ => panic!("expected property signature"),
     };
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
+    let ty = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut Vec::new(),
+        &TypeRegistry::new(),
+    )
+    .unwrap();
     assert_eq!(
         ty,
         RustType::Named {
@@ -351,7 +396,12 @@ fn test_convert_ts_type_named_without_type_args() {
         TsTypeElement::TsPropertySignature(p) => p,
         _ => panic!("expected property signature"),
     };
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
+    let ty = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut Vec::new(),
+        &TypeRegistry::new(),
+    )
+    .unwrap();
     assert_eq!(
         ty,
         RustType::Named {
@@ -371,7 +421,12 @@ fn test_convert_ts_type_fn_type() {
         TsTypeElement::TsPropertySignature(p) => p,
         _ => panic!("expected property signature"),
     };
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
+    let ty = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut Vec::new(),
+        &TypeRegistry::new(),
+    )
+    .unwrap();
     assert_eq!(
         ty,
         RustType::Fn {
@@ -388,7 +443,12 @@ fn test_convert_ts_type_fn_type_no_params() {
         TsTypeElement::TsPropertySignature(p) => p,
         _ => panic!("expected property signature"),
     };
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
+    let ty = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut Vec::new(),
+        &TypeRegistry::new(),
+    )
+    .unwrap();
     assert_eq!(
         ty,
         RustType::Fn {
@@ -407,7 +467,12 @@ fn test_convert_ts_type_any() {
         TsTypeElement::TsPropertySignature(p) => p,
         _ => panic!("expected property signature"),
     };
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
+    let ty = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut Vec::new(),
+        &TypeRegistry::new(),
+    )
+    .unwrap();
     assert_eq!(ty, RustType::Any);
 }
 
@@ -418,7 +483,12 @@ fn test_convert_ts_type_unknown() {
         TsTypeElement::TsPropertySignature(p) => p,
         _ => panic!("expected property signature"),
     };
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
+    let ty = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut Vec::new(),
+        &TypeRegistry::new(),
+    )
+    .unwrap();
     assert_eq!(ty, RustType::Any);
 }
 
@@ -429,7 +499,12 @@ fn test_convert_ts_type_never() {
         TsTypeElement::TsPropertySignature(p) => p,
         _ => panic!("expected property signature"),
     };
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
+    let ty = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut Vec::new(),
+        &TypeRegistry::new(),
+    )
+    .unwrap();
     assert_eq!(ty, RustType::Never);
 }
 
@@ -643,7 +718,12 @@ fn test_convert_ts_type_void_returns_unit() {
     };
     // The callback type is `() => void`, which is a TsFnType
     // whose return type is void. We check the return type is Unit.
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
+    let ty = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut Vec::new(),
+        &TypeRegistry::new(),
+    )
+    .unwrap();
     assert_eq!(
         ty,
         RustType::Fn {
@@ -755,7 +835,12 @@ fn test_convert_ts_type_tuple_two_elements() {
         TsTypeElement::TsPropertySignature(p) => p,
         _ => panic!("expected property signature"),
     };
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
+    let ty = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut Vec::new(),
+        &TypeRegistry::new(),
+    )
+    .unwrap();
     assert_eq!(ty, RustType::Tuple(vec![RustType::String, RustType::F64]));
 }
 
@@ -766,7 +851,12 @@ fn test_convert_ts_type_tuple_single_element() {
         TsTypeElement::TsPropertySignature(p) => p,
         _ => panic!("expected property signature"),
     };
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
+    let ty = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut Vec::new(),
+        &TypeRegistry::new(),
+    )
+    .unwrap();
     assert_eq!(ty, RustType::Tuple(vec![RustType::Bool]));
 }
 
@@ -777,7 +867,12 @@ fn test_convert_ts_type_tuple_empty() {
         TsTypeElement::TsPropertySignature(p) => p,
         _ => panic!("expected property signature"),
     };
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
+    let ty = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut Vec::new(),
+        &TypeRegistry::new(),
+    )
+    .unwrap();
     assert_eq!(ty, RustType::Tuple(vec![]));
 }
 
@@ -788,7 +883,12 @@ fn test_convert_ts_type_tuple_nested() {
         TsTypeElement::TsPropertySignature(p) => p,
         _ => panic!("expected property signature"),
     };
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
+    let ty = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut Vec::new(),
+        &TypeRegistry::new(),
+    )
+    .unwrap();
     assert_eq!(
         ty,
         RustType::Tuple(vec![
@@ -839,7 +939,12 @@ fn test_convert_ts_type_indexed_access_string_key_returns_associated_type() {
         TsTypeElement::TsPropertySignature(p) => p,
         _ => panic!("expected property signature"),
     };
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
+    let ty = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut Vec::new(),
+        &TypeRegistry::new(),
+    )
+    .unwrap();
     assert_eq!(
         ty,
         RustType::Named {
@@ -856,7 +961,11 @@ fn test_convert_ts_type_indexed_access_non_string_key_returns_error() {
         TsTypeElement::TsPropertySignature(p) => p,
         _ => panic!("expected property signature"),
     };
-    let result = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new());
+    let result = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut Vec::new(),
+        &TypeRegistry::new(),
+    );
     assert!(result.is_err());
 }
 
@@ -1061,7 +1170,7 @@ fn test_convert_type_alias_union_without_common_discriminant_falls_through() {
 #[test]
 fn test_convert_interface_call_signature_single_generates_fn_type_alias() {
     let decl = parse_interface("interface Callback { (x: number): string }");
-    let items = convert_interface_items(&decl, Visibility::Public).unwrap();
+    let items = convert_interface_items(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
     assert_eq!(items.len(), 1);
     assert_eq!(
         items[0],
@@ -1082,7 +1191,7 @@ fn test_convert_interface_call_signature_overload_uses_longest() {
     let decl = parse_interface(
         "interface Overloaded { (x: number): string; (x: number, y: string): boolean }",
     );
-    let items = convert_interface_items(&decl, Visibility::Public).unwrap();
+    let items = convert_interface_items(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
     assert_eq!(items.len(), 1);
     match &items[0] {
         Item::TypeAlias { ty, .. } => match ty {
@@ -1098,7 +1207,7 @@ fn test_convert_interface_call_signature_overload_uses_longest() {
 #[test]
 fn test_convert_interface_call_signature_no_params_generates_fn_type() {
     let decl = parse_interface("interface Factory { (): void }");
-    let items = convert_interface_items(&decl, Visibility::Public).unwrap();
+    let items = convert_interface_items(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
     assert_eq!(items.len(), 1);
     assert_eq!(
         items[0],
@@ -1117,7 +1226,7 @@ fn test_convert_interface_call_signature_no_params_generates_fn_type() {
 #[test]
 fn test_convert_interface_mixed_props_and_methods_generates_struct_and_trait() {
     let decl = parse_interface("interface Ctx { name: string; greet(msg: string): void }");
-    let items = convert_interface_items(&decl, Visibility::Public).unwrap();
+    let items = convert_interface_items(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
     assert_eq!(items.len(), 3);
     // First: struct with properties
     match &items[0] {
@@ -1376,7 +1485,11 @@ fn test_convert_ts_type_intersection_annotation_returns_first_type() {
         _ => panic!("expected property signature"),
     };
     let mut extra = Vec::new();
-    let result = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut extra);
+    let result = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut extra,
+        &TypeRegistry::new(),
+    );
     assert!(
         result.is_ok(),
         "intersection in annotation should not error, got: {result:?}"
@@ -1413,7 +1526,12 @@ fn test_convert_ts_type_type_lit_single_field_generates_struct() {
         _ => panic!("expected property signature"),
     };
     let mut extra = Vec::new();
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut extra).unwrap();
+    let ty = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut extra,
+        &TypeRegistry::new(),
+    )
+    .unwrap();
 
     match &ty {
         RustType::Named { name, .. } => {
@@ -1444,7 +1562,12 @@ fn test_convert_ts_type_type_lit_multiple_fields_generates_struct() {
         _ => panic!("expected property signature"),
     };
     let mut extra = Vec::new();
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut extra).unwrap();
+    let ty = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut extra,
+        &TypeRegistry::new(),
+    )
+    .unwrap();
 
     match &ty {
         RustType::Named { name, .. } => {
@@ -1473,7 +1596,12 @@ fn test_convert_ts_type_type_lit_optional_field_generates_option() {
         _ => panic!("expected property signature"),
     };
     let mut extra = Vec::new();
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut extra).unwrap();
+    let ty = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut extra,
+        &TypeRegistry::new(),
+    )
+    .unwrap();
 
     assert!(matches!(ty, RustType::Named { .. }));
     assert_eq!(extra.len(), 1);
@@ -1499,7 +1627,12 @@ fn test_convert_ts_type_intersection_type_lits_generates_merged_struct() {
         _ => panic!("expected property signature"),
     };
     let mut extra = Vec::new();
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut extra).unwrap();
+    let ty = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut extra,
+        &TypeRegistry::new(),
+    )
+    .unwrap();
 
     match &ty {
         RustType::Named { name, .. } => {
@@ -1531,7 +1664,12 @@ fn test_convert_ts_type_intersection_type_ref_and_type_lit_generates_struct() {
         _ => panic!("expected property signature"),
     };
     let mut extra = Vec::new();
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut extra).unwrap();
+    let ty = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut extra,
+        &TypeRegistry::new(),
+    )
+    .unwrap();
 
     match &ty {
         RustType::Named { name, .. } => {
@@ -1559,7 +1697,11 @@ fn test_convert_ts_type_intersection_duplicate_field_returns_error() {
         TsTypeElement::TsPropertySignature(p) => p,
         _ => panic!("expected property signature"),
     };
-    let result = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new());
+    let result = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut Vec::new(),
+        &TypeRegistry::new(),
+    );
     assert!(result.is_err(), "duplicate field should error");
     assert!(
         result.unwrap_err().to_string().contains("duplicate field"),
@@ -1621,7 +1763,12 @@ fn test_convert_ts_type_object_keyword_returns_serde_json_value() {
         TsTypeElement::TsPropertySignature(p) => p,
         _ => panic!("expected property signature"),
     };
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
+    let ty = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut Vec::new(),
+        &TypeRegistry::new(),
+    )
+    .unwrap();
     assert_eq!(
         ty,
         RustType::Named {
@@ -1658,7 +1805,12 @@ fn test_convert_ts_type_non_nullable_union_generates_enum_in_extra_items() {
         _ => panic!("expected property signature"),
     };
     let mut extra = Vec::new();
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut extra).unwrap();
+    let ty = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut extra,
+        &TypeRegistry::new(),
+    )
+    .unwrap();
     // The return type should be a Named reference to the generated enum
     assert!(
         matches!(ty, RustType::Named { .. }),
@@ -1686,7 +1838,12 @@ fn test_convert_ts_type_union_never_simplified_to_single_type() {
         TsTypeElement::TsPropertySignature(p) => p,
         _ => panic!("expected property signature"),
     };
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
+    let ty = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut Vec::new(),
+        &TypeRegistry::new(),
+    )
+    .unwrap();
     assert_eq!(ty, RustType::String);
 }
 
@@ -1698,7 +1855,12 @@ fn test_convert_ts_type_union_void_treated_as_nullable() {
         TsTypeElement::TsPropertySignature(p) => p,
         _ => panic!("expected property signature"),
     };
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
+    let ty = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut Vec::new(),
+        &TypeRegistry::new(),
+    )
+    .unwrap();
     assert_eq!(ty, RustType::Option(Box::new(RustType::String)));
 }
 
@@ -1734,7 +1896,12 @@ fn test_convert_ts_type_nullable_multi_type_generates_option_enum() {
         _ => panic!("expected property signature"),
     };
     let mut extra = Vec::new();
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut extra).unwrap();
+    let ty = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut extra,
+        &TypeRegistry::new(),
+    )
+    .unwrap();
 
     match &ty {
         RustType::Option(inner) => match inner.as_ref() {
@@ -1764,7 +1931,12 @@ fn test_convert_ts_type_nullable_null_undefined_dedup_returns_option() {
         _ => panic!("expected property signature"),
     };
     let mut extra = Vec::new();
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut extra).unwrap();
+    let ty = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut extra,
+        &TypeRegistry::new(),
+    )
+    .unwrap();
 
     assert_eq!(ty, RustType::Option(Box::new(RustType::String)));
     assert!(extra.is_empty(), "no extra items expected for single type");
@@ -1778,7 +1950,12 @@ fn test_convert_ts_type_nullable_three_types_generates_option_enum() {
         _ => panic!("expected property signature"),
     };
     let mut extra = Vec::new();
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut extra).unwrap();
+    let ty = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut extra,
+        &TypeRegistry::new(),
+    )
+    .unwrap();
 
     match &ty {
         RustType::Option(inner) => match inner.as_ref() {
@@ -1808,7 +1985,12 @@ fn test_convert_ts_type_lit_string_returns_string() {
         TsTypeElement::TsPropertySignature(p) => p,
         _ => panic!("expected property signature"),
     };
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
+    let ty = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut Vec::new(),
+        &TypeRegistry::new(),
+    )
+    .unwrap();
     assert_eq!(ty, RustType::String);
 }
 
@@ -1819,7 +2001,12 @@ fn test_convert_ts_type_lit_bool_true_returns_bool() {
         TsTypeElement::TsPropertySignature(p) => p,
         _ => panic!("expected property signature"),
     };
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
+    let ty = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut Vec::new(),
+        &TypeRegistry::new(),
+    )
+    .unwrap();
     assert_eq!(ty, RustType::Bool);
 }
 
@@ -1830,7 +2017,12 @@ fn test_convert_ts_type_lit_bool_false_returns_bool() {
         TsTypeElement::TsPropertySignature(p) => p,
         _ => panic!("expected property signature"),
     };
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
+    let ty = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut Vec::new(),
+        &TypeRegistry::new(),
+    )
+    .unwrap();
     assert_eq!(ty, RustType::Bool);
 }
 
@@ -1841,7 +2033,12 @@ fn test_convert_ts_type_lit_number_returns_f64() {
         TsTypeElement::TsPropertySignature(p) => p,
         _ => panic!("expected property signature"),
     };
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
+    let ty = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut Vec::new(),
+        &TypeRegistry::new(),
+    )
+    .unwrap();
     assert_eq!(ty, RustType::F64);
 }
 
@@ -1854,7 +2051,12 @@ fn test_convert_ts_type_conditional_true_branch_returns_type() {
         TsTypeElement::TsPropertySignature(p) => p,
         _ => panic!("expected property signature"),
     };
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
+    let ty = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut Vec::new(),
+        &TypeRegistry::new(),
+    )
+    .unwrap();
     assert_eq!(ty, RustType::Bool);
 }
 
@@ -1865,7 +2067,12 @@ fn test_convert_ts_type_record_string_number_returns_hashmap() {
         TsTypeElement::TsPropertySignature(p) => p,
         _ => panic!("expected property signature"),
     };
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
+    let ty = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut Vec::new(),
+        &TypeRegistry::new(),
+    )
+    .unwrap();
     assert_eq!(
         ty,
         RustType::Named {
@@ -1882,7 +2089,12 @@ fn test_convert_ts_type_readonly_returns_inner_type() {
         TsTypeElement::TsPropertySignature(p) => p,
         _ => panic!("expected property signature"),
     };
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
+    let ty = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut Vec::new(),
+        &TypeRegistry::new(),
+    )
+    .unwrap();
     assert_eq!(
         ty,
         RustType::Named {
@@ -1899,6 +2111,11 @@ fn test_convert_ts_type_conditional_bool_predicate_returns_bool() {
         TsTypeElement::TsPropertySignature(p) => p,
         _ => panic!("expected property signature"),
     };
-    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
+    let ty = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut Vec::new(),
+        &TypeRegistry::new(),
+    )
+    .unwrap();
     assert_eq!(ty, RustType::Bool);
 }

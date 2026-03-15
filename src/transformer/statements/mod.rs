@@ -136,7 +136,7 @@ fn convert_var_decl(
         ast::Pat::Ident(ident) => ident
             .type_ann
             .as_ref()
-            .map(|ann| convert_ts_type(&ann.type_ann, &mut Vec::new()))
+            .map(|ann| convert_ts_type(&ann.type_ann, &mut Vec::new(), reg))
             .transpose()?,
         _ => None,
     };
@@ -763,7 +763,7 @@ fn try_expand_spread_var_decl(
         ast::Pat::Ident(ident) => ident
             .type_ann
             .as_ref()
-            .map(|ann| convert_ts_type(&ann.type_ann, &mut Vec::new()))
+            .map(|ann| convert_ts_type(&ann.type_ann, &mut Vec::new(), reg))
             .transpose()?,
         _ => None,
     };
@@ -1370,7 +1370,7 @@ fn convert_nested_fn_decl(fn_decl: &ast::FnDecl, reg: &TypeRegistry) -> Result<S
             ast::Pat::Ident(ident) => ident
                 .type_ann
                 .as_ref()
-                .map(|ann| convert_ts_type(&ann.type_ann, &mut Vec::new()))
+                .map(|ann| convert_ts_type(&ann.type_ann, &mut Vec::new(), reg))
                 .transpose()?,
             _ => None,
         };
@@ -1384,7 +1384,7 @@ fn convert_nested_fn_decl(fn_decl: &ast::FnDecl, reg: &TypeRegistry) -> Result<S
         .function
         .return_type
         .as_ref()
-        .map(|ann| convert_ts_type(&ann.type_ann, &mut Vec::new()))
+        .map(|ann| convert_ts_type(&ann.type_ann, &mut Vec::new(), reg))
         .transpose()?
         .and_then(|ty| {
             if matches!(ty, RustType::Unit) {

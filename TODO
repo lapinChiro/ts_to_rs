@@ -30,16 +30,16 @@
 
 ### Tier 1: 高優先度 — 伝播リスクが高い、または ROI が極めて高い
 
-- **[I-41]** **`convert_type_ref` / `convert_ts_type` への TypeRegistry 伝搬** — アーキテクチャ改善
-    - 現在 `convert_ts_type(ts_type, extra_items)` は TypeRegistry を受け取らない
-    - ユーティリティ型の展開（I-40）、型解決の改善等に TypeRegistry が必要
-    - シグネチャ変更の影響範囲が広い（全呼び出し元の更新が必要）ため独立タスクとする
-    - ⚠️ 伝播: 今後の型関連機能追加のたびに TypeRegistry の欠如が制約になる
 
 ### Tier 2: 中優先度 — 直接的な価値が高い
 
 - **[I-14]** **オブジェクト分割代入の拡張（デフォルト値、ネスト、rest）** — 分割代入
     - TS で頻出。デフォルト値 `{ x = 0 }`, ネスト `{ a: { b } }`, rest `{ a, ...rest }` が未対応
+
+- **[I-45]** **型ガードの式変換（`typeof`, `instanceof`）** — 式変換
+    - `typeof x === "string"` → Rust の型チェック式に変換
+    - `instanceof` → `is` 等のパターンに変換
+    - 型 narrowing（I-38）の前提。まず式変換だけ対応し、narrowing は後続で実装
 
 - **[I-10]** **条件内代入式の対応** — 式変換正確性
     - `while (x = getValue())` → `loop { let x = getValue(); if !x { break; } ... }` パターンへ変換
@@ -49,6 +49,15 @@
 
 - **[I-23]** **constructor パラメータプロパティ** — クラス変換（Hono 2件）
     - `constructor(public x: number)` の TsParamProp 対応
+
+- **[I-46]** **computed property (`obj[expr]`) の変換** — 式変換
+    - TypeRegistry 登録済み struct → フィールドアクセスに変換
+    - 未登録 → `HashMap::get()` / index access に変換
+    - 方針決定済み: 「登録済み → フィールドアクセス、未登録 → HashMap」
+
+- **[I-47]** **`in` 演算子の変換** — 式変換
+    - `"key" in obj` → `obj.contains_key("key")` (HashMap) or フィールド存在チェック
+    - 方針決定済み: 「登録済み → コンパイル時判定、未登録 → HashMap::contains_key」
 
 - **[I-15]** **`+x`（単項プラス / 数値変換）** — 式変換
     - TypeEnv で型判定可能。`+x` → 型に応じて `x` / `x.parse::<f64>()` 等に変換
@@ -65,6 +74,7 @@
 - **[I-16]** **空配列の型推論改善** — 型推論
     - `const arr: number[] = []` は動作するが、型注記なし `const arr = []` は型情報なし
     - `expected` 型伝搬の改善で対応
+    - 🔗 関連: I-38（型推論基盤）の一部として対応可能
 
 - **[I-18]** **re-export の追跡** — import/export
     - `transform_import` / `transform_export_named` は実装済み
@@ -81,6 +91,7 @@
 
 - **[I-22]** **型注記なしパラメータ** — 型推論（Hono 1件）
     - Arrow 関数パラメータに型注記がない場合の型推論
+    - 🔗 関連: I-38（型推論基盤）の一部として対応可能
 
 - **[I-24]** **外部パッケージの型定義解決** — 型解決
     - 外部パッケージの `.d.ts` ファイルから型情報を読み込む
@@ -104,25 +115,12 @@
     - **TypeEnv の解決範囲の制限** (`expressions/mod.rs` `resolve_expr_type`): 直接の識別子・1 レベルのフィールドアクセスのみ。多段メンバーアクセス・関数戻り値・配列要素の型は未追跡
     - **expected 型の伝搬欠落** (`expressions/mod.rs` `convert_expr`): ネストした二項演算・optional chain 等に `expected` が伝搬されない
 
+### Tier 3: 低優先度
+
 - **[I-39]** **Transformer の Range 生成で `Expr::IntLit` を使用** — IR 整合性
     - `Expr::IntLit` は IR に追加済みだが、for ループの Range 生成（`0..n`）で `NumberLit(0.0)` を生成し、Generator の `generate_range_bound` が `as i64` キャストしている
     - Transformer 側で整数と判定できる場合に `IntLit` を直接生成すれば、Generator のキャスト不要
-
-- **[I-42]** **switch 文の改善（fall-through 検出 + 文字列 match + 非リテラル case）** — 変換正確性
-    - fall-through 検出で `return`/`throw` を終端として扱っていない。`return` で終わる case が fall-through パスに入り、unreachable な `_fall = true;` が生成される。`case 1: return "one";` は clean match の `1 => { return "one".to_string(); }` が正しい
-    - clean match で文字列 discriminant に `.as_str()` が必要（Rust の `match` は `String` を `&str` パターンでマッチできない）
-    - `MatchArm::patterns` が `Expr` 型だが、Rust の match パターンは式ではない。リテラルマッチは動作するが、変数 case（`case someVar:`）や destructuring は未対応
-    - バッチで対応可能
-
-- **[I-40]** **ユーティリティ型の TypeRegistry 連携（Partial/Required/Pick/Omit）** — 型構文
-    - `Partial<T>` → 全フィールドを `Option<T>` にした合成 struct
-    - `Required<T>` → 全フィールドから `Option` を剥がした struct
-    - `Pick<T, K>` / `Omit<T, K>` → 対応フィールドのみ/除外した struct
-    - 前提: `convert_type_ref` に `TypeRegistry` パラメータを渡すシグネチャ変更が必要（I-41）
-    - 🔗 依存: I-41
-
-### Tier 3: 低優先度
-
+    - 動作上は問題なし。孤立した改善
 - **[I-44]** **合成 struct 名のグローバルカウンタによる非決定性** — テスト品質
     - `_TypeLit0`, `_Intersection1` 等の合成 struct 名は `AtomicU32` グローバルカウンタで生成
     - テスト実行順序によって ID が変わるため、厳密な名前一致テストが書けない
@@ -135,7 +133,7 @@
 - **[I-29]** **ネスト async 関数** — 文（Hono 1件解消）
 - **[I-30]** **生成コードの Cargo.toml への依存クレート追加** — コード生成
     - I-03 完了済み。`tests/compile-check/Cargo.toml` の依存情報を参考に生成物の Cargo.toml を作成可能
-- **[I-31]** **expressions/mod.rs のモジュール分割** — リファクタリング（1,509 行）
+- **[I-31]** **expressions/mod.rs のモジュール分割** — リファクタリング（1,593 行）
 - **[I-32]** **コンパイルテストのスキップ解消** — テスト品質（4/51 がスキップ中）
     - I-03 完了済みで外部クレート起因 4 件は解消。残り 4 件（indexed-access-type, conditional-type, interface-mixed, union-type）は個別対応が必要
 - **[I-33]** **非プリミティブ type assertion のコメント保持** — type assertion
@@ -153,13 +151,12 @@
 
 - ジェネリック型の具体化 — ジェネリクス変換（大テーマ）が前提
 - ジェネリック型を含む intersection（Hono 1件）— ジェネリック型の展開が前提
+- 型 narrowing（型ガード後の型絞り込み）— I-38（型推論基盤）+ I-45（型ガードの式変換）が前提
 
 ### 設計方針の決定待ち
 
 以下はユーザーの設計方針決定が必要。個別の技術課題ではなく、横断的な戦略の選択が前提。
 
-- **型ガード戦略**（`typeof x`, `instanceof`, ユーザー定義型ガード）— 型 narrowing を含む包括的な方針が必要。部分実装はかえって混乱を招く
-- **オブジェクトリテラルの扱い方針**（computed property, `in` 演算子, 型注記なしオブジェクト）— 匿名 struct / HashMap / serde_json::Value のいずれを採用するかの横断的決定が必要
 - **`any`/`unknown` の実用的な変換先** — `Box<dyn Any>` は式中で使用不可。`serde_json::Value` 等の選択はユースケース依存
 - **エラー型戦略**（`anyhow::Error` / 独自型）— 初版は `String` 固定。変更はユーザー判断
 - **所有権推論**（clone 削減）— 初版は全 clone。最適化はユーザー判断

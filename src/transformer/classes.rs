@@ -75,12 +75,12 @@ pub fn extract_class_info(
     for member in &class_decl.class.body {
         match member {
             ast::ClassMember::ClassProp(prop) if prop.is_static => {
-                if let Some(ac) = convert_static_prop(prop, &vis)? {
+                if let Some(ac) = convert_static_prop(prop, &vis, reg)? {
                     static_consts.push(ac);
                 }
             }
             ast::ClassMember::ClassProp(prop) => {
-                fields.push(convert_class_prop(prop, &vis)?);
+                fields.push(convert_class_prop(prop, &vis, reg)?);
             }
             ast::ClassMember::Constructor(ctor) => {
                 constructor = Some(convert_constructor(ctor, &vis, reg)?);
@@ -545,7 +545,11 @@ fn try_extract_super_call(stmt: &Stmt) -> Option<Vec<Expr>> {
 /// Converts a static class property to an associated constant.
 ///
 /// Returns `None` if the property has no initializer (cannot become a const without a value).
-fn convert_static_prop(prop: &ast::ClassProp, vis: &Visibility) -> Result<Option<AssocConst>> {
+fn convert_static_prop(
+    prop: &ast::ClassProp,
+    vis: &Visibility,
+    reg: &TypeRegistry,
+) -> Result<Option<AssocConst>> {
     let name = extract_prop_name(&prop.key)
         .map_err(|_| anyhow!("unsupported static property key (only identifiers)"))?;
 
@@ -553,7 +557,7 @@ fn convert_static_prop(prop: &ast::ClassProp, vis: &Visibility) -> Result<Option
         .type_ann
         .as_ref()
         .ok_or_else(|| anyhow!("static property '{}' has no type annotation", name))?;
-    let ty = convert_ts_type(&type_ann.type_ann, &mut Vec::new())?;
+    let ty = convert_ts_type(&type_ann.type_ann, &mut Vec::new(), reg)?;
 
     let value = match &prop.value {
         Some(init) => convert_expr(
@@ -574,7 +578,11 @@ fn convert_static_prop(prop: &ast::ClassProp, vis: &Visibility) -> Result<Option
 }
 
 /// Converts a class property to a struct field.
-fn convert_class_prop(prop: &ast::ClassProp, class_vis: &Visibility) -> Result<StructField> {
+fn convert_class_prop(
+    prop: &ast::ClassProp,
+    class_vis: &Visibility,
+    reg: &TypeRegistry,
+) -> Result<StructField> {
     let field_name = extract_prop_name(&prop.key)
         .map_err(|_| anyhow!("unsupported class property key (only identifiers)"))?;
 
@@ -583,7 +591,7 @@ fn convert_class_prop(prop: &ast::ClassProp, class_vis: &Visibility) -> Result<S
         .as_ref()
         .ok_or_else(|| anyhow!("class property '{}' has no type annotation", field_name))?;
 
-    let ty = convert_ts_type(&type_ann.type_ann, &mut Vec::new())?;
+    let ty = convert_ts_type(&type_ann.type_ann, &mut Vec::new(), reg)?;
     let member_vis = resolve_member_visibility(prop.accessibility, class_vis);
 
     Ok(StructField {
@@ -603,7 +611,7 @@ fn convert_constructor(
     for param in &ctor.params {
         match param {
             ast::ParamOrTsParamProp::Param(p) => {
-                let param = convert_param_pat(&p.pat)?;
+                let param = convert_param_pat(&p.pat, reg)?;
                 params.push(param);
             }
             ast::ParamOrTsParamProp::TsParamProp(_) => {
@@ -722,7 +730,7 @@ fn convert_class_method(
 
     let mut params = Vec::new();
     for param in &method.function.params {
-        let p = convert_param_pat(&param.pat)?;
+        let p = convert_param_pat(&param.pat, reg)?;
         params.push(p);
     }
 
@@ -730,7 +738,7 @@ fn convert_class_method(
         .function
         .return_type
         .as_ref()
-        .map(|ann| convert_ts_type(&ann.type_ann, &mut Vec::new()))
+        .map(|ann| convert_ts_type(&ann.type_ann, &mut Vec::new(), reg))
         .transpose()?;
 
     // void → None (Rust omits `-> ()`)
@@ -817,9 +825,9 @@ fn is_self_field_access(expr: &Expr) -> bool {
 }
 
 /// Converts a parameter pattern into an IR [`Param`].
-fn convert_param_pat(pat: &ast::Pat) -> Result<Param> {
+fn convert_param_pat(pat: &ast::Pat, reg: &TypeRegistry) -> Result<Param> {
     match pat {
-        ast::Pat::Ident(ident) => crate::transformer::convert_ident_to_param(ident),
+        ast::Pat::Ident(ident) => crate::transformer::convert_ident_to_param(ident, reg),
         _ => Err(anyhow!("unsupported parameter pattern")),
     }
 }

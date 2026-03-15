@@ -201,7 +201,7 @@ fn convert_ts_as_expr(
     type_env: &TypeEnv,
 ) -> Result<Expr> {
     use crate::transformer::types::convert_ts_type;
-    match convert_ts_type(&ts_as.type_ann, &mut Vec::new()) {
+    match convert_ts_type(&ts_as.type_ann, &mut Vec::new(), reg) {
         Ok(target_ty) => {
             let is_primitive_cast = matches!(target_ty, RustType::F64 | RustType::Bool);
             if is_primitive_cast {
@@ -459,6 +459,7 @@ pub fn convert_arrow_expr(
                             resilient,
                             fallback_warnings,
                             &mut Vec::new(),
+                            reg,
                         )
                     })
                     .transpose()?;
@@ -480,6 +481,7 @@ pub fn convert_arrow_expr(
                 resilient,
                 fallback_warnings,
                 &mut Vec::new(),
+                reg,
             )
         })
         .transpose()?;
@@ -1553,7 +1555,7 @@ pub fn resolve_expr_type(
         ast::Expr::Paren(paren) => resolve_expr_type(&paren.expr, type_env, reg),
         ast::Expr::TsAs(ts_as) => {
             use crate::transformer::types::convert_ts_type;
-            convert_ts_type(&ts_as.type_ann, &mut Vec::new()).ok()
+            convert_ts_type(&ts_as.type_ann, &mut Vec::new(), reg).ok()
         }
         _ => None,
     }

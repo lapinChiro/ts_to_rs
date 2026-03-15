@@ -73,13 +73,16 @@ pub fn single_declarator(var_decl: &ast::VarDecl) -> Result<&ast::VarDeclarator>
 ///
 /// Extracts name and type annotation from a `BindingIdent`, converts the type,
 /// and returns a `Param`. Used by both function and class method parameter conversion.
-pub fn convert_ident_to_param(ident: &ast::BindingIdent) -> Result<crate::ir::Param> {
+pub fn convert_ident_to_param(
+    ident: &ast::BindingIdent,
+    reg: &crate::registry::TypeRegistry,
+) -> Result<crate::ir::Param> {
     let name = ident.id.sym.to_string();
     let ty = ident
         .type_ann
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("parameter '{}' has no type annotation", name))?;
-    let rust_type = types::convert_ts_type(&ty.type_ann, &mut Vec::new())?;
+    let rust_type = types::convert_ts_type(&ty.type_ann, &mut Vec::new(), reg)?;
     Ok(crate::ir::Param {
         name,
         ty: Some(rust_type),
@@ -426,7 +429,7 @@ fn transform_decl(
 ) -> Result<(Vec<Item>, Vec<String>)> {
     match decl {
         Decl::TsInterface(interface_decl) => {
-            let items = types::convert_interface_items(interface_decl, vis)?;
+            let items = types::convert_interface_items(interface_decl, vis, reg)?;
             Ok((items, vec![]))
         }
         Decl::TsTypeAlias(type_alias_decl) => {
@@ -547,7 +550,7 @@ fn convert_var_decl_arrow_fns(
                     arrow
                         .return_type
                         .as_ref()
-                        .and_then(|ann| convert_ts_type(&ann.type_ann, &mut Vec::new()).ok())
+                        .and_then(|ann| convert_ts_type(&ann.type_ann, &mut Vec::new(), reg).ok())
                 });
                 let mut fn_body = match body {
                     crate::ir::ClosureBody::Expr(expr) => {

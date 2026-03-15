@@ -68,11 +68,13 @@ cargo llvm-cov --html                  # HTMLレポート生成（target/llvm-co
 - 新機能・バグ修正の着手 → /tdd
 - 作業完了時（コミット前） → /quality-check
 - 機能追加完了後 → /refactoring-check
+- 開発セッションの最後（コミット前） → /todo-audit
 - backlog/ の操作 → /backlog-management
 - backlog/ が空で作業依頼を受けた → /backlog-replenishment
 - PRD の作成 → /prd-template
 - TODO が空で作業依頼を受けた → /todo-replenishment
 - 調査タスク → /investigation
+- TODO の棚卸し（定期的、または大きな機能追加の完了後） → /todo-grooming
 - 変換正当性の監査（定期的、または大規模変更後） → /correctness-audit
 - ルールの作成・変更 → /rule-writing, /rule-maintenance
 
