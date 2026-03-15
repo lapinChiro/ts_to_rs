@@ -588,6 +588,7 @@ fn test_convert_fn_decl_inline_type_literal_single_field_generates_struct() {
             name: "FooOpts".to_string(),
             type_params: vec![],
             fields: vec![StructField {
+                vis: None,
                 name: "x".to_string(),
                 ty: RustType::F64,
             }],
@@ -621,10 +622,12 @@ fn test_convert_fn_decl_inline_type_literal_multiple_fields_generates_struct() {
             type_params: vec![],
             fields: vec![
                 StructField {
+                    vis: None,
                     name: "x".to_string(),
                     ty: RustType::F64,
                 },
                 StructField {
+                    vis: None,
                     name: "y".to_string(),
                     ty: RustType::String,
                 },
@@ -672,5 +675,20 @@ fn test_convert_fn_decl_inline_type_literal_empty_generates_empty_struct() {
             type_params: vec![],
             fields: vec![],
         }
+    );
+}
+
+#[test]
+fn test_convert_fn_decl_default_param_inline_type_generates_struct() {
+    let decl = parse_fn_decl("function f(x: { a: string } = {}): void { }");
+    let (items, _warnings) =
+        convert_fn_decl(&decl, Visibility::Public, &TypeRegistry::new(), false).unwrap();
+    // Should produce: struct + function
+    let has_struct = items
+        .iter()
+        .any(|i| matches!(i, Item::Struct { name, .. } if name == "FX"));
+    assert!(
+        has_struct,
+        "inline type literal in default param should generate struct, got: {items:?}"
     );
 }

@@ -78,7 +78,7 @@ pub fn extract_class_info(
                 }
             }
             ast::ClassMember::ClassProp(prop) => {
-                fields.push(convert_class_prop(prop)?);
+                fields.push(convert_class_prop(prop, &vis)?);
             }
             ast::ClassMember::Constructor(ctor) => {
                 constructor = Some(convert_constructor(ctor, &vis, reg)?);
@@ -334,6 +334,67 @@ fn generate_child_class(info: &ClassInfo, parent: &ClassInfo) -> Result<Vec<Item
     Ok(items)
 }
 
+/// Generates IR items for a child class that also implements interfaces.
+///
+/// Produces: struct (parent+child fields) + impl Child + impl ParentTrait for Child
+/// + impl Interface for Child (per interface).
+pub fn generate_child_class_with_implements(
+    info: &ClassInfo,
+    parent: Option<&ClassInfo>,
+    iface_methods: &std::collections::HashMap<String, Vec<String>>,
+) -> Result<Vec<Item>> {
+    // Start with child class items (struct + impl + impl ParentTrait)
+    let mut items = generate_items_for_class(info, parent)?;
+
+    // Add interface trait impls by moving matching methods from impl Child to impl Interface
+    let mut claimed_methods: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    for iface_name in &info.implements {
+        if let Some(method_names) = iface_methods.get(iface_name) {
+            let trait_methods = strip_method_visibility(
+                &info
+                    .methods
+                    .iter()
+                    .filter(|m| method_names.contains(&m.name))
+                    .cloned()
+                    .collect::<Vec<_>>(),
+            );
+
+            if !trait_methods.is_empty() {
+                for m in &trait_methods {
+                    claimed_methods.insert(m.name.clone());
+                }
+                items.extend(make_impl(
+                    &info.name,
+                    Some(iface_name),
+                    vec![],
+                    None,
+                    trait_methods,
+                ));
+            }
+        }
+    }
+
+    // Remove claimed methods from the own impl block
+    if !claimed_methods.is_empty() {
+        for item in &mut items {
+            if let Item::Impl {
+                struct_name,
+                for_trait: None,
+                methods,
+                ..
+            } = item
+            {
+                if struct_name == &info.name {
+                    methods.retain(|m| !claimed_methods.contains(&m.name));
+                }
+            }
+        }
+    }
+
+    Ok(items)
+}
+
 /// Generates IR items for a class that implements one or more interfaces.
 ///
 /// Methods matching interface method names go into `impl Trait for Struct`.
@@ -490,7 +551,7 @@ fn convert_static_prop(prop: &ast::ClassProp, vis: &Visibility) -> Result<Option
 }
 
 /// Converts a class property to a struct field.
-fn convert_class_prop(prop: &ast::ClassProp) -> Result<StructField> {
+fn convert_class_prop(prop: &ast::ClassProp, class_vis: &Visibility) -> Result<StructField> {
     let field_name = extract_prop_name(&prop.key)
         .map_err(|_| anyhow!("unsupported class property key (only identifiers)"))?;
 
@@ -500,8 +561,10 @@ fn convert_class_prop(prop: &ast::ClassProp) -> Result<StructField> {
         .ok_or_else(|| anyhow!("class property '{}' has no type annotation", field_name))?;
 
     let ty = convert_ts_type(&type_ann.type_ann)?;
+    let member_vis = resolve_member_visibility(prop.accessibility, class_vis);
 
     Ok(StructField {
+        vis: Some(member_vis),
         name: field_name,
         ty,
     })
@@ -659,8 +722,10 @@ fn convert_class_method(
     let body_stmts = body.as_deref().unwrap_or(&[]);
     let needs_mut = is_setter || body_has_self_assignment(body_stmts);
 
+    let member_vis = resolve_member_visibility(method.accessibility, vis);
+
     Ok(Method {
-        vis: vis.clone(),
+        vis: member_vis,
         name,
         has_self: !method.is_static,
         has_mut_self: !method.is_static && needs_mut,
@@ -668,6 +733,21 @@ fn convert_class_method(
         return_type,
         body,
     })
+}
+
+/// Resolves the effective visibility of a class member based on its TypeScript accessibility modifier.
+///
+/// `protected` maps to `pub(crate)`, `private` maps to `Private`, and `public` (or unspecified)
+/// inherits the class-level visibility.
+fn resolve_member_visibility(
+    accessibility: Option<ast::Accessibility>,
+    class_vis: &Visibility,
+) -> Visibility {
+    match accessibility {
+        Some(ast::Accessibility::Protected) => Visibility::PubCrate,
+        Some(ast::Accessibility::Private) => Visibility::Private,
+        _ => class_vis.clone(),
+    }
 }
 
 /// Returns `true` if the method body contains an assignment to `self.field`.
@@ -728,10 +808,12 @@ mod tests {
                 type_params: vec![],
                 fields: vec![
                     StructField {
+                        vis: Some(Visibility::Private),
                         name: "x".to_string(),
                         ty: RustType::F64,
                     },
                     StructField {
+                        vis: Some(Visibility::Private),
                         name: "y".to_string(),
                         ty: RustType::String,
                     },
@@ -952,10 +1034,12 @@ mod tests {
             parent: None,
             fields: vec![
                 StructField {
+                    vis: None,
                     name: "a".to_string(),
                     ty: RustType::F64,
                 },
                 StructField {
+                    vis: None,
                     name: "b".to_string(),
                     ty: RustType::String,
                 },
@@ -1036,5 +1120,28 @@ mod tests {
             }
             _ => panic!("expected Item::Impl, got {:?}", items[1]),
         }
+    }
+
+    #[test]
+    fn test_convert_class_protected_method_generates_pub_crate() {
+        let decl = parse_class_decl("class Foo { protected greet(): string { return 'hi'; } }");
+        let items = convert_class_decl(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
+        match &items[1] {
+            Item::Impl { methods, .. } => {
+                assert_eq!(methods.len(), 1);
+                assert_eq!(methods[0].name, "greet");
+                assert_eq!(methods[0].vis, Visibility::PubCrate);
+            }
+            _ => panic!("expected Item::Impl"),
+        }
+    }
+
+    #[test]
+    fn test_convert_class_protected_property_generates_pub_crate_field() {
+        let decl = parse_class_decl("class Foo { protected x: number; }");
+        let items = convert_class_decl(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
+        // Verify via generator output since StructField doesn't have vis yet
+        let output = crate::generator::generate(&items);
+        assert!(output.contains("pub(crate) x: f64"));
     }
 }

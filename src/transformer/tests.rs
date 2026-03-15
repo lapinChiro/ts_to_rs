@@ -211,10 +211,12 @@ fn test_transform_module_single_interface() {
             type_params: vec![],
             fields: vec![
                 StructField {
+                    vis: None,
                     name: "name".to_string(),
                     ty: RustType::String,
                 },
                 StructField {
+                    vis: None,
                     name: "age".to_string(),
                     ty: RustType::F64,
                 },
@@ -555,5 +557,122 @@ class Foo implements Greeter {
             !methods.iter().any(|m| m.name == "greet"),
             "own impl should NOT contain greet"
         );
+    }
+}
+
+#[test]
+fn test_transform_module_class_extends_and_implements() {
+    let source = r#"
+interface Greeter { greet(): string; }
+class Parent {
+    name: string;
+    getName(): string { return this.name; }
+}
+class Child extends Parent implements Greeter {
+    age: number;
+    greet(): string { return this.name; }
+    helper(): void {}
+}
+"#;
+    let module = parse_typescript(source).expect("parse failed");
+    let items = transform_module(&module, &TypeRegistry::new()).unwrap();
+
+    // Child struct should exist with parent + child fields
+    let child_struct = items
+        .iter()
+        .find(|i| matches!(i, Item::Struct { name, .. } if name == "Child"));
+    assert!(
+        child_struct.is_some(),
+        "should have Child struct, got: {items:?}"
+    );
+    if let Some(Item::Struct { fields, .. }) = child_struct {
+        let field_names: Vec<&str> = fields.iter().map(|f| f.name.as_str()).collect();
+        assert!(
+            field_names.contains(&"name"),
+            "should have parent field 'name'"
+        );
+        assert!(
+            field_names.contains(&"age"),
+            "should have child field 'age'"
+        );
+    }
+
+    // impl ParentTrait for Child
+    let has_parent_trait_impl = items.iter().any(|i| {
+        matches!(
+            i,
+            Item::Impl {
+                struct_name,
+                for_trait: Some(trait_name),
+                ..
+            } if struct_name == "Child" && trait_name == "ParentTrait"
+        )
+    });
+    assert!(
+        has_parent_trait_impl,
+        "should have impl ParentTrait for Child, got: {items:?}"
+    );
+
+    // impl Greeter for Child
+    let has_greeter_impl = items.iter().any(|i| {
+        matches!(
+            i,
+            Item::Impl {
+                struct_name,
+                for_trait: Some(trait_name),
+                ..
+            } if struct_name == "Child" && trait_name == "Greeter"
+        )
+    });
+    assert!(
+        has_greeter_impl,
+        "should have impl Greeter for Child, got: {items:?}"
+    );
+
+    // impl Child (own methods not in any trait)
+    let own_impl = items.iter().find(|i| {
+        matches!(
+            i,
+            Item::Impl {
+                struct_name,
+                for_trait: None,
+                ..
+            } if struct_name == "Child"
+        )
+    });
+    assert!(own_impl.is_some(), "should have impl Child");
+    if let Some(Item::Impl { methods, .. }) = own_impl {
+        assert!(
+            methods.iter().any(|m| m.name == "helper"),
+            "own impl should contain helper"
+        );
+        assert!(
+            !methods.iter().any(|m| m.name == "greet"),
+            "own impl should NOT contain greet (it belongs to impl Greeter)"
+        );
+    }
+}
+
+#[test]
+fn test_transform_enum_computed_member_bitshift() {
+    let source = "enum Flags { Read = 1 << 0, Write = 1 << 1 }";
+    let module = parse_typescript(source).expect("parse failed");
+    let items = transform_module(&module, &TypeRegistry::new()).unwrap();
+
+    assert_eq!(items.len(), 1);
+    match &items[0] {
+        Item::Enum { variants, .. } => {
+            assert_eq!(variants[0].name, "Read");
+            assert_eq!(
+                variants[0].value,
+                Some(crate::ir::EnumValue::Expr("1 << 0".to_string()))
+            );
+            assert_eq!(variants[1].name, "Write");
+            assert_eq!(
+                variants[1].value,
+                Some(crate::ir::EnumValue::Expr("1 << 1".to_string()))
+            );
+        }
+        _ => panic!("expected Enum"),
     }
 }

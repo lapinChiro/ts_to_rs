@@ -5,7 +5,7 @@
 use anyhow::{anyhow, Result};
 use swc_ecma_ast as ast;
 
-use crate::ir::{BinOp, Expr, RustType, Stmt, UnOp};
+use crate::ir::{BinOp, ClosureBody, Expr, Param, RustType, Stmt, UnOp};
 use crate::registry::TypeRegistry;
 use crate::transformer::expressions::convert_expr;
 use crate::transformer::types::convert_ts_type;
@@ -62,6 +62,7 @@ pub fn convert_stmt(
         ast::Stmt::Labeled(labeled_stmt) => convert_labeled_stmt(labeled_stmt, reg, return_type),
         ast::Stmt::DoWhile(do_while) => convert_do_while_stmt(do_while, reg, return_type),
         ast::Stmt::Try(try_stmt) => convert_try_stmt(try_stmt, reg, return_type),
+        ast::Stmt::Decl(ast::Decl::Fn(fn_decl)) => convert_nested_fn_decl(fn_decl, reg),
         _ => Err(anyhow!("unsupported statement: {:?}", stmt)),
     }
 }
@@ -199,8 +200,8 @@ fn convert_for_stmt(
         label: None,
         var,
         iterable: Expr::Range {
-            start: Box::new(start),
-            end: Box::new(end),
+            start: Some(Box::new(start)),
+            end: Some(Box::new(end)),
         },
         body,
     })
@@ -548,12 +549,31 @@ fn try_convert_array_destructuring(
     for (i, elem) in arr_pat.elems.iter().enumerate() {
         let pat = match elem {
             Some(pat) => pat,
-            None => {
-                return Err(anyhow!(
-                    "skipping elements in array destructuring is not supported"
-                ))
-            }
+            None => continue, // skip hole: `[a, , b]`
         };
+
+        // Rest element: `[first, ...rest]`
+        if let ast::Pat::Rest(rest_pat) = pat {
+            let name = extract_pat_ident_name(&rest_pat.arg)?;
+            stmts.push(Stmt::Let {
+                mutable,
+                name,
+                ty: None,
+                init: Some(Expr::MethodCall {
+                    object: Box::new(Expr::Index {
+                        object: Box::new(source_expr.clone()),
+                        index: Box::new(Expr::Range {
+                            start: Some(Box::new(Expr::NumberLit(i as f64))),
+                            end: None,
+                        }),
+                    }),
+                    method: "to_vec".to_string(),
+                    args: vec![],
+                }),
+            });
+            break; // rest must be last
+        }
+
         let name = extract_pat_ident_name(pat)?;
         stmts.push(Stmt::Let {
             mutable,
@@ -697,6 +717,61 @@ fn convert_block_or_stmt(
             Ok(vec![s])
         }
     }
+}
+
+/// Converts a nested function declaration into a closure-bound `let` statement.
+///
+/// `function inner(x: number): number { return x; }`
+/// becomes `let inner = |x: f64| -> f64 { x };`
+fn convert_nested_fn_decl(fn_decl: &ast::FnDecl, reg: &TypeRegistry) -> Result<Stmt> {
+    let name = fn_decl.ident.sym.to_string();
+
+    let mut params = Vec::new();
+    for p in &fn_decl.function.params {
+        let param_name = extract_pat_ident_name(&p.pat)?;
+        let ty = match &p.pat {
+            ast::Pat::Ident(ident) => ident
+                .type_ann
+                .as_ref()
+                .map(|ann| convert_ts_type(&ann.type_ann))
+                .transpose()?,
+            _ => None,
+        };
+        params.push(Param {
+            name: param_name,
+            ty,
+        });
+    }
+
+    let return_type = fn_decl
+        .function
+        .return_type
+        .as_ref()
+        .map(|ann| convert_ts_type(&ann.type_ann))
+        .transpose()?
+        .and_then(|ty| {
+            if matches!(ty, RustType::Unit) {
+                None
+            } else {
+                Some(ty)
+            }
+        });
+
+    let body = match &fn_decl.function.body {
+        Some(block) => convert_stmt_list(&block.stmts, reg, return_type.as_ref())?,
+        None => Vec::new(),
+    };
+
+    Ok(Stmt::Let {
+        name,
+        mutable: false,
+        ty: None,
+        init: Some(Expr::Closure {
+            params,
+            return_type,
+            body: ClosureBody::Block(body),
+        }),
+    })
 }
 
 #[cfg(test)]

@@ -52,6 +52,8 @@ pub enum RustType {
 pub enum Visibility {
     /// `pub`
     Public,
+    /// `pub(crate)`
+    PubCrate,
     /// No visibility modifier (private by default)
     Private,
 }
@@ -63,6 +65,8 @@ pub enum EnumValue {
     Number(i64),
     /// A string value (e.g., `Up = "UP"`)
     Str(String),
+    /// A computed expression (e.g., `Read = 1 << 0`)
+    Expr(String),
 }
 
 /// A variant of an enum, with an optional value.
@@ -81,6 +85,8 @@ pub struct EnumVariant {
 /// A named field in a struct.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StructField {
+    /// Field visibility (defaults to inheriting from the parent struct)
+    pub vis: Option<Visibility>,
     /// Field name
     pub name: String,
     /// Field type
@@ -358,12 +364,12 @@ pub enum Expr {
         /// Right operand
         right: Box<Expr>,
     },
-    /// A range expression: `start..end`
+    /// A range expression: `start..end` or `start..` (open-ended)
     Range {
         /// Start of range (inclusive)
-        start: Box<Expr>,
-        /// End of range (exclusive)
-        end: Box<Expr>,
+        start: Option<Box<Expr>>,
+        /// End of range (exclusive, `None` for open-ended `start..`)
+        end: Option<Box<Expr>>,
     },
     /// A function call: `name(args)` (e.g., `Ok(x)`, `Err("msg".to_string())`)
     FnCall {
@@ -566,10 +572,12 @@ mod tests {
             type_params: vec![],
             fields: vec![
                 StructField {
+                    vis: None,
                     name: "x".to_string(),
                     ty: RustType::F64,
                 },
                 StructField {
+                    vis: None,
                     name: "y".to_string(),
                     ty: RustType::Option(Box::new(RustType::F64)),
                 },
@@ -830,8 +838,8 @@ mod tests {
             label: None,
             var: "i".to_string(),
             iterable: Expr::Range {
-                start: Box::new(Expr::NumberLit(0.0)),
-                end: Box::new(Expr::NumberLit(10.0)),
+                start: Some(Box::new(Expr::NumberLit(0.0))),
+                end: Some(Box::new(Expr::NumberLit(10.0))),
             },
             body: vec![],
         };
@@ -853,13 +861,13 @@ mod tests {
     #[test]
     fn test_expr_range() {
         let expr = Expr::Range {
-            start: Box::new(Expr::NumberLit(0.0)),
-            end: Box::new(Expr::NumberLit(5.0)),
+            start: Some(Box::new(Expr::NumberLit(0.0))),
+            end: Some(Box::new(Expr::NumberLit(5.0))),
         };
         match expr {
             Expr::Range { start, end } => {
-                assert_eq!(*start, Expr::NumberLit(0.0));
-                assert_eq!(*end, Expr::NumberLit(5.0));
+                assert_eq!(*start.unwrap(), Expr::NumberLit(0.0));
+                assert_eq!(*end.unwrap(), Expr::NumberLit(5.0));
             }
             _ => panic!("expected Range"),
         }

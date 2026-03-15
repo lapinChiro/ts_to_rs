@@ -6,16 +6,7 @@
 
 Hono 再評価（`report/hono-rescan-2025-03.md`）と依存関係に基づく実行順序。
 
-1. `backlog/object-keyword-type.md` — `object` keyword 対応（Hono 2件、工数極小）
-2. `backlog/protected-members.md` — `protected` → `pub(crate)`（工数小、#4 の前提）
-3. `backlog/non-nullable-union-annotation.md` — 非 nullable union 型注記（Hono 7件、#8 の前提）
-4. `backlog/extends-implements.md` — `extends` + `implements` 併用
-5. `backlog/computed-enum-member.md` — enum computed member
-6. `backlog/nested-function-decl.md` — ネスト関数宣言（Hono 1件）
-7. `backlog/array-destructuring-ext.md` — 配列分割代入の拡張
-8. `backlog/intersection-union-complex.md` — intersection + union 複合型（#3 の後）
-9. `backlog/stmt-responsibility.md` — convert_stmt 責務整理
-10. `backlog/default-param-extra-items.md` — extra_items 破棄修正
+1. `backlog/stmt-responsibility.md` — convert_stmt 責務整理（大規模リファクタリング）
 
 ## Hono 対応の開始条件
 

@@ -63,9 +63,10 @@
 8. **computed member（enum）** — enum
    - PRD 化済み（`backlog/computed-enum-member.md`）
 
-9. **ネスト関数宣言** — 文（Hono 1件）
-   - `compose.ts` 内の `async function dispatch()` がクロージャ内で宣言されている
-   - `convert_stmt` に `Decl::Fn` の処理を追加。ローカル関数としてクロージャに変換
+9. **ネスト関数宣言（async 対応）** — 文（Hono 1件）
+   - 同期ネスト関数は実装済み。`async function dispatch()` のようなネスト async 関数は未対応
+   - stable Rust では async closure がないため、通常 closure + async block での対応が必要
+   - Hono `compose.ts` の実際の変換時に対応を検討
 
 ### Tier 2: 保守性・アーキテクチャ改善
 

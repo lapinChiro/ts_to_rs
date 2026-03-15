@@ -1868,8 +1868,8 @@ fn test_convert_expr_slice_to_range_to_vec() {
             object: Box::new(Expr::Index {
                 object: Box::new(Expr::Ident("arr".to_string())),
                 index: Box::new(Expr::Range {
-                    start: Box::new(Expr::NumberLit(1.0)),
-                    end: Box::new(Expr::NumberLit(3.0)),
+                    start: Some(Box::new(Expr::NumberLit(1.0))),
+                    end: Some(Box::new(Expr::NumberLit(3.0))),
                 }),
             }),
             method: "to_vec".to_string(),
@@ -1890,12 +1890,12 @@ fn test_convert_expr_splice_to_drain_collect() {
                 object: Box::new(Expr::Ident("arr".to_string())),
                 method: "drain".to_string(),
                 args: vec![Expr::Range {
-                    start: Box::new(Expr::NumberLit(1.0)),
-                    end: Box::new(Expr::BinaryOp {
+                    start: Some(Box::new(Expr::NumberLit(1.0))),
+                    end: Some(Box::new(Expr::BinaryOp {
                         left: Box::new(Expr::NumberLit(1.0)),
                         op: BinOp::Add,
                         right: Box::new(Expr::NumberLit(2.0)),
-                    }),
+                    })),
                 }],
             }),
             method: "collect::<Vec<_>>".to_string(),

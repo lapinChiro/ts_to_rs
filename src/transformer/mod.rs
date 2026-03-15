@@ -457,6 +457,9 @@ fn transform_class_with_inheritance(
         if parent_info.is_some_and(|p| p.is_abstract) {
             // Parent is abstract — generate struct + impl AbstractParent for Child
             classes::generate_child_of_abstract(&info, parent_name)
+        } else if !info.implements.is_empty() {
+            // Child class with interface implementations
+            classes::generate_child_class_with_implements(&info, parent_info, iface_methods)
         } else {
             // This class is a child — generate struct + impl + trait impl
             classes::generate_items_for_class(&info, parent_info)
@@ -589,6 +592,7 @@ fn convert_ts_enum(ts_enum: &swc_ecma_ast::TsEnumDecl, vis: Visibility) -> Resul
                     None
                 }
             }
+            swc_ecma_ast::Expr::Bin(bin) => format_bin_expr(bin).map(EnumValue::Expr),
             _ => None,
         });
 
@@ -606,6 +610,36 @@ fn convert_ts_enum(ts_enum: &swc_ecma_ast::TsEnumDecl, vis: Visibility) -> Resul
         serde_tag: None,
         variants,
     }])
+}
+
+/// Formats a binary expression AST node as a Rust expression string.
+///
+/// Supports numeric literals and binary operators (e.g., `1 << 0`, `1 | 2`).
+/// Returns `None` for unsupported operands.
+fn format_bin_expr(bin: &swc_ecma_ast::BinExpr) -> Option<String> {
+    let left = format_simple_expr(&bin.left)?;
+    let right = format_simple_expr(&bin.right)?;
+    let op = match bin.op {
+        swc_ecma_ast::BinaryOp::LShift => "<<",
+        swc_ecma_ast::BinaryOp::RShift => ">>",
+        swc_ecma_ast::BinaryOp::BitOr => "|",
+        swc_ecma_ast::BinaryOp::BitAnd => "&",
+        swc_ecma_ast::BinaryOp::BitXor => "^",
+        swc_ecma_ast::BinaryOp::Add => "+",
+        swc_ecma_ast::BinaryOp::Sub => "-",
+        swc_ecma_ast::BinaryOp::Mul => "*",
+        _ => return None,
+    };
+    Some(format!("{left} {op} {right}"))
+}
+
+/// Formats a simple expression (numeric literal or nested binary) as a string.
+fn format_simple_expr(expr: &swc_ecma_ast::Expr) -> Option<String> {
+    match expr {
+        swc_ecma_ast::Expr::Lit(swc_ecma_ast::Lit::Num(n)) => Some(format!("{}", n.value as i64)),
+        swc_ecma_ast::Expr::Bin(bin) => format_bin_expr(bin),
+        _ => None,
+    }
 }
 
 /// Returns a human-readable kind name for a module-level item.

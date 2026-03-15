@@ -590,8 +590,8 @@ fn map_method_call(object: Expr, method: &str, args: Vec<Expr>) -> Expr {
                 object: Box::new(Expr::Index {
                     object: Box::new(object),
                     index: Box::new(Expr::Range {
-                        start: Box::new(start),
-                        end: Box::new(end),
+                        start: Some(Box::new(start)),
+                        end: Some(Box::new(end)),
                     }),
                 }),
                 method: "to_vec".to_string(),
@@ -619,8 +619,8 @@ fn map_method_call(object: Expr, method: &str, args: Vec<Expr>) -> Expr {
                 object: Box::new(object),
                 method: "drain".to_string(),
                 args: vec![Expr::Range {
-                    start: Box::new(start),
-                    end: Box::new(end),
+                    start: Some(Box::new(start)),
+                    end: Some(Box::new(end)),
                 }],
             };
             Expr::MethodCall {

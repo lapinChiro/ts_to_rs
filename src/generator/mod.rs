@@ -37,10 +37,7 @@ fn generate_item(item: &Item) -> String {
             .collect::<Vec<_>>()
             .join("\n"),
         Item::Use { vis, path, names } => {
-            let vis_prefix = match vis {
-                Visibility::Public => "pub ",
-                Visibility::Private => "",
-            };
+            let vis_prefix = generate_vis(vis);
             if names.len() == 1 {
                 format!("{vis_prefix}use {}::{};", path, names[0])
             } else {
@@ -57,10 +54,7 @@ fn generate_item(item: &Item) -> String {
             let generics = generate_type_params(type_params);
             let mut out = format!("{vis_str}struct {name}{generics} {{\n");
             for field in fields {
-                let field_vis = match vis {
-                    Visibility::Public => "pub ",
-                    Visibility::Private => "",
-                };
+                let field_vis = generate_vis(field.vis.as_ref().unwrap_or(vis));
                 out.push_str(&format!(
                     "    {field_vis}{}: {},\n",
                     field.name,
@@ -259,9 +253,12 @@ fn has_data_variants(variants: &[EnumVariant]) -> bool {
 
 fn is_numeric_enum(variants: &[EnumVariant]) -> bool {
     !has_data_variants(variants)
-        && variants
-            .iter()
-            .all(|v| matches!(v.value, None | Some(EnumValue::Number(_))))
+        && variants.iter().all(|v| {
+            matches!(
+                v.value,
+                None | Some(EnumValue::Number(_)) | Some(EnumValue::Expr(_))
+            )
+        })
 }
 
 /// Generates a Rust enum definition from IR.
@@ -317,19 +314,20 @@ fn generate_enum(
     } else if numeric {
         let mut next_value: i64 = 0;
         for variant in variants {
-            let value = match &variant.value {
+            match &variant.value {
                 Some(EnumValue::Number(n)) => {
                     next_value = *n + 1;
-                    *n
+                    out.push_str(&format!("    {} = {},\n", variant.name, n));
+                }
+                Some(EnumValue::Expr(expr)) => {
+                    out.push_str(&format!("    {} = {},\n", variant.name, expr));
                 }
                 None => {
-                    let v = next_value;
+                    out.push_str(&format!("    {} = {},\n", variant.name, next_value));
                     next_value += 1;
-                    v
                 }
                 _ => unreachable!(),
             };
-            out.push_str(&format!("    {} = {},\n", variant.name, value));
         }
     } else {
         for variant in variants {
@@ -403,6 +401,7 @@ fn generate_serde_tagged_enum(
 fn generate_vis(vis: &Visibility) -> &'static str {
     match vis {
         Visibility::Public => "pub ",
+        Visibility::PubCrate => "pub(crate) ",
         Visibility::Private => "",
     }
 }
@@ -478,10 +477,12 @@ mod tests {
             type_params: vec![],
             fields: vec![
                 StructField {
+                    vis: None,
                     name: "name".to_string(),
                     ty: RustType::String,
                 },
                 StructField {
+                    vis: None,
                     name: "age".to_string(),
                     ty: RustType::F64,
                 },
@@ -502,6 +503,7 @@ pub struct Foo {
             name: "Bar".to_string(),
             type_params: vec![],
             fields: vec![StructField {
+                vis: None,
                 name: "x".to_string(),
                 ty: RustType::Bool,
             }],
@@ -520,6 +522,7 @@ struct Bar {
             name: "Container".to_string(),
             type_params: vec!["T".to_string()],
             fields: vec![StructField {
+                vis: None,
                 name: "value".to_string(),
                 ty: RustType::Named {
                     name: "T".to_string(),

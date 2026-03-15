@@ -96,13 +96,14 @@ pub(super) fn generate_expr(expr: &Expr) -> String {
                 format!("{name} {{ {fields_str} }}")
             }
         }
-        Expr::Range { start, end } => {
-            format!(
-                "{}..{}",
-                generate_range_bound(start),
-                generate_range_bound(end)
-            )
-        }
+        Expr::Range { start, end } => match (start, end) {
+            (Some(s), Some(e)) => {
+                format!("{}..{}", generate_range_bound(s), generate_range_bound(e))
+            }
+            (Some(s), None) => format!("{}..", generate_range_bound(s)),
+            (None, Some(e)) => format!("..{}", generate_range_bound(e)),
+            (None, None) => "..".to_string(),
+        },
         Expr::FnCall { name, args } => {
             let args_str = args
                 .iter()

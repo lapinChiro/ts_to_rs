@@ -37,6 +37,10 @@ pub fn convert_ts_type(ts_type: &TsType) -> Result<RustType> {
                 Ok(RustType::Any)
             }
             TsKeywordTypeKind::TsNeverKeyword => Ok(RustType::Never),
+            TsKeywordTypeKind::TsObjectKeyword => Ok(RustType::Named {
+                name: "serde_json::Value".to_string(),
+                type_args: vec![],
+            }),
             other => Err(anyhow!("unsupported keyword type: {:?}", other)),
         },
         TsType::TsArrayType(arr) => {
@@ -132,7 +136,9 @@ fn convert_union_type(union: &swc_ecma_ast::TsUnionType) -> Result<RustType> {
         // `null | undefined` — treat as Option of unit, but we don't have unit type
         Err(anyhow!("union of only null/undefined is not supported"))
     } else if !has_null_or_undefined {
-        Err(anyhow!("non-nullable union types are not supported"))
+        // Fallback: use the first type of the union (information loss)
+        // TODO: anonymous enums are not expressible in Rust type annotation position
+        convert_ts_type(non_null_types[0])
     } else {
         Err(anyhow!(
             "union with multiple non-null types is not supported"
@@ -540,8 +546,19 @@ pub fn convert_type_alias(decl: &TsTypeAliasDecl, vis: Visibility) -> Result<Ite
                 fields,
             })
         }
+        TsType::TsKeywordType(_) => {
+            let ty = convert_ts_type(decl.type_ann.as_ref())?;
+            let type_params = extract_type_params(decl.type_params.as_deref());
+            Ok(Item::TypeAlias {
+                vis,
+                name,
+                ty,
+                type_params,
+            })
+        }
         _ => Err(anyhow!(
-            "unsupported type alias body (only object type literals are supported)"
+            "unsupported type alias body: {:?}",
+            std::mem::discriminant(decl.type_ann.as_ref())
         )),
     }
 }
@@ -1066,6 +1083,40 @@ fn try_convert_general_union(decl: &TsTypeAliasDecl, vis: Visibility) -> Result<
                     fields: vec![],
                 });
             }
+            TsType::TsTypeLit(lit) => {
+                let mut fields = Vec::new();
+                for member in &lit.members {
+                    if let TsTypeElement::TsPropertySignature(prop) = member {
+                        fields.push(convert_property_signature(prop)?);
+                    }
+                }
+                variants.push(EnumVariant {
+                    name: format!("Variant{}", variants.len()),
+                    value: None,
+                    data: None,
+                    fields,
+                });
+            }
+            TsType::TsUnionOrIntersectionType(
+                swc_ecma_ast::TsUnionOrIntersectionType::TsIntersectionType(intersection),
+            ) => {
+                let mut fields = Vec::new();
+                for member_ty in &intersection.types {
+                    if let TsType::TsTypeLit(lit) = member_ty.as_ref() {
+                        for member in &lit.members {
+                            if let TsTypeElement::TsPropertySignature(prop) = member {
+                                fields.push(convert_property_signature(prop)?);
+                            }
+                        }
+                    }
+                }
+                variants.push(EnumVariant {
+                    name: format!("Variant{}", variants.len()),
+                    value: None,
+                    data: None,
+                    fields,
+                });
+            }
             _ => return Err(anyhow!("unsupported type in union")),
         }
     }
@@ -1240,6 +1291,7 @@ pub(crate) fn convert_property_signature(prop: &TsPropertySignature) -> Result<S
     }
 
     Ok(StructField {
+        vis: None,
         name: field_name,
         ty,
     })

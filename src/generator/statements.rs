@@ -454,8 +454,8 @@ fn f() {
                 label: None,
                 var: "i".to_string(),
                 iterable: Expr::Range {
-                    start: Box::new(Expr::NumberLit(0.0)),
-                    end: Box::new(Expr::Ident("n".to_string())),
+                    start: Some(Box::new(Expr::NumberLit(0.0))),
+                    end: Some(Box::new(Expr::Ident("n".to_string()))),
                 },
                 body: vec![Stmt::Expr(Expr::Ident("x".to_string()))],
             }],

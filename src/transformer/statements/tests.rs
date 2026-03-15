@@ -116,8 +116,8 @@ fn test_convert_stmt_for_counter_zero_to_n() {
             label: None,
             var: "i".to_string(),
             iterable: Expr::Range {
-                start: Box::new(Expr::NumberLit(0.0)),
-                end: Box::new(Expr::Ident("n".to_string())),
+                start: Some(Box::new(Expr::NumberLit(0.0))),
+                end: Some(Box::new(Expr::Ident("n".to_string()))),
             },
             body: vec![Stmt::Expr(Expr::Ident("i".to_string()))],
         }
@@ -134,8 +134,8 @@ fn test_convert_stmt_for_counter_start_to_literal() {
             label: None,
             var: "i".to_string(),
             iterable: Expr::Range {
-                start: Box::new(Expr::NumberLit(1.0)),
-                end: Box::new(Expr::NumberLit(10.0)),
+                start: Some(Box::new(Expr::NumberLit(1.0))),
+                end: Some(Box::new(Expr::NumberLit(10.0))),
             },
             body: vec![Stmt::Expr(Expr::Ident("i".to_string()))],
         }
@@ -711,4 +711,54 @@ fn test_convert_stmt_list_array_destructuring_three_elements() {
     assert!(matches!(&result[0], Stmt::Let { name, .. } if name == "a"));
     assert!(matches!(&result[1], Stmt::Let { name, .. } if name == "b"));
     assert!(matches!(&result[2], Stmt::Let { name, .. } if name == "c"));
+}
+
+#[test]
+fn test_convert_stmt_list_array_destructuring_skip_element() {
+    let stmts = parse_fn_body("function f(arr: number[]) { const [a, , b] = arr; }");
+    let result = convert_stmt_list(&stmts, &TypeRegistry::new(), None).unwrap();
+    assert_eq!(result.len(), 2);
+    assert!(matches!(&result[0], Stmt::Let { name, .. } if name == "a"));
+    assert!(matches!(&result[1], Stmt::Let { name, .. } if name == "b"));
+    // Verify correct indices: a = arr[0], b = arr[2]
+    if let Stmt::Let {
+        init: Some(Expr::Index { index, .. }),
+        ..
+    } = &result[1]
+    {
+        assert_eq!(**index, Expr::NumberLit(2.0));
+    } else {
+        panic!("expected Index expression");
+    }
+}
+
+#[test]
+fn test_convert_stmt_list_array_destructuring_rest() {
+    let stmts = parse_fn_body("function f(arr: number[]) { const [first, ...rest] = arr; }");
+    let result = convert_stmt_list(&stmts, &TypeRegistry::new(), None).unwrap();
+    assert_eq!(result.len(), 2);
+    assert!(matches!(&result[0], Stmt::Let { name, .. } if name == "first"));
+    assert!(matches!(&result[1], Stmt::Let { name, .. } if name == "rest"));
+}
+
+#[test]
+fn test_convert_stmt_nested_fn_decl_generates_closure_let() {
+    let stmts =
+        parse_fn_body("function outer() { function inner(x: number): number { return x; } }");
+    let result = convert_stmt_list(&stmts, &TypeRegistry::new(), None).unwrap();
+    assert_eq!(result.len(), 1);
+    match &result[0] {
+        Stmt::Let {
+            name,
+            mutable,
+            init: Some(Expr::Closure { params, .. }),
+            ..
+        } => {
+            assert_eq!(name, "inner");
+            assert!(!mutable);
+            assert_eq!(params.len(), 1);
+            assert_eq!(params[0].name, "x");
+        }
+        other => panic!("expected Let with Closure, got: {other:?}"),
+    }
 }

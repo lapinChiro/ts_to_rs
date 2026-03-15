@@ -621,10 +621,16 @@ fn test_convert_type_alias_nullable_union_with_multiple_types() {
 }
 
 #[test]
-fn test_convert_type_alias_non_object_returns_error() {
+fn test_convert_type_alias_keyword_type_returns_type_alias() {
     let decl = parse_type_alias("type Name = string;");
-    let result = convert_type_alias(&decl, Visibility::Public);
-    assert!(result.is_err());
+    let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+    match item {
+        Item::TypeAlias { name, ty, .. } => {
+            assert_eq!(name, "Name");
+            assert_eq!(ty, RustType::String);
+        }
+        _ => panic!("expected Item::TypeAlias, got {:?}", item),
+    }
 }
 
 #[test]
@@ -969,6 +975,7 @@ fn test_convert_type_alias_discriminated_union_two_variants_generates_serde_tagg
                     value: Some(EnumValue::Str("click".to_string())),
                     data: None,
                     fields: vec![StructField {
+                        vis: None,
                         name: "x".to_string(),
                         ty: RustType::F64,
                     }],
@@ -978,6 +985,7 @@ fn test_convert_type_alias_discriminated_union_two_variants_generates_serde_tagg
                     value: Some(EnumValue::Str("hover".to_string())),
                     data: None,
                     fields: vec![StructField {
+                        vis: None,
                         name: "y".to_string(),
                         ty: RustType::F64,
                     }],
@@ -1371,5 +1379,74 @@ fn test_convert_type_alias_nullable_undefined_generates_option_alias() {
             assert_eq!(ty, RustType::Option(Box::new(RustType::F64)));
         }
         _ => panic!("expected Item::TypeAlias, got {:?}", item),
+    }
+}
+
+#[test]
+fn test_convert_ts_type_object_keyword_returns_serde_json_value() {
+    let decl = parse_interface("interface T { x: object; }");
+    let prop = match &decl.body.body[0] {
+        TsTypeElement::TsPropertySignature(p) => p,
+        _ => panic!("expected property signature"),
+    };
+    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann).unwrap();
+    assert_eq!(
+        ty,
+        RustType::Named {
+            name: "serde_json::Value".to_string(),
+            type_args: vec![],
+        }
+    );
+}
+
+#[test]
+fn test_convert_type_alias_object_keyword_returns_serde_json_value() {
+    let decl = parse_type_alias("type X = object;");
+    let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+    match item {
+        Item::TypeAlias { name, ty, .. } => {
+            assert_eq!(name, "X");
+            assert_eq!(
+                ty,
+                RustType::Named {
+                    name: "serde_json::Value".to_string(),
+                    type_args: vec![],
+                }
+            );
+        }
+        _ => panic!("expected Item::TypeAlias, got {:?}", item),
+    }
+}
+
+#[test]
+fn test_convert_ts_type_non_nullable_union_returns_first_type() {
+    let decl = parse_interface("interface T { x: string | number; }");
+    let prop = match &decl.body.body[0] {
+        TsTypeElement::TsPropertySignature(p) => p,
+        _ => panic!("expected property signature"),
+    };
+    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann).unwrap();
+    assert_eq!(ty, RustType::String);
+}
+
+#[test]
+fn test_convert_type_alias_intersection_union_complex_generates_enum() {
+    let decl = parse_type_alias("type X = { a: string } & { b: number } | { c: boolean };");
+    let item = convert_type_alias(&decl, Visibility::Public).unwrap();
+    match item {
+        Item::Enum { name, variants, .. } => {
+            assert_eq!(name, "X");
+            assert_eq!(variants.len(), 2);
+            // First variant: intersection { a: string } & { b: number } → merged fields
+            assert_eq!(variants[0].fields.len(), 2);
+            let field_names: Vec<&str> =
+                variants[0].fields.iter().map(|f| f.name.as_str()).collect();
+            assert!(field_names.contains(&"a"));
+            assert!(field_names.contains(&"b"));
+            // Second variant: { c: boolean }
+            assert_eq!(variants[1].fields.len(), 1);
+            assert_eq!(variants[1].fields[0].name, "c");
+        }
+        _ => panic!("expected Item::Enum, got {:?}", item),
     }
 }

@@ -217,9 +217,7 @@ fn convert_param(
             Ok((param, stmts, vec![]))
         }
         ast::Pat::Assign(assign) => {
-            let (param, stmts) =
-                convert_default_param(assign, fn_name, vis, resilient, fallback_warnings)?;
-            Ok((param, stmts, vec![]))
+            convert_default_param(assign, fn_name, vis, resilient, fallback_warnings)
         }
         _ => Err(anyhow!("unsupported parameter pattern")),
     }
@@ -235,11 +233,9 @@ fn convert_default_param(
     vis: Visibility,
     resilient: bool,
     fallback_warnings: &mut Vec<String>,
-) -> Result<(Param, Vec<Stmt>)> {
+) -> Result<(Param, Vec<Stmt>, Vec<Item>)> {
     // Recursively convert the inner parameter (left side)
-    // Note: extra items from inline type literals in default params are not expected,
-    // but we accept and discard them for API consistency.
-    let (inner_param, mut stmts, _extra) =
+    let (inner_param, mut stmts, extra) =
         convert_param(&assign.left, fn_name, vis, resilient, fallback_warnings)?;
     let param_name = inner_param.name.clone();
 
@@ -283,6 +279,7 @@ fn convert_default_param(
             ty: Some(option_type),
         },
         stmts,
+        extra,
     ))
 }
 
