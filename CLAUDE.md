@@ -71,6 +71,7 @@ cargo llvm-cov --html                  # HTMLレポート生成（target/llvm-co
 - PRD の作成 → /prd-template
 - TODO が空で作業依頼を受けた → /todo-replenishment
 - 調査タスク → /investigation
+- 変換正当性の監査（定期的、または大規模変更後） → /correctness-audit
 - ルールの作成・変更 → /rule-writing, /rule-maintenance
 
 ## 自発的改善の原則

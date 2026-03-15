@@ -2,11 +2,31 @@
 
 ## 次のタスク
 
-### 実行順序（Hono 変換率 57% → 目標 65%+）
+### 実行順序
 
-Hono 再評価（`report/hono-rescan-2025-03.md`）と依存関係に基づく実行順序。
+**開発環境の改善（先に実施）:**
 
-（全タスク完了）
+1. `backlog/main-rs-refactoring.md` — main.rs リファクタリング
+2. `backlog/coverage-threshold-optimization.md` — カバレッジ閾値最適化（#1 の完了が前提）
+
+**Critical — 生成コードがコンパイル不可:**
+
+3. `backlog/optional-chaining-nullish-fix.md` — optional chaining / nullish coalescing の非 Option 型対応
+4. `backlog/try-catch-control-flow.md` — try/catch の制御フロー（break/continue、throw 型不一致）
+5. `backlog/number-integer-context.md` — number の整数コンテキスト（配列インデックス `as usize`、parseInt パニック回避）
+6. `backlog/any-unknown-representation.md` — any/unknown の実用的表現（`Box<dyn Any>` → `serde_json::Value`）
+
+**High — 意味的に誤りまたは情報損失:**
+
+7. `backlog/type-assertion-preserve.md` — type assertion の型情報保持
+8. `backlog/promise-conditional-fallback.md` — Promise の union 内展開 + conditional type フォールバック改善
+9. `backlog/const-mutability.md` — const のミュータビリティ差異（オブジェクト型 → `let mut`）
+10. `backlog/test-quality-improvement.md` — テスト品質改善（コンパイル不可スナップショット修正、欠落テスト追加、アサーション強化）
+
+**Medium — エッジケース・小規模修正:**
+
+11. `backlog/expression-semantics-fixes.md` — 式変換の修正（Math 可変引数、複数スプレッド、三項演算子等）
+12. `backlog/type-edge-cases.md` — 型エッジケース（never/void の union 処理、intersection 型注記位置）
 
 ## Hono 対応の開始条件
 
