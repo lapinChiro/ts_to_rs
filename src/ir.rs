@@ -464,6 +464,8 @@ pub enum Expr {
         /// The target type
         target: RustType,
     },
+    /// A block expression: `{ stmt1; stmt2; tail_expr }`
+    Block(Vec<Stmt>),
 }
 
 /// Binary operators supported in the IR.

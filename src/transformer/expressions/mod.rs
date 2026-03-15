@@ -5,7 +5,7 @@
 use anyhow::{anyhow, Result};
 use swc_ecma_ast as ast;
 
-use crate::ir::{BinOp, ClosureBody, Expr, Param, RustType, UnOp};
+use crate::ir::{BinOp, ClosureBody, Expr, Param, RustType, Stmt, UnOp};
 use crate::registry::{TypeDef, TypeRegistry};
 use crate::transformer::functions::{convert_last_return_to_tail, convert_ts_type_with_fallback};
 use crate::transformer::statements::convert_stmt;
@@ -1413,16 +1413,15 @@ fn convert_array_lit(
         .iter()
         .filter_map(|e| e.as_ref())
         .any(|e| e.spread.is_some());
-    if has_spread {
-        return Err(anyhow!(
-            "spread array in expression position is not supported (only in let/return/expression statements)"
-        ));
-    }
 
     let element_type = match expected {
         Some(RustType::Vec(inner)) => Some(inner.as_ref()),
         _ => None,
     };
+
+    if has_spread {
+        return convert_spread_array_to_block(array_lit, reg, element_type, type_env);
+    }
 
     let elements = array_lit
         .elems
@@ -1431,6 +1430,89 @@ fn convert_array_lit(
         .map(|elem| convert_expr(&elem.expr, reg, element_type, type_env))
         .collect::<Result<Vec<_>>>()?;
     Ok(Expr::Vec { elements })
+}
+
+/// Converts a spread array literal to an `Expr::Block` that builds the vec at runtime.
+///
+/// `[1, ...arr, 2]` becomes:
+/// ```text
+/// {
+///     let mut _v = vec![1.0];
+///     _v.extend(arr.iter().cloned());
+///     _v.push(2.0);
+///     _v
+/// }
+/// ```
+fn convert_spread_array_to_block(
+    array_lit: &ast::ArrayLit,
+    reg: &TypeRegistry,
+    element_type: Option<&RustType>,
+    type_env: &TypeEnv,
+) -> Result<Expr> {
+    let mut stmts: Vec<Stmt> = Vec::new();
+
+    // Collect initial non-spread elements for vec![...] initialization
+    let mut init_elements: Vec<Expr> = Vec::new();
+    let mut initialized = false;
+
+    for elem_opt in &array_lit.elems {
+        let elem = match elem_opt {
+            Some(e) => e,
+            None => continue,
+        };
+
+        if elem.spread.is_some() {
+            // Emit initialization if not yet done
+            if !initialized {
+                stmts.push(Stmt::Let {
+                    mutable: true,
+                    name: "_v".to_string(),
+                    ty: None,
+                    init: Some(Expr::Vec {
+                        elements: std::mem::take(&mut init_elements),
+                    }),
+                });
+                initialized = true;
+            }
+            // _v.extend(arr.iter().cloned())
+            let spread_expr = convert_expr(&elem.expr, reg, None, type_env)?;
+            stmts.push(Stmt::Expr(Expr::MethodCall {
+                object: Box::new(Expr::Ident("_v".to_string())),
+                method: "extend".to_string(),
+                args: vec![Expr::MethodCall {
+                    object: Box::new(Expr::MethodCall {
+                        object: Box::new(spread_expr),
+                        method: "iter".to_string(),
+                        args: vec![],
+                    }),
+                    method: "cloned".to_string(),
+                    args: vec![],
+                }],
+            }));
+        } else {
+            let value = convert_expr(&elem.expr, reg, element_type, type_env)?;
+            if initialized {
+                // _v.push(value)
+                stmts.push(Stmt::Expr(Expr::MethodCall {
+                    object: Box::new(Expr::Ident("_v".to_string())),
+                    method: "push".to_string(),
+                    args: vec![value],
+                }));
+            } else {
+                init_elements.push(value);
+            }
+        }
+    }
+
+    // If no spread was encountered (shouldn't happen), fall back
+    if !initialized {
+        return Ok(Expr::Vec {
+            elements: init_elements,
+        });
+    }
+
+    stmts.push(Stmt::TailExpr(Expr::Ident("_v".to_string())));
+    Ok(Expr::Block(stmts))
 }
 
 /// Converts an SWC unary expression to an IR `UnaryOp`.

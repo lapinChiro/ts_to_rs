@@ -2708,3 +2708,61 @@ fn test_convert_opt_chain_nested_option_uses_and_then() {
         "nested optional chaining should use and_then, got: {result:?}"
     );
 }
+
+// -- array spread in expression position tests --
+
+use crate::ir::Stmt as IrStmt;
+
+#[test]
+fn test_convert_expr_array_spread_in_expression_generates_block() {
+    // foo([...arr, 1]) — spread in function arg position
+    let expr = parse_expr("foo([...arr, 1]);");
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    // The argument should be an Expr::Block
+    match &result {
+        Expr::FnCall { args, .. } => {
+            assert_eq!(args.len(), 1);
+            assert!(
+                matches!(&args[0], Expr::Block(_)),
+                "expected Block for spread array arg, got: {:?}",
+                args[0]
+            );
+        }
+        other => panic!("expected FnCall, got: {other:?}"),
+    }
+}
+
+#[test]
+fn test_convert_expr_array_spread_prefix_and_suffix_generates_block() {
+    // [1, ...arr, 2] in expression position (as function arg)
+    let expr = parse_expr("foo([1, ...arr, 2]);");
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    match &result {
+        Expr::FnCall { args, .. } => {
+            assert_eq!(args.len(), 1);
+            match &args[0] {
+                Expr::Block(stmts) => {
+                    // Should contain: let mut _v = vec![1.0]; + extend + push + tail
+                    assert!(
+                        stmts.len() >= 3,
+                        "expected at least 3 stmts in block, got {stmts:?}"
+                    );
+                    // First: let mut _v = vec![1.0];
+                    assert!(
+                        matches!(&stmts[0], IrStmt::Let { mutable: true, name, .. } if name == "_v"),
+                        "expected let mut _v, got: {:?}",
+                        stmts[0]
+                    );
+                    // Last: tail expr _v
+                    assert!(
+                        matches!(stmts.last(), Some(IrStmt::TailExpr(Expr::Ident(n))) if n == "_v"),
+                        "expected tail _v, got: {:?}",
+                        stmts.last()
+                    );
+                }
+                other => panic!("expected Block, got: {other:?}"),
+            }
+        }
+        other => panic!("expected FnCall, got: {other:?}"),
+    }
+}

@@ -217,6 +217,16 @@ pub(super) fn generate_expr(expr: &Expr) -> String {
         Expr::Ref(inner) => format!("&{}", generate_expr(inner)),
         Expr::Unit => "()".to_string(),
         Expr::IntLit(n) => format!("{n}"),
+        Expr::Block(stmts) => {
+            use super::statements::generate_stmt;
+            let mut out = "{\n".to_string();
+            for s in stmts {
+                out.push_str(&generate_stmt(s, 1));
+                out.push('\n');
+            }
+            out.push('}');
+            out
+        }
     }
 }
 
@@ -785,5 +795,22 @@ mod tests {
             base: Some(Box::new(Expr::Ident("other".to_string()))),
         };
         assert_eq!(generate_expr(&expr), "Foo { ..other }");
+    }
+
+    #[test]
+    fn test_generate_expr_block_renders_block_expression() {
+        let expr = Expr::Block(vec![
+            Stmt::Let {
+                mutable: true,
+                name: "_v".to_string(),
+                ty: None,
+                init: Some(Expr::Vec {
+                    elements: vec![Expr::NumberLit(1.0)],
+                }),
+            },
+            Stmt::TailExpr(Expr::Ident("_v".to_string())),
+        ]);
+        let expected = "{\n    let mut _v = vec![1.0];\n    _v\n}";
+        assert_eq!(generate_expr(&expr), expected);
     }
 }
