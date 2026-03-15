@@ -380,7 +380,7 @@ fn convert_try_stmt(
             init: Some(Expr::FnCall {
                 name: "scopeguard::guard".to_string(),
                 args: vec![
-                    Expr::Ident("()".to_string()),
+                    Expr::Unit,
                     Expr::Closure {
                         params: vec![crate::ir::Param {
                             name: "_".to_string(),
@@ -419,7 +419,7 @@ fn convert_try_stmt(
             }),
             init: Some(Expr::FnCall {
                 name: "Ok".to_string(),
-                args: vec![Expr::Ident("()".to_string())],
+                args: vec![Expr::Unit],
             }),
         });
 
@@ -471,8 +471,9 @@ fn convert_try_stmt(
         }
 
         // if let Err(param) = _try_result { ...catch... }
-        result.push(Stmt::If {
-            condition: Expr::Ident(format!("let Err({catch_param}) = _try_result")),
+        result.push(Stmt::IfLet {
+            pattern: format!("Err({catch_param})"),
+            expr: Expr::Ident("_try_result".to_string()),
             then_body: catch_body,
             else_body: None,
         });

@@ -832,7 +832,7 @@ fn map_method_call(object: Expr, method: &str, args: Vec<Expr>) -> Expr {
                     }],
                     return_type: None,
                     body: ClosureBody::Expr(Box::new(Expr::BinaryOp {
-                        left: Box::new(Expr::Ident("*item".to_string())),
+                        left: Box::new(Expr::Deref(Box::new(Expr::Ident("item".to_string())))),
                         op: BinOp::Eq,
                         right: Box::new(search_value),
                     })),
@@ -903,7 +903,7 @@ fn map_method_call(object: Expr, method: &str, args: Vec<Expr>) -> Expr {
                 .into_iter()
                 .map(|arg| match arg {
                     // Variable: &sep
-                    Expr::Ident(name) => Expr::Ident(format!("&{name}")),
+                    Expr::Ident(name) => Expr::Ref(Box::new(Expr::Ident(name))),
                     // String literal: already &str in Rust, pass through
                     lit @ Expr::StringLit(_) => lit,
                     // Other expressions: call .as_str() — but wrap in parens via method call
@@ -971,7 +971,7 @@ fn wrap_sort_comparator_body(expr: Expr) -> Expr {
                         object: Box::new(Expr::MethodCall {
                             object: inner,
                             method: "partial_cmp".to_string(),
-                            args: vec![Expr::Ident("&0.0".to_string())],
+                            args: vec![Expr::Ref(Box::new(Expr::NumberLit(0.0)))],
                         }),
                         method: "unwrap".to_string(),
                         args: vec![],

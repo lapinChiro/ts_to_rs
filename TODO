@@ -30,17 +30,6 @@
 
 ### Tier 1: 高優先度 — 伝播リスクが高い、または ROI が極めて高い
 
-- **[I-01]** **`Expr::Ident` の Rust 構文フラグメント濫用の解消** — IR 設計改善
-   - `Expr::Ident("*item")`, `Expr::Ident("&sep")`, `Expr::Ident("&0.0")`, `Expr::Ident("()")` のように、`Ident` に Rust 構文フラグメントを埋め込んでいる
-   - try/catch 展開で `Expr::Ident("let Err(e) = _try_result")` を `if` の condition に使用（`if let` パターンの表現手段がないため）
-   - IR に `Expr::Deref` / `Expr::Ref` / `Expr::Unit` / `Expr::LetPattern` を追加する
-   - ⚠️ 伝播: builtin API マッピング追加のたびに `*item` ハックが増える
-   - 🔗 相乗: I-02 の IntLit 追加と同時に IR 式バリアント拡充として対応可能
-
-- **[I-02]** **IR に整数リテラル `Expr::IntLit(i64)` を追加** — IR 設計改善
-   - Generator の `generate_range_bound` / `Expr::Index` が型変換を担当しており 1:1 レンダリング原則に違反
-   - 🔗 相乗: I-01 と同時に IR 式バリアント拡充として対応可能
-
 - **[I-03]** **コンパイルテストの外部クレート解決基盤** — テストインフラ
    - 現在のコンパイルテストは素の `rustc` で単一ファイルをコンパイルするため、外部クレート（scopeguard, serde, serde_json 等）を参照するコードがコンパイルできない
    - スキップ 8 件中 4 件（error_handling, discriminated-union, keyword-types, type-assertion）がこれに起因

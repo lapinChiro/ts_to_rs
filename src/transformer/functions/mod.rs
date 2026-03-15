@@ -612,7 +612,7 @@ fn wrap_stmt_return(stmt: Stmt) -> Stmt {
         }
         Stmt::Return(None) => Stmt::Return(Some(Expr::FnCall {
             name: "Ok".to_string(),
-            args: vec![Expr::Ident("()".to_string())],
+            args: vec![Expr::Unit],
         })),
         Stmt::If {
             condition,

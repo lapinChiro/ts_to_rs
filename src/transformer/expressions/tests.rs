@@ -2103,7 +2103,7 @@ fn test_convert_expr_index_of_to_iter_position() {
                         }],
                         return_type: None,
                         body: ClosureBody::Expr(Box::new(Expr::BinaryOp {
-                            left: Box::new(Expr::Ident("*item".to_string())),
+                            left: Box::new(Expr::Deref(Box::new(Expr::Ident("item".to_string(),)))),
                             op: BinOp::Eq,
                             right: Box::new(Expr::Ident("x".to_string())),
                         })),
@@ -2235,7 +2235,7 @@ fn test_map_method_join_passes_borrowed_arg() {
         // The argument should be a reference: &sep
         assert_eq!(
             args,
-            &[Expr::Ident("&sep".to_string())],
+            &[Expr::Ref(Box::new(Expr::Ident("sep".to_string())))],
             "expected &sep, got: {args:?}"
         );
         return;

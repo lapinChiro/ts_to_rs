@@ -288,6 +288,17 @@ pub enum Stmt {
     Expr(Expr),
     /// A tail expression (implicit return without `return` keyword).
     TailExpr(Expr),
+    /// `if let <pattern> = <expr> { ... } [else { ... }]`
+    IfLet {
+        /// Pattern to match (e.g., `"Err(e)"`)
+        pattern: String,
+        /// Expression to match against
+        expr: Expr,
+        /// Then branch body
+        then_body: Vec<Stmt>,
+        /// Optional else branch body
+        else_body: Option<Vec<Stmt>>,
+    },
     /// A labeled block: `'label: { body... }`
     ///
     /// Used for try/catch expansion where the labeled block captures the result.
@@ -409,6 +420,14 @@ pub enum Expr {
     },
     /// An await expression: `expr.await`
     Await(Box<Expr>),
+    /// A dereference expression: `*expr`
+    Deref(Box<Expr>),
+    /// A reference expression: `&expr`
+    Ref(Box<Expr>),
+    /// The unit value: `()`
+    Unit,
+    /// An integer literal: `42`
+    IntLit(i64),
     /// An index access expression: `object[index]`
     Index {
         /// The object expression (e.g., `arr`)

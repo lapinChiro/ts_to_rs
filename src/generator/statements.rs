@@ -126,6 +126,32 @@ pub(super) fn generate_stmt(stmt: &Stmt, indent: usize) -> String {
         Stmt::TailExpr(expr) => {
             format!("{pad}{}", generate_expr(expr))
         }
+        Stmt::IfLet {
+            pattern,
+            expr,
+            then_body,
+            else_body,
+        } => {
+            let mut out = format!("{pad}if let {pattern} = {} {{\n", generate_expr(expr));
+            for s in then_body {
+                out.push_str(&generate_stmt(s, indent + 1));
+                out.push('\n');
+            }
+            match else_body {
+                Some(stmts) => {
+                    out.push_str(&format!("{pad}}} else {{\n"));
+                    for s in stmts {
+                        out.push_str(&generate_stmt(s, indent + 1));
+                        out.push('\n');
+                    }
+                    out.push_str(&format!("{pad}}}"));
+                }
+                None => {
+                    out.push_str(&format!("{pad}}}"));
+                }
+            }
+            out
+        }
         Stmt::LabeledBlock { label, body } => {
             let mut out = format!("{pad}'{label}: {{\n");
             for s in body {
@@ -549,6 +575,62 @@ fn f() {
 fn f() -> f64 {
     return 1.0;
     2.0
+}";
+        assert_eq!(generate(&[item]), expected);
+    }
+
+    #[test]
+    fn test_generate_stmt_if_let_without_else_renders_if_let() {
+        let item = Item::Fn {
+            vis: Visibility::Private,
+            is_async: false,
+            name: "f".to_string(),
+            type_params: vec![],
+            params: vec![],
+            return_type: None,
+            body: vec![Stmt::IfLet {
+                pattern: "Err(e)".to_string(),
+                expr: Expr::Ident("result".to_string()),
+                then_body: vec![Stmt::Expr(Expr::MethodCall {
+                    object: Box::new(Expr::Ident("e".to_string())),
+                    method: "to_string".to_string(),
+                    args: vec![],
+                })],
+                else_body: None,
+            }],
+        };
+        let expected = "\
+fn f() {
+    if let Err(e) = result {
+        e.to_string();
+    }
+}";
+        assert_eq!(generate(&[item]), expected);
+    }
+
+    #[test]
+    fn test_generate_stmt_if_let_with_else_renders_else_branch() {
+        let item = Item::Fn {
+            vis: Visibility::Private,
+            is_async: false,
+            name: "f".to_string(),
+            type_params: vec![],
+            params: vec![],
+            return_type: None,
+            body: vec![Stmt::IfLet {
+                pattern: "Some(x)".to_string(),
+                expr: Expr::Ident("opt".to_string()),
+                then_body: vec![Stmt::Expr(Expr::Ident("x".to_string()))],
+                else_body: Some(vec![Stmt::Return(None)]),
+            }],
+        };
+        let expected = "\
+fn f() {
+    if let Some(x) = opt {
+        x;
+    } else {
+        return;
+    }
 }";
         assert_eq!(generate(&[item]), expected);
     }

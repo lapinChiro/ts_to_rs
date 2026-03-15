@@ -211,15 +211,16 @@ fn test_convert_stmt_list_try_catch_expands_to_let_block_if() {
         _ => panic!("expected LabeledBlock, got {:?}", result[1]),
     }
     match &result[2] {
-        Stmt::If {
-            condition,
-            then_body,
-            ..
+        Stmt::IfLet {
+            pattern, then_body, ..
         } => {
-            assert!(matches!(condition, Expr::Ident(s) if s.contains("Err(e)")));
+            assert!(
+                pattern.contains("Err(e)"),
+                "expected Err(e) pattern, got {pattern}"
+            );
             assert_eq!(then_body.len(), 1);
         }
-        _ => panic!("expected If, got {:?}", result[2]),
+        _ => panic!("expected IfLet, got {:?}", result[2]),
     }
 }
 
@@ -235,8 +236,8 @@ fn test_convert_stmt_list_try_catch_empty_catch_expands_correctly() {
         _ => panic!("expected LabeledBlock"),
     }
     match &result[2] {
-        Stmt::If { then_body, .. } => assert!(then_body.is_empty()),
-        _ => panic!("expected If"),
+        Stmt::IfLet { then_body, .. } => assert!(then_body.is_empty()),
+        _ => panic!("expected IfLet"),
     }
 }
 
@@ -263,7 +264,7 @@ fn test_convert_stmt_list_try_catch_finally_expands_all() {
     assert!(matches!(&result[0], Stmt::Let { name, .. } if name == "_finally_guard"));
     assert!(matches!(&result[1], Stmt::Let { name, .. } if name == "_try_result"));
     assert!(matches!(&result[2], Stmt::LabeledBlock { .. }));
-    assert!(matches!(&result[3], Stmt::If { .. }));
+    assert!(matches!(&result[3], Stmt::IfLet { .. }));
 }
 
 #[test]
@@ -287,12 +288,15 @@ fn test_convert_stmt_nested_try_catch_expands_inner_in_outer_body() {
         }
         _ => panic!("expected LabeledBlock, got {:?}", result[1]),
     }
-    // Outer if should use "outer" param
+    // Outer if let should use "outer" param
     match &result[2] {
-        Stmt::If { condition, .. } => {
-            assert!(matches!(condition, Expr::Ident(s) if s.contains("outer")));
+        Stmt::IfLet { pattern, .. } => {
+            assert!(
+                pattern.contains("outer"),
+                "expected outer in pattern, got {pattern}"
+            );
         }
-        _ => panic!("expected If, got {:?}", result[2]),
+        _ => panic!("expected IfLet, got {:?}", result[2]),
     }
 }
 
@@ -384,20 +388,24 @@ fn test_convert_try_catch_basic_expands_to_let_labeledblock_if() {
 
     // 3. if let Err(e) = _try_result { handle(e); }
     match &result[2] {
-        Stmt::If {
-            condition,
+        Stmt::IfLet {
+            pattern,
+            expr,
             then_body,
             else_body,
         } => {
-            // condition uses Ident hack for "let Err(e) = _try_result"
             assert!(
-                matches!(condition, Expr::Ident(s) if s.contains("Err")),
-                "expected if-let-err condition, got {condition:?}"
+                pattern.contains("Err"),
+                "expected Err pattern, got {pattern:?}"
+            );
+            assert!(
+                matches!(expr, Expr::Ident(s) if s == "_try_result"),
+                "expected _try_result expr, got {expr:?}"
             );
             assert!(!then_body.is_empty(), "expected catch body");
             assert!(else_body.is_none());
         }
-        _ => panic!("expected If, got {:?}", result[2]),
+        _ => panic!("expected IfLet, got {:?}", result[2]),
     }
 }
 
@@ -502,10 +510,10 @@ fn test_convert_try_catch_finally_expands_all() {
         result[2]
     );
 
-    // 4. if error check
+    // 4. if let error check
     assert!(
-        matches!(&result[3], Stmt::If { .. }),
-        "expected If, got {:?}",
+        matches!(&result[3], Stmt::IfLet { .. }),
+        "expected IfLet, got {:?}",
         result[3]
     );
 }

@@ -216,6 +216,10 @@ pub(super) fn generate_expr(expr: &Expr) -> String {
         Expr::Cast { expr, target } => {
             format!("{} as {}", generate_expr(expr), generate_type(target))
         }
+        Expr::Deref(inner) => format!("*{}", generate_expr(inner)),
+        Expr::Ref(inner) => format!("&{}", generate_expr(inner)),
+        Expr::Unit => "()".to_string(),
+        Expr::IntLit(n) => format!("{n}"),
     }
 }
 
@@ -260,6 +264,7 @@ fn generate_macro_call(name: &str, args: &[Expr]) -> String {
 /// must be emitted as integers (e.g., `0..n` instead of `0.0..n`).
 fn generate_range_bound(expr: &Expr) -> String {
     match expr {
+        Expr::IntLit(n) => format!("{n}"),
         Expr::NumberLit(n) if n.fract() == 0.0 => format!("{}", *n as i64),
         _ => format!("{} as i64", generate_expr(expr)),
     }
@@ -716,6 +721,44 @@ mod tests {
             args: vec![Expr::Ident("x".to_string())],
         };
         assert_eq!(generate_expr(&expr), "obj.foo(x)");
+    }
+
+    #[test]
+    fn test_generate_expr_deref_renders_star() {
+        let expr = Expr::Deref(Box::new(Expr::Ident("x".to_string())));
+        assert_eq!(generate_expr(&expr), "*x");
+    }
+
+    #[test]
+    fn test_generate_expr_ref_renders_ampersand() {
+        let expr = Expr::Ref(Box::new(Expr::Ident("sep".to_string())));
+        assert_eq!(generate_expr(&expr), "&sep");
+    }
+
+    #[test]
+    fn test_generate_expr_ref_number_renders_ampersand_literal() {
+        let expr = Expr::Ref(Box::new(Expr::NumberLit(0.0)));
+        assert_eq!(generate_expr(&expr), "&0.0");
+    }
+
+    #[test]
+    fn test_generate_expr_unit_renders_parens() {
+        assert_eq!(generate_expr(&Expr::Unit), "()");
+    }
+
+    #[test]
+    fn test_generate_expr_int_lit_positive_renders_number() {
+        assert_eq!(generate_expr(&Expr::IntLit(42)), "42");
+    }
+
+    #[test]
+    fn test_generate_expr_int_lit_negative_renders_negative() {
+        assert_eq!(generate_expr(&Expr::IntLit(-1)), "-1");
+    }
+
+    #[test]
+    fn test_generate_expr_int_lit_zero_renders_zero() {
+        assert_eq!(generate_expr(&Expr::IntLit(0)), "0");
     }
 
     #[test]
