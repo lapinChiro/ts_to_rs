@@ -99,26 +99,23 @@ pub(super) fn generate_expr(expr: &Expr) -> String {
                 format!("{obj_str}.{method}({args_str})")
             }
         }
-        Expr::StructInit { name, fields, .. } => {
-            if fields
+        Expr::StructInit { name, fields, base } => {
+            let mut parts: Vec<String> = if fields
                 .iter()
                 .all(|(f, v)| matches!(v, Expr::Ident(i) if i == f))
             {
-                // Shorthand: `Self { x, y }` when field name == value name
-                let fields_str = fields
-                    .iter()
-                    .map(|(f, _)| f.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                format!("{name} {{ {fields_str} }}")
+                // Shorthand: `x, y` when field name == value name
+                fields.iter().map(|(f, _)| f.to_string()).collect()
             } else {
-                let fields_str = fields
+                fields
                     .iter()
                     .map(|(f, v)| format!("{f}: {}", generate_expr(v)))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                format!("{name} {{ {fields_str} }}")
+                    .collect()
+            };
+            if let Some(base_expr) = base {
+                parts.push(format!("..{}", generate_expr(base_expr)));
             }
+            format!("{name} {{ {} }}", parts.join(", "))
         }
         Expr::Range { start, end } => match (start, end) {
             (Some(s), Some(e)) => {
@@ -768,5 +765,25 @@ mod tests {
             field: "x".to_string(),
         };
         assert_eq!(generate_expr(&expr), "self.x");
+    }
+
+    #[test]
+    fn test_generate_struct_init_with_base_renders_update_syntax() {
+        let expr = Expr::StructInit {
+            name: "Foo".to_string(),
+            fields: vec![("key".to_string(), Expr::NumberLit(1.0))],
+            base: Some(Box::new(Expr::Ident("other".to_string()))),
+        };
+        assert_eq!(generate_expr(&expr), "Foo { key: 1.0, ..other }");
+    }
+
+    #[test]
+    fn test_generate_struct_init_base_only_renders_update_syntax() {
+        let expr = Expr::StructInit {
+            name: "Foo".to_string(),
+            fields: vec![],
+            base: Some(Box::new(Expr::Ident("other".to_string()))),
+        };
+        assert_eq!(generate_expr(&expr), "Foo { ..other }");
     }
 }

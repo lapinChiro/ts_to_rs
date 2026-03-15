@@ -93,6 +93,18 @@ pub struct StructField {
     pub ty: RustType,
 }
 
+/// An arm in a `match` expression.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MatchArm {
+    /// Pattern expressions (e.g., literal values). Multiple patterns represent `a | b`.
+    /// Empty when `is_wildcard` is true.
+    pub patterns: Vec<Expr>,
+    /// Whether this is a wildcard arm (`_ =>`).
+    pub is_wildcard: bool,
+    /// Arm body.
+    pub body: Vec<Stmt>,
+}
+
 /// A function parameter.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Param {
@@ -299,6 +311,13 @@ pub enum Stmt {
         /// Optional else branch body
         else_body: Option<Vec<Stmt>>,
     },
+    /// `match <expr> { <arms> }`
+    Match {
+        /// Expression to match against
+        expr: Expr,
+        /// Match arms
+        arms: Vec<MatchArm>,
+    },
     /// A labeled block: `'label: { body... }`
     ///
     /// Used for try/catch expansion where the labeled block captures the result.
@@ -344,12 +363,15 @@ pub enum Expr {
         /// Arguments
         args: Vec<Expr>,
     },
-    /// A struct initializer: `Self { field1: val1, field2: val2 }`
+    /// A struct initializer: `Self { field1: val1, field2: val2 }` or with struct update
+    /// syntax `Self { field1: val1, ..base }`.
     StructInit {
         /// Struct name (e.g., `Self`)
         name: String,
         /// Field name-value pairs
         fields: Vec<(String, Expr)>,
+        /// Optional base expression for struct update syntax (`..base`)
+        base: Option<Box<Expr>>,
     },
     /// An assignment: `<target> = <value>`
     Assign {

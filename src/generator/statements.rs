@@ -152,6 +152,33 @@ pub(super) fn generate_stmt(stmt: &Stmt, indent: usize) -> String {
             }
             out
         }
+        Stmt::Match { expr, arms } => {
+            let mut out = format!("{pad}match {} {{\n", generate_expr(expr));
+            for arm in arms {
+                if arm.is_wildcard {
+                    out.push_str(&format!("{}_ => {{\n", indent_str(indent + 1)));
+                } else {
+                    let patterns_str = arm
+                        .patterns
+                        .iter()
+                        .map(generate_expr)
+                        .collect::<Vec<_>>()
+                        .join(" | ");
+                    out.push_str(&format!(
+                        "{}{} => {{\n",
+                        indent_str(indent + 1),
+                        patterns_str
+                    ));
+                }
+                for s in &arm.body {
+                    out.push_str(&generate_stmt(s, indent + 2));
+                    out.push('\n');
+                }
+                out.push_str(&format!("{}}}\n", indent_str(indent + 1)));
+            }
+            out.push_str(&format!("{pad}}}"));
+            out
+        }
         Stmt::LabeledBlock { label, body } => {
             let mut out = format!("{pad}'{label}: {{\n");
             for s in body {
@@ -630,6 +657,158 @@ fn f() {
         x;
     } else {
         return;
+    }
+}";
+        assert_eq!(generate(&[item]), expected);
+    }
+
+    #[test]
+    fn test_generate_match_single_arm_renders_match() {
+        let item = Item::Fn {
+            vis: Visibility::Private,
+            is_async: false,
+            name: "f".to_string(),
+            type_params: vec![],
+            params: vec![],
+            return_type: None,
+            body: vec![Stmt::Match {
+                expr: Expr::Ident("x".to_string()),
+                arms: vec![crate::ir::MatchArm {
+                    patterns: vec![Expr::IntLit(1)],
+                    is_wildcard: false,
+                    body: vec![Stmt::Expr(Expr::FnCall {
+                        name: "do_a".to_string(),
+                        args: vec![],
+                    })],
+                }],
+            }],
+        };
+        let expected = "\
+fn f() {
+    match x {
+        1 => {
+            do_a();
+        }
+    }
+}";
+        assert_eq!(generate(&[item]), expected);
+    }
+
+    #[test]
+    fn test_generate_match_multiple_patterns_renders_or() {
+        let item = Item::Fn {
+            vis: Visibility::Private,
+            is_async: false,
+            name: "f".to_string(),
+            type_params: vec![],
+            params: vec![],
+            return_type: None,
+            body: vec![Stmt::Match {
+                expr: Expr::Ident("x".to_string()),
+                arms: vec![crate::ir::MatchArm {
+                    patterns: vec![Expr::IntLit(1), Expr::IntLit(2)],
+                    is_wildcard: false,
+                    body: vec![Stmt::Expr(Expr::FnCall {
+                        name: "do_ab".to_string(),
+                        args: vec![],
+                    })],
+                }],
+            }],
+        };
+        let expected = "\
+fn f() {
+    match x {
+        1 | 2 => {
+            do_ab();
+        }
+    }
+}";
+        assert_eq!(generate(&[item]), expected);
+    }
+
+    #[test]
+    fn test_generate_match_wildcard_renders_underscore() {
+        let item = Item::Fn {
+            vis: Visibility::Private,
+            is_async: false,
+            name: "f".to_string(),
+            type_params: vec![],
+            params: vec![],
+            return_type: None,
+            body: vec![Stmt::Match {
+                expr: Expr::Ident("x".to_string()),
+                arms: vec![crate::ir::MatchArm {
+                    patterns: vec![],
+                    is_wildcard: true,
+                    body: vec![Stmt::Expr(Expr::FnCall {
+                        name: "do_default".to_string(),
+                        args: vec![],
+                    })],
+                }],
+            }],
+        };
+        let expected = "\
+fn f() {
+    match x {
+        _ => {
+            do_default();
+        }
+    }
+}";
+        assert_eq!(generate(&[item]), expected);
+    }
+
+    #[test]
+    fn test_generate_match_multiple_arms_renders_all() {
+        let item = Item::Fn {
+            vis: Visibility::Private,
+            is_async: false,
+            name: "f".to_string(),
+            type_params: vec![],
+            params: vec![],
+            return_type: None,
+            body: vec![Stmt::Match {
+                expr: Expr::Ident("x".to_string()),
+                arms: vec![
+                    crate::ir::MatchArm {
+                        patterns: vec![Expr::IntLit(1)],
+                        is_wildcard: false,
+                        body: vec![Stmt::Expr(Expr::FnCall {
+                            name: "do_a".to_string(),
+                            args: vec![],
+                        })],
+                    },
+                    crate::ir::MatchArm {
+                        patterns: vec![Expr::IntLit(2), Expr::IntLit(3)],
+                        is_wildcard: false,
+                        body: vec![Stmt::Expr(Expr::FnCall {
+                            name: "do_bc".to_string(),
+                            args: vec![],
+                        })],
+                    },
+                    crate::ir::MatchArm {
+                        patterns: vec![],
+                        is_wildcard: true,
+                        body: vec![Stmt::Expr(Expr::FnCall {
+                            name: "do_default".to_string(),
+                            args: vec![],
+                        })],
+                    },
+                ],
+            }],
+        };
+        let expected = "\
+fn f() {
+    match x {
+        1 => {
+            do_a();
+        }
+        2 | 3 => {
+            do_bc();
+        }
+        _ => {
+            do_default();
+        }
     }
 }";
         assert_eq!(generate(&[item]), expected);

@@ -502,6 +502,7 @@ fn rewrite_super_constructor(ctor: &Method, parent: &ClassInfo) -> Result<Method
                     Stmt::TailExpr(Expr::StructInit {
                         name,
                         fields: merged,
+                        base: None,
                     })
                 }
                 Stmt::Return(Some(Expr::StructInit {
@@ -512,6 +513,7 @@ fn rewrite_super_constructor(ctor: &Method, parent: &ClassInfo) -> Result<Method
                     Stmt::Return(Some(Expr::StructInit {
                         name,
                         fields: merged,
+                        base: None,
                     }))
                 }
                 other => other,
@@ -522,6 +524,7 @@ fn rewrite_super_constructor(ctor: &Method, parent: &ClassInfo) -> Result<Method
         new_body.push(Stmt::TailExpr(Expr::StructInit {
             name: "Self".to_string(),
             fields: super_fields,
+            base: None,
         }));
     }
 
@@ -660,6 +663,7 @@ fn convert_constructor_body(
         other_stmts.push(Stmt::Return(Some(Expr::StructInit {
             name: "Self".to_string(),
             fields,
+            base: None,
         })));
     }
 

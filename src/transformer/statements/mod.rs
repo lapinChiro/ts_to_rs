@@ -5,7 +5,7 @@
 use anyhow::{anyhow, Result};
 use swc_ecma_ast as ast;
 
-use crate::ir::{BinOp, ClosureBody, Expr, Param, RustType, Stmt, UnOp};
+use crate::ir::{BinOp, ClosureBody, Expr, MatchArm, Param, RustType, Stmt, UnOp};
 use crate::registry::TypeRegistry;
 use crate::transformer::expressions::convert_expr;
 use crate::transformer::types::convert_ts_type;
@@ -109,6 +109,9 @@ pub fn convert_stmt(
         )?]),
         ast::Stmt::Try(try_stmt) => convert_try_stmt(try_stmt, reg, return_type, type_env),
         ast::Stmt::Decl(ast::Decl::Fn(fn_decl)) => Ok(vec![convert_nested_fn_decl(fn_decl, reg)?]),
+        ast::Stmt::Switch(switch_stmt) => {
+            convert_switch_stmt(switch_stmt, reg, return_type, type_env)
+        }
         _ => Err(anyhow!("unsupported statement: {:?}", stmt)),
     }
 }
@@ -947,6 +950,174 @@ fn try_convert_object_destructuring(
     }
 
     Ok(Some(stmts))
+}
+
+/// Converts a `switch` statement to a `match` expression or fall-through pattern.
+///
+/// - If all cases end with `break` (or are empty fall-throughs), generates a clean `Stmt::Match`.
+/// - If any case has a non-empty body without `break` (fall-through with code), generates
+///   a `LabeledBlock` + flag pattern.
+fn convert_switch_stmt(
+    switch: &ast::SwitchStmt,
+    reg: &TypeRegistry,
+    return_type: Option<&RustType>,
+    type_env: &mut TypeEnv,
+) -> Result<Vec<Stmt>> {
+    let discriminant = convert_expr(&switch.discriminant, reg, None, type_env)?;
+
+    // Analyze cases: detect if any has a non-trivial fall-through
+    let case_count = switch.cases.len();
+    let has_code_fallthrough = switch.cases.iter().enumerate().any(|(i, case)| {
+        let is_last = i == case_count - 1;
+        let has_body = !case.cons.is_empty();
+        let ends_with_break = case
+            .cons
+            .last()
+            .is_some_and(|s| matches!(s, ast::Stmt::Break(_)));
+        // A case with code but no break is a fall-through (unless it's the last case)
+        has_body && !ends_with_break && !is_last
+    });
+
+    if has_code_fallthrough {
+        convert_switch_fallthrough(switch, &discriminant, reg, return_type, type_env)
+    } else {
+        convert_switch_clean_match(switch, discriminant, reg, return_type, type_env)
+    }
+}
+
+/// Converts a switch with no code fall-through into a clean `Stmt::Match`.
+fn convert_switch_clean_match(
+    switch: &ast::SwitchStmt,
+    discriminant: Expr,
+    reg: &TypeRegistry,
+    return_type: Option<&RustType>,
+    type_env: &mut TypeEnv,
+) -> Result<Vec<Stmt>> {
+    let mut arms: Vec<MatchArm> = Vec::new();
+    let mut pending_patterns: Vec<Expr> = Vec::new();
+
+    for case in &switch.cases {
+        if let Some(test) = &case.test {
+            let pattern = convert_expr(test, reg, None, type_env)?;
+            pending_patterns.push(pattern);
+        }
+
+        // Empty body = fall-through to next case, accumulate patterns
+        if case.cons.is_empty() {
+            continue;
+        }
+
+        // Non-empty body: create an arm with all accumulated patterns
+        let body = case
+            .cons
+            .iter()
+            .filter(|s| !matches!(s, ast::Stmt::Break(_)))
+            .map(|s| convert_stmt(s, reg, return_type, type_env))
+            .collect::<Result<Vec<_>>>()?
+            .into_iter()
+            .flatten()
+            .collect();
+
+        let is_wildcard = case.test.is_none();
+        arms.push(MatchArm {
+            patterns: std::mem::take(&mut pending_patterns),
+            is_wildcard,
+            body,
+        });
+    }
+
+    Ok(vec![Stmt::Match {
+        expr: discriminant,
+        arms,
+    }])
+}
+
+/// Converts a switch with code fall-through into a labeled block + flag pattern.
+///
+/// ```text
+/// 'switch: {
+///     let mut _fall = false;
+///     if discriminant == val1 || _fall { body1; _fall = true; }
+///     if discriminant == val2 || _fall { body2; break 'switch; }
+///     // default:
+///     default_body;
+/// }
+/// ```
+fn convert_switch_fallthrough(
+    switch: &ast::SwitchStmt,
+    discriminant: &Expr,
+    reg: &TypeRegistry,
+    return_type: Option<&RustType>,
+    type_env: &mut TypeEnv,
+) -> Result<Vec<Stmt>> {
+    let mut block_body = Vec::new();
+
+    // let mut _fall = false;
+    block_body.push(Stmt::Let {
+        mutable: true,
+        name: "_fall".to_string(),
+        ty: None,
+        init: Some(Expr::BoolLit(false)),
+    });
+
+    for case in &switch.cases {
+        let ends_with_break = case
+            .cons
+            .last()
+            .is_some_and(|s| matches!(s, ast::Stmt::Break(_)));
+
+        let body: Vec<Stmt> = case
+            .cons
+            .iter()
+            .filter(|s| !matches!(s, ast::Stmt::Break(_)))
+            .map(|s| convert_stmt(s, reg, return_type, type_env))
+            .collect::<Result<Vec<_>>>()?
+            .into_iter()
+            .flatten()
+            .collect();
+
+        if let Some(test) = &case.test {
+            // case val: ...
+            let test_expr = convert_expr(test, reg, None, type_env)?;
+            let condition = Expr::BinaryOp {
+                left: Box::new(Expr::BinaryOp {
+                    left: Box::new(discriminant.clone()),
+                    op: BinOp::Eq,
+                    right: Box::new(test_expr),
+                }),
+                op: BinOp::LogicalOr,
+                right: Box::new(Expr::Ident("_fall".to_string())),
+            };
+
+            let mut then_body = body;
+            if ends_with_break {
+                then_body.push(Stmt::Break {
+                    label: Some("switch".to_string()),
+                    value: None,
+                });
+            } else {
+                // No break → set fall-through flag
+                then_body.push(Stmt::Expr(Expr::Assign {
+                    target: Box::new(Expr::Ident("_fall".to_string())),
+                    value: Box::new(Expr::BoolLit(true)),
+                }));
+            }
+
+            block_body.push(Stmt::If {
+                condition,
+                then_body,
+                else_body: None,
+            });
+        } else {
+            // default: ... (always executes if reached)
+            block_body.extend(body);
+        }
+    }
+
+    Ok(vec![Stmt::LabeledBlock {
+        label: "switch".to_string(),
+        body: block_body,
+    }])
 }
 
 /// Converts a `do...while` statement to `loop { body; if !(cond) { break; } }`.

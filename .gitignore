@@ -1,4 +1,3 @@
 /target
-Cargo.lock
 tests/compile-check/target/
 tests/compile-check/Cargo.lock

@@ -430,6 +430,7 @@ fn test_convert_expr_object_literal_with_type_hint_basic() {
                 ("x".to_string(), Expr::NumberLit(1.0)),
                 ("y".to_string(), Expr::NumberLit(2.0)),
             ],
+            base: None,
         }
     );
 }
@@ -457,6 +458,7 @@ fn test_convert_expr_object_literal_mixed_field_types() {
                 ("count".to_string(), Expr::NumberLit(42.0)),
                 ("active".to_string(), Expr::BoolLit(true)),
             ],
+            base: None,
         }
     );
 }
@@ -480,6 +482,7 @@ fn test_convert_expr_object_literal_single_field() {
         Expr::StructInit {
             name: "Wrapper".to_string(),
             fields: vec![("value".to_string(), Expr::NumberLit(10.0))],
+            base: None,
         }
     );
 }
@@ -503,6 +506,7 @@ fn test_convert_expr_object_literal_empty() {
         Expr::StructInit {
             name: "Empty".to_string(),
             fields: vec![],
+            base: None,
         }
     );
 }
@@ -548,6 +552,7 @@ fn test_convert_expr_object_spread_last_position_expands_remaining_fields() {
                     }
                 ),
             ],
+            base: None,
         }
     );
 }
@@ -588,14 +593,15 @@ fn test_convert_expr_object_spread_middle_position_expands_remaining_fields() {
                     }
                 ),
             ],
+            base: None,
         }
     );
 }
 
 #[test]
-fn test_convert_expr_object_spread_multiple_errors() {
-    // {...a, ...b} — multiple spreads are not supported
-    let swc_expr = parse_var_init("const p: Point = { ...a, ...b };");
+fn test_convert_object_spread_unregistered_type_generates_struct_update() {
+    // {...a, key: 1} — TypeRegistry 未登録 → struct update syntax
+    let swc_expr = parse_var_init("const p: Point = { ...other, x: 10 };");
     let expected = RustType::Named {
         name: "Point".to_string(),
         type_args: vec![],
@@ -605,9 +611,50 @@ fn test_convert_expr_object_spread_multiple_errors() {
         &TypeRegistry::new(),
         Some(&expected),
         &TypeEnv::new(),
+    )
+    .unwrap();
+    assert_eq!(
+        result,
+        Expr::StructInit {
+            name: "Point".to_string(),
+            fields: vec![("x".to_string(), Expr::NumberLit(10.0))],
+            base: Some(Box::new(Expr::Ident("other".to_string()))),
+        }
     );
-    assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("multiple spreads"));
+}
+
+#[test]
+fn test_convert_object_spread_multiple_registered_generates_merged_fields() {
+    // {...a, ...b} — 複数スプレッド + TypeRegistry 登録済み
+    let swc_expr = parse_var_init("const p: Point = { ...a, ...b };");
+    let expected = RustType::Named {
+        name: "Point".to_string(),
+        type_args: vec![],
+    };
+    let mut reg = TypeRegistry::new();
+    use crate::registry::TypeDef;
+    reg.register(
+        "Point".to_string(),
+        TypeDef::Struct {
+            fields: vec![
+                ("x".to_string(), RustType::F64),
+                ("y".to_string(), RustType::F64),
+            ],
+        },
+    );
+    let result = convert_expr(&swc_expr, &reg, Some(&expected), &TypeEnv::new()).unwrap();
+    // 最初の spread (a) はフィールド展開、最後の spread (b) は base
+    match &result {
+        Expr::StructInit { base, fields, .. } => {
+            assert!(base.is_some(), "expected base for last spread");
+            // a のフィールドが展開されている
+            assert!(
+                fields.iter().any(|(k, _)| k == "x" || k == "y"),
+                "expected expanded fields from first spread, got {fields:?}"
+            );
+        }
+        other => panic!("expected StructInit, got {other:?}"),
+    }
 }
 
 #[test]
@@ -644,6 +691,7 @@ fn test_convert_expr_object_spread_with_override() {
                     }
                 ),
             ],
+            base: None,
         }
     );
 }
@@ -806,6 +854,7 @@ fn test_convert_expr_call_resolves_object_arg_from_registry() {
                     ("x".to_string(), Expr::NumberLit(0.0)),
                     ("y".to_string(), Expr::NumberLit(0.0)),
                 ],
+                base: None,
             }],
         }
     );
@@ -862,10 +911,12 @@ fn test_convert_expr_object_literal_nested_resolves_field_type_from_registry() {
                             ("x".to_string(), Expr::NumberLit(0.0)),
                             ("y".to_string(), Expr::NumberLit(0.0)),
                         ],
+                        base: None,
                     }
                 ),
                 ("w".to_string(), Expr::NumberLit(10.0)),
             ],
+            base: None,
         }
     );
 }
@@ -1068,6 +1119,7 @@ fn test_convert_expr_object_shorthand_single() {
         Expr::StructInit {
             name: "Foo".to_string(),
             fields: vec![("x".to_string(), Expr::Ident("x".to_string()))],
+            base: None,
         }
     );
 }
@@ -1095,6 +1147,7 @@ fn test_convert_expr_object_shorthand_mixed_with_key_value() {
                 ("x".to_string(), Expr::Ident("x".to_string())),
                 ("y".to_string(), Expr::NumberLit(2.0)),
             ],
+            base: None,
         }
     );
 }
@@ -1122,6 +1175,7 @@ fn test_convert_expr_object_shorthand_with_registry_field_type() {
         Expr::StructInit {
             name: "User".to_string(),
             fields: vec![("name".to_string(), Expr::Ident("name".to_string()))],
+            base: None,
         }
     );
 }

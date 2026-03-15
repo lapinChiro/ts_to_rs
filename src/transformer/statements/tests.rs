@@ -609,6 +609,7 @@ fn test_convert_stmt_var_decl_object_literal_with_type_annotation() {
                     ("x".to_string(), Expr::NumberLit(1.0)),
                     ("y".to_string(), Expr::NumberLit(2.0)),
                 ],
+                base: None,
             }),
         }
     );
@@ -1144,4 +1145,84 @@ fn test_convert_stmt_spread_non_spread_array_uses_normal_path() {
     assert!(
         matches!(&result[0], Stmt::Let { name, init: Some(Expr::Vec { .. }), .. } if name == "x")
     );
+}
+
+// -- switch statement tests --
+
+#[test]
+fn test_convert_switch_single_case_break_generates_match() {
+    let stmts = parse_fn_body("function f(x: number) { switch(x) { case 1: doA(); break; } }");
+    let result =
+        convert_stmt_list(&stmts, &TypeRegistry::new(), None, &mut TypeEnv::new()).unwrap();
+    assert_eq!(result.len(), 1, "expected 1 stmt, got {result:?}");
+    match &result[0] {
+        Stmt::Match { arms, .. } => {
+            assert_eq!(arms.len(), 1);
+            assert_eq!(arms[0].patterns.len(), 1);
+            assert!(!arms[0].is_wildcard);
+            assert!(!arms[0].body.is_empty());
+        }
+        other => panic!("expected Match, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_convert_switch_empty_fallthrough_merges_patterns() {
+    let stmts =
+        parse_fn_body("function f(x: number) { switch(x) { case 1: case 2: doAB(); break; } }");
+    let result =
+        convert_stmt_list(&stmts, &TypeRegistry::new(), None, &mut TypeEnv::new()).unwrap();
+    assert_eq!(result.len(), 1, "expected 1 stmt, got {result:?}");
+    match &result[0] {
+        Stmt::Match { arms, .. } => {
+            assert_eq!(arms.len(), 1);
+            assert_eq!(
+                arms[0].patterns.len(),
+                2,
+                "expected 2 patterns for merged cases"
+            );
+        }
+        other => panic!("expected Match, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_convert_switch_default_generates_wildcard() {
+    let stmts = parse_fn_body(
+        "function f(x: number) { switch(x) { case 1: doA(); break; default: doB(); } }",
+    );
+    let result =
+        convert_stmt_list(&stmts, &TypeRegistry::new(), None, &mut TypeEnv::new()).unwrap();
+    assert_eq!(result.len(), 1, "expected 1 stmt, got {result:?}");
+    match &result[0] {
+        Stmt::Match { arms, .. } => {
+            assert_eq!(arms.len(), 2);
+            assert!(!arms[0].is_wildcard);
+            assert!(arms[1].is_wildcard, "last arm should be wildcard");
+        }
+        other => panic!("expected Match, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_convert_switch_fallthrough_generates_labeled_block() {
+    // break-less fall-through: case 1 falls into case 2
+    let stmts = parse_fn_body(
+        "function f(x: number) { switch(x) { case 1: doA(); case 2: doB(); break; } }",
+    );
+    let result =
+        convert_stmt_list(&stmts, &TypeRegistry::new(), None, &mut TypeEnv::new()).unwrap();
+    assert_eq!(result.len(), 1, "expected 1 stmt, got {result:?}");
+    // Fall-through path generates a LabeledBlock with flag pattern
+    match &result[0] {
+        Stmt::LabeledBlock { label, body } => {
+            assert_eq!(label, "switch");
+            // Should contain: let mut _fall = false; + if chains
+            let has_fall_flag = body
+                .iter()
+                .any(|s| matches!(s, Stmt::Let { name, .. } if name == "_fall"));
+            assert!(has_fall_flag, "expected _fall flag, got {body:?}");
+        }
+        other => panic!("expected LabeledBlock for fall-through, got {other:?}"),
+    }
 }

@@ -1294,7 +1294,7 @@ fn convert_object_lit(
     });
 
     let mut fields = Vec::new();
-    let mut base: Option<Box<Expr>> = None;
+    let mut spreads: Vec<Expr> = Vec::new();
 
     for prop in &obj_lit.props {
         match prop {
@@ -1330,42 +1330,68 @@ fn convert_object_lit(
                 }
             },
             ast::PropOrSpread::Spread(spread_elem) => {
-                if base.is_some() {
-                    return Err(anyhow!(
-                        "multiple spreads in object literal are not supported"
-                    ));
-                }
                 let spread_expr = convert_expr(&spread_elem.expr, reg, None, type_env)?;
-                base = Some(Box::new(spread_expr));
+                spreads.push(spread_expr);
             }
         }
     }
 
-    // When spread is present, expand remaining struct fields from the base expression
-    if let Some(base_expr) = base {
-        let all_fields = struct_fields.ok_or_else(|| {
-            anyhow!(
-                "spread in object literal requires struct '{}' to be registered in TypeRegistry",
-                struct_name
-            )
-        })?;
+    // Resolve spreads into field expansion + optional struct update base
+    let struct_update_base = if spreads.is_empty() {
+        None
+    } else if spreads.len() == 1 && struct_fields.is_some() {
+        // Single spread + TypeRegistry registered → expand fields (preserves type propagation)
+        let base_expr = &spreads[0];
+        let all_fields = struct_fields.unwrap();
         let explicit_keys: Vec<String> = fields.iter().map(|(k, _)| k.clone()).collect();
         for (field_name, _) in all_fields {
             if !explicit_keys.iter().any(|k| k == field_name) {
                 fields.push((
                     field_name.clone(),
                     Expr::FieldAccess {
-                        object: base_expr.clone(),
+                        object: Box::new(base_expr.clone()),
                         field: field_name.clone(),
                     },
                 ));
             }
         }
-    }
+        None
+    } else if spreads.len() == 1 {
+        // Single spread + TypeRegistry unregistered → struct update syntax
+        Some(Box::new(spreads.into_iter().next().unwrap()))
+    } else {
+        // Multiple spreads: expand all but last via TypeRegistry, last becomes base
+        let (earlier, last) = spreads.split_at(spreads.len() - 1);
+        if let Some(all_fields) = struct_fields {
+            let explicit_keys: Vec<String> = fields.iter().map(|(k, _)| k.clone()).collect();
+            for spread_expr in earlier {
+                for (field_name, _) in all_fields {
+                    if !explicit_keys.iter().any(|k| k == field_name)
+                        && !fields.iter().any(|(k, _)| k == field_name)
+                    {
+                        fields.push((
+                            field_name.clone(),
+                            Expr::FieldAccess {
+                                object: Box::new(spread_expr.clone()),
+                                field: field_name.clone(),
+                            },
+                        ));
+                    }
+                }
+            }
+        } else {
+            return Err(anyhow!(
+                "multiple spreads with unregistered type '{}' — TypeRegistry required for field expansion",
+                struct_name
+            ));
+        }
+        Some(Box::new(last[0].clone()))
+    };
 
     Ok(Expr::StructInit {
         name: struct_name.to_string(),
         fields,
+        base: struct_update_base,
     })
 }
 
