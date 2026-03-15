@@ -1805,3 +1805,49 @@ fn test_convert_ts_type_nullable_three_types_generates_option_enum() {
         other => panic!("expected Enum, got: {other:?}"),
     }
 }
+
+// -- TsLitType in annotation position tests --
+
+#[test]
+fn test_convert_ts_type_lit_string_returns_string() {
+    let decl = parse_interface("interface T { x: \"hello\"; }");
+    let prop = match &decl.body.body[0] {
+        TsTypeElement::TsPropertySignature(p) => p,
+        _ => panic!("expected property signature"),
+    };
+    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
+    assert_eq!(ty, RustType::String);
+}
+
+#[test]
+fn test_convert_ts_type_lit_bool_true_returns_bool() {
+    let decl = parse_interface("interface T { x: true; }");
+    let prop = match &decl.body.body[0] {
+        TsTypeElement::TsPropertySignature(p) => p,
+        _ => panic!("expected property signature"),
+    };
+    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
+    assert_eq!(ty, RustType::Bool);
+}
+
+#[test]
+fn test_convert_ts_type_lit_bool_false_returns_bool() {
+    let decl = parse_interface("interface T { x: false; }");
+    let prop = match &decl.body.body[0] {
+        TsTypeElement::TsPropertySignature(p) => p,
+        _ => panic!("expected property signature"),
+    };
+    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
+    assert_eq!(ty, RustType::Bool);
+}
+
+#[test]
+fn test_convert_ts_type_lit_number_returns_f64() {
+    let decl = parse_interface("interface T { x: 42; }");
+    let prop = match &decl.body.body[0] {
+        TsTypeElement::TsPropertySignature(p) => p,
+        _ => panic!("expected property signature"),
+    };
+    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
+    assert_eq!(ty, RustType::F64);
+}

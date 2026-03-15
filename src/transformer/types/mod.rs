@@ -80,6 +80,15 @@ pub fn convert_ts_type(ts_type: &TsType, extra_items: &mut Vec<Item>) -> Result<
         }
         TsType::TsIndexedAccessType(indexed) => convert_indexed_access_type(indexed, extra_items),
         TsType::TsTypeLit(type_lit) => convert_type_lit_in_annotation(type_lit, extra_items),
+        TsType::TsLitType(lit) => match &lit.lit {
+            swc_ecma_ast::TsLit::Str(_) | swc_ecma_ast::TsLit::Tpl(_) => Ok(RustType::String),
+            swc_ecma_ast::TsLit::Bool(_) => Ok(RustType::Bool),
+            swc_ecma_ast::TsLit::Number(_) => Ok(RustType::F64),
+            swc_ecma_ast::TsLit::BigInt(_) => Ok(RustType::Named {
+                name: "i64".to_string(),
+                type_args: vec![],
+            }),
+        },
         _ => Err(anyhow!("unsupported type: {:?}", ts_type)),
     }
 }
