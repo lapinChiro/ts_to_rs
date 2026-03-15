@@ -1,15 +1,12 @@
 //! Statement generation: converts IR statements into Rust source strings.
 
-use crate::ir::{Expr, Stmt, VecSegment};
+use crate::ir::{Expr, Stmt};
 
 use super::expressions::{escape_ident, generate_expr};
 use super::types::generate_type;
 
 /// Generates a statement with the given indentation level.
-///
-/// When `is_last_in_fn` is true and the statement is `Stmt::Return(Some(expr))`,
-/// it emits just the expression (idiomatic Rust tail expression).
-pub(super) fn generate_stmt(stmt: &Stmt, indent: usize, is_last_in_fn: bool) -> String {
+pub(super) fn generate_stmt(stmt: &Stmt, indent: usize) -> String {
     let pad = indent_str(indent);
     match stmt {
         Stmt::Let {
@@ -18,16 +15,6 @@ pub(super) fn generate_stmt(stmt: &Stmt, indent: usize, is_last_in_fn: bool) -> 
             ty,
             init,
         } => {
-            // VecSpread in let init: expand to multiple statements
-            if let Some(Expr::VecSpread { segments }) = init {
-                return generate_vec_spread_let_stmts(
-                    name,
-                    *mutable,
-                    ty.as_ref(),
-                    segments,
-                    indent,
-                );
-            }
             let mut out = format!("{pad}let ");
             if *mutable {
                 out.push_str("mut ");
@@ -50,14 +37,14 @@ pub(super) fn generate_stmt(stmt: &Stmt, indent: usize, is_last_in_fn: bool) -> 
             let mut out = format!("{pad}if {} {{\n", generate_expr(condition));
             for s in then_body {
                 // Statements inside if are not tail-position of a function
-                out.push_str(&generate_stmt(s, indent + 1, false));
+                out.push_str(&generate_stmt(s, indent + 1));
                 out.push('\n');
             }
             match else_body {
                 Some(stmts) => {
                     out.push_str(&format!("{pad}}} else {{\n"));
                     for s in stmts {
-                        out.push_str(&generate_stmt(s, indent + 1, false));
+                        out.push_str(&generate_stmt(s, indent + 1));
                         out.push('\n');
                     }
                     out.push_str(&format!("{pad}}}"));
@@ -79,7 +66,7 @@ pub(super) fn generate_stmt(stmt: &Stmt, indent: usize, is_last_in_fn: bool) -> 
                 .unwrap_or_default();
             let mut out = format!("{pad}{label_prefix}while {} {{\n", generate_expr(condition));
             for s in body {
-                out.push_str(&generate_stmt(s, indent + 1, false));
+                out.push_str(&generate_stmt(s, indent + 1));
                 out.push('\n');
             }
             out.push_str(&format!("{pad}}}"));
@@ -100,7 +87,7 @@ pub(super) fn generate_stmt(stmt: &Stmt, indent: usize, is_last_in_fn: bool) -> 
                 generate_expr(iterable)
             );
             for s in body {
-                out.push_str(&generate_stmt(s, indent + 1, false));
+                out.push_str(&generate_stmt(s, indent + 1));
                 out.push('\n');
             }
             out.push_str(&format!("{pad}}}"));
@@ -113,7 +100,7 @@ pub(super) fn generate_stmt(stmt: &Stmt, indent: usize, is_last_in_fn: bool) -> 
                 .unwrap_or_default();
             let mut out = format!("{pad}{label_prefix}loop {{\n");
             for s in body {
-                out.push_str(&generate_stmt(s, indent + 1, false));
+                out.push_str(&generate_stmt(s, indent + 1));
                 out.push('\n');
             }
             out.push_str(&format!("{pad}}}"));
@@ -127,24 +114,15 @@ pub(super) fn generate_stmt(stmt: &Stmt, indent: usize, is_last_in_fn: bool) -> 
             Some(l) => format!("{pad}continue '{l};"),
             None => format!("{pad}continue;"),
         },
-        Stmt::Return(expr) => {
-            if let Some(Expr::VecSpread { segments }) = expr {
-                return generate_vec_spread_stmts(segments, indent, is_last_in_fn);
-            }
-            if is_last_in_fn {
-                match expr {
-                    Some(e) => format!("{pad}{}", generate_expr(e)),
-                    None => format!("{pad}return;"),
-                }
-            } else {
-                match expr {
-                    Some(e) => format!("{pad}return {};", generate_expr(e)),
-                    None => format!("{pad}return;"),
-                }
-            }
-        }
+        Stmt::Return(expr) => match expr {
+            Some(e) => format!("{pad}return {};", generate_expr(e)),
+            None => format!("{pad}return;"),
+        },
         Stmt::Expr(expr) => {
             format!("{pad}{};", generate_expr(expr))
+        }
+        Stmt::TailExpr(expr) => {
+            format!("{pad}{}", generate_expr(expr))
         }
         Stmt::TryCatch {
             try_body,
@@ -161,7 +139,7 @@ pub(super) fn generate_stmt(stmt: &Stmt, indent: usize, is_last_in_fn: bool) -> 
                     "{pad}let _finally_guard = scopeguard::guard((), |_| {{"
                 ));
                 for s in finally_stmts {
-                    lines.push(generate_stmt(s, indent + 1, false));
+                    lines.push(generate_stmt(s, indent + 1));
                 }
                 lines.push(format!("{pad}}});"));
             }
@@ -179,13 +157,13 @@ pub(super) fn generate_stmt(stmt: &Stmt, indent: usize, is_last_in_fn: bool) -> 
                 lines.push(format!("{pad}}};"));
                 lines.push(format!("{pad}if let Err({param_name}) = _try_result {{"));
                 for s in catch_stmts {
-                    lines.push(generate_stmt(s, indent + 1, false));
+                    lines.push(generate_stmt(s, indent + 1));
                 }
                 lines.push(format!("{pad}}}"));
             } else {
                 // No catch block — just emit try body inline
                 for s in try_body {
-                    lines.push(generate_stmt(s, indent, false));
+                    lines.push(generate_stmt(s, indent));
                 }
             }
 
@@ -224,105 +202,13 @@ fn generate_try_body_stmt(stmt: &Stmt, indent: usize) -> String {
             lines.push(format!("{pad}}}"));
             lines.join("\n")
         }
-        other => generate_stmt(other, indent, false),
+        other => generate_stmt(other, indent),
     }
 }
 
 /// Checks if an expression is an `Err(...)` call.
 fn is_err_call(expr: &Expr) -> bool {
     matches!(expr, Expr::FnCall { name, .. } if name == "Err")
-}
-
-/// Expands a `VecSpread` in a `let` binding into multiple statements.
-///
-/// For `[...arr]` (single spread only), generates `let name = arr.clone();`.
-/// For general cases, generates `let mut name = Vec::new();` + `extend`/`push`.
-fn generate_vec_spread_let_stmts(
-    name: &str,
-    _mutable: bool,
-    ty: Option<&crate::ir::RustType>,
-    segments: &[VecSegment],
-    indent: usize,
-) -> String {
-    let pad = indent_str(indent);
-    let ty_str = ty
-        .map(|t| format!(": {}", generate_type(t)))
-        .unwrap_or_default();
-
-    // Optimization: [...arr] → let name = arr.clone();
-    if segments.len() == 1 {
-        if let VecSegment::Spread(expr) = &segments[0] {
-            return format!("{pad}let {name}{ty_str} = {}.clone();", generate_expr(expr));
-        }
-    }
-
-    let mut lines = Vec::new();
-    lines.push(format!("{pad}let mut {name}{ty_str} = Vec::new();"));
-
-    for seg in segments {
-        match seg {
-            VecSegment::Element(expr) => {
-                lines.push(format!("{pad}{name}.push({});", generate_expr(expr)));
-            }
-            VecSegment::Spread(expr) => {
-                lines.push(format!(
-                    "{pad}{name}.extend({}.iter().cloned());",
-                    generate_expr(expr)
-                ));
-            }
-        }
-    }
-
-    lines.join("\n")
-}
-
-/// Expands a `VecSpread` into multiple statements with proper indentation.
-///
-/// For `[...arr]` (single spread only), generates `arr.clone()` as a tail expression or return.
-/// For general cases, generates `let mut` + `extend`/`push` + tail/return.
-fn generate_vec_spread_stmts(
-    segments: &[VecSegment],
-    indent: usize,
-    is_last_in_fn: bool,
-) -> String {
-    let pad = indent_str(indent);
-
-    // Optimization: [...arr] → arr.clone()
-    if segments.len() == 1 {
-        if let VecSegment::Spread(expr) = &segments[0] {
-            let clone_expr = format!("{}.clone()", generate_expr(expr));
-            return if is_last_in_fn {
-                format!("{pad}{clone_expr}")
-            } else {
-                format!("{pad}return {clone_expr};")
-            };
-        }
-    }
-
-    let mut lines = Vec::new();
-    lines.push(format!("{pad}let mut __spread_vec = Vec::new();"));
-
-    for seg in segments {
-        match seg {
-            VecSegment::Element(expr) => {
-                lines.push(format!("{pad}__spread_vec.push({});", generate_expr(expr)));
-            }
-            VecSegment::Spread(expr) => {
-                lines.push(format!(
-                    "{pad}__spread_vec.extend({}.iter().cloned());",
-                    generate_expr(expr)
-                ));
-            }
-        }
-    }
-
-    if is_last_in_fn {
-        lines.push(format!("{pad}__spread_vec"));
-    } else {
-        lines.push(format!("{pad}return __spread_vec;"));
-    }
-
-    lines.join("\n")
 }
 
 /// Returns the indentation string for the given level (4 spaces per level).
@@ -712,6 +598,47 @@ fn f() {
     }
 
     #[test]
+    fn test_generate_stmt_tail_expr_ident_outputs_without_semicolon() {
+        let item = Item::Fn {
+            vis: Visibility::Private,
+            is_async: false,
+            name: "f".to_string(),
+            type_params: vec![],
+            params: vec![],
+            return_type: Some(RustType::F64),
+            body: vec![Stmt::TailExpr(Expr::Ident("x".to_string()))],
+        };
+        let expected = "\
+fn f() -> f64 {
+    x
+}";
+        assert_eq!(generate(&[item]), expected);
+    }
+
+    #[test]
+    fn test_generate_stmt_tail_expr_complex_expr_outputs_without_semicolon() {
+        use crate::ir::BinOp;
+        let item = Item::Fn {
+            vis: Visibility::Private,
+            is_async: false,
+            name: "f".to_string(),
+            type_params: vec![],
+            params: vec![],
+            return_type: Some(RustType::F64),
+            body: vec![Stmt::TailExpr(Expr::BinaryOp {
+                left: Box::new(Expr::Ident("a".to_string())),
+                op: BinOp::Add,
+                right: Box::new(Expr::Ident("b".to_string())),
+            })],
+        };
+        let expected = "\
+fn f() -> f64 {
+    a + b
+}";
+        assert_eq!(generate(&[item]), expected);
+    }
+
+    #[test]
     fn test_generate_return_not_last_uses_return_keyword() {
         let item = Item::Fn {
             vis: Visibility::Private,
@@ -722,7 +649,7 @@ fn f() {
             return_type: Some(RustType::F64),
             body: vec![
                 Stmt::Return(Some(Expr::NumberLit(1.0))),
-                Stmt::Return(Some(Expr::NumberLit(2.0))),
+                Stmt::TailExpr(Expr::NumberLit(2.0)),
             ],
         };
         let expected = "\

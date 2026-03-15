@@ -819,3 +819,84 @@ fn test_type_env_stmt_list_registers_let_binding_type() {
         "convert_stmt_list should register Let binding types in TypeEnv"
     );
 }
+
+// --- Spread array expansion tests (SWC AST level) ---
+
+#[test]
+fn test_convert_stmt_spread_let_single_spread_optimizes_to_clone() {
+    // const x = [...arr] → let x = arr.clone();
+    let stmts = parse_fn_body("function f(arr: number[]) { const x = [...arr]; }");
+    let result = convert_stmt(&stmts[0], &TypeRegistry::new(), None, &mut TypeEnv::new()).unwrap();
+    assert_eq!(result.len(), 1);
+    assert!(
+        matches!(&result[0], Stmt::Let { name, init: Some(Expr::MethodCall { method, .. }), .. }
+            if name == "x" && method == "clone"),
+        "expected let x = arr.clone(), got: {result:?}"
+    );
+}
+
+#[test]
+fn test_convert_stmt_spread_let_mixed_segments_expands_to_stmts() {
+    // const x = [...arr, 1] → let mut x = Vec::new(); x.extend(...); x.push(1.0);
+    let stmts = parse_fn_body("function f(arr: number[]) { const x = [...arr, 1]; }");
+    let result = convert_stmt(&stmts[0], &TypeRegistry::new(), None, &mut TypeEnv::new()).unwrap();
+    assert_eq!(result.len(), 3, "expected 3 statements, got: {result:?}");
+    // First: let mut x = Vec::new();
+    assert!(matches!(
+        &result[0],
+        Stmt::Let { mutable: true, name, init: Some(Expr::FnCall { name: fn_name, .. }), .. }
+        if name == "x" && fn_name == "Vec::new"
+    ));
+    // Second: x.extend(...)
+    assert!(matches!(
+        &result[1],
+        Stmt::Expr(Expr::MethodCall { method, .. }) if method == "extend"
+    ));
+    // Third: x.push(1.0)
+    assert!(matches!(
+        &result[2],
+        Stmt::Expr(Expr::MethodCall { method, .. }) if method == "push"
+    ));
+}
+
+#[test]
+fn test_convert_stmt_spread_return_single_spread_optimizes_to_clone() {
+    // return [...arr] → return arr.clone();
+    let stmts = parse_fn_body("function f(arr: number[]) { return [...arr]; }");
+    let result = convert_stmt(&stmts[0], &TypeRegistry::new(), None, &mut TypeEnv::new()).unwrap();
+    assert_eq!(result.len(), 1);
+    assert!(
+        matches!(&result[0], Stmt::Return(Some(Expr::MethodCall { method, .. })) if method == "clone"),
+        "expected return arr.clone(), got: {result:?}"
+    );
+}
+
+#[test]
+fn test_convert_stmt_spread_return_mixed_segments_expands_to_stmts() {
+    // return [...arr, 1] → let mut __spread_vec = Vec::new(); ...; return __spread_vec;
+    let stmts = parse_fn_body("function f(arr: number[]) { return [...arr, 1]; }");
+    let result = convert_stmt(&stmts[0], &TypeRegistry::new(), None, &mut TypeEnv::new()).unwrap();
+    assert!(
+        result.len() >= 4,
+        "expected at least 4 statements, got: {result:?}"
+    );
+    assert!(matches!(
+        &result[0],
+        Stmt::Let { mutable: true, name, .. } if name == "__spread_vec"
+    ));
+    assert!(matches!(
+        result.last().unwrap(),
+        Stmt::Return(Some(Expr::Ident(n))) if n == "__spread_vec"
+    ));
+}
+
+#[test]
+fn test_convert_stmt_spread_non_spread_array_uses_normal_path() {
+    // const x = [1, 2] → let x = vec![1.0, 2.0]; (normal path, no expansion)
+    let stmts = parse_fn_body("function f() { const x = [1, 2]; }");
+    let result = convert_stmt(&stmts[0], &TypeRegistry::new(), None, &mut TypeEnv::new()).unwrap();
+    assert_eq!(result.len(), 1);
+    assert!(
+        matches!(&result[0], Stmt::Let { name, init: Some(Expr::Vec { .. }), .. } if name == "x")
+    );
+}

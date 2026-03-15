@@ -148,10 +148,8 @@ fn generate_item(item: &Item) -> String {
             let name = escape_ident(name);
             let mut out =
                 format!("{vis_str}{async_str}fn {name}{generics}({params_str}){ret_str} {{\n");
-            let body_len = body.len();
-            for (i, stmt) in body.iter().enumerate() {
-                let is_last = i == body_len - 1;
-                out.push_str(&generate_stmt(stmt, 1, is_last));
+            for stmt in body {
+                out.push_str(&generate_stmt(stmt, 1));
                 out.push('\n');
             }
             out.push('}');
@@ -200,10 +198,8 @@ fn generate_trait_method_sig(method: &Method) -> String {
         Some(body) => {
             // Default implementation
             let mut out = format!("    fn {}({params_str}){ret_str} {{\n", method.name);
-            let stmts_len = body.len();
-            for (i, stmt) in body.iter().enumerate() {
-                let is_last = i == stmts_len - 1;
-                out.push_str(&generate_stmt(stmt, 2, is_last));
+            for stmt in body {
+                out.push_str(&generate_stmt(stmt, 2));
                 out.push('\n');
             }
             out.push_str("    }\n");
@@ -236,10 +232,8 @@ fn generate_method(method: &Method) -> String {
     let name = &method.name;
     let mut out = format!("    {vis_str}fn {name}({params_str}){ret_str} {{\n");
     let body = method.body.as_deref().unwrap_or(&[]);
-    let body_len = body.len();
-    for (i, stmt) in body.iter().enumerate() {
-        let is_last = i == body_len - 1;
-        out.push_str(&generate_stmt(stmt, 2, is_last));
+    for stmt in body {
+        out.push_str(&generate_stmt(stmt, 2));
         out.push('\n');
     }
     out.push_str("    }\n");
@@ -723,11 +717,11 @@ pub enum Value {
                 },
             ],
             return_type: Some(RustType::F64),
-            body: vec![Stmt::Return(Some(Expr::BinaryOp {
+            body: vec![Stmt::TailExpr(Expr::BinaryOp {
                 left: Box::new(Expr::Ident("a".to_string())),
                 op: BinOp::Add,
                 right: Box::new(Expr::Ident("b".to_string())),
-            }))],
+            })],
         };
         let expected = "\
 pub fn add(a: f64, b: f64) -> f64 {
@@ -766,7 +760,7 @@ fn greet(name: String) {
             type_params: vec![],
             params: vec![],
             return_type: Some(RustType::F64),
-            body: vec![Stmt::Return(Some(Expr::NumberLit(42.0)))],
+            body: vec![Stmt::TailExpr(Expr::NumberLit(42.0))],
         };
         let expected = "\
 pub fn get_value() -> f64 {
@@ -793,7 +787,7 @@ pub fn get_value() -> f64 {
                 name: "T".to_string(),
                 type_args: vec![],
             }),
-            body: vec![Stmt::Return(Some(Expr::Ident("x".to_string())))],
+            body: vec![Stmt::TailExpr(Expr::Ident("x".to_string()))],
         };
         let expected = "\
 pub fn identity<T>(x: T) -> T {
@@ -823,9 +817,7 @@ pub fn identity<T>(x: T) -> T {
                     name: "Self".to_string(),
                     type_args: vec![],
                 }),
-                body: Some(vec![Stmt::Return(Some(Expr::Ident(
-                    "Self { x }".to_string(),
-                )))]),
+                body: Some(vec![Stmt::TailExpr(Expr::Ident("Self { x }".to_string()))]),
             }],
         };
         let expected = "\
@@ -850,10 +842,10 @@ impl Foo {
                 has_mut_self: false,
                 params: vec![],
                 return_type: Some(RustType::String),
-                body: Some(vec![Stmt::Return(Some(Expr::FieldAccess {
+                body: Some(vec![Stmt::TailExpr(Expr::FieldAccess {
                     object: Box::new(Expr::Ident("self".to_string())),
                     field: "name".to_string(),
-                }))]),
+                })]),
             }],
         };
         let expected = "\
@@ -929,10 +921,10 @@ pub trait AnimalTrait {
                 has_mut_self: false,
                 params: vec![],
                 return_type: Some(RustType::String),
-                body: Some(vec![Stmt::Return(Some(Expr::FieldAccess {
+                body: Some(vec![Stmt::TailExpr(Expr::FieldAccess {
                     object: Box::new(Expr::Ident("self".to_string())),
                     field: "name".to_string(),
-                }))]),
+                })]),
             }],
         };
         let expected = "\

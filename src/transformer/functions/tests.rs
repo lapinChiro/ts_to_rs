@@ -38,11 +38,11 @@ fn test_convert_fn_decl_add() {
                 },
             ],
             return_type: Some(RustType::F64),
-            body: vec![Stmt::Return(Some(Expr::BinaryOp {
+            body: vec![Stmt::TailExpr(Expr::BinaryOp {
                 left: Box::new(Expr::Ident("a".to_string())),
                 op: BinOp::Add,
                 right: Box::new(Expr::Ident("b".to_string())),
-            }))],
+            })],
         }
     );
 }
@@ -75,7 +75,7 @@ fn test_convert_fn_decl_no_params() {
     match item {
         Item::Fn { params, body, .. } => {
             assert!(params.is_empty());
-            assert_eq!(body, vec![Stmt::Return(Some(Expr::BoolLit(true)))]);
+            assert_eq!(body, vec![Stmt::TailExpr(Expr::BoolLit(true))]);
         }
         _ => panic!("expected Item::Fn"),
     }
@@ -177,14 +177,14 @@ fn test_convert_fn_decl_throw_wraps_return_in_ok() {
             let last = body.last().unwrap();
             assert_eq!(
                 *last,
-                Stmt::Return(Some(Expr::FnCall {
+                Stmt::TailExpr(Expr::FnCall {
                     name: "Ok".to_string(),
                     args: vec![Expr::MethodCall {
                         object: Box::new(Expr::StringLit("ok".to_string())),
                         method: "to_string".to_string(),
                         args: vec![],
                     }],
-                }))
+                })
             );
         }
         _ => panic!("expected Item::Fn"),
@@ -770,4 +770,46 @@ fn test_contains_throw_in_labeled_wraps_result() {
     assert!(fn_returns_result(
         "function f() { outer: while(true) { throw new Error(\"x\"); } }"
     ));
+}
+
+// --- convert_last_return_to_tail tests ---
+
+#[test]
+fn test_convert_last_return_to_tail_converts_final_return() {
+    let mut body = vec![
+        Stmt::Expr(Expr::Ident("setup".to_string())),
+        Stmt::Return(Some(Expr::Ident("x".to_string()))),
+    ];
+    convert_last_return_to_tail(&mut body);
+    assert_eq!(body.len(), 2);
+    assert_eq!(body[1], Stmt::TailExpr(Expr::Ident("x".to_string())));
+}
+
+#[test]
+fn test_convert_last_return_to_tail_preserves_non_final_return() {
+    let mut body = vec![
+        Stmt::Return(Some(Expr::Ident("early".to_string()))),
+        Stmt::Expr(Expr::Ident("x".to_string())),
+    ];
+    convert_last_return_to_tail(&mut body);
+    // Non-final return should remain unchanged
+    assert_eq!(
+        body[0],
+        Stmt::Return(Some(Expr::Ident("early".to_string())))
+    );
+}
+
+#[test]
+fn test_convert_last_return_to_tail_skips_return_none() {
+    let mut body = vec![Stmt::Return(None)];
+    convert_last_return_to_tail(&mut body);
+    // Return(None) cannot be a tail expression — should remain unchanged
+    assert_eq!(body[0], Stmt::Return(None));
+}
+
+#[test]
+fn test_convert_last_return_to_tail_empty_body_noop() {
+    let mut body: Vec<Stmt> = vec![];
+    convert_last_return_to_tail(&mut body);
+    assert!(body.is_empty());
 }

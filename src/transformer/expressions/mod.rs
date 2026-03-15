@@ -5,9 +5,9 @@
 use anyhow::{anyhow, Result};
 use swc_ecma_ast as ast;
 
-use crate::ir::{self, BinOp, ClosureBody, Expr, Param, RustType, UnOp};
+use crate::ir::{BinOp, ClosureBody, Expr, Param, RustType, UnOp};
 use crate::registry::{TypeDef, TypeRegistry};
-use crate::transformer::functions::convert_ts_type_with_fallback;
+use crate::transformer::functions::{convert_last_return_to_tail, convert_ts_type_with_fallback};
 use crate::transformer::statements::convert_stmt;
 use crate::transformer::TypeEnv;
 
@@ -500,6 +500,7 @@ pub fn convert_arrow_expr(
                     &mut inner_env,
                 )?);
             }
+            convert_last_return_to_tail(&mut stmts);
             ClosureBody::Block(stmts)
         }
     };
@@ -1227,48 +1228,39 @@ fn convert_object_lit(
 /// Converts an SWC array literal to an IR `Expr::Vec` or `Expr::VecSpread`.
 ///
 /// When `expected` is `RustType::Vec(inner)`, the inner type is propagated to each element.
-/// If any element uses spread syntax (`...expr`), produces `Expr::VecSpread`.
+///
+/// Spread arrays (`[...arr, 1]`) are handled at the statement level by `try_expand_spread_*`
+/// in `convert_stmt`, so only non-spread arrays should reach here. If a spread array reaches
+/// here (e.g., nested in a function call argument), an error is returned.
 fn convert_array_lit(
     array_lit: &ast::ArrayLit,
     reg: &TypeRegistry,
     expected: Option<&RustType>,
     type_env: &TypeEnv,
 ) -> Result<Expr> {
+    let has_spread = array_lit
+        .elems
+        .iter()
+        .filter_map(|e| e.as_ref())
+        .any(|e| e.spread.is_some());
+    if has_spread {
+        return Err(anyhow!(
+            "spread array in expression position is not supported (only in let/return/expression statements)"
+        ));
+    }
+
     let element_type = match expected {
         Some(RustType::Vec(inner)) => Some(inner.as_ref()),
         _ => None,
     };
 
-    let has_spread = array_lit
+    let elements = array_lit
         .elems
         .iter()
         .filter_map(|elem| elem.as_ref())
-        .any(|elem| elem.spread.is_some());
-
-    if !has_spread {
-        let elements = array_lit
-            .elems
-            .iter()
-            .filter_map(|elem| elem.as_ref())
-            .map(|elem| convert_expr(&elem.expr, reg, element_type, type_env))
-            .collect::<Result<Vec<_>>>()?;
-        return Ok(Expr::Vec { elements });
-    }
-
-    let segments = array_lit
-        .elems
-        .iter()
-        .filter_map(|elem| elem.as_ref())
-        .map(|elem| {
-            let expr = convert_expr(&elem.expr, reg, element_type, type_env)?;
-            if elem.spread.is_some() {
-                Ok(ir::VecSegment::Spread(expr))
-            } else {
-                Ok(ir::VecSegment::Element(expr))
-            }
-        })
+        .map(|elem| convert_expr(&elem.expr, reg, element_type, type_env))
         .collect::<Result<Vec<_>>>()?;
-    Ok(Expr::VecSpread { segments })
+    Ok(Expr::Vec { elements })
 }
 
 /// Converts an SWC unary expression to an IR `UnaryOp`.

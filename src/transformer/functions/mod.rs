@@ -109,7 +109,7 @@ pub fn convert_fn_decl(
         .as_ref()
         .is_some_and(|block| contains_throw(&block.stmts));
 
-    let (return_type, body) = if has_throw {
+    let (return_type, mut body) = if has_throw {
         let ok_type = return_type.unwrap_or_else(|| RustType::Named {
             name: "()".to_string(),
             type_args: vec![],
@@ -123,6 +123,8 @@ pub fn convert_fn_decl(
     } else {
         (return_type, body)
     };
+
+    convert_last_return_to_tail(&mut body);
 
     extra_items.push(Item::Fn {
         vis,
@@ -445,6 +447,18 @@ fn unwrap_promise_type(ty: RustType) -> Option<RustType> {
             ref type_args,
         } if name == "Promise" && type_args.len() == 1 => Some(type_args[0].clone()),
         other => Some(other),
+    }
+}
+
+/// Converts the last `Stmt::Return(Some(expr))` in a function body to `Stmt::TailExpr(expr)`.
+///
+/// This enables idiomatic Rust tail expressions (implicit return without `return` keyword).
+/// `Stmt::Return(None)` is not converted because `return;` cannot be a tail expression.
+pub(crate) fn convert_last_return_to_tail(body: &mut Vec<Stmt>) {
+    if let Some(Stmt::Return(Some(_))) = body.last() {
+        if let Some(Stmt::Return(Some(expr))) = body.pop() {
+            body.push(Stmt::TailExpr(expr));
+        }
     }
 }
 

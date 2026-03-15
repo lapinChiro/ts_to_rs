@@ -284,6 +284,8 @@ pub enum Stmt {
     Return(Option<Expr>),
     /// A bare expression statement (e.g., a function call).
     Expr(Expr),
+    /// A tail expression (implicit return without `return` keyword).
+    TailExpr(Expr),
     /// `try { ... } catch (e) { ... } finally { ... }`
     ///
     /// Converted to an immediately-invoked closure + match for try/catch,
@@ -391,11 +393,6 @@ pub enum Expr {
     Vec {
         /// Elements of the vec
         elements: Vec<Expr>,
-    },
-    /// A vec built with spread: `[...arr, 1, 2]`
-    VecSpread {
-        /// Segments of the vec (elements and spreads)
-        segments: Vec<VecSegment>,
     },
     /// An `if` expression: `if cond { then } else { else }`
     If {
@@ -515,15 +512,6 @@ impl UnOp {
             UnOp::Neg => "-",
         }
     }
-}
-
-/// A segment in a vec with spread syntax.
-#[derive(Debug, Clone, PartialEq)]
-pub enum VecSegment {
-    /// A single element (e.g., `1` in `[1, ...arr]`)
-    Element(Expr),
-    /// A spread expression (e.g., `...arr` in `[1, ...arr]`)
-    Spread(Expr),
 }
 
 /// The body of a closure expression.

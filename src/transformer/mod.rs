@@ -549,12 +549,13 @@ fn convert_var_decl_arrow_fns(
                         .as_ref()
                         .and_then(|ann| convert_ts_type(&ann.type_ann, &mut Vec::new()).ok())
                 });
-                let fn_body = match body {
+                let mut fn_body = match body {
                     crate::ir::ClosureBody::Expr(expr) => {
                         vec![crate::ir::Stmt::Return(Some(*expr))]
                     }
                     crate::ir::ClosureBody::Block(stmts) => stmts,
                 };
+                functions::convert_last_return_to_tail(&mut fn_body);
                 // Check for untyped parameters — these produce invalid Rust in Item::Fn
                 let mut checked_params = Vec::new();
                 for p in params {

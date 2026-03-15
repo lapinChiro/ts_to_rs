@@ -2,10 +2,6 @@
 
 ## 次のタスク
 
-### 割れ窓修正
-
-1. `backlog/generator-semantic-extraction.md` — Generator から意味的変換を transformer へ移動
-
 ### Phase 2 以降
 
 割れ窓修正後に TODO から PRD 化する。詳細は `TODO` を参照。

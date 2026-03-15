@@ -9,6 +9,7 @@ use crate::ir::{AssocConst, Expr, Item, Method, Param, RustType, Stmt, StructFie
 use crate::registry::TypeRegistry;
 use crate::transformer::expressions::convert_expr;
 use crate::transformer::extract_prop_name;
+use crate::transformer::functions::convert_last_return_to_tail;
 use crate::transformer::statements::convert_stmt;
 use crate::transformer::types::convert_ts_type;
 use crate::transformer::TypeEnv;
@@ -480,16 +481,29 @@ fn rewrite_super_constructor(ctor: &Method, parent: &ClassInfo) -> Result<Method
     }
 
     // Build Self { parent_fields..., child_fields... } at the end
-    // If the body ends with a Return(StructInit), merge super fields into it
-    let has_struct_init = new_body
-        .iter()
-        .any(|s| matches!(s, Stmt::Return(Some(Expr::StructInit { .. }))));
+    // If the body ends with a TailExpr(StructInit) or Return(StructInit), merge super fields into it
+    let has_struct_init = new_body.iter().any(|s| {
+        matches!(
+            s,
+            Stmt::TailExpr(Expr::StructInit { .. }) | Stmt::Return(Some(Expr::StructInit { .. }))
+        )
+    });
 
     if has_struct_init {
         // Merge super fields into existing StructInit
         new_body = new_body
             .into_iter()
             .map(|s| match s {
+                Stmt::TailExpr(Expr::StructInit {
+                    name, mut fields, ..
+                }) => {
+                    let mut merged = super_fields.clone();
+                    merged.append(&mut fields);
+                    Stmt::TailExpr(Expr::StructInit {
+                        name,
+                        fields: merged,
+                    })
+                }
                 Stmt::Return(Some(Expr::StructInit {
                     name, mut fields, ..
                 })) => {
@@ -505,10 +519,10 @@ fn rewrite_super_constructor(ctor: &Method, parent: &ClassInfo) -> Result<Method
             .collect();
     } else if !super_fields.is_empty() {
         // No existing StructInit — create one with super fields
-        new_body.push(Stmt::Return(Some(Expr::StructInit {
+        new_body.push(Stmt::TailExpr(Expr::StructInit {
             name: "Self".to_string(),
             fields: super_fields,
-        })));
+        }));
     }
 
     Ok(Method {
@@ -649,6 +663,7 @@ fn convert_constructor_body(
         })));
     }
 
+    convert_last_return_to_tail(&mut other_stmts);
     Ok(other_stmts)
 }
 
@@ -740,6 +755,7 @@ fn convert_class_method(
                     &mut method_env,
                 )?);
             }
+            convert_last_return_to_tail(&mut stmts);
             Some(stmts)
         }
         None => None,

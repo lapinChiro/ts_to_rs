@@ -1,6 +1,6 @@
 //! Expression generation: converts IR expressions into Rust source strings.
 
-use crate::ir::{BinOp, ClosureBody, Expr, Param, RustType, VecSegment};
+use crate::ir::{BinOp, ClosureBody, Expr, Param, RustType};
 
 use super::generate_param;
 use super::statements::generate_stmt;
@@ -213,44 +213,10 @@ pub(super) fn generate_expr(expr: &Expr) -> String {
             };
             format!("{}[{index_str}]", generate_expr(object))
         }
-        Expr::VecSpread { segments } => generate_vec_spread(segments),
         Expr::Cast { expr, target } => {
             format!("{} as {}", generate_expr(expr), generate_type(target))
         }
     }
-}
-
-/// Generates a vec with spread syntax as a block expression.
-///
-/// Special case: `[...arr]` (single spread, no other elements) generates `arr.clone()`.
-/// General case: generates a block with `Vec::new()` + `extend`/`push` calls.
-fn generate_vec_spread(segments: &[VecSegment]) -> String {
-    // Optimization: [...arr] → arr.clone()
-    if segments.len() == 1 {
-        if let VecSegment::Spread(expr) = &segments[0] {
-            return format!("{}.clone()", generate_expr(expr));
-        }
-    }
-
-    let mut lines = Vec::new();
-    lines.push("let mut __spread_vec = Vec::new();".to_string());
-
-    for seg in segments {
-        match seg {
-            VecSegment::Element(expr) => {
-                lines.push(format!("__spread_vec.push({});", generate_expr(expr)));
-            }
-            VecSegment::Spread(expr) => {
-                lines.push(format!(
-                    "__spread_vec.extend({}.iter().cloned());",
-                    generate_expr(expr)
-                ));
-            }
-        }
-    }
-
-    lines.push("__spread_vec".to_string());
-    format!("{{\n    {}\n}}", lines.join("\n    "))
 }
 
 /// Generates a macro call expression (e.g., `println!("{:?}", x)`).
@@ -320,10 +286,8 @@ fn generate_closure(
         }
         ClosureBody::Block(stmts) => {
             let mut out = format!("|{params_str}|{ret_str} {{\n");
-            let body_len = stmts.len();
-            for (i, stmt) in stmts.iter().enumerate() {
-                let is_last = i == body_len - 1;
-                out.push_str(&generate_stmt(stmt, 1, is_last));
+            for stmt in stmts {
+                out.push_str(&generate_stmt(stmt, 1));
                 out.push('\n');
             }
             out.push('}');
@@ -450,11 +414,11 @@ mod tests {
                 ty: Some(RustType::F64),
             }],
             return_type: Some(RustType::F64),
-            body: ClosureBody::Block(vec![Stmt::Return(Some(Expr::BinaryOp {
+            body: ClosureBody::Block(vec![Stmt::TailExpr(Expr::BinaryOp {
                 left: Box::new(Expr::Ident("x".to_string())),
                 op: BinOp::Add,
                 right: Box::new(Expr::NumberLit(1.0)),
-            }))]),
+            })]),
         };
         let expected = "|x: f64| -> f64 {\n    x + 1.0\n}";
         assert_eq!(generate_expr(&expr), expected);
@@ -731,7 +695,7 @@ mod tests {
             ty: None,
             init: Some(Expr::NumberLit(1.0)),
         };
-        let result = generate_stmt(&stmt, 0, true);
+        let result = generate_stmt(&stmt, 0);
         assert!(result.contains("r#type"), "expected r#type in: {result}");
     }
 

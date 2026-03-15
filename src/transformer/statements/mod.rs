@@ -36,6 +36,10 @@ pub fn convert_stmt(
 ) -> Result<Vec<Stmt>> {
     match stmt {
         ast::Stmt::Return(ret) => {
+            // Spread array detection at SWC AST level
+            if let Some(stmts) = try_expand_spread_return(ret, reg, return_type, type_env)? {
+                return Ok(stmts);
+            }
             let expr = ret
                 .arg
                 .as_ref()
@@ -44,6 +48,10 @@ pub fn convert_stmt(
             Ok(vec![Stmt::Return(expr)])
         }
         ast::Stmt::Decl(ast::Decl::Var(var_decl)) => {
+            // Spread array detection at SWC AST level
+            if let Some(stmts) = try_expand_spread_var_decl(var_decl, reg, type_env)? {
+                return Ok(stmts);
+            }
             if let Some(expanded) = try_convert_object_destructuring(var_decl, reg, type_env)? {
                 Ok(expanded)
             } else if let Some(expanded) = try_convert_array_destructuring(var_decl, reg, type_env)?
@@ -55,6 +63,10 @@ pub fn convert_stmt(
         }
         ast::Stmt::If(if_stmt) => Ok(vec![convert_if_stmt(if_stmt, reg, return_type, type_env)?]),
         ast::Stmt::Expr(expr_stmt) => {
+            // Spread array detection at SWC AST level
+            if let Some(stmts) = try_expand_spread_expr_stmt(expr_stmt, reg, type_env)? {
+                return Ok(stmts);
+            }
             let expr = convert_expr(&expr_stmt.expr, reg, None, type_env)?;
             Ok(vec![Stmt::Expr(expr)])
         }
@@ -458,6 +470,217 @@ pub fn convert_stmt_list(
         result.extend(converted);
     }
     Ok(result)
+}
+
+// --- Spread array detection and expansion at SWC AST level ---
+
+/// Returns true if an SWC ArrayLit contains spread elements.
+fn has_spread_elements(array_lit: &ast::ArrayLit) -> bool {
+    array_lit
+        .elems
+        .iter()
+        .filter_map(|e| e.as_ref())
+        .any(|e| e.spread.is_some())
+}
+
+/// Extracts the initializer array literal from a VarDecl if it is a spread array.
+fn extract_spread_array_init(var_decl: &ast::VarDecl) -> Option<(&ast::Pat, &ast::ArrayLit)> {
+    let declarator = var_decl.decls.first()?;
+    let init = declarator.init.as_ref()?;
+    let array_lit = match init.as_ref() {
+        ast::Expr::Array(a) => a,
+        _ => return None,
+    };
+    if has_spread_elements(array_lit) {
+        Some((&declarator.name, array_lit))
+    } else {
+        None
+    }
+}
+
+/// Converts spread array elements to IR expressions and marks whether each is a spread.
+fn convert_spread_segments(
+    array_lit: &ast::ArrayLit,
+    reg: &TypeRegistry,
+    expected: Option<&RustType>,
+    type_env: &TypeEnv,
+) -> Result<Vec<(bool, Expr)>> {
+    let element_type = match expected {
+        Some(RustType::Vec(inner)) => Some(inner.as_ref()),
+        _ => None,
+    };
+    array_lit
+        .elems
+        .iter()
+        .filter_map(|e| e.as_ref())
+        .map(|elem| {
+            let expr = convert_expr(&elem.expr, reg, element_type, type_env)?;
+            Ok((elem.spread.is_some(), expr))
+        })
+        .collect()
+}
+
+/// Generates push/extend statements from spread segments for a given variable name.
+fn emit_spread_ops(var_name: &str, segments: &[(bool, Expr)], result: &mut Vec<Stmt>) {
+    for (is_spread, expr) in segments {
+        if *is_spread {
+            result.push(Stmt::Expr(Expr::MethodCall {
+                object: Box::new(Expr::Ident(var_name.to_string())),
+                method: "extend".to_string(),
+                args: vec![Expr::MethodCall {
+                    object: Box::new(Expr::MethodCall {
+                        object: Box::new(expr.clone()),
+                        method: "iter".to_string(),
+                        args: vec![],
+                    }),
+                    method: "cloned".to_string(),
+                    args: vec![],
+                }],
+            }));
+        } else {
+            result.push(Stmt::Expr(Expr::MethodCall {
+                object: Box::new(Expr::Ident(var_name.to_string())),
+                method: "push".to_string(),
+                args: vec![expr.clone()],
+            }));
+        }
+    }
+}
+
+/// Detects `let x = [...arr, 1]` at SWC AST level and expands to IR statements.
+///
+/// Returns `None` if the VarDecl does not contain a spread array initializer.
+fn try_expand_spread_var_decl(
+    var_decl: &ast::VarDecl,
+    reg: &TypeRegistry,
+    type_env: &TypeEnv,
+) -> Result<Option<Vec<Stmt>>> {
+    let (pat, array_lit) = match extract_spread_array_init(var_decl) {
+        Some(v) => v,
+        None => return Ok(None),
+    };
+    let name = extract_pat_ident_name(pat)?;
+    let ty = match pat {
+        ast::Pat::Ident(ident) => ident
+            .type_ann
+            .as_ref()
+            .map(|ann| convert_ts_type(&ann.type_ann, &mut Vec::new()))
+            .transpose()?,
+        _ => None,
+    };
+
+    let segments = convert_spread_segments(array_lit, reg, ty.as_ref(), type_env)?;
+
+    // Optimization: [...arr] → let name = arr.clone();
+    if segments.len() == 1 && segments[0].0 {
+        return Ok(Some(vec![Stmt::Let {
+            mutable: false,
+            name,
+            ty,
+            init: Some(Expr::MethodCall {
+                object: Box::new(segments[0].1.clone()),
+                method: "clone".to_string(),
+                args: vec![],
+            }),
+        }]));
+    }
+
+    let mut result = Vec::new();
+    result.push(Stmt::Let {
+        mutable: true,
+        name: name.clone(),
+        ty,
+        init: Some(Expr::FnCall {
+            name: "Vec::new".to_string(),
+            args: vec![],
+        }),
+    });
+    emit_spread_ops(&name, &segments, &mut result);
+    Ok(Some(result))
+}
+
+/// Detects `return [...arr, 1]` at SWC AST level and expands to IR statements.
+///
+/// Returns `None` if the return statement does not contain a spread array.
+fn try_expand_spread_return(
+    ret: &ast::ReturnStmt,
+    reg: &TypeRegistry,
+    return_type: Option<&RustType>,
+    type_env: &TypeEnv,
+) -> Result<Option<Vec<Stmt>>> {
+    let arg = match &ret.arg {
+        Some(arg) => arg,
+        None => return Ok(None),
+    };
+    let array_lit = match arg.as_ref() {
+        ast::Expr::Array(a) if has_spread_elements(a) => a,
+        _ => return Ok(None),
+    };
+
+    let segments = convert_spread_segments(array_lit, reg, return_type, type_env)?;
+
+    // Optimization: return [...arr] → return arr.clone();
+    if segments.len() == 1 && segments[0].0 {
+        return Ok(Some(vec![Stmt::Return(Some(Expr::MethodCall {
+            object: Box::new(segments[0].1.clone()),
+            method: "clone".to_string(),
+            args: vec![],
+        }))]));
+    }
+
+    let var_name = "__spread_vec".to_string();
+    let mut result = Vec::new();
+    result.push(Stmt::Let {
+        mutable: true,
+        name: var_name.clone(),
+        ty: None,
+        init: Some(Expr::FnCall {
+            name: "Vec::new".to_string(),
+            args: vec![],
+        }),
+    });
+    emit_spread_ops(&var_name, &segments, &mut result);
+    result.push(Stmt::Return(Some(Expr::Ident(var_name))));
+    Ok(Some(result))
+}
+
+/// Detects `[...arr, 1]` as a bare expression statement and expands to IR statements.
+///
+/// Returns `None` if the expression is not a spread array.
+fn try_expand_spread_expr_stmt(
+    expr_stmt: &ast::ExprStmt,
+    reg: &TypeRegistry,
+    type_env: &TypeEnv,
+) -> Result<Option<Vec<Stmt>>> {
+    let array_lit = match expr_stmt.expr.as_ref() {
+        ast::Expr::Array(a) if has_spread_elements(a) => a,
+        _ => return Ok(None),
+    };
+
+    let segments = convert_spread_segments(array_lit, reg, None, type_env)?;
+
+    // Optimization: [...arr] → arr.clone();
+    if segments.len() == 1 && segments[0].0 {
+        return Ok(Some(vec![Stmt::Expr(Expr::MethodCall {
+            object: Box::new(segments[0].1.clone()),
+            method: "clone".to_string(),
+            args: vec![],
+        })]));
+    }
+
+    let var_name = "__spread_vec".to_string();
+    let mut result = Vec::new();
+    result.push(Stmt::Let {
+        mutable: true,
+        name: var_name.clone(),
+        ty: None,
+        init: Some(Expr::FnCall {
+            name: "Vec::new".to_string(),
+            args: vec![],
+        }),
+    });
+    emit_spread_ops(&var_name, &segments, &mut result);
+    Ok(Some(result))
 }
 
 /// Tries to convert a variable declaration with object destructuring pattern.

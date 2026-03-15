@@ -288,11 +288,11 @@ fn test_transform_module_function_declaration() {
                 },
             ],
             return_type: Some(RustType::F64),
-            body: vec![Stmt::Return(Some(Expr::BinaryOp {
+            body: vec![Stmt::TailExpr(Expr::BinaryOp {
                 left: Box::new(Expr::Ident("a".to_string())),
                 op: BinOp::Add,
                 right: Box::new(Expr::Ident("b".to_string())),
-            }))],
+            })],
         }
     );
 }
