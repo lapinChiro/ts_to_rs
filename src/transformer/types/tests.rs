@@ -931,30 +931,23 @@ fn test_convert_type_alias_conditional_infer_returns_associated_type() {
 }
 
 #[test]
-fn test_convert_type_alias_conditional_nested_generates_comment_and_placeholder() {
-    // Nested conditional types are not supported by Tier 1 — should produce fallback
+fn test_convert_type_alias_conditional_nested_generates_type_alias() {
+    // Nested conditional types are now handled recursively via convert_conditional_type
+    // Outer: T extends string ? (inner) : never → true branch = inner conditional
+    // Inner: T extends "a" ? number : boolean → true branch = number
     let decl = parse_type_alias(
         "type Foo<T> = T extends string ? T extends \"a\" ? number : boolean : never;",
     );
     let items = convert_type_alias_items(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
-    assert_eq!(items.len(), 2);
-    // First item should be a comment containing original TS info
-    match &items[0] {
-        Item::Comment(text) => {
-            assert!(text.contains("TODO"));
-            assert!(text.contains("Foo"));
-        }
-        _ => panic!("expected Item::Comment, got {:?}", items[0]),
-    }
-    // Second item should be a placeholder TypeAlias with true branch fallback
-    // (Any since the true branch is also an unsupported nested conditional)
+    assert_eq!(items.len(), 1);
+    // Recursive true-branch fallback: outer true → inner true → number → f64
     assert_eq!(
-        items[1],
+        items[0],
         Item::TypeAlias {
             vis: Visibility::Public,
             name: "Foo".to_string(),
             type_params: vec!["T".to_string()],
-            ty: RustType::Any,
+            ty: RustType::F64,
         }
     );
 }
@@ -1850,4 +1843,62 @@ fn test_convert_ts_type_lit_number_returns_f64() {
     };
     let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
     assert_eq!(ty, RustType::F64);
+}
+
+// -- TsConditionalType in annotation position tests --
+
+#[test]
+fn test_convert_ts_type_conditional_true_branch_returns_type() {
+    let decl = parse_interface("interface T { x: string extends object ? boolean : number; }");
+    let prop = match &decl.body.body[0] {
+        TsTypeElement::TsPropertySignature(p) => p,
+        _ => panic!("expected property signature"),
+    };
+    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
+    assert_eq!(ty, RustType::Bool);
+}
+
+#[test]
+fn test_convert_ts_type_record_string_number_returns_hashmap() {
+    let decl = parse_interface("interface T { x: Record<string, number>; }");
+    let prop = match &decl.body.body[0] {
+        TsTypeElement::TsPropertySignature(p) => p,
+        _ => panic!("expected property signature"),
+    };
+    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
+    assert_eq!(
+        ty,
+        RustType::Named {
+            name: "HashMap".to_string(),
+            type_args: vec![RustType::String, RustType::F64],
+        }
+    );
+}
+
+#[test]
+fn test_convert_ts_type_readonly_returns_inner_type() {
+    let decl = parse_interface("interface T { x: Readonly<Point>; }");
+    let prop = match &decl.body.body[0] {
+        TsTypeElement::TsPropertySignature(p) => p,
+        _ => panic!("expected property signature"),
+    };
+    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
+    assert_eq!(
+        ty,
+        RustType::Named {
+            name: "Point".to_string(),
+            type_args: vec![],
+        }
+    );
+}
+
+#[test]
+fn test_convert_ts_type_conditional_bool_predicate_returns_bool() {
+    let decl = parse_interface("interface T { x: string extends object ? true : false; }");
+    let prop = match &decl.body.body[0] {
+        TsTypeElement::TsPropertySignature(p) => p,
+        _ => panic!("expected property signature"),
+    };
+    let ty = convert_ts_type(&prop.type_ann.as_ref().unwrap().type_ann, &mut Vec::new()).unwrap();
+    assert_eq!(ty, RustType::Bool);
 }

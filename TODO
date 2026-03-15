@@ -30,36 +30,41 @@
 
 ### Tier 1: 高優先度 — 伝播リスクが高い、または ROI が極めて高い
 
+- **[I-41]** **`convert_type_ref` / `convert_ts_type` への TypeRegistry 伝搬** — アーキテクチャ改善
+    - 現在 `convert_ts_type(ts_type, extra_items)` は TypeRegistry を受け取らない
+    - ユーティリティ型の展開（I-40）、型解決の改善等に TypeRegistry が必要
+    - シグネチャ変更の影響範囲が広い（全呼び出し元の更新が必要）ため独立タスクとする
+    - ⚠️ 伝播: 今後の型関連機能追加のたびに TypeRegistry の欠如が制約になる
+
 ### Tier 2: 中優先度 — 直接的な価値が高い
 
-- **[I-07]** **式中ネスト位置の配列スプレッド対応** — 式変換正確性
-   - `foo([...arr, 1])` が式中にある場合エラー。一時変数にホイスト
-
-- **[I-08]** **TsConditionalType の型注記位置対応** — 型構文（Hono 3件解消）
-
-- **[I-09]** **mapped type の基本対応** — 型構文（Hono 3件解消）
-   - `HashMap<String, V>` にフォールバック
+- **[I-14]** **オブジェクト分割代入の拡張（デフォルト値、ネスト、rest）** — 分割代入
+    - TS で頻出。デフォルト値 `{ x = 0 }`, ネスト `{ a: { b } }`, rest `{ a, ...rest }` が未対応
 
 - **[I-10]** **条件内代入式の対応** — 式変換正確性
-    - `while (x = getValue())` → `loop` パターンへ変換
+    - `while (x = getValue())` → `loop { let x = getValue(); if !x { break; } ... }` パターンへ変換
 
-- **[I-11]** **三項演算子の分岐型不一致** — 式変換正確性
+- **[I-17]** **const のミュータビリティ解析改善** — 変換正確性
+    - `mark_mut_params_from_body` パターンを `convert_var_decl` にも適用し、body 内で変更される const を `let mut` にする
 
-- **[I-12]** **`Promise<T>` の union 内展開** — 型変換正確性
-
-- **[I-13]** **super() の位置ベースフィールドマッピング** — 式変換正確性
-
-- **[I-14]** **オブジェクト分割代入の拡張（デフォルト値、ネスト、rest）** — 分割代入
+- **[I-23]** **constructor パラメータプロパティ** — クラス変換（Hono 2件）
+    - `constructor(public x: number)` の TsParamProp 対応
 
 - **[I-15]** **`+x`（単項プラス / 数値変換）** — 式変換
     - TypeEnv で型判定可能。`+x` → 型に応じて `x` / `x.parse::<f64>()` 等に変換
 
+- **[I-11]** **三項演算子の分岐型不一致** — 式変換正確性
+    - `cond ? "str" : 42` のように分岐の型が異なる場合、Rust の `if` 式では型が一致しないためコンパイルエラーになる
+    - 対策: enum ラップ、片方の型変換、または `Box<dyn Any>` フォールバック
+
+- **[I-12]** **`Promise<T>` の union 内展開** — 型変換正確性
+    - `string | Promise<string>` で `Promise<T>` が union メンバーにある場合の展開
+
+- **[I-13]** **super() の位置ベースフィールドマッピング** — 式変換正確性
+
 - **[I-16]** **空配列の型推論改善** — 型推論
     - `const arr: number[] = []` は動作するが、型注記なし `const arr = []` は型情報なし
     - `expected` 型伝搬の改善で対応
-
-- **[I-17]** **const のミュータビリティ解析改善** — 変換正確性
-    - `mark_mut_params_from_body` パターンを `convert_var_decl` にも適用し、body 内で変更される const を `let mut` にする
 
 - **[I-18]** **re-export の追跡** — import/export
     - `transform_import` / `transform_export_named` は実装済み
@@ -77,27 +82,60 @@
 - **[I-22]** **型注記なしパラメータ** — 型推論（Hono 1件）
     - Arrow 関数パラメータに型注記がない場合の型推論
 
-- **[I-23]** **constructor パラメータプロパティ** — クラス変換（Hono 2件）
-    - `constructor(public x: number)` の TsParamProp 対応
-
 - **[I-24]** **外部パッケージの型定義解決** — 型解決
     - 外部パッケージの `.d.ts` ファイルから型情報を読み込む
 
 - **[I-25]** **高度な conditional type の変換戦略** — 型変換（Hono 完全変換に必須）
-    - テンプレートリテラル型、再帰的条件型、高階型操作、複雑ネスト条件型
+    - I-08（基本対応）で infer パターン・true branch フォールバックは型注記位置で対応済み
+    - ここでは I-08 で未対応の高度なパターンを扱う: テンプレートリテラル型、再帰的条件型、高階型操作
     - TS 固有の問題への対処コード（IDE 表示改善等）→ Rust では不要、コメント/スキップ生成
-    - Rust に代替パターンがあるもの → Rust イディオム（Extractor, IntoResponse, serde, proc macro）に変換
     - 調査済み: `report/tier3-conditional-types-rust-approaches.md` に Group A〜D の分析あり
+
+- **[I-38]** **型推論基盤の整備** — 型推論
+    - 現在、型推論が未対応のために以下の暫定実装（`RustType::Any` フォールバック等）が存在する。型推論の実装時にこれら全てが影響範囲となる:
+    - **conditional type true-branch フォールバック** (`types/mod.rs` `convert_conditional_type`): `T extends X ? A : B` で T の具体型を判定せず true branch (A) を返す。false branch の情報が消失
+    - **mapped type の value 型 Any フォールバック** (`types/mod.rs` `TsMappedType`): 型注記がない mapped type の value 型が `Any` になる
+    - **call signature パラメータ型 Any フォールバック** (`types/mod.rs` `convert_interface_as_fn_type`): 型注記なしパラメータが `Any` になる
+    - **関数型パラメータ型 Any フォールバック** (`types/mod.rs` `convert_fn_type`): 型注記なしパラメータが `Any` になる
+    - **optional chain の base オブジェクト型 Any フォールバック** (`expressions/mod.rs`): `resolve_expr_type` が型を解決できない場合に `Any` を使用
+    - **nullish coalescing の型判定失敗** (`expressions/mod.rs`): `resolve_expr_type` が left 側の型を特定できない場合、Option パターン認識が失敗
+    - **resilient mode の Any フォールバック** (`functions/mod.rs`): 型変換失敗時に `Any` にフォールバック
+    - **arrow 関数パラメータ型注記なし** (`expressions/mod.rs`): 型注記がない arrow パラメータが `Any` に
+    - **TypeEnv の解決範囲の制限** (`expressions/mod.rs` `resolve_expr_type`): 直接の識別子・1 レベルのフィールドアクセスのみ。多段メンバーアクセス・関数戻り値・配列要素の型は未追跡
+    - **expected 型の伝搬欠落** (`expressions/mod.rs` `convert_expr`): ネストした二項演算・optional chain 等に `expected` が伝搬されない
+
+- **[I-39]** **Transformer の Range 生成で `Expr::IntLit` を使用** — IR 整合性
+    - `Expr::IntLit` は IR に追加済みだが、for ループの Range 生成（`0..n`）で `NumberLit(0.0)` を生成し、Generator の `generate_range_bound` が `as i64` キャストしている
+    - Transformer 側で整数と判定できる場合に `IntLit` を直接生成すれば、Generator のキャスト不要
+
+- **[I-42]** **switch 文の改善（fall-through 検出 + 文字列 match + 非リテラル case）** — 変換正確性
+    - fall-through 検出で `return`/`throw` を終端として扱っていない。`return` で終わる case が fall-through パスに入り、unreachable な `_fall = true;` が生成される。`case 1: return "one";` は clean match の `1 => { return "one".to_string(); }` が正しい
+    - clean match で文字列 discriminant に `.as_str()` が必要（Rust の `match` は `String` を `&str` パターンでマッチできない）
+    - `MatchArm::patterns` が `Expr` 型だが、Rust の match パターンは式ではない。リテラルマッチは動作するが、変数 case（`case someVar:`）や destructuring は未対応
+    - バッチで対応可能
+
+- **[I-40]** **ユーティリティ型の TypeRegistry 連携（Partial/Required/Pick/Omit）** — 型構文
+    - `Partial<T>` → 全フィールドを `Option<T>` にした合成 struct
+    - `Required<T>` → 全フィールドから `Option` を剥がした struct
+    - `Pick<T, K>` / `Omit<T, K>` → 対応フィールドのみ/除外した struct
+    - 前提: `convert_type_ref` に `TypeRegistry` パラメータを渡すシグネチャ変更が必要（I-41）
+    - 🔗 依存: I-41
 
 ### Tier 3: 低優先度
 
+- **[I-44]** **合成 struct 名のグローバルカウンタによる非決定性** — テスト品質
+    - `_TypeLit0`, `_Intersection1` 等の合成 struct 名は `AtomicU32` グローバルカウンタで生成
+    - テスト実行順序によって ID が変わるため、厳密な名前一致テストが書けない
+    - 対策案: テスト前にカウンタをリセットする API、またはファイル単位のローカルカウンタ
 - **[I-26]** **union 内の未対応型** — 型構文（Hono 2件）
 - **[I-27]** **タプルの optional 要素** — 型構文
-- **[I-28]** **conditional type フォールバック値の改善** — 型変換正確性
+- **[I-28]** **conditional type の分岐型改善** — 型変換正確性
+    - I-38（型推論）が前提。型推論なしでは true branch フォールバックが唯一の選択肢
+    - 🔗 依存: I-38
 - **[I-29]** **ネスト async 関数** — 文（Hono 1件解消）
 - **[I-30]** **生成コードの Cargo.toml への依存クレート追加** — コード生成
     - I-03 完了済み。`tests/compile-check/Cargo.toml` の依存情報を参考に生成物の Cargo.toml を作成可能
-- **[I-31]** **expressions/mod.rs のモジュール分割** — リファクタリング（1,483 行）
+- **[I-31]** **expressions/mod.rs のモジュール分割** — リファクタリング（1,509 行）
 - **[I-32]** **コンパイルテストのスキップ解消** — テスト品質（4/51 がスキップ中）
     - I-03 完了済みで外部クレート起因 4 件は解消。残り 4 件（indexed-access-type, conditional-type, interface-mixed, union-type）は個別対応が必要
 - **[I-33]** **非プリミティブ type assertion のコメント保持** — type assertion

@@ -89,6 +89,20 @@ pub fn convert_ts_type(ts_type: &TsType, extra_items: &mut Vec<Item>) -> Result<
                 type_args: vec![],
             }),
         },
+        TsType::TsConditionalType(cond) => convert_conditional_type(cond, extra_items),
+        TsType::TsMappedType(mapped) => {
+            // Fallback: treat mapped types as HashMap<String, V>
+            let value_type = mapped
+                .type_ann
+                .as_ref()
+                .map(|ann| convert_ts_type(ann, extra_items))
+                .transpose()?
+                .unwrap_or(RustType::Any);
+            Ok(RustType::Named {
+                name: "HashMap".to_string(),
+                type_args: vec![RustType::String, value_type],
+            })
+        }
         _ => Err(anyhow!("unsupported type: {:?}", ts_type)),
     }
 }
@@ -114,6 +128,32 @@ fn convert_type_ref(
             }
             let inner = convert_ts_type(&params.params[0], extra_items)?;
             Ok(RustType::Vec(Box::new(inner)))
+        }
+        "Record" => {
+            let params = type_ref
+                .type_params
+                .as_ref()
+                .ok_or_else(|| anyhow!("Record requires type parameters"))?;
+            if params.params.len() != 2 {
+                return Err(anyhow!("Record expects exactly two type parameters"));
+            }
+            let key = convert_ts_type(&params.params[0], extra_items)?;
+            let val = convert_ts_type(&params.params[1], extra_items)?;
+            Ok(RustType::Named {
+                name: "HashMap".to_string(),
+                type_args: vec![key, val],
+            })
+        }
+        "Readonly" => {
+            // Rust is immutable by default — Readonly<T> is just T
+            let params = type_ref
+                .type_params
+                .as_ref()
+                .ok_or_else(|| anyhow!("Readonly requires a type parameter"))?;
+            if params.params.len() != 1 {
+                return Err(anyhow!("Readonly expects exactly one type parameter"));
+            }
+            convert_ts_type(&params.params[0], extra_items)
         }
         // User-defined types: pass through as Named, with any generic type arguments
         other => {
