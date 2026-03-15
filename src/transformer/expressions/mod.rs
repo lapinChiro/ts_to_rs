@@ -374,7 +374,7 @@ pub fn convert_arrow_expr(
         ast::BlockStmtOrExpr::BlockStmt(block) => {
             let mut stmts = Vec::new();
             for stmt in &block.stmts {
-                stmts.push(convert_stmt(stmt, reg, return_type.as_ref())?);
+                stmts.extend(convert_stmt(stmt, reg, return_type.as_ref())?);
             }
             ClosureBody::Block(stmts)
         }

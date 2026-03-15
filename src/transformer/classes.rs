@@ -622,7 +622,7 @@ fn convert_constructor_body(stmts: &[ast::Stmt], reg: &TypeRegistry) -> Result<V
             let value = convert_expr(value_expr, reg, None)?;
             fields.push((field_name, value));
         } else {
-            other_stmts.push(convert_stmt(stmt, reg, None)?);
+            other_stmts.extend(convert_stmt(stmt, reg, None)?);
         }
     }
 
@@ -711,7 +711,7 @@ fn convert_class_method(
         Some(block) => {
             let mut stmts = Vec::new();
             for stmt in &block.stmts {
-                stmts.push(convert_stmt(stmt, reg, return_type.as_ref())?);
+                stmts.extend(convert_stmt(stmt, reg, return_type.as_ref())?);
             }
             Some(stmts)
         }

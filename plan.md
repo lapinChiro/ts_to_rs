@@ -6,7 +6,7 @@
 
 Hono 再評価（`report/hono-rescan-2025-03.md`）と依存関係に基づく実行順序。
 
-1. `backlog/stmt-responsibility.md` — convert_stmt 責務整理（大規模リファクタリング）
+（全タスク完了）
 
 ## Hono 対応の開始条件
 

@@ -4,6 +4,17 @@ use crate::parser::parse_typescript;
 use crate::registry::TypeRegistry;
 use swc_ecma_ast::{Decl, ModuleItem};
 
+/// Helper: convert a single statement and assert exactly one IR statement is produced.
+fn convert_single_stmt(
+    stmt: &ast::Stmt,
+    reg: &TypeRegistry,
+    return_type: Option<&RustType>,
+) -> Stmt {
+    let mut stmts = convert_stmt(stmt, reg, return_type).unwrap();
+    assert_eq!(stmts.len(), 1, "expected single statement, got {stmts:?}");
+    stmts.remove(0)
+}
+
 /// Helper: parse TS source containing a function and return its body statements.
 fn parse_fn_body(source: &str) -> Vec<ast::Stmt> {
     let module = parse_typescript(source).expect("parse failed");
@@ -22,21 +33,21 @@ fn parse_fn_body(source: &str) -> Vec<ast::Stmt> {
 #[test]
 fn test_convert_stmt_return_expr() {
     let stmts = parse_fn_body("function f() { return 42; }");
-    let result = convert_stmt(&stmts[0], &TypeRegistry::new(), None).unwrap();
+    let result = convert_single_stmt(&stmts[0], &TypeRegistry::new(), None);
     assert_eq!(result, Stmt::Return(Some(Expr::NumberLit(42.0))));
 }
 
 #[test]
 fn test_convert_stmt_return_no_value() {
     let stmts = parse_fn_body("function f() { return; }");
-    let result = convert_stmt(&stmts[0], &TypeRegistry::new(), None).unwrap();
+    let result = convert_single_stmt(&stmts[0], &TypeRegistry::new(), None);
     assert_eq!(result, Stmt::Return(None));
 }
 
 #[test]
 fn test_convert_stmt_const_decl() {
     let stmts = parse_fn_body("function f() { const x = 1; }");
-    let result = convert_stmt(&stmts[0], &TypeRegistry::new(), None).unwrap();
+    let result = convert_single_stmt(&stmts[0], &TypeRegistry::new(), None);
     assert_eq!(
         result,
         Stmt::Let {
@@ -51,7 +62,7 @@ fn test_convert_stmt_const_decl() {
 #[test]
 fn test_convert_stmt_let_decl_mutable() {
     let stmts = parse_fn_body("function f() { let x = 1; }");
-    let result = convert_stmt(&stmts[0], &TypeRegistry::new(), None).unwrap();
+    let result = convert_single_stmt(&stmts[0], &TypeRegistry::new(), None);
     assert_eq!(
         result,
         Stmt::Let {
@@ -66,7 +77,7 @@ fn test_convert_stmt_let_decl_mutable() {
 #[test]
 fn test_convert_stmt_const_with_type_annotation() {
     let stmts = parse_fn_body("function f() { const x: number = 1; }");
-    let result = convert_stmt(&stmts[0], &TypeRegistry::new(), None).unwrap();
+    let result = convert_single_stmt(&stmts[0], &TypeRegistry::new(), None);
     assert_eq!(
         result,
         Stmt::Let {
@@ -81,7 +92,7 @@ fn test_convert_stmt_const_with_type_annotation() {
 #[test]
 fn test_convert_stmt_if_no_else() {
     let stmts = parse_fn_body("function f() { if (true) { return 1; } }");
-    let result = convert_stmt(&stmts[0], &TypeRegistry::new(), None).unwrap();
+    let result = convert_single_stmt(&stmts[0], &TypeRegistry::new(), None);
     assert_eq!(
         result,
         Stmt::If {
@@ -95,7 +106,7 @@ fn test_convert_stmt_if_no_else() {
 #[test]
 fn test_convert_stmt_if_else() {
     let stmts = parse_fn_body("function f() { if (true) { return 1; } else { return 2; } }");
-    let result = convert_stmt(&stmts[0], &TypeRegistry::new(), None).unwrap();
+    let result = convert_single_stmt(&stmts[0], &TypeRegistry::new(), None);
     assert_eq!(
         result,
         Stmt::If {
@@ -109,7 +120,7 @@ fn test_convert_stmt_if_else() {
 #[test]
 fn test_convert_stmt_for_counter_zero_to_n() {
     let stmts = parse_fn_body("function f(n: number) { for (let i = 0; i < n; i++) { i; } }");
-    let result = convert_stmt(&stmts[0], &TypeRegistry::new(), None).unwrap();
+    let result = convert_single_stmt(&stmts[0], &TypeRegistry::new(), None);
     assert_eq!(
         result,
         Stmt::ForIn {
@@ -127,7 +138,7 @@ fn test_convert_stmt_for_counter_zero_to_n() {
 #[test]
 fn test_convert_stmt_for_counter_start_to_literal() {
     let stmts = parse_fn_body("function f() { for (let i = 1; i < 10; i++) { i; } }");
-    let result = convert_stmt(&stmts[0], &TypeRegistry::new(), None).unwrap();
+    let result = convert_single_stmt(&stmts[0], &TypeRegistry::new(), None);
     assert_eq!(
         result,
         Stmt::ForIn {
@@ -145,7 +156,7 @@ fn test_convert_stmt_for_counter_start_to_literal() {
 #[test]
 fn test_convert_stmt_for_of() {
     let stmts = parse_fn_body("function f() { for (const item of items) { item; } }");
-    let result = convert_stmt(&stmts[0], &TypeRegistry::new(), None).unwrap();
+    let result = convert_single_stmt(&stmts[0], &TypeRegistry::new(), None);
     assert_eq!(
         result,
         Stmt::ForIn {
@@ -160,7 +171,7 @@ fn test_convert_stmt_for_of() {
 #[test]
 fn test_convert_stmt_while() {
     let stmts = parse_fn_body("function f() { while (x > 0) { x = x - 1; } }");
-    let result = convert_stmt(&stmts[0], &TypeRegistry::new(), None).unwrap();
+    let result = convert_single_stmt(&stmts[0], &TypeRegistry::new(), None);
     assert_eq!(
         result,
         Stmt::While {
@@ -305,7 +316,7 @@ fn test_convert_stmt_nested_try_catch_generates_nested_try_catch_ir() {
 #[test]
 fn test_convert_stmt_throw_new_error_string() {
     let stmts = parse_fn_body("function f() { throw new Error(\"something went wrong\"); }");
-    let result = convert_stmt(&stmts[0], &TypeRegistry::new(), None).unwrap();
+    let result = convert_single_stmt(&stmts[0], &TypeRegistry::new(), None);
     // throw new Error("msg") → return Err("msg".to_string())
     assert_eq!(
         result,
@@ -323,7 +334,7 @@ fn test_convert_stmt_throw_new_error_string() {
 #[test]
 fn test_convert_stmt_throw_string_literal() {
     let stmts = parse_fn_body("function f() { throw \"error msg\"; }");
-    let result = convert_stmt(&stmts[0], &TypeRegistry::new(), None).unwrap();
+    let result = convert_single_stmt(&stmts[0], &TypeRegistry::new(), None);
     // throw "msg" → return Err("msg".to_string())
     assert_eq!(
         result,
@@ -343,7 +354,7 @@ fn test_convert_stmt_throw_string_literal() {
 #[test]
 fn test_convert_stmt_var_decl_object_literal_with_type_annotation() {
     let stmts = parse_fn_body("function f() { const p: Point = { x: 1, y: 2 }; }");
-    let result = convert_stmt(&stmts[0], &TypeRegistry::new(), None).unwrap();
+    let result = convert_single_stmt(&stmts[0], &TypeRegistry::new(), None);
     assert_eq!(
         result,
         Stmt::Let {
@@ -367,7 +378,7 @@ fn test_convert_stmt_var_decl_object_literal_with_type_annotation() {
 #[test]
 fn test_convert_stmt_expression_statement() {
     let stmts = parse_fn_body("function f() { foo; }");
-    let result = convert_stmt(&stmts[0], &TypeRegistry::new(), None).unwrap();
+    let result = convert_single_stmt(&stmts[0], &TypeRegistry::new(), None);
     assert_eq!(result, Stmt::Expr(Expr::Ident("foo".to_string())));
 }
 
@@ -376,7 +387,7 @@ fn test_convert_stmt_expression_statement() {
 #[test]
 fn test_convert_stmt_var_decl_string_type_annotation_adds_to_string() {
     let stmts = parse_fn_body(r#"function f() { const s: string = "hello"; }"#);
-    let result = convert_stmt(&stmts[0], &TypeRegistry::new(), None).unwrap();
+    let result = convert_single_stmt(&stmts[0], &TypeRegistry::new(), None);
     assert_eq!(
         result,
         Stmt::Let {
@@ -395,7 +406,7 @@ fn test_convert_stmt_var_decl_string_type_annotation_adds_to_string() {
 #[test]
 fn test_convert_stmt_var_decl_string_array_type_annotation() {
     let stmts = parse_fn_body(r#"function f() { const a: string[] = ["a", "b"]; }"#);
-    let result = convert_stmt(&stmts[0], &TypeRegistry::new(), None).unwrap();
+    let result = convert_single_stmt(&stmts[0], &TypeRegistry::new(), None);
     assert_eq!(
         result,
         Stmt::Let {
@@ -423,7 +434,7 @@ fn test_convert_stmt_var_decl_string_array_type_annotation() {
 #[test]
 fn test_convert_stmt_return_string_with_string_return_type() {
     let stmts = parse_fn_body(r#"function f(): string { return "ok"; }"#);
-    let result = convert_stmt(&stmts[0], &TypeRegistry::new(), Some(&RustType::String)).unwrap();
+    let result = convert_single_stmt(&stmts[0], &TypeRegistry::new(), Some(&RustType::String));
     assert_eq!(
         result,
         Stmt::Return(Some(Expr::MethodCall {
@@ -437,7 +448,7 @@ fn test_convert_stmt_return_string_with_string_return_type() {
 #[test]
 fn test_convert_stmt_return_number_with_f64_return_type_unchanged() {
     let stmts = parse_fn_body("function f(): number { return 42; }");
-    let result = convert_stmt(&stmts[0], &TypeRegistry::new(), Some(&RustType::F64)).unwrap();
+    let result = convert_single_stmt(&stmts[0], &TypeRegistry::new(), Some(&RustType::F64));
     assert_eq!(result, Stmt::Return(Some(Expr::NumberLit(42.0))));
 }
 
@@ -446,7 +457,7 @@ fn test_convert_stmt_return_number_with_f64_return_type_unchanged() {
 #[test]
 fn test_convert_stmt_break_no_label() {
     let stmts = parse_fn_body("function f() { while (true) { break; } }");
-    let result = convert_stmt(&stmts[0], &TypeRegistry::new(), None).unwrap();
+    let result = convert_single_stmt(&stmts[0], &TypeRegistry::new(), None);
     match result {
         Stmt::While { body, .. } => {
             assert_eq!(body[0], Stmt::Break { label: None });
@@ -458,7 +469,7 @@ fn test_convert_stmt_break_no_label() {
 #[test]
 fn test_convert_stmt_continue_no_label() {
     let stmts = parse_fn_body("function f() { while (true) { continue; } }");
-    let result = convert_stmt(&stmts[0], &TypeRegistry::new(), None).unwrap();
+    let result = convert_single_stmt(&stmts[0], &TypeRegistry::new(), None);
     match result {
         Stmt::While { body, .. } => {
             assert_eq!(body[0], Stmt::Continue { label: None });
@@ -470,7 +481,7 @@ fn test_convert_stmt_continue_no_label() {
 #[test]
 fn test_convert_stmt_break_with_label() {
     let stmts = parse_fn_body("function f() { outer: while (true) { break outer; } }");
-    let result = convert_stmt(&stmts[0], &TypeRegistry::new(), None).unwrap();
+    let result = convert_single_stmt(&stmts[0], &TypeRegistry::new(), None);
     match result {
         Stmt::While { label, body, .. } => {
             assert_eq!(label, Some("outer".to_string()));
@@ -488,7 +499,7 @@ fn test_convert_stmt_break_with_label() {
 #[test]
 fn test_convert_stmt_continue_with_label() {
     let stmts = parse_fn_body("function f() { outer: for (const x of items) { continue outer; } }");
-    let result = convert_stmt(&stmts[0], &TypeRegistry::new(), None).unwrap();
+    let result = convert_single_stmt(&stmts[0], &TypeRegistry::new(), None);
     match result {
         Stmt::ForIn { label, body, .. } => {
             assert_eq!(label, Some("outer".to_string()));
@@ -602,7 +613,7 @@ fn test_convert_stmt_list_object_destructuring_rename() {
 fn test_convert_stmt_labeled_for_range() {
     let stmts =
         parse_fn_body("function f() { outer: for (let i = 0; i < 10; i++) { break outer; } }");
-    let result = convert_stmt(&stmts[0], &TypeRegistry::new(), None).unwrap();
+    let result = convert_single_stmt(&stmts[0], &TypeRegistry::new(), None);
     match result {
         Stmt::ForIn { label, .. } => {
             assert_eq!(label, Some("outer".to_string()));

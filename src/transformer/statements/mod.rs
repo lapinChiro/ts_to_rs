@@ -31,7 +31,7 @@ pub fn convert_stmt(
     stmt: &ast::Stmt,
     reg: &TypeRegistry,
     return_type: Option<&RustType>,
-) -> Result<Stmt> {
+) -> Result<Vec<Stmt>> {
     match stmt {
         ast::Stmt::Return(ret) => {
             let expr = ret
@@ -39,30 +39,45 @@ pub fn convert_stmt(
                 .as_ref()
                 .map(|e| convert_expr(e, reg, return_type))
                 .transpose()?;
-            Ok(Stmt::Return(expr))
+            Ok(vec![Stmt::Return(expr)])
         }
-        ast::Stmt::Decl(ast::Decl::Var(var_decl)) => convert_var_decl(var_decl, reg),
-        ast::Stmt::If(if_stmt) => convert_if_stmt(if_stmt, reg, return_type),
+        ast::Stmt::Decl(ast::Decl::Var(var_decl)) => {
+            if let Some(expanded) = try_convert_object_destructuring(var_decl, reg)? {
+                Ok(expanded)
+            } else if let Some(expanded) = try_convert_array_destructuring(var_decl, reg)? {
+                Ok(expanded)
+            } else {
+                Ok(vec![convert_var_decl(var_decl, reg)?])
+            }
+        }
+        ast::Stmt::If(if_stmt) => Ok(vec![convert_if_stmt(if_stmt, reg, return_type)?]),
         ast::Stmt::Expr(expr_stmt) => {
             let expr = convert_expr(&expr_stmt.expr, reg, None)?;
-            Ok(Stmt::Expr(expr))
+            Ok(vec![Stmt::Expr(expr)])
         }
-        ast::Stmt::Throw(throw_stmt) => convert_throw_stmt(throw_stmt, reg),
-        ast::Stmt::While(while_stmt) => convert_while_stmt(while_stmt, reg, return_type),
-        ast::Stmt::ForOf(for_of) => convert_for_of_stmt(for_of, reg, return_type),
-        ast::Stmt::For(for_stmt) => convert_for_stmt(for_stmt, reg, return_type),
+        ast::Stmt::Throw(throw_stmt) => Ok(vec![convert_throw_stmt(throw_stmt, reg)?]),
+        ast::Stmt::While(while_stmt) => Ok(vec![convert_while_stmt(while_stmt, reg, return_type)?]),
+        ast::Stmt::ForOf(for_of) => Ok(vec![convert_for_of_stmt(for_of, reg, return_type)?]),
+        ast::Stmt::For(for_stmt) => match convert_for_stmt(for_stmt, reg, return_type) {
+            Ok(s) => Ok(vec![s]),
+            Err(_) => convert_for_stmt_as_loop(for_stmt, reg, return_type),
+        },
         ast::Stmt::Break(break_stmt) => {
             let label = break_stmt.label.as_ref().map(|l| l.sym.to_string());
-            Ok(Stmt::Break { label })
+            Ok(vec![Stmt::Break { label }])
         }
         ast::Stmt::Continue(cont_stmt) => {
             let label = cont_stmt.label.as_ref().map(|l| l.sym.to_string());
-            Ok(Stmt::Continue { label })
+            Ok(vec![Stmt::Continue { label }])
         }
-        ast::Stmt::Labeled(labeled_stmt) => convert_labeled_stmt(labeled_stmt, reg, return_type),
-        ast::Stmt::DoWhile(do_while) => convert_do_while_stmt(do_while, reg, return_type),
-        ast::Stmt::Try(try_stmt) => convert_try_stmt(try_stmt, reg, return_type),
-        ast::Stmt::Decl(ast::Decl::Fn(fn_decl)) => convert_nested_fn_decl(fn_decl, reg),
+        ast::Stmt::Labeled(labeled_stmt) => {
+            Ok(vec![convert_labeled_stmt(labeled_stmt, reg, return_type)?])
+        }
+        ast::Stmt::DoWhile(do_while) => {
+            Ok(vec![convert_do_while_stmt(do_while, reg, return_type)?])
+        }
+        ast::Stmt::Try(try_stmt) => Ok(vec![convert_try_stmt(try_stmt, reg, return_type)?]),
+        ast::Stmt::Decl(ast::Decl::Fn(fn_decl)) => Ok(vec![convert_nested_fn_decl(fn_decl, reg)?]),
         _ => Err(anyhow!("unsupported statement: {:?}", stmt)),
     }
 }
@@ -295,36 +310,21 @@ fn convert_try_stmt(
     reg: &TypeRegistry,
     return_type: Option<&RustType>,
 ) -> Result<Stmt> {
-    let try_body: Vec<Stmt> = try_stmt
-        .block
-        .stmts
-        .iter()
-        .map(|s| convert_stmt(s, reg, return_type))
-        .collect::<Result<Vec<_>>>()?;
+    let try_body = convert_stmt_list(&try_stmt.block.stmts, reg, return_type)?;
 
     let (catch_param, catch_body) = if let Some(handler) = &try_stmt.handler {
         let param_name = handler.param.as_ref().and_then(|p| match p {
             swc_ecma_ast::Pat::Ident(ident) => Some(ident.id.sym.to_string()),
             _ => None,
         });
-        let body: Vec<Stmt> = handler
-            .body
-            .stmts
-            .iter()
-            .map(|s| convert_stmt(s, reg, return_type))
-            .collect::<Result<Vec<_>>>()?;
+        let body = convert_stmt_list(&handler.body.stmts, reg, return_type)?;
         (param_name, Some(body))
     } else {
         (None, None)
     };
 
     let finally_body = if let Some(finalizer) = &try_stmt.finalizer {
-        let body: Vec<Stmt> = finalizer
-            .stmts
-            .iter()
-            .map(|s| convert_stmt(s, reg, return_type))
-            .collect::<Result<Vec<_>>>()?;
-        Some(body)
+        Some(convert_stmt_list(&finalizer.stmts, reg, return_type)?)
     } else {
         None
     };
@@ -389,32 +389,7 @@ pub fn convert_stmt_list(
 ) -> Result<Vec<Stmt>> {
     let mut result = Vec::new();
     for stmt in stmts {
-        match stmt {
-            ast::Stmt::Try(try_stmt) => {
-                result.push(convert_try_stmt(try_stmt, reg, return_type)?);
-            }
-            ast::Stmt::Decl(ast::Decl::Var(var_decl)) => {
-                if let Some(expanded) = try_convert_object_destructuring(var_decl, reg)? {
-                    result.extend(expanded);
-                } else if let Some(expanded) = try_convert_array_destructuring(var_decl, reg)? {
-                    result.extend(expanded);
-                } else {
-                    result.push(convert_stmt(stmt, reg, return_type)?);
-                }
-            }
-            ast::Stmt::For(for_stmt) => {
-                // Try simple counter pattern first; fall back to loop
-                match convert_for_stmt(for_stmt, reg, return_type) {
-                    Ok(s) => result.push(s),
-                    Err(_) => {
-                        result.extend(convert_for_stmt_as_loop(for_stmt, reg, return_type)?);
-                    }
-                }
-            }
-            other => {
-                result.push(convert_stmt(other, reg, return_type)?);
-            }
-        }
+        result.extend(convert_stmt(stmt, reg, return_type)?);
     }
     Ok(result)
 }
@@ -496,7 +471,7 @@ fn convert_do_while_stmt(
 ) -> Result<Stmt> {
     let body_stmts = match do_while.body.as_ref() {
         ast::Stmt::Block(block) => convert_stmt_list(&block.stmts, reg, return_type)?,
-        single => vec![convert_stmt(single, reg, return_type)?],
+        single => convert_stmt(single, reg, return_type)?,
     };
 
     let condition = convert_expr(&do_while.test, reg, None)?;
@@ -705,17 +680,8 @@ fn convert_block_or_stmt(
     return_type: Option<&RustType>,
 ) -> Result<Vec<Stmt>> {
     match stmt {
-        ast::Stmt::Block(block) => {
-            let mut stmts = Vec::new();
-            for s in &block.stmts {
-                stmts.push(convert_stmt(s, reg, return_type)?);
-            }
-            Ok(stmts)
-        }
-        other => {
-            let s = convert_stmt(other, reg, return_type)?;
-            Ok(vec![s])
-        }
+        ast::Stmt::Block(block) => convert_stmt_list(&block.stmts, reg, return_type),
+        other => convert_stmt(other, reg, return_type),
     }
 }
 
