@@ -195,127 +195,104 @@ fn test_convert_stmt_while() {
 }
 
 #[test]
-fn test_convert_stmt_list_try_catch_generates_try_catch_ir() {
+fn test_convert_stmt_list_try_catch_expands_to_let_block_if() {
     let stmts =
         parse_fn_body("function f() { try { const x = 1; return x; } catch (e) { return 0; } }");
     let result =
         convert_stmt_list(&stmts, &TypeRegistry::new(), None, &mut TypeEnv::new()).unwrap();
-    assert_eq!(result.len(), 1);
-    match &result[0] {
-        Stmt::TryCatch {
-            try_body,
-            catch_param,
-            catch_body,
-            finally_body,
-        } => {
-            assert_eq!(try_body.len(), 2);
-            assert_eq!(catch_param, &Some("e".to_string()));
-            assert!(catch_body.is_some());
-            assert_eq!(catch_body.as_ref().unwrap().len(), 1);
-            assert!(finally_body.is_none());
+    // Let(_try_result) + LabeledBlock + If
+    assert_eq!(result.len(), 3, "got {result:?}");
+    assert!(matches!(&result[0], Stmt::Let { name, .. } if name == "_try_result"));
+    match &result[1] {
+        Stmt::LabeledBlock { label, body } => {
+            assert_eq!(label, "try_block");
+            assert_eq!(body.len(), 2, "try body should have 2 stmts");
         }
-        _ => panic!("expected Stmt::TryCatch, got {:?}", result[0]),
+        _ => panic!("expected LabeledBlock, got {:?}", result[1]),
+    }
+    match &result[2] {
+        Stmt::If {
+            condition,
+            then_body,
+            ..
+        } => {
+            assert!(matches!(condition, Expr::Ident(s) if s.contains("Err(e)")));
+            assert_eq!(then_body.len(), 1);
+        }
+        _ => panic!("expected If, got {:?}", result[2]),
     }
 }
 
 #[test]
-fn test_convert_stmt_list_try_catch_empty_catch_generates_try_catch_ir() {
+fn test_convert_stmt_list_try_catch_empty_catch_expands_correctly() {
     let stmts = parse_fn_body("function f() { try { const x = 1; } catch (e) { } }");
     let result =
         convert_stmt_list(&stmts, &TypeRegistry::new(), None, &mut TypeEnv::new()).unwrap();
-    assert_eq!(result.len(), 1);
-    match &result[0] {
-        Stmt::TryCatch {
-            try_body,
-            catch_param,
-            catch_body,
-            finally_body,
-        } => {
-            assert_eq!(try_body.len(), 1);
-            assert_eq!(catch_param, &Some("e".to_string()));
-            assert!(catch_body.is_some());
-            assert_eq!(catch_body.as_ref().unwrap().len(), 0);
-            assert!(finally_body.is_none());
-        }
-        _ => panic!("expected Stmt::TryCatch, got {:?}", result[0]),
+    assert_eq!(result.len(), 3, "got {result:?}");
+    assert!(matches!(&result[0], Stmt::Let { name, .. } if name == "_try_result"));
+    match &result[1] {
+        Stmt::LabeledBlock { body, .. } => assert_eq!(body.len(), 1),
+        _ => panic!("expected LabeledBlock"),
+    }
+    match &result[2] {
+        Stmt::If { then_body, .. } => assert!(then_body.is_empty()),
+        _ => panic!("expected If"),
     }
 }
 
 #[test]
-fn test_convert_stmt_list_try_finally_generates_try_catch_ir() {
+fn test_convert_stmt_list_try_finally_expands_to_scopeguard_and_body() {
     let stmts = parse_fn_body("function f() { try { const x = 1; } finally { const y = 2; } }");
     let result =
         convert_stmt_list(&stmts, &TypeRegistry::new(), None, &mut TypeEnv::new()).unwrap();
-    assert_eq!(result.len(), 1);
-    match &result[0] {
-        Stmt::TryCatch {
-            try_body,
-            catch_param,
-            catch_body,
-            finally_body,
-        } => {
-            assert_eq!(try_body.len(), 1);
-            assert!(catch_param.is_none());
-            assert!(catch_body.is_none());
-            assert!(finally_body.is_some());
-            assert_eq!(finally_body.as_ref().unwrap().len(), 1);
-        }
-        _ => panic!("expected Stmt::TryCatch, got {:?}", result[0]),
-    }
+    // scopeguard + try body inline
+    assert_eq!(result.len(), 2, "got {result:?}");
+    assert!(matches!(&result[0], Stmt::Let { name, .. } if name == "_finally_guard"));
+    assert!(matches!(&result[1], Stmt::Let { .. })); // const x = 1
 }
 
 #[test]
-fn test_convert_stmt_list_try_catch_finally_generates_try_catch_ir() {
+fn test_convert_stmt_list_try_catch_finally_expands_all() {
     let stmts = parse_fn_body(
         "function f() { try { const x = 1; } catch (e) { const y = 2; } finally { const z = 3; } }",
     );
     let result =
         convert_stmt_list(&stmts, &TypeRegistry::new(), None, &mut TypeEnv::new()).unwrap();
-    assert_eq!(result.len(), 1);
-    match &result[0] {
-        Stmt::TryCatch {
-            try_body,
-            catch_param,
-            catch_body,
-            finally_body,
-        } => {
-            assert_eq!(try_body.len(), 1);
-            assert_eq!(catch_param, &Some("e".to_string()));
-            assert!(catch_body.is_some());
-            assert!(finally_body.is_some());
-        }
-        _ => panic!("expected Stmt::TryCatch, got {:?}", result[0]),
-    }
+    // scopeguard + _try_result + LabeledBlock + If
+    assert_eq!(result.len(), 4, "got {result:?}");
+    assert!(matches!(&result[0], Stmt::Let { name, .. } if name == "_finally_guard"));
+    assert!(matches!(&result[1], Stmt::Let { name, .. } if name == "_try_result"));
+    assert!(matches!(&result[2], Stmt::LabeledBlock { .. }));
+    assert!(matches!(&result[3], Stmt::If { .. }));
 }
 
 #[test]
-fn test_convert_stmt_nested_try_catch_generates_nested_try_catch_ir() {
+fn test_convert_stmt_nested_try_catch_expands_inner_in_outer_body() {
     let stmts = parse_fn_body(
         "function f() { try { try { x(); } catch (inner) { y(); } } catch (outer) { z(); } }",
     );
     let result =
         convert_stmt_list(&stmts, &TypeRegistry::new(), None, &mut TypeEnv::new()).unwrap();
-    assert_eq!(result.len(), 1);
-    match &result[0] {
-        Stmt::TryCatch {
-            try_body,
-            catch_param,
-            ..
-        } => {
-            assert_eq!(catch_param, &Some("outer".to_string()));
-            // The inner try/catch should be inside try_body
-            assert_eq!(try_body.len(), 1);
-            match &try_body[0] {
-                Stmt::TryCatch {
-                    catch_param: inner_param,
-                    ..
-                } => {
-                    assert_eq!(inner_param, &Some("inner".to_string()));
-                }
-                _ => panic!("expected inner Stmt::TryCatch, got {:?}", try_body[0]),
-            }
+    // Outer: Let + LabeledBlock + If
+    assert_eq!(result.len(), 3, "got {result:?}");
+    // The LabeledBlock body should contain the inner try/catch expansion (3 stmts)
+    match &result[1] {
+        Stmt::LabeledBlock { body, .. } => {
+            // Inner: Let(_try_result) + LabeledBlock + If = 3 stmts
+            assert_eq!(
+                body.len(),
+                3,
+                "inner try/catch should expand to 3 stmts, got {body:?}"
+            );
         }
-        _ => panic!("expected Stmt::TryCatch, got {:?}", result[0]),
+        _ => panic!("expected LabeledBlock, got {:?}", result[1]),
+    }
+    // Outer if should use "outer" param
+    match &result[2] {
+        Stmt::If { condition, .. } => {
+            assert!(matches!(condition, Expr::Ident(s) if s.contains("outer")));
+        }
+        _ => panic!("expected If, got {:?}", result[2]),
     }
 }
 
@@ -353,6 +330,253 @@ fn test_convert_stmt_throw_string_literal() {
             }],
         }))
     );
+}
+
+// -- try/catch expansion tests (primitive IR, no Stmt::TryCatch) --
+
+#[test]
+fn test_convert_try_catch_basic_expands_to_let_labeledblock_if() {
+    let stmts = parse_fn_body("function f() { try { risky(); } catch (e) { handle(e); } }");
+    let result =
+        convert_stmt_list(&stmts, &TypeRegistry::new(), None, &mut TypeEnv::new()).unwrap();
+
+    // Should expand to 3 statements: Let, LabeledBlock, If
+    assert_eq!(result.len(), 3, "expected 3 stmts, got {result:?}");
+
+    // 1. let mut _try_result: Result<(), String> = Ok(());
+    match &result[0] {
+        Stmt::Let {
+            mutable,
+            name,
+            ty,
+            init,
+        } => {
+            assert!(mutable, "expected mutable");
+            assert_eq!(name, "_try_result");
+            assert_eq!(
+                ty,
+                &Some(RustType::Result {
+                    ok: Box::new(RustType::Unit),
+                    err: Box::new(RustType::String),
+                })
+            );
+            assert!(
+                matches!(init, Some(Expr::FnCall { name, .. }) if name == "Ok"),
+                "expected Ok(...) init, got {init:?}"
+            );
+        }
+        _ => panic!("expected Let, got {:?}", result[0]),
+    }
+
+    // 2. 'try_block: { risky(); }
+    match &result[1] {
+        Stmt::LabeledBlock { label, body } => {
+            assert_eq!(label, "try_block");
+            assert_eq!(body.len(), 1, "expected 1 stmt in try body");
+            assert!(
+                matches!(&body[0], Stmt::Expr(Expr::FnCall { name, .. }) if name == "risky"),
+                "expected risky() call, got {:?}",
+                body[0]
+            );
+        }
+        _ => panic!("expected LabeledBlock, got {:?}", result[1]),
+    }
+
+    // 3. if let Err(e) = _try_result { handle(e); }
+    match &result[2] {
+        Stmt::If {
+            condition,
+            then_body,
+            else_body,
+        } => {
+            // condition uses Ident hack for "let Err(e) = _try_result"
+            assert!(
+                matches!(condition, Expr::Ident(s) if s.contains("Err")),
+                "expected if-let-err condition, got {condition:?}"
+            );
+            assert!(!then_body.is_empty(), "expected catch body");
+            assert!(else_body.is_none());
+        }
+        _ => panic!("expected If, got {:?}", result[2]),
+    }
+}
+
+#[test]
+fn test_convert_try_catch_throw_in_body_expands_to_assign_break() {
+    let stmts = parse_fn_body(
+        "function f() { try { throw new Error(\"oops\"); } catch (e) { handle(e); } }",
+    );
+    let result =
+        convert_stmt_list(&stmts, &TypeRegistry::new(), None, &mut TypeEnv::new()).unwrap();
+
+    assert_eq!(result.len(), 3, "expected 3 stmts, got {result:?}");
+
+    // Check the labeled block body: throw should be expanded to Assign + Break
+    match &result[1] {
+        Stmt::LabeledBlock { body, .. } => {
+            assert_eq!(body.len(), 2, "expected assign + break, got {body:?}");
+            // First: _try_result = Err("oops".to_string())
+            match &body[0] {
+                Stmt::Expr(Expr::Assign { target, value }) => {
+                    assert!(
+                        matches!(target.as_ref(), Expr::Ident(s) if s == "_try_result"),
+                        "expected _try_result target"
+                    );
+                    assert!(
+                        matches!(value.as_ref(), Expr::FnCall { name, .. } if name == "Err"),
+                        "expected Err(...) value"
+                    );
+                }
+                _ => panic!("expected Assign, got {:?}", body[0]),
+            }
+            // Second: break 'try_block;
+            assert!(
+                matches!(&body[1], Stmt::Break { label: Some(l), value: None } if l == "try_block"),
+                "expected break 'try_block, got {:?}",
+                body[1]
+            );
+        }
+        _ => panic!("expected LabeledBlock, got {:?}", result[1]),
+    }
+}
+
+#[test]
+fn test_convert_try_finally_expands_to_scopeguard_and_body() {
+    let stmts = parse_fn_body("function f() { try { risky(); } finally { cleanup(); } }");
+    let result =
+        convert_stmt_list(&stmts, &TypeRegistry::new(), None, &mut TypeEnv::new()).unwrap();
+
+    // Should expand to: Let(scopeguard) + try body inline
+    assert!(
+        result.len() >= 2,
+        "expected at least 2 stmts, got {result:?}"
+    );
+
+    // 1. let _finally_guard = scopeguard::guard((), |_| { cleanup(); });
+    match &result[0] {
+        Stmt::Let { name, init, .. } => {
+            assert_eq!(name, "_finally_guard");
+            assert!(
+                matches!(init, Some(Expr::FnCall { name, .. }) if name == "scopeguard::guard"),
+                "expected scopeguard::guard call, got {init:?}"
+            );
+        }
+        _ => panic!("expected Let for scopeguard, got {:?}", result[0]),
+    }
+
+    // 2. try body inline: risky();
+    assert!(
+        matches!(&result[1], Stmt::Expr(Expr::FnCall { name, .. }) if name == "risky"),
+        "expected risky() call, got {:?}",
+        result[1]
+    );
+}
+
+#[test]
+fn test_convert_try_catch_finally_expands_all() {
+    let stmts = parse_fn_body(
+        "function f() { try { risky(); } catch (e) { handle(e); } finally { cleanup(); } }",
+    );
+    let result =
+        convert_stmt_list(&stmts, &TypeRegistry::new(), None, &mut TypeEnv::new()).unwrap();
+
+    // Should expand to: Let(scopeguard), Let(_try_result), LabeledBlock, If
+    assert_eq!(result.len(), 4, "expected 4 stmts, got {result:?}");
+
+    // 1. scopeguard
+    match &result[0] {
+        Stmt::Let { name, .. } => assert_eq!(name, "_finally_guard"),
+        _ => panic!("expected Let for scopeguard, got {:?}", result[0]),
+    }
+
+    // 2. _try_result
+    match &result[1] {
+        Stmt::Let { name, .. } => assert_eq!(name, "_try_result"),
+        _ => panic!("expected Let for _try_result, got {:?}", result[1]),
+    }
+
+    // 3. labeled block
+    assert!(
+        matches!(&result[2], Stmt::LabeledBlock { label, .. } if label == "try_block"),
+        "expected LabeledBlock, got {:?}",
+        result[2]
+    );
+
+    // 4. if error check
+    assert!(
+        matches!(&result[3], Stmt::If { .. }),
+        "expected If, got {:?}",
+        result[3]
+    );
+}
+
+// -- try/catch break/continue in try body tests --
+
+#[test]
+fn test_convert_try_catch_break_in_loop_uses_flag() {
+    // break inside try body (within a for loop) should use flag pattern
+    let stmts = parse_fn_body(
+        "function f(items: number[]) { for (const item of items) { try { if (item < 0) { break; } risky(); } catch (e) { handle(e); } } }",
+    );
+    let result =
+        convert_stmt_list(&stmts, &TypeRegistry::new(), None, &mut TypeEnv::new()).unwrap();
+
+    // Should have a ForIn with body containing: _try_result, _try_break, LabeledBlock, if _try_break { break }, if let Err
+    assert_eq!(result.len(), 1);
+    match &result[0] {
+        Stmt::ForIn { body, .. } => {
+            // Look for _try_break flag declaration
+            let has_break_flag = body
+                .iter()
+                .any(|s| matches!(s, Stmt::Let { name, .. } if name == "_try_break"));
+            assert!(has_break_flag, "expected _try_break flag, got {body:?}");
+
+            // Look for break flag check: if _try_break { break; }
+            let has_break_check = body.iter().any(|s| {
+                matches!(s, Stmt::If { condition: Expr::Ident(c), then_body, .. }
+                    if c == "_try_break" && matches!(then_body.first(), Some(Stmt::Break { label: None, .. })))
+            });
+            assert!(
+                has_break_check,
+                "expected if _try_break {{ break; }}, got {body:?}"
+            );
+        }
+        _ => panic!("expected ForIn, got {:?}", result[0]),
+    }
+}
+
+#[test]
+fn test_convert_try_catch_continue_in_loop_uses_flag() {
+    let stmts = parse_fn_body(
+        "function f(items: number[]) { for (const item of items) { try { if (item < 0) { continue; } risky(); } catch (e) { handle(e); } } }",
+    );
+    let result =
+        convert_stmt_list(&stmts, &TypeRegistry::new(), None, &mut TypeEnv::new()).unwrap();
+
+    assert_eq!(result.len(), 1);
+    match &result[0] {
+        Stmt::ForIn { body, .. } => {
+            // Look for _try_continue flag declaration
+            let has_continue_flag = body
+                .iter()
+                .any(|s| matches!(s, Stmt::Let { name, .. } if name == "_try_continue"));
+            assert!(
+                has_continue_flag,
+                "expected _try_continue flag, got {body:?}"
+            );
+
+            // Look for continue flag check: if _try_continue { continue; }
+            let has_continue_check = body.iter().any(|s| {
+                matches!(s, Stmt::If { condition: Expr::Ident(c), then_body, .. }
+                    if c == "_try_continue" && matches!(then_body.first(), Some(Stmt::Continue { label: None })))
+            });
+            assert!(
+                has_continue_check,
+                "expected if _try_continue {{ continue; }}, got {body:?}"
+            );
+        }
+        _ => panic!("expected ForIn, got {:?}", result[0]),
+    }
 }
 
 // -- Object literal in variable declaration tests --
@@ -468,7 +692,13 @@ fn test_convert_stmt_break_no_label() {
     let result = convert_single_stmt(&stmts[0], &TypeRegistry::new(), None);
     match result {
         Stmt::While { body, .. } => {
-            assert_eq!(body[0], Stmt::Break { label: None });
+            assert_eq!(
+                body[0],
+                Stmt::Break {
+                    label: None,
+                    value: None
+                }
+            );
         }
         _ => panic!("expected While"),
     }
@@ -496,7 +726,8 @@ fn test_convert_stmt_break_with_label() {
             assert_eq!(
                 body[0],
                 Stmt::Break {
-                    label: Some("outer".to_string())
+                    label: Some("outer".to_string()),
+                    value: None,
                 }
             );
         }
@@ -722,7 +953,13 @@ fn test_convert_stmt_do_while_basic() {
                 } => {
                     assert!(matches!(condition, Expr::UnaryOp { op, .. } if *op == UnOp::Not));
                     assert_eq!(then_body.len(), 1);
-                    assert!(matches!(&then_body[0], Stmt::Break { label: None }));
+                    assert!(matches!(
+                        &then_body[0],
+                        Stmt::Break {
+                            label: None,
+                            value: None
+                        }
+                    ));
                     assert!(else_body.is_none());
                 }
                 _ => panic!("expected If statement for break condition"),

@@ -21,10 +21,10 @@ pub fn safeDivide(a: f64, b: f64) -> Result<f64, String> {
 }
 
 fn withTryCatch() {
-    let _try_result: Result<(), String> = 'try_block: {
+    let mut _try_result: Result<(), String> = Ok(());
+    'try_block: {
         riskyOperation();
-        Ok(())
-    };
+    }
     if let Err(e) = _try_result {
         eprintln!("{:?}", e);
     }
@@ -32,32 +32,33 @@ fn withTryCatch() {
 
 fn withTryFinally() {
     let _finally_guard = scopeguard::guard((), |_| {
-        println!("cleanup");
-    });
+    println!("cleanup");
+});
     riskyOperation();
 }
 
 fn withTryCatchFinally() {
     let _finally_guard = scopeguard::guard((), |_| {
-        println!("done");
-    });
-    let _try_result: Result<(), String> = 'try_block: {
+    println!("done");
+});
+    let mut _try_result: Result<(), String> = Ok(());
+    'try_block: {
         riskyOperation();
-        Ok(())
-    };
+    }
     if let Err(e) = _try_result {
         eprintln!("{:?}", e);
     }
 }
 
 fn withThrowInTryCatch(x: f64) {
-    let _try_result: Result<(), String> = 'try_block: {
+    let mut _try_result: Result<(), String> = Ok(());
+    'try_block: {
         if x < 0.0 {
-            break 'try_block Err("negative".to_string());
+            _try_result = Err("negative".to_string());
+            break 'try_block;
         }
         println!("ok");
-        Ok(())
-    };
+    }
     if let Err(e) = _try_result {
         eprintln!("{:?}", e);
     }
@@ -65,13 +66,18 @@ fn withThrowInTryCatch(x: f64) {
 
 fn withBreakInTryCatch(items: Vec<f64>) {
     for item in items {
-        let _try_result: Result<(), String> = 'try_block: {
+        let mut _try_result: Result<(), String> = Ok(());
+        let mut _try_break = false;
+        'try_block: {
             if item < 0.0 {
-                break;
+                _try_break = true;
+                break 'try_block;
             }
             riskyOperation();
-            Ok(())
-        };
+        }
+        if _try_break {
+            break;
+        }
         if let Err(e) = _try_result {
             eprintln!("{:?}", e);
         }

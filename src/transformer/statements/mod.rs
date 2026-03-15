@@ -89,7 +89,7 @@ pub fn convert_stmt(
         },
         ast::Stmt::Break(break_stmt) => {
             let label = break_stmt.label.as_ref().map(|l| l.sym.to_string());
-            Ok(vec![Stmt::Break { label }])
+            Ok(vec![Stmt::Break { label, value: None }])
         }
         ast::Stmt::Continue(cont_stmt) => {
             let label = cont_stmt.label.as_ref().map(|l| l.sym.to_string());
@@ -107,12 +107,7 @@ pub fn convert_stmt(
             return_type,
             type_env,
         )?]),
-        ast::Stmt::Try(try_stmt) => Ok(vec![convert_try_stmt(
-            try_stmt,
-            reg,
-            return_type,
-            type_env,
-        )?]),
+        ast::Stmt::Try(try_stmt) => convert_try_stmt(try_stmt, reg, return_type, type_env),
         ast::Stmt::Decl(ast::Decl::Fn(fn_decl)) => Ok(vec![convert_nested_fn_decl(fn_decl, reg)?]),
         _ => Err(anyhow!("unsupported statement: {:?}", stmt)),
     }
@@ -362,43 +357,243 @@ fn convert_while_stmt(
     })
 }
 
-/// Converts a `try` statement into `Stmt::TryCatch`.
+/// Expands a `try` statement into primitive IR statements.
+///
+/// - try/catch → `let mut _try_result = Ok(()); 'try_block: { body } if let Err(e) = ... { catch }`
+/// - try/finally → `let _finally_guard = scopeguard::guard(...); body`
+/// - try/catch/finally → combines both patterns
 fn convert_try_stmt(
     try_stmt: &ast::TryStmt,
     reg: &TypeRegistry,
     return_type: Option<&RustType>,
     type_env: &mut TypeEnv,
-) -> Result<Stmt> {
+) -> Result<Vec<Stmt>> {
+    let mut result = Vec::new();
+
+    // 1. finally → scopeguard
+    if let Some(finalizer) = &try_stmt.finalizer {
+        let finally_body = convert_stmt_list(&finalizer.stmts, reg, return_type, type_env)?;
+        result.push(Stmt::Let {
+            mutable: false,
+            name: "_finally_guard".to_string(),
+            ty: None,
+            init: Some(Expr::FnCall {
+                name: "scopeguard::guard".to_string(),
+                args: vec![
+                    Expr::Ident("()".to_string()),
+                    Expr::Closure {
+                        params: vec![crate::ir::Param {
+                            name: "_".to_string(),
+                            ty: None,
+                        }],
+                        return_type: None,
+                        body: crate::ir::ClosureBody::Block(finally_body),
+                    },
+                ],
+            }),
+        });
+    }
+
+    // 2. Convert try body
     let try_body = convert_stmt_list(&try_stmt.block.stmts, reg, return_type, type_env)?;
 
-    let (catch_param, catch_body) = if let Some(handler) = &try_stmt.handler {
-        let param_name = handler.param.as_ref().and_then(|p| match p {
-            swc_ecma_ast::Pat::Ident(ident) => Some(ident.id.sym.to_string()),
-            _ => None,
+    // 3. catch → labeled block + if-let-err
+    if let Some(handler) = &try_stmt.handler {
+        let catch_param = handler
+            .param
+            .as_ref()
+            .and_then(|p| match p {
+                swc_ecma_ast::Pat::Ident(ident) => Some(ident.id.sym.to_string()),
+                _ => None,
+            })
+            .unwrap_or_else(|| "_e".to_string());
+        let catch_body = convert_stmt_list(&handler.body.stmts, reg, return_type, type_env)?;
+
+        // let mut _try_result: Result<(), String> = Ok(());
+        result.push(Stmt::Let {
+            mutable: true,
+            name: "_try_result".to_string(),
+            ty: Some(RustType::Result {
+                ok: Box::new(RustType::Unit),
+                err: Box::new(RustType::String),
+            }),
+            init: Some(Expr::FnCall {
+                name: "Ok".to_string(),
+                args: vec![Expr::Ident("()".to_string())],
+            }),
         });
-        let body = convert_stmt_list(&handler.body.stmts, reg, return_type, type_env)?;
-        (param_name, Some(body))
-    } else {
-        (None, None)
-    };
 
-    let finally_body = if let Some(finalizer) = &try_stmt.finalizer {
-        Some(convert_stmt_list(
-            &finalizer.stmts,
-            reg,
-            return_type,
-            type_env,
-        )?)
-    } else {
-        None
-    };
+        // Rewrite throws and detect break/continue in try body
+        let mut rewrite = TryBodyRewrite::default();
+        let expanded_body = rewrite.rewrite(try_body, 0);
 
-    Ok(Stmt::TryCatch {
-        try_body,
-        catch_param,
-        catch_body,
-        finally_body,
-    })
+        // Add flag declarations if needed
+        if rewrite.needs_break_flag {
+            result.push(Stmt::Let {
+                mutable: true,
+                name: "_try_break".to_string(),
+                ty: None,
+                init: Some(Expr::BoolLit(false)),
+            });
+        }
+        if rewrite.needs_continue_flag {
+            result.push(Stmt::Let {
+                mutable: true,
+                name: "_try_continue".to_string(),
+                ty: None,
+                init: Some(Expr::BoolLit(false)),
+            });
+        }
+
+        // 'try_block: { ...body with throw→assign+break, break/continue→flag+break... }
+        result.push(Stmt::LabeledBlock {
+            label: "try_block".to_string(),
+            body: expanded_body,
+        });
+
+        // Post-block flag checks (before the if-let-err)
+        if rewrite.needs_break_flag {
+            result.push(Stmt::If {
+                condition: Expr::Ident("_try_break".to_string()),
+                then_body: vec![Stmt::Break {
+                    label: None,
+                    value: None,
+                }],
+                else_body: None,
+            });
+        }
+        if rewrite.needs_continue_flag {
+            result.push(Stmt::If {
+                condition: Expr::Ident("_try_continue".to_string()),
+                then_body: vec![Stmt::Continue { label: None }],
+                else_body: None,
+            });
+        }
+
+        // if let Err(param) = _try_result { ...catch... }
+        result.push(Stmt::If {
+            condition: Expr::Ident(format!("let Err({catch_param}) = _try_result")),
+            then_body: catch_body,
+            else_body: None,
+        });
+    } else {
+        // No catch → inline try body
+        result.extend(try_body);
+    }
+
+    Ok(result)
+}
+
+/// Rewrites try body statements: converts throws to assign+break,
+/// and converts break/continue (at loop_depth 0) to flag+break.
+#[derive(Default)]
+struct TryBodyRewrite {
+    needs_break_flag: bool,
+    needs_continue_flag: bool,
+}
+
+impl TryBodyRewrite {
+    /// Rewrites statements in a try body.
+    ///
+    /// `loop_depth`: 0 = directly in try body, >0 = inside an inner loop.
+    /// At depth 0, bare break/continue target the try_block's enclosing loop,
+    /// so they must be converted to flag + break 'try_block.
+    fn rewrite(&mut self, stmts: Vec<Stmt>, loop_depth: usize) -> Vec<Stmt> {
+        let mut result = Vec::new();
+        for stmt in stmts {
+            match stmt {
+                // throw → assign + break 'try_block
+                Stmt::Return(Some(ref expr)) if is_err_call(expr) => {
+                    result.push(Stmt::Expr(Expr::Assign {
+                        target: Box::new(Expr::Ident("_try_result".to_string())),
+                        value: Box::new(expr.clone()),
+                    }));
+                    result.push(Stmt::Break {
+                        label: Some("try_block".to_string()),
+                        value: None,
+                    });
+                }
+                // break (no label) at try body level → flag + break 'try_block
+                Stmt::Break {
+                    label: None,
+                    value: None,
+                } if loop_depth == 0 => {
+                    self.needs_break_flag = true;
+                    result.push(Stmt::Expr(Expr::Assign {
+                        target: Box::new(Expr::Ident("_try_break".to_string())),
+                        value: Box::new(Expr::BoolLit(true)),
+                    }));
+                    result.push(Stmt::Break {
+                        label: Some("try_block".to_string()),
+                        value: None,
+                    });
+                }
+                // continue (no label) at try body level → flag + break 'try_block
+                Stmt::Continue { label: None } if loop_depth == 0 => {
+                    self.needs_continue_flag = true;
+                    result.push(Stmt::Expr(Expr::Assign {
+                        target: Box::new(Expr::Ident("_try_continue".to_string())),
+                        value: Box::new(Expr::BoolLit(true)),
+                    }));
+                    result.push(Stmt::Break {
+                        label: Some("try_block".to_string()),
+                        value: None,
+                    });
+                }
+                // Recurse into if/else (same loop depth)
+                Stmt::If {
+                    condition,
+                    then_body,
+                    else_body,
+                } => {
+                    result.push(Stmt::If {
+                        condition,
+                        then_body: self.rewrite(then_body, loop_depth),
+                        else_body: else_body.map(|e| self.rewrite(e, loop_depth)),
+                    });
+                }
+                // Recurse into loops (increment depth)
+                Stmt::ForIn {
+                    label,
+                    var,
+                    iterable,
+                    body,
+                } => {
+                    result.push(Stmt::ForIn {
+                        label,
+                        var,
+                        iterable,
+                        body: self.rewrite(body, loop_depth + 1),
+                    });
+                }
+                Stmt::While {
+                    label,
+                    condition,
+                    body,
+                } => {
+                    result.push(Stmt::While {
+                        label,
+                        condition,
+                        body: self.rewrite(body, loop_depth + 1),
+                    });
+                }
+                Stmt::Loop { label, body } => {
+                    result.push(Stmt::Loop {
+                        label,
+                        body: self.rewrite(body, loop_depth + 1),
+                    });
+                }
+                // Don't recurse into nested LabeledBlock (nested try/catch)
+                other => result.push(other),
+            }
+        }
+        result
+    }
+}
+
+/// Checks if an expression is an `Err(...)` call.
+fn is_err_call(expr: &Expr) -> bool {
+    matches!(expr, Expr::FnCall { name, .. } if name == "Err")
 }
 
 /// Converts a `throw` statement into `return Err(...)`.
@@ -771,7 +966,10 @@ fn convert_do_while_stmt(
             op: UnOp::Not,
             operand: Box::new(condition),
         },
-        then_body: vec![Stmt::Break { label: None }],
+        then_body: vec![Stmt::Break {
+            label: None,
+            value: None,
+        }],
         else_body: None,
     };
 
@@ -906,7 +1104,10 @@ fn convert_for_stmt_as_loop(
                 op: UnOp::Not,
                 operand: Box::new(condition),
             },
-            then_body: vec![Stmt::Break { label: None }],
+            then_body: vec![Stmt::Break {
+                label: None,
+                value: None,
+            }],
             else_body: None,
         });
     }

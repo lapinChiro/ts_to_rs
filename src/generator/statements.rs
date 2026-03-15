@@ -1,6 +1,6 @@
 //! Statement generation: converts IR statements into Rust source strings.
 
-use crate::ir::{Expr, Stmt};
+use crate::ir::Stmt;
 
 use super::expressions::{escape_ident, generate_expr};
 use super::types::generate_type;
@@ -106,9 +106,11 @@ pub(super) fn generate_stmt(stmt: &Stmt, indent: usize) -> String {
             out.push_str(&format!("{pad}}}"));
             out
         }
-        Stmt::Break { label } => match label {
-            Some(l) => format!("{pad}break '{l};"),
-            None => format!("{pad}break;"),
+        Stmt::Break { label, value } => match (label, value) {
+            (Some(l), Some(v)) => format!("{pad}break '{l} {};", generate_expr(v)),
+            (Some(l), None) => format!("{pad}break '{l};"),
+            (None, None) => format!("{pad}break;"),
+            (None, Some(v)) => format!("{pad}break {};", generate_expr(v)),
         },
         Stmt::Continue { label } => match label {
             Some(l) => format!("{pad}continue '{l};"),
@@ -124,91 +126,16 @@ pub(super) fn generate_stmt(stmt: &Stmt, indent: usize) -> String {
         Stmt::TailExpr(expr) => {
             format!("{pad}{}", generate_expr(expr))
         }
-        Stmt::TryCatch {
-            try_body,
-            catch_param,
-            catch_body,
-            finally_body,
-        } => {
-            let mut lines = Vec::new();
-            let inner_pad = "    ".repeat(indent + 1);
-
-            // Emit scopeguard for finally block
-            if let Some(finally_stmts) = finally_body {
-                lines.push(format!(
-                    "{pad}let _finally_guard = scopeguard::guard((), |_| {{"
-                ));
-                for s in finally_stmts {
-                    lines.push(generate_stmt(s, indent + 1));
-                }
-                lines.push(format!("{pad}}});"));
+        Stmt::LabeledBlock { label, body } => {
+            let mut out = format!("{pad}'{label}: {{\n");
+            for s in body {
+                out.push_str(&generate_stmt(s, indent + 1));
+                out.push('\n');
             }
-
-            // Emit try/catch as labeled block + if let Err
-            if let Some(catch_stmts) = catch_body {
-                let param_name = catch_param.as_deref().unwrap_or("_e");
-                lines.push(format!(
-                    "{pad}let _try_result: Result<(), String> = 'try_block: {{"
-                ));
-                for s in try_body {
-                    lines.push(generate_try_body_stmt(s, indent + 1));
-                }
-                lines.push(format!("{inner_pad}Ok(())"));
-                lines.push(format!("{pad}}};"));
-                lines.push(format!("{pad}if let Err({param_name}) = _try_result {{"));
-                for s in catch_stmts {
-                    lines.push(generate_stmt(s, indent + 1));
-                }
-                lines.push(format!("{pad}}}"));
-            } else {
-                // No catch block — just emit try body inline
-                for s in try_body {
-                    lines.push(generate_stmt(s, indent));
-                }
-            }
-
-            lines.join("\n")
+            out.push_str(&format!("{pad}}}"));
+            out
         }
     }
-}
-
-/// Generates a statement inside a try block's labeled block.
-///
-/// Rewrites `return Err(...)` (from throw conversion) to `break 'try_block Err(...)`,
-/// so the error exits the labeled block rather than the enclosing function.
-fn generate_try_body_stmt(stmt: &Stmt, indent: usize) -> String {
-    let pad = indent_str(indent);
-    match stmt {
-        Stmt::Return(Some(expr)) if is_err_call(expr) => {
-            format!("{pad}break 'try_block {};", generate_expr(expr))
-        }
-        // Recurse into nested blocks (if/else, loops, etc.)
-        Stmt::If {
-            condition,
-            then_body,
-            else_body,
-        } => {
-            let mut lines = Vec::new();
-            lines.push(format!("{pad}if {} {{", generate_expr(condition)));
-            for s in then_body {
-                lines.push(generate_try_body_stmt(s, indent + 1));
-            }
-            if let Some(else_stmts) = else_body {
-                lines.push(format!("{pad}}} else {{"));
-                for s in else_stmts {
-                    lines.push(generate_try_body_stmt(s, indent + 1));
-                }
-            }
-            lines.push(format!("{pad}}}"));
-            lines.join("\n")
-        }
-        other => generate_stmt(other, indent),
-    }
-}
-
-/// Checks if an expression is an `Err(...)` call.
-fn is_err_call(expr: &Expr) -> bool {
-    matches!(expr, Expr::FnCall { name, .. } if name == "Err")
 }
 
 /// Returns the indentation string for the given level (4 spaces per level).
@@ -430,7 +357,10 @@ fn f() {
             return_type: None,
             body: vec![Stmt::Loop {
                 label: None,
-                body: vec![Stmt::Break { label: None }],
+                body: vec![Stmt::Break {
+                    label: None,
+                    value: None,
+                }],
             }],
         };
         let expected = "\
@@ -462,139 +392,6 @@ fn f() {
     return;
 }";
         assert_eq!(generate(&[item]), expected);
-    }
-
-    #[test]
-    fn test_generate_stmt_try_catch_generates_labeled_block() {
-        let item = Item::Fn {
-            vis: Visibility::Private,
-            is_async: false,
-            name: "f".to_string(),
-            type_params: vec![],
-            params: vec![],
-            return_type: None,
-            body: vec![Stmt::TryCatch {
-                try_body: vec![Stmt::Expr(Expr::FnCall {
-                    name: "do_something".to_string(),
-                    args: vec![],
-                })],
-                catch_param: Some("e".to_string()),
-                catch_body: Some(vec![Stmt::Expr(Expr::MacroCall {
-                    name: "eprintln".to_string(),
-                    args: vec![
-                        Expr::StringLit("{}".to_string()),
-                        Expr::Ident("e".to_string()),
-                    ],
-                })]),
-                finally_body: None,
-            }],
-        };
-        let output = generate(&[item]);
-        assert!(
-            output.contains("let _try_result: Result<(), String> = 'try_block: {"),
-            "expected labeled block, got:\n{output}"
-        );
-        assert!(
-            output.contains("do_something()"),
-            "expected try body, got:\n{output}"
-        );
-        assert!(
-            output.contains("if let Err(e) = _try_result {"),
-            "expected if let Err, got:\n{output}"
-        );
-        assert!(
-            output.contains("eprintln!"),
-            "expected catch body, got:\n{output}"
-        );
-        assert!(
-            !output.contains("scopeguard"),
-            "should not contain scopeguard without finally, got:\n{output}"
-        );
-    }
-
-    #[test]
-    fn test_generate_stmt_try_finally_generates_scopeguard() {
-        let item = Item::Fn {
-            vis: Visibility::Private,
-            is_async: false,
-            name: "f".to_string(),
-            type_params: vec![],
-            params: vec![],
-            return_type: None,
-            body: vec![Stmt::TryCatch {
-                try_body: vec![Stmt::Expr(Expr::FnCall {
-                    name: "do_something".to_string(),
-                    args: vec![],
-                })],
-                catch_param: None,
-                catch_body: None,
-                finally_body: Some(vec![Stmt::Expr(Expr::FnCall {
-                    name: "cleanup".to_string(),
-                    args: vec![],
-                })]),
-            }],
-        };
-        let output = generate(&[item]);
-        assert!(
-            output.contains("scopeguard::guard((), |_|"),
-            "expected scopeguard, got:\n{output}"
-        );
-        assert!(
-            output.contains("cleanup()"),
-            "expected finally body, got:\n{output}"
-        );
-        assert!(
-            output.contains("do_something()"),
-            "expected try body, got:\n{output}"
-        );
-        assert!(
-            !output.contains("match (||"),
-            "should not contain match without catch, got:\n{output}"
-        );
-    }
-
-    #[test]
-    fn test_generate_stmt_try_catch_finally_generates_both() {
-        let item = Item::Fn {
-            vis: Visibility::Private,
-            is_async: false,
-            name: "f".to_string(),
-            type_params: vec![],
-            params: vec![],
-            return_type: None,
-            body: vec![Stmt::TryCatch {
-                try_body: vec![Stmt::Expr(Expr::FnCall {
-                    name: "do_something".to_string(),
-                    args: vec![],
-                })],
-                catch_param: Some("e".to_string()),
-                catch_body: Some(vec![Stmt::Expr(Expr::FnCall {
-                    name: "handle_error".to_string(),
-                    args: vec![Expr::Ident("e".to_string())],
-                })]),
-                finally_body: Some(vec![Stmt::Expr(Expr::FnCall {
-                    name: "cleanup".to_string(),
-                    args: vec![],
-                })]),
-            }],
-        };
-        let output = generate(&[item]);
-        assert!(
-            output.contains("scopeguard::guard((), |_|"),
-            "expected scopeguard, got:\n{output}"
-        );
-        assert!(
-            output.contains("let _try_result: Result<(), String> = 'try_block: {"),
-            "expected labeled block, got:\n{output}"
-        );
-        assert!(
-            output.contains("cleanup()"),
-            "expected finally body in scopeguard, got:\n{output}"
-        );
-        assert!(
-            output.contains("if let Err(e) = _try_result {"),
-            "expected if let Err, got:\n{output}"
-        );
     }
 
     #[test]
@@ -634,6 +431,102 @@ fn f() -> f64 {
         let expected = "\
 fn f() -> f64 {
     a + b
+}";
+        assert_eq!(generate(&[item]), expected);
+    }
+
+    #[test]
+    fn test_generate_labeled_block_simple_body_outputs_labeled_block() {
+        let item = Item::Fn {
+            vis: Visibility::Private,
+            is_async: false,
+            name: "f".to_string(),
+            type_params: vec![],
+            params: vec![],
+            return_type: None,
+            body: vec![Stmt::LabeledBlock {
+                label: "try_block".to_string(),
+                body: vec![Stmt::Expr(Expr::FnCall {
+                    name: "do_something".to_string(),
+                    args: vec![],
+                })],
+            }],
+        };
+        let expected = "\
+fn f() {
+    'try_block: {
+        do_something();
+    }
+}";
+        assert_eq!(generate(&[item]), expected);
+    }
+
+    #[test]
+    fn test_generate_break_with_label_and_value_outputs_break_label_value() {
+        let item = Item::Fn {
+            vis: Visibility::Private,
+            is_async: false,
+            name: "f".to_string(),
+            type_params: vec![],
+            params: vec![],
+            return_type: None,
+            body: vec![Stmt::Break {
+                label: Some("try_block".to_string()),
+                value: Some(Expr::FnCall {
+                    name: "Err".to_string(),
+                    args: vec![Expr::MethodCall {
+                        object: Box::new(Expr::StringLit("error".to_string())),
+                        method: "to_string".to_string(),
+                        args: vec![],
+                    }],
+                }),
+            }],
+        };
+        let expected = "\
+fn f() {
+    break 'try_block Err(\"error\".to_string());
+}";
+        assert_eq!(generate(&[item]), expected);
+    }
+
+    #[test]
+    fn test_generate_break_label_only_no_value_outputs_break_label() {
+        let item = Item::Fn {
+            vis: Visibility::Private,
+            is_async: false,
+            name: "f".to_string(),
+            type_params: vec![],
+            params: vec![],
+            return_type: None,
+            body: vec![Stmt::Break {
+                label: Some("outer".to_string()),
+                value: None,
+            }],
+        };
+        let expected = "\
+fn f() {
+    break 'outer;
+}";
+        assert_eq!(generate(&[item]), expected);
+    }
+
+    #[test]
+    fn test_generate_break_no_label_no_value_outputs_break() {
+        let item = Item::Fn {
+            vis: Visibility::Private,
+            is_async: false,
+            name: "f".to_string(),
+            type_params: vec![],
+            params: vec![],
+            return_type: None,
+            body: vec![Stmt::Break {
+                label: None,
+                value: None,
+            }],
+        };
+        let expected = "\
+fn f() {
+    break;
 }";
         assert_eq!(generate(&[item]), expected);
     }

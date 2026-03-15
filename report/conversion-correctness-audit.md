@@ -15,7 +15,7 @@ TypeScript → Rust 変換の全変換パスについて、型変換の正確性
 |---|------|------|------|
 | T-1 | `number` → `f64` の整数コンテキスト | 配列インデックス `arr[idx]` で `idx: f64` になり `usize` が必要な箇所でコンパイル不可 | 未対応 |
 | T-2 | `any`/`unknown` → `Box<dyn std::any::Any>` | 式の中で直接使用不可（`x + 1` 等）。TS の `any` は任意の式で使える | 未対応 |
-| T-3 | 型注記位置の intersection がフォールバック | `A & B` → `A` に縮退（`B` の情報が消失） | 未対応（TODO #2） |
+| T-3 | 型注記位置の intersection がフォールバック | `A & B` → `A` に縮退（`B` の情報が消失） | 未対応（`backlog/inline-type-annotation-struct.md`） |
 
 ### High（コンパイル可能だが意味的に問題）
 
@@ -42,7 +42,7 @@ TypeScript → Rust 変換の全変換パスについて、型変換の正確性
 |---|------|------|------|
 | ~~S-1~~ | ~~optional chaining が非 Option 型で壊れる~~ | | **修正済み**（Phase 1: `type-env-opt-chain`） |
 | ~~S-2~~ | ~~nullish coalescing が非 Option 型で壊れる~~ | | **修正済み**（Phase 1: `type-env-opt-chain`） |
-| S-3 | try/catch 内の break/continue | 即時実行クロージャ内で break/continue はコンパイル不可 | 未対応 |
+| ~~S-3~~ | ~~try/catch 内の break/continue~~ | ~~即時実行クロージャ内で break/continue はコンパイル不可~~ | **修正済み**（`Stmt::TryCatch` 廃止、フラグ変数パターンで対応） |
 | ~~S-4~~ | ~~throw の条件分岐内検出漏れ~~ | | **修正済み**（Phase 1: `contains-throw-recursion`） |
 
 ### High
@@ -61,9 +61,9 @@ TypeScript → Rust 変換の全変換パスについて、型変換の正確性
 | S-9 | `Math.max(a, b, c)` が 3 引数以上でエラー | `f64::max` は 2 引数のみ | 未対応 |
 | S-10 | テンプレートリテラルのエスケープシーケンス | `raw` フィールド使用の影響が不明 | 未対応 |
 | S-11 | super() が位置ベースのフィールドマッピング | 引数順序と親クラスのフィールド宣言順の不一致 | 未対応 |
-| S-12 | オブジェクトスプレッドが複数不可 | `{...a, ...b}` でエラー | 未対応（TODO #3） |
+| S-12 | オブジェクトスプレッドが複数不可 | `{...a, ...b}` でエラー | 未対応（TODO I-05） |
 | S-13 | 三項演算子の型不一致 | `cond ? "text" : 123` で if 式の分岐型不一致 | 未対応 |
-| S-14 | 代入式が条件式内で無効 | `while (x = getValue())` がコンパイル不可 | 未対応（TODO #4） |
+| S-14 | 代入式が条件式内で無効 | `while (x = getValue())` がコンパイル不可 | 未対応（TODO I-10） |
 | S-15 | async void のセマンティクス差異 | TS の async void は即座に返るが Rust の async fn は Future | 未対応 |
 
 ## 3. テストの品質

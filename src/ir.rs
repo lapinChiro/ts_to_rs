@@ -270,10 +270,12 @@ pub enum Stmt {
         /// Loop body
         body: Vec<Stmt>,
     },
-    /// `break ['label];`
+    /// `break ['label] [value];`
     Break {
         /// Optional target label
         label: Option<String>,
+        /// Optional value expression (e.g., `break 'try_block Err(...)`)
+        value: Option<Expr>,
     },
     /// `continue ['label];`
     Continue {
@@ -286,19 +288,14 @@ pub enum Stmt {
     Expr(Expr),
     /// A tail expression (implicit return without `return` keyword).
     TailExpr(Expr),
-    /// `try { ... } catch (e) { ... } finally { ... }`
+    /// A labeled block: `'label: { body... }`
     ///
-    /// Converted to an immediately-invoked closure + match for try/catch,
-    /// and `scopeguard::guard` for finally.
-    TryCatch {
-        /// Statements inside the `try` block
-        try_body: Vec<Stmt>,
-        /// Catch parameter name (e.g., `e` in `catch (e)`)
-        catch_param: Option<String>,
-        /// Statements inside the `catch` block
-        catch_body: Option<Vec<Stmt>>,
-        /// Statements inside the `finally` block
-        finally_body: Option<Vec<Stmt>>,
+    /// Used for try/catch expansion where the labeled block captures the result.
+    LabeledBlock {
+        /// Block label (e.g., `try_block`)
+        label: String,
+        /// Block body
+        body: Vec<Stmt>,
     },
 }
 
