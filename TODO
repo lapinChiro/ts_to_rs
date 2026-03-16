@@ -31,6 +31,30 @@
 ### Tier 1: 高優先度 — 伝播リスクが高い、または ROI が極めて高い
 
 （I-52〜I-57 は修正済み。対応 PRD: `e2e-bugfix-codegen-semantics.md`）
+（I-63, I-64 は PRD 化済み: `backlog/e2e-test-expansion.md`）
+
+- **[I-65]** **`undefined` リテラルと `!== undefined` の変換** — 式変換正確性
+    - `undefined` リテラルが Rust の `None` に変換されない（`undefined` のまま出力される）
+    - `x !== undefined` が `x.is_some()` に変換されない（`x != undefined` のまま出力される）
+    - `T | undefined` 型の変数にリテラルを代入する際、`Some()` ラップが付与されない（例: `let a: Option<f64> = 42.0;` → `Some(42.0)` であるべき）
+    - 影響: optional chaining, nullish coalescing の E2E テストが `undefined` を含むパターンで動作しない
+    - E2E テスト拡充（I-63）で発見
+
+- **[I-66]** **数値 enum の `Display` / 数値アクセス未対応** — コード生成
+    - `console.log(Status.Active)` で TS は `1` を出力するが、Rust の enum は `Display` 未実装でコンパイルエラー
+    - 数値 enum のバリアントを `println!` で出力するには `as i32` キャストまたは `Display` 実装が必要
+    - E2E テスト拡充（I-63）で発見
+
+- **[I-67]** **クロージャの String パラメータにリテラルを渡すと型不一致** — 式変換正確性
+    - `const greet = (name: string): string => ...;  greet("World")` で `"World"` が `.to_string()` なしで渡される
+    - 関数呼び出しの TypeEnv 引数型伝搬（I-38 ステップ 5）は通常関数のみ対応。クロージャ変数の Fn 型からのパラメータ型取得が未対応
+    - E2E テスト拡充（I-63）で発見
+
+- **[I-68]** **`self.field` の String 結合で所有権エラー** — コード生成
+    - `self.name + " suffix"` で `self.name` が move されてコンパイルエラー
+    - `self.name.clone() + " suffix"` または `format!` マクロに変換する必要がある
+    - 初版は全 clone 方針のため、`self.field` の文字列結合で `.clone()` を付与すべき
+    - E2E テスト拡充（I-63）で発見
 
 ### Tier 2: 中優先度 — 直接的な価値が高い
 
@@ -46,13 +70,6 @@
     - I-48 の拡張。HTTP サーバーの起動・リクエスト処理・レスポンス検証
     - 🔗 依存: I-48（テストインフラ）
 
-- **[I-14]** **オブジェクト分割代入の拡張（デフォルト値、ネスト、rest）** — 分割代入
-    - TS で頻出。デフォルト値 `{ x = 0 }`, ネスト `{ a: { b } }`, rest `{ a, ...rest }` が未対応
-
-- **[I-45]** **型ガードの式変換（`typeof`, `instanceof`）** — 式変換
-    - `typeof x === "string"` → Rust の型チェック式に変換
-    - `instanceof` → `is` 等のパターンに変換
-    - 型 narrowing（I-38）の前提。まず式変換だけ対応し、narrowing は後続で実装
 
 - **[I-10]** **条件内代入式の対応** — 式変換正確性
     - `while (x = getValue())` → `loop { let x = getValue(); if !x { break; } ... }` パターンへ変換
@@ -105,6 +122,12 @@
     - ここでは I-08 で未対応の高度なパターンを扱う: テンプレートリテラル型、再帰的条件型、高階型操作
     - TS 固有の問題への対処コード（IDE 表示改善等）→ Rust では不要、コメント/スキップ生成
     - 調査済み: `report/tier3-conditional-types-rust-approaches.md` に Group A〜D の分析あり
+
+- **[I-62]** **`is_string_type` の `Option<String>` ハック除去** — 型推論
+    - `is_string_type` が `Option<String>` を `String` 扱いするハックが残存
+    - 除去には TypeEnv の再代入時型更新（`x = x ?? "default"` 後に `x` が `String` になる）が前提
+    - `convert_assign_expr` で TypeEnv を更新し、nullish coalescing 後の型が `Option` から inner type に変わる仕組みが必要
+    - 🔗 依存: I-38（型推論基盤）完了済み。独立して実装可能
 
 - **[I-61]** **型推論: チェーンメソッド呼び出しの戻り値型追跡** — 型推論
     - I-38 でカバーされない「レベル 3」の型推論。`arr.filter(...).map(...)` のようなチェーンメソッド呼び出しで、各メソッドの戻り値型を追跡する

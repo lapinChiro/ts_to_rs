@@ -162,3 +162,58 @@ fn test_e2e_error_handling_ts_rust_stdout_match() {
 fn test_e2e_classes_ts_rust_stdout_match() {
     run_e2e_test("classes");
 }
+
+#[test]
+fn test_e2e_switch_match_ts_rust_stdout_match() {
+    run_e2e_test("switch_match");
+}
+
+#[test]
+fn test_e2e_loop_control_ts_rust_stdout_match() {
+    run_e2e_test("loop_control");
+}
+
+#[test]
+fn test_e2e_enum_basic_ts_rust_stdout_match() {
+    run_e2e_test("enum_basic");
+}
+
+#[test]
+fn test_e2e_optional_chaining_ts_rust_stdout_match() {
+    run_e2e_test("optional_chaining");
+}
+
+#[test]
+fn test_e2e_nullish_coalescing_ts_rust_stdout_match() {
+    run_e2e_test("nullish_coalescing");
+}
+
+#[test]
+fn test_e2e_closures_ts_rust_stdout_match() {
+    run_e2e_test("closures");
+}
+
+#[test]
+fn test_e2e_destructuring_ts_rust_stdout_match() {
+    run_e2e_test("destructuring");
+}
+
+#[test]
+fn test_e2e_spread_ops_ts_rust_stdout_match() {
+    run_e2e_test("spread_ops");
+}
+
+#[test]
+fn test_e2e_class_inheritance_ts_rust_stdout_match() {
+    run_e2e_test("class_inheritance");
+}
+
+#[test]
+fn test_e2e_generics_ts_rust_stdout_match() {
+    run_e2e_test("generics");
+}
+
+#[test]
+fn test_e2e_template_literals_ts_rust_stdout_match() {
+    run_e2e_test("template_literals");
+}

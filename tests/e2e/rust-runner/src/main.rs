@@ -1,12 +1,7 @@
 fn main() {
-    let s: String = "Hello, World!".to_string();
-    println!("{} {}", "upper:", s.to_uppercase());
-    println!("{} {}", "lower:", s.to_lowercase());
-    println!("{} {}", "includes:", s.contains(&"World"));
-    println!("{} {}", "starts:", s.starts_with("Hello"));
-    println!("{} {}", "trim:", "  spaces  ".trim().to_string());
-    println!("{} {}", "split:", "a,b,c".split(",").collect::<Vec<&str>>().join(" "));
-    let name: String = "Rust".to_string();
-    let greeting: String = "Hello ".to_string() + &name;
-    println!("{}", greeting);
+    let name: String = "World".to_string();
+    let n: f64 = 42.0;
+    println!("{}", format!("Hello {}", name));
+    println!("{}", format!("The answer is {}", n));
+    println!("{}", format!("{} + {} = {}", n, n, n + n));
 }

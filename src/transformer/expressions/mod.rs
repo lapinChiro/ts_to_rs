@@ -30,7 +30,7 @@ pub fn convert_expr(
     match expr {
         ast::Expr::Ident(ident) => Ok(Expr::Ident(ident.sym.to_string())),
         ast::Expr::Lit(lit) => convert_lit(lit, expected),
-        ast::Expr::Bin(bin) => convert_bin_expr(bin, reg, type_env),
+        ast::Expr::Bin(bin) => convert_bin_expr(bin, reg, expected, type_env),
         ast::Expr::Tpl(tpl) => convert_template_literal(tpl, reg, type_env),
         ast::Expr::Paren(paren) => convert_expr(&paren.expr, reg, expected, type_env),
         ast::Expr::Member(member) => convert_member_expr(member, reg, type_env),
@@ -108,7 +108,12 @@ fn is_string_like(expr: &Expr) -> bool {
 }
 
 /// Converts an SWC binary expression to an IR `BinaryOp`.
-fn convert_bin_expr(bin: &ast::BinExpr, reg: &TypeRegistry, type_env: &TypeEnv) -> Result<Expr> {
+fn convert_bin_expr(
+    bin: &ast::BinExpr,
+    reg: &TypeRegistry,
+    expected: Option<&RustType>,
+    type_env: &TypeEnv,
+) -> Result<Expr> {
     // `x ?? y` → `x.unwrap_or_else(|| y)` (Option) or `x` (non-Option)
     if bin.op == ast::BinaryOp::NullishCoalescing {
         let left_type = resolve_expr_type(&bin.left, type_env, reg);
@@ -138,12 +143,11 @@ fn convert_bin_expr(bin: &ast::BinExpr, reg: &TypeRegistry, type_env: &TypeEnv) 
     let op = convert_binary_op(bin.op)?;
 
     // String concatenation: wrap RHS in Ref(&) when LHS is string-like.
-    // Check both the IR expression and the AST-level type information.
+    // Priority: type inference → expected type → IR heuristic (is_string_like fallback).
     let is_string_context = if op == BinOp::Add {
-        is_string_like(&left) || {
-            let left_type = resolve_expr_type(&bin.left, type_env, reg);
-            left_type.is_some_and(|ty| is_string_type(&ty))
-        }
+        let left_type = resolve_expr_type(&bin.left, type_env, reg);
+        let type_inferred = left_type.is_some_and(|ty| is_string_type(&ty));
+        type_inferred || matches!(expected, Some(RustType::String)) || is_string_like(&left)
     } else {
         false
     };
@@ -592,11 +596,21 @@ fn convert_call_expr(call: &ast::CallExpr, reg: &TypeRegistry, type_env: &TypeEn
                     return Ok(result);
                 }
 
-                // Look up function parameter types from the registry
-                let param_types = reg.get(&fn_name).and_then(|def| match def {
-                    TypeDef::Function { params, .. } => Some(params.as_slice()),
-                    _ => None,
-                });
+                // Look up function parameter types from the registry or TypeEnv
+                let typeenv_params: Vec<(String, RustType)>;
+                let param_types: Option<&[(String, RustType)]> =
+                    if let Some(TypeDef::Function { params, .. }) = reg.get(&fn_name) {
+                        Some(params.as_slice())
+                    } else if let Some(RustType::Fn { params, .. }) = type_env.get(&fn_name) {
+                        typeenv_params = params
+                            .iter()
+                            .enumerate()
+                            .map(|(i, ty)| (format!("_p{i}"), ty.clone()))
+                            .collect();
+                        Some(typeenv_params.as_slice())
+                    } else {
+                        None
+                    };
                 let args = convert_call_args_with_types(&call.args, reg, param_types, type_env)?;
                 Ok(Expr::FnCall {
                     name: fn_name,

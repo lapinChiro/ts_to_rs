@@ -3053,3 +3053,148 @@ fn test_resolve_expr_type_new_unregistered_returns_none() {
 
     assert_eq!(resolve_expr_type(&expr, &env, &TypeRegistry::new()), None);
 }
+
+// --- Step 5: expected 型伝搬テスト ---
+
+#[test]
+fn test_convert_bin_expr_expected_string_enables_concat() {
+    // a + b with expected=String → string concat context (RHS wrapped in Ref)
+    let swc_expr = parse_expr("a + b;");
+    let reg = TypeRegistry::new();
+    let env = TypeEnv::new(); // a, b not registered → types unknown
+
+    let result = convert_expr(&swc_expr, &reg, Some(&RustType::String), &env).unwrap();
+
+    // In string concat context, RHS should be wrapped in Ref
+    match &result {
+        Expr::BinaryOp { op, right, .. } => {
+            assert_eq!(*op, BinOp::Add);
+            assert!(
+                matches!(right.as_ref(), Expr::Ref(_)),
+                "RHS should be Ref in string concat context, got: {:?}",
+                right
+            );
+        }
+        _ => panic!("expected BinaryOp, got: {:?}", result),
+    }
+}
+
+#[test]
+fn test_convert_bin_expr_no_expected_numeric_add() {
+    // a + b with expected=None → numeric addition (no Ref wrapping)
+    let swc_expr = parse_expr("a + b;");
+    let reg = TypeRegistry::new();
+    let env = TypeEnv::new();
+
+    let result = convert_expr(&swc_expr, &reg, None, &env).unwrap();
+
+    match &result {
+        Expr::BinaryOp { op, right, .. } => {
+            assert_eq!(*op, BinOp::Add);
+            assert!(
+                !matches!(right.as_ref(), Expr::Ref(_)),
+                "RHS should NOT be Ref in numeric context"
+            );
+        }
+        _ => panic!("expected BinaryOp, got: {:?}", result),
+    }
+}
+
+#[test]
+fn test_convert_call_expr_typeenv_fn_provides_param_expected() {
+    // f("hello") where TypeEnv has f: Fn { params: [String], return_type: Bool }
+    // → "hello" should become "hello".to_string() because expected=String
+    let swc_expr = parse_expr("f(\"hello\");");
+    let reg = TypeRegistry::new();
+    let mut env = TypeEnv::new();
+    env.insert(
+        "f".to_string(),
+        RustType::Fn {
+            params: vec![RustType::String],
+            return_type: Box::new(RustType::Bool),
+        },
+    );
+
+    let result = convert_expr(&swc_expr, &reg, None, &env).unwrap();
+
+    match &result {
+        Expr::FnCall { name, args } => {
+            assert_eq!(name, "f");
+            assert_eq!(args.len(), 1);
+            // The string literal should have .to_string() because param type is String
+            assert!(
+                matches!(
+                    &args[0],
+                    Expr::MethodCall { method, .. } if method == "to_string"
+                ),
+                "arg should be .to_string() call, got: {:?}",
+                args[0]
+            );
+        }
+        _ => panic!("expected FnCall, got: {:?}", result),
+    }
+}
+
+#[test]
+fn test_convert_call_expr_no_typeenv_fn_no_expected() {
+    // f("hello") where TypeEnv is empty → "hello" stays as StringLit (no .to_string())
+    let swc_expr = parse_expr("f(\"hello\");");
+    let reg = TypeRegistry::new();
+    let env = TypeEnv::new();
+
+    let result = convert_expr(&swc_expr, &reg, None, &env).unwrap();
+
+    match &result {
+        Expr::FnCall { name, args } => {
+            assert_eq!(name, "f");
+            assert_eq!(args.len(), 1);
+            assert!(
+                matches!(&args[0], Expr::StringLit(s) if s == "hello"),
+                "arg should be plain StringLit, got: {:?}",
+                args[0]
+            );
+        }
+        _ => panic!("expected FnCall, got: {:?}", result),
+    }
+}
+
+// --- Step 8: I-16 空配列の型推論テスト ---
+
+#[test]
+fn test_convert_array_lit_empty_with_expected_vec_string() {
+    // [] with expected=Vec<String> → Expr::Vec with no elements (type comes from context)
+    let swc_expr = parse_var_init("const x = [];");
+    let reg = TypeRegistry::new();
+    let env = TypeEnv::new();
+    let expected = RustType::Vec(Box::new(RustType::String));
+
+    let result = convert_expr(&swc_expr, &reg, Some(&expected), &env).unwrap();
+
+    assert_eq!(result, Expr::Vec { elements: vec![] });
+}
+
+#[test]
+fn test_convert_array_lit_elements_get_expected_element_type() {
+    // ["a", "b"] with expected=Vec<String> → elements get .to_string()
+    let swc_expr = parse_var_init("const x = [\"a\", \"b\"];");
+    let reg = TypeRegistry::new();
+    let env = TypeEnv::new();
+    let expected = RustType::Vec(Box::new(RustType::String));
+
+    let result = convert_expr(&swc_expr, &reg, Some(&expected), &env).unwrap();
+
+    match &result {
+        Expr::Vec { elements } => {
+            assert_eq!(elements.len(), 2);
+            // Each element should have .to_string() because element expected type is String
+            for elem in elements {
+                assert!(
+                    matches!(elem, Expr::MethodCall { method, .. } if method == "to_string"),
+                    "element should be .to_string() call, got: {:?}",
+                    elem
+                );
+            }
+        }
+        _ => panic!("expected Vec, got: {:?}", result),
+    }
+}
