@@ -12,7 +12,7 @@ use swc_ecma_ast::{
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::ir::{EnumValue, EnumVariant, Item, Method, Param, RustType, StructField, Visibility};
-use crate::registry::TypeRegistry;
+use crate::registry::{TypeDef, TypeRegistry};
 
 /// Counter for generating unique synthetic struct names.
 static SYNTHETIC_COUNTER: AtomicU32 = AtomicU32::new(0);
@@ -162,6 +162,11 @@ fn convert_type_ref(
             }
             convert_ts_type(&params.params[0], extra_items, reg)
         }
+        "Partial" => convert_utility_partial(type_ref, extra_items, reg),
+        "Required" => convert_utility_required(type_ref, extra_items, reg),
+        "Pick" => convert_utility_pick(type_ref, extra_items, reg),
+        "Omit" => convert_utility_omit(type_ref, extra_items, reg),
+        "NonNullable" => convert_utility_non_nullable(type_ref, extra_items, reg),
         // User-defined types: pass through as Named, with any generic type arguments
         other => {
             let type_args = match &type_ref.type_params {
@@ -1653,6 +1658,320 @@ pub(crate) fn convert_property_signature(
         name: field_name,
         ty,
     })
+}
+
+// -- Utility type helpers --
+
+/// Resolved struct info: (type_name, fields).
+type ResolvedFields = (String, Vec<(String, RustType)>);
+
+/// Extracts the inner type name and resolves its fields from the registry.
+/// Returns `(type_name, fields)` or `None` if unregistered.
+fn resolve_utility_inner_fields<'a>(
+    type_ref: &swc_ecma_ast::TsTypeRef,
+    extra_items: &'a [Item],
+    reg: &'a TypeRegistry,
+) -> Option<ResolvedFields> {
+    let params = type_ref.type_params.as_ref()?;
+    if params.params.is_empty() {
+        return None;
+    }
+    let inner = &params.params[0];
+    // Inner type must be a type reference with an ident name
+    let inner_name = match inner.as_ref() {
+        swc_ecma_ast::TsType::TsTypeRef(inner_ref) => match &inner_ref.type_name {
+            swc_ecma_ast::TsEntityName::Ident(ident) => ident.sym.to_string(),
+            _ => return None,
+        },
+        _ => return None,
+    };
+
+    // Try registry first, then check extra_items for synthesized structs
+    let fields = if let Some(TypeDef::Struct { fields }) = reg.get(&inner_name) {
+        fields.clone()
+    } else {
+        // Look in extra_items for a previously synthesized struct
+        extra_items.iter().find_map(|item| match item {
+            Item::Struct { name, fields, .. } if name == &inner_name => Some(
+                fields
+                    .iter()
+                    .map(|f| (f.name.clone(), f.ty.clone()))
+                    .collect(),
+            ),
+            _ => None,
+        })?
+    };
+
+    Some((inner_name, fields))
+}
+
+/// Resolves the inner type of a utility type, converting it first if needed (for nesting).
+/// Returns `(resolved_name, fields)` or None if no struct fields can be found.
+fn resolve_utility_inner_with_conversion(
+    type_ref: &swc_ecma_ast::TsTypeRef,
+    extra_items: &mut Vec<Item>,
+    reg: &TypeRegistry,
+) -> Result<Option<ResolvedFields>> {
+    // First try direct resolution from registry/extra_items
+    if let Some(result) = resolve_utility_inner_fields(type_ref, extra_items, reg) {
+        return Ok(Some(result));
+    }
+
+    // If not found, convert the inner type (handles nested utility types)
+    let params = type_ref
+        .type_params
+        .as_ref()
+        .ok_or_else(|| anyhow!("utility type requires a type parameter"))?;
+    if params.params.is_empty() {
+        return Ok(None);
+    }
+    let converted = convert_ts_type(&params.params[0], extra_items, reg)?;
+
+    // If conversion produced a Named type, look for it in extra_items
+    if let RustType::Named { ref name, .. } = converted {
+        if let Some(fields) = extra_items.iter().find_map(|item| match item {
+            Item::Struct {
+                name: n, fields, ..
+            } if n == name => Some(
+                fields
+                    .iter()
+                    .map(|f| (f.name.clone(), f.ty.clone()))
+                    .collect(),
+            ),
+            _ => None,
+        }) {
+            return Ok(Some((name.clone(), fields)));
+        }
+    }
+
+    Ok(None)
+}
+
+/// `Partial<T>` → all fields wrapped in `Option<T>`
+fn convert_utility_partial(
+    type_ref: &swc_ecma_ast::TsTypeRef,
+    extra_items: &mut Vec<Item>,
+    reg: &TypeRegistry,
+) -> Result<RustType> {
+    let Some((inner_name, fields)) =
+        resolve_utility_inner_with_conversion(type_ref, extra_items, reg)?
+    else {
+        // Fallback: return inner type as-is
+        let params = type_ref
+            .type_params
+            .as_ref()
+            .ok_or_else(|| anyhow!("Partial requires a type parameter"))?;
+        return convert_ts_type(&params.params[0], extra_items, reg);
+    };
+
+    let synth_name = format!("Partial{inner_name}");
+    let synth_fields = fields
+        .into_iter()
+        .map(|(name, ty)| StructField {
+            vis: None,
+            name,
+            ty: if matches!(ty, RustType::Option(_)) {
+                ty
+            } else {
+                RustType::Option(Box::new(ty))
+            },
+        })
+        .collect();
+
+    extra_items.push(Item::Struct {
+        name: synth_name.clone(),
+        vis: Visibility::Public,
+        fields: synth_fields,
+        type_params: vec![],
+    });
+
+    Ok(RustType::Named {
+        name: synth_name,
+        type_args: vec![],
+    })
+}
+
+/// `Required<T>` → all `Option` wrappers removed from fields
+fn convert_utility_required(
+    type_ref: &swc_ecma_ast::TsTypeRef,
+    extra_items: &mut Vec<Item>,
+    reg: &TypeRegistry,
+) -> Result<RustType> {
+    let Some((inner_name, fields)) =
+        resolve_utility_inner_with_conversion(type_ref, extra_items, reg)?
+    else {
+        let params = type_ref
+            .type_params
+            .as_ref()
+            .ok_or_else(|| anyhow!("Required requires a type parameter"))?;
+        return convert_ts_type(&params.params[0], extra_items, reg);
+    };
+
+    let synth_name = format!("Required{inner_name}");
+    let synth_fields = fields
+        .into_iter()
+        .map(|(name, ty)| StructField {
+            vis: None,
+            name,
+            ty: match ty {
+                RustType::Option(inner) => *inner,
+                other => other,
+            },
+        })
+        .collect();
+
+    extra_items.push(Item::Struct {
+        name: synth_name.clone(),
+        vis: Visibility::Public,
+        fields: synth_fields,
+        type_params: vec![],
+    });
+
+    Ok(RustType::Named {
+        name: synth_name,
+        type_args: vec![],
+    })
+}
+
+/// Extracts string literal keys from a union type parameter (e.g., `"x" | "y"`).
+fn extract_string_keys(ts_type: &swc_ecma_ast::TsType) -> Vec<String> {
+    match ts_type {
+        swc_ecma_ast::TsType::TsLitType(lit) => match &lit.lit {
+            swc_ecma_ast::TsLit::Str(s) => vec![s.value.to_string_lossy().into_owned()],
+            _ => vec![],
+        },
+        swc_ecma_ast::TsType::TsUnionOrIntersectionType(
+            swc_ecma_ast::TsUnionOrIntersectionType::TsUnionType(union),
+        ) => union
+            .types
+            .iter()
+            .flat_map(|t| extract_string_keys(t))
+            .collect(),
+        _ => vec![],
+    }
+}
+
+/// `Pick<T, K>` → only fields whose names are in K
+fn convert_utility_pick(
+    type_ref: &swc_ecma_ast::TsTypeRef,
+    extra_items: &mut Vec<Item>,
+    reg: &TypeRegistry,
+) -> Result<RustType> {
+    let params = type_ref
+        .type_params
+        .as_ref()
+        .ok_or_else(|| anyhow!("Pick requires type parameters"))?;
+    if params.params.len() < 2 {
+        return Err(anyhow!("Pick expects at least two type parameters"));
+    }
+
+    let Some((inner_name, fields)) = resolve_utility_inner_fields(type_ref, extra_items, reg)
+    else {
+        return convert_ts_type(&params.params[0], extra_items, reg);
+    };
+
+    let keys = extract_string_keys(&params.params[1]);
+    let picked_fields: Vec<StructField> = fields
+        .into_iter()
+        .filter(|(name, _)| keys.contains(name))
+        .map(|(name, ty)| StructField {
+            vis: None,
+            name,
+            ty,
+        })
+        .collect();
+
+    let keys_suffix = keys.iter().map(|k| capitalize_first(k)).collect::<String>();
+    let synth_name = format!("Pick{inner_name}{keys_suffix}");
+
+    extra_items.push(Item::Struct {
+        name: synth_name.clone(),
+        vis: Visibility::Public,
+        fields: picked_fields,
+        type_params: vec![],
+    });
+
+    Ok(RustType::Named {
+        name: synth_name,
+        type_args: vec![],
+    })
+}
+
+/// `Omit<T, K>` → all fields except those in K
+fn convert_utility_omit(
+    type_ref: &swc_ecma_ast::TsTypeRef,
+    extra_items: &mut Vec<Item>,
+    reg: &TypeRegistry,
+) -> Result<RustType> {
+    let params = type_ref
+        .type_params
+        .as_ref()
+        .ok_or_else(|| anyhow!("Omit requires type parameters"))?;
+    if params.params.len() < 2 {
+        return Err(anyhow!("Omit expects at least two type parameters"));
+    }
+
+    let Some((inner_name, fields)) = resolve_utility_inner_fields(type_ref, extra_items, reg)
+    else {
+        return convert_ts_type(&params.params[0], extra_items, reg);
+    };
+
+    let keys = extract_string_keys(&params.params[1]);
+    let omitted_fields: Vec<StructField> = fields
+        .into_iter()
+        .filter(|(name, _)| !keys.contains(name))
+        .map(|(name, ty)| StructField {
+            vis: None,
+            name,
+            ty,
+        })
+        .collect();
+
+    let keys_suffix = keys.iter().map(|k| capitalize_first(k)).collect::<String>();
+    let synth_name = format!("Omit{inner_name}{keys_suffix}");
+
+    extra_items.push(Item::Struct {
+        name: synth_name.clone(),
+        vis: Visibility::Public,
+        fields: omitted_fields,
+        type_params: vec![],
+    });
+
+    Ok(RustType::Named {
+        name: synth_name,
+        type_args: vec![],
+    })
+}
+
+/// `NonNullable<T>` → strip `Option` wrapper or remove null/undefined from union
+fn convert_utility_non_nullable(
+    type_ref: &swc_ecma_ast::TsTypeRef,
+    extra_items: &mut Vec<Item>,
+    reg: &TypeRegistry,
+) -> Result<RustType> {
+    let params = type_ref
+        .type_params
+        .as_ref()
+        .ok_or_else(|| anyhow!("NonNullable requires a type parameter"))?;
+    if params.params.len() != 1 {
+        return Err(anyhow!("NonNullable expects exactly one type parameter"));
+    }
+
+    let inner = convert_ts_type(&params.params[0], extra_items, reg)?;
+    // Strip Option wrapper
+    Ok(match inner {
+        RustType::Option(inner_ty) => *inner_ty,
+        other => other,
+    })
+}
+
+/// Capitalizes the first character of a string.
+fn capitalize_first(s: &str) -> String {
+    let mut chars = s.chars();
+    match chars.next() {
+        None => String::new(),
+        Some(c) => c.to_uppercase().to_string() + chars.as_str(),
+    }
 }
 
 #[cfg(test)]

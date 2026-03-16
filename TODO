@@ -157,6 +157,13 @@
 - **[I-35]** **indexed access type の非文字列キー対応** — 型構文（Hono 2件）
 - **[I-36]** **qualified type name (`A.B` 形式)** — 型構文（Hono 1件）
 - **[I-37]** **型リテラルメンバーのメソッドシグネチャ対応** — 型構文（Hono 1件）
+- **[I-58]** **Trait の type_params 未対応** — 型構文
+    - `convert_interface_as_trait` で `Item::Trait` 生成時に type_params を渡していない（`types/mod.rs:559`）
+    - ジェネリックなインターフェースをトレイトに変換する際、型パラメータが消失する
+- **[I-59]** **Pick/Omit のネストしたユーティリティ型未対応** — 型変換
+    - `Pick<Partial<T>, K>` のように inner が utility type の場合、`resolve_utility_inner_fields` が直接解決できず失敗する
+    - `Partial`/`Required` は `resolve_utility_inner_with_conversion` でネスト対応済みだが、`Pick`/`Omit` は未対応
+    - 動作上は inner type をフォールバックで返すため、パニックはしない
 
 
 ---
