@@ -114,6 +114,16 @@ fn convert_bin_expr(
     expected: Option<&RustType>,
     type_env: &TypeEnv,
 ) -> Result<Expr> {
+    // typeof x === "type" / typeof x !== "type" pattern
+    if let Some(result) = try_convert_typeof_comparison(bin, type_env, reg) {
+        return Ok(result);
+    }
+
+    // x instanceof ClassName pattern
+    if bin.op == ast::BinaryOp::InstanceOf {
+        return Ok(convert_instanceof(bin, type_env));
+    }
+
     // `x ?? y` → `x.unwrap_or_else(|| y)` (Option) or `x` (non-Option)
     if bin.op == ast::BinaryOp::NullishCoalescing {
         let left_type = resolve_expr_type(&bin.left, type_env, reg);
@@ -1625,6 +1635,15 @@ fn convert_unary_expr(
     reg: &TypeRegistry,
     type_env: &TypeEnv,
 ) -> Result<Expr> {
+    // typeof x → resolve to string literal based on TypeEnv
+    if unary.op == ast::UnaryOp::TypeOf {
+        let operand_type = resolve_expr_type(&unary.arg, type_env, reg);
+        return Ok(match operand_type {
+            Some(ty) => Expr::StringLit(typeof_to_string(&ty).to_string()),
+            None => Expr::StringLit("unknown".to_string()),
+        });
+    }
+
     let op = match unary.op {
         ast::UnaryOp::Bang => UnOp::Not,
         ast::UnaryOp::Minus => UnOp::Neg,
@@ -1779,6 +1798,179 @@ fn resolve_field_type(
             .find(|(name, _)| name == &field_name)
             .map(|(_, ty)| ty.clone()),
         _ => None,
+    }
+}
+
+/// Detects `typeof x === "type"` / `typeof x !== "type"` patterns and resolves
+/// them using TypeEnv. Returns `None` if the pattern is not recognized.
+fn try_convert_typeof_comparison(
+    bin: &ast::BinExpr,
+    type_env: &TypeEnv,
+    reg: &TypeRegistry,
+) -> Option<Expr> {
+    let is_eq = matches!(bin.op, ast::BinaryOp::EqEq | ast::BinaryOp::EqEqEq);
+    let is_neq = matches!(bin.op, ast::BinaryOp::NotEq | ast::BinaryOp::NotEqEq);
+    if !is_eq && !is_neq {
+        return None;
+    }
+
+    // Extract (typeof operand, type string) from either order
+    let (typeof_operand, type_str) = extract_typeof_and_string(bin)?;
+
+    // Resolve the operand's type from TypeEnv
+    let operand_type = resolve_expr_type(typeof_operand, type_env, reg);
+
+    let result = match &operand_type {
+        Some(ty) => resolve_typeof_match(ty, &type_str),
+        None => TypeofMatch::Placeholder,
+    };
+
+    let expr = match result {
+        TypeofMatch::True => Expr::BoolLit(!is_neq),
+        TypeofMatch::False => Expr::BoolLit(is_neq),
+        TypeofMatch::IsNone => {
+            let operand_ir =
+                crate::transformer::expressions::convert_expr(typeof_operand, reg, None, type_env)
+                    .ok()?;
+            let method = if is_neq { "is_some" } else { "is_none" };
+            Expr::MethodCall {
+                object: Box::new(operand_ir),
+                method: method.to_string(),
+                args: vec![],
+            }
+        }
+        TypeofMatch::Placeholder => {
+            // Unknown type → optimistic true (negated for !==)
+            Expr::BoolLit(!is_neq)
+        }
+    };
+
+    Some(expr)
+}
+
+/// Extracts the typeof operand and the comparison string from a binary expression.
+/// Handles both `typeof x === "string"` and `"string" === typeof x`.
+fn extract_typeof_and_string(bin: &ast::BinExpr) -> Option<(&ast::Expr, String)> {
+    // Left is typeof, right is string
+    if let ast::Expr::Unary(unary) = bin.left.as_ref() {
+        if unary.op == ast::UnaryOp::TypeOf {
+            if let ast::Expr::Lit(ast::Lit::Str(s)) = bin.right.as_ref() {
+                return Some((&unary.arg, s.value.to_string_lossy().into_owned()));
+            }
+        }
+    }
+    // Right is typeof, left is string
+    if let ast::Expr::Unary(unary) = bin.right.as_ref() {
+        if unary.op == ast::UnaryOp::TypeOf {
+            if let ast::Expr::Lit(ast::Lit::Str(s)) = bin.left.as_ref() {
+                return Some((&unary.arg, s.value.to_string_lossy().into_owned()));
+            }
+        }
+    }
+    None
+}
+
+enum TypeofMatch {
+    True,
+    False,
+    IsNone,
+    Placeholder,
+}
+
+/// Resolves whether a RustType matches a typeof string.
+fn resolve_typeof_match(ty: &RustType, typeof_str: &str) -> TypeofMatch {
+    match typeof_str {
+        "string" => {
+            if matches!(ty, RustType::String) {
+                TypeofMatch::True
+            } else {
+                TypeofMatch::False
+            }
+        }
+        "number" => {
+            if matches!(ty, RustType::F64) {
+                TypeofMatch::True
+            } else {
+                TypeofMatch::False
+            }
+        }
+        "boolean" => {
+            if matches!(ty, RustType::Bool) {
+                TypeofMatch::True
+            } else {
+                TypeofMatch::False
+            }
+        }
+        "undefined" => {
+            if matches!(ty, RustType::Option(_)) {
+                TypeofMatch::IsNone
+            } else {
+                TypeofMatch::False
+            }
+        }
+        "object" => {
+            if matches!(ty, RustType::Named { .. } | RustType::Vec(_)) {
+                TypeofMatch::True
+            } else {
+                TypeofMatch::False
+            }
+        }
+        "function" => {
+            if matches!(ty, RustType::Fn { .. }) {
+                TypeofMatch::True
+            } else {
+                TypeofMatch::False
+            }
+        }
+        _ => TypeofMatch::False,
+    }
+}
+
+/// Converts `x instanceof ClassName` using TypeEnv.
+fn convert_instanceof(bin: &ast::BinExpr, type_env: &TypeEnv) -> Expr {
+    // Get the class name from the RHS
+    let class_name = match bin.right.as_ref() {
+        ast::Expr::Ident(ident) => ident.sym.to_string(),
+        _ => return Expr::BoolLit(true), // placeholder
+    };
+
+    // Get the LHS variable name and type
+    let lhs_type = match bin.left.as_ref() {
+        ast::Expr::Ident(ident) => type_env.get(ident.sym.as_ref()).cloned(),
+        _ => None,
+    };
+
+    match lhs_type {
+        Some(RustType::Named { name, .. }) => Expr::BoolLit(name == class_name),
+        Some(RustType::Option(inner)) => match inner.as_ref() {
+            RustType::Named { name, .. } if name == &class_name => {
+                let lhs_ir = match bin.left.as_ref() {
+                    ast::Expr::Ident(ident) => Expr::Ident(ident.sym.to_string()),
+                    _ => return Expr::BoolLit(true),
+                };
+                Expr::MethodCall {
+                    object: Box::new(lhs_ir),
+                    method: "is_some".to_string(),
+                    args: vec![],
+                }
+            }
+            _ => Expr::BoolLit(false),
+        },
+        Some(_) => Expr::BoolLit(false),
+        None => Expr::BoolLit(true), // placeholder for unknown type
+    }
+}
+
+/// Resolves typeof to a string literal based on TypeEnv type.
+fn typeof_to_string(ty: &RustType) -> &'static str {
+    match ty {
+        RustType::String => "string",
+        RustType::F64 => "number",
+        RustType::Bool => "boolean",
+        RustType::Option(_) => "undefined",
+        RustType::Named { .. } | RustType::Vec(_) => "object",
+        RustType::Fn { .. } => "function",
+        _ => "object",
     }
 }
 

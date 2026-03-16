@@ -3198,3 +3198,110 @@ fn test_convert_array_lit_elements_get_expected_element_type() {
         _ => panic!("expected Vec, got: {:?}", result),
     }
 }
+
+// --- I-45: typeof / instanceof type guard expressions ---
+
+#[test]
+fn test_typeof_equals_string_known_type_resolves_true() {
+    let swc_expr = parse_expr("typeof x === \"string\";");
+    let mut env = TypeEnv::new();
+    env.insert("x".to_string(), RustType::String);
+    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &env).unwrap();
+    assert_eq!(result, Expr::BoolLit(true));
+}
+
+#[test]
+fn test_typeof_equals_string_mismatched_type_resolves_false() {
+    let swc_expr = parse_expr("typeof x === \"string\";");
+    let mut env = TypeEnv::new();
+    env.insert("x".to_string(), RustType::F64);
+    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &env).unwrap();
+    assert_eq!(result, Expr::BoolLit(false));
+}
+
+#[test]
+fn test_typeof_equals_number_known_type_resolves_true() {
+    let swc_expr = parse_expr("typeof x === \"number\";");
+    let mut env = TypeEnv::new();
+    env.insert("x".to_string(), RustType::F64);
+    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &env).unwrap();
+    assert_eq!(result, Expr::BoolLit(true));
+}
+
+#[test]
+fn test_typeof_not_equals_string_known_type_resolves_false() {
+    let swc_expr = parse_expr("typeof x !== \"string\";");
+    let mut env = TypeEnv::new();
+    env.insert("x".to_string(), RustType::String);
+    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &env).unwrap();
+    assert_eq!(result, Expr::BoolLit(false));
+}
+
+#[test]
+fn test_typeof_equals_string_unknown_type_resolves_placeholder() {
+    let swc_expr = parse_expr("typeof x === \"string\";");
+    let env = TypeEnv::new(); // x not registered
+    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &env).unwrap();
+    // Unknown type → placeholder true
+    assert_eq!(result, Expr::BoolLit(true));
+}
+
+#[test]
+fn test_typeof_equals_undefined_option_resolves_is_none() {
+    let swc_expr = parse_expr("typeof x === \"undefined\";");
+    let mut env = TypeEnv::new();
+    env.insert("x".to_string(), RustType::Option(Box::new(RustType::F64)));
+    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &env).unwrap();
+    assert!(
+        matches!(&result, Expr::MethodCall { method, .. } if method == "is_none"),
+        "expected is_none call, got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_typeof_standalone_known_type_resolves_string_lit() {
+    let swc_expr = parse_expr("typeof x;");
+    let mut env = TypeEnv::new();
+    env.insert("x".to_string(), RustType::String);
+    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &env).unwrap();
+    assert_eq!(result, Expr::StringLit("string".to_string()));
+}
+
+#[test]
+fn test_instanceof_known_type_match_resolves_true() {
+    let swc_expr = parse_expr("x instanceof Foo;");
+    let mut env = TypeEnv::new();
+    env.insert(
+        "x".to_string(),
+        RustType::Named {
+            name: "Foo".to_string(),
+            type_args: vec![],
+        },
+    );
+    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &env).unwrap();
+    assert_eq!(result, Expr::BoolLit(true));
+}
+
+#[test]
+fn test_instanceof_known_type_mismatch_resolves_false() {
+    let swc_expr = parse_expr("x instanceof Foo;");
+    let mut env = TypeEnv::new();
+    env.insert(
+        "x".to_string(),
+        RustType::Named {
+            name: "Bar".to_string(),
+            type_args: vec![],
+        },
+    );
+    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &env).unwrap();
+    assert_eq!(result, Expr::BoolLit(false));
+}
+
+#[test]
+fn test_instanceof_unknown_type_resolves_placeholder() {
+    let swc_expr = parse_expr("x instanceof Foo;");
+    let env = TypeEnv::new();
+    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &env).unwrap();
+    assert_eq!(result, Expr::BoolLit(true));
+}
