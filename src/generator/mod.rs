@@ -96,9 +96,17 @@ fn generate_item(item: &Item) -> String {
             let generics = generate_type_params(type_params);
             format!("{vis_str}type {name}{generics} = {};", generate_type(ty))
         }
-        Item::Trait { vis, name, methods } => {
+        Item::Trait {
+            vis,
+            name,
+            methods,
+            associated_types,
+        } => {
             let vis_str = generate_vis(vis);
             let mut out = format!("{vis_str}trait {name} {{\n");
+            for assoc_type in associated_types {
+                out.push_str(&format!("    type {assoc_type};\n"));
+            }
             for method in methods {
                 out.push_str(&generate_trait_method_sig(method));
             }
@@ -951,6 +959,7 @@ pub struct B {
                 return_type: Some(RustType::String),
                 body: None,
             }],
+            associated_types: vec![],
         };
         let expected = "\
 pub trait AnimalTrait {

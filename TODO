@@ -24,112 +24,61 @@
 
 優先度の判断軸:
 
-1. **テスト基盤の盤石さ**: E2E テスト基盤は全ての開発の手戻りを防ぐ基盤。何よりも優先する
-2. **直接的な価値**: 変換の正確性 > 変換率（Hono 実測） > 保守性 > 工数の小ささ
-3. **相乗効果**: 解決すると他の課題も副次的に解消・簡素化する度合い
-4. **伝播防止**: 未解決のまま放置すると今後の開発に悪影響が蓄積する度合い
+1. **変換の正確性**: 意味の違う Rust コードを生成するなら、その機能は存在しないのと同じ。正確性は何よりも優先する
+2. **相乗効果**: 解決すると他の課題も副次的に解消・簡素化する度合い
+3. **伝播防止**: 未解決のまま放置すると今後の開発に悪影響が蓄積する度合い
 
-### Tier 1: 高優先度 — テスト品質
+### Tier 1: 高優先度 — 変換正確性
 
-- **[I-32]** **コンパイルテストのスキップ解消** — テスト品質（残り 2/51 がスキップ中）
-    - 解消済み: interface-mixed（trait impl pub 除去）、union-type（struct derive + PhantomData）
-    - 残り 2 件: indexed-access-type（I-35 前提）、conditional-type（`Unwrap<T> = <T as Promise>::Output` で未定義 trait `Promise` を参照）
+#### 型リテラル・enum 変換
 
-### Tier 2: 中優先度 — 変換正確性・変換率
+- **[I-90]** **文字列リテラルから string literal union enum への変換** — 式変換正確性
+    - `const d: Direction = "up"` で `"up"` → `Direction::Up` への変換が必要
+    - `d == "up"` → `d == Direction::Up` への変換も必要
+    - 🔗 解消すると string literal union の E2E 追加が可能
 
-#### 高 ROI — 小工数で広範囲に効果
-
-- **[I-85]** **`NaN` / `Infinity` リテラルが Rust 定数に変換されない** — 式変換
-    - `NaN` → `f64::NAN`、`Infinity` → `f64::INFINITY` への変換。小工数
-    - E2E テスト（`number_api.ts`）で発覚
-
-- **[I-84]** **static メソッド呼び出しが `.` で生成される** — 式変換正確性
-    - `MathHelper.add()` → `MathHelper::add()` であるべき
-    - 🔗 解消すると `advanced_classes.ts` に static テストの E2E 追加が可能
-
-- **[I-86]** **オプショナルフィールド未指定時に `None` が生成されない** — コード生成
-    - `{ name: "test" }` で `value?: number` 省略時に `value: None` が必要
-    - 🔗 解消すると `object_ops.ts` + `destructuring.ts` の E2E 拡充が可能
-
-- **[I-46]** **computed property (`obj[expr]`) の変換** — 式変換
-    - TypeRegistry 登録済み struct → フィールドアクセス、未登録 → `HashMap::get()`
-    - 🔗 解消すると E2E テストで配列インデックスアクセスが使用可能になり、テストの表現力が大幅に向上
-    - 方針決定済み
-
-#### 型安全性 — `.to_string()` 関連（共通の根本原因）
-
-- **[I-67]** **クロージャの String パラメータにリテラルを渡すと型不一致** — 式変換正確性
-    - 根本原因: arrow 式の `Stmt::Let` が `ty: None` → TypeEnv に `Fn` 型未登録
-    - 🔗 相乗: I-88 と同じ「呼び出しサイトでの型ガイド引数変換」基盤を共有
-
-- **[I-88]** **コンストラクタの String 引数に `.to_string()` が付与されない** — 式変換正確性
-    - `new Foo("hello")` → `Foo::new("hello")` だが `"hello".to_string()` が必要
-    - 🔗 相乗: I-67 と同じ TypeRegistry 引数型 lookup
-
-- **[I-89]** **数値と文字列の `+` 結合が Rust でコンパイルできない** — 式変換正確性
-    - `this.celsius + "C"` → `format!("{}{}", self.celsius, "C")` 等に変換が必要
-    - 現在の文字列結合処理は両辺が文字列の場合のみ対応
+- **[I-91]** **discriminated union のランタイム操作** — 変換正確性
+    - 値の構築: `{ kind: "circle", radius: 5 }` → `Shape::Circle { radius: 5.0 }`
+    - フィールドアクセス: `s.kind` → match 式
+    - 分岐: `switch (s.kind)` → match 式
+    - 型定義は実装済みだが、値操作が欠落
 
 #### 表示・出力
 
 - **[I-79]** **`console.log` の Vec / Option 出力** — コード生成
     - `Vec<T>` / `Option<T>` は `Display` 未実装のためコンパイルエラー
     - 🔗 相乗: I-66 と同じ Display 問題
-    - TS 出力形式（`[ 1, 2, 3 ]`）と Rust `{:?}`（`[1.0, 2.0, 3.0]`）は不一致
 
 - **[I-66]** **数値 enum の `Display` / 数値アクセス未対応** — コード生成
     - `console.log(Status.Active)` で TS は `1` を出力するが Rust は `Display` 未実装
 
-#### クロージャ・関数
-
-- **[I-80]** **クロージャの可変キャプチャで `let mut` 未生成** — 変換正確性
-    - クロージャが外部変数を変更する場合、クロージャバインディングに `let mut` が必要
-    - 🔗 解消すると `closures.ts` の可変キャプチャ E2E 追加が可能
-
-- **[I-81]** **optional chaining 内の JS メソッド名が Rust メソッド名にマッピングされない** — 式変換正確性
-    - `s?.toUpperCase()` → `.to_uppercase()` にならない。`map_method_call` を通らない
-    - 🔗 解消すると `optional_chaining.ts` のメソッド呼び出し E2E 追加が可能
-
-- **[I-82]** **高階関数の呼び出しサイトで `Box::new()` ラッピング未生成** — 式変換正確性
-    - 引数が `Box<dyn Fn(T) -> U>` の場合、`Box::new(fn_name)` が必要
-    - 🔗 解消すると `functions.ts` の高階関数 E2E 追加が可能
+#### 関数・クラス
 
 - **[I-83]** **async fn main に `#[tokio::main]` 未生成** — コード生成
-    - `async fn main()` は Rust で直接使えない
     - 🔗 解消すると I-77（async/await E2E）が追加可能
 
-#### 文・制御構文
+- **[I-23]** **constructor パラメータプロパティ** — クラス変換（Hono 2件）
+    - `constructor(public x: number)` の TsParamProp 対応
 
-- **[I-87]** **関数内のローカル interface/type 宣言が未対応** — 文変換
-    - `function main() { interface Foo { ... } }` で `unsupported statement` エラー
-    - 対策: `convert_stmt_list` でトップレベルと同じ型宣言処理を呼ぶ
+#### 式・制御構文
 
-- **[I-60]** **switch の非リテラル case が変数バインディングになる** — 変換正確性
-    - `case A:` → マッチガード `x if x == A =>` が必要
-    - switch E2E テスト追加済みのため退行検出可能
-
-- **[I-10]** **条件内代入式の対応** — 式変換正確性
-    - `while (x = getValue())` → `loop { let x = getValue(); if !x { break; } ... }`
-
-- **[I-17]** **const のミュータビリティ解析改善** — 変換正確性
-    - body 内で変更される const を `let mut` にする
-
-- **[I-47]** **`in` 演算子の変換** — 式変換
-    - `"key" in obj` → `obj.contains_key("key")` or フィールド存在チェック
+- **[I-46]** **computed property (`obj[expr]`) の変換** — 式変換
+    - 🔗 解消すると E2E テストで配列インデックスアクセスが使用可能
     - 方針決定済み
 
+- **[I-10]** **条件内代入式の対応** — 式変換正確性
+
+- **[I-47]** **`in` 演算子の変換** — 式変換。方針決定済み
+
 - **[I-15]** **`+x`（単項プラス / 数値変換）** — 式変換
-    - 型に応じて `x` / `x.parse::<f64>()` 等に変換
 
 #### 型変換
 
 - **[I-28]** **conditional type の分岐型改善** — 型変換正確性
-    - 🔗 解消すると I-32（conditional-type スキップ解消）が可能
 
 - **[I-62]** **`is_string_type` の `Option<String>` ハック除去** — 型推論
 
-- **[I-69]** **型 narrowing（型ガード後の型絞り込み）** — 型推論
-    - I-38 + I-45 完了済み。着手可能
+- **[I-69]** **型 narrowing（型ガード後の型絞り込み）** — 型推論。着手可能
 
 - **[I-11]** **三項演算子の分岐型不一致** — 式変換正確性
 
@@ -137,19 +86,13 @@
 
 - **[I-13]** **super() の位置ベースフィールドマッピング** — 式変換正確性
 
-- **[I-23]** **constructor パラメータプロパティ** — クラス変換（Hono 2件）
-    - `constructor(public x: number)` の TsParamProp 対応
-
 - **[I-61]** **型推論: チェーンメソッド呼び出しの戻り値型追跡** — 型推論
-    - `arr.filter(...).map(...)` の各メソッド戻り値型追跡
 
 #### import/export・API
 
 - **[I-18]** **re-export の追跡** — import/export
 
 - **[I-19]** **`.substring`/`.slice` → Rust の文字列スライス** — builtin API
-
-- **[I-20]** **discriminated union の拡張パターン** — 型変換
 
 - **[I-21]** **async void のセマンティクス差異対応** — 変換正確性
 
@@ -160,8 +103,7 @@
 
 ### Tier 3: 低優先度
 
-- **[I-39]** **Transformer の Range 生成で `Expr::IntLit` を使用** — IR 整合性
-    - 動作上は問題なし。孤立した改善
+- **[I-39]** **Transformer の Range 生成で `Expr::IntLit` を使用** — IR 整合性。動作上問題なし
 - **[I-26]** **union 内の未対応型** — 型構文（Hono 2件）
 - **[I-27]** **タプルの optional 要素** — 型構文
 - **[I-29]** **ネスト async 関数** — 文（Hono 1件解消）
@@ -191,10 +133,10 @@
     - 未検証: 抽象クラス → trait、getter/setter、static メソッド
 - **[I-74]** **E2E テスト: 既存スクリプトのエッジケース（残課題）** — I-80/81/82/86 解消が前提
     - 未検証: closures 可変キャプチャ、optional chaining メソッド、高階関数、destructuring デフォルト値
-- **[I-78]** **E2E テスト: 型システム（残課題）** — 前提なし（変換機能は実装済み、E2E 試行が必要）
-    - 未検証: 文字列リテラル union → enum、discriminated union、intersection type
-- **[I-77]** **E2E テスト: async/await** — I-83（`#[tokio::main]` 生成）の解消が前提
-- **[I-49]** **E2E テスト基盤: 標準入力** — I-24（外部パッケージ型解決）の解消が前提
+- **[I-20]** **discriminated union の拡張パターン** — I-91（基本ランタイム操作）の完了が前提
+- **[I-32]** **コンパイルテストのスキップ解消（残り 1 件）** — I-35 の解消が前提。ディレクトリ compile-check でカバー済み
+- **[I-77]** **E2E テスト: async/await** — I-83 の解消が前提
+- **[I-49]** **E2E テスト基盤: 標準入力** — I-24 の解消が前提
 - **[I-50]** **E2E テスト基盤: ファイル I/O** — I-24 の解消が前提
 - **[I-51]** **E2E テスト基盤: HTTP リクエスト/レスポンス** — I-24 の解消が前提
 - ジェネリック型の具体化 — ジェネリクス変換（大テーマ）が前提

@@ -523,6 +523,7 @@ fn convert_interface_as_struct_and_trait(
         vis: vis.clone(),
         name: trait_name.clone(),
         methods: methods.clone(),
+        associated_types: vec![],
     };
 
     let impl_item = Item::Impl {
@@ -571,6 +572,7 @@ fn convert_interface_as_trait(
         vis,
         name: name.to_string(),
         methods,
+        associated_types: vec![],
     })
 }
 
@@ -636,19 +638,22 @@ pub fn convert_type_alias_items(
         let name = decl.id.sym.to_string();
         let type_params = extract_type_params(decl.type_params.as_deref());
 
-        match convert_conditional_type(cond, &mut Vec::new(), reg) {
+        let mut extra_items = Vec::new();
+        match convert_conditional_type(cond, &mut extra_items, reg) {
             Ok(ty) => {
                 // Remove type params not used in the resolved type
                 let used_params = type_params
                     .into_iter()
                     .filter(|p| ty.uses_param(p))
                     .collect();
-                return Ok(vec![Item::TypeAlias {
+                let mut items = extra_items;
+                items.push(Item::TypeAlias {
                     vis,
                     name,
                     type_params: used_params,
                     ty,
-                }]);
+                });
+                return Ok(items);
             }
             Err(_) => {
                 // Fallback: use the true branch type, or serde_json::Value if that also fails
@@ -859,7 +864,14 @@ fn convert_conditional_type(
     reg: &TypeRegistry,
 ) -> Result<RustType> {
     // Pattern: infer extraction — `T extends Foo<infer U> ? U : never`
-    if let Some(ty) = try_convert_infer_pattern(cond)? {
+    if let Some((ty, trait_name)) = try_convert_infer_pattern(cond)? {
+        // Generate a stub trait for the container (e.g., `pub trait Promise { type Output; }`)
+        extra_items.push(Item::Trait {
+            vis: Visibility::Public,
+            name: trait_name,
+            methods: vec![],
+            associated_types: vec!["Output".to_string()],
+        });
         return Ok(ty);
     }
 
@@ -888,8 +900,11 @@ fn is_true_false_literal(true_type: &TsType, false_type: &TsType) -> bool {
 /// Tries to detect the `infer` extraction pattern:
 /// `T extends Foo<infer U> ? U : never` → `<T as Foo>::Output`
 ///
-/// Returns `Some(RustType)` if the pattern matches, `None` otherwise.
-fn try_convert_infer_pattern(cond: &swc_ecma_ast::TsConditionalType) -> Result<Option<RustType>> {
+/// Returns `Some((RustType, trait_name))` if the pattern matches, `None` otherwise.
+/// The `trait_name` is used to generate a stub trait definition if needed.
+fn try_convert_infer_pattern(
+    cond: &swc_ecma_ast::TsConditionalType,
+) -> Result<Option<(RustType, String)>> {
     // false_type must be `never`
     if !matches!(
         cond.false_type.as_ref(),
@@ -914,10 +929,13 @@ fn try_convert_infer_pattern(cond: &swc_ecma_ast::TsConditionalType) -> Result<O
     };
 
     // Generate `<T as Foo>::Output`
-    Ok(Some(RustType::Named {
-        name: format!("<{check_name} as {container_name}>::Output"),
-        type_args: vec![],
-    }))
+    Ok(Some((
+        RustType::Named {
+            name: format!("<{check_name} as {container_name}>::Output"),
+            type_args: vec![],
+        },
+        container_name,
+    )))
 }
 
 /// Extracts container name and infer parameter name from a type like `Foo<infer U>`.

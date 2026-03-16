@@ -8,6 +8,10 @@ pub type ToNumber = f64;
 
 pub type IsArray = bool;
 
+pub trait Promise {
+    type Output;
+}
+
 pub type Unwrap<T> = <T as Promise>::Output;
 
 pub type Nested = f64;

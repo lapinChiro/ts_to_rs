@@ -394,6 +394,11 @@ fn test_e2e_nested_logic_ts_rust_stdout_match() {
 }
 
 #[test]
+fn test_e2e_intersection_type_ts_rust_stdout_match() {
+    run_e2e_test("intersection_type");
+}
+
+#[test]
 fn test_e2e_console_error_ts_rust_stdout_and_stderr_match() {
     run_e2e_test_with_stderr("console_error");
 }

@@ -211,6 +211,7 @@ pub fn generate_parent_class_items(info: &ClassInfo) -> Result<Vec<Item>> {
         vis: info.vis.clone(),
         name: trait_name.clone(),
         methods: trait_methods,
+        associated_types: vec![],
     });
 
     // impl (constructor + static consts)
@@ -254,6 +255,7 @@ pub fn generate_abstract_class_items(info: &ClassInfo) -> Result<Vec<Item>> {
         vis: info.vis.clone(),
         name: info.name.clone(),
         methods,
+        associated_types: vec![],
     }])
 }
 

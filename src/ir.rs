@@ -219,6 +219,8 @@ pub enum Item {
         name: String,
         /// Method signatures (body is empty — signatures only)
         methods: Vec<Method>,
+        /// Associated type declarations (e.g., `type Output;`)
+        associated_types: Vec<String>,
     },
     /// An `impl` block for a struct, optionally implementing a trait.
     Impl {

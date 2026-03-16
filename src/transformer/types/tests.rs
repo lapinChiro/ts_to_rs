@@ -238,7 +238,9 @@ fn test_convert_interface_method_only_generates_trait() {
     let item = convert_interface(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
 
     match item {
-        Item::Trait { vis, name, methods } => {
+        Item::Trait {
+            vis, name, methods, ..
+        } => {
             assert_eq!(vis, Visibility::Public);
             assert_eq!(name, "Greeter");
             assert_eq!(methods.len(), 1);
@@ -1024,9 +1026,19 @@ fn test_convert_type_alias_conditional_predicate_returns_bool() {
 fn test_convert_type_alias_conditional_infer_returns_associated_type() {
     let decl = parse_type_alias("type Unwrap<T> = T extends Promise<infer U> ? U : never;");
     let items = convert_type_alias_items(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
-    assert_eq!(items.len(), 1);
+    // First item: Promise trait stub, second: the type alias
+    assert_eq!(items.len(), 2);
     assert_eq!(
         items[0],
+        Item::Trait {
+            vis: Visibility::Public,
+            name: "Promise".to_string(),
+            methods: vec![],
+            associated_types: vec!["Output".to_string()],
+        }
+    );
+    assert_eq!(
+        items[1],
         Item::TypeAlias {
             vis: Visibility::Public,
             name: "Unwrap".to_string(),
