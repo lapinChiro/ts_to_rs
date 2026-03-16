@@ -25,6 +25,14 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Install E2E dependencies
+        run: npm install
+        working-directory: tests/e2e
+
       - name: Format check
         run: cargo fmt --all --check
 
