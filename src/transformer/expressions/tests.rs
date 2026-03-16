@@ -1465,21 +1465,25 @@ fn test_convert_expr_string_replace() {
 fn test_convert_expr_array_map_to_iter_map_collect() {
     let expr = parse_expr("arr.map((x: number) => x + 1);");
     let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
-    // arr.map((x: number) => x + 1) → arr.iter().map(|x| x + 1).collect()
+    // arr.map((x: number) => x + 1) → arr.iter().cloned().map(|x| x + 1).collect()
     assert_eq!(
         result,
         Expr::MethodCall {
             object: Box::new(Expr::MethodCall {
                 object: Box::new(Expr::MethodCall {
-                    object: Box::new(Expr::Ident("arr".to_string())),
-                    method: "iter".to_string(),
+                    object: Box::new(Expr::MethodCall {
+                        object: Box::new(Expr::Ident("arr".to_string())),
+                        method: "iter".to_string(),
+                        args: vec![],
+                    }),
+                    method: "cloned".to_string(),
                     args: vec![],
                 }),
                 method: "map".to_string(),
                 args: vec![Expr::Closure {
                     params: vec![Param {
                         name: "x".to_string(),
-                        ty: Some(RustType::F64),
+                        ty: None,
                     }],
                     return_type: None,
                     body: ClosureBody::Expr(Box::new(Expr::BinaryOp {
@@ -1499,21 +1503,25 @@ fn test_convert_expr_array_map_to_iter_map_collect() {
 fn test_convert_expr_array_filter_to_iter_filter_collect() {
     let expr = parse_expr("arr.filter((x: number) => x > 0);");
     let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
-    // arr.filter((x: number) => x > 0) → arr.iter().filter(|x| x > 0).collect()
+    // arr.filter((x: number) => x > 0) → arr.iter().cloned().filter(|x| x > 0).collect()
     assert_eq!(
         result,
         Expr::MethodCall {
             object: Box::new(Expr::MethodCall {
                 object: Box::new(Expr::MethodCall {
-                    object: Box::new(Expr::Ident("arr".to_string())),
-                    method: "iter".to_string(),
+                    object: Box::new(Expr::MethodCall {
+                        object: Box::new(Expr::Ident("arr".to_string())),
+                        method: "iter".to_string(),
+                        args: vec![],
+                    }),
+                    method: "cloned".to_string(),
                     args: vec![],
                 }),
                 method: "filter".to_string(),
                 args: vec![Expr::Closure {
                     params: vec![Param {
                         name: "x".to_string(),
-                        ty: Some(RustType::F64),
+                        ty: None,
                     }],
                     return_type: None,
                     body: ClosureBody::Expr(Box::new(Expr::BinaryOp {
@@ -1533,20 +1541,24 @@ fn test_convert_expr_array_filter_to_iter_filter_collect() {
 fn test_convert_expr_array_find_to_iter_find() {
     let expr = parse_expr("arr.find((x: number) => x > 0);");
     let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
-    // arr.find((x: number) => x > 0) → arr.iter().find(|x| x > 0)
+    // arr.find((x: number) => x > 0) → arr.iter().cloned().find(|x| x > 0)
     assert_eq!(
         result,
         Expr::MethodCall {
             object: Box::new(Expr::MethodCall {
-                object: Box::new(Expr::Ident("arr".to_string())),
-                method: "iter".to_string(),
+                object: Box::new(Expr::MethodCall {
+                    object: Box::new(Expr::Ident("arr".to_string())),
+                    method: "iter".to_string(),
+                    args: vec![],
+                }),
+                method: "cloned".to_string(),
                 args: vec![],
             }),
             method: "find".to_string(),
             args: vec![Expr::Closure {
                 params: vec![Param {
                     name: "x".to_string(),
-                    ty: Some(RustType::F64),
+                    ty: None,
                 }],
                 return_type: None,
                 body: ClosureBody::Expr(Box::new(Expr::BinaryOp {
@@ -1563,20 +1575,24 @@ fn test_convert_expr_array_find_to_iter_find() {
 fn test_convert_expr_array_some_to_iter_any() {
     let expr = parse_expr("arr.some((x: number) => x > 0);");
     let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
-    // arr.some((x: number) => x > 0) → arr.iter().any(|x| x > 0)
+    // arr.some((x: number) => x > 0) → arr.iter().cloned().any(|x| x > 0)
     assert_eq!(
         result,
         Expr::MethodCall {
             object: Box::new(Expr::MethodCall {
-                object: Box::new(Expr::Ident("arr".to_string())),
-                method: "iter".to_string(),
+                object: Box::new(Expr::MethodCall {
+                    object: Box::new(Expr::Ident("arr".to_string())),
+                    method: "iter".to_string(),
+                    args: vec![],
+                }),
+                method: "cloned".to_string(),
                 args: vec![],
             }),
             method: "any".to_string(),
             args: vec![Expr::Closure {
                 params: vec![Param {
                     name: "x".to_string(),
-                    ty: Some(RustType::F64),
+                    ty: None,
                 }],
                 return_type: None,
                 body: ClosureBody::Expr(Box::new(Expr::BinaryOp {
@@ -1593,20 +1609,24 @@ fn test_convert_expr_array_some_to_iter_any() {
 fn test_convert_expr_array_every_to_iter_all() {
     let expr = parse_expr("arr.every((x: number) => x > 0);");
     let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
-    // arr.every((x: number) => x > 0) → arr.iter().all(|x| x > 0)
+    // arr.every((x: number) => x > 0) → arr.iter().cloned().all(|x| x > 0)
     assert_eq!(
         result,
         Expr::MethodCall {
             object: Box::new(Expr::MethodCall {
-                object: Box::new(Expr::Ident("arr".to_string())),
-                method: "iter".to_string(),
+                object: Box::new(Expr::MethodCall {
+                    object: Box::new(Expr::Ident("arr".to_string())),
+                    method: "iter".to_string(),
+                    args: vec![],
+                }),
+                method: "cloned".to_string(),
                 args: vec![],
             }),
             method: "all".to_string(),
             args: vec![Expr::Closure {
                 params: vec![Param {
                     name: "x".to_string(),
-                    ty: Some(RustType::F64),
+                    ty: None,
                 }],
                 return_type: None,
                 body: ClosureBody::Expr(Box::new(Expr::BinaryOp {
@@ -1626,20 +1646,24 @@ fn test_convert_expr_array_foreach_to_for_loop() {
     let expr = parse_expr("arr.forEach((x: number) => console.log(x));");
     let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
     // forEach は map_method_call で ForEach 用の IR に変換される
-    // 初版: arr.iter().for_each(|x| ...) に変換
+    // 初版: arr.iter().cloned().for_each(|x| ...) に変換
     assert_eq!(
         result,
         Expr::MethodCall {
             object: Box::new(Expr::MethodCall {
-                object: Box::new(Expr::Ident("arr".to_string())),
-                method: "iter".to_string(),
+                object: Box::new(Expr::MethodCall {
+                    object: Box::new(Expr::Ident("arr".to_string())),
+                    method: "iter".to_string(),
+                    args: vec![],
+                }),
+                method: "cloned".to_string(),
                 args: vec![],
             }),
             method: "for_each".to_string(),
             args: vec![Expr::Closure {
                 params: vec![Param {
                     name: "x".to_string(),
-                    ty: Some(RustType::F64),
+                    ty: None,
                 }],
                 return_type: None,
                 body: ClosureBody::Expr(Box::new(Expr::MacroCall {

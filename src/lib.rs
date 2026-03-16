@@ -48,6 +48,7 @@ pub fn build_shared_registry(sources: &[&str]) -> TypeRegistry {
 ///
 /// Returns an error if parsing or transformation fails.
 pub fn transpile(ts_source: &str) -> Result<String> {
+    transformer::types::reset_synthetic_counter();
     let module = parser::parse_typescript(ts_source)?;
     let reg = build_registry(&module);
     let items = transformer::transform_module(&module, &reg)?;
@@ -62,6 +63,7 @@ pub fn transpile(ts_source: &str) -> Result<String> {
 ///
 /// Returns an error if parsing or transformation fails.
 pub fn transpile_with_registry(ts_source: &str, registry: &TypeRegistry) -> Result<String> {
+    transformer::types::reset_synthetic_counter();
     let module = parser::parse_typescript(ts_source)?;
     let mut reg = build_registry(&module);
     reg.merge(registry);
@@ -89,6 +91,7 @@ pub fn transpile_collecting_with_registry(
     ts_source: &str,
     registry: &TypeRegistry,
 ) -> Result<(String, Vec<UnsupportedSyntax>)> {
+    transformer::types::reset_synthetic_counter();
     let module = parser::parse_typescript(ts_source)?;
     let mut reg = build_registry(&module);
     reg.merge(registry);

@@ -31,24 +31,24 @@ fn strip_internal_use_statements(rs_source: &str) -> String {
         .join("\n")
 }
 
-/// Runs an E2E test for the given script name.
-///
-/// 1. Reads the TS script from `tests/e2e/scripts/{name}.ts`
-/// 2. Transpiles TS → Rust
-/// 3. Writes Rust to `tests/e2e/rust-runner/src/main.rs` and runs `cargo run`
-/// 4. Runs TS via locally-installed `tsx`
-/// 5. Compares stdout line-by-line
-fn run_e2e_test(name: &str) {
-    let _guard = E2E_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+/// Result of running a single E2E script on both TS and Rust sides.
+struct E2eResult {
+    rs_source: String,
+    rust_stdout: String,
+    rust_stderr: String,
+    ts_stdout: String,
+    ts_stderr: String,
+}
+
+/// Transpiles and executes a single TS script, returning both TS and Rust outputs.
+fn execute_e2e(name: &str) -> E2eResult {
     let script_path = format!("{SCRIPTS_DIR}/{name}.ts");
     let ts_source = fs::read_to_string(&script_path)
         .unwrap_or_else(|e| panic!("failed to read {script_path}: {e}"));
 
-    // Step 1: Transpile TS → Rust directly. Scripts must define `function main()`.
-    // In Rust, `fn main()` becomes the entry point automatically.
+    // Step 1: Transpile TS → Rust
     let rs_source =
         transpile(&ts_source).unwrap_or_else(|e| panic!("transpile failed for '{name}': {e}"));
-
     let rs_source = strip_internal_use_statements(&rs_source);
 
     // Step 2: Write Rust source and run
@@ -69,9 +69,7 @@ fn run_e2e_test(name: &str) {
         rs_source
     );
 
-    let rust_stdout = String::from_utf8_lossy(&rust_output.stdout);
-
-    // Step 3: Run TS via locally-installed tsx (append main() call for execution)
+    // Step 3: Run TS via locally-installed tsx
     let ts_exec_path = format!("{SCRIPTS_DIR}/{name}_exec.ts");
     let ts_exec_source = format!("{ts_source}\nmain();\n");
     fs::write(&ts_exec_path, &ts_exec_source)
@@ -82,7 +80,6 @@ fn run_e2e_test(name: &str) {
         .output()
         .expect("failed to execute tsx — run `npm install` in tests/e2e/");
 
-    // Clean up temp file
     let _ = fs::remove_file(&ts_exec_path);
 
     assert!(
@@ -91,11 +88,25 @@ fn run_e2e_test(name: &str) {
         String::from_utf8_lossy(&ts_output.stderr)
     );
 
-    let ts_stdout = String::from_utf8_lossy(&ts_output.stdout);
+    E2eResult {
+        rs_source,
+        rust_stdout: String::from_utf8_lossy(&rust_output.stdout).into_owned(),
+        rust_stderr: String::from_utf8_lossy(&rust_output.stderr).into_owned(),
+        ts_stdout: String::from_utf8_lossy(&ts_output.stdout).into_owned(),
+        ts_stderr: String::from_utf8_lossy(&ts_output.stderr).into_owned(),
+    }
+}
 
-    // Step 4: Compare stdout line-by-line
-    let rust_lines: Vec<&str> = rust_stdout.lines().collect();
-    let ts_lines: Vec<&str> = ts_stdout.lines().collect();
+/// Compares two outputs line-by-line, panicking with a diff on mismatch.
+fn assert_lines_match(
+    name: &str,
+    stream: &str,
+    ts_output: &str,
+    rust_output: &str,
+    rs_source: &str,
+) {
+    let rust_lines: Vec<&str> = rust_output.lines().collect();
+    let ts_lines: Vec<&str> = ts_output.lines().collect();
 
     if rust_lines != ts_lines {
         let mut diff = String::new();
@@ -113,9 +124,143 @@ fn run_e2e_test(name: &str) {
             }
         }
         panic!(
-            "stdout mismatch for '{name}':\n{diff}\nTS output:\n{ts_stdout}\nRust output:\n{rust_stdout}\nGenerated Rust:\n{rs_source}"
+            "{stream} mismatch for '{name}':\n{diff}\nTS {stream}:\n{ts_output}\nRust {stream}:\n{rust_output}\nGenerated Rust:\n{rs_source}"
         );
     }
+}
+
+/// Runs an E2E test comparing stdout only (existing behavior).
+fn run_e2e_test(name: &str) {
+    let _guard = E2E_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let result = execute_e2e(name);
+    assert_lines_match(
+        name,
+        "stdout",
+        &result.ts_stdout,
+        &result.rust_stdout,
+        &result.rs_source,
+    );
+}
+
+/// Runs a multi-file E2E test.
+///
+/// Transpiles all `.ts` files in `tests/e2e/scripts/multi/{name}/`,
+/// writes them to `tests/e2e/rust-runner/src/`, and compares stdout.
+/// `main.ts` → `src/main.rs`, other files → `src/<name>.rs` with `mod` declarations.
+fn run_e2e_multi_file_test(name: &str) {
+    let _guard = E2E_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = format!("{SCRIPTS_DIR}/multi/{name}");
+
+    // Collect all .ts files
+    let mut entries: Vec<_> = fs::read_dir(&dir)
+        .unwrap_or_else(|e| panic!("failed to read dir {dir}: {e}"))
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "ts"))
+        .collect();
+    entries.sort_by_key(|e| e.file_name());
+
+    let mut mod_names: Vec<String> = Vec::new();
+    let mut main_rs = String::new();
+
+    for entry in &entries {
+        let file_name = entry.file_name();
+        let stem = entry
+            .path()
+            .file_stem()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let ts_source = fs::read_to_string(entry.path())
+            .unwrap_or_else(|e| panic!("failed to read {}: {e}", file_name.to_string_lossy()));
+
+        let rs_source = transpile(&ts_source).unwrap_or_else(|e| {
+            panic!(
+                "transpile failed for '{}': {e}",
+                file_name.to_string_lossy()
+            )
+        });
+        // Multi-file tests need internal use statements for cross-module references
+        // (unlike single-file tests where they are noise)
+
+        if stem == "main" {
+            main_rs = rs_source;
+        } else {
+            let mod_path = format!("{RUST_RUNNER_DIR}/src/{stem}.rs");
+            fs::write(&mod_path, &rs_source)
+                .unwrap_or_else(|e| panic!("failed to write {mod_path}: {e}"));
+            mod_names.push(stem);
+        }
+    }
+
+    // Prepend mod declarations to main.rs
+    let mod_decls: String = mod_names.iter().map(|m| format!("mod {m};\n")).collect();
+    let full_main = format!("{mod_decls}{main_rs}");
+
+    let main_path = format!("{RUST_RUNNER_DIR}/src/main.rs");
+    fs::write(&main_path, &full_main)
+        .unwrap_or_else(|e| panic!("failed to write {main_path}: {e}"));
+
+    // Run Rust
+    let rust_output = Command::new("cargo")
+        .args(["run", "--quiet"])
+        .current_dir(RUST_RUNNER_DIR)
+        .output()
+        .expect("failed to execute cargo run");
+
+    // Clean up module files
+    for m in &mod_names {
+        let _ = fs::remove_file(format!("{RUST_RUNNER_DIR}/src/{m}.rs"));
+    }
+
+    assert!(
+        rust_output.status.success(),
+        "cargo run failed for multi-file '{name}':\nstderr: {}\ngenerated main.rs:\n{}",
+        String::from_utf8_lossy(&rust_output.stderr),
+        full_main
+    );
+
+    let rust_stdout = String::from_utf8_lossy(&rust_output.stdout);
+
+    // Run TS (tsx resolves relative imports automatically)
+    let ts_exec_path = format!("{dir}/main_exec.ts");
+    let main_ts = fs::read_to_string(format!("{dir}/main.ts")).unwrap();
+    fs::write(&ts_exec_path, format!("{main_ts}\nmain();\n")).unwrap();
+
+    let ts_output = Command::new(TSX_BIN)
+        .arg(&ts_exec_path)
+        .output()
+        .expect("failed to execute tsx");
+
+    let _ = fs::remove_file(&ts_exec_path);
+
+    assert!(
+        ts_output.status.success(),
+        "tsx failed for multi-file '{name}':\n{}",
+        String::from_utf8_lossy(&ts_output.stderr)
+    );
+
+    let ts_stdout = String::from_utf8_lossy(&ts_output.stdout);
+    assert_lines_match(name, "stdout", &ts_stdout, &rust_stdout, &full_main);
+}
+
+/// Runs an E2E test comparing both stdout and stderr.
+fn run_e2e_test_with_stderr(name: &str) {
+    let _guard = E2E_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let result = execute_e2e(name);
+    assert_lines_match(
+        name,
+        "stdout",
+        &result.ts_stdout,
+        &result.rust_stdout,
+        &result.rs_source,
+    );
+    assert_lines_match(
+        name,
+        "stderr",
+        &result.ts_stderr,
+        &result.rust_stderr,
+        &result.rs_source,
+    );
 }
 
 #[test]
@@ -216,4 +361,44 @@ fn test_e2e_generics_ts_rust_stdout_match() {
 #[test]
 fn test_e2e_template_literals_ts_rust_stdout_match() {
     run_e2e_test("template_literals");
+}
+
+#[test]
+fn test_e2e_array_methods_ts_rust_stdout_match() {
+    run_e2e_test("array_methods");
+}
+
+#[test]
+fn test_e2e_object_ops_ts_rust_stdout_match() {
+    run_e2e_test("object_ops");
+}
+
+#[test]
+fn test_e2e_advanced_classes_ts_rust_stdout_match() {
+    run_e2e_test("advanced_classes");
+}
+
+#[test]
+fn test_e2e_number_api_ts_rust_stdout_match() {
+    run_e2e_test("number_api");
+}
+
+#[test]
+fn test_e2e_type_system_ts_rust_stdout_match() {
+    run_e2e_test("type_system");
+}
+
+#[test]
+fn test_e2e_nested_logic_ts_rust_stdout_match() {
+    run_e2e_test("nested_logic");
+}
+
+#[test]
+fn test_e2e_console_error_ts_rust_stdout_and_stderr_match() {
+    run_e2e_test_with_stderr("console_error");
+}
+
+#[test]
+fn test_e2e_multi_import_basic_ts_rust_stdout_match() {
+    run_e2e_multi_file_test("import_basic");
 }

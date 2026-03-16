@@ -12,4 +12,10 @@ function main(): void {
     console.log("abs:", Math.abs(-5));
     console.log("max:", Math.max(1, 5, 3));
     console.log("min:", Math.min(1, 5, 3));
+
+    // 追加 Math 関数
+    console.log("sqrt:", Math.sqrt(16));
+    console.log("pow:", Math.pow(2, 10));
+    console.log("round:", Math.round(3.5));
+    console.log("PI:", Math.PI);
 }

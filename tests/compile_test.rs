@@ -67,8 +67,6 @@ fn test_all_fixtures_compile() {
         // Conditional types produce type aliases with unused type params and references to
         // traits (e.g., `<T as Promise>::Output`) not defined in the generated code.
         "conditional-type",
-        // Mixed interfaces generate trait impl with empty method bodies that don't type-check.
-        "interface-mixed",
         // Type reference union variants reference types that lack required derives (Debug, Clone,
         // PartialEq) and have unused type parameters when compiled in isolation.
         "union-type",

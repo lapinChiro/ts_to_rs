@@ -114,12 +114,13 @@ fn generate_item(item: &Item) -> String {
                     constant.name
                 ));
             }
+            let in_trait_impl = for_trait.is_some();
             for method in methods {
                 if !first {
                     out.push('\n');
                 }
                 first = false;
-                out.push_str(&generate_method(method));
+                out.push_str(&generate_method(method, in_trait_impl));
             }
             out.push('}');
             out
@@ -209,8 +210,17 @@ fn generate_trait_method_sig(method: &Method) -> String {
 }
 
 /// Generates a method inside an `impl` block.
-fn generate_method(method: &Method) -> String {
-    let vis_str = generate_vis(&method.vis);
+///
+/// When `in_trait_impl` is true, visibility qualifiers are suppressed because
+/// Rust does not allow them on trait implementation methods.
+/// Empty method bodies with non-unit return types get `todo!()` as a placeholder.
+fn generate_method(method: &Method, in_trait_impl: bool) -> String {
+    // Trait impl methods must not have visibility qualifiers
+    let vis_str = if in_trait_impl {
+        String::new()
+    } else {
+        generate_vis(&method.vis).to_string()
+    };
     let self_param = self_param_str(method);
     let other_params = method
         .params
@@ -232,9 +242,14 @@ fn generate_method(method: &Method) -> String {
     let name = &method.name;
     let mut out = format!("    {vis_str}fn {name}({params_str}){ret_str} {{\n");
     let body = method.body.as_deref().unwrap_or(&[]);
-    for stmt in body {
-        out.push_str(&generate_stmt(stmt, 2));
-        out.push('\n');
+    if body.is_empty() && method.return_type.is_some() {
+        // Non-unit return type with empty body: insert todo!() to avoid type mismatch
+        out.push_str("        todo!()\n");
+    } else {
+        for stmt in body {
+            out.push_str(&generate_stmt(stmt, 2));
+            out.push('\n');
+        }
     }
     out.push_str("    }\n");
     out

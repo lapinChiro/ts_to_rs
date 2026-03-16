@@ -14,9 +14,10 @@ pub trait ServiceTrait {
 }
 
 impl ServiceTrait for Service {
-    pub fn start(&self) {
+    fn start(&self) {
     }
 
-    pub fn stop(&self) -> bool {
+    fn stop(&self) -> bool {
+        todo!()
     }
 }

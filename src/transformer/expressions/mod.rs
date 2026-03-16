@@ -772,13 +772,23 @@ fn map_method_call(object: Expr, method: &str, args: Vec<Expr>) -> Expr {
             method: "collect::<Vec<&str>>".to_string(),
             args: vec![],
         },
-        // Iterator methods that collect: .map(fn) / .filter(fn) → .iter().method(fn).collect()
+        // Iterator methods that collect: .map(fn) / .filter(fn) → .iter().cloned().method(fn).collect()
+        // .cloned() converts &T → T, giving closures value semantics matching TypeScript behavior.
+        // TODO: clone 削減 — Copy 型には .copied()、不要な clone は所有権解析で除去
         "map" | "filter" => {
             let iter_call = Expr::MethodCall {
-                object: Box::new(object),
-                method: "iter".to_string(),
+                object: Box::new(Expr::MethodCall {
+                    object: Box::new(object),
+                    method: "iter".to_string(),
+                    args: vec![],
+                }),
+                method: "cloned".to_string(),
                 args: vec![],
             };
+            let args = args
+                .into_iter()
+                .map(strip_closure_type_annotations)
+                .collect();
             let method_call = Expr::MethodCall {
                 object: Box::new(iter_call),
                 method: method.to_string(),
@@ -793,10 +803,18 @@ fn map_method_call(object: Expr, method: &str, args: Vec<Expr>) -> Expr {
         // Iterator methods without collect: .find(fn), .some(fn), .every(fn)
         "find" => {
             let iter_call = Expr::MethodCall {
-                object: Box::new(object),
-                method: "iter".to_string(),
+                object: Box::new(Expr::MethodCall {
+                    object: Box::new(object),
+                    method: "iter".to_string(),
+                    args: vec![],
+                }),
+                method: "cloned".to_string(),
                 args: vec![],
             };
+            let args = args
+                .into_iter()
+                .map(strip_closure_type_annotations)
+                .collect();
             Expr::MethodCall {
                 object: Box::new(iter_call),
                 method: "find".to_string(),
@@ -805,10 +823,18 @@ fn map_method_call(object: Expr, method: &str, args: Vec<Expr>) -> Expr {
         }
         "some" => {
             let iter_call = Expr::MethodCall {
-                object: Box::new(object),
-                method: "iter".to_string(),
+                object: Box::new(Expr::MethodCall {
+                    object: Box::new(object),
+                    method: "iter".to_string(),
+                    args: vec![],
+                }),
+                method: "cloned".to_string(),
                 args: vec![],
             };
+            let args = args
+                .into_iter()
+                .map(strip_closure_type_annotations)
+                .collect();
             Expr::MethodCall {
                 object: Box::new(iter_call),
                 method: "any".to_string(),
@@ -817,10 +843,18 @@ fn map_method_call(object: Expr, method: &str, args: Vec<Expr>) -> Expr {
         }
         "every" => {
             let iter_call = Expr::MethodCall {
-                object: Box::new(object),
-                method: "iter".to_string(),
+                object: Box::new(Expr::MethodCall {
+                    object: Box::new(object),
+                    method: "iter".to_string(),
+                    args: vec![],
+                }),
+                method: "cloned".to_string(),
                 args: vec![],
             };
+            let args = args
+                .into_iter()
+                .map(strip_closure_type_annotations)
+                .collect();
             Expr::MethodCall {
                 object: Box::new(iter_call),
                 method: "all".to_string(),
@@ -1012,13 +1046,21 @@ fn map_method_call(object: Expr, method: &str, args: Vec<Expr>) -> Expr {
                 args: vec![init, callback],
             }
         }
-        // forEach → .iter().for_each(fn)
+        // forEach → .iter().cloned().for_each(fn)
         "forEach" => {
             let iter_call = Expr::MethodCall {
-                object: Box::new(object),
-                method: "iter".to_string(),
+                object: Box::new(Expr::MethodCall {
+                    object: Box::new(object),
+                    method: "iter".to_string(),
+                    args: vec![],
+                }),
+                method: "cloned".to_string(),
                 args: vec![],
             };
+            let args = args
+                .into_iter()
+                .map(strip_closure_type_annotations)
+                .collect();
             Expr::MethodCall {
                 object: Box::new(iter_call),
                 method: "for_each".to_string(),
@@ -1057,7 +1099,7 @@ fn map_method_call(object: Expr, method: &str, args: Vec<Expr>) -> Expr {
     }
 }
 
-/// Strips type annotations from closure parameters.
+/// Strips type annotations from closure parameters and return type.
 ///
 /// Used for iterator method closures (`fold`, `sort_by`, etc.) where Rust's type
 /// inference handles `&T` references correctly without explicit annotations.
@@ -1065,7 +1107,7 @@ fn strip_closure_type_annotations(expr: Expr) -> Expr {
     match expr {
         Expr::Closure {
             params,
-            return_type,
+            return_type: _,
             body,
         } => Expr::Closure {
             params: params
@@ -1075,7 +1117,7 @@ fn strip_closure_type_annotations(expr: Expr) -> Expr {
                     ty: None,
                 })
                 .collect(),
-            return_type,
+            return_type: None,
             body,
         },
         other => other,

@@ -17,6 +17,14 @@ use crate::registry::{TypeDef, TypeRegistry};
 /// Counter for generating unique synthetic struct names.
 static SYNTHETIC_COUNTER: AtomicU32 = AtomicU32::new(0);
 
+/// Resets the synthetic name counter to zero.
+///
+/// Called at the start of each `transpile` invocation to ensure deterministic naming
+/// across test runs. Without reset, test execution order affects generated names.
+pub(crate) fn reset_synthetic_counter() {
+    SYNTHETIC_COUNTER.store(0, Ordering::Relaxed);
+}
+
 /// Generates a unique synthetic struct name with the given prefix (e.g., `_TypeLit0`, `_Intersection1`).
 fn generate_synthetic_name(prefix: &str) -> String {
     let id = SYNTHETIC_COUNTER.fetch_add(1, Ordering::Relaxed);

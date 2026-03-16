@@ -9,4 +9,10 @@ function main(): void {
     const isPositive = (n: number): boolean => n > 0;
     console.log("positive 5:", isPositive(5));
     console.log("positive -1:", isPositive(-1));
+
+    // Closure capturing outer variable (read-only)
+    const offset: number = 100;
+    const addOffset = (x: number): number => x + offset;
+    console.log("offset 5:", addOffset(5));
+    console.log("offset 20:", addOffset(20));
 }
