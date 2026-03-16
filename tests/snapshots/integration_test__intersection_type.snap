@@ -2,17 +2,20 @@
 source: tests/integration_test.rs
 expression: output
 ---
+#[derive(Debug, Clone, PartialEq)]
 struct Combined {
     name: String,
     age: f64,
 }
 
+#[derive(Debug, Clone, PartialEq)]
 struct Triple {
     a: String,
     b: f64,
     c: bool,
 }
 
+#[derive(Debug, Clone, PartialEq)]
 struct WithOptional {
     name: String,
     nick: Option<String>,

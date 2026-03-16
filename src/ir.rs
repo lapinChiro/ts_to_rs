@@ -47,6 +47,29 @@ pub enum RustType {
     },
 }
 
+impl RustType {
+    /// Returns true if this type references the given type parameter name.
+    pub fn uses_param(&self, param: &str) -> bool {
+        match self {
+            RustType::Named { name, type_args } => {
+                name == param
+                    // Handle qualified paths like `<T as Promise>::Output`
+                    || name.contains(&format!("<{param} "))
+                    || name.contains(&format!("<{param}>"))
+                    || type_args.iter().any(|a| a.uses_param(param))
+            }
+            RustType::Option(inner) | RustType::Vec(inner) => inner.uses_param(param),
+            RustType::Result { ok, err } => ok.uses_param(param) || err.uses_param(param),
+            RustType::Tuple(elems) => elems.iter().any(|e| e.uses_param(param)),
+            RustType::Fn {
+                params,
+                return_type,
+            } => params.iter().any(|p| p.uses_param(param)) || return_type.uses_param(param),
+            _ => false,
+        }
+    }
+}
+
 /// Visibility modifier for items.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Visibility {

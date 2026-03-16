@@ -638,10 +638,15 @@ pub fn convert_type_alias_items(
 
         match convert_conditional_type(cond, &mut Vec::new(), reg) {
             Ok(ty) => {
+                // Remove type params not used in the resolved type
+                let used_params = type_params
+                    .into_iter()
+                    .filter(|p| ty.uses_param(p))
+                    .collect();
                 return Ok(vec![Item::TypeAlias {
                     vis,
                     name,
-                    type_params,
+                    type_params: used_params,
                     ty,
                 }]);
             }
@@ -649,6 +654,10 @@ pub fn convert_type_alias_items(
                 // Fallback: use the true branch type, or serde_json::Value if that also fails
                 let fallback_ty =
                     convert_ts_type(&cond.true_type, &mut Vec::new(), reg).unwrap_or(RustType::Any);
+                let used_params = type_params
+                    .into_iter()
+                    .filter(|p| fallback_ty.uses_param(p))
+                    .collect();
                 let comment =
                     format!("TODO: Conditional type not auto-converted\nOriginal TS: type {name}",);
                 return Ok(vec![
@@ -656,7 +665,7 @@ pub fn convert_type_alias_items(
                     Item::TypeAlias {
                         vis,
                         name,
-                        type_params,
+                        type_params: used_params,
                         ty: fallback_ty,
                     },
                 ]);

@@ -2,6 +2,7 @@
 source: tests/integration_test.rs
 expression: output
 ---
+#[derive(Debug, Clone, PartialEq)]
 struct Animal {
     name: String,
 }
@@ -22,6 +23,7 @@ impl AnimalTrait for Animal {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
 struct Dog {
     name: String,
 }

@@ -64,12 +64,9 @@ fn test_all_fixtures_compile() {
     // Fixtures that cannot compile in isolation due to reasons OTHER than missing crates:
     let skip_compile = [
         "indexed-access-type",
-        // Conditional types produce type aliases with unused type params and references to
-        // traits (e.g., `<T as Promise>::Output`) not defined in the generated code.
+        // Conditional type `Unwrap<T> = <T as Promise>::Output` references undefined trait `Promise`.
+        // Resolving this requires type resolution for external/undefined traits.
         "conditional-type",
-        // Type reference union variants reference types that lack required derives (Debug, Clone,
-        // PartialEq) and have unused type parameters when compiled in isolation.
-        "union-type",
     ];
 
     let mut entries: Vec<_> = fs::read_dir(fixture_dir)

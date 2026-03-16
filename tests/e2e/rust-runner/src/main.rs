@@ -1,9 +1,11 @@
+#[derive(Debug, Clone, PartialEq)]
 struct Dog {
     kind: String,
     name: String,
     breed: String,
 }
 
+#[derive(Debug, Clone, PartialEq)]
 struct Cat {
     kind: String,
     name: String,

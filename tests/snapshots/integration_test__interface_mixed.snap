@@ -4,6 +4,7 @@ expression: output
 ---
 pub type Handler = Box<dyn Fn(String) -> f64>;
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct Service {
     pub name: String,
 }

@@ -6,11 +6,13 @@ use crate::geometry::Point;
 
 use crate::utils::config::{Config, Logger};
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct User {
     pub name: String,
     pub age: f64,
 }
 
+#[derive(Debug, Clone, PartialEq)]
 struct Internal {
     id: f64,
 }

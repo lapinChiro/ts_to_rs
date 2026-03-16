@@ -2,6 +2,7 @@
 source: tests/integration_test.rs
 expression: output
 ---
+#[derive(Debug, Clone, PartialEq)]
 struct Point {
     x: f64,
     y: f64,

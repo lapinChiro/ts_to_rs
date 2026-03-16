@@ -2,6 +2,7 @@
 source: tests/integration_test.rs
 expression: output
 ---
+#[derive(Debug, Clone, PartialEq)]
 struct Point {
     x: f64,
     y: f64,
@@ -27,6 +28,7 @@ fn spreadAtEnd(p: Point) -> Point {
     p2
 }
 
+#[derive(Debug, Clone, PartialEq)]
 struct Config {
     a: f64,
     b: f64,

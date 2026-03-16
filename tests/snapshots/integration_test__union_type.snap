@@ -42,19 +42,25 @@ enum StringOrNumber {
     F64(f64),
 }
 
+#[derive(Debug, Clone, PartialEq)]
 struct Success {
 }
 
+#[derive(Debug, Clone, PartialEq)]
 struct Failure {
 }
 
+#[derive(Debug, Clone, PartialEq)]
 struct MyType {
 }
 
+#[derive(Debug, Clone, PartialEq)]
 struct Response {
 }
 
+#[derive(Debug, Clone, PartialEq)]
 struct Promise<T> {
+    _phantom_t: std::marker::PhantomData<T>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

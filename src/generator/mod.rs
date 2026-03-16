@@ -5,7 +5,7 @@ pub mod types;
 mod expressions;
 mod statements;
 
-use crate::ir::{EnumValue, EnumVariant, Item, Method, Param, Visibility};
+use crate::ir::{EnumValue, EnumVariant, Item, Method, Param, RustType, Visibility};
 
 use expressions::{escape_ident, generate_expr};
 use statements::generate_stmt;
@@ -52,7 +52,13 @@ fn generate_item(item: &Item) -> String {
         } => {
             let vis_str = generate_vis(vis);
             let generics = generate_type_params(type_params);
-            let mut out = format!("{vis_str}struct {name}{generics} {{\n");
+            let derivable = fields.iter().all(|f| is_derivable_type(&f.ty));
+            let mut out = if derivable {
+                "#[derive(Debug, Clone, PartialEq)]\n".to_string()
+            } else {
+                String::new()
+            };
+            out.push_str(&format!("{vis_str}struct {name}{generics} {{\n"));
             for field in fields {
                 let field_vis = generate_vis(field.vis.as_ref().unwrap_or(vis));
                 out.push_str(&format!(
@@ -60,6 +66,16 @@ fn generate_item(item: &Item) -> String {
                     escape_ident(&field.name),
                     generate_type(&field.ty)
                 ));
+            }
+            // Add PhantomData for type params not used in any field
+            for tp in type_params {
+                let used = fields.iter().any(|f| f.ty.uses_param(tp));
+                if !used {
+                    out.push_str(&format!(
+                        "    _phantom_{}: std::marker::PhantomData<{tp}>,\n",
+                        tp.to_lowercase()
+                    ));
+                }
             }
             out.push('}');
             out
@@ -407,6 +423,21 @@ fn generate_serde_tagged_enum(
     out
 }
 
+/// Returns true if a type can appear in a struct with `#[derive(Debug, Clone, PartialEq)]`.
+///
+/// `Box<dyn Fn>` and `Box<dyn Any>` do not implement these traits, so structs
+/// containing them cannot derive them.
+fn is_derivable_type(ty: &RustType) -> bool {
+    match ty {
+        RustType::Fn { .. } | RustType::Any => false,
+        RustType::Option(inner) | RustType::Vec(inner) => is_derivable_type(inner),
+        RustType::Result { ok, err } => is_derivable_type(ok) && is_derivable_type(err),
+        RustType::Tuple(elems) => elems.iter().all(is_derivable_type),
+        RustType::Named { type_args, .. } => type_args.iter().all(is_derivable_type),
+        _ => true,
+    }
+}
+
 /// Generates the visibility prefix string.
 fn generate_vis(vis: &Visibility) -> &'static str {
     match vis {
@@ -499,6 +530,7 @@ mod tests {
             ],
         };
         let expected = "\
+#[derive(Debug, Clone, PartialEq)]
 pub struct Foo {
     pub name: String,
     pub age: f64,
@@ -519,6 +551,7 @@ pub struct Foo {
             }],
         };
         let expected = "\
+#[derive(Debug, Clone, PartialEq)]
 struct Bar {
     x: bool,
 }";
@@ -541,6 +574,7 @@ struct Bar {
             }],
         };
         let expected = "\
+#[derive(Debug, Clone, PartialEq)]
 pub struct Container<T> {
     pub value: T,
 }";
@@ -891,9 +925,11 @@ impl Foo {
             },
         ];
         let expected = "\
+#[derive(Debug, Clone, PartialEq)]
 pub struct A {
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct B {
 }";
         assert_eq!(generate(&items), expected);

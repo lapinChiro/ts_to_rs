@@ -998,7 +998,7 @@ fn test_convert_type_alias_conditional_simple_returns_type_alias_with_true_branc
         Item::TypeAlias {
             vis: Visibility::Public,
             name: "ToNum".to_string(),
-            type_params: vec!["T".to_string()],
+            type_params: vec![],
             ty: RustType::F64,
         }
     );
@@ -1014,7 +1014,7 @@ fn test_convert_type_alias_conditional_predicate_returns_bool() {
         Item::TypeAlias {
             vis: Visibility::Public,
             name: "IsString".to_string(),
-            type_params: vec!["T".to_string()],
+            type_params: vec![],
             ty: RustType::Bool,
         }
     );
@@ -1055,7 +1055,7 @@ fn test_convert_type_alias_conditional_nested_generates_type_alias() {
         Item::TypeAlias {
             vis: Visibility::Public,
             name: "Foo".to_string(),
-            type_params: vec!["T".to_string()],
+            type_params: vec![],
             ty: RustType::F64,
         }
     );

@@ -2,16 +2,19 @@
 source: tests/integration_test.rs
 expression: output
 ---
+#[derive(Debug, Clone, PartialEq)]
 struct Origin {
     x: f64,
     y: f64,
 }
 
+#[derive(Debug, Clone, PartialEq)]
 struct Size {
     w: f64,
     h: f64,
 }
 
+#[derive(Debug, Clone, PartialEq)]
 struct Rect {
     origin: Origin,
     size: Size,

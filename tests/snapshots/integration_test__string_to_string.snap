@@ -2,6 +2,7 @@
 source: tests/integration_test.rs
 expression: output
 ---
+#[derive(Debug, Clone, PartialEq)]
 struct Config {
     name: String,
     label: String,

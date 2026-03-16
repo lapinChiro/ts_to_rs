@@ -2,6 +2,7 @@
 source: tests/integration_test.rs
 expression: output
 ---
+#[derive(Debug, Clone, PartialEq)]
 pub struct CreateUserOpts {
     pub name: String,
     pub age: f64,
@@ -11,6 +12,7 @@ pub fn createUser(opts: CreateUserOpts) {
     let n: String = opts.name;
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct GreetOpts {
     pub loud: bool,
 }

@@ -2,10 +2,12 @@
 source: tests/integration_test.rs
 expression: output
 ---
+#[derive(Debug, Clone, PartialEq)]
 pub struct Container<T> {
     pub value: T,
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct Pair<A, B> {
     pub first: A,
     pub second: B,
@@ -15,6 +17,7 @@ pub fn identity<T>(x: T) -> T {
     x
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct UserList {
     pub users: Container<String>,
 }

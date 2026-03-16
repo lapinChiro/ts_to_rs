@@ -2,6 +2,7 @@
 source: tests/integration_test.rs
 expression: output
 ---
+#[derive(Debug, Clone, PartialEq)]
 pub struct User {
     pub name: String,
     pub age: f64,
@@ -17,6 +18,7 @@ impl User {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
 struct Point {
     x: f64,
     y: f64,

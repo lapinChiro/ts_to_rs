@@ -4,14 +4,15 @@ expression: output
 ---
 pub type StringOnly<T> = T;
 
-pub type ToNumber<T> = f64;
+pub type ToNumber = f64;
 
-pub type IsArray<T> = bool;
+pub type IsArray = bool;
 
 pub type Unwrap<T> = <T as Promise>::Output;
 
-pub type Nested<T> = f64;
+pub type Nested = f64;
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct AfterFallback {
     pub x: f64,
 }

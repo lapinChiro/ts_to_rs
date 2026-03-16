@@ -9,6 +9,7 @@ trait Shape {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
 struct Circle {
     radius: f64,
 }
