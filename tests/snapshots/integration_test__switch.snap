@@ -1,0 +1,31 @@
+---
+source: tests/integration_test.rs
+expression: output
+---
+fn getLabel(x: f64) -> String {
+    match x {
+        1.0 => {
+            return "one".to_string();
+        }
+        2.0 => {
+            return "two".to_string();
+        }
+        _ => {
+            return "other".to_string();
+        }
+    }
+}
+
+fn classify(status: String) -> String {
+    match status.as_str() {
+        "active" | "enabled" => {
+            return "on".to_string();
+        }
+        "inactive" | "disabled" => {
+            return "off".to_string();
+        }
+        _ => {
+            return "unknown".to_string();
+        }
+    }
+}

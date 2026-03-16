@@ -5,7 +5,7 @@
 use anyhow::{anyhow, Result};
 use swc_ecma_ast as ast;
 
-use crate::ir::{BinOp, ClosureBody, Expr, MatchArm, Param, RustType, Stmt, UnOp};
+use crate::ir::{BinOp, ClosureBody, Expr, MatchArm, MatchPattern, Param, RustType, Stmt, UnOp};
 use crate::registry::TypeRegistry;
 use crate::transformer::expressions::convert_expr;
 use crate::transformer::types::convert_ts_type;
@@ -993,6 +993,19 @@ fn try_convert_object_destructuring(
     Ok(Some(stmts))
 }
 
+/// Checks whether a case body is terminated (break, return, throw, or continue).
+fn is_case_terminated(stmts: &[ast::Stmt]) -> bool {
+    stmts.last().is_some_and(|s| {
+        matches!(
+            s,
+            ast::Stmt::Break(_)
+                | ast::Stmt::Return(_)
+                | ast::Stmt::Throw(_)
+                | ast::Stmt::Continue(_)
+        )
+    })
+}
+
 /// Converts a `switch` statement to a `match` expression or fall-through pattern.
 ///
 /// - If all cases end with `break` (or are empty fall-throughs), generates a clean `Stmt::Match`.
@@ -1011,12 +1024,9 @@ fn convert_switch_stmt(
     let has_code_fallthrough = switch.cases.iter().enumerate().any(|(i, case)| {
         let is_last = i == case_count - 1;
         let has_body = !case.cons.is_empty();
-        let ends_with_break = case
-            .cons
-            .last()
-            .is_some_and(|s| matches!(s, ast::Stmt::Break(_)));
-        // A case with code but no break is a fall-through (unless it's the last case)
-        has_body && !ends_with_break && !is_last
+        let is_terminated = is_case_terminated(&case.cons);
+        // A case with code but not terminated is a fall-through (unless it's the last case)
+        has_body && !is_terminated && !is_last
     });
 
     if has_code_fallthrough {
@@ -1035,12 +1045,12 @@ fn convert_switch_clean_match(
     type_env: &mut TypeEnv,
 ) -> Result<Vec<Stmt>> {
     let mut arms: Vec<MatchArm> = Vec::new();
-    let mut pending_patterns: Vec<Expr> = Vec::new();
+    let mut pending_patterns: Vec<MatchPattern> = Vec::new();
 
     for case in &switch.cases {
         if let Some(test) = &case.test {
             let pattern = convert_expr(test, reg, None, type_env)?;
-            pending_patterns.push(pattern);
+            pending_patterns.push(MatchPattern::Literal(pattern));
         }
 
         // Empty body = fall-through to next case, accumulate patterns
@@ -1052,17 +1062,18 @@ fn convert_switch_clean_match(
         let body = case
             .cons
             .iter()
-            .filter(|s| !matches!(s, ast::Stmt::Break(_)))
+            .filter(|s| !matches!(s, ast::Stmt::Break(_) | ast::Stmt::Continue(_)))
             .map(|s| convert_stmt(s, reg, return_type, type_env))
             .collect::<Result<Vec<_>>>()?
             .into_iter()
             .flatten()
             .collect();
 
-        let is_wildcard = case.test.is_none();
+        if case.test.is_none() {
+            pending_patterns.push(MatchPattern::Wildcard);
+        }
         arms.push(MatchArm {
             patterns: std::mem::take(&mut pending_patterns),
-            is_wildcard,
             body,
         });
     }

@@ -93,14 +93,20 @@ pub struct StructField {
     pub ty: RustType,
 }
 
+/// A pattern in a match arm.
+#[derive(Debug, Clone, PartialEq)]
+pub enum MatchPattern {
+    /// A literal value pattern (e.g., `1`, `"hello"`)
+    Literal(Expr),
+    /// A wildcard pattern (`_`)
+    Wildcard,
+}
+
 /// An arm in a `match` expression.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MatchArm {
-    /// Pattern expressions (e.g., literal values). Multiple patterns represent `a | b`.
-    /// Empty when `is_wildcard` is true.
-    pub patterns: Vec<Expr>,
-    /// Whether this is a wildcard arm (`_ =>`).
-    pub is_wildcard: bool,
+    /// Patterns for this arm. Multiple patterns represent `a | b | _`.
+    pub patterns: Vec<MatchPattern>,
     /// Arm body.
     pub body: Vec<Stmt>,
 }

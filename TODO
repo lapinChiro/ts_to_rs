@@ -164,6 +164,10 @@
     - `Pick<Partial<T>, K>` のように inner が utility type の場合、`resolve_utility_inner_fields` が直接解決できず失敗する
     - `Partial`/`Required` は `resolve_utility_inner_with_conversion` でネスト対応済みだが、`Pick`/`Omit` は未対応
     - 動作上は inner type をフォールバックで返すため、パニックはしない
+- **[I-60]** **switch の非リテラル case が変数バインディングになる** — 変換正確性
+    - `case A:` が `A =>` に変換されるが、Rust では変数バインディング（新しい `A` に束縛）であり、TS の `x === A` 比較と意味が異なる
+    - 対策: 非リテラル case を検出し、fall-through パス（if-chain）にフォールバック、またはマッチガード `x if x == A =>` を生成
+    - 定数 case（`const A = 1` 相当）のみリテラルパターンを許容し、変数参照 case は if-chain に切り替える
 
 
 ---

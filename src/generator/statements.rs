@@ -153,23 +153,37 @@ pub(super) fn generate_stmt(stmt: &Stmt, indent: usize) -> String {
             out
         }
         Stmt::Match { expr, arms } => {
-            let mut out = format!("{pad}match {} {{\n", generate_expr(expr));
+            use crate::ir::{Expr as IrExpr, MatchPattern};
+
+            // Detect if any arm has a string literal pattern → need .as_str()
+            let has_string_patterns = arms.iter().any(|arm| {
+                arm.patterns
+                    .iter()
+                    .any(|p| matches!(p, MatchPattern::Literal(IrExpr::StringLit(_))))
+            });
+
+            let discriminant_str = if has_string_patterns {
+                format!("{}.as_str()", generate_expr(expr))
+            } else {
+                generate_expr(expr)
+            };
+
+            let mut out = format!("{pad}match {discriminant_str} {{\n");
             for arm in arms {
-                if arm.is_wildcard {
-                    out.push_str(&format!("{}_ => {{\n", indent_str(indent + 1)));
-                } else {
-                    let patterns_str = arm
-                        .patterns
-                        .iter()
-                        .map(generate_expr)
-                        .collect::<Vec<_>>()
-                        .join(" | ");
-                    out.push_str(&format!(
-                        "{}{} => {{\n",
-                        indent_str(indent + 1),
-                        patterns_str
-                    ));
-                }
+                let patterns_str = arm
+                    .patterns
+                    .iter()
+                    .map(|p| match p {
+                        MatchPattern::Literal(e) => generate_expr(e),
+                        MatchPattern::Wildcard => "_".to_string(),
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" | ");
+                out.push_str(&format!(
+                    "{}{} => {{\n",
+                    indent_str(indent + 1),
+                    patterns_str
+                ));
                 for s in &arm.body {
                     out.push_str(&generate_stmt(s, indent + 2));
                     out.push('\n');
@@ -199,7 +213,7 @@ fn indent_str(level: usize) -> String {
 #[cfg(test)]
 mod tests {
     use crate::generator::generate;
-    use crate::ir::{Expr, Item, RustType, Stmt, Visibility};
+    use crate::ir::{Expr, Item, MatchPattern as MP, RustType, Stmt, Visibility};
 
     // Statement tests need to be wrapped in Item::Fn to test generate()
 
@@ -674,8 +688,7 @@ fn f() {
             body: vec![Stmt::Match {
                 expr: Expr::Ident("x".to_string()),
                 arms: vec![crate::ir::MatchArm {
-                    patterns: vec![Expr::IntLit(1)],
-                    is_wildcard: false,
+                    patterns: vec![MP::Literal(Expr::IntLit(1))],
                     body: vec![Stmt::Expr(Expr::FnCall {
                         name: "do_a".to_string(),
                         args: vec![],
@@ -706,8 +719,7 @@ fn f() {
             body: vec![Stmt::Match {
                 expr: Expr::Ident("x".to_string()),
                 arms: vec![crate::ir::MatchArm {
-                    patterns: vec![Expr::IntLit(1), Expr::IntLit(2)],
-                    is_wildcard: false,
+                    patterns: vec![MP::Literal(Expr::IntLit(1)), MP::Literal(Expr::IntLit(2))],
                     body: vec![Stmt::Expr(Expr::FnCall {
                         name: "do_ab".to_string(),
                         args: vec![],
@@ -738,8 +750,7 @@ fn f() {
             body: vec![Stmt::Match {
                 expr: Expr::Ident("x".to_string()),
                 arms: vec![crate::ir::MatchArm {
-                    patterns: vec![],
-                    is_wildcard: true,
+                    patterns: vec![MP::Wildcard],
                     body: vec![Stmt::Expr(Expr::FnCall {
                         name: "do_default".to_string(),
                         args: vec![],
@@ -771,24 +782,21 @@ fn f() {
                 expr: Expr::Ident("x".to_string()),
                 arms: vec![
                     crate::ir::MatchArm {
-                        patterns: vec![Expr::IntLit(1)],
-                        is_wildcard: false,
+                        patterns: vec![MP::Literal(Expr::IntLit(1))],
                         body: vec![Stmt::Expr(Expr::FnCall {
                             name: "do_a".to_string(),
                             args: vec![],
                         })],
                     },
                     crate::ir::MatchArm {
-                        patterns: vec![Expr::IntLit(2), Expr::IntLit(3)],
-                        is_wildcard: false,
+                        patterns: vec![MP::Literal(Expr::IntLit(2)), MP::Literal(Expr::IntLit(3))],
                         body: vec![Stmt::Expr(Expr::FnCall {
                             name: "do_bc".to_string(),
                             args: vec![],
                         })],
                     },
                     crate::ir::MatchArm {
-                        patterns: vec![],
-                        is_wildcard: true,
+                        patterns: vec![MP::Wildcard],
                         body: vec![Stmt::Expr(Expr::FnCall {
                             name: "do_default".to_string(),
                             args: vec![],
@@ -805,6 +813,49 @@ fn f() {
         }
         2 | 3 => {
             do_bc();
+        }
+        _ => {
+            do_default();
+        }
+    }
+}";
+        assert_eq!(generate(&[item]), expected);
+    }
+
+    #[test]
+    fn test_generate_match_string_patterns_adds_as_str() {
+        let item = Item::Fn {
+            vis: Visibility::Private,
+            is_async: false,
+            name: "f".to_string(),
+            type_params: vec![],
+            params: vec![],
+            return_type: None,
+            body: vec![Stmt::Match {
+                expr: Expr::Ident("s".to_string()),
+                arms: vec![
+                    crate::ir::MatchArm {
+                        patterns: vec![MP::Literal(Expr::StringLit("hello".to_string()))],
+                        body: vec![Stmt::Expr(Expr::FnCall {
+                            name: "do_hello".to_string(),
+                            args: vec![],
+                        })],
+                    },
+                    crate::ir::MatchArm {
+                        patterns: vec![MP::Wildcard],
+                        body: vec![Stmt::Expr(Expr::FnCall {
+                            name: "do_default".to_string(),
+                            args: vec![],
+                        })],
+                    },
+                ],
+            }],
+        };
+        let expected = "\
+fn f() {
+    match s.as_str() {
+        \"hello\" => {
+            do_hello();
         }
         _ => {
             do_default();

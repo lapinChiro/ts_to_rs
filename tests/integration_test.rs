@@ -362,3 +362,10 @@ fn test_conditional_type() {
     let output = transpile(&input).unwrap();
     insta::assert_snapshot!(output);
 }
+
+#[test]
+fn test_switch() {
+    let input = fs::read_to_string("tests/fixtures/switch.input.ts").unwrap();
+    let output = transpile(&input).unwrap();
+    insta::assert_snapshot!(output);
+}
