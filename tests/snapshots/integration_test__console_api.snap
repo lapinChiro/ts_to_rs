@@ -4,9 +4,9 @@ expression: output
 ---
 fn demo(x: f64, name: String) -> f64 {
     println!("start");
-    println!("{:?}", x);
-    eprintln!("{:?}", name);
-    eprintln!("{:?} {:?}", x, name);
+    println!("{}", x);
+    eprintln!("{}", name);
+    eprintln!("{} {}", x, name);
     println!();
     x
 }

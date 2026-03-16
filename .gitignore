@@ -1,3 +1,7 @@
 /target
 tests/compile-check/target/
 tests/compile-check/Cargo.lock
+tests/e2e/rust-runner/target/
+tests/e2e/rust-runner/Cargo.lock
+tests/e2e/node_modules/
+tests/e2e/scripts/*_exec.ts

@@ -29,6 +29,37 @@ pub(crate) fn escape_ident(name: &str) -> String {
     }
 }
 
+/// Returns a typed float literal string when the expression is a numeric literal
+/// (or negated numeric literal) used as a method receiver.
+///
+/// Rust cannot call methods on ambiguous float literals (e.g., `3.7.floor()`),
+/// so we emit `3.7_f64.floor()` or `(-5.0_f64).abs()`.
+fn float_literal_for_method(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::NumberLit(n) => {
+            let lit = if n.fract() == 0.0 {
+                format!("{n:.1}_f64")
+            } else {
+                format!("{n}_f64")
+            };
+            Some(lit)
+        }
+        Expr::UnaryOp { op, operand } if op.as_str() == "-" => {
+            if let Expr::NumberLit(n) = operand.as_ref() {
+                let lit = if n.fract() == 0.0 {
+                    format!("{n:.1}_f64")
+                } else {
+                    format!("{n}_f64")
+                };
+                Some(format!("(-{lit})"))
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
 /// Returns `true` if the expression needs parentheses when used as the receiver
 /// of a method call or field access (i.e., before `.method()` or `.field`).
 fn needs_parens_as_receiver(expr: &Expr) -> bool {
@@ -91,8 +122,13 @@ pub(super) fn generate_expr(expr: &Expr) -> String {
                 .map(generate_expr)
                 .collect::<Vec<_>>()
                 .join(", ");
-            let obj_str = generate_expr(object);
             let method = escape_ident(method);
+            // Float literals need _f64 suffix for method calls (e.g., 3.7_f64.floor())
+            // Also handles negated literals: (-5.0_f64).abs()
+            if let Some(lit) = float_literal_for_method(object) {
+                return format!("{lit}.{method}({args_str})");
+            }
+            let obj_str = generate_expr(object);
             if needs_parens_as_receiver(object) {
                 format!("({obj_str}).{method}({args_str})")
             } else {
@@ -230,12 +266,15 @@ pub(super) fn generate_expr(expr: &Expr) -> String {
     }
 }
 
-/// Generates a macro call expression (e.g., `println!("{:?}", x)`).
+/// Generates a macro call expression (e.g., `println!("{}", x)`).
 ///
 /// For `println!`/`eprintln!`, constructs a format string based on argument types:
 /// - No args → `name!()`
 /// - Single string literal → `name!("the string")`
-/// - Other args → `name!("{:?} {:?}", arg1, arg2)` (string literals use `{}`)
+/// - Other args → `name!("{} {}", arg1, arg2)` using Display format
+///
+/// Display (`{}`) is used instead of Debug (`{:?}`) because `console.log` in TypeScript
+/// outputs values without debug formatting (e.g., strings without quotes).
 fn generate_macro_call(name: &str, args: &[Expr]) -> String {
     if args.is_empty() {
         return format!("{name}!()");
@@ -248,15 +287,8 @@ fn generate_macro_call(name: &str, args: &[Expr]) -> String {
         }
     }
 
-    // Build format string with placeholders
-    let placeholders: Vec<&str> = args
-        .iter()
-        .map(|arg| match arg {
-            Expr::StringLit(_) => "{}",
-            _ => "{:?}",
-        })
-        .collect();
-    let format_str = placeholders.join(" ");
+    // Build format string with Display placeholders
+    let format_str = args.iter().map(|_| "{}").collect::<Vec<_>>().join(" ");
     let args_str = args
         .iter()
         .map(generate_expr)
@@ -566,7 +598,7 @@ mod tests {
             name: "println".to_string(),
             args: vec![Expr::Ident("x".to_string())],
         };
-        assert_eq!(generate_expr(&expr), "println!(\"{:?}\", x)");
+        assert_eq!(generate_expr(&expr), "println!(\"{}\", x)");
     }
 
     #[test]
@@ -578,7 +610,7 @@ mod tests {
                 Expr::Ident("x".to_string()),
             ],
         };
-        assert_eq!(generate_expr(&expr), "println!(\"{} {:?}\", \"value:\", x)");
+        assert_eq!(generate_expr(&expr), "println!(\"{} {}\", \"value:\", x)");
     }
 
     #[test]
@@ -587,7 +619,7 @@ mod tests {
             name: "eprintln".to_string(),
             args: vec![Expr::Ident("err".to_string())],
         };
-        assert_eq!(generate_expr(&expr), "eprintln!(\"{:?}\", err)");
+        assert_eq!(generate_expr(&expr), "eprintln!(\"{}\", err)");
     }
 
     #[test]

@@ -26,7 +26,7 @@ fn withTryCatch() {
         riskyOperation();
     }
     if let Err(e) = _try_result {
-        eprintln!("{:?}", e);
+        eprintln!("{}", e);
     }
 }
 
@@ -46,7 +46,7 @@ fn withTryCatchFinally() {
         riskyOperation();
     }
     if let Err(e) = _try_result {
-        eprintln!("{:?}", e);
+        eprintln!("{}", e);
     }
 }
 
@@ -60,7 +60,7 @@ fn withThrowInTryCatch(x: f64) {
         println!("ok");
     }
     if let Err(e) = _try_result {
-        eprintln!("{:?}", e);
+        eprintln!("{}", e);
     }
 }
 
@@ -79,7 +79,7 @@ fn withBreakInTryCatch(items: Vec<f64>) {
             break;
         }
         if let Err(e) = _try_result {
-            eprintln!("{:?}", e);
+            eprintln!("{}", e);
         }
     }
 }
