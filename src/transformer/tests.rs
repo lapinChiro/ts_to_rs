@@ -702,3 +702,100 @@ fn test_type_env_insert_same_name_overwrites_shadowing() {
 
     assert_eq!(env.get("x"), Some(&RustType::String));
 }
+
+#[test]
+fn test_type_env_get_parent_scope_variable_returns_type() {
+    let mut env = TypeEnv::new();
+    env.insert("x".to_string(), RustType::F64);
+    env.push_scope();
+
+    // 子スコープから親の変数が見える
+    assert_eq!(env.get("x"), Some(&RustType::F64));
+}
+
+#[test]
+fn test_type_env_shadow_in_child_scope_hides_parent() {
+    let mut env = TypeEnv::new();
+    env.insert("x".to_string(), RustType::F64);
+    env.push_scope();
+    env.insert("x".to_string(), RustType::String);
+
+    // 子スコープではシャドウされた型
+    assert_eq!(env.get("x"), Some(&RustType::String));
+
+    // pop 後は親の型に戻る
+    env.pop_scope();
+    assert_eq!(env.get("x"), Some(&RustType::F64));
+}
+
+#[test]
+fn test_type_env_pop_scope_removes_child_variables() {
+    let mut env = TypeEnv::new();
+    env.push_scope();
+    env.insert("y".to_string(), RustType::Bool);
+    env.pop_scope();
+
+    // 子スコープの変数は pop 後に消える
+    assert_eq!(env.get("y"), None);
+}
+
+#[test]
+fn test_type_env_update_modifies_parent_scope() {
+    let mut env = TypeEnv::new();
+    env.insert("x".to_string(), RustType::F64);
+    env.push_scope();
+    env.update("x".to_string(), RustType::String);
+
+    // 子スコープから親の変数が更新される
+    assert_eq!(env.get("x"), Some(&RustType::String));
+
+    env.pop_scope();
+    // pop 後も更新は維持される
+    assert_eq!(env.get("x"), Some(&RustType::String));
+}
+
+#[test]
+fn test_type_env_update_nonexistent_inserts_in_current_scope() {
+    let mut env = TypeEnv::new();
+    env.push_scope();
+    env.update("z".to_string(), RustType::Bool);
+
+    // 存在しない変数の update は現在のスコープに挿入
+    assert_eq!(env.get("z"), Some(&RustType::Bool));
+
+    env.pop_scope();
+    // pop 後は消える（親スコープには入らない）
+    assert_eq!(env.get("z"), None);
+}
+
+#[test]
+fn test_type_env_clone_is_independent() {
+    let mut env = TypeEnv::new();
+    env.insert("x".to_string(), RustType::F64);
+
+    let mut cloned = env.clone();
+    cloned.insert("x".to_string(), RustType::String);
+
+    // 元の環境は変わらない
+    assert_eq!(env.get("x"), Some(&RustType::F64));
+    assert_eq!(cloned.get("x"), Some(&RustType::String));
+}
+
+#[test]
+fn test_type_env_nested_scopes_three_levels() {
+    let mut env = TypeEnv::new();
+    env.insert("x".to_string(), RustType::F64);
+
+    env.push_scope();
+    env.insert("x".to_string(), RustType::String);
+
+    env.push_scope();
+    env.insert("x".to_string(), RustType::Bool);
+    assert_eq!(env.get("x"), Some(&RustType::Bool));
+
+    env.pop_scope();
+    assert_eq!(env.get("x"), Some(&RustType::String));
+
+    env.pop_scope();
+    assert_eq!(env.get("x"), Some(&RustType::F64));
+}

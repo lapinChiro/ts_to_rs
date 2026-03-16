@@ -1638,8 +1638,42 @@ pub fn resolve_expr_type(
         ast::Expr::Lit(ast::Lit::Num(_)) => Some(RustType::F64),
         ast::Expr::Lit(ast::Lit::Bool(_)) => Some(RustType::Bool),
         ast::Expr::Tpl(_) => Some(RustType::String),
-        ast::Expr::Bin(bin) if bin.op == ast::BinaryOp::Add => {
-            // If either side is string, the result is string
+        ast::Expr::Bin(bin) => resolve_bin_expr_type(bin, type_env, reg),
+        ast::Expr::Member(member) => {
+            let obj_type = resolve_expr_type(&member.obj, type_env, reg)?;
+            // 配列インデックスアクセス: Vec<T>[n] → T
+            if matches!(&member.prop, ast::MemberProp::Computed(_)) {
+                if let RustType::Vec(elem_ty) = &obj_type {
+                    return Some(elem_ty.as_ref().clone());
+                }
+            }
+            resolve_field_type(&obj_type, &member.prop, reg)
+        }
+        ast::Expr::Paren(paren) => resolve_expr_type(&paren.expr, type_env, reg),
+        ast::Expr::TsAs(ts_as) => {
+            use crate::transformer::types::convert_ts_type;
+            convert_ts_type(&ts_as.type_ann, &mut Vec::new(), reg).ok()
+        }
+        ast::Expr::Call(call) => resolve_call_return_type(call, type_env, reg),
+        ast::Expr::New(new_expr) => resolve_new_expr_type(new_expr, reg),
+        _ => None,
+    }
+}
+
+/// 二項演算の結果型を解決する。
+fn resolve_bin_expr_type(
+    bin: &ast::BinExpr,
+    type_env: &TypeEnv,
+    reg: &TypeRegistry,
+) -> Option<RustType> {
+    use ast::BinaryOp::*;
+    match bin.op {
+        // 比較・等値 → Bool
+        Lt | LtEq | Gt | GtEq | EqEq | NotEq | EqEqEq | NotEqEq | In | InstanceOf => {
+            Some(RustType::Bool)
+        }
+        // 加算: 文字列 + any → String, otherwise F64
+        Add => {
             let left_ty = resolve_expr_type(&bin.left, type_env, reg);
             if left_ty
                 .as_ref()
@@ -1654,20 +1688,56 @@ pub fn resolve_expr_type(
             {
                 return Some(RustType::String);
             }
-            // Numeric addition
             Some(RustType::F64)
         }
-        ast::Expr::Member(member) => {
-            let obj_type = resolve_expr_type(&member.obj, type_env, reg)?;
-            resolve_field_type(&obj_type, &member.prop, reg)
-        }
-        ast::Expr::Paren(paren) => resolve_expr_type(&paren.expr, type_env, reg),
-        ast::Expr::TsAs(ts_as) => {
-            use crate::transformer::types::convert_ts_type;
-            convert_ts_type(&ts_as.type_ann, &mut Vec::new(), reg).ok()
-        }
-        _ => None,
+        // 算術演算 → F64
+        Sub | Mul | Div | Mod | Exp | BitAnd | BitOr | BitXor | LShift | RShift
+        | ZeroFillRShift => Some(RustType::F64),
+        // 論理演算 → operand の型（right 側で推定）
+        LogicalAnd | LogicalOr | NullishCoalescing => resolve_expr_type(&bin.right, type_env, reg)
+            .or_else(|| resolve_expr_type(&bin.left, type_env, reg)),
     }
+}
+
+/// 関数呼び出しの戻り値型を解決する。
+fn resolve_call_return_type(
+    call: &ast::CallExpr,
+    type_env: &TypeEnv,
+    reg: &TypeRegistry,
+) -> Option<RustType> {
+    // 関数名を取得
+    let callee = call.callee.as_expr()?;
+    let fn_name = match callee.as_ref() {
+        ast::Expr::Ident(ident) => ident.sym.to_string(),
+        _ => return None,
+    };
+
+    // TypeEnv で Fn 型を探索
+    if let Some(RustType::Fn { return_type, .. }) = type_env.get(&fn_name) {
+        return Some(return_type.as_ref().clone());
+    }
+
+    // TypeRegistry で Function を探索
+    if let Some(crate::registry::TypeDef::Function { return_type, .. }) = reg.get(&fn_name) {
+        return Some(return_type.clone().unwrap_or(RustType::Unit));
+    }
+
+    None
+}
+
+/// new 式の結果型を解決する。
+fn resolve_new_expr_type(new_expr: &ast::NewExpr, reg: &TypeRegistry) -> Option<RustType> {
+    let class_name = match new_expr.callee.as_ref() {
+        ast::Expr::Ident(ident) => ident.sym.to_string(),
+        _ => return None,
+    };
+
+    // TypeRegistry に登録されていれば Named 型を返す
+    reg.get(&class_name)?;
+    Some(RustType::Named {
+        name: class_name,
+        type_args: vec![],
+    })
 }
 
 /// Named 型のフィールド型を TypeRegistry から解決する。

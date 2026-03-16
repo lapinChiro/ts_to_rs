@@ -2907,3 +2907,149 @@ fn test_call_with_option_arg_wraps_some() {
         other => panic!("expected FnCall, got: {other:?}"),
     }
 }
+
+// --- resolve_expr_type: function call return type ---
+
+#[test]
+fn test_resolve_expr_type_call_registry_fn_returns_return_type() {
+    let expr = parse_single_expr("getValue();");
+    let env = TypeEnv::new();
+    let mut reg = TypeRegistry::new();
+    reg.register(
+        "getValue".to_string(),
+        TypeDef::Function {
+            params: vec![],
+            return_type: Some(RustType::String),
+        },
+    );
+
+    assert_eq!(resolve_expr_type(&expr, &env, &reg), Some(RustType::String));
+}
+
+#[test]
+fn test_resolve_expr_type_call_unregistered_fn_returns_none() {
+    let expr = parse_single_expr("unknown();");
+    let env = TypeEnv::new();
+
+    assert_eq!(resolve_expr_type(&expr, &env, &TypeRegistry::new()), None);
+}
+
+#[test]
+fn test_resolve_expr_type_call_fn_type_in_env_returns_return_type() {
+    let expr = parse_single_expr("f();");
+    let mut env = TypeEnv::new();
+    env.insert(
+        "f".to_string(),
+        RustType::Fn {
+            params: vec![],
+            return_type: Box::new(RustType::Bool),
+        },
+    );
+
+    assert_eq!(
+        resolve_expr_type(&expr, &env, &TypeRegistry::new()),
+        Some(RustType::Bool)
+    );
+}
+
+#[test]
+fn test_resolve_expr_type_call_registry_fn_no_return_type_returns_unit() {
+    let expr = parse_single_expr("doSomething();");
+    let env = TypeEnv::new();
+    let mut reg = TypeRegistry::new();
+    reg.register(
+        "doSomething".to_string(),
+        TypeDef::Function {
+            params: vec![],
+            return_type: None,
+        },
+    );
+
+    assert_eq!(resolve_expr_type(&expr, &env, &reg), Some(RustType::Unit));
+}
+
+// --- resolve_expr_type: array index ---
+
+#[test]
+fn test_resolve_expr_type_index_vec_returns_element_type() {
+    let expr = parse_single_expr("arr[0];");
+    let mut env = TypeEnv::new();
+    env.insert("arr".to_string(), RustType::Vec(Box::new(RustType::String)));
+
+    assert_eq!(
+        resolve_expr_type(&expr, &env, &TypeRegistry::new()),
+        Some(RustType::String)
+    );
+}
+
+#[test]
+fn test_resolve_expr_type_index_non_vec_returns_none() {
+    let expr = parse_single_expr("x[0];");
+    let mut env = TypeEnv::new();
+    env.insert("x".to_string(), RustType::String);
+
+    assert_eq!(resolve_expr_type(&expr, &env, &TypeRegistry::new()), None);
+}
+
+// --- resolve_expr_type: binary operations ---
+
+#[test]
+fn test_resolve_expr_type_comparison_returns_bool() {
+    let expr = parse_single_expr("x > y;");
+    let env = TypeEnv::new();
+
+    assert_eq!(
+        resolve_expr_type(&expr, &env, &TypeRegistry::new()),
+        Some(RustType::Bool)
+    );
+}
+
+#[test]
+fn test_resolve_expr_type_equality_returns_bool() {
+    let expr = parse_single_expr("x === y;");
+    let env = TypeEnv::new();
+
+    assert_eq!(
+        resolve_expr_type(&expr, &env, &TypeRegistry::new()),
+        Some(RustType::Bool)
+    );
+}
+
+#[test]
+fn test_resolve_expr_type_logical_and_returns_operand_type() {
+    let expr = parse_single_expr("a && b;");
+    let mut env = TypeEnv::new();
+    env.insert("a".to_string(), RustType::String);
+    env.insert("b".to_string(), RustType::String);
+
+    assert_eq!(
+        resolve_expr_type(&expr, &env, &TypeRegistry::new()),
+        Some(RustType::String)
+    );
+}
+
+// --- resolve_expr_type: new expression ---
+
+#[test]
+fn test_resolve_expr_type_new_registered_returns_named_type() {
+    let expr = parse_single_expr("new Foo();");
+    let env = TypeEnv::new();
+    let mut reg = TypeRegistry::new();
+    reg.register("Foo".to_string(), TypeDef::Struct { fields: vec![] });
+
+    assert_eq!(
+        resolve_expr_type(&expr, &env, &reg),
+        Some(RustType::Named {
+            name: "Foo".to_string(),
+            type_args: vec![],
+        })
+    );
+}
+
+#[test]
+fn test_resolve_expr_type_new_unregistered_returns_none() {
+    let expr = parse_single_expr("new Unknown();");
+    let env = TypeEnv::new();
+
+    assert_eq!(resolve_expr_type(&expr, &env, &TypeRegistry::new()), None);
+}

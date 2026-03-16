@@ -84,11 +84,6 @@
 
 - **[I-13]** **super() の位置ベースフィールドマッピング** — 式変換正確性
 
-- **[I-16]** **空配列の型推論改善** — 型推論
-    - `const arr: number[] = []` は動作するが、型注記なし `const arr = []` は型情報なし
-    - `expected` 型伝搬の改善で対応
-    - 🔗 関連: I-38（型推論基盤）の一部として対応可能
-
 - **[I-18]** **re-export の追跡** — import/export
     - `transform_import` / `transform_export_named` は実装済み
     - re-export チェーン（`export { X } from "./a"` → `export { X } from "./b"`）の追跡が未対応
@@ -102,10 +97,6 @@
 - **[I-21]** **async void のセマンティクス差異対応** — 変換正確性
     - TS の async void は即座に返るが Rust は Future。差異の警告 or ドキュメント化
 
-- **[I-22]** **型注記なしパラメータ** — 型推論（Hono 1件）
-    - Arrow 関数パラメータに型注記がない場合の型推論
-    - 🔗 関連: I-38（型推論基盤）の一部として対応可能
-
 - **[I-24]** **外部パッケージの型定義解決** — 型解決
     - 外部パッケージの `.d.ts` ファイルから型情報を読み込む
 
@@ -115,20 +106,12 @@
     - TS 固有の問題への対処コード（IDE 表示改善等）→ Rust では不要、コメント/スキップ生成
     - 調査済み: `report/tier3-conditional-types-rust-approaches.md` に Group A〜D の分析あり
 
-- **[I-38]** **型推論基盤の整備** — 型推論
-    - 現在、型推論が未対応のために以下の暫定実装（`RustType::Any` フォールバック等）が存在する。型推論の実装時にこれら全てが影響範囲となる:
-    - **conditional type true-branch フォールバック** (`types/mod.rs` `convert_conditional_type`): `T extends X ? A : B` で T の具体型を判定せず true branch (A) を返す。false branch の情報が消失
-    - **mapped type の value 型 Any フォールバック** (`types/mod.rs` `TsMappedType`): 型注記がない mapped type の value 型が `Any` になる
-    - **call signature パラメータ型 Any フォールバック** (`types/mod.rs` `convert_interface_as_fn_type`): 型注記なしパラメータが `Any` になる
-    - **関数型パラメータ型 Any フォールバック** (`types/mod.rs` `convert_fn_type`): 型注記なしパラメータが `Any` になる
-    - **optional chain の base オブジェクト型 Any フォールバック** (`expressions/mod.rs`): `resolve_expr_type` が型を解決できない場合に `Any` を使用
-    - **nullish coalescing の型判定失敗** (`expressions/mod.rs`): `resolve_expr_type` が left 側の型を特定できない場合、Option パターン認識が失敗
-    - **resilient mode の Any フォールバック** (`functions/mod.rs`): 型変換失敗時に `Any` にフォールバック
-    - **arrow 関数パラメータ型注記なし** (`expressions/mod.rs`): 型注記がない arrow パラメータが `Any` に
-    - **TypeEnv の解決範囲の制限** (`expressions/mod.rs` `resolve_expr_type`): 直接の識別子・1 レベルのフィールドアクセスのみ。多段メンバーアクセス・関数戻り値・配列要素の型は未追跡
-    - **expected 型の伝搬欠落** (`expressions/mod.rs` `convert_expr`): ネストした二項演算・optional chain 等に `expected` が伝搬されない
-    - **文字列結合の IR レベルヒューリスティック** (`expressions/mod.rs` `is_string_like`): 型情報なしで特定メソッド名（`to_string` 等）から文字列型を推定。型推論があれば不要
-    - **TypeEnv の shadowing 未追跡** (`expressions/mod.rs` `is_string_type`): デフォルト引数の `Option<String>` 変数が `unwrap_or` で shadow された後も `Option<String>` のまま。`Option<String>` を String 扱いするヒューリスティックで暫定回避
+- **[I-61]** **型推論: チェーンメソッド呼び出しの戻り値型追跡** — 型推論
+    - I-38 でカバーされない「レベル 3」の型推論。`arr.filter(...).map(...)` のようなチェーンメソッド呼び出しで、各メソッドの戻り値型を追跡する
+    - 前提: ビルトイン API（`Array.map`, `Array.filter`, `String.split` 等）の戻り値型テーブルが必要。型推論基盤とは独立した機能
+    - I-38 は「識別子 → 多段フィールドアクセス → 関数呼び出し戻り値（TypeRegistry 登録済み）」までをカバー。チェーンメソッドはその先の範囲
+    - 本来、型推論は全ての式ノードで型を解決できるべきであり、この項目は I-38 では意図的にスコープ外とした残課題
+    - 🔗 依存: I-38（型推論基盤）
 
 ### Tier 3: 低優先度
 
