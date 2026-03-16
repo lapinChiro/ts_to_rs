@@ -18,4 +18,11 @@ function main(): void {
         }
     }
     console.log("found:", found);
+
+    // for-range with sum (I-57 fix)
+    let sum: number = 0;
+    for (let i = 0; i < 5; i++) {
+        sum = sum + i;
+    }
+    console.log("sum 0..5:", sum);
 }

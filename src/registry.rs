@@ -209,15 +209,31 @@ fn collect_type_alias_fields(alias: &ast::TsTypeAliasDecl) -> Option<Vec<(String
 fn collect_fn_def(func: &ast::Function) -> Result<TypeDef> {
     let mut params = Vec::new();
     for param in &func.params {
-        if let ast::Pat::Ident(ident) = &param.pat {
-            let name = ident.id.sym.to_string();
-            if let Some(ann) = &ident.type_ann {
-                if let Ok(ty) =
-                    convert_ts_type(&ann.type_ann, &mut Vec::new(), &TypeRegistry::new())
-                {
-                    params.push((name, ty));
+        match &param.pat {
+            ast::Pat::Ident(ident) => {
+                let name = ident.id.sym.to_string();
+                if let Some(ann) = &ident.type_ann {
+                    if let Ok(ty) =
+                        convert_ts_type(&ann.type_ann, &mut Vec::new(), &TypeRegistry::new())
+                    {
+                        params.push((name, ty));
+                    }
                 }
             }
+            ast::Pat::Assign(assign) => {
+                // Default parameter: `name: Type = value` → Option<Type>
+                if let ast::Pat::Ident(ident) = assign.left.as_ref() {
+                    let name = ident.id.sym.to_string();
+                    if let Some(ann) = &ident.type_ann {
+                        if let Ok(ty) =
+                            convert_ts_type(&ann.type_ann, &mut Vec::new(), &TypeRegistry::new())
+                        {
+                            params.push((name, RustType::Option(Box::new(ty))));
+                        }
+                    }
+                }
+            }
+            _ => {}
         }
     }
 

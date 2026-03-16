@@ -326,7 +326,11 @@ fn generate_closure(
     };
     match body {
         ClosureBody::Expr(expr) => {
-            format!("|{params_str}|{ret_str} {}", generate_expr(expr))
+            if return_type.is_some() {
+                format!("|{params_str}|{ret_str} {{ {} }}", generate_expr(expr))
+            } else {
+                format!("|{params_str}|{ret_str} {}", generate_expr(expr))
+            }
         }
         ClosureBody::Block(stmts) => {
             let mut out = format!("|{params_str}|{ret_str} {{\n");
@@ -493,6 +497,40 @@ mod tests {
             })),
         };
         assert_eq!(generate_expr(&expr), "|x| x + 1.0");
+    }
+
+    #[test]
+    fn test_generate_closure_expr_body_with_return_type_has_braces() {
+        let expr = Expr::Closure {
+            params: vec![Param {
+                name: "x".to_string(),
+                ty: Some(RustType::F64),
+            }],
+            return_type: Some(RustType::F64),
+            body: ClosureBody::Expr(Box::new(Expr::BinaryOp {
+                left: Box::new(Expr::Ident("x".to_string())),
+                op: BinOp::Mul,
+                right: Box::new(Expr::NumberLit(2.0)),
+            })),
+        };
+        assert_eq!(generate_expr(&expr), "|x: f64| -> f64 { x * 2.0 }");
+    }
+
+    #[test]
+    fn test_generate_closure_expr_body_without_return_type_no_braces() {
+        let expr = Expr::Closure {
+            params: vec![Param {
+                name: "x".to_string(),
+                ty: Some(RustType::F64),
+            }],
+            return_type: None,
+            body: ClosureBody::Expr(Box::new(Expr::BinaryOp {
+                left: Box::new(Expr::Ident("x".to_string())),
+                op: BinOp::Mul,
+                right: Box::new(Expr::NumberLit(2.0)),
+            })),
+        };
+        assert_eq!(generate_expr(&expr), "|x: f64| x * 2.0");
     }
 
     #[test]

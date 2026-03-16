@@ -131,7 +131,18 @@ fn test_convert_stmt_for_counter_zero_to_n() {
                 start: Some(Box::new(Expr::NumberLit(0.0))),
                 end: Some(Box::new(Expr::Ident("n".to_string()))),
             },
-            body: vec![Stmt::Expr(Expr::Ident("i".to_string()))],
+            body: vec![
+                Stmt::Let {
+                    mutable: false,
+                    name: "i".to_string(),
+                    ty: None,
+                    init: Some(Expr::Cast {
+                        expr: Box::new(Expr::Ident("i".to_string())),
+                        target: RustType::F64,
+                    }),
+                },
+                Stmt::Expr(Expr::Ident("i".to_string())),
+            ],
         }
     );
 }
@@ -149,7 +160,18 @@ fn test_convert_stmt_for_counter_start_to_literal() {
                 start: Some(Box::new(Expr::NumberLit(1.0))),
                 end: Some(Box::new(Expr::NumberLit(10.0))),
             },
-            body: vec![Stmt::Expr(Expr::Ident("i".to_string()))],
+            body: vec![
+                Stmt::Let {
+                    mutable: false,
+                    name: "i".to_string(),
+                    ty: None,
+                    init: Some(Expr::Cast {
+                        expr: Box::new(Expr::Ident("i".to_string())),
+                        target: RustType::F64,
+                    }),
+                },
+                Stmt::Expr(Expr::Ident("i".to_string())),
+            ],
         }
     );
 }
@@ -584,6 +606,77 @@ fn test_convert_try_catch_continue_in_loop_uses_flag() {
             );
         }
         _ => panic!("expected ForIn, got {:?}", result[0]),
+    }
+}
+
+// -- try/catch with return type tests --
+
+#[test]
+fn test_convert_try_catch_both_return_adds_unreachable() {
+    // When both try and catch end with return in a function with return type,
+    // unreachable!() should be added after the if-let-Err block
+    let stmts = parse_fn_body(
+        "function safeDivide(a: number, b: number): number { try { if (b === 0) throw new Error(\"div by zero\"); return a / b; } catch (e) { return 0; } }",
+    );
+    let return_type = RustType::F64;
+    let result = convert_stmt_list(
+        &stmts,
+        &TypeRegistry::new(),
+        Some(&return_type),
+        &mut TypeEnv::new(),
+    )
+    .unwrap();
+
+    // Last statement should be Expr(MacroCall { name: "unreachable", args: [] })
+    let last = result.last().expect("should have statements");
+    assert!(
+        matches!(last, Stmt::Expr(Expr::MacroCall { name, args }) if name == "unreachable" && args.is_empty()),
+        "expected unreachable!() as last stmt, got {last:?}"
+    );
+}
+
+#[test]
+fn test_convert_try_catch_try_no_return_no_unreachable() {
+    // When try body does NOT end with return, unreachable!() should NOT be added
+    let stmts = parse_fn_body(
+        "function riskyOp(x: number): number { try { if (x < 0) { throw new Error(\"negative\"); } console.log(x); } catch (e) { console.log(e); } return x; }",
+    );
+    let return_type = RustType::F64;
+    let result = convert_stmt_list(
+        &stmts,
+        &TypeRegistry::new(),
+        Some(&return_type),
+        &mut TypeEnv::new(),
+    )
+    .unwrap();
+
+    // The last statement should be the Return(x), NOT unreachable
+    let last = result.last().expect("should have statements");
+    assert!(
+        matches!(last, Stmt::Return(_)),
+        "expected Return as last stmt (no unreachable), got {last:?}"
+    );
+}
+
+// -- for-range loop variable f64 shadow tests --
+
+#[test]
+fn test_convert_for_range_inserts_f64_shadow() {
+    // for (let i = 0; i < n; i++) { sum += i; }
+    // → body should start with: let i = i as f64;
+    let stmts =
+        parse_fn_body("function f(n: number) { for (let i = 0; i < n; i++) { sum += i; } }");
+    let result = convert_single_stmt(&stmts[0], &TypeRegistry::new(), None);
+    match result {
+        Stmt::ForIn { body, .. } => {
+            // First stmt should be: let i = i as f64;
+            assert!(
+                matches!(&body[0], Stmt::Let { name, init: Some(Expr::Cast { target: RustType::F64, .. }), .. } if name == "i"),
+                "expected let i = i as f64; as first stmt, got {:?}",
+                body[0]
+            );
+        }
+        other => panic!("expected ForIn, got: {other:?}"),
     }
 }
 

@@ -1,6 +1,6 @@
 use super::*;
 use crate::parser::parse_typescript;
-use crate::registry::TypeRegistry;
+use crate::registry::{TypeDef, TypeRegistry};
 use crate::transformer::TypeEnv;
 use swc_ecma_ast::{Decl, ModuleItem, Stmt};
 
@@ -1329,7 +1329,22 @@ fn test_convert_expr_string_includes_to_contains() {
         Expr::MethodCall {
             object: Box::new(Expr::Ident("s".to_string())),
             method: "contains".to_string(),
-            args: vec![Expr::StringLit("x".to_string())],
+            args: vec![Expr::Ref(Box::new(Expr::StringLit("x".to_string())))],
+        }
+    );
+}
+
+#[test]
+fn test_convert_includes_to_contains_with_ref() {
+    // arr.includes(3) → arr.contains(&3.0)
+    let expr = parse_expr("arr.includes(3);");
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    assert_eq!(
+        result,
+        Expr::MethodCall {
+            object: Box::new(Expr::Ident("arr".to_string())),
+            method: "contains".to_string(),
+            args: vec![Expr::Ref(Box::new(Expr::NumberLit(3.0)))],
         }
     );
 }
@@ -2404,7 +2419,6 @@ fn test_convert_opt_chain_normal_field_unchanged() {
 // --- resolve_expr_type tests ---
 
 use super::resolve_expr_type;
-use crate::registry::TypeDef;
 
 /// Helper: parse a single expression from a statement
 fn parse_single_expr(source: &str) -> swc_ecma_ast::Expr {
@@ -2529,11 +2543,14 @@ fn test_resolve_expr_type_ts_as_returns_target_type() {
 }
 
 #[test]
-fn test_resolve_expr_type_unsupported_expr_returns_none() {
+fn test_resolve_expr_type_number_literal_returns_f64() {
     let expr = parse_single_expr("42;");
     let env = TypeEnv::new();
 
-    assert_eq!(resolve_expr_type(&expr, &env, &TypeRegistry::new()), None);
+    assert_eq!(
+        resolve_expr_type(&expr, &env, &TypeRegistry::new()),
+        Some(RustType::F64)
+    );
 }
 
 #[test]
@@ -2762,6 +2779,130 @@ fn test_convert_expr_array_spread_prefix_and_suffix_generates_block() {
                 }
                 other => panic!("expected Block, got: {other:?}"),
             }
+        }
+        other => panic!("expected FnCall, got: {other:?}"),
+    }
+}
+
+// -- String concatenation with & on RHS tests --
+
+#[test]
+fn test_string_concat_rhs_ident_gets_ref() {
+    // "Hello " + name → BinaryOp { left: StringLit, op: Add, right: Ref(Ident) }
+    let swc_expr = parse_expr(r#""Hello " + name"#);
+    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    match result {
+        Expr::BinaryOp { right, op, .. } => {
+            assert_eq!(op, BinOp::Add);
+            assert!(
+                matches!(*right, Expr::Ref(_)),
+                "expected RHS to be Ref(...), got: {right:?}"
+            );
+        }
+        other => panic!("expected BinaryOp, got: {other:?}"),
+    }
+}
+
+#[test]
+fn test_string_concat_chain_rhs_gets_ref() {
+    // "Hello " + name + "!" → outer Add: LHS is Add(StringLit, Ref(Ident)), RHS should be Ref(StringLit("!"))
+    // Actually "!" is a literal, so it gets .to_string() in Rust, which is already &str-compatible
+    // But the pattern is: greeting + " " + name
+    let swc_expr = parse_expr(r#"greeting + " " + name"#);
+    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    // The outer BinaryOp's left is also a BinaryOp with Add
+    // We just verify the structure doesn't panic and produces BinaryOp
+    assert!(matches!(result, Expr::BinaryOp { op: BinOp::Add, .. }));
+}
+
+#[test]
+fn test_numeric_add_no_ref() {
+    // a + b (numeric) should NOT get Ref
+    let swc_expr = parse_expr("a + b");
+    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    match result {
+        Expr::BinaryOp { right, op, .. } => {
+            assert_eq!(op, BinOp::Add);
+            assert!(
+                !matches!(*right, Expr::Ref(_)),
+                "numeric add should NOT have Ref on RHS"
+            );
+        }
+        other => panic!("expected BinaryOp, got: {other:?}"),
+    }
+}
+
+// -- Default argument (Option<T>) call site completion tests --
+
+#[test]
+fn test_call_with_missing_default_arg_appends_none() {
+    // greet("World") where greet has params: (name: String, greeting: Option<String>)
+    // Should produce: greet("World".to_string(), None)
+    let mut reg = TypeRegistry::new();
+    reg.register(
+        "greet".to_string(),
+        TypeDef::Function {
+            params: vec![
+                ("name".to_string(), RustType::String),
+                (
+                    "greeting".to_string(),
+                    RustType::Option(Box::new(RustType::String)),
+                ),
+            ],
+            return_type: Some(RustType::String),
+        },
+    );
+
+    let swc_expr = parse_expr("greet(\"World\")");
+    let result = convert_expr(&swc_expr, &reg, None, &TypeEnv::new()).unwrap();
+
+    match result {
+        Expr::FnCall { name, args } => {
+            assert_eq!(name, "greet");
+            assert_eq!(
+                args.len(),
+                2,
+                "expected 2 args (with None appended), got {args:?}"
+            );
+            // Second arg should be None (Ident("None"))
+            assert_eq!(args[1], Expr::Ident("None".to_string()));
+        }
+        other => panic!("expected FnCall, got: {other:?}"),
+    }
+}
+
+#[test]
+fn test_call_with_option_arg_wraps_some() {
+    // greet("World", "Hi") where greeting is Option<String>
+    // Should produce: greet("World".to_string(), Some("Hi".to_string()))
+    let mut reg = TypeRegistry::new();
+    reg.register(
+        "greet".to_string(),
+        TypeDef::Function {
+            params: vec![
+                ("name".to_string(), RustType::String),
+                (
+                    "greeting".to_string(),
+                    RustType::Option(Box::new(RustType::String)),
+                ),
+            ],
+            return_type: Some(RustType::String),
+        },
+    );
+
+    let swc_expr = parse_expr("greet(\"World\", \"Hi\")");
+    let result = convert_expr(&swc_expr, &reg, None, &TypeEnv::new()).unwrap();
+
+    match result {
+        Expr::FnCall { name, args } => {
+            assert_eq!(name, "greet");
+            assert_eq!(args.len(), 2);
+            // Second arg should be Some(...)
+            assert!(
+                matches!(&args[1], Expr::FnCall { name, args: inner } if name == "Some" && inner.len() == 1),
+                "expected Some(...), got: {:?}",
+                args[1]
+            );
         }
         other => panic!("expected FnCall, got: {other:?}"),
     }

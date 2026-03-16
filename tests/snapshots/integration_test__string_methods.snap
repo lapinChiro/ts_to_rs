@@ -19,7 +19,7 @@ fn replaceChar(s: String) -> String {
 }
 
 fn hasContent(s: String) -> bool {
-    s.contains("x") && !s.ends_with("z")
+    s.contains(&"x") && !s.ends_with("z")
 }
 
 fn shout(s: String) -> String {

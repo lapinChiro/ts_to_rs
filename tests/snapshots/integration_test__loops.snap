@@ -21,6 +21,7 @@ pub fn sumArray(items: Vec<f64>) -> f64 {
 pub fn repeatN(n: f64) -> f64 {
     let mut count: f64 = 0.0;
     for i in 0..n as i64 {
+        let i = i as f64;
         count = count + 1.0;
     }
     count
@@ -29,6 +30,7 @@ pub fn repeatN(n: f64) -> f64 {
 pub fn countFive() -> f64 {
     let mut count: f64 = 0.0;
     for i in 0..5 {
+        let i = i as f64;
         count = count + 1.0;
     }
     count

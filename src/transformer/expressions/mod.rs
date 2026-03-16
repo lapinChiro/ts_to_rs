@@ -77,6 +77,36 @@ fn convert_lit(lit: &ast::Lit, expected: Option<&RustType>) -> Result<Expr> {
     }
 }
 
+/// Checks whether a RustType represents a string (including Option<String>).
+fn is_string_type(ty: &RustType) -> bool {
+    matches!(ty, RustType::String)
+        || matches!(ty, RustType::Option(inner) if matches!(inner.as_ref(), RustType::String))
+}
+
+/// Checks whether an IR expression is known to produce a String value.
+///
+/// Used to detect string concatenation (`+`) and wrap the RHS in `&`.
+fn is_string_like(expr: &Expr) -> bool {
+    match expr {
+        Expr::StringLit(_) | Expr::FormatMacro { .. } => true,
+        Expr::MethodCall { method, .. }
+            if method == "to_string"
+                || method == "to_uppercase"
+                || method == "to_lowercase"
+                || method == "trim"
+                || method == "replace" =>
+        {
+            true
+        }
+        Expr::BinaryOp {
+            op: BinOp::Add,
+            left,
+            ..
+        } => is_string_like(left),
+        _ => false,
+    }
+}
+
 /// Converts an SWC binary expression to an IR `BinaryOp`.
 fn convert_bin_expr(bin: &ast::BinExpr, reg: &TypeRegistry, type_env: &TypeEnv) -> Result<Expr> {
     // `x ?? y` → `x.unwrap_or_else(|| y)` (Option) or `x` (non-Option)
@@ -106,6 +136,37 @@ fn convert_bin_expr(bin: &ast::BinExpr, reg: &TypeRegistry, type_env: &TypeEnv) 
     let left = convert_expr(&bin.left, reg, None, type_env)?;
     let right = convert_expr(&bin.right, reg, None, type_env)?;
     let op = convert_binary_op(bin.op)?;
+
+    // String concatenation: wrap RHS in Ref(&) when LHS is string-like.
+    // Check both the IR expression and the AST-level type information.
+    let is_string_context = if op == BinOp::Add {
+        is_string_like(&left) || {
+            let left_type = resolve_expr_type(&bin.left, type_env, reg);
+            left_type.is_some_and(|ty| is_string_type(&ty))
+        }
+    } else {
+        false
+    };
+
+    // In string concat context:
+    // - LHS StringLit needs .to_string() (Rust: &str can't use + operator directly)
+    // - RHS non-literal needs & (Rust: String + &str)
+    let left = if is_string_context && matches!(left, Expr::StringLit(_)) {
+        Expr::MethodCall {
+            object: Box::new(left),
+            method: "to_string".to_string(),
+            args: vec![],
+        }
+    } else {
+        left
+    };
+
+    let right = if is_string_context && !matches!(right, Expr::StringLit(_)) {
+        Expr::Ref(Box::new(right))
+    } else {
+        right
+    };
+
     Ok(Expr::BinaryOp {
         left: Box::new(left),
         op,
@@ -604,7 +665,7 @@ fn map_method_call(object: Expr, method: &str, args: Vec<Expr>) -> Expr {
         "includes" => Expr::MethodCall {
             object: Box::new(object),
             method: "contains".to_string(),
-            args,
+            args: args.into_iter().map(|a| Expr::Ref(Box::new(a))).collect(),
         },
         "startsWith" => Expr::MethodCall {
             object: Box::new(object),
@@ -1214,13 +1275,38 @@ fn convert_call_args_with_types(
     param_types: Option<&[(String, RustType)]>,
     type_env: &TypeEnv,
 ) -> Result<Vec<Expr>> {
-    args.iter()
+    let mut result: Vec<Expr> = args
+        .iter()
         .enumerate()
         .map(|(i, arg)| {
-            let expected = param_types.and_then(|params| params.get(i).map(|(_, ty)| ty));
-            convert_expr(&arg.expr, reg, expected, type_env)
+            let param_ty = param_types.and_then(|params| params.get(i).map(|(_, ty)| ty));
+            // For Option<T> params, pass the inner type as expected so conversions apply
+            let expected = match param_ty {
+                Some(RustType::Option(inner)) => Some(inner.as_ref()),
+                other => other,
+            };
+            let mut expr = convert_expr(&arg.expr, reg, expected, type_env)?;
+            // Wrap in Some(...) when the parameter type is Option<T>
+            if let Some(RustType::Option(_)) = param_ty {
+                expr = Expr::FnCall {
+                    name: "Some".to_string(),
+                    args: vec![expr],
+                };
+            }
+            Ok(expr)
         })
-        .collect()
+        .collect::<Result<Vec<_>>>()?;
+
+    // Append None for missing Option parameters (default arguments)
+    if let Some(params) = param_types {
+        for param in params.iter().skip(result.len()) {
+            if matches!(param.1, RustType::Option(_)) {
+                result.push(Expr::Ident("None".to_string()));
+            }
+        }
+    }
+
+    Ok(result)
 }
 
 /// Converts a template literal to `Expr::FormatMacro`.
@@ -1548,6 +1634,29 @@ pub fn resolve_expr_type(
 ) -> Option<RustType> {
     match expr {
         ast::Expr::Ident(ident) => type_env.get(ident.sym.as_ref()).cloned(),
+        ast::Expr::Lit(ast::Lit::Str(_)) => Some(RustType::String),
+        ast::Expr::Lit(ast::Lit::Num(_)) => Some(RustType::F64),
+        ast::Expr::Lit(ast::Lit::Bool(_)) => Some(RustType::Bool),
+        ast::Expr::Tpl(_) => Some(RustType::String),
+        ast::Expr::Bin(bin) if bin.op == ast::BinaryOp::Add => {
+            // If either side is string, the result is string
+            let left_ty = resolve_expr_type(&bin.left, type_env, reg);
+            if left_ty
+                .as_ref()
+                .is_some_and(|t| matches!(t, RustType::String))
+            {
+                return Some(RustType::String);
+            }
+            let right_ty = resolve_expr_type(&bin.right, type_env, reg);
+            if right_ty
+                .as_ref()
+                .is_some_and(|t| matches!(t, RustType::String))
+            {
+                return Some(RustType::String);
+            }
+            // Numeric addition
+            Some(RustType::F64)
+        }
         ast::Expr::Member(member) => {
             let obj_type = resolve_expr_type(&member.obj, type_env, reg)?;
             resolve_field_type(&obj_type, &member.prop, reg)

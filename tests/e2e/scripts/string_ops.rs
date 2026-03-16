@@ -5,7 +5,11 @@ fn main() {
     println!("{} {}", "includes:", s.contains(&"World"));
     println!("{} {}", "starts:", s.starts_with("Hello"));
     println!("{} {}", "trim:", "  spaces  ".trim().to_string());
-    println!("{} {}", "split:", "a,b,c".split(",").collect::<Vec<&str>>().join(" "));
+    println!(
+        "{} {}",
+        "split:",
+        "a,b,c".split(",").collect::<Vec<&str>>().join(" ")
+    );
     let name: String = "Rust".to_string();
     let greeting: String = "Hello ".to_string() + &name;
     println!("{}", greeting);

@@ -263,7 +263,23 @@ fn convert_for_stmt(
         None => return Err(anyhow!("unsupported for loop: no update expression")),
     }
 
-    let body = convert_block_or_stmt(&for_stmt.body, reg, return_type, type_env)?;
+    let mut body = convert_block_or_stmt(&for_stmt.body, reg, return_type, type_env)?;
+
+    // Range iterates over integers; shadow the loop variable as f64
+    // to match TS's `number` type: `let i = i as f64;`
+    body.insert(
+        0,
+        Stmt::Let {
+            mutable: false,
+            name: var.clone(),
+            ty: None,
+            init: Some(Expr::Cast {
+                expr: Box::new(Expr::Ident(var.clone())),
+                target: RustType::F64,
+            }),
+        },
+    );
+
     Ok(Stmt::ForIn {
         label: None,
         var,
@@ -448,6 +464,11 @@ fn convert_try_stmt(
             });
         }
 
+        // Check if both try and catch always return — if so, add unreachable!()
+        // after the if-let-Err to satisfy Rust's exhaustive return requirement.
+        let try_ends_with_return = ends_with_return(&expanded_body);
+        let catch_ends_with_return = ends_with_return(&catch_body);
+
         // 'try_block: { ...body with throw→assign+break, break/continue→flag+break... }
         result.push(Stmt::LabeledBlock {
             label: "try_block".to_string(),
@@ -480,12 +501,32 @@ fn convert_try_stmt(
             then_body: catch_body,
             else_body: None,
         });
+
+        if return_type.is_some() && try_ends_with_return && catch_ends_with_return {
+            result.push(Stmt::Expr(Expr::MacroCall {
+                name: "unreachable".to_string(),
+                args: vec![],
+            }));
+        }
     } else {
         // No catch → inline try body
         result.extend(try_body);
     }
 
     Ok(result)
+}
+
+/// Checks whether a statement list ends with a return on all exit paths.
+fn ends_with_return(stmts: &[Stmt]) -> bool {
+    match stmts.last() {
+        Some(Stmt::Return(_)) => true,
+        Some(Stmt::If {
+            then_body,
+            else_body: Some(else_body),
+            ..
+        }) => ends_with_return(then_body) && ends_with_return(else_body),
+        _ => false,
+    }
 }
 
 /// Rewrites try body statements: converts throws to assign+break,

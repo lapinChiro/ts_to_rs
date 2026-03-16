@@ -30,7 +30,7 @@
 
 ### Tier 1: 高優先度 — 伝播リスクが高い、または ROI が極めて高い
 
-（I-52〜I-57 は `backlog/e2e-bugfix-codegen-semantics.md` に PRD 化済み）
+（I-52〜I-57 は修正済み。対応 PRD: `e2e-bugfix-codegen-semantics.md`）
 
 ### Tier 2: 中優先度 — 直接的な価値が高い
 
@@ -127,12 +127,15 @@
     - **arrow 関数パラメータ型注記なし** (`expressions/mod.rs`): 型注記がない arrow パラメータが `Any` に
     - **TypeEnv の解決範囲の制限** (`expressions/mod.rs` `resolve_expr_type`): 直接の識別子・1 レベルのフィールドアクセスのみ。多段メンバーアクセス・関数戻り値・配列要素の型は未追跡
     - **expected 型の伝搬欠落** (`expressions/mod.rs` `convert_expr`): ネストした二項演算・optional chain 等に `expected` が伝搬されない
+    - **文字列結合の IR レベルヒューリスティック** (`expressions/mod.rs` `is_string_like`): 型情報なしで特定メソッド名（`to_string` 等）から文字列型を推定。型推論があれば不要
+    - **TypeEnv の shadowing 未追跡** (`expressions/mod.rs` `is_string_type`): デフォルト引数の `Option<String>` 変数が `unwrap_or` で shadow された後も `Option<String>` のまま。`Option<String>` を String 扱いするヒューリスティックで暫定回避
 
 ### Tier 3: 低優先度
 
 - **[I-39]** **Transformer の Range 生成で `Expr::IntLit` を使用** — IR 整合性
     - `Expr::IntLit` は IR に追加済みだが、for ループの Range 生成（`0..n`）で `NumberLit(0.0)` を生成し、Generator の `generate_range_bound` が `as i64` キャストしている
     - Transformer 側で整数と判定できる場合に `IntLit` を直接生成すれば、Generator のキャスト不要
+    - 関連: for-range body に常時 `let i = i as f64;` を挿入する暫定実装がある。IntLit 対応と合わせて、整数限定 for-range では不要な f64 キャストを省略可能
     - 動作上は問題なし。孤立した改善
 - **[I-44]** **合成 struct 名のグローバルカウンタによる非決定性** — テスト品質
     - `_TypeLit0`, `_Intersection1` 等の合成 struct 名は `AtomicU32` グローバルカウンタで生成
