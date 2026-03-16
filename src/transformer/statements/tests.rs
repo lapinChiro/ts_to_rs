@@ -1392,3 +1392,187 @@ fn test_convert_switch_string_discriminant_generates_string_patterns() {
         other => panic!("expected Match, got {other:?}"),
     }
 }
+
+// --- I-14: Object destructuring extensions ---
+
+#[test]
+fn test_object_destructuring_default_number_generates_unwrap_or() {
+    let stmts = parse_fn_body("function f() { const { x = 0 } = obj; }");
+    let result =
+        convert_stmt_list(&stmts, &TypeRegistry::new(), None, &mut TypeEnv::new()).unwrap();
+    assert_eq!(result.len(), 1);
+    // { x = 0 } → let x = obj.x.unwrap_or(0.0);
+    match &result[0] {
+        Stmt::Let {
+            name,
+            init: Some(expr),
+            ..
+        } => {
+            assert_eq!(name, "x");
+            assert!(
+                matches!(expr, Expr::MethodCall { method, .. } if method == "unwrap_or"),
+                "expected unwrap_or call, got: {:?}",
+                expr
+            );
+        }
+        other => panic!("expected Let with unwrap_or, got: {:?}", other),
+    }
+}
+
+#[test]
+fn test_object_destructuring_default_string_generates_unwrap_or_else() {
+    let stmts = parse_fn_body("function f() { const { x = \"hi\" } = obj; }");
+    let result =
+        convert_stmt_list(&stmts, &TypeRegistry::new(), None, &mut TypeEnv::new()).unwrap();
+    assert_eq!(result.len(), 1);
+    // { x = "hi" } → let x = obj.x.unwrap_or_else(|| "hi".to_string());
+    match &result[0] {
+        Stmt::Let {
+            name,
+            init: Some(expr),
+            ..
+        } => {
+            assert_eq!(name, "x");
+            assert!(
+                matches!(expr, Expr::MethodCall { method, .. } if method == "unwrap_or_else"),
+                "expected unwrap_or_else call, got: {:?}",
+                expr
+            );
+        }
+        other => panic!("expected Let with unwrap_or_else, got: {:?}", other),
+    }
+}
+
+#[test]
+fn test_object_destructuring_default_bool_generates_unwrap_or() {
+    let stmts = parse_fn_body("function f() { const { x = true } = obj; }");
+    let result =
+        convert_stmt_list(&stmts, &TypeRegistry::new(), None, &mut TypeEnv::new()).unwrap();
+    assert_eq!(result.len(), 1);
+    match &result[0] {
+        Stmt::Let {
+            name,
+            init: Some(expr),
+            ..
+        } => {
+            assert_eq!(name, "x");
+            assert!(
+                matches!(expr, Expr::MethodCall { method, .. } if method == "unwrap_or"),
+                "expected unwrap_or call, got: {:?}",
+                expr
+            );
+        }
+        other => panic!("expected Let with unwrap_or, got: {:?}", other),
+    }
+}
+
+#[test]
+fn test_object_destructuring_nested_generates_chained_field_access() {
+    // { a: { b } } = obj → let b = obj.a.b;
+    let stmts = parse_fn_body("function f() { const { a: { b } } = obj; }");
+    let result =
+        convert_stmt_list(&stmts, &TypeRegistry::new(), None, &mut TypeEnv::new()).unwrap();
+    assert_eq!(result.len(), 1);
+    match &result[0] {
+        Stmt::Let {
+            name,
+            init: Some(init),
+            ..
+        } => {
+            assert_eq!(name, "b");
+            // Should be obj.a.b (nested FieldAccess)
+            match init {
+                Expr::FieldAccess { object, field } => {
+                    assert_eq!(field, "b");
+                    assert!(
+                        matches!(object.as_ref(), Expr::FieldAccess { field: inner_field, .. } if inner_field == "a"),
+                        "expected obj.a.b, got: {:?}",
+                        init
+                    );
+                }
+                _ => panic!("expected FieldAccess, got: {:?}", init),
+            }
+        }
+        other => panic!("expected Let, got: {:?}", other),
+    }
+}
+
+#[test]
+fn test_object_destructuring_nested_multiple_fields() {
+    // { a: { b, c } } = obj → let b = obj.a.b; let c = obj.a.c;
+    let stmts = parse_fn_body("function f() { const { a: { b, c } } = obj; }");
+    let result =
+        convert_stmt_list(&stmts, &TypeRegistry::new(), None, &mut TypeEnv::new()).unwrap();
+    assert_eq!(result.len(), 2, "expected 2 stmts, got: {:?}", result);
+    match &result[0] {
+        Stmt::Let { name, .. } => assert_eq!(name, "b"),
+        other => panic!("expected Let for b, got: {:?}", other),
+    }
+    match &result[1] {
+        Stmt::Let { name, .. } => assert_eq!(name, "c"),
+        other => panic!("expected Let for c, got: {:?}", other),
+    }
+}
+
+#[test]
+fn test_object_destructuring_rest_with_type_expands_remaining_fields() {
+    // { a, ...rest } = point where Point has { a, b, c }
+    let stmts = parse_fn_body("function f() { const { a, ...rest } = point; }");
+    let mut reg = TypeRegistry::new();
+    reg.register(
+        "Point".to_string(),
+        crate::registry::TypeDef::Struct {
+            fields: vec![
+                ("a".to_string(), RustType::F64),
+                ("b".to_string(), RustType::F64),
+                ("c".to_string(), RustType::F64),
+            ],
+        },
+    );
+    let mut type_env = TypeEnv::new();
+    type_env.insert(
+        "point".to_string(),
+        RustType::Named {
+            name: "Point".to_string(),
+            type_args: vec![],
+        },
+    );
+    let result = convert_stmt_list(&stmts, &reg, None, &mut type_env).unwrap();
+    // { a, ...rest } → let a = point.a; let b = point.b; let c = point.c;
+    assert_eq!(result.len(), 3, "expected 3 stmts, got: {:?}", result);
+    assert!(matches!(&result[0], Stmt::Let { name, .. } if name == "a"));
+    assert!(matches!(&result[1], Stmt::Let { name, .. } if name == "b"));
+    assert!(matches!(&result[2], Stmt::Let { name, .. } if name == "c"));
+}
+
+#[test]
+fn test_object_destructuring_rest_no_type_generates_comment() {
+    // { a, ...rest } = obj where obj has unknown type
+    let stmts = parse_fn_body("function f() { const { a, ...rest } = obj; }");
+    let result =
+        convert_stmt_list(&stmts, &TypeRegistry::new(), None, &mut TypeEnv::new()).unwrap();
+    // Should have at least the explicit field `a` and a comment statement for rest
+    assert!(
+        !result.is_empty(),
+        "expected at least 1 stmt, got: {:?}",
+        result
+    );
+    assert!(matches!(&result[0], Stmt::Let { name, .. } if name == "a"));
+}
+
+#[test]
+fn test_object_destructuring_no_default_unchanged() {
+    // Existing behavior: { x } → let x = obj.x;
+    let stmts = parse_fn_body("function f() { const { x } = obj; }");
+    let result =
+        convert_stmt_list(&stmts, &TypeRegistry::new(), None, &mut TypeEnv::new()).unwrap();
+    assert_eq!(result.len(), 1);
+    assert!(
+        matches!(
+            &result[0],
+            Stmt::Let { name, init: Some(Expr::FieldAccess { .. }), .. } if name == "x"
+        ),
+        "expected plain FieldAccess, got: {:?}",
+        result[0]
+    );
+}

@@ -951,46 +951,155 @@ fn try_convert_object_destructuring(
     let source_expr = convert_expr(source, reg, None, type_env)?;
 
     let mutable = !matches!(var_decl.kind, ast::VarDeclKind::Const);
+    let source_type = crate::transformer::expressions::resolve_expr_type(source, type_env, reg);
     let mut stmts = Vec::new();
 
-    for prop in &obj_pat.props {
+    expand_object_pat_props(
+        &obj_pat.props,
+        &source_expr,
+        mutable,
+        &mut stmts,
+        reg,
+        type_env,
+        source_type.as_ref(),
+    )?;
+
+    Ok(Some(stmts))
+}
+
+/// Recursively expands object destructuring pattern properties into `let` statements.
+fn expand_object_pat_props(
+    props: &[ast::ObjectPatProp],
+    source_expr: &Expr,
+    mutable: bool,
+    stmts: &mut Vec<Stmt>,
+    reg: &TypeRegistry,
+    type_env: &TypeEnv,
+    source_type: Option<&RustType>,
+) -> Result<()> {
+    for prop in props {
         match prop {
             ast::ObjectPatProp::Assign(assign) => {
-                // { x } — shorthand, key and binding name are the same
+                // { x } or { x = default } — shorthand with optional default
                 let field_name = assign.key.sym.to_string();
+                let field_access = Expr::FieldAccess {
+                    object: Box::new(source_expr.clone()),
+                    field: field_name.clone(),
+                };
+                let init_expr = if let Some(default_expr) = &assign.value {
+                    // { x = value } → obj.x.unwrap_or(value) or unwrap_or_else(|| value)
+                    let default_ir = convert_expr(default_expr, reg, None, type_env)?;
+                    match &default_ir {
+                        // String values need unwrap_or_else to avoid eager evaluation
+                        Expr::MethodCall { method, .. } if method == "to_string" => {
+                            Expr::MethodCall {
+                                object: Box::new(field_access),
+                                method: "unwrap_or_else".to_string(),
+                                args: vec![Expr::Closure {
+                                    params: vec![],
+                                    return_type: None,
+                                    body: crate::ir::ClosureBody::Expr(Box::new(default_ir)),
+                                }],
+                            }
+                        }
+                        Expr::StringLit(_) => Expr::MethodCall {
+                            object: Box::new(field_access),
+                            method: "unwrap_or_else".to_string(),
+                            args: vec![Expr::Closure {
+                                params: vec![],
+                                return_type: None,
+                                body: crate::ir::ClosureBody::Expr(Box::new(default_ir)),
+                            }],
+                        },
+                        _ => Expr::MethodCall {
+                            object: Box::new(field_access),
+                            method: "unwrap_or".to_string(),
+                            args: vec![default_ir],
+                        },
+                    }
+                } else {
+                    field_access
+                };
                 stmts.push(Stmt::Let {
                     mutable,
-                    name: field_name.clone(),
+                    name: field_name,
                     ty: None,
-                    init: Some(Expr::FieldAccess {
-                        object: Box::new(source_expr.clone()),
-                        field: field_name,
-                    }),
+                    init: Some(init_expr),
                 });
             }
             ast::ObjectPatProp::KeyValue(kv) => {
-                // { x: newX } — rename
                 let field_name = extract_prop_name(&kv.key)
                     .map_err(|_| anyhow!("unsupported destructuring key"))?;
-                let binding_name = extract_pat_ident_name(kv.value.as_ref())
-                    .map_err(|_| anyhow!("unsupported destructuring value pattern"))?;
-                stmts.push(Stmt::Let {
-                    mutable,
-                    name: binding_name,
-                    ty: None,
-                    init: Some(Expr::FieldAccess {
-                        object: Box::new(source_expr.clone()),
-                        field: field_name,
-                    }),
-                });
+                let nested_source = Expr::FieldAccess {
+                    object: Box::new(source_expr.clone()),
+                    field: field_name,
+                };
+                match kv.value.as_ref() {
+                    // { a: { b, c } } — nested destructuring
+                    ast::Pat::Object(inner_pat) => {
+                        expand_object_pat_props(
+                            &inner_pat.props,
+                            &nested_source,
+                            mutable,
+                            stmts,
+                            reg,
+                            type_env,
+                            None,
+                        )?;
+                    }
+                    // { x: newX } — rename
+                    _ => {
+                        let binding_name = extract_pat_ident_name(kv.value.as_ref())
+                            .map_err(|_| anyhow!("unsupported destructuring value pattern"))?;
+                        stmts.push(Stmt::Let {
+                            mutable,
+                            name: binding_name,
+                            ty: None,
+                            init: Some(nested_source),
+                        });
+                    }
+                }
             }
-            ast::ObjectPatProp::Rest(_) => {
-                return Err(anyhow!("rest pattern in destructuring is not supported"));
+            ast::ObjectPatProp::Rest(_rest) => {
+                // Collect explicitly named fields in this destructuring
+                let explicit_fields: Vec<String> = props
+                    .iter()
+                    .filter_map(|p| match p {
+                        ast::ObjectPatProp::Assign(a) => Some(a.key.sym.to_string()),
+                        ast::ObjectPatProp::KeyValue(kv) => extract_prop_name(&kv.key).ok(),
+                        _ => None,
+                    })
+                    .collect();
+
+                // Try to get remaining fields from TypeRegistry
+                let type_name = source_type.and_then(|ty| match ty {
+                    RustType::Named { name, .. } => Some(name.as_str()),
+                    _ => None,
+                });
+                if let Some(crate::registry::TypeDef::Struct { fields }) =
+                    type_name.and_then(|n| reg.get(n))
+                {
+                    for (field_name, _) in fields {
+                        if !explicit_fields.contains(field_name) {
+                            stmts.push(Stmt::Let {
+                                mutable,
+                                name: field_name.clone(),
+                                ty: None,
+                                init: Some(Expr::FieldAccess {
+                                    object: Box::new(source_expr.clone()),
+                                    field: field_name.clone(),
+                                }),
+                            });
+                        }
+                    }
+                }
+                // If type info unavailable, rest is silently skipped
+                // (the explicit fields are still expanded)
             }
         }
     }
 
-    Ok(Some(stmts))
+    Ok(())
 }
 
 /// Checks whether a case body is terminated (break, return, throw, or continue).

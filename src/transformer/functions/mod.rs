@@ -372,53 +372,230 @@ fn convert_object_destructuring_param(
         _ => "param".to_string(),
     };
 
+    // Keep a reference to the type for rest pattern expansion before moving into param
+    let rust_type_ref = rust_type.clone();
     let param = Param {
         name: param_name.clone(),
         ty: Some(rust_type),
     };
+    let rust_type = rust_type_ref;
 
     let mut stmts = Vec::new();
     for prop in &obj_pat.props {
         match prop {
             ast::ObjectPatProp::Assign(assign) => {
-                // { x } — shorthand
+                // { x } or { x = default } — shorthand with optional default
                 let field_name = assign.key.sym.to_string();
+                let field_access = Expr::FieldAccess {
+                    object: Box::new(Expr::Ident(param_name.clone())),
+                    field: field_name.clone(),
+                };
+                let init_expr = if let Some(default_expr) = &assign.value {
+                    let default_ir = crate::transformer::expressions::convert_expr(
+                        default_expr,
+                        reg,
+                        None,
+                        &crate::transformer::TypeEnv::new(),
+                    )?;
+                    match &default_ir {
+                        Expr::MethodCall { method, .. } if method == "to_string" => {
+                            Expr::MethodCall {
+                                object: Box::new(field_access),
+                                method: "unwrap_or_else".to_string(),
+                                args: vec![Expr::Closure {
+                                    params: vec![],
+                                    return_type: None,
+                                    body: crate::ir::ClosureBody::Expr(Box::new(default_ir)),
+                                }],
+                            }
+                        }
+                        Expr::StringLit(_) => Expr::MethodCall {
+                            object: Box::new(field_access),
+                            method: "unwrap_or_else".to_string(),
+                            args: vec![Expr::Closure {
+                                params: vec![],
+                                return_type: None,
+                                body: crate::ir::ClosureBody::Expr(Box::new(default_ir)),
+                            }],
+                        },
+                        _ => Expr::MethodCall {
+                            object: Box::new(field_access),
+                            method: "unwrap_or".to_string(),
+                            args: vec![default_ir],
+                        },
+                    }
+                } else {
+                    field_access
+                };
                 stmts.push(Stmt::Let {
                     mutable: false,
-                    name: field_name.clone(),
+                    name: field_name,
                     ty: None,
-                    init: Some(Expr::FieldAccess {
-                        object: Box::new(Expr::Ident(param_name.clone())),
-                        field: field_name,
-                    }),
+                    init: Some(init_expr),
                 });
             }
             ast::ObjectPatProp::KeyValue(kv) => {
-                // { x: newX } — rename
                 let field_name = extract_prop_name(&kv.key)
                     .map_err(|_| anyhow!("unsupported destructuring key"))?;
-                let binding_name = extract_pat_ident_name(kv.value.as_ref())
-                    .map_err(|_| anyhow!("unsupported destructuring value pattern"))?;
-                let binding_name = pascal_to_snake(&binding_name);
-                stmts.push(Stmt::Let {
-                    mutable: false,
-                    name: binding_name,
-                    ty: None,
-                    init: Some(Expr::FieldAccess {
-                        object: Box::new(Expr::Ident(param_name.clone())),
-                        field: field_name,
-                    }),
-                });
+                let nested_source = Expr::FieldAccess {
+                    object: Box::new(Expr::Ident(param_name.clone())),
+                    field: field_name,
+                };
+                match kv.value.as_ref() {
+                    // { a: { b, c } } — nested destructuring
+                    ast::Pat::Object(inner_pat) => {
+                        expand_fn_param_object_props(
+                            &inner_pat.props,
+                            &nested_source,
+                            &mut stmts,
+                            reg,
+                        )?;
+                    }
+                    // { x: newX } — rename
+                    _ => {
+                        let binding_name = extract_pat_ident_name(kv.value.as_ref())
+                            .map_err(|_| anyhow!("unsupported destructuring value pattern"))?;
+                        let binding_name = pascal_to_snake(&binding_name);
+                        stmts.push(Stmt::Let {
+                            mutable: false,
+                            name: binding_name,
+                            ty: None,
+                            init: Some(nested_source),
+                        });
+                    }
+                }
             }
-            ast::ObjectPatProp::Rest(_) => {
-                return Err(anyhow!(
-                    "rest pattern in destructuring parameter is not supported"
-                ));
+            ast::ObjectPatProp::Rest(_rest) => {
+                // Collect explicitly named fields
+                let explicit_fields: Vec<String> = obj_pat
+                    .props
+                    .iter()
+                    .filter_map(|p| match p {
+                        ast::ObjectPatProp::Assign(a) => Some(a.key.sym.to_string()),
+                        ast::ObjectPatProp::KeyValue(kv) => extract_prop_name(&kv.key).ok(),
+                        _ => None,
+                    })
+                    .collect();
+
+                // Expand remaining fields from TypeRegistry
+                let type_name = match &rust_type {
+                    RustType::Named { name, .. } => Some(name.as_str()),
+                    _ => None,
+                };
+                if let Some(crate::registry::TypeDef::Struct { fields }) =
+                    type_name.and_then(|n| reg.get(n))
+                {
+                    for (field_name, _) in fields {
+                        if !explicit_fields.contains(field_name) {
+                            stmts.push(Stmt::Let {
+                                mutable: false,
+                                name: field_name.clone(),
+                                ty: None,
+                                init: Some(Expr::FieldAccess {
+                                    object: Box::new(Expr::Ident(param_name.clone())),
+                                    field: field_name.clone(),
+                                }),
+                            });
+                        }
+                    }
+                }
             }
         }
     }
 
     Ok((param, stmts))
+}
+
+/// Recursively expands nested object destructuring properties for function parameters.
+fn expand_fn_param_object_props(
+    props: &[ast::ObjectPatProp],
+    source_expr: &Expr,
+    stmts: &mut Vec<Stmt>,
+    reg: &TypeRegistry,
+) -> Result<()> {
+    for prop in props {
+        match prop {
+            ast::ObjectPatProp::Assign(assign) => {
+                let field_name = assign.key.sym.to_string();
+                let field_access = Expr::FieldAccess {
+                    object: Box::new(source_expr.clone()),
+                    field: field_name.clone(),
+                };
+                let init_expr = if let Some(default_expr) = &assign.value {
+                    let default_ir = crate::transformer::expressions::convert_expr(
+                        default_expr,
+                        reg,
+                        None,
+                        &crate::transformer::TypeEnv::new(),
+                    )?;
+                    match &default_ir {
+                        Expr::MethodCall { method, .. } if method == "to_string" => {
+                            Expr::MethodCall {
+                                object: Box::new(field_access),
+                                method: "unwrap_or_else".to_string(),
+                                args: vec![Expr::Closure {
+                                    params: vec![],
+                                    return_type: None,
+                                    body: crate::ir::ClosureBody::Expr(Box::new(default_ir)),
+                                }],
+                            }
+                        }
+                        Expr::StringLit(_) => Expr::MethodCall {
+                            object: Box::new(field_access),
+                            method: "unwrap_or_else".to_string(),
+                            args: vec![Expr::Closure {
+                                params: vec![],
+                                return_type: None,
+                                body: crate::ir::ClosureBody::Expr(Box::new(default_ir)),
+                            }],
+                        },
+                        _ => Expr::MethodCall {
+                            object: Box::new(field_access),
+                            method: "unwrap_or".to_string(),
+                            args: vec![default_ir],
+                        },
+                    }
+                } else {
+                    field_access
+                };
+                stmts.push(Stmt::Let {
+                    mutable: false,
+                    name: field_name,
+                    ty: None,
+                    init: Some(init_expr),
+                });
+            }
+            ast::ObjectPatProp::KeyValue(kv) => {
+                let field_name = extract_prop_name(&kv.key)
+                    .map_err(|_| anyhow!("unsupported destructuring key"))?;
+                let nested_source = Expr::FieldAccess {
+                    object: Box::new(source_expr.clone()),
+                    field: field_name,
+                };
+                match kv.value.as_ref() {
+                    ast::Pat::Object(inner_pat) => {
+                        expand_fn_param_object_props(&inner_pat.props, &nested_source, stmts, reg)?;
+                    }
+                    _ => {
+                        let binding_name = extract_pat_ident_name(kv.value.as_ref())
+                            .map_err(|_| anyhow!("unsupported destructuring value pattern"))?;
+                        let binding_name = pascal_to_snake(&binding_name);
+                        stmts.push(Stmt::Let {
+                            mutable: false,
+                            name: binding_name,
+                            ty: None,
+                            init: Some(nested_source),
+                        });
+                    }
+                }
+            }
+            ast::ObjectPatProp::Rest(_) => {
+                // Rest in nested destructuring: silently skip
+                // (type info not available at this level)
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Converts a snake_case name to PascalCase.

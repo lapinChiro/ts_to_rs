@@ -813,3 +813,36 @@ fn test_convert_last_return_to_tail_empty_body_noop() {
     convert_last_return_to_tail(&mut body);
     assert!(body.is_empty());
 }
+
+#[test]
+fn test_object_destructuring_param_default_number_generates_unwrap_or() {
+    let fn_decl = parse_fn_decl("function f({ x = 0 }: { x?: number }): void { console.log(x); }");
+    let reg = TypeRegistry::new();
+    let (items, _) = convert_fn_decl(&fn_decl, Visibility::Private, &reg, false).unwrap();
+    match &items[0] {
+        Item::Fn { body, .. } => {
+            // First statement should be the destructuring expansion with unwrap_or
+            assert!(
+                !body.is_empty(),
+                "expected at least 1 body statement, got {}",
+                body.len()
+            );
+            match &body[0] {
+                Stmt::Let {
+                    name,
+                    init: Some(expr),
+                    ..
+                } => {
+                    assert_eq!(name, "x");
+                    assert!(
+                        matches!(expr, Expr::MethodCall { method, .. } if method == "unwrap_or"),
+                        "expected unwrap_or call, got: {:?}",
+                        expr
+                    );
+                }
+                other => panic!("expected Let with unwrap_or, got: {:?}", other),
+            }
+        }
+        other => panic!("expected Fn item, got: {:?}", other),
+    }
+}
