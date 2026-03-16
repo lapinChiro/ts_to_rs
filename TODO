@@ -30,46 +30,23 @@
 
 ### Tier 1: 高優先度 — 伝播リスクが高い、または ROI が極めて高い
 
-（I-52〜I-57 は修正済み。対応 PRD: `e2e-bugfix-codegen-semantics.md`）
-（I-63, I-64 は PRD 化済み: `backlog/e2e-test-expansion.md`）
+（I-65, I-68 は修正済み）
 
-- **[I-65]** **`undefined` リテラルと `!== undefined` の変換** — 式変換正確性
-    - `undefined` リテラルが Rust の `None` に変換されない（`undefined` のまま出力される）
-    - `x !== undefined` が `x.is_some()` に変換されない（`x != undefined` のまま出力される）
-    - `T | undefined` 型の変数にリテラルを代入する際、`Some()` ラップが付与されない（例: `let a: Option<f64> = 42.0;` → `Some(42.0)` であるべき）
-    - 影響: optional chaining, nullish coalescing の E2E テストが `undefined` を含むパターンで動作しない
-    - E2E テスト拡充（I-63）で発見
+### Tier 2: 中優先度 — 直接的な価値が高い
+
+- **[I-60]** **switch の非リテラル case が変数バインディングになる** — 変換正確性
+    - `case A:` が `A =>` に変換されるが、Rust では変数バインディング（新しい `A` に束縛）であり、TS の `x === A` 比較と意味が異なる
+    - 対策: 非リテラル case を検出し、マッチガード `x if x == A =>` を生成、または if-chain にフォールバック
+    - switch E2E テスト追加済みのため、退行検出が可能
+
+- **[I-67]** **クロージャの String パラメータにリテラルを渡すと型不一致** — 式変換正確性
+    - `const greet = (name: string): string => ...;  greet("World")` で `"World"` が `.to_string()` なしで渡される
+    - 根本原因: クロージャの `Stmt::Let` が `ty: None` のため TypeEnv に `RustType::Fn` が登録されない。`convert_call_expr` の TypeEnv Fn lookup インフラは実装済み（I-38 ステップ 5）だが、型情報の登録側が欠如
+    - 修正方針: arrow 式変換時に `Fn { params, return_type }` 型を推論し、`Stmt::Let` の `ty` に設定する
 
 - **[I-66]** **数値 enum の `Display` / 数値アクセス未対応** — コード生成
     - `console.log(Status.Active)` で TS は `1` を出力するが、Rust の enum は `Display` 未実装でコンパイルエラー
     - 数値 enum のバリアントを `println!` で出力するには `as i32` キャストまたは `Display` 実装が必要
-    - E2E テスト拡充（I-63）で発見
-
-- **[I-67]** **クロージャの String パラメータにリテラルを渡すと型不一致** — 式変換正確性
-    - `const greet = (name: string): string => ...;  greet("World")` で `"World"` が `.to_string()` なしで渡される
-    - 関数呼び出しの TypeEnv 引数型伝搬（I-38 ステップ 5）は通常関数のみ対応。クロージャ変数の Fn 型からのパラメータ型取得が未対応
-    - E2E テスト拡充（I-63）で発見
-
-- **[I-68]** **`self.field` の String 結合で所有権エラー** — コード生成
-    - `self.name + " suffix"` で `self.name` が move されてコンパイルエラー
-    - `self.name.clone() + " suffix"` または `format!` マクロに変換する必要がある
-    - 初版は全 clone 方針のため、`self.field` の文字列結合で `.clone()` を付与すべき
-    - E2E テスト拡充（I-63）で発見
-
-### Tier 2: 中優先度 — 直接的な価値が高い
-
-- **[I-49]** **ブラックボックステスト拡張: 標準入力** — テスト品質
-    - I-48 の拡張。stdin からの入力を受け取り、処理結果を stdout に出力するスクリプトの検証
-    - 🔗 依存: I-48（テストインフラ）
-
-- **[I-50]** **ブラックボックステスト拡張: ファイル I/O** — テスト品質
-    - I-48 の拡張。ファイルの読み書きを行うスクリプトの検証
-    - 🔗 依存: I-48（テストインフラ）
-
-- **[I-51]** **ブラックボックステスト拡張: HTTP リクエスト/レスポンス** — テスト品質
-    - I-48 の拡張。HTTP サーバーの起動・リクエスト処理・レスポンス検証
-    - 🔗 依存: I-48（テストインフラ）
-
 
 - **[I-10]** **条件内代入式の対応** — 式変換正確性
     - `while (x = getValue())` → `loop { let x = getValue(); if !x { break; } ... }` パターンへ変換
@@ -92,6 +69,20 @@
 - **[I-15]** **`+x`（単項プラス / 数値変換）** — 式変換
     - TypeEnv で型判定可能。`+x` → 型に応じて `x` / `x.parse::<f64>()` 等に変換
 
+- **[I-28]** **conditional type の分岐型改善** — 型変換正確性
+    - 型推論基盤（I-38）完了済みにより、true branch フォールバック以外の選択肢が利用可能に
+
+- **[I-62]** **`is_string_type` の `Option<String>` ハック除去** — 型推論
+    - `is_string_type` が `Option<String>` を `String` 扱いするハックが残存
+    - 除去には TypeEnv の再代入時型更新（`x = x ?? "default"` 後に `x` が `String` になる）が前提
+    - `convert_assign_expr` で TypeEnv を更新し、nullish coalescing 後の型が `Option` から inner type に変わる仕組みが必要
+    - I-65（undefined/None 変換）完了済みにより、Option セマンティクスの基盤が整った
+
+- **[I-69]** **型 narrowing（型ガード後の型絞り込み）** — 型推論
+    - `typeof x === "string"` の後のブロック内で `x` の型を `String` に絞り込む
+    - `instanceof` 後も同様
+    - I-38（型推論基盤）+ I-45（型ガード式変換）ともに完了済み。着手可能
+
 - **[I-11]** **三項演算子の分岐型不一致** — 式変換正確性
     - `cond ? "str" : 42` のように分岐の型が異なる場合、Rust の `if` 式では型が一致しないためコンパイルエラーになる
     - 対策: enum ラップ、片方の型変換、または `Box<dyn Any>` フォールバック
@@ -100,6 +91,19 @@
     - `string | Promise<string>` で `Promise<T>` が union メンバーにある場合の展開
 
 - **[I-13]** **super() の位置ベースフィールドマッピング** — 式変換正確性
+
+- **[I-49]** **ブラックボックステスト拡張: 標準入力** — テスト品質
+    - I-48 の拡張。stdin からの入力を受け取り、処理結果を stdout に出力するスクリプトの検証
+
+- **[I-50]** **ブラックボックステスト拡張: ファイル I/O** — テスト品質
+    - I-48 の拡張。ファイルの読み書きを行うスクリプトの検証
+
+- **[I-51]** **ブラックボックステスト拡張: HTTP リクエスト/レスポンス** — テスト品質
+    - I-48 の拡張。HTTP サーバーの起動・リクエスト処理・レスポンス検証
+
+- **[I-61]** **型推論: チェーンメソッド呼び出しの戻り値型追跡** — 型推論
+    - `arr.filter(...).map(...)` のようなチェーンメソッド呼び出しで、各メソッドの戻り値型を追跡する
+    - 前提: ビルトイン API（`Array.map`, `Array.filter`, `String.split` 等）の戻り値型テーブルが必要
 
 - **[I-18]** **re-export の追跡** — import/export
     - `transform_import` / `transform_export_named` は実装済み
@@ -123,25 +127,11 @@
     - TS 固有の問題への対処コード（IDE 表示改善等）→ Rust では不要、コメント/スキップ生成
     - 調査済み: `report/tier3-conditional-types-rust-approaches.md` に Group A〜D の分析あり
 
-- **[I-62]** **`is_string_type` の `Option<String>` ハック除去** — 型推論
-    - `is_string_type` が `Option<String>` を `String` 扱いするハックが残存
-    - 除去には TypeEnv の再代入時型更新（`x = x ?? "default"` 後に `x` が `String` になる）が前提
-    - `convert_assign_expr` で TypeEnv を更新し、nullish coalescing 後の型が `Option` から inner type に変わる仕組みが必要
-    - 🔗 依存: I-38（型推論基盤）完了済み。独立して実装可能
-
-- **[I-61]** **型推論: チェーンメソッド呼び出しの戻り値型追跡** — 型推論
-    - I-38 でカバーされない「レベル 3」の型推論。`arr.filter(...).map(...)` のようなチェーンメソッド呼び出しで、各メソッドの戻り値型を追跡する
-    - 前提: ビルトイン API（`Array.map`, `Array.filter`, `String.split` 等）の戻り値型テーブルが必要。型推論基盤とは独立した機能
-    - I-38 は「識別子 → 多段フィールドアクセス → 関数呼び出し戻り値（TypeRegistry 登録済み）」までをカバー。チェーンメソッドはその先の範囲
-    - 本来、型推論は全ての式ノードで型を解決できるべきであり、この項目は I-38 では意図的にスコープ外とした残課題
-    - 🔗 依存: I-38（型推論基盤）
-
 ### Tier 3: 低優先度
 
 - **[I-39]** **Transformer の Range 生成で `Expr::IntLit` を使用** — IR 整合性
     - `Expr::IntLit` は IR に追加済みだが、for ループの Range 生成（`0..n`）で `NumberLit(0.0)` を生成し、Generator の `generate_range_bound` が `as i64` キャストしている
     - Transformer 側で整数と判定できる場合に `IntLit` を直接生成すれば、Generator のキャスト不要
-    - 関連: for-range body に常時 `let i = i as f64;` を挿入する暫定実装がある。IntLit 対応と合わせて、整数限定 for-range では不要な f64 キャストを省略可能
     - 動作上は問題なし。孤立した改善
 - **[I-44]** **合成 struct 名のグローバルカウンタによる非決定性** — テスト品質
     - `_TypeLit0`, `_Intersection1` 等の合成 struct 名は `AtomicU32` グローバルカウンタで生成
@@ -149,15 +139,12 @@
     - 対策案: テスト前にカウンタをリセットする API、またはファイル単位のローカルカウンタ
 - **[I-26]** **union 内の未対応型** — 型構文（Hono 2件）
 - **[I-27]** **タプルの optional 要素** — 型構文
-- **[I-28]** **conditional type の分岐型改善** — 型変換正確性
-    - I-38（型推論）が前提。型推論なしでは true branch フォールバックが唯一の選択肢
-    - 🔗 依存: I-38
 - **[I-29]** **ネスト async 関数** — 文（Hono 1件解消）
 - **[I-30]** **生成コードの Cargo.toml への依存クレート追加** — コード生成
     - I-03 完了済み。`tests/compile-check/Cargo.toml` の依存情報を参考に生成物の Cargo.toml を作成可能
-- **[I-31]** **expressions/mod.rs のモジュール分割** — リファクタリング（1,593 行）
+- **[I-31]** **expressions/mod.rs のモジュール分割** — リファクタリング（2,057 行）
 - **[I-32]** **コンパイルテストのスキップ解消** — テスト品質（4/51 がスキップ中）
-    - I-03 完了済みで外部クレート起因 4 件は解消。残り 4 件（indexed-access-type, conditional-type, interface-mixed, union-type）は個別対応が必要
+    - 残り 4 件（indexed-access-type, conditional-type, interface-mixed, union-type）は個別対応が必要
 - **[I-33]** **非プリミティブ type assertion のコメント保持** — type assertion
 - **[I-34]** **Math.random() → `rand` クレート** — 組み込み API
 - **[I-35]** **indexed access type の非文字列キー対応** — 型構文（Hono 2件）
@@ -170,10 +157,6 @@
     - `Pick<Partial<T>, K>` のように inner が utility type の場合、`resolve_utility_inner_fields` が直接解決できず失敗する
     - `Partial`/`Required` は `resolve_utility_inner_with_conversion` でネスト対応済みだが、`Pick`/`Omit` は未対応
     - 動作上は inner type をフォールバックで返すため、パニックはしない
-- **[I-60]** **switch の非リテラル case が変数バインディングになる** — 変換正確性
-    - `case A:` が `A =>` に変換されるが、Rust では変数バインディング（新しい `A` に束縛）であり、TS の `x === A` 比較と意味が異なる
-    - 対策: 非リテラル case を検出し、fall-through パス（if-chain）にフォールバック、またはマッチガード `x if x == A =>` を生成
-    - 定数 case（`const A = 1` 相当）のみリテラルパターンを許容し、変数参照 case は if-chain に切り替える
 
 
 ---
@@ -184,7 +167,6 @@
 
 - ジェネリック型の具体化 — ジェネリクス変換（大テーマ）が前提
 - ジェネリック型を含む intersection（Hono 1件）— ジェネリック型の展開が前提
-- 型 narrowing（型ガード後の型絞り込み）— I-38（型推論基盤）+ I-45（型ガードの式変換）が前提
 
 ### 設計方針の決定待ち
 

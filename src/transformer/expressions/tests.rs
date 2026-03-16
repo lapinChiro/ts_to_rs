@@ -3305,3 +3305,104 @@ fn test_instanceof_unknown_type_resolves_placeholder() {
     let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &env).unwrap();
     assert_eq!(result, Expr::BoolLit(true));
 }
+
+// --- I-68: self.field string concat clone ---
+
+#[test]
+fn test_self_field_string_concat_gets_clone() {
+    // this.name + " suffix" → self.name.clone() + &" suffix"
+    let swc_expr = parse_expr("this.name + \" suffix\";");
+    let reg = TypeRegistry::new();
+    let mut env = TypeEnv::new();
+    // Mark "this" as having a string field to trigger string concat context
+    env.insert(
+        "this".to_string(),
+        RustType::Named {
+            name: "Self".to_string(),
+            type_args: vec![],
+        },
+    );
+    let result = convert_expr(&swc_expr, &reg, Some(&RustType::String), &env).unwrap();
+    match &result {
+        Expr::BinaryOp { left, op, .. } => {
+            assert_eq!(*op, BinOp::Add);
+            // LHS should be self.name.clone()
+            assert!(
+                matches!(left.as_ref(), Expr::MethodCall { method, .. } if method == "clone"),
+                "expected .clone() on self.field, got: {:?}",
+                left
+            );
+        }
+        _ => panic!("expected BinaryOp, got: {:?}", result),
+    }
+}
+
+// --- I-65: undefined / Option semantics ---
+
+#[test]
+fn test_undefined_literal_converts_to_none() {
+    let swc_expr = parse_expr("undefined;");
+    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    assert_eq!(result, Expr::Ident("None".to_string()));
+}
+
+#[test]
+fn test_equals_undefined_converts_to_is_none() {
+    let swc_expr = parse_expr("x === undefined;");
+    let mut env = TypeEnv::new();
+    env.insert("x".to_string(), RustType::Option(Box::new(RustType::F64)));
+    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &env).unwrap();
+    assert!(
+        matches!(&result, Expr::MethodCall { method, .. } if method == "is_none"),
+        "expected is_none, got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_not_equals_undefined_converts_to_is_some() {
+    let swc_expr = parse_expr("x !== undefined;");
+    let mut env = TypeEnv::new();
+    env.insert("x".to_string(), RustType::Option(Box::new(RustType::F64)));
+    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &env).unwrap();
+    assert!(
+        matches!(&result, Expr::MethodCall { method, .. } if method == "is_some"),
+        "expected is_some, got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_option_expected_wraps_literal_in_some() {
+    let swc_expr = parse_expr("42;");
+    let expected = RustType::Option(Box::new(RustType::F64));
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        Some(&expected),
+        &TypeEnv::new(),
+    )
+    .unwrap();
+    assert_eq!(
+        result,
+        Expr::FnCall {
+            name: "Some".to_string(),
+            args: vec![Expr::NumberLit(42.0)],
+        }
+    );
+}
+
+#[test]
+fn test_option_expected_undefined_stays_none() {
+    let swc_expr = parse_expr("undefined;");
+    let expected = RustType::Option(Box::new(RustType::F64));
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        Some(&expected),
+        &TypeEnv::new(),
+    )
+    .unwrap();
+    // Should be None, not Some(None)
+    assert_eq!(result, Expr::Ident("None".to_string()));
+}

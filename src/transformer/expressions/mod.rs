@@ -27,8 +27,32 @@ pub fn convert_expr(
     expected: Option<&RustType>,
     type_env: &TypeEnv,
 ) -> Result<Expr> {
+    // Option<T> expected with literal/identifier values: wrap in Some()
+    if let Some(RustType::Option(inner)) = expected {
+        // undefined → None (no wrapping)
+        if matches!(expr, ast::Expr::Ident(ident) if ident.sym.as_ref() == "undefined") {
+            return Ok(Expr::Ident("None".to_string()));
+        }
+        // Only wrap literals and simple identifiers in Some()
+        // Complex expressions (method calls, optional chaining, etc.) may already return Option
+        if matches!(expr, ast::Expr::Lit(_)) {
+            let inner_result = convert_expr(expr, reg, Some(inner), type_env)?;
+            return Ok(Expr::FnCall {
+                name: "Some".to_string(),
+                args: vec![inner_result],
+            });
+        }
+    }
+
     match expr {
-        ast::Expr::Ident(ident) => Ok(Expr::Ident(ident.sym.to_string())),
+        ast::Expr::Ident(ident) => {
+            let name = ident.sym.to_string();
+            if name == "undefined" {
+                Ok(Expr::Ident("None".to_string()))
+            } else {
+                Ok(Expr::Ident(name))
+            }
+        }
         ast::Expr::Lit(lit) => convert_lit(lit, expected),
         ast::Expr::Bin(bin) => convert_bin_expr(bin, reg, expected, type_env),
         ast::Expr::Tpl(tpl) => convert_template_literal(tpl, reg, type_env),
@@ -119,6 +143,11 @@ fn convert_bin_expr(
         return Ok(result);
     }
 
+    // x === undefined / x !== undefined pattern
+    if let Some(result) = try_convert_undefined_comparison(bin, type_env, reg) {
+        return Ok(result);
+    }
+
     // x instanceof ClassName pattern
     if bin.op == ast::BinaryOp::InstanceOf {
         return Ok(convert_instanceof(bin, type_env));
@@ -164,11 +193,23 @@ fn convert_bin_expr(
 
     // In string concat context:
     // - LHS StringLit needs .to_string() (Rust: &str can't use + operator directly)
+    // - LHS self.field needs .clone() (Rust: can't move out of &self)
     // - RHS non-literal needs & (Rust: String + &str)
     let left = if is_string_context && matches!(left, Expr::StringLit(_)) {
         Expr::MethodCall {
             object: Box::new(left),
             method: "to_string".to_string(),
+            args: vec![],
+        }
+    } else if is_string_context
+        && matches!(
+            &left,
+            Expr::FieldAccess { object, .. } if matches!(object.as_ref(), Expr::Ident(name) if name == "self")
+        )
+    {
+        Expr::MethodCall {
+            object: Box::new(left),
+            method: "clone".to_string(),
             args: vec![],
         }
     } else {
@@ -1310,12 +1351,15 @@ fn convert_call_args_with_types(
                 other => other,
             };
             let mut expr = convert_expr(&arg.expr, reg, expected, type_env)?;
-            // Wrap in Some(...) when the parameter type is Option<T>
+            // Wrap in Some(...) when the parameter type is Option<T>,
+            // but skip if the value is already None (from undefined)
             if let Some(RustType::Option(_)) = param_ty {
-                expr = Expr::FnCall {
-                    name: "Some".to_string(),
-                    args: vec![expr],
-                };
+                if !matches!(&expr, Expr::Ident(name) if name == "None") {
+                    expr = Expr::FnCall {
+                        name: "Some".to_string(),
+                        args: vec![expr],
+                    };
+                }
             }
             Ok(expr)
         })
@@ -1803,6 +1847,41 @@ fn resolve_field_type(
 
 /// Detects `typeof x === "type"` / `typeof x !== "type"` patterns and resolves
 /// them using TypeEnv. Returns `None` if the pattern is not recognized.
+/// Detects `x === undefined` / `x !== undefined` and converts to `is_none()` / `is_some()`.
+fn try_convert_undefined_comparison(
+    bin: &ast::BinExpr,
+    type_env: &TypeEnv,
+    reg: &TypeRegistry,
+) -> Option<Expr> {
+    let is_eq = matches!(bin.op, ast::BinaryOp::EqEq | ast::BinaryOp::EqEqEq);
+    let is_neq = matches!(bin.op, ast::BinaryOp::NotEq | ast::BinaryOp::NotEqEq);
+    if !is_eq && !is_neq {
+        return None;
+    }
+
+    // Extract the non-undefined side
+    let other_expr = if is_undefined_ident(&bin.right) {
+        Some(bin.left.as_ref())
+    } else if is_undefined_ident(&bin.left) {
+        Some(bin.right.as_ref())
+    } else {
+        None
+    }?;
+
+    let other_ir = convert_expr(other_expr, reg, None, type_env).ok()?;
+    let method = if is_eq { "is_none" } else { "is_some" };
+    Some(Expr::MethodCall {
+        object: Box::new(other_ir),
+        method: method.to_string(),
+        args: vec![],
+    })
+}
+
+/// Returns true if the expression is the `undefined` identifier.
+fn is_undefined_ident(expr: &ast::Expr) -> bool {
+    matches!(expr, ast::Expr::Ident(ident) if ident.sym.as_ref() == "undefined")
+}
+
 fn try_convert_typeof_comparison(
     bin: &ast::BinExpr,
     type_env: &TypeEnv,
