@@ -80,13 +80,6 @@
     - ネストしたパス（`obj.inner.field = 1`、`container.items.push(x)`）は未検出で `let`（不変）のまま → コンパイルエラー
     - 背景: `const` 変数の body スキャンによるミュータビリティ推論（実装済み）の制限事項
 
-#### 型推論
-
-- **[I-98]** **型注釈なし変数の TypeEnv 登録** — 型推論
-    - `const g = new Greeter("Alice")` で型注釈がないと TypeEnv に `g` が登録されない
-    - 初期化式の `resolve_expr_type` 結果を TypeEnv に入れることで、後続のメソッド呼び出しで引数型 lookup が有効になる
-    - `convert_stmt_list` の `Stmt::Let { ty: None, init: Some(init) }` ケースで `resolve_expr_type` を実行
-
 ### Tier 2: 中優先度 — E2E テスト拡充・検証
 
 既に実装済みの変換機能に対する E2E テスト追加。変換の正確性は保証されている前提で、実行時の挙動一致を検証する。

@@ -454,6 +454,11 @@ fn test_e2e_async_await_ts_rust_stdout_match() {
 }
 
 #[test]
+fn test_e2e_type_infer_ts_rust_stdout_match() {
+    run_e2e_test("type_infer");
+}
+
+#[test]
 fn test_e2e_multi_import_basic_ts_rust_stdout_match() {
     run_e2e_multi_file_test("import_basic");
 }

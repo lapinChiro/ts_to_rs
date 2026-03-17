@@ -214,6 +214,13 @@ fn test_async_await() {
 }
 
 #[test]
+fn test_type_infer_unannotated() {
+    let input = fs::read_to_string("tests/fixtures/type-infer-unannotated.input.ts").unwrap();
+    let output = transpile(&input).unwrap();
+    insta::assert_snapshot!(output);
+}
+
+#[test]
 fn test_unary_operators() {
     let input = fs::read_to_string("tests/fixtures/unary-operators.input.ts").unwrap();
     let output = transpile(&input).unwrap();

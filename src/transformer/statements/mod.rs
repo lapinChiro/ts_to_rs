@@ -7,7 +7,7 @@ use swc_ecma_ast as ast;
 
 use crate::ir::{BinOp, ClosureBody, Expr, MatchArm, MatchPattern, Param, RustType, Stmt, UnOp};
 use crate::registry::TypeRegistry;
-use crate::transformer::expressions::convert_expr;
+use crate::transformer::expressions::{convert_expr, resolve_expr_type};
 use crate::transformer::types::convert_ts_type;
 use crate::transformer::TypeEnv;
 use crate::transformer::{extract_pat_ident_name, extract_prop_name, single_declarator};
@@ -736,7 +736,7 @@ pub fn convert_stmt_list(
                 } => {
                     type_env.insert(name.clone(), ty.clone());
                 }
-                // Infer Fn type from closure init for TypeEnv (enables .to_string() at call sites)
+                // Infer type from init expression for TypeEnv
                 Stmt::Let {
                     name,
                     ty: None,
@@ -744,7 +744,13 @@ pub fn convert_stmt_list(
                     ..
                 } => {
                     if let Some(fn_type) = infer_fn_type_from_closure(&Some(init.clone())) {
+                        // Closure → Fn type (from IR)
                         type_env.insert(name.clone(), fn_type);
+                    } else if let Some(resolved) = extract_var_decl_init(stmt, name)
+                        .and_then(|ast_init| resolve_expr_type(ast_init, type_env, reg))
+                    {
+                        // General type inference from AST init expression
+                        type_env.insert(name.clone(), resolved);
                     }
                 }
                 _ => {}
@@ -754,6 +760,25 @@ pub fn convert_stmt_list(
     }
     mark_mutated_vars(&mut result);
     Ok(result)
+}
+
+/// Extracts the init expression from a VarDecl AST statement
+/// when the declarator has a simple identifier matching `expected_name`.
+///
+/// Returns `None` for destructuring patterns (array/object) because a single
+/// AST VarDecl expands into multiple IR `Stmt::Let`, and the init expression
+/// does not correspond to any individual destructured variable.
+fn extract_var_decl_init<'a>(stmt: &'a ast::Stmt, expected_name: &str) -> Option<&'a ast::Expr> {
+    if let ast::Stmt::Decl(ast::Decl::Var(var_decl)) = stmt {
+        let decl = var_decl.decls.first()?;
+        // Only match simple identifiers, not destructuring patterns
+        if let ast::Pat::Ident(ident) = &decl.name {
+            if ident.sym.as_ref() == expected_name {
+                return decl.init.as_deref();
+            }
+        }
+    }
+    None
 }
 
 /// Mutating methods that require `&mut self` on the receiver.
