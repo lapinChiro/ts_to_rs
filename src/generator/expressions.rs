@@ -280,6 +280,44 @@ pub(super) fn generate_expr(expr: &Expr) -> String {
             out.push('}');
             out
         }
+        Expr::Match { expr, arms } => {
+            use crate::ir::MatchPattern;
+            let match_target = generate_expr(expr);
+            let mut out = format!("match {match_target} {{\n");
+            for arm in arms {
+                let patterns_str = arm
+                    .patterns
+                    .iter()
+                    .map(|p| match p {
+                        MatchPattern::Literal(e) => generate_expr(e),
+                        MatchPattern::Wildcard => "_".to_string(),
+                        MatchPattern::EnumVariant { path, bindings } => {
+                            if bindings.is_empty() {
+                                format!("{path} {{ .. }}")
+                            } else {
+                                let fields = bindings.join(", ");
+                                format!("{path} {{ {fields}, .. }}")
+                            }
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" | ");
+                let guard_str = arm
+                    .guard
+                    .as_ref()
+                    .map(|g| format!(" if {}", generate_expr(g)))
+                    .unwrap_or_default();
+                out.push_str(&format!("    {patterns_str}{guard_str} => {{\n"));
+                for s in &arm.body {
+                    use super::statements::generate_stmt;
+                    out.push_str(&generate_stmt(s, 2));
+                    out.push('\n');
+                }
+                out.push_str("    }\n");
+            }
+            out.push('}');
+            out
+        }
     }
 }
 
@@ -964,6 +1002,39 @@ mod tests {
             Stmt::TailExpr(Expr::Ident("_v".to_string())),
         ]);
         let expected = "{\n    let mut _v = vec![1.0];\n    _v\n}";
+        assert_eq!(generate_expr(&expr), expected);
+    }
+
+    #[test]
+    fn test_generate_expr_match_with_enum_variant_bindings() {
+        use crate::ir::MatchArm;
+        let expr = Expr::Match {
+            expr: Box::new(Expr::Ref(Box::new(Expr::Ident("s".to_string())))),
+            arms: vec![
+                MatchArm {
+                    patterns: vec![crate::ir::MatchPattern::EnumVariant {
+                        path: "Shape::Circle".to_string(),
+                        bindings: vec!["radius".to_string()],
+                    }],
+                    guard: None,
+                    body: vec![Stmt::TailExpr(Expr::MethodCall {
+                        object: Box::new(Expr::Ident("radius".to_string())),
+                        method: "clone".to_string(),
+                        args: vec![],
+                    })],
+                },
+                MatchArm {
+                    patterns: vec![crate::ir::MatchPattern::Wildcard],
+                    guard: None,
+                    body: vec![Stmt::TailExpr(Expr::MacroCall {
+                        name: "panic".to_string(),
+                        args: vec![Expr::StringLit("unexpected variant".to_string())],
+                        use_debug: vec![false],
+                    })],
+                },
+            ],
+        };
+        let expected = "match &s {\n    Shape::Circle { radius, .. } => {\n        radius.clone()\n    }\n    _ => {\n        panic!(\"unexpected variant\")\n    }\n}";
         assert_eq!(generate_expr(&expr), expected);
     }
 }

@@ -663,16 +663,18 @@ fn convert_member_expr(
         _ => return Err(anyhow!("unsupported member property (only identifiers)")),
     };
 
-    // Check if accessing the discriminant field of a discriminated union enum
+    // Check if accessing a field of a discriminated union enum
     if let Some(RustType::Named { name, .. }) =
         resolve_expr_type(&member.obj, type_env, reg).as_ref()
     {
         if let Some(TypeDef::Enum {
             tag_field: Some(tag),
+            variant_fields,
             ..
         }) = reg.get(name)
         {
             if field == *tag {
+                // Tag field → method call (e.g., s.kind() )
                 let object = convert_expr(&member.obj, reg, None, type_env)?;
                 return Ok(Expr::MethodCall {
                     object: Box::new(object),
@@ -680,11 +682,84 @@ fn convert_member_expr(
                     args: vec![],
                 });
             }
+            // Non-tag field: if bound in TypeEnv (match arm destructuring),
+            // clone the reference (match on &obj binds fields by reference)
+            if type_env.get(&field).is_some() {
+                return Ok(Expr::MethodCall {
+                    object: Box::new(Expr::Ident(field)),
+                    method: "clone".to_string(),
+                    args: vec![],
+                });
+            }
+            // Standalone field access → inline match expression
+            return convert_du_standalone_field_access(
+                &member.obj,
+                name,
+                &field,
+                variant_fields,
+                reg,
+                type_env,
+            );
         }
     }
 
     let object = convert_expr(&member.obj, reg, None, type_env)?;
     resolve_member_access(&object, &field, &member.obj, reg)
+}
+
+/// Discriminated union の standalone フィールドアクセスを inline match 式に変換する。
+///
+/// `s.radius` → `match &s { Shape::Circle { radius, .. } => radius.clone(), _ => panic!("...") }`
+fn convert_du_standalone_field_access(
+    obj_expr: &ast::Expr,
+    enum_name: &str,
+    field: &str,
+    variant_fields: &std::collections::HashMap<String, Vec<(String, RustType)>>,
+    reg: &TypeRegistry,
+    type_env: &TypeEnv,
+) -> Result<Expr> {
+    use crate::ir::{MatchArm, MatchPattern};
+
+    let object = convert_expr(obj_expr, reg, None, type_env)?;
+    let match_expr = Expr::Ref(Box::new(object));
+
+    let mut arms: Vec<MatchArm> = Vec::new();
+
+    // Create arms for variants that have this field
+    for (variant_name, fields) in variant_fields {
+        if fields.iter().any(|(n, _)| n == field) {
+            arms.push(MatchArm {
+                patterns: vec![MatchPattern::EnumVariant {
+                    path: format!("{enum_name}::{variant_name}"),
+                    bindings: vec![field.to_string()],
+                }],
+                guard: None,
+                body: vec![Stmt::TailExpr(Expr::MethodCall {
+                    object: Box::new(Expr::Ident(field.to_string())),
+                    method: "clone".to_string(),
+                    args: vec![],
+                })],
+            });
+        }
+    }
+
+    // Add wildcard arm with panic
+    arms.push(MatchArm {
+        patterns: vec![MatchPattern::Wildcard],
+        guard: None,
+        body: vec![Stmt::TailExpr(Expr::MacroCall {
+            name: "panic".to_string(),
+            args: vec![Expr::StringLit(format!(
+                "variant does not have field '{field}'"
+            ))],
+            use_debug: vec![false],
+        })],
+    });
+
+    Ok(Expr::Match {
+        expr: Box::new(match_expr),
+        arms,
+    })
 }
 
 /// Converts an assignment expression (`target = value`) to `Expr::Assign`.

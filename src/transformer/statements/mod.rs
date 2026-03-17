@@ -1353,7 +1353,7 @@ fn try_convert_discriminated_union_switch(
     };
 
     // Check if this is a discriminated union and the field is the tag
-    let (string_values, _variant_fields) = match reg.get(&enum_name) {
+    let (string_values, variant_fields) = match reg.get(&enum_name) {
         Some(TypeDef::Enum {
             tag_field: Some(tag),
             string_values,
@@ -1363,12 +1363,19 @@ fn try_convert_discriminated_union_switch(
         _ => return Ok(None),
     };
 
+    // Extract the object variable name for field access rewriting (e.g., "s" from "s.kind")
+    let obj_var_name = match member.obj.as_ref() {
+        ast::Expr::Ident(ident) => Some(ident.sym.to_string()),
+        _ => None,
+    };
+
     // Convert the match: match on &object (not object.tag)
     let object = convert_expr(&member.obj, reg, None, type_env)?;
     let match_expr = Expr::Ref(Box::new(object));
 
     let mut arms: Vec<MatchArm> = Vec::new();
     let mut pending_patterns: Vec<MatchPattern> = Vec::new();
+    let mut pending_variant_names: Vec<String> = Vec::new();
 
     for case in &switch.cases {
         if let Some(test) = &case.test {
@@ -1381,7 +1388,9 @@ fn try_convert_discriminated_union_switch(
             if let Some(variant_name) = string_values.get(&str_value) {
                 pending_patterns.push(MatchPattern::EnumVariant {
                     path: format!("{enum_name}::{variant_name}"),
+                    bindings: vec![],
                 });
+                pending_variant_names.push(variant_name.clone());
             } else {
                 return Ok(None); // Unknown variant → fallback
             }
@@ -1392,7 +1401,50 @@ fn try_convert_discriminated_union_switch(
             continue;
         }
 
-        // Non-empty body: create arm
+        // Scan body for field accesses on the DU variable (e.g., s.radius)
+        // and collect field names to bind in the match pattern
+        let needed_fields = if let Some(ref var_name) = obj_var_name {
+            collect_du_field_accesses(&case.cons, var_name, &field_name)
+        } else {
+            Vec::new()
+        };
+
+        // Update bindings on pending patterns and register fields in TypeEnv
+        if !needed_fields.is_empty() {
+            for pattern in &mut pending_patterns {
+                if let MatchPattern::EnumVariant { bindings, path, .. } = pattern {
+                    // Extract variant name from path (e.g., "Shape::Circle" → "Circle")
+                    let vname = path.rsplit("::").next().unwrap_or("");
+                    if let Some(fields) = variant_fields.get(vname) {
+                        *bindings = needed_fields
+                            .iter()
+                            .filter(|f| fields.iter().any(|(n, _)| n == *f))
+                            .cloned()
+                            .collect();
+                    }
+                }
+            }
+        }
+
+        // Collect field types for TypeEnv registration
+        let mut field_types: Vec<(String, RustType)> = Vec::new();
+        for vname in &pending_variant_names {
+            if let Some(fields) = variant_fields.get(vname) {
+                for (fname, ftype) in fields {
+                    if needed_fields.contains(fname) && !field_types.iter().any(|(n, _)| n == fname)
+                    {
+                        field_types.push((fname.clone(), ftype.clone()));
+                    }
+                }
+            }
+        }
+
+        // Push scope with bound fields, convert body, pop scope
+        type_env.push_scope();
+        for (fname, ftype) in &field_types {
+            type_env.insert(fname.clone(), ftype.clone());
+        }
+
         let body = case
             .cons
             .iter()
@@ -1403,6 +1455,8 @@ fn try_convert_discriminated_union_switch(
             .flatten()
             .collect();
 
+        type_env.pop_scope();
+
         if case.test.is_none() {
             pending_patterns.push(MatchPattern::Wildcard);
         }
@@ -1412,12 +1466,120 @@ fn try_convert_discriminated_union_switch(
             guard: None,
             body,
         });
+        pending_variant_names.clear();
     }
 
     Ok(Some(vec![Stmt::Match {
         expr: match_expr,
         arms,
     }]))
+}
+
+/// switch arm body 内で `obj_var.field` 形式のフィールドアクセスを収集する。
+///
+/// `tag_field`（discriminant フィールド）はスキップする。
+fn collect_du_field_accesses(stmts: &[ast::Stmt], obj_var: &str, tag_field: &str) -> Vec<String> {
+    let mut fields = Vec::new();
+    for stmt in stmts {
+        collect_du_field_accesses_from_stmt(stmt, obj_var, tag_field, &mut fields);
+    }
+    fields.sort();
+    fields.dedup();
+    fields
+}
+
+fn collect_du_field_accesses_from_stmt(
+    stmt: &ast::Stmt,
+    obj_var: &str,
+    tag_field: &str,
+    fields: &mut Vec<String>,
+) {
+    use swc_ecma_ast as ast;
+    match stmt {
+        ast::Stmt::Expr(expr_stmt) => {
+            collect_du_field_accesses_from_expr(&expr_stmt.expr, obj_var, tag_field, fields);
+        }
+        ast::Stmt::Return(ret) => {
+            if let Some(arg) = &ret.arg {
+                collect_du_field_accesses_from_expr(arg, obj_var, tag_field, fields);
+            }
+        }
+        ast::Stmt::Decl(ast::Decl::Var(var_decl)) => {
+            for decl in &var_decl.decls {
+                if let Some(init) = &decl.init {
+                    collect_du_field_accesses_from_expr(init, obj_var, tag_field, fields);
+                }
+            }
+        }
+        ast::Stmt::If(if_stmt) => {
+            collect_du_field_accesses_from_expr(&if_stmt.test, obj_var, tag_field, fields);
+            collect_du_field_accesses_from_stmt(&if_stmt.cons, obj_var, tag_field, fields);
+            if let Some(alt) = &if_stmt.alt {
+                collect_du_field_accesses_from_stmt(alt, obj_var, tag_field, fields);
+            }
+        }
+        ast::Stmt::Block(block) => {
+            for s in &block.stmts {
+                collect_du_field_accesses_from_stmt(s, obj_var, tag_field, fields);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_du_field_accesses_from_expr(
+    expr: &ast::Expr,
+    obj_var: &str,
+    tag_field: &str,
+    fields: &mut Vec<String>,
+) {
+    use swc_ecma_ast as ast;
+    match expr {
+        ast::Expr::Member(member) => {
+            // Check if this is obj_var.field
+            if let ast::Expr::Ident(ident) = member.obj.as_ref() {
+                if ident.sym.as_ref() == obj_var {
+                    if let ast::MemberProp::Ident(prop) = &member.prop {
+                        let field_name = prop.sym.to_string();
+                        if field_name != tag_field {
+                            fields.push(field_name);
+                        }
+                    }
+                }
+            }
+            // Also recurse into obj in case of nested access
+            collect_du_field_accesses_from_expr(&member.obj, obj_var, tag_field, fields);
+        }
+        ast::Expr::Bin(bin) => {
+            collect_du_field_accesses_from_expr(&bin.left, obj_var, tag_field, fields);
+            collect_du_field_accesses_from_expr(&bin.right, obj_var, tag_field, fields);
+        }
+        ast::Expr::Unary(unary) => {
+            collect_du_field_accesses_from_expr(&unary.arg, obj_var, tag_field, fields);
+        }
+        ast::Expr::Call(call) => {
+            if let ast::Callee::Expr(callee) = &call.callee {
+                collect_du_field_accesses_from_expr(callee, obj_var, tag_field, fields);
+            }
+            for arg in &call.args {
+                collect_du_field_accesses_from_expr(&arg.expr, obj_var, tag_field, fields);
+            }
+        }
+        ast::Expr::Paren(paren) => {
+            collect_du_field_accesses_from_expr(&paren.expr, obj_var, tag_field, fields);
+        }
+        ast::Expr::Tpl(tpl) => {
+            for expr in &tpl.exprs {
+                collect_du_field_accesses_from_expr(expr, obj_var, tag_field, fields);
+            }
+        }
+        ast::Expr::Cond(cond) => {
+            collect_du_field_accesses_from_expr(&cond.test, obj_var, tag_field, fields);
+            collect_du_field_accesses_from_expr(&cond.cons, obj_var, tag_field, fields);
+            collect_du_field_accesses_from_expr(&cond.alt, obj_var, tag_field, fields);
+        }
+        _ => {}
+    }
 }
 
 /// Returns true if the expression is a literal that can safely be used as a Rust match pattern.

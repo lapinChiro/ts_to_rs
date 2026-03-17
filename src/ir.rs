@@ -123,10 +123,12 @@ pub enum MatchPattern {
     Literal(Expr),
     /// A wildcard pattern (`_`)
     Wildcard,
-    /// An enum variant pattern (e.g., `Shape::Circle { .. }`)
+    /// An enum variant pattern (e.g., `Shape::Circle { radius, .. }`)
     EnumVariant {
         /// Fully qualified variant name (e.g., `"Shape::Circle"`)
         path: String,
+        /// Field names to bind in the pattern. Empty means `{ .. }`.
+        bindings: Vec<String>,
     },
 }
 
@@ -506,6 +508,13 @@ pub enum Expr {
     },
     /// A block expression: `{ stmt1; stmt2; tail_expr }`
     Block(Vec<Stmt>),
+    /// A match expression: `match expr { arms }`
+    Match {
+        /// Expression to match against
+        expr: Box<Expr>,
+        /// Match arms
+        arms: Vec<MatchArm>,
+    },
 }
 
 /// Binary operators supported in the IR.

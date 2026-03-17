@@ -176,8 +176,13 @@ pub(super) fn generate_stmt(stmt: &Stmt, indent: usize) -> String {
                     .map(|p| match p {
                         MatchPattern::Literal(e) => generate_expr(e),
                         MatchPattern::Wildcard => "_".to_string(),
-                        MatchPattern::EnumVariant { path } => {
-                            format!("{path} {{ .. }}")
+                        MatchPattern::EnumVariant { path, bindings } => {
+                            if bindings.is_empty() {
+                                format!("{path} {{ .. }}")
+                            } else {
+                                let fields = bindings.join(", ");
+                                format!("{path} {{ {fields}, .. }}")
+                            }
                         }
                     })
                     .collect::<Vec<_>>()
@@ -222,7 +227,7 @@ fn indent_str(level: usize) -> String {
 #[cfg(test)]
 mod tests {
     use crate::generator::generate;
-    use crate::ir::{Expr, Item, MatchPattern as MP, RustType, Stmt, Visibility};
+    use crate::ir::{BinOp, Expr, Item, MatchPattern as MP, RustType, Stmt, Visibility};
 
     // Statement tests need to be wrapped in Item::Fn to test generate()
 
@@ -876,6 +881,63 @@ fn f() {
         }
         _ => {
             do_default();
+        }
+    }
+}";
+        assert_eq!(generate(&[item]), expected);
+    }
+
+    #[test]
+    fn test_generate_match_enum_variant_with_bindings_renders_field_names() {
+        let item = Item::Fn {
+            vis: Visibility::Private,
+            is_async: false,
+            name: "f".to_string(),
+            type_params: vec![],
+            params: vec![],
+            return_type: None,
+            body: vec![Stmt::Match {
+                expr: Expr::Ref(Box::new(Expr::Ident("s".to_string()))),
+                arms: vec![
+                    crate::ir::MatchArm {
+                        patterns: vec![MP::EnumVariant {
+                            path: "Shape::Circle".to_string(),
+                            bindings: vec!["radius".to_string()],
+                        }],
+                        guard: None,
+                        body: vec![Stmt::Expr(Expr::Ident("radius".to_string()))],
+                    },
+                    crate::ir::MatchArm {
+                        patterns: vec![MP::EnumVariant {
+                            path: "Shape::Rect".to_string(),
+                            bindings: vec!["width".to_string(), "height".to_string()],
+                        }],
+                        guard: None,
+                        body: vec![Stmt::Expr(Expr::BinaryOp {
+                            left: Box::new(Expr::Ident("width".to_string())),
+                            op: BinOp::Add,
+                            right: Box::new(Expr::Ident("height".to_string())),
+                        })],
+                    },
+                    crate::ir::MatchArm {
+                        patterns: vec![MP::Wildcard],
+                        guard: None,
+                        body: vec![Stmt::Expr(Expr::IntLit(0))],
+                    },
+                ],
+            }],
+        };
+        let expected = "\
+fn f() {
+    match &s {
+        Shape::Circle { radius, .. } => {
+            radius;
+        }
+        Shape::Rect { width, height, .. } => {
+            width + height;
+        }
+        _ => {
+            0;
         }
     }
 }";

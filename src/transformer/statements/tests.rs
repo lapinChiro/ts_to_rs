@@ -1834,10 +1834,168 @@ fn test_convert_switch_discriminated_union_to_enum_match() {
         // First arm should be EnumVariant pattern
         assert!(
             arms[0].patterns.iter().any(
-                |p| matches!(p, MatchPattern::EnumVariant { path } if path == "Shape::Circle")
+                |p| matches!(p, MatchPattern::EnumVariant { path, .. } if path == "Shape::Circle")
             ),
             "expected EnumVariant pattern for circle, got: {:?}",
             arms[0].patterns
+        );
+    } else {
+        panic!("expected Match");
+    }
+}
+
+// --- I-97: discriminated union field access in switch arms ---
+
+/// Helper to build a Shape discriminated union registry.
+fn build_shape_registry() -> TypeRegistry {
+    let mut reg = TypeRegistry::new();
+    let mut string_values = std::collections::HashMap::new();
+    string_values.insert("circle".to_string(), "Circle".to_string());
+    string_values.insert("square".to_string(), "Square".to_string());
+    let mut variant_fields = std::collections::HashMap::new();
+    variant_fields.insert(
+        "Circle".to_string(),
+        vec![("radius".to_string(), RustType::F64)],
+    );
+    variant_fields.insert(
+        "Square".to_string(),
+        vec![
+            ("width".to_string(), RustType::F64),
+            ("height".to_string(), RustType::F64),
+        ],
+    );
+    reg.register(
+        "Shape".to_string(),
+        TypeDef::Enum {
+            variants: vec!["Circle".to_string(), "Square".to_string()],
+            string_values,
+            tag_field: Some("kind".to_string()),
+            variant_fields,
+        },
+    );
+    reg
+}
+
+#[test]
+fn test_convert_du_switch_field_access_single_field_becomes_binding() {
+    let module = parse_typescript(
+        r#"
+        function get_radius(s: Shape): number {
+            switch (s.kind) {
+                case "circle":
+                    return s.radius;
+                case "square":
+                    return 0;
+            }
+        }
+        "#,
+    )
+    .unwrap();
+    let reg = build_shape_registry();
+    let fn_decl = match &module.body[0] {
+        ModuleItem::Stmt(ast::Stmt::Decl(Decl::Fn(f))) => f,
+        _ => panic!("expected function declaration"),
+    };
+    let body_stmts = &fn_decl.function.body.as_ref().unwrap().stmts;
+    let mut type_env = TypeEnv::new();
+    type_env.insert(
+        "s".to_string(),
+        RustType::Named {
+            name: "Shape".to_string(),
+            type_args: vec![],
+        },
+    );
+    let result = convert_stmt_list(body_stmts, &reg, Some(&RustType::F64), &mut type_env).unwrap();
+
+    let match_stmt = result
+        .iter()
+        .find(|s| matches!(s, Stmt::Match { .. }))
+        .expect("expected a Match statement");
+
+    if let Stmt::Match { arms, .. } = match_stmt {
+        // Circle arm should have "radius" in bindings
+        let circle_arm = &arms[0];
+        assert!(
+            circle_arm.patterns.iter().any(
+                |p| matches!(p, MatchPattern::EnumVariant { bindings, .. } if bindings == &["radius"])
+            ),
+            "expected radius binding in Circle arm, got: {:?}",
+            circle_arm.patterns
+        );
+        // Circle arm body should reference `radius.clone()` (match on &s binds by ref)
+        assert!(
+            circle_arm.body.iter().any(|s| {
+                matches!(s, Stmt::Return(Some(Expr::MethodCall { object, method, .. }))
+                    if matches!(object.as_ref(), Expr::Ident(name) if name == "radius")
+                    && method == "clone")
+            }),
+            "expected return of `radius.clone()`, got: {:?}",
+            circle_arm.body
+        );
+        // Square arm should have no bindings (no field access)
+        let square_arm = &arms[1];
+        assert!(
+            square_arm.patterns.iter().any(
+                |p| matches!(p, MatchPattern::EnumVariant { bindings, .. } if bindings.is_empty())
+            ),
+            "expected no bindings in Square arm, got: {:?}",
+            square_arm.patterns
+        );
+    } else {
+        panic!("expected Match");
+    }
+}
+
+#[test]
+fn test_convert_du_switch_field_access_multiple_fields_become_bindings() {
+    let module = parse_typescript(
+        r#"
+        function area(s: Shape): number {
+            switch (s.kind) {
+                case "circle":
+                    return 0;
+                case "square":
+                    return s.width * s.height;
+            }
+        }
+        "#,
+    )
+    .unwrap();
+    let reg = build_shape_registry();
+    let fn_decl = match &module.body[0] {
+        ModuleItem::Stmt(ast::Stmt::Decl(Decl::Fn(f))) => f,
+        _ => panic!("expected function declaration"),
+    };
+    let body_stmts = &fn_decl.function.body.as_ref().unwrap().stmts;
+    let mut type_env = TypeEnv::new();
+    type_env.insert(
+        "s".to_string(),
+        RustType::Named {
+            name: "Shape".to_string(),
+            type_args: vec![],
+        },
+    );
+    let result = convert_stmt_list(body_stmts, &reg, Some(&RustType::F64), &mut type_env).unwrap();
+
+    let match_stmt = result
+        .iter()
+        .find(|s| matches!(s, Stmt::Match { .. }))
+        .expect("expected a Match statement");
+
+    if let Stmt::Match { arms, .. } = match_stmt {
+        // Square arm should have width and height in bindings
+        let square_arm = &arms[1];
+        let has_bindings = square_arm.patterns.iter().any(|p| {
+            if let MatchPattern::EnumVariant { bindings, .. } = p {
+                bindings.contains(&"width".to_string()) && bindings.contains(&"height".to_string())
+            } else {
+                false
+            }
+        });
+        assert!(
+            has_bindings,
+            "expected width, height bindings in Square arm, got: {:?}",
+            square_arm.patterns
         );
     } else {
         panic!("expected Match");

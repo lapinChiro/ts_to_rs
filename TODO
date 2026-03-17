@@ -31,13 +31,6 @@
 
 ### Tier 1: 高優先度 — 変換正確性
 
-#### 型リテラル・enum 変換
-
-- **[I-97]** **discriminated union のバリアントフィールドアクセス** — 変換正確性
-    - `s.radius`（discriminated union 変数の非 discriminant フィールドアクセス）は Rust では直接アクセスできない
-    - match 式で destructuring する必要がある（`match s { Shape::Circle { radius, .. } => radius, _ => panic!() }`）
-    - I-91 で値構築・tag アクセス・switch 分岐は実装済み。残るのはこのフィールドアクセスのみ
-
 #### 関数・クラス
 
 - **[I-83]** **async fn main に `#[tokio::main]` 未生成** — コード生成
@@ -108,6 +101,10 @@
 
 ### Tier 3: 低優先度
 
+- **[I-99]** **`collect_du_field_accesses_from_expr` の AST ノード網羅性改善** — コード品質
+    - 配列リテラル、オブジェクトリテラル、代入式、Arrow 関数等の式ノードが未カバー
+    - 未検出時は standalone match 式にフォールバックするため意味は変わらないが、冗長なコードが生成される
+    - `src/transformer/statements/mod.rs` の `collect_du_field_accesses_from_expr` 関数
 - **[I-39]** **Transformer の Range 生成で `Expr::IntLit` を使用** — IR 整合性。動作上問題なし
 - **[I-26]** **union 内の未対応型** — 型構文（Hono 2件）
 - **[I-27]** **タプルの optional 要素** — 型構文

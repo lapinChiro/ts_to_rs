@@ -1,4 +1,5 @@
 use super::*;
+use crate::ir::MatchPattern;
 use crate::parser::parse_typescript;
 use crate::registry::{TypeDef, TypeRegistry};
 use crate::transformer::TypeEnv;
@@ -4023,5 +4024,73 @@ fn test_convert_method_call_string_arg_gets_to_string_with_registry() {
         );
     } else {
         panic!("expected MethodCall, got: {result:?}");
+    }
+}
+
+// --- I-97: discriminated union standalone field access ---
+
+fn build_shape_registry_for_expr() -> TypeRegistry {
+    let mut reg = TypeRegistry::new();
+    let mut string_values = std::collections::HashMap::new();
+    string_values.insert("circle".to_string(), "Circle".to_string());
+    string_values.insert("square".to_string(), "Square".to_string());
+    let mut variant_fields = std::collections::HashMap::new();
+    variant_fields.insert(
+        "Circle".to_string(),
+        vec![("radius".to_string(), RustType::F64)],
+    );
+    variant_fields.insert(
+        "Square".to_string(),
+        vec![("side".to_string(), RustType::F64)],
+    );
+    reg.register(
+        "Shape".to_string(),
+        TypeDef::Enum {
+            variants: vec!["Circle".to_string(), "Square".to_string()],
+            string_values,
+            tag_field: Some("kind".to_string()),
+            variant_fields,
+        },
+    );
+    reg
+}
+
+#[test]
+fn test_convert_du_standalone_field_access_generates_match_expr() {
+    let reg = build_shape_registry_for_expr();
+    let mut type_env = TypeEnv::new();
+    type_env.insert(
+        "s".to_string(),
+        RustType::Named {
+            name: "Shape".to_string(),
+            type_args: vec![],
+        },
+    );
+
+    // s.radius → match expression
+    let swc_expr = parse_var_init("const x = s.radius;");
+    let result = convert_expr(&swc_expr, &reg, None, &type_env).unwrap();
+
+    // Should be Expr::Match
+    if let Expr::Match { expr, arms } = &result {
+        // Match on &s
+        assert_eq!(**expr, Expr::Ref(Box::new(Expr::Ident("s".to_string()))));
+        // One arm for Circle (which has radius) + wildcard
+        assert!(
+            arms.len() >= 2,
+            "expected at least 2 arms, got: {}",
+            arms.len()
+        );
+        // First arm should bind radius
+        assert!(
+            arms[0].patterns.iter().any(|p| {
+                matches!(p, MatchPattern::EnumVariant { path, bindings }
+                    if path == "Shape::Circle" && bindings == &["radius"])
+            }),
+            "expected Circle arm with radius binding, got: {:?}",
+            arms[0].patterns
+        );
+    } else {
+        panic!("expected Expr::Match, got: {result:?}");
     }
 }
