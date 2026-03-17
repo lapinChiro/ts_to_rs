@@ -9,3 +9,8 @@ async function fetchMessage(): Promise<string> {
 async function noReturnType() {
   return;
 }
+
+async function main(): Promise<void> {
+  const num = await fetchNumber();
+  console.log(num);
+}

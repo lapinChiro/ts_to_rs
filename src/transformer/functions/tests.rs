@@ -24,6 +24,7 @@ fn test_convert_fn_decl_add() {
         item,
         Item::Fn {
             vis: Visibility::Public,
+            attributes: vec![],
             is_async: false,
             name: "add".to_string(),
             type_params: vec![],
@@ -275,6 +276,58 @@ fn test_convert_fn_decl_sync_is_not_async() {
     match item {
         Item::Fn { is_async, .. } => {
             assert!(!is_async);
+        }
+        _ => panic!("expected Item::Fn"),
+    }
+}
+
+#[test]
+fn test_convert_fn_decl_async_main_has_tokio_main_attribute() {
+    let fn_decl = parse_fn_decl("async function main(): Promise<void> { }");
+    let items = convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new(), false)
+        .unwrap()
+        .0;
+    let item = items.last().unwrap().clone();
+    match item {
+        Item::Fn {
+            attributes,
+            is_async,
+            name,
+            ..
+        } => {
+            assert!(is_async);
+            assert_eq!(name, "main");
+            assert_eq!(attributes, vec!["tokio::main".to_string()]);
+        }
+        _ => panic!("expected Item::Fn"),
+    }
+}
+
+#[test]
+fn test_convert_fn_decl_async_non_main_has_no_attributes() {
+    let fn_decl = parse_fn_decl("async function fetchData(): Promise<number> { return 42; }");
+    let items = convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new(), false)
+        .unwrap()
+        .0;
+    let item = items.last().unwrap().clone();
+    match item {
+        Item::Fn { attributes, .. } => {
+            assert!(attributes.is_empty());
+        }
+        _ => panic!("expected Item::Fn"),
+    }
+}
+
+#[test]
+fn test_convert_fn_decl_sync_main_has_no_attributes() {
+    let fn_decl = parse_fn_decl("function main(): void { }");
+    let items = convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new(), false)
+        .unwrap()
+        .0;
+    let item = items.last().unwrap().clone();
+    match item {
+        Item::Fn { attributes, .. } => {
+            assert!(attributes.is_empty());
         }
         _ => panic!("expected Item::Fn"),
     }

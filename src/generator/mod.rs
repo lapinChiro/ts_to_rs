@@ -151,6 +151,7 @@ fn generate_item(item: &Item) -> String {
         }
         Item::Fn {
             vis,
+            attributes,
             is_async,
             name,
             type_params,
@@ -159,6 +160,10 @@ fn generate_item(item: &Item) -> String {
             body,
         } => {
             let vis_str = generate_vis(vis);
+            let mut attr_str = String::new();
+            for attr in attributes {
+                attr_str.push_str(&format!("#[{attr}]\n"));
+            }
             let async_str = if *is_async { "async " } else { "" };
             let generics = generate_type_params(type_params);
             let params_str = params
@@ -171,8 +176,9 @@ fn generate_item(item: &Item) -> String {
                 None => String::new(),
             };
             let name = escape_ident(name);
-            let mut out =
-                format!("{vis_str}{async_str}fn {name}{generics}({params_str}){ret_str} {{\n");
+            let mut out = format!(
+                "{attr_str}{vis_str}{async_str}fn {name}{generics}({params_str}){ret_str} {{\n"
+            );
             for stmt in body {
                 out.push_str(&generate_stmt(stmt, 1));
                 out.push('\n');
@@ -828,6 +834,7 @@ pub enum Value {
     fn test_generate_fn_simple_return() {
         let item = Item::Fn {
             vis: Visibility::Public,
+            attributes: vec![],
             is_async: false,
             name: "add".to_string(),
             type_params: vec![],
@@ -859,6 +866,7 @@ pub fn add(a: f64, b: f64) -> f64 {
     fn test_generate_fn_no_return_type() {
         let item = Item::Fn {
             vis: Visibility::Private,
+            attributes: vec![],
             is_async: false,
             name: "greet".to_string(),
             type_params: vec![],
@@ -880,6 +888,7 @@ fn greet(name: String) {
     fn test_generate_fn_no_params() {
         let item = Item::Fn {
             vis: Visibility::Public,
+            attributes: vec![],
             is_async: false,
             name: "get_value".to_string(),
             type_params: vec![],
@@ -898,6 +907,7 @@ pub fn get_value() -> f64 {
     fn test_generate_fn_with_type_params() {
         let item = Item::Fn {
             vis: Visibility::Public,
+            attributes: vec![],
             is_async: false,
             name: "identity".to_string(),
             type_params: vec!["T".to_string()],
@@ -1068,6 +1078,7 @@ impl AnimalTrait for Dog {
     fn test_escape_ident_fn_name_reserved_word_adds_r_hash() {
         let item = Item::Fn {
             vis: Visibility::Public,
+            attributes: vec![],
             is_async: false,
             name: "match".to_string(),
             type_params: vec![],
@@ -1079,6 +1090,44 @@ impl AnimalTrait for Dog {
         assert!(
             output.contains("fn r#match()"),
             "expected r#match in: {output}"
+        );
+    }
+
+    #[test]
+    fn test_generate_fn_with_attributes_outputs_attr_lines() {
+        let item = Item::Fn {
+            vis: Visibility::Private,
+            attributes: vec!["tokio::main".to_string()],
+            is_async: true,
+            name: "main".to_string(),
+            type_params: vec![],
+            params: vec![],
+            return_type: None,
+            body: vec![],
+        };
+        let expected = "\
+#[tokio::main]
+async fn main() {
+}";
+        assert_eq!(generate(&[item]), expected);
+    }
+
+    #[test]
+    fn test_generate_fn_without_attributes_no_attr_lines() {
+        let item = Item::Fn {
+            vis: Visibility::Private,
+            attributes: vec![],
+            is_async: true,
+            name: "not_main".to_string(),
+            type_params: vec![],
+            params: vec![],
+            return_type: None,
+            body: vec![],
+        };
+        let output = generate(&[item]);
+        assert!(
+            !output.contains("#["),
+            "expected no attributes in: {output}"
         );
     }
 

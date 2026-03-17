@@ -628,6 +628,7 @@ fn convert_var_decl_arrow_fns(
                     crate::transformer::types::extract_type_params(arrow.type_params.as_deref());
                 items.push(Item::Fn {
                     vis: vis.clone(),
+                    attributes: vec![],
                     is_async: arrow.is_async,
                     name,
                     type_params,

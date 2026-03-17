@@ -13,3 +13,9 @@ async fn fetchMessage() -> String {
 async fn noReturnType() {
     return;
 }
+
+#[tokio::main]
+async fn main() -> () {
+    let num = fetchNumber().await;
+    println!("{}", num);
+}

@@ -274,6 +274,7 @@ fn test_transform_module_function_declaration() {
         items[0],
         Item::Fn {
             vis: Visibility::Private,
+            attributes: vec![],
             is_async: false,
             name: "add".to_string(),
             type_params: vec![],

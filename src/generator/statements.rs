@@ -235,6 +235,7 @@ mod tests {
     fn test_generate_let_simple() {
         let item = Item::Fn {
             vis: Visibility::Private,
+            attributes: vec![],
             is_async: false,
             name: "f".to_string(),
             type_params: vec![],
@@ -258,6 +259,7 @@ fn f() {
     fn test_generate_let_mut_with_type() {
         let item = Item::Fn {
             vis: Visibility::Private,
+            attributes: vec![],
             is_async: false,
             name: "f".to_string(),
             type_params: vec![],
@@ -281,6 +283,7 @@ fn f() {
     fn test_generate_let_no_init() {
         let item = Item::Fn {
             vis: Visibility::Private,
+            attributes: vec![],
             is_async: false,
             name: "f".to_string(),
             type_params: vec![],
@@ -304,6 +307,7 @@ fn f() {
     fn test_generate_if_no_else() {
         let item = Item::Fn {
             vis: Visibility::Private,
+            attributes: vec![],
             is_async: false,
             name: "f".to_string(),
             type_params: vec![],
@@ -328,6 +332,7 @@ fn f() {
     fn test_generate_if_with_else() {
         let item = Item::Fn {
             vis: Visibility::Private,
+            attributes: vec![],
             is_async: false,
             name: "f".to_string(),
             type_params: vec![],
@@ -354,6 +359,7 @@ fn f() {
     fn test_generate_while() {
         let item = Item::Fn {
             vis: Visibility::Private,
+            attributes: vec![],
             is_async: false,
             name: "f".to_string(),
             type_params: vec![],
@@ -378,6 +384,7 @@ fn f() {
     fn test_generate_for_in_range() {
         let item = Item::Fn {
             vis: Visibility::Private,
+            attributes: vec![],
             is_async: false,
             name: "f".to_string(),
             type_params: vec![],
@@ -406,6 +413,7 @@ fn f() {
     fn test_generate_for_in_iterable() {
         let item = Item::Fn {
             vis: Visibility::Private,
+            attributes: vec![],
             is_async: false,
             name: "f".to_string(),
             type_params: vec![],
@@ -431,6 +439,7 @@ fn f() {
     fn test_generate_loop_basic() {
         let item = Item::Fn {
             vis: Visibility::Private,
+            attributes: vec![],
             is_async: false,
             name: "f".to_string(),
             type_params: vec![],
@@ -457,6 +466,7 @@ fn f() {
     fn test_generate_return_bare() {
         let item = Item::Fn {
             vis: Visibility::Private,
+            attributes: vec![],
             is_async: false,
             name: "f".to_string(),
             type_params: vec![],
@@ -479,6 +489,7 @@ fn f() {
     fn test_generate_stmt_tail_expr_ident_outputs_without_semicolon() {
         let item = Item::Fn {
             vis: Visibility::Private,
+            attributes: vec![],
             is_async: false,
             name: "f".to_string(),
             type_params: vec![],
@@ -498,6 +509,7 @@ fn f() -> f64 {
         use crate::ir::BinOp;
         let item = Item::Fn {
             vis: Visibility::Private,
+            attributes: vec![],
             is_async: false,
             name: "f".to_string(),
             type_params: vec![],
@@ -520,6 +532,7 @@ fn f() -> f64 {
     fn test_generate_labeled_block_simple_body_outputs_labeled_block() {
         let item = Item::Fn {
             vis: Visibility::Private,
+            attributes: vec![],
             is_async: false,
             name: "f".to_string(),
             type_params: vec![],
@@ -546,6 +559,7 @@ fn f() {
     fn test_generate_break_with_label_and_value_outputs_break_label_value() {
         let item = Item::Fn {
             vis: Visibility::Private,
+            attributes: vec![],
             is_async: false,
             name: "f".to_string(),
             type_params: vec![],
@@ -574,6 +588,7 @@ fn f() {
     fn test_generate_break_label_only_no_value_outputs_break_label() {
         let item = Item::Fn {
             vis: Visibility::Private,
+            attributes: vec![],
             is_async: false,
             name: "f".to_string(),
             type_params: vec![],
@@ -595,6 +610,7 @@ fn f() {
     fn test_generate_break_no_label_no_value_outputs_break() {
         let item = Item::Fn {
             vis: Visibility::Private,
+            attributes: vec![],
             is_async: false,
             name: "f".to_string(),
             type_params: vec![],
@@ -616,6 +632,7 @@ fn f() {
     fn test_generate_return_not_last_uses_return_keyword() {
         let item = Item::Fn {
             vis: Visibility::Private,
+            attributes: vec![],
             is_async: false,
             name: "f".to_string(),
             type_params: vec![],
@@ -638,6 +655,7 @@ fn f() -> f64 {
     fn test_generate_stmt_if_let_without_else_renders_if_let() {
         let item = Item::Fn {
             vis: Visibility::Private,
+            attributes: vec![],
             is_async: false,
             name: "f".to_string(),
             type_params: vec![],
@@ -667,6 +685,7 @@ fn f() {
     fn test_generate_stmt_if_let_with_else_renders_else_branch() {
         let item = Item::Fn {
             vis: Visibility::Private,
+            attributes: vec![],
             is_async: false,
             name: "f".to_string(),
             type_params: vec![],
@@ -694,6 +713,7 @@ fn f() {
     fn test_generate_match_single_arm_renders_match() {
         let item = Item::Fn {
             vis: Visibility::Private,
+            attributes: vec![],
             is_async: false,
             name: "f".to_string(),
             type_params: vec![],
@@ -726,6 +746,7 @@ fn f() {
     fn test_generate_match_multiple_patterns_renders_or() {
         let item = Item::Fn {
             vis: Visibility::Private,
+            attributes: vec![],
             is_async: false,
             name: "f".to_string(),
             type_params: vec![],
@@ -758,6 +779,7 @@ fn f() {
     fn test_generate_match_wildcard_renders_underscore() {
         let item = Item::Fn {
             vis: Visibility::Private,
+            attributes: vec![],
             is_async: false,
             name: "f".to_string(),
             type_params: vec![],
@@ -790,6 +812,7 @@ fn f() {
     fn test_generate_match_multiple_arms_renders_all() {
         let item = Item::Fn {
             vis: Visibility::Private,
+            attributes: vec![],
             is_async: false,
             name: "f".to_string(),
             type_params: vec![],
@@ -846,6 +869,7 @@ fn f() {
     fn test_generate_match_string_patterns_adds_as_str() {
         let item = Item::Fn {
             vis: Visibility::Private,
+            attributes: vec![],
             is_async: false,
             name: "f".to_string(),
             type_params: vec![],
@@ -891,6 +915,7 @@ fn f() {
     fn test_generate_match_enum_variant_with_bindings_renders_field_names() {
         let item = Item::Fn {
             vis: Visibility::Private,
+            attributes: vec![],
             is_async: false,
             name: "f".to_string(),
             type_params: vec![],

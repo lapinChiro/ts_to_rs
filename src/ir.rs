@@ -257,6 +257,8 @@ pub enum Item {
     Fn {
         /// Visibility
         vis: Visibility,
+        /// Attributes (e.g., `["tokio::main"]` → `#[tokio::main]`)
+        attributes: Vec<String>,
         /// Whether this is an `async fn`
         is_async: bool,
         /// Function name
@@ -763,6 +765,7 @@ mod tests {
     fn test_item_fn() {
         let item = Item::Fn {
             vis: Visibility::Public,
+            attributes: vec![],
             is_async: false,
             name: "add".to_string(),
             type_params: vec![],

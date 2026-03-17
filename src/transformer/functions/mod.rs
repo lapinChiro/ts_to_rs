@@ -134,8 +134,15 @@ pub fn convert_fn_decl(
         body = new_body;
     }
 
+    let attributes = if is_async && name == "main" {
+        vec!["tokio::main".to_string()]
+    } else {
+        vec![]
+    };
+
     extra_items.push(Item::Fn {
         vis,
+        attributes,
         is_async,
         name,
         type_params,
