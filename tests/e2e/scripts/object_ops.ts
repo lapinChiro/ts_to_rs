@@ -16,6 +16,16 @@ function greet(person: Person): string {
     return "Hello, " + person.name;
 }
 
+interface Config {
+    name: string;
+    debug?: boolean;
+    timeout?: number;
+}
+
+function describeConfig(c: Config): string {
+    return "config: " + c.name;
+}
+
 function main(): void {
     const p: Person = { name: "Alice", age: 30 };
     console.log("name:", p.name);
@@ -26,4 +36,8 @@ function main(): void {
     console.log("width:", r.width);
     console.log("height:", r.height);
     console.log("area:", area(r));
+
+    // I-86: Optional fields omitted → None in Rust
+    const cfg: Config = { name: "app" };
+    console.log("config:", describeConfig(cfg));
 }

@@ -176,13 +176,22 @@ pub(super) fn generate_stmt(stmt: &Stmt, indent: usize) -> String {
                     .map(|p| match p {
                         MatchPattern::Literal(e) => generate_expr(e),
                         MatchPattern::Wildcard => "_".to_string(),
+                        MatchPattern::EnumVariant { path } => {
+                            format!("{path} {{ .. }}")
+                        }
                     })
                     .collect::<Vec<_>>()
                     .join(" | ");
+                let guard_str = arm
+                    .guard
+                    .as_ref()
+                    .map(|g| format!(" if {}", generate_expr(g)))
+                    .unwrap_or_default();
                 out.push_str(&format!(
-                    "{}{} => {{\n",
+                    "{}{}{} => {{\n",
                     indent_str(indent + 1),
-                    patterns_str
+                    patterns_str,
+                    guard_str
                 ));
                 for s in &arm.body {
                     out.push_str(&generate_stmt(s, indent + 2));
@@ -689,6 +698,7 @@ fn f() {
                 expr: Expr::Ident("x".to_string()),
                 arms: vec![crate::ir::MatchArm {
                     patterns: vec![MP::Literal(Expr::IntLit(1))],
+                    guard: None,
                     body: vec![Stmt::Expr(Expr::FnCall {
                         name: "do_a".to_string(),
                         args: vec![],
@@ -720,6 +730,7 @@ fn f() {
                 expr: Expr::Ident("x".to_string()),
                 arms: vec![crate::ir::MatchArm {
                     patterns: vec![MP::Literal(Expr::IntLit(1)), MP::Literal(Expr::IntLit(2))],
+                    guard: None,
                     body: vec![Stmt::Expr(Expr::FnCall {
                         name: "do_ab".to_string(),
                         args: vec![],
@@ -751,6 +762,7 @@ fn f() {
                 expr: Expr::Ident("x".to_string()),
                 arms: vec![crate::ir::MatchArm {
                     patterns: vec![MP::Wildcard],
+                    guard: None,
                     body: vec![Stmt::Expr(Expr::FnCall {
                         name: "do_default".to_string(),
                         args: vec![],
@@ -783,6 +795,7 @@ fn f() {
                 arms: vec![
                     crate::ir::MatchArm {
                         patterns: vec![MP::Literal(Expr::IntLit(1))],
+                        guard: None,
                         body: vec![Stmt::Expr(Expr::FnCall {
                             name: "do_a".to_string(),
                             args: vec![],
@@ -790,6 +803,7 @@ fn f() {
                     },
                     crate::ir::MatchArm {
                         patterns: vec![MP::Literal(Expr::IntLit(2)), MP::Literal(Expr::IntLit(3))],
+                        guard: None,
                         body: vec![Stmt::Expr(Expr::FnCall {
                             name: "do_bc".to_string(),
                             args: vec![],
@@ -797,6 +811,7 @@ fn f() {
                     },
                     crate::ir::MatchArm {
                         patterns: vec![MP::Wildcard],
+                        guard: None,
                         body: vec![Stmt::Expr(Expr::FnCall {
                             name: "do_default".to_string(),
                             args: vec![],
@@ -836,6 +851,7 @@ fn f() {
                 arms: vec![
                     crate::ir::MatchArm {
                         patterns: vec![MP::Literal(Expr::StringLit("hello".to_string()))],
+                        guard: None,
                         body: vec![Stmt::Expr(Expr::FnCall {
                             name: "do_hello".to_string(),
                             args: vec![],
@@ -843,6 +859,7 @@ fn f() {
                     },
                     crate::ir::MatchArm {
                         patterns: vec![MP::Wildcard],
+                        guard: None,
                         body: vec![Stmt::Expr(Expr::FnCall {
                             name: "do_default".to_string(),
                             args: vec![],

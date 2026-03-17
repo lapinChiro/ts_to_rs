@@ -47,13 +47,14 @@ pub fn convert_expr(
     match expr {
         ast::Expr::Ident(ident) => {
             let name = ident.sym.to_string();
-            if name == "undefined" {
-                Ok(Expr::Ident("None".to_string()))
-            } else {
-                Ok(Expr::Ident(name))
+            match name.as_str() {
+                "undefined" => Ok(Expr::Ident("None".to_string())),
+                "NaN" => Ok(Expr::Ident("f64::NAN".to_string())),
+                "Infinity" => Ok(Expr::Ident("f64::INFINITY".to_string())),
+                _ => Ok(Expr::Ident(name)),
             }
         }
-        ast::Expr::Lit(lit) => convert_lit(lit, expected),
+        ast::Expr::Lit(lit) => convert_lit(lit, expected, reg),
         ast::Expr::Bin(bin) => convert_bin_expr(bin, reg, expected, type_env),
         ast::Expr::Tpl(tpl) => convert_template_literal(tpl, reg, type_env),
         ast::Expr::Paren(paren) => convert_expr(&paren.expr, reg, expected, type_env),
@@ -81,11 +82,18 @@ pub fn convert_expr(
 ///
 /// When `expected` is `RustType::String`, string literals are wrapped with `.to_string()`
 /// to produce an owned `String` instead of `&str`.
-fn convert_lit(lit: &ast::Lit, expected: Option<&RustType>) -> Result<Expr> {
+fn convert_lit(lit: &ast::Lit, expected: Option<&RustType>, reg: &TypeRegistry) -> Result<Expr> {
     match lit {
         ast::Lit::Num(n) => Ok(Expr::NumberLit(n.value)),
         ast::Lit::Str(s) => {
-            let expr = Expr::StringLit(s.value.to_string_lossy().into_owned());
+            let value = s.value.to_string_lossy().into_owned();
+            // Check if the expected type is a string literal union enum
+            if let Some(RustType::Named { name, .. }) = expected {
+                if let Some(variant) = lookup_string_enum_variant(reg, name, &value) {
+                    return Ok(Expr::Ident(format!("{name}::{variant}")));
+                }
+            }
+            let expr = Expr::StringLit(value);
             if matches!(expected, Some(RustType::String)) {
                 Ok(Expr::MethodCall {
                     object: Box::new(expr),
@@ -101,10 +109,131 @@ fn convert_lit(lit: &ast::Lit, expected: Option<&RustType>) -> Result<Expr> {
     }
 }
 
+/// 文字列リテラル値から string literal union enum のバリアント名を逆引きする。
+fn lookup_string_enum_variant<'a>(
+    reg: &'a TypeRegistry,
+    enum_name: &str,
+    string_value: &str,
+) -> Option<&'a String> {
+    if let Some(TypeDef::Enum { string_values, .. }) = reg.get(enum_name) {
+        string_values.get(string_value)
+    } else {
+        None
+    }
+}
+
+/// discriminated union のオブジェクトリテラルを enum バリアント構築に変換する。
+///
+/// `{ kind: "circle", radius: 5 }` → `Shape::Circle { radius: 5.0 }`
+fn convert_discriminated_union_object_lit(
+    obj_lit: &ast::ObjectLit,
+    reg: &TypeRegistry,
+    type_env: &TypeEnv,
+    enum_name: &str,
+    tag_field: &str,
+    string_values: &std::collections::HashMap<String, String>,
+    variant_fields_map: &std::collections::HashMap<String, Vec<(String, RustType)>>,
+) -> Result<Expr> {
+    // Find the discriminant field value
+    let mut disc_value = None;
+    for prop in &obj_lit.props {
+        if let ast::PropOrSpread::Prop(prop) = prop {
+            if let ast::Prop::KeyValue(kv) = prop.as_ref() {
+                let key = match &kv.key {
+                    ast::PropName::Ident(ident) => ident.sym.to_string(),
+                    ast::PropName::Str(s) => s.value.to_string_lossy().into_owned(),
+                    _ => continue,
+                };
+                if key == tag_field {
+                    if let ast::Expr::Lit(ast::Lit::Str(s)) = kv.value.as_ref() {
+                        disc_value = Some(s.value.to_string_lossy().into_owned());
+                    }
+                }
+            }
+        }
+    }
+
+    let disc_value = disc_value.ok_or_else(|| {
+        anyhow!("discriminated union object literal missing discriminant field '{tag_field}'")
+    })?;
+
+    let variant_name = string_values.get(&disc_value).ok_or_else(|| {
+        anyhow!("unknown discriminant value '{disc_value}' for enum '{enum_name}'")
+    })?;
+
+    let variant_field_types = variant_fields_map.get(variant_name);
+
+    // Build fields (excluding the discriminant field)
+    let mut fields = Vec::new();
+    for prop in &obj_lit.props {
+        if let ast::PropOrSpread::Prop(prop) = prop {
+            match prop.as_ref() {
+                ast::Prop::KeyValue(kv) => {
+                    let key = match &kv.key {
+                        ast::PropName::Ident(ident) => ident.sym.to_string(),
+                        ast::PropName::Str(s) => s.value.to_string_lossy().into_owned(),
+                        _ => continue,
+                    };
+                    if key == tag_field {
+                        continue; // Skip discriminant field
+                    }
+                    let field_expected = variant_field_types
+                        .and_then(|fs| fs.iter().find(|(n, _)| n == &key).map(|(_, ty)| ty));
+                    let value = convert_expr(&kv.value, reg, field_expected, type_env)?;
+                    fields.push((key, value));
+                }
+                ast::Prop::Shorthand(ident) => {
+                    let key = ident.sym.to_string();
+                    if key == tag_field {
+                        continue;
+                    }
+                    let field_expected = variant_field_types
+                        .and_then(|fs| fs.iter().find(|(n, _)| n == &key).map(|(_, ty)| ty));
+                    let value = convert_expr(
+                        &ast::Expr::Ident(ident.clone()),
+                        reg,
+                        field_expected,
+                        type_env,
+                    )?;
+                    fields.push((key, value));
+                }
+                _ => {}
+            }
+        }
+    }
+
+    let full_name = format!("{enum_name}::{variant_name}");
+
+    // Unit variant (no fields) → Ident
+    if fields.is_empty() {
+        return Ok(Expr::Ident(full_name));
+    }
+
+    Ok(Expr::StructInit {
+        name: full_name,
+        fields,
+        base: None,
+    })
+}
+
 /// Checks whether a RustType represents a string (including Option<String>).
 fn is_string_type(ty: &RustType) -> bool {
     matches!(ty, RustType::String)
         || matches!(ty, RustType::Option(inner) if matches!(inner.as_ref(), RustType::String))
+}
+
+/// `println!` の引数で `{:?}` (Debug) を使うべき型かどうかを判定する。
+///
+/// `Vec<T>`, `Option<T>`, `Tuple`, 型不明の場合は Debug フォーマットを使う。
+/// プリミティブ型と Named 型（enum/struct）は Display を使う。
+fn needs_debug_format(ty: Option<&RustType>) -> bool {
+    match ty {
+        None => false, // 型不明の場合は Display を試みる（コンパイルエラーで発見できる）
+        Some(RustType::Vec(_)) => true,
+        Some(RustType::Option(_)) => true,
+        Some(RustType::Tuple(_)) => true,
+        _ => false,
+    }
 }
 
 /// Checks whether an IR expression is known to produce a String value.
@@ -148,6 +277,11 @@ fn convert_bin_expr(
         return Ok(result);
     }
 
+    // string literal enum comparison: d == "up" → d == Direction::Up
+    if let Some(result) = try_convert_enum_string_comparison(bin, type_env, reg) {
+        return Ok(result);
+    }
+
     // x instanceof ClassName pattern
     if bin.op == ast::BinaryOp::InstanceOf {
         return Ok(convert_instanceof(bin, type_env));
@@ -165,7 +299,11 @@ fn convert_bin_expr(
             // Non-Option type: nullish coalescing is a no-op, return left as-is
             return Ok(left);
         }
-        let right = convert_expr(&bin.right, reg, None, type_env)?;
+        let inner_expected = match &left_type {
+            Some(RustType::Option(inner)) => Some(inner.as_ref().clone()),
+            _ => None,
+        };
+        let right = convert_expr(&bin.right, reg, inner_expected.as_ref(), type_env)?;
         return Ok(Expr::MethodCall {
             object: Box::new(left),
             method: "unwrap_or_else".to_string(),
@@ -190,6 +328,29 @@ fn convert_bin_expr(
     } else {
         false
     };
+
+    // Mixed-type concatenation: one side is string, other is known non-string → format!
+    // Handles: `42 + " px"` (f64 + &str) and `"val: " + x` (String + f64)
+    if op == BinOp::Add && is_string_context {
+        let left_type = resolve_expr_type(&bin.left, type_env, reg);
+        let right_type = resolve_expr_type(&bin.right, type_env, reg);
+        let left_is_string =
+            left_type.as_ref().is_some_and(is_string_type) || is_string_like(&left);
+        let left_known_non_string = (left_type.is_some()
+            && !left_type.as_ref().is_some_and(is_string_type))
+            && !is_string_like(&left);
+        let right_known_non_string = (right_type.is_some()
+            && !right_type.as_ref().is_some_and(is_string_type))
+            && !is_string_like(&right);
+
+        if (left_known_non_string && !left_is_string) || (right_known_non_string && left_is_string)
+        {
+            return Ok(Expr::FormatMacro {
+                template: "{}{}".to_string(),
+                args: vec![left, right],
+            });
+        }
+    }
 
     // In string concat context:
     // - LHS StringLit needs .to_string() (Rust: &str can't use + operator directly)
@@ -434,11 +595,7 @@ fn convert_opt_chain_expr(
                 });
             }
 
-            let body_expr = Expr::MethodCall {
-                object: Box::new(Expr::Ident("_v".to_string())),
-                method,
-                args,
-            };
+            let body_expr = map_method_call(Expr::Ident("_v".to_string()), &method, args);
             Ok(Expr::MethodCall {
                 object: Box::new(Expr::MethodCall {
                     object: Box::new(object),
@@ -491,10 +648,40 @@ fn convert_member_expr(
     reg: &TypeRegistry,
     type_env: &TypeEnv,
 ) -> Result<Expr> {
+    // Computed property: arr[0], arr[i] → Expr::Index
+    if let ast::MemberProp::Computed(computed) = &member.prop {
+        let object = convert_expr(&member.obj, reg, None, type_env)?;
+        let index = convert_expr(&computed.expr, reg, None, type_env)?;
+        return Ok(Expr::Index {
+            object: Box::new(object),
+            index: Box::new(index),
+        });
+    }
+
     let field = match &member.prop {
         ast::MemberProp::Ident(ident) => ident.sym.to_string(),
         _ => return Err(anyhow!("unsupported member property (only identifiers)")),
     };
+
+    // Check if accessing the discriminant field of a discriminated union enum
+    if let Some(RustType::Named { name, .. }) =
+        resolve_expr_type(&member.obj, type_env, reg).as_ref()
+    {
+        if let Some(TypeDef::Enum {
+            tag_field: Some(tag),
+            ..
+        }) = reg.get(name)
+        {
+            if field == *tag {
+                let object = convert_expr(&member.obj, reg, None, type_env)?;
+                return Ok(Expr::MethodCall {
+                    object: Box::new(object),
+                    method: tag.clone(),
+                    args: vec![],
+                });
+            }
+        }
+    }
 
     let object = convert_expr(&member.obj, reg, None, type_env)?;
     resolve_member_access(&object, &field, &member.obj, reg)
@@ -683,9 +870,18 @@ fn convert_call_expr(call: &ast::CallExpr, reg: &TypeRegistry, type_env: &TypeEn
                             _ => return Err(anyhow!("unsupported console method: {}", method)),
                         };
                         let args = convert_call_args(&call.args, reg, type_env)?;
+                        let use_debug = call
+                            .args
+                            .iter()
+                            .map(|arg| {
+                                let ty = resolve_expr_type(&arg.expr, type_env, reg);
+                                needs_debug_format(ty.as_ref())
+                            })
+                            .collect();
                         return Ok(Expr::MacroCall {
                             name: macro_name.to_string(),
                             args,
+                            use_debug,
                         });
                     }
 
@@ -701,7 +897,21 @@ fn convert_call_expr(call: &ast::CallExpr, reg: &TypeRegistry, type_env: &TypeEn
                 }
 
                 let object = convert_expr(&member.obj, reg, None, type_env)?;
-                let args = convert_call_args(&call.args, reg, type_env)?;
+                // Look up method parameter types from the object's type
+                let method_params = resolve_expr_type(&member.obj, type_env, reg).and_then(|ty| {
+                    if let RustType::Named { name, .. } = &ty {
+                        if let Some(TypeDef::Struct { methods, .. }) = reg.get(name) {
+                            return methods.get(&method).cloned();
+                        }
+                    }
+                    None
+                });
+                let args = convert_call_args_with_types(
+                    &call.args,
+                    reg,
+                    method_params.as_deref(),
+                    type_env,
+                )?;
                 let method_call = map_method_call(object, &method, args);
                 Ok(method_call)
             }
@@ -1353,8 +1563,13 @@ fn convert_new_expr(
         ast::Expr::Ident(ident) => ident.sym.to_string(),
         _ => return Err(anyhow!("unsupported new expression target")),
     };
+    // Look up constructor param types from struct fields in TypeRegistry
+    let param_types = reg.get(&class_name).and_then(|def| match def {
+        TypeDef::Struct { fields, .. } => Some(fields.as_slice()),
+        _ => None,
+    });
     let args = match &new_expr.args {
-        Some(args) => convert_call_args(args, reg, type_env)?,
+        Some(args) => convert_call_args_with_types(args, reg, param_types, type_env)?,
         None => vec![],
     };
     Ok(Expr::FnCall {
@@ -1402,6 +1617,14 @@ fn convert_call_args_with_types(
                         args: vec![expr],
                     };
                 }
+            }
+            // Wrap in Box::new(...) when the parameter type is Fn (Box<dyn Fn>)
+            // and the argument is an identifier (function name), not an inline closure
+            if matches!(param_ty, Some(RustType::Fn { .. })) && matches!(&expr, Expr::Ident(_)) {
+                expr = Expr::FnCall {
+                    name: "Box::new".to_string(),
+                    args: vec![expr],
+                };
             }
             Ok(expr)
         })
@@ -1485,9 +1708,28 @@ fn convert_object_lit(
         }
     };
 
+    // Check if this is a discriminated union enum
+    if let Some(TypeDef::Enum {
+        tag_field: Some(tag),
+        string_values,
+        variant_fields,
+        ..
+    }) = reg.get(struct_name)
+    {
+        return convert_discriminated_union_object_lit(
+            obj_lit,
+            reg,
+            type_env,
+            struct_name,
+            tag,
+            string_values,
+            variant_fields,
+        );
+    }
+
     // Look up field types from the registry to propagate expected types to nested values
     let struct_fields = reg.get(struct_name).and_then(|def| match def {
-        TypeDef::Struct { fields } => Some(fields.as_slice()),
+        TypeDef::Struct { fields, .. } => Some(fields.as_slice()),
         _ => None,
     });
 
@@ -1585,6 +1827,19 @@ fn convert_object_lit(
         }
         Some(Box::new(last[0].clone()))
     };
+
+    // Auto-fill omitted Option<T> fields with None (when no struct update base)
+    if struct_update_base.is_none() {
+        if let Some(all_fields) = struct_fields {
+            let explicit_keys: std::collections::HashSet<String> =
+                fields.iter().map(|(k, _)| k.clone()).collect();
+            for (field_name, field_ty) in all_fields {
+                if !explicit_keys.contains(field_name) && matches!(field_ty, RustType::Option(_)) {
+                    fields.push((field_name.clone(), Expr::Ident("None".to_string())));
+                }
+            }
+        }
+    }
 
     Ok(Expr::StructInit {
         name: struct_name.to_string(),
@@ -1879,7 +2134,7 @@ fn resolve_field_type(
     };
     let type_def = reg.get(type_name)?;
     match type_def {
-        crate::registry::TypeDef::Struct { fields } => fields
+        crate::registry::TypeDef::Struct { fields, .. } => fields
             .iter()
             .find(|(name, _)| name == &field_name)
             .map(|(_, ty)| ty.clone()),
@@ -1917,6 +2172,79 @@ fn try_convert_undefined_comparison(
         method: method.to_string(),
         args: vec![],
     })
+}
+
+/// 等値比較で一方が string literal union enum 型の場合、文字列リテラル側を enum バリアントに変換する。
+///
+/// `d == "up"` → `d == Direction::Up`、`"up" != d` → `Direction::Up != d`
+fn try_convert_enum_string_comparison(
+    bin: &ast::BinExpr,
+    type_env: &TypeEnv,
+    reg: &TypeRegistry,
+) -> Option<Expr> {
+    let is_eq = matches!(bin.op, ast::BinaryOp::EqEq | ast::BinaryOp::EqEqEq);
+    let is_neq = matches!(bin.op, ast::BinaryOp::NotEq | ast::BinaryOp::NotEqEq);
+    if !is_eq && !is_neq {
+        return None;
+    }
+
+    let op = if is_eq { BinOp::Eq } else { BinOp::NotEq };
+
+    // Try: left is enum variable, right is string literal
+    if let Some(str_value) = extract_string_lit(&bin.right) {
+        if let Some(enum_name) = resolve_enum_type_name(&bin.left, type_env, reg) {
+            if let Some(variant) = lookup_string_enum_variant(reg, &enum_name, &str_value) {
+                let left = convert_expr(&bin.left, reg, None, type_env).ok()?;
+                return Some(Expr::BinaryOp {
+                    left: Box::new(left),
+                    op,
+                    right: Box::new(Expr::Ident(format!("{enum_name}::{variant}"))),
+                });
+            }
+        }
+    }
+
+    // Try: left is string literal, right is enum variable
+    if let Some(str_value) = extract_string_lit(&bin.left) {
+        if let Some(enum_name) = resolve_enum_type_name(&bin.right, type_env, reg) {
+            if let Some(variant) = lookup_string_enum_variant(reg, &enum_name, &str_value) {
+                let right = convert_expr(&bin.right, reg, None, type_env).ok()?;
+                return Some(Expr::BinaryOp {
+                    left: Box::new(Expr::Ident(format!("{enum_name}::{variant}"))),
+                    op,
+                    right: Box::new(right),
+                });
+            }
+        }
+    }
+
+    None
+}
+
+/// 式から文字列リテラル値を抽出する。
+fn extract_string_lit(expr: &ast::Expr) -> Option<String> {
+    if let ast::Expr::Lit(ast::Lit::Str(s)) = expr {
+        Some(s.value.to_string_lossy().into_owned())
+    } else {
+        None
+    }
+}
+
+/// 式の型が string literal union enum の場合、その enum 名を返す。
+fn resolve_enum_type_name(
+    expr: &ast::Expr,
+    type_env: &TypeEnv,
+    reg: &TypeRegistry,
+) -> Option<String> {
+    let ty = resolve_expr_type(expr, type_env, reg)?;
+    if let RustType::Named { name, .. } = &ty {
+        if let Some(TypeDef::Enum { string_values, .. }) = reg.get(name) {
+            if !string_values.is_empty() {
+                return Some(name.clone());
+            }
+        }
+    }
+    None
 }
 
 /// Returns true if the expression is the `undefined` identifier.

@@ -399,8 +399,53 @@ fn test_e2e_intersection_type_ts_rust_stdout_match() {
 }
 
 #[test]
+fn test_e2e_switch_nonliteral_ts_rust_stdout_match() {
+    run_e2e_test("switch_nonliteral");
+}
+
+#[test]
+fn test_e2e_const_mutation_ts_rust_stdout_match() {
+    run_e2e_test("const_mutation");
+}
+
+#[test]
+fn test_e2e_to_string_calls_ts_rust_stdout_match() {
+    run_e2e_test("to_string_calls");
+}
+
+#[test]
+fn test_e2e_string_concat_ts_rust_stdout_match() {
+    run_e2e_test("string_concat");
+}
+
+#[test]
+fn test_e2e_local_type_decl_ts_rust_stdout_match() {
+    run_e2e_test("local_type_decl");
+}
+
+#[test]
 fn test_e2e_console_error_ts_rust_stdout_and_stderr_match() {
     run_e2e_test_with_stderr("console_error");
+}
+
+#[test]
+fn test_e2e_method_args_ts_rust_stdout_match() {
+    run_e2e_test("method_args");
+}
+
+#[test]
+fn test_e2e_console_display_ts_rust_stdout_match() {
+    run_e2e_test("console_display");
+}
+
+#[test]
+fn test_e2e_discriminated_union_ts_rust_stdout_match() {
+    run_e2e_test("discriminated_union");
+}
+
+#[test]
+fn test_e2e_string_literal_enum_ts_rust_stdout_match() {
+    run_e2e_test("string_literal_enum");
 }
 
 #[test]

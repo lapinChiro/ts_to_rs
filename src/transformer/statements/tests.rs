@@ -1,7 +1,7 @@
 use super::*;
-use crate::ir::{BinOp, Expr, RustType, Stmt, UnOp};
+use crate::ir::{BinOp, Expr, MatchPattern, RustType, Stmt, UnOp};
 use crate::parser::parse_typescript;
-use crate::registry::TypeRegistry;
+use crate::registry::{TypeDef, TypeRegistry};
 use crate::transformer::TypeEnv;
 use swc_ecma_ast::{Decl, ModuleItem};
 
@@ -630,7 +630,7 @@ fn test_convert_try_catch_both_return_adds_unreachable() {
     // Last statement should be Expr(MacroCall { name: "unreachable", args: [] })
     let last = result.last().expect("should have statements");
     assert!(
-        matches!(last, Stmt::Expr(Expr::MacroCall { name, args }) if name == "unreachable" && args.is_empty()),
+        matches!(last, Stmt::Expr(Expr::MacroCall { name, args, .. }) if name == "unreachable" && args.is_empty()),
         "expected unreachable!() as last stmt, got {last:?}"
     );
 }
@@ -1393,6 +1393,198 @@ fn test_convert_switch_string_discriminant_generates_string_patterns() {
     }
 }
 
+// --- I-60: Switch non-literal case ---
+
+#[test]
+fn test_switch_nonliteral_case_generates_guard() {
+    // case A (variable reference) should generate a match guard, not a pattern binding
+    let stmts = parse_fn_body(
+        "function f(x: number) { const A: number = 1; switch(x) { case A: doA(); break; default: doB(); } }",
+    );
+    let result =
+        convert_stmt_list(&stmts, &TypeRegistry::new(), None, &mut TypeEnv::new()).unwrap();
+    // Find the Match statement (second stmt after the const)
+    let match_stmt = result
+        .iter()
+        .find(|s| matches!(s, Stmt::Match { .. }))
+        .expect("expected a Match statement");
+    match match_stmt {
+        Stmt::Match { arms, .. } => {
+            // First arm (case A) should have a guard
+            assert!(
+                arms[0].guard.is_some(),
+                "non-literal case should have a guard, got {:?}",
+                arms[0]
+            );
+            assert!(
+                arms[0]
+                    .patterns
+                    .iter()
+                    .any(|p| matches!(p, crate::ir::MatchPattern::Wildcard)),
+                "non-literal case should use wildcard pattern"
+            );
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[test]
+fn test_switch_nonliteral_fallthrough_cases_combined_guard() {
+    // case A: case B: ... should combine into a single guard with ||
+    let stmts = parse_fn_body(
+        "function f(x: number) { const A: number = 1; const B: number = 2; switch(x) { case A: case B: doAB(); break; } }",
+    );
+    let result =
+        convert_stmt_list(&stmts, &TypeRegistry::new(), None, &mut TypeEnv::new()).unwrap();
+    let match_stmt = result
+        .iter()
+        .find(|s| matches!(s, Stmt::Match { .. }))
+        .expect("expected a Match statement");
+    match match_stmt {
+        Stmt::Match { arms, .. } => {
+            assert_eq!(arms.len(), 1);
+            assert!(
+                arms[0].guard.is_some(),
+                "combined non-literal cases should have a guard"
+            );
+            // Guard should be a LogicalOr of two equality checks
+            match &arms[0].guard {
+                Some(Expr::BinaryOp {
+                    op: BinOp::LogicalOr,
+                    ..
+                }) => {} // OK
+                other => panic!("expected LogicalOr guard, got {other:?}"),
+            }
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[test]
+fn test_switch_mixed_literal_nonliteral_separate_arms() {
+    // Literal cases should have no guard, non-literal cases should have guards
+    let stmts = parse_fn_body(
+        "function f(x: number) { const A: number = 10; switch(x) { case 1: doA(); break; case A: doB(); break; } }",
+    );
+    let result =
+        convert_stmt_list(&stmts, &TypeRegistry::new(), None, &mut TypeEnv::new()).unwrap();
+    let match_stmt = result
+        .iter()
+        .find(|s| matches!(s, Stmt::Match { .. }))
+        .expect("expected a Match statement");
+    match match_stmt {
+        Stmt::Match { arms, .. } => {
+            assert_eq!(arms.len(), 2);
+            // First arm (case 1) - literal, no guard
+            assert!(
+                arms[0].guard.is_none(),
+                "literal case should have no guard, got {:?}",
+                arms[0]
+            );
+            // Second arm (case A) - non-literal, has guard
+            assert!(
+                arms[1].guard.is_some(),
+                "non-literal case should have a guard, got {:?}",
+                arms[1]
+            );
+        }
+        _ => unreachable!(),
+    }
+}
+
+// --- I-87: Local interface/type declarations ---
+
+#[test]
+fn test_convert_stmt_local_interface_skipped() {
+    // interface inside function body should not error, just be skipped
+    let stmts = parse_fn_body("function f() { interface Foo { x: number; } const a: number = 1; }");
+    let result =
+        convert_stmt_list(&stmts, &TypeRegistry::new(), None, &mut TypeEnv::new()).unwrap();
+    // Should have 1 statement (const a), interface is skipped
+    assert_eq!(
+        result.len(),
+        1,
+        "expected 1 stmt (interface skipped), got {result:?}"
+    );
+    assert!(matches!(&result[0], Stmt::Let { name, .. } if name == "a"));
+}
+
+#[test]
+fn test_convert_stmt_local_type_alias_skipped() {
+    // type alias inside function body should not error, just be skipped
+    let stmts = parse_fn_body("function f() { type ID = number; const b: number = 2; }");
+    let result =
+        convert_stmt_list(&stmts, &TypeRegistry::new(), None, &mut TypeEnv::new()).unwrap();
+    assert_eq!(
+        result.len(),
+        1,
+        "expected 1 stmt (type alias skipped), got {result:?}"
+    );
+    assert!(matches!(&result[0], Stmt::Let { name, .. } if name == "b"));
+}
+
+// --- I-17: const mutability body scan ---
+
+#[test]
+fn test_const_field_assignment_in_body_becomes_let_mut() {
+    // const with number type (primitive, not object) but field assignment in body → let mut
+    // is_object_type returns false for number, so body scan must detect the mutation
+    let stmts = parse_fn_body("function f() { const p: number = 0; p.x = 1; }");
+    let result =
+        convert_stmt_list(&stmts, &TypeRegistry::new(), None, &mut TypeEnv::new()).unwrap();
+    // First stmt should be `let mut p = ...`
+    match &result[0] {
+        Stmt::Let { mutable, name, .. } => {
+            assert_eq!(name, "p");
+            assert!(
+                *mutable,
+                "const with field assignment should become let mut"
+            );
+        }
+        other => panic!("expected Let, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_const_mutating_method_in_body_becomes_let_mut() {
+    // const arr WITHOUT type annotation, with push() call in body → let mut
+    // This tests the body-scan path (not the is_object_type path)
+    let stmts = parse_fn_body("function f() { const arr = [1, 2, 3]; arr.push(4); }");
+    let result =
+        convert_stmt_list(&stmts, &TypeRegistry::new(), None, &mut TypeEnv::new()).unwrap();
+    match &result[0] {
+        Stmt::Let { mutable, name, .. } => {
+            assert_eq!(name, "arr");
+            assert!(
+                *mutable,
+                "const with mutating method call should become let mut"
+            );
+        }
+        other => panic!("expected Let, got {other:?}"),
+    }
+}
+
+// --- I-80: Closure mutable capture ---
+
+#[test]
+fn test_closure_mutating_outer_var_closure_binding_becomes_let_mut() {
+    // const inc = () => { count += 1; } where closure captures mutably
+    // → inc should be `let mut` because calling FnMut requires mutable binding
+    let stmts = parse_fn_body(
+        "function f() { let count: number = 0; const inc = (): void => { count += 1; }; }",
+    );
+    let result =
+        convert_stmt_list(&stmts, &TypeRegistry::new(), None, &mut TypeEnv::new()).unwrap();
+    // Second stmt: let mut inc = || { ... } (closure binding needs mut for FnMut)
+    match &result[1] {
+        Stmt::Let { mutable, name, .. } => {
+            assert_eq!(name, "inc");
+            assert!(*mutable, "closure that captures mutably should be let mut");
+        }
+        other => panic!("expected Let for inc, got {other:?}"),
+    }
+}
+
 // --- I-14: Object destructuring extensions ---
 
 #[test]
@@ -1527,6 +1719,7 @@ fn test_object_destructuring_rest_with_type_expands_remaining_fields() {
                 ("b".to_string(), RustType::F64),
                 ("c".to_string(), RustType::F64),
             ],
+            methods: std::collections::HashMap::new(),
         },
     );
     let mut type_env = TypeEnv::new();
@@ -1575,4 +1768,78 @@ fn test_object_destructuring_no_default_unchanged() {
         "expected plain FieldAccess, got: {:?}",
         result[0]
     );
+}
+
+// --- I-91: discriminated union switch → enum match ---
+
+#[test]
+fn test_convert_switch_discriminated_union_to_enum_match() {
+    let module = parse_typescript(
+        r#"
+        function main(): void {
+            const s: Shape = { kind: "circle", radius: 5 };
+            switch (s.kind) {
+                case "circle":
+                    console.log("circle");
+                    break;
+                case "square":
+                    console.log("square");
+                    break;
+            }
+        }
+        "#,
+    )
+    .unwrap();
+
+    let mut reg = TypeRegistry::new();
+    let mut string_values = std::collections::HashMap::new();
+    string_values.insert("circle".to_string(), "Circle".to_string());
+    string_values.insert("square".to_string(), "Square".to_string());
+    let mut variant_fields = std::collections::HashMap::new();
+    variant_fields.insert(
+        "Circle".to_string(),
+        vec![("radius".to_string(), RustType::F64)],
+    );
+    variant_fields.insert(
+        "Square".to_string(),
+        vec![("side".to_string(), RustType::F64)],
+    );
+    reg.register(
+        "Shape".to_string(),
+        TypeDef::Enum {
+            variants: vec!["Circle".to_string(), "Square".to_string()],
+            string_values,
+            tag_field: Some("kind".to_string()),
+            variant_fields,
+        },
+    );
+
+    let fn_decl = match &module.body[0] {
+        ModuleItem::Stmt(ast::Stmt::Decl(Decl::Fn(f))) => f,
+        _ => panic!("expected function declaration"),
+    };
+    let body_stmts = &fn_decl.function.body.as_ref().unwrap().stmts;
+    let mut type_env = TypeEnv::new();
+    let result = convert_stmt_list(body_stmts, &reg, None, &mut type_env).unwrap();
+
+    // Find the match statement
+    let match_stmt = result
+        .iter()
+        .find(|s| matches!(s, Stmt::Match { .. }))
+        .expect("expected a Match statement");
+
+    if let Stmt::Match { expr, arms } = match_stmt {
+        // Match on `s` (the enum variable), not `s.kind`
+        assert_eq!(*expr, Expr::Ref(Box::new(Expr::Ident("s".to_string()))));
+        // First arm should be EnumVariant pattern
+        assert!(
+            arms[0].patterns.iter().any(
+                |p| matches!(p, MatchPattern::EnumVariant { path } if path == "Shape::Circle")
+            ),
+            "expected EnumVariant pattern for circle, got: {:?}",
+            arms[0].patterns
+        );
+    } else {
+        panic!("expected Match");
+    }
 }

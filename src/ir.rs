@@ -123,6 +123,11 @@ pub enum MatchPattern {
     Literal(Expr),
     /// A wildcard pattern (`_`)
     Wildcard,
+    /// An enum variant pattern (e.g., `Shape::Circle { .. }`)
+    EnumVariant {
+        /// Fully qualified variant name (e.g., `"Shape::Circle"`)
+        path: String,
+    },
 }
 
 /// An arm in a `match` expression.
@@ -130,6 +135,8 @@ pub enum MatchPattern {
 pub struct MatchArm {
     /// Patterns for this arm. Multiple patterns represent `a | b | _`.
     pub patterns: Vec<MatchPattern>,
+    /// Optional match guard: `_ if guard_expr => { ... }`.
+    pub guard: Option<Expr>,
     /// Arm body.
     pub body: Vec<Stmt>,
 }
@@ -470,6 +477,8 @@ pub enum Expr {
         name: String,
         /// Arguments
         args: Vec<Expr>,
+        /// Per-argument flag: true → use `{:?}` (Debug), false → use `{}` (Display)
+        use_debug: Vec<bool>,
     },
     /// An await expression: `expr.await`
     Await(Box<Expr>),

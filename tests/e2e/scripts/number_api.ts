@@ -12,4 +12,9 @@ function main(): void {
     const y: number = parseFloat("2.5");
     console.log("sum:", x + y);
     console.log("product:", x * y);
+
+    // NaN and Infinity
+    console.log("isNaN NaN:", isNaN(NaN));
+    console.log("isFinite Infinity:", Number.isFinite(Infinity));
+    console.log("NaN equality:", NaN === NaN);
 }

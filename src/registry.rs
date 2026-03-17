@@ -19,11 +19,19 @@ pub enum TypeDef {
     Struct {
         /// フィールド名と型のペア
         fields: Vec<(String, RustType)>,
+        /// メソッドシグネチャ（メソッド名 → パラメータ一覧）
+        methods: HashMap<String, Vec<(String, RustType)>>,
     },
     /// enum
     Enum {
         /// バリアント名の一覧
         variants: Vec<String>,
+        /// 文字列リテラル値 → バリアント名のマッピング（string literal union / discriminated union）
+        string_values: HashMap<String, String>,
+        /// discriminated union の tag フィールド名（例: "kind"）
+        tag_field: Option<String>,
+        /// バリアント名 → フィールド一覧のマッピング（discriminated union のみ）
+        variant_fields: HashMap<String, Vec<(String, RustType)>>,
     },
     /// 関数
     Function {
@@ -110,12 +118,26 @@ fn collect_decl(reg: &mut TypeRegistry, decl: &ast::Decl) {
     match decl {
         ast::Decl::TsInterface(iface) => {
             if let Ok(fields) = collect_interface_fields(iface) {
-                reg.register(iface.id.sym.to_string(), TypeDef::Struct { fields });
+                let methods = collect_interface_methods(iface);
+                reg.register(
+                    iface.id.sym.to_string(),
+                    TypeDef::Struct { fields, methods },
+                );
             }
         }
         ast::Decl::TsTypeAlias(alias) => {
-            if let Some(fields) = collect_type_alias_fields(alias) {
-                reg.register(alias.id.sym.to_string(), TypeDef::Struct { fields });
+            if let Some(enum_def) = try_collect_string_literal_union(alias) {
+                reg.register(alias.id.sym.to_string(), enum_def);
+            } else if let Some(enum_def) = try_collect_discriminated_union(alias) {
+                reg.register(alias.id.sym.to_string(), enum_def);
+            } else if let Some(fields) = collect_type_alias_fields(alias, reg) {
+                reg.register(
+                    alias.id.sym.to_string(),
+                    TypeDef::Struct {
+                        fields,
+                        methods: HashMap::new(),
+                    },
+                );
             }
         }
         ast::Decl::TsEnum(ts_enum) => {
@@ -127,7 +149,15 @@ fn collect_decl(reg: &mut TypeRegistry, decl: &ast::Decl) {
                     ast::TsEnumMemberId::Str(s) => s.value.to_string_lossy().into_owned(),
                 })
                 .collect();
-            reg.register(ts_enum.id.sym.to_string(), TypeDef::Enum { variants });
+            reg.register(
+                ts_enum.id.sym.to_string(),
+                TypeDef::Enum {
+                    variants,
+                    string_values: HashMap::new(),
+                    tag_field: None,
+                    variant_fields: HashMap::new(),
+                },
+            );
         }
         ast::Decl::Fn(fn_decl) => {
             if let Ok(func_def) = collect_fn_def(&fn_decl.function) {
@@ -150,8 +180,73 @@ fn collect_decl(reg: &mut TypeRegistry, decl: &ast::Decl) {
                 }
             }
         }
+        ast::Decl::Class(class) => {
+            let def = collect_class_info(class);
+            if let TypeDef::Struct {
+                ref fields,
+                ref methods,
+            } = def
+            {
+                if !fields.is_empty() || !methods.is_empty() {
+                    reg.register(class.ident.sym.to_string(), def);
+                }
+            }
+        }
         _ => {}
     }
+}
+
+/// クラス宣言からフィールドとメソッドシグネチャを収集し、`TypeDef::Struct` を返す。
+fn collect_class_info(class: &ast::ClassDecl) -> TypeDef {
+    let mut fields = Vec::new();
+    let mut methods = HashMap::new();
+
+    for member in &class.class.body {
+        match member {
+            ast::ClassMember::ClassProp(prop) => {
+                let name = match &prop.key {
+                    ast::PropName::Ident(ident) => ident.sym.to_string(),
+                    _ => continue,
+                };
+                if let Some(ann) = &prop.type_ann {
+                    if let Ok(ty) =
+                        convert_ts_type(&ann.type_ann, &mut Vec::new(), &TypeRegistry::new())
+                    {
+                        fields.push((name, ty));
+                    }
+                }
+            }
+            ast::ClassMember::Method(method) => {
+                let name = match &method.key {
+                    ast::PropName::Ident(ident) => ident.sym.to_string(),
+                    _ => continue,
+                };
+                if let Some(func) = &method.function.body {
+                    let _ = func; // body exists, collect params
+                }
+                let params: Vec<(String, RustType)> = method
+                    .function
+                    .params
+                    .iter()
+                    .filter_map(|param| {
+                        let ident = match &param.pat {
+                            ast::Pat::Ident(ident) => ident,
+                            _ => return None,
+                        };
+                        let ty = ident.type_ann.as_ref().and_then(|ann| {
+                            convert_ts_type(&ann.type_ann, &mut Vec::new(), &TypeRegistry::new())
+                                .ok()
+                        })?;
+                        Some((ident.id.sym.to_string(), ty))
+                    })
+                    .collect();
+                methods.insert(name, params);
+            }
+            _ => {}
+        }
+    }
+
+    TypeDef::Struct { fields, methods }
 }
 
 /// interface のフィールド名・型を収集する。
@@ -165,6 +260,47 @@ fn collect_interface_fields(iface: &ast::TsInterfaceDecl) -> Result<Vec<(String,
         }
     }
     Ok(fields)
+}
+
+/// interface のメソッドシグネチャを収集する。
+fn collect_interface_methods(
+    iface: &ast::TsInterfaceDecl,
+) -> HashMap<String, Vec<(String, RustType)>> {
+    let mut methods = HashMap::new();
+    for member in &iface.body.body {
+        if let ast::TsTypeElement::TsMethodSignature(method) = member {
+            let name = match method.key.as_ref() {
+                ast::Expr::Ident(ident) => ident.sym.to_string(),
+                _ => continue,
+            };
+            let params: Vec<(String, RustType)> = method
+                .params
+                .iter()
+                .filter_map(|param| {
+                    let param_name = match param {
+                        ast::TsFnParam::Ident(ident) => ident.id.sym.to_string(),
+                        _ => return None,
+                    };
+                    let ty = match param {
+                        ast::TsFnParam::Ident(ident) => {
+                            ident.type_ann.as_ref().and_then(|ann| {
+                                convert_ts_type(
+                                    &ann.type_ann,
+                                    &mut Vec::new(),
+                                    &TypeRegistry::new(),
+                                )
+                                .ok()
+                            })?
+                        }
+                        _ => return None,
+                    };
+                    Some((param_name, ty))
+                })
+                .collect();
+            methods.insert(name, params);
+        }
+    }
+    methods
 }
 
 /// TsPropertySignature からフィールド名と型を取得する。
@@ -187,22 +323,237 @@ fn collect_property_signature(prop: &ast::TsPropertySignature) -> Option<(String
     Some((name, ty))
 }
 
-/// type alias (オブジェクト型) のフィールドを収集する。
-fn collect_type_alias_fields(alias: &ast::TsTypeAliasDecl) -> Option<Vec<(String, RustType)>> {
-    let type_lit = match alias.type_ann.as_ref() {
-        ast::TsType::TsTypeLit(lit) => lit,
+/// string literal union type alias を検出し、`TypeDef::Enum` を返す。
+///
+/// `type Direction = "up" | "down"` のように、全メンバーが文字列リテラルの union type を検出する。
+fn try_collect_string_literal_union(alias: &ast::TsTypeAliasDecl) -> Option<TypeDef> {
+    use crate::transformer::types::string_to_pascal_case;
+
+    let union = match alias.type_ann.as_ref() {
+        ast::TsType::TsUnionOrIntersectionType(
+            swc_ecma_ast::TsUnionOrIntersectionType::TsUnionType(u),
+        ) => u,
         _ => return None,
     };
 
-    let mut fields = Vec::new();
-    for member in &type_lit.members {
+    let mut variants = Vec::new();
+    let mut string_values = HashMap::new();
+    for ty in &union.types {
+        match ty.as_ref() {
+            ast::TsType::TsLitType(lit) => match &lit.lit {
+                swc_ecma_ast::TsLit::Str(s) => {
+                    let value = s.value.to_string_lossy().into_owned();
+                    let variant_name = string_to_pascal_case(&value);
+                    string_values.insert(value, variant_name.clone());
+                    variants.push(variant_name);
+                }
+                _ => return None,
+            },
+            _ => return None,
+        }
+    }
+
+    Some(TypeDef::Enum {
+        variants,
+        string_values,
+        tag_field: None,
+        variant_fields: HashMap::new(),
+    })
+}
+
+/// discriminated union type alias を検出し、`TypeDef::Enum` を返す。
+///
+/// `type Shape = { kind: "circle", r: number } | { kind: "square", s: number }` を検出する。
+/// 全メンバーがオブジェクト型リテラルで、共通の文字列リテラル discriminant フィールドを持つ場合に該当。
+fn try_collect_discriminated_union(alias: &ast::TsTypeAliasDecl) -> Option<TypeDef> {
+    use crate::transformer::types::string_to_pascal_case;
+
+    let union = match alias.type_ann.as_ref() {
+        ast::TsType::TsUnionOrIntersectionType(
+            swc_ecma_ast::TsUnionOrIntersectionType::TsUnionType(u),
+        ) => u,
+        _ => return None,
+    };
+
+    // All members must be object type literals
+    let type_lits: Vec<&swc_ecma_ast::TsTypeLit> = union
+        .types
+        .iter()
+        .filter_map(|ty| match ty.as_ref() {
+            ast::TsType::TsTypeLit(lit) => Some(lit),
+            _ => None,
+        })
+        .collect();
+
+    if type_lits.len() != union.types.len() || type_lits.len() < 2 {
+        return None;
+    }
+
+    // Find a common discriminant field with string literal types in all members
+    let tag = find_registry_discriminant_field(&type_lits)?;
+
+    let mut variants = Vec::new();
+    let mut string_values = HashMap::new();
+    let mut variant_fields_map = HashMap::new();
+
+    for type_lit in &type_lits {
+        let (disc_value, fields) = extract_registry_variant_info(type_lit, &tag)?;
+        let variant_name = string_to_pascal_case(&disc_value);
+        string_values.insert(disc_value, variant_name.clone());
+        variant_fields_map.insert(variant_name.clone(), fields);
+        variants.push(variant_name);
+    }
+
+    Some(TypeDef::Enum {
+        variants,
+        string_values,
+        tag_field: Some(tag),
+        variant_fields: variant_fields_map,
+    })
+}
+
+/// discriminated union の discriminant フィールドを見つける。
+///
+/// 全メンバーに共通し、すべて文字列リテラル型であるフィールド名を返す。
+fn find_registry_discriminant_field(type_lits: &[&swc_ecma_ast::TsTypeLit]) -> Option<String> {
+    let first = type_lits[0];
+    for member in &first.members {
         if let ast::TsTypeElement::TsPropertySignature(prop) = member {
-            if let Some((name, ty)) = collect_property_signature(prop) {
-                fields.push((name, ty));
+            let name = match prop.key.as_ref() {
+                ast::Expr::Ident(ident) => ident.sym.to_string(),
+                _ => continue,
+            };
+            // Check if this field has a string literal type in all members
+            let is_discriminant = type_lits.iter().all(|lit| {
+                lit.members.iter().any(|m| {
+                    if let ast::TsTypeElement::TsPropertySignature(p) = m {
+                        let field_name = match p.key.as_ref() {
+                            ast::Expr::Ident(id) => id.sym.to_string(),
+                            _ => return false,
+                        };
+                        if field_name != name {
+                            return false;
+                        }
+                        // Check if type annotation is a string literal
+                        if let Some(ann) = &p.type_ann {
+                            matches!(
+                                ann.type_ann.as_ref(),
+                                ast::TsType::TsLitType(lit) if matches!(&lit.lit, swc_ecma_ast::TsLit::Str(_))
+                            )
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                })
+            });
+            if is_discriminant {
+                return Some(name);
             }
         }
     }
-    Some(fields)
+    None
+}
+
+/// discriminated union の 1 つのバリアントから discriminant 値と非 discriminant フィールドを抽出する。
+fn extract_registry_variant_info(
+    type_lit: &swc_ecma_ast::TsTypeLit,
+    tag_field: &str,
+) -> Option<(String, Vec<(String, RustType)>)> {
+    let mut disc_value = None;
+    let mut fields = Vec::new();
+
+    for member in &type_lit.members {
+        if let ast::TsTypeElement::TsPropertySignature(prop) = member {
+            let name = match prop.key.as_ref() {
+                ast::Expr::Ident(ident) => ident.sym.to_string(),
+                _ => continue,
+            };
+            if name == tag_field {
+                // Extract string literal value
+                if let Some(ann) = &prop.type_ann {
+                    if let ast::TsType::TsLitType(lit) = ann.type_ann.as_ref() {
+                        if let swc_ecma_ast::TsLit::Str(s) = &lit.lit {
+                            disc_value = Some(s.value.to_string_lossy().into_owned());
+                        }
+                    }
+                }
+            } else {
+                // Non-discriminant field: convert type
+                if let Some(ann) = &prop.type_ann {
+                    if let Ok(ty) =
+                        convert_ts_type(&ann.type_ann, &mut Vec::new(), &TypeRegistry::new())
+                    {
+                        let ty = if prop.optional {
+                            RustType::Option(Box::new(ty))
+                        } else {
+                            ty
+                        };
+                        fields.push((name, ty));
+                    }
+                }
+            }
+        }
+    }
+
+    Some((disc_value?, fields))
+}
+
+/// type alias (オブジェクト型) のフィールドを収集する。
+fn collect_type_alias_fields(
+    alias: &ast::TsTypeAliasDecl,
+    reg: &TypeRegistry,
+) -> Option<Vec<(String, RustType)>> {
+    match alias.type_ann.as_ref() {
+        ast::TsType::TsTypeLit(lit) => {
+            let mut fields = Vec::new();
+            for member in &lit.members {
+                if let ast::TsTypeElement::TsPropertySignature(prop) = member {
+                    if let Some((name, ty)) = collect_property_signature(prop) {
+                        fields.push((name, ty));
+                    }
+                }
+            }
+            Some(fields)
+        }
+        // Intersection type: `type Person = Named & Aged` → merge fields from all members
+        ast::TsType::TsUnionOrIntersectionType(
+            swc_ecma_ast::TsUnionOrIntersectionType::TsIntersectionType(intersection),
+        ) => {
+            let mut fields = Vec::new();
+            for ty in &intersection.types {
+                match ty.as_ref() {
+                    ast::TsType::TsTypeLit(lit) => {
+                        for member in &lit.members {
+                            if let ast::TsTypeElement::TsPropertySignature(prop) = member {
+                                if let Some(field) = collect_property_signature(prop) {
+                                    fields.push(field);
+                                }
+                            }
+                        }
+                    }
+                    ast::TsType::TsTypeRef(type_ref) => {
+                        if let ast::TsEntityName::Ident(ident) = &type_ref.type_name {
+                            if let Some(TypeDef::Struct {
+                                fields: ref_fields, ..
+                            }) = reg.get(ident.sym.as_ref())
+                            {
+                                fields.extend(ref_fields.iter().cloned());
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            if fields.is_empty() {
+                None
+            } else {
+                Some(fields)
+            }
+        }
+        _ => None,
+    }
 }
 
 /// 関数宣言からパラメータ型と戻り値型を収集する。
@@ -297,6 +648,7 @@ mod tests {
                     ("x".to_string(), RustType::F64),
                     ("y".to_string(), RustType::F64),
                 ],
+                methods: std::collections::HashMap::new(),
             },
         );
         let def = reg.get("Point").unwrap();
@@ -307,6 +659,7 @@ mod tests {
                     ("x".to_string(), RustType::F64),
                     ("y".to_string(), RustType::F64),
                 ],
+                methods: HashMap::new(),
             }
         );
     }
@@ -318,6 +671,9 @@ mod tests {
             "Color".to_string(),
             TypeDef::Enum {
                 variants: vec!["Red".to_string(), "Green".to_string(), "Blue".to_string()],
+                string_values: HashMap::new(),
+                tag_field: None,
+                variant_fields: HashMap::new(),
             },
         );
         let def = reg.get("Color").unwrap();
@@ -325,6 +681,9 @@ mod tests {
             *def,
             TypeDef::Enum {
                 variants: vec!["Red".to_string(), "Green".to_string(), "Blue".to_string(),],
+                string_values: HashMap::new(),
+                tag_field: None,
+                variant_fields: HashMap::new(),
             }
         );
     }
@@ -372,6 +731,7 @@ mod tests {
             "Point".to_string(),
             TypeDef::Struct {
                 fields: vec![("x".to_string(), RustType::F64)],
+                methods: std::collections::HashMap::new(),
             },
         );
 
@@ -380,6 +740,9 @@ mod tests {
             "Color".to_string(),
             TypeDef::Enum {
                 variants: vec!["Red".to_string()],
+                string_values: HashMap::new(),
+                tag_field: None,
+                variant_fields: HashMap::new(),
             },
         );
 
@@ -401,6 +764,7 @@ mod tests {
                     ("x".to_string(), RustType::F64),
                     ("y".to_string(), RustType::F64),
                 ],
+                methods: HashMap::new(),
             }
         );
     }
@@ -416,6 +780,7 @@ mod tests {
                     ("name".to_string(), RustType::String),
                     ("count".to_string(), RustType::F64),
                 ],
+                methods: HashMap::new(),
             }
         );
     }
@@ -428,6 +793,9 @@ mod tests {
             reg.get("Color").unwrap(),
             &TypeDef::Enum {
                 variants: vec!["Red".to_string(), "Green".to_string(), "Blue".to_string(),],
+                string_values: HashMap::new(),
+                tag_field: None,
+                variant_fields: HashMap::new(),
             }
         );
     }
@@ -499,6 +867,7 @@ mod tests {
                     "name".to_string(),
                     RustType::Option(Box::new(RustType::String)),
                 )],
+                methods: HashMap::new(),
             }
         );
     }
@@ -508,5 +877,133 @@ mod tests {
         let module = parse_typescript("").unwrap();
         let reg = build_registry(&module);
         assert!(reg.get("anything").is_none());
+    }
+
+    // --- I-92: intersection type registration ---
+
+    #[test]
+    fn test_build_registry_intersection_type_alias_merges_fields() {
+        let module = parse_typescript(
+            "interface Named { name: string; } interface Aged { age: number; } type Person = Named & Aged;",
+        )
+        .unwrap();
+        let reg = build_registry(&module);
+        let person = reg.get("Person").expect("Person should be registered");
+        match person {
+            TypeDef::Struct { fields, .. } => {
+                assert_eq!(fields.len(), 2, "expected 2 merged fields");
+                assert!(
+                    fields
+                        .iter()
+                        .any(|(n, t)| n == "name" && *t == RustType::String),
+                    "expected name: String"
+                );
+                assert!(
+                    fields
+                        .iter()
+                        .any(|(n, t)| n == "age" && *t == RustType::F64),
+                    "expected age: f64"
+                );
+            }
+            other => panic!("expected Struct, got {other:?}"),
+        }
+    }
+
+    // --- I-90: string literal union enum registration ---
+
+    #[test]
+    fn test_build_registry_string_literal_union_registers_enum() {
+        let module =
+            parse_typescript(r#"type Direction = "up" | "down" | "left" | "right";"#).unwrap();
+        let reg = build_registry(&module);
+        let def = reg
+            .get("Direction")
+            .expect("Direction should be registered");
+        match def {
+            TypeDef::Enum {
+                variants,
+                string_values,
+                ..
+            } => {
+                assert_eq!(variants, &["Up", "Down", "Left", "Right"]);
+                assert_eq!(string_values.get("up").unwrap(), "Up");
+                assert_eq!(string_values.get("down").unwrap(), "Down");
+                assert_eq!(string_values.get("left").unwrap(), "Left");
+                assert_eq!(string_values.get("right").unwrap(), "Right");
+            }
+            other => panic!("expected Enum, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_build_registry_ts_enum_has_empty_string_values() {
+        let module = parse_typescript("enum Color { Red, Green, Blue }").unwrap();
+        let reg = build_registry(&module);
+        match reg.get("Color").unwrap() {
+            TypeDef::Enum { string_values, .. } => {
+                assert!(
+                    string_values.is_empty(),
+                    "TS enum should have empty string_values"
+                );
+            }
+            other => panic!("expected Enum, got {other:?}"),
+        }
+    }
+
+    // --- I-91: discriminated union registration ---
+
+    #[test]
+    fn test_build_registry_discriminated_union_registers_enum() {
+        let module = parse_typescript(
+            r#"type Shape = { kind: "circle", radius: number } | { kind: "square", side: number };"#,
+        )
+        .unwrap();
+        let reg = build_registry(&module);
+        let def = reg.get("Shape").expect("Shape should be registered");
+        match def {
+            TypeDef::Enum {
+                variants,
+                string_values,
+                tag_field,
+                variant_fields,
+            } => {
+                assert_eq!(variants, &["Circle", "Square"]);
+                assert_eq!(tag_field.as_deref(), Some("kind"));
+                assert_eq!(string_values.get("circle").unwrap(), "Circle");
+                assert_eq!(string_values.get("square").unwrap(), "Square");
+                // Circle variant has radius: f64
+                let circle_fields = variant_fields.get("Circle").expect("Circle variant");
+                assert_eq!(circle_fields, &[("radius".to_string(), RustType::F64)]);
+                // Square variant has side: f64
+                let square_fields = variant_fields.get("Square").expect("Square variant");
+                assert_eq!(square_fields, &[("side".to_string(), RustType::F64)]);
+            }
+            other => panic!("expected Enum, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_build_registry_discriminated_union_unit_variant() {
+        let module =
+            parse_typescript(r#"type Status = { type: "active" } | { type: "inactive" };"#)
+                .unwrap();
+        let reg = build_registry(&module);
+        let def = reg.get("Status").expect("Status should be registered");
+        match def {
+            TypeDef::Enum {
+                variants,
+                tag_field,
+                variant_fields,
+                ..
+            } => {
+                assert_eq!(variants, &["Active", "Inactive"]);
+                assert_eq!(tag_field.as_deref(), Some("type"));
+                assert!(
+                    variant_fields.get("Active").unwrap().is_empty(),
+                    "unit variant should have no fields"
+                );
+            }
+            other => panic!("expected Enum, got {other:?}"),
+        }
     }
 }

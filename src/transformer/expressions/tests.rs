@@ -342,6 +342,35 @@ fn test_convert_expr_new_no_args() {
     );
 }
 
+// --- I-88: Constructor string arg gets .to_string() ---
+
+#[test]
+fn test_new_expr_string_arg_gets_to_string() {
+    // new Foo("hello") with Foo { name: String } → Foo::new("hello".to_string())
+    let mut reg = TypeRegistry::new();
+    use crate::registry::TypeDef;
+    reg.register(
+        "Foo".to_string(),
+        TypeDef::Struct {
+            fields: vec![("name".to_string(), RustType::String)],
+            methods: std::collections::HashMap::new(),
+        },
+    );
+    let swc_expr = parse_expr(r#"new Foo("hello");"#);
+    let result = convert_expr(&swc_expr, &reg, None, &TypeEnv::new()).unwrap();
+    match &result {
+        Expr::FnCall { name, args } => {
+            assert_eq!(name, "Foo::new");
+            assert!(
+                matches!(&args[0], Expr::MethodCall { method, .. } if method == "to_string"),
+                "expected .to_string() on string arg, got {:?}",
+                args[0]
+            );
+        }
+        other => panic!("expected FnCall, got {other:?}"),
+    }
+}
+
 #[test]
 fn test_convert_expr_template_literal_no_exprs() {
     let swc_expr = parse_var_init("const x = `hello world`;");
@@ -535,6 +564,7 @@ fn test_convert_expr_object_spread_last_position_expands_remaining_fields() {
                 ("x".to_string(), RustType::F64),
                 ("y".to_string(), RustType::F64),
             ],
+            methods: std::collections::HashMap::new(),
         },
     );
     let result = convert_expr(&swc_expr, &reg, Some(&expected), &TypeEnv::new()).unwrap();
@@ -575,6 +605,7 @@ fn test_convert_expr_object_spread_middle_position_expands_remaining_fields() {
                 ("b".to_string(), RustType::F64),
                 ("c".to_string(), RustType::F64),
             ],
+            methods: std::collections::HashMap::new(),
         },
     );
     let result = convert_expr(&swc_expr, &reg, Some(&expected), &TypeEnv::new()).unwrap();
@@ -640,6 +671,7 @@ fn test_convert_object_spread_multiple_registered_generates_merged_fields() {
                 ("x".to_string(), RustType::F64),
                 ("y".to_string(), RustType::F64),
             ],
+            methods: std::collections::HashMap::new(),
         },
     );
     let result = convert_expr(&swc_expr, &reg, Some(&expected), &TypeEnv::new()).unwrap();
@@ -673,6 +705,7 @@ fn test_convert_expr_object_spread_with_override() {
                 ("x".to_string(), RustType::F64),
                 ("y".to_string(), RustType::F64),
             ],
+            methods: std::collections::HashMap::new(),
         },
     );
     let result = convert_expr(&swc_expr, &reg, Some(&expected), &TypeEnv::new()).unwrap();
@@ -799,6 +832,9 @@ fn test_convert_expr_member_enum_access_from_registry() {
         "Color".to_string(),
         TypeDef::Enum {
             variants: vec!["Red".to_string(), "Green".to_string(), "Blue".to_string()],
+            string_values: std::collections::HashMap::new(),
+            tag_field: None,
+            variant_fields: std::collections::HashMap::new(),
         },
     );
 
@@ -874,6 +910,7 @@ fn test_convert_expr_object_literal_nested_resolves_field_type_from_registry() {
                 ("x".to_string(), RustType::F64),
                 ("y".to_string(), RustType::F64),
             ],
+            methods: std::collections::HashMap::new(),
         },
     );
     reg.register(
@@ -889,6 +926,7 @@ fn test_convert_expr_object_literal_nested_resolves_field_type_from_registry() {
                 ),
                 ("w".to_string(), RustType::F64),
             ],
+            methods: std::collections::HashMap::new(),
         },
     );
 
@@ -919,6 +957,106 @@ fn test_convert_expr_object_literal_nested_resolves_field_type_from_registry() {
             base: None,
         }
     );
+}
+
+// --- I-86: Optional None completion ---
+
+#[test]
+fn test_object_lit_omitted_optional_field_gets_none() {
+    // struct Item { name: String, value: Option<f64> }
+    // { name: "test" } → Item { name: "test".to_string(), value: None }
+    let mut reg = TypeRegistry::new();
+    use crate::registry::TypeDef;
+    reg.register(
+        "Item".to_string(),
+        TypeDef::Struct {
+            fields: vec![
+                ("name".to_string(), RustType::String),
+                (
+                    "value".to_string(),
+                    RustType::Option(Box::new(RustType::F64)),
+                ),
+            ],
+            methods: std::collections::HashMap::new(),
+        },
+    );
+    let swc_expr = parse_var_init(r#"const i: Item = { name: "test" };"#);
+    let expected = RustType::Named {
+        name: "Item".to_string(),
+        type_args: vec![],
+    };
+    let result = convert_expr(&swc_expr, &reg, Some(&expected), &TypeEnv::new()).unwrap();
+    match &result {
+        Expr::StructInit { fields, .. } => {
+            assert_eq!(fields.len(), 2, "expected 2 fields (name + value: None)");
+            assert!(
+                fields
+                    .iter()
+                    .any(|(k, v)| k == "value" && matches!(v, Expr::Ident(s) if s == "None")),
+                "expected value: None, got {:?}",
+                fields
+            );
+        }
+        other => panic!("expected StructInit, got {other:?}"),
+    }
+}
+
+// --- I-89: Number + string concatenation ---
+
+#[test]
+fn test_binary_number_plus_string_generates_format() {
+    // x + " px" where x: number → format!("{}{}", x, " px")
+    let swc_expr = parse_var_init(r#"const s: string = x + " px";"#);
+    let mut env = TypeEnv::new();
+    env.insert("x".to_string(), RustType::F64);
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        Some(&RustType::String),
+        &env,
+    )
+    .unwrap();
+    match &result {
+        Expr::FormatMacro { template, args } => {
+            assert_eq!(template, "{}{}");
+            assert_eq!(args.len(), 2);
+        }
+        other => panic!("expected FormatMacro for number + string, got {other:?}"),
+    }
+}
+
+// --- I-82: Box::new wrapping for Fn arguments ---
+
+#[test]
+fn test_fn_arg_box_dyn_fn_gets_box_new() {
+    // applyFn(myFunc) where param is Fn type → applyFn(Box::new(my_func))
+    let mut reg = TypeRegistry::new();
+    use crate::registry::TypeDef;
+    reg.register(
+        "applyFn".to_string(),
+        TypeDef::Function {
+            params: vec![(
+                "f".to_string(),
+                RustType::Fn {
+                    params: vec![RustType::F64],
+                    return_type: Box::new(RustType::F64),
+                },
+            )],
+            return_type: Some(RustType::F64),
+        },
+    );
+    let swc_expr = parse_expr("applyFn(myFunc);");
+    let result = convert_expr(&swc_expr, &reg, None, &TypeEnv::new()).unwrap();
+    match &result {
+        Expr::FnCall { args, .. } => {
+            assert!(
+                matches!(&args[0], Expr::FnCall { name, .. } if name == "Box::new"),
+                "expected Box::new wrapping, got {:?}",
+                args[0]
+            );
+        }
+        other => panic!("expected FnCall, got {other:?}"),
+    }
 }
 
 // -- Ternary (conditional) expression tests --
@@ -1041,6 +1179,7 @@ fn test_convert_expr_console_log_single_arg() {
         Expr::MacroCall {
             name: "println".to_string(),
             args: vec![Expr::Ident("x".to_string())],
+            use_debug: vec![false],
         }
     );
 }
@@ -1054,6 +1193,7 @@ fn test_convert_expr_console_error() {
         Expr::MacroCall {
             name: "eprintln".to_string(),
             args: vec![Expr::Ident("x".to_string())],
+            use_debug: vec![false],
         }
     );
 }
@@ -1067,6 +1207,7 @@ fn test_convert_expr_console_warn() {
         Expr::MacroCall {
             name: "eprintln".to_string(),
             args: vec![Expr::Ident("x".to_string())],
+            use_debug: vec![false],
         }
     );
 }
@@ -1080,6 +1221,7 @@ fn test_convert_expr_console_log_no_args() {
         Expr::MacroCall {
             name: "println".to_string(),
             args: vec![],
+            use_debug: vec![],
         }
     );
 }
@@ -1093,6 +1235,7 @@ fn test_convert_expr_console_log_multiple_args() {
         Expr::MacroCall {
             name: "println".to_string(),
             args: vec![Expr::Ident("x".to_string()), Expr::Ident("y".to_string()),],
+            use_debug: vec![false, false],
         }
     );
 }
@@ -1167,6 +1310,7 @@ fn test_convert_expr_object_shorthand_with_registry_field_type() {
         "User".to_string(),
         TypeDef::Struct {
             fields: vec![("name".to_string(), RustType::String)],
+            methods: std::collections::HashMap::new(),
         },
     );
     let result = convert_expr(&swc_expr, &reg, Some(&expected), &TypeEnv::new()).unwrap();
@@ -1669,6 +1813,7 @@ fn test_convert_expr_array_foreach_to_for_loop() {
                 body: ClosureBody::Expr(Box::new(Expr::MacroCall {
                     name: "println".to_string(),
                     args: vec![Expr::Ident("x".to_string())],
+                    use_debug: vec![false],
                 })),
             }],
         }
@@ -2054,6 +2199,22 @@ fn test_convert_expr_math_e_to_consts() {
     let expr = parse_expr("Math.E;");
     let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
     assert_eq!(result, Expr::Ident("std::f64::consts::E".to_string()));
+}
+
+// --- I-85: NaN / Infinity ---
+
+#[test]
+fn test_convert_expr_nan_to_f64_nan() {
+    let expr = parse_expr("NaN;");
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    assert_eq!(result, Expr::Ident("f64::NAN".to_string()));
+}
+
+#[test]
+fn test_convert_expr_infinity_to_f64_infinity() {
+    let expr = parse_expr("Infinity;");
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    assert_eq!(result, Expr::Ident("f64::INFINITY".to_string()));
 }
 
 #[test]
@@ -2485,6 +2646,7 @@ fn test_resolve_expr_type_member_field_found_returns_field_type() {
         "Foo".to_string(),
         TypeDef::Struct {
             fields: vec![("field".to_string(), RustType::String)],
+            methods: std::collections::HashMap::new(),
         },
     );
 
@@ -2507,6 +2669,7 @@ fn test_resolve_expr_type_member_field_not_found_returns_none() {
         "Foo".to_string(),
         TypeDef::Struct {
             fields: vec![("other".to_string(), RustType::F64)],
+            methods: std::collections::HashMap::new(),
         },
     );
 
@@ -2529,6 +2692,7 @@ fn test_resolve_expr_type_member_option_named_returns_field_type() {
         "Foo".to_string(),
         TypeDef::Struct {
             fields: vec![("field".to_string(), RustType::String)],
+            methods: std::collections::HashMap::new(),
         },
     );
 
@@ -2599,12 +2763,14 @@ fn test_resolve_expr_type_member_chain_returns_nested_type() {
                     type_args: vec![],
                 },
             )],
+            methods: std::collections::HashMap::new(),
         },
     );
     reg.register(
         "Inner".to_string(),
         TypeDef::Struct {
             fields: vec![("name".to_string(), RustType::String)],
+            methods: std::collections::HashMap::new(),
         },
     );
 
@@ -2664,6 +2830,43 @@ fn test_convert_opt_chain_unknown_type_returns_map_pattern() {
         &result,
         Expr::MethodCall { method, .. } if method == "map"
     ));
+}
+
+// --- I-81: Optional chaining method name mapping ---
+
+#[test]
+fn test_opt_chain_method_call_maps_to_rust_name() {
+    // s?.toUpperCase() → s.as_ref().map(|_v| _v.to_uppercase())
+    let expr = parse_single_expr("s?.toUpperCase();");
+    let mut env = TypeEnv::new();
+    env.insert(
+        "s".to_string(),
+        RustType::Option(Box::new(RustType::String)),
+    );
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &env).unwrap();
+    // Dig into the map closure body and verify method name is to_uppercase
+    if let Expr::MethodCall {
+        method: outer_method,
+        args,
+        ..
+    } = &result
+    {
+        assert_eq!(outer_method, "map");
+        if let Some(Expr::Closure {
+            body: ClosureBody::Expr(body_expr),
+            ..
+        }) = args.first()
+        {
+            if let Expr::MethodCall { method, .. } = body_expr.as_ref() {
+                assert_eq!(
+                    method, "to_uppercase",
+                    "expected to_uppercase, got {method}"
+                );
+                return;
+            }
+        }
+    }
+    panic!("unexpected IR structure: {result:?}");
 }
 
 // --- TypeEnv-aware nullish coalescing tests ---
@@ -2732,12 +2935,14 @@ fn test_convert_opt_chain_nested_option_uses_and_then() {
                     type_args: vec![],
                 })),
             )],
+            methods: std::collections::HashMap::new(),
         },
     );
     reg.register(
         "Bar".to_string(),
         TypeDef::Struct {
             fields: vec![("z".to_string(), RustType::String)],
+            methods: std::collections::HashMap::new(),
         },
     );
 
@@ -3059,7 +3264,13 @@ fn test_resolve_expr_type_new_registered_returns_named_type() {
     let expr = parse_single_expr("new Foo();");
     let env = TypeEnv::new();
     let mut reg = TypeRegistry::new();
-    reg.register("Foo".to_string(), TypeDef::Struct { fields: vec![] });
+    reg.register(
+        "Foo".to_string(),
+        TypeDef::Struct {
+            fields: vec![],
+            methods: std::collections::HashMap::new(),
+        },
+    );
 
     assert_eq!(
         resolve_expr_type(&expr, &env, &reg),
@@ -3429,4 +3640,388 @@ fn test_option_expected_undefined_stays_none() {
     .unwrap();
     // Should be None, not Some(None)
     assert_eq!(result, Expr::Ident("None".to_string()));
+}
+
+// --- I-90: string literal → enum variant conversion ---
+
+#[test]
+fn test_convert_lit_string_to_enum_variant_when_expected_is_string_literal_union() {
+    let mut reg = TypeRegistry::new();
+    let mut string_values = std::collections::HashMap::new();
+    string_values.insert("up".to_string(), "Up".to_string());
+    string_values.insert("down".to_string(), "Down".to_string());
+    reg.register(
+        "Direction".to_string(),
+        TypeDef::Enum {
+            variants: vec!["Up".to_string(), "Down".to_string()],
+            string_values,
+            tag_field: None,
+            variant_fields: std::collections::HashMap::new(),
+        },
+    );
+
+    let expected = RustType::Named {
+        name: "Direction".to_string(),
+        type_args: vec![],
+    };
+    let swc_expr = parse_expr(r#""up";"#);
+    let result = convert_expr(&swc_expr, &reg, Some(&expected), &TypeEnv::new()).unwrap();
+    assert_eq!(result, Expr::Ident("Direction::Up".to_string()));
+}
+
+#[test]
+fn test_convert_lit_string_no_match_falls_back_to_string_lit() {
+    let mut reg = TypeRegistry::new();
+    let mut string_values = std::collections::HashMap::new();
+    string_values.insert("up".to_string(), "Up".to_string());
+    reg.register(
+        "Direction".to_string(),
+        TypeDef::Enum {
+            variants: vec!["Up".to_string()],
+            string_values,
+            tag_field: None,
+            variant_fields: std::collections::HashMap::new(),
+        },
+    );
+
+    let expected = RustType::Named {
+        name: "Direction".to_string(),
+        type_args: vec![],
+    };
+    let swc_expr = parse_expr(r#""unknown";"#);
+    let result = convert_expr(&swc_expr, &reg, Some(&expected), &TypeEnv::new()).unwrap();
+    assert_eq!(result, Expr::StringLit("unknown".to_string()));
+}
+
+#[test]
+fn test_convert_bin_expr_enum_var_eq_string_literal_converts_rhs() {
+    let mut reg = TypeRegistry::new();
+    let mut string_values = std::collections::HashMap::new();
+    string_values.insert("up".to_string(), "Up".to_string());
+    string_values.insert("down".to_string(), "Down".to_string());
+    reg.register(
+        "Direction".to_string(),
+        TypeDef::Enum {
+            variants: vec!["Up".to_string(), "Down".to_string()],
+            string_values,
+            tag_field: None,
+            variant_fields: std::collections::HashMap::new(),
+        },
+    );
+
+    let mut type_env = TypeEnv::new();
+    type_env.insert(
+        "d".to_string(),
+        RustType::Named {
+            name: "Direction".to_string(),
+            type_args: vec![],
+        },
+    );
+
+    let swc_expr = parse_expr(r#"d == "up";"#);
+    let result = convert_expr(&swc_expr, &reg, None, &type_env).unwrap();
+    assert_eq!(
+        result,
+        Expr::BinaryOp {
+            left: Box::new(Expr::Ident("d".to_string())),
+            op: BinOp::Eq,
+            right: Box::new(Expr::Ident("Direction::Up".to_string())),
+        }
+    );
+}
+
+#[test]
+fn test_convert_bin_expr_string_literal_ne_enum_var_converts_lhs() {
+    let mut reg = TypeRegistry::new();
+    let mut string_values = std::collections::HashMap::new();
+    string_values.insert("up".to_string(), "Up".to_string());
+    reg.register(
+        "Direction".to_string(),
+        TypeDef::Enum {
+            variants: vec!["Up".to_string()],
+            string_values,
+            tag_field: None,
+            variant_fields: std::collections::HashMap::new(),
+        },
+    );
+
+    let mut type_env = TypeEnv::new();
+    type_env.insert(
+        "d".to_string(),
+        RustType::Named {
+            name: "Direction".to_string(),
+            type_args: vec![],
+        },
+    );
+
+    let swc_expr = parse_expr(r#""up" != d;"#);
+    let result = convert_expr(&swc_expr, &reg, None, &type_env).unwrap();
+    assert_eq!(
+        result,
+        Expr::BinaryOp {
+            left: Box::new(Expr::Ident("Direction::Up".to_string())),
+            op: BinOp::NotEq,
+            right: Box::new(Expr::Ident("d".to_string())),
+        }
+    );
+}
+
+#[test]
+fn test_convert_call_args_string_literal_to_enum_variant() {
+    let mut reg = TypeRegistry::new();
+    let mut string_values = std::collections::HashMap::new();
+    string_values.insert("up".to_string(), "Up".to_string());
+    string_values.insert("down".to_string(), "Down".to_string());
+    reg.register(
+        "Direction".to_string(),
+        TypeDef::Enum {
+            variants: vec!["Up".to_string(), "Down".to_string()],
+            string_values,
+            tag_field: None,
+            variant_fields: std::collections::HashMap::new(),
+        },
+    );
+    reg.register(
+        "move_dir".to_string(),
+        TypeDef::Function {
+            params: vec![(
+                "d".to_string(),
+                RustType::Named {
+                    name: "Direction".to_string(),
+                    type_args: vec![],
+                },
+            )],
+            return_type: None,
+        },
+    );
+
+    let swc_expr = parse_expr(r#"move_dir("up");"#);
+    let result = convert_expr(&swc_expr, &reg, None, &TypeEnv::new()).unwrap();
+    assert_eq!(
+        result,
+        Expr::FnCall {
+            name: "move_dir".to_string(),
+            args: vec![Expr::Ident("Direction::Up".to_string())],
+        }
+    );
+}
+
+// --- I-91: discriminated union object literal → enum variant ---
+
+#[test]
+fn test_convert_object_lit_discriminated_union_to_enum_variant() {
+    let mut reg = TypeRegistry::new();
+    let mut string_values = std::collections::HashMap::new();
+    string_values.insert("circle".to_string(), "Circle".to_string());
+    string_values.insert("square".to_string(), "Square".to_string());
+    let mut variant_fields = std::collections::HashMap::new();
+    variant_fields.insert(
+        "Circle".to_string(),
+        vec![("radius".to_string(), RustType::F64)],
+    );
+    variant_fields.insert(
+        "Square".to_string(),
+        vec![("side".to_string(), RustType::F64)],
+    );
+    reg.register(
+        "Shape".to_string(),
+        TypeDef::Enum {
+            variants: vec!["Circle".to_string(), "Square".to_string()],
+            string_values,
+            tag_field: Some("kind".to_string()),
+            variant_fields,
+        },
+    );
+
+    let expected = RustType::Named {
+        name: "Shape".to_string(),
+        type_args: vec![],
+    };
+    let swc_expr = parse_var_init(r#"const s: Shape = { kind: "circle", radius: 5 };"#);
+    let result = convert_expr(&swc_expr, &reg, Some(&expected), &TypeEnv::new()).unwrap();
+    assert_eq!(
+        result,
+        Expr::StructInit {
+            name: "Shape::Circle".to_string(),
+            fields: vec![("radius".to_string(), Expr::NumberLit(5.0))],
+            base: None,
+        }
+    );
+}
+
+#[test]
+fn test_convert_object_lit_discriminated_union_unit_variant() {
+    let mut reg = TypeRegistry::new();
+    let mut string_values = std::collections::HashMap::new();
+    string_values.insert("active".to_string(), "Active".to_string());
+    let mut variant_fields = std::collections::HashMap::new();
+    variant_fields.insert("Active".to_string(), vec![]);
+    reg.register(
+        "Status".to_string(),
+        TypeDef::Enum {
+            variants: vec!["Active".to_string()],
+            string_values,
+            tag_field: Some("type".to_string()),
+            variant_fields,
+        },
+    );
+
+    let expected = RustType::Named {
+        name: "Status".to_string(),
+        type_args: vec![],
+    };
+    let swc_expr = parse_var_init(r#"const s: Status = { type: "active" };"#);
+    let result = convert_expr(&swc_expr, &reg, Some(&expected), &TypeEnv::new()).unwrap();
+    // Unit variant: no fields → Ident
+    assert_eq!(result, Expr::Ident("Status::Active".to_string()));
+}
+
+#[test]
+fn test_convert_member_expr_discriminant_field_to_method_call() {
+    let mut reg = TypeRegistry::new();
+    let mut string_values = std::collections::HashMap::new();
+    string_values.insert("circle".to_string(), "Circle".to_string());
+    let mut variant_fields = std::collections::HashMap::new();
+    variant_fields.insert(
+        "Circle".to_string(),
+        vec![("radius".to_string(), RustType::F64)],
+    );
+    reg.register(
+        "Shape".to_string(),
+        TypeDef::Enum {
+            variants: vec!["Circle".to_string()],
+            string_values,
+            tag_field: Some("kind".to_string()),
+            variant_fields,
+        },
+    );
+
+    let mut type_env = TypeEnv::new();
+    type_env.insert(
+        "s".to_string(),
+        RustType::Named {
+            name: "Shape".to_string(),
+            type_args: vec![],
+        },
+    );
+
+    let swc_expr = parse_expr("s.kind;");
+    let result = convert_expr(&swc_expr, &reg, None, &type_env).unwrap();
+    assert_eq!(
+        result,
+        Expr::MethodCall {
+            object: Box::new(Expr::Ident("s".to_string())),
+            method: "kind".to_string(),
+            args: vec![],
+        }
+    );
+}
+
+// --- I-46: computed property (index access) ---
+
+#[test]
+fn test_convert_member_expr_array_index_literal_generates_index() {
+    let swc_expr = parse_expr("arr[0];");
+    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    assert_eq!(
+        result,
+        Expr::Index {
+            object: Box::new(Expr::Ident("arr".to_string())),
+            index: Box::new(Expr::NumberLit(0.0)),
+        }
+    );
+}
+
+#[test]
+fn test_convert_member_expr_array_index_variable_generates_index() {
+    let swc_expr = parse_expr("arr[i];");
+    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    assert_eq!(
+        result,
+        Expr::Index {
+            object: Box::new(Expr::Ident("arr".to_string())),
+            index: Box::new(Expr::Ident("i".to_string())),
+        }
+    );
+}
+
+// --- I-95: nullish coalescing expected type propagation ---
+
+#[test]
+fn test_convert_nullish_coalescing_rhs_string_gets_to_string_when_lhs_is_option_string() {
+    let mut type_env = TypeEnv::new();
+    type_env.insert(
+        "s".to_string(),
+        RustType::Option(Box::new(RustType::String)),
+    );
+
+    let swc_expr = parse_expr(r#"s ?? "default";"#);
+    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &type_env).unwrap();
+
+    // Should be s.unwrap_or_else(|| "default".to_string())
+    if let Expr::MethodCall { method, args, .. } = &result {
+        assert_eq!(method, "unwrap_or_else");
+        if let Expr::Closure { body, .. } = &args[0] {
+            if let ClosureBody::Expr(expr) = body {
+                assert!(
+                    matches!(
+                        expr.as_ref(),
+                        Expr::MethodCall { method, .. } if method == "to_string"
+                    ),
+                    "expected .to_string() on rhs, got: {expr:?}"
+                );
+            } else {
+                panic!("expected ClosureBody::Expr");
+            }
+        } else {
+            panic!("expected Closure");
+        }
+    } else {
+        panic!("expected MethodCall, got: {result:?}");
+    }
+}
+
+// --- I-94: method argument type lookup ---
+
+#[test]
+fn test_convert_method_call_string_arg_gets_to_string_with_registry() {
+    let mut reg = TypeRegistry::new();
+    let mut methods = std::collections::HashMap::new();
+    methods.insert(
+        "greet".to_string(),
+        vec![("name".to_string(), RustType::String)],
+    );
+    reg.register(
+        "Greeter".to_string(),
+        TypeDef::Struct {
+            fields: vec![],
+            methods,
+        },
+    );
+
+    let mut type_env = TypeEnv::new();
+    type_env.insert(
+        "g".to_string(),
+        RustType::Named {
+            name: "Greeter".to_string(),
+            type_args: vec![],
+        },
+    );
+
+    let swc_expr = parse_expr(r#"g.greet("world");"#);
+    let result = convert_expr(&swc_expr, &reg, None, &type_env).unwrap();
+
+    // Should have .to_string() on the string arg
+    if let Expr::MethodCall { args, .. } = &result {
+        assert!(
+            matches!(
+                &args[0],
+                Expr::MethodCall { method, .. } if method == "to_string"
+            ),
+            "expected .to_string() on method arg, got: {:?}",
+            args[0]
+        );
+    } else {
+        panic!("expected MethodCall, got: {result:?}");
+    }
 }

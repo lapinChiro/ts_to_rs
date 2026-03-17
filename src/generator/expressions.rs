@@ -60,6 +60,17 @@ fn float_literal_for_method(expr: &Expr) -> Option<String> {
     }
 }
 
+/// Returns `true` if the expression is an uppercase identifier (heuristic for type/class name).
+///
+/// Used to detect static method calls: `Foo.method()` → `Foo::method()`.
+fn is_type_ident(expr: &Expr) -> bool {
+    if let Expr::Ident(name) = expr {
+        name.chars().next().is_some_and(|c| c.is_ascii_uppercase())
+    } else {
+        false
+    }
+}
+
 /// Returns `true` if the expression needs parentheses when used as the receiver
 /// of a method call or field access (i.e., before `.method()` or `.field`).
 fn needs_parens_as_receiver(expr: &Expr) -> bool {
@@ -129,10 +140,12 @@ pub(super) fn generate_expr(expr: &Expr) -> String {
                 return format!("{lit}.{method}({args_str})");
             }
             let obj_str = generate_expr(object);
+            // Uppercase identifier receiver → static method call (Type::method)
+            let sep = if is_type_ident(object) { "::" } else { "." };
             if needs_parens_as_receiver(object) {
-                format!("({obj_str}).{method}({args_str})")
+                format!("({obj_str}){sep}{method}({args_str})")
             } else {
-                format!("{obj_str}.{method}({args_str})")
+                format!("{obj_str}{sep}{method}({args_str})")
             }
         }
         Expr::StructInit { name, fields, base } => {
@@ -232,7 +245,11 @@ pub(super) fn generate_expr(expr: &Expr) -> String {
                 generate_expr(else_expr)
             )
         }
-        Expr::MacroCall { name, args } => generate_macro_call(name, args),
+        Expr::MacroCall {
+            name,
+            args,
+            use_debug,
+        } => generate_macro_call(name, args, use_debug),
         Expr::Await(expr) => format!("{}.await", generate_expr(expr)),
         Expr::Index { object, index } => {
             // Index values must be usize in Rust; emit integer literals without .0,
@@ -275,7 +292,7 @@ pub(super) fn generate_expr(expr: &Expr) -> String {
 ///
 /// Display (`{}`) is used instead of Debug (`{:?}`) because `console.log` in TypeScript
 /// outputs values without debug formatting (e.g., strings without quotes).
-fn generate_macro_call(name: &str, args: &[Expr]) -> String {
+fn generate_macro_call(name: &str, args: &[Expr], use_debug: &[bool]) -> String {
     if args.is_empty() {
         return format!("{name}!()");
     }
@@ -287,8 +304,19 @@ fn generate_macro_call(name: &str, args: &[Expr]) -> String {
         }
     }
 
-    // Build format string with Display placeholders
-    let format_str = args.iter().map(|_| "{}").collect::<Vec<_>>().join(" ");
+    // Build format string with per-argument Display/Debug placeholders
+    let format_str = args
+        .iter()
+        .enumerate()
+        .map(|(i, _)| {
+            if use_debug.get(i).copied().unwrap_or(false) {
+                "{:?}"
+            } else {
+                "{}"
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
     let args_str = args
         .iter()
         .map(generate_expr)
@@ -617,6 +645,7 @@ mod tests {
         let expr = Expr::MacroCall {
             name: "println".to_string(),
             args: vec![],
+            use_debug: vec![],
         };
         assert_eq!(generate_expr(&expr), "println!()");
     }
@@ -626,6 +655,7 @@ mod tests {
         let expr = Expr::MacroCall {
             name: "println".to_string(),
             args: vec![Expr::StringLit("hello".to_string())],
+            use_debug: vec![false],
         };
         assert_eq!(generate_expr(&expr), "println!(\"hello\")");
     }
@@ -635,6 +665,7 @@ mod tests {
         let expr = Expr::MacroCall {
             name: "println".to_string(),
             args: vec![Expr::Ident("x".to_string())],
+            use_debug: vec![false],
         };
         assert_eq!(generate_expr(&expr), "println!(\"{}\", x)");
     }
@@ -647,6 +678,7 @@ mod tests {
                 Expr::StringLit("value:".to_string()),
                 Expr::Ident("x".to_string()),
             ],
+            use_debug: vec![false, false],
         };
         assert_eq!(generate_expr(&expr), "println!(\"{} {}\", \"value:\", x)");
     }
@@ -656,8 +688,35 @@ mod tests {
         let expr = Expr::MacroCall {
             name: "eprintln".to_string(),
             args: vec![Expr::Ident("err".to_string())],
+            use_debug: vec![false],
         };
         assert_eq!(generate_expr(&expr), "eprintln!(\"{}\", err)");
+    }
+
+    #[test]
+    fn test_generate_expr_macro_call_use_debug_single() {
+        let expr = Expr::MacroCall {
+            name: "println".to_string(),
+            args: vec![Expr::Ident("arr".to_string())],
+            use_debug: vec![true],
+        };
+        assert_eq!(generate_expr(&expr), "println!(\"{:?}\", arr)");
+    }
+
+    #[test]
+    fn test_generate_expr_macro_call_use_debug_mixed() {
+        let expr = Expr::MacroCall {
+            name: "println".to_string(),
+            args: vec![
+                Expr::StringLit("items:".to_string()),
+                Expr::Ident("arr".to_string()),
+            ],
+            use_debug: vec![false, true],
+        };
+        assert_eq!(
+            generate_expr(&expr),
+            "println!(\"{} {:?}\", \"items:\", arr)"
+        );
     }
 
     #[test]
@@ -740,6 +799,30 @@ mod tests {
             args: vec![],
         };
         assert_eq!(generate_expr(&expr), "foo().bar()");
+    }
+
+    // --- I-84: static method :: separator ---
+
+    #[test]
+    fn test_generate_static_method_call_uses_double_colon() {
+        // Foo.method() → Foo::method() (uppercase receiver = type name = static call)
+        let expr = Expr::MethodCall {
+            object: Box::new(Expr::Ident("Foo".to_string())),
+            method: "create".to_string(),
+            args: vec![Expr::IntLit(1)],
+        };
+        assert_eq!(generate_expr(&expr), "Foo::create(1)");
+    }
+
+    #[test]
+    fn test_generate_instance_method_call_uses_dot() {
+        // foo.method() → foo.method() (lowercase = instance, no change)
+        let expr = Expr::MethodCall {
+            object: Box::new(Expr::Ident("foo".to_string())),
+            method: "create".to_string(),
+            args: vec![],
+        };
+        assert_eq!(generate_expr(&expr), "foo.create()");
     }
 
     #[test]

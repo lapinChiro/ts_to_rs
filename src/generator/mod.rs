@@ -387,6 +387,22 @@ fn generate_enum(
         out.push_str("        }\n");
         out.push_str("    }\n");
         out.push('}');
+
+        // Generate Display impl for string enums
+        out.push_str(&format!("\n\nimpl std::fmt::Display for {name} {{\n"));
+        out.push_str("    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {\n");
+        out.push_str("        write!(f, \"{}\", self.as_str())\n");
+        out.push_str("    }\n");
+        out.push('}');
+    }
+
+    // Generate Display impl for numeric enums
+    if numeric {
+        out.push_str(&format!("\n\nimpl std::fmt::Display for {name} {{\n"));
+        out.push_str("    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {\n");
+        out.push_str("        write!(f, \"{}\", *self as i64)\n");
+        out.push_str("    }\n");
+        out.push('}');
     }
 
     out
@@ -404,14 +420,10 @@ fn generate_serde_tagged_enum(
     let vis_str = generate_vis(vis);
     let mut out = String::new();
 
-    out.push_str("#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]\n");
-    out.push_str(&format!("#[serde(tag = \"{tag}\")]\n"));
+    out.push_str("#[derive(Debug, Clone, PartialEq)]\n");
     out.push_str(&format!("{vis_str}enum {name} {{\n"));
 
     for variant in variants {
-        if let Some(EnumValue::Str(s)) = &variant.value {
-            out.push_str(&format!("    #[serde(rename = \"{s}\")]\n"));
-        }
         if variant.fields.is_empty() {
             out.push_str(&format!("    {},\n", variant.name));
         } else {
@@ -428,6 +440,29 @@ fn generate_serde_tagged_enum(
     }
 
     out.push('}');
+
+    // Generate tag accessor method: fn kind(&self) -> &str { match self { ... } }
+    let tag_method = escape_rust_keyword(tag);
+    out.push_str(&format!("\n\nimpl {name} {{\n"));
+    out.push_str(&format!("    pub fn {tag_method}(&self) -> &str {{\n"));
+    out.push_str("        match self {\n");
+    for variant in variants {
+        if let Some(EnumValue::Str(s)) = &variant.value {
+            let pattern_suffix = if variant.fields.is_empty() {
+                String::new()
+            } else {
+                " { .. }".to_string()
+            };
+            out.push_str(&format!(
+                "            {name}::{}{pattern_suffix} => \"{s}\",\n",
+                variant.name
+            ));
+        }
+    }
+    out.push_str("        }\n");
+    out.push_str("    }\n");
+    out.push('}');
+
     out
 }
 
@@ -443,6 +478,21 @@ fn is_derivable_type(ty: &RustType) -> bool {
         RustType::Tuple(elems) => elems.iter().all(is_derivable_type),
         RustType::Named { type_args, .. } => type_args.iter().all(is_derivable_type),
         _ => true,
+    }
+}
+
+/// Rust の予約語をエスケープする（`type` → `r#type`）。
+fn escape_rust_keyword(name: &str) -> String {
+    match name {
+        "type" | "match" | "move" | "ref" | "self" | "super" | "crate" | "fn" | "let" | "mut"
+        | "pub" | "return" | "static" | "struct" | "trait" | "use" | "where" | "while"
+        | "async" | "await" | "dyn" | "abstract" | "become" | "box" | "do" | "final" | "macro"
+        | "override" | "priv" | "typeof" | "unsized" | "virtual" | "yield" | "try" | "mod"
+        | "enum" | "extern" | "const" | "continue" | "break" | "else" | "false" | "for" | "if"
+        | "impl" | "in" | "loop" | "true" | "unsafe" | "as" => {
+            format!("r#{name}")
+        }
+        _ => name.to_string(),
     }
 }
 
@@ -625,6 +675,12 @@ pub enum Color {
     Red = 0,
     Green = 1,
     Blue = 2,
+}
+
+impl std::fmt::Display for Color {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, \"{}\", *self as i64)
+    }
 }";
         assert_eq!(generate(&[item]), expected);
     }
@@ -656,6 +712,12 @@ pub enum Color {
 pub enum Status {
     Active = 1,
     Inactive = 0,
+}
+
+impl std::fmt::Display for Status {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, \"{}\", *self as i64)
+    }
 }";
         assert_eq!(generate(&[item]), expected);
     }
@@ -694,6 +756,12 @@ impl Direction {
             Direction::Up => \"UP\",
             Direction::Down => \"DOWN\",
         }
+    }
+}
+
+impl std::fmt::Display for Direction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, \"{}\", self.as_str())
     }
 }";
         assert_eq!(generate(&[item]), expected);

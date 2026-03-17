@@ -1436,12 +1436,14 @@ fn test_convert_type_alias_intersection_type_ref_resolved_generates_merged_struc
         "Foo".to_string(),
         crate::registry::TypeDef::Struct {
             fields: vec![("a".to_string(), RustType::String)],
+            methods: std::collections::HashMap::new(),
         },
     );
     reg.register(
         "Bar".to_string(),
         crate::registry::TypeDef::Struct {
             fields: vec![("b".to_string(), RustType::F64)],
+            methods: std::collections::HashMap::new(),
         },
     );
     let decl = parse_type_alias("type C = Foo & Bar;");
@@ -2156,6 +2158,7 @@ fn reg_with_point() -> TypeRegistry {
                 ("y".to_string(), RustType::F64),
                 ("z".to_string(), RustType::F64),
             ],
+            methods: std::collections::HashMap::new(),
         },
     );
     reg
@@ -2219,6 +2222,7 @@ fn test_utility_required_strips_option_from_all_fields() {
                 ("x".to_string(), RustType::Option(Box::new(RustType::F64))),
                 ("y".to_string(), RustType::Option(Box::new(RustType::F64))),
             ],
+            methods: std::collections::HashMap::new(),
         },
     );
     let mut extra_items = Vec::new();

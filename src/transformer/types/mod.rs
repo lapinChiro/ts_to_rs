@@ -1200,7 +1200,7 @@ fn try_convert_single_string_literal(
 /// Converts a string value to PascalCase for use as an enum variant name.
 ///
 /// Examples: `"up"` → `"Up"`, `"foo-bar"` → `"FooBar"`, `"UPPER_CASE"` → `"UpperCase"`
-fn string_to_pascal_case(s: &str) -> String {
+pub(crate) fn string_to_pascal_case(s: &str) -> String {
     s.split(['-', '_', ' '])
         .filter(|part| !part.is_empty())
         .map(|part| {
@@ -1450,6 +1450,7 @@ fn try_convert_intersection_type(
                 // Try to resolve fields from TypeRegistry
                 if let Some(crate::registry::TypeDef::Struct {
                     fields: resolved_fields,
+                    ..
                 }) = reg.get(&type_name)
                 {
                     for (name, ty) in resolved_fields {
@@ -1722,7 +1723,7 @@ fn resolve_utility_inner_fields<'a>(
     };
 
     // Try registry first, then check extra_items for synthesized structs
-    let fields = if let Some(TypeDef::Struct { fields }) = reg.get(&inner_name) {
+    let fields = if let Some(TypeDef::Struct { fields, .. }) = reg.get(&inner_name) {
         fields.clone()
     } else {
         // Look in extra_items for a previously synthesized struct

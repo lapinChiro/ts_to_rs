@@ -482,7 +482,7 @@ fn convert_object_destructuring_param(
                     RustType::Named { name, .. } => Some(name.as_str()),
                     _ => None,
                 };
-                if let Some(crate::registry::TypeDef::Struct { fields }) =
+                if let Some(crate::registry::TypeDef::Struct { fields, .. }) =
                     type_name.and_then(|n| reg.get(n))
                 {
                     for (field_name, _) in fields {

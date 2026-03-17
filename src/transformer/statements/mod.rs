@@ -112,6 +112,8 @@ pub fn convert_stmt(
         ast::Stmt::Switch(switch_stmt) => {
             convert_switch_stmt(switch_stmt, reg, return_type, type_env)
         }
+        // Local type declarations are skipped — they don't produce runtime code
+        ast::Stmt::Decl(ast::Decl::TsInterface(_) | ast::Decl::TsTypeAlias(_)) => Ok(vec![]),
         _ => Err(anyhow!("unsupported statement: {:?}", stmt)),
     }
 }
@@ -160,6 +162,33 @@ fn convert_var_decl(
         ty,
         init,
     })
+}
+
+/// Infers a `RustType::Fn` from a closure expression for TypeEnv registration.
+///
+/// When `const greet = (name: string): string => ...` is converted, the variable's type
+/// annotation is absent. This function extracts param/return types from the `Expr::Closure`
+/// so the `Fn` type can be registered in TypeEnv, enabling `.to_string()` at call sites.
+fn infer_fn_type_from_closure(init: &Option<Expr>) -> Option<RustType> {
+    if let Some(Expr::Closure {
+        params,
+        return_type,
+        ..
+    }) = init
+    {
+        let param_types: Vec<RustType> = params.iter().filter_map(|p| p.ty.clone()).collect();
+        // Only infer if at least one parameter has a type annotation
+        if param_types.is_empty() && return_type.is_none() {
+            return None;
+        }
+        let ret = return_type.clone().unwrap_or(RustType::Unit);
+        Some(RustType::Fn {
+            params: param_types,
+            return_type: Box::new(ret),
+        })
+    } else {
+        None
+    }
 }
 
 /// Returns true if the type is an object/struct type that may need mutability
@@ -506,6 +535,7 @@ fn convert_try_stmt(
             result.push(Stmt::Expr(Expr::MacroCall {
                 name: "unreachable".to_string(),
                 args: vec![],
+                use_debug: vec![],
             }));
         }
     } else {
@@ -700,16 +730,156 @@ pub fn convert_stmt_list(
     for stmt in stmts {
         let converted = convert_stmt(stmt, reg, return_type, type_env)?;
         for s in &converted {
-            if let Stmt::Let {
-                name, ty: Some(ty), ..
-            } = s
-            {
-                type_env.insert(name.clone(), ty.clone());
+            match s {
+                Stmt::Let {
+                    name, ty: Some(ty), ..
+                } => {
+                    type_env.insert(name.clone(), ty.clone());
+                }
+                // Infer Fn type from closure init for TypeEnv (enables .to_string() at call sites)
+                Stmt::Let {
+                    name,
+                    ty: None,
+                    init: Some(init),
+                    ..
+                } => {
+                    if let Some(fn_type) = infer_fn_type_from_closure(&Some(init.clone())) {
+                        type_env.insert(name.clone(), fn_type);
+                    }
+                }
+                _ => {}
             }
         }
         result.extend(converted);
     }
+    mark_mutated_vars(&mut result);
     Ok(result)
+}
+
+/// Mutating methods that require `&mut self` on the receiver.
+const MUTATING_METHODS: &[&str] = &[
+    "reverse", "sort", "sort_by", "drain", "push", "pop", "remove", "insert", "clear", "truncate",
+    "retain",
+];
+
+/// Post-processes a statement list to mark immutable variables as `let mut`
+/// when subsequent statements mutate them (field assignment or mutating method call).
+/// Also marks closure bindings as `let mut` when the closure captures mutably (FnMut).
+fn mark_mutated_vars(stmts: &mut [Stmt]) {
+    let mut needs_mut = std::collections::HashSet::new();
+    collect_mutated_vars(stmts, &mut needs_mut);
+
+    // Detect closures that capture outer variables mutably → closure binding needs `let mut`
+    let mut closure_needs_mut = std::collections::HashSet::new();
+    for stmt in stmts.iter() {
+        if let Stmt::Let {
+            name,
+            init: Some(Expr::Closure { body, .. }),
+            ..
+        } = stmt
+        {
+            let mut closure_mutations = std::collections::HashSet::new();
+            match body {
+                ClosureBody::Block(body_stmts) => {
+                    collect_closure_assigns(body_stmts, &mut closure_mutations);
+                }
+                ClosureBody::Expr(expr) => {
+                    collect_assigns_from_expr(expr, &mut closure_mutations);
+                }
+            }
+            if !closure_mutations.is_empty() {
+                closure_needs_mut.insert(name.clone());
+            }
+        }
+    }
+    needs_mut.extend(closure_needs_mut);
+
+    for stmt in stmts.iter_mut() {
+        if let Stmt::Let { mutable, name, .. } = stmt {
+            if !*mutable && needs_mut.contains(name.as_str()) {
+                *mutable = true;
+            }
+        }
+    }
+}
+
+/// Collects variable names that are assigned to inside closure bodies (direct assignment).
+fn collect_closure_assigns(stmts: &[Stmt], names: &mut std::collections::HashSet<String>) {
+    for stmt in stmts {
+        match stmt {
+            Stmt::Expr(expr) | Stmt::TailExpr(expr) => {
+                collect_assigns_from_expr(expr, names);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Collects variable names from direct assignment expressions (`x = ...`, `x += ...`).
+fn collect_assigns_from_expr(expr: &Expr, names: &mut std::collections::HashSet<String>) {
+    if let Expr::Assign { target, .. } = expr {
+        if let Expr::Ident(name) = target.as_ref() {
+            names.insert(name.clone());
+        }
+    }
+}
+
+/// Recursively collects variable names that are targets of field assignments or mutating methods.
+fn collect_mutated_vars(stmts: &[Stmt], names: &mut std::collections::HashSet<String>) {
+    for stmt in stmts {
+        match stmt {
+            Stmt::Expr(expr) | Stmt::TailExpr(expr) => {
+                collect_mutated_vars_from_expr(expr, names);
+            }
+            Stmt::Let {
+                init: Some(expr), ..
+            } => {
+                collect_mutated_vars_from_expr(expr, names);
+            }
+            Stmt::Return(Some(expr)) => {
+                collect_mutated_vars_from_expr(expr, names);
+            }
+            Stmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                collect_mutated_vars(then_body, names);
+                if let Some(els) = else_body {
+                    collect_mutated_vars(els, names);
+                }
+            }
+            Stmt::While { body, .. } | Stmt::ForIn { body, .. } | Stmt::Loop { body, .. } => {
+                collect_mutated_vars(body, names);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Checks if an expression mutates a variable via field assignment or mutating method call.
+fn collect_mutated_vars_from_expr(expr: &Expr, names: &mut std::collections::HashSet<String>) {
+    match expr {
+        // Field assignment: obj.field = value
+        Expr::Assign { target, value, .. } => {
+            if let Expr::FieldAccess { object, .. } = target.as_ref() {
+                if let Expr::Ident(name) = object.as_ref() {
+                    names.insert(name.clone());
+                }
+            }
+            collect_mutated_vars_from_expr(value, names);
+        }
+        // Mutating method call: arr.push(...)
+        Expr::MethodCall { object, method, .. } => {
+            if MUTATING_METHODS.contains(&method.as_str()) {
+                if let Expr::Ident(name) = object.as_ref() {
+                    names.insert(name.clone());
+                }
+            }
+            collect_mutated_vars_from_expr(object, names);
+        }
+        _ => {}
+    }
 }
 
 // --- Spread array detection and expansion at SWC AST level ---
@@ -1076,7 +1246,7 @@ fn expand_object_pat_props(
                     RustType::Named { name, .. } => Some(name.as_str()),
                     _ => None,
                 });
-                if let Some(crate::registry::TypeDef::Struct { fields }) =
+                if let Some(crate::registry::TypeDef::Struct { fields, .. }) =
                     type_name.and_then(|n| reg.get(n))
                 {
                     for (field_name, _) in fields {
@@ -1126,6 +1296,13 @@ fn convert_switch_stmt(
     return_type: Option<&RustType>,
     type_env: &mut TypeEnv,
 ) -> Result<Vec<Stmt>> {
+    // Check if this is a switch on a discriminated union's tag field
+    if let Some(result) =
+        try_convert_discriminated_union_switch(switch, reg, return_type, type_env)?
+    {
+        return Ok(result);
+    }
+
     let discriminant = convert_expr(&switch.discriminant, reg, None, type_env)?;
 
     // Analyze cases: detect if any has a non-trivial fall-through
@@ -1145,6 +1322,133 @@ fn convert_switch_stmt(
     }
 }
 
+/// discriminated union の tag フィールドに対する switch を enum match に変換する。
+///
+/// `switch (s.kind) { case "circle": ... }` → `match &s { Shape::Circle { .. } => ... }`
+fn try_convert_discriminated_union_switch(
+    switch: &ast::SwitchStmt,
+    reg: &TypeRegistry,
+    return_type: Option<&RustType>,
+    type_env: &mut TypeEnv,
+) -> Result<Option<Vec<Stmt>>> {
+    use crate::registry::TypeDef;
+    use crate::transformer::expressions::resolve_expr_type;
+
+    // Check if discriminant is a member expression (e.g., s.kind)
+    let member = match switch.discriminant.as_ref() {
+        ast::Expr::Member(m) => m,
+        _ => return Ok(None),
+    };
+
+    let field_name = match &member.prop {
+        ast::MemberProp::Ident(ident) => ident.sym.to_string(),
+        _ => return Ok(None),
+    };
+
+    // Resolve the object's type
+    let obj_type = resolve_expr_type(&member.obj, type_env, reg);
+    let enum_name = match &obj_type {
+        Some(RustType::Named { name, .. }) => name.clone(),
+        _ => return Ok(None),
+    };
+
+    // Check if this is a discriminated union and the field is the tag
+    let (string_values, _variant_fields) = match reg.get(&enum_name) {
+        Some(TypeDef::Enum {
+            tag_field: Some(tag),
+            string_values,
+            variant_fields,
+            ..
+        }) if *tag == field_name => (string_values, variant_fields),
+        _ => return Ok(None),
+    };
+
+    // Convert the match: match on &object (not object.tag)
+    let object = convert_expr(&member.obj, reg, None, type_env)?;
+    let match_expr = Expr::Ref(Box::new(object));
+
+    let mut arms: Vec<MatchArm> = Vec::new();
+    let mut pending_patterns: Vec<MatchPattern> = Vec::new();
+
+    for case in &switch.cases {
+        if let Some(test) = &case.test {
+            // Extract string literal from case
+            let str_value = match test.as_ref() {
+                ast::Expr::Lit(ast::Lit::Str(s)) => s.value.to_string_lossy().into_owned(),
+                _ => return Ok(None), // Non-string case → fallback to normal switch
+            };
+
+            if let Some(variant_name) = string_values.get(&str_value) {
+                pending_patterns.push(MatchPattern::EnumVariant {
+                    path: format!("{enum_name}::{variant_name}"),
+                });
+            } else {
+                return Ok(None); // Unknown variant → fallback
+            }
+        }
+
+        // Empty body = fall-through, accumulate patterns
+        if case.cons.is_empty() {
+            continue;
+        }
+
+        // Non-empty body: create arm
+        let body = case
+            .cons
+            .iter()
+            .filter(|s| !matches!(s, ast::Stmt::Break(_) | ast::Stmt::Continue(_)))
+            .map(|s| convert_stmt(s, reg, return_type, type_env))
+            .collect::<Result<Vec<_>>>()?
+            .into_iter()
+            .flatten()
+            .collect();
+
+        if case.test.is_none() {
+            pending_patterns.push(MatchPattern::Wildcard);
+        }
+
+        arms.push(MatchArm {
+            patterns: std::mem::take(&mut pending_patterns),
+            guard: None,
+            body,
+        });
+    }
+
+    Ok(Some(vec![Stmt::Match {
+        expr: match_expr,
+        arms,
+    }]))
+}
+
+/// Returns true if the expression is a literal that can safely be used as a Rust match pattern.
+///
+/// Non-literal expressions (identifiers, function calls, etc.) would become variable bindings
+/// in a Rust match, silently changing semantics. These must use match guards instead.
+fn is_literal_match_pattern(expr: &Expr) -> bool {
+    matches!(
+        expr,
+        Expr::IntLit(_) | Expr::NumberLit(_) | Expr::StringLit(_) | Expr::BoolLit(_)
+    )
+}
+
+/// Builds a combined guard expression from multiple non-literal patterns.
+///
+/// For a single pattern: `discriminant == pattern`
+/// For multiple patterns: `discriminant == p1 || discriminant == p2 || ...`
+fn build_combined_guard(discriminant: &Expr, patterns: Vec<Expr>) -> Expr {
+    let mut parts = patterns.into_iter().map(|p| Expr::BinaryOp {
+        left: Box::new(discriminant.clone()),
+        op: BinOp::Eq,
+        right: Box::new(p),
+    });
+    let first = parts.next().expect("at least one pattern");
+    parts.fold(first, |acc, part| Expr::BinaryOp {
+        left: Box::new(acc),
+        op: BinOp::LogicalOr,
+        right: Box::new(part),
+    })
+}
+
 /// Converts a switch with no code fall-through into a clean `Stmt::Match`.
 fn convert_switch_clean_match(
     switch: &ast::SwitchStmt,
@@ -1155,10 +1459,12 @@ fn convert_switch_clean_match(
 ) -> Result<Vec<Stmt>> {
     let mut arms: Vec<MatchArm> = Vec::new();
     let mut pending_patterns: Vec<MatchPattern> = Vec::new();
+    let mut pending_exprs: Vec<Expr> = Vec::new();
 
     for case in &switch.cases {
         if let Some(test) = &case.test {
             let pattern = convert_expr(test, reg, None, type_env)?;
+            pending_exprs.push(pattern.clone());
             pending_patterns.push(MatchPattern::Literal(pattern));
         }
 
@@ -1181,8 +1487,23 @@ fn convert_switch_clean_match(
         if case.test.is_none() {
             pending_patterns.push(MatchPattern::Wildcard);
         }
+
+        // Check if any pending pattern is non-literal
+        let has_non_literal = pending_exprs.iter().any(|e| !is_literal_match_pattern(e));
+
+        let (patterns, guard) = if has_non_literal {
+            // Convert to wildcard + guard to avoid variable binding in match
+            let guard = build_combined_guard(&discriminant, std::mem::take(&mut pending_exprs));
+            std::mem::take(&mut pending_patterns);
+            (vec![MatchPattern::Wildcard], Some(guard))
+        } else {
+            pending_exprs.clear();
+            (std::mem::take(&mut pending_patterns), None)
+        };
+
         arms.push(MatchArm {
-            patterns: std::mem::take(&mut pending_patterns),
+            patterns,
+            guard,
             body,
         });
     }

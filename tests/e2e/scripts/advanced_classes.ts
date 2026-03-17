@@ -14,6 +14,22 @@ class Temperature {
     }
 }
 
+class Counter {
+    count: number;
+    constructor(initial: number) {
+        this.count = initial;
+    }
+    static zero(): Counter {
+        return new Counter(0);
+    }
+    static fromValue(v: number): Counter {
+        return new Counter(v);
+    }
+    value(): number {
+        return this.count;
+    }
+}
+
 class Box {
     width: number;
     height: number;
@@ -45,4 +61,9 @@ function main(): void {
     const b = new Box(2, 3, 4);
     console.log("volume:", b.volume());
     console.log("surface:", b.surfaceArea());
+
+    const c1 = Counter.zero();
+    console.log("counter zero:", c1.value());
+    const c2 = Counter.fromValue(42);
+    console.log("counter from:", c2.value());
 }

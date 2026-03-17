@@ -2,26 +2,38 @@
 source: tests/integration_test.rs
 expression: output
 ---
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "kind")]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Event {
-    #[serde(rename = "click")]
     Click {
         x: f64,
     },
-    #[serde(rename = "hover")]
     Hover {
         y: f64,
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type")]
+impl Event {
+    pub fn kind(&self) -> &str {
+        match self {
+            Event::Click { .. } => "click",
+            Event::Hover { .. } => "hover",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum Status {
-    #[serde(rename = "active")]
     Active,
-    #[serde(rename = "inactive")]
     Inactive,
-    #[serde(rename = "pending")]
     Pending,
+}
+
+impl Status {
+    pub fn r#type(&self) -> &str {
+        match self {
+            Status::Active => "active",
+            Status::Inactive => "inactive",
+            Status::Pending => "pending",
+        }
+    }
 }
