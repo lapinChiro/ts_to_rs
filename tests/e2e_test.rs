@@ -459,6 +459,21 @@ fn test_e2e_type_infer_ts_rust_stdout_match() {
 }
 
 #[test]
+fn test_e2e_in_operator_ts_rust_stdout_match() {
+    run_e2e_test("in_operator");
+}
+
+#[test]
+fn test_e2e_conditional_assignment_ts_rust_stdout_match() {
+    run_e2e_test("conditional_assignment");
+}
+
+#[test]
+fn test_e2e_param_properties_ts_rust_stdout_match() {
+    run_e2e_test("param_properties");
+}
+
+#[test]
 fn test_e2e_multi_import_basic_ts_rust_stdout_match() {
     run_e2e_multi_file_test("import_basic");
 }

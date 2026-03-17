@@ -4094,3 +4094,68 @@ fn test_convert_du_standalone_field_access_generates_match_expr() {
         panic!("expected Expr::Match, got: {result:?}");
     }
 }
+
+// --- `in` operator tests ---
+
+#[test]
+fn test_in_operator_struct_field_exists_generates_true() {
+    // "x" in point → true (Point has field x)
+    let expr = parse_expr(r#""x" in point"#);
+    let mut reg = TypeRegistry::new();
+    reg.register(
+        "Point".to_string(),
+        TypeDef::Struct {
+            fields: vec![
+                ("x".to_string(), RustType::F64),
+                ("y".to_string(), RustType::F64),
+            ],
+            methods: std::collections::HashMap::new(),
+        },
+    );
+    let mut env = TypeEnv::new();
+    env.insert(
+        "point".to_string(),
+        RustType::Named {
+            name: "Point".to_string(),
+            type_args: vec![],
+        },
+    );
+    let result = convert_expr(&expr, &reg, None, &env).unwrap();
+    assert_eq!(result, Expr::BoolLit(true));
+}
+
+#[test]
+fn test_in_operator_struct_field_missing_generates_false() {
+    // "z" in point → false (Point has no field z)
+    let expr = parse_expr(r#""z" in point"#);
+    let mut reg = TypeRegistry::new();
+    reg.register(
+        "Point".to_string(),
+        TypeDef::Struct {
+            fields: vec![
+                ("x".to_string(), RustType::F64),
+                ("y".to_string(), RustType::F64),
+            ],
+            methods: std::collections::HashMap::new(),
+        },
+    );
+    let mut env = TypeEnv::new();
+    env.insert(
+        "point".to_string(),
+        RustType::Named {
+            name: "Point".to_string(),
+            type_args: vec![],
+        },
+    );
+    let result = convert_expr(&expr, &reg, None, &env).unwrap();
+    assert_eq!(result, Expr::BoolLit(false));
+}
+
+#[test]
+fn test_in_operator_unknown_type_generates_true_fallback() {
+    // "x" in unknown → true (fallback)
+    let expr = parse_expr(r#""x" in unknown"#);
+    let env = TypeEnv::new();
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &env).unwrap();
+    assert_eq!(result, Expr::BoolLit(true));
+}

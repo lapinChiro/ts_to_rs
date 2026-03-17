@@ -306,6 +306,17 @@ pub enum Stmt {
         /// Loop body
         body: Vec<Stmt>,
     },
+    /// `['label:] while let <pattern> = <expr> { ... }`
+    WhileLet {
+        /// Optional loop label (e.g., `'outer`)
+        label: Option<String>,
+        /// Pattern to match (e.g., `"Some(x)"`)
+        pattern: String,
+        /// Expression to match against
+        expr: Expr,
+        /// Loop body
+        body: Vec<Stmt>,
+    },
     /// `['label:] for <var> in <iterable> { ... }`
     ForIn {
         /// Optional loop label (e.g., `'outer`)

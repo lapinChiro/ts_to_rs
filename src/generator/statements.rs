@@ -72,6 +72,27 @@ pub(super) fn generate_stmt(stmt: &Stmt, indent: usize) -> String {
             out.push_str(&format!("{pad}}}"));
             out
         }
+        Stmt::WhileLet {
+            label,
+            pattern,
+            expr,
+            body,
+        } => {
+            let label_prefix = label
+                .as_ref()
+                .map(|l| format!("'{l}: "))
+                .unwrap_or_default();
+            let mut out = format!(
+                "{pad}{label_prefix}while let {pattern} = {} {{\n",
+                generate_expr(expr)
+            );
+            for s in body {
+                out.push_str(&generate_stmt(s, indent + 1));
+                out.push('\n');
+            }
+            out.push_str(&format!("{pad}}}"));
+            out
+        }
         Stmt::ForIn {
             label,
             var,
@@ -374,6 +395,35 @@ fn f() {
         let expected = "\
 fn f() {
     while true {
+        x;
+    }
+}";
+        assert_eq!(generate(&[item]), expected);
+    }
+
+    #[test]
+    fn test_generate_while_let_generates_pattern_match_loop() {
+        let item = Item::Fn {
+            vis: Visibility::Private,
+            attributes: vec![],
+            is_async: false,
+            name: "f".to_string(),
+            type_params: vec![],
+            params: vec![],
+            return_type: None,
+            body: vec![Stmt::WhileLet {
+                label: None,
+                pattern: "Some(x)".to_string(),
+                expr: Expr::FnCall {
+                    name: "get_value".to_string(),
+                    args: vec![],
+                },
+                body: vec![Stmt::Expr(Expr::Ident("x".to_string()))],
+            }],
+        };
+        let expected = "\
+fn f() {
+    while let Some(x) = get_value() {
         x;
     }
 }";

@@ -287,6 +287,11 @@ fn convert_bin_expr(
         return Ok(convert_instanceof(bin, type_env));
     }
 
+    // "key" in obj pattern
+    if bin.op == ast::BinaryOp::In {
+        return Ok(convert_in_operator(bin, reg, type_env));
+    }
+
     // `x ?? y` → `x.unwrap_or_else(|| y)` (Option) or `x` (non-Option)
     if bin.op == ast::BinaryOp::NullishCoalescing {
         let left_type = resolve_expr_type(&bin.left, type_env, reg);
@@ -391,7 +396,7 @@ fn convert_bin_expr(
 }
 
 /// Converts an SWC binary operator to an IR [`BinOp`].
-fn convert_binary_op(op: ast::BinaryOp) -> Result<BinOp> {
+pub(crate) fn convert_binary_op(op: ast::BinaryOp) -> Result<BinOp> {
     match op {
         ast::BinaryOp::Add => Ok(BinOp::Add),
         ast::BinaryOp::Sub => Ok(BinOp::Sub),
@@ -2447,6 +2452,63 @@ fn resolve_typeof_match(ty: &RustType, typeof_str: &str) -> TypeofMatch {
             }
         }
         _ => TypeofMatch::False,
+    }
+}
+
+/// Converts `"key" in obj` to a Rust expression.
+///
+/// - struct with known fields → static `true`/`false`
+/// - HashMap → `obj.contains_key("key")`
+/// - unknown type → `true` (fallback)
+fn convert_in_operator(bin: &ast::BinExpr, reg: &TypeRegistry, type_env: &TypeEnv) -> Expr {
+    // Extract the key string from LHS (must be a string literal)
+    let key = match bin.left.as_ref() {
+        ast::Expr::Lit(ast::Lit::Str(s)) => s.value.to_string_lossy().into_owned(),
+        _ => return Expr::BoolLit(true), // non-string key: fallback
+    };
+
+    // Resolve the RHS object type
+    let obj_type = resolve_expr_type(&bin.right, type_env, reg);
+
+    match &obj_type {
+        Some(RustType::Named { name, .. }) if name == "HashMap" || name == "BTreeMap" => {
+            // HashMap/BTreeMap → obj.contains_key("key")
+            let obj_ir = match bin.right.as_ref() {
+                ast::Expr::Ident(ident) => Expr::Ident(ident.sym.as_ref().to_owned()),
+                _ => return Expr::BoolLit(true), // complex expr: fallback
+            };
+            Expr::MethodCall {
+                object: Box::new(obj_ir),
+                method: "contains_key".to_string(),
+                args: vec![Expr::StringLit(key)],
+            }
+        }
+        Some(RustType::Named { name, .. }) => {
+            // Check TypeRegistry for field existence
+            match reg.get(name) {
+                Some(TypeDef::Struct { fields, .. }) => {
+                    Expr::BoolLit(fields.iter().any(|(f, _)| f == &key))
+                }
+                Some(TypeDef::Enum {
+                    tag_field,
+                    variant_fields,
+                    ..
+                }) => {
+                    // discriminated union: check if any variant has this field
+                    if tag_field.as_deref() == Some(key.as_str()) {
+                        Expr::BoolLit(true) // tag field always exists
+                    } else {
+                        Expr::BoolLit(
+                            variant_fields
+                                .values()
+                                .any(|fields| fields.iter().any(|(f, _)| f == &key)),
+                        )
+                    }
+                }
+                _ => Expr::BoolLit(true), // registered but unknown shape: fallback
+            }
+        }
+        _ => Expr::BoolLit(true), // unknown type: fallback
     }
 }
 

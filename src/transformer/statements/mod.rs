@@ -61,7 +61,7 @@ pub fn convert_stmt(
                 Ok(vec![convert_var_decl(var_decl, reg, type_env)?])
             }
         }
-        ast::Stmt::If(if_stmt) => Ok(vec![convert_if_stmt(if_stmt, reg, return_type, type_env)?]),
+        ast::Stmt::If(if_stmt) => convert_if_stmt(if_stmt, reg, return_type, type_env),
         ast::Stmt::Expr(expr_stmt) => {
             // Spread array detection at SWC AST level
             if let Some(stmts) = try_expand_spread_expr_stmt(expr_stmt, reg, type_env)? {
@@ -71,12 +71,7 @@ pub fn convert_stmt(
             Ok(vec![Stmt::Expr(expr)])
         }
         ast::Stmt::Throw(throw_stmt) => Ok(vec![convert_throw_stmt(throw_stmt, reg, type_env)?]),
-        ast::Stmt::While(while_stmt) => Ok(vec![convert_while_stmt(
-            while_stmt,
-            reg,
-            return_type,
-            type_env,
-        )?]),
+        ast::Stmt::While(while_stmt) => convert_while_stmt(while_stmt, reg, return_type, type_env),
         ast::Stmt::ForOf(for_of) => Ok(vec![convert_for_of_stmt(
             for_of,
             reg,
@@ -197,28 +192,376 @@ fn is_object_type(ty: &RustType) -> bool {
     matches!(ty, RustType::Named { .. } | RustType::Vec(_))
 }
 
+/// Represents a conditional assignment extracted from a condition expression.
+///
+/// Covers patterns like `if (x = expr)` and `if ((x = expr) > 0)`.
+struct ConditionalAssignment<'a> {
+    /// The variable name being assigned to
+    var_name: String,
+    /// The right-hand side of the assignment
+    rhs: &'a ast::Expr,
+    /// If the assignment was inside a comparison, the outer comparison details.
+    /// `None` for bare assignments like `if (x = expr)`.
+    outer_comparison: Option<OuterComparison<'a>>,
+}
+
+/// Details of a comparison expression wrapping a conditional assignment.
+struct OuterComparison<'a> {
+    /// The binary operator (e.g., `>`, `!==`)
+    op: ast::BinaryOp,
+    /// The other operand of the comparison (not the assignment side)
+    other_operand: &'a ast::Expr,
+    /// Whether the assignment was on the left side of the comparison
+    assign_on_left: bool,
+}
+
+/// Extracts a conditional assignment from a condition expression, if present.
+///
+/// Recognizes:
+/// - Bare assignment: `x = expr` (possibly wrapped in parens)
+/// - Assignment inside comparison: `(x = expr) > 0`, `(x = expr) !== null`
+fn extract_conditional_assignment(expr: &ast::Expr) -> Option<ConditionalAssignment<'_>> {
+    // Unwrap parentheses
+    let expr = unwrap_parens(expr);
+
+    // Pattern 1: bare assignment `x = expr`
+    if let ast::Expr::Assign(assign) = expr {
+        if assign.op == ast::AssignOp::Assign {
+            if let Some(var_name) = extract_assign_target_name(&assign.left) {
+                return Some(ConditionalAssignment {
+                    var_name,
+                    rhs: &assign.right,
+                    outer_comparison: None,
+                });
+            }
+        }
+    }
+
+    // Pattern 2: comparison with assignment on one side: `(x = expr) > 0`
+    if let ast::Expr::Bin(bin) = expr {
+        if is_comparison_op(bin.op) {
+            // Check left side for assignment
+            if let Some(assign) = extract_assign_from_expr(&bin.left) {
+                return Some(ConditionalAssignment {
+                    var_name: assign.0,
+                    rhs: assign.1,
+                    outer_comparison: Some(OuterComparison {
+                        op: bin.op,
+                        other_operand: &bin.right,
+                        assign_on_left: true,
+                    }),
+                });
+            }
+            // Check right side for assignment
+            if let Some(assign) = extract_assign_from_expr(&bin.right) {
+                return Some(ConditionalAssignment {
+                    var_name: assign.0,
+                    rhs: assign.1,
+                    outer_comparison: Some(OuterComparison {
+                        op: bin.op,
+                        other_operand: &bin.left,
+                        assign_on_left: false,
+                    }),
+                });
+            }
+        }
+    }
+
+    None
+}
+
+/// Unwraps nested parentheses from an expression.
+fn unwrap_parens(expr: &ast::Expr) -> &ast::Expr {
+    match expr {
+        ast::Expr::Paren(p) => unwrap_parens(&p.expr),
+        _ => expr,
+    }
+}
+
+/// Extracts the variable name from an assignment target.
+fn extract_assign_target_name(target: &ast::AssignTarget) -> Option<String> {
+    match target {
+        ast::AssignTarget::Simple(ast::SimpleAssignTarget::Ident(ident)) => {
+            Some(ident.id.sym.to_string())
+        }
+        _ => None,
+    }
+}
+
+/// Extracts an assignment expression from a (possibly parenthesized) expression.
+fn extract_assign_from_expr(expr: &ast::Expr) -> Option<(String, &ast::Expr)> {
+    let expr = unwrap_parens(expr);
+    if let ast::Expr::Assign(assign) = expr {
+        if assign.op == ast::AssignOp::Assign {
+            if let Some(name) = extract_assign_target_name(&assign.left) {
+                return Some((name, &assign.right));
+            }
+        }
+    }
+    None
+}
+
+/// Returns true if the operator is a comparison (not logical).
+fn is_comparison_op(op: ast::BinaryOp) -> bool {
+    matches!(
+        op,
+        ast::BinaryOp::EqEq
+            | ast::BinaryOp::NotEq
+            | ast::BinaryOp::EqEqEq
+            | ast::BinaryOp::NotEqEq
+            | ast::BinaryOp::Lt
+            | ast::BinaryOp::LtEq
+            | ast::BinaryOp::Gt
+            | ast::BinaryOp::GtEq
+    )
+}
+
+/// Generates a truthiness check expression for a given type.
+///
+/// Returns `None` for Option types (which use `if let` / `while let` instead).
+fn generate_truthiness_condition(var_name: &str, ty: &RustType) -> Expr {
+    match ty {
+        RustType::F64 => Expr::BinaryOp {
+            left: Box::new(Expr::Ident(var_name.to_string())),
+            op: BinOp::NotEq,
+            right: Box::new(Expr::NumberLit(0.0)),
+        },
+        RustType::String => Expr::UnaryOp {
+            op: UnOp::Not,
+            operand: Box::new(Expr::MethodCall {
+                object: Box::new(Expr::Ident(var_name.to_string())),
+                method: "is_empty".to_string(),
+                args: vec![],
+            }),
+        },
+        RustType::Bool => Expr::Ident(var_name.to_string()),
+        // Fallback for unknown types: use the variable as-is (may need manual fixing)
+        _ => Expr::Ident(var_name.to_string()),
+    }
+}
+
+/// Converts an `if` statement with a conditional assignment.
+fn convert_if_with_conditional_assignment(
+    ca: &ConditionalAssignment<'_>,
+    reg: &TypeRegistry,
+    type_env: &mut TypeEnv,
+    then_body: Vec<Stmt>,
+    else_body: Option<Vec<Stmt>>,
+) -> Result<Vec<Stmt>> {
+    let rhs_type = resolve_expr_type(ca.rhs, type_env, reg);
+    let rhs_ir = convert_expr(ca.rhs, reg, None, type_env)?;
+
+    // If there's an outer comparison, always extract assignment + keep comparison
+    if let Some(outer) = &ca.outer_comparison {
+        let other = convert_expr(outer.other_operand, reg, None, type_env)?;
+        let ir_op = crate::transformer::expressions::convert_binary_op(outer.op)?;
+        let condition = if outer.assign_on_left {
+            Expr::BinaryOp {
+                left: Box::new(Expr::Ident(ca.var_name.clone())),
+                op: ir_op,
+                right: Box::new(other),
+            }
+        } else {
+            Expr::BinaryOp {
+                left: Box::new(other),
+                op: ir_op,
+                right: Box::new(Expr::Ident(ca.var_name.clone())),
+            }
+        };
+        let let_stmt = Stmt::Let {
+            mutable: false,
+            name: ca.var_name.clone(),
+            ty: rhs_type.clone(),
+            init: Some(rhs_ir),
+        };
+        type_env.insert(ca.var_name.clone(), rhs_type.unwrap_or(RustType::Any));
+        return Ok(vec![
+            let_stmt,
+            Stmt::If {
+                condition,
+                then_body,
+                else_body,
+            },
+        ]);
+    }
+
+    // Bare assignment: type-dependent transformation
+    match &rhs_type {
+        Some(RustType::Option(_)) => {
+            // if let Some(var) = expr { ... }
+            Ok(vec![Stmt::IfLet {
+                pattern: format!("Some({})", ca.var_name),
+                expr: rhs_ir,
+                then_body,
+                else_body,
+            }])
+        }
+        Some(ty) => {
+            let condition = generate_truthiness_condition(&ca.var_name, ty);
+            let let_stmt = Stmt::Let {
+                mutable: false,
+                name: ca.var_name.clone(),
+                ty: rhs_type.clone(),
+                init: Some(rhs_ir),
+            };
+            type_env.insert(ca.var_name.clone(), ty.clone());
+            Ok(vec![
+                let_stmt,
+                Stmt::If {
+                    condition,
+                    then_body,
+                    else_body,
+                },
+            ])
+        }
+        None => {
+            // Type unknown: extract assignment, use variable as condition (fallback)
+            let let_stmt = Stmt::Let {
+                mutable: false,
+                name: ca.var_name.clone(),
+                ty: None,
+                init: Some(rhs_ir),
+            };
+            Ok(vec![
+                let_stmt,
+                Stmt::If {
+                    condition: Expr::Ident(ca.var_name.clone()),
+                    then_body,
+                    else_body,
+                },
+            ])
+        }
+    }
+}
+
+/// Converts a `while` statement with a conditional assignment.
+fn convert_while_with_conditional_assignment(
+    ca: &ConditionalAssignment<'_>,
+    reg: &TypeRegistry,
+    type_env: &mut TypeEnv,
+    body: Vec<Stmt>,
+) -> Result<Vec<Stmt>> {
+    let rhs_type = resolve_expr_type(ca.rhs, type_env, reg);
+    let rhs_ir = convert_expr(ca.rhs, reg, None, type_env)?;
+
+    match &rhs_type {
+        Some(RustType::Option(_)) => {
+            // while let Some(var) = expr { ... }
+            Ok(vec![Stmt::WhileLet {
+                label: None,
+                pattern: format!("Some({})", ca.var_name),
+                expr: rhs_ir,
+                body,
+            }])
+        }
+        Some(ty) => {
+            // loop { let x = expr; if <falsy> { break; } ... }
+            let falsy_condition = generate_falsy_condition(&ca.var_name, ty);
+            let mut loop_body = vec![
+                Stmt::Let {
+                    mutable: false,
+                    name: ca.var_name.clone(),
+                    ty: rhs_type.clone(),
+                    init: Some(rhs_ir),
+                },
+                Stmt::If {
+                    condition: falsy_condition,
+                    then_body: vec![Stmt::Break {
+                        label: None,
+                        value: None,
+                    }],
+                    else_body: None,
+                },
+            ];
+            type_env.insert(ca.var_name.clone(), ty.clone());
+            loop_body.extend(body);
+            Ok(vec![Stmt::Loop {
+                label: None,
+                body: loop_body,
+            }])
+        }
+        None => {
+            // Fallback: loop with variable as break condition
+            let mut loop_body = vec![
+                Stmt::Let {
+                    mutable: false,
+                    name: ca.var_name.clone(),
+                    ty: None,
+                    init: Some(rhs_ir),
+                },
+                Stmt::If {
+                    condition: Expr::UnaryOp {
+                        op: UnOp::Not,
+                        operand: Box::new(Expr::Ident(ca.var_name.clone())),
+                    },
+                    then_body: vec![Stmt::Break {
+                        label: None,
+                        value: None,
+                    }],
+                    else_body: None,
+                },
+            ];
+            loop_body.extend(body);
+            Ok(vec![Stmt::Loop {
+                label: None,
+                body: loop_body,
+            }])
+        }
+    }
+}
+
+/// Generates a falsy check condition (the inverse of truthiness) for loop break.
+fn generate_falsy_condition(var_name: &str, ty: &RustType) -> Expr {
+    match ty {
+        RustType::F64 => Expr::BinaryOp {
+            left: Box::new(Expr::Ident(var_name.to_string())),
+            op: BinOp::Eq,
+            right: Box::new(Expr::NumberLit(0.0)),
+        },
+        RustType::String => Expr::MethodCall {
+            object: Box::new(Expr::Ident(var_name.to_string())),
+            method: "is_empty".to_string(),
+            args: vec![],
+        },
+        RustType::Bool => Expr::UnaryOp {
+            op: UnOp::Not,
+            operand: Box::new(Expr::Ident(var_name.to_string())),
+        },
+        _ => Expr::UnaryOp {
+            op: UnOp::Not,
+            operand: Box::new(Expr::Ident(var_name.to_string())),
+        },
+    }
+}
+
 /// Converts an if statement to an IR `Stmt::If`.
+///
+/// Detects conditional assignments (`if (x = expr)`) and transforms them into
+/// type-appropriate Rust patterns (e.g., `if let Some(x)` for Option types).
 fn convert_if_stmt(
     if_stmt: &ast::IfStmt,
     reg: &TypeRegistry,
     return_type: Option<&RustType>,
     type_env: &mut TypeEnv,
-) -> Result<Stmt> {
-    let condition = convert_expr(&if_stmt.test, reg, None, type_env)?;
-
+) -> Result<Vec<Stmt>> {
     let then_body = convert_block_or_stmt(&if_stmt.cons, reg, return_type, type_env)?;
-
     let else_body = if_stmt
         .alt
         .as_ref()
         .map(|alt| convert_block_or_stmt(alt, reg, return_type, type_env))
         .transpose()?;
 
-    Ok(Stmt::If {
+    // Check for conditional assignment patterns
+    if let Some(ca) = extract_conditional_assignment(&if_stmt.test) {
+        return convert_if_with_conditional_assignment(&ca, reg, type_env, then_body, else_body);
+    }
+
+    let condition = convert_expr(&if_stmt.test, reg, None, type_env)?;
+    Ok(vec![Stmt::If {
         condition,
         then_body,
         else_body,
-    })
+    }])
 }
 
 /// Converts a C-style `for` statement to `Stmt::ForIn` if it matches the simple counter pattern.
@@ -390,19 +733,28 @@ fn convert_labeled_stmt(
 }
 
 /// Converts a `while` statement to `Stmt::While`.
+///
+/// Detects conditional assignments (`while (x = expr)`) and transforms them into
+/// type-appropriate Rust patterns (e.g., `while let Some(x)` for Option types,
+/// `loop { ... break }` for numeric types).
 fn convert_while_stmt(
     while_stmt: &ast::WhileStmt,
     reg: &TypeRegistry,
     return_type: Option<&RustType>,
     type_env: &mut TypeEnv,
-) -> Result<Stmt> {
-    let condition = convert_expr(&while_stmt.test, reg, None, type_env)?;
+) -> Result<Vec<Stmt>> {
     let body = convert_block_or_stmt(&while_stmt.body, reg, return_type, type_env)?;
-    Ok(Stmt::While {
+
+    if let Some(ca) = extract_conditional_assignment(&while_stmt.test) {
+        return convert_while_with_conditional_assignment(&ca, reg, type_env, body);
+    }
+
+    let condition = convert_expr(&while_stmt.test, reg, None, type_env)?;
+    Ok(vec![Stmt::While {
         label: None,
         condition,
         body,
-    })
+    }])
 }
 
 /// Expands a `try` statement into primitive IR statements.

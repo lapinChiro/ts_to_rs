@@ -83,7 +83,9 @@ pub fn extract_class_info(
                 fields.push(convert_class_prop(prop, &vis, reg)?);
             }
             ast::ClassMember::Constructor(ctor) => {
-                constructor = Some(convert_constructor(ctor, &vis, reg)?);
+                let (method, param_prop_fields) = convert_constructor(ctor, &vis, reg)?;
+                constructor = Some(method);
+                fields.extend(param_prop_fields);
             }
             ast::ClassMember::Method(method) => {
                 methods.push(convert_class_method(method, &vis, reg)?);
@@ -604,30 +606,56 @@ fn convert_class_prop(
 }
 
 /// Converts a constructor to a `new()` associated function.
+///
+/// Returns the method and any additional struct fields extracted from
+/// `TsParamProp` (parameter properties like `constructor(public x: number)`).
 fn convert_constructor(
     ctor: &ast::Constructor,
     vis: &Visibility,
     reg: &TypeRegistry,
-) -> Result<Method> {
+) -> Result<(Method, Vec<StructField>)> {
     let mut params = Vec::new();
+    let mut param_prop_fields = Vec::new();
+    // Names of parameter properties — used to inject `this.field = param`
+    // assignments into the constructor body.
+    let mut param_prop_names = Vec::new();
+
     for param in &ctor.params {
         match param {
             ast::ParamOrTsParamProp::Param(p) => {
                 let param = convert_param_pat(&p.pat, reg)?;
                 params.push(param);
             }
-            ast::ParamOrTsParamProp::TsParamProp(_) => {
-                return Err(anyhow!("TypeScript parameter properties are not supported"));
+            ast::ParamOrTsParamProp::TsParamProp(prop) => {
+                let (ir_param, field) = convert_ts_param_prop(prop, vis, reg)?;
+                param_prop_names.push(ir_param.name.clone());
+                params.push(ir_param);
+                param_prop_fields.push(field);
             }
         }
     }
 
     let body = match &ctor.body {
-        Some(block) => Some(convert_constructor_body(&block.stmts, reg, &params)?),
+        Some(block) => {
+            // Prepend synthetic `this.field = field` for each param prop
+            // before the original body statements, then run through the
+            // existing constructor body conversion which recognises
+            // `this.field = value` patterns and folds them into `Self { ... }`.
+            let synthetic_stmts = build_param_prop_assignments(&param_prop_names);
+            let all_stmts: Vec<ast::Stmt> = synthetic_stmts
+                .into_iter()
+                .chain(block.stmts.iter().cloned())
+                .collect();
+            Some(convert_constructor_body(&all_stmts, reg, &params)?)
+        }
+        None if !param_prop_names.is_empty() => {
+            let synthetic_stmts = build_param_prop_assignments(&param_prop_names);
+            Some(convert_constructor_body(&synthetic_stmts, reg, &params)?)
+        }
         None => None,
     };
 
-    Ok(Method {
+    let method = Method {
         vis: vis.clone(),
         name: "new".to_string(),
         has_self: false,
@@ -638,7 +666,81 @@ fn convert_constructor(
             type_args: vec![],
         }),
         body,
-    })
+    };
+    Ok((method, param_prop_fields))
+}
+
+/// Converts a `TsParamProp` into an IR parameter and a struct field.
+fn convert_ts_param_prop(
+    prop: &ast::TsParamProp,
+    class_vis: &Visibility,
+    reg: &TypeRegistry,
+) -> Result<(Param, StructField)> {
+    let (name, ty) = match &prop.param {
+        ast::TsParamPropParam::Ident(ident) => {
+            let ir_param = crate::transformer::convert_ident_to_param(ident, reg)?;
+            (ir_param.name, ir_param.ty)
+        }
+        ast::TsParamPropParam::Assign(assign) => {
+            // `public x: number = 42` — extract name and type from the left side
+            match assign.left.as_ref() {
+                ast::Pat::Ident(ident) => {
+                    let ir_param = crate::transformer::convert_ident_to_param(ident, reg)?;
+                    (ir_param.name, ir_param.ty)
+                }
+                _ => return Err(anyhow!("unsupported parameter property pattern")),
+            }
+        }
+    };
+
+    let field_vis = resolve_member_visibility(prop.accessibility, class_vis);
+
+    let field = StructField {
+        vis: Some(field_vis),
+        name: name.clone(),
+        ty: ty.clone().unwrap_or(RustType::Any),
+    };
+
+    let param = Param { name, ty };
+
+    Ok((param, field))
+}
+
+/// Builds synthetic `this.<name> = <name>` assignment statements (SWC AST nodes).
+///
+/// These are prepended to the constructor body before conversion, so the
+/// existing `try_extract_this_assignment` logic handles them uniformly.
+fn build_param_prop_assignments(names: &[String]) -> Vec<ast::Stmt> {
+    use swc_common::DUMMY_SP;
+
+    names
+        .iter()
+        .map(|name| {
+            ast::Stmt::Expr(ast::ExprStmt {
+                span: DUMMY_SP,
+                expr: Box::new(ast::Expr::Assign(ast::AssignExpr {
+                    span: DUMMY_SP,
+                    op: ast::AssignOp::Assign,
+                    left: ast::AssignTarget::Simple(ast::SimpleAssignTarget::Member(
+                        ast::MemberExpr {
+                            span: DUMMY_SP,
+                            obj: Box::new(ast::Expr::This(ast::ThisExpr { span: DUMMY_SP })),
+                            prop: ast::MemberProp::Ident(ast::IdentName {
+                                span: DUMMY_SP,
+                                sym: name.clone().into(),
+                            }),
+                        },
+                    )),
+                    right: Box::new(ast::Expr::Ident(ast::Ident {
+                        span: DUMMY_SP,
+                        ctxt: swc_common::SyntaxContext::empty(),
+                        sym: name.clone().into(),
+                        optional: false,
+                    })),
+                })),
+            })
+        })
+        .collect()
 }
 
 /// Converts constructor body statements.
@@ -1200,5 +1302,179 @@ mod tests {
         // Verify via generator output since StructField doesn't have vis yet
         let output = crate::generator::generate(&items);
         assert!(output.contains("pub(crate) x: f64"));
+    }
+
+    // --- TsParamProp (constructor parameter properties) ---
+
+    #[test]
+    fn test_param_prop_basic_public_generates_field_and_new() {
+        let decl = parse_class_decl("class Foo { constructor(public x: number) {} }");
+        let items = convert_class_decl(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
+
+        // Struct should have field `x`
+        match &items[0] {
+            Item::Struct { fields, .. } => {
+                assert_eq!(fields.len(), 1);
+                assert_eq!(fields[0].name, "x");
+                assert_eq!(fields[0].ty, RustType::F64);
+                assert_eq!(fields[0].vis, Some(Visibility::Public));
+            }
+            _ => panic!("expected Item::Struct"),
+        }
+
+        // Impl should have `new(x: f64) -> Self`
+        match &items[1] {
+            Item::Impl { methods, .. } => {
+                assert_eq!(methods.len(), 1);
+                assert_eq!(methods[0].name, "new");
+                assert_eq!(
+                    methods[0].params,
+                    vec![Param {
+                        name: "x".to_string(),
+                        ty: Some(RustType::F64),
+                    }]
+                );
+            }
+            _ => panic!("expected Item::Impl"),
+        }
+    }
+
+    #[test]
+    fn test_param_prop_private_generates_private_field() {
+        let decl = parse_class_decl("class Foo { constructor(private x: number) {} }");
+        let items = convert_class_decl(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
+
+        match &items[0] {
+            Item::Struct { fields, .. } => {
+                assert_eq!(fields.len(), 1);
+                assert_eq!(fields[0].name, "x");
+                assert_eq!(fields[0].vis, Some(Visibility::Private));
+            }
+            _ => panic!("expected Item::Struct"),
+        }
+    }
+
+    #[test]
+    fn test_param_prop_readonly_generates_field() {
+        let decl = parse_class_decl("class Foo { constructor(public readonly x: string) {} }");
+        let items = convert_class_decl(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
+
+        match &items[0] {
+            Item::Struct { fields, .. } => {
+                assert_eq!(fields.len(), 1);
+                assert_eq!(fields[0].name, "x");
+                assert_eq!(fields[0].ty, RustType::String);
+                assert_eq!(fields[0].vis, Some(Visibility::Public));
+            }
+            _ => panic!("expected Item::Struct"),
+        }
+    }
+
+    #[test]
+    fn test_param_prop_with_default_value_generates_field_and_param() {
+        let decl = parse_class_decl("class Foo { constructor(public x: number = 42) {} }");
+        let items = convert_class_decl(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
+
+        match &items[0] {
+            Item::Struct { fields, .. } => {
+                assert_eq!(fields.len(), 1);
+                assert_eq!(fields[0].name, "x");
+                assert_eq!(fields[0].ty, RustType::F64);
+            }
+            _ => panic!("expected Item::Struct"),
+        }
+
+        match &items[1] {
+            Item::Impl { methods, .. } => {
+                assert_eq!(methods[0].name, "new");
+                assert_eq!(methods[0].params.len(), 1);
+                assert_eq!(methods[0].params[0].name, "x");
+            }
+            _ => panic!("expected Item::Impl"),
+        }
+    }
+
+    #[test]
+    fn test_param_prop_mixed_with_regular_param() {
+        let decl = parse_class_decl(
+            "class Foo { constructor(public x: number, y: string) { console.log(y); } }",
+        );
+        let items = convert_class_decl(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
+
+        // Struct should only have field `x` (not `y`)
+        match &items[0] {
+            Item::Struct { fields, .. } => {
+                assert_eq!(fields.len(), 1);
+                assert_eq!(fields[0].name, "x");
+            }
+            _ => panic!("expected Item::Struct"),
+        }
+
+        // new() should have both params
+        match &items[1] {
+            Item::Impl { methods, .. } => {
+                assert_eq!(methods[0].params.len(), 2);
+                assert_eq!(methods[0].params[0].name, "x");
+                assert_eq!(methods[0].params[1].name, "y");
+            }
+            _ => panic!("expected Item::Impl"),
+        }
+    }
+
+    #[test]
+    fn test_param_prop_multiple_generates_multiple_fields() {
+        let decl =
+            parse_class_decl("class Foo { constructor(public x: number, private y: string) {} }");
+        let items = convert_class_decl(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
+
+        match &items[0] {
+            Item::Struct { fields, .. } => {
+                assert_eq!(fields.len(), 2);
+                assert_eq!(fields[0].name, "x");
+                assert_eq!(fields[0].vis, Some(Visibility::Public));
+                assert_eq!(fields[1].name, "y");
+                assert_eq!(fields[1].vis, Some(Visibility::Private));
+            }
+            _ => panic!("expected Item::Struct"),
+        }
+    }
+
+    #[test]
+    fn test_param_prop_with_existing_this_assignment() {
+        let decl = parse_class_decl(
+            "class Foo { z: boolean; constructor(public x: number) { this.z = true; } }",
+        );
+        let items = convert_class_decl(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
+
+        // Struct should have both `z` (explicit) and `x` (param prop)
+        match &items[0] {
+            Item::Struct { fields, .. } => {
+                assert_eq!(fields.len(), 2);
+                let names: Vec<&str> = fields.iter().map(|f| f.name.as_str()).collect();
+                assert!(names.contains(&"x"));
+                assert!(names.contains(&"z"));
+            }
+            _ => panic!("expected Item::Struct"),
+        }
+    }
+
+    #[test]
+    fn test_param_prop_with_body_logic_preserves_statements() {
+        let decl =
+            parse_class_decl("class Foo { constructor(public x: number) { console.log(x); } }");
+        let items = convert_class_decl(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
+
+        match &items[1] {
+            Item::Impl { methods, .. } => {
+                let body = methods[0].body.as_ref().unwrap();
+                // Should have both the console.log and the Self init
+                assert!(
+                    body.len() >= 2,
+                    "body should have logic + Self init, got {:?}",
+                    body
+                );
+            }
+            _ => panic!("expected Item::Impl"),
+        }
     }
 }

@@ -16,6 +16,15 @@ fn convert_single_stmt(
     stmts.remove(0)
 }
 
+/// Helper: convert statements with a pre-populated TypeEnv.
+fn convert_stmts_with_env(
+    stmt: &ast::Stmt,
+    reg: &TypeRegistry,
+    type_env: &mut TypeEnv,
+) -> Vec<Stmt> {
+    convert_stmt(stmt, reg, None, type_env).unwrap()
+}
+
 /// Helper: parse TS source containing a function and return its body statements.
 fn parse_fn_body(source: &str) -> Vec<ast::Stmt> {
     let module = parse_typescript(source).expect("parse failed");
@@ -2000,4 +2009,176 @@ fn test_convert_du_switch_field_access_multiple_fields_become_bindings() {
     } else {
         panic!("expected Match");
     }
+}
+
+// --- Conditional assignment tests ---
+
+#[test]
+fn test_cond_assign_if_option_type_generates_if_let_some() {
+    // if (x = getOpt()) { use(x); }
+    // When getOpt returns Option<f64>, should generate: if let Some(x) = get_opt() { ... }
+    let stmts = parse_fn_body(
+        "function f(): void { let x: number | null = null; if (x = getOpt()) { console.log(x); } }",
+    );
+    let mut reg = TypeRegistry::new();
+    reg.register(
+        "getOpt".to_string(),
+        TypeDef::Function {
+            params: vec![],
+            return_type: Some(RustType::Option(Box::new(RustType::F64))),
+        },
+    );
+    let mut env = TypeEnv::new();
+    // Convert let statement first to populate env
+    let _ = convert_stmt(&stmts[0], &reg, None, &mut env);
+    let result = convert_stmts_with_env(&stmts[1], &reg, &mut env);
+
+    // Should produce IfLet with Some(x) pattern
+    assert!(
+        result
+            .iter()
+            .any(|s| matches!(s, Stmt::IfLet { pattern, .. } if pattern == "Some(x)")),
+        "expected IfLet with Some(x), got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_cond_assign_if_f64_type_generates_let_and_if_neq_zero() {
+    // if (x = getNum()) { use(x); }
+    // When getNum returns f64, should generate: let x = get_num(); if x != 0.0 { ... }
+    let stmts = parse_fn_body(
+        "function f(): void { let x: number = 0; if (x = getNum()) { console.log(x); } }",
+    );
+    let mut reg = TypeRegistry::new();
+    reg.register(
+        "getNum".to_string(),
+        TypeDef::Function {
+            params: vec![],
+            return_type: Some(RustType::F64),
+        },
+    );
+    let mut env = TypeEnv::new();
+    let _ = convert_stmt(&stmts[0], &reg, None, &mut env);
+    let result = convert_stmts_with_env(&stmts[1], &reg, &mut env);
+
+    // Should produce: Let + If with condition x != 0.0
+    assert!(
+        result.len() >= 2,
+        "expected at least 2 statements (let + if), got: {:?}",
+        result
+    );
+    assert!(
+        matches!(&result[0], Stmt::Let { name, .. } if name == "x"),
+        "expected Let binding for x, got: {:?}",
+        result[0]
+    );
+    assert!(
+        matches!(&result[1], Stmt::If { .. }),
+        "expected If statement, got: {:?}",
+        result[1]
+    );
+}
+
+#[test]
+fn test_cond_assign_while_option_type_generates_while_let_some() {
+    // while (x = getOpt()) { use(x); }
+    // When getOpt returns Option<f64>, should generate: while let Some(x) = get_opt() { ... }
+    let stmts = parse_fn_body(
+        "function f(): void { let x: number | null = null; while (x = getOpt()) { console.log(x); } }",
+    );
+    let mut reg = TypeRegistry::new();
+    reg.register(
+        "getOpt".to_string(),
+        TypeDef::Function {
+            params: vec![],
+            return_type: Some(RustType::Option(Box::new(RustType::F64))),
+        },
+    );
+    let mut env = TypeEnv::new();
+    let _ = convert_stmt(&stmts[0], &reg, None, &mut env);
+    let result = convert_stmts_with_env(&stmts[1], &reg, &mut env);
+
+    assert!(
+        result
+            .iter()
+            .any(|s| matches!(s, Stmt::WhileLet { pattern, .. } if pattern == "Some(x)")),
+        "expected WhileLet with Some(x), got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_cond_assign_while_f64_type_generates_loop_with_break() {
+    // while (x = getNum()) { use(x); }
+    // When getNum returns f64, should generate: loop { let x = ...; if x == 0.0 { break; } ... }
+    let stmts = parse_fn_body(
+        "function f(): void { let x: number = 0; while (x = getNum()) { console.log(x); } }",
+    );
+    let mut reg = TypeRegistry::new();
+    reg.register(
+        "getNum".to_string(),
+        TypeDef::Function {
+            params: vec![],
+            return_type: Some(RustType::F64),
+        },
+    );
+    let mut env = TypeEnv::new();
+    let _ = convert_stmt(&stmts[0], &reg, None, &mut env);
+    let result = convert_stmts_with_env(&stmts[1], &reg, &mut env);
+
+    assert!(
+        result.iter().any(|s| matches!(s, Stmt::Loop { .. })),
+        "expected Loop statement, got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_cond_assign_if_comparison_extracts_assignment() {
+    // if ((x = compute()) > 0) { use(x); }
+    // Should generate: let x = compute(); if x > 0.0 { ... }
+    let stmts = parse_fn_body(
+        "function f(): void { let x: number = 0; if ((x = compute()) > 0) { console.log(x); } }",
+    );
+    let mut reg = TypeRegistry::new();
+    reg.register(
+        "compute".to_string(),
+        TypeDef::Function {
+            params: vec![],
+            return_type: Some(RustType::F64),
+        },
+    );
+    let mut env = TypeEnv::new();
+    let _ = convert_stmt(&stmts[0], &reg, None, &mut env);
+    let result = convert_stmts_with_env(&stmts[1], &reg, &mut env);
+
+    assert!(
+        result.len() >= 2,
+        "expected at least 2 statements (let + if), got: {:?}",
+        result
+    );
+    assert!(
+        matches!(&result[0], Stmt::Let { name, .. } if name == "x"),
+        "expected Let binding for x, got: {:?}",
+        result[0]
+    );
+    assert!(
+        matches!(&result[1], Stmt::If { .. }),
+        "expected If with comparison, got: {:?}",
+        result[1]
+    );
+}
+
+#[test]
+fn test_cond_assign_normal_if_unchanged() {
+    // if (x > 0) { ... } — no assignment, should pass through unchanged
+    let stmts =
+        parse_fn_body("function f(): void { let x: number = 1; if (x > 0) { console.log(x); } }");
+    let mut env = TypeEnv::new();
+    let _ = convert_stmt(&stmts[0], &TypeRegistry::new(), None, &mut env);
+    let result = convert_stmts_with_env(&stmts[1], &TypeRegistry::new(), &mut env);
+
+    assert_eq!(result.len(), 1, "normal if should produce 1 statement");
+    assert!(matches!(&result[0], Stmt::If { .. }));
 }

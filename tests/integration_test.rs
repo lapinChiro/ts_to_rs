@@ -376,3 +376,10 @@ fn test_switch() {
     let output = transpile(&input).unwrap();
     insta::assert_snapshot!(output);
 }
+
+#[test]
+fn test_param_properties() {
+    let input = fs::read_to_string("tests/fixtures/param-properties.input.ts").unwrap();
+    let output = transpile(&input).unwrap();
+    insta::assert_snapshot!(output);
+}
