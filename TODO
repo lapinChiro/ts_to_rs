@@ -17,7 +17,7 @@
 - **保留** — 正当な保留理由あり（前提タスク未完了、またはユーザーの設計方針決定が必要）
 - **スコープ外** — 明示的に対象外。需要発生時に再評価
 
-件数は Hono コアファイル 7 個の変換結果（`report/hono-rescan-2025-03.md`、変換率 66%）に基づく。
+件数は Hono 全47ファイルの変換結果（`report/hono-conversion-rate-analysis.md`、変換率 6.4%）に基づく。
 
 ---
 
@@ -34,6 +34,25 @@
 #### 式・制御構文
 
 - **[I-15]** **`+x`（単項プラス / 数値変換）** — 式変換
+- **[I-115]** **ビット演算子 (`^`, `|`, `&`, `<<`, `>>`)** — 式変換
+    - `convert_bin_expr` で XOR 等のビット演算子が未対応。Hono の `utils/buffer.ts` で `^` が使用されている
+    - 追加コストは小さい（`BinOp` に対応するバリアントを追加するだけ）
+- **[I-116]** **Arrow関数の配列デストラクチャリングパラメータ** — 式変換
+    - Arrow関数の `Pat::Object`（オブジェクトデストラクチャリング）は対応済みだが、`Pat::Array`（`([a, b]) => ...`）は未対応
+    - Hono の `middleware/basic-auth/index.ts` で `[usernameEqual, passwordEqual]` パターンが使用
+
+#### 未対応構文（Hono影響大）
+
+- **[I-112]** **オブジェクトリテラルの型推論（型注釈なし）** — 型推論（未対応）
+    - `convert_object_lit` (expressions/mod.rs:1782) が型注釈なしの場合 struct 名を決定できずエラー
+    - `return { status: "ok" }` や `const obj = { path: '/' }` が全てエラー
+    - 戻り値型・変数の型注釈からの struct 名推論が必要
+    - 優先度根拠: Hono **10ファイル**に影響（修正後の最大ボトルネック）。型推論の基盤改善テーマ
+- **[I-111]** **正規表現リテラル (`/pattern/flags`)** — 式変換（未対応）
+    - `convert_lit` (expressions/mod.rs:108) で `ast::Lit::Regex` が未対応
+    - `/pattern/g` → `Regex::new("pattern")` への変換が必要。`regex` クレート依存
+    - 優先度根拠: Hono **8ファイル**に影響。実コードで頻出だがランタイム依存あり
+    - 🔗 関連: I-30（生成コードの Cargo.toml 依存クレート追加）が解消されると自動的に `regex` 追加可能
 
 #### 型変換・型推論
 
@@ -114,6 +133,13 @@
     - `variable in obj`（文字列リテラルではなく変数をキーに使う）パターンが未対応
     - 現在は `true` にフォールバックする
     - Rust では HashMap の `contains_key(&variable)` に変換するのが自然だが、struct の場合は静的解決不可
+- **[I-113]** **`for...in` 文** — 制御構文（Hono 1ファイルに影響）
+    - `for (const key in obj) { ... }` → `for key in obj.keys() { ... }` への変換
+    - `for...of` は `convert_for_of_stmt` で対応済みだが、`for...in` は `convert_stmt` の match に分岐なし
+    - スコープ外から再評価: Hono で実際に使用されていたため
+- **[I-114]** **関数式 (`function name() {}`)** — 式変換（Hono 1ファイルに影響）
+    - `convert_expr` に `ast::Expr::Fn` の分岐がない
+    - Arrow関数 (`ast::Expr::Arrow`) と同等のクロージャ変換が可能
 
 ---
 
@@ -143,7 +169,7 @@
 - heterogeneous enum（数値と文字列の混在）— TS でも非推奨
 - template literal type — Rust に直接対応する構文がない
 - `~x`, `void x`, `delete obj.prop` — 需要が低い
-- `for...in`（オブジェクトキー列挙）— TS でも非推奨
+- `for...in`（オブジェクトキー列挙）— TS でも非推奨だが Hono で使用あり（I-113 として Tier 3 に移動済み）
 - Docker ベースの開発環境 — 複数人開発時に再評価
 - Watch モード — 変換機能が十分に揃った後
 - デフォルト引数値の拡張（複雑な式）— 需要発生時に対応

@@ -4159,3 +4159,125 @@ fn test_in_operator_unknown_type_generates_true_fallback() {
     let result = convert_expr(&expr, &TypeRegistry::new(), None, &env).unwrap();
     assert_eq!(result, Expr::BoolLit(true));
 }
+
+// ---- I-109: Arrow function destructuring parameters ----
+
+#[test]
+fn test_convert_expr_arrow_object_destructuring_generates_expansion() {
+    // ({ x, y }: Point) => x + y → closure with synthetic param + expansion stmts
+    let reg = {
+        let mut r = TypeRegistry::new();
+        r.register(
+            "Point".to_string(),
+            TypeDef::Struct {
+                fields: vec![
+                    ("x".to_string(), crate::ir::RustType::F64),
+                    ("y".to_string(), crate::ir::RustType::F64),
+                ],
+                methods: std::collections::HashMap::new(),
+            },
+        );
+        r
+    };
+    let swc_expr = parse_var_init("const f = ({ x, y }: Point) => x + y;");
+    let result = convert_expr(&swc_expr, &reg, None, &TypeEnv::new()).unwrap();
+    match result {
+        Expr::Closure { params, body, .. } => {
+            // Should have a synthetic parameter named after the type
+            assert_eq!(params.len(), 1);
+            assert_eq!(params[0].name, "point");
+            assert_eq!(
+                params[0].ty,
+                Some(crate::ir::RustType::Named {
+                    name: "Point".to_string(),
+                    type_args: vec![],
+                })
+            );
+            // Body should be a Block with expansion stmts + the expression
+            match body {
+                crate::ir::ClosureBody::Block(stmts) => {
+                    // At least 2 expansion stmts (let x = point.x; let y = point.y;) + return
+                    assert!(
+                        stmts.len() >= 3,
+                        "expected at least 3 stmts, got {}",
+                        stmts.len()
+                    );
+                }
+                _ => panic!("expected Block body with expansion stmts"),
+            }
+        }
+        _ => panic!("expected Expr::Closure, got {:?}", result),
+    }
+}
+
+#[test]
+fn test_convert_expr_arrow_default_param_generates_option() {
+    // (x: number = 0) => x + 1 → closure with Option<f64> param + unwrap_or
+    let swc_expr = parse_var_init("const f = (x: number = 0) => x + 1;");
+    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    match result {
+        Expr::Closure { params, body, .. } => {
+            assert_eq!(params.len(), 1);
+            assert_eq!(params[0].name, "x");
+            // Should be Option<f64>
+            assert_eq!(
+                params[0].ty,
+                Some(crate::ir::RustType::Option(Box::new(
+                    crate::ir::RustType::F64
+                )))
+            );
+            // Body should be Block with unwrap_or expansion + expression
+            match body {
+                crate::ir::ClosureBody::Block(stmts) => {
+                    assert!(
+                        stmts.len() >= 2,
+                        "expected at least 2 stmts, got {}",
+                        stmts.len()
+                    );
+                }
+                _ => panic!("expected Block body with default expansion"),
+            }
+        }
+        _ => panic!("expected Expr::Closure, got {:?}", result),
+    }
+}
+
+// ---- I-108: Update expressions in convert_expr ----
+
+#[test]
+fn test_convert_expr_postfix_increment_generates_assign_add() {
+    // i++ → i = i + 1.0
+    let expr = parse_expr("i++");
+    let env = TypeEnv::new();
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &env).unwrap();
+    assert_eq!(
+        result,
+        Expr::Assign {
+            target: Box::new(Expr::Ident("i".to_string())),
+            value: Box::new(Expr::BinaryOp {
+                left: Box::new(Expr::Ident("i".to_string())),
+                op: BinOp::Add,
+                right: Box::new(Expr::NumberLit(1.0)),
+            }),
+        }
+    );
+}
+
+#[test]
+fn test_convert_expr_postfix_decrement_generates_assign_sub() {
+    // i-- → i = i - 1.0
+    let expr = parse_expr("i--");
+    let env = TypeEnv::new();
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &env).unwrap();
+    assert_eq!(
+        result,
+        Expr::Assign {
+            target: Box::new(Expr::Ident("i".to_string())),
+            value: Box::new(Expr::BinaryOp {
+                left: Box::new(Expr::Ident("i".to_string())),
+                op: BinOp::Sub,
+                right: Box::new(Expr::NumberLit(1.0)),
+            }),
+        }
+    );
+}

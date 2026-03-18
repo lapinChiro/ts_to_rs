@@ -61,6 +61,7 @@ pub fn convert_expr(
         ast::Expr::Member(member) => convert_member_expr(member, reg, type_env),
         ast::Expr::This(_) => Ok(Expr::Ident("self".to_string())),
         ast::Expr::Assign(assign) => convert_assign_expr(assign, reg, type_env),
+        ast::Expr::Update(up) => convert_update_expr(up),
         ast::Expr::Arrow(arrow) => convert_arrow_expr(arrow, reg, false, &mut Vec::new(), type_env),
         ast::Expr::Call(call) => convert_call_expr(call, reg, type_env),
         ast::Expr::New(new_expr) => convert_new_expr(new_expr, reg, type_env),
@@ -767,6 +768,34 @@ fn convert_du_standalone_field_access(
     })
 }
 
+/// Converts an update expression (`i++`, `i--`, `++i`, `--i`) to `Expr::Assign`.
+///
+/// Both prefix and postfix forms are converted to the same assignment:
+/// - `i++` / `++i` → `i = i + 1.0`
+/// - `i--` / `--i` → `i = i - 1.0`
+///
+/// Note: In statement context, prefix/postfix distinction is irrelevant.
+/// In expression context where the return value matters (e.g., `while (i--)`),
+/// the prefix/postfix semantics differ, but this is not yet handled.
+fn convert_update_expr(up: &ast::UpdateExpr) -> Result<Expr> {
+    let name = match up.arg.as_ref() {
+        ast::Expr::Ident(ident) => ident.sym.to_string(),
+        _ => return Err(anyhow!("unsupported update expression target")),
+    };
+    let op = match up.op {
+        ast::UpdateOp::PlusPlus => BinOp::Add,
+        ast::UpdateOp::MinusMinus => BinOp::Sub,
+    };
+    Ok(Expr::Assign {
+        target: Box::new(Expr::Ident(name.clone())),
+        value: Box::new(Expr::BinaryOp {
+            left: Box::new(Expr::Ident(name)),
+            op,
+            right: Box::new(Expr::NumberLit(1.0)),
+        }),
+    })
+}
+
 /// Converts an assignment expression (`target = value`) to `Expr::Assign`.
 fn convert_assign_expr(
     assign: &ast::AssignExpr,
@@ -829,6 +858,7 @@ pub fn convert_arrow_expr(
     type_env: &TypeEnv,
 ) -> Result<Expr> {
     let mut params = Vec::new();
+    let mut expansion_stmts = Vec::new();
     for param in &arrow.params {
         match param {
             ast::Pat::Ident(ident) => {
@@ -851,6 +881,66 @@ pub fn convert_arrow_expr(
                     ty: rust_type,
                 });
             }
+            ast::Pat::Object(obj_pat) => {
+                let (param, stmts) =
+                    crate::transformer::functions::convert_object_destructuring_param(
+                        obj_pat, reg,
+                    )?;
+                params.push(param);
+                expansion_stmts.extend(stmts);
+            }
+            ast::Pat::Assign(assign) => {
+                // Default parameter: (x: number = 0) => ...
+                // Extract inner ident and type
+                match assign.left.as_ref() {
+                    ast::Pat::Ident(ident) => {
+                        let name = ident.id.sym.to_string();
+                        let inner_type = ident
+                            .type_ann
+                            .as_ref()
+                            .map(|ann| {
+                                convert_ts_type_with_fallback(
+                                    &ann.type_ann,
+                                    resilient,
+                                    fallback_warnings,
+                                    &mut Vec::new(),
+                                    reg,
+                                )
+                            })
+                            .transpose()?
+                            .ok_or_else(|| {
+                                anyhow!("default parameter requires a type annotation")
+                            })?;
+                        let option_type = RustType::Option(Box::new(inner_type));
+                        let (default_expr, use_unwrap_or_default) =
+                            crate::transformer::functions::convert_default_value(&assign.right)?;
+                        let unwrap_call = if use_unwrap_or_default {
+                            Expr::MethodCall {
+                                object: Box::new(Expr::Ident(name.clone())),
+                                method: "unwrap_or_default".to_string(),
+                                args: vec![],
+                            }
+                        } else {
+                            Expr::MethodCall {
+                                object: Box::new(Expr::Ident(name.clone())),
+                                method: "unwrap_or".to_string(),
+                                args: vec![default_expr.unwrap()],
+                            }
+                        };
+                        expansion_stmts.push(Stmt::Let {
+                            mutable: false,
+                            name: name.clone(),
+                            ty: None,
+                            init: Some(unwrap_call),
+                        });
+                        params.push(Param {
+                            name,
+                            ty: Some(option_type),
+                        });
+                    }
+                    _ => return Err(anyhow!("unsupported arrow default parameter pattern")),
+                }
+            }
             _ => return Err(anyhow!("unsupported arrow parameter pattern")),
         }
     }
@@ -869,25 +959,49 @@ pub fn convert_arrow_expr(
         })
         .transpose()?;
 
-    let body = match arrow.body.as_ref() {
-        ast::BlockStmtOrExpr::Expr(expr) => {
-            let ir_expr = convert_expr(expr, reg, return_type.as_ref(), type_env)?;
-            ClosureBody::Expr(Box::new(ir_expr))
-        }
-        ast::BlockStmtOrExpr::BlockStmt(block) => {
-            let mut inner_env = type_env.clone();
-            let mut stmts = Vec::new();
-            for stmt in &block.stmts {
-                stmts.extend(convert_stmt(
-                    stmt,
-                    reg,
-                    return_type.as_ref(),
-                    &mut inner_env,
-                )?);
+    let body = if expansion_stmts.is_empty() {
+        match arrow.body.as_ref() {
+            ast::BlockStmtOrExpr::Expr(expr) => {
+                let ir_expr = convert_expr(expr, reg, return_type.as_ref(), type_env)?;
+                ClosureBody::Expr(Box::new(ir_expr))
             }
-            convert_last_return_to_tail(&mut stmts);
-            ClosureBody::Block(stmts)
+            ast::BlockStmtOrExpr::BlockStmt(block) => {
+                let mut inner_env = type_env.clone();
+                let mut stmts = Vec::new();
+                for stmt in &block.stmts {
+                    stmts.extend(convert_stmt(
+                        stmt,
+                        reg,
+                        return_type.as_ref(),
+                        &mut inner_env,
+                    )?);
+                }
+                convert_last_return_to_tail(&mut stmts);
+                ClosureBody::Block(stmts)
+            }
         }
+    } else {
+        // When we have expansion stmts, the body must be a Block
+        let mut body_stmts = expansion_stmts;
+        match arrow.body.as_ref() {
+            ast::BlockStmtOrExpr::Expr(expr) => {
+                let ir_expr = convert_expr(expr, reg, return_type.as_ref(), type_env)?;
+                body_stmts.push(Stmt::Return(Some(ir_expr)));
+            }
+            ast::BlockStmtOrExpr::BlockStmt(block) => {
+                let mut inner_env = type_env.clone();
+                for stmt in &block.stmts {
+                    body_stmts.extend(convert_stmt(
+                        stmt,
+                        reg,
+                        return_type.as_ref(),
+                        &mut inner_env,
+                    )?);
+                }
+                convert_last_return_to_tail(&mut body_stmts);
+            }
+        }
+        ClosureBody::Block(body_stmts)
     };
 
     Ok(Expr::Closure {

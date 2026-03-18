@@ -1,0 +1,32 @@
+---
+source: tests/integration_test.rs
+expression: output
+---
+#[derive(Debug, Clone, PartialEq)]
+struct Counter {
+    count: f64,
+}
+
+impl Counter {
+    fn new(initial: Option<f64>) -> Self {
+        let initial = initial.unwrap_or(0.0);
+        Self { count: initial }
+    }
+
+    fn reset(&mut self, value: Option<f64>) {
+        let value = value.unwrap_or(0.0);
+        self.count = value;
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct Config {
+    timeout: f64,
+}
+
+impl Config {
+    fn new(timeout: Option<f64>) -> Self {
+        let timeout = timeout.unwrap_or(30.0);
+        Self { timeout }
+    }
+}

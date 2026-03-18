@@ -620,10 +620,12 @@ fn convert_constructor(
     // assignments into the constructor body.
     let mut param_prop_names = Vec::new();
 
+    let mut default_expansion_stmts = Vec::new();
     for param in &ctor.params {
         match param {
             ast::ParamOrTsParamProp::Param(p) => {
-                let param = convert_param_pat(&p.pat, reg)?;
+                let (param, expansion) = convert_param_pat(&p.pat, reg)?;
+                default_expansion_stmts.extend(expansion);
                 params.push(param);
             }
             ast::ParamOrTsParamProp::TsParamProp(prop) => {
@@ -646,11 +648,24 @@ fn convert_constructor(
                 .into_iter()
                 .chain(block.stmts.iter().cloned())
                 .collect();
-            Some(convert_constructor_body(&all_stmts, reg, &params)?)
+            let mut body = convert_constructor_body(&all_stmts, reg, &params)?;
+            // Insert default parameter expansion stmts at the beginning
+            for (i, stmt) in default_expansion_stmts.into_iter().enumerate() {
+                body.insert(i, stmt);
+            }
+            Some(body)
         }
         None if !param_prop_names.is_empty() => {
             let synthetic_stmts = build_param_prop_assignments(&param_prop_names);
-            Some(convert_constructor_body(&synthetic_stmts, reg, &params)?)
+            let mut body = convert_constructor_body(&synthetic_stmts, reg, &params)?;
+            for (i, stmt) in default_expansion_stmts.into_iter().enumerate() {
+                body.insert(i, stmt);
+            }
+            Some(body)
+        }
+        None if !default_expansion_stmts.is_empty() => {
+            // No body but has default params — need to create body with expansion stmts
+            Some(default_expansion_stmts)
         }
         None => None,
     };
@@ -833,8 +848,10 @@ fn convert_class_method(
     };
 
     let mut params = Vec::new();
+    let mut default_expansion_stmts = Vec::new();
     for param in &method.function.params {
-        let p = convert_param_pat(&param.pat, reg)?;
+        let (p, expansion) = convert_param_pat(&param.pat, reg)?;
+        default_expansion_stmts.extend(expansion);
         params.push(p);
     }
 
@@ -862,7 +879,7 @@ fn convert_class_method(
                     method_env.insert(p.name.clone(), ty.clone());
                 }
             }
-            let mut stmts = Vec::new();
+            let mut stmts = default_expansion_stmts;
             for stmt in &block.stmts {
                 stmts.extend(convert_stmt(
                     stmt,
@@ -928,10 +945,64 @@ fn is_self_field_access(expr: &Expr) -> bool {
     )
 }
 
-/// Converts a parameter pattern into an IR [`Param`].
-fn convert_param_pat(pat: &ast::Pat, reg: &TypeRegistry) -> Result<Param> {
+/// Converts a parameter pattern into an IR [`Param`] and optional expansion statements.
+///
+/// Supports:
+/// - `x: number` → simple parameter
+/// - `x: number = 0` → `Option<f64>` + `let x = x.unwrap_or(0.0);`
+/// - `options: Options = {}` → `Option<Options>` + `let options = options.unwrap_or_default();`
+fn convert_param_pat(pat: &ast::Pat, reg: &TypeRegistry) -> Result<(Param, Vec<Stmt>)> {
     match pat {
-        ast::Pat::Ident(ident) => crate::transformer::convert_ident_to_param(ident, reg),
+        ast::Pat::Ident(ident) => {
+            let param = crate::transformer::convert_ident_to_param(ident, reg)?;
+            Ok((param, vec![]))
+        }
+        ast::Pat::Assign(assign) => {
+            // Default value parameter: x: T = value
+            match assign.left.as_ref() {
+                ast::Pat::Ident(ident) => {
+                    let inner_param = crate::transformer::convert_ident_to_param(ident, reg)?;
+                    let param_name = inner_param.name.clone();
+                    let inner_type = inner_param
+                        .ty
+                        .ok_or_else(|| anyhow!("default parameter requires a type annotation"))?;
+                    let option_type = RustType::Option(Box::new(inner_type));
+
+                    let (default_expr, use_unwrap_or_default) =
+                        crate::transformer::functions::convert_default_value(&assign.right)?;
+
+                    let unwrap_call = if use_unwrap_or_default {
+                        Expr::MethodCall {
+                            object: Box::new(Expr::Ident(param_name.clone())),
+                            method: "unwrap_or_default".to_string(),
+                            args: vec![],
+                        }
+                    } else {
+                        Expr::MethodCall {
+                            object: Box::new(Expr::Ident(param_name.clone())),
+                            method: "unwrap_or".to_string(),
+                            args: vec![default_expr.unwrap()],
+                        }
+                    };
+
+                    let expansion_stmt = Stmt::Let {
+                        mutable: false,
+                        name: param_name.clone(),
+                        ty: None,
+                        init: Some(unwrap_call),
+                    };
+
+                    Ok((
+                        Param {
+                            name: param_name,
+                            ty: Some(option_type),
+                        },
+                        vec![expansion_stmt],
+                    ))
+                }
+                _ => Err(anyhow!("unsupported parameter pattern")),
+            }
+        }
         _ => Err(anyhow!("unsupported parameter pattern")),
     }
 }
@@ -1472,6 +1543,68 @@ mod tests {
                     body.len() >= 2,
                     "body should have logic + Self init, got {:?}",
                     body
+                );
+            }
+            _ => panic!("expected Item::Impl"),
+        }
+    }
+
+    #[test]
+    fn test_convert_class_constructor_default_number_param() {
+        // constructor(x: number = 0) should produce Option<f64> param + unwrap_or
+        let decl =
+            parse_class_decl("class Foo { x: number; constructor(x: number = 0) { this.x = x; } }");
+        let items = convert_class_decl(&decl, Visibility::Private, &TypeRegistry::new()).unwrap();
+
+        // Find the Impl item
+        let impl_item = items.iter().find(|i| matches!(i, Item::Impl { .. }));
+        assert!(impl_item.is_some(), "expected Impl item");
+
+        match impl_item.unwrap() {
+            Item::Impl { methods, .. } => {
+                let new_method = methods.iter().find(|m| m.name == "new");
+                assert!(new_method.is_some(), "expected 'new' method");
+                let method = new_method.unwrap();
+                // Parameter should be Option<f64>
+                assert_eq!(method.params.len(), 1);
+                assert_eq!(method.params[0].name, "x");
+                assert_eq!(
+                    method.params[0].ty,
+                    Some(RustType::Option(Box::new(RustType::F64)))
+                );
+                // Body should contain unwrap_or expansion as first statement
+                assert!(
+                    method.body.as_ref().unwrap().len() >= 2,
+                    "expected unwrap_or expansion + Self init, got {:?}",
+                    method.body.as_ref().unwrap()
+                );
+            }
+            _ => panic!("expected Item::Impl"),
+        }
+    }
+
+    #[test]
+    fn test_convert_class_constructor_default_empty_object_param() {
+        // constructor(options: Options = {}) should produce Option<Options> + unwrap_or_default
+        let decl = parse_class_decl("class Foo { constructor(options: Options = {}) {} }");
+        let items = convert_class_decl(&decl, Visibility::Private, &TypeRegistry::new()).unwrap();
+
+        let impl_item = items.iter().find(|i| matches!(i, Item::Impl { .. }));
+        assert!(impl_item.is_some(), "expected Impl item");
+
+        match impl_item.unwrap() {
+            Item::Impl { methods, .. } => {
+                let new_method = methods.iter().find(|m| m.name == "new");
+                assert!(new_method.is_some(), "expected 'new' method");
+                let method = new_method.unwrap();
+                assert_eq!(method.params.len(), 1);
+                assert_eq!(method.params[0].name, "options");
+                assert_eq!(
+                    method.params[0].ty,
+                    Some(RustType::Option(Box::new(RustType::Named {
+                        name: "Options".to_string(),
+                        type_args: vec![],
+                    })))
                 );
             }
             _ => panic!("expected Item::Impl"),

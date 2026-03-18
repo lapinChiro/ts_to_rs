@@ -77,6 +77,7 @@ cargo llvm-cov --html                  # HTMLレポート生成（target/llvm-co
 - 調査タスク → /investigation
 - TODO の棚卸し（定期的、または大きな機能追加の完了後） → /todo-grooming
 - 変換正当性の監査（定期的、または大規模変更後） → /correctness-audit
+- Hono 変換改善の開発ループ → /hono-cycle（単発）または `/loop 0 /hono-cycle`（連続）
 - ルールの作成・変更 → /rule-writing, /rule-maintenance
 
 ## 自発的改善の原則

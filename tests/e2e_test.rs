@@ -477,3 +477,8 @@ fn test_e2e_param_properties_ts_rust_stdout_match() {
 fn test_e2e_multi_import_basic_ts_rust_stdout_match() {
     run_e2e_multi_file_test("import_basic");
 }
+
+#[test]
+fn test_e2e_update_expr_ts_rust_stdout_match() {
+    run_e2e_test("update_expr");
+}

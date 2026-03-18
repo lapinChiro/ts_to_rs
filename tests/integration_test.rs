@@ -383,3 +383,17 @@ fn test_param_properties() {
     let output = transpile(&input).unwrap();
     insta::assert_snapshot!(output);
 }
+
+#[test]
+fn test_update_expr() {
+    let input = fs::read_to_string("tests/fixtures/update-expr.input.ts").unwrap();
+    let output = transpile(&input).unwrap();
+    insta::assert_snapshot!(output);
+}
+
+#[test]
+fn test_class_default_params() {
+    let input = fs::read_to_string("tests/fixtures/class-default-params.input.ts").unwrap();
+    let output = transpile(&input).unwrap();
+    insta::assert_snapshot!(output);
+}

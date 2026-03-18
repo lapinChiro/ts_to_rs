@@ -1,0 +1,23 @@
+---
+source: tests/integration_test.rs
+expression: output
+---
+fn incrementCounter(initial: f64) -> f64 {
+    let mut count: f64 = initial;
+    count = count + 1.0;
+    count
+}
+
+fn decrementCounter(initial: f64) -> f64 {
+    let mut count: f64 = initial;
+    count = count - 1.0;
+    count
+}
+
+fn consumeWhitespace(s: String, start: f64) -> f64 {
+    let mut startIndex: f64 = start;
+    while startIndex < s.len() as f64 {
+        startIndex = startIndex + 1.0;
+    }
+    startIndex
+}

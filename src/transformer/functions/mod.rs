@@ -336,7 +336,7 @@ fn convert_default_param(
 ///
 /// Returns `(Some(expr), false)` for literal values (use `unwrap_or`),
 /// or `(None, true)` for empty objects (use `unwrap_or_default`).
-fn convert_default_value(expr: &ast::Expr) -> Result<(Option<Expr>, bool)> {
+pub(crate) fn convert_default_value(expr: &ast::Expr) -> Result<(Option<Expr>, bool)> {
     match expr {
         ast::Expr::Lit(lit) => match lit {
             ast::Lit::Num(n) => Ok((Some(Expr::NumberLit(n.value)), false)),
@@ -363,7 +363,7 @@ fn convert_default_value(expr: &ast::Expr) -> Result<(Option<Expr>, bool)> {
 /// and expansion statements.
 ///
 /// Example: `{ x, y }: Point` → param `point: Point` + `let x = point.x; let y = point.y;`
-fn convert_object_destructuring_param(
+pub(crate) fn convert_object_destructuring_param(
     obj_pat: &ast::ObjectPat,
     reg: &TypeRegistry,
 ) -> Result<(Param, Vec<Stmt>)> {
