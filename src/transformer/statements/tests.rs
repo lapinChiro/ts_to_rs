@@ -2196,3 +2196,73 @@ fn test_convert_stmt_for_of_array_destructuring_generates_tuple() {
     // Should produce a ForIn with a tuple destructuring pattern
     assert!(!result.is_empty(), "should produce at least one statement");
 }
+
+// ---- EmptyStmt ----
+
+#[test]
+fn test_convert_stmt_empty_stmt_produces_no_ir() {
+    // function f(): void { ; } — the empty statement should produce no IR
+    let stmts = parse_fn_body("function f(): void { ; }");
+    assert_eq!(stmts.len(), 1, "should parse one empty statement");
+    let result = convert_stmt(&stmts[0], &TypeRegistry::new(), None, &mut TypeEnv::new()).unwrap();
+    assert!(
+        result.is_empty(),
+        "empty statement should produce no IR statements"
+    );
+}
+
+// ---- for...of array destructuring - 3 elements ----
+
+#[test]
+fn test_convert_stmt_for_of_array_destructuring_3_elements() {
+    let stmts = parse_fn_body(
+        "function f(entries: [string, number, boolean][]) { for (const [a, b, c] of entries) { console.log(a); } }",
+    );
+    let mut env = TypeEnv::new();
+    let result = convert_stmt(&stmts[0], &TypeRegistry::new(), None, &mut env).unwrap();
+    // Should produce a ForIn with a 3-element tuple destructuring pattern "(a, b, c)"
+    assert!(!result.is_empty(), "should produce at least one statement");
+    let for_in = result.iter().find(|s| matches!(s, Stmt::ForIn { .. }));
+    assert!(for_in.is_some(), "should contain a ForIn statement");
+    match for_in.unwrap() {
+        Stmt::ForIn { var, .. } => {
+            assert_eq!(
+                var, "(a, b, c)",
+                "for-in var should be tuple pattern (a, b, c)"
+            );
+        }
+        _ => unreachable!(),
+    }
+}
+
+// ---- for loop multiple declarators ----
+
+#[test]
+fn test_convert_stmt_for_loop_multiple_declarators() {
+    let stmts = parse_fn_body(
+        "function f(n: number) { for (let i = 0, len = n; i < len; i++) { console.log(i); } }",
+    );
+    let mut env = TypeEnv::new();
+    let result = convert_stmt(&stmts[0], &TypeRegistry::new(), None, &mut env).unwrap();
+    // Multiple declarators fall back to loop pattern: Let(i), Let(len), Loop { ... }
+    assert!(
+        result.len() >= 3,
+        "expected at least 3 statements (2 lets + loop), got {:?}",
+        result
+    );
+    // First two should be Let statements for i and len
+    match &result[0] {
+        Stmt::Let { name, mutable, .. } => {
+            assert_eq!(name, "i");
+            assert!(*mutable, "i should be mutable");
+        }
+        other => panic!("expected Let for i, got {:?}", other),
+    }
+    match &result[1] {
+        Stmt::Let { name, mutable, .. } => {
+            assert_eq!(name, "len");
+            assert!(*mutable, "len should be mutable");
+        }
+        other => panic!("expected Let for len, got {:?}", other),
+    }
+}

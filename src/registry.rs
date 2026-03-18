@@ -1040,4 +1040,44 @@ mod tests {
             other => panic!("expected Enum, got {other:?}"),
         }
     }
+
+    // --- Function type alias registration ---
+
+    #[test]
+    fn test_build_registry_fn_type_alias_with_params() {
+        // type Handler = (c: string) => number;
+        let module = parse_typescript("type Handler = (c: string) => number;").unwrap();
+        let reg = build_registry(&module);
+        let def = reg.get("Handler").expect("Handler should be registered");
+        match def {
+            TypeDef::Function {
+                params,
+                return_type,
+            } => {
+                assert_eq!(params.len(), 1);
+                assert_eq!(params[0].0, "c");
+                assert_eq!(params[0].1, RustType::String);
+                assert_eq!(*return_type, Some(RustType::F64));
+            }
+            other => panic!("expected Function, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_build_registry_fn_type_alias_no_params() {
+        // type Factory = () => string;
+        let module = parse_typescript("type Factory = () => string;").unwrap();
+        let reg = build_registry(&module);
+        let def = reg.get("Factory").expect("Factory should be registered");
+        match def {
+            TypeDef::Function {
+                params,
+                return_type,
+            } => {
+                assert!(params.is_empty(), "expected no params, got {:?}", params);
+                assert_eq!(*return_type, Some(RustType::String));
+            }
+            other => panic!("expected Function, got {other:?}"),
+        }
+    }
 }

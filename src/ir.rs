@@ -1021,4 +1021,22 @@ mod tests {
             _ => panic!("expected Return"),
         }
     }
+
+    #[test]
+    fn test_binop_bitwise_as_str() {
+        assert_eq!(BinOp::BitAnd.as_str(), "&");
+        assert_eq!(BinOp::BitOr.as_str(), "|");
+        assert_eq!(BinOp::BitXor.as_str(), "^");
+        assert_eq!(BinOp::Shl.as_str(), "<<");
+        assert_eq!(BinOp::Shr.as_str(), ">>");
+    }
+
+    #[test]
+    fn test_binop_bitwise_precedence_order() {
+        // Rust precedence: Shl/Shr > BitAnd > BitXor > BitOr
+        assert!(BinOp::Shl.precedence() > BinOp::BitAnd.precedence());
+        assert!(BinOp::Shr.precedence() > BinOp::BitAnd.precedence());
+        assert!(BinOp::BitAnd.precedence() > BinOp::BitXor.precedence());
+        assert!(BinOp::BitXor.precedence() > BinOp::BitOr.precedence());
+    }
 }

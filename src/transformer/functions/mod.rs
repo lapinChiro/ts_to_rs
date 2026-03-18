@@ -261,6 +261,33 @@ fn convert_param(
         ast::Pat::Assign(assign) => {
             convert_default_param(assign, fn_name, vis, resilient, fallback_warnings, reg)
         }
+        ast::Pat::Rest(rest) => {
+            if let ast::Pat::Ident(ident) = rest.arg.as_ref() {
+                let name = ident.id.sym.to_string();
+                let type_ann = rest.type_ann.as_ref().or(ident.type_ann.as_ref());
+                let rust_type = type_ann
+                    .map(|ann| {
+                        crate::transformer::functions::convert_ts_type_with_fallback(
+                            &ann.type_ann,
+                            resilient,
+                            fallback_warnings,
+                            &mut Vec::new(),
+                            reg,
+                        )
+                    })
+                    .transpose()?;
+                Ok((
+                    Param {
+                        name,
+                        ty: rust_type,
+                    },
+                    vec![],
+                    vec![],
+                ))
+            } else {
+                Err(anyhow!("unsupported rest parameter pattern"))
+            }
+        }
         _ => Err(anyhow!("unsupported parameter pattern")),
     }
 }

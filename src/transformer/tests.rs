@@ -800,3 +800,155 @@ fn test_type_env_nested_scopes_three_levels() {
     env.pop_scope();
     assert_eq!(env.get("x"), Some(&RustType::F64));
 }
+
+// ---- export * ----
+
+#[test]
+fn test_transform_module_export_all_relative() {
+    let source = r#"export * from "./utils";"#;
+    let module = parse_typescript(source).expect("parse failed");
+    let items = transform_module(&module, &TypeRegistry::new()).unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(
+        items[0],
+        Item::Use {
+            vis: Visibility::Public,
+            path: "crate::utils".to_string(),
+            names: vec!["*".to_string()],
+        }
+    );
+}
+
+#[test]
+fn test_transform_module_export_all_external_skipped() {
+    let source = r#"export * from "some-package";"#;
+    let module = parse_typescript(source).expect("parse failed");
+    let items = transform_module(&module, &TypeRegistry::new()).unwrap();
+    assert!(items.is_empty());
+}
+
+// ---- variable type annotation propagation to arrow return type ----
+
+#[test]
+fn test_transform_var_type_arrow_propagates_return_type() {
+    let source = r#"
+        interface Point { x: number; y: number; }
+        export const make: (n: number) => Point = (n: number) => {
+            return { x: n, y: 0 };
+        };
+    "#;
+    let module = parse_typescript(source).expect("parse failed");
+    let items = transform_module(&module, &TypeRegistry::new()).unwrap();
+
+    let fn_item = items
+        .iter()
+        .find(|i| matches!(i, Item::Fn { name, .. } if name == "make"));
+    assert!(fn_item.is_some(), "expected fn make, got: {items:?}");
+    match fn_item.unwrap() {
+        Item::Fn { return_type, .. } => {
+            assert_eq!(
+                *return_type,
+                Some(RustType::Named {
+                    name: "Point".to_string(),
+                    type_args: vec![],
+                })
+            );
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[test]
+fn test_transform_var_type_alias_arrow_propagates_return_type() {
+    let source = r#"
+        interface Info { name: string; }
+        type GetInfo = (key: string) => Info;
+        export const getInfo: GetInfo = (key: string) => {
+            return { name: key };
+        };
+    "#;
+    let module = parse_typescript(source).expect("parse failed");
+    let reg = crate::registry::build_registry(&module);
+    let items = transform_module(&module, &reg).unwrap();
+
+    let fn_item = items
+        .iter()
+        .find(|i| matches!(i, Item::Fn { name, .. } if name == "getInfo"));
+    assert!(fn_item.is_some(), "expected fn getInfo");
+    match fn_item.unwrap() {
+        Item::Fn { return_type, .. } => {
+            assert_eq!(
+                *return_type,
+                Some(RustType::Named {
+                    name: "Info".to_string(),
+                    type_args: vec![],
+                })
+            );
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[test]
+fn test_transform_var_arrow_explicit_return_type_takes_priority() {
+    let source = r#"
+        const f: (x: number) => string = (x: number): number => {
+            return x;
+        };
+    "#;
+    let module = parse_typescript(source).expect("parse failed");
+    let items = transform_module(&module, &TypeRegistry::new()).unwrap();
+
+    match &items[0] {
+        Item::Fn { return_type, .. } => {
+            assert_eq!(*return_type, Some(RustType::F64));
+        }
+        _ => panic!("expected Item::Fn"),
+    }
+}
+
+// ---- extract_fn_return_type tests ----
+
+#[test]
+fn test_extract_fn_return_type_from_fn_type() {
+    let ty = RustType::Fn {
+        params: vec![],
+        return_type: Box::new(RustType::String),
+    };
+    let result = extract_fn_return_type(&ty, &TypeRegistry::new());
+    assert_eq!(result, Some(RustType::String));
+}
+
+#[test]
+fn test_extract_fn_return_type_from_named_type_in_registry() {
+    let mut reg = TypeRegistry::new();
+    reg.register(
+        "GetInfo".to_string(),
+        crate::registry::TypeDef::Function {
+            params: vec![],
+            return_type: Some(RustType::Named {
+                name: "Info".to_string(),
+                type_args: vec![],
+            }),
+        },
+    );
+    let ty = RustType::Named {
+        name: "GetInfo".to_string(),
+        type_args: vec![],
+    };
+    let result = extract_fn_return_type(&ty, &reg);
+    assert_eq!(
+        result,
+        Some(RustType::Named {
+            name: "Info".to_string(),
+            type_args: vec![],
+        })
+    );
+}
+
+#[test]
+fn test_extract_fn_return_type_unknown_returns_none() {
+    let ty = RustType::String;
+    let result = extract_fn_return_type(&ty, &TypeRegistry::new());
+    assert_eq!(result, None);
+}

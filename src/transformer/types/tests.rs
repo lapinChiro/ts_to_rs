@@ -2371,3 +2371,131 @@ fn test_utility_partial_pick_nested() {
         "expected PartialPickPointXY with Option fields, got: {extra_items:?}"
     );
 }
+
+// -- TsTypePredicate → Bool --
+
+#[test]
+fn test_convert_ts_type_predicate_returns_bool() {
+    // `(x: any) => x is string` is a function type whose return is TsTypePredicate
+    let decl = parse_type_alias("type Guard = (x: any) => x is string;");
+    let item = convert_type_alias(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
+
+    match item {
+        Item::TypeAlias { ty, .. } => {
+            assert_eq!(
+                ty,
+                RustType::Fn {
+                    params: vec![RustType::Any],
+                    return_type: Box::new(RustType::Bool),
+                }
+            );
+        }
+        _ => panic!("expected Item::TypeAlias, got {:?}", item),
+    }
+}
+
+// -- TsUndefinedKeyword → Unit --
+
+#[test]
+fn test_convert_ts_type_undefined_keyword_returns_unit() {
+    let decl = parse_interface("interface T { x: undefined; }");
+    let prop = match &decl.body.body[0] {
+        TsTypeElement::TsPropertySignature(p) => p,
+        _ => panic!("expected property signature"),
+    };
+    let ty = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut Vec::new(),
+        &TypeRegistry::new(),
+    )
+    .unwrap();
+    assert_eq!(ty, RustType::Unit);
+}
+
+// -- TsNullKeyword → Unit --
+
+#[test]
+fn test_convert_ts_type_null_keyword_returns_unit() {
+    let decl = parse_interface("interface T { x: null; }");
+    let prop = match &decl.body.body[0] {
+        TsTypeElement::TsPropertySignature(p) => p,
+        _ => panic!("expected property signature"),
+    };
+    let ty = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut Vec::new(),
+        &TypeRegistry::new(),
+    )
+    .unwrap();
+    assert_eq!(ty, RustType::Unit);
+}
+
+// -- TsBigIntKeyword → i64 --
+
+#[test]
+fn test_convert_ts_type_bigint_keyword_returns_i64() {
+    let decl = parse_interface("interface T { x: bigint; }");
+    let prop = match &decl.body.body[0] {
+        TsTypeElement::TsPropertySignature(p) => p,
+        _ => panic!("expected property signature"),
+    };
+    let ty = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut Vec::new(),
+        &TypeRegistry::new(),
+    )
+    .unwrap();
+    assert_eq!(
+        ty,
+        RustType::Named {
+            name: "i64".to_string(),
+            type_args: vec![],
+        }
+    );
+}
+
+// -- Index signature in type literal → HashMap --
+
+#[test]
+fn test_convert_type_alias_index_signature_to_hashmap() {
+    let decl = parse_type_alias("type Foo = { [key: string]: number };");
+    let item = convert_type_alias(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
+
+    match item {
+        Item::TypeAlias { name, ty, .. } => {
+            assert_eq!(name, "Foo");
+            assert_eq!(
+                ty,
+                RustType::Named {
+                    name: "HashMap".to_string(),
+                    type_args: vec![RustType::String, RustType::F64],
+                }
+            );
+        }
+        _ => panic!("expected Item::TypeAlias, got {:?}", item),
+    }
+}
+
+// -- Index signature in annotation → HashMap --
+
+#[test]
+fn test_convert_ts_type_index_signature_in_annotation_to_hashmap() {
+    let decl = parse_interface("interface T { x: { [key: string]: string }; }");
+    let prop = match &decl.body.body[0] {
+        TsTypeElement::TsPropertySignature(p) => p,
+        _ => panic!("expected property signature"),
+    };
+    let ty = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut Vec::new(),
+        &TypeRegistry::new(),
+    )
+    .unwrap();
+    assert_eq!(
+        ty,
+        RustType::Named {
+            name: "HashMap".to_string(),
+            type_args: vec![RustType::String, RustType::String],
+        }
+    );
+}

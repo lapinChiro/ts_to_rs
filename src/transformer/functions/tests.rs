@@ -626,8 +626,49 @@ fn test_convert_fn_decl_default_new_expr_uses_unwrap_or_default() {
     let fn_decl = parse_fn_decl("function foo(m: Map = new Map()): void {}");
     let (items, _) =
         convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new(), false).unwrap();
-    // Should produce a function with Option<Map> parameter + unwrap_or_default
     assert!(!items.is_empty());
+}
+
+#[test]
+fn test_convert_fn_decl_default_variable_ref_uses_unwrap_or() {
+    // = baseMimes → unwrap_or(baseMimes)
+    let fn_decl = parse_fn_decl("function foo(x: number = defaultVal): void {}");
+    let (items, _) =
+        convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new(), false).unwrap();
+    assert!(!items.is_empty());
+}
+
+#[test]
+fn test_convert_fn_decl_default_empty_array_uses_unwrap_or_default() {
+    // = [] → unwrap_or_default()
+    let fn_decl = parse_fn_decl("function foo(x: string[] = []): void {}");
+    let (items, _) =
+        convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new(), false).unwrap();
+    assert!(!items.is_empty());
+}
+
+#[test]
+fn test_convert_fn_decl_default_negative_number() {
+    // = -1 → unwrap_or(-1.0)
+    let fn_decl = parse_fn_decl("function foo(x: number = -1): void {}");
+    let (items, _) =
+        convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new(), false).unwrap();
+    assert!(!items.is_empty());
+}
+
+#[test]
+fn test_convert_fn_decl_rest_param() {
+    // ...args: number[] → args: Vec<f64>
+    let fn_decl = parse_fn_decl("function foo(...args: number[]): void {}");
+    let (items, _) =
+        convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new(), false).unwrap();
+    match &items[0] {
+        Item::Fn { params, .. } => {
+            assert_eq!(params.len(), 1);
+            assert_eq!(params[0].name, "args");
+        }
+        _ => panic!("expected Item::Fn"),
+    }
 }
 
 #[test]

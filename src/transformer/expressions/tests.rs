@@ -4485,3 +4485,320 @@ fn test_convert_expr_arrow_rest_param_generates_vec() {
         _ => panic!("expected Expr::Closure, got {:?}", result),
     }
 }
+
+// ---- Compound assignment operators ----
+
+#[test]
+fn test_convert_expr_compound_assign_mod() {
+    // x %= 3 → x = x % 3
+    let expr = parse_expr("x %= 3");
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    assert_eq!(
+        result,
+        Expr::Assign {
+            target: Box::new(Expr::Ident("x".to_string())),
+            value: Box::new(Expr::BinaryOp {
+                left: Box::new(Expr::Ident("x".to_string())),
+                op: BinOp::Mod,
+                right: Box::new(Expr::NumberLit(3.0)),
+            }),
+        }
+    );
+}
+
+#[test]
+fn test_convert_expr_compound_assign_bitand() {
+    // x &= mask → x = x & mask
+    let expr = parse_expr("x &= mask");
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    assert_eq!(
+        result,
+        Expr::Assign {
+            target: Box::new(Expr::Ident("x".to_string())),
+            value: Box::new(Expr::BinaryOp {
+                left: Box::new(Expr::Ident("x".to_string())),
+                op: BinOp::BitAnd,
+                right: Box::new(Expr::Ident("mask".to_string())),
+            }),
+        }
+    );
+}
+
+// ---- Compound assignment operators (remaining) ----
+
+#[test]
+fn test_convert_expr_compound_assign_add() {
+    // x += 1 → x = x + 1
+    let expr = parse_expr("x += 1");
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    assert_eq!(
+        result,
+        Expr::Assign {
+            target: Box::new(Expr::Ident("x".to_string())),
+            value: Box::new(Expr::BinaryOp {
+                left: Box::new(Expr::Ident("x".to_string())),
+                op: BinOp::Add,
+                right: Box::new(Expr::NumberLit(1.0)),
+            }),
+        }
+    );
+}
+
+#[test]
+fn test_convert_expr_compound_assign_sub() {
+    // x -= 1 → x = x - 1
+    let expr = parse_expr("x -= 1");
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    assert_eq!(
+        result,
+        Expr::Assign {
+            target: Box::new(Expr::Ident("x".to_string())),
+            value: Box::new(Expr::BinaryOp {
+                left: Box::new(Expr::Ident("x".to_string())),
+                op: BinOp::Sub,
+                right: Box::new(Expr::NumberLit(1.0)),
+            }),
+        }
+    );
+}
+
+#[test]
+fn test_convert_expr_compound_assign_mul() {
+    // x *= 2 → x = x * 2
+    let expr = parse_expr("x *= 2");
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    assert_eq!(
+        result,
+        Expr::Assign {
+            target: Box::new(Expr::Ident("x".to_string())),
+            value: Box::new(Expr::BinaryOp {
+                left: Box::new(Expr::Ident("x".to_string())),
+                op: BinOp::Mul,
+                right: Box::new(Expr::NumberLit(2.0)),
+            }),
+        }
+    );
+}
+
+#[test]
+fn test_convert_expr_compound_assign_div() {
+    // x /= 2 → x = x / 2
+    let expr = parse_expr("x /= 2");
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    assert_eq!(
+        result,
+        Expr::Assign {
+            target: Box::new(Expr::Ident("x".to_string())),
+            value: Box::new(Expr::BinaryOp {
+                left: Box::new(Expr::Ident("x".to_string())),
+                op: BinOp::Div,
+                right: Box::new(Expr::NumberLit(2.0)),
+            }),
+        }
+    );
+}
+
+#[test]
+fn test_convert_expr_compound_assign_bitor() {
+    // x |= mask → x = x | mask
+    let expr = parse_expr("x |= mask");
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    assert_eq!(
+        result,
+        Expr::Assign {
+            target: Box::new(Expr::Ident("x".to_string())),
+            value: Box::new(Expr::BinaryOp {
+                left: Box::new(Expr::Ident("x".to_string())),
+                op: BinOp::BitOr,
+                right: Box::new(Expr::Ident("mask".to_string())),
+            }),
+        }
+    );
+}
+
+#[test]
+fn test_convert_expr_compound_assign_bitxor() {
+    // x ^= mask → x = x ^ mask
+    let expr = parse_expr("x ^= mask");
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    assert_eq!(
+        result,
+        Expr::Assign {
+            target: Box::new(Expr::Ident("x".to_string())),
+            value: Box::new(Expr::BinaryOp {
+                left: Box::new(Expr::Ident("x".to_string())),
+                op: BinOp::BitXor,
+                right: Box::new(Expr::Ident("mask".to_string())),
+            }),
+        }
+    );
+}
+
+#[test]
+fn test_convert_expr_compound_assign_shl() {
+    // x <<= 2 → x = x << 2
+    let expr = parse_expr("x <<= 2");
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    assert_eq!(
+        result,
+        Expr::Assign {
+            target: Box::new(Expr::Ident("x".to_string())),
+            value: Box::new(Expr::BinaryOp {
+                left: Box::new(Expr::Ident("x".to_string())),
+                op: BinOp::Shl,
+                right: Box::new(Expr::NumberLit(2.0)),
+            }),
+        }
+    );
+}
+
+#[test]
+fn test_convert_expr_compound_assign_shr() {
+    // x >>= 2 → x = x >> 2
+    let expr = parse_expr("x >>= 2");
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    assert_eq!(
+        result,
+        Expr::Assign {
+            target: Box::new(Expr::Ident("x".to_string())),
+            value: Box::new(Expr::BinaryOp {
+                left: Box::new(Expr::Ident("x".to_string())),
+                op: BinOp::Shr,
+                right: Box::new(Expr::NumberLit(2.0)),
+            }),
+        }
+    );
+}
+
+// ---- Function expression parameter patterns ----
+
+#[test]
+fn test_convert_expr_fn_expr_object_destructuring_param() {
+    // const f = function({ x, y }: Point) { return x; }; → Closure with 1 param of type Point
+    let reg = {
+        let mut r = TypeRegistry::new();
+        r.register(
+            "Point".to_string(),
+            TypeDef::Struct {
+                fields: vec![
+                    ("x".to_string(), crate::ir::RustType::F64),
+                    ("y".to_string(), crate::ir::RustType::F64),
+                ],
+                methods: std::collections::HashMap::new(),
+            },
+        );
+        r
+    };
+    let swc_expr = parse_var_init("const f = function({ x, y }: Point) { return x; };");
+    let result = convert_expr(&swc_expr, &reg, None, &TypeEnv::new()).unwrap();
+    match result {
+        Expr::Closure { params, body, .. } => {
+            assert_eq!(params.len(), 1);
+            assert_eq!(
+                params[0].ty,
+                Some(crate::ir::RustType::Named {
+                    name: "Point".to_string(),
+                    type_args: vec![],
+                })
+            );
+            // Body should be a Block with expansion stmts
+            match body {
+                crate::ir::ClosureBody::Block(stmts) => {
+                    assert!(
+                        stmts.len() >= 2,
+                        "expected at least 2 stmts, got {}",
+                        stmts.len()
+                    );
+                }
+                _ => panic!("expected Block body with expansion stmts"),
+            }
+        }
+        _ => panic!("expected Expr::Closure, got {:?}", result),
+    }
+}
+
+#[test]
+fn test_convert_expr_fn_expr_default_param() {
+    // const f = function(x: number = 0) { return x; }; → Closure with Option<f64> param
+    let swc_expr = parse_var_init("const f = function(x: number = 0) { return x; };");
+    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    match result {
+        Expr::Closure { params, body, .. } => {
+            assert_eq!(params.len(), 1);
+            assert_eq!(params[0].name, "x");
+            assert_eq!(
+                params[0].ty,
+                Some(crate::ir::RustType::Option(Box::new(
+                    crate::ir::RustType::F64
+                )))
+            );
+            // Body should be Block with unwrap_or expansion + return
+            match body {
+                crate::ir::ClosureBody::Block(stmts) => {
+                    assert!(
+                        stmts.len() >= 2,
+                        "expected at least 2 stmts, got {}",
+                        stmts.len()
+                    );
+                }
+                _ => panic!("expected Block body with default expansion"),
+            }
+        }
+        _ => panic!("expected Expr::Closure, got {:?}", result),
+    }
+}
+
+// ---- Update expression error path ----
+
+#[test]
+fn test_convert_expr_update_non_ident_target_errors() {
+    // arr[0]++ should error because the target is not an identifier
+    let expr = parse_expr("arr[0]++");
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new());
+    assert!(result.is_err());
+    let err_msg = result.unwrap_err().to_string();
+    assert!(
+        err_msg.contains("unsupported update expression target"),
+        "expected 'unsupported update expression target', got: {err_msg}"
+    );
+}
+
+// ---- Function expression with rest param ----
+
+#[test]
+fn test_convert_expr_fn_expr_rest_param_generates_closure() {
+    // const f = function(...args: number[]): void {};
+    let swc_expr = parse_var_init("const f = function(...args: number[]): void {};");
+    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    match result {
+        Expr::Closure { params, .. } => {
+            assert_eq!(params.len(), 1);
+            assert_eq!(params[0].name, "args");
+            assert_eq!(
+                params[0].ty,
+                Some(crate::ir::RustType::Vec(Box::new(crate::ir::RustType::F64)))
+            );
+        }
+        _ => panic!("expected Expr::Closure, got {:?}", result),
+    }
+}
+
+// ---- Arrow with rest param no type ----
+
+#[test]
+fn test_convert_expr_arrow_rest_param_no_type() {
+    // const f = (...args) => args; → rest param with no type annotation
+    let swc_expr = parse_var_init("const f = (...args) => args;");
+    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    match result {
+        Expr::Closure { params, .. } => {
+            assert_eq!(params.len(), 1);
+            assert_eq!(params[0].name, "args");
+            assert_eq!(
+                params[0].ty, None,
+                "rest param without type annotation should have ty=None"
+            );
+        }
+        _ => panic!("expected Expr::Closure, got {:?}", result),
+    }
+}
