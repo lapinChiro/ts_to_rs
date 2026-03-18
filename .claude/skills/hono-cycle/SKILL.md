@@ -15,6 +15,15 @@ user-invocable: true
 - Hono ソースが `/tmp/hono-src/` に存在すること（なければ `git clone --depth 1 https://github.com/honojs/hono.git /tmp/hono-src` で取得）
 - `cargo build --release` が成功すること
 
+## 計測モードの原則
+
+**Hono の変換計測は必ずディレクトリモードで行う。** 単一ファイルモードはプロジェクト内のクロスファイル型解決が効かず、実態と乖離した結果になる。
+
+- **ディレクトリモード**（必須）: `./target/release/ts_to_rs /tmp/hono-src/src/` — `build_shared_registry()` で全ファイルの型定義を共有した状態で変換。これが「実際の変換能力」を示す
+- **単一ファイルモード**（参考値）: `./target/release/ts_to_rs file.ts` — 型共有なし。個別ファイルのデバッグ時のみ使用
+
+レポートにはディレクトリモードの結果を主指標として記載し、単一ファイルモードとの差分がある場合は併記する。
+
 ## サイクル手順
 
 以下の 6 ステップを順に実行する。各ステップの完了を確認してから次に進む。
@@ -22,14 +31,21 @@ user-invocable: true
 ### ステップ 1: Hono 変換の実行とエラー収集
 
 1. `cargo build --release` でツールをビルド
-2. 以下の 47 ファイルに対して変換を実行し、エラーを収集する:
+2. **ベンチマークスクリプトを実行**してエラーを収集する:
 
 ```bash
-find /tmp/hono-src/src -name '*.ts' -not -name '*.d.ts' -not -name '*.test.ts' -not -name '*.spec.ts' -not -path '*/jsx/*' -not -path '*/types*'
+# ディレクトリモード（主計測） — 必ずこちらを使う
+./scripts/hono-bench.sh
+
+# 両モード比較（差分分析が必要な場合）
+./scripts/hono-bench.sh --both
+
+# 個別ファイルのデバッグ時のみ単一ファイルモードを補助的に使用
+./target/release/ts_to_rs /tmp/hono-src/src/some/file.ts 2>&1
 ```
 
-3. 各ファイルの変換結果を記録: 成功 / 失敗（エラーメッセージ）
-4. エラーをカテゴリ別に集計する
+3. スクリプトの出力からエラーカテゴリ別のインスタンス数を確認する
+4. 前回の結果（`report/hono-conversion-rate-analysis.md`）と比較する
 
 ### ステップ 2: エラー分析と TODO 更新
 
@@ -74,7 +90,7 @@ find /tmp/hono-src/src -name '*.ts' -not -name '*.d.ts' -not -name '*.test.ts' -
    - plan.md を更新
 2. サイクルの結果をユーザーに報告する:
    - 修正した構文パターン
-   - 変換成功ファイル数の変化
+   - 変換成功ファイル数の変化（ディレクトリモード基準）
    - 次のサイクルで対応すべき最優先課題
 
 ## 中断条件
@@ -88,6 +104,7 @@ find /tmp/hono-src/src -name '*.ts' -not -name '*.d.ts' -not -name '*.test.ts' -
 
 ## 禁止事項
 
+- **単一ファイルモードの結果のみでエラー分布を判断すること** — 必ずディレクトリモードで計測する
 - エラー分析をせずに実装に入ること
 - TODO の優先度整理をスキップすること
 - 品質チェックを通さずにサイクル完了とすること

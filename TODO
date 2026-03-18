@@ -17,7 +17,9 @@
 - **保留** — 正当な保留理由あり（前提タスク未完了、またはユーザーの設計方針決定が必要）
 - **スコープ外** — 明示的に対象外。需要発生時に再評価
 
-件数は Hono 全151ファイルの変換結果（`report/hono-conversion-rate-analysis.md`、変換率 24%）に基づく。
+件数はディレクトリモード（`./scripts/hono-bench.sh`）の計測結果に基づく。
+151ファイル中 41 ファイルがクリーン（27%）、297 エラーインスタンス。
+計測方法の詳細: `report/hono-conversion-rate-analysis.md`
 
 ---
 
@@ -29,50 +31,64 @@
 2. **相乗効果**: 解決すると他の課題も副次的に解消・簡素化する度合い
 3. **伝播防止**: 未解決のまま放置すると今後の開発に悪影響が蓄積する度合い
 
-### Tier 1: 高優先度 — 変換正確性
+### Tier 1: 高優先度 — 変換正確性・最大インパクト
+
+#### オブジェクトリテラル型伝播
+
+- **[I-112a]** **変数型注釈付き Arrow 関数の戻り値型伝播** — 型伝播バグ（**60 インスタンス中 推定 30+ を解消**）— **PRD 作成済み**
+    - `convert_var_decl_arrow_fns` (mod.rs:553) が変数の型注釈（`: GetConnInfo`）を読み取っていない
+    - 型情報は AST に存在する（`Pat::Ident` の `type_ann`）が、変数名だけ抽出して型注釈を無視
+    - `convert_var_decl` (statements/mod.rs:132) では同じパターンで正しく抽出しており、実装漏れ
+    - **ディレクトリモード（クロスファイル型共有）では解決しない**: 問題は TypeRegistry への型登録ではなく、登録された型から Arrow 関数の戻り値型への伝播が行われていないこと
+    - 詳細: `report/object-literal-type-inference-design.md`, `backlog/var-type-annotation-propagation.md`
+
+#### 未対応構文（インスタンス数順）
+
+- **[I-111]** **正規表現リテラル (`/pattern/flags`)** — 式変換（**37 インスタンス**、Hono 13ファイルに影響）
+    - `convert_lit` (expressions/mod.rs:108) で `ast::Lit::Regex` が未対応
+    - `/pattern/g` → `Regex::new("pattern")` への変換が必要。`regex` クレート依存
+    - 🔗 関連: I-30（生成コードの Cargo.toml 依存クレート追加）が解消されると自動的に `regex` 追加可能
+- **[I-117]** **`null` リテラル** — 式変換（**17 インスタンス**）
+    - `convert_lit` で `ast::Lit::Null` が未対応
+    - コンテキストに応じて `None`（Option）またはデフォルト値に変換が必要
+- **[I-120]** **`for...of` のデストラクチャリングバインディング** — 制御構文（**10 インスタンス**）
+    - `for (const [key, value] of entries)` のように、for...of のバインディングが配列/オブジェクトデストラクチャリングのケース
+    - 現在の `convert_for_of_stmt` は `Pat::Ident`（単一変数）のみ対応
+- **[I-118]** **`declare module` (`TsModuleDecl`)** — 型宣言の変換（**5 インスタンス**、Hono 5ファイルに影響）
+    - TypeScript の `declare module` は型宣言のみで、ランタイムコードを生成しない
+    - `TsInterface` / `TsTypeAlias` と同様に、内部の型定義を TypeRegistry に登録する処理が必要
+    - 単純なスキップではなく、モジュール内の interface/type alias を正しく解析・登録する
+- **[I-121]** **`undefined` キーワード型** — 型変換（**5 インスタンス**）
+    - 型注釈での `undefined` キーワード（`TsUndefinedKeyword`）が未対応
+    - `Option<T>` の `None` 側に相当。union `T | undefined` → `Option<T>` は対応済みだが、型注釈単体での `undefined` が未対応
+- **[I-122]** **型ガード述語型 (`x is Type`)** — 型変換（**5 インスタンス**）
+    - `TsTypePredicate` が未対応。関数の戻り値型が `x is string` のようなケース
+    - Rust では `bool` に変換し、呼び出し元で型キャストが必要
+- **[I-123]** **`EmptyStmt`（空文）** — 文変換（**4 インスタンス**）
+    - セミコロンのみの文（`;;`）が `convert_stmt` で未対応
+    - 無視すれば良い（Rust でも空文は合法）
 
 #### 式・制御構文
 
 - **[I-15]** **`+x`（単項プラス / 数値変換）** — 式変換
-- **[I-115]** **ビット演算子 (`^`, `|`, `&`, `<<`, `>>`)** — 式変換
-    - `convert_bin_expr` で XOR 等のビット演算子が未対応。Hono の `utils/buffer.ts` で `^` が使用されている
+- **[I-115]** **ビット演算子 (`^`, `|`, `&`, `<<`, `>>`)** — 式変換（**3 インスタンス**）
+    - `convert_bin_expr` で XOR 等のビット演算子が未対応。Hono の `utils/buffer.ts` で `^` が使用
     - 追加コストは小さい（`BinOp` に対応するバリアントを追加するだけ）
-- **[I-116]** **Arrow関数の配列デストラクチャリングパラメータ** — 式変換
+- **[I-124]** **複合代入演算子 (`%=`, `&=`, `|=` 等)** — 式変換（**3 インスタンス**）
+    - `convert_assign_expr` で `AddAssign`, `SubAssign`, `MulAssign`, `DivAssign` は対応済みだが、`ModAssign`, `BitAndAssign` 等が未対応
+- **[I-116]** **Arrow関数の配列デストラクチャリングパラメータ** — 式変換（**18 インスタンス** の一部）
     - Arrow関数の `Pat::Object`（オブジェクトデストラクチャリング）は対応済みだが、`Pat::Array`（`([a, b]) => ...`）は未対応
-    - Hono の `middleware/basic-auth/index.ts` で `[usernameEqual, passwordEqual]` パターンが使用
-
-#### 未対応構文（Hono影響大）
-
-- **[I-112]** **オブジェクトリテラルの型推論（型注釈なし）** — 型推論（未対応）
-    - `convert_object_lit` (expressions/mod.rs:1782) が型注釈なしの場合 struct 名を決定できずエラー
-    - `return { status: "ok" }` や `const obj = { path: '/' }` が全てエラー
-    - 戻り値型・変数の型注釈からの struct 名推論が必要
-    - 優先度根拠: Hono **28ファイル**に影響（全体の最大ボトルネック）。型推論の基盤改善テーマ
-- **[I-111]** **正規表現リテラル (`/pattern/flags`)** — 式変換（未対応）
-    - `convert_lit` (expressions/mod.rs:108) で `ast::Lit::Regex` が未対応
-    - `/pattern/g` → `Regex::new("pattern")` への変換が必要。`regex` クレート依存
-    - 優先度根拠: Hono **13ファイル**に影響。実コードで頻出だがランタイム依存あり
-    - 🔗 関連: I-30（生成コードの Cargo.toml 依存クレート追加）が解消されると自動的に `regex` 追加可能
-- **[I-117]** **`null` リテラル** — 式変換（Hono 2ファイルに影響）
-    - `convert_lit` で `ast::Lit::Null` が未対応
-    - コンテキストに応じて `None`（Option）またはデフォルト値に変換が必要
-- **[I-118]** **`declare module` (`TsModuleDecl`)** — 型宣言の変換（Hono 5ファイルに影響）
-    - TypeScript の `declare module` は型宣言のみで、ランタイムコードを生成しない
-    - `TsInterface` / `TsTypeAlias` と同様に、内部の型定義を TypeRegistry に登録する処理が必要
-    - 単純なスキップではなく、モジュール内の interface/type alias を正しく解析・登録する
+    - Hono の `middleware/basic-auth/index.ts` で使用
 
 #### 型変換・型推論
 
 - **[I-93]** **ネストしたフィールド/メソッド経由の変更検出** — ミュータビリティ推論
-    - `mark_mutated_vars`（`convert_stmt_list` の後処理）は直接的な変更（`obj.field = ...`、`arr.push(...)`）のみ検出
-    - ネストしたパス（`obj.inner.field = 1`、`container.items.push(x)`）は未検出で `let`（不変）のまま → コンパイルエラー
-    - 背景: `const` 変数の body スキャンによるミュータビリティ推論（実装済み）の制限事項
-    - 優先度根拠: 実コードでネストしたフィールド変更は頻出し、コンパイルエラーの主要原因の一つ
+    - `mark_mutated_vars` は直接的な変更（`obj.field = ...`、`arr.push(...)`）のみ検出
+    - ネストしたパス（`obj.inner.field = 1`）は未検出で `let`（不変）のまま → コンパイルエラー
 - **[I-28]** **conditional type の分岐型改善** — 型変換正確性
 - **[I-62]** **`is_string_type` の `Option<String>` ハック除去** — 型推論
 - **[I-69]** **型 narrowing（型ガード後の型絞り込み）** — 型推論
     - `typeof x === "string"` / `x instanceof Foo` / `"key" in obj` の条件分岐後、then/else ブランチで型を絞り込む
-    - `in` 演算子の式変換（I-47）は実装済みだが、`if ("key" in obj)` での型ガード narrowing は未実装
 - **[I-11]** **三項演算子の分岐型不一致** — 式変換正確性
 - **[I-12]** **`Promise<T>` の union 内展開** — 型変換正確性
 - **[I-13]** **super() の位置ベースフィールドマッピング** — 式変換正確性
@@ -83,8 +99,12 @@
 - **[I-18]** **re-export の追跡** — import/export
 - **[I-19]** **`.substring`/`.slice` → Rust の文字列スライス** — builtin API
 - **[I-21]** **async void のセマンティクス差異対応** — 変換正確性
-- **[I-24]** **外部パッケージの型定義解決** — 型解決
-    - 🔗 解消すると I-49/50/51（stdin/ファイル I/O/HTTP E2E 基盤）が着手可能
+- **[I-24]** **Web API ビルトイン型のスタブ提供** — 型解決
+    - 旧「外部パッケージの型定義解決」を調査結果に基づき再定義
+    - プロジェクト内のクロスファイル型解決は `build_shared_registry()` で**既に実装済み**
+    - 真に未解決なのは `Response`, `ReadableStream`, `crypto.subtle` 等の Web API ビルトイン型のみ
+    - 対応方法: ユーザー提供の型スタブファイルを共有レジストリに含める仕組み（`--with-types` オプション等）
+    - 詳細: `report/i24-external-type-resolution.md`
 - **[I-25]** **高度な conditional type の変換戦略** — 型変換（Hono 完全変換に必須）
 
 ### Tier 2: 中優先度 — テスト拡充・基盤改善
@@ -94,56 +114,37 @@
 - **[I-96]** **compile test の race condition** — テスト基盤
     - `test_all_fixtures_compile` と `test_multi_file_fixtures_compile` が同じ `tests/compile-check/src/lib.rs` に並行書き込みし、散発的に compile エラーが発生する
     - `--test-threads=1` で回避可能だが、根本対策は Mutex 追加または別ディレクトリ使用
-    - 優先度根拠: 並列テスト実行時に CI を不安定にし、他の開発を妨げる伝播リスクあり
 
 #### E2E テスト拡充
 
-既に実装済みの変換機能に対する E2E テスト追加。変換の正確性は保証されている前提で、実行時の挙動一致を検証する。
+既に実装済みの変換機能に対する E2E テスト追加。
 
-- **[I-20]** **discriminated union の拡張パターン** — バリアントフィールドアクセス変換は実装済み
-    - 未検証: ネストした discriminated union、複数 tag フィールド等
-- **[I-71]** **E2E テスト: オブジェクト操作（残課題）** — Optional None 補完・struct 初期化は実装済み
-    - 未検証: オブジェクトスプレッド（struct update syntax）
-- **[I-74]** **E2E テスト: 既存スクリプトのエッジケース（残課題）** — 基本的な E2E テスト（変数・関数・配列・enum 等）は完了済み
-    - 未検証: closures 可変キャプチャ、optional chaining メソッド、高階関数、destructuring デフォルト値
-- **[I-72]** **E2E テスト: 高度なクラス機能（残課題）** — static メソッドの `::` 生成は実装済み
-    - 未検証: 抽象クラス → trait、getter/setter
+- **[I-20]** **discriminated union の拡張パターン** — 未検証: ネストした discriminated union、複数 tag フィールド等
+- **[I-71]** **E2E テスト: オブジェクト操作（残課題）** — 未検証: オブジェクトスプレッド（struct update syntax）
+- **[I-74]** **E2E テスト: 既存スクリプトのエッジケース** — 未検証: closures 可変キャプチャ、optional chaining メソッド、高階関数
+- **[I-72]** **E2E テスト: 高度なクラス機能** — 未検証: 抽象クラス → trait、getter/setter
 
 ### Tier 3: 低優先度
 
 - **[I-99]** **`collect_du_field_accesses_from_expr` の AST ノード網羅性改善** — コード品質
-    - 配列リテラル、オブジェクトリテラル、代入式、Arrow 関数等の式ノードが未カバー
-    - 未検出時は standalone match 式にフォールバックするため意味は変わらないが、冗長なコードが生成される
-    - `src/transformer/statements/mod.rs` の `collect_du_field_accesses_from_expr` 関数
 - **[I-39]** **Transformer の Range 生成で `Expr::IntLit` を使用** — IR 整合性。動作上問題なし
-- **[I-26]** **union 内の未対応型** — 型構文（Hono 2件）
+- **[I-26]** **union 内の未対応型** — 型構文（**8 インスタンス**）
 - **[I-27]** **タプルの optional 要素** — 型構文
-- **[I-29]** **ネスト async 関数** — 文（Hono 1件解消）
+- **[I-29]** **ネスト async 関数** — 文
 - **[I-30]** **生成コードの Cargo.toml への依存クレート追加** — コード生成
 - **[I-31]** **expressions/mod.rs のモジュール分割** — リファクタリング（2,564 行）
 - **[I-33]** **非プリミティブ type assertion のコメント保持** — type assertion
 - **[I-34]** **Math.random() → `rand` クレート** — 組み込み API
-- **[I-35]** **indexed access type の非文字列キー対応** — 型構文（Hono 2件）
+- **[I-35]** **indexed access type の非文字列キー対応** — 型構文（**4 インスタンス**）
     - 🔗 解消すると I-32（indexed-access-type のコンパイルテストスキップ解消）が可能
-- **[I-36]** **qualified type name (`A.B` 形式)** — 型構文（Hono 1件）
-- **[I-37]** **型リテラルメンバーのメソッドシグネチャ対応** — 型構文（Hono 1件）
+- **[I-36]** **qualified type name (`A.B` 形式)** — 型構文
+- **[I-37]** **型リテラルメンバーのメソッドシグネチャ対応** — 型構文（**8 インスタンス**）
 - **[I-58]** **Trait の type_params 未対応** — 型構文
 - **[I-59]** **Pick/Omit のネストしたユーティリティ型未対応** — 型変換
 - **[I-105]** **デコレータ付き TsParamProp** — クラス変換
-    - `constructor(@Inject() public x: Service)` のデコレータは無視される
-    - Rust にデコレータの直接対応はなく、DI フレームワーク依存のため変換先が不明確
 - **[I-106]** **ラベル付き while での条件内代入** — 式変換
-    - `'label: while (x = expr)` のパターンで、条件内代入の検出・変換が未対応
-    - 通常の `while` の条件内代入（I-10 で実装済み）のラベル付き版
-    - `convert_labeled_stmt` 内の while 分岐は条件をそのまま `convert_expr` に渡しており、代入検出パスを通らない
 - **[I-107]** **`in` 演算子の動的キー** — 式変換
-    - `variable in obj`（文字列リテラルではなく変数をキーに使う）パターンが未対応
-    - 現在は `true` にフォールバックする
-    - Rust では HashMap の `contains_key(&variable)` に変換するのが自然だが、struct の場合は静的解決不可
-- **[I-113]** **`for...in` 文** — 制御構文（Hono 1ファイルに影響）
-    - `for (const key in obj) { ... }` → `for key in obj.keys() { ... }` への変換
-    - `for...of` は `convert_for_of_stmt` で対応済みだが、`for...in` は `convert_stmt` の match に分岐なし
-    - スコープ外から再評価: Hono で実際に使用されていたため
+- **[I-113]** **`for...in` 文** — 制御構文（**3 インスタンス**）
 
 ---
 
@@ -151,15 +152,23 @@
 
 ### 前提タスクの完了待ち
 
+- **[I-112b]** **未登録型の引数に対するオブジェクトリテラル** — Hono 4〜5ファイルに影響
+    - `new Response(msg, { status: 413 })` 等の Web API ビルトイン型が TypeRegistry に未登録
+    - ディレクトリモード計測で確認済み: プロジェクト内型（SmartRouter, serialize 等）はクロスファイル型共有で解決される。真に外部型解決が必要なのは Web API ビルトイン型を使う 4〜5 ファイルのみ
+    - I-24（Web API ビルトイン型のスタブ提供）の解消が前提
+    - 詳細: `report/i24-external-type-resolution.md`
 - **[I-32]** **コンパイルテストのスキップ解消（残り 1 件）** — I-35（indexed access type の非文字列キー対応）の解消が前提
-- **[I-49]** **E2E テスト基盤: 標準入力** — I-24（外部パッケージの型定義解決）の解消が前提
-- **[I-50]** **E2E テスト基盤: ファイル I/O** — I-24（外部パッケージの型定義解決）の解消が前提
-- **[I-51]** **E2E テスト基盤: HTTP リクエスト/レスポンス** — I-24（外部パッケージの型定義解決）の解消が前提
+- **[I-49]** **E2E テスト基盤: 標準入力** — I-24（Web API 型スタブ提供）の解消が前提
+- **[I-50]** **E2E テスト基盤: ファイル I/O** — I-24 の解消が前提
+- **[I-51]** **E2E テスト基盤: HTTP リクエスト/レスポンス** — I-24 の解消が前提
 - **[I-100]** **ジェネリック型の具体化** — ジェネリクス変換（大テーマ）が前提
 - **[I-101]** **ジェネリック型を含む intersection**（Hono 1件）— ジェネリック型の展開が前提
 
 ### 設計方針の決定待ち
 
+- **[I-112c]** **型注釈なし変数のオブジェクトリテラル** — Hono 2ファイルに影響
+    - `let value = {}` のように型注釈が完全にないケース
+    - 匿名構造体の自動生成が必要だが、サイレントに意味が変わるリスクあり。設計方針の決定が必要
 - **[I-102]** **`any`/`unknown` の実用的な変換先** — `Box<dyn Any>` は式中で使用不可。ユースケース依存
 - **[I-103]** **エラー型戦略**（`anyhow::Error` / 独自型）— 初版は `String` 固定。変更はユーザー判断
 - **[I-104]** **所有権推論**（clone 削減）— 初版は全 clone。最適化はユーザー判断
@@ -173,7 +182,6 @@
 - heterogeneous enum（数値と文字列の混在）— TS でも非推奨
 - template literal type — Rust に直接対応する構文がない
 - `~x`, `void x`, `delete obj.prop` — 需要が低い
-- `for...in`（オブジェクトキー列挙）— TS でも非推奨だが Hono で使用あり（I-113 として Tier 3 に移動済み）
 - Docker ベースの開発環境 — 複数人開発時に再評価
 - Watch モード — 変換機能が十分に揃った後
 - デフォルト引数値の拡張（複雑な式）— 需要発生時に対応

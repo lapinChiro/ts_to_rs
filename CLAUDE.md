@@ -21,6 +21,8 @@ cargo test                 # 全テスト実行
 cargo clippy --all-targets --all-features -- -D warnings  # lint
 cargo fmt --all --check    # フォーマットチェック
 cargo llvm-cov --ignore-filename-regex 'main\.rs' --fail-under-lines 89  # カバレッジ計測（閾値89%、main.rs除外）
+./scripts/hono-bench.sh              # Hono 変換率ベンチマーク（ディレクトリモード）
+./scripts/hono-bench.sh --both       # ディレクトリ + 単一ファイル両方
 cargo llvm-cov --html                  # HTMLレポート生成（target/llvm-cov/html/）
 ```
 
