@@ -65,7 +65,13 @@ pub fn convert_ts_type(
                 name: "serde_json::Value".to_string(),
                 type_args: vec![],
             }),
-            TsKeywordTypeKind::TsUndefinedKeyword => Ok(RustType::Unit),
+            TsKeywordTypeKind::TsUndefinedKeyword | TsKeywordTypeKind::TsNullKeyword => {
+                Ok(RustType::Unit)
+            }
+            TsKeywordTypeKind::TsBigIntKeyword => Ok(RustType::Named {
+                name: "i64".to_string(),
+                type_args: vec![],
+            }),
             other => Err(anyhow!("unsupported keyword type: {:?}", other)),
         },
         TsType::TsArrayType(arr) => {
@@ -746,6 +752,27 @@ pub fn convert_type_alias(
                     TsTypeElement::TsPropertySignature(prop) => {
                         let field = convert_property_signature(prop, &mut Vec::new(), reg)?;
                         fields.push(field);
+                    }
+                    TsTypeElement::TsIndexSignature(idx) => {
+                        // { [key: string]: T } → HashMap<String, T>
+                        // Convert the entire type literal to a type alias instead of a struct
+                        if let Some(type_ann) = &idx.type_ann {
+                            let value_type =
+                                convert_ts_type(&type_ann.type_ann, &mut Vec::new(), reg)?;
+                            let type_params = extract_type_params(decl.type_params.as_deref());
+                            return Ok(Item::TypeAlias {
+                                vis,
+                                name,
+                                ty: RustType::Named {
+                                    name: "HashMap".to_string(),
+                                    type_args: vec![RustType::String, value_type],
+                                },
+                                type_params,
+                            });
+                        }
+                        return Err(anyhow!(
+                            "unsupported index signature without type annotation"
+                        ));
                     }
                     _ => {
                         return Err(anyhow!(
@@ -1508,6 +1535,19 @@ fn convert_type_lit_in_annotation(
         match member {
             TsTypeElement::TsPropertySignature(prop) => {
                 fields.push(convert_property_signature(prop, extra_items, reg)?);
+            }
+            TsTypeElement::TsIndexSignature(idx) => {
+                // { [key: string]: T } → HashMap<String, T>
+                if let Some(type_ann) = &idx.type_ann {
+                    let value_type = convert_ts_type(&type_ann.type_ann, extra_items, reg)?;
+                    return Ok(RustType::Named {
+                        name: "HashMap".to_string(),
+                        type_args: vec![RustType::String, value_type],
+                    });
+                }
+                return Err(anyhow!(
+                    "unsupported index signature without type annotation"
+                ));
             }
             _ => return Err(anyhow!("unsupported type literal member")),
         }
