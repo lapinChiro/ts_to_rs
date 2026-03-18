@@ -590,12 +590,10 @@ fn convert_class_prop(
     let field_name = extract_prop_name(&prop.key)
         .map_err(|_| anyhow!("unsupported class property key (only identifiers)"))?;
 
-    let type_ann = prop
-        .type_ann
-        .as_ref()
-        .ok_or_else(|| anyhow!("class property '{}' has no type annotation", field_name))?;
-
-    let ty = convert_ts_type(&type_ann.type_ann, &mut Vec::new(), reg)?;
+    let ty = match prop.type_ann.as_ref() {
+        Some(ann) => convert_ts_type(&ann.type_ann, &mut Vec::new(), reg)?,
+        None => RustType::Any, // Fallback to Any for unannotated class properties
+    };
     let member_vis = resolve_member_visibility(prop.accessibility, class_vis);
 
     Ok(StructField {

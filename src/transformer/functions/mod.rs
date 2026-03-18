@@ -196,10 +196,20 @@ fn convert_param(
     match pat {
         ast::Pat::Ident(ident) => {
             let param_name = ident.id.sym.to_string();
-            let ty = ident
-                .type_ann
-                .as_ref()
-                .ok_or_else(|| anyhow!("parameter '{}' has no type annotation", param_name))?;
+            let ty = match ident.type_ann.as_ref() {
+                Some(ann) => ann,
+                None => {
+                    // No type annotation — fallback to Any
+                    return Ok((
+                        Param {
+                            name: param_name,
+                            ty: Some(RustType::Any),
+                        },
+                        vec![],
+                        vec![],
+                    ));
+                }
+            };
 
             // Check if the type annotation is an inline type literal
             if let ast::TsType::TsTypeLit(type_lit) = ty.type_ann.as_ref() {

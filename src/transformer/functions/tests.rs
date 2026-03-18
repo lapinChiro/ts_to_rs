@@ -217,10 +217,17 @@ fn test_convert_fn_decl_throw_no_return_type_becomes_result_unit() {
 }
 
 #[test]
-fn test_convert_fn_decl_missing_param_type_annotation() {
+fn test_convert_fn_decl_missing_param_type_annotation_falls_back_to_any() {
     let fn_decl = parse_fn_decl("function bad(x) { return x; }");
     let result = convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new(), false);
-    assert!(result.is_err());
+    assert!(result.is_ok(), "should fall back to Any, not error");
+    let items = result.unwrap().0;
+    match items.last().unwrap() {
+        Item::Fn { params, .. } => {
+            assert_eq!(params[0].ty, Some(RustType::Any));
+        }
+        _ => panic!("expected Item::Fn"),
+    }
 }
 
 // -- async function tests --

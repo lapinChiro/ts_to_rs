@@ -509,6 +509,27 @@ fn transform_decl(
             let items = convert_ts_enum(ts_enum, vis)?;
             Ok((items, vec![]))
         }
+        Decl::TsModule(ts_module) => {
+            // `declare module 'name' { ... }` — process internal declarations
+            let mut items = Vec::new();
+            if let Some(ast::TsNamespaceBody::TsModuleBlock(block)) = &ts_module.body {
+                for item in &block.body {
+                    if let ModuleItem::Stmt(ast::Stmt::Decl(inner_decl)) = item {
+                        if let Ok((inner_items, _)) = transform_decl(
+                            inner_decl,
+                            vis.clone(),
+                            reg,
+                            class_map,
+                            iface_methods,
+                            resilient,
+                        ) {
+                            items.extend(inner_items);
+                        }
+                    }
+                }
+            }
+            Ok((items, vec![]))
+        }
         _ => Err(UnsupportedSyntaxError {
             kind: format_decl_kind(decl),
             byte_pos: decl.span().lo.0,
@@ -631,23 +652,14 @@ fn convert_var_decl_arrow_fns(
                     crate::ir::ClosureBody::Block(stmts) => stmts,
                 };
                 functions::convert_last_return_to_tail(&mut fn_body);
-                // Check for untyped parameters — these produce invalid Rust in Item::Fn
+                // Untyped parameters → fallback to Any
                 let mut checked_params = Vec::new();
                 for p in params {
                     if p.ty.is_none() {
-                        if resilient {
-                            fallback_warnings
-                                .push(format!("parameter '{}' has no type annotation", p.name));
-                            checked_params.push(crate::ir::Param {
-                                name: p.name,
-                                ty: Some(crate::ir::RustType::Any),
-                            });
-                        } else {
-                            return Err(anyhow::anyhow!(
-                                "parameter '{}' has no type annotation",
-                                p.name
-                            ));
-                        }
+                        checked_params.push(crate::ir::Param {
+                            name: p.name,
+                            ty: Some(crate::ir::RustType::Any),
+                        });
                     } else {
                         checked_params.push(p);
                     }

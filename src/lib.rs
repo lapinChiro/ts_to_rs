@@ -372,32 +372,15 @@ function bar(obj: Record<string, number>) { for (const k in obj) { console.log(k
     }
 
     #[test]
-    fn test_transpile_arrow_untyped_param_errors_in_default_mode() {
-        // Arrow function with untyped param should error in strict mode
+    fn test_transpile_arrow_untyped_param_falls_back_to_any() {
+        // Arrow function with untyped param should fallback to Any (not error)
         let source = "export const f = (c) => c;";
         let result = transpile(source);
-        assert!(
-            result.is_err(),
-            "untyped arrow param should error in strict mode"
-        );
-    }
-
-    #[test]
-    fn test_transpile_collecting_arrow_untyped_param_fallback_to_any() {
-        // Arrow function with untyped param should fallback to Any in collecting mode
-        let source = "export const f = (c) => c;";
-        let (output, unsupported) = transpile_collecting(source).unwrap();
-        assert!(
-            output.contains("fn f"),
-            "function should still be converted, got: {output}"
-        );
+        assert!(result.is_ok(), "untyped arrow param should fallback to Any");
+        let output = result.unwrap();
         assert!(
             output.contains("serde_json::Value"),
-            "untyped param should fallback to serde_json::Value, got: {output}"
-        );
-        assert!(
-            !unsupported.is_empty(),
-            "untyped param should be reported as unsupported"
+            "untyped param should be serde_json::Value, got: {output}"
         );
     }
 }
