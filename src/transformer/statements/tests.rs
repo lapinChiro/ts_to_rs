@@ -2026,6 +2026,7 @@ fn test_cond_assign_if_option_type_generates_if_let_some() {
         TypeDef::Function {
             params: vec![],
             return_type: Some(RustType::Option(Box::new(RustType::F64))),
+            has_rest: false,
         },
     );
     let mut env = TypeEnv::new();
@@ -2056,6 +2057,7 @@ fn test_cond_assign_if_f64_type_generates_let_and_if_neq_zero() {
         TypeDef::Function {
             params: vec![],
             return_type: Some(RustType::F64),
+            has_rest: false,
         },
     );
     let mut env = TypeEnv::new();
@@ -2093,6 +2095,7 @@ fn test_cond_assign_while_option_type_generates_while_let_some() {
         TypeDef::Function {
             params: vec![],
             return_type: Some(RustType::Option(Box::new(RustType::F64))),
+            has_rest: false,
         },
     );
     let mut env = TypeEnv::new();
@@ -2121,6 +2124,7 @@ fn test_cond_assign_while_f64_type_generates_loop_with_break() {
         TypeDef::Function {
             params: vec![],
             return_type: Some(RustType::F64),
+            has_rest: false,
         },
     );
     let mut env = TypeEnv::new();
@@ -2147,6 +2151,7 @@ fn test_cond_assign_if_comparison_extracts_assignment() {
         TypeDef::Function {
             params: vec![],
             return_type: Some(RustType::F64),
+            has_rest: false,
         },
     );
     let mut env = TypeEnv::new();

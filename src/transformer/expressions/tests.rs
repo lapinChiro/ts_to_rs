@@ -876,6 +876,7 @@ fn test_convert_expr_call_resolves_object_arg_from_registry() {
                 },
             )],
             return_type: None,
+            has_rest: false,
         },
     );
 
@@ -1044,6 +1045,7 @@ fn test_fn_arg_box_dyn_fn_gets_box_new() {
                 },
             )],
             return_type: Some(RustType::F64),
+            has_rest: false,
         },
     );
     let swc_expr = parse_expr("applyFn(myFunc);");
@@ -3080,6 +3082,7 @@ fn test_call_with_missing_default_arg_appends_none() {
                 ),
             ],
             return_type: Some(RustType::String),
+            has_rest: false,
         },
     );
 
@@ -3117,6 +3120,7 @@ fn test_call_with_option_arg_wraps_some() {
                 ),
             ],
             return_type: Some(RustType::String),
+            has_rest: false,
         },
     );
 
@@ -3150,6 +3154,7 @@ fn test_resolve_expr_type_call_registry_fn_returns_return_type() {
         TypeDef::Function {
             params: vec![],
             return_type: Some(RustType::String),
+            has_rest: false,
         },
     );
 
@@ -3192,6 +3197,7 @@ fn test_resolve_expr_type_call_registry_fn_no_return_type_returns_unit() {
         TypeDef::Function {
             params: vec![],
             return_type: None,
+            has_rest: false,
         },
     );
 
@@ -3391,6 +3397,173 @@ fn test_convert_call_expr_no_typeenv_fn_no_expected() {
             );
         }
         _ => panic!("expected FnCall, got: {:?}", result),
+    }
+}
+
+// --- Rest parameter call-site tests ---
+
+#[test]
+fn test_convert_call_expr_rest_param_packs_args_into_vec() {
+    // sum(1, 2, 3) where sum(...nums: number[]) → sum(vec![1.0, 2.0, 3.0])
+    let swc_expr = parse_expr("sum(1, 2, 3);");
+    let mut reg = TypeRegistry::new();
+    use crate::registry::TypeDef;
+    reg.register(
+        "sum".to_string(),
+        TypeDef::Function {
+            params: vec![("nums".to_string(), RustType::Vec(Box::new(RustType::F64)))],
+            return_type: Some(RustType::F64),
+            has_rest: true,
+        },
+    );
+
+    let result = convert_expr(&swc_expr, &reg, None, &TypeEnv::new()).unwrap();
+
+    match &result {
+        Expr::FnCall { name, args } => {
+            assert_eq!(name, "sum");
+            assert_eq!(args.len(), 1, "all args should be packed into one vec");
+            match &args[0] {
+                Expr::Vec { elements } => {
+                    assert_eq!(elements.len(), 3);
+                }
+                other => panic!("expected Vec, got: {other:?}"),
+            }
+        }
+        _ => panic!("expected FnCall, got: {result:?}"),
+    }
+}
+
+#[test]
+fn test_convert_call_expr_rest_param_mixed_regular_and_rest() {
+    // log("hello", 1, 2) where log(prefix: string, ...nums: number[])
+    // → log("hello".to_string(), vec![1.0, 2.0])
+    let swc_expr = parse_expr(r#"log("hello", 1, 2);"#);
+    let mut reg = TypeRegistry::new();
+    use crate::registry::TypeDef;
+    reg.register(
+        "log".to_string(),
+        TypeDef::Function {
+            params: vec![
+                ("prefix".to_string(), RustType::String),
+                ("nums".to_string(), RustType::Vec(Box::new(RustType::F64))),
+            ],
+            return_type: None,
+            has_rest: true,
+        },
+    );
+
+    let result = convert_expr(&swc_expr, &reg, None, &TypeEnv::new()).unwrap();
+
+    match &result {
+        Expr::FnCall { name, args } => {
+            assert_eq!(name, "log");
+            assert_eq!(args.len(), 2, "prefix + packed rest");
+            match &args[1] {
+                Expr::Vec { elements } => {
+                    assert_eq!(elements.len(), 2);
+                }
+                other => panic!("expected Vec for rest args, got: {other:?}"),
+            }
+        }
+        _ => panic!("expected FnCall, got: {result:?}"),
+    }
+}
+
+#[test]
+fn test_convert_call_expr_rest_param_no_rest_args() {
+    // sum() where sum(...nums: number[]) → sum(vec![])
+    let swc_expr = parse_expr("sum();");
+    let mut reg = TypeRegistry::new();
+    use crate::registry::TypeDef;
+    reg.register(
+        "sum".to_string(),
+        TypeDef::Function {
+            params: vec![("nums".to_string(), RustType::Vec(Box::new(RustType::F64)))],
+            return_type: Some(RustType::F64),
+            has_rest: true,
+        },
+    );
+
+    let result = convert_expr(&swc_expr, &reg, None, &TypeEnv::new()).unwrap();
+
+    match &result {
+        Expr::FnCall { name, args } => {
+            assert_eq!(name, "sum");
+            assert_eq!(args.len(), 1);
+            match &args[0] {
+                Expr::Vec { elements } => {
+                    assert_eq!(elements.len(), 0, "no rest args → empty vec");
+                }
+                other => panic!("expected empty Vec, got: {other:?}"),
+            }
+        }
+        _ => panic!("expected FnCall, got: {result:?}"),
+    }
+}
+
+#[test]
+fn test_convert_call_expr_rest_param_spread_single_array() {
+    // sum(...arr) where sum(...nums: number[]) → sum(arr)
+    let swc_expr = parse_expr("sum(...arr);");
+    let mut reg = TypeRegistry::new();
+    use crate::registry::TypeDef;
+    reg.register(
+        "sum".to_string(),
+        TypeDef::Function {
+            params: vec![("nums".to_string(), RustType::Vec(Box::new(RustType::F64)))],
+            return_type: Some(RustType::F64),
+            has_rest: true,
+        },
+    );
+
+    let result = convert_expr(&swc_expr, &reg, None, &TypeEnv::new()).unwrap();
+
+    match &result {
+        Expr::FnCall { name, args } => {
+            assert_eq!(name, "sum");
+            assert_eq!(args.len(), 1);
+            // Should pass arr directly, not wrap in vec!
+            assert!(
+                matches!(&args[0], Expr::Ident(name) if name == "arr"),
+                "spread arg should be passed directly, got: {:?}",
+                args[0]
+            );
+        }
+        _ => panic!("expected FnCall, got: {result:?}"),
+    }
+}
+
+#[test]
+fn test_convert_call_expr_rest_param_mixed_literal_and_spread() {
+    // sum(1, ...arr) where sum(...nums: number[]) → sum([vec![1.0], arr].concat())
+    let swc_expr = parse_expr("sum(1, ...arr);");
+    let mut reg = TypeRegistry::new();
+    use crate::registry::TypeDef;
+    reg.register(
+        "sum".to_string(),
+        TypeDef::Function {
+            params: vec![("nums".to_string(), RustType::Vec(Box::new(RustType::F64)))],
+            return_type: Some(RustType::F64),
+            has_rest: true,
+        },
+    );
+
+    let result = convert_expr(&swc_expr, &reg, None, &TypeEnv::new()).unwrap();
+
+    match &result {
+        Expr::FnCall { name, args } => {
+            assert_eq!(name, "sum");
+            assert_eq!(args.len(), 1);
+            // Should be [vec![1.0], arr].concat()
+            match &args[0] {
+                Expr::MethodCall { method, .. } => {
+                    assert_eq!(method, "concat");
+                }
+                other => panic!("expected MethodCall(.concat()), got: {other:?}"),
+            }
+        }
+        _ => panic!("expected FnCall, got: {result:?}"),
     }
 }
 
@@ -3793,6 +3966,7 @@ fn test_convert_call_args_string_literal_to_enum_variant() {
                 },
             )],
             return_type: None,
+            has_rest: false,
         },
     );
 

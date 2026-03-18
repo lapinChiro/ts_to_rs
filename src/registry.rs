@@ -39,6 +39,8 @@ pub enum TypeDef {
         params: Vec<(String, RustType)>,
         /// 戻り値型
         return_type: Option<RustType>,
+        /// 最後のパラメータが rest パラメータかどうか
+        has_rest: bool,
     },
 }
 
@@ -529,6 +531,7 @@ fn try_collect_fn_type_alias(alias: &ast::TsTypeAliasDecl) -> Option<TypeDef> {
             Some(TypeDef::Function {
                 params,
                 return_type,
+                has_rest: false,
             })
         }
         _ => None,
@@ -593,6 +596,7 @@ fn collect_type_alias_fields(
 /// 関数宣言からパラメータ型と戻り値型を収集する。
 fn collect_fn_def(func: &ast::Function) -> Result<TypeDef> {
     let mut params = Vec::new();
+    let mut has_rest = false;
     for param in &func.params {
         match &param.pat {
             ast::Pat::Ident(ident) => {
@@ -618,6 +622,20 @@ fn collect_fn_def(func: &ast::Function) -> Result<TypeDef> {
                     }
                 }
             }
+            ast::Pat::Rest(rest) => {
+                has_rest = true;
+                if let ast::Pat::Ident(ident) = rest.arg.as_ref() {
+                    let name = ident.id.sym.to_string();
+                    let type_ann = rest.type_ann.as_ref().or(ident.type_ann.as_ref());
+                    if let Some(ann) = type_ann {
+                        if let Ok(ty) =
+                            convert_ts_type(&ann.type_ann, &mut Vec::new(), &TypeRegistry::new())
+                        {
+                            params.push((name, ty));
+                        }
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -630,6 +648,7 @@ fn collect_fn_def(func: &ast::Function) -> Result<TypeDef> {
     Ok(TypeDef::Function {
         params,
         return_type,
+        has_rest,
     })
 }
 
@@ -657,6 +676,7 @@ fn collect_arrow_def(arrow: &ast::ArrowExpr) -> Result<TypeDef> {
     Ok(TypeDef::Function {
         params,
         return_type,
+        has_rest: false,
     })
 }
 
@@ -736,6 +756,7 @@ mod tests {
                     },
                 )],
                 return_type: None,
+                has_rest: false,
             },
         );
         let def = reg.get("draw").unwrap();
@@ -743,6 +764,7 @@ mod tests {
             TypeDef::Function {
                 params,
                 return_type,
+                ..
             } => {
                 assert_eq!(params.len(), 1);
                 assert_eq!(params[0].0, "p");
@@ -844,6 +866,7 @@ mod tests {
             TypeDef::Function {
                 params,
                 return_type,
+                ..
             } => {
                 assert_eq!(params.len(), 2);
                 assert_eq!(params[0].0, "p");
@@ -870,11 +893,62 @@ mod tests {
             TypeDef::Function {
                 params,
                 return_type,
+                ..
             } => {
                 assert_eq!(params.len(), 1);
                 assert_eq!(params[0].0, "name");
                 assert_eq!(params[0].1, RustType::String);
                 assert_eq!(*return_type, Some(RustType::String));
+            }
+            _ => panic!("expected Function"),
+        }
+    }
+
+    #[test]
+    fn test_build_registry_fn_rest_param_sets_has_rest_true() {
+        let module =
+            parse_typescript("function sum(...nums: number[]): number { return 0; }").unwrap();
+        let reg = build_registry(&module);
+        match reg.get("sum").unwrap() {
+            TypeDef::Function {
+                params, has_rest, ..
+            } => {
+                assert!(has_rest, "has_rest should be true for rest param");
+                assert_eq!(params.len(), 1);
+                assert_eq!(params[0].0, "nums");
+                assert_eq!(params[0].1, RustType::Vec(Box::new(RustType::F64)));
+            }
+            _ => panic!("expected Function"),
+        }
+    }
+
+    #[test]
+    fn test_build_registry_fn_mixed_and_rest_param() {
+        let module =
+            parse_typescript("function log(prefix: string, ...msgs: string[]): void {}").unwrap();
+        let reg = build_registry(&module);
+        match reg.get("log").unwrap() {
+            TypeDef::Function {
+                params, has_rest, ..
+            } => {
+                assert!(has_rest);
+                assert_eq!(params.len(), 2);
+                assert_eq!(params[0].0, "prefix");
+                assert_eq!(params[0].1, RustType::String);
+                assert_eq!(params[1].0, "msgs");
+                assert_eq!(params[1].1, RustType::Vec(Box::new(RustType::String)));
+            }
+            _ => panic!("expected Function"),
+        }
+    }
+
+    #[test]
+    fn test_build_registry_fn_no_rest_param_has_rest_false() {
+        let module = parse_typescript("function greet(name: string): void {}").unwrap();
+        let reg = build_registry(&module);
+        match reg.get("greet").unwrap() {
+            TypeDef::Function { has_rest, .. } => {
+                assert!(!has_rest, "has_rest should be false without rest param");
             }
             _ => panic!("expected Function"),
         }
@@ -1053,6 +1127,7 @@ mod tests {
             TypeDef::Function {
                 params,
                 return_type,
+                ..
             } => {
                 assert_eq!(params.len(), 1);
                 assert_eq!(params[0].0, "c");
@@ -1073,6 +1148,7 @@ mod tests {
             TypeDef::Function {
                 params,
                 return_type,
+                ..
             } => {
                 assert!(params.is_empty(), "expected no params, got {:?}", params);
                 assert_eq!(*return_type, Some(RustType::String));

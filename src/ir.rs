@@ -596,6 +596,14 @@ impl BinOp {
         }
     }
 
+    /// Returns `true` if this operator is a bitwise operator.
+    pub fn is_bitwise(self) -> bool {
+        matches!(
+            self,
+            BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | BinOp::Shl | BinOp::Shr
+        )
+    }
+
     /// Returns the precedence level (higher = binds tighter).
     ///
     /// Based on Rust operator precedence:
@@ -1029,6 +1037,32 @@ mod tests {
         assert_eq!(BinOp::BitXor.as_str(), "^");
         assert_eq!(BinOp::Shl.as_str(), "<<");
         assert_eq!(BinOp::Shr.as_str(), ">>");
+    }
+
+    #[test]
+    fn test_binop_is_bitwise_returns_true_for_bitwise_ops() {
+        assert!(BinOp::BitAnd.is_bitwise());
+        assert!(BinOp::BitOr.is_bitwise());
+        assert!(BinOp::BitXor.is_bitwise());
+        assert!(BinOp::Shl.is_bitwise());
+        assert!(BinOp::Shr.is_bitwise());
+    }
+
+    #[test]
+    fn test_binop_is_bitwise_returns_false_for_non_bitwise_ops() {
+        assert!(!BinOp::Add.is_bitwise());
+        assert!(!BinOp::Sub.is_bitwise());
+        assert!(!BinOp::Mul.is_bitwise());
+        assert!(!BinOp::Div.is_bitwise());
+        assert!(!BinOp::Mod.is_bitwise());
+        assert!(!BinOp::Eq.is_bitwise());
+        assert!(!BinOp::NotEq.is_bitwise());
+        assert!(!BinOp::Lt.is_bitwise());
+        assert!(!BinOp::LtEq.is_bitwise());
+        assert!(!BinOp::Gt.is_bitwise());
+        assert!(!BinOp::GtEq.is_bitwise());
+        assert!(!BinOp::LogicalAnd.is_bitwise());
+        assert!(!BinOp::LogicalOr.is_bitwise());
     }
 
     #[test]

@@ -1261,20 +1261,27 @@ fn convert_call_expr(call: &ast::CallExpr, reg: &TypeRegistry, type_env: &TypeEn
 
                 // Look up function parameter types from the registry or TypeEnv
                 let typeenv_params: Vec<(String, RustType)>;
-                let param_types: Option<&[(String, RustType)]> =
-                    if let Some(TypeDef::Function { params, .. }) = reg.get(&fn_name) {
-                        Some(params.as_slice())
-                    } else if let Some(RustType::Fn { params, .. }) = type_env.get(&fn_name) {
-                        typeenv_params = params
-                            .iter()
-                            .enumerate()
-                            .map(|(i, ty)| (format!("_p{i}"), ty.clone()))
-                            .collect();
-                        Some(typeenv_params.as_slice())
-                    } else {
-                        None
-                    };
-                let args = convert_call_args_with_types(&call.args, reg, param_types, type_env)?;
+                let mut has_rest = false;
+                let param_types: Option<&[(String, RustType)]> = if let Some(TypeDef::Function {
+                    params,
+                    has_rest: rest,
+                    ..
+                }) = reg.get(&fn_name)
+                {
+                    has_rest = *rest;
+                    Some(params.as_slice())
+                } else if let Some(RustType::Fn { params, .. }) = type_env.get(&fn_name) {
+                    typeenv_params = params
+                        .iter()
+                        .enumerate()
+                        .map(|(i, ty)| (format!("_p{i}"), ty.clone()))
+                        .collect();
+                    Some(typeenv_params.as_slice())
+                } else {
+                    None
+                };
+                let args =
+                    convert_call_args_with_types(&call.args, reg, param_types, has_rest, type_env)?;
                 Ok(Expr::FnCall {
                     name: fn_name,
                     args,
@@ -1335,6 +1342,7 @@ fn convert_call_expr(call: &ast::CallExpr, reg: &TypeRegistry, type_env: &TypeEn
                     &call.args,
                     reg,
                     method_params.as_deref(),
+                    false,
                     type_env,
                 )?;
                 let method_call = map_method_call(object, &method, args);
@@ -1994,7 +2002,7 @@ fn convert_new_expr(
         _ => None,
     });
     let args = match &new_expr.args {
-        Some(args) => convert_call_args_with_types(args, reg, param_types, type_env)?,
+        Some(args) => convert_call_args_with_types(args, reg, param_types, false, type_env)?,
         None => vec![],
     };
     Ok(Expr::FnCall {
@@ -2009,20 +2017,46 @@ fn convert_call_args(
     reg: &TypeRegistry,
     type_env: &TypeEnv,
 ) -> Result<Vec<Expr>> {
-    convert_call_args_with_types(args, reg, None, type_env)
+    convert_call_args_with_types(args, reg, None, false, type_env)
 }
 
 /// Converts call arguments with optional parameter type information from the registry.
 ///
 /// When `param_types` is provided, each argument gets the corresponding parameter's type
 /// as its expected type. This enables object literal arguments to resolve their struct name.
+///
+/// When `has_rest` is true, the last parameter is a rest parameter (`Vec<T>`).
+/// Extra arguments beyond the regular parameters are packed into a `vec![...]`.
 fn convert_call_args_with_types(
     args: &[ast::ExprOrSpread],
     reg: &TypeRegistry,
     param_types: Option<&[(String, RustType)]>,
+    has_rest: bool,
     type_env: &TypeEnv,
 ) -> Result<Vec<Expr>> {
-    let mut result: Vec<Expr> = args
+    // Determine how many regular (non-rest) parameters there are
+    let regular_param_count = if has_rest {
+        param_types.map(|p| p.len().saturating_sub(1)).unwrap_or(0)
+    } else {
+        usize::MAX // No rest param → treat all as regular
+    };
+
+    // Get the element type for the rest parameter (inner type of Vec<T>)
+    let rest_element_type = if has_rest {
+        param_types.and_then(|p| p.last()).and_then(|(_, ty)| {
+            if let RustType::Vec(inner) = ty {
+                Some(inner.as_ref())
+            } else {
+                None
+            }
+        })
+    } else {
+        None
+    };
+
+    // Convert regular arguments
+    let regular_args_count = args.len().min(regular_param_count);
+    let mut result: Vec<Expr> = args[..regular_args_count]
         .iter()
         .enumerate()
         .map(|(i, arg)| {
@@ -2055,11 +2089,64 @@ fn convert_call_args_with_types(
         })
         .collect::<Result<Vec<_>>>()?;
 
-    // Append None for missing Option parameters (default arguments)
-    if let Some(params) = param_types {
-        for param in params.iter().skip(result.len()) {
-            if matches!(param.1, RustType::Option(_)) {
-                result.push(Expr::Ident("None".to_string()));
+    if has_rest {
+        // Pack remaining arguments into a vec![]
+        let rest_args = &args[regular_args_count..];
+        if rest_args.len() == 1 && rest_args[0].spread.is_some() {
+            // Single spread: foo(...arr) → foo(arr)
+            let expr = convert_expr(&rest_args[0].expr, reg, None, type_env)?;
+            result.push(expr);
+        } else if rest_args.iter().any(|a| a.spread.is_some()) {
+            // Mixed literals and spread: foo(1, ...arr) → foo([vec![1.0], arr].concat())
+            let mut parts: Vec<Expr> = Vec::new();
+            let mut literal_buf: Vec<Expr> = Vec::new();
+
+            for arg in rest_args {
+                if arg.spread.is_some() {
+                    // Flush literal buffer as vec![...]
+                    if !literal_buf.is_empty() {
+                        parts.push(Expr::Vec {
+                            elements: std::mem::take(&mut literal_buf),
+                        });
+                    }
+                    // Add spread array directly
+                    let expr = convert_expr(&arg.expr, reg, None, type_env)?;
+                    parts.push(expr);
+                } else {
+                    let expr = convert_expr(&arg.expr, reg, rest_element_type, type_env)?;
+                    literal_buf.push(expr);
+                }
+            }
+            if !literal_buf.is_empty() {
+                parts.push(Expr::Vec {
+                    elements: literal_buf,
+                });
+            }
+
+            // [part1, part2, ...].concat()
+            let concat_receiver = Expr::Vec { elements: parts };
+            result.push(Expr::MethodCall {
+                object: Box::new(concat_receiver),
+                method: "concat".to_string(),
+                args: vec![],
+            });
+        } else {
+            // All literal args: foo(1, 2, 3) → foo(vec![1.0, 2.0, 3.0])
+            let rest_exprs: Vec<Expr> = rest_args
+                .iter()
+                .map(|arg| convert_expr(&arg.expr, reg, rest_element_type, type_env))
+                .collect::<Result<Vec<_>>>()?;
+            result.push(Expr::Vec {
+                elements: rest_exprs,
+            });
+        }
+    } else {
+        // Append None for missing Option parameters (default arguments)
+        if let Some(params) = param_types {
+            for param in params.iter().skip(result.len()) {
+                if matches!(param.1, RustType::Option(_)) {
+                    result.push(Expr::Ident("None".to_string()));
+                }
             }
         }
     }

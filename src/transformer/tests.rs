@@ -930,6 +930,7 @@ fn test_extract_fn_return_type_from_named_type_in_registry() {
                 name: "Info".to_string(),
                 type_args: vec![],
             }),
+            has_rest: false,
         },
     );
     let ty = RustType::Named {
