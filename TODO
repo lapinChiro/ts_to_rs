@@ -18,7 +18,7 @@
 - **スコープ外** — 明示的に対象外。需要発生時に再評価
 
 件数は Hono ベンチマーク（`./scripts/hono-bench.sh`）の実測値に基づく。
-158 ファイル中 58 ファイルがクリーン（36.7%）、239 エラーインスタンス。
+158 ファイル中 61 ファイルがクリーン（38.6%）、223 エラーインスタンス。
 **注意**: ベンチマーク実行前に `cargo build --release` が必要。古いビルドで実行すると数値が不正確になる。
 **補足**: 「クリーン」は変換エラーなし（`--report-unsupported` でエラー 0）を意味する。生成 Rust のコンパイル可能性とは別指標。クリーンファイルでも未解決型（Web API 等）や不正構文によりコンパイルは通らない場合がある。
 
@@ -44,16 +44,13 @@
     - Discriminant(15): 条件型の亜種 — **5 件**
     - Discriminant(17): テンプレートリテラル型 — **5 件**（スコープ外候補）
     - Discriminant(14): `keyof typeof` 演算子（`TsTypeOperator` wrapping `TsTypeQuery`）— **1 件**
-    - Discriminant(10): 文字列リテラル union + `undefined`（`'A' | 'B' | undefined`）— **1 件**。`try_convert_string_literal_union` が `undefined` メンバーを拒否し、`try_convert_general_union` にフォールスルーする変換バグ。🔗 I-26 関連
+    - ~~Discriminant(10)~~: 文字列リテラル union + `undefined` のバグは I-26 で修正済み（0 件）
     - Hono 完全変換に必須。I-28（conditional type 改善）と重複
-- **[I-126]** **計算プロパティアクセス (`obj[expr]`)** — （**14 インスタンス**）
-    - `member property (only identifiers)` エラー。計算プロパティ（`this[method]()`, `obj[key]`）が未対応
-    - `this.#privateField` や `Symbol` プロパティも含む
+- **[I-126]** **計算プロパティアクセス (`obj[expr]`)** — （**2 インスタンス**）
+    - `#privateField` の `PrivateName` 対応は完了（14 → 2 に減少）
+    - 残存 2 件は `Computed` プロパティ以外の未特定パターン
 - **[I-127]** **交差型 (`A & B`) の変換改善** — （**10 インスタンス**）
     - 基本的な property signature の merge は実装済みだが、メソッドシグネチャ等を含む場合に失敗
-- **[I-26]** **union 内の未対応型** — （**10 インスタンス**）
-    - `TsSymbolKeyword` 等の未対応キーワード型が union 内に含まれる場合のエラー
-    - 文字列リテラル union + `undefined` が `try_convert_string_literal_union` と `try_convert_general_union` の両方でフォールスルーするバグを含む（🔗 I-25 Discriminant(10) の 1 件）
 
 #### パラメータ・引数パターン
 

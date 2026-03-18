@@ -697,6 +697,7 @@ fn convert_member_expr(
 
     let field = match &member.prop {
         ast::MemberProp::Ident(ident) => ident.sym.to_string(),
+        ast::MemberProp::PrivateName(private) => format!("_{}", private.name),
         _ => return Err(anyhow!("unsupported member property (only identifiers)")),
     };
 
@@ -1309,6 +1310,7 @@ fn convert_call_expr(call: &ast::CallExpr, reg: &TypeRegistry, type_env: &TypeEn
             ast::Expr::Member(member) => {
                 let method = match &member.prop {
                     ast::MemberProp::Ident(ident) => ident.sym.to_string(),
+                    ast::MemberProp::PrivateName(private) => format!("_{}", private.name),
                     _ => return Err(anyhow!("unsupported call target member property")),
                 };
 

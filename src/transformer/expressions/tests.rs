@@ -4653,6 +4653,22 @@ fn test_convert_expr_nested_array_with_vec_tuple_expected() {
     }
 }
 
+// ---- I-126: Private field (PrivateName) access ----
+
+#[test]
+fn test_convert_expr_private_field_access_generates_field_access() {
+    // this.#field → self._field
+    let expr = parse_expr("this.#routes");
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    match &result {
+        Expr::FieldAccess { object, field } => {
+            assert!(matches!(object.as_ref(), Expr::Ident(name) if name == "self"));
+            assert_eq!(field, "_routes");
+        }
+        other => panic!("expected FieldAccess, got: {other:?}"),
+    }
+}
+
 // ---- I-115: Bitwise operators ----
 
 #[test]

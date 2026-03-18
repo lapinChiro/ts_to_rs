@@ -1188,6 +1188,15 @@ fn try_convert_string_literal_union(
                 }
                 _ => return Ok(None), // Non-string literal → not a string literal union
             },
+            // Skip null/undefined in string literal unions (they become Option wrapping)
+            TsType::TsKeywordType(kw)
+                if matches!(
+                    kw.kind,
+                    TsKeywordTypeKind::TsNullKeyword | TsKeywordTypeKind::TsUndefinedKeyword
+                ) =>
+            {
+                continue;
+            }
             _ => return Ok(None), // Non-literal member → not a string literal union
         }
     }
@@ -1356,7 +1365,21 @@ fn try_convert_general_union(
                     TsKeywordTypeKind::TsStringKeyword => ("String".to_string(), RustType::String),
                     TsKeywordTypeKind::TsNumberKeyword => ("F64".to_string(), RustType::F64),
                     TsKeywordTypeKind::TsBooleanKeyword => ("Bool".to_string(), RustType::Bool),
-                    _ => return Err(anyhow!("unsupported keyword type in union: {:?}", kw.kind)),
+                    TsKeywordTypeKind::TsBigIntKeyword => (
+                        "I64".to_string(),
+                        RustType::Named {
+                            name: "i64".to_string(),
+                            type_args: vec![],
+                        },
+                    ),
+                    TsKeywordTypeKind::TsSymbolKeyword
+                    | TsKeywordTypeKind::TsAnyKeyword
+                    | TsKeywordTypeKind::TsUnknownKeyword
+                    | TsKeywordTypeKind::TsObjectKeyword => ("Any".to_string(), RustType::Any),
+                    TsKeywordTypeKind::TsNeverKeyword | TsKeywordTypeKind::TsVoidKeyword => {
+                        continue
+                    }
+                    _ => continue,
                 };
                 variants.push(EnumVariant {
                     name: variant_name,
@@ -1412,7 +1435,15 @@ fn try_convert_general_union(
                     fields,
                 });
             }
-            _ => return Err(anyhow!("unsupported type in union")),
+            _ => {
+                // Fallback: unsupported union member types become Any variant
+                variants.push(EnumVariant {
+                    name: format!("Other{}", variants.len()),
+                    value: None,
+                    data: Some(RustType::Any),
+                    fields: vec![],
+                });
+            }
         }
     }
 
