@@ -9,6 +9,7 @@ use crate::ir::{BinOp, ClosureBody, Expr, Param, RustType, Stmt, UnOp};
 use crate::registry::{TypeDef, TypeRegistry};
 use crate::transformer::functions::{convert_last_return_to_tail, convert_ts_type_with_fallback};
 use crate::transformer::statements::convert_stmt;
+use crate::transformer::types::convert_ts_type;
 use crate::transformer::TypeEnv;
 
 /// Converts an SWC [`ast::Expr`] into an IR [`Expr`], with an optional expected type.
@@ -63,6 +64,7 @@ pub fn convert_expr(
         ast::Expr::Assign(assign) => convert_assign_expr(assign, reg, type_env),
         ast::Expr::Update(up) => convert_update_expr(up),
         ast::Expr::Arrow(arrow) => convert_arrow_expr(arrow, reg, false, &mut Vec::new(), type_env),
+        ast::Expr::Fn(fn_expr) => convert_fn_expr(fn_expr, reg, type_env),
         ast::Expr::Call(call) => convert_call_expr(call, reg, type_env),
         ast::Expr::New(new_expr) => convert_new_expr(new_expr, reg, type_env),
         ast::Expr::Array(array_lit) => convert_array_lit(array_lit, reg, expected, type_env),
@@ -793,6 +795,120 @@ fn convert_update_expr(up: &ast::UpdateExpr) -> Result<Expr> {
             op,
             right: Box::new(Expr::NumberLit(1.0)),
         }),
+    })
+}
+
+/// Converts a function expression to `Expr::Closure`.
+///
+/// Function expressions (`function(x) { ... }` or `function name(x) { ... }`)
+/// are treated identically to arrow functions — the optional name is ignored.
+fn convert_fn_expr(fn_expr: &ast::FnExpr, reg: &TypeRegistry, type_env: &TypeEnv) -> Result<Expr> {
+    let func = &fn_expr.function;
+
+    // Convert parameters — reuse the same logic as arrow functions
+    let mut params = Vec::new();
+    let mut expansion_stmts = Vec::new();
+    for param in &func.params {
+        match &param.pat {
+            ast::Pat::Ident(ident) => {
+                let name = ident.id.sym.to_string();
+                let rust_type = ident
+                    .type_ann
+                    .as_ref()
+                    .map(|ann| convert_ts_type(&ann.type_ann, &mut Vec::new(), reg))
+                    .transpose()?;
+                params.push(Param {
+                    name,
+                    ty: rust_type,
+                });
+            }
+            ast::Pat::Object(obj_pat) => {
+                let (param, stmts) =
+                    crate::transformer::functions::convert_object_destructuring_param(
+                        obj_pat, reg,
+                    )?;
+                params.push(param);
+                expansion_stmts.extend(stmts);
+            }
+            ast::Pat::Assign(assign) => match assign.left.as_ref() {
+                ast::Pat::Ident(ident) => {
+                    let name = ident.id.sym.to_string();
+                    let inner_type = ident
+                        .type_ann
+                        .as_ref()
+                        .map(|ann| convert_ts_type(&ann.type_ann, &mut Vec::new(), reg))
+                        .transpose()?
+                        .ok_or_else(|| anyhow!("default parameter requires a type annotation"))?;
+                    let option_type = RustType::Option(Box::new(inner_type));
+                    let (default_expr, use_unwrap_or_default) =
+                        crate::transformer::functions::convert_default_value(&assign.right)?;
+                    let unwrap_call = if use_unwrap_or_default {
+                        Expr::MethodCall {
+                            object: Box::new(Expr::Ident(name.clone())),
+                            method: "unwrap_or_default".to_string(),
+                            args: vec![],
+                        }
+                    } else {
+                        Expr::MethodCall {
+                            object: Box::new(Expr::Ident(name.clone())),
+                            method: "unwrap_or".to_string(),
+                            args: vec![default_expr.unwrap()],
+                        }
+                    };
+                    expansion_stmts.push(Stmt::Let {
+                        mutable: false,
+                        name: name.clone(),
+                        ty: None,
+                        init: Some(unwrap_call),
+                    });
+                    params.push(Param {
+                        name,
+                        ty: Some(option_type),
+                    });
+                }
+                _ => return Err(anyhow!("unsupported function expression default parameter")),
+            },
+            _ => return Err(anyhow!("unsupported function expression parameter pattern")),
+        }
+    }
+
+    let return_type = func
+        .return_type
+        .as_ref()
+        .map(|ann| convert_ts_type(&ann.type_ann, &mut Vec::new(), reg))
+        .transpose()?;
+
+    // void → None
+    let return_type = return_type.and_then(|ty| {
+        if matches!(ty, RustType::Unit) {
+            None
+        } else {
+            Some(ty)
+        }
+    });
+
+    let body = match &func.body {
+        Some(block) => {
+            let mut inner_env = type_env.clone();
+            let mut stmts = expansion_stmts;
+            for stmt in &block.stmts {
+                stmts.extend(convert_stmt(
+                    stmt,
+                    reg,
+                    return_type.as_ref(),
+                    &mut inner_env,
+                )?);
+            }
+            convert_last_return_to_tail(&mut stmts);
+            ClosureBody::Block(stmts)
+        }
+        None => ClosureBody::Block(expansion_stmts),
+    };
+
+    Ok(Expr::Closure {
+        params,
+        return_type,
+        body,
     })
 }
 

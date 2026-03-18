@@ -4281,3 +4281,52 @@ fn test_convert_expr_postfix_decrement_generates_assign_sub() {
         }
     );
 }
+
+// ---- I-114: Function expressions ----
+
+#[test]
+fn test_convert_expr_fn_expr_anonymous_generates_closure() {
+    // function(x: number): number { return x + 1; } → Closure
+    let swc_expr = parse_var_init("const f = function(x: number): number { return x + 1; };");
+    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    match result {
+        Expr::Closure {
+            params,
+            return_type,
+            body,
+        } => {
+            assert_eq!(params.len(), 1);
+            assert_eq!(params[0].name, "x");
+            assert_eq!(params[0].ty, Some(crate::ir::RustType::F64));
+            assert_eq!(return_type, Some(crate::ir::RustType::F64));
+            assert!(matches!(body, crate::ir::ClosureBody::Block(_)));
+        }
+        _ => panic!("expected Expr::Closure, got {:?}", result),
+    }
+}
+
+#[test]
+fn test_convert_expr_fn_expr_named_generates_closure() {
+    // function foo(x: number) { return x; } → Closure (name ignored)
+    let swc_expr = parse_var_init("const f = function foo(x: number): number { return x; };");
+    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    match result {
+        Expr::Closure { params, .. } => {
+            assert_eq!(params.len(), 1);
+            assert_eq!(params[0].name, "x");
+        }
+        _ => panic!("expected Expr::Closure, got {:?}", result),
+    }
+}
+
+#[test]
+fn test_convert_expr_fn_expr_no_params_generates_closure() {
+    let swc_expr = parse_var_init("const f = function(): void {};");
+    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    match result {
+        Expr::Closure { params, .. } => {
+            assert!(params.is_empty());
+        }
+        _ => panic!("expected Expr::Closure, got {:?}", result),
+    }
+}

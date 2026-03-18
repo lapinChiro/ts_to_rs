@@ -17,7 +17,7 @@
 - **保留** — 正当な保留理由あり（前提タスク未完了、またはユーザーの設計方針決定が必要）
 - **スコープ外** — 明示的に対象外。需要発生時に再評価
 
-件数は Hono 全47ファイルの変換結果（`report/hono-conversion-rate-analysis.md`、変換率 6.4%）に基づく。
+件数は Hono 全151ファイルの変換結果（`report/hono-conversion-rate-analysis.md`、変換率 24%）に基づく。
 
 ---
 
@@ -47,12 +47,19 @@
     - `convert_object_lit` (expressions/mod.rs:1782) が型注釈なしの場合 struct 名を決定できずエラー
     - `return { status: "ok" }` や `const obj = { path: '/' }` が全てエラー
     - 戻り値型・変数の型注釈からの struct 名推論が必要
-    - 優先度根拠: Hono **10ファイル**に影響（修正後の最大ボトルネック）。型推論の基盤改善テーマ
+    - 優先度根拠: Hono **28ファイル**に影響（全体の最大ボトルネック）。型推論の基盤改善テーマ
 - **[I-111]** **正規表現リテラル (`/pattern/flags`)** — 式変換（未対応）
     - `convert_lit` (expressions/mod.rs:108) で `ast::Lit::Regex` が未対応
     - `/pattern/g` → `Regex::new("pattern")` への変換が必要。`regex` クレート依存
-    - 優先度根拠: Hono **8ファイル**に影響。実コードで頻出だがランタイム依存あり
+    - 優先度根拠: Hono **13ファイル**に影響。実コードで頻出だがランタイム依存あり
     - 🔗 関連: I-30（生成コードの Cargo.toml 依存クレート追加）が解消されると自動的に `regex` 追加可能
+- **[I-117]** **`null` リテラル** — 式変換（Hono 2ファイルに影響）
+    - `convert_lit` で `ast::Lit::Null` が未対応
+    - コンテキストに応じて `None`（Option）またはデフォルト値に変換が必要
+- **[I-118]** **`declare module` (`TsModuleDecl`)** — 型宣言の変換（Hono 5ファイルに影響）
+    - TypeScript の `declare module` は型宣言のみで、ランタイムコードを生成しない
+    - `TsInterface` / `TsTypeAlias` と同様に、内部の型定義を TypeRegistry に登録する処理が必要
+    - 単純なスキップではなく、モジュール内の interface/type alias を正しく解析・登録する
 
 #### 型変換・型推論
 
@@ -137,9 +144,6 @@
     - `for (const key in obj) { ... }` → `for key in obj.keys() { ... }` への変換
     - `for...of` は `convert_for_of_stmt` で対応済みだが、`for...in` は `convert_stmt` の match に分岐なし
     - スコープ外から再評価: Hono で実際に使用されていたため
-- **[I-114]** **関数式 (`function name() {}`)** — 式変換（Hono 1ファイルに影響）
-    - `convert_expr` に `ast::Expr::Fn` の分岐がない
-    - Arrow関数 (`ast::Expr::Arrow`) と同等のクロージャ変換が可能
 
 ---
 

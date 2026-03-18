@@ -397,3 +397,10 @@ fn test_class_default_params() {
     let output = transpile(&input).unwrap();
     insta::assert_snapshot!(output);
 }
+
+#[test]
+fn test_fn_expr() {
+    let input = fs::read_to_string("tests/fixtures/fn-expr.input.ts").unwrap();
+    let output = transpile(&input).unwrap();
+    insta::assert_snapshot!(output);
+}
