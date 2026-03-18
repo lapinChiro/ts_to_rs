@@ -5060,3 +5060,44 @@ fn test_convert_expr_arrow_rest_param_no_type() {
         _ => panic!("expected Expr::Closure, got {:?}", result),
     }
 }
+
+// ---- I-129: Call target expansion ----
+
+#[test]
+fn test_convert_call_expr_paren_ident_unwraps_to_fn_call() {
+    // (foo)(1) → foo(1.0)
+    let expr = parse_expr("(foo)(1);");
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    match &result {
+        Expr::FnCall { name, args } => {
+            assert_eq!(name, "foo");
+            assert_eq!(args.len(), 1);
+        }
+        other => panic!("expected FnCall, got: {other:?}"),
+    }
+}
+
+#[test]
+fn test_convert_call_expr_paren_member_unwraps_to_method_call() {
+    // (obj.method)() → obj.method()
+    let expr = parse_expr("(obj.method)();");
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    match &result {
+        Expr::MethodCall { method, .. } => {
+            assert_eq!(method, "method");
+        }
+        other => panic!("expected MethodCall, got: {other:?}"),
+    }
+}
+
+#[test]
+fn test_convert_call_expr_chained_call_does_not_error() {
+    // f(x)(y) — chained call should not error
+    let expr = parse_expr("f(1)(2);");
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new());
+    assert!(
+        result.is_ok(),
+        "chained call should not error: {:?}",
+        result.err()
+    );
+}

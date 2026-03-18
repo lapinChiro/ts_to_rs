@@ -1369,6 +1369,34 @@ fn convert_call_expr(call: &ast::CallExpr, reg: &TypeRegistry, type_env: &TypeEn
                 let method_call = map_method_call(object, &method, args);
                 Ok(method_call)
             }
+            // Unwrap parenthesized expression and retry: (foo)(args) → foo(args)
+            ast::Expr::Paren(paren) => {
+                let unwrapped_call = ast::CallExpr {
+                    callee: ast::Callee::Expr(paren.expr.clone()),
+                    args: call.args.clone(),
+                    span: call.span,
+                    ctxt: call.ctxt,
+                    type_args: call.type_args.clone(),
+                };
+                convert_call_expr(&unwrapped_call, reg, type_env)
+            }
+            // Chained call: f(x)(y) → { let _f = f(x); _f(y) }
+            ast::Expr::Call(inner_call) => {
+                let inner_result = convert_call_expr(inner_call, reg, type_env)?;
+                let args = convert_call_args(&call.args, reg, type_env)?;
+                Ok(Expr::Block(vec![
+                    Stmt::Let {
+                        name: "_f".to_string(),
+                        mutable: false,
+                        ty: None,
+                        init: Some(inner_result),
+                    },
+                    Stmt::TailExpr(Expr::FnCall {
+                        name: "_f".to_string(),
+                        args,
+                    }),
+                ]))
+            }
             _ => Err(anyhow!("unsupported call target expression")),
         },
         ast::Callee::Super(_) => {
