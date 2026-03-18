@@ -239,6 +239,14 @@ pub(super) fn generate_expr(expr: &Expr) -> String {
                 .join(", ");
             format!("vec![{elems_str}]")
         }
+        Expr::Tuple { elements } => {
+            let elems_str = elements
+                .iter()
+                .map(generate_expr)
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("({elems_str})")
+        }
         Expr::If {
             condition,
             then_expr,
@@ -452,6 +460,21 @@ mod tests {
     #[test]
     fn test_generate_expr_ident() {
         assert_eq!(generate_expr(&Expr::Ident("foo".to_string())), "foo");
+    }
+
+    #[test]
+    fn test_generate_expr_tuple_literal() {
+        let expr = Expr::Tuple {
+            elements: vec![
+                Expr::MethodCall {
+                    object: Box::new(Expr::StringLit("a".to_string())),
+                    method: "to_string".to_string(),
+                    args: vec![],
+                },
+                Expr::NumberLit(1.0),
+            ],
+        };
+        assert_eq!(generate_expr(&expr), r#"("a".to_string(), 1.0)"#);
     }
 
     #[test]

@@ -65,72 +65,8 @@ run_directory_mode() {
     local json_file="/tmp/hono-bench-errors.json"
     "$BINARY" --report-unsupported "$HONO_CLEAN/" -o "$output_dir/" > "$json_file" 2>/dev/null
 
-    # Parse JSON with python3
-    python3 -c "
-import json, sys, os
-from collections import Counter
-
-with open('$json_file') as f:
-    content = f.read().strip()
-    data = json.loads(content) if content else []
-
-files_with_errors = set()
-error_kinds = Counter()
-
-for item in data:
-    loc = item['location']
-    filename = loc.split(':')[0].replace('$HONO_CLEAN/', '')
-    files_with_errors.add(filename)
-
-    kind = item['kind']
-    # Categorize
-    if 'object literal requires' in kind: cat = 'OBJECT_LITERAL_NO_TYPE'
-    elif 'type alias body' in kind: cat = 'TYPE_ALIAS_UNSUPPORTED'
-    elif 'Regex' in kind and 'literal' in kind.lower() or 'Regex(Regex' in kind: cat = 'REGEX_LITERAL'
-    elif 'arrow' in kind and 'default' in kind: cat = 'ARROW_DEFAULT_PARAM'
-    elif 'arrow parameter pattern' in kind: cat = 'ARROW_PARAM_PATTERN'
-    elif 'member property' in kind: cat = 'MEMBER_PROPERTY'
-    elif 'indexed access' in kind: cat = 'INDEXED_ACCESS'
-    elif 'intersection' in kind: cat = 'INTERSECTION_TYPE'
-    elif 'type in union' in kind: cat = 'UNION_TYPE'
-    elif 'Null' in kind: cat = 'NULL_LITERAL'
-    elif 'no type annotation' in kind: cat = 'NO_TYPE_ANNOTATION'
-    elif 'default parameter value' in kind or 'default parameter requires' in kind: cat = 'DEFAULT_PARAM_VALUE'
-    elif 'binary operator' in kind: cat = 'BINARY_OPERATOR'
-    elif 'ForIn' in kind: cat = 'FOR_IN_STMT'
-    elif 'multiple declarators' in kind: cat = 'FOR_MULTI_DECL'
-    elif 'type literal member' in kind: cat = 'TYPE_LITERAL_MEMBER'
-    elif 'call target' in kind: cat = 'CALL_TARGET'
-    elif 'TsBigInt' in kind or 'BigInt' in kind: cat = 'BIGINT'
-    elif 'TsModuleDecl' in kind: cat = 'TS_MODULE_DECL'
-    elif 'ExportAll' in kind: cat = 'EXPORT_ALL'
-    elif 'for...of binding' in kind: cat = 'FOR_OF_BINDING'
-    elif 'object destructuring' in kind: cat = 'OBJ_DESTRUCT_NO_TYPE'
-    elif 'call signature' in kind: cat = 'CALL_SIGNATURE_PARAM'
-    elif 'function type parameter' in kind: cat = 'FN_TYPE_PARAM'
-    elif 'object literal key' in kind: cat = 'OBJECT_LITERAL_KEY'
-    elif 'interface member' in kind: cat = 'INTERFACE_MEMBER'
-    elif 'TaggedTpl' in kind: cat = 'TAGGED_TEMPLATE'
-    elif 'compound assignment' in kind: cat = 'COMPOUND_ASSIGN'
-    elif 'TsUndefinedKeyword' in kind: cat = 'UNDEFINED_KEYWORD'
-    elif 'TsTypePredicate' in kind: cat = 'TYPE_PREDICATE'
-    elif 'Empty' in kind: cat = 'EMPTY_STMT'
-    else: cat = 'OTHER'
-    error_kinds[cat] += 1
-
-total = $total
-clean = total - len(files_with_errors)
-
-print(f'=== DIRECTORY MODE (--report-unsupported) ===')
-print(f'Total files:       {total}')
-print(f'Clean (0 errors):  {clean} ({clean*100//total}%)')
-print(f'With errors:       {len(files_with_errors)} ({len(files_with_errors)*100//total}%)')
-print(f'Error instances:   {len(data)}')
-print()
-print('Error categories (instance count):')
-for cat, count in error_kinds.most_common():
-    print(f'  {count:4d}  {cat}')
-" 2>&1
+    # Analyze and append to history
+    python3 "$SCRIPT_DIR/analyze-bench.py" "$json_file" "$total" "$HONO_CLEAN"
 }
 
 run_single_file_mode() {

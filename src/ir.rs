@@ -477,6 +477,11 @@ pub enum Expr {
         /// Elements of the vec
         elements: Vec<Expr>,
     },
+    /// A tuple literal: `(a, b, c)`
+    Tuple {
+        /// Elements of the tuple
+        elements: Vec<Expr>,
+    },
     /// An `if` expression: `if cond { then } else { else }`
     If {
         /// Condition expression

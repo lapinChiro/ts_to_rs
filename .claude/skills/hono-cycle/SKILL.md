@@ -45,11 +45,18 @@ user-invocable: true
 ```
 
 3. スクリプトの出力からエラーカテゴリ別のインスタンス数を確認する
-4. 前回の結果（`report/hono-conversion-rate-analysis.md`）と比較する
+4. 実行結果は自動的に `bench-history.jsonl` に追記され、前回エントリとの差分が表示される
+5. 差分は `timestamp` フィールドで最新を特定して比較する（行順序には依存しない）
+
+**ファイル構成**:
+- `scripts/hono-bench.sh` — ベンチマーク実行スクリプト（エントリポイント）
+- `scripts/analyze-bench.py` — エラー JSON の解析（hono-bench.sh が自動呼出し）
+- `bench-history.jsonl` — 結果履歴（毎回追記）。スキーマ: `{timestamp, git_sha, total_files, clean_files, clean_pct, error_instances, categories}`
+- `/tmp/hono-bench-errors.json` — 生エラーデータ（一時ファイル、実行ごとに上書き）
 
 ### ステップ 2: エラー分析と TODO 更新
 
-1. 前回のレポート (`report/hono-conversion-rate-analysis.md`) と比較し、変化を確認する
+1. `bench-history.jsonl` の直前エントリと比較し、変化を確認する（`clean_pct` と `error_instances` の増減、カテゴリ別の変動）
 2. **新しく表面化したエラー**を特定する（前回なかったカテゴリ、または件数が増えたカテゴリ）
 3. 新しいエラーについて:
    - ソースコードを確認し、具体的な TS パターンを特定する

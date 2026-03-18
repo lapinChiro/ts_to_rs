@@ -21,10 +21,31 @@ cargo test                 # 全テスト実行
 cargo clippy --all-targets --all-features -- -D warnings  # lint
 cargo fmt --all --check    # フォーマットチェック
 cargo llvm-cov --ignore-filename-regex 'main\.rs' --fail-under-lines 89  # カバレッジ計測（閾値89%、main.rs除外）
+cargo llvm-cov --html                  # HTMLレポート生成（target/llvm-cov/html/）
 ./scripts/hono-bench.sh              # Hono 変換率ベンチマーク（ディレクトリモード）
 ./scripts/hono-bench.sh --both       # ディレクトリ + 単一ファイル両方
-cargo llvm-cov --html                  # HTMLレポート生成（target/llvm-cov/html/）
 ```
+
+### Hono ベンチマーク
+
+Hono フレームワークの変換成功率を計測する。変換機能の変更後に実行して効果を定量評価する。
+
+- **実行**: `./scripts/hono-bench.sh`（内部で `cargo build --release` を確認し、Hono リポジトリを自動クローン）
+- **解析**: `scripts/analyze-bench.py` がベンチ実行の最後に自動呼出しされ、エラー JSON をカテゴリ別に集計
+- **履歴**: 実行ごとに `bench-history.jsonl` に 1 行追記される（JSONL 形式）。過去の結果と比較可能
+- **エラー JSON**: `/tmp/hono-bench-errors.json` に生データが出力される
+
+```bash
+# 履歴の推移を確認（timestamp 順でソート）
+cat bench-history.jsonl | python3 -c "
+import sys, json
+entries = sorted([json.loads(l) for l in sys.stdin if l.strip()], key=lambda e: e['timestamp'])
+for r in entries:
+    print(f\"{r['timestamp'][:10]}  {r['git_sha']}  clean={r['clean_files']}/{r['total_files']} ({r['clean_pct']}%)  errors={r['error_instances']}\")
+"
+```
+
+**注意**: 「クリーン」は変換エラーなし（`--report-unsupported` でエラー 0）を意味し、生成 Rust のコンパイル可能性とは別指標。
 
 ## Architecture
 

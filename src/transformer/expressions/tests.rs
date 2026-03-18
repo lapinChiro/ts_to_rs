@@ -4585,6 +4585,74 @@ fn test_convert_expr_null_literal_generates_none() {
     assert_eq!(result, Expr::Ident("None".to_string()));
 }
 
+#[test]
+fn test_convert_expr_null_with_option_expected_returns_none_not_some_none() {
+    // null with expected=Option<f64> should be None, NOT Some(None)
+    let expr = parse_expr("null");
+    let expected = RustType::Option(Box::new(RustType::F64));
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        Some(&expected),
+        &TypeEnv::new(),
+    )
+    .unwrap();
+    assert_eq!(
+        result,
+        Expr::Ident("None".to_string()),
+        "null with Option expected should be None, got: {:?}",
+        result
+    );
+}
+
+// ---- I-143: Tuple literal conversion ----
+
+#[test]
+fn test_convert_expr_array_with_tuple_expected_generates_tuple() {
+    // ["a", 1] with expected=Tuple([String, F64]) → Expr::Tuple
+    let expr = parse_expr(r#"["a", 1]"#);
+    let expected = RustType::Tuple(vec![RustType::String, RustType::F64]);
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        Some(&expected),
+        &TypeEnv::new(),
+    )
+    .unwrap();
+    match &result {
+        Expr::Tuple { elements } => {
+            assert_eq!(elements.len(), 2);
+        }
+        other => panic!("expected Tuple, got: {other:?}"),
+    }
+}
+
+#[test]
+fn test_convert_expr_nested_array_with_vec_tuple_expected() {
+    // [["a", 1], ["b", 2]] with expected=Vec<Tuple([String, F64])>
+    // → Expr::Vec { elements: [Expr::Tuple, Expr::Tuple] }
+    let expr = parse_expr(r#"[["a", 1], ["b", 2]]"#);
+    let expected = RustType::Vec(Box::new(RustType::Tuple(vec![
+        RustType::String,
+        RustType::F64,
+    ])));
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        Some(&expected),
+        &TypeEnv::new(),
+    )
+    .unwrap();
+    match &result {
+        Expr::Vec { elements } => {
+            assert_eq!(elements.len(), 2);
+            assert!(matches!(&elements[0], Expr::Tuple { .. }));
+            assert!(matches!(&elements[1], Expr::Tuple { .. }));
+        }
+        other => panic!("expected Vec of Tuples, got: {other:?}"),
+    }
+}
+
 // ---- I-115: Bitwise operators ----
 
 #[test]

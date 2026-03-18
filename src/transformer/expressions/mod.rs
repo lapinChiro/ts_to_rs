@@ -30,8 +30,10 @@ pub fn convert_expr(
 ) -> Result<Expr> {
     // Option<T> expected with literal/identifier values: wrap in Some()
     if let Some(RustType::Option(inner)) = expected {
-        // undefined → None (no wrapping)
-        if matches!(expr, ast::Expr::Ident(ident) if ident.sym.as_ref() == "undefined") {
+        // null / undefined → None (no wrapping)
+        if matches!(expr, ast::Expr::Ident(ident) if ident.sym.as_ref() == "undefined")
+            || matches!(expr, ast::Expr::Lit(ast::Lit::Null(..)))
+        {
             return Ok(Expr::Ident("None".to_string()));
         }
         // Only wrap literals and simple identifiers in Some()
@@ -2378,6 +2380,21 @@ fn convert_array_lit(
         .iter()
         .filter_map(|e| e.as_ref())
         .any(|e| e.spread.is_some());
+
+    // When expected is a Tuple type, convert to Expr::Tuple
+    if let Some(RustType::Tuple(tuple_types)) = expected {
+        let elements = array_lit
+            .elems
+            .iter()
+            .filter_map(|elem| elem.as_ref())
+            .enumerate()
+            .map(|(i, elem)| {
+                let elem_expected = tuple_types.get(i);
+                convert_expr(&elem.expr, reg, elem_expected, type_env)
+            })
+            .collect::<Result<Vec<_>>>()?;
+        return Ok(Expr::Tuple { elements });
+    }
 
     let element_type = match expected {
         Some(RustType::Vec(inner)) => Some(inner.as_ref()),
