@@ -114,7 +114,7 @@ fn convert_lit(lit: &ast::Lit, expected: Option<&RustType>, reg: &TypeRegistry) 
         ast::Lit::Regex(regex) => {
             let pattern = regex.exp.to_string();
             let flags = regex.flags.to_string();
-            // Embed i/m flags as inline flags in the pattern
+            // Embed supported flags as inline flags in the pattern
             let mut prefix = String::new();
             if flags.contains('i') {
                 prefix.push_str("(?i)");
@@ -122,6 +122,13 @@ fn convert_lit(lit: &ast::Lit, expected: Option<&RustType>, reg: &TypeRegistry) 
             if flags.contains('m') {
                 prefix.push_str("(?m)");
             }
+            if flags.contains('s') {
+                prefix.push_str("(?s)");
+            }
+            // Note: 'g' flag affects method selection (find vs find_iter, replace vs replace_all)
+            // but is not embedded in the pattern itself. Currently not tracked in IR.
+            // 'u' flag: Rust regex is Unicode-aware by default.
+            // 'y' flag: sticky — no direct Rust equivalent.
             let full_pattern = format!("{prefix}{pattern}");
             Ok(Expr::MethodCall {
                 object: Box::new(Expr::FnCall {
@@ -2986,12 +2993,19 @@ fn resolve_typeof_match(ty: &RustType, typeof_str: &str) -> TypeofMatch {
 ///
 /// - struct with known fields → static `true`/`false`
 /// - HashMap → `obj.contains_key("key")`
-/// - unknown type → `true` (fallback)
+/// - unknown type → `todo!()` (no silent `true` fallback)
 fn convert_in_operator(bin: &ast::BinExpr, reg: &TypeRegistry, type_env: &TypeEnv) -> Expr {
     // Extract the key string from LHS (must be a string literal)
     let key = match bin.left.as_ref() {
         ast::Expr::Lit(ast::Lit::Str(s)) => s.value.to_string_lossy().into_owned(),
-        _ => return Expr::BoolLit(true), // non-string key: fallback
+        _ => {
+            return Expr::FnCall {
+                name: "todo!".to_string(),
+                args: vec![Expr::StringLit(
+                    "in operator with non-string key".to_string(),
+                )],
+            };
+        }
     };
 
     // Resolve the RHS object type
@@ -3002,7 +3016,14 @@ fn convert_in_operator(bin: &ast::BinExpr, reg: &TypeRegistry, type_env: &TypeEn
             // HashMap/BTreeMap → obj.contains_key("key")
             let obj_ir = match bin.right.as_ref() {
                 ast::Expr::Ident(ident) => Expr::Ident(ident.sym.as_ref().to_owned()),
-                _ => return Expr::BoolLit(true), // complex expr: fallback
+                _ => {
+                    return Expr::FnCall {
+                        name: "todo!".to_string(),
+                        args: vec![Expr::StringLit(
+                            "in operator with complex RHS expression".to_string(),
+                        )],
+                    };
+                }
             };
             Expr::MethodCall {
                 object: Box::new(obj_ir),
@@ -3032,19 +3053,42 @@ fn convert_in_operator(bin: &ast::BinExpr, reg: &TypeRegistry, type_env: &TypeEn
                         )
                     }
                 }
-                _ => Expr::BoolLit(true), // registered but unknown shape: fallback
+                _ => Expr::FnCall {
+                    name: "todo!".to_string(),
+                    args: vec![Expr::StringLit(format!(
+                        "in operator — type '{name}' has unknown shape"
+                    ))],
+                },
             }
         }
-        _ => Expr::BoolLit(true), // unknown type: fallback
+        _ => Expr::FnCall {
+            name: "todo!".to_string(),
+            args: vec![Expr::StringLit(format!(
+                "in operator — cannot resolve type of RHS for key '{key}'"
+            ))],
+        },
     }
 }
 
 /// Converts `x instanceof ClassName` using TypeEnv.
+///
+/// - Known matching type → `true`
+/// - Known non-matching type → `false`
+/// - `Option<T>` where T matches → `x.is_some()`
+/// - Unknown type → `todo!()` placeholder (compile error, not silent `true`)
 fn convert_instanceof(bin: &ast::BinExpr, type_env: &TypeEnv) -> Expr {
     // Get the class name from the RHS
     let class_name = match bin.right.as_ref() {
         ast::Expr::Ident(ident) => ident.sym.to_string(),
-        _ => return Expr::BoolLit(true), // placeholder
+        _ => {
+            // Non-identifier RHS (e.g., `x instanceof expr`) — cannot resolve statically
+            return Expr::FnCall {
+                name: "todo!".to_string(),
+                args: vec![Expr::StringLit(
+                    "instanceof with non-identifier RHS".to_string(),
+                )],
+            };
+        }
     };
 
     // Get the LHS variable name and type
@@ -3059,7 +3103,12 @@ fn convert_instanceof(bin: &ast::BinExpr, type_env: &TypeEnv) -> Expr {
             RustType::Named { name, .. } if name == &class_name => {
                 let lhs_ir = match bin.left.as_ref() {
                     ast::Expr::Ident(ident) => Expr::Ident(ident.sym.to_string()),
-                    _ => return Expr::BoolLit(true),
+                    _ => {
+                        return Expr::FnCall {
+                            name: "todo!".to_string(),
+                            args: vec![Expr::StringLit("instanceof with complex LHS".to_string())],
+                        };
+                    }
                 };
                 Expr::MethodCall {
                     object: Box::new(lhs_ir),
@@ -3070,7 +3119,13 @@ fn convert_instanceof(bin: &ast::BinExpr, type_env: &TypeEnv) -> Expr {
             _ => Expr::BoolLit(false),
         },
         Some(_) => Expr::BoolLit(false),
-        None => Expr::BoolLit(true), // placeholder for unknown type
+        // Unknown type: generate todo!() instead of silent true
+        None => Expr::FnCall {
+            name: "todo!".to_string(),
+            args: vec![Expr::StringLit(format!(
+                "instanceof {class_name} — type unknown"
+            ))],
+        },
     }
 }
 

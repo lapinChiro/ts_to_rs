@@ -3708,11 +3708,15 @@ fn test_instanceof_known_type_mismatch_resolves_false() {
 }
 
 #[test]
-fn test_instanceof_unknown_type_resolves_placeholder() {
+fn test_instanceof_unknown_type_generates_todo() {
+    // Unknown type should generate todo!(), not static true
     let swc_expr = parse_expr("x instanceof Foo;");
     let env = TypeEnv::new();
     let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &env).unwrap();
-    assert_eq!(result, Expr::BoolLit(true));
+    match &result {
+        Expr::FnCall { name, .. } => assert_eq!(name, "todo!"),
+        other => panic!("expected todo!() for unknown instanceof, got: {other:?}"),
+    }
 }
 
 // --- I-68: self.field string concat clone ---
@@ -4326,12 +4330,15 @@ fn test_in_operator_struct_field_missing_generates_false() {
 }
 
 #[test]
-fn test_in_operator_unknown_type_generates_true_fallback() {
-    // "x" in unknown → true (fallback)
+fn test_in_operator_unknown_type_generates_todo() {
+    // "x" in unknown → todo!() (not silent true)
     let expr = parse_expr(r#""x" in unknown"#);
     let env = TypeEnv::new();
     let result = convert_expr(&expr, &TypeRegistry::new(), None, &env).unwrap();
-    assert_eq!(result, Expr::BoolLit(true));
+    match &result {
+        Expr::FnCall { name, .. } => assert_eq!(name, "todo!"),
+        other => panic!("expected todo!() for unknown in operator, got: {other:?}"),
+    }
 }
 
 // ---- I-109: Arrow function destructuring parameters ----
@@ -5128,6 +5135,56 @@ fn test_convert_call_expr_chained_call_does_not_error() {
         "chained call should not error: {:?}",
         result.err()
     );
+}
+
+// ---- I-164: instanceof runtime resolution ----
+
+#[test]
+fn test_convert_instanceof_unknown_type_does_not_return_true() {
+    // x instanceof Foo where x is unknown → should NOT return BoolLit(true)
+    let expr = parse_expr("x instanceof Foo");
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    assert!(
+        !matches!(&result, Expr::BoolLit(true)),
+        "instanceof with unknown type should not return static true, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_convert_instanceof_known_matching_type_returns_true() {
+    // x instanceof Foo where x: Foo → true (correct static resolution)
+    let expr = parse_expr("x instanceof Foo");
+    let mut env = TypeEnv::new();
+    env.insert(
+        "x".to_string(),
+        RustType::Named {
+            name: "Foo".to_string(),
+            type_args: vec![],
+        },
+    );
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &env).unwrap();
+    assert_eq!(result, Expr::BoolLit(true));
+}
+
+#[test]
+fn test_convert_instanceof_option_type_returns_is_some() {
+    // x instanceof Foo where x: Option<Foo> → x.is_some()
+    let expr = parse_expr("x instanceof Foo");
+    let mut env = TypeEnv::new();
+    env.insert(
+        "x".to_string(),
+        RustType::Option(Box::new(RustType::Named {
+            name: "Foo".to_string(),
+            type_args: vec![],
+        })),
+    );
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &env).unwrap();
+    match &result {
+        Expr::MethodCall { method, .. } => {
+            assert_eq!(method, "is_some");
+        }
+        other => panic!("expected MethodCall(is_some), got: {other:?}"),
+    }
 }
 
 // ---- I-163: typeof runtime resolution ----

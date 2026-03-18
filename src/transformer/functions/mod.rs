@@ -5,7 +5,7 @@
 use anyhow::{anyhow, Result};
 use swc_ecma_ast as ast;
 
-use crate::ir::{Expr, Item, Param, RustType, Stmt, Visibility};
+use crate::ir::{Expr, Item, MatchArm, Param, RustType, Stmt, Visibility};
 use crate::registry::TypeRegistry;
 use crate::transformer::statements::convert_stmt_list;
 use crate::transformer::types::{convert_property_signature, convert_ts_type, extract_type_params};
@@ -871,6 +871,66 @@ fn wrap_stmt_return(stmt: Stmt) -> Stmt {
             condition,
             then_body: wrap_returns_in_ok(then_body),
             else_body: else_body.map(wrap_returns_in_ok),
+        },
+        Stmt::While {
+            label,
+            condition,
+            body,
+        } => Stmt::While {
+            label,
+            condition,
+            body: wrap_returns_in_ok(body),
+        },
+        Stmt::WhileLet {
+            label,
+            pattern,
+            expr,
+            body,
+        } => Stmt::WhileLet {
+            label,
+            pattern,
+            expr,
+            body: wrap_returns_in_ok(body),
+        },
+        Stmt::ForIn {
+            label,
+            var,
+            iterable,
+            body,
+        } => Stmt::ForIn {
+            label,
+            var,
+            iterable,
+            body: wrap_returns_in_ok(body),
+        },
+        Stmt::Loop { label, body } => Stmt::Loop {
+            label,
+            body: wrap_returns_in_ok(body),
+        },
+        Stmt::Match { expr, arms } => Stmt::Match {
+            expr,
+            arms: arms
+                .into_iter()
+                .map(|arm| MatchArm {
+                    body: wrap_returns_in_ok(arm.body),
+                    ..arm
+                })
+                .collect(),
+        },
+        Stmt::IfLet {
+            pattern,
+            expr,
+            then_body,
+            else_body,
+        } => Stmt::IfLet {
+            pattern,
+            expr,
+            then_body: wrap_returns_in_ok(then_body),
+            else_body: else_body.map(wrap_returns_in_ok),
+        },
+        Stmt::LabeledBlock { label, body } => Stmt::LabeledBlock {
+            label,
+            body: wrap_returns_in_ok(body),
         },
         other => other,
     }
