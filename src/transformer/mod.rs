@@ -351,6 +351,23 @@ fn transform_module_item(
             let items: Vec<Item> = transform_export_named(export).into_iter().collect();
             Ok((items, vec![]))
         }
+        ModuleItem::ModuleDecl(ModuleDecl::ExportAll(export_all)) => {
+            let src = export_all.src.value.to_string_lossy().into_owned();
+            if src.starts_with("./") || src.starts_with("../") {
+                let path = convert_relative_path_to_crate_path(&src);
+                Ok((
+                    vec![Item::Use {
+                        vis: Visibility::Public,
+                        path,
+                        names: vec!["*".to_string()],
+                    }],
+                    vec![],
+                ))
+            } else {
+                // External package re-exports are skipped
+                Ok((vec![], vec![]))
+            }
+        }
         _ => Err(UnsupportedSyntaxError {
             kind: format_module_item_kind(module_item),
             byte_pos: module_item.span().lo.0,

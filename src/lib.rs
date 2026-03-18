@@ -238,9 +238,9 @@ export default 42;
 
     #[test]
     fn test_transpile_collecting_transformer_internal_error_collected() {
-        // Unsupported default value (new Map()) triggers an error inside convert_param,
+        // Unsupported syntax (for...in) triggers an error inside convert_stmt,
         // which is a transformer-internal error (not UnsupportedSyntaxError).
-        let source = "function foo(x: Map = new Map()) { return x; }";
+        let source = "function foo(obj: Record<string, number>) { for (const k in obj) { console.log(k); } }";
         let result = transpile_collecting(source);
         assert!(result.is_ok(), "should not be a fatal error: {result:?}");
         let (_output, unsupported) = result.unwrap();
@@ -252,10 +252,10 @@ export default 42;
 
     #[test]
     fn test_transpile_collecting_mixed_supported_and_internal_error() {
-        // interface is convertible, function with unsupported default value is not
+        // interface is convertible, function with unsupported syntax is not
         let source = r#"
 interface Foo { name: string; }
-function bar(x: Map = new Map()) { return x; }
+function bar(obj: Record<string, number>) { for (const k in obj) { console.log(k); } }
 "#;
         let result = transpile_collecting(source);
         assert!(result.is_ok(), "should not be a fatal error: {result:?}");

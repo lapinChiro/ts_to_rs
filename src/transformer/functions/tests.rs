@@ -621,11 +621,13 @@ fn test_convert_fn_decl_default_param_mixed_with_normal() {
 }
 
 #[test]
-fn test_convert_fn_decl_default_unsupported_value_errors() {
-    // new Map() is an unsupported default value
+fn test_convert_fn_decl_default_new_expr_uses_unwrap_or_default() {
+    // new Map() → unwrap_or_default()
     let fn_decl = parse_fn_decl("function foo(m: Map = new Map()): void {}");
-    let result = convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new(), false);
-    assert!(result.is_err());
+    let (items, _) =
+        convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new(), false).unwrap();
+    // Should produce a function with Option<Map> parameter + unwrap_or_default
+    assert!(!items.is_empty());
 }
 
 #[test]

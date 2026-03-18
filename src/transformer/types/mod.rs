@@ -65,6 +65,7 @@ pub fn convert_ts_type(
                 name: "serde_json::Value".to_string(),
                 type_args: vec![],
             }),
+            TsKeywordTypeKind::TsUndefinedKeyword => Ok(RustType::Unit),
             other => Err(anyhow!("unsupported keyword type: {:?}", other)),
         },
         TsType::TsArrayType(arr) => {
@@ -116,6 +117,10 @@ pub fn convert_ts_type(
                 name: "HashMap".to_string(),
                 type_args: vec![RustType::String, value_type],
             })
+        }
+        TsType::TsTypePredicate(_) => {
+            // `x is Type` → bool (type guard predicates are booleans at runtime)
+            Ok(RustType::Bool)
         }
         _ => Err(anyhow!("unsupported type: {:?}", ts_type)),
     }

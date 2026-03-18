@@ -355,6 +355,29 @@ pub(crate) fn convert_default_value(expr: &ast::Expr) -> Result<(Option<Expr>, b
             // `= {}` → unwrap_or_default()
             Ok((None, true))
         }
+        ast::Expr::Ident(ident) => {
+            // `= someVariable` → unwrap_or(someVariable)
+            Ok((Some(Expr::Ident(ident.sym.to_string())), false))
+        }
+        ast::Expr::Array(arr) if arr.elems.is_empty() => {
+            // `= []` → unwrap_or_default()
+            Ok((None, true))
+        }
+        ast::Expr::New(_) => {
+            // `= new Map()` → unwrap_or_default()
+            Ok((None, true))
+        }
+        ast::Expr::Unary(unary)
+            if unary.op == ast::UnaryOp::Minus
+                && matches!(unary.arg.as_ref(), ast::Expr::Lit(ast::Lit::Num(_))) =>
+        {
+            // `= -1` → unwrap_or(-1.0)
+            if let ast::Expr::Lit(ast::Lit::Num(n)) = unary.arg.as_ref() {
+                Ok((Some(Expr::NumberLit(-n.value)), false))
+            } else {
+                unreachable!()
+            }
+        }
         _ => Err(anyhow!("unsupported default parameter value")),
     }
 }

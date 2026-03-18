@@ -2282,21 +2282,22 @@ fn convert_for_stmt_as_loop(
     // 1. Extract init → Stmt::Let { mutable: true, ... }
     match &for_stmt.init {
         Some(ast::VarDeclOrExpr::VarDecl(var_decl)) => {
-            let decl = single_declarator(var_decl)
-                .map_err(|_| anyhow!("unsupported for loop: multiple declarators"))?;
-            let name = extract_pat_ident_name(&decl.name)
-                .map_err(|_| anyhow!("unsupported for loop: non-ident binding"))?;
-            let init_expr = decl
-                .init
-                .as_ref()
-                .map(|e| convert_expr(e, reg, None, type_env))
-                .transpose()?;
-            result.push(Stmt::Let {
-                mutable: true,
-                name,
-                ty: None,
-                init: init_expr,
-            });
+            // Support multiple declarators: for (let i = 0, len = n; ...)
+            for decl in &var_decl.decls {
+                let name = extract_pat_ident_name(&decl.name)
+                    .map_err(|_| anyhow!("unsupported for loop: non-ident binding"))?;
+                let init_expr = decl
+                    .init
+                    .as_ref()
+                    .map(|e| convert_expr(e, reg, None, type_env))
+                    .transpose()?;
+                result.push(Stmt::Let {
+                    mutable: true,
+                    name,
+                    ty: None,
+                    init: init_expr,
+                });
+            }
         }
         Some(ast::VarDeclOrExpr::Expr(expr)) => {
             let e = convert_expr(expr, reg, None, type_env)?;
