@@ -512,3 +512,13 @@ fn test_e2e_tuple_literals_ts_rust_stdout_match() {
 fn test_e2e_param_type_infer_ts_rust_stdout_match() {
     run_e2e_test("param_type_infer");
 }
+
+#[test]
+fn test_e2e_update_expr_semantics_ts_rust_stdout_match() {
+    run_e2e_test("update_expr_semantics");
+}
+
+#[test]
+fn test_e2e_typeof_check_ts_rust_stdout_match() {
+    run_e2e_test("typeof_check");
+}

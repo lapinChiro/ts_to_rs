@@ -4419,41 +4419,69 @@ fn test_convert_expr_arrow_default_param_generates_option() {
 // ---- I-108: Update expressions in convert_expr ----
 
 #[test]
-fn test_convert_expr_postfix_increment_generates_assign_add() {
-    // i++ → i = i + 1.0
+fn test_convert_expr_postfix_increment_returns_old_value() {
+    // i++ → { let _old = i; i = i + 1.0; _old }
+    use crate::ir::Stmt as IrStmt;
     let expr = parse_expr("i++");
     let env = TypeEnv::new();
     let result = convert_expr(&expr, &TypeRegistry::new(), None, &env).unwrap();
-    assert_eq!(
-        result,
-        Expr::Assign {
-            target: Box::new(Expr::Ident("i".to_string())),
-            value: Box::new(Expr::BinaryOp {
-                left: Box::new(Expr::Ident("i".to_string())),
-                op: BinOp::Add,
-                right: Box::new(Expr::NumberLit(1.0)),
-            }),
+    match &result {
+        Expr::Block(stmts) => {
+            assert_eq!(stmts.len(), 3);
+            assert!(matches!(&stmts[0], IrStmt::Let { name, .. } if name == "_old"));
+            assert!(matches!(&stmts[2], IrStmt::TailExpr(Expr::Ident(n)) if n == "_old"));
         }
-    );
+        other => panic!("expected Block for postfix i++, got: {other:?}"),
+    }
 }
 
 #[test]
-fn test_convert_expr_postfix_decrement_generates_assign_sub() {
-    // i-- → i = i - 1.0
+fn test_convert_expr_prefix_increment_returns_new_value() {
+    // ++i → { i = i + 1.0; i }
+    use crate::ir::Stmt as IrStmt;
+    let expr = parse_expr("++i");
+    let env = TypeEnv::new();
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &env).unwrap();
+    match &result {
+        Expr::Block(stmts) => {
+            assert_eq!(stmts.len(), 2);
+            assert!(matches!(&stmts[0], IrStmt::Expr(Expr::Assign { .. })));
+            assert!(matches!(&stmts[1], IrStmt::TailExpr(Expr::Ident(n)) if n == "i"));
+        }
+        other => panic!("expected Block for prefix ++i, got: {other:?}"),
+    }
+}
+
+#[test]
+fn test_convert_expr_postfix_decrement_returns_old_value() {
+    // i-- → { let _old = i; i = i - 1.0; _old }
+    use crate::ir::Stmt as IrStmt;
     let expr = parse_expr("i--");
     let env = TypeEnv::new();
     let result = convert_expr(&expr, &TypeRegistry::new(), None, &env).unwrap();
-    assert_eq!(
-        result,
-        Expr::Assign {
-            target: Box::new(Expr::Ident("i".to_string())),
-            value: Box::new(Expr::BinaryOp {
-                left: Box::new(Expr::Ident("i".to_string())),
-                op: BinOp::Sub,
-                right: Box::new(Expr::NumberLit(1.0)),
-            }),
+    match &result {
+        Expr::Block(stmts) => {
+            assert_eq!(stmts.len(), 3);
+            assert!(matches!(&stmts[2], IrStmt::TailExpr(Expr::Ident(n)) if n == "_old"));
         }
-    );
+        other => panic!("expected Block for postfix i--, got: {other:?}"),
+    }
+}
+
+#[test]
+fn test_convert_expr_prefix_decrement_returns_new_value() {
+    // --i → { i = i - 1.0; i }
+    use crate::ir::Stmt as IrStmt;
+    let expr = parse_expr("--i");
+    let env = TypeEnv::new();
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &env).unwrap();
+    match &result {
+        Expr::Block(stmts) => {
+            assert_eq!(stmts.len(), 2);
+            assert!(matches!(&stmts[1], IrStmt::TailExpr(Expr::Ident(n)) if n == "i"));
+        }
+        other => panic!("expected Block for prefix --i, got: {other:?}"),
+    }
 }
 
 // ---- I-114: Function expressions ----
@@ -5100,4 +5128,39 @@ fn test_convert_call_expr_chained_call_does_not_error() {
         "chained call should not error: {:?}",
         result.err()
     );
+}
+
+// ---- I-163: typeof runtime resolution ----
+
+#[test]
+fn test_convert_typeof_static_number_returns_string_lit() {
+    // typeof 42 → "number" (static, no change needed)
+    let expr = parse_expr("typeof 42");
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    assert_eq!(result, Expr::StringLit("number".to_string()));
+}
+
+#[test]
+fn test_convert_typeof_option_type_returns_runtime_if() {
+    // typeof x where x: Option<f64> → runtime branch
+    let expr = parse_expr("typeof x");
+    let mut env = TypeEnv::new();
+    env.insert("x".to_string(), RustType::Option(Box::new(RustType::F64)));
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &env).unwrap();
+    // Should be an If expression, NOT a static StringLit("undefined")
+    match &result {
+        Expr::If { .. } => {} // runtime branch — correct
+        Expr::StringLit(s) if s == "undefined" => {
+            panic!("typeof Option should NOT be static 'undefined' — must be runtime branch")
+        }
+        other => panic!("expected If for typeof Option, got: {other:?}"),
+    }
+}
+
+#[test]
+fn test_convert_typeof_unknown_type_returns_object() {
+    // typeof x where x: unknown → "object" (JS default, not "unknown")
+    let expr = parse_expr("typeof x");
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    assert_eq!(result, Expr::StringLit("object".to_string()));
 }

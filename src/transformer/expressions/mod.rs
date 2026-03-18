@@ -818,14 +818,31 @@ fn convert_update_expr(up: &ast::UpdateExpr) -> Result<Expr> {
         ast::UpdateOp::PlusPlus => BinOp::Add,
         ast::UpdateOp::MinusMinus => BinOp::Sub,
     };
-    Ok(Expr::Assign {
+    let assign = Stmt::Expr(Expr::Assign {
         target: Box::new(Expr::Ident(name.clone())),
         value: Box::new(Expr::BinaryOp {
-            left: Box::new(Expr::Ident(name)),
+            left: Box::new(Expr::Ident(name.clone())),
             op,
             right: Box::new(Expr::NumberLit(1.0)),
         }),
-    })
+    });
+
+    if up.prefix {
+        // Prefix: ++i → { i = i + 1.0; i }
+        Ok(Expr::Block(vec![assign, Stmt::TailExpr(Expr::Ident(name))]))
+    } else {
+        // Postfix: i++ → { let _old = i; i = i + 1.0; _old }
+        Ok(Expr::Block(vec![
+            Stmt::Let {
+                mutable: false,
+                name: "_old".to_string(),
+                ty: None,
+                init: Some(Expr::Ident(name)),
+            },
+            assign,
+            Stmt::TailExpr(Expr::Ident("_old".to_string())),
+        ]))
+    }
 }
 
 /// Converts a function expression to `Expr::Closure`.
@@ -2552,12 +2569,26 @@ fn convert_unary_expr(
     reg: &TypeRegistry,
     type_env: &TypeEnv,
 ) -> Result<Expr> {
-    // typeof x → resolve to string literal based on TypeEnv
+    // typeof x → resolve based on TypeEnv
     if unary.op == ast::UnaryOp::TypeOf {
         let operand_type = resolve_expr_type(&unary.arg, type_env, reg);
         return Ok(match operand_type {
+            Some(RustType::Option(inner)) => {
+                // Option<T>: runtime branch — is_some() → typeof inner, else "undefined"
+                let operand = convert_expr(&unary.arg, reg, None, type_env)?;
+                let inner_typeof = typeof_to_string(&inner);
+                Expr::If {
+                    condition: Box::new(Expr::MethodCall {
+                        object: Box::new(operand),
+                        method: "is_some".to_string(),
+                        args: vec![],
+                    }),
+                    then_expr: Box::new(Expr::StringLit(inner_typeof.to_string())),
+                    else_expr: Box::new(Expr::StringLit("undefined".to_string())),
+                }
+            }
             Some(ty) => Expr::StringLit(typeof_to_string(&ty).to_string()),
-            None => Expr::StringLit("unknown".to_string()),
+            None => Expr::StringLit("object".to_string()),
         });
     }
 

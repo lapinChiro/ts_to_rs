@@ -1497,11 +1497,9 @@ fn try_convert_intersection_type(
                             }
                             fields.push(field);
                         }
-                        _ => {
-                            return Err(anyhow!(
-                                "unsupported intersection member (only property signatures are supported)"
-                            ));
-                        }
+                        // TODO: I-137 — メソッドシグネチャは struct フィールドではなく
+                        // impl ブロックのメソッドとして変換すべき。現時点ではスキップ。
+                        _ => continue,
                     }
                 }
             }
@@ -1536,6 +1534,9 @@ fn try_convert_intersection_type(
                     });
                 }
             }
+            // Skip keyword types in intersections (e.g., `string & {}` → use object fields only).
+            // This is safe for TypeScript branding patterns where the keyword is nominal.
+            TsType::TsKeywordType(_) => continue,
             _ => {
                 return Err(anyhow!("unsupported intersection member type"));
             }
@@ -1621,11 +1622,9 @@ fn convert_intersection_in_annotation(
                             }
                             fields.push(field);
                         }
-                        _ => {
-                            return Err(anyhow!(
-                                "unsupported intersection member (only property signatures are supported)"
-                            ));
-                        }
+                        // TODO: I-137 — メソッドシグネチャは struct フィールドではなく
+                        // impl ブロックのメソッドとして変換すべき。現時点ではスキップ。
+                        _ => continue,
                     }
                 }
             }
@@ -1637,6 +1636,8 @@ fn convert_intersection_in_annotation(
                     ty: rust_type,
                 });
             }
+            // Skip keyword types in intersections (branding patterns like `string & {}`)
+            TsType::TsKeywordType(_) => continue,
             _ => {
                 return Err(anyhow!("unsupported intersection member type"));
             }

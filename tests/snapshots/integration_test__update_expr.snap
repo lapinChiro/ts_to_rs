@@ -4,20 +4,32 @@ expression: output
 ---
 fn incrementCounter(initial: f64) -> f64 {
     let mut count: f64 = initial;
+    {
+    let _old = count;
     count = count + 1.0;
+    _old
+};
     count
 }
 
 fn decrementCounter(initial: f64) -> f64 {
     let mut count: f64 = initial;
+    {
+    let _old = count;
     count = count - 1.0;
+    _old
+};
     count
 }
 
 fn consumeWhitespace(s: String, start: f64) -> f64 {
     let mut startIndex: f64 = start;
     while startIndex < s.len() as f64 {
-        startIndex = startIndex + 1.0;
+        {
+    let _old = startIndex;
+    startIndex = startIndex + 1.0;
+    _old
+};
     }
     startIndex
 }
