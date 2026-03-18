@@ -19,7 +19,6 @@ use std::collections::HashMap;
 use crate::ir::{EnumValue, EnumVariant, Item, RustType, Visibility};
 use crate::registry::TypeRegistry;
 use crate::transformer::classes::ClassInfo;
-use crate::transformer::expressions::convert_arrow_expr;
 use crate::transformer::types::convert_ts_type;
 
 /// ローカル変数の型情報を保持する型環境。
@@ -568,19 +567,29 @@ fn convert_var_decl_arrow_fns(
             swc_ecma_ast::Expr::Arrow(arrow) => arrow,
             _ => continue,
         };
-        let name = match extract_pat_ident_name(&decl.name) {
-            Ok(n) => n,
-            Err(_) => continue,
+        let (name, var_return_type) = match &decl.name {
+            swc_ecma_ast::Pat::Ident(ident) => {
+                let n = ident.id.sym.to_string();
+                // Extract variable's type annotation and resolve to a return type
+                let ret = ident.type_ann.as_ref().and_then(|ann| {
+                    let rust_type = convert_ts_type(&ann.type_ann, &mut Vec::new(), reg).ok()?;
+                    extract_fn_return_type(&rust_type, reg)
+                });
+                (n, ret)
+            }
+            _ => continue,
         };
 
         // Convert the arrow to a closure IR, then extract parts for Item::Fn
+        // Pass var_return_type so it propagates into the arrow body
         let mut fallback_warnings = Vec::new();
-        let closure = convert_arrow_expr(
+        let closure = crate::transformer::expressions::convert_arrow_expr_with_return_type(
             arrow,
             reg,
             resilient,
             &mut fallback_warnings,
             &TypeEnv::new(),
+            var_return_type.as_ref(),
         )?;
         match closure {
             crate::ir::Expr::Closure {
@@ -588,13 +597,9 @@ fn convert_var_decl_arrow_fns(
                 return_type,
                 body,
             } => {
-                // If the arrow has no explicit return type annotation, try the variable's
-                let ret = return_type.or_else(|| {
-                    arrow
-                        .return_type
-                        .as_ref()
-                        .and_then(|ann| convert_ts_type(&ann.type_ann, &mut Vec::new(), reg).ok())
-                });
+                // return_type already includes the override from variable annotation
+                // (applied inside convert_arrow_expr_with_return_type)
+                let ret = return_type;
                 let mut fn_body = match body {
                     crate::ir::ClosureBody::Expr(expr) => {
                         vec![crate::ir::Stmt::Return(Some(*expr))]
@@ -642,6 +647,32 @@ fn convert_var_decl_arrow_fns(
         }
     }
     Ok((items, all_warnings))
+}
+
+/// Extracts the return type from a function type.
+///
+/// Handles two cases:
+/// - `RustType::Fn { return_type, .. }` → returns the return_type directly
+/// - `RustType::Named { name, .. }` → looks up TypeRegistry for `TypeDef::Function` and extracts return_type
+fn extract_fn_return_type(ty: &RustType, reg: &TypeRegistry) -> Option<RustType> {
+    match ty {
+        RustType::Fn { return_type, .. } => {
+            let rt = return_type.as_ref();
+            if matches!(rt, RustType::Unit) {
+                None
+            } else {
+                Some(rt.clone())
+            }
+        }
+        RustType::Named { name, .. } => {
+            if let Some(crate::registry::TypeDef::Function { return_type, .. }) = reg.get(name) {
+                return_type.clone()
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
 }
 
 /// Converts a TS enum declaration into an IR [`Item::Enum`].

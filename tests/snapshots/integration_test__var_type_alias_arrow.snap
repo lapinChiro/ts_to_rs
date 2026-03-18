@@ -1,0 +1,19 @@
+---
+source: tests/integration_test.rs
+expression: output
+---
+#[derive(Debug, Clone, PartialEq)]
+struct ConnInfo {
+    remote: RemoteInfo,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct RemoteInfo {
+    address: String,
+}
+
+type GetConnInfo = Box<dyn Fn(String) -> ConnInfo>;
+
+pub fn getConnInfo(host: String) -> ConnInfo {
+    ConnInfo { remote: RemoteInfo { address: host } }
+}

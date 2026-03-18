@@ -4330,3 +4330,158 @@ fn test_convert_expr_fn_expr_no_params_generates_closure() {
         _ => panic!("expected Expr::Closure, got {:?}", result),
     }
 }
+
+// ---- I-111: Regex literal ----
+
+#[test]
+fn test_convert_expr_regex_no_flags_generates_regex_new() {
+    // /pattern/ → Regex::new("pattern").unwrap()
+    let expr = parse_var_init(r#"const r = /pattern/;"#);
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    match result {
+        Expr::MethodCall { object, method, .. } => {
+            assert_eq!(method, "unwrap");
+            match *object {
+                Expr::FnCall { name, args } => {
+                    assert_eq!(name, "Regex::new");
+                    assert_eq!(args.len(), 1);
+                    assert_eq!(args[0], Expr::StringLit("pattern".to_string()));
+                }
+                _ => panic!("expected FnCall, got {:?}", object),
+            }
+        }
+        _ => panic!("expected MethodCall(unwrap), got {:?}", result),
+    }
+}
+
+#[test]
+fn test_convert_expr_regex_global_flag_ignored() {
+    // /pattern/g → Regex::new("pattern").unwrap() (g ignored)
+    let expr = parse_var_init(r#"const r = /pattern/g;"#);
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    match result {
+        Expr::MethodCall { object, .. } => match *object {
+            Expr::FnCall { args, .. } => {
+                assert_eq!(args[0], Expr::StringLit("pattern".to_string()));
+            }
+            _ => panic!("expected FnCall"),
+        },
+        _ => panic!("expected MethodCall"),
+    }
+}
+
+#[test]
+fn test_convert_expr_regex_case_insensitive_flag_inlined() {
+    // /pattern/i → Regex::new("(?i)pattern").unwrap()
+    let expr = parse_var_init(r#"const r = /pattern/i;"#);
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    match result {
+        Expr::MethodCall { object, .. } => match *object {
+            Expr::FnCall { args, .. } => {
+                assert_eq!(args[0], Expr::StringLit("(?i)pattern".to_string()));
+            }
+            _ => panic!("expected FnCall"),
+        },
+        _ => panic!("expected MethodCall"),
+    }
+}
+
+#[test]
+fn test_convert_expr_regex_multiple_flags_inlined() {
+    // /pattern/gim → Regex::new("(?i)(?m)pattern").unwrap()
+    let expr = parse_var_init(r#"const r = /pattern/gim;"#);
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    match result {
+        Expr::MethodCall { object, .. } => match *object {
+            Expr::FnCall { args, .. } => {
+                assert_eq!(args[0], Expr::StringLit("(?i)(?m)pattern".to_string()));
+            }
+            _ => panic!("expected FnCall"),
+        },
+        _ => panic!("expected MethodCall"),
+    }
+}
+
+// ---- I-117: Null literal ----
+
+#[test]
+fn test_convert_expr_null_literal_generates_none() {
+    let expr = parse_expr("null");
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    assert_eq!(result, Expr::Ident("None".to_string()));
+}
+
+// ---- I-115: Bitwise operators ----
+
+#[test]
+fn test_convert_expr_bitwise_xor() {
+    let expr = parse_expr("a ^ b");
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    assert!(matches!(
+        result,
+        Expr::BinaryOp {
+            op: BinOp::BitXor,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn test_convert_expr_bitwise_and() {
+    let expr = parse_expr("a & b");
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    assert!(matches!(
+        result,
+        Expr::BinaryOp {
+            op: BinOp::BitAnd,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn test_convert_expr_bitwise_or() {
+    let expr = parse_expr("a | b");
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    assert!(matches!(
+        result,
+        Expr::BinaryOp {
+            op: BinOp::BitOr,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn test_convert_expr_shift_left() {
+    let expr = parse_expr("a << b");
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    assert!(matches!(result, Expr::BinaryOp { op: BinOp::Shl, .. }));
+}
+
+#[test]
+fn test_convert_expr_shift_right() {
+    let expr = parse_expr("a >> b");
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    assert!(matches!(result, Expr::BinaryOp { op: BinOp::Shr, .. }));
+}
+
+// ---- Rest parameter in arrow ----
+
+#[test]
+fn test_convert_expr_arrow_rest_param_generates_vec() {
+    // (...args: number[]) => args → rest param becomes Vec<f64>
+    let swc_expr = parse_var_init("const f = (...args: number[]) => args;");
+    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    match result {
+        Expr::Closure { params, .. } => {
+            assert_eq!(params.len(), 1);
+            assert_eq!(params[0].name, "args");
+            assert_eq!(
+                params[0].ty,
+                Some(crate::ir::RustType::Vec(Box::new(crate::ir::RustType::F64)))
+            );
+        }
+        _ => panic!("expected Expr::Closure, got {:?}", result),
+    }
+}

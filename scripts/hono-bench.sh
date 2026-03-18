@@ -45,7 +45,6 @@ prepare_clean_copy() {
         -not -name '*.test.ts' \
         -not -name '*.spec.ts' \
         -not -path '*/jsx/*' \
-        -not -path '*/types*' \
         | while IFS= read -r f; do
             mkdir -p "$HONO_CLEAN/$(dirname "$f")"
             cp "$f" "$HONO_CLEAN/$f"

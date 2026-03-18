@@ -108,6 +108,28 @@ fn convert_lit(lit: &ast::Lit, expected: Option<&RustType>, reg: &TypeRegistry) 
             }
         }
         ast::Lit::Bool(b) => Ok(Expr::BoolLit(b.value)),
+        ast::Lit::Null(_) => Ok(Expr::Ident("None".to_string())),
+        ast::Lit::Regex(regex) => {
+            let pattern = regex.exp.to_string();
+            let flags = regex.flags.to_string();
+            // Embed i/m flags as inline flags in the pattern
+            let mut prefix = String::new();
+            if flags.contains('i') {
+                prefix.push_str("(?i)");
+            }
+            if flags.contains('m') {
+                prefix.push_str("(?m)");
+            }
+            let full_pattern = format!("{prefix}{pattern}");
+            Ok(Expr::MethodCall {
+                object: Box::new(Expr::FnCall {
+                    name: "Regex::new".to_string(),
+                    args: vec![Expr::StringLit(full_pattern)],
+                }),
+                method: "unwrap".to_string(),
+                args: vec![],
+            })
+        }
         _ => Err(anyhow!("unsupported literal: {:?}", lit)),
     }
 }
@@ -414,6 +436,11 @@ pub(crate) fn convert_binary_op(op: ast::BinaryOp) -> Result<BinOp> {
         ast::BinaryOp::GtEq => Ok(BinOp::GtEq),
         ast::BinaryOp::LogicalAnd => Ok(BinOp::LogicalAnd),
         ast::BinaryOp::LogicalOr => Ok(BinOp::LogicalOr),
+        ast::BinaryOp::BitAnd => Ok(BinOp::BitAnd),
+        ast::BinaryOp::BitOr => Ok(BinOp::BitOr),
+        ast::BinaryOp::BitXor => Ok(BinOp::BitXor),
+        ast::BinaryOp::LShift => Ok(BinOp::Shl),
+        ast::BinaryOp::RShift => Ok(BinOp::Shr),
         _ => Err(anyhow!("unsupported binary operator: {:?}", op)),
     }
 }
@@ -868,6 +895,21 @@ fn convert_fn_expr(fn_expr: &ast::FnExpr, reg: &TypeRegistry, type_env: &TypeEnv
                 }
                 _ => return Err(anyhow!("unsupported function expression default parameter")),
             },
+            ast::Pat::Rest(rest) => {
+                if let ast::Pat::Ident(ident) = rest.arg.as_ref() {
+                    let name = ident.id.sym.to_string();
+                    let type_ann = rest.type_ann.as_ref().or(ident.type_ann.as_ref());
+                    let rust_type = type_ann
+                        .map(|ann| convert_ts_type(&ann.type_ann, &mut Vec::new(), reg))
+                        .transpose()?;
+                    params.push(Param {
+                        name,
+                        ty: rust_type,
+                    });
+                } else {
+                    return Err(anyhow!("unsupported function expression rest parameter"));
+                }
+            }
             _ => return Err(anyhow!("unsupported function expression parameter pattern")),
         }
     }
@@ -951,6 +993,36 @@ fn convert_assign_expr(
             op: BinOp::Div,
             right: Box::new(right),
         },
+        ast::AssignOp::ModAssign => Expr::BinaryOp {
+            left: Box::new(target.clone()),
+            op: BinOp::Mod,
+            right: Box::new(right),
+        },
+        ast::AssignOp::BitAndAssign => Expr::BinaryOp {
+            left: Box::new(target.clone()),
+            op: BinOp::BitAnd,
+            right: Box::new(right),
+        },
+        ast::AssignOp::BitOrAssign => Expr::BinaryOp {
+            left: Box::new(target.clone()),
+            op: BinOp::BitOr,
+            right: Box::new(right),
+        },
+        ast::AssignOp::BitXorAssign => Expr::BinaryOp {
+            left: Box::new(target.clone()),
+            op: BinOp::BitXor,
+            right: Box::new(right),
+        },
+        ast::AssignOp::LShiftAssign => Expr::BinaryOp {
+            left: Box::new(target.clone()),
+            op: BinOp::Shl,
+            right: Box::new(right),
+        },
+        ast::AssignOp::RShiftAssign => Expr::BinaryOp {
+            left: Box::new(target.clone()),
+            op: BinOp::Shr,
+            right: Box::new(right),
+        },
         _ => return Err(anyhow!("unsupported compound assignment operator")),
     };
     Ok(Expr::Assign {
@@ -966,12 +1038,27 @@ fn convert_assign_expr(
 ///
 /// When `resilient` is true, unsupported types fall back to [`RustType::Any`] and
 /// the error message is appended to `fallback_warnings`.
+/// `override_return_type` allows callers to inject a return type from an external source
+/// (e.g., variable type annotation `const f: FnType = () => ...`). When provided and the
+/// arrow has no explicit return type annotation, this type is used for the body conversion.
 pub fn convert_arrow_expr(
     arrow: &ast::ArrowExpr,
     reg: &TypeRegistry,
     resilient: bool,
     fallback_warnings: &mut Vec<String>,
     type_env: &TypeEnv,
+) -> Result<Expr> {
+    convert_arrow_expr_with_return_type(arrow, reg, resilient, fallback_warnings, type_env, None)
+}
+
+/// Inner implementation of arrow expression conversion with optional return type override.
+pub(crate) fn convert_arrow_expr_with_return_type(
+    arrow: &ast::ArrowExpr,
+    reg: &TypeRegistry,
+    resilient: bool,
+    fallback_warnings: &mut Vec<String>,
+    type_env: &TypeEnv,
+    override_return_type: Option<&RustType>,
 ) -> Result<Expr> {
     let mut params = Vec::new();
     let mut expansion_stmts = Vec::new();
@@ -1057,10 +1144,37 @@ pub fn convert_arrow_expr(
                     _ => return Err(anyhow!("unsupported arrow default parameter pattern")),
                 }
             }
+            ast::Pat::Rest(rest) => {
+                // ...args: T[] → args: Vec<T>
+                if let ast::Pat::Ident(ident) = rest.arg.as_ref() {
+                    let name = ident.id.sym.to_string();
+                    // Type annotation may be on RestPat itself or on the inner BindingIdent
+                    let type_ann = rest.type_ann.as_ref().or(ident.type_ann.as_ref());
+                    let rust_type = type_ann
+                        .map(|ann| {
+                            convert_ts_type_with_fallback(
+                                &ann.type_ann,
+                                resilient,
+                                fallback_warnings,
+                                &mut Vec::new(),
+                                reg,
+                            )
+                        })
+                        .transpose()?;
+                    params.push(Param {
+                        name,
+                        ty: rust_type,
+                    });
+                } else {
+                    return Err(anyhow!("unsupported arrow rest parameter pattern"));
+                }
+            }
             _ => return Err(anyhow!("unsupported arrow parameter pattern")),
         }
     }
 
+    // Arrow's explicit return type annotation takes priority;
+    // fall back to override_return_type from variable type annotation
     let return_type = arrow
         .return_type
         .as_ref()
@@ -1073,7 +1187,8 @@ pub fn convert_arrow_expr(
                 reg,
             )
         })
-        .transpose()?;
+        .transpose()?
+        .or_else(|| override_return_type.cloned());
 
     let body = if expansion_stmts.is_empty() {
         match arrow.body.as_ref() {

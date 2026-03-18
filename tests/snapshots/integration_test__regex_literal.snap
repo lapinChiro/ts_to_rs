@@ -1,0 +1,15 @@
+---
+source: tests/integration_test.rs
+expression: output
+---
+fn makePattern() -> f64 {
+    let pattern = Regex::new("hello").unwrap();
+    let count: f64 = 1.0;
+    count
+}
+
+fn makeInsensitivePattern() -> f64 {
+    let pattern = Regex::new("(?i)hello").unwrap();
+    let count: f64 = 2.0;
+    count
+}

@@ -482,3 +482,8 @@ fn test_e2e_multi_import_basic_ts_rust_stdout_match() {
 fn test_e2e_update_expr_ts_rust_stdout_match() {
     run_e2e_test("update_expr");
 }
+
+#[test]
+fn test_e2e_var_type_arrow_ts_rust_stdout_match() {
+    run_e2e_test("var_type_arrow");
+}

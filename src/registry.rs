@@ -130,6 +130,8 @@ fn collect_decl(reg: &mut TypeRegistry, decl: &ast::Decl) {
                 reg.register(alias.id.sym.to_string(), enum_def);
             } else if let Some(enum_def) = try_collect_discriminated_union(alias) {
                 reg.register(alias.id.sym.to_string(), enum_def);
+            } else if let Some(func_def) = try_collect_fn_type_alias(alias) {
+                reg.register(alias.id.sym.to_string(), func_def);
             } else if let Some(fields) = collect_type_alias_fields(alias, reg) {
                 reg.register(
                     alias.id.sym.to_string(),
@@ -501,6 +503,38 @@ fn extract_registry_variant_info(
 }
 
 /// type alias (オブジェクト型) のフィールドを収集する。
+/// 関数型エイリアス (`type F = (x: T) => U`) を `TypeDef::Function` として収集する。
+fn try_collect_fn_type_alias(alias: &ast::TsTypeAliasDecl) -> Option<TypeDef> {
+    match alias.type_ann.as_ref() {
+        ast::TsType::TsFnOrConstructorType(ast::TsFnOrConstructorType::TsFnType(fn_type)) => {
+            let mut params = Vec::new();
+            for param in &fn_type.params {
+                if let ast::TsFnParam::Ident(ident) = param {
+                    let name = ident.id.sym.to_string();
+                    if let Some(ann) = &ident.type_ann {
+                        if let Ok(ty) =
+                            convert_ts_type(&ann.type_ann, &mut Vec::new(), &TypeRegistry::new())
+                        {
+                            params.push((name, ty));
+                        }
+                    }
+                }
+            }
+            let return_type = convert_ts_type(
+                &fn_type.type_ann.type_ann,
+                &mut Vec::new(),
+                &TypeRegistry::new(),
+            )
+            .ok();
+            Some(TypeDef::Function {
+                params,
+                return_type,
+            })
+        }
+        _ => None,
+    }
+}
+
 fn collect_type_alias_fields(
     alias: &ast::TsTypeAliasDecl,
     reg: &TypeRegistry,

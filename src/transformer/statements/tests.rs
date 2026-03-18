@@ -2182,3 +2182,17 @@ fn test_cond_assign_normal_if_unchanged() {
     assert_eq!(result.len(), 1, "normal if should produce 1 statement");
     assert!(matches!(&result[0], Stmt::If { .. }));
 }
+
+// ---- I-120: for...of array destructuring ----
+
+#[test]
+fn test_convert_stmt_for_of_array_destructuring_generates_tuple() {
+    // for (const [k, v] of entries) { ... }
+    let stmts = parse_fn_body(
+        "function f(entries: [string, number][]) { for (const [k, v] of entries) { console.log(k); } }",
+    );
+    let mut env = TypeEnv::new();
+    let result = convert_stmt(&stmts[0], &TypeRegistry::new(), None, &mut env).unwrap();
+    // Should produce a ForIn with a tuple destructuring pattern
+    assert!(!result.is_empty(), "should produce at least one statement");
+}

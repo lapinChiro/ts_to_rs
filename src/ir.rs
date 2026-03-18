@@ -559,6 +559,16 @@ pub enum BinOp {
     LogicalAnd,
     /// `||`
     LogicalOr,
+    /// `&`
+    BitAnd,
+    /// `|`
+    BitOr,
+    /// `^`
+    BitXor,
+    /// `<<`
+    Shl,
+    /// `>>`
+    Shr,
 }
 
 impl BinOp {
@@ -578,6 +588,11 @@ impl BinOp {
             BinOp::GtEq => ">=",
             BinOp::LogicalAnd => "&&",
             BinOp::LogicalOr => "||",
+            BinOp::BitAnd => "&",
+            BinOp::BitOr => "|",
+            BinOp::BitXor => "^",
+            BinOp::Shl => "<<",
+            BinOp::Shr => ">>",
         }
     }
 
@@ -591,6 +606,10 @@ impl BinOp {
             BinOp::LogicalAnd => 4,
             BinOp::Eq | BinOp::NotEq => 5,
             BinOp::Lt | BinOp::LtEq | BinOp::Gt | BinOp::GtEq => 6,
+            BinOp::BitOr => 4,
+            BinOp::BitXor => 5,
+            BinOp::BitAnd => 6,
+            BinOp::Shl | BinOp::Shr => 7,
             BinOp::Add | BinOp::Sub => 8,
             BinOp::Mul | BinOp::Div | BinOp::Mod => 9,
         }

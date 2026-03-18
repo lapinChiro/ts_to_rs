@@ -404,3 +404,24 @@ fn test_fn_expr() {
     let output = transpile(&input).unwrap();
     insta::assert_snapshot!(output);
 }
+
+#[test]
+fn test_var_type_arrow() {
+    let input = fs::read_to_string("tests/fixtures/var-type-arrow.input.ts").unwrap();
+    let output = transpile(&input).unwrap();
+    insta::assert_snapshot!(output);
+}
+
+#[test]
+fn test_var_type_alias_arrow() {
+    let input = fs::read_to_string("tests/fixtures/var-type-alias-arrow.input.ts").unwrap();
+    let output = transpile(&input).unwrap();
+    insta::assert_snapshot!(output);
+}
+
+#[test]
+fn test_regex_literal() {
+    let input = fs::read_to_string("tests/fixtures/regex-literal.input.ts").unwrap();
+    let output = transpile(&input).unwrap();
+    insta::assert_snapshot!(output);
+}

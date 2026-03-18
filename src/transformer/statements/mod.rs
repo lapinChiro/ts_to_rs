@@ -109,6 +109,8 @@ pub fn convert_stmt(
         }
         // Local type declarations are skipped — they don't produce runtime code
         ast::Stmt::Decl(ast::Decl::TsInterface(_) | ast::Decl::TsTypeAlias(_)) => Ok(vec![]),
+        // Empty statements (`;`) are skipped
+        ast::Stmt::Empty(_) => Ok(vec![]),
         _ => Err(anyhow!("unsupported statement: {:?}", stmt)),
     }
 }
@@ -676,8 +678,25 @@ fn convert_for_of_stmt(
         ast::ForHead::VarDecl(var_decl) => {
             let decl = single_declarator(var_decl)
                 .map_err(|_| anyhow!("for...of with multiple declarators is not supported"))?;
-            extract_pat_ident_name(&decl.name)
-                .map_err(|_| anyhow!("unsupported for...of binding pattern"))?
+            match &decl.name {
+                ast::Pat::Ident(ident) => ident.id.sym.to_string(),
+                ast::Pat::Array(arr_pat) => {
+                    // [k, v] → (k, v) tuple destructuring
+                    let names: Vec<String> = arr_pat
+                        .elems
+                        .iter()
+                        .map(|elem| match elem {
+                            Some(ast::Pat::Ident(ident)) => Ok(ident.id.sym.to_string()),
+                            Some(_) => Err(anyhow!("unsupported for...of array binding element")),
+                            None => Ok("_".to_string()),
+                        })
+                        .collect::<Result<_>>()?;
+                    format!("({})", names.join(", "))
+                }
+                _ => {
+                    return Err(anyhow!("unsupported for...of binding pattern"));
+                }
+            }
         }
         _ => return Err(anyhow!("unsupported for...of left-hand side")),
     };

@@ -1,17 +1,28 @@
+#[derive(Debug, Clone, PartialEq)]
+struct Point {
+    x: f64,
+    y: f64,
+}
+
+fn makePoint(x: f64, y: f64) -> Point {
+    Point { x, y }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct Info {
+    name: String,
+    value: f64,
+}
+
+fn createInfo(n: String, v: f64) -> Info {
+    Info { name: n, value: v }
+}
+
 fn main() {
-    let mut count: f64 = 0.0;
-    count = count + 1.0;
-    println!("{} {}", "after ++:", count);
-    count = count - 1.0;
-    println!("{} {}", "after --:", count);
-    let mut x: f64 = 5.0;
-    x = x + 1.0;
-    x = x + 1.0;
-    x = x + 1.0;
-    println!("{} {}", "x after 3 increments:", x);
-    let mut n: f64 = 3.0;
-    while n > 0.0 {
-        println!("{} {}", "n:", n);
-        n = n - 1.0;
-    }
+    let mut p: Point = makePoint(3.0, 4.0);
+    println!("{} {}", "point x:", p.x);
+    println!("{} {}", "point y:", p.y);
+    let mut info: Info = createInfo("test".to_string(), 42.0);
+    println!("{} {}", "info name:", info.name);
+    println!("{} {}", "info value:", info.value);
 }

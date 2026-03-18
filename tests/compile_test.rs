@@ -37,6 +37,7 @@ fn assert_compiles(rs_source: &str, fixture_name: &str) {
     let full_source = format!(
         "#![allow(unused, dead_code, unreachable_code)]\n\
          use serde::{{Serialize, Deserialize}};\n\
+         use regex::Regex;\n\
          {}",
         compilable_source
     );
