@@ -507,3 +507,8 @@ fn test_e2e_null_option_ts_rust_stdout_match() {
 fn test_e2e_tuple_literals_ts_rust_stdout_match() {
     run_e2e_test("tuple_literals");
 }
+
+#[test]
+fn test_e2e_param_type_infer_ts_rust_stdout_match() {
+    run_e2e_test("param_type_infer");
+}

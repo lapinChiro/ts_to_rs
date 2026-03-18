@@ -584,15 +584,21 @@ fn convert_var_decl_arrow_fns(
             swc_ecma_ast::Expr::Arrow(arrow) => arrow,
             _ => continue,
         };
-        let (name, var_return_type) = match &decl.name {
+        let (name, var_return_type, var_param_types) = match &decl.name {
             swc_ecma_ast::Pat::Ident(ident) => {
                 let n = ident.id.sym.to_string();
-                // Extract variable's type annotation and resolve to a return type
-                let ret = ident.type_ann.as_ref().and_then(|ann| {
-                    let rust_type = convert_ts_type(&ann.type_ann, &mut Vec::new(), reg).ok()?;
-                    extract_fn_return_type(&rust_type, reg)
-                });
-                (n, ret)
+                // Extract variable's type annotation and resolve to return type + param types
+                let var_rust_type = ident
+                    .type_ann
+                    .as_ref()
+                    .and_then(|ann| convert_ts_type(&ann.type_ann, &mut Vec::new(), reg).ok());
+                let ret = var_rust_type
+                    .as_ref()
+                    .and_then(|ty| extract_fn_return_type(ty, reg));
+                let param_types = var_rust_type
+                    .as_ref()
+                    .and_then(|ty| extract_fn_param_types(ty, reg));
+                (n, ret, param_types)
             }
             _ => continue,
         };
@@ -607,6 +613,7 @@ fn convert_var_decl_arrow_fns(
             &mut fallback_warnings,
             &TypeEnv::new(),
             var_return_type.as_ref(),
+            var_param_types.as_deref(),
         )?;
         match closure {
             crate::ir::Expr::Closure {
@@ -684,6 +691,25 @@ fn extract_fn_return_type(ty: &RustType, reg: &TypeRegistry) -> Option<RustType>
         RustType::Named { name, .. } => {
             if let Some(crate::registry::TypeDef::Function { return_type, .. }) = reg.get(name) {
                 return_type.clone()
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Extracts parameter types from a function type.
+///
+/// Handles two cases:
+/// - `RustType::Fn { params, .. }` → returns the params directly
+/// - `RustType::Named { name, .. }` → looks up TypeRegistry for `TypeDef::Function` and extracts params
+fn extract_fn_param_types(ty: &RustType, reg: &TypeRegistry) -> Option<Vec<RustType>> {
+    match ty {
+        RustType::Fn { params, .. } => Some(params.clone()),
+        RustType::Named { name, .. } => {
+            if let Some(crate::registry::TypeDef::Function { params, .. }) = reg.get(name) {
+                Some(params.iter().map(|(_, ty)| ty.clone()).collect())
             } else {
                 None
             }

@@ -1050,10 +1050,23 @@ pub fn convert_arrow_expr(
     fallback_warnings: &mut Vec<String>,
     type_env: &TypeEnv,
 ) -> Result<Expr> {
-    convert_arrow_expr_with_return_type(arrow, reg, resilient, fallback_warnings, type_env, None)
+    convert_arrow_expr_with_return_type(
+        arrow,
+        reg,
+        resilient,
+        fallback_warnings,
+        type_env,
+        None,
+        None,
+    )
 }
 
-/// Inner implementation of arrow expression conversion with optional return type override.
+/// Inner implementation of arrow expression conversion with optional type overrides.
+///
+/// `override_return_type` allows callers to inject a return type from an external source
+/// (e.g., variable type annotation `const f: FnType = () => ...`).
+/// `override_param_types` allows callers to inject parameter types from an external source
+/// (e.g., variable type annotation `const f: (x: number) => void = (x) => ...`).
 pub(crate) fn convert_arrow_expr_with_return_type(
     arrow: &ast::ArrowExpr,
     reg: &TypeRegistry,
@@ -1061,10 +1074,11 @@ pub(crate) fn convert_arrow_expr_with_return_type(
     fallback_warnings: &mut Vec<String>,
     type_env: &TypeEnv,
     override_return_type: Option<&RustType>,
+    override_param_types: Option<&[RustType]>,
 ) -> Result<Expr> {
     let mut params = Vec::new();
     let mut expansion_stmts = Vec::new();
-    for param in &arrow.params {
+    for (i, param) in arrow.params.iter().enumerate() {
         match param {
             ast::Pat::Ident(ident) => {
                 let name = ident.id.sym.to_string();
@@ -1081,6 +1095,9 @@ pub(crate) fn convert_arrow_expr_with_return_type(
                         )
                     })
                     .transpose()?;
+                // If no direct annotation, try override from variable type annotation
+                let rust_type = rust_type
+                    .or_else(|| override_param_types.and_then(|types| types.get(i).cloned()));
                 params.push(Param {
                     name,
                     ty: rust_type,
