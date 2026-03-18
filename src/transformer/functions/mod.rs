@@ -405,7 +405,17 @@ pub(crate) fn convert_default_value(expr: &ast::Expr) -> Result<(Option<Expr>, b
                 unreachable!()
             }
         }
-        _ => Err(anyhow!("unsupported default parameter value")),
+        // General expression: use unwrap_or_else(|| expr) for any expression
+        // that can be converted (e.g., console.log, function calls, member access)
+        other => {
+            let expr = crate::transformer::expressions::convert_expr(
+                other,
+                &TypeRegistry::new(),
+                None,
+                &crate::transformer::TypeEnv::new(),
+            )?;
+            Ok((Some(expr), false))
+        }
     }
 }
 

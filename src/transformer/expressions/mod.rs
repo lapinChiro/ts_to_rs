@@ -997,6 +997,19 @@ fn convert_assign_expr(
     };
     let right = convert_expr(&assign.right, reg, None, type_env)?;
 
+    // ??= (nullish coalescing assignment): x ??= y → x.get_or_insert_with(|| y)
+    if assign.op == ast::AssignOp::NullishAssign {
+        return Ok(Expr::MethodCall {
+            object: Box::new(target),
+            method: "get_or_insert_with".to_string(),
+            args: vec![Expr::Closure {
+                params: vec![],
+                return_type: None,
+                body: crate::ir::ClosureBody::Expr(Box::new(right)),
+            }],
+        });
+    }
+
     // For compound assignment (+=, -=, *=, /=), desugar to target = target op value
     let value = match assign.op {
         ast::AssignOp::Assign => right,
@@ -1048,6 +1061,16 @@ fn convert_assign_expr(
         ast::AssignOp::RShiftAssign => Expr::BinaryOp {
             left: Box::new(target.clone()),
             op: BinOp::Shr,
+            right: Box::new(right),
+        },
+        ast::AssignOp::AndAssign => Expr::BinaryOp {
+            left: Box::new(target.clone()),
+            op: BinOp::LogicalAnd,
+            right: Box::new(right),
+        },
+        ast::AssignOp::OrAssign => Expr::BinaryOp {
+            left: Box::new(target.clone()),
+            op: BinOp::LogicalOr,
             right: Box::new(right),
         },
         _ => return Err(anyhow!("unsupported compound assignment operator")),
