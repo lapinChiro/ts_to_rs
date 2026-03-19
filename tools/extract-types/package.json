@@ -1,0 +1,21 @@
+{
+  "name": "extract-types",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Extract fully-resolved type information from TypeScript using the Compiler API",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "typescript": "^5.9.0"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.0",
+    "@types/node": "^24.0.0"
+  }
+}

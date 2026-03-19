@@ -5,3 +5,6 @@ tests/e2e/rust-runner/target/
 tests/e2e/rust-runner/Cargo.lock
 tests/e2e/node_modules/
 tests/e2e/scripts/*_exec.ts
+tools/extract-types/node_modules/
+tools/extract-types/dist/
+.ts_to_rs/
