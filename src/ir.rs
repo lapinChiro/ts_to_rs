@@ -533,6 +533,19 @@ pub enum Expr {
         /// Match arms
         arms: Vec<MatchArm>,
     },
+    /// A compiled regex literal: `Regex::new("pattern").unwrap()`
+    ///
+    /// Preserves the `g` (global) and `y` (sticky) flags from the original TypeScript regex.
+    /// The `g` flag affects method selection (e.g., `replace` vs `replace_all`).
+    /// The `y` flag has no Rust equivalent and generates a warning comment.
+    Regex {
+        /// The regex pattern with inline flags embedded (e.g., `"(?i)pattern"`)
+        pattern: String,
+        /// Whether the `g` (global) flag was present
+        global: bool,
+        /// Whether the `y` (sticky) flag was present
+        sticky: bool,
+    },
 }
 
 /// Binary operators supported in the IR.

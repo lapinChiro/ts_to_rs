@@ -294,6 +294,9 @@ pub(super) fn generate_expr(expr: &Expr) -> String {
             out.push('}');
             out
         }
+        Expr::Regex { pattern, .. } => {
+            format!("Regex::new(\"{pattern}\").unwrap()")
+        }
         Expr::Match { expr, arms } => {
             use crate::ir::MatchPattern;
             let match_target = generate_expr(expr);

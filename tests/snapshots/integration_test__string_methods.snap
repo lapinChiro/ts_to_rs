@@ -15,7 +15,7 @@ fn normalize(s: String) -> String {
 }
 
 fn replaceChar(s: String) -> String {
-    s.replace("a", "b")
+    s.replacen("a", "b", 1)
 }
 
 fn hasContent(s: String) -> bool {

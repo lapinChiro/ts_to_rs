@@ -522,3 +522,8 @@ fn test_e2e_update_expr_semantics_ts_rust_stdout_match() {
 fn test_e2e_typeof_check_ts_rust_stdout_match() {
     run_e2e_test("typeof_check");
 }
+
+#[test]
+fn test_e2e_regex_replace_ts_rust_stdout_match() {
+    run_e2e_test("regex_replace");
+}

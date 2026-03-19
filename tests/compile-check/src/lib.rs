@@ -1,6 +1,5 @@
 #![allow(unused, dead_code, unreachable_code)]
 use serde::{Serialize, Deserialize};
-use regex::Regex;
 fn doSomething() {
     let mut x: f64 = 1.0;
 }

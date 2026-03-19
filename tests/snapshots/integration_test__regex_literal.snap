@@ -2,6 +2,8 @@
 source: tests/integration_test.rs
 expression: output
 ---
+use regex::Regex;
+
 fn makePattern() -> f64 {
     let pattern = Regex::new("hello").unwrap();
     let count: f64 = 1.0;

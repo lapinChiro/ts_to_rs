@@ -21,11 +21,16 @@ pub(super) fn generate_param(p: &Param) -> String {
 
 /// Generates Rust source code from a list of IR items.
 pub fn generate(items: &[Item]) -> String {
-    items
+    let output = items
         .iter()
         .map(generate_item)
         .collect::<Vec<_>>()
-        .join("\n\n")
+        .join("\n\n");
+    if output.contains("Regex::new(") {
+        format!("use regex::Regex;\n\n{output}")
+    } else {
+        output
+    }
 }
 
 /// Generates a single IR item as Rust source code.

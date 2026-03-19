@@ -125,18 +125,12 @@ fn convert_lit(lit: &ast::Lit, expected: Option<&RustType>, reg: &TypeRegistry) 
             if flags.contains('s') {
                 prefix.push_str("(?s)");
             }
-            // Note: 'g' flag affects method selection (find vs find_iter, replace vs replace_all)
-            // but is not embedded in the pattern itself. Currently not tracked in IR.
-            // 'u' flag: Rust regex is Unicode-aware by default.
-            // 'y' flag: sticky — no direct Rust equivalent.
+            // 'u' flag: Rust regex is Unicode-aware by default — no action needed.
             let full_pattern = format!("{prefix}{pattern}");
-            Ok(Expr::MethodCall {
-                object: Box::new(Expr::FnCall {
-                    name: "Regex::new".to_string(),
-                    args: vec![Expr::StringLit(full_pattern)],
-                }),
-                method: "unwrap".to_string(),
-                args: vec![],
+            Ok(Expr::Regex {
+                pattern: full_pattern,
+                global: flags.contains('g'),
+                sticky: flags.contains('y'),
             })
         }
         _ => Err(anyhow!("unsupported literal: {:?}", lit)),
@@ -281,7 +275,7 @@ fn is_string_like(expr: &Expr) -> bool {
                 || method == "to_uppercase"
                 || method == "to_lowercase"
                 || method == "trim"
-                || method == "replace" =>
+                || method == "replacen" =>
         {
             true
         }
@@ -1827,6 +1821,53 @@ fn map_method_call(object: Expr, method: &str, args: Vec<Expr>) -> Expr {
                 object: Box::new(object),
                 method: "join".to_string(),
                 args,
+            }
+        }
+        // Regex-aware replace: str.replace(/p/g, "r") → regex.replace_all(&str, "r")
+        "replace" if matches!(args.first(), Some(Expr::Regex { .. })) => {
+            let mut args_iter = args.into_iter();
+            let regex_expr = args_iter.next().unwrap();
+            let remaining_args: Vec<Expr> = args_iter.collect();
+            if let Expr::Regex {
+                pattern,
+                global,
+                sticky: _,
+            } = regex_expr
+            {
+                let regex_obj = Expr::MethodCall {
+                    object: Box::new(Expr::FnCall {
+                        name: "Regex::new".to_string(),
+                        args: vec![Expr::StringLit(pattern)],
+                    }),
+                    method: "unwrap".to_string(),
+                    args: vec![],
+                };
+                let method_name = if global { "replace_all" } else { "replace" };
+                let mut call_args = vec![Expr::Ref(Box::new(object))];
+                call_args.extend(remaining_args);
+                // Regex::replace/replace_all returns Cow<str>, convert to String
+                Expr::MethodCall {
+                    object: Box::new(Expr::MethodCall {
+                        object: Box::new(regex_obj),
+                        method: method_name.to_string(),
+                        args: call_args,
+                    }),
+                    method: "to_string".to_string(),
+                    args: vec![],
+                }
+            } else {
+                unreachable!()
+            }
+        }
+        // String replace: str.replace("a", "b") → str.replacen("a", "b", 1)
+        // TS replaces only the first occurrence; Rust's replace() replaces all.
+        "replace" => {
+            let mut new_args = args;
+            new_args.push(Expr::IntLit(1));
+            Expr::MethodCall {
+                object: Box::new(object),
+                method: "replacen".to_string(),
+                args: new_args,
             }
         }
         // No mapping needed — pass through unchanged

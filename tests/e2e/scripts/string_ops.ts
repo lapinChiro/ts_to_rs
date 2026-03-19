@@ -11,4 +11,9 @@ function main(): void {
     const name: string = "Rust";
     const greeting: string = "Hello " + name;
     console.log(greeting);
+
+    // String replace: first occurrence only (I-172)
+    const repeated: string = "aaa bbb aaa";
+    const replaced: string = repeated.replace("aaa", "ccc");
+    console.log("replace:", replaced);
 }

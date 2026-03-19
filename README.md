@@ -122,7 +122,16 @@ ts-to-rs input.ts --report-unsupported
 | `x as T` (type assertion) | `x`（assertion 除去） |
 | `x ?? y` (nullish coalescing) | `x.unwrap_or_else(\|\| y)` |
 | `x?.y` (optional chaining) | `x.as_ref().map(\|_v\| _v.y)` |
+| `===` / `!==` (厳密等価) | `==` / `!=` |
 | `export` | `pub` |
+
+### 変換不可能な構文
+
+以下の TypeScript 構文は Rust の型システム上で等価な表現が存在しないため、変換できない。
+
+| TypeScript | 理由 |
+|-----------|------|
+| `==` / `!=` (抽象等価) | JS の型強制（`1 == "1"` → `true`）は Rust の静的型システムで表現不可能。`===` を使用すること |
 
 ## 例
 
