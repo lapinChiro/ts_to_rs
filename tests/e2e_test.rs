@@ -527,3 +527,13 @@ fn test_e2e_typeof_check_ts_rust_stdout_match() {
 fn test_e2e_regex_replace_ts_rust_stdout_match() {
     run_e2e_test("regex_replace");
 }
+
+#[test]
+fn test_e2e_bigint_basics_ts_rust_stdout_match() {
+    run_e2e_test("bigint_basics");
+}
+
+#[test]
+fn test_e2e_iife_ts_rust_stdout_match() {
+    run_e2e_test("iife");
+}

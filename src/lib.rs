@@ -238,9 +238,9 @@ export default 42;
 
     #[test]
     fn test_transpile_collecting_transformer_internal_error_collected() {
-        // Unsupported syntax (for...in) triggers an error inside convert_stmt,
+        // Unsupported syntax (tagged template) triggers an error inside convert_expr,
         // which is a transformer-internal error (not UnsupportedSyntaxError).
-        let source = "function foo(obj: Record<string, number>) { for (const k in obj) { console.log(k); } }";
+        let source = "function foo() { const x = tag`hello`; }";
         let result = transpile_collecting(source);
         assert!(result.is_ok(), "should not be a fatal error: {result:?}");
         let (_output, unsupported) = result.unwrap();
@@ -255,7 +255,7 @@ export default 42;
         // interface is convertible, function with unsupported syntax is not
         let source = r#"
 interface Foo { name: string; }
-function bar(obj: Record<string, number>) { for (const k in obj) { console.log(k); } }
+function bar() { const x = tag`hello`; }
 "#;
         let result = transpile_collecting(source);
         assert!(result.is_ok(), "should not be a fatal error: {result:?}");

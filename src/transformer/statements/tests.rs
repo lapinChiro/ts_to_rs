@@ -200,6 +200,27 @@ fn test_convert_stmt_for_of() {
     );
 }
 
+// --- I-113: for...in ---
+
+#[test]
+fn test_convert_stmt_for_in_generates_keys_iteration() {
+    let stmts = parse_fn_body("function f() { for (const k in obj) { k; } }");
+    let result = convert_single_stmt(&stmts[0], &TypeRegistry::new(), None);
+    assert_eq!(
+        result,
+        Stmt::ForIn {
+            label: None,
+            var: "k".to_string(),
+            iterable: Expr::MethodCall {
+                object: Box::new(Expr::Ident("obj".to_string())),
+                method: "keys".to_string(),
+                args: vec![],
+            },
+            body: vec![Stmt::Expr(Expr::Ident("k".to_string()))],
+        }
+    );
+}
+
 #[test]
 fn test_convert_stmt_while() {
     let stmts = parse_fn_body("function f() { while (x > 0) { x = x - 1; } }");

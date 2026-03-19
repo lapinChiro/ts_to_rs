@@ -126,6 +126,12 @@ pub fn convert_stmt(
         ast::Stmt::Switch(switch_stmt) => {
             convert_switch_stmt(switch_stmt, reg, return_type, type_env)
         }
+        ast::Stmt::ForIn(for_in) => Ok(vec![convert_for_in_stmt(
+            for_in,
+            reg,
+            return_type,
+            type_env,
+        )?]),
         // Local type declarations are skipped — they don't produce runtime code
         ast::Stmt::Decl(ast::Decl::TsInterface(_) | ast::Decl::TsTypeAlias(_)) => Ok(vec![]),
         // Empty statements (`;`) are skipped
@@ -725,6 +731,42 @@ fn convert_for_of_stmt(
     };
     let iterable = convert_expr(&for_of.right, reg, None, type_env)?;
     let body = convert_block_or_stmt(&for_of.body, reg, return_type, type_env)?;
+    Ok(Stmt::ForIn {
+        label: None,
+        var,
+        iterable,
+        body,
+    })
+}
+
+/// Converts a `for...in` statement to `for key in obj.keys()`.
+///
+/// JavaScript `for (const k in obj)` iterates over property names.
+/// Rust equivalent: `for k in obj.keys()` (for HashMap-like types).
+fn convert_for_in_stmt(
+    for_in: &ast::ForInStmt,
+    reg: &TypeRegistry,
+    return_type: Option<&RustType>,
+    type_env: &mut TypeEnv,
+) -> Result<Stmt> {
+    let var = match &for_in.left {
+        ast::ForHead::VarDecl(var_decl) => {
+            let decl = single_declarator(var_decl)
+                .map_err(|_| anyhow!("for...in with multiple declarators is not supported"))?;
+            match &decl.name {
+                ast::Pat::Ident(ident) => ident.id.sym.to_string(),
+                _ => return Err(anyhow!("unsupported for...in binding pattern")),
+            }
+        }
+        _ => return Err(anyhow!("unsupported for...in left-hand side")),
+    };
+    let obj = convert_expr(&for_in.right, reg, None, type_env)?;
+    let iterable = Expr::MethodCall {
+        object: Box::new(obj),
+        method: "keys".to_string(),
+        args: vec![],
+    };
+    let body = convert_block_or_stmt(&for_in.body, reg, return_type, type_env)?;
     Ok(Stmt::ForIn {
         label: None,
         var,

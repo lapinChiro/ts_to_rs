@@ -136,6 +136,11 @@ fn convert_lit(lit: &ast::Lit, expected: Option<&RustType>, reg: &TypeRegistry) 
                 sticky: flags.contains('y'),
             })
         }
+        ast::Lit::BigInt(bigint) => {
+            // BigInt literals (e.g., 123n) → i64 (matching TsBigIntKeyword → i64 type conversion)
+            let value = bigint.value.to_string().parse::<i64>().unwrap_or(0);
+            Ok(Expr::IntLit(value))
+        }
         _ => Err(anyhow!("unsupported literal: {:?}", lit)),
     }
 }
@@ -1251,6 +1256,37 @@ pub(crate) fn convert_arrow_expr_with_return_type(
                     return Err(anyhow!("unsupported arrow rest parameter pattern"));
                 }
             }
+            ast::Pat::Array(arr_pat) => {
+                // Array destructuring: ([k, v]: [string, number]) => ... → (k, v) tuple
+                let names: Vec<String> = arr_pat
+                    .elems
+                    .iter()
+                    .map(|elem| match elem {
+                        Some(ast::Pat::Ident(ident)) => Ok(ident.id.sym.to_string()),
+                        Some(_) => Err(anyhow!("unsupported arrow array destructuring element")),
+                        None => Ok("_".to_string()),
+                    })
+                    .collect::<Result<_>>()?;
+                let tuple_name = format!("({})", names.join(", "));
+                // Try to get type from annotation
+                let rust_type = arr_pat
+                    .type_ann
+                    .as_ref()
+                    .map(|ann| {
+                        convert_ts_type_with_fallback(
+                            &ann.type_ann,
+                            resilient,
+                            fallback_warnings,
+                            &mut Vec::new(),
+                            reg,
+                        )
+                    })
+                    .transpose()?;
+                params.push(Param {
+                    name: tuple_name,
+                    ty: rust_type,
+                });
+            }
             _ => return Err(anyhow!("unsupported arrow parameter pattern")),
         }
     }
@@ -1455,6 +1491,41 @@ fn convert_call_expr(call: &ast::CallExpr, reg: &TypeRegistry, type_env: &TypeEn
                     },
                     Stmt::TailExpr(Expr::FnCall {
                         name: "_f".to_string(),
+                        args,
+                    }),
+                ]))
+            }
+            // IIFE: (() => expr)() or (function() { ... })()
+            // Arrow/Fn expressions as callee → convert to closure and call immediately
+            ast::Expr::Arrow(arrow) => {
+                let mut warnings = Vec::new();
+                let closure = convert_arrow_expr(arrow, reg, false, &mut warnings, type_env)?;
+                let args = convert_call_args(&call.args, reg, type_env)?;
+                Ok(Expr::Block(vec![
+                    Stmt::Let {
+                        name: "__iife".to_string(),
+                        mutable: false,
+                        ty: None,
+                        init: Some(closure),
+                    },
+                    Stmt::TailExpr(Expr::FnCall {
+                        name: "__iife".to_string(),
+                        args,
+                    }),
+                ]))
+            }
+            ast::Expr::Fn(fn_expr) => {
+                let closure = convert_fn_expr(fn_expr, reg, type_env)?;
+                let args = convert_call_args(&call.args, reg, type_env)?;
+                Ok(Expr::Block(vec![
+                    Stmt::Let {
+                        name: "__iife".to_string(),
+                        mutable: false,
+                        ty: None,
+                        init: Some(closure),
+                    },
+                    Stmt::TailExpr(Expr::FnCall {
+                        name: "__iife".to_string(),
                         args,
                     }),
                 ]))

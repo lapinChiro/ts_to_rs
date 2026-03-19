@@ -439,10 +439,13 @@ fn test_convert_fn_decl_destructuring_with_normal_params() {
 }
 
 #[test]
-fn test_convert_fn_decl_destructuring_no_type_annotation_fails() {
+fn test_convert_fn_decl_destructuring_no_type_annotation_falls_back_to_value() {
     let fn_decl = parse_fn_decl("function foo({ x, y }): void {}");
     let result = convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new(), false);
-    assert!(result.is_err());
+    assert!(
+        result.is_ok(),
+        "object destructuring without type annotation should fallback to serde_json::Value"
+    );
 }
 
 #[test]

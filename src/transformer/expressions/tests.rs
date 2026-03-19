@@ -40,6 +40,22 @@ fn test_convert_expr_number_literal() {
     assert_eq!(result, Expr::NumberLit(42.0));
 }
 
+// --- I-132: BigInt literal ---
+
+#[test]
+fn test_convert_expr_bigint_literal_generates_int_lit() {
+    let swc_expr = parse_expr("123n;");
+    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    assert_eq!(result, Expr::IntLit(123));
+}
+
+#[test]
+fn test_convert_expr_bigint_zero_generates_int_lit() {
+    let swc_expr = parse_expr("0n;");
+    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    assert_eq!(result, Expr::IntLit(0));
+}
+
 #[test]
 fn test_convert_expr_string_literal() {
     let swc_expr = parse_expr("\"hello\";");
@@ -4481,6 +4497,52 @@ fn test_convert_expr_arrow_object_destructuring_generates_expansion() {
     }
 }
 
+// --- I-144: array destructuring in arrow params ---
+
+#[test]
+fn test_convert_expr_arrow_array_destructuring_param_generates_tuple() {
+    // ([k, v]: [string, number]) => ... → closure with (k, v) tuple param
+    let swc_expr = parse_var_init("const f = ([k, v]: [string, number]) => k;");
+    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new());
+    assert!(
+        result.is_ok(),
+        "array destructuring with type should not error: {:?}",
+        result.err()
+    );
+    if let Ok(Expr::Closure { params, .. }) = &result {
+        assert_eq!(params.len(), 1, "should have 1 tuple param");
+        assert_eq!(params[0].name, "(k, v)");
+    } else {
+        panic!("expected Closure, got: {:?}", result);
+    }
+}
+
+#[test]
+fn test_convert_expr_arrow_array_destructuring_no_type_generates_param() {
+    // ([a, b]) => ... → should not crash (fallback to untyped)
+    let swc_expr = parse_var_init("const f = ([a, b]) => a;");
+    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new());
+    assert!(
+        result.is_ok(),
+        "array destructuring without type should not error: {:?}",
+        result.err()
+    );
+}
+
+// --- I-135: object destructuring without type annotation ---
+
+#[test]
+fn test_convert_expr_arrow_object_destructuring_no_type_generates_value_param() {
+    // ({ x, y }) => ... → should not crash (fallback to serde_json::Value)
+    let swc_expr = parse_var_init("const f = ({ x, y }) => x;");
+    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new());
+    assert!(
+        result.is_ok(),
+        "object destructuring without type should not error: {:?}",
+        result.err()
+    );
+}
+
 #[test]
 fn test_convert_expr_arrow_default_param_generates_option() {
     // (x: number = 0) => x + 1 → closure with Option<f64> param + unwrap_or
@@ -5486,6 +5548,32 @@ fn test_convert_call_expr_chained_call_does_not_error() {
     assert!(
         result.is_ok(),
         "chained call should not error: {:?}",
+        result.err()
+    );
+}
+
+// --- I-129: IIFE (immediately invoked function expression) ---
+
+#[test]
+fn test_convert_call_expr_arrow_iife_generates_closure_call() {
+    // (() => 42)() — arrow IIFE should produce a closure call
+    let expr = parse_expr("(() => 42)();");
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new());
+    assert!(
+        result.is_ok(),
+        "arrow IIFE should not error: {:?}",
+        result.err()
+    );
+}
+
+#[test]
+fn test_convert_call_expr_arrow_iife_with_args_generates_closure_call() {
+    // ((x: number) => x + 1)(5) — arrow IIFE with args
+    let expr = parse_expr("((x: number): number => x + 1)(5);");
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new());
+    assert!(
+        result.is_ok(),
+        "arrow IIFE with args should not error: {:?}",
         result.err()
     );
 }

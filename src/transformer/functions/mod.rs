@@ -437,11 +437,15 @@ pub(crate) fn convert_object_destructuring_param(
     obj_pat: &ast::ObjectPat,
     reg: &TypeRegistry,
 ) -> Result<(Param, Vec<Stmt>)> {
-    let type_ann = obj_pat
-        .type_ann
-        .as_ref()
-        .ok_or_else(|| anyhow!("object destructuring parameter requires a type annotation"))?;
-    let rust_type = convert_ts_type(&type_ann.type_ann, &mut Vec::new(), reg)?;
+    let rust_type = if let Some(type_ann) = obj_pat.type_ann.as_ref() {
+        convert_ts_type(&type_ann.type_ann, &mut Vec::new(), reg)?
+    } else {
+        // No type annotation — fallback to serde_json::Value
+        RustType::Named {
+            name: "serde_json::Value".to_string(),
+            type_args: vec![],
+        }
+    };
 
     // Generate parameter name from type name (PascalCase → snake_case)
     let param_name = match &rust_type {
