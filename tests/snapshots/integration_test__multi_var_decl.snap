@@ -1,0 +1,16 @@
+---
+source: tests/integration_test.rs
+expression: output
+---
+fn multiVarConst() -> f64 {
+    let a: f64 = 1.0;
+    let b: f64 = 2.0;
+    a + b
+}
+
+fn multiVarLet() -> f64 {
+    let mut x: f64 = 10.0;
+    let mut y: f64 = 20.0;
+    x = x + 1.0;
+    x + y
+}

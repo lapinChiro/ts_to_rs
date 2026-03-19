@@ -427,6 +427,22 @@ fn test_regex_literal() {
 }
 
 #[test]
+fn test_multi_var_decl() {
+    let input = fs::read_to_string("tests/fixtures/multi-var-decl.input.ts").unwrap();
+    let output = transpile(&input).unwrap();
+    // Should produce two separate let statements, not error
+    assert!(
+        output.contains("let a") && output.contains("let b"),
+        "multi-var const should expand to separate lets: {output}"
+    );
+    assert!(
+        output.contains("let mut x") && output.contains("let mut y"),
+        "multi-var let should expand to separate let muts: {output}"
+    );
+    insta::assert_snapshot!(output);
+}
+
+#[test]
 fn test_nullable_return() {
     let input = fs::read_to_string("tests/fixtures/nullable-return.input.ts").unwrap();
     let output = transpile(&input).unwrap();

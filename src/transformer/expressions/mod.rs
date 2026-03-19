@@ -78,6 +78,10 @@ pub fn convert_expr(
             let inner = convert_expr(&await_expr.arg, reg, None, type_env)?;
             Ok(Expr::Await(Box::new(inner)))
         }
+        // Non-null assertion (expr!) — TS type-level only, no runtime effect. Strip assertion.
+        ast::Expr::TsNonNull(ts_non_null) => {
+            convert_expr(&ts_non_null.expr, reg, expected, type_env)
+        }
         _ => Err(anyhow!("unsupported expression: {:?}", expr)),
     }
 }

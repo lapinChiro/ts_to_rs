@@ -4815,6 +4815,16 @@ fn test_convert_expr_regex_exec_generates_captures() {
     );
 }
 
+// ---- I-158: Non-null assertion ----
+
+#[test]
+fn test_convert_expr_non_null_assertion_strips_assertion() {
+    // x! → x (non-null assertion is type-level only, stripped)
+    let expr = parse_expr("x!;");
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    assert_eq!(result, Expr::Ident("x".to_string()));
+}
+
 // ---- I-117: Null literal ----
 
 #[test]

@@ -77,7 +77,7 @@ pub fn convert_stmt(
             {
                 Ok(expanded)
             } else {
-                Ok(vec![convert_var_decl(var_decl, reg, type_env)?])
+                convert_var_decl(var_decl, reg, type_env)
             }
         }
         ast::Stmt::If(if_stmt) => convert_if_stmt(if_stmt, reg, return_type, type_env),
@@ -134,7 +134,10 @@ pub fn convert_stmt(
     }
 }
 
-/// Converts a variable declaration to an IR `Stmt::Let`.
+/// Converts a variable declaration to IR `Stmt::Let` statements.
+///
+/// Handles multiple declarators (e.g., `const a = 1, b = 2`) by expanding each into
+/// a separate `Stmt::Let`.
 ///
 /// - `const` with primitive type → immutable (`let`)
 /// - `const` with object/struct type → mutable (`let mut`), because TS `const` allows
@@ -144,40 +147,41 @@ fn convert_var_decl(
     var_decl: &ast::VarDecl,
     reg: &TypeRegistry,
     type_env: &TypeEnv,
-) -> Result<Stmt> {
-    // We only handle single-declarator variable declarations
-    let declarator = single_declarator(var_decl)?;
+) -> Result<Vec<Stmt>> {
+    let mut stmts = Vec::new();
+    for declarator in &var_decl.decls {
+        let name = extract_pat_ident_name(&declarator.name)?;
 
-    let name = extract_pat_ident_name(&declarator.name)?;
+        let ty = match &declarator.name {
+            ast::Pat::Ident(ident) => ident
+                .type_ann
+                .as_ref()
+                .map(|ann| convert_ts_type(&ann.type_ann, &mut Vec::new(), reg))
+                .transpose()?,
+            _ => None,
+        };
 
-    let ty = match &declarator.name {
-        ast::Pat::Ident(ident) => ident
-            .type_ann
+        let mutable = if matches!(var_decl.kind, ast::VarDeclKind::Const) {
+            // const + object type → let mut (TS const allows field mutation)
+            ty.as_ref().is_some_and(is_object_type)
+        } else {
+            true
+        };
+
+        let init = declarator
+            .init
             .as_ref()
-            .map(|ann| convert_ts_type(&ann.type_ann, &mut Vec::new(), reg))
-            .transpose()?,
-        _ => None,
-    };
+            .map(|e| convert_expr(e, reg, ty.as_ref(), type_env))
+            .transpose()?;
 
-    let mutable = if matches!(var_decl.kind, ast::VarDeclKind::Const) {
-        // const + object type → let mut (TS const allows field mutation)
-        ty.as_ref().is_some_and(is_object_type)
-    } else {
-        true
-    };
-
-    let init = declarator
-        .init
-        .as_ref()
-        .map(|e| convert_expr(e, reg, ty.as_ref(), type_env))
-        .transpose()?;
-
-    Ok(Stmt::Let {
-        mutable,
-        name,
-        ty,
-        init,
-    })
+        stmts.push(Stmt::Let {
+            mutable,
+            name,
+            ty,
+            init,
+        });
+    }
+    Ok(stmts)
 }
 
 /// Infers a `RustType::Fn` from a closure expression for TypeEnv registration.
