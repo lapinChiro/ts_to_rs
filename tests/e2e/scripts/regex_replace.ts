@@ -17,4 +17,10 @@ function main(): void {
     const mixed: string = "Hello HELLO hello";
     const ciResult: string = mixed.replace(/hello/gi, "hi");
     console.log("case-insensitive global:", ciResult);
+
+    // I-176: regex.test() → is_match()
+    const hasDigits: boolean = /\d+/.test("abc123");
+    console.log("has digits:", hasDigits);
+    const noDigits: boolean = /\d+/.test("abcdef");
+    console.log("no digits:", noDigits);
 }

@@ -425,3 +425,20 @@ fn test_regex_literal() {
     let output = transpile(&input).unwrap();
     insta::assert_snapshot!(output);
 }
+
+#[test]
+fn test_nullable_return() {
+    let input = fs::read_to_string("tests/fixtures/nullable-return.input.ts").unwrap();
+    let output = transpile(&input).unwrap();
+    // Ternary with null should NOT double-wrap in Some()
+    assert!(
+        !output.contains("Some(if"),
+        "ternary return should not be wrapped in Some(): {output}"
+    );
+    // Direct return of literal should be wrapped in Some()
+    assert!(
+        output.contains(r#"Some("found".to_string())"#),
+        "direct return of literal should be wrapped in Some(): {output}"
+    );
+    insta::assert_snapshot!(output);
+}

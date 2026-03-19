@@ -1154,4 +1154,41 @@ async fn main() {
             "expected r#type in: {output}"
         );
     }
+
+    // --- Expr::Regex tests (I-174) ---
+
+    #[test]
+    fn test_generate_regex_backslash_pattern_uses_raw_string() {
+        // \d+ must use raw string to preserve backslashes
+        let expr = Expr::Regex {
+            pattern: r"\d+".to_string(),
+            global: false,
+            sticky: false,
+        };
+        let output = generate_expr(&expr);
+        assert_eq!(output, r#"Regex::new(r"\d+").unwrap()"#);
+    }
+
+    #[test]
+    fn test_generate_regex_quote_pattern_uses_raw_hash_string() {
+        // Pattern containing " must use r#"..."#
+        let expr = Expr::Regex {
+            pattern: r#"a"b"#.to_string(),
+            global: false,
+            sticky: false,
+        };
+        let output = generate_expr(&expr);
+        assert_eq!(output, r###"Regex::new(r#"a"b"#).unwrap()"###);
+    }
+
+    #[test]
+    fn test_generate_regex_simple_pattern_uses_raw_string() {
+        let expr = Expr::Regex {
+            pattern: "pattern".to_string(),
+            global: false,
+            sticky: false,
+        };
+        let output = generate_expr(&expr);
+        assert_eq!(output, r#"Regex::new(r"pattern").unwrap()"#);
+    }
 }

@@ -48,7 +48,7 @@ pub fn convert_stmt(
             // Wrap in Some() when return type is Option<T> and the value is not None.
             // Skip wrapping for expressions that already produce Option (optional chaining, etc.)
             let already_option = ret.arg.as_ref().is_some_and(|e| {
-                contains_opt_chain(e)
+                already_produces_option(e)
                     || matches!(e.as_ref(), ast::Expr::Ident(id) if id.sym.as_ref() == "null")
             });
             let expr = match (expr, return_type) {
@@ -1427,15 +1427,26 @@ fn try_expand_spread_var_decl(
 /// Detects `return [...arr, 1]` at SWC AST level and expands to IR statements.
 ///
 /// Returns `None` if the return statement does not contain a spread array.
-/// Returns true if the AST expression contains an optional chaining operator (`?.`).
+/// Returns true if the AST expression already produces `Option` in the generated Rust code.
 ///
-/// Used to avoid double-wrapping in `Some()` — optional chaining already produces `Option`.
-fn contains_opt_chain(expr: &ast::Expr) -> bool {
+/// Used to avoid double-wrapping in `Some()` at the return statement level.
+/// Detects optional chaining (`?.`) and ternary expressions with null/undefined branches.
+fn already_produces_option(expr: &ast::Expr) -> bool {
     match expr {
         ast::Expr::OptChain(_) => true,
-        ast::Expr::Paren(p) => contains_opt_chain(&p.expr),
+        ast::Expr::Paren(p) => already_produces_option(&p.expr),
+        // Ternary with null/undefined in either branch → already produces Option
+        ast::Expr::Cond(cond) => {
+            is_null_or_undefined_expr(&cond.cons) || is_null_or_undefined_expr(&cond.alt)
+        }
         _ => false,
     }
+}
+
+/// Returns true if the expression is a `null` literal or `undefined` identifier.
+fn is_null_or_undefined_expr(expr: &ast::Expr) -> bool {
+    matches!(expr, ast::Expr::Lit(ast::Lit::Null(..)))
+        || matches!(expr, ast::Expr::Ident(id) if id.sym.as_ref() == "undefined")
 }
 
 fn try_expand_spread_return(

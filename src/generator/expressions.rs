@@ -295,7 +295,11 @@ pub(super) fn generate_expr(expr: &Expr) -> String {
             out
         }
         Expr::Regex { pattern, .. } => {
-            format!("Regex::new(\"{pattern}\").unwrap()")
+            if pattern.contains('"') {
+                format!("Regex::new(r#\"{pattern}\"#).unwrap()")
+            } else {
+                format!("Regex::new(r\"{pattern}\").unwrap()")
+            }
         }
         Expr::Match { expr, arms } => {
             use crate::ir::MatchPattern;

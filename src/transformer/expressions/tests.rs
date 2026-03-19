@@ -1608,6 +1608,24 @@ fn test_convert_expr_string_replace_generates_replacen() {
     );
 }
 
+#[test]
+fn test_convert_expr_string_replace_all_generates_replace() {
+    // s.replaceAll("a", "b") → s.replace("a", "b") (Rust replace replaces all)
+    let expr = parse_expr(r#"s.replaceAll("a", "b");"#);
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    assert_eq!(
+        result,
+        Expr::MethodCall {
+            object: Box::new(Expr::Ident("s".to_string())),
+            method: "replace".to_string(),
+            args: vec![
+                Expr::StringLit("a".to_string()),
+                Expr::StringLit("b".to_string()),
+            ],
+        }
+    );
+}
+
 // -- Array method conversion tests --
 
 #[test]
@@ -4669,20 +4687,17 @@ fn test_convert_expr_regex_multiple_flags_preserved_in_ir() {
 
 #[test]
 fn test_convert_expr_replace_with_global_regex_generates_replace_all() {
-    // s.replace(/p/g, "r") → Regex::new("p").unwrap().replace_all(&s, "r").to_string()
+    // s.replace(/p/g, "r") → Regex::new(r"p").unwrap().replace_all(&s, "r").to_string()
     let expr = parse_expr(r#"s.replace(/p/g, "r");"#);
     let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
     assert_eq!(
         result,
         Expr::MethodCall {
             object: Box::new(Expr::MethodCall {
-                object: Box::new(Expr::MethodCall {
-                    object: Box::new(Expr::FnCall {
-                        name: "Regex::new".to_string(),
-                        args: vec![Expr::StringLit("p".to_string())],
-                    }),
-                    method: "unwrap".to_string(),
-                    args: vec![],
+                object: Box::new(Expr::Regex {
+                    pattern: "p".to_string(),
+                    global: false,
+                    sticky: false,
                 }),
                 method: "replace_all".to_string(),
                 args: vec![
@@ -4698,20 +4713,17 @@ fn test_convert_expr_replace_with_global_regex_generates_replace_all() {
 
 #[test]
 fn test_convert_expr_replace_with_non_global_regex_generates_replace() {
-    // s.replace(/p/, "r") → Regex::new("p").unwrap().replace(&s, "r").to_string()
+    // s.replace(/p/, "r") → Regex::new(r"p").unwrap().replace(&s, "r").to_string()
     let expr = parse_expr(r#"s.replace(/p/, "r");"#);
     let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
     assert_eq!(
         result,
         Expr::MethodCall {
             object: Box::new(Expr::MethodCall {
-                object: Box::new(Expr::MethodCall {
-                    object: Box::new(Expr::FnCall {
-                        name: "Regex::new".to_string(),
-                        args: vec![Expr::StringLit("p".to_string())],
-                    }),
-                    method: "unwrap".to_string(),
-                    args: vec![],
+                object: Box::new(Expr::Regex {
+                    pattern: "p".to_string(),
+                    global: false,
+                    sticky: false,
                 }),
                 method: "replace".to_string(),
                 args: vec![
@@ -4721,6 +4733,84 @@ fn test_convert_expr_replace_with_non_global_regex_generates_replace() {
             }),
             method: "to_string".to_string(),
             args: vec![],
+        }
+    );
+}
+
+// ---- I-176: Regex method conversion ----
+
+#[test]
+fn test_convert_expr_regex_test_generates_is_match() {
+    // /p/.test(s) → Regex::new(r"p").unwrap().is_match(&s)
+    let expr = parse_expr(r#"/p/.test(s);"#);
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    assert_eq!(
+        result,
+        Expr::MethodCall {
+            object: Box::new(Expr::Regex {
+                pattern: "p".to_string(),
+                global: false,
+                sticky: false,
+            }),
+            method: "is_match".to_string(),
+            args: vec![Expr::Ref(Box::new(Expr::Ident("s".to_string())))],
+        }
+    );
+}
+
+#[test]
+fn test_convert_expr_string_match_regex_generates_find() {
+    // s.match(/p/) → Regex::new(r"p").unwrap().find(&s)
+    let expr = parse_expr(r#"s.match(/p/);"#);
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    assert_eq!(
+        result,
+        Expr::MethodCall {
+            object: Box::new(Expr::Regex {
+                pattern: "p".to_string(),
+                global: false,
+                sticky: false,
+            }),
+            method: "find".to_string(),
+            args: vec![Expr::Ref(Box::new(Expr::Ident("s".to_string())))],
+        }
+    );
+}
+
+#[test]
+fn test_convert_expr_string_match_global_regex_generates_find_iter() {
+    // s.match(/p/g) → Regex::new(r"p").unwrap().find_iter(&s)
+    let expr = parse_expr(r#"s.match(/p/g);"#);
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    assert_eq!(
+        result,
+        Expr::MethodCall {
+            object: Box::new(Expr::Regex {
+                pattern: "p".to_string(),
+                global: false,
+                sticky: false,
+            }),
+            method: "find_iter".to_string(),
+            args: vec![Expr::Ref(Box::new(Expr::Ident("s".to_string())))],
+        }
+    );
+}
+
+#[test]
+fn test_convert_expr_regex_exec_generates_captures() {
+    // /p/.exec(s) → Regex::new(r"p").unwrap().captures(&s)
+    let expr = parse_expr(r#"/p/.exec(s);"#);
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    assert_eq!(
+        result,
+        Expr::MethodCall {
+            object: Box::new(Expr::Regex {
+                pattern: "p".to_string(),
+                global: false,
+                sticky: false,
+            }),
+            method: "captures".to_string(),
+            args: vec![Expr::Ref(Box::new(Expr::Ident("s".to_string())))],
         }
     );
 }

@@ -1828,19 +1828,10 @@ fn map_method_call(object: Expr, method: &str, args: Vec<Expr>) -> Expr {
             let regex_expr = args_iter.next().unwrap();
             let remaining_args: Vec<Expr> = args_iter.collect();
             if let Expr::Regex {
-                pattern,
-                global,
-                sticky: _,
+                pattern, global, ..
             } = regex_expr
             {
-                let regex_obj = Expr::MethodCall {
-                    object: Box::new(Expr::FnCall {
-                        name: "Regex::new".to_string(),
-                        args: vec![Expr::StringLit(pattern)],
-                    }),
-                    method: "unwrap".to_string(),
-                    args: vec![],
-                };
+                let regex_obj = build_regex_new(pattern);
                 let method_name = if global { "replace_all" } else { "replace" };
                 let mut call_args = vec![Expr::Ref(Box::new(object))];
                 call_args.extend(remaining_args);
@@ -1858,6 +1849,56 @@ fn map_method_call(object: Expr, method: &str, args: Vec<Expr>) -> Expr {
                 unreachable!()
             }
         }
+        // str.match(regex) → regex.find(&str) or regex.find_iter(&str) depending on g flag
+        "match" if matches!(args.first(), Some(Expr::Regex { .. })) => {
+            let regex_expr = args.into_iter().next().unwrap();
+            if let Expr::Regex {
+                pattern, global, ..
+            } = regex_expr
+            {
+                let regex_obj = build_regex_new(pattern);
+                let method_name = if global { "find_iter" } else { "find" };
+                Expr::MethodCall {
+                    object: Box::new(regex_obj),
+                    method: method_name.to_string(),
+                    args: vec![Expr::Ref(Box::new(object))],
+                }
+            } else {
+                unreachable!()
+            }
+        }
+        // regex.test(str) → regex.is_match(&str)
+        "test" if matches!(&object, Expr::Regex { .. }) => {
+            if let Expr::Regex { pattern, .. } = object {
+                let regex_obj = build_regex_new(pattern);
+                Expr::MethodCall {
+                    object: Box::new(regex_obj),
+                    method: "is_match".to_string(),
+                    args: args.into_iter().map(|a| Expr::Ref(Box::new(a))).collect(),
+                }
+            } else {
+                unreachable!()
+            }
+        }
+        // regex.exec(str) → regex.captures(&str)
+        "exec" if matches!(&object, Expr::Regex { .. }) => {
+            if let Expr::Regex { pattern, .. } = object {
+                let regex_obj = build_regex_new(pattern);
+                Expr::MethodCall {
+                    object: Box::new(regex_obj),
+                    method: "captures".to_string(),
+                    args: args.into_iter().map(|a| Expr::Ref(Box::new(a))).collect(),
+                }
+            } else {
+                unreachable!()
+            }
+        }
+        // str.replaceAll("a", "b") → str.replace("a", "b") (Rust replace replaces all)
+        "replaceAll" => Expr::MethodCall {
+            object: Box::new(object),
+            method: "replace".to_string(),
+            args,
+        },
         // String replace: str.replace("a", "b") → str.replacen("a", "b", 1)
         // TS replaces only the first occurrence; Rust's replace() replaces all.
         "replace" => {
@@ -1875,6 +1916,17 @@ fn map_method_call(object: Expr, method: &str, args: Vec<Expr>) -> Expr {
             method: method.to_string(),
             args,
         },
+    }
+}
+
+/// Builds a `Regex::new(r"pattern").unwrap()` expression from a pattern string.
+///
+/// Returns `Expr::Regex` which the generator renders as `Regex::new(r"pattern").unwrap()`.
+fn build_regex_new(pattern: String) -> Expr {
+    Expr::Regex {
+        pattern,
+        global: false,
+        sticky: false,
     }
 }
 
