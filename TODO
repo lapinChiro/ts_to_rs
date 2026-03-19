@@ -23,6 +23,8 @@
 **補足**: 「クリーン」は変換エラーなし（`--report-unsupported` でエラー 0）を意味する。生成 Rust のコンパイル可能性とは別指標。クリーンファイルでも未解決型や不正構文によりコンパイルは通らない場合がある。
 **ビルトイン型**: I-24 完了済み。Web API ビルトイン型（Response, Request, Headers 等 106 型）はバイナリに埋め込み済みで、デフォルトで TypeRegistry にロードされる。
 **Node.js API**: I-49/I-50 完了済み。`fs.readFileSync/writeFileSync/existsSync`、`process.env.VAR`、stdin パターンの変換が動作。E2E テスト基盤に stdin/環境変数ヘルパーあり。
+**Interface → Trait**: I-137/I-127 完了済み。interface は内容に応じて struct/trait/struct+trait+impl に 3 分類変換。extends → supertrait/フィールド継承。交差型の trait 合成対応。
+**resolve-types**: `ts_to_rs resolve-types --tsconfig ...` サブコマンド実装済み。Docker イメージ定義あり（`tools/extract-types/Dockerfile`）。ただし Docker での E2E テストは未実施。
 
 ---
 
@@ -35,7 +37,8 @@
 | **完了: 変換成功率の向上** | ~~エラー < 200 件~~ **達成（177 件）** | Tier 1 TODO の消化 |
 | **完了: Web API ビルトイン型** | ~~I-24~~ **達成** | tsc 統合 + ビルトイン型埋め込み + resolve-types サブコマンド |
 | **完了: E2E I/O テスト基盤** | ~~I-49/I-50~~ **達成** | fs/process.env/stdin 変換 + E2E テスト基盤（stdin/env ヘルパー） |
-| **次: コンパイル可能性の向上** | コンパイルクリーン率 > 40% | I-137（サイレント欠落修正）、I-112b（76 件解消）、I-25（48 件解消）、I-186（コンパイルエラー修正）。「変換成功かつコンパイル成功」のファイル数を主指標にする |
+| **完了: Interface → Trait** | ~~I-137/I-127~~ **達成** | interface 3 分類変換 + extends + 交差型 trait 合成 |
+| **次: コンパイル可能性の向上** | コンパイルクリーン率 > 40% | I-112b（76 件解消）、I-25（48 件解消）、I-186（コンパイルエラー修正）、I-187（trait パラメータ型）。「変換成功かつコンパイル成功」のファイル数を主指標にする |
 | **その次: テスト拡充** | コンパイルクリーン率 > 50% | E2E テストの拡充（I-20, I-71, I-72, I-74）、HTTP 対応（I-183） |
 
 ---
@@ -50,35 +53,7 @@
 
 ### Tier 1: 高優先度 — 正確性・変換成功率を直接改善
 
-#### コンパイルエラーになる問題
-
-- **[I-186]** **`split()` の戻り値が `Vec<&str>` だが `Vec<String>` 型注釈と不一致** — コンパイルエラー
-    - `const parts: string[] = s.split("\n")` → `let parts: Vec<String> = s.split("\n").collect::<Vec<&str>>()` となり型不一致
-    - `map_method_call` の `split` 変換が `.collect::<Vec<&str>>()` をハードコードしている
-    - 対策: 型注釈が `Vec<String>` のとき `.map(|s| s.to_string()).collect::<Vec<String>>()` を生成
-
-#### 未対応構文（インスタンス数が多い順）
-
-- **[I-112b]** **未登録型の引数に対するオブジェクトリテラル** — （**76 インスタンス**、OBJECT_LITERAL_NO_TYPE カテゴリ全体）
-    - 関数引数のオブジェクトリテラルが型解決できない。最大のエラーカテゴリ
-    - I-24（Web API ビルトイン型）完了済みにより TypeRegistry に型情報あり。関数パラメータの型情報を活用してフィールド解決が可能
-    - 残存: (1) 関数パラメータ型からオブジェクトリテラルへの型伝播、(2) 戻り値型が伝播しないケース
-- **[I-25]** **高度な type alias body の変換** — （**48 インスタンス**、TYPE_ALIAS_UNSUPPORTED）
-    - `type` 宣言の body で未対応の SWC 型パターンが残存
-    - Discriminant(3): 条件型 `A extends B ? C : D` — **22 件**（最大）
-    - Discriminant(15): 条件型の亜種 — **5 件**
-    - Discriminant(14): `keyof typeof` 演算子 — **1 件**
-    - Discriminant(6): マップ型 — **9 件**（スコープ外）
-    - Discriminant(16): ネストしたマップ型 — **6 件**（スコープ外）
-    - Discriminant(17): テンプレートリテラル型 — **5 件**（スコープ外）
-    - Hono 完全変換に必須。条件型（Discriminant 3/15）は PRD 化可能な 28 件を含む
-- **[I-134]** **オブジェクトリテラルの計算キー** — （**4 インスタンス**、OBJECT_LITERAL_KEY）
-    - `{ [key]: value }` のような計算プロパティキーが未対応（3 件 + 1 件）
-- **[I-180]** **トップレベル式文** — （**1 インスタンス**）
-    - `globalThis.crypto ??= crypto` がトップレベルで失敗。`??=` 自体は関数内で `get_or_insert_with` に変換済み
-    - 問題はトップレベルの式文が関数外で変換されないこと
-- **[I-146]** **デフォルト値の残存パターン** — （**1 インスタンス**、DEFAULT_PARAM_VALUE）
-    - 残存 1 件は型注釈なしのデフォルト値（`default parameter requires a type annotation`）
+#### 未対応構文（PRD 化済みを除く）
 
 #### union/intersection の情報欠落
 
@@ -97,22 +72,11 @@
 - **[I-12]** **`Promise<T>` の union 内展開** — 型変換正確性
 - **[I-13]** **super() の位置ベースフィールドマッピング** — 式変換正確性
 - **[I-61]** **型推論: チェーンメソッド呼び出しの戻り値型追跡** — 型推論
-- **[I-15]** **`+x`（単項プラス / 数値変換）** — 式変換
-
-#### interface/trait の型使用
-
-- **[I-187]** **interface 型を関数パラメータで使用する場合の `impl Trait` / `&dyn Trait` 変換**
-    - `function foo(g: Greeter)` → `fn foo(g: impl Greeter)` or `fn foo(g: &dyn Greeter)` にすべきだが、現在は `fn foo(g: Greeter)` と値型のまま出力される
-    - trait はサイズ不定のため Rust ではそのまま値型に使えない
-    - 変数宣言 `let x: Greeter = ...` も同様に `Box<dyn Greeter>` 等が必要
-    - interface を trait に変換するようになったことで顕在化した問題
-
 #### import/export・API
 
 - **[I-18]** **re-export の追跡** — import/export（**2 インスタンス**、EXPORT_ALL を含む）
     - `export * from './module'`（`ExportAll`）が未対応
     - 名前付き re-export `export { X } from './module'` の追跡も含む
-- **[I-19]** **`.substring`/`.slice` → Rust の文字列スライス** — builtin API
 - **[I-21]** **async void のセマンティクス差異対応** — 変換正確性
 
 ### Tier 2: 中優先度 — テスト拡充・基盤改善
@@ -159,7 +123,6 @@
 - **[I-35]** **indexed access type の非文字列キー対応** — 型構文（**4 インスタンス**、INDEXED_ACCESS のうちの一部）
     - 🔗 解消すると I-32（コンパイルテストスキップ解消、残り 1 件）が可能
 - **[I-36]** **qualified type name (`A.B` 形式)** — 型構文（**3 インスタンス**、QUALIFIED_TYPE）
-- **[I-37]** **型リテラルメンバーのメソッドシグネチャ対応** — 型構文（**2 インスタンス**、TYPE_LITERAL_MEMBER）
 - **[I-58]** **Trait の type_params 未対応** — 型構文
 - **[I-59]** **Pick/Omit のネストしたユーティリティ型未対応** — 型変換
 - **[I-105]** **デコレータ付き TsParamProp** — クラス変換
