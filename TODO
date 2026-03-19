@@ -93,6 +93,9 @@
 
 #### コンパイルエラーになる問題（変換は成功するがRustがコンパイル不可）
 
+- **[I-186]** **`split()` の戻り値が `Vec<&str>` だが `Vec<String>` 型注釈と不一致** — コンパイルエラー
+    - `const parts: string[] = s.split("\n")` → `let parts: Vec<String> = s.split("\n").collect::<Vec<&str>>()` となり型不一致
+    - 対策: `.split()` → `.split().map(|s| s.to_string()).collect::<Vec<String>>()` に変換するか、型注釈が `Vec<String>` のとき `.to_string()` を挿入
 
 #### 型変換・型推論
 
@@ -131,6 +134,25 @@
 - **[I-71]** **E2E テスト: オブジェクト操作（残課題）** — 未検証: オブジェクトスプレッド
 - **[I-74]** **E2E テスト: 既存スクリプトのエッジケース** — 未検証: closures 可変キャプチャ等
 - **[I-72]** **E2E テスト: 高度なクラス機能** — 未検証: 抽象クラス → trait、getter/setter
+
+#### Node.js API 変換（未対応分）
+
+- **[I-183]** **HTTP E2E テスト基盤 + fetch 変換** — I-51 の後続
+    - `fetch(url)` → `reqwest::blocking::get(url)` 等の変換と、テストランナー内の簡易 HTTP サーバーを含む E2E テスト基盤
+    - 前提: I-30（生成コードの Cargo.toml への依存クレート追加）。`reqwest` を生成プロジェクトの依存に追加する仕組みが必要
+    - 前提: 非同期処理の変換。`fetch` は Promise を返すため、`async/await` との組み合わせが必要
+- **[I-184]** **fs モジュールの追加メソッド** — 同期 API のみ
+    - `fs.mkdirSync(path, { recursive: true })` → `std::fs::create_dir_all(path)`
+    - `fs.readdirSync(path)` → `std::fs::read_dir(path)`
+    - `fs.unlinkSync(path)` → `std::fs::remove_file(path)`
+    - `fs.statSync(path)` → `std::fs::metadata(path)`
+    - `fs.renameSync(old, new)` → `std::fs::rename(old, new)`
+    - 需要に応じて段階的に追加
+- **[I-185]** **process の追加プロパティ** — env 以外
+    - `process.argv` → `std::env::args().collect::<Vec<String>>()`
+    - `process.exit(code)` → `std::process::exit(code)`
+    - `process.cwd()` → `std::env::current_dir().unwrap().to_string_lossy().to_string()`
+    - 需要に応じて段階的に追加
 
 ### Tier 3: 低優先度
 

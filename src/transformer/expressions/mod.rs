@@ -723,6 +723,24 @@ fn convert_member_expr(
         _ => return Err(anyhow!("unsupported member property (only identifiers)")),
     };
 
+    // process.env.VAR → std::env::var("VAR").unwrap()
+    if let ast::Expr::Member(inner) = member.obj.as_ref() {
+        if let (ast::Expr::Ident(obj), ast::MemberProp::Ident(prop)) =
+            (inner.obj.as_ref(), &inner.prop)
+        {
+            if obj.sym.as_ref() == "process" && prop.sym.as_ref() == "env" {
+                return Ok(Expr::MethodCall {
+                    object: Box::new(Expr::FnCall {
+                        name: "std::env::var".to_string(),
+                        args: vec![Expr::StringLit(field)],
+                    }),
+                    method: "unwrap".to_string(),
+                    args: vec![],
+                });
+            }
+        }
+    }
+
     // Check if accessing a field of a discriminated union enum
     if let Some(RustType::Named { name, .. }) =
         resolve_expr_type(&member.obj, type_env, reg).as_ref()
@@ -1444,6 +1462,11 @@ fn convert_call_expr(call: &ast::CallExpr, reg: &TypeRegistry, type_env: &TypeEn
                     // Number.isNaN(x) → x.is_nan(), Number.isFinite(x) → x.is_finite()
                     if obj_ident.sym.as_ref() == "Number" {
                         return convert_number_static_call(&method, &call.args, reg, type_env);
+                    }
+
+                    // fs.readFileSync/writeFileSync/existsSync → std::fs equivalents
+                    if obj_ident.sym.as_ref() == "fs" {
+                        return convert_fs_call(&method, &call.args, reg, type_env);
                     }
                 }
 
@@ -2185,6 +2208,85 @@ fn convert_number_static_call(
             right: Box::new(Expr::NumberLit(0.0)),
         }),
         _ => Err(anyhow!("unsupported Number method: {method}")),
+    }
+}
+
+/// Converts Node.js `fs` module method calls to `std::fs` equivalents.
+fn convert_fs_call(
+    method: &str,
+    args: &[ast::ExprOrSpread],
+    reg: &TypeRegistry,
+    type_env: &TypeEnv,
+) -> Result<Expr> {
+    match method {
+        "readFileSync" => {
+            if args.is_empty() {
+                return Err(anyhow!("fs.readFileSync requires at least 1 argument"));
+            }
+            let path_arg = convert_expr(&args[0].expr, reg, None, type_env)?;
+
+            // Special case: fs.readFileSync("/dev/stdin", ...) or fs.readFileSync(0, ...)
+            let is_stdin = matches!(&path_arg, Expr::StringLit(s) if s == "/dev/stdin")
+                || matches!(&path_arg, Expr::NumberLit(n) if *n == 0.0)
+                || matches!(&path_arg, Expr::IntLit(n) if *n == 0);
+
+            if is_stdin {
+                // std::io::read_to_string(std::io::stdin()).unwrap()
+                return Ok(Expr::MethodCall {
+                    object: Box::new(Expr::FnCall {
+                        name: "std::io::read_to_string".to_string(),
+                        args: vec![Expr::FnCall {
+                            name: "std::io::stdin".to_string(),
+                            args: vec![],
+                        }],
+                    }),
+                    method: "unwrap".to_string(),
+                    args: vec![],
+                });
+            }
+
+            // fs.readFileSync(path, "utf8") → std::fs::read_to_string(&path).unwrap()
+            Ok(Expr::MethodCall {
+                object: Box::new(Expr::FnCall {
+                    name: "std::fs::read_to_string".to_string(),
+                    args: vec![Expr::Ref(Box::new(path_arg))],
+                }),
+                method: "unwrap".to_string(),
+                args: vec![],
+            })
+        }
+        "writeFileSync" => {
+            if args.len() < 2 {
+                return Err(anyhow!("fs.writeFileSync requires at least 2 arguments"));
+            }
+            let path_arg = convert_expr(&args[0].expr, reg, None, type_env)?;
+            let data_arg = convert_expr(&args[1].expr, reg, None, type_env)?;
+            // fs.writeFileSync(path, data) → std::fs::write(&path, &data).unwrap()
+            Ok(Expr::MethodCall {
+                object: Box::new(Expr::FnCall {
+                    name: "std::fs::write".to_string(),
+                    args: vec![Expr::Ref(Box::new(path_arg)), Expr::Ref(Box::new(data_arg))],
+                }),
+                method: "unwrap".to_string(),
+                args: vec![],
+            })
+        }
+        "existsSync" => {
+            if args.is_empty() {
+                return Err(anyhow!("fs.existsSync requires 1 argument"));
+            }
+            let path_arg = convert_expr(&args[0].expr, reg, None, type_env)?;
+            // fs.existsSync(path) → std::path::Path::new(&path).exists()
+            Ok(Expr::MethodCall {
+                object: Box::new(Expr::FnCall {
+                    name: "std::path::Path::new".to_string(),
+                    args: vec![Expr::Ref(Box::new(path_arg))],
+                }),
+                method: "exists".to_string(),
+                args: vec![],
+            })
+        }
+        _ => Err(anyhow!("unsupported fs method: {method}")),
     }
 }
 

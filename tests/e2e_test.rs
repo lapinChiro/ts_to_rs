@@ -40,8 +40,22 @@ struct E2eResult {
     ts_stderr: String,
 }
 
+/// Options for customizing E2E test execution.
+#[derive(Default)]
+struct E2eOptions<'a> {
+    /// Data to pipe to stdin (None = no stdin)
+    stdin: Option<&'a str>,
+    /// Extra environment variables to set for both TS and Rust
+    env: Vec<(&'a str, &'a str)>,
+}
+
 /// Transpiles and executes a single TS script, returning both TS and Rust outputs.
 fn execute_e2e(name: &str) -> E2eResult {
+    execute_e2e_with_options(name, &E2eOptions::default())
+}
+
+/// Transpiles and executes a single TS script with custom options.
+fn execute_e2e_with_options(name: &str, opts: &E2eOptions) -> E2eResult {
     let script_path = format!("{SCRIPTS_DIR}/{name}.ts");
     let ts_source = fs::read_to_string(&script_path)
         .unwrap_or_else(|e| panic!("failed to read {script_path}: {e}"));
@@ -56,11 +70,33 @@ fn execute_e2e(name: &str) -> E2eResult {
     fs::write(&main_path, &rs_source)
         .unwrap_or_else(|e| panic!("failed to write {main_path}: {e}"));
 
-    let rust_output = Command::new("cargo")
+    let mut rust_cmd = Command::new("cargo");
+    rust_cmd
         .args(["run", "--quiet"])
-        .current_dir(RUST_RUNNER_DIR)
-        .output()
-        .expect("failed to execute cargo run");
+        .current_dir(RUST_RUNNER_DIR);
+    for (k, v) in &opts.env {
+        rust_cmd.env(k, v);
+    }
+    let rust_output = if let Some(stdin_data) = opts.stdin {
+        rust_cmd.stdin(std::process::Stdio::piped());
+        let mut child = rust_cmd
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("failed to spawn cargo run");
+        use std::io::Write;
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(stdin_data.as_bytes())
+            .expect("failed to write stdin");
+        child
+            .wait_with_output()
+            .expect("failed to wait for cargo run")
+    } else {
+        rust_cmd.output().expect("failed to execute cargo run")
+    };
 
     assert!(
         rust_output.status.success(),
@@ -75,10 +111,31 @@ fn execute_e2e(name: &str) -> E2eResult {
     fs::write(&ts_exec_path, &ts_exec_source)
         .unwrap_or_else(|e| panic!("failed to write {ts_exec_path}: {e}"));
 
-    let ts_output = Command::new(TSX_BIN)
-        .arg(&ts_exec_path)
-        .output()
-        .expect("failed to execute tsx — run `npm install` in tests/e2e/");
+    let mut ts_cmd = Command::new(TSX_BIN);
+    ts_cmd.arg(&ts_exec_path);
+    for (k, v) in &opts.env {
+        ts_cmd.env(k, v);
+    }
+    let ts_output = if let Some(stdin_data) = opts.stdin {
+        ts_cmd.stdin(std::process::Stdio::piped());
+        let mut child = ts_cmd
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("failed to spawn tsx");
+        use std::io::Write;
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(stdin_data.as_bytes())
+            .expect("failed to write stdin");
+        child.wait_with_output().expect("failed to wait for tsx")
+    } else {
+        ts_cmd
+            .output()
+            .expect("failed to execute tsx — run `npm install` in tests/e2e/")
+    };
 
     let _ = fs::remove_file(&ts_exec_path);
 
@@ -133,6 +190,40 @@ fn assert_lines_match(
 fn run_e2e_test(name: &str) {
     let _guard = E2E_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let result = execute_e2e(name);
+    assert_lines_match(
+        name,
+        "stdout",
+        &result.ts_stdout,
+        &result.rust_stdout,
+        &result.rs_source,
+    );
+}
+
+/// Runs an E2E test with stdin input.
+fn run_e2e_test_with_stdin(name: &str, stdin_input: &str) {
+    let _guard = E2E_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let opts = E2eOptions {
+        stdin: Some(stdin_input),
+        ..Default::default()
+    };
+    let result = execute_e2e_with_options(name, &opts);
+    assert_lines_match(
+        name,
+        "stdout",
+        &result.ts_stdout,
+        &result.rust_stdout,
+        &result.rs_source,
+    );
+}
+
+/// Runs an E2E test with extra environment variables.
+fn run_e2e_test_with_env(name: &str, env: &[(&str, &str)]) {
+    let _guard = E2E_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let opts = E2eOptions {
+        env: env.to_vec(),
+        ..Default::default()
+    };
+    let result = execute_e2e_with_options(name, &opts);
     assert_lines_match(
         name,
         "stdout",
@@ -541,4 +632,21 @@ fn test_e2e_iife_ts_rust_stdout_match() {
 #[test]
 fn test_e2e_readonly_param_ts_rust_stdout_match() {
     run_e2e_test("readonly_param");
+}
+
+#[test]
+fn test_e2e_stdin_echo_ts_rust_stdout_match() {
+    run_e2e_test_with_stdin("stdin_echo", "hello\nworld\nfoo\n");
+}
+
+#[test]
+fn test_e2e_file_io_ts_rust_stdout_match() {
+    let temp_dir = std::env::temp_dir().join("ts_to_rs_e2e_file_io");
+    let _ = std::fs::remove_dir_all(&temp_dir);
+    std::fs::create_dir_all(&temp_dir).expect("failed to create temp dir");
+    let temp_dir_str = temp_dir.to_string_lossy().to_string();
+
+    run_e2e_test_with_env("file_io", &[("TEST_DIR", &temp_dir_str)]);
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
 }
