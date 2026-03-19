@@ -3789,6 +3789,7 @@ fn test_not_equals_undefined_converts_to_is_some() {
 
 #[test]
 fn test_option_expected_wraps_literal_in_some() {
+    // Literals with Option expected are wrapped in Some() (for array elements etc.)
     let swc_expr = parse_expr("42;");
     let expected = RustType::Option(Box::new(RustType::F64));
     let result = convert_expr(
@@ -4751,6 +4752,38 @@ fn test_convert_expr_null_with_option_expected_returns_none_not_some_none() {
         "null with Option expected should be None, got: {:?}",
         result
     );
+}
+
+// ---- I-160: Return value Option wrapping ----
+
+#[test]
+fn test_convert_expr_ident_with_option_expected_passes_through() {
+    // x with expected=Option<String> → x (Some wrapping happens at return stmt level)
+    let expr = parse_expr("x");
+    let expected = RustType::Option(Box::new(RustType::String));
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        Some(&expected),
+        &TypeEnv::new(),
+    )
+    .unwrap();
+    assert_eq!(result, Expr::Ident("x".to_string()));
+}
+
+#[test]
+fn test_convert_expr_undefined_with_option_expected_returns_none() {
+    // undefined with expected=Option<T> → None (no wrapping)
+    let expr = parse_expr("undefined");
+    let expected = RustType::Option(Box::new(RustType::String));
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        Some(&expected),
+        &TypeEnv::new(),
+    )
+    .unwrap();
+    assert_eq!(result, Expr::Ident("None".to_string()));
 }
 
 // ---- I-143: Tuple literal conversion ----

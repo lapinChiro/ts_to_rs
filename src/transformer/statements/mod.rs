@@ -45,6 +45,25 @@ pub fn convert_stmt(
                 .as_ref()
                 .map(|e| convert_expr(e, reg, return_type, type_env))
                 .transpose()?;
+            // Wrap in Some() when return type is Option<T> and the value is not None.
+            // Skip wrapping for expressions that already produce Option (optional chaining, etc.)
+            let already_option = ret.arg.as_ref().is_some_and(|e| {
+                contains_opt_chain(e)
+                    || matches!(e.as_ref(), ast::Expr::Ident(id) if id.sym.as_ref() == "null")
+            });
+            let expr = match (expr, return_type) {
+                (Some(inner), Some(RustType::Option(_)))
+                    if !already_option
+                        && !matches!(&inner, Expr::Ident(name) if name == "None")
+                        && !matches!(&inner, Expr::FnCall { name, .. } if name == "Some") =>
+                {
+                    Some(Expr::FnCall {
+                        name: "Some".to_string(),
+                        args: vec![inner],
+                    })
+                }
+                (expr, _) => expr,
+            };
             Ok(vec![Stmt::Return(expr)])
         }
         ast::Stmt::Decl(ast::Decl::Var(var_decl)) => {
@@ -1408,6 +1427,17 @@ fn try_expand_spread_var_decl(
 /// Detects `return [...arr, 1]` at SWC AST level and expands to IR statements.
 ///
 /// Returns `None` if the return statement does not contain a spread array.
+/// Returns true if the AST expression contains an optional chaining operator (`?.`).
+///
+/// Used to avoid double-wrapping in `Some()` — optional chaining already produces `Option`.
+fn contains_opt_chain(expr: &ast::Expr) -> bool {
+    match expr {
+        ast::Expr::OptChain(_) => true,
+        ast::Expr::Paren(p) => contains_opt_chain(&p.expr),
+        _ => false,
+    }
+}
+
 fn try_expand_spread_return(
     ret: &ast::ReturnStmt,
     reg: &TypeRegistry,

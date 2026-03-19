@@ -15,6 +15,19 @@ function main(): void {
         console.log("c is undefined");
     }
 
+    // I-160: nullable return value — return value wrapped in Some()
+    function findValue(id: number): number | null {
+        if (id === 1) {
+            return 42;
+        }
+        return null;
+    }
+    const v1: number | null = findValue(1);
+    const v2: number | null = findValue(99);
+    // Check via null comparison (avoids Debug format difference)
+    console.log("v1 is null:", v1 === null);
+    console.log("v2 is null:", v2 === null);
+
     // nested null
     const arr: (number | null)[] = [1, null, 3];
     let nullCount: number = 0;

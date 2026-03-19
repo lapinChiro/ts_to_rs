@@ -17,6 +17,18 @@ use crate::registry::{TypeDef, TypeRegistry};
 /// Counter for generating unique synthetic struct names.
 static SYNTHETIC_COUNTER: AtomicU32 = AtomicU32::new(0);
 
+/// Returns true if the keyword type is a nullable sentinel (`null`, `undefined`, `void`).
+///
+/// These types are filtered from union members and cause the union to be wrapped in `Option`.
+fn is_nullable_keyword(kind: TsKeywordTypeKind) -> bool {
+    matches!(
+        kind,
+        TsKeywordTypeKind::TsNullKeyword
+            | TsKeywordTypeKind::TsUndefinedKeyword
+            | TsKeywordTypeKind::TsVoidKeyword
+    )
+}
+
 /// Resets the synthetic name counter to zero.
 ///
 /// Called at the start of each `transpile` invocation to ensure deterministic naming
@@ -215,11 +227,7 @@ fn convert_union_type(
 
     for ty in &union.types {
         match ty.as_ref() {
-            TsType::TsKeywordType(kw)
-                if kw.kind == TsKeywordTypeKind::TsNullKeyword
-                    || kw.kind == TsKeywordTypeKind::TsUndefinedKeyword
-                    || kw.kind == TsKeywordTypeKind::TsVoidKeyword =>
-            {
+            TsType::TsKeywordType(kw) if is_nullable_keyword(kw.kind) => {
                 has_null_or_undefined = true;
             }
             // never is the bottom type — remove from unions (T | never = T)
@@ -1188,13 +1196,8 @@ fn try_convert_string_literal_union(
                 }
                 _ => return Ok(None), // Non-string literal → not a string literal union
             },
-            // Skip null/undefined in string literal unions (they become Option wrapping)
-            TsType::TsKeywordType(kw)
-                if matches!(
-                    kw.kind,
-                    TsKeywordTypeKind::TsNullKeyword | TsKeywordTypeKind::TsUndefinedKeyword
-                ) =>
-            {
+            // Skip nullable members in string literal unions (they become Option wrapping)
+            TsType::TsKeywordType(kw) if is_nullable_keyword(kw.kind) => {
                 continue;
             }
             _ => return Ok(None), // Non-literal member → not a string literal union
@@ -1297,10 +1300,7 @@ fn try_convert_general_union(
     let mut has_null_or_undefined = false;
     for ty in &union.types {
         match ty.as_ref() {
-            TsType::TsKeywordType(kw)
-                if kw.kind == TsKeywordTypeKind::TsNullKeyword
-                    || kw.kind == TsKeywordTypeKind::TsUndefinedKeyword =>
-            {
+            TsType::TsKeywordType(kw) if is_nullable_keyword(kw.kind) => {
                 has_null_or_undefined = true;
             }
             other => non_null_types.push(other),

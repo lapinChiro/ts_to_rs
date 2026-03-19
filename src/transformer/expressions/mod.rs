@@ -28,16 +28,15 @@ pub fn convert_expr(
     expected: Option<&RustType>,
     type_env: &TypeEnv,
 ) -> Result<Expr> {
-    // Option<T> expected with literal/identifier values: wrap in Some()
+    // Option<T> expected: handle null/undefined → None, literals → Some(lit)
     if let Some(RustType::Option(inner)) = expected {
-        // null / undefined → None (no wrapping)
+        // null / undefined → None
         if matches!(expr, ast::Expr::Ident(ident) if ident.sym.as_ref() == "undefined")
             || matches!(expr, ast::Expr::Lit(ast::Lit::Null(..)))
         {
             return Ok(Expr::Ident("None".to_string()));
         }
-        // Only wrap literals and simple identifiers in Some()
-        // Complex expressions (method calls, optional chaining, etc.) may already return Option
+        // Wrap non-null literals in Some() (needed for array elements like vec![Some(1.0), None])
         if matches!(expr, ast::Expr::Lit(_)) {
             let inner_result = convert_expr(expr, reg, Some(inner), type_env)?;
             return Ok(Expr::FnCall {

@@ -1879,6 +1879,20 @@ fn test_convert_ts_type_union_void_treated_as_nullable() {
 }
 
 #[test]
+fn test_convert_type_alias_union_void_generates_option() {
+    // type X = string | void → type X = Option<String> (I-170: void filtered in type alias)
+    let decl = parse_type_alias("type X = string | void;");
+    let item = convert_type_alias(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
+    match item {
+        Item::TypeAlias { name, ty, .. } => {
+            assert_eq!(name, "X");
+            assert_eq!(ty, RustType::Option(Box::new(RustType::String)));
+        }
+        other => panic!("expected TypeAlias, got {:?}", other),
+    }
+}
+
+#[test]
 fn test_convert_type_alias_intersection_union_complex_generates_enum() {
     let decl = parse_type_alias("type X = { a: string } & { b: number } | { c: boolean };");
     let item = convert_type_alias(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
