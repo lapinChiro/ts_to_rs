@@ -140,6 +140,42 @@ pub fn convert_ts_type(
             // `x is Type` → bool (type guard predicates are booleans at runtime)
             Ok(RustType::Bool)
         }
+        TsType::TsTypeOperator(op) => {
+            use swc_ecma_ast::TsTypeOperatorOp;
+            match op.op {
+                // `readonly T[]` → strip readonly, convert inner type
+                // Rust enforces immutability through variable bindings, not types
+                TsTypeOperatorOp::ReadOnly => convert_ts_type(&op.type_ann, extra_items, reg),
+                _ => Err(anyhow!("unsupported type operator: {:?}", op.op)),
+            }
+        }
+        TsType::TsTypeQuery(query) => {
+            // `typeof X` → look up X in registry; if found, use that type
+            let name = match &query.expr_name {
+                swc_ecma_ast::TsTypeQueryExpr::TsEntityName(swc_ecma_ast::TsEntityName::Ident(
+                    ident,
+                )) => ident.sym.to_string(),
+                _ => return Err(anyhow!("unsupported typeof expression")),
+            };
+            match reg.get(&name) {
+                Some(crate::registry::TypeDef::Function {
+                    params,
+                    return_type,
+                    ..
+                }) => {
+                    let param_types: Vec<RustType> =
+                        params.iter().map(|(_, t)| t.clone()).collect();
+                    let ret = return_type.clone().unwrap_or(RustType::Unit);
+                    Ok(RustType::Fn {
+                        params: param_types,
+                        return_type: Box::new(ret),
+                    })
+                }
+                _ => Err(anyhow!(
+                    "unsupported type: TsTypeQuery for unknown identifier '{name}'"
+                )),
+            }
+        }
         _ => Err(anyhow!("unsupported type: {:?}", ts_type)),
     }
 }
@@ -476,6 +512,21 @@ fn convert_interface_as_fn_type(
                     .map(|ann| convert_ts_type(&ann.type_ann, &mut Vec::new(), reg))
                     .transpose()?
                     .unwrap_or(RustType::Any);
+                param_types.push(ty);
+            }
+            swc_ecma_ast::TsFnParam::Rest(rest) => {
+                // Rest parameter: ...args: T[] → Vec<T>
+                let type_ann = rest.type_ann.as_ref().or_else(|| {
+                    if let swc_ecma_ast::Pat::Ident(ident) = rest.arg.as_ref() {
+                        ident.type_ann.as_ref()
+                    } else {
+                        None
+                    }
+                });
+                let ty = type_ann
+                    .map(|ann| convert_ts_type(&ann.type_ann, &mut Vec::new(), reg))
+                    .transpose()?
+                    .unwrap_or(RustType::Vec(Box::new(RustType::Any)));
                 param_types.push(ty);
             }
             _ => return Err(anyhow!("unsupported call signature parameter pattern")),

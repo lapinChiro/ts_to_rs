@@ -1235,6 +1235,50 @@ fn test_convert_interface_call_signature_no_params_generates_fn_type() {
     );
 }
 
+// --- I-130: call signature rest parameters ---
+
+#[test]
+fn test_convert_interface_call_signature_rest_param_generates_fn_type() {
+    let decl = parse_interface("interface Handler { (...args: number[]): void }");
+    let items = convert_interface_items(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(
+        items[0],
+        Item::TypeAlias {
+            vis: Visibility::Public,
+            name: "Handler".to_string(),
+            type_params: vec![],
+            ty: RustType::Fn {
+                params: vec![RustType::Vec(Box::new(RustType::F64))],
+                return_type: Box::new(RustType::Unit),
+            },
+        }
+    );
+}
+
+#[test]
+fn test_convert_interface_call_signature_mixed_and_rest_generates_fn_type() {
+    let decl =
+        parse_interface("interface Formatter { (template: string, ...values: number[]): string }");
+    let items = convert_interface_items(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
+    assert_eq!(items.len(), 1);
+    match &items[0] {
+        Item::TypeAlias {
+            ty: RustType::Fn {
+                params,
+                return_type,
+            },
+            ..
+        } => {
+            assert_eq!(params.len(), 2);
+            assert_eq!(params[0], RustType::String);
+            assert_eq!(params[1], RustType::Vec(Box::new(RustType::F64)));
+            assert_eq!(return_type.as_ref(), &RustType::String);
+        }
+        _ => panic!("expected TypeAlias with Fn type"),
+    }
+}
+
 #[test]
 fn test_convert_interface_mixed_props_and_methods_generates_struct_and_trait() {
     let decl = parse_interface("interface Ctx { name: string; greet(msg: string): void }");
@@ -2130,6 +2174,93 @@ fn test_convert_ts_type_readonly_returns_inner_type() {
             type_args: vec![],
         }
     );
+}
+
+// --- I-150: readonly type operator ---
+
+#[test]
+fn test_convert_ts_type_readonly_array_returns_vec_string() {
+    // readonly string[] → Vec<String>
+    let decl = parse_interface("interface T { x: readonly string[]; }");
+    let prop = match &decl.body.body[0] {
+        TsTypeElement::TsPropertySignature(p) => p,
+        _ => panic!("expected property signature"),
+    };
+    let ty = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut Vec::new(),
+        &TypeRegistry::new(),
+    )
+    .unwrap();
+    assert_eq!(ty, RustType::Vec(Box::new(RustType::String)));
+}
+
+#[test]
+fn test_convert_ts_type_readonly_number_array_returns_vec_f64() {
+    // readonly number[] → Vec<f64>
+    let decl = parse_interface("interface T { x: readonly number[]; }");
+    let prop = match &decl.body.body[0] {
+        TsTypeElement::TsPropertySignature(p) => p,
+        _ => panic!("expected property signature"),
+    };
+    let ty = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut Vec::new(),
+        &TypeRegistry::new(),
+    )
+    .unwrap();
+    assert_eq!(ty, RustType::Vec(Box::new(RustType::F64)));
+}
+
+// --- I-149: typeof type query ---
+
+#[test]
+fn test_convert_ts_type_typeof_known_fn_returns_fn_type() {
+    // typeof knownFn where knownFn is registered → returns its fn type
+    use crate::registry::TypeDef;
+    let mut reg = TypeRegistry::new();
+    reg.register(
+        "myFunc".to_string(),
+        TypeDef::Function {
+            params: vec![("x".to_string(), RustType::F64)],
+            return_type: Some(RustType::String),
+            has_rest: false,
+        },
+    );
+    let decl = parse_interface("interface T { f: typeof myFunc; }");
+    let prop = match &decl.body.body[0] {
+        TsTypeElement::TsPropertySignature(p) => p,
+        _ => panic!("expected property signature"),
+    };
+    let ty = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut Vec::new(),
+        &reg,
+    )
+    .unwrap();
+    assert_eq!(
+        ty,
+        RustType::Fn {
+            params: vec![RustType::F64],
+            return_type: Box::new(RustType::String),
+        }
+    );
+}
+
+#[test]
+fn test_convert_ts_type_typeof_unknown_returns_error() {
+    // typeof unknownFn where unknownFn is NOT registered → error
+    let decl = parse_interface("interface T { f: typeof unknownFn; }");
+    let prop = match &decl.body.body[0] {
+        TsTypeElement::TsPropertySignature(p) => p,
+        _ => panic!("expected property signature"),
+    };
+    let result = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut Vec::new(),
+        &TypeRegistry::new(),
+    );
+    assert!(result.is_err(), "typeof unknown should return error");
 }
 
 #[test]

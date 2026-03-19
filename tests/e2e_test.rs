@@ -537,3 +537,8 @@ fn test_e2e_bigint_basics_ts_rust_stdout_match() {
 fn test_e2e_iife_ts_rust_stdout_match() {
     run_e2e_test("iife");
 }
+
+#[test]
+fn test_e2e_readonly_param_ts_rust_stdout_match() {
+    run_e2e_test("readonly_param");
+}

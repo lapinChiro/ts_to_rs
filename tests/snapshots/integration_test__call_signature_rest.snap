@@ -1,0 +1,9 @@
+---
+source: tests/integration_test.rs
+expression: output
+---
+type VarargHandler = Box<dyn Fn(Vec<f64>)>;
+
+type Formatter = Box<dyn Fn(String, Vec<f64>) -> String>;
+
+type Callback = Box<dyn Fn(f64, f64) -> f64>;

@@ -1,10 +1,14 @@
 use std::fs;
 use std::process::Command;
+use std::sync::Mutex;
 
 use ts_to_rs::{build_shared_registry, transpile_collecting, transpile_collecting_with_registry};
 
 /// Path to the fixed Cargo project used for compile checking.
 const COMPILE_CHECK_DIR: &str = "tests/compile-check";
+
+/// Mutex to serialize compile tests (they share the same compile-check project).
+static COMPILE_LOCK: Mutex<()> = Mutex::new(());
 
 /// Strips internal module `use` statements while preserving external crate imports.
 ///
@@ -28,6 +32,8 @@ fn strip_internal_use_statements(rs_source: &str) -> String {
 
 /// Compiles the given Rust source code via `cargo check` against the fixed
 /// compile-check project (which has external crate dependencies).
+///
+/// Caller must hold `COMPILE_LOCK` before calling this function.
 fn assert_compiles(rs_source: &str, fixture_name: &str) {
     let compilable_source = strip_internal_use_statements(rs_source);
 
@@ -58,6 +64,8 @@ fn assert_compiles(rs_source: &str, fixture_name: &str) {
 
 #[test]
 fn test_all_fixtures_compile() {
+    let _lock = COMPILE_LOCK.lock().unwrap();
+
     let fixture_dir = "tests/fixtures";
     let mut fixture_count = 0;
 
@@ -108,6 +116,8 @@ fn test_all_fixtures_compile() {
 ///
 /// All `.ts` files in the directory are transpiled with a shared TypeRegistry.
 /// `main.ts` → `src/lib.rs`, other files → `src/<name>.rs` with `mod` declarations.
+///
+/// Caller must hold `COMPILE_LOCK` before calling this function.
 fn assert_compiles_directory(dir: &str, fixture_name: &str) {
     // Collect all .ts files
     let mut entries: Vec<_> = fs::read_dir(dir)
@@ -189,6 +199,8 @@ fn assert_compiles_directory(dir: &str, fixture_name: &str) {
 
 #[test]
 fn test_multi_file_fixtures_compile() {
+    let _lock = COMPILE_LOCK.lock().unwrap();
+
     let multi_dir = "tests/fixtures/multi";
     let Ok(entries) = fs::read_dir(multi_dir) else {
         return; // No multi-file fixtures yet

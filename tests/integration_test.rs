@@ -458,3 +458,10 @@ fn test_nullable_return() {
     );
     insta::assert_snapshot!(output);
 }
+
+#[test]
+fn test_call_signature_rest() {
+    let input = fs::read_to_string("tests/fixtures/call-signature-rest.input.ts").unwrap();
+    let output = transpile(&input).unwrap();
+    insta::assert_snapshot!(output);
+}
