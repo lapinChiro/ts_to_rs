@@ -465,3 +465,10 @@ fn test_call_signature_rest() {
     let output = transpile(&input).unwrap();
     insta::assert_snapshot!(output);
 }
+
+#[test]
+fn test_interface_methods() {
+    let input = fs::read_to_string("tests/fixtures/interface-methods.input.ts").unwrap();
+    let output = transpile_collecting(&input).unwrap().0;
+    insta::assert_snapshot!(output);
+}

@@ -1033,6 +1033,7 @@ fn test_convert_type_alias_conditional_infer_returns_associated_type() {
         Item::Trait {
             vis: Visibility::Public,
             name: "Promise".to_string(),
+            supertraits: vec![],
             methods: vec![],
             associated_types: vec!["Output".to_string()],
         }
@@ -1284,19 +1285,19 @@ fn test_convert_interface_mixed_props_and_methods_generates_struct_and_trait() {
     let decl = parse_interface("interface Ctx { name: string; greet(msg: string): void }");
     let items = convert_interface_items(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
     assert_eq!(items.len(), 3);
-    // First: struct with properties
+    // First: struct with properties (named {Name}Data)
     match &items[0] {
         Item::Struct { name, fields, .. } => {
-            assert_eq!(name, "Ctx");
+            assert_eq!(name, "CtxData");
             assert_eq!(fields.len(), 1);
             assert_eq!(fields[0].name, "name");
         }
         _ => panic!("expected Item::Struct, got {:?}", items[0]),
     }
-    // Second: trait with methods
+    // Second: trait with methods (named {Name} — the interface name)
     match &items[1] {
         Item::Trait { name, methods, .. } => {
-            assert_eq!(name, "CtxTrait");
+            assert_eq!(name, "Ctx");
             assert_eq!(methods.len(), 1);
             assert_eq!(methods[0].name, "greet");
         }
@@ -1309,8 +1310,8 @@ fn test_convert_interface_mixed_props_and_methods_generates_struct_and_trait() {
             for_trait,
             ..
         } => {
-            assert_eq!(struct_name, "Ctx");
-            assert_eq!(for_trait.as_deref(), Some("CtxTrait"));
+            assert_eq!(struct_name, "CtxData");
+            assert_eq!(for_trait.as_deref(), Some("Ctx"));
         }
         _ => panic!("expected Item::Impl, got {:?}", items[2]),
     }
@@ -1481,6 +1482,7 @@ fn test_convert_type_alias_intersection_type_ref_resolved_generates_merged_struc
         crate::registry::TypeDef::Struct {
             fields: vec![("a".to_string(), RustType::String)],
             methods: std::collections::HashMap::new(),
+            extends: vec![],
         },
     );
     reg.register(
@@ -1488,6 +1490,7 @@ fn test_convert_type_alias_intersection_type_ref_resolved_generates_merged_struc
         crate::registry::TypeDef::Struct {
             fields: vec![("b".to_string(), RustType::F64)],
             methods: std::collections::HashMap::new(),
+            extends: vec![],
         },
     );
     let decl = parse_type_alias("type C = Foo & Bar;");
@@ -2304,6 +2307,7 @@ fn reg_with_point() -> TypeRegistry {
                 ("z".to_string(), RustType::F64),
             ],
             methods: std::collections::HashMap::new(),
+            extends: vec![],
         },
     );
     reg
@@ -2368,6 +2372,7 @@ fn test_utility_required_strips_option_from_all_fields() {
                 ("y".to_string(), RustType::Option(Box::new(RustType::F64))),
             ],
             methods: std::collections::HashMap::new(),
+            extends: vec![],
         },
     );
     let mut extra_items = Vec::new();

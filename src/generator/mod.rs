@@ -104,11 +104,17 @@ fn generate_item(item: &Item) -> String {
         Item::Trait {
             vis,
             name,
+            supertraits,
             methods,
             associated_types,
         } => {
             let vis_str = generate_vis(vis);
-            let mut out = format!("{vis_str}trait {name} {{\n");
+            let bounds = if supertraits.is_empty() {
+                String::new()
+            } else {
+                format!(": {}", supertraits.join(" + "))
+            };
+            let mut out = format!("{vis_str}trait {name}{bounds} {{\n");
             for assoc_type in associated_types {
                 out.push_str(&format!("    type {assoc_type};\n"));
             }
@@ -1042,11 +1048,36 @@ pub struct B {
                 return_type: Some(RustType::String),
                 body: None,
             }],
+            supertraits: vec![],
             associated_types: vec![],
         };
         let expected = "\
 pub trait AnimalTrait {
     fn speak(&self) -> String;
+}";
+        assert_eq!(generate(&[item]), expected);
+    }
+
+    #[test]
+    fn test_generate_trait_with_supertraits_outputs_bounds() {
+        let item = Item::Trait {
+            vis: Visibility::Public,
+            name: "Dog".to_string(),
+            supertraits: vec!["Animal".to_string(), "Debug".to_string()],
+            methods: vec![Method {
+                vis: Visibility::Private,
+                name: "bark".to_string(),
+                has_self: true,
+                has_mut_self: false,
+                params: vec![],
+                return_type: None,
+                body: None,
+            }],
+            associated_types: vec![],
+        };
+        let expected = "\
+pub trait Dog: Animal + Debug {
+    fn bark(&self);
 }";
         assert_eq!(generate(&[item]), expected);
     }

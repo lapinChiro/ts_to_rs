@@ -1750,6 +1750,7 @@ fn test_object_destructuring_rest_with_type_expands_remaining_fields() {
                 ("c".to_string(), RustType::F64),
             ],
             methods: std::collections::HashMap::new(),
+            extends: vec![],
         },
     );
     let mut type_env = TypeEnv::new();

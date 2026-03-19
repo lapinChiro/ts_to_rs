@@ -5,16 +5,16 @@ expression: output
 pub type Handler = Box<dyn Fn(String) -> f64>;
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Service {
+pub struct ServiceData {
     pub name: String,
 }
 
-pub trait ServiceTrait {
+pub trait Service {
     fn start(&self);
     fn stop(&self) -> bool;
 }
 
-impl ServiceTrait for Service {
+impl Service for ServiceData {
     fn start(&self) {
     }
 

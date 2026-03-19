@@ -443,6 +443,9 @@ pub fn convert_interface(
 }
 
 /// Converts an interface with only property signatures into an IR [`Item::Struct`].
+///
+/// If the interface extends other interfaces, parent fields are included
+/// (flattened) before the child's own fields.
 fn convert_interface_as_struct(
     decl: &TsInterfaceDecl,
     vis: Visibility,
@@ -451,6 +454,25 @@ fn convert_interface_as_struct(
     reg: &TypeRegistry,
 ) -> Result<Item> {
     let mut fields = Vec::new();
+
+    // Flatten parent fields from extends chain
+    for parent_name in collect_extends_names(decl) {
+        if let Some(TypeDef::Struct {
+            fields: parent_fields,
+            ..
+        }) = reg.get(&parent_name)
+        {
+            for (fname, ftype) in parent_fields {
+                if !fields.iter().any(|f: &StructField| f.name == *fname) {
+                    fields.push(StructField {
+                        vis: Some(Visibility::Public),
+                        name: fname.clone(),
+                        ty: ftype.clone(),
+                    });
+                }
+            }
+        }
+    }
 
     for member in &decl.body.body {
         match member {
@@ -553,9 +575,9 @@ fn convert_interface_as_fn_type(
 
 /// Converts a mixed interface (properties + methods) into struct + trait + impl.
 ///
-/// - Properties → `Item::Struct`
-/// - Methods → `Item::Trait` (named `{Name}Trait`)
-/// - Impl block → `Item::Impl` (implements `{Name}Trait` for `{Name}`)
+/// - Properties → `Item::Struct` (named `{Name}Data`)
+/// - Methods → `Item::Trait` (named `{Name}` — the interface name)
+/// - Impl block → `Item::Impl` (implements `{Name}` for `{Name}Data`)
 fn convert_interface_as_struct_and_trait(
     decl: &TsInterfaceDecl,
     vis: Visibility,
@@ -565,6 +587,25 @@ fn convert_interface_as_struct_and_trait(
 ) -> Result<Vec<Item>> {
     let mut fields = Vec::new();
     let mut methods = Vec::new();
+
+    // Flatten parent fields from extends chain
+    for parent_name in collect_extends_names(decl) {
+        if let Some(TypeDef::Struct {
+            fields: parent_fields,
+            ..
+        }) = reg.get(&parent_name)
+        {
+            for (fname, ftype) in parent_fields {
+                if !fields.iter().any(|f: &StructField| f.name == *fname) {
+                    fields.push(StructField {
+                        vis: Some(Visibility::Public),
+                        name: fname.clone(),
+                        ty: ftype.clone(),
+                    });
+                }
+            }
+        }
+    }
 
     for member in &decl.body.body {
         match member {
@@ -580,25 +621,27 @@ fn convert_interface_as_struct_and_trait(
         }
     }
 
-    let trait_name = format!("{name}Trait");
+    let struct_name = format!("{name}Data");
+    let supertraits = collect_extends_names(decl);
 
     let struct_item = Item::Struct {
         vis: vis.clone(),
-        name: name.to_string(),
+        name: struct_name.clone(),
         type_params: type_params.clone(),
         fields,
     };
 
     let trait_item = Item::Trait {
         vis: vis.clone(),
-        name: trait_name.clone(),
+        name: name.to_string(),
+        supertraits,
         methods: methods.clone(),
         associated_types: vec![],
     };
 
     let impl_item = Item::Impl {
-        struct_name: name.to_string(),
-        for_trait: Some(trait_name),
+        struct_name,
+        for_trait: Some(name.to_string()),
         consts: vec![],
         methods,
     };
@@ -638,12 +681,29 @@ fn convert_interface_as_trait(
     // TODO: Add type_params to Item::Trait when needed.
     let _ = type_params;
 
+    let supertraits = collect_extends_names(decl);
+
     Ok(Item::Trait {
         vis,
         name: name.to_string(),
+        supertraits,
         methods,
         associated_types: vec![],
     })
+}
+
+/// Collects parent interface names from the `extends` clause of an interface declaration.
+fn collect_extends_names(decl: &TsInterfaceDecl) -> Vec<String> {
+    decl.extends
+        .iter()
+        .filter_map(|e| {
+            if let swc_ecma_ast::Expr::Ident(ident) = e.expr.as_ref() {
+                Some(ident.sym.to_string())
+            } else {
+                None
+            }
+        })
+        .collect()
 }
 
 /// Converts a [`TsMethodSignature`] into an IR [`Method`] (signature only, no body).
@@ -960,6 +1020,7 @@ fn convert_conditional_type(
         extra_items.push(Item::Trait {
             vis: Visibility::Public,
             name: trait_name,
+            supertraits: vec![],
             methods: vec![],
             associated_types: vec!["Output".to_string()],
         });
@@ -1595,6 +1656,42 @@ fn try_convert_intersection_type(
     }
 
     let type_params = extract_type_params(decl.type_params.as_deref());
+
+    // If all intersection members are named type refs that resolve to method-only types
+    // (traits), generate a supertrait composition instead of a struct.
+    let trait_names: Vec<String> = intersection
+        .types
+        .iter()
+        .filter_map(|ty| {
+            if let TsType::TsTypeRef(type_ref) = ty.as_ref() {
+                if let swc_ecma_ast::TsEntityName::Ident(ident) = &type_ref.type_name {
+                    let name = ident.sym.to_string();
+                    if let Some(crate::registry::TypeDef::Struct {
+                        fields: f,
+                        methods: m,
+                        ..
+                    }) = reg.get(&name)
+                    {
+                        if f.is_empty() && !m.is_empty() {
+                            return Some(name);
+                        }
+                    }
+                }
+            }
+            None
+        })
+        .collect();
+
+    if trait_names.len() == intersection.types.len() && !trait_names.is_empty() {
+        // All members are method-only (trait-like) → supertrait composition
+        return Ok(Some(Item::Trait {
+            vis,
+            name: decl.id.sym.to_string(),
+            supertraits: trait_names,
+            methods: vec![],
+            associated_types: vec![],
+        }));
+    }
 
     Ok(Some(Item::Struct {
         vis,

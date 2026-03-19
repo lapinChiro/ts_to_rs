@@ -226,6 +226,8 @@ pub enum Item {
         vis: Visibility,
         /// Trait name (e.g., `AnimalTrait`)
         name: String,
+        /// Supertrait bounds (e.g., `["Animal", "Debug"]` → `trait Dog: Animal + Debug`)
+        supertraits: Vec<String>,
         /// Method signatures (body is empty — signatures only)
         methods: Vec<Method>,
         /// Associated type declarations (e.g., `type Output;`)

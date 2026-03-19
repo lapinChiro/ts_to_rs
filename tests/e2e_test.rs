@@ -640,6 +640,11 @@ fn test_e2e_stdin_echo_ts_rust_stdout_match() {
 }
 
 #[test]
+fn test_e2e_interface_traits_ts_rust_stdout_match() {
+    run_e2e_test("interface_traits");
+}
+
+#[test]
 fn test_e2e_file_io_ts_rust_stdout_match() {
     let temp_dir = std::env::temp_dir().join("ts_to_rs_e2e_file_io");
     let _ = std::fs::remove_dir_all(&temp_dir);

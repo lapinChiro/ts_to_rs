@@ -224,6 +224,7 @@ fn convert_external_typedef(def: &ExternalTypeDef) -> Option<TypeDef> {
             Some(TypeDef::Struct {
                 fields: converted_fields,
                 methods: converted_methods,
+                extends: vec![],
             })
         }
         ExternalTypeDef::Function { signatures } => {
@@ -467,7 +468,9 @@ mod tests {
         let def: ExternalTypeDef = serde_json::from_str(json).unwrap();
         let type_def = convert_external_typedef(&def).unwrap();
         match type_def {
-            TypeDef::Struct { fields, methods } => {
+            TypeDef::Struct {
+                fields, methods, ..
+            } => {
                 assert_eq!(fields.len(), 2);
                 assert_eq!(fields[0].0, "status");
                 assert_eq!(fields[0].1, RustType::F64);

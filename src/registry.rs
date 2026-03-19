@@ -21,6 +21,8 @@ pub enum TypeDef {
         fields: Vec<(String, RustType)>,
         /// メソッドシグネチャ（メソッド名 → パラメータ一覧）
         methods: HashMap<String, Vec<(String, RustType)>>,
+        /// 親 interface 名のリスト（`interface B extends A` の `A`）
+        extends: Vec<String>,
     },
     /// enum
     Enum {
@@ -121,9 +123,24 @@ fn collect_decl(reg: &mut TypeRegistry, decl: &ast::Decl) {
         ast::Decl::TsInterface(iface) => {
             if let Ok(fields) = collect_interface_fields(iface) {
                 let methods = collect_interface_methods(iface);
+                let extends: Vec<String> = iface
+                    .extends
+                    .iter()
+                    .filter_map(|e| {
+                        if let ast::Expr::Ident(ident) = e.expr.as_ref() {
+                            Some(ident.sym.to_string())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
                 reg.register(
                     iface.id.sym.to_string(),
-                    TypeDef::Struct { fields, methods },
+                    TypeDef::Struct {
+                        fields,
+                        methods,
+                        extends,
+                    },
                 );
             }
         }
@@ -140,6 +157,7 @@ fn collect_decl(reg: &mut TypeRegistry, decl: &ast::Decl) {
                     TypeDef::Struct {
                         fields,
                         methods: HashMap::new(),
+                        extends: vec![],
                     },
                 );
             }
@@ -189,6 +207,7 @@ fn collect_decl(reg: &mut TypeRegistry, decl: &ast::Decl) {
             if let TypeDef::Struct {
                 ref fields,
                 ref methods,
+                ..
             } = def
             {
                 if !fields.is_empty() || !methods.is_empty() {
@@ -250,7 +269,11 @@ fn collect_class_info(class: &ast::ClassDecl) -> TypeDef {
         }
     }
 
-    TypeDef::Struct { fields, methods }
+    TypeDef::Struct {
+        fields,
+        methods,
+        extends: vec![],
+    }
 }
 
 /// interface のフィールド名・型を収集する。
@@ -703,6 +726,7 @@ mod tests {
                     ("y".to_string(), RustType::F64),
                 ],
                 methods: std::collections::HashMap::new(),
+                extends: vec![],
             },
         );
         let def = reg.get("Point").unwrap();
@@ -714,6 +738,7 @@ mod tests {
                     ("y".to_string(), RustType::F64),
                 ],
                 methods: HashMap::new(),
+                extends: vec![],
             }
         );
     }
@@ -788,6 +813,7 @@ mod tests {
             TypeDef::Struct {
                 fields: vec![("x".to_string(), RustType::F64)],
                 methods: std::collections::HashMap::new(),
+                extends: vec![],
             },
         );
 
@@ -821,6 +847,7 @@ mod tests {
                     ("y".to_string(), RustType::F64),
                 ],
                 methods: HashMap::new(),
+                extends: vec![],
             }
         );
     }
@@ -837,6 +864,7 @@ mod tests {
                     ("count".to_string(), RustType::F64),
                 ],
                 methods: HashMap::new(),
+                extends: vec![],
             }
         );
     }
@@ -976,6 +1004,7 @@ mod tests {
                     RustType::Option(Box::new(RustType::String)),
                 )],
                 methods: HashMap::new(),
+                extends: vec![],
             }
         );
     }

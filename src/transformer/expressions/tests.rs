@@ -371,6 +371,7 @@ fn test_new_expr_string_arg_gets_to_string() {
         TypeDef::Struct {
             fields: vec![("name".to_string(), RustType::String)],
             methods: std::collections::HashMap::new(),
+            extends: vec![],
         },
     );
     let swc_expr = parse_expr(r#"new Foo("hello");"#);
@@ -582,6 +583,7 @@ fn test_convert_expr_object_spread_last_position_expands_remaining_fields() {
                 ("y".to_string(), RustType::F64),
             ],
             methods: std::collections::HashMap::new(),
+            extends: vec![],
         },
     );
     let result = convert_expr(&swc_expr, &reg, Some(&expected), &TypeEnv::new()).unwrap();
@@ -623,6 +625,7 @@ fn test_convert_expr_object_spread_middle_position_expands_remaining_fields() {
                 ("c".to_string(), RustType::F64),
             ],
             methods: std::collections::HashMap::new(),
+            extends: vec![],
         },
     );
     let result = convert_expr(&swc_expr, &reg, Some(&expected), &TypeEnv::new()).unwrap();
@@ -689,6 +692,7 @@ fn test_convert_object_spread_multiple_registered_generates_merged_fields() {
                 ("y".to_string(), RustType::F64),
             ],
             methods: std::collections::HashMap::new(),
+            extends: vec![],
         },
     );
     let result = convert_expr(&swc_expr, &reg, Some(&expected), &TypeEnv::new()).unwrap();
@@ -723,6 +727,7 @@ fn test_convert_expr_object_spread_with_override() {
                 ("y".to_string(), RustType::F64),
             ],
             methods: std::collections::HashMap::new(),
+            extends: vec![],
         },
     );
     let result = convert_expr(&swc_expr, &reg, Some(&expected), &TypeEnv::new()).unwrap();
@@ -929,6 +934,7 @@ fn test_convert_expr_object_literal_nested_resolves_field_type_from_registry() {
                 ("y".to_string(), RustType::F64),
             ],
             methods: std::collections::HashMap::new(),
+            extends: vec![],
         },
     );
     reg.register(
@@ -945,6 +951,7 @@ fn test_convert_expr_object_literal_nested_resolves_field_type_from_registry() {
                 ("w".to_string(), RustType::F64),
             ],
             methods: std::collections::HashMap::new(),
+            extends: vec![],
         },
     );
 
@@ -996,6 +1003,7 @@ fn test_object_lit_omitted_optional_field_gets_none() {
                 ),
             ],
             methods: std::collections::HashMap::new(),
+            extends: vec![],
         },
     );
     let swc_expr = parse_var_init(r#"const i: Item = { name: "test" };"#);
@@ -1330,6 +1338,7 @@ fn test_convert_expr_object_shorthand_with_registry_field_type() {
         TypeDef::Struct {
             fields: vec![("name".to_string(), RustType::String)],
             methods: std::collections::HashMap::new(),
+            extends: vec![],
         },
     );
     let result = convert_expr(&swc_expr, &reg, Some(&expected), &TypeEnv::new()).unwrap();
@@ -2686,6 +2695,7 @@ fn test_resolve_expr_type_member_field_found_returns_field_type() {
         TypeDef::Struct {
             fields: vec![("field".to_string(), RustType::String)],
             methods: std::collections::HashMap::new(),
+            extends: vec![],
         },
     );
 
@@ -2709,6 +2719,7 @@ fn test_resolve_expr_type_member_field_not_found_returns_none() {
         TypeDef::Struct {
             fields: vec![("other".to_string(), RustType::F64)],
             methods: std::collections::HashMap::new(),
+            extends: vec![],
         },
     );
 
@@ -2732,6 +2743,7 @@ fn test_resolve_expr_type_member_option_named_returns_field_type() {
         TypeDef::Struct {
             fields: vec![("field".to_string(), RustType::String)],
             methods: std::collections::HashMap::new(),
+            extends: vec![],
         },
     );
 
@@ -2803,6 +2815,7 @@ fn test_resolve_expr_type_member_chain_returns_nested_type() {
                 },
             )],
             methods: std::collections::HashMap::new(),
+            extends: vec![],
         },
     );
     reg.register(
@@ -2810,6 +2823,7 @@ fn test_resolve_expr_type_member_chain_returns_nested_type() {
         TypeDef::Struct {
             fields: vec![("name".to_string(), RustType::String)],
             methods: std::collections::HashMap::new(),
+            extends: vec![],
         },
     );
 
@@ -2975,6 +2989,7 @@ fn test_convert_opt_chain_nested_option_uses_and_then() {
                 })),
             )],
             methods: std::collections::HashMap::new(),
+            extends: vec![],
         },
     );
     reg.register(
@@ -2982,6 +2997,7 @@ fn test_convert_opt_chain_nested_option_uses_and_then() {
         TypeDef::Struct {
             fields: vec![("z".to_string(), RustType::String)],
             methods: std::collections::HashMap::new(),
+            extends: vec![],
         },
     );
 
@@ -3312,6 +3328,7 @@ fn test_resolve_expr_type_new_registered_returns_named_type() {
         TypeDef::Struct {
             fields: vec![],
             methods: std::collections::HashMap::new(),
+            extends: vec![],
         },
     );
 
@@ -4281,6 +4298,7 @@ fn test_convert_method_call_string_arg_gets_to_string_with_registry() {
         TypeDef::Struct {
             fields: vec![],
             methods,
+            extends: vec![],
         },
     );
 
@@ -4394,6 +4412,7 @@ fn test_in_operator_struct_field_exists_generates_true() {
                 ("y".to_string(), RustType::F64),
             ],
             methods: std::collections::HashMap::new(),
+            extends: vec![],
         },
     );
     let mut env = TypeEnv::new();
@@ -4421,6 +4440,7 @@ fn test_in_operator_struct_field_missing_generates_false() {
                 ("y".to_string(), RustType::F64),
             ],
             methods: std::collections::HashMap::new(),
+            extends: vec![],
         },
     );
     let mut env = TypeEnv::new();
@@ -4462,6 +4482,7 @@ fn test_convert_expr_arrow_object_destructuring_generates_expansion() {
                     ("y".to_string(), crate::ir::RustType::F64),
                 ],
                 methods: std::collections::HashMap::new(),
+                extends: vec![],
             },
         );
         r
@@ -5393,6 +5414,7 @@ fn test_convert_expr_fn_expr_object_destructuring_param() {
                     ("y".to_string(), crate::ir::RustType::F64),
                 ],
                 methods: std::collections::HashMap::new(),
+                extends: vec![],
             },
         );
         r

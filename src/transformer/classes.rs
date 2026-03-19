@@ -212,6 +212,7 @@ pub fn generate_parent_class_items(info: &ClassInfo) -> Result<Vec<Item>> {
     items.push(Item::Trait {
         vis: info.vis.clone(),
         name: trait_name.clone(),
+        supertraits: vec![],
         methods: trait_methods,
         associated_types: vec![],
     });
@@ -256,6 +257,7 @@ pub fn generate_abstract_class_items(info: &ClassInfo) -> Result<Vec<Item>> {
     Ok(vec![Item::Trait {
         vis: info.vis.clone(),
         name: info.name.clone(),
+        supertraits: vec![],
         methods,
         associated_types: vec![],
     }])
