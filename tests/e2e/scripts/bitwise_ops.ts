@@ -35,4 +35,13 @@ function main(): void {
 
     // Mixed with arithmetic
     console.log("mixed:", 10 + (a & b));
+
+    // Unsigned right shift (>>>)
+    console.log("ushr:", 8 >>> 1);
+    console.log("ushr_neg:", (-1 >>> 0));
+
+    // Unsigned right shift compound assignment (>>>=)
+    let y: number = 32;
+    y >>>= 2;
+    console.log("ushr_assign:", y);
 }

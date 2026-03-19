@@ -587,6 +587,8 @@ pub enum BinOp {
     Shl,
     /// `>>`
     Shr,
+    /// `>>>` (unsigned right shift — Rust: `(x as u32) >> (n as u32)`)
+    UShr,
 }
 
 impl BinOp {
@@ -611,6 +613,7 @@ impl BinOp {
             BinOp::BitXor => "^",
             BinOp::Shl => "<<",
             BinOp::Shr => ">>",
+            BinOp::UShr => ">>",
         }
     }
 
@@ -618,7 +621,7 @@ impl BinOp {
     pub fn is_bitwise(self) -> bool {
         matches!(
             self,
-            BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | BinOp::Shl | BinOp::Shr
+            BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | BinOp::Shl | BinOp::Shr | BinOp::UShr
         )
     }
 
@@ -635,7 +638,7 @@ impl BinOp {
             BinOp::BitOr => 4,
             BinOp::BitXor => 5,
             BinOp::BitAnd => 6,
-            BinOp::Shl | BinOp::Shr => 7,
+            BinOp::Shl | BinOp::Shr | BinOp::UShr => 7,
             BinOp::Add | BinOp::Sub => 8,
             BinOp::Mul | BinOp::Div | BinOp::Mod => 9,
         }

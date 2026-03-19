@@ -214,6 +214,12 @@ pub(super) fn generate_expr(expr: &Expr) -> String {
         Expr::BinaryOp { left, op, right } => {
             let op_str = op.as_str();
             if op.is_bitwise() {
+                if *op == BinOp::UShr {
+                    // UShr (>>>): convert via i32 → u32 to match JS ToUint32 semantics
+                    let left_str = format!("({} as i32 as u32)", generate_expr(left));
+                    let right_str = format!("({} as u32)", generate_expr(right));
+                    return format!("({left_str} {op_str} {right_str}) as f64");
+                }
                 let left_str = format!("{} as i64", generate_expr(left));
                 let right_str = format!("{} as i64", generate_expr(right));
                 format!("(({left_str}) {op_str} ({right_str})) as f64")
@@ -542,6 +548,19 @@ mod tests {
             right: Box::new(Expr::Ident("b".to_string())),
         };
         assert_eq!(generate_expr(&expr), "((a as i64) >> (b as i64)) as f64");
+    }
+
+    #[test]
+    fn test_generate_expr_unsigned_shr_casts_to_u32() {
+        let expr = Expr::BinaryOp {
+            left: Box::new(Expr::Ident("a".to_string())),
+            op: BinOp::UShr,
+            right: Box::new(Expr::Ident("b".to_string())),
+        };
+        assert_eq!(
+            generate_expr(&expr),
+            "((a as i32 as u32) >> (b as u32)) as f64"
+        );
     }
 
     #[test]

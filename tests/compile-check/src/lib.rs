@@ -1,8 +1,9 @@
 #![allow(unused, dead_code, unreachable_code)]
 use serde::{Serialize, Deserialize};
-mod env;
-use crate::env::Bindings;
+fn doSomething() {
+    let mut x: f64 = 1.0;
+}
 
-fn getBindings(b: Bindings) -> Bindings {
-    b
+fn runCallback(cb: Box<dyn Fn(f64)>) {
+    cb(42.0);
 }

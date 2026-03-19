@@ -6,7 +6,7 @@ hono-bench.sh から呼び出される。エラー JSON を解析し、
 決まったスキーマで bench-history.jsonl に1行追記する。
 
 使い方:
-    python3 scripts/analyze-bench.py <errors.json> <total_files> <hono_clean_dir>
+    python3 scripts/analyze-bench.py <errors.json> <total_files> <hono_clean_dir> [compile_clean_files]
 """
 
 import json
@@ -113,7 +113,12 @@ def get_git_sha() -> str:
         return "unknown"
 
 
-def analyze(json_path: str, total_files: int, hono_clean_dir: str) -> dict:
+def analyze(
+    json_path: str,
+    total_files: int,
+    hono_clean_dir: str,
+    compile_clean_files: int | None = None,
+) -> dict:
     """エラー JSON を解析し、結果レコードを返す。"""
     with open(json_path) as f:
         content = f.read().strip()
@@ -130,7 +135,7 @@ def analyze(json_path: str, total_files: int, hono_clean_dir: str) -> dict:
 
     clean_files = total_files - len(files_with_errors)
 
-    return {
+    record = {
         "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "git_sha": get_git_sha(),
         "total_files": total_files,
@@ -140,6 +145,14 @@ def analyze(json_path: str, total_files: int, hono_clean_dir: str) -> dict:
         "categories": dict(categories.most_common()),
     }
 
+    if compile_clean_files is not None:
+        record["compile_clean_files"] = compile_clean_files
+        record["compile_clean_pct"] = (
+            round(compile_clean_files * 100 / total_files, 1) if total_files > 0 else 0
+        )
+
+    return record
+
 
 def print_summary(record: dict) -> None:
     """解析結果を標準出力に表示する。"""
@@ -148,6 +161,11 @@ def print_summary(record: dict) -> None:
     print(
         f"Clean (0 errors):  {record['clean_files']} ({record['clean_pct']}%)"
     )
+    if "compile_clean_files" in record:
+        print(
+            f"Compile clean:     {record['compile_clean_files']}"
+            f" ({record['compile_clean_pct']}%)"
+        )
     print(
         f"With errors:       {record['total_files'] - record['clean_files']}"
         f" ({100 - record['clean_pct']}%)"
@@ -185,6 +203,14 @@ def print_diff(prev: dict, curr: dict) -> None:
     sign = lambda v: f"+{v}" if v > 0 else str(v)
     print(f"  Clean files:     {prev['clean_files']} → {curr['clean_files']} ({sign(dc)})")
     print(f"  Clean %:         {prev['clean_pct']}% → {curr['clean_pct']}% ({sign(dp)}pp)")
+    # Compile clean diff (backward compatible — skip if either entry lacks the field)
+    if "compile_clean_files" in curr and "compile_clean_files" in prev:
+        dcc = curr["compile_clean_files"] - prev["compile_clean_files"]
+        dcp = round(curr["compile_clean_pct"] - prev["compile_clean_pct"], 1)
+        print(f"  Compile clean:   {prev['compile_clean_files']} → {curr['compile_clean_files']} ({sign(dcc)})")
+        print(f"  Compile %:       {prev['compile_clean_pct']}% → {curr['compile_clean_pct']}% ({sign(dcp)}pp)")
+    elif "compile_clean_files" in curr:
+        print(f"  Compile clean:   (new) {curr['compile_clean_files']} ({curr['compile_clean_pct']}%)")
     print(f"  Error instances: {prev['error_instances']} → {curr['error_instances']} ({sign(de)})")
 
     # カテゴリ別の変動
@@ -205,9 +231,9 @@ def print_diff(prev: dict, curr: dict) -> None:
 
 
 def main() -> None:
-    if len(sys.argv) != 4:
+    if len(sys.argv) < 4:
         print(
-            f"Usage: {sys.argv[0]} <errors.json> <total_files> <hono_clean_dir>",
+            f"Usage: {sys.argv[0]} <errors.json> <total_files> <hono_clean_dir> [compile_clean_files]",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -215,8 +241,9 @@ def main() -> None:
     json_path = sys.argv[1]
     total_files = int(sys.argv[2])
     hono_clean_dir = sys.argv[3]
+    compile_clean_files = int(sys.argv[4]) if len(sys.argv) > 4 else None
 
-    record = analyze(json_path, total_files, hono_clean_dir)
+    record = analyze(json_path, total_files, hono_clean_dir, compile_clean_files)
 
     # bench-history.jsonl のパスを特定
     repo_root = subprocess.run(

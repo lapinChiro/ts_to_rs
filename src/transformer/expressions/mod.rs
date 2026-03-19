@@ -447,6 +447,7 @@ pub(crate) fn convert_binary_op(op: ast::BinaryOp) -> Result<BinOp> {
         ast::BinaryOp::BitXor => Ok(BinOp::BitXor),
         ast::BinaryOp::LShift => Ok(BinOp::Shl),
         ast::BinaryOp::RShift => Ok(BinOp::Shr),
+        ast::BinaryOp::ZeroFillRShift => Ok(BinOp::UShr),
         _ => Err(anyhow!("unsupported binary operator: {:?}", op)),
     }
 }
@@ -689,9 +690,21 @@ fn convert_member_expr(
     reg: &TypeRegistry,
     type_env: &TypeEnv,
 ) -> Result<Expr> {
-    // Computed property: arr[0], arr[i] → Expr::Index
+    // Computed property: arr[0], arr[i] → Expr::Index or tuple.N → Expr::FieldAccess
     if let ast::MemberProp::Computed(computed) = &member.prop {
         let object = convert_expr(&member.obj, reg, None, type_env)?;
+
+        // Tuple index access: pair[0] → pair.0 (Rust uses dot notation for tuples)
+        if let Some(RustType::Tuple(_)) = resolve_expr_type(&member.obj, type_env, reg) {
+            if let ast::Expr::Lit(ast::Lit::Num(num)) = &*computed.expr {
+                let idx = num.value as usize;
+                return Ok(Expr::FieldAccess {
+                    object: Box::new(object),
+                    field: idx.to_string(),
+                });
+            }
+        }
+
         let index = convert_expr(&computed.expr, reg, None, type_env)?;
         return Ok(Expr::Index {
             object: Box::new(object),
@@ -1068,6 +1081,11 @@ fn convert_assign_expr(
         ast::AssignOp::OrAssign => Expr::BinaryOp {
             left: Box::new(target.clone()),
             op: BinOp::LogicalOr,
+            right: Box::new(right),
+        },
+        ast::AssignOp::ZeroFillRShiftAssign => Expr::BinaryOp {
+            left: Box::new(target.clone()),
+            op: BinOp::UShr,
             right: Box::new(right),
         },
         _ => return Err(anyhow!("unsupported compound assignment operator")),
@@ -2748,10 +2766,22 @@ pub fn resolve_expr_type(
         ast::Expr::Bin(bin) => resolve_bin_expr_type(bin, type_env, reg),
         ast::Expr::Member(member) => {
             let obj_type = resolve_expr_type(&member.obj, type_env, reg)?;
-            // 配列インデックスアクセス: Vec<T>[n] → T
-            if matches!(&member.prop, ast::MemberProp::Computed(_)) {
-                if let RustType::Vec(elem_ty) = &obj_type {
-                    return Some(elem_ty.as_ref().clone());
+            // インデックスアクセスの型解決
+            if let ast::MemberProp::Computed(computed) = &member.prop {
+                match &obj_type {
+                    // 配列: Vec<T>[n] → T
+                    RustType::Vec(elem_ty) => return Some(elem_ty.as_ref().clone()),
+                    // タプル: (A, B)[0] → A
+                    RustType::Tuple(elems) => {
+                        if let ast::Expr::Lit(ast::Lit::Num(num)) = &*computed.expr {
+                            let idx = num.value as usize;
+                            if idx < elems.len() {
+                                return Some(elems[idx].clone());
+                            }
+                        }
+                        return None;
+                    }
+                    _ => {}
                 }
             }
             resolve_field_type(&obj_type, &member.prop, reg)

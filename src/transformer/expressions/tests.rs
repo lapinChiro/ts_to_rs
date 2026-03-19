@@ -4145,6 +4145,75 @@ fn test_convert_member_expr_array_index_variable_generates_index() {
     );
 }
 
+// --- I-159: tuple index access ---
+
+#[test]
+fn test_convert_member_expr_tuple_literal_index_generates_field_access() {
+    let mut type_env = TypeEnv::new();
+    type_env.insert(
+        "pair".to_string(),
+        RustType::Tuple(vec![RustType::String, RustType::F64]),
+    );
+
+    let swc_expr = parse_expr("pair[0];");
+    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &type_env).unwrap();
+    assert_eq!(
+        result,
+        Expr::FieldAccess {
+            object: Box::new(Expr::Ident("pair".to_string())),
+            field: "0".to_string(),
+        }
+    );
+}
+
+#[test]
+fn test_convert_member_expr_tuple_second_index_generates_field_access() {
+    let mut type_env = TypeEnv::new();
+    type_env.insert(
+        "pair".to_string(),
+        RustType::Tuple(vec![RustType::String, RustType::F64]),
+    );
+
+    let swc_expr = parse_expr("pair[1];");
+    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &type_env).unwrap();
+    assert_eq!(
+        result,
+        Expr::FieldAccess {
+            object: Box::new(Expr::Ident("pair".to_string())),
+            field: "1".to_string(),
+        }
+    );
+}
+
+#[test]
+fn test_convert_member_expr_non_tuple_index_unchanged() {
+    let mut type_env = TypeEnv::new();
+    type_env.insert("arr".to_string(), RustType::Vec(Box::new(RustType::F64)));
+
+    let swc_expr = parse_expr("arr[0];");
+    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &type_env).unwrap();
+    assert_eq!(
+        result,
+        Expr::Index {
+            object: Box::new(Expr::Ident("arr".to_string())),
+            index: Box::new(Expr::NumberLit(0.0)),
+        }
+    );
+}
+
+#[test]
+fn test_resolve_expr_type_tuple_index_returns_element_type() {
+    let mut type_env = TypeEnv::new();
+    type_env.insert(
+        "pair".to_string(),
+        RustType::Tuple(vec![RustType::String, RustType::F64]),
+    );
+
+    let swc_expr = parse_expr("pair[0];");
+    let result = resolve_expr_type(&swc_expr, &type_env, &TypeRegistry::new());
+    assert_eq!(result, Some(RustType::String));
+}
+
 // --- I-95: nullish coalescing expected type propagation ---
 
 #[test]
@@ -5003,6 +5072,44 @@ fn test_convert_expr_shift_right() {
     let expr = parse_expr("a >> b");
     let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
     assert!(matches!(result, Expr::BinaryOp { op: BinOp::Shr, .. }));
+}
+
+// --- I-179: unsigned right shift ---
+
+#[test]
+fn test_convert_expr_unsigned_right_shift_generates_ushr() {
+    let expr = parse_expr("a >>> b");
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    assert!(matches!(
+        result,
+        Expr::BinaryOp {
+            op: BinOp::UShr,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn test_convert_expr_compound_assign_ushr_generates_desugar() {
+    let expr = parse_expr("x >>>= 2");
+    let mut type_env = TypeEnv::new();
+    type_env.insert("x".to_string(), RustType::F64);
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &type_env).unwrap();
+    // Should be Assign { target: x, value: BinaryOp { op: UShr, ... } }
+    if let Expr::Assign { value, .. } = &result {
+        assert!(
+            matches!(
+                value.as_ref(),
+                Expr::BinaryOp {
+                    op: BinOp::UShr,
+                    ..
+                }
+            ),
+            "expected UShr binary op in assignment, got: {value:?}"
+        );
+    } else {
+        panic!("expected Assign, got: {result:?}");
+    }
 }
 
 // ---- Rest parameter in arrow ----
