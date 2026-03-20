@@ -577,6 +577,16 @@ pub(super) fn convert_call_args_with_types(
                     args: vec![expr],
                 };
             }
+            // Trait type coercion: when param is a trait type, the generated
+            // Rust param is `&dyn Trait`. If the argument is `Box<dyn Trait>`, use `&*arg`.
+            if let Some(RustType::Named { name, .. }) = param_ty {
+                if reg.is_trait_type(name) {
+                    let arg_type = resolve_expr_type(&arg.expr, type_env, reg);
+                    if is_box_dyn_trait(&arg_type) {
+                        expr = Expr::Ref(Box::new(Expr::Deref(Box::new(expr))));
+                    }
+                }
+            }
             Ok(expr)
         })
         .collect::<Result<Vec<_>>>()?;
@@ -656,4 +666,13 @@ pub(super) fn convert_call_args_with_types(
     }
 
     Ok(result)
+}
+
+/// Returns true if the type is `Box<dyn Trait>` (i.e., `Named { name: "Box", type_args: [DynTrait(_)] }`).
+fn is_box_dyn_trait(ty: &Option<RustType>) -> bool {
+    matches!(
+        ty,
+        Some(RustType::Named { name, type_args })
+            if name == "Box" && type_args.len() == 1 && matches!(&type_args[0], RustType::DynTrait(_))
+    )
 }

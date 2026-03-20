@@ -24,7 +24,7 @@
 **ビルトイン型**: I-24 完了済み。Web API ビルトイン型（Response, Request, Headers 等 106 型）はバイナリに埋め込み済みで、デフォルトで TypeRegistry にロードされる。
 **Node.js API**: I-49/I-50 完了済み。`fs.readFileSync/writeFileSync/existsSync`、`process.env.VAR`、stdin パターンの変換が動作。E2E テスト基盤に stdin/環境変数ヘルパーあり。
 **Interface → Trait**: I-137/I-127 完了済み。interface は内容に応じて struct/trait/struct+trait+impl に 3 分類変換。extends → supertrait/フィールド継承。交差型の trait 合成対応。
-**Trait パラメータ型**: I-187 完了済み。trait 型のパラメータは `&dyn Trait`、変数・戻り値は `Box<dyn Trait>` に変換。ただし呼び出し側の自動調整（I-189）は未実装。
+**Trait パラメータ型**: I-187/I-189 完了済み。trait 型のパラメータは `&dyn Trait`、変数・戻り値は `Box<dyn Trait>` に変換。呼び出し側の型強制（`&*` / `Box::new()` 自動付与）も実装済み。
 **resolve-types**: `ts_to_rs resolve-types --tsconfig ...` サブコマンド実装済み。Docker イメージ定義あり（`tools/extract-types/Dockerfile`）。ただし Docker での E2E テストは未実施。
 
 ---
@@ -39,7 +39,7 @@
 | **完了: Web API ビルトイン型** | ~~I-24~~ **達成** | tsc 統合 + ビルトイン型埋め込み + resolve-types サブコマンド |
 | **完了: E2E I/O テスト基盤** | ~~I-49/I-50~~ **達成** | fs/process.env/stdin 変換 + E2E テスト基盤（stdin/env ヘルパー） |
 | **完了: Interface → Trait** | ~~I-137/I-127~~ **達成** | interface 3 分類変換 + extends + 交差型 trait 合成 |
-| **次: コンパイル可能性の向上** | コンパイルクリーン率 > 40% | I-112b（完了: 計算プロパティキー HashMap 変換、エラー -5）、I-186（完了: split 型不一致修正）、I-187（完了: trait パラメータ型）、I-25/I-37（完了: 型エイリアスパターン拡張、TYPE_ALIAS -36, TYPE_LITERAL_MEMBER -2）。残: I-189（呼び出し側自動調整）。「変換成功かつコンパイル成功」のファイル数を主指標にする |
+| **次: コンパイル可能性の向上** | コンパイルクリーン率 > 40% | I-112b（完了: 計算プロパティキー HashMap 変換、エラー -5）、I-186（完了: split 型不一致修正）、I-187（完了: trait パラメータ型）、I-25/I-37（完了: 型エイリアスパターン拡張、TYPE_ALIAS -36, TYPE_LITERAL_MEMBER -2）、I-189（完了: trait 呼び出し側型強制、&* / Box::new 自動付与）。「変換成功かつコンパイル成功」のファイル数を主指標にする |
 | **その次: テスト拡充** | コンパイルクリーン率 > 50% | E2E テストの拡充（I-20, I-71, I-72, I-74）、HTTP 対応（I-183） |
 
 ---
@@ -56,15 +56,10 @@
 
 #### 型変換・型推論
 
-- **[I-189]** **trait 型の呼び出し側型強制** — PRD 化済み → `backlog/i189-trait-call-site-coercion.md`
 - **[I-69]** **型 narrowing（型ガード後の型絞り込み）** — PRD 化済み → `backlog/i69-type-narrowing.md`
 - **[I-61]** **型推論: チェーンメソッド呼び出しの戻り値型追跡** — PRD 化済み → `backlog/i61-chain-method-type-tracking.md`
 - **[I-100]** **ジェネリック型の基盤 + 具体化** — PRD 化済み → `backlog/i100-generics-foundation.md`
   - 🔗 I-58（Trait の type_params）を統合
-
-#### union/intersection
-
-- **[I-171]** **union の未対応メンバーの型付きフォールバック** — PRD 化済み → `backlog/i171-union-member-fallback.md`
 
 #### import/export
 
@@ -100,6 +95,19 @@
 - **[I-12]** **`Promise<T>` の union 内展開** — 型変換正確性
 - **[I-13]** **super() の位置ベースフィールドマッピング** — 式変換正確性
 - **[I-21]** **async void のセマンティクス差異対応** — 変換正確性
+
+#### コンパイル正確性
+
+- **[I-201]** **`null as any` の trait 型文脈での生成コード** — コンパイルエラー
+  - `const g: Greeter = null as any` → `let g: Box<dyn Greeter> = None` が生成されるがコンパイルエラー
+  - `None` は `Option` 型専用であり、`Box<dyn Trait>` には使えない
+  - `todo!()` / `unimplemented!()` / `panic!()` 等のプレースホルダー生成が妥当
+  - コンパイルテスト `trait-coercion` のスキップ原因
+- **[I-202]** **`Box<dyn Fn>` を含む enum の derive 不適合** — コンパイルエラー
+  - union に関数型メンバーがあると `Fn(Box<dyn Fn(T) -> U>)` バリアントが生成される
+  - `#[derive(Clone, PartialEq)]` は `dyn Fn` に対してコンパイルエラー
+  - derive 対象を型の内容に応じて選択するか、手動実装を生成する必要がある
+  - コンパイルテスト `union-fallback` のスキップ原因
 
 #### セマンティクス正確性
 
@@ -209,7 +217,7 @@
 
 ### 前提タスクの完了待ち
 
-- **[I-32]** **コンパイルテストのスキップ解消（残り 1 件）** — I-35（indexed access type の非文字列キー対応）の解消が前提
+- **[I-32]** **コンパイルテストのスキップ解消（残り 3 件）** — 前提: I-35（indexed-access-type）、I-201（trait-coercion: null as any）、I-202（union-fallback: Box<dyn Fn> derive）
 - **[I-101]** **ジェネリック型を含む intersection** — I-100（ジェネリクス基盤、Tier 1 に移動済み）の解消が前提
 - **[I-181]** **call signature のジェネリック型パラメータ** — I-100（ジェネリクス基盤、Tier 1 に移動済み）の解消が前提。call signature の rest パラメータは対応済みだが、ジェネリック型パラメータ付きの 3 インスタンスが残存
 - **[I-183]** **HTTP E2E テスト基盤 + fetch 変換** — I-30（Cargo.toml 依存追加、Tier 2 に昇格済み）の解消が前提

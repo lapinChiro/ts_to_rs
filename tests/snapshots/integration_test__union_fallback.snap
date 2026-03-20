@@ -1,0 +1,28 @@
+---
+source: tests/integration_test.rs
+expression: output
+---
+#[derive(Debug, Clone, PartialEq)]
+enum StringOrFn {
+    String(String),
+    Fn(Box<dyn Fn(f64) -> String>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum StringOrTuple {
+    String(String),
+    Tuple((f64, String)),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum Mixed {
+    String(String),
+    Fn(Box<dyn Fn(f64)>),
+    Tuple((bool, f64)),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum StringOrNumber {
+    String(String),
+    F64(f64),
+}

@@ -297,34 +297,39 @@ fn convert_union_type(
         // `null | undefined` — treat as Option of unit, but we don't have unit type
         Err(anyhow!("union of only null/undefined is not supported"))
     } else if !has_null_or_undefined {
-        // Convert all members, unwrapping Promise<T> → T
-        let mut rust_types = Vec::new();
+        // Convert all members, with fallback for unsupported types
+        let mut variants = Vec::new();
+        let mut name_parts = Vec::new();
         for ty in &non_null_types {
-            let rust_type = convert_ts_type(ty, extra_items, reg)?;
-            let unwrapped = unwrap_promise(rust_type);
-            if !rust_types.contains(&unwrapped) {
-                rust_types.push(unwrapped);
+            match convert_ts_type(ty, extra_items, reg) {
+                Ok(rust_type) => {
+                    let unwrapped = unwrap_promise(rust_type);
+                    let variant_name = variant_name_from_type(&unwrapped);
+                    // Deduplicate
+                    if !name_parts.contains(&variant_name) {
+                        name_parts.push(variant_name.clone());
+                        variants.push(EnumVariant {
+                            name: variant_name,
+                            value: None,
+                            data: Some(unwrapped),
+                            fields: vec![],
+                        });
+                    }
+                }
+                Err(_) => {
+                    convert_unsupported_union_member(ty, &mut variants, extra_items, reg);
+                    if let Some(last) = variants.last() {
+                        name_parts.push(last.name.clone());
+                    }
+                }
             }
         }
 
         // After dedup, if only one type remains, return it directly
-        if rust_types.len() == 1 {
-            return Ok(rust_types.into_iter().next().unwrap());
+        if variants.len() == 1 && variants[0].data.is_some() {
+            return Ok(variants.into_iter().next().unwrap().data.unwrap());
         }
 
-        // Generate an enum for non-nullable union in type annotation position
-        let mut variants = Vec::new();
-        let mut name_parts = Vec::new();
-        for rust_type in &rust_types {
-            let variant_name = variant_name_from_type(rust_type);
-            name_parts.push(variant_name.clone());
-            variants.push(EnumVariant {
-                name: variant_name,
-                value: None,
-                data: Some(rust_type.clone()),
-                fields: vec![],
-            });
-        }
         let enum_name = name_parts.join("Or");
         extra_items.push(Item::Enum {
             vis: Visibility::Public,
@@ -339,35 +344,39 @@ fn convert_union_type(
     } else {
         // has_null_or_undefined && non_null_types.len() > 1
         // e.g., string | number | null → Option<StringOrF64>
-        let mut rust_types = Vec::new();
+        let mut variants = Vec::new();
+        let mut name_parts = Vec::new();
         for ty in &non_null_types {
-            let rust_type = convert_ts_type(ty, extra_items, reg)?;
-            let unwrapped = unwrap_promise(rust_type);
-            if !rust_types.contains(&unwrapped) {
-                rust_types.push(unwrapped);
+            match convert_ts_type(ty, extra_items, reg) {
+                Ok(rust_type) => {
+                    let unwrapped = unwrap_promise(rust_type);
+                    let variant_name = variant_name_from_type(&unwrapped);
+                    if !name_parts.contains(&variant_name) {
+                        name_parts.push(variant_name.clone());
+                        variants.push(EnumVariant {
+                            name: variant_name,
+                            value: None,
+                            data: Some(unwrapped),
+                            fields: vec![],
+                        });
+                    }
+                }
+                Err(_) => {
+                    convert_unsupported_union_member(ty, &mut variants, extra_items, reg);
+                    if let Some(last) = variants.last() {
+                        name_parts.push(last.name.clone());
+                    }
+                }
             }
         }
 
         // After dedup, if only one type remains (e.g., null | undefined | T)
-        if rust_types.len() == 1 {
+        if variants.len() == 1 && variants[0].data.is_some() {
             return Ok(RustType::Option(Box::new(
-                rust_types.into_iter().next().unwrap(),
+                variants.into_iter().next().unwrap().data.unwrap(),
             )));
         }
 
-        // Generate an enum and wrap in Option
-        let mut variants = Vec::new();
-        let mut name_parts = Vec::new();
-        for rust_type in &rust_types {
-            let variant_name = variant_name_from_type(rust_type);
-            name_parts.push(variant_name.clone());
-            variants.push(EnumVariant {
-                name: variant_name,
-                value: None,
-                data: Some(rust_type.clone()),
-                fields: vec![],
-            });
-        }
         let enum_name = name_parts.join("Or");
         extra_items.push(Item::Enum {
             vis: Visibility::Public,
@@ -1720,13 +1729,7 @@ fn try_convert_general_union(
                 });
             }
             _ => {
-                // Fallback: unsupported union member types become Any variant
-                variants.push(EnumVariant {
-                    name: format!("Other{}", variants.len()),
-                    value: None,
-                    data: Some(RustType::Any),
-                    fields: vec![],
-                });
+                convert_unsupported_union_member(ty, &mut variants, extra_items, reg);
             }
         }
     }
@@ -2407,6 +2410,91 @@ fn capitalize_first(s: &str) -> String {
         None => String::new(),
         Some(c) => c.to_uppercase().to_string() + chars.as_str(),
     }
+}
+
+/// Converts an unsupported union member type into a typed enum variant.
+///
+/// - Function types → `Fn(Box<dyn Fn(T) -> U>)` variant
+/// - Tuple types → `Tuple((T1, T2, ...))` variant
+/// - Other unsupported types → `Other{N}(serde_json::Value)` variant with index
+fn convert_unsupported_union_member(
+    ty: &TsType,
+    variants: &mut Vec<EnumVariant>,
+    extra_items: &mut Vec<Item>,
+    reg: &TypeRegistry,
+) {
+    // Unwrap parenthesized types: ((x: number) => string) → (x: number) => string
+    let ty = match ty {
+        TsType::TsParenthesizedType(paren) => paren.type_ann.as_ref(),
+        other => other,
+    };
+    match ty {
+        TsType::TsFnOrConstructorType(swc_ecma_ast::TsFnOrConstructorType::TsFnType(fn_type)) => {
+            // Function type → Fn(Box<dyn Fn(params) -> ret>)
+            if let Ok(rust_type) = convert_fn_type_to_rust(fn_type, extra_items, reg) {
+                variants.push(EnumVariant {
+                    name: "Fn".to_string(),
+                    value: None,
+                    data: Some(rust_type),
+                    fields: vec![],
+                });
+                return;
+            }
+        }
+        TsType::TsTupleType(tuple) => {
+            // Tuple type → Tuple((T1, T2, ...))
+            let elem_types: Vec<RustType> = tuple
+                .elem_types
+                .iter()
+                .filter_map(|elem| convert_ts_type(&elem.ty, extra_items, reg).ok())
+                .collect();
+            if elem_types.len() == tuple.elem_types.len() {
+                variants.push(EnumVariant {
+                    name: "Tuple".to_string(),
+                    value: None,
+                    data: Some(RustType::Tuple(elem_types)),
+                    fields: vec![],
+                });
+                return;
+            }
+        }
+        _ => {}
+    }
+    // Fallback: unsupported types become Other{N}(serde_json::Value)
+    variants.push(EnumVariant {
+        name: format!("Other{}", variants.len()),
+        value: None,
+        data: Some(RustType::Any),
+        fields: vec![],
+    });
+}
+
+/// Converts a TS function type to a `RustType::Fn`.
+fn convert_fn_type_to_rust(
+    fn_type: &swc_ecma_ast::TsFnType,
+    extra_items: &mut Vec<Item>,
+    reg: &TypeRegistry,
+) -> Result<RustType> {
+    let params: Vec<RustType> = fn_type
+        .params
+        .iter()
+        .filter_map(|param| {
+            if let swc_ecma_ast::TsFnParam::Ident(ident) = param {
+                ident
+                    .type_ann
+                    .as_ref()
+                    .and_then(|ann| convert_ts_type(&ann.type_ann, extra_items, reg).ok())
+            } else {
+                None
+            }
+        })
+        .collect();
+    let return_type =
+        convert_ts_type(&fn_type.type_ann.type_ann, extra_items, reg).unwrap_or(RustType::Unit);
+    Ok(RustType::Fn {
+        params,
+        return_type: Box::new(return_type),
+    })
 }
 
 #[cfg(test)]

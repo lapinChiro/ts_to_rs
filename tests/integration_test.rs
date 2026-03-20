@@ -472,3 +472,17 @@ fn test_interface_methods() {
     let output = transpile_collecting(&input).unwrap().0;
     insta::assert_snapshot!(output);
 }
+
+#[test]
+fn test_union_fallback() {
+    let input = fs::read_to_string("tests/fixtures/union-fallback.input.ts").unwrap();
+    let output = transpile(&input).unwrap();
+    insta::assert_snapshot!(output);
+}
+
+#[test]
+fn test_trait_coercion() {
+    let input = fs::read_to_string("tests/fixtures/trait-coercion.input.ts").unwrap();
+    let output = transpile_collecting(&input).unwrap().0;
+    insta::assert_snapshot!(output);
+}

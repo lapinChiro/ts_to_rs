@@ -92,7 +92,7 @@ pub fn convert_expr(
         }
     }
 
-    match expr {
+    let result = match expr {
         ast::Expr::Ident(ident) => {
             let name = ident.sym.to_string();
             match name.as_str() {
@@ -128,7 +128,77 @@ pub fn convert_expr(
         // Non-null assertion (expr!) — TS type-level only, no runtime effect. Strip assertion.
         ast::Expr::TsNonNull(ts_non_null) => convert_expr(&ts_non_null.expr, reg, ctx, type_env),
         _ => Err(anyhow!("unsupported expression: {:?}", expr)),
+    }?;
+
+    // Trait type coercion: when expected type is Box<dyn Trait> and the expression
+    // produces a concrete (non-Box) value, wrap it in Box::new().
+    if let Some(expected) = expected {
+        if needs_trait_box_coercion(expected, expr, type_env, reg) {
+            return Ok(Expr::FnCall {
+                name: "Box::new".to_string(),
+                args: vec![result],
+            });
+        }
     }
+
+    Ok(result)
+}
+
+/// Returns true when the expected type is `Box<dyn Trait>` and the source expression
+/// produces a concrete (non-Box) value that needs wrapping.
+fn needs_trait_box_coercion(
+    expected: &RustType,
+    src_expr: &ast::Expr,
+    type_env: &TypeEnv,
+    reg: &TypeRegistry,
+) -> bool {
+    // Check if expected type is Box<dyn Trait>
+    let trait_name = match expected {
+        RustType::Named { name, type_args }
+            if name == "Box"
+                && type_args.len() == 1
+                && matches!(&type_args[0], RustType::DynTrait(_)) =>
+        {
+            if let RustType::DynTrait(t) = &type_args[0] {
+                t.as_str()
+            } else {
+                return false;
+            }
+        }
+        _ => return false,
+    };
+
+    // Resolve the expression's actual type. If unknown or Any, skip coercion (safe default).
+    let Some(expr_type) = type_resolution::resolve_expr_type(src_expr, type_env, reg) else {
+        return false;
+    };
+    if matches!(expr_type, RustType::Any) {
+        return false;
+    }
+
+    // If the expression already produces Box<dyn Trait>, no wrapping needed
+    if matches!(
+        &expr_type,
+        RustType::Named { name, type_args }
+            if name == "Box" && type_args.first().is_some_and(|a| matches!(a, RustType::DynTrait(t) if t == trait_name))
+    ) {
+        return false;
+    }
+
+    // If the expression's type is the trait type itself (e.g., a function returning `Greeter`
+    // which will be transformed to `Box<dyn Greeter>`), no wrapping needed — the generated
+    // code already returns Box<dyn Trait>.
+    if let RustType::Named {
+        name: expr_name,
+        type_args: expr_args,
+    } = &expr_type
+    {
+        if expr_args.is_empty() && expr_name == trait_name && reg.is_trait_type(expr_name) {
+            return false;
+        }
+    }
+
+    true
 }
 
 /// Converts a template literal to `Expr::FormatMacro`.
