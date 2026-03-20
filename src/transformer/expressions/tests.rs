@@ -4541,12 +4541,53 @@ fn test_typeof_not_equals_string_known_type_resolves_false() {
 }
 
 #[test]
-fn test_typeof_equals_string_unknown_type_resolves_placeholder() {
+fn test_typeof_equals_string_unknown_type_generates_todo() {
     let swc_expr = parse_expr("typeof x === \"string\";");
     let env = TypeEnv::new(); // x not registered
     let result = convert_expr(&swc_expr, &TypeRegistry::new(), &ExprContext::none(), &env).unwrap();
-    // Unknown type → placeholder true
-    assert_eq!(result, Expr::BoolLit(true));
+    // Unknown type → todo!() (compile error, not silent true)
+    assert!(matches!(&result, Expr::FnCall { name, .. } if name == "todo!"));
+}
+
+#[test]
+fn test_typeof_equals_string_any_type_generates_todo() {
+    // Any type → todo!() (compile error, not silent true).
+    // For function params, any_narrowing generates enum and if-let instead.
+    let swc_expr = parse_expr("typeof x === \"string\";");
+    let mut env = TypeEnv::new();
+    env.insert("x".to_string(), RustType::Any);
+    let result = convert_expr(&swc_expr, &TypeRegistry::new(), &ExprContext::none(), &env).unwrap();
+    assert!(matches!(&result, Expr::FnCall { name, .. } if name == "todo!"));
+}
+
+#[test]
+fn test_typeof_equals_number_any_type_generates_todo() {
+    let swc_expr = parse_expr("typeof x === \"number\";");
+    let mut env = TypeEnv::new();
+    env.insert("x".to_string(), RustType::Any);
+    let result = convert_expr(&swc_expr, &TypeRegistry::new(), &ExprContext::none(), &env).unwrap();
+    assert!(matches!(&result, Expr::FnCall { name, .. } if name == "todo!"));
+}
+
+#[test]
+fn test_typeof_not_equals_string_any_type_generates_todo() {
+    // !== with Any → todo!() (compile error, not silent true).
+    let swc_expr = parse_expr("typeof x !== \"string\";");
+    let mut env = TypeEnv::new();
+    env.insert("x".to_string(), RustType::Any);
+    let result = convert_expr(&swc_expr, &TypeRegistry::new(), &ExprContext::none(), &env).unwrap();
+    assert!(matches!(&result, Expr::FnCall { name, .. } if name == "todo!"));
+}
+
+#[test]
+fn test_instanceof_any_type_generates_todo() {
+    // Any type → todo!() (compile error, not silent true).
+    // For function params, any_narrowing generates enum and if-let instead.
+    let swc_expr = parse_expr("x instanceof Foo;");
+    let mut env = TypeEnv::new();
+    env.insert("x".to_string(), RustType::Any);
+    let result = convert_expr(&swc_expr, &TypeRegistry::new(), &ExprContext::none(), &env).unwrap();
+    assert!(matches!(&result, Expr::FnCall { name, .. } if name == "todo!"));
 }
 
 #[test]
@@ -4603,14 +4644,11 @@ fn test_instanceof_known_type_mismatch_resolves_false() {
 
 #[test]
 fn test_instanceof_unknown_type_generates_todo() {
-    // Unknown type should generate todo!(), not static true
+    // Unknown type → todo!() (compile error, not silent true).
     let swc_expr = parse_expr("x instanceof Foo;");
     let env = TypeEnv::new();
     let result = convert_expr(&swc_expr, &TypeRegistry::new(), &ExprContext::none(), &env).unwrap();
-    match &result {
-        Expr::FnCall { name, .. } => assert_eq!(name, "todo!"),
-        other => panic!("expected todo!() for unknown instanceof, got: {other:?}"),
-    }
+    assert!(matches!(&result, Expr::FnCall { name, .. } if name == "todo!"));
 }
 
 // --- self.field string concat clone ---
@@ -6806,8 +6844,8 @@ fn test_convert_call_expr_arrow_iife_with_args_generates_closure_call() {
 // ---- instanceof runtime resolution ----
 
 #[test]
-fn test_convert_instanceof_unknown_type_does_not_return_true() {
-    // x instanceof Foo where x is unknown → should NOT return BoolLit(true)
+fn test_convert_instanceof_unknown_type_generates_todo() {
+    // Unknown type → todo!() (compile error, not silent true).
     let expr = parse_expr("x instanceof Foo");
     let result = convert_expr(
         &expr,
@@ -6816,10 +6854,7 @@ fn test_convert_instanceof_unknown_type_does_not_return_true() {
         &TypeEnv::new(),
     )
     .unwrap();
-    assert!(
-        !matches!(&result, Expr::BoolLit(true)),
-        "instanceof with unknown type should not return static true, got: {result:?}"
-    );
+    assert!(matches!(&result, Expr::FnCall { name, .. } if name == "todo!"));
 }
 
 #[test]

@@ -20,7 +20,7 @@ mod functions;
 mod literals;
 mod member_access;
 mod methods;
-mod patterns;
+pub(crate) mod patterns;
 mod type_resolution;
 use assignments::{convert_assign_expr, convert_update_expr};
 pub(crate) use binary::convert_binary_op;
@@ -226,9 +226,12 @@ fn convert_template_literal(
     Ok(Expr::FormatMacro { template, args })
 }
 
-/// Converts an SWC conditional (ternary) expression to `Expr::If`.
+/// Converts an SWC conditional (ternary) expression to `Expr::If` or `Expr::IfLet`.
 ///
 /// `condition ? consequent : alternate` → `if condition { consequent } else { alternate }`
+///
+/// When the condition is a narrowing guard (typeof/instanceof/null-check/truthy),
+/// generates `Expr::IfLet` with the narrowed variable available in the then branch.
 fn convert_cond_expr(
     cond: &ast::CondExpr,
     reg: &TypeRegistry,
@@ -236,7 +239,50 @@ fn convert_cond_expr(
     type_env: &TypeEnv,
 ) -> Result<Expr> {
     let ctx = &ExprContext { expected };
-    // Cat A: ternary condition is always boolean
+
+    // Try narrowing: extract guard from the ternary condition
+    if let Some(guard) = patterns::extract_narrowing_guard(&cond.test) {
+        if let Some((pattern, is_swap)) = guard.if_let_pattern(type_env, reg) {
+            // Determine which TS branch corresponds to the if-let match (pattern matched).
+            // For === guards: consequent is the matched branch.
+            // For !== guards (is_swap): alternate is the matched branch.
+            let (matched_ast, unmatched_ast) = if is_swap {
+                (cond.alt.as_ref(), cond.cons.as_ref())
+            } else {
+                (cond.cons.as_ref(), cond.alt.as_ref())
+            };
+
+            // Convert the matched branch with narrowed type environment.
+            // The narrowing corresponds to what the if-let pattern extracts
+            // (e.g., String from StringOrF64::String(x), T from Some(x)).
+            let mut narrowed_env = type_env.clone();
+            narrowed_env.push_scope();
+            if let Some(original) = type_env.get(guard.var_name()).cloned() {
+                let narrowed = if is_swap {
+                    guard.narrowed_type_for_else(&original)
+                } else {
+                    guard.narrowed_type_for_then(&original)
+                };
+                if let Some(narrowed) = narrowed {
+                    narrowed_env.insert(guard.var_name().to_string(), narrowed);
+                }
+            }
+            let matched_expr = convert_expr(matched_ast, reg, ctx, &narrowed_env)?;
+
+            // Convert the unmatched branch with original type environment
+            let unmatched_expr = convert_expr(unmatched_ast, reg, ctx, type_env)?;
+
+            let expr_ir = Expr::Ident(guard.var_name().to_string());
+            return Ok(Expr::IfLet {
+                pattern,
+                expr: Box::new(expr_ir),
+                then_expr: Box::new(matched_expr),
+                else_expr: Box::new(unmatched_expr),
+            });
+        }
+    }
+
+    // Fallback: regular if expression
     let condition = convert_expr(&cond.test, reg, &ExprContext::none(), type_env)?;
     let then_expr = convert_expr(&cond.cons, reg, ctx, type_env)?;
     let else_expr = convert_expr(&cond.alt, reg, ctx, type_env)?;

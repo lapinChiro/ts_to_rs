@@ -3,6 +3,7 @@
 //! This module converts SWC TypeScript AST nodes into the IR representation
 //! defined in [`crate::ir`].
 
+pub(crate) mod any_narrowing;
 pub mod classes;
 pub mod expressions;
 pub mod functions;

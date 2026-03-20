@@ -42,7 +42,7 @@ pub(super) fn convert_bin_expr(
 
     // x instanceof ClassName pattern
     if bin.op == ast::BinaryOp::InstanceOf {
-        return Ok(convert_instanceof(bin, type_env));
+        return Ok(convert_instanceof(bin, type_env, reg));
     }
 
     // "key" in obj pattern

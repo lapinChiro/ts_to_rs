@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use anyhow::Result;
 use swc_ecma_ast as ast;
 
-use crate::ir::RustType;
+use crate::ir::{Item, RustType};
 use crate::transformer::types::convert_ts_type;
 
 /// 型定義の種類。
@@ -321,8 +321,17 @@ fn collect_decl(reg: &mut TypeRegistry, decl: &ast::Decl, lookup: &TypeRegistry)
             );
         }
         ast::Decl::Fn(fn_decl) => {
-            if let Ok(func_def) = collect_fn_def(&fn_decl.function, lookup) {
-                reg.register(fn_decl.ident.sym.to_string(), func_def);
+            let mut extra_items = Vec::new();
+            if let Ok(func_def) =
+                collect_fn_def_with_extras(&fn_decl.function, lookup, &mut extra_items)
+            {
+                let fn_name = fn_decl.ident.sym.to_string();
+                // Register any-narrowing enums for `any`-typed parameters with typeof checks
+                if let Some(body) = &fn_decl.function.body {
+                    register_any_narrowing_enums(reg, &fn_name, &func_def, body);
+                }
+                reg.register(fn_name, func_def);
+                register_extra_enums(reg, &extra_items);
             }
         }
         ast::Decl::Var(var_decl) => {
@@ -334,8 +343,23 @@ fn collect_decl(reg: &mut TypeRegistry, decl: &ast::Decl, lookup: &TypeRegistry)
                             ast::Pat::Ident(ident) => ident.id.sym.to_string(),
                             _ => continue,
                         };
-                        if let Ok(func_def) = collect_arrow_def(arrow, lookup) {
+                        let mut extra_items = Vec::new();
+                        if let Ok(func_def) =
+                            collect_arrow_def_with_extras(arrow, lookup, &mut extra_items)
+                        {
+                            // Register any-narrowing enums for arrow function any-typed params
+                            match arrow.body.as_ref() {
+                                ast::BlockStmtOrExpr::BlockStmt(body) => {
+                                    register_any_narrowing_enums(reg, &name, &func_def, body);
+                                }
+                                ast::BlockStmtOrExpr::Expr(expr) => {
+                                    register_any_narrowing_enums_from_expr(
+                                        reg, &name, &func_def, expr,
+                                    );
+                                }
+                            }
                             reg.register(name, func_def);
+                            register_extra_enums(reg, &extra_items);
                         }
                     }
                 }
@@ -750,8 +774,12 @@ fn collect_type_alias_fields(
     }
 }
 
-/// 関数宣言からパラメータ型と戻り値型を収集する。
-fn collect_fn_def(func: &ast::Function, lookup: &TypeRegistry) -> Result<TypeDef> {
+/// 関数宣言からパラメータ型と戻り値型を収集する。インライン union で生成された enum を extra_items に収集する。
+fn collect_fn_def_with_extras(
+    func: &ast::Function,
+    lookup: &TypeRegistry,
+    extra_items: &mut Vec<Item>,
+) -> Result<TypeDef> {
     let mut params = Vec::new();
     let mut has_rest = false;
     for param in &func.params {
@@ -759,7 +787,7 @@ fn collect_fn_def(func: &ast::Function, lookup: &TypeRegistry) -> Result<TypeDef
             ast::Pat::Ident(ident) => {
                 let name = ident.id.sym.to_string();
                 if let Some(ann) = &ident.type_ann {
-                    if let Ok(ty) = convert_ts_type(&ann.type_ann, &mut Vec::new(), lookup) {
+                    if let Ok(ty) = convert_ts_type(&ann.type_ann, extra_items, lookup) {
                         params.push((name, ty));
                     }
                 }
@@ -769,7 +797,7 @@ fn collect_fn_def(func: &ast::Function, lookup: &TypeRegistry) -> Result<TypeDef
                 if let ast::Pat::Ident(ident) = assign.left.as_ref() {
                     let name = ident.id.sym.to_string();
                     if let Some(ann) = &ident.type_ann {
-                        if let Ok(ty) = convert_ts_type(&ann.type_ann, &mut Vec::new(), lookup) {
+                        if let Ok(ty) = convert_ts_type(&ann.type_ann, extra_items, lookup) {
                             params.push((name, RustType::Option(Box::new(ty))));
                         }
                     }
@@ -781,7 +809,7 @@ fn collect_fn_def(func: &ast::Function, lookup: &TypeRegistry) -> Result<TypeDef
                     let name = ident.id.sym.to_string();
                     let type_ann = rest.type_ann.as_ref().or(ident.type_ann.as_ref());
                     if let Some(ann) = type_ann {
-                        if let Ok(ty) = convert_ts_type(&ann.type_ann, &mut Vec::new(), lookup) {
+                        if let Ok(ty) = convert_ts_type(&ann.type_ann, extra_items, lookup) {
                             params.push((name, ty));
                         }
                     }
@@ -794,7 +822,7 @@ fn collect_fn_def(func: &ast::Function, lookup: &TypeRegistry) -> Result<TypeDef
     let return_type = func
         .return_type
         .as_ref()
-        .and_then(|ann| convert_ts_type(&ann.type_ann, &mut Vec::new(), lookup).ok());
+        .and_then(|ann| convert_ts_type(&ann.type_ann, extra_items, lookup).ok());
 
     Ok(TypeDef::Function {
         params,
@@ -803,14 +831,112 @@ fn collect_fn_def(func: &ast::Function, lookup: &TypeRegistry) -> Result<TypeDef
     })
 }
 
-/// アロー関数からパラメータ型と戻り値型を収集する。
-fn collect_arrow_def(arrow: &ast::ArrowExpr, lookup: &TypeRegistry) -> Result<TypeDef> {
+/// Registers enum items generated during type conversion into the TypeRegistry.
+fn register_extra_enums(reg: &mut TypeRegistry, extra_items: &[Item]) {
+    for item in extra_items {
+        if let Item::Enum { name, variants, .. } = item {
+            let variant_names: Vec<String> = variants.iter().map(|v| v.name.clone()).collect();
+            reg.register(
+                name.clone(),
+                TypeDef::Enum {
+                    variants: variant_names,
+                    string_values: HashMap::new(),
+                    tag_field: None,
+                    variant_fields: HashMap::new(),
+                },
+            );
+        }
+    }
+}
+
+/// Registers any-narrowing enum types for `any`-typed function parameters.
+///
+/// Scans the function body for typeof checks on `any`-typed parameters and registers
+/// the generated enum types in the TypeRegistry so that `resolve_typeof_to_enum_variant`
+/// can find them during statement conversion.
+fn register_any_narrowing_enums(
+    reg: &mut TypeRegistry,
+    fn_name: &str,
+    func_def: &TypeDef,
+    body: &ast::BlockStmt,
+) {
+    use crate::transformer::any_narrowing::{
+        collect_any_constraints, collect_any_local_var_names, generate_any_enum,
+    };
+
+    let TypeDef::Function { params, .. } = func_def else {
+        return;
+    };
+
+    // Collect any-typed parameter names
+    let mut any_names: Vec<String> = params
+        .iter()
+        .filter(|(_, ty)| matches!(ty, RustType::Any))
+        .map(|(name, _)| name.clone())
+        .collect();
+
+    // Also collect any-typed local variable names
+    any_names.extend(collect_any_local_var_names(body));
+
+    if any_names.is_empty() {
+        return;
+    }
+
+    let constraints = collect_any_constraints(body, &any_names);
+    for (param_name, constraint) in &constraints {
+        if constraint.is_empty() {
+            continue;
+        }
+        let (enum_item, _) = generate_any_enum(fn_name, param_name, constraint);
+        register_extra_enums(reg, &[enum_item]);
+    }
+}
+
+/// Expression-body variant of `register_any_narrowing_enums`.
+fn register_any_narrowing_enums_from_expr(
+    reg: &mut TypeRegistry,
+    fn_name: &str,
+    func_def: &TypeDef,
+    expr: &ast::Expr,
+) {
+    use crate::transformer::any_narrowing::{collect_any_constraints_from_expr, generate_any_enum};
+
+    let TypeDef::Function { params, .. } = func_def else {
+        return;
+    };
+
+    let any_names: Vec<String> = params
+        .iter()
+        .filter(|(_, ty)| matches!(ty, RustType::Any))
+        .map(|(name, _)| name.clone())
+        .collect();
+
+    if any_names.is_empty() {
+        return;
+    }
+
+    let constraints = collect_any_constraints_from_expr(expr, &any_names);
+    for (param_name, constraint) in &constraints {
+        if constraint.is_empty() {
+            continue;
+        }
+        let (enum_item, _) = generate_any_enum(fn_name, param_name, constraint);
+        register_extra_enums(reg, &[enum_item]);
+    }
+}
+
+/// アロー関数からパラメータ型と戻り値型を収集する。インライン union enum を extra_items に収集する。
+fn collect_arrow_def_with_extras(
+    arrow: &ast::ArrowExpr,
+    lookup: &TypeRegistry,
+    extra_items: &mut Vec<Item>,
+) -> Result<TypeDef> {
     let mut params = Vec::new();
     for param in &arrow.params {
         if let ast::Pat::Ident(ident) = param {
             let name = ident.id.sym.to_string();
             if let Some(ann) = &ident.type_ann {
-                if let Ok(ty) = convert_ts_type(&ann.type_ann, &mut Vec::new(), lookup) {
+                if let Ok(ty) = convert_ts_type(&ann.type_ann, extra_items, lookup) {
                     params.push((name, ty));
                 }
             }
@@ -820,7 +946,7 @@ fn collect_arrow_def(arrow: &ast::ArrowExpr, lookup: &TypeRegistry) -> Result<Ty
     let return_type = arrow
         .return_type
         .as_ref()
-        .and_then(|ann| convert_ts_type(&ann.type_ann, &mut Vec::new(), lookup).ok());
+        .and_then(|ann| convert_ts_type(&ann.type_ann, extra_items, lookup).ok());
 
     Ok(TypeDef::Function {
         params,

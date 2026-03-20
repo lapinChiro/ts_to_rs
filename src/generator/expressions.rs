@@ -81,6 +81,7 @@ fn needs_parens_as_receiver(expr: &Expr) -> bool {
             | Expr::Cast { .. }
             | Expr::Assign { .. }
             | Expr::If { .. }
+            | Expr::IfLet { .. }
     )
 }
 
@@ -265,6 +266,19 @@ pub(super) fn generate_expr(expr: &Expr) -> String {
                 generate_expr(else_expr)
             )
         }
+        Expr::IfLet {
+            pattern,
+            expr,
+            then_expr,
+            else_expr,
+        } => {
+            format!(
+                "if let {pattern} = {} {{ {} }} else {{ {} }}",
+                generate_expr(expr),
+                generate_expr(then_expr),
+                generate_expr(else_expr)
+            )
+        }
         Expr::MacroCall {
             name,
             args,
@@ -288,6 +302,9 @@ pub(super) fn generate_expr(expr: &Expr) -> String {
         }
         Expr::Deref(inner) => format!("*{}", generate_expr(inner)),
         Expr::Ref(inner) => format!("&{}", generate_expr(inner)),
+        Expr::Matches { expr, pattern } => {
+            format!("matches!({}, {pattern})", generate_expr(expr))
+        }
         Expr::Unit => "()".to_string(),
         Expr::IntLit(n) => format!("{n}"),
         Expr::Block(stmts) => {

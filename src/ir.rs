@@ -34,7 +34,12 @@ pub enum RustType {
     },
     /// A tuple type: `(T1, T2, ...)`
     Tuple(Vec<RustType>),
-    /// `Box<dyn std::any::Any>` (corresponds to TypeScript `any` and `unknown`)
+    /// `serde_json::Value` (corresponds to TypeScript `any` and `unknown`).
+    ///
+    /// For `any`-typed function parameters with typeof/instanceof checks, the transformer
+    /// generates a custom enum via lazy type materialization (`any_narrowing.rs`) and
+    /// replaces this with `RustType::Named`. This fallback is used only when no
+    /// typeof/instanceof usage is detected.
     Any,
     /// `!` (never type, corresponds to TypeScript `never`)
     Never,
@@ -502,6 +507,17 @@ pub enum Expr {
         /// Else branch expression
         else_expr: Box<Expr>,
     },
+    /// An `if let` expression: `if let pattern = expr { then } else { else }`
+    IfLet {
+        /// Pattern to match (e.g., `"Some(x)"`, `"Enum::Variant(x)"`)
+        pattern: String,
+        /// Expression to match against
+        expr: Box<Expr>,
+        /// Then branch expression (pattern matched)
+        then_expr: Box<Expr>,
+        /// Else branch expression (pattern not matched)
+        else_expr: Box<Expr>,
+    },
     /// A macro call: `name!(args)` (e.g., `println!("{:?}", x)`)
     MacroCall {
         /// Macro name (without `!`)
@@ -534,6 +550,13 @@ pub enum Expr {
         expr: Box<Expr>,
         /// The target type
         target: RustType,
+    },
+    /// A `matches!` macro expression: `matches!(expr, pattern)`
+    Matches {
+        /// Expression to test
+        expr: Box<Expr>,
+        /// Pattern to match against (raw Rust pattern string)
+        pattern: String,
     },
     /// A block expression: `{ stmt1; stmt2; tail_expr }`
     Block(Vec<Stmt>),

@@ -149,6 +149,43 @@ pub(super) fn try_convert_typeof_comparison(
     // Resolve the operand's type from TypeEnv
     let operand_type = resolve_expr_type(typeof_operand, type_env, reg);
 
+    // If the operand is a union enum type, generate a matches!() expression
+    // for correct runtime checking. In if-statements, can_generate_if_let
+    // overrides this with if-let patterns (which also narrows the type).
+    if let Some(RustType::Named {
+        name: enum_name, ..
+    }) = &operand_type
+    {
+        if let Some(crate::registry::TypeDef::Enum { variants, .. }) = reg.get(enum_name) {
+            let expected_variant = match type_str.as_str() {
+                "string" => "String",
+                "number" => "F64",
+                "boolean" => "Bool",
+                "object" => "Object",
+                "function" => "Function",
+                _ => "",
+            };
+            if variants.iter().any(|v| v == expected_variant) {
+                let operand_ir =
+                    super::convert_expr(typeof_operand, reg, &super::ExprContext::none(), type_env)
+                        .ok()?;
+                let pattern = format!("{enum_name}::{expected_variant}(_)");
+                let matches_expr = Expr::Matches {
+                    expr: Box::new(operand_ir),
+                    pattern,
+                };
+                return Some(if is_neq {
+                    Expr::UnaryOp {
+                        op: crate::ir::UnOp::Not,
+                        operand: Box::new(matches_expr),
+                    }
+                } else {
+                    matches_expr
+                });
+            }
+        }
+    }
+
     let result = match &operand_type {
         Some(ty) => resolve_typeof_match(ty, &type_str),
         None => TypeofMatch::Placeholder,
@@ -170,8 +207,15 @@ pub(super) fn try_convert_typeof_comparison(
             }
         }
         TypeofMatch::Placeholder => {
-            // Unknown type → optimistic true (negated for !==)
-            Expr::BoolLit(!is_neq)
+            // Unknown/Any type → todo!() to produce a compile error.
+            // For function params, any_narrowing converts `any` to enum and generates if-let,
+            // so this path is only reached for unhandled cases (expression-body arrows, local vars).
+            Expr::FnCall {
+                name: "todo!".to_string(),
+                args: vec![Expr::StringLit(format!(
+                    "typeof {type_str} — cannot resolve type of operand"
+                ))],
+            }
         }
     };
 
@@ -208,12 +252,19 @@ enum TypeofMatch {
     False,
     /// The type is `Option<T>` and typeof is `"undefined"` — convert to `.is_none()`.
     IsNone,
-    /// The operand type is unknown — use optimistic fallback.
+    /// The operand type is unknown — generate `todo!()` to produce a compile error.
     Placeholder,
 }
 
 /// Resolves whether a RustType matches a typeof string.
 fn resolve_typeof_match(ty: &RustType, typeof_str: &str) -> TypeofMatch {
+    // Any means "type unknown" — cannot determine match/mismatch at compile time.
+    // For function params with typeof checks, any_narrowing generates an enum and if-let.
+    // This path is only reached for unhandled cases (arrow function params, local variables).
+    // Placeholder generates `todo!()` to produce a compile error (not a silent `true`).
+    if matches!(ty, RustType::Any) {
+        return TypeofMatch::Placeholder;
+    }
     match typeof_str {
         "string" => {
             if matches!(ty, RustType::String) {
@@ -352,7 +403,11 @@ pub(super) fn convert_in_operator(
 /// - Known non-matching type → `false`
 /// - `Option<T>` where T matches → `x.is_some()`
 /// - Unknown type → `todo!()` placeholder (compile error, not silent `true`)
-pub(super) fn convert_instanceof(bin: &ast::BinExpr, type_env: &TypeEnv) -> Expr {
+pub(super) fn convert_instanceof(
+    bin: &ast::BinExpr,
+    type_env: &TypeEnv,
+    reg: &TypeRegistry,
+) -> Expr {
     // Get the class name from the RHS
     let class_name = match bin.right.as_ref() {
         ast::Expr::Ident(ident) => ident.sym.to_string(),
@@ -374,7 +429,31 @@ pub(super) fn convert_instanceof(bin: &ast::BinExpr, type_env: &TypeEnv) -> Expr
     };
 
     match lhs_type {
-        Some(RustType::Named { name, .. }) => Expr::BoolLit(name == class_name),
+        // Any/unknown type → todo!() to produce a compile error.
+        // For function params, any_narrowing generates enums and if-let patterns.
+        // This path is only reached for unhandled cases (expression-body arrows, local vars).
+        Some(RustType::Any) | None => Expr::FnCall {
+            name: "todo!".to_string(),
+            args: vec![Expr::StringLit(format!(
+                "instanceof {class_name} — cannot resolve type of operand"
+            ))],
+        },
+        Some(RustType::Named { ref name, .. }) => {
+            // Check if this is a union enum with a matching variant
+            if let Some(crate::registry::TypeDef::Enum { variants, .. }) = reg.get(name) {
+                if variants.iter().any(|v| v == &class_name) {
+                    let lhs_ir = match bin.left.as_ref() {
+                        ast::Expr::Ident(ident) => Expr::Ident(ident.sym.to_string()),
+                        _ => return Expr::BoolLit(true),
+                    };
+                    return Expr::Matches {
+                        expr: Box::new(lhs_ir),
+                        pattern: format!("{name}::{class_name}(_)"),
+                    };
+                }
+            }
+            Expr::BoolLit(*name == class_name)
+        }
         Some(RustType::Option(inner)) => match inner.as_ref() {
             RustType::Named { name, .. } if name == &class_name => {
                 let lhs_ir = match bin.left.as_ref() {
@@ -395,13 +474,6 @@ pub(super) fn convert_instanceof(bin: &ast::BinExpr, type_env: &TypeEnv) -> Expr
             _ => Expr::BoolLit(false),
         },
         Some(_) => Expr::BoolLit(false),
-        // Unknown type: generate todo!() instead of silent true
-        None => Expr::FnCall {
-            name: "todo!".to_string(),
-            args: vec![Expr::StringLit(format!(
-                "instanceof {class_name} — type unknown"
-            ))],
-        },
     }
 }
 
@@ -415,5 +487,340 @@ pub(super) fn typeof_to_string(ty: &RustType) -> &'static str {
         RustType::Named { .. } | RustType::Vec(_) => "object",
         RustType::Fn { .. } => "function",
         _ => "object",
+    }
+}
+
+/// A narrowing guard extracted from an if-condition.
+#[derive(Debug)]
+pub(crate) enum NarrowingGuard {
+    /// `typeof x === "string"` (or "number", "boolean", etc.)
+    Typeof {
+        var_name: String,
+        type_name: String,
+        /// true if the comparison is `===`/`==` (narrows in then branch)
+        /// false if `!==`/`!=` (narrows in else branch)
+        is_eq: bool,
+    },
+    /// `x !== null` / `x !== undefined`
+    NonNullish { var_name: String, is_neq: bool },
+    /// `if (x)` — truthy check, narrows `Option<T>` to `T`
+    Truthy { var_name: String },
+    /// `x instanceof Foo`
+    InstanceOf {
+        var_name: String,
+        class_name: String,
+    },
+}
+
+impl NarrowingGuard {
+    /// Returns the variable name being narrowed.
+    pub(crate) fn var_name(&self) -> &str {
+        match self {
+            NarrowingGuard::Typeof { var_name, .. }
+            | NarrowingGuard::Truthy { var_name }
+            | NarrowingGuard::InstanceOf { var_name, .. }
+            | NarrowingGuard::NonNullish { var_name, .. } => var_name,
+        }
+    }
+
+    /// Returns the narrowed RustType for the then branch.
+    pub(crate) fn narrowed_type_for_then(&self, original: &RustType) -> Option<RustType> {
+        match self {
+            NarrowingGuard::Typeof {
+                type_name, is_eq, ..
+            } => {
+                if *is_eq {
+                    typeof_string_to_rust_type(type_name)
+                } else {
+                    // !== → narrowing happens in else, not then
+                    None
+                }
+            }
+            NarrowingGuard::NonNullish { is_neq, .. } => {
+                if *is_neq {
+                    // x !== null → then branch: unwrap Option<T> → T
+                    if let RustType::Option(inner) = original {
+                        Some(inner.as_ref().clone())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            }
+            NarrowingGuard::Truthy { .. } => {
+                // if (x) → then branch: unwrap Option<T> → T
+                if let RustType::Option(inner) = original {
+                    Some(inner.as_ref().clone())
+                } else {
+                    None
+                }
+            }
+            NarrowingGuard::InstanceOf { class_name, .. } => Some(RustType::Named {
+                name: class_name.clone(),
+                type_args: vec![],
+            }),
+        }
+    }
+
+    /// Returns the if-let pattern string if this guard can generate an if-let.
+    ///
+    /// Returns `Some((pattern, is_swap))` where `is_swap` is true for `!==`/`!=` guards
+    /// (meaning then/else branches should be swapped).
+    /// Returns `None` if the guard cannot generate an if-let pattern (e.g., variable type
+    /// is not an enum or Option).
+    pub(crate) fn if_let_pattern(
+        &self,
+        type_env: &super::super::TypeEnv,
+        reg: &TypeRegistry,
+    ) -> Option<(String, bool)> {
+        let var_type = type_env.get(self.var_name())?;
+        match self {
+            NarrowingGuard::NonNullish { is_neq, .. } => {
+                if matches!(var_type, RustType::Option(_)) {
+                    Some((format!("Some({})", self.var_name()), !is_neq))
+                } else {
+                    None
+                }
+            }
+            NarrowingGuard::Truthy { .. } => {
+                if matches!(var_type, RustType::Option(_)) {
+                    Some((format!("Some({})", self.var_name()), false))
+                } else {
+                    None
+                }
+            }
+            NarrowingGuard::Typeof {
+                type_name, is_eq, ..
+            } => {
+                let (enum_name, variant) =
+                    resolve_typeof_to_enum_variant(var_type, type_name, reg)?;
+                Some((
+                    format!("{enum_name}::{variant}({})", self.var_name()),
+                    !is_eq,
+                ))
+            }
+            NarrowingGuard::InstanceOf { class_name, .. } => {
+                let (enum_name, variant) =
+                    resolve_instanceof_to_enum_variant(var_type, class_name, reg)?;
+                Some((
+                    format!("{enum_name}::{variant}({})", self.var_name()),
+                    false,
+                ))
+            }
+        }
+    }
+
+    /// Returns the narrowed RustType for the else branch.
+    pub(crate) fn narrowed_type_for_else(&self, original: &RustType) -> Option<RustType> {
+        match self {
+            NarrowingGuard::Typeof {
+                type_name, is_eq, ..
+            } => {
+                if !*is_eq {
+                    typeof_string_to_rust_type(type_name)
+                } else {
+                    None
+                }
+            }
+            NarrowingGuard::NonNullish { is_neq, .. } => {
+                if !*is_neq {
+                    // x === null → else branch: unwrap Option<T> → T
+                    if let RustType::Option(inner) = original {
+                        Some(inner.as_ref().clone())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            }
+            NarrowingGuard::Truthy { .. } => {
+                // if (x) → else branch: x is falsy, no narrowing
+                None
+            }
+            NarrowingGuard::InstanceOf { .. } => {
+                // instanceof → else branch: not the checked type, no narrowing
+                None
+            }
+        }
+    }
+}
+
+/// Result of extracting narrowing guards from a compound condition.
+///
+/// For `typeof x === "string" && typeof y === "number"`, returns two guards.
+/// For `typeof x === "string" && x.length > 0`, returns one guard and one remaining condition.
+#[derive(Debug)]
+pub(crate) struct CompoundGuards<'a> {
+    /// Narrowing guards paired with their original AST expressions.
+    /// The AST reference is retained so that non-if-let guards can be converted
+    /// through the standard `convert_expr` pipeline instead of re-implementing conversion.
+    pub guards: Vec<(NarrowingGuard, &'a ast::Expr)>,
+    /// Sub-expressions in the && chain that are not narrowing guards.
+    pub remaining: Vec<&'a ast::Expr>,
+}
+
+/// Extracts all narrowing guards from a `&&`-connected condition.
+///
+/// Recursively traverses `LogicalAnd` nodes and collects guards.
+/// Non-guard sub-expressions are collected in `remaining`.
+pub(crate) fn extract_narrowing_guards(condition: &ast::Expr) -> CompoundGuards<'_> {
+    let mut result = CompoundGuards {
+        guards: Vec::new(),
+        remaining: Vec::new(),
+    };
+    collect_guards_from_and(condition, &mut result);
+    result
+}
+
+fn collect_guards_from_and<'a>(expr: &'a ast::Expr, result: &mut CompoundGuards<'a>) {
+    if let ast::Expr::Bin(bin) = expr {
+        if bin.op == ast::BinaryOp::LogicalAnd {
+            collect_guards_from_and(&bin.left, result);
+            collect_guards_from_and(&bin.right, result);
+            return;
+        }
+    }
+    // Not a LogicalAnd — try to extract a single guard
+    if let Some(guard) = extract_narrowing_guard(expr) {
+        result.guards.push((guard, expr));
+    } else {
+        result.remaining.push(expr);
+    }
+}
+
+/// Extracts a narrowing guard from an if-condition expression.
+pub(crate) fn extract_narrowing_guard(condition: &ast::Expr) -> Option<NarrowingGuard> {
+    match condition {
+        ast::Expr::Bin(bin) => {
+            // instanceof check: if (x instanceof Foo)
+            if bin.op == ast::BinaryOp::InstanceOf {
+                if let (ast::Expr::Ident(lhs), ast::Expr::Ident(rhs)) =
+                    (bin.left.as_ref(), bin.right.as_ref())
+                {
+                    return Some(NarrowingGuard::InstanceOf {
+                        var_name: lhs.sym.to_string(),
+                        class_name: rhs.sym.to_string(),
+                    });
+                }
+                return None;
+            }
+
+            let is_eq = matches!(bin.op, ast::BinaryOp::EqEq | ast::BinaryOp::EqEqEq);
+            let is_neq = matches!(bin.op, ast::BinaryOp::NotEq | ast::BinaryOp::NotEqEq);
+            if !is_eq && !is_neq {
+                return None;
+            }
+
+            // typeof x === "type"
+            if let Some((ast::Expr::Ident(ident), type_str)) = extract_typeof_and_string(bin) {
+                return Some(NarrowingGuard::Typeof {
+                    var_name: ident.sym.to_string(),
+                    type_name: type_str,
+                    is_eq,
+                });
+            }
+
+            // x !== null / x !== undefined
+            let (var_expr, is_nullish) = if is_null_or_undefined(&bin.right) {
+                (Some(&*bin.left), true)
+            } else if is_null_or_undefined(&bin.left) {
+                (Some(&*bin.right), true)
+            } else {
+                (None, false)
+            };
+            if is_nullish {
+                if let Some(ast::Expr::Ident(ident)) = var_expr {
+                    return Some(NarrowingGuard::NonNullish {
+                        var_name: ident.sym.to_string(),
+                        is_neq,
+                    });
+                }
+            }
+
+            None
+        }
+        // Truthy check: if (x) where x is a simple identifier
+        ast::Expr::Ident(ident) => {
+            let name = ident.sym.to_string();
+            // Exclude keywords that aren't variables
+            if name == "undefined" || name == "null" || name == "true" || name == "false" {
+                return None;
+            }
+            Some(NarrowingGuard::Truthy { var_name: name })
+        }
+        _ => None,
+    }
+}
+
+/// Maps a typeof string to a RustType.
+pub(crate) fn typeof_string_to_rust_type(type_name: &str) -> Option<RustType> {
+    match type_name {
+        "string" => Some(RustType::String),
+        "number" => Some(RustType::F64),
+        "boolean" => Some(RustType::Bool),
+        _ => None,
+    }
+}
+
+/// Returns true if the expression is `null` or `undefined`.
+fn is_null_or_undefined(expr: &ast::Expr) -> bool {
+    matches!(expr, ast::Expr::Lit(ast::Lit::Null(..)))
+        || matches!(expr, ast::Expr::Ident(ident) if ident.sym.as_ref() == "undefined")
+}
+
+/// Resolves a typeof string to an enum variant name.
+///
+/// Given a variable type like `Named { name: "StringOrF64" }` and typeof string `"string"`,
+/// looks up the enum in TypeRegistry and finds the variant that matches.
+pub(crate) fn resolve_typeof_to_enum_variant(
+    var_type: &RustType,
+    typeof_str: &str,
+    reg: &TypeRegistry,
+) -> Option<(String, String)> {
+    let enum_name = match var_type {
+        RustType::Named { name, type_args } if type_args.is_empty() => name,
+        _ => return None,
+    };
+    let type_def = reg.get(enum_name)?;
+    let variants = match type_def {
+        crate::registry::TypeDef::Enum { variants, .. } => variants,
+        _ => return None,
+    };
+    let expected_variant = match typeof_str {
+        "string" => "String",
+        "number" => "F64",
+        "boolean" => "Bool",
+        "object" => "Object",
+        "function" => "Function",
+        _ => return None,
+    };
+    if variants.iter().any(|v| v == expected_variant) {
+        Some((enum_name.clone(), expected_variant.to_string()))
+    } else {
+        None
+    }
+}
+
+/// Resolves an instanceof class name to an enum variant.
+pub(crate) fn resolve_instanceof_to_enum_variant(
+    var_type: &RustType,
+    class_name: &str,
+    reg: &TypeRegistry,
+) -> Option<(String, String)> {
+    let enum_name = match var_type {
+        RustType::Named { name, type_args } if type_args.is_empty() => name,
+        _ => return None,
+    };
+    let type_def = reg.get(enum_name)?;
+    let variants = match type_def {
+        crate::registry::TypeDef::Enum { variants, .. } => variants,
+        _ => return None,
+    };
+    if variants.iter().any(|v| v == class_name) {
+        Some((enum_name.clone(), class_name.to_string()))
+    } else {
+        None
     }
 }
