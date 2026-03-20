@@ -1479,19 +1479,19 @@ fn test_convert_type_alias_intersection_type_ref_resolved_generates_merged_struc
     let mut reg = TypeRegistry::new();
     reg.register(
         "Foo".to_string(),
-        crate::registry::TypeDef::Struct {
-            fields: vec![("a".to_string(), RustType::String)],
-            methods: std::collections::HashMap::new(),
-            extends: vec![],
-        },
+        crate::registry::TypeDef::new_struct(
+            vec![("a".to_string(), RustType::String)],
+            std::collections::HashMap::new(),
+            vec![],
+        ),
     );
     reg.register(
         "Bar".to_string(),
-        crate::registry::TypeDef::Struct {
-            fields: vec![("b".to_string(), RustType::F64)],
-            methods: std::collections::HashMap::new(),
-            extends: vec![],
-        },
+        crate::registry::TypeDef::new_struct(
+            vec![("b".to_string(), RustType::F64)],
+            std::collections::HashMap::new(),
+            vec![],
+        ),
     );
     let decl = parse_type_alias("type C = Foo & Bar;");
     let item = convert_type_alias(&decl, Visibility::Public, &reg).unwrap();
@@ -2300,15 +2300,15 @@ fn reg_with_point() -> TypeRegistry {
     let mut reg = TypeRegistry::new();
     reg.register(
         "Point".to_string(),
-        TypeDef::Struct {
-            fields: vec![
+        TypeDef::new_struct(
+            vec![
                 ("x".to_string(), RustType::F64),
                 ("y".to_string(), RustType::F64),
                 ("z".to_string(), RustType::F64),
             ],
-            methods: std::collections::HashMap::new(),
-            extends: vec![],
-        },
+            std::collections::HashMap::new(),
+            vec![],
+        ),
     );
     reg
 }
@@ -2366,14 +2366,14 @@ fn test_utility_required_strips_option_from_all_fields() {
     let mut reg = TypeRegistry::new();
     reg.register(
         "OptPoint".to_string(),
-        TypeDef::Struct {
-            fields: vec![
+        TypeDef::new_struct(
+            vec![
                 ("x".to_string(), RustType::Option(Box::new(RustType::F64))),
                 ("y".to_string(), RustType::Option(Box::new(RustType::F64))),
             ],
-            methods: std::collections::HashMap::new(),
-            extends: vec![],
-        },
+            std::collections::HashMap::new(),
+            vec![],
+        ),
     );
     let mut extra_items = Vec::new();
     let ty = convert_ts_type(&ts_type, &mut extra_items, &reg).unwrap();

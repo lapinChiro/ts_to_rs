@@ -45,6 +45,12 @@ pub enum RustType {
         /// Generic type arguments (empty if not generic)
         type_args: Vec<RustType>,
     },
+    /// A reference type: `&T` (e.g., `&dyn Greeter`)
+    Ref(Box<RustType>),
+    /// A trait object type: `dyn T` (e.g., `dyn Greeter`)
+    ///
+    /// Used with `Ref` for `&dyn Trait` parameters and with `Named { name: "Box" }` for `Box<dyn Trait>`.
+    DynTrait(String),
 }
 
 impl RustType {
@@ -58,13 +64,16 @@ impl RustType {
                     || name.contains(&format!("<{param}>"))
                     || type_args.iter().any(|a| a.uses_param(param))
             }
-            RustType::Option(inner) | RustType::Vec(inner) => inner.uses_param(param),
+            RustType::Option(inner) | RustType::Vec(inner) | RustType::Ref(inner) => {
+                inner.uses_param(param)
+            }
             RustType::Result { ok, err } => ok.uses_param(param) || err.uses_param(param),
             RustType::Tuple(elems) => elems.iter().any(|e| e.uses_param(param)),
             RustType::Fn {
                 params,
                 return_type,
             } => params.iter().any(|p| p.uses_param(param)) || return_type.uses_param(param),
+            RustType::DynTrait(name) => name == param,
             _ => false,
         }
     }

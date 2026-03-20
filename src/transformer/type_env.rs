@@ -15,10 +15,7 @@ pub(crate) fn wrap_trait_for_param(ty: RustType, reg: &TypeRegistry) -> RustType
     } = ty
     {
         if type_args.is_empty() && reg.is_trait_type(name) {
-            return RustType::Named {
-                name: format!("&dyn {name}"),
-                type_args: vec![],
-            };
+            return RustType::Ref(Box::new(RustType::DynTrait(name.clone())));
         }
     }
     ty
@@ -35,8 +32,8 @@ pub(crate) fn wrap_trait_for_value(ty: RustType, reg: &TypeRegistry) -> RustType
     {
         if type_args.is_empty() && reg.is_trait_type(name) {
             return RustType::Named {
-                name: format!("Box<dyn {name}>"),
-                type_args: vec![],
+                name: "Box".to_string(),
+                type_args: vec![RustType::DynTrait(name.clone())],
             };
         }
     }

@@ -1745,15 +1745,15 @@ fn test_object_destructuring_rest_with_type_expands_remaining_fields() {
     let mut reg = TypeRegistry::new();
     reg.register(
         "Point".to_string(),
-        crate::registry::TypeDef::Struct {
-            fields: vec![
+        crate::registry::TypeDef::new_struct(
+            vec![
                 ("a".to_string(), RustType::F64),
                 ("b".to_string(), RustType::F64),
                 ("c".to_string(), RustType::F64),
             ],
-            methods: std::collections::HashMap::new(),
-            extends: vec![],
-        },
+            std::collections::HashMap::new(),
+            vec![],
+        ),
     );
     let mut type_env = TypeEnv::new();
     type_env.insert(
@@ -2305,14 +2305,9 @@ fn test_convert_var_decl_trait_type_generates_box_dyn() {
         "greet".to_string(),
         vec![("msg".to_string(), RustType::String)],
     );
-    reg.register_interface("Greeter".to_string());
     reg.register(
         "Greeter".to_string(),
-        TypeDef::Struct {
-            fields: vec![],
-            methods,
-            extends: vec![],
-        },
+        TypeDef::new_interface(vec![], methods, vec![]),
     );
     let stmts = parse_fn_body("function _f(): void { const g: Greeter = null as any; }");
     let stmt = &stmts[0];
@@ -2324,8 +2319,8 @@ fn test_convert_var_decl_trait_type_generates_box_dyn() {
             assert_eq!(
                 *ty,
                 Some(RustType::Named {
-                    name: "Box<dyn Greeter>".to_string(),
-                    type_args: vec![],
+                    name: "Box".to_string(),
+                    type_args: vec![RustType::DynTrait("Greeter".to_string())],
                 })
             );
         }

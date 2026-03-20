@@ -489,8 +489,10 @@ fn generate_serde_tagged_enum(
 /// containing them cannot derive them.
 fn is_derivable_type(ty: &RustType) -> bool {
     match ty {
-        RustType::Fn { .. } | RustType::Any => false,
-        RustType::Option(inner) | RustType::Vec(inner) => is_derivable_type(inner),
+        RustType::Fn { .. } | RustType::Any | RustType::DynTrait(_) => false,
+        RustType::Option(inner) | RustType::Vec(inner) | RustType::Ref(inner) => {
+            is_derivable_type(inner)
+        }
         RustType::Result { ok, err } => is_derivable_type(ok) && is_derivable_type(err),
         RustType::Tuple(elems) => elems.iter().all(is_derivable_type),
         RustType::Named { type_args, .. } => type_args.iter().all(is_derivable_type),

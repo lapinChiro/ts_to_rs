@@ -63,6 +63,8 @@ pub fn generate_type(ty: &RustType) -> String {
                 format!("{name}<{args}>")
             }
         }
+        RustType::Ref(inner) => format!("&{}", generate_type(inner)),
+        RustType::DynTrait(name) => format!("dyn {name}"),
     }
 }
 

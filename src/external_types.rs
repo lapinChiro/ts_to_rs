@@ -172,9 +172,6 @@ pub fn load_types_json(json: &str) -> Result<TypeRegistry> {
     let mut registry = TypeRegistry::new();
     for (name, def) in parsed.types {
         if let Some(type_def) = convert_external_typedef(&def) {
-            if matches!(def, ExternalTypeDef::Interface { .. }) {
-                registry.register_interface(name.clone());
-            }
             registry.register(name.clone(), type_def);
         }
     }
@@ -224,11 +221,11 @@ fn convert_external_typedef(def: &ExternalTypeDef) -> Option<TypeDef> {
                 })
                 .collect();
 
-            Some(TypeDef::Struct {
-                fields: converted_fields,
-                methods: converted_methods,
-                extends: vec![],
-            })
+            Some(TypeDef::new_interface(
+                converted_fields,
+                converted_methods,
+                vec![],
+            ))
         }
         ExternalTypeDef::Function { signatures } => {
             let sig = signatures.first()?;

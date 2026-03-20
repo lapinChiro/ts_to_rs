@@ -57,18 +57,18 @@
 #### union/intersection の情報欠落
 
 - **[I-171]** **union の未対応メンバー → `Other{N}(Any)` フォールバック** — 情報欠落
-    - 関数型、タプル型等の未対応メンバーが `serde_json::Value` バリアントになる
-    - 複数の異なる未対応型が同じ `Any` バリアントに畳み込まれ、パターンマッチで区別不能
-    - 対策: 関数型は `Box<dyn Fn>` バリアント、タプル型は `Tuple` バリアントとして変換可能
+  - 関数型、タプル型等の未対応メンバーが `serde_json::Value` バリアントになる
+  - 複数の異なる未対応型が同じ `Any` バリアントに畳み込まれ、パターンマッチで区別不能
+  - 対策: 関数型は `Box<dyn Fn>` バリアント、タプル型は `Tuple` バリアントとして変換可能
 
 #### 型変換・型推論
 
 - **[I-189]** **trait 型の呼び出し側自動調整** — コンパイルエラー（I-187 の後続）
-    - `&dyn Trait` パラメータへの引数に `&` を自動付与
-    - `Box<dyn Trait>` 変数の初期化に `Box::new()` を自動付与
-    - I-187 で型注釈の変換は完了済みだが、呼び出し側・初期化側が未調整のためコンパイルエラーになる
+  - `&dyn Trait` パラメータへの引数に `&` を自動付与
+  - `Box<dyn Trait>` 変数の初期化に `Box::new()` を自動付与
+  - I-187 で型注釈の変換は完了済みだが、呼び出し側・初期化側が未調整のためコンパイルエラーになる
 - **[I-93]** **ネストしたフィールド/メソッド経由の変更検出** — ミュータビリティ推論
-    - `mark_mutated_vars` は直接的な変更のみ検出。ネストしたパスは未検出
+  - `mark_mutated_vars` は直接的な変更のみ検出。ネストしたパスは未検出
 - **[I-62]** **`is_string_type` の `Option<String>` ハック除去** — 型推論
 - **[I-69]** **型 narrowing（型ガード後の型絞り込み）** — 型推論
 - **[I-11]** **三項演算子の分岐型不一致** — 式変換正確性
@@ -79,8 +79,8 @@
 #### import/export・API
 
 - **[I-18]** **re-export の追跡** — import/export
-    - `export * from './module'`（`ExportAll`）は部分的に動作（`pub use crate::<mod>::*` を生成）。予約語モジュール名でコンパイルエラーになるケースあり
-    - 名前付き re-export `export { X } from './module'` の追跡も含む
+  - `export * from './module'`（`ExportAll`）は部分的に動作（`pub use crate::<mod>::*` を生成）。予約語モジュール名でコンパイルエラーになるケースあり
+  - 名前付き re-export `export { X } from './module'` の追跡も含む
 - **[I-21]** **async void のセマンティクス差異対応** — 変換正確性
 
 ### Tier 2: 中優先度 — テスト拡充・基盤改善
@@ -88,9 +88,9 @@
 #### ベンチマーク・テスト基盤
 
 - **[I-182]** **Hono クリーンファイルのコンパイルテスト導入** — フェーズ「コンパイル可能性の向上」の中核
-    - 変換成功（エラー 0）の Hono ファイルに対して `cargo check` を実行し、「変換成功かつコンパイル成功」のファイル数を新指標にする
-    - フィクスチャベースのコンパイルチェック基盤（`tests/compile_test.rs`）は既存。Hono ベンチ（`scripts/hono-bench.sh`）でも `compile_clean_files` を計測済み（現在 47/158 = 29.7%）
-    - I-24（Web API ビルトイン型）完了済みだが、ベンチマーク数値に変化なし。ビルトイン型は TypeRegistry の型情報としてのみ使われ、生成 Rust 内のビルトイン型の struct 定義は生成されないため
+  - 変換成功（エラー 0）の Hono ファイルに対して `cargo check` を実行し、「変換成功かつコンパイル成功」のファイル数を新指標にする
+  - フィクスチャベースのコンパイルチェック基盤（`tests/compile_test.rs`）は既存。Hono ベンチ（`scripts/hono-bench.sh`）でも `compile_clean_files` を計測済み（現在 47/158 = 29.7%）
+  - I-24（Web API ビルトイン型）完了済みだが、ベンチマーク数値に変化なし。ビルトイン型は TypeRegistry の型情報としてのみ使われ、生成 Rust 内のビルトイン型の struct 定義は生成されないため
 
 #### E2E テスト拡充
 
@@ -102,20 +102,23 @@
 #### Node.js API 変換（未対応分）
 
 - **[I-184]** **fs モジュールの追加メソッド** — 同期 API のみ
-    - `fs.mkdirSync(path, { recursive: true })` → `std::fs::create_dir_all(path)`
-    - `fs.readdirSync(path)` → `std::fs::read_dir(path)`
-    - `fs.unlinkSync(path)` → `std::fs::remove_file(path)`
-    - `fs.statSync(path)` → `std::fs::metadata(path)`
-    - `fs.renameSync(old, new)` → `std::fs::rename(old, new)`
-    - 需要に応じて段階的に追加
+  - `fs.mkdirSync(path, { recursive: true })` → `std::fs::create_dir_all(path)`
+  - `fs.readdirSync(path)` → `std::fs::read_dir(path)`
+  - `fs.unlinkSync(path)` → `std::fs::remove_file(path)`
+  - `fs.statSync(path)` → `std::fs::metadata(path)`
+  - `fs.renameSync(old, new)` → `std::fs::rename(old, new)`
+  - 需要に応じて段階的に追加
 - **[I-185]** **process の追加プロパティ** — env 以外
-    - `process.argv` → `std::env::args().collect::<Vec<String>>()`
-    - `process.exit(code)` → `std::process::exit(code)`
-    - `process.cwd()` → `std::env::current_dir().unwrap().to_string_lossy().to_string()`
-    - 需要に応じて段階的に追加
+  - `process.argv` → `std::env::args().collect::<Vec<String>>()`
+  - `process.exit(code)` → `std::process::exit(code)`
+  - `process.cwd()` → `std::env::current_dir().unwrap().to_string_lossy().to_string()`
+  - 需要に応じて段階的に追加
 
 ### Tier 3: 低優先度
 
+- **[I-191]** **README.md の記述内容の見直し** — ドキュメント
+  - モジュール再構成（expressions/ 分割、type_env.rs 新設等）後の構成が反映されていない
+  - アーキテクチャ説明、ディレクトリ構成、使用例が現在のコードベースと一致しているか確認・更新する
 - **[I-99]** **`collect_du_field_accesses_from_expr` の AST ノード網羅性改善** — コード品質
 - **[I-39]** **Transformer の Range 生成で `Expr::IntLit` を使用** — IR 整合性
 - **[I-27]** **タプルの optional 要素** — 型構文
@@ -124,7 +127,7 @@
 - **[I-33]** **非プリミティブ type assertion のコメント保持** — type assertion
 - **[I-34]** **Math.random() → `rand` クレート** — 組み込み API
 - **[I-35]** **indexed access type の非文字列キー対応** — 型構文（**5 インスタンス**、non-string key 3 + base type 2）
-    - 🔗 解消すると I-32（コンパイルテストスキップ解消、残り 1 件）が可能
+  - 🔗 解消すると I-32（コンパイルテストスキップ解消、残り 1 件）が可能
 - **[I-36]** **qualified type name (`A.B` 形式)** — 型構文（**3 インスタンス**、QUALIFIED_TYPE）
 - **[I-58]** **Trait の type_params 未対応** — 型構文
 - **[I-59]** **Pick/Omit のネストしたユーティリティ型未対応** — 型変換
@@ -138,14 +141,14 @@
 - **[I-155]** **`satisfies` 式** — 式変換（**1 インスタンス**、SATISFIES_EXPR）
 - **[I-156]** **オブジェクトリテラルのゲッター/メソッド記法** — 式変換（**1 インスタンス**）
 - **[I-126]** **計算プロパティアクセス残存** — 式変換（**3 インスタンス**、MEMBER_PROPERTY の一部）
-    - `#privateField` 対応済み（14→3）。残存は未特定パターン
+  - `#privateField` 対応済み（14→3）。残存は未特定パターン
 - **[I-190]** **HashMap 変換時の `use std::collections::HashMap` 自動追加** — コード生成
-    - 計算プロパティキー `{ [key]: value }` → `HashMap::from(...)` の変換は動作するが、生成コードに use 宣言が含まれないためコンパイルエラーになる
-    - 🔗 I-30（Cargo.toml 依存追加）と同系統の「生成コードの周辺ファイル/宣言の自動生成」問題
+  - 計算プロパティキー `{ [key]: value }` → `HashMap::from(...)` の変換は動作するが、生成コードに use 宣言が含まれないためコンパイルエラーになる
+  - 🔗 I-30（Cargo.toml 依存追加）と同系統の「生成コードの周辺ファイル/宣言の自動生成」問題
 - **[I-188]** **`substring`/`slice` のバイト境界安全性** — 文字列変換
-    - 現在 `s[start..end]` はバイトインデックスで生成しており、マルチバイト文字でパニックする可能性がある
-    - `s.chars().skip(start).take(end-start).collect::<String>()` 等の安全な変換が必要だが、パフォーマンスとのトレードオフがある
-    - ASCII のみのユースケースでは現在の実装で問題ない
+  - 現在 `s[start..end]` はバイトインデックスで生成しており、マルチバイト文字でパニックする可能性がある
+  - `s.chars().skip(start).take(end-start).collect::<String>()` 等の安全な変換が必要だが、パフォーマンスとのトレードオフがある
+  - ASCII のみのユースケースでは現在の実装で問題ない
 
 ---
 
@@ -155,20 +158,20 @@
 
 - **[I-32]** **コンパイルテストのスキップ解消（残り 1 件）** — I-35（indexed access type の非文字列キー対応）の解消が前提
 - **[I-100]** **ジェネリック型の具体化** — ジェネリクスの基盤実装が前提
-    - `TypeDef` / `TypeRegistry` がジェネリック型パラメータを保持・解決する仕組みが現在存在しない
-    - 具体化（`ReadableStream<Uint8Array>` の `R = Uint8Array` をメソッド戻り値に伝播）を行うには、まず TypeRegistry のジェネリクス対応が必要
-    - この基盤実装自体は PRD 化可能だが、設計規模が大きいため独立した PRD として起票すべき
+  - `TypeDef` / `TypeRegistry` がジェネリック型パラメータを保持・解決する仕組みが現在存在しない
+  - 具体化（`ReadableStream<Uint8Array>` の `R = Uint8Array` をメソッド戻り値に伝播）を行うには、まず TypeRegistry のジェネリクス対応が必要
+  - この基盤実装自体は PRD 化可能だが、設計規模が大きいため独立した PRD として起票すべき
 - **[I-101]** **ジェネリック型を含む intersection** — I-100（ジェネリクス基盤）の解消が前提
 - **[I-181]** **call signature のジェネリック型パラメータ** — I-100（ジェネリクス基盤）の解消が前提。call signature の rest パラメータは対応済みだが、ジェネリック型パラメータ付きの 3 インスタンスが残存
 - **[I-183]** **HTTP E2E テスト基盤 + fetch 変換** — 以下の前提が未解決
-    - I-30（生成コードの Cargo.toml への依存クレート追加）: `reqwest` を生成プロジェクトの依存に追加する仕組みが必要
-    - 非同期処理の変換: `fetch` は Promise を返すため、`async/await` との組み合わせが必要
-    - `fetch(url)` → `reqwest::blocking::get(url)` 等の変換と、テストランナー内の簡易 HTTP サーバーを含む E2E テスト基盤
+  - I-30（生成コードの Cargo.toml への依存クレート追加）: `reqwest` を生成プロジェクトの依存に追加する仕組みが必要
+  - 非同期処理の変換: `fetch` は Promise を返すため、`async/await` との組み合わせが必要
+  - `fetch(url)` → `reqwest::blocking::get(url)` 等の変換と、テストランナー内の簡易 HTTP サーバーを含む E2E テスト基盤
 
 ### 設計方針の決定待ち
 
 - **[I-112c]** **型注釈なし変数のオブジェクトリテラル** — Hono 2ファイルに影響
-    - 匿名構造体の自動生成が必要だが、サイレントリスクあり
+  - 匿名構造体の自動生成が必要だが、サイレントリスクあり
 - **[I-102]** **`any`/`unknown` の実用的な変換先** — ユースケース依存
 - **[I-103]** **エラー型戦略** — 初版は `String` 固定
 - **[I-104]** **所有権推論** — 初版は全 clone

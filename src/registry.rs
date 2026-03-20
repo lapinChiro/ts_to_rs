@@ -1,10 +1,13 @@
 //! TypeRegistry — モジュール内の型定義を事前収集し、変換時に参照するレジストリ。
 //!
-//! 変換パイプラインの第 1 パスで SWC AST を走査して型情報を収集し、
-//! 第 2 パスの変換時にネストしたオブジェクトリテラルや enum メンバーアクセスの
-//! 解決に使用する。
+//! 2-pass 方式で構築する:
+//! - **Pass 1**: 型名だけをプレースホルダーとして登録する
+//! - **Pass 2**: Pass 1 の型名一覧を参照しながらフィールド型を完全に解決する
+//!
+//! これにより前方参照（`interface A { b: B }` が `interface B` より前に宣言される場合）
+//! でも正しく型を解決できる。
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use anyhow::Result;
 use swc_ecma_ast as ast;
@@ -23,6 +26,8 @@ pub enum TypeDef {
         methods: HashMap<String, Vec<(String, RustType)>>,
         /// 親 interface 名のリスト（`interface B extends A` の `A`）
         extends: Vec<String>,
+        /// Whether this type comes from a TS interface declaration (true) or class/type alias (false)
+        is_interface: bool,
     },
     /// enum
     Enum {
@@ -46,6 +51,36 @@ pub enum TypeDef {
     },
 }
 
+impl TypeDef {
+    /// Creates a new struct TypeDef (from class, type alias, or other non-interface source).
+    pub fn new_struct(
+        fields: Vec<(String, RustType)>,
+        methods: HashMap<String, Vec<(String, RustType)>>,
+        extends: Vec<String>,
+    ) -> Self {
+        TypeDef::Struct {
+            fields,
+            methods,
+            extends,
+            is_interface: false,
+        }
+    }
+
+    /// Creates a new interface TypeDef (from TS interface declaration).
+    pub fn new_interface(
+        fields: Vec<(String, RustType)>,
+        methods: HashMap<String, Vec<(String, RustType)>>,
+        extends: Vec<String>,
+    ) -> Self {
+        TypeDef::Struct {
+            fields,
+            methods,
+            extends,
+            is_interface: true,
+        }
+    }
+}
+
 /// モジュール内の型定義を保持するレジストリ。
 ///
 /// 型名をキーにして `TypeDef` を引くことで、変換時にフィールド型や
@@ -53,8 +88,6 @@ pub enum TypeDef {
 #[derive(Debug, Clone)]
 pub struct TypeRegistry {
     types: HashMap<String, TypeDef>,
-    /// interface 由来の型名を保持するセット（class 由来は含まない）
-    interface_names: HashSet<String>,
 }
 
 impl TypeRegistry {
@@ -62,7 +95,6 @@ impl TypeRegistry {
     pub fn new() -> Self {
         Self {
             types: HashMap::new(),
-            interface_names: HashSet::new(),
         }
     }
 
@@ -81,19 +113,16 @@ impl TypeRegistry {
     /// interface 由来かつ methods が空でない場合に `true` を返す。
     /// class 由来の型は常に `false`。
     pub fn is_trait_type(&self, name: &str) -> bool {
-        if !self.interface_names.contains(name) {
-            return false;
-        }
-        if let Some(TypeDef::Struct { methods, .. }) = self.get(name) {
-            !methods.is_empty()
+        if let Some(TypeDef::Struct {
+            methods,
+            is_interface,
+            ..
+        }) = self.get(name)
+        {
+            *is_interface && !methods.is_empty()
         } else {
             false
         }
-    }
-
-    /// interface 名を登録する。
-    pub fn register_interface(&mut self, name: String) {
-        self.interface_names.insert(name);
     }
 
     /// 別の TypeRegistry の内容をマージする。
@@ -102,9 +131,6 @@ impl TypeRegistry {
     pub fn merge(&mut self, other: &TypeRegistry) {
         for (name, def) in &other.types {
             self.types.insert(name.clone(), def.clone());
-        }
-        for name in &other.interface_names {
-            self.interface_names.insert(name.clone());
         }
     }
 }
@@ -117,6 +143,10 @@ impl Default for TypeRegistry {
 
 /// SWC [`ast::Module`] を走査し、型定義を収集して [`TypeRegistry`] を構築する。
 ///
+/// 2-pass 方式で構築する:
+/// - **Pass 1**: 型名だけをプレースホルダーとして登録する
+/// - **Pass 2**: Pass 1 で構築した型名一覧を参照しながら、フィールド型を完全に解決する
+///
 /// 以下の宣言を収集する:
 /// - `interface` → `TypeDef::Struct`
 /// - `type` (オブジェクト型) → `TypeDef::Struct`
@@ -128,13 +158,28 @@ impl Default for TypeRegistry {
 pub fn build_registry(module: &ast::Module) -> TypeRegistry {
     let mut reg = TypeRegistry::new();
 
+    // Pass 1: 型名だけをプレースホルダーとして登録する
     for item in &module.body {
         match item {
             ast::ModuleItem::Stmt(ast::Stmt::Decl(decl)) => {
-                collect_decl(&mut reg, decl);
+                collect_type_name(&mut reg, decl);
             }
             ast::ModuleItem::ModuleDecl(ast::ModuleDecl::ExportDecl(export)) => {
-                collect_decl(&mut reg, &export.decl);
+                collect_type_name(&mut reg, &export.decl);
+            }
+            _ => {}
+        }
+    }
+
+    // Pass 2: Pass 1 の型名一覧を参照しながらフィールド型を完全に解決する
+    let lookup = reg.clone();
+    for item in &module.body {
+        match item {
+            ast::ModuleItem::Stmt(ast::Stmt::Decl(decl)) => {
+                collect_decl(&mut reg, decl, &lookup);
+            }
+            ast::ModuleItem::ModuleDecl(ast::ModuleDecl::ExportDecl(export)) => {
+                collect_decl(&mut reg, &export.decl, &lookup);
             }
             _ => {}
         }
@@ -143,12 +188,84 @@ pub fn build_registry(module: &ast::Module) -> TypeRegistry {
     reg
 }
 
-/// 個々の宣言から型情報を収集する。
-fn collect_decl(reg: &mut TypeRegistry, decl: &ast::Decl) {
+/// Pass 1: 宣言から型名だけをプレースホルダーとして登録する。
+///
+/// フィールド型の解決は行わず、型名の存在だけを記録する。
+/// これにより Pass 2 で前方参照を解決できる。
+fn collect_type_name(reg: &mut TypeRegistry, decl: &ast::Decl) {
     match decl {
         ast::Decl::TsInterface(iface) => {
-            if let Ok(fields) = collect_interface_fields(iface) {
-                let methods = collect_interface_methods(iface);
+            reg.register(
+                iface.id.sym.to_string(),
+                TypeDef::new_interface(vec![], HashMap::new(), vec![]),
+            );
+        }
+        ast::Decl::TsTypeAlias(alias) => {
+            reg.register(
+                alias.id.sym.to_string(),
+                TypeDef::new_struct(vec![], HashMap::new(), vec![]),
+            );
+        }
+        ast::Decl::TsEnum(ts_enum) => {
+            reg.register(
+                ts_enum.id.sym.to_string(),
+                TypeDef::Enum {
+                    variants: vec![],
+                    string_values: HashMap::new(),
+                    tag_field: None,
+                    variant_fields: HashMap::new(),
+                },
+            );
+        }
+        ast::Decl::Fn(fn_decl) => {
+            reg.register(
+                fn_decl.ident.sym.to_string(),
+                TypeDef::Function {
+                    params: vec![],
+                    return_type: None,
+                    has_rest: false,
+                },
+            );
+        }
+        ast::Decl::Var(var_decl) => {
+            for d in &var_decl.decls {
+                if let Some(init) = &d.init {
+                    if let ast::Expr::Arrow(_) = init.as_ref() {
+                        let name = match &d.name {
+                            ast::Pat::Ident(ident) => ident.id.sym.to_string(),
+                            _ => continue,
+                        };
+                        reg.register(
+                            name,
+                            TypeDef::Function {
+                                params: vec![],
+                                return_type: None,
+                                has_rest: false,
+                            },
+                        );
+                    }
+                }
+            }
+        }
+        ast::Decl::Class(class) => {
+            reg.register(
+                class.ident.sym.to_string(),
+                TypeDef::new_struct(vec![], HashMap::new(), vec![]),
+            );
+        }
+        _ => {}
+    }
+}
+
+/// Pass 2: 個々の宣言から型情報を完全に収集する。
+///
+/// `lookup` には Pass 1 で登録された全型名が含まれており、
+/// `convert_ts_type` での型解決に使用される。
+fn collect_decl(reg: &mut TypeRegistry, decl: &ast::Decl, lookup: &TypeRegistry) {
+    match decl {
+        ast::Decl::TsInterface(iface) => {
+            if let Ok(fields) = collect_interface_fields(iface, lookup) {
+                let methods = collect_interface_methods(iface, lookup);
                 let extends: Vec<String> = iface
                     .extends
                     .iter()
@@ -161,33 +278,27 @@ fn collect_decl(reg: &mut TypeRegistry, decl: &ast::Decl) {
                     })
                     .collect();
                 let name = iface.id.sym.to_string();
-                reg.register_interface(name.clone());
-                reg.register(
-                    name,
-                    TypeDef::Struct {
-                        fields,
-                        methods,
-                        extends,
-                    },
-                );
+                reg.register(name, TypeDef::new_interface(fields, methods, extends));
             }
         }
         ast::Decl::TsTypeAlias(alias) => {
             if let Some(enum_def) = try_collect_string_literal_union(alias) {
                 reg.register(alias.id.sym.to_string(), enum_def);
-            } else if let Some(enum_def) = try_collect_discriminated_union(alias) {
+            } else if let Some(enum_def) = try_collect_discriminated_union(alias, lookup) {
                 reg.register(alias.id.sym.to_string(), enum_def);
-            } else if let Some(func_def) = try_collect_fn_type_alias(alias) {
+            } else if let Some(func_def) = try_collect_fn_type_alias(alias, lookup) {
                 reg.register(alias.id.sym.to_string(), func_def);
-            } else if let Some(fields) = collect_type_alias_fields(alias, reg) {
-                reg.register(
-                    alias.id.sym.to_string(),
-                    TypeDef::Struct {
-                        fields,
-                        methods: HashMap::new(),
-                        extends: vec![],
-                    },
-                );
+            } else {
+                // Intersection types need pass-2 resolved types (e.g., `type Person = Named & Aged`
+                // requires Named and Aged to have their fields already resolved).
+                // Use `reg` which accumulates resolved types during pass 2.
+                let fields = collect_type_alias_fields(alias, reg);
+                if let Some(fields) = fields {
+                    reg.register(
+                        alias.id.sym.to_string(),
+                        TypeDef::new_struct(fields, HashMap::new(), vec![]),
+                    );
+                }
             }
         }
         ast::Decl::TsEnum(ts_enum) => {
@@ -210,7 +321,7 @@ fn collect_decl(reg: &mut TypeRegistry, decl: &ast::Decl) {
             );
         }
         ast::Decl::Fn(fn_decl) => {
-            if let Ok(func_def) = collect_fn_def(&fn_decl.function) {
+            if let Ok(func_def) = collect_fn_def(&fn_decl.function, lookup) {
                 reg.register(fn_decl.ident.sym.to_string(), func_def);
             }
         }
@@ -223,7 +334,7 @@ fn collect_decl(reg: &mut TypeRegistry, decl: &ast::Decl) {
                             ast::Pat::Ident(ident) => ident.id.sym.to_string(),
                             _ => continue,
                         };
-                        if let Ok(func_def) = collect_arrow_def(arrow) {
+                        if let Ok(func_def) = collect_arrow_def(arrow, lookup) {
                             reg.register(name, func_def);
                         }
                     }
@@ -231,7 +342,7 @@ fn collect_decl(reg: &mut TypeRegistry, decl: &ast::Decl) {
             }
         }
         ast::Decl::Class(class) => {
-            let def = collect_class_info(class);
+            let def = collect_class_info(class, lookup);
             if let TypeDef::Struct {
                 ref fields,
                 ref methods,
@@ -248,7 +359,7 @@ fn collect_decl(reg: &mut TypeRegistry, decl: &ast::Decl) {
 }
 
 /// クラス宣言からフィールドとメソッドシグネチャを収集し、`TypeDef::Struct` を返す。
-fn collect_class_info(class: &ast::ClassDecl) -> TypeDef {
+fn collect_class_info(class: &ast::ClassDecl, lookup: &TypeRegistry) -> TypeDef {
     let mut fields = Vec::new();
     let mut methods = HashMap::new();
 
@@ -260,9 +371,7 @@ fn collect_class_info(class: &ast::ClassDecl) -> TypeDef {
                     _ => continue,
                 };
                 if let Some(ann) = &prop.type_ann {
-                    if let Ok(ty) =
-                        convert_ts_type(&ann.type_ann, &mut Vec::new(), &TypeRegistry::new())
-                    {
+                    if let Ok(ty) = convert_ts_type(&ann.type_ann, &mut Vec::new(), lookup) {
                         fields.push((name, ty));
                     }
                 }
@@ -285,8 +394,7 @@ fn collect_class_info(class: &ast::ClassDecl) -> TypeDef {
                             _ => return None,
                         };
                         let ty = ident.type_ann.as_ref().and_then(|ann| {
-                            convert_ts_type(&ann.type_ann, &mut Vec::new(), &TypeRegistry::new())
-                                .ok()
+                            convert_ts_type(&ann.type_ann, &mut Vec::new(), lookup).ok()
                         })?;
                         Some((ident.id.sym.to_string(), ty))
                     })
@@ -297,19 +405,18 @@ fn collect_class_info(class: &ast::ClassDecl) -> TypeDef {
         }
     }
 
-    TypeDef::Struct {
-        fields,
-        methods,
-        extends: vec![],
-    }
+    TypeDef::new_struct(fields, methods, vec![])
 }
 
 /// interface のフィールド名・型を収集する。
-fn collect_interface_fields(iface: &ast::TsInterfaceDecl) -> Result<Vec<(String, RustType)>> {
+fn collect_interface_fields(
+    iface: &ast::TsInterfaceDecl,
+    lookup: &TypeRegistry,
+) -> Result<Vec<(String, RustType)>> {
     let mut fields = Vec::new();
     for member in &iface.body.body {
         if let ast::TsTypeElement::TsPropertySignature(prop) = member {
-            if let Some((name, ty)) = collect_property_signature(prop) {
+            if let Some((name, ty)) = collect_property_signature(prop, lookup) {
                 fields.push((name, ty));
             }
         }
@@ -320,6 +427,7 @@ fn collect_interface_fields(iface: &ast::TsInterfaceDecl) -> Result<Vec<(String,
 /// interface のメソッドシグネチャを収集する。
 fn collect_interface_methods(
     iface: &ast::TsInterfaceDecl,
+    lookup: &TypeRegistry,
 ) -> HashMap<String, Vec<(String, RustType)>> {
     let mut methods = HashMap::new();
     for member in &iface.body.body {
@@ -339,12 +447,7 @@ fn collect_interface_methods(
                     let ty = match param {
                         ast::TsFnParam::Ident(ident) => {
                             ident.type_ann.as_ref().and_then(|ann| {
-                                convert_ts_type(
-                                    &ann.type_ann,
-                                    &mut Vec::new(),
-                                    &TypeRegistry::new(),
-                                )
-                                .ok()
+                                convert_ts_type(&ann.type_ann, &mut Vec::new(), lookup).ok()
                             })?
                         }
                         _ => return None,
@@ -359,14 +462,18 @@ fn collect_interface_methods(
 }
 
 /// TsPropertySignature からフィールド名と型を取得する。
-fn collect_property_signature(prop: &ast::TsPropertySignature) -> Option<(String, RustType)> {
+fn collect_property_signature(
+    prop: &ast::TsPropertySignature,
+    lookup: &TypeRegistry,
+) -> Option<(String, RustType)> {
     let name = match prop.key.as_ref() {
         ast::Expr::Ident(ident) => ident.sym.to_string(),
         _ => return None,
     };
-    let ty = prop.type_ann.as_ref().and_then(|ann| {
-        convert_ts_type(&ann.type_ann, &mut Vec::new(), &TypeRegistry::new()).ok()
-    })?;
+    let ty = prop
+        .type_ann
+        .as_ref()
+        .and_then(|ann| convert_ts_type(&ann.type_ann, &mut Vec::new(), lookup).ok())?;
 
     // Optional fields are wrapped in Option
     let ty = if prop.optional {
@@ -420,7 +527,10 @@ fn try_collect_string_literal_union(alias: &ast::TsTypeAliasDecl) -> Option<Type
 ///
 /// `type Shape = { kind: "circle", r: number } | { kind: "square", s: number }` を検出する。
 /// 全メンバーがオブジェクト型リテラルで、共通の文字列リテラル discriminant フィールドを持つ場合に該当。
-fn try_collect_discriminated_union(alias: &ast::TsTypeAliasDecl) -> Option<TypeDef> {
+fn try_collect_discriminated_union(
+    alias: &ast::TsTypeAliasDecl,
+    lookup: &TypeRegistry,
+) -> Option<TypeDef> {
     use crate::transformer::types::string_to_pascal_case;
 
     let union = match alias.type_ann.as_ref() {
@@ -452,7 +562,7 @@ fn try_collect_discriminated_union(alias: &ast::TsTypeAliasDecl) -> Option<TypeD
     let mut variant_fields_map = HashMap::new();
 
     for type_lit in &type_lits {
-        let (disc_value, fields) = extract_registry_variant_info(type_lit, &tag)?;
+        let (disc_value, fields) = extract_registry_variant_info(type_lit, &tag, lookup)?;
         let variant_name = string_to_pascal_case(&disc_value);
         string_values.insert(disc_value, variant_name.clone());
         variant_fields_map.insert(variant_name.clone(), fields);
@@ -515,6 +625,7 @@ fn find_registry_discriminant_field(type_lits: &[&swc_ecma_ast::TsTypeLit]) -> O
 fn extract_registry_variant_info(
     type_lit: &swc_ecma_ast::TsTypeLit,
     tag_field: &str,
+    lookup: &TypeRegistry,
 ) -> Option<(String, Vec<(String, RustType)>)> {
     let mut disc_value = None;
     let mut fields = Vec::new();
@@ -537,9 +648,7 @@ fn extract_registry_variant_info(
             } else {
                 // Non-discriminant field: convert type
                 if let Some(ann) = &prop.type_ann {
-                    if let Ok(ty) =
-                        convert_ts_type(&ann.type_ann, &mut Vec::new(), &TypeRegistry::new())
-                    {
+                    if let Ok(ty) = convert_ts_type(&ann.type_ann, &mut Vec::new(), lookup) {
                         let ty = if prop.optional {
                             RustType::Option(Box::new(ty))
                         } else {
@@ -557,7 +666,10 @@ fn extract_registry_variant_info(
 
 /// type alias (オブジェクト型) のフィールドを収集する。
 /// 関数型エイリアス (`type F = (x: T) => U`) を `TypeDef::Function` として収集する。
-fn try_collect_fn_type_alias(alias: &ast::TsTypeAliasDecl) -> Option<TypeDef> {
+fn try_collect_fn_type_alias(
+    alias: &ast::TsTypeAliasDecl,
+    lookup: &TypeRegistry,
+) -> Option<TypeDef> {
     match alias.type_ann.as_ref() {
         ast::TsType::TsFnOrConstructorType(ast::TsFnOrConstructorType::TsFnType(fn_type)) => {
             let mut params = Vec::new();
@@ -565,20 +677,14 @@ fn try_collect_fn_type_alias(alias: &ast::TsTypeAliasDecl) -> Option<TypeDef> {
                 if let ast::TsFnParam::Ident(ident) = param {
                     let name = ident.id.sym.to_string();
                     if let Some(ann) = &ident.type_ann {
-                        if let Ok(ty) =
-                            convert_ts_type(&ann.type_ann, &mut Vec::new(), &TypeRegistry::new())
-                        {
+                        if let Ok(ty) = convert_ts_type(&ann.type_ann, &mut Vec::new(), lookup) {
                             params.push((name, ty));
                         }
                     }
                 }
             }
-            let return_type = convert_ts_type(
-                &fn_type.type_ann.type_ann,
-                &mut Vec::new(),
-                &TypeRegistry::new(),
-            )
-            .ok();
+            let return_type =
+                convert_ts_type(&fn_type.type_ann.type_ann, &mut Vec::new(), lookup).ok();
             Some(TypeDef::Function {
                 params,
                 return_type,
@@ -598,7 +704,7 @@ fn collect_type_alias_fields(
             let mut fields = Vec::new();
             for member in &lit.members {
                 if let ast::TsTypeElement::TsPropertySignature(prop) = member {
-                    if let Some((name, ty)) = collect_property_signature(prop) {
+                    if let Some((name, ty)) = collect_property_signature(prop, reg) {
                         fields.push((name, ty));
                     }
                 }
@@ -615,7 +721,7 @@ fn collect_type_alias_fields(
                     ast::TsType::TsTypeLit(lit) => {
                         for member in &lit.members {
                             if let ast::TsTypeElement::TsPropertySignature(prop) = member {
-                                if let Some(field) = collect_property_signature(prop) {
+                                if let Some(field) = collect_property_signature(prop, reg) {
                                     fields.push(field);
                                 }
                             }
@@ -645,7 +751,7 @@ fn collect_type_alias_fields(
 }
 
 /// 関数宣言からパラメータ型と戻り値型を収集する。
-fn collect_fn_def(func: &ast::Function) -> Result<TypeDef> {
+fn collect_fn_def(func: &ast::Function, lookup: &TypeRegistry) -> Result<TypeDef> {
     let mut params = Vec::new();
     let mut has_rest = false;
     for param in &func.params {
@@ -653,9 +759,7 @@ fn collect_fn_def(func: &ast::Function) -> Result<TypeDef> {
             ast::Pat::Ident(ident) => {
                 let name = ident.id.sym.to_string();
                 if let Some(ann) = &ident.type_ann {
-                    if let Ok(ty) =
-                        convert_ts_type(&ann.type_ann, &mut Vec::new(), &TypeRegistry::new())
-                    {
+                    if let Ok(ty) = convert_ts_type(&ann.type_ann, &mut Vec::new(), lookup) {
                         params.push((name, ty));
                     }
                 }
@@ -665,9 +769,7 @@ fn collect_fn_def(func: &ast::Function) -> Result<TypeDef> {
                 if let ast::Pat::Ident(ident) = assign.left.as_ref() {
                     let name = ident.id.sym.to_string();
                     if let Some(ann) = &ident.type_ann {
-                        if let Ok(ty) =
-                            convert_ts_type(&ann.type_ann, &mut Vec::new(), &TypeRegistry::new())
-                        {
+                        if let Ok(ty) = convert_ts_type(&ann.type_ann, &mut Vec::new(), lookup) {
                             params.push((name, RustType::Option(Box::new(ty))));
                         }
                     }
@@ -679,9 +781,7 @@ fn collect_fn_def(func: &ast::Function) -> Result<TypeDef> {
                     let name = ident.id.sym.to_string();
                     let type_ann = rest.type_ann.as_ref().or(ident.type_ann.as_ref());
                     if let Some(ann) = type_ann {
-                        if let Ok(ty) =
-                            convert_ts_type(&ann.type_ann, &mut Vec::new(), &TypeRegistry::new())
-                        {
+                        if let Ok(ty) = convert_ts_type(&ann.type_ann, &mut Vec::new(), lookup) {
                             params.push((name, ty));
                         }
                     }
@@ -694,7 +794,7 @@ fn collect_fn_def(func: &ast::Function) -> Result<TypeDef> {
     let return_type = func
         .return_type
         .as_ref()
-        .and_then(|ann| convert_ts_type(&ann.type_ann, &mut Vec::new(), &TypeRegistry::new()).ok());
+        .and_then(|ann| convert_ts_type(&ann.type_ann, &mut Vec::new(), lookup).ok());
 
     Ok(TypeDef::Function {
         params,
@@ -704,15 +804,13 @@ fn collect_fn_def(func: &ast::Function) -> Result<TypeDef> {
 }
 
 /// アロー関数からパラメータ型と戻り値型を収集する。
-fn collect_arrow_def(arrow: &ast::ArrowExpr) -> Result<TypeDef> {
+fn collect_arrow_def(arrow: &ast::ArrowExpr, lookup: &TypeRegistry) -> Result<TypeDef> {
     let mut params = Vec::new();
     for param in &arrow.params {
         if let ast::Pat::Ident(ident) = param {
             let name = ident.id.sym.to_string();
             if let Some(ann) = &ident.type_ann {
-                if let Ok(ty) =
-                    convert_ts_type(&ann.type_ann, &mut Vec::new(), &TypeRegistry::new())
-                {
+                if let Ok(ty) = convert_ts_type(&ann.type_ann, &mut Vec::new(), lookup) {
                     params.push((name, ty));
                 }
             }
@@ -722,7 +820,7 @@ fn collect_arrow_def(arrow: &ast::ArrowExpr) -> Result<TypeDef> {
     let return_type = arrow
         .return_type
         .as_ref()
-        .and_then(|ann| convert_ts_type(&ann.type_ann, &mut Vec::new(), &TypeRegistry::new()).ok());
+        .and_then(|ann| convert_ts_type(&ann.type_ann, &mut Vec::new(), lookup).ok());
 
     Ok(TypeDef::Function {
         params,
@@ -746,29 +844,17 @@ mod tests {
     #[test]
     fn test_registry_register_and_get_struct() {
         let mut reg = TypeRegistry::new();
-        reg.register(
-            "Point".to_string(),
-            TypeDef::Struct {
-                fields: vec![
-                    ("x".to_string(), RustType::F64),
-                    ("y".to_string(), RustType::F64),
-                ],
-                methods: std::collections::HashMap::new(),
-                extends: vec![],
-            },
+        let point = TypeDef::new_struct(
+            vec![
+                ("x".to_string(), RustType::F64),
+                ("y".to_string(), RustType::F64),
+            ],
+            HashMap::new(),
+            vec![],
         );
+        reg.register("Point".to_string(), point.clone());
         let def = reg.get("Point").unwrap();
-        assert_eq!(
-            *def,
-            TypeDef::Struct {
-                fields: vec![
-                    ("x".to_string(), RustType::F64),
-                    ("y".to_string(), RustType::F64),
-                ],
-                methods: HashMap::new(),
-                extends: vec![],
-            }
-        );
+        assert_eq!(*def, point);
     }
 
     #[test]
@@ -838,11 +924,11 @@ mod tests {
         let mut reg1 = TypeRegistry::new();
         reg1.register(
             "Point".to_string(),
-            TypeDef::Struct {
-                fields: vec![("x".to_string(), RustType::F64)],
-                methods: std::collections::HashMap::new(),
-                extends: vec![],
-            },
+            TypeDef::new_struct(
+                vec![("x".to_string(), RustType::F64)],
+                HashMap::new(),
+                vec![],
+            ),
         );
 
         let mut reg2 = TypeRegistry::new();
@@ -869,14 +955,14 @@ mod tests {
         let reg = build_registry(&module);
         assert_eq!(
             reg.get("Point").unwrap(),
-            &TypeDef::Struct {
-                fields: vec![
+            &TypeDef::new_interface(
+                vec![
                     ("x".to_string(), RustType::F64),
                     ("y".to_string(), RustType::F64),
                 ],
-                methods: HashMap::new(),
-                extends: vec![],
-            }
+                HashMap::new(),
+                vec![],
+            )
         );
     }
 
@@ -886,14 +972,14 @@ mod tests {
         let reg = build_registry(&module);
         assert_eq!(
             reg.get("Config").unwrap(),
-            &TypeDef::Struct {
-                fields: vec![
+            &TypeDef::new_struct(
+                vec![
                     ("name".to_string(), RustType::String),
                     ("count".to_string(), RustType::F64),
                 ],
-                methods: HashMap::new(),
-                extends: vec![],
-            }
+                HashMap::new(),
+                vec![],
+            )
         );
     }
 
@@ -1026,14 +1112,14 @@ mod tests {
         let reg = build_registry(&module);
         assert_eq!(
             reg.get("Config").unwrap(),
-            &TypeDef::Struct {
-                fields: vec![(
+            &TypeDef::new_interface(
+                vec![(
                     "name".to_string(),
                     RustType::Option(Box::new(RustType::String)),
                 )],
-                methods: HashMap::new(),
-                extends: vec![],
-            }
+                HashMap::new(),
+                vec![],
+            )
         );
     }
 
@@ -1222,14 +1308,9 @@ mod tests {
             "greet".to_string(),
             vec![("msg".to_string(), RustType::String)],
         );
-        reg.register_interface("Greeter".to_string());
         reg.register(
             "Greeter".to_string(),
-            TypeDef::Struct {
-                fields: vec![],
-                methods,
-                extends: vec![],
-            },
+            TypeDef::new_interface(vec![], methods, vec![]),
         );
         assert!(reg.is_trait_type("Greeter"));
     }
@@ -1237,14 +1318,13 @@ mod tests {
     #[test]
     fn test_is_trait_type_fields_only_returns_false() {
         let mut reg = TypeRegistry::new();
-        reg.register_interface("Point".to_string());
         reg.register(
             "Point".to_string(),
-            TypeDef::Struct {
-                fields: vec![("x".to_string(), RustType::F64)],
-                methods: HashMap::new(),
-                extends: vec![],
-            },
+            TypeDef::new_interface(
+                vec![("x".to_string(), RustType::F64)],
+                HashMap::new(),
+                vec![],
+            ),
         );
         assert!(!reg.is_trait_type("Point"));
     }
@@ -1254,14 +1334,13 @@ mod tests {
         let mut reg = TypeRegistry::new();
         let mut methods = HashMap::new();
         methods.insert("greet".to_string(), vec![]);
-        reg.register_interface("Ctx".to_string());
         reg.register(
             "Ctx".to_string(),
-            TypeDef::Struct {
-                fields: vec![("name".to_string(), RustType::String)],
+            TypeDef::new_interface(
+                vec![("name".to_string(), RustType::String)],
                 methods,
-                extends: vec![],
-            },
+                vec![],
+            ),
         );
         assert!(reg.is_trait_type("Ctx"));
     }
@@ -1270,5 +1349,25 @@ mod tests {
     fn test_is_trait_type_unknown_returns_false() {
         let reg = TypeRegistry::new();
         assert!(!reg.is_trait_type("Unknown"));
+    }
+
+    #[test]
+    fn test_build_registry_forward_reference_resolves_type() {
+        // Interface A references interface B, but A is declared first.
+        // With 2-pass construction, B should be registered before A's fields are resolved.
+        let module = parse_typescript("interface A { b: B } interface B { x: number; }").unwrap();
+        let reg = build_registry(&module);
+
+        // A should have field b with type Named { name: "B" }
+        match reg.get("A").unwrap() {
+            TypeDef::Struct { fields, .. } => {
+                assert_eq!(fields.len(), 1);
+                assert_eq!(fields[0].0, "b");
+                assert!(matches!(&fields[0].1, RustType::Named { name, .. } if name == "B"));
+            }
+            other => panic!("expected Struct, got: {:?}", other),
+        }
+        // B should also be registered
+        assert!(reg.get("B").is_some());
     }
 }

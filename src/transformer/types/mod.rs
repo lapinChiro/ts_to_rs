@@ -1385,6 +1385,8 @@ fn variant_name_from_type(ty: &RustType) -> String {
         RustType::Tuple(_) => "Tuple".to_string(),
         RustType::Fn { .. } => "Fn".to_string(),
         RustType::Result { .. } => "Result".to_string(),
+        RustType::Ref(inner) => format!("Ref{}", variant_name_from_type(inner)),
+        RustType::DynTrait(name) => format!("Dyn{name}"),
     }
 }
 
