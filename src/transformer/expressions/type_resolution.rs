@@ -11,7 +11,7 @@ use crate::registry::{TypeDef, TypeRegistry};
 use crate::transformer::types::convert_ts_type;
 use crate::transformer::TypeEnv;
 
-use super::convert_expr;
+use super::{convert_expr, ExprContext};
 
 /// 式の型を解決する。解決できない場合は None を返す。
 ///
@@ -181,19 +181,35 @@ pub(super) fn convert_ts_as_expr(
         Ok(target_ty) => {
             let is_primitive_cast = matches!(target_ty, RustType::F64 | RustType::Bool);
             if is_primitive_cast {
-                let inner = convert_expr(&ts_as.expr, reg, Some(&target_ty), type_env)?;
+                let inner = convert_expr(
+                    &ts_as.expr,
+                    reg,
+                    &ExprContext::with_expected(&target_ty),
+                    type_env,
+                )?;
                 Ok(Expr::Cast {
                     expr: Box::new(inner),
                     target: target_ty,
                 })
             } else {
                 // Pass the assertion type as expected to help type inference
-                convert_expr(&ts_as.expr, reg, expected.or(Some(&target_ty)), type_env)
+                let merged = expected.or(Some(&target_ty));
+                let ctx = match merged {
+                    Some(ty) => ExprContext::with_expected(ty),
+                    // Cat C: type propagated when available
+                    None => ExprContext::none(),
+                };
+                convert_expr(&ts_as.expr, reg, &ctx, type_env)
             }
         }
         Err(_) => {
             // If we can't convert the type, just ignore the assertion
-            convert_expr(&ts_as.expr, reg, expected, type_env)
+            let ctx = match expected {
+                Some(ty) => ExprContext::with_expected(ty),
+                // Cat C: type propagated when available
+                None => ExprContext::none(),
+            };
+            convert_expr(&ts_as.expr, reg, &ctx, type_env)
         }
     }
 }

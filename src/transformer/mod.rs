@@ -7,11 +7,11 @@ pub mod classes;
 pub mod expressions;
 pub mod functions;
 pub mod statements;
-mod type_env;
+pub(crate) mod type_env;
 pub mod types;
 
 pub use type_env::TypeEnv;
-pub(crate) use type_env::{wrap_trait_for_param, wrap_trait_for_value};
+pub(crate) use type_env::{wrap_trait_for_position, TypePosition};
 
 use anyhow::Result;
 use swc_common::Spanned;
@@ -59,9 +59,7 @@ pub fn convert_ident_to_param(
         .type_ann
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("parameter '{}' has no type annotation", name))?;
-    let rust_type = types::convert_ts_type(&ty.type_ann, &mut Vec::new(), reg)?;
-    // Trait types in parameter position → &dyn Trait
-    let rust_type = wrap_trait_for_param(rust_type, reg);
+    let rust_type = types::convert_type_for_position(&ty.type_ann, TypePosition::Param, reg)?;
     Ok(crate::ir::Param {
         name,
         ty: Some(rust_type),

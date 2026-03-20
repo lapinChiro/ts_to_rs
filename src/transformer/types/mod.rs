@@ -13,6 +13,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::ir::{EnumValue, EnumVariant, Item, Method, Param, RustType, StructField, Visibility};
 use crate::registry::{TypeDef, TypeRegistry};
+use crate::transformer::type_env::{wrap_trait_for_position, TypePosition};
 
 /// Counter for generating unique synthetic struct names.
 static SYNTHETIC_COUNTER: AtomicU32 = AtomicU32::new(0);
@@ -41,6 +42,21 @@ pub(crate) fn reset_synthetic_counter() {
 fn generate_synthetic_name(prefix: &str) -> String {
     let id = SYNTHETIC_COUNTER.fetch_add(1, Ordering::Relaxed);
     format!("_{prefix}{id}")
+}
+
+/// Converts a SWC [`TsType`] into an IR [`RustType`] with position-aware trait wrapping.
+///
+/// Combines [`convert_ts_type`] and [`wrap_trait_for_position`]: converts the type annotation
+/// and then wraps trait types according to the specified position.
+///
+/// Use this instead of calling `convert_ts_type` + `wrap_trait_for_position` separately.
+pub fn convert_type_for_position(
+    ts_type: &TsType,
+    position: TypePosition,
+    reg: &TypeRegistry,
+) -> Result<RustType> {
+    let ty = convert_ts_type(ts_type, &mut Vec::new(), reg)?;
+    Ok(wrap_trait_for_position(ty, position, reg))
 }
 
 /// Converts a SWC [`TsType`] into an IR [`RustType`].

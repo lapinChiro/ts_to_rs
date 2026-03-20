@@ -15,7 +15,7 @@ use super::patterns::{
 use super::type_resolution::resolve_expr_type;
 use crate::ir::ClosureBody;
 
-use super::convert_expr;
+use super::{convert_expr, ExprContext};
 
 /// Converts a binary expression to IR, handling special patterns like
 /// nullish coalescing, typeof/undefined comparisons, and string concatenation.
@@ -57,7 +57,8 @@ pub(super) fn convert_bin_expr(
             .as_ref()
             .is_some_and(|ty| matches!(ty, RustType::Option(_)));
 
-        let left = convert_expr(&bin.left, reg, None, type_env)?;
+        // Cat A: ?? left operand — type is resolved separately for Option detection
+        let left = convert_expr(&bin.left, reg, &ExprContext::none(), type_env)?;
         if !is_option && left_type.is_some() {
             // Non-Option type: nullish coalescing is a no-op, return left as-is
             return Ok(left);
@@ -66,7 +67,12 @@ pub(super) fn convert_bin_expr(
             Some(RustType::Option(inner)) => Some(inner.as_ref().clone()),
             _ => None,
         };
-        let right = convert_expr(&bin.right, reg, inner_expected.as_ref(), type_env)?;
+        let right_ctx = match inner_expected.as_ref() {
+            Some(ty) => ExprContext::with_expected(ty),
+            // Cat C: inner type already propagated when available
+            None => ExprContext::none(),
+        };
+        let right = convert_expr(&bin.right, reg, &right_ctx, type_env)?;
         return Ok(Expr::MethodCall {
             object: Box::new(left),
             method: "unwrap_or_else".to_string(),
@@ -78,8 +84,9 @@ pub(super) fn convert_bin_expr(
         });
     }
 
-    let left = convert_expr(&bin.left, reg, None, type_env)?;
-    let right = convert_expr(&bin.right, reg, None, type_env)?;
+    // Cat A: binary operands — result type depends on operator, not context
+    let left = convert_expr(&bin.left, reg, &ExprContext::none(), type_env)?;
+    let right = convert_expr(&bin.right, reg, &ExprContext::none(), type_env)?;
     let op = convert_binary_op(bin.op)?;
 
     // String concatenation: wrap RHS in Ref(&) when LHS is string-like.
@@ -191,7 +198,8 @@ pub(super) fn convert_unary_expr(
         return Ok(match operand_type {
             Some(RustType::Option(inner)) => {
                 // Option<T>: runtime branch — is_some() → typeof inner, else "undefined"
-                let operand = convert_expr(&unary.arg, reg, None, type_env)?;
+                // Cat A: typeof operand — only used for type discrimination
+                let operand = convert_expr(&unary.arg, reg, &ExprContext::none(), type_env)?;
                 let inner_typeof = typeof_to_string(&inner);
                 Expr::If {
                     condition: Box::new(Expr::MethodCall {
@@ -213,7 +221,8 @@ pub(super) fn convert_unary_expr(
         ast::UnaryOp::Minus => UnOp::Neg,
         _ => return Err(anyhow!("unsupported unary operator: {:?}", unary.op)),
     };
-    let operand = convert_expr(&unary.arg, reg, None, type_env)?;
+    // Cat A: unary operand — type depends on operator semantics
+    let operand = convert_expr(&unary.arg, reg, &ExprContext::none(), type_env)?;
     Ok(Expr::UnaryOp {
         op,
         operand: Box::new(operand),

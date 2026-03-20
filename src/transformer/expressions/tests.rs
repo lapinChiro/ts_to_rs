@@ -29,14 +29,26 @@ fn parse_var_init(source: &str) -> ast::Expr {
 #[test]
 fn test_convert_expr_identifier() {
     let swc_expr = parse_expr("foo;");
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(result, Expr::Ident("foo".to_string()));
 }
 
 #[test]
 fn test_convert_expr_number_literal() {
     let swc_expr = parse_expr("42;");
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(result, Expr::NumberLit(42.0));
 }
 
@@ -45,42 +57,78 @@ fn test_convert_expr_number_literal() {
 #[test]
 fn test_convert_expr_bigint_literal_generates_int_lit() {
     let swc_expr = parse_expr("123n;");
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(result, Expr::IntLit(123));
 }
 
 #[test]
 fn test_convert_expr_bigint_zero_generates_int_lit() {
     let swc_expr = parse_expr("0n;");
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(result, Expr::IntLit(0));
 }
 
 #[test]
 fn test_convert_expr_string_literal() {
     let swc_expr = parse_expr("\"hello\";");
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(result, Expr::StringLit("hello".to_string()));
 }
 
 #[test]
 fn test_convert_expr_bool_true() {
     let swc_expr = parse_expr("true;");
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(result, Expr::BoolLit(true));
 }
 
 #[test]
 fn test_convert_expr_bool_false() {
     let swc_expr = parse_expr("false;");
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(result, Expr::BoolLit(false));
 }
 
 #[test]
 fn test_convert_expr_binary_add() {
     let swc_expr = parse_var_init("const x = a + b;");
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::BinaryOp {
@@ -94,7 +142,13 @@ fn test_convert_expr_binary_add() {
 #[test]
 fn test_convert_expr_binary_greater_than() {
     let swc_expr = parse_var_init("const x = a > b;");
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::BinaryOp {
@@ -108,7 +162,13 @@ fn test_convert_expr_binary_greater_than() {
 #[test]
 fn test_convert_expr_binary_strict_equals() {
     let swc_expr = parse_var_init("const x = a === b;");
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::BinaryOp {
@@ -122,7 +182,13 @@ fn test_convert_expr_binary_strict_equals() {
 #[test]
 fn test_convert_expr_template_literal() {
     let swc_expr = parse_var_init("const x = `Hello ${name}`;");
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::FormatMacro {
@@ -135,7 +201,13 @@ fn test_convert_expr_template_literal() {
 #[test]
 fn test_convert_expr_member_this_field() {
     let swc_expr = parse_expr("this.name;");
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::FieldAccess {
@@ -148,7 +220,13 @@ fn test_convert_expr_member_this_field() {
 #[test]
 fn test_convert_expr_member_non_this() {
     let swc_expr = parse_expr("obj.field;");
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::FieldAccess {
@@ -164,7 +242,13 @@ fn test_convert_expr_member_non_this() {
 fn test_convert_expr_arrow_expr_body() {
     // `(x: number) => x + 1`
     let swc_expr = parse_var_init("const f = (x: number) => x + 1;");
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     match result {
         Expr::Closure {
             params,
@@ -185,7 +269,13 @@ fn test_convert_expr_arrow_expr_body() {
 fn test_convert_expr_arrow_block_body() {
     // `(x: number): number => { return x + 1; }`
     let swc_expr = parse_var_init("const f = (x: number): number => { return x + 1; };");
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     match result {
         Expr::Closure {
             params,
@@ -204,7 +294,13 @@ fn test_convert_expr_arrow_block_body() {
 #[test]
 fn test_convert_expr_arrow_no_params() {
     let swc_expr = parse_var_init("const f = () => 42;");
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     match result {
         Expr::Closure { params, body, .. } => {
             assert!(params.is_empty());
@@ -217,7 +313,13 @@ fn test_convert_expr_arrow_no_params() {
 #[test]
 fn test_convert_expr_arrow_no_type_annotation_param_ty_is_none() {
     let swc_expr = parse_var_init("const f = (x) => x + 1;");
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     match result {
         Expr::Closure { params, .. } => {
             assert_eq!(params.len(), 1);
@@ -232,7 +334,13 @@ fn test_convert_expr_arrow_no_type_annotation_param_ty_is_none() {
 fn test_convert_expr_arrow_mixed_type_annotations() {
     // Only first param has type annotation
     let swc_expr = parse_var_init("const f = (x: number, y) => x + y;");
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     match result {
         Expr::Closure { params, .. } => {
             assert_eq!(params.len(), 2);
@@ -248,7 +356,13 @@ fn test_convert_expr_arrow_mixed_type_annotations() {
 #[test]
 fn test_convert_expr_call_simple() {
     let swc_expr = parse_expr("foo(x, y);");
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::FnCall {
@@ -261,7 +375,13 @@ fn test_convert_expr_call_simple() {
 #[test]
 fn test_convert_expr_call_no_args() {
     let swc_expr = parse_expr("foo();");
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::FnCall {
@@ -274,7 +394,13 @@ fn test_convert_expr_call_no_args() {
 #[test]
 fn test_convert_expr_call_nested() {
     let swc_expr = parse_expr("foo(bar(x));");
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::FnCall {
@@ -290,7 +416,13 @@ fn test_convert_expr_call_nested() {
 #[test]
 fn test_convert_expr_method_call() {
     let swc_expr = parse_expr("obj.method(x);");
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::MethodCall {
@@ -304,7 +436,13 @@ fn test_convert_expr_method_call() {
 #[test]
 fn test_convert_expr_method_call_this() {
     let swc_expr = parse_expr("this.doSomething(x);");
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::MethodCall {
@@ -318,7 +456,13 @@ fn test_convert_expr_method_call_this() {
 #[test]
 fn test_convert_expr_method_chain() {
     let swc_expr = parse_expr("a.b().c();");
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::MethodCall {
@@ -336,7 +480,13 @@ fn test_convert_expr_method_chain() {
 #[test]
 fn test_convert_expr_new() {
     let swc_expr = parse_expr("new Foo(x, y);");
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::FnCall {
@@ -349,7 +499,13 @@ fn test_convert_expr_new() {
 #[test]
 fn test_convert_expr_new_no_args() {
     let swc_expr = parse_expr("new Foo();");
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::FnCall {
@@ -375,7 +531,7 @@ fn test_new_expr_string_arg_gets_to_string() {
         ),
     );
     let swc_expr = parse_expr(r#"new Foo("hello");"#);
-    let result = convert_expr(&swc_expr, &reg, None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(&swc_expr, &reg, &ExprContext::none(), &TypeEnv::new()).unwrap();
     match &result {
         Expr::FnCall { name, args } => {
             assert_eq!(name, "Foo::new");
@@ -392,7 +548,13 @@ fn test_new_expr_string_arg_gets_to_string() {
 #[test]
 fn test_convert_expr_template_literal_no_exprs() {
     let swc_expr = parse_var_init("const x = `hello world`;");
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::FormatMacro {
@@ -405,7 +567,13 @@ fn test_convert_expr_template_literal_no_exprs() {
 #[test]
 fn test_convert_expr_array_numbers() {
     let expr = parse_var_init("const a = [1, 2, 3];");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::Vec {
@@ -421,7 +589,13 @@ fn test_convert_expr_array_numbers() {
 #[test]
 fn test_convert_expr_array_strings() {
     let expr = parse_var_init(r#"const a = ["x", "y"];"#);
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::Vec {
@@ -436,14 +610,26 @@ fn test_convert_expr_array_strings() {
 #[test]
 fn test_convert_expr_array_empty() {
     let expr = parse_var_init("const a = [];");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(result, Expr::Vec { elements: vec![] });
 }
 
 #[test]
 fn test_convert_expr_array_single_element() {
     let expr = parse_var_init("const a = [42];");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::Vec {
@@ -465,7 +651,7 @@ fn test_convert_expr_object_literal_with_type_hint_basic() {
     let result = convert_expr(
         &swc_expr,
         &TypeRegistry::new(),
-        Some(&expected),
+        &ExprContext::with_expected(&expected),
         &TypeEnv::new(),
     )
     .unwrap();
@@ -492,7 +678,7 @@ fn test_convert_expr_object_literal_mixed_field_types() {
     let result = convert_expr(
         &swc_expr,
         &TypeRegistry::new(),
-        Some(&expected),
+        &ExprContext::with_expected(&expected),
         &TypeEnv::new(),
     )
     .unwrap();
@@ -520,7 +706,7 @@ fn test_convert_expr_object_literal_single_field() {
     let result = convert_expr(
         &swc_expr,
         &TypeRegistry::new(),
-        Some(&expected),
+        &ExprContext::with_expected(&expected),
         &TypeEnv::new(),
     )
     .unwrap();
@@ -544,7 +730,7 @@ fn test_convert_expr_object_literal_empty() {
     let result = convert_expr(
         &swc_expr,
         &TypeRegistry::new(),
-        Some(&expected),
+        &ExprContext::with_expected(&expected),
         &TypeEnv::new(),
     )
     .unwrap();
@@ -561,7 +747,12 @@ fn test_convert_expr_object_literal_empty() {
 #[test]
 fn test_convert_expr_object_literal_without_type_hint_errors() {
     let swc_expr = parse_var_init("const obj = { x: 1 };");
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new());
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    );
     assert!(result.is_err());
 }
 
@@ -586,7 +777,13 @@ fn test_convert_expr_object_spread_last_position_expands_remaining_fields() {
             vec![],
         ),
     );
-    let result = convert_expr(&swc_expr, &reg, Some(&expected), &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &reg,
+        &ExprContext::with_expected(&expected),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::StructInit {
@@ -628,7 +825,13 @@ fn test_convert_expr_object_spread_middle_position_expands_remaining_fields() {
             vec![],
         ),
     );
-    let result = convert_expr(&swc_expr, &reg, Some(&expected), &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &reg,
+        &ExprContext::with_expected(&expected),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::StructInit {
@@ -660,7 +863,7 @@ fn test_convert_object_spread_unregistered_type_generates_struct_update() {
     let result = convert_expr(
         &swc_expr,
         &TypeRegistry::new(),
-        Some(&expected),
+        &ExprContext::with_expected(&expected),
         &TypeEnv::new(),
     )
     .unwrap();
@@ -695,7 +898,13 @@ fn test_convert_object_spread_multiple_registered_generates_merged_fields() {
             vec![],
         ),
     );
-    let result = convert_expr(&swc_expr, &reg, Some(&expected), &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &reg,
+        &ExprContext::with_expected(&expected),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     // 最初の spread (a) はフィールド展開、最後の spread (b) は base
     match &result {
         Expr::StructInit { base, fields, .. } => {
@@ -730,7 +939,13 @@ fn test_convert_expr_object_spread_with_override() {
             vec![],
         ),
     );
-    let result = convert_expr(&swc_expr, &reg, Some(&expected), &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &reg,
+        &ExprContext::with_expected(&expected),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     // Spread expands to field-by-field access: x is overridden, y from base
     assert_eq!(
         result,
@@ -754,7 +969,13 @@ fn test_convert_expr_object_spread_with_override() {
 #[test]
 fn test_convert_expr_array_nested() {
     let expr = parse_var_init("const a = [[1, 2], [3]];");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::Vec {
@@ -778,7 +999,7 @@ fn test_convert_expr_string_lit_with_string_expected_adds_to_string() {
     let result = convert_expr(
         &swc_expr,
         &TypeRegistry::new(),
-        Some(&RustType::String),
+        &ExprContext::with_expected(&RustType::String),
         &TypeEnv::new(),
     )
     .unwrap();
@@ -795,7 +1016,13 @@ fn test_convert_expr_string_lit_with_string_expected_adds_to_string() {
 #[test]
 fn test_convert_expr_string_lit_without_expected_unchanged() {
     let swc_expr = parse_expr("\"hello\";");
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(result, Expr::StringLit("hello".to_string()));
 }
 
@@ -805,7 +1032,7 @@ fn test_convert_expr_string_lit_with_f64_expected_unchanged() {
     let result = convert_expr(
         &swc_expr,
         &TypeRegistry::new(),
-        Some(&RustType::F64),
+        &ExprContext::with_expected(&RustType::F64),
         &TypeEnv::new(),
     )
     .unwrap();
@@ -819,7 +1046,7 @@ fn test_convert_expr_array_string_with_vec_string_expected() {
     let result = convert_expr(
         &expr,
         &TypeRegistry::new(),
-        Some(&expected),
+        &ExprContext::with_expected(&expected),
         &TypeEnv::new(),
     )
     .unwrap();
@@ -861,7 +1088,7 @@ fn test_convert_expr_member_enum_access_from_registry() {
     );
 
     let swc_expr = parse_expr("Color.Red;");
-    let result = convert_expr(&swc_expr, &reg, None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(&swc_expr, &reg, &ExprContext::none(), &TypeEnv::new()).unwrap();
     assert_eq!(result, Expr::Ident("Color::Red".to_string()));
 }
 
@@ -870,7 +1097,7 @@ fn test_convert_expr_member_non_enum_unchanged() {
     // obj.field should remain FieldAccess when obj is not an enum
     let reg = TypeRegistry::new();
     let swc_expr = parse_expr("obj.field;");
-    let result = convert_expr(&swc_expr, &reg, None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(&swc_expr, &reg, &ExprContext::none(), &TypeEnv::new()).unwrap();
     assert_eq!(
         result,
         Expr::FieldAccess {
@@ -902,7 +1129,7 @@ fn test_convert_expr_call_resolves_object_arg_from_registry() {
     );
 
     let swc_expr = parse_expr("draw({ x: 0, y: 0 });");
-    let result = convert_expr(&swc_expr, &reg, None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(&swc_expr, &reg, &ExprContext::none(), &TypeEnv::new()).unwrap();
     assert_eq!(
         result,
         Expr::FnCall {
@@ -960,7 +1187,13 @@ fn test_convert_expr_object_literal_nested_resolves_field_type_from_registry() {
         name: "Rect".to_string(),
         type_args: vec![],
     };
-    let result = convert_expr(&swc_expr, &reg, Some(&expected), &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &reg,
+        &ExprContext::with_expected(&expected),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::StructInit {
@@ -1011,7 +1244,13 @@ fn test_object_lit_omitted_optional_field_gets_none() {
         name: "Item".to_string(),
         type_args: vec![],
     };
-    let result = convert_expr(&swc_expr, &reg, Some(&expected), &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &reg,
+        &ExprContext::with_expected(&expected),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     match &result {
         Expr::StructInit { fields, .. } => {
             assert_eq!(fields.len(), 2, "expected 2 fields (name + value: None)");
@@ -1038,7 +1277,7 @@ fn test_binary_number_plus_string_generates_format() {
     let result = convert_expr(
         &swc_expr,
         &TypeRegistry::new(),
-        Some(&RustType::String),
+        &ExprContext::with_expected(&RustType::String),
         &env,
     )
     .unwrap();
@@ -1073,7 +1312,7 @@ fn test_fn_arg_box_dyn_fn_gets_box_new() {
         },
     );
     let swc_expr = parse_expr("applyFn(myFunc);");
-    let result = convert_expr(&swc_expr, &reg, None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(&swc_expr, &reg, &ExprContext::none(), &TypeEnv::new()).unwrap();
     match &result {
         Expr::FnCall { args, .. } => {
             assert!(
@@ -1091,7 +1330,13 @@ fn test_fn_arg_box_dyn_fn_gets_box_new() {
 #[test]
 fn test_convert_expr_ternary_basic_identifiers() {
     let swc_expr = parse_var_init("const x = flag ? a : b;");
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::If {
@@ -1105,7 +1350,13 @@ fn test_convert_expr_ternary_basic_identifiers() {
 #[test]
 fn test_convert_expr_ternary_with_comparison_condition() {
     let swc_expr = parse_var_init("const x = a > 0 ? a : b;");
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::If {
@@ -1123,7 +1374,13 @@ fn test_convert_expr_ternary_with_comparison_condition() {
 #[test]
 fn test_convert_expr_ternary_with_string_literals() {
     let swc_expr = parse_var_init(r#"const x = flag ? "yes" : "no";"#);
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::If {
@@ -1138,7 +1395,13 @@ fn test_convert_expr_ternary_with_string_literals() {
 fn test_convert_expr_ternary_nested() {
     // x > 0 ? "positive" : x < 0 ? "negative" : "zero"
     let swc_expr = parse_var_init(r#"const s = x > 0 ? "positive" : x < 0 ? "negative" : "zero";"#);
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::If {
@@ -1165,7 +1428,13 @@ fn test_convert_expr_ternary_nested() {
 fn test_convert_expr_ternary_heterogeneous_branches_produces_if() {
     // cond ? "a" : 1 → if-else with different types (no type coercion)
     let swc_expr = parse_var_init(r#"const x = flag ? "a" : 1;"#);
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::If {
@@ -1180,7 +1449,13 @@ fn test_convert_expr_ternary_heterogeneous_branches_produces_if() {
 fn test_convert_expr_math_max_three_args_chains() {
     // Math.max(a, b, c) → a.max(b).max(c)
     let expr = parse_expr("Math.max(a, b, c);");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::MethodCall {
@@ -1200,7 +1475,13 @@ fn test_convert_expr_math_max_three_args_chains() {
 #[test]
 fn test_convert_expr_console_log_single_arg() {
     let swc_expr = parse_expr("console.log(x);");
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::MacroCall {
@@ -1214,7 +1495,13 @@ fn test_convert_expr_console_log_single_arg() {
 #[test]
 fn test_convert_expr_console_error() {
     let swc_expr = parse_expr("console.error(x);");
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::MacroCall {
@@ -1228,7 +1515,13 @@ fn test_convert_expr_console_error() {
 #[test]
 fn test_convert_expr_console_warn() {
     let swc_expr = parse_expr("console.warn(x);");
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::MacroCall {
@@ -1242,7 +1535,13 @@ fn test_convert_expr_console_warn() {
 #[test]
 fn test_convert_expr_console_log_no_args() {
     let swc_expr = parse_expr("console.log();");
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::MacroCall {
@@ -1256,7 +1555,13 @@ fn test_convert_expr_console_log_no_args() {
 #[test]
 fn test_convert_expr_console_log_multiple_args() {
     let swc_expr = parse_expr("console.log(x, y);");
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::MacroCall {
@@ -1280,7 +1585,7 @@ fn test_convert_expr_object_shorthand_single() {
     let result = convert_expr(
         &swc_expr,
         &TypeRegistry::new(),
-        Some(&expected),
+        &ExprContext::with_expected(&expected),
         &TypeEnv::new(),
     )
     .unwrap();
@@ -1305,7 +1610,7 @@ fn test_convert_expr_object_shorthand_mixed_with_key_value() {
     let result = convert_expr(
         &swc_expr,
         &TypeRegistry::new(),
-        Some(&expected),
+        &ExprContext::with_expected(&expected),
         &TypeEnv::new(),
     )
     .unwrap();
@@ -1341,7 +1646,13 @@ fn test_convert_expr_object_shorthand_with_registry_field_type() {
             vec![],
         ),
     );
-    let result = convert_expr(&swc_expr, &reg, Some(&expected), &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &reg,
+        &ExprContext::with_expected(&expected),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::StructInit {
@@ -1359,7 +1670,7 @@ fn test_convert_expr_array_nested_vec_string_expected() {
     let result = convert_expr(
         &expr,
         &TypeRegistry::new(),
-        Some(&expected),
+        &ExprContext::with_expected(&expected),
         &TypeEnv::new(),
     )
     .unwrap();
@@ -1382,7 +1693,13 @@ fn test_convert_expr_array_nested_vec_string_expected() {
 #[test]
 fn test_convert_expr_unary_not_bool_literal() {
     let expr = parse_expr("!true;");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::UnaryOp {
@@ -1395,7 +1712,13 @@ fn test_convert_expr_unary_not_bool_literal() {
 #[test]
 fn test_convert_expr_unary_not_ident() {
     let expr = parse_expr("!x;");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::UnaryOp {
@@ -1408,7 +1731,13 @@ fn test_convert_expr_unary_not_ident() {
 #[test]
 fn test_convert_expr_unary_minus_ident() {
     let expr = parse_expr("-x;");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::UnaryOp {
@@ -1421,7 +1750,13 @@ fn test_convert_expr_unary_minus_ident() {
 #[test]
 fn test_convert_expr_unary_minus_number_literal() {
     let expr = parse_expr("-42;");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::UnaryOp {
@@ -1434,7 +1769,13 @@ fn test_convert_expr_unary_minus_number_literal() {
 #[test]
 fn test_convert_expr_unary_not_complex_expr() {
     let expr = parse_expr("!(a > b);");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::UnaryOp {
@@ -1453,7 +1794,13 @@ fn test_convert_expr_unary_not_complex_expr() {
 #[test]
 fn test_convert_expr_await_simple() {
     let expr = parse_expr("await fetch();");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::Await(Box::new(Expr::FnCall {
@@ -1466,7 +1813,13 @@ fn test_convert_expr_await_simple() {
 #[test]
 fn test_convert_expr_await_ident() {
     let expr = parse_expr("await promise;");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::Await(Box::new(Expr::Ident("promise".to_string())))
@@ -1478,7 +1831,13 @@ fn test_convert_expr_await_ident() {
 #[test]
 fn test_convert_expr_string_length_to_len_as_f64() {
     let expr = parse_expr("s.length;");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::Cast {
@@ -1495,7 +1854,13 @@ fn test_convert_expr_string_length_to_len_as_f64() {
 #[test]
 fn test_convert_expr_string_includes_to_contains() {
     let expr = parse_expr(r#"s.includes("x");"#);
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::MethodCall {
@@ -1510,7 +1875,13 @@ fn test_convert_expr_string_includes_to_contains() {
 fn test_convert_includes_to_contains_with_ref() {
     // arr.includes(3) → arr.contains(&3.0)
     let expr = parse_expr("arr.includes(3);");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::MethodCall {
@@ -1524,7 +1895,13 @@ fn test_convert_includes_to_contains_with_ref() {
 #[test]
 fn test_convert_expr_string_starts_with() {
     let expr = parse_expr(r#"s.startsWith("a");"#);
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::MethodCall {
@@ -1538,7 +1915,13 @@ fn test_convert_expr_string_starts_with() {
 #[test]
 fn test_convert_expr_string_ends_with() {
     let expr = parse_expr(r#"s.endsWith("z");"#);
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::MethodCall {
@@ -1552,7 +1935,13 @@ fn test_convert_expr_string_ends_with() {
 #[test]
 fn test_convert_expr_string_trim_adds_to_string() {
     let expr = parse_expr("s.trim();");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::MethodCall {
@@ -1570,7 +1959,13 @@ fn test_convert_expr_string_trim_adds_to_string() {
 #[test]
 fn test_convert_expr_string_to_lower_case() {
     let expr = parse_expr("s.toLowerCase();");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::MethodCall {
@@ -1584,7 +1979,13 @@ fn test_convert_expr_string_to_lower_case() {
 #[test]
 fn test_convert_expr_string_to_upper_case() {
     let expr = parse_expr("s.toUpperCase();");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::MethodCall {
@@ -1599,7 +2000,13 @@ fn test_convert_expr_string_to_upper_case() {
 fn test_convert_expr_string_split_generates_vec_string() {
     // s.split(",") → s.split(",").map(|s| s.to_string()).collect::<Vec<String>>()
     let expr = parse_expr(r#"s.split(",");"#);
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::MethodCall {
@@ -1633,7 +2040,13 @@ fn test_convert_expr_string_split_generates_vec_string() {
 fn test_convert_expr_substring_two_args_generates_slice() {
     // s.substring(1, 3) → s[1..3].to_string()
     let expr = parse_expr("s.substring(1, 3);");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::MethodCall {
@@ -1654,7 +2067,13 @@ fn test_convert_expr_substring_two_args_generates_slice() {
 fn test_convert_expr_substring_one_arg_generates_open_range() {
     // s.substring(1) → s[1..].to_string()
     let expr = parse_expr("s.substring(1);");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::MethodCall {
@@ -1675,7 +2094,13 @@ fn test_convert_expr_substring_one_arg_generates_open_range() {
 fn test_convert_expr_slice_one_arg_generates_open_range() {
     // arr.slice(1) → arr[1..].to_vec()
     let expr = parse_expr("arr.slice(1);");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::MethodCall {
@@ -1696,7 +2121,13 @@ fn test_convert_expr_slice_one_arg_generates_open_range() {
 fn test_convert_expr_string_replace_generates_replacen() {
     // s.replace("a", "b") → s.replacen("a", "b", 1) (first occurrence only)
     let expr = parse_expr(r#"s.replace("a", "b");"#);
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::MethodCall {
@@ -1715,7 +2146,13 @@ fn test_convert_expr_string_replace_generates_replacen() {
 fn test_convert_expr_string_replace_all_generates_replace() {
     // s.replaceAll("a", "b") → s.replace("a", "b") (Rust replace replaces all)
     let expr = parse_expr(r#"s.replaceAll("a", "b");"#);
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::MethodCall {
@@ -1734,7 +2171,13 @@ fn test_convert_expr_string_replace_all_generates_replace() {
 #[test]
 fn test_convert_expr_array_map_to_iter_map_collect() {
     let expr = parse_expr("arr.map((x: number) => x + 1);");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     // arr.map((x: number) => x + 1) → arr.iter().cloned().map(|x| x + 1).collect()
     assert_eq!(
         result,
@@ -1772,7 +2215,13 @@ fn test_convert_expr_array_map_to_iter_map_collect() {
 #[test]
 fn test_convert_expr_array_filter_to_iter_filter_collect() {
     let expr = parse_expr("arr.filter((x: number) => x > 0);");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     // arr.filter((x: number) => x > 0) → arr.iter().cloned().filter(|x| x > 0).collect()
     assert_eq!(
         result,
@@ -1810,7 +2259,13 @@ fn test_convert_expr_array_filter_to_iter_filter_collect() {
 #[test]
 fn test_convert_expr_array_find_to_iter_find() {
     let expr = parse_expr("arr.find((x: number) => x > 0);");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     // arr.find((x: number) => x > 0) → arr.iter().cloned().find(|x| x > 0)
     assert_eq!(
         result,
@@ -1844,7 +2299,13 @@ fn test_convert_expr_array_find_to_iter_find() {
 #[test]
 fn test_convert_expr_array_some_to_iter_any() {
     let expr = parse_expr("arr.some((x: number) => x > 0);");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     // arr.some((x: number) => x > 0) → arr.iter().cloned().any(|x| x > 0)
     assert_eq!(
         result,
@@ -1878,7 +2339,13 @@ fn test_convert_expr_array_some_to_iter_any() {
 #[test]
 fn test_convert_expr_array_every_to_iter_all() {
     let expr = parse_expr("arr.every((x: number) => x > 0);");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     // arr.every((x: number) => x > 0) → arr.iter().cloned().all(|x| x > 0)
     assert_eq!(
         result,
@@ -1914,7 +2381,13 @@ fn test_convert_expr_array_foreach_to_for_loop() {
     // forEach は式→文の変換なので、statement レベルで別途テストする
     // ここではメソッド呼び出しとしての変換を確認
     let expr = parse_expr("arr.forEach((x: number) => console.log(x));");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     // forEach は map_method_call で ForEach 用の IR に変換される
     // 初版: arr.iter().cloned().for_each(|x| ...) に変換
     assert_eq!(
@@ -1951,7 +2424,13 @@ fn test_convert_expr_array_foreach_to_for_loop() {
 #[test]
 fn test_convert_expr_math_floor() {
     let expr = parse_expr("Math.floor(3.7);");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::MethodCall {
@@ -1965,7 +2444,13 @@ fn test_convert_expr_math_floor() {
 #[test]
 fn test_convert_expr_math_ceil() {
     let expr = parse_expr("Math.ceil(x);");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::MethodCall {
@@ -1979,7 +2464,13 @@ fn test_convert_expr_math_ceil() {
 #[test]
 fn test_convert_expr_math_round() {
     let expr = parse_expr("Math.round(x);");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::MethodCall {
@@ -1993,7 +2484,13 @@ fn test_convert_expr_math_round() {
 #[test]
 fn test_convert_expr_math_abs() {
     let expr = parse_expr("Math.abs(x);");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::MethodCall {
@@ -2007,7 +2504,13 @@ fn test_convert_expr_math_abs() {
 #[test]
 fn test_convert_expr_math_sqrt() {
     let expr = parse_expr("Math.sqrt(x);");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::MethodCall {
@@ -2021,7 +2524,13 @@ fn test_convert_expr_math_sqrt() {
 #[test]
 fn test_convert_expr_math_max() {
     let expr = parse_expr("Math.max(a, b);");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::MethodCall {
@@ -2035,7 +2544,13 @@ fn test_convert_expr_math_max() {
 #[test]
 fn test_convert_expr_math_min() {
     let expr = parse_expr("Math.min(a, b);");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::MethodCall {
@@ -2049,7 +2564,13 @@ fn test_convert_expr_math_min() {
 #[test]
 fn test_convert_expr_math_pow() {
     let expr = parse_expr("Math.pow(x, 2);");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::MethodCall {
@@ -2063,7 +2584,13 @@ fn test_convert_expr_math_pow() {
 #[test]
 fn test_convert_expr_math_nested() {
     let expr = parse_expr("Math.floor(Math.sqrt(x));");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::MethodCall {
@@ -2083,7 +2610,13 @@ fn test_convert_expr_math_nested() {
 #[test]
 fn test_convert_expr_parse_int() {
     let expr = parse_expr(r#"parseInt("42");"#);
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     // parseInt("42") → "42".parse::<f64>().unwrap_or(f64::NAN)
     assert_eq!(
         result,
@@ -2102,7 +2635,13 @@ fn test_convert_expr_parse_int() {
 #[test]
 fn test_convert_expr_parse_float() {
     let expr = parse_expr(r#"parseFloat("3.14");"#);
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     // parseFloat("3.14") → "3.14".parse::<f64>().unwrap_or(f64::NAN)
     assert_eq!(
         result,
@@ -2121,7 +2660,13 @@ fn test_convert_expr_parse_float() {
 #[test]
 fn test_convert_expr_is_nan_global() {
     let expr = parse_expr("isNaN(x);");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     // isNaN(x) → x.is_nan()
     assert_eq!(
         result,
@@ -2136,7 +2681,13 @@ fn test_convert_expr_is_nan_global() {
 #[test]
 fn test_convert_expr_number_is_nan() {
     let expr = parse_expr("Number.isNaN(x);");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     // Number.isNaN(x) → x.is_nan()
     assert_eq!(
         result,
@@ -2151,7 +2702,13 @@ fn test_convert_expr_number_is_nan() {
 #[test]
 fn test_convert_expr_number_is_finite() {
     let expr = parse_expr("Number.isFinite(x);");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     // Number.isFinite(x) → x.is_finite()
     assert_eq!(
         result,
@@ -2169,7 +2726,13 @@ fn test_convert_expr_number_is_finite() {
 fn test_convert_expr_nullish_coalescing_basic() {
     // `a ?? b` → `a.unwrap_or_else(|| b)`
     let expr = parse_expr("a ?? b;");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::MethodCall {
@@ -2190,7 +2753,13 @@ fn test_convert_expr_nullish_coalescing_basic() {
 fn test_convert_expr_type_assertion_primitive_generates_cast() {
     // `x as number` → `x as f64` (primitive cast preserved)
     let expr = parse_expr("x as number;");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::Cast {
@@ -2204,7 +2773,13 @@ fn test_convert_expr_type_assertion_primitive_generates_cast() {
 fn test_convert_expr_type_assertion_nested() {
     // `(obj as Foo).bar` → `obj.bar`
     let expr = parse_expr("(obj as Foo).bar;");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::FieldAccess {
@@ -2217,7 +2792,13 @@ fn test_convert_expr_type_assertion_nested() {
 #[test]
 fn test_convert_opt_chain_length_returns_len_as_f64() {
     let expr = parse_expr("x?.length;");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     // x?.length → x.as_ref().map(|_v| _v.len() as f64)
     assert_eq!(
         result,
@@ -2251,7 +2832,13 @@ fn test_convert_opt_chain_length_returns_len_as_f64() {
 fn test_convert_expr_number_is_integer_to_fract() {
     // Number.isInteger(x) → x.fract() == 0.0
     let expr = parse_expr("Number.isInteger(x);");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::BinaryOp {
@@ -2270,7 +2857,13 @@ fn test_convert_expr_number_is_integer_to_fract() {
 fn test_convert_expr_math_sign_to_signum() {
     // Math.sign(x) → x.signum()
     let expr = parse_expr("Math.sign(x);");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::MethodCall {
@@ -2285,7 +2878,13 @@ fn test_convert_expr_math_sign_to_signum() {
 fn test_convert_expr_math_trunc() {
     // Math.trunc(x) → x.trunc()
     let expr = parse_expr("Math.trunc(x);");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::MethodCall {
@@ -2300,7 +2899,13 @@ fn test_convert_expr_math_trunc() {
 fn test_convert_expr_math_log_to_ln() {
     // Math.log(x) → x.ln()
     let expr = parse_expr("Math.log(x);");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::MethodCall {
@@ -2315,7 +2920,13 @@ fn test_convert_expr_math_log_to_ln() {
 fn test_convert_expr_math_pi_to_consts() {
     // Math.PI → std::f64::consts::PI
     let expr = parse_expr("Math.PI;");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(result, Expr::Ident("std::f64::consts::PI".to_string()));
 }
 
@@ -2323,7 +2934,13 @@ fn test_convert_expr_math_pi_to_consts() {
 fn test_convert_expr_math_e_to_consts() {
     // Math.E → std::f64::consts::E
     let expr = parse_expr("Math.E;");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(result, Expr::Ident("std::f64::consts::E".to_string()));
 }
 
@@ -2332,14 +2949,26 @@ fn test_convert_expr_math_e_to_consts() {
 #[test]
 fn test_convert_expr_nan_to_f64_nan() {
     let expr = parse_expr("NaN;");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(result, Expr::Ident("f64::NAN".to_string()));
 }
 
 #[test]
 fn test_convert_expr_infinity_to_f64_infinity() {
     let expr = parse_expr("Infinity;");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(result, Expr::Ident("f64::INFINITY".to_string()));
 }
 
@@ -2347,7 +2976,13 @@ fn test_convert_expr_infinity_to_f64_infinity() {
 fn test_convert_expr_slice_to_range_to_vec() {
     // arr.slice(1, 3) → arr[1..3].to_vec()
     let expr = parse_expr("arr.slice(1, 3);");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::MethodCall {
@@ -2368,7 +3003,13 @@ fn test_convert_expr_slice_to_range_to_vec() {
 fn test_convert_expr_splice_to_drain_collect() {
     // arr.splice(1, 2) → arr.drain(1..3).collect::<Vec<_>>()
     let expr = parse_expr("arr.splice(1, 2);");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::MethodCall {
@@ -2390,7 +3031,13 @@ fn test_convert_expr_splice_to_drain_collect() {
 fn test_convert_expr_reverse_unchanged() {
     // arr.reverse() → arr.reverse() (same name, in-place)
     let expr = parse_expr("arr.reverse();");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::MethodCall {
@@ -2405,7 +3052,13 @@ fn test_convert_expr_reverse_unchanged() {
 fn test_convert_expr_sort_no_args_generates_sort_by_partial_cmp() {
     // arr.sort() → arr.sort_by(|a, b| a.partial_cmp(b).unwrap())
     let expr = parse_expr("arr.sort();");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::MethodCall {
@@ -2441,7 +3094,13 @@ fn test_convert_expr_sort_no_args_generates_sort_by_partial_cmp() {
 fn test_convert_expr_sort_with_comparator_to_sort_by() {
     // arr.sort((a, b) => a - b) → arr.sort_by(|a, b| (a - b).partial_cmp(&0.0).unwrap())
     let expr = parse_expr("arr.sort((a, b) => a - b);");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     if let Expr::MethodCall { method, args, .. } = &result {
         assert_eq!(method, "sort_by");
         if let Some(Expr::Closure { params, body, .. }) = args.first() {
@@ -2464,7 +3123,13 @@ fn test_convert_expr_sort_with_comparator_to_sort_by() {
 fn test_convert_expr_index_of_to_iter_position() {
     // arr.indexOf(x) → arr.iter().position(|item| *item == x).map(|i| i as f64).unwrap_or(-1.0)
     let expr = parse_expr("arr.indexOf(x);");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::MethodCall {
@@ -2512,7 +3177,13 @@ fn test_convert_expr_index_of_to_iter_position() {
 fn test_convert_expr_join_string_literal_passes_through() {
     // arr.join(",") → arr.join(",") — string literals are already &str in Rust
     let expr = parse_expr("arr.join(\",\");");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::MethodCall {
@@ -2527,7 +3198,13 @@ fn test_convert_expr_join_string_literal_passes_through() {
 fn test_convert_expr_reduce_with_init_to_iter_fold() {
     // arr.reduce((acc, x) => acc + x, 0) → arr.iter().fold(0, |acc, x| acc + x)
     let expr = parse_expr("arr.reduce((acc, x) => acc + x, 0);");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::MethodCall {
@@ -2567,7 +3244,13 @@ fn test_map_method_reduce_typed_closure_strips_type_annotations() {
     // arr.reduce((acc: number, x: number) => acc + x, 0)
     // → fold closure params should have NO type annotation (Rust infers &T from iter())
     let expr = parse_expr("arr.reduce((acc: number, x: number) => acc + x, 0);");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     // Extract the closure from fold args
     if let Expr::MethodCall { args, .. } = &result {
         if let Some(Expr::Closure { params, .. }) = args.get(1) {
@@ -2591,7 +3274,13 @@ fn test_map_method_reduce_typed_closure_strips_type_annotations() {
 fn test_map_method_indexof_position_returns_f64_with_unwrap() {
     // arr.indexOf(target) → arr.iter().position(...).map(|i| i as f64).unwrap_or(-1.0)
     let expr = parse_expr("arr.indexOf(target);");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     // Should end with .unwrap_or(-1.0)
     if let Expr::MethodCall { method, args, .. } = &result {
         assert_eq!(method, "unwrap_or", "expected unwrap_or, got: {result:?}");
@@ -2609,7 +3298,13 @@ fn test_map_method_indexof_position_returns_f64_with_unwrap() {
 fn test_map_method_join_passes_borrowed_arg() {
     // arr.join(sep) → arr.join(&sep)
     let expr = parse_expr("arr.join(sep);");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     if let Expr::MethodCall { method, args, .. } = &result {
         assert_eq!(method, "join");
         // The argument should be a reference: &sep
@@ -2627,7 +3322,13 @@ fn test_map_method_join_passes_borrowed_arg() {
 fn test_map_method_sort_no_args_uses_partial_cmp() {
     // arr.sort() → arr.sort_by(|a, b| a.partial_cmp(b).unwrap())
     let expr = parse_expr("arr.sort();");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     if let Expr::MethodCall { method, .. } = &result {
         assert_eq!(
             method, "sort_by",
@@ -2642,7 +3343,13 @@ fn test_map_method_sort_no_args_uses_partial_cmp() {
 fn test_map_method_sort_with_comparator_strips_type_annotations() {
     // arr.sort((a: number, b: number) => b - a) → sort_by closure params have no type annotation
     let expr = parse_expr("arr.sort((a: number, b: number) => b - a);");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     if let Expr::MethodCall { method, args, .. } = &result {
         assert_eq!(method, "sort_by");
         if let Some(Expr::Closure { params, .. }) = args.first() {
@@ -2662,7 +3369,13 @@ fn test_map_method_splice_generates_integer_range() {
     // arr.splice(1, 2) → arr.drain(1..3).collect::<Vec<_>>()
     // The range should use integer literals, not float
     let expr = parse_expr("arr.splice(1, 2);");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     // Drill into: MethodCall { object: MethodCall { method: "drain", args: [Range { start, end }] }, method: "collect..." }
     if let Expr::MethodCall {
         object,
@@ -2701,7 +3414,13 @@ fn test_map_method_splice_generates_integer_range() {
 #[test]
 fn test_convert_opt_chain_normal_field_unchanged() {
     let expr = parse_expr("x?.y;");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     // x?.y → x.as_ref().map(|_v| _v.y) — 既存動作が壊れないこと
     assert_eq!(
         result,
@@ -2922,7 +3641,7 @@ fn test_convert_opt_chain_non_option_type_returns_plain_access() {
         },
     );
 
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &env).unwrap();
+    let result = convert_expr(&expr, &TypeRegistry::new(), &ExprContext::none(), &env).unwrap();
     assert_eq!(
         result,
         Expr::FieldAccess {
@@ -2944,7 +3663,7 @@ fn test_convert_opt_chain_option_type_returns_map_pattern() {
         })),
     );
 
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &env).unwrap();
+    let result = convert_expr(&expr, &TypeRegistry::new(), &ExprContext::none(), &env).unwrap();
     assert!(matches!(
         &result,
         Expr::MethodCall { method, .. } if method == "map"
@@ -2956,7 +3675,7 @@ fn test_convert_opt_chain_unknown_type_returns_map_pattern() {
     let expr = parse_single_expr("x?.y;");
     let env = TypeEnv::new();
 
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &env).unwrap();
+    let result = convert_expr(&expr, &TypeRegistry::new(), &ExprContext::none(), &env).unwrap();
     assert!(matches!(
         &result,
         Expr::MethodCall { method, .. } if method == "map"
@@ -2974,7 +3693,7 @@ fn test_opt_chain_method_call_maps_to_rust_name() {
         "s".to_string(),
         RustType::Option(Box::new(RustType::String)),
     );
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &env).unwrap();
+    let result = convert_expr(&expr, &TypeRegistry::new(), &ExprContext::none(), &env).unwrap();
     // Dig into the map closure body and verify method name is to_uppercase
     if let Expr::MethodCall {
         method: outer_method,
@@ -3008,7 +3727,7 @@ fn test_convert_nullish_coalescing_non_option_returns_left() {
     let mut env = TypeEnv::new();
     env.insert("x".to_string(), RustType::String);
 
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &env).unwrap();
+    let result = convert_expr(&expr, &TypeRegistry::new(), &ExprContext::none(), &env).unwrap();
     assert_eq!(result, Expr::Ident("x".to_string()));
 }
 
@@ -3021,7 +3740,7 @@ fn test_convert_nullish_coalescing_option_returns_unwrap_or_else() {
         RustType::Option(Box::new(RustType::String)),
     );
 
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &env).unwrap();
+    let result = convert_expr(&expr, &TypeRegistry::new(), &ExprContext::none(), &env).unwrap();
     assert!(matches!(
         &result,
         Expr::MethodCall { method, .. } if method == "unwrap_or_else"
@@ -3033,7 +3752,7 @@ fn test_convert_nullish_coalescing_unknown_type_returns_unwrap_or_else() {
     let expr = parse_single_expr("x ?? y;");
     let env = TypeEnv::new();
 
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &env).unwrap();
+    let result = convert_expr(&expr, &TypeRegistry::new(), &ExprContext::none(), &env).unwrap();
     assert!(matches!(
         &result,
         Expr::MethodCall { method, .. } if method == "unwrap_or_else"
@@ -3079,7 +3798,7 @@ fn test_convert_opt_chain_nested_option_uses_and_then() {
         ),
     );
 
-    let result = convert_expr(&expr, &reg, None, &env).unwrap();
+    let result = convert_expr(&expr, &reg, &ExprContext::none(), &env).unwrap();
     // The outermost should use and_then (not map) to avoid Option<Option<T>>
     let result_str = format!("{result:?}");
     assert!(
@@ -3096,7 +3815,13 @@ use crate::ir::Stmt as IrStmt;
 fn test_convert_expr_array_spread_in_expression_generates_block() {
     // foo([...arr, 1]) — spread in function arg position
     let expr = parse_expr("foo([...arr, 1]);");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     // The argument should be an Expr::Block
     match &result {
         Expr::FnCall { args, .. } => {
@@ -3115,7 +3840,13 @@ fn test_convert_expr_array_spread_in_expression_generates_block() {
 fn test_convert_expr_array_spread_prefix_and_suffix_generates_block() {
     // [1, ...arr, 2] in expression position (as function arg)
     let expr = parse_expr("foo([1, ...arr, 2]);");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     match &result {
         Expr::FnCall { args, .. } => {
             assert_eq!(args.len(), 1);
@@ -3152,7 +3883,13 @@ fn test_convert_expr_array_spread_prefix_and_suffix_generates_block() {
 fn test_string_concat_rhs_ident_gets_ref() {
     // "Hello " + name → BinaryOp { left: StringLit, op: Add, right: Ref(Ident) }
     let swc_expr = parse_expr(r#""Hello " + name"#);
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     match result {
         Expr::BinaryOp { right, op, .. } => {
             assert_eq!(op, BinOp::Add);
@@ -3171,7 +3908,13 @@ fn test_string_concat_chain_rhs_gets_ref() {
     // Actually "!" is a literal, so it gets .to_string() in Rust, which is already &str-compatible
     // But the pattern is: greeting + " " + name
     let swc_expr = parse_expr(r#"greeting + " " + name"#);
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     // The outer BinaryOp's left is also a BinaryOp with Add
     // We just verify the structure doesn't panic and produces BinaryOp
     assert!(matches!(result, Expr::BinaryOp { op: BinOp::Add, .. }));
@@ -3181,7 +3924,13 @@ fn test_string_concat_chain_rhs_gets_ref() {
 fn test_numeric_add_no_ref() {
     // a + b (numeric) should NOT get Ref
     let swc_expr = parse_expr("a + b");
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     match result {
         Expr::BinaryOp { right, op, .. } => {
             assert_eq!(op, BinOp::Add);
@@ -3217,7 +3966,7 @@ fn test_call_with_missing_default_arg_appends_none() {
     );
 
     let swc_expr = parse_expr("greet(\"World\")");
-    let result = convert_expr(&swc_expr, &reg, None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(&swc_expr, &reg, &ExprContext::none(), &TypeEnv::new()).unwrap();
 
     match result {
         Expr::FnCall { name, args } => {
@@ -3255,7 +4004,7 @@ fn test_call_with_option_arg_wraps_some() {
     );
 
     let swc_expr = parse_expr("greet(\"World\", \"Hi\")");
-    let result = convert_expr(&swc_expr, &reg, None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(&swc_expr, &reg, &ExprContext::none(), &TypeEnv::new()).unwrap();
 
     match result {
         Expr::FnCall { name, args } => {
@@ -3432,7 +4181,13 @@ fn test_convert_bin_expr_expected_string_enables_concat() {
     let reg = TypeRegistry::new();
     let env = TypeEnv::new(); // a, b not registered → types unknown
 
-    let result = convert_expr(&swc_expr, &reg, Some(&RustType::String), &env).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &reg,
+        &ExprContext::with_expected(&RustType::String),
+        &env,
+    )
+    .unwrap();
 
     // In string concat context, RHS should be wrapped in Ref
     match &result {
@@ -3455,7 +4210,7 @@ fn test_convert_bin_expr_no_expected_numeric_add() {
     let reg = TypeRegistry::new();
     let env = TypeEnv::new();
 
-    let result = convert_expr(&swc_expr, &reg, None, &env).unwrap();
+    let result = convert_expr(&swc_expr, &reg, &ExprContext::none(), &env).unwrap();
 
     match &result {
         Expr::BinaryOp { op, right, .. } => {
@@ -3484,7 +4239,7 @@ fn test_convert_call_expr_typeenv_fn_provides_param_expected() {
         },
     );
 
-    let result = convert_expr(&swc_expr, &reg, None, &env).unwrap();
+    let result = convert_expr(&swc_expr, &reg, &ExprContext::none(), &env).unwrap();
 
     match &result {
         Expr::FnCall { name, args } => {
@@ -3511,7 +4266,7 @@ fn test_convert_call_expr_no_typeenv_fn_no_expected() {
     let reg = TypeRegistry::new();
     let env = TypeEnv::new();
 
-    let result = convert_expr(&swc_expr, &reg, None, &env).unwrap();
+    let result = convert_expr(&swc_expr, &reg, &ExprContext::none(), &env).unwrap();
 
     match &result {
         Expr::FnCall { name, args } => {
@@ -3544,7 +4299,7 @@ fn test_convert_call_expr_rest_param_packs_args_into_vec() {
         },
     );
 
-    let result = convert_expr(&swc_expr, &reg, None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(&swc_expr, &reg, &ExprContext::none(), &TypeEnv::new()).unwrap();
 
     match &result {
         Expr::FnCall { name, args } => {
@@ -3580,7 +4335,7 @@ fn test_convert_call_expr_rest_param_mixed_regular_and_rest() {
         },
     );
 
-    let result = convert_expr(&swc_expr, &reg, None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(&swc_expr, &reg, &ExprContext::none(), &TypeEnv::new()).unwrap();
 
     match &result {
         Expr::FnCall { name, args } => {
@@ -3612,7 +4367,7 @@ fn test_convert_call_expr_rest_param_no_rest_args() {
         },
     );
 
-    let result = convert_expr(&swc_expr, &reg, None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(&swc_expr, &reg, &ExprContext::none(), &TypeEnv::new()).unwrap();
 
     match &result {
         Expr::FnCall { name, args } => {
@@ -3644,7 +4399,7 @@ fn test_convert_call_expr_rest_param_spread_single_array() {
         },
     );
 
-    let result = convert_expr(&swc_expr, &reg, None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(&swc_expr, &reg, &ExprContext::none(), &TypeEnv::new()).unwrap();
 
     match &result {
         Expr::FnCall { name, args } => {
@@ -3676,7 +4431,7 @@ fn test_convert_call_expr_rest_param_mixed_literal_and_spread() {
         },
     );
 
-    let result = convert_expr(&swc_expr, &reg, None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(&swc_expr, &reg, &ExprContext::none(), &TypeEnv::new()).unwrap();
 
     match &result {
         Expr::FnCall { name, args } => {
@@ -3704,7 +4459,13 @@ fn test_convert_array_lit_empty_with_expected_vec_string() {
     let env = TypeEnv::new();
     let expected = RustType::Vec(Box::new(RustType::String));
 
-    let result = convert_expr(&swc_expr, &reg, Some(&expected), &env).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &reg,
+        &ExprContext::with_expected(&expected),
+        &env,
+    )
+    .unwrap();
 
     assert_eq!(result, Expr::Vec { elements: vec![] });
 }
@@ -3717,7 +4478,13 @@ fn test_convert_array_lit_elements_get_expected_element_type() {
     let env = TypeEnv::new();
     let expected = RustType::Vec(Box::new(RustType::String));
 
-    let result = convert_expr(&swc_expr, &reg, Some(&expected), &env).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &reg,
+        &ExprContext::with_expected(&expected),
+        &env,
+    )
+    .unwrap();
 
     match &result {
         Expr::Vec { elements } => {
@@ -3742,7 +4509,7 @@ fn test_typeof_equals_string_known_type_resolves_true() {
     let swc_expr = parse_expr("typeof x === \"string\";");
     let mut env = TypeEnv::new();
     env.insert("x".to_string(), RustType::String);
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &env).unwrap();
+    let result = convert_expr(&swc_expr, &TypeRegistry::new(), &ExprContext::none(), &env).unwrap();
     assert_eq!(result, Expr::BoolLit(true));
 }
 
@@ -3751,7 +4518,7 @@ fn test_typeof_equals_string_mismatched_type_resolves_false() {
     let swc_expr = parse_expr("typeof x === \"string\";");
     let mut env = TypeEnv::new();
     env.insert("x".to_string(), RustType::F64);
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &env).unwrap();
+    let result = convert_expr(&swc_expr, &TypeRegistry::new(), &ExprContext::none(), &env).unwrap();
     assert_eq!(result, Expr::BoolLit(false));
 }
 
@@ -3760,7 +4527,7 @@ fn test_typeof_equals_number_known_type_resolves_true() {
     let swc_expr = parse_expr("typeof x === \"number\";");
     let mut env = TypeEnv::new();
     env.insert("x".to_string(), RustType::F64);
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &env).unwrap();
+    let result = convert_expr(&swc_expr, &TypeRegistry::new(), &ExprContext::none(), &env).unwrap();
     assert_eq!(result, Expr::BoolLit(true));
 }
 
@@ -3769,7 +4536,7 @@ fn test_typeof_not_equals_string_known_type_resolves_false() {
     let swc_expr = parse_expr("typeof x !== \"string\";");
     let mut env = TypeEnv::new();
     env.insert("x".to_string(), RustType::String);
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &env).unwrap();
+    let result = convert_expr(&swc_expr, &TypeRegistry::new(), &ExprContext::none(), &env).unwrap();
     assert_eq!(result, Expr::BoolLit(false));
 }
 
@@ -3777,7 +4544,7 @@ fn test_typeof_not_equals_string_known_type_resolves_false() {
 fn test_typeof_equals_string_unknown_type_resolves_placeholder() {
     let swc_expr = parse_expr("typeof x === \"string\";");
     let env = TypeEnv::new(); // x not registered
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &env).unwrap();
+    let result = convert_expr(&swc_expr, &TypeRegistry::new(), &ExprContext::none(), &env).unwrap();
     // Unknown type → placeholder true
     assert_eq!(result, Expr::BoolLit(true));
 }
@@ -3787,7 +4554,7 @@ fn test_typeof_equals_undefined_option_resolves_is_none() {
     let swc_expr = parse_expr("typeof x === \"undefined\";");
     let mut env = TypeEnv::new();
     env.insert("x".to_string(), RustType::Option(Box::new(RustType::F64)));
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &env).unwrap();
+    let result = convert_expr(&swc_expr, &TypeRegistry::new(), &ExprContext::none(), &env).unwrap();
     assert!(
         matches!(&result, Expr::MethodCall { method, .. } if method == "is_none"),
         "expected is_none call, got: {:?}",
@@ -3800,7 +4567,7 @@ fn test_typeof_standalone_known_type_resolves_string_lit() {
     let swc_expr = parse_expr("typeof x;");
     let mut env = TypeEnv::new();
     env.insert("x".to_string(), RustType::String);
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &env).unwrap();
+    let result = convert_expr(&swc_expr, &TypeRegistry::new(), &ExprContext::none(), &env).unwrap();
     assert_eq!(result, Expr::StringLit("string".to_string()));
 }
 
@@ -3815,7 +4582,7 @@ fn test_instanceof_known_type_match_resolves_true() {
             type_args: vec![],
         },
     );
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &env).unwrap();
+    let result = convert_expr(&swc_expr, &TypeRegistry::new(), &ExprContext::none(), &env).unwrap();
     assert_eq!(result, Expr::BoolLit(true));
 }
 
@@ -3830,7 +4597,7 @@ fn test_instanceof_known_type_mismatch_resolves_false() {
             type_args: vec![],
         },
     );
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &env).unwrap();
+    let result = convert_expr(&swc_expr, &TypeRegistry::new(), &ExprContext::none(), &env).unwrap();
     assert_eq!(result, Expr::BoolLit(false));
 }
 
@@ -3839,7 +4606,7 @@ fn test_instanceof_unknown_type_generates_todo() {
     // Unknown type should generate todo!(), not static true
     let swc_expr = parse_expr("x instanceof Foo;");
     let env = TypeEnv::new();
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &env).unwrap();
+    let result = convert_expr(&swc_expr, &TypeRegistry::new(), &ExprContext::none(), &env).unwrap();
     match &result {
         Expr::FnCall { name, .. } => assert_eq!(name, "todo!"),
         other => panic!("expected todo!() for unknown instanceof, got: {other:?}"),
@@ -3862,7 +4629,13 @@ fn test_self_field_string_concat_gets_clone() {
             type_args: vec![],
         },
     );
-    let result = convert_expr(&swc_expr, &reg, Some(&RustType::String), &env).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &reg,
+        &ExprContext::with_expected(&RustType::String),
+        &env,
+    )
+    .unwrap();
     match &result {
         Expr::BinaryOp { left, op, .. } => {
             assert_eq!(*op, BinOp::Add);
@@ -3882,7 +4655,13 @@ fn test_self_field_string_concat_gets_clone() {
 #[test]
 fn test_undefined_literal_converts_to_none() {
     let swc_expr = parse_expr("undefined;");
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(result, Expr::Ident("None".to_string()));
 }
 
@@ -3891,7 +4670,7 @@ fn test_equals_undefined_converts_to_is_none() {
     let swc_expr = parse_expr("x === undefined;");
     let mut env = TypeEnv::new();
     env.insert("x".to_string(), RustType::Option(Box::new(RustType::F64)));
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &env).unwrap();
+    let result = convert_expr(&swc_expr, &TypeRegistry::new(), &ExprContext::none(), &env).unwrap();
     assert!(
         matches!(&result, Expr::MethodCall { method, .. } if method == "is_none"),
         "expected is_none, got: {:?}",
@@ -3904,7 +4683,7 @@ fn test_not_equals_undefined_converts_to_is_some() {
     let swc_expr = parse_expr("x !== undefined;");
     let mut env = TypeEnv::new();
     env.insert("x".to_string(), RustType::Option(Box::new(RustType::F64)));
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &env).unwrap();
+    let result = convert_expr(&swc_expr, &TypeRegistry::new(), &ExprContext::none(), &env).unwrap();
     assert!(
         matches!(&result, Expr::MethodCall { method, .. } if method == "is_some"),
         "expected is_some, got: {:?}",
@@ -3920,7 +4699,7 @@ fn test_option_expected_wraps_literal_in_some() {
     let result = convert_expr(
         &swc_expr,
         &TypeRegistry::new(),
-        Some(&expected),
+        &ExprContext::with_expected(&expected),
         &TypeEnv::new(),
     )
     .unwrap();
@@ -3940,7 +4719,7 @@ fn test_option_expected_undefined_stays_none() {
     let result = convert_expr(
         &swc_expr,
         &TypeRegistry::new(),
-        Some(&expected),
+        &ExprContext::with_expected(&expected),
         &TypeEnv::new(),
     )
     .unwrap();
@@ -3971,7 +4750,13 @@ fn test_convert_lit_string_to_enum_variant_when_expected_is_string_literal_union
         type_args: vec![],
     };
     let swc_expr = parse_expr(r#""up";"#);
-    let result = convert_expr(&swc_expr, &reg, Some(&expected), &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &reg,
+        &ExprContext::with_expected(&expected),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(result, Expr::Ident("Direction::Up".to_string()));
 }
 
@@ -3995,7 +4780,13 @@ fn test_convert_lit_string_no_match_falls_back_to_string_lit() {
         type_args: vec![],
     };
     let swc_expr = parse_expr(r#""unknown";"#);
-    let result = convert_expr(&swc_expr, &reg, Some(&expected), &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &reg,
+        &ExprContext::with_expected(&expected),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(result, Expr::StringLit("unknown".to_string()));
 }
 
@@ -4025,7 +4816,7 @@ fn test_convert_bin_expr_enum_var_eq_string_literal_converts_rhs() {
     );
 
     let swc_expr = parse_expr(r#"d == "up";"#);
-    let result = convert_expr(&swc_expr, &reg, None, &type_env).unwrap();
+    let result = convert_expr(&swc_expr, &reg, &ExprContext::none(), &type_env).unwrap();
     assert_eq!(
         result,
         Expr::BinaryOp {
@@ -4061,7 +4852,7 @@ fn test_convert_bin_expr_string_literal_ne_enum_var_converts_lhs() {
     );
 
     let swc_expr = parse_expr(r#""up" != d;"#);
-    let result = convert_expr(&swc_expr, &reg, None, &type_env).unwrap();
+    let result = convert_expr(&swc_expr, &reg, &ExprContext::none(), &type_env).unwrap();
     assert_eq!(
         result,
         Expr::BinaryOp {
@@ -4103,7 +4894,7 @@ fn test_convert_call_args_string_literal_to_enum_variant() {
     );
 
     let swc_expr = parse_expr(r#"move_dir("up");"#);
-    let result = convert_expr(&swc_expr, &reg, None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(&swc_expr, &reg, &ExprContext::none(), &TypeEnv::new()).unwrap();
     assert_eq!(
         result,
         Expr::FnCall {
@@ -4145,7 +4936,13 @@ fn test_convert_object_lit_discriminated_union_to_enum_variant() {
         type_args: vec![],
     };
     let swc_expr = parse_var_init(r#"const s: Shape = { kind: "circle", radius: 5 };"#);
-    let result = convert_expr(&swc_expr, &reg, Some(&expected), &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &reg,
+        &ExprContext::with_expected(&expected),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::StructInit {
@@ -4178,7 +4975,13 @@ fn test_convert_object_lit_discriminated_union_unit_variant() {
         type_args: vec![],
     };
     let swc_expr = parse_var_init(r#"const s: Status = { type: "active" };"#);
-    let result = convert_expr(&swc_expr, &reg, Some(&expected), &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &reg,
+        &ExprContext::with_expected(&expected),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     // Unit variant: no fields → Ident
     assert_eq!(result, Expr::Ident("Status::Active".to_string()));
 }
@@ -4213,7 +5016,7 @@ fn test_convert_member_expr_discriminant_field_to_method_call() {
     );
 
     let swc_expr = parse_expr("s.kind;");
-    let result = convert_expr(&swc_expr, &reg, None, &type_env).unwrap();
+    let result = convert_expr(&swc_expr, &reg, &ExprContext::none(), &type_env).unwrap();
     assert_eq!(
         result,
         Expr::MethodCall {
@@ -4229,7 +5032,13 @@ fn test_convert_member_expr_discriminant_field_to_method_call() {
 #[test]
 fn test_convert_member_expr_array_index_literal_generates_index() {
     let swc_expr = parse_expr("arr[0];");
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::Index {
@@ -4242,7 +5051,13 @@ fn test_convert_member_expr_array_index_literal_generates_index() {
 #[test]
 fn test_convert_member_expr_array_index_variable_generates_index() {
     let swc_expr = parse_expr("arr[i];");
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::Index {
@@ -4263,7 +5078,13 @@ fn test_convert_member_expr_tuple_literal_index_generates_field_access() {
     );
 
     let swc_expr = parse_expr("pair[0];");
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &type_env).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &type_env,
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::FieldAccess {
@@ -4282,7 +5103,13 @@ fn test_convert_member_expr_tuple_second_index_generates_field_access() {
     );
 
     let swc_expr = parse_expr("pair[1];");
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &type_env).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &type_env,
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::FieldAccess {
@@ -4298,7 +5125,13 @@ fn test_convert_member_expr_non_tuple_index_unchanged() {
     type_env.insert("arr".to_string(), RustType::Vec(Box::new(RustType::F64)));
 
     let swc_expr = parse_expr("arr[0];");
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &type_env).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &type_env,
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::Index {
@@ -4332,7 +5165,13 @@ fn test_convert_nullish_coalescing_rhs_string_gets_to_string_when_lhs_is_option_
     );
 
     let swc_expr = parse_expr(r#"s ?? "default";"#);
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &type_env).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &type_env,
+    )
+    .unwrap();
 
     // Should be s.unwrap_or_else(|| "default".to_string())
     if let Expr::MethodCall { method, args, .. } = &result {
@@ -4382,7 +5221,7 @@ fn test_convert_method_call_string_arg_gets_to_string_with_registry() {
     );
 
     let swc_expr = parse_expr(r#"g.greet("world");"#);
-    let result = convert_expr(&swc_expr, &reg, None, &type_env).unwrap();
+    let result = convert_expr(&swc_expr, &reg, &ExprContext::none(), &type_env).unwrap();
 
     // Should have .to_string() on the string arg
     if let Expr::MethodCall { args, .. } = &result {
@@ -4441,7 +5280,7 @@ fn test_convert_du_standalone_field_access_generates_match_expr() {
 
     // s.radius → match expression
     let swc_expr = parse_var_init("const x = s.radius;");
-    let result = convert_expr(&swc_expr, &reg, None, &type_env).unwrap();
+    let result = convert_expr(&swc_expr, &reg, &ExprContext::none(), &type_env).unwrap();
 
     // Should be Expr::Match
     if let Expr::Match { expr, arms } = &result {
@@ -4493,7 +5332,7 @@ fn test_in_operator_struct_field_exists_generates_true() {
             type_args: vec![],
         },
     );
-    let result = convert_expr(&expr, &reg, None, &env).unwrap();
+    let result = convert_expr(&expr, &reg, &ExprContext::none(), &env).unwrap();
     assert_eq!(result, Expr::BoolLit(true));
 }
 
@@ -4521,7 +5360,7 @@ fn test_in_operator_struct_field_missing_generates_false() {
             type_args: vec![],
         },
     );
-    let result = convert_expr(&expr, &reg, None, &env).unwrap();
+    let result = convert_expr(&expr, &reg, &ExprContext::none(), &env).unwrap();
     assert_eq!(result, Expr::BoolLit(false));
 }
 
@@ -4530,7 +5369,7 @@ fn test_in_operator_unknown_type_generates_todo() {
     // "x" in unknown → todo!() (not silent true)
     let expr = parse_expr(r#""x" in unknown"#);
     let env = TypeEnv::new();
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &env).unwrap();
+    let result = convert_expr(&expr, &TypeRegistry::new(), &ExprContext::none(), &env).unwrap();
     match &result {
         Expr::FnCall { name, .. } => assert_eq!(name, "todo!"),
         other => panic!("expected todo!() for unknown in operator, got: {other:?}"),
@@ -4558,7 +5397,7 @@ fn test_convert_expr_arrow_object_destructuring_generates_expansion() {
         r
     };
     let swc_expr = parse_var_init("const f = ({ x, y }: Point) => x + y;");
-    let result = convert_expr(&swc_expr, &reg, None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(&swc_expr, &reg, &ExprContext::none(), &TypeEnv::new()).unwrap();
     match result {
         Expr::Closure { params, body, .. } => {
             // Should have a synthetic parameter named after the type
@@ -4594,7 +5433,12 @@ fn test_convert_expr_arrow_object_destructuring_generates_expansion() {
 fn test_convert_expr_arrow_array_destructuring_param_generates_tuple() {
     // ([k, v]: [string, number]) => ... → closure with (k, v) tuple param
     let swc_expr = parse_var_init("const f = ([k, v]: [string, number]) => k;");
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new());
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    );
     assert!(
         result.is_ok(),
         "array destructuring with type should not error: {:?}",
@@ -4612,7 +5456,12 @@ fn test_convert_expr_arrow_array_destructuring_param_generates_tuple() {
 fn test_convert_expr_arrow_array_destructuring_no_type_generates_param() {
     // ([a, b]) => ... → should not crash (fallback to untyped)
     let swc_expr = parse_var_init("const f = ([a, b]) => a;");
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new());
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    );
     assert!(
         result.is_ok(),
         "array destructuring without type should not error: {:?}",
@@ -4626,7 +5475,12 @@ fn test_convert_expr_arrow_array_destructuring_no_type_generates_param() {
 fn test_convert_expr_arrow_object_destructuring_no_type_generates_value_param() {
     // ({ x, y }) => ... → should not crash (fallback to serde_json::Value)
     let swc_expr = parse_var_init("const f = ({ x, y }) => x;");
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new());
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    );
     assert!(
         result.is_ok(),
         "object destructuring without type should not error: {:?}",
@@ -4638,7 +5492,13 @@ fn test_convert_expr_arrow_object_destructuring_no_type_generates_value_param() 
 fn test_convert_expr_arrow_default_param_generates_option() {
     // (x: number = 0) => x + 1 → closure with Option<f64> param + unwrap_or
     let swc_expr = parse_var_init("const f = (x: number = 0) => x + 1;");
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     match result {
         Expr::Closure { params, body, .. } => {
             assert_eq!(params.len(), 1);
@@ -4674,7 +5534,7 @@ fn test_convert_expr_postfix_increment_returns_old_value() {
     use crate::ir::Stmt as IrStmt;
     let expr = parse_expr("i++");
     let env = TypeEnv::new();
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &env).unwrap();
+    let result = convert_expr(&expr, &TypeRegistry::new(), &ExprContext::none(), &env).unwrap();
     match &result {
         Expr::Block(stmts) => {
             assert_eq!(stmts.len(), 3);
@@ -4691,7 +5551,7 @@ fn test_convert_expr_prefix_increment_returns_new_value() {
     use crate::ir::Stmt as IrStmt;
     let expr = parse_expr("++i");
     let env = TypeEnv::new();
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &env).unwrap();
+    let result = convert_expr(&expr, &TypeRegistry::new(), &ExprContext::none(), &env).unwrap();
     match &result {
         Expr::Block(stmts) => {
             assert_eq!(stmts.len(), 2);
@@ -4708,7 +5568,7 @@ fn test_convert_expr_postfix_decrement_returns_old_value() {
     use crate::ir::Stmt as IrStmt;
     let expr = parse_expr("i--");
     let env = TypeEnv::new();
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &env).unwrap();
+    let result = convert_expr(&expr, &TypeRegistry::new(), &ExprContext::none(), &env).unwrap();
     match &result {
         Expr::Block(stmts) => {
             assert_eq!(stmts.len(), 3);
@@ -4724,7 +5584,7 @@ fn test_convert_expr_prefix_decrement_returns_new_value() {
     use crate::ir::Stmt as IrStmt;
     let expr = parse_expr("--i");
     let env = TypeEnv::new();
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &env).unwrap();
+    let result = convert_expr(&expr, &TypeRegistry::new(), &ExprContext::none(), &env).unwrap();
     match &result {
         Expr::Block(stmts) => {
             assert_eq!(stmts.len(), 2);
@@ -4740,7 +5600,13 @@ fn test_convert_expr_prefix_decrement_returns_new_value() {
 fn test_convert_expr_fn_expr_anonymous_generates_closure() {
     // function(x: number): number { return x + 1; } → Closure
     let swc_expr = parse_var_init("const f = function(x: number): number { return x + 1; };");
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     match result {
         Expr::Closure {
             params,
@@ -4761,7 +5627,13 @@ fn test_convert_expr_fn_expr_anonymous_generates_closure() {
 fn test_convert_expr_fn_expr_named_generates_closure() {
     // function foo(x: number) { return x; } → Closure (name ignored)
     let swc_expr = parse_var_init("const f = function foo(x: number): number { return x; };");
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     match result {
         Expr::Closure { params, .. } => {
             assert_eq!(params.len(), 1);
@@ -4774,7 +5646,13 @@ fn test_convert_expr_fn_expr_named_generates_closure() {
 #[test]
 fn test_convert_expr_fn_expr_no_params_generates_closure() {
     let swc_expr = parse_var_init("const f = function(): void {};");
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     match result {
         Expr::Closure { params, .. } => {
             assert!(params.is_empty());
@@ -4789,7 +5667,13 @@ fn test_convert_expr_fn_expr_no_params_generates_closure() {
 fn test_convert_expr_regex_no_flags_generates_regex_new() {
     // /pattern/ → Expr::Regex { global: false, sticky: false }
     let expr = parse_var_init(r#"const r = /pattern/;"#);
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::Regex {
@@ -4804,7 +5688,13 @@ fn test_convert_expr_regex_no_flags_generates_regex_new() {
 fn test_convert_expr_regex_global_flag_preserved() {
     // /pattern/g → Expr::Regex { global: true }
     let expr = parse_var_init(r#"const r = /pattern/g;"#);
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::Regex {
@@ -4819,7 +5709,13 @@ fn test_convert_expr_regex_global_flag_preserved() {
 fn test_convert_expr_regex_case_insensitive_flag_inlined() {
     // /pattern/i → Expr::Regex with (?i) prefix
     let expr = parse_var_init(r#"const r = /pattern/i;"#);
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::Regex {
@@ -4834,7 +5730,13 @@ fn test_convert_expr_regex_case_insensitive_flag_inlined() {
 fn test_convert_expr_regex_multiple_flags_inlined() {
     // /pattern/gim → Expr::Regex with (?i)(?m) prefix and global: true
     let expr = parse_var_init(r#"const r = /pattern/gim;"#);
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::Regex {
@@ -4851,7 +5753,13 @@ fn test_convert_expr_regex_multiple_flags_inlined() {
 fn test_convert_expr_regex_no_flags_generates_regex_ir() {
     // /pattern/ → Expr::Regex { global: false, sticky: false }
     let expr = parse_var_init(r#"const r = /pattern/;"#);
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::Regex {
@@ -4866,7 +5774,13 @@ fn test_convert_expr_regex_no_flags_generates_regex_ir() {
 fn test_convert_expr_regex_global_flag_preserved_in_ir() {
     // /pattern/g → Expr::Regex { global: true, sticky: false }
     let expr = parse_var_init(r#"const r = /pattern/g;"#);
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::Regex {
@@ -4881,7 +5795,13 @@ fn test_convert_expr_regex_global_flag_preserved_in_ir() {
 fn test_convert_expr_regex_sticky_flag_preserved_in_ir() {
     // /pattern/y → Expr::Regex { global: false, sticky: true }
     let expr = parse_var_init(r#"const r = /pattern/y;"#);
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::Regex {
@@ -4896,7 +5816,13 @@ fn test_convert_expr_regex_sticky_flag_preserved_in_ir() {
 fn test_convert_expr_regex_multiple_flags_preserved_in_ir() {
     // /pattern/gims → Expr::Regex { global: true, sticky: false } with (?i)(?m)(?s) prefix
     let expr = parse_var_init(r#"const r = /pattern/gims;"#);
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::Regex {
@@ -4911,7 +5837,13 @@ fn test_convert_expr_regex_multiple_flags_preserved_in_ir() {
 fn test_convert_expr_replace_with_global_regex_generates_replace_all() {
     // s.replace(/p/g, "r") → Regex::new(r"p").unwrap().replace_all(&s, "r").to_string()
     let expr = parse_expr(r#"s.replace(/p/g, "r");"#);
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::MethodCall {
@@ -4937,7 +5869,13 @@ fn test_convert_expr_replace_with_global_regex_generates_replace_all() {
 fn test_convert_expr_replace_with_non_global_regex_generates_replace() {
     // s.replace(/p/, "r") → Regex::new(r"p").unwrap().replace(&s, "r").to_string()
     let expr = parse_expr(r#"s.replace(/p/, "r");"#);
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::MethodCall {
@@ -4965,7 +5903,13 @@ fn test_convert_expr_replace_with_non_global_regex_generates_replace() {
 fn test_convert_expr_regex_test_generates_is_match() {
     // /p/.test(s) → Regex::new(r"p").unwrap().is_match(&s)
     let expr = parse_expr(r#"/p/.test(s);"#);
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::MethodCall {
@@ -4984,7 +5928,13 @@ fn test_convert_expr_regex_test_generates_is_match() {
 fn test_convert_expr_string_match_regex_generates_find() {
     // s.match(/p/) → Regex::new(r"p").unwrap().find(&s)
     let expr = parse_expr(r#"s.match(/p/);"#);
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::MethodCall {
@@ -5003,7 +5953,13 @@ fn test_convert_expr_string_match_regex_generates_find() {
 fn test_convert_expr_string_match_global_regex_generates_find_iter() {
     // s.match(/p/g) → Regex::new(r"p").unwrap().find_iter(&s)
     let expr = parse_expr(r#"s.match(/p/g);"#);
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::MethodCall {
@@ -5022,7 +5978,13 @@ fn test_convert_expr_string_match_global_regex_generates_find_iter() {
 fn test_convert_expr_regex_exec_generates_captures() {
     // /p/.exec(s) → Regex::new(r"p").unwrap().captures(&s)
     let expr = parse_expr(r#"/p/.exec(s);"#);
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::MethodCall {
@@ -5043,7 +6005,13 @@ fn test_convert_expr_regex_exec_generates_captures() {
 fn test_convert_expr_non_null_assertion_strips_assertion() {
     // x! → x (non-null assertion is type-level only, stripped)
     let expr = parse_expr("x!;");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(result, Expr::Ident("x".to_string()));
 }
 
@@ -5052,7 +6020,13 @@ fn test_convert_expr_non_null_assertion_strips_assertion() {
 #[test]
 fn test_convert_expr_null_literal_generates_none() {
     let expr = parse_expr("null");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(result, Expr::Ident("None".to_string()));
 }
 
@@ -5064,7 +6038,7 @@ fn test_convert_expr_null_with_option_expected_returns_none_not_some_none() {
     let result = convert_expr(
         &expr,
         &TypeRegistry::new(),
-        Some(&expected),
+        &ExprContext::with_expected(&expected),
         &TypeEnv::new(),
     )
     .unwrap();
@@ -5086,7 +6060,7 @@ fn test_convert_expr_ident_with_option_expected_passes_through() {
     let result = convert_expr(
         &expr,
         &TypeRegistry::new(),
-        Some(&expected),
+        &ExprContext::with_expected(&expected),
         &TypeEnv::new(),
     )
     .unwrap();
@@ -5101,7 +6075,7 @@ fn test_convert_expr_undefined_with_option_expected_returns_none() {
     let result = convert_expr(
         &expr,
         &TypeRegistry::new(),
-        Some(&expected),
+        &ExprContext::with_expected(&expected),
         &TypeEnv::new(),
     )
     .unwrap();
@@ -5118,7 +6092,7 @@ fn test_convert_expr_array_with_tuple_expected_generates_tuple() {
     let result = convert_expr(
         &expr,
         &TypeRegistry::new(),
-        Some(&expected),
+        &ExprContext::with_expected(&expected),
         &TypeEnv::new(),
     )
     .unwrap();
@@ -5142,7 +6116,7 @@ fn test_convert_expr_nested_array_with_vec_tuple_expected() {
     let result = convert_expr(
         &expr,
         &TypeRegistry::new(),
-        Some(&expected),
+        &ExprContext::with_expected(&expected),
         &TypeEnv::new(),
     )
     .unwrap();
@@ -5162,7 +6136,13 @@ fn test_convert_expr_nested_array_with_vec_tuple_expected() {
 fn test_convert_expr_private_field_access_generates_field_access() {
     // this.#field → self._field
     let expr = parse_expr("this.#routes");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     match &result {
         Expr::FieldAccess { object, field } => {
             assert!(matches!(object.as_ref(), Expr::Ident(name) if name == "self"));
@@ -5177,7 +6157,13 @@ fn test_convert_expr_private_field_access_generates_field_access() {
 #[test]
 fn test_convert_expr_bitwise_xor() {
     let expr = parse_expr("a ^ b");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert!(matches!(
         result,
         Expr::BinaryOp {
@@ -5190,7 +6176,13 @@ fn test_convert_expr_bitwise_xor() {
 #[test]
 fn test_convert_expr_bitwise_and() {
     let expr = parse_expr("a & b");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert!(matches!(
         result,
         Expr::BinaryOp {
@@ -5203,7 +6195,13 @@ fn test_convert_expr_bitwise_and() {
 #[test]
 fn test_convert_expr_bitwise_or() {
     let expr = parse_expr("a | b");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert!(matches!(
         result,
         Expr::BinaryOp {
@@ -5216,14 +6214,26 @@ fn test_convert_expr_bitwise_or() {
 #[test]
 fn test_convert_expr_shift_left() {
     let expr = parse_expr("a << b");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert!(matches!(result, Expr::BinaryOp { op: BinOp::Shl, .. }));
 }
 
 #[test]
 fn test_convert_expr_shift_right() {
     let expr = parse_expr("a >> b");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert!(matches!(result, Expr::BinaryOp { op: BinOp::Shr, .. }));
 }
 
@@ -5232,7 +6242,13 @@ fn test_convert_expr_shift_right() {
 #[test]
 fn test_convert_expr_unsigned_right_shift_generates_ushr() {
     let expr = parse_expr("a >>> b");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert!(matches!(
         result,
         Expr::BinaryOp {
@@ -5247,7 +6263,8 @@ fn test_convert_expr_compound_assign_ushr_generates_desugar() {
     let expr = parse_expr("x >>>= 2");
     let mut type_env = TypeEnv::new();
     type_env.insert("x".to_string(), RustType::F64);
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &type_env).unwrap();
+    let result =
+        convert_expr(&expr, &TypeRegistry::new(), &ExprContext::none(), &type_env).unwrap();
     // Should be Assign { target: x, value: BinaryOp { op: UShr, ... } }
     if let Expr::Assign { value, .. } = &result {
         assert!(
@@ -5271,7 +6288,13 @@ fn test_convert_expr_compound_assign_ushr_generates_desugar() {
 fn test_convert_expr_arrow_rest_param_generates_vec() {
     // (...args: number[]) => args → rest param becomes Vec<f64>
     let swc_expr = parse_var_init("const f = (...args: number[]) => args;");
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     match result {
         Expr::Closure { params, .. } => {
             assert_eq!(params.len(), 1);
@@ -5291,7 +6314,13 @@ fn test_convert_expr_arrow_rest_param_generates_vec() {
 fn test_convert_expr_compound_assign_mod() {
     // x %= 3 → x = x % 3
     let expr = parse_expr("x %= 3");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::Assign {
@@ -5309,7 +6338,13 @@ fn test_convert_expr_compound_assign_mod() {
 fn test_convert_expr_compound_assign_bitand() {
     // x &= mask → x = x & mask
     let expr = parse_expr("x &= mask");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::Assign {
@@ -5329,7 +6364,13 @@ fn test_convert_expr_compound_assign_bitand() {
 fn test_convert_expr_compound_assign_add() {
     // x += 1 → x = x + 1
     let expr = parse_expr("x += 1");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::Assign {
@@ -5347,7 +6388,13 @@ fn test_convert_expr_compound_assign_add() {
 fn test_convert_expr_compound_assign_sub() {
     // x -= 1 → x = x - 1
     let expr = parse_expr("x -= 1");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::Assign {
@@ -5365,7 +6412,13 @@ fn test_convert_expr_compound_assign_sub() {
 fn test_convert_expr_compound_assign_mul() {
     // x *= 2 → x = x * 2
     let expr = parse_expr("x *= 2");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::Assign {
@@ -5383,7 +6436,13 @@ fn test_convert_expr_compound_assign_mul() {
 fn test_convert_expr_compound_assign_div() {
     // x /= 2 → x = x / 2
     let expr = parse_expr("x /= 2");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::Assign {
@@ -5401,7 +6460,13 @@ fn test_convert_expr_compound_assign_div() {
 fn test_convert_expr_compound_assign_bitor() {
     // x |= mask → x = x | mask
     let expr = parse_expr("x |= mask");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::Assign {
@@ -5419,7 +6484,13 @@ fn test_convert_expr_compound_assign_bitor() {
 fn test_convert_expr_compound_assign_bitxor() {
     // x ^= mask → x = x ^ mask
     let expr = parse_expr("x ^= mask");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::Assign {
@@ -5437,7 +6508,13 @@ fn test_convert_expr_compound_assign_bitxor() {
 fn test_convert_expr_compound_assign_shl() {
     // x <<= 2 → x = x << 2
     let expr = parse_expr("x <<= 2");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::Assign {
@@ -5455,7 +6532,13 @@ fn test_convert_expr_compound_assign_shl() {
 fn test_convert_expr_compound_assign_shr() {
     // x >>= 2 → x = x >> 2
     let expr = parse_expr("x >>= 2");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::Assign {
@@ -5490,7 +6573,7 @@ fn test_convert_expr_fn_expr_object_destructuring_param() {
         r
     };
     let swc_expr = parse_var_init("const f = function({ x, y }: Point) { return x; };");
-    let result = convert_expr(&swc_expr, &reg, None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(&swc_expr, &reg, &ExprContext::none(), &TypeEnv::new()).unwrap();
     match result {
         Expr::Closure { params, body, .. } => {
             assert_eq!(params.len(), 1);
@@ -5521,7 +6604,13 @@ fn test_convert_expr_fn_expr_object_destructuring_param() {
 fn test_convert_expr_fn_expr_default_param() {
     // const f = function(x: number = 0) { return x; }; → Closure with Option<f64> param
     let swc_expr = parse_var_init("const f = function(x: number = 0) { return x; };");
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     match result {
         Expr::Closure { params, body, .. } => {
             assert_eq!(params.len(), 1);
@@ -5554,7 +6643,12 @@ fn test_convert_expr_fn_expr_default_param() {
 fn test_convert_expr_update_non_ident_target_errors() {
     // arr[0]++ should error because the target is not an identifier
     let expr = parse_expr("arr[0]++");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new());
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    );
     assert!(result.is_err());
     let err_msg = result.unwrap_err().to_string();
     assert!(
@@ -5569,7 +6663,13 @@ fn test_convert_expr_update_non_ident_target_errors() {
 fn test_convert_expr_fn_expr_rest_param_generates_closure() {
     // const f = function(...args: number[]): void {};
     let swc_expr = parse_var_init("const f = function(...args: number[]): void {};");
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     match result {
         Expr::Closure { params, .. } => {
             assert_eq!(params.len(), 1);
@@ -5589,7 +6689,13 @@ fn test_convert_expr_fn_expr_rest_param_generates_closure() {
 fn test_convert_expr_arrow_rest_param_no_type() {
     // const f = (...args) => args; → rest param with no type annotation
     let swc_expr = parse_var_init("const f = (...args) => args;");
-    let result = convert_expr(&swc_expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     match result {
         Expr::Closure { params, .. } => {
             assert_eq!(params.len(), 1);
@@ -5609,7 +6715,13 @@ fn test_convert_expr_arrow_rest_param_no_type() {
 fn test_convert_call_expr_paren_ident_unwraps_to_fn_call() {
     // (foo)(1) → foo(1.0)
     let expr = parse_expr("(foo)(1);");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     match &result {
         Expr::FnCall { name, args } => {
             assert_eq!(name, "foo");
@@ -5623,7 +6735,13 @@ fn test_convert_call_expr_paren_ident_unwraps_to_fn_call() {
 fn test_convert_call_expr_paren_member_unwraps_to_method_call() {
     // (obj.method)() → obj.method()
     let expr = parse_expr("(obj.method)();");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     match &result {
         Expr::MethodCall { method, .. } => {
             assert_eq!(method, "method");
@@ -5636,7 +6754,12 @@ fn test_convert_call_expr_paren_member_unwraps_to_method_call() {
 fn test_convert_call_expr_chained_call_does_not_error() {
     // f(x)(y) — chained call should not error
     let expr = parse_expr("f(1)(2);");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new());
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    );
     assert!(
         result.is_ok(),
         "chained call should not error: {:?}",
@@ -5650,7 +6773,12 @@ fn test_convert_call_expr_chained_call_does_not_error() {
 fn test_convert_call_expr_arrow_iife_generates_closure_call() {
     // (() => 42)() — arrow IIFE should produce a closure call
     let expr = parse_expr("(() => 42)();");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new());
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    );
     assert!(
         result.is_ok(),
         "arrow IIFE should not error: {:?}",
@@ -5662,7 +6790,12 @@ fn test_convert_call_expr_arrow_iife_generates_closure_call() {
 fn test_convert_call_expr_arrow_iife_with_args_generates_closure_call() {
     // ((x: number) => x + 1)(5) — arrow IIFE with args
     let expr = parse_expr("((x: number): number => x + 1)(5);");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new());
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    );
     assert!(
         result.is_ok(),
         "arrow IIFE with args should not error: {:?}",
@@ -5676,7 +6809,13 @@ fn test_convert_call_expr_arrow_iife_with_args_generates_closure_call() {
 fn test_convert_instanceof_unknown_type_does_not_return_true() {
     // x instanceof Foo where x is unknown → should NOT return BoolLit(true)
     let expr = parse_expr("x instanceof Foo");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert!(
         !matches!(&result, Expr::BoolLit(true)),
         "instanceof with unknown type should not return static true, got: {result:?}"
@@ -5695,7 +6834,7 @@ fn test_convert_instanceof_known_matching_type_returns_true() {
             type_args: vec![],
         },
     );
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &env).unwrap();
+    let result = convert_expr(&expr, &TypeRegistry::new(), &ExprContext::none(), &env).unwrap();
     assert_eq!(result, Expr::BoolLit(true));
 }
 
@@ -5711,7 +6850,7 @@ fn test_convert_instanceof_option_type_returns_is_some() {
             type_args: vec![],
         })),
     );
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &env).unwrap();
+    let result = convert_expr(&expr, &TypeRegistry::new(), &ExprContext::none(), &env).unwrap();
     match &result {
         Expr::MethodCall { method, .. } => {
             assert_eq!(method, "is_some");
@@ -5726,7 +6865,13 @@ fn test_convert_instanceof_option_type_returns_is_some() {
 fn test_convert_typeof_static_number_returns_string_lit() {
     // typeof 42 → "number" (static, no change needed)
     let expr = parse_expr("typeof 42");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(result, Expr::StringLit("number".to_string()));
 }
 
@@ -5736,7 +6881,7 @@ fn test_convert_typeof_option_type_returns_runtime_if() {
     let expr = parse_expr("typeof x");
     let mut env = TypeEnv::new();
     env.insert("x".to_string(), RustType::Option(Box::new(RustType::F64)));
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &env).unwrap();
+    let result = convert_expr(&expr, &TypeRegistry::new(), &ExprContext::none(), &env).unwrap();
     // Should be an If expression, NOT a static StringLit("undefined")
     match &result {
         Expr::If { .. } => {} // runtime branch — correct
@@ -5751,7 +6896,13 @@ fn test_convert_typeof_option_type_returns_runtime_if() {
 fn test_convert_typeof_unknown_type_returns_object() {
     // typeof x where x: unknown → "object" (JS default, not "unknown")
     let expr = parse_expr("typeof x");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(result, Expr::StringLit("object".to_string()));
 }
 
@@ -5761,7 +6912,13 @@ fn test_convert_typeof_unknown_type_returns_object() {
 fn test_process_env_access_converts_to_env_var() {
     // process.env.HOME → std::env::var("HOME").unwrap()
     let expr = parse_expr("process.env.HOME;");
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::MethodCall {
@@ -5781,7 +6938,13 @@ fn test_process_env_access_converts_to_env_var() {
 fn test_fs_read_file_sync_converts_to_read_to_string() {
     // fs.readFileSync("a.txt", "utf8") → std::fs::read_to_string(&"a.txt").unwrap()
     let expr = parse_expr(r#"fs.readFileSync("a.txt", "utf8");"#);
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::MethodCall {
@@ -5799,7 +6962,13 @@ fn test_fs_read_file_sync_converts_to_read_to_string() {
 fn test_fs_write_file_sync_converts_to_fs_write() {
     // fs.writeFileSync("a.txt", data) → std::fs::write(&"a.txt", &data).unwrap()
     let expr = parse_expr(r#"fs.writeFileSync("a.txt", data);"#);
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::MethodCall {
@@ -5820,7 +6989,13 @@ fn test_fs_write_file_sync_converts_to_fs_write() {
 fn test_fs_exists_sync_converts_to_path_exists() {
     // fs.existsSync("a.txt") → std::path::Path::new("a.txt").exists()
     let expr = parse_expr(r#"fs.existsSync("a.txt");"#);
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::MethodCall {
@@ -5838,7 +7013,13 @@ fn test_fs_exists_sync_converts_to_path_exists() {
 fn test_fs_read_file_sync_stdin_converts_to_stdin_read() {
     // fs.readFileSync("/dev/stdin", "utf8") → std::io::read_to_string(std::io::stdin()).unwrap()
     let expr = parse_expr(r#"fs.readFileSync("/dev/stdin", "utf8");"#);
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::MethodCall {
@@ -5859,7 +7040,13 @@ fn test_fs_read_file_sync_stdin_converts_to_stdin_read() {
 fn test_fs_read_file_sync_fd0_converts_to_stdin_read() {
     // fs.readFileSync(0, "utf8") → same as /dev/stdin
     let expr = parse_expr(r#"fs.readFileSync(0, "utf8");"#);
-    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        &expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::MethodCall {
@@ -5889,7 +7076,13 @@ fn test_convert_object_lit_all_computed_keys_generates_hashmap() {
         _ => panic!("expected var decl"),
     };
     let init = stmt.init.as_ref().unwrap();
-    let result = convert_expr(init, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    let result = convert_expr(
+        init,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         Expr::FnCall {
@@ -5904,4 +7097,146 @@ fn test_convert_object_lit_all_computed_keys_generates_hashmap() {
             }],
         }
     );
+}
+
+// --- ExprContext type propagation (Category B improvements) ---
+
+/// Step 5: Assignment RHS should propagate type from TypeEnv.
+/// `x = { name: "test" }` where x: Config → `Config { name: "test".to_string() }`
+#[test]
+fn test_convert_assign_expr_propagates_type_from_type_env() {
+    let mut reg = TypeRegistry::new();
+    reg.register(
+        "Config".to_string(),
+        TypeDef::new_struct(
+            vec![("name".to_string(), RustType::String)],
+            std::collections::HashMap::new(),
+            vec![],
+        ),
+    );
+
+    let mut type_env = TypeEnv::new();
+    type_env.insert(
+        "x".to_string(),
+        RustType::Named {
+            name: "Config".to_string(),
+            type_args: vec![],
+        },
+    );
+
+    let swc_expr = parse_expr(r#"x = { name: "test" };"#);
+    let result = convert_expr(&swc_expr, &reg, &ExprContext::none(), &type_env).unwrap();
+
+    // Expected: x = Config { name: "test".to_string() }
+    match &result {
+        Expr::Assign { value, .. } => match value.as_ref() {
+            Expr::StructInit { name, fields, .. } => {
+                assert_eq!(name, "Config");
+                assert_eq!(fields[0].0, "name");
+                assert!(
+                    matches!(&fields[0].1, Expr::MethodCall { method, .. } if method == "to_string"),
+                    "expected .to_string() on string field, got {:?}",
+                    fields[0].1
+                );
+            }
+            other => panic!("expected StructInit, got {other:?}"),
+        },
+        other => panic!("expected Assign, got {other:?}"),
+    }
+}
+
+/// Step 8: HashMap value should propagate expected value type.
+/// `{ [key]: "value" }` with expected `HashMap<String, String>` → values get `.to_string()`
+#[test]
+fn test_convert_hashmap_propagates_value_type() {
+    let swc_expr = parse_var_init(r#"const m = { [key]: "val" };"#);
+    let expected = RustType::Named {
+        name: "HashMap".to_string(),
+        type_args: vec![RustType::String, RustType::String],
+    };
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::with_expected(&expected),
+        &TypeEnv::new(),
+    )
+    .unwrap();
+
+    // Expected: HashMap::from(vec![(key, "val".to_string())])
+    match &result {
+        Expr::FnCall { name, args } => {
+            assert_eq!(name, "HashMap::from");
+            match &args[0] {
+                Expr::Vec { elements } => match &elements[0] {
+                    Expr::Tuple { elements } => {
+                        assert!(
+                            matches!(&elements[1], Expr::MethodCall { method, .. } if method == "to_string"),
+                            "expected .to_string() on HashMap value, got {:?}",
+                            elements[1]
+                        );
+                    }
+                    other => panic!("expected Tuple, got {other:?}"),
+                },
+                other => panic!("expected Vec, got {other:?}"),
+            }
+        }
+        other => panic!("expected FnCall(HashMap::from), got {other:?}"),
+    }
+}
+
+/// Step 9: Optional chaining method args should propagate parameter types.
+/// `obj?.greet("hello")` where obj: Option<Greeter> and greet takes String → "hello".to_string()
+#[test]
+fn test_convert_opt_chain_method_call_propagates_param_types() {
+    use crate::registry::TypeDef;
+
+    let mut reg = TypeRegistry::new();
+    let mut methods = std::collections::HashMap::new();
+    methods.insert(
+        "greet".to_string(),
+        vec![("name".to_string(), RustType::String)],
+    );
+    reg.register(
+        "Greeter".to_string(),
+        TypeDef::new_struct(vec![], methods, vec![]),
+    );
+
+    let mut type_env = TypeEnv::new();
+    type_env.insert(
+        "obj".to_string(),
+        RustType::Option(Box::new(RustType::Named {
+            name: "Greeter".to_string(),
+            type_args: vec![],
+        })),
+    );
+
+    let swc_expr = parse_expr(r#"obj?.greet("hello");"#);
+    let result = convert_expr(&swc_expr, &reg, &ExprContext::none(), &type_env).unwrap();
+
+    // Expected: obj.as_ref().map(|_v| _v.greet("hello".to_string()))
+    // The "hello" arg should have .to_string() because greet's param type is String
+    match &result {
+        Expr::MethodCall { method, args, .. } if method == "map" => {
+            // The closure body should contain a method call with to_string on the arg
+            match &args[0] {
+                Expr::Closure { body, .. } => match body {
+                    ClosureBody::Expr(expr) => match expr.as_ref() {
+                        Expr::MethodCall {
+                            args: inner_args, ..
+                        } => {
+                            assert!(
+                                matches!(&inner_args[0], Expr::MethodCall { method, .. } if method == "to_string"),
+                                "expected .to_string() on string arg, got {:?}",
+                                inner_args[0]
+                            );
+                        }
+                        other => panic!("expected MethodCall inside closure, got {other:?}"),
+                    },
+                    _ => panic!("expected ClosureBody::Expr"),
+                },
+                other => panic!("expected Closure, got {other:?}"),
+            }
+        }
+        other => panic!("expected MethodCall(map), got {other:?}"),
+    }
 }

@@ -13,6 +13,7 @@ use super::convert_fn_expr;
 use super::literals::needs_debug_format;
 use super::methods::map_method_call;
 use super::type_resolution::resolve_expr_type;
+use super::ExprContext;
 
 /// Converts a function/method call expression.
 ///
@@ -110,7 +111,8 @@ pub(super) fn convert_call_expr(
                     }
                 }
 
-                let object = convert_expr(&member.obj, reg, None, type_env)?;
+                // Cat A: method receiver — converted before method resolution
+                let object = convert_expr(&member.obj, reg, &ExprContext::none(), type_env)?;
                 // Look up method parameter types from the object's type
                 let method_params = resolve_expr_type(&member.obj, type_env, reg).and_then(|ty| {
                     if let RustType::Named { name, .. } = &ty {
@@ -322,7 +324,8 @@ pub(super) fn convert_fs_call(
             if args.is_empty() {
                 return Err(anyhow!("fs.readFileSync requires at least 1 argument"));
             }
-            let path_arg = convert_expr(&args[0].expr, reg, None, type_env)?;
+            // Cat A: built-in fs API path arg
+            let path_arg = convert_expr(&args[0].expr, reg, &ExprContext::none(), type_env)?;
 
             // Special case: fs.readFileSync("/dev/stdin", ...) or fs.readFileSync(0, ...)
             let is_stdin = matches!(&path_arg, Expr::StringLit(s) if s == "/dev/stdin")
@@ -358,8 +361,9 @@ pub(super) fn convert_fs_call(
             if args.len() < 2 {
                 return Err(anyhow!("fs.writeFileSync requires at least 2 arguments"));
             }
-            let path_arg = convert_expr(&args[0].expr, reg, None, type_env)?;
-            let data_arg = convert_expr(&args[1].expr, reg, None, type_env)?;
+            // Cat A: built-in fs API path/data args
+            let path_arg = convert_expr(&args[0].expr, reg, &ExprContext::none(), type_env)?;
+            let data_arg = convert_expr(&args[1].expr, reg, &ExprContext::none(), type_env)?;
             // fs.writeFileSync(path, data) → std::fs::write(&path, &data).unwrap()
             Ok(Expr::MethodCall {
                 object: Box::new(Expr::FnCall {
@@ -374,7 +378,8 @@ pub(super) fn convert_fs_call(
             if args.is_empty() {
                 return Err(anyhow!("fs.existsSync requires 1 argument"));
             }
-            let path_arg = convert_expr(&args[0].expr, reg, None, type_env)?;
+            // Cat A: built-in fs API path arg
+            let path_arg = convert_expr(&args[0].expr, reg, &ExprContext::none(), type_env)?;
             // fs.existsSync(path) → std::path::Path::new(&path).exists()
             Ok(Expr::MethodCall {
                 object: Box::new(Expr::FnCall {
@@ -548,7 +553,12 @@ pub(super) fn convert_call_args_with_types(
                 Some(RustType::Option(inner)) => Some(inner.as_ref()),
                 other => other,
             };
-            let mut expr = convert_expr(&arg.expr, reg, expected, type_env)?;
+            let arg_ctx = match expected {
+                Some(ty) => ExprContext::with_expected(ty),
+                // Cat C: param type propagated when available
+                None => ExprContext::none(),
+            };
+            let mut expr = convert_expr(&arg.expr, reg, &arg_ctx, type_env)?;
             // Wrap in Some(...) when the parameter type is Option<T>,
             // but skip if the value is already None (from undefined)
             if let Some(RustType::Option(_)) = param_ty {
@@ -575,8 +585,8 @@ pub(super) fn convert_call_args_with_types(
         // Pack remaining arguments into a vec![]
         let rest_args = &args[regular_args_count..];
         if rest_args.len() == 1 && rest_args[0].spread.is_some() {
-            // Single spread: foo(...arr) → foo(arr)
-            let expr = convert_expr(&rest_args[0].expr, reg, None, type_env)?;
+            // Cat A: single spread source — type is the array itself
+            let expr = convert_expr(&rest_args[0].expr, reg, &ExprContext::none(), type_env)?;
             result.push(expr);
         } else if rest_args.iter().any(|a| a.spread.is_some()) {
             // Mixed literals and spread: foo(1, ...arr) → foo([vec![1.0], arr].concat())
@@ -591,11 +601,16 @@ pub(super) fn convert_call_args_with_types(
                             elements: std::mem::take(&mut literal_buf),
                         });
                     }
-                    // Add spread array directly
-                    let expr = convert_expr(&arg.expr, reg, None, type_env)?;
+                    // Cat A: spread source — type is the array itself
+                    let expr = convert_expr(&arg.expr, reg, &ExprContext::none(), type_env)?;
                     parts.push(expr);
                 } else {
-                    let expr = convert_expr(&arg.expr, reg, rest_element_type, type_env)?;
+                    let rest_ctx = match rest_element_type {
+                        Some(ty) => ExprContext::with_expected(ty),
+                        // Cat C: rest element type propagated when available
+                        None => ExprContext::none(),
+                    };
+                    let expr = convert_expr(&arg.expr, reg, &rest_ctx, type_env)?;
                     literal_buf.push(expr);
                 }
             }
@@ -616,7 +631,14 @@ pub(super) fn convert_call_args_with_types(
             // All literal args: foo(1, 2, 3) → foo(vec![1.0, 2.0, 3.0])
             let rest_exprs: Vec<Expr> = rest_args
                 .iter()
-                .map(|arg| convert_expr(&arg.expr, reg, rest_element_type, type_env))
+                .map(|arg| {
+                    let rest_ctx = match rest_element_type {
+                        Some(ty) => ExprContext::with_expected(ty),
+                        // Cat C: rest element type propagated when available
+                        None => ExprContext::none(),
+                    };
+                    convert_expr(&arg.expr, reg, &rest_ctx, type_env)
+                })
                 .collect::<Result<Vec<_>>>()?;
             result.push(Expr::Vec {
                 elements: rest_exprs,

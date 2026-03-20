@@ -7,8 +7,8 @@ use crate::ir::{BinOp, ClosureBody, Expr, Stmt};
 use crate::registry::TypeRegistry;
 use crate::transformer::TypeEnv;
 
-use super::convert_expr;
 use super::member_access::convert_member_expr;
+use super::{convert_expr, ExprContext};
 
 /// Converts an assignment expression (`target = value`) to `Expr::Assign`.
 pub(super) fn convert_assign_expr(
@@ -16,6 +16,13 @@ pub(super) fn convert_assign_expr(
     reg: &TypeRegistry,
     type_env: &TypeEnv,
 ) -> Result<Expr> {
+    // Extract target variable name for type lookup before converting target expr
+    let target_var_name = match &assign.left {
+        ast::AssignTarget::Simple(ast::SimpleAssignTarget::Ident(ident)) => {
+            Some(ident.id.sym.to_string())
+        }
+        _ => None,
+    };
     let target = match &assign.left {
         ast::AssignTarget::Simple(simple) => match simple {
             ast::SimpleAssignTarget::Member(member) => convert_member_expr(member, reg, type_env)?,
@@ -24,7 +31,15 @@ pub(super) fn convert_assign_expr(
         },
         _ => return Err(anyhow!("unsupported assignment target pattern")),
     };
-    let right = convert_expr(&assign.right, reg, None, type_env)?;
+    // Propagate target variable's type from TypeEnv to RHS (Category B)
+    let rhs_ctx = match &target_var_name {
+        Some(name) => match type_env.get(name) {
+            Some(ty) => ExprContext::with_expected(ty),
+            None => ExprContext::none(),
+        },
+        None => ExprContext::none(),
+    };
+    let right = convert_expr(&assign.right, reg, &rhs_ctx, type_env)?;
 
     // ??= (nullish coalescing assignment): x ??= y → x.get_or_insert_with(|| y)
     if assign.op == ast::AssignOp::NullishAssign {

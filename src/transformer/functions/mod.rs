@@ -10,7 +10,7 @@ use crate::registry::TypeRegistry;
 use crate::transformer::statements::convert_stmt_list;
 use crate::transformer::types::{convert_property_signature, convert_ts_type, extract_type_params};
 use crate::transformer::{
-    extract_pat_ident_name, extract_prop_name, wrap_trait_for_param, wrap_trait_for_value, TypeEnv,
+    extract_pat_ident_name, extract_prop_name, wrap_trait_for_position, TypeEnv, TypePosition,
 };
 
 /// Converts an SWC [`ast::FnDecl`] into an IR [`Item::Fn`].
@@ -83,7 +83,7 @@ pub fn convert_fn_decl(
     };
 
     // Trait types in return position → Box<dyn Trait>
-    let return_type = return_type.map(|ty| wrap_trait_for_value(ty, reg));
+    let return_type = return_type.map(|ty| wrap_trait_for_position(ty, TypePosition::Value, reg));
 
     let mut fn_type_env = TypeEnv::new();
     for p in &params {
@@ -261,7 +261,7 @@ fn convert_param(
                 reg,
             )?;
             // Trait types in parameter position → &dyn Trait
-            let rust_type = wrap_trait_for_param(rust_type, reg);
+            let rust_type = wrap_trait_for_position(rust_type, TypePosition::Param, reg);
             Ok((
                 Param {
                     name: param_name,
@@ -425,10 +425,11 @@ pub(crate) fn convert_default_value(expr: &ast::Expr) -> Result<(Option<Expr>, b
         // General expression: use unwrap_or_else(|| expr) for any expression
         // that can be converted (e.g., console.log, function calls, member access)
         other => {
+            // Cat B: parameter type annotation available
             let expr = crate::transformer::expressions::convert_expr(
                 other,
                 &TypeRegistry::new(),
-                None,
+                &crate::transformer::expressions::ExprContext::none(),
                 &crate::transformer::TypeEnv::new(),
             )?;
             Ok((Some(expr), false))
@@ -479,10 +480,11 @@ pub(crate) fn convert_object_destructuring_param(
                     field: field_name.clone(),
                 };
                 let init_expr = if let Some(default_expr) = &assign.value {
+                    // Cat B: field type could be looked up from struct definition
                     let default_ir = crate::transformer::expressions::convert_expr(
                         default_expr,
                         reg,
-                        None,
+                        &crate::transformer::expressions::ExprContext::none(),
                         &crate::transformer::TypeEnv::new(),
                     )?;
                     match &default_ir {
@@ -610,10 +612,11 @@ fn expand_fn_param_object_props(
                     field: field_name.clone(),
                 };
                 let init_expr = if let Some(default_expr) = &assign.value {
+                    // Cat B: field type could be looked up from struct definition
                     let default_ir = crate::transformer::expressions::convert_expr(
                         default_expr,
                         reg,
-                        None,
+                        &crate::transformer::expressions::ExprContext::none(),
                         &crate::transformer::TypeEnv::new(),
                     )?;
                     match &default_ir {

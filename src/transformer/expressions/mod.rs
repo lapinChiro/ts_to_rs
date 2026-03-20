@@ -35,6 +35,27 @@ use member_access::{convert_member_expr, convert_opt_chain_expr};
 use type_resolution::convert_ts_as_expr;
 pub use type_resolution::resolve_expr_type;
 
+/// Expression conversion context. Holds a type hint from the enclosing scope.
+#[derive(Debug, Clone)]
+pub struct ExprContext<'a> {
+    /// Expected type from outer context (variable annotation, function parameter, etc.)
+    pub expected: Option<&'a RustType>,
+}
+
+impl<'a> ExprContext<'a> {
+    /// No type information available.
+    pub fn none() -> Self {
+        Self { expected: None }
+    }
+
+    /// With an expected type.
+    pub fn with_expected(expected: &'a RustType) -> Self {
+        Self {
+            expected: Some(expected),
+        }
+    }
+}
+
 /// Converts an SWC [`ast::Expr`] into an IR [`Expr`], with an optional expected type.
 ///
 /// The `expected` type is used for:
@@ -48,9 +69,10 @@ pub use type_resolution::resolve_expr_type;
 pub fn convert_expr(
     expr: &ast::Expr,
     reg: &TypeRegistry,
-    expected: Option<&RustType>,
+    ctx: &ExprContext,
     type_env: &TypeEnv,
 ) -> Result<Expr> {
+    let expected = ctx.expected;
     // Option<T> expected: handle null/undefined → None, literals → Some(lit)
     if let Some(RustType::Option(inner)) = expected {
         // null / undefined → None
@@ -61,7 +83,8 @@ pub fn convert_expr(
         }
         // Wrap non-null literals in Some() (needed for array elements like vec![Some(1.0), None])
         if matches!(expr, ast::Expr::Lit(_)) {
-            let inner_result = convert_expr(expr, reg, Some(inner), type_env)?;
+            let inner_result =
+                convert_expr(expr, reg, &ExprContext::with_expected(inner), type_env)?;
             return Ok(Expr::FnCall {
                 name: "Some".to_string(),
                 args: vec![inner_result],
@@ -82,7 +105,7 @@ pub fn convert_expr(
         ast::Expr::Lit(lit) => convert_lit(lit, expected, reg),
         ast::Expr::Bin(bin) => convert_bin_expr(bin, reg, expected, type_env),
         ast::Expr::Tpl(tpl) => convert_template_literal(tpl, reg, type_env),
-        ast::Expr::Paren(paren) => convert_expr(&paren.expr, reg, expected, type_env),
+        ast::Expr::Paren(paren) => convert_expr(&paren.expr, reg, ctx, type_env),
         ast::Expr::Member(member) => convert_member_expr(member, reg, type_env),
         ast::Expr::This(_) => Ok(Expr::Ident("self".to_string())),
         ast::Expr::Assign(assign) => convert_assign_expr(assign, reg, type_env),
@@ -98,13 +121,12 @@ pub fn convert_expr(
         ast::Expr::TsAs(ts_as) => convert_ts_as_expr(ts_as, reg, expected, type_env),
         ast::Expr::OptChain(opt_chain) => convert_opt_chain_expr(opt_chain, reg, type_env),
         ast::Expr::Await(await_expr) => {
-            let inner = convert_expr(&await_expr.arg, reg, None, type_env)?;
+            // Cat A: await inner type depends on Promise resolution
+            let inner = convert_expr(&await_expr.arg, reg, &ExprContext::none(), type_env)?;
             Ok(Expr::Await(Box::new(inner)))
         }
         // Non-null assertion (expr!) — TS type-level only, no runtime effect. Strip assertion.
-        ast::Expr::TsNonNull(ts_non_null) => {
-            convert_expr(&ts_non_null.expr, reg, expected, type_env)
-        }
+        ast::Expr::TsNonNull(ts_non_null) => convert_expr(&ts_non_null.expr, reg, ctx, type_env),
         _ => Err(anyhow!("unsupported expression: {:?}", expr)),
     }
 }
@@ -125,7 +147,8 @@ fn convert_template_literal(
         template.push_str(&quasi.raw);
         if i < tpl.exprs.len() {
             template.push_str("{}");
-            let arg = convert_expr(&tpl.exprs[i], reg, None, type_env)?;
+            // Cat A: template interpolation — format!() accepts any Display type
+            let arg = convert_expr(&tpl.exprs[i], reg, &ExprContext::none(), type_env)?;
             args.push(arg);
         }
     }
@@ -142,9 +165,11 @@ fn convert_cond_expr(
     expected: Option<&RustType>,
     type_env: &TypeEnv,
 ) -> Result<Expr> {
-    let condition = convert_expr(&cond.test, reg, None, type_env)?;
-    let then_expr = convert_expr(&cond.cons, reg, expected, type_env)?;
-    let else_expr = convert_expr(&cond.alt, reg, expected, type_env)?;
+    let ctx = &ExprContext { expected };
+    // Cat A: ternary condition is always boolean
+    let condition = convert_expr(&cond.test, reg, &ExprContext::none(), type_env)?;
+    let then_expr = convert_expr(&cond.cons, reg, ctx, type_env)?;
+    let else_expr = convert_expr(&cond.alt, reg, ctx, type_env)?;
     Ok(Expr::If {
         condition: Box::new(condition),
         then_expr: Box::new(then_expr),

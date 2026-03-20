@@ -9,7 +9,7 @@ use swc_ecma_ast as ast;
 
 use crate::ir::{AssocConst, Expr, Item, Method, Param, RustType, Stmt, StructField, Visibility};
 use crate::registry::TypeRegistry;
-use crate::transformer::expressions::convert_expr;
+use crate::transformer::expressions::{convert_expr, ExprContext};
 use crate::transformer::extract_prop_name;
 use crate::transformer::functions::convert_last_return_to_tail;
 use crate::transformer::statements::convert_stmt;
@@ -568,12 +568,7 @@ fn convert_static_prop(
     let ty = convert_ts_type(&type_ann.type_ann, &mut Vec::new(), reg)?;
 
     let value = match &prop.value {
-        Some(init) => convert_expr(
-            init,
-            &crate::registry::TypeRegistry::new(),
-            None,
-            &TypeEnv::new(),
-        )?,
+        Some(init) => convert_expr(init, reg, &ExprContext::with_expected(&ty), &TypeEnv::new())?,
         None => return Ok(None), // No initializer — skip
     };
 
@@ -781,7 +776,8 @@ fn convert_constructor_body(
 
     for stmt in stmts {
         if let Some((field_name, value_expr)) = try_extract_this_assignment(stmt) {
-            let value = convert_expr(value_expr, reg, None, &type_env)?;
+            // Cat B: field type could be looked up from class definition
+            let value = convert_expr(value_expr, reg, &ExprContext::none(), &type_env)?;
             fields.push((field_name, value));
         } else {
             other_stmts.extend(convert_stmt(stmt, reg, None, &mut type_env)?);
@@ -1739,6 +1735,53 @@ mod tests {
                 );
             }
             _ => panic!("expected Item::Impl"),
+        }
+    }
+
+    // --- ExprContext type propagation ---
+
+    /// Step 7: Static property initializer should propagate type annotation.
+    /// `static config: Config = { name: "default" }` should produce StructInit, not error.
+    #[test]
+    fn test_convert_static_prop_propagates_type_annotation() {
+        let mut reg = TypeRegistry::new();
+        reg.register(
+            "Config".to_string(),
+            crate::registry::TypeDef::new_struct(
+                vec![("name".to_string(), RustType::String)],
+                std::collections::HashMap::new(),
+                vec![],
+            ),
+        );
+
+        let decl =
+            parse_class_decl(r#"class Foo { static config: Config = { name: "default" }; }"#);
+        let items = convert_class_decl(&decl, Visibility::Private, &reg).unwrap();
+
+        // Find the Impl item with static consts
+        let impl_item = items
+            .iter()
+            .find(|item| matches!(item, Item::Impl { .. }))
+            .expect("expected Item::Impl");
+
+        match impl_item {
+            Item::Impl { consts, .. } => {
+                assert_eq!(consts.len(), 1);
+                assert_eq!(consts[0].name, "config");
+                match &consts[0].value {
+                    Expr::StructInit { name, fields, .. } => {
+                        assert_eq!(name, "Config");
+                        assert_eq!(fields[0].0, "name");
+                        assert!(
+                            matches!(&fields[0].1, Expr::MethodCall { method, .. } if method == "to_string"),
+                            "expected .to_string() on string field, got {:?}",
+                            fields[0].1
+                        );
+                    }
+                    other => panic!("expected StructInit, got {other:?}"),
+                }
+            }
+            _ => unreachable!(),
         }
     }
 }

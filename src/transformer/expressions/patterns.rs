@@ -35,7 +35,9 @@ pub(super) fn try_convert_undefined_comparison(
         None
     }?;
 
-    let other_ir = super::convert_expr(other_expr, reg, None, type_env).ok()?;
+    // Cat A: comparison operand
+    let other_ir =
+        super::convert_expr(other_expr, reg, &super::ExprContext::none(), type_env).ok()?;
     let method = if is_eq { "is_none" } else { "is_some" };
     Some(Expr::MethodCall {
         object: Box::new(other_ir),
@@ -64,7 +66,10 @@ pub(super) fn try_convert_enum_string_comparison(
     if let Some(str_value) = extract_string_lit(&bin.right) {
         if let Some(enum_name) = resolve_enum_type_name(&bin.left, type_env, reg) {
             if let Some(variant) = lookup_string_enum_variant(reg, &enum_name, &str_value) {
-                let left = super::convert_expr(&bin.left, reg, None, type_env).ok()?;
+                // Cat A: comparison operand
+                let left =
+                    super::convert_expr(&bin.left, reg, &super::ExprContext::none(), type_env)
+                        .ok()?;
                 return Some(Expr::BinaryOp {
                     left: Box::new(left),
                     op,
@@ -78,7 +83,10 @@ pub(super) fn try_convert_enum_string_comparison(
     if let Some(str_value) = extract_string_lit(&bin.left) {
         if let Some(enum_name) = resolve_enum_type_name(&bin.right, type_env, reg) {
             if let Some(variant) = lookup_string_enum_variant(reg, &enum_name, &str_value) {
-                let right = super::convert_expr(&bin.right, reg, None, type_env).ok()?;
+                // Cat A: comparison operand
+                let right =
+                    super::convert_expr(&bin.right, reg, &super::ExprContext::none(), type_env)
+                        .ok()?;
                 return Some(Expr::BinaryOp {
                     left: Box::new(Expr::Ident(format!("{enum_name}::{variant}"))),
                     op,
@@ -150,7 +158,10 @@ pub(super) fn try_convert_typeof_comparison(
         TypeofMatch::True => Expr::BoolLit(!is_neq),
         TypeofMatch::False => Expr::BoolLit(is_neq),
         TypeofMatch::IsNone => {
-            let operand_ir = super::convert_expr(typeof_operand, reg, None, type_env).ok()?;
+            // Cat A: typeof operand
+            let operand_ir =
+                super::convert_expr(typeof_operand, reg, &super::ExprContext::none(), type_env)
+                    .ok()?;
             let method = if is_neq { "is_some" } else { "is_none" };
             Expr::MethodCall {
                 object: Box::new(operand_ir),

@@ -2327,3 +2327,63 @@ fn test_convert_var_decl_trait_type_generates_box_dyn() {
         other => panic!("expected Let, got {:?}", other),
     }
 }
+
+// --- ExprContext type propagation (Category B improvements) ---
+
+/// Step 6: Switch case values should propagate discriminant type for string enum matching.
+/// `switch(dir) { case "up": ... }` where dir: Direction → case becomes `Direction::Up`
+#[test]
+fn test_convert_switch_case_propagates_discriminant_type_for_string_enum() {
+    let mut reg = TypeRegistry::new();
+    reg.register(
+        "Direction".to_string(),
+        TypeDef::Enum {
+            variants: vec!["Up".to_string(), "Down".to_string()],
+            string_values: HashMap::from([
+                ("up".to_string(), "Up".to_string()),
+                ("down".to_string(), "Down".to_string()),
+            ]),
+            tag_field: None,
+            variant_fields: HashMap::new(),
+        },
+    );
+
+    let mut type_env = TypeEnv::new();
+    type_env.insert(
+        "dir".to_string(),
+        RustType::Named {
+            name: "Direction".to_string(),
+            type_args: vec![],
+        },
+    );
+
+    let stmts = parse_fn_body(
+        r#"function f(dir: Direction) { switch(dir) { case "up": doA(); break; case "down": doB(); break; } }"#,
+    );
+    let result = convert_stmt_list(&stmts, &reg, None, &mut type_env).unwrap();
+    assert_eq!(result.len(), 1, "expected 1 stmt, got {result:?}");
+    match &result[0] {
+        Stmt::Match { arms, .. } => {
+            assert_eq!(arms.len(), 2);
+            // Case "up" should become Direction::Up
+            assert!(
+                arms[0].patterns.iter().any(|p| matches!(
+                    p,
+                    MatchPattern::Literal(Expr::Ident(s)) if s == "Direction::Up"
+                )),
+                "expected Direction::Up pattern, got {:?}",
+                arms[0].patterns
+            );
+            // Case "down" should become Direction::Down
+            assert!(
+                arms[1].patterns.iter().any(|p| matches!(
+                    p,
+                    MatchPattern::Literal(Expr::Ident(s)) if s == "Direction::Down"
+                )),
+                "expected Direction::Down pattern, got {:?}",
+                arms[1].patterns
+            );
+        }
+        other => panic!("expected Match, got {other:?}"),
+    }
+}

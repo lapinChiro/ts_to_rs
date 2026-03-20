@@ -13,7 +13,7 @@ use crate::transformer::statements::convert_stmt;
 use crate::transformer::types::convert_ts_type;
 use crate::transformer::TypeEnv;
 
-use super::convert_expr;
+use super::{convert_expr, ExprContext};
 
 /// Converts a single parameter pattern into IR [`Param`] and expansion statements.
 ///
@@ -292,7 +292,12 @@ pub(crate) fn convert_arrow_expr_with_return_type(
     let body = if expansion_stmts.is_empty() {
         match arrow.body.as_ref() {
             ast::BlockStmtOrExpr::Expr(expr) => {
-                let ir_expr = convert_expr(expr, reg, return_type.as_ref(), type_env)?;
+                let ret_ctx = match return_type.as_ref() {
+                    Some(ty) => ExprContext::with_expected(ty),
+                    // Cat C: return type propagated when available
+                    None => ExprContext::none(),
+                };
+                let ir_expr = convert_expr(expr, reg, &ret_ctx, type_env)?;
                 ClosureBody::Expr(Box::new(ir_expr))
             }
             ast::BlockStmtOrExpr::BlockStmt(block) => {
@@ -315,7 +320,12 @@ pub(crate) fn convert_arrow_expr_with_return_type(
         let mut body_stmts = expansion_stmts;
         match arrow.body.as_ref() {
             ast::BlockStmtOrExpr::Expr(expr) => {
-                let ir_expr = convert_expr(expr, reg, return_type.as_ref(), type_env)?;
+                let ret_ctx = match return_type.as_ref() {
+                    Some(ty) => ExprContext::with_expected(ty),
+                    // Cat C: return type propagated when available
+                    None => ExprContext::none(),
+                };
+                let ir_expr = convert_expr(expr, reg, &ret_ctx, type_env)?;
                 body_stmts.push(Stmt::Return(Some(ir_expr)));
             }
             ast::BlockStmtOrExpr::BlockStmt(block) => {
