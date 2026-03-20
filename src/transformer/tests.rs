@@ -3,6 +3,7 @@ use crate::ir::Stmt;
 use crate::ir::{BinOp, Expr, Param, RustType, StructField, Visibility};
 use crate::parser::parse_typescript;
 use crate::registry::TypeRegistry;
+use crate::transformer::functions::{extract_fn_param_types, extract_fn_return_type};
 
 #[test]
 fn test_transform_module_empty() {

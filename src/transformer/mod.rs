@@ -7,7 +7,11 @@ pub mod classes;
 pub mod expressions;
 pub mod functions;
 pub mod statements;
+mod type_env;
 pub mod types;
+
+pub use type_env::TypeEnv;
+pub(crate) use type_env::{wrap_trait_for_param, wrap_trait_for_value};
 
 use anyhow::Result;
 use swc_common::Spanned;
@@ -16,116 +20,9 @@ use swc_ecma_ast::{Decl, ImportSpecifier, Module, ModuleDecl, ModuleItem, Stmt};
 
 use std::collections::HashMap;
 
-use crate::ir::{EnumValue, EnumVariant, Item, RustType, Visibility};
+use crate::ir::{EnumValue, EnumVariant, Item, Visibility};
 use crate::registry::TypeRegistry;
 use crate::transformer::classes::ClassInfo;
-use crate::transformer::types::convert_ts_type;
-
-/// Wraps a trait type for parameter position: `Greeter` → `&dyn Greeter`.
-///
-/// Non-trait types are returned unchanged.
-pub(crate) fn wrap_trait_for_param(ty: RustType, reg: &TypeRegistry) -> RustType {
-    if let RustType::Named {
-        ref name,
-        ref type_args,
-    } = ty
-    {
-        if type_args.is_empty() && reg.is_trait_type(name) {
-            return RustType::Named {
-                name: format!("&dyn {name}"),
-                type_args: vec![],
-            };
-        }
-    }
-    ty
-}
-
-/// Wraps a trait type for value position (variable, return): `Greeter` → `Box<dyn Greeter>`.
-///
-/// Non-trait types are returned unchanged.
-pub(crate) fn wrap_trait_for_value(ty: RustType, reg: &TypeRegistry) -> RustType {
-    if let RustType::Named {
-        ref name,
-        ref type_args,
-    } = ty
-    {
-        if type_args.is_empty() && reg.is_trait_type(name) {
-            return RustType::Named {
-                name: format!("Box<dyn {name}>"),
-                type_args: vec![],
-            };
-        }
-    }
-    ty
-}
-
-/// ローカル変数の型情報を保持する型環境。
-///
-/// スコープチェーンにより、ブロックスコープでの変数シャドウイングを正しく追跡する。
-/// 変数宣言時にエントリを追加し、後続の式変換で参照する。
-#[derive(Debug, Clone)]
-pub struct TypeEnv {
-    scopes: Vec<HashMap<String, RustType>>,
-}
-
-impl Default for TypeEnv {
-    fn default() -> Self {
-        Self {
-            scopes: vec![HashMap::new()],
-        }
-    }
-}
-
-impl TypeEnv {
-    /// 新しい空の型環境を作成する。ルートスコープが 1 つ含まれる。
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// 新しい子スコープを開始する。
-    pub fn push_scope(&mut self) {
-        self.scopes.push(HashMap::new());
-    }
-
-    /// 現在のスコープを終了し、その中の変数を破棄する。
-    /// ルートスコープは pop しない。
-    pub fn pop_scope(&mut self) {
-        if self.scopes.len() > 1 {
-            self.scopes.pop();
-        }
-    }
-
-    /// 変数の型を現在のスコープに登録する。同スコープ内の同名変数は上書きされる。
-    pub fn insert(&mut self, name: String, ty: RustType) {
-        if let Some(scope) = self.scopes.last_mut() {
-            scope.insert(name, ty);
-        }
-    }
-
-    /// 既存の変数の型を更新する。スコープチェーンを内側から探索し、
-    /// 最初に見つかったスコープで更新する。どのスコープにも存在しない場合は
-    /// 現在のスコープに挿入する。
-    pub fn update(&mut self, name: String, ty: RustType) {
-        for scope in self.scopes.iter_mut().rev() {
-            if let std::collections::hash_map::Entry::Occupied(mut e) = scope.entry(name.clone()) {
-                e.insert(ty);
-                return;
-            }
-        }
-        // どのスコープにも存在しない → 現在のスコープに挿入
-        self.insert(name, ty);
-    }
-
-    /// 変数名から型を取得する。最内スコープから順に探索する。
-    pub fn get(&self, name: &str) -> Option<&RustType> {
-        for scope in self.scopes.iter().rev() {
-            if let Some(ty) = scope.get(name) {
-                return Some(ty);
-            }
-        }
-        None
-    }
-}
 
 /// Extracts the identifier name from a [`ast::Pat::Ident`] pattern.
 ///
@@ -213,8 +110,8 @@ impl std::error::Error for UnsupportedSyntaxError {}
 /// Returns an error if transformation fails or unsupported syntax is encountered.
 pub fn transform_module(module: &Module, reg: &TypeRegistry) -> Result<Vec<Item>> {
     // Pre-scan: collect class info for inheritance resolution
-    let class_map = pre_scan_classes(module, reg);
-    let iface_methods = pre_scan_interface_methods(module);
+    let class_map = classes::pre_scan_classes(module, reg);
+    let iface_methods = classes::pre_scan_interface_methods(module);
 
     let mut items = Vec::new();
     for module_item in &module.body {
@@ -240,8 +137,8 @@ pub fn transform_module_collecting(
     module: &Module,
     reg: &TypeRegistry,
 ) -> Result<(Vec<Item>, Vec<UnsupportedSyntaxError>)> {
-    let class_map = pre_scan_classes(module, reg);
-    let iface_methods = pre_scan_interface_methods(module);
+    let class_map = classes::pre_scan_classes(module, reg);
+    let iface_methods = classes::pre_scan_interface_methods(module);
 
     let mut items = Vec::new();
     let mut unsupported = Vec::new();
@@ -272,87 +169,6 @@ pub fn transform_module_collecting(
     }
 
     Ok((items, unsupported))
-}
-
-/// Pre-scans all class declarations in the module to collect inheritance info.
-///
-/// Returns a map from class name to [`ClassInfo`]. Only classes that can be
-/// successfully parsed are included; parse failures are silently skipped
-/// (they will be reported during the main transformation pass).
-fn pre_scan_classes(module: &Module, reg: &TypeRegistry) -> HashMap<String, ClassInfo> {
-    let mut map = HashMap::new();
-
-    for module_item in &module.body {
-        let (decl, vis) = match module_item {
-            ModuleItem::Stmt(Stmt::Decl(Decl::Class(cd))) => (cd, Visibility::Private),
-            ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(export)) => {
-                if let Decl::Class(cd) = &export.decl {
-                    (cd, Visibility::Public)
-                } else {
-                    continue;
-                }
-            }
-            _ => continue,
-        };
-        if let Ok(info) = classes::extract_class_info(decl, vis, reg) {
-            map.insert(info.name.clone(), info);
-        }
-    }
-
-    map
-}
-
-/// Pre-scans all interface declarations to collect method names per interface.
-///
-/// Used by `implements` processing to determine which class methods belong to
-/// which trait impl block.
-fn pre_scan_interface_methods(module: &Module) -> HashMap<String, Vec<String>> {
-    let mut map = HashMap::new();
-
-    for module_item in &module.body {
-        let decl = match module_item {
-            ModuleItem::Stmt(Stmt::Decl(Decl::TsInterface(d))) => d,
-            ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(export)) => {
-                if let Decl::TsInterface(d) = &export.decl {
-                    d
-                } else {
-                    continue;
-                }
-            }
-            _ => continue,
-        };
-
-        let name = decl.id.sym.to_string();
-        let method_names: Vec<String> = decl
-            .body
-            .body
-            .iter()
-            .filter_map(|member| {
-                if let swc_ecma_ast::TsTypeElement::TsMethodSignature(method) = member {
-                    if let swc_ecma_ast::Expr::Ident(ident) = method.key.as_ref() {
-                        return Some(ident.sym.to_string());
-                    }
-                }
-                None
-            })
-            .collect();
-
-        if !method_names.is_empty() {
-            map.insert(name, method_names);
-        }
-    }
-
-    map
-}
-
-/// Identifies which classes are parents (are extended by another class).
-fn find_parent_class_names(
-    class_map: &HashMap<String, ClassInfo>,
-) -> std::collections::HashSet<String> {
-    class_map
-        .values()
-        .filter_map(|info| info.parent.clone())
-        .collect()
 }
 
 /// Transforms a single module item into IR [`Item`]s.
@@ -540,11 +356,16 @@ fn transform_decl(
             Ok((items, warnings))
         }
         Decl::Class(class_decl) => {
-            let items =
-                transform_class_with_inheritance(class_decl, vis, reg, class_map, iface_methods)?;
+            let items = classes::transform_class_with_inheritance(
+                class_decl,
+                vis,
+                reg,
+                class_map,
+                iface_methods,
+            )?;
             Ok((items, vec![]))
         }
-        Decl::Var(var_decl) => convert_var_decl_arrow_fns(var_decl, vis, reg, resilient),
+        Decl::Var(var_decl) => functions::convert_var_decl_arrow_fns(var_decl, vis, reg, resilient),
         Decl::TsEnum(ts_enum) => {
             let items = convert_ts_enum(ts_enum, vis)?;
             Ok((items, vec![]))
@@ -575,198 +396,6 @@ fn transform_decl(
             byte_pos: decl.span().lo.0,
         }
         .into()),
-    }
-}
-
-/// Transforms a class declaration, handling inheritance and `implements` if applicable.
-///
-/// - If the class is a parent (extended by another class): generates struct + trait + impls
-/// - If the class is a child (extends another class): generates struct + impl + trait impl
-/// - If the class implements interfaces: generates struct + impl + impl Trait for Struct
-/// - Otherwise: generates struct + impl (no trait)
-fn transform_class_with_inheritance(
-    class_decl: &ast::ClassDecl,
-    vis: Visibility,
-    reg: &TypeRegistry,
-    class_map: &HashMap<String, ClassInfo>,
-    iface_methods: &HashMap<String, Vec<String>>,
-) -> Result<Vec<Item>> {
-    let info = classes::extract_class_info(class_decl, vis, reg)?;
-    let parent_names = find_parent_class_names(class_map);
-
-    if info.is_abstract {
-        // Abstract class — generate trait (not struct)
-        classes::generate_abstract_class_items(&info)
-    } else if parent_names.contains(&info.name) {
-        // This class is a parent — generate struct + trait + impls
-        classes::generate_parent_class_items(&info)
-    } else if let Some(parent_name) = &info.parent {
-        let parent_info = class_map.get(parent_name);
-        if parent_info.is_some_and(|p| p.is_abstract) {
-            // Parent is abstract — generate struct + impl AbstractParent for Child
-            classes::generate_child_of_abstract(&info, parent_name)
-        } else if !info.implements.is_empty() {
-            // Child class with interface implementations
-            classes::generate_child_class_with_implements(&info, parent_info, iface_methods)
-        } else {
-            // This class is a child — generate struct + impl + trait impl
-            classes::generate_items_for_class(&info, parent_info)
-        }
-    } else if !info.implements.is_empty() {
-        // Class implements interfaces — split methods into trait impls
-        classes::generate_class_with_implements(&info, iface_methods)
-    } else {
-        // Standalone class — no inheritance
-        classes::generate_items_for_class(&info, None)
-    }
-}
-
-/// Converts `const` variable declarations with arrow function initializers into `Item::Fn`.
-///
-/// `const double = (x: number): number => x * 2;`
-/// becomes `fn double(x: f64) -> f64 { x * 2.0 }`
-///
-/// Non-arrow-function variable declarations are skipped.
-fn convert_var_decl_arrow_fns(
-    var_decl: &swc_ecma_ast::VarDecl,
-    vis: Visibility,
-    reg: &TypeRegistry,
-    resilient: bool,
-) -> Result<(Vec<Item>, Vec<String>)> {
-    let mut items = Vec::new();
-    let mut all_warnings = Vec::new();
-    for decl in &var_decl.decls {
-        let init = match &decl.init {
-            Some(init) => init,
-            None => continue,
-        };
-        // Only handle arrow function initializers
-        let arrow = match init.as_ref() {
-            swc_ecma_ast::Expr::Arrow(arrow) => arrow,
-            _ => continue,
-        };
-        let (name, var_return_type, var_param_types) = match &decl.name {
-            swc_ecma_ast::Pat::Ident(ident) => {
-                let n = ident.id.sym.to_string();
-                // Extract variable's type annotation and resolve to return type + param types
-                let var_rust_type = ident
-                    .type_ann
-                    .as_ref()
-                    .and_then(|ann| convert_ts_type(&ann.type_ann, &mut Vec::new(), reg).ok());
-                let ret = var_rust_type
-                    .as_ref()
-                    .and_then(|ty| extract_fn_return_type(ty, reg));
-                let param_types = var_rust_type
-                    .as_ref()
-                    .and_then(|ty| extract_fn_param_types(ty, reg));
-                (n, ret, param_types)
-            }
-            _ => continue,
-        };
-
-        // Convert the arrow to a closure IR, then extract parts for Item::Fn
-        // Pass var_return_type so it propagates into the arrow body
-        let mut fallback_warnings = Vec::new();
-        let closure = crate::transformer::expressions::convert_arrow_expr_with_return_type(
-            arrow,
-            reg,
-            resilient,
-            &mut fallback_warnings,
-            &TypeEnv::new(),
-            var_return_type.as_ref(),
-            var_param_types.as_deref(),
-        )?;
-        match closure {
-            crate::ir::Expr::Closure {
-                params,
-                return_type,
-                body,
-            } => {
-                // return_type already includes the override from variable annotation
-                // (applied inside convert_arrow_expr_with_return_type)
-                let ret = return_type;
-                let mut fn_body = match body {
-                    crate::ir::ClosureBody::Expr(expr) => {
-                        vec![crate::ir::Stmt::Return(Some(*expr))]
-                    }
-                    crate::ir::ClosureBody::Block(stmts) => stmts,
-                };
-                functions::convert_last_return_to_tail(&mut fn_body);
-                // Untyped parameters → fallback to Any
-                let mut checked_params = Vec::new();
-                for p in params {
-                    if p.ty.is_none() {
-                        checked_params.push(crate::ir::Param {
-                            name: p.name,
-                            ty: Some(crate::ir::RustType::Any),
-                        });
-                    } else {
-                        checked_params.push(p);
-                    }
-                }
-
-                let type_params =
-                    crate::transformer::types::extract_type_params(arrow.type_params.as_deref());
-                items.push(Item::Fn {
-                    vis: vis.clone(),
-                    attributes: vec![],
-                    is_async: arrow.is_async,
-                    name,
-                    type_params,
-                    params: checked_params,
-                    return_type: ret,
-                    body: fn_body,
-                });
-                all_warnings.extend(fallback_warnings);
-            }
-            _ => continue,
-        }
-    }
-    Ok((items, all_warnings))
-}
-
-/// Extracts the return type from a function type.
-///
-/// Handles two cases:
-/// - `RustType::Fn { return_type, .. }` → returns the return_type directly
-/// - `RustType::Named { name, .. }` → looks up TypeRegistry for `TypeDef::Function` and extracts return_type
-fn extract_fn_return_type(ty: &RustType, reg: &TypeRegistry) -> Option<RustType> {
-    match ty {
-        RustType::Fn { return_type, .. } => {
-            let rt = return_type.as_ref();
-            if matches!(rt, RustType::Unit) {
-                None
-            } else {
-                Some(rt.clone())
-            }
-        }
-        RustType::Named { name, .. } => {
-            if let Some(crate::registry::TypeDef::Function { return_type, .. }) = reg.get(name) {
-                return_type.clone()
-            } else {
-                None
-            }
-        }
-        _ => None,
-    }
-}
-
-/// Extracts parameter types from a function type.
-///
-/// Handles two cases:
-/// - `RustType::Fn { params, .. }` → returns the params directly
-/// - `RustType::Named { name, .. }` → looks up TypeRegistry for `TypeDef::Function` and extracts params
-fn extract_fn_param_types(ty: &RustType, reg: &TypeRegistry) -> Option<Vec<RustType>> {
-    match ty {
-        RustType::Fn { params, .. } => Some(params.clone()),
-        RustType::Named { name, .. } => {
-            if let Some(crate::registry::TypeDef::Function { params, .. }) = reg.get(name) {
-                Some(params.iter().map(|(_, ty)| ty.clone()).collect())
-            } else {
-                None
-            }
-        }
-        _ => None,
     }
 }
 

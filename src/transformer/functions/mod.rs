@@ -967,5 +967,153 @@ fn wrap_stmt_return(stmt: Stmt) -> Stmt {
     }
 }
 
+/// Converts `const` variable declarations with arrow function initializers into `Item::Fn`.
+///
+/// `const double = (x: number): number => x * 2;`
+/// becomes `fn double(x: f64) -> f64 { x * 2.0 }`
+///
+/// Non-arrow-function variable declarations are skipped.
+pub(crate) fn convert_var_decl_arrow_fns(
+    var_decl: &ast::VarDecl,
+    vis: Visibility,
+    reg: &TypeRegistry,
+    resilient: bool,
+) -> Result<(Vec<Item>, Vec<String>)> {
+    let mut items = Vec::new();
+    let mut all_warnings = Vec::new();
+    for decl in &var_decl.decls {
+        let init = match &decl.init {
+            Some(init) => init,
+            None => continue,
+        };
+        // Only handle arrow function initializers
+        let arrow = match init.as_ref() {
+            ast::Expr::Arrow(arrow) => arrow,
+            _ => continue,
+        };
+        let (name, var_return_type, var_param_types) = match &decl.name {
+            ast::Pat::Ident(ident) => {
+                let n = ident.id.sym.to_string();
+                // Extract variable's type annotation and resolve to return type + param types
+                let var_rust_type = ident
+                    .type_ann
+                    .as_ref()
+                    .and_then(|ann| convert_ts_type(&ann.type_ann, &mut Vec::new(), reg).ok());
+                let ret = var_rust_type
+                    .as_ref()
+                    .and_then(|ty| extract_fn_return_type(ty, reg));
+                let param_types = var_rust_type
+                    .as_ref()
+                    .and_then(|ty| extract_fn_param_types(ty, reg));
+                (n, ret, param_types)
+            }
+            _ => continue,
+        };
+
+        // Convert the arrow to a closure IR, then extract parts for Item::Fn
+        // Pass var_return_type so it propagates into the arrow body
+        let mut fallback_warnings = Vec::new();
+        let closure = crate::transformer::expressions::convert_arrow_expr_with_return_type(
+            arrow,
+            reg,
+            resilient,
+            &mut fallback_warnings,
+            &TypeEnv::new(),
+            var_return_type.as_ref(),
+            var_param_types.as_deref(),
+        )?;
+        match closure {
+            Expr::Closure {
+                params,
+                return_type,
+                body,
+            } => {
+                // return_type already includes the override from variable annotation
+                // (applied inside convert_arrow_expr_with_return_type)
+                let ret = return_type;
+                let mut fn_body = match body {
+                    crate::ir::ClosureBody::Expr(expr) => {
+                        vec![Stmt::Return(Some(*expr))]
+                    }
+                    crate::ir::ClosureBody::Block(stmts) => stmts,
+                };
+                convert_last_return_to_tail(&mut fn_body);
+                // Untyped parameters → fallback to Any
+                let mut checked_params = Vec::new();
+                for p in params {
+                    if p.ty.is_none() {
+                        checked_params.push(Param {
+                            name: p.name,
+                            ty: Some(RustType::Any),
+                        });
+                    } else {
+                        checked_params.push(p);
+                    }
+                }
+
+                let type_params = extract_type_params(arrow.type_params.as_deref());
+                items.push(Item::Fn {
+                    vis: vis.clone(),
+                    attributes: vec![],
+                    is_async: arrow.is_async,
+                    name,
+                    type_params,
+                    params: checked_params,
+                    return_type: ret,
+                    body: fn_body,
+                });
+                all_warnings.extend(fallback_warnings);
+            }
+            _ => continue,
+        }
+    }
+    Ok((items, all_warnings))
+}
+
+/// Extracts the return type from a function type.
+///
+/// Handles two cases:
+/// - `RustType::Fn { return_type, .. }` → returns the return_type directly
+/// - `RustType::Named { name, .. }` → looks up TypeRegistry for `TypeDef::Function` and extracts return_type
+pub(super) fn extract_fn_return_type(ty: &RustType, reg: &TypeRegistry) -> Option<RustType> {
+    match ty {
+        RustType::Fn { return_type, .. } => {
+            let rt = return_type.as_ref();
+            if matches!(rt, RustType::Unit) {
+                None
+            } else {
+                Some(rt.clone())
+            }
+        }
+        RustType::Named { name, .. } => {
+            if let Some(crate::registry::TypeDef::Function { return_type, .. }) = reg.get(name) {
+                return_type.clone()
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Extracts parameter types from a function type.
+///
+/// Handles two cases:
+/// - `RustType::Fn { params, .. }` → returns the params directly
+/// - `RustType::Named { name, .. }` → looks up TypeRegistry for `TypeDef::Function` and extracts params
+pub(super) fn extract_fn_param_types(ty: &RustType, reg: &TypeRegistry) -> Option<Vec<RustType>> {
+    match ty {
+        RustType::Fn { params, .. } => Some(params.clone()),
+        RustType::Named { name, .. } => {
+            if let Some(crate::registry::TypeDef::Function { params, .. }) = reg.get(name) {
+                Some(params.iter().map(|(_, ty)| ty.clone()).collect())
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests;

@@ -2,6 +2,8 @@
 //!
 //! Converts SWC class declarations into IR [`Item::Struct`] + [`Item::Impl`].
 
+use std::collections::HashMap;
+
 use anyhow::{anyhow, Result};
 use swc_ecma_ast as ast;
 
@@ -1004,6 +1006,135 @@ fn convert_param_pat(pat: &ast::Pat, reg: &TypeRegistry) -> Result<(Param, Vec<S
             }
         }
         _ => Err(anyhow!("unsupported parameter pattern")),
+    }
+}
+
+/// Pre-scans all class declarations in the module to collect inheritance info.
+///
+/// Returns a map from class name to [`ClassInfo`]. Only classes that can be
+/// successfully parsed are included; parse failures are silently skipped
+/// (they will be reported during the main transformation pass).
+pub(super) fn pre_scan_classes(
+    module: &ast::Module,
+    reg: &TypeRegistry,
+) -> HashMap<String, ClassInfo> {
+    let mut map = HashMap::new();
+
+    for module_item in &module.body {
+        let (decl, vis) = match module_item {
+            ast::ModuleItem::Stmt(ast::Stmt::Decl(ast::Decl::Class(cd))) => {
+                (cd, Visibility::Private)
+            }
+            ast::ModuleItem::ModuleDecl(ast::ModuleDecl::ExportDecl(export)) => {
+                if let ast::Decl::Class(cd) = &export.decl {
+                    (cd, Visibility::Public)
+                } else {
+                    continue;
+                }
+            }
+            _ => continue,
+        };
+        if let Ok(info) = extract_class_info(decl, vis, reg) {
+            map.insert(info.name.clone(), info);
+        }
+    }
+
+    map
+}
+
+/// Pre-scans all interface declarations to collect method names per interface.
+///
+/// Used by `implements` processing to determine which class methods belong to
+/// which trait impl block.
+pub(super) fn pre_scan_interface_methods(module: &ast::Module) -> HashMap<String, Vec<String>> {
+    let mut map = HashMap::new();
+
+    for module_item in &module.body {
+        let decl = match module_item {
+            ast::ModuleItem::Stmt(ast::Stmt::Decl(ast::Decl::TsInterface(d))) => d,
+            ast::ModuleItem::ModuleDecl(ast::ModuleDecl::ExportDecl(export)) => {
+                if let ast::Decl::TsInterface(d) = &export.decl {
+                    d
+                } else {
+                    continue;
+                }
+            }
+            _ => continue,
+        };
+
+        let name = decl.id.sym.to_string();
+        let method_names: Vec<String> = decl
+            .body
+            .body
+            .iter()
+            .filter_map(|member| {
+                if let ast::TsTypeElement::TsMethodSignature(method) = member {
+                    if let ast::Expr::Ident(ident) = method.key.as_ref() {
+                        return Some(ident.sym.to_string());
+                    }
+                }
+                None
+            })
+            .collect();
+
+        if !method_names.is_empty() {
+            map.insert(name, method_names);
+        }
+    }
+
+    map
+}
+
+/// Identifies which classes are parents (are extended by another class).
+fn find_parent_class_names(
+    class_map: &HashMap<String, ClassInfo>,
+) -> std::collections::HashSet<String> {
+    class_map
+        .values()
+        .filter_map(|info| info.parent.clone())
+        .collect()
+}
+
+/// Transforms a class declaration, handling inheritance and `implements` if applicable.
+///
+/// - If the class is a parent (extended by another class): generates struct + trait + impls
+/// - If the class is a child (extends another class): generates struct + impl + trait impl
+/// - If the class implements interfaces: generates struct + impl + impl Trait for Struct
+/// - Otherwise: generates struct + impl (no trait)
+pub(super) fn transform_class_with_inheritance(
+    class_decl: &ast::ClassDecl,
+    vis: Visibility,
+    reg: &TypeRegistry,
+    class_map: &HashMap<String, ClassInfo>,
+    iface_methods: &HashMap<String, Vec<String>>,
+) -> Result<Vec<Item>> {
+    let info = extract_class_info(class_decl, vis, reg)?;
+    let parent_names = find_parent_class_names(class_map);
+
+    if info.is_abstract {
+        // Abstract class — generate trait (not struct)
+        generate_abstract_class_items(&info)
+    } else if parent_names.contains(&info.name) {
+        // This class is a parent — generate struct + trait + impls
+        generate_parent_class_items(&info)
+    } else if let Some(parent_name) = &info.parent {
+        let parent_info = class_map.get(parent_name);
+        if parent_info.is_some_and(|p| p.is_abstract) {
+            // Parent is abstract — generate struct + impl AbstractParent for Child
+            generate_child_of_abstract(&info, parent_name)
+        } else if !info.implements.is_empty() {
+            // Child class with interface implementations
+            generate_child_class_with_implements(&info, parent_info, iface_methods)
+        } else {
+            // This class is a child — generate struct + impl + trait impl
+            generate_items_for_class(&info, parent_info)
+        }
+    } else if !info.implements.is_empty() {
+        // Class implements interfaces — split methods into trait impls
+        generate_class_with_implements(&info, iface_methods)
+    } else {
+        // Standalone class — no inheritance
+        generate_items_for_class(&info, None)
     }
 }
 

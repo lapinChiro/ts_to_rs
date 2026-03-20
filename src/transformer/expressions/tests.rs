@@ -1,5 +1,5 @@
 use super::*;
-use crate::ir::MatchPattern;
+use crate::ir::{BinOp, MatchPattern, UnOp};
 use crate::parser::parse_typescript;
 use crate::registry::{TypeDef, TypeRegistry};
 use crate::transformer::TypeEnv;
