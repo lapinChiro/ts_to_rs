@@ -1047,3 +1047,54 @@ fn test_convert_fn_param_struct_type_unchanged() {
         other => panic!("expected Fn item, got: {:?}", other),
     }
 }
+
+// --- Default parameter type inference (I-146) ---
+
+#[test]
+fn test_convert_fn_default_param_number_no_annotation_infers_f64() {
+    // function foo(x = 0) → fn foo(x: Option<f64>)
+    let fn_decl = parse_fn_decl("function foo(x = 0): void {}");
+    let (items, _) =
+        convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new(), false).unwrap();
+    match &items[0] {
+        Item::Fn { params, .. } => {
+            assert_eq!(
+                params[0].ty,
+                Some(RustType::Option(Box::new(RustType::F64)))
+            );
+        }
+        other => panic!("expected Fn item, got: {other:?}"),
+    }
+}
+
+#[test]
+fn test_convert_fn_default_param_string_no_annotation_infers_string() {
+    let fn_decl = parse_fn_decl(r#"function foo(s = "hi"): void {}"#);
+    let (items, _) =
+        convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new(), false).unwrap();
+    match &items[0] {
+        Item::Fn { params, .. } => {
+            assert_eq!(
+                params[0].ty,
+                Some(RustType::Option(Box::new(RustType::String)))
+            );
+        }
+        other => panic!("expected Fn item, got: {other:?}"),
+    }
+}
+
+#[test]
+fn test_convert_fn_default_param_bool_no_annotation_infers_bool() {
+    let fn_decl = parse_fn_decl("function foo(b = true): void {}");
+    let (items, _) =
+        convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new(), false).unwrap();
+    match &items[0] {
+        Item::Fn { params, .. } => {
+            assert_eq!(
+                params[0].ty,
+                Some(RustType::Option(Box::new(RustType::Bool)))
+            );
+        }
+        other => panic!("expected Fn item, got: {other:?}"),
+    }
+}

@@ -7240,3 +7240,58 @@ fn test_convert_opt_chain_method_call_propagates_param_types() {
         other => panic!("expected MethodCall(map), got {other:?}"),
     }
 }
+
+// --- Unary plus (I-15) ---
+
+/// +x where x: number → x (identity, no-op)
+#[test]
+fn test_convert_expr_unary_plus_number_returns_identity() {
+    let mut type_env = TypeEnv::new();
+    type_env.insert("x".to_string(), crate::ir::RustType::F64);
+    let swc_expr = parse_expr("+x;");
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &type_env,
+    )
+    .unwrap();
+    assert_eq!(result, Expr::Ident("x".to_string()));
+}
+
+/// +x where x: string → x.parse::<f64>().unwrap()
+#[test]
+fn test_convert_expr_unary_plus_string_returns_parse() {
+    let mut type_env = TypeEnv::new();
+    type_env.insert("x".to_string(), crate::ir::RustType::String);
+    let swc_expr = parse_expr("+x;");
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &type_env,
+    )
+    .unwrap();
+    // x.parse::<f64>().unwrap()
+    match &result {
+        Expr::MethodCall { method, object, .. } if method == "unwrap" => match object.as_ref() {
+            Expr::MethodCall { method, .. } if method == "parse::<f64>" => {}
+            other => panic!("expected parse::<f64>(), got {other:?}"),
+        },
+        other => panic!("expected .unwrap(), got {other:?}"),
+    }
+}
+
+/// +x where x: unknown → x (fallback, let compiler catch type errors)
+#[test]
+fn test_convert_expr_unary_plus_unknown_returns_identity() {
+    let swc_expr = parse_expr("+x;");
+    let result = convert_expr(
+        &swc_expr,
+        &TypeRegistry::new(),
+        &ExprContext::none(),
+        &TypeEnv::new(),
+    )
+    .unwrap();
+    assert_eq!(result, Expr::Ident("x".to_string()));
+}

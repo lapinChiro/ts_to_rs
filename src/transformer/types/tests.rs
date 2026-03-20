@@ -2649,3 +2649,94 @@ fn test_convert_ts_type_index_signature_in_annotation_to_hashmap() {
         }
     );
 }
+
+// --- Type alias fallback to convert_ts_type ---
+
+#[test]
+fn test_convert_type_alias_type_ref_generates_type_alias() {
+    // type Params = Record<string, string> → type Params = HashMap<String, String>
+    let decl = parse_type_alias("type Params = Record<string, string>;");
+    let items = convert_type_alias_items(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(
+        items[0],
+        Item::TypeAlias {
+            vis: Visibility::Public,
+            name: "Params".to_string(),
+            type_params: vec![],
+            ty: RustType::Named {
+                name: "HashMap".to_string(),
+                type_args: vec![RustType::String, RustType::String],
+            },
+        }
+    );
+}
+
+#[test]
+fn test_convert_type_alias_array_generates_type_alias() {
+    // type Names = string[] → type Names = Vec<String>
+    let decl = parse_type_alias("type Names = string[];");
+    let items = convert_type_alias_items(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(
+        items[0],
+        Item::TypeAlias {
+            vis: Visibility::Public,
+            name: "Names".to_string(),
+            type_params: vec![],
+            ty: RustType::Vec(Box::new(RustType::String)),
+        }
+    );
+}
+
+#[test]
+fn test_convert_type_alias_keyof_typeof_generates_string_union() {
+    // type K = keyof typeof obj → string union of fields
+    // We need "obj" registered in the registry with fields
+    let mut reg = TypeRegistry::new();
+    reg.register(
+        "AlgorithmTypes".to_string(),
+        TypeDef::new_struct(
+            vec![
+                ("HS256".to_string(), RustType::String),
+                ("RS256".to_string(), RustType::String),
+            ],
+            std::collections::HashMap::new(),
+            vec![],
+        ),
+    );
+
+    let decl = parse_type_alias("type Algo = keyof typeof AlgorithmTypes;");
+    let items = convert_type_alias_items(&decl, Visibility::Public, &reg).unwrap();
+    assert_eq!(items.len(), 1);
+    // Should produce a string literal union enum
+    match &items[0] {
+        Item::Enum { name, variants, .. } => {
+            assert_eq!(name, "Algo");
+            let variant_names: Vec<&str> = variants.iter().map(|v| v.name.as_str()).collect();
+            assert!(
+                variant_names.contains(&"HS256"),
+                "expected HS256 variant, got {variant_names:?}"
+            );
+            assert!(
+                variant_names.contains(&"RS256"),
+                "expected RS256 variant, got {variant_names:?}"
+            );
+        }
+        other => panic!("expected Enum, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_convert_type_alias_type_literal_method_generates_trait() {
+    // type X = { foo(): string } → trait X { fn foo(&self) -> String }
+    let decl = parse_type_alias("type X = { foo(): string };");
+    let items = convert_type_alias_items(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
+    // Should produce a trait (not error)
+    assert!(
+        items
+            .iter()
+            .any(|i| matches!(i, Item::Trait { name, .. } if name == "X")),
+        "expected trait X, got {items:?}"
+    );
+}

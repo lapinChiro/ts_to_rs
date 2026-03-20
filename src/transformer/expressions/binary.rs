@@ -216,6 +216,25 @@ pub(super) fn convert_unary_expr(
         });
     }
 
+    // Unary plus: +x → numeric conversion
+    if unary.op == ast::UnaryOp::Plus {
+        let operand_type = resolve_expr_type(&unary.arg, type_env, reg);
+        let operand = convert_expr(&unary.arg, reg, &ExprContext::none(), type_env)?;
+        return Ok(match operand_type {
+            Some(RustType::F64) => operand, // already numeric, identity
+            Some(RustType::String) => Expr::MethodCall {
+                object: Box::new(Expr::MethodCall {
+                    object: Box::new(operand),
+                    method: "parse::<f64>".to_string(),
+                    args: vec![],
+                }),
+                method: "unwrap".to_string(),
+                args: vec![],
+            },
+            _ => operand, // fallback: return as-is, let compiler catch type errors
+        });
+    }
+
     let op = match unary.op {
         ast::UnaryOp::Bang => UnOp::Not,
         ast::UnaryOp::Minus => UnOp::Neg,

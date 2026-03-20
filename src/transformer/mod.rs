@@ -222,6 +222,9 @@ fn transform_module_item(
                 Ok((vec![], vec![]))
             }
         }
+        // Top-level expression statements (e.g., `globalThis.crypto ??= crypto`)
+        // Rust has no top-level expressions; skip silently
+        ModuleItem::Stmt(Stmt::Expr(_)) => Ok((vec![], vec![])),
         _ => Err(UnsupportedSyntaxError {
             kind: format_module_item_kind(module_item),
             byte_pos: module_item.span().lo.0,

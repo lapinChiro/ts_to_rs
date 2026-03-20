@@ -1081,3 +1081,26 @@ fn test_extract_fn_param_types_unknown_returns_none() {
     let result = extract_fn_param_types(&ty, &TypeRegistry::new());
     assert_eq!(result, None);
 }
+
+// --- Top-level expression statements (I-180) ---
+
+#[test]
+fn test_transform_module_top_level_expr_stmt_does_not_error() {
+    // Top-level expression like `globalThis.crypto ??= crypto` should not cause an error
+    let source = r#"
+        interface Foo { name: string; }
+        console.log("init");
+    "#;
+    let module = parse_typescript(source).expect("parse failed");
+    // Use collecting mode since transform_module errors on unsupported
+    let (items, unsupported) = transform_module_collecting(&module, &TypeRegistry::new()).unwrap();
+    // Foo should be converted
+    assert!(items
+        .iter()
+        .any(|i| matches!(i, Item::Struct { name, .. } if name == "Foo")));
+    // console.log should be converted (not unsupported)
+    assert!(
+        unsupported.is_empty(),
+        "expected no unsupported errors, got: {unsupported:?}"
+    );
+}

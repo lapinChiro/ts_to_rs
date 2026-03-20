@@ -824,8 +824,80 @@ pub fn convert_type_alias_items(
         }
     }
 
+    // keyof typeof X → string literal union enum from struct fields
+    if let Some(items) = try_convert_keyof_typeof_alias(decl, vis.clone(), reg)? {
+        return Ok(items);
+    }
+
     let item = convert_type_alias(decl, vis, reg)?;
     Ok(vec![item])
+}
+
+/// Tries to convert `type X = keyof typeof Y` to a string literal union enum.
+///
+/// Returns `Ok(Some(items))` if the type alias is `keyof typeof <name>` and the name
+/// is found in the registry as a struct. Returns `Ok(None)` otherwise.
+fn try_convert_keyof_typeof_alias(
+    decl: &TsTypeAliasDecl,
+    vis: Visibility,
+    reg: &TypeRegistry,
+) -> Result<Option<Vec<Item>>> {
+    // Match: TsTypeOperator(KeyOf, TsTypeQuery(ident))
+    let op = match decl.type_ann.as_ref() {
+        TsType::TsTypeOperator(op) if op.op == swc_ecma_ast::TsTypeOperatorOp::KeyOf => op,
+        _ => return Ok(None),
+    };
+    let query = match op.type_ann.as_ref() {
+        TsType::TsTypeQuery(q) => q,
+        _ => return Ok(None),
+    };
+    let type_name = match &query.expr_name {
+        swc_ecma_ast::TsTypeQueryExpr::TsEntityName(swc_ecma_ast::TsEntityName::Ident(ident)) => {
+            ident.sym.to_string()
+        }
+        _ => return Ok(None),
+    };
+    let fields = match reg.get(&type_name) {
+        Some(crate::registry::TypeDef::Struct { fields, .. }) => fields,
+        Some(crate::registry::TypeDef::Enum { string_values, .. }) => {
+            // For enums, use variant string values as keys
+            let name = decl.id.sym.to_string();
+            let variants = string_values
+                .values()
+                .map(|v| EnumVariant {
+                    name: v.clone(),
+                    value: None,
+                    data: None,
+                    fields: vec![],
+                })
+                .collect();
+            return Ok(Some(vec![Item::Enum {
+                vis,
+                name,
+                serde_tag: None,
+                variants,
+            }]));
+        }
+        _ => return Ok(None),
+    };
+
+    let name = decl.id.sym.to_string();
+    let variants = fields
+        .iter()
+        .map(|(field_name, _)| EnumVariant {
+            name: field_name.clone(),
+            value: Some(EnumValue::Str(field_name.clone())),
+            data: None,
+            fields: vec![],
+        })
+        .collect();
+
+    Ok(Some(vec![Item::Enum {
+        vis,
+        name,
+        serde_tag: None,
+        variants,
+    }]))
 }
 
 /// Converts a [`TsTypeAliasDecl`] into an IR item.
@@ -881,6 +953,84 @@ pub fn convert_type_alias(
 
     match decl.type_ann.as_ref() {
         TsType::TsTypeLit(lit) => {
+            let has_methods = lit
+                .members
+                .iter()
+                .any(|m| matches!(m, TsTypeElement::TsMethodSignature(_)));
+            let has_properties = lit
+                .members
+                .iter()
+                .any(|m| matches!(m, TsTypeElement::TsPropertySignature(_)));
+            let has_call_signatures = lit
+                .members
+                .iter()
+                .any(|m| matches!(m, TsTypeElement::TsCallSignatureDecl(_)));
+
+            // Call signatures only → function type alias
+            if has_call_signatures && !has_methods && !has_properties {
+                let call_sigs: Vec<&swc_ecma_ast::TsCallSignatureDecl> = lit
+                    .members
+                    .iter()
+                    .filter_map(|m| match m {
+                        TsTypeElement::TsCallSignatureDecl(sig) => Some(sig),
+                        _ => None,
+                    })
+                    .collect();
+                // Pick the signature with the most parameters (overload resolution)
+                let sig = call_sigs
+                    .iter()
+                    .max_by_key(|s| s.params.len())
+                    .ok_or_else(|| anyhow!("no call signatures found"))?;
+                let mut param_types = Vec::new();
+                for param in &sig.params {
+                    match param {
+                        swc_ecma_ast::TsFnParam::Ident(ident) => {
+                            let ty = ident
+                                .type_ann
+                                .as_ref()
+                                .map(|ann| convert_ts_type(&ann.type_ann, &mut Vec::new(), reg))
+                                .transpose()?
+                                .unwrap_or(RustType::Any);
+                            param_types.push(ty);
+                        }
+                        _ => param_types.push(RustType::Any),
+                    }
+                }
+                let return_type = sig
+                    .type_ann
+                    .as_ref()
+                    .map(|ann| convert_ts_type(&ann.type_ann, &mut Vec::new(), reg))
+                    .transpose()?
+                    .unwrap_or(RustType::Unit);
+                let type_params = extract_type_params(decl.type_params.as_deref());
+                return Ok(Item::TypeAlias {
+                    vis,
+                    name,
+                    type_params,
+                    ty: RustType::Fn {
+                        params: param_types,
+                        return_type: Box::new(return_type),
+                    },
+                });
+            }
+
+            // Methods only → trait (same logic as interface 3-way classification)
+            if has_methods && !has_properties {
+                let mut methods = Vec::new();
+                for member in &lit.members {
+                    if let TsTypeElement::TsMethodSignature(method_sig) = member {
+                        methods.push(convert_method_signature(method_sig, reg)?);
+                    }
+                }
+                return Ok(Item::Trait {
+                    vis,
+                    name: name.to_string(),
+                    supertraits: vec![],
+                    methods,
+                    associated_types: vec![],
+                });
+            }
+
             let mut fields = Vec::new();
             for member in &lit.members {
                 match member {
@@ -890,7 +1040,6 @@ pub fn convert_type_alias(
                     }
                     TsTypeElement::TsIndexSignature(idx) => {
                         // { [key: string]: T } → HashMap<String, T>
-                        // Convert the entire type literal to a type alias instead of a struct
                         if let Some(type_ann) = &idx.type_ann {
                             let value_type =
                                 convert_ts_type(&type_ann.type_ann, &mut Vec::new(), reg)?;
@@ -909,6 +1058,9 @@ pub fn convert_type_alias(
                             "unsupported index signature without type annotation"
                         ));
                     }
+                    TsTypeElement::TsMethodSignature(_) => {
+                        // Methods mixed with properties: skip methods (Rust structs can't have methods inline)
+                    }
                     _ => {
                         return Err(anyhow!(
                             "unsupported type literal member (only property signatures are supported)"
@@ -925,8 +1077,14 @@ pub fn convert_type_alias(
                 fields,
             })
         }
-        TsType::TsKeywordType(_) => {
-            let ty = convert_ts_type(decl.type_ann.as_ref(), &mut Vec::new(), reg)?;
+        // Fallback: any type that convert_ts_type can handle → type alias
+        other => {
+            let ty = convert_ts_type(other, &mut Vec::new(), reg).map_err(|_| {
+                anyhow!(
+                    "unsupported type alias body: {:?}",
+                    std::mem::discriminant(other)
+                )
+            })?;
             let type_params = extract_type_params(decl.type_params.as_deref());
             Ok(Item::TypeAlias {
                 vis,
@@ -935,10 +1093,6 @@ pub fn convert_type_alias(
                 type_params,
             })
         }
-        _ => Err(anyhow!(
-            "unsupported type alias body: {:?}",
-            std::mem::discriminant(decl.type_ann.as_ref())
-        )),
     }
 }
 

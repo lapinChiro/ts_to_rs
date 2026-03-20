@@ -333,9 +333,13 @@ fn convert_default_param(
     let param_name = inner_param.name.clone();
 
     // Wrap the type in Option<T>
-    let inner_type = inner_param
-        .ty
-        .ok_or_else(|| anyhow!("default parameter requires a type annotation"))?;
+    // If no type annotation (or Any fallback), infer from default value literal
+    let inner_type = match inner_param.ty {
+        Some(RustType::Any) | None => {
+            infer_type_from_default(&assign.right).unwrap_or(RustType::Any)
+        }
+        Some(ty) => ty,
+    };
     let option_type = RustType::Option(Box::new(inner_type));
 
     // Convert default value to IR expression
@@ -434,6 +438,30 @@ pub(crate) fn convert_default_value(expr: &ast::Expr) -> Result<(Option<Expr>, b
             )?;
             Ok((Some(expr), false))
         }
+    }
+}
+
+/// Infers the type of a default parameter from its literal value.
+///
+/// - Number literal → `f64`
+/// - String literal → `String`
+/// - Boolean literal → `bool`
+/// - Other expressions → `None`
+fn infer_type_from_default(expr: &ast::Expr) -> Option<RustType> {
+    match expr {
+        ast::Expr::Lit(lit) => match lit {
+            ast::Lit::Num(_) => Some(RustType::F64),
+            ast::Lit::Str(_) => Some(RustType::String),
+            ast::Lit::Bool(_) => Some(RustType::Bool),
+            _ => None,
+        },
+        ast::Expr::Unary(unary)
+            if unary.op == ast::UnaryOp::Minus
+                && matches!(unary.arg.as_ref(), ast::Expr::Lit(ast::Lit::Num(_))) =>
+        {
+            Some(RustType::F64)
+        }
+        _ => None,
     }
 }
 
