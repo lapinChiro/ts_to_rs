@@ -1569,7 +1569,8 @@ fn convert_call_expr(call: &ast::CallExpr, reg: &TypeRegistry, type_env: &TypeEn
 /// Maps TypeScript method names to Rust equivalents.
 ///
 /// Handles simple renames, methods that need wrapping (e.g., `trim` → `trim().to_string()`),
-/// methods that need chaining (e.g., `split` → `split(s).collect::<Vec<&str>>()`),
+/// methods that need chaining (e.g., `split` → `split(s).map(…).collect::<Vec<String>>()`),
+/// string methods (e.g., `substring` → `[a..b].to_string()`),
 /// and array methods (e.g., `reduce` → `iter().fold()`, `indexOf` → `iter().position()`,
 /// `slice` → `[a..b].to_vec()`, `splice` → `drain().collect()`).
 fn map_method_call(object: Expr, method: &str, args: Vec<Expr>) -> Expr {
@@ -1610,14 +1611,30 @@ fn map_method_call(object: Expr, method: &str, args: Vec<Expr>) -> Expr {
             method: "to_string".to_string(),
             args: vec![],
         },
-        // split() returns an iterator, chain .collect::<Vec<&str>>()
+        // split() → .split(sep).map(|s| s.to_string()).collect::<Vec<String>>()
+        // TS split() returns string[], Rust split() returns Iterator<Item=&str>
         "split" => Expr::MethodCall {
             object: Box::new(Expr::MethodCall {
-                object: Box::new(object),
-                method: "split".to_string(),
-                args,
+                object: Box::new(Expr::MethodCall {
+                    object: Box::new(object),
+                    method: "split".to_string(),
+                    args,
+                }),
+                method: "map".to_string(),
+                args: vec![Expr::Closure {
+                    params: vec![Param {
+                        name: "s".to_string(),
+                        ty: None,
+                    }],
+                    return_type: None,
+                    body: ClosureBody::Expr(Box::new(Expr::MethodCall {
+                        object: Box::new(Expr::Ident("s".to_string())),
+                        method: "to_string".to_string(),
+                        args: vec![],
+                    })),
+                }],
             }),
-            method: "collect::<Vec<&str>>".to_string(),
+            method: "collect::<Vec<String>>".to_string(),
             args: vec![],
         },
         // Iterator methods that collect: .map(fn) / .filter(fn) → .iter().cloned().method(fn).collect()
@@ -1709,24 +1726,36 @@ fn map_method_call(object: Expr, method: &str, args: Vec<Expr>) -> Expr {
                 args,
             }
         }
-        // slice(start, end) → [start..end].to_vec()
-        "slice" => {
-            if args.len() != 2 {
-                return Expr::MethodCall {
-                    object: Box::new(object),
-                    method: method.to_string(),
-                    args,
-                };
-            }
+        // substring(start, end) → [start..end].to_string()
+        // substring(start) → [start..].to_string()
+        "substring" => {
             let mut iter = args.into_iter();
-            let start = iter.next().unwrap();
-            let end = iter.next().unwrap();
+            let start = iter.next();
+            let end = iter.next();
             Expr::MethodCall {
                 object: Box::new(Expr::Index {
                     object: Box::new(object),
                     index: Box::new(Expr::Range {
-                        start: Some(Box::new(start)),
-                        end: Some(Box::new(end)),
+                        start: start.map(Box::new),
+                        end: end.map(Box::new),
+                    }),
+                }),
+                method: "to_string".to_string(),
+                args: vec![],
+            }
+        }
+        // slice(start, end) → [start..end].to_vec()
+        // slice(start) → [start..].to_vec()
+        "slice" => {
+            let mut iter = args.into_iter();
+            let start = iter.next();
+            let end = iter.next();
+            Expr::MethodCall {
+                object: Box::new(Expr::Index {
+                    object: Box::new(object),
+                    index: Box::new(Expr::Range {
+                        start: start.map(Box::new),
+                        end: end.map(Box::new),
                     }),
                 }),
                 method: "to_vec".to_string(),
@@ -2583,6 +2612,47 @@ fn convert_cond_expr(
 /// Converts an SWC object literal to an IR `Expr::StructInit`.
 ///
 /// Requires an expected type (`RustType::Named`) from the enclosing context (e.g., a variable
+/// Tries to convert an object literal with all computed keys to a `HashMap::from(...)`.
+///
+/// Returns `Ok(Some(expr))` if all properties use computed keys, `Ok(None)` if not
+/// (mixed or no computed keys), or `Err` if a computed key value fails to convert.
+fn try_convert_as_hashmap(
+    obj_lit: &ast::ObjectLit,
+    reg: &TypeRegistry,
+    type_env: &TypeEnv,
+) -> Result<Option<Expr>> {
+    if obj_lit.props.is_empty() {
+        return Ok(None);
+    }
+
+    // Check that ALL properties are key-value pairs with computed keys
+    let mut entries = Vec::new();
+    for prop in &obj_lit.props {
+        match prop {
+            ast::PropOrSpread::Prop(prop) => match prop.as_ref() {
+                ast::Prop::KeyValue(kv) => {
+                    let computed_expr = match &kv.key {
+                        ast::PropName::Computed(c) => &c.expr,
+                        _ => return Ok(None), // non-computed key → not a HashMap
+                    };
+                    let key = convert_expr(computed_expr, reg, None, type_env)?;
+                    let value = convert_expr(&kv.value, reg, None, type_env)?;
+                    entries.push(Expr::Tuple {
+                        elements: vec![key, value],
+                    });
+                }
+                _ => return Ok(None),
+            },
+            ast::PropOrSpread::Spread(_) => return Ok(None),
+        }
+    }
+
+    Ok(Some(Expr::FnCall {
+        name: "HashMap::from".to_string(),
+        args: vec![Expr::Vec { elements: entries }],
+    }))
+}
+
 /// declaration's type annotation). Without a named type, returns an error because Rust requires
 /// a named struct.
 ///
@@ -2594,6 +2664,11 @@ fn convert_object_lit(
     expected: Option<&RustType>,
     type_env: &TypeEnv,
 ) -> Result<Expr> {
+    // Check if all properties use computed keys → HashMap::from(vec![(k, v), ...])
+    if let Some(hashmap) = try_convert_as_hashmap(obj_lit, reg, type_env)? {
+        return Ok(hashmap);
+    }
+
     let struct_name = match expected {
         Some(RustType::Named { name, .. }) => name.as_str(),
         _ => {

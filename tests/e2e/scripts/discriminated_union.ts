@@ -37,13 +37,13 @@ function main(): void {
     console.log(c3.kind == "circle");
     console.log(sq3.kind != "circle");
 
-    // I-97: field access in switch arms
+    // field access in switch arms
     const c4: Shape = { kind: "circle", radius: 10 };
     const sq4: Shape = { kind: "square", side: 7 };
     console.log("dim:", get_dimension(c4));
     console.log("dim:", get_dimension(sq4));
 
-    // I-97: standalone field access
+    // standalone field access
     const c5: Shape = { kind: "circle", radius: 42 };
     console.log("radius:", c5.radius);
 }

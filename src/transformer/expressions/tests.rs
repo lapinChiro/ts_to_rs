@@ -40,7 +40,7 @@ fn test_convert_expr_number_literal() {
     assert_eq!(result, Expr::NumberLit(42.0));
 }
 
-// --- I-132: BigInt literal ---
+// --- BigInt literal ---
 
 #[test]
 fn test_convert_expr_bigint_literal_generates_int_lit() {
@@ -359,7 +359,7 @@ fn test_convert_expr_new_no_args() {
     );
 }
 
-// --- I-88: Constructor string arg gets .to_string() ---
+// --- Constructor string arg gets .to_string() ---
 
 #[test]
 fn test_new_expr_string_arg_gets_to_string() {
@@ -984,7 +984,7 @@ fn test_convert_expr_object_literal_nested_resolves_field_type_from_registry() {
     );
 }
 
-// --- I-86: Optional None completion ---
+// --- Optional None completion ---
 
 #[test]
 fn test_object_lit_omitted_optional_field_gets_none() {
@@ -1027,7 +1027,7 @@ fn test_object_lit_omitted_optional_field_gets_none() {
     }
 }
 
-// --- I-89: Number + string concatenation ---
+// --- Number + string concatenation ---
 
 #[test]
 fn test_binary_number_plus_string_generates_format() {
@@ -1051,7 +1051,7 @@ fn test_binary_number_plus_string_generates_format() {
     }
 }
 
-// --- I-82: Box::new wrapping for Fn arguments ---
+// --- Box::new wrapping for Fn arguments ---
 
 #[test]
 fn test_fn_arg_box_dyn_fn_gets_box_new() {
@@ -1596,19 +1596,97 @@ fn test_convert_expr_string_to_upper_case() {
 }
 
 #[test]
-fn test_convert_expr_string_split() {
+fn test_convert_expr_string_split_generates_vec_string() {
+    // s.split(",") → s.split(",").map(|s| s.to_string()).collect::<Vec<String>>()
     let expr = parse_expr(r#"s.split(",");"#);
     let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
-    // s.split(",") → s.split(",").collect::<Vec<&str>>()
     assert_eq!(
         result,
         Expr::MethodCall {
             object: Box::new(Expr::MethodCall {
-                object: Box::new(Expr::Ident("s".to_string())),
-                method: "split".to_string(),
-                args: vec![Expr::StringLit(",".to_string())],
+                object: Box::new(Expr::MethodCall {
+                    object: Box::new(Expr::Ident("s".to_string())),
+                    method: "split".to_string(),
+                    args: vec![Expr::StringLit(",".to_string())],
+                }),
+                method: "map".to_string(),
+                args: vec![Expr::Closure {
+                    params: vec![Param {
+                        name: "s".to_string(),
+                        ty: None,
+                    }],
+                    body: ClosureBody::Expr(Box::new(Expr::MethodCall {
+                        object: Box::new(Expr::Ident("s".to_string())),
+                        method: "to_string".to_string(),
+                        args: vec![],
+                    })),
+                    return_type: None,
+                }],
             }),
-            method: "collect::<Vec<&str>>".to_string(),
+            method: "collect::<Vec<String>>".to_string(),
+            args: vec![],
+        }
+    );
+}
+
+#[test]
+fn test_convert_expr_substring_two_args_generates_slice() {
+    // s.substring(1, 3) → s[1..3].to_string()
+    let expr = parse_expr("s.substring(1, 3);");
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    assert_eq!(
+        result,
+        Expr::MethodCall {
+            object: Box::new(Expr::Index {
+                object: Box::new(Expr::Ident("s".to_string())),
+                index: Box::new(Expr::Range {
+                    start: Some(Box::new(Expr::NumberLit(1.0))),
+                    end: Some(Box::new(Expr::NumberLit(3.0))),
+                }),
+            }),
+            method: "to_string".to_string(),
+            args: vec![],
+        }
+    );
+}
+
+#[test]
+fn test_convert_expr_substring_one_arg_generates_open_range() {
+    // s.substring(1) → s[1..].to_string()
+    let expr = parse_expr("s.substring(1);");
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    assert_eq!(
+        result,
+        Expr::MethodCall {
+            object: Box::new(Expr::Index {
+                object: Box::new(Expr::Ident("s".to_string())),
+                index: Box::new(Expr::Range {
+                    start: Some(Box::new(Expr::NumberLit(1.0))),
+                    end: None,
+                }),
+            }),
+            method: "to_string".to_string(),
+            args: vec![],
+        }
+    );
+}
+
+#[test]
+fn test_convert_expr_slice_one_arg_generates_open_range() {
+    // arr.slice(1) → arr[1..].to_vec()
+    let expr = parse_expr("arr.slice(1);");
+    let result = convert_expr(&expr, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    assert_eq!(
+        result,
+        Expr::MethodCall {
+            object: Box::new(Expr::Index {
+                object: Box::new(Expr::Ident("arr".to_string())),
+                index: Box::new(Expr::Range {
+                    start: Some(Box::new(Expr::NumberLit(1.0))),
+                    end: None,
+                }),
+            }),
+            method: "to_vec".to_string(),
             args: vec![],
         }
     );
@@ -2249,7 +2327,7 @@ fn test_convert_expr_math_e_to_consts() {
     assert_eq!(result, Expr::Ident("std::f64::consts::E".to_string()));
 }
 
-// --- I-85: NaN / Infinity ---
+// --- NaN / Infinity ---
 
 #[test]
 fn test_convert_expr_nan_to_f64_nan() {
@@ -2885,7 +2963,7 @@ fn test_convert_opt_chain_unknown_type_returns_map_pattern() {
     ));
 }
 
-// --- I-81: Optional chaining method name mapping ---
+// --- Optional chaining method name mapping ---
 
 #[test]
 fn test_opt_chain_method_call_maps_to_rust_name() {
@@ -3620,7 +3698,7 @@ fn test_convert_call_expr_rest_param_mixed_literal_and_spread() {
     }
 }
 
-// --- Step 8: I-16 空配列の型推論テスト ---
+// --- Step 8: 空配列の型推論テスト ---
 
 #[test]
 fn test_convert_array_lit_empty_with_expected_vec_string() {
@@ -3661,7 +3739,7 @@ fn test_convert_array_lit_elements_get_expected_element_type() {
     }
 }
 
-// --- I-45: typeof / instanceof type guard expressions ---
+// --- typeof / instanceof type guard expressions ---
 
 #[test]
 fn test_typeof_equals_string_known_type_resolves_true() {
@@ -3772,7 +3850,7 @@ fn test_instanceof_unknown_type_generates_todo() {
     }
 }
 
-// --- I-68: self.field string concat clone ---
+// --- self.field string concat clone ---
 
 #[test]
 fn test_self_field_string_concat_gets_clone() {
@@ -3803,7 +3881,7 @@ fn test_self_field_string_concat_gets_clone() {
     }
 }
 
-// --- I-65: undefined / Option semantics ---
+// --- undefined / Option semantics ---
 
 #[test]
 fn test_undefined_literal_converts_to_none() {
@@ -3874,7 +3952,7 @@ fn test_option_expected_undefined_stays_none() {
     assert_eq!(result, Expr::Ident("None".to_string()));
 }
 
-// --- I-90: string literal → enum variant conversion ---
+// --- string literal → enum variant conversion ---
 
 #[test]
 fn test_convert_lit_string_to_enum_variant_when_expected_is_string_literal_union() {
@@ -4039,7 +4117,7 @@ fn test_convert_call_args_string_literal_to_enum_variant() {
     );
 }
 
-// --- I-91: discriminated union object literal → enum variant ---
+// --- discriminated union object literal → enum variant ---
 
 #[test]
 fn test_convert_object_lit_discriminated_union_to_enum_variant() {
@@ -4150,7 +4228,7 @@ fn test_convert_member_expr_discriminant_field_to_method_call() {
     );
 }
 
-// --- I-46: computed property (index access) ---
+// --- computed property (index access) ---
 
 #[test]
 fn test_convert_member_expr_array_index_literal_generates_index() {
@@ -4178,7 +4256,7 @@ fn test_convert_member_expr_array_index_variable_generates_index() {
     );
 }
 
-// --- I-159: tuple index access ---
+// --- tuple index access ---
 
 #[test]
 fn test_convert_member_expr_tuple_literal_index_generates_field_access() {
@@ -4247,7 +4325,7 @@ fn test_resolve_expr_type_tuple_index_returns_element_type() {
     assert_eq!(result, Some(RustType::String));
 }
 
-// --- I-95: nullish coalescing expected type propagation ---
+// --- nullish coalescing expected type propagation ---
 
 #[test]
 fn test_convert_nullish_coalescing_rhs_string_gets_to_string_when_lhs_is_option_string() {
@@ -4283,7 +4361,7 @@ fn test_convert_nullish_coalescing_rhs_string_gets_to_string_when_lhs_is_option_
     }
 }
 
-// --- I-94: method argument type lookup ---
+// --- method argument type lookup ---
 
 #[test]
 fn test_convert_method_call_string_arg_gets_to_string_with_registry() {
@@ -4329,7 +4407,7 @@ fn test_convert_method_call_string_arg_gets_to_string_with_registry() {
     }
 }
 
-// --- I-97: discriminated union standalone field access ---
+// --- discriminated union standalone field access ---
 
 fn build_shape_registry_for_expr() -> TypeRegistry {
     let mut reg = TypeRegistry::new();
@@ -4467,7 +4545,7 @@ fn test_in_operator_unknown_type_generates_todo() {
     }
 }
 
-// ---- I-109: Arrow function destructuring parameters ----
+// ---- Arrow function destructuring parameters ----
 
 #[test]
 fn test_convert_expr_arrow_object_destructuring_generates_expansion() {
@@ -4518,7 +4596,7 @@ fn test_convert_expr_arrow_object_destructuring_generates_expansion() {
     }
 }
 
-// --- I-144: array destructuring in arrow params ---
+// --- array destructuring in arrow params ---
 
 #[test]
 fn test_convert_expr_arrow_array_destructuring_param_generates_tuple() {
@@ -4550,7 +4628,7 @@ fn test_convert_expr_arrow_array_destructuring_no_type_generates_param() {
     );
 }
 
-// --- I-135: object destructuring without type annotation ---
+// --- object destructuring without type annotation ---
 
 #[test]
 fn test_convert_expr_arrow_object_destructuring_no_type_generates_value_param() {
@@ -4596,7 +4674,7 @@ fn test_convert_expr_arrow_default_param_generates_option() {
     }
 }
 
-// ---- I-108: Update expressions in convert_expr ----
+// ---- Update expressions in convert_expr ----
 
 #[test]
 fn test_convert_expr_postfix_increment_returns_old_value() {
@@ -4664,7 +4742,7 @@ fn test_convert_expr_prefix_decrement_returns_new_value() {
     }
 }
 
-// ---- I-114: Function expressions ----
+// ---- Function expressions ----
 
 #[test]
 fn test_convert_expr_fn_expr_anonymous_generates_closure() {
@@ -4713,7 +4791,7 @@ fn test_convert_expr_fn_expr_no_params_generates_closure() {
     }
 }
 
-// ---- I-111: Regex literal ----
+// ---- Regex literal ----
 
 #[test]
 fn test_convert_expr_regex_no_flags_generates_regex_new() {
@@ -4775,7 +4853,7 @@ fn test_convert_expr_regex_multiple_flags_inlined() {
     );
 }
 
-// ---- I-168: Regex flag semantics ----
+// ---- Regex flag semantics ----
 
 #[test]
 fn test_convert_expr_regex_no_flags_generates_regex_ir() {
@@ -4889,7 +4967,7 @@ fn test_convert_expr_replace_with_non_global_regex_generates_replace() {
     );
 }
 
-// ---- I-176: Regex method conversion ----
+// ---- Regex method conversion ----
 
 #[test]
 fn test_convert_expr_regex_test_generates_is_match() {
@@ -4967,7 +5045,7 @@ fn test_convert_expr_regex_exec_generates_captures() {
     );
 }
 
-// ---- I-158: Non-null assertion ----
+// ---- Non-null assertion ----
 
 #[test]
 fn test_convert_expr_non_null_assertion_strips_assertion() {
@@ -4977,7 +5055,7 @@ fn test_convert_expr_non_null_assertion_strips_assertion() {
     assert_eq!(result, Expr::Ident("x".to_string()));
 }
 
-// ---- I-117: Null literal ----
+// ---- Null literal ----
 
 #[test]
 fn test_convert_expr_null_literal_generates_none() {
@@ -5006,7 +5084,7 @@ fn test_convert_expr_null_with_option_expected_returns_none_not_some_none() {
     );
 }
 
-// ---- I-160: Return value Option wrapping ----
+// ---- Return value Option wrapping ----
 
 #[test]
 fn test_convert_expr_ident_with_option_expected_passes_through() {
@@ -5038,7 +5116,7 @@ fn test_convert_expr_undefined_with_option_expected_returns_none() {
     assert_eq!(result, Expr::Ident("None".to_string()));
 }
 
-// ---- I-143: Tuple literal conversion ----
+// ---- Tuple literal conversion ----
 
 #[test]
 fn test_convert_expr_array_with_tuple_expected_generates_tuple() {
@@ -5086,7 +5164,7 @@ fn test_convert_expr_nested_array_with_vec_tuple_expected() {
     }
 }
 
-// ---- I-126: Private field (PrivateName) access ----
+// ---- Private field (PrivateName) access ----
 
 #[test]
 fn test_convert_expr_private_field_access_generates_field_access() {
@@ -5102,7 +5180,7 @@ fn test_convert_expr_private_field_access_generates_field_access() {
     }
 }
 
-// ---- I-115: Bitwise operators ----
+// ---- Bitwise operators ----
 
 #[test]
 fn test_convert_expr_bitwise_xor() {
@@ -5157,7 +5235,7 @@ fn test_convert_expr_shift_right() {
     assert!(matches!(result, Expr::BinaryOp { op: BinOp::Shr, .. }));
 }
 
-// --- I-179: unsigned right shift ---
+// --- unsigned right shift ---
 
 #[test]
 fn test_convert_expr_unsigned_right_shift_generates_ushr() {
@@ -5533,7 +5611,7 @@ fn test_convert_expr_arrow_rest_param_no_type() {
     }
 }
 
-// ---- I-129: Call target expansion ----
+// ---- Call target expansion ----
 
 #[test]
 fn test_convert_call_expr_paren_ident_unwraps_to_fn_call() {
@@ -5574,7 +5652,7 @@ fn test_convert_call_expr_chained_call_does_not_error() {
     );
 }
 
-// --- I-129: IIFE (immediately invoked function expression) ---
+// --- IIFE (immediately invoked function expression) ---
 
 #[test]
 fn test_convert_call_expr_arrow_iife_generates_closure_call() {
@@ -5600,7 +5678,7 @@ fn test_convert_call_expr_arrow_iife_with_args_generates_closure_call() {
     );
 }
 
-// ---- I-164: instanceof runtime resolution ----
+// ---- instanceof runtime resolution ----
 
 #[test]
 fn test_convert_instanceof_unknown_type_does_not_return_true() {
@@ -5650,7 +5728,7 @@ fn test_convert_instanceof_option_type_returns_is_some() {
     }
 }
 
-// ---- I-163: typeof runtime resolution ----
+// ---- typeof runtime resolution ----
 
 #[test]
 fn test_convert_typeof_static_number_returns_string_lit() {
@@ -5802,6 +5880,36 @@ fn test_fs_read_file_sync_fd0_converts_to_stdin_read() {
             }),
             method: "unwrap".to_string(),
             args: vec![],
+        }
+    );
+}
+
+#[test]
+fn test_convert_object_lit_all_computed_keys_generates_hashmap() {
+    // { [key]: "val" } (no type hint) → HashMap::from(vec![(key, "val".to_string())])
+    let module =
+        crate::parser::parse_typescript(r#"const x: Record<string, string> = { [key]: "val" };"#)
+            .unwrap();
+    let stmt = match &module.body[0] {
+        swc_ecma_ast::ModuleItem::Stmt(swc_ecma_ast::Stmt::Decl(swc_ecma_ast::Decl::Var(v))) => {
+            &v.decls[0]
+        }
+        _ => panic!("expected var decl"),
+    };
+    let init = stmt.init.as_ref().unwrap();
+    let result = convert_expr(init, &TypeRegistry::new(), None, &TypeEnv::new()).unwrap();
+    assert_eq!(
+        result,
+        Expr::FnCall {
+            name: "HashMap::from".to_string(),
+            args: vec![Expr::Vec {
+                elements: vec![Expr::Tuple {
+                    elements: vec![
+                        Expr::Ident("key".to_string()),
+                        Expr::StringLit("val".to_string()),
+                    ],
+                }],
+            }],
         }
     );
 }

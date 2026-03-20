@@ -10,7 +10,9 @@ use crate::registry::TypeRegistry;
 use crate::transformer::expressions::{convert_expr, resolve_expr_type};
 use crate::transformer::types::convert_ts_type;
 use crate::transformer::TypeEnv;
-use crate::transformer::{extract_pat_ident_name, extract_prop_name, single_declarator};
+use crate::transformer::{
+    extract_pat_ident_name, extract_prop_name, single_declarator, wrap_trait_for_value,
+};
 
 /// Converts an SWC [`ast::Stmt`] into an IR [`Stmt`].
 ///
@@ -166,6 +168,8 @@ fn convert_var_decl(
                 .transpose()?,
             _ => None,
         };
+        // Trait types in variable position → Box<dyn Trait>
+        let ty = ty.map(|t| wrap_trait_for_value(t, reg));
 
         let mutable = if matches!(var_decl.kind, ast::VarDeclKind::Const) {
             // const + object type → let mut (TS const allows field mutation)

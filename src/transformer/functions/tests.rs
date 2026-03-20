@@ -1,7 +1,9 @@
+use std::collections::HashMap;
+
 use super::*;
 use crate::ir::{BinOp, Expr, Item, Param, RustType, Stmt, StructField, Visibility};
 use crate::parser::parse_typescript;
-use crate::registry::TypeRegistry;
+use crate::registry::{TypeDef, TypeRegistry};
 use swc_ecma_ast::{Decl, ModuleItem};
 
 /// Helper: parse TS source and extract the first FnDecl.
@@ -948,6 +950,105 @@ fn test_object_destructuring_param_default_number_generates_unwrap_or() {
                 }
                 other => panic!("expected Let with unwrap_or, got: {:?}", other),
             }
+        }
+        other => panic!("expected Fn item, got: {:?}", other),
+    }
+}
+
+/// Helper: create a TypeRegistry with a trait type (methods-only interface).
+fn reg_with_trait(name: &str) -> TypeRegistry {
+    let mut reg = TypeRegistry::new();
+    let mut methods = HashMap::new();
+    methods.insert(
+        "greet".to_string(),
+        vec![("msg".to_string(), RustType::String)],
+    );
+    reg.register_interface(name.to_string());
+    reg.register(
+        name.to_string(),
+        TypeDef::Struct {
+            fields: vec![],
+            methods,
+            extends: vec![],
+        },
+    );
+    reg
+}
+
+#[test]
+fn test_convert_fn_param_trait_type_generates_dyn_ref() {
+    // function foo(g: Greeter): void { } → fn foo(g: &dyn Greeter) { }
+    let reg = reg_with_trait("Greeter");
+    let fn_decl = parse_fn_decl("function foo(g: Greeter): void { }");
+    let items = convert_fn_decl(&fn_decl, Visibility::Public, &reg, false)
+        .unwrap()
+        .0;
+    let item = items.last().unwrap();
+    match item {
+        Item::Fn { params, .. } => {
+            assert_eq!(params.len(), 1);
+            assert_eq!(
+                params[0].ty,
+                Some(RustType::Named {
+                    name: "&dyn Greeter".to_string(),
+                    type_args: vec![],
+                })
+            );
+        }
+        other => panic!("expected Fn item, got: {:?}", other),
+    }
+}
+
+#[test]
+fn test_convert_fn_return_trait_type_generates_box_dyn() {
+    // function make(): Greeter { } → fn make() -> Box<dyn Greeter> { }
+    let reg = reg_with_trait("Greeter");
+    let fn_decl = parse_fn_decl("function make(): Greeter { return null as any; }");
+    let items = convert_fn_decl(&fn_decl, Visibility::Public, &reg, true)
+        .unwrap()
+        .0;
+    let item = items.last().unwrap();
+    match item {
+        Item::Fn { return_type, .. } => {
+            assert_eq!(
+                *return_type,
+                Some(RustType::Named {
+                    name: "Box<dyn Greeter>".to_string(),
+                    type_args: vec![],
+                })
+            );
+        }
+        other => panic!("expected Fn item, got: {:?}", other),
+    }
+}
+
+#[test]
+fn test_convert_fn_param_struct_type_unchanged() {
+    // function foo(p: Point): void { } → fn foo(p: Point) { }
+    let mut reg = TypeRegistry::new();
+    reg.register(
+        "Point".to_string(),
+        TypeDef::Struct {
+            fields: vec![("x".to_string(), RustType::F64)],
+            methods: HashMap::new(),
+            extends: vec![],
+        },
+    );
+    let fn_decl = parse_fn_decl("function foo(p: Point): void { }");
+    let items = convert_fn_decl(&fn_decl, Visibility::Public, &reg, false)
+        .unwrap()
+        .0;
+    let item = items.last().unwrap();
+    match item {
+        Item::Fn { params, .. } => {
+            assert_eq!(params.len(), 1);
+            assert_eq!(
+                params[0].ty,
+                Some(RustType::Named {
+                    name: "Point".to_string(),
+                    type_args: vec![],
+                })
+            );
         }
         other => panic!("expected Fn item, got: {:?}", other),
     }

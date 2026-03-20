@@ -4,7 +4,7 @@
 //! 第 2 パスの変換時にネストしたオブジェクトリテラルや enum メンバーアクセスの
 //! 解決に使用する。
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use anyhow::Result;
 use swc_ecma_ast as ast;
@@ -53,6 +53,8 @@ pub enum TypeDef {
 #[derive(Debug, Clone)]
 pub struct TypeRegistry {
     types: HashMap<String, TypeDef>,
+    /// interface 由来の型名を保持するセット（class 由来は含まない）
+    interface_names: HashSet<String>,
 }
 
 impl TypeRegistry {
@@ -60,6 +62,7 @@ impl TypeRegistry {
     pub fn new() -> Self {
         Self {
             types: HashMap::new(),
+            interface_names: HashSet::new(),
         }
     }
 
@@ -73,12 +76,35 @@ impl TypeRegistry {
         self.types.get(name)
     }
 
+    /// 型名が trait（メソッドを持つ interface）を指すかどうかを判定する。
+    ///
+    /// interface 由来かつ methods が空でない場合に `true` を返す。
+    /// class 由来の型は常に `false`。
+    pub fn is_trait_type(&self, name: &str) -> bool {
+        if !self.interface_names.contains(name) {
+            return false;
+        }
+        if let Some(TypeDef::Struct { methods, .. }) = self.get(name) {
+            !methods.is_empty()
+        } else {
+            false
+        }
+    }
+
+    /// interface 名を登録する。
+    pub fn register_interface(&mut self, name: String) {
+        self.interface_names.insert(name);
+    }
+
     /// 別の TypeRegistry の内容をマージする。
     ///
     /// 同名の型が既に存在する場合は上書きする。
     pub fn merge(&mut self, other: &TypeRegistry) {
         for (name, def) in &other.types {
             self.types.insert(name.clone(), def.clone());
+        }
+        for name in &other.interface_names {
+            self.interface_names.insert(name.clone());
         }
     }
 }
@@ -134,8 +160,10 @@ fn collect_decl(reg: &mut TypeRegistry, decl: &ast::Decl) {
                         }
                     })
                     .collect();
+                let name = iface.id.sym.to_string();
+                reg.register_interface(name.clone());
                 reg.register(
-                    iface.id.sym.to_string(),
+                    name,
                     TypeDef::Struct {
                         fields,
                         methods,
@@ -1016,7 +1044,7 @@ mod tests {
         assert!(reg.get("anything").is_none());
     }
 
-    // --- I-92: intersection type registration ---
+    // --- intersection type registration ---
 
     #[test]
     fn test_build_registry_intersection_type_alias_merges_fields() {
@@ -1046,7 +1074,7 @@ mod tests {
         }
     }
 
-    // --- I-90: string literal union enum registration ---
+    // --- string literal union enum registration ---
 
     #[test]
     fn test_build_registry_string_literal_union_registers_enum() {
@@ -1087,7 +1115,7 @@ mod tests {
         }
     }
 
-    // --- I-91: discriminated union registration ---
+    // --- discriminated union registration ---
 
     #[test]
     fn test_build_registry_discriminated_union_registers_enum() {
@@ -1184,5 +1212,63 @@ mod tests {
             }
             other => panic!("expected Function, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn test_is_trait_type_methods_only_returns_true() {
+        let mut reg = TypeRegistry::new();
+        let mut methods = HashMap::new();
+        methods.insert(
+            "greet".to_string(),
+            vec![("msg".to_string(), RustType::String)],
+        );
+        reg.register_interface("Greeter".to_string());
+        reg.register(
+            "Greeter".to_string(),
+            TypeDef::Struct {
+                fields: vec![],
+                methods,
+                extends: vec![],
+            },
+        );
+        assert!(reg.is_trait_type("Greeter"));
+    }
+
+    #[test]
+    fn test_is_trait_type_fields_only_returns_false() {
+        let mut reg = TypeRegistry::new();
+        reg.register_interface("Point".to_string());
+        reg.register(
+            "Point".to_string(),
+            TypeDef::Struct {
+                fields: vec![("x".to_string(), RustType::F64)],
+                methods: HashMap::new(),
+                extends: vec![],
+            },
+        );
+        assert!(!reg.is_trait_type("Point"));
+    }
+
+    #[test]
+    fn test_is_trait_type_mixed_returns_true() {
+        let mut reg = TypeRegistry::new();
+        let mut methods = HashMap::new();
+        methods.insert("greet".to_string(), vec![]);
+        reg.register_interface("Ctx".to_string());
+        reg.register(
+            "Ctx".to_string(),
+            TypeDef::Struct {
+                fields: vec![("name".to_string(), RustType::String)],
+                methods,
+                extends: vec![],
+            },
+        );
+        assert!(reg.is_trait_type("Ctx"));
+    }
+
+    #[test]
+    fn test_is_trait_type_unknown_returns_false() {
+        let reg = TypeRegistry::new();
+        assert!(!reg.is_trait_type("Unknown"));
     }
 }

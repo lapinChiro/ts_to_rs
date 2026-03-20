@@ -980,7 +980,7 @@ mod tests {
         assert_eq!(generate_expr(&expr), "foo().bar()");
     }
 
-    // --- I-84: static method :: separator ---
+    // --- static method :: separator ---
 
     #[test]
     fn test_generate_static_method_call_uses_double_colon() {

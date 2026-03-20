@@ -9,7 +9,7 @@ function main(): void {
     const firstResult: string = s.replace(/aaa/, "ccc");
     console.log("first:", firstResult);
 
-    // String replace: first occurrence only (I-172)
+    // String replace: first occurrence only
     const strResult: string = s.replace("aaa", "ccc");
     console.log("string:", strResult);
 
@@ -18,7 +18,7 @@ function main(): void {
     const ciResult: string = mixed.replace(/hello/gi, "hi");
     console.log("case-insensitive global:", ciResult);
 
-    // I-176: regex.test() → is_match()
+    // regex.test() → is_match()
     const hasDigits: boolean = /\d+/.test("abc123");
     console.log("has digits:", hasDigits);
     const noDigits: boolean = /\d+/.test("abcdef");

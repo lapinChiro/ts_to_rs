@@ -907,7 +907,7 @@ fn test_transform_var_arrow_explicit_return_type_takes_priority() {
     }
 }
 
-// ---- I-125: param type inference from variable annotation ----
+// ---- param type inference from variable annotation ----
 
 #[test]
 fn test_transform_var_arrow_infers_param_types_from_variable_annotation() {

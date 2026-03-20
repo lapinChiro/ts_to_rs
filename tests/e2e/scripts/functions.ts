@@ -11,7 +11,7 @@ function greet(name: string, greeting: string = "Hello"): string {
     return greeting + " " + name;
 }
 
-// I-82: Higher-order function with function argument
+// Higher-order function with function argument
 function applyTwice(f: (x: number) => number, x: number): number {
     return f(f(x));
 }

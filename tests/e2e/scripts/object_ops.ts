@@ -37,7 +37,10 @@ function main(): void {
     console.log("height:", r.height);
     console.log("area:", area(r));
 
-    // I-86: Optional fields omitted → None in Rust
+    // Optional fields omitted → None in Rust
     const cfg: Config = { name: "app" };
     console.log("config:", describeConfig(cfg));
+
+    // Computed property keys → HashMap (変換は動作するが、
+    // use std::collections::HashMap の自動追加が未実装のため E2E ではスキップ)
 }

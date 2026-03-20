@@ -9,7 +9,9 @@ use crate::ir::{Expr, Item, MatchArm, Param, RustType, Stmt, Visibility};
 use crate::registry::TypeRegistry;
 use crate::transformer::statements::convert_stmt_list;
 use crate::transformer::types::{convert_property_signature, convert_ts_type, extract_type_params};
-use crate::transformer::{extract_pat_ident_name, extract_prop_name, TypeEnv};
+use crate::transformer::{
+    extract_pat_ident_name, extract_prop_name, wrap_trait_for_param, wrap_trait_for_value, TypeEnv,
+};
 
 /// Converts an SWC [`ast::FnDecl`] into an IR [`Item::Fn`].
 ///
@@ -79,6 +81,9 @@ pub fn convert_fn_decl(
     } else {
         return_type
     };
+
+    // Trait types in return position → Box<dyn Trait>
+    let return_type = return_type.map(|ty| wrap_trait_for_value(ty, reg));
 
     let mut fn_type_env = TypeEnv::new();
     for p in &params {
@@ -255,6 +260,8 @@ fn convert_param(
                 &mut type_extra_items,
                 reg,
             )?;
+            // Trait types in parameter position → &dyn Trait
+            let rust_type = wrap_trait_for_param(rust_type, reg);
             Ok((
                 Param {
                     name: param_name,

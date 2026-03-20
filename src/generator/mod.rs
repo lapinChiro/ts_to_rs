@@ -1186,7 +1186,7 @@ async fn main() {
         );
     }
 
-    // --- Expr::Regex tests (I-174) ---
+    // --- Expr::Regex tests ---
 
     #[test]
     fn test_generate_regex_backslash_pattern_uses_raw_string() {

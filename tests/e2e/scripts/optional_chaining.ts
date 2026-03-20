@@ -19,7 +19,7 @@ function main(): void {
     console.log("with value:", withDefault(42, 0));
     console.log("with fallback:", withDefault(undefined, 99));
 
-    // I-81: method call name mapping (toUpperCase → to_uppercase)
+    // method call name mapping (toUpperCase → to_uppercase)
     console.log("upper hello:", safeUpper("hello"));
     console.log("upper opt:", safeUpperOpt("world"));
     console.log("upper opt undef:", safeUpperOpt(undefined));

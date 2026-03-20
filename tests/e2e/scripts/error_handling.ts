@@ -10,7 +10,7 @@ function riskyOperation(x: number): number {
     return x;
 }
 
-// try/catch 両方が return する関数 (I-54 fix)
+// try/catch 両方が return する関数 
 function safeDivide(a: number, b: number): number {
     try {
         if (b === 0) {

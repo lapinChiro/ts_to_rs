@@ -1609,8 +1609,9 @@ fn try_convert_intersection_type(
                             }
                             fields.push(field);
                         }
-                        // TODO: I-137 — メソッドシグネチャは struct フィールドではなく
-                        // impl ブロックのメソッドとして変換すべき。現時点ではスキップ。
+                        // TODO: intersection 内の型リテラルにメソッドシグネチャが含まれる場合、
+                        // struct フィールドではなく impl ブロックのメソッドとして変換すべき。
+                        // 現時点ではスキップ。
                         _ => continue,
                     }
                 }
@@ -1770,8 +1771,9 @@ fn convert_intersection_in_annotation(
                             }
                             fields.push(field);
                         }
-                        // TODO: I-137 — メソッドシグネチャは struct フィールドではなく
-                        // impl ブロックのメソッドとして変換すべき。現時点ではスキップ。
+                        // TODO: intersection 内の型リテラルにメソッドシグネチャが含まれる場合、
+                        // struct フィールドではなく impl ブロックのメソッドとして変換すべき。
+                        // 現時点ではスキップ。
                         _ => continue,
                     }
                 }

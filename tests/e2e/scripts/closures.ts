@@ -16,7 +16,7 @@ function main(): void {
     console.log("offset 5:", addOffset(5));
     console.log("offset 20:", addOffset(20));
 
-    // I-80: Closure capturing mutable variable
+    // Closure capturing mutable variable
     let count: number = 0;
     const inc = (): void => { count += 1; };
     inc();

@@ -172,6 +172,9 @@ pub fn load_types_json(json: &str) -> Result<TypeRegistry> {
     let mut registry = TypeRegistry::new();
     for (name, def) in parsed.types {
         if let Some(type_def) = convert_external_typedef(&def) {
+            if matches!(def, ExternalTypeDef::Interface { .. }) {
+                registry.register_interface(name.clone());
+            }
             registry.register(name.clone(), type_def);
         }
     }

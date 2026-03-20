@@ -21,6 +21,44 @@ use crate::registry::TypeRegistry;
 use crate::transformer::classes::ClassInfo;
 use crate::transformer::types::convert_ts_type;
 
+/// Wraps a trait type for parameter position: `Greeter` → `&dyn Greeter`.
+///
+/// Non-trait types are returned unchanged.
+pub(crate) fn wrap_trait_for_param(ty: RustType, reg: &TypeRegistry) -> RustType {
+    if let RustType::Named {
+        ref name,
+        ref type_args,
+    } = ty
+    {
+        if type_args.is_empty() && reg.is_trait_type(name) {
+            return RustType::Named {
+                name: format!("&dyn {name}"),
+                type_args: vec![],
+            };
+        }
+    }
+    ty
+}
+
+/// Wraps a trait type for value position (variable, return): `Greeter` → `Box<dyn Greeter>`.
+///
+/// Non-trait types are returned unchanged.
+pub(crate) fn wrap_trait_for_value(ty: RustType, reg: &TypeRegistry) -> RustType {
+    if let RustType::Named {
+        ref name,
+        ref type_args,
+    } = ty
+    {
+        if type_args.is_empty() && reg.is_trait_type(name) {
+            return RustType::Named {
+                name: format!("Box<dyn {name}>"),
+                type_args: vec![],
+            };
+        }
+    }
+    ty
+}
+
 /// ローカル変数の型情報を保持する型環境。
 ///
 /// スコープチェーンにより、ブロックスコープでの変数シャドウイングを正しく追跡する。
@@ -125,6 +163,8 @@ pub fn convert_ident_to_param(
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("parameter '{}' has no type annotation", name))?;
     let rust_type = types::convert_ts_type(&ty.type_ann, &mut Vec::new(), reg)?;
+    // Trait types in parameter position → &dyn Trait
+    let rust_type = wrap_trait_for_param(rust_type, reg);
     Ok(crate::ir::Param {
         name,
         ty: Some(rust_type),

@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use super::*;
 use crate::ir::{BinOp, Expr, MatchPattern, RustType, Stmt, UnOp};
 use crate::parser::parse_typescript;
@@ -200,7 +202,7 @@ fn test_convert_stmt_for_of() {
     );
 }
 
-// --- I-113: for...in ---
+// --- for...in ---
 
 #[test]
 fn test_convert_stmt_for_in_generates_keys_iteration() {
@@ -1423,7 +1425,7 @@ fn test_convert_switch_string_discriminant_generates_string_patterns() {
     }
 }
 
-// --- I-60: Switch non-literal case ---
+// --- Switch non-literal case ---
 
 #[test]
 fn test_switch_nonliteral_case_generates_guard() {
@@ -1522,7 +1524,7 @@ fn test_switch_mixed_literal_nonliteral_separate_arms() {
     }
 }
 
-// --- I-87: Local interface/type declarations ---
+// --- Local interface/type declarations ---
 
 #[test]
 fn test_convert_stmt_local_interface_skipped() {
@@ -1553,7 +1555,7 @@ fn test_convert_stmt_local_type_alias_skipped() {
     assert!(matches!(&result[0], Stmt::Let { name, .. } if name == "b"));
 }
 
-// --- I-17: const mutability body scan ---
+// --- const mutability body scan ---
 
 #[test]
 fn test_const_field_assignment_in_body_becomes_let_mut() {
@@ -1594,7 +1596,7 @@ fn test_const_mutating_method_in_body_becomes_let_mut() {
     }
 }
 
-// --- I-80: Closure mutable capture ---
+// --- Closure mutable capture ---
 
 #[test]
 fn test_closure_mutating_outer_var_closure_binding_becomes_let_mut() {
@@ -1615,7 +1617,7 @@ fn test_closure_mutating_outer_var_closure_binding_becomes_let_mut() {
     }
 }
 
-// --- I-14: Object destructuring extensions ---
+// --- Object destructuring extensions ---
 
 #[test]
 fn test_object_destructuring_default_number_generates_unwrap_or() {
@@ -1801,7 +1803,7 @@ fn test_object_destructuring_no_default_unchanged() {
     );
 }
 
-// --- I-91: discriminated union switch → enum match ---
+// --- discriminated union switch → enum match ---
 
 #[test]
 fn test_convert_switch_discriminated_union_to_enum_match() {
@@ -1875,7 +1877,7 @@ fn test_convert_switch_discriminated_union_to_enum_match() {
     }
 }
 
-// --- I-97: discriminated union field access in switch arms ---
+// --- discriminated union field access in switch arms ---
 
 /// Helper to build a Shape discriminated union registry.
 fn build_shape_registry() -> TypeRegistry {
@@ -2210,7 +2212,7 @@ fn test_cond_assign_normal_if_unchanged() {
     assert!(matches!(&result[0], Stmt::If { .. }));
 }
 
-// ---- I-120: for...of array destructuring ----
+// ---- for...of array destructuring ----
 
 #[test]
 fn test_convert_stmt_for_of_array_destructuring_generates_tuple() {
@@ -2291,5 +2293,42 @@ fn test_convert_stmt_for_loop_multiple_declarators() {
             assert!(*mutable, "len should be mutable");
         }
         other => panic!("expected Let for len, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_convert_var_decl_trait_type_generates_box_dyn() {
+    // const g: Greeter = ... → let g: Box<dyn Greeter> = ...
+    let mut reg = TypeRegistry::new();
+    let mut methods = HashMap::new();
+    methods.insert(
+        "greet".to_string(),
+        vec![("msg".to_string(), RustType::String)],
+    );
+    reg.register_interface("Greeter".to_string());
+    reg.register(
+        "Greeter".to_string(),
+        TypeDef::Struct {
+            fields: vec![],
+            methods,
+            extends: vec![],
+        },
+    );
+    let stmts = parse_fn_body("function _f(): void { const g: Greeter = null as any; }");
+    let stmt = &stmts[0];
+    let result = convert_stmt(stmt, &reg, None, &mut TypeEnv::new()).unwrap();
+    assert_eq!(result.len(), 1);
+    match &result[0] {
+        Stmt::Let { name, ty, .. } => {
+            assert_eq!(name, "g");
+            assert_eq!(
+                *ty,
+                Some(RustType::Named {
+                    name: "Box<dyn Greeter>".to_string(),
+                    type_args: vec![],
+                })
+            );
+        }
+        other => panic!("expected Let, got {:?}", other),
     }
 }

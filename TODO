@@ -18,12 +18,13 @@
 - **スコープ外** — 明示的に対象外。需要発生時に再評価
 
 件数は Hono ベンチマーク（`./scripts/hono-bench.sh`）の実測値に基づく。
-158 ファイル中 76 ファイルがクリーン（48.1%）、177 エラーインスタンス。コンパイルクリーン 47 ファイル（29.7%）。
+158 ファイル中 77 ファイルがクリーン（48.7%）、172 エラーインスタンス。コンパイルクリーン 47 ファイル（29.7%）。
 **注意**: ベンチマーク実行前に `cargo build --release` が必要。古いビルドで実行すると数値が不正確になる。
 **補足**: 「クリーン」は変換エラーなし（`--report-unsupported` でエラー 0）を意味する。生成 Rust のコンパイル可能性とは別指標。クリーンファイルでも未解決型や不正構文によりコンパイルは通らない場合がある。
 **ビルトイン型**: I-24 完了済み。Web API ビルトイン型（Response, Request, Headers 等 106 型）はバイナリに埋め込み済みで、デフォルトで TypeRegistry にロードされる。
 **Node.js API**: I-49/I-50 完了済み。`fs.readFileSync/writeFileSync/existsSync`、`process.env.VAR`、stdin パターンの変換が動作。E2E テスト基盤に stdin/環境変数ヘルパーあり。
 **Interface → Trait**: I-137/I-127 完了済み。interface は内容に応じて struct/trait/struct+trait+impl に 3 分類変換。extends → supertrait/フィールド継承。交差型の trait 合成対応。
+**Trait パラメータ型**: I-187 完了済み。trait 型のパラメータは `&dyn Trait`、変数・戻り値は `Box<dyn Trait>` に変換。ただし呼び出し側の自動調整（I-189）は未実装。
 **resolve-types**: `ts_to_rs resolve-types --tsconfig ...` サブコマンド実装済み。Docker イメージ定義あり（`tools/extract-types/Dockerfile`）。ただし Docker での E2E テストは未実施。
 
 ---
@@ -38,7 +39,7 @@
 | **完了: Web API ビルトイン型** | ~~I-24~~ **達成** | tsc 統合 + ビルトイン型埋め込み + resolve-types サブコマンド |
 | **完了: E2E I/O テスト基盤** | ~~I-49/I-50~~ **達成** | fs/process.env/stdin 変換 + E2E テスト基盤（stdin/env ヘルパー） |
 | **完了: Interface → Trait** | ~~I-137/I-127~~ **達成** | interface 3 分類変換 + extends + 交差型 trait 合成 |
-| **次: コンパイル可能性の向上** | コンパイルクリーン率 > 40% | I-112b（76 件解消）、I-25（48 件解消）、I-186（コンパイルエラー修正）、I-187（trait パラメータ型）。「変換成功かつコンパイル成功」のファイル数を主指標にする |
+| **次: コンパイル可能性の向上** | コンパイルクリーン率 > 40% | I-112b（76 件解消、PRD 化済み）、I-25（48 件解消、PRD 化済み）、I-186（完了: split 型不一致修正）、I-187（完了: trait パラメータ型）。残: I-189（呼び出し側自動調整）。「変換成功かつコンパイル成功」のファイル数を主指標にする |
 | **その次: テスト拡充** | コンパイルクリーン率 > 50% | E2E テストの拡充（I-20, I-71, I-72, I-74）、HTTP 対応（I-183） |
 
 ---
@@ -53,8 +54,6 @@
 
 ### Tier 1: 高優先度 — 正確性・変換成功率を直接改善
 
-#### 未対応構文（PRD 化済みを除く）
-
 #### union/intersection の情報欠落
 
 - **[I-171]** **union の未対応メンバー → `Other{N}(Any)` フォールバック** — 情報欠落
@@ -64,6 +63,10 @@
 
 #### 型変換・型推論
 
+- **[I-189]** **trait 型の呼び出し側自動調整** — コンパイルエラー（I-187 の後続）
+    - `&dyn Trait` パラメータへの引数に `&` を自動付与
+    - `Box<dyn Trait>` 変数の初期化に `Box::new()` を自動付与
+    - I-187 で型注釈の変換は完了済みだが、呼び出し側・初期化側が未調整のためコンパイルエラーになる
 - **[I-93]** **ネストしたフィールド/メソッド経由の変更検出** — ミュータビリティ推論
     - `mark_mutated_vars` は直接的な変更のみ検出。ネストしたパスは未検出
 - **[I-62]** **`is_string_type` の `Option<String>` ハック除去** — 型推論
@@ -72,10 +75,11 @@
 - **[I-12]** **`Promise<T>` の union 内展開** — 型変換正確性
 - **[I-13]** **super() の位置ベースフィールドマッピング** — 式変換正確性
 - **[I-61]** **型推論: チェーンメソッド呼び出しの戻り値型追跡** — 型推論
+
 #### import/export・API
 
-- **[I-18]** **re-export の追跡** — import/export（**2 インスタンス**、EXPORT_ALL を含む）
-    - `export * from './module'`（`ExportAll`）が未対応
+- **[I-18]** **re-export の追跡** — import/export
+    - `export * from './module'`（`ExportAll`）は部分的に動作（`pub use crate::<mod>::*` を生成）。予約語モジュール名でコンパイルエラーになるケースあり
     - 名前付き re-export `export { X } from './module'` の追跡も含む
 - **[I-21]** **async void のセマンティクス差異対応** — 変換正確性
 
@@ -120,7 +124,7 @@
 - **[I-31]** **expressions/mod.rs のモジュール分割** — リファクタリング
 - **[I-33]** **非プリミティブ type assertion のコメント保持** — type assertion
 - **[I-34]** **Math.random() → `rand` クレート** — 組み込み API
-- **[I-35]** **indexed access type の非文字列キー対応** — 型構文（**4 インスタンス**、INDEXED_ACCESS のうちの一部）
+- **[I-35]** **indexed access type の非文字列キー対応** — 型構文（**5 インスタンス**、non-string key 3 + base type 2）
     - 🔗 解消すると I-32（コンパイルテストスキップ解消、残り 1 件）が可能
 - **[I-36]** **qualified type name (`A.B` 形式)** — 型構文（**3 インスタンス**、QUALIFIED_TYPE）
 - **[I-58]** **Trait の type_params 未対応** — 型構文
@@ -136,6 +140,13 @@
 - **[I-156]** **オブジェクトリテラルのゲッター/メソッド記法** — 式変換（**1 インスタンス**）
 - **[I-126]** **計算プロパティアクセス残存** — 式変換（**3 インスタンス**、MEMBER_PROPERTY の一部）
     - `#privateField` 対応済み（14→3）。残存は未特定パターン
+- **[I-190]** **HashMap 変換時の `use std::collections::HashMap` 自動追加** — コード生成
+    - 計算プロパティキー `{ [key]: value }` → `HashMap::from(...)` の変換は動作するが、生成コードに use 宣言が含まれないためコンパイルエラーになる
+    - 🔗 I-30（Cargo.toml 依存追加）と同系統の「生成コードの周辺ファイル/宣言の自動生成」問題
+- **[I-188]** **`substring`/`slice` のバイト境界安全性** — 文字列変換
+    - 現在 `s[start..end]` はバイトインデックスで生成しており、マルチバイト文字でパニックする可能性がある
+    - `s.chars().skip(start).take(end-start).collect::<String>()` 等の安全な変換が必要だが、パフォーマンスとのトレードオフがある
+    - ASCII のみのユースケースでは現在の実装で問題ない
 
 ---
 

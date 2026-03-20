@@ -1236,7 +1236,7 @@ fn test_convert_interface_call_signature_no_params_generates_fn_type() {
     );
 }
 
-// --- I-130: call signature rest parameters ---
+// --- call signature rest parameters ---
 
 #[test]
 fn test_convert_interface_call_signature_rest_param_generates_fn_type() {
@@ -1927,7 +1927,7 @@ fn test_convert_ts_type_union_void_treated_as_nullable() {
 
 #[test]
 fn test_convert_type_alias_union_void_generates_option() {
-    // type X = string | void → type X = Option<String> (I-170: void filtered in type alias)
+    // type X = string | void → type X = Option<String> (void filtered in type alias)
     let decl = parse_type_alias("type X = string | void;");
     let item = convert_type_alias(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
     match item {
@@ -2179,7 +2179,7 @@ fn test_convert_ts_type_readonly_returns_inner_type() {
     );
 }
 
-// --- I-150: readonly type operator ---
+// --- readonly type operator ---
 
 #[test]
 fn test_convert_ts_type_readonly_array_returns_vec_string() {
@@ -2215,7 +2215,7 @@ fn test_convert_ts_type_readonly_number_array_returns_vec_f64() {
     assert_eq!(ty, RustType::Vec(Box::new(RustType::F64)));
 }
 
-// --- I-149: typeof type query ---
+// --- typeof type query ---
 
 #[test]
 fn test_convert_ts_type_typeof_known_fn_returns_fn_type() {

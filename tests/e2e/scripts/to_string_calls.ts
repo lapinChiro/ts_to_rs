@@ -1,4 +1,4 @@
-// I-67: closure with String parameter - .to_string() at call site
+// closure with String parameter - .to_string() at call site
 function main(): void {
     const shout = (msg: string): string => {
         return msg + "!";

@@ -15,7 +15,7 @@ function main(): void {
         console.log("c is undefined");
     }
 
-    // I-160: nullable return value — return value wrapped in Some()
+    // nullable return value — return value wrapped in Some()
     function findValue(id: number): number | null {
         if (id === 1) {
             return 42;
