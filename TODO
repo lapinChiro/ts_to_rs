@@ -29,12 +29,7 @@
 - **Interface → Trait**: interface は内容に応じて struct/trait/struct+trait+impl に 3 分類変換。extends, 交差型 trait 合成対応
 - **Trait パラメータ型**: `&dyn Trait` / `Box<dyn Trait>` 変換 + 呼び出し側型強制（`&*` / `Box::new()`）
 - **resolve-types**: `ts_to_rs resolve-types --tsconfig ...` サブコマンド実装済み
-- **型 narrowing 基盤**: typeof/instanceof/null-check/truthy → `if let` パターン生成。any 型パラメータ/ローカル変数の typeof/instanceof → enum 自動生成。enum 型の typeof/instanceof → `matches!` 式生成
-- **型 narrowing 構文カバレッジ**: typeof "object"/"function" バリアント解決、複合条件 (&&) のネスト if let、三項演算子の narrowing（`Expr::IfLet`）、switch (typeof x) の match 変換
-
-### 楽観的 true の除去状況
-
-`resolve_typeof_match` と `convert_instanceof` の `Any | None → true` フォールバックを `todo!()` に置換済み。サイレントな `true` 生成は存在しない。型が解決できない typeof/instanceof はコンパイルエラーとして検出される。
+- **型 narrowing**: typeof/instanceof/null-check/truthy → `if let` パターン生成。any 型 → enum 自動生成。typeof "object"/"function" バリアント解決。複合条件 (&&) のネスト if let。三項演算子の `Expr::IfLet`。switch (typeof x) の match 変換。楽観的 `true` フォールバックは `todo!()` に置換済み
 
 ---
 
@@ -46,7 +41,7 @@
 | **完了: Web API ビルトイン型** | ~~I-24~~ **達成** | tsc 統合 + ビルトイン型埋め込み + resolve-types |
 | **完了: E2E I/O テスト基盤** | ~~I-49/I-50~~ **達成** | fs/process.env/stdin + E2E テスト基盤 |
 | **完了: Interface → Trait** | ~~I-137/I-127~~ **達成** | interface 3 分類 + extends + 交差型 |
-| **次: コンパイル可能性の向上** | コンパイルクリーン率 > 40% | 型 narrowing Phase B（B-1〜B-4 完了、Placeholder 除去残）、I-61（チェーンメソッド）、I-100（ジェネリクス）。「変換成功かつコンパイル成功」のファイル数を主指標 |
+| **次: コンパイル可能性の向上** | コンパイルクリーン率 > 40% | I-61（チェーンメソッド）、I-100（ジェネリクス）。「変換成功かつコンパイル成功」のファイル数を主指標 |
 | **その次: テスト拡充** | コンパイルクリーン率 > 50% | E2E テストの拡充（I-20, I-71, I-72, I-74）、HTTP 対応（I-183） |
 
 ---
@@ -61,14 +56,14 @@
 
 ### Tier 1: 高優先度 — 正確性・伝播リスク・レバレッジ
 
-#### 型 narrowing
+#### 変換正確性（サイレント意味変更）
 
-- **[I-216]** **switch 文の default 後の case が unreachable になる** — 変換正確性（サイレント意味変更）
+- **[I-216]** **switch 文の default 後の case が unreachable になる** — サイレント意味変更
   - TypeScript では `default` は「全 case 不一致時」に評価されるため、default 後の case にも到達可能
   - Rust の `match` では `_` wildcard が先にマッチし、後続アームが unreachable になる
   - typeof switch（`try_convert_typeof_switch`）と通常 switch（`convert_switch_clean_match`）の両方に影響
-  - 解決策: default を常に最後のアームに移動するか、default 前後の case を全て列挙してから wildcard を生成する
-  - 発生頻度は極めて低い（default 後に case を書くパターンは稀）が、サイレント意味変更カテゴリのため Tier 1
+  - 解決策: default を常に最後のアームに移動する
+  - 発生頻度は極めて低いが、サイレント意味変更カテゴリのため Tier 1
 
 #### 型変換・型推論
 
@@ -103,25 +98,26 @@
   - typeof → enum 自動生成は完了。instanceof → enum も完了（同一ファイル内のクラスのみ）
   - 残: typeof/instanceof 未使用の `any` は `serde_json::Value` のまま。関数返り値の暗黙的 any 変数は enum 化されない
 
+#### 型 narrowing 残課題
+
+- **[I-215]** **typeof "object"/"function" の narrowing 内部型解決** — 型 narrowing
+  - `typeof_string_to_rust_type` が "string"/"number"/"boolean" のみ対応し、"object"/"function" は `None` を返す
+  - パターンマッチ自体は正しいが、case body / then ブランチ内で変数の type_env が narrowing されず型依存変換が不正確になりうる
+  - 解決策: enum バリアントの内部型を TypeRegistry から解決し、narrowing に使用する
+  - if let・三項演算子・switch typeof の全てに影響
+- **[I-213]** **`!==` / `!=` ガードの排除 narrowing** — 型 narrowing
+  - `typeof x !== "number"` の if 文 then ブランチで `x` が `String` に narrowing されない（`StringOrF64` のまま）
+  - if-let パターンの branch swap で制御フローは正しいが、不一致側の body 内で型排除が効かない
+  - 解決策: 2 バリアント union の `!==` → else ブランチで反対のバリアントに narrowing。3+ バリアントでは match 式が必要
+- **[I-214]** **三項演算子の複合条件 (&&) narrowing** — 式変換
+  - `typeof x === "string" && x.length > 0 ? x : "default"` のような compound `&&` は三項演算子で未対応
+  - if 文の compound narrowing は `extract_narrowing_guards` で対応済みだが、`convert_cond_expr` は `extract_narrowing_guard`（単数）のみ使用
+  - 解決策: `convert_cond_expr` でも `extract_narrowing_guards` を使い、複数ガード時はネスト `Expr::IfLet` を生成
+
 #### 型変換・型推論
 
-- **[I-215]** **typeof "object"/"function" の case body 内 narrowing** — 型 narrowing
-  - `typeof_string_to_rust_type` が "string"/"number"/"boolean" のみ対応し、"object"/"function" は `None` を返す
-  - if let / switch match のパターン自体は正しい（B-1 で `resolve_typeof_to_enum_variant` に "object"→"Object", "function"→"Function" を追加済み）
-  - 問題: case body / then ブランチ内で変数の type_env が narrowing されないため、型依存の変換が不正確になりうる
-  - 解決策: enum バリアントの内部型を TypeRegistry から解決し、narrowing に使用する。any-narrowing enum なら `serde_json::Value`、union enum ならバリアント固有の型
-  - if let（B-2）、三項演算子（B-3）、switch typeof（B-4）の全てに影響
-- **[I-213]** **`!==` / `!=` ガードの排除 narrowing** — コンパイルエラー
-  - `typeof x !== "number"` の then ブランチで `x` が `String` に narrowing されない（`StringOrF64` のまま）
-  - 現在の `generate_if_let` は if-let パターンのマッチ/不一致で分岐を振り分けるのみ。不一致側（else）での型排除はサポートしていない
-  - 単一ガード・複合ガードの両方で同じ制限。union が 2 バリアントの場合は片方を排除すれば確定するため、narrowing 可能
-  - 解決策: 2 バリアント union の `!==` → else ブランチで反対のバリアントに narrowing。3+ バリアントでは match 式が必要
-- **[I-194]** **typeof 未登録識別子の解決** — 型変換（**4 インスタンス**: `typeof fetch` ×3, `typeof WebSocket` ×1）
+- **[I-194]** **typeof 未登録識別子の解決** — 型変換（**3 インスタンス**: `typeof fetch` ×2, `typeof WebSocket` ×1）
   - TypeRegistry に `fetch`/`WebSocket` が未登録のため `TsTypeQuery` が失敗
-- **[I-214]** **三項演算子の複合条件 (&&) narrowing** — 式変換
-  - `typeof x === "string" && x.length > 0 ? x : "default"` のような compound `&&` は三項演算子の narrowing で未対応
-  - if 文の compound narrowing（B-2）は `extract_narrowing_guards` で対応済みだが、`convert_cond_expr` は `extract_narrowing_guard`（単数）のみ使用
-  - 解決策: `convert_cond_expr` でも `extract_narrowing_guards` を使い、複数ガード時はネスト `Expr::IfLet` を生成
 - **[I-93]** **ネストしたフィールド/メソッド経由の変更検出** — ミュータビリティ推論
 - **[I-112c]** **型注釈なし変数のオブジェクトリテラル** — Hono 2 ファイルに影響
 - **[I-62]** **`is_string_type` の `Option<String>` ハック除去** — 型推論
@@ -162,7 +158,7 @@
 
 #### 未対応構文（小修正）
 
-- **[I-195]** **arrow デフォルトパラメータの残存パターン** — **4 インスタンス**
+- **[I-195]** **arrow デフォルトパラメータの残存パターン** — **3 インスタンス**
 - **[I-196]** **`parseInt` の radix 引数対応** — **1 インスタンス**
 
 #### ベンチマーク・テスト基盤
@@ -199,7 +195,7 @@
 - **[I-106]** **ラベル付き while での条件内代入**
 - **[I-148]** **for...of デストラクチャリングの残存パターン** — **1 インスタンス**
 - **[I-138]** **タグ付きテンプレートリテラル** — **1 インスタンス**
-- **[I-139]** **関数型パラメータパターン** — **2 インスタンス**
+- **[I-139]** **関数型パラメータパターン** — **3 インスタンス**
 - **[I-151]** **代入ターゲットパターン** — **3 インスタンス**
 - **[I-154]** **カンマ式 (`SeqExpr`)** — **1 インスタンス**
 - **[I-155]** **`satisfies` 式** — **1 インスタンス**
