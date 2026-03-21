@@ -22,6 +22,7 @@ use swc_ecma_ast::{Decl, ImportSpecifier, Module, ModuleDecl, ModuleItem, Stmt};
 use std::collections::HashMap;
 
 use crate::ir::{EnumValue, EnumVariant, Item, Visibility};
+use crate::pipeline::SyntheticTypeRegistry;
 use crate::registry::TypeRegistry;
 use crate::transformer::classes::ClassInfo;
 
@@ -53,6 +54,7 @@ pub fn single_declarator(var_decl: &ast::VarDecl) -> Result<&ast::VarDeclarator>
 /// and returns a `Param`. Used by both function and class method parameter conversion.
 pub fn convert_ident_to_param(
     ident: &ast::BindingIdent,
+    synthetic: &mut SyntheticTypeRegistry,
     reg: &crate::registry::TypeRegistry,
 ) -> Result<crate::ir::Param> {
     let name = ident.id.sym.to_string();
@@ -60,7 +62,8 @@ pub fn convert_ident_to_param(
         .type_ann
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("parameter '{}' has no type annotation", name))?;
-    let rust_type = types::convert_type_for_position(&ty.type_ann, TypePosition::Param, reg)?;
+    let rust_type =
+        types::convert_type_for_position(&ty.type_ann, TypePosition::Param, synthetic, reg)?;
     Ok(crate::ir::Param {
         name,
         ty: Some(rust_type),
@@ -108,7 +111,11 @@ impl std::error::Error for UnsupportedSyntaxError {}
 ///
 /// Returns an error if transformation fails or unsupported syntax is encountered.
 pub fn transform_module(module: &Module, reg: &TypeRegistry) -> Result<Vec<Item>> {
-    transform_module_with_path(module, reg, None)
+    let mut synthetic = SyntheticTypeRegistry::new();
+    let mut items = transform_module_with_path(module, reg, None, &mut synthetic)?;
+    let mut all = synthetic.into_items();
+    all.append(&mut items);
+    Ok(all)
 }
 
 /// Transforms an SWC [`Module`] into IR items, with the file's crate-relative directory.
@@ -120,9 +127,10 @@ pub fn transform_module_with_path(
     module: &Module,
     reg: &TypeRegistry,
     current_file_dir: Option<&str>,
+    synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Vec<Item>> {
     // Pre-scan: collect class info for inheritance resolution
-    let class_map = classes::pre_scan_classes(module, reg);
+    let class_map = classes::pre_scan_classes(module, synthetic, reg);
     let iface_methods = classes::pre_scan_interface_methods(module);
 
     let mut items = Vec::new();
@@ -134,6 +142,7 @@ pub fn transform_module_with_path(
             &iface_methods,
             false,
             current_file_dir,
+            synthetic,
         )?;
         items.extend(converted);
     }
@@ -155,7 +164,12 @@ pub fn transform_module_collecting(
     module: &Module,
     reg: &TypeRegistry,
 ) -> Result<(Vec<Item>, Vec<UnsupportedSyntaxError>)> {
-    transform_module_collecting_with_path(module, reg, None)
+    let mut synthetic = SyntheticTypeRegistry::new();
+    let (mut items, unsupported) =
+        transform_module_collecting_with_path(module, reg, None, &mut synthetic)?;
+    let mut all = synthetic.into_items();
+    all.append(&mut items);
+    Ok((all, unsupported))
 }
 
 /// Like [`transform_module_collecting`] but with file path context for import resolution.
@@ -163,8 +177,9 @@ pub fn transform_module_collecting_with_path(
     module: &Module,
     reg: &TypeRegistry,
     current_file_dir: Option<&str>,
+    synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<(Vec<Item>, Vec<UnsupportedSyntaxError>)> {
-    let class_map = classes::pre_scan_classes(module, reg);
+    let class_map = classes::pre_scan_classes(module, synthetic, reg);
     let iface_methods = classes::pre_scan_interface_methods(module);
 
     let mut items = Vec::new();
@@ -178,6 +193,7 @@ pub fn transform_module_collecting_with_path(
             &iface_methods,
             true,
             current_file_dir,
+            synthetic,
         ) {
             Ok((converted, warnings)) => {
                 items.extend(converted);
@@ -216,6 +232,7 @@ fn transform_module_item(
     iface_methods: &HashMap<String, Vec<String>>,
     resilient: bool,
     current_file_dir: Option<&str>,
+    synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<(Vec<Item>, Vec<String>)> {
     match module_item {
         ModuleItem::Stmt(Stmt::Decl(decl)) => transform_decl(
@@ -225,6 +242,7 @@ fn transform_module_item(
             class_map,
             iface_methods,
             resilient,
+            synthetic,
         ),
         ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(export)) => transform_decl(
             &export.decl,
@@ -233,6 +251,7 @@ fn transform_module_item(
             class_map,
             iface_methods,
             resilient,
+            synthetic,
         ),
         ModuleItem::ModuleDecl(ModuleDecl::Import(import_decl)) => {
             let items: Vec<Item> = transform_import(import_decl, current_file_dir)
@@ -420,18 +439,20 @@ fn transform_decl(
     class_map: &HashMap<String, ClassInfo>,
     iface_methods: &HashMap<String, Vec<String>>,
     resilient: bool,
+    synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<(Vec<Item>, Vec<String>)> {
     match decl {
         Decl::TsInterface(interface_decl) => {
-            let items = types::convert_interface_items(interface_decl, vis, reg)?;
+            let items = types::convert_interface_items(interface_decl, vis, synthetic, reg)?;
             Ok((items, vec![]))
         }
         Decl::TsTypeAlias(type_alias_decl) => {
-            let items = types::convert_type_alias_items(type_alias_decl, vis, reg)?;
+            let items = types::convert_type_alias_items(type_alias_decl, vis, synthetic, reg)?;
             Ok((items, vec![]))
         }
         Decl::Fn(fn_decl) => {
-            let (items, warnings) = functions::convert_fn_decl(fn_decl, vis, reg, resilient)?;
+            let (items, warnings) =
+                functions::convert_fn_decl(fn_decl, vis, reg, resilient, synthetic)?;
             Ok((items, warnings))
         }
         Decl::Class(class_decl) => {
@@ -441,10 +462,13 @@ fn transform_decl(
                 reg,
                 class_map,
                 iface_methods,
+                synthetic,
             )?;
             Ok((items, vec![]))
         }
-        Decl::Var(var_decl) => functions::convert_var_decl_arrow_fns(var_decl, vis, reg, resilient),
+        Decl::Var(var_decl) => {
+            functions::convert_var_decl_arrow_fns(var_decl, vis, reg, resilient, synthetic)
+        }
         Decl::TsEnum(ts_enum) => {
             let items = convert_ts_enum(ts_enum, vis)?;
             Ok((items, vec![]))
@@ -462,6 +486,7 @@ fn transform_decl(
                             class_map,
                             iface_methods,
                             resilient,
+                            synthetic,
                         ) {
                             items.extend(inner_items);
                         }

@@ -7,10 +7,11 @@ use anyhow::{anyhow, Result};
 use swc_ecma_ast as ast;
 
 use crate::ir::{ClosureBody, Expr, Param, RustType, Stmt};
+use crate::pipeline::type_converter::convert_ts_type;
+use crate::pipeline::SyntheticTypeRegistry;
 use crate::registry::TypeRegistry;
 use crate::transformer::functions::{convert_last_return_to_tail, convert_ts_type_with_fallback};
 use crate::transformer::statements::convert_stmt;
-use crate::transformer::types::convert_ts_type;
 use crate::transformer::TypeEnv;
 
 use super::{convert_expr, ExprContext};
@@ -23,11 +24,11 @@ use super::{convert_expr, ExprContext};
 /// `context` is used in error messages (e.g. "function expression", "arrow").
 fn convert_function_param_pat(
     pat: &ast::Pat,
-    convert_type: &mut dyn FnMut(&ast::TsType) -> Result<RustType>,
     reg: &TypeRegistry,
     params: &mut Vec<Param>,
     expansion_stmts: &mut Vec<Stmt>,
     context: &str,
+    synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<()> {
     match pat {
         ast::Pat::Ident(ident) => {
@@ -35,7 +36,7 @@ fn convert_function_param_pat(
             let rust_type = ident
                 .type_ann
                 .as_ref()
-                .map(|ann| convert_type(&ann.type_ann))
+                .map(|ann| convert_ts_type(&ann.type_ann, synthetic, reg))
                 .transpose()?;
             params.push(Param {
                 name,
@@ -43,8 +44,9 @@ fn convert_function_param_pat(
             });
         }
         ast::Pat::Object(obj_pat) => {
-            let (param, stmts) =
-                crate::transformer::functions::convert_object_destructuring_param(obj_pat, reg)?;
+            let (param, stmts) = crate::transformer::functions::convert_object_destructuring_param(
+                obj_pat, reg, synthetic,
+            )?;
             params.push(param);
             expansion_stmts.extend(stmts);
         }
@@ -54,12 +56,12 @@ fn convert_function_param_pat(
                 let inner_type = ident
                     .type_ann
                     .as_ref()
-                    .map(|ann| convert_type(&ann.type_ann))
+                    .map(|ann| convert_ts_type(&ann.type_ann, synthetic, reg))
                     .transpose()?
                     .ok_or_else(|| anyhow!("default parameter requires a type annotation"))?;
                 let option_type = RustType::Option(Box::new(inner_type));
                 let (default_expr, use_unwrap_or_default) =
-                    crate::transformer::functions::convert_default_value(&assign.right)?;
+                    crate::transformer::functions::convert_default_value(&assign.right, synthetic)?;
                 let unwrap_call = if use_unwrap_or_default {
                     Expr::MethodCall {
                         object: Box::new(Expr::Ident(name.clone())),
@@ -91,7 +93,7 @@ fn convert_function_param_pat(
                 let name = ident.id.sym.to_string();
                 let type_ann = rest.type_ann.as_ref().or(ident.type_ann.as_ref());
                 let rust_type = type_ann
-                    .map(|ann| convert_type(&ann.type_ann))
+                    .map(|ann| convert_ts_type(&ann.type_ann, synthetic, reg))
                     .transpose()?;
                 params.push(Param {
                     name,
@@ -114,28 +116,28 @@ pub(super) fn convert_fn_expr(
     fn_expr: &ast::FnExpr,
     reg: &TypeRegistry,
     type_env: &TypeEnv,
+    synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Expr> {
     let func = &fn_expr.function;
 
     // Convert parameters — reuse the same logic as arrow functions
     let mut params = Vec::new();
     let mut expansion_stmts = Vec::new();
-    let mut convert_type = |ann: &ast::TsType| convert_ts_type(ann, &mut Vec::new(), reg);
     for param in &func.params {
         convert_function_param_pat(
             &param.pat,
-            &mut convert_type,
             reg,
             &mut params,
             &mut expansion_stmts,
             "function expression",
+            synthetic,
         )?;
     }
 
     let return_type = func
         .return_type
         .as_ref()
-        .map(|ann| convert_ts_type(&ann.type_ann, &mut Vec::new(), reg))
+        .map(|ann| convert_ts_type(&ann.type_ann, synthetic, reg))
         .transpose()?;
 
     // void → None
@@ -157,6 +159,7 @@ pub(super) fn convert_fn_expr(
                     reg,
                     return_type.as_ref(),
                     &mut inner_env,
+                    synthetic,
                 )?);
             }
             convert_last_return_to_tail(&mut stmts);
@@ -188,6 +191,7 @@ pub fn convert_arrow_expr(
     resilient: bool,
     fallback_warnings: &mut Vec<String>,
     type_env: &TypeEnv,
+    synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Expr> {
     convert_arrow_expr_with_return_type(
         arrow,
@@ -197,6 +201,7 @@ pub fn convert_arrow_expr(
         type_env,
         None,
         None,
+        synthetic,
     )
 }
 
@@ -206,6 +211,7 @@ pub fn convert_arrow_expr(
 /// (e.g., variable type annotation `const f: FnType = () => ...`).
 /// `override_param_types` allows callers to inject parameter types from an external source
 /// (e.g., variable type annotation `const f: (x: number) => void = (x) => ...`).
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn convert_arrow_expr_with_return_type(
     arrow: &ast::ArrowExpr,
     reg: &TypeRegistry,
@@ -214,61 +220,63 @@ pub(crate) fn convert_arrow_expr_with_return_type(
     type_env: &TypeEnv,
     override_return_type: Option<&RustType>,
     override_param_types: Option<&[RustType]>,
+    synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Expr> {
     let mut params = Vec::new();
     let mut expansion_stmts = Vec::new();
-    let mut convert_type = |ann: &ast::TsType| {
-        convert_ts_type_with_fallback(ann, resilient, fallback_warnings, &mut Vec::new(), reg)
-    };
-    for (i, param) in arrow.params.iter().enumerate() {
-        match param {
-            // Ident needs arrow-specific override_param_types fallback
-            ast::Pat::Ident(ident) => {
-                let name = ident.id.sym.to_string();
-                let rust_type = ident
-                    .type_ann
-                    .as_ref()
-                    .map(|ann| convert_type(&ann.type_ann))
-                    .transpose()?;
-                // If no direct annotation, try override from variable type annotation
-                let rust_type = rust_type
-                    .or_else(|| override_param_types.and_then(|types| types.get(i).cloned()));
-                params.push(Param {
-                    name,
-                    ty: rust_type,
-                });
+    {
+        for (i, param) in arrow.params.iter().enumerate() {
+            match param {
+                // Ident needs arrow-specific override_param_types fallback
+                ast::Pat::Ident(ident) => {
+                    let name = ident.id.sym.to_string();
+                    let rust_type = ident
+                        .type_ann
+                        .as_ref()
+                        .map(|ann| convert_ts_type(&ann.type_ann, synthetic, reg))
+                        .transpose()?;
+                    // If no direct annotation, try override from variable type annotation
+                    let rust_type = rust_type
+                        .or_else(|| override_param_types.and_then(|types| types.get(i).cloned()));
+                    params.push(Param {
+                        name,
+                        ty: rust_type,
+                    });
+                }
+                // Array destructuring is arrow-only
+                ast::Pat::Array(arr_pat) => {
+                    let names: Vec<String> = arr_pat
+                        .elems
+                        .iter()
+                        .map(|elem| match elem {
+                            Some(ast::Pat::Ident(ident)) => Ok(ident.id.sym.to_string()),
+                            Some(_) => {
+                                Err(anyhow!("unsupported arrow array destructuring element"))
+                            }
+                            None => Ok("_".to_string()),
+                        })
+                        .collect::<Result<_>>()?;
+                    let tuple_name = format!("({})", names.join(", "));
+                    let rust_type = arr_pat
+                        .type_ann
+                        .as_ref()
+                        .map(|ann| convert_ts_type(&ann.type_ann, synthetic, reg))
+                        .transpose()?;
+                    params.push(Param {
+                        name: tuple_name,
+                        ty: rust_type,
+                    });
+                }
+                // Object, Assign, Rest, and catch-all are shared with fn_expr
+                other => convert_function_param_pat(
+                    other,
+                    reg,
+                    &mut params,
+                    &mut expansion_stmts,
+                    "arrow",
+                    synthetic,
+                )?,
             }
-            // Array destructuring is arrow-only
-            ast::Pat::Array(arr_pat) => {
-                let names: Vec<String> = arr_pat
-                    .elems
-                    .iter()
-                    .map(|elem| match elem {
-                        Some(ast::Pat::Ident(ident)) => Ok(ident.id.sym.to_string()),
-                        Some(_) => Err(anyhow!("unsupported arrow array destructuring element")),
-                        None => Ok("_".to_string()),
-                    })
-                    .collect::<Result<_>>()?;
-                let tuple_name = format!("({})", names.join(", "));
-                let rust_type = arr_pat
-                    .type_ann
-                    .as_ref()
-                    .map(|ann| convert_type(&ann.type_ann))
-                    .transpose()?;
-                params.push(Param {
-                    name: tuple_name,
-                    ty: rust_type,
-                });
-            }
-            // Object, Assign, Rest, and catch-all are shared with fn_expr
-            other => convert_function_param_pat(
-                other,
-                &mut convert_type,
-                reg,
-                &mut params,
-                &mut expansion_stmts,
-                "arrow",
-            )?,
         }
     }
 
@@ -282,7 +290,7 @@ pub(crate) fn convert_arrow_expr_with_return_type(
                 &ann.type_ann,
                 resilient,
                 fallback_warnings,
-                &mut Vec::new(),
+                synthetic,
                 reg,
             )
         })
@@ -297,7 +305,7 @@ pub(crate) fn convert_arrow_expr_with_return_type(
                     // Cat C: return type propagated when available
                     None => ExprContext::none(),
                 };
-                let ir_expr = convert_expr(expr, reg, &ret_ctx, type_env)?;
+                let ir_expr = convert_expr(expr, reg, &ret_ctx, type_env, synthetic)?;
                 ClosureBody::Expr(Box::new(ir_expr))
             }
             ast::BlockStmtOrExpr::BlockStmt(block) => {
@@ -309,6 +317,7 @@ pub(crate) fn convert_arrow_expr_with_return_type(
                         reg,
                         return_type.as_ref(),
                         &mut inner_env,
+                        synthetic,
                     )?);
                 }
                 convert_last_return_to_tail(&mut stmts);
@@ -325,7 +334,7 @@ pub(crate) fn convert_arrow_expr_with_return_type(
                     // Cat C: return type propagated when available
                     None => ExprContext::none(),
                 };
-                let ir_expr = convert_expr(expr, reg, &ret_ctx, type_env)?;
+                let ir_expr = convert_expr(expr, reg, &ret_ctx, type_env, synthetic)?;
                 body_stmts.push(Stmt::Return(Some(ir_expr)));
             }
             ast::BlockStmtOrExpr::BlockStmt(block) => {
@@ -336,6 +345,7 @@ pub(crate) fn convert_arrow_expr_with_return_type(
                         reg,
                         return_type.as_ref(),
                         &mut inner_env,
+                        synthetic,
                     )?);
                 }
                 convert_last_return_to_tail(&mut body_stmts);

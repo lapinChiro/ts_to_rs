@@ -8,12 +8,14 @@ pub mod external_types;
 pub mod generator;
 pub mod ir;
 pub mod parser;
+pub mod pipeline;
 pub mod registry;
 pub mod transformer;
 
 use anyhow::Result;
 use serde::Serialize;
 
+use crate::pipeline::SyntheticTypeRegistry;
 use crate::registry::{build_registry, TypeRegistry};
 use crate::transformer::UnsupportedSyntaxError;
 
@@ -49,7 +51,6 @@ pub fn build_shared_registry(sources: &[&str]) -> TypeRegistry {
 ///
 /// Returns an error if parsing or transformation fails.
 pub fn transpile(ts_source: &str) -> Result<String> {
-    transformer::types::reset_synthetic_counter();
     let module = parser::parse_typescript(ts_source)?;
     let reg = build_registry(&module);
     let items = transformer::transform_module(&module, &reg)?;
@@ -76,12 +77,15 @@ pub fn transpile_with_registry_and_path(
     registry: &TypeRegistry,
     current_file_dir: Option<&str>,
 ) -> Result<String> {
-    transformer::types::reset_synthetic_counter();
     let module = parser::parse_typescript(ts_source)?;
     let mut reg = build_registry(&module);
     reg.merge(registry);
-    let items = transformer::transform_module_with_path(&module, &reg, current_file_dir)?;
-    Ok(generator::generate(&items))
+    let mut synthetic = SyntheticTypeRegistry::new();
+    let items =
+        transformer::transform_module_with_path(&module, &reg, current_file_dir, &mut synthetic)?;
+    let mut all_items = synthetic.into_items();
+    all_items.extend(items);
+    Ok(generator::generate(&all_items))
 }
 
 /// Transpiles TypeScript source code, collecting unsupported syntax instead of aborting.
@@ -113,13 +117,19 @@ pub fn transpile_collecting_with_registry_and_path(
     registry: &TypeRegistry,
     current_file_dir: Option<&str>,
 ) -> Result<(String, Vec<UnsupportedSyntax>)> {
-    transformer::types::reset_synthetic_counter();
     let module = parser::parse_typescript(ts_source)?;
     let mut reg = build_registry(&module);
     reg.merge(registry);
-    let (items, raw_unsupported) =
-        transformer::transform_module_collecting_with_path(&module, &reg, current_file_dir)?;
-    let output = generator::generate(&items);
+    let mut synthetic = SyntheticTypeRegistry::new();
+    let (items, raw_unsupported) = transformer::transform_module_collecting_with_path(
+        &module,
+        &reg,
+        current_file_dir,
+        &mut synthetic,
+    )?;
+    let mut all_items = synthetic.into_items();
+    all_items.extend(items);
+    let output = generator::generate(&all_items);
     let unsupported = raw_unsupported
         .into_iter()
         .map(|raw| resolve_unsupported(ts_source, raw))

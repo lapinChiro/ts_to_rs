@@ -9,6 +9,7 @@ use crate::ir::{Expr, RustType};
 // Re-export for tests that use `super::*`
 #[cfg(test)]
 use crate::ir::{ClosureBody, Param};
+use crate::pipeline::SyntheticTypeRegistry;
 use crate::registry::TypeRegistry;
 use crate::transformer::TypeEnv;
 
@@ -71,6 +72,7 @@ pub fn convert_expr(
     reg: &TypeRegistry,
     ctx: &ExprContext,
     type_env: &TypeEnv,
+    synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Expr> {
     let expected = ctx.expected;
     // Option<T> expected: handle null/undefined → None, literals → Some(lit)
@@ -83,8 +85,13 @@ pub fn convert_expr(
         }
         // Wrap non-null literals in Some() (needed for array elements like vec![Some(1.0), None])
         if matches!(expr, ast::Expr::Lit(_)) {
-            let inner_result =
-                convert_expr(expr, reg, &ExprContext::with_expected(inner), type_env)?;
+            let inner_result = convert_expr(
+                expr,
+                reg,
+                &ExprContext::with_expected(inner),
+                type_env,
+                synthetic,
+            )?;
             return Ok(Expr::FnCall {
                 name: "Some".to_string(),
                 args: vec![inner_result],
@@ -103,30 +110,46 @@ pub fn convert_expr(
             }
         }
         ast::Expr::Lit(lit) => convert_lit(lit, expected, reg),
-        ast::Expr::Bin(bin) => convert_bin_expr(bin, reg, expected, type_env),
-        ast::Expr::Tpl(tpl) => convert_template_literal(tpl, reg, type_env),
-        ast::Expr::Paren(paren) => convert_expr(&paren.expr, reg, ctx, type_env),
-        ast::Expr::Member(member) => convert_member_expr(member, reg, type_env),
+        ast::Expr::Bin(bin) => convert_bin_expr(bin, reg, expected, type_env, synthetic),
+        ast::Expr::Tpl(tpl) => convert_template_literal(tpl, reg, type_env, synthetic),
+        ast::Expr::Paren(paren) => convert_expr(&paren.expr, reg, ctx, type_env, synthetic),
+        ast::Expr::Member(member) => convert_member_expr(member, reg, type_env, synthetic),
         ast::Expr::This(_) => Ok(Expr::Ident("self".to_string())),
-        ast::Expr::Assign(assign) => convert_assign_expr(assign, reg, type_env),
+        ast::Expr::Assign(assign) => convert_assign_expr(assign, reg, type_env, synthetic),
         ast::Expr::Update(up) => convert_update_expr(up),
-        ast::Expr::Arrow(arrow) => convert_arrow_expr(arrow, reg, false, &mut Vec::new(), type_env),
-        ast::Expr::Fn(fn_expr) => convert_fn_expr(fn_expr, reg, type_env),
-        ast::Expr::Call(call) => convert_call_expr(call, reg, type_env),
-        ast::Expr::New(new_expr) => convert_new_expr(new_expr, reg, type_env),
-        ast::Expr::Array(array_lit) => convert_array_lit(array_lit, reg, expected, type_env),
-        ast::Expr::Object(obj_lit) => convert_object_lit(obj_lit, reg, expected, type_env),
-        ast::Expr::Cond(cond) => convert_cond_expr(cond, reg, expected, type_env),
-        ast::Expr::Unary(unary) => convert_unary_expr(unary, reg, type_env),
-        ast::Expr::TsAs(ts_as) => convert_ts_as_expr(ts_as, reg, expected, type_env),
-        ast::Expr::OptChain(opt_chain) => convert_opt_chain_expr(opt_chain, reg, type_env),
+        ast::Expr::Arrow(arrow) => {
+            convert_arrow_expr(arrow, reg, false, &mut Vec::new(), type_env, synthetic)
+        }
+        ast::Expr::Fn(fn_expr) => convert_fn_expr(fn_expr, reg, type_env, synthetic),
+        ast::Expr::Call(call) => convert_call_expr(call, reg, type_env, synthetic),
+        ast::Expr::New(new_expr) => convert_new_expr(new_expr, reg, type_env, synthetic),
+        ast::Expr::Array(array_lit) => {
+            convert_array_lit(array_lit, reg, expected, type_env, synthetic)
+        }
+        ast::Expr::Object(obj_lit) => {
+            convert_object_lit(obj_lit, reg, expected, type_env, synthetic)
+        }
+        ast::Expr::Cond(cond) => convert_cond_expr(cond, reg, expected, type_env, synthetic),
+        ast::Expr::Unary(unary) => convert_unary_expr(unary, reg, type_env, synthetic),
+        ast::Expr::TsAs(ts_as) => convert_ts_as_expr(ts_as, reg, expected, type_env, synthetic),
+        ast::Expr::OptChain(opt_chain) => {
+            convert_opt_chain_expr(opt_chain, reg, type_env, synthetic)
+        }
         ast::Expr::Await(await_expr) => {
             // Cat A: await inner type depends on Promise resolution
-            let inner = convert_expr(&await_expr.arg, reg, &ExprContext::none(), type_env)?;
+            let inner = convert_expr(
+                &await_expr.arg,
+                reg,
+                &ExprContext::none(),
+                type_env,
+                synthetic,
+            )?;
             Ok(Expr::Await(Box::new(inner)))
         }
         // Non-null assertion (expr!) — TS type-level only, no runtime effect. Strip assertion.
-        ast::Expr::TsNonNull(ts_non_null) => convert_expr(&ts_non_null.expr, reg, ctx, type_env),
+        ast::Expr::TsNonNull(ts_non_null) => {
+            convert_expr(&ts_non_null.expr, reg, ctx, type_env, synthetic)
+        }
         _ => Err(anyhow!("unsupported expression: {:?}", expr)),
     }?;
 
@@ -208,6 +231,7 @@ fn convert_template_literal(
     tpl: &ast::Tpl,
     reg: &TypeRegistry,
     type_env: &TypeEnv,
+    synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Expr> {
     let mut template = String::new();
     let mut args = Vec::new();
@@ -218,7 +242,13 @@ fn convert_template_literal(
         if i < tpl.exprs.len() {
             template.push_str("{}");
             // Cat A: template interpolation — format!() accepts any Display type
-            let arg = convert_expr(&tpl.exprs[i], reg, &ExprContext::none(), type_env)?;
+            let arg = convert_expr(
+                &tpl.exprs[i],
+                reg,
+                &ExprContext::none(),
+                type_env,
+                synthetic,
+            )?;
             args.push(arg);
         }
     }
@@ -237,6 +267,7 @@ fn convert_cond_expr(
     reg: &TypeRegistry,
     expected: Option<&RustType>,
     type_env: &TypeEnv,
+    synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Expr> {
     let ctx = &ExprContext { expected };
 
@@ -267,10 +298,10 @@ fn convert_cond_expr(
                     narrowed_env.insert(guard.var_name().to_string(), narrowed);
                 }
             }
-            let matched_expr = convert_expr(matched_ast, reg, ctx, &narrowed_env)?;
+            let matched_expr = convert_expr(matched_ast, reg, ctx, &narrowed_env, synthetic)?;
 
             // Convert the unmatched branch with original type environment
-            let unmatched_expr = convert_expr(unmatched_ast, reg, ctx, type_env)?;
+            let unmatched_expr = convert_expr(unmatched_ast, reg, ctx, type_env, synthetic)?;
 
             let expr_ir = Expr::Ident(guard.var_name().to_string());
             return Ok(Expr::IfLet {
@@ -283,9 +314,9 @@ fn convert_cond_expr(
     }
 
     // Fallback: regular if expression
-    let condition = convert_expr(&cond.test, reg, &ExprContext::none(), type_env)?;
-    let then_expr = convert_expr(&cond.cons, reg, ctx, type_env)?;
-    let else_expr = convert_expr(&cond.alt, reg, ctx, type_env)?;
+    let condition = convert_expr(&cond.test, reg, &ExprContext::none(), type_env, synthetic)?;
+    let then_expr = convert_expr(&cond.cons, reg, ctx, type_env, synthetic)?;
+    let else_expr = convert_expr(&cond.alt, reg, ctx, type_env, synthetic)?;
     Ok(Expr::If {
         condition: Box::new(condition),
         then_expr: Box::new(then_expr),

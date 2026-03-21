@@ -1,17 +1,18 @@
 ---
 source: tests/integration_test.rs
+assertion_line: 494
 expression: output
 ---
-fn processOptional(x: Option<String>) {
-    if let Some(x) = x {
-        println!("{}", x);
-    }
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum StringOrF64 {
     String(String),
     F64(f64),
+}
+
+fn processOptional(x: Option<String>) {
+    if let Some(x) = x {
+        println!("{}", x);
+    }
 }
 
 fn processUnion(x: StringOrF64) -> String {
@@ -33,18 +34,6 @@ fn processObject(x: ProcessObjectXType) {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum StringOrF64 {
-    String(String),
-    F64(f64),
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum StringOrF64 {
-    String(String),
-    F64(f64),
-}
-
 fn processCompound(x: StringOrF64, y: StringOrF64) {
     if let StringOrF64::String(x) = x {
         if let StringOrF64::F64(y) = y {
@@ -52,12 +41,6 @@ fn processCompound(x: StringOrF64, y: StringOrF64) {
             println!("{}", y.toFixed(2.0));
         }
     }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum StringOrF64 {
-    String(String),
-    F64(f64),
 }
 
 fn processMixed(x: StringOrF64, y: Option<String>) {
@@ -69,30 +52,12 @@ fn processMixed(x: StringOrF64, y: Option<String>) {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum StringOrF64 {
-    String(String),
-    F64(f64),
-}
-
 fn processGuardAndCondition(x: StringOrF64) {
     if let StringOrF64::String(x) = x {
         if x.len() as f64 > 0.0 {
             println!("{}", x);
         }
     }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum StringOrF64 {
-    String(String),
-    F64(f64),
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum StringOrF64 {
-    String(String),
-    F64(f64),
 }
 
 fn processCompoundWithElse(x: StringOrF64, y: StringOrF64) -> String {
@@ -107,12 +72,6 @@ fn processCompoundWithElse(x: StringOrF64, y: StringOrF64) -> String {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum StringOrF64 {
-    String(String),
-    F64(f64),
-}
-
 fn processGuardConditionElse(x: StringOrF64) -> String {
     if let StringOrF64::String(x) = x {
         if x.len() as f64 > 0.0 {
@@ -123,12 +82,6 @@ fn processGuardConditionElse(x: StringOrF64) -> String {
     } else {
         return "empty or not string".to_string();
     }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum StringOrF64 {
-    String(String),
-    F64(f64),
 }
 
 fn processNeqCompound(x: StringOrF64, y: Option<String>) {
@@ -144,12 +97,6 @@ fn processNeqCompound(x: StringOrF64, y: Option<String>) {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum StringOrF64 {
-    String(String),
-    F64(f64),
-}
-
 fn ternaryTypeof(x: StringOrF64) -> f64 {
     if let StringOrF64::String(x) = x { x.len() as f64 } else { 0.0 }
 }
@@ -162,20 +109,8 @@ fn ternaryNoGuard(a: f64) -> String {
     if a > 0.0 { "positive".to_string() } else { "non-positive".to_string() }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum StringOrF64 {
-    String(String),
-    F64(f64),
-}
-
 fn ternaryNeqTypeof(x: StringOrF64) -> f64 {
     if let StringOrF64::String(x) = x { x.len() as f64 } else { 0.0 }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum StringOrF64 {
-    String(String),
-    F64(f64),
 }
 
 fn switchTypeof(x: StringOrF64) -> String {
@@ -192,12 +127,6 @@ fn switchTypeof(x: StringOrF64) -> String {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum StringOrF64 {
-    String(String),
-    F64(f64),
-}
-
 fn switchTypeofNarrow(x: StringOrF64) -> f64 {
     match x {
         StringOrF64::String(x) => {
@@ -207,12 +136,6 @@ fn switchTypeofNarrow(x: StringOrF64) -> f64 {
             return 0.0;
         }
     }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum StringOrF64 {
-    String(String),
-    F64(f64),
 }
 
 fn switchTypeofFallthrough(x: StringOrF64) -> String {

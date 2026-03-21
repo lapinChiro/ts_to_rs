@@ -8,12 +8,13 @@ use anyhow::{anyhow, Result};
 use swc_ecma_ast as ast;
 
 use crate::ir::{AssocConst, Expr, Item, Method, Param, RustType, Stmt, StructField, Visibility};
+use crate::pipeline::type_converter::convert_ts_type;
+use crate::pipeline::SyntheticTypeRegistry;
 use crate::registry::TypeRegistry;
 use crate::transformer::expressions::{convert_expr, ExprContext};
 use crate::transformer::extract_prop_name;
 use crate::transformer::functions::convert_last_return_to_tail;
 use crate::transformer::statements::convert_stmt;
-use crate::transformer::types::convert_ts_type;
 use crate::transformer::TypeEnv;
 
 /// Extracted class information for resolving inheritance relationships.
@@ -45,6 +46,7 @@ pub struct ClassInfo {
 pub fn extract_class_info(
     class_decl: &ast::ClassDecl,
     vis: Visibility,
+    synthetic: &mut SyntheticTypeRegistry,
     reg: &TypeRegistry,
 ) -> Result<ClassInfo> {
     let name = class_decl.ident.sym.to_string();
@@ -77,20 +79,20 @@ pub fn extract_class_info(
     for member in &class_decl.class.body {
         match member {
             ast::ClassMember::ClassProp(prop) if prop.is_static => {
-                if let Some(ac) = convert_static_prop(prop, &vis, reg)? {
+                if let Some(ac) = convert_static_prop(prop, &vis, synthetic, reg)? {
                     static_consts.push(ac);
                 }
             }
             ast::ClassMember::ClassProp(prop) => {
-                fields.push(convert_class_prop(prop, &vis, reg)?);
+                fields.push(convert_class_prop(prop, &vis, synthetic, reg)?);
             }
             ast::ClassMember::Constructor(ctor) => {
-                let (method, param_prop_fields) = convert_constructor(ctor, &vis, reg)?;
+                let (method, param_prop_fields) = convert_constructor(ctor, &vis, synthetic, reg)?;
                 constructor = Some(method);
                 fields.extend(param_prop_fields);
             }
             ast::ClassMember::Method(method) => {
-                methods.push(convert_class_method(method, &vis, reg)?);
+                methods.push(convert_class_method(method, &vis, synthetic, reg)?);
             }
             _ => {}
         }
@@ -120,9 +122,10 @@ pub fn extract_class_info(
 pub fn convert_class_decl(
     class_decl: &ast::ClassDecl,
     vis: Visibility,
+    synthetic: &mut SyntheticTypeRegistry,
     reg: &TypeRegistry,
 ) -> Result<Vec<Item>> {
-    let info = extract_class_info(class_decl, vis, reg)?;
+    let info = extract_class_info(class_decl, vis, synthetic, reg)?;
     if info.is_abstract {
         generate_abstract_class_items(&info)
     } else {
@@ -558,6 +561,7 @@ fn try_extract_super_call(stmt: &Stmt) -> Option<Vec<Expr>> {
 fn convert_static_prop(
     prop: &ast::ClassProp,
     vis: &Visibility,
+    synthetic: &mut SyntheticTypeRegistry,
     reg: &TypeRegistry,
 ) -> Result<Option<AssocConst>> {
     let name = extract_prop_name(&prop.key)
@@ -567,10 +571,16 @@ fn convert_static_prop(
         .type_ann
         .as_ref()
         .ok_or_else(|| anyhow!("static property '{}' has no type annotation", name))?;
-    let ty = convert_ts_type(&type_ann.type_ann, &mut Vec::new(), reg)?;
+    let ty = convert_ts_type(&type_ann.type_ann, synthetic, reg)?;
 
     let value = match &prop.value {
-        Some(init) => convert_expr(init, reg, &ExprContext::with_expected(&ty), &TypeEnv::new())?,
+        Some(init) => convert_expr(
+            init,
+            reg,
+            &ExprContext::with_expected(&ty),
+            &TypeEnv::new(),
+            synthetic,
+        )?,
         None => return Ok(None), // No initializer — skip
     };
 
@@ -586,13 +596,14 @@ fn convert_static_prop(
 fn convert_class_prop(
     prop: &ast::ClassProp,
     class_vis: &Visibility,
+    synthetic: &mut SyntheticTypeRegistry,
     reg: &TypeRegistry,
 ) -> Result<StructField> {
     let field_name = extract_prop_name(&prop.key)
         .map_err(|_| anyhow!("unsupported class property key (only identifiers)"))?;
 
     let ty = match prop.type_ann.as_ref() {
-        Some(ann) => convert_ts_type(&ann.type_ann, &mut Vec::new(), reg)?,
+        Some(ann) => convert_ts_type(&ann.type_ann, synthetic, reg)?,
         None => RustType::Any, // Fallback to Any for unannotated class properties
     };
     let member_vis = resolve_member_visibility(prop.accessibility, class_vis);
@@ -611,6 +622,7 @@ fn convert_class_prop(
 fn convert_constructor(
     ctor: &ast::Constructor,
     vis: &Visibility,
+    synthetic: &mut SyntheticTypeRegistry,
     reg: &TypeRegistry,
 ) -> Result<(Method, Vec<StructField>)> {
     let mut params = Vec::new();
@@ -623,12 +635,12 @@ fn convert_constructor(
     for param in &ctor.params {
         match param {
             ast::ParamOrTsParamProp::Param(p) => {
-                let (param, expansion) = convert_param_pat(&p.pat, reg)?;
+                let (param, expansion) = convert_param_pat(&p.pat, synthetic, reg)?;
                 default_expansion_stmts.extend(expansion);
                 params.push(param);
             }
             ast::ParamOrTsParamProp::TsParamProp(prop) => {
-                let (ir_param, field) = convert_ts_param_prop(prop, vis, reg)?;
+                let (ir_param, field) = convert_ts_param_prop(prop, vis, synthetic, reg)?;
                 param_prop_names.push(ir_param.name.clone());
                 params.push(ir_param);
                 param_prop_fields.push(field);
@@ -647,7 +659,7 @@ fn convert_constructor(
                 .into_iter()
                 .chain(block.stmts.iter().cloned())
                 .collect();
-            let mut body = convert_constructor_body(&all_stmts, reg, &params)?;
+            let mut body = convert_constructor_body(&all_stmts, reg, &params, synthetic)?;
             // Insert default parameter expansion stmts at the beginning
             for (i, stmt) in default_expansion_stmts.into_iter().enumerate() {
                 body.insert(i, stmt);
@@ -656,7 +668,7 @@ fn convert_constructor(
         }
         None if !param_prop_names.is_empty() => {
             let synthetic_stmts = build_param_prop_assignments(&param_prop_names);
-            let mut body = convert_constructor_body(&synthetic_stmts, reg, &params)?;
+            let mut body = convert_constructor_body(&synthetic_stmts, reg, &params, synthetic)?;
             for (i, stmt) in default_expansion_stmts.into_iter().enumerate() {
                 body.insert(i, stmt);
             }
@@ -688,18 +700,20 @@ fn convert_constructor(
 fn convert_ts_param_prop(
     prop: &ast::TsParamProp,
     class_vis: &Visibility,
+    synthetic: &mut SyntheticTypeRegistry,
     reg: &TypeRegistry,
 ) -> Result<(Param, StructField)> {
     let (name, ty) = match &prop.param {
         ast::TsParamPropParam::Ident(ident) => {
-            let ir_param = crate::transformer::convert_ident_to_param(ident, reg)?;
+            let ir_param = crate::transformer::convert_ident_to_param(ident, synthetic, reg)?;
             (ir_param.name, ir_param.ty)
         }
         ast::TsParamPropParam::Assign(assign) => {
             // `public x: number = 42` — extract name and type from the left side
             match assign.left.as_ref() {
                 ast::Pat::Ident(ident) => {
-                    let ir_param = crate::transformer::convert_ident_to_param(ident, reg)?;
+                    let ir_param =
+                        crate::transformer::convert_ident_to_param(ident, synthetic, reg)?;
                     (ir_param.name, ir_param.ty)
                 }
                 _ => return Err(anyhow!("unsupported parameter property pattern")),
@@ -766,6 +780,7 @@ fn convert_constructor_body(
     stmts: &[ast::Stmt],
     reg: &TypeRegistry,
     params: &[Param],
+    synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Vec<Stmt>> {
     let mut type_env = TypeEnv::new();
     for p in params {
@@ -779,10 +794,10 @@ fn convert_constructor_body(
     for stmt in stmts {
         if let Some((field_name, value_expr)) = try_extract_this_assignment(stmt) {
             // Cat B: field type could be looked up from class definition
-            let value = convert_expr(value_expr, reg, &ExprContext::none(), &type_env)?;
+            let value = convert_expr(value_expr, reg, &ExprContext::none(), &type_env, synthetic)?;
             fields.push((field_name, value));
         } else {
-            other_stmts.extend(convert_stmt(stmt, reg, None, &mut type_env)?);
+            other_stmts.extend(convert_stmt(stmt, reg, None, &mut type_env, synthetic)?);
         }
     }
 
@@ -834,6 +849,7 @@ fn try_extract_this_assignment(stmt: &ast::Stmt) -> Option<(String, &ast::Expr)>
 fn convert_class_method(
     method: &ast::ClassMethod,
     vis: &Visibility,
+    synthetic: &mut SyntheticTypeRegistry,
     reg: &TypeRegistry,
 ) -> Result<Method> {
     let raw_name = extract_prop_name(&method.key)
@@ -850,7 +866,7 @@ fn convert_class_method(
     let mut params = Vec::new();
     let mut default_expansion_stmts = Vec::new();
     for param in &method.function.params {
-        let (p, expansion) = convert_param_pat(&param.pat, reg)?;
+        let (p, expansion) = convert_param_pat(&param.pat, synthetic, reg)?;
         default_expansion_stmts.extend(expansion);
         params.push(p);
     }
@@ -859,7 +875,7 @@ fn convert_class_method(
         .function
         .return_type
         .as_ref()
-        .map(|ann| convert_ts_type(&ann.type_ann, &mut Vec::new(), reg))
+        .map(|ann| convert_ts_type(&ann.type_ann, synthetic, reg))
         .transpose()?;
 
     // void → None (Rust omits `-> ()`)
@@ -886,6 +902,7 @@ fn convert_class_method(
                     reg,
                     return_type.as_ref(),
                     &mut method_env,
+                    synthetic,
                 )?);
             }
             convert_last_return_to_tail(&mut stmts);
@@ -951,17 +968,22 @@ fn is_self_field_access(expr: &Expr) -> bool {
 /// - `x: number` → simple parameter
 /// - `x: number = 0` → `Option<f64>` + `let x = x.unwrap_or(0.0);`
 /// - `options: Options = {}` → `Option<Options>` + `let options = options.unwrap_or_default();`
-fn convert_param_pat(pat: &ast::Pat, reg: &TypeRegistry) -> Result<(Param, Vec<Stmt>)> {
+fn convert_param_pat(
+    pat: &ast::Pat,
+    synthetic: &mut SyntheticTypeRegistry,
+    reg: &TypeRegistry,
+) -> Result<(Param, Vec<Stmt>)> {
     match pat {
         ast::Pat::Ident(ident) => {
-            let param = crate::transformer::convert_ident_to_param(ident, reg)?;
+            let param = crate::transformer::convert_ident_to_param(ident, synthetic, reg)?;
             Ok((param, vec![]))
         }
         ast::Pat::Assign(assign) => {
             // Default value parameter: x: T = value
             match assign.left.as_ref() {
                 ast::Pat::Ident(ident) => {
-                    let inner_param = crate::transformer::convert_ident_to_param(ident, reg)?;
+                    let inner_param =
+                        crate::transformer::convert_ident_to_param(ident, synthetic, reg)?;
                     let param_name = inner_param.name.clone();
                     let inner_type = inner_param
                         .ty
@@ -969,7 +991,10 @@ fn convert_param_pat(pat: &ast::Pat, reg: &TypeRegistry) -> Result<(Param, Vec<S
                     let option_type = RustType::Option(Box::new(inner_type));
 
                     let (default_expr, use_unwrap_or_default) =
-                        crate::transformer::functions::convert_default_value(&assign.right)?;
+                        crate::transformer::functions::convert_default_value(
+                            &assign.right,
+                            synthetic,
+                        )?;
 
                     let unwrap_call = if use_unwrap_or_default {
                         Expr::MethodCall {
@@ -1014,6 +1039,7 @@ fn convert_param_pat(pat: &ast::Pat, reg: &TypeRegistry) -> Result<(Param, Vec<S
 /// (they will be reported during the main transformation pass).
 pub(super) fn pre_scan_classes(
     module: &ast::Module,
+    synthetic: &mut SyntheticTypeRegistry,
     reg: &TypeRegistry,
 ) -> HashMap<String, ClassInfo> {
     let mut map = HashMap::new();
@@ -1032,7 +1058,7 @@ pub(super) fn pre_scan_classes(
             }
             _ => continue,
         };
-        if let Ok(info) = extract_class_info(decl, vis, reg) {
+        if let Ok(info) = extract_class_info(decl, vis, synthetic, reg) {
             map.insert(info.name.clone(), info);
         }
     }
@@ -1105,8 +1131,9 @@ pub(super) fn transform_class_with_inheritance(
     reg: &TypeRegistry,
     class_map: &HashMap<String, ClassInfo>,
     iface_methods: &HashMap<String, Vec<String>>,
+    synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Vec<Item>> {
-    let info = extract_class_info(class_decl, vis, reg)?;
+    let info = extract_class_info(class_decl, vis, synthetic, reg)?;
     let parent_names = find_parent_class_names(class_map);
 
     if info.is_abstract {
@@ -1156,7 +1183,13 @@ mod tests {
     #[test]
     fn test_convert_class_properties_only() {
         let decl = parse_class_decl("class Foo { x: number; y: string; }");
-        let items = convert_class_decl(&decl, Visibility::Private, &TypeRegistry::new()).unwrap();
+        let items = convert_class_decl(
+            &decl,
+            Visibility::Private,
+            &mut SyntheticTypeRegistry::new(),
+            &TypeRegistry::new(),
+        )
+        .unwrap();
 
         assert_eq!(items.len(), 1);
         assert_eq!(
@@ -1185,7 +1218,13 @@ mod tests {
     fn test_convert_class_constructor() {
         let decl =
             parse_class_decl("class Foo { x: number; constructor(x: number) { this.x = x; } }");
-        let items = convert_class_decl(&decl, Visibility::Private, &TypeRegistry::new()).unwrap();
+        let items = convert_class_decl(
+            &decl,
+            Visibility::Private,
+            &mut SyntheticTypeRegistry::new(),
+            &TypeRegistry::new(),
+        )
+        .unwrap();
 
         assert_eq!(items.len(), 2);
         match &items[1] {
@@ -1221,7 +1260,13 @@ mod tests {
     fn test_convert_class_method_with_self() {
         let decl =
             parse_class_decl("class Foo { name: string; greet(): string { return this.name; } }");
-        let items = convert_class_decl(&decl, Visibility::Private, &TypeRegistry::new()).unwrap();
+        let items = convert_class_decl(
+            &decl,
+            Visibility::Private,
+            &mut SyntheticTypeRegistry::new(),
+            &TypeRegistry::new(),
+        )
+        .unwrap();
 
         assert_eq!(items.len(), 2);
         match &items[1] {
@@ -1238,7 +1283,13 @@ mod tests {
     #[test]
     fn test_convert_class_export_visibility() {
         let decl = parse_class_decl("class Foo { x: number; greet(): string { return this.x; } }");
-        let items = convert_class_decl(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
+        let items = convert_class_decl(
+            &decl,
+            Visibility::Public,
+            &mut SyntheticTypeRegistry::new(),
+            &TypeRegistry::new(),
+        )
+        .unwrap();
 
         match &items[0] {
             Item::Struct { vis, .. } => assert_eq!(*vis, Visibility::Public),
@@ -1255,7 +1306,13 @@ mod tests {
     #[test]
     fn test_convert_class_static_method_has_no_self() {
         let decl = parse_class_decl("class Foo { x: number; static bar(): number { return 1; } }");
-        let items = convert_class_decl(&decl, Visibility::Private, &TypeRegistry::new()).unwrap();
+        let items = convert_class_decl(
+            &decl,
+            Visibility::Private,
+            &mut SyntheticTypeRegistry::new(),
+            &TypeRegistry::new(),
+        )
+        .unwrap();
 
         assert_eq!(items.len(), 2);
         match &items[1] {
@@ -1280,7 +1337,13 @@ mod tests {
     fn test_extract_class_info_implements_single() {
         let decl =
             parse_class_decl("class Foo implements Greeter { greet(): string { return 'hi'; } }");
-        let info = extract_class_info(&decl, Visibility::Private, &TypeRegistry::new()).unwrap();
+        let info = extract_class_info(
+            &decl,
+            Visibility::Private,
+            &mut SyntheticTypeRegistry::new(),
+            &TypeRegistry::new(),
+        )
+        .unwrap();
 
         assert_eq!(info.implements, vec!["Greeter".to_string()]);
     }
@@ -1288,7 +1351,13 @@ mod tests {
     #[test]
     fn test_extract_class_info_implements_multiple() {
         let decl = parse_class_decl("class Foo implements A, B { foo(): void {} bar(): void {} }");
-        let info = extract_class_info(&decl, Visibility::Private, &TypeRegistry::new()).unwrap();
+        let info = extract_class_info(
+            &decl,
+            Visibility::Private,
+            &mut SyntheticTypeRegistry::new(),
+            &TypeRegistry::new(),
+        )
+        .unwrap();
 
         assert_eq!(info.implements, vec!["A".to_string(), "B".to_string()]);
     }
@@ -1296,7 +1365,13 @@ mod tests {
     #[test]
     fn test_extract_class_info_no_implements() {
         let decl = parse_class_decl("class Foo { x: number; }");
-        let info = extract_class_info(&decl, Visibility::Private, &TypeRegistry::new()).unwrap();
+        let info = extract_class_info(
+            &decl,
+            Visibility::Private,
+            &mut SyntheticTypeRegistry::new(),
+            &TypeRegistry::new(),
+        )
+        .unwrap();
 
         assert!(info.implements.is_empty());
     }
@@ -1306,7 +1381,13 @@ mod tests {
         let decl = parse_class_decl(
             "class Foo { name: string; constructor(name: string) { this.name = name; } }",
         );
-        let items = convert_class_decl(&decl, Visibility::Private, &TypeRegistry::new()).unwrap();
+        let items = convert_class_decl(
+            &decl,
+            Visibility::Private,
+            &mut SyntheticTypeRegistry::new(),
+            &TypeRegistry::new(),
+        )
+        .unwrap();
 
         match &items[1] {
             Item::Impl { methods, .. } => {
@@ -1321,14 +1402,26 @@ mod tests {
     #[test]
     fn test_extract_class_info_abstract_flag_is_true() {
         let decl = parse_class_decl("abstract class Shape { abstract area(): number; }");
-        let info = extract_class_info(&decl, Visibility::Private, &TypeRegistry::new()).unwrap();
+        let info = extract_class_info(
+            &decl,
+            Visibility::Private,
+            &mut SyntheticTypeRegistry::new(),
+            &TypeRegistry::new(),
+        )
+        .unwrap();
         assert!(info.is_abstract);
     }
 
     #[test]
     fn test_convert_abstract_class_abstract_only_generates_trait() {
         let decl = parse_class_decl("abstract class Shape { abstract area(): number; }");
-        let items = convert_class_decl(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
+        let items = convert_class_decl(
+            &decl,
+            Visibility::Public,
+            &mut SyntheticTypeRegistry::new(),
+            &TypeRegistry::new(),
+        )
+        .unwrap();
         // Should produce a single Trait item, not Struct + Impl
         assert_eq!(items.len(), 1);
         match &items[0] {
@@ -1354,7 +1447,13 @@ mod tests {
         let decl = parse_class_decl(
             "abstract class Shape { abstract area(): number; describe(): string { return \"shape\"; } }",
         );
-        let items = convert_class_decl(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
+        let items = convert_class_decl(
+            &decl,
+            Visibility::Public,
+            &mut SyntheticTypeRegistry::new(),
+            &TypeRegistry::new(),
+        )
+        .unwrap();
         assert_eq!(items.len(), 1);
         match &items[0] {
             Item::Trait { methods, .. } => {
@@ -1373,7 +1472,13 @@ mod tests {
     #[test]
     fn test_convert_abstract_class_concrete_only_generates_trait_with_defaults() {
         let decl = parse_class_decl("abstract class Foo { bar(): number { return 1; } }");
-        let items = convert_class_decl(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
+        let items = convert_class_decl(
+            &decl,
+            Visibility::Public,
+            &mut SyntheticTypeRegistry::new(),
+            &TypeRegistry::new(),
+        )
+        .unwrap();
         assert_eq!(items.len(), 1);
         match &items[0] {
             Item::Trait { methods, .. } => {
@@ -1443,7 +1548,13 @@ mod tests {
         let decl = parse_class_decl(
             "class Config { static readonly MAX_SIZE: number = 100; value: number; }",
         );
-        let items = convert_class_decl(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
+        let items = convert_class_decl(
+            &decl,
+            Visibility::Public,
+            &mut SyntheticTypeRegistry::new(),
+            &TypeRegistry::new(),
+        )
+        .unwrap();
         // Should have: Struct (only value field) + Impl (with const MAX_SIZE)
         match &items[0] {
             Item::Struct { fields, .. } => {
@@ -1470,7 +1581,13 @@ mod tests {
     #[test]
     fn test_convert_class_static_string_prop_generates_assoc_const() {
         let decl = parse_class_decl("class Foo { static NAME: string = \"hello\"; x: number; }");
-        let items = convert_class_decl(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
+        let items = convert_class_decl(
+            &decl,
+            Visibility::Public,
+            &mut SyntheticTypeRegistry::new(),
+            &TypeRegistry::new(),
+        )
+        .unwrap();
         match &items[1] {
             Item::Impl { consts, .. } => {
                 assert_eq!(consts.len(), 1);
@@ -1484,7 +1601,13 @@ mod tests {
     #[test]
     fn test_convert_class_protected_method_generates_pub_crate() {
         let decl = parse_class_decl("class Foo { protected greet(): string { return 'hi'; } }");
-        let items = convert_class_decl(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
+        let items = convert_class_decl(
+            &decl,
+            Visibility::Public,
+            &mut SyntheticTypeRegistry::new(),
+            &TypeRegistry::new(),
+        )
+        .unwrap();
         match &items[1] {
             Item::Impl { methods, .. } => {
                 assert_eq!(methods.len(), 1);
@@ -1498,7 +1621,13 @@ mod tests {
     #[test]
     fn test_convert_class_protected_property_generates_pub_crate_field() {
         let decl = parse_class_decl("class Foo { protected x: number; }");
-        let items = convert_class_decl(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
+        let items = convert_class_decl(
+            &decl,
+            Visibility::Public,
+            &mut SyntheticTypeRegistry::new(),
+            &TypeRegistry::new(),
+        )
+        .unwrap();
         // Verify via generator output since StructField doesn't have vis yet
         let output = crate::generator::generate(&items);
         assert!(output.contains("pub(crate) x: f64"));
@@ -1509,7 +1638,13 @@ mod tests {
     #[test]
     fn test_param_prop_basic_public_generates_field_and_new() {
         let decl = parse_class_decl("class Foo { constructor(public x: number) {} }");
-        let items = convert_class_decl(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
+        let items = convert_class_decl(
+            &decl,
+            Visibility::Public,
+            &mut SyntheticTypeRegistry::new(),
+            &TypeRegistry::new(),
+        )
+        .unwrap();
 
         // Struct should have field `x`
         match &items[0] {
@@ -1542,7 +1677,13 @@ mod tests {
     #[test]
     fn test_param_prop_private_generates_private_field() {
         let decl = parse_class_decl("class Foo { constructor(private x: number) {} }");
-        let items = convert_class_decl(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
+        let items = convert_class_decl(
+            &decl,
+            Visibility::Public,
+            &mut SyntheticTypeRegistry::new(),
+            &TypeRegistry::new(),
+        )
+        .unwrap();
 
         match &items[0] {
             Item::Struct { fields, .. } => {
@@ -1557,7 +1698,13 @@ mod tests {
     #[test]
     fn test_param_prop_readonly_generates_field() {
         let decl = parse_class_decl("class Foo { constructor(public readonly x: string) {} }");
-        let items = convert_class_decl(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
+        let items = convert_class_decl(
+            &decl,
+            Visibility::Public,
+            &mut SyntheticTypeRegistry::new(),
+            &TypeRegistry::new(),
+        )
+        .unwrap();
 
         match &items[0] {
             Item::Struct { fields, .. } => {
@@ -1573,7 +1720,13 @@ mod tests {
     #[test]
     fn test_param_prop_with_default_value_generates_field_and_param() {
         let decl = parse_class_decl("class Foo { constructor(public x: number = 42) {} }");
-        let items = convert_class_decl(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
+        let items = convert_class_decl(
+            &decl,
+            Visibility::Public,
+            &mut SyntheticTypeRegistry::new(),
+            &TypeRegistry::new(),
+        )
+        .unwrap();
 
         match &items[0] {
             Item::Struct { fields, .. } => {
@@ -1599,7 +1752,13 @@ mod tests {
         let decl = parse_class_decl(
             "class Foo { constructor(public x: number, y: string) { console.log(y); } }",
         );
-        let items = convert_class_decl(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
+        let items = convert_class_decl(
+            &decl,
+            Visibility::Public,
+            &mut SyntheticTypeRegistry::new(),
+            &TypeRegistry::new(),
+        )
+        .unwrap();
 
         // Struct should only have field `x` (not `y`)
         match &items[0] {
@@ -1625,7 +1784,13 @@ mod tests {
     fn test_param_prop_multiple_generates_multiple_fields() {
         let decl =
             parse_class_decl("class Foo { constructor(public x: number, private y: string) {} }");
-        let items = convert_class_decl(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
+        let items = convert_class_decl(
+            &decl,
+            Visibility::Public,
+            &mut SyntheticTypeRegistry::new(),
+            &TypeRegistry::new(),
+        )
+        .unwrap();
 
         match &items[0] {
             Item::Struct { fields, .. } => {
@@ -1644,7 +1809,13 @@ mod tests {
         let decl = parse_class_decl(
             "class Foo { z: boolean; constructor(public x: number) { this.z = true; } }",
         );
-        let items = convert_class_decl(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
+        let items = convert_class_decl(
+            &decl,
+            Visibility::Public,
+            &mut SyntheticTypeRegistry::new(),
+            &TypeRegistry::new(),
+        )
+        .unwrap();
 
         // Struct should have both `z` (explicit) and `x` (param prop)
         match &items[0] {
@@ -1662,7 +1833,13 @@ mod tests {
     fn test_param_prop_with_body_logic_preserves_statements() {
         let decl =
             parse_class_decl("class Foo { constructor(public x: number) { console.log(x); } }");
-        let items = convert_class_decl(&decl, Visibility::Public, &TypeRegistry::new()).unwrap();
+        let items = convert_class_decl(
+            &decl,
+            Visibility::Public,
+            &mut SyntheticTypeRegistry::new(),
+            &TypeRegistry::new(),
+        )
+        .unwrap();
 
         match &items[1] {
             Item::Impl { methods, .. } => {
@@ -1683,7 +1860,13 @@ mod tests {
         // constructor(x: number = 0) should produce Option<f64> param + unwrap_or
         let decl =
             parse_class_decl("class Foo { x: number; constructor(x: number = 0) { this.x = x; } }");
-        let items = convert_class_decl(&decl, Visibility::Private, &TypeRegistry::new()).unwrap();
+        let items = convert_class_decl(
+            &decl,
+            Visibility::Private,
+            &mut SyntheticTypeRegistry::new(),
+            &TypeRegistry::new(),
+        )
+        .unwrap();
 
         // Find the Impl item
         let impl_item = items.iter().find(|i| matches!(i, Item::Impl { .. }));
@@ -1716,7 +1899,13 @@ mod tests {
     fn test_convert_class_constructor_default_empty_object_param() {
         // constructor(options: Options = {}) should produce Option<Options> + unwrap_or_default
         let decl = parse_class_decl("class Foo { constructor(options: Options = {}) {} }");
-        let items = convert_class_decl(&decl, Visibility::Private, &TypeRegistry::new()).unwrap();
+        let items = convert_class_decl(
+            &decl,
+            Visibility::Private,
+            &mut SyntheticTypeRegistry::new(),
+            &TypeRegistry::new(),
+        )
+        .unwrap();
 
         let impl_item = items.iter().find(|i| matches!(i, Item::Impl { .. }));
         assert!(impl_item.is_some(), "expected Impl item");
@@ -1758,7 +1947,13 @@ mod tests {
 
         let decl =
             parse_class_decl(r#"class Foo { static config: Config = { name: "default" }; }"#);
-        let items = convert_class_decl(&decl, Visibility::Private, &reg).unwrap();
+        let items = convert_class_decl(
+            &decl,
+            Visibility::Private,
+            &mut SyntheticTypeRegistry::new(),
+            &reg,
+        )
+        .unwrap();
 
         // Find the Impl item with static consts
         let impl_item = items

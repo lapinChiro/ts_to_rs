@@ -132,6 +132,11 @@
 
 #### 型変換・型推論
 
+- **[I-224]** **TypeResolver の `this` 型解決** — 型推論
+  - TypeResolver（`src/pipeline/type_resolver.rs`）がクラスメソッド内の `this` 式に対して `ResolvedType::Unknown` を返す
+  - クラス宣言の走査時（`visit_class_decl`）に、メソッドスコープ内で `this` の型をクラス自身の `Named` 型としてスコープに登録する必要がある
+  - `this.field` のフィールドアクセスや `this.method()` のメソッド呼び出しの型解決に影響
+  - 解決策: `visit_class_decl` でクラス名を記録し、メソッド走査時にスコープに `self` / `this` を `RustType::Named { name: class_name }` として登録する
 - **[I-101]** **ジェネリック型を含む intersection** — 型変換
   - `interface A<T> extends B<T>, C<T>` のようなジェネリック intersection が未対応
   - I-100（ジェネリクス基盤）完了により `TypeRegistry::instantiate` と `TypeParam` が利用可能。intersection 変換（`try_convert_intersection_type`）と統合すればよい

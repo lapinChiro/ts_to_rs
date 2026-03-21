@@ -18,9 +18,15 @@ fn parse_fn_decl(source: &str) -> ast::FnDecl {
 #[test]
 fn test_convert_fn_decl_add() {
     let fn_decl = parse_fn_decl("function add(a: number, b: number): number { return a + b; }");
-    let items = convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new(), false)
-        .unwrap()
-        .0;
+    let items = convert_fn_decl(
+        &fn_decl,
+        Visibility::Public,
+        &TypeRegistry::new(),
+        false,
+        &mut SyntheticTypeRegistry::new(),
+    )
+    .unwrap()
+    .0;
     let item = items.last().unwrap().clone();
     assert_eq!(
         item,
@@ -53,9 +59,15 @@ fn test_convert_fn_decl_add() {
 #[test]
 fn test_convert_fn_decl_no_return_type() {
     let fn_decl = parse_fn_decl("function greet(name: string) { return name; }");
-    let items = convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new(), false)
-        .unwrap()
-        .0;
+    let items = convert_fn_decl(
+        &fn_decl,
+        Visibility::Public,
+        &TypeRegistry::new(),
+        false,
+        &mut SyntheticTypeRegistry::new(),
+    )
+    .unwrap()
+    .0;
     let item = items.last().unwrap().clone();
     match item {
         Item::Fn {
@@ -71,9 +83,15 @@ fn test_convert_fn_decl_no_return_type() {
 #[test]
 fn test_convert_fn_decl_no_params() {
     let fn_decl = parse_fn_decl("function noop(): boolean { return true; }");
-    let items = convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new(), false)
-        .unwrap()
-        .0;
+    let items = convert_fn_decl(
+        &fn_decl,
+        Visibility::Public,
+        &TypeRegistry::new(),
+        false,
+        &mut SyntheticTypeRegistry::new(),
+    )
+    .unwrap()
+    .0;
     let item = items.last().unwrap().clone();
     match item {
         Item::Fn { params, body, .. } => {
@@ -88,9 +106,15 @@ fn test_convert_fn_decl_no_params() {
 fn test_convert_fn_decl_with_local_vars() {
     let fn_decl =
         parse_fn_decl("function calc(x: number): number { const result = x + 1; return result; }");
-    let items = convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new(), false)
-        .unwrap()
-        .0;
+    let items = convert_fn_decl(
+        &fn_decl,
+        Visibility::Public,
+        &TypeRegistry::new(),
+        false,
+        &mut SyntheticTypeRegistry::new(),
+    )
+    .unwrap()
+    .0;
     let item = items.last().unwrap().clone();
     match item {
         Item::Fn { body, .. } => {
@@ -117,9 +141,15 @@ fn test_convert_fn_decl_with_local_vars() {
 #[test]
 fn test_convert_fn_decl_generic_single_param() {
     let fn_decl = parse_fn_decl("function identity<T>(x: T): T { return x; }");
-    let items = convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new(), false)
-        .unwrap()
-        .0;
+    let items = convert_fn_decl(
+        &fn_decl,
+        Visibility::Public,
+        &TypeRegistry::new(),
+        false,
+        &mut SyntheticTypeRegistry::new(),
+    )
+    .unwrap()
+    .0;
     let item = items.last().unwrap().clone();
     match item {
         Item::Fn { type_params, .. } => {
@@ -138,9 +168,15 @@ fn test_convert_fn_decl_generic_single_param() {
 #[test]
 fn test_convert_fn_decl_generic_multiple_params() {
     let fn_decl = parse_fn_decl("function pair<A, B>(a: A, b: B): A { return a; }");
-    let items = convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new(), false)
-        .unwrap()
-        .0;
+    let items = convert_fn_decl(
+        &fn_decl,
+        Visibility::Public,
+        &TypeRegistry::new(),
+        false,
+        &mut SyntheticTypeRegistry::new(),
+    )
+    .unwrap()
+    .0;
     let item = items.last().unwrap().clone();
     match item {
         Item::Fn { type_params, .. } => {
@@ -166,9 +202,15 @@ fn test_convert_fn_decl_generic_multiple_params() {
 fn test_convert_fn_decl_throw_wraps_return_type_in_result() {
     let fn_decl =
             parse_fn_decl("function validate(x: number): string { if (x < 0) { throw new Error(\"negative\"); } return \"ok\"; }");
-    let items = convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new(), false)
-        .unwrap()
-        .0;
+    let items = convert_fn_decl(
+        &fn_decl,
+        Visibility::Public,
+        &TypeRegistry::new(),
+        false,
+        &mut SyntheticTypeRegistry::new(),
+    )
+    .unwrap()
+    .0;
     let item = items.last().unwrap().clone();
     match item {
         Item::Fn { return_type, .. } => {
@@ -188,9 +230,15 @@ fn test_convert_fn_decl_throw_wraps_return_type_in_result() {
 fn test_convert_fn_decl_throw_wraps_return_in_ok() {
     let fn_decl =
             parse_fn_decl("function validate(x: number): string { if (x < 0) { throw new Error(\"negative\"); } return \"ok\"; }");
-    let items = convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new(), false)
-        .unwrap()
-        .0;
+    let items = convert_fn_decl(
+        &fn_decl,
+        Visibility::Public,
+        &TypeRegistry::new(),
+        false,
+        &mut SyntheticTypeRegistry::new(),
+    )
+    .unwrap()
+    .0;
     let item = items.last().unwrap().clone();
     match item {
         Item::Fn { body, .. } => {
@@ -215,9 +263,15 @@ fn test_convert_fn_decl_throw_wraps_return_in_ok() {
 #[test]
 fn test_convert_fn_decl_throw_no_return_type_becomes_result_unit() {
     let fn_decl = parse_fn_decl("function fail() { throw new Error(\"boom\"); }");
-    let items = convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new(), false)
-        .unwrap()
-        .0;
+    let items = convert_fn_decl(
+        &fn_decl,
+        Visibility::Public,
+        &TypeRegistry::new(),
+        false,
+        &mut SyntheticTypeRegistry::new(),
+    )
+    .unwrap()
+    .0;
     let item = items.last().unwrap().clone();
     match item {
         Item::Fn { return_type, .. } => {
@@ -239,7 +293,13 @@ fn test_convert_fn_decl_throw_no_return_type_becomes_result_unit() {
 #[test]
 fn test_convert_fn_decl_missing_param_type_annotation_falls_back_to_any() {
     let fn_decl = parse_fn_decl("function bad(x) { return x; }");
-    let result = convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new(), false);
+    let result = convert_fn_decl(
+        &fn_decl,
+        Visibility::Public,
+        &TypeRegistry::new(),
+        false,
+        &mut SyntheticTypeRegistry::new(),
+    );
     assert!(result.is_ok(), "should fall back to Any, not error");
     let items = result.unwrap().0;
     match items.last().unwrap() {
@@ -255,9 +315,15 @@ fn test_convert_fn_decl_missing_param_type_annotation_falls_back_to_any() {
 #[test]
 fn test_convert_fn_decl_async_is_async() {
     let fn_decl = parse_fn_decl("async function fetchData(): Promise<number> { return 42; }");
-    let items = convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new(), false)
-        .unwrap()
-        .0;
+    let items = convert_fn_decl(
+        &fn_decl,
+        Visibility::Public,
+        &TypeRegistry::new(),
+        false,
+        &mut SyntheticTypeRegistry::new(),
+    )
+    .unwrap()
+    .0;
     let item = items.last().unwrap().clone();
     match item {
         Item::Fn {
@@ -276,9 +342,15 @@ fn test_convert_fn_decl_async_is_async() {
 #[test]
 fn test_convert_fn_decl_async_no_return_type() {
     let fn_decl = parse_fn_decl("async function doWork() { return; }");
-    let items = convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new(), false)
-        .unwrap()
-        .0;
+    let items = convert_fn_decl(
+        &fn_decl,
+        Visibility::Public,
+        &TypeRegistry::new(),
+        false,
+        &mut SyntheticTypeRegistry::new(),
+    )
+    .unwrap()
+    .0;
     let item = items.last().unwrap().clone();
     match item {
         Item::Fn {
@@ -296,9 +368,15 @@ fn test_convert_fn_decl_async_no_return_type() {
 #[test]
 fn test_convert_fn_decl_sync_is_not_async() {
     let fn_decl = parse_fn_decl("function add(a: number, b: number): number { return a + b; }");
-    let items = convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new(), false)
-        .unwrap()
-        .0;
+    let items = convert_fn_decl(
+        &fn_decl,
+        Visibility::Public,
+        &TypeRegistry::new(),
+        false,
+        &mut SyntheticTypeRegistry::new(),
+    )
+    .unwrap()
+    .0;
     let item = items.last().unwrap().clone();
     match item {
         Item::Fn { is_async, .. } => {
@@ -311,9 +389,15 @@ fn test_convert_fn_decl_sync_is_not_async() {
 #[test]
 fn test_convert_fn_decl_async_main_has_tokio_main_attribute() {
     let fn_decl = parse_fn_decl("async function main(): Promise<void> { }");
-    let items = convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new(), false)
-        .unwrap()
-        .0;
+    let items = convert_fn_decl(
+        &fn_decl,
+        Visibility::Public,
+        &TypeRegistry::new(),
+        false,
+        &mut SyntheticTypeRegistry::new(),
+    )
+    .unwrap()
+    .0;
     let item = items.last().unwrap().clone();
     match item {
         Item::Fn {
@@ -333,9 +417,15 @@ fn test_convert_fn_decl_async_main_has_tokio_main_attribute() {
 #[test]
 fn test_convert_fn_decl_async_non_main_has_no_attributes() {
     let fn_decl = parse_fn_decl("async function fetchData(): Promise<number> { return 42; }");
-    let items = convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new(), false)
-        .unwrap()
-        .0;
+    let items = convert_fn_decl(
+        &fn_decl,
+        Visibility::Public,
+        &TypeRegistry::new(),
+        false,
+        &mut SyntheticTypeRegistry::new(),
+    )
+    .unwrap()
+    .0;
     let item = items.last().unwrap().clone();
     match item {
         Item::Fn { attributes, .. } => {
@@ -348,9 +438,15 @@ fn test_convert_fn_decl_async_non_main_has_no_attributes() {
 #[test]
 fn test_convert_fn_decl_sync_main_has_no_attributes() {
     let fn_decl = parse_fn_decl("function main(): void { }");
-    let items = convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new(), false)
-        .unwrap()
-        .0;
+    let items = convert_fn_decl(
+        &fn_decl,
+        Visibility::Public,
+        &TypeRegistry::new(),
+        false,
+        &mut SyntheticTypeRegistry::new(),
+    )
+    .unwrap()
+    .0;
     let item = items.last().unwrap().clone();
     match item {
         Item::Fn { attributes, .. } => {
@@ -363,9 +459,15 @@ fn test_convert_fn_decl_sync_main_has_no_attributes() {
 #[test]
 fn test_convert_fn_decl_object_destructuring_param_generates_expansion() {
     let fn_decl = parse_fn_decl("function foo({ x, y }: Point): void { console.log(x); }");
-    let items = convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new(), false)
-        .unwrap()
-        .0;
+    let items = convert_fn_decl(
+        &fn_decl,
+        Visibility::Public,
+        &TypeRegistry::new(),
+        false,
+        &mut SyntheticTypeRegistry::new(),
+    )
+    .unwrap()
+    .0;
     let item = items.last().unwrap().clone();
 
     match item {
@@ -414,9 +516,15 @@ fn test_convert_fn_decl_object_destructuring_param_generates_expansion() {
 #[test]
 fn test_convert_fn_decl_object_destructuring_rename() {
     let fn_decl = parse_fn_decl("function foo({ x: newX, y: newY }: Point): void {}");
-    let items = convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new(), false)
-        .unwrap()
-        .0;
+    let items = convert_fn_decl(
+        &fn_decl,
+        Visibility::Public,
+        &TypeRegistry::new(),
+        false,
+        &mut SyntheticTypeRegistry::new(),
+    )
+    .unwrap()
+    .0;
     let item = items.last().unwrap().clone();
 
     match item {
@@ -441,9 +549,15 @@ fn test_convert_fn_decl_object_destructuring_rename() {
 #[test]
 fn test_convert_fn_decl_destructuring_with_normal_params() {
     let fn_decl = parse_fn_decl("function foo(name: string, { x, y }: Point): void {}");
-    let items = convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new(), false)
-        .unwrap()
-        .0;
+    let items = convert_fn_decl(
+        &fn_decl,
+        Visibility::Public,
+        &TypeRegistry::new(),
+        false,
+        &mut SyntheticTypeRegistry::new(),
+    )
+    .unwrap()
+    .0;
     let item = items.last().unwrap().clone();
 
     match item {
@@ -461,7 +575,13 @@ fn test_convert_fn_decl_destructuring_with_normal_params() {
 #[test]
 fn test_convert_fn_decl_destructuring_no_type_annotation_falls_back_to_value() {
     let fn_decl = parse_fn_decl("function foo({ x, y }): void {}");
-    let result = convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new(), false);
+    let result = convert_fn_decl(
+        &fn_decl,
+        Visibility::Public,
+        &TypeRegistry::new(),
+        false,
+        &mut SyntheticTypeRegistry::new(),
+    );
     assert!(
         result.is_ok(),
         "object destructuring without type annotation should fallback to serde_json::Value"
@@ -471,9 +591,15 @@ fn test_convert_fn_decl_destructuring_no_type_annotation_falls_back_to_value() {
 #[test]
 fn test_convert_fn_decl_default_number_param_wraps_in_option() {
     let fn_decl = parse_fn_decl("function foo(x: number = 0): void {}");
-    let items = convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new(), false)
-        .unwrap()
-        .0;
+    let items = convert_fn_decl(
+        &fn_decl,
+        Visibility::Public,
+        &TypeRegistry::new(),
+        false,
+        &mut SyntheticTypeRegistry::new(),
+    )
+    .unwrap()
+    .0;
     let item = items.last().unwrap().clone();
     match item {
         Item::Fn { params, body, .. } => {
@@ -525,9 +651,15 @@ fn test_convert_fn_decl_default_number_param_wraps_in_option() {
 #[test]
 fn test_convert_fn_decl_default_string_param_wraps_in_option() {
     let fn_decl = parse_fn_decl("function foo(name: string = \"hello\"): void {}");
-    let items = convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new(), false)
-        .unwrap()
-        .0;
+    let items = convert_fn_decl(
+        &fn_decl,
+        Visibility::Public,
+        &TypeRegistry::new(),
+        false,
+        &mut SyntheticTypeRegistry::new(),
+    )
+    .unwrap()
+    .0;
     let item = items.last().unwrap().clone();
     match item {
         Item::Fn { params, body, .. } => {
@@ -566,9 +698,15 @@ fn test_convert_fn_decl_default_string_param_wraps_in_option() {
 #[test]
 fn test_convert_fn_decl_default_bool_param_wraps_in_option() {
     let fn_decl = parse_fn_decl("function foo(flag: boolean = true): void {}");
-    let items = convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new(), false)
-        .unwrap()
-        .0;
+    let items = convert_fn_decl(
+        &fn_decl,
+        Visibility::Public,
+        &TypeRegistry::new(),
+        false,
+        &mut SyntheticTypeRegistry::new(),
+    )
+    .unwrap()
+    .0;
     let item = items.last().unwrap().clone();
     match item {
         Item::Fn { params, body, .. } => {
@@ -594,9 +732,15 @@ fn test_convert_fn_decl_default_bool_param_wraps_in_option() {
 #[test]
 fn test_convert_fn_decl_default_empty_object_uses_unwrap_or_default() {
     let fn_decl = parse_fn_decl("function foo(options: Config = {}): void {}");
-    let items = convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new(), false)
-        .unwrap()
-        .0;
+    let items = convert_fn_decl(
+        &fn_decl,
+        Visibility::Public,
+        &TypeRegistry::new(),
+        false,
+        &mut SyntheticTypeRegistry::new(),
+    )
+    .unwrap()
+    .0;
     let item = items.last().unwrap().clone();
     match item {
         Item::Fn { params, body, .. } => {
@@ -625,9 +769,15 @@ fn test_convert_fn_decl_default_empty_object_uses_unwrap_or_default() {
 #[test]
 fn test_convert_fn_decl_default_param_mixed_with_normal() {
     let fn_decl = parse_fn_decl("function foo(a: number, b: number = 10): void {}");
-    let items = convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new(), false)
-        .unwrap()
-        .0;
+    let items = convert_fn_decl(
+        &fn_decl,
+        Visibility::Public,
+        &TypeRegistry::new(),
+        false,
+        &mut SyntheticTypeRegistry::new(),
+    )
+    .unwrap()
+    .0;
     let item = items.last().unwrap().clone();
     match item {
         Item::Fn { params, body, .. } => {
@@ -654,8 +804,14 @@ fn test_convert_fn_decl_default_param_mixed_with_normal() {
 fn test_convert_fn_decl_default_new_expr_uses_unwrap_or_default() {
     // new Map() → unwrap_or_default()
     let fn_decl = parse_fn_decl("function foo(m: Map = new Map()): void {}");
-    let (items, _) =
-        convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new(), false).unwrap();
+    let (items, _) = convert_fn_decl(
+        &fn_decl,
+        Visibility::Public,
+        &TypeRegistry::new(),
+        false,
+        &mut SyntheticTypeRegistry::new(),
+    )
+    .unwrap();
     assert!(!items.is_empty());
 }
 
@@ -663,8 +819,14 @@ fn test_convert_fn_decl_default_new_expr_uses_unwrap_or_default() {
 fn test_convert_fn_decl_default_variable_ref_uses_unwrap_or() {
     // = baseMimes → unwrap_or(baseMimes)
     let fn_decl = parse_fn_decl("function foo(x: number = defaultVal): void {}");
-    let (items, _) =
-        convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new(), false).unwrap();
+    let (items, _) = convert_fn_decl(
+        &fn_decl,
+        Visibility::Public,
+        &TypeRegistry::new(),
+        false,
+        &mut SyntheticTypeRegistry::new(),
+    )
+    .unwrap();
     assert!(!items.is_empty());
 }
 
@@ -672,8 +834,14 @@ fn test_convert_fn_decl_default_variable_ref_uses_unwrap_or() {
 fn test_convert_fn_decl_default_empty_array_uses_unwrap_or_default() {
     // = [] → unwrap_or_default()
     let fn_decl = parse_fn_decl("function foo(x: string[] = []): void {}");
-    let (items, _) =
-        convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new(), false).unwrap();
+    let (items, _) = convert_fn_decl(
+        &fn_decl,
+        Visibility::Public,
+        &TypeRegistry::new(),
+        false,
+        &mut SyntheticTypeRegistry::new(),
+    )
+    .unwrap();
     assert!(!items.is_empty());
 }
 
@@ -681,8 +849,14 @@ fn test_convert_fn_decl_default_empty_array_uses_unwrap_or_default() {
 fn test_convert_fn_decl_default_negative_number() {
     // = -1 → unwrap_or(-1.0)
     let fn_decl = parse_fn_decl("function foo(x: number = -1): void {}");
-    let (items, _) =
-        convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new(), false).unwrap();
+    let (items, _) = convert_fn_decl(
+        &fn_decl,
+        Visibility::Public,
+        &TypeRegistry::new(),
+        false,
+        &mut SyntheticTypeRegistry::new(),
+    )
+    .unwrap();
     assert!(!items.is_empty());
 }
 
@@ -690,8 +864,14 @@ fn test_convert_fn_decl_default_negative_number() {
 fn test_convert_fn_decl_rest_param() {
     // ...args: number[] → args: Vec<f64>
     let fn_decl = parse_fn_decl("function foo(...args: number[]): void {}");
-    let (items, _) =
-        convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new(), false).unwrap();
+    let (items, _) = convert_fn_decl(
+        &fn_decl,
+        Visibility::Public,
+        &TypeRegistry::new(),
+        false,
+        &mut SyntheticTypeRegistry::new(),
+    )
+    .unwrap();
     match &items[0] {
         Item::Fn { params, .. } => {
             assert_eq!(params.len(), 1);
@@ -704,8 +884,14 @@ fn test_convert_fn_decl_rest_param() {
 #[test]
 fn test_convert_fn_decl_inline_type_literal_single_field_generates_struct() {
     let fn_decl = parse_fn_decl("function foo(opts: { x: number }): void {}");
-    let (items, _) =
-        convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new(), false).unwrap();
+    let (items, _) = convert_fn_decl(
+        &fn_decl,
+        Visibility::Public,
+        &TypeRegistry::new(),
+        false,
+        &mut SyntheticTypeRegistry::new(),
+    )
+    .unwrap();
     assert_eq!(items.len(), 2);
     assert_eq!(
         items[0],
@@ -737,8 +923,14 @@ fn test_convert_fn_decl_inline_type_literal_single_field_generates_struct() {
 #[test]
 fn test_convert_fn_decl_inline_type_literal_multiple_fields_generates_struct() {
     let fn_decl = parse_fn_decl("function bar(config: { x: number, y: string }): void {}");
-    let (items, _) =
-        convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new(), false).unwrap();
+    let (items, _) = convert_fn_decl(
+        &fn_decl,
+        Visibility::Public,
+        &TypeRegistry::new(),
+        false,
+        &mut SyntheticTypeRegistry::new(),
+    )
+    .unwrap();
     assert_eq!(items.len(), 2);
     assert_eq!(
         items[0],
@@ -765,8 +957,14 @@ fn test_convert_fn_decl_inline_type_literal_multiple_fields_generates_struct() {
 #[test]
 fn test_convert_fn_decl_inline_type_literal_mixed_with_normal_param_generates_struct() {
     let fn_decl = parse_fn_decl("function baz(name: string, opts: { x: number }): void {}");
-    let (items, _) =
-        convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new(), false).unwrap();
+    let (items, _) = convert_fn_decl(
+        &fn_decl,
+        Visibility::Public,
+        &TypeRegistry::new(),
+        false,
+        &mut SyntheticTypeRegistry::new(),
+    )
+    .unwrap();
     assert_eq!(items.len(), 2);
     match &items[0] {
         Item::Struct { name, .. } => assert_eq!(name, "BazOpts"),
@@ -790,8 +988,14 @@ fn test_convert_fn_decl_inline_type_literal_mixed_with_normal_param_generates_st
 #[test]
 fn test_convert_fn_decl_inline_type_literal_empty_generates_empty_struct() {
     let fn_decl = parse_fn_decl("function qux(opts: {}): void {}");
-    let (items, _) =
-        convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new(), false).unwrap();
+    let (items, _) = convert_fn_decl(
+        &fn_decl,
+        Visibility::Public,
+        &TypeRegistry::new(),
+        false,
+        &mut SyntheticTypeRegistry::new(),
+    )
+    .unwrap();
     assert_eq!(items.len(), 2);
     assert_eq!(
         items[0],
@@ -807,8 +1011,14 @@ fn test_convert_fn_decl_inline_type_literal_empty_generates_empty_struct() {
 #[test]
 fn test_convert_fn_decl_default_param_inline_type_generates_struct() {
     let decl = parse_fn_decl("function f(x: { a: string } = {}): void { }");
-    let (items, _warnings) =
-        convert_fn_decl(&decl, Visibility::Public, &TypeRegistry::new(), false).unwrap();
+    let (items, _warnings) = convert_fn_decl(
+        &decl,
+        Visibility::Public,
+        &TypeRegistry::new(),
+        false,
+        &mut SyntheticTypeRegistry::new(),
+    )
+    .unwrap();
     // Should produce: struct + function
     let has_struct = items
         .iter()
@@ -824,9 +1034,15 @@ fn test_convert_fn_decl_default_param_inline_type_generates_struct() {
 /// Helper: check if the function's return type is Result
 fn fn_returns_result(source: &str) -> bool {
     let fn_decl = parse_fn_decl(source);
-    let items = convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new(), false)
-        .unwrap()
-        .0;
+    let items = convert_fn_decl(
+        &fn_decl,
+        Visibility::Public,
+        &TypeRegistry::new(),
+        false,
+        &mut SyntheticTypeRegistry::new(),
+    )
+    .unwrap()
+    .0;
     let item = items.last().unwrap();
     matches!(
         item,
@@ -944,7 +1160,14 @@ fn test_convert_last_return_to_tail_empty_body_noop() {
 fn test_object_destructuring_param_default_number_generates_unwrap_or() {
     let fn_decl = parse_fn_decl("function f({ x = 0 }: { x?: number }): void { console.log(x); }");
     let reg = TypeRegistry::new();
-    let (items, _) = convert_fn_decl(&fn_decl, Visibility::Private, &reg, false).unwrap();
+    let (items, _) = convert_fn_decl(
+        &fn_decl,
+        Visibility::Private,
+        &reg,
+        false,
+        &mut SyntheticTypeRegistry::new(),
+    )
+    .unwrap();
     match &items[0] {
         Item::Fn { body, .. } => {
             // First statement should be the destructuring expansion with unwrap_or
@@ -996,9 +1219,15 @@ fn test_convert_fn_param_trait_type_generates_dyn_ref() {
     // function foo(g: Greeter): void { } → fn foo(g: &dyn Greeter) { }
     let reg = reg_with_trait("Greeter");
     let fn_decl = parse_fn_decl("function foo(g: Greeter): void { }");
-    let items = convert_fn_decl(&fn_decl, Visibility::Public, &reg, false)
-        .unwrap()
-        .0;
+    let items = convert_fn_decl(
+        &fn_decl,
+        Visibility::Public,
+        &reg,
+        false,
+        &mut SyntheticTypeRegistry::new(),
+    )
+    .unwrap()
+    .0;
     let item = items.last().unwrap();
     match item {
         Item::Fn { params, .. } => {
@@ -1019,9 +1248,15 @@ fn test_convert_fn_return_trait_type_generates_box_dyn() {
     // function make(): Greeter { } → fn make() -> Box<dyn Greeter> { }
     let reg = reg_with_trait("Greeter");
     let fn_decl = parse_fn_decl("function make(): Greeter { return null as any; }");
-    let items = convert_fn_decl(&fn_decl, Visibility::Public, &reg, true)
-        .unwrap()
-        .0;
+    let items = convert_fn_decl(
+        &fn_decl,
+        Visibility::Public,
+        &reg,
+        true,
+        &mut SyntheticTypeRegistry::new(),
+    )
+    .unwrap()
+    .0;
     let item = items.last().unwrap();
     match item {
         Item::Fn { return_type, .. } => {
@@ -1050,9 +1285,15 @@ fn test_convert_fn_param_struct_type_unchanged() {
         ),
     );
     let fn_decl = parse_fn_decl("function foo(p: Point): void { }");
-    let items = convert_fn_decl(&fn_decl, Visibility::Public, &reg, false)
-        .unwrap()
-        .0;
+    let items = convert_fn_decl(
+        &fn_decl,
+        Visibility::Public,
+        &reg,
+        false,
+        &mut SyntheticTypeRegistry::new(),
+    )
+    .unwrap()
+    .0;
     let item = items.last().unwrap();
     match item {
         Item::Fn { params, .. } => {
@@ -1075,8 +1316,14 @@ fn test_convert_fn_param_struct_type_unchanged() {
 fn test_convert_fn_default_param_number_no_annotation_infers_f64() {
     // function foo(x = 0) → fn foo(x: Option<f64>)
     let fn_decl = parse_fn_decl("function foo(x = 0): void {}");
-    let (items, _) =
-        convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new(), false).unwrap();
+    let (items, _) = convert_fn_decl(
+        &fn_decl,
+        Visibility::Public,
+        &TypeRegistry::new(),
+        false,
+        &mut SyntheticTypeRegistry::new(),
+    )
+    .unwrap();
     match &items[0] {
         Item::Fn { params, .. } => {
             assert_eq!(
@@ -1091,8 +1338,14 @@ fn test_convert_fn_default_param_number_no_annotation_infers_f64() {
 #[test]
 fn test_convert_fn_default_param_string_no_annotation_infers_string() {
     let fn_decl = parse_fn_decl(r#"function foo(s = "hi"): void {}"#);
-    let (items, _) =
-        convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new(), false).unwrap();
+    let (items, _) = convert_fn_decl(
+        &fn_decl,
+        Visibility::Public,
+        &TypeRegistry::new(),
+        false,
+        &mut SyntheticTypeRegistry::new(),
+    )
+    .unwrap();
     match &items[0] {
         Item::Fn { params, .. } => {
             assert_eq!(
@@ -1107,8 +1360,14 @@ fn test_convert_fn_default_param_string_no_annotation_infers_string() {
 #[test]
 fn test_convert_fn_default_param_bool_no_annotation_infers_bool() {
     let fn_decl = parse_fn_decl("function foo(b = true): void {}");
-    let (items, _) =
-        convert_fn_decl(&fn_decl, Visibility::Public, &TypeRegistry::new(), false).unwrap();
+    let (items, _) = convert_fn_decl(
+        &fn_decl,
+        Visibility::Public,
+        &TypeRegistry::new(),
+        false,
+        &mut SyntheticTypeRegistry::new(),
+    )
+    .unwrap();
     match &items[0] {
         Item::Fn { params, .. } => {
             assert_eq!(

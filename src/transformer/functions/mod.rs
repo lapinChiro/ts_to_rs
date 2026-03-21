@@ -6,9 +6,12 @@ use anyhow::{anyhow, Result};
 use swc_ecma_ast as ast;
 
 use crate::ir::{Expr, Item, MatchArm, Param, RustType, Stmt, Visibility};
+use crate::pipeline::type_converter::{
+    convert_property_signature, convert_ts_type, extract_type_params,
+};
+use crate::pipeline::SyntheticTypeRegistry;
 use crate::registry::TypeRegistry;
 use crate::transformer::statements::convert_stmt_list;
-use crate::transformer::types::{convert_property_signature, convert_ts_type, extract_type_params};
 use crate::transformer::{
     extract_pat_ident_name, extract_prop_name, wrap_trait_for_position, TypeEnv, TypePosition,
 };
@@ -27,10 +30,12 @@ pub fn convert_fn_decl(
     vis: Visibility,
     reg: &TypeRegistry,
     resilient: bool,
+    synthetic_out: &mut SyntheticTypeRegistry,
 ) -> Result<(Vec<Item>, Vec<String>)> {
     let name = fn_decl.ident.sym.to_string();
     let mut fallback_warnings = Vec::new();
-    let mut extra_items = Vec::new();
+    let mut items = Vec::new();
+    let mut synthetic = SyntheticTypeRegistry::new();
 
     let mut params = Vec::new();
     let mut destructuring_stmts = Vec::new();
@@ -42,10 +47,11 @@ pub fn convert_fn_decl(
             resilient,
             &mut fallback_warnings,
             reg,
+            &mut synthetic,
         )?;
         params.push(p);
         destructuring_stmts.extend(stmts);
-        extra_items.extend(extra);
+        items.extend(extra);
     }
 
     let is_async = fn_decl.function.is_async;
@@ -59,7 +65,7 @@ pub fn convert_fn_decl(
                 &ann.type_ann,
                 resilient,
                 &mut fallback_warnings,
-                &mut extra_items,
+                &mut synthetic,
                 reg,
             )
         })
@@ -159,9 +165,13 @@ pub fn convert_fn_decl(
     }
 
     let body_stmts = match &fn_decl.function.body {
-        Some(block) => {
-            convert_stmt_list(&block.stmts, reg, return_type.as_ref(), &mut fn_type_env)?
-        }
+        Some(block) => convert_stmt_list(
+            &block.stmts,
+            reg,
+            return_type.as_ref(),
+            &mut fn_type_env,
+            &mut synthetic,
+        )?,
         None => Vec::new(),
     };
     // Prepend destructuring expansion statements
@@ -173,7 +183,8 @@ pub fn convert_fn_decl(
         combined
     };
 
-    let type_params = extract_type_params(fn_decl.function.type_params.as_deref(), reg);
+    let type_params =
+        extract_type_params(fn_decl.function.type_params.as_deref(), &mut synthetic, reg);
 
     // If the function body contains `throw`, wrap return type in Result and returns in Ok()
     let has_throw = fn_decl
@@ -211,11 +222,14 @@ pub fn convert_fn_decl(
         vec![]
     };
 
-    // Prepend any-type enum items before the function item
-    extra_items.extend(any_enum_items);
-    extra_items.extend(local_any_enum_items);
+    // Merge local synthetic types into the external registry
+    synthetic_out.merge(synthetic);
 
-    extra_items.push(Item::Fn {
+    // Prepend any-type enum items before the function item
+    items.extend(any_enum_items);
+    items.extend(local_any_enum_items);
+
+    items.push(Item::Fn {
         vis,
         attributes,
         is_async,
@@ -226,7 +240,7 @@ pub fn convert_fn_decl(
         body,
     });
 
-    Ok((extra_items, fallback_warnings))
+    Ok((items, fallback_warnings))
 }
 
 /// Converts a TypeScript type to an IR type, falling back to [`RustType::Any`] when
@@ -237,10 +251,10 @@ pub(crate) fn convert_ts_type_with_fallback(
     ts_type: &swc_ecma_ast::TsType,
     resilient: bool,
     fallback_warnings: &mut Vec<String>,
-    extra_items: &mut Vec<Item>,
+    synthetic: &mut SyntheticTypeRegistry,
     reg: &TypeRegistry,
 ) -> Result<RustType> {
-    match convert_ts_type(ts_type, extra_items, reg) {
+    match convert_ts_type(ts_type, synthetic, reg) {
         Ok(ty) => Ok(ty),
         Err(e) => {
             if resilient {
@@ -267,6 +281,7 @@ fn convert_param(
     resilient: bool,
     fallback_warnings: &mut Vec<String>,
     reg: &TypeRegistry,
+    synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<(Param, Vec<Stmt>, Vec<Item>)> {
     match pat {
         ast::Pat::Ident(ident) => {
@@ -293,7 +308,7 @@ fn convert_param(
                 for member in &type_lit.members {
                     match member {
                         ast::TsTypeElement::TsPropertySignature(prop) => {
-                            fields.push(convert_property_signature(prop, &mut Vec::new(), reg)?);
+                            fields.push(convert_property_signature(prop, synthetic, reg)?);
                         }
                         _ => {
                             return Err(anyhow!(
@@ -322,12 +337,11 @@ fn convert_param(
                 ));
             }
 
-            let mut type_extra_items = Vec::new();
             let rust_type = convert_ts_type_with_fallback(
                 &ty.type_ann,
                 resilient,
                 fallback_warnings,
-                &mut type_extra_items,
+                synthetic,
                 reg,
             )?;
             // Trait types in parameter position → &dyn Trait
@@ -338,16 +352,22 @@ fn convert_param(
                     ty: Some(rust_type),
                 },
                 vec![],
-                type_extra_items,
+                vec![],
             ))
         }
         ast::Pat::Object(obj_pat) => {
-            let (param, stmts) = convert_object_destructuring_param(obj_pat, reg)?;
+            let (param, stmts) = convert_object_destructuring_param(obj_pat, reg, synthetic)?;
             Ok((param, stmts, vec![]))
         }
-        ast::Pat::Assign(assign) => {
-            convert_default_param(assign, fn_name, vis, resilient, fallback_warnings, reg)
-        }
+        ast::Pat::Assign(assign) => convert_default_param(
+            assign,
+            fn_name,
+            vis,
+            resilient,
+            fallback_warnings,
+            reg,
+            synthetic,
+        ),
         ast::Pat::Rest(rest) => {
             if let ast::Pat::Ident(ident) = rest.arg.as_ref() {
                 let name = ident.id.sym.to_string();
@@ -358,7 +378,7 @@ fn convert_param(
                             &ann.type_ann,
                             resilient,
                             fallback_warnings,
-                            &mut Vec::new(),
+                            synthetic,
                             reg,
                         )
                     })
@@ -390,6 +410,7 @@ fn convert_default_param(
     resilient: bool,
     fallback_warnings: &mut Vec<String>,
     reg: &TypeRegistry,
+    synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<(Param, Vec<Stmt>, Vec<Item>)> {
     // Recursively convert the inner parameter (left side)
     let (inner_param, mut stmts, extra) = convert_param(
@@ -399,6 +420,7 @@ fn convert_default_param(
         resilient,
         fallback_warnings,
         reg,
+        synthetic,
     )?;
     let param_name = inner_param.name.clone();
 
@@ -413,7 +435,7 @@ fn convert_default_param(
     let option_type = RustType::Option(Box::new(inner_type));
 
     // Convert default value to IR expression
-    let (default_expr, use_unwrap_or_default) = convert_default_value(&assign.right)?;
+    let (default_expr, use_unwrap_or_default) = convert_default_value(&assign.right, synthetic)?;
 
     // Generate expansion statement: `let x = x.unwrap_or(value);` or `let x = x.unwrap_or_default();`
     let unwrap_call = if use_unwrap_or_default {
@@ -454,7 +476,10 @@ fn convert_default_param(
 ///
 /// Returns `(Some(expr), false)` for literal values (use `unwrap_or`),
 /// or `(None, true)` for empty objects (use `unwrap_or_default`).
-pub(crate) fn convert_default_value(expr: &ast::Expr) -> Result<(Option<Expr>, bool)> {
+pub(crate) fn convert_default_value(
+    expr: &ast::Expr,
+    synthetic: &mut SyntheticTypeRegistry,
+) -> Result<(Option<Expr>, bool)> {
     match expr {
         ast::Expr::Lit(lit) => match lit {
             ast::Lit::Num(n) => Ok((Some(Expr::NumberLit(n.value)), false)),
@@ -505,6 +530,7 @@ pub(crate) fn convert_default_value(expr: &ast::Expr) -> Result<(Option<Expr>, b
                 &TypeRegistry::new(),
                 &crate::transformer::expressions::ExprContext::none(),
                 &crate::transformer::TypeEnv::new(),
+                synthetic,
             )?;
             Ok((Some(expr), false))
         }
@@ -542,9 +568,10 @@ fn infer_type_from_default(expr: &ast::Expr) -> Option<RustType> {
 pub(crate) fn convert_object_destructuring_param(
     obj_pat: &ast::ObjectPat,
     reg: &TypeRegistry,
+    synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<(Param, Vec<Stmt>)> {
     let rust_type = if let Some(type_ann) = obj_pat.type_ann.as_ref() {
-        convert_ts_type(&type_ann.type_ann, &mut Vec::new(), reg)?
+        convert_ts_type(&type_ann.type_ann, synthetic, reg)?
     } else {
         // No type annotation — fallback to serde_json::Value
         RustType::Named {
@@ -584,6 +611,7 @@ pub(crate) fn convert_object_destructuring_param(
                         reg,
                         &crate::transformer::expressions::ExprContext::none(),
                         &crate::transformer::TypeEnv::new(),
+                        synthetic,
                     )?;
                     match &default_ir {
                         Expr::MethodCall { method, .. } if method == "to_string" => {
@@ -637,6 +665,7 @@ pub(crate) fn convert_object_destructuring_param(
                             &nested_source,
                             &mut stmts,
                             reg,
+                            synthetic,
                         )?;
                     }
                     // { x: newX } — rename
@@ -700,6 +729,7 @@ fn expand_fn_param_object_props(
     source_expr: &Expr,
     stmts: &mut Vec<Stmt>,
     reg: &TypeRegistry,
+    synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<()> {
     for prop in props {
         match prop {
@@ -716,6 +746,7 @@ fn expand_fn_param_object_props(
                         reg,
                         &crate::transformer::expressions::ExprContext::none(),
                         &crate::transformer::TypeEnv::new(),
+                        synthetic,
                     )?;
                     match &default_ir {
                         Expr::MethodCall { method, .. } if method == "to_string" => {
@@ -763,7 +794,13 @@ fn expand_fn_param_object_props(
                 };
                 match kv.value.as_ref() {
                     ast::Pat::Object(inner_pat) => {
-                        expand_fn_param_object_props(&inner_pat.props, &nested_source, stmts, reg)?;
+                        expand_fn_param_object_props(
+                            &inner_pat.props,
+                            &nested_source,
+                            stmts,
+                            reg,
+                            synthetic,
+                        )?;
                     }
                     _ => {
                         let binding_name = extract_pat_ident_name(kv.value.as_ref())
@@ -1079,6 +1116,7 @@ pub(crate) fn convert_var_decl_arrow_fns(
     vis: Visibility,
     reg: &TypeRegistry,
     resilient: bool,
+    synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<(Vec<Item>, Vec<String>)> {
     let mut items = Vec::new();
     let mut all_warnings = Vec::new();
@@ -1099,7 +1137,7 @@ pub(crate) fn convert_var_decl_arrow_fns(
                 let var_rust_type = ident
                     .type_ann
                     .as_ref()
-                    .and_then(|ann| convert_ts_type(&ann.type_ann, &mut Vec::new(), reg).ok());
+                    .and_then(|ann| convert_ts_type(&ann.type_ann, synthetic, reg).ok());
                 let ret = var_rust_type
                     .as_ref()
                     .and_then(|ty| extract_fn_return_type(ty, reg));
@@ -1179,6 +1217,7 @@ pub(crate) fn convert_var_decl_arrow_fns(
             &arrow_type_env,
             var_return_type.as_ref(),
             var_param_types.as_deref(),
+            synthetic,
         )?;
         match closure {
             Expr::Closure {
@@ -1209,7 +1248,7 @@ pub(crate) fn convert_var_decl_arrow_fns(
                     }
                 }
 
-                let type_params = extract_type_params(arrow.type_params.as_deref(), reg);
+                let type_params = extract_type_params(arrow.type_params.as_deref(), synthetic, reg);
                 items.push(Item::Fn {
                     vis: vis.clone(),
                     attributes: vec![],

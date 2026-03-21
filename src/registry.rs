@@ -13,7 +13,8 @@ use anyhow::Result;
 use swc_ecma_ast as ast;
 
 use crate::ir::{Item, RustType, TypeParam};
-use crate::transformer::types::convert_ts_type;
+use crate::pipeline::type_converter::convert_ts_type;
+use crate::pipeline::SyntheticTypeRegistry;
 
 /// メソッドシグネチャ（パラメータ + 戻り値型）。
 #[derive(Debug, Clone, PartialEq)]
@@ -240,6 +241,19 @@ impl Default for TypeRegistry {
 ///
 /// 型変換に失敗した宣言はスキップする（レジストリ構築は best-effort）。
 pub fn build_registry(module: &ast::Module) -> TypeRegistry {
+    let mut synthetic = SyntheticTypeRegistry::new();
+    build_registry_with_synthetic(module, &mut synthetic)
+}
+
+/// Builds a [`TypeRegistry`] from a module, accumulating synthetic types in the provided registry.
+///
+/// This is the primary API for the new pipeline (Pass 2). Synthetic types (union enums,
+/// inline structs) generated during type conversion are registered in `synthetic` for
+/// centralized deduplication.
+pub fn build_registry_with_synthetic(
+    module: &ast::Module,
+    synthetic: &mut SyntheticTypeRegistry,
+) -> TypeRegistry {
     let mut reg = TypeRegistry::new();
 
     // Pass 1: 型名だけをプレースホルダーとして登録する
@@ -260,14 +274,17 @@ pub fn build_registry(module: &ast::Module) -> TypeRegistry {
     for item in &module.body {
         match item {
             ast::ModuleItem::Stmt(ast::Stmt::Decl(decl)) => {
-                collect_decl(&mut reg, decl, &lookup);
+                collect_decl(&mut reg, decl, &lookup, synthetic);
             }
             ast::ModuleItem::ModuleDecl(ast::ModuleDecl::ExportDecl(export)) => {
-                collect_decl(&mut reg, &export.decl, &lookup);
+                collect_decl(&mut reg, &export.decl, &lookup, synthetic);
             }
             _ => {}
         }
     }
+
+    // Register synthetic enum types (generated during type conversion) into the TypeRegistry
+    register_extra_enums(&mut reg, synthetic);
 
     reg
 }
@@ -346,12 +363,18 @@ fn collect_type_name(reg: &mut TypeRegistry, decl: &ast::Decl) {
 ///
 /// `lookup` には Pass 1 で登録された全型名が含まれており、
 /// `convert_ts_type` での型解決に使用される。
-fn collect_decl(reg: &mut TypeRegistry, decl: &ast::Decl, lookup: &TypeRegistry) {
+fn collect_decl(
+    reg: &mut TypeRegistry,
+    decl: &ast::Decl,
+    lookup: &TypeRegistry,
+    synthetic: &mut SyntheticTypeRegistry,
+) {
     match decl {
         ast::Decl::TsInterface(iface) => {
-            if let Ok(fields) = collect_interface_fields(iface, lookup) {
-                let methods = collect_interface_methods(iface, lookup);
-                let type_params = collect_type_params(iface.type_params.as_deref(), lookup);
+            if let Ok(fields) = collect_interface_fields(iface, lookup, synthetic) {
+                let methods = collect_interface_methods(iface, lookup, synthetic);
+                let type_params =
+                    collect_type_params(iface.type_params.as_deref(), lookup, synthetic);
                 let extends: Vec<String> = iface
                     .extends
                     .iter()
@@ -379,15 +402,16 @@ fn collect_decl(reg: &mut TypeRegistry, decl: &ast::Decl, lookup: &TypeRegistry)
         ast::Decl::TsTypeAlias(alias) => {
             if let Some(enum_def) = try_collect_string_literal_union(alias) {
                 reg.register(alias.id.sym.to_string(), enum_def);
-            } else if let Some(enum_def) = try_collect_discriminated_union(alias, lookup) {
+            } else if let Some(enum_def) = try_collect_discriminated_union(alias, lookup, synthetic)
+            {
                 reg.register(alias.id.sym.to_string(), enum_def);
-            } else if let Some(func_def) = try_collect_fn_type_alias(alias, lookup) {
+            } else if let Some(func_def) = try_collect_fn_type_alias(alias, lookup, synthetic) {
                 reg.register(alias.id.sym.to_string(), func_def);
             } else {
                 // Intersection types need pass-2 resolved types (e.g., `type Person = Named & Aged`
                 // requires Named and Aged to have their fields already resolved).
                 // Use `reg` which accumulates resolved types during pass 2.
-                let fields = collect_type_alias_fields(alias, reg);
+                let fields = collect_type_alias_fields(alias, reg, synthetic);
                 if let Some(fields) = fields {
                     reg.register(
                         alias.id.sym.to_string(),
@@ -417,17 +441,13 @@ fn collect_decl(reg: &mut TypeRegistry, decl: &ast::Decl, lookup: &TypeRegistry)
             );
         }
         ast::Decl::Fn(fn_decl) => {
-            let mut extra_items = Vec::new();
-            if let Ok(func_def) =
-                collect_fn_def_with_extras(&fn_decl.function, lookup, &mut extra_items)
-            {
+            if let Ok(func_def) = collect_fn_def_with_extras(&fn_decl.function, lookup, synthetic) {
                 let fn_name = fn_decl.ident.sym.to_string();
                 // Register any-narrowing enums for `any`-typed parameters with typeof checks
                 if let Some(body) = &fn_decl.function.body {
                     register_any_narrowing_enums(reg, &fn_name, &func_def, body);
                 }
                 reg.register(fn_name, func_def);
-                register_extra_enums(reg, &extra_items);
             }
         }
         ast::Decl::Var(var_decl) => {
@@ -439,9 +459,8 @@ fn collect_decl(reg: &mut TypeRegistry, decl: &ast::Decl, lookup: &TypeRegistry)
                             ast::Pat::Ident(ident) => ident.id.sym.to_string(),
                             _ => continue,
                         };
-                        let mut extra_items = Vec::new();
                         if let Ok(func_def) =
-                            collect_arrow_def_with_extras(arrow, lookup, &mut extra_items)
+                            collect_arrow_def_with_extras(arrow, lookup, synthetic)
                         {
                             // Register any-narrowing enums for arrow function any-typed params
                             match arrow.body.as_ref() {
@@ -455,14 +474,13 @@ fn collect_decl(reg: &mut TypeRegistry, decl: &ast::Decl, lookup: &TypeRegistry)
                                 }
                             }
                             reg.register(name, func_def);
-                            register_extra_enums(reg, &extra_items);
                         }
                     }
                 }
             }
         }
         ast::Decl::Class(class) => {
-            let def = collect_class_info(class, lookup);
+            let def = collect_class_info(class, lookup, synthetic);
             if let TypeDef::Struct {
                 ref fields,
                 ref methods,
@@ -479,7 +497,11 @@ fn collect_decl(reg: &mut TypeRegistry, decl: &ast::Decl, lookup: &TypeRegistry)
 }
 
 /// クラス宣言からフィールドとメソッドシグネチャを収集し、`TypeDef::Struct` を返す。
-fn collect_class_info(class: &ast::ClassDecl, lookup: &TypeRegistry) -> TypeDef {
+fn collect_class_info(
+    class: &ast::ClassDecl,
+    lookup: &TypeRegistry,
+    synthetic: &mut SyntheticTypeRegistry,
+) -> TypeDef {
     let mut fields = Vec::new();
     let mut methods = HashMap::new();
 
@@ -491,7 +513,7 @@ fn collect_class_info(class: &ast::ClassDecl, lookup: &TypeRegistry) -> TypeDef 
                     _ => continue,
                 };
                 if let Some(ann) = &prop.type_ann {
-                    if let Ok(ty) = convert_ts_type(&ann.type_ann, &mut Vec::new(), lookup) {
+                    if let Ok(ty) = convert_ts_type(&ann.type_ann, synthetic, lookup) {
                         fields.push((name, ty));
                     }
                 }
@@ -514,15 +536,16 @@ fn collect_class_info(class: &ast::ClassDecl, lookup: &TypeRegistry) -> TypeDef 
                             _ => return None,
                         };
                         let ty = ident.type_ann.as_ref().and_then(|ann| {
-                            convert_ts_type(&ann.type_ann, &mut Vec::new(), lookup).ok()
+                            convert_ts_type(&ann.type_ann, synthetic, lookup).ok()
                         })?;
                         Some((ident.id.sym.to_string(), ty))
                     })
                     .collect();
-                let return_type =
-                    method.function.return_type.as_ref().and_then(|ann| {
-                        convert_ts_type(&ann.type_ann, &mut Vec::new(), lookup).ok()
-                    });
+                let return_type = method
+                    .function
+                    .return_type
+                    .as_ref()
+                    .and_then(|ann| convert_ts_type(&ann.type_ann, synthetic, lookup).ok());
                 methods.insert(
                     name,
                     MethodSignature {
@@ -542,6 +565,7 @@ fn collect_class_info(class: &ast::ClassDecl, lookup: &TypeRegistry) -> TypeDef 
 fn collect_type_params(
     decl: Option<&ast::TsTypeParamDecl>,
     lookup: &TypeRegistry,
+    synthetic: &mut SyntheticTypeRegistry,
 ) -> Vec<TypeParam> {
     decl.map(|d| {
         d.params
@@ -551,7 +575,7 @@ fn collect_type_params(
                 constraint: p
                     .constraint
                     .as_ref()
-                    .and_then(|c| convert_ts_type(c, &mut Vec::new(), lookup).ok()),
+                    .and_then(|c| convert_ts_type(c, synthetic, lookup).ok()),
             })
             .collect()
     })
@@ -562,11 +586,12 @@ fn collect_type_params(
 fn collect_interface_fields(
     iface: &ast::TsInterfaceDecl,
     lookup: &TypeRegistry,
+    synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Vec<(String, RustType)>> {
     let mut fields = Vec::new();
     for member in &iface.body.body {
         if let ast::TsTypeElement::TsPropertySignature(prop) = member {
-            if let Some((name, ty)) = collect_property_signature(prop, lookup) {
+            if let Some((name, ty)) = collect_property_signature(prop, lookup, synthetic) {
                 fields.push((name, ty));
             }
         }
@@ -578,6 +603,7 @@ fn collect_interface_fields(
 fn collect_interface_methods(
     iface: &ast::TsInterfaceDecl,
     lookup: &TypeRegistry,
+    synthetic: &mut SyntheticTypeRegistry,
 ) -> HashMap<String, MethodSignature> {
     let mut methods = HashMap::new();
     for member in &iface.body.body {
@@ -597,7 +623,7 @@ fn collect_interface_methods(
                     let ty = match param {
                         ast::TsFnParam::Ident(ident) => {
                             ident.type_ann.as_ref().and_then(|ann| {
-                                convert_ts_type(&ann.type_ann, &mut Vec::new(), lookup).ok()
+                                convert_ts_type(&ann.type_ann, synthetic, lookup).ok()
                             })?
                         }
                         _ => return None,
@@ -608,7 +634,7 @@ fn collect_interface_methods(
             let return_type = method
                 .type_ann
                 .as_ref()
-                .and_then(|ann| convert_ts_type(&ann.type_ann, &mut Vec::new(), lookup).ok());
+                .and_then(|ann| convert_ts_type(&ann.type_ann, synthetic, lookup).ok());
             methods.insert(
                 name,
                 MethodSignature {
@@ -625,6 +651,7 @@ fn collect_interface_methods(
 fn collect_property_signature(
     prop: &ast::TsPropertySignature,
     lookup: &TypeRegistry,
+    synthetic: &mut SyntheticTypeRegistry,
 ) -> Option<(String, RustType)> {
     let name = match prop.key.as_ref() {
         ast::Expr::Ident(ident) => ident.sym.to_string(),
@@ -633,7 +660,7 @@ fn collect_property_signature(
     let ty = prop
         .type_ann
         .as_ref()
-        .and_then(|ann| convert_ts_type(&ann.type_ann, &mut Vec::new(), lookup).ok())?;
+        .and_then(|ann| convert_ts_type(&ann.type_ann, synthetic, lookup).ok())?;
 
     // Optional fields are wrapped in Option
     let ty = if prop.optional {
@@ -649,7 +676,7 @@ fn collect_property_signature(
 ///
 /// `type Direction = "up" | "down"` のように、全メンバーが文字列リテラルの union type を検出する。
 fn try_collect_string_literal_union(alias: &ast::TsTypeAliasDecl) -> Option<TypeDef> {
-    use crate::transformer::types::string_to_pascal_case;
+    use crate::pipeline::type_converter::string_to_pascal_case;
 
     let union = match alias.type_ann.as_ref() {
         ast::TsType::TsUnionOrIntersectionType(
@@ -691,8 +718,9 @@ fn try_collect_string_literal_union(alias: &ast::TsTypeAliasDecl) -> Option<Type
 fn try_collect_discriminated_union(
     alias: &ast::TsTypeAliasDecl,
     lookup: &TypeRegistry,
+    synthetic: &mut SyntheticTypeRegistry,
 ) -> Option<TypeDef> {
-    use crate::transformer::types::string_to_pascal_case;
+    use crate::pipeline::type_converter::string_to_pascal_case;
 
     let union = match alias.type_ann.as_ref() {
         ast::TsType::TsUnionOrIntersectionType(
@@ -723,7 +751,8 @@ fn try_collect_discriminated_union(
     let mut variant_fields_map = HashMap::new();
 
     for type_lit in &type_lits {
-        let (disc_value, fields) = extract_registry_variant_info(type_lit, &tag, lookup)?;
+        let (disc_value, fields) =
+            extract_registry_variant_info(type_lit, &tag, lookup, synthetic)?;
         let variant_name = string_to_pascal_case(&disc_value);
         string_values.insert(disc_value, variant_name.clone());
         variant_fields_map.insert(variant_name.clone(), fields);
@@ -788,6 +817,7 @@ fn extract_registry_variant_info(
     type_lit: &swc_ecma_ast::TsTypeLit,
     tag_field: &str,
     lookup: &TypeRegistry,
+    synthetic: &mut SyntheticTypeRegistry,
 ) -> Option<(String, Vec<(String, RustType)>)> {
     let mut disc_value = None;
     let mut fields = Vec::new();
@@ -810,7 +840,7 @@ fn extract_registry_variant_info(
             } else {
                 // Non-discriminant field: convert type
                 if let Some(ann) = &prop.type_ann {
-                    if let Ok(ty) = convert_ts_type(&ann.type_ann, &mut Vec::new(), lookup) {
+                    if let Ok(ty) = convert_ts_type(&ann.type_ann, synthetic, lookup) {
                         let ty = if prop.optional {
                             RustType::Option(Box::new(ty))
                         } else {
@@ -831,6 +861,7 @@ fn extract_registry_variant_info(
 fn try_collect_fn_type_alias(
     alias: &ast::TsTypeAliasDecl,
     lookup: &TypeRegistry,
+    synthetic: &mut SyntheticTypeRegistry,
 ) -> Option<TypeDef> {
     match alias.type_ann.as_ref() {
         ast::TsType::TsFnOrConstructorType(ast::TsFnOrConstructorType::TsFnType(fn_type)) => {
@@ -839,14 +870,13 @@ fn try_collect_fn_type_alias(
                 if let ast::TsFnParam::Ident(ident) = param {
                     let name = ident.id.sym.to_string();
                     if let Some(ann) = &ident.type_ann {
-                        if let Ok(ty) = convert_ts_type(&ann.type_ann, &mut Vec::new(), lookup) {
+                        if let Ok(ty) = convert_ts_type(&ann.type_ann, synthetic, lookup) {
                             params.push((name, ty));
                         }
                     }
                 }
             }
-            let return_type =
-                convert_ts_type(&fn_type.type_ann.type_ann, &mut Vec::new(), lookup).ok();
+            let return_type = convert_ts_type(&fn_type.type_ann.type_ann, synthetic, lookup).ok();
             Some(TypeDef::Function {
                 params,
                 return_type,
@@ -860,13 +890,14 @@ fn try_collect_fn_type_alias(
 fn collect_type_alias_fields(
     alias: &ast::TsTypeAliasDecl,
     reg: &TypeRegistry,
+    synthetic: &mut SyntheticTypeRegistry,
 ) -> Option<Vec<(String, RustType)>> {
     match alias.type_ann.as_ref() {
         ast::TsType::TsTypeLit(lit) => {
             let mut fields = Vec::new();
             for member in &lit.members {
                 if let ast::TsTypeElement::TsPropertySignature(prop) = member {
-                    if let Some((name, ty)) = collect_property_signature(prop, reg) {
+                    if let Some((name, ty)) = collect_property_signature(prop, reg, synthetic) {
                         fields.push((name, ty));
                     }
                 }
@@ -883,7 +914,9 @@ fn collect_type_alias_fields(
                     ast::TsType::TsTypeLit(lit) => {
                         for member in &lit.members {
                             if let ast::TsTypeElement::TsPropertySignature(prop) = member {
-                                if let Some(field) = collect_property_signature(prop, reg) {
+                                if let Some(field) =
+                                    collect_property_signature(prop, reg, synthetic)
+                                {
                                     fields.push(field);
                                 }
                             }
@@ -912,11 +945,11 @@ fn collect_type_alias_fields(
     }
 }
 
-/// 関数宣言からパラメータ型と戻り値型を収集する。インライン union で生成された enum を extra_items に収集する。
+/// 関数宣言からパラメータ型と戻り値型を収集する。インライン union で生成された enum を synthetic に収集する。
 fn collect_fn_def_with_extras(
     func: &ast::Function,
     lookup: &TypeRegistry,
-    extra_items: &mut Vec<Item>,
+    synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<TypeDef> {
     let mut params = Vec::new();
     let mut has_rest = false;
@@ -925,7 +958,7 @@ fn collect_fn_def_with_extras(
             ast::Pat::Ident(ident) => {
                 let name = ident.id.sym.to_string();
                 if let Some(ann) = &ident.type_ann {
-                    if let Ok(ty) = convert_ts_type(&ann.type_ann, extra_items, lookup) {
+                    if let Ok(ty) = convert_ts_type(&ann.type_ann, synthetic, lookup) {
                         params.push((name, ty));
                     }
                 }
@@ -935,7 +968,7 @@ fn collect_fn_def_with_extras(
                 if let ast::Pat::Ident(ident) = assign.left.as_ref() {
                     let name = ident.id.sym.to_string();
                     if let Some(ann) = &ident.type_ann {
-                        if let Ok(ty) = convert_ts_type(&ann.type_ann, extra_items, lookup) {
+                        if let Ok(ty) = convert_ts_type(&ann.type_ann, synthetic, lookup) {
                             params.push((name, RustType::Option(Box::new(ty))));
                         }
                     }
@@ -947,7 +980,7 @@ fn collect_fn_def_with_extras(
                     let name = ident.id.sym.to_string();
                     let type_ann = rest.type_ann.as_ref().or(ident.type_ann.as_ref());
                     if let Some(ann) = type_ann {
-                        if let Ok(ty) = convert_ts_type(&ann.type_ann, extra_items, lookup) {
+                        if let Ok(ty) = convert_ts_type(&ann.type_ann, synthetic, lookup) {
                             params.push((name, ty));
                         }
                     }
@@ -960,7 +993,7 @@ fn collect_fn_def_with_extras(
     let return_type = func
         .return_type
         .as_ref()
-        .and_then(|ann| convert_ts_type(&ann.type_ann, extra_items, lookup).ok());
+        .and_then(|ann| convert_ts_type(&ann.type_ann, synthetic, lookup).ok());
 
     Ok(TypeDef::Function {
         params,
@@ -970,21 +1003,26 @@ fn collect_fn_def_with_extras(
 }
 
 /// Registers enum items generated during type conversion into the TypeRegistry.
-fn register_extra_enums(reg: &mut TypeRegistry, extra_items: &[Item]) {
-    for item in extra_items {
-        if let Item::Enum { name, variants, .. } = item {
-            let variant_names: Vec<String> = variants.iter().map(|v| v.name.clone()).collect();
-            reg.register(
-                name.clone(),
-                TypeDef::Enum {
-                    type_params: vec![],
-                    variants: variant_names,
-                    string_values: HashMap::new(),
-                    tag_field: None,
-                    variant_fields: HashMap::new(),
-                },
-            );
-        }
+fn register_extra_enums(reg: &mut TypeRegistry, synthetic: &SyntheticTypeRegistry) {
+    for item in synthetic.all_items() {
+        register_single_enum(reg, item);
+    }
+}
+
+/// Registers a single enum item in the TypeRegistry.
+fn register_single_enum(reg: &mut TypeRegistry, item: &Item) {
+    if let Item::Enum { name, variants, .. } = item {
+        let variant_names: Vec<String> = variants.iter().map(|v| v.name.clone()).collect();
+        reg.register(
+            name.clone(),
+            TypeDef::Enum {
+                type_params: vec![],
+                variants: variant_names,
+                string_values: HashMap::new(),
+                tag_field: None,
+                variant_fields: HashMap::new(),
+            },
+        );
     }
 }
 
@@ -1027,7 +1065,7 @@ fn register_any_narrowing_enums(
             continue;
         }
         let (enum_item, _) = generate_any_enum(fn_name, param_name, constraint);
-        register_extra_enums(reg, &[enum_item]);
+        register_single_enum(reg, &enum_item);
     }
 }
 
@@ -1060,22 +1098,22 @@ fn register_any_narrowing_enums_from_expr(
             continue;
         }
         let (enum_item, _) = generate_any_enum(fn_name, param_name, constraint);
-        register_extra_enums(reg, &[enum_item]);
+        register_single_enum(reg, &enum_item);
     }
 }
 
-/// アロー関数からパラメータ型と戻り値型を収集する。インライン union enum を extra_items に収集する。
+/// アロー関数からパラメータ型と戻り値型を収集する。インライン union enum を synthetic に収集する。
 fn collect_arrow_def_with_extras(
     arrow: &ast::ArrowExpr,
     lookup: &TypeRegistry,
-    extra_items: &mut Vec<Item>,
+    synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<TypeDef> {
     let mut params = Vec::new();
     for param in &arrow.params {
         if let ast::Pat::Ident(ident) = param {
             let name = ident.id.sym.to_string();
             if let Some(ann) = &ident.type_ann {
-                if let Ok(ty) = convert_ts_type(&ann.type_ann, extra_items, lookup) {
+                if let Ok(ty) = convert_ts_type(&ann.type_ann, synthetic, lookup) {
                     params.push((name, ty));
                 }
             }
@@ -1085,7 +1123,7 @@ fn collect_arrow_def_with_extras(
     let return_type = arrow
         .return_type
         .as_ref()
-        .and_then(|ann| convert_ts_type(&ann.type_ann, extra_items, lookup).ok());
+        .and_then(|ann| convert_ts_type(&ann.type_ann, synthetic, lookup).ok());
 
     Ok(TypeDef::Function {
         params,
@@ -1792,5 +1830,112 @@ mod tests {
             .instantiate("Container", &[RustType::String, RustType::F64])
             .expect("instantiate should succeed");
         assert_eq!(instantiated, original);
+    }
+
+    // --- P4 テスト計画のテスト ---
+
+    #[test]
+    fn test_build_registry_with_union_field() {
+        let module =
+            crate::parser::parse_typescript("interface Foo { x: string | number; }").unwrap();
+        let mut synthetic = SyntheticTypeRegistry::new();
+        let reg = build_registry_with_synthetic(&module, &mut synthetic);
+
+        // Foo should be registered
+        let foo = reg.get("Foo");
+        assert!(foo.is_some(), "Foo should be in registry");
+
+        // x's type should be Named (the synthetic enum)
+        if let Some(TypeDef::Struct { fields, .. }) = foo {
+            assert_eq!(fields.len(), 1, "Foo should have 1 field");
+            let (name, ty) = &fields[0];
+            assert_eq!(name, "x");
+            assert!(
+                matches!(ty, RustType::Named { .. }),
+                "x should be a Named type (synthetic enum), got: {ty:?}"
+            );
+        } else {
+            panic!("Foo should be a Struct");
+        }
+
+        // SyntheticTypeRegistry should have the union enum
+        assert!(
+            !synthetic.all_items().is_empty(),
+            "SyntheticTypeRegistry should contain the union enum"
+        );
+    }
+
+    #[test]
+    fn test_build_registry_union_dedup() {
+        let module = crate::parser::parse_typescript(
+            "interface A { x: string | number; } interface B { y: string | number; }",
+        )
+        .unwrap();
+        let mut synthetic = SyntheticTypeRegistry::new();
+        let _reg = build_registry_with_synthetic(&module, &mut synthetic);
+
+        // Both A.x and B.y use string | number → should be 1 synthetic enum (deduplicated)
+        let enum_count = synthetic
+            .all_items()
+            .iter()
+            .filter(|item| matches!(item, Item::Enum { .. }))
+            .count();
+        assert_eq!(
+            enum_count, 1,
+            "same union type should produce only 1 enum (dedup)"
+        );
+    }
+
+    #[test]
+    fn test_analyze_any_params_registers_enum() {
+        use crate::transformer::any_narrowing::{collect_any_constraints, generate_any_enum};
+
+        let module = crate::parser::parse_typescript(
+            r#"function foo(x: any) { if (typeof x === "string") { return x; } }"#,
+        )
+        .unwrap();
+        let reg = build_registry(&module);
+
+        // Verify any-typed parameter exists
+        let foo_def = reg.get("foo");
+        assert!(foo_def.is_some(), "foo should be in registry");
+        if let Some(TypeDef::Function { params, .. }) = foo_def {
+            assert!(
+                params.iter().any(|(_, ty)| matches!(ty, RustType::Any)),
+                "foo should have an any-typed parameter"
+            );
+        }
+
+        // Simulate AnyTypeAnalyzer: collect constraints and generate enum
+        if let Some(ast::ModuleItem::Stmt(ast::Stmt::Decl(ast::Decl::Fn(fn_decl)))) =
+            module.body.first()
+        {
+            if let Some(body) = &fn_decl.function.body {
+                let constraints = collect_any_constraints(body, &["x".to_string()]);
+                if let Some(constraint) = constraints.get("x") {
+                    let (enum_item, _enum_type) = generate_any_enum("foo", "x", constraint);
+                    assert!(
+                        matches!(enum_item, Item::Enum { .. }),
+                        "should generate an enum for any-typed parameter"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_transpile_collecting_synthetic_output() {
+        let source = "export function foo(x: string | number): void { }";
+        let (output, _unsupported) = crate::transpile_collecting(source).unwrap();
+        // Output should contain the synthetic enum
+        assert!(
+            output.contains("enum"),
+            "transpile output should contain synthetic enum for union type, got: {output}"
+        );
+        // Output should contain the function
+        assert!(
+            output.contains("fn foo"),
+            "transpile output should contain the function"
+        );
     }
 }

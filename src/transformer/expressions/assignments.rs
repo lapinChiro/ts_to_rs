@@ -4,6 +4,7 @@ use anyhow::{anyhow, Result};
 use swc_ecma_ast as ast;
 
 use crate::ir::{BinOp, ClosureBody, Expr, Stmt};
+use crate::pipeline::SyntheticTypeRegistry;
 use crate::registry::TypeRegistry;
 use crate::transformer::TypeEnv;
 
@@ -15,6 +16,7 @@ pub(super) fn convert_assign_expr(
     assign: &ast::AssignExpr,
     reg: &TypeRegistry,
     type_env: &TypeEnv,
+    synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Expr> {
     // Extract target variable name for type lookup before converting target expr
     let target_var_name = match &assign.left {
@@ -25,7 +27,9 @@ pub(super) fn convert_assign_expr(
     };
     let target = match &assign.left {
         ast::AssignTarget::Simple(simple) => match simple {
-            ast::SimpleAssignTarget::Member(member) => convert_member_expr(member, reg, type_env)?,
+            ast::SimpleAssignTarget::Member(member) => {
+                convert_member_expr(member, reg, type_env, synthetic)?
+            }
             ast::SimpleAssignTarget::Ident(ident) => Expr::Ident(ident.id.sym.to_string()),
             _ => return Err(anyhow!("unsupported assignment target")),
         },
@@ -39,7 +43,7 @@ pub(super) fn convert_assign_expr(
         },
         None => ExprContext::none(),
     };
-    let right = convert_expr(&assign.right, reg, &rhs_ctx, type_env)?;
+    let right = convert_expr(&assign.right, reg, &rhs_ctx, type_env, synthetic)?;
 
     // ??= (nullish coalescing assignment): x ??= y → x.get_or_insert_with(|| y)
     if assign.op == ast::AssignOp::NullishAssign {

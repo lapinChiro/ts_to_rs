@@ -7,8 +7,9 @@ use anyhow::Result;
 use swc_ecma_ast as ast;
 
 use crate::ir::{Expr, RustType};
+use crate::pipeline::type_converter::convert_ts_type;
+use crate::pipeline::SyntheticTypeRegistry;
 use crate::registry::{TypeDef, TypeRegistry};
-use crate::transformer::types::convert_ts_type;
 use crate::transformer::TypeEnv;
 
 use super::{convert_expr, ExprContext};
@@ -52,7 +53,12 @@ pub fn resolve_expr_type(
             resolve_field_type(&obj_type, &member.prop, reg)
         }
         ast::Expr::Paren(paren) => resolve_expr_type(&paren.expr, type_env, reg),
-        ast::Expr::TsAs(ts_as) => convert_ts_type(&ts_as.type_ann, &mut Vec::new(), reg).ok(),
+        ast::Expr::TsAs(ts_as) => {
+            // resolve_expr_type is used in read-only contexts (type resolution for coercion
+            // decisions). Synthetic types generated here are discarded since the actual
+            // conversion happens separately via convert_ts_as_expr with the real registry.
+            convert_ts_type(&ts_as.type_ann, &mut SyntheticTypeRegistry::new(), reg).ok()
+        }
         ast::Expr::Call(call) => resolve_call_return_type(call, type_env, reg),
         ast::Expr::New(new_expr) => resolve_new_expr_type(new_expr, reg),
         _ => None,
@@ -225,8 +231,9 @@ pub(super) fn convert_ts_as_expr(
     reg: &TypeRegistry,
     expected: Option<&RustType>,
     type_env: &TypeEnv,
+    synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Expr> {
-    match convert_ts_type(&ts_as.type_ann, &mut Vec::new(), reg) {
+    match convert_ts_type(&ts_as.type_ann, synthetic, reg) {
         Ok(target_ty) => {
             let is_primitive_cast = matches!(target_ty, RustType::F64 | RustType::Bool);
             if is_primitive_cast {
@@ -235,6 +242,7 @@ pub(super) fn convert_ts_as_expr(
                     reg,
                     &ExprContext::with_expected(&target_ty),
                     type_env,
+                    synthetic,
                 )?;
                 Ok(Expr::Cast {
                     expr: Box::new(inner),
@@ -248,7 +256,7 @@ pub(super) fn convert_ts_as_expr(
                     // Cat C: type propagated when available
                     None => ExprContext::none(),
                 };
-                convert_expr(&ts_as.expr, reg, &ctx, type_env)
+                convert_expr(&ts_as.expr, reg, &ctx, type_env, synthetic)
             }
         }
         Err(_) => {
@@ -258,7 +266,7 @@ pub(super) fn convert_ts_as_expr(
                 // Cat C: type propagated when available
                 None => ExprContext::none(),
             };
-            convert_expr(&ts_as.expr, reg, &ctx, type_env)
+            convert_expr(&ts_as.expr, reg, &ctx, type_env, synthetic)
         }
     }
 }

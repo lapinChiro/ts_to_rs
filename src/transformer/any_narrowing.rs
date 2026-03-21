@@ -81,6 +81,11 @@ pub(crate) fn collect_any_local_var_names(body: &ast::BlockStmt) -> Vec<String> 
 /// Generates an enum Item and its RustType from collected constraints.
 ///
 /// Returns `(enum_item, rust_type)` where `rust_type` is `Named { name: enum_name }`.
+/// Generates an any-type enum from typeof/instanceof constraints.
+///
+/// Returns the generated `(Item, RustType)` pair.
+/// In the unified pipeline (P8), this will be replaced by
+/// `SyntheticTypeRegistry.register_any_enum()`.
 pub(crate) fn generate_any_enum(
     fn_name: &str,
     param_name: &str,
