@@ -290,7 +290,7 @@ fn transpile_file(input: &Path, output: Option<&Path>, use_builtin_types: bool) 
 
 /// Shared directory transpilation infrastructure: pre-scan, build registry, transpile, generate mod.rs.
 ///
-/// The `transpile_file` callback receives `(ts_source, registry)` and returns
+/// The `transpile_file` callback receives `(ts_source, registry, current_file_dir)` and returns
 /// `(rs_source, Vec<UnsupportedSyntax>)`. For default mode, unsupported vec is empty.
 fn transpile_directory_common<F>(
     input_dir: &Path,
@@ -299,7 +299,7 @@ fn transpile_directory_common<F>(
     transpile_file: F,
 ) -> Result<Vec<UnsupportedSyntax>>
 where
-    F: Fn(&str, &TypeRegistry) -> Result<(String, Vec<UnsupportedSyntax>)>,
+    F: Fn(&str, &TypeRegistry, Option<&str>) -> Result<(String, Vec<UnsupportedSyntax>)>,
 {
     let ts_files = directory::collect_ts_files(input_dir)?;
     directory::validate_has_ts_files(&ts_files, input_dir)?;
@@ -332,8 +332,16 @@ where
     for (ts_path, ts_source) in &file_sources {
         let rs_path = directory::compute_output_path(ts_path, input_dir, &output_dir)?;
 
-        let (rs_source, unsupported) = transpile_file(ts_source, &shared_registry)
-            .with_context(|| format!("failed to transpile: {}", ts_path.display()))?;
+        // Compute the file's directory relative to the input root (for import path resolution)
+        let current_file_dir = ts_path
+            .parent()
+            .and_then(|p| p.strip_prefix(input_dir).ok())
+            .and_then(|p| p.to_str())
+            .filter(|s| !s.is_empty());
+
+        let (rs_source, unsupported) =
+            transpile_file(ts_source, &shared_registry, current_file_dir)
+                .with_context(|| format!("failed to transpile: {}", ts_path.display()))?;
 
         if let Some(parent) = rs_path.parent() {
             fs::create_dir_all(parent)
@@ -378,9 +386,14 @@ fn transpile_directory_collecting(
     output: Option<&Path>,
     use_builtin_types: bool,
 ) -> Result<Vec<UnsupportedSyntax>> {
-    transpile_directory_common(input_dir, output, use_builtin_types, |source, reg| {
-        ts_to_rs::transpile_collecting_with_registry(source, reg)
-    })
+    transpile_directory_common(
+        input_dir,
+        output,
+        use_builtin_types,
+        |source, reg, file_dir| {
+            ts_to_rs::transpile_collecting_with_registry_and_path(source, reg, file_dir)
+        },
+    )
 }
 
 /// Transpiles all `.ts` files in a directory to Rust (default mode — errors on unsupported).
@@ -389,9 +402,14 @@ fn transpile_directory(
     output: Option<&Path>,
     use_builtin_types: bool,
 ) -> Result<()> {
-    transpile_directory_common(input_dir, output, use_builtin_types, |source, reg| {
-        let rs = ts_to_rs::transpile_with_registry(source, reg)?;
-        Ok((rs, vec![]))
-    })?;
+    transpile_directory_common(
+        input_dir,
+        output,
+        use_builtin_types,
+        |source, reg, file_dir| {
+            let rs = ts_to_rs::transpile_with_registry_and_path(source, reg, file_dir)?;
+            Ok((rs, vec![]))
+        },
+    )?;
     Ok(())
 }

@@ -65,12 +65,16 @@ run_directory_mode() {
     local json_file="/tmp/hono-bench-errors.json"
     "$BINARY" --report-unsupported "$HONO_CLEAN/" -o "$output_dir/" > "$json_file" 2>/dev/null
 
-    # Compile check on clean files
+    # Compile check on clean files (file-level: use statements stripped)
     local compile_clean
     compile_clean=$(run_compile_check "$json_file" "$output_dir")
 
+    # Compile check on entire output directory (directory-level: cross-module refs intact)
+    local dir_compile_clean
+    dir_compile_clean=$(run_directory_compile_check "$output_dir")
+
     # Analyze and append to history
-    python3 "$SCRIPT_DIR/analyze-bench.py" "$json_file" "$total" "$HONO_CLEAN" "$compile_clean"
+    python3 "$SCRIPT_DIR/analyze-bench.py" "$json_file" "$total" "$HONO_CLEAN" "$compile_clean" "$dir_compile_clean"
 }
 
 run_compile_check() {
@@ -177,6 +181,85 @@ print(total_clean - len(error_mods))
 " 2>/dev/null)
 
     echo "${compile_clean:-0}"
+}
+
+run_directory_compile_check() {
+    local output_dir="$1"
+    local check_dir="/tmp/hono-dir-compile-check"
+
+    # Create Cargo project using the output directory's module structure
+    rm -rf "$check_dir"
+    mkdir -p "$check_dir/src"
+    cp "$PROJECT_DIR/tests/compile-check/Cargo.toml" "$check_dir/Cargo.toml"
+
+    # Copy all .rs files preserving directory structure
+    (cd "$output_dir" && find . -name '*.rs' -not -name 'mod.rs' | while IFS= read -r f; do
+        dir=$(dirname "$f")
+        mkdir -p "$check_dir/src/$dir"
+        cp "$f" "$check_dir/src/$f"
+    done)
+
+    # Copy all mod.rs files
+    (cd "$output_dir" && find . -name 'mod.rs' | while IFS= read -r f; do
+        dir=$(dirname "$f")
+        mkdir -p "$check_dir/src/$dir"
+        cp "$f" "$check_dir/src/$f"
+    done)
+
+    # Count total .rs files (excluding mod.rs)
+    local total_modules
+    total_modules=$(find "$check_dir/src" -name '*.rs' -not -name 'mod.rs' -not -name 'lib.rs' | wc -l)
+
+    if [ "$total_modules" = "0" ]; then
+        echo "0"
+        return
+    fi
+
+    # Create lib.rs from root mod.rs
+    local root_mod="$check_dir/src/mod.rs"
+    if [ -f "$root_mod" ]; then
+        {
+            echo '#![allow(unused, dead_code, unreachable_code, non_snake_case, non_camel_case_types)]'
+            echo 'use serde::{Serialize, Deserialize};'
+            cat "$root_mod"
+        } > "$check_dir/src/lib.rs"
+        rm "$root_mod"
+    else
+        echo '#![allow(unused, dead_code, unreachable_code, non_snake_case, non_camel_case_types)]' > "$check_dir/src/lib.rs"
+    fi
+
+    # Run cargo check, parse which modules had errors
+    local cargo_json="/tmp/hono-dir-compile-output.json"
+    (cd "$check_dir" && cargo check --message-format=json 2>/dev/null || true) > "$cargo_json"
+
+    local dir_compile_clean
+    dir_compile_clean=$(python3 -c "
+import json, sys
+
+total = $total_modules
+error_files = set()
+with open('$cargo_json') as f:
+    for line in f:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            msg = json.loads(line)
+            if msg.get('reason') == 'compiler-message':
+                level = msg.get('message', {}).get('level', '')
+                if level != 'error':
+                    continue
+                for span in msg.get('message', {}).get('spans', []):
+                    fname = span.get('file_name', '')
+                    if fname.startswith('src/') and fname != 'src/lib.rs' and not fname.endswith('/mod.rs'):
+                        error_files.add(fname)
+        except json.JSONDecodeError:
+            pass
+
+print(total - len(error_files))
+" 2>/dev/null)
+
+    echo "${dir_compile_clean:-0}"
 }
 
 run_single_file_mode() {

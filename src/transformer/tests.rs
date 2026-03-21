@@ -114,6 +114,50 @@ fn test_transform_module_import_multiple_hyphens() {
     );
 }
 
+// --- convert_relative_path_to_crate_path unit tests ---
+
+#[test]
+fn test_convert_relative_path_parent_dir_from_nested_file() {
+    // File: adapter/bun/server.ts, import: ../context → crate::adapter::context
+    let result = convert_relative_path_to_crate_path("../context", Some("adapter/bun"));
+    assert_eq!(result, "crate::adapter::context");
+}
+
+#[test]
+fn test_convert_relative_path_double_parent_from_deeply_nested() {
+    // File: adapter/bun/server.ts, import: ../../types → crate::types
+    let result = convert_relative_path_to_crate_path("../../types", Some("adapter/bun"));
+    assert_eq!(result, "crate::types");
+}
+
+#[test]
+fn test_convert_relative_path_parent_with_subpath() {
+    // File: adapter/bun/server.ts, import: ../../helper/conninfo → crate::helper::conninfo
+    let result = convert_relative_path_to_crate_path("../../helper/conninfo", Some("adapter/bun"));
+    assert_eq!(result, "crate::helper::conninfo");
+}
+
+#[test]
+fn test_convert_relative_path_current_dir_with_file_context() {
+    // File: adapter/bun/server.ts, import: ./websocket → crate::adapter::bun::websocket
+    let result = convert_relative_path_to_crate_path("./websocket", Some("adapter/bun"));
+    assert_eq!(result, "crate::adapter::bun::websocket");
+}
+
+#[test]
+fn test_convert_relative_path_current_dir_no_context() {
+    // No file context (root level), import: ./bar → crate::bar (existing behavior)
+    let result = convert_relative_path_to_crate_path("./bar", None);
+    assert_eq!(result, "crate::bar");
+}
+
+#[test]
+fn test_convert_relative_path_parent_hyphen_to_underscore() {
+    // File: adapter/bun/server.ts, import: ../../hono-base → crate::hono_base
+    let result = convert_relative_path_to_crate_path("../../hono-base", Some("adapter/bun"));
+    assert_eq!(result, "crate::hono_base");
+}
+
 #[test]
 fn test_transform_module_export_named_reexport_single() {
     let source = r#"export { Foo } from "./bar";"#;

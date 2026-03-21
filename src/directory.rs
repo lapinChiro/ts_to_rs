@@ -57,7 +57,15 @@ pub fn compute_output_path(ts_path: &Path, input_dir: &Path, output_dir: &Path) 
     let relative = ts_path
         .strip_prefix(input_dir)
         .with_context(|| format!("{} is not under {}", ts_path.display(), input_dir.display()))?;
-    let rs_relative = relative.with_extension("rs");
+    // Replace hyphens with underscores in all path components (Rust module names cannot contain hyphens)
+    let sanitized: PathBuf = relative
+        .iter()
+        .map(|component| {
+            let s = component.to_string_lossy();
+            std::ffi::OsString::from(s.replace('-', "_"))
+        })
+        .collect();
+    let rs_relative = sanitized.with_extension("rs");
     Ok(output_dir.join(rs_relative))
 }
 
@@ -107,7 +115,12 @@ pub fn generate_mod_rs(dir: &Path) -> Result<Option<String>> {
     Ok(Some(format!("{content}\n")))
 }
 
-/// Collects all directories that contain at least one `.rs` file (for mod.rs generation).
+/// Collects all directories that need `mod.rs` generation.
+///
+/// A directory is included if it contains `.rs` files directly, or if any of
+/// its subdirectories (recursively) contain `.rs` files. This ensures that
+/// intermediate directories (e.g., `adapter/` which has no `.rs` files but has
+/// subdirectories like `adapter/bun/`) are also included.
 ///
 /// Returns directories in bottom-up order (deepest first) so that mod.rs files
 /// in child directories exist before parent mod.rs files reference them.
@@ -120,12 +133,14 @@ pub fn collect_output_dirs(output_dir: &Path) -> Result<Vec<PathBuf>> {
     Ok(dirs)
 }
 
-fn collect_output_dirs_recursive(dir: &Path, dirs: &mut Vec<PathBuf>) -> Result<()> {
+/// Returns `true` if this directory (or any descendant) contains `.rs` files.
+fn collect_output_dirs_recursive(dir: &Path, dirs: &mut Vec<PathBuf>) -> Result<bool> {
     if !dir.is_dir() {
-        return Ok(());
+        return Ok(false);
     }
 
     let mut has_rs_files = false;
+    let mut has_rs_descendants = false;
     let entries = std::fs::read_dir(dir)
         .with_context(|| format!("failed to read directory: {}", dir.display()))?;
 
@@ -134,7 +149,9 @@ fn collect_output_dirs_recursive(dir: &Path, dirs: &mut Vec<PathBuf>) -> Result<
         let path = entry.path();
 
         if path.is_dir() {
-            collect_output_dirs_recursive(&path, dirs)?;
+            if collect_output_dirs_recursive(&path, dirs)? {
+                has_rs_descendants = true;
+            }
         } else if path.is_file() {
             let name = entry.file_name();
             let name_str = name.to_string_lossy();
@@ -144,11 +161,11 @@ fn collect_output_dirs_recursive(dir: &Path, dirs: &mut Vec<PathBuf>) -> Result<
         }
     }
 
-    if has_rs_files {
+    if has_rs_files || has_rs_descendants {
         dirs.push(dir.to_path_buf());
     }
 
-    Ok(())
+    Ok(has_rs_files || has_rs_descendants)
 }
 
 /// Compute default output directory path by appending `_rs` suffix.
@@ -281,6 +298,28 @@ mod tests {
     }
 
     #[test]
+    fn test_compute_output_path_hyphen_to_underscore() {
+        let result = compute_output_path(
+            Path::new("src/hono-base.ts"),
+            Path::new("src"),
+            Path::new("out"),
+        )
+        .unwrap();
+        assert_eq!(result, PathBuf::from("out/hono_base.rs"));
+    }
+
+    #[test]
+    fn test_compute_output_path_nested_hyphen() {
+        let result = compute_output_path(
+            Path::new("src/my-dir/some-file.ts"),
+            Path::new("src"),
+            Path::new("out"),
+        )
+        .unwrap();
+        assert_eq!(result, PathBuf::from("out/my_dir/some_file.rs"));
+    }
+
+    #[test]
     fn test_compute_output_path_flat() {
         let result =
             compute_output_path(Path::new("src/main.ts"), Path::new("src"), Path::new("out"))
@@ -354,5 +393,84 @@ mod tests {
     fn test_validate_has_ts_files_non_empty_ok() {
         let result = validate_has_ts_files(&[PathBuf::from("foo.ts")], Path::new("/some/dir"));
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_collect_output_dirs_includes_intermediate_dirs() {
+        // Structure: root/adapter/bun/server.rs
+        // adapter/ has no .rs files directly, only subdirectories.
+        // collect_output_dirs should include adapter/ so mod.rs is generated there.
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+
+        let bun_dir = root.join("adapter").join("bun");
+        fs::create_dir_all(&bun_dir).unwrap();
+        fs::write(bun_dir.join("server.rs"), "").unwrap();
+
+        let dirs = collect_output_dirs(root).unwrap();
+        let relative_dirs: Vec<String> = dirs
+            .iter()
+            .map(|d| d.strip_prefix(root).unwrap().to_string_lossy().into_owned())
+            .collect();
+
+        assert!(
+            relative_dirs.contains(&"adapter/bun".to_string()),
+            "should include adapter/bun (has .rs files)"
+        );
+        assert!(
+            relative_dirs.contains(&"adapter".to_string()),
+            "should include adapter (intermediate dir with subdirectories)"
+        );
+    }
+
+    #[test]
+    fn test_collect_output_dirs_three_level_nesting() {
+        // Structure: root/a/b/c/file.rs
+        // All intermediate dirs (a, a/b, a/b/c) should be included.
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+
+        let deep = root.join("a").join("b").join("c");
+        fs::create_dir_all(&deep).unwrap();
+        fs::write(deep.join("file.rs"), "").unwrap();
+
+        let dirs = collect_output_dirs(root).unwrap();
+        let relative_dirs: Vec<String> = dirs
+            .iter()
+            .map(|d| d.strip_prefix(root).unwrap().to_string_lossy().into_owned())
+            .collect();
+
+        assert!(relative_dirs.contains(&"a/b/c".to_string()));
+        assert!(relative_dirs.contains(&"a/b".to_string()));
+        assert!(relative_dirs.contains(&"a".to_string()));
+    }
+
+    #[test]
+    fn test_collect_output_dirs_bottom_up_order() {
+        // Directories should be in bottom-up order (deepest first)
+        // so mod.rs in children exists before parent references them.
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+
+        let deep = root.join("a").join("b");
+        fs::create_dir_all(&deep).unwrap();
+        fs::write(deep.join("file.rs"), "").unwrap();
+        fs::write(root.join("top.rs"), "").unwrap();
+
+        let dirs = collect_output_dirs(root).unwrap();
+        let relative_dirs: Vec<String> = dirs
+            .iter()
+            .map(|d| d.strip_prefix(root).unwrap().to_string_lossy().into_owned())
+            .collect();
+
+        let idx_ab = relative_dirs.iter().position(|d| d == "a/b").unwrap();
+        let idx_a = relative_dirs.iter().position(|d| d == "a").unwrap();
+        let idx_root = relative_dirs.iter().position(|d| d.is_empty()).unwrap();
+
+        assert!(idx_ab < idx_a, "a/b should come before a (bottom-up order)");
+        assert!(
+            idx_a < idx_root,
+            "a should come before root (bottom-up order)"
+        );
     }
 }

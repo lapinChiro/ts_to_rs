@@ -108,14 +108,33 @@ impl std::error::Error for UnsupportedSyntaxError {}
 ///
 /// Returns an error if transformation fails or unsupported syntax is encountered.
 pub fn transform_module(module: &Module, reg: &TypeRegistry) -> Result<Vec<Item>> {
+    transform_module_with_path(module, reg, None)
+}
+
+/// Transforms an SWC [`Module`] into IR items, with the file's crate-relative directory.
+///
+/// `current_file_dir` is the directory of the source file relative to the crate root
+/// (e.g., `Some("adapter/bun")` for `adapter/bun/server.ts`). This is used to resolve
+/// `../` in import paths. When `None`, the file is assumed to be at the crate root.
+pub fn transform_module_with_path(
+    module: &Module,
+    reg: &TypeRegistry,
+    current_file_dir: Option<&str>,
+) -> Result<Vec<Item>> {
     // Pre-scan: collect class info for inheritance resolution
     let class_map = classes::pre_scan_classes(module, reg);
     let iface_methods = classes::pre_scan_interface_methods(module);
 
     let mut items = Vec::new();
     for module_item in &module.body {
-        let (converted, _warnings) =
-            transform_module_item(module_item, reg, &class_map, &iface_methods, false)?;
+        let (converted, _warnings) = transform_module_item(
+            module_item,
+            reg,
+            &class_map,
+            &iface_methods,
+            false,
+            current_file_dir,
+        )?;
         items.extend(converted);
     }
 
@@ -136,6 +155,15 @@ pub fn transform_module_collecting(
     module: &Module,
     reg: &TypeRegistry,
 ) -> Result<(Vec<Item>, Vec<UnsupportedSyntaxError>)> {
+    transform_module_collecting_with_path(module, reg, None)
+}
+
+/// Like [`transform_module_collecting`] but with file path context for import resolution.
+pub fn transform_module_collecting_with_path(
+    module: &Module,
+    reg: &TypeRegistry,
+    current_file_dir: Option<&str>,
+) -> Result<(Vec<Item>, Vec<UnsupportedSyntaxError>)> {
     let class_map = classes::pre_scan_classes(module, reg);
     let iface_methods = classes::pre_scan_interface_methods(module);
 
@@ -143,7 +171,14 @@ pub fn transform_module_collecting(
     let mut unsupported = Vec::new();
 
     for module_item in &module.body {
-        match transform_module_item(module_item, reg, &class_map, &iface_methods, true) {
+        match transform_module_item(
+            module_item,
+            reg,
+            &class_map,
+            &iface_methods,
+            true,
+            current_file_dir,
+        ) {
             Ok((converted, warnings)) => {
                 items.extend(converted);
                 for warning in warnings {
@@ -180,6 +215,7 @@ fn transform_module_item(
     class_map: &HashMap<String, ClassInfo>,
     iface_methods: &HashMap<String, Vec<String>>,
     resilient: bool,
+    current_file_dir: Option<&str>,
 ) -> Result<(Vec<Item>, Vec<String>)> {
     match module_item {
         ModuleItem::Stmt(Stmt::Decl(decl)) => transform_decl(
@@ -199,17 +235,21 @@ fn transform_module_item(
             resilient,
         ),
         ModuleItem::ModuleDecl(ModuleDecl::Import(import_decl)) => {
-            let items: Vec<Item> = transform_import(import_decl).into_iter().collect();
+            let items: Vec<Item> = transform_import(import_decl, current_file_dir)
+                .into_iter()
+                .collect();
             Ok((items, vec![]))
         }
         ModuleItem::ModuleDecl(ModuleDecl::ExportNamed(export)) => {
-            let items: Vec<Item> = transform_export_named(export).into_iter().collect();
+            let items: Vec<Item> = transform_export_named(export, current_file_dir)
+                .into_iter()
+                .collect();
             Ok((items, vec![]))
         }
         ModuleItem::ModuleDecl(ModuleDecl::ExportAll(export_all)) => {
             let src = export_all.src.value.to_string_lossy().into_owned();
             if src.starts_with("./") || src.starts_with("../") {
-                let path = convert_relative_path_to_crate_path(&src);
+                let path = convert_relative_path_to_crate_path(&src, current_file_dir);
                 Ok((
                     vec![Item::Use {
                         vis: Visibility::Public,
@@ -238,7 +278,10 @@ fn transform_module_item(
 ///
 /// Only relative path imports with named specifiers are converted.
 /// External package imports and non-named specifiers are skipped.
-fn transform_import(import_decl: &swc_ecma_ast::ImportDecl) -> Option<Item> {
+fn transform_import(
+    import_decl: &swc_ecma_ast::ImportDecl,
+    current_file_dir: Option<&str>,
+) -> Option<Item> {
     let src = import_decl.src.value.to_string_lossy().into_owned();
 
     // Only handle relative imports
@@ -260,7 +303,7 @@ fn transform_import(import_decl: &swc_ecma_ast::ImportDecl) -> Option<Item> {
         return None;
     }
 
-    let path = convert_relative_path_to_crate_path(&src);
+    let path = convert_relative_path_to_crate_path(&src, current_file_dir);
     Some(Item::Use {
         vis: Visibility::Private,
         path,
@@ -272,7 +315,10 @@ fn transform_import(import_decl: &swc_ecma_ast::ImportDecl) -> Option<Item> {
 ///
 /// - Re-exports (`export { Foo } from "./bar"`) become `pub use bar::Foo;`
 /// - Local name exports (`export { Foo }`) are skipped (declarations are already `pub`)
-fn transform_export_named(export: &swc_ecma_ast::NamedExport) -> Option<Item> {
+fn transform_export_named(
+    export: &swc_ecma_ast::NamedExport,
+    current_file_dir: Option<&str>,
+) -> Option<Item> {
     // Local name exports (no source path) are skipped
     let src = export.src.as_ref()?;
     let src_str = src.value.to_string_lossy().into_owned();
@@ -303,7 +349,7 @@ fn transform_export_named(export: &swc_ecma_ast::NamedExport) -> Option<Item> {
         return None;
     }
 
-    let path = convert_relative_path_to_crate_path(&src_str);
+    let path = convert_relative_path_to_crate_path(&src_str, current_file_dir);
     Some(Item::Use {
         vis: Visibility::Public,
         path,
@@ -311,21 +357,52 @@ fn transform_export_named(export: &swc_ecma_ast::NamedExport) -> Option<Item> {
     })
 }
 
-/// Converts a relative TS import path to a Rust crate path.
+/// Converts a TypeScript relative import path to a Rust `crate::` path.
 ///
-/// Hyphens in path segments are replaced with underscores to produce valid Rust identifiers.
-///
-/// Examples:
-/// - `./foo` → `crate::foo`
-/// - `./sub/bar` → `crate::sub::bar`
-/// - `./hono-base` → `crate::hono_base`
-fn convert_relative_path_to_crate_path(rel_path: &str) -> String {
-    let stripped = rel_path.strip_prefix("./").unwrap_or(rel_path);
-    let parts: Vec<String> = stripped
+/// `current_file_dir` is the directory of the importing file, relative to the
+/// crate root (e.g., `Some("adapter/bun")` for `adapter/bun/server.ts`).
+/// When `None`, the file is assumed to be at the crate root.
+/// Hyphens in path segments are replaced with underscores.
+fn convert_relative_path_to_crate_path(rel_path: &str, current_file_dir: Option<&str>) -> String {
+    let resolved = if rel_path.starts_with("../") {
+        // Resolve parent-relative paths using the current file's directory
+        let base_parts: Vec<&str> = current_file_dir
+            .unwrap_or("")
+            .split('/')
+            .filter(|s| !s.is_empty())
+            .collect();
+        let mut parts = base_parts;
+        let mut remaining = rel_path;
+        while let Some(rest) = remaining.strip_prefix("../") {
+            parts.pop();
+            remaining = rest;
+        }
+        // remaining may still have ./ prefix
+        let remaining = remaining.strip_prefix("./").unwrap_or(remaining);
+        if remaining.is_empty() {
+            parts.join("/")
+        } else {
+            let suffix = remaining;
+            if parts.is_empty() {
+                suffix.to_string()
+            } else {
+                format!("{}/{suffix}", parts.join("/"))
+            }
+        }
+    } else {
+        // ./foo or ./sub/bar — resolve relative to current file's directory
+        let stripped = rel_path.strip_prefix("./").unwrap_or(rel_path);
+        match current_file_dir {
+            Some(dir) if !dir.is_empty() => format!("{dir}/{stripped}"),
+            _ => stripped.to_string(),
+        }
+    };
+
+    let crate_path: Vec<String> = resolved
         .split('/')
         .map(|seg| seg.replace('-', "_"))
         .collect();
-    format!("crate::{}", parts.join("::"))
+    format!("crate::{}", crate_path.join("::"))
 }
 
 /// Transforms a single declaration into IR [`Item`]s.

@@ -64,11 +64,23 @@ pub fn transpile(ts_source: &str) -> Result<String> {
 ///
 /// Returns an error if parsing or transformation fails.
 pub fn transpile_with_registry(ts_source: &str, registry: &TypeRegistry) -> Result<String> {
+    transpile_with_registry_and_path(ts_source, registry, None)
+}
+
+/// Like [`transpile_with_registry`] but with file path context for import resolution.
+///
+/// `current_file_dir` is the directory of the source file relative to the crate root
+/// (e.g., `Some("adapter/bun")` for `adapter/bun/server.ts`).
+pub fn transpile_with_registry_and_path(
+    ts_source: &str,
+    registry: &TypeRegistry,
+    current_file_dir: Option<&str>,
+) -> Result<String> {
     transformer::types::reset_synthetic_counter();
     let module = parser::parse_typescript(ts_source)?;
     let mut reg = build_registry(&module);
     reg.merge(registry);
-    let items = transformer::transform_module(&module, &reg)?;
+    let items = transformer::transform_module_with_path(&module, &reg, current_file_dir)?;
     Ok(generator::generate(&items))
 }
 
@@ -92,11 +104,21 @@ pub fn transpile_collecting_with_registry(
     ts_source: &str,
     registry: &TypeRegistry,
 ) -> Result<(String, Vec<UnsupportedSyntax>)> {
+    transpile_collecting_with_registry_and_path(ts_source, registry, None)
+}
+
+/// Like [`transpile_collecting_with_registry`] but with file path context for import resolution.
+pub fn transpile_collecting_with_registry_and_path(
+    ts_source: &str,
+    registry: &TypeRegistry,
+    current_file_dir: Option<&str>,
+) -> Result<(String, Vec<UnsupportedSyntax>)> {
     transformer::types::reset_synthetic_counter();
     let module = parser::parse_typescript(ts_source)?;
     let mut reg = build_registry(&module);
     reg.merge(registry);
-    let (items, raw_unsupported) = transformer::transform_module_collecting(&module, &reg)?;
+    let (items, raw_unsupported) =
+        transformer::transform_module_collecting_with_path(&module, &reg, current_file_dir)?;
     let output = generator::generate(&items);
     let unsupported = raw_unsupported
         .into_iter()
