@@ -21,3 +21,11 @@ pub fn identity<T>(x: T) -> T {
 pub struct UserList {
     pub users: Container<String>,
 }
+
+pub trait Processor<T> {
+    fn process(&self, input: T) -> T;
+}
+
+pub trait Bounded<T: Processor<String>> {
+    fn wrap(&self, item: T) -> T;
+}

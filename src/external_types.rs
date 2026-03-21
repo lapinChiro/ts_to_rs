@@ -10,7 +10,7 @@ use anyhow::{bail, Context, Result};
 use serde::Deserialize;
 
 use crate::ir::RustType;
-use crate::registry::{TypeDef, TypeRegistry};
+use crate::registry::{MethodSignature, TypeDef, TypeRegistry};
 
 /// JSON interchange format version. Must match the tsc extraction script's output.
 const FORMAT_VERSION: u64 = 1;
@@ -199,7 +199,7 @@ fn convert_external_typedef(def: &ExternalTypeDef) -> Option<TypeDef> {
                 })
                 .collect();
 
-            let converted_methods: HashMap<String, Vec<(String, RustType)>> = methods
+            let converted_methods: HashMap<String, MethodSignature> = methods
                 .iter()
                 .filter_map(|(name, method)| {
                     // Use the first signature (most general for overloads)
@@ -217,7 +217,14 @@ fn convert_external_typedef(def: &ExternalTypeDef) -> Option<TypeDef> {
                             (p.name.clone(), ty)
                         })
                         .collect();
-                    Some((name.clone(), params))
+                    let return_type = sig.return_type.as_ref().map(convert_external_type);
+                    Some((
+                        name.clone(),
+                        MethodSignature {
+                            params,
+                            return_type,
+                        },
+                    ))
                 })
                 .collect();
 

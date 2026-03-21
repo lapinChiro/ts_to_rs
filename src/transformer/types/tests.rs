@@ -1,5 +1,5 @@
 use super::*;
-use crate::ir::StructField;
+use crate::ir::{StructField, TypeParam};
 use crate::parser::parse_typescript;
 use crate::registry::{TypeDef, TypeRegistry};
 use swc_ecma_ast::{Decl, ModuleItem, Stmt};
@@ -211,7 +211,13 @@ fn test_convert_interface_with_type_params() {
 
     match item {
         Item::Struct { type_params, .. } => {
-            assert_eq!(type_params, vec!["T".to_string()]);
+            assert_eq!(
+                type_params,
+                vec![TypeParam {
+                    name: "T".to_string(),
+                    constraint: None
+                }]
+            );
         }
         _ => panic!("expected Item::Struct"),
     }
@@ -224,7 +230,19 @@ fn test_convert_interface_with_multiple_type_params() {
 
     match item {
         Item::Struct { type_params, .. } => {
-            assert_eq!(type_params, vec!["A".to_string(), "B".to_string()]);
+            assert_eq!(
+                type_params,
+                vec![
+                    TypeParam {
+                        name: "A".to_string(),
+                        constraint: None
+                    },
+                    TypeParam {
+                        name: "B".to_string(),
+                        constraint: None
+                    },
+                ]
+            );
         }
         _ => panic!("expected Item::Struct"),
     }
@@ -338,7 +356,19 @@ fn test_convert_type_alias_with_type_params() {
 
     match item {
         Item::Struct { type_params, .. } => {
-            assert_eq!(type_params, vec!["A".to_string(), "B".to_string()]);
+            assert_eq!(
+                type_params,
+                vec![
+                    TypeParam {
+                        name: "A".to_string(),
+                        constraint: None
+                    },
+                    TypeParam {
+                        name: "B".to_string(),
+                        constraint: None
+                    },
+                ]
+            );
         }
         _ => panic!("expected Item::Struct"),
     }
@@ -928,7 +958,19 @@ fn test_convert_type_alias_function_type_with_generics() {
 
     match item {
         Item::TypeAlias { type_params, .. } => {
-            assert_eq!(type_params, vec!["T".to_string(), "U".to_string()]);
+            assert_eq!(
+                type_params,
+                vec![
+                    TypeParam {
+                        name: "T".to_string(),
+                        constraint: None
+                    },
+                    TypeParam {
+                        name: "U".to_string(),
+                        constraint: None
+                    },
+                ]
+            );
         }
         _ => panic!("expected Item::TypeAlias"),
     }
@@ -981,7 +1023,10 @@ fn test_convert_type_alias_conditional_filter_returns_type_alias_with_true_branc
         Item::TypeAlias {
             vis: Visibility::Public,
             name: "Filter".to_string(),
-            type_params: vec!["T".to_string()],
+            type_params: vec![TypeParam {
+                name: "T".to_string(),
+                constraint: None
+            }],
             ty: RustType::Named {
                 name: "T".to_string(),
                 type_args: vec![],
@@ -1033,6 +1078,7 @@ fn test_convert_type_alias_conditional_infer_returns_associated_type() {
         Item::Trait {
             vis: Visibility::Public,
             name: "Promise".to_string(),
+            type_params: vec![],
             supertraits: vec![],
             methods: vec![],
             associated_types: vec!["Output".to_string()],
@@ -1043,7 +1089,10 @@ fn test_convert_type_alias_conditional_infer_returns_associated_type() {
         Item::TypeAlias {
             vis: Visibility::Public,
             name: "Unwrap".to_string(),
-            type_params: vec!["T".to_string()],
+            type_params: vec![TypeParam {
+                name: "T".to_string(),
+                constraint: None
+            }],
             ty: RustType::Named {
                 name: "<T as Promise>::Output".to_string(),
                 type_args: vec![],

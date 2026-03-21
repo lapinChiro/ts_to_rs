@@ -5,7 +5,7 @@ pub mod types;
 mod expressions;
 mod statements;
 
-use crate::ir::{EnumValue, EnumVariant, Item, Method, Param, RustType, Visibility};
+use crate::ir::{EnumValue, EnumVariant, Item, Method, Param, RustType, TypeParam, Visibility};
 
 use expressions::{escape_ident, generate_expr};
 use statements::generate_stmt;
@@ -74,11 +74,12 @@ fn generate_item(item: &Item) -> String {
             }
             // Add PhantomData for type params not used in any field
             for tp in type_params {
-                let used = fields.iter().any(|f| f.ty.uses_param(tp));
+                let used = fields.iter().any(|f| f.ty.uses_param(&tp.name));
                 if !used {
                     out.push_str(&format!(
-                        "    _phantom_{}: std::marker::PhantomData<{tp}>,\n",
-                        tp.to_lowercase()
+                        "    _phantom_{}: std::marker::PhantomData<{}>,\n",
+                        tp.name.to_lowercase(),
+                        tp.name
                     ));
                 }
             }
@@ -104,17 +105,19 @@ fn generate_item(item: &Item) -> String {
         Item::Trait {
             vis,
             name,
+            type_params,
             supertraits,
             methods,
             associated_types,
         } => {
             let vis_str = generate_vis(vis);
+            let generics = generate_type_params(type_params);
             let bounds = if supertraits.is_empty() {
                 String::new()
             } else {
                 format!(": {}", supertraits.join(" + "))
             };
-            let mut out = format!("{vis_str}trait {name}{bounds} {{\n");
+            let mut out = format!("{vis_str}trait {name}{generics}{bounds} {{\n");
             for assoc_type in associated_types {
                 out.push_str(&format!("    type {assoc_type};\n"));
             }
@@ -524,14 +527,21 @@ fn generate_vis(vis: &Visibility) -> &'static str {
     }
 }
 
-/// Generates the generic type parameters string (e.g., `<T, U>`).
+/// Generates the generic type parameters string (e.g., `<T, U>` or `<T: Foo>`).
 ///
 /// Returns an empty string if there are no type parameters.
-fn generate_type_params(type_params: &[String]) -> String {
+fn generate_type_params(type_params: &[TypeParam]) -> String {
     if type_params.is_empty() {
         String::new()
     } else {
-        format!("<{}>", type_params.join(", "))
+        let params: Vec<String> = type_params
+            .iter()
+            .map(|p| match &p.constraint {
+                Some(ty) => format!("{}: {}", p.name, generate_type(ty)),
+                None => p.name.clone(),
+            })
+            .collect();
+        format!("<{}>", params.join(", "))
     }
 }
 
@@ -540,7 +550,7 @@ mod tests {
     use super::*;
     use crate::ir::{
         BinOp, EnumValue, EnumVariant, Expr, Item, Method, Param, RustType, Stmt, StructField,
-        Visibility,
+        TypeParam, Visibility,
     };
 
     // --- Item::Use tests ---
@@ -640,7 +650,10 @@ struct Bar {
         let item = Item::Struct {
             vis: Visibility::Public,
             name: "Container".to_string(),
-            type_params: vec!["T".to_string()],
+            type_params: vec![TypeParam {
+                name: "T".to_string(),
+                constraint: None,
+            }],
             fields: vec![StructField {
                 vis: None,
                 name: "value".to_string(),
@@ -923,7 +936,10 @@ pub fn get_value() -> f64 {
             attributes: vec![],
             is_async: false,
             name: "identity".to_string(),
-            type_params: vec!["T".to_string()],
+            type_params: vec![TypeParam {
+                name: "T".to_string(),
+                constraint: None,
+            }],
             params: vec![Param {
                 name: "x".to_string(),
                 ty: Some(RustType::Named {
@@ -1041,6 +1057,7 @@ pub struct B {
         let item = Item::Trait {
             vis: Visibility::Public,
             name: "AnimalTrait".to_string(),
+            type_params: vec![],
             methods: vec![Method {
                 vis: Visibility::Private,
                 name: "speak".to_string(),
@@ -1065,6 +1082,7 @@ pub trait AnimalTrait {
         let item = Item::Trait {
             vis: Visibility::Public,
             name: "Dog".to_string(),
+            type_params: vec![],
             supertraits: vec!["Animal".to_string(), "Debug".to_string()],
             methods: vec![Method {
                 vis: Visibility::Private,

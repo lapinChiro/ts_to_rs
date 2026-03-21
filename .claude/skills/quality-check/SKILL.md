@@ -20,7 +20,7 @@ cargo clippy --all-targets --all-features -- -D warnings > /tmp/clippy-result.tx
 cargo test > /tmp/test-result.txt 2>&1
 ```
 
-出力はファイルにリダイレクトしてから Read ツールで全文を確認する。
+コマンド出力の確認方法は `.claude/rules/command-output-verification.md` に従う。
 
 エラーがあった場合:
 
@@ -29,7 +29,6 @@ cargo test > /tmp/test-result.txt 2>&1
 
 ## 禁止事項
 
-- 出力を `tail` や `grep` でフィルタリングして確認すること（出力が切れるリスクがある）
 - テストを削除・弱体化してエラーを消すこと
 - clippy 警告を `#[allow(...)]` で黙らせること（根本原因を修正する）
 - 品質チェックを実行せずに「完了」と報告すること

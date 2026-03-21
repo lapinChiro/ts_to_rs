@@ -11,7 +11,9 @@ use swc_ecma_ast::{
 
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use crate::ir::{EnumValue, EnumVariant, Item, Method, Param, RustType, StructField, Visibility};
+use crate::ir::{
+    EnumValue, EnumVariant, Item, Method, Param, RustType, StructField, TypeParam, Visibility,
+};
 use crate::registry::{TypeDef, TypeRegistry};
 use crate::transformer::type_env::{wrap_trait_for_position, TypePosition};
 
@@ -421,7 +423,7 @@ pub fn convert_interface_items(
     reg: &TypeRegistry,
 ) -> Result<Vec<Item>> {
     let name = decl.id.sym.to_string();
-    let type_params = extract_type_params(decl.type_params.as_deref());
+    let type_params = extract_type_params(decl.type_params.as_deref(), reg);
 
     let has_methods = decl
         .body
@@ -475,7 +477,7 @@ fn convert_interface_as_struct(
     decl: &TsInterfaceDecl,
     vis: Visibility,
     name: &str,
-    type_params: Vec<String>,
+    type_params: Vec<TypeParam>,
     reg: &TypeRegistry,
 ) -> Result<Item> {
     let mut fields = Vec::new();
@@ -530,7 +532,7 @@ fn convert_interface_as_fn_type(
     decl: &TsInterfaceDecl,
     vis: Visibility,
     name: &str,
-    type_params: Vec<String>,
+    type_params: Vec<TypeParam>,
     reg: &TypeRegistry,
 ) -> Result<Item> {
     let call_sigs: Vec<&swc_ecma_ast::TsCallSignatureDecl> = decl
@@ -607,7 +609,7 @@ fn convert_interface_as_struct_and_trait(
     decl: &TsInterfaceDecl,
     vis: Visibility,
     name: &str,
-    type_params: Vec<String>,
+    type_params: Vec<TypeParam>,
     reg: &TypeRegistry,
 ) -> Result<Vec<Item>> {
     let mut fields = Vec::new();
@@ -659,6 +661,7 @@ fn convert_interface_as_struct_and_trait(
     let trait_item = Item::Trait {
         vis: vis.clone(),
         name: name.to_string(),
+        type_params: type_params.clone(),
         supertraits,
         methods: methods.clone(),
         associated_types: vec![],
@@ -679,7 +682,7 @@ fn convert_interface_as_trait(
     decl: &TsInterfaceDecl,
     vis: Visibility,
     name: &str,
-    type_params: Vec<String>,
+    type_params: Vec<TypeParam>,
     reg: &TypeRegistry,
 ) -> Result<Item> {
     let mut methods = Vec::new();
@@ -702,15 +705,12 @@ fn convert_interface_as_trait(
         }
     }
 
-    // type_params are not directly on Trait in current IR, so we ignore them for now.
-    // TODO: Add type_params to Item::Trait when needed.
-    let _ = type_params;
-
     let supertraits = collect_extends_names(decl);
 
     Ok(Item::Trait {
         vis,
         name: name.to_string(),
+        type_params,
         supertraits,
         methods,
         associated_types: vec![],
@@ -791,7 +791,7 @@ pub fn convert_type_alias_items(
     // Conditional type may produce multiple items (comment + placeholder)
     if let TsType::TsConditionalType(cond) = decl.type_ann.as_ref() {
         let name = decl.id.sym.to_string();
-        let type_params = extract_type_params(decl.type_params.as_deref());
+        let type_params = extract_type_params(decl.type_params.as_deref(), reg);
 
         let mut extra_items = Vec::new();
         match convert_conditional_type(cond, &mut extra_items, reg) {
@@ -799,7 +799,7 @@ pub fn convert_type_alias_items(
                 // Remove type params not used in the resolved type
                 let used_params = type_params
                     .into_iter()
-                    .filter(|p| ty.uses_param(p))
+                    .filter(|p| ty.uses_param(&p.name))
                     .collect();
                 let mut items = extra_items;
                 items.push(Item::TypeAlias {
@@ -816,7 +816,7 @@ pub fn convert_type_alias_items(
                     convert_ts_type(&cond.true_type, &mut Vec::new(), reg).unwrap_or(RustType::Any);
                 let used_params = type_params
                     .into_iter()
-                    .filter(|p| fallback_ty.uses_param(p))
+                    .filter(|p| fallback_ty.uses_param(&p.name))
                     .collect();
                 let comment =
                     format!("TODO: Conditional type not auto-converted\nOriginal TS: type {name}",);
@@ -1011,7 +1011,7 @@ pub fn convert_type_alias(
                     .map(|ann| convert_ts_type(&ann.type_ann, &mut Vec::new(), reg))
                     .transpose()?
                     .unwrap_or(RustType::Unit);
-                let type_params = extract_type_params(decl.type_params.as_deref());
+                let type_params = extract_type_params(decl.type_params.as_deref(), reg);
                 return Ok(Item::TypeAlias {
                     vis,
                     name,
@@ -1034,6 +1034,7 @@ pub fn convert_type_alias(
                 return Ok(Item::Trait {
                     vis,
                     name: name.to_string(),
+                    type_params: vec![],
                     supertraits: vec![],
                     methods,
                     associated_types: vec![],
@@ -1052,7 +1053,7 @@ pub fn convert_type_alias(
                         if let Some(type_ann) = &idx.type_ann {
                             let value_type =
                                 convert_ts_type(&type_ann.type_ann, &mut Vec::new(), reg)?;
-                            let type_params = extract_type_params(decl.type_params.as_deref());
+                            let type_params = extract_type_params(decl.type_params.as_deref(), reg);
                             return Ok(Item::TypeAlias {
                                 vis,
                                 name,
@@ -1077,7 +1078,7 @@ pub fn convert_type_alias(
                     }
                 }
             }
-            let type_params = extract_type_params(decl.type_params.as_deref());
+            let type_params = extract_type_params(decl.type_params.as_deref(), reg);
 
             Ok(Item::Struct {
                 vis,
@@ -1094,7 +1095,7 @@ pub fn convert_type_alias(
                     std::mem::discriminant(other)
                 )
             })?;
-            let type_params = extract_type_params(decl.type_params.as_deref());
+            let type_params = extract_type_params(decl.type_params.as_deref(), reg);
             Ok(Item::TypeAlias {
                 vis,
                 name,
@@ -1138,7 +1139,7 @@ fn try_convert_function_type_alias(
     let return_type = convert_ts_type(&fn_type.type_ann.type_ann, extra_items, reg)?;
 
     let name = decl.id.sym.to_string();
-    let type_params = extract_type_params(decl.type_params.as_deref());
+    let type_params = extract_type_params(decl.type_params.as_deref(), reg);
 
     Ok(Some(Item::TypeAlias {
         vis,
@@ -1172,7 +1173,7 @@ fn try_convert_tuple_type_alias(
         .collect::<Result<Vec<_>>>()?;
 
     let name = decl.id.sym.to_string();
-    let type_params = extract_type_params(decl.type_params.as_deref());
+    let type_params = extract_type_params(decl.type_params.as_deref(), reg);
 
     Ok(Some(Item::TypeAlias {
         vis,
@@ -1199,6 +1200,7 @@ fn convert_conditional_type(
         extra_items.push(Item::Trait {
             vis: Visibility::Public,
             name: trait_name,
+            type_params: vec![],
             supertraits: vec![],
             methods: vec![],
             associated_types: vec!["Output".to_string()],
@@ -1603,7 +1605,7 @@ fn try_convert_general_union(
     // Nullable union with single non-null type: `type X = T | null` → `type X = Option<T>`
     if has_null_or_undefined && non_null_types.len() == 1 {
         let inner_type = convert_ts_type(non_null_types[0], extra_items, reg)?;
-        let type_params = extract_type_params(decl.type_params.as_deref());
+        let type_params = extract_type_params(decl.type_params.as_deref(), reg);
         return Ok(Some(Item::TypeAlias {
             vis,
             name: decl.id.sym.to_string(),
@@ -1831,7 +1833,7 @@ fn try_convert_intersection_type(
         }
     }
 
-    let type_params = extract_type_params(decl.type_params.as_deref());
+    let type_params = extract_type_params(decl.type_params.as_deref(), reg);
 
     // If all intersection members are named type refs that resolve to method-only types
     // (traits), generate a supertrait composition instead of a struct.
@@ -1863,6 +1865,7 @@ fn try_convert_intersection_type(
         return Ok(Some(Item::Trait {
             vis,
             name: decl.id.sym.to_string(),
+            type_params: vec![],
             supertraits: trait_names,
             methods: vec![],
             associated_types: vec![],
@@ -2051,15 +2054,24 @@ fn convert_indexed_access_type(
     })
 }
 
-/// Extracts type parameter names from an optional [`TsTypeParamDecl`].
+/// Extracts type parameters (name + optional constraint) from an optional [`TsTypeParamDecl`].
 ///
 /// Returns an empty vec if there are no type parameters.
-pub fn extract_type_params(type_params: Option<&swc_ecma_ast::TsTypeParamDecl>) -> Vec<String> {
+pub fn extract_type_params(
+    type_params: Option<&swc_ecma_ast::TsTypeParamDecl>,
+    reg: &TypeRegistry,
+) -> Vec<TypeParam> {
     match type_params {
         Some(params) => params
             .params
             .iter()
-            .map(|p| p.name.sym.to_string())
+            .map(|p| TypeParam {
+                name: p.name.sym.to_string(),
+                constraint: p
+                    .constraint
+                    .as_ref()
+                    .and_then(|c| convert_ts_type(c, &mut Vec::new(), reg).ok()),
+            })
             .collect(),
         None => vec![],
     }

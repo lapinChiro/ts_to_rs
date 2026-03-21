@@ -12,18 +12,29 @@ use std::collections::HashMap;
 use anyhow::Result;
 use swc_ecma_ast as ast;
 
-use crate::ir::{Item, RustType};
+use crate::ir::{Item, RustType, TypeParam};
 use crate::transformer::types::convert_ts_type;
+
+/// メソッドシグネチャ（パラメータ + 戻り値型）。
+#[derive(Debug, Clone, PartialEq)]
+pub struct MethodSignature {
+    /// パラメータ名と型のペア
+    pub params: Vec<(String, RustType)>,
+    /// 戻り値型（アノテーションなしの場合は None）
+    pub return_type: Option<RustType>,
+}
 
 /// 型定義の種類。
 #[derive(Debug, Clone, PartialEq)]
 pub enum TypeDef {
     /// struct（interface / type alias から変換）
     Struct {
+        /// ジェネリック型パラメータ
+        type_params: Vec<TypeParam>,
         /// フィールド名と型のペア
         fields: Vec<(String, RustType)>,
-        /// メソッドシグネチャ（メソッド名 → パラメータ一覧）
-        methods: HashMap<String, Vec<(String, RustType)>>,
+        /// メソッドシグネチャ（メソッド名 → シグネチャ）
+        methods: HashMap<String, MethodSignature>,
         /// 親 interface 名のリスト（`interface B extends A` の `A`）
         extends: Vec<String>,
         /// Whether this type comes from a TS interface declaration (true) or class/type alias (false)
@@ -31,6 +42,8 @@ pub enum TypeDef {
     },
     /// enum
     Enum {
+        /// ジェネリック型パラメータ
+        type_params: Vec<TypeParam>,
         /// バリアント名の一覧
         variants: Vec<String>,
         /// 文字列リテラル値 → バリアント名のマッピング（string literal union / discriminated union）
@@ -55,10 +68,11 @@ impl TypeDef {
     /// Creates a new struct TypeDef (from class, type alias, or other non-interface source).
     pub fn new_struct(
         fields: Vec<(String, RustType)>,
-        methods: HashMap<String, Vec<(String, RustType)>>,
+        methods: HashMap<String, MethodSignature>,
         extends: Vec<String>,
     ) -> Self {
         TypeDef::Struct {
+            type_params: vec![],
             fields,
             methods,
             extends,
@@ -69,14 +83,67 @@ impl TypeDef {
     /// Creates a new interface TypeDef (from TS interface declaration).
     pub fn new_interface(
         fields: Vec<(String, RustType)>,
-        methods: HashMap<String, Vec<(String, RustType)>>,
+        methods: HashMap<String, MethodSignature>,
         extends: Vec<String>,
     ) -> Self {
         TypeDef::Struct {
+            type_params: vec![],
             fields,
             methods,
             extends,
             is_interface: true,
+        }
+    }
+
+    /// Returns the type parameters of this TypeDef, if any.
+    pub fn type_params(&self) -> &[TypeParam] {
+        match self {
+            TypeDef::Struct { type_params, .. } | TypeDef::Enum { type_params, .. } => type_params,
+            _ => &[],
+        }
+    }
+
+    /// 型パラメータを具体型で置換した新しい TypeDef を返す。
+    pub fn substitute_types(
+        &self,
+        bindings: &std::collections::HashMap<String, RustType>,
+    ) -> TypeDef {
+        match self {
+            TypeDef::Struct {
+                type_params,
+                fields,
+                methods,
+                extends,
+                is_interface,
+            } => TypeDef::Struct {
+                type_params: type_params.clone(),
+                fields: fields
+                    .iter()
+                    .map(|(name, ty)| (name.clone(), ty.substitute(bindings)))
+                    .collect(),
+                methods: methods
+                    .iter()
+                    .map(|(name, sig)| {
+                        (
+                            name.clone(),
+                            MethodSignature {
+                                params: sig
+                                    .params
+                                    .iter()
+                                    .map(|(n, ty)| (n.clone(), ty.substitute(bindings)))
+                                    .collect(),
+                                return_type: sig
+                                    .return_type
+                                    .as_ref()
+                                    .map(|ty| ty.substitute(bindings)),
+                            },
+                        )
+                    })
+                    .collect(),
+                extends: extends.clone(),
+                is_interface: *is_interface,
+            },
+            other => other.clone(),
         }
     }
 }
@@ -123,6 +190,23 @@ impl TypeRegistry {
         } else {
             false
         }
+    }
+
+    /// ジェネリック型を具体型引数でインスタンス化する。
+    ///
+    /// 型パラメータがない、または引数の数が不一致の場合は元の TypeDef をそのまま返す。
+    pub fn instantiate(&self, name: &str, args: &[RustType]) -> Option<TypeDef> {
+        let type_def = self.get(name)?;
+        let params = type_def.type_params();
+        if params.is_empty() || args.len() != params.len() {
+            return Some(type_def.clone());
+        }
+        let bindings: HashMap<String, RustType> = params
+            .iter()
+            .zip(args.iter())
+            .map(|(p, a)| (p.name.clone(), a.clone()))
+            .collect();
+        Some(type_def.substitute_types(&bindings))
     }
 
     /// 別の TypeRegistry の内容をマージする。
@@ -210,6 +294,7 @@ fn collect_type_name(reg: &mut TypeRegistry, decl: &ast::Decl) {
             reg.register(
                 ts_enum.id.sym.to_string(),
                 TypeDef::Enum {
+                    type_params: vec![],
                     variants: vec![],
                     string_values: HashMap::new(),
                     tag_field: None,
@@ -266,6 +351,7 @@ fn collect_decl(reg: &mut TypeRegistry, decl: &ast::Decl, lookup: &TypeRegistry)
         ast::Decl::TsInterface(iface) => {
             if let Ok(fields) = collect_interface_fields(iface, lookup) {
                 let methods = collect_interface_methods(iface, lookup);
+                let type_params = collect_type_params(iface.type_params.as_deref(), lookup);
                 let extends: Vec<String> = iface
                     .extends
                     .iter()
@@ -278,7 +364,16 @@ fn collect_decl(reg: &mut TypeRegistry, decl: &ast::Decl, lookup: &TypeRegistry)
                     })
                     .collect();
                 let name = iface.id.sym.to_string();
-                reg.register(name, TypeDef::new_interface(fields, methods, extends));
+                reg.register(
+                    name,
+                    TypeDef::Struct {
+                        type_params,
+                        fields,
+                        methods,
+                        extends,
+                        is_interface: true,
+                    },
+                );
             }
         }
         ast::Decl::TsTypeAlias(alias) => {
@@ -313,6 +408,7 @@ fn collect_decl(reg: &mut TypeRegistry, decl: &ast::Decl, lookup: &TypeRegistry)
             reg.register(
                 ts_enum.id.sym.to_string(),
                 TypeDef::Enum {
+                    type_params: vec![],
                     variants,
                     string_values: HashMap::new(),
                     tag_field: None,
@@ -423,13 +519,43 @@ fn collect_class_info(class: &ast::ClassDecl, lookup: &TypeRegistry) -> TypeDef 
                         Some((ident.id.sym.to_string(), ty))
                     })
                     .collect();
-                methods.insert(name, params);
+                let return_type =
+                    method.function.return_type.as_ref().and_then(|ann| {
+                        convert_ts_type(&ann.type_ann, &mut Vec::new(), lookup).ok()
+                    });
+                methods.insert(
+                    name,
+                    MethodSignature {
+                        params,
+                        return_type,
+                    },
+                );
             }
             _ => {}
         }
     }
 
     TypeDef::new_struct(fields, methods, vec![])
+}
+
+/// TS の型パラメータ宣言から TypeParam を収集する。
+fn collect_type_params(
+    decl: Option<&ast::TsTypeParamDecl>,
+    lookup: &TypeRegistry,
+) -> Vec<TypeParam> {
+    decl.map(|d| {
+        d.params
+            .iter()
+            .map(|p| TypeParam {
+                name: p.name.sym.to_string(),
+                constraint: p
+                    .constraint
+                    .as_ref()
+                    .and_then(|c| convert_ts_type(c, &mut Vec::new(), lookup).ok()),
+            })
+            .collect()
+    })
+    .unwrap_or_default()
 }
 
 /// interface のフィールド名・型を収集する。
@@ -452,7 +578,7 @@ fn collect_interface_fields(
 fn collect_interface_methods(
     iface: &ast::TsInterfaceDecl,
     lookup: &TypeRegistry,
-) -> HashMap<String, Vec<(String, RustType)>> {
+) -> HashMap<String, MethodSignature> {
     let mut methods = HashMap::new();
     for member in &iface.body.body {
         if let ast::TsTypeElement::TsMethodSignature(method) = member {
@@ -479,7 +605,17 @@ fn collect_interface_methods(
                     Some((param_name, ty))
                 })
                 .collect();
-            methods.insert(name, params);
+            let return_type = method
+                .type_ann
+                .as_ref()
+                .and_then(|ann| convert_ts_type(&ann.type_ann, &mut Vec::new(), lookup).ok());
+            methods.insert(
+                name,
+                MethodSignature {
+                    params,
+                    return_type,
+                },
+            );
         }
     }
     methods
@@ -540,6 +676,7 @@ fn try_collect_string_literal_union(alias: &ast::TsTypeAliasDecl) -> Option<Type
     }
 
     Some(TypeDef::Enum {
+        type_params: vec![],
         variants,
         string_values,
         tag_field: None,
@@ -594,6 +731,7 @@ fn try_collect_discriminated_union(
     }
 
     Some(TypeDef::Enum {
+        type_params: vec![],
         variants,
         string_values,
         tag_field: Some(tag),
@@ -839,6 +977,7 @@ fn register_extra_enums(reg: &mut TypeRegistry, extra_items: &[Item]) {
             reg.register(
                 name.clone(),
                 TypeDef::Enum {
+                    type_params: vec![],
                     variants: variant_names,
                     string_values: HashMap::new(),
                     tag_field: None,
@@ -989,6 +1128,7 @@ mod tests {
         reg.register(
             "Color".to_string(),
             TypeDef::Enum {
+                type_params: vec![],
                 variants: vec!["Red".to_string(), "Green".to_string(), "Blue".to_string()],
                 string_values: HashMap::new(),
                 tag_field: None,
@@ -999,6 +1139,7 @@ mod tests {
         assert_eq!(
             *def,
             TypeDef::Enum {
+                type_params: vec![],
                 variants: vec!["Red".to_string(), "Green".to_string(), "Blue".to_string(),],
                 string_values: HashMap::new(),
                 tag_field: None,
@@ -1061,6 +1202,7 @@ mod tests {
         reg2.register(
             "Color".to_string(),
             TypeDef::Enum {
+                type_params: vec![],
                 variants: vec!["Red".to_string()],
                 string_values: HashMap::new(),
                 tag_field: None,
@@ -1116,6 +1258,7 @@ mod tests {
         assert_eq!(
             reg.get("Color").unwrap(),
             &TypeDef::Enum {
+                type_params: vec![],
                 variants: vec!["Red".to_string(), "Green".to_string(), "Blue".to_string(),],
                 string_values: HashMap::new(),
                 tag_field: None,
@@ -1339,6 +1482,7 @@ mod tests {
         let def = reg.get("Shape").expect("Shape should be registered");
         match def {
             TypeDef::Enum {
+                type_params: _,
                 variants,
                 string_values,
                 tag_field,
@@ -1432,7 +1576,10 @@ mod tests {
         let mut methods = HashMap::new();
         methods.insert(
             "greet".to_string(),
-            vec![("msg".to_string(), RustType::String)],
+            MethodSignature {
+                params: vec![("msg".to_string(), RustType::String)],
+                return_type: None,
+            },
         );
         reg.register(
             "Greeter".to_string(),
@@ -1459,7 +1606,13 @@ mod tests {
     fn test_is_trait_type_mixed_returns_true() {
         let mut reg = TypeRegistry::new();
         let mut methods = HashMap::new();
-        methods.insert("greet".to_string(), vec![]);
+        methods.insert(
+            "greet".to_string(),
+            MethodSignature {
+                params: vec![],
+                return_type: None,
+            },
+        );
         reg.register(
             "Ctx".to_string(),
             TypeDef::new_interface(
@@ -1495,5 +1648,149 @@ mod tests {
         }
         // B should also be registered
         assert!(reg.get("B").is_some());
+    }
+
+    #[test]
+    fn test_interface_method_return_type_stored_in_registry() {
+        // interface に戻り値型付きメソッドを定義すると、MethodSignature に格納される
+        let module =
+            parse_typescript("interface Formatter { format(input: string): string; }").unwrap();
+        let reg = build_registry(&module);
+        match reg.get("Formatter").unwrap() {
+            TypeDef::Struct { methods, .. } => {
+                let sig = methods.get("format").expect("format method should exist");
+                assert_eq!(sig.params, vec![("input".to_string(), RustType::String)]);
+                assert_eq!(sig.return_type, Some(RustType::String));
+            }
+            other => panic!("expected Struct, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_interface_method_without_return_type_stores_none() {
+        // 戻り値型アノテーションなしのメソッド → return_type が None
+        let module = parse_typescript("interface Logger { log(msg: string); }").unwrap();
+        let reg = build_registry(&module);
+        match reg.get("Logger").unwrap() {
+            TypeDef::Struct { methods, .. } => {
+                let sig = methods.get("log").expect("log method should exist");
+                assert_eq!(sig.return_type, None);
+            }
+            other => panic!("expected Struct, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_class_method_return_type_stored_in_registry() {
+        // class メソッドの戻り値型も MethodSignature に格納される
+        let module =
+            parse_typescript("class Parser { parse(input: string): number { return 0; } }")
+                .unwrap();
+        let reg = build_registry(&module);
+        match reg.get("Parser").unwrap() {
+            TypeDef::Struct { methods, .. } => {
+                let sig = methods.get("parse").expect("parse method should exist");
+                assert_eq!(sig.return_type, Some(RustType::F64));
+            }
+            other => panic!("expected Struct, got {other:?}"),
+        }
+    }
+
+    // --- I-100: Generics Foundation ---
+
+    #[test]
+    fn test_generic_interface_type_params_stored_in_registry() {
+        // interface Container<T> { value: T; } → TypeDef に type_params: ["T"] が格納される
+        let module = parse_typescript("interface Container<T> { value: T; }").unwrap();
+        let reg = build_registry(&module);
+        match reg.get("Container").unwrap() {
+            TypeDef::Struct {
+                type_params,
+                fields,
+                ..
+            } => {
+                assert_eq!(type_params.len(), 1);
+                assert_eq!(type_params[0].name, "T");
+                assert_eq!(type_params[0].constraint, None);
+                // フィールド value は型パラメータ T（Named("T")）
+                assert_eq!(fields.len(), 1);
+                assert_eq!(fields[0].0, "value");
+                assert!(
+                    matches!(&fields[0].1, RustType::Named { name, .. } if name == "T"),
+                    "expected Named(T), got {:?}",
+                    fields[0].1
+                );
+            }
+            other => panic!("expected Struct, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_generic_interface_constraint_stored_in_registry() {
+        // interface Processor<T extends Serializable> { ... }
+        // → type_params に constraint: Some(Named("Serializable")) が格納される
+        let module = parse_typescript(
+            "interface Serializable { serialize(): string; } \
+             interface Processor<T extends Serializable> { process(input: T): T; }",
+        )
+        .unwrap();
+        let reg = build_registry(&module);
+        match reg.get("Processor").unwrap() {
+            TypeDef::Struct { type_params, .. } => {
+                assert_eq!(type_params.len(), 1);
+                assert_eq!(type_params[0].name, "T");
+                assert_eq!(
+                    type_params[0].constraint,
+                    Some(RustType::Named {
+                        name: "Serializable".to_string(),
+                        type_args: vec![],
+                    })
+                );
+            }
+            other => panic!("expected Struct, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_instantiate_generic_type_substitutes_fields() {
+        // Container<T> { value: T } を instantiate("Container", [String]) →
+        // fields に value: String が入る
+        let module = parse_typescript("interface Container<T> { value: T; }").unwrap();
+        let reg = build_registry(&module);
+        let instantiated = reg
+            .instantiate("Container", &[RustType::String])
+            .expect("instantiate should succeed");
+        match instantiated {
+            TypeDef::Struct { fields, .. } => {
+                assert_eq!(fields.len(), 1);
+                assert_eq!(fields[0].0, "value");
+                assert_eq!(fields[0].1, RustType::String);
+            }
+            other => panic!("expected Struct, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_instantiate_non_generic_returns_original() {
+        // 型パラメータなしの型 → instantiate しても元の TypeDef が返る
+        let module = parse_typescript("interface Point { x: number; y: number; }").unwrap();
+        let reg = build_registry(&module);
+        let original = reg.get("Point").unwrap().clone();
+        let instantiated = reg
+            .instantiate("Point", &[RustType::String])
+            .expect("instantiate should succeed");
+        assert_eq!(instantiated, original);
+    }
+
+    #[test]
+    fn test_instantiate_arg_count_mismatch_returns_original() {
+        // 型引数の数が不一致 → 元の TypeDef が返る
+        let module = parse_typescript("interface Container<T> { value: T; }").unwrap();
+        let reg = build_registry(&module);
+        let original = reg.get("Container").unwrap().clone();
+        let instantiated = reg
+            .instantiate("Container", &[RustType::String, RustType::F64])
+            .expect("instantiate should succeed");
+        assert_eq!(instantiated, original);
     }
 }

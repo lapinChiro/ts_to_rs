@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use super::*;
 use crate::ir::{BinOp, Expr, MatchPattern, RustType, Stmt, UnOp};
 use crate::parser::parse_typescript;
-use crate::registry::{TypeDef, TypeRegistry};
+use crate::registry::{MethodSignature, TypeDef, TypeRegistry};
 use crate::transformer::TypeEnv;
 use swc_ecma_ast::{Decl, ModuleItem};
 
@@ -1840,6 +1840,7 @@ fn test_convert_switch_discriminated_union_to_enum_match() {
     reg.register(
         "Shape".to_string(),
         TypeDef::Enum {
+            type_params: vec![],
             variants: vec!["Circle".to_string(), "Square".to_string()],
             string_values,
             tag_field: Some("kind".to_string()),
@@ -1900,6 +1901,7 @@ fn build_shape_registry() -> TypeRegistry {
     reg.register(
         "Shape".to_string(),
         TypeDef::Enum {
+            type_params: vec![],
             variants: vec!["Circle".to_string(), "Square".to_string()],
             string_values,
             tag_field: Some("kind".to_string()),
@@ -2303,7 +2305,10 @@ fn test_convert_var_decl_trait_type_generates_box_dyn() {
     let mut methods = HashMap::new();
     methods.insert(
         "greet".to_string(),
-        vec![("msg".to_string(), RustType::String)],
+        MethodSignature {
+            params: vec![("msg".to_string(), RustType::String)],
+            return_type: None,
+        },
     );
     reg.register(
         "Greeter".to_string(),
@@ -2338,6 +2343,7 @@ fn test_convert_switch_case_propagates_discriminant_type_for_string_enum() {
     reg.register(
         "Direction".to_string(),
         TypeDef::Enum {
+            type_params: vec![],
             variants: vec!["Up".to_string(), "Down".to_string()],
             string_values: HashMap::from([
                 ("up".to_string(), "Up".to_string()),

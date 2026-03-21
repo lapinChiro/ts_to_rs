@@ -173,7 +173,7 @@ pub fn convert_fn_decl(
         combined
     };
 
-    let type_params = extract_type_params(fn_decl.function.type_params.as_deref());
+    let type_params = extract_type_params(fn_decl.function.type_params.as_deref(), reg);
 
     // If the function body contains `throw`, wrap return type in Result and returns in Ok()
     let has_throw = fn_decl
@@ -1209,7 +1209,7 @@ pub(crate) fn convert_var_decl_arrow_fns(
                     }
                 }
 
-                let type_params = extract_type_params(arrow.type_params.as_deref());
+                let type_params = extract_type_params(arrow.type_params.as_deref(), reg);
                 items.push(Item::Fn {
                     vis: vis.clone(),
                     attributes: vec![],

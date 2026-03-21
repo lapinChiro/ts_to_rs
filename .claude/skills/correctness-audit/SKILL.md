@@ -1,6 +1,7 @@
 ---
 name: correctness-audit
 description: 変換ロジックとテストの論理的正当性を徹底的に監査し、問題を PRD 化する。定期的な品質ゲートとして使用
+user-invocable: true
 ---
 
 # 変換正当性の監査

@@ -98,30 +98,73 @@ fn resolve_bin_expr_type(
     }
 }
 
-/// 関数呼び出しの戻り値型を解決する。
+/// 関数呼び出しまたはメソッド呼び出しの戻り値型を解決する。
 fn resolve_call_return_type(
     call: &ast::CallExpr,
     type_env: &TypeEnv,
     reg: &TypeRegistry,
 ) -> Option<RustType> {
-    // 関数名を取得
     let callee = call.callee.as_expr()?;
-    let fn_name = match callee.as_ref() {
-        ast::Expr::Ident(ident) => ident.sym.to_string(),
+    match callee.as_ref() {
+        ast::Expr::Ident(ident) => {
+            let fn_name = ident.sym.to_string();
+            // TypeEnv で Fn 型を探索
+            if let Some(RustType::Fn { return_type, .. }) = type_env.get(&fn_name) {
+                return Some(return_type.as_ref().clone());
+            }
+            // TypeRegistry で Function を探索
+            if let Some(TypeDef::Function { return_type, .. }) = reg.get(&fn_name) {
+                return Some(return_type.clone().unwrap_or(RustType::Unit));
+            }
+            None
+        }
+        ast::Expr::Member(member) => {
+            // メソッド呼び出し: オブジェクト型を解決 → メソッドの戻り値型を取得
+            let obj_type = resolve_expr_type(&member.obj, type_env, reg)?;
+            let method_name = match &member.prop {
+                ast::MemberProp::Ident(ident) => ident.sym.to_string(),
+                _ => return None,
+            };
+            resolve_method_return_type(&obj_type, &method_name, reg)
+        }
+        _ => None,
+    }
+}
+
+/// メソッドの戻り値型を TypeRegistry から解決する。
+///
+/// オブジェクト型（String, Vec, Named 等）に対応する TypeDef を探し、
+/// メソッドシグネチャの戻り値型を返す。
+/// ジェネリック型の場合、`type_args` を使ってインスタンス化した TypeDef から戻り値型を解決する。
+pub(super) fn resolve_method_return_type(
+    obj_type: &RustType,
+    method_name: &str,
+    reg: &TypeRegistry,
+) -> Option<RustType> {
+    // オブジェクト型に対応する TypeRegistry のキーと型引数を決定
+    let (type_name, type_args) = match obj_type {
+        RustType::String => ("String", &[] as &[RustType]),
+        RustType::Vec(_) => ("Vec", &[] as &[RustType]),
+        RustType::Named { name, type_args } => (name.as_str(), type_args.as_slice()),
+        RustType::Option(inner) => match inner.as_ref() {
+            RustType::Named { name, type_args } => (name.as_str(), type_args.as_slice()),
+            _ => return None,
+        },
         _ => return None,
     };
 
-    // TypeEnv で Fn 型を探索
-    if let Some(RustType::Fn { return_type, .. }) = type_env.get(&fn_name) {
-        return Some(return_type.as_ref().clone());
+    let type_def = if type_args.is_empty() {
+        reg.get(type_name)?.clone()
+    } else {
+        reg.instantiate(type_name, type_args)?
+    };
+    match &type_def {
+        TypeDef::Struct { methods, .. } => {
+            let sig = methods.get(method_name)?;
+            sig.return_type.clone()
+        }
+        _ => None,
     }
-
-    // TypeRegistry で Function を探索
-    if let Some(TypeDef::Function { return_type, .. }) = reg.get(&fn_name) {
-        return Some(return_type.clone().unwrap_or(RustType::Unit));
-    }
-
-    None
 }
 
 /// new 式の結果型を解決する。
@@ -140,15 +183,17 @@ fn resolve_new_expr_type(new_expr: &ast::NewExpr, reg: &TypeRegistry) -> Option<
 }
 
 /// Named 型のフィールド型を TypeRegistry から解決する。
+///
+/// ジェネリック型の場合、`type_args` を使ってインスタンス化した TypeDef からフィールド型を解決する。
 pub(super) fn resolve_field_type(
     obj_type: &RustType,
     prop: &ast::MemberProp,
     reg: &TypeRegistry,
 ) -> Option<RustType> {
-    let type_name = match obj_type {
-        RustType::Named { name, .. } => name,
+    let (type_name, type_args) = match obj_type {
+        RustType::Named { name, type_args } => (name.as_str(), type_args.as_slice()),
         RustType::Option(inner) => match inner.as_ref() {
-            RustType::Named { name, .. } => name,
+            RustType::Named { name, type_args } => (name.as_str(), type_args.as_slice()),
             _ => return None,
         },
         _ => return None,
@@ -157,8 +202,12 @@ pub(super) fn resolve_field_type(
         ast::MemberProp::Ident(ident) => ident.sym.to_string(),
         _ => return None,
     };
-    let type_def = reg.get(type_name)?;
-    match type_def {
+    let type_def = if type_args.is_empty() {
+        reg.get(type_name)?.clone()
+    } else {
+        reg.instantiate(type_name, type_args)?
+    };
+    match &type_def {
         TypeDef::Struct { fields, .. } => fields
             .iter()
             .find(|(name, _)| name == &field_name)
@@ -211,5 +260,179 @@ pub(super) fn convert_ts_as_expr(
             };
             convert_expr(&ts_as.expr, reg, &ctx, type_env)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ir::TypeParam;
+    use crate::registry::{MethodSignature, TypeRegistry};
+    use std::collections::HashMap;
+
+    /// TypeEnv にオブジェクト型を登録し、TypeRegistry にメソッドの戻り値型を登録して
+    /// resolve_expr_type が Call 式でメソッド戻り値型を返すことを検証する。
+    ///
+    /// テスト用の AST を手動構築するのは煩雑なため、registry のユニットテストと
+    /// E2E テストでカバーし、ここでは resolve_method_return_type の単体テストのみ行う。
+
+    #[test]
+    fn test_resolve_method_return_type_from_registry() {
+        // TypeRegistry に String メソッド trim() → String を登録
+        let mut reg = TypeRegistry::new();
+        let mut methods = HashMap::new();
+        methods.insert(
+            "trim".to_string(),
+            MethodSignature {
+                params: vec![],
+                return_type: Some(RustType::String),
+            },
+        );
+        reg.register(
+            "String".to_string(),
+            TypeDef::new_struct(vec![], methods, vec![]),
+        );
+
+        // String 型のオブジェクトの trim() は String を返す
+        let result = resolve_method_return_type(&RustType::String, "trim", &reg);
+        assert_eq!(result, Some(RustType::String));
+    }
+
+    #[test]
+    fn test_resolve_method_return_type_named_type() {
+        // Named 型のメソッド戻り値型解決
+        let mut reg = TypeRegistry::new();
+        let mut methods = HashMap::new();
+        methods.insert(
+            "json".to_string(),
+            MethodSignature {
+                params: vec![],
+                return_type: Some(RustType::Named {
+                    name: "Value".to_string(),
+                    type_args: vec![],
+                }),
+            },
+        );
+        reg.register(
+            "Response".to_string(),
+            TypeDef::new_struct(vec![], methods, vec![]),
+        );
+
+        let obj_type = RustType::Named {
+            name: "Response".to_string(),
+            type_args: vec![],
+        };
+        let result = resolve_method_return_type(&obj_type, "json", &reg);
+        assert_eq!(
+            result,
+            Some(RustType::Named {
+                name: "Value".to_string(),
+                type_args: vec![],
+            })
+        );
+    }
+
+    #[test]
+    fn test_resolve_method_return_type_unknown_method_returns_none() {
+        // 未知のメソッド → None（エラーにならない）
+        let reg = TypeRegistry::new();
+        let result = resolve_method_return_type(&RustType::String, "unknown", &reg);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_resolve_method_return_type_vec_builtin() {
+        // Vec 型のビルトインメソッドの戻り値型が解決できる
+        let mut reg = TypeRegistry::new();
+        let mut methods = HashMap::new();
+        methods.insert(
+            "len".to_string(),
+            MethodSignature {
+                params: vec![],
+                return_type: Some(RustType::F64),
+            },
+        );
+        reg.register(
+            "Vec".to_string(),
+            TypeDef::new_struct(vec![], methods, vec![]),
+        );
+
+        let obj_type = RustType::Vec(Box::new(RustType::F64));
+        let result = resolve_method_return_type(&obj_type, "len", &reg);
+        assert_eq!(result, Some(RustType::F64));
+    }
+
+    #[test]
+    fn test_resolve_field_type_generic_instantiation() {
+        // Container<T> { value: T } で Container<String>.value → String に解決される
+        let mut reg = TypeRegistry::new();
+        reg.register(
+            "Container".to_string(),
+            TypeDef::Struct {
+                type_params: vec![TypeParam {
+                    name: "T".to_string(),
+                    constraint: None,
+                }],
+                fields: vec![(
+                    "value".to_string(),
+                    RustType::Named {
+                        name: "T".to_string(),
+                        type_args: vec![],
+                    },
+                )],
+                methods: HashMap::new(),
+                extends: vec![],
+                is_interface: false,
+            },
+        );
+
+        let obj_type = RustType::Named {
+            name: "Container".to_string(),
+            type_args: vec![RustType::String],
+        };
+        // "value" プロパティの型解決用 AST ノードを作成
+        let prop = ast::MemberProp::Ident(ast::IdentName {
+            span: swc_common::DUMMY_SP,
+            sym: "value".into(),
+        });
+        let result = resolve_field_type(&obj_type, &prop, &reg);
+        assert_eq!(result, Some(RustType::String));
+    }
+
+    #[test]
+    fn test_resolve_method_return_type_generic_instantiation() {
+        // Container<T> { get(): T } で Container<String>.get() → String に解決される
+        let mut reg = TypeRegistry::new();
+        let mut methods = HashMap::new();
+        methods.insert(
+            "get".to_string(),
+            MethodSignature {
+                params: vec![],
+                return_type: Some(RustType::Named {
+                    name: "T".to_string(),
+                    type_args: vec![],
+                }),
+            },
+        );
+        reg.register(
+            "Container".to_string(),
+            TypeDef::Struct {
+                type_params: vec![TypeParam {
+                    name: "T".to_string(),
+                    constraint: None,
+                }],
+                fields: vec![],
+                methods,
+                extends: vec![],
+                is_interface: false,
+            },
+        );
+
+        let obj_type = RustType::Named {
+            name: "Container".to_string(),
+            type_args: vec![RustType::String],
+        };
+        let result = resolve_method_return_type(&obj_type, "get", &reg);
+        assert_eq!(result, Some(RustType::String));
     }
 }

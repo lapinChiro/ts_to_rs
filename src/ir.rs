@@ -3,6 +3,17 @@
 //! The IR sits between the SWC TypeScript AST and Rust source code generation.
 //! It models the subset of Rust constructs needed for Phase 1 of ts_to_rs.
 
+/// ジェネリック型パラメータ（名前 + オプショナルな制約）。
+///
+/// IR と TypeRegistry の両方で使用される。
+#[derive(Debug, Clone, PartialEq)]
+pub struct TypeParam {
+    /// 型パラメータ名（例: "T"）
+    pub name: String,
+    /// 制約（例: `T extends Foo` → `Some(Named("Foo"))`）
+    pub constraint: Option<RustType>,
+}
+
 /// Represents a Rust type.
 #[derive(Debug, Clone, PartialEq)]
 pub enum RustType {
@@ -80,6 +91,45 @@ impl RustType {
             } => params.iter().any(|p| p.uses_param(param)) || return_type.uses_param(param),
             RustType::DynTrait(name) => name == param,
             _ => false,
+        }
+    }
+
+    /// 型パラメータ名を具体型に置換する。
+    ///
+    /// `bindings` は型パラメータ名 → 具体型のマッピング。
+    /// `Named { name: "T" }` が `bindings` に存在すれば具体型に置換し、
+    /// それ以外のバリアントは再帰的に処理する。
+    pub fn substitute(&self, bindings: &std::collections::HashMap<String, RustType>) -> RustType {
+        match self {
+            RustType::Named { name, type_args } => {
+                if type_args.is_empty() {
+                    if let Some(concrete) = bindings.get(name.as_str()) {
+                        return concrete.clone();
+                    }
+                }
+                RustType::Named {
+                    name: name.clone(),
+                    type_args: type_args.iter().map(|a| a.substitute(bindings)).collect(),
+                }
+            }
+            RustType::Vec(inner) => RustType::Vec(Box::new(inner.substitute(bindings))),
+            RustType::Option(inner) => RustType::Option(Box::new(inner.substitute(bindings))),
+            RustType::Ref(inner) => RustType::Ref(Box::new(inner.substitute(bindings))),
+            RustType::Result { ok, err } => RustType::Result {
+                ok: Box::new(ok.substitute(bindings)),
+                err: Box::new(err.substitute(bindings)),
+            },
+            RustType::Tuple(elems) => {
+                RustType::Tuple(elems.iter().map(|e| e.substitute(bindings)).collect())
+            }
+            RustType::Fn {
+                params,
+                return_type,
+            } => RustType::Fn {
+                params: params.iter().map(|p| p.substitute(bindings)).collect(),
+                return_type: Box::new(return_type.substitute(bindings)),
+            },
+            other => other.clone(),
         }
     }
 }
@@ -218,8 +268,8 @@ pub enum Item {
         vis: Visibility,
         /// Struct name
         name: String,
-        /// Generic type parameters (e.g., `["T", "U"]`)
-        type_params: Vec<String>,
+        /// Generic type parameters
+        type_params: Vec<TypeParam>,
         /// Named fields
         fields: Vec<StructField>,
     },
@@ -240,6 +290,8 @@ pub enum Item {
         vis: Visibility,
         /// Trait name (e.g., `AnimalTrait`)
         name: String,
+        /// Generic type parameters
+        type_params: Vec<TypeParam>,
         /// Supertrait bounds (e.g., `["Animal", "Debug"]` → `trait Dog: Animal + Debug`)
         supertraits: Vec<String>,
         /// Method signatures (body is empty — signatures only)
@@ -265,7 +317,7 @@ pub enum Item {
         /// Alias name
         name: String,
         /// Generic type parameters (e.g., `["T", "U"]`)
-        type_params: Vec<String>,
+        type_params: Vec<TypeParam>,
         /// The aliased type
         ty: RustType,
     },
@@ -279,8 +331,8 @@ pub enum Item {
         is_async: bool,
         /// Function name
         name: String,
-        /// Generic type parameters (e.g., `["T", "U"]`)
-        type_params: Vec<String>,
+        /// Generic type parameters
+        type_params: Vec<TypeParam>,
         /// Parameters
         params: Vec<Param>,
         /// Return type (`None` means `()`)
@@ -1127,5 +1179,78 @@ mod tests {
         assert!(BinOp::Shr.precedence() > BinOp::BitAnd.precedence());
         assert!(BinOp::BitAnd.precedence() > BinOp::BitXor.precedence());
         assert!(BinOp::BitXor.precedence() > BinOp::BitOr.precedence());
+    }
+
+    // --- I-100: RustType::substitute ---
+
+    #[test]
+    fn test_substitute_type_param_to_concrete() {
+        // Named("T") に T→String → RustType::String
+        use std::collections::HashMap;
+        let ty = RustType::Named {
+            name: "T".to_string(),
+            type_args: vec![],
+        };
+        let bindings = HashMap::from([("T".to_string(), RustType::String)]);
+        assert_eq!(ty.substitute(&bindings), RustType::String);
+    }
+
+    #[test]
+    fn test_substitute_vec_recursive() {
+        // Vec<T> に T→F64 → Vec<F64>
+        use std::collections::HashMap;
+        let ty = RustType::Vec(Box::new(RustType::Named {
+            name: "T".to_string(),
+            type_args: vec![],
+        }));
+        let bindings = HashMap::from([("T".to_string(), RustType::F64)]);
+        assert_eq!(
+            ty.substitute(&bindings),
+            RustType::Vec(Box::new(RustType::F64))
+        );
+    }
+
+    #[test]
+    fn test_substitute_option_recursive() {
+        // Option<Vec<T>> に T→String → Option<Vec<String>>
+        use std::collections::HashMap;
+        let ty = RustType::Option(Box::new(RustType::Vec(Box::new(RustType::Named {
+            name: "T".to_string(),
+            type_args: vec![],
+        }))));
+        let bindings = HashMap::from([("T".to_string(), RustType::String)]);
+        assert_eq!(
+            ty.substitute(&bindings),
+            RustType::Option(Box::new(RustType::Vec(Box::new(RustType::String))))
+        );
+    }
+
+    #[test]
+    fn test_substitute_unrelated_type_unchanged() {
+        // RustType::Bool に T→String → Bool（変化なし）
+        use std::collections::HashMap;
+        let bindings = HashMap::from([("T".to_string(), RustType::String)]);
+        assert_eq!(RustType::Bool.substitute(&bindings), RustType::Bool);
+    }
+
+    #[test]
+    fn test_substitute_named_type_args() {
+        // Container<T> に T→String → Container<String>
+        use std::collections::HashMap;
+        let ty = RustType::Named {
+            name: "Container".to_string(),
+            type_args: vec![RustType::Named {
+                name: "T".to_string(),
+                type_args: vec![],
+            }],
+        };
+        let bindings = HashMap::from([("T".to_string(), RustType::String)]);
+        assert_eq!(
+            ty.substitute(&bindings),
+            RustType::Named {
+                name: "Container".to_string(),
+                type_args: vec![RustType::String],
+            }
+        );
     }
 }

@@ -1,7 +1,7 @@
 use super::*;
 use crate::ir::{BinOp, MatchPattern, UnOp};
 use crate::parser::parse_typescript;
-use crate::registry::{TypeDef, TypeRegistry};
+use crate::registry::{MethodSignature, TypeDef, TypeRegistry};
 use crate::transformer::TypeEnv;
 use swc_ecma_ast::{Decl, ModuleItem, Stmt};
 
@@ -1080,6 +1080,7 @@ fn test_convert_expr_member_enum_access_from_registry() {
     reg.register(
         "Color".to_string(),
         TypeDef::Enum {
+            type_params: vec![],
             variants: vec!["Red".to_string(), "Green".to_string(), "Blue".to_string()],
             string_values: std::collections::HashMap::new(),
             tag_field: None,
@@ -4776,6 +4777,7 @@ fn test_convert_lit_string_to_enum_variant_when_expected_is_string_literal_union
     reg.register(
         "Direction".to_string(),
         TypeDef::Enum {
+            type_params: vec![],
             variants: vec!["Up".to_string(), "Down".to_string()],
             string_values,
             tag_field: None,
@@ -4806,6 +4808,7 @@ fn test_convert_lit_string_no_match_falls_back_to_string_lit() {
     reg.register(
         "Direction".to_string(),
         TypeDef::Enum {
+            type_params: vec![],
             variants: vec!["Up".to_string()],
             string_values,
             tag_field: None,
@@ -4837,6 +4840,7 @@ fn test_convert_bin_expr_enum_var_eq_string_literal_converts_rhs() {
     reg.register(
         "Direction".to_string(),
         TypeDef::Enum {
+            type_params: vec![],
             variants: vec!["Up".to_string(), "Down".to_string()],
             string_values,
             tag_field: None,
@@ -4873,6 +4877,7 @@ fn test_convert_bin_expr_string_literal_ne_enum_var_converts_lhs() {
     reg.register(
         "Direction".to_string(),
         TypeDef::Enum {
+            type_params: vec![],
             variants: vec!["Up".to_string()],
             string_values,
             tag_field: None,
@@ -4910,6 +4915,7 @@ fn test_convert_call_args_string_literal_to_enum_variant() {
     reg.register(
         "Direction".to_string(),
         TypeDef::Enum {
+            type_params: vec![],
             variants: vec!["Up".to_string(), "Down".to_string()],
             string_values,
             tag_field: None,
@@ -4962,6 +4968,7 @@ fn test_convert_object_lit_discriminated_union_to_enum_variant() {
     reg.register(
         "Shape".to_string(),
         TypeDef::Enum {
+            type_params: vec![],
             variants: vec!["Circle".to_string(), "Square".to_string()],
             string_values,
             tag_field: Some("kind".to_string()),
@@ -5001,6 +5008,7 @@ fn test_convert_object_lit_discriminated_union_unit_variant() {
     reg.register(
         "Status".to_string(),
         TypeDef::Enum {
+            type_params: vec![],
             variants: vec!["Active".to_string()],
             string_values,
             tag_field: Some("type".to_string()),
@@ -5037,6 +5045,7 @@ fn test_convert_member_expr_discriminant_field_to_method_call() {
     reg.register(
         "Shape".to_string(),
         TypeDef::Enum {
+            type_params: vec![],
             variants: vec!["Circle".to_string()],
             string_values,
             tag_field: Some("kind".to_string()),
@@ -5242,7 +5251,10 @@ fn test_convert_method_call_string_arg_gets_to_string_with_registry() {
     let mut methods = std::collections::HashMap::new();
     methods.insert(
         "greet".to_string(),
-        vec![("name".to_string(), RustType::String)],
+        MethodSignature {
+            params: vec![("name".to_string(), RustType::String)],
+            return_type: None,
+        },
     );
     reg.register(
         "Greeter".to_string(),
@@ -5295,6 +5307,7 @@ fn build_shape_registry_for_expr() -> TypeRegistry {
     reg.register(
         "Shape".to_string(),
         TypeDef::Enum {
+            type_params: vec![],
             variants: vec!["Circle".to_string(), "Square".to_string()],
             string_values,
             tag_field: Some("kind".to_string()),
@@ -7229,7 +7242,10 @@ fn test_convert_opt_chain_method_call_propagates_param_types() {
     let mut methods = std::collections::HashMap::new();
     methods.insert(
         "greet".to_string(),
-        vec![("name".to_string(), RustType::String)],
+        MethodSignature {
+            params: vec![("name".to_string(), RustType::String)],
+            return_type: None,
+        },
     );
     reg.register(
         "Greeter".to_string(),

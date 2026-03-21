@@ -114,7 +114,7 @@ pub(super) fn convert_call_expr(
                 // Cat A: method receiver — converted before method resolution
                 let object = convert_expr(&member.obj, reg, &ExprContext::none(), type_env)?;
                 // Look up method parameter types from the object's type
-                let method_params = resolve_expr_type(&member.obj, type_env, reg).and_then(|ty| {
+                let method_sig = resolve_expr_type(&member.obj, type_env, reg).and_then(|ty| {
                     if let RustType::Named { name, .. } = &ty {
                         if let Some(TypeDef::Struct { methods, .. }) = reg.get(name) {
                             return methods.get(&method).cloned();
@@ -122,13 +122,9 @@ pub(super) fn convert_call_expr(
                     }
                     None
                 });
-                let args = convert_call_args_with_types(
-                    &call.args,
-                    reg,
-                    method_params.as_deref(),
-                    false,
-                    type_env,
-                )?;
+                let method_params = method_sig.as_ref().map(|sig| sig.params.as_slice());
+                let args =
+                    convert_call_args_with_types(&call.args, reg, method_params, false, type_env)?;
                 let method_call = map_method_call(object, &method, args);
                 Ok(method_call)
             }

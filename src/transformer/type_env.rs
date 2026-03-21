@@ -118,12 +118,18 @@ impl TypeEnv {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::registry::TypeDef;
+    use crate::registry::{MethodSignature, TypeDef};
 
     fn make_trait_registry() -> TypeRegistry {
         let mut reg = TypeRegistry::new();
         let mut methods = HashMap::new();
-        methods.insert("greet".to_string(), vec![]);
+        methods.insert(
+            "greet".to_string(),
+            MethodSignature {
+                params: vec![],
+                return_type: None,
+            },
+        );
         reg.register(
             "Greeter".to_string(),
             TypeDef::new_interface(vec![], methods, vec![]),

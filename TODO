@@ -30,6 +30,8 @@
 - **Trait パラメータ型**: `&dyn Trait` / `Box<dyn Trait>` 変換 + 呼び出し側型強制（`&*` / `Box::new()`）
 - **resolve-types**: `ts_to_rs resolve-types --tsconfig ...` サブコマンド実装済み
 - **型 narrowing**: typeof/instanceof/null-check/truthy → `if let` パターン生成。any 型 → enum 自動生成。typeof "object"/"function" バリアント解決。複合条件 (&&) のネスト if let。三項演算子の `Expr::IfLet`。switch (typeof x) の match 変換。楽観的 `true` フォールバックは `todo!()` に置換済み
+- **チェーンメソッド型追跡**: `MethodSignature`（パラメータ + 戻り値型）を TypeRegistry に格納。`resolve_method_return_type` でメソッド呼び出しの戻り値型を解決。ユーザー定義型・外部型のチェーンメソッドで動作。ビルトイン String/Array は I-211（ECMAScript 標準型追加）待ち
+- **ジェネリクス基盤**: `TypeParam`（名前 + 制約）を IR に定義。`TypeDef::Struct`/`Enum` に `type_params` 格納。`RustType::substitute` で型パラメータの具体型置換。`TypeRegistry::instantiate` でジェネリック型のインスタンス化。`resolve_field_type`/`resolve_method_return_type` で `type_args` を使った具体型解決。`Item::Struct`/`Trait`/`Fn`/`TypeAlias` の型パラメータに制約（`T: Bound`）を出力
 
 ---
 
@@ -41,7 +43,8 @@
 | **完了: Web API ビルトイン型** | ~~I-24~~ **達成** | tsc 統合 + ビルトイン型埋め込み + resolve-types |
 | **完了: E2E I/O テスト基盤** | ~~I-49/I-50~~ **達成** | fs/process.env/stdin + E2E テスト基盤 |
 | **完了: Interface → Trait** | ~~I-137/I-127~~ **達成** | interface 3 分類 + extends + 交差型 |
-| **次: コンパイル可能性の向上** | コンパイルクリーン率 > 40% | I-61（チェーンメソッド）、I-100（ジェネリクス）。「変換成功かつコンパイル成功」のファイル数を主指標 |
+| **完了: コンパイル可能性の基盤** | ~~I-61/I-100~~ **達成** | チェーンメソッド型追跡 + ジェネリクス基盤 |
+| **次: 変換率の大幅改善** | エラーインスタンス < 50 件 | I-112c（74 件、全エラーの 55.6%）が最大のレバレッジ。I-218（ジェネリクス残課題）、I-211（ビルトイン型）で基盤強化 |
 | **その次: テスト拡充** | コンパイルクリーン率 > 50% | E2E テストの拡充（I-20, I-71, I-72, I-74）、HTTP 対応（I-183） |
 
 ---
@@ -65,19 +68,30 @@
   - 解決策: default を常に最後のアームに移動する
   - 発生頻度は極めて低いが、サイレント意味変更カテゴリのため Tier 1
 
-#### 型変換・型推論
+#### 型変換・型推論（レバレッジ最大）
 
-- **[I-61]** **型推論: チェーンメソッド呼び出しの戻り値型追跡** — PRD 化済み → `backlog/i61-chain-method-type-tracking.md`
-- **[I-100]** **ジェネリック型の基盤 + 具体化** — PRD 化済み → `backlog/i100-generics-foundation.md`
-  - 🔗 I-58（Trait の type_params）を統合
+- **[I-112c]** **型注釈なし変数のオブジェクトリテラル** — **74 インスタンス**（全 133 エラーの 55.6%）
+  - `const obj = { key: value }` のように型注釈がないオブジェクトリテラルで、struct 名が推定できずエラーになる
+  - エラーメッセージ: `object literal requires a type annotation to determine struct name`
+  - Hono の最大のエラーカテゴリ。解消すれば変換成功率が大幅に改善する
+  - 解決策: 代入先の型、関数引数の型、return 文の戻り値型などから struct 名を推定する。推定できない場合は匿名構造体（タプル struct or インライン定義）を検討
+- **[I-218]** **ジェネリクス基盤の残課題** — I-100 で構築した基盤の未対応箇所
+  - `collect_class_info`（`src/registry.rs:482`）が class の `type_params` を収集しない。`class Foo<T> { value: T }` の TypeDef に type_params が格納されず、`instantiate` が効かない。`class.class.type_params` から `collect_type_params` で収集すべき
+  - `Item::Impl`（`src/ir.rs:303`）に `type_params` がない。`impl<T> Container<T>` のような generic impl が生成できず `impl Container` になる。ジェネリック struct の impl ブロック全てに影響
+  - `substitute_types`（`src/registry.rs:114`）が `TypeDef::Enum` の `variant_fields` を代入しない（`clone()` のみ）。ジェネリック discriminated union で型パラメータが具体化されない
+  - type alias の registry 登録時（`src/registry.rs` の `collect_decl` 内 `TsTypeAlias` 分岐）に `type_params` を収集していない。`type Pair<A,B> = { ... }` が非ジェネリックとして登録される
 
 #### ビルトイン型
 
 - **[I-211]** **ECMAScript 標準組み込み型の追加** — ビルトイン型定義
   - `builtin_types.json` は `lib.dom.d.ts`（Web API）のみから抽出。`lib.es5.d.ts`, `lib.es2015.d.ts` 等の ECMAScript 標準型を含んでいない
-  - 不足: `Date`, `Error`, `RegExp`, `Map`, `Set`, `WeakMap`, `WeakSet`, `Symbol`, `Intl` 等
+  - 不足: `String`, `Array`, `Date`, `Error`, `RegExp`, `Map`, `Set`, `WeakMap`, `WeakSet`, `Symbol`, `Intl` 等
   - instanceof on これらの型が enum バリアント `Date(Date)` を生成するが struct が未定義でコンパイルエラー
   - `tools/extract-types/` の抽出スクリプトの対象ライブラリを拡大すれば解決
+  - **I-61 との関連**: `MethodSignature`（戻り値型付き）と `resolve_method_return_type` は実装済みだが、TypeRegistry に `String`/`Array` が未登録のため、ビルトインメソッドのチェーン型追跡が機能しない。本項目で追加すれば自動的に解決する。追加後の検証:
+    1. `"hello".trim().split(" ")` で `split` のレシーバ型が `String` と解決される
+    2. `[1,2,3].map(...).filter(...)` で `filter` のレシーバ型が `Vec<f64>` と解決される
+    3. E2E テスト `method_chain.ts` に配列チェーンのテストケースを追加する（I-217 の解消も前提）
 
 #### import/export
 
@@ -116,10 +130,17 @@
 
 #### 型変換・型推論
 
+- **[I-101]** **ジェネリック型を含む intersection** — 型変換
+  - `interface A<T> extends B<T>, C<T>` のようなジェネリック intersection が未対応
+  - I-100（ジェネリクス基盤）完了により `TypeRegistry::instantiate` と `TypeParam` が利用可能。intersection 変換（`try_convert_intersection_type`）と統合すればよい
+  - 🔗 I-218（ジェネリクス残課題）の一部（class type_params）が先行すると実装が容易
+- **[I-181]** **call signature のジェネリック型パラメータ** — 型変換
+  - `interface Fn<T> { (arg: T): T }` のような call signature のジェネリクス
+  - `convert_interface_as_fn_type` は既に `type_params: Vec<TypeParam>` を受け取るが、制約の伝搬が未検証
+  - I-100 完了により基盤は整備済み
 - **[I-194]** **typeof 未登録識別子の解決** — 型変換（**3 インスタンス**: `typeof fetch` ×2, `typeof WebSocket` ×1）
   - TypeRegistry に `fetch`/`WebSocket` が未登録のため `TsTypeQuery` が失敗
 - **[I-93]** **ネストしたフィールド/メソッド経由の変更検出** — ミュータビリティ推論
-- **[I-112c]** **型注釈なし変数のオブジェクトリテラル** — Hono 2 ファイルに影響
 - **[I-62]** **`is_string_type` の `Option<String>` ハック除去** — 型推論
 - **[I-11]** **三項演算子の分岐型不一致** — 式変換正確性
 - **[I-12]** **`Promise<T>` の union 内展開** — 型変換正確性
@@ -128,6 +149,11 @@
 
 #### コンパイル正確性
 
+- **[I-217]** **`filter` クロージャの参照型ミスマッチ** — コンパイルエラー
+  - `arr.filter(|x| x > 4.0)` で `x` が `&f64` だが `4.0` は `f64`。`*x > 4.0` が正しい
+  - `iter().cloned().filter()` パターンでは問題ないが、`.iter().filter()` では `&T` が渡される
+  - 現在の変換は `nums.map(...).collect::<Vec<_>>().iter().cloned().filter(...)` のように `.cloned()` を挿入するが、一部のパスで `.filter()` の引数が参照を考慮していない
+  - E2E テスト `method_chain.ts` でこの問題のため配列チェーン（`map → filter`）のテストケースを除外している。解消後に `method_chain.ts` に `nums.map(...).filter(...)` パターンを追加すること
 - **[I-212]** **同一 union 型の enum 重複定義** — コンパイルエラー
   - 同一ファイル内の複数関数が同じ union 型（例: `string | number`）を使用すると、`StringOrF64` enum が関数ごとに重複生成される
   - `#[derive]` の `conflicting implementations of trait PartialEq` コンパイルエラー
@@ -145,6 +171,20 @@
   - `serde_json::Value` → `LocalAnyDataType` の代入が型不一致
   - `LocalAnyDataType::Other(input)` への自動変換が必要
   - コンパイルテスト `any-type-narrowing` のスキップ原因
+
+#### 未対応型（ベンチマークで検出）
+
+- **[I-219]** **conditional type (`T extends U ? X : Y`)** — **5 インスタンス**
+  - `type IsString<T> = T extends string ? "yes" : "no"` のような conditional type が未対応
+  - エラーメッセージ: `unsupported type alias body: Discriminant(15)`
+  - Rust では trait の associated type + specialization で部分的に表現可能だが、完全な対応は困難
+- **[I-220]** **infer type (`infer R`)** — **4 インスタンス**
+  - `type ReturnType<T> = T extends (...args: any[]) => infer R ? R : never` のような infer type が未対応
+  - エラーメッセージ: `unsupported type alias body: Discriminant(16)`
+  - conditional type（I-219）の前提
+- **[I-221]** **unsupported intersection member type** — **8 インスタンス**
+  - intersection の一部メンバー型が未対応（`try_convert_intersection_type` で処理できない型）
+  - 🔗 I-101（ジェネリック intersection）と関連するが、ジェネリクスに限らず intersection の一般的な制限
 
 #### セマンティクス正確性
 
@@ -179,7 +219,7 @@
 
 ### Tier 3: 低優先度 — 孤立した問題・コード品質
 
-- **[I-192]** **大規模ファイルの分割** — `statements/mod.rs`（2800+ 行）、`types/mod.rs`（2259 行）等
+- **[I-192]** **大規模ファイルの分割** — `statements/mod.rs`（3069 行）、`types/mod.rs`（2513 行）等
 - **[I-193]** **API 表面積の最小化** — `pub fn` → `pub(crate) fn`
 - **[I-191]** **README.md の記述内容の見直し**
 - **[I-99]** **`collect_du_field_accesses_from_expr` の AST ノード網羅性改善**
@@ -187,8 +227,8 @@
 - **[I-27]** **タプルの optional 要素**
 - **[I-29]** **ネスト async 関数**
 - **[I-33]** **非プリミティブ type assertion のコメント保持**
-- **[I-34]** **Math.random() → `rand` クレート** — 🔗 I-30 が前提
-- **[I-35]** **indexed access type の非文字列キー対応** — **5 インスタンス**。🔗 I-32 を unblock
+- **[I-34]** **Math.random() → `rand` クレート** — 🔗 I-30（Cargo.toml 依存追加）が前提
+- **[I-35]** **indexed access type の非文字列キー対応** — **3 インスタンス**（非文字列キー）+ **2 インスタンス**（非対応ベース型）
 - **[I-36]** **qualified type name (`A.B` 形式)** — **3 インスタンス**
 - **[I-59]** **Pick/Omit のネストしたユーティリティ型未対応**
 - **[I-105]** **デコレータ付き TsParamProp**
@@ -196,15 +236,15 @@
 - **[I-148]** **for...of デストラクチャリングの残存パターン** — **1 インスタンス**
 - **[I-138]** **タグ付きテンプレートリテラル** — **1 インスタンス**
 - **[I-139]** **関数型パラメータパターン** — **3 インスタンス**
-- **[I-151]** **代入ターゲットパターン** — **3 インスタンス**
+- **[I-151]** **代入ターゲットパターン** — **2 インスタンス**
 - **[I-154]** **カンマ式 (`SeqExpr`)** — **1 インスタンス**
 - **[I-155]** **`satisfies` 式** — **1 インスタンス**
 - **[I-156]** **オブジェクトリテラルのゲッター/メソッド記法** — **1 インスタンス**
 - **[I-126]** **計算プロパティアクセス残存** — **3 インスタンス**
-- **[I-197]** **template literal type** — **5 インスタンス**
-- **[I-198]** **ビット否定・void・delete 演算子**
+- **[I-197]** **template literal type** — ベンチマークでは直接検出されず。conditional type（I-219）として報告されている可能性
+- **[I-198]** **ビット否定・void・delete 演算子** — delete は **1 インスタンス**
 - **[I-199]** **型の構造的一致による推論**
-- **[I-200]** **マップ型 (`{ [K in keyof T]: V }`)** — **4 インスタンス**
+- **[I-200]** **マップ型 (`{ [K in keyof T]: V }`)** — **3 インスタンス**
 
 ---
 
@@ -212,9 +252,7 @@
 
 ### 前提タスクの完了待ち
 
-- **[I-32]** **コンパイルテストのスキップ解消（残り 5 件）** — indexed-access-type（I-35）、trait-coercion（I-201）、union-fallback（I-202）、any-type-narrowing（I-209）、type-narrowing（I-212）
-- **[I-101]** **ジェネリック型を含む intersection** — I-100（ジェネリクス基盤）の解消が前提
-- **[I-181]** **call signature のジェネリック型パラメータ** — I-100 の解消が前提
+- **[I-32]** **コンパイルテストのスキップ解消（残り 5 件）** — indexed-access-type（I-35）、trait-coercion（I-201）、union-fallback（I-202）、any-type-narrowing（I-209）、type-narrowing（I-212）。各原因の修正が前提
 - **[I-183]** **HTTP E2E テスト基盤 + fetch 変換** — I-30（Cargo.toml 依存追加）の解消が前提
 
 ---

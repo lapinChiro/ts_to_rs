@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
 use super::*;
-use crate::ir::{BinOp, Expr, Item, Param, RustType, Stmt, StructField, Visibility};
+use crate::ir::{BinOp, Expr, Item, Param, RustType, Stmt, StructField, TypeParam, Visibility};
 use crate::parser::parse_typescript;
-use crate::registry::{TypeDef, TypeRegistry};
+use crate::registry::{MethodSignature, TypeDef, TypeRegistry};
 use swc_ecma_ast::{Decl, ModuleItem};
 
 /// Helper: parse TS source and extract the first FnDecl.
@@ -123,7 +123,13 @@ fn test_convert_fn_decl_generic_single_param() {
     let item = items.last().unwrap().clone();
     match item {
         Item::Fn { type_params, .. } => {
-            assert_eq!(type_params, vec!["T".to_string()]);
+            assert_eq!(
+                type_params,
+                vec![TypeParam {
+                    name: "T".to_string(),
+                    constraint: None
+                }]
+            );
         }
         _ => panic!("expected Item::Fn"),
     }
@@ -138,7 +144,19 @@ fn test_convert_fn_decl_generic_multiple_params() {
     let item = items.last().unwrap().clone();
     match item {
         Item::Fn { type_params, .. } => {
-            assert_eq!(type_params, vec!["A".to_string(), "B".to_string()]);
+            assert_eq!(
+                type_params,
+                vec![
+                    TypeParam {
+                        name: "A".to_string(),
+                        constraint: None
+                    },
+                    TypeParam {
+                        name: "B".to_string(),
+                        constraint: None
+                    },
+                ]
+            );
         }
         _ => panic!("expected Item::Fn"),
     }
@@ -961,7 +979,10 @@ fn reg_with_trait(name: &str) -> TypeRegistry {
     let mut methods = HashMap::new();
     methods.insert(
         "greet".to_string(),
-        vec![("msg".to_string(), RustType::String)],
+        MethodSignature {
+            params: vec![("msg".to_string(), RustType::String)],
+            return_type: None,
+        },
     );
     reg.register(
         name.to_string(),

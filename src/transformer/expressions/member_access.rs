@@ -158,7 +158,7 @@ pub(super) fn convert_opt_chain_expr(
                 Some(ty) => Some(ty),
                 None => None,
             };
-            let method_params = inner_type.and_then(|ty| {
+            let method_sig = inner_type.and_then(|ty| {
                 if let RustType::Named { name, .. } = ty {
                     if let Some(TypeDef::Struct { methods, .. }) = reg.get(name) {
                         return methods.get(&method);
@@ -172,8 +172,8 @@ pub(super) fn convert_opt_chain_expr(
                 .iter()
                 .enumerate()
                 .map(|(i, arg)| {
-                    let ctx = method_params
-                        .and_then(|params| params.get(i))
+                    let ctx = method_sig
+                        .and_then(|sig| sig.params.get(i))
                         .map(|(_, ty)| ExprContext::with_expected(ty))
                         // Cat C: method param type propagated when available
                         .unwrap_or_else(ExprContext::none);
