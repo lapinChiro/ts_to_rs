@@ -78,11 +78,14 @@ pub fn convert_expr(
     type_env: &TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Expr> {
-    // FileTypeResolution の expected_type を優先し、なければ ExprContext のものを使う
-    let expected = tctx
-        .type_resolution
-        .expected_type(Span::from_swc(expr.span()))
-        .or(ctx.expected);
+    // ExprContext が明示的に expected を持つ場合はそれを優先する。
+    // これにより Option<T> の unwrap 再帰時に ctx.expected = T が使われ、
+    // tctx.type_resolution.expected_type が返す Option<T> で無限ループしない。
+    // ExprContext が None の場合のみ FileTypeResolution を参照する。
+    let expected = ctx.expected.or_else(|| {
+        tctx.type_resolution
+            .expected_type(Span::from_swc(expr.span()))
+    });
     // Option<T> expected: handle null/undefined → None, literals → Some(lit)
     if let Some(RustType::Option(inner)) = expected {
         // null / undefined → None

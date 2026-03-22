@@ -13,14 +13,20 @@
 9. Hono ベンチマーク結果が改善している
 10. pub な型・関数に doc コメントがある
 
-## 前提状況
+## 現在の状況（Phase B 完了時点）
 
-- `transpile_pipeline()` は現在ブリッジ実装（`transpile_collecting_with_registry` に委譲）
-- `TranspileOutput` に `module_graph` / `synthetic_items` フィールドが未追加
-- `TypeCollector::collect()` / `AnyTypeAnalyzer::analyze()` は独立 struct として存在しない。型収集は `build_registry()` で行う
-- `generate_any_enum` は Transformer 内で直接呼ばれ、SyntheticTypeRegistry 経由ではない
+- `transpile_pipeline()` は全コンポーネント接続の本実装（Phase A で置換済み）
+- `TranspileOutput` に `module_graph` + `synthetic_items` フィールド追加済み
+- `FileOutput.unsupported` は `UnsupportedSyntaxError` 型（パイプライン内部型に統一）
+- `transpile_single()` 簡易 API 追加済み
+- lib.rs の全公開 API が統一パイプライン経由（Phase B で置換済み）
+- per-file synthetic は items に prepend（旧 API 互換）+ `TranspileOutput.synthetic_items` にも蓄積（OutputWriter 用）
+- **expected_type 優先順位**: ExprContext 優先、FileTypeResolution フォールバック（Phase B で修正。逆にすると Option<T> unwrap 再帰で無限ループ）
+- **TypeResolver の Promise unwrap**: `unwrap_promise_and_unit()` ヘルパーで全 4 箇所（fn_decl, class method, arrow, fn_expr）で適用済み
+- main.rs はまだ旧パイプライン（`transpile_with_registry` 等を直接呼ぶ）。ただし内部的には統一パイプライン経由
 - ExprContext / TypeEnv narrowing / resolve_expr_type_heuristic は P6 でフォールバックとして併存中
 - tctx + reg 二重パラメータが 105 関数に存在
+- `generate_any_enum` は Transformer 内で直接呼ばれ、SyntheticTypeRegistry 経由ではない
 
 ## タスク一覧
 
@@ -51,28 +57,41 @@
 
 **具体的な修正**: `transpile_pipeline()` の Pass 4-5 で `file_synthetic.into_items()` を `items` に prepend する。`synthetic.merge(file_synthetic)` も維持し、`TranspileOutput.synthetic_items` にも入れる（OutputWriter 用）。
 
-- [ ] **B1**: `transpile_pipeline()` で per-file synthetic を items に含める修正
-- [ ] **B2**: `transpile()` を `transpile_single()` 経由に置換
-- [ ] **B3**: `transpile_collecting()` を統一パイプライン経由に置換
-- [ ] **B4**: 他の公開 API（`transpile_with_registry` 等）を統一パイプライン経由に置換
-- [ ] **B-verify**: 全スナップショットテスト + E2E テストが GREEN
+- [x] **B1**: `transpile_pipeline()` で per-file synthetic を items に含める修正
+- [x] **B2-B4**: lib.rs の全公開 API を統一パイプライン経由に置換
+  - `transpile()` → unsupported 検出でエラー（strict mode）
+  - `transpile_with_registry()` / `transpile_with_registry_and_path()` → 同上
+  - `transpile_collecting()` / `transpile_collecting_with_registry()` / `transpile_collecting_with_registry_and_path()` → unsupported 収集
+  - **修正した重大バグ**: C3 で `tctx.type_resolution.expected_type` を優先していたため、Option<T> unwrap 再帰で無限ループ。`ctx.expected` を優先し FileTypeResolution をフォールバックに変更
+  - **修正した重大バグ**: TypeResolver が `Promise<T>` を unwrap せずに expected_type に登録していた。`unwrap_promise_and_unit()` ヘルパーを追加し全 4 箇所で適用
+- [x] **B-verify**: 全テスト GREEN（lib 1092 + CLI 3 + compile 2 + doc 2 + E2E 60 + integration 69）、clippy 0
 
 ### Phase C: main.rs 統一
 
-- [ ] **C1**: 単一ファイルモードを統一パイプライン経由に置換
-- [ ] **C2**: ディレクトリモードを統一パイプライン + OutputWriter 経由に置換
-- [ ] **C-verify**: Hono ベンチマーク実行、結果確認
+**注意**: main.rs は現在 `transpile_with_registry` / `transpile_with_registry_and_path` を呼んでおり、これらは Phase B で統一パイプライン経由に変更済み。したがって main.rs は **既に間接的に統一パイプラインを使っている**。Phase C の本質は main.rs のコードを直接 `TranspileInput` / `transpile_pipeline` / `OutputWriter` を使うようにリファクタリングし、旧 API への依存を断ち切ること。
+
+- [ ] **C1**: 単一ファイルモード（`src/main.rs:268`）を `transpile_pipeline` + unsupported チェックに置換。`transpile_with_registry` を介さず直接 `TranspileInput` を構築
+- [ ] **C2**: ディレクトリモード（`src/main.rs:295-377`）を `transpile_pipeline` + `OutputWriter::write_to_directory` に置換。`transpile_directory_common` / `transpile_with_registry_and_path` のループを `transpile_pipeline` の1回呼び出しに集約。mod.rs 生成を `OutputWriter.generate_mod_rs` に委譲
+- [ ] **C3**: collecting モード（`src/main.rs:69-75`）も `transpile_pipeline` 経由に置換
+- [ ] **C-verify**: Hono ベンチマーク実行、結果確認。全テスト GREEN
 
 ### Phase D: 不要コード削除
 
-- [ ] **D1**: P1 ブリッジ実装の残骸を削除（旧 `transpile_pipeline` のコメント等）
-- [ ] **D2**: `convert_relative_path_to_crate_path` の使用箇所確認と削除
-- [ ] **D3**: ExprContext の削除可否を検証（TypeResolver expected_types カバレッジ確認）
+**前提**: Phase C で main.rs が統一パイプライン直接呼び出しに変わった後、旧 API のラッパー（lib.rs の `transpile_with_registry` 等）が main.rs から使われなくなる。
+
+- [ ] **D1**: lib.rs の旧ラッパー API の整理。main.rs が使わなくなった関数は `pub(crate)` に変更するか削除。ただし外部クレートとして使用される可能性を考慮（`transpile()` / `transpile_collecting()` は公開 API として維持）
+- [ ] **D2**: `convert_relative_path_to_crate_path` の使用箇所確認と削除。Phase C でディレクトリモードが OutputWriter に移行すれば不要になる
+- [ ] **D3**: ExprContext の削除可否を検証
+  - **検証方法**: Hono ベンチマーク実行時に、`ctx.expected` がフォールバックで使われるケース（= `tctx.type_resolution.expected_type(span)` が `None` だが `ctx.expected` が `Some`）をログ出力し、0 件なら削除可能
+  - **注意**: Phase B で発見した通り、ExprContext は Option<T> unwrap 再帰で必須。ExprContext を削除するには TypeResolver が Option unwrap 後の inner type も expected_type として設定する必要がある
   - 削除可能: ExprContext struct + 全参照箇所を削除
   - 削除不可: フォールバック併存を維持し、理由を記録
 - [ ] **D4**: TypeEnv narrowing の削除可否を検証
-- [ ] **D5**: resolve_expr_type_heuristic の削除可否を検証（Hono ベンチでフォールバック発火 0 件を確認）
-- [ ] **D6**: tctx + reg 二重パラメータの統合（reg を TransformContext に統合、105 関数 + 全テスト）
+  - **検証方法**: `narrowed_type()` のフォールバック（`type_env.get()` のみで型が取れるケース）をログ出力し、0 件なら narrowing 関連コードを削除可能
+  - TypeEnv 自体は変数型追跡（insert/get）に使われるため構造体は残す
+- [ ] **D5**: resolve_expr_type_heuristic の削除可否を検証
+  - **検証方法**: `resolve_expr_type` で `tctx.type_resolution.expr_type(span)` が Unknown/未登録で heuristic にフォールバックするケースを Hono ベンチで計測し、0 件なら削除可能
+- [ ] **D6**: tctx + reg 二重パラメータの統合（reg を TransformContext に統合、105 関数 + 全テスト）。`/large-scale-refactor` スキルに従う
 
 ### Phase E: 最終検証
 

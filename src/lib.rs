@@ -15,8 +15,8 @@ pub mod transformer;
 use anyhow::Result;
 use serde::Serialize;
 
-use crate::pipeline::SyntheticTypeRegistry;
-use crate::registry::{build_registry, TypeRegistry};
+use crate::pipeline::{NullModuleResolver, TranspileInput};
+use crate::registry::TypeRegistry;
 use crate::transformer::UnsupportedSyntaxError;
 
 /// A report entry for an unsupported TypeScript syntax encountered during transformation.
@@ -36,7 +36,7 @@ pub fn build_shared_registry(sources: &[&str]) -> TypeRegistry {
     let mut shared = TypeRegistry::new();
     for source in sources {
         if let Ok(module) = parser::parse_typescript(source) {
-            let reg = build_registry(&module);
+            let reg = registry::build_registry(&module);
             shared.merge(&reg);
         }
     }
@@ -45,16 +45,27 @@ pub fn build_shared_registry(sources: &[&str]) -> TypeRegistry {
 
 /// Transpiles TypeScript source code to Rust source code.
 ///
-/// Chains the full pipeline: parse → build registry → transform → generate.
+/// Uses the unified pipeline. Any unsupported syntax causes an error.
 ///
 /// # Errors
 ///
-/// Returns an error if parsing or transformation fails.
+/// Returns an error if parsing or transformation fails, or if unsupported syntax is encountered.
 pub fn transpile(ts_source: &str) -> Result<String> {
-    let module = parser::parse_typescript(ts_source)?;
-    let reg = build_registry(&module);
-    let items = transformer::transform_module(&module, &reg)?;
-    Ok(generator::generate(&items))
+    let input = TranspileInput {
+        files: vec![(std::path::PathBuf::from("input.ts"), ts_source.to_string())],
+        builtin_types: None,
+        module_resolver: Box::new(NullModuleResolver),
+    };
+    let output = pipeline::transpile_pipeline(input)?;
+    let file = output.files.into_iter().next().unwrap();
+    if let Some(first) = file.unsupported.first() {
+        anyhow::bail!(
+            "unsupported syntax: {} at byte {}",
+            first.kind,
+            first.byte_pos
+        );
+    }
+    Ok(file.rust_source)
 }
 
 /// Transpiles TypeScript source code to Rust source code using a pre-built [`TypeRegistry`].
@@ -72,33 +83,28 @@ pub fn transpile_with_registry(ts_source: &str, registry: &TypeRegistry) -> Resu
 ///
 /// `current_file_dir` is the directory of the source file relative to the crate root
 /// (e.g., `Some("adapter/bun")` for `adapter/bun/server.ts`).
+///
+/// Any unsupported syntax causes an error (strict mode).
 pub fn transpile_with_registry_and_path(
     ts_source: &str,
     registry: &TypeRegistry,
-    current_file_dir: Option<&str>,
+    _current_file_dir: Option<&str>,
 ) -> Result<String> {
-    let module = parser::parse_typescript(ts_source)?;
-    let mut reg = build_registry(&module);
-    reg.merge(registry);
-    let mut synthetic = SyntheticTypeRegistry::new();
-    let mg = pipeline::ModuleGraph::empty();
-    let resolution = pipeline::type_resolution::FileTypeResolution::empty();
-    let tctx = transformer::context::TransformContext::new(
-        &mg,
-        &reg,
-        &resolution,
-        std::path::Path::new(""),
-    );
-    let items = transformer::transform_module_with_path(
-        &module,
-        &tctx,
-        &reg,
-        current_file_dir,
-        &mut synthetic,
-    )?;
-    let mut all_items = synthetic.into_items();
-    all_items.extend(items);
-    Ok(generator::generate(&all_items))
+    let input = TranspileInput {
+        files: vec![(std::path::PathBuf::from("input.ts"), ts_source.to_string())],
+        builtin_types: Some(registry.clone()),
+        module_resolver: Box::new(NullModuleResolver),
+    };
+    let output = pipeline::transpile_pipeline(input)?;
+    let file = output.files.into_iter().next().unwrap();
+    if let Some(first) = file.unsupported.first() {
+        anyhow::bail!(
+            "unsupported syntax: {} at byte {}",
+            first.kind,
+            first.byte_pos
+        );
+    }
+    Ok(file.rust_source)
 }
 
 /// Transpiles TypeScript source code, collecting unsupported syntax instead of aborting.
@@ -128,35 +134,21 @@ pub fn transpile_collecting_with_registry(
 pub fn transpile_collecting_with_registry_and_path(
     ts_source: &str,
     registry: &TypeRegistry,
-    current_file_dir: Option<&str>,
+    _current_file_dir: Option<&str>,
 ) -> Result<(String, Vec<UnsupportedSyntax>)> {
-    let module = parser::parse_typescript(ts_source)?;
-    let mut reg = build_registry(&module);
-    reg.merge(registry);
-    let mut synthetic = SyntheticTypeRegistry::new();
-    let mg2 = pipeline::ModuleGraph::empty();
-    let resolution2 = pipeline::type_resolution::FileTypeResolution::empty();
-    let tctx = transformer::context::TransformContext::new(
-        &mg2,
-        &reg,
-        &resolution2,
-        std::path::Path::new(""),
-    );
-    let (items, raw_unsupported) = transformer::transform_module_collecting_with_path(
-        &module,
-        &tctx,
-        &reg,
-        current_file_dir,
-        &mut synthetic,
-    )?;
-    let mut all_items = synthetic.into_items();
-    all_items.extend(items);
-    let output = generator::generate(&all_items);
-    let unsupported = raw_unsupported
+    let input = TranspileInput {
+        files: vec![(std::path::PathBuf::from("input.ts"), ts_source.to_string())],
+        builtin_types: Some(registry.clone()),
+        module_resolver: Box::new(NullModuleResolver),
+    };
+    let output = pipeline::transpile_pipeline(input)?;
+    let file = output.files.into_iter().next().unwrap();
+    let unsupported = file
+        .unsupported
         .into_iter()
         .map(|raw| resolve_unsupported(ts_source, raw))
         .collect();
-    Ok((output, unsupported))
+    Ok((file.rust_source, unsupported))
 }
 
 /// Resolves an [`UnsupportedSyntaxError`] into an [`UnsupportedSyntax`] with line/col info.

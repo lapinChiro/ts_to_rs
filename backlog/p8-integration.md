@@ -46,13 +46,13 @@ P1〜P7 で新パイプラインの全コンポーネントが実装された。
   - コンパイルテスト `type-narrowing` のスキップ解除もここで行う
 - 不要コードの削除:
   - `convert_relative_path_to_crate_path`（`src/directory.rs`）→ `ModuleGraph` に置換済み
-  - `ExprContext`（`src/transformer/expressions/mod.rs`）→ P6 で `FileTypeResolution.expected_type(span)` を優先参照するよう変更済み。ExprContext はフォールバックとして併存中。P8 で TypeResolver の expected_types カバレッジが 100% になった時点で削除する。削除前に「ExprContext 経由でしか期待型が取れないケース」がないことを grep + テストで確認すること
-  - `TypeEnv` の narrowing スコープ管理（`src/transformer/type_env.rs`）→ P6 で `FileTypeResolution.narrowed_type()` を優先参照するよう変更済み。TypeEnv はフォールバックとして併存中。P8 で narrowing_events カバレッジが 100% になった時点で narrowing 関連コードを削除する。TypeEnv 自体は変数型追跡（`insert`/`get`）にも使われるため、narrowing 以外の用途が残る場合は構造体は残す
-  - `resolve_expr_type`（`src/transformer/expressions/type_resolution.rs`）→ P6 で `FileTypeResolution.expr_types` を優先参照するよう変更済み。ヒューリスティクス（`resolve_expr_type_heuristic`）がフォールバックとして併存中。P8 で TypeResolver の expr_types カバレッジが 100% になった時点で、フォールバックパスを削除する。フォールバックが発火するケースを Hono ベンチマークで計測し、0 件であることを確認してから削除すること
+  - `ExprContext`（`src/transformer/expressions/mod.rs`）→ P6 で FileTypeResolution をフォールバックとして参照するよう変更済み（P8 Phase B で優先順位を修正: ExprContext 優先、FileTypeResolution フォールバック）。ExprContext は Transformer が文脈に基づいて設定する「精密な」expected であり、FileTypeResolution は TypeResolver の事前計算値。Option<T> unwrap のように文脈を変えて再帰する場合に ExprContext 優先が必須（Phase B で発見した無限ループバグの教訓）。削除するには TypeResolver が全 ExprContext 伝搬ケースをカバーする必要がある
+  - `TypeEnv` の narrowing スコープ管理（`src/transformer/type_env.rs`）→ P6 で `FileTypeResolution.narrowed_type()` を優先参照するよう変更済み。TypeEnv はフォールバックとして併存中。TypeEnv 自体は変数型追跡（`insert`/`get`）にも使われるため、narrowing 以外の用途が残る場合は構造体は残す
+  - `resolve_expr_type`（`src/transformer/expressions/type_resolution.rs`）→ P6 で `FileTypeResolution.expr_types` を優先参照するよう変更済み。ヒューリスティクス（`resolve_expr_type_heuristic`）がフォールバックとして併存中。フォールバックが発火するケースを Hono ベンチマークで計測し、0 件であることを確認してから削除すること
   - `tctx` + `reg` の二重パラメータ（全 Transformer 関数）→ P6 で `tctx.type_registry` と `reg` が同一の参照を持つ冗長な構造のまま残存。P8 で `reg` パラメータを削除し `tctx.type_registry` に統一する。影響範囲: 105 関数 + 全テストコード
   - 分散した合成型生成（Transformer 内の直接 `Item::Enum` push）→ `SyntheticTypeRegistry` に集約済み
-  - P1 で作成したブリッジ実装（`transpile_pipeline` の旧ロジック呼び出し）
-- `transpile_single(source: &str) -> Result<String>` の簡易 API の提供
+  - P1 で作成したブリッジ実装 → Phase A で本実装に置換済み。旧ブリッジコードは存在しない
+- ~~`transpile_single(source: &str) -> Result<String>` の簡易 API の提供~~ → Phase A で実装済み（`src/pipeline/mod.rs`）
 
 ### スコープ外
 
@@ -100,16 +100,25 @@ pub fn transpile(input: TranspileInput) -> Result<TranspileOutput> {
     }
     // SyntheticTypeRegistry is now immutable
 
-    // Pass 5-6: Transformation + Code Generation (per file)
-    // Note: P6 の TransformContext は module_graph, type_registry, type_resolution, file_path の 4 フィールド。
-    // synthetic_registry は &mut が必要なため別引数。P8 ではここで不変になっているので TransformContext に統合する。
-    // また P6 では tctx と reg を二重に渡す冗長パターンが残っている。P8 で reg パラメータを削除し tctx.type_registry に統一する。
+    // Pass 4-5: Transformation + Code Generation (per file)
+    // Phase A で実装済み。実際のコードは src/pipeline/mod.rs:82-110 を参照。
+    // - TransformContext (module_graph, type_registry, type_resolution, file_path)
+    // - per-file SyntheticTypeRegistry → items に prepend + 共有 synthetic にマージ
+    // - transform_module_collecting_with_path → generate
+    // Phase D で tctx + reg 二重パラメータ統合、synthetic の TransformContext 統合を予定。
     let mut file_outputs = Vec::new();
     for (file, type_resolution) in parsed.files.iter().zip(type_resolutions.iter()) {
         let ctx = TransformContext::new(&module_graph, &registry, type_resolution, &file.path);
-        // P8 で synthetic_registry を TransformContext に統合し、Transformer API を簡素化する
-        let (items, unsupported) = Transformer::transform(file, &ctx)?;
-        let rust_source = generate(&items);
+        let mut file_synthetic = SyntheticTypeRegistry::new();
+        let (items, unsupported) = transform_module_collecting_with_path(
+            &file.module, &ctx, &registry, ctx.file_path.parent().and_then(|p| p.to_str()),
+            &mut file_synthetic,
+        )?;
+        let file_synthetic_items = file_synthetic.all_items().into_iter().cloned().collect::<Vec<_>>();
+        synthetic.merge(file_synthetic);
+        let mut all_items = file_synthetic_items;
+        all_items.extend(items);
+        let rust_source = generate(&all_items);
         file_outputs.push(FileOutput {
             path: file.path.with_extension("rs"),
             rust_source,

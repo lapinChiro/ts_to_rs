@@ -138,10 +138,11 @@ impl<'a> TypeResolver<'a> {
         self.enter_scope();
 
         // Record return type for expected_types on return statements
+        // Promise<T> → T, void → None (Rust omits `-> ()`)
         let prev_return_type = self.current_fn_return_type.take();
         if let Some(return_ann) = fn_decl.function.return_type.as_ref() {
             if let Ok(ty) = convert_ts_type(&return_ann.type_ann, self.synthetic, self.registry) {
-                self.current_fn_return_type = Some(ty);
+                self.current_fn_return_type = unwrap_promise_and_unit(ty);
             }
         }
 
@@ -275,13 +276,13 @@ impl<'a> TypeResolver<'a> {
                         for param in &method.function.params {
                             self.visit_param_pat(&param.pat);
                         }
-                        // Set return type
+                        // Set return type (Promise<T> → T, void → None)
                         let prev_return_type = self.current_fn_return_type.take();
                         if let Some(return_ann) = &method.function.return_type {
                             if let Ok(ty) =
                                 convert_ts_type(&return_ann.type_ann, self.synthetic, self.registry)
                             {
-                                self.current_fn_return_type = Some(ty);
+                                self.current_fn_return_type = unwrap_promise_and_unit(ty);
                             }
                         }
                         // Walk body
@@ -879,11 +880,11 @@ impl<'a> TypeResolver<'a> {
     fn resolve_arrow_expr(&mut self, arrow: &ast::ArrowExpr) -> ResolvedType {
         self.enter_scope();
 
-        // Save and set return type
+        // Save and set return type (Promise<T> → T, void → None)
         let prev_return_type = self.current_fn_return_type.take();
         if let Some(return_ann) = &arrow.return_type {
             if let Ok(ty) = convert_ts_type(&return_ann.type_ann, self.synthetic, self.registry) {
-                self.current_fn_return_type = Some(ty);
+                self.current_fn_return_type = unwrap_promise_and_unit(ty);
             }
         }
 
@@ -936,7 +937,7 @@ impl<'a> TypeResolver<'a> {
         let prev_return_type = self.current_fn_return_type.take();
         if let Some(return_ann) = &fn_expr.function.return_type {
             if let Ok(ty) = convert_ts_type(&return_ann.type_ann, self.synthetic, self.registry) {
-                self.current_fn_return_type = Some(ty);
+                self.current_fn_return_type = unwrap_promise_and_unit(ty);
             }
         }
 
@@ -1002,6 +1003,22 @@ fn is_object_type(ty: &ResolvedType) -> bool {
             RustType::Named { .. } | RustType::Vec(_) | RustType::Tuple(_) | RustType::Any
         ),
         ResolvedType::Unknown => false,
+    }
+}
+
+/// Promise<T> → T に展開し、Unit（void）は None にする。
+/// TypeResolver が expected_type / return_type として登録する前に適用する。
+fn unwrap_promise_and_unit(ty: RustType) -> Option<RustType> {
+    let unwrapped = match &ty {
+        RustType::Named { name, type_args } if name == "Promise" && type_args.len() == 1 => {
+            type_args[0].clone()
+        }
+        _ => ty,
+    };
+    if matches!(unwrapped, RustType::Unit) {
+        None
+    } else {
+        Some(unwrapped)
     }
 }
 

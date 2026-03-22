@@ -57,8 +57,7 @@ pub fn transpile_pipeline(input: TranspileInput) -> Result<TranspileOutput> {
 
     // Pass 1: Module Graph
     let root_dir = find_common_root(&parsed);
-    let module_graph =
-        ModuleGraphBuilder::new(&parsed, &*input.module_resolver, &root_dir).build();
+    let module_graph = ModuleGraphBuilder::new(&parsed, &*input.module_resolver, &root_dir).build();
 
     // Pass 2: Type Collection (shared registry from all files)
     let mut shared_registry = input.builtin_types.unwrap_or_default();
@@ -97,10 +96,15 @@ pub fn transpile_pipeline(input: TranspileInput) -> Result<TranspileOutput> {
             &mut file_synthetic,
         )?;
 
-        // Merge per-file synthetic types
+        // per-file synthetic types をファイル出力に含める（旧 API 互換）
+        // 同時に共有 synthetic にも蓄積する（OutputWriter 用）
+        let file_synthetic_items: Vec<crate::ir::Item> =
+            file_synthetic.all_items().into_iter().cloned().collect();
         synthetic.merge(file_synthetic);
 
-        let rust_source = crate::generator::generate(&items);
+        let mut all_items = file_synthetic_items;
+        all_items.extend(items);
+        let rust_source = crate::generator::generate(&all_items);
 
         file_outputs.push(FileOutput {
             path: file.path.with_extension("rs"),
@@ -154,7 +158,10 @@ fn find_common_root(parsed: &ParsedFiles) -> std::path::PathBuf {
     }
     // 全ファイルの共通 prefix を求める
     let first = &parsed.files[0].path;
-    let mut common = first.parent().unwrap_or(std::path::Path::new("")).to_path_buf();
+    let mut common = first
+        .parent()
+        .unwrap_or(std::path::Path::new(""))
+        .to_path_buf();
     for file in &parsed.files[1..] {
         while !file.path.starts_with(&common) {
             common = match common.parent() {
