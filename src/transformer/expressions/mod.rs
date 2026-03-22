@@ -3,15 +3,17 @@
 //! Converts SWC expression nodes into the IR [`Expr`] representation.
 
 use anyhow::{anyhow, Result};
+use swc_common::Spanned;
 use swc_ecma_ast as ast;
 
 use crate::ir::{Expr, RustType};
+use crate::pipeline::type_resolution::Span;
+use crate::pipeline::SyntheticTypeRegistry;
+use crate::registry::TypeRegistry;
 use crate::transformer::context::TransformContext;
 // Re-export for tests that use `super::*`
 #[cfg(test)]
 use crate::ir::{ClosureBody, Param};
-use crate::pipeline::SyntheticTypeRegistry;
-use crate::registry::TypeRegistry;
 use crate::transformer::TypeEnv;
 
 mod assignments;
@@ -76,7 +78,11 @@ pub fn convert_expr(
     type_env: &TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Expr> {
-    let expected = ctx.expected;
+    // FileTypeResolution の expected_type を優先し、なければ ExprContext のものを使う
+    let expected = tctx
+        .type_resolution
+        .expected_type(Span::from_swc(expr.span()))
+        .or(ctx.expected);
     // Option<T> expected: handle null/undefined → None, literals → Some(lit)
     if let Some(RustType::Option(inner)) = expected {
         // null / undefined → None

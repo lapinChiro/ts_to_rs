@@ -697,4 +697,6 @@ fn expr_contains_regex(expr: &crate::ir::Expr) -> bool {
 }
 
 #[cfg(test)]
+pub(crate) mod test_fixtures;
+#[cfg(test)]
 mod tests;

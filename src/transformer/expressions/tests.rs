@@ -1,48 +1,10 @@
 use super::*;
 use crate::ir::{BinOp, MatchPattern, UnOp};
 use crate::parser::parse_typescript;
-use crate::pipeline::type_resolution::FileTypeResolution;
-use crate::pipeline::ModuleGraph;
 use crate::registry::{MethodSignature, TypeDef, TypeRegistry};
-use crate::transformer::context::TransformContext;
+use crate::transformer::test_fixtures::TctxFixture;
 use crate::transformer::TypeEnv;
-use std::path::Path;
 use swc_ecma_ast::{Decl, ModuleItem, Stmt};
-
-/// Test fixture: TransformContext + TypeRegistry の所有者。
-/// テストごとに 4 行のボイラープレートを排除する。
-struct TctxFixture {
-    mg: ModuleGraph,
-    reg: TypeRegistry,
-    res: FileTypeResolution,
-}
-
-impl TctxFixture {
-    fn new() -> Self {
-        Self {
-            mg: ModuleGraph::empty(),
-            reg: TypeRegistry::new(),
-            res: FileTypeResolution::empty(),
-        }
-    }
-
-    fn with_reg(reg: TypeRegistry) -> Self {
-        Self {
-            mg: ModuleGraph::empty(),
-            reg,
-            res: FileTypeResolution::empty(),
-        }
-    }
-
-    fn tctx(&self) -> TransformContext<'_> {
-        TransformContext::new(&self.mg, &self.reg, &self.res, Path::new("test.ts"))
-    }
-
-    fn reg(&self) -> &TypeRegistry {
-        &self.reg
-    }
-}
-
 /// Helper: parse a TS expression statement and return the SWC Expr.
 fn parse_expr(source: &str) -> ast::Expr {
     let module = parse_typescript(source).expect("parse failed");

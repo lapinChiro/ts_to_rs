@@ -1,25 +1,47 @@
 //! Type resolution and type assertion conversion for expressions.
 //!
-//! Resolves expression types from TypeEnv and TypeRegistry, and converts
-//! TypeScript type assertions (`x as T`) to IR.
+//! まず `FileTypeResolution.expr_types` を参照し、Known ならそれを返す。
+//! Unknown または未登録の場合は TypeEnv / TypeRegistry ベースのヒューリスティクスにフォールバックする。
+//! TypeScript の型アサーション（`x as T`）も IR に変換する。
 
 use anyhow::Result;
+use swc_common::Spanned;
 use swc_ecma_ast as ast;
 
 use crate::ir::{Expr, RustType};
 use crate::pipeline::type_converter::convert_ts_type;
-use crate::pipeline::SyntheticTypeRegistry;
+use crate::pipeline::type_resolution::Span;
+use crate::pipeline::{ResolvedType, SyntheticTypeRegistry};
 use crate::registry::{TypeDef, TypeRegistry};
+use crate::transformer::context::TransformContext;
 use crate::transformer::TypeEnv;
 
 use super::{convert_expr, ExprContext};
-use crate::transformer::context::TransformContext;
 
 /// 式の型を解決する。解決できない場合は None を返す。
 ///
-/// TypeEnv からローカル変数の型を、TypeRegistry からフィールドの型を解決する。
-/// メソッド呼び出しの戻り値型や型パラメータの具体化は対象外。
+/// まず `FileTypeResolution.expr_types` を参照し、Known ならそれを返す。
+/// Unknown または未登録の場合は TypeEnv / TypeRegistry ベースのヒューリスティクスにフォールバックする。
 pub fn resolve_expr_type(
+    expr: &ast::Expr,
+    type_env: &TypeEnv,
+    tctx: &TransformContext<'_>,
+    reg: &TypeRegistry,
+) -> Option<RustType> {
+    // FileTypeResolution lookup: Known ならヒューリスティクスを迂回
+    let span = Span::from_swc(expr.span());
+    if let ResolvedType::Known(ty) = tctx.type_resolution.expr_type(span) {
+        return Some(ty.clone());
+    }
+
+    // フォールバック: 既存ヒューリスティクス
+    resolve_expr_type_heuristic(expr, type_env, tctx, reg)
+}
+
+/// 既存のヒューリスティクスによる型解決。
+///
+/// TypeEnv からローカル変数の型を、TypeRegistry からフィールドの型を解決する。
+fn resolve_expr_type_heuristic(
     expr: &ast::Expr,
     type_env: &TypeEnv,
     tctx: &TransformContext<'_>,
@@ -290,46 +312,9 @@ mod tests {
     use super::*;
     use crate::ir::TypeParam;
     use crate::pipeline::type_resolution::FileTypeResolution;
-    use crate::pipeline::ModuleGraph;
     use crate::registry::{MethodSignature, TypeRegistry};
-    use crate::transformer::context::TransformContext;
+    use crate::transformer::test_fixtures::TctxFixture;
     use std::collections::HashMap;
-    use std::path::Path;
-
-    /// Test fixture: TransformContext + TypeRegistry の所有者。
-    /// テストごとに 4 行のボイラープレートを排除する。
-    struct TctxFixture {
-        mg: ModuleGraph,
-        reg: TypeRegistry,
-        res: FileTypeResolution,
-    }
-
-    impl TctxFixture {
-        fn new() -> Self {
-            Self {
-                mg: ModuleGraph::empty(),
-                reg: TypeRegistry::new(),
-                res: FileTypeResolution::empty(),
-            }
-        }
-
-        fn with_reg(reg: TypeRegistry) -> Self {
-            Self {
-                mg: ModuleGraph::empty(),
-                reg,
-                res: FileTypeResolution::empty(),
-            }
-        }
-
-        fn tctx(&self) -> TransformContext<'_> {
-            TransformContext::new(&self.mg, &self.reg, &self.res, Path::new("test.ts"))
-        }
-
-        fn reg(&self) -> &TypeRegistry {
-            &self.reg
-        }
-    }
-
     /// TypeEnv にオブジェクト型を登録し、TypeRegistry にメソッドの戻り値型を登録して
     /// resolve_expr_type が Call 式でメソッド戻り値型を返すことを検証する。
     ///
@@ -505,5 +490,93 @@ mod tests {
         let tctx = f.tctx();
         let result = resolve_method_return_type(&obj_type, "get", &tctx, f.reg());
         assert_eq!(result, Some(RustType::String));
+    }
+
+    // ===== FileTypeResolution lookup tests (Phase C) =====
+
+    #[test]
+    fn test_resolve_expr_type_prefers_file_resolution_over_heuristic() {
+        // FileTypeResolution に Known(F64) が登録された Ident 式は、
+        // TypeEnv に登録がなくても F64 を返すべき
+        use crate::pipeline::type_resolution::Span;
+        use crate::pipeline::ResolvedType;
+
+        let ident_span = Span { lo: 0, hi: 1 };
+        let mut res = FileTypeResolution::empty();
+        res.expr_types
+            .insert(ident_span, ResolvedType::Known(RustType::F64));
+
+        let f = TctxFixture::with_resolution(res);
+        let tctx = f.tctx();
+
+        // SWC Ident AST node with matching span
+        let expr = ast::Expr::Ident(ast::Ident {
+            span: swc_common::Span::new(swc_common::BytePos(0), swc_common::BytePos(1)),
+            ctxt: Default::default(),
+            sym: "unknown_var".into(),
+            optional: false,
+        });
+
+        let env = TypeEnv::new(); // empty — no type for "unknown_var"
+        let result = resolve_expr_type(&expr, &env, &tctx, f.reg());
+
+        // FileTypeResolution should take precedence over heuristic (which returns None)
+        assert_eq!(
+            result,
+            Some(RustType::F64),
+            "FileTypeResolution Known should override heuristic"
+        );
+    }
+
+    #[test]
+    fn test_resolve_expr_type_falls_back_when_resolution_unknown() {
+        // FileTypeResolution に Unknown が登録 → 既存ヒューリスティクスにフォールバック
+        use crate::pipeline::type_resolution::Span;
+        use crate::pipeline::ResolvedType;
+
+        let lit_span = Span { lo: 0, hi: 2 };
+        let mut res = FileTypeResolution::empty();
+        res.expr_types.insert(lit_span, ResolvedType::Unknown);
+
+        let f = TctxFixture::with_resolution(res);
+        let tctx = f.tctx();
+
+        // 数値リテラル "42" — ヒューリスティクスは Some(F64) を返す
+        let expr = ast::Expr::Lit(ast::Lit::Num(ast::Number {
+            span: swc_common::Span::new(swc_common::BytePos(0), swc_common::BytePos(2)),
+            value: 42.0,
+            raw: None,
+        }));
+
+        let env = TypeEnv::new();
+        let result = resolve_expr_type(&expr, &env, &tctx, f.reg());
+
+        assert_eq!(
+            result,
+            Some(RustType::F64),
+            "Unknown in FileTypeResolution should fall back to heuristic"
+        );
+    }
+
+    #[test]
+    fn test_resolve_expr_type_falls_back_when_span_not_in_resolution() {
+        // FileTypeResolution に該当 span がない → 既存ヒューリスティクスにフォールバック
+        let f = TctxFixture::new(); // empty resolution
+        let tctx = f.tctx();
+
+        let expr = ast::Expr::Lit(ast::Lit::Str(ast::Str {
+            span: swc_common::DUMMY_SP,
+            value: "hello".into(),
+            raw: None,
+        }));
+
+        let env = TypeEnv::new();
+        let result = resolve_expr_type(&expr, &env, &tctx, f.reg());
+
+        assert_eq!(
+            result,
+            Some(RustType::String),
+            "Missing span should fall back to heuristic"
+        );
     }
 }
