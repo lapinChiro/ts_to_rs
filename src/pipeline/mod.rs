@@ -5,6 +5,7 @@
 
 pub mod module_graph;
 pub mod module_resolver;
+pub mod output_writer;
 pub mod synthetic_registry;
 pub mod type_converter;
 pub mod type_resolution;

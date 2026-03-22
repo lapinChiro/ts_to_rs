@@ -3,8 +3,6 @@ use std::collections::HashMap;
 use super::*;
 use crate::ir::{BinOp, Expr, MatchPattern, RustType, Stmt, UnOp};
 use crate::parser::parse_typescript;
-use crate::pipeline::type_resolution::FileTypeResolution;
-use crate::pipeline::ModuleGraph;
 use crate::registry::{MethodSignature, TypeDef, TypeRegistry};
 use crate::transformer::context::TransformContext;
 use crate::transformer::test_fixtures::TctxFixture;
@@ -17,8 +15,7 @@ fn convert_single_stmt(
     reg: &TypeRegistry,
     return_type: Option<&RustType>,
 ) -> Stmt {
-    let mg = ModuleGraph::empty();
-    let res = FileTypeResolution::empty();
+    let (mg, res) = TctxFixture::empty_context_parts();
     let tctx = TransformContext::new(&mg, reg, &res, Path::new("test.ts"));
     let mut stmts = convert_stmt(
         stmt,
@@ -39,8 +36,7 @@ fn convert_stmts_with_env(
     reg: &TypeRegistry,
     type_env: &mut TypeEnv,
 ) -> Vec<Stmt> {
-    let mg = ModuleGraph::empty();
-    let res = FileTypeResolution::empty();
+    let (mg, res) = TctxFixture::empty_context_parts();
     let tctx = TransformContext::new(&mg, reg, &res, Path::new("test.ts"));
     convert_stmt(
         stmt,

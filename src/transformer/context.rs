@@ -54,48 +54,7 @@ mod tests {
     use crate::pipeline::ModuleGraph;
     use crate::pipeline::SyntheticTypeRegistry;
     use crate::registry::TypeRegistry;
-
-    /// Test fixture holding owned data so TransformContext can borrow from it.
-    struct Fixture {
-        mg: ModuleGraph,
-        reg: TypeRegistry,
-        resolution: FileTypeResolution,
-    }
-
-    impl Fixture {
-        fn new() -> Self {
-            Self {
-                mg: ModuleGraph::empty(),
-                reg: TypeRegistry::new(),
-                resolution: FileTypeResolution::empty(),
-            }
-        }
-
-        fn with_resolution(resolution: FileTypeResolution) -> Self {
-            Self {
-                mg: ModuleGraph::empty(),
-                reg: TypeRegistry::new(),
-                resolution,
-            }
-        }
-
-        fn ctx(&self) -> TransformContext<'_> {
-            TransformContext::new(&self.mg, &self.reg, &self.resolution, Path::new("test.ts"))
-        }
-
-        fn transform(&self, source: &str) -> (Vec<Item>, String) {
-            let module = parse_typescript(source).unwrap();
-            let mut synthetic = SyntheticTypeRegistry::new();
-            let items = crate::transformer::transform_module_with_context(
-                &module,
-                &self.ctx(),
-                &mut synthetic,
-            )
-            .unwrap();
-            let output = crate::generator::generate(&items);
-            (items, output)
-        }
-    }
+    use crate::transformer::test_fixtures::TctxFixture;
 
     /// Runs TypeResolver on source and returns the FileTypeResolution.
     fn resolve_types(source: &str) -> FileTypeResolution {
@@ -126,7 +85,7 @@ mod tests {
 
     #[test]
     fn test_transform_with_context_basic_fn_produces_same_ir() {
-        let f = Fixture::new();
+        let f = TctxFixture::new();
         let (items, output) = f.transform(r#"function hello(): string { return "world"; }"#);
         assert!(!items.is_empty(), "should produce at least one item");
         assert!(
@@ -156,11 +115,11 @@ mod tests {
         .unwrap();
 
         // New API with empty resolution
-        let f = Fixture::new();
+        let f = TctxFixture::new();
         let mut synthetic_new = SyntheticTypeRegistry::new();
         let new_items = crate::transformer::transform_module_with_context(
             &module,
-            &f.ctx(),
+            &f.tctx(),
             &mut synthetic_new,
         )
         .unwrap();
@@ -181,7 +140,7 @@ mod tests {
             "TypeResolver should resolve expression types"
         );
 
-        let f = Fixture::with_resolution(resolution);
+        let f = TctxFixture::with_resolution(resolution);
         let (_, output) = f.transform(source);
         assert!(output.contains("fn greet"), "should generate function");
     }
@@ -189,7 +148,7 @@ mod tests {
     #[test]
     fn test_expr_type_unknown_fallback_to_heuristics() {
         // Empty resolution → all Unknown → fallback should produce .to_string()
-        let f = Fixture::new();
+        let f = TctxFixture::new();
         let (_, output) = f.transform(r#"function greet(): string { return "hello"; }"#);
         assert!(
             output.contains("to_string()"),
@@ -208,7 +167,7 @@ mod tests {
             "TypeResolver should set expected types for return statements"
         );
 
-        let f = Fixture::with_resolution(resolution);
+        let f = TctxFixture::with_resolution(resolution);
         let (_, output) = f.transform(source);
         assert!(
             output.contains("to_string()"),
@@ -233,7 +192,7 @@ function check(x: string | number): string {
             "TypeResolver should detect typeof narrowing"
         );
 
-        let f = Fixture::with_resolution(resolution);
+        let f = TctxFixture::with_resolution(resolution);
         let (_, output) = f.transform(source);
         assert!(
             output.contains("fn check"),
@@ -246,7 +205,7 @@ function check(x: string | number): string {
     #[test]
     fn test_regex_use_in_ir_from_transformer() {
         // Transformer should emit Item::Use for regex::Regex
-        let f = Fixture::new();
+        let f = TctxFixture::new();
         let (items, _) =
             f.transform(r#"function test_re(): boolean { return /hello/.test("world"); }"#);
 
@@ -295,7 +254,7 @@ function describe(s: string): string {
         default: return "unknown";
     }
 }"#;
-        let f = Fixture::new();
+        let f = TctxFixture::new();
         let (items, _) = f.transform(source);
 
         let fn_item = items

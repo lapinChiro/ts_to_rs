@@ -57,4 +57,30 @@ impl TctxFixture {
     pub fn reg(&self) -> &TypeRegistry {
         &self.reg
     }
+
+    /// 借用した TypeRegistry から TransformContext を生成するためのヘルパー部品。
+    ///
+    /// `TctxFixture::with_reg()` は所有権を要求するため、借用のみ持つヘルパー関数
+    /// （例: `convert_single_stmt(reg: &TypeRegistry)`）ではこのタプルを使う。
+    /// 返り値の `ModuleGraph` と `FileTypeResolution` は TransformContext が借用するため、
+    /// TransformContext と同じスコープで保持する必要がある。
+    pub fn empty_context_parts() -> (ModuleGraph, FileTypeResolution) {
+        (ModuleGraph::empty(), FileTypeResolution::empty())
+    }
+
+    /// TS ソースを変換し、IR と生成コードを返す。
+    ///
+    /// context.rs のテストで使用する統合テスト用ヘルパー。
+    pub fn transform(&self, source: &str) -> (Vec<crate::ir::Item>, String) {
+        let module = crate::parser::parse_typescript(source).unwrap();
+        let mut synthetic = crate::pipeline::SyntheticTypeRegistry::new();
+        let items = crate::transformer::transform_module_with_context(
+            &module,
+            &self.tctx(),
+            &mut synthetic,
+        )
+        .unwrap();
+        let output = crate::generator::generate(&items);
+        (items, output)
+    }
 }
