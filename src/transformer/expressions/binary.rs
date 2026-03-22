@@ -17,50 +17,52 @@ use super::type_resolution::resolve_expr_type;
 use crate::ir::ClosureBody;
 
 use super::{convert_expr, ExprContext};
+use crate::transformer::context::TransformContext;
 
 /// Converts a binary expression to IR, handling special patterns like
 /// nullish coalescing, typeof/undefined comparisons, and string concatenation.
 pub(super) fn convert_bin_expr(
     bin: &ast::BinExpr,
+    tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
     expected: Option<&RustType>,
     type_env: &TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Expr> {
     // typeof x === "type" / typeof x !== "type" pattern
-    if let Some(result) = try_convert_typeof_comparison(bin, type_env, reg, synthetic) {
+    if let Some(result) = try_convert_typeof_comparison(bin, type_env, tctx, reg, synthetic) {
         return Ok(result);
     }
 
     // x === undefined / x !== undefined pattern
-    if let Some(result) = try_convert_undefined_comparison(bin, type_env, reg, synthetic) {
+    if let Some(result) = try_convert_undefined_comparison(bin, type_env, tctx, reg, synthetic) {
         return Ok(result);
     }
 
     // string literal enum comparison: d == "up" → d == Direction::Up
-    if let Some(result) = try_convert_enum_string_comparison(bin, type_env, reg, synthetic) {
+    if let Some(result) = try_convert_enum_string_comparison(bin, type_env, tctx, reg, synthetic) {
         return Ok(result);
     }
 
     // x instanceof ClassName pattern
     if bin.op == ast::BinaryOp::InstanceOf {
-        return Ok(convert_instanceof(bin, type_env, reg));
+        return Ok(convert_instanceof(bin, type_env, tctx, reg));
     }
 
     // "key" in obj pattern
     if bin.op == ast::BinaryOp::In {
-        return Ok(convert_in_operator(bin, reg, type_env));
+        return Ok(convert_in_operator(bin, tctx, reg, type_env));
     }
 
     // `x ?? y` → `x.unwrap_or_else(|| y)` (Option) or `x` (non-Option)
     if bin.op == ast::BinaryOp::NullishCoalescing {
-        let left_type = resolve_expr_type(&bin.left, type_env, reg);
+        let left_type = resolve_expr_type(&bin.left, type_env, tctx, reg);
         let is_option = left_type
             .as_ref()
             .is_some_and(|ty| matches!(ty, RustType::Option(_)));
 
         // Cat A: ?? left operand — type is resolved separately for Option detection
-        let left = convert_expr(&bin.left, reg, &ExprContext::none(), type_env, synthetic)?;
+        let left = convert_expr(&bin.left, tctx, reg, &ExprContext::none(), type_env, synthetic)?;
         if !is_option && left_type.is_some() {
             // Non-Option type: nullish coalescing is a no-op, return left as-is
             return Ok(left);
@@ -74,7 +76,7 @@ pub(super) fn convert_bin_expr(
             // Cat C: inner type already propagated when available
             None => ExprContext::none(),
         };
-        let right = convert_expr(&bin.right, reg, &right_ctx, type_env, synthetic)?;
+        let right = convert_expr(&bin.right, tctx, reg, &right_ctx, type_env, synthetic)?;
         return Ok(Expr::MethodCall {
             object: Box::new(left),
             method: "unwrap_or_else".to_string(),
@@ -87,14 +89,14 @@ pub(super) fn convert_bin_expr(
     }
 
     // Cat A: binary operands — result type depends on operator, not context
-    let left = convert_expr(&bin.left, reg, &ExprContext::none(), type_env, synthetic)?;
-    let right = convert_expr(&bin.right, reg, &ExprContext::none(), type_env, synthetic)?;
+    let left = convert_expr(&bin.left, tctx, reg, &ExprContext::none(), type_env, synthetic)?;
+    let right = convert_expr(&bin.right, tctx, reg, &ExprContext::none(), type_env, synthetic)?;
     let op = convert_binary_op(bin.op)?;
 
     // String concatenation: wrap RHS in Ref(&) when LHS is string-like.
     // Priority: type inference → expected type → IR heuristic (is_string_like fallback).
     let is_string_context = if op == BinOp::Add {
-        let left_type = resolve_expr_type(&bin.left, type_env, reg);
+        let left_type = resolve_expr_type(&bin.left, type_env, tctx, reg);
         let type_inferred = left_type.is_some_and(|ty| is_string_type(&ty));
         type_inferred || matches!(expected, Some(RustType::String)) || is_string_like(&left)
     } else {
@@ -104,8 +106,8 @@ pub(super) fn convert_bin_expr(
     // Mixed-type concatenation: one side is string, other is known non-string → format!
     // Handles: `42 + " px"` (f64 + &str) and `"val: " + x` (String + f64)
     if op == BinOp::Add && is_string_context {
-        let left_type = resolve_expr_type(&bin.left, type_env, reg);
-        let right_type = resolve_expr_type(&bin.right, type_env, reg);
+        let left_type = resolve_expr_type(&bin.left, type_env, tctx, reg);
+        let right_type = resolve_expr_type(&bin.right, type_env, tctx, reg);
         let left_is_string =
             left_type.as_ref().is_some_and(is_string_type) || is_string_like(&left);
         let left_known_non_string = (left_type.is_some()
@@ -191,19 +193,20 @@ pub(crate) fn convert_binary_op(op: ast::BinaryOp) -> Result<BinOp> {
 /// Converts a unary expression (`!x`, `-x`, `typeof x`) to IR.
 pub(super) fn convert_unary_expr(
     unary: &ast::UnaryExpr,
+    tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
     type_env: &TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Expr> {
     // typeof x → resolve based on TypeEnv
     if unary.op == ast::UnaryOp::TypeOf {
-        let operand_type = resolve_expr_type(&unary.arg, type_env, reg);
+        let operand_type = resolve_expr_type(&unary.arg, type_env, tctx, reg);
         return Ok(match operand_type {
             Some(RustType::Option(inner)) => {
                 // Option<T>: runtime branch — is_some() → typeof inner, else "undefined"
                 // Cat A: typeof operand — only used for type discrimination
                 let operand =
-                    convert_expr(&unary.arg, reg, &ExprContext::none(), type_env, synthetic)?;
+                    convert_expr(&unary.arg, tctx, reg, &ExprContext::none(), type_env, synthetic)?;
                 let inner_typeof = typeof_to_string(&inner);
                 Expr::If {
                     condition: Box::new(Expr::MethodCall {
@@ -222,8 +225,8 @@ pub(super) fn convert_unary_expr(
 
     // Unary plus: +x → numeric conversion
     if unary.op == ast::UnaryOp::Plus {
-        let operand_type = resolve_expr_type(&unary.arg, type_env, reg);
-        let operand = convert_expr(&unary.arg, reg, &ExprContext::none(), type_env, synthetic)?;
+        let operand_type = resolve_expr_type(&unary.arg, type_env, tctx, reg);
+        let operand = convert_expr(&unary.arg, tctx, reg, &ExprContext::none(), type_env, synthetic)?;
         return Ok(match operand_type {
             Some(RustType::F64) => operand, // already numeric, identity
             Some(RustType::String) => Expr::MethodCall {
@@ -245,7 +248,7 @@ pub(super) fn convert_unary_expr(
         _ => return Err(anyhow!("unsupported unary operator: {:?}", unary.op)),
     };
     // Cat A: unary operand — type depends on operator semantics
-    let operand = convert_expr(&unary.arg, reg, &ExprContext::none(), type_env, synthetic)?;
+    let operand = convert_expr(&unary.arg, tctx, reg, &ExprContext::none(), type_env, synthetic)?;
     Ok(Expr::UnaryOp {
         op,
         operand: Box::new(operand),

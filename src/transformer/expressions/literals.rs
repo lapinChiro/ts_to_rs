@@ -8,6 +8,7 @@ use swc_ecma_ast as ast;
 
 use crate::ir::{BinOp, Expr, RustType};
 use crate::registry::{TypeDef, TypeRegistry};
+use crate::transformer::context::TransformContext;
 
 /// Converts an SWC literal to an IR expression.
 ///
@@ -16,6 +17,7 @@ use crate::registry::{TypeDef, TypeRegistry};
 pub(super) fn convert_lit(
     lit: &ast::Lit,
     expected: Option<&RustType>,
+    _tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
 ) -> Result<Expr> {
     match lit {

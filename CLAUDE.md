@@ -78,6 +78,9 @@ for r in entries:
 ## 行動規範
 
 - **変換可能性の独断禁止** — 詳細は `.claude/rules/conversion-feasibility.md` 参照
+- **PRD 完了条件の厳守** — 詳細は `.claude/rules/prd-completion.md` 参照
+- **段階的コミット**: 複数フェーズの作業では各フェーズ完了時にコミットする — 詳細は `.claude/rules/incremental-commit.md` 参照
+- **一括編集の安全手順**: スクリプトによる一括置換は dry run → 確認 → 実行 — 詳細は `.claude/rules/bulk-edit-safety.md` 参照
 - **Git 操作の制限**: `git commit` / `push` / `merge` はユーザーのみが行う。Claude はコミットメッセージの提案のみ
 - **判断軸のある質問**: 選択肢・メリデメ・推奨案を提示して確認する。「これでよいですか？」のような判断軸のない質問をしない。自分で判断できることは判断して進める
 - **検証の原則**: 検証項目・期待結果を事前に定義してから実行する。後付け判定の禁止
@@ -104,6 +107,7 @@ for r in entries:
 - 変換正当性の監査（定期的、または大規模変更後） → /correctness-audit
 - Hono 変換改善の開発ループ → /hono-cycle（単発）または `/loop 0 /hono-cycle`（連続）
 - ルールの作成・変更 → /rule-writing, /rule-maintenance
+- 大規模リファクタリング（10箇所以上のシグネチャ変更、5ファイル以上にまたがる機械的変更） → /large-scale-refactor
 
 ## 自発的改善の原則
 

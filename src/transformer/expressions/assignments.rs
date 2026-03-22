@@ -10,10 +10,12 @@ use crate::transformer::TypeEnv;
 
 use super::member_access::convert_member_expr;
 use super::{convert_expr, ExprContext};
+use crate::transformer::context::TransformContext;
 
 /// Converts an assignment expression (`target = value`) to `Expr::Assign`.
 pub(super) fn convert_assign_expr(
     assign: &ast::AssignExpr,
+    tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
     type_env: &TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
@@ -28,7 +30,7 @@ pub(super) fn convert_assign_expr(
     let target = match &assign.left {
         ast::AssignTarget::Simple(simple) => match simple {
             ast::SimpleAssignTarget::Member(member) => {
-                convert_member_expr(member, reg, type_env, synthetic)?
+                convert_member_expr(member, tctx, reg, type_env, synthetic)?
             }
             ast::SimpleAssignTarget::Ident(ident) => Expr::Ident(ident.id.sym.to_string()),
             _ => return Err(anyhow!("unsupported assignment target")),
@@ -43,7 +45,7 @@ pub(super) fn convert_assign_expr(
         },
         None => ExprContext::none(),
     };
-    let right = convert_expr(&assign.right, reg, &rhs_ctx, type_env, synthetic)?;
+    let right = convert_expr(&assign.right, tctx, reg, &rhs_ctx, type_env, synthetic)?;
 
     // ??= (nullish coalescing assignment): x ??= y → x.get_or_insert_with(|| y)
     if assign.op == ast::AssignOp::NullishAssign {

@@ -15,6 +15,7 @@ use super::literals::needs_debug_format;
 use super::methods::map_method_call;
 use super::type_resolution::resolve_expr_type;
 use super::ExprContext;
+use crate::transformer::context::TransformContext;
 
 /// Converts a function/method call expression.
 ///
@@ -22,6 +23,7 @@ use super::ExprContext;
 /// - `obj.method(x)` → `Expr::MethodCall { object, method, args }`
 pub(super) fn convert_call_expr(
     call: &ast::CallExpr,
+    tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
     type_env: &TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
@@ -35,7 +37,7 @@ pub(super) fn convert_call_expr(
                 // parseFloat(s) → s.parse::<f64>().unwrap()
                 // isNaN(x) → x.is_nan()
                 if let Some(result) =
-                    convert_global_builtin(&fn_name, &call.args, reg, type_env, synthetic)?
+                    convert_global_builtin(&fn_name, &call.args, tctx, reg, type_env, synthetic)?
                 {
                     return Ok(result);
                 }
@@ -63,6 +65,7 @@ pub(super) fn convert_call_expr(
                 };
                 let args = convert_call_args_with_types(
                     &call.args,
+                    tctx,
                     reg,
                     param_types,
                     has_rest,
@@ -89,12 +92,12 @@ pub(super) fn convert_call_expr(
                             "error" | "warn" => "eprintln",
                             _ => return Err(anyhow!("unsupported console method: {}", method)),
                         };
-                        let args = convert_call_args(&call.args, reg, type_env, synthetic)?;
+                        let args = convert_call_args(&call.args, tctx, reg, type_env, synthetic)?;
                         let use_debug = call
                             .args
                             .iter()
                             .map(|arg| {
-                                let ty = resolve_expr_type(&arg.expr, type_env, reg);
+                                let ty = resolve_expr_type(&arg.expr, type_env, tctx, reg);
                                 needs_debug_format(ty.as_ref())
                             })
                             .collect();
@@ -107,27 +110,27 @@ pub(super) fn convert_call_expr(
 
                     // Math.method(args) → first_arg.method(rest_args)
                     if obj_ident.sym.as_ref() == "Math" {
-                        return convert_math_call(&method, &call.args, reg, type_env, synthetic);
+                        return convert_math_call(&method, &call.args, tctx, reg, type_env, synthetic);
                     }
 
                     // Number.isNaN(x) → x.is_nan(), Number.isFinite(x) → x.is_finite()
                     if obj_ident.sym.as_ref() == "Number" {
                         return convert_number_static_call(
-                            &method, &call.args, reg, type_env, synthetic,
+                            &method, &call.args, tctx, reg, type_env, synthetic,
                         );
                     }
 
                     // fs.readFileSync/writeFileSync/existsSync → std::fs equivalents
                     if obj_ident.sym.as_ref() == "fs" {
-                        return convert_fs_call(&method, &call.args, reg, type_env, synthetic);
+                        return convert_fs_call(&method, &call.args, tctx, reg, type_env, synthetic);
                     }
                 }
 
                 // Cat A: method receiver — converted before method resolution
                 let object =
-                    convert_expr(&member.obj, reg, &ExprContext::none(), type_env, synthetic)?;
+                    convert_expr(&member.obj, tctx, reg, &ExprContext::none(), type_env, synthetic)?;
                 // Look up method parameter types from the object's type
-                let method_sig = resolve_expr_type(&member.obj, type_env, reg).and_then(|ty| {
+                let method_sig = resolve_expr_type(&member.obj, type_env, tctx, reg).and_then(|ty| {
                     if let RustType::Named { name, .. } = &ty {
                         if let Some(TypeDef::Struct { methods, .. }) = reg.get(name) {
                             return methods.get(&method).cloned();
@@ -138,6 +141,7 @@ pub(super) fn convert_call_expr(
                 let method_params = method_sig.as_ref().map(|sig| sig.params.as_slice());
                 let args = convert_call_args_with_types(
                     &call.args,
+                    tctx,
                     reg,
                     method_params,
                     false,
@@ -156,12 +160,12 @@ pub(super) fn convert_call_expr(
                     ctxt: call.ctxt,
                     type_args: call.type_args.clone(),
                 };
-                convert_call_expr(&unwrapped_call, reg, type_env, synthetic)
+                convert_call_expr(&unwrapped_call, tctx, reg, type_env, synthetic)
             }
             // Chained call: f(x)(y) → { let _f = f(x); _f(y) }
             ast::Expr::Call(inner_call) => {
-                let inner_result = convert_call_expr(inner_call, reg, type_env, synthetic)?;
-                let args = convert_call_args(&call.args, reg, type_env, synthetic)?;
+                let inner_result = convert_call_expr(inner_call, tctx, reg, type_env, synthetic)?;
+                let args = convert_call_args(&call.args, tctx, reg, type_env, synthetic)?;
                 Ok(Expr::Block(vec![
                     Stmt::Let {
                         name: "_f".to_string(),
@@ -180,8 +184,8 @@ pub(super) fn convert_call_expr(
             ast::Expr::Arrow(arrow) => {
                 let mut warnings = Vec::new();
                 let closure =
-                    convert_arrow_expr(arrow, reg, false, &mut warnings, type_env, synthetic)?;
-                let args = convert_call_args(&call.args, reg, type_env, synthetic)?;
+                    convert_arrow_expr(arrow, tctx, reg, false, &mut warnings, type_env, synthetic)?;
+                let args = convert_call_args(&call.args, tctx, reg, type_env, synthetic)?;
                 Ok(Expr::Block(vec![
                     Stmt::Let {
                         name: "__iife".to_string(),
@@ -196,8 +200,8 @@ pub(super) fn convert_call_expr(
                 ]))
             }
             ast::Expr::Fn(fn_expr) => {
-                let closure = convert_fn_expr(fn_expr, reg, type_env, synthetic)?;
-                let args = convert_call_args(&call.args, reg, type_env, synthetic)?;
+                let closure = convert_fn_expr(fn_expr, tctx, reg, type_env, synthetic)?;
+                let args = convert_call_args(&call.args, tctx, reg, type_env, synthetic)?;
                 Ok(Expr::Block(vec![
                     Stmt::Let {
                         name: "__iife".to_string(),
@@ -214,7 +218,7 @@ pub(super) fn convert_call_expr(
             _ => Err(anyhow!("unsupported call target expression")),
         },
         ast::Callee::Super(_) => {
-            let args = convert_call_args(&call.args, reg, type_env, synthetic)?;
+            let args = convert_call_args(&call.args, tctx, reg, type_env, synthetic)?;
             Ok(Expr::FnCall {
                 name: "super".to_string(),
                 args,
@@ -230,6 +234,7 @@ pub(super) fn convert_call_expr(
 pub(super) fn convert_global_builtin(
     fn_name: &str,
     args: &[ast::ExprOrSpread],
+    tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
     type_env: &TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
@@ -237,7 +242,7 @@ pub(super) fn convert_global_builtin(
     match fn_name {
         // parseInt(s) → s.parse::<f64>().unwrap_or(f64::NAN)
         "parseInt" => {
-            let converted = convert_call_args(args, reg, type_env, synthetic)?;
+            let converted = convert_call_args(args, tctx, reg, type_env, synthetic)?;
             if converted.len() != 1 {
                 return Err(anyhow!("parseInt expects 1 argument"));
             }
@@ -254,7 +259,7 @@ pub(super) fn convert_global_builtin(
         }
         // parseFloat(s) → s.parse::<f64>().unwrap_or(f64::NAN)
         "parseFloat" => {
-            let converted = convert_call_args(args, reg, type_env, synthetic)?;
+            let converted = convert_call_args(args, tctx, reg, type_env, synthetic)?;
             if converted.len() != 1 {
                 return Err(anyhow!("parseFloat expects 1 argument"));
             }
@@ -271,7 +276,7 @@ pub(super) fn convert_global_builtin(
         }
         // isNaN(x) → x.is_nan()
         "isNaN" => {
-            let converted = convert_call_args(args, reg, type_env, synthetic)?;
+            let converted = convert_call_args(args, tctx, reg, type_env, synthetic)?;
             if converted.len() != 1 {
                 return Err(anyhow!("isNaN expects 1 argument"));
             }
@@ -294,11 +299,12 @@ pub(super) fn convert_global_builtin(
 pub(super) fn convert_number_static_call(
     method: &str,
     args: &[ast::ExprOrSpread],
+    tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
     type_env: &TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Expr> {
-    let converted = convert_call_args(args, reg, type_env, synthetic)?;
+    let converted = convert_call_args(args, tctx, reg, type_env, synthetic)?;
     if converted.len() != 1 {
         return Err(anyhow!("Number.{method} expects 1 argument"));
     }
@@ -334,6 +340,7 @@ pub(super) fn convert_number_static_call(
 pub(super) fn convert_fs_call(
     method: &str,
     args: &[ast::ExprOrSpread],
+    tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
     type_env: &TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
@@ -346,6 +353,7 @@ pub(super) fn convert_fs_call(
             // Cat A: built-in fs API path arg
             let path_arg = convert_expr(
                 &args[0].expr,
+                tctx,
                 reg,
                 &ExprContext::none(),
                 type_env,
@@ -389,6 +397,7 @@ pub(super) fn convert_fs_call(
             // Cat A: built-in fs API path/data args
             let path_arg = convert_expr(
                 &args[0].expr,
+                tctx,
                 reg,
                 &ExprContext::none(),
                 type_env,
@@ -396,6 +405,7 @@ pub(super) fn convert_fs_call(
             )?;
             let data_arg = convert_expr(
                 &args[1].expr,
+                tctx,
                 reg,
                 &ExprContext::none(),
                 type_env,
@@ -418,6 +428,7 @@ pub(super) fn convert_fs_call(
             // Cat A: built-in fs API path arg
             let path_arg = convert_expr(
                 &args[0].expr,
+                tctx,
                 reg,
                 &ExprContext::none(),
                 type_env,
@@ -446,11 +457,12 @@ pub(super) fn convert_fs_call(
 pub(super) fn convert_math_call(
     method: &str,
     args: &[ast::ExprOrSpread],
+    tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
     type_env: &TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Expr> {
-    let converted_args = convert_call_args(args, reg, type_env, synthetic)?;
+    let converted_args = convert_call_args(args, tctx, reg, type_env, synthetic)?;
     match method {
         // 1-arg methods: first arg becomes receiver (same name)
         "floor" | "ceil" | "round" | "abs" | "sqrt" | "trunc" => {
@@ -520,6 +532,7 @@ pub(super) fn convert_math_call(
 /// `new Foo(x, y)` → `Expr::FnCall { name: "Foo::new", args }`
 pub(super) fn convert_new_expr(
     new_expr: &ast::NewExpr,
+    tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
     type_env: &TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
@@ -535,7 +548,7 @@ pub(super) fn convert_new_expr(
     });
     let args = match &new_expr.args {
         Some(args) => {
-            convert_call_args_with_types(args, reg, param_types, false, type_env, synthetic)?
+            convert_call_args_with_types(args, tctx, reg, param_types, false, type_env, synthetic)?
         }
         None => vec![],
     };
@@ -548,11 +561,12 @@ pub(super) fn convert_new_expr(
 /// Converts call arguments from SWC `ExprOrSpread` to IR `Expr`.
 pub(super) fn convert_call_args(
     args: &[ast::ExprOrSpread],
+    tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
     type_env: &TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Vec<Expr>> {
-    convert_call_args_with_types(args, reg, None, false, type_env, synthetic)
+    convert_call_args_with_types(args, tctx, reg, None, false, type_env, synthetic)
 }
 
 /// Converts call arguments with optional parameter type information from the registry.
@@ -564,6 +578,7 @@ pub(super) fn convert_call_args(
 /// Extra arguments beyond the regular parameters are packed into a `vec![...]`.
 pub(super) fn convert_call_args_with_types(
     args: &[ast::ExprOrSpread],
+    tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
     param_types: Option<&[(String, RustType)]>,
     has_rest: bool,
@@ -607,7 +622,7 @@ pub(super) fn convert_call_args_with_types(
                 // Cat C: param type propagated when available
                 None => ExprContext::none(),
             };
-            let mut expr = convert_expr(&arg.expr, reg, &arg_ctx, type_env, synthetic)?;
+            let mut expr = convert_expr(&arg.expr, tctx, reg, &arg_ctx, type_env, synthetic)?;
             // Wrap in Some(...) when the parameter type is Option<T>,
             // but skip if the value is already None (from undefined)
             if let Some(RustType::Option(_)) = param_ty {
@@ -630,7 +645,7 @@ pub(super) fn convert_call_args_with_types(
             // Rust param is `&dyn Trait`. If the argument is `Box<dyn Trait>`, use `&*arg`.
             if let Some(RustType::Named { name, .. }) = param_ty {
                 if reg.is_trait_type(name) {
-                    let arg_type = resolve_expr_type(&arg.expr, type_env, reg);
+                    let arg_type = resolve_expr_type(&arg.expr, type_env, tctx, reg);
                     if is_box_dyn_trait(&arg_type) {
                         expr = Expr::Ref(Box::new(Expr::Deref(Box::new(expr))));
                     }
@@ -647,6 +662,7 @@ pub(super) fn convert_call_args_with_types(
             // Cat A: single spread source — type is the array itself
             let expr = convert_expr(
                 &rest_args[0].expr,
+                tctx,
                 reg,
                 &ExprContext::none(),
                 type_env,
@@ -668,7 +684,7 @@ pub(super) fn convert_call_args_with_types(
                     }
                     // Cat A: spread source — type is the array itself
                     let expr =
-                        convert_expr(&arg.expr, reg, &ExprContext::none(), type_env, synthetic)?;
+                        convert_expr(&arg.expr, tctx, reg, &ExprContext::none(), type_env, synthetic)?;
                     parts.push(expr);
                 } else {
                     let rest_ctx = match rest_element_type {
@@ -676,7 +692,7 @@ pub(super) fn convert_call_args_with_types(
                         // Cat C: rest element type propagated when available
                         None => ExprContext::none(),
                     };
-                    let expr = convert_expr(&arg.expr, reg, &rest_ctx, type_env, synthetic)?;
+                    let expr = convert_expr(&arg.expr, tctx, reg, &rest_ctx, type_env, synthetic)?;
                     literal_buf.push(expr);
                 }
             }
@@ -703,7 +719,7 @@ pub(super) fn convert_call_args_with_types(
                         // Cat C: rest element type propagated when available
                         None => ExprContext::none(),
                     };
-                    convert_expr(&arg.expr, reg, &rest_ctx, type_env, synthetic)
+                    convert_expr(&arg.expr, tctx, reg, &rest_ctx, type_env, synthetic)
                 })
                 .collect::<Result<Vec<_>>>()?;
             result.push(Expr::Vec {

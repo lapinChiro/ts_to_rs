@@ -5,6 +5,7 @@
 
 pub(crate) mod any_narrowing;
 pub mod classes;
+pub mod context;
 pub mod expressions;
 pub mod functions;
 pub mod statements;
@@ -25,6 +26,7 @@ use crate::ir::{EnumValue, EnumVariant, Item, Visibility};
 use crate::pipeline::SyntheticTypeRegistry;
 use crate::registry::TypeRegistry;
 use crate::transformer::classes::ClassInfo;
+use crate::transformer::context::TransformContext;
 
 /// Extracts the identifier name from a [`ast::Pat::Ident`] pattern.
 ///
@@ -112,10 +114,23 @@ impl std::error::Error for UnsupportedSyntaxError {}
 /// Returns an error if transformation fails or unsupported syntax is encountered.
 pub fn transform_module(module: &Module, reg: &TypeRegistry) -> Result<Vec<Item>> {
     let mut synthetic = SyntheticTypeRegistry::new();
-    let mut items = transform_module_with_path(module, reg, None, &mut synthetic)?;
+    let mg = crate::pipeline::ModuleGraph::empty();
+    let resolution = crate::pipeline::type_resolution::FileTypeResolution::empty();
+    let tctx = context::TransformContext::new(&mg, reg, &resolution, std::path::Path::new(""));
+    let mut items = transform_module_with_path(module, &tctx, reg, None, &mut synthetic)?;
     let mut all = synthetic.into_items();
     all.append(&mut items);
     Ok(all)
+}
+
+/// Transforms an SWC [`Module`] into IR items using a [`TransformContext`].
+pub fn transform_module_with_context(
+    module: &Module,
+    ctx: &context::TransformContext<'_>,
+    synthetic: &mut SyntheticTypeRegistry,
+) -> Result<Vec<Item>> {
+    let current_file_dir = ctx.file_path.parent().and_then(|p| p.to_str());
+    transform_module_with_path(module, ctx, ctx.type_registry, current_file_dir, synthetic)
 }
 
 /// Transforms an SWC [`Module`] into IR items, with the file's crate-relative directory.
@@ -125,18 +140,20 @@ pub fn transform_module(module: &Module, reg: &TypeRegistry) -> Result<Vec<Item>
 /// `../` in import paths. When `None`, the file is assumed to be at the crate root.
 pub fn transform_module_with_path(
     module: &Module,
+    tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
     current_file_dir: Option<&str>,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Vec<Item>> {
     // Pre-scan: collect class info for inheritance resolution
-    let class_map = classes::pre_scan_classes(module, synthetic, reg);
+    let class_map = classes::pre_scan_classes(module, synthetic, tctx, reg);
     let iface_methods = classes::pre_scan_interface_methods(module);
 
     let mut items = Vec::new();
     for module_item in &module.body {
         let (converted, _warnings) = transform_module_item(
             module_item,
+            tctx,
             reg,
             &class_map,
             &iface_methods,
@@ -147,6 +164,7 @@ pub fn transform_module_with_path(
         items.extend(converted);
     }
 
+    inject_regex_import_if_needed(&mut items);
     Ok(items)
 }
 
@@ -165,8 +183,11 @@ pub fn transform_module_collecting(
     reg: &TypeRegistry,
 ) -> Result<(Vec<Item>, Vec<UnsupportedSyntaxError>)> {
     let mut synthetic = SyntheticTypeRegistry::new();
+    let mg = crate::pipeline::ModuleGraph::empty();
+    let resolution = crate::pipeline::type_resolution::FileTypeResolution::empty();
+    let tctx = context::TransformContext::new(&mg, reg, &resolution, std::path::Path::new(""));
     let (mut items, unsupported) =
-        transform_module_collecting_with_path(module, reg, None, &mut synthetic)?;
+        transform_module_collecting_with_path(module, &tctx, reg, None, &mut synthetic)?;
     let mut all = synthetic.into_items();
     all.append(&mut items);
     Ok((all, unsupported))
@@ -175,11 +196,12 @@ pub fn transform_module_collecting(
 /// Like [`transform_module_collecting`] but with file path context for import resolution.
 pub fn transform_module_collecting_with_path(
     module: &Module,
+    tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
     current_file_dir: Option<&str>,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<(Vec<Item>, Vec<UnsupportedSyntaxError>)> {
-    let class_map = classes::pre_scan_classes(module, synthetic, reg);
+    let class_map = classes::pre_scan_classes(module, synthetic, tctx, reg);
     let iface_methods = classes::pre_scan_interface_methods(module);
 
     let mut items = Vec::new();
@@ -188,6 +210,7 @@ pub fn transform_module_collecting_with_path(
     for module_item in &module.body {
         match transform_module_item(
             module_item,
+            tctx,
             reg,
             &class_map,
             &iface_methods,
@@ -218,6 +241,7 @@ pub fn transform_module_collecting_with_path(
         }
     }
 
+    inject_regex_import_if_needed(&mut items);
     Ok((items, unsupported))
 }
 
@@ -227,6 +251,7 @@ pub fn transform_module_collecting_with_path(
 /// return types fall back to `RustType::Any` instead of aborting.
 fn transform_module_item(
     module_item: &ModuleItem,
+    tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
     class_map: &HashMap<String, ClassInfo>,
     iface_methods: &HashMap<String, Vec<String>>,
@@ -238,6 +263,7 @@ fn transform_module_item(
         ModuleItem::Stmt(Stmt::Decl(decl)) => transform_decl(
             decl,
             Visibility::Private,
+            tctx,
             reg,
             class_map,
             iface_methods,
@@ -247,6 +273,7 @@ fn transform_module_item(
         ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(export)) => transform_decl(
             &export.decl,
             Visibility::Public,
+            tctx,
             reg,
             class_map,
             iface_methods,
@@ -435,6 +462,7 @@ fn convert_relative_path_to_crate_path(rel_path: &str, current_file_dir: Option<
 fn transform_decl(
     decl: &Decl,
     vis: Visibility,
+    tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
     class_map: &HashMap<String, ClassInfo>,
     iface_methods: &HashMap<String, Vec<String>>,
@@ -452,13 +480,14 @@ fn transform_decl(
         }
         Decl::Fn(fn_decl) => {
             let (items, warnings) =
-                functions::convert_fn_decl(fn_decl, vis, reg, resilient, synthetic)?;
+                functions::convert_fn_decl(fn_decl, vis, tctx, reg, resilient, synthetic)?;
             Ok((items, warnings))
         }
         Decl::Class(class_decl) => {
             let items = classes::transform_class_with_inheritance(
                 class_decl,
                 vis,
+                tctx,
                 reg,
                 class_map,
                 iface_methods,
@@ -467,7 +496,7 @@ fn transform_decl(
             Ok((items, vec![]))
         }
         Decl::Var(var_decl) => {
-            functions::convert_var_decl_arrow_fns(var_decl, vis, reg, resilient, synthetic)
+            functions::convert_var_decl_arrow_fns(var_decl, vis, tctx, reg, resilient, synthetic)
         }
         Decl::TsEnum(ts_enum) => {
             let items = convert_ts_enum(ts_enum, vis)?;
@@ -482,6 +511,7 @@ fn transform_decl(
                         if let Ok((inner_items, _)) = transform_decl(
                             inner_decl,
                             vis.clone(),
+                            tctx,
                             reg,
                             class_map,
                             iface_methods,
@@ -603,6 +633,66 @@ fn format_decl_kind(decl: &Decl) -> String {
         Decl::TsModule(_) => "TsModuleDecl".to_string(),
         Decl::Using(_) => "UsingDecl".to_string(),
         _ => format!("Decl({decl:?})"),
+    }
+}
+
+fn inject_regex_import_if_needed(items: &mut Vec<Item>) {
+    if items_contain_regex(items) {
+        items.insert(
+            0,
+            Item::Use {
+                vis: Visibility::Private,
+                path: "regex".to_string(),
+                names: vec!["Regex".to_string()],
+            },
+        );
+    }
+}
+
+fn items_contain_regex(items: &[Item]) -> bool {
+    use crate::ir::Method;
+    items.iter().any(|item| match item {
+        Item::Fn { body, .. } => stmts_contain_regex(body),
+        Item::Impl { methods, .. } => methods
+            .iter()
+            .any(|m: &Method| m.body.as_ref().is_some_and(|b| stmts_contain_regex(b))),
+        _ => false,
+    })
+}
+
+fn stmts_contain_regex(stmts: &[crate::ir::Stmt]) -> bool {
+    use crate::ir::Stmt;
+    stmts.iter().any(|stmt| match stmt {
+        Stmt::Let { init, .. } => init.as_ref().is_some_and(expr_contains_regex),
+        Stmt::Expr(e) | Stmt::Return(Some(e)) | Stmt::TailExpr(e) => expr_contains_regex(e),
+        Stmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            stmts_contain_regex(then_body)
+                || else_body
+                    .as_ref()
+                    .is_some_and(|b| stmts_contain_regex(b.as_slice()))
+        }
+        Stmt::Match { arms, .. } => arms.iter().any(|arm| stmts_contain_regex(&arm.body)),
+        Stmt::While { body, .. } | Stmt::ForIn { body, .. } => stmts_contain_regex(body),
+        Stmt::LabeledBlock { body, .. } => stmts_contain_regex(body),
+        _ => false,
+    })
+}
+
+fn expr_contains_regex(expr: &crate::ir::Expr) -> bool {
+    use crate::ir::Expr;
+    match expr {
+        Expr::Regex { .. } => true,
+        Expr::MethodCall { object, args, .. } => {
+            expr_contains_regex(object) || args.iter().any(expr_contains_regex)
+        }
+        Expr::FnCall { args, .. } => args.iter().any(expr_contains_regex),
+        Expr::Ref(inner) | Expr::Await(inner) | Expr::Deref(inner) => expr_contains_regex(inner),
+        Expr::Block(stmts) => stmts_contain_regex(stmts),
+        _ => false,
     }
 }
 

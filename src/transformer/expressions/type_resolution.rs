@@ -13,6 +13,7 @@ use crate::registry::{TypeDef, TypeRegistry};
 use crate::transformer::TypeEnv;
 
 use super::{convert_expr, ExprContext};
+use crate::transformer::context::TransformContext;
 
 /// 式の型を解決する。解決できない場合は None を返す。
 ///
@@ -21,6 +22,7 @@ use super::{convert_expr, ExprContext};
 pub fn resolve_expr_type(
     expr: &ast::Expr,
     type_env: &TypeEnv,
+    tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
 ) -> Option<RustType> {
     match expr {
@@ -29,9 +31,9 @@ pub fn resolve_expr_type(
         ast::Expr::Lit(ast::Lit::Num(_)) => Some(RustType::F64),
         ast::Expr::Lit(ast::Lit::Bool(_)) => Some(RustType::Bool),
         ast::Expr::Tpl(_) => Some(RustType::String),
-        ast::Expr::Bin(bin) => resolve_bin_expr_type(bin, type_env, reg),
+        ast::Expr::Bin(bin) => resolve_bin_expr_type(bin, type_env, tctx, reg),
         ast::Expr::Member(member) => {
-            let obj_type = resolve_expr_type(&member.obj, type_env, reg)?;
+            let obj_type = resolve_expr_type(&member.obj, type_env, tctx, reg)?;
             // インデックスアクセスの型解決
             if let ast::MemberProp::Computed(computed) = &member.prop {
                 match &obj_type {
@@ -50,17 +52,17 @@ pub fn resolve_expr_type(
                     _ => {}
                 }
             }
-            resolve_field_type(&obj_type, &member.prop, reg)
+            resolve_field_type(&obj_type, &member.prop, tctx, reg)
         }
-        ast::Expr::Paren(paren) => resolve_expr_type(&paren.expr, type_env, reg),
+        ast::Expr::Paren(paren) => resolve_expr_type(&paren.expr, type_env, tctx, reg),
         ast::Expr::TsAs(ts_as) => {
             // resolve_expr_type is used in read-only contexts (type resolution for coercion
             // decisions). Synthetic types generated here are discarded since the actual
             // conversion happens separately via convert_ts_as_expr with the real registry.
             convert_ts_type(&ts_as.type_ann, &mut SyntheticTypeRegistry::new(), reg).ok()
         }
-        ast::Expr::Call(call) => resolve_call_return_type(call, type_env, reg),
-        ast::Expr::New(new_expr) => resolve_new_expr_type(new_expr, reg),
+        ast::Expr::Call(call) => resolve_call_return_type(call, type_env, tctx, reg),
+        ast::Expr::New(new_expr) => resolve_new_expr_type(new_expr, tctx, reg),
         _ => None,
     }
 }
@@ -69,6 +71,7 @@ pub fn resolve_expr_type(
 fn resolve_bin_expr_type(
     bin: &ast::BinExpr,
     type_env: &TypeEnv,
+    tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
 ) -> Option<RustType> {
     use ast::BinaryOp::*;
@@ -79,14 +82,14 @@ fn resolve_bin_expr_type(
         }
         // 加算: 文字列 + any → String, otherwise F64
         Add => {
-            let left_ty = resolve_expr_type(&bin.left, type_env, reg);
+            let left_ty = resolve_expr_type(&bin.left, type_env, tctx, reg);
             if left_ty
                 .as_ref()
                 .is_some_and(|t| matches!(t, RustType::String))
             {
                 return Some(RustType::String);
             }
-            let right_ty = resolve_expr_type(&bin.right, type_env, reg);
+            let right_ty = resolve_expr_type(&bin.right, type_env, tctx, reg);
             if right_ty
                 .as_ref()
                 .is_some_and(|t| matches!(t, RustType::String))
@@ -99,8 +102,8 @@ fn resolve_bin_expr_type(
         Sub | Mul | Div | Mod | Exp | BitAnd | BitOr | BitXor | LShift | RShift
         | ZeroFillRShift => Some(RustType::F64),
         // 論理演算 → operand の型（right 側で推定）
-        LogicalAnd | LogicalOr | NullishCoalescing => resolve_expr_type(&bin.right, type_env, reg)
-            .or_else(|| resolve_expr_type(&bin.left, type_env, reg)),
+        LogicalAnd | LogicalOr | NullishCoalescing => resolve_expr_type(&bin.right, type_env, tctx, reg)
+            .or_else(|| resolve_expr_type(&bin.left, type_env, tctx, reg)),
     }
 }
 
@@ -108,6 +111,7 @@ fn resolve_bin_expr_type(
 fn resolve_call_return_type(
     call: &ast::CallExpr,
     type_env: &TypeEnv,
+    tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
 ) -> Option<RustType> {
     let callee = call.callee.as_expr()?;
@@ -126,12 +130,12 @@ fn resolve_call_return_type(
         }
         ast::Expr::Member(member) => {
             // メソッド呼び出し: オブジェクト型を解決 → メソッドの戻り値型を取得
-            let obj_type = resolve_expr_type(&member.obj, type_env, reg)?;
+            let obj_type = resolve_expr_type(&member.obj, type_env, tctx, reg)?;
             let method_name = match &member.prop {
                 ast::MemberProp::Ident(ident) => ident.sym.to_string(),
                 _ => return None,
             };
-            resolve_method_return_type(&obj_type, &method_name, reg)
+            resolve_method_return_type(&obj_type, &method_name, tctx, reg)
         }
         _ => None,
     }
@@ -145,6 +149,7 @@ fn resolve_call_return_type(
 pub(super) fn resolve_method_return_type(
     obj_type: &RustType,
     method_name: &str,
+    _tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
 ) -> Option<RustType> {
     // オブジェクト型に対応する TypeRegistry のキーと型引数を決定
@@ -174,7 +179,7 @@ pub(super) fn resolve_method_return_type(
 }
 
 /// new 式の結果型を解決する。
-fn resolve_new_expr_type(new_expr: &ast::NewExpr, reg: &TypeRegistry) -> Option<RustType> {
+fn resolve_new_expr_type(new_expr: &ast::NewExpr, _tctx: &TransformContext<'_>, reg: &TypeRegistry) -> Option<RustType> {
     let class_name = match new_expr.callee.as_ref() {
         ast::Expr::Ident(ident) => ident.sym.to_string(),
         _ => return None,
@@ -194,6 +199,7 @@ fn resolve_new_expr_type(new_expr: &ast::NewExpr, reg: &TypeRegistry) -> Option<
 pub(super) fn resolve_field_type(
     obj_type: &RustType,
     prop: &ast::MemberProp,
+    _tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
 ) -> Option<RustType> {
     let (type_name, type_args) = match obj_type {
@@ -228,6 +234,7 @@ pub(super) fn resolve_field_type(
 /// - Other types: passes the assertion type as `expected` to the inner expression
 pub(super) fn convert_ts_as_expr(
     ts_as: &ast::TsAsExpr,
+    tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
     expected: Option<&RustType>,
     type_env: &TypeEnv,
@@ -239,6 +246,7 @@ pub(super) fn convert_ts_as_expr(
             if is_primitive_cast {
                 let inner = convert_expr(
                     &ts_as.expr,
+                    tctx,
                     reg,
                     &ExprContext::with_expected(&target_ty),
                     type_env,
@@ -256,7 +264,7 @@ pub(super) fn convert_ts_as_expr(
                     // Cat C: type propagated when available
                     None => ExprContext::none(),
                 };
-                convert_expr(&ts_as.expr, reg, &ctx, type_env, synthetic)
+                convert_expr(&ts_as.expr, tctx, reg, &ctx, type_env, synthetic)
             }
         }
         Err(_) => {
@@ -266,7 +274,7 @@ pub(super) fn convert_ts_as_expr(
                 // Cat C: type propagated when available
                 None => ExprContext::none(),
             };
-            convert_expr(&ts_as.expr, reg, &ctx, type_env, synthetic)
+            convert_expr(&ts_as.expr, tctx, reg, &ctx, type_env, synthetic)
         }
     }
 }

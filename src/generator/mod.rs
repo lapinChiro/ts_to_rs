@@ -20,17 +20,17 @@ pub(super) fn generate_param(p: &Param) -> String {
 }
 
 /// Generates Rust source code from a list of IR items.
+///
+/// The Generator is a pure IR → text conversion. It does not perform semantic
+/// analysis (e.g., scanning for `Regex::new()` to inject imports). All semantic
+/// decisions (imports, type coercions, etc.) are the Transformer's responsibility
+/// and must be present in the IR items.
 pub fn generate(items: &[Item]) -> String {
-    let output = items
+    items
         .iter()
         .map(generate_item)
         .collect::<Vec<_>>()
-        .join("\n\n");
-    if output.contains("Regex::new(") {
-        format!("use regex::Regex;\n\n{output}")
-    } else {
-        output
-    }
+        .join("\n\n")
 }
 
 /// Generates a single IR item as Rust source code.

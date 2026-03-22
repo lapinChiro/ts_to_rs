@@ -14,6 +14,7 @@ use crate::registry::TypeRegistry;
 use crate::transformer::expressions::{convert_expr, ExprContext};
 use crate::transformer::extract_prop_name;
 use crate::transformer::functions::convert_last_return_to_tail;
+use crate::transformer::context::TransformContext;
 use crate::transformer::statements::convert_stmt;
 use crate::transformer::TypeEnv;
 
@@ -47,6 +48,7 @@ pub fn extract_class_info(
     class_decl: &ast::ClassDecl,
     vis: Visibility,
     synthetic: &mut SyntheticTypeRegistry,
+    tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
 ) -> Result<ClassInfo> {
     let name = class_decl.ident.sym.to_string();
@@ -79,20 +81,20 @@ pub fn extract_class_info(
     for member in &class_decl.class.body {
         match member {
             ast::ClassMember::ClassProp(prop) if prop.is_static => {
-                if let Some(ac) = convert_static_prop(prop, &vis, synthetic, reg)? {
+                if let Some(ac) = convert_static_prop(prop, &vis, synthetic, tctx, reg)? {
                     static_consts.push(ac);
                 }
             }
             ast::ClassMember::ClassProp(prop) => {
-                fields.push(convert_class_prop(prop, &vis, synthetic, reg)?);
+                fields.push(convert_class_prop(prop, &vis, synthetic, tctx, reg)?);
             }
             ast::ClassMember::Constructor(ctor) => {
-                let (method, param_prop_fields) = convert_constructor(ctor, &vis, synthetic, reg)?;
+                let (method, param_prop_fields) = convert_constructor(ctor, &vis, synthetic, tctx, reg)?;
                 constructor = Some(method);
                 fields.extend(param_prop_fields);
             }
             ast::ClassMember::Method(method) => {
-                methods.push(convert_class_method(method, &vis, synthetic, reg)?);
+                methods.push(convert_class_method(method, &vis, synthetic, tctx, reg)?);
             }
             _ => {}
         }
@@ -123,9 +125,10 @@ pub fn convert_class_decl(
     class_decl: &ast::ClassDecl,
     vis: Visibility,
     synthetic: &mut SyntheticTypeRegistry,
+    tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
 ) -> Result<Vec<Item>> {
-    let info = extract_class_info(class_decl, vis, synthetic, reg)?;
+    let info = extract_class_info(class_decl, vis, synthetic, tctx, reg)?;
     if info.is_abstract {
         generate_abstract_class_items(&info)
     } else {
@@ -562,6 +565,7 @@ fn convert_static_prop(
     prop: &ast::ClassProp,
     vis: &Visibility,
     synthetic: &mut SyntheticTypeRegistry,
+    tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
 ) -> Result<Option<AssocConst>> {
     let name = extract_prop_name(&prop.key)
@@ -576,6 +580,7 @@ fn convert_static_prop(
     let value = match &prop.value {
         Some(init) => convert_expr(
             init,
+            tctx,
             reg,
             &ExprContext::with_expected(&ty),
             &TypeEnv::new(),
@@ -597,6 +602,7 @@ fn convert_class_prop(
     prop: &ast::ClassProp,
     class_vis: &Visibility,
     synthetic: &mut SyntheticTypeRegistry,
+    _tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
 ) -> Result<StructField> {
     let field_name = extract_prop_name(&prop.key)
@@ -623,6 +629,7 @@ fn convert_constructor(
     ctor: &ast::Constructor,
     vis: &Visibility,
     synthetic: &mut SyntheticTypeRegistry,
+    tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
 ) -> Result<(Method, Vec<StructField>)> {
     let mut params = Vec::new();
@@ -635,12 +642,12 @@ fn convert_constructor(
     for param in &ctor.params {
         match param {
             ast::ParamOrTsParamProp::Param(p) => {
-                let (param, expansion) = convert_param_pat(&p.pat, synthetic, reg)?;
+                let (param, expansion) = convert_param_pat(&p.pat, synthetic, tctx, reg)?;
                 default_expansion_stmts.extend(expansion);
                 params.push(param);
             }
             ast::ParamOrTsParamProp::TsParamProp(prop) => {
-                let (ir_param, field) = convert_ts_param_prop(prop, vis, synthetic, reg)?;
+                let (ir_param, field) = convert_ts_param_prop(prop, vis, synthetic, tctx, reg)?;
                 param_prop_names.push(ir_param.name.clone());
                 params.push(ir_param);
                 param_prop_fields.push(field);
@@ -659,7 +666,7 @@ fn convert_constructor(
                 .into_iter()
                 .chain(block.stmts.iter().cloned())
                 .collect();
-            let mut body = convert_constructor_body(&all_stmts, reg, &params, synthetic)?;
+            let mut body = convert_constructor_body(&all_stmts, tctx, reg, &params, synthetic)?;
             // Insert default parameter expansion stmts at the beginning
             for (i, stmt) in default_expansion_stmts.into_iter().enumerate() {
                 body.insert(i, stmt);
@@ -668,7 +675,7 @@ fn convert_constructor(
         }
         None if !param_prop_names.is_empty() => {
             let synthetic_stmts = build_param_prop_assignments(&param_prop_names);
-            let mut body = convert_constructor_body(&synthetic_stmts, reg, &params, synthetic)?;
+            let mut body = convert_constructor_body(&synthetic_stmts, tctx, reg, &params, synthetic)?;
             for (i, stmt) in default_expansion_stmts.into_iter().enumerate() {
                 body.insert(i, stmt);
             }
@@ -701,6 +708,7 @@ fn convert_ts_param_prop(
     prop: &ast::TsParamProp,
     class_vis: &Visibility,
     synthetic: &mut SyntheticTypeRegistry,
+    _tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
 ) -> Result<(Param, StructField)> {
     let (name, ty) = match &prop.param {
@@ -778,6 +786,7 @@ fn build_param_prop_assignments(names: &[String]) -> Vec<ast::Stmt> {
 /// match this pattern are converted as normal statements.
 fn convert_constructor_body(
     stmts: &[ast::Stmt],
+    tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
     params: &[Param],
     synthetic: &mut SyntheticTypeRegistry,
@@ -794,10 +803,10 @@ fn convert_constructor_body(
     for stmt in stmts {
         if let Some((field_name, value_expr)) = try_extract_this_assignment(stmt) {
             // Cat B: field type could be looked up from class definition
-            let value = convert_expr(value_expr, reg, &ExprContext::none(), &type_env, synthetic)?;
+            let value = convert_expr(value_expr, tctx, reg, &ExprContext::none(), &type_env, synthetic)?;
             fields.push((field_name, value));
         } else {
-            other_stmts.extend(convert_stmt(stmt, reg, None, &mut type_env, synthetic)?);
+            other_stmts.extend(convert_stmt(stmt, tctx, reg, None, &mut type_env, synthetic)?);
         }
     }
 
@@ -850,6 +859,7 @@ fn convert_class_method(
     method: &ast::ClassMethod,
     vis: &Visibility,
     synthetic: &mut SyntheticTypeRegistry,
+    tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
 ) -> Result<Method> {
     let raw_name = extract_prop_name(&method.key)
@@ -866,7 +876,7 @@ fn convert_class_method(
     let mut params = Vec::new();
     let mut default_expansion_stmts = Vec::new();
     for param in &method.function.params {
-        let (p, expansion) = convert_param_pat(&param.pat, synthetic, reg)?;
+        let (p, expansion) = convert_param_pat(&param.pat, synthetic, tctx, reg)?;
         default_expansion_stmts.extend(expansion);
         params.push(p);
     }
@@ -899,6 +909,7 @@ fn convert_class_method(
             for stmt in &block.stmts {
                 stmts.extend(convert_stmt(
                     stmt,
+                    tctx,
                     reg,
                     return_type.as_ref(),
                     &mut method_env,
@@ -971,6 +982,7 @@ fn is_self_field_access(expr: &Expr) -> bool {
 fn convert_param_pat(
     pat: &ast::Pat,
     synthetic: &mut SyntheticTypeRegistry,
+    _tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
 ) -> Result<(Param, Vec<Stmt>)> {
     match pat {
@@ -1040,6 +1052,7 @@ fn convert_param_pat(
 pub(super) fn pre_scan_classes(
     module: &ast::Module,
     synthetic: &mut SyntheticTypeRegistry,
+    tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
 ) -> HashMap<String, ClassInfo> {
     let mut map = HashMap::new();
@@ -1058,7 +1071,7 @@ pub(super) fn pre_scan_classes(
             }
             _ => continue,
         };
-        if let Ok(info) = extract_class_info(decl, vis, synthetic, reg) {
+        if let Ok(info) = extract_class_info(decl, vis, synthetic, tctx, reg) {
             map.insert(info.name.clone(), info);
         }
     }
@@ -1128,12 +1141,13 @@ fn find_parent_class_names(
 pub(super) fn transform_class_with_inheritance(
     class_decl: &ast::ClassDecl,
     vis: Visibility,
+    tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
     class_map: &HashMap<String, ClassInfo>,
     iface_methods: &HashMap<String, Vec<String>>,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Vec<Item>> {
-    let info = extract_class_info(class_decl, vis, synthetic, reg)?;
+    let info = extract_class_info(class_decl, vis, synthetic, tctx, reg)?;
     let parent_names = find_parent_class_names(class_map);
 
     if info.is_abstract {
@@ -1951,6 +1965,7 @@ mod tests {
             &decl,
             Visibility::Private,
             &mut SyntheticTypeRegistry::new(),
+            &tctx,
             &reg,
         )
         .unwrap();

@@ -9,6 +9,7 @@ use crate::registry::{TypeDef, TypeRegistry};
 use crate::transformer::TypeEnv;
 
 use super::{convert_expr, ExprContext};
+use crate::transformer::context::TransformContext;
 
 /// Converts a discriminated union object literal to an enum variant construction.
 ///
@@ -17,6 +18,7 @@ use super::{convert_expr, ExprContext};
 #[allow(clippy::too_many_arguments)]
 pub(super) fn convert_discriminated_union_object_lit(
     obj_lit: &ast::ObjectLit,
+    tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
     type_env: &TypeEnv,
     enum_name: &str,
@@ -75,7 +77,7 @@ pub(super) fn convert_discriminated_union_object_lit(
                         // Cat C: field type propagated when available
                         None => ExprContext::none(),
                     };
-                    let value = convert_expr(&kv.value, reg, &field_ctx, type_env, synthetic)?;
+                    let value = convert_expr(&kv.value, tctx, reg, &field_ctx, type_env, synthetic)?;
                     fields.push((key, value));
                 }
                 ast::Prop::Shorthand(ident) => {
@@ -92,6 +94,7 @@ pub(super) fn convert_discriminated_union_object_lit(
                     };
                     let value = convert_expr(
                         &ast::Expr::Ident(ident.clone()),
+                        tctx,
                         reg,
                         &field_ctx,
                         type_env,
@@ -124,6 +127,7 @@ pub(super) fn convert_discriminated_union_object_lit(
 /// (mixed or no computed keys), or `Err` if a computed key value fails to convert.
 pub(super) fn try_convert_as_hashmap(
     obj_lit: &ast::ObjectLit,
+    tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
     expected: Option<&RustType>,
     type_env: &TypeEnv,
@@ -154,6 +158,7 @@ pub(super) fn try_convert_as_hashmap(
                     // Cat A: HashMap computed key — arbitrary expression
                     let key = convert_expr(
                         computed_expr,
+                        tctx,
                         reg,
                         &ExprContext::none(),
                         type_env,
@@ -164,7 +169,7 @@ pub(super) fn try_convert_as_hashmap(
                         // Cat C: HashMap value type propagated when available
                         None => ExprContext::none(),
                     };
-                    let value = convert_expr(&kv.value, reg, &value_ctx, type_env, synthetic)?;
+                    let value = convert_expr(&kv.value, tctx, reg, &value_ctx, type_env, synthetic)?;
                     entries.push(Expr::Tuple {
                         elements: vec![key, value],
                     });
@@ -191,13 +196,14 @@ pub(super) fn try_convert_as_hashmap(
 /// `Expr::StructInit { name: "Point", fields: [...] }`
 pub(super) fn convert_object_lit(
     obj_lit: &ast::ObjectLit,
+    tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
     expected: Option<&RustType>,
     type_env: &TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Expr> {
     // Check if all properties use computed keys → HashMap::from(vec![(k, v), ...])
-    if let Some(hashmap) = try_convert_as_hashmap(obj_lit, reg, expected, type_env, synthetic)? {
+    if let Some(hashmap) = try_convert_as_hashmap(obj_lit, tctx, reg, expected, type_env, synthetic)? {
         return Ok(hashmap);
     }
 
@@ -220,6 +226,7 @@ pub(super) fn convert_object_lit(
     {
         return convert_discriminated_union_object_lit(
             obj_lit,
+            tctx,
             reg,
             type_env,
             struct_name,
@@ -256,7 +263,7 @@ pub(super) fn convert_object_lit(
                         // Cat C: field type propagated when available
                         None => ExprContext::none(),
                     };
-                    let value = convert_expr(&kv.value, reg, &field_ctx, type_env, synthetic)?;
+                    let value = convert_expr(&kv.value, tctx, reg, &field_ctx, type_env, synthetic)?;
                     fields.push((key, value));
                 }
                 ast::Prop::Shorthand(ident) => {
@@ -270,6 +277,7 @@ pub(super) fn convert_object_lit(
                     };
                     let value = convert_expr(
                         &ast::Expr::Ident(ident.clone()),
+                        tctx,
                         reg,
                         &field_ctx,
                         type_env,
@@ -287,6 +295,7 @@ pub(super) fn convert_object_lit(
                 // Cat A: spread source — type is the struct itself
                 let spread_expr = convert_expr(
                     &spread_elem.expr,
+                    tctx,
                     reg,
                     &ExprContext::none(),
                     type_env,
@@ -378,6 +387,7 @@ pub(super) fn convert_object_lit(
 /// here (e.g., nested in a function call argument), an error is returned.
 pub(super) fn convert_array_lit(
     array_lit: &ast::ArrayLit,
+    tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
     expected: Option<&RustType>,
     type_env: &TypeEnv,
@@ -404,7 +414,7 @@ pub(super) fn convert_array_lit(
                         // Cat C: tuple element type propagated when available
                         None => ExprContext::none(),
                     };
-                    convert_expr(&elem.expr, reg, &elem_ctx, type_env, synthetic)
+                    convert_expr(&elem.expr, tctx, reg, &elem_ctx, type_env, synthetic)
                 }
             })
             .collect::<Result<Vec<_>>>()?;
@@ -417,7 +427,7 @@ pub(super) fn convert_array_lit(
     };
 
     if has_spread {
-        return convert_spread_array_to_block(array_lit, reg, element_type, type_env, synthetic);
+        return convert_spread_array_to_block(array_lit, tctx, reg, element_type, type_env, synthetic);
     }
 
     let elements = array_lit
@@ -430,7 +440,7 @@ pub(super) fn convert_array_lit(
                 // Cat C: element type propagated when available
                 None => ExprContext::none(),
             };
-            convert_expr(&elem.expr, reg, &elem_ctx, type_env, synthetic)
+            convert_expr(&elem.expr, tctx, reg, &elem_ctx, type_env, synthetic)
         })
         .collect::<Result<Vec<_>>>()?;
     Ok(Expr::Vec { elements })
@@ -449,6 +459,7 @@ pub(super) fn convert_array_lit(
 /// ```
 pub(super) fn convert_spread_array_to_block(
     array_lit: &ast::ArrayLit,
+    tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
     element_type: Option<&RustType>,
     type_env: &TypeEnv,
@@ -481,7 +492,7 @@ pub(super) fn convert_spread_array_to_block(
             }
             // Cat A: spread source — type is the array itself
             let spread_expr =
-                convert_expr(&elem.expr, reg, &ExprContext::none(), type_env, synthetic)?;
+                convert_expr(&elem.expr, tctx, reg, &ExprContext::none(), type_env, synthetic)?;
             stmts.push(Stmt::Expr(Expr::MethodCall {
                 object: Box::new(Expr::Ident("_v".to_string())),
                 method: "extend".to_string(),
@@ -501,7 +512,7 @@ pub(super) fn convert_spread_array_to_block(
                 // Cat C: element type propagated when available
                 None => ExprContext::none(),
             };
-            let value = convert_expr(&elem.expr, reg, &elem_ctx, type_env, synthetic)?;
+            let value = convert_expr(&elem.expr, tctx, reg, &elem_ctx, type_env, synthetic)?;
             if initialized {
                 // _v.push(value)
                 stmts.push(Stmt::Expr(Expr::MethodCall {

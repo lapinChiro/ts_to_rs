@@ -15,6 +15,7 @@ use crate::transformer::statements::convert_stmt;
 use crate::transformer::TypeEnv;
 
 use super::{convert_expr, ExprContext};
+use crate::transformer::context::TransformContext;
 
 /// Converts a single parameter pattern into IR [`Param`] and expansion statements.
 ///
@@ -24,6 +25,7 @@ use super::{convert_expr, ExprContext};
 /// `context` is used in error messages (e.g. "function expression", "arrow").
 fn convert_function_param_pat(
     pat: &ast::Pat,
+    tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
     params: &mut Vec<Param>,
     expansion_stmts: &mut Vec<Stmt>,
@@ -45,7 +47,7 @@ fn convert_function_param_pat(
         }
         ast::Pat::Object(obj_pat) => {
             let (param, stmts) = crate::transformer::functions::convert_object_destructuring_param(
-                obj_pat, reg, synthetic,
+                obj_pat, tctx, reg, synthetic,
             )?;
             params.push(param);
             expansion_stmts.extend(stmts);
@@ -114,6 +116,7 @@ fn convert_function_param_pat(
 /// are treated identically to arrow functions — the optional name is ignored.
 pub(super) fn convert_fn_expr(
     fn_expr: &ast::FnExpr,
+    tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
     type_env: &TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
@@ -126,6 +129,7 @@ pub(super) fn convert_fn_expr(
     for param in &func.params {
         convert_function_param_pat(
             &param.pat,
+            tctx,
             reg,
             &mut params,
             &mut expansion_stmts,
@@ -156,6 +160,7 @@ pub(super) fn convert_fn_expr(
             for stmt in &block.stmts {
                 stmts.extend(convert_stmt(
                     stmt,
+                    tctx,
                     reg,
                     return_type.as_ref(),
                     &mut inner_env,
@@ -187,6 +192,7 @@ pub(super) fn convert_fn_expr(
 /// arrow has no explicit return type annotation, this type is used for the body conversion.
 pub fn convert_arrow_expr(
     arrow: &ast::ArrowExpr,
+    tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
     resilient: bool,
     fallback_warnings: &mut Vec<String>,
@@ -195,6 +201,7 @@ pub fn convert_arrow_expr(
 ) -> Result<Expr> {
     convert_arrow_expr_with_return_type(
         arrow,
+        tctx,
         reg,
         resilient,
         fallback_warnings,
@@ -214,6 +221,7 @@ pub fn convert_arrow_expr(
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn convert_arrow_expr_with_return_type(
     arrow: &ast::ArrowExpr,
+    tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
     resilient: bool,
     fallback_warnings: &mut Vec<String>,
@@ -270,6 +278,7 @@ pub(crate) fn convert_arrow_expr_with_return_type(
                 // Object, Assign, Rest, and catch-all are shared with fn_expr
                 other => convert_function_param_pat(
                     other,
+                    tctx,
                     reg,
                     &mut params,
                     &mut expansion_stmts,
@@ -291,6 +300,7 @@ pub(crate) fn convert_arrow_expr_with_return_type(
                 resilient,
                 fallback_warnings,
                 synthetic,
+                tctx,
                 reg,
             )
         })
@@ -305,7 +315,7 @@ pub(crate) fn convert_arrow_expr_with_return_type(
                     // Cat C: return type propagated when available
                     None => ExprContext::none(),
                 };
-                let ir_expr = convert_expr(expr, reg, &ret_ctx, type_env, synthetic)?;
+                let ir_expr = convert_expr(expr, tctx, reg, &ret_ctx, type_env, synthetic)?;
                 ClosureBody::Expr(Box::new(ir_expr))
             }
             ast::BlockStmtOrExpr::BlockStmt(block) => {
@@ -314,6 +324,7 @@ pub(crate) fn convert_arrow_expr_with_return_type(
                 for stmt in &block.stmts {
                     stmts.extend(convert_stmt(
                         stmt,
+                        tctx,
                         reg,
                         return_type.as_ref(),
                         &mut inner_env,
@@ -334,7 +345,7 @@ pub(crate) fn convert_arrow_expr_with_return_type(
                     // Cat C: return type propagated when available
                     None => ExprContext::none(),
                 };
-                let ir_expr = convert_expr(expr, reg, &ret_ctx, type_env, synthetic)?;
+                let ir_expr = convert_expr(expr, tctx, reg, &ret_ctx, type_env, synthetic)?;
                 body_stmts.push(Stmt::Return(Some(ir_expr)));
             }
             ast::BlockStmtOrExpr::BlockStmt(block) => {
@@ -342,6 +353,7 @@ pub(crate) fn convert_arrow_expr_with_return_type(
                 for stmt in &block.stmts {
                     body_stmts.extend(convert_stmt(
                         stmt,
+                        tctx,
                         reg,
                         return_type.as_ref(),
                         &mut inner_env,

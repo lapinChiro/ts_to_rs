@@ -6,6 +6,7 @@ use anyhow::{anyhow, Result};
 use swc_ecma_ast as ast;
 
 use crate::ir::{Expr, RustType};
+use crate::transformer::context::TransformContext;
 // Re-export for tests that use `super::*`
 #[cfg(test)]
 use crate::ir::{ClosureBody, Param};
@@ -69,6 +70,7 @@ impl<'a> ExprContext<'a> {
 /// Returns an error for unsupported expression types.
 pub fn convert_expr(
     expr: &ast::Expr,
+    tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
     ctx: &ExprContext,
     type_env: &TypeEnv,
@@ -87,6 +89,7 @@ pub fn convert_expr(
         if matches!(expr, ast::Expr::Lit(_)) {
             let inner_result = convert_expr(
                 expr,
+                tctx,
                 reg,
                 &ExprContext::with_expected(inner),
                 type_env,
@@ -109,36 +112,37 @@ pub fn convert_expr(
                 _ => Ok(Expr::Ident(name)),
             }
         }
-        ast::Expr::Lit(lit) => convert_lit(lit, expected, reg),
-        ast::Expr::Bin(bin) => convert_bin_expr(bin, reg, expected, type_env, synthetic),
-        ast::Expr::Tpl(tpl) => convert_template_literal(tpl, reg, type_env, synthetic),
-        ast::Expr::Paren(paren) => convert_expr(&paren.expr, reg, ctx, type_env, synthetic),
-        ast::Expr::Member(member) => convert_member_expr(member, reg, type_env, synthetic),
+        ast::Expr::Lit(lit) => convert_lit(lit, expected, tctx, reg),
+        ast::Expr::Bin(bin) => convert_bin_expr(bin, tctx, reg, expected, type_env, synthetic),
+        ast::Expr::Tpl(tpl) => convert_template_literal(tpl, tctx, reg, type_env, synthetic),
+        ast::Expr::Paren(paren) => convert_expr(&paren.expr, tctx, reg, ctx, type_env, synthetic),
+        ast::Expr::Member(member) => convert_member_expr(member, tctx, reg, type_env, synthetic),
         ast::Expr::This(_) => Ok(Expr::Ident("self".to_string())),
-        ast::Expr::Assign(assign) => convert_assign_expr(assign, reg, type_env, synthetic),
+        ast::Expr::Assign(assign) => convert_assign_expr(assign, tctx, reg, type_env, synthetic),
         ast::Expr::Update(up) => convert_update_expr(up),
         ast::Expr::Arrow(arrow) => {
-            convert_arrow_expr(arrow, reg, false, &mut Vec::new(), type_env, synthetic)
+            convert_arrow_expr(arrow, tctx, reg, false, &mut Vec::new(), type_env, synthetic)
         }
-        ast::Expr::Fn(fn_expr) => convert_fn_expr(fn_expr, reg, type_env, synthetic),
-        ast::Expr::Call(call) => convert_call_expr(call, reg, type_env, synthetic),
-        ast::Expr::New(new_expr) => convert_new_expr(new_expr, reg, type_env, synthetic),
+        ast::Expr::Fn(fn_expr) => convert_fn_expr(fn_expr, tctx, reg, type_env, synthetic),
+        ast::Expr::Call(call) => convert_call_expr(call, tctx, reg, type_env, synthetic),
+        ast::Expr::New(new_expr) => convert_new_expr(new_expr, tctx, reg, type_env, synthetic),
         ast::Expr::Array(array_lit) => {
-            convert_array_lit(array_lit, reg, expected, type_env, synthetic)
+            convert_array_lit(array_lit, tctx, reg, expected, type_env, synthetic)
         }
         ast::Expr::Object(obj_lit) => {
-            convert_object_lit(obj_lit, reg, expected, type_env, synthetic)
+            convert_object_lit(obj_lit, tctx, reg, expected, type_env, synthetic)
         }
-        ast::Expr::Cond(cond) => convert_cond_expr(cond, reg, expected, type_env, synthetic),
-        ast::Expr::Unary(unary) => convert_unary_expr(unary, reg, type_env, synthetic),
-        ast::Expr::TsAs(ts_as) => convert_ts_as_expr(ts_as, reg, expected, type_env, synthetic),
+        ast::Expr::Cond(cond) => convert_cond_expr(cond, tctx, reg, expected, type_env, synthetic),
+        ast::Expr::Unary(unary) => convert_unary_expr(unary, tctx, reg, type_env, synthetic),
+        ast::Expr::TsAs(ts_as) => convert_ts_as_expr(ts_as, tctx, reg, expected, type_env, synthetic),
         ast::Expr::OptChain(opt_chain) => {
-            convert_opt_chain_expr(opt_chain, reg, type_env, synthetic)
+            convert_opt_chain_expr(opt_chain, tctx, reg, type_env, synthetic)
         }
         ast::Expr::Await(await_expr) => {
             // Cat A: await inner type depends on Promise resolution
             let inner = convert_expr(
                 &await_expr.arg,
+                tctx,
                 reg,
                 &ExprContext::none(),
                 type_env,
@@ -148,7 +152,7 @@ pub fn convert_expr(
         }
         // Non-null assertion (expr!) — TS type-level only, no runtime effect. Strip assertion.
         ast::Expr::TsNonNull(ts_non_null) => {
-            convert_expr(&ts_non_null.expr, reg, ctx, type_env, synthetic)
+            convert_expr(&ts_non_null.expr, tctx, reg, ctx, type_env, synthetic)
         }
         _ => Err(anyhow!("unsupported expression: {:?}", expr)),
     }?;
@@ -156,7 +160,7 @@ pub fn convert_expr(
     // Trait type coercion: when expected type is Box<dyn Trait> and the expression
     // produces a concrete (non-Box) value, wrap it in Box::new().
     if let Some(expected) = expected {
-        if needs_trait_box_coercion(expected, expr, type_env, reg) {
+        if needs_trait_box_coercion(expected, expr, type_env, tctx, reg) {
             return Ok(Expr::FnCall {
                 name: "Box::new".to_string(),
                 args: vec![result],
@@ -173,6 +177,7 @@ fn needs_trait_box_coercion(
     expected: &RustType,
     src_expr: &ast::Expr,
     type_env: &TypeEnv,
+    tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
 ) -> bool {
     // Check if expected type is Box<dyn Trait>
@@ -192,7 +197,7 @@ fn needs_trait_box_coercion(
     };
 
     // Resolve the expression's actual type. If unknown or Any, skip coercion (safe default).
-    let Some(expr_type) = type_resolution::resolve_expr_type(src_expr, type_env, reg) else {
+    let Some(expr_type) = type_resolution::resolve_expr_type(src_expr, type_env, tctx, reg) else {
         return false;
     };
     if matches!(expr_type, RustType::Any) {
@@ -229,6 +234,7 @@ fn needs_trait_box_coercion(
 /// `` `Hello ${name}` `` becomes `format!("Hello {}", name)`.
 fn convert_template_literal(
     tpl: &ast::Tpl,
+    tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
     type_env: &TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
@@ -244,6 +250,7 @@ fn convert_template_literal(
             // Cat A: template interpolation — format!() accepts any Display type
             let arg = convert_expr(
                 &tpl.exprs[i],
+                tctx,
                 reg,
                 &ExprContext::none(),
                 type_env,
@@ -264,6 +271,7 @@ fn convert_template_literal(
 /// generates `Expr::IfLet` with the narrowed variable available in the then branch.
 fn convert_cond_expr(
     cond: &ast::CondExpr,
+    tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
     expected: Option<&RustType>,
     type_env: &TypeEnv,
@@ -273,7 +281,7 @@ fn convert_cond_expr(
 
     // Try narrowing: extract guard from the ternary condition
     if let Some(guard) = patterns::extract_narrowing_guard(&cond.test) {
-        if let Some((pattern, is_swap)) = guard.if_let_pattern(type_env, reg) {
+        if let Some((pattern, is_swap)) = guard.if_let_pattern(type_env, tctx, reg) {
             // Determine which TS branch corresponds to the if-let match (pattern matched).
             // For === guards: consequent is the matched branch.
             // For !== guards (is_swap): alternate is the matched branch.
@@ -298,10 +306,10 @@ fn convert_cond_expr(
                     narrowed_env.insert(guard.var_name().to_string(), narrowed);
                 }
             }
-            let matched_expr = convert_expr(matched_ast, reg, ctx, &narrowed_env, synthetic)?;
+            let matched_expr = convert_expr(matched_ast, tctx, reg, ctx, &narrowed_env, synthetic)?;
 
             // Convert the unmatched branch with original type environment
-            let unmatched_expr = convert_expr(unmatched_ast, reg, ctx, type_env, synthetic)?;
+            let unmatched_expr = convert_expr(unmatched_ast, tctx, reg, ctx, type_env, synthetic)?;
 
             let expr_ir = Expr::Ident(guard.var_name().to_string());
             return Ok(Expr::IfLet {
@@ -314,9 +322,9 @@ fn convert_cond_expr(
     }
 
     // Fallback: regular if expression
-    let condition = convert_expr(&cond.test, reg, &ExprContext::none(), type_env, synthetic)?;
-    let then_expr = convert_expr(&cond.cons, reg, ctx, type_env, synthetic)?;
-    let else_expr = convert_expr(&cond.alt, reg, ctx, type_env, synthetic)?;
+    let condition = convert_expr(&cond.test, tctx, reg, &ExprContext::none(), type_env, synthetic)?;
+    let then_expr = convert_expr(&cond.cons, tctx, reg, ctx, type_env, synthetic)?;
+    let else_expr = convert_expr(&cond.alt, tctx, reg, ctx, type_env, synthetic)?;
     Ok(Expr::If {
         condition: Box::new(condition),
         then_expr: Box::new(then_expr),

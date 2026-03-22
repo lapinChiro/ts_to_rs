@@ -12,6 +12,7 @@ use crate::transformer::TypeEnv;
 
 use super::literals::lookup_string_enum_variant;
 use super::type_resolution::resolve_expr_type;
+use crate::transformer::context::TransformContext;
 
 /// Detects `typeof x === "type"` / `typeof x !== "type"` patterns and resolves
 /// them using TypeEnv. Returns `None` if the pattern is not recognized.
@@ -19,6 +20,7 @@ use super::type_resolution::resolve_expr_type;
 pub(super) fn try_convert_undefined_comparison(
     bin: &ast::BinExpr,
     type_env: &TypeEnv,
+    tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Option<Expr> {
@@ -40,6 +42,7 @@ pub(super) fn try_convert_undefined_comparison(
     // Cat A: comparison operand
     let other_ir = super::convert_expr(
         other_expr,
+        tctx,
         reg,
         &super::ExprContext::none(),
         type_env,
@@ -60,6 +63,7 @@ pub(super) fn try_convert_undefined_comparison(
 pub(super) fn try_convert_enum_string_comparison(
     bin: &ast::BinExpr,
     type_env: &TypeEnv,
+    tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Option<Expr> {
@@ -73,11 +77,12 @@ pub(super) fn try_convert_enum_string_comparison(
 
     // Try: left is enum variable, right is string literal
     if let Some(str_value) = extract_string_lit(&bin.right) {
-        if let Some(enum_name) = resolve_enum_type_name(&bin.left, type_env, reg) {
+        if let Some(enum_name) = resolve_enum_type_name(&bin.left, type_env, tctx, reg) {
             if let Some(variant) = lookup_string_enum_variant(reg, &enum_name, &str_value) {
                 // Cat A: comparison operand
                 let left = super::convert_expr(
                     &bin.left,
+                    tctx,
                     reg,
                     &super::ExprContext::none(),
                     type_env,
@@ -95,11 +100,12 @@ pub(super) fn try_convert_enum_string_comparison(
 
     // Try: left is string literal, right is enum variable
     if let Some(str_value) = extract_string_lit(&bin.left) {
-        if let Some(enum_name) = resolve_enum_type_name(&bin.right, type_env, reg) {
+        if let Some(enum_name) = resolve_enum_type_name(&bin.right, type_env, tctx, reg) {
             if let Some(variant) = lookup_string_enum_variant(reg, &enum_name, &str_value) {
                 // Cat A: comparison operand
                 let right = super::convert_expr(
                     &bin.right,
+                    tctx,
                     reg,
                     &super::ExprContext::none(),
                     type_env,
@@ -131,9 +137,10 @@ fn extract_string_lit(expr: &ast::Expr) -> Option<String> {
 fn resolve_enum_type_name(
     expr: &ast::Expr,
     type_env: &TypeEnv,
+    tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
 ) -> Option<String> {
-    let ty = resolve_expr_type(expr, type_env, reg)?;
+    let ty = resolve_expr_type(expr, type_env, tctx, reg)?;
     if let RustType::Named { name, .. } = &ty {
         if let Some(TypeDef::Enum { string_values, .. }) = reg.get(name) {
             if !string_values.is_empty() {
@@ -154,6 +161,7 @@ fn is_undefined_ident(expr: &ast::Expr) -> bool {
 pub(super) fn try_convert_typeof_comparison(
     bin: &ast::BinExpr,
     type_env: &TypeEnv,
+    tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Option<Expr> {
@@ -167,7 +175,7 @@ pub(super) fn try_convert_typeof_comparison(
     let (typeof_operand, type_str) = extract_typeof_and_string(bin)?;
 
     // Resolve the operand's type from TypeEnv
-    let operand_type = resolve_expr_type(typeof_operand, type_env, reg);
+    let operand_type = resolve_expr_type(typeof_operand, type_env, tctx, reg);
 
     // If the operand is a union enum type, generate a matches!() expression
     // for correct runtime checking. In if-statements, can_generate_if_let
@@ -188,6 +196,7 @@ pub(super) fn try_convert_typeof_comparison(
             if variants.iter().any(|v| v == expected_variant) {
                 let operand_ir = super::convert_expr(
                     typeof_operand,
+                    tctx,
                     reg,
                     &super::ExprContext::none(),
                     type_env,
@@ -223,6 +232,7 @@ pub(super) fn try_convert_typeof_comparison(
             // Cat A: typeof operand
             let operand_ir = super::convert_expr(
                 typeof_operand,
+                tctx,
                 reg,
                 &super::ExprContext::none(),
                 type_env,
@@ -349,6 +359,7 @@ fn resolve_typeof_match(ty: &RustType, typeof_str: &str) -> TypeofMatch {
 /// - unknown type → `todo!()` (no silent `true` fallback)
 pub(super) fn convert_in_operator(
     bin: &ast::BinExpr,
+    tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
     type_env: &TypeEnv,
 ) -> Expr {
@@ -366,7 +377,7 @@ pub(super) fn convert_in_operator(
     };
 
     // Resolve the RHS object type
-    let obj_type = resolve_expr_type(&bin.right, type_env, reg);
+    let obj_type = resolve_expr_type(&bin.right, type_env, tctx, reg);
 
     match &obj_type {
         Some(RustType::Named { name, .. }) if name == "HashMap" || name == "BTreeMap" => {
@@ -436,6 +447,7 @@ pub(super) fn convert_in_operator(
 pub(super) fn convert_instanceof(
     bin: &ast::BinExpr,
     type_env: &TypeEnv,
+    _tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
 ) -> Expr {
     // Get the class name from the RHS
@@ -602,6 +614,7 @@ impl NarrowingGuard {
     pub(crate) fn if_let_pattern(
         &self,
         type_env: &super::super::TypeEnv,
+        tctx: &TransformContext<'_>,
         reg: &TypeRegistry,
     ) -> Option<(String, bool)> {
         let var_type = type_env.get(self.var_name())?;
@@ -624,7 +637,7 @@ impl NarrowingGuard {
                 type_name, is_eq, ..
             } => {
                 let (enum_name, variant) =
-                    resolve_typeof_to_enum_variant(var_type, type_name, reg)?;
+                    resolve_typeof_to_enum_variant(var_type, type_name, tctx, reg)?;
                 Some((
                     format!("{enum_name}::{variant}({})", self.var_name()),
                     !is_eq,
@@ -632,7 +645,7 @@ impl NarrowingGuard {
             }
             NarrowingGuard::InstanceOf { class_name, .. } => {
                 let (enum_name, variant) =
-                    resolve_instanceof_to_enum_variant(var_type, class_name, reg)?;
+                    resolve_instanceof_to_enum_variant(var_type, class_name, tctx, reg)?;
                 Some((
                     format!("{enum_name}::{variant}({})", self.var_name()),
                     false,
@@ -807,6 +820,7 @@ fn is_null_or_undefined(expr: &ast::Expr) -> bool {
 pub(crate) fn resolve_typeof_to_enum_variant(
     var_type: &RustType,
     typeof_str: &str,
+    _tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
 ) -> Option<(String, String)> {
     let enum_name = match var_type {
@@ -837,6 +851,7 @@ pub(crate) fn resolve_typeof_to_enum_variant(
 pub(crate) fn resolve_instanceof_to_enum_variant(
     var_type: &RustType,
     class_name: &str,
+    _tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
 ) -> Option<(String, String)> {
     let enum_name = match var_type {

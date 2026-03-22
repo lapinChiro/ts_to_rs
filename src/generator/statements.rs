@@ -174,20 +174,12 @@ pub(super) fn generate_stmt(stmt: &Stmt, indent: usize) -> String {
             out
         }
         Stmt::Match { expr, arms } => {
-            use crate::ir::{Expr as IrExpr, MatchPattern};
+            use crate::ir::MatchPattern;
 
-            // Detect if any arm has a string literal pattern → need .as_str()
-            let has_string_patterns = arms.iter().any(|arm| {
-                arm.patterns
-                    .iter()
-                    .any(|p| matches!(p, MatchPattern::Literal(IrExpr::StringLit(_))))
-            });
-
-            let discriminant_str = if has_string_patterns {
-                format!("{}.as_str()", generate_expr(expr))
-            } else {
-                generate_expr(expr)
-            };
+            // The discriminant is rendered as-is. If `.as_str()` is needed (e.g., for
+            // string pattern matching), the Transformer must have already wrapped the
+            // expression in `Expr::MethodCall { method: "as_str", .. }`.
+            let discriminant_str = generate_expr(expr);
 
             let mut out = format!("{pad}match {discriminant_str} {{\n");
             for arm in arms {
@@ -916,7 +908,9 @@ fn f() {
     }
 
     #[test]
-    fn test_generate_match_string_patterns_adds_as_str() {
+    fn test_generate_match_string_patterns_renders_as_str_from_ir() {
+        // Generator renders .as_str() transparently when it's already in the IR
+        // (applied by the Transformer). Generator does NOT inject .as_str() itself.
         let item = Item::Fn {
             vis: Visibility::Private,
             attributes: vec![],
@@ -926,7 +920,11 @@ fn f() {
             params: vec![],
             return_type: None,
             body: vec![Stmt::Match {
-                expr: Expr::Ident("s".to_string()),
+                expr: Expr::MethodCall {
+                    object: Box::new(Expr::Ident("s".to_string())),
+                    method: "as_str".to_string(),
+                    args: vec![],
+                },
                 arms: vec![
                     crate::ir::MatchArm {
                         patterns: vec![MP::Literal(Expr::StringLit("hello".to_string()))],
