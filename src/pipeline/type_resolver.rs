@@ -178,13 +178,6 @@ impl<'a> TypeResolver<'a> {
         let is_const = matches!(var_decl.kind, ast::VarDeclKind::Const);
 
         for decl in &var_decl.decls {
-            // Resolve initializer expression regardless of pattern type
-            if let Some(init) = &decl.init {
-                let init_span = Span::from_swc(init.span());
-                let init_type = self.resolve_expr(init);
-                self.result.expr_types.insert(init_span, init_type);
-            }
-
             // Register variables from the pattern
             self.register_pat_vars(&decl.name, is_const);
 
@@ -192,12 +185,28 @@ impl<'a> TypeResolver<'a> {
                 let name = ident.id.sym.to_string();
                 let span = Span::from_swc(ident.id.span);
 
-                // Resolve type from annotation or initializer
+                // Resolve type from annotation
                 let annotation_type = ident.type_ann.as_ref().and_then(|ann| {
                     convert_ts_type(&ann.type_ann, self.synthetic, self.registry).ok()
                 });
 
-                let init_type = decl.init.as_ref().map(|init| self.resolve_expr(init));
+                // Set expected type BEFORE resolving the initializer, so that
+                // resolve_arrow_expr / resolve_fn_expr can read it from the map
+                if let (Some(ann_ty), Some(init)) = (&annotation_type, &decl.init) {
+                    let init_span = Span::from_swc(init.span());
+                    self.result
+                        .expected_types
+                        .insert(init_span, ann_ty.clone());
+                    self.propagate_expected(init, ann_ty);
+                }
+
+                // Resolve initializer once (after expected types are set)
+                let init_type = decl.init.as_ref().map(|init| {
+                    let init_span = Span::from_swc(init.span());
+                    let ty = self.resolve_expr(init);
+                    self.result.expr_types.insert(init_span, ty.clone());
+                    ty
+                });
 
                 let var_type = if let Some(ann_ty) = &annotation_type {
                     ResolvedType::Known(ann_ty.clone())
@@ -207,24 +216,17 @@ impl<'a> TypeResolver<'a> {
                     ResolvedType::Unknown
                 };
 
-                // Set expected type for initializer and propagate into compound expressions
-                if let (Some(ann_ty), Some(init)) = (&annotation_type, &decl.init) {
-                    let init_span = Span::from_swc(init.span());
-                    self.result.expected_types.insert(init_span, ann_ty.clone());
-                    self.propagate_expected(init, ann_ty);
-                }
-
-                // Record expression type for initializer
+                // const + object type → mut (TS const allows field mutation)
+                // let → initially false, mark_var_mutable() sets true on reassignment
+                let mutable = is_const && is_object_type(&var_type);
+                self.declare_var(&name, var_type, span, mutable);
+            } else {
+                // Non-ident patterns (destructuring): resolve init without expected type
                 if let Some(init) = &decl.init {
                     let init_span = Span::from_swc(init.span());
                     let init_type = self.resolve_expr(init);
                     self.result.expr_types.insert(init_span, init_type);
                 }
-
-                // const + object type → mut (TS const allows field mutation)
-                // let → initially false, mark_var_mutable() sets true on reassignment
-                let mutable = is_const && is_object_type(&var_type);
-                self.declare_var(&name, var_type, span, mutable);
             }
         }
     }
@@ -591,6 +593,32 @@ impl<'a> TypeResolver<'a> {
 
     // --- Expected type propagation ---
 
+    /// Resolves the field list for an object literal based on the expected type name.
+    ///
+    /// For `TypeDef::Struct`, returns its fields directly.
+    /// For `TypeDef::Enum` (discriminated union), identifies the variant from the
+    /// tag field value in the object literal, then returns the variant's fields.
+    fn resolve_object_lit_fields(
+        &self,
+        type_name: &str,
+        obj: &ast::ObjectLit,
+    ) -> Option<Vec<(String, RustType)>> {
+        match self.registry.get(type_name) {
+            Some(TypeDef::Struct { fields, .. }) => Some(fields.clone()),
+            Some(TypeDef::Enum {
+                tag_field: Some(tag),
+                variant_fields,
+                string_values,
+                ..
+            }) => {
+                let tag_value = find_string_prop_value(obj, tag)?;
+                let variant_name = string_values.get(&tag_value)?;
+                variant_fields.get(variant_name).cloned()
+            }
+            _ => None,
+        }
+    }
+
     /// Propagates an expected type into compound expressions recursively.
     ///
     /// When a parent context provides an expected type (e.g., variable annotation,
@@ -598,42 +626,65 @@ impl<'a> TypeResolver<'a> {
     /// expressions (object literal fields, array elements, ternary branches, etc.).
     fn propagate_expected(&mut self, expr: &ast::Expr, expected: &RustType) {
         match expr {
-            // P-1: Object literal + Named(struct) → set field types
+            // P-1: Object literal + Named(struct/enum) → set field types
+            // P-2: Object literal + HashMap<K, V> → set value type V
             ast::Expr::Object(obj) => {
-                if let RustType::Named { name, .. } = expected {
-                    if let Some(TypeDef::Struct { fields, .. }) = self.registry.get(name) {
-                        let fields = fields.clone();
+                match expected {
+                    RustType::Named {
+                        name,
+                        type_args,
+                    } if name == "HashMap" && type_args.len() == 2 => {
+                        // P-2: HashMap<K, V> — set value type V for each computed property
+                        let value_type = &type_args[1];
                         for prop in &obj.props {
                             if let ast::PropOrSpread::Prop(prop) = prop {
-                                match prop.as_ref() {
-                                    ast::Prop::KeyValue(kv) => {
-                                        let key = extract_prop_name(&kv.key);
-                                        if let Some(field_ty) =
-                                            key.and_then(|k| fields.iter().find(|(n, _)| n == &k))
-                                        {
-                                            let span = Span::from_swc(kv.value.span());
-                                            self.result
-                                                .expected_types
-                                                .insert(span, field_ty.1.clone());
-                                            self.propagate_expected(&kv.value, &field_ty.1);
-                                        }
-                                    }
-                                    ast::Prop::Shorthand(ident) => {
-                                        let key = ident.sym.to_string();
-                                        if let Some(field_ty) =
-                                            fields.iter().find(|(n, _)| n == &key)
-                                        {
-                                            let span = Span::from_swc(ident.span);
-                                            self.result
-                                                .expected_types
-                                                .insert(span, field_ty.1.clone());
-                                        }
-                                    }
-                                    _ => {}
+                                if let ast::Prop::KeyValue(kv) = prop.as_ref() {
+                                    let span = Span::from_swc(kv.value.span());
+                                    self.result
+                                        .expected_types
+                                        .insert(span, value_type.clone());
+                                    self.propagate_expected(&kv.value, value_type);
                                 }
                             }
                         }
                     }
+                    RustType::Named { name, .. } => {
+                        // P-1: Struct or DU — set field types
+                        let fields = self.resolve_object_lit_fields(name, obj);
+                        if let Some(fields) = fields {
+                            for prop in &obj.props {
+                                if let ast::PropOrSpread::Prop(prop) = prop {
+                                    match prop.as_ref() {
+                                        ast::Prop::KeyValue(kv) => {
+                                            let key = extract_prop_name(&kv.key);
+                                            if let Some(field_ty) = key
+                                                .and_then(|k| fields.iter().find(|(n, _)| n == &k))
+                                            {
+                                                let span = Span::from_swc(kv.value.span());
+                                                self.result
+                                                    .expected_types
+                                                    .insert(span, field_ty.1.clone());
+                                                self.propagate_expected(&kv.value, &field_ty.1);
+                                            }
+                                        }
+                                        ast::Prop::Shorthand(ident) => {
+                                            let key = ident.sym.to_string();
+                                            if let Some(field_ty) =
+                                                fields.iter().find(|(n, _)| n == &key)
+                                            {
+                                                let span = Span::from_swc(ident.span);
+                                                self.result
+                                                    .expected_types
+                                                    .insert(span, field_ty.1.clone());
+                                            }
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
                 }
             }
             // P-3: Array literal + Vec<T> → set element type T
@@ -777,11 +828,64 @@ impl<'a> TypeResolver<'a> {
                 ResolvedType::Unknown
             }
             ast::Expr::OptChain(opt) => {
-                // Optional chaining: x?.y — resolve the base, return Unknown for safety
-                // The actual type depends on whether the base is None/Some
-                if let ast::OptChainBase::Member(member) = &*opt.base {
-                    let obj_type = self.resolve_expr(&member.obj);
-                    let _ = obj_type; // Walk for side effects (registering expr_types)
+                // Optional chaining: x?.y or x?.method(args)
+                match &*opt.base {
+                    ast::OptChainBase::Member(member) => {
+                        let obj_type = self.resolve_expr(&member.obj);
+                        let _ = obj_type; // Walk for side effects (registering expr_types)
+                    }
+                    ast::OptChainBase::Call(opt_call) => {
+                        // x?.method(args) — the callee may itself be an OptChain
+                        // wrapping a Member expression. Unwrap to extract the
+                        // actual Member for method param lookup.
+                        let effective_member = match opt_call.callee.as_ref() {
+                            ast::Expr::OptChain(inner_opt) => {
+                                if let ast::OptChainBase::Member(m) = &*inner_opt.base {
+                                    Some(m)
+                                } else {
+                                    None
+                                }
+                            }
+                            _ => None,
+                        };
+                        if let Some(member) = effective_member {
+                            let obj_type = self.resolve_expr(&member.obj);
+                            if let ResolvedType::Known(ref rust_ty) = obj_type {
+                                let inner_ty = match rust_ty {
+                                    RustType::Option(inner) => inner.as_ref(),
+                                    other => other,
+                                };
+                                let method_name = match &member.prop {
+                                    ast::MemberProp::Ident(ident) => {
+                                        Some(ident.sym.to_string())
+                                    }
+                                    _ => None,
+                                };
+                                if let Some(params) = method_name
+                                    .and_then(|name| self.lookup_method_params(inner_ty, &name))
+                                {
+                                    for (arg, param_ty) in
+                                        opt_call.args.iter().zip(params.iter())
+                                    {
+                                        let arg_span = Span::from_swc(arg.expr.span());
+                                        self.result
+                                            .expected_types
+                                            .insert(arg_span, param_ty.clone());
+                                        self.propagate_expected(&arg.expr, param_ty);
+                                    }
+                                }
+                            }
+                        } else {
+                            self.set_call_arg_expected_types(
+                                &opt_call.callee,
+                                &opt_call.args,
+                            );
+                        }
+                        // Walk callee for side effects
+                        let callee_span = Span::from_swc(opt_call.callee.span());
+                        let callee_ty = self.resolve_expr(&opt_call.callee);
+                        self.result.expr_types.insert(callee_span, callee_ty);
+                    }
                 }
                 ResolvedType::Unknown
             }
@@ -954,17 +1058,24 @@ impl<'a> TypeResolver<'a> {
 
     /// Sets expected types for function call arguments based on the callee's parameter types.
     fn set_call_arg_expected_types(&mut self, callee: &ast::Expr, args: &[ast::ExprOrSpread]) {
-        let param_types: Option<Vec<RustType>> = match callee {
+        // Resolve param types and has_rest flag
+        let param_info: Option<(Vec<RustType>, bool)> = match callee {
             ast::Expr::Ident(ident) => {
                 let fn_name = ident.sym.to_string();
                 // Check TypeRegistry for function parameter types
-                if let Some(TypeDef::Function { params, .. }) = self.registry.get(&fn_name) {
-                    Some(params.iter().map(|(_, ty)| ty.clone()).collect())
+                if let Some(TypeDef::Function {
+                    params, has_rest, ..
+                }) = self.registry.get(&fn_name)
+                {
+                    Some((
+                        params.iter().map(|(_, ty)| ty.clone()).collect(),
+                        *has_rest,
+                    ))
                 } else if let ResolvedType::Known(RustType::Fn { params, .. }) =
                     self.lookup_var(&fn_name)
                 {
-                    // Scope lookup for Fn type variables
-                    Some(params)
+                    // Scope lookup for Fn type variables (no rest info available)
+                    Some((params, false))
                 } else {
                     None
                 }
@@ -973,11 +1084,18 @@ impl<'a> TypeResolver<'a> {
                 // Method call: look up method signature from object type
                 let obj_type = self.resolve_expr(&member.obj);
                 if let ResolvedType::Known(ref rust_ty) = obj_type {
+                    // Unwrap Option<T> → T for method lookup (optional chaining)
+                    let inner_ty = match rust_ty {
+                        RustType::Option(inner) => inner.as_ref(),
+                        other => other,
+                    };
                     let method_name = match &member.prop {
                         ast::MemberProp::Ident(ident) => Some(ident.sym.to_string()),
                         _ => None,
                     };
-                    method_name.and_then(|name| self.lookup_method_params(rust_ty, &name))
+                    method_name
+                        .and_then(|name| self.lookup_method_params(inner_ty, &name))
+                        .map(|params| (params, false))
                 } else {
                     None
                 }
@@ -985,13 +1103,40 @@ impl<'a> TypeResolver<'a> {
             _ => None,
         };
 
-        if let Some(param_types) = param_types {
-            for (arg, param_ty) in args.iter().zip(param_types.iter()) {
+        if let Some((param_types, has_rest)) = param_info {
+            // Extract rest element type if has_rest and last param is Vec<T>
+            let rest_element_type = if has_rest {
+                match param_types.last() {
+                    Some(RustType::Vec(inner)) => Some(inner.as_ref().clone()),
+                    _ => None,
+                }
+            } else {
+                None
+            };
+            let regular_params = if rest_element_type.is_some() {
+                &param_types[..param_types.len() - 1]
+            } else {
+                &param_types
+            };
+
+            // Set expected types for regular (non-rest) parameters
+            for (arg, param_ty) in args.iter().zip(regular_params.iter()) {
                 let arg_span = Span::from_swc(arg.expr.span());
                 self.result
                     .expected_types
                     .insert(arg_span, param_ty.clone());
                 self.propagate_expected(&arg.expr, param_ty);
+            }
+
+            // Set element type for rest parameter arguments
+            if let Some(ref elem_ty) = rest_element_type {
+                for arg in args.iter().skip(regular_params.len()) {
+                    let arg_span = Span::from_swc(arg.expr.span());
+                    self.result
+                        .expected_types
+                        .insert(arg_span, elem_ty.clone());
+                    self.propagate_expected(&arg.expr, elem_ty);
+                }
             }
         }
     }
@@ -1073,15 +1218,41 @@ impl<'a> TypeResolver<'a> {
             }
         }
 
+        // If no explicit return annotation, check expected type from parent context
+        // (e.g., variable type annotation: `const f: FnType = () => ...`)
+        let expected_param_types = if self.current_fn_return_type.is_none() {
+            let arrow_span = Span::from_swc(arrow.span);
+            if let Some(expected) = self.result.expected_types.get(&arrow_span).cloned() {
+                let (ret, params) = resolve_fn_type_info(&expected, self.registry);
+                if let Some(ret_ty) = ret {
+                    self.current_fn_return_type = unwrap_promise_and_unit(ret_ty);
+                }
+                params
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         // Register parameters
         let mut param_types = Vec::new();
-        for param in &arrow.params {
+        for (i, param) in arrow.params.iter().enumerate() {
             if let ast::Pat::Ident(ident) = param {
                 let name = ident.id.sym.to_string();
                 let span = Span::from_swc(ident.id.span);
-                let ty = ident.type_ann.as_ref().and_then(|ann| {
-                    convert_ts_type(&ann.type_ann, self.synthetic, self.registry).ok()
-                });
+                // Arrow's own annotation takes priority; fall back to expected param type
+                let ty = ident
+                    .type_ann
+                    .as_ref()
+                    .and_then(|ann| {
+                        convert_ts_type(&ann.type_ann, self.synthetic, self.registry).ok()
+                    })
+                    .or_else(|| {
+                        expected_param_types
+                            .as_ref()
+                            .and_then(|types| types.get(i).cloned())
+                    });
                 let resolved = ty
                     .clone()
                     .map(ResolvedType::Known)
@@ -1099,6 +1270,14 @@ impl<'a> TypeResolver<'a> {
                 }
             }
             ast::BlockStmtOrExpr::Expr(expr) => {
+                // Propagate return type as expected type to expression body
+                if let Some(return_ty) = self.current_fn_return_type.clone() {
+                    let span = Span::from_swc(expr.span());
+                    self.result
+                        .expected_types
+                        .insert(span, return_ty.clone());
+                    self.propagate_expected(expr, &return_ty);
+                }
                 let span = Span::from_swc(expr.span());
                 let ty = self.resolve_expr(expr);
                 self.result.expr_types.insert(span, ty);
@@ -1123,6 +1302,17 @@ impl<'a> TypeResolver<'a> {
         if let Some(return_ann) = &fn_expr.function.return_type {
             if let Ok(ty) = convert_ts_type(&return_ann.type_ann, self.synthetic, self.registry) {
                 self.current_fn_return_type = unwrap_promise_and_unit(ty);
+            }
+        }
+
+        // If no explicit return annotation, check expected type from parent context
+        if self.current_fn_return_type.is_none() {
+            let fn_span = Span::from_swc(fn_expr.function.span);
+            if let Some(expected) = self.result.expected_types.get(&fn_span).cloned() {
+                let (ret, _params) = resolve_fn_type_info(&expected, self.registry);
+                if let Some(ret_ty) = ret {
+                    self.current_fn_return_type = unwrap_promise_and_unit(ret_ty);
+                }
             }
         }
 
@@ -1184,6 +1374,25 @@ fn extract_prop_name(key: &ast::PropName) -> Option<String> {
     }
 }
 
+/// Extracts the string value of a named property from an object literal.
+///
+/// Used to identify the discriminant value in a discriminated union object literal.
+fn find_string_prop_value(obj: &ast::ObjectLit, prop_name: &str) -> Option<String> {
+    for prop in &obj.props {
+        if let ast::PropOrSpread::Prop(prop) = prop {
+            if let ast::Prop::KeyValue(kv) = prop.as_ref() {
+                let key = extract_prop_name(&kv.key);
+                if key.as_deref() == Some(prop_name) {
+                    if let ast::Expr::Lit(ast::Lit::Str(s)) = &*kv.value {
+                        return Some(s.value.to_string_lossy().into_owned());
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
 fn is_null_literal(expr: &ast::Expr) -> bool {
     matches!(expr, ast::Expr::Lit(ast::Lit::Null(_)))
 }
@@ -1213,6 +1422,49 @@ fn unwrap_promise_and_unit(ty: RustType) -> Option<RustType> {
         None
     } else {
         Some(unwrapped)
+    }
+}
+
+/// Extracts function return type and parameter types from an expected type.
+///
+/// Handles two cases:
+/// - `RustType::Fn { return_type, params }` — uses the types directly
+/// - `RustType::Named { name }` — looks up TypeRegistry for `TypeDef::Function`
+///
+/// Used by `resolve_arrow_expr` and `resolve_fn_expr` to infer return type
+/// from parent context (e.g., variable type annotation).
+fn resolve_fn_type_info(
+    expected: &RustType,
+    registry: &TypeRegistry,
+) -> (Option<RustType>, Option<Vec<RustType>>) {
+    match expected {
+        RustType::Fn {
+            return_type,
+            params,
+        } => {
+            let ret = if matches!(return_type.as_ref(), RustType::Unit) {
+                None
+            } else {
+                Some(return_type.as_ref().clone())
+            };
+            (ret, Some(params.clone()))
+        }
+        RustType::Named { name, .. } => {
+            if let Some(TypeDef::Function {
+                return_type,
+                params,
+                ..
+            }) = registry.get(name)
+            {
+                (
+                    return_type.clone(),
+                    Some(params.iter().map(|(_, ty)| ty.clone()).collect()),
+                )
+            } else {
+                (None, None)
+            }
+        }
+        _ => (None, None),
     }
 }
 
@@ -1955,6 +2207,150 @@ mod tests {
         assert!(
             has_string_expected,
             "class property initializer should have String as expected from annotation"
+        );
+    }
+
+    #[test]
+    fn test_propagate_expected_du_object_lit_fields() {
+        let res = resolve(
+            r#"
+            type Shape = { kind: "circle"; radius: number } | { kind: "square"; side: number };
+            const s: Shape = { kind: "circle", radius: 42 };
+            "#,
+        );
+
+        let has_f64_expected = res
+            .expected_types
+            .values()
+            .any(|t| matches!(t, RustType::F64));
+        assert!(
+            has_f64_expected,
+            "DU variant field 'radius' should have expected type f64"
+        );
+    }
+
+    #[test]
+    fn test_propagate_expected_hashmap_value() {
+        let res = resolve(
+            r#"
+            const m: Record<string, number> = { [key]: 42 };
+            "#,
+        );
+
+        let has_f64_expected = res
+            .expected_types
+            .values()
+            .any(|t| matches!(t, RustType::F64));
+        assert!(
+            has_f64_expected,
+            "HashMap value should have expected type f64"
+        );
+    }
+
+    #[test]
+    fn test_propagate_expected_arrow_expr_body() {
+        let res = resolve(
+            r#"
+            const f = (): string => "hello";
+            "#,
+        );
+
+        let has_string_expected = res
+            .expected_types
+            .values()
+            .any(|t| matches!(t, RustType::String));
+        assert!(
+            has_string_expected,
+            "arrow expression body should have expected type String from return annotation"
+        );
+    }
+
+    #[test]
+    fn test_propagate_expected_rest_param_args() {
+        let res = resolve(
+            r#"
+            function foo(a: number, ...rest: string[]): void {}
+            foo(1, "hello", "world");
+            "#,
+        );
+
+        let string_expected_count = res
+            .expected_types
+            .values()
+            .filter(|t| matches!(t, RustType::String))
+            .count();
+        assert!(
+            string_expected_count >= 2,
+            "rest args 'hello' and 'world' should have expected type String, got {string_expected_count}"
+        );
+    }
+
+    #[test]
+    fn test_propagate_expected_opt_chain_method_args() {
+        let res = resolve(
+            r#"
+            interface Obj {
+                greet(name: string): void;
+            }
+            declare const obj: Obj | undefined;
+            obj?.greet("hello");
+            "#,
+        );
+
+        let has_string_expected = res
+            .expected_types
+            .values()
+            .any(|t| matches!(t, RustType::String));
+        assert!(
+            has_string_expected,
+            "opt chain method arg should have expected type String"
+        );
+    }
+
+    #[test]
+    fn test_resolve_arrow_return_type_from_fn_type_alias() {
+        // Variable type annotation with function type alias should propagate
+        // return type to arrow body, enabling nested object literal struct resolution
+        let res = resolve(
+            r#"
+            interface ConnInfo { remote: RemoteInfo; }
+            interface RemoteInfo { address: string; }
+            type GetConnInfo = (host: string) => ConnInfo;
+            const getConnInfo: GetConnInfo = (host: string) => ({
+                remote: { address: host },
+            });
+            "#,
+        );
+
+        // The nested object literal { address: host } should have expected type
+        // Named("RemoteInfo") — propagated through: GetConnInfo → ConnInfo → remote field
+        let has_remote_info_expected = res.expected_types.values().any(|t| {
+            matches!(t, RustType::Named { name, .. } if name == "RemoteInfo")
+        });
+        assert!(
+            has_remote_info_expected,
+            "nested object literal should have expected type RemoteInfo from fn type alias return type"
+        );
+    }
+
+    #[test]
+    fn test_resolve_arrow_explicit_annotation_takes_priority_over_expected() {
+        // Arrow's own return type annotation should take priority over expected type
+        let res = resolve(
+            r#"
+            const f: (x: number) => string = (x: number): number => 42;
+            "#,
+        );
+
+        // The return value `42` should have expected type f64 (from arrow's own annotation),
+        // not String (from variable annotation)
+        let has_f64_expected = res
+            .expected_types
+            .values()
+            .any(|t| matches!(t, RustType::F64));
+        assert!(
+            has_f64_expected,
+            "arrow's own return annotation (number) should take priority"
         );
     }
 }

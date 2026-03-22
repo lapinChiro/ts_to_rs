@@ -21,17 +21,24 @@ TypeResolver の `propagate_expected` と Transformer の手動伝搬（`convert
 
 ---
 
-## Phase 2.5-A: TypeResolver のギャップ埋め
+## Phase 2.5-A: TypeResolver のギャップ埋め ✅
 
 ### 目的
 
 TypeResolver の `propagate_expected` に不足しているパターンを追加し、production pipeline で全てのケースの expected type が正しく設定されるようにする。
 
-### 完了条件
+### 完了条件（全達成）
 
-- 下記 5 パターンが `propagate_expected` または関連メソッドに追加されている
-- 既存の TypeResolver テスト全 GREEN
-- 新パターンごとに TypeResolver のテストが 1 件以上追加されている
+- [x] 下記 5 パターンが `propagate_expected` または関連メソッドに追加されている
+- [x] 既存の TypeResolver テスト全 GREEN
+- [x] 新パターンごとに TypeResolver のテストが 1 件以上追加されている
+
+### 追加で実施した修正
+
+- `visit_var_decl` 再構成: `resolve_expr` 3回→1回。expected type 設定を resolution の前に移動
+- `resolve_arrow_expr` / `resolve_fn_expr` に expected type 読み取りを追加（`resolve_fn_type_info` ヘルパー）
+- 関数型エイリアス注釈からの return type/param types 推論
+- `test_var_type_alias_arrow` 修正（ネストされた object literal の struct name 推論）
 
 ### タスク
 
