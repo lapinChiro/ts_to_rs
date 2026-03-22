@@ -300,16 +300,16 @@ let tctx = f.tctx();
 
 - [x] **C1+C2**: `resolve_expr_type` 自体の先頭に FileTypeResolution lookup を追加。Known なら即返却、Unknown/未登録なら `resolve_expr_type_heuristic` にフォールバック。呼び出し側の変更不要（再帰呼び出しも自動的に lookup を試みる）。テスト 3 件追加（1081 GREEN）
 - [x] **C3**: `convert_expr` 内で `ExprContext::expected` を使う前に `tctx.type_resolution.expected_type(span)` を確認するロジック追加
-- [ ] **C4**: TypeEnv の narrowing 参照箇所で `tctx.type_resolution.narrowed_type()` を先に確認するロジック追加
-- [ ] **C5**: Generator の enum 分類（`has_data_variants` / `is_numeric_enum` / `generate_enum` in `src/generator/mod.rs`）が TS セマンティクスの判断を含むか評価し、含む場合は Transformer に移動。IR の EnumValue/data で十分な場合はそのままで PRD 完了条件を満たす判断をユーザーに確認
-- [ ] **C-verify**: `cargo test` 全 GREEN。新規テスト（context.rs 内）も全 GREEN
+- [x] **C4**: `resolve_expr_type_heuristic` の Ident ケースで `tctx.type_resolution.narrowed_type()` を TypeEnv.get() より先に確認。テスト 1 件追加（1082 GREEN）
+- [x] **C5**: Generator の enum 分類を評価 → `has_data_variants`/`is_numeric_enum` は IR のデータ構造（`EnumVariant.data`/`EnumValue`）に基づくレンダリング戦略選択であり、TS セマンティクスの判断ではない。Transformer が IR に正しい値を設定していれば Generator の責務で正当。移動不要
+- [x] **C-verify**: `cargo test` 全 GREEN（1082 lib + E2E 60 + integration 69 + compile 3 + doc 2）。clippy 0、fmt 通過
 - [ ] **C-commit**: `[WIP] P6: Phase C — FileTypeResolution lookup + enum 分類評価`
 
 ### Phase D: 最終検証
 
-- [ ] **D1**: `cargo clippy --all-targets --all-features -- -D warnings` 0 警告
-- [ ] **D2**: `cargo fmt --all --check` 通過
-- [ ] **D3**: Hono ベンチマーク実行。結果が悪化していない
+- [x] **D1**: `cargo clippy --all-targets --all-features -- -D warnings` 0 警告
+- [x] **D2**: `cargo fmt --all --check` 通過
+- [x] **D3**: Hono ベンチマーク実行。結果悪化なし（clean 84/158 = 53.2%、前回と同一）
 
 ## 見直し結果
 

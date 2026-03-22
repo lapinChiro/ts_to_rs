@@ -48,7 +48,14 @@ fn resolve_expr_type_heuristic(
     reg: &TypeRegistry,
 ) -> Option<RustType> {
     match expr {
-        ast::Expr::Ident(ident) => type_env.get(ident.sym.as_ref()).cloned(),
+        ast::Expr::Ident(ident) => {
+            let name = ident.sym.as_ref();
+            // FileTypeResolution の narrowing を優先し、なければ TypeEnv にフォールバック
+            tctx.type_resolution
+                .narrowed_type(name, ident.span.lo.0)
+                .cloned()
+                .or_else(|| type_env.get(name).cloned())
+        }
         ast::Expr::Lit(ast::Lit::Str(_)) => Some(RustType::String),
         ast::Expr::Lit(ast::Lit::Num(_)) => Some(RustType::F64),
         ast::Expr::Lit(ast::Lit::Bool(_)) => Some(RustType::Bool),
@@ -577,6 +584,44 @@ mod tests {
             result,
             Some(RustType::String),
             "Missing span should fall back to heuristic"
+        );
+    }
+
+    #[test]
+    fn test_resolve_expr_type_narrowing_from_file_resolution_overrides_type_env() {
+        // FileTypeResolution の narrowing_events が TypeEnv より優先される
+        use crate::pipeline::type_resolution::NarrowingEvent;
+
+        let mut res = FileTypeResolution::empty();
+        res.narrowing_events.push(NarrowingEvent {
+            scope_start: 0,
+            scope_end: 100,
+            var_name: "x".to_string(),
+            narrowed_type: RustType::String,
+        });
+
+        let f = TctxFixture::with_resolution(res);
+        let tctx = f.tctx();
+
+        // Ident "x" at position 10 (inside narrowing scope 0..100)
+        let expr = ast::Expr::Ident(ast::Ident {
+            span: swc_common::Span::new(swc_common::BytePos(10), swc_common::BytePos(11)),
+            ctxt: Default::default(),
+            sym: "x".into(),
+            optional: false,
+        });
+
+        // TypeEnv に F64 として登録（narrowing 前の型）
+        let mut env = TypeEnv::new();
+        env.insert("x".to_string(), RustType::F64);
+
+        let result = resolve_expr_type(&expr, &env, &tctx, f.reg());
+
+        // FileTypeResolution の narrowing (String) が TypeEnv (F64) より優先される
+        assert_eq!(
+            result,
+            Some(RustType::String),
+            "FileTypeResolution narrowing should override TypeEnv"
         );
     }
 }
