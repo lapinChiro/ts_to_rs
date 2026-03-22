@@ -75,18 +75,18 @@ Phase 2 で ExprContext 削除時に追加。各 Transformer 関数が `convert_
 | Assignment RHS → LHS type | resolve_expr (717) | #13 (assignments.rs:39) |
 | Nullish coalescing RHS → Option inner | resolve_bin_expr (846) | #14 (binary.rs:74) |
 
-### Transformer にのみ存在（TypeResolver のギャップ — 7 箇所）
+### Transformer にのみ存在（TypeResolver のギャップ — Phase 2.5-A で 5 件解消、2 件残存）
 
-| 伝搬パターン | Transformer | 影響 |
-|---|---|---|
-| DU object lit fields → variant field type | #1, #2 (data_literals.rs:75,85) | production で DU フィールド値に expected が設定されない |
-| HashMap value → value type | #3 (data_literals.rs:150) | production で HashMap value に expected が設定されない |
-| Spread array element → element type | #8 (data_literals.rs:482) | production で spread array 要素に expected が設定されない |
-| Rest args → Vec element type | #10, #11 (calls.rs:660,681) | production で rest 引数に expected が設定されない |
-| Opt chain method args → param type | #12 (member_access.rs:188) | production で opt chain メソッド引数に expected が設定されない |
-| Arrow expr body → return type | #15, #16 (functions.rs:312,337) | production で arrow body に expected が設定されない |
-| Return stmt → return type | #17 (statements/mod.rs:62) | visit_stmt:358 がカバー — 要確認 |
-| Static prop → type annotation | #19 (classes.rs:583) | visit_class_body:322 がカバー — 要確認 |
+| 伝搬パターン | Transformer | 影響 | 状態 |
+|---|---|---|---|
+| DU object lit fields → variant field type | #1, #2 (data_literals.rs:75,85) | production で DU フィールド値に expected が設定されない | ✅ Phase 2.5-A で解消 |
+| HashMap value → value type | #3 (data_literals.rs:150) | production で HashMap value に expected が設定されない | ✅ Phase 2.5-A で解消 |
+| Spread array element → element type | #8 (data_literals.rs:482) | production で spread array 要素に expected が設定されない | 未解消 |
+| Rest args → Vec element type | #10, #11 (calls.rs:660,681) | production で rest 引数に expected が設定されない | ✅ Phase 2.5-A で解消 |
+| Opt chain method args → param type | #12 (member_access.rs:188) | production で opt chain メソッド引数に expected が設定されない | ✅ Phase 2.5-A で解消 |
+| Arrow expr body → return type | #15, #16 (functions.rs:312,337) | production で arrow body に expected が設定されない | ✅ Phase 2.5-A で解消 |
+| Return stmt → return type | #17 (statements/mod.rs:62) | visit_stmt:358 がカバー — 要確認 | 未確認 |
+| Static prop → type annotation | #19 (classes.rs:583) | visit_class_body:322 がカバー — 要確認 | 未確認 |
 
 **注**: #17 (return stmt) と #19 (static prop) は TypeResolver にも呼び出し元があるが、完全に同等かは精査が必要。特に return stmt の Option\<T\> unwrap ロジック（inner T を渡す vs Option\<T\> をそのまま渡す）に差異がある可能性がある。
 
