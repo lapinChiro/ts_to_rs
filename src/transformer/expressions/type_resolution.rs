@@ -102,8 +102,10 @@ fn resolve_bin_expr_type(
         Sub | Mul | Div | Mod | Exp | BitAnd | BitOr | BitXor | LShift | RShift
         | ZeroFillRShift => Some(RustType::F64),
         // 論理演算 → operand の型（right 側で推定）
-        LogicalAnd | LogicalOr | NullishCoalescing => resolve_expr_type(&bin.right, type_env, tctx, reg)
-            .or_else(|| resolve_expr_type(&bin.left, type_env, tctx, reg)),
+        LogicalAnd | LogicalOr | NullishCoalescing => {
+            resolve_expr_type(&bin.right, type_env, tctx, reg)
+                .or_else(|| resolve_expr_type(&bin.left, type_env, tctx, reg))
+        }
     }
 }
 
@@ -179,7 +181,11 @@ pub(super) fn resolve_method_return_type(
 }
 
 /// new 式の結果型を解決する。
-fn resolve_new_expr_type(new_expr: &ast::NewExpr, _tctx: &TransformContext<'_>, reg: &TypeRegistry) -> Option<RustType> {
+fn resolve_new_expr_type(
+    new_expr: &ast::NewExpr,
+    _tctx: &TransformContext<'_>,
+    reg: &TypeRegistry,
+) -> Option<RustType> {
     let class_name = match new_expr.callee.as_ref() {
         ast::Expr::Ident(ident) => ident.sym.to_string(),
         _ => return None,
@@ -283,8 +289,46 @@ pub(super) fn convert_ts_as_expr(
 mod tests {
     use super::*;
     use crate::ir::TypeParam;
+    use crate::pipeline::type_resolution::FileTypeResolution;
+    use crate::pipeline::ModuleGraph;
     use crate::registry::{MethodSignature, TypeRegistry};
+    use crate::transformer::context::TransformContext;
     use std::collections::HashMap;
+    use std::path::Path;
+
+    /// Test fixture: TransformContext + TypeRegistry の所有者。
+    /// テストごとに 4 行のボイラープレートを排除する。
+    struct TctxFixture {
+        mg: ModuleGraph,
+        reg: TypeRegistry,
+        res: FileTypeResolution,
+    }
+
+    impl TctxFixture {
+        fn new() -> Self {
+            Self {
+                mg: ModuleGraph::empty(),
+                reg: TypeRegistry::new(),
+                res: FileTypeResolution::empty(),
+            }
+        }
+
+        fn with_reg(reg: TypeRegistry) -> Self {
+            Self {
+                mg: ModuleGraph::empty(),
+                reg,
+                res: FileTypeResolution::empty(),
+            }
+        }
+
+        fn tctx(&self) -> TransformContext<'_> {
+            TransformContext::new(&self.mg, &self.reg, &self.res, Path::new("test.ts"))
+        }
+
+        fn reg(&self) -> &TypeRegistry {
+            &self.reg
+        }
+    }
 
     /// TypeEnv にオブジェクト型を登録し、TypeRegistry にメソッドの戻り値型を登録して
     /// resolve_expr_type が Call 式でメソッド戻り値型を返すことを検証する。
@@ -310,7 +354,9 @@ mod tests {
         );
 
         // String 型のオブジェクトの trim() は String を返す
-        let result = resolve_method_return_type(&RustType::String, "trim", &reg);
+        let f = TctxFixture::with_reg(reg);
+        let tctx = f.tctx();
+        let result = resolve_method_return_type(&RustType::String, "trim", &tctx, f.reg());
         assert_eq!(result, Some(RustType::String));
     }
 
@@ -338,7 +384,9 @@ mod tests {
             name: "Response".to_string(),
             type_args: vec![],
         };
-        let result = resolve_method_return_type(&obj_type, "json", &reg);
+        let f = TctxFixture::with_reg(reg);
+        let tctx = f.tctx();
+        let result = resolve_method_return_type(&obj_type, "json", &tctx, f.reg());
         assert_eq!(
             result,
             Some(RustType::Named {
@@ -351,8 +399,9 @@ mod tests {
     #[test]
     fn test_resolve_method_return_type_unknown_method_returns_none() {
         // 未知のメソッド → None（エラーにならない）
-        let reg = TypeRegistry::new();
-        let result = resolve_method_return_type(&RustType::String, "unknown", &reg);
+        let f = TctxFixture::new();
+        let tctx = f.tctx();
+        let result = resolve_method_return_type(&RustType::String, "unknown", &tctx, f.reg());
         assert_eq!(result, None);
     }
 
@@ -374,7 +423,9 @@ mod tests {
         );
 
         let obj_type = RustType::Vec(Box::new(RustType::F64));
-        let result = resolve_method_return_type(&obj_type, "len", &reg);
+        let f = TctxFixture::with_reg(reg);
+        let tctx = f.tctx();
+        let result = resolve_method_return_type(&obj_type, "len", &tctx, f.reg());
         assert_eq!(result, Some(RustType::F64));
     }
 
@@ -411,7 +462,9 @@ mod tests {
             span: swc_common::DUMMY_SP,
             sym: "value".into(),
         });
-        let result = resolve_field_type(&obj_type, &prop, &reg);
+        let f = TctxFixture::with_reg(reg);
+        let tctx = f.tctx();
+        let result = resolve_field_type(&obj_type, &prop, &tctx, f.reg());
         assert_eq!(result, Some(RustType::String));
     }
 
@@ -448,7 +501,9 @@ mod tests {
             name: "Container".to_string(),
             type_args: vec![RustType::String],
         };
-        let result = resolve_method_return_type(&obj_type, "get", &reg);
+        let f = TctxFixture::with_reg(reg);
+        let tctx = f.tctx();
+        let result = resolve_method_return_type(&obj_type, "get", &tctx, f.reg());
         assert_eq!(result, Some(RustType::String));
     }
 }

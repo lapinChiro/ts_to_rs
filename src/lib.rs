@@ -83,9 +83,19 @@ pub fn transpile_with_registry_and_path(
     let mut synthetic = SyntheticTypeRegistry::new();
     let mg = pipeline::ModuleGraph::empty();
     let resolution = pipeline::type_resolution::FileTypeResolution::empty();
-    let tctx = transformer::context::TransformContext::new(&mg, &reg, &resolution, std::path::Path::new(""));
-    let items =
-        transformer::transform_module_with_path(&module, &tctx, &reg, current_file_dir, &mut synthetic)?;
+    let tctx = transformer::context::TransformContext::new(
+        &mg,
+        &reg,
+        &resolution,
+        std::path::Path::new(""),
+    );
+    let items = transformer::transform_module_with_path(
+        &module,
+        &tctx,
+        &reg,
+        current_file_dir,
+        &mut synthetic,
+    )?;
     let mut all_items = synthetic.into_items();
     all_items.extend(items);
     Ok(generator::generate(&all_items))
@@ -126,7 +136,12 @@ pub fn transpile_collecting_with_registry_and_path(
     let mut synthetic = SyntheticTypeRegistry::new();
     let mg2 = pipeline::ModuleGraph::empty();
     let resolution2 = pipeline::type_resolution::FileTypeResolution::empty();
-    let tctx = transformer::context::TransformContext::new(&mg2, &reg, &resolution2, std::path::Path::new(""));
+    let tctx = transformer::context::TransformContext::new(
+        &mg2,
+        &reg,
+        &resolution2,
+        std::path::Path::new(""),
+    );
     let (items, raw_unsupported) = transformer::transform_module_collecting_with_path(
         &module,
         &tctx,

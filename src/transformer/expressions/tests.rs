@@ -1,9 +1,47 @@
 use super::*;
 use crate::ir::{BinOp, MatchPattern, UnOp};
 use crate::parser::parse_typescript;
+use crate::pipeline::type_resolution::FileTypeResolution;
+use crate::pipeline::ModuleGraph;
 use crate::registry::{MethodSignature, TypeDef, TypeRegistry};
+use crate::transformer::context::TransformContext;
 use crate::transformer::TypeEnv;
+use std::path::Path;
 use swc_ecma_ast::{Decl, ModuleItem, Stmt};
+
+/// Test fixture: TransformContext + TypeRegistry の所有者。
+/// テストごとに 4 行のボイラープレートを排除する。
+struct TctxFixture {
+    mg: ModuleGraph,
+    reg: TypeRegistry,
+    res: FileTypeResolution,
+}
+
+impl TctxFixture {
+    fn new() -> Self {
+        Self {
+            mg: ModuleGraph::empty(),
+            reg: TypeRegistry::new(),
+            res: FileTypeResolution::empty(),
+        }
+    }
+
+    fn with_reg(reg: TypeRegistry) -> Self {
+        Self {
+            mg: ModuleGraph::empty(),
+            reg,
+            res: FileTypeResolution::empty(),
+        }
+    }
+
+    fn tctx(&self) -> TransformContext<'_> {
+        TransformContext::new(&self.mg, &self.reg, &self.res, Path::new("test.ts"))
+    }
+
+    fn reg(&self) -> &TypeRegistry {
+        &self.reg
+    }
+}
 
 /// Helper: parse a TS expression statement and return the SWC Expr.
 fn parse_expr(source: &str) -> ast::Expr {
@@ -28,10 +66,13 @@ fn parse_var_init(source: &str) -> ast::Expr {
 
 #[test]
 fn test_convert_expr_identifier() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let swc_expr = parse_expr("foo;");
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -42,10 +83,13 @@ fn test_convert_expr_identifier() {
 
 #[test]
 fn test_convert_expr_number_literal() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let swc_expr = parse_expr("42;");
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -58,10 +102,13 @@ fn test_convert_expr_number_literal() {
 
 #[test]
 fn test_convert_expr_bigint_literal_generates_int_lit() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let swc_expr = parse_expr("123n;");
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -72,10 +119,13 @@ fn test_convert_expr_bigint_literal_generates_int_lit() {
 
 #[test]
 fn test_convert_expr_bigint_zero_generates_int_lit() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let swc_expr = parse_expr("0n;");
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -86,10 +136,13 @@ fn test_convert_expr_bigint_zero_generates_int_lit() {
 
 #[test]
 fn test_convert_expr_string_literal() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let swc_expr = parse_expr("\"hello\";");
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -100,10 +153,13 @@ fn test_convert_expr_string_literal() {
 
 #[test]
 fn test_convert_expr_bool_true() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let swc_expr = parse_expr("true;");
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -114,10 +170,13 @@ fn test_convert_expr_bool_true() {
 
 #[test]
 fn test_convert_expr_bool_false() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let swc_expr = parse_expr("false;");
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -128,10 +187,13 @@ fn test_convert_expr_bool_false() {
 
 #[test]
 fn test_convert_expr_binary_add() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let swc_expr = parse_var_init("const x = a + b;");
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -149,10 +211,13 @@ fn test_convert_expr_binary_add() {
 
 #[test]
 fn test_convert_expr_binary_greater_than() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let swc_expr = parse_var_init("const x = a > b;");
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -170,10 +235,13 @@ fn test_convert_expr_binary_greater_than() {
 
 #[test]
 fn test_convert_expr_binary_strict_equals() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let swc_expr = parse_var_init("const x = a === b;");
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -191,10 +259,13 @@ fn test_convert_expr_binary_strict_equals() {
 
 #[test]
 fn test_convert_expr_template_literal() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let swc_expr = parse_var_init("const x = `Hello ${name}`;");
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -211,10 +282,13 @@ fn test_convert_expr_template_literal() {
 
 #[test]
 fn test_convert_expr_member_this_field() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let swc_expr = parse_expr("this.name;");
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -231,10 +305,13 @@ fn test_convert_expr_member_this_field() {
 
 #[test]
 fn test_convert_expr_member_non_this() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let swc_expr = parse_expr("obj.field;");
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -253,11 +330,14 @@ fn test_convert_expr_member_non_this() {
 
 #[test]
 fn test_convert_expr_arrow_expr_body() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // `(x: number) => x + 1`
     let swc_expr = parse_var_init("const f = (x: number) => x + 1;");
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -281,11 +361,14 @@ fn test_convert_expr_arrow_expr_body() {
 
 #[test]
 fn test_convert_expr_arrow_block_body() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // `(x: number): number => { return x + 1; }`
     let swc_expr = parse_var_init("const f = (x: number): number => { return x + 1; };");
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -308,10 +391,13 @@ fn test_convert_expr_arrow_block_body() {
 
 #[test]
 fn test_convert_expr_arrow_no_params() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let swc_expr = parse_var_init("const f = () => 42;");
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -328,10 +414,13 @@ fn test_convert_expr_arrow_no_params() {
 
 #[test]
 fn test_convert_expr_arrow_no_type_annotation_param_ty_is_none() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let swc_expr = parse_var_init("const f = (x) => x + 1;");
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -349,11 +438,14 @@ fn test_convert_expr_arrow_no_type_annotation_param_ty_is_none() {
 
 #[test]
 fn test_convert_expr_arrow_mixed_type_annotations() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // Only first param has type annotation
     let swc_expr = parse_var_init("const f = (x: number, y) => x + y;");
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -373,10 +465,13 @@ fn test_convert_expr_arrow_mixed_type_annotations() {
 
 #[test]
 fn test_convert_expr_call_simple() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let swc_expr = parse_expr("foo(x, y);");
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -393,10 +488,13 @@ fn test_convert_expr_call_simple() {
 
 #[test]
 fn test_convert_expr_call_no_args() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let swc_expr = parse_expr("foo();");
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -413,10 +511,13 @@ fn test_convert_expr_call_no_args() {
 
 #[test]
 fn test_convert_expr_call_nested() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let swc_expr = parse_expr("foo(bar(x));");
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -436,10 +537,13 @@ fn test_convert_expr_call_nested() {
 
 #[test]
 fn test_convert_expr_method_call() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let swc_expr = parse_expr("obj.method(x);");
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -457,10 +561,13 @@ fn test_convert_expr_method_call() {
 
 #[test]
 fn test_convert_expr_method_call_this() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let swc_expr = parse_expr("this.doSomething(x);");
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -478,10 +585,13 @@ fn test_convert_expr_method_call_this() {
 
 #[test]
 fn test_convert_expr_method_chain() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let swc_expr = parse_expr("a.b().c();");
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -503,10 +613,13 @@ fn test_convert_expr_method_chain() {
 
 #[test]
 fn test_convert_expr_new() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let swc_expr = parse_expr("new Foo(x, y);");
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -523,10 +636,13 @@ fn test_convert_expr_new() {
 
 #[test]
 fn test_convert_expr_new_no_args() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let swc_expr = parse_expr("new Foo();");
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -556,10 +672,13 @@ fn test_new_expr_string_arg_gets_to_string() {
             vec![],
         ),
     );
+    let f = TctxFixture::with_reg(reg);
+    let tctx = f.tctx();
     let swc_expr = parse_expr(r#"new Foo("hello");"#);
     let result = convert_expr(
         &swc_expr,
-        &reg,
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -580,10 +699,13 @@ fn test_new_expr_string_arg_gets_to_string() {
 
 #[test]
 fn test_convert_expr_template_literal_no_exprs() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let swc_expr = parse_var_init("const x = `hello world`;");
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -600,10 +722,13 @@ fn test_convert_expr_template_literal_no_exprs() {
 
 #[test]
 fn test_convert_expr_array_numbers() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_var_init("const a = [1, 2, 3];");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -623,10 +748,13 @@ fn test_convert_expr_array_numbers() {
 
 #[test]
 fn test_convert_expr_array_strings() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_var_init(r#"const a = ["x", "y"];"#);
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -645,10 +773,13 @@ fn test_convert_expr_array_strings() {
 
 #[test]
 fn test_convert_expr_array_empty() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_var_init("const a = [];");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -659,10 +790,13 @@ fn test_convert_expr_array_empty() {
 
 #[test]
 fn test_convert_expr_array_single_element() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_var_init("const a = [42];");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -680,6 +814,8 @@ fn test_convert_expr_array_single_element() {
 
 #[test]
 fn test_convert_expr_object_literal_with_type_hint_basic() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // { x: 1, y: 2 } with expected Named("Point")
     let swc_expr = parse_var_init("const p: Point = { x: 1, y: 2 };");
     let expected = RustType::Named {
@@ -688,7 +824,8 @@ fn test_convert_expr_object_literal_with_type_hint_basic() {
     };
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::with_expected(&expected),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -709,6 +846,8 @@ fn test_convert_expr_object_literal_with_type_hint_basic() {
 
 #[test]
 fn test_convert_expr_object_literal_mixed_field_types() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let swc_expr = parse_var_init(r#"const c: Config = { name: "foo", count: 42, active: true };"#);
     let expected = RustType::Named {
         name: "Config".to_string(),
@@ -716,7 +855,8 @@ fn test_convert_expr_object_literal_mixed_field_types() {
     };
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::with_expected(&expected),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -738,6 +878,8 @@ fn test_convert_expr_object_literal_mixed_field_types() {
 
 #[test]
 fn test_convert_expr_object_literal_single_field() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let swc_expr = parse_var_init("const w: Wrapper = { value: 10 };");
     let expected = RustType::Named {
         name: "Wrapper".to_string(),
@@ -745,7 +887,8 @@ fn test_convert_expr_object_literal_single_field() {
     };
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::with_expected(&expected),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -763,6 +906,8 @@ fn test_convert_expr_object_literal_single_field() {
 
 #[test]
 fn test_convert_expr_object_literal_empty() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let swc_expr = parse_var_init("const e: Empty = {};");
     let expected = RustType::Named {
         name: "Empty".to_string(),
@@ -770,7 +915,8 @@ fn test_convert_expr_object_literal_empty() {
     };
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::with_expected(&expected),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -788,10 +934,13 @@ fn test_convert_expr_object_literal_empty() {
 
 #[test]
 fn test_convert_expr_object_literal_without_type_hint_errors() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let swc_expr = parse_var_init("const obj = { x: 1 };");
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -820,9 +969,12 @@ fn test_convert_expr_object_spread_last_position_expands_remaining_fields() {
             vec![],
         ),
     );
+    let f = TctxFixture::with_reg(reg);
+    let tctx = f.tctx();
     let result = convert_expr(
         &swc_expr,
-        &reg,
+        &tctx,
+        f.reg(),
         &ExprContext::with_expected(&expected),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -869,9 +1021,12 @@ fn test_convert_expr_object_spread_middle_position_expands_remaining_fields() {
             vec![],
         ),
     );
+    let f = TctxFixture::with_reg(reg);
+    let tctx = f.tctx();
     let result = convert_expr(
         &swc_expr,
-        &reg,
+        &tctx,
+        f.reg(),
         &ExprContext::with_expected(&expected),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -899,6 +1054,8 @@ fn test_convert_expr_object_spread_middle_position_expands_remaining_fields() {
 
 #[test]
 fn test_convert_object_spread_unregistered_type_generates_struct_update() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // {...a, key: 1} — TypeRegistry 未登録 → struct update syntax
     let swc_expr = parse_var_init("const p: Point = { ...other, x: 10 };");
     let expected = RustType::Named {
@@ -907,7 +1064,8 @@ fn test_convert_object_spread_unregistered_type_generates_struct_update() {
     };
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::with_expected(&expected),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -944,9 +1102,12 @@ fn test_convert_object_spread_multiple_registered_generates_merged_fields() {
             vec![],
         ),
     );
+    let f = TctxFixture::with_reg(reg);
+    let tctx = f.tctx();
     let result = convert_expr(
         &swc_expr,
-        &reg,
+        &tctx,
+        f.reg(),
         &ExprContext::with_expected(&expected),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -986,9 +1147,12 @@ fn test_convert_expr_object_spread_with_override() {
             vec![],
         ),
     );
+    let f = TctxFixture::with_reg(reg);
+    let tctx = f.tctx();
     let result = convert_expr(
         &swc_expr,
-        &reg,
+        &tctx,
+        f.reg(),
         &ExprContext::with_expected(&expected),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1016,10 +1180,13 @@ fn test_convert_expr_object_spread_with_override() {
 
 #[test]
 fn test_convert_expr_array_nested() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_var_init("const a = [[1, 2], [3]];");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1044,10 +1211,13 @@ fn test_convert_expr_array_nested() {
 
 #[test]
 fn test_convert_expr_string_lit_with_string_expected_adds_to_string() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let swc_expr = parse_expr("\"hello\";");
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::with_expected(&RustType::String),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1065,10 +1235,13 @@ fn test_convert_expr_string_lit_with_string_expected_adds_to_string() {
 
 #[test]
 fn test_convert_expr_string_lit_without_expected_unchanged() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let swc_expr = parse_expr("\"hello\";");
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1079,10 +1252,13 @@ fn test_convert_expr_string_lit_without_expected_unchanged() {
 
 #[test]
 fn test_convert_expr_string_lit_with_f64_expected_unchanged() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let swc_expr = parse_expr("\"hello\";");
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::with_expected(&RustType::F64),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1093,11 +1269,14 @@ fn test_convert_expr_string_lit_with_f64_expected_unchanged() {
 
 #[test]
 fn test_convert_expr_array_string_with_vec_string_expected() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_var_init(r#"const a = ["a", "b"];"#);
     let expected = RustType::Vec(Box::new(RustType::String));
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::with_expected(&expected),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1141,10 +1320,13 @@ fn test_convert_expr_member_enum_access_from_registry() {
         },
     );
 
+    let f = TctxFixture::with_reg(reg);
+    let tctx = f.tctx();
     let swc_expr = parse_expr("Color.Red;");
     let result = convert_expr(
         &swc_expr,
-        &reg,
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1156,11 +1338,13 @@ fn test_convert_expr_member_enum_access_from_registry() {
 #[test]
 fn test_convert_expr_member_non_enum_unchanged() {
     // obj.field should remain FieldAccess when obj is not an enum
-    let reg = TypeRegistry::new();
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let swc_expr = parse_expr("obj.field;");
     let result = convert_expr(
         &swc_expr,
-        &reg,
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1196,10 +1380,13 @@ fn test_convert_expr_call_resolves_object_arg_from_registry() {
         },
     );
 
+    let f = TctxFixture::with_reg(reg);
+    let tctx = f.tctx();
     let swc_expr = parse_expr("draw({ x: 0, y: 0 });");
     let result = convert_expr(
         &swc_expr,
-        &reg,
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1258,13 +1445,16 @@ fn test_convert_expr_object_literal_nested_resolves_field_type_from_registry() {
     );
 
     let swc_expr = parse_var_init("const r: Rect = { origin: { x: 0, y: 0 }, w: 10 };");
+    let f = TctxFixture::with_reg(reg);
+    let tctx = f.tctx();
     let expected = RustType::Named {
         name: "Rect".to_string(),
         type_args: vec![],
     };
     let result = convert_expr(
         &swc_expr,
-        &reg,
+        &tctx,
+        f.reg(),
         &ExprContext::with_expected(&expected),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1316,13 +1506,16 @@ fn test_object_lit_omitted_optional_field_gets_none() {
         ),
     );
     let swc_expr = parse_var_init(r#"const i: Item = { name: "test" };"#);
+    let f = TctxFixture::with_reg(reg);
+    let tctx = f.tctx();
     let expected = RustType::Named {
         name: "Item".to_string(),
         type_args: vec![],
     };
     let result = convert_expr(
         &swc_expr,
-        &reg,
+        &tctx,
+        f.reg(),
         &ExprContext::with_expected(&expected),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1347,13 +1540,16 @@ fn test_object_lit_omitted_optional_field_gets_none() {
 
 #[test]
 fn test_binary_number_plus_string_generates_format() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // x + " px" where x: number → format!("{}{}", x, " px")
     let swc_expr = parse_var_init(r#"const s: string = x + " px";"#);
     let mut env = TypeEnv::new();
     env.insert("x".to_string(), RustType::F64);
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::with_expected(&RustType::String),
         &env,
         &mut SyntheticTypeRegistry::new(),
@@ -1389,10 +1585,13 @@ fn test_fn_arg_box_dyn_fn_gets_box_new() {
             has_rest: false,
         },
     );
+    let f = TctxFixture::with_reg(reg);
+    let tctx = f.tctx();
     let swc_expr = parse_expr("applyFn(myFunc);");
     let result = convert_expr(
         &swc_expr,
-        &reg,
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1414,10 +1613,13 @@ fn test_fn_arg_box_dyn_fn_gets_box_new() {
 
 #[test]
 fn test_convert_expr_ternary_basic_identifiers() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let swc_expr = parse_var_init("const x = flag ? a : b;");
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1435,10 +1637,13 @@ fn test_convert_expr_ternary_basic_identifiers() {
 
 #[test]
 fn test_convert_expr_ternary_with_comparison_condition() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let swc_expr = parse_var_init("const x = a > 0 ? a : b;");
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1460,10 +1665,13 @@ fn test_convert_expr_ternary_with_comparison_condition() {
 
 #[test]
 fn test_convert_expr_ternary_with_string_literals() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let swc_expr = parse_var_init(r#"const x = flag ? "yes" : "no";"#);
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1481,11 +1689,14 @@ fn test_convert_expr_ternary_with_string_literals() {
 
 #[test]
 fn test_convert_expr_ternary_nested() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // x > 0 ? "positive" : x < 0 ? "negative" : "zero"
     let swc_expr = parse_var_init(r#"const s = x > 0 ? "positive" : x < 0 ? "negative" : "zero";"#);
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1515,11 +1726,14 @@ fn test_convert_expr_ternary_nested() {
 
 #[test]
 fn test_convert_expr_ternary_heterogeneous_branches_produces_if() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // cond ? "a" : 1 → if-else with different types (no type coercion)
     let swc_expr = parse_var_init(r#"const x = flag ? "a" : 1;"#);
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1537,11 +1751,14 @@ fn test_convert_expr_ternary_heterogeneous_branches_produces_if() {
 
 #[test]
 fn test_convert_expr_math_max_three_args_chains() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // Math.max(a, b, c) → a.max(b).max(c)
     let expr = parse_expr("Math.max(a, b, c);");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1565,10 +1782,13 @@ fn test_convert_expr_math_max_three_args_chains() {
 
 #[test]
 fn test_convert_expr_console_log_single_arg() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let swc_expr = parse_expr("console.log(x);");
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1586,10 +1806,13 @@ fn test_convert_expr_console_log_single_arg() {
 
 #[test]
 fn test_convert_expr_console_error() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let swc_expr = parse_expr("console.error(x);");
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1607,10 +1830,13 @@ fn test_convert_expr_console_error() {
 
 #[test]
 fn test_convert_expr_console_warn() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let swc_expr = parse_expr("console.warn(x);");
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1628,10 +1854,13 @@ fn test_convert_expr_console_warn() {
 
 #[test]
 fn test_convert_expr_console_log_no_args() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let swc_expr = parse_expr("console.log();");
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1649,10 +1878,13 @@ fn test_convert_expr_console_log_no_args() {
 
 #[test]
 fn test_convert_expr_console_log_multiple_args() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let swc_expr = parse_expr("console.log(x, y);");
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1672,6 +1904,8 @@ fn test_convert_expr_console_log_multiple_args() {
 
 #[test]
 fn test_convert_expr_object_shorthand_single() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // const p: Foo = { x }  →  Foo { x: x }
     let swc_expr = parse_var_init("const p: Foo = { x };");
     let expected = RustType::Named {
@@ -1680,7 +1914,8 @@ fn test_convert_expr_object_shorthand_single() {
     };
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::with_expected(&expected),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1698,6 +1933,8 @@ fn test_convert_expr_object_shorthand_single() {
 
 #[test]
 fn test_convert_expr_object_shorthand_mixed_with_key_value() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // const p: Foo = { x, y: 2 }  →  Foo { x: x, y: 2.0 }
     let swc_expr = parse_var_init("const p: Foo = { x, y: 2 };");
     let expected = RustType::Named {
@@ -1706,7 +1943,8 @@ fn test_convert_expr_object_shorthand_mixed_with_key_value() {
     };
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::with_expected(&expected),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1744,9 +1982,12 @@ fn test_convert_expr_object_shorthand_with_registry_field_type() {
             vec![],
         ),
     );
+    let f = TctxFixture::with_reg(reg);
+    let tctx = f.tctx();
     let result = convert_expr(
         &swc_expr,
-        &reg,
+        &tctx,
+        f.reg(),
         &ExprContext::with_expected(&expected),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1764,11 +2005,14 @@ fn test_convert_expr_object_shorthand_with_registry_field_type() {
 
 #[test]
 fn test_convert_expr_array_nested_vec_string_expected() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_var_init(r#"const a = [["a"]];"#);
     let expected = RustType::Vec(Box::new(RustType::Vec(Box::new(RustType::String))));
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::with_expected(&expected),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1792,10 +2036,13 @@ fn test_convert_expr_array_nested_vec_string_expected() {
 
 #[test]
 fn test_convert_expr_unary_not_bool_literal() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_expr("!true;");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1812,10 +2059,13 @@ fn test_convert_expr_unary_not_bool_literal() {
 
 #[test]
 fn test_convert_expr_unary_not_ident() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_expr("!x;");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1832,10 +2082,13 @@ fn test_convert_expr_unary_not_ident() {
 
 #[test]
 fn test_convert_expr_unary_minus_ident() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_expr("-x;");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1852,10 +2105,13 @@ fn test_convert_expr_unary_minus_ident() {
 
 #[test]
 fn test_convert_expr_unary_minus_number_literal() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_expr("-42;");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1872,10 +2128,13 @@ fn test_convert_expr_unary_minus_number_literal() {
 
 #[test]
 fn test_convert_expr_unary_not_complex_expr() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_expr("!(a > b);");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1898,10 +2157,13 @@ fn test_convert_expr_unary_not_complex_expr() {
 
 #[test]
 fn test_convert_expr_await_simple() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_expr("await fetch();");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1918,10 +2180,13 @@ fn test_convert_expr_await_simple() {
 
 #[test]
 fn test_convert_expr_await_ident() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_expr("await promise;");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1937,10 +2202,13 @@ fn test_convert_expr_await_ident() {
 
 #[test]
 fn test_convert_expr_string_length_to_len_as_f64() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_expr("s.length;");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1961,10 +2229,13 @@ fn test_convert_expr_string_length_to_len_as_f64() {
 
 #[test]
 fn test_convert_expr_string_includes_to_contains() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_expr(r#"s.includes("x");"#);
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1982,11 +2253,14 @@ fn test_convert_expr_string_includes_to_contains() {
 
 #[test]
 fn test_convert_includes_to_contains_with_ref() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // arr.includes(3) → arr.contains(&3.0)
     let expr = parse_expr("arr.includes(3);");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -2004,10 +2278,13 @@ fn test_convert_includes_to_contains_with_ref() {
 
 #[test]
 fn test_convert_expr_string_starts_with() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_expr(r#"s.startsWith("a");"#);
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -2025,10 +2302,13 @@ fn test_convert_expr_string_starts_with() {
 
 #[test]
 fn test_convert_expr_string_ends_with() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_expr(r#"s.endsWith("z");"#);
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -2046,10 +2326,13 @@ fn test_convert_expr_string_ends_with() {
 
 #[test]
 fn test_convert_expr_string_trim_adds_to_string() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_expr("s.trim();");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -2071,10 +2354,13 @@ fn test_convert_expr_string_trim_adds_to_string() {
 
 #[test]
 fn test_convert_expr_string_to_lower_case() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_expr("s.toLowerCase();");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -2092,10 +2378,13 @@ fn test_convert_expr_string_to_lower_case() {
 
 #[test]
 fn test_convert_expr_string_to_upper_case() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_expr("s.toUpperCase();");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -2113,11 +2402,14 @@ fn test_convert_expr_string_to_upper_case() {
 
 #[test]
 fn test_convert_expr_string_split_generates_vec_string() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // s.split(",") → s.split(",").map(|s| s.to_string()).collect::<Vec<String>>()
     let expr = parse_expr(r#"s.split(",");"#);
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -2154,11 +2446,14 @@ fn test_convert_expr_string_split_generates_vec_string() {
 
 #[test]
 fn test_convert_expr_substring_two_args_generates_slice() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // s.substring(1, 3) → s[1..3].to_string()
     let expr = parse_expr("s.substring(1, 3);");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -2182,11 +2477,14 @@ fn test_convert_expr_substring_two_args_generates_slice() {
 
 #[test]
 fn test_convert_expr_substring_one_arg_generates_open_range() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // s.substring(1) → s[1..].to_string()
     let expr = parse_expr("s.substring(1);");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -2210,11 +2508,14 @@ fn test_convert_expr_substring_one_arg_generates_open_range() {
 
 #[test]
 fn test_convert_expr_slice_one_arg_generates_open_range() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // arr.slice(1) → arr[1..].to_vec()
     let expr = parse_expr("arr.slice(1);");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -2238,11 +2539,14 @@ fn test_convert_expr_slice_one_arg_generates_open_range() {
 
 #[test]
 fn test_convert_expr_string_replace_generates_replacen() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // s.replace("a", "b") → s.replacen("a", "b", 1) (first occurrence only)
     let expr = parse_expr(r#"s.replace("a", "b");"#);
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -2264,11 +2568,14 @@ fn test_convert_expr_string_replace_generates_replacen() {
 
 #[test]
 fn test_convert_expr_string_replace_all_generates_replace() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // s.replaceAll("a", "b") → s.replace("a", "b") (Rust replace replaces all)
     let expr = parse_expr(r#"s.replaceAll("a", "b");"#);
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -2291,10 +2598,13 @@ fn test_convert_expr_string_replace_all_generates_replace() {
 
 #[test]
 fn test_convert_expr_array_map_to_iter_map_collect() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_expr("arr.map((x: number) => x + 1);");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -2336,10 +2646,13 @@ fn test_convert_expr_array_map_to_iter_map_collect() {
 
 #[test]
 fn test_convert_expr_array_filter_to_iter_filter_collect() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_expr("arr.filter((x: number) => x > 0);");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -2381,10 +2694,13 @@ fn test_convert_expr_array_filter_to_iter_filter_collect() {
 
 #[test]
 fn test_convert_expr_array_find_to_iter_find() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_expr("arr.find((x: number) => x > 0);");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -2422,10 +2738,13 @@ fn test_convert_expr_array_find_to_iter_find() {
 
 #[test]
 fn test_convert_expr_array_some_to_iter_any() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_expr("arr.some((x: number) => x > 0);");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -2463,10 +2782,13 @@ fn test_convert_expr_array_some_to_iter_any() {
 
 #[test]
 fn test_convert_expr_array_every_to_iter_all() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_expr("arr.every((x: number) => x > 0);");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -2504,12 +2826,15 @@ fn test_convert_expr_array_every_to_iter_all() {
 
 #[test]
 fn test_convert_expr_array_foreach_to_for_loop() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // forEach は式→文の変換なので、statement レベルで別途テストする
     // ここではメソッド呼び出しとしての変換を確認
     let expr = parse_expr("arr.forEach((x: number) => console.log(x));");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -2550,10 +2875,13 @@ fn test_convert_expr_array_foreach_to_for_loop() {
 
 #[test]
 fn test_convert_expr_math_floor() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_expr("Math.floor(3.7);");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -2571,10 +2899,13 @@ fn test_convert_expr_math_floor() {
 
 #[test]
 fn test_convert_expr_math_ceil() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_expr("Math.ceil(x);");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -2592,10 +2923,13 @@ fn test_convert_expr_math_ceil() {
 
 #[test]
 fn test_convert_expr_math_round() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_expr("Math.round(x);");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -2613,10 +2947,13 @@ fn test_convert_expr_math_round() {
 
 #[test]
 fn test_convert_expr_math_abs() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_expr("Math.abs(x);");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -2634,10 +2971,13 @@ fn test_convert_expr_math_abs() {
 
 #[test]
 fn test_convert_expr_math_sqrt() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_expr("Math.sqrt(x);");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -2655,10 +2995,13 @@ fn test_convert_expr_math_sqrt() {
 
 #[test]
 fn test_convert_expr_math_max() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_expr("Math.max(a, b);");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -2676,10 +3019,13 @@ fn test_convert_expr_math_max() {
 
 #[test]
 fn test_convert_expr_math_min() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_expr("Math.min(a, b);");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -2697,10 +3043,13 @@ fn test_convert_expr_math_min() {
 
 #[test]
 fn test_convert_expr_math_pow() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_expr("Math.pow(x, 2);");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -2718,10 +3067,13 @@ fn test_convert_expr_math_pow() {
 
 #[test]
 fn test_convert_expr_math_nested() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_expr("Math.floor(Math.sqrt(x));");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -2745,10 +3097,13 @@ fn test_convert_expr_math_nested() {
 
 #[test]
 fn test_convert_expr_parse_int() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_expr(r#"parseInt("42");"#);
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -2771,10 +3126,13 @@ fn test_convert_expr_parse_int() {
 
 #[test]
 fn test_convert_expr_parse_float() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_expr(r#"parseFloat("3.14");"#);
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -2797,10 +3155,13 @@ fn test_convert_expr_parse_float() {
 
 #[test]
 fn test_convert_expr_is_nan_global() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_expr("isNaN(x);");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -2819,10 +3180,13 @@ fn test_convert_expr_is_nan_global() {
 
 #[test]
 fn test_convert_expr_number_is_nan() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_expr("Number.isNaN(x);");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -2841,10 +3205,13 @@ fn test_convert_expr_number_is_nan() {
 
 #[test]
 fn test_convert_expr_number_is_finite() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_expr("Number.isFinite(x);");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -2865,11 +3232,14 @@ fn test_convert_expr_number_is_finite() {
 
 #[test]
 fn test_convert_expr_nullish_coalescing_basic() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // `a ?? b` → `a.unwrap_or_else(|| b)`
     let expr = parse_expr("a ?? b;");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -2893,11 +3263,14 @@ fn test_convert_expr_nullish_coalescing_basic() {
 
 #[test]
 fn test_convert_expr_type_assertion_primitive_generates_cast() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // `x as number` → `x as f64` (primitive cast preserved)
     let expr = parse_expr("x as number;");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -2914,11 +3287,14 @@ fn test_convert_expr_type_assertion_primitive_generates_cast() {
 
 #[test]
 fn test_convert_expr_type_assertion_nested() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // `(obj as Foo).bar` → `obj.bar`
     let expr = parse_expr("(obj as Foo).bar;");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -2935,10 +3311,13 @@ fn test_convert_expr_type_assertion_nested() {
 
 #[test]
 fn test_convert_opt_chain_length_returns_len_as_f64() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_expr("x?.length;");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -2975,11 +3354,14 @@ fn test_convert_opt_chain_length_returns_len_as_f64() {
 
 #[test]
 fn test_convert_expr_number_is_integer_to_fract() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // Number.isInteger(x) → x.fract() == 0.0
     let expr = parse_expr("Number.isInteger(x);");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -3001,11 +3383,14 @@ fn test_convert_expr_number_is_integer_to_fract() {
 
 #[test]
 fn test_convert_expr_math_sign_to_signum() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // Math.sign(x) → x.signum()
     let expr = parse_expr("Math.sign(x);");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -3023,11 +3408,14 @@ fn test_convert_expr_math_sign_to_signum() {
 
 #[test]
 fn test_convert_expr_math_trunc() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // Math.trunc(x) → x.trunc()
     let expr = parse_expr("Math.trunc(x);");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -3045,11 +3433,14 @@ fn test_convert_expr_math_trunc() {
 
 #[test]
 fn test_convert_expr_math_log_to_ln() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // Math.log(x) → x.ln()
     let expr = parse_expr("Math.log(x);");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -3067,11 +3458,14 @@ fn test_convert_expr_math_log_to_ln() {
 
 #[test]
 fn test_convert_expr_math_pi_to_consts() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // Math.PI → std::f64::consts::PI
     let expr = parse_expr("Math.PI;");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -3082,11 +3476,14 @@ fn test_convert_expr_math_pi_to_consts() {
 
 #[test]
 fn test_convert_expr_math_e_to_consts() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // Math.E → std::f64::consts::E
     let expr = parse_expr("Math.E;");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -3099,10 +3496,13 @@ fn test_convert_expr_math_e_to_consts() {
 
 #[test]
 fn test_convert_expr_nan_to_f64_nan() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_expr("NaN;");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -3113,10 +3513,13 @@ fn test_convert_expr_nan_to_f64_nan() {
 
 #[test]
 fn test_convert_expr_infinity_to_f64_infinity() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_expr("Infinity;");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -3127,11 +3530,14 @@ fn test_convert_expr_infinity_to_f64_infinity() {
 
 #[test]
 fn test_convert_expr_slice_to_range_to_vec() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // arr.slice(1, 3) → arr[1..3].to_vec()
     let expr = parse_expr("arr.slice(1, 3);");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -3155,11 +3561,14 @@ fn test_convert_expr_slice_to_range_to_vec() {
 
 #[test]
 fn test_convert_expr_splice_to_drain_collect() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // arr.splice(1, 2) → arr.drain(1..3).collect::<Vec<_>>()
     let expr = parse_expr("arr.splice(1, 2);");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -3184,11 +3593,14 @@ fn test_convert_expr_splice_to_drain_collect() {
 
 #[test]
 fn test_convert_expr_reverse_unchanged() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // arr.reverse() → arr.reverse() (same name, in-place)
     let expr = parse_expr("arr.reverse();");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -3206,11 +3618,14 @@ fn test_convert_expr_reverse_unchanged() {
 
 #[test]
 fn test_convert_expr_sort_no_args_generates_sort_by_partial_cmp() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // arr.sort() → arr.sort_by(|a, b| a.partial_cmp(b).unwrap())
     let expr = parse_expr("arr.sort();");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -3249,11 +3664,14 @@ fn test_convert_expr_sort_no_args_generates_sort_by_partial_cmp() {
 
 #[test]
 fn test_convert_expr_sort_with_comparator_to_sort_by() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // arr.sort((a, b) => a - b) → arr.sort_by(|a, b| (a - b).partial_cmp(&0.0).unwrap())
     let expr = parse_expr("arr.sort((a, b) => a - b);");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -3279,11 +3697,14 @@ fn test_convert_expr_sort_with_comparator_to_sort_by() {
 
 #[test]
 fn test_convert_expr_index_of_to_iter_position() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // arr.indexOf(x) → arr.iter().position(|item| *item == x).map(|i| i as f64).unwrap_or(-1.0)
     let expr = parse_expr("arr.indexOf(x);");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -3334,11 +3755,14 @@ fn test_convert_expr_index_of_to_iter_position() {
 
 #[test]
 fn test_convert_expr_join_string_literal_passes_through() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // arr.join(",") → arr.join(",") — string literals are already &str in Rust
     let expr = parse_expr("arr.join(\",\");");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -3356,11 +3780,14 @@ fn test_convert_expr_join_string_literal_passes_through() {
 
 #[test]
 fn test_convert_expr_reduce_with_init_to_iter_fold() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // arr.reduce((acc, x) => acc + x, 0) → arr.iter().fold(0, |acc, x| acc + x)
     let expr = parse_expr("arr.reduce((acc, x) => acc + x, 0);");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -3402,12 +3829,15 @@ fn test_convert_expr_reduce_with_init_to_iter_fold() {
 
 #[test]
 fn test_map_method_reduce_typed_closure_strips_type_annotations() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // arr.reduce((acc: number, x: number) => acc + x, 0)
     // → fold closure params should have NO type annotation (Rust infers &T from iter())
     let expr = parse_expr("arr.reduce((acc: number, x: number) => acc + x, 0);");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -3434,11 +3864,14 @@ fn test_map_method_reduce_typed_closure_strips_type_annotations() {
 
 #[test]
 fn test_map_method_indexof_position_returns_f64_with_unwrap() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // arr.indexOf(target) → arr.iter().position(...).map(|i| i as f64).unwrap_or(-1.0)
     let expr = parse_expr("arr.indexOf(target);");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -3459,11 +3892,14 @@ fn test_map_method_indexof_position_returns_f64_with_unwrap() {
 
 #[test]
 fn test_map_method_join_passes_borrowed_arg() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // arr.join(sep) → arr.join(&sep)
     let expr = parse_expr("arr.join(sep);");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -3484,11 +3920,14 @@ fn test_map_method_join_passes_borrowed_arg() {
 
 #[test]
 fn test_map_method_sort_no_args_uses_partial_cmp() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // arr.sort() → arr.sort_by(|a, b| a.partial_cmp(b).unwrap())
     let expr = parse_expr("arr.sort();");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -3506,11 +3945,14 @@ fn test_map_method_sort_no_args_uses_partial_cmp() {
 
 #[test]
 fn test_map_method_sort_with_comparator_strips_type_annotations() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // arr.sort((a: number, b: number) => b - a) → sort_by closure params have no type annotation
     let expr = parse_expr("arr.sort((a: number, b: number) => b - a);");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -3532,12 +3974,15 @@ fn test_map_method_sort_with_comparator_strips_type_annotations() {
 
 #[test]
 fn test_map_method_splice_generates_integer_range() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // arr.splice(1, 2) → arr.drain(1..3).collect::<Vec<_>>()
     // The range should use integer literals, not float
     let expr = parse_expr("arr.splice(1, 2);");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -3580,10 +4025,13 @@ fn test_map_method_splice_generates_integer_range() {
 
 #[test]
 fn test_convert_opt_chain_normal_field_unchanged() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_expr("x?.y;");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -3625,22 +4073,26 @@ fn parse_single_expr(source: &str) -> swc_ecma_ast::Expr {
 
 #[test]
 fn test_resolve_expr_type_ident_registered_returns_type() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_single_expr("x;");
     let mut env = TypeEnv::new();
     env.insert("x".to_string(), RustType::String);
 
     assert_eq!(
-        resolve_expr_type(&expr, &env, &TypeRegistry::new()),
+        resolve_expr_type(&expr, &env, &tctx, f.reg()),
         Some(RustType::String)
     );
 }
 
 #[test]
 fn test_resolve_expr_type_ident_unregistered_returns_none() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_single_expr("y;");
     let env = TypeEnv::new();
 
-    assert_eq!(resolve_expr_type(&expr, &env, &TypeRegistry::new()), None);
+    assert_eq!(resolve_expr_type(&expr, &env, &tctx, f.reg()), None);
 }
 
 #[test]
@@ -3663,8 +4115,13 @@ fn test_resolve_expr_type_member_field_found_returns_field_type() {
             vec![],
         ),
     );
+    let f = TctxFixture::with_reg(reg);
+    let tctx = f.tctx();
 
-    assert_eq!(resolve_expr_type(&expr, &env, &reg), Some(RustType::String));
+    assert_eq!(
+        resolve_expr_type(&expr, &env, &tctx, f.reg()),
+        Some(RustType::String)
+    );
 }
 
 #[test]
@@ -3687,8 +4144,10 @@ fn test_resolve_expr_type_member_field_not_found_returns_none() {
             vec![],
         ),
     );
+    let f = TctxFixture::with_reg(reg);
+    let tctx = f.tctx();
 
-    assert_eq!(resolve_expr_type(&expr, &env, &reg), None);
+    assert_eq!(resolve_expr_type(&expr, &env, &tctx, f.reg()), None);
 }
 
 #[test]
@@ -3711,48 +4170,61 @@ fn test_resolve_expr_type_member_option_named_returns_field_type() {
             vec![],
         ),
     );
+    let f = TctxFixture::with_reg(reg);
+    let tctx = f.tctx();
 
-    assert_eq!(resolve_expr_type(&expr, &env, &reg), Some(RustType::String));
+    assert_eq!(
+        resolve_expr_type(&expr, &env, &tctx, f.reg()),
+        Some(RustType::String)
+    );
 }
 
 #[test]
 fn test_resolve_expr_type_member_obj_unresolvable_returns_none() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_single_expr("y.field;");
     let env = TypeEnv::new();
 
-    assert_eq!(resolve_expr_type(&expr, &env, &TypeRegistry::new()), None);
+    assert_eq!(resolve_expr_type(&expr, &env, &tctx, f.reg()), None);
 }
 
 #[test]
 fn test_resolve_expr_type_paren_delegates_to_inner() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_single_expr("(x);");
     let mut env = TypeEnv::new();
     env.insert("x".to_string(), RustType::F64);
 
     assert_eq!(
-        resolve_expr_type(&expr, &env, &TypeRegistry::new()),
+        resolve_expr_type(&expr, &env, &tctx, f.reg()),
         Some(RustType::F64)
     );
 }
 
 #[test]
 fn test_resolve_expr_type_ts_as_returns_target_type() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_single_expr("x as string;");
     let env = TypeEnv::new();
 
     assert_eq!(
-        resolve_expr_type(&expr, &env, &TypeRegistry::new()),
+        resolve_expr_type(&expr, &env, &tctx, f.reg()),
         Some(RustType::String)
     );
 }
 
 #[test]
 fn test_resolve_expr_type_number_literal_returns_f64() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_single_expr("42;");
     let env = TypeEnv::new();
 
     assert_eq!(
-        resolve_expr_type(&expr, &env, &TypeRegistry::new()),
+        resolve_expr_type(&expr, &env, &tctx, f.reg()),
         Some(RustType::F64)
     );
 }
@@ -3791,14 +4263,21 @@ fn test_resolve_expr_type_member_chain_returns_nested_type() {
             vec![],
         ),
     );
+    let f = TctxFixture::with_reg(reg);
+    let tctx = f.tctx();
 
-    assert_eq!(resolve_expr_type(&expr, &env, &reg), Some(RustType::String));
+    assert_eq!(
+        resolve_expr_type(&expr, &env, &tctx, f.reg()),
+        Some(RustType::String)
+    );
 }
 
 // --- TypeEnv-aware optional chaining tests ---
 
 #[test]
 fn test_convert_opt_chain_non_option_type_returns_plain_access() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_single_expr("x?.y;");
     let mut env = TypeEnv::new();
     env.insert(
@@ -3811,7 +4290,8 @@ fn test_convert_opt_chain_non_option_type_returns_plain_access() {
 
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &env,
         &mut SyntheticTypeRegistry::new(),
@@ -3828,6 +4308,8 @@ fn test_convert_opt_chain_non_option_type_returns_plain_access() {
 
 #[test]
 fn test_convert_opt_chain_option_type_returns_map_pattern() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_single_expr("x?.y;");
     let mut env = TypeEnv::new();
     env.insert(
@@ -3840,7 +4322,8 @@ fn test_convert_opt_chain_option_type_returns_map_pattern() {
 
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &env,
         &mut SyntheticTypeRegistry::new(),
@@ -3854,12 +4337,15 @@ fn test_convert_opt_chain_option_type_returns_map_pattern() {
 
 #[test]
 fn test_convert_opt_chain_unknown_type_returns_map_pattern() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_single_expr("x?.y;");
     let env = TypeEnv::new();
 
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &env,
         &mut SyntheticTypeRegistry::new(),
@@ -3875,6 +4361,8 @@ fn test_convert_opt_chain_unknown_type_returns_map_pattern() {
 
 #[test]
 fn test_opt_chain_method_call_maps_to_rust_name() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // s?.toUpperCase() → s.as_ref().map(|_v| _v.to_uppercase())
     let expr = parse_single_expr("s?.toUpperCase();");
     let mut env = TypeEnv::new();
@@ -3884,7 +4372,8 @@ fn test_opt_chain_method_call_maps_to_rust_name() {
     );
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &env,
         &mut SyntheticTypeRegistry::new(),
@@ -3919,13 +4408,16 @@ fn test_opt_chain_method_call_maps_to_rust_name() {
 
 #[test]
 fn test_convert_nullish_coalescing_non_option_returns_left() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_single_expr("x ?? y;");
     let mut env = TypeEnv::new();
     env.insert("x".to_string(), RustType::String);
 
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &env,
         &mut SyntheticTypeRegistry::new(),
@@ -3936,6 +4428,8 @@ fn test_convert_nullish_coalescing_non_option_returns_left() {
 
 #[test]
 fn test_convert_nullish_coalescing_option_returns_unwrap_or_else() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_single_expr("x ?? y;");
     let mut env = TypeEnv::new();
     env.insert(
@@ -3945,7 +4439,8 @@ fn test_convert_nullish_coalescing_option_returns_unwrap_or_else() {
 
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &env,
         &mut SyntheticTypeRegistry::new(),
@@ -3959,12 +4454,15 @@ fn test_convert_nullish_coalescing_option_returns_unwrap_or_else() {
 
 #[test]
 fn test_convert_nullish_coalescing_unknown_type_returns_unwrap_or_else() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_single_expr("x ?? y;");
     let env = TypeEnv::new();
 
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &env,
         &mut SyntheticTypeRegistry::new(),
@@ -4014,10 +4512,13 @@ fn test_convert_opt_chain_nested_option_uses_and_then() {
             vec![],
         ),
     );
+    let f = TctxFixture::with_reg(reg);
+    let tctx = f.tctx();
 
     let result = convert_expr(
         &expr,
-        &reg,
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &env,
         &mut SyntheticTypeRegistry::new(),
@@ -4037,11 +4538,14 @@ use crate::ir::Stmt as IrStmt;
 
 #[test]
 fn test_convert_expr_array_spread_in_expression_generates_block() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // foo([...arr, 1]) — spread in function arg position
     let expr = parse_expr("foo([...arr, 1]);");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -4063,11 +4567,14 @@ fn test_convert_expr_array_spread_in_expression_generates_block() {
 
 #[test]
 fn test_convert_expr_array_spread_prefix_and_suffix_generates_block() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // [1, ...arr, 2] in expression position (as function arg)
     let expr = parse_expr("foo([1, ...arr, 2]);");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -4107,11 +4614,14 @@ fn test_convert_expr_array_spread_prefix_and_suffix_generates_block() {
 
 #[test]
 fn test_string_concat_rhs_ident_gets_ref() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // "Hello " + name → BinaryOp { left: StringLit, op: Add, right: Ref(Ident) }
     let swc_expr = parse_expr(r#""Hello " + name"#);
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -4131,13 +4641,16 @@ fn test_string_concat_rhs_ident_gets_ref() {
 
 #[test]
 fn test_string_concat_chain_rhs_gets_ref() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // "Hello " + name + "!" → outer Add: LHS is Add(StringLit, Ref(Ident)), RHS should be Ref(StringLit("!"))
     // Actually "!" is a literal, so it gets .to_string() in Rust, which is already &str-compatible
     // But the pattern is: greeting + " " + name
     let swc_expr = parse_expr(r#"greeting + " " + name"#);
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -4150,11 +4663,14 @@ fn test_string_concat_chain_rhs_gets_ref() {
 
 #[test]
 fn test_numeric_add_no_ref() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // a + b (numeric) should NOT get Ref
     let swc_expr = parse_expr("a + b");
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -4194,10 +4710,13 @@ fn test_call_with_missing_default_arg_appends_none() {
         },
     );
 
+    let f = TctxFixture::with_reg(reg);
+    let tctx = f.tctx();
     let swc_expr = parse_expr("greet(\"World\")");
     let result = convert_expr(
         &swc_expr,
-        &reg,
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -4239,10 +4758,13 @@ fn test_call_with_option_arg_wraps_some() {
         },
     );
 
+    let f = TctxFixture::with_reg(reg);
+    let tctx = f.tctx();
     let swc_expr = parse_expr("greet(\"World\", \"Hi\")");
     let result = convert_expr(
         &swc_expr,
-        &reg,
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -4279,20 +4801,29 @@ fn test_resolve_expr_type_call_registry_fn_returns_return_type() {
             has_rest: false,
         },
     );
+    let f = TctxFixture::with_reg(reg);
+    let tctx = f.tctx();
 
-    assert_eq!(resolve_expr_type(&expr, &env, &reg), Some(RustType::String));
+    assert_eq!(
+        resolve_expr_type(&expr, &env, &tctx, f.reg()),
+        Some(RustType::String)
+    );
 }
 
 #[test]
 fn test_resolve_expr_type_call_unregistered_fn_returns_none() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_single_expr("unknown();");
     let env = TypeEnv::new();
 
-    assert_eq!(resolve_expr_type(&expr, &env, &TypeRegistry::new()), None);
+    assert_eq!(resolve_expr_type(&expr, &env, &tctx, f.reg()), None);
 }
 
 #[test]
 fn test_resolve_expr_type_call_fn_type_in_env_returns_return_type() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_single_expr("f();");
     let mut env = TypeEnv::new();
     env.insert(
@@ -4304,7 +4835,7 @@ fn test_resolve_expr_type_call_fn_type_in_env_returns_return_type() {
     );
 
     assert_eq!(
-        resolve_expr_type(&expr, &env, &TypeRegistry::new()),
+        resolve_expr_type(&expr, &env, &tctx, f.reg()),
         Some(RustType::Bool)
     );
 }
@@ -4322,66 +4853,81 @@ fn test_resolve_expr_type_call_registry_fn_no_return_type_returns_unit() {
             has_rest: false,
         },
     );
+    let f = TctxFixture::with_reg(reg);
+    let tctx = f.tctx();
 
-    assert_eq!(resolve_expr_type(&expr, &env, &reg), Some(RustType::Unit));
+    assert_eq!(
+        resolve_expr_type(&expr, &env, &tctx, f.reg()),
+        Some(RustType::Unit)
+    );
 }
 
 // --- resolve_expr_type: array index ---
 
 #[test]
 fn test_resolve_expr_type_index_vec_returns_element_type() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_single_expr("arr[0];");
     let mut env = TypeEnv::new();
     env.insert("arr".to_string(), RustType::Vec(Box::new(RustType::String)));
 
     assert_eq!(
-        resolve_expr_type(&expr, &env, &TypeRegistry::new()),
+        resolve_expr_type(&expr, &env, &tctx, f.reg()),
         Some(RustType::String)
     );
 }
 
 #[test]
 fn test_resolve_expr_type_index_non_vec_returns_none() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_single_expr("x[0];");
     let mut env = TypeEnv::new();
     env.insert("x".to_string(), RustType::String);
 
-    assert_eq!(resolve_expr_type(&expr, &env, &TypeRegistry::new()), None);
+    assert_eq!(resolve_expr_type(&expr, &env, &tctx, f.reg()), None);
 }
 
 // --- resolve_expr_type: binary operations ---
 
 #[test]
 fn test_resolve_expr_type_comparison_returns_bool() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_single_expr("x > y;");
     let env = TypeEnv::new();
 
     assert_eq!(
-        resolve_expr_type(&expr, &env, &TypeRegistry::new()),
+        resolve_expr_type(&expr, &env, &tctx, f.reg()),
         Some(RustType::Bool)
     );
 }
 
 #[test]
 fn test_resolve_expr_type_equality_returns_bool() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_single_expr("x === y;");
     let env = TypeEnv::new();
 
     assert_eq!(
-        resolve_expr_type(&expr, &env, &TypeRegistry::new()),
+        resolve_expr_type(&expr, &env, &tctx, f.reg()),
         Some(RustType::Bool)
     );
 }
 
 #[test]
 fn test_resolve_expr_type_logical_and_returns_operand_type() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_single_expr("a && b;");
     let mut env = TypeEnv::new();
     env.insert("a".to_string(), RustType::String);
     env.insert("b".to_string(), RustType::String);
 
     assert_eq!(
-        resolve_expr_type(&expr, &env, &TypeRegistry::new()),
+        resolve_expr_type(&expr, &env, &tctx, f.reg()),
         Some(RustType::String)
     );
 }
@@ -4398,8 +4944,10 @@ fn test_resolve_expr_type_new_registered_returns_named_type() {
         TypeDef::new_struct(vec![], std::collections::HashMap::new(), vec![]),
     );
 
+    let f = TctxFixture::with_reg(reg);
+    let tctx = f.tctx();
     assert_eq!(
-        resolve_expr_type(&expr, &env, &reg),
+        resolve_expr_type(&expr, &env, &tctx, f.reg()),
         Some(RustType::Named {
             name: "Foo".to_string(),
             type_args: vec![],
@@ -4409,10 +4957,12 @@ fn test_resolve_expr_type_new_registered_returns_named_type() {
 
 #[test]
 fn test_resolve_expr_type_new_unregistered_returns_none() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_single_expr("new Unknown();");
     let env = TypeEnv::new();
 
-    assert_eq!(resolve_expr_type(&expr, &env, &TypeRegistry::new()), None);
+    assert_eq!(resolve_expr_type(&expr, &env, &tctx, f.reg()), None);
 }
 
 // --- Step 5: expected 型伝搬テスト ---
@@ -4421,12 +4971,14 @@ fn test_resolve_expr_type_new_unregistered_returns_none() {
 fn test_convert_bin_expr_expected_string_enables_concat() {
     // a + b with expected=String → string concat context (RHS wrapped in Ref)
     let swc_expr = parse_expr("a + b;");
-    let reg = TypeRegistry::new();
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let env = TypeEnv::new(); // a, b not registered → types unknown
 
     let result = convert_expr(
         &swc_expr,
-        &reg,
+        &tctx,
+        f.reg(),
         &ExprContext::with_expected(&RustType::String),
         &env,
         &mut SyntheticTypeRegistry::new(),
@@ -4451,12 +5003,14 @@ fn test_convert_bin_expr_expected_string_enables_concat() {
 fn test_convert_bin_expr_no_expected_numeric_add() {
     // a + b with expected=None → numeric addition (no Ref wrapping)
     let swc_expr = parse_expr("a + b;");
-    let reg = TypeRegistry::new();
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let env = TypeEnv::new();
 
     let result = convert_expr(
         &swc_expr,
-        &reg,
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &env,
         &mut SyntheticTypeRegistry::new(),
@@ -4480,7 +5034,8 @@ fn test_convert_call_expr_typeenv_fn_provides_param_expected() {
     // f("hello") where TypeEnv has f: Fn { params: [String], return_type: Bool }
     // → "hello" should become "hello".to_string() because expected=String
     let swc_expr = parse_expr("f(\"hello\");");
-    let reg = TypeRegistry::new();
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let mut env = TypeEnv::new();
     env.insert(
         "f".to_string(),
@@ -4492,7 +5047,8 @@ fn test_convert_call_expr_typeenv_fn_provides_param_expected() {
 
     let result = convert_expr(
         &swc_expr,
-        &reg,
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &env,
         &mut SyntheticTypeRegistry::new(),
@@ -4521,12 +5077,14 @@ fn test_convert_call_expr_typeenv_fn_provides_param_expected() {
 fn test_convert_call_expr_no_typeenv_fn_no_expected() {
     // f("hello") where TypeEnv is empty → "hello" stays as StringLit (no .to_string())
     let swc_expr = parse_expr("f(\"hello\");");
-    let reg = TypeRegistry::new();
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let env = TypeEnv::new();
 
     let result = convert_expr(
         &swc_expr,
-        &reg,
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &env,
         &mut SyntheticTypeRegistry::new(),
@@ -4563,10 +5121,13 @@ fn test_convert_call_expr_rest_param_packs_args_into_vec() {
             has_rest: true,
         },
     );
+    let f = TctxFixture::with_reg(reg);
+    let tctx = f.tctx();
 
     let result = convert_expr(
         &swc_expr,
-        &reg,
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -4606,10 +5167,13 @@ fn test_convert_call_expr_rest_param_mixed_regular_and_rest() {
             has_rest: true,
         },
     );
+    let f = TctxFixture::with_reg(reg);
+    let tctx = f.tctx();
 
     let result = convert_expr(
         &swc_expr,
-        &reg,
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -4645,10 +5209,13 @@ fn test_convert_call_expr_rest_param_no_rest_args() {
             has_rest: true,
         },
     );
+    let f = TctxFixture::with_reg(reg);
+    let tctx = f.tctx();
 
     let result = convert_expr(
         &swc_expr,
-        &reg,
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -4684,10 +5251,13 @@ fn test_convert_call_expr_rest_param_spread_single_array() {
             has_rest: true,
         },
     );
+    let f = TctxFixture::with_reg(reg);
+    let tctx = f.tctx();
 
     let result = convert_expr(
         &swc_expr,
-        &reg,
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -4723,10 +5293,13 @@ fn test_convert_call_expr_rest_param_mixed_literal_and_spread() {
             has_rest: true,
         },
     );
+    let f = TctxFixture::with_reg(reg);
+    let tctx = f.tctx();
 
     let result = convert_expr(
         &swc_expr,
-        &reg,
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -4755,13 +5328,15 @@ fn test_convert_call_expr_rest_param_mixed_literal_and_spread() {
 fn test_convert_array_lit_empty_with_expected_vec_string() {
     // [] with expected=Vec<String> → Expr::Vec with no elements (type comes from context)
     let swc_expr = parse_var_init("const x = [];");
-    let reg = TypeRegistry::new();
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let env = TypeEnv::new();
     let expected = RustType::Vec(Box::new(RustType::String));
 
     let result = convert_expr(
         &swc_expr,
-        &reg,
+        &tctx,
+        f.reg(),
         &ExprContext::with_expected(&expected),
         &env,
         &mut SyntheticTypeRegistry::new(),
@@ -4775,13 +5350,15 @@ fn test_convert_array_lit_empty_with_expected_vec_string() {
 fn test_convert_array_lit_elements_get_expected_element_type() {
     // ["a", "b"] with expected=Vec<String> → elements get .to_string()
     let swc_expr = parse_var_init("const x = [\"a\", \"b\"];");
-    let reg = TypeRegistry::new();
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let env = TypeEnv::new();
     let expected = RustType::Vec(Box::new(RustType::String));
 
     let result = convert_expr(
         &swc_expr,
-        &reg,
+        &tctx,
+        f.reg(),
         &ExprContext::with_expected(&expected),
         &env,
         &mut SyntheticTypeRegistry::new(),
@@ -4808,12 +5385,15 @@ fn test_convert_array_lit_elements_get_expected_element_type() {
 
 #[test]
 fn test_typeof_equals_string_known_type_resolves_true() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let swc_expr = parse_expr("typeof x === \"string\";");
     let mut env = TypeEnv::new();
     env.insert("x".to_string(), RustType::String);
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &env,
         &mut SyntheticTypeRegistry::new(),
@@ -4824,12 +5404,15 @@ fn test_typeof_equals_string_known_type_resolves_true() {
 
 #[test]
 fn test_typeof_equals_string_mismatched_type_resolves_false() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let swc_expr = parse_expr("typeof x === \"string\";");
     let mut env = TypeEnv::new();
     env.insert("x".to_string(), RustType::F64);
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &env,
         &mut SyntheticTypeRegistry::new(),
@@ -4840,12 +5423,15 @@ fn test_typeof_equals_string_mismatched_type_resolves_false() {
 
 #[test]
 fn test_typeof_equals_number_known_type_resolves_true() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let swc_expr = parse_expr("typeof x === \"number\";");
     let mut env = TypeEnv::new();
     env.insert("x".to_string(), RustType::F64);
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &env,
         &mut SyntheticTypeRegistry::new(),
@@ -4856,12 +5442,15 @@ fn test_typeof_equals_number_known_type_resolves_true() {
 
 #[test]
 fn test_typeof_not_equals_string_known_type_resolves_false() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let swc_expr = parse_expr("typeof x !== \"string\";");
     let mut env = TypeEnv::new();
     env.insert("x".to_string(), RustType::String);
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &env,
         &mut SyntheticTypeRegistry::new(),
@@ -4872,11 +5461,14 @@ fn test_typeof_not_equals_string_known_type_resolves_false() {
 
 #[test]
 fn test_typeof_equals_string_unknown_type_generates_todo() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let swc_expr = parse_expr("typeof x === \"string\";");
     let env = TypeEnv::new(); // x not registered
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &env,
         &mut SyntheticTypeRegistry::new(),
@@ -4888,6 +5480,8 @@ fn test_typeof_equals_string_unknown_type_generates_todo() {
 
 #[test]
 fn test_typeof_equals_string_any_type_generates_todo() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // Any type → todo!() (compile error, not silent true).
     // For function params, any_narrowing generates enum and if-let instead.
     let swc_expr = parse_expr("typeof x === \"string\";");
@@ -4895,7 +5489,8 @@ fn test_typeof_equals_string_any_type_generates_todo() {
     env.insert("x".to_string(), RustType::Any);
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &env,
         &mut SyntheticTypeRegistry::new(),
@@ -4906,12 +5501,15 @@ fn test_typeof_equals_string_any_type_generates_todo() {
 
 #[test]
 fn test_typeof_equals_number_any_type_generates_todo() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let swc_expr = parse_expr("typeof x === \"number\";");
     let mut env = TypeEnv::new();
     env.insert("x".to_string(), RustType::Any);
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &env,
         &mut SyntheticTypeRegistry::new(),
@@ -4922,13 +5520,16 @@ fn test_typeof_equals_number_any_type_generates_todo() {
 
 #[test]
 fn test_typeof_not_equals_string_any_type_generates_todo() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // !== with Any → todo!() (compile error, not silent true).
     let swc_expr = parse_expr("typeof x !== \"string\";");
     let mut env = TypeEnv::new();
     env.insert("x".to_string(), RustType::Any);
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &env,
         &mut SyntheticTypeRegistry::new(),
@@ -4939,6 +5540,8 @@ fn test_typeof_not_equals_string_any_type_generates_todo() {
 
 #[test]
 fn test_instanceof_any_type_generates_todo() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // Any type → todo!() (compile error, not silent true).
     // For function params, any_narrowing generates enum and if-let instead.
     let swc_expr = parse_expr("x instanceof Foo;");
@@ -4946,7 +5549,8 @@ fn test_instanceof_any_type_generates_todo() {
     env.insert("x".to_string(), RustType::Any);
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &env,
         &mut SyntheticTypeRegistry::new(),
@@ -4957,12 +5561,15 @@ fn test_instanceof_any_type_generates_todo() {
 
 #[test]
 fn test_typeof_equals_undefined_option_resolves_is_none() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let swc_expr = parse_expr("typeof x === \"undefined\";");
     let mut env = TypeEnv::new();
     env.insert("x".to_string(), RustType::Option(Box::new(RustType::F64)));
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &env,
         &mut SyntheticTypeRegistry::new(),
@@ -4977,12 +5584,15 @@ fn test_typeof_equals_undefined_option_resolves_is_none() {
 
 #[test]
 fn test_typeof_standalone_known_type_resolves_string_lit() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let swc_expr = parse_expr("typeof x;");
     let mut env = TypeEnv::new();
     env.insert("x".to_string(), RustType::String);
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &env,
         &mut SyntheticTypeRegistry::new(),
@@ -4993,6 +5603,8 @@ fn test_typeof_standalone_known_type_resolves_string_lit() {
 
 #[test]
 fn test_instanceof_known_type_match_resolves_true() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let swc_expr = parse_expr("x instanceof Foo;");
     let mut env = TypeEnv::new();
     env.insert(
@@ -5004,7 +5616,8 @@ fn test_instanceof_known_type_match_resolves_true() {
     );
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &env,
         &mut SyntheticTypeRegistry::new(),
@@ -5015,6 +5628,8 @@ fn test_instanceof_known_type_match_resolves_true() {
 
 #[test]
 fn test_instanceof_known_type_mismatch_resolves_false() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let swc_expr = parse_expr("x instanceof Foo;");
     let mut env = TypeEnv::new();
     env.insert(
@@ -5026,7 +5641,8 @@ fn test_instanceof_known_type_mismatch_resolves_false() {
     );
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &env,
         &mut SyntheticTypeRegistry::new(),
@@ -5037,12 +5653,15 @@ fn test_instanceof_known_type_mismatch_resolves_false() {
 
 #[test]
 fn test_instanceof_unknown_type_generates_todo() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // Unknown type → todo!() (compile error, not silent true).
     let swc_expr = parse_expr("x instanceof Foo;");
     let env = TypeEnv::new();
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &env,
         &mut SyntheticTypeRegistry::new(),
@@ -5057,7 +5676,8 @@ fn test_instanceof_unknown_type_generates_todo() {
 fn test_self_field_string_concat_gets_clone() {
     // this.name + " suffix" → self.name.clone() + &" suffix"
     let swc_expr = parse_expr("this.name + \" suffix\";");
-    let reg = TypeRegistry::new();
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let mut env = TypeEnv::new();
     // Mark "this" as having a string field to trigger string concat context
     env.insert(
@@ -5069,7 +5689,8 @@ fn test_self_field_string_concat_gets_clone() {
     );
     let result = convert_expr(
         &swc_expr,
-        &reg,
+        &tctx,
+        f.reg(),
         &ExprContext::with_expected(&RustType::String),
         &env,
         &mut SyntheticTypeRegistry::new(),
@@ -5093,10 +5714,13 @@ fn test_self_field_string_concat_gets_clone() {
 
 #[test]
 fn test_undefined_literal_converts_to_none() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let swc_expr = parse_expr("undefined;");
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -5107,12 +5731,15 @@ fn test_undefined_literal_converts_to_none() {
 
 #[test]
 fn test_equals_undefined_converts_to_is_none() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let swc_expr = parse_expr("x === undefined;");
     let mut env = TypeEnv::new();
     env.insert("x".to_string(), RustType::Option(Box::new(RustType::F64)));
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &env,
         &mut SyntheticTypeRegistry::new(),
@@ -5127,12 +5754,15 @@ fn test_equals_undefined_converts_to_is_none() {
 
 #[test]
 fn test_not_equals_undefined_converts_to_is_some() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let swc_expr = parse_expr("x !== undefined;");
     let mut env = TypeEnv::new();
     env.insert("x".to_string(), RustType::Option(Box::new(RustType::F64)));
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &env,
         &mut SyntheticTypeRegistry::new(),
@@ -5147,12 +5777,15 @@ fn test_not_equals_undefined_converts_to_is_some() {
 
 #[test]
 fn test_option_expected_wraps_literal_in_some() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // Literals with Option expected are wrapped in Some() (for array elements etc.)
     let swc_expr = parse_expr("42;");
     let expected = RustType::Option(Box::new(RustType::F64));
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::with_expected(&expected),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -5169,11 +5802,14 @@ fn test_option_expected_wraps_literal_in_some() {
 
 #[test]
 fn test_option_expected_undefined_stays_none() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let swc_expr = parse_expr("undefined;");
     let expected = RustType::Option(Box::new(RustType::F64));
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::with_expected(&expected),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -5206,10 +5842,13 @@ fn test_convert_lit_string_to_enum_variant_when_expected_is_string_literal_union
         name: "Direction".to_string(),
         type_args: vec![],
     };
+    let f = TctxFixture::with_reg(reg);
+    let tctx = f.tctx();
     let swc_expr = parse_expr(r#""up";"#);
     let result = convert_expr(
         &swc_expr,
-        &reg,
+        &tctx,
+        f.reg(),
         &ExprContext::with_expected(&expected),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -5238,10 +5877,13 @@ fn test_convert_lit_string_no_match_falls_back_to_string_lit() {
         name: "Direction".to_string(),
         type_args: vec![],
     };
+    let f = TctxFixture::with_reg(reg);
+    let tctx = f.tctx();
     let swc_expr = parse_expr(r#""unknown";"#);
     let result = convert_expr(
         &swc_expr,
-        &reg,
+        &tctx,
+        f.reg(),
         &ExprContext::with_expected(&expected),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -5276,10 +5918,13 @@ fn test_convert_bin_expr_enum_var_eq_string_literal_converts_rhs() {
         },
     );
 
+    let f = TctxFixture::with_reg(reg);
+    let tctx = f.tctx();
     let swc_expr = parse_expr(r#"d == "up";"#);
     let result = convert_expr(
         &swc_expr,
-        &reg,
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &type_env,
         &mut SyntheticTypeRegistry::new(),
@@ -5320,10 +5965,13 @@ fn test_convert_bin_expr_string_literal_ne_enum_var_converts_lhs() {
         },
     );
 
+    let f = TctxFixture::with_reg(reg);
+    let tctx = f.tctx();
     let swc_expr = parse_expr(r#""up" != d;"#);
     let result = convert_expr(
         &swc_expr,
-        &reg,
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &type_env,
         &mut SyntheticTypeRegistry::new(),
@@ -5370,10 +6018,13 @@ fn test_convert_call_args_string_literal_to_enum_variant() {
         },
     );
 
+    let f = TctxFixture::with_reg(reg);
+    let tctx = f.tctx();
     let swc_expr = parse_expr(r#"move_dir("up");"#);
     let result = convert_expr(
         &swc_expr,
-        &reg,
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -5420,10 +6071,13 @@ fn test_convert_object_lit_discriminated_union_to_enum_variant() {
         name: "Shape".to_string(),
         type_args: vec![],
     };
+    let f = TctxFixture::with_reg(reg);
+    let tctx = f.tctx();
     let swc_expr = parse_var_init(r#"const s: Shape = { kind: "circle", radius: 5 };"#);
     let result = convert_expr(
         &swc_expr,
-        &reg,
+        &tctx,
+        f.reg(),
         &ExprContext::with_expected(&expected),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -5461,10 +6115,13 @@ fn test_convert_object_lit_discriminated_union_unit_variant() {
         name: "Status".to_string(),
         type_args: vec![],
     };
+    let f = TctxFixture::with_reg(reg);
+    let tctx = f.tctx();
     let swc_expr = parse_var_init(r#"const s: Status = { type: "active" };"#);
     let result = convert_expr(
         &swc_expr,
-        &reg,
+        &tctx,
+        f.reg(),
         &ExprContext::with_expected(&expected),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -5504,10 +6161,13 @@ fn test_convert_member_expr_discriminant_field_to_method_call() {
         },
     );
 
+    let f = TctxFixture::with_reg(reg);
+    let tctx = f.tctx();
     let swc_expr = parse_expr("s.kind;");
     let result = convert_expr(
         &swc_expr,
-        &reg,
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &type_env,
         &mut SyntheticTypeRegistry::new(),
@@ -5527,10 +6187,13 @@ fn test_convert_member_expr_discriminant_field_to_method_call() {
 
 #[test]
 fn test_convert_member_expr_array_index_literal_generates_index() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let swc_expr = parse_expr("arr[0];");
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -5547,10 +6210,13 @@ fn test_convert_member_expr_array_index_literal_generates_index() {
 
 #[test]
 fn test_convert_member_expr_array_index_variable_generates_index() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let swc_expr = parse_expr("arr[i];");
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -5569,6 +6235,8 @@ fn test_convert_member_expr_array_index_variable_generates_index() {
 
 #[test]
 fn test_convert_member_expr_tuple_literal_index_generates_field_access() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let mut type_env = TypeEnv::new();
     type_env.insert(
         "pair".to_string(),
@@ -5578,7 +6246,8 @@ fn test_convert_member_expr_tuple_literal_index_generates_field_access() {
     let swc_expr = parse_expr("pair[0];");
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &type_env,
         &mut SyntheticTypeRegistry::new(),
@@ -5595,6 +6264,8 @@ fn test_convert_member_expr_tuple_literal_index_generates_field_access() {
 
 #[test]
 fn test_convert_member_expr_tuple_second_index_generates_field_access() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let mut type_env = TypeEnv::new();
     type_env.insert(
         "pair".to_string(),
@@ -5604,7 +6275,8 @@ fn test_convert_member_expr_tuple_second_index_generates_field_access() {
     let swc_expr = parse_expr("pair[1];");
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &type_env,
         &mut SyntheticTypeRegistry::new(),
@@ -5621,13 +6293,16 @@ fn test_convert_member_expr_tuple_second_index_generates_field_access() {
 
 #[test]
 fn test_convert_member_expr_non_tuple_index_unchanged() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let mut type_env = TypeEnv::new();
     type_env.insert("arr".to_string(), RustType::Vec(Box::new(RustType::F64)));
 
     let swc_expr = parse_expr("arr[0];");
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &type_env,
         &mut SyntheticTypeRegistry::new(),
@@ -5644,6 +6319,8 @@ fn test_convert_member_expr_non_tuple_index_unchanged() {
 
 #[test]
 fn test_resolve_expr_type_tuple_index_returns_element_type() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let mut type_env = TypeEnv::new();
     type_env.insert(
         "pair".to_string(),
@@ -5651,7 +6328,7 @@ fn test_resolve_expr_type_tuple_index_returns_element_type() {
     );
 
     let swc_expr = parse_expr("pair[0];");
-    let result = resolve_expr_type(&swc_expr, &type_env, &TypeRegistry::new());
+    let result = resolve_expr_type(&swc_expr, &type_env, &tctx, f.reg());
     assert_eq!(result, Some(RustType::String));
 }
 
@@ -5659,6 +6336,8 @@ fn test_resolve_expr_type_tuple_index_returns_element_type() {
 
 #[test]
 fn test_convert_nullish_coalescing_rhs_string_gets_to_string_when_lhs_is_option_string() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let mut type_env = TypeEnv::new();
     type_env.insert(
         "s".to_string(),
@@ -5668,7 +6347,8 @@ fn test_convert_nullish_coalescing_rhs_string_gets_to_string_when_lhs_is_option_
     let swc_expr = parse_expr(r#"s ?? "default";"#);
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &type_env,
         &mut SyntheticTypeRegistry::new(),
@@ -5725,10 +6405,13 @@ fn test_convert_method_call_string_arg_gets_to_string_with_registry() {
         },
     );
 
+    let f = TctxFixture::with_reg(reg);
+    let tctx = f.tctx();
     let swc_expr = parse_expr(r#"g.greet("world");"#);
     let result = convert_expr(
         &swc_expr,
-        &reg,
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &type_env,
         &mut SyntheticTypeRegistry::new(),
@@ -5792,10 +6475,13 @@ fn test_convert_du_standalone_field_access_generates_match_expr() {
     );
 
     // s.radius → match expression
+    let f = TctxFixture::with_reg(reg);
+    let tctx = f.tctx();
     let swc_expr = parse_var_init("const x = s.radius;");
     let result = convert_expr(
         &swc_expr,
-        &reg,
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &type_env,
         &mut SyntheticTypeRegistry::new(),
@@ -5844,6 +6530,8 @@ fn test_in_operator_struct_field_exists_generates_true() {
             vec![],
         ),
     );
+    let f = TctxFixture::with_reg(reg);
+    let tctx = f.tctx();
     let mut env = TypeEnv::new();
     env.insert(
         "point".to_string(),
@@ -5854,7 +6542,8 @@ fn test_in_operator_struct_field_exists_generates_true() {
     );
     let result = convert_expr(
         &expr,
-        &reg,
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &env,
         &mut SyntheticTypeRegistry::new(),
@@ -5879,6 +6568,8 @@ fn test_in_operator_struct_field_missing_generates_false() {
             vec![],
         ),
     );
+    let f = TctxFixture::with_reg(reg);
+    let tctx = f.tctx();
     let mut env = TypeEnv::new();
     env.insert(
         "point".to_string(),
@@ -5889,7 +6580,8 @@ fn test_in_operator_struct_field_missing_generates_false() {
     );
     let result = convert_expr(
         &expr,
-        &reg,
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &env,
         &mut SyntheticTypeRegistry::new(),
@@ -5900,12 +6592,15 @@ fn test_in_operator_struct_field_missing_generates_false() {
 
 #[test]
 fn test_in_operator_unknown_type_generates_todo() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // "x" in unknown → todo!() (not silent true)
     let expr = parse_expr(r#""x" in unknown"#);
     let env = TypeEnv::new();
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &env,
         &mut SyntheticTypeRegistry::new(),
@@ -5937,10 +6632,13 @@ fn test_convert_expr_arrow_object_destructuring_generates_expansion() {
         );
         r
     };
+    let f = TctxFixture::with_reg(reg);
+    let tctx = f.tctx();
     let swc_expr = parse_var_init("const f = ({ x, y }: Point) => x + y;");
     let result = convert_expr(
         &swc_expr,
-        &reg,
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -5979,11 +6677,14 @@ fn test_convert_expr_arrow_object_destructuring_generates_expansion() {
 
 #[test]
 fn test_convert_expr_arrow_array_destructuring_param_generates_tuple() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // ([k, v]: [string, number]) => ... → closure with (k, v) tuple param
     let swc_expr = parse_var_init("const f = ([k, v]: [string, number]) => k;");
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -6003,11 +6704,14 @@ fn test_convert_expr_arrow_array_destructuring_param_generates_tuple() {
 
 #[test]
 fn test_convert_expr_arrow_array_destructuring_no_type_generates_param() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // ([a, b]) => ... → should not crash (fallback to untyped)
     let swc_expr = parse_var_init("const f = ([a, b]) => a;");
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -6023,11 +6727,14 @@ fn test_convert_expr_arrow_array_destructuring_no_type_generates_param() {
 
 #[test]
 fn test_convert_expr_arrow_object_destructuring_no_type_generates_value_param() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // ({ x, y }) => ... → should not crash (fallback to serde_json::Value)
     let swc_expr = parse_var_init("const f = ({ x, y }) => x;");
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -6041,11 +6748,14 @@ fn test_convert_expr_arrow_object_destructuring_no_type_generates_value_param() 
 
 #[test]
 fn test_convert_expr_arrow_default_param_generates_option() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // (x: number = 0) => x + 1 → closure with Option<f64> param + unwrap_or
     let swc_expr = parse_var_init("const f = (x: number = 0) => x + 1;");
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -6082,13 +6792,16 @@ fn test_convert_expr_arrow_default_param_generates_option() {
 
 #[test]
 fn test_convert_expr_postfix_increment_returns_old_value() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // i++ → { let _old = i; i = i + 1.0; _old }
     use crate::ir::Stmt as IrStmt;
     let expr = parse_expr("i++");
     let env = TypeEnv::new();
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &env,
         &mut SyntheticTypeRegistry::new(),
@@ -6106,13 +6819,16 @@ fn test_convert_expr_postfix_increment_returns_old_value() {
 
 #[test]
 fn test_convert_expr_prefix_increment_returns_new_value() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // ++i → { i = i + 1.0; i }
     use crate::ir::Stmt as IrStmt;
     let expr = parse_expr("++i");
     let env = TypeEnv::new();
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &env,
         &mut SyntheticTypeRegistry::new(),
@@ -6130,13 +6846,16 @@ fn test_convert_expr_prefix_increment_returns_new_value() {
 
 #[test]
 fn test_convert_expr_postfix_decrement_returns_old_value() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // i-- → { let _old = i; i = i - 1.0; _old }
     use crate::ir::Stmt as IrStmt;
     let expr = parse_expr("i--");
     let env = TypeEnv::new();
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &env,
         &mut SyntheticTypeRegistry::new(),
@@ -6153,13 +6872,16 @@ fn test_convert_expr_postfix_decrement_returns_old_value() {
 
 #[test]
 fn test_convert_expr_prefix_decrement_returns_new_value() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // --i → { i = i - 1.0; i }
     use crate::ir::Stmt as IrStmt;
     let expr = parse_expr("--i");
     let env = TypeEnv::new();
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &env,
         &mut SyntheticTypeRegistry::new(),
@@ -6178,11 +6900,14 @@ fn test_convert_expr_prefix_decrement_returns_new_value() {
 
 #[test]
 fn test_convert_expr_fn_expr_anonymous_generates_closure() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // function(x: number): number { return x + 1; } → Closure
     let swc_expr = parse_var_init("const f = function(x: number): number { return x + 1; };");
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -6206,11 +6931,14 @@ fn test_convert_expr_fn_expr_anonymous_generates_closure() {
 
 #[test]
 fn test_convert_expr_fn_expr_named_generates_closure() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // function foo(x: number) { return x; } → Closure (name ignored)
     let swc_expr = parse_var_init("const f = function foo(x: number): number { return x; };");
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -6227,10 +6955,13 @@ fn test_convert_expr_fn_expr_named_generates_closure() {
 
 #[test]
 fn test_convert_expr_fn_expr_no_params_generates_closure() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let swc_expr = parse_var_init("const f = function(): void {};");
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -6248,11 +6979,14 @@ fn test_convert_expr_fn_expr_no_params_generates_closure() {
 
 #[test]
 fn test_convert_expr_regex_no_flags_generates_regex_new() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // /pattern/ → Expr::Regex { global: false, sticky: false }
     let expr = parse_var_init(r#"const r = /pattern/;"#);
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -6270,11 +7004,14 @@ fn test_convert_expr_regex_no_flags_generates_regex_new() {
 
 #[test]
 fn test_convert_expr_regex_global_flag_preserved() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // /pattern/g → Expr::Regex { global: true }
     let expr = parse_var_init(r#"const r = /pattern/g;"#);
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -6292,11 +7029,14 @@ fn test_convert_expr_regex_global_flag_preserved() {
 
 #[test]
 fn test_convert_expr_regex_case_insensitive_flag_inlined() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // /pattern/i → Expr::Regex with (?i) prefix
     let expr = parse_var_init(r#"const r = /pattern/i;"#);
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -6314,11 +7054,14 @@ fn test_convert_expr_regex_case_insensitive_flag_inlined() {
 
 #[test]
 fn test_convert_expr_regex_multiple_flags_inlined() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // /pattern/gim → Expr::Regex with (?i)(?m) prefix and global: true
     let expr = parse_var_init(r#"const r = /pattern/gim;"#);
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -6338,11 +7081,14 @@ fn test_convert_expr_regex_multiple_flags_inlined() {
 
 #[test]
 fn test_convert_expr_regex_no_flags_generates_regex_ir() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // /pattern/ → Expr::Regex { global: false, sticky: false }
     let expr = parse_var_init(r#"const r = /pattern/;"#);
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -6360,11 +7106,14 @@ fn test_convert_expr_regex_no_flags_generates_regex_ir() {
 
 #[test]
 fn test_convert_expr_regex_global_flag_preserved_in_ir() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // /pattern/g → Expr::Regex { global: true, sticky: false }
     let expr = parse_var_init(r#"const r = /pattern/g;"#);
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -6382,11 +7131,14 @@ fn test_convert_expr_regex_global_flag_preserved_in_ir() {
 
 #[test]
 fn test_convert_expr_regex_sticky_flag_preserved_in_ir() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // /pattern/y → Expr::Regex { global: false, sticky: true }
     let expr = parse_var_init(r#"const r = /pattern/y;"#);
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -6404,11 +7156,14 @@ fn test_convert_expr_regex_sticky_flag_preserved_in_ir() {
 
 #[test]
 fn test_convert_expr_regex_multiple_flags_preserved_in_ir() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // /pattern/gims → Expr::Regex { global: true, sticky: false } with (?i)(?m)(?s) prefix
     let expr = parse_var_init(r#"const r = /pattern/gims;"#);
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -6426,11 +7181,14 @@ fn test_convert_expr_regex_multiple_flags_preserved_in_ir() {
 
 #[test]
 fn test_convert_expr_replace_with_global_regex_generates_replace_all() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // s.replace(/p/g, "r") → Regex::new(r"p").unwrap().replace_all(&s, "r").to_string()
     let expr = parse_expr(r#"s.replace(/p/g, "r");"#);
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -6459,11 +7217,14 @@ fn test_convert_expr_replace_with_global_regex_generates_replace_all() {
 
 #[test]
 fn test_convert_expr_replace_with_non_global_regex_generates_replace() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // s.replace(/p/, "r") → Regex::new(r"p").unwrap().replace(&s, "r").to_string()
     let expr = parse_expr(r#"s.replace(/p/, "r");"#);
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -6494,11 +7255,14 @@ fn test_convert_expr_replace_with_non_global_regex_generates_replace() {
 
 #[test]
 fn test_convert_expr_regex_test_generates_is_match() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // /p/.test(s) → Regex::new(r"p").unwrap().is_match(&s)
     let expr = parse_expr(r#"/p/.test(s);"#);
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -6520,11 +7284,14 @@ fn test_convert_expr_regex_test_generates_is_match() {
 
 #[test]
 fn test_convert_expr_string_match_regex_generates_find() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // s.match(/p/) → Regex::new(r"p").unwrap().find(&s)
     let expr = parse_expr(r#"s.match(/p/);"#);
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -6546,11 +7313,14 @@ fn test_convert_expr_string_match_regex_generates_find() {
 
 #[test]
 fn test_convert_expr_string_match_global_regex_generates_find_iter() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // s.match(/p/g) → Regex::new(r"p").unwrap().find_iter(&s)
     let expr = parse_expr(r#"s.match(/p/g);"#);
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -6572,11 +7342,14 @@ fn test_convert_expr_string_match_global_regex_generates_find_iter() {
 
 #[test]
 fn test_convert_expr_regex_exec_generates_captures() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // /p/.exec(s) → Regex::new(r"p").unwrap().captures(&s)
     let expr = parse_expr(r#"/p/.exec(s);"#);
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -6600,11 +7373,14 @@ fn test_convert_expr_regex_exec_generates_captures() {
 
 #[test]
 fn test_convert_expr_non_null_assertion_strips_assertion() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // x! → x (non-null assertion is type-level only, stripped)
     let expr = parse_expr("x!;");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -6617,10 +7393,13 @@ fn test_convert_expr_non_null_assertion_strips_assertion() {
 
 #[test]
 fn test_convert_expr_null_literal_generates_none() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_expr("null");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -6631,12 +7410,15 @@ fn test_convert_expr_null_literal_generates_none() {
 
 #[test]
 fn test_convert_expr_null_with_option_expected_returns_none_not_some_none() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // null with expected=Option<f64> should be None, NOT Some(None)
     let expr = parse_expr("null");
     let expected = RustType::Option(Box::new(RustType::F64));
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::with_expected(&expected),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -6654,12 +7436,15 @@ fn test_convert_expr_null_with_option_expected_returns_none_not_some_none() {
 
 #[test]
 fn test_convert_expr_ident_with_option_expected_passes_through() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // x with expected=Option<String> → x (Some wrapping happens at return stmt level)
     let expr = parse_expr("x");
     let expected = RustType::Option(Box::new(RustType::String));
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::with_expected(&expected),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -6670,12 +7455,15 @@ fn test_convert_expr_ident_with_option_expected_passes_through() {
 
 #[test]
 fn test_convert_expr_undefined_with_option_expected_returns_none() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // undefined with expected=Option<T> → None (no wrapping)
     let expr = parse_expr("undefined");
     let expected = RustType::Option(Box::new(RustType::String));
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::with_expected(&expected),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -6688,12 +7476,15 @@ fn test_convert_expr_undefined_with_option_expected_returns_none() {
 
 #[test]
 fn test_convert_expr_array_with_tuple_expected_generates_tuple() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // ["a", 1] with expected=Tuple([String, F64]) → Expr::Tuple
     let expr = parse_expr(r#"["a", 1]"#);
     let expected = RustType::Tuple(vec![RustType::String, RustType::F64]);
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::with_expected(&expected),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -6709,6 +7500,8 @@ fn test_convert_expr_array_with_tuple_expected_generates_tuple() {
 
 #[test]
 fn test_convert_expr_nested_array_with_vec_tuple_expected() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // [["a", 1], ["b", 2]] with expected=Vec<Tuple([String, F64])>
     // → Expr::Vec { elements: [Expr::Tuple, Expr::Tuple] }
     let expr = parse_expr(r#"[["a", 1], ["b", 2]]"#);
@@ -6718,7 +7511,8 @@ fn test_convert_expr_nested_array_with_vec_tuple_expected() {
     ])));
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::with_expected(&expected),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -6738,11 +7532,14 @@ fn test_convert_expr_nested_array_with_vec_tuple_expected() {
 
 #[test]
 fn test_convert_expr_private_field_access_generates_field_access() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // this.#field → self._field
     let expr = parse_expr("this.#routes");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -6761,10 +7558,13 @@ fn test_convert_expr_private_field_access_generates_field_access() {
 
 #[test]
 fn test_convert_expr_bitwise_xor() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_expr("a ^ b");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -6781,10 +7581,13 @@ fn test_convert_expr_bitwise_xor() {
 
 #[test]
 fn test_convert_expr_bitwise_and() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_expr("a & b");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -6801,10 +7604,13 @@ fn test_convert_expr_bitwise_and() {
 
 #[test]
 fn test_convert_expr_bitwise_or() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_expr("a | b");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -6821,10 +7627,13 @@ fn test_convert_expr_bitwise_or() {
 
 #[test]
 fn test_convert_expr_shift_left() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_expr("a << b");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -6835,10 +7644,13 @@ fn test_convert_expr_shift_left() {
 
 #[test]
 fn test_convert_expr_shift_right() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_expr("a >> b");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -6851,10 +7663,13 @@ fn test_convert_expr_shift_right() {
 
 #[test]
 fn test_convert_expr_unsigned_right_shift_generates_ushr() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_expr("a >>> b");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -6871,12 +7686,15 @@ fn test_convert_expr_unsigned_right_shift_generates_ushr() {
 
 #[test]
 fn test_convert_expr_compound_assign_ushr_generates_desugar() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let expr = parse_expr("x >>>= 2");
     let mut type_env = TypeEnv::new();
     type_env.insert("x".to_string(), RustType::F64);
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &type_env,
         &mut SyntheticTypeRegistry::new(),
@@ -6903,11 +7721,14 @@ fn test_convert_expr_compound_assign_ushr_generates_desugar() {
 
 #[test]
 fn test_convert_expr_arrow_rest_param_generates_vec() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // (...args: number[]) => args → rest param becomes Vec<f64>
     let swc_expr = parse_var_init("const f = (...args: number[]) => args;");
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -6930,11 +7751,14 @@ fn test_convert_expr_arrow_rest_param_generates_vec() {
 
 #[test]
 fn test_convert_expr_compound_assign_mod() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // x %= 3 → x = x % 3
     let expr = parse_expr("x %= 3");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -6955,11 +7779,14 @@ fn test_convert_expr_compound_assign_mod() {
 
 #[test]
 fn test_convert_expr_compound_assign_bitand() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // x &= mask → x = x & mask
     let expr = parse_expr("x &= mask");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -6982,11 +7809,14 @@ fn test_convert_expr_compound_assign_bitand() {
 
 #[test]
 fn test_convert_expr_compound_assign_add() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // x += 1 → x = x + 1
     let expr = parse_expr("x += 1");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -7007,11 +7837,14 @@ fn test_convert_expr_compound_assign_add() {
 
 #[test]
 fn test_convert_expr_compound_assign_sub() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // x -= 1 → x = x - 1
     let expr = parse_expr("x -= 1");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -7032,11 +7865,14 @@ fn test_convert_expr_compound_assign_sub() {
 
 #[test]
 fn test_convert_expr_compound_assign_mul() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // x *= 2 → x = x * 2
     let expr = parse_expr("x *= 2");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -7057,11 +7893,14 @@ fn test_convert_expr_compound_assign_mul() {
 
 #[test]
 fn test_convert_expr_compound_assign_div() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // x /= 2 → x = x / 2
     let expr = parse_expr("x /= 2");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -7082,11 +7921,14 @@ fn test_convert_expr_compound_assign_div() {
 
 #[test]
 fn test_convert_expr_compound_assign_bitor() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // x |= mask → x = x | mask
     let expr = parse_expr("x |= mask");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -7107,11 +7949,14 @@ fn test_convert_expr_compound_assign_bitor() {
 
 #[test]
 fn test_convert_expr_compound_assign_bitxor() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // x ^= mask → x = x ^ mask
     let expr = parse_expr("x ^= mask");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -7132,11 +7977,14 @@ fn test_convert_expr_compound_assign_bitxor() {
 
 #[test]
 fn test_convert_expr_compound_assign_shl() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // x <<= 2 → x = x << 2
     let expr = parse_expr("x <<= 2");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -7157,11 +8005,14 @@ fn test_convert_expr_compound_assign_shl() {
 
 #[test]
 fn test_convert_expr_compound_assign_shr() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // x >>= 2 → x = x >> 2
     let expr = parse_expr("x >>= 2");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -7200,10 +8051,13 @@ fn test_convert_expr_fn_expr_object_destructuring_param() {
         );
         r
     };
+    let f = TctxFixture::with_reg(reg);
+    let tctx = f.tctx();
     let swc_expr = parse_var_init("const f = function({ x, y }: Point) { return x; };");
     let result = convert_expr(
         &swc_expr,
-        &reg,
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -7237,11 +8091,14 @@ fn test_convert_expr_fn_expr_object_destructuring_param() {
 
 #[test]
 fn test_convert_expr_fn_expr_default_param() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // const f = function(x: number = 0) { return x; }; → Closure with Option<f64> param
     let swc_expr = parse_var_init("const f = function(x: number = 0) { return x; };");
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -7277,11 +8134,14 @@ fn test_convert_expr_fn_expr_default_param() {
 
 #[test]
 fn test_convert_expr_update_non_ident_target_errors() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // arr[0]++ should error because the target is not an identifier
     let expr = parse_expr("arr[0]++");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -7298,11 +8158,14 @@ fn test_convert_expr_update_non_ident_target_errors() {
 
 #[test]
 fn test_convert_expr_fn_expr_rest_param_generates_closure() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // const f = function(...args: number[]): void {};
     let swc_expr = parse_var_init("const f = function(...args: number[]): void {};");
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -7325,11 +8188,14 @@ fn test_convert_expr_fn_expr_rest_param_generates_closure() {
 
 #[test]
 fn test_convert_expr_arrow_rest_param_no_type() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // const f = (...args) => args; → rest param with no type annotation
     let swc_expr = parse_var_init("const f = (...args) => args;");
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -7352,11 +8218,14 @@ fn test_convert_expr_arrow_rest_param_no_type() {
 
 #[test]
 fn test_convert_call_expr_paren_ident_unwraps_to_fn_call() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // (foo)(1) → foo(1.0)
     let expr = parse_expr("(foo)(1);");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -7373,11 +8242,14 @@ fn test_convert_call_expr_paren_ident_unwraps_to_fn_call() {
 
 #[test]
 fn test_convert_call_expr_paren_member_unwraps_to_method_call() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // (obj.method)() → obj.method()
     let expr = parse_expr("(obj.method)();");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -7393,11 +8265,14 @@ fn test_convert_call_expr_paren_member_unwraps_to_method_call() {
 
 #[test]
 fn test_convert_call_expr_chained_call_does_not_error() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // f(x)(y) — chained call should not error
     let expr = parse_expr("f(1)(2);");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -7413,11 +8288,14 @@ fn test_convert_call_expr_chained_call_does_not_error() {
 
 #[test]
 fn test_convert_call_expr_arrow_iife_generates_closure_call() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // (() => 42)() — arrow IIFE should produce a closure call
     let expr = parse_expr("(() => 42)();");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -7431,11 +8309,14 @@ fn test_convert_call_expr_arrow_iife_generates_closure_call() {
 
 #[test]
 fn test_convert_call_expr_arrow_iife_with_args_generates_closure_call() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // ((x: number) => x + 1)(5) — arrow IIFE with args
     let expr = parse_expr("((x: number): number => x + 1)(5);");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -7451,11 +8332,14 @@ fn test_convert_call_expr_arrow_iife_with_args_generates_closure_call() {
 
 #[test]
 fn test_convert_instanceof_unknown_type_generates_todo() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // Unknown type → todo!() (compile error, not silent true).
     let expr = parse_expr("x instanceof Foo");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -7466,6 +8350,8 @@ fn test_convert_instanceof_unknown_type_generates_todo() {
 
 #[test]
 fn test_convert_instanceof_known_matching_type_returns_true() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // x instanceof Foo where x: Foo → true (correct static resolution)
     let expr = parse_expr("x instanceof Foo");
     let mut env = TypeEnv::new();
@@ -7478,7 +8364,8 @@ fn test_convert_instanceof_known_matching_type_returns_true() {
     );
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &env,
         &mut SyntheticTypeRegistry::new(),
@@ -7489,6 +8376,8 @@ fn test_convert_instanceof_known_matching_type_returns_true() {
 
 #[test]
 fn test_convert_instanceof_option_type_returns_is_some() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // x instanceof Foo where x: Option<Foo> → x.is_some()
     let expr = parse_expr("x instanceof Foo");
     let mut env = TypeEnv::new();
@@ -7501,7 +8390,8 @@ fn test_convert_instanceof_option_type_returns_is_some() {
     );
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &env,
         &mut SyntheticTypeRegistry::new(),
@@ -7519,11 +8409,14 @@ fn test_convert_instanceof_option_type_returns_is_some() {
 
 #[test]
 fn test_convert_typeof_static_number_returns_string_lit() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // typeof 42 → "number" (static, no change needed)
     let expr = parse_expr("typeof 42");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -7534,13 +8427,16 @@ fn test_convert_typeof_static_number_returns_string_lit() {
 
 #[test]
 fn test_convert_typeof_option_type_returns_runtime_if() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // typeof x where x: Option<f64> → runtime branch
     let expr = parse_expr("typeof x");
     let mut env = TypeEnv::new();
     env.insert("x".to_string(), RustType::Option(Box::new(RustType::F64)));
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &env,
         &mut SyntheticTypeRegistry::new(),
@@ -7558,11 +8454,14 @@ fn test_convert_typeof_option_type_returns_runtime_if() {
 
 #[test]
 fn test_convert_typeof_unknown_type_returns_object() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // typeof x where x: unknown → "object" (JS default, not "unknown")
     let expr = parse_expr("typeof x");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -7575,11 +8474,14 @@ fn test_convert_typeof_unknown_type_returns_object() {
 
 #[test]
 fn test_process_env_access_converts_to_env_var() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // process.env.HOME → std::env::var("HOME").unwrap()
     let expr = parse_expr("process.env.HOME;");
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -7602,11 +8504,14 @@ fn test_process_env_access_converts_to_env_var() {
 
 #[test]
 fn test_fs_read_file_sync_converts_to_read_to_string() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // fs.readFileSync("a.txt", "utf8") → std::fs::read_to_string(&"a.txt").unwrap()
     let expr = parse_expr(r#"fs.readFileSync("a.txt", "utf8");"#);
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -7627,11 +8532,14 @@ fn test_fs_read_file_sync_converts_to_read_to_string() {
 
 #[test]
 fn test_fs_write_file_sync_converts_to_fs_write() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // fs.writeFileSync("a.txt", data) → std::fs::write(&"a.txt", &data).unwrap()
     let expr = parse_expr(r#"fs.writeFileSync("a.txt", data);"#);
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -7655,11 +8563,14 @@ fn test_fs_write_file_sync_converts_to_fs_write() {
 
 #[test]
 fn test_fs_exists_sync_converts_to_path_exists() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // fs.existsSync("a.txt") → std::path::Path::new("a.txt").exists()
     let expr = parse_expr(r#"fs.existsSync("a.txt");"#);
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -7680,11 +8591,14 @@ fn test_fs_exists_sync_converts_to_path_exists() {
 
 #[test]
 fn test_fs_read_file_sync_stdin_converts_to_stdin_read() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // fs.readFileSync("/dev/stdin", "utf8") → std::io::read_to_string(std::io::stdin()).unwrap()
     let expr = parse_expr(r#"fs.readFileSync("/dev/stdin", "utf8");"#);
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -7708,11 +8622,14 @@ fn test_fs_read_file_sync_stdin_converts_to_stdin_read() {
 
 #[test]
 fn test_fs_read_file_sync_fd0_converts_to_stdin_read() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // fs.readFileSync(0, "utf8") → same as /dev/stdin
     let expr = parse_expr(r#"fs.readFileSync(0, "utf8");"#);
     let result = convert_expr(
         &expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -7736,6 +8653,8 @@ fn test_fs_read_file_sync_fd0_converts_to_stdin_read() {
 
 #[test]
 fn test_convert_object_lit_all_computed_keys_generates_hashmap() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     // { [key]: "val" } (no type hint) → HashMap::from(vec![(key, "val".to_string())])
     let module =
         crate::parser::parse_typescript(r#"const x: Record<string, string> = { [key]: "val" };"#)
@@ -7749,7 +8668,8 @@ fn test_convert_object_lit_all_computed_keys_generates_hashmap() {
     let init = stmt.init.as_ref().unwrap();
     let result = convert_expr(
         init,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -7796,10 +8716,13 @@ fn test_convert_assign_expr_propagates_type_from_type_env() {
         },
     );
 
+    let f = TctxFixture::with_reg(reg);
+    let tctx = f.tctx();
     let swc_expr = parse_expr(r#"x = { name: "test" };"#);
     let result = convert_expr(
         &swc_expr,
-        &reg,
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &type_env,
         &mut SyntheticTypeRegistry::new(),
@@ -7828,6 +8751,8 @@ fn test_convert_assign_expr_propagates_type_from_type_env() {
 /// `{ [key]: "value" }` with expected `HashMap<String, String>` → values get `.to_string()`
 #[test]
 fn test_convert_hashmap_propagates_value_type() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let swc_expr = parse_var_init(r#"const m = { [key]: "val" };"#);
     let expected = RustType::Named {
         name: "HashMap".to_string(),
@@ -7835,7 +8760,8 @@ fn test_convert_hashmap_propagates_value_type() {
     };
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::with_expected(&expected),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -7893,10 +8819,13 @@ fn test_convert_opt_chain_method_call_propagates_param_types() {
         })),
     );
 
+    let f = TctxFixture::with_reg(reg);
+    let tctx = f.tctx();
     let swc_expr = parse_expr(r#"obj?.greet("hello");"#);
     let result = convert_expr(
         &swc_expr,
-        &reg,
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &type_env,
         &mut SyntheticTypeRegistry::new(),
@@ -7936,12 +8865,15 @@ fn test_convert_opt_chain_method_call_propagates_param_types() {
 /// +x where x: number → x (identity, no-op)
 #[test]
 fn test_convert_expr_unary_plus_number_returns_identity() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let mut type_env = TypeEnv::new();
     type_env.insert("x".to_string(), crate::ir::RustType::F64);
     let swc_expr = parse_expr("+x;");
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &type_env,
         &mut SyntheticTypeRegistry::new(),
@@ -7953,12 +8885,15 @@ fn test_convert_expr_unary_plus_number_returns_identity() {
 /// +x where x: string → x.parse::<f64>().unwrap()
 #[test]
 fn test_convert_expr_unary_plus_string_returns_parse() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let mut type_env = TypeEnv::new();
     type_env.insert("x".to_string(), crate::ir::RustType::String);
     let swc_expr = parse_expr("+x;");
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &type_env,
         &mut SyntheticTypeRegistry::new(),
@@ -7977,10 +8912,13 @@ fn test_convert_expr_unary_plus_string_returns_parse() {
 /// +x where x: unknown → x (fallback, let compiler catch type errors)
 #[test]
 fn test_convert_expr_unary_plus_unknown_returns_identity() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
     let swc_expr = parse_expr("+x;");
     let result = convert_expr(
         &swc_expr,
-        &TypeRegistry::new(),
+        &tctx,
+        f.reg(),
         &ExprContext::none(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),

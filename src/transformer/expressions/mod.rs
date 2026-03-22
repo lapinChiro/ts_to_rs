@@ -120,9 +120,15 @@ pub fn convert_expr(
         ast::Expr::This(_) => Ok(Expr::Ident("self".to_string())),
         ast::Expr::Assign(assign) => convert_assign_expr(assign, tctx, reg, type_env, synthetic),
         ast::Expr::Update(up) => convert_update_expr(up),
-        ast::Expr::Arrow(arrow) => {
-            convert_arrow_expr(arrow, tctx, reg, false, &mut Vec::new(), type_env, synthetic)
-        }
+        ast::Expr::Arrow(arrow) => convert_arrow_expr(
+            arrow,
+            tctx,
+            reg,
+            false,
+            &mut Vec::new(),
+            type_env,
+            synthetic,
+        ),
         ast::Expr::Fn(fn_expr) => convert_fn_expr(fn_expr, tctx, reg, type_env, synthetic),
         ast::Expr::Call(call) => convert_call_expr(call, tctx, reg, type_env, synthetic),
         ast::Expr::New(new_expr) => convert_new_expr(new_expr, tctx, reg, type_env, synthetic),
@@ -134,7 +140,9 @@ pub fn convert_expr(
         }
         ast::Expr::Cond(cond) => convert_cond_expr(cond, tctx, reg, expected, type_env, synthetic),
         ast::Expr::Unary(unary) => convert_unary_expr(unary, tctx, reg, type_env, synthetic),
-        ast::Expr::TsAs(ts_as) => convert_ts_as_expr(ts_as, tctx, reg, expected, type_env, synthetic),
+        ast::Expr::TsAs(ts_as) => {
+            convert_ts_as_expr(ts_as, tctx, reg, expected, type_env, synthetic)
+        }
         ast::Expr::OptChain(opt_chain) => {
             convert_opt_chain_expr(opt_chain, tctx, reg, type_env, synthetic)
         }
@@ -322,7 +330,14 @@ fn convert_cond_expr(
     }
 
     // Fallback: regular if expression
-    let condition = convert_expr(&cond.test, tctx, reg, &ExprContext::none(), type_env, synthetic)?;
+    let condition = convert_expr(
+        &cond.test,
+        tctx,
+        reg,
+        &ExprContext::none(),
+        type_env,
+        synthetic,
+    )?;
     let then_expr = convert_expr(&cond.cons, tctx, reg, ctx, type_env, synthetic)?;
     let else_expr = convert_expr(&cond.alt, tctx, reg, ctx, type_env, synthetic)?;
     Ok(Expr::If {

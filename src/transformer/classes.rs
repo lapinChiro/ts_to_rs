@@ -11,10 +11,10 @@ use crate::ir::{AssocConst, Expr, Item, Method, Param, RustType, Stmt, StructFie
 use crate::pipeline::type_converter::convert_ts_type;
 use crate::pipeline::SyntheticTypeRegistry;
 use crate::registry::TypeRegistry;
+use crate::transformer::context::TransformContext;
 use crate::transformer::expressions::{convert_expr, ExprContext};
 use crate::transformer::extract_prop_name;
 use crate::transformer::functions::convert_last_return_to_tail;
-use crate::transformer::context::TransformContext;
 use crate::transformer::statements::convert_stmt;
 use crate::transformer::TypeEnv;
 
@@ -89,7 +89,8 @@ pub fn extract_class_info(
                 fields.push(convert_class_prop(prop, &vis, synthetic, tctx, reg)?);
             }
             ast::ClassMember::Constructor(ctor) => {
-                let (method, param_prop_fields) = convert_constructor(ctor, &vis, synthetic, tctx, reg)?;
+                let (method, param_prop_fields) =
+                    convert_constructor(ctor, &vis, synthetic, tctx, reg)?;
                 constructor = Some(method);
                 fields.extend(param_prop_fields);
             }
@@ -675,7 +676,8 @@ fn convert_constructor(
         }
         None if !param_prop_names.is_empty() => {
             let synthetic_stmts = build_param_prop_assignments(&param_prop_names);
-            let mut body = convert_constructor_body(&synthetic_stmts, tctx, reg, &params, synthetic)?;
+            let mut body =
+                convert_constructor_body(&synthetic_stmts, tctx, reg, &params, synthetic)?;
             for (i, stmt) in default_expansion_stmts.into_iter().enumerate() {
                 body.insert(i, stmt);
             }
@@ -803,10 +805,24 @@ fn convert_constructor_body(
     for stmt in stmts {
         if let Some((field_name, value_expr)) = try_extract_this_assignment(stmt) {
             // Cat B: field type could be looked up from class definition
-            let value = convert_expr(value_expr, tctx, reg, &ExprContext::none(), &type_env, synthetic)?;
+            let value = convert_expr(
+                value_expr,
+                tctx,
+                reg,
+                &ExprContext::none(),
+                &type_env,
+                synthetic,
+            )?;
             fields.push((field_name, value));
         } else {
-            other_stmts.extend(convert_stmt(stmt, tctx, reg, None, &mut type_env, synthetic)?);
+            other_stmts.extend(convert_stmt(
+                stmt,
+                tctx,
+                reg,
+                None,
+                &mut type_env,
+                synthetic,
+            )?);
         }
     }
 
@@ -1182,8 +1198,46 @@ mod tests {
     use super::*;
     use crate::ir::{Item, Param, RustType, StructField, Visibility};
     use crate::parser::parse_typescript;
+    use crate::pipeline::type_resolution::FileTypeResolution;
+    use crate::pipeline::ModuleGraph;
     use crate::registry::TypeRegistry;
+    use crate::transformer::context::TransformContext;
+    use std::path::Path;
     use swc_ecma_ast::{Decl, ModuleItem};
+
+    /// Test fixture: TransformContext + TypeRegistry の所有者。
+    /// テストごとに 4 行のボイラープレートを排除する。
+    struct TctxFixture {
+        mg: ModuleGraph,
+        reg: TypeRegistry,
+        res: FileTypeResolution,
+    }
+
+    impl TctxFixture {
+        fn new() -> Self {
+            Self {
+                mg: ModuleGraph::empty(),
+                reg: TypeRegistry::new(),
+                res: FileTypeResolution::empty(),
+            }
+        }
+
+        fn with_reg(reg: TypeRegistry) -> Self {
+            Self {
+                mg: ModuleGraph::empty(),
+                reg,
+                res: FileTypeResolution::empty(),
+            }
+        }
+
+        fn tctx(&self) -> TransformContext<'_> {
+            TransformContext::new(&self.mg, &self.reg, &self.res, Path::new("test.ts"))
+        }
+
+        fn reg(&self) -> &TypeRegistry {
+            &self.reg
+        }
+    }
 
     /// Helper: parse TS source and extract the first ClassDecl.
     fn parse_class_decl(source: &str) -> ast::ClassDecl {
@@ -1196,12 +1250,15 @@ mod tests {
 
     #[test]
     fn test_convert_class_properties_only() {
+        let f = TctxFixture::new();
+        let tctx = f.tctx();
         let decl = parse_class_decl("class Foo { x: number; y: string; }");
         let items = convert_class_decl(
             &decl,
             Visibility::Private,
             &mut SyntheticTypeRegistry::new(),
-            &TypeRegistry::new(),
+            &tctx,
+            f.reg(),
         )
         .unwrap();
 
@@ -1230,13 +1287,16 @@ mod tests {
 
     #[test]
     fn test_convert_class_constructor() {
+        let f = TctxFixture::new();
+        let tctx = f.tctx();
         let decl =
             parse_class_decl("class Foo { x: number; constructor(x: number) { this.x = x; } }");
         let items = convert_class_decl(
             &decl,
             Visibility::Private,
             &mut SyntheticTypeRegistry::new(),
-            &TypeRegistry::new(),
+            &tctx,
+            f.reg(),
         )
         .unwrap();
 
@@ -1272,13 +1332,16 @@ mod tests {
 
     #[test]
     fn test_convert_class_method_with_self() {
+        let f = TctxFixture::new();
+        let tctx = f.tctx();
         let decl =
             parse_class_decl("class Foo { name: string; greet(): string { return this.name; } }");
         let items = convert_class_decl(
             &decl,
             Visibility::Private,
             &mut SyntheticTypeRegistry::new(),
-            &TypeRegistry::new(),
+            &tctx,
+            f.reg(),
         )
         .unwrap();
 
@@ -1296,12 +1359,15 @@ mod tests {
 
     #[test]
     fn test_convert_class_export_visibility() {
+        let f = TctxFixture::new();
+        let tctx = f.tctx();
         let decl = parse_class_decl("class Foo { x: number; greet(): string { return this.x; } }");
         let items = convert_class_decl(
             &decl,
             Visibility::Public,
             &mut SyntheticTypeRegistry::new(),
-            &TypeRegistry::new(),
+            &tctx,
+            f.reg(),
         )
         .unwrap();
 
@@ -1319,12 +1385,15 @@ mod tests {
 
     #[test]
     fn test_convert_class_static_method_has_no_self() {
+        let f = TctxFixture::new();
+        let tctx = f.tctx();
         let decl = parse_class_decl("class Foo { x: number; static bar(): number { return 1; } }");
         let items = convert_class_decl(
             &decl,
             Visibility::Private,
             &mut SyntheticTypeRegistry::new(),
-            &TypeRegistry::new(),
+            &tctx,
+            f.reg(),
         )
         .unwrap();
 
@@ -1349,13 +1418,16 @@ mod tests {
 
     #[test]
     fn test_extract_class_info_implements_single() {
+        let f = TctxFixture::new();
+        let tctx = f.tctx();
         let decl =
             parse_class_decl("class Foo implements Greeter { greet(): string { return 'hi'; } }");
         let info = extract_class_info(
             &decl,
             Visibility::Private,
             &mut SyntheticTypeRegistry::new(),
-            &TypeRegistry::new(),
+            &tctx,
+            f.reg(),
         )
         .unwrap();
 
@@ -1364,12 +1436,15 @@ mod tests {
 
     #[test]
     fn test_extract_class_info_implements_multiple() {
+        let f = TctxFixture::new();
+        let tctx = f.tctx();
         let decl = parse_class_decl("class Foo implements A, B { foo(): void {} bar(): void {} }");
         let info = extract_class_info(
             &decl,
             Visibility::Private,
             &mut SyntheticTypeRegistry::new(),
-            &TypeRegistry::new(),
+            &tctx,
+            f.reg(),
         )
         .unwrap();
 
@@ -1378,12 +1453,15 @@ mod tests {
 
     #[test]
     fn test_extract_class_info_no_implements() {
+        let f = TctxFixture::new();
+        let tctx = f.tctx();
         let decl = parse_class_decl("class Foo { x: number; }");
         let info = extract_class_info(
             &decl,
             Visibility::Private,
             &mut SyntheticTypeRegistry::new(),
-            &TypeRegistry::new(),
+            &tctx,
+            f.reg(),
         )
         .unwrap();
 
@@ -1392,6 +1470,8 @@ mod tests {
 
     #[test]
     fn test_convert_class_this_to_self() {
+        let f = TctxFixture::new();
+        let tctx = f.tctx();
         let decl = parse_class_decl(
             "class Foo { name: string; constructor(name: string) { this.name = name; } }",
         );
@@ -1399,7 +1479,8 @@ mod tests {
             &decl,
             Visibility::Private,
             &mut SyntheticTypeRegistry::new(),
-            &TypeRegistry::new(),
+            &tctx,
+            f.reg(),
         )
         .unwrap();
 
@@ -1415,12 +1496,15 @@ mod tests {
 
     #[test]
     fn test_extract_class_info_abstract_flag_is_true() {
+        let f = TctxFixture::new();
+        let tctx = f.tctx();
         let decl = parse_class_decl("abstract class Shape { abstract area(): number; }");
         let info = extract_class_info(
             &decl,
             Visibility::Private,
             &mut SyntheticTypeRegistry::new(),
-            &TypeRegistry::new(),
+            &tctx,
+            f.reg(),
         )
         .unwrap();
         assert!(info.is_abstract);
@@ -1428,12 +1512,15 @@ mod tests {
 
     #[test]
     fn test_convert_abstract_class_abstract_only_generates_trait() {
+        let f = TctxFixture::new();
+        let tctx = f.tctx();
         let decl = parse_class_decl("abstract class Shape { abstract area(): number; }");
         let items = convert_class_decl(
             &decl,
             Visibility::Public,
             &mut SyntheticTypeRegistry::new(),
-            &TypeRegistry::new(),
+            &tctx,
+            f.reg(),
         )
         .unwrap();
         // Should produce a single Trait item, not Struct + Impl
@@ -1458,6 +1545,8 @@ mod tests {
 
     #[test]
     fn test_convert_abstract_class_mixed_generates_trait_with_defaults() {
+        let f = TctxFixture::new();
+        let tctx = f.tctx();
         let decl = parse_class_decl(
             "abstract class Shape { abstract area(): number; describe(): string { return \"shape\"; } }",
         );
@@ -1465,7 +1554,8 @@ mod tests {
             &decl,
             Visibility::Public,
             &mut SyntheticTypeRegistry::new(),
-            &TypeRegistry::new(),
+            &tctx,
+            f.reg(),
         )
         .unwrap();
         assert_eq!(items.len(), 1);
@@ -1485,12 +1575,15 @@ mod tests {
 
     #[test]
     fn test_convert_abstract_class_concrete_only_generates_trait_with_defaults() {
+        let f = TctxFixture::new();
+        let tctx = f.tctx();
         let decl = parse_class_decl("abstract class Foo { bar(): number { return 1; } }");
         let items = convert_class_decl(
             &decl,
             Visibility::Public,
             &mut SyntheticTypeRegistry::new(),
-            &TypeRegistry::new(),
+            &tctx,
+            f.reg(),
         )
         .unwrap();
         assert_eq!(items.len(), 1);
@@ -1559,6 +1652,8 @@ mod tests {
 
     #[test]
     fn test_convert_class_static_prop_generates_assoc_const() {
+        let f = TctxFixture::new();
+        let tctx = f.tctx();
         let decl = parse_class_decl(
             "class Config { static readonly MAX_SIZE: number = 100; value: number; }",
         );
@@ -1566,7 +1661,8 @@ mod tests {
             &decl,
             Visibility::Public,
             &mut SyntheticTypeRegistry::new(),
-            &TypeRegistry::new(),
+            &tctx,
+            f.reg(),
         )
         .unwrap();
         // Should have: Struct (only value field) + Impl (with const MAX_SIZE)
@@ -1594,12 +1690,15 @@ mod tests {
 
     #[test]
     fn test_convert_class_static_string_prop_generates_assoc_const() {
+        let f = TctxFixture::new();
+        let tctx = f.tctx();
         let decl = parse_class_decl("class Foo { static NAME: string = \"hello\"; x: number; }");
         let items = convert_class_decl(
             &decl,
             Visibility::Public,
             &mut SyntheticTypeRegistry::new(),
-            &TypeRegistry::new(),
+            &tctx,
+            f.reg(),
         )
         .unwrap();
         match &items[1] {
@@ -1614,12 +1713,15 @@ mod tests {
 
     #[test]
     fn test_convert_class_protected_method_generates_pub_crate() {
+        let f = TctxFixture::new();
+        let tctx = f.tctx();
         let decl = parse_class_decl("class Foo { protected greet(): string { return 'hi'; } }");
         let items = convert_class_decl(
             &decl,
             Visibility::Public,
             &mut SyntheticTypeRegistry::new(),
-            &TypeRegistry::new(),
+            &tctx,
+            f.reg(),
         )
         .unwrap();
         match &items[1] {
@@ -1634,12 +1736,15 @@ mod tests {
 
     #[test]
     fn test_convert_class_protected_property_generates_pub_crate_field() {
+        let f = TctxFixture::new();
+        let tctx = f.tctx();
         let decl = parse_class_decl("class Foo { protected x: number; }");
         let items = convert_class_decl(
             &decl,
             Visibility::Public,
             &mut SyntheticTypeRegistry::new(),
-            &TypeRegistry::new(),
+            &tctx,
+            f.reg(),
         )
         .unwrap();
         // Verify via generator output since StructField doesn't have vis yet
@@ -1651,12 +1756,15 @@ mod tests {
 
     #[test]
     fn test_param_prop_basic_public_generates_field_and_new() {
+        let f = TctxFixture::new();
+        let tctx = f.tctx();
         let decl = parse_class_decl("class Foo { constructor(public x: number) {} }");
         let items = convert_class_decl(
             &decl,
             Visibility::Public,
             &mut SyntheticTypeRegistry::new(),
-            &TypeRegistry::new(),
+            &tctx,
+            f.reg(),
         )
         .unwrap();
 
@@ -1690,12 +1798,15 @@ mod tests {
 
     #[test]
     fn test_param_prop_private_generates_private_field() {
+        let f = TctxFixture::new();
+        let tctx = f.tctx();
         let decl = parse_class_decl("class Foo { constructor(private x: number) {} }");
         let items = convert_class_decl(
             &decl,
             Visibility::Public,
             &mut SyntheticTypeRegistry::new(),
-            &TypeRegistry::new(),
+            &tctx,
+            f.reg(),
         )
         .unwrap();
 
@@ -1711,12 +1822,15 @@ mod tests {
 
     #[test]
     fn test_param_prop_readonly_generates_field() {
+        let f = TctxFixture::new();
+        let tctx = f.tctx();
         let decl = parse_class_decl("class Foo { constructor(public readonly x: string) {} }");
         let items = convert_class_decl(
             &decl,
             Visibility::Public,
             &mut SyntheticTypeRegistry::new(),
-            &TypeRegistry::new(),
+            &tctx,
+            f.reg(),
         )
         .unwrap();
 
@@ -1733,12 +1847,15 @@ mod tests {
 
     #[test]
     fn test_param_prop_with_default_value_generates_field_and_param() {
+        let f = TctxFixture::new();
+        let tctx = f.tctx();
         let decl = parse_class_decl("class Foo { constructor(public x: number = 42) {} }");
         let items = convert_class_decl(
             &decl,
             Visibility::Public,
             &mut SyntheticTypeRegistry::new(),
-            &TypeRegistry::new(),
+            &tctx,
+            f.reg(),
         )
         .unwrap();
 
@@ -1763,6 +1880,8 @@ mod tests {
 
     #[test]
     fn test_param_prop_mixed_with_regular_param() {
+        let f = TctxFixture::new();
+        let tctx = f.tctx();
         let decl = parse_class_decl(
             "class Foo { constructor(public x: number, y: string) { console.log(y); } }",
         );
@@ -1770,7 +1889,8 @@ mod tests {
             &decl,
             Visibility::Public,
             &mut SyntheticTypeRegistry::new(),
-            &TypeRegistry::new(),
+            &tctx,
+            f.reg(),
         )
         .unwrap();
 
@@ -1796,13 +1916,16 @@ mod tests {
 
     #[test]
     fn test_param_prop_multiple_generates_multiple_fields() {
+        let f = TctxFixture::new();
+        let tctx = f.tctx();
         let decl =
             parse_class_decl("class Foo { constructor(public x: number, private y: string) {} }");
         let items = convert_class_decl(
             &decl,
             Visibility::Public,
             &mut SyntheticTypeRegistry::new(),
-            &TypeRegistry::new(),
+            &tctx,
+            f.reg(),
         )
         .unwrap();
 
@@ -1820,6 +1943,8 @@ mod tests {
 
     #[test]
     fn test_param_prop_with_existing_this_assignment() {
+        let f = TctxFixture::new();
+        let tctx = f.tctx();
         let decl = parse_class_decl(
             "class Foo { z: boolean; constructor(public x: number) { this.z = true; } }",
         );
@@ -1827,7 +1952,8 @@ mod tests {
             &decl,
             Visibility::Public,
             &mut SyntheticTypeRegistry::new(),
-            &TypeRegistry::new(),
+            &tctx,
+            f.reg(),
         )
         .unwrap();
 
@@ -1845,13 +1971,16 @@ mod tests {
 
     #[test]
     fn test_param_prop_with_body_logic_preserves_statements() {
+        let f = TctxFixture::new();
+        let tctx = f.tctx();
         let decl =
             parse_class_decl("class Foo { constructor(public x: number) { console.log(x); } }");
         let items = convert_class_decl(
             &decl,
             Visibility::Public,
             &mut SyntheticTypeRegistry::new(),
-            &TypeRegistry::new(),
+            &tctx,
+            f.reg(),
         )
         .unwrap();
 
@@ -1871,6 +2000,8 @@ mod tests {
 
     #[test]
     fn test_convert_class_constructor_default_number_param() {
+        let f = TctxFixture::new();
+        let tctx = f.tctx();
         // constructor(x: number = 0) should produce Option<f64> param + unwrap_or
         let decl =
             parse_class_decl("class Foo { x: number; constructor(x: number = 0) { this.x = x; } }");
@@ -1878,7 +2009,8 @@ mod tests {
             &decl,
             Visibility::Private,
             &mut SyntheticTypeRegistry::new(),
-            &TypeRegistry::new(),
+            &tctx,
+            f.reg(),
         )
         .unwrap();
 
@@ -1911,13 +2043,16 @@ mod tests {
 
     #[test]
     fn test_convert_class_constructor_default_empty_object_param() {
+        let f = TctxFixture::new();
+        let tctx = f.tctx();
         // constructor(options: Options = {}) should produce Option<Options> + unwrap_or_default
         let decl = parse_class_decl("class Foo { constructor(options: Options = {}) {} }");
         let items = convert_class_decl(
             &decl,
             Visibility::Private,
             &mut SyntheticTypeRegistry::new(),
-            &TypeRegistry::new(),
+            &tctx,
+            f.reg(),
         )
         .unwrap();
 
@@ -1959,6 +2094,9 @@ mod tests {
             ),
         );
 
+        let f = TctxFixture::with_reg(reg);
+        let tctx = f.tctx();
+
         let decl =
             parse_class_decl(r#"class Foo { static config: Config = { name: "default" }; }"#);
         let items = convert_class_decl(
@@ -1966,7 +2104,7 @@ mod tests {
             Visibility::Private,
             &mut SyntheticTypeRegistry::new(),
             &tctx,
-            &reg,
+            f.reg(),
         )
         .unwrap();
 

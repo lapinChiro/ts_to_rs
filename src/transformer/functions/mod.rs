@@ -11,11 +11,11 @@ use crate::pipeline::type_converter::{
 };
 use crate::pipeline::SyntheticTypeRegistry;
 use crate::registry::TypeRegistry;
+use crate::transformer::context::TransformContext;
 use crate::transformer::statements::convert_stmt_list;
 use crate::transformer::{
     extract_pat_ident_name, extract_prop_name, wrap_trait_for_position, TypeEnv, TypePosition,
 };
-use crate::transformer::context::TransformContext;
 
 /// Converts an SWC [`ast::FnDecl`] into an IR [`Item::Fn`].
 ///
@@ -540,9 +540,8 @@ pub(crate) fn convert_default_value(
             let dummy_mg = crate::pipeline::ModuleGraph::empty();
             let dummy_res = crate::pipeline::type_resolution::FileTypeResolution::empty();
             let dummy_reg = TypeRegistry::new();
-            let dummy_tctx = TransformContext::new(
-                &dummy_mg, &dummy_reg, &dummy_res, std::path::Path::new(""),
-            );
+            let dummy_tctx =
+                TransformContext::new(&dummy_mg, &dummy_reg, &dummy_res, std::path::Path::new(""));
             let expr = crate::transformer::expressions::convert_expr(
                 other,
                 &dummy_tctx,
@@ -1299,7 +1298,11 @@ pub(crate) fn convert_var_decl_arrow_fns(
 /// Handles two cases:
 /// - `RustType::Fn { return_type, .. }` → returns the return_type directly
 /// - `RustType::Named { name, .. }` → looks up TypeRegistry for `TypeDef::Function` and extracts return_type
-pub(super) fn extract_fn_return_type(ty: &RustType, _tctx: &TransformContext<'_>, reg: &TypeRegistry) -> Option<RustType> {
+pub(super) fn extract_fn_return_type(
+    ty: &RustType,
+    _tctx: &TransformContext<'_>,
+    reg: &TypeRegistry,
+) -> Option<RustType> {
     match ty {
         RustType::Fn { return_type, .. } => {
             let rt = return_type.as_ref();
@@ -1325,7 +1328,11 @@ pub(super) fn extract_fn_return_type(ty: &RustType, _tctx: &TransformContext<'_>
 /// Handles two cases:
 /// - `RustType::Fn { params, .. }` → returns the params directly
 /// - `RustType::Named { name, .. }` → looks up TypeRegistry for `TypeDef::Function` and extracts params
-pub(super) fn extract_fn_param_types(ty: &RustType, _tctx: &TransformContext<'_>, reg: &TypeRegistry) -> Option<Vec<RustType>> {
+pub(super) fn extract_fn_param_types(
+    ty: &RustType,
+    _tctx: &TransformContext<'_>,
+    reg: &TypeRegistry,
+) -> Option<Vec<RustType>> {
     match ty {
         RustType::Fn { params, .. } => Some(params.clone()),
         RustType::Named { name, .. } => {

@@ -142,10 +142,18 @@ mod tests {
         let reg = TypeRegistry::new();
 
         // Old API
+        let mg = ModuleGraph::empty();
+        let resolution = FileTypeResolution::empty();
+        let old_tctx = TransformContext::new(&mg, &reg, &resolution, Path::new("test.ts"));
         let mut synthetic_old = SyntheticTypeRegistry::new();
-        let old_items =
-            crate::transformer::transform_module_with_path(&module, &reg, None, &mut synthetic_old)
-                .unwrap();
+        let old_items = crate::transformer::transform_module_with_path(
+            &module,
+            &old_tctx,
+            &reg,
+            None,
+            &mut synthetic_old,
+        )
+        .unwrap();
 
         // New API with empty resolution
         let f = Fixture::new();

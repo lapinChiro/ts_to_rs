@@ -9,13 +9,13 @@ use crate::ir::{BinOp, ClosureBody, Expr, MatchArm, MatchPattern, Param, RustTyp
 use crate::pipeline::type_converter::convert_ts_type;
 use crate::pipeline::SyntheticTypeRegistry;
 use crate::registry::TypeRegistry;
+use crate::transformer::context::TransformContext;
 use crate::transformer::expressions::patterns::extract_narrowing_guards;
 use crate::transformer::expressions::{convert_expr, resolve_expr_type, ExprContext};
 use crate::transformer::TypeEnv;
 use crate::transformer::{
     extract_pat_ident_name, extract_prop_name, single_declarator, TypePosition,
 };
-use crate::transformer::context::TransformContext;
 
 /// Converts an SWC [`ast::Stmt`] into an IR [`Stmt`].
 ///
@@ -84,7 +84,9 @@ pub fn convert_stmt(
         }
         ast::Stmt::Decl(ast::Decl::Var(var_decl)) => {
             // Spread array detection at SWC AST level
-            if let Some(stmts) = try_expand_spread_var_decl(var_decl, tctx, reg, type_env, synthetic)? {
+            if let Some(stmts) =
+                try_expand_spread_var_decl(var_decl, tctx, reg, type_env, synthetic)?
+            {
                 return Ok(stmts);
             }
             if let Some(expanded) =
@@ -99,10 +101,14 @@ pub fn convert_stmt(
                 convert_var_decl(var_decl, tctx, reg, type_env, synthetic)
             }
         }
-        ast::Stmt::If(if_stmt) => convert_if_stmt(if_stmt, tctx, reg, return_type, type_env, synthetic),
+        ast::Stmt::If(if_stmt) => {
+            convert_if_stmt(if_stmt, tctx, reg, return_type, type_env, synthetic)
+        }
         ast::Stmt::Expr(expr_stmt) => {
             // Spread array detection at SWC AST level
-            if let Some(stmts) = try_expand_spread_expr_stmt(expr_stmt, tctx, reg, type_env, synthetic)? {
+            if let Some(stmts) =
+                try_expand_spread_expr_stmt(expr_stmt, tctx, reg, type_env, synthetic)?
+            {
                 return Ok(stmts);
             }
             // Cat A: standalone expression
@@ -133,7 +139,9 @@ pub fn convert_stmt(
         ast::Stmt::For(for_stmt) => {
             match convert_for_stmt(for_stmt, tctx, reg, return_type, type_env, synthetic) {
                 Ok(s) => Ok(vec![s]),
-                Err(_) => convert_for_stmt_as_loop(for_stmt, tctx, reg, return_type, type_env, synthetic),
+                Err(_) => {
+                    convert_for_stmt_as_loop(for_stmt, tctx, reg, return_type, type_env, synthetic)
+                }
             }
         }
         ast::Stmt::Break(break_stmt) => {
@@ -755,7 +763,8 @@ fn convert_if_stmt(
                 }
             }
         }
-        let body = convert_block_or_stmt(&if_stmt.cons, tctx, reg, return_type, type_env, synthetic)?;
+        let body =
+            convert_block_or_stmt(&if_stmt.cons, tctx, reg, return_type, type_env, synthetic)?;
         if guard.is_some() {
             type_env.pop_scope();
         }
@@ -966,7 +975,8 @@ fn convert_for_stmt(
                 .as_ref()
                 .ok_or_else(|| anyhow!("unsupported for loop: no initializer"))?;
             // Cat A: for-loop initializer
-            let start_expr = convert_expr(init, tctx, reg, &ExprContext::none(), type_env, synthetic)?;
+            let start_expr =
+                convert_expr(init, tctx, reg, &ExprContext::none(), type_env, synthetic)?;
             (name, start_expr)
         }
         _ => {
@@ -988,7 +998,14 @@ fn convert_for_stmt(
                     return Err(anyhow!("unsupported for loop: condition var mismatch"));
                 }
                 // Cat A: for-loop bound expression
-                convert_expr(&bin.right, tctx, reg, &ExprContext::none(), type_env, synthetic)?
+                convert_expr(
+                    &bin.right,
+                    tctx,
+                    reg,
+                    &ExprContext::none(),
+                    type_env,
+                    synthetic,
+                )?
             }
             _ => return Err(anyhow!("unsupported for loop: non-simple condition")),
         },
@@ -1016,7 +1033,8 @@ fn convert_for_stmt(
         None => return Err(anyhow!("unsupported for loop: no update expression")),
     }
 
-    let mut body = convert_block_or_stmt(&for_stmt.body, tctx, reg, return_type, type_env, synthetic)?;
+    let mut body =
+        convert_block_or_stmt(&for_stmt.body, tctx, reg, return_type, type_env, synthetic)?;
 
     // Range iterates over integers; shadow the loop variable as f64
     // to match TS's `number` type: `let i = i as f64;`
@@ -1169,8 +1187,14 @@ fn convert_labeled_stmt(
                 type_env,
                 synthetic,
             )?;
-            let body =
-                convert_block_or_stmt(&while_stmt.body, tctx, reg, return_type, type_env, synthetic)?;
+            let body = convert_block_or_stmt(
+                &while_stmt.body,
+                tctx,
+                reg,
+                return_type,
+                type_env,
+                synthetic,
+            )?;
             Ok(Stmt::While {
                 label: Some(label_name),
                 condition,
@@ -1178,7 +1202,8 @@ fn convert_labeled_stmt(
             })
         }
         ast::Stmt::ForOf(for_of) => {
-            let mut stmt = convert_for_of_stmt(for_of, tctx, reg, return_type, type_env, synthetic)?;
+            let mut stmt =
+                convert_for_of_stmt(for_of, tctx, reg, return_type, type_env, synthetic)?;
             if let Stmt::ForIn { ref mut label, .. } = stmt {
                 *label = Some(label_name);
             }
@@ -1210,10 +1235,19 @@ fn convert_while_stmt(
     type_env: &mut TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Vec<Stmt>> {
-    let body = convert_block_or_stmt(&while_stmt.body, tctx, reg, return_type, type_env, synthetic)?;
+    let body = convert_block_or_stmt(
+        &while_stmt.body,
+        tctx,
+        reg,
+        return_type,
+        type_env,
+        synthetic,
+    )?;
 
     if let Some(ca) = extract_conditional_assignment(&while_stmt.test) {
-        return convert_while_with_conditional_assignment(&ca, tctx, reg, type_env, body, synthetic);
+        return convert_while_with_conditional_assignment(
+            &ca, tctx, reg, type_env, body, synthetic,
+        );
     }
 
     // Cat A: boolean context (while condition)
@@ -1249,8 +1283,14 @@ fn convert_try_stmt(
 
     // 1. finally → scopeguard
     if let Some(finalizer) = &try_stmt.finalizer {
-        let finally_body =
-            convert_stmt_list(&finalizer.stmts, tctx, reg, return_type, type_env, synthetic)?;
+        let finally_body = convert_stmt_list(
+            &finalizer.stmts,
+            tctx,
+            reg,
+            return_type,
+            type_env,
+            synthetic,
+        )?;
         result.push(Stmt::Let {
             mutable: false,
             name: "_finally_guard".to_string(),
@@ -1273,7 +1313,14 @@ fn convert_try_stmt(
     }
 
     // 2. Convert try body
-    let try_body = convert_stmt_list(&try_stmt.block.stmts, tctx, reg, return_type, type_env, synthetic)?;
+    let try_body = convert_stmt_list(
+        &try_stmt.block.stmts,
+        tctx,
+        reg,
+        return_type,
+        type_env,
+        synthetic,
+    )?;
 
     // 3. catch → labeled block + if-let-err
     if let Some(handler) = &try_stmt.handler {
@@ -1285,8 +1332,14 @@ fn convert_try_stmt(
                 _ => None,
             })
             .unwrap_or_else(|| "_e".to_string());
-        let catch_body =
-            convert_stmt_list(&handler.body.stmts, tctx, reg, return_type, type_env, synthetic)?;
+        let catch_body = convert_stmt_list(
+            &handler.body.stmts,
+            tctx,
+            reg,
+            return_type,
+            type_env,
+            synthetic,
+        )?;
 
         // let mut _try_result: Result<(), String> = Ok(());
         result.push(Stmt::Let {
@@ -1544,9 +1597,14 @@ fn extract_error_message(
             if let Some(args) = &new_expr.args {
                 if let Some(first) = args.first() {
                     // Cat A: error message argument
-                    if let Ok(e) =
-                        convert_expr(&first.expr, tctx, reg, &ExprContext::none(), type_env, synthetic)
-                    {
+                    if let Ok(e) = convert_expr(
+                        &first.expr,
+                        tctx,
+                        reg,
+                        &ExprContext::none(),
+                        type_env,
+                        synthetic,
+                    ) {
                         return e;
                     }
                 }
@@ -2029,7 +2087,8 @@ fn try_convert_object_destructuring(
     let source_expr = convert_expr(source, tctx, reg, &ExprContext::none(), type_env, synthetic)?;
 
     let mutable = !matches!(var_decl.kind, ast::VarDeclKind::Const);
-    let source_type = crate::transformer::expressions::resolve_expr_type(source, type_env, tctx, reg);
+    let source_type =
+        crate::transformer::expressions::resolve_expr_type(source, type_env, tctx, reg);
     let mut stmts = Vec::new();
 
     expand_object_pat_props(
@@ -2072,8 +2131,14 @@ fn expand_object_pat_props(
                 let init_expr = if let Some(default_expr) = &assign.value {
                     // { x = value } → obj.x.unwrap_or(value) or unwrap_or_else(|| value)
                     // Cat B: field type could be looked up from struct definition
-                    let default_ir =
-                        convert_expr(default_expr, tctx, reg, &ExprContext::none(), type_env, synthetic)?;
+                    let default_ir = convert_expr(
+                        default_expr,
+                        tctx,
+                        reg,
+                        &ExprContext::none(),
+                        type_env,
+                        synthetic,
+                    )?;
                     match &default_ir {
                         // String values need unwrap_or_else to avoid eager evaluation
                         Expr::MethodCall { method, .. } if method == "to_string" => {
@@ -2223,7 +2288,8 @@ fn convert_switch_stmt(
     }
 
     // Check if this is a switch (typeof x) on a union/any enum type
-    if let Some(result) = try_convert_typeof_switch(switch, tctx, reg, return_type, type_env, synthetic)?
+    if let Some(result) =
+        try_convert_typeof_switch(switch, tctx, reg, return_type, type_env, synthetic)?
     {
         return Ok(result);
     }
@@ -2241,12 +2307,10 @@ fn convert_switch_stmt(
     )?;
 
     // Wrap discriminant with .as_str() if any case has a string literal test.
-    let has_string_cases = switch.cases.iter().any(|case| {
-        matches!(
-            case.test.as_deref(),
-            Some(ast::Expr::Lit(ast::Lit::Str(_)))
-        )
-    });
+    let has_string_cases = switch
+        .cases
+        .iter()
+        .any(|case| matches!(case.test.as_deref(), Some(ast::Expr::Lit(ast::Lit::Str(_)))));
     if has_string_cases {
         discriminant = Expr::MethodCall {
             object: Box::new(discriminant),
@@ -2515,7 +2579,14 @@ fn try_convert_discriminated_union_switch(
 
     // Convert the match: match on &object (not object.tag)
     // Cat A: receiver object
-    let object = convert_expr(&member.obj, tctx, reg, &ExprContext::none(), type_env, synthetic)?;
+    let object = convert_expr(
+        &member.obj,
+        tctx,
+        reg,
+        &ExprContext::none(),
+        type_env,
+        synthetic,
+    )?;
     let match_expr = Expr::Ref(Box::new(object));
 
     let mut arms: Vec<MatchArm> = Vec::new();
@@ -3121,7 +3192,8 @@ fn convert_for_stmt_as_loop(
     }
 
     // 2b. Original body
-    let body_stmts = convert_block_or_stmt(&for_stmt.body, tctx, reg, return_type, type_env, synthetic)?;
+    let body_stmts =
+        convert_block_or_stmt(&for_stmt.body, tctx, reg, return_type, type_env, synthetic)?;
     loop_body.extend(body_stmts);
 
     // 2c. Update expression

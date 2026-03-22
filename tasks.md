@@ -216,15 +216,85 @@ let tctx = TransformContext::new(&mg, &reg, &res, std::path::Path::new("test.ts"
 **スクリプト活用**: Phase A で成功した v4 スクリプト（single-line のみ）+ multi-line fix スクリプトを踏襲。
 **注意**: `.claude/rules/bulk-edit-safety.md` に従い dry run → 確認 → 実行。
 
-- [ ] **B1**: `src/transformer/context.rs` テスト修正（1 箇所）
-- [ ] **B2**: `src/transformer/expressions/type_resolution.rs` テスト修正（6 箇所）
-- [ ] **B3**: `src/transformer/tests.rs` 修正（6 箇所）
-- [ ] **B4**: `src/transformer/classes.rs` 内テスト修正（28 箇所）
-- [ ] **B5**: `src/transformer/functions/tests.rs` 修正（43 箇所）
-- [ ] **B6**: `src/transformer/statements/tests.rs` 修正（73 箇所）
-- [ ] **B7**: `src/transformer/expressions/tests.rs` 修正（305 箇所）
-- [ ] **B-verify**: `cargo test --lib` 全 GREEN（1078 件以上）+ `cargo clippy --all-targets -- -D warnings` 0 + E2E/integration/compile テストも全 GREEN
+- [x] **B1**: `src/transformer/context.rs` テスト修正（1 箇所）
+- [x] **B2**: `src/transformer/expressions/type_resolution.rs` テスト修正（6 箇所）
+- [x] **B3**: `src/transformer/tests.rs` 修正（6 箇所）
+- [x] **B4**: `src/transformer/classes.rs` 内テスト修正（28 箇所）
+- [x] **B5**: `src/transformer/functions/tests.rs` 修正（43 箇所）
+- [x] **B6**: `src/transformer/statements/tests.rs` 修正（73 箇所）
+- [x] **B7**: `src/transformer/expressions/tests.rs` 修正（305 箇所）
+- [x] **B-verify**: `cargo test --lib` 全 GREEN（1078 件）+ `cargo clippy --all-targets -- -D warnings` 0 + E2E(60)/integration(69)/compile(3) テストも全 GREEN
 - [ ] **B-commit**: `[WIP] P6: Phase B — テストコード tctx 対応`
+
+### Phase B2: TctxFixture リファクタリング（DRY 改善）
+
+**目的**: 362 箇所に重複する 4 行フィクスチャ（`let reg/mg/res/tctx`）を `TctxFixture` 構造体に抽出し、DRY を達成する。
+`context.rs` の `Fixture` パターンが既に理想的な実装例。
+
+**TctxFixture 設計**:
+```rust
+struct TctxFixture {
+    mg: ModuleGraph,
+    reg: TypeRegistry,
+    res: FileTypeResolution,
+}
+
+impl TctxFixture {
+    fn new() -> Self {
+        Self { mg: ModuleGraph::empty(), reg: TypeRegistry::new(), res: FileTypeResolution::empty() }
+    }
+    fn with_reg(reg: TypeRegistry) -> Self {
+        Self { mg: ModuleGraph::empty(), reg, res: FileTypeResolution::empty() }
+    }
+    fn tctx(&self) -> TransformContext<'_> {
+        TransformContext::new(&self.mg, &self.reg, &self.res, Path::new("test.ts"))
+    }
+    fn reg(&self) -> &TypeRegistry { &self.reg }
+}
+```
+
+**変換パターン A（空レジストリ — 395 箇所）:**
+```rust
+// Before (4 lines):
+let reg = TypeRegistry::new();
+let mg = ModuleGraph::empty();
+let res = FileTypeResolution::empty();
+let tctx = TransformContext::new(&mg, &reg, &res, Path::new("test.ts"));
+// ... convert_expr(&swc_expr, &tctx, &reg, ...);
+
+// After (2 lines):
+let f = TctxFixture::new();
+let tctx = f.tctx();
+// ... convert_expr(&swc_expr, &tctx, f.reg(), ...);
+```
+
+**変換パターン B（カスタムレジストリ — 60 箇所）:**
+```rust
+// Before:
+let mut reg = TypeRegistry::new();
+reg.register("Foo", ...);
+let mg = ModuleGraph::empty();
+let res = FileTypeResolution::empty();
+let tctx = TransformContext::new(&mg, &reg, &res, Path::new("test.ts"));
+// ... convert_expr(&swc_expr, &tctx, &reg, ...);
+
+// After:
+let mut reg = TypeRegistry::new();
+reg.register("Foo", ...);
+let f = TctxFixture::with_reg(reg);
+let tctx = f.tctx();
+// ... convert_expr(&swc_expr, &tctx, f.reg(), ...);
+```
+
+**タスク（小さいファイルから順に）:**
+- [x] **B2-1**: `type_resolution.rs` テストモジュール — TctxFixture 定義 + 6 箇所修正（1空+5カスタム）
+- [x] **B2-2**: `tests.rs` — TctxFixture 定義 + 6 箇所修正（4空+2カスタム）
+- [x] **B2-3**: `classes.rs` テストモジュール — TctxFixture 定義 + 28 箇所修正（27空+1カスタム）
+- [x] **B2-4**: `functions/tests.rs` — TctxFixture 定義 + 43 箇所修正（40空+1ヘルパー+2カスタム）
+- [x] **B2-5**: `statements/tests.rs` — TctxFixture 定義 + 69 箇所修正（60空+9カスタム）。ヘルパー `convert_single_stmt`/`convert_stmts_with_env` は借用制約のためインラインのまま
+- [x] **B2-6**: `expressions/tests.rs` — TctxFixture 定義 + 305 箇所修正（263空+42カスタム）
+- [x] **B2-verify**: `cargo test --lib` 1078 GREEN + `cargo clippy --all-targets -- -D warnings` 0 + `cargo fmt` 通過
+- [ ] **B2-commit**: `[WIP] P6: Phase B2 — TctxFixture リファクタリング`
 
 ### Phase C: FileTypeResolution lookup の実装
 

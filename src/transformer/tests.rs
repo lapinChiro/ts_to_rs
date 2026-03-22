@@ -2,8 +2,46 @@ use super::*;
 use crate::ir::Stmt;
 use crate::ir::{BinOp, Expr, Param, RustType, StructField, Visibility};
 use crate::parser::parse_typescript;
+use crate::pipeline::type_resolution::FileTypeResolution;
+use crate::pipeline::ModuleGraph;
 use crate::registry::TypeRegistry;
+use crate::transformer::context::TransformContext;
 use crate::transformer::functions::{extract_fn_param_types, extract_fn_return_type};
+use std::path::Path;
+
+/// Test fixture: TransformContext + TypeRegistry の所有者。
+/// テストごとに 4 行のボイラープレートを排除する。
+struct TctxFixture {
+    mg: ModuleGraph,
+    reg: TypeRegistry,
+    res: FileTypeResolution,
+}
+
+impl TctxFixture {
+    fn new() -> Self {
+        Self {
+            mg: ModuleGraph::empty(),
+            reg: TypeRegistry::new(),
+            res: FileTypeResolution::empty(),
+        }
+    }
+
+    fn with_reg(reg: TypeRegistry) -> Self {
+        Self {
+            mg: ModuleGraph::empty(),
+            reg,
+            res: FileTypeResolution::empty(),
+        }
+    }
+
+    fn tctx(&self) -> TransformContext<'_> {
+        TransformContext::new(&self.mg, &self.reg, &self.res, Path::new("test.ts"))
+    }
+
+    fn reg(&self) -> &TypeRegistry {
+        &self.reg
+    }
+}
 
 #[test]
 fn test_transform_module_empty() {
@@ -1034,7 +1072,9 @@ fn test_extract_fn_return_type_from_fn_type() {
         params: vec![],
         return_type: Box::new(RustType::String),
     };
-    let result = extract_fn_return_type(&ty, &TypeRegistry::new());
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
+    let result = extract_fn_return_type(&ty, &tctx, f.reg());
     assert_eq!(result, Some(RustType::String));
 }
 
@@ -1056,7 +1096,9 @@ fn test_extract_fn_return_type_from_named_type_in_registry() {
         name: "GetInfo".to_string(),
         type_args: vec![],
     };
-    let result = extract_fn_return_type(&ty, &reg);
+    let f = TctxFixture::with_reg(reg);
+    let tctx = f.tctx();
+    let result = extract_fn_return_type(&ty, &tctx, f.reg());
     assert_eq!(
         result,
         Some(RustType::Named {
@@ -1069,7 +1111,9 @@ fn test_extract_fn_return_type_from_named_type_in_registry() {
 #[test]
 fn test_extract_fn_return_type_unknown_returns_none() {
     let ty = RustType::String;
-    let result = extract_fn_return_type(&ty, &TypeRegistry::new());
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
+    let result = extract_fn_return_type(&ty, &tctx, f.reg());
     assert_eq!(result, None);
 }
 
@@ -1081,7 +1125,9 @@ fn test_extract_fn_param_types_from_fn_type() {
         params: vec![RustType::F64, RustType::String],
         return_type: Box::new(RustType::Unit),
     };
-    let result = extract_fn_param_types(&ty, &TypeRegistry::new());
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
+    let result = extract_fn_param_types(&ty, &tctx, f.reg());
     assert_eq!(result, Some(vec![RustType::F64, RustType::String]));
 }
 
@@ -1109,7 +1155,9 @@ fn test_extract_fn_param_types_from_named_type_in_registry() {
         name: "GetConnInfo".to_string(),
         type_args: vec![],
     };
-    let result = extract_fn_param_types(&ty, &reg);
+    let f = TctxFixture::with_reg(reg);
+    let tctx = f.tctx();
+    let result = extract_fn_param_types(&ty, &tctx, f.reg());
     assert_eq!(
         result,
         Some(vec![RustType::Named {
@@ -1122,7 +1170,9 @@ fn test_extract_fn_param_types_from_named_type_in_registry() {
 #[test]
 fn test_extract_fn_param_types_unknown_returns_none() {
     let ty = RustType::String;
-    let result = extract_fn_param_types(&ty, &TypeRegistry::new());
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
+    let result = extract_fn_param_types(&ty, &tctx, f.reg());
     assert_eq!(result, None);
 }
 

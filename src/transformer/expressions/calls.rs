@@ -110,7 +110,9 @@ pub(super) fn convert_call_expr(
 
                     // Math.method(args) → first_arg.method(rest_args)
                     if obj_ident.sym.as_ref() == "Math" {
-                        return convert_math_call(&method, &call.args, tctx, reg, type_env, synthetic);
+                        return convert_math_call(
+                            &method, &call.args, tctx, reg, type_env, synthetic,
+                        );
                     }
 
                     // Number.isNaN(x) → x.is_nan(), Number.isFinite(x) → x.is_finite()
@@ -122,22 +124,31 @@ pub(super) fn convert_call_expr(
 
                     // fs.readFileSync/writeFileSync/existsSync → std::fs equivalents
                     if obj_ident.sym.as_ref() == "fs" {
-                        return convert_fs_call(&method, &call.args, tctx, reg, type_env, synthetic);
+                        return convert_fs_call(
+                            &method, &call.args, tctx, reg, type_env, synthetic,
+                        );
                     }
                 }
 
                 // Cat A: method receiver — converted before method resolution
-                let object =
-                    convert_expr(&member.obj, tctx, reg, &ExprContext::none(), type_env, synthetic)?;
+                let object = convert_expr(
+                    &member.obj,
+                    tctx,
+                    reg,
+                    &ExprContext::none(),
+                    type_env,
+                    synthetic,
+                )?;
                 // Look up method parameter types from the object's type
-                let method_sig = resolve_expr_type(&member.obj, type_env, tctx, reg).and_then(|ty| {
-                    if let RustType::Named { name, .. } = &ty {
-                        if let Some(TypeDef::Struct { methods, .. }) = reg.get(name) {
-                            return methods.get(&method).cloned();
+                let method_sig =
+                    resolve_expr_type(&member.obj, type_env, tctx, reg).and_then(|ty| {
+                        if let RustType::Named { name, .. } = &ty {
+                            if let Some(TypeDef::Struct { methods, .. }) = reg.get(name) {
+                                return methods.get(&method).cloned();
+                            }
                         }
-                    }
-                    None
-                });
+                        None
+                    });
                 let method_params = method_sig.as_ref().map(|sig| sig.params.as_slice());
                 let args = convert_call_args_with_types(
                     &call.args,
@@ -183,8 +194,15 @@ pub(super) fn convert_call_expr(
             // Arrow/Fn expressions as callee → convert to closure and call immediately
             ast::Expr::Arrow(arrow) => {
                 let mut warnings = Vec::new();
-                let closure =
-                    convert_arrow_expr(arrow, tctx, reg, false, &mut warnings, type_env, synthetic)?;
+                let closure = convert_arrow_expr(
+                    arrow,
+                    tctx,
+                    reg,
+                    false,
+                    &mut warnings,
+                    type_env,
+                    synthetic,
+                )?;
                 let args = convert_call_args(&call.args, tctx, reg, type_env, synthetic)?;
                 Ok(Expr::Block(vec![
                     Stmt::Let {
@@ -683,8 +701,14 @@ pub(super) fn convert_call_args_with_types(
                         });
                     }
                     // Cat A: spread source — type is the array itself
-                    let expr =
-                        convert_expr(&arg.expr, tctx, reg, &ExprContext::none(), type_env, synthetic)?;
+                    let expr = convert_expr(
+                        &arg.expr,
+                        tctx,
+                        reg,
+                        &ExprContext::none(),
+                        type_env,
+                        synthetic,
+                    )?;
                     parts.push(expr);
                 } else {
                     let rest_ctx = match rest_element_type {

@@ -77,7 +77,8 @@ pub(super) fn convert_discriminated_union_object_lit(
                         // Cat C: field type propagated when available
                         None => ExprContext::none(),
                     };
-                    let value = convert_expr(&kv.value, tctx, reg, &field_ctx, type_env, synthetic)?;
+                    let value =
+                        convert_expr(&kv.value, tctx, reg, &field_ctx, type_env, synthetic)?;
                     fields.push((key, value));
                 }
                 ast::Prop::Shorthand(ident) => {
@@ -169,7 +170,8 @@ pub(super) fn try_convert_as_hashmap(
                         // Cat C: HashMap value type propagated when available
                         None => ExprContext::none(),
                     };
-                    let value = convert_expr(&kv.value, tctx, reg, &value_ctx, type_env, synthetic)?;
+                    let value =
+                        convert_expr(&kv.value, tctx, reg, &value_ctx, type_env, synthetic)?;
                     entries.push(Expr::Tuple {
                         elements: vec![key, value],
                     });
@@ -203,7 +205,9 @@ pub(super) fn convert_object_lit(
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Expr> {
     // Check if all properties use computed keys → HashMap::from(vec![(k, v), ...])
-    if let Some(hashmap) = try_convert_as_hashmap(obj_lit, tctx, reg, expected, type_env, synthetic)? {
+    if let Some(hashmap) =
+        try_convert_as_hashmap(obj_lit, tctx, reg, expected, type_env, synthetic)?
+    {
         return Ok(hashmap);
     }
 
@@ -263,7 +267,8 @@ pub(super) fn convert_object_lit(
                         // Cat C: field type propagated when available
                         None => ExprContext::none(),
                     };
-                    let value = convert_expr(&kv.value, tctx, reg, &field_ctx, type_env, synthetic)?;
+                    let value =
+                        convert_expr(&kv.value, tctx, reg, &field_ctx, type_env, synthetic)?;
                     fields.push((key, value));
                 }
                 ast::Prop::Shorthand(ident) => {
@@ -427,7 +432,14 @@ pub(super) fn convert_array_lit(
     };
 
     if has_spread {
-        return convert_spread_array_to_block(array_lit, tctx, reg, element_type, type_env, synthetic);
+        return convert_spread_array_to_block(
+            array_lit,
+            tctx,
+            reg,
+            element_type,
+            type_env,
+            synthetic,
+        );
     }
 
     let elements = array_lit
@@ -491,8 +503,14 @@ pub(super) fn convert_spread_array_to_block(
                 initialized = true;
             }
             // Cat A: spread source — type is the array itself
-            let spread_expr =
-                convert_expr(&elem.expr, tctx, reg, &ExprContext::none(), type_env, synthetic)?;
+            let spread_expr = convert_expr(
+                &elem.expr,
+                tctx,
+                reg,
+                &ExprContext::none(),
+                type_env,
+                synthetic,
+            )?;
             stmts.push(Stmt::Expr(Expr::MethodCall {
                 object: Box::new(Expr::Ident("_v".to_string())),
                 method: "extend".to_string(),

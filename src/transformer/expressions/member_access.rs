@@ -95,11 +95,24 @@ pub(super) fn convert_opt_chain_expr(
             }
 
             // Cat A: receiver object for optional chaining
-            let object = convert_expr(&member.obj, tctx, reg, &ExprContext::none(), type_env, synthetic)?;
+            let object = convert_expr(
+                &member.obj,
+                tctx,
+                reg,
+                &ExprContext::none(),
+                type_env,
+                synthetic,
+            )?;
             let body_expr = match &member.prop {
                 ast::MemberProp::Ident(ident) => {
                     let field = ident.sym.to_string();
-                    resolve_member_access(&Expr::Ident("_v".to_string()), &field, &member.obj, tctx, reg)?
+                    resolve_member_access(
+                        &Expr::Ident("_v".to_string()),
+                        &field,
+                        &member.obj,
+                        tctx,
+                        reg,
+                    )?
                 }
                 ast::MemberProp::Computed(computed) => {
                     // Cat A: computed index
@@ -244,7 +257,14 @@ pub(super) fn extract_method_from_callee(
         _ => return Err(anyhow!("unsupported optional call callee: {:?}", callee)),
     };
     // Cat A: receiver object
-    let object = convert_expr(&member.obj, tctx, reg, &ExprContext::none(), type_env, synthetic)?;
+    let object = convert_expr(
+        &member.obj,
+        tctx,
+        reg,
+        &ExprContext::none(),
+        type_env,
+        synthetic,
+    )?;
     let method = match &member.prop {
         ast::MemberProp::Ident(ident) => ident.sym.to_string(),
         _ => return Err(anyhow!("unsupported optional call property")),
@@ -265,7 +285,14 @@ pub(super) fn convert_member_expr(
     // Computed property: arr[0], arr[i] → Expr::Index or tuple.N → Expr::FieldAccess
     if let ast::MemberProp::Computed(computed) = &member.prop {
         // Cat A: receiver object
-        let object = convert_expr(&member.obj, tctx, reg, &ExprContext::none(), type_env, synthetic)?;
+        let object = convert_expr(
+            &member.obj,
+            tctx,
+            reg,
+            &ExprContext::none(),
+            type_env,
+            synthetic,
+        )?;
 
         // Tuple index access: pair[0] → pair.0 (Rust uses dot notation for tuples)
         if let Some(RustType::Tuple(_)) = resolve_expr_type(&member.obj, type_env, tctx, reg) {
@@ -330,8 +357,14 @@ pub(super) fn convert_member_expr(
             if field == *tag {
                 // Tag field → method call (e.g., s.kind() )
                 // Cat A: receiver object
-                let object =
-                    convert_expr(&member.obj, tctx, reg, &ExprContext::none(), type_env, synthetic)?;
+                let object = convert_expr(
+                    &member.obj,
+                    tctx,
+                    reg,
+                    &ExprContext::none(),
+                    type_env,
+                    synthetic,
+                )?;
                 return Ok(Expr::MethodCall {
                     object: Box::new(object),
                     method: tag.clone(),
@@ -362,7 +395,14 @@ pub(super) fn convert_member_expr(
     }
 
     // Cat A: receiver object
-    let object = convert_expr(&member.obj, tctx, reg, &ExprContext::none(), type_env, synthetic)?;
+    let object = convert_expr(
+        &member.obj,
+        tctx,
+        reg,
+        &ExprContext::none(),
+        type_env,
+        synthetic,
+    )?;
     resolve_member_access(&object, &field, &member.obj, tctx, reg)
 }
 
@@ -380,7 +420,14 @@ pub(super) fn convert_du_standalone_field_access(
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Expr> {
     // Cat A: receiver object
-    let object = convert_expr(obj_expr, tctx, reg, &ExprContext::none(), type_env, synthetic)?;
+    let object = convert_expr(
+        obj_expr,
+        tctx,
+        reg,
+        &ExprContext::none(),
+        type_env,
+        synthetic,
+    )?;
     let match_expr = Expr::Ref(Box::new(object));
 
     let mut arms: Vec<MatchArm> = Vec::new();
