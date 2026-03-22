@@ -16,7 +16,7 @@ use crate::registry::{TypeDef, TypeRegistry};
 use crate::transformer::context::TransformContext;
 use crate::transformer::TypeEnv;
 
-use super::{convert_expr, ExprContext};
+use super::{convert_expr};
 
 /// 式の型を解決する。解決できない場合は None を返す。
 ///
@@ -285,7 +285,6 @@ pub(super) fn convert_ts_as_expr(
                     &ts_as.expr,
                     tctx,
                     reg,
-                    &ExprContext::with_expected(&target_ty),
                     type_env,
                     synthetic,
                 )?;
@@ -294,24 +293,12 @@ pub(super) fn convert_ts_as_expr(
                     target: target_ty,
                 })
             } else {
-                // Pass the assertion type as expected to help type inference
-                let merged = expected.or(Some(&target_ty));
-                let ctx = match merged {
-                    Some(ty) => ExprContext::with_expected(ty),
-                    // Cat C: type propagated when available
-                    None => ExprContext::none(),
-                };
-                convert_expr(&ts_as.expr, tctx, reg, &ctx, type_env, synthetic)
+                convert_expr(&ts_as.expr, tctx, reg, type_env, synthetic)
             }
         }
         Err(_) => {
             // If we can't convert the type, just ignore the assertion
-            let ctx = match expected {
-                Some(ty) => ExprContext::with_expected(ty),
-                // Cat C: type propagated when available
-                None => ExprContext::none(),
-            };
-            convert_expr(&ts_as.expr, tctx, reg, &ctx, type_env, synthetic)
+            convert_expr(&ts_as.expr, tctx, reg, type_env, synthetic)
         }
     }
 }

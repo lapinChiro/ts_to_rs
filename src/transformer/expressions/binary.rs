@@ -16,7 +16,7 @@ use super::patterns::{
 use super::type_resolution::resolve_expr_type;
 use crate::ir::ClosureBody;
 
-use super::{convert_expr, ExprContext};
+use super::{convert_expr};
 use crate::transformer::context::TransformContext;
 
 /// Converts a binary expression to IR, handling special patterns like
@@ -66,7 +66,6 @@ pub(super) fn convert_bin_expr(
             &bin.left,
             tctx,
             reg,
-            &ExprContext::none(),
             type_env,
             synthetic,
         )?;
@@ -78,12 +77,7 @@ pub(super) fn convert_bin_expr(
             Some(RustType::Option(inner)) => Some(inner.as_ref().clone()),
             _ => None,
         };
-        let right_ctx = match inner_expected.as_ref() {
-            Some(ty) => ExprContext::with_expected(ty),
-            // Cat C: inner type already propagated when available
-            None => ExprContext::none(),
-        };
-        let right = convert_expr(&bin.right, tctx, reg, &right_ctx, type_env, synthetic)?;
+        let right = convert_expr(&bin.right, tctx, reg, type_env, synthetic)?;
         return Ok(Expr::MethodCall {
             object: Box::new(left),
             method: "unwrap_or_else".to_string(),
@@ -100,7 +94,6 @@ pub(super) fn convert_bin_expr(
         &bin.left,
         tctx,
         reg,
-        &ExprContext::none(),
         type_env,
         synthetic,
     )?;
@@ -108,7 +101,6 @@ pub(super) fn convert_bin_expr(
         &bin.right,
         tctx,
         reg,
-        &ExprContext::none(),
         type_env,
         synthetic,
     )?;
@@ -230,7 +222,6 @@ pub(super) fn convert_unary_expr(
                     &unary.arg,
                     tctx,
                     reg,
-                    &ExprContext::none(),
                     type_env,
                     synthetic,
                 )?;
@@ -257,7 +248,6 @@ pub(super) fn convert_unary_expr(
             &unary.arg,
             tctx,
             reg,
-            &ExprContext::none(),
             type_env,
             synthetic,
         )?;
@@ -286,7 +276,6 @@ pub(super) fn convert_unary_expr(
         &unary.arg,
         tctx,
         reg,
-        &ExprContext::none(),
         type_env,
         synthetic,
     )?;

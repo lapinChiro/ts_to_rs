@@ -44,8 +44,7 @@ pub(super) fn try_convert_undefined_comparison(
         other_expr,
         tctx,
         reg,
-        &super::ExprContext::none(),
-        type_env,
+                type_env,
         synthetic,
     )
     .ok()?;
@@ -84,8 +83,7 @@ pub(super) fn try_convert_enum_string_comparison(
                     &bin.left,
                     tctx,
                     reg,
-                    &super::ExprContext::none(),
-                    type_env,
+                                        type_env,
                     synthetic,
                 )
                 .ok()?;
@@ -107,8 +105,7 @@ pub(super) fn try_convert_enum_string_comparison(
                     &bin.right,
                     tctx,
                     reg,
-                    &super::ExprContext::none(),
-                    type_env,
+                                        type_env,
                     synthetic,
                 )
                 .ok()?;
@@ -198,8 +195,7 @@ pub(super) fn try_convert_typeof_comparison(
                     typeof_operand,
                     tctx,
                     reg,
-                    &super::ExprContext::none(),
-                    type_env,
+                                        type_env,
                     synthetic,
                 )
                 .ok()?;
@@ -234,8 +230,7 @@ pub(super) fn try_convert_typeof_comparison(
                 typeof_operand,
                 tctx,
                 reg,
-                &super::ExprContext::none(),
-                type_env,
+                                type_env,
                 synthetic,
             )
             .ok()?;

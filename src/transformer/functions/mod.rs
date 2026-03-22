@@ -537,7 +537,6 @@ pub(crate) fn convert_default_value(
                 other,
                 &dummy_tctx,
                 &dummy_reg,
-                &crate::transformer::expressions::ExprContext::none(),
                 &crate::transformer::TypeEnv::new(),
                 synthetic,
             )?;
@@ -620,7 +619,6 @@ pub(crate) fn convert_object_destructuring_param(
                         default_expr,
                         tctx,
                         reg,
-                        &crate::transformer::expressions::ExprContext::none(),
                         &crate::transformer::TypeEnv::new(),
                         synthetic,
                     )?;
@@ -758,7 +756,6 @@ fn expand_fn_param_object_props(
                         default_expr,
                         tctx,
                         reg,
-                        &crate::transformer::expressions::ExprContext::none(),
                         &crate::transformer::TypeEnv::new(),
                         synthetic,
                     )?;

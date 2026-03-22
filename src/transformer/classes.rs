@@ -12,7 +12,7 @@ use crate::pipeline::type_converter::convert_ts_type;
 use crate::pipeline::SyntheticTypeRegistry;
 use crate::registry::TypeRegistry;
 use crate::transformer::context::TransformContext;
-use crate::transformer::expressions::{convert_expr, ExprContext};
+use crate::transformer::expressions::convert_expr;
 use crate::transformer::extract_prop_name;
 use crate::transformer::functions::convert_last_return_to_tail;
 use crate::transformer::statements::convert_stmt;
@@ -583,7 +583,6 @@ fn convert_static_prop(
             init,
             tctx,
             reg,
-            &ExprContext::with_expected(&ty),
             &TypeEnv::new(),
             synthetic,
         )?,
@@ -809,7 +808,6 @@ fn convert_constructor_body(
                 value_expr,
                 tctx,
                 reg,
-                &ExprContext::none(),
                 &type_env,
                 synthetic,
             )?;

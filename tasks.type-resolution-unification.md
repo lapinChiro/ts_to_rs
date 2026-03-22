@@ -468,75 +468,112 @@ unit test の修正は Phase 2（ExprContext 削除）で行う。
 - `convert_expr` のシグネチャから `ctx` パラメータが消えている
 - 全テスト GREEN
 
-### タスク
+### 現在の状態（Phase 2 作業中）
 
-#### 2-1: `convert_expr` のシグネチャ変更
+**完了済み:**
+- 2-1: `convert_expr` から `ctx: &ExprContext` パラメータ除去。`convert_expr_with_expected`（`pub(crate)`, expected_override パラメータ付き）を追加
+- 2-2/2-3: プロダクションコードから ExprContext::with_expected / ::none() の呼び出しを一括除去
 
-**ファイル**: `src/transformer/expressions/mod.rs`
+**未完了:**
+- 29 テスト失敗中（`cargo test` で確認可能）
+- unused variable 警告 18 件
+- ExprContext struct 自体が残存
 
-**変更**:
-1. `convert_expr` から `ctx: &ExprContext` パラメータを除去
-2. 内部に `convert_expr_inner` を追加し、`expected_override: Option<&RustType>` を持つ
-3. `convert_expr` は `convert_expr_inner(expr, tctx, None, type_env, synthetic)` を呼ぶ
-4. expected の解決を `expected_override.or_else(|| tctx.type_resolution.expected_type(span))` に変更
-5. Option<T> unwrap の再帰呼び出しは `convert_expr_inner(expr, tctx, Some(inner), ...)` を使う
+### 次の作業者が行うべき作業（順序厳守）
 
-**影響範囲**: `convert_expr` を呼ぶ全箇所。ExprContext を構築して渡していた箇所は、ExprContext の構築を削除するだけ。
+#### Step A: アドホック修正箇所の精査（最初に実施）
 
-**完了条件**: `convert_expr` が `ctx` を取らない。Option unwrap が内部の `expected_override` で動作する
+一括置換スクリプトが multi-line パターンを正しく処理できず、3 箇所で手動応急修正を行った。**これらは動作するが、不要なデッドコードが残存している。** 各箇所を精査し、本来の修正を適用する:
 
-**依存**: Phase 1 全完了
+| ファイル | 応急修正の内容 | 残存する問題 | 本来の修正 |
+|---|---|---|---|
+| `assignments.rs:24-44` | `let rhs_ctx = match ...` を丸ごと削除 | `target_var_name` が unused | `target_var_name` の定義〜利用を精査。TypeResolver が assignment RHS の expected を設定するようになった（Phase 1 の 1-6）ため、変数自体が不要なら定義ごと削除。他の用途があれば残す |
+| `type_resolution.rs:296-310` | `convert_ts_as_expr` 内の `let ctx = match ...` 2 箇所を `convert_expr(...)` に置換 | 関数パラメータ `expected` が unused | `convert_ts_as_expr` の `expected` パラメータ自体が不要か判定。TypeResolver が TsAs の inner に expected を設定済み（Phase 1 の 1-11）なら、パラメータを削除し全呼び出し元を修正 |
+| `member_access.rs:186-205` | opt chain method call の `method_sig` パターンを削除し `convert_expr` に置換 | `method_sig` と `i` が unused | TypeResolver の `set_call_arg_expected_types` が method call の引数 expected をカバーしているか確認。カバー済みなら `method_sig` の定義〜利用を削除。未カバーなら TypeResolver に追加 |
 
-#### 2-2: ExprContext::with_expected 全呼び出しの除去
+**完了条件**: 上記 3 箇所の unused variable が解消されている
 
-**対象ファイル** と **対応方針**:
+#### Step B: 失敗テスト 29 件の修正
 
-| ファイル | 箇所数 | 対応 |
+テストが `let expected = RustType::...; convert_expr(...)` の形で expected を渡せなくなっている。`convert_expr_with_expected` に移行する。
+
+**修正パターン:**
+```rust
+// Before（current broken state — expected is defined but unused）:
+let expected = RustType::String;
+let result = convert_expr(&expr_ast, &f.tctx(), f.reg(), &TypeEnv::new(), &mut synthetic)?;
+
+// After:
+let expected = RustType::String;
+let result = super::convert_expr_with_expected(&expr_ast, &f.tctx(), f.reg(), Some(&expected), &TypeEnv::new(), &mut synthetic)?;
+```
+
+`convert_expr_with_expected` は `pub(crate)` で `src/transformer/expressions/mod.rs` に定義済み。テストからは `super::convert_expr_with_expected` で呼ぶ。
+
+**失敗テスト一覧（29 件）:**
+
+expressions/tests.rs（18 件）:
+1. `test_binary_number_plus_string_generates_format`
+2. `test_convert_assign_expr_propagates_type_from_type_env`
+3. `test_convert_bin_expr_expected_string_enables_concat`
+4. `test_convert_call_args_string_literal_to_enum_variant`
+5. `test_convert_call_expr_typeenv_fn_provides_param_expected`
+6. `test_convert_expr_array_nested_vec_string_expected`
+7. `test_convert_expr_array_string_with_vec_string_expected`
+8. `test_convert_expr_call_resolves_object_arg_from_registry`
+9. `test_convert_expr_nested_array_with_vec_tuple_expected`
+10. `test_convert_expr_object_literal_nested_resolves_field_type_from_registry`
+11. `test_convert_expr_string_lit_with_string_expected_adds_to_string`
+12. `test_convert_hashmap_propagates_value_type`
+13. `test_convert_method_call_string_arg_gets_to_string_with_registry`
+14. `test_convert_nullish_coalescing_rhs_string_gets_to_string_when_lhs_is_option_string`
+15. `test_convert_opt_chain_method_call_propagates_param_types`
+16. `test_new_expr_string_arg_gets_to_string`
+17. `test_self_field_string_concat_gets_clone`
+18. `test_convert_array_lit_elements_get_expected_element_type`
+
+statements/tests.rs（6 件）:
+19. `test_convert_stmt_return_string_with_string_return_type`
+20. `test_convert_stmt_var_decl_object_literal_with_type_annotation`
+21. `test_convert_stmt_var_decl_string_type_annotation_adds_to_string`
+22. `test_convert_stmt_var_decl_string_array_type_annotation`
+23. `test_convert_switch_case_propagates_discriminant_type_for_string_enum`
+24. `test_convert_switch_discriminated_union_to_enum_match`
+
+transformer/tests.rs（2 件）:
+25. `test_transform_var_type_alias_arrow_propagates_return_type`
+26. `test_transform_var_type_arrow_propagates_return_type`
+
+functions/tests.rs（1 件）:
+27. `test_convert_fn_decl_throw_wraps_return_in_ok`
+
+classes/tests.rs（1 件）:
+28. `test_convert_static_prop_propagates_type_annotation`
+
+context/tests.rs（1 件）:
+29. `test_expr_type_unknown_fallback_to_heuristics`
+
+**ファイル別の注意事項:**
+
+| ファイル | テスト数 | 修正方法 |
 |---|---|---|
-| `statements/mod.rs` | 5 | return type, var decl, array elem, switch case — 全て TypeResolver が設定済みなので ExprContext 構築を削除し `convert_expr` を呼ぶだけ |
-| `expressions/data_literals.rs` | 8 | struct field, DU field, HashMap value, tuple/vec element — TypeResolver が propagate_expected で設定済み |
-| `expressions/calls.rs` | 4 | function arg, rest param — TypeResolver の set_call_arg_expected_types が設定済み |
-| `expressions/functions.rs` | 2 | arrow body return — TypeResolver の current_fn_return_type が設定済み |
-| `expressions/binary.rs` | 1 | nullish coalescing RHS — TypeResolver が設定済み（1-7） |
-| `expressions/assignments.rs` | 1 | assignment RHS — TypeResolver が設定済み（1-6） |
-| `expressions/member_access.rs` | 1 | opt chain method arg — TypeResolver の method call 対応（1-4b）が設定済み |
-| `expressions/type_resolution.rs` | 3 | TsAs inner — TypeResolver が設定済み（1-11）|
-| `expressions/mod.rs` | 1 | Option inner — convert_expr_inner の expected_override で処理 |
-| `classes.rs` | 1 | static prop init — TypeResolver が設定済み（1-8） |
+| expressions/tests.rs | 18 | `convert_expr` → `super::convert_expr_with_expected` + `Some(&expected)` 追加。一部は `convert_bin_expr` 等のサブ関数経由のため、サブ関数への expected 受け渡しも確認 |
+| statements/tests.rs | 6 | `convert_single_stmt` 等のヘルパー経由。ヘルパーは expected を渡さないため、テスト内で直接 convert_expr_with_expected を呼ぶか、ヘルパーに expected パラメータを追加 |
+| transformer/tests.rs | 2 | `transform_module` 経由（TypeResolver 込み）。TypeResolver の Phase 1 改善で expected が設定されていれば修正不要の可能性あり。失敗原因を再確認 |
+| functions/tests.rs | 1 | `convert_fn_decl` 経由。return type expected の伝搬を確認 |
+| classes/tests.rs | 1 | static prop init。TypeResolver の Phase 1 (1-8) で expected 設定済みのはず。失敗原因を確認 |
+| context/tests.rs | 1 | ExprContext フォールバック動作のテスト。ExprContext 削除後はテスト自体の意図が変わるため、テストを書き換えるか削除 |
 
-**完了条件**: `ExprContext::with_expected` の呼び出しがゼロ
+**完了条件**: `cargo test` で上記 29 テスト全て GREEN
 
-**依存**: 2-1
+#### Step C: ExprContext struct 削除 + unused variable 警告修正
 
-#### 2-3: ExprContext::none 全呼び出しの除去
+Step A, B 完了後に実施:
+1. `ExprContext` struct と `impl ExprContext` を `src/transformer/expressions/mod.rs` から削除
+2. ExprContext の import 文が残っていれば削除（`use ... ExprContext` を grep）
+3. Step A で残った unused variable を全て削除（`cargo clippy` で確認）
 
-**対象**: 全ファイルで `ExprContext::none()` を渡している箇所（約 100 箇所）。`convert_expr` から `ctx` パラメータが消えたため、これらは全て単純に削除する（引数リストから `&ExprContext::none()` を消す）。
-
-**方法**: `/large-scale-refactor` スキルに従う。sed/grep による一括置換。
-
-**完了条件**: `ExprContext::none()` の呼び出しがゼロ
-
-**依存**: 2-1
-
-#### 2-4: ExprContext struct 削除
-
-**ファイル**: `src/transformer/expressions/mod.rs`
-
-`ExprContext` struct と `impl ExprContext` を削除。`pub use ExprContext` も削除。
-
-**完了条件**: `ExprContext` が codebase 内に存在しない
-
-**依存**: 2-2, 2-3
-
-#### 2-5: テスト更新
-
-ExprContext を使っていたユニットテストを更新:
-- TypeResolver 経由でテストする場合: `FileTypeResolution` に expected_types を設定
-- Direct テストの場合: `tctx.type_resolution.expected_types` にエントリを追加
-
-**完了条件**: `cargo test` 全 GREEN
-
-**依存**: 2-4
+**完了条件**: `cargo clippy --all-targets --all-features -- -D warnings` 0 警告 + `cargo test` 全 GREEN
 
 ---
 

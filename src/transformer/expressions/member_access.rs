@@ -10,7 +10,7 @@ use crate::transformer::TypeEnv;
 
 use super::methods::map_method_call;
 use super::type_resolution::{resolve_expr_type, resolve_field_type};
-use super::{convert_expr, ExprContext};
+use super::{convert_expr};
 use crate::transformer::context::TransformContext;
 
 /// Resolves a member access expression, applying special conversions for known fields.
@@ -99,7 +99,6 @@ pub(super) fn convert_opt_chain_expr(
                 &member.obj,
                 tctx,
                 reg,
-                &ExprContext::none(),
                 type_env,
                 synthetic,
             )?;
@@ -120,7 +119,6 @@ pub(super) fn convert_opt_chain_expr(
                         &computed.expr,
                         tctx,
                         reg,
-                        &ExprContext::none(),
                         type_env,
                         synthetic,
                     )?;
@@ -199,12 +197,7 @@ pub(super) fn convert_opt_chain_expr(
                 .iter()
                 .enumerate()
                 .map(|(i, arg)| {
-                    let ctx = method_sig
-                        .and_then(|sig| sig.params.get(i))
-                        .map(|(_, ty)| ExprContext::with_expected(ty))
-                        // Cat C: method param type propagated when available
-                        .unwrap_or_else(ExprContext::none);
-                    convert_expr(&arg.expr, tctx, reg, &ctx, type_env, synthetic)
+                    convert_expr(&arg.expr, tctx, reg, type_env, synthetic)
                 })
                 .collect::<Result<_>>()?;
 
@@ -261,7 +254,6 @@ pub(super) fn extract_method_from_callee(
         &member.obj,
         tctx,
         reg,
-        &ExprContext::none(),
         type_env,
         synthetic,
     )?;
@@ -289,7 +281,6 @@ pub(super) fn convert_member_expr(
             &member.obj,
             tctx,
             reg,
-            &ExprContext::none(),
             type_env,
             synthetic,
         )?;
@@ -310,7 +301,6 @@ pub(super) fn convert_member_expr(
             &computed.expr,
             tctx,
             reg,
-            &ExprContext::none(),
             type_env,
             synthetic,
         )?;
@@ -361,7 +351,6 @@ pub(super) fn convert_member_expr(
                     &member.obj,
                     tctx,
                     reg,
-                    &ExprContext::none(),
                     type_env,
                     synthetic,
                 )?;
@@ -399,7 +388,6 @@ pub(super) fn convert_member_expr(
         &member.obj,
         tctx,
         reg,
-        &ExprContext::none(),
         type_env,
         synthetic,
     )?;
@@ -424,7 +412,6 @@ pub(super) fn convert_du_standalone_field_access(
         obj_expr,
         tctx,
         reg,
-        &ExprContext::none(),
         type_env,
         synthetic,
     )?;

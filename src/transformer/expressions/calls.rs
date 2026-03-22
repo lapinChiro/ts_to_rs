@@ -14,7 +14,6 @@ use super::convert_fn_expr;
 use super::literals::needs_debug_format;
 use super::methods::map_method_call;
 use super::type_resolution::resolve_expr_type;
-use super::ExprContext;
 use crate::transformer::context::TransformContext;
 
 /// Converts a function/method call expression.
@@ -135,7 +134,6 @@ pub(super) fn convert_call_expr(
                     &member.obj,
                     tctx,
                     reg,
-                    &ExprContext::none(),
                     type_env,
                     synthetic,
                 )?;
@@ -373,7 +371,6 @@ pub(super) fn convert_fs_call(
                 &args[0].expr,
                 tctx,
                 reg,
-                &ExprContext::none(),
                 type_env,
                 synthetic,
             )?;
@@ -417,7 +414,6 @@ pub(super) fn convert_fs_call(
                 &args[0].expr,
                 tctx,
                 reg,
-                &ExprContext::none(),
                 type_env,
                 synthetic,
             )?;
@@ -425,7 +421,6 @@ pub(super) fn convert_fs_call(
                 &args[1].expr,
                 tctx,
                 reg,
-                &ExprContext::none(),
                 type_env,
                 synthetic,
             )?;
@@ -448,7 +443,6 @@ pub(super) fn convert_fs_call(
                 &args[0].expr,
                 tctx,
                 reg,
-                &ExprContext::none(),
                 type_env,
                 synthetic,
             )?;
@@ -635,12 +629,7 @@ pub(super) fn convert_call_args_with_types(
                 Some(RustType::Option(inner)) => Some(inner.as_ref()),
                 other => other,
             };
-            let arg_ctx = match expected {
-                Some(ty) => ExprContext::with_expected(ty),
-                // Cat C: param type propagated when available
-                None => ExprContext::none(),
-            };
-            let mut expr = convert_expr(&arg.expr, tctx, reg, &arg_ctx, type_env, synthetic)?;
+            let mut expr = convert_expr(&arg.expr, tctx, reg, type_env, synthetic)?;
             // Wrap in Some(...) when the parameter type is Option<T>,
             // but skip if the value is already None (from undefined)
             if let Some(RustType::Option(_)) = param_ty {
@@ -682,7 +671,6 @@ pub(super) fn convert_call_args_with_types(
                 &rest_args[0].expr,
                 tctx,
                 reg,
-                &ExprContext::none(),
                 type_env,
                 synthetic,
             )?;
@@ -705,18 +693,12 @@ pub(super) fn convert_call_args_with_types(
                         &arg.expr,
                         tctx,
                         reg,
-                        &ExprContext::none(),
                         type_env,
                         synthetic,
                     )?;
                     parts.push(expr);
                 } else {
-                    let rest_ctx = match rest_element_type {
-                        Some(ty) => ExprContext::with_expected(ty),
-                        // Cat C: rest element type propagated when available
-                        None => ExprContext::none(),
-                    };
-                    let expr = convert_expr(&arg.expr, tctx, reg, &rest_ctx, type_env, synthetic)?;
+                    let expr = convert_expr(&arg.expr, tctx, reg, type_env, synthetic)?;
                     literal_buf.push(expr);
                 }
             }
@@ -738,12 +720,7 @@ pub(super) fn convert_call_args_with_types(
             let rest_exprs: Vec<Expr> = rest_args
                 .iter()
                 .map(|arg| {
-                    let rest_ctx = match rest_element_type {
-                        Some(ty) => ExprContext::with_expected(ty),
-                        // Cat C: rest element type propagated when available
-                        None => ExprContext::none(),
-                    };
-                    convert_expr(&arg.expr, tctx, reg, &rest_ctx, type_env, synthetic)
+                    convert_expr(&arg.expr, tctx, reg, type_env, synthetic)
                 })
                 .collect::<Result<Vec<_>>>()?;
             result.push(Expr::Vec {

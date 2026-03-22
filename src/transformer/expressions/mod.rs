@@ -70,19 +70,35 @@ impl<'a> ExprContext<'a> {
 /// # Errors
 ///
 /// Returns an error for unsupported expression types.
+/// Converts an SWC [`ast::Expr`] into an IR [`Expr`].
+///
+/// The expected type is read from `FileTypeResolution.expected_type()`.
+/// For Option<T> unwrapping, an internal override mechanism is used to
+/// avoid infinite recursion (same span would return Option<T> again).
 pub fn convert_expr(
     expr: &ast::Expr,
     tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
-    ctx: &ExprContext,
     type_env: &TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Expr> {
-    // ExprContext が明示的に expected を持つ場合はそれを優先する。
-    // これにより Option<T> の unwrap 再帰時に ctx.expected = T が使われ、
-    // tctx.type_resolution.expected_type が返す Option<T> で無限ループしない。
-    // ExprContext が None の場合のみ FileTypeResolution を参照する。
-    let expected = ctx.expected.or_else(|| {
+    convert_expr_with_expected(expr, tctx, reg, None, type_env, synthetic)
+}
+
+/// Converts an expression with an explicit expected type override.
+///
+/// Used when the expected type is known from context but not stored in
+/// `FileTypeResolution` (e.g., Option<T> unwrap recursion, or test code
+/// that sets expected directly).
+pub(crate) fn convert_expr_with_expected(
+    expr: &ast::Expr,
+    tctx: &TransformContext<'_>,
+    reg: &TypeRegistry,
+    expected_override: Option<&RustType>,
+    type_env: &TypeEnv,
+    synthetic: &mut SyntheticTypeRegistry,
+) -> Result<Expr> {
+    let expected = expected_override.or_else(|| {
         tctx.type_resolution
             .expected_type(Span::from_swc(expr.span()))
     });
@@ -96,11 +112,11 @@ pub fn convert_expr(
         }
         // Wrap non-null literals in Some() (needed for array elements like vec![Some(1.0), None])
         if matches!(expr, ast::Expr::Lit(_)) {
-            let inner_result = convert_expr(
+            let inner_result = convert_expr_with_expected(
                 expr,
                 tctx,
                 reg,
-                &ExprContext::with_expected(inner),
+                Some(inner),
                 type_env,
                 synthetic,
             )?;
@@ -124,7 +140,7 @@ pub fn convert_expr(
         ast::Expr::Lit(lit) => convert_lit(lit, expected, tctx, reg),
         ast::Expr::Bin(bin) => convert_bin_expr(bin, tctx, reg, expected, type_env, synthetic),
         ast::Expr::Tpl(tpl) => convert_template_literal(tpl, tctx, reg, type_env, synthetic),
-        ast::Expr::Paren(paren) => convert_expr(&paren.expr, tctx, reg, ctx, type_env, synthetic),
+        ast::Expr::Paren(paren) => convert_expr(&paren.expr, tctx, reg, type_env, synthetic),
         ast::Expr::Member(member) => convert_member_expr(member, tctx, reg, type_env, synthetic),
         ast::Expr::This(_) => Ok(Expr::Ident("self".to_string())),
         ast::Expr::Assign(assign) => convert_assign_expr(assign, tctx, reg, type_env, synthetic),
@@ -161,7 +177,6 @@ pub fn convert_expr(
                 &await_expr.arg,
                 tctx,
                 reg,
-                &ExprContext::none(),
                 type_env,
                 synthetic,
             )?;
@@ -169,7 +184,7 @@ pub fn convert_expr(
         }
         // Non-null assertion (expr!) — TS type-level only, no runtime effect. Strip assertion.
         ast::Expr::TsNonNull(ts_non_null) => {
-            convert_expr(&ts_non_null.expr, tctx, reg, ctx, type_env, synthetic)
+            convert_expr(&ts_non_null.expr, tctx, reg, type_env, synthetic)
         }
         _ => Err(anyhow!("unsupported expression: {:?}", expr)),
     }?;
@@ -269,7 +284,6 @@ fn convert_template_literal(
                 &tpl.exprs[i],
                 tctx,
                 reg,
-                &ExprContext::none(),
                 type_env,
                 synthetic,
             )?;
@@ -294,7 +308,6 @@ fn convert_cond_expr(
     type_env: &TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Expr> {
-    let ctx = &ExprContext { expected };
 
     // Try narrowing: extract guard from the ternary condition
     if let Some(guard) = patterns::extract_narrowing_guard(&cond.test) {
@@ -323,10 +336,10 @@ fn convert_cond_expr(
                     narrowed_env.insert(guard.var_name().to_string(), narrowed);
                 }
             }
-            let matched_expr = convert_expr(matched_ast, tctx, reg, ctx, &narrowed_env, synthetic)?;
+            let matched_expr = convert_expr(matched_ast, tctx, reg, &narrowed_env, synthetic)?;
 
             // Convert the unmatched branch with original type environment
-            let unmatched_expr = convert_expr(unmatched_ast, tctx, reg, ctx, type_env, synthetic)?;
+            let unmatched_expr = convert_expr(unmatched_ast, tctx, reg, type_env, synthetic)?;
 
             let expr_ir = Expr::Ident(guard.var_name().to_string());
             return Ok(Expr::IfLet {
@@ -343,12 +356,11 @@ fn convert_cond_expr(
         &cond.test,
         tctx,
         reg,
-        &ExprContext::none(),
         type_env,
         synthetic,
     )?;
-    let then_expr = convert_expr(&cond.cons, tctx, reg, ctx, type_env, synthetic)?;
-    let else_expr = convert_expr(&cond.alt, tctx, reg, ctx, type_env, synthetic)?;
+    let then_expr = convert_expr(&cond.cons, tctx, reg, type_env, synthetic)?;
+    let else_expr = convert_expr(&cond.alt, tctx, reg, type_env, synthetic)?;
     Ok(Expr::If {
         condition: Box::new(condition),
         then_expr: Box::new(then_expr),

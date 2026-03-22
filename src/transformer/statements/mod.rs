@@ -11,7 +11,7 @@ use crate::pipeline::SyntheticTypeRegistry;
 use crate::registry::TypeRegistry;
 use crate::transformer::context::TransformContext;
 use crate::transformer::expressions::patterns::extract_narrowing_guards;
-use crate::transformer::expressions::{convert_expr, resolve_expr_type, ExprContext};
+use crate::transformer::expressions::{convert_expr, resolve_expr_type};
 use crate::transformer::TypeEnv;
 use crate::transformer::{
     extract_pat_ident_name, extract_prop_name, single_declarator, TypePosition,
@@ -53,12 +53,7 @@ pub fn convert_stmt(
                 .arg
                 .as_ref()
                 .map(|e| {
-                    let ret_ctx = match return_type {
-                        Some(ty) => ExprContext::with_expected(ty),
-                        // Cat C: return type propagated when available
-                        None => ExprContext::none(),
-                    };
-                    convert_expr(e, tctx, reg, &ret_ctx, type_env, synthetic)
+                    convert_expr(e, tctx, reg, type_env, synthetic)
                 })
                 .transpose()?;
             // Wrap in Some() when return type is Option<T> and the value is not None.
@@ -116,7 +111,6 @@ pub fn convert_stmt(
                 &expr_stmt.expr,
                 tctx,
                 reg,
-                &ExprContext::none(),
                 type_env,
                 synthetic,
             )?;
@@ -247,12 +241,7 @@ fn convert_var_decl(
             .init
             .as_ref()
             .map(|e| {
-                let init_ctx = match ty.as_ref() {
-                    Some(t) => ExprContext::with_expected(t),
-                    // Cat C: var type propagated when available
-                    None => ExprContext::none(),
-                };
-                convert_expr(e, tctx, reg, &init_ctx, type_env, synthetic)
+                convert_expr(e, tctx, reg, type_env, synthetic)
             })
             .transpose()?;
 
@@ -459,7 +448,7 @@ fn convert_if_with_conditional_assignment(
 ) -> Result<Vec<Stmt>> {
     let rhs_type = resolve_expr_type(ca.rhs, type_env, tctx, reg);
     // Cat A: type resolved separately for rhs_type
-    let rhs_ir = convert_expr(ca.rhs, tctx, reg, &ExprContext::none(), type_env, synthetic)?;
+    let rhs_ir = convert_expr(ca.rhs, tctx, reg, type_env, synthetic)?;
 
     // If there's an outer comparison, always extract assignment + keep comparison
     if let Some(outer) = &ca.outer_comparison {
@@ -468,7 +457,6 @@ fn convert_if_with_conditional_assignment(
             outer.other_operand,
             tctx,
             reg,
-            &ExprContext::none(),
             type_env,
             synthetic,
         )?;
@@ -563,7 +551,7 @@ fn convert_while_with_conditional_assignment(
 ) -> Result<Vec<Stmt>> {
     let rhs_type = resolve_expr_type(ca.rhs, type_env, tctx, reg);
     // Cat A: type resolved separately for rhs_type
-    let rhs_ir = convert_expr(ca.rhs, tctx, reg, &ExprContext::none(), type_env, synthetic)?;
+    let rhs_ir = convert_expr(ca.rhs, tctx, reg, type_env, synthetic)?;
 
     match &rhs_type {
         Some(RustType::Option(_)) => {
@@ -804,7 +792,6 @@ fn convert_if_stmt(
         &if_stmt.test,
         tctx,
         reg,
-        &ExprContext::none(),
         type_env,
         synthetic,
     )?;
@@ -861,7 +848,6 @@ fn convert_and_combine_conditions(
             ast_expr,
             tctx,
             reg,
-            &ExprContext::none(),
             type_env,
             synthetic,
         )?);
@@ -976,7 +962,7 @@ fn convert_for_stmt(
                 .ok_or_else(|| anyhow!("unsupported for loop: no initializer"))?;
             // Cat A: for-loop initializer
             let start_expr =
-                convert_expr(init, tctx, reg, &ExprContext::none(), type_env, synthetic)?;
+                convert_expr(init, tctx, reg, type_env, synthetic)?;
             (name, start_expr)
         }
         _ => {
@@ -1002,7 +988,6 @@ fn convert_for_stmt(
                     &bin.right,
                     tctx,
                     reg,
-                    &ExprContext::none(),
                     type_env,
                     synthetic,
                 )?
@@ -1104,7 +1089,6 @@ fn convert_for_of_stmt(
         &for_of.right,
         tctx,
         reg,
-        &ExprContext::none(),
         type_env,
         synthetic,
     )?;
@@ -1145,7 +1129,6 @@ fn convert_for_in_stmt(
         &for_in.right,
         tctx,
         reg,
-        &ExprContext::none(),
         type_env,
         synthetic,
     )?;
@@ -1183,7 +1166,6 @@ fn convert_labeled_stmt(
                 &while_stmt.test,
                 tctx,
                 reg,
-                &ExprContext::none(),
                 type_env,
                 synthetic,
             )?;
@@ -1255,7 +1237,6 @@ fn convert_while_stmt(
         &while_stmt.test,
         tctx,
         reg,
-        &ExprContext::none(),
         type_env,
         synthetic,
     )?;
@@ -1601,7 +1582,6 @@ fn extract_error_message(
                         &first.expr,
                         tctx,
                         reg,
-                        &ExprContext::none(),
                         type_env,
                         synthetic,
                     ) {
@@ -1612,7 +1592,7 @@ fn extract_error_message(
             Expr::StringLit("unknown error".to_string())
         }
         // Cat A: error message expression
-        other => convert_expr(other, tctx, reg, &ExprContext::none(), type_env, synthetic)
+        other => convert_expr(other, tctx, reg, type_env, synthetic)
             .unwrap_or_else(|_| Expr::StringLit("unknown error".to_string())),
     }
 }
@@ -1854,12 +1834,7 @@ fn convert_spread_segments(
         .iter()
         .filter_map(|e| e.as_ref())
         .map(|elem| {
-            let elem_ctx = match element_type {
-                Some(ty) => ExprContext::with_expected(ty),
-                // Cat C: element type propagated when available
-                None => ExprContext::none(),
-            };
-            let expr = convert_expr(&elem.expr, tctx, reg, &elem_ctx, type_env, synthetic)?;
+            let expr = convert_expr(&elem.expr, tctx, reg, type_env, synthetic)?;
             Ok((elem.spread.is_some(), expr))
         })
         .collect()
@@ -2084,7 +2059,7 @@ fn try_convert_object_destructuring(
         .as_ref()
         .ok_or_else(|| anyhow!("object destructuring requires an initializer"))?;
     // Cat A: destructuring source
-    let source_expr = convert_expr(source, tctx, reg, &ExprContext::none(), type_env, synthetic)?;
+    let source_expr = convert_expr(source, tctx, reg, type_env, synthetic)?;
 
     let mutable = !matches!(var_decl.kind, ast::VarDeclKind::Const);
     let source_type =
@@ -2135,7 +2110,6 @@ fn expand_object_pat_props(
                         default_expr,
                         tctx,
                         reg,
-                        &ExprContext::none(),
                         type_env,
                         synthetic,
                     )?;
@@ -2301,7 +2275,6 @@ fn convert_switch_stmt(
         &switch.discriminant,
         tctx,
         reg,
-        &ExprContext::none(),
         type_env,
         synthetic,
     )?;
@@ -2583,7 +2556,6 @@ fn try_convert_discriminated_union_switch(
         &member.obj,
         tctx,
         reg,
-        &ExprContext::none(),
         type_env,
         synthetic,
     )?;
@@ -2846,17 +2818,10 @@ fn convert_switch_clean_match(
 
     // Build ExprContext from discriminant type for case value conversion.
     // Only propagate for enum types (Named types registered in registry), not primitives.
-    let case_ctx = match discriminant_type {
-        Some(ty @ RustType::Named { name, .. }) if reg.get(name).is_some() => {
-            ExprContext::with_expected(ty)
-        }
-        // Cat C: discriminant type propagated when available
-        _ => ExprContext::none(),
-    };
 
     for case in &switch.cases {
         if let Some(test) = &case.test {
-            let pattern = convert_expr(test, tctx, reg, &case_ctx, type_env, synthetic)?;
+            let pattern = convert_expr(test, tctx, reg, type_env, synthetic)?;
             pending_exprs.push(pattern.clone());
             pending_patterns.push(MatchPattern::Literal(pattern));
         }
@@ -2957,14 +2922,7 @@ fn convert_switch_fallthrough(
         if let Some(test) = &case.test {
             // case val: ...
             // Only propagate enum types to case values, not primitives
-            let case_ctx = match discriminant_type {
-                Some(ty @ RustType::Named { name, .. }) if reg.get(name).is_some() => {
-                    ExprContext::with_expected(ty)
-                }
-                // Cat C: discriminant type propagated when available
-                _ => ExprContext::none(),
-            };
-            let test_expr = convert_expr(test, tctx, reg, &case_ctx, type_env, synthetic)?;
+            let test_expr = convert_expr(test, tctx, reg, type_env, synthetic)?;
             let condition = Expr::BinaryOp {
                 left: Box::new(Expr::BinaryOp {
                     left: Box::new(discriminant.clone()),
@@ -3027,7 +2985,6 @@ fn convert_do_while_stmt(
         &do_while.test,
         tctx,
         reg,
-        &ExprContext::none(),
         type_env,
         synthetic,
     )?;
@@ -3079,7 +3036,7 @@ fn try_convert_array_destructuring(
         .as_ref()
         .ok_or_else(|| anyhow!("array destructuring requires an initializer"))?;
     // Cat A: destructuring source
-    let source_expr = convert_expr(source, tctx, reg, &ExprContext::none(), type_env, synthetic)?;
+    let source_expr = convert_expr(source, tctx, reg, type_env, synthetic)?;
 
     let mutable = !matches!(var_decl.kind, ast::VarDeclKind::Const);
     let mut stmts = Vec::new();
@@ -3153,7 +3110,7 @@ fn convert_for_stmt_as_loop(
                     .init
                     .as_ref()
                     // Cat A: for-loop initializer
-                    .map(|e| convert_expr(e, tctx, reg, &ExprContext::none(), type_env, synthetic))
+                    .map(|e| convert_expr(e, tctx, reg, type_env, synthetic))
                     .transpose()?;
                 result.push(Stmt::Let {
                     mutable: true,
@@ -3165,7 +3122,7 @@ fn convert_for_stmt_as_loop(
         }
         Some(ast::VarDeclOrExpr::Expr(expr)) => {
             // Cat A: for-loop init expression
-            let e = convert_expr(expr, tctx, reg, &ExprContext::none(), type_env, synthetic)?;
+            let e = convert_expr(expr, tctx, reg, type_env, synthetic)?;
             result.push(Stmt::Expr(e));
         }
         None => {}
@@ -3177,7 +3134,7 @@ fn convert_for_stmt_as_loop(
     // 2a. Condition → if !(condition) { break; }
     if let Some(test) = &for_stmt.test {
         // Cat A: boolean context (for-loop condition)
-        let condition = convert_expr(test, tctx, reg, &ExprContext::none(), type_env, synthetic)?;
+        let condition = convert_expr(test, tctx, reg, type_env, synthetic)?;
         loop_body.push(Stmt::If {
             condition: Expr::UnaryOp {
                 op: UnOp::Not,
@@ -3248,7 +3205,6 @@ fn convert_update_to_stmt(
                 &ast::Expr::Assign(assign.clone()),
                 tctx,
                 reg,
-                &ExprContext::none(),
                 type_env,
                 synthetic,
             )?;
@@ -3256,7 +3212,7 @@ fn convert_update_to_stmt(
         }
         other => {
             // Cat A: for-loop update expression
-            let e = convert_expr(other, tctx, reg, &ExprContext::none(), type_env, synthetic)?;
+            let e = convert_expr(other, tctx, reg, type_env, synthetic)?;
             Ok(Stmt::Expr(e))
         }
     }

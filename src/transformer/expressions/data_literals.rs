@@ -8,7 +8,7 @@ use crate::pipeline::SyntheticTypeRegistry;
 use crate::registry::{TypeDef, TypeRegistry};
 use crate::transformer::TypeEnv;
 
-use super::{convert_expr, ExprContext};
+use super::{convert_expr};
 use crate::transformer::context::TransformContext;
 
 /// Converts a discriminated union object literal to an enum variant construction.
@@ -72,13 +72,8 @@ pub(super) fn convert_discriminated_union_object_lit(
                     }
                     let field_expected = variant_field_types
                         .and_then(|fs| fs.iter().find(|(n, _)| n == &key).map(|(_, ty)| ty));
-                    let field_ctx = match field_expected {
-                        Some(ty) => ExprContext::with_expected(ty),
-                        // Cat C: field type propagated when available
-                        None => ExprContext::none(),
-                    };
                     let value =
-                        convert_expr(&kv.value, tctx, reg, &field_ctx, type_env, synthetic)?;
+                        convert_expr(&kv.value, tctx, reg, type_env, synthetic)?;
                     fields.push((key, value));
                 }
                 ast::Prop::Shorthand(ident) => {
@@ -88,17 +83,11 @@ pub(super) fn convert_discriminated_union_object_lit(
                     }
                     let field_expected = variant_field_types
                         .and_then(|fs| fs.iter().find(|(n, _)| n == &key).map(|(_, ty)| ty));
-                    let field_ctx = match field_expected {
-                        Some(ty) => ExprContext::with_expected(ty),
-                        // Cat C: field type propagated when available
-                        None => ExprContext::none(),
-                    };
                     let value = convert_expr(
                         &ast::Expr::Ident(ident.clone()),
                         tctx,
                         reg,
-                        &field_ctx,
-                        type_env,
+                                                type_env,
                         synthetic,
                     )?;
                     fields.push((key, value));
@@ -161,17 +150,11 @@ pub(super) fn try_convert_as_hashmap(
                         computed_expr,
                         tctx,
                         reg,
-                        &ExprContext::none(),
                         type_env,
                         synthetic,
                     )?;
-                    let value_ctx = match value_type {
-                        Some(ty) => ExprContext::with_expected(ty),
-                        // Cat C: HashMap value type propagated when available
-                        None => ExprContext::none(),
-                    };
                     let value =
-                        convert_expr(&kv.value, tctx, reg, &value_ctx, type_env, synthetic)?;
+                        convert_expr(&kv.value, tctx, reg, type_env, synthetic)?;
                     entries.push(Expr::Tuple {
                         elements: vec![key, value],
                     });
@@ -262,30 +245,19 @@ pub(super) fn convert_object_lit(
                     // Resolve the expected type for this field from the registry
                     let field_expected = struct_fields
                         .and_then(|fs| fs.iter().find(|(name, _)| name == &key).map(|(_, ty)| ty));
-                    let field_ctx = match field_expected {
-                        Some(ty) => ExprContext::with_expected(ty),
-                        // Cat C: field type propagated when available
-                        None => ExprContext::none(),
-                    };
                     let value =
-                        convert_expr(&kv.value, tctx, reg, &field_ctx, type_env, synthetic)?;
+                        convert_expr(&kv.value, tctx, reg, type_env, synthetic)?;
                     fields.push((key, value));
                 }
                 ast::Prop::Shorthand(ident) => {
                     let key = ident.sym.to_string();
                     let field_expected = struct_fields
                         .and_then(|fs| fs.iter().find(|(name, _)| name == &key).map(|(_, ty)| ty));
-                    let field_ctx = match field_expected {
-                        Some(ty) => ExprContext::with_expected(ty),
-                        // Cat C: field type propagated when available
-                        None => ExprContext::none(),
-                    };
                     let value = convert_expr(
                         &ast::Expr::Ident(ident.clone()),
                         tctx,
                         reg,
-                        &field_ctx,
-                        type_env,
+                                                type_env,
                         synthetic,
                     )?;
                     fields.push((key, value));
@@ -302,7 +274,6 @@ pub(super) fn convert_object_lit(
                     &spread_elem.expr,
                     tctx,
                     reg,
-                    &ExprContext::none(),
                     type_env,
                     synthetic,
                 )?;
@@ -414,12 +385,7 @@ pub(super) fn convert_array_lit(
             .map(|(i, elem)| {
                 let elem_expected = tuple_types.get(i);
                 {
-                    let elem_ctx = match elem_expected {
-                        Some(ty) => ExprContext::with_expected(ty),
-                        // Cat C: tuple element type propagated when available
-                        None => ExprContext::none(),
-                    };
-                    convert_expr(&elem.expr, tctx, reg, &elem_ctx, type_env, synthetic)
+                    convert_expr(&elem.expr, tctx, reg, type_env, synthetic)
                 }
             })
             .collect::<Result<Vec<_>>>()?;
@@ -447,12 +413,7 @@ pub(super) fn convert_array_lit(
         .iter()
         .filter_map(|elem| elem.as_ref())
         .map(|elem| {
-            let elem_ctx = match element_type {
-                Some(ty) => ExprContext::with_expected(ty),
-                // Cat C: element type propagated when available
-                None => ExprContext::none(),
-            };
-            convert_expr(&elem.expr, tctx, reg, &elem_ctx, type_env, synthetic)
+            convert_expr(&elem.expr, tctx, reg, type_env, synthetic)
         })
         .collect::<Result<Vec<_>>>()?;
     Ok(Expr::Vec { elements })
@@ -507,7 +468,6 @@ pub(super) fn convert_spread_array_to_block(
                 &elem.expr,
                 tctx,
                 reg,
-                &ExprContext::none(),
                 type_env,
                 synthetic,
             )?;
@@ -525,12 +485,7 @@ pub(super) fn convert_spread_array_to_block(
                 }],
             }));
         } else {
-            let elem_ctx = match element_type {
-                Some(ty) => ExprContext::with_expected(ty),
-                // Cat C: element type propagated when available
-                None => ExprContext::none(),
-            };
-            let value = convert_expr(&elem.expr, tctx, reg, &elem_ctx, type_env, synthetic)?;
+            let value = convert_expr(&elem.expr, tctx, reg, type_env, synthetic)?;
             if initialized {
                 // _v.push(value)
                 stmts.push(Stmt::Expr(Expr::MethodCall {

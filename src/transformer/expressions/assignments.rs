@@ -9,7 +9,7 @@ use crate::registry::TypeRegistry;
 use crate::transformer::TypeEnv;
 
 use super::member_access::convert_member_expr;
-use super::{convert_expr, ExprContext};
+use super::{convert_expr};
 use crate::transformer::context::TransformContext;
 
 /// Converts an assignment expression (`target = value`) to `Expr::Assign`.
@@ -37,15 +37,7 @@ pub(super) fn convert_assign_expr(
         },
         _ => return Err(anyhow!("unsupported assignment target pattern")),
     };
-    // Propagate target variable's type from TypeEnv to RHS (Category B)
-    let rhs_ctx = match &target_var_name {
-        Some(name) => match type_env.get(name) {
-            Some(ty) => ExprContext::with_expected(ty),
-            None => ExprContext::none(),
-        },
-        None => ExprContext::none(),
-    };
-    let right = convert_expr(&assign.right, tctx, reg, &rhs_ctx, type_env, synthetic)?;
+    let right = convert_expr(&assign.right, tctx, reg, type_env, synthetic)?;
 
     // ??= (nullish coalescing assignment): x ??= y → x.get_or_insert_with(|| y)
     if assign.op == ast::AssignOp::NullishAssign {
