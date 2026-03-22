@@ -2,7 +2,12 @@
 
 ## 背景・動機
 
-P6 で Generator のセマンティック判断（`.as_str()` 付加、enum 分類、regex import スキャン）を Transformer に移動した。本 PRD では Generator が純粋な IR→テキスト変換であることを検証・確認し、新規に `OutputWriter` を構築する。
+P6 で Generator のセマンティック判断を Transformer に移動した。具体的には:
+- `.as_str()` 付加: Transformer が IR に `Expr::MethodCall { method: "as_str" }` を含めるよう変更。Generator は IR をそのまま出力
+- regex import スキャン: Transformer が IR に `Item::Use { path: "regex", names: ["Regex"] }` を含めるよう変更。Generator は IR をそのまま出力
+- enum 分類（`has_data_variants` / `is_numeric_enum`）: P6 で評価した結果、IR のデータ構造（`EnumVariant.data` / `EnumValue`）に基づくレンダリング戦略選択であり、TS セマンティクスの判断ではないと判定。Generator に残すのが正当
+
+本 PRD では Generator が純粋な IR→テキスト変換であることを検証・確認し、新規に `OutputWriter` を構築する。
 
 現在の出力フローの問題:
 

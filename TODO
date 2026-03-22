@@ -238,7 +238,7 @@
 
 ### Tier 3: 低優先度 — 孤立した問題・コード品質
 
-- **[I-192]** **大規模ファイルの分割** — `statements/mod.rs`（3069 行）、`types/mod.rs`（2513 行）等
+- **[I-192]** **大規模ファイルの分割** — `statements/mod.rs`（3357 行）、`expressions/tests.rs`（8891 行）等
 - **[I-193]** **API 表面積の最小化** — `pub fn` → `pub(crate) fn`
 - **[I-191]** **README.md の記述内容の見直し**
 - **[I-99]** **`collect_du_field_accesses_from_expr` の AST ノード網羅性改善**
