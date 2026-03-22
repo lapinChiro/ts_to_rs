@@ -196,7 +196,7 @@ impl<'a> OutputWriter<'a> {
 
         // 4. rustfmt
         if run_rustfmt {
-            run_rustfmt_on_paths(&all_paths);
+            crate::run_rustfmt(&all_paths);
         }
 
         Ok(())
@@ -236,18 +236,6 @@ fn collect_dirs(output_dir: &Path, file_outputs: &[(PathBuf, String)]) -> Vec<Pa
     }
     // 深い方から順（BTreeSet は浅い方から順なので reverse）
     dirs.into_iter().rev().collect()
-}
-
-/// rustfmt を実行する（ベストエフォート）。
-fn run_rustfmt_on_paths(paths: &[PathBuf]) {
-    if paths.is_empty() {
-        return;
-    }
-    let args: Vec<&str> = paths.iter().filter_map(|p| p.to_str()).collect();
-    if args.is_empty() {
-        return;
-    }
-    let _ = std::process::Command::new("rustfmt").args(&args).status();
 }
 
 #[cfg(test)]

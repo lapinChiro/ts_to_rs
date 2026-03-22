@@ -2,13 +2,46 @@ use std::fs;
 use std::process::Command;
 use std::sync::Mutex;
 
-use ts_to_rs::{build_shared_registry, transpile_collecting, transpile_collecting_with_registry};
+use ts_to_rs::pipeline::{NullModuleResolver, TranspileInput};
+use ts_to_rs::transpile_collecting;
 
 /// Path to the fixed Cargo project used for compile checking.
 const COMPILE_CHECK_DIR: &str = "tests/compile-check";
 
 /// Mutex to serialize compile tests (they share the same compile-check project).
 static COMPILE_LOCK: Mutex<()> = Mutex::new(());
+
+/// Simplifies `use crate::...::module::Name` to `use module::Name` for multi-file compilation.
+///
+/// In multi-file compile tests, sibling modules are available as `mod <name>;`,
+/// so `use crate::long::path::env::Bindings` becomes `use env::Bindings`.
+fn simplify_use_statements(rs_source: &str) -> String {
+    rs_source
+        .lines()
+        .map(|line| {
+            let trimmed = line.trim_start();
+            if (trimmed.starts_with("use crate::") || trimmed.starts_with("pub use crate::"))
+                && trimmed.ends_with(';')
+            {
+                // Extract the last two segments: module::Name
+                let path_part = trimmed
+                    .trim_start_matches("pub use crate::")
+                    .trim_start_matches("use crate::")
+                    .trim_end_matches(';');
+                let segments: Vec<&str> = path_part.split("::").collect();
+                if segments.len() >= 2 {
+                    let short = segments[segments.len() - 2..].join("::");
+                    format!("use {};", short)
+                } else {
+                    line.to_string()
+                }
+            } else {
+                line.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
 
 /// Strips internal module `use` statements while preserving external crate imports.
 ///
@@ -139,35 +172,38 @@ fn assert_compiles_directory(dir: &str, fixture_name: &str) {
         .collect();
     entries.sort_by_key(|e| e.file_name());
 
-    // Read all sources for shared registry
-    let sources: Vec<String> = entries
+    // Build TranspileInput with all files
+    let files: Vec<(std::path::PathBuf, String)> = entries
         .iter()
         .map(|e| {
-            fs::read_to_string(e.path())
-                .unwrap_or_else(|err| panic!("failed to read {}: {err}", e.path().display()))
+            let source = fs::read_to_string(e.path())
+                .unwrap_or_else(|err| panic!("failed to read {}: {err}", e.path().display()));
+            (e.path(), source)
         })
         .collect();
-    let source_refs: Vec<&str> = sources.iter().map(|s| s.as_str()).collect();
-    let shared_registry = build_shared_registry(&source_refs);
+
+    let input = TranspileInput {
+        files,
+        builtin_types: None,
+        module_resolver: Box::new(NullModuleResolver),
+    };
+    let output = ts_to_rs::pipeline::transpile_pipeline(input)
+        .unwrap_or_else(|e| panic!("transpile_pipeline failed for '{fixture_name}': {e}"));
 
     let mut mod_names: Vec<String> = Vec::new();
     let mut lib_rs = String::new();
 
-    for (i, entry) in entries.iter().enumerate() {
-        let stem = entry
-            .path()
+    for file_output in &output.files {
+        let stem = file_output
+            .path
             .file_stem()
             .unwrap()
             .to_string_lossy()
             .into_owned();
 
-        let (rs_source, _) = transpile_collecting_with_registry(&sources[i], &shared_registry)
-            .unwrap_or_else(|e| {
-                panic!(
-                    "transpile failed for '{}': {e}",
-                    entry.file_name().to_string_lossy()
-                )
-            });
+        // マルチファイルテストでは同一ディレクトリ内の use は保持し、
+        // crate パス部分だけを短縮する（`use crate::long::path::module::Name` → `use module::Name`）
+        let rs_source = simplify_use_statements(&file_output.rust_source);
 
         if stem == "main" {
             lib_rs = rs_source;
@@ -191,7 +227,7 @@ fn assert_compiles_directory(dir: &str, fixture_name: &str) {
     fs::write(&lib_path, &full_source)
         .unwrap_or_else(|e| panic!("failed to write {lib_path}: {e}"));
 
-    let output = Command::new("cargo")
+    let cmd_output = Command::new("cargo")
         .args(["check", "--message-format=short"])
         .current_dir(COMPILE_CHECK_DIR)
         .output()
@@ -203,9 +239,9 @@ fn assert_compiles_directory(dir: &str, fixture_name: &str) {
     }
 
     assert!(
-        output.status.success(),
+        cmd_output.status.success(),
         "cargo check failed for multi-file fixture '{fixture_name}':\n{}\ngenerated lib.rs:\n{full_source}",
-        String::from_utf8_lossy(&output.stderr)
+        String::from_utf8_lossy(&cmd_output.stderr)
     );
 }
 

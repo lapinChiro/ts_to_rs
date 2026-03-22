@@ -30,13 +30,12 @@ P1〜P7 で新パイプラインの全コンポーネントが実装された。
   - Pass 5: `Transformer` + `TransformContext` → `Vec<Item>`（per file）
   - Pass 6: `Generator` → `String`（per file）
   - Pass 7: `OutputWriter` → 出力
-- 既存 `lib.rs` 公開 API の置換:
-  - `transpile(source: &str) -> Result<String>` → 内部で `TranspileInput` + `NullModuleResolver` を構築して統一パイプラインを呼ぶ
-  - `transpile_collecting(source: &str) -> Result<(String, Vec<UnsupportedSyntax>)>` → 同上
-  - `transpile_collecting_with_registry_and_path(...)` → 同上
-- 既存 `main.rs` の置換:
-  - ディレクトリモード: `transpile_directory()` → `TranspileInput` + `NodeModuleResolver` で統一パイプラインを呼ぶ
-  - 単一ファイルモード: `transpile()` → `TranspileInput` + `NullModuleResolver` で統一パイプラインを呼ぶ
+- 既存 `lib.rs` 公開 API の置換 → **Phase B で実施済み**:
+  - 公開 API を `transpile()` と `transpile_collecting()` の 2 関数に整理。両方とも `run_single_file_pipeline()` + `extract_single_output()` 内部関数を使用
+  - 旧ラッパー API（`transpile_with_registry` / `transpile_with_registry_and_path` / `transpile_collecting_with_registry` / `transpile_collecting_with_registry_and_path`）と `build_shared_registry` は削除済み
+- 既存 `main.rs` の置換 → **Phase C で実施済み**:
+  - ディレクトリモード: `TranspileInput` + `NodeModuleResolver` → `transpile_pipeline` → `OutputWriter`
+  - 単一ファイルモード: `TranspileInput` + `NullModuleResolver` → `transpile_pipeline` → ファイル書き出し
 - AnyTypeAnalyzer の SyntheticTypeRegistry 完全統合（P4 から繰り越し）:
   - `generate_any_enum`（`src/transformer/any_narrowing.rs:84`）が現在 `(Item, RustType)` を直接返し、呼び出し元（`src/transformer/functions/mod.rs:106,136,1173`、`src/registry.rs:1067,1100`）が Item を `items` に push する方式
   - 統一パイプラインでは、`generate_any_enum` が SyntheticTypeRegistry に登録し、Item は返さない方式に変更。Transformer は SyntheticTypeRegistry から `all_items()` で取得する
@@ -51,8 +50,8 @@ P1〜P7 で新パイプラインの全コンポーネントが実装された。
   - `resolve_expr_type`（`src/transformer/expressions/type_resolution.rs`）→ P6 で `FileTypeResolution.expr_types` を優先参照するよう変更済み。ヒューリスティクス（`resolve_expr_type_heuristic`）がフォールバックとして併存中。フォールバックが発火するケースを Hono ベンチマークで計測し、0 件であることを確認してから削除すること
   - `tctx` + `reg` の二重パラメータ（全 Transformer 関数）→ P6 で `tctx.type_registry` と `reg` が同一の参照を持つ冗長な構造のまま残存。P8 で `reg` パラメータを削除し `tctx.type_registry` に統一する。影響範囲: 105 関数 + 全テストコード
   - 分散した合成型生成（Transformer 内の直接 `Item::Enum` push）→ `SyntheticTypeRegistry` に集約済み
-  - P1 で作成したブリッジ実装 → Phase A で本実装に置換済み。旧ブリッジコードは存在しない
-- ~~`transpile_single(source: &str) -> Result<String>` の簡易 API の提供~~ → Phase A で実装済み（`src/pipeline/mod.rs`）
+  - P1 で作成したブリッジ実装 → **Phase A で本実装に置換済み**。旧ブリッジコードは存在しない
+- `transpile_single(source: &str) -> Result<String>` の簡易 API → **Phase A で実装済み**（`src/pipeline/mod.rs`）
 
 ### スコープ外
 
@@ -192,26 +191,26 @@ let rust_source = pipeline::transpile_single(&source)?;
 
 ### 削除対象コード
 
-| 削除対象 | ファイル | 置換先 | P6 での状態 |
-|---------|---------|--------|------------|
-| `convert_relative_path_to_crate_path` | `src/directory.rs` | `ModuleGraph.module_path()` | 未使用だが残存 |
-| `transpile_directory` (旧実装) | `src/directory.rs` | 統一パイプライン + `OutputWriter` | 現行 API として使用中 |
-| `ExprContext` | `src/transformer/expressions/mod.rs` | `TransformContext` + `expected_types` | フォールバックとして併存中（P6 で FileTypeResolution 優先に変更済み） |
-| `TypeEnv` の narrowing 管理 | `src/transformer/type_env.rs` | `narrowing_events` | フォールバックとして併存中（P6 で narrowed_type 優先に変更済み）。変数型追跡の用途は残る |
-| `resolve_expr_type_heuristic` | `src/transformer/expressions/type_resolution.rs` | `TypeResolver` | フォールバックとして併存中（P6 で expr_types 優先に変更済み） |
-| `tctx` + `reg` 二重パラメータ | 全 Transformer 関数（105 関数） | `tctx.type_registry` に統一 | P6 で `tctx.type_registry == reg` の冗長構造のまま残存 |
-| 合成型の直接 Item push | `src/transformer/types/mod.rs` | `SyntheticTypeRegistry` | 一部残存 |
-| P1 のブリッジ実装 | `src/pipeline/mod.rs` | 本 PRD の本実装 | 現行コードパスとして使用中 |
+| 削除対象 | ファイル | 置換先 | 現在の状態（Phase C 完了時点） |
+|---------|---------|--------|------|
+| `convert_relative_path_to_crate_path` | `src/transformer/mod.rs` | `ModuleGraph.resolve_import()` | Transformer 内で 4 箇所使用中。Phase D で評価 |
+| `transpile_directory` (旧実装) | `src/main.rs` | 統一パイプライン + `OutputWriter` | **Phase C で削除済み** |
+| `build_shared_registry` | `src/lib.rs` | `transpile_pipeline` 内の型収集 | **リファクタリングで削除済み** |
+| `transpile_with_registry` 系 4 関数 | `src/lib.rs` | `transpile()` / `transpile_collecting()` | **リファクタリングで削除済み** |
+| `ExprContext` | `src/transformer/expressions/mod.rs` | `TransformContext` + `expected_types` | フォールバックとして併存中。ExprContext 優先（Phase B の教訓）。Phase D で削除可否検証 |
+| `TypeEnv` の narrowing 管理 | `src/transformer/type_env.rs` | `narrowing_events` | フォールバックとして併存中。Phase D で検証。変数型追跡の用途は残る |
+| `resolve_expr_type_heuristic` | `src/transformer/expressions/type_resolution.rs` | `TypeResolver` | フォールバックとして併存中。Phase D で検証 |
+| `tctx` + `reg` 二重パラメータ | 全 Transformer 関数（105 関数） | `tctx.type_registry` に統一 | 冗長構造のまま残存。Phase D で統合 |
+| 合成型の直接 Item push | `src/transformer/types/mod.rs` | `SyntheticTypeRegistry` | 一部残存。Phase D の D0a で対応 |
+| P1 のブリッジ実装 | `src/pipeline/mod.rs` | 本 PRD の本実装 | **Phase A で削除済み** |
 
-### 影響ファイル
+### 影響ファイル（Phase D 以降の残作業）
 
-- **変更**: `src/pipeline/mod.rs`（ブリッジ実装を本実装に置換）
-- **変更**: `src/lib.rs`（公開 API を統一パイプラインのラッパーに置換）
-- **変更**: `src/main.rs`（ディレクトリ/単一ファイルモードを統一パイプライン呼び出しに置換）
-- **変更/削除**: `src/directory.rs`（`transpile_directory` の削除、`convert_relative_path_to_crate_path` の削除）
-- **変更/削除**: `src/transformer/expressions/mod.rs`（`ExprContext` の削除）
-- **変更/削除**: `src/transformer/type_env.rs`（narrowing 管理の削除。構造体自体が不要なら全削除）
-- **変更/削除**: `src/transformer/expressions/type_resolution.rs`（`resolve_expr_type` のフォールバック不要確認後に削除）
+- **変更**: `src/transformer/mod.rs`（`convert_relative_path_to_crate_path` の削除候補）
+- **変更**: `src/transformer/expressions/mod.rs`（`ExprContext` の削除候補）
+- **変更**: `src/transformer/type_env.rs`（narrowing 管理の削除候補）
+- **変更**: `src/transformer/expressions/type_resolution.rs`（`resolve_expr_type_heuristic` の削除候補）
+- **変更**: 全 Transformer 関数 105 個 + 全テストコード（tctx + reg 統合）
 
 ## 作業ステップ
 

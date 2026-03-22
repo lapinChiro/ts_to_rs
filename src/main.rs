@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -6,6 +7,9 @@ use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 
 use ts_to_rs::directory;
+use ts_to_rs::pipeline::module_resolver::NodeModuleResolver;
+use ts_to_rs::pipeline::output_writer::OutputWriter;
+use ts_to_rs::pipeline::{NullModuleResolver, TranspileInput};
 use ts_to_rs::registry::TypeRegistry;
 use ts_to_rs::UnsupportedSyntax;
 
@@ -65,21 +69,230 @@ fn main() -> Result<()> {
         .context("input path is required for transpilation")?;
     let use_builtin = !cli.no_builtin_types;
 
-    if cli.report_unsupported {
-        let unsupported = if input.is_dir() {
-            transpile_directory_collecting(&input, cli.output.as_deref(), use_builtin)?
-        } else {
-            transpile_file_collecting(&input, cli.output.as_deref(), use_builtin)?
-        };
-        let json = serde_json::to_string_pretty(&unsupported)?;
-        println!("{json}");
-        Ok(())
-    } else if input.is_dir() {
-        transpile_directory(&input, cli.output.as_deref(), use_builtin)
+    if input.is_dir() {
+        transpile_directory(
+            &input,
+            cli.output.as_deref(),
+            use_builtin,
+            cli.report_unsupported,
+        )
     } else {
-        transpile_file(&input, cli.output.as_deref(), use_builtin)
+        transpile_file(
+            &input,
+            cli.output.as_deref(),
+            use_builtin,
+            cli.report_unsupported,
+        )
     }
 }
+
+// ===== Transpilation =====
+
+/// Transpiles a single TypeScript file to Rust using the unified pipeline.
+fn transpile_file(
+    input: &Path,
+    output: Option<&Path>,
+    use_builtin_types: bool,
+    report_unsupported: bool,
+) -> Result<()> {
+    let ts_source = fs::read_to_string(input)
+        .with_context(|| format!("failed to read input file: {}", input.display()))?;
+
+    let input_dir = input.parent().unwrap_or(Path::new("."));
+    let builtin_types = build_base_registry(input_dir, use_builtin_types);
+
+    let pipeline_input = TranspileInput {
+        files: vec![(input.to_path_buf(), ts_source.clone())],
+        builtin_types: Some(builtin_types),
+        module_resolver: Box::new(NullModuleResolver),
+    };
+    let pipeline_output = ts_to_rs::pipeline::transpile_pipeline(pipeline_input)
+        .with_context(|| format!("failed to transpile: {}", input.display()))?;
+
+    let file = pipeline_output
+        .files
+        .into_iter()
+        .next()
+        .context("pipeline returned no output files")?;
+
+    // Report or error on unsupported syntax
+    if report_unsupported {
+        let unsupported: Vec<UnsupportedSyntax> = file
+            .unsupported
+            .into_iter()
+            .map(|raw| resolve_unsupported(&ts_source, input, raw))
+            .collect();
+        let json = serde_json::to_string_pretty(&unsupported)?;
+        println!("{json}");
+    } else if let Some(first) = file.unsupported.first() {
+        bail!(
+            "unsupported syntax: {} at byte {} in {}",
+            first.kind,
+            first.byte_pos,
+            input.display()
+        );
+    }
+
+    let output_path = output
+        .map(PathBuf::from)
+        .unwrap_or_else(|| input.with_extension("rs"));
+
+    fs::write(&output_path, &file.rust_source)
+        .with_context(|| format!("failed to write output file: {}", output_path.display()))?;
+
+    ts_to_rs::run_rustfmt(std::slice::from_ref(&output_path));
+    eprintln!("Wrote {}", output_path.display());
+    Ok(())
+}
+
+/// Transpiles all `.ts` files in a directory using the unified pipeline + OutputWriter.
+fn transpile_directory(
+    input_dir: &Path,
+    output: Option<&Path>,
+    use_builtin_types: bool,
+    report_unsupported: bool,
+) -> Result<()> {
+    let ts_files = directory::collect_ts_files(input_dir)?;
+    directory::validate_has_ts_files(&ts_files, input_dir)?;
+
+    let output_dir = output
+        .map(PathBuf::from)
+        .unwrap_or_else(|| directory::default_output_dir(input_dir));
+
+    // Read all source files
+    let mut files: Vec<(PathBuf, String)> = Vec::new();
+    for ts_path in &ts_files {
+        let ts_source = fs::read_to_string(ts_path)
+            .with_context(|| format!("failed to read: {}", ts_path.display()))?;
+        files.push((ts_path.clone(), ts_source));
+    }
+
+    let builtin_types = build_base_registry(input_dir, use_builtin_types);
+    let known_files: HashSet<PathBuf> = ts_files.iter().cloned().collect();
+
+    // clone: TranspileInput が files の所有権を取るが、error reporting で
+    // ソース文字列が必要なため保持。FileOutput にソース文字列を含める
+    // リファクタリングで解消可能（Phase D 候補）
+    let pipeline_input = TranspileInput {
+        files: files.clone(),
+        builtin_types: Some(builtin_types),
+        module_resolver: Box::new(NodeModuleResolver::new(
+            input_dir.to_path_buf(),
+            known_files,
+        )),
+    };
+    let pipeline_output = ts_to_rs::pipeline::transpile_pipeline(pipeline_input)
+        .with_context(|| format!("failed to transpile directory: {}", input_dir.display()))?;
+
+    // Collect unsupported syntax for reporting
+    let mut all_unsupported = Vec::new();
+    if report_unsupported {
+        for (file_output, (ts_path, ts_source)) in pipeline_output.files.iter().zip(files.iter()) {
+            for raw in &file_output.unsupported {
+                all_unsupported.push(resolve_unsupported(ts_source, ts_path, raw.clone()));
+            }
+        }
+    } else {
+        // Strict mode: error on first unsupported
+        for (file_output, (ts_path, _)) in pipeline_output.files.iter().zip(files.iter()) {
+            if let Some(first) = file_output.unsupported.first() {
+                bail!(
+                    "unsupported syntax: {} at byte {} in {}",
+                    first.kind,
+                    first.byte_pos,
+                    ts_path.display()
+                );
+            }
+        }
+    }
+
+    // Compute output paths: .ts → .rs, preserving directory structure
+    let file_outputs: Vec<(PathBuf, String)> = pipeline_output
+        .files
+        .iter()
+        .zip(ts_files.iter())
+        .map(|(fo, ts_path)| {
+            let rs_path = directory::compute_output_path(ts_path, input_dir, &output_dir)
+                .unwrap_or_else(|_| ts_path.with_extension("rs"));
+            // Use relative path within output_dir for OutputWriter
+            let rel_path = rs_path
+                .strip_prefix(&output_dir)
+                .unwrap_or(&rs_path)
+                .to_path_buf();
+            (rel_path, fo.rust_source.clone())
+        })
+        .collect();
+
+    // Write files + mod.rs + synthetic types via OutputWriter
+    let writer = OutputWriter::new(&pipeline_output.module_graph);
+    writer.write_to_directory(
+        &output_dir,
+        &file_outputs,
+        &pipeline_output.synthetic_items,
+        true, // run rustfmt
+    )?;
+
+    eprintln!("Converted {} file(s)", ts_files.len());
+
+    if report_unsupported {
+        let json = serde_json::to_string_pretty(&all_unsupported)?;
+        println!("{json}");
+    }
+
+    Ok(())
+}
+
+// ===== Helpers =====
+
+/// Resolves an [`UnsupportedSyntaxError`] into an [`UnsupportedSyntax`] with file path + line/col.
+fn resolve_unsupported(
+    source: &str,
+    file_path: &Path,
+    raw: ts_to_rs::transformer::UnsupportedSyntaxError,
+) -> UnsupportedSyntax {
+    let resolved = ts_to_rs::resolve_unsupported(source, raw);
+    UnsupportedSyntax {
+        kind: resolved.kind,
+        location: format!("{}:{}", file_path.display(), resolved.location),
+    }
+}
+
+/// Builds a base registry from built-in types and optional external types.json.
+fn build_base_registry(input_dir: &Path, use_builtin_types: bool) -> TypeRegistry {
+    let mut registry = if use_builtin_types {
+        ts_to_rs::external_types::load_builtin_types().unwrap_or_default()
+    } else {
+        TypeRegistry::new()
+    };
+
+    // Auto-detect .ts_to_rs/types.json
+    if let Some(external) = load_external_types_json(input_dir) {
+        registry.merge(&external);
+    }
+
+    registry
+}
+
+/// Loads external types from `.ts_to_rs/types.json` if it exists in the input directory.
+fn load_external_types_json(input_dir: &Path) -> Option<TypeRegistry> {
+    let types_json = input_dir.join(".ts_to_rs/types.json");
+    if !types_json.exists() {
+        return None;
+    }
+    let json = fs::read_to_string(&types_json).ok()?;
+    match ts_to_rs::external_types::load_types_json(&json) {
+        Ok(reg) => {
+            eprintln!("Loaded external types from {}", types_json.display());
+            Some(reg)
+        }
+        Err(e) => {
+            eprintln!("Warning: failed to load {}: {e}", types_json.display());
+            None
+        }
+    }
+}
+
+// ===== Docker / resolve-types =====
 
 /// Resolves external type definitions by running tsc via Docker.
 fn resolve_types(tsconfig: &Path, output: Option<&Path>) -> Result<()> {
@@ -166,250 +379,5 @@ fn resolve_types(tsconfig: &Path, output: Option<&Path>) -> Result<()> {
         .with_context(|| format!("failed to write: {}", output_path.display()))?;
 
     eprintln!("Wrote {}", output_path.display());
-    Ok(())
-}
-
-/// Loads external types from `.ts_to_rs/types.json` if it exists in the input directory.
-fn load_external_types_json(input_dir: &Path) -> Option<TypeRegistry> {
-    let types_json = input_dir.join(".ts_to_rs/types.json");
-    if !types_json.exists() {
-        return None;
-    }
-    let json = fs::read_to_string(&types_json).ok()?;
-    match ts_to_rs::external_types::load_types_json(&json) {
-        Ok(reg) => {
-            eprintln!("Loaded external types from {}", types_json.display());
-            Some(reg)
-        }
-        Err(e) => {
-            eprintln!("Warning: failed to load {}: {e}", types_json.display());
-            None
-        }
-    }
-}
-
-/// Runs `rustfmt` on the given files. Prints a warning and continues if `rustfmt` is not available.
-fn run_rustfmt(paths: &[PathBuf]) {
-    if paths.is_empty() {
-        return;
-    }
-
-    let result = Command::new("rustfmt").args(paths).status();
-
-    match result {
-        Ok(status) if status.success() => {}
-        Ok(status) => {
-            eprintln!("Warning: rustfmt exited with status {status}; output may not be formatted");
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            eprintln!("Warning: rustfmt not found; output will not be formatted");
-        }
-        Err(e) => {
-            eprintln!("Warning: failed to run rustfmt: {e}; output may not be formatted");
-        }
-    }
-}
-
-/// Builds a base registry from built-in types and optional external types.json.
-fn build_base_registry(input_dir: &Path, use_builtin_types: bool) -> TypeRegistry {
-    let mut registry = if use_builtin_types {
-        ts_to_rs::external_types::load_builtin_types().unwrap_or_default()
-    } else {
-        TypeRegistry::new()
-    };
-
-    // Auto-detect .ts_to_rs/types.json
-    if let Some(external) = load_external_types_json(input_dir) {
-        registry.merge(&external);
-    }
-
-    registry
-}
-
-/// Transpiles a single file in collecting mode, returning unsupported syntax entries.
-fn transpile_file_collecting(
-    input: &Path,
-    output: Option<&Path>,
-    use_builtin_types: bool,
-) -> Result<Vec<UnsupportedSyntax>> {
-    let ts_source = fs::read_to_string(input)
-        .with_context(|| format!("failed to read input file: {}", input.display()))?;
-
-    let input_dir = input.parent().unwrap_or(Path::new("."));
-    let registry = build_base_registry(input_dir, use_builtin_types);
-
-    let (rs_source, unsupported) =
-        ts_to_rs::transpile_collecting_with_registry(&ts_source, &registry)
-            .with_context(|| format!("failed to transpile: {}", input.display()))?;
-
-    let output_path = output
-        .map(PathBuf::from)
-        .unwrap_or_else(|| input.with_extension("rs"));
-
-    fs::write(&output_path, &rs_source)
-        .with_context(|| format!("failed to write output file: {}", output_path.display()))?;
-
-    run_rustfmt(std::slice::from_ref(&output_path));
-
-    eprintln!("Wrote {}", output_path.display());
-
-    let unsupported = unsupported
-        .into_iter()
-        .map(|u| UnsupportedSyntax {
-            location: format!("{}:{}", input.display(), u.location),
-            ..u
-        })
-        .collect();
-
-    Ok(unsupported)
-}
-
-/// Transpiles a single TypeScript file to Rust.
-fn transpile_file(input: &Path, output: Option<&Path>, use_builtin_types: bool) -> Result<()> {
-    let ts_source = fs::read_to_string(input)
-        .with_context(|| format!("failed to read input file: {}", input.display()))?;
-
-    let input_dir = input.parent().unwrap_or(Path::new("."));
-    let registry = build_base_registry(input_dir, use_builtin_types);
-
-    let rs_source = ts_to_rs::transpile_with_registry(&ts_source, &registry)
-        .with_context(|| format!("failed to transpile: {}", input.display()))?;
-
-    let output_path = output
-        .map(PathBuf::from)
-        .unwrap_or_else(|| input.with_extension("rs"));
-
-    fs::write(&output_path, &rs_source)
-        .with_context(|| format!("failed to write output file: {}", output_path.display()))?;
-
-    run_rustfmt(std::slice::from_ref(&output_path));
-
-    eprintln!("Wrote {}", output_path.display());
-    Ok(())
-}
-
-/// Shared directory transpilation infrastructure: pre-scan, build registry, transpile, generate mod.rs.
-///
-/// The `transpile_file` callback receives `(ts_source, registry, current_file_dir)` and returns
-/// `(rs_source, Vec<UnsupportedSyntax>)`. For default mode, unsupported vec is empty.
-fn transpile_directory_common<F>(
-    input_dir: &Path,
-    output: Option<&Path>,
-    use_builtin_types: bool,
-    transpile_file: F,
-) -> Result<Vec<UnsupportedSyntax>>
-where
-    F: Fn(&str, &TypeRegistry, Option<&str>) -> Result<(String, Vec<UnsupportedSyntax>)>,
-{
-    let ts_files = directory::collect_ts_files(input_dir)?;
-    directory::validate_has_ts_files(&ts_files, input_dir)?;
-
-    let output_dir = output
-        .map(PathBuf::from)
-        .unwrap_or_else(|| directory::default_output_dir(input_dir));
-
-    // Pass 1: read all files and build shared registry
-    let mut file_sources = Vec::new();
-    for ts_path in &ts_files {
-        let ts_source = fs::read_to_string(ts_path)
-            .with_context(|| format!("failed to read: {}", ts_path.display()))?;
-        file_sources.push((ts_path.clone(), ts_source));
-    }
-
-    let source_strs: Vec<&str> = file_sources.iter().map(|(_, s)| s.as_str()).collect();
-    let mut shared_registry = ts_to_rs::build_shared_registry(&source_strs);
-
-    // Merge base registry (built-in types + optional types.json), lowest priority
-    let base_registry = build_base_registry(input_dir, use_builtin_types);
-    let mut combined = base_registry;
-    combined.merge(&shared_registry);
-    shared_registry = combined;
-
-    // Pass 2: transpile each file
-    let mut all_unsupported = Vec::new();
-    let mut rs_paths = Vec::new();
-
-    for (ts_path, ts_source) in &file_sources {
-        let rs_path = directory::compute_output_path(ts_path, input_dir, &output_dir)?;
-
-        // Compute the file's directory relative to the input root (for import path resolution)
-        let current_file_dir = ts_path
-            .parent()
-            .and_then(|p| p.strip_prefix(input_dir).ok())
-            .and_then(|p| p.to_str())
-            .filter(|s| !s.is_empty());
-
-        let (rs_source, unsupported) =
-            transpile_file(ts_source, &shared_registry, current_file_dir)
-                .with_context(|| format!("failed to transpile: {}", ts_path.display()))?;
-
-        if let Some(parent) = rs_path.parent() {
-            fs::create_dir_all(parent)
-                .with_context(|| format!("failed to create directory: {}", parent.display()))?;
-        }
-
-        fs::write(&rs_path, &rs_source)
-            .with_context(|| format!("failed to write: {}", rs_path.display()))?;
-
-        eprintln!("Wrote {}", rs_path.display());
-        rs_paths.push(rs_path);
-
-        for u in unsupported {
-            all_unsupported.push(UnsupportedSyntax {
-                location: format!("{}:{}", ts_path.display(), u.location),
-                ..u
-            });
-        }
-    }
-
-    // Generate mod.rs files
-    let output_dirs = directory::collect_output_dirs(&output_dir)?;
-    for dir in &output_dirs {
-        if let Some(content) = directory::generate_mod_rs(dir)? {
-            let mod_rs_path = dir.join("mod.rs");
-            fs::write(&mod_rs_path, &content)
-                .with_context(|| format!("failed to write: {}", mod_rs_path.display()))?;
-            eprintln!("Wrote {}", mod_rs_path.display());
-            rs_paths.push(mod_rs_path);
-        }
-    }
-
-    run_rustfmt(&rs_paths);
-    eprintln!("Converted {} file(s)", ts_files.len());
-
-    Ok(all_unsupported)
-}
-
-/// Transpiles all `.ts` files in a directory in collecting mode, returning unsupported syntax.
-fn transpile_directory_collecting(
-    input_dir: &Path,
-    output: Option<&Path>,
-    use_builtin_types: bool,
-) -> Result<Vec<UnsupportedSyntax>> {
-    transpile_directory_common(
-        input_dir,
-        output,
-        use_builtin_types,
-        |source, reg, file_dir| {
-            ts_to_rs::transpile_collecting_with_registry_and_path(source, reg, file_dir)
-        },
-    )
-}
-
-/// Transpiles all `.ts` files in a directory to Rust (default mode — errors on unsupported).
-fn transpile_directory(
-    input_dir: &Path,
-    output: Option<&Path>,
-    use_builtin_types: bool,
-) -> Result<()> {
-    transpile_directory_common(
-        input_dir,
-        output,
-        use_builtin_types,
-        |source, reg, file_dir| {
-            let rs = ts_to_rs::transpile_with_registry_and_path(source, reg, file_dir)?;
-            Ok((rs, vec![]))
-        },
-    )?;
     Ok(())
 }

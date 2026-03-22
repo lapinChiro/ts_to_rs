@@ -316,4 +316,65 @@ mod tests {
         let output = transpile_pipeline(input).unwrap();
         assert_eq!(output.files[0].path, PathBuf::from("src/foo.rs"));
     }
+
+    // ===== find_common_root tests =====
+
+    #[test]
+    fn test_find_common_root_empty_files() {
+        let parsed = ParsedFiles { files: vec![] };
+        assert_eq!(find_common_root(&parsed), PathBuf::new());
+    }
+
+    #[test]
+    fn test_find_common_root_single_file() {
+        let parsed = parse_files(vec![(
+            PathBuf::from("src/foo.ts"),
+            "const x = 1;".to_string(),
+        )])
+        .unwrap();
+        assert_eq!(find_common_root(&parsed), PathBuf::from("src"));
+    }
+
+    #[test]
+    fn test_find_common_root_single_file_no_parent() {
+        let parsed =
+            parse_files(vec![(PathBuf::from("foo.ts"), "const x = 1;".to_string())]).unwrap();
+        assert_eq!(find_common_root(&parsed), PathBuf::from(""));
+    }
+
+    #[test]
+    fn test_find_common_root_same_directory() {
+        let parsed = parse_files(vec![
+            (PathBuf::from("src/a.ts"), "const a = 1;".to_string()),
+            (PathBuf::from("src/b.ts"), "const b = 2;".to_string()),
+        ])
+        .unwrap();
+        assert_eq!(find_common_root(&parsed), PathBuf::from("src"));
+    }
+
+    #[test]
+    fn test_find_common_root_nested_directories() {
+        let parsed = parse_files(vec![
+            (PathBuf::from("src/a/x.ts"), "const x = 1;".to_string()),
+            (PathBuf::from("src/b/y.ts"), "const y = 2;".to_string()),
+        ])
+        .unwrap();
+        assert_eq!(find_common_root(&parsed), PathBuf::from("src"));
+    }
+
+    #[test]
+    fn test_find_common_root_deeply_nested() {
+        let parsed = parse_files(vec![
+            (
+                PathBuf::from("project/src/a/x.ts"),
+                "const x = 1;".to_string(),
+            ),
+            (
+                PathBuf::from("project/src/b/c/y.ts"),
+                "const y = 2;".to_string(),
+            ),
+        ])
+        .unwrap();
+        assert_eq!(find_common_root(&parsed), PathBuf::from("project/src"));
+    }
 }

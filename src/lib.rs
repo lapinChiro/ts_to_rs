@@ -16,7 +16,6 @@ use anyhow::Result;
 use serde::Serialize;
 
 use crate::pipeline::{NullModuleResolver, TranspileInput};
-use crate::registry::TypeRegistry;
 use crate::transformer::UnsupportedSyntaxError;
 
 /// A report entry for an unsupported TypeScript syntax encountered during transformation.
@@ -28,21 +27,6 @@ pub struct UnsupportedSyntax {
     pub location: String,
 }
 
-/// Build a shared [`TypeRegistry`] from multiple TypeScript sources.
-///
-/// Each source is parsed independently; sources that fail to parse are silently skipped.
-/// The resulting registry contains type information from all successfully parsed sources.
-pub fn build_shared_registry(sources: &[&str]) -> TypeRegistry {
-    let mut shared = TypeRegistry::new();
-    for source in sources {
-        if let Ok(module) = parser::parse_typescript(source) {
-            let reg = registry::build_registry(&module);
-            shared.merge(&reg);
-        }
-    }
-    shared
-}
-
 /// Transpiles TypeScript source code to Rust source code.
 ///
 /// Uses the unified pipeline. Any unsupported syntax causes an error.
@@ -51,52 +35,8 @@ pub fn build_shared_registry(sources: &[&str]) -> TypeRegistry {
 ///
 /// Returns an error if parsing or transformation fails, or if unsupported syntax is encountered.
 pub fn transpile(ts_source: &str) -> Result<String> {
-    let input = TranspileInput {
-        files: vec![(std::path::PathBuf::from("input.ts"), ts_source.to_string())],
-        builtin_types: None,
-        module_resolver: Box::new(NullModuleResolver),
-    };
-    let output = pipeline::transpile_pipeline(input)?;
-    let file = output.files.into_iter().next().unwrap();
-    if let Some(first) = file.unsupported.first() {
-        anyhow::bail!(
-            "unsupported syntax: {} at byte {}",
-            first.kind,
-            first.byte_pos
-        );
-    }
-    Ok(file.rust_source)
-}
-
-/// Transpiles TypeScript source code to Rust source code using a pre-built [`TypeRegistry`].
-///
-/// Used in directory mode where the registry is constructed from multiple files.
-///
-/// # Errors
-///
-/// Returns an error if parsing or transformation fails.
-pub fn transpile_with_registry(ts_source: &str, registry: &TypeRegistry) -> Result<String> {
-    transpile_with_registry_and_path(ts_source, registry, None)
-}
-
-/// Like [`transpile_with_registry`] but with file path context for import resolution.
-///
-/// `current_file_dir` is the directory of the source file relative to the crate root
-/// (e.g., `Some("adapter/bun")` for `adapter/bun/server.ts`).
-///
-/// Any unsupported syntax causes an error (strict mode).
-pub fn transpile_with_registry_and_path(
-    ts_source: &str,
-    registry: &TypeRegistry,
-    _current_file_dir: Option<&str>,
-) -> Result<String> {
-    let input = TranspileInput {
-        files: vec![(std::path::PathBuf::from("input.ts"), ts_source.to_string())],
-        builtin_types: Some(registry.clone()),
-        module_resolver: Box::new(NullModuleResolver),
-    };
-    let output = pipeline::transpile_pipeline(input)?;
-    let file = output.files.into_iter().next().unwrap();
+    let output = run_single_file_pipeline(ts_source, None)?;
+    let file = extract_single_output(output)?;
     if let Some(first) = file.unsupported.first() {
         anyhow::bail!(
             "unsupported syntax: {} at byte {}",
@@ -115,34 +55,8 @@ pub fn transpile_with_registry_and_path(
 ///
 /// Returns an error if parsing fails. Unsupported syntax errors are collected, not propagated.
 pub fn transpile_collecting(ts_source: &str) -> Result<(String, Vec<UnsupportedSyntax>)> {
-    transpile_collecting_with_registry(ts_source, &TypeRegistry::new())
-}
-
-/// Like [`transpile_collecting`] but with a pre-built [`TypeRegistry`].
-///
-/// # Errors
-///
-/// Returns an error if parsing fails. Unsupported syntax errors are collected, not propagated.
-pub fn transpile_collecting_with_registry(
-    ts_source: &str,
-    registry: &TypeRegistry,
-) -> Result<(String, Vec<UnsupportedSyntax>)> {
-    transpile_collecting_with_registry_and_path(ts_source, registry, None)
-}
-
-/// Like [`transpile_collecting_with_registry`] but with file path context for import resolution.
-pub fn transpile_collecting_with_registry_and_path(
-    ts_source: &str,
-    registry: &TypeRegistry,
-    _current_file_dir: Option<&str>,
-) -> Result<(String, Vec<UnsupportedSyntax>)> {
-    let input = TranspileInput {
-        files: vec![(std::path::PathBuf::from("input.ts"), ts_source.to_string())],
-        builtin_types: Some(registry.clone()),
-        module_resolver: Box::new(NullModuleResolver),
-    };
-    let output = pipeline::transpile_pipeline(input)?;
-    let file = output.files.into_iter().next().unwrap();
+    let output = run_single_file_pipeline(ts_source, None)?;
+    let file = extract_single_output(output)?;
     let unsupported = file
         .unsupported
         .into_iter()
@@ -152,7 +66,7 @@ pub fn transpile_collecting_with_registry_and_path(
 }
 
 /// Resolves an [`UnsupportedSyntaxError`] into an [`UnsupportedSyntax`] with line/col info.
-fn resolve_unsupported(source: &str, raw: UnsupportedSyntaxError) -> UnsupportedSyntax {
+pub fn resolve_unsupported(source: &str, raw: UnsupportedSyntaxError) -> UnsupportedSyntax {
     let (line, col) = byte_pos_to_line_col(source, raw.byte_pos);
     UnsupportedSyntax {
         kind: raw.kind,
@@ -160,8 +74,28 @@ fn resolve_unsupported(source: &str, raw: UnsupportedSyntaxError) -> Unsupported
     }
 }
 
+/// Runs `rustfmt` on the given files. Prints a warning and continues if `rustfmt` is not available.
+pub fn run_rustfmt(paths: &[std::path::PathBuf]) {
+    if paths.is_empty() {
+        return;
+    }
+    let result = std::process::Command::new("rustfmt").args(paths).status();
+    match result {
+        Ok(status) if status.success() => {}
+        Ok(status) => {
+            eprintln!("Warning: rustfmt exited with status {status}; output may not be formatted");
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            eprintln!("Warning: rustfmt not found; output will not be formatted");
+        }
+        Err(e) => {
+            eprintln!("Warning: failed to run rustfmt: {e}; output may not be formatted");
+        }
+    }
+}
+
 /// Converts a SWC `BytePos` (1-based byte position) to a 1-based (line, col) pair.
-fn byte_pos_to_line_col(source: &str, byte_pos: u32) -> (usize, usize) {
+pub fn byte_pos_to_line_col(source: &str, byte_pos: u32) -> (usize, usize) {
     if byte_pos == 0 {
         return (1, 1);
     }
@@ -180,6 +114,30 @@ fn byte_pos_to_line_col(source: &str, byte_pos: u32) -> (usize, usize) {
         }
     }
     (line, col)
+}
+
+// ===== Internal helpers =====
+
+/// Runs the unified pipeline for a single source file.
+fn run_single_file_pipeline(
+    ts_source: &str,
+    builtin_types: Option<registry::TypeRegistry>,
+) -> Result<pipeline::TranspileOutput> {
+    let input = TranspileInput {
+        files: vec![(std::path::PathBuf::from("input.ts"), ts_source.to_string())],
+        builtin_types,
+        module_resolver: Box::new(NullModuleResolver),
+    };
+    pipeline::transpile_pipeline(input)
+}
+
+/// Extracts the single file output from a pipeline result.
+fn extract_single_output(output: pipeline::TranspileOutput) -> Result<pipeline::FileOutput> {
+    output
+        .files
+        .into_iter()
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("pipeline returned no output files"))
 }
 
 #[cfg(test)]
@@ -206,44 +164,6 @@ mod tests {
     #[test]
     fn test_byte_pos_to_line_col_zero_returns_1_1() {
         assert_eq!(byte_pos_to_line_col("hello", 0), (1, 1));
-    }
-
-    #[test]
-    fn test_build_shared_registry_single_source_registers_type() {
-        let sources = vec!["interface Foo { x: string; }"];
-        let reg = build_shared_registry(&sources);
-        assert!(reg.get("Foo").is_some(), "Foo should be in the registry");
-    }
-
-    #[test]
-    fn test_build_shared_registry_multiple_sources_cross_reference() {
-        let sources = vec![
-            "interface Foo { x: string; }",
-            "interface Bar { y: number; }",
-        ];
-        let reg = build_shared_registry(&sources);
-        assert!(reg.get("Foo").is_some(), "Foo should be in the registry");
-        assert!(reg.get("Bar").is_some(), "Bar should be in the registry");
-    }
-
-    #[test]
-    fn test_build_shared_registry_invalid_source_skipped() {
-        let sources = vec!["{{{invalid", "interface Valid { x: string; }"];
-        let reg = build_shared_registry(&sources);
-        assert!(
-            reg.get("Valid").is_some(),
-            "Valid should be in the registry despite invalid source"
-        );
-    }
-
-    #[test]
-    fn test_build_shared_registry_empty_sources_returns_empty() {
-        let sources: Vec<&str> = vec![];
-        let reg = build_shared_registry(&sources);
-        assert!(
-            reg.get("Foo").is_none(),
-            "empty registry should not contain any types"
-        );
     }
 
     #[test]
@@ -285,8 +205,6 @@ export default 42;
 
     #[test]
     fn test_transpile_collecting_transformer_internal_error_collected() {
-        // Unsupported syntax (tagged template) triggers an error inside convert_expr,
-        // which is a transformer-internal error (not UnsupportedSyntaxError).
         let source = "function foo() { const x = tag`hello`; }";
         let result = transpile_collecting(source);
         assert!(result.is_ok(), "should not be a fatal error: {result:?}");
@@ -299,7 +217,6 @@ export default 42;
 
     #[test]
     fn test_transpile_collecting_mixed_supported_and_internal_error() {
-        // interface is convertible, function with unsupported syntax is not
         let source = r#"
 interface Foo { name: string; }
 function bar() { const x = tag`hello`; }
@@ -319,7 +236,6 @@ function bar() { const x = tag`hello`; }
 
     #[test]
     fn test_transpile_collecting_default_param_converts_successfully() {
-        // Default parameter with literal value should now convert successfully
         let source = "function foo(x: number = 0) { return x; }";
         let (output, unsupported) = transpile_collecting(source).unwrap();
         assert!(
@@ -334,7 +250,6 @@ function bar() { const x = tag`hello`; }
 
     #[test]
     fn test_transpile_collecting_non_nullable_union_param_generates_enum() {
-        // Non-nullable union type generates an enum and references it
         let source = "export function foo(x: string | number): void { }";
         let (output, _unsupported) = transpile_collecting(source).unwrap();
         assert!(
@@ -353,7 +268,6 @@ function bar() { const x = tag`hello`; }
 
     #[test]
     fn test_transpile_collecting_mixed_param_types_union_generates_enum() {
-        // Supported param type + non-nullable union param type in the same function
         let source = "export function bar(a: string, b: string | number): void { }";
         let (output, _unsupported) = transpile_collecting(source).unwrap();
         assert!(
@@ -372,7 +286,6 @@ function bar() { const x = tag`hello`; }
 
     #[test]
     fn test_transpile_collecting_non_nullable_union_return_type_generates_enum() {
-        // Non-nullable union return type generates an enum
         let source = "export function baz(x: number): string | number { return x; }";
         let (output, _unsupported) = transpile_collecting(source).unwrap();
         assert!(
@@ -387,8 +300,6 @@ function bar() { const x = tag`hello`; }
 
     #[test]
     fn test_transpile_collecting_non_nullable_union_no_unsupported_report() {
-        // Non-nullable union is now supported (fallback to first type), so it
-        // should not appear in the unsupported report
         let source = "export function foo(x: string | number): void { }";
         let (output, unsupported) = transpile_collecting(source).unwrap();
         assert!(output.contains("fn foo"), "function should be converted");
@@ -400,7 +311,6 @@ function bar() { const x = tag`hello`; }
 
     #[test]
     fn test_transpile_default_non_nullable_union_param_succeeds() {
-        // Non-nullable union is now supported, so strict mode should succeed
         let source = "function foo(x: string | number): void { }";
         let result = transpile(source);
         assert!(
@@ -412,7 +322,6 @@ function bar() { const x = tag`hello`; }
 
     #[test]
     fn test_transpile_collecting_parse_error_still_returns_err() {
-        // Invalid TypeScript syntax should still be a fatal error
         let source = "function {{{";
         let result = transpile_collecting(source);
         assert!(result.is_err(), "parse errors should still propagate");
@@ -420,7 +329,6 @@ function bar() { const x = tag`hello`; }
 
     #[test]
     fn test_transpile_arrow_untyped_param_falls_back_to_any() {
-        // Arrow function with untyped param should fallback to Any (not error)
         let source = "export const f = (c) => c;";
         let result = transpile(source);
         assert!(result.is_ok(), "untyped arrow param should fallback to Any");
