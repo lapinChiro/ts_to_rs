@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use crate::ir::RustType;
 use crate::registry::TypeRegistry;
-use crate::UnsupportedSyntax;
+use crate::transformer::UnsupportedSyntaxError;
 
 /// A collection of parsed TypeScript files.
 ///
@@ -65,8 +65,11 @@ pub struct TranspileInput {
 pub struct TranspileOutput {
     /// Per-file transpilation results.
     pub files: Vec<FileOutput>,
-    // module_graph: ModuleGraph — will be added in P8
-    // synthetic_types: SyntheticTypeRegistry — will be added in P8
+    /// Module graph (cross-file dependency info). Used by OutputWriter for mod.rs generation.
+    pub module_graph: super::ModuleGraph,
+    /// Synthetic type items (union enums, any-enums, inline structs).
+    /// Used by OutputWriter for synthetic type placement.
+    pub synthetic_items: Vec<crate::ir::Item>,
 }
 
 /// The result of type resolution for an expression or variable.
@@ -89,5 +92,5 @@ pub struct FileOutput {
     /// Generated Rust source code.
     pub rust_source: String,
     /// Unsupported syntax entries encountered during transformation.
-    pub unsupported: Vec<UnsupportedSyntax>,
+    pub unsupported: Vec<UnsupportedSyntaxError>,
 }

@@ -43,30 +43,64 @@ pub fn parse_files(files: Vec<(std::path::PathBuf, String)>) -> Result<ParsedFil
     Ok(ParsedFiles { files: parsed })
 }
 
-/// Unified transpilation pipeline (bridge implementation).
+/// 統一変換パイプライン。全モードで同一のコードパスを通る。
 ///
-/// Currently delegates to the existing `transpile_collecting_with_registry` for each file.
-/// This will be replaced with the full multi-pass pipeline in P2-P8.
+/// Pass 0: Parse → Pass 1: ModuleGraph → Pass 2: TypeCollection →
+/// Pass 3: TypeResolution → Pass 4-5: Transform + Generate
 ///
 /// # Errors
 ///
 /// Returns an error if parsing or transformation fails.
 pub fn transpile_pipeline(input: TranspileInput) -> Result<TranspileOutput> {
+    // Pass 0: Parse
     let parsed = parse_files(input.files)?;
-    let builtin_registry = input.builtin_types.unwrap_or_default();
 
-    // Build shared registry from all files (existing Pass 1 logic)
-    let source_strs: Vec<&str> = parsed.files.iter().map(|f| f.source.as_str()).collect();
-    let mut shared_registry = crate::build_shared_registry(&source_strs);
-    shared_registry.merge(&builtin_registry);
+    // Pass 1: Module Graph
+    let root_dir = find_common_root(&parsed);
+    let module_graph =
+        ModuleGraphBuilder::new(&parsed, &*input.module_resolver, &root_dir).build();
 
-    let mut file_outputs = Vec::new();
+    // Pass 2: Type Collection (shared registry from all files)
+    let mut shared_registry = input.builtin_types.unwrap_or_default();
     for file in &parsed.files {
-        // Bridge: delegate to existing logic.
-        // Note: current_file_dir is not computed here — directory mode import
-        // resolution will be handled properly by ModuleGraph in P2.
-        let (rust_source, unsupported) =
-            crate::transpile_collecting_with_registry(&file.source, &shared_registry)?;
+        let file_registry = crate::registry::build_registry(&file.module);
+        shared_registry.merge(&file_registry);
+    }
+
+    // Pass 3: Type Resolution (all files first, so SyntheticTypeRegistry becomes immutable before Transform)
+    let mut synthetic = SyntheticTypeRegistry::new();
+    let mut type_resolutions = Vec::with_capacity(parsed.files.len());
+    for file in &parsed.files {
+        let type_resolution = {
+            let mut resolver =
+                type_resolver::TypeResolver::new(&shared_registry, &mut synthetic, &module_graph);
+            resolver.resolve_file(file)
+        };
+        type_resolutions.push(type_resolution);
+    }
+
+    // Pass 4-5: Transformation + Code Generation (per file)
+    let mut file_outputs = Vec::new();
+    for (file, type_resolution) in parsed.files.iter().zip(type_resolutions.iter()) {
+        let tctx = crate::transformer::context::TransformContext::new(
+            &module_graph,
+            &shared_registry,
+            type_resolution,
+            &file.path,
+        );
+        let mut file_synthetic = SyntheticTypeRegistry::new();
+        let (items, unsupported) = crate::transformer::transform_module_collecting_with_path(
+            &file.module,
+            &tctx,
+            &shared_registry,
+            tctx.file_path.parent().and_then(|p| p.to_str()),
+            &mut file_synthetic,
+        )?;
+
+        // Merge per-file synthetic types
+        synthetic.merge(file_synthetic);
+
+        let rust_source = crate::generator::generate(&items);
 
         file_outputs.push(FileOutput {
             path: file.path.with_extension("rs"),
@@ -75,11 +109,61 @@ pub fn transpile_pipeline(input: TranspileInput) -> Result<TranspileOutput> {
         });
     }
 
+    let synthetic_items = synthetic.into_items();
+
     Ok(TranspileOutput {
         files: file_outputs,
-        // module_graph and synthetic_types will be added in P8
-        // when the full pipeline is assembled.
+        module_graph,
+        synthetic_items,
     })
+}
+
+/// 単一ファイルの簡易 API。
+///
+/// 内部で `TranspileInput` を構築し、統一パイプラインを呼ぶ。
+///
+/// # Errors
+///
+/// Returns an error if parsing or transformation fails.
+pub fn transpile_single(source: &str) -> Result<String> {
+    let input = TranspileInput {
+        files: vec![(std::path::PathBuf::from("input.ts"), source.to_string())],
+        builtin_types: None,
+        module_resolver: Box::new(NullModuleResolver),
+    };
+    let output = transpile_pipeline(input)?;
+    Ok(output
+        .files
+        .into_iter()
+        .next()
+        .map(|f| f.rust_source)
+        .unwrap_or_default())
+}
+
+/// ファイルリストの共通ルートディレクトリを求める。
+fn find_common_root(parsed: &ParsedFiles) -> std::path::PathBuf {
+    if parsed.files.is_empty() {
+        return std::path::PathBuf::new();
+    }
+    if parsed.files.len() == 1 {
+        return parsed.files[0]
+            .path
+            .parent()
+            .unwrap_or(std::path::Path::new(""))
+            .to_path_buf();
+    }
+    // 全ファイルの共通 prefix を求める
+    let first = &parsed.files[0].path;
+    let mut common = first.parent().unwrap_or(std::path::Path::new("")).to_path_buf();
+    for file in &parsed.files[1..] {
+        while !file.path.starts_with(&common) {
+            common = match common.parent() {
+                Some(p) => p.to_path_buf(),
+                None => return std::path::PathBuf::new(),
+            };
+        }
+    }
+    common
 }
 
 #[cfg(test)]
