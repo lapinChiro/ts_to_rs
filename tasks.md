@@ -20,12 +20,10 @@
 **main.rs:** `TranspileInput` + `transpile_pipeline` + `OutputWriter` 直接使用。旧 API 依存なし。
 **Transformer:** AnyTypeAnalyzer 統合済み。to_pascal_case 集約済み。SyntheticTypeRegistry ソート修正済み。
 
-**残存する実装不足（fallback が残っている箇所）:**
-- ExprContext: expected_type の伝搬に使用。TypeResolver の expected_types カバレッジが不十分なため ExprContext がフォールバックとして必要
-- TypeEnv narrowing: スコープベースの narrowing 管理。TypeResolver の narrowing_events カバレッジが不十分
-- resolve_expr_type_heuristic: 式の型解決。TypeResolver の expr_types カバレッジが不十分
+**残存する実装不足:**
+- ExprContext / heuristic / TypeEnv narrowing: TypeResolver の移行が未完了。3つの runtime fallback が並行して存在（D-TR-1 で調査完了。`report/d-tr1-type-resolver-coverage-gaps.md` 参照）
 - convert_relative_path_to_crate_path: import パス解決。ModuleGraph.resolve_import が未使用
-- tctx + reg 二重パラメータ: 105 関数に残存
+- tctx + reg 二重パラメータ: 112 関数に残存
 - files.clone(): main.rs ディレクトリモードで不可避
 
 ## タスク一覧
@@ -36,48 +34,58 @@
 
 ### Phase D: 残作業
 
-**実行順序: TypeResolver 改善 → fallback 削除 → パラメータ統合 → 構造改善**
+**実施順序と依存関係:**
 
-#### D-TR: TypeResolver カバレッジ改善（D2-D4 の前提）
-
-TypeResolver のカバレッジが不十分なために ExprContext / TypeEnv narrowing / heuristic を fallback として残している。fallback は実装不足であり正当な理由ではない。TypeResolver を改善し、fallback を不要にする。
-
-- [ ] **D-TR-1**: TypeResolver カバレッジギャップ調査
-  - heuristic 無効化時に失敗したテストケースの全一覧を作成
-  - 各失敗の原因を分類（expr_types 未登録 / expected_types 未登録 / narrowing_events 未登録）
-  - TypeResolver が対応すべき AST パターンの一覧を作成
-- [ ] **D-TR-2**: TypeResolver の expr_types カバレッジ改善
-  - D-TR-1 で特定した未対応パターンを TypeResolver に追加
-  - テスト追加: 各パターンに対して TypeResolver が Known を返すことを検証
-- [ ] **D-TR-3**: TypeResolver の expected_types カバレッジ改善
-  - Option<T> の inner type を expected_type として設定するロジックを追加
-  - return 文以外の expected_type 伝搬（変数宣言、関数引数等）を改善
-- [ ] **D-TR-4**: TypeResolver の narrowing_events カバレッジ改善
-  - TypeEnv の push_scope/pop_scope/insert に対応する narrowing_events を生成
-  - compound narrowing（nested if/switch）のカバレッジを確認
-- [ ] **D-TR-verify**: heuristic 無効化で全テスト GREEN を確認
-
-#### D2-D4: fallback 削除（D-TR 完了後）
-
-- [ ] **D2**: ExprContext 削除 — D-TR-3 完了後、ExprContext struct と全参照箇所を削除。`convert_expr` の expected は `tctx.type_resolution.expected_type(span)` のみから取得
-- [ ] **D3**: TypeEnv narrowing 削除 — D-TR-4 完了後、TypeEnv の push_scope/pop_scope/narrowing 関連コードを削除。TypeEnv は変数型追跡（insert/get）の用途のみ残す
-- [ ] **D4**: resolve_expr_type_heuristic 削除 — D-TR-2 完了後、heuristic 関数を削除。`resolve_expr_type` は `tctx.type_resolution.expr_type(span)` のみから取得
+```
+D1 (import 解決)          ─┐
+D6 (files.clone 解消)     ─┼─→ 型解決統一と独立。先に実施
+                           │
+D-TR〜D4 (型解決の統一)   ─┤
+  Phase 1: TypeResolver    │
+  Phase 2: ExprContext 削除│
+  Phase 3: Heuristic 削除  │
+  Phase 4: TypeEnv 簡素化  │
+                           │
+D5 (reg パラメータ削除)   ─┘─→ Phase 2 完了後が効率的（シグネチャ安定後）
+```
 
 #### D1: import 解決の ModuleGraph 統合
+
+型解決統一と無関係。先に片付ける。
 
 - [ ] **D1**: `convert_relative_path_to_crate_path` に ModuleGraph lookup + fallback パターンを適用
   - TransformContext の module_graph を使い `resolve_import()` を先に試す
   - 解決できない場合（NullModuleResolver 等）のみ `convert_relative_path_to_crate_path` にフォールバック
 
-#### D5: tctx + reg 二重パラメータ統合
-
-- [ ] **D5**: 105 関数の `reg: &TypeRegistry` を削除し `tctx.type_registry` に統一
-  - 分析結果: 14 ファイル、105 関数。全箇所で `reg == tctx.type_registry`
-  - `/large-scale-refactor` スキルに従う
-
 #### D6: files.clone() 解消
 
+型解決統一と無関係。先に片付ける。
+
 - [ ] **D6**: `FileOutput` に `source: String` フィールドを追加し `files.clone()` を解消
+
+#### D-TR 〜 D4: 型解決の統一
+
+**詳細計画: `tasks.type-resolution-unification.md`（Phase 1〜4）**
+
+根本的な設計問題: TypeResolver（pre-pass）と runtime fallback（ExprContext / heuristic / TypeEnv narrowing）が同一機能を並行実装している。TypeResolver を完全化し、全 fallback を削除する。
+
+- [x] **D-TR-1**: TypeResolver カバレッジギャップ調査（`report/d-tr1-type-resolver-coverage-gaps.md`）
+  - heuristic 無効化: 50 テスト失敗（大半はテスト構造の問題。TypeResolver は heuristic のスーパーセット）
+  - ExprContext 無効化: 47 テスト失敗（TypeResolver の expected_types が 3 パターンのみで不完全）
+  - TypeEnv narrowing 無効化: 4 テスト失敗（TypeEnv 自体のユニットテストのみ。narrowing_events で完全カバー済み）
+- [ ] **Phase 1** (1-1〜1-12): TypeResolver expected_types 完全化 — `propagate_expected` で 13 パターンを追加
+- [ ] **Phase 2** (2-1〜2-5): ExprContext 削除 — `ctx: &ExprContext` パラメータ除去、Option unwrap は内部 override で処理
+- [ ] **Phase 3** (3-1〜3-5): Heuristic 削除 — `resolve_expr_type` の約 30 呼び出しを `FileTypeResolution.expr_type` に置換
+- [ ] **Phase 4** (4-1〜4-3): TypeEnv 簡素化 — narrowing 用 push_scope/pop_scope 削除、update() 削除
+
+#### D5: tctx + reg 二重パラメータ統合
+
+Phase 2（ExprContext 削除）で `ctx` パラメータが消えた後、シグネチャが安定した状態で実施する。Phase 2 より前に実施すると、シグネチャ変更が二度手間になる。
+
+- [ ] **D5**: 112 関数の `reg: &TypeRegistry` を削除し `tctx.type_registry` に統一
+  - 分析結果: 14 ファイル、112 関数。全箇所で `reg == tctx.type_registry`
+  - `/large-scale-refactor` スキルに従う
+  - **依存**: Phase 2 完了後
 
 ### Phase E: 最終検証
 
