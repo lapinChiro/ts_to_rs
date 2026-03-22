@@ -224,7 +224,7 @@ let tctx = TransformContext::new(&mg, &reg, &res, std::path::Path::new("test.ts"
 - [x] **B6**: `src/transformer/statements/tests.rs` 修正（73 箇所）
 - [x] **B7**: `src/transformer/expressions/tests.rs` 修正（305 箇所）
 - [x] **B-verify**: `cargo test --lib` 全 GREEN（1078 件）+ `cargo clippy --all-targets -- -D warnings` 0 + E2E(60)/integration(69)/compile(3) テストも全 GREEN
-- [ ] **B-commit**: `[WIP] P6: Phase B — テストコード tctx 対応`
+- [x] **B-commit**: `[WIP] P6: Phase B — テストコード tctx 対応`
 
 ### Phase B2: TctxFixture リファクタリング（DRY 改善）
 
@@ -294,7 +294,7 @@ let tctx = f.tctx();
 - [x] **B2-5**: `statements/tests.rs` — TctxFixture 定義 + 69 箇所修正（60空+9カスタム）。ヘルパー `convert_single_stmt`/`convert_stmts_with_env` は借用制約のためインラインのまま
 - [x] **B2-6**: `expressions/tests.rs` — TctxFixture 定義 + 305 箇所修正（263空+42カスタム）
 - [x] **B2-verify**: `cargo test --lib` 1078 GREEN + `cargo clippy --all-targets -- -D warnings` 0 + `cargo fmt` 通過
-- [ ] **B2-commit**: `[WIP] P6: Phase B2 — TctxFixture リファクタリング`
+- [x] **B2-commit**: `[WIP] P6: Phase B2 — TctxFixture リファクタリング`
 
 ### Phase C: FileTypeResolution lookup の実装
 
