@@ -207,10 +207,11 @@ impl<'a> TypeResolver<'a> {
                     ResolvedType::Unknown
                 };
 
-                // Set expected type for initializer
+                // Set expected type for initializer and propagate into compound expressions
                 if let (Some(ann_ty), Some(init)) = (&annotation_type, &decl.init) {
                     let init_span = Span::from_swc(init.span());
                     self.result.expected_types.insert(init_span, ann_ty.clone());
+                    self.propagate_expected(init, ann_ty);
                 }
 
                 // Record expression type for initializer
@@ -312,6 +313,19 @@ impl<'a> TypeResolver<'a> {
                         let span = Span::from_swc(init.span());
                         let ty = self.resolve_expr(init);
                         self.result.expr_types.insert(span, ty);
+                        // Set expected from type annotation and propagate
+                        if let Some(type_ann) = &prop.type_ann {
+                            if let Ok(ann_ty) = convert_ts_type(
+                                &type_ann.type_ann,
+                                self.synthetic,
+                                self.registry,
+                            ) {
+                                self.result
+                                    .expected_types
+                                    .insert(span, ann_ty.clone());
+                                self.propagate_expected(init, &ann_ty);
+                            }
+                        }
                     }
                 }
                 _ => {}
@@ -342,9 +356,10 @@ impl<'a> TypeResolver<'a> {
                     let ty = self.resolve_expr(arg);
                     self.result.expr_types.insert(span, ty);
 
-                    // Set expected type from function return type
-                    if let Some(return_ty) = &self.current_fn_return_type {
+                    // Set expected type from function return type and propagate
+                    if let Some(return_ty) = self.current_fn_return_type.clone() {
                         self.result.expected_types.insert(span, return_ty.clone());
+                        self.propagate_expected(arg, &return_ty);
                     }
                 }
             }
@@ -397,7 +412,20 @@ impl<'a> TypeResolver<'a> {
             ast::Stmt::Switch(switch_stmt) => {
                 let span = Span::from_swc(switch_stmt.discriminant.span());
                 let ty = self.resolve_expr(&switch_stmt.discriminant);
-                self.result.expr_types.insert(span, ty);
+                self.result.expr_types.insert(span, ty.clone());
+                // Propagate discriminant type to case test values (Named types only).
+                // String/F64 etc. are NOT propagated — string case values should remain
+                // as literal patterns, not get .to_string() added.
+                if let ResolvedType::Known(ref rust_ty @ RustType::Named { ref name, .. }) = ty {
+                    if self.registry.get(name).is_some() {
+                        for case in &switch_stmt.cases {
+                            if let Some(test) = &case.test {
+                                let test_span = Span::from_swc(test.span());
+                                self.result.expected_types.insert(test_span, rust_ty.clone());
+                            }
+                        }
+                    }
+                }
                 for case in &switch_stmt.cases {
                     for s in &case.cons {
                         self.visit_stmt(s);
@@ -563,6 +591,91 @@ impl<'a> TypeResolver<'a> {
         }
     }
 
+    // --- Expected type propagation ---
+
+    /// Propagates an expected type into compound expressions recursively.
+    ///
+    /// When a parent context provides an expected type (e.g., variable annotation,
+    /// return type, function parameter), this method sets expected types on child
+    /// expressions (object literal fields, array elements, ternary branches, etc.).
+    fn propagate_expected(&mut self, expr: &ast::Expr, expected: &RustType) {
+        match expr {
+            // P-1: Object literal + Named(struct) → set field types
+            ast::Expr::Object(obj) => {
+                if let RustType::Named { name, .. } = expected {
+                    if let Some(TypeDef::Struct { fields, .. }) = self.registry.get(name) {
+                        let fields = fields.clone();
+                        for prop in &obj.props {
+                            if let ast::PropOrSpread::Prop(prop) = prop {
+                                match prop.as_ref() {
+                                    ast::Prop::KeyValue(kv) => {
+                                        let key = extract_prop_name(&kv.key);
+                                        if let Some(field_ty) =
+                                            key.and_then(|k| fields.iter().find(|(n, _)| n == &k))
+                                        {
+                                            let span = Span::from_swc(kv.value.span());
+                                            self.result
+                                                .expected_types
+                                                .insert(span, field_ty.1.clone());
+                                            self.propagate_expected(&kv.value, &field_ty.1);
+                                        }
+                                    }
+                                    ast::Prop::Shorthand(ident) => {
+                                        let key = ident.sym.to_string();
+                                        if let Some(field_ty) =
+                                            fields.iter().find(|(n, _)| n == &key)
+                                        {
+                                            let span = Span::from_swc(ident.span);
+                                            self.result
+                                                .expected_types
+                                                .insert(span, field_ty.1.clone());
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            // P-3: Array literal + Vec<T> → set element type T
+            // P-4: Array literal + Tuple(T1, ...) → set positional types
+            ast::Expr::Array(arr) => match expected {
+                RustType::Vec(inner) => {
+                    for elem in arr.elems.iter().flatten() {
+                        let span = Span::from_swc(elem.expr.span());
+                        self.result.expected_types.insert(span, inner.as_ref().clone());
+                        self.propagate_expected(&elem.expr, inner);
+                    }
+                }
+                RustType::Tuple(types) => {
+                    for (elem, ty) in arr.elems.iter().flatten().zip(types.iter()) {
+                        let span = Span::from_swc(elem.expr.span());
+                        self.result.expected_types.insert(span, ty.clone());
+                        self.propagate_expected(&elem.expr, ty);
+                    }
+                }
+                _ => {}
+            },
+            // P-5: Paren expr → propagate to inner
+            ast::Expr::Paren(paren) => {
+                let span = Span::from_swc(paren.expr.span());
+                self.result.expected_types.insert(span, expected.clone());
+                self.propagate_expected(&paren.expr, expected);
+            }
+            // P-6: Cond (ternary) → propagate to both branches
+            ast::Expr::Cond(cond) => {
+                let cons_span = Span::from_swc(cond.cons.span());
+                self.result.expected_types.insert(cons_span, expected.clone());
+                self.propagate_expected(&cond.cons, expected);
+                let alt_span = Span::from_swc(cond.alt.span());
+                self.result.expected_types.insert(alt_span, expected.clone());
+                self.propagate_expected(&cond.alt, expected);
+            }
+            _ => {}
+        }
+    }
+
     // --- Expression type resolution ---
 
     fn resolve_expr(&mut self, expr: &ast::Expr) -> ResolvedType {
@@ -592,6 +705,13 @@ impl<'a> TypeResolver<'a> {
                 // Mark left side as mutable
                 if let Some(ast::SimpleAssignTarget::Ident(ident)) = assign.left.as_simple() {
                     self.mark_var_mutable(ident.id.sym.as_ref());
+                    // Set LHS type as expected on RHS and propagate
+                    let lhs_type = self.lookup_var(ident.id.sym.as_ref());
+                    if let ResolvedType::Known(ref ty) = lhs_type {
+                        let rhs_span = Span::from_swc(assign.right.span());
+                        self.result.expected_types.insert(rhs_span, ty.clone());
+                        self.propagate_expected(&assign.right, ty);
+                    }
                 }
                 self.resolve_expr(&assign.right)
             }
@@ -703,12 +823,27 @@ impl<'a> TypeResolver<'a> {
             }
             Sub | Mul | Div | Mod | Exp | BitAnd | BitOr | BitXor | LShift | RShift
             | ZeroFillRShift => ResolvedType::Known(RustType::F64),
-            LogicalAnd | LogicalOr | NullishCoalescing => {
+            LogicalAnd | LogicalOr => {
                 let right = self.resolve_expr(&bin.right);
                 if !matches!(right, ResolvedType::Unknown) {
                     right
                 } else {
                     self.resolve_expr(&bin.left)
+                }
+            }
+            NullishCoalescing => {
+                let left = self.resolve_expr(&bin.left);
+                // If left is Option<T>, set inner T as expected on RHS
+                if let ResolvedType::Known(RustType::Option(ref inner)) = left {
+                    let rhs_span = Span::from_swc(bin.right.span());
+                    self.result.expected_types.insert(rhs_span, inner.as_ref().clone());
+                    self.propagate_expected(&bin.right, inner);
+                }
+                let right = self.resolve_expr(&bin.right);
+                if !matches!(right, ResolvedType::Unknown) {
+                    right
+                } else {
+                    left
                 }
             }
         }
@@ -819,6 +954,24 @@ impl<'a> TypeResolver<'a> {
                 // Check TypeRegistry for function parameter types
                 if let Some(TypeDef::Function { params, .. }) = self.registry.get(&fn_name) {
                     Some(params.iter().map(|(_, ty)| ty.clone()).collect())
+                } else if let ResolvedType::Known(RustType::Fn { params, .. }) =
+                    self.lookup_var(&fn_name)
+                {
+                    // Scope lookup for Fn type variables
+                    Some(params)
+                } else {
+                    None
+                }
+            }
+            ast::Expr::Member(member) => {
+                // Method call: look up method signature from object type
+                let obj_type = self.resolve_expr(&member.obj);
+                if let ResolvedType::Known(ref rust_ty) = obj_type {
+                    let method_name = match &member.prop {
+                        ast::MemberProp::Ident(ident) => Some(ident.sym.to_string()),
+                        _ => None,
+                    };
+                    method_name.and_then(|name| self.lookup_method_params(rust_ty, &name))
                 } else {
                     None
                 }
@@ -832,7 +985,29 @@ impl<'a> TypeResolver<'a> {
                 self.result
                     .expected_types
                     .insert(arg_span, param_ty.clone());
+                self.propagate_expected(&arg.expr, param_ty);
             }
+        }
+    }
+
+    /// Looks up method parameter types from the object type's definition.
+    fn lookup_method_params(&self, obj_type: &RustType, method_name: &str) -> Option<Vec<RustType>> {
+        let (type_name, type_args) = match obj_type {
+            RustType::Named { name, type_args } => (name.as_str(), type_args.as_slice()),
+            _ => return None,
+        };
+
+        let type_def = if type_args.is_empty() {
+            self.registry.get(type_name).cloned()
+        } else {
+            self.registry.instantiate(type_name, type_args)
+        };
+
+        match &type_def {
+            Some(TypeDef::Struct { methods, .. }) => methods
+                .get(method_name)
+                .map(|sig| sig.params.iter().map(|(_, ty)| ty.clone()).collect()),
+            _ => None,
         }
     }
 
@@ -987,6 +1162,15 @@ impl<'a> TypeResolver<'a> {
         }
 
         ResolvedType::Unknown
+    }
+}
+
+/// Extracts the property name from an object literal key.
+fn extract_prop_name(key: &ast::PropName) -> Option<String> {
+    match key {
+        ast::PropName::Ident(ident) => Some(ident.sym.to_string()),
+        ast::PropName::Str(s) => Some(s.value.to_string_lossy().into_owned()),
+        _ => None,
     }
 }
 
@@ -1461,6 +1645,308 @@ mod tests {
         assert!(
             !res.expr_types.is_empty(),
             "throw expression should be resolved"
+        );
+    }
+
+    // --- Phase 1: propagate_expected tests ---
+
+    /// Helper: resolve with a pre-built registry for struct/enum definitions.
+    fn resolve_with_reg(source: &str, reg: &TypeRegistry) -> FileTypeResolution {
+        let files = parse_files(vec![(PathBuf::from("test.ts"), source.to_string())]).unwrap();
+        let file = &files.files[0];
+        let mut synthetic = SyntheticTypeRegistry::new();
+        let module_graph = ModuleGraph::empty();
+        let mut resolver = TypeResolver::new(reg, &mut synthetic, &module_graph);
+        resolver.resolve_file(file)
+    }
+
+    #[test]
+    fn test_propagate_expected_var_decl_object_literal_sets_struct_name() {
+        // 1-2: const p: Point = { x: 1, y: 2 } → object literal gets Named("Point")
+        let mut reg = TypeRegistry::new();
+        reg.register(
+            "Point".to_string(),
+            crate::registry::TypeDef::new_struct(
+                vec![
+                    ("x".to_string(), RustType::F64),
+                    ("y".to_string(), RustType::F64),
+                ],
+                Default::default(),
+                vec![],
+            ),
+        );
+
+        let res = resolve_with_reg("const p: Point = { x: 1, y: 2 };", &reg);
+
+        // The object literal span should have expected = Named("Point")
+        let has_point_expected = res
+            .expected_types
+            .values()
+            .any(|t| matches!(t, RustType::Named { name, .. } if name == "Point"));
+        assert!(
+            has_point_expected,
+            "object literal should have Named(\"Point\") as expected type"
+        );
+
+        // Field value spans should also have expected types (propagated from struct fields)
+        // Count expected_types entries — should be more than just the top-level initializer
+        assert!(
+            res.expected_types.len() >= 3,
+            "expected at least 3 entries (initializer + 2 field values), got {}",
+            res.expected_types.len()
+        );
+    }
+
+    #[test]
+    fn test_propagate_expected_var_decl_array_vec_sets_element_type() {
+        // 1-2 + P-3: const a: number[] = [1, 2] → each element gets F64
+        let res = resolve("const a: number[] = [1, 2];");
+
+        let f64_expected_count = res
+            .expected_types
+            .values()
+            .filter(|t| matches!(t, RustType::F64))
+            .count();
+        // Each array element should get F64 as expected type
+        assert!(
+            f64_expected_count >= 2,
+            "each array element should have F64 as expected, got {} F64 entries",
+            f64_expected_count
+        );
+    }
+
+    #[test]
+    fn test_propagate_expected_var_decl_tuple_sets_positional_types() {
+        // 1-2 + P-4: const t: [string, number] = ["a", 1]
+        let res = resolve(r#"const t: [string, number] = ["a", 1];"#);
+
+        let has_string_expected = res
+            .expected_types
+            .values()
+            .any(|t| matches!(t, RustType::String));
+        let has_f64_expected = res
+            .expected_types
+            .values()
+            .any(|t| matches!(t, RustType::F64));
+        assert!(has_string_expected, "first tuple element should expect String");
+        assert!(has_f64_expected, "second tuple element should expect F64");
+    }
+
+    #[test]
+    fn test_propagate_expected_return_object_sets_field_types() {
+        // 1-3: function f(): Point { return { x: 1, y: 2 }; }
+        let mut reg = TypeRegistry::new();
+        reg.register(
+            "Point".to_string(),
+            crate::registry::TypeDef::new_struct(
+                vec![
+                    ("x".to_string(), RustType::F64),
+                    ("y".to_string(), RustType::F64),
+                ],
+                Default::default(),
+                vec![],
+            ),
+        );
+
+        let res = resolve_with_reg(
+            "function f(): Point { return { x: 1, y: 2 }; }",
+            &reg,
+        );
+
+        // Return value object literal should have Named("Point") as expected
+        let has_point_expected = res
+            .expected_types
+            .values()
+            .any(|t| matches!(t, RustType::Named { name, .. } if name == "Point"));
+        assert!(
+            has_point_expected,
+            "return object literal should have Named(\"Point\") as expected"
+        );
+    }
+
+    #[test]
+    fn test_propagate_expected_call_arg_from_registry_fn() {
+        // 1-4: Registry function の引数 expected が propagate される
+        let mut reg = TypeRegistry::new();
+        reg.register(
+            "greet".to_string(),
+            crate::registry::TypeDef::Function {
+                params: vec![("name".to_string(), RustType::String)],
+                return_type: None,
+                has_rest: false,
+            },
+        );
+
+        let res = resolve_with_reg(r#"greet("hello");"#, &reg);
+
+        let has_string_expected = res
+            .expected_types
+            .values()
+            .any(|t| matches!(t, RustType::String));
+        assert!(
+            has_string_expected,
+            "call argument should have String as expected from registry function params"
+        );
+    }
+
+    #[test]
+    fn test_propagate_expected_call_arg_from_scope_fn_type() {
+        // 1-4a: scope 内の Fn 型変数から引数の expected を設定
+        let res = resolve(
+            r#"
+            function callHandler(handler: (name: string) => void) {
+                handler("hello");
+            }
+            "#,
+        );
+
+        let has_string_expected = res
+            .expected_types
+            .values()
+            .any(|t| matches!(t, RustType::String));
+        assert!(
+            has_string_expected,
+            "call argument should have String as expected from Fn type in scope"
+        );
+    }
+
+    #[test]
+    fn test_propagate_expected_switch_case_gets_discriminant_type() {
+        // 1-5: switch(dir) { case "up": } where dir: Direction
+        let mut reg = TypeRegistry::new();
+        reg.register(
+            "Direction".to_string(),
+            crate::registry::TypeDef::Enum {
+                type_params: vec![],
+                variants: vec![],
+                tag_field: None,
+                variant_fields: Default::default(),
+                string_values: Default::default(),
+            },
+        );
+
+        let res = resolve_with_reg(
+            r#"
+            function f(dir: Direction) {
+                switch (dir) {
+                    case "up":
+                        break;
+                }
+            }
+            "#,
+            &reg,
+        );
+
+        let has_direction_expected = res
+            .expected_types
+            .values()
+            .any(|t| matches!(t, RustType::Named { name, .. } if name == "Direction"));
+        assert!(
+            has_direction_expected,
+            "switch case value should have Direction as expected type"
+        );
+    }
+
+    #[test]
+    fn test_propagate_expected_assign_rhs_gets_lhs_type() {
+        // 1-6: let x: Point; x = { x: 1, y: 2 }
+        let mut reg = TypeRegistry::new();
+        reg.register(
+            "Point".to_string(),
+            crate::registry::TypeDef::new_struct(
+                vec![
+                    ("x".to_string(), RustType::F64),
+                    ("y".to_string(), RustType::F64),
+                ],
+                Default::default(),
+                vec![],
+            ),
+        );
+
+        let res = resolve_with_reg(
+            r#"
+            function f() {
+                let x: Point = { x: 0, y: 0 };
+                x = { x: 1, y: 2 };
+            }
+            "#,
+            &reg,
+        );
+
+        // Count Named("Point") expected entries — should include both var decl init AND assignment RHS
+        let point_expected_count = res
+            .expected_types
+            .values()
+            .filter(|t| matches!(t, RustType::Named { name, .. } if name == "Point"))
+            .count();
+        assert!(
+            point_expected_count >= 2,
+            "both var decl init and assignment RHS should have Named(\"Point\") as expected, got {}",
+            point_expected_count
+        );
+    }
+
+    #[test]
+    fn test_propagate_expected_nullish_coalescing_rhs_gets_inner_type() {
+        // 1-7: opt ?? "default" where opt: string | null (Option<String>)
+        let res = resolve(
+            r#"
+            function f(opt: string | null) {
+                const result = opt ?? "default";
+            }
+            "#,
+        );
+
+        // The RHS "default" should have String as expected (inner of Option<String>)
+        let has_string_expected = res
+            .expected_types
+            .values()
+            .any(|t| matches!(t, RustType::String));
+        assert!(
+            has_string_expected,
+            "nullish coalescing RHS should have String as expected (inner of Option<String>)"
+        );
+    }
+
+    #[test]
+    fn test_propagate_expected_ternary_branches_get_expected() {
+        // 1-10: const s: string = c ? "a" : "b" → both branches get String
+        let res = resolve(
+            r#"const s: string = true ? "a" : "b";"#,
+        );
+
+        // Count String expected entries
+        let string_expected_count = res
+            .expected_types
+            .values()
+            .filter(|t| matches!(t, RustType::String))
+            .count();
+        // At minimum: "a" and "b" should both have String expected
+        assert!(
+            string_expected_count >= 2,
+            "both ternary branches should have String expected, got {}",
+            string_expected_count
+        );
+    }
+
+    #[test]
+    fn test_propagate_expected_class_prop_initializer_gets_annotation_type() {
+        // 1-8: class C { static x: string = "hi" }
+        let res = resolve(
+            r#"
+            class C {
+                static x: string = "hello";
+            }
+            "#,
+        );
+
+        let has_string_expected = res
+            .expected_types
+            .values()
+            .any(|t| matches!(t, RustType::String));
+        assert!(
+            has_string_expected,
+            "class property initializer should have String as expected from annotation"
         );
     }
 }
