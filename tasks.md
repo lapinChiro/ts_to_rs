@@ -22,9 +22,7 @@
 
 **残存する実装不足:**
 - ExprContext / heuristic / TypeEnv narrowing: TypeResolver の移行が未完了。3つの runtime fallback が並行して存在（D-TR-1 で調査完了。`report/d-tr1-type-resolver-coverage-gaps.md` 参照）
-- convert_relative_path_to_crate_path: import パス解決。ModuleGraph.resolve_import が未使用
 - tctx + reg 二重パラメータ: 112 関数に残存
-- files.clone(): main.rs ディレクトリモードで不可避
 
 ## タスク一覧
 
@@ -49,19 +47,15 @@ D-TR〜D4 (型解決の統一)   ─┤
 D5 (reg パラメータ削除)   ─┘─→ Phase 2 完了後が効率的（シグネチャ安定後）
 ```
 
-#### D1: import 解決の ModuleGraph 統合
+#### D1: import 解決の ModuleGraph 統合 ✅
 
-型解決統一と無関係。先に片付ける。
+- [x] **D1**: `transform_import` / `transform_export_named` / `export_all` に ModuleGraph lookup + fallback を適用
+  - `resolve_import_path_with_fallback` ヘルパー追加。`ModuleGraph.resolve_import()` を優先し、失敗時は `convert_relative_path_to_crate_path` にフォールバック
+  - re-export chain の解決に対応（テスト 3 件追加）
 
-- [ ] **D1**: `convert_relative_path_to_crate_path` に ModuleGraph lookup + fallback パターンを適用
-  - TransformContext の module_graph を使い `resolve_import()` を先に試す
-  - 解決できない場合（NullModuleResolver 等）のみ `convert_relative_path_to_crate_path` にフォールバック
+#### D6: files.clone() 解消 ✅
 
-#### D6: files.clone() 解消
-
-型解決統一と無関係。先に片付ける。
-
-- [ ] **D6**: `FileOutput` に `source: String` フィールドを追加し `files.clone()` を解消
+- [x] **D6**: `FileOutput` に `source: String` フィールドを追加し `main.rs` の `files.clone()` を解消
 
 #### D-TR 〜 D4: 型解決の統一
 

@@ -102,7 +102,7 @@ fn transpile_file(
     let builtin_types = build_base_registry(input_dir, use_builtin_types);
 
     let pipeline_input = TranspileInput {
-        files: vec![(input.to_path_buf(), ts_source.clone())],
+        files: vec![(input.to_path_buf(), ts_source)],
         builtin_types: Some(builtin_types),
         module_resolver: Box::new(NullModuleResolver),
     };
@@ -120,7 +120,7 @@ fn transpile_file(
         let unsupported: Vec<UnsupportedSyntax> = file
             .unsupported
             .into_iter()
-            .map(|raw| resolve_unsupported(&ts_source, input, raw))
+            .map(|raw| resolve_unsupported(&file.source, input, raw))
             .collect();
         let json = serde_json::to_string_pretty(&unsupported)?;
         println!("{json}");
@@ -170,11 +170,8 @@ fn transpile_directory(
     let builtin_types = build_base_registry(input_dir, use_builtin_types);
     let known_files: HashSet<PathBuf> = ts_files.iter().cloned().collect();
 
-    // clone: TranspileInput が files の所有権を取るが、error reporting で
-    // ソース文字列が必要なため保持。FileOutput にソース文字列を含める
-    // リファクタリングで解消可能（Phase D 候補）
     let pipeline_input = TranspileInput {
-        files: files.clone(),
+        files,
         builtin_types: Some(builtin_types),
         module_resolver: Box::new(NodeModuleResolver::new(
             input_dir.to_path_buf(),
@@ -187,15 +184,18 @@ fn transpile_directory(
     // Collect unsupported syntax for reporting
     let mut all_unsupported = Vec::new();
     if report_unsupported {
-        for (file_output, (ts_path, ts_source)) in pipeline_output.files.iter().zip(files.iter()) {
+        for file_output in &pipeline_output.files {
+            let ts_path = file_output.path.with_extension("ts");
             for raw in &file_output.unsupported {
-                all_unsupported.push(resolve_unsupported(ts_source, ts_path, raw.clone()));
+                all_unsupported
+                    .push(resolve_unsupported(&file_output.source, &ts_path, raw.clone()));
             }
         }
     } else {
         // Strict mode: error on first unsupported
-        for (file_output, (ts_path, _)) in pipeline_output.files.iter().zip(files.iter()) {
+        for file_output in &pipeline_output.files {
             if let Some(first) = file_output.unsupported.first() {
+                let ts_path = file_output.path.with_extension("ts");
                 bail!(
                     "unsupported syntax: {} at byte {} in {}",
                     first.kind,

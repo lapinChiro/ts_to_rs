@@ -89,6 +89,8 @@ pub enum ResolvedType {
 pub struct FileOutput {
     /// Output file path (`.rs` extension).
     pub path: PathBuf,
+    /// Original TypeScript source text (for error position resolution).
+    pub source: String,
     /// Generated Rust source code.
     pub rust_source: String,
     /// Unsupported syntax entries encountered during transformation.

@@ -80,6 +80,7 @@ for r in entries:
 - **変換可能性の独断禁止** — 詳細は `.claude/rules/conversion-feasibility.md` 参照
 - **PRD 完了条件の厳守** — 詳細は `.claude/rules/prd-completion.md` 参照
 - **段階的コミット**: 複数フェーズの作業では各フェーズ完了時にコミットする — 詳細は `.claude/rules/incremental-commit.md` 参照
+- **コミット前ドキュメント同期**: コミットメッセージ作成前に tasks.md / plan.md を最新化する — 詳細は `.claude/rules/pre-commit-doc-sync.md` 参照
 - **一括編集の安全手順**: スクリプトによる一括置換は dry run → 確認 → 実行 — 詳細は `.claude/rules/bulk-edit-safety.md` 参照
 - **Git 操作の制限**: `git commit` / `push` / `merge` はユーザーのみが行う。Claude はコミットメッセージの提案のみ
 - **判断軸のある質問**: 選択肢・メリデメ・推奨案を提示して確認する。「これでよいですか？」のような判断軸のない質問をしない。自分で判断できることは判断して進める

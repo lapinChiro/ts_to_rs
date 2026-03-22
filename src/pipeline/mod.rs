@@ -108,6 +108,7 @@ pub fn transpile_pipeline(input: TranspileInput) -> Result<TranspileOutput> {
 
         file_outputs.push(FileOutput {
             path: file.path.with_extension("rs"),
+            source: file.source.clone(),
             rust_source,
             unsupported,
         });

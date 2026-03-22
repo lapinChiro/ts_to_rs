@@ -281,21 +281,19 @@ fn transform_module_item(
             synthetic,
         ),
         ModuleItem::ModuleDecl(ModuleDecl::Import(import_decl)) => {
-            let items: Vec<Item> = transform_import(import_decl, current_file_dir)
-                .into_iter()
-                .collect();
+            let items = transform_import(import_decl, tctx, current_file_dir);
             Ok((items, vec![]))
         }
         ModuleItem::ModuleDecl(ModuleDecl::ExportNamed(export)) => {
-            let items: Vec<Item> = transform_export_named(export, current_file_dir)
-                .into_iter()
-                .collect();
+            let items = transform_export_named(export, tctx, current_file_dir);
             Ok((items, vec![]))
         }
         ModuleItem::ModuleDecl(ModuleDecl::ExportAll(export_all)) => {
             let src = export_all.src.value.to_string_lossy().into_owned();
             if src.starts_with("./") || src.starts_with("../") {
-                let path = convert_relative_path_to_crate_path(&src, current_file_dir);
+                let path = resolve_import_path_with_fallback(
+                    &src, "*", tctx, current_file_dir,
+                );
                 Ok((
                     vec![Item::Use {
                         vis: Visibility::Public,
@@ -320,19 +318,41 @@ fn transform_module_item(
     }
 }
 
-/// Transforms an import declaration into an IR [`Item::Use`], if applicable.
+/// Resolves an import path using ModuleGraph first, falling back to heuristic path conversion.
 ///
+/// When `ModuleGraph.resolve_import()` succeeds, the resolved module path is used.
+/// This handles re-export chains correctly (e.g., importing `Config` from `./index`
+/// which re-exports from `./types` → resolves to `crate::types`).
+///
+/// When resolution fails (single-file mode, external packages, or unresolvable paths),
+/// falls back to [`convert_relative_path_to_crate_path`].
+fn resolve_import_path_with_fallback(
+    specifier: &str,
+    name: &str,
+    tctx: &TransformContext<'_>,
+    current_file_dir: Option<&str>,
+) -> String {
+    if let Some(resolved) = tctx.module_graph.resolve_import(tctx.file_path, specifier, name) {
+        return resolved.module_path;
+    }
+    convert_relative_path_to_crate_path(specifier, current_file_dir)
+}
+
+/// Transforms an import declaration into IR [`Item::Use`] items.
+///
+/// Uses `ModuleGraph.resolve_import()` to resolve import paths through re-export chains.
+/// Falls back to heuristic path conversion when resolution fails.
 /// Only relative path imports with named specifiers are converted.
-/// External package imports and non-named specifiers are skipped.
 fn transform_import(
     import_decl: &swc_ecma_ast::ImportDecl,
+    tctx: &TransformContext<'_>,
     current_file_dir: Option<&str>,
-) -> Option<Item> {
+) -> Vec<Item> {
     let src = import_decl.src.value.to_string_lossy().into_owned();
 
     // Only handle relative imports
     if !src.starts_with("./") && !src.starts_with("../") {
-        return None;
+        return vec![];
     }
 
     // Collect named specifiers only
@@ -346,32 +366,52 @@ fn transform_import(
         .collect();
 
     if names.is_empty() {
-        return None;
+        return vec![];
     }
 
-    let path = convert_relative_path_to_crate_path(&src, current_file_dir);
-    Some(Item::Use {
-        vis: Visibility::Private,
-        path,
-        names,
-    })
+    // Resolve each name through ModuleGraph to handle re-export chains.
+    // Names resolving to different module paths produce separate use items.
+    let mut path_groups: Vec<(String, Vec<String>)> = Vec::new();
+    for name in &names {
+        let path = resolve_import_path_with_fallback(&src, name, tctx, current_file_dir);
+        if let Some(group) = path_groups.iter_mut().find(|(p, _)| p == &path) {
+            group.1.push(name.clone());
+        } else {
+            path_groups.push((path, vec![name.clone()]));
+        }
+    }
+
+    path_groups
+        .into_iter()
+        .map(|(path, names)| Item::Use {
+            vis: Visibility::Private,
+            path,
+            names,
+        })
+        .collect()
 }
 
-/// Transforms a named export into an IR [`Item::Use`] with public visibility.
+/// Transforms a named export into IR [`Item::Use`] items with public visibility.
 ///
 /// - Re-exports (`export { Foo } from "./bar"`) become `pub use bar::Foo;`
 /// - Local name exports (`export { Foo }`) are skipped (declarations are already `pub`)
+///
+/// Uses `ModuleGraph.resolve_import()` to resolve re-export chains.
 fn transform_export_named(
     export: &swc_ecma_ast::NamedExport,
+    tctx: &TransformContext<'_>,
     current_file_dir: Option<&str>,
-) -> Option<Item> {
+) -> Vec<Item> {
     // Local name exports (no source path) are skipped
-    let src = export.src.as_ref()?;
+    let src = match export.src.as_ref() {
+        Some(s) => s,
+        None => return vec![],
+    };
     let src_str = src.value.to_string_lossy().into_owned();
 
     // Only handle relative imports
     if !src_str.starts_with("./") && !src_str.starts_with("../") {
-        return None;
+        return vec![];
     }
 
     let names: Vec<String> = export
@@ -392,15 +432,28 @@ fn transform_export_named(
         .collect();
 
     if names.is_empty() {
-        return None;
+        return vec![];
     }
 
-    let path = convert_relative_path_to_crate_path(&src_str, current_file_dir);
-    Some(Item::Use {
-        vis: Visibility::Public,
-        path,
-        names,
-    })
+    // Resolve each name through ModuleGraph (same logic as transform_import)
+    let mut path_groups: Vec<(String, Vec<String>)> = Vec::new();
+    for name in &names {
+        let path = resolve_import_path_with_fallback(&src_str, name, tctx, current_file_dir);
+        if let Some(group) = path_groups.iter_mut().find(|(p, _)| p == &path) {
+            group.1.push(name.clone());
+        } else {
+            path_groups.push((path, vec![name.clone()]));
+        }
+    }
+
+    path_groups
+        .into_iter()
+        .map(|(path, names)| Item::Use {
+            vis: Visibility::Public,
+            path,
+            names,
+        })
+        .collect()
 }
 
 /// Converts a TypeScript relative import path to a Rust `crate::` path.
