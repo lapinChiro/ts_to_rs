@@ -8,9 +8,9 @@ use crate::pipeline::SyntheticTypeRegistry;
 use crate::registry::{TypeDef, TypeRegistry};
 use crate::transformer::TypeEnv;
 
+use super::convert_expr;
 use super::methods::map_method_call;
 use super::type_resolution::{resolve_expr_type, resolve_field_type};
-use super::{convert_expr};
 use crate::transformer::context::TransformContext;
 
 /// Resolves a member access expression, applying special conversions for known fields.
@@ -95,13 +95,7 @@ pub(super) fn convert_opt_chain_expr(
             }
 
             // Cat A: receiver object for optional chaining
-            let object = convert_expr(
-                &member.obj,
-                tctx,
-                reg,
-                type_env,
-                synthetic,
-            )?;
+            let object = convert_expr(&member.obj, tctx, reg, type_env, synthetic)?;
             let body_expr = match &member.prop {
                 ast::MemberProp::Ident(ident) => {
                     let field = ident.sym.to_string();
@@ -115,13 +109,7 @@ pub(super) fn convert_opt_chain_expr(
                 }
                 ast::MemberProp::Computed(computed) => {
                     // Cat A: computed index
-                    let index = convert_expr(
-                        &computed.expr,
-                        tctx,
-                        reg,
-                        type_env,
-                        synthetic,
-                    )?;
+                    let index = convert_expr(&computed.expr, tctx, reg, type_env, synthetic)?;
                     Expr::Index {
                         object: Box::new(Expr::Ident("_v".to_string())),
                         index: Box::new(index),
@@ -177,7 +165,6 @@ pub(super) fn convert_opt_chain_expr(
             let (object, method) =
                 extract_method_from_callee(&opt_call.callee, tctx, reg, type_env, synthetic)?;
 
-            // Look up method parameter types from registry (Category B)
             let inner_type = match &callee_obj_type {
                 Some(RustType::Option(inner)) => Some(inner.as_ref()),
                 Some(ty) => Some(ty),
@@ -197,7 +184,10 @@ pub(super) fn convert_opt_chain_expr(
                 .iter()
                 .enumerate()
                 .map(|(i, arg)| {
-                    convert_expr(&arg.expr, tctx, reg, type_env, synthetic)
+                    let param_ty = method_sig.and_then(|sig| sig.params.get(i).map(|(_, ty)| ty));
+                    super::convert_expr_with_expected(
+                        &arg.expr, tctx, reg, param_ty, type_env, synthetic,
+                    )
                 })
                 .collect::<Result<_>>()?;
 
@@ -250,13 +240,7 @@ pub(super) fn extract_method_from_callee(
         _ => return Err(anyhow!("unsupported optional call callee: {:?}", callee)),
     };
     // Cat A: receiver object
-    let object = convert_expr(
-        &member.obj,
-        tctx,
-        reg,
-        type_env,
-        synthetic,
-    )?;
+    let object = convert_expr(&member.obj, tctx, reg, type_env, synthetic)?;
     let method = match &member.prop {
         ast::MemberProp::Ident(ident) => ident.sym.to_string(),
         _ => return Err(anyhow!("unsupported optional call property")),
@@ -277,13 +261,7 @@ pub(super) fn convert_member_expr(
     // Computed property: arr[0], arr[i] → Expr::Index or tuple.N → Expr::FieldAccess
     if let ast::MemberProp::Computed(computed) = &member.prop {
         // Cat A: receiver object
-        let object = convert_expr(
-            &member.obj,
-            tctx,
-            reg,
-            type_env,
-            synthetic,
-        )?;
+        let object = convert_expr(&member.obj, tctx, reg, type_env, synthetic)?;
 
         // Tuple index access: pair[0] → pair.0 (Rust uses dot notation for tuples)
         if let Some(RustType::Tuple(_)) = resolve_expr_type(&member.obj, type_env, tctx, reg) {
@@ -297,13 +275,7 @@ pub(super) fn convert_member_expr(
         }
 
         // Cat A: computed index
-        let index = convert_expr(
-            &computed.expr,
-            tctx,
-            reg,
-            type_env,
-            synthetic,
-        )?;
+        let index = convert_expr(&computed.expr, tctx, reg, type_env, synthetic)?;
         return Ok(Expr::Index {
             object: Box::new(object),
             index: Box::new(index),
@@ -347,13 +319,7 @@ pub(super) fn convert_member_expr(
             if field == *tag {
                 // Tag field → method call (e.g., s.kind() )
                 // Cat A: receiver object
-                let object = convert_expr(
-                    &member.obj,
-                    tctx,
-                    reg,
-                    type_env,
-                    synthetic,
-                )?;
+                let object = convert_expr(&member.obj, tctx, reg, type_env, synthetic)?;
                 return Ok(Expr::MethodCall {
                     object: Box::new(object),
                     method: tag.clone(),
@@ -384,13 +350,7 @@ pub(super) fn convert_member_expr(
     }
 
     // Cat A: receiver object
-    let object = convert_expr(
-        &member.obj,
-        tctx,
-        reg,
-        type_env,
-        synthetic,
-    )?;
+    let object = convert_expr(&member.obj, tctx, reg, type_env, synthetic)?;
     resolve_member_access(&object, &field, &member.obj, tctx, reg)
 }
 
@@ -408,13 +368,7 @@ pub(super) fn convert_du_standalone_field_access(
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Expr> {
     // Cat A: receiver object
-    let object = convert_expr(
-        obj_expr,
-        tctx,
-        reg,
-        type_env,
-        synthetic,
-    )?;
+    let object = convert_expr(obj_expr, tctx, reg, type_env, synthetic)?;
     let match_expr = Expr::Ref(Box::new(object));
 
     let mut arms: Vec<MatchArm> = Vec::new();

@@ -12,7 +12,7 @@ use crate::pipeline::type_converter::convert_ts_type;
 use crate::pipeline::SyntheticTypeRegistry;
 use crate::registry::TypeRegistry;
 use crate::transformer::context::TransformContext;
-use crate::transformer::expressions::convert_expr;
+use crate::transformer::expressions::{convert_expr, convert_expr_with_expected};
 use crate::transformer::extract_prop_name;
 use crate::transformer::functions::convert_last_return_to_tail;
 use crate::transformer::statements::convert_stmt;
@@ -579,13 +579,9 @@ fn convert_static_prop(
     let ty = convert_ts_type(&type_ann.type_ann, synthetic, reg)?;
 
     let value = match &prop.value {
-        Some(init) => convert_expr(
-            init,
-            tctx,
-            reg,
-            &TypeEnv::new(),
-            synthetic,
-        )?,
+        Some(init) => {
+            convert_expr_with_expected(init, tctx, reg, Some(&ty), &TypeEnv::new(), synthetic)?
+        }
         None => return Ok(None), // No initializer — skip
     };
 
@@ -804,13 +800,7 @@ fn convert_constructor_body(
     for stmt in stmts {
         if let Some((field_name, value_expr)) = try_extract_this_assignment(stmt) {
             // Cat B: field type could be looked up from class definition
-            let value = convert_expr(
-                value_expr,
-                tctx,
-                reg,
-                &type_env,
-                synthetic,
-            )?;
+            let value = convert_expr(value_expr, tctx, reg, &type_env, synthetic)?;
             fields.push((field_name, value));
         } else {
             other_stmts.extend(convert_stmt(
@@ -2038,7 +2028,7 @@ mod tests {
         }
     }
 
-    // --- ExprContext type propagation ---
+    // --- Expected type propagation ---
 
     /// Step 7: Static property initializer should propagate type annotation.
     /// `static config: Config = { name: "default" }` should produce StructInit, not error.

@@ -1212,12 +1212,8 @@ fn test_transform_import_module_graph_resolves_import_path() {
 
     let reg = TypeRegistry::new();
     let res = crate::pipeline::type_resolution::FileTypeResolution::empty();
-    let tctx = crate::transformer::context::TransformContext::new(
-        &module_graph,
-        &reg,
-        &res,
-        &file_a,
-    );
+    let tctx =
+        crate::transformer::context::TransformContext::new(&module_graph, &reg, &res, &file_a);
 
     let mut synthetic = crate::pipeline::SyntheticTypeRegistry::new();
     let items = crate::transformer::transform_module_with_context(
@@ -1272,12 +1268,8 @@ fn test_transform_import_module_graph_resolves_reexport_chain() {
 
     let reg = TypeRegistry::new();
     let res = crate::pipeline::type_resolution::FileTypeResolution::empty();
-    let tctx = crate::transformer::context::TransformContext::new(
-        &module_graph,
-        &reg,
-        &res,
-        &file_a,
-    );
+    let tctx =
+        crate::transformer::context::TransformContext::new(&module_graph, &reg, &res, &file_a);
 
     let mut synthetic = crate::pipeline::SyntheticTypeRegistry::new();
     let items = crate::transformer::transform_module_with_context(

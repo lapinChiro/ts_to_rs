@@ -187,8 +187,11 @@ fn transpile_directory(
         for file_output in &pipeline_output.files {
             let ts_path = file_output.path.with_extension("ts");
             for raw in &file_output.unsupported {
-                all_unsupported
-                    .push(resolve_unsupported(&file_output.source, &ts_path, raw.clone()));
+                all_unsupported.push(resolve_unsupported(
+                    &file_output.source,
+                    &ts_path,
+                    raw.clone(),
+                ));
             }
         }
     } else {

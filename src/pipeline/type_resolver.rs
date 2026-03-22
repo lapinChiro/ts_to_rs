@@ -315,14 +315,10 @@ impl<'a> TypeResolver<'a> {
                         self.result.expr_types.insert(span, ty);
                         // Set expected from type annotation and propagate
                         if let Some(type_ann) = &prop.type_ann {
-                            if let Ok(ann_ty) = convert_ts_type(
-                                &type_ann.type_ann,
-                                self.synthetic,
-                                self.registry,
-                            ) {
-                                self.result
-                                    .expected_types
-                                    .insert(span, ann_ty.clone());
+                            if let Ok(ann_ty) =
+                                convert_ts_type(&type_ann.type_ann, self.synthetic, self.registry)
+                            {
+                                self.result.expected_types.insert(span, ann_ty.clone());
                                 self.propagate_expected(init, &ann_ty);
                             }
                         }
@@ -421,7 +417,9 @@ impl<'a> TypeResolver<'a> {
                         for case in &switch_stmt.cases {
                             if let Some(test) = &case.test {
                                 let test_span = Span::from_swc(test.span());
-                                self.result.expected_types.insert(test_span, rust_ty.clone());
+                                self.result
+                                    .expected_types
+                                    .insert(test_span, rust_ty.clone());
                             }
                         }
                     }
@@ -644,7 +642,9 @@ impl<'a> TypeResolver<'a> {
                 RustType::Vec(inner) => {
                     for elem in arr.elems.iter().flatten() {
                         let span = Span::from_swc(elem.expr.span());
-                        self.result.expected_types.insert(span, inner.as_ref().clone());
+                        self.result
+                            .expected_types
+                            .insert(span, inner.as_ref().clone());
                         self.propagate_expected(&elem.expr, inner);
                     }
                 }
@@ -666,10 +666,14 @@ impl<'a> TypeResolver<'a> {
             // P-6: Cond (ternary) → propagate to both branches
             ast::Expr::Cond(cond) => {
                 let cons_span = Span::from_swc(cond.cons.span());
-                self.result.expected_types.insert(cons_span, expected.clone());
+                self.result
+                    .expected_types
+                    .insert(cons_span, expected.clone());
                 self.propagate_expected(&cond.cons, expected);
                 let alt_span = Span::from_swc(cond.alt.span());
-                self.result.expected_types.insert(alt_span, expected.clone());
+                self.result
+                    .expected_types
+                    .insert(alt_span, expected.clone());
                 self.propagate_expected(&cond.alt, expected);
             }
             _ => {}
@@ -836,7 +840,9 @@ impl<'a> TypeResolver<'a> {
                 // If left is Option<T>, set inner T as expected on RHS
                 if let ResolvedType::Known(RustType::Option(ref inner)) = left {
                     let rhs_span = Span::from_swc(bin.right.span());
-                    self.result.expected_types.insert(rhs_span, inner.as_ref().clone());
+                    self.result
+                        .expected_types
+                        .insert(rhs_span, inner.as_ref().clone());
                     self.propagate_expected(&bin.right, inner);
                 }
                 let right = self.resolve_expr(&bin.right);
@@ -991,7 +997,11 @@ impl<'a> TypeResolver<'a> {
     }
 
     /// Looks up method parameter types from the object type's definition.
-    fn lookup_method_params(&self, obj_type: &RustType, method_name: &str) -> Option<Vec<RustType>> {
+    fn lookup_method_params(
+        &self,
+        obj_type: &RustType,
+        method_name: &str,
+    ) -> Option<Vec<RustType>> {
         let (type_name, type_args) = match obj_type {
             RustType::Named { name, type_args } => (name.as_str(), type_args.as_slice()),
             _ => return None,
@@ -1728,7 +1738,10 @@ mod tests {
             .expected_types
             .values()
             .any(|t| matches!(t, RustType::F64));
-        assert!(has_string_expected, "first tuple element should expect String");
+        assert!(
+            has_string_expected,
+            "first tuple element should expect String"
+        );
         assert!(has_f64_expected, "second tuple element should expect F64");
     }
 
@@ -1748,10 +1761,7 @@ mod tests {
             ),
         );
 
-        let res = resolve_with_reg(
-            "function f(): Point { return { x: 1, y: 2 }; }",
-            &reg,
-        );
+        let res = resolve_with_reg("function f(): Point { return { x: 1, y: 2 }; }", &reg);
 
         // Return value object literal should have Named("Point") as expected
         let has_point_expected = res
@@ -1911,9 +1921,7 @@ mod tests {
     #[test]
     fn test_propagate_expected_ternary_branches_get_expected() {
         // 1-10: const s: string = c ? "a" : "b" → both branches get String
-        let res = resolve(
-            r#"const s: string = true ? "a" : "b";"#,
-        );
+        let res = resolve(r#"const s: string = true ? "a" : "b";"#);
 
         // Count String expected entries
         let string_expected_count = res

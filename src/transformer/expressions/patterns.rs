@@ -40,14 +40,7 @@ pub(super) fn try_convert_undefined_comparison(
     }?;
 
     // Cat A: comparison operand
-    let other_ir = super::convert_expr(
-        other_expr,
-        tctx,
-        reg,
-                type_env,
-        synthetic,
-    )
-    .ok()?;
+    let other_ir = super::convert_expr(other_expr, tctx, reg, type_env, synthetic).ok()?;
     let method = if is_eq { "is_none" } else { "is_some" };
     Some(Expr::MethodCall {
         object: Box::new(other_ir),
@@ -79,14 +72,7 @@ pub(super) fn try_convert_enum_string_comparison(
         if let Some(enum_name) = resolve_enum_type_name(&bin.left, type_env, tctx, reg) {
             if let Some(variant) = lookup_string_enum_variant(reg, &enum_name, &str_value) {
                 // Cat A: comparison operand
-                let left = super::convert_expr(
-                    &bin.left,
-                    tctx,
-                    reg,
-                                        type_env,
-                    synthetic,
-                )
-                .ok()?;
+                let left = super::convert_expr(&bin.left, tctx, reg, type_env, synthetic).ok()?;
                 return Some(Expr::BinaryOp {
                     left: Box::new(left),
                     op,
@@ -101,14 +87,7 @@ pub(super) fn try_convert_enum_string_comparison(
         if let Some(enum_name) = resolve_enum_type_name(&bin.right, type_env, tctx, reg) {
             if let Some(variant) = lookup_string_enum_variant(reg, &enum_name, &str_value) {
                 // Cat A: comparison operand
-                let right = super::convert_expr(
-                    &bin.right,
-                    tctx,
-                    reg,
-                                        type_env,
-                    synthetic,
-                )
-                .ok()?;
+                let right = super::convert_expr(&bin.right, tctx, reg, type_env, synthetic).ok()?;
                 return Some(Expr::BinaryOp {
                     left: Box::new(Expr::Ident(format!("{enum_name}::{variant}"))),
                     op,
@@ -191,14 +170,8 @@ pub(super) fn try_convert_typeof_comparison(
                 _ => "",
             };
             if variants.iter().any(|v| v == expected_variant) {
-                let operand_ir = super::convert_expr(
-                    typeof_operand,
-                    tctx,
-                    reg,
-                                        type_env,
-                    synthetic,
-                )
-                .ok()?;
+                let operand_ir =
+                    super::convert_expr(typeof_operand, tctx, reg, type_env, synthetic).ok()?;
                 let pattern = format!("{enum_name}::{expected_variant}(_)");
                 let matches_expr = Expr::Matches {
                     expr: Box::new(operand_ir),
@@ -226,14 +199,8 @@ pub(super) fn try_convert_typeof_comparison(
         TypeofMatch::False => Expr::BoolLit(is_neq),
         TypeofMatch::IsNone => {
             // Cat A: typeof operand
-            let operand_ir = super::convert_expr(
-                typeof_operand,
-                tctx,
-                reg,
-                                type_env,
-                synthetic,
-            )
-            .ok()?;
+            let operand_ir =
+                super::convert_expr(typeof_operand, tctx, reg, type_env, synthetic).ok()?;
             let method = if is_neq { "is_some" } else { "is_none" };
             Expr::MethodCall {
                 object: Box::new(operand_ir),

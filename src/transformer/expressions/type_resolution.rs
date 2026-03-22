@@ -16,7 +16,7 @@ use crate::registry::{TypeDef, TypeRegistry};
 use crate::transformer::context::TransformContext;
 use crate::transformer::TypeEnv;
 
-use super::{convert_expr};
+use super::convert_expr;
 
 /// 式の型を解決する。解決できない場合は None を返す。
 ///
@@ -273,7 +273,6 @@ pub(super) fn convert_ts_as_expr(
     ts_as: &ast::TsAsExpr,
     tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
-    expected: Option<&RustType>,
     type_env: &TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Expr> {
@@ -281,13 +280,7 @@ pub(super) fn convert_ts_as_expr(
         Ok(target_ty) => {
             let is_primitive_cast = matches!(target_ty, RustType::F64 | RustType::Bool);
             if is_primitive_cast {
-                let inner = convert_expr(
-                    &ts_as.expr,
-                    tctx,
-                    reg,
-                    type_env,
-                    synthetic,
-                )?;
+                let inner = convert_expr(&ts_as.expr, tctx, reg, type_env, synthetic)?;
                 Ok(Expr::Cast {
                     expr: Box::new(inner),
                     target: target_ty,

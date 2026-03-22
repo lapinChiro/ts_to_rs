@@ -1142,10 +1142,11 @@ fn test_convert_expr_string_lit_with_string_expected_adds_to_string() {
     let f = TctxFixture::new();
     let tctx = f.tctx();
     let swc_expr = parse_expr("\"hello\";");
-    let result = convert_expr(
+    let result = convert_expr_with_expected(
         &swc_expr,
         &tctx,
         f.reg(),
+        Some(&RustType::String),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -1468,10 +1469,11 @@ fn test_binary_number_plus_string_generates_format() {
     let swc_expr = parse_var_init(r#"const s: string = x + " px";"#);
     let mut env = TypeEnv::new();
     env.insert("x".to_string(), RustType::F64);
-    let result = convert_expr(
+    let result = convert_expr_with_expected(
         &swc_expr,
         &tctx,
         f.reg(),
+        Some(&RustType::String),
         &env,
         &mut SyntheticTypeRegistry::new(),
     )
@@ -4801,10 +4803,11 @@ fn test_convert_bin_expr_expected_string_enables_concat() {
     let tctx = f.tctx();
     let env = TypeEnv::new(); // a, b not registered → types unknown
 
-    let result = convert_expr(
+    let result = convert_expr_with_expected(
         &swc_expr,
         &tctx,
         f.reg(),
+        Some(&RustType::String),
         &env,
         &mut SyntheticTypeRegistry::new(),
     )
@@ -5490,10 +5493,11 @@ fn test_self_field_string_concat_gets_clone() {
             type_args: vec![],
         },
     );
-    let result = convert_expr(
+    let result = convert_expr_with_expected(
         &swc_expr,
         &tctx,
         f.reg(),
+        Some(&RustType::String),
         &env,
         &mut SyntheticTypeRegistry::new(),
     )
@@ -8405,7 +8409,7 @@ fn test_convert_object_lit_all_computed_keys_generates_hashmap() {
     );
 }
 
-// --- ExprContext type propagation (Category B improvements) ---
+// --- Expected type propagation (Category B improvements) ---
 
 /// Step 5: Assignment RHS should propagate type from TypeEnv.
 /// `x = { name: "test" }` where x: Config → `Config { name: "test".to_string() }`

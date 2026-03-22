@@ -291,9 +291,7 @@ fn transform_module_item(
         ModuleItem::ModuleDecl(ModuleDecl::ExportAll(export_all)) => {
             let src = export_all.src.value.to_string_lossy().into_owned();
             if src.starts_with("./") || src.starts_with("../") {
-                let path = resolve_import_path_with_fallback(
-                    &src, "*", tctx, current_file_dir,
-                );
+                let path = resolve_import_path_with_fallback(&src, "*", tctx, current_file_dir);
                 Ok((
                     vec![Item::Use {
                         vis: Visibility::Public,
@@ -332,7 +330,10 @@ fn resolve_import_path_with_fallback(
     tctx: &TransformContext<'_>,
     current_file_dir: Option<&str>,
 ) -> String {
-    if let Some(resolved) = tctx.module_graph.resolve_import(tctx.file_path, specifier, name) {
+    if let Some(resolved) = tctx
+        .module_graph
+        .resolve_import(tctx.file_path, specifier, name)
+    {
         return resolved.module_path;
     }
     convert_relative_path_to_crate_path(specifier, current_file_dir)

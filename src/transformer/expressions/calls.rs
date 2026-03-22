@@ -130,13 +130,7 @@ pub(super) fn convert_call_expr(
                 }
 
                 // Cat A: method receiver — converted before method resolution
-                let object = convert_expr(
-                    &member.obj,
-                    tctx,
-                    reg,
-                    type_env,
-                    synthetic,
-                )?;
+                let object = convert_expr(&member.obj, tctx, reg, type_env, synthetic)?;
                 // Look up method parameter types from the object's type
                 let method_sig =
                     resolve_expr_type(&member.obj, type_env, tctx, reg).and_then(|ty| {
@@ -367,13 +361,7 @@ pub(super) fn convert_fs_call(
                 return Err(anyhow!("fs.readFileSync requires at least 1 argument"));
             }
             // Cat A: built-in fs API path arg
-            let path_arg = convert_expr(
-                &args[0].expr,
-                tctx,
-                reg,
-                type_env,
-                synthetic,
-            )?;
+            let path_arg = convert_expr(&args[0].expr, tctx, reg, type_env, synthetic)?;
 
             // Special case: fs.readFileSync("/dev/stdin", ...) or fs.readFileSync(0, ...)
             let is_stdin = matches!(&path_arg, Expr::StringLit(s) if s == "/dev/stdin")
@@ -410,20 +398,8 @@ pub(super) fn convert_fs_call(
                 return Err(anyhow!("fs.writeFileSync requires at least 2 arguments"));
             }
             // Cat A: built-in fs API path/data args
-            let path_arg = convert_expr(
-                &args[0].expr,
-                tctx,
-                reg,
-                type_env,
-                synthetic,
-            )?;
-            let data_arg = convert_expr(
-                &args[1].expr,
-                tctx,
-                reg,
-                type_env,
-                synthetic,
-            )?;
+            let path_arg = convert_expr(&args[0].expr, tctx, reg, type_env, synthetic)?;
+            let data_arg = convert_expr(&args[1].expr, tctx, reg, type_env, synthetic)?;
             // fs.writeFileSync(path, data) → std::fs::write(&path, &data).unwrap()
             Ok(Expr::MethodCall {
                 object: Box::new(Expr::FnCall {
@@ -439,13 +415,7 @@ pub(super) fn convert_fs_call(
                 return Err(anyhow!("fs.existsSync requires 1 argument"));
             }
             // Cat A: built-in fs API path arg
-            let path_arg = convert_expr(
-                &args[0].expr,
-                tctx,
-                reg,
-                type_env,
-                synthetic,
-            )?;
+            let path_arg = convert_expr(&args[0].expr, tctx, reg, type_env, synthetic)?;
             // fs.existsSync(path) → std::path::Path::new(&path).exists()
             Ok(Expr::MethodCall {
                 object: Box::new(Expr::FnCall {
@@ -604,19 +574,6 @@ pub(super) fn convert_call_args_with_types(
         usize::MAX // No rest param → treat all as regular
     };
 
-    // Get the element type for the rest parameter (inner type of Vec<T>)
-    let rest_element_type = if has_rest {
-        param_types.and_then(|p| p.last()).and_then(|(_, ty)| {
-            if let RustType::Vec(inner) = ty {
-                Some(inner.as_ref())
-            } else {
-                None
-            }
-        })
-    } else {
-        None
-    };
-
     // Convert regular arguments
     let regular_args_count = args.len().min(regular_param_count);
     let mut result: Vec<Expr> = args[..regular_args_count]
@@ -629,7 +586,9 @@ pub(super) fn convert_call_args_with_types(
                 Some(RustType::Option(inner)) => Some(inner.as_ref()),
                 other => other,
             };
-            let mut expr = convert_expr(&arg.expr, tctx, reg, type_env, synthetic)?;
+            let mut expr = super::convert_expr_with_expected(
+                &arg.expr, tctx, reg, expected, type_env, synthetic,
+            )?;
             // Wrap in Some(...) when the parameter type is Option<T>,
             // but skip if the value is already None (from undefined)
             if let Some(RustType::Option(_)) = param_ty {
@@ -662,18 +621,24 @@ pub(super) fn convert_call_args_with_types(
         })
         .collect::<Result<Vec<_>>>()?;
 
+    let rest_element_type = if has_rest {
+        param_types.and_then(|p| p.last()).and_then(|(_, ty)| {
+            if let RustType::Vec(inner) = ty {
+                Some(inner.as_ref())
+            } else {
+                None
+            }
+        })
+    } else {
+        None
+    };
+
     if has_rest {
         // Pack remaining arguments into a vec![]
         let rest_args = &args[regular_args_count..];
         if rest_args.len() == 1 && rest_args[0].spread.is_some() {
             // Cat A: single spread source — type is the array itself
-            let expr = convert_expr(
-                &rest_args[0].expr,
-                tctx,
-                reg,
-                type_env,
-                synthetic,
-            )?;
+            let expr = convert_expr(&rest_args[0].expr, tctx, reg, type_env, synthetic)?;
             result.push(expr);
         } else if rest_args.iter().any(|a| a.spread.is_some()) {
             // Mixed literals and spread: foo(1, ...arr) → foo([vec![1.0], arr].concat())
@@ -689,16 +654,17 @@ pub(super) fn convert_call_args_with_types(
                         });
                     }
                     // Cat A: spread source — type is the array itself
-                    let expr = convert_expr(
+                    let expr = convert_expr(&arg.expr, tctx, reg, type_env, synthetic)?;
+                    parts.push(expr);
+                } else {
+                    let expr = super::convert_expr_with_expected(
                         &arg.expr,
                         tctx,
                         reg,
+                        rest_element_type,
                         type_env,
                         synthetic,
                     )?;
-                    parts.push(expr);
-                } else {
-                    let expr = convert_expr(&arg.expr, tctx, reg, type_env, synthetic)?;
                     literal_buf.push(expr);
                 }
             }
@@ -720,7 +686,14 @@ pub(super) fn convert_call_args_with_types(
             let rest_exprs: Vec<Expr> = rest_args
                 .iter()
                 .map(|arg| {
-                    convert_expr(&arg.expr, tctx, reg, type_env, synthetic)
+                    super::convert_expr_with_expected(
+                        &arg.expr,
+                        tctx,
+                        reg,
+                        rest_element_type,
+                        type_env,
+                        synthetic,
+                    )
                 })
                 .collect::<Result<Vec<_>>>()?;
             result.push(Expr::Vec {

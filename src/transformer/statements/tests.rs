@@ -2990,7 +2990,7 @@ fn test_convert_var_decl_trait_type_generates_box_dyn() {
     }
 }
 
-// --- ExprContext type propagation (Category B improvements) ---
+// --- Expected type propagation (Category B improvements) ---
 
 /// Step 6: Switch case values should propagate discriminant type for string enum matching.
 /// `switch(dir) { case "up": ... }` where dir: Direction → case becomes `Direction::Up`
