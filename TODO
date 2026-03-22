@@ -161,11 +161,11 @@
   - `iter().cloned().filter()` パターンでは問題ないが、`.iter().filter()` では `&T` が渡される
   - 現在の変換は `nums.map(...).collect::<Vec<_>>().iter().cloned().filter(...)` のように `.cloned()` を挿入するが、一部のパスで `.filter()` の引数が参照を考慮していない
   - E2E テスト `method_chain.ts` でこの問題のため配列チェーン（`map → filter`）のテストケースを除外している。解消後に `method_chain.ts` に `nums.map(...).filter(...)` パターンを追加すること
-- **[I-212]** **同一 union 型の enum 重複定義** — コンパイルエラー
-  - 同一ファイル内の複数関数が同じ union 型（例: `string | number`）を使用すると、`StringOrF64` enum が関数ごとに重複生成される
-  - `#[derive]` の `conflicting implementations of trait PartialEq` コンパイルエラー
-  - コンパイルテスト `type-narrowing` のスキップ原因
-  - 解決策: ファイルスコープでの enum 重複排除、または TypeRegistry での一元管理
+- **[I-212]** **同一 union 型の enum 重複定義** — **P8 で解消済み**
+  - P8 の統一パイプラインで per-file `SyntheticTypeRegistry` の `register_union` dedup が機能し、同一ファイル内の同じ union 型は 1 つの enum に統一される
+  - コンパイルテスト `type-narrowing` の I-212 由来のスキップ原因は解消。ただし残存する別のコンパイルエラーのためスキップは維持:
+    - `f64.toFixed(2)`: JS の `Number.prototype.toFixed()` が Rust に未変換。Rust では `format!("{:.2}", v)` に変換すべき（`src/transformer/expressions/calls.rs` の `convert_call_expr` で対応が必要）
+    - `StringOrF64` の `Display` 未実装: `println!("{}", x)` で `StringOrF64` enum を表示するには `Display` trait の `impl` が必要。Generator が `#[derive(Debug)]` のみ付加し `Display` は未生成（`src/generator/mod.rs` の `generate_enum` で対応が必要）
 - **[I-201]** **`null as any` / `null` の非 Option 型への代入** — コンパイルエラー
   - `null as any` → trait 型文脈で `None` 生成（`Box<dyn Trait>` に代入不可）
   - `null` → any-narrowing enum 文脈で `None` 生成（enum に代入不可）

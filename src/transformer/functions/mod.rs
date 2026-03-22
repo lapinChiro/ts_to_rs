@@ -97,7 +97,7 @@ pub fn convert_fn_decl(
 
     // Lazy type materialization for `any`-typed parameters:
     // Scan body for typeof/instanceof usage and generate enum types
-    let any_enum_items = if let Some(body) = &fn_decl.function.body {
+    if let Some(body) = &fn_decl.function.body {
         let any_param_names: Vec<String> = params
             .iter()
             .filter(|p| matches!(&p.ty, Some(RustType::Any)))
@@ -106,54 +106,47 @@ pub fn convert_fn_decl(
         if !any_param_names.is_empty() {
             let constraints =
                 crate::transformer::any_narrowing::collect_any_constraints(body, &any_param_names);
-            let mut enum_items = Vec::new();
             for (param_name, constraint) in &constraints {
                 if constraint.is_empty() {
                     continue;
                 }
-                let (enum_item, enum_type) = crate::transformer::any_narrowing::generate_any_enum(
-                    &name, param_name, constraint,
-                );
-                // Override parameter type from Any to the generated enum
+                let variants =
+                    crate::transformer::any_narrowing::build_any_enum_variants(constraint);
+                let enum_name = synthetic_out.register_any_enum(&name, param_name, variants);
+                let enum_type = RustType::Named {
+                    name: enum_name,
+                    type_args: vec![],
+                };
                 if let Some(p) = params.iter_mut().find(|p| &p.name == param_name) {
                     p.ty = Some(enum_type);
                 }
-                enum_items.push(enum_item);
             }
-            enum_items
-        } else {
-            Vec::new()
         }
-    } else {
-        Vec::new()
-    };
+    }
 
     // Lazy type materialization for `any`-typed LOCAL variables:
     // Scan body for local variable declarations with `any` type and typeof checks
     let mut local_any_overrides: Vec<(String, RustType)> = Vec::new();
-    let local_any_enum_items = if let Some(body) = &fn_decl.function.body {
+    if let Some(body) = &fn_decl.function.body {
         let local_any_names = crate::transformer::any_narrowing::collect_any_local_var_names(body);
         if !local_any_names.is_empty() {
             let constraints =
                 crate::transformer::any_narrowing::collect_any_constraints(body, &local_any_names);
-            let mut enum_items = Vec::new();
             for (var_name, constraint) in &constraints {
                 if constraint.is_empty() {
                     continue;
                 }
-                let (enum_item, enum_type) = crate::transformer::any_narrowing::generate_any_enum(
-                    &name, var_name, constraint,
-                );
+                let variants =
+                    crate::transformer::any_narrowing::build_any_enum_variants(constraint);
+                let enum_name = synthetic_out.register_any_enum(&name, var_name, variants);
+                let enum_type = RustType::Named {
+                    name: enum_name,
+                    type_args: vec![],
+                };
                 local_any_overrides.push((var_name.clone(), enum_type));
-                enum_items.push(enum_item);
             }
-            enum_items
-        } else {
-            Vec::new()
         }
-    } else {
-        Vec::new()
-    };
+    }
 
     let mut fn_type_env = TypeEnv::new();
     for p in &params {
@@ -230,9 +223,7 @@ pub fn convert_fn_decl(
     // Merge local synthetic types into the external registry
     synthetic_out.merge(synthetic);
 
-    // Prepend any-type enum items before the function item
-    items.extend(any_enum_items);
-    items.extend(local_any_enum_items);
+    // any-type enum items は SyntheticTypeRegistry に登録済み（per-file synthetic 経由で出力される）
 
     items.push(Item::Fn {
         vis,
@@ -1224,12 +1215,14 @@ pub(crate) fn convert_var_decl_arrow_fns(
                     if constraint.is_empty() {
                         continue;
                     }
-                    let (enum_item, enum_type) =
-                        crate::transformer::any_narrowing::generate_any_enum(
-                            &name, param_name, constraint,
-                        );
+                    let variants =
+                        crate::transformer::any_narrowing::build_any_enum_variants(constraint);
+                    let enum_name = synthetic.register_any_enum(&name, param_name, variants);
+                    let enum_type = RustType::Named {
+                        name: enum_name,
+                        type_args: vec![],
+                    };
                     arrow_type_env.insert(param_name.clone(), enum_type);
-                    items.push(enum_item);
                 }
             }
         }

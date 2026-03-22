@@ -40,7 +40,7 @@ PRD スコープ内で Phase A-C で未着手の 2 項目を先に対応:
 2. `trait-coercion` — I-201（null as any → None）
 3. `union-fallback` — I-202（Box<dyn Fn> derive 不適合）
 4. `any-type-narrowing` — I-209（serde_json::Value → enum 型強制）
-5. `type-narrowing` — I-212（同一 union 型の enum 重複定義）
+5. `type-narrowing` — I-212（enum 重複定義）は P8 統一パイプラインで**解消済み**。残存エラーは `f64.toFixed()` 未対応 + `StringOrF64` の Display 未実装
 
 ## 上記完了後の作業
 

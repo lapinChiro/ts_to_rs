@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use swc_ecma_ast as ast;
 
-use crate::ir::{EnumVariant, Item, RustType, Visibility};
+use crate::ir::{EnumVariant, RustType};
 
 /// Constraints collected from typeof/instanceof usage on an `any`-typed variable.
 #[derive(Debug, Default)]
@@ -83,20 +83,9 @@ pub(crate) fn collect_any_local_var_names(body: &ast::BlockStmt) -> Vec<String> 
 /// Returns `(enum_item, rust_type)` where `rust_type` is `Named { name: enum_name }`.
 /// Generates an any-type enum from typeof/instanceof constraints.
 ///
-/// Returns the generated `(Item, RustType)` pair.
-/// In the unified pipeline (P8), this will be replaced by
-/// `SyntheticTypeRegistry.register_any_enum()`.
-pub(crate) fn generate_any_enum(
-    fn_name: &str,
-    param_name: &str,
-    constraints: &AnyTypeConstraints,
-) -> (Item, RustType) {
-    let enum_name = format!(
-        "{}{}Type",
-        to_pascal_case(fn_name),
-        to_pascal_case(param_name)
-    );
-
+/// Returns the variants for an any-narrowing enum.
+/// Callers should register these via `SyntheticTypeRegistry::register_any_enum()`.
+pub(crate) fn build_any_enum_variants(constraints: &AnyTypeConstraints) -> Vec<EnumVariant> {
     let mut variants = Vec::new();
 
     for typeof_str in &constraints.typeof_checks {
@@ -145,19 +134,7 @@ pub(crate) fn generate_any_enum(
         fields: vec![],
     });
 
-    let item = Item::Enum {
-        vis: Visibility::Public,
-        name: enum_name.clone(),
-        serde_tag: None,
-        variants,
-    };
-
-    let rust_type = RustType::Named {
-        name: enum_name,
-        type_args: vec![],
-    };
-
-    (item, rust_type)
+    variants
 }
 
 // --- AST scanning helpers ---
@@ -268,7 +245,7 @@ fn extract_typeof_and_string(bin: &ast::BinExpr) -> Option<(&ast::Expr, String)>
     None
 }
 
-fn to_pascal_case(s: &str) -> String {
+pub(crate) fn to_pascal_case(s: &str) -> String {
     let mut chars = s.chars();
     match chars.next() {
         None => String::new(),

@@ -116,8 +116,10 @@ fn test_all_fixtures_compile() {
         // any-type-narrowing uses `null` assigned to enum type which generates `None`.
         // Same root cause as I-201 (null as any → None).
         "any-type-narrowing",
-        // type-narrowing fixture has multiple functions with the same union type (string | number),
-        // generating duplicate StringOrF64 enum definitions. Enum dedup is a separate concern.
+        // type-narrowing: I-212 (enum 重複定義) は P8 統一パイプラインで解消済み。
+        // 残存コンパイルエラー（I-212 とは無関係）:
+        //   - f64.toFixed(2): JS 固有メソッドの Rust 変換が未対応（TODO: format!("{:.N}", v) に変換）
+        //   - StringOrF64 の Display 未実装: println! で enum を表示するには Display trait が必要
         "type-narrowing",
     ];
 

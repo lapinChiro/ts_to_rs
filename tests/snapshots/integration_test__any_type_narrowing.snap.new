@@ -1,0 +1,55 @@
+---
+source: tests/integration_test.rs
+assertion_line: 487
+expression: output
+---
+#[derive(Debug, Clone, PartialEq)]
+pub enum CheckArrowXType {
+    String(String),
+    Other(serde_json::Value),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ExprArrowXType {
+    String(String),
+    Other(serde_json::Value),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum LocalAnyDataType {
+    String(String),
+    Other(serde_json::Value),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ProcessAnyXType {
+    String(String),
+    Other(serde_json::Value),
+}
+
+fn processAny(x: ProcessAnyXType) {
+    if let ProcessAnyXType::String(x) = x {
+        println!("{}", x);
+    }
+}
+
+fn passthrough(x: serde_json::Value) {
+    println!("{}", x);
+}
+
+fn checkArrow(x: CheckArrowXType) -> () {
+    if let CheckArrowXType::String(x) = x {
+        println!("{}", x);
+    }
+}
+
+fn localAny(input: serde_json::Value) {
+    let mut data: LocalAnyDataType = input;
+    if let LocalAnyDataType::String(data) = data {
+        println!("{}", data);
+    }
+}
+
+fn exprArrow(x: ExprArrowXType) -> f64 {
+    if let ExprArrowXType::String(x) = x { x.len() as f64 } else { 0.0 }
+}

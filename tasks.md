@@ -69,8 +69,9 @@
 - AnyTypeAnalyzer の SyntheticTypeRegistry 完全統合（PRD 40-43行）
 - I-212（同一 union 型の enum 重複定義）の解消（PRD 44-46行）
 
-- [ ] **D0a**: AnyTypeAnalyzer 統合 — `generate_any_enum` が `(Item, RustType)` を返す方式から、`SyntheticTypeRegistry::register_any_enum` に登録する方式に変更。Transformer 内の `items.push(any_enum_item)` を削除し、per-file synthetic 経由で出力する。**二重定義に注意**（PRD 43行の警告）
-- [ ] **D0b**: I-212 解消 — D0a 完了後、同一 union 型の enum が SyntheticTypeRegistry の dedup で一元管理される。compile test `type-narrowing` のスキップを解除して GREEN を確認
+- [x] **D0a**: AnyTypeAnalyzer 統合 — `generate_any_enum` → `build_any_enum_variants` にリネーム（variants のみ返す）。Transformer 内で `synthetic_out.register_any_enum()` / `synthetic.register_any_enum()` に登録。registry.rs も `register_single_enum_by_name` に変更。`items.push(enum_item)` を全て削除し per-file synthetic 経由で出力
+  - **発見した割れ窓**: `to_pascal_case` が `any_narrowing.rs` と `synthetic_registry.rs` に重複定義。enum 名の生成ロジック（`{FnName}{ParamName}Type`）が `register_any_enum` と registry.rs に重複。共通ユーティリティへの抽出が必要（D7 として記録）
+- [x] **D0b**: I-212 解消 — **P8 統一パイプラインの per-file SyntheticTypeRegistry dedup で既に解消済み**。compile test `type-narrowing` のスキップ理由を I-212 から残存コンパイルエラー（`toFixed` 未対応 + `Display` 未実装）に更新
 - [ ] **D1**: `convert_relative_path_to_crate_path` の使用箇所確認と削除。Transformer 内で import パス変換に使われている（4箇所）。Transformer が ModuleGraph.resolve_import を使うようになれば不要になるが、P8 のスコープ内かどうかを評価する
 - [ ] **D2**: ExprContext の削除可否を検証
   - ExprContext は Option<T> unwrap 再帰で必須（Phase B の教訓）。削除するには TypeResolver が Option unwrap 後の inner type も expected_type として設定する必要がある
@@ -81,6 +82,7 @@
   - Hono ベンチでフォールバック発火数を計測し、0 件なら削除可能
 - [ ] **D5**: tctx + reg 二重パラメータの統合（105 関数 + 全テスト）。`/large-scale-refactor` スキルに従う
 - [ ] **D6**: `files.clone()` の解消（main.rs ディレクトリモード）。FileOutput にソース文字列を含めるか、TranspileInput が参照を受け取るリファクタリング
+- [ ] **D7**: `to_pascal_case` の重複解消 + enum 名生成ロジックの集約。`any_narrowing.rs:250` と `synthetic_registry.rs:284` に同一の `to_pascal_case` が重複。enum 名の `{FnName}{ParamName}Type` 生成ロジックも `register_any_enum`（synthetic_registry.rs:112-116）と `register_any_narrowing_enums`（registry.rs:1070-1073）に重複。共通ユーティリティに抽出すべき
 
 ### Phase E: 最終検証
 
