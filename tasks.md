@@ -13,76 +13,71 @@
 9. Hono ベンチマーク結果が改善している
 10. pub な型・関数に doc コメントがある
 
-## 現在の状況（Phase C + リファクタリング完了時点）
+## 現在の状況
 
-- `transpile_pipeline()` は全コンポーネント接続の本実装（Phase A）
-- `TranspileOutput` に `module_graph` + `synthetic_items` フィールド追加済み
-- `FileOutput.unsupported` は `UnsupportedSyntaxError` 型（パイプライン内部型に統一）
-- `transpile_single()` 簡易 API 追加済み
-- lib.rs の公開 API は `transpile()` と `transpile_collecting()` の 2 関数のみ。両方とも `run_single_file_pipeline()` + `extract_single_output()` 内部関数を使用。旧ラッパー API（`transpile_with_registry` 等 4 関数）と `build_shared_registry` は削除済み
-- main.rs は `TranspileInput` + `transpile_pipeline` + `OutputWriter` を直接使用。旧 API への依存なし
-- per-file synthetic は items に prepend（旧 API 互換）+ `TranspileOutput.synthetic_items` にも蓄積（OutputWriter 用）
-- **expected_type 優先順位**: ExprContext 優先、FileTypeResolution フォールバック（Phase B で修正）
-- **TypeResolver の Promise unwrap**: `unwrap_promise_and_unit()` で全 4 箇所適用済み
-- DRY: `byte_pos_to_line_col`, `resolve_unsupported`, `run_rustfmt` は lib.rs に集約。main.rs / output_writer.rs は lib.rs の公開関数を使用
-- `find_common_root` のユニットテスト 6 件追加済み
-- compile_test の `assert_compiles_directory` は `transpile_pipeline` ベースに書き換え済み
-- ExprContext / TypeEnv narrowing / resolve_expr_type_heuristic は P6 でフォールバックとして併存中
-- tctx + reg 二重パラメータが 105 関数に存在
-- `generate_any_enum` は Transformer 内で直接呼ばれ、SyntheticTypeRegistry 経由ではない
-- `files.clone()` が main.rs ディレクトリモードに存在（TranspileInput が所有権を取るため不可避。FileOutput にソース文字列を含めるリファクタリングで解消可能）
+**パイプライン:** 全 Pass 接続済み。`transpile_pipeline` 本実装。
+**lib.rs:** `transpile()` / `transpile_collecting()` の 2 関数のみ。旧 API 削除済み。
+**main.rs:** `TranspileInput` + `transpile_pipeline` + `OutputWriter` 直接使用。旧 API 依存なし。
+**Transformer:** AnyTypeAnalyzer 統合済み。to_pascal_case 集約済み。SyntheticTypeRegistry ソート修正済み。
+
+**残存する実装不足（fallback が残っている箇所）:**
+- ExprContext: expected_type の伝搬に使用。TypeResolver の expected_types カバレッジが不十分なため ExprContext がフォールバックとして必要
+- TypeEnv narrowing: スコープベースの narrowing 管理。TypeResolver の narrowing_events カバレッジが不十分
+- resolve_expr_type_heuristic: 式の型解決。TypeResolver の expr_types カバレッジが不十分
+- convert_relative_path_to_crate_path: import パス解決。ModuleGraph.resolve_import が未使用
+- tctx + reg 二重パラメータ: 105 関数に残存
+- files.clone(): main.rs ディレクトリモードで不可避
 
 ## タスク一覧
 
-### Phase A: 統一パイプライン本実装（完了）
+### Phase A-C + リファクタリング + D0a/D0b/D7（全完了）
 
-- [x] **A1**: `TranspileOutput` に `module_graph` と `synthetic_items` フィールドを追加
-- [x] **A2**: `transpile_pipeline()` を全コンポーネント接続の本実装に置換（Pass 0→1→2→3→4-5）
-- [x] **A3**: `transpile_single()` API を追加
-- [x] **A-verify**: 既存テスト全 GREEN
+省略（git history 参照）
 
-### Phase B: lib.rs API ラッパー化（完了）
+### Phase D: 残作業
 
-- [x] **B1**: `transpile_pipeline()` で per-file synthetic を items に含める修正
-- [x] **B2-B4**: lib.rs の公開 API を統一パイプライン経由に置換
-  - **修正した重大バグ 1**: expected_type 優先順位（Option<T> unwrap 再帰で無限ループ）
-  - **修正した重大バグ 2**: TypeResolver が Promise<T> を unwrap せず expected_type に登録
-- [x] **B-verify**: 全テスト GREEN、clippy 0
+**実行順序: TypeResolver 改善 → fallback 削除 → パラメータ統合 → 構造改善**
 
-### Phase C: main.rs 統一（完了）
+#### D-TR: TypeResolver カバレッジ改善（D2-D4 の前提）
 
-- [x] **C1-C3**: main.rs を全面書き換え。`TranspileInput` + `transpile_pipeline` + `OutputWriter` を直接使用
-- [x] **C-verify**: 全テスト GREEN。Hono ベンチマーク: ディレクトリコンパイル 91.8%→98.7%
+TypeResolver のカバレッジが不十分なために ExprContext / TypeEnv narrowing / heuristic を fallback として残している。fallback は実装不足であり正当な理由ではない。TypeResolver を改善し、fallback を不要にする。
 
-### リファクタリング（完了）
+- [ ] **D-TR-1**: TypeResolver カバレッジギャップ調査
+  - heuristic 無効化時に失敗したテストケースの全一覧を作成
+  - 各失敗の原因を分類（expr_types 未登録 / expected_types 未登録 / narrowing_events 未登録）
+  - TypeResolver が対応すべき AST パターンの一覧を作成
+- [ ] **D-TR-2**: TypeResolver の expr_types カバレッジ改善
+  - D-TR-1 で特定した未対応パターンを TypeResolver に追加
+  - テスト追加: 各パターンに対して TypeResolver が Known を返すことを検証
+- [ ] **D-TR-3**: TypeResolver の expected_types カバレッジ改善
+  - Option<T> の inner type を expected_type として設定するロジックを追加
+  - return 文以外の expected_type 伝搬（変数宣言、関数引数等）を改善
+- [ ] **D-TR-4**: TypeResolver の narrowing_events カバレッジ改善
+  - TypeEnv の push_scope/pop_scope/insert に対応する narrowing_events を生成
+  - compound narrowing（nested if/switch）のカバレッジを確認
+- [ ] **D-TR-verify**: heuristic 無効化で全テスト GREEN を確認
 
-- [x] `unwrap()` → `ok_or_else` + エラーメッセージ（lib.rs 3箇所 + main.rs 1箇所）
-- [x] DRY: `byte_pos_to_line_col`, `resolve_unsupported`, `run_rustfmt` を lib.rs に集約
-- [x] DRY: `transpile_strict` / `transpile_collecting_impl` 内部関数抽出 → `run_single_file_pipeline` + `extract_single_output` に統合
-- [x] 死んだ API 削除: `build_shared_registry`, `transpile_with_registry`, `transpile_with_registry_and_path`, `transpile_collecting_with_registry`, `transpile_collecting_with_registry_and_path`
-- [x] `find_common_root` テスト 6 件追加
-- [x] compile_test の `assert_compiles_directory` を `transpile_pipeline` ベースに書き換え
+#### D2-D4: fallback 削除（D-TR 完了後）
 
-### Phase D: 統合残課題 + 不要コード削除
+- [ ] **D2**: ExprContext 削除 — D-TR-3 完了後、ExprContext struct と全参照箇所を削除。`convert_expr` の expected は `tctx.type_resolution.expected_type(span)` のみから取得
+- [ ] **D3**: TypeEnv narrowing 削除 — D-TR-4 完了後、TypeEnv の push_scope/pop_scope/narrowing 関連コードを削除。TypeEnv は変数型追跡（insert/get）の用途のみ残す
+- [ ] **D4**: resolve_expr_type_heuristic 削除 — D-TR-2 完了後、heuristic 関数を削除。`resolve_expr_type` は `tctx.type_resolution.expr_type(span)` のみから取得
 
-**PRD スコープ内で Phase A-C で未着手の項目:**
-- AnyTypeAnalyzer の SyntheticTypeRegistry 完全統合（PRD 40-43行）
-- I-212（同一 union 型の enum 重複定義）の解消（PRD 44-46行）
+#### D1: import 解決の ModuleGraph 統合
 
-- [x] **D0a**: AnyTypeAnalyzer 統合 — `generate_any_enum` → `build_any_enum_variants` にリネーム（variants のみ返す）。Transformer 内で `synthetic_out.register_any_enum()` / `synthetic.register_any_enum()` に登録。registry.rs も `register_single_enum_by_name` に変更。`items.push(enum_item)` を全て削除し per-file synthetic 経由で出力
-  - **発見した割れ窓**: `to_pascal_case` が `any_narrowing.rs` と `synthetic_registry.rs` に重複定義。enum 名の生成ロジック（`{FnName}{ParamName}Type`）が `register_any_enum` と registry.rs に重複。共通ユーティリティへの抽出が必要（D7 として記録）
-- [x] **D0b**: I-212 解消 — **P8 統一パイプラインの per-file SyntheticTypeRegistry dedup で既に解消済み**。compile test `type-narrowing` のスキップ理由を I-212 から残存コンパイルエラー（`toFixed` 未対応 + `Display` 未実装）に更新
-- [ ] **D1**: `convert_relative_path_to_crate_path` の使用箇所確認と削除。Transformer 内で import パス変換に使われている（4箇所）。Transformer が ModuleGraph.resolve_import を使うようになれば不要になるが、P8 のスコープ内かどうかを評価する
-- [ ] **D2**: ExprContext の削除可否を検証
-  - ExprContext は Option<T> unwrap 再帰で必須（Phase B の教訓）。削除するには TypeResolver が Option unwrap 後の inner type も expected_type として設定する必要がある
-  - Hono ベンチでフォールバック発火数を計測し、削除可否を判断
-- [ ] **D3**: TypeEnv narrowing の削除可否を検証
-  - TypeEnv 自体は変数型追跡（insert/get）に使われるため構造体は残す
-- [ ] **D4**: resolve_expr_type_heuristic の削除可否を検証
-  - Hono ベンチでフォールバック発火数を計測し、0 件なら削除可能
-- [ ] **D5**: tctx + reg 二重パラメータの統合（105 関数 + 全テスト）。`/large-scale-refactor` スキルに従う
-- [ ] **D6**: `files.clone()` の解消（main.rs ディレクトリモード）。FileOutput にソース文字列を含めるか、TranspileInput が参照を受け取るリファクタリング
-- [ ] **D7**: `to_pascal_case` の重複解消 + enum 名生成ロジックの集約。`any_narrowing.rs:250` と `synthetic_registry.rs:284` に同一の `to_pascal_case` が重複。enum 名の `{FnName}{ParamName}Type` 生成ロジックも `register_any_enum`（synthetic_registry.rs:112-116）と `register_any_narrowing_enums`（registry.rs:1070-1073）に重複。共通ユーティリティに抽出すべき
+- [ ] **D1**: `convert_relative_path_to_crate_path` に ModuleGraph lookup + fallback パターンを適用
+  - TransformContext の module_graph を使い `resolve_import()` を先に試す
+  - 解決できない場合（NullModuleResolver 等）のみ `convert_relative_path_to_crate_path` にフォールバック
+
+#### D5: tctx + reg 二重パラメータ統合
+
+- [ ] **D5**: 105 関数の `reg: &TypeRegistry` を削除し `tctx.type_registry` に統一
+  - 分析結果: 14 ファイル、105 関数。全箇所で `reg == tctx.type_registry`
+  - `/large-scale-refactor` スキルに従う
+
+#### D6: files.clone() 解消
+
+- [ ] **D6**: `FileOutput` に `source: String` フィールドを追加し `files.clone()` を解消
 
 ### Phase E: 最終検証
 

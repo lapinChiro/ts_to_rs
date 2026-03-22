@@ -842,20 +842,7 @@ fn expand_fn_param_object_props(
 /// Converts a snake_case name to PascalCase.
 ///
 /// Example: `"foo_opts"` → `"FooOpts"`, `"bar_config"` → `"BarConfig"`
-fn to_pascal_case(name: &str) -> String {
-    name.split('_')
-        .map(|part| {
-            let mut chars = part.chars();
-            match chars.next() {
-                Some(c) => {
-                    let upper: String = c.to_uppercase().collect();
-                    upper + chars.as_str()
-                }
-                None => String::new(),
-            }
-        })
-        .collect()
-}
+use crate::transformer::any_narrowing::to_pascal_case;
 
 /// Converts a PascalCase name to snake_case.
 ///

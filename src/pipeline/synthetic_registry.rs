@@ -202,7 +202,10 @@ impl SyntheticTypeRegistry {
 
     /// Returns all registered synthetic types as IR items.
     pub fn all_items(&self) -> Vec<&Item> {
-        self.types.values().map(|def| &def.item).collect()
+        // 名前順にソートして出力の決定性を保証
+        let mut entries: Vec<_> = self.types.iter().collect();
+        entries.sort_by(|(a, _), (b, _)| a.cmp(b));
+        entries.into_iter().map(|(_, def)| &def.item).collect()
     }
 
     /// Merges another registry into this one.
@@ -226,7 +229,10 @@ impl SyntheticTypeRegistry {
 
     /// Consumes the registry and returns all items as owned values.
     pub fn into_items(self) -> Vec<Item> {
-        self.types.into_values().map(|def| def.item).collect()
+        // 名前順にソートして出力の決定性を保証
+        let mut entries: Vec<_> = self.types.into_iter().collect();
+        entries.sort_by(|(a, _), (b, _)| a.cmp(b));
+        entries.into_iter().map(|(_, def)| def.item).collect()
     }
 }
 
@@ -281,21 +287,7 @@ fn variant_name_for_type(ty: &RustType) -> String {
 }
 
 /// Converts a string to PascalCase.
-fn to_pascal_case(s: &str) -> String {
-    let mut result = String::new();
-    let mut capitalize_next = true;
-    for ch in s.chars() {
-        if ch == '_' || ch == '-' {
-            capitalize_next = true;
-        } else if capitalize_next {
-            result.extend(ch.to_uppercase());
-            capitalize_next = false;
-        } else {
-            result.push(ch);
-        }
-    }
-    result
-}
+use crate::transformer::any_narrowing::to_pascal_case;
 
 #[cfg(test)]
 mod tests {

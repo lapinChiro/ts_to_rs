@@ -4,6 +4,12 @@ assertion_line: 494
 expression: output
 ---
 #[derive(Debug, Clone, PartialEq)]
+pub enum ProcessObjectXType {
+    Object(serde_json::Value),
+    Other(serde_json::Value),
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum StringOrF64 {
     String(String),
     F64(f64),
@@ -20,12 +26,6 @@ fn processUnion(x: StringOrF64) -> String {
         return x.trim().to_string();
     }
     "not a string".to_string()
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum ProcessObjectXType {
-    Object(serde_json::Value),
-    Other(serde_json::Value),
 }
 
 fn processObject(x: ProcessObjectXType) {

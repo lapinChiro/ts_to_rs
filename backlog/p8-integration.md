@@ -191,26 +191,25 @@ let rust_source = pipeline::transpile_single(&source)?;
 
 ### 削除対象コード
 
-| 削除対象 | ファイル | 置換先 | 現在の状態（Phase C 完了時点） |
+| 削除対象 | ファイル | 置換先 | 現在の状態（Phase D 完了時点） |
 |---------|---------|--------|------|
-| `convert_relative_path_to_crate_path` | `src/transformer/mod.rs` | `ModuleGraph.resolve_import()` | Transformer 内で 4 箇所使用中。Phase D で評価 |
+| `convert_relative_path_to_crate_path` | `src/transformer/mod.rs` | `ModuleGraph.resolve_import()` | **D1: ModuleGraph lookup + fallback パターンを適用すべき**。TransformContext は module_graph を持っているが未使用。resolve_import() を先に試し、解決不可時に fallback |
 | `transpile_directory` (旧実装) | `src/main.rs` | 統一パイプライン + `OutputWriter` | **Phase C で削除済み** |
 | `build_shared_registry` | `src/lib.rs` | `transpile_pipeline` 内の型収集 | **リファクタリングで削除済み** |
 | `transpile_with_registry` 系 4 関数 | `src/lib.rs` | `transpile()` / `transpile_collecting()` | **リファクタリングで削除済み** |
-| `ExprContext` | `src/transformer/expressions/mod.rs` | `TransformContext` + `expected_types` | フォールバックとして併存中。ExprContext 優先（Phase B の教訓）。Phase D で削除可否検証 |
-| `TypeEnv` の narrowing 管理 | `src/transformer/type_env.rs` | `narrowing_events` | フォールバックとして併存中。Phase D で検証。変数型追跡の用途は残る |
-| `resolve_expr_type_heuristic` | `src/transformer/expressions/type_resolution.rs` | `TypeResolver` | フォールバックとして併存中。Phase D で検証 |
-| `tctx` + `reg` 二重パラメータ | 全 Transformer 関数（105 関数） | `tctx.type_registry` に統一 | 冗長構造のまま残存。Phase D で統合 |
-| 合成型の直接 Item push | `src/transformer/types/mod.rs` | `SyntheticTypeRegistry` | 一部残存。Phase D の D0a で対応 |
+| `ExprContext` | `src/transformer/expressions/mod.rs` | `TransformContext` + `expected_types` | **D2: TypeResolver が Option unwrap 後の inner type も設定すれば削除可能**。現状は再帰防止に必須 |
+| `TypeEnv` の narrowing 管理 | `src/transformer/type_env.rs` | `narrowing_events` | **D3: TypeResolver の narrowing_events カバレッジ 100% で削除可能**。現状は不十分 |
+| `resolve_expr_type_heuristic` | `src/transformer/expressions/type_resolution.rs` | `TypeResolver` | **D4: TypeResolver の expr_types カバレッジ 100% で削除可能**。現状は不十分 |
+| `tctx` + `reg` 二重パラメータ | 全 Transformer 関数（105 関数） | `tctx.type_registry` に統一 | **D5: 未着手**。分析・設計済み（tasks.md 参照） |
+| 合成型の直接 Item push | `src/transformer/functions/mod.rs` 等 | `SyntheticTypeRegistry` | **D0a で解消済み**（`build_any_enum_variants` + `register_any_enum`） |
 | P1 のブリッジ実装 | `src/pipeline/mod.rs` | 本 PRD の本実装 | **Phase A で削除済み** |
 
-### 影響ファイル（Phase D 以降の残作業）
+### 影響ファイル（D1, D2-D4, D5, D6 の残作業）
 
-- **変更**: `src/transformer/mod.rs`（`convert_relative_path_to_crate_path` の削除候補）
-- **変更**: `src/transformer/expressions/mod.rs`（`ExprContext` の削除候補）
-- **変更**: `src/transformer/type_env.rs`（narrowing 管理の削除候補）
-- **変更**: `src/transformer/expressions/type_resolution.rs`（`resolve_expr_type_heuristic` の削除候補）
-- **変更**: 全 Transformer 関数 105 個 + 全テストコード（tctx + reg 統合）
+- **D1**: `src/transformer/mod.rs`（import 解決に ModuleGraph lookup + fallback を適用）
+- **D2-D4**: `src/pipeline/type_resolver.rs`（TypeResolver のカバレッジ改善: expected_types の Option inner type 設定、narrowing_events カバレッジ、expr_types カバレッジ）→ カバレッジ 100% 達成後に ExprContext / TypeEnv narrowing / heuristic を削除
+- **D5**: 全 Transformer 関数 105 個（14 ファイル）+ 全テストコード — `reg: &TypeRegistry` パラメータを削除し `tctx.type_registry` に統一
+- **D6**: `src/pipeline/types.rs`（`FileOutput` に `source: String` フィールド追加）+ `src/pipeline/mod.rs`（ソース文字列を移送）+ `src/main.rs`（`files.clone()` 削除）
 
 ## 作業ステップ
 

@@ -35,6 +35,8 @@ pub fn resolve_expr_type(
     }
 
     // フォールバック: 既存ヒューリスティクス
+    // D4 検証結果: heuristic 無効化で多数のテスト失敗。FileTypeResolution のカバレッジが不十分。
+    // heuristic は引き続き必要。削除は TypeResolver の改善後。
     resolve_expr_type_heuristic(expr, type_env, tctx, reg)
 }
 

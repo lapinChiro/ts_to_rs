@@ -245,10 +245,21 @@ fn extract_typeof_and_string(bin: &ast::BinExpr) -> Option<(&ast::Expr, String)>
     None
 }
 
+/// Converts a snake_case or kebab-case string to PascalCase.
+///
+/// `foo_bar` → `FooBar`, `my-name` → `MyName`, `hello` → `Hello`
 pub(crate) fn to_pascal_case(s: &str) -> String {
-    let mut chars = s.chars();
-    match chars.next() {
-        None => String::new(),
-        Some(c) => c.to_uppercase().to_string() + chars.as_str(),
+    let mut result = String::new();
+    let mut capitalize_next = true;
+    for ch in s.chars() {
+        if ch == '_' || ch == '-' {
+            capitalize_next = true;
+        } else if capitalize_next {
+            result.extend(ch.to_uppercase());
+            capitalize_next = false;
+        } else {
+            result.push(ch);
+        }
     }
+    result
 }
