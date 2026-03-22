@@ -223,16 +223,18 @@ let tctx = TransformContext::new(&mg, &reg, &res, std::path::Path::new("test.ts"
 - [ ] **B5**: `src/transformer/functions/tests.rs` 修正（43 箇所）
 - [ ] **B6**: `src/transformer/statements/tests.rs` 修正（73 箇所）
 - [ ] **B7**: `src/transformer/expressions/tests.rs` 修正（305 箇所）
-- [ ] **B-verify**: `cargo test --lib` 全 GREEN + `cargo clippy --all-targets -- -D warnings` 0
+- [ ] **B-verify**: `cargo test --lib` 全 GREEN（1078 件以上）+ `cargo clippy --all-targets -- -D warnings` 0 + E2E/integration/compile テストも全 GREEN
 - [ ] **B-commit**: `[WIP] P6: Phase B — テストコード tctx 対応`
 
 ### Phase C: FileTypeResolution lookup の実装
 
 - [ ] **C1**: `resolve_expr_type_or_lookup` ヘルパー関数を `expressions/type_resolution.rs` に作成。FileTypeResolution を先にチェックし、Unknown なら既存 `resolve_expr_type` にフォールバック
-- [ ] **C2**: `resolve_expr_type` の全呼び出し箇所（30 箇所）を `resolve_expr_type_or_lookup` に置換
+- [ ] **C2**: `resolve_expr_type` の全呼び出し箇所（31 箇所）を `resolve_expr_type_or_lookup` に置換
 - [ ] **C3**: `convert_expr` 内で `ExprContext::expected` を使う前に `tctx.type_resolution.expected_type(span)` を確認するロジック追加
 - [ ] **C4**: TypeEnv の narrowing 参照箇所で `tctx.type_resolution.narrowed_type()` を先に確認するロジック追加
+- [ ] **C5**: Generator の enum 分類（`has_data_variants` / `is_numeric_enum` / `generate_enum` in `src/generator/mod.rs`）が TS セマンティクスの判断を含むか評価し、含む場合は Transformer に移動。IR の EnumValue/data で十分な場合はそのままで PRD 完了条件を満たす判断をユーザーに確認
 - [ ] **C-verify**: `cargo test` 全 GREEN。新規テスト（context.rs 内）も全 GREEN
+- [ ] **C-commit**: `[WIP] P6: Phase C — FileTypeResolution lookup + enum 分類評価`
 
 ### Phase D: 最終検証
 

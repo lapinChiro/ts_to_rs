@@ -2231,7 +2231,7 @@ fn convert_switch_stmt(
     // Resolve discriminant type for propagating to case values (Category B)
     let discriminant_type = resolve_expr_type(&switch.discriminant, type_env, tctx, reg);
     // Cat A: switch discriminant
-    let discriminant = convert_expr(
+    let mut discriminant = convert_expr(
         &switch.discriminant,
         tctx,
         reg,
@@ -2239,6 +2239,21 @@ fn convert_switch_stmt(
         type_env,
         synthetic,
     )?;
+
+    // Wrap discriminant with .as_str() if any case has a string literal test.
+    let has_string_cases = switch.cases.iter().any(|case| {
+        matches!(
+            case.test.as_deref(),
+            Some(ast::Expr::Lit(ast::Lit::Str(_)))
+        )
+    });
+    if has_string_cases {
+        discriminant = Expr::MethodCall {
+            object: Box::new(discriminant),
+            method: "as_str".to_string(),
+            args: vec![],
+        };
+    }
 
     // Analyze cases: detect if any has a non-trivial fall-through
     let case_count = switch.cases.len();
