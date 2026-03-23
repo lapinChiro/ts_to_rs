@@ -830,6 +830,9 @@ impl<'a> TypeResolver<'a> {
             ast::Expr::New(new_expr) => self.resolve_new_expr(new_expr),
             ast::Expr::Paren(paren) => self.resolve_expr(&paren.expr),
             ast::Expr::TsAs(ts_as) => {
+                // Resolve inner expression to register its type and trigger nested
+                // call resolution (e.g., `foo(bar(x) as T)` needs bar's args typed).
+                self.resolve_expr(&ts_as.expr);
                 convert_ts_type(&ts_as.type_ann, self.synthetic, self.registry)
                     .map(ResolvedType::Known)
                     .unwrap_or(ResolvedType::Unknown)
@@ -884,6 +887,7 @@ impl<'a> TypeResolver<'a> {
             }
             ast::Expr::TsTypeAssertion(assertion) => {
                 // <T>x — same as TsAs
+                self.resolve_expr(&assertion.expr);
                 convert_ts_type(&assertion.type_ann, self.synthetic, self.registry)
                     .map(ResolvedType::Known)
                     .unwrap_or(ResolvedType::Unknown)
@@ -1111,13 +1115,6 @@ impl<'a> TypeResolver<'a> {
 
         // Set expected types for arguments based on callee's parameter types
         self.set_call_arg_expected_types(callee, &call.args);
-
-        // Propagate expected types into nested call expressions within arguments.
-        // Must happen AFTER set_call_arg_expected_types so this call's args have their
-        // expected types before we descend into nested calls (e.g., console.log(g.greet("hello"))).
-        for arg in &call.args {
-            self.set_expected_types_in_nested_calls(&arg.expr);
-        }
 
         // Resolve the callee to determine return type
         let result = match callee {
@@ -1538,45 +1535,6 @@ impl<'a> TypeResolver<'a> {
         ResolvedType::Unknown
     }
 
-    /// Sets expected types on arguments of nested call expressions.
-    ///
-    /// When a call expression appears as an argument to another call (e.g.,
-    /// `console.log(g.greet("hello"))`), the outer call's `resolve_call_expr` does
-    /// not recurse into argument sub-expressions. This method descends into
-    /// arguments to find nested calls and invoke `set_call_arg_expected_types` on
-    /// each, ensuring inner call arguments receive their expected types.
-    ///
-    /// Does NOT resolve expression types or insert into `expr_types`.
-    ///
-    /// # Architecture note
-    ///
-    /// This is a workaround for `resolve_expr` not being called recursively on
-    /// call arguments. `resolve_expr` has side effects (`mark_var_mutable`,
-    /// `expected_types` insertion, etc.) that can break patterns like destructuring
-    /// when called on arguments. The root fix is to split `resolve_expr` into
-    /// side-effect-free type resolution and separate scope updates, which would
-    /// allow recursive argument resolution and eliminate this workaround.
-    /// See Phase 3 in `tasks.type-resolution-unification.md`.
-    fn set_expected_types_in_nested_calls(&mut self, expr: &ast::Expr) {
-        match expr {
-            ast::Expr::Call(call) => {
-                let callee = match &call.callee {
-                    ast::Callee::Expr(e) => e.as_ref(),
-                    _ => return,
-                };
-                self.set_call_arg_expected_types(callee, &call.args);
-                for arg in &call.args {
-                    self.set_expected_types_in_nested_calls(&arg.expr);
-                }
-            }
-            ast::Expr::Paren(paren) => self.set_expected_types_in_nested_calls(&paren.expr),
-            ast::Expr::TsAs(ts_as) => self.set_expected_types_in_nested_calls(&ts_as.expr),
-            ast::Expr::TsNonNull(non_null) => {
-                self.set_expected_types_in_nested_calls(&non_null.expr);
-            }
-            _ => {}
-        }
-    }
 }
 
 /// Extracts the property name from an object literal key.

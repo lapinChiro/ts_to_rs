@@ -478,13 +478,13 @@ unit test の修正は Phase 2（ExprContext 削除）で行う。
 
 **副作用**: Phase 2 の過程で Transformer に expected type の手動伝搬コード（`convert_expr_with_expected` 経由）を 19 箇所追加した。これは TypeResolver の `propagate_expected` と知識が重複している。この二重性の解消は **Phase 2.5** として別タスクファイルに計画済み。
 
-→ **`tasks.expected-type-unification.md`** を参照
+Phase 2 で追加した Transformer の手動伝搬（`convert_expr_with_expected` 経由 19 箇所）と TypeResolver の `propagate_expected` の二重性を解消した。全完了条件達成済み（詳細は git history 参照）
 
 ---
 
 ## Phase 2.5: Expected Type 伝搬の一本化
 
-→ **`tasks.expected-type-unification.md`** に詳細設計を記載
+全完了条件達成済み（詳細は git history 参照）
 
 Phase 2 で追加した Transformer の手動伝搬（`convert_expr_with_expected` 経由 19 箇所）と TypeResolver の `propagate_expected` の二重性を解消する。**Phase 3 の前に完了すること。**
 
@@ -593,19 +593,26 @@ pub(crate) fn get_expr_type<'a>(tctx: &'a TransformContext<'_>, expr: &ast::Expr
 
 3-2 で `resolve_expr_type` 関連関数を削除した際に、関連テスト（`type_resolution.rs` 内の FileTypeResolution lookup テスト 4 件 + `tests.rs` 内の `test_resolve_expr_type_*` 21 件）もすべて削除済み。
 
-#### 3-5: `resolve_expr` 副作用分離 → `set_expected_types_in_nested_calls` 廃止
+#### 3-5: `set_expected_types_in_nested_calls` 廃止 ✅
 
-**ファイル**: `src/pipeline/type_resolver.rs:1560`
+**当初の設計**: `resolve_expr` を「副作用のない型解決」と「副作用のあるスコープ更新」に分離し、分離後は引数に対して型解決のみを再帰呼出しすることで `set_expected_types_in_nested_calls` を不要にする。
 
-`resolve_call_expr` が引数に対して `resolve_expr` を再帰呼出ししないため、ネストされた呼び出しの引数に expected type が設定されない。`set_expected_types_in_nested_calls` はこの問題の回避策。
+**実際の実装と設計判断の変更理由**:
 
-根本原因は `resolve_expr` に副作用（`mark_var_mutable`、`expected_types` 挿入等）があり、引数に対して呼ぶとデストラクチャリング等のパターンが壊れること。
+Phase 3-1 で `resolve_call_expr` 末尾に `resolve_expr` on all args（step 4）を追加したことにより、ネストされた Call は `resolve_call_expr` → `set_call_arg_expected_types` の再帰で自然に expected type を受け取るようになっていた。
 
-**解決策**: `resolve_expr` を「副作用のない型解決」と「副作用のあるスコープ更新」に分離する。分離後は引数に対して型解決のみを再帰呼出しでき、`set_expected_types_in_nested_calls` を削除できる。
+副作用分離が不要な理由を以下の観点で検証した:
 
-**完了条件**: `set_expected_types_in_nested_calls` が削除され、引数のネスト呼び出しが通常の再帰で expected type を受け取る
+1. **型解決と出力記録の相互依存**: `expected_types` の設定（副作用）→ 型解決（pure）→ `expected_types` の読み取り（pureだが副作用の結果に依存）が交互に必要。分離すると pure 関数が impure な入力に依存する矛盾が生じる
+2. **DRY 違反**: `type_of` と `record_effects` が同一の `match expr {}` 構造を持つことになる。これは知識の重複
+3. **副作用の正当性**: `resolve_expr` の全副作用（`mark_var_mutable`、`expected_types` 挿入、`propagate_expected`、`expr_types` 記録、`scope_stack` 管理、`current_fn_return_type` 退避/復元）は call argument コンテキストで呼び出されても正しく動作する。スコープ分離が保たれ、state 汚染は発生しない
 
-**依存**: 3-1
+以上から、当初設計の副作用分離ではなく、`set_expected_types_in_nested_calls` の単純削除が理想的な実装と判断した。
+
+**実施内容**:
+- `set_expected_types_in_nested_calls` メソッドとその呼び出しを削除
+- `resolve_expr_inner` の `TsAs` アームに `resolve_expr(&ts_as.expr)` を追加（旧 `set_expected_types_in_nested_calls` が TsAs を透過していたため、ネスト呼び出しの expected type 伝搬が途切れないよう修正）
+- `resolve_expr_inner` の `TsTypeAssertion` アームにも同様に `resolve_expr(&assertion.expr)` を追加（TsAs と対称）
 
 #### 3-6: `type_env` パラメータの部分的除去
 

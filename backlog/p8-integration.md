@@ -43,14 +43,15 @@ P1〜P7 で新パイプラインの全コンポーネントが実装された。
 - I-212（同一 union 型の enum 重複定義）の完全解消（P4 から繰り越し）:
   - Transformer 内の合成型直接 push が全て SyntheticTypeRegistry 経由になった時点で達成される
   - コンパイルテスト `type-narrowing` のスキップ解除もここで行う
-- 不要コードの削除:
-  - `convert_relative_path_to_crate_path`（`src/directory.rs`）→ `ModuleGraph` に置換済み
-  - `ExprContext`（`src/transformer/expressions/mod.rs`）→ P6 で FileTypeResolution をフォールバックとして参照するよう変更済み（P8 Phase B で優先順位を修正: ExprContext 優先、FileTypeResolution フォールバック）。ExprContext は Transformer が文脈に基づいて設定する「精密な」expected であり、FileTypeResolution は TypeResolver の事前計算値。Option<T> unwrap のように文脈を変えて再帰する場合に ExprContext 優先が必須（Phase B で発見した無限ループバグの教訓）。削除するには TypeResolver が全 ExprContext 伝搬ケースをカバーする必要がある
-  - `TypeEnv` の narrowing スコープ管理（`src/transformer/type_env.rs`）→ P6 で `FileTypeResolution.narrowed_type()` を優先参照するよう変更済み。TypeEnv はフォールバックとして併存中。TypeEnv 自体は変数型追跡（`insert`/`get`）にも使われるため、narrowing 以外の用途が残る場合は構造体は残す
-  - `resolve_expr_type`（`src/transformer/expressions/type_resolution.rs`）→ P6 で `FileTypeResolution.expr_types` を優先参照するよう変更済み。ヒューリスティクス（`resolve_expr_type_heuristic`）がフォールバックとして併存中。フォールバックが発火するケースを Hono ベンチマークで計測し、0 件であることを確認してから削除すること
-  - `tctx` + `reg` の二重パラメータ（全 Transformer 関数）→ P6 で `tctx.type_registry` と `reg` が同一の参照を持つ冗長な構造のまま残存。P8 で `reg` パラメータを削除し `tctx.type_registry` に統一する。影響範囲: 105 関数 + 全テストコード
-  - 分散した合成型生成（Transformer 内の直接 `Item::Enum` push）→ `SyntheticTypeRegistry` に集約済み
-  - P1 で作成したブリッジ実装 → **Phase A で本実装に置換済み**。旧ブリッジコードは存在しない
+- 不要コードの削除（完了済み / 残作業の状態）:
+  - `convert_relative_path_to_crate_path` → **D1 で削除済み**（ModuleGraph lookup + fallback に置換）
+  - `ExprContext` → **Phase 2 で削除済み**（TypeResolver の expected_types に一本化）
+  - `resolve_expr_type` / `resolve_expr_type_heuristic` → **Phase 3-2 で削除済み**（TypeResolver の expr_types に一本化）
+  - `set_expected_types_in_nested_calls` → **Phase 3-5 で削除済み**（resolve_call_expr の再帰で自然に解消）
+  - `TypeEnv` の narrowing スコープ管理 → **Phase 4 で削除予定**。narrowing_events で完全カバー済み（D-TR-1 で検証）だが push_scope/pop_scope の削除は未実施
+  - `tctx` + `reg` の二重パラメータ → **D5: 未着手**。105 関数 + テストコード
+  - 分散した合成型生成 → **D0a で削除済み**
+  - P1 のブリッジ実装 → **Phase A で削除済み**
 - `transpile_single(source: &str) -> Result<String>` の簡易 API → **Phase A で実装済み**（`src/pipeline/mod.rs`）
 
 ### スコープ外
@@ -191,25 +192,25 @@ let rust_source = pipeline::transpile_single(&source)?;
 
 ### 削除対象コード
 
-| 削除対象 | ファイル | 置換先 | 現在の状態（Phase D 完了時点） |
+| 削除対象 | ファイル | 置換先 | 現在の状態 |
 |---------|---------|--------|------|
-| `convert_relative_path_to_crate_path` | `src/transformer/mod.rs` | `ModuleGraph.resolve_import()` | **D1: ModuleGraph lookup + fallback パターンを適用すべき**。TransformContext は module_graph を持っているが未使用。resolve_import() を先に試し、解決不可時に fallback |
+| `convert_relative_path_to_crate_path` | `src/transformer/mod.rs` | `ModuleGraph.resolve_import()` | **D1 で完了済み** |
 | `transpile_directory` (旧実装) | `src/main.rs` | 統一パイプライン + `OutputWriter` | **Phase C で削除済み** |
 | `build_shared_registry` | `src/lib.rs` | `transpile_pipeline` 内の型収集 | **リファクタリングで削除済み** |
 | `transpile_with_registry` 系 4 関数 | `src/lib.rs` | `transpile()` / `transpile_collecting()` | **リファクタリングで削除済み** |
-| `ExprContext` | `src/transformer/expressions/mod.rs` | `TransformContext` + `expected_types` | **D2: TypeResolver が Option unwrap 後の inner type も設定すれば削除可能**。現状は再帰防止に必須 |
-| `TypeEnv` の narrowing 管理 | `src/transformer/type_env.rs` | `narrowing_events` | **D3: TypeResolver の narrowing_events カバレッジ 100% で削除可能**。現状は不十分 |
-| `resolve_expr_type_heuristic` | `src/transformer/expressions/type_resolution.rs` | `TypeResolver` | **D4: TypeResolver の expr_types カバレッジ 100% で削除可能**。現状は不十分 |
+| `ExprContext` | `src/transformer/expressions/mod.rs` | `TransformContext` + `expected_types` | **Phase 2 で削除済み** |
+| `TypeEnv` の narrowing 管理 | `src/transformer/type_env.rs` | `narrowing_events` | **Phase 4 で削除予定**。TypeResolver の narrowing_events カバレッジは D-TR-1 で 100% 確認済みだが、push_scope/pop_scope の削除は未実施 |
+| `resolve_expr_type_heuristic` | `src/transformer/expressions/type_resolution.rs` | `TypeResolver` | **Phase 3-2 で削除済み** |
 | `tctx` + `reg` 二重パラメータ | 全 Transformer 関数（105 関数） | `tctx.type_registry` に統一 | **D5: 未着手**。分析・設計済み（tasks.md 参照） |
-| 合成型の直接 Item push | `src/transformer/functions/mod.rs` 等 | `SyntheticTypeRegistry` | **D0a で解消済み**（`build_any_enum_variants` + `register_any_enum`） |
+| 合成型の直接 Item push | `src/transformer/functions/mod.rs` 等 | `SyntheticTypeRegistry` | **D0a で解消済み** |
 | P1 のブリッジ実装 | `src/pipeline/mod.rs` | 本 PRD の本実装 | **Phase A で削除済み** |
 
-### 影響ファイル（D1, D2-D4, D5, D6 の残作業）
+### 残作業
 
-- **D1**: `src/transformer/mod.rs`（import 解決に ModuleGraph lookup + fallback を適用）
-- **D2-D4**: `src/pipeline/type_resolver.rs`（TypeResolver のカバレッジ改善: expected_types の Option inner type 設定、narrowing_events カバレッジ、expr_types カバレッジ）→ カバレッジ 100% 達成後に ExprContext / TypeEnv narrowing / heuristic を削除
 - **D5**: 全 Transformer 関数 105 個（14 ファイル）+ 全テストコード — `reg: &TypeRegistry` パラメータを削除し `tctx.type_registry` に統一
-- **D6**: `src/pipeline/types.rs`（`FileOutput` に `source: String` フィールド追加）+ `src/pipeline/mod.rs`（ソース文字列を移送）+ `src/main.rs`（`files.clone()` 削除）
+- **Phase 3-6〜3-7**: `type_env` パラメータの部分的除去、`ast_produces_option` 削除（TypeResolver Cond/OptChain expr_type 強化）
+- **Phase 4**: TypeEnv 簡素化（narrowing 用 push_scope/pop_scope 削除）
+- **Phase E**: 最終検証
 
 ## 作業ステップ
 
@@ -244,14 +245,19 @@ let rust_source = pipeline::transpile_single(&source)?;
 
 ### Step 5: 不要コードの削除
 
-1. `ExprContext` の削除（参照箇所がゼロであることを確認）
-2. `TypeEnv` の narrowing 管理の削除
-3. `resolve_expr_type` の削除（フォールバックが不要になっている場合）
-4. `convert_relative_path_to_crate_path` の削除
-5. `transpile_directory` 旧実装の削除
-6. 分散した合成型生成の残骸の削除
-7. P1 のブリッジ実装の削除
-8. 各削除後に `cargo test` が GREEN であることを確認
+削除済み:
+- ~~`ExprContext` の削除~~ → Phase 2 で完了
+- ~~`resolve_expr_type` / `resolve_expr_type_heuristic` の削除~~ → Phase 3-2 で完了
+- ~~`convert_relative_path_to_crate_path` の削除~~ → D1 で完了
+- ~~`transpile_directory` 旧実装の削除~~ → Phase C で完了
+- ~~分散した合成型生成の残骸の削除~~ → D0a で完了
+- ~~P1 のブリッジ実装の削除~~ → Phase A で完了
+- ~~`set_expected_types_in_nested_calls` の削除~~ → Phase 3-5 で完了
+
+残り:
+1. `TypeEnv` の narrowing 管理の削除 → Phase 4 で対応
+2. `tctx` + `reg` 二重パラメータの統合 → D5 で対応
+3. 各削除後に `cargo test` が GREEN であることを確認
 
 ### Step 6: 全テスト + ベンチマーク（検証）
 
@@ -286,10 +292,14 @@ let rust_source = pipeline::transpile_single(&source)?;
 
 ## 完了条件
 
-**注記**: 以下の条件には P2〜P7 で「コンポーネントは実装済みだが既存コードとの統合は P8 に委ねた」項目が含まれる。具体的には:
-- P2 の「`convert_relative_path_to_crate_path` が `ModuleGraph` に置き換えられている」→ P6 で Transformer に統合し、P8 で旧コードを削除
-- P3 の「`SyntheticTypeRegistry` で合成型が一元管理されている」→ P4 で TypeCollector が使用開始し、P8 で分散生成を完全削除
-- P4 の「I-212 が構造的に解消されている」→ P8 で全パスが SyntheticTypeRegistry を使うようになった時点で完全達成
+**注記**: P2〜P7 からの繰り越し項目の進捗:
+- `convert_relative_path_to_crate_path` → **D1 で削除済み**
+- `SyntheticTypeRegistry` で合成型一元管理 → **D0a で達成済み**
+- I-212（enum 重複定義）→ **P8 で構造的に解消済み**
+- `ExprContext` → **Phase 2 で削除済み**
+- `resolve_expr_type_heuristic` → **Phase 3-2 で削除済み**
+- `TypeEnv` narrowing → **Phase 4 で削除予定**
+- `tctx` + `reg` 二重パラメータ → **D5 で統合予定**
 
 - [ ] 統一パイプライン `transpile(TranspileInput) -> TranspileOutput` が P1〜P7 の全コンポーネントを接続して動作する
 - [ ] 既存 `lib.rs` 公開 API（`transpile()`, `transpile_collecting()` 等）が統一パイプラインのラッパーになっている
