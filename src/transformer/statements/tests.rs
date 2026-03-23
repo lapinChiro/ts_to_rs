@@ -2643,7 +2643,8 @@ fn test_convert_du_switch_field_access_multiple_fields_become_bindings() {
 fn test_cond_assign_if_option_type_generates_if_let_some() {
     // if (x = getOpt()) { use(x); }
     // When getOpt returns Option<f64>, should generate: if let Some(x) = get_opt() { ... }
-    let source = "function f(): void { let x: number | null = null; if (x = getOpt()) { console.log(x); } }";
+    let source =
+        "function f(): void { let x: number | null = null; if (x = getOpt()) { console.log(x); } }";
     let mut reg = TypeRegistry::new();
     reg.register(
         "getOpt".to_string(),

@@ -26,6 +26,15 @@ pub(crate) fn get_expr_type<'a>(
     tctx: &'a TransformContext<'_>,
     expr: &ast::Expr,
 ) -> Option<&'a RustType> {
+    // Ident 式の場合、narrowed_type を優先参照（型ナローイング後の型）
+    if let ast::Expr::Ident(ident) = expr {
+        if let Some(narrowed) = tctx
+            .type_resolution
+            .narrowed_type(ident.sym.as_ref(), ident.span.lo.0)
+        {
+            return Some(narrowed);
+        }
+    }
     match tctx.type_resolution.expr_type(Span::from_swc(expr.span())) {
         ResolvedType::Known(ty) => Some(ty),
         ResolvedType::Unknown => None,

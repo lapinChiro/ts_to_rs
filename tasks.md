@@ -22,7 +22,7 @@
 
 **残存する実装不足:**
 - expected type 二重伝搬: Phase 2.5 で解消済み
-- heuristic: Phase 3-1-A で `get_expr_type` に置換完了。プロダクションコードから `resolve_expr_type` の呼び出しゼロ。3-1-B のリグレッション修正後、3-2 で heuristic 関数群を削除予定
+- heuristic: Phase 3-1 完了（3-1-A: 置換、3-1-B: リグレッション修正 + TypeResolver trait 型ラッピング）。プロダクションコードから `resolve_expr_type` の呼び出しゼロ。3-2 で heuristic 関数群を削除予定
 - TypeEnv narrowing: runtime fallback として残存（Phase 4 で削除予定）
 - tctx + reg 二重パラメータ: 112 関数に残存（D5 で削除予定）
 

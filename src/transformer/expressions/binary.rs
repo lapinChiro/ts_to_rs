@@ -98,12 +98,11 @@ pub(super) fn convert_bin_expr(
         let left_type = get_expr_type(tctx, &bin.left);
         let right_type = get_expr_type(tctx, &bin.right);
         let left_is_string = left_type.is_some_and(is_string_type) || is_string_like(&left);
-        let left_known_non_string =
-            (left_type.is_some() && !left_type.is_some_and(is_string_type))
-                && !is_string_like(&left);
-        let right_known_non_string =
-            (right_type.is_some() && !right_type.is_some_and(is_string_type))
-                && !is_string_like(&right);
+        let left_known_non_string = (left_type.is_some() && !left_type.is_some_and(is_string_type))
+            && !is_string_like(&left);
+        let right_known_non_string = (right_type.is_some()
+            && !right_type.is_some_and(is_string_type))
+            && !is_string_like(&right);
 
         if (left_known_non_string && !left_is_string) || (right_known_non_string && left_is_string)
         {

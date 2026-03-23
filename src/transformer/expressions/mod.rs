@@ -190,12 +190,11 @@ fn convert_expr_with_expected(
     Ok(result)
 }
 
-/// Returns true when the expected type is a trait type (`Box<dyn Trait>` or `Named(trait)`)
+/// Returns true when the expected type is a trait type (`Box<dyn Trait>`)
 /// and the source expression produces a concrete (non-Box) value that needs wrapping.
 ///
-/// TypeResolver sets `Named(trait)` as expected type (not `Box<dyn Trait>`), because
-/// it uses `convert_ts_type` which does not apply TypePosition-based `Box<dyn>` wrapping.
-/// Both forms are handled here.
+/// TypeResolver applies `wrap_trait_for_position` so expected types are normally
+/// `Box<dyn Trait>`, but `Named(trait)` is also accepted for robustness.
 fn needs_trait_box_coercion(
     expected: &RustType,
     src_expr: &ast::Expr,

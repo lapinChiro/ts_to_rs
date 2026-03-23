@@ -507,9 +507,9 @@ Phase 2 で追加した Transformer の手動伝搬（`convert_expr_with_expecte
 
 ### タスク
 
-#### 3-1: `resolve_expr_type` 呼び出し箇所の置換 ← 作業中
+#### 3-1: `resolve_expr_type` 呼び出し箇所の置換 ← 完了
 
-**状態**: プロダクションコード 25 箇所の置換完了。TypeResolver 強化完了。テスト 28 件を `from_source` パターンに移行完了。**スナップショット 3 件のリグレッション（3-1-B で修正予定）**。
+**状態**: 完了。プロダクションコード 25 箇所の置換完了。TypeResolver 強化完了。テスト 28 件を `from_source` パターンに移行完了。3-1-B リグレッション 3 件修正完了。
 
 ##### 3-1-A: 置換 + TypeResolver 強化（完了）
 
@@ -526,7 +526,7 @@ Phase 2 で追加した Transformer の手動伝搬（`convert_expr_with_expecte
 - [x] テスト 28 件を `TctxFixture::from_source` / `from_source_with_reg` パターンに移行
 - [x] ユニットテスト 1115 全パス、CLI 3、compile 2、E2E 60 全パス
 
-##### 3-1-B: 発見されたリグレッション修正（次の作業）
+##### 3-1-B: 発見されたリグレッション修正（完了）
 
 スナップショット 3 件で変換結果が変化。根本原因は `get_expr_type` が heuristic の 2 つの機能をカバーしていないこと:
 
@@ -554,23 +554,23 @@ pub(crate) fn get_expr_type<'a>(tctx: &'a TransformContext<'_>, expr: &ast::Expr
 
 - 旧 heuristic: TypeEnv → `Box<dyn Greeter>` → `is_box_dyn_trait` → true → `&*g`
 - 新 `get_expr_type`: TypeResolver → `Named { name: "Greeter" }` → `is_box_dyn_trait` → false → `g`
-- **原因**: TypeResolver は TS→Rust 型マッピングで `Greeter`（trait）→ `Named { name: "Greeter" }` を記録。`trait → Box<dyn Trait>` 変換は Transformer で実施される
-- **修正**: `is_box_dyn_trait` を拡張し、`Named(Trait)` も `Box<dyn Trait>` 相当として認識
-
-```rust
-fn is_box_dyn_trait(ty: Option<&RustType>, reg: &TypeRegistry) -> bool {
-    match ty {
-        Some(RustType::Named { name, type_args })
-            if name == "Box" && type_args.len() == 1
-            && matches!(&type_args[0], RustType::DynTrait(_)) => true,
-        Some(RustType::Named { name, type_args })
-            if type_args.is_empty() && reg.is_trait_type(name) => true,
-        _ => false,
-    }
-}
-```
+- **原因**: TypeResolver は `convert_ts_type` のみ使用し `wrap_trait_for_position` を適用しなかったため、trait 型が `Named { name: "Greeter" }` のまま記録されていた
+- **修正**: TypeResolver の型記録時に `wrap_trait_for_position` を適用し、パラメータは `Param` (`&dyn Trait`)、変数宣言/戻り値型は `Value` (`Box<dyn Trait>`) としてラップ。`is_box_dyn_trait` は元のシグネチャのまま（`reg` パラメータ不要）
 
 **完了条件**: スナップショット 3 件がリグレッションなしで更新、`cargo test` 全 GREEN
+
+**実装時の追加修正**:
+- TypeResolver の `detect_narrowing_guard` に `LogicalAnd` 再帰処理と truthy narrowing（`if (x)` where `x: Option<T>` → `T`）を追加
+- TypeResolver の型記録に `wrap_trait_for_position` を適用:
+  - パラメータ → `Param` (`&dyn Trait`)
+  - 変数宣言/プロパティ → `Value` (`Box<dyn Trait>`)
+  - 戻り値型 → `Value` (`Box<dyn Trait>`)
+  これにより `is_box_dyn_trait` の `reg` パラメータ追加が不要に
+- `resolve_member_expr` / `resolve_method_return_type` / `lookup_method_params` に `Ref(DynTrait)` / `Box<dyn Trait>` / `DynTrait` からの trait 名展開を追加（`extract_type_name_for_registry` ヘルパー）
+
+**残存する trait 型ラッピングの不整合**（Phase 3 以降で対処）:
+1. **TypeRegistry が未ラップの `Named(trait)` を保持**: `build_registry` が `convert_ts_type` を使い `wrap_trait_for_position` を適用しないため、`set_call_arg_expected_types` の TypeRegistry パスから `Named(trait)` が expected_types に入る。`needs_trait_box_coercion` の `Named(trait)` フォールバック (`expressions/mod.rs:220`) が依然必要
+2. **Fn 型の Param ラップと expected_type の不整合**: スコープに登録した `Fn` 型のパラメータは `Param` 位置でラップ（`Ref(DynTrait(...))`）。これが `set_call_arg_expected_types` のスコープルックアップパスから expected_types に入ると、`needs_trait_box_coercion` がマッチしない。ローカル定義関数に trait パラメータがある場合に Box coercion が欠落する可能性あり
 
 #### 3-2: `resolve_expr_type` 関連関数の削除
 

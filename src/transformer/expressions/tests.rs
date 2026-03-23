@@ -51,7 +51,11 @@ fn extract_expr_stmt(module: &ast::Module, index: usize) -> ast::Expr {
 ///
 /// `fn_index` selects which function in the module, `stmt_index` selects which
 /// statement in the function body. The statement must be an expression statement.
-fn extract_fn_body_expr_stmt(module: &ast::Module, fn_index: usize, stmt_index: usize) -> ast::Expr {
+fn extract_fn_body_expr_stmt(
+    module: &ast::Module,
+    fn_index: usize,
+    stmt_index: usize,
+) -> ast::Expr {
     let fn_decl = match &module.body[fn_index] {
         ModuleItem::Stmt(Stmt::Decl(Decl::Fn(f))) => f,
         _ => panic!("expected function declaration at module index {fn_index}"),
@@ -1493,9 +1497,7 @@ fn test_object_lit_omitted_optional_field_gets_none() {
 #[test]
 fn test_binary_number_plus_string_generates_format() {
     // x + " px" where x: number → format!("{}{}", x, " px")
-    let f = TctxFixture::from_source(
-        r#"function f(x: number): string { return x + " px"; }"#,
-    );
+    let f = TctxFixture::from_source(r#"function f(x: number): string { return x + " px"; }"#);
     let tctx = f.tctx();
     // The return expression is the binary expression
     let fn_decl = match &f.module().body[0] {
@@ -4148,10 +4150,7 @@ fn test_convert_opt_chain_non_option_type_returns_plain_access() {
             vec![],
         ),
     );
-    let f = TctxFixture::from_source_with_reg(
-        "function f(x: Foo) { x?.y; }",
-        reg,
-    );
+    let f = TctxFixture::from_source_with_reg("function f(x: Foo) { x?.y; }", reg);
     let tctx = f.tctx();
     let swc_expr = extract_fn_body_expr_stmt(f.module(), 0, 0);
 
@@ -4361,10 +4360,7 @@ fn test_convert_opt_chain_nested_option_uses_and_then() {
             vec![],
         ),
     );
-    let f = TctxFixture::from_source_with_reg(
-        "function f(x: Foo | null) { x?.y?.z; }",
-        reg,
-    );
+    let f = TctxFixture::from_source_with_reg("function f(x: Foo | null) { x?.y?.z; }", reg);
     let tctx = f.tctx();
     let swc_expr = extract_fn_body_expr_stmt(f.module(), 0, 0);
 
@@ -5343,9 +5339,8 @@ fn test_instanceof_any_type_generates_todo() {
 
 #[test]
 fn test_typeof_equals_undefined_option_resolves_is_none() {
-    let f = TctxFixture::from_source(
-        r#"function f(x: number | null) { typeof x === "undefined"; }"#,
-    );
+    let f =
+        TctxFixture::from_source(r#"function f(x: number | null) { typeof x === "undefined"; }"#);
     let tctx = f.tctx();
     let swc_expr = extract_fn_body_expr_stmt(f.module(), 0, 0);
     let result = convert_expr(
@@ -5666,10 +5661,7 @@ fn test_convert_bin_expr_enum_var_eq_string_literal_converts_rhs() {
         },
     );
 
-    let f = TctxFixture::from_source_with_reg(
-        r#"function f(d: Direction) { d == "up"; }"#,
-        reg,
-    );
+    let f = TctxFixture::from_source_with_reg(r#"function f(d: Direction) { d == "up"; }"#, reg);
     let tctx = f.tctx();
     let swc_expr = extract_fn_body_expr_stmt(f.module(), 0, 0);
     let result = convert_expr(
@@ -5706,10 +5698,7 @@ fn test_convert_bin_expr_string_literal_ne_enum_var_converts_lhs() {
         },
     );
 
-    let f = TctxFixture::from_source_with_reg(
-        r#"function f(d: Direction) { "up" != d; }"#,
-        reg,
-    );
+    let f = TctxFixture::from_source_with_reg(r#"function f(d: Direction) { "up" != d; }"#, reg);
     let tctx = f.tctx();
     let swc_expr = extract_fn_body_expr_stmt(f.module(), 0, 0);
     let result = convert_expr(
@@ -5888,10 +5877,7 @@ fn test_convert_member_expr_discriminant_field_to_method_call() {
         },
     );
 
-    let f = TctxFixture::from_source_with_reg(
-        "function f(s: Shape) { s.kind; }",
-        reg,
-    );
+    let f = TctxFixture::from_source_with_reg("function f(s: Shape) { s.kind; }", reg);
     let tctx = f.tctx();
     let swc_expr = extract_fn_body_expr_stmt(f.module(), 0, 0);
     let result = convert_expr(
@@ -6173,10 +6159,7 @@ fn test_convert_du_standalone_field_access_generates_match_expr() {
     let reg = build_shape_registry_for_expr();
 
     // s.radius → match expression
-    let f = TctxFixture::from_source_with_reg(
-        "function f(s: Shape) { const x = s.radius; }",
-        reg,
-    );
+    let f = TctxFixture::from_source_with_reg("function f(s: Shape) { const x = s.radius; }", reg);
     let tctx = f.tctx();
     let swc_expr = extract_fn_body_var_init(f.module(), 0, 0);
     let result = convert_expr(
@@ -6229,10 +6212,7 @@ fn test_in_operator_struct_field_exists_generates_true() {
             vec![],
         ),
     );
-    let f = TctxFixture::from_source_with_reg(
-        r#"function f(point: Point) { "x" in point; }"#,
-        reg,
-    );
+    let f = TctxFixture::from_source_with_reg(r#"function f(point: Point) { "x" in point; }"#, reg);
     let tctx = f.tctx();
     let swc_expr = extract_fn_body_expr_stmt(f.module(), 0, 0);
     let result = convert_expr(
@@ -6261,10 +6241,7 @@ fn test_in_operator_struct_field_missing_generates_false() {
             vec![],
         ),
     );
-    let f = TctxFixture::from_source_with_reg(
-        r#"function f(point: Point) { "z" in point; }"#,
-        reg,
-    );
+    let f = TctxFixture::from_source_with_reg(r#"function f(point: Point) { "z" in point; }"#, reg);
     let tctx = f.tctx();
     let swc_expr = extract_fn_body_expr_stmt(f.module(), 0, 0);
     let result = convert_expr(

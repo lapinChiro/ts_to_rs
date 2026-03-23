@@ -16,6 +16,7 @@ use crate::pipeline::ModuleGraph;
 use crate::pipeline::ResolvedType;
 use crate::pipeline::SyntheticTypeRegistry;
 use crate::registry::{TypeDef, TypeRegistry};
+use crate::transformer::type_env::{wrap_trait_for_position, TypePosition};
 
 /// Pre-computes type information for a single file.
 ///
@@ -152,6 +153,7 @@ impl<'a> TypeResolver<'a> {
                         .and_then(|ann| {
                             convert_ts_type(&ann.type_ann, self.synthetic, self.registry).ok()
                         })
+                        .map(|ty| wrap_trait_for_position(ty, TypePosition::Param, self.registry))
                         .unwrap_or(RustType::Any);
                     Some((name, ty))
                 } else {
@@ -164,28 +166,20 @@ impl<'a> TypeResolver<'a> {
             .return_type
             .as_ref()
             .and_then(|ann| convert_ts_type(&ann.type_ann, self.synthetic, self.registry).ok())
-            .and_then(|ty| unwrap_promise_and_unit(ty));
+            .and_then(|ty| unwrap_promise_and_unit(ty))
+            .map(|ty| wrap_trait_for_position(ty, TypePosition::Value, self.registry));
         let fn_type = RustType::Fn {
             params: params.iter().map(|(_, ty)| ty.clone()).collect(),
-            return_type: Box::new(return_type.unwrap_or(RustType::Unit)),
+            return_type: Box::new(return_type.clone().unwrap_or(RustType::Unit)),
         };
-        self.declare_var(
-            &fn_name,
-            ResolvedType::Known(fn_type),
-            fn_span,
-            false,
-        );
+        self.declare_var(&fn_name, ResolvedType::Known(fn_type), fn_span, false);
 
         self.enter_scope();
 
         // Record return type for expected_types on return statements
         // Promise<T> → T, void → None (Rust omits `-> ()`)
         let prev_return_type = self.current_fn_return_type.take();
-        if let Some(return_ann) = fn_decl.function.return_type.as_ref() {
-            if let Ok(ty) = convert_ts_type(&return_ann.type_ann, self.synthetic, self.registry) {
-                self.current_fn_return_type = unwrap_promise_and_unit(ty);
-            }
-        }
+        self.current_fn_return_type = return_type;
 
         // Register parameters in scope
         for param in &fn_decl.function.params {
@@ -209,6 +203,7 @@ impl<'a> TypeResolver<'a> {
                 .type_ann
                 .as_ref()
                 .and_then(|ann| convert_ts_type(&ann.type_ann, self.synthetic, self.registry).ok())
+                .map(|ty| wrap_trait_for_position(ty, TypePosition::Param, self.registry))
                 .map(ResolvedType::Known)
                 .unwrap_or(ResolvedType::Unknown);
             self.declare_var(&name, ty, span, false);
@@ -226,9 +221,11 @@ impl<'a> TypeResolver<'a> {
                 let name = ident.id.sym.to_string();
                 let span = Span::from_swc(ident.id.span);
 
-                // Resolve type from annotation
+                // Resolve type from annotation (Value position: trait → Box<dyn Trait>)
                 let annotation_type = ident.type_ann.as_ref().and_then(|ann| {
-                    convert_ts_type(&ann.type_ann, self.synthetic, self.registry).ok()
+                    convert_ts_type(&ann.type_ann, self.synthetic, self.registry)
+                        .ok()
+                        .map(|ty| wrap_trait_for_position(ty, TypePosition::Value, self.registry))
                 });
 
                 // Set expected type BEFORE resolving the initializer, so that
@@ -318,13 +315,20 @@ impl<'a> TypeResolver<'a> {
                         for param in &method.function.params {
                             self.visit_param_pat(&param.pat);
                         }
-                        // Set return type (Promise<T> → T, void → None)
+                        // Set return type (Promise<T> → T, void → None, trait → Box<dyn Trait>)
                         let prev_return_type = self.current_fn_return_type.take();
                         if let Some(return_ann) = &method.function.return_type {
                             if let Ok(ty) =
                                 convert_ts_type(&return_ann.type_ann, self.synthetic, self.registry)
                             {
-                                self.current_fn_return_type = unwrap_promise_and_unit(ty);
+                                self.current_fn_return_type =
+                                    unwrap_promise_and_unit(ty).map(|ty| {
+                                        wrap_trait_for_position(
+                                            ty,
+                                            TypePosition::Value,
+                                            self.registry,
+                                        )
+                                    });
                             }
                         }
                         // Walk body
@@ -356,9 +360,14 @@ impl<'a> TypeResolver<'a> {
                         self.result.expr_types.insert(span, ty);
                         // Set expected from type annotation and propagate
                         if let Some(type_ann) = &prop.type_ann {
-                            if let Ok(ann_ty) =
+                            if let Ok(raw_ty) =
                                 convert_ts_type(&type_ann.type_ann, self.synthetic, self.registry)
                             {
+                                let ann_ty = wrap_trait_for_position(
+                                    raw_ty,
+                                    TypePosition::Value,
+                                    self.registry,
+                                );
                                 self.result.expected_types.insert(span, ann_ty.clone());
                                 self.propagate_expected(init, &ann_ty);
                             }
@@ -519,48 +528,66 @@ impl<'a> TypeResolver<'a> {
     fn detect_narrowing_guard(&mut self, test: &ast::Expr, consequent: &ast::Stmt) {
         let scope_span = Span::from_swc(consequent.span());
 
-        // typeof x === "string"
-        if let ast::Expr::Bin(bin) = test {
-            if matches!(bin.op, ast::BinaryOp::EqEqEq | ast::BinaryOp::EqEq) {
-                if let Some((var_name, narrowed_type)) = self.extract_typeof_narrowing(bin) {
+        match test {
+            // Compound: a && b → detect narrowing from both sides
+            ast::Expr::Bin(bin) if matches!(bin.op, ast::BinaryOp::LogicalAnd) => {
+                self.detect_narrowing_guard(&bin.left, consequent);
+                self.detect_narrowing_guard(&bin.right, consequent);
+            }
+            ast::Expr::Bin(bin) => {
+                // typeof x === "string"
+                if matches!(bin.op, ast::BinaryOp::EqEqEq | ast::BinaryOp::EqEq) {
+                    if let Some((var_name, narrowed_type)) = self.extract_typeof_narrowing(bin) {
+                        self.result.narrowing_events.push(NarrowingEvent {
+                            scope_start: scope_span.lo,
+                            scope_end: scope_span.hi,
+                            var_name,
+                            narrowed_type,
+                        });
+                    }
+                }
+                // x !== null
+                if matches!(bin.op, ast::BinaryOp::NotEqEq | ast::BinaryOp::NotEq) {
+                    if let Some((var_name, narrowed_type)) = self.extract_null_check_narrowing(bin)
+                    {
+                        self.result.narrowing_events.push(NarrowingEvent {
+                            scope_start: scope_span.lo,
+                            scope_end: scope_span.hi,
+                            var_name,
+                            narrowed_type,
+                        });
+                    }
+                }
+                // x instanceof Foo
+                if matches!(bin.op, ast::BinaryOp::InstanceOf) {
+                    if let (ast::Expr::Ident(var_ident), ast::Expr::Ident(class_ident)) =
+                        (bin.left.as_ref(), bin.right.as_ref())
+                    {
+                        self.result.narrowing_events.push(NarrowingEvent {
+                            scope_start: scope_span.lo,
+                            scope_end: scope_span.hi,
+                            var_name: var_ident.sym.to_string(),
+                            narrowed_type: RustType::Named {
+                                name: class_ident.sym.to_string(),
+                                type_args: vec![],
+                            },
+                        });
+                    }
+                }
+            }
+            // Truthy check: if (x) where x is Option<T> → narrow to T
+            ast::Expr::Ident(ident) => {
+                let var_name = ident.sym.to_string();
+                if let ResolvedType::Known(RustType::Option(inner)) = self.lookup_var(&var_name) {
                     self.result.narrowing_events.push(NarrowingEvent {
                         scope_start: scope_span.lo,
                         scope_end: scope_span.hi,
                         var_name,
-                        narrowed_type,
+                        narrowed_type: inner.as_ref().clone(),
                     });
                 }
             }
-            // x !== null
-            if matches!(bin.op, ast::BinaryOp::NotEqEq | ast::BinaryOp::NotEq) {
-                if let Some((var_name, narrowed_type)) = self.extract_null_check_narrowing(bin) {
-                    self.result.narrowing_events.push(NarrowingEvent {
-                        scope_start: scope_span.lo,
-                        scope_end: scope_span.hi,
-                        var_name,
-                        narrowed_type,
-                    });
-                }
-            }
-        }
-
-        // x instanceof Foo
-        if let ast::Expr::Bin(bin) = test {
-            if matches!(bin.op, ast::BinaryOp::InstanceOf) {
-                if let (ast::Expr::Ident(var_ident), ast::Expr::Ident(class_ident)) =
-                    (bin.left.as_ref(), bin.right.as_ref())
-                {
-                    self.result.narrowing_events.push(NarrowingEvent {
-                        scope_start: scope_span.lo,
-                        scope_end: scope_span.hi,
-                        var_name: var_ident.sym.to_string(),
-                        narrowed_type: RustType::Named {
-                            name: class_ident.sym.to_string(),
-                            type_args: vec![],
-                        },
-                    });
-                }
-            }
+            _ => {}
         }
     }
 
@@ -779,7 +806,10 @@ impl<'a> TypeResolver<'a> {
         let ty = self.resolve_expr_inner(expr);
         if matches!(ty, ResolvedType::Known(_)) {
             let span = Span::from_swc(expr.span());
-            self.result.expr_types.entry(span).or_insert_with(|| ty.clone());
+            self.result
+                .expr_types
+                .entry(span)
+                .or_insert_with(|| ty.clone());
         }
         ty
     }
@@ -837,9 +867,7 @@ impl<'a> TypeResolver<'a> {
                 match unary.op {
                     ast::UnaryOp::TypeOf => ResolvedType::Known(RustType::String),
                     ast::UnaryOp::Bang => ResolvedType::Known(RustType::Bool),
-                    ast::UnaryOp::Minus | ast::UnaryOp::Plus => {
-                        ResolvedType::Known(RustType::F64)
-                    }
+                    ast::UnaryOp::Minus | ast::UnaryOp::Plus => ResolvedType::Known(RustType::F64),
                     _ => ResolvedType::Unknown,
                 }
             }
@@ -1054,9 +1082,9 @@ impl<'a> TypeResolver<'a> {
         }
 
         // Lookup in TypeRegistry
-        let (type_name, type_args) = match obj_rust_type {
-            RustType::Named { name, type_args } => (name.as_str(), type_args.as_slice()),
-            _ => return ResolvedType::Unknown,
+        let (type_name, type_args) = match extract_type_name_for_registry(obj_rust_type) {
+            Some(pair) => pair,
+            None => return ResolvedType::Unknown,
         };
 
         let type_def = if type_args.is_empty() {
@@ -1090,7 +1118,6 @@ impl<'a> TypeResolver<'a> {
         for arg in &call.args {
             self.set_expected_types_in_nested_calls(&arg.expr);
         }
-
 
         // Resolve the callee to determine return type
         let result = match callee {
@@ -1239,10 +1266,7 @@ impl<'a> TypeResolver<'a> {
         obj_type: &RustType,
         method_name: &str,
     ) -> Option<Vec<RustType>> {
-        let (type_name, type_args) = match obj_type {
-            RustType::Named { name, type_args } => (name.as_str(), type_args.as_slice()),
-            _ => return None,
-        };
+        let (type_name, type_args) = extract_type_name_for_registry(obj_type)?;
 
         let type_def = if type_args.is_empty() {
             self.registry.get(type_name).cloned()
@@ -1259,11 +1283,9 @@ impl<'a> TypeResolver<'a> {
     }
 
     fn resolve_method_return_type(&self, obj_type: &RustType, method_name: &str) -> ResolvedType {
-        let (type_name, type_args) = match obj_type {
-            RustType::String => ("String", &[] as &[RustType]),
-            RustType::Vec(_) => ("Vec", &[] as &[RustType]),
-            RustType::Named { name, type_args } => (name.as_str(), type_args.as_slice()),
-            _ => return ResolvedType::Unknown,
+        let (type_name, type_args) = match extract_type_name_for_registry(obj_type) {
+            Some(pair) => pair,
+            None => return ResolvedType::Unknown,
         };
 
         let type_def = if type_args.is_empty() {
@@ -1320,11 +1342,12 @@ impl<'a> TypeResolver<'a> {
     fn resolve_arrow_expr(&mut self, arrow: &ast::ArrowExpr) -> ResolvedType {
         self.enter_scope();
 
-        // Save and set return type (Promise<T> → T, void → None)
+        // Save and set return type (Promise<T> → T, void → None, trait → Box<dyn Trait>)
         let prev_return_type = self.current_fn_return_type.take();
         if let Some(return_ann) = &arrow.return_type {
             if let Ok(ty) = convert_ts_type(&return_ann.type_ann, self.synthetic, self.registry) {
-                self.current_fn_return_type = unwrap_promise_and_unit(ty);
+                self.current_fn_return_type = unwrap_promise_and_unit(ty)
+                    .map(|ty| wrap_trait_for_position(ty, TypePosition::Value, self.registry));
             }
         }
 
@@ -1363,7 +1386,8 @@ impl<'a> TypeResolver<'a> {
                             expected_param_types
                                 .as_ref()
                                 .and_then(|types| types.get(i).cloned())
-                        });
+                        })
+                        .map(|ty| wrap_trait_for_position(ty, TypePosition::Param, self.registry));
                     let resolved = ty
                         .clone()
                         .map(ResolvedType::Known)
@@ -1382,11 +1406,13 @@ impl<'a> TypeResolver<'a> {
                         }),
                         _ => None,
                     };
-                    let ty = ty.or_else(|| {
-                        expected_param_types
-                            .as_ref()
-                            .and_then(|types| types.get(i).cloned())
-                    });
+                    let ty = ty
+                        .or_else(|| {
+                            expected_param_types
+                                .as_ref()
+                                .and_then(|types| types.get(i).cloned())
+                        })
+                        .map(|ty| wrap_trait_for_position(ty, TypePosition::Param, self.registry));
                     // Register sub-pattern variables
                     self.visit_param_pat(param);
                     param_types.push(ty.unwrap_or(RustType::Any));
@@ -1432,7 +1458,8 @@ impl<'a> TypeResolver<'a> {
         let prev_return_type = self.current_fn_return_type.take();
         if let Some(return_ann) = &fn_expr.function.return_type {
             if let Ok(ty) = convert_ts_type(&return_ann.type_ann, self.synthetic, self.registry) {
-                self.current_fn_return_type = unwrap_promise_and_unit(ty);
+                self.current_fn_return_type = unwrap_promise_and_unit(ty)
+                    .map(|ty| wrap_trait_for_position(ty, TypePosition::Value, self.registry));
             }
         }
 
@@ -1451,9 +1478,13 @@ impl<'a> TypeResolver<'a> {
         let mut param_types = Vec::new();
         for param in &fn_expr.function.params {
             if let ast::Pat::Ident(ident) = &param.pat {
-                let ty = ident.type_ann.as_ref().and_then(|ann| {
-                    convert_ts_type(&ann.type_ann, self.synthetic, self.registry).ok()
-                });
+                let ty = ident
+                    .type_ann
+                    .as_ref()
+                    .and_then(|ann| {
+                        convert_ts_type(&ann.type_ann, self.synthetic, self.registry).ok()
+                    })
+                    .map(|ty| wrap_trait_for_position(ty, TypePosition::Param, self.registry));
                 param_types.push(ty.unwrap_or(RustType::Any));
             }
             self.visit_param_pat(&param.pat);
@@ -1589,6 +1620,36 @@ fn is_object_type(ty: &ResolvedType) -> bool {
             RustType::Named { .. } | RustType::Vec(_) | RustType::Tuple(_) | RustType::Any
         ),
         ResolvedType::Unknown => false,
+    }
+}
+
+/// RustType から TypeRegistry ルックアップ用の (型名, 型引数) を抽出する。
+///
+/// `Named`, `String`, `Vec` に加え、trait ラッピング後の `Ref(DynTrait)`,
+/// `Box<dyn Trait>` (`Named { name: "Box", type_args: [DynTrait(_)] }`),
+/// `DynTrait` も trait 名に展開する。
+fn extract_type_name_for_registry(ty: &RustType) -> Option<(&str, &[RustType])> {
+    match ty {
+        RustType::String => Some(("String", &[])),
+        RustType::Vec(_) => Some(("Vec", &[])),
+        RustType::Named { name, type_args }
+            if name == "Box"
+                && type_args.len() == 1
+                && matches!(&type_args[0], RustType::DynTrait(_)) =>
+        {
+            if let RustType::DynTrait(trait_name) = &type_args[0] {
+                Some((trait_name.as_str(), &[]))
+            } else {
+                None
+            }
+        }
+        RustType::Named { name, type_args } => Some((name.as_str(), type_args.as_slice())),
+        RustType::Ref(inner) => match inner.as_ref() {
+            RustType::DynTrait(name) => Some((name.as_str(), &[])),
+            _ => None,
+        },
+        RustType::DynTrait(name) => Some((name.as_str(), &[])),
+        _ => None,
     }
 }
 

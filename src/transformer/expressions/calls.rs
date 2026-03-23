@@ -132,15 +132,14 @@ pub(super) fn convert_call_expr(
                 // Cat A: method receiver — converted before method resolution
                 let object = convert_expr(&member.obj, tctx, reg, type_env, synthetic)?;
                 // Look up method parameter types from the object's type
-                let method_sig =
-                    get_expr_type(tctx, &member.obj).and_then(|ty| {
-                        if let RustType::Named { name, .. } = ty {
-                            if let Some(TypeDef::Struct { methods, .. }) = reg.get(name) {
-                                return methods.get(&method).cloned();
-                            }
+                let method_sig = get_expr_type(tctx, &member.obj).and_then(|ty| {
+                    if let RustType::Named { name, .. } = ty {
+                        if let Some(TypeDef::Struct { methods, .. }) = reg.get(name) {
+                            return methods.get(&method).cloned();
                         }
-                        None
-                    });
+                    }
+                    None
+                });
                 let method_params = method_sig.as_ref().map(|sig| sig.params.as_slice());
                 let args = convert_call_args_with_types(
                     &call.args,
@@ -672,7 +671,9 @@ pub(super) fn convert_call_args_with_types(
     Ok(result)
 }
 
-/// Returns true if the type is `Box<dyn Trait>` (i.e., `Named { name: "Box", type_args: [DynTrait(_)] }`).
+/// Returns true if the type is `Box<dyn Trait>` or a `Named` type that is a trait.
+///
+/// Returns true if the type is `Box<dyn Trait>`.
 fn is_box_dyn_trait(ty: Option<&RustType>) -> bool {
     matches!(
         ty,

@@ -110,12 +110,8 @@ pub(super) fn convert_opt_chain_expr(
             };
 
             // If the field type is Option, use and_then to avoid Option<Option<T>>
-            let field_type = resolve_field_type(
-                obj_type.unwrap_or(&RustType::Any),
-                &member.prop,
-                tctx,
-                reg,
-            );
+            let field_type =
+                resolve_field_type(obj_type.unwrap_or(&RustType::Any), &member.prop, tctx, reg);
             let method_name = if field_type.is_some_and(|ty| matches!(ty, RustType::Option(_))) {
                 "and_then"
             } else {
@@ -149,8 +145,7 @@ pub(super) fn convert_opt_chain_expr(
                 },
                 _ => None,
             };
-            let is_option =
-                callee_obj_type.is_some_and(|ty| matches!(ty, RustType::Option(_)));
+            let is_option = callee_obj_type.is_some_and(|ty| matches!(ty, RustType::Option(_)));
 
             let (object, method) =
                 extract_method_from_callee(&opt_call.callee, tctx, reg, type_env, synthetic)?;
