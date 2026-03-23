@@ -47,6 +47,46 @@ fn extract_expr_stmt(module: &ast::Module, index: usize) -> ast::Expr {
     }
 }
 
+/// Extract an expression statement from a function body.
+///
+/// `fn_index` selects which function in the module, `stmt_index` selects which
+/// statement in the function body. The statement must be an expression statement.
+fn extract_fn_body_expr_stmt(module: &ast::Module, fn_index: usize, stmt_index: usize) -> ast::Expr {
+    let fn_decl = match &module.body[fn_index] {
+        ModuleItem::Stmt(Stmt::Decl(Decl::Fn(f))) => f,
+        _ => panic!("expected function declaration at module index {fn_index}"),
+    };
+    let body = fn_decl
+        .function
+        .body
+        .as_ref()
+        .expect("function has no body");
+    match &body.stmts[stmt_index] {
+        ast::Stmt::Expr(expr_stmt) => *expr_stmt.expr.clone(),
+        _ => panic!("expected expression statement at stmt index {stmt_index}"),
+    }
+}
+
+/// Extract a variable initializer from a function body.
+fn extract_fn_body_var_init(module: &ast::Module, fn_index: usize, stmt_index: usize) -> ast::Expr {
+    let fn_decl = match &module.body[fn_index] {
+        ModuleItem::Stmt(Stmt::Decl(Decl::Fn(f))) => f,
+        _ => panic!("expected function declaration at module index {fn_index}"),
+    };
+    let body = fn_decl
+        .function
+        .body
+        .as_ref()
+        .expect("function has no body");
+    match &body.stmts[stmt_index] {
+        ast::Stmt::Decl(Decl::Var(var_decl)) => {
+            let init = var_decl.decls[0].init.as_ref().expect("no initializer");
+            *init.clone()
+        }
+        _ => panic!("expected variable declaration at stmt index {stmt_index}"),
+    }
+}
+
 /// Build a TypeRegistry with a `greet(name: String, greeting: Option<String>) -> String` function.
 fn greet_registry() -> TypeRegistry {
     let mut reg = TypeRegistry::new();
@@ -1453,16 +1493,25 @@ fn test_object_lit_omitted_optional_field_gets_none() {
 #[test]
 fn test_binary_number_plus_string_generates_format() {
     // x + " px" where x: number → format!("{}{}", x, " px")
-    let f = TctxFixture::from_source(r#"const s: string = x + " px";"#);
+    let f = TctxFixture::from_source(
+        r#"function f(x: number): string { return x + " px"; }"#,
+    );
     let tctx = f.tctx();
-    let swc_expr = extract_var_init(f.module());
-    let mut env = TypeEnv::new();
-    env.insert("x".to_string(), RustType::F64);
+    // The return expression is the binary expression
+    let fn_decl = match &f.module().body[0] {
+        ModuleItem::Stmt(Stmt::Decl(Decl::Fn(fd))) => fd,
+        _ => panic!("expected fn decl"),
+    };
+    let ret_stmt = &fn_decl.function.body.as_ref().unwrap().stmts[0];
+    let swc_expr = match ret_stmt {
+        ast::Stmt::Return(ret) => *ret.arg.as_ref().unwrap().clone(),
+        _ => panic!("expected return"),
+    };
     let result = convert_expr(
         &swc_expr,
         &tctx,
         f.reg(),
-        &env,
+        &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
     .unwrap();
@@ -4090,23 +4139,27 @@ fn test_resolve_expr_type_member_chain_returns_nested_type() {
 
 #[test]
 fn test_convert_opt_chain_non_option_type_returns_plain_access() {
-    let f = TctxFixture::new();
-    let tctx = f.tctx();
-    let expr = parse_single_expr("x?.y;");
-    let mut env = TypeEnv::new();
-    env.insert(
-        "x".to_string(),
-        RustType::Named {
-            name: "Foo".to_string(),
-            type_args: vec![],
-        },
+    let mut reg = TypeRegistry::new();
+    reg.register(
+        "Foo".to_string(),
+        TypeDef::new_struct(
+            vec![("y".to_string(), RustType::String)],
+            std::collections::HashMap::new(),
+            vec![],
+        ),
     );
+    let f = TctxFixture::from_source_with_reg(
+        "function f(x: Foo) { x?.y; }",
+        reg,
+    );
+    let tctx = f.tctx();
+    let swc_expr = extract_fn_body_expr_stmt(f.module(), 0, 0);
 
     let result = convert_expr(
-        &expr,
+        &swc_expr,
         &tctx,
         f.reg(),
-        &env,
+        &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
     .unwrap();
@@ -4218,17 +4271,15 @@ fn test_opt_chain_method_call_maps_to_rust_name() {
 
 #[test]
 fn test_convert_nullish_coalescing_non_option_returns_left() {
-    let f = TctxFixture::new();
+    let f = TctxFixture::from_source("function f(x: string, y: string) { x ?? y; }");
     let tctx = f.tctx();
-    let expr = parse_single_expr("x ?? y;");
-    let mut env = TypeEnv::new();
-    env.insert("x".to_string(), RustType::String);
+    let swc_expr = extract_fn_body_expr_stmt(f.module(), 0, 0);
 
     let result = convert_expr(
-        &expr,
+        &swc_expr,
         &tctx,
         f.reg(),
-        &env,
+        &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
     .unwrap();
@@ -4285,17 +4336,8 @@ fn test_convert_nullish_coalescing_unknown_type_returns_unwrap_or_else() {
 
 #[test]
 fn test_convert_opt_chain_nested_option_uses_and_then() {
-    // x?.y?.z where x: Option<Foo>, Foo.y: Option<Bar>, Bar.z: String
+    // x?.y?.z where x: Foo | null, Foo.y: Bar | null, Bar.z: String
     // Should use .and_then() for the inner chain to avoid Option<Option<T>>
-    let expr = parse_single_expr("x?.y?.z;");
-    let mut env = TypeEnv::new();
-    env.insert(
-        "x".to_string(),
-        RustType::Option(Box::new(RustType::Named {
-            name: "Foo".to_string(),
-            type_args: vec![],
-        })),
-    );
     let mut reg = TypeRegistry::new();
     reg.register(
         "Foo".to_string(),
@@ -4319,14 +4361,18 @@ fn test_convert_opt_chain_nested_option_uses_and_then() {
             vec![],
         ),
     );
-    let f = TctxFixture::with_reg(reg);
+    let f = TctxFixture::from_source_with_reg(
+        "function f(x: Foo | null) { x?.y?.z; }",
+        reg,
+    );
     let tctx = f.tctx();
+    let swc_expr = extract_fn_body_expr_stmt(f.module(), 0, 0);
 
     let result = convert_expr(
-        &expr,
+        &swc_expr,
         &tctx,
         f.reg(),
-        &env,
+        &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
     .unwrap();
@@ -5138,16 +5184,14 @@ fn test_convert_array_lit_elements_get_expected_element_type() {
 
 #[test]
 fn test_typeof_equals_string_known_type_resolves_true() {
-    let f = TctxFixture::new();
+    let f = TctxFixture::from_source(r#"function f(x: string) { typeof x === "string"; }"#);
     let tctx = f.tctx();
-    let swc_expr = parse_expr("typeof x === \"string\";");
-    let mut env = TypeEnv::new();
-    env.insert("x".to_string(), RustType::String);
+    let swc_expr = extract_fn_body_expr_stmt(f.module(), 0, 0);
     let result = convert_expr(
         &swc_expr,
         &tctx,
         f.reg(),
-        &env,
+        &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
     .unwrap();
@@ -5156,16 +5200,14 @@ fn test_typeof_equals_string_known_type_resolves_true() {
 
 #[test]
 fn test_typeof_equals_string_mismatched_type_resolves_false() {
-    let f = TctxFixture::new();
+    let f = TctxFixture::from_source(r#"function f(x: number) { typeof x === "string"; }"#);
     let tctx = f.tctx();
-    let swc_expr = parse_expr("typeof x === \"string\";");
-    let mut env = TypeEnv::new();
-    env.insert("x".to_string(), RustType::F64);
+    let swc_expr = extract_fn_body_expr_stmt(f.module(), 0, 0);
     let result = convert_expr(
         &swc_expr,
         &tctx,
         f.reg(),
-        &env,
+        &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
     .unwrap();
@@ -5174,16 +5216,14 @@ fn test_typeof_equals_string_mismatched_type_resolves_false() {
 
 #[test]
 fn test_typeof_equals_number_known_type_resolves_true() {
-    let f = TctxFixture::new();
+    let f = TctxFixture::from_source(r#"function f(x: number) { typeof x === "number"; }"#);
     let tctx = f.tctx();
-    let swc_expr = parse_expr("typeof x === \"number\";");
-    let mut env = TypeEnv::new();
-    env.insert("x".to_string(), RustType::F64);
+    let swc_expr = extract_fn_body_expr_stmt(f.module(), 0, 0);
     let result = convert_expr(
         &swc_expr,
         &tctx,
         f.reg(),
-        &env,
+        &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
     .unwrap();
@@ -5192,16 +5232,14 @@ fn test_typeof_equals_number_known_type_resolves_true() {
 
 #[test]
 fn test_typeof_not_equals_string_known_type_resolves_false() {
-    let f = TctxFixture::new();
+    let f = TctxFixture::from_source(r#"function f(x: string) { typeof x !== "string"; }"#);
     let tctx = f.tctx();
-    let swc_expr = parse_expr("typeof x !== \"string\";");
-    let mut env = TypeEnv::new();
-    env.insert("x".to_string(), RustType::String);
+    let swc_expr = extract_fn_body_expr_stmt(f.module(), 0, 0);
     let result = convert_expr(
         &swc_expr,
         &tctx,
         f.reg(),
-        &env,
+        &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
     .unwrap();
@@ -5305,16 +5343,16 @@ fn test_instanceof_any_type_generates_todo() {
 
 #[test]
 fn test_typeof_equals_undefined_option_resolves_is_none() {
-    let f = TctxFixture::new();
+    let f = TctxFixture::from_source(
+        r#"function f(x: number | null) { typeof x === "undefined"; }"#,
+    );
     let tctx = f.tctx();
-    let swc_expr = parse_expr("typeof x === \"undefined\";");
-    let mut env = TypeEnv::new();
-    env.insert("x".to_string(), RustType::Option(Box::new(RustType::F64)));
+    let swc_expr = extract_fn_body_expr_stmt(f.module(), 0, 0);
     let result = convert_expr(
         &swc_expr,
         &tctx,
         f.reg(),
-        &env,
+        &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
     .unwrap();
@@ -5327,16 +5365,14 @@ fn test_typeof_equals_undefined_option_resolves_is_none() {
 
 #[test]
 fn test_typeof_standalone_known_type_resolves_string_lit() {
-    let f = TctxFixture::new();
+    let f = TctxFixture::from_source("function f(x: string) { typeof x; }");
     let tctx = f.tctx();
-    let swc_expr = parse_expr("typeof x;");
-    let mut env = TypeEnv::new();
-    env.insert("x".to_string(), RustType::String);
+    let swc_expr = extract_fn_body_expr_stmt(f.module(), 0, 0);
     let result = convert_expr(
         &swc_expr,
         &tctx,
         f.reg(),
-        &env,
+        &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
     .unwrap();
@@ -5630,23 +5666,17 @@ fn test_convert_bin_expr_enum_var_eq_string_literal_converts_rhs() {
         },
     );
 
-    let mut type_env = TypeEnv::new();
-    type_env.insert(
-        "d".to_string(),
-        RustType::Named {
-            name: "Direction".to_string(),
-            type_args: vec![],
-        },
+    let f = TctxFixture::from_source_with_reg(
+        r#"function f(d: Direction) { d == "up"; }"#,
+        reg,
     );
-
-    let f = TctxFixture::with_reg(reg);
     let tctx = f.tctx();
-    let swc_expr = parse_expr(r#"d == "up";"#);
+    let swc_expr = extract_fn_body_expr_stmt(f.module(), 0, 0);
     let result = convert_expr(
         &swc_expr,
         &tctx,
         f.reg(),
-        &type_env,
+        &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
     .unwrap();
@@ -5676,23 +5706,17 @@ fn test_convert_bin_expr_string_literal_ne_enum_var_converts_lhs() {
         },
     );
 
-    let mut type_env = TypeEnv::new();
-    type_env.insert(
-        "d".to_string(),
-        RustType::Named {
-            name: "Direction".to_string(),
-            type_args: vec![],
-        },
+    let f = TctxFixture::from_source_with_reg(
+        r#"function f(d: Direction) { "up" != d; }"#,
+        reg,
     );
-
-    let f = TctxFixture::with_reg(reg);
     let tctx = f.tctx();
-    let swc_expr = parse_expr(r#""up" != d;"#);
+    let swc_expr = extract_fn_body_expr_stmt(f.module(), 0, 0);
     let result = convert_expr(
         &swc_expr,
         &tctx,
         f.reg(),
-        &type_env,
+        &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
     .unwrap();
@@ -5864,23 +5888,17 @@ fn test_convert_member_expr_discriminant_field_to_method_call() {
         },
     );
 
-    let mut type_env = TypeEnv::new();
-    type_env.insert(
-        "s".to_string(),
-        RustType::Named {
-            name: "Shape".to_string(),
-            type_args: vec![],
-        },
+    let f = TctxFixture::from_source_with_reg(
+        "function f(s: Shape) { s.kind; }",
+        reg,
     );
-
-    let f = TctxFixture::with_reg(reg);
     let tctx = f.tctx();
-    let swc_expr = parse_expr("s.kind;");
+    let swc_expr = extract_fn_body_expr_stmt(f.module(), 0, 0);
     let result = convert_expr(
         &swc_expr,
         &tctx,
         f.reg(),
-        &type_env,
+        &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
     .unwrap();
@@ -5944,20 +5962,14 @@ fn test_convert_member_expr_array_index_variable_generates_index() {
 
 #[test]
 fn test_convert_member_expr_tuple_literal_index_generates_field_access() {
-    let f = TctxFixture::new();
+    let f = TctxFixture::from_source("function f(pair: [string, number]) { pair[0]; }");
     let tctx = f.tctx();
-    let mut type_env = TypeEnv::new();
-    type_env.insert(
-        "pair".to_string(),
-        RustType::Tuple(vec![RustType::String, RustType::F64]),
-    );
-
-    let swc_expr = parse_expr("pair[0];");
+    let swc_expr = extract_fn_body_expr_stmt(f.module(), 0, 0);
     let result = convert_expr(
         &swc_expr,
         &tctx,
         f.reg(),
-        &type_env,
+        &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
     .unwrap();
@@ -5972,20 +5984,14 @@ fn test_convert_member_expr_tuple_literal_index_generates_field_access() {
 
 #[test]
 fn test_convert_member_expr_tuple_second_index_generates_field_access() {
-    let f = TctxFixture::new();
+    let f = TctxFixture::from_source("function f(pair: [string, number]) { pair[1]; }");
     let tctx = f.tctx();
-    let mut type_env = TypeEnv::new();
-    type_env.insert(
-        "pair".to_string(),
-        RustType::Tuple(vec![RustType::String, RustType::F64]),
-    );
-
-    let swc_expr = parse_expr("pair[1];");
+    let swc_expr = extract_fn_body_expr_stmt(f.module(), 0, 0);
     let result = convert_expr(
         &swc_expr,
         &tctx,
         f.reg(),
-        &type_env,
+        &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
     .unwrap();
@@ -6165,24 +6171,19 @@ fn build_shape_registry_for_expr() -> TypeRegistry {
 #[test]
 fn test_convert_du_standalone_field_access_generates_match_expr() {
     let reg = build_shape_registry_for_expr();
-    let mut type_env = TypeEnv::new();
-    type_env.insert(
-        "s".to_string(),
-        RustType::Named {
-            name: "Shape".to_string(),
-            type_args: vec![],
-        },
-    );
 
     // s.radius → match expression
-    let f = TctxFixture::with_reg(reg);
+    let f = TctxFixture::from_source_with_reg(
+        "function f(s: Shape) { const x = s.radius; }",
+        reg,
+    );
     let tctx = f.tctx();
-    let swc_expr = parse_var_init("const x = s.radius;");
+    let swc_expr = extract_fn_body_var_init(f.module(), 0, 0);
     let result = convert_expr(
         &swc_expr,
         &tctx,
         f.reg(),
-        &type_env,
+        &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
     .unwrap();
@@ -6216,7 +6217,6 @@ fn test_convert_du_standalone_field_access_generates_match_expr() {
 #[test]
 fn test_in_operator_struct_field_exists_generates_true() {
     // "x" in point → true (Point has field x)
-    let expr = parse_expr(r#""x" in point"#);
     let mut reg = TypeRegistry::new();
     reg.register(
         "Point".to_string(),
@@ -6229,21 +6229,17 @@ fn test_in_operator_struct_field_exists_generates_true() {
             vec![],
         ),
     );
-    let f = TctxFixture::with_reg(reg);
-    let tctx = f.tctx();
-    let mut env = TypeEnv::new();
-    env.insert(
-        "point".to_string(),
-        RustType::Named {
-            name: "Point".to_string(),
-            type_args: vec![],
-        },
+    let f = TctxFixture::from_source_with_reg(
+        r#"function f(point: Point) { "x" in point; }"#,
+        reg,
     );
+    let tctx = f.tctx();
+    let swc_expr = extract_fn_body_expr_stmt(f.module(), 0, 0);
     let result = convert_expr(
-        &expr,
+        &swc_expr,
         &tctx,
         f.reg(),
-        &env,
+        &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
     .unwrap();
@@ -6253,7 +6249,6 @@ fn test_in_operator_struct_field_exists_generates_true() {
 #[test]
 fn test_in_operator_struct_field_missing_generates_false() {
     // "z" in point → false (Point has no field z)
-    let expr = parse_expr(r#""z" in point"#);
     let mut reg = TypeRegistry::new();
     reg.register(
         "Point".to_string(),
@@ -6266,21 +6261,17 @@ fn test_in_operator_struct_field_missing_generates_false() {
             vec![],
         ),
     );
-    let f = TctxFixture::with_reg(reg);
-    let tctx = f.tctx();
-    let mut env = TypeEnv::new();
-    env.insert(
-        "point".to_string(),
-        RustType::Named {
-            name: "Point".to_string(),
-            type_args: vec![],
-        },
+    let f = TctxFixture::from_source_with_reg(
+        r#"function f(point: Point) { "z" in point; }"#,
+        reg,
     );
+    let tctx = f.tctx();
+    let swc_expr = extract_fn_body_expr_stmt(f.module(), 0, 0);
     let result = convert_expr(
-        &expr,
+        &swc_expr,
         &tctx,
         f.reg(),
-        &env,
+        &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
     .unwrap();
@@ -8038,12 +8029,12 @@ fn test_convert_instanceof_option_type_returns_is_some() {
 
 #[test]
 fn test_convert_typeof_static_number_returns_string_lit() {
-    let f = TctxFixture::new();
-    let tctx = f.tctx();
     // typeof 42 → "number" (static, no change needed)
-    let expr = parse_expr("typeof 42");
+    let f = TctxFixture::from_source("function f() { typeof 42; }");
+    let tctx = f.tctx();
+    let swc_expr = extract_fn_body_expr_stmt(f.module(), 0, 0);
     let result = convert_expr(
-        &expr,
+        &swc_expr,
         &tctx,
         f.reg(),
         &TypeEnv::new(),
@@ -8055,17 +8046,15 @@ fn test_convert_typeof_static_number_returns_string_lit() {
 
 #[test]
 fn test_convert_typeof_option_type_returns_runtime_if() {
-    let f = TctxFixture::new();
+    // typeof x where x: number | null → runtime branch
+    let f = TctxFixture::from_source("function f(x: number | null) { typeof x; }");
     let tctx = f.tctx();
-    // typeof x where x: Option<f64> → runtime branch
-    let expr = parse_expr("typeof x");
-    let mut env = TypeEnv::new();
-    env.insert("x".to_string(), RustType::Option(Box::new(RustType::F64)));
+    let swc_expr = extract_fn_body_expr_stmt(f.module(), 0, 0);
     let result = convert_expr(
-        &expr,
+        &swc_expr,
         &tctx,
         f.reg(),
-        &env,
+        &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
     .unwrap();
@@ -8488,16 +8477,14 @@ fn test_convert_expr_unary_plus_number_returns_identity() {
 /// +x where x: string → x.parse::<f64>().unwrap()
 #[test]
 fn test_convert_expr_unary_plus_string_returns_parse() {
-    let f = TctxFixture::new();
+    let f = TctxFixture::from_source("function f(x: string) { +x; }");
     let tctx = f.tctx();
-    let mut type_env = TypeEnv::new();
-    type_env.insert("x".to_string(), crate::ir::RustType::String);
-    let swc_expr = parse_expr("+x;");
+    let swc_expr = extract_fn_body_expr_stmt(f.module(), 0, 0);
     let result = convert_expr(
         &swc_expr,
         &tctx,
         f.reg(),
-        &type_env,
+        &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
     .unwrap();

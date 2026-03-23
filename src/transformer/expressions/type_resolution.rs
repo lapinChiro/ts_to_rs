@@ -18,6 +18,20 @@ use crate::transformer::TypeEnv;
 
 use super::convert_expr;
 
+/// FileTypeResolution から式の型を取得する。Unknown なら None。
+///
+/// `resolve_expr_type` と異なり heuristic fallback を行わない。
+/// TypeResolver が事前に解決した型のみを返す。
+pub(crate) fn get_expr_type<'a>(
+    tctx: &'a TransformContext<'_>,
+    expr: &ast::Expr,
+) -> Option<&'a RustType> {
+    match tctx.type_resolution.expr_type(Span::from_swc(expr.span())) {
+        ResolvedType::Known(ty) => Some(ty),
+        ResolvedType::Unknown => None,
+    }
+}
+
 /// 式の型を解決する。解決できない場合は None を返す。
 ///
 /// まず `FileTypeResolution.expr_types` を参照し、Known ならそれを返す。

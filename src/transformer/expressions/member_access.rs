@@ -10,7 +10,7 @@ use crate::transformer::TypeEnv;
 
 use super::convert_expr;
 use super::methods::map_method_call;
-use super::type_resolution::{resolve_expr_type, resolve_field_type};
+use super::type_resolution::{get_expr_type, resolve_field_type};
 use crate::transformer::context::TransformContext;
 
 /// Resolves a member access expression, applying special conversions for known fields.
@@ -83,10 +83,8 @@ pub(super) fn convert_opt_chain_expr(
 ) -> Result<Expr> {
     match opt_chain.base.as_ref() {
         ast::OptChainBase::Member(member) => {
-            let obj_type = resolve_expr_type(&member.obj, type_env, tctx, reg);
-            let is_option = obj_type
-                .as_ref()
-                .is_some_and(|ty| matches!(ty, RustType::Option(_)));
+            let obj_type = get_expr_type(tctx, &member.obj);
+            let is_option = obj_type.is_some_and(|ty| matches!(ty, RustType::Option(_)));
 
             // Non-Option type with known type: plain member access
             if !is_option && obj_type.is_some() {
@@ -113,7 +111,7 @@ pub(super) fn convert_opt_chain_expr(
 
             // If the field type is Option, use and_then to avoid Option<Option<T>>
             let field_type = resolve_field_type(
-                obj_type.as_ref().unwrap_or(&RustType::Any),
+                obj_type.unwrap_or(&RustType::Any),
                 &member.prop,
                 tctx,
                 reg,
@@ -144,16 +142,15 @@ pub(super) fn convert_opt_chain_expr(
         ast::OptChainBase::Call(opt_call) => {
             // Check if the callee object is a non-Option type
             let callee_obj_type = match opt_call.callee.as_ref() {
-                ast::Expr::Member(m) => resolve_expr_type(&m.obj, type_env, tctx, reg),
+                ast::Expr::Member(m) => get_expr_type(tctx, &m.obj),
                 ast::Expr::OptChain(oc) => match oc.base.as_ref() {
-                    ast::OptChainBase::Member(m) => resolve_expr_type(&m.obj, type_env, tctx, reg),
+                    ast::OptChainBase::Member(m) => get_expr_type(tctx, &m.obj),
                     _ => None,
                 },
                 _ => None,
             };
-            let is_option = callee_obj_type
-                .as_ref()
-                .is_some_and(|ty| matches!(ty, RustType::Option(_)));
+            let is_option =
+                callee_obj_type.is_some_and(|ty| matches!(ty, RustType::Option(_)));
 
             let (object, method) =
                 extract_method_from_callee(&opt_call.callee, tctx, reg, type_env, synthetic)?;
@@ -237,7 +234,7 @@ pub(super) fn convert_member_expr(
         let object = convert_expr(&member.obj, tctx, reg, type_env, synthetic)?;
 
         // Tuple index access: pair[0] → pair.0 (Rust uses dot notation for tuples)
-        if let Some(RustType::Tuple(_)) = resolve_expr_type(&member.obj, type_env, tctx, reg) {
+        if let Some(RustType::Tuple(_)) = get_expr_type(tctx, &member.obj) {
             if let ast::Expr::Lit(ast::Lit::Num(num)) = &*computed.expr {
                 let idx = num.value as usize;
                 return Ok(Expr::FieldAccess {
@@ -280,9 +277,7 @@ pub(super) fn convert_member_expr(
     }
 
     // Check if accessing a field of a discriminated union enum
-    if let Some(RustType::Named { name, .. }) =
-        resolve_expr_type(&member.obj, type_env, tctx, reg).as_ref()
-    {
+    if let Some(RustType::Named { name, .. }) = get_expr_type(tctx, &member.obj) {
         if let Some(TypeDef::Enum {
             tag_field: Some(tag),
             variant_fields,

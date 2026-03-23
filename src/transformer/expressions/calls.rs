@@ -13,7 +13,7 @@ use super::convert_expr;
 use super::convert_fn_expr;
 use super::literals::needs_debug_format;
 use super::methods::map_method_call;
-use super::type_resolution::resolve_expr_type;
+use super::type_resolution::get_expr_type;
 use crate::transformer::context::TransformContext;
 
 /// Converts a function/method call expression.
@@ -96,8 +96,8 @@ pub(super) fn convert_call_expr(
                             .args
                             .iter()
                             .map(|arg| {
-                                let ty = resolve_expr_type(&arg.expr, type_env, tctx, reg);
-                                needs_debug_format(ty.as_ref())
+                                let ty = get_expr_type(tctx, &arg.expr);
+                                needs_debug_format(ty)
                             })
                             .collect();
                         return Ok(Expr::MacroCall {
@@ -133,8 +133,8 @@ pub(super) fn convert_call_expr(
                 let object = convert_expr(&member.obj, tctx, reg, type_env, synthetic)?;
                 // Look up method parameter types from the object's type
                 let method_sig =
-                    resolve_expr_type(&member.obj, type_env, tctx, reg).and_then(|ty| {
-                        if let RustType::Named { name, .. } = &ty {
+                    get_expr_type(tctx, &member.obj).and_then(|ty| {
+                        if let RustType::Named { name, .. } = ty {
                             if let Some(TypeDef::Struct { methods, .. }) = reg.get(name) {
                                 return methods.get(&method).cloned();
                             }
@@ -597,8 +597,8 @@ pub(super) fn convert_call_args_with_types(
             // Rust param is `&dyn Trait`. If the argument is `Box<dyn Trait>`, use `&*arg`.
             if let Some(RustType::Named { name, .. }) = param_ty {
                 if reg.is_trait_type(name) {
-                    let arg_type = resolve_expr_type(&arg.expr, type_env, tctx, reg);
-                    if is_box_dyn_trait(&arg_type) {
+                    let arg_type = get_expr_type(tctx, &arg.expr);
+                    if is_box_dyn_trait(arg_type) {
                         expr = Expr::Ref(Box::new(Expr::Deref(Box::new(expr))));
                     }
                 }
@@ -673,7 +673,7 @@ pub(super) fn convert_call_args_with_types(
 }
 
 /// Returns true if the type is `Box<dyn Trait>` (i.e., `Named { name: "Box", type_args: [DynTrait(_)] }`).
-fn is_box_dyn_trait(ty: &Option<RustType>) -> bool {
+fn is_box_dyn_trait(ty: Option<&RustType>) -> bool {
     matches!(
         ty,
         Some(RustType::Named { name, type_args })

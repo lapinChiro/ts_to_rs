@@ -507,15 +507,42 @@ Phase 2 で追加した Transformer の手動伝搬（`convert_expr_with_expecte
 
 ### タスク
 
-#### 3-1: `resolve_expr_type` 呼び出し箇所の置換
+#### 3-1: `resolve_expr_type` 呼び出し箇所の置換 ← 作業中
 
-**対象**: Transformer 内の全 `resolve_expr_type(expr, type_env, tctx, reg)` 呼び出し（約 30 箇所）。
+**状態**: プロダクションコード 25 箇所の置換完了。TypeResolver 強化完了。テスト 28 件を `from_source` パターンに移行完了。**スナップショット 3 件のリグレッション（3-1-B で修正予定）**。
 
-**置換先**: `tctx.type_resolution.expr_type(Span::from_swc(expr.span()))` を使い、`ResolvedType::Known(ty)` を `Some(ty)` に変換するヘルパーを用意:
+##### 3-1-A: 置換 + TypeResolver 強化（完了）
+
+- [x] `get_expr_type` ヘルパー追加（`type_resolution.rs`）— `Option<&RustType>` を返す
+- [x] プロダクションコード 25 箇所の `resolve_expr_type` → `get_expr_type` 置換（6 ファイル）
+- [x] `resolve_expr_type` の re-export を `#[cfg(test)]` に限定
+- [x] TypeResolver `resolve_expr` にラッパー追加 — Known な結果を自動的に `expr_types` に記録
+- [x] TypeResolver `resolve_bin_expr` — 比較演算・算術演算のオペランドを `resolve_expr` で解決
+- [x] TypeResolver `Unary` — operand を `resolve_expr` で解決（typeof/unary plus の operand 型記録）
+- [x] TypeResolver `While` — condition を `resolve_expr` で解決
+- [x] TypeResolver `resolve_call_expr` — 全引数を `resolve_expr` で解決
+- [x] TypeResolver `resolve_bin_expr(Add)` — early return を排除し両オペランドを必ず解決
+- [x] TypeResolver `visit_fn_decl` — ネストされた関数宣言を親スコープに Fn 型変数として登録
+- [x] テスト 28 件を `TctxFixture::from_source` / `from_source_with_reg` パターンに移行
+- [x] ユニットテスト 1115 全パス、CLI 3、compile 2、E2E 60 全パス
+
+##### 3-1-B: 発見されたリグレッション修正（次の作業）
+
+スナップショット 3 件で変換結果が変化。根本原因は `get_expr_type` が heuristic の 2 つの機能をカバーしていないこと:
+
+**問題 1: narrowing 後の変数型が未反映**（`narrowing_truthy_instanceof`, `type_narrowing` — 計 4 箇所）
+
+- 旧 heuristic: `narrowed_type(name, pos)` → narrowed 型 → `Display` format
+- 新 `get_expr_type`: `expr_types` のみ参照 → 宣言型（un-narrowed）→ `Debug` format
+- **修正**: `get_expr_type` で Ident 式の場合に `narrowed_type` を優先参照
 
 ```rust
-/// FileTypeResolution から式の型を取得する。Unknown なら None。
-fn get_expr_type(tctx: &TransformContext<'_>, expr: &ast::Expr) -> Option<&RustType> {
+pub(crate) fn get_expr_type<'a>(tctx: &'a TransformContext<'_>, expr: &ast::Expr) -> Option<&'a RustType> {
+    if let ast::Expr::Ident(ident) = expr {
+        if let Some(narrowed) = tctx.type_resolution.narrowed_type(ident.sym.as_ref(), ident.span.lo.0) {
+            return Some(narrowed);
+        }
+    }
     match tctx.type_resolution.expr_type(Span::from_swc(expr.span())) {
         ResolvedType::Known(ty) => Some(ty),
         ResolvedType::Unknown => None,
@@ -523,23 +550,27 @@ fn get_expr_type(tctx: &TransformContext<'_>, expr: &ast::Expr) -> Option<&RustT
 }
 ```
 
-**対象ファイルと箇所数**:
+**問題 2: trait 型変数の `&*` deref が消えた**（`trait_coercion` — 1 箇所）
 
-| ファイル | 呼び出し数 | 用途 |
-|---|---|---|
-| `expressions/binary.rs` | 6 | string concat 判定, typeof operand 型, unary plus operand 型 |
-| `expressions/calls.rs` | 3 | format arg 型, method signature lookup, trait coercion |
-| `expressions/member_access.rs` | 5 | opt chain base 型, DU field access, tuple index |
-| `expressions/patterns.rs` | 3 | typeof guard, in operator object 型 |
-| `expressions/mod.rs` | 2 | Option wrapping 判定, trait coercion wrapping |
-| `statements/mod.rs` | 6 | cond assign, switch discriminant, destructuring source, DU tag field |
-| `expressions/type_resolution.rs` | 6 | 内部再帰呼び出し（全削除対象） |
+- 旧 heuristic: TypeEnv → `Box<dyn Greeter>` → `is_box_dyn_trait` → true → `&*g`
+- 新 `get_expr_type`: TypeResolver → `Named { name: "Greeter" }` → `is_box_dyn_trait` → false → `g`
+- **原因**: TypeResolver は TS→Rust 型マッピングで `Greeter`（trait）→ `Named { name: "Greeter" }` を記録。`trait → Box<dyn Trait>` 変換は Transformer で実施される
+- **修正**: `is_box_dyn_trait` を拡張し、`Named(Trait)` も `Box<dyn Trait>` 相当として認識
 
-**方法**: `/large-scale-refactor` スキルに従う。
+```rust
+fn is_box_dyn_trait(ty: Option<&RustType>, reg: &TypeRegistry) -> bool {
+    match ty {
+        Some(RustType::Named { name, type_args })
+            if name == "Box" && type_args.len() == 1
+            && matches!(&type_args[0], RustType::DynTrait(_)) => true,
+        Some(RustType::Named { name, type_args })
+            if type_args.is_empty() && reg.is_trait_type(name) => true,
+        _ => false,
+    }
+}
+```
 
-**完了条件**: `resolve_expr_type` の呼び出しがゼロ
-
-**依存**: Phase 2.5 完了
+**完了条件**: スナップショット 3 件がリグレッションなしで更新、`cargo test` 全 GREEN
 
 #### 3-2: `resolve_expr_type` 関連関数の削除
 

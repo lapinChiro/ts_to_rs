@@ -37,6 +37,8 @@ use functions::convert_fn_expr;
 use literals::convert_lit;
 use member_access::{convert_member_expr, convert_opt_chain_expr};
 use type_resolution::convert_ts_as_expr;
+pub(crate) use type_resolution::get_expr_type;
+#[cfg(test)]
 pub use type_resolution::resolve_expr_type;
 
 /// Converts an SWC [`ast::Expr`] into an IR [`Expr`], with an optional expected type.
@@ -100,8 +102,8 @@ fn convert_expr_with_expected(
         }
         // Non-literal expressions: check if the expression already produces Option<T>.
         // If so, fall through to normal conversion (tctx has expected types for sub-exprs).
-        let expr_type = resolve_expr_type(expr, type_env, tctx, reg);
-        if matches!(&expr_type, Some(RustType::Option(_))) || ast_produces_option(expr) {
+        let expr_type = type_resolution::get_expr_type(tctx, expr);
+        if matches!(expr_type, Some(RustType::Option(_))) || ast_produces_option(expr) {
             // Already produces Option — skip wrapping, fall through to normal conversion
         } else {
             // Expression produces T or unknown → convert with inner type, then wrap in Some()
@@ -220,7 +222,7 @@ fn needs_trait_box_coercion(
     };
 
     // Resolve the expression's actual type. If unknown or Any, skip coercion (safe default).
-    let Some(expr_type) = type_resolution::resolve_expr_type(src_expr, type_env, tctx, reg) else {
+    let Some(expr_type) = type_resolution::get_expr_type(tctx, src_expr) else {
         return false;
     };
     if matches!(expr_type, RustType::Any) {
@@ -229,7 +231,7 @@ fn needs_trait_box_coercion(
 
     // If the expression already produces Box<dyn Trait>, no wrapping needed
     if matches!(
-        &expr_type,
+        expr_type,
         RustType::Named { name, type_args }
             if name == "Box" && type_args.first().is_some_and(|a| matches!(a, RustType::DynTrait(t) if t == trait_name))
     ) {
@@ -242,7 +244,7 @@ fn needs_trait_box_coercion(
     if let RustType::Named {
         name: expr_name,
         type_args: expr_args,
-    } = &expr_type
+    } = expr_type
     {
         if expr_args.is_empty() && expr_name == trait_name && reg.is_trait_type(expr_name) {
             return false;

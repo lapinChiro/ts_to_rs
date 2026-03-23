@@ -11,7 +11,7 @@ use crate::pipeline::SyntheticTypeRegistry;
 use crate::registry::TypeRegistry;
 use crate::transformer::context::TransformContext;
 use crate::transformer::expressions::patterns::extract_narrowing_guards;
-use crate::transformer::expressions::{convert_expr, resolve_expr_type};
+use crate::transformer::expressions::{convert_expr, get_expr_type};
 use crate::transformer::TypeEnv;
 use crate::transformer::{
     extract_pat_ident_name, extract_prop_name, single_declarator, TypePosition,
@@ -417,7 +417,7 @@ fn convert_if_with_conditional_assignment(
     else_body: Option<Vec<Stmt>>,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Vec<Stmt>> {
-    let rhs_type = resolve_expr_type(ca.rhs, type_env, tctx, reg);
+    let rhs_type = get_expr_type(tctx, ca.rhs);
     // Cat A: type resolved separately for rhs_type
     let rhs_ir = convert_expr(ca.rhs, tctx, reg, type_env, synthetic)?;
 
@@ -442,10 +442,13 @@ fn convert_if_with_conditional_assignment(
         let let_stmt = Stmt::Let {
             mutable: false,
             name: ca.var_name.clone(),
-            ty: rhs_type.clone(),
+            ty: rhs_type.cloned(),
             init: Some(rhs_ir),
         };
-        type_env.insert(ca.var_name.clone(), rhs_type.unwrap_or(RustType::Any));
+        type_env.insert(
+            ca.var_name.clone(),
+            rhs_type.cloned().unwrap_or(RustType::Any),
+        );
         return Ok(vec![
             let_stmt,
             Stmt::If {
@@ -457,7 +460,7 @@ fn convert_if_with_conditional_assignment(
     }
 
     // Bare assignment: type-dependent transformation
-    match &rhs_type {
+    match rhs_type {
         Some(RustType::Option(_)) => {
             // if let Some(var) = expr { ... }
             Ok(vec![Stmt::IfLet {
@@ -472,7 +475,7 @@ fn convert_if_with_conditional_assignment(
             let let_stmt = Stmt::Let {
                 mutable: false,
                 name: ca.var_name.clone(),
-                ty: rhs_type.clone(),
+                ty: rhs_type.cloned(),
                 init: Some(rhs_ir),
             };
             type_env.insert(ca.var_name.clone(), ty.clone());
@@ -514,11 +517,11 @@ fn convert_while_with_conditional_assignment(
     body: Vec<Stmt>,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Vec<Stmt>> {
-    let rhs_type = resolve_expr_type(ca.rhs, type_env, tctx, reg);
+    let rhs_type = get_expr_type(tctx, ca.rhs);
     // Cat A: type resolved separately for rhs_type
     let rhs_ir = convert_expr(ca.rhs, tctx, reg, type_env, synthetic)?;
 
-    match &rhs_type {
+    match rhs_type {
         Some(RustType::Option(_)) => {
             // while let Some(var) = expr { ... }
             Ok(vec![Stmt::WhileLet {
@@ -535,7 +538,7 @@ fn convert_while_with_conditional_assignment(
                 Stmt::Let {
                     mutable: false,
                     name: ca.var_name.clone(),
-                    ty: rhs_type.clone(),
+                    ty: rhs_type.cloned(),
                     init: Some(rhs_ir),
                 },
                 Stmt::If {
@@ -1546,7 +1549,7 @@ pub fn convert_stmt_list(
                         // Closure → Fn type (from IR)
                         type_env.insert(name.clone(), fn_type);
                     } else if let Some(resolved) = extract_var_decl_init(stmt, name)
-                        .and_then(|ast_init| resolve_expr_type(ast_init, type_env, tctx, reg))
+                        .and_then(|ast_init| get_expr_type(tctx, ast_init).cloned())
                     {
                         // General type inference from AST init expression
                         type_env.insert(name.clone(), resolved);
@@ -1950,8 +1953,7 @@ fn try_convert_object_destructuring(
     let source_expr = convert_expr(source, tctx, reg, type_env, synthetic)?;
 
     let mutable = !matches!(var_decl.kind, ast::VarDeclKind::Const);
-    let source_type =
-        crate::transformer::expressions::resolve_expr_type(source, type_env, tctx, reg);
+    let source_type = get_expr_type(tctx, source);
     let mut stmts = Vec::new();
 
     expand_object_pat_props(
@@ -1962,7 +1964,7 @@ fn try_convert_object_destructuring(
         tctx,
         reg,
         type_env,
-        source_type.as_ref(),
+        source_type,
         synthetic,
     )?;
 
@@ -2393,8 +2395,6 @@ fn try_convert_discriminated_union_switch(
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Option<Vec<Stmt>>> {
     use crate::registry::TypeDef;
-    use crate::transformer::expressions::resolve_expr_type;
-
     // Check if discriminant is a member expression (e.g., s.kind)
     let member = match switch.discriminant.as_ref() {
         ast::Expr::Member(m) => m,
@@ -2407,8 +2407,8 @@ fn try_convert_discriminated_union_switch(
     };
 
     // Resolve the object's type
-    let obj_type = resolve_expr_type(&member.obj, type_env, tctx, reg);
-    let enum_name = match &obj_type {
+    let obj_type = get_expr_type(tctx, &member.obj);
+    let enum_name = match obj_type {
         Some(RustType::Named { name, .. }) => name.clone(),
         _ => return Ok(None),
     };
@@ -2690,8 +2690,8 @@ fn try_convert_string_enum_switch(
     use crate::registry::TypeDef;
 
     // Resolve the discriminant's type
-    let disc_type = resolve_expr_type(&switch.discriminant, type_env, tctx, reg);
-    let enum_name = match &disc_type {
+    let disc_type = get_expr_type(tctx, &switch.discriminant);
+    let enum_name = match disc_type {
         Some(RustType::Named { name, .. }) => name.clone(),
         _ => return Ok(None),
     };

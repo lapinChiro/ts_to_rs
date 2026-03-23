@@ -2308,7 +2308,6 @@ fn test_object_destructuring_nested_multiple_fields() {
 #[test]
 fn test_object_destructuring_rest_with_type_expands_remaining_fields() {
     // { a, ...rest } = point where Point has { a, b, c }
-    let stmts = parse_fn_body("function f() { const { a, ...rest } = point; }");
     let mut reg = TypeRegistry::new();
     reg.register(
         "Point".to_string(),
@@ -2322,18 +2321,17 @@ fn test_object_destructuring_rest_with_type_expands_remaining_fields() {
             vec![],
         ),
     );
-    let mut type_env = TypeEnv::new();
-    type_env.insert(
-        "point".to_string(),
-        RustType::Named {
-            name: "Point".to_string(),
-            type_args: vec![],
-        },
-    );
-    let f = TctxFixture::with_reg(reg);
+    let source = "function f(point: Point) { const { a, ...rest } = point; }";
+    let f = TctxFixture::from_source_with_reg(source, reg);
     let tctx = f.tctx();
+    let fn_decl = match &f.module().body[0] {
+        ModuleItem::Stmt(ast::Stmt::Decl(Decl::Fn(fd))) => fd,
+        _ => panic!("expected fn decl"),
+    };
+    let body_stmts = &fn_decl.function.body.as_ref().unwrap().stmts;
+    let mut type_env = TypeEnv::new();
     let result = convert_stmt_list(
-        &stmts,
+        body_stmts,
         &tctx,
         f.reg(),
         None,
@@ -2402,8 +2400,7 @@ fn test_object_destructuring_no_default_unchanged() {
 
 #[test]
 fn test_convert_switch_discriminated_union_to_enum_match() {
-    let module = parse_typescript(
-        r#"
+    let source = r#"
         function main(): void {
             const s: Shape = { kind: "circle", radius: 5 };
             switch (s.kind) {
@@ -2415,9 +2412,7 @@ fn test_convert_switch_discriminated_union_to_enum_match() {
                     break;
             }
         }
-        "#,
-    )
-    .unwrap();
+    "#;
 
     let mut reg = TypeRegistry::new();
     let mut string_values = std::collections::HashMap::new();
@@ -2443,27 +2438,18 @@ fn test_convert_switch_discriminated_union_to_enum_match() {
         },
     );
 
-    let fn_decl = match &module.body[0] {
-        ModuleItem::Stmt(ast::Stmt::Decl(Decl::Fn(f))) => f,
+    let f = TctxFixture::from_source_with_reg(source, reg);
+    let tctx = f.tctx();
+    let fn_decl = match &f.module().body[0] {
+        ModuleItem::Stmt(ast::Stmt::Decl(Decl::Fn(fd))) => fd,
         _ => panic!("expected function declaration"),
     };
     let body_stmts = &fn_decl.function.body.as_ref().unwrap().stmts;
     let mut type_env = TypeEnv::new();
-    // Run TypeResolver to populate expected types for object literals
-    let mg = crate::pipeline::ModuleGraph::empty();
-    let mut synthetic = SyntheticTypeRegistry::new();
-    let parsed = crate::pipeline::ParsedFile {
-        path: std::path::PathBuf::from("test.ts"),
-        source: String::new(),
-        module: module.clone(),
-    };
-    let mut resolver = crate::pipeline::type_resolver::TypeResolver::new(&reg, &mut synthetic, &mg);
-    let res = resolver.resolve_file(&parsed);
-    let tctx = TransformContext::new(&mg, &reg, &res, Path::new("test.ts"));
     let result = convert_stmt_list(
         body_stmts,
         &tctx,
-        &reg,
+        f.reg(),
         None,
         &mut type_env,
         &mut SyntheticTypeRegistry::new(),
@@ -2527,8 +2513,7 @@ fn build_shape_registry() -> TypeRegistry {
 
 #[test]
 fn test_convert_du_switch_field_access_single_field_becomes_binding() {
-    let module = parse_typescript(
-        r#"
+    let source = r#"
         function get_radius(s: Shape): number {
             switch (s.kind) {
                 case "circle":
@@ -2537,25 +2522,16 @@ fn test_convert_du_switch_field_access_single_field_becomes_binding() {
                     return 0;
             }
         }
-        "#,
-    )
-    .unwrap();
+    "#;
     let reg = build_shape_registry();
-    let fn_decl = match &module.body[0] {
-        ModuleItem::Stmt(ast::Stmt::Decl(Decl::Fn(f))) => f,
+    let f = TctxFixture::from_source_with_reg(source, reg);
+    let tctx = f.tctx();
+    let fn_decl = match &f.module().body[0] {
+        ModuleItem::Stmt(ast::Stmt::Decl(Decl::Fn(fd))) => fd,
         _ => panic!("expected function declaration"),
     };
     let body_stmts = &fn_decl.function.body.as_ref().unwrap().stmts;
     let mut type_env = TypeEnv::new();
-    type_env.insert(
-        "s".to_string(),
-        RustType::Named {
-            name: "Shape".to_string(),
-            type_args: vec![],
-        },
-    );
-    let f = TctxFixture::with_reg(reg);
-    let tctx = f.tctx();
     let result = convert_stmt_list(
         body_stmts,
         &tctx,
@@ -2607,8 +2583,7 @@ fn test_convert_du_switch_field_access_single_field_becomes_binding() {
 
 #[test]
 fn test_convert_du_switch_field_access_multiple_fields_become_bindings() {
-    let module = parse_typescript(
-        r#"
+    let source = r#"
         function area(s: Shape): number {
             switch (s.kind) {
                 case "circle":
@@ -2617,25 +2592,16 @@ fn test_convert_du_switch_field_access_multiple_fields_become_bindings() {
                     return s.width * s.height;
             }
         }
-        "#,
-    )
-    .unwrap();
+    "#;
     let reg = build_shape_registry();
-    let fn_decl = match &module.body[0] {
-        ModuleItem::Stmt(ast::Stmt::Decl(Decl::Fn(f))) => f,
+    let f = TctxFixture::from_source_with_reg(source, reg);
+    let tctx = f.tctx();
+    let fn_decl = match &f.module().body[0] {
+        ModuleItem::Stmt(ast::Stmt::Decl(Decl::Fn(fd))) => fd,
         _ => panic!("expected function declaration"),
     };
     let body_stmts = &fn_decl.function.body.as_ref().unwrap().stmts;
     let mut type_env = TypeEnv::new();
-    type_env.insert(
-        "s".to_string(),
-        RustType::Named {
-            name: "Shape".to_string(),
-            type_args: vec![],
-        },
-    );
-    let f = TctxFixture::with_reg(reg);
-    let tctx = f.tctx();
     let result = convert_stmt_list(
         body_stmts,
         &tctx,
@@ -2677,9 +2643,7 @@ fn test_convert_du_switch_field_access_multiple_fields_become_bindings() {
 fn test_cond_assign_if_option_type_generates_if_let_some() {
     // if (x = getOpt()) { use(x); }
     // When getOpt returns Option<f64>, should generate: if let Some(x) = get_opt() { ... }
-    let stmts = parse_fn_body(
-        "function f(): void { let x: number | null = null; if (x = getOpt()) { console.log(x); } }",
-    );
+    let source = "function f(): void { let x: number | null = null; if (x = getOpt()) { console.log(x); } }";
     let mut reg = TypeRegistry::new();
     reg.register(
         "getOpt".to_string(),
@@ -2689,19 +2653,23 @@ fn test_cond_assign_if_option_type_generates_if_let_some() {
             has_rest: false,
         },
     );
-    let mut env = TypeEnv::new();
-    // Convert let statement first to populate env
-    let f = TctxFixture::with_reg(reg);
+    let f = TctxFixture::from_source_with_reg(source, reg);
     let tctx = f.tctx();
-    let _ = convert_stmt(
-        &stmts[0],
+    let fn_decl = match &f.module().body[0] {
+        ModuleItem::Stmt(ast::Stmt::Decl(Decl::Fn(fd))) => fd,
+        _ => panic!("expected fn decl"),
+    };
+    let body_stmts = &fn_decl.function.body.as_ref().unwrap().stmts;
+    let mut env = TypeEnv::new();
+    let result = convert_stmt_list(
+        body_stmts,
         &tctx,
         f.reg(),
         None,
         &mut env,
         &mut SyntheticTypeRegistry::new(),
-    );
-    let result = convert_stmts_with_env(&stmts[1], f.reg(), &mut env);
+    )
+    .unwrap();
 
     // Should produce IfLet with Some(x) pattern
     assert!(
@@ -2764,9 +2732,7 @@ fn test_cond_assign_if_f64_type_generates_let_and_if_neq_zero() {
 fn test_cond_assign_while_option_type_generates_while_let_some() {
     // while (x = getOpt()) { use(x); }
     // When getOpt returns Option<f64>, should generate: while let Some(x) = get_opt() { ... }
-    let stmts = parse_fn_body(
-        "function f(): void { let x: number | null = null; while (x = getOpt()) { console.log(x); } }",
-    );
+    let source = "function f(): void { let x: number | null = null; while (x = getOpt()) { console.log(x); } }";
     let mut reg = TypeRegistry::new();
     reg.register(
         "getOpt".to_string(),
@@ -2776,18 +2742,23 @@ fn test_cond_assign_while_option_type_generates_while_let_some() {
             has_rest: false,
         },
     );
-    let mut env = TypeEnv::new();
-    let f = TctxFixture::with_reg(reg);
+    let f = TctxFixture::from_source_with_reg(source, reg);
     let tctx = f.tctx();
-    let _ = convert_stmt(
-        &stmts[0],
+    let fn_decl = match &f.module().body[0] {
+        ModuleItem::Stmt(ast::Stmt::Decl(Decl::Fn(fd))) => fd,
+        _ => panic!("expected fn decl"),
+    };
+    let body_stmts = &fn_decl.function.body.as_ref().unwrap().stmts;
+    let mut env = TypeEnv::new();
+    let result = convert_stmt_list(
+        body_stmts,
         &tctx,
         f.reg(),
         None,
         &mut env,
         &mut SyntheticTypeRegistry::new(),
-    );
-    let result = convert_stmts_with_env(&stmts[1], f.reg(), &mut env);
+    )
+    .unwrap();
 
     assert!(
         result
@@ -3092,22 +3063,17 @@ fn test_convert_switch_case_propagates_discriminant_type_for_string_enum() {
         },
     );
 
-    let mut type_env = TypeEnv::new();
-    type_env.insert(
-        "dir".to_string(),
-        RustType::Named {
-            name: "Direction".to_string(),
-            type_args: vec![],
-        },
-    );
-
-    let stmts = parse_fn_body(
-        r#"function f(dir: Direction) { switch(dir) { case "up": doA(); break; case "down": doB(); break; } }"#,
-    );
-    let f = TctxFixture::with_reg(reg);
+    let source = r#"function f(dir: Direction) { switch(dir) { case "up": doA(); break; case "down": doB(); break; } }"#;
+    let f = TctxFixture::from_source_with_reg(source, reg);
     let tctx = f.tctx();
+    let fn_decl = match &f.module().body[0] {
+        ModuleItem::Stmt(ast::Stmt::Decl(Decl::Fn(fd))) => fd,
+        _ => panic!("expected fn decl"),
+    };
+    let body_stmts = &fn_decl.function.body.as_ref().unwrap().stmts;
+    let mut type_env = TypeEnv::new();
     let result = convert_stmt_list(
-        &stmts,
+        body_stmts,
         &tctx,
         f.reg(),
         None,

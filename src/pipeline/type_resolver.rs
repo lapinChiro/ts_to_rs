@@ -135,6 +135,47 @@ impl<'a> TypeResolver<'a> {
     }
 
     fn visit_fn_decl(&mut self, fn_decl: &ast::FnDecl) {
+        // Register function name in current scope (before enter_scope) so that
+        // the function is visible to sibling statements (TS hoisting semantics).
+        let fn_name = fn_decl.ident.sym.to_string();
+        let fn_span = Span::from_swc(fn_decl.ident.span);
+        let params: Vec<(String, RustType)> = fn_decl
+            .function
+            .params
+            .iter()
+            .filter_map(|p| {
+                if let ast::Pat::Ident(ident) = &p.pat {
+                    let name = ident.id.sym.to_string();
+                    let ty = ident
+                        .type_ann
+                        .as_ref()
+                        .and_then(|ann| {
+                            convert_ts_type(&ann.type_ann, self.synthetic, self.registry).ok()
+                        })
+                        .unwrap_or(RustType::Any);
+                    Some((name, ty))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        let return_type = fn_decl
+            .function
+            .return_type
+            .as_ref()
+            .and_then(|ann| convert_ts_type(&ann.type_ann, self.synthetic, self.registry).ok())
+            .and_then(|ty| unwrap_promise_and_unit(ty));
+        let fn_type = RustType::Fn {
+            params: params.iter().map(|(_, ty)| ty.clone()).collect(),
+            return_type: Box::new(return_type.unwrap_or(RustType::Unit)),
+        };
+        self.declare_var(
+            &fn_name,
+            ResolvedType::Known(fn_type),
+            fn_span,
+            false,
+        );
+
         self.enter_scope();
 
         // Record return type for expected_types on return statements
@@ -392,6 +433,8 @@ impl<'a> TypeResolver<'a> {
                 self.leave_scope();
             }
             ast::Stmt::While(while_stmt) => {
+                // Resolve condition to register expr_types for assignment patterns
+                self.resolve_expr(&while_stmt.test);
                 if let Some(body) = while_stmt.body.as_block() {
                     self.visit_block_stmt(body);
                 }
@@ -728,7 +771,20 @@ impl<'a> TypeResolver<'a> {
 
     // --- Expression type resolution ---
 
+    /// 式の型を解決し、Known な結果を `expr_types` に記録する。
+    ///
+    /// 全ての部分式の型が `expr_types` に蓄積されるため、Transformer は
+    /// `get_expr_type(tctx, expr)` だけで任意の式の型を取得できる。
     fn resolve_expr(&mut self, expr: &ast::Expr) -> ResolvedType {
+        let ty = self.resolve_expr_inner(expr);
+        if matches!(ty, ResolvedType::Known(_)) {
+            let span = Span::from_swc(expr.span());
+            self.result.expr_types.entry(span).or_insert_with(|| ty.clone());
+        }
+        ty
+    }
+
+    fn resolve_expr_inner(&mut self, expr: &ast::Expr) -> ResolvedType {
         match expr {
             ast::Expr::Ident(ident) => self.lookup_var(ident.sym.as_ref()),
             ast::Expr::Lit(ast::Lit::Str(_)) => ResolvedType::Known(RustType::String),
@@ -774,12 +830,19 @@ impl<'a> TypeResolver<'a> {
                     self.resolve_expr(&cond.alt)
                 }
             }
-            ast::Expr::Unary(unary) => match unary.op {
-                ast::UnaryOp::TypeOf => ResolvedType::Known(RustType::String),
-                ast::UnaryOp::Bang => ResolvedType::Known(RustType::Bool),
-                ast::UnaryOp::Minus | ast::UnaryOp::Plus => ResolvedType::Known(RustType::F64),
-                _ => ResolvedType::Unknown,
-            },
+            ast::Expr::Unary(unary) => {
+                // Resolve operand to register its expr_type (used by Transformer
+                // for typeof/unary plus operand type decisions)
+                self.resolve_expr(&unary.arg);
+                match unary.op {
+                    ast::UnaryOp::TypeOf => ResolvedType::Known(RustType::String),
+                    ast::UnaryOp::Bang => ResolvedType::Known(RustType::Bool),
+                    ast::UnaryOp::Minus | ast::UnaryOp::Plus => {
+                        ResolvedType::Known(RustType::F64)
+                    }
+                    _ => ResolvedType::Unknown,
+                }
+            }
             ast::Expr::Await(await_expr) => self.resolve_expr(&await_expr.arg),
             ast::Expr::TsNonNull(ts_non_null) => {
                 // x! (non-null assertion) — unwrap Option, return inner type
@@ -904,21 +967,29 @@ impl<'a> TypeResolver<'a> {
         use ast::BinaryOp::*;
         match bin.op {
             Lt | LtEq | Gt | GtEq | EqEq | NotEq | EqEqEq | NotEqEq | In | InstanceOf => {
+                // Resolve operands to register their expr_types (used by Transformer
+                // for typeof comparison, enum string comparison, in operator, etc.)
+                self.resolve_expr(&bin.left);
+                self.resolve_expr(&bin.right);
                 ResolvedType::Known(RustType::Bool)
             }
             Add => {
                 let left_ty = self.resolve_expr(&bin.left);
-                if matches!(left_ty, ResolvedType::Known(RustType::String)) {
-                    return ResolvedType::Known(RustType::String);
-                }
                 let right_ty = self.resolve_expr(&bin.right);
-                if matches!(right_ty, ResolvedType::Known(RustType::String)) {
-                    return ResolvedType::Known(RustType::String);
+                if matches!(left_ty, ResolvedType::Known(RustType::String))
+                    || matches!(right_ty, ResolvedType::Known(RustType::String))
+                {
+                    ResolvedType::Known(RustType::String)
+                } else {
+                    ResolvedType::Known(RustType::F64)
                 }
-                ResolvedType::Known(RustType::F64)
             }
             Sub | Mul | Div | Mod | Exp | BitAnd | BitOr | BitXor | LShift | RShift
-            | ZeroFillRShift => ResolvedType::Known(RustType::F64),
+            | ZeroFillRShift => {
+                self.resolve_expr(&bin.left);
+                self.resolve_expr(&bin.right);
+                ResolvedType::Known(RustType::F64)
+            }
             LogicalAnd | LogicalOr => {
                 let right = self.resolve_expr(&bin.right);
                 if !matches!(right, ResolvedType::Unknown) {
@@ -1020,30 +1091,45 @@ impl<'a> TypeResolver<'a> {
             self.set_expected_types_in_nested_calls(&arg.expr);
         }
 
-        match callee {
+
+        // Resolve the callee to determine return type
+        let result = match callee {
             ast::Expr::Ident(ident) => {
                 let fn_name = ident.sym.to_string();
                 // Check scope for Fn type
                 if let ResolvedType::Known(RustType::Fn { return_type, .. }) =
                     self.lookup_var(&fn_name)
                 {
-                    return ResolvedType::Known(return_type.as_ref().clone());
+                    ResolvedType::Known(return_type.as_ref().clone())
+                } else if let Some(TypeDef::Function { return_type, .. }) =
+                    self.registry.get(&fn_name)
+                {
+                    // Check TypeRegistry
+                    ResolvedType::Known(return_type.clone().unwrap_or(RustType::Unit))
+                } else {
+                    ResolvedType::Unknown
                 }
-                // Check TypeRegistry
-                if let Some(TypeDef::Function { return_type, .. }) = self.registry.get(&fn_name) {
-                    return ResolvedType::Known(return_type.clone().unwrap_or(RustType::Unit));
-                }
-                ResolvedType::Unknown
             }
             ast::Expr::Member(member) => {
                 let obj_type = self.resolve_expr(&member.obj);
                 let obj_rust_type = match &obj_type {
                     ResolvedType::Known(ty) => ty,
-                    ResolvedType::Unknown => return ResolvedType::Unknown,
+                    ResolvedType::Unknown => {
+                        // Still resolve arguments even if callee type is unknown
+                        for arg in &call.args {
+                            self.resolve_expr(&arg.expr);
+                        }
+                        return ResolvedType::Unknown;
+                    }
                 };
                 let method_name = match &member.prop {
                     ast::MemberProp::Ident(ident) => ident.sym.to_string(),
-                    _ => return ResolvedType::Unknown,
+                    _ => {
+                        for arg in &call.args {
+                            self.resolve_expr(&arg.expr);
+                        }
+                        return ResolvedType::Unknown;
+                    }
                 };
                 self.resolve_method_return_type(obj_rust_type, &method_name)
             }
@@ -1057,7 +1143,14 @@ impl<'a> TypeResolver<'a> {
                     ResolvedType::Unknown
                 }
             }
+        };
+
+        // Resolve all argument expressions to register their types in expr_types.
+        for arg in &call.args {
+            self.resolve_expr(&arg.expr);
         }
+
+        result
     }
 
     /// Sets expected types for function call arguments based on the callee's parameter types.

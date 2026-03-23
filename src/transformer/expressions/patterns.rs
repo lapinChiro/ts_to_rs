@@ -11,7 +11,7 @@ use crate::registry::{TypeDef, TypeRegistry};
 use crate::transformer::TypeEnv;
 
 use super::literals::lookup_string_enum_variant;
-use super::type_resolution::resolve_expr_type;
+use super::type_resolution::get_expr_type;
 use crate::transformer::context::TransformContext;
 
 /// Detects `typeof x === "type"` / `typeof x !== "type"` patterns and resolves
@@ -116,8 +116,8 @@ fn resolve_enum_type_name(
     tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
 ) -> Option<String> {
-    let ty = resolve_expr_type(expr, type_env, tctx, reg)?;
-    if let RustType::Named { name, .. } = &ty {
+    let ty = get_expr_type(tctx, expr)?;
+    if let RustType::Named { name, .. } = ty {
         if let Some(TypeDef::Enum { string_values, .. }) = reg.get(name) {
             if !string_values.is_empty() {
                 return Some(name.clone());
@@ -151,14 +151,14 @@ pub(super) fn try_convert_typeof_comparison(
     let (typeof_operand, type_str) = extract_typeof_and_string(bin)?;
 
     // Resolve the operand's type from TypeEnv
-    let operand_type = resolve_expr_type(typeof_operand, type_env, tctx, reg);
+    let operand_type = get_expr_type(tctx, typeof_operand);
 
     // If the operand is a union enum type, generate a matches!() expression
     // for correct runtime checking. In if-statements, can_generate_if_let
     // overrides this with if-let patterns (which also narrows the type).
     if let Some(RustType::Named {
         name: enum_name, ..
-    }) = &operand_type
+    }) = operand_type
     {
         if let Some(crate::registry::TypeDef::Enum { variants, .. }) = reg.get(enum_name) {
             let expected_variant = match type_str.as_str() {
@@ -189,7 +189,7 @@ pub(super) fn try_convert_typeof_comparison(
         }
     }
 
-    let result = match &operand_type {
+    let result = match operand_type {
         Some(ty) => resolve_typeof_match(ty, &type_str),
         None => TypeofMatch::Placeholder,
     };
@@ -339,9 +339,9 @@ pub(super) fn convert_in_operator(
     };
 
     // Resolve the RHS object type
-    let obj_type = resolve_expr_type(&bin.right, type_env, tctx, reg);
+    let obj_type = get_expr_type(tctx, &bin.right);
 
-    match &obj_type {
+    match obj_type {
         Some(RustType::Named { name, .. }) if name == "HashMap" || name == "BTreeMap" => {
             // HashMap/BTreeMap → obj.contains_key("key")
             let obj_ir = match bin.right.as_ref() {
