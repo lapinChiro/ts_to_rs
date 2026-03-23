@@ -855,12 +855,42 @@ impl<'a> TypeResolver<'a> {
                 self.resolve_expr(&assign.right)
             }
             ast::Expr::Cond(cond) => {
-                // Ternary: resolve both branches, prefer non-Unknown
+                // Ternary: resolve both branches.
+                // If either branch is null/undefined or already Option<T>,
+                // the result is Option<T>.
                 let cons = self.resolve_expr(&cond.cons);
-                if !matches!(cons, ResolvedType::Unknown) {
-                    cons
+                let alt = self.resolve_expr(&cond.alt);
+
+                let cons_is_null = is_null_or_undefined(&cond.cons);
+                let alt_is_null = is_null_or_undefined(&cond.alt);
+                let cons_is_option =
+                    matches!(&cons, ResolvedType::Known(RustType::Option(_)));
+                let alt_is_option =
+                    matches!(&alt, ResolvedType::Known(RustType::Option(_)));
+
+                let produces_option =
+                    cons_is_null || alt_is_null || cons_is_option || alt_is_option;
+
+                if produces_option {
+                    // Pick the non-null branch's type as the value type
+                    let value_type = if cons_is_null { &alt } else { &cons };
+                    match value_type {
+                        ResolvedType::Known(RustType::Option(_)) => value_type.clone(),
+                        ResolvedType::Known(ty) => {
+                            ResolvedType::Known(RustType::Option(Box::new(ty.clone())))
+                        }
+                        ResolvedType::Unknown => {
+                            // Value type unknown but result is optional
+                            ResolvedType::Known(RustType::Option(Box::new(RustType::Any)))
+                        }
+                    }
                 } else {
-                    self.resolve_expr(&cond.alt)
+                    // Neither branch is null/Option: prefer non-Unknown
+                    if !matches!(cons, ResolvedType::Unknown) {
+                        cons
+                    } else {
+                        alt
+                    }
                 }
             }
             ast::Expr::Unary(unary) => {
@@ -919,10 +949,22 @@ impl<'a> TypeResolver<'a> {
             }
             ast::Expr::OptChain(opt) => {
                 // Optional chaining: x?.y or x?.method(args)
-                match &*opt.base {
+                // Result is always Option<T> where T is the resolved member/call type.
+                let inner_result = match &*opt.base {
                     ast::OptChainBase::Member(member) => {
                         let obj_type = self.resolve_expr(&member.obj);
-                        let _ = obj_type; // Walk for side effects (registering expr_types)
+                        // Unwrap Option<T> → T for field lookup
+                        let unwrapped = match &obj_type {
+                            ResolvedType::Known(RustType::Option(inner)) => {
+                                ResolvedType::Known(inner.as_ref().clone())
+                            }
+                            other => other.clone(),
+                        };
+                        // Resolve field type using the same logic as resolve_member_expr
+                        match &unwrapped {
+                            ResolvedType::Known(ty) => self.resolve_member_type(ty, &member.prop),
+                            _ => ResolvedType::Unknown,
+                        }
                     }
                     ast::OptChainBase::Call(opt_call) => {
                         // x?.method(args) — the callee may itself be an OptChain
@@ -938,7 +980,7 @@ impl<'a> TypeResolver<'a> {
                             }
                             _ => None,
                         };
-                        if let Some(member) = effective_member {
+                        let call_return_type = if let Some(member) = effective_member {
                             let obj_type = self.resolve_expr(&member.obj);
                             if let ResolvedType::Known(ref rust_ty) = obj_type {
                                 let inner_ty = match rust_ty {
@@ -946,13 +988,19 @@ impl<'a> TypeResolver<'a> {
                                     other => other,
                                 };
                                 let method_name = match &member.prop {
-                                    ast::MemberProp::Ident(ident) => Some(ident.sym.to_string()),
+                                    ast::MemberProp::Ident(ident) => {
+                                        Some(ident.sym.to_string())
+                                    }
                                     _ => None,
                                 };
+                                // Set expected types for args
                                 if let Some(params) = method_name
-                                    .and_then(|name| self.lookup_method_params(inner_ty, &name))
+                                    .as_deref()
+                                    .and_then(|name| self.lookup_method_params(inner_ty, name))
                                 {
-                                    for (arg, param_ty) in opt_call.args.iter().zip(params.iter()) {
+                                    for (arg, param_ty) in
+                                        opt_call.args.iter().zip(params.iter())
+                                    {
                                         let arg_span = Span::from_swc(arg.expr.span());
                                         self.result
                                             .expected_types
@@ -960,17 +1008,45 @@ impl<'a> TypeResolver<'a> {
                                         self.propagate_expected(&arg.expr, param_ty);
                                     }
                                 }
+                                // Resolve return type
+                                method_name
+                                    .as_deref()
+                                    .map(|name| {
+                                        self.resolve_method_return_type(inner_ty, name)
+                                    })
+                                    .unwrap_or(ResolvedType::Unknown)
+                            } else {
+                                ResolvedType::Unknown
                             }
                         } else {
-                            self.set_call_arg_expected_types(&opt_call.callee, &opt_call.args);
-                        }
+                            self.set_call_arg_expected_types(
+                                &opt_call.callee,
+                                &opt_call.args,
+                            );
+                            ResolvedType::Unknown
+                        };
                         // Walk callee for side effects
                         let callee_span = Span::from_swc(opt_call.callee.span());
                         let callee_ty = self.resolve_expr(&opt_call.callee);
                         self.result.expr_types.insert(callee_span, callee_ty);
+                        // Resolve all argument expressions
+                        for arg in &opt_call.args {
+                            self.resolve_expr(&arg.expr);
+                        }
+                        call_return_type
+                    }
+                };
+                // Wrap in Option<T>. OptChain always produces an optional result,
+                // even if the inner type is unknown.
+                match inner_result {
+                    ResolvedType::Known(RustType::Option(_)) => inner_result,
+                    ResolvedType::Known(ty) => {
+                        ResolvedType::Known(RustType::Option(Box::new(ty)))
+                    }
+                    ResolvedType::Unknown => {
+                        ResolvedType::Known(RustType::Option(Box::new(RustType::Any)))
                     }
                 }
-                ResolvedType::Unknown
             }
             ast::Expr::Update(_) => {
                 // i++ / i-- → f64
@@ -1052,13 +1128,20 @@ impl<'a> TypeResolver<'a> {
 
     fn resolve_member_expr(&mut self, member: &ast::MemberExpr) -> ResolvedType {
         let obj_type = self.resolve_expr(&member.obj);
-        let obj_rust_type = match &obj_type {
-            ResolvedType::Known(ty) => ty,
-            ResolvedType::Unknown => return ResolvedType::Unknown,
-        };
+        match &obj_type {
+            ResolvedType::Known(ty) => self.resolve_member_type(ty, &member.prop),
+            ResolvedType::Unknown => ResolvedType::Unknown,
+        }
+    }
 
+    /// Resolves the type of a member access given the object's type and property.
+    fn resolve_member_type(
+        &self,
+        obj_rust_type: &RustType,
+        prop: &ast::MemberProp,
+    ) -> ResolvedType {
         // Array/tuple indexing
-        if let ast::MemberProp::Computed(computed) = &member.prop {
+        if let ast::MemberProp::Computed(computed) = prop {
             match obj_rust_type {
                 RustType::Vec(elem_ty) => return ResolvedType::Known(elem_ty.as_ref().clone()),
                 RustType::Tuple(elems) => {
@@ -1075,7 +1158,7 @@ impl<'a> TypeResolver<'a> {
         }
 
         // Named field access
-        let field_name = match &member.prop {
+        let field_name = match prop {
             ast::MemberProp::Ident(ident) => ident.sym.to_string(),
             _ => return ResolvedType::Unknown,
         };
@@ -1535,6 +1618,12 @@ impl<'a> TypeResolver<'a> {
         ResolvedType::Unknown
     }
 
+}
+
+/// Returns true if the expression is a `null` literal or `undefined` identifier.
+fn is_null_or_undefined(expr: &ast::Expr) -> bool {
+    matches!(expr, ast::Expr::Lit(ast::Lit::Null(..)))
+        || matches!(expr, ast::Expr::Ident(id) if id.sym.as_ref() == "undefined")
 }
 
 /// Extracts the property name from an object literal key.

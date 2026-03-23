@@ -101,7 +101,7 @@ fn convert_expr_with_expected(
         // Non-literal expressions: check if the expression already produces Option<T>.
         // If so, fall through to normal conversion (tctx has expected types for sub-exprs).
         let expr_type = type_resolution::get_expr_type(tctx, expr);
-        if matches!(expr_type, Some(RustType::Option(_))) || ast_produces_option(expr) {
+        if matches!(expr_type, Some(RustType::Option(_))) {
             // Already produces Option — skip wrapping, fall through to normal conversion
         } else {
             // Expression produces T or unknown → convert with inner type, then wrap in Some()
@@ -363,33 +363,5 @@ fn convert_cond_expr(
 /// - Optional chaining (`?.`) — always produces Option
 /// - Ternary with null/undefined branch (`x ? y : null`) — produces Option
 ///
-/// This is a temporary workaround: `get_expr_type` does not return `Option<T>`
-/// for Cond/OptChain expressions. Phase 3 task 3-7 will replace this with
-/// `tctx.type_resolution.expr_type()` after TypeResolver is enhanced to set
-/// correct expr_types for these patterns.
-fn ast_produces_option(expr: &ast::Expr) -> bool {
-    match expr {
-        ast::Expr::OptChain(_) => true,
-        ast::Expr::Paren(p) => ast_produces_option(&p.expr),
-        ast::Expr::Cond(cond) => {
-            // A ternary produces Option if either branch is null/undefined,
-            // OR if either branch itself produces Option (recursive check for nested ternaries).
-            // e.g., `x ? (y ? "a" : null) : "b"` — the cons branch produces Option,
-            // so TypeResolver will wrap the alt in Some(), making the whole expression Option.
-            is_null_or_undefined(&cond.cons)
-                || is_null_or_undefined(&cond.alt)
-                || ast_produces_option(&cond.cons)
-                || ast_produces_option(&cond.alt)
-        }
-        _ => false,
-    }
-}
-
-/// Returns true if the expression is a `null` literal or `undefined` identifier.
-fn is_null_or_undefined(expr: &ast::Expr) -> bool {
-    matches!(expr, ast::Expr::Lit(ast::Lit::Null(..)))
-        || matches!(expr, ast::Expr::Ident(id) if id.sym.as_ref() == "undefined")
-}
-
 #[cfg(test)]
 mod tests;
