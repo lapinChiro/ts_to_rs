@@ -21,7 +21,6 @@
 **Transformer:** AnyTypeAnalyzer 統合済み。to_pascal_case 集約済み。SyntheticTypeRegistry ソート修正済み。
 
 **残存する実装不足:**
-- TypeEnv narrowing: runtime fallback として残存（Phase 4 で削除予定）
 - tctx + reg 二重パラメータ: 112 関数に残存（D5 で削除予定）
 
 ## タスク一覧
@@ -40,7 +39,7 @@ D6 (files.clone 解消)       ─┼─→ 完了
                              │
 D-TR〜D4 (型解決の統一)     ─┤
   Phase 1〜3: 完了           │
-  Phase 4: TypeEnv 簡素化   │  ← 次の作業
+  Phase 4: TypeEnv 簡素化   │  完了
                              │
 D5 (reg パラメータ削除)     ─┘─→ Phase 4 完了後に実施
 ```
@@ -73,7 +72,7 @@ D5 (reg パラメータ削除)     ─┘─→ Phase 4 完了後に実施
   - [x] **Phase 2.5-C**: unit test の TypeResolver 経由移行（50+ テスト書き換え）
   - [x] **Phase 2.5-D**: Transformer の手動伝搬削除（19 箇所）+ 設計レビュー修正
 - [x] **Phase 3** (3-1〜3-7): Heuristic 削除 — 全完了。`resolve_expr_type` 関連関数削除、`set_expected_types_in_nested_calls` 廃止、`type_resolution.rs` の `type_env` 除去、`ast_produces_option` 削除（TypeResolver Cond/OptChain 強化）
-- [ ] **Phase 4** (4-1〜4-3): TypeEnv 簡素化 — narrowing 用 push_scope/pop_scope 削除、update() 削除
+- [x] **Phase 4** (4-1〜4-3): TypeEnv 簡素化 — narrowing 用 push_scope/pop_scope 削除、update() 削除、関連テスト 2 件削除
 
 #### D5: tctx + reg 二重パラメータ統合
 

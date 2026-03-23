@@ -623,8 +623,7 @@ fn convert_if_stmt(
     type_env: &mut TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Vec<Stmt>> {
-    // Check for conditional assignment patterns first (before narrowing)
-    // We need the un-narrowed then/else for conditional assignment detection
+    // Check for conditional assignment patterns first
     if let Some(ca) = extract_conditional_assignment(&if_stmt.test) {
         let then_body =
             convert_block_or_stmt(&if_stmt.cons, tctx, reg, return_type, type_env, synthetic)?;
@@ -659,15 +658,10 @@ fn convert_if_stmt(
 
     // If we have if-let capable guards, generate nested if-let
     if !if_let_guards.is_empty() {
-        // Apply all guards' narrowing to then branch AND remaining conditions.
-        // Remaining conditions (e.g., `x.length > 0` in `typeof x === "string" && x.length > 0`)
-        // appear inside the if-let block, so they must be converted with the narrowed type.
-        let scope_count = apply_narrowing_scopes(&if_let_guards, type_env);
         let then_body =
             convert_block_or_stmt(&if_stmt.cons, tctx, reg, return_type, type_env, synthetic)?;
 
         // Build remaining conditions from non-if-let guard ASTs + non-guard ASTs.
-        // All converted via the standard convert_expr pipeline with narrowed type_env.
         let all_remaining: Vec<&ast::Expr> = non_if_let_ast
             .iter()
             .copied()
@@ -675,10 +669,8 @@ fn convert_if_stmt(
             .collect();
         let remaining_condition =
             convert_and_combine_conditions(&all_remaining, tctx, reg, type_env, synthetic)?;
-        pop_scopes(type_env, scope_count);
 
-        // Else branch: no narrowing applied.
-        // Duplicated at every nesting level (if-let guards + remaining conditions)
+        // Else branch: duplicated at every nesting level (if-let guards + remaining conditions)
         // to preserve `if (A && B) { then } else { else }` semantics.
         let else_body = if_stmt
             .alt
@@ -709,44 +701,18 @@ fn convert_if_stmt(
         None
     };
 
-    // Convert then branch with narrowed type environment
-    let then_body = {
-        if let Some(guard) = guard {
-            type_env.push_scope();
-            if let Some(original) = type_env.get(guard.var_name()).cloned() {
-                if let Some(narrowed) = guard.narrowed_type_for_then(&original) {
-                    type_env.insert(guard.var_name().to_string(), narrowed);
-                }
-            }
-        }
-        let body =
-            convert_block_or_stmt(&if_stmt.cons, tctx, reg, return_type, type_env, synthetic)?;
-        if guard.is_some() {
-            type_env.pop_scope();
-        }
-        body
-    };
+    // Convert then branch
+    let then_body =
+        convert_block_or_stmt(&if_stmt.cons, tctx, reg, return_type, type_env, synthetic)?;
 
-    // Convert else branch with narrowed type environment (opposite narrowing)
+    // Convert else branch
     let else_body = if let Some(alt) = &if_stmt.alt {
-        if let Some(guard) = guard {
-            type_env.push_scope();
-            if let Some(original) = type_env.get(guard.var_name()).cloned() {
-                if let Some(narrowed) = guard.narrowed_type_for_else(&original) {
-                    type_env.insert(guard.var_name().to_string(), narrowed);
-                }
-            }
-        }
-        let body = convert_block_or_stmt(alt, tctx, reg, return_type, type_env, synthetic)?;
-        if guard.is_some() {
-            type_env.pop_scope();
-        }
-        Some(body)
+        Some(convert_block_or_stmt(alt, tctx, reg, return_type, type_env, synthetic)?)
     } else {
         None
     };
 
-    // Try to generate if-let pattern for narrowing (Option, union enum)
+    // Try to generate if-let pattern (Option, union enum)
     if let Some(guard) = guard {
         if can_generate_if_let(guard, type_env, tctx, reg) {
             return Ok(vec![generate_if_let(
@@ -762,31 +728,6 @@ fn convert_if_stmt(
         then_body,
         else_body,
     }])
-}
-
-/// Pushes narrowing scopes for each guard. Returns the number of scopes pushed.
-fn apply_narrowing_scopes(
-    guards: &[&crate::transformer::expressions::patterns::NarrowingGuard],
-    type_env: &mut TypeEnv,
-) -> usize {
-    let mut count = 0;
-    for guard in guards {
-        type_env.push_scope();
-        if let Some(original) = type_env.get(guard.var_name()).cloned() {
-            if let Some(narrowed) = guard.narrowed_type_for_then(&original) {
-                type_env.insert(guard.var_name().to_string(), narrowed);
-            }
-        }
-        count += 1;
-    }
-    count
-}
-
-/// Pops N scopes from the type environment.
-fn pop_scopes(type_env: &mut TypeEnv, count: usize) {
-    for _ in 0..count {
-        type_env.pop_scope();
-    }
 }
 
 /// Converts AST expressions and combines them with `&&`.
@@ -2214,7 +2155,7 @@ fn convert_switch_stmt(
 /// `switch (typeof x) { case "string": ... case "number": ... }` →
 /// `match x { Enum::String(x) => { ... }, Enum::F64(x) => { ... } }`
 ///
-/// 各 case body 内では type_env に narrowing された型が適用される。
+/// 各 case body 内では destructured なフィールドが type_env に登録される。
 fn try_convert_typeof_switch(
     switch: &ast::SwitchStmt,
     tctx: &TransformContext<'_>,
@@ -2276,7 +2217,7 @@ fn try_convert_typeof_switch(
     // and are flushed when a non-empty body is encountered — each pending entry generates
     // a separate arm with the same body, because Rust `|` patterns cannot bind different types.
     let mut arms: Vec<MatchArm> = Vec::new();
-    let mut pending: Vec<(MatchPattern, String)> = Vec::new(); // (pattern, typeof_str)
+    let mut pending: Vec<MatchPattern> = Vec::new();
 
     for case in &switch.cases {
         if let Some(test) = &case.test {
@@ -2299,21 +2240,14 @@ fn try_convert_typeof_switch(
             };
 
             // Accumulate pattern (will be flushed when we hit a non-empty body)
-            pending.push((pattern, typeof_str));
+            pending.push(pattern);
 
             if case.cons.is_empty() {
                 continue;
             }
 
             // Non-empty body: flush all pending patterns as separate arms with this body.
-            // Each arm gets its own narrowing because different variants have different inner types.
-            for (pat, ts) in pending.drain(..) {
-                let narrowed_type =
-                    crate::transformer::expressions::patterns::typeof_string_to_rust_type(&ts);
-                type_env.push_scope();
-                if let Some(narrowed) = narrowed_type {
-                    type_env.insert(var_name.clone(), narrowed);
-                }
+            for pat in pending.drain(..) {
                 let body: Vec<Stmt> = case
                     .cons
                     .iter()
@@ -2323,7 +2257,6 @@ fn try_convert_typeof_switch(
                     .into_iter()
                     .flatten()
                     .collect();
-                type_env.pop_scope();
 
                 arms.push(MatchArm {
                     patterns: vec![pat],
@@ -2332,8 +2265,8 @@ fn try_convert_typeof_switch(
                 });
             }
         } else {
-            // default case — also flush any pending patterns with no narrowing
-            for (pat, _) in pending.drain(..) {
+            // default case — also flush any pending patterns
+            for pat in pending.drain(..) {
                 let body: Vec<Stmt> = case
                     .cons
                     .iter()
@@ -2369,7 +2302,7 @@ fn try_convert_typeof_switch(
 
     // Flush any remaining pending patterns (trailing empty-body cases that fell off
     // the end of the switch). Generate arms with empty body to preserve match exhaustiveness.
-    for (pat, _) in pending.drain(..) {
+    for pat in pending.drain(..) {
         arms.push(MatchArm {
             patterns: vec![pat],
             guard: None,

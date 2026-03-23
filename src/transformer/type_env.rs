@@ -90,20 +90,6 @@ impl TypeEnv {
         }
     }
 
-    /// 既存の変数の型を更新する。スコープチェーンを内側から探索し、
-    /// 最初に見つかったスコープで更新する。どのスコープにも存在しない場合は
-    /// 現在のスコープに挿入する。
-    pub fn update(&mut self, name: String, ty: RustType) {
-        for scope in self.scopes.iter_mut().rev() {
-            if let std::collections::hash_map::Entry::Occupied(mut e) = scope.entry(name.clone()) {
-                e.insert(ty);
-                return;
-            }
-        }
-        // どのスコープにも存在しない → 現在のスコープに挿入
-        self.insert(name, ty);
-    }
-
     /// 変数名から型を取得する。最内スコープから順に探索する。
     pub fn get(&self, name: &str) -> Option<&RustType> {
         for scope in self.scopes.iter().rev() {

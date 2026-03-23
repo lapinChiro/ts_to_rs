@@ -48,7 +48,7 @@ P1〜P7 で新パイプラインの全コンポーネントが実装された。
   - `ExprContext` → **Phase 2 で削除済み**（TypeResolver の expected_types に一本化）
   - `resolve_expr_type` / `resolve_expr_type_heuristic` → **Phase 3-2 で削除済み**（TypeResolver の expr_types に一本化）
   - `set_expected_types_in_nested_calls` → **Phase 3-5 で削除済み**（resolve_call_expr の再帰で自然に解消）
-  - `TypeEnv` の narrowing スコープ管理 → **Phase 4 で削除予定**。narrowing_events で完全カバー済み（D-TR-1 で検証）だが push_scope/pop_scope の削除は未実施
+  - `TypeEnv` の narrowing スコープ管理 → **Phase 4 で削除済み**。narrowing 用 push_scope/pop_scope 削除、update() 削除
   - `tctx` + `reg` の二重パラメータ → **D5: 未着手**。105 関数 + テストコード
   - 分散した合成型生成 → **D0a で削除済み**
   - P1 のブリッジ実装 → **Phase A で削除済み**
@@ -199,7 +199,7 @@ let rust_source = pipeline::transpile_single(&source)?;
 | `build_shared_registry` | `src/lib.rs` | `transpile_pipeline` 内の型収集 | **リファクタリングで削除済み** |
 | `transpile_with_registry` 系 4 関数 | `src/lib.rs` | `transpile()` / `transpile_collecting()` | **リファクタリングで削除済み** |
 | `ExprContext` | `src/transformer/expressions/mod.rs` | `TransformContext` + `expected_types` | **Phase 2 で削除済み** |
-| `TypeEnv` の narrowing 管理 | `src/transformer/type_env.rs` | `narrowing_events` | **Phase 4 で削除予定**。TypeResolver の narrowing_events カバレッジは D-TR-1 で 100% 確認済みだが、push_scope/pop_scope の削除は未実施 |
+| `TypeEnv` の narrowing 管理 | `src/transformer/type_env.rs` | `narrowing_events` | **Phase 4 で削除済み**。narrowing 用 push_scope/pop_scope 削除、update() 削除 |
 | `resolve_expr_type_heuristic` | `src/transformer/expressions/type_resolution.rs` | `TypeResolver` | **Phase 3-2 で削除済み** |
 | `tctx` + `reg` 二重パラメータ | 全 Transformer 関数（105 関数） | `tctx.type_registry` に統一 | **D5: 未着手**。分析・設計済み（tasks.md 参照） |
 | 合成型の直接 Item push | `src/transformer/functions/mod.rs` 等 | `SyntheticTypeRegistry` | **D0a で解消済み** |
@@ -207,9 +207,8 @@ let rust_source = pipeline::transpile_single(&source)?;
 
 ### 残作業（実施順）
 
-1. **Phase 4**: TypeEnv 簡素化（narrowing 用 push_scope/pop_scope 削除）
-2. **D5**: 全 Transformer 関数 105 個（14 ファイル）+ 全テストコード — `reg: &TypeRegistry` パラメータを削除し `tctx.type_registry` に統一
-3. **Phase E**: 最終検証
+1. **D5**: 全 Transformer 関数 112 個（14 ファイル）+ 全テストコード — `reg: &TypeRegistry` パラメータを削除し `tctx.type_registry` に統一
+2. **Phase E**: 最終検証
 
 ## 作業ステップ
 
@@ -254,9 +253,8 @@ let rust_source = pipeline::transpile_single(&source)?;
 - ~~`set_expected_types_in_nested_calls` の削除~~ → Phase 3-5 で完了
 
 残り:
-1. `TypeEnv` の narrowing 管理の削除 → Phase 4 で対応
-2. `tctx` + `reg` 二重パラメータの統合 → D5 で対応
-3. 各削除後に `cargo test` が GREEN であることを確認
+1. `tctx` + `reg` 二重パラメータの統合 → D5 で対応
+2. 各削除後に `cargo test` が GREEN であることを確認
 
 ### Step 6: 全テスト + ベンチマーク（検証）
 
@@ -297,7 +295,7 @@ let rust_source = pipeline::transpile_single(&source)?;
 - I-212（enum 重複定義）→ **P8 で構造的に解消済み**
 - `ExprContext` → **Phase 2 で削除済み**
 - `resolve_expr_type_heuristic` → **Phase 3-2 で削除済み**
-- `TypeEnv` narrowing → **Phase 4 で削除予定**
+- `TypeEnv` narrowing → **Phase 4 で削除済み**
 - `tctx` + `reg` 二重パラメータ → **D5 で統合予定**
 
 - [ ] 統一パイプライン `transpile(TranspileInput) -> TranspileOutput` が P1〜P7 の全コンポーネントを接続して動作する
