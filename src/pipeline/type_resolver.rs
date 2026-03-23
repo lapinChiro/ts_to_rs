@@ -166,7 +166,7 @@ impl<'a> TypeResolver<'a> {
             .return_type
             .as_ref()
             .and_then(|ann| convert_ts_type(&ann.type_ann, self.synthetic, self.registry).ok())
-            .and_then(|ty| unwrap_promise_and_unit(ty))
+            .and_then(unwrap_promise_and_unit)
             .map(|ty| wrap_trait_for_position(ty, TypePosition::Value, self.registry));
         let fn_type = RustType::Fn {
             params: params.iter().map(|(_, ty)| ty.clone()).collect(),

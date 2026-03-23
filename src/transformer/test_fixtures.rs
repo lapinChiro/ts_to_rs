@@ -47,16 +47,6 @@ impl TctxFixture {
         }
     }
 
-    /// カスタム FileTypeResolution で構築する（lookup テスト用）。
-    pub fn with_resolution(res: FileTypeResolution) -> Self {
-        Self {
-            mg: ModuleGraph::empty(),
-            reg: TypeRegistry::new(),
-            res,
-            module: None,
-        }
-    }
-
     /// TS ソースコードを解析し、TypeResolver を実行して TransformContext を構築する。
     ///
     /// unit test で TypeResolver 経由の expected type 設定をテストする場合に使用。
@@ -119,7 +109,7 @@ impl TctxFixture {
     ///
     /// # Panics
     ///
-    /// `new()` / `with_reg()` / `with_resolution()` で構築した場合はパニックする。
+    /// `new()` / `with_reg()` で構築した場合はパニックする。
     pub fn module(&self) -> &swc_ecma_ast::Module {
         self.module
             .as_ref()

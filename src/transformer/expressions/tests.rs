@@ -3927,216 +3927,6 @@ fn test_convert_opt_chain_normal_field_unchanged() {
     );
 }
 
-// --- resolve_expr_type tests ---
-
-use super::resolve_expr_type;
-
-/// Helper: parse a single expression from a statement
-fn parse_single_expr(source: &str) -> swc_ecma_ast::Expr {
-    parse_expr(source)
-}
-
-#[test]
-fn test_resolve_expr_type_ident_registered_returns_type() {
-    let f = TctxFixture::new();
-    let tctx = f.tctx();
-    let expr = parse_single_expr("x;");
-    let mut env = TypeEnv::new();
-    env.insert("x".to_string(), RustType::String);
-
-    assert_eq!(
-        resolve_expr_type(&expr, &env, &tctx, f.reg()),
-        Some(RustType::String)
-    );
-}
-
-#[test]
-fn test_resolve_expr_type_ident_unregistered_returns_none() {
-    let f = TctxFixture::new();
-    let tctx = f.tctx();
-    let expr = parse_single_expr("y;");
-    let env = TypeEnv::new();
-
-    assert_eq!(resolve_expr_type(&expr, &env, &tctx, f.reg()), None);
-}
-
-#[test]
-fn test_resolve_expr_type_member_field_found_returns_field_type() {
-    let expr = parse_single_expr("x.field;");
-    let mut env = TypeEnv::new();
-    env.insert(
-        "x".to_string(),
-        RustType::Named {
-            name: "Foo".to_string(),
-            type_args: vec![],
-        },
-    );
-    let mut reg = TypeRegistry::new();
-    reg.register(
-        "Foo".to_string(),
-        TypeDef::new_struct(
-            vec![("field".to_string(), RustType::String)],
-            std::collections::HashMap::new(),
-            vec![],
-        ),
-    );
-    let f = TctxFixture::with_reg(reg);
-    let tctx = f.tctx();
-
-    assert_eq!(
-        resolve_expr_type(&expr, &env, &tctx, f.reg()),
-        Some(RustType::String)
-    );
-}
-
-#[test]
-fn test_resolve_expr_type_member_field_not_found_returns_none() {
-    let expr = parse_single_expr("x.missing;");
-    let mut env = TypeEnv::new();
-    env.insert(
-        "x".to_string(),
-        RustType::Named {
-            name: "Foo".to_string(),
-            type_args: vec![],
-        },
-    );
-    let mut reg = TypeRegistry::new();
-    reg.register(
-        "Foo".to_string(),
-        TypeDef::new_struct(
-            vec![("other".to_string(), RustType::F64)],
-            std::collections::HashMap::new(),
-            vec![],
-        ),
-    );
-    let f = TctxFixture::with_reg(reg);
-    let tctx = f.tctx();
-
-    assert_eq!(resolve_expr_type(&expr, &env, &tctx, f.reg()), None);
-}
-
-#[test]
-fn test_resolve_expr_type_member_option_named_returns_field_type() {
-    let expr = parse_single_expr("x.field;");
-    let mut env = TypeEnv::new();
-    env.insert(
-        "x".to_string(),
-        RustType::Option(Box::new(RustType::Named {
-            name: "Foo".to_string(),
-            type_args: vec![],
-        })),
-    );
-    let mut reg = TypeRegistry::new();
-    reg.register(
-        "Foo".to_string(),
-        TypeDef::new_struct(
-            vec![("field".to_string(), RustType::String)],
-            std::collections::HashMap::new(),
-            vec![],
-        ),
-    );
-    let f = TctxFixture::with_reg(reg);
-    let tctx = f.tctx();
-
-    assert_eq!(
-        resolve_expr_type(&expr, &env, &tctx, f.reg()),
-        Some(RustType::String)
-    );
-}
-
-#[test]
-fn test_resolve_expr_type_member_obj_unresolvable_returns_none() {
-    let f = TctxFixture::new();
-    let tctx = f.tctx();
-    let expr = parse_single_expr("y.field;");
-    let env = TypeEnv::new();
-
-    assert_eq!(resolve_expr_type(&expr, &env, &tctx, f.reg()), None);
-}
-
-#[test]
-fn test_resolve_expr_type_paren_delegates_to_inner() {
-    let f = TctxFixture::new();
-    let tctx = f.tctx();
-    let expr = parse_single_expr("(x);");
-    let mut env = TypeEnv::new();
-    env.insert("x".to_string(), RustType::F64);
-
-    assert_eq!(
-        resolve_expr_type(&expr, &env, &tctx, f.reg()),
-        Some(RustType::F64)
-    );
-}
-
-#[test]
-fn test_resolve_expr_type_ts_as_returns_target_type() {
-    let f = TctxFixture::new();
-    let tctx = f.tctx();
-    let expr = parse_single_expr("x as string;");
-    let env = TypeEnv::new();
-
-    assert_eq!(
-        resolve_expr_type(&expr, &env, &tctx, f.reg()),
-        Some(RustType::String)
-    );
-}
-
-#[test]
-fn test_resolve_expr_type_number_literal_returns_f64() {
-    let f = TctxFixture::new();
-    let tctx = f.tctx();
-    let expr = parse_single_expr("42;");
-    let env = TypeEnv::new();
-
-    assert_eq!(
-        resolve_expr_type(&expr, &env, &tctx, f.reg()),
-        Some(RustType::F64)
-    );
-}
-
-#[test]
-fn test_resolve_expr_type_member_chain_returns_nested_type() {
-    let expr = parse_single_expr("x.inner.name;");
-    let mut env = TypeEnv::new();
-    env.insert(
-        "x".to_string(),
-        RustType::Named {
-            name: "Outer".to_string(),
-            type_args: vec![],
-        },
-    );
-    let mut reg = TypeRegistry::new();
-    reg.register(
-        "Outer".to_string(),
-        TypeDef::new_struct(
-            vec![(
-                "inner".to_string(),
-                RustType::Named {
-                    name: "Inner".to_string(),
-                    type_args: vec![],
-                },
-            )],
-            std::collections::HashMap::new(),
-            vec![],
-        ),
-    );
-    reg.register(
-        "Inner".to_string(),
-        TypeDef::new_struct(
-            vec![("name".to_string(), RustType::String)],
-            std::collections::HashMap::new(),
-            vec![],
-        ),
-    );
-    let f = TctxFixture::with_reg(reg);
-    let tctx = f.tctx();
-
-    assert_eq!(
-        resolve_expr_type(&expr, &env, &tctx, f.reg()),
-        Some(RustType::String)
-    );
-}
-
 // --- TypeEnv-aware optional chaining tests ---
 
 #[test]
@@ -4175,7 +3965,7 @@ fn test_convert_opt_chain_non_option_type_returns_plain_access() {
 fn test_convert_opt_chain_option_type_returns_map_pattern() {
     let f = TctxFixture::new();
     let tctx = f.tctx();
-    let expr = parse_single_expr("x?.y;");
+    let expr = parse_expr("x?.y;");
     let mut env = TypeEnv::new();
     env.insert(
         "x".to_string(),
@@ -4203,7 +3993,7 @@ fn test_convert_opt_chain_option_type_returns_map_pattern() {
 fn test_convert_opt_chain_unknown_type_returns_map_pattern() {
     let f = TctxFixture::new();
     let tctx = f.tctx();
-    let expr = parse_single_expr("x?.y;");
+    let expr = parse_expr("x?.y;");
     let env = TypeEnv::new();
 
     let result = convert_expr(
@@ -4227,7 +4017,7 @@ fn test_opt_chain_method_call_maps_to_rust_name() {
     let f = TctxFixture::new();
     let tctx = f.tctx();
     // s?.toUpperCase() → s.as_ref().map(|_v| _v.to_uppercase())
-    let expr = parse_single_expr("s?.toUpperCase();");
+    let expr = parse_expr("s?.toUpperCase();");
     let mut env = TypeEnv::new();
     env.insert(
         "s".to_string(),
@@ -4289,7 +4079,7 @@ fn test_convert_nullish_coalescing_non_option_returns_left() {
 fn test_convert_nullish_coalescing_option_returns_unwrap_or_else() {
     let f = TctxFixture::new();
     let tctx = f.tctx();
-    let expr = parse_single_expr("x ?? y;");
+    let expr = parse_expr("x ?? y;");
     let mut env = TypeEnv::new();
     env.insert(
         "x".to_string(),
@@ -4314,7 +4104,7 @@ fn test_convert_nullish_coalescing_option_returns_unwrap_or_else() {
 fn test_convert_nullish_coalescing_unknown_type_returns_unwrap_or_else() {
     let f = TctxFixture::new();
     let tctx = f.tctx();
-    let expr = parse_single_expr("x ?? y;");
+    let expr = parse_expr("x ?? y;");
     let env = TypeEnv::new();
 
     let result = convert_expr(
@@ -4595,185 +4385,6 @@ fn test_call_with_option_arg_wraps_some() {
         }
         other => panic!("expected FnCall, got: {other:?}"),
     }
-}
-
-// --- resolve_expr_type: function call return type ---
-
-#[test]
-fn test_resolve_expr_type_call_registry_fn_returns_return_type() {
-    let expr = parse_single_expr("getValue();");
-    let env = TypeEnv::new();
-    let mut reg = TypeRegistry::new();
-    reg.register(
-        "getValue".to_string(),
-        TypeDef::Function {
-            params: vec![],
-            return_type: Some(RustType::String),
-            has_rest: false,
-        },
-    );
-    let f = TctxFixture::with_reg(reg);
-    let tctx = f.tctx();
-
-    assert_eq!(
-        resolve_expr_type(&expr, &env, &tctx, f.reg()),
-        Some(RustType::String)
-    );
-}
-
-#[test]
-fn test_resolve_expr_type_call_unregistered_fn_returns_none() {
-    let f = TctxFixture::new();
-    let tctx = f.tctx();
-    let expr = parse_single_expr("unknown();");
-    let env = TypeEnv::new();
-
-    assert_eq!(resolve_expr_type(&expr, &env, &tctx, f.reg()), None);
-}
-
-#[test]
-fn test_resolve_expr_type_call_fn_type_in_env_returns_return_type() {
-    let f = TctxFixture::new();
-    let tctx = f.tctx();
-    let expr = parse_single_expr("f();");
-    let mut env = TypeEnv::new();
-    env.insert(
-        "f".to_string(),
-        RustType::Fn {
-            params: vec![],
-            return_type: Box::new(RustType::Bool),
-        },
-    );
-
-    assert_eq!(
-        resolve_expr_type(&expr, &env, &tctx, f.reg()),
-        Some(RustType::Bool)
-    );
-}
-
-#[test]
-fn test_resolve_expr_type_call_registry_fn_no_return_type_returns_unit() {
-    let expr = parse_single_expr("doSomething();");
-    let env = TypeEnv::new();
-    let mut reg = TypeRegistry::new();
-    reg.register(
-        "doSomething".to_string(),
-        TypeDef::Function {
-            params: vec![],
-            return_type: None,
-            has_rest: false,
-        },
-    );
-    let f = TctxFixture::with_reg(reg);
-    let tctx = f.tctx();
-
-    assert_eq!(
-        resolve_expr_type(&expr, &env, &tctx, f.reg()),
-        Some(RustType::Unit)
-    );
-}
-
-// --- resolve_expr_type: array index ---
-
-#[test]
-fn test_resolve_expr_type_index_vec_returns_element_type() {
-    let f = TctxFixture::new();
-    let tctx = f.tctx();
-    let expr = parse_single_expr("arr[0];");
-    let mut env = TypeEnv::new();
-    env.insert("arr".to_string(), RustType::Vec(Box::new(RustType::String)));
-
-    assert_eq!(
-        resolve_expr_type(&expr, &env, &tctx, f.reg()),
-        Some(RustType::String)
-    );
-}
-
-#[test]
-fn test_resolve_expr_type_index_non_vec_returns_none() {
-    let f = TctxFixture::new();
-    let tctx = f.tctx();
-    let expr = parse_single_expr("x[0];");
-    let mut env = TypeEnv::new();
-    env.insert("x".to_string(), RustType::String);
-
-    assert_eq!(resolve_expr_type(&expr, &env, &tctx, f.reg()), None);
-}
-
-// --- resolve_expr_type: binary operations ---
-
-#[test]
-fn test_resolve_expr_type_comparison_returns_bool() {
-    let f = TctxFixture::new();
-    let tctx = f.tctx();
-    let expr = parse_single_expr("x > y;");
-    let env = TypeEnv::new();
-
-    assert_eq!(
-        resolve_expr_type(&expr, &env, &tctx, f.reg()),
-        Some(RustType::Bool)
-    );
-}
-
-#[test]
-fn test_resolve_expr_type_equality_returns_bool() {
-    let f = TctxFixture::new();
-    let tctx = f.tctx();
-    let expr = parse_single_expr("x === y;");
-    let env = TypeEnv::new();
-
-    assert_eq!(
-        resolve_expr_type(&expr, &env, &tctx, f.reg()),
-        Some(RustType::Bool)
-    );
-}
-
-#[test]
-fn test_resolve_expr_type_logical_and_returns_operand_type() {
-    let f = TctxFixture::new();
-    let tctx = f.tctx();
-    let expr = parse_single_expr("a && b;");
-    let mut env = TypeEnv::new();
-    env.insert("a".to_string(), RustType::String);
-    env.insert("b".to_string(), RustType::String);
-
-    assert_eq!(
-        resolve_expr_type(&expr, &env, &tctx, f.reg()),
-        Some(RustType::String)
-    );
-}
-
-// --- resolve_expr_type: new expression ---
-
-#[test]
-fn test_resolve_expr_type_new_registered_returns_named_type() {
-    let expr = parse_single_expr("new Foo();");
-    let env = TypeEnv::new();
-    let mut reg = TypeRegistry::new();
-    reg.register(
-        "Foo".to_string(),
-        TypeDef::new_struct(vec![], std::collections::HashMap::new(), vec![]),
-    );
-
-    let f = TctxFixture::with_reg(reg);
-    let tctx = f.tctx();
-    assert_eq!(
-        resolve_expr_type(&expr, &env, &tctx, f.reg()),
-        Some(RustType::Named {
-            name: "Foo".to_string(),
-            type_args: vec![],
-        })
-    );
-}
-
-#[test]
-fn test_resolve_expr_type_new_unregistered_returns_none() {
-    let f = TctxFixture::new();
-    let tctx = f.tctx();
-    let expr = parse_single_expr("new Unknown();");
-    let env = TypeEnv::new();
-
-    assert_eq!(resolve_expr_type(&expr, &env, &tctx, f.reg()), None);
 }
 
 // --- Step 5: expected 型伝搬テスト ---
@@ -6013,21 +5624,6 @@ fn test_convert_member_expr_non_tuple_index_unchanged() {
             index: Box::new(Expr::NumberLit(0.0)),
         }
     );
-}
-
-#[test]
-fn test_resolve_expr_type_tuple_index_returns_element_type() {
-    let f = TctxFixture::new();
-    let tctx = f.tctx();
-    let mut type_env = TypeEnv::new();
-    type_env.insert(
-        "pair".to_string(),
-        RustType::Tuple(vec![RustType::String, RustType::F64]),
-    );
-
-    let swc_expr = parse_expr("pair[0];");
-    let result = resolve_expr_type(&swc_expr, &type_env, &tctx, f.reg());
-    assert_eq!(result, Some(RustType::String));
 }
 
 // --- nullish coalescing expected type propagation ---

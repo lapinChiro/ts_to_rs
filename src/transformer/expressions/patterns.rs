@@ -69,7 +69,7 @@ pub(super) fn try_convert_enum_string_comparison(
 
     // Try: left is enum variable, right is string literal
     if let Some(str_value) = extract_string_lit(&bin.right) {
-        if let Some(enum_name) = resolve_enum_type_name(&bin.left, type_env, tctx, reg) {
+        if let Some(enum_name) = resolve_enum_type_name(&bin.left, tctx, reg) {
             if let Some(variant) = lookup_string_enum_variant(reg, &enum_name, &str_value) {
                 // Cat A: comparison operand
                 let left = super::convert_expr(&bin.left, tctx, reg, type_env, synthetic).ok()?;
@@ -84,7 +84,7 @@ pub(super) fn try_convert_enum_string_comparison(
 
     // Try: left is string literal, right is enum variable
     if let Some(str_value) = extract_string_lit(&bin.left) {
-        if let Some(enum_name) = resolve_enum_type_name(&bin.right, type_env, tctx, reg) {
+        if let Some(enum_name) = resolve_enum_type_name(&bin.right, tctx, reg) {
             if let Some(variant) = lookup_string_enum_variant(reg, &enum_name, &str_value) {
                 // Cat A: comparison operand
                 let right = super::convert_expr(&bin.right, tctx, reg, type_env, synthetic).ok()?;
@@ -112,7 +112,6 @@ fn extract_string_lit(expr: &ast::Expr) -> Option<String> {
 /// 式の型が string literal union enum の場合、その enum 名を返す。
 fn resolve_enum_type_name(
     expr: &ast::Expr,
-    type_env: &TypeEnv,
     tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
 ) -> Option<String> {
@@ -323,7 +322,6 @@ pub(super) fn convert_in_operator(
     bin: &ast::BinExpr,
     tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
-    type_env: &TypeEnv,
 ) -> Expr {
     // Extract the key string from LHS (must be a string literal)
     let key = match bin.left.as_ref() {

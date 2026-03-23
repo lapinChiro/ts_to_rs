@@ -39,8 +39,8 @@
 - **Trait パラメータ型**: `&dyn Trait` / `Box<dyn Trait>` 変換 + 呼び出し側型強制（`&*` / `Box::new()`）
 - **resolve-types**: `ts_to_rs resolve-types --tsconfig ...` サブコマンド実装済み
 - **型 narrowing**: typeof/instanceof/null-check/truthy → `if let` パターン生成。any 型 → enum 自動生成。typeof "object"/"function" バリアント解決。複合条件 (&&) のネスト if let。三項演算子の `Expr::IfLet`。switch (typeof x) の match 変換。楽観的 `true` フォールバックは `todo!()` に置換済み
-- **チェーンメソッド型追跡**: `MethodSignature`（パラメータ + 戻り値型）を TypeRegistry に格納。`resolve_method_return_type` でメソッド呼び出しの戻り値型を解決。ユーザー定義型・外部型のチェーンメソッドで動作。ビルトイン String/Array は I-211（ECMAScript 標準型追加）待ち
-- **ジェネリクス基盤**: `TypeParam`（名前 + 制約）を IR に定義。`TypeDef::Struct`/`Enum` に `type_params` 格納。`RustType::substitute` で型パラメータの具体型置換。`TypeRegistry::instantiate` でジェネリック型のインスタンス化。`resolve_field_type`/`resolve_method_return_type` で `type_args` を使った具体型解決。`Item::Struct`/`Trait`/`Fn`/`TypeAlias` の型パラメータに制約（`T: Bound`）を出力
+- **チェーンメソッド型追跡**: `MethodSignature`（パラメータ + 戻り値型）を TypeRegistry に格納。`TypeResolver::resolve_method_return_type` でメソッド呼び出しの戻り値型を解決。ユーザー定義型・外部型のチェーンメソッドで動作。ビルトイン String/Array は I-211（ECMAScript 標準型追加）待ち
+- **ジェネリクス基盤**: `TypeParam`（名前 + 制約）を IR に定義。`TypeDef::Struct`/`Enum` に `type_params` 格納。`RustType::substitute` で型パラメータの具体型置換。`TypeRegistry::instantiate` でジェネリック型のインスタンス化。`resolve_field_type`/`TypeResolver::resolve_method_return_type` で `type_args` を使った具体型解決。`Item::Struct`/`Trait`/`Fn`/`TypeAlias` の型パラメータに制約（`T: Bound`）を出力
 - **ディレクトリモード改善**: 中間ディレクトリ（サブディレクトリのみ）の mod.rs 生成。`../` import パスの `crate::` パス解決。ハイフン入りファイル名のアンダースコア変換。ディレクトリ単位コンパイルチェック（ベンチマーク 2 指標並行計測）
 
 ---
@@ -99,7 +99,7 @@
   - 不足: `String`, `Array`, `Date`, `Error`, `RegExp`, `Map`, `Set`, `WeakMap`, `WeakSet`, `Symbol`, `Intl` 等
   - instanceof on これらの型が enum バリアント `Date(Date)` を生成するが struct が未定義でコンパイルエラー
   - `tools/extract-types/` の抽出スクリプトの対象ライブラリを拡大すれば解決
-  - **I-61 との関連**: `MethodSignature`（戻り値型付き）と `resolve_method_return_type` は実装済みだが、TypeRegistry に `String`/`Array` が未登録のため、ビルトインメソッドのチェーン型追跡が機能しない。本項目で追加すれば自動的に解決する。追加後の検証:
+  - **I-61 との関連**: `MethodSignature`（戻り値型付き）と `TypeResolver::resolve_method_return_type` は実装済みだが、TypeRegistry に `String`/`Array` が未登録のため、ビルトインメソッドのチェーン型追跡が機能しない。本項目で追加すれば自動的に解決する。追加後の検証:
     1. `"hello".trim().split(" ")` で `split` のレシーバ型が `String` と解決される
     2. `[1,2,3].map(...).filter(...)` で `filter` のレシーバ型が `Vec<f64>` と解決される
     3. E2E テスト `method_chain.ts` に配列チェーンのテストケースを追加する（I-217 の解消も前提）

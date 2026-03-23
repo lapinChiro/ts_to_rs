@@ -51,7 +51,7 @@ pub(super) fn convert_bin_expr(
 
     // "key" in obj pattern
     if bin.op == ast::BinaryOp::In {
-        return Ok(convert_in_operator(bin, tctx, reg, type_env));
+        return Ok(convert_in_operator(bin, tctx, reg));
     }
 
     // `x ?? y` → `x.unwrap_or_else(|| y)` (Option) or `x` (non-Option)
@@ -86,7 +86,7 @@ pub(super) fn convert_bin_expr(
     // Priority: type inference → expected type → IR heuristic (is_string_like fallback).
     let is_string_context = if op == BinOp::Add {
         let left_type = get_expr_type(tctx, &bin.left);
-        let type_inferred = left_type.is_some_and(|ty| is_string_type(ty));
+        let type_inferred = left_type.is_some_and(is_string_type);
         type_inferred || matches!(expected, Some(RustType::String)) || is_string_like(&left)
     } else {
         false
@@ -193,7 +193,7 @@ pub(super) fn convert_unary_expr(
                 // Option<T>: runtime branch — is_some() → typeof inner, else "undefined"
                 // Cat A: typeof operand — only used for type discrimination
                 let operand = convert_expr(&unary.arg, tctx, reg, type_env, synthetic)?;
-                let inner_typeof = typeof_to_string(&inner);
+                let inner_typeof = typeof_to_string(inner);
                 Expr::If {
                     condition: Box::new(Expr::MethodCall {
                         object: Box::new(operand),

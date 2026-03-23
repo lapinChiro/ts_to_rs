@@ -38,8 +38,6 @@ use literals::convert_lit;
 use member_access::{convert_member_expr, convert_opt_chain_expr};
 use type_resolution::convert_ts_as_expr;
 pub(crate) use type_resolution::get_expr_type;
-#[cfg(test)]
-pub use type_resolution::resolve_expr_type;
 
 /// Converts an SWC [`ast::Expr`] into an IR [`Expr`], with an optional expected type.
 ///
@@ -179,7 +177,7 @@ fn convert_expr_with_expected(
     // Trait type coercion: when expected type is Box<dyn Trait> and the expression
     // produces a concrete (non-Box) value, wrap it in Box::new().
     if let Some(expected) = expected {
-        if needs_trait_box_coercion(expected, expr, type_env, tctx, reg) {
+        if needs_trait_box_coercion(expected, expr, tctx, reg) {
             return Ok(Expr::FnCall {
                 name: "Box::new".to_string(),
                 args: vec![result],
@@ -198,7 +196,6 @@ fn convert_expr_with_expected(
 fn needs_trait_box_coercion(
     expected: &RustType,
     src_expr: &ast::Expr,
-    type_env: &TypeEnv,
     tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
 ) -> bool {
@@ -353,7 +350,7 @@ fn convert_cond_expr(
 /// - Optional chaining (`?.`) — always produces Option
 /// - Ternary with null/undefined branch (`x ? y : null`) — produces Option
 ///
-/// This is a temporary workaround: `resolve_expr_type` does not return `Option<T>`
+/// This is a temporary workaround: `get_expr_type` does not return `Option<T>`
 /// for Cond/OptChain expressions. Phase 3 task 3-7 will replace this with
 /// `tctx.type_resolution.expr_type()` after TypeResolver is enhanced to set
 /// correct expr_types for these patterns.

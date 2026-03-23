@@ -111,7 +111,7 @@ pub(super) fn convert_opt_chain_expr(
 
             // If the field type is Option, use and_then to avoid Option<Option<T>>
             let field_type =
-                resolve_field_type(obj_type.unwrap_or(&RustType::Any), &member.prop, tctx, reg);
+                resolve_field_type(obj_type.unwrap_or(&RustType::Any), &member.prop, reg);
             let method_name = if field_type.is_some_and(|ty| matches!(ty, RustType::Option(_))) {
                 "and_then"
             } else {
