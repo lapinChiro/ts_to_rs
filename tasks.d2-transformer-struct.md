@@ -182,8 +182,8 @@ pub fn convert_expr(
 
 ### Phase D-2-C: statements モジュールのメソッド化
 
-- [ ] **C-1**: `statements/mod.rs` — 36 関数
-- [ ] **C-2**: `cargo check` 通過確認
+- [x] **C-1**: `statements/mod.rs` — 36 関数メソッド化 + ラッパー
+- [x] **C-2**: rust-analyzer diagnostics エラー 0 確認
 
 ### Phase D-2-D: functions, classes モジュールのメソッド化
 
