@@ -882,8 +882,8 @@ fn test_transform_var_type_arrow_propagates_return_type() {
             return { x: n, y: 0 };
         };
     "#;
-    let module = parse_typescript(source).expect("parse failed");
-    let items = transform_module(&module, &TypeRegistry::new()).unwrap();
+    let f = TctxFixture::from_source(source);
+    let (items, _) = f.transform(source);
 
     let fn_item = items
         .iter()
@@ -912,9 +912,8 @@ fn test_transform_var_type_alias_arrow_propagates_return_type() {
             return { name: key };
         };
     "#;
-    let module = parse_typescript(source).expect("parse failed");
-    let reg = crate::registry::build_registry(&module);
-    let items = transform_module(&module, &reg).unwrap();
+    let f = TctxFixture::from_source(source);
+    let (items, _) = f.transform(source);
 
     let fn_item = items
         .iter()

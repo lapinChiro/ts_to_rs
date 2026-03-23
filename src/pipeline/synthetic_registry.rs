@@ -3,7 +3,7 @@
 //! Manages union enums, any-type enums, and inline structs with
 //! deduplication based on semantic signatures.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use crate::ir::{EnumVariant, Item, RustType, StructField, Visibility};
 
@@ -14,8 +14,8 @@ use crate::ir::{EnumVariant, Item, RustType, StructField, Visibility};
 /// semantic signature and returns the same name for identical types.
 #[derive(Debug)]
 pub struct SyntheticTypeRegistry {
-    /// Registered types by name.
-    types: HashMap<String, SyntheticTypeDef>,
+    /// Registered types by name (BTreeMap for deterministic iteration order).
+    types: BTreeMap<String, SyntheticTypeDef>,
     /// Union deduplication: sorted member signature → registered name.
     union_dedup: HashMap<String, String>,
     /// Inline struct deduplication: field signature → registered name.
@@ -53,7 +53,7 @@ impl SyntheticTypeRegistry {
     /// Creates an empty registry.
     pub fn new() -> Self {
         Self {
-            types: HashMap::new(),
+            types: BTreeMap::new(),
             union_dedup: HashMap::new(),
             struct_dedup: HashMap::new(),
             struct_counter: 0,
@@ -201,11 +201,10 @@ impl SyntheticTypeRegistry {
     }
 
     /// Returns all registered synthetic types as IR items.
+    ///
+    /// Iteration order is deterministic (name-sorted) because `types` is a `BTreeMap`.
     pub fn all_items(&self) -> Vec<&Item> {
-        // 名前順にソートして出力の決定性を保証
-        let mut entries: Vec<_> = self.types.iter().collect();
-        entries.sort_by(|(a, _), (b, _)| a.cmp(b));
-        entries.into_iter().map(|(_, def)| &def.item).collect()
+        self.types.values().map(|def| &def.item).collect()
     }
 
     /// Merges another registry into this one.
@@ -228,11 +227,10 @@ impl SyntheticTypeRegistry {
     }
 
     /// Consumes the registry and returns all items as owned values.
+    ///
+    /// Iteration order is deterministic (name-sorted) because `types` is a `BTreeMap`.
     pub fn into_items(self) -> Vec<Item> {
-        // 名前順にソートして出力の決定性を保証
-        let mut entries: Vec<_> = self.types.into_iter().collect();
-        entries.sort_by(|(a, _), (b, _)| a.cmp(b));
-        entries.into_iter().map(|(_, def)| def.item).collect()
+        self.types.into_values().map(|def| def.item).collect()
     }
 }
 

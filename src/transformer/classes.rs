@@ -12,7 +12,7 @@ use crate::pipeline::type_converter::convert_ts_type;
 use crate::pipeline::SyntheticTypeRegistry;
 use crate::registry::TypeRegistry;
 use crate::transformer::context::TransformContext;
-use crate::transformer::expressions::{convert_expr, convert_expr_with_expected};
+use crate::transformer::expressions::convert_expr;
 use crate::transformer::extract_prop_name;
 use crate::transformer::functions::convert_last_return_to_tail;
 use crate::transformer::statements::convert_stmt;
@@ -579,9 +579,7 @@ fn convert_static_prop(
     let ty = convert_ts_type(&type_ann.type_ann, synthetic, reg)?;
 
     let value = match &prop.value {
-        Some(init) => {
-            convert_expr_with_expected(init, tctx, reg, Some(&ty), &TypeEnv::new(), synthetic)?
-        }
+        Some(init) => convert_expr(init, tctx, reg, &TypeEnv::new(), synthetic)?,
         None => return Ok(None), // No initializer — skip
     };
 
@@ -2044,11 +2042,14 @@ mod tests {
             ),
         );
 
-        let f = TctxFixture::with_reg(reg);
+        let source = r#"class Foo { static config: Config = { name: "default" }; }"#;
+        let f = TctxFixture::from_source_with_reg(source, reg);
         let tctx = f.tctx();
 
-        let decl =
-            parse_class_decl(r#"class Foo { static config: Config = { name: "default" }; }"#);
+        let decl = match &f.module().body[0] {
+            ModuleItem::Stmt(ast::Stmt::Decl(Decl::Class(decl))) => decl.clone(),
+            _ => panic!("expected ClassDecl"),
+        };
         let items = convert_class_decl(
             &decl,
             Visibility::Private,

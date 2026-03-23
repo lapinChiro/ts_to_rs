@@ -11,9 +11,7 @@ use crate::pipeline::SyntheticTypeRegistry;
 use crate::registry::TypeRegistry;
 use crate::transformer::context::TransformContext;
 use crate::transformer::expressions::patterns::extract_narrowing_guards;
-use crate::transformer::expressions::{
-    convert_expr, convert_expr_with_expected, resolve_expr_type,
-};
+use crate::transformer::expressions::{convert_expr, resolve_expr_type};
 use crate::transformer::TypeEnv;
 use crate::transformer::{
     extract_pat_ident_name, extract_prop_name, single_declarator, TypePosition,
@@ -49,38 +47,13 @@ pub fn convert_stmt(
             if let Some(stmts) = try_expand_spread_return(ret, tctx, reg, type_env, synthetic)? {
                 return Ok(stmts);
             }
-            // For Option<T> return types, pass inner T as expected type since
-            // the Some() wrapping is handled separately below.
-            let expected_for_expr = match return_type {
-                Some(RustType::Option(inner)) => Some(inner.as_ref()),
-                other => other,
-            };
             let expr = ret
                 .arg
                 .as_ref()
-                .map(|e| {
-                    convert_expr_with_expected(e, tctx, reg, expected_for_expr, type_env, synthetic)
-                })
+                .map(|e| convert_expr(e, tctx, reg, type_env, synthetic))
                 .transpose()?;
-            // Wrap in Some() when return type is Option<T> and the value is not None.
-            // Skip wrapping for expressions that already produce Option (optional chaining, etc.)
-            let already_option = ret.arg.as_ref().is_some_and(|e| {
-                already_produces_option(e)
-                    || matches!(e.as_ref(), ast::Expr::Ident(id) if id.sym.as_ref() == "null")
-            });
-            let expr = match (expr, return_type) {
-                (Some(inner), Some(RustType::Option(_)))
-                    if !already_option
-                        && !matches!(&inner, Expr::Ident(name) if name == "None")
-                        && !matches!(&inner, Expr::FnCall { name, .. } if name == "Some") =>
-                {
-                    Some(Expr::FnCall {
-                        name: "Some".to_string(),
-                        args: vec![inner],
-                    })
-                }
-                (expr, _) => expr,
-            };
+            // Option<T> wrapping is handled centrally by convert_expr_with_expected.
+            // No additional wrapping needed here.
             Ok(vec![Stmt::Return(expr)])
         }
         ast::Stmt::Decl(ast::Decl::Var(var_decl)) => {
@@ -240,7 +213,7 @@ fn convert_var_decl(
         let init = declarator
             .init
             .as_ref()
-            .map(|e| convert_expr_with_expected(e, tctx, reg, ty.as_ref(), type_env, synthetic))
+            .map(|e| convert_expr(e, tctx, reg, type_env, synthetic))
             .transpose()?;
 
         stmts.push(Stmt::Let {
@@ -1862,28 +1835,6 @@ fn try_expand_spread_var_decl(
 /// Detects `return [...arr, 1]` at SWC AST level and expands to IR statements.
 ///
 /// Returns `None` if the return statement does not contain a spread array.
-/// Returns true if the AST expression already produces `Option` in the generated Rust code.
-///
-/// Used to avoid double-wrapping in `Some()` at the return statement level.
-/// Detects optional chaining (`?.`) and ternary expressions with null/undefined branches.
-fn already_produces_option(expr: &ast::Expr) -> bool {
-    match expr {
-        ast::Expr::OptChain(_) => true,
-        ast::Expr::Paren(p) => already_produces_option(&p.expr),
-        // Ternary with null/undefined in either branch → already produces Option
-        ast::Expr::Cond(cond) => {
-            is_null_or_undefined_expr(&cond.cons) || is_null_or_undefined_expr(&cond.alt)
-        }
-        _ => false,
-    }
-}
-
-/// Returns true if the expression is a `null` literal or `undefined` identifier.
-fn is_null_or_undefined_expr(expr: &ast::Expr) -> bool {
-    matches!(expr, ast::Expr::Lit(ast::Lit::Null(..)))
-        || matches!(expr, ast::Expr::Ident(id) if id.sym.as_ref() == "undefined")
-}
-
 fn try_expand_spread_return(
     ret: &ast::ReturnStmt,
     tctx: &TransformContext<'_>,

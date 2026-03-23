@@ -67,18 +67,7 @@ pub(super) fn convert_bin_expr(
             // Non-Option type: nullish coalescing is a no-op, return left as-is
             return Ok(left);
         }
-        let inner_expected = match &left_type {
-            Some(RustType::Option(inner)) => Some(inner.as_ref().clone()),
-            _ => None,
-        };
-        let right = super::convert_expr_with_expected(
-            &bin.right,
-            tctx,
-            reg,
-            inner_expected.as_ref(),
-            type_env,
-            synthetic,
-        )?;
+        let right = convert_expr(&bin.right, tctx, reg, type_env, synthetic)?;
         return Ok(Expr::MethodCall {
             object: Box::new(left),
             method: "unwrap_or_else".to_string(),

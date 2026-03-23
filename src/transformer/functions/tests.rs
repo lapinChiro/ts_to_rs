@@ -249,10 +249,13 @@ fn test_convert_fn_decl_throw_wraps_return_type_in_result() {
 
 #[test]
 fn test_convert_fn_decl_throw_wraps_return_in_ok() {
-    let f = TctxFixture::new();
+    let source = "function validate(x: number): string { if (x < 0) { throw new Error(\"negative\"); } return \"ok\"; }";
+    let f = TctxFixture::from_source(source);
     let tctx = f.tctx();
-    let fn_decl =
-            parse_fn_decl("function validate(x: number): string { if (x < 0) { throw new Error(\"negative\"); } return \"ok\"; }");
+    let fn_decl = match &f.module().body[0] {
+        ModuleItem::Stmt(ast::Stmt::Decl(Decl::Fn(fn_decl))) => fn_decl.clone(),
+        _ => panic!("expected function declaration"),
+    };
     let items = convert_fn_decl(
         &fn_decl,
         Visibility::Public,

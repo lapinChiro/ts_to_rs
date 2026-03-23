@@ -22,7 +22,6 @@ pub(super) fn resolve_member_access(
     object: &Expr,
     field: &str,
     ts_obj: &ast::Expr,
-    _tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
 ) -> Result<Expr> {
     // Check if the TS object is an identifier referring to an enum
@@ -99,13 +98,7 @@ pub(super) fn convert_opt_chain_expr(
             let body_expr = match &member.prop {
                 ast::MemberProp::Ident(ident) => {
                     let field = ident.sym.to_string();
-                    resolve_member_access(
-                        &Expr::Ident("_v".to_string()),
-                        &field,
-                        &member.obj,
-                        tctx,
-                        reg,
-                    )?
+                    resolve_member_access(&Expr::Ident("_v".to_string()), &field, &member.obj, reg)?
                 }
                 ast::MemberProp::Computed(computed) => {
                     // Cat A: computed index
@@ -165,30 +158,10 @@ pub(super) fn convert_opt_chain_expr(
             let (object, method) =
                 extract_method_from_callee(&opt_call.callee, tctx, reg, type_env, synthetic)?;
 
-            let inner_type = match &callee_obj_type {
-                Some(RustType::Option(inner)) => Some(inner.as_ref()),
-                Some(ty) => Some(ty),
-                None => None,
-            };
-            let method_sig = inner_type.and_then(|ty| {
-                if let RustType::Named { name, .. } = ty {
-                    if let Some(TypeDef::Struct { methods, .. }) = reg.get(name) {
-                        return methods.get(&method);
-                    }
-                }
-                None
-            });
-
             let args: Vec<Expr> = opt_call
                 .args
                 .iter()
-                .enumerate()
-                .map(|(i, arg)| {
-                    let param_ty = method_sig.and_then(|sig| sig.params.get(i).map(|(_, ty)| ty));
-                    super::convert_expr_with_expected(
-                        &arg.expr, tctx, reg, param_ty, type_env, synthetic,
-                    )
-                })
+                .map(|arg| convert_expr(&arg.expr, tctx, reg, type_env, synthetic))
                 .collect::<Result<_>>()?;
 
             // Non-Option type: plain method call
@@ -351,7 +324,7 @@ pub(super) fn convert_member_expr(
 
     // Cat A: receiver object
     let object = convert_expr(&member.obj, tctx, reg, type_env, synthetic)?;
-    resolve_member_access(&object, &field, &member.obj, tctx, reg)
+    resolve_member_access(&object, &field, &member.obj, reg)
 }
 
 /// Discriminated union の standalone フィールドアクセスを inline match 式に変換する。

@@ -14,10 +14,16 @@ use crate::transformer::context::TransformContext;
 ///
 /// テスト関数で `let f = TctxFixture::new();` と 1 行書くだけで
 /// `f.tctx()` と `f.reg()` が使える。
+///
+/// `from_source` / `from_source_with_reg` で構築した場合、TypeResolver 経由で
+/// expected type が設定された FileTypeResolution と、解析済み Module を保持する。
+/// テストでは `f.module()` から式を抽出し、`convert_expr` で変換すると
+/// TypeResolver が設定した expected type が自動的に適用される。
 pub struct TctxFixture {
     mg: ModuleGraph,
     reg: TypeRegistry,
     res: FileTypeResolution,
+    module: Option<swc_ecma_ast::Module>,
 }
 
 impl TctxFixture {
@@ -27,6 +33,7 @@ impl TctxFixture {
             mg: ModuleGraph::empty(),
             reg: TypeRegistry::new(),
             res: FileTypeResolution::empty(),
+            module: None,
         }
     }
 
@@ -36,6 +43,7 @@ impl TctxFixture {
             mg: ModuleGraph::empty(),
             reg,
             res: FileTypeResolution::empty(),
+            module: None,
         }
     }
 
@@ -45,6 +53,50 @@ impl TctxFixture {
             mg: ModuleGraph::empty(),
             reg: TypeRegistry::new(),
             res,
+            module: None,
+        }
+    }
+
+    /// TS ソースコードを解析し、TypeResolver を実行して TransformContext を構築する。
+    ///
+    /// unit test で TypeResolver 経由の expected type 設定をテストする場合に使用。
+    /// ソースから TypeRegistry と FileTypeResolution が自動的に構築される。
+    /// `module()` で解析済み Module にアクセスでき、式の抽出に使用する。
+    pub fn from_source(source: &str) -> Self {
+        let module = crate::parser::parse_typescript(source).unwrap();
+        let reg = crate::registry::build_registry(&module);
+        Self::build_with_resolver(module, reg, source)
+    }
+
+    /// TS ソースコードを解析し、カスタム TypeRegistry と TypeResolver を使用して構築する。
+    ///
+    /// ソースに含まれる型定義に加え、事前に登録した型定義（struct のフィールド型等）を
+    /// TypeResolver に提供したい場合に使用する。ソースから抽出した型定義は `reg` にマージされる。
+    pub fn from_source_with_reg(source: &str, mut reg: TypeRegistry) -> Self {
+        let module = crate::parser::parse_typescript(source).unwrap();
+        let source_reg = crate::registry::build_registry(&module);
+        reg.merge(&source_reg);
+        Self::build_with_resolver(module, reg, source)
+    }
+
+    /// TypeResolver を実行して TctxFixture を構築する内部ヘルパー。
+    fn build_with_resolver(module: swc_ecma_ast::Module, reg: TypeRegistry, source: &str) -> Self {
+        let mg = ModuleGraph::empty();
+        let mut synthetic = crate::pipeline::SyntheticTypeRegistry::new();
+        let parsed = crate::pipeline::ParsedFile {
+            path: std::path::PathBuf::from("test.ts"),
+            source: source.to_string(),
+            module,
+        };
+        let mut resolver =
+            crate::pipeline::type_resolver::TypeResolver::new(&reg, &mut synthetic, &mg);
+        let res = resolver.resolve_file(&parsed);
+        let module = parsed.module;
+        Self {
+            mg,
+            reg,
+            res,
+            module: Some(module),
         }
     }
 
@@ -56,6 +108,22 @@ impl TctxFixture {
     /// TypeRegistry への参照を返す。
     pub fn reg(&self) -> &TypeRegistry {
         &self.reg
+    }
+
+    /// 解析済み Module への参照を返す。
+    ///
+    /// `from_source` / `from_source_with_reg` で構築した場合のみ利用可能。
+    /// テストで変数宣言の initializer や式を抽出する際に使用する。
+    /// この Module から抽出した式は、FileTypeResolution と同じ span を持つため、
+    /// `convert_expr` が TypeResolver の設定した expected type を正しく読み取る。
+    ///
+    /// # Panics
+    ///
+    /// `new()` / `with_reg()` / `with_resolution()` で構築した場合はパニックする。
+    pub fn module(&self) -> &swc_ecma_ast::Module {
+        self.module
+            .as_ref()
+            .expect("module() is only available on fixtures created with from_source()")
     }
 
     /// 借用した TypeRegistry から TransformContext を生成するためのヘルパー部品。

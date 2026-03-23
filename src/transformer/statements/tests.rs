@@ -49,6 +49,69 @@ fn convert_stmts_with_env(
     .unwrap()
 }
 
+/// Helper: convert a single statement from source, running TypeResolver first.
+///
+/// Unlike `convert_single_stmt`, this runs TypeResolver to populate expected types.
+/// Use for tests that depend on type annotation-based expected type propagation.
+fn convert_single_stmt_resolved(
+    source: &str,
+    reg: &TypeRegistry,
+    return_type: Option<&RustType>,
+) -> Stmt {
+    let module = parse_typescript(source).expect("parse failed");
+    let mut source_reg = crate::registry::build_registry(&module);
+    source_reg.merge(reg);
+    let mg = crate::pipeline::ModuleGraph::empty();
+    let mut synthetic = SyntheticTypeRegistry::new();
+    let parsed = crate::pipeline::ParsedFile {
+        path: std::path::PathBuf::from("test.ts"),
+        source: source.to_string(),
+        module: module.clone(),
+    };
+    let mut resolver =
+        crate::pipeline::type_resolver::TypeResolver::new(&source_reg, &mut synthetic, &mg);
+    let res = resolver.resolve_file(&parsed);
+    let tctx = TransformContext::new(&mg, &source_reg, &res, Path::new("test.ts"));
+
+    // Extract the statement from the parsed module
+    let stmt = match &module.body[0] {
+        ModuleItem::Stmt(ast::Stmt::Decl(Decl::Var(_))) => match &module.body[0] {
+            ModuleItem::Stmt(s) => s,
+            _ => unreachable!(),
+        },
+        ModuleItem::Stmt(ast::Stmt::Decl(Decl::Fn(fn_decl))) => {
+            // For function declarations, extract the return statement from body
+            let body = fn_decl.function.body.as_ref().expect("no function body");
+            let stmt = &body.stmts[0];
+            let mut stmts = convert_stmt(
+                stmt,
+                &tctx,
+                &source_reg,
+                return_type,
+                &mut TypeEnv::new(),
+                &mut SyntheticTypeRegistry::new(),
+            )
+            .unwrap();
+            assert_eq!(stmts.len(), 1, "expected single statement, got {stmts:?}");
+            return stmts.remove(0);
+        }
+        ModuleItem::Stmt(s) => s,
+        _ => panic!("expected statement"),
+    };
+
+    let mut stmts = convert_stmt(
+        stmt,
+        &tctx,
+        &source_reg,
+        return_type,
+        &mut TypeEnv::new(),
+        &mut SyntheticTypeRegistry::new(),
+    )
+    .unwrap();
+    assert_eq!(stmts.len(), 1, "expected single statement, got {stmts:?}");
+    stmts.remove(0)
+}
+
 /// Helper: parse TS source containing a function and return its body statements.
 fn parse_fn_body(source: &str) -> Vec<ast::Stmt> {
     let module = parse_typescript(source).expect("parse failed");
@@ -846,8 +909,11 @@ fn test_convert_for_range_inserts_f64_shadow() {
 #[test]
 fn test_convert_stmt_var_decl_object_literal_with_type_annotation() {
     // const + Named type → let mut (TS const allows field mutation)
-    let stmts = parse_fn_body("function f() { const p: Point = { x: 1, y: 2 }; }");
-    let result = convert_single_stmt(&stmts[0], &TypeRegistry::new(), None);
+    let result = convert_single_stmt_resolved(
+        "const p: Point = { x: 1, y: 2 };",
+        &TypeRegistry::new(),
+        None,
+    );
     assert_eq!(
         result,
         Stmt::Let {
@@ -880,8 +946,8 @@ fn test_convert_stmt_expression_statement() {
 
 #[test]
 fn test_convert_stmt_var_decl_string_type_annotation_adds_to_string() {
-    let stmts = parse_fn_body(r#"function f() { const s: string = "hello"; }"#);
-    let result = convert_single_stmt(&stmts[0], &TypeRegistry::new(), None);
+    let result =
+        convert_single_stmt_resolved(r#"const s: string = "hello";"#, &TypeRegistry::new(), None);
     assert_eq!(
         result,
         Stmt::Let {
@@ -900,8 +966,11 @@ fn test_convert_stmt_var_decl_string_type_annotation_adds_to_string() {
 #[test]
 fn test_convert_stmt_var_decl_string_array_type_annotation() {
     // const + Vec type → let mut (TS const allows push/pop)
-    let stmts = parse_fn_body(r#"function f() { const a: string[] = ["a", "b"]; }"#);
-    let result = convert_single_stmt(&stmts[0], &TypeRegistry::new(), None);
+    let result = convert_single_stmt_resolved(
+        r#"const a: string[] = ["a", "b"];"#,
+        &TypeRegistry::new(),
+        None,
+    );
     assert_eq!(
         result,
         Stmt::Let {
@@ -928,8 +997,11 @@ fn test_convert_stmt_var_decl_string_array_type_annotation() {
 
 #[test]
 fn test_convert_stmt_return_string_with_string_return_type() {
-    let stmts = parse_fn_body(r#"function f(): string { return "ok"; }"#);
-    let result = convert_single_stmt(&stmts[0], &TypeRegistry::new(), Some(&RustType::String));
+    let result = convert_single_stmt_resolved(
+        r#"function f(): string { return "ok"; }"#,
+        &TypeRegistry::new(),
+        Some(&RustType::String),
+    );
     assert_eq!(
         result,
         Stmt::Return(Some(Expr::MethodCall {
@@ -2377,12 +2449,21 @@ fn test_convert_switch_discriminated_union_to_enum_match() {
     };
     let body_stmts = &fn_decl.function.body.as_ref().unwrap().stmts;
     let mut type_env = TypeEnv::new();
-    let f = TctxFixture::with_reg(reg);
-    let tctx = f.tctx();
+    // Run TypeResolver to populate expected types for object literals
+    let mg = crate::pipeline::ModuleGraph::empty();
+    let mut synthetic = SyntheticTypeRegistry::new();
+    let parsed = crate::pipeline::ParsedFile {
+        path: std::path::PathBuf::from("test.ts"),
+        source: String::new(),
+        module: module.clone(),
+    };
+    let mut resolver = crate::pipeline::type_resolver::TypeResolver::new(&reg, &mut synthetic, &mg);
+    let res = resolver.resolve_file(&parsed);
+    let tctx = TransformContext::new(&mg, &reg, &res, Path::new("test.ts"));
     let result = convert_stmt_list(
         body_stmts,
         &tctx,
-        f.reg(),
+        &reg,
         None,
         &mut type_env,
         &mut SyntheticTypeRegistry::new(),

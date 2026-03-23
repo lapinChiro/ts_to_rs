@@ -29,21 +29,7 @@ pub(super) fn convert_assign_expr(
         },
         _ => return Err(anyhow!("unsupported assignment target pattern")),
     };
-    // Look up target variable's type to propagate expected type to RHS
-    let target_expected = match &assign.left {
-        ast::AssignTarget::Simple(ast::SimpleAssignTarget::Ident(ident)) => {
-            type_env.get(ident.id.sym.as_ref()).cloned()
-        }
-        _ => None,
-    };
-    let right = super::convert_expr_with_expected(
-        &assign.right,
-        tctx,
-        reg,
-        target_expected.as_ref(),
-        type_env,
-        synthetic,
-    )?;
+    let right = super::convert_expr(&assign.right, tctx, reg, type_env, synthetic)?;
 
     // ??= (nullish coalescing assignment): x ??= y → x.get_or_insert_with(|| y)
     if assign.op == ast::AssignOp::NullishAssign {

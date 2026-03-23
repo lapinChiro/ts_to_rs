@@ -581,24 +581,10 @@ pub(super) fn convert_call_args_with_types(
         .enumerate()
         .map(|(i, arg)| {
             let param_ty = param_types.and_then(|params| params.get(i).map(|(_, ty)| ty));
-            // For Option<T> params, pass the inner type as expected so conversions apply
-            let expected = match param_ty {
-                Some(RustType::Option(inner)) => Some(inner.as_ref()),
-                other => other,
-            };
-            let mut expr = super::convert_expr_with_expected(
-                &arg.expr, tctx, reg, expected, type_env, synthetic,
-            )?;
-            // Wrap in Some(...) when the parameter type is Option<T>,
-            // but skip if the value is already None (from undefined)
-            if let Some(RustType::Option(_)) = param_ty {
-                if !matches!(&expr, Expr::Ident(name) if name == "None") {
-                    expr = Expr::FnCall {
-                        name: "Some".to_string(),
-                        args: vec![expr],
-                    };
-                }
-            }
+            // Option<T> wrapping is handled centrally by convert_expr_with_expected
+            // (called internally by convert_expr). TypeResolver's set_call_arg_expected_types
+            // sets the expected type for each arg span, so no explicit param_ty passing needed.
+            let mut expr = convert_expr(&arg.expr, tctx, reg, type_env, synthetic)?;
             // Wrap in Box::new(...) when the parameter type is Fn (Box<dyn Fn>)
             // and the argument is an identifier (function name), not an inline closure
             if matches!(param_ty, Some(RustType::Fn { .. })) && matches!(&expr, Expr::Ident(_)) {
@@ -620,18 +606,6 @@ pub(super) fn convert_call_args_with_types(
             Ok(expr)
         })
         .collect::<Result<Vec<_>>>()?;
-
-    let rest_element_type = if has_rest {
-        param_types.and_then(|p| p.last()).and_then(|(_, ty)| {
-            if let RustType::Vec(inner) = ty {
-                Some(inner.as_ref())
-            } else {
-                None
-            }
-        })
-    } else {
-        None
-    };
 
     if has_rest {
         // Pack remaining arguments into a vec![]
@@ -657,14 +631,7 @@ pub(super) fn convert_call_args_with_types(
                     let expr = convert_expr(&arg.expr, tctx, reg, type_env, synthetic)?;
                     parts.push(expr);
                 } else {
-                    let expr = super::convert_expr_with_expected(
-                        &arg.expr,
-                        tctx,
-                        reg,
-                        rest_element_type,
-                        type_env,
-                        synthetic,
-                    )?;
+                    let expr = convert_expr(&arg.expr, tctx, reg, type_env, synthetic)?;
                     literal_buf.push(expr);
                 }
             }
@@ -685,16 +652,7 @@ pub(super) fn convert_call_args_with_types(
             // All literal args: foo(1, 2, 3) → foo(vec![1.0, 2.0, 3.0])
             let rest_exprs: Vec<Expr> = rest_args
                 .iter()
-                .map(|arg| {
-                    super::convert_expr_with_expected(
-                        &arg.expr,
-                        tctx,
-                        reg,
-                        rest_element_type,
-                        type_env,
-                        synthetic,
-                    )
-                })
+                .map(|arg| convert_expr(&arg.expr, tctx, reg, type_env, synthetic))
                 .collect::<Result<Vec<_>>>()?;
             result.push(Expr::Vec {
                 elements: rest_exprs,

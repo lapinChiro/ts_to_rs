@@ -194,9 +194,7 @@ impl<'a> TypeResolver<'a> {
                 // resolve_arrow_expr / resolve_fn_expr can read it from the map
                 if let (Some(ann_ty), Some(init)) = (&annotation_type, &decl.init) {
                     let init_span = Span::from_swc(init.span());
-                    self.result
-                        .expected_types
-                        .insert(init_span, ann_ty.clone());
+                    self.result.expected_types.insert(init_span, ann_ty.clone());
                     self.propagate_expected(init, ann_ty);
                 }
 
@@ -630,19 +628,16 @@ impl<'a> TypeResolver<'a> {
             // P-2: Object literal + HashMap<K, V> → set value type V
             ast::Expr::Object(obj) => {
                 match expected {
-                    RustType::Named {
-                        name,
-                        type_args,
-                    } if name == "HashMap" && type_args.len() == 2 => {
+                    RustType::Named { name, type_args }
+                        if name == "HashMap" && type_args.len() == 2 =>
+                    {
                         // P-2: HashMap<K, V> — set value type V for each computed property
                         let value_type = &type_args[1];
                         for prop in &obj.props {
                             if let ast::PropOrSpread::Prop(prop) = prop {
                                 if let ast::Prop::KeyValue(kv) = prop.as_ref() {
                                     let span = Span::from_swc(kv.value.span());
-                                    self.result
-                                        .expected_types
-                                        .insert(span, value_type.clone());
+                                    self.result.expected_types.insert(span, value_type.clone());
                                     self.propagate_expected(&kv.value, value_type);
                                 }
                             }
@@ -856,17 +851,13 @@ impl<'a> TypeResolver<'a> {
                                     other => other,
                                 };
                                 let method_name = match &member.prop {
-                                    ast::MemberProp::Ident(ident) => {
-                                        Some(ident.sym.to_string())
-                                    }
+                                    ast::MemberProp::Ident(ident) => Some(ident.sym.to_string()),
                                     _ => None,
                                 };
                                 if let Some(params) = method_name
                                     .and_then(|name| self.lookup_method_params(inner_ty, &name))
                                 {
-                                    for (arg, param_ty) in
-                                        opt_call.args.iter().zip(params.iter())
-                                    {
+                                    for (arg, param_ty) in opt_call.args.iter().zip(params.iter()) {
                                         let arg_span = Span::from_swc(arg.expr.span());
                                         self.result
                                             .expected_types
@@ -876,10 +867,7 @@ impl<'a> TypeResolver<'a> {
                                 }
                             }
                         } else {
-                            self.set_call_arg_expected_types(
-                                &opt_call.callee,
-                                &opt_call.args,
-                            );
+                            self.set_call_arg_expected_types(&opt_call.callee, &opt_call.args);
                         }
                         // Walk callee for side effects
                         let callee_span = Span::from_swc(opt_call.callee.span());
@@ -1025,6 +1013,13 @@ impl<'a> TypeResolver<'a> {
         // Set expected types for arguments based on callee's parameter types
         self.set_call_arg_expected_types(callee, &call.args);
 
+        // Propagate expected types into nested call expressions within arguments.
+        // Must happen AFTER set_call_arg_expected_types so this call's args have their
+        // expected types before we descend into nested calls (e.g., console.log(g.greet("hello"))).
+        for arg in &call.args {
+            self.set_expected_types_in_nested_calls(&arg.expr);
+        }
+
         match callee {
             ast::Expr::Ident(ident) => {
                 let fn_name = ident.sym.to_string();
@@ -1052,7 +1047,16 @@ impl<'a> TypeResolver<'a> {
                 };
                 self.resolve_method_return_type(obj_rust_type, &method_name)
             }
-            _ => ResolvedType::Unknown,
+            _ => {
+                // Non-Ident/non-Member callees (e.g., IIFE: ((...) => expr)())
+                // Resolve the callee expression to walk arrow/fn bodies and determine return type.
+                let callee_type = self.resolve_expr(callee);
+                if let ResolvedType::Known(RustType::Fn { return_type, .. }) = callee_type {
+                    ResolvedType::Known(return_type.as_ref().clone())
+                } else {
+                    ResolvedType::Unknown
+                }
+            }
         }
     }
 
@@ -1067,10 +1071,7 @@ impl<'a> TypeResolver<'a> {
                     params, has_rest, ..
                 }) = self.registry.get(&fn_name)
                 {
-                    Some((
-                        params.iter().map(|(_, ty)| ty.clone()).collect(),
-                        *has_rest,
-                    ))
+                    Some((params.iter().map(|(_, ty)| ty.clone()).collect(), *has_rest))
                 } else if let ResolvedType::Known(RustType::Fn { params, .. }) =
                     self.lookup_var(&fn_name)
                 {
@@ -1132,9 +1133,7 @@ impl<'a> TypeResolver<'a> {
             if let Some(ref elem_ty) = rest_element_type {
                 for arg in args.iter().skip(regular_params.len()) {
                     let arg_span = Span::from_swc(arg.expr.span());
-                    self.result
-                        .expected_types
-                        .insert(arg_span, elem_ty.clone());
+                    self.result.expected_types.insert(arg_span, elem_ty.clone());
                     self.propagate_expected(&arg.expr, elem_ty);
                 }
             }
@@ -1190,13 +1189,31 @@ impl<'a> TypeResolver<'a> {
         }
     }
 
-    fn resolve_new_expr(&self, new_expr: &ast::NewExpr) -> ResolvedType {
+    fn resolve_new_expr(&mut self, new_expr: &ast::NewExpr) -> ResolvedType {
         let class_name = match new_expr.callee.as_ref() {
             ast::Expr::Ident(ident) => ident.sym.to_string(),
             _ => return ResolvedType::Unknown,
         };
 
-        if self.registry.get(&class_name).is_some() {
+        if let Some(type_def) = self.registry.get(&class_name) {
+            // Propagate expected types for constructor arguments based on struct field types
+            if let Some(args) = &new_expr.args {
+                let field_types: Option<Vec<RustType>> = match type_def {
+                    TypeDef::Struct { fields, .. } => {
+                        Some(fields.iter().map(|(_, ty)| ty.clone()).collect())
+                    }
+                    _ => None,
+                };
+                if let Some(param_types) = field_types {
+                    for (arg, param_ty) in args.iter().zip(param_types.iter()) {
+                        let arg_span = Span::from_swc(arg.expr.span());
+                        self.result
+                            .expected_types
+                            .insert(arg_span, param_ty.clone());
+                        self.propagate_expected(&arg.expr, param_ty);
+                    }
+                }
+            }
             ResolvedType::Known(RustType::Named {
                 name: class_name,
                 type_args: vec![],
@@ -1238,27 +1255,50 @@ impl<'a> TypeResolver<'a> {
         // Register parameters
         let mut param_types = Vec::new();
         for (i, param) in arrow.params.iter().enumerate() {
-            if let ast::Pat::Ident(ident) = param {
-                let name = ident.id.sym.to_string();
-                let span = Span::from_swc(ident.id.span);
-                // Arrow's own annotation takes priority; fall back to expected param type
-                let ty = ident
-                    .type_ann
-                    .as_ref()
-                    .and_then(|ann| {
-                        convert_ts_type(&ann.type_ann, self.synthetic, self.registry).ok()
-                    })
-                    .or_else(|| {
+            match param {
+                ast::Pat::Ident(ident) => {
+                    let name = ident.id.sym.to_string();
+                    let span = Span::from_swc(ident.id.span);
+                    // Arrow's own annotation takes priority; fall back to expected param type
+                    let ty = ident
+                        .type_ann
+                        .as_ref()
+                        .and_then(|ann| {
+                            convert_ts_type(&ann.type_ann, self.synthetic, self.registry).ok()
+                        })
+                        .or_else(|| {
+                            expected_param_types
+                                .as_ref()
+                                .and_then(|types| types.get(i).cloned())
+                        });
+                    let resolved = ty
+                        .clone()
+                        .map(ResolvedType::Known)
+                        .unwrap_or(ResolvedType::Unknown);
+                    self.declare_var(&name, resolved, span, false);
+                    param_types.push(ty.unwrap_or(RustType::Any));
+                }
+                // Destructuring patterns: extract type from type annotation
+                _ => {
+                    let ty: Option<RustType> = match param {
+                        ast::Pat::Array(arr) => arr.type_ann.as_ref().and_then(|ann| {
+                            convert_ts_type(&ann.type_ann, self.synthetic, self.registry).ok()
+                        }),
+                        ast::Pat::Object(obj) => obj.type_ann.as_ref().and_then(|ann| {
+                            convert_ts_type(&ann.type_ann, self.synthetic, self.registry).ok()
+                        }),
+                        _ => None,
+                    };
+                    let ty = ty.or_else(|| {
                         expected_param_types
                             .as_ref()
                             .and_then(|types| types.get(i).cloned())
                     });
-                let resolved = ty
-                    .clone()
-                    .map(ResolvedType::Known)
-                    .unwrap_or(ResolvedType::Unknown);
-                self.declare_var(&name, resolved, span, false);
-                param_types.push(ty.unwrap_or(RustType::Any));
+                    // Register sub-pattern variables
+                    self.visit_param_pat(param);
+                    param_types.push(ty.unwrap_or(RustType::Any));
+                } // Ident is handled above; remaining patterns are covered by the
+                  // destructuring branch. This arm is unreachable but kept for safety.
             }
         }
 
@@ -1273,9 +1313,7 @@ impl<'a> TypeResolver<'a> {
                 // Propagate return type as expected type to expression body
                 if let Some(return_ty) = self.current_fn_return_type.clone() {
                     let span = Span::from_swc(expr.span());
-                    self.result
-                        .expected_types
-                        .insert(span, return_ty.clone());
+                    self.result.expected_types.insert(span, return_ty.clone());
                     self.propagate_expected(expr, &return_ty);
                 }
                 let span = Span::from_swc(expr.span());
@@ -1316,7 +1354,15 @@ impl<'a> TypeResolver<'a> {
             }
         }
 
+        // Register parameters and collect their types
+        let mut param_types = Vec::new();
         for param in &fn_expr.function.params {
+            if let ast::Pat::Ident(ident) = &param.pat {
+                let ty = ident.type_ann.as_ref().and_then(|ann| {
+                    convert_ts_type(&ann.type_ann, self.synthetic, self.registry).ok()
+                });
+                param_types.push(ty.unwrap_or(RustType::Any));
+            }
             self.visit_param_pat(&param.pat);
         }
 
@@ -1326,10 +1372,14 @@ impl<'a> TypeResolver<'a> {
             }
         }
 
+        let return_type = self.current_fn_return_type.take().unwrap_or(RustType::Unit);
         self.current_fn_return_type = prev_return_type;
         self.leave_scope();
 
-        ResolvedType::Unknown // Function expression type is complex; return Unknown for now
+        ResolvedType::Known(RustType::Fn {
+            params: param_types,
+            return_type: Box::new(return_type),
+        })
     }
 
     /// Resolves an array literal expression.
@@ -1362,6 +1412,46 @@ impl<'a> TypeResolver<'a> {
         }
 
         ResolvedType::Unknown
+    }
+
+    /// Sets expected types on arguments of nested call expressions.
+    ///
+    /// When a call expression appears as an argument to another call (e.g.,
+    /// `console.log(g.greet("hello"))`), the outer call's `resolve_call_expr` does
+    /// not recurse into argument sub-expressions. This method descends into
+    /// arguments to find nested calls and invoke `set_call_arg_expected_types` on
+    /// each, ensuring inner call arguments receive their expected types.
+    ///
+    /// Does NOT resolve expression types or insert into `expr_types`.
+    ///
+    /// # Architecture note
+    ///
+    /// This is a workaround for `resolve_expr` not being called recursively on
+    /// call arguments. `resolve_expr` has side effects (`mark_var_mutable`,
+    /// `expected_types` insertion, etc.) that can break patterns like destructuring
+    /// when called on arguments. The root fix is to split `resolve_expr` into
+    /// side-effect-free type resolution and separate scope updates, which would
+    /// allow recursive argument resolution and eliminate this workaround.
+    /// See Phase 3 in `tasks.type-resolution-unification.md`.
+    fn set_expected_types_in_nested_calls(&mut self, expr: &ast::Expr) {
+        match expr {
+            ast::Expr::Call(call) => {
+                let callee = match &call.callee {
+                    ast::Callee::Expr(e) => e.as_ref(),
+                    _ => return,
+                };
+                self.set_call_arg_expected_types(callee, &call.args);
+                for arg in &call.args {
+                    self.set_expected_types_in_nested_calls(&arg.expr);
+                }
+            }
+            ast::Expr::Paren(paren) => self.set_expected_types_in_nested_calls(&paren.expr),
+            ast::Expr::TsAs(ts_as) => self.set_expected_types_in_nested_calls(&ts_as.expr),
+            ast::Expr::TsNonNull(non_null) => {
+                self.set_expected_types_in_nested_calls(&non_null.expr);
+            }
+            _ => {}
+        }
     }
 }
 
@@ -2324,9 +2414,10 @@ mod tests {
 
         // The nested object literal { address: host } should have expected type
         // Named("RemoteInfo") — propagated through: GetConnInfo → ConnInfo → remote field
-        let has_remote_info_expected = res.expected_types.values().any(|t| {
-            matches!(t, RustType::Named { name, .. } if name == "RemoteInfo")
-        });
+        let has_remote_info_expected = res
+            .expected_types
+            .values()
+            .any(|t| matches!(t, RustType::Named { name, .. } if name == "RemoteInfo"));
         assert!(
             has_remote_info_expected,
             "nested object literal should have expected type RemoteInfo from fn type alias return type"

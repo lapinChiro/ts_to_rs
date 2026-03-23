@@ -66,10 +66,9 @@ pub fn convert_expr(
 
 /// Converts an expression with an explicit expected type override.
 ///
-/// Used when the expected type is known from context but not stored in
-/// `FileTypeResolution` (e.g., Option<T> unwrap recursion, or test code
-/// that sets expected directly).
-pub(crate) fn convert_expr_with_expected(
+/// Private helper: only used by `convert_expr` for Option<T> unwrap recursion
+/// (to avoid infinite loop from reading the same Option<T> span).
+fn convert_expr_with_expected(
     expr: &ast::Expr,
     tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
@@ -81,7 +80,8 @@ pub(crate) fn convert_expr_with_expected(
         tctx.type_resolution
             .expected_type(Span::from_swc(expr.span()))
     });
-    // Option<T> expected: handle null/undefined → None, literals → Some(lit)
+    // Option<T> expected: unified wrapping logic.
+    // All Option wrapping decisions are made here to prevent double-wrapping (Some(Some(x))).
     if let Some(RustType::Option(inner)) = expected {
         // null / undefined → None
         if matches!(expr, ast::Expr::Ident(ident) if ident.sym.as_ref() == "undefined")
@@ -89,10 +89,30 @@ pub(crate) fn convert_expr_with_expected(
         {
             return Ok(Expr::Ident("None".to_string()));
         }
-        // Wrap non-null literals in Some() (needed for array elements like vec![Some(1.0), None])
+        // Literals → Some(convert(expr, inner_T))
         if matches!(expr, ast::Expr::Lit(_)) {
             let inner_result =
                 convert_expr_with_expected(expr, tctx, reg, Some(inner), type_env, synthetic)?;
+            return Ok(Expr::FnCall {
+                name: "Some".to_string(),
+                args: vec![inner_result],
+            });
+        }
+        // Non-literal expressions: check if the expression already produces Option<T>.
+        // If so, fall through to normal conversion (tctx has expected types for sub-exprs).
+        let expr_type = resolve_expr_type(expr, type_env, tctx, reg);
+        if matches!(&expr_type, Some(RustType::Option(_))) || ast_produces_option(expr) {
+            // Already produces Option — skip wrapping, fall through to normal conversion
+        } else {
+            // Expression produces T or unknown → convert with inner type, then wrap in Some()
+            let inner_result =
+                convert_expr_with_expected(expr, tctx, reg, Some(inner), type_env, synthetic)?;
+            // Guard: skip wrapping if conversion already produced None or Some(...)
+            if matches!(&inner_result, Expr::Ident(name) if name == "None")
+                || matches!(&inner_result, Expr::FnCall { name, .. } if name == "Some")
+            {
+                return Ok(inner_result);
+            }
             return Ok(Expr::FnCall {
                 name: "Some".to_string(),
                 args: vec![inner_result],
@@ -168,8 +188,12 @@ pub(crate) fn convert_expr_with_expected(
     Ok(result)
 }
 
-/// Returns true when the expected type is `Box<dyn Trait>` and the source expression
-/// produces a concrete (non-Box) value that needs wrapping.
+/// Returns true when the expected type is a trait type (`Box<dyn Trait>` or `Named(trait)`)
+/// and the source expression produces a concrete (non-Box) value that needs wrapping.
+///
+/// TypeResolver sets `Named(trait)` as expected type (not `Box<dyn Trait>`), because
+/// it uses `convert_ts_type` which does not apply TypePosition-based `Box<dyn>` wrapping.
+/// Both forms are handled here.
 fn needs_trait_box_coercion(
     expected: &RustType,
     src_expr: &ast::Expr,
@@ -177,7 +201,7 @@ fn needs_trait_box_coercion(
     tctx: &TransformContext<'_>,
     reg: &TypeRegistry,
 ) -> bool {
-    // Check if expected type is Box<dyn Trait>
+    // Check if expected type is Box<dyn Trait> or a Named trait type
     let trait_name = match expected {
         RustType::Named { name, type_args }
             if name == "Box"
@@ -190,6 +214,8 @@ fn needs_trait_box_coercion(
                 return false;
             }
         }
+        // TypeResolver sets Named(trait) as expected; treat it the same as Box<dyn Trait>
+        RustType::Named { name, .. } if reg.is_trait_type(name) => name.as_str(),
         _ => return false,
     };
 
@@ -317,6 +343,41 @@ fn convert_cond_expr(
         then_expr: Box::new(then_expr),
         else_expr: Box::new(else_expr),
     })
+}
+
+/// Returns true if the AST expression inherently produces `Option` when
+/// expected type is `Option<T>` — based on AST structure, not type resolution.
+///
+/// Detects:
+/// - Optional chaining (`?.`) — always produces Option
+/// - Ternary with null/undefined branch (`x ? y : null`) — produces Option
+///
+/// This is a temporary workaround: `resolve_expr_type` does not return `Option<T>`
+/// for Cond/OptChain expressions. Phase 3 task 3-7 will replace this with
+/// `tctx.type_resolution.expr_type()` after TypeResolver is enhanced to set
+/// correct expr_types for these patterns.
+fn ast_produces_option(expr: &ast::Expr) -> bool {
+    match expr {
+        ast::Expr::OptChain(_) => true,
+        ast::Expr::Paren(p) => ast_produces_option(&p.expr),
+        ast::Expr::Cond(cond) => {
+            // A ternary produces Option if either branch is null/undefined,
+            // OR if either branch itself produces Option (recursive check for nested ternaries).
+            // e.g., `x ? (y ? "a" : null) : "b"` — the cons branch produces Option,
+            // so TypeResolver will wrap the alt in Some(), making the whole expression Option.
+            is_null_or_undefined(&cond.cons)
+                || is_null_or_undefined(&cond.alt)
+                || ast_produces_option(&cond.cons)
+                || ast_produces_option(&cond.alt)
+        }
+        _ => false,
+    }
+}
+
+/// Returns true if the expression is a `null` literal or `undefined` identifier.
+fn is_null_or_undefined(expr: &ast::Expr) -> bool {
+    matches!(expr, ast::Expr::Lit(ast::Lit::Null(..)))
+        || matches!(expr, ast::Expr::Ident(id) if id.sym.as_ref() == "undefined")
 }
 
 #[cfg(test)]

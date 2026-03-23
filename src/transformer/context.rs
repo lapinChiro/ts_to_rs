@@ -56,21 +56,6 @@ mod tests {
     use crate::registry::TypeRegistry;
     use crate::transformer::test_fixtures::TctxFixture;
 
-    /// Runs TypeResolver on source and returns the FileTypeResolution.
-    fn resolve_types(source: &str) -> FileTypeResolution {
-        let reg = TypeRegistry::new();
-        let mg = ModuleGraph::empty();
-        let mut synthetic = SyntheticTypeRegistry::new();
-        let parsed = crate::pipeline::ParsedFile {
-            path: std::path::PathBuf::from("test.ts"),
-            source: source.to_string(),
-            module: parse_typescript(source).unwrap(),
-        };
-        let mut resolver =
-            crate::pipeline::type_resolver::TypeResolver::new(&reg, &mut synthetic, &mg);
-        resolver.resolve_file(&parsed)
-    }
-
     // ===== TransformContext 基本動作 =====
 
     #[test]
@@ -134,25 +119,25 @@ mod tests {
     #[test]
     fn test_expr_type_lookup_known_type_from_resolution() {
         let source = "function greet(name: string): string { return name; }";
-        let resolution = resolve_types(source);
+        let f = TctxFixture::from_source(source);
         assert!(
-            !resolution.expr_types.is_empty(),
+            !f.tctx().type_resolution.expr_types.is_empty(),
             "TypeResolver should resolve expression types"
         );
 
-        let f = TctxFixture::with_resolution(resolution);
         let (_, output) = f.transform(source);
         assert!(output.contains("fn greet"), "should generate function");
     }
 
     #[test]
     fn test_expr_type_unknown_fallback_to_heuristics() {
-        // Empty resolution → all Unknown → fallback should produce .to_string()
-        let f = TctxFixture::new();
-        let (_, output) = f.transform(r#"function greet(): string { return "hello"; }"#);
+        // TypeResolver sets expected type for return → should produce .to_string()
+        let source = r#"function greet(): string { return "hello"; }"#;
+        let f = TctxFixture::from_source(source);
+        let (_, output) = f.transform(source);
         assert!(
             output.contains("to_string()"),
-            "fallback should handle string literal: {output}"
+            "TypeResolver should set expected type causing .to_string(): {output}"
         );
     }
 
@@ -161,13 +146,12 @@ mod tests {
     #[test]
     fn test_expected_type_lookup_from_resolution() {
         let source = r#"function greet(): string { return "hello"; }"#;
-        let resolution = resolve_types(source);
+        let f = TctxFixture::from_source(source);
         assert!(
-            !resolution.expected_types.is_empty(),
+            !f.tctx().type_resolution.expected_types.is_empty(),
             "TypeResolver should set expected types for return statements"
         );
 
-        let f = TctxFixture::with_resolution(resolution);
         let (_, output) = f.transform(source);
         assert!(
             output.contains("to_string()"),
@@ -186,13 +170,12 @@ function check(x: string | number): string {
     }
     return "";
 }"#;
-        let resolution = resolve_types(source);
+        let f = TctxFixture::from_source(source);
         assert!(
-            !resolution.narrowing_events.is_empty(),
+            !f.tctx().type_resolution.narrowing_events.is_empty(),
             "TypeResolver should detect typeof narrowing"
         );
 
-        let f = TctxFixture::with_resolution(resolution);
         let (_, output) = f.transform(source);
         assert!(
             output.contains("fn check"),
