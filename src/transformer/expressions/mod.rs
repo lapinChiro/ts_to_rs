@@ -7,6 +7,7 @@ use swc_common::Spanned;
 use swc_ecma_ast as ast;
 
 use crate::ir::{Expr, RustType};
+use crate::pipeline::type_converter::convert_ts_type;
 use crate::pipeline::type_resolution::Span;
 use crate::pipeline::SyntheticTypeRegistry;
 use crate::registry::TypeRegistry;
@@ -36,7 +37,6 @@ pub(crate) use functions::convert_arrow_expr_with_return_type;
 use functions::convert_fn_expr;
 use literals::convert_lit;
 use member_access::{convert_member_expr, convert_opt_chain_expr};
-use type_resolution::convert_ts_as_expr;
 pub(crate) use type_resolution::get_expr_type;
 
 /// Converts an SWC [`ast::Expr`] into an IR [`Expr`], with an optional expected type.
@@ -158,7 +158,20 @@ fn convert_expr_with_expected(
         }
         ast::Expr::Cond(cond) => convert_cond_expr(cond, tctx, reg, type_env, synthetic),
         ast::Expr::Unary(unary) => convert_unary_expr(unary, tctx, reg, type_env, synthetic),
-        ast::Expr::TsAs(ts_as) => convert_ts_as_expr(ts_as, tctx, reg, type_env, synthetic),
+        ast::Expr::TsAs(ts_as) => {
+            match convert_ts_type(&ts_as.type_ann, synthetic, reg) {
+                Ok(target_ty)
+                    if matches!(target_ty, RustType::F64 | RustType::Bool) =>
+                {
+                    let inner = convert_expr(&ts_as.expr, tctx, reg, type_env, synthetic)?;
+                    Ok(Expr::Cast {
+                        expr: Box::new(inner),
+                        target: target_ty,
+                    })
+                }
+                _ => convert_expr(&ts_as.expr, tctx, reg, type_env, synthetic),
+            }
+        }
         ast::Expr::OptChain(opt_chain) => {
             convert_opt_chain_expr(opt_chain, tctx, reg, type_env, synthetic)
         }

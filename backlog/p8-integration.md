@@ -208,7 +208,7 @@ let rust_source = pipeline::transpile_single(&source)?;
 ### 残作業
 
 - **D5**: 全 Transformer 関数 105 個（14 ファイル）+ 全テストコード — `reg: &TypeRegistry` パラメータを削除し `tctx.type_registry` に統一
-- **Phase 3-6〜3-7**: `type_env` パラメータの部分的除去、`ast_produces_option` 削除（TypeResolver Cond/OptChain expr_type 強化）
+- **Phase 3-7**: `ast_produces_option` 削除（TypeResolver Cond/OptChain expr_type 強化）
 - **Phase 4**: TypeEnv 簡素化（narrowing 用 push_scope/pop_scope 削除）
 - **Phase E**: 最終検証
 

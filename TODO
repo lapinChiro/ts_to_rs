@@ -146,6 +146,20 @@
   - クラス宣言の走査時（`visit_class_decl`）に、メソッドスコープ内で `this` の型をクラス自身の `Named` 型としてスコープに登録する必要がある
   - `this.field` のフィールドアクセスや `this.method()` のメソッド呼び出しの型解決に影響
   - 解決策: `visit_class_decl` でクラス名を記録し、メソッド走査時にスコープに `self` / `this` を `RustType::Named { name: class_name }` として登録する
+- **[I-226]** **`TypeEnv` の完全除去 — Transformer から `type_env` パラメータを除去** — アーキテクチャ
+  - **理想的な姿**: Transformer が独自の型追跡（`type_env.insert`/`get`）を一切持たず、全ての型情報を TypeResolver の pre-pass 結果（`FileTypeResolution`）から読み取る。型情報の源泉が一本化され、TypeResolver と Transformer の間の型不整合が構造的に排除される
+  - **除去すべき理由**: 現在 TypeResolver（`src/pipeline/type_resolver.rs`）と TypeEnv（`src/transformer/type_env.rs`）が同一の情報（変数の型、narrowing 後の型）を並行して保持しており、DRY 違反。Transformer が `type_env.insert` で型を記録しても TypeResolver の結果には反映されず、逆も然り。新機能追加時に両方を更新する必要があり、一方の更新漏れがサイレントな型不整合を生む
+  - **現在の `type_env` 用途（プロダクションコード）**: `get()` 11箇所、`insert()` 15箇所、`push_scope()`/`pop_scope()` 各5箇所。55関数が `type_env` をパラメータに取る
+  - **用途の分類と置換方針**:
+    1. **Narrowing ガード — `get()` 7箇所 + `insert()` 5箇所 + `push_scope`/`pop_scope` 3ペア** (`statements/mod.rs:715-788`, `expressions/mod.rs:323`, `expressions/patterns.rs:580`): if/else の narrowing スコープ。`type_env.get(var_name)` で元の型を取得し、`narrowed_type_for_then/else` を計算し、`push_scope` → `insert(narrowed)` → body 変換 → `pop_scope`。**置換方針**: TypeResolver の `FileTypeResolution.narrowed_type(var_name, pos)` が同じ情報を提供済み（TypeEnv narrowing を無効化しても全テスト GREEN であることを検証済み）。TypeEnv の narrowing 用 push_scope/pop_scope を削除すれば、この分類の全用途が消滅する
+    2. **DU match arm フィールドバインディング — `insert()` 1箇所 + `push_scope`/`pop_scope` 1ペア + `get()` 1箇所** (`statements/mod.rs:2505-2520`, `member_access.rs:294`): switch → match 変換時に destructuring されたフィールド変数を match arm スコープに登録。`member_access.rs:294` で「この変数名が TypeEnv に存在するか」をチェックし、match arm 内のフィールドアクセスを clone に変換。**置換方針**: TypeResolver が DU switch の各 case で destructure されるフィールドを事前解析し、`FileTypeResolution` に per-span のフィールドバインディング情報を記録する。または、Transformer が match arm 生成時に IR レベルでバインディング情報を保持し、member_access 変換で参照する（TypeEnv ではなく IR コンテキストとして）
+    3. **typeof switch case narrowing — `insert()` 1箇所 + `push_scope`/`pop_scope` 1ペア** (`statements/mod.rs:2313-2326`): typeof switch の case body 内で narrowed type を設定。分類 1 と同じ方針で FileTypeResolution に置換可能
+    4. **変数宣言の型登録 — `insert()` 5箇所** (`statements/mod.rs:448,481,553,1539,1550,1555`): 明示的型注釈 or `get_expr_type` で推論した型を登録。後続の式変換で `type_env.get(name)` により参照される。**置換方針**: TypeResolver は既に全変数の型を `scope_stack` で追跡しており、`resolve_expr` で Ident 式の型を `expr_types` に記録済み。Transformer は `get_expr_type(tctx, ident_expr)` で同じ情報を取得可能。ただし、Transformer が名前（文字列）で参照する箇所（`type_env.get(&name)`）は、対応する AST ノードのスパンが必要になるため、参照方法の変更が必要
+    5. **関数パラメータの型登録 — `insert()` 3箇所** (`functions/mod.rs:154`, `classes.rs:792`, `statements/mod.rs:3236`): 関数 body 変換前にパラメータ型を登録。**置換方針**: TypeResolver の `resolve_arrow_expr`/`resolve_fn_expr` が既にパラメータをスコープに登録し、body 内の式の型を解決済み。`expr_types` 経由で参照可能
+    6. **any-narrowing enum オーバーライド — `insert()` 2箇所 + `get()` 2箇所** (`functions/mod.rs:161,1209`, `statements/mod.rs:199`, `functions/mod.rs:1248`): AnyTypeAnalyzer が生成した enum 型で Any 型を上書き。**置換方針**: AnyTypeAnalyzer の結果を TypeResolver に統合し、`resolve_expr` が Any 型の変数に対して enum 型を返すようにする
+    7. **関数型変数の参照 — `get()` 1箇所** (`calls.rs:55`): `type_env.get(&fn_name)` で Fn 型を参照し、パラメータ型を取得。**置換方針**: TypeResolver が `lookup_var` で同じ情報を提供済み。`get_expr_type(tctx, callee_expr)` で Fn 型を取得可能
+  - **依存**: 分類 1, 3 の除去（TypeEnv の narrowing 用 push_scope/pop_scope 削除）が前提。これが完了すると残る用途は分類 2, 4, 5, 6, 7 のみ
+  - 伝播リスク: 新機能追加時に TypeResolver と TypeEnv の両方を更新する必要がある現状が続く
 - **[I-101]** **ジェネリック型を含む intersection** — 型変換
   - `interface A<T> extends B<T>, C<T>` のようなジェネリック intersection が未対応
   - I-100（ジェネリクス基盤）完了により `TypeRegistry::instantiate` と `TypeParam` が利用可能。intersection 変換（`try_convert_intersection_type`）と統合すればよい

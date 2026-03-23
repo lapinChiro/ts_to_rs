@@ -1,22 +1,15 @@
-//! Type resolution and type assertion conversion for expressions.
+//! Type resolution helpers for expressions.
 //!
 //! - `get_expr_type`: FileTypeResolution から式の型を取得する
 //! - `resolve_field_type`: TypeRegistry から構造体フィールドの宣言型を取得する
-//! - `convert_ts_as_expr`: TypeScript の型アサーション（`x as T`）を IR に変換する
-
-use anyhow::Result;
 use swc_common::Spanned;
 use swc_ecma_ast as ast;
 
-use crate::ir::{Expr, RustType};
-use crate::pipeline::type_converter::convert_ts_type;
+use crate::ir::RustType;
 use crate::pipeline::type_resolution::Span;
-use crate::pipeline::{ResolvedType, SyntheticTypeRegistry};
+use crate::pipeline::ResolvedType;
 use crate::registry::{TypeDef, TypeRegistry};
 use crate::transformer::context::TransformContext;
-use crate::transformer::TypeEnv;
-
-use super::convert_expr;
 
 /// FileTypeResolution から式の型を取得する。Unknown なら None。
 ///
@@ -71,37 +64,6 @@ pub(super) fn resolve_field_type(
             .find(|(name, _)| name == &field_name)
             .map(|(_, ty)| ty.clone()),
         _ => None,
-    }
-}
-
-/// Converts a TypeScript type assertion (`x as T`).
-///
-/// - Primitive types (f64, i64, bool): generates `x as T` cast
-/// - Other types: passes the assertion type as `expected` to the inner expression
-pub(super) fn convert_ts_as_expr(
-    ts_as: &ast::TsAsExpr,
-    tctx: &TransformContext<'_>,
-    reg: &TypeRegistry,
-    type_env: &TypeEnv,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Result<Expr> {
-    match convert_ts_type(&ts_as.type_ann, synthetic, reg) {
-        Ok(target_ty) => {
-            let is_primitive_cast = matches!(target_ty, RustType::F64 | RustType::Bool);
-            if is_primitive_cast {
-                let inner = convert_expr(&ts_as.expr, tctx, reg, type_env, synthetic)?;
-                Ok(Expr::Cast {
-                    expr: Box::new(inner),
-                    target: target_ty,
-                })
-            } else {
-                convert_expr(&ts_as.expr, tctx, reg, type_env, synthetic)
-            }
-        }
-        Err(_) => {
-            // If we can't convert the type, just ignore the assertion
-            convert_expr(&ts_as.expr, tctx, reg, type_env, synthetic)
-        }
     }
 }
 
