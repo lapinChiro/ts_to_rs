@@ -20,7 +20,6 @@ fn convert_single_stmt(
     let mut stmts = convert_stmt(
         stmt,
         &tctx,
-        reg,
         return_type,
         &mut TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -41,7 +40,6 @@ fn convert_stmts_with_env(
     convert_stmt(
         stmt,
         &tctx,
-        reg,
         None,
         type_env,
         &mut SyntheticTypeRegistry::new(),
@@ -86,7 +84,6 @@ fn convert_single_stmt_resolved(
             let mut stmts = convert_stmt(
                 stmt,
                 &tctx,
-                &source_reg,
                 return_type,
                 &mut TypeEnv::new(),
                 &mut SyntheticTypeRegistry::new(),
@@ -102,7 +99,6 @@ fn convert_single_stmt_resolved(
     let mut stmts = convert_stmt(
         stmt,
         &tctx,
-        &source_reg,
         return_type,
         &mut TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -342,7 +338,6 @@ fn test_convert_stmt_list_try_catch_expands_to_let_block_if() {
     let result = convert_stmt_list(
         &stmts,
         &tctx,
-        f.reg(),
         None,
         &mut TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -380,7 +375,6 @@ fn test_convert_stmt_list_try_catch_empty_catch_expands_correctly() {
     let result = convert_stmt_list(
         &stmts,
         &tctx,
-        f.reg(),
         None,
         &mut TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -406,7 +400,6 @@ fn test_convert_stmt_list_try_finally_expands_to_scopeguard_and_body() {
     let result = convert_stmt_list(
         &stmts,
         &tctx,
-        f.reg(),
         None,
         &mut TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -428,7 +421,6 @@ fn test_convert_stmt_list_try_catch_finally_expands_all() {
     let result = convert_stmt_list(
         &stmts,
         &tctx,
-        f.reg(),
         None,
         &mut TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -452,7 +444,6 @@ fn test_convert_stmt_nested_try_catch_expands_inner_in_outer_body() {
     let result = convert_stmt_list(
         &stmts,
         &tctx,
-        f.reg(),
         None,
         &mut TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -530,7 +521,6 @@ fn test_convert_try_catch_basic_expands_to_let_labeledblock_if() {
     let result = convert_stmt_list(
         &stmts,
         &tctx,
-        f.reg(),
         None,
         &mut TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -612,7 +602,6 @@ fn test_convert_try_catch_throw_in_body_expands_to_assign_break() {
     let result = convert_stmt_list(
         &stmts,
         &tctx,
-        f.reg(),
         None,
         &mut TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -658,7 +647,6 @@ fn test_convert_try_finally_expands_to_scopeguard_and_body() {
     let result = convert_stmt_list(
         &stmts,
         &tctx,
-        f.reg(),
         None,
         &mut TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -701,7 +689,6 @@ fn test_convert_try_catch_finally_expands_all() {
     let result = convert_stmt_list(
         &stmts,
         &tctx,
-        f.reg(),
         None,
         &mut TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -751,7 +738,6 @@ fn test_convert_try_catch_break_in_loop_uses_flag() {
     let result = convert_stmt_list(
         &stmts,
         &tctx,
-        f.reg(),
         None,
         &mut TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -792,7 +778,6 @@ fn test_convert_try_catch_continue_in_loop_uses_flag() {
     let result = convert_stmt_list(
         &stmts,
         &tctx,
-        f.reg(),
         None,
         &mut TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -840,7 +825,6 @@ fn test_convert_try_catch_both_return_adds_unreachable() {
     let result = convert_stmt_list(
         &stmts,
         &tctx,
-        f.reg(),
         Some(&return_type),
         &mut TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -867,7 +851,6 @@ fn test_convert_try_catch_try_no_return_no_unreachable() {
     let result = convert_stmt_list(
         &stmts,
         &tctx,
-        f.reg(),
         Some(&return_type),
         &mut TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1099,7 +1082,6 @@ fn test_convert_stmt_list_for_decrement_becomes_loop() {
     let result = convert_stmt_list(
         &stmts,
         &tctx,
-        f.reg(),
         None,
         &mut TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1121,7 +1103,6 @@ fn test_convert_stmt_list_for_step_by_two_becomes_loop() {
     let result = convert_stmt_list(
         &stmts,
         &tctx,
-        f.reg(),
         None,
         &mut TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1142,7 +1123,6 @@ fn test_convert_stmt_for_simple_counter_unchanged() {
     let result = convert_stmt_list(
         &stmts,
         &tctx,
-        f.reg(),
         None,
         &mut TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1162,7 +1142,6 @@ fn test_convert_stmt_list_object_destructuring_basic() {
     let result = convert_stmt_list(
         &stmts,
         &tctx,
-        f.reg(),
         None,
         &mut TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1203,7 +1182,6 @@ fn test_convert_stmt_list_object_destructuring_let_mutable() {
     let result = convert_stmt_list(
         &stmts,
         &tctx,
-        f.reg(),
         None,
         &mut TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1222,7 +1200,6 @@ fn test_convert_stmt_list_object_destructuring_rename() {
     let result = convert_stmt_list(
         &stmts,
         &tctx,
-        f.reg(),
         None,
         &mut TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1266,7 +1243,6 @@ fn test_convert_stmt_list_array_destructuring_basic() {
     let result = convert_stmt_list(
         &stmts,
         &tctx,
-        f.reg(),
         None,
         &mut TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1307,7 +1283,6 @@ fn test_convert_stmt_list_array_destructuring_let_mutable() {
     let result = convert_stmt_list(
         &stmts,
         &tctx,
-        f.reg(),
         None,
         &mut TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1326,7 +1301,6 @@ fn test_convert_stmt_list_array_destructuring_single_element() {
     let result = convert_stmt_list(
         &stmts,
         &tctx,
-        f.reg(),
         None,
         &mut TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1357,7 +1331,6 @@ fn test_convert_stmt_do_while_basic() {
     let result = convert_stmt_list(
         &stmts,
         &tctx,
-        f.reg(),
         None,
         &mut TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1402,7 +1375,6 @@ fn test_convert_stmt_list_array_destructuring_three_elements() {
     let result = convert_stmt_list(
         &stmts,
         &tctx,
-        f.reg(),
         None,
         &mut TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1422,7 +1394,6 @@ fn test_convert_stmt_list_array_destructuring_skip_element() {
     let result = convert_stmt_list(
         &stmts,
         &tctx,
-        f.reg(),
         None,
         &mut TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1451,7 +1422,6 @@ fn test_convert_stmt_list_array_destructuring_rest() {
     let result = convert_stmt_list(
         &stmts,
         &tctx,
-        f.reg(),
         None,
         &mut TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1471,7 +1441,6 @@ fn test_convert_stmt_nested_fn_decl_generates_closure_let() {
     let result = convert_stmt_list(
         &stmts,
         &tctx,
-        f.reg(),
         None,
         &mut TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1514,7 +1483,6 @@ fn test_type_env_stmt_list_registers_let_binding_type() {
     let _result = convert_stmt_list(
         &stmts_ref,
         &tctx,
-        f.reg(),
         None,
         &mut type_env,
         &mut SyntheticTypeRegistry::new(),
@@ -1539,7 +1507,6 @@ fn test_convert_stmt_spread_let_single_spread_optimizes_to_clone() {
     let result = convert_stmt(
         &stmts[0],
         &tctx,
-        f.reg(),
         None,
         &mut TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1562,7 +1529,6 @@ fn test_convert_stmt_spread_let_mixed_segments_expands_to_stmts() {
     let result = convert_stmt(
         &stmts[0],
         &tctx,
-        f.reg(),
         None,
         &mut TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1596,7 +1562,6 @@ fn test_convert_stmt_spread_return_single_spread_optimizes_to_clone() {
     let result = convert_stmt(
         &stmts[0],
         &tctx,
-        f.reg(),
         None,
         &mut TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1618,7 +1583,6 @@ fn test_convert_stmt_spread_return_mixed_segments_expands_to_stmts() {
     let result = convert_stmt(
         &stmts[0],
         &tctx,
-        f.reg(),
         None,
         &mut TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1647,7 +1611,6 @@ fn test_convert_stmt_spread_non_spread_array_uses_normal_path() {
     let result = convert_stmt(
         &stmts[0],
         &tctx,
-        f.reg(),
         None,
         &mut TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1669,7 +1632,6 @@ fn test_convert_switch_single_case_break_generates_match() {
     let result = convert_stmt_list(
         &stmts,
         &tctx,
-        f.reg(),
         None,
         &mut TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1699,7 +1661,6 @@ fn test_convert_switch_empty_fallthrough_merges_patterns() {
     let result = convert_stmt_list(
         &stmts,
         &tctx,
-        f.reg(),
         None,
         &mut TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1729,7 +1690,6 @@ fn test_convert_switch_default_generates_wildcard() {
     let result = convert_stmt_list(
         &stmts,
         &tctx,
-        f.reg(),
         None,
         &mut TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1766,7 +1726,6 @@ fn test_convert_switch_fallthrough_generates_labeled_block() {
     let result = convert_stmt_list(
         &stmts,
         &tctx,
-        f.reg(),
         None,
         &mut TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1798,7 +1757,6 @@ fn test_convert_switch_return_terminated_case_generates_clean_match() {
     let result = convert_stmt_list(
         &stmts,
         &tctx,
-        f.reg(),
         None,
         &mut TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1826,7 +1784,6 @@ fn test_convert_switch_throw_terminated_case_generates_clean_match() {
     let result = convert_stmt_list(
         &stmts,
         &tctx,
-        f.reg(),
         None,
         &mut TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1851,7 +1808,6 @@ fn test_convert_switch_string_discriminant_generates_string_patterns() {
     let result = convert_stmt_list(
         &stmts,
         &tctx,
-        f.reg(),
         None,
         &mut TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1888,7 +1844,6 @@ fn test_switch_nonliteral_case_generates_guard() {
     let result = convert_stmt_list(
         &stmts,
         &tctx,
-        f.reg(),
         None,
         &mut TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1930,7 +1885,6 @@ fn test_switch_nonliteral_fallthrough_cases_combined_guard() {
     let result = convert_stmt_list(
         &stmts,
         &tctx,
-        f.reg(),
         None,
         &mut TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -1971,7 +1925,6 @@ fn test_switch_mixed_literal_nonliteral_separate_arms() {
     let result = convert_stmt_list(
         &stmts,
         &tctx,
-        f.reg(),
         None,
         &mut TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -2012,7 +1965,6 @@ fn test_convert_stmt_local_interface_skipped() {
     let result = convert_stmt_list(
         &stmts,
         &tctx,
-        f.reg(),
         None,
         &mut TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -2036,7 +1988,6 @@ fn test_convert_stmt_local_type_alias_skipped() {
     let result = convert_stmt_list(
         &stmts,
         &tctx,
-        f.reg(),
         None,
         &mut TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -2062,7 +2013,6 @@ fn test_const_field_assignment_in_body_becomes_let_mut() {
     let result = convert_stmt_list(
         &stmts,
         &tctx,
-        f.reg(),
         None,
         &mut TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -2091,7 +2041,6 @@ fn test_const_mutating_method_in_body_becomes_let_mut() {
     let result = convert_stmt_list(
         &stmts,
         &tctx,
-        f.reg(),
         None,
         &mut TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -2123,7 +2072,6 @@ fn test_closure_mutating_outer_var_closure_binding_becomes_let_mut() {
     let result = convert_stmt_list(
         &stmts,
         &tctx,
-        f.reg(),
         None,
         &mut TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -2149,7 +2097,6 @@ fn test_object_destructuring_default_number_generates_unwrap_or() {
     let result = convert_stmt_list(
         &stmts,
         &tctx,
-        f.reg(),
         None,
         &mut TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -2182,7 +2129,6 @@ fn test_object_destructuring_default_string_generates_unwrap_or_else() {
     let result = convert_stmt_list(
         &stmts,
         &tctx,
-        f.reg(),
         None,
         &mut TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -2215,7 +2161,6 @@ fn test_object_destructuring_default_bool_generates_unwrap_or() {
     let result = convert_stmt_list(
         &stmts,
         &tctx,
-        f.reg(),
         None,
         &mut TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -2248,7 +2193,6 @@ fn test_object_destructuring_nested_generates_chained_field_access() {
     let result = convert_stmt_list(
         &stmts,
         &tctx,
-        f.reg(),
         None,
         &mut TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -2288,7 +2232,6 @@ fn test_object_destructuring_nested_multiple_fields() {
     let result = convert_stmt_list(
         &stmts,
         &tctx,
-        f.reg(),
         None,
         &mut TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -2333,7 +2276,6 @@ fn test_object_destructuring_rest_with_type_expands_remaining_fields() {
     let result = convert_stmt_list(
         body_stmts,
         &tctx,
-        f.reg(),
         None,
         &mut type_env,
         &mut SyntheticTypeRegistry::new(),
@@ -2355,7 +2297,6 @@ fn test_object_destructuring_rest_no_type_generates_comment() {
     let result = convert_stmt_list(
         &stmts,
         &tctx,
-        f.reg(),
         None,
         &mut TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -2379,7 +2320,6 @@ fn test_object_destructuring_no_default_unchanged() {
     let result = convert_stmt_list(
         &stmts,
         &tctx,
-        f.reg(),
         None,
         &mut TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -2449,7 +2389,6 @@ fn test_convert_switch_discriminated_union_to_enum_match() {
     let result = convert_stmt_list(
         body_stmts,
         &tctx,
-        f.reg(),
         None,
         &mut type_env,
         &mut SyntheticTypeRegistry::new(),
@@ -2535,7 +2474,6 @@ fn test_convert_du_switch_field_access_single_field_becomes_binding() {
     let result = convert_stmt_list(
         body_stmts,
         &tctx,
-        f.reg(),
         Some(&RustType::F64),
         &mut type_env,
         &mut SyntheticTypeRegistry::new(),
@@ -2605,7 +2543,6 @@ fn test_convert_du_switch_field_access_multiple_fields_become_bindings() {
     let result = convert_stmt_list(
         body_stmts,
         &tctx,
-        f.reg(),
         Some(&RustType::F64),
         &mut type_env,
         &mut SyntheticTypeRegistry::new(),
@@ -2665,7 +2602,6 @@ fn test_cond_assign_if_option_type_generates_if_let_some() {
     let result = convert_stmt_list(
         body_stmts,
         &tctx,
-        f.reg(),
         None,
         &mut env,
         &mut SyntheticTypeRegistry::new(),
@@ -2704,7 +2640,6 @@ fn test_cond_assign_if_f64_type_generates_let_and_if_neq_zero() {
     let _ = convert_stmt(
         &stmts[0],
         &tctx,
-        f.reg(),
         None,
         &mut env,
         &mut SyntheticTypeRegistry::new(),
@@ -2754,7 +2689,6 @@ fn test_cond_assign_while_option_type_generates_while_let_some() {
     let result = convert_stmt_list(
         body_stmts,
         &tctx,
-        f.reg(),
         None,
         &mut env,
         &mut SyntheticTypeRegistry::new(),
@@ -2792,7 +2726,6 @@ fn test_cond_assign_while_f64_type_generates_loop_with_break() {
     let _ = convert_stmt(
         &stmts[0],
         &tctx,
-        f.reg(),
         None,
         &mut env,
         &mut SyntheticTypeRegistry::new(),
@@ -2828,7 +2761,6 @@ fn test_cond_assign_if_comparison_extracts_assignment() {
     let _ = convert_stmt(
         &stmts[0],
         &tctx,
-        f.reg(),
         None,
         &mut env,
         &mut SyntheticTypeRegistry::new(),
@@ -2863,7 +2795,6 @@ fn test_cond_assign_normal_if_unchanged() {
     let _ = convert_stmt(
         &stmts[0],
         &tctx,
-        f.reg(),
         None,
         &mut env,
         &mut SyntheticTypeRegistry::new(),
@@ -2888,7 +2819,6 @@ fn test_convert_stmt_for_of_array_destructuring_generates_tuple() {
     let result = convert_stmt(
         &stmts[0],
         &tctx,
-        f.reg(),
         None,
         &mut env,
         &mut SyntheticTypeRegistry::new(),
@@ -2910,7 +2840,6 @@ fn test_convert_stmt_empty_stmt_produces_no_ir() {
     let result = convert_stmt(
         &stmts[0],
         &tctx,
-        f.reg(),
         None,
         &mut TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -2935,7 +2864,6 @@ fn test_convert_stmt_for_of_array_destructuring_3_elements() {
     let result = convert_stmt(
         &stmts[0],
         &tctx,
-        f.reg(),
         None,
         &mut env,
         &mut SyntheticTypeRegistry::new(),
@@ -2969,7 +2897,6 @@ fn test_convert_stmt_for_loop_multiple_declarators() {
     let result = convert_stmt(
         &stmts[0],
         &tctx,
-        f.reg(),
         None,
         &mut env,
         &mut SyntheticTypeRegistry::new(),
@@ -3021,7 +2948,6 @@ fn test_convert_var_decl_trait_type_generates_box_dyn() {
     let result = convert_stmt(
         stmt,
         &tctx,
-        f.reg(),
         None,
         &mut TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
@@ -3076,7 +3002,6 @@ fn test_convert_switch_case_propagates_discriminant_type_for_string_enum() {
     let result = convert_stmt_list(
         body_stmts,
         &tctx,
-        f.reg(),
         None,
         &mut type_env,
         &mut SyntheticTypeRegistry::new(),

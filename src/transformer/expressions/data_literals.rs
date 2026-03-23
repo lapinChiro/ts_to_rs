@@ -5,7 +5,7 @@ use swc_ecma_ast as ast;
 
 use crate::ir::{Expr, RustType, Stmt};
 use crate::pipeline::SyntheticTypeRegistry;
-use crate::registry::{TypeDef, TypeRegistry};
+use crate::registry::TypeDef;
 use crate::transformer::TypeEnv;
 
 use super::convert_expr;
@@ -18,7 +18,6 @@ use crate::transformer::context::TransformContext;
 pub(super) fn convert_discriminated_union_object_lit(
     obj_lit: &ast::ObjectLit,
     tctx: &TransformContext<'_>,
-    reg: &TypeRegistry,
     type_env: &TypeEnv,
     enum_name: &str,
     tag_field: &str,
@@ -66,7 +65,7 @@ pub(super) fn convert_discriminated_union_object_lit(
                     if key == tag_field {
                         continue; // Skip discriminant field
                     }
-                    let value = convert_expr(&kv.value, tctx, reg, type_env, synthetic)?;
+                    let value = convert_expr(&kv.value, tctx, type_env, synthetic)?;
                     fields.push((key, value));
                 }
                 ast::Prop::Shorthand(ident) => {
@@ -74,13 +73,8 @@ pub(super) fn convert_discriminated_union_object_lit(
                     if key == tag_field {
                         continue;
                     }
-                    let value = convert_expr(
-                        &ast::Expr::Ident(ident.clone()),
-                        tctx,
-                        reg,
-                        type_env,
-                        synthetic,
-                    )?;
+                    let value =
+                        convert_expr(&ast::Expr::Ident(ident.clone()), tctx, type_env, synthetic)?;
                     fields.push((key, value));
                 }
                 _ => {}
@@ -109,7 +103,6 @@ pub(super) fn convert_discriminated_union_object_lit(
 pub(super) fn try_convert_as_hashmap(
     obj_lit: &ast::ObjectLit,
     tctx: &TransformContext<'_>,
-    reg: &TypeRegistry,
     type_env: &TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Option<Expr>> {
@@ -128,8 +121,8 @@ pub(super) fn try_convert_as_hashmap(
                         _ => return Ok(None), // non-computed key → not a HashMap
                     };
                     // Cat A: HashMap computed key — arbitrary expression
-                    let key = convert_expr(computed_expr, tctx, reg, type_env, synthetic)?;
-                    let value = convert_expr(&kv.value, tctx, reg, type_env, synthetic)?;
+                    let key = convert_expr(computed_expr, tctx, type_env, synthetic)?;
+                    let value = convert_expr(&kv.value, tctx, type_env, synthetic)?;
                     entries.push(Expr::Tuple {
                         elements: vec![key, value],
                     });
@@ -157,13 +150,13 @@ pub(super) fn try_convert_as_hashmap(
 pub(super) fn convert_object_lit(
     obj_lit: &ast::ObjectLit,
     tctx: &TransformContext<'_>,
-    reg: &TypeRegistry,
     expected: Option<&RustType>,
     type_env: &TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Expr> {
+    let reg = tctx.type_registry;
     // Check if all properties use computed keys → HashMap::from(vec![(k, v), ...])
-    if let Some(hashmap) = try_convert_as_hashmap(obj_lit, tctx, reg, type_env, synthetic)? {
+    if let Some(hashmap) = try_convert_as_hashmap(obj_lit, tctx, type_env, synthetic)? {
         return Ok(hashmap);
     }
 
@@ -186,7 +179,6 @@ pub(super) fn convert_object_lit(
         return convert_discriminated_union_object_lit(
             obj_lit,
             tctx,
-            reg,
             type_env,
             struct_name,
             tag,
@@ -213,18 +205,13 @@ pub(super) fn convert_object_lit(
                         ast::PropName::Str(s) => s.value.to_string_lossy().into_owned(),
                         _ => return Err(anyhow!("unsupported object literal key")),
                     };
-                    let value = convert_expr(&kv.value, tctx, reg, type_env, synthetic)?;
+                    let value = convert_expr(&kv.value, tctx, type_env, synthetic)?;
                     fields.push((key, value));
                 }
                 ast::Prop::Shorthand(ident) => {
                     let key = ident.sym.to_string();
-                    let value = convert_expr(
-                        &ast::Expr::Ident(ident.clone()),
-                        tctx,
-                        reg,
-                        type_env,
-                        synthetic,
-                    )?;
+                    let value =
+                        convert_expr(&ast::Expr::Ident(ident.clone()), tctx, type_env, synthetic)?;
                     fields.push((key, value));
                 }
                 _ => {
@@ -235,7 +222,7 @@ pub(super) fn convert_object_lit(
             },
             ast::PropOrSpread::Spread(spread_elem) => {
                 // Cat A: spread source — type is the struct itself
-                let spread_expr = convert_expr(&spread_elem.expr, tctx, reg, type_env, synthetic)?;
+                let spread_expr = convert_expr(&spread_elem.expr, tctx, type_env, synthetic)?;
                 spreads.push(spread_expr);
             }
         }
@@ -323,7 +310,6 @@ pub(super) fn convert_object_lit(
 pub(super) fn convert_array_lit(
     array_lit: &ast::ArrayLit,
     tctx: &TransformContext<'_>,
-    reg: &TypeRegistry,
     expected: Option<&RustType>,
     type_env: &TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
@@ -340,20 +326,20 @@ pub(super) fn convert_array_lit(
             .elems
             .iter()
             .filter_map(|elem| elem.as_ref())
-            .map(|elem| convert_expr(&elem.expr, tctx, reg, type_env, synthetic))
+            .map(|elem| convert_expr(&elem.expr, tctx, type_env, synthetic))
             .collect::<Result<Vec<_>>>()?;
         return Ok(Expr::Tuple { elements });
     }
 
     if has_spread {
-        return convert_spread_array_to_block(array_lit, tctx, reg, type_env, synthetic);
+        return convert_spread_array_to_block(array_lit, tctx, type_env, synthetic);
     }
 
     let elements = array_lit
         .elems
         .iter()
         .filter_map(|elem| elem.as_ref())
-        .map(|elem| convert_expr(&elem.expr, tctx, reg, type_env, synthetic))
+        .map(|elem| convert_expr(&elem.expr, tctx, type_env, synthetic))
         .collect::<Result<Vec<_>>>()?;
     Ok(Expr::Vec { elements })
 }
@@ -372,7 +358,6 @@ pub(super) fn convert_array_lit(
 pub(super) fn convert_spread_array_to_block(
     array_lit: &ast::ArrayLit,
     tctx: &TransformContext<'_>,
-    reg: &TypeRegistry,
     type_env: &TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Expr> {
@@ -402,7 +387,7 @@ pub(super) fn convert_spread_array_to_block(
                 initialized = true;
             }
             // Cat A: spread source — type is the array itself
-            let spread_expr = convert_expr(&elem.expr, tctx, reg, type_env, synthetic)?;
+            let spread_expr = convert_expr(&elem.expr, tctx, type_env, synthetic)?;
             stmts.push(Stmt::Expr(Expr::MethodCall {
                 object: Box::new(Expr::Ident("_v".to_string())),
                 method: "extend".to_string(),
@@ -417,7 +402,7 @@ pub(super) fn convert_spread_array_to_block(
                 }],
             }));
         } else {
-            let value = convert_expr(&elem.expr, tctx, reg, type_env, synthetic)?;
+            let value = convert_expr(&elem.expr, tctx, type_env, synthetic)?;
             if initialized {
                 // _v.push(value)
                 stmts.push(Stmt::Expr(Expr::MethodCall {

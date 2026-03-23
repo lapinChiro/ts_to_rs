@@ -7,7 +7,7 @@ use swc_ecma_ast as ast;
 
 use crate::ir::{BinOp, Expr, RustType};
 use crate::pipeline::SyntheticTypeRegistry;
-use crate::registry::{TypeDef, TypeRegistry};
+use crate::registry::TypeDef;
 use crate::transformer::TypeEnv;
 
 use super::literals::lookup_string_enum_variant;
@@ -21,7 +21,6 @@ pub(super) fn try_convert_undefined_comparison(
     bin: &ast::BinExpr,
     type_env: &TypeEnv,
     tctx: &TransformContext<'_>,
-    reg: &TypeRegistry,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Option<Expr> {
     let is_eq = matches!(bin.op, ast::BinaryOp::EqEq | ast::BinaryOp::EqEqEq);
@@ -40,7 +39,7 @@ pub(super) fn try_convert_undefined_comparison(
     }?;
 
     // Cat A: comparison operand
-    let other_ir = super::convert_expr(other_expr, tctx, reg, type_env, synthetic).ok()?;
+    let other_ir = super::convert_expr(other_expr, tctx, type_env, synthetic).ok()?;
     let method = if is_eq { "is_none" } else { "is_some" };
     Some(Expr::MethodCall {
         object: Box::new(other_ir),
@@ -56,9 +55,9 @@ pub(super) fn try_convert_enum_string_comparison(
     bin: &ast::BinExpr,
     type_env: &TypeEnv,
     tctx: &TransformContext<'_>,
-    reg: &TypeRegistry,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Option<Expr> {
+    let reg = tctx.type_registry;
     let is_eq = matches!(bin.op, ast::BinaryOp::EqEq | ast::BinaryOp::EqEqEq);
     let is_neq = matches!(bin.op, ast::BinaryOp::NotEq | ast::BinaryOp::NotEqEq);
     if !is_eq && !is_neq {
@@ -69,10 +68,10 @@ pub(super) fn try_convert_enum_string_comparison(
 
     // Try: left is enum variable, right is string literal
     if let Some(str_value) = extract_string_lit(&bin.right) {
-        if let Some(enum_name) = resolve_enum_type_name(&bin.left, tctx, reg) {
+        if let Some(enum_name) = resolve_enum_type_name(&bin.left, tctx) {
             if let Some(variant) = lookup_string_enum_variant(reg, &enum_name, &str_value) {
                 // Cat A: comparison operand
-                let left = super::convert_expr(&bin.left, tctx, reg, type_env, synthetic).ok()?;
+                let left = super::convert_expr(&bin.left, tctx, type_env, synthetic).ok()?;
                 return Some(Expr::BinaryOp {
                     left: Box::new(left),
                     op,
@@ -84,10 +83,10 @@ pub(super) fn try_convert_enum_string_comparison(
 
     // Try: left is string literal, right is enum variable
     if let Some(str_value) = extract_string_lit(&bin.left) {
-        if let Some(enum_name) = resolve_enum_type_name(&bin.right, tctx, reg) {
+        if let Some(enum_name) = resolve_enum_type_name(&bin.right, tctx) {
             if let Some(variant) = lookup_string_enum_variant(reg, &enum_name, &str_value) {
                 // Cat A: comparison operand
-                let right = super::convert_expr(&bin.right, tctx, reg, type_env, synthetic).ok()?;
+                let right = super::convert_expr(&bin.right, tctx, type_env, synthetic).ok()?;
                 return Some(Expr::BinaryOp {
                     left: Box::new(Expr::Ident(format!("{enum_name}::{variant}"))),
                     op,
@@ -110,11 +109,8 @@ fn extract_string_lit(expr: &ast::Expr) -> Option<String> {
 }
 
 /// 式の型が string literal union enum の場合、その enum 名を返す。
-fn resolve_enum_type_name(
-    expr: &ast::Expr,
-    tctx: &TransformContext<'_>,
-    reg: &TypeRegistry,
-) -> Option<String> {
+fn resolve_enum_type_name(expr: &ast::Expr, tctx: &TransformContext<'_>) -> Option<String> {
+    let reg = tctx.type_registry;
     let ty = get_expr_type(tctx, expr)?;
     if let RustType::Named { name, .. } = ty {
         if let Some(TypeDef::Enum { string_values, .. }) = reg.get(name) {
@@ -137,9 +133,9 @@ pub(super) fn try_convert_typeof_comparison(
     bin: &ast::BinExpr,
     type_env: &TypeEnv,
     tctx: &TransformContext<'_>,
-    reg: &TypeRegistry,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Option<Expr> {
+    let reg = tctx.type_registry;
     let is_eq = matches!(bin.op, ast::BinaryOp::EqEq | ast::BinaryOp::EqEqEq);
     let is_neq = matches!(bin.op, ast::BinaryOp::NotEq | ast::BinaryOp::NotEqEq);
     if !is_eq && !is_neq {
@@ -170,7 +166,7 @@ pub(super) fn try_convert_typeof_comparison(
             };
             if variants.iter().any(|v| v == expected_variant) {
                 let operand_ir =
-                    super::convert_expr(typeof_operand, tctx, reg, type_env, synthetic).ok()?;
+                    super::convert_expr(typeof_operand, tctx, type_env, synthetic).ok()?;
                 let pattern = format!("{enum_name}::{expected_variant}(_)");
                 let matches_expr = Expr::Matches {
                     expr: Box::new(operand_ir),
@@ -198,8 +194,7 @@ pub(super) fn try_convert_typeof_comparison(
         TypeofMatch::False => Expr::BoolLit(is_neq),
         TypeofMatch::IsNone => {
             // Cat A: typeof operand
-            let operand_ir =
-                super::convert_expr(typeof_operand, tctx, reg, type_env, synthetic).ok()?;
+            let operand_ir = super::convert_expr(typeof_operand, tctx, type_env, synthetic).ok()?;
             let method = if is_neq { "is_some" } else { "is_none" };
             Expr::MethodCall {
                 object: Box::new(operand_ir),
@@ -318,11 +313,8 @@ fn resolve_typeof_match(ty: &RustType, typeof_str: &str) -> TypeofMatch {
 /// - struct with known fields → static `true`/`false`
 /// - HashMap → `obj.contains_key("key")`
 /// - unknown type → `todo!()` (no silent `true` fallback)
-pub(super) fn convert_in_operator(
-    bin: &ast::BinExpr,
-    tctx: &TransformContext<'_>,
-    reg: &TypeRegistry,
-) -> Expr {
+pub(super) fn convert_in_operator(bin: &ast::BinExpr, tctx: &TransformContext<'_>) -> Expr {
+    let reg = tctx.type_registry;
     // Extract the key string from LHS (must be a string literal)
     let key = match bin.left.as_ref() {
         ast::Expr::Lit(ast::Lit::Str(s)) => s.value.to_string_lossy().into_owned(),
@@ -407,9 +399,9 @@ pub(super) fn convert_in_operator(
 pub(super) fn convert_instanceof(
     bin: &ast::BinExpr,
     type_env: &TypeEnv,
-    _tctx: &TransformContext<'_>,
-    reg: &TypeRegistry,
+    tctx: &TransformContext<'_>,
 ) -> Expr {
+    let reg = tctx.type_registry;
     // Get the class name from the RHS
     let class_name = match bin.right.as_ref() {
         ast::Expr::Ident(ident) => ident.sym.to_string(),
@@ -575,7 +567,6 @@ impl NarrowingGuard {
         &self,
         type_env: &super::super::TypeEnv,
         tctx: &TransformContext<'_>,
-        reg: &TypeRegistry,
     ) -> Option<(String, bool)> {
         let var_type = type_env.get(self.var_name())?;
         match self {
@@ -597,7 +588,7 @@ impl NarrowingGuard {
                 type_name, is_eq, ..
             } => {
                 let (enum_name, variant) =
-                    resolve_typeof_to_enum_variant(var_type, type_name, tctx, reg)?;
+                    resolve_typeof_to_enum_variant(var_type, type_name, tctx)?;
                 Some((
                     format!("{enum_name}::{variant}({})", self.var_name()),
                     !is_eq,
@@ -605,7 +596,7 @@ impl NarrowingGuard {
             }
             NarrowingGuard::InstanceOf { class_name, .. } => {
                 let (enum_name, variant) =
-                    resolve_instanceof_to_enum_variant(var_type, class_name, tctx, reg)?;
+                    resolve_instanceof_to_enum_variant(var_type, class_name, tctx)?;
                 Some((
                     format!("{enum_name}::{variant}({})", self.var_name()),
                     false,
@@ -780,9 +771,9 @@ fn is_null_or_undefined(expr: &ast::Expr) -> bool {
 pub(crate) fn resolve_typeof_to_enum_variant(
     var_type: &RustType,
     typeof_str: &str,
-    _tctx: &TransformContext<'_>,
-    reg: &TypeRegistry,
+    tctx: &TransformContext<'_>,
 ) -> Option<(String, String)> {
+    let reg = tctx.type_registry;
     let enum_name = match var_type {
         RustType::Named { name, type_args } if type_args.is_empty() => name,
         _ => return None,
@@ -811,9 +802,9 @@ pub(crate) fn resolve_typeof_to_enum_variant(
 pub(crate) fn resolve_instanceof_to_enum_variant(
     var_type: &RustType,
     class_name: &str,
-    _tctx: &TransformContext<'_>,
-    reg: &TypeRegistry,
+    tctx: &TransformContext<'_>,
 ) -> Option<(String, String)> {
+    let reg = tctx.type_registry;
     let enum_name = match var_type {
         RustType::Named { name, type_args } if type_args.is_empty() => name,
         _ => return None,

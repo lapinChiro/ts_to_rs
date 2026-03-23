@@ -119,7 +119,6 @@ fn test_convert_expr_identifier() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -135,7 +134,6 @@ fn test_convert_expr_number_literal() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -153,7 +151,6 @@ fn test_convert_expr_bigint_literal_generates_int_lit() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -169,7 +166,6 @@ fn test_convert_expr_bigint_zero_generates_int_lit() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -185,7 +181,6 @@ fn test_convert_expr_string_literal() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -201,7 +196,6 @@ fn test_convert_expr_bool_true() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -217,7 +211,6 @@ fn test_convert_expr_bool_false() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -233,7 +226,6 @@ fn test_convert_expr_binary_add() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -256,7 +248,6 @@ fn test_convert_expr_binary_greater_than() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -279,7 +270,6 @@ fn test_convert_expr_binary_strict_equals() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -302,7 +292,6 @@ fn test_convert_expr_template_literal() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -324,7 +313,6 @@ fn test_convert_expr_member_this_field() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -346,7 +334,6 @@ fn test_convert_expr_member_non_this() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -371,7 +358,6 @@ fn test_convert_expr_arrow_expr_body() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -401,7 +387,6 @@ fn test_convert_expr_arrow_block_body() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -429,7 +414,6 @@ fn test_convert_expr_arrow_no_params() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -451,7 +435,6 @@ fn test_convert_expr_arrow_no_type_annotation_param_ty_is_none() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -475,7 +458,6 @@ fn test_convert_expr_arrow_mixed_type_annotations() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -500,7 +482,6 @@ fn test_convert_expr_call_simple() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -522,7 +503,6 @@ fn test_convert_expr_call_no_args() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -544,7 +524,6 @@ fn test_convert_expr_call_nested() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -569,7 +548,6 @@ fn test_convert_expr_method_call() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -592,7 +570,6 @@ fn test_convert_expr_method_call_this() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -615,7 +592,6 @@ fn test_convert_expr_method_chain() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -642,7 +618,6 @@ fn test_convert_expr_new() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -664,7 +639,6 @@ fn test_convert_expr_new_no_args() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -700,7 +674,6 @@ fn test_new_expr_string_arg_gets_to_string() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -726,7 +699,6 @@ fn test_convert_expr_template_literal_no_exprs() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -748,7 +720,6 @@ fn test_convert_expr_array_numbers() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -773,7 +744,6 @@ fn test_convert_expr_array_strings() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -797,7 +767,6 @@ fn test_convert_expr_array_empty() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -813,7 +782,6 @@ fn test_convert_expr_array_single_element() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -837,7 +805,6 @@ fn test_convert_expr_object_literal_with_type_hint_basic() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -864,7 +831,6 @@ fn test_convert_expr_object_literal_mixed_field_types() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -891,7 +857,6 @@ fn test_convert_expr_object_literal_single_field() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -914,7 +879,6 @@ fn test_convert_expr_object_literal_empty() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -937,7 +901,6 @@ fn test_convert_expr_object_literal_without_type_hint_errors() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     );
@@ -966,7 +929,6 @@ fn test_convert_expr_object_spread_last_position_expands_remaining_fields() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -1013,7 +975,6 @@ fn test_convert_expr_object_spread_middle_position_expands_remaining_fields() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -1047,7 +1008,6 @@ fn test_convert_object_spread_unregistered_type_generates_struct_update() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -1084,7 +1044,6 @@ fn test_convert_object_spread_multiple_registered_generates_merged_fields() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -1124,7 +1083,6 @@ fn test_convert_expr_object_spread_with_override() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -1157,7 +1115,6 @@ fn test_convert_expr_array_nested() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -1187,7 +1144,6 @@ fn test_convert_expr_string_lit_with_string_expected_adds_to_string() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -1210,7 +1166,6 @@ fn test_convert_expr_string_lit_without_expected_unchanged() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -1226,7 +1181,6 @@ fn test_convert_expr_string_lit_with_f64_expected_unchanged() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -1242,7 +1196,6 @@ fn test_convert_expr_array_string_with_vec_string_expected() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -1291,7 +1244,6 @@ fn test_convert_expr_member_enum_access_from_registry() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -1308,7 +1260,6 @@ fn test_convert_expr_member_non_enum_unchanged() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -1350,7 +1301,6 @@ fn test_convert_expr_call_resolves_object_arg_from_registry() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -1416,7 +1366,6 @@ fn test_convert_expr_object_literal_nested_resolves_field_type_from_registry() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -1472,7 +1421,6 @@ fn test_object_lit_omitted_optional_field_gets_none() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -1512,7 +1460,6 @@ fn test_binary_number_plus_string_generates_format() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -1553,7 +1500,6 @@ fn test_fn_arg_box_dyn_fn_gets_box_new() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -1580,7 +1526,6 @@ fn test_convert_expr_ternary_basic_identifiers() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -1603,7 +1548,6 @@ fn test_convert_expr_ternary_with_comparison_condition() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -1630,7 +1574,6 @@ fn test_convert_expr_ternary_with_string_literals() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -1654,7 +1597,6 @@ fn test_convert_expr_ternary_nested() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -1690,7 +1632,6 @@ fn test_convert_expr_ternary_heterogeneous_branches_produces_if() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -1714,7 +1655,6 @@ fn test_convert_expr_math_max_three_args_chains() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -1743,7 +1683,6 @@ fn test_convert_expr_console_log_single_arg() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -1766,7 +1705,6 @@ fn test_convert_expr_console_error() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -1789,7 +1727,6 @@ fn test_convert_expr_console_warn() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -1812,7 +1749,6 @@ fn test_convert_expr_console_log_no_args() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -1835,7 +1771,6 @@ fn test_convert_expr_console_log_multiple_args() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -1861,7 +1796,6 @@ fn test_convert_expr_object_shorthand_single() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -1885,7 +1819,6 @@ fn test_convert_expr_object_shorthand_mixed_with_key_value() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -1923,7 +1856,6 @@ fn test_convert_expr_object_shorthand_with_registry_field_type() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -1946,7 +1878,6 @@ fn test_convert_expr_array_nested_vec_string_expected() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -1975,7 +1906,6 @@ fn test_convert_expr_unary_not_bool_literal() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -1997,7 +1927,6 @@ fn test_convert_expr_unary_not_ident() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -2019,7 +1948,6 @@ fn test_convert_expr_unary_minus_ident() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -2041,7 +1969,6 @@ fn test_convert_expr_unary_minus_number_literal() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -2063,7 +1990,6 @@ fn test_convert_expr_unary_not_complex_expr() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -2091,7 +2017,6 @@ fn test_convert_expr_await_simple() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -2113,7 +2038,6 @@ fn test_convert_expr_await_ident() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -2134,7 +2058,6 @@ fn test_convert_expr_string_length_to_len_as_f64() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -2160,7 +2083,6 @@ fn test_convert_expr_string_includes_to_contains() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -2184,7 +2106,6 @@ fn test_convert_includes_to_contains_with_ref() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -2207,7 +2128,6 @@ fn test_convert_expr_string_starts_with() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -2230,7 +2150,6 @@ fn test_convert_expr_string_ends_with() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -2253,7 +2172,6 @@ fn test_convert_expr_string_trim_adds_to_string() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -2280,7 +2198,6 @@ fn test_convert_expr_string_to_lower_case() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -2303,7 +2220,6 @@ fn test_convert_expr_string_to_upper_case() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -2327,7 +2243,6 @@ fn test_convert_expr_string_split_generates_vec_string() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -2370,7 +2285,6 @@ fn test_convert_expr_substring_two_args_generates_slice() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -2400,7 +2314,6 @@ fn test_convert_expr_substring_one_arg_generates_open_range() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -2430,7 +2343,6 @@ fn test_convert_expr_slice_one_arg_generates_open_range() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -2460,7 +2372,6 @@ fn test_convert_expr_string_replace_generates_replacen() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -2488,7 +2399,6 @@ fn test_convert_expr_string_replace_all_generates_replace() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -2516,7 +2426,6 @@ fn test_convert_expr_array_map_to_iter_map_collect() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -2563,7 +2472,6 @@ fn test_convert_expr_array_filter_to_iter_filter_collect() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -2610,7 +2518,6 @@ fn test_convert_expr_array_find_to_iter_find() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -2653,7 +2560,6 @@ fn test_convert_expr_array_some_to_iter_any() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -2696,7 +2602,6 @@ fn test_convert_expr_array_every_to_iter_all() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -2741,7 +2646,6 @@ fn test_convert_expr_array_foreach_to_for_loop() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -2787,7 +2691,6 @@ fn test_convert_expr_math_floor() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -2810,7 +2713,6 @@ fn test_convert_expr_math_ceil() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -2833,7 +2735,6 @@ fn test_convert_expr_math_round() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -2856,7 +2757,6 @@ fn test_convert_expr_math_abs() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -2879,7 +2779,6 @@ fn test_convert_expr_math_sqrt() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -2902,7 +2801,6 @@ fn test_convert_expr_math_max() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -2925,7 +2823,6 @@ fn test_convert_expr_math_min() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -2948,7 +2845,6 @@ fn test_convert_expr_math_pow() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -2971,7 +2867,6 @@ fn test_convert_expr_math_nested() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -3000,7 +2895,6 @@ fn test_convert_expr_parse_int() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -3028,7 +2922,6 @@ fn test_convert_expr_parse_float() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -3056,7 +2949,6 @@ fn test_convert_expr_is_nan_global() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -3080,7 +2972,6 @@ fn test_convert_expr_number_is_nan() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -3104,7 +2995,6 @@ fn test_convert_expr_number_is_finite() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -3131,7 +3021,6 @@ fn test_convert_expr_nullish_coalescing_basic() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -3161,7 +3050,6 @@ fn test_convert_expr_type_assertion_primitive_generates_cast() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -3184,7 +3072,6 @@ fn test_convert_expr_type_assertion_nested() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -3206,7 +3093,6 @@ fn test_convert_opt_chain_length_returns_len_as_f64() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -3249,7 +3135,6 @@ fn test_convert_expr_number_is_integer_to_fract() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -3277,7 +3162,6 @@ fn test_convert_expr_math_sign_to_signum() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -3301,7 +3185,6 @@ fn test_convert_expr_math_trunc() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -3325,7 +3208,6 @@ fn test_convert_expr_math_log_to_ln() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -3349,7 +3231,6 @@ fn test_convert_expr_math_pi_to_consts() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -3366,7 +3247,6 @@ fn test_convert_expr_math_e_to_consts() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -3384,7 +3264,6 @@ fn test_convert_expr_nan_to_f64_nan() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -3400,7 +3279,6 @@ fn test_convert_expr_infinity_to_f64_infinity() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -3417,7 +3295,6 @@ fn test_convert_expr_slice_to_range_to_vec() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -3447,7 +3324,6 @@ fn test_convert_expr_splice_to_drain_collect() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -3478,7 +3354,6 @@ fn test_convert_expr_reverse_unchanged() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -3502,7 +3377,6 @@ fn test_convert_expr_sort_no_args_generates_sort_by_partial_cmp() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -3547,7 +3421,6 @@ fn test_convert_expr_sort_with_comparator_to_sort_by() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -3579,7 +3452,6 @@ fn test_convert_expr_index_of_to_iter_position() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -3636,7 +3508,6 @@ fn test_convert_expr_join_string_literal_passes_through() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -3660,7 +3531,6 @@ fn test_convert_expr_reduce_with_init_to_iter_fold() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -3709,7 +3579,6 @@ fn test_map_method_reduce_typed_closure_strips_type_annotations() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -3742,7 +3611,6 @@ fn test_map_method_indexof_position_returns_f64_with_unwrap() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -3769,7 +3637,6 @@ fn test_map_method_join_passes_borrowed_arg() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -3796,7 +3663,6 @@ fn test_map_method_sort_no_args_uses_partial_cmp() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -3820,7 +3686,6 @@ fn test_map_method_sort_with_comparator_strips_type_annotations() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -3849,7 +3714,6 @@ fn test_map_method_splice_generates_integer_range() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -3897,7 +3761,6 @@ fn test_convert_opt_chain_normal_field_unchanged() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -3947,7 +3810,6 @@ fn test_convert_opt_chain_non_option_type_returns_plain_access() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -3975,14 +3837,7 @@ fn test_convert_opt_chain_option_type_returns_map_pattern() {
         })),
     );
 
-    let result = convert_expr(
-        &expr,
-        &tctx,
-        f.reg(),
-        &env,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap();
+    let result = convert_expr(&expr, &tctx, &env, &mut SyntheticTypeRegistry::new()).unwrap();
     assert!(matches!(
         &result,
         Expr::MethodCall { method, .. } if method == "map"
@@ -3996,14 +3851,7 @@ fn test_convert_opt_chain_unknown_type_returns_map_pattern() {
     let expr = parse_expr("x?.y;");
     let env = TypeEnv::new();
 
-    let result = convert_expr(
-        &expr,
-        &tctx,
-        f.reg(),
-        &env,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap();
+    let result = convert_expr(&expr, &tctx, &env, &mut SyntheticTypeRegistry::new()).unwrap();
     assert!(matches!(
         &result,
         Expr::MethodCall { method, .. } if method == "map"
@@ -4023,14 +3871,7 @@ fn test_opt_chain_method_call_maps_to_rust_name() {
         "s".to_string(),
         RustType::Option(Box::new(RustType::String)),
     );
-    let result = convert_expr(
-        &expr,
-        &tctx,
-        f.reg(),
-        &env,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap();
+    let result = convert_expr(&expr, &tctx, &env, &mut SyntheticTypeRegistry::new()).unwrap();
     // Dig into the map closure body and verify method name is to_uppercase
     if let Expr::MethodCall {
         method: outer_method,
@@ -4067,7 +3908,6 @@ fn test_convert_nullish_coalescing_non_option_returns_left() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -4086,14 +3926,7 @@ fn test_convert_nullish_coalescing_option_returns_unwrap_or_else() {
         RustType::Option(Box::new(RustType::String)),
     );
 
-    let result = convert_expr(
-        &expr,
-        &tctx,
-        f.reg(),
-        &env,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap();
+    let result = convert_expr(&expr, &tctx, &env, &mut SyntheticTypeRegistry::new()).unwrap();
     assert!(matches!(
         &result,
         Expr::MethodCall { method, .. } if method == "unwrap_or_else"
@@ -4107,14 +3940,7 @@ fn test_convert_nullish_coalescing_unknown_type_returns_unwrap_or_else() {
     let expr = parse_expr("x ?? y;");
     let env = TypeEnv::new();
 
-    let result = convert_expr(
-        &expr,
-        &tctx,
-        f.reg(),
-        &env,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap();
+    let result = convert_expr(&expr, &tctx, &env, &mut SyntheticTypeRegistry::new()).unwrap();
     assert!(matches!(
         &result,
         Expr::MethodCall { method, .. } if method == "unwrap_or_else"
@@ -4157,7 +3983,6 @@ fn test_convert_opt_chain_nested_option_uses_and_then() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -4183,7 +4008,6 @@ fn test_convert_expr_array_spread_in_expression_generates_block() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -4211,7 +4035,6 @@ fn test_convert_expr_array_spread_prefix_and_suffix_generates_block() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -4257,7 +4080,6 @@ fn test_string_concat_rhs_ident_gets_ref() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -4285,7 +4107,6 @@ fn test_string_concat_chain_rhs_gets_ref() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -4304,7 +4125,6 @@ fn test_numeric_add_no_ref() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -4334,7 +4154,6 @@ fn test_call_with_missing_default_arg_appends_none() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -4366,7 +4185,6 @@ fn test_call_with_option_arg_wraps_some() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -4397,14 +4215,7 @@ fn test_convert_bin_expr_expected_string_enables_concat() {
     let swc_expr = extract_var_init(f.module());
     let env = TypeEnv::new(); // a, b not registered → types unknown
 
-    let result = convert_expr(
-        &swc_expr,
-        &tctx,
-        f.reg(),
-        &env,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap();
+    let result = convert_expr(&swc_expr, &tctx, &env, &mut SyntheticTypeRegistry::new()).unwrap();
 
     // In string concat context, RHS should be wrapped in Ref
     match &result {
@@ -4428,14 +4239,7 @@ fn test_convert_bin_expr_no_expected_numeric_add() {
     let tctx = f.tctx();
     let env = TypeEnv::new();
 
-    let result = convert_expr(
-        &swc_expr,
-        &tctx,
-        f.reg(),
-        &env,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap();
+    let result = convert_expr(&swc_expr, &tctx, &env, &mut SyntheticTypeRegistry::new()).unwrap();
 
     match &result {
         Expr::BinaryOp { op, right, .. } => {
@@ -4462,14 +4266,7 @@ fn test_convert_call_expr_typeenv_fn_provides_param_expected() {
     let env = TypeEnv::new();
 
     let swc_expr = extract_expr_stmt(f.module(), 1);
-    let result = convert_expr(
-        &swc_expr,
-        &tctx,
-        f.reg(),
-        &env,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap();
+    let result = convert_expr(&swc_expr, &tctx, &env, &mut SyntheticTypeRegistry::new()).unwrap();
 
     match &result {
         Expr::FnCall { name, args } => {
@@ -4497,14 +4294,7 @@ fn test_convert_call_expr_no_typeenv_fn_no_expected() {
     let tctx = f.tctx();
     let env = TypeEnv::new();
 
-    let result = convert_expr(
-        &swc_expr,
-        &tctx,
-        f.reg(),
-        &env,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap();
+    let result = convert_expr(&swc_expr, &tctx, &env, &mut SyntheticTypeRegistry::new()).unwrap();
 
     match &result {
         Expr::FnCall { name, args } => {
@@ -4542,7 +4332,6 @@ fn test_convert_call_expr_rest_param_packs_args_into_vec() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -4587,7 +4376,6 @@ fn test_convert_call_expr_rest_param_mixed_regular_and_rest() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -4628,7 +4416,6 @@ fn test_convert_call_expr_rest_param_no_rest_args() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -4669,7 +4456,6 @@ fn test_convert_call_expr_rest_param_spread_single_array() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -4710,7 +4496,6 @@ fn test_convert_call_expr_rest_param_mixed_literal_and_spread() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -4742,14 +4527,7 @@ fn test_convert_array_lit_empty_with_expected_vec_string() {
     let swc_expr = extract_var_init(f.module());
     let env = TypeEnv::new();
 
-    let result = convert_expr(
-        &swc_expr,
-        &tctx,
-        f.reg(),
-        &env,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap();
+    let result = convert_expr(&swc_expr, &tctx, &env, &mut SyntheticTypeRegistry::new()).unwrap();
 
     assert_eq!(result, Expr::Vec { elements: vec![] });
 }
@@ -4762,14 +4540,7 @@ fn test_convert_array_lit_elements_get_expected_element_type() {
     let swc_expr = extract_var_init(f.module());
     let env = TypeEnv::new();
 
-    let result = convert_expr(
-        &swc_expr,
-        &tctx,
-        f.reg(),
-        &env,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap();
+    let result = convert_expr(&swc_expr, &tctx, &env, &mut SyntheticTypeRegistry::new()).unwrap();
 
     match &result {
         Expr::Vec { elements } => {
@@ -4797,7 +4568,6 @@ fn test_typeof_equals_string_known_type_resolves_true() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -4813,7 +4583,6 @@ fn test_typeof_equals_string_mismatched_type_resolves_false() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -4829,7 +4598,6 @@ fn test_typeof_equals_number_known_type_resolves_true() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -4845,7 +4613,6 @@ fn test_typeof_not_equals_string_known_type_resolves_false() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -4859,14 +4626,7 @@ fn test_typeof_equals_string_unknown_type_generates_todo() {
     let tctx = f.tctx();
     let swc_expr = parse_expr("typeof x === \"string\";");
     let env = TypeEnv::new(); // x not registered
-    let result = convert_expr(
-        &swc_expr,
-        &tctx,
-        f.reg(),
-        &env,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap();
+    let result = convert_expr(&swc_expr, &tctx, &env, &mut SyntheticTypeRegistry::new()).unwrap();
     // Unknown type → todo!() (compile error, not silent true)
     assert!(matches!(&result, Expr::FnCall { name, .. } if name == "todo!"));
 }
@@ -4880,14 +4640,7 @@ fn test_typeof_equals_string_any_type_generates_todo() {
     let swc_expr = parse_expr("typeof x === \"string\";");
     let mut env = TypeEnv::new();
     env.insert("x".to_string(), RustType::Any);
-    let result = convert_expr(
-        &swc_expr,
-        &tctx,
-        f.reg(),
-        &env,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap();
+    let result = convert_expr(&swc_expr, &tctx, &env, &mut SyntheticTypeRegistry::new()).unwrap();
     assert!(matches!(&result, Expr::FnCall { name, .. } if name == "todo!"));
 }
 
@@ -4898,14 +4651,7 @@ fn test_typeof_equals_number_any_type_generates_todo() {
     let swc_expr = parse_expr("typeof x === \"number\";");
     let mut env = TypeEnv::new();
     env.insert("x".to_string(), RustType::Any);
-    let result = convert_expr(
-        &swc_expr,
-        &tctx,
-        f.reg(),
-        &env,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap();
+    let result = convert_expr(&swc_expr, &tctx, &env, &mut SyntheticTypeRegistry::new()).unwrap();
     assert!(matches!(&result, Expr::FnCall { name, .. } if name == "todo!"));
 }
 
@@ -4917,14 +4663,7 @@ fn test_typeof_not_equals_string_any_type_generates_todo() {
     let swc_expr = parse_expr("typeof x !== \"string\";");
     let mut env = TypeEnv::new();
     env.insert("x".to_string(), RustType::Any);
-    let result = convert_expr(
-        &swc_expr,
-        &tctx,
-        f.reg(),
-        &env,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap();
+    let result = convert_expr(&swc_expr, &tctx, &env, &mut SyntheticTypeRegistry::new()).unwrap();
     assert!(matches!(&result, Expr::FnCall { name, .. } if name == "todo!"));
 }
 
@@ -4937,14 +4676,7 @@ fn test_instanceof_any_type_generates_todo() {
     let swc_expr = parse_expr("x instanceof Foo;");
     let mut env = TypeEnv::new();
     env.insert("x".to_string(), RustType::Any);
-    let result = convert_expr(
-        &swc_expr,
-        &tctx,
-        f.reg(),
-        &env,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap();
+    let result = convert_expr(&swc_expr, &tctx, &env, &mut SyntheticTypeRegistry::new()).unwrap();
     assert!(matches!(&result, Expr::FnCall { name, .. } if name == "todo!"));
 }
 
@@ -4957,7 +4689,6 @@ fn test_typeof_equals_undefined_option_resolves_is_none() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -4977,7 +4708,6 @@ fn test_typeof_standalone_known_type_resolves_string_lit() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -4998,14 +4728,7 @@ fn test_instanceof_known_type_match_resolves_true() {
             type_args: vec![],
         },
     );
-    let result = convert_expr(
-        &swc_expr,
-        &tctx,
-        f.reg(),
-        &env,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap();
+    let result = convert_expr(&swc_expr, &tctx, &env, &mut SyntheticTypeRegistry::new()).unwrap();
     assert_eq!(result, Expr::BoolLit(true));
 }
 
@@ -5022,14 +4745,7 @@ fn test_instanceof_known_type_mismatch_resolves_false() {
             type_args: vec![],
         },
     );
-    let result = convert_expr(
-        &swc_expr,
-        &tctx,
-        f.reg(),
-        &env,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap();
+    let result = convert_expr(&swc_expr, &tctx, &env, &mut SyntheticTypeRegistry::new()).unwrap();
     assert_eq!(result, Expr::BoolLit(false));
 }
 
@@ -5040,14 +4756,7 @@ fn test_instanceof_unknown_type_generates_todo() {
     // Unknown type → todo!() (compile error, not silent true).
     let swc_expr = parse_expr("x instanceof Foo;");
     let env = TypeEnv::new();
-    let result = convert_expr(
-        &swc_expr,
-        &tctx,
-        f.reg(),
-        &env,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap();
+    let result = convert_expr(&swc_expr, &tctx, &env, &mut SyntheticTypeRegistry::new()).unwrap();
     assert!(matches!(&result, Expr::FnCall { name, .. } if name == "todo!"));
 }
 
@@ -5068,14 +4777,7 @@ fn test_self_field_string_concat_gets_clone() {
             type_args: vec![],
         },
     );
-    let result = convert_expr(
-        &swc_expr,
-        &tctx,
-        f.reg(),
-        &env,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap();
+    let result = convert_expr(&swc_expr, &tctx, &env, &mut SyntheticTypeRegistry::new()).unwrap();
     match &result {
         Expr::BinaryOp { left, op, .. } => {
             assert_eq!(*op, BinOp::Add);
@@ -5100,7 +4802,6 @@ fn test_undefined_literal_converts_to_none() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -5115,14 +4816,7 @@ fn test_equals_undefined_converts_to_is_none() {
     let swc_expr = parse_expr("x === undefined;");
     let mut env = TypeEnv::new();
     env.insert("x".to_string(), RustType::Option(Box::new(RustType::F64)));
-    let result = convert_expr(
-        &swc_expr,
-        &tctx,
-        f.reg(),
-        &env,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap();
+    let result = convert_expr(&swc_expr, &tctx, &env, &mut SyntheticTypeRegistry::new()).unwrap();
     assert!(
         matches!(&result, Expr::MethodCall { method, .. } if method == "is_none"),
         "expected is_none, got: {:?}",
@@ -5137,14 +4831,7 @@ fn test_not_equals_undefined_converts_to_is_some() {
     let swc_expr = parse_expr("x !== undefined;");
     let mut env = TypeEnv::new();
     env.insert("x".to_string(), RustType::Option(Box::new(RustType::F64)));
-    let result = convert_expr(
-        &swc_expr,
-        &tctx,
-        f.reg(),
-        &env,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap();
+    let result = convert_expr(&swc_expr, &tctx, &env, &mut SyntheticTypeRegistry::new()).unwrap();
     assert!(
         matches!(&result, Expr::MethodCall { method, .. } if method == "is_some"),
         "expected is_some, got: {:?}",
@@ -5161,7 +4848,6 @@ fn test_option_expected_wraps_literal_in_some() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -5183,7 +4869,6 @@ fn test_option_expected_undefined_stays_none() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -5217,7 +4902,6 @@ fn test_convert_lit_string_to_enum_variant_when_expected_is_string_literal_union
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -5247,7 +4931,6 @@ fn test_convert_lit_string_no_match_falls_back_to_string_lit() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -5278,7 +4961,6 @@ fn test_convert_bin_expr_enum_var_eq_string_literal_converts_rhs() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -5315,7 +4997,6 @@ fn test_convert_bin_expr_string_literal_ne_enum_var_converts_lhs() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -5368,7 +5049,6 @@ fn test_convert_call_args_string_literal_to_enum_variant() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -5419,7 +5099,6 @@ fn test_convert_object_lit_discriminated_union_to_enum_variant() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -5458,7 +5137,6 @@ fn test_convert_object_lit_discriminated_union_unit_variant() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -5494,7 +5172,6 @@ fn test_convert_member_expr_discriminant_field_to_method_call() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -5519,7 +5196,6 @@ fn test_convert_member_expr_array_index_literal_generates_index() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -5541,7 +5217,6 @@ fn test_convert_member_expr_array_index_variable_generates_index() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -5565,7 +5240,6 @@ fn test_convert_member_expr_tuple_literal_index_generates_field_access() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -5587,7 +5261,6 @@ fn test_convert_member_expr_tuple_second_index_generates_field_access() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -5612,7 +5285,6 @@ fn test_convert_member_expr_non_tuple_index_unchanged() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &type_env,
         &mut SyntheticTypeRegistry::new(),
     )
@@ -5642,7 +5314,6 @@ fn test_convert_nullish_coalescing_rhs_string_gets_to_string_when_lhs_is_option_
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &type_env,
         &mut SyntheticTypeRegistry::new(),
     )
@@ -5700,7 +5371,6 @@ fn test_convert_method_call_string_arg_gets_to_string_with_registry() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &type_env,
         &mut SyntheticTypeRegistry::new(),
     )
@@ -5761,7 +5431,6 @@ fn test_convert_du_standalone_field_access_generates_match_expr() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -5814,7 +5483,6 @@ fn test_in_operator_struct_field_exists_generates_true() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -5843,7 +5511,6 @@ fn test_in_operator_struct_field_missing_generates_false() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -5858,14 +5525,7 @@ fn test_in_operator_unknown_type_generates_todo() {
     // "x" in unknown → todo!() (not silent true)
     let expr = parse_expr(r#""x" in unknown"#);
     let env = TypeEnv::new();
-    let result = convert_expr(
-        &expr,
-        &tctx,
-        f.reg(),
-        &env,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap();
+    let result = convert_expr(&expr, &tctx, &env, &mut SyntheticTypeRegistry::new()).unwrap();
     match &result {
         Expr::FnCall { name, .. } => assert_eq!(name, "todo!"),
         other => panic!("expected todo!() for unknown in operator, got: {other:?}"),
@@ -5898,7 +5558,6 @@ fn test_convert_expr_arrow_object_destructuring_generates_expansion() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -5943,7 +5602,6 @@ fn test_convert_expr_arrow_array_destructuring_param_generates_tuple() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     );
@@ -5969,7 +5627,6 @@ fn test_convert_expr_arrow_array_destructuring_no_type_generates_param() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     );
@@ -5991,7 +5648,6 @@ fn test_convert_expr_arrow_object_destructuring_no_type_generates_value_param() 
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     );
@@ -6011,7 +5667,6 @@ fn test_convert_expr_arrow_default_param_generates_option() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -6053,14 +5708,7 @@ fn test_convert_expr_postfix_increment_returns_old_value() {
     use crate::ir::Stmt as IrStmt;
     let expr = parse_expr("i++");
     let env = TypeEnv::new();
-    let result = convert_expr(
-        &expr,
-        &tctx,
-        f.reg(),
-        &env,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap();
+    let result = convert_expr(&expr, &tctx, &env, &mut SyntheticTypeRegistry::new()).unwrap();
     match &result {
         Expr::Block(stmts) => {
             assert_eq!(stmts.len(), 3);
@@ -6079,14 +5727,7 @@ fn test_convert_expr_prefix_increment_returns_new_value() {
     use crate::ir::Stmt as IrStmt;
     let expr = parse_expr("++i");
     let env = TypeEnv::new();
-    let result = convert_expr(
-        &expr,
-        &tctx,
-        f.reg(),
-        &env,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap();
+    let result = convert_expr(&expr, &tctx, &env, &mut SyntheticTypeRegistry::new()).unwrap();
     match &result {
         Expr::Block(stmts) => {
             assert_eq!(stmts.len(), 2);
@@ -6105,14 +5746,7 @@ fn test_convert_expr_postfix_decrement_returns_old_value() {
     use crate::ir::Stmt as IrStmt;
     let expr = parse_expr("i--");
     let env = TypeEnv::new();
-    let result = convert_expr(
-        &expr,
-        &tctx,
-        f.reg(),
-        &env,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap();
+    let result = convert_expr(&expr, &tctx, &env, &mut SyntheticTypeRegistry::new()).unwrap();
     match &result {
         Expr::Block(stmts) => {
             assert_eq!(stmts.len(), 3);
@@ -6130,14 +5764,7 @@ fn test_convert_expr_prefix_decrement_returns_new_value() {
     use crate::ir::Stmt as IrStmt;
     let expr = parse_expr("--i");
     let env = TypeEnv::new();
-    let result = convert_expr(
-        &expr,
-        &tctx,
-        f.reg(),
-        &env,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap();
+    let result = convert_expr(&expr, &tctx, &env, &mut SyntheticTypeRegistry::new()).unwrap();
     match &result {
         Expr::Block(stmts) => {
             assert_eq!(stmts.len(), 2);
@@ -6158,7 +5785,6 @@ fn test_convert_expr_fn_expr_anonymous_generates_closure() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -6188,7 +5814,6 @@ fn test_convert_expr_fn_expr_named_generates_closure() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -6210,7 +5835,6 @@ fn test_convert_expr_fn_expr_no_params_generates_closure() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -6234,7 +5858,6 @@ fn test_convert_expr_regex_no_flags_generates_regex_new() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -6258,7 +5881,6 @@ fn test_convert_expr_regex_global_flag_preserved() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -6282,7 +5904,6 @@ fn test_convert_expr_regex_case_insensitive_flag_inlined() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -6306,7 +5927,6 @@ fn test_convert_expr_regex_multiple_flags_inlined() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -6332,7 +5952,6 @@ fn test_convert_expr_regex_no_flags_generates_regex_ir() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -6356,7 +5975,6 @@ fn test_convert_expr_regex_global_flag_preserved_in_ir() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -6380,7 +5998,6 @@ fn test_convert_expr_regex_sticky_flag_preserved_in_ir() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -6404,7 +6021,6 @@ fn test_convert_expr_regex_multiple_flags_preserved_in_ir() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -6428,7 +6044,6 @@ fn test_convert_expr_replace_with_global_regex_generates_replace_all() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -6463,7 +6078,6 @@ fn test_convert_expr_replace_with_non_global_regex_generates_replace() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -6500,7 +6114,6 @@ fn test_convert_expr_regex_test_generates_is_match() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -6528,7 +6141,6 @@ fn test_convert_expr_string_match_regex_generates_find() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -6556,7 +6168,6 @@ fn test_convert_expr_string_match_global_regex_generates_find_iter() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -6584,7 +6195,6 @@ fn test_convert_expr_regex_exec_generates_captures() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -6614,7 +6224,6 @@ fn test_convert_expr_non_null_assertion_strips_assertion() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -6632,7 +6241,6 @@ fn test_convert_expr_null_literal_generates_none() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -6649,7 +6257,6 @@ fn test_convert_expr_null_with_option_expected_returns_none_not_some_none() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -6673,7 +6280,6 @@ fn test_convert_expr_ident_with_option_expected_passes_through() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -6696,7 +6302,6 @@ fn test_convert_expr_undefined_with_option_expected_returns_none() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -6715,7 +6320,6 @@ fn test_convert_expr_array_with_tuple_expected_generates_tuple() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -6738,7 +6342,6 @@ fn test_convert_expr_nested_array_with_vec_tuple_expected() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -6764,7 +6367,6 @@ fn test_convert_expr_private_field_access_generates_field_access() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -6788,7 +6390,6 @@ fn test_convert_expr_bitwise_xor() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -6810,7 +6411,6 @@ fn test_convert_expr_bitwise_and() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -6832,7 +6432,6 @@ fn test_convert_expr_bitwise_or() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -6854,7 +6453,6 @@ fn test_convert_expr_shift_left() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -6870,7 +6468,6 @@ fn test_convert_expr_shift_right() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -6888,7 +6485,6 @@ fn test_convert_expr_unsigned_right_shift_generates_ushr() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -6909,14 +6505,7 @@ fn test_convert_expr_compound_assign_ushr_generates_desugar() {
     let expr = parse_expr("x >>>= 2");
     let mut type_env = TypeEnv::new();
     type_env.insert("x".to_string(), RustType::F64);
-    let result = convert_expr(
-        &expr,
-        &tctx,
-        f.reg(),
-        &type_env,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap();
+    let result = convert_expr(&expr, &tctx, &type_env, &mut SyntheticTypeRegistry::new()).unwrap();
     // Should be Assign { target: x, value: BinaryOp { op: UShr, ... } }
     if let Expr::Assign { value, .. } = &result {
         assert!(
@@ -6945,7 +6534,6 @@ fn test_convert_expr_arrow_rest_param_generates_vec() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -6974,7 +6562,6 @@ fn test_convert_expr_compound_assign_mod() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -7001,7 +6588,6 @@ fn test_convert_expr_compound_assign_bitand() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -7030,7 +6616,6 @@ fn test_convert_expr_compound_assign_add() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -7057,7 +6642,6 @@ fn test_convert_expr_compound_assign_sub() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -7084,7 +6668,6 @@ fn test_convert_expr_compound_assign_mul() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -7111,7 +6694,6 @@ fn test_convert_expr_compound_assign_div() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -7138,7 +6720,6 @@ fn test_convert_expr_compound_assign_bitor() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -7165,7 +6746,6 @@ fn test_convert_expr_compound_assign_bitxor() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -7192,7 +6772,6 @@ fn test_convert_expr_compound_assign_shl() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -7219,7 +6798,6 @@ fn test_convert_expr_compound_assign_shr() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -7263,7 +6841,6 @@ fn test_convert_expr_fn_expr_object_destructuring_param() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -7303,7 +6880,6 @@ fn test_convert_expr_fn_expr_default_param() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -7345,7 +6921,6 @@ fn test_convert_expr_update_non_ident_target_errors() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     );
@@ -7368,7 +6943,6 @@ fn test_convert_expr_fn_expr_rest_param_generates_closure() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -7397,7 +6971,6 @@ fn test_convert_expr_arrow_rest_param_no_type() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -7426,7 +6999,6 @@ fn test_convert_call_expr_paren_ident_unwraps_to_fn_call() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -7449,7 +7021,6 @@ fn test_convert_call_expr_paren_member_unwraps_to_method_call() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -7471,7 +7042,6 @@ fn test_convert_call_expr_chained_call_does_not_error() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     );
@@ -7493,7 +7063,6 @@ fn test_convert_call_expr_arrow_iife_generates_closure_call() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     );
@@ -7513,7 +7082,6 @@ fn test_convert_call_expr_arrow_iife_with_args_generates_closure_call() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     );
@@ -7535,7 +7103,6 @@ fn test_convert_instanceof_unknown_type_generates_todo() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -7557,14 +7124,7 @@ fn test_convert_instanceof_known_matching_type_returns_true() {
             type_args: vec![],
         },
     );
-    let result = convert_expr(
-        &expr,
-        &tctx,
-        f.reg(),
-        &env,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap();
+    let result = convert_expr(&expr, &tctx, &env, &mut SyntheticTypeRegistry::new()).unwrap();
     assert_eq!(result, Expr::BoolLit(true));
 }
 
@@ -7582,14 +7142,7 @@ fn test_convert_instanceof_option_type_returns_is_some() {
             type_args: vec![],
         })),
     );
-    let result = convert_expr(
-        &expr,
-        &tctx,
-        f.reg(),
-        &env,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap();
+    let result = convert_expr(&expr, &tctx, &env, &mut SyntheticTypeRegistry::new()).unwrap();
     match &result {
         Expr::MethodCall { method, .. } => {
             assert_eq!(method, "is_some");
@@ -7609,7 +7162,6 @@ fn test_convert_typeof_static_number_returns_string_lit() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -7626,7 +7178,6 @@ fn test_convert_typeof_option_type_returns_runtime_if() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -7650,7 +7201,6 @@ fn test_convert_typeof_unknown_type_returns_object() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -7669,7 +7219,6 @@ fn test_process_env_access_converts_to_env_var() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -7698,7 +7247,6 @@ fn test_fs_read_file_sync_converts_to_read_to_string() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -7725,7 +7273,6 @@ fn test_fs_write_file_sync_converts_to_fs_write() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -7755,7 +7302,6 @@ fn test_fs_exists_sync_converts_to_path_exists() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -7782,7 +7328,6 @@ fn test_fs_read_file_sync_stdin_converts_to_stdin_read() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -7812,7 +7357,6 @@ fn test_fs_read_file_sync_fd0_converts_to_stdin_read() {
     let result = convert_expr(
         &expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -7851,7 +7395,6 @@ fn test_convert_object_lit_all_computed_keys_generates_hashmap() {
     let result = convert_expr(
         init,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -7899,7 +7442,6 @@ fn test_convert_assign_expr_propagates_type_from_type_env() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &type_env,
         &mut SyntheticTypeRegistry::new(),
     )
@@ -7933,7 +7475,6 @@ fn test_convert_hashmap_propagates_value_type() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -7992,7 +7533,6 @@ fn test_convert_opt_chain_method_call_propagates_param_types() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &type_env,
         &mut SyntheticTypeRegistry::new(),
     )
@@ -8039,7 +7579,6 @@ fn test_convert_expr_unary_plus_number_returns_identity() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &type_env,
         &mut SyntheticTypeRegistry::new(),
     )
@@ -8056,7 +7595,6 @@ fn test_convert_expr_unary_plus_string_returns_parse() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )
@@ -8080,7 +7618,6 @@ fn test_convert_expr_unary_plus_unknown_returns_identity() {
     let result = convert_expr(
         &swc_expr,
         &tctx,
-        f.reg(),
         &TypeEnv::new(),
         &mut SyntheticTypeRegistry::new(),
     )

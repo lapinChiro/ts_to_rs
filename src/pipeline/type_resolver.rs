@@ -863,10 +863,8 @@ impl<'a> TypeResolver<'a> {
 
                 let cons_is_null = is_null_or_undefined(&cond.cons);
                 let alt_is_null = is_null_or_undefined(&cond.alt);
-                let cons_is_option =
-                    matches!(&cons, ResolvedType::Known(RustType::Option(_)));
-                let alt_is_option =
-                    matches!(&alt, ResolvedType::Known(RustType::Option(_)));
+                let cons_is_option = matches!(&cons, ResolvedType::Known(RustType::Option(_)));
+                let alt_is_option = matches!(&alt, ResolvedType::Known(RustType::Option(_)));
 
                 let produces_option =
                     cons_is_null || alt_is_null || cons_is_option || alt_is_option;
@@ -988,9 +986,7 @@ impl<'a> TypeResolver<'a> {
                                     other => other,
                                 };
                                 let method_name = match &member.prop {
-                                    ast::MemberProp::Ident(ident) => {
-                                        Some(ident.sym.to_string())
-                                    }
+                                    ast::MemberProp::Ident(ident) => Some(ident.sym.to_string()),
                                     _ => None,
                                 };
                                 // Set expected types for args
@@ -998,9 +994,7 @@ impl<'a> TypeResolver<'a> {
                                     .as_deref()
                                     .and_then(|name| self.lookup_method_params(inner_ty, name))
                                 {
-                                    for (arg, param_ty) in
-                                        opt_call.args.iter().zip(params.iter())
-                                    {
+                                    for (arg, param_ty) in opt_call.args.iter().zip(params.iter()) {
                                         let arg_span = Span::from_swc(arg.expr.span());
                                         self.result
                                             .expected_types
@@ -1011,18 +1005,13 @@ impl<'a> TypeResolver<'a> {
                                 // Resolve return type
                                 method_name
                                     .as_deref()
-                                    .map(|name| {
-                                        self.resolve_method_return_type(inner_ty, name)
-                                    })
+                                    .map(|name| self.resolve_method_return_type(inner_ty, name))
                                     .unwrap_or(ResolvedType::Unknown)
                             } else {
                                 ResolvedType::Unknown
                             }
                         } else {
-                            self.set_call_arg_expected_types(
-                                &opt_call.callee,
-                                &opt_call.args,
-                            );
+                            self.set_call_arg_expected_types(&opt_call.callee, &opt_call.args);
                             ResolvedType::Unknown
                         };
                         // Walk callee for side effects
@@ -1040,9 +1029,7 @@ impl<'a> TypeResolver<'a> {
                 // even if the inner type is unknown.
                 match inner_result {
                     ResolvedType::Known(RustType::Option(_)) => inner_result,
-                    ResolvedType::Known(ty) => {
-                        ResolvedType::Known(RustType::Option(Box::new(ty)))
-                    }
+                    ResolvedType::Known(ty) => ResolvedType::Known(RustType::Option(Box::new(ty))),
                     ResolvedType::Unknown => {
                         ResolvedType::Known(RustType::Option(Box::new(RustType::Any)))
                     }
@@ -1617,7 +1604,6 @@ impl<'a> TypeResolver<'a> {
 
         ResolvedType::Unknown
     }
-
 }
 
 /// Returns true if the expression is a `null` literal or `undefined` identifier.

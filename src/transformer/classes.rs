@@ -10,7 +10,6 @@ use swc_ecma_ast as ast;
 use crate::ir::{AssocConst, Expr, Item, Method, Param, RustType, Stmt, StructField, Visibility};
 use crate::pipeline::type_converter::convert_ts_type;
 use crate::pipeline::SyntheticTypeRegistry;
-use crate::registry::TypeRegistry;
 use crate::transformer::context::TransformContext;
 use crate::transformer::expressions::convert_expr;
 use crate::transformer::extract_prop_name;
@@ -49,7 +48,6 @@ pub fn extract_class_info(
     vis: Visibility,
     synthetic: &mut SyntheticTypeRegistry,
     tctx: &TransformContext<'_>,
-    reg: &TypeRegistry,
 ) -> Result<ClassInfo> {
     let name = class_decl.ident.sym.to_string();
     let parent = class_decl.class.super_class.as_ref().and_then(|sc| {
@@ -81,21 +79,20 @@ pub fn extract_class_info(
     for member in &class_decl.class.body {
         match member {
             ast::ClassMember::ClassProp(prop) if prop.is_static => {
-                if let Some(ac) = convert_static_prop(prop, &vis, synthetic, tctx, reg)? {
+                if let Some(ac) = convert_static_prop(prop, &vis, synthetic, tctx)? {
                     static_consts.push(ac);
                 }
             }
             ast::ClassMember::ClassProp(prop) => {
-                fields.push(convert_class_prop(prop, &vis, synthetic, tctx, reg)?);
+                fields.push(convert_class_prop(prop, &vis, synthetic, tctx)?);
             }
             ast::ClassMember::Constructor(ctor) => {
-                let (method, param_prop_fields) =
-                    convert_constructor(ctor, &vis, synthetic, tctx, reg)?;
+                let (method, param_prop_fields) = convert_constructor(ctor, &vis, synthetic, tctx)?;
                 constructor = Some(method);
                 fields.extend(param_prop_fields);
             }
             ast::ClassMember::Method(method) => {
-                methods.push(convert_class_method(method, &vis, synthetic, tctx, reg)?);
+                methods.push(convert_class_method(method, &vis, synthetic, tctx)?);
             }
             _ => {}
         }
@@ -127,9 +124,8 @@ pub fn convert_class_decl(
     vis: Visibility,
     synthetic: &mut SyntheticTypeRegistry,
     tctx: &TransformContext<'_>,
-    reg: &TypeRegistry,
 ) -> Result<Vec<Item>> {
-    let info = extract_class_info(class_decl, vis, synthetic, tctx, reg)?;
+    let info = extract_class_info(class_decl, vis, synthetic, tctx)?;
     if info.is_abstract {
         generate_abstract_class_items(&info)
     } else {
@@ -567,8 +563,8 @@ fn convert_static_prop(
     vis: &Visibility,
     synthetic: &mut SyntheticTypeRegistry,
     tctx: &TransformContext<'_>,
-    reg: &TypeRegistry,
 ) -> Result<Option<AssocConst>> {
+    let reg = tctx.type_registry;
     let name = extract_prop_name(&prop.key)
         .map_err(|_| anyhow!("unsupported static property key (only identifiers)"))?;
 
@@ -579,7 +575,7 @@ fn convert_static_prop(
     let ty = convert_ts_type(&type_ann.type_ann, synthetic, reg)?;
 
     let value = match &prop.value {
-        Some(init) => convert_expr(init, tctx, reg, &TypeEnv::new(), synthetic)?,
+        Some(init) => convert_expr(init, tctx, &TypeEnv::new(), synthetic)?,
         None => return Ok(None), // No initializer — skip
     };
 
@@ -596,9 +592,9 @@ fn convert_class_prop(
     prop: &ast::ClassProp,
     class_vis: &Visibility,
     synthetic: &mut SyntheticTypeRegistry,
-    _tctx: &TransformContext<'_>,
-    reg: &TypeRegistry,
+    tctx: &TransformContext<'_>,
 ) -> Result<StructField> {
+    let reg = tctx.type_registry;
     let field_name = extract_prop_name(&prop.key)
         .map_err(|_| anyhow!("unsupported class property key (only identifiers)"))?;
 
@@ -624,7 +620,6 @@ fn convert_constructor(
     vis: &Visibility,
     synthetic: &mut SyntheticTypeRegistry,
     tctx: &TransformContext<'_>,
-    reg: &TypeRegistry,
 ) -> Result<(Method, Vec<StructField>)> {
     let mut params = Vec::new();
     let mut param_prop_fields = Vec::new();
@@ -636,12 +631,12 @@ fn convert_constructor(
     for param in &ctor.params {
         match param {
             ast::ParamOrTsParamProp::Param(p) => {
-                let (param, expansion) = convert_param_pat(&p.pat, synthetic, tctx, reg)?;
+                let (param, expansion) = convert_param_pat(&p.pat, synthetic, tctx)?;
                 default_expansion_stmts.extend(expansion);
                 params.push(param);
             }
             ast::ParamOrTsParamProp::TsParamProp(prop) => {
-                let (ir_param, field) = convert_ts_param_prop(prop, vis, synthetic, tctx, reg)?;
+                let (ir_param, field) = convert_ts_param_prop(prop, vis, synthetic, tctx)?;
                 param_prop_names.push(ir_param.name.clone());
                 params.push(ir_param);
                 param_prop_fields.push(field);
@@ -660,7 +655,7 @@ fn convert_constructor(
                 .into_iter()
                 .chain(block.stmts.iter().cloned())
                 .collect();
-            let mut body = convert_constructor_body(&all_stmts, tctx, reg, &params, synthetic)?;
+            let mut body = convert_constructor_body(&all_stmts, tctx, &params, synthetic)?;
             // Insert default parameter expansion stmts at the beginning
             for (i, stmt) in default_expansion_stmts.into_iter().enumerate() {
                 body.insert(i, stmt);
@@ -669,8 +664,7 @@ fn convert_constructor(
         }
         None if !param_prop_names.is_empty() => {
             let synthetic_stmts = build_param_prop_assignments(&param_prop_names);
-            let mut body =
-                convert_constructor_body(&synthetic_stmts, tctx, reg, &params, synthetic)?;
+            let mut body = convert_constructor_body(&synthetic_stmts, tctx, &params, synthetic)?;
             for (i, stmt) in default_expansion_stmts.into_iter().enumerate() {
                 body.insert(i, stmt);
             }
@@ -703,9 +697,9 @@ fn convert_ts_param_prop(
     prop: &ast::TsParamProp,
     class_vis: &Visibility,
     synthetic: &mut SyntheticTypeRegistry,
-    _tctx: &TransformContext<'_>,
-    reg: &TypeRegistry,
+    tctx: &TransformContext<'_>,
 ) -> Result<(Param, StructField)> {
+    let reg = tctx.type_registry;
     let (name, ty) = match &prop.param {
         ast::TsParamPropParam::Ident(ident) => {
             let ir_param = crate::transformer::convert_ident_to_param(ident, synthetic, reg)?;
@@ -782,7 +776,6 @@ fn build_param_prop_assignments(names: &[String]) -> Vec<ast::Stmt> {
 fn convert_constructor_body(
     stmts: &[ast::Stmt],
     tctx: &TransformContext<'_>,
-    reg: &TypeRegistry,
     params: &[Param],
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Vec<Stmt>> {
@@ -798,17 +791,10 @@ fn convert_constructor_body(
     for stmt in stmts {
         if let Some((field_name, value_expr)) = try_extract_this_assignment(stmt) {
             // Cat B: field type could be looked up from class definition
-            let value = convert_expr(value_expr, tctx, reg, &type_env, synthetic)?;
+            let value = convert_expr(value_expr, tctx, &type_env, synthetic)?;
             fields.push((field_name, value));
         } else {
-            other_stmts.extend(convert_stmt(
-                stmt,
-                tctx,
-                reg,
-                None,
-                &mut type_env,
-                synthetic,
-            )?);
+            other_stmts.extend(convert_stmt(stmt, tctx, None, &mut type_env, synthetic)?);
         }
     }
 
@@ -862,8 +848,8 @@ fn convert_class_method(
     vis: &Visibility,
     synthetic: &mut SyntheticTypeRegistry,
     tctx: &TransformContext<'_>,
-    reg: &TypeRegistry,
 ) -> Result<Method> {
+    let reg = tctx.type_registry;
     let raw_name = extract_prop_name(&method.key)
         .map_err(|_| anyhow!("unsupported method key (only identifiers)"))?;
 
@@ -878,7 +864,7 @@ fn convert_class_method(
     let mut params = Vec::new();
     let mut default_expansion_stmts = Vec::new();
     for param in &method.function.params {
-        let (p, expansion) = convert_param_pat(&param.pat, synthetic, tctx, reg)?;
+        let (p, expansion) = convert_param_pat(&param.pat, synthetic, tctx)?;
         default_expansion_stmts.extend(expansion);
         params.push(p);
     }
@@ -912,7 +898,6 @@ fn convert_class_method(
                 stmts.extend(convert_stmt(
                     stmt,
                     tctx,
-                    reg,
                     return_type.as_ref(),
                     &mut method_env,
                     synthetic,
@@ -984,9 +969,9 @@ fn is_self_field_access(expr: &Expr) -> bool {
 fn convert_param_pat(
     pat: &ast::Pat,
     synthetic: &mut SyntheticTypeRegistry,
-    _tctx: &TransformContext<'_>,
-    reg: &TypeRegistry,
+    tctx: &TransformContext<'_>,
 ) -> Result<(Param, Vec<Stmt>)> {
+    let reg = tctx.type_registry;
     match pat {
         ast::Pat::Ident(ident) => {
             let param = crate::transformer::convert_ident_to_param(ident, synthetic, reg)?;
@@ -1055,7 +1040,6 @@ pub(super) fn pre_scan_classes(
     module: &ast::Module,
     synthetic: &mut SyntheticTypeRegistry,
     tctx: &TransformContext<'_>,
-    reg: &TypeRegistry,
 ) -> HashMap<String, ClassInfo> {
     let mut map = HashMap::new();
 
@@ -1073,7 +1057,7 @@ pub(super) fn pre_scan_classes(
             }
             _ => continue,
         };
-        if let Ok(info) = extract_class_info(decl, vis, synthetic, tctx, reg) {
+        if let Ok(info) = extract_class_info(decl, vis, synthetic, tctx) {
             map.insert(info.name.clone(), info);
         }
     }
@@ -1144,12 +1128,11 @@ pub(super) fn transform_class_with_inheritance(
     class_decl: &ast::ClassDecl,
     vis: Visibility,
     tctx: &TransformContext<'_>,
-    reg: &TypeRegistry,
     class_map: &HashMap<String, ClassInfo>,
     iface_methods: &HashMap<String, Vec<String>>,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Vec<Item>> {
-    let info = extract_class_info(class_decl, vis, synthetic, tctx, reg)?;
+    let info = extract_class_info(class_decl, vis, synthetic, tctx)?;
     let parent_names = find_parent_class_names(class_map);
 
     if info.is_abstract {
@@ -1206,7 +1189,6 @@ mod tests {
             Visibility::Private,
             &mut SyntheticTypeRegistry::new(),
             &tctx,
-            f.reg(),
         )
         .unwrap();
 
@@ -1244,7 +1226,6 @@ mod tests {
             Visibility::Private,
             &mut SyntheticTypeRegistry::new(),
             &tctx,
-            f.reg(),
         )
         .unwrap();
 
@@ -1289,7 +1270,6 @@ mod tests {
             Visibility::Private,
             &mut SyntheticTypeRegistry::new(),
             &tctx,
-            f.reg(),
         )
         .unwrap();
 
@@ -1315,7 +1295,6 @@ mod tests {
             Visibility::Public,
             &mut SyntheticTypeRegistry::new(),
             &tctx,
-            f.reg(),
         )
         .unwrap();
 
@@ -1341,7 +1320,6 @@ mod tests {
             Visibility::Private,
             &mut SyntheticTypeRegistry::new(),
             &tctx,
-            f.reg(),
         )
         .unwrap();
 
@@ -1375,7 +1353,6 @@ mod tests {
             Visibility::Private,
             &mut SyntheticTypeRegistry::new(),
             &tctx,
-            f.reg(),
         )
         .unwrap();
 
@@ -1392,7 +1369,6 @@ mod tests {
             Visibility::Private,
             &mut SyntheticTypeRegistry::new(),
             &tctx,
-            f.reg(),
         )
         .unwrap();
 
@@ -1409,7 +1385,6 @@ mod tests {
             Visibility::Private,
             &mut SyntheticTypeRegistry::new(),
             &tctx,
-            f.reg(),
         )
         .unwrap();
 
@@ -1428,7 +1403,6 @@ mod tests {
             Visibility::Private,
             &mut SyntheticTypeRegistry::new(),
             &tctx,
-            f.reg(),
         )
         .unwrap();
 
@@ -1452,7 +1426,6 @@ mod tests {
             Visibility::Private,
             &mut SyntheticTypeRegistry::new(),
             &tctx,
-            f.reg(),
         )
         .unwrap();
         assert!(info.is_abstract);
@@ -1468,7 +1441,6 @@ mod tests {
             Visibility::Public,
             &mut SyntheticTypeRegistry::new(),
             &tctx,
-            f.reg(),
         )
         .unwrap();
         // Should produce a single Trait item, not Struct + Impl
@@ -1503,7 +1475,6 @@ mod tests {
             Visibility::Public,
             &mut SyntheticTypeRegistry::new(),
             &tctx,
-            f.reg(),
         )
         .unwrap();
         assert_eq!(items.len(), 1);
@@ -1531,7 +1502,6 @@ mod tests {
             Visibility::Public,
             &mut SyntheticTypeRegistry::new(),
             &tctx,
-            f.reg(),
         )
         .unwrap();
         assert_eq!(items.len(), 1);
@@ -1610,7 +1580,6 @@ mod tests {
             Visibility::Public,
             &mut SyntheticTypeRegistry::new(),
             &tctx,
-            f.reg(),
         )
         .unwrap();
         // Should have: Struct (only value field) + Impl (with const MAX_SIZE)
@@ -1646,7 +1615,6 @@ mod tests {
             Visibility::Public,
             &mut SyntheticTypeRegistry::new(),
             &tctx,
-            f.reg(),
         )
         .unwrap();
         match &items[1] {
@@ -1669,7 +1637,6 @@ mod tests {
             Visibility::Public,
             &mut SyntheticTypeRegistry::new(),
             &tctx,
-            f.reg(),
         )
         .unwrap();
         match &items[1] {
@@ -1692,7 +1659,6 @@ mod tests {
             Visibility::Public,
             &mut SyntheticTypeRegistry::new(),
             &tctx,
-            f.reg(),
         )
         .unwrap();
         // Verify via generator output since StructField doesn't have vis yet
@@ -1712,7 +1678,6 @@ mod tests {
             Visibility::Public,
             &mut SyntheticTypeRegistry::new(),
             &tctx,
-            f.reg(),
         )
         .unwrap();
 
@@ -1754,7 +1719,6 @@ mod tests {
             Visibility::Public,
             &mut SyntheticTypeRegistry::new(),
             &tctx,
-            f.reg(),
         )
         .unwrap();
 
@@ -1778,7 +1742,6 @@ mod tests {
             Visibility::Public,
             &mut SyntheticTypeRegistry::new(),
             &tctx,
-            f.reg(),
         )
         .unwrap();
 
@@ -1803,7 +1766,6 @@ mod tests {
             Visibility::Public,
             &mut SyntheticTypeRegistry::new(),
             &tctx,
-            f.reg(),
         )
         .unwrap();
 
@@ -1838,7 +1800,6 @@ mod tests {
             Visibility::Public,
             &mut SyntheticTypeRegistry::new(),
             &tctx,
-            f.reg(),
         )
         .unwrap();
 
@@ -1873,7 +1834,6 @@ mod tests {
             Visibility::Public,
             &mut SyntheticTypeRegistry::new(),
             &tctx,
-            f.reg(),
         )
         .unwrap();
 
@@ -1901,7 +1861,6 @@ mod tests {
             Visibility::Public,
             &mut SyntheticTypeRegistry::new(),
             &tctx,
-            f.reg(),
         )
         .unwrap();
 
@@ -1928,7 +1887,6 @@ mod tests {
             Visibility::Public,
             &mut SyntheticTypeRegistry::new(),
             &tctx,
-            f.reg(),
         )
         .unwrap();
 
@@ -1958,7 +1916,6 @@ mod tests {
             Visibility::Private,
             &mut SyntheticTypeRegistry::new(),
             &tctx,
-            f.reg(),
         )
         .unwrap();
 
@@ -2000,7 +1957,6 @@ mod tests {
             Visibility::Private,
             &mut SyntheticTypeRegistry::new(),
             &tctx,
-            f.reg(),
         )
         .unwrap();
 
@@ -2055,7 +2011,6 @@ mod tests {
             Visibility::Private,
             &mut SyntheticTypeRegistry::new(),
             &tctx,
-            f.reg(),
         )
         .unwrap();
 

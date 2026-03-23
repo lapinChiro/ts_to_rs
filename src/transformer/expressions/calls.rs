@@ -5,7 +5,7 @@ use swc_ecma_ast as ast;
 
 use crate::ir::{BinOp, Expr, RustType, Stmt};
 use crate::pipeline::SyntheticTypeRegistry;
-use crate::registry::{TypeDef, TypeRegistry};
+use crate::registry::TypeDef;
 use crate::transformer::TypeEnv;
 
 use super::convert_arrow_expr;
@@ -23,10 +23,11 @@ use crate::transformer::context::TransformContext;
 pub(super) fn convert_call_expr(
     call: &ast::CallExpr,
     tctx: &TransformContext<'_>,
-    reg: &TypeRegistry,
     type_env: &TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Expr> {
+    let reg = tctx.type_registry;
+
     match call.callee {
         ast::Callee::Expr(ref callee) => match callee.as_ref() {
             ast::Expr::Ident(ident) => {
@@ -36,7 +37,7 @@ pub(super) fn convert_call_expr(
                 // parseFloat(s) → s.parse::<f64>().unwrap()
                 // isNaN(x) → x.is_nan()
                 if let Some(result) =
-                    convert_global_builtin(&fn_name, &call.args, tctx, reg, type_env, synthetic)?
+                    convert_global_builtin(&fn_name, &call.args, tctx, type_env, synthetic)?
                 {
                     return Ok(result);
                 }
@@ -65,7 +66,6 @@ pub(super) fn convert_call_expr(
                 let args = convert_call_args_with_types(
                     &call.args,
                     tctx,
-                    reg,
                     param_types,
                     has_rest,
                     type_env,
@@ -91,7 +91,7 @@ pub(super) fn convert_call_expr(
                             "error" | "warn" => "eprintln",
                             _ => return Err(anyhow!("unsupported console method: {}", method)),
                         };
-                        let args = convert_call_args(&call.args, tctx, reg, type_env, synthetic)?;
+                        let args = convert_call_args(&call.args, tctx, type_env, synthetic)?;
                         let use_debug = call
                             .args
                             .iter()
@@ -109,28 +109,24 @@ pub(super) fn convert_call_expr(
 
                     // Math.method(args) → first_arg.method(rest_args)
                     if obj_ident.sym.as_ref() == "Math" {
-                        return convert_math_call(
-                            &method, &call.args, tctx, reg, type_env, synthetic,
-                        );
+                        return convert_math_call(&method, &call.args, tctx, type_env, synthetic);
                     }
 
                     // Number.isNaN(x) → x.is_nan(), Number.isFinite(x) → x.is_finite()
                     if obj_ident.sym.as_ref() == "Number" {
                         return convert_number_static_call(
-                            &method, &call.args, tctx, reg, type_env, synthetic,
+                            &method, &call.args, tctx, type_env, synthetic,
                         );
                     }
 
                     // fs.readFileSync/writeFileSync/existsSync → std::fs equivalents
                     if obj_ident.sym.as_ref() == "fs" {
-                        return convert_fs_call(
-                            &method, &call.args, tctx, reg, type_env, synthetic,
-                        );
+                        return convert_fs_call(&method, &call.args, tctx, type_env, synthetic);
                     }
                 }
 
                 // Cat A: method receiver — converted before method resolution
-                let object = convert_expr(&member.obj, tctx, reg, type_env, synthetic)?;
+                let object = convert_expr(&member.obj, tctx, type_env, synthetic)?;
                 // Look up method parameter types from the object's type
                 let method_sig = get_expr_type(tctx, &member.obj).and_then(|ty| {
                     if let RustType::Named { name, .. } = ty {
@@ -144,7 +140,6 @@ pub(super) fn convert_call_expr(
                 let args = convert_call_args_with_types(
                     &call.args,
                     tctx,
-                    reg,
                     method_params,
                     false,
                     type_env,
@@ -162,12 +157,12 @@ pub(super) fn convert_call_expr(
                     ctxt: call.ctxt,
                     type_args: call.type_args.clone(),
                 };
-                convert_call_expr(&unwrapped_call, tctx, reg, type_env, synthetic)
+                convert_call_expr(&unwrapped_call, tctx, type_env, synthetic)
             }
             // Chained call: f(x)(y) → { let _f = f(x); _f(y) }
             ast::Expr::Call(inner_call) => {
-                let inner_result = convert_call_expr(inner_call, tctx, reg, type_env, synthetic)?;
-                let args = convert_call_args(&call.args, tctx, reg, type_env, synthetic)?;
+                let inner_result = convert_call_expr(inner_call, tctx, type_env, synthetic)?;
+                let args = convert_call_args(&call.args, tctx, type_env, synthetic)?;
                 Ok(Expr::Block(vec![
                     Stmt::Let {
                         name: "_f".to_string(),
@@ -185,16 +180,9 @@ pub(super) fn convert_call_expr(
             // Arrow/Fn expressions as callee → convert to closure and call immediately
             ast::Expr::Arrow(arrow) => {
                 let mut warnings = Vec::new();
-                let closure = convert_arrow_expr(
-                    arrow,
-                    tctx,
-                    reg,
-                    false,
-                    &mut warnings,
-                    type_env,
-                    synthetic,
-                )?;
-                let args = convert_call_args(&call.args, tctx, reg, type_env, synthetic)?;
+                let closure =
+                    convert_arrow_expr(arrow, tctx, false, &mut warnings, type_env, synthetic)?;
+                let args = convert_call_args(&call.args, tctx, type_env, synthetic)?;
                 Ok(Expr::Block(vec![
                     Stmt::Let {
                         name: "__iife".to_string(),
@@ -209,8 +197,8 @@ pub(super) fn convert_call_expr(
                 ]))
             }
             ast::Expr::Fn(fn_expr) => {
-                let closure = convert_fn_expr(fn_expr, tctx, reg, type_env, synthetic)?;
-                let args = convert_call_args(&call.args, tctx, reg, type_env, synthetic)?;
+                let closure = convert_fn_expr(fn_expr, tctx, type_env, synthetic)?;
+                let args = convert_call_args(&call.args, tctx, type_env, synthetic)?;
                 Ok(Expr::Block(vec![
                     Stmt::Let {
                         name: "__iife".to_string(),
@@ -227,7 +215,7 @@ pub(super) fn convert_call_expr(
             _ => Err(anyhow!("unsupported call target expression")),
         },
         ast::Callee::Super(_) => {
-            let args = convert_call_args(&call.args, tctx, reg, type_env, synthetic)?;
+            let args = convert_call_args(&call.args, tctx, type_env, synthetic)?;
             Ok(Expr::FnCall {
                 name: "super".to_string(),
                 args,
@@ -244,14 +232,13 @@ pub(super) fn convert_global_builtin(
     fn_name: &str,
     args: &[ast::ExprOrSpread],
     tctx: &TransformContext<'_>,
-    reg: &TypeRegistry,
     type_env: &TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Option<Expr>> {
     match fn_name {
         // parseInt(s) → s.parse::<f64>().unwrap_or(f64::NAN)
         "parseInt" => {
-            let converted = convert_call_args(args, tctx, reg, type_env, synthetic)?;
+            let converted = convert_call_args(args, tctx, type_env, synthetic)?;
             if converted.len() != 1 {
                 return Err(anyhow!("parseInt expects 1 argument"));
             }
@@ -268,7 +255,7 @@ pub(super) fn convert_global_builtin(
         }
         // parseFloat(s) → s.parse::<f64>().unwrap_or(f64::NAN)
         "parseFloat" => {
-            let converted = convert_call_args(args, tctx, reg, type_env, synthetic)?;
+            let converted = convert_call_args(args, tctx, type_env, synthetic)?;
             if converted.len() != 1 {
                 return Err(anyhow!("parseFloat expects 1 argument"));
             }
@@ -285,7 +272,7 @@ pub(super) fn convert_global_builtin(
         }
         // isNaN(x) → x.is_nan()
         "isNaN" => {
-            let converted = convert_call_args(args, tctx, reg, type_env, synthetic)?;
+            let converted = convert_call_args(args, tctx, type_env, synthetic)?;
             if converted.len() != 1 {
                 return Err(anyhow!("isNaN expects 1 argument"));
             }
@@ -309,11 +296,10 @@ pub(super) fn convert_number_static_call(
     method: &str,
     args: &[ast::ExprOrSpread],
     tctx: &TransformContext<'_>,
-    reg: &TypeRegistry,
     type_env: &TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Expr> {
-    let converted = convert_call_args(args, tctx, reg, type_env, synthetic)?;
+    let converted = convert_call_args(args, tctx, type_env, synthetic)?;
     if converted.len() != 1 {
         return Err(anyhow!("Number.{method} expects 1 argument"));
     }
@@ -350,7 +336,6 @@ pub(super) fn convert_fs_call(
     method: &str,
     args: &[ast::ExprOrSpread],
     tctx: &TransformContext<'_>,
-    reg: &TypeRegistry,
     type_env: &TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Expr> {
@@ -360,7 +345,7 @@ pub(super) fn convert_fs_call(
                 return Err(anyhow!("fs.readFileSync requires at least 1 argument"));
             }
             // Cat A: built-in fs API path arg
-            let path_arg = convert_expr(&args[0].expr, tctx, reg, type_env, synthetic)?;
+            let path_arg = convert_expr(&args[0].expr, tctx, type_env, synthetic)?;
 
             // Special case: fs.readFileSync("/dev/stdin", ...) or fs.readFileSync(0, ...)
             let is_stdin = matches!(&path_arg, Expr::StringLit(s) if s == "/dev/stdin")
@@ -397,8 +382,8 @@ pub(super) fn convert_fs_call(
                 return Err(anyhow!("fs.writeFileSync requires at least 2 arguments"));
             }
             // Cat A: built-in fs API path/data args
-            let path_arg = convert_expr(&args[0].expr, tctx, reg, type_env, synthetic)?;
-            let data_arg = convert_expr(&args[1].expr, tctx, reg, type_env, synthetic)?;
+            let path_arg = convert_expr(&args[0].expr, tctx, type_env, synthetic)?;
+            let data_arg = convert_expr(&args[1].expr, tctx, type_env, synthetic)?;
             // fs.writeFileSync(path, data) → std::fs::write(&path, &data).unwrap()
             Ok(Expr::MethodCall {
                 object: Box::new(Expr::FnCall {
@@ -414,7 +399,7 @@ pub(super) fn convert_fs_call(
                 return Err(anyhow!("fs.existsSync requires 1 argument"));
             }
             // Cat A: built-in fs API path arg
-            let path_arg = convert_expr(&args[0].expr, tctx, reg, type_env, synthetic)?;
+            let path_arg = convert_expr(&args[0].expr, tctx, type_env, synthetic)?;
             // fs.existsSync(path) → std::path::Path::new(&path).exists()
             Ok(Expr::MethodCall {
                 object: Box::new(Expr::FnCall {
@@ -439,11 +424,10 @@ pub(super) fn convert_math_call(
     method: &str,
     args: &[ast::ExprOrSpread],
     tctx: &TransformContext<'_>,
-    reg: &TypeRegistry,
     type_env: &TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Expr> {
-    let converted_args = convert_call_args(args, tctx, reg, type_env, synthetic)?;
+    let converted_args = convert_call_args(args, tctx, type_env, synthetic)?;
     match method {
         // 1-arg methods: first arg becomes receiver (same name)
         "floor" | "ceil" | "round" | "abs" | "sqrt" | "trunc" => {
@@ -514,10 +498,11 @@ pub(super) fn convert_math_call(
 pub(super) fn convert_new_expr(
     new_expr: &ast::NewExpr,
     tctx: &TransformContext<'_>,
-    reg: &TypeRegistry,
     type_env: &TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Expr> {
+    let reg = tctx.type_registry;
+
     let class_name = match new_expr.callee.as_ref() {
         ast::Expr::Ident(ident) => ident.sym.to_string(),
         _ => return Err(anyhow!("unsupported new expression target")),
@@ -529,7 +514,7 @@ pub(super) fn convert_new_expr(
     });
     let args = match &new_expr.args {
         Some(args) => {
-            convert_call_args_with_types(args, tctx, reg, param_types, false, type_env, synthetic)?
+            convert_call_args_with_types(args, tctx, param_types, false, type_env, synthetic)?
         }
         None => vec![],
     };
@@ -543,11 +528,10 @@ pub(super) fn convert_new_expr(
 pub(super) fn convert_call_args(
     args: &[ast::ExprOrSpread],
     tctx: &TransformContext<'_>,
-    reg: &TypeRegistry,
     type_env: &TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Vec<Expr>> {
-    convert_call_args_with_types(args, tctx, reg, None, false, type_env, synthetic)
+    convert_call_args_with_types(args, tctx, None, false, type_env, synthetic)
 }
 
 /// Converts call arguments with optional parameter type information from the registry.
@@ -560,12 +544,13 @@ pub(super) fn convert_call_args(
 pub(super) fn convert_call_args_with_types(
     args: &[ast::ExprOrSpread],
     tctx: &TransformContext<'_>,
-    reg: &TypeRegistry,
     param_types: Option<&[(String, RustType)]>,
     has_rest: bool,
     type_env: &TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Vec<Expr>> {
+    let reg = tctx.type_registry;
+
     // Determine how many regular (non-rest) parameters there are
     let regular_param_count = if has_rest {
         param_types.map(|p| p.len().saturating_sub(1)).unwrap_or(0)
@@ -583,7 +568,7 @@ pub(super) fn convert_call_args_with_types(
             // Option<T> wrapping is handled centrally by convert_expr_with_expected
             // (called internally by convert_expr). TypeResolver's set_call_arg_expected_types
             // sets the expected type for each arg span, so no explicit param_ty passing needed.
-            let mut expr = convert_expr(&arg.expr, tctx, reg, type_env, synthetic)?;
+            let mut expr = convert_expr(&arg.expr, tctx, type_env, synthetic)?;
             // Wrap in Box::new(...) when the parameter type is Fn (Box<dyn Fn>)
             // and the argument is an identifier (function name), not an inline closure
             if matches!(param_ty, Some(RustType::Fn { .. })) && matches!(&expr, Expr::Ident(_)) {
@@ -611,7 +596,7 @@ pub(super) fn convert_call_args_with_types(
         let rest_args = &args[regular_args_count..];
         if rest_args.len() == 1 && rest_args[0].spread.is_some() {
             // Cat A: single spread source — type is the array itself
-            let expr = convert_expr(&rest_args[0].expr, tctx, reg, type_env, synthetic)?;
+            let expr = convert_expr(&rest_args[0].expr, tctx, type_env, synthetic)?;
             result.push(expr);
         } else if rest_args.iter().any(|a| a.spread.is_some()) {
             // Mixed literals and spread: foo(1, ...arr) → foo([vec![1.0], arr].concat())
@@ -627,10 +612,10 @@ pub(super) fn convert_call_args_with_types(
                         });
                     }
                     // Cat A: spread source — type is the array itself
-                    let expr = convert_expr(&arg.expr, tctx, reg, type_env, synthetic)?;
+                    let expr = convert_expr(&arg.expr, tctx, type_env, synthetic)?;
                     parts.push(expr);
                 } else {
-                    let expr = convert_expr(&arg.expr, tctx, reg, type_env, synthetic)?;
+                    let expr = convert_expr(&arg.expr, tctx, type_env, synthetic)?;
                     literal_buf.push(expr);
                 }
             }
@@ -651,7 +636,7 @@ pub(super) fn convert_call_args_with_types(
             // All literal args: foo(1, 2, 3) → foo(vec![1.0, 2.0, 3.0])
             let rest_exprs: Vec<Expr> = rest_args
                 .iter()
-                .map(|arg| convert_expr(&arg.expr, tctx, reg, type_env, synthetic))
+                .map(|arg| convert_expr(&arg.expr, tctx, type_env, synthetic))
                 .collect::<Result<Vec<_>>>()?;
             result.push(Expr::Vec {
                 elements: rest_exprs,

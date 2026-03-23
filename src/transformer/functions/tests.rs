@@ -24,7 +24,6 @@ fn test_convert_fn_decl_add() {
         &fn_decl,
         Visibility::Public,
         &tctx,
-        f.reg(),
         false,
         &mut SyntheticTypeRegistry::new(),
     )
@@ -68,7 +67,6 @@ fn test_convert_fn_decl_no_return_type() {
         &fn_decl,
         Visibility::Public,
         &tctx,
-        f.reg(),
         false,
         &mut SyntheticTypeRegistry::new(),
     )
@@ -95,7 +93,6 @@ fn test_convert_fn_decl_no_params() {
         &fn_decl,
         Visibility::Public,
         &tctx,
-        f.reg(),
         false,
         &mut SyntheticTypeRegistry::new(),
     )
@@ -121,7 +118,6 @@ fn test_convert_fn_decl_with_local_vars() {
         &fn_decl,
         Visibility::Public,
         &tctx,
-        f.reg(),
         false,
         &mut SyntheticTypeRegistry::new(),
     )
@@ -159,7 +155,6 @@ fn test_convert_fn_decl_generic_single_param() {
         &fn_decl,
         Visibility::Public,
         &tctx,
-        f.reg(),
         false,
         &mut SyntheticTypeRegistry::new(),
     )
@@ -189,7 +184,6 @@ fn test_convert_fn_decl_generic_multiple_params() {
         &fn_decl,
         Visibility::Public,
         &tctx,
-        f.reg(),
         false,
         &mut SyntheticTypeRegistry::new(),
     )
@@ -226,7 +220,6 @@ fn test_convert_fn_decl_throw_wraps_return_type_in_result() {
         &fn_decl,
         Visibility::Public,
         &tctx,
-        f.reg(),
         false,
         &mut SyntheticTypeRegistry::new(),
     )
@@ -260,7 +253,6 @@ fn test_convert_fn_decl_throw_wraps_return_in_ok() {
         &fn_decl,
         Visibility::Public,
         &tctx,
-        f.reg(),
         false,
         &mut SyntheticTypeRegistry::new(),
     )
@@ -296,7 +288,6 @@ fn test_convert_fn_decl_throw_no_return_type_becomes_result_unit() {
         &fn_decl,
         Visibility::Public,
         &tctx,
-        f.reg(),
         false,
         &mut SyntheticTypeRegistry::new(),
     )
@@ -329,7 +320,6 @@ fn test_convert_fn_decl_missing_param_type_annotation_falls_back_to_any() {
         &fn_decl,
         Visibility::Public,
         &tctx,
-        f.reg(),
         false,
         &mut SyntheticTypeRegistry::new(),
     );
@@ -354,7 +344,6 @@ fn test_convert_fn_decl_async_is_async() {
         &fn_decl,
         Visibility::Public,
         &tctx,
-        f.reg(),
         false,
         &mut SyntheticTypeRegistry::new(),
     )
@@ -384,7 +373,6 @@ fn test_convert_fn_decl_async_no_return_type() {
         &fn_decl,
         Visibility::Public,
         &tctx,
-        f.reg(),
         false,
         &mut SyntheticTypeRegistry::new(),
     )
@@ -413,7 +401,6 @@ fn test_convert_fn_decl_sync_is_not_async() {
         &fn_decl,
         Visibility::Public,
         &tctx,
-        f.reg(),
         false,
         &mut SyntheticTypeRegistry::new(),
     )
@@ -437,7 +424,6 @@ fn test_convert_fn_decl_async_main_has_tokio_main_attribute() {
         &fn_decl,
         Visibility::Public,
         &tctx,
-        f.reg(),
         false,
         &mut SyntheticTypeRegistry::new(),
     )
@@ -468,7 +454,6 @@ fn test_convert_fn_decl_async_non_main_has_no_attributes() {
         &fn_decl,
         Visibility::Public,
         &tctx,
-        f.reg(),
         false,
         &mut SyntheticTypeRegistry::new(),
     )
@@ -492,7 +477,6 @@ fn test_convert_fn_decl_sync_main_has_no_attributes() {
         &fn_decl,
         Visibility::Public,
         &tctx,
-        f.reg(),
         false,
         &mut SyntheticTypeRegistry::new(),
     )
@@ -516,7 +500,6 @@ fn test_convert_fn_decl_object_destructuring_param_generates_expansion() {
         &fn_decl,
         Visibility::Public,
         &tctx,
-        f.reg(),
         false,
         &mut SyntheticTypeRegistry::new(),
     )
@@ -576,7 +559,6 @@ fn test_convert_fn_decl_object_destructuring_rename() {
         &fn_decl,
         Visibility::Public,
         &tctx,
-        f.reg(),
         false,
         &mut SyntheticTypeRegistry::new(),
     )
@@ -612,7 +594,6 @@ fn test_convert_fn_decl_destructuring_with_normal_params() {
         &fn_decl,
         Visibility::Public,
         &tctx,
-        f.reg(),
         false,
         &mut SyntheticTypeRegistry::new(),
     )
@@ -641,7 +622,6 @@ fn test_convert_fn_decl_destructuring_no_type_annotation_falls_back_to_value() {
         &fn_decl,
         Visibility::Public,
         &tctx,
-        f.reg(),
         false,
         &mut SyntheticTypeRegistry::new(),
     );
@@ -660,7 +640,6 @@ fn test_convert_fn_decl_default_number_param_wraps_in_option() {
         &fn_decl,
         Visibility::Public,
         &tctx,
-        f.reg(),
         false,
         &mut SyntheticTypeRegistry::new(),
     )
@@ -723,7 +702,6 @@ fn test_convert_fn_decl_default_string_param_wraps_in_option() {
         &fn_decl,
         Visibility::Public,
         &tctx,
-        f.reg(),
         false,
         &mut SyntheticTypeRegistry::new(),
     )
@@ -773,7 +751,6 @@ fn test_convert_fn_decl_default_bool_param_wraps_in_option() {
         &fn_decl,
         Visibility::Public,
         &tctx,
-        f.reg(),
         false,
         &mut SyntheticTypeRegistry::new(),
     )
@@ -810,7 +787,6 @@ fn test_convert_fn_decl_default_empty_object_uses_unwrap_or_default() {
         &fn_decl,
         Visibility::Public,
         &tctx,
-        f.reg(),
         false,
         &mut SyntheticTypeRegistry::new(),
     )
@@ -850,7 +826,6 @@ fn test_convert_fn_decl_default_param_mixed_with_normal() {
         &fn_decl,
         Visibility::Public,
         &tctx,
-        f.reg(),
         false,
         &mut SyntheticTypeRegistry::new(),
     )
@@ -888,7 +863,6 @@ fn test_convert_fn_decl_default_new_expr_uses_unwrap_or_default() {
         &fn_decl,
         Visibility::Public,
         &tctx,
-        f.reg(),
         false,
         &mut SyntheticTypeRegistry::new(),
     )
@@ -906,7 +880,6 @@ fn test_convert_fn_decl_default_variable_ref_uses_unwrap_or() {
         &fn_decl,
         Visibility::Public,
         &tctx,
-        f.reg(),
         false,
         &mut SyntheticTypeRegistry::new(),
     )
@@ -924,7 +897,6 @@ fn test_convert_fn_decl_default_empty_array_uses_unwrap_or_default() {
         &fn_decl,
         Visibility::Public,
         &tctx,
-        f.reg(),
         false,
         &mut SyntheticTypeRegistry::new(),
     )
@@ -942,7 +914,6 @@ fn test_convert_fn_decl_default_negative_number() {
         &fn_decl,
         Visibility::Public,
         &tctx,
-        f.reg(),
         false,
         &mut SyntheticTypeRegistry::new(),
     )
@@ -960,7 +931,6 @@ fn test_convert_fn_decl_rest_param() {
         &fn_decl,
         Visibility::Public,
         &tctx,
-        f.reg(),
         false,
         &mut SyntheticTypeRegistry::new(),
     )
@@ -983,7 +953,6 @@ fn test_convert_fn_decl_inline_type_literal_single_field_generates_struct() {
         &fn_decl,
         Visibility::Public,
         &tctx,
-        f.reg(),
         false,
         &mut SyntheticTypeRegistry::new(),
     )
@@ -1025,7 +994,6 @@ fn test_convert_fn_decl_inline_type_literal_multiple_fields_generates_struct() {
         &fn_decl,
         Visibility::Public,
         &tctx,
-        f.reg(),
         false,
         &mut SyntheticTypeRegistry::new(),
     )
@@ -1062,7 +1030,6 @@ fn test_convert_fn_decl_inline_type_literal_mixed_with_normal_param_generates_st
         &fn_decl,
         Visibility::Public,
         &tctx,
-        f.reg(),
         false,
         &mut SyntheticTypeRegistry::new(),
     )
@@ -1096,7 +1063,6 @@ fn test_convert_fn_decl_inline_type_literal_empty_generates_empty_struct() {
         &fn_decl,
         Visibility::Public,
         &tctx,
-        f.reg(),
         false,
         &mut SyntheticTypeRegistry::new(),
     )
@@ -1122,7 +1088,6 @@ fn test_convert_fn_decl_default_param_inline_type_generates_struct() {
         &decl,
         Visibility::Public,
         &tctx,
-        f.reg(),
         false,
         &mut SyntheticTypeRegistry::new(),
     )
@@ -1148,7 +1113,6 @@ fn fn_returns_result(source: &str) -> bool {
         &fn_decl,
         Visibility::Public,
         &tctx,
-        f.reg(),
         false,
         &mut SyntheticTypeRegistry::new(),
     )
@@ -1276,7 +1240,6 @@ fn test_object_destructuring_param_default_number_generates_unwrap_or() {
         &fn_decl,
         Visibility::Private,
         &tctx,
-        f.reg(),
         false,
         &mut SyntheticTypeRegistry::new(),
     )
@@ -1338,7 +1301,6 @@ fn test_convert_fn_param_trait_type_generates_dyn_ref() {
         &fn_decl,
         Visibility::Public,
         &tctx,
-        f.reg(),
         false,
         &mut SyntheticTypeRegistry::new(),
     )
@@ -1370,7 +1332,6 @@ fn test_convert_fn_return_trait_type_generates_box_dyn() {
         &fn_decl,
         Visibility::Public,
         &tctx,
-        f.reg(),
         true,
         &mut SyntheticTypeRegistry::new(),
     )
@@ -1410,7 +1371,6 @@ fn test_convert_fn_param_struct_type_unchanged() {
         &fn_decl,
         Visibility::Public,
         &tctx,
-        f.reg(),
         false,
         &mut SyntheticTypeRegistry::new(),
     )
@@ -1444,7 +1404,6 @@ fn test_convert_fn_default_param_number_no_annotation_infers_f64() {
         &fn_decl,
         Visibility::Public,
         &tctx,
-        f.reg(),
         false,
         &mut SyntheticTypeRegistry::new(),
     )
@@ -1469,7 +1428,6 @@ fn test_convert_fn_default_param_string_no_annotation_infers_string() {
         &fn_decl,
         Visibility::Public,
         &tctx,
-        f.reg(),
         false,
         &mut SyntheticTypeRegistry::new(),
     )
@@ -1494,7 +1452,6 @@ fn test_convert_fn_default_param_bool_no_annotation_infers_bool() {
         &fn_decl,
         Visibility::Public,
         &tctx,
-        f.reg(),
         false,
         &mut SyntheticTypeRegistry::new(),
     )

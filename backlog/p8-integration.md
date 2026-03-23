@@ -49,7 +49,7 @@ P1〜P7 で新パイプラインの全コンポーネントが実装された。
   - `resolve_expr_type` / `resolve_expr_type_heuristic` → **Phase 3-2 で削除済み**（TypeResolver の expr_types に一本化）
   - `set_expected_types_in_nested_calls` → **Phase 3-5 で削除済み**（resolve_call_expr の再帰で自然に解消）
   - `TypeEnv` の narrowing スコープ管理 → **Phase 4 で削除済み**。narrowing 用 push_scope/pop_scope 削除、update() 削除
-  - `tctx` + `reg` の二重パラメータ → **D5: 未着手**。105 関数 + テストコード
+  - `tctx` + `reg` の二重パラメータ → **D5 で削除済み**。99 関数 + テストコードから `reg` パラメータを削除
   - 分散した合成型生成 → **D0a で削除済み**
   - P1 のブリッジ実装 → **Phase A で削除済み**
 - `transpile_single(source: &str) -> Result<String>` の簡易 API → **Phase A で実装済み**（`src/pipeline/mod.rs`）
@@ -105,7 +105,7 @@ pub fn transpile(input: TranspileInput) -> Result<TranspileOutput> {
     // - TransformContext (module_graph, type_registry, type_resolution, file_path)
     // - per-file SyntheticTypeRegistry → items に prepend + 共有 synthetic にマージ
     // - transform_module_collecting_with_path → generate
-    // Phase D で tctx + reg 二重パラメータ統合、synthetic の TransformContext 統合を予定。
+    // D5 で reg パラメータ削除済み。D-2 で Transformer struct に統合予定。
     let mut file_outputs = Vec::new();
     for (file, type_resolution) in parsed.files.iter().zip(type_resolutions.iter()) {
         let ctx = TransformContext::new(&module_graph, &registry, type_resolution, &file.path);
@@ -201,13 +201,13 @@ let rust_source = pipeline::transpile_single(&source)?;
 | `ExprContext` | `src/transformer/expressions/mod.rs` | `TransformContext` + `expected_types` | **Phase 2 で削除済み** |
 | `TypeEnv` の narrowing 管理 | `src/transformer/type_env.rs` | `narrowing_events` | **Phase 4 で削除済み**。narrowing 用 push_scope/pop_scope 削除、update() 削除 |
 | `resolve_expr_type_heuristic` | `src/transformer/expressions/type_resolution.rs` | `TypeResolver` | **Phase 3-2 で削除済み** |
-| `tctx` + `reg` 二重パラメータ | 全 Transformer 関数（105 関数） | `tctx.type_registry` に統一 | **D5: 未着手**。分析・設計済み（tasks.md 参照） |
+| `tctx` + `reg` 二重パラメータ | 全 Transformer 関数（99 関数） | `tctx.type_registry` に統一 | **D5 で削除済み** |
 | 合成型の直接 Item push | `src/transformer/functions/mod.rs` 等 | `SyntheticTypeRegistry` | **D0a で解消済み** |
 | P1 のブリッジ実装 | `src/pipeline/mod.rs` | 本 PRD の本実装 | **Phase A で削除済み** |
 
 ### 残作業（実施順）
 
-1. **D5**: 全 Transformer 関数 112 個（14 ファイル）+ 全テストコード — `reg: &TypeRegistry` パラメータを削除し `tctx.type_registry` に統一
+1. **D-2**: Transformer struct 導入（105 関数のメソッド化）— `tasks.d2-transformer-struct.md`
 2. **Phase E**: 最終検証
 
 ## 作業ステップ
@@ -253,8 +253,7 @@ let rust_source = pipeline::transpile_single(&source)?;
 - ~~`set_expected_types_in_nested_calls` の削除~~ → Phase 3-5 で完了
 
 残り:
-1. `tctx` + `reg` 二重パラメータの統合 → D5 で対応
-2. 各削除後に `cargo test` が GREEN であることを確認
+1. 各削除後に `cargo test` が GREEN であることを確認
 
 ### Step 6: 全テスト + ベンチマーク（検証）
 
@@ -296,7 +295,7 @@ let rust_source = pipeline::transpile_single(&source)?;
 - `ExprContext` → **Phase 2 で削除済み**
 - `resolve_expr_type_heuristic` → **Phase 3-2 で削除済み**
 - `TypeEnv` narrowing → **Phase 4 で削除済み**
-- `tctx` + `reg` 二重パラメータ → **D5 で統合予定**
+- `tctx` + `reg` 二重パラメータ → **D5 で削除済み**
 
 - [ ] 統一パイプライン `transpile(TranspileInput) -> TranspileOutput` が P1〜P7 の全コンポーネントを接続して動作する
 - [ ] 既存 `lib.rs` 公開 API（`transpile()`, `transpile_collecting()` 等）が統一パイプラインのラッパーになっている

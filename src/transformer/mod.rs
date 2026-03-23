@@ -117,7 +117,7 @@ pub fn transform_module(module: &Module, reg: &TypeRegistry) -> Result<Vec<Item>
     let mg = crate::pipeline::ModuleGraph::empty();
     let resolution = crate::pipeline::type_resolution::FileTypeResolution::empty();
     let tctx = context::TransformContext::new(&mg, reg, &resolution, std::path::Path::new(""));
-    let mut items = transform_module_with_path(module, &tctx, reg, None, &mut synthetic)?;
+    let mut items = transform_module_with_path(module, &tctx, None, &mut synthetic)?;
     let mut all = synthetic.into_items();
     all.append(&mut items);
     Ok(all)
@@ -130,7 +130,7 @@ pub fn transform_module_with_context(
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Vec<Item>> {
     let current_file_dir = ctx.file_path.parent().and_then(|p| p.to_str());
-    transform_module_with_path(module, ctx, ctx.type_registry, current_file_dir, synthetic)
+    transform_module_with_path(module, ctx, current_file_dir, synthetic)
 }
 
 /// Transforms an SWC [`Module`] into IR items, with the file's crate-relative directory.
@@ -141,12 +141,11 @@ pub fn transform_module_with_context(
 pub fn transform_module_with_path(
     module: &Module,
     tctx: &TransformContext<'_>,
-    reg: &TypeRegistry,
     current_file_dir: Option<&str>,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Vec<Item>> {
     // Pre-scan: collect class info for inheritance resolution
-    let class_map = classes::pre_scan_classes(module, synthetic, tctx, reg);
+    let class_map = classes::pre_scan_classes(module, synthetic, tctx);
     let iface_methods = classes::pre_scan_interface_methods(module);
 
     let mut items = Vec::new();
@@ -154,7 +153,6 @@ pub fn transform_module_with_path(
         let (converted, _warnings) = transform_module_item(
             module_item,
             tctx,
-            reg,
             &class_map,
             &iface_methods,
             false,
@@ -187,7 +185,7 @@ pub fn transform_module_collecting(
     let resolution = crate::pipeline::type_resolution::FileTypeResolution::empty();
     let tctx = context::TransformContext::new(&mg, reg, &resolution, std::path::Path::new(""));
     let (mut items, unsupported) =
-        transform_module_collecting_with_path(module, &tctx, reg, None, &mut synthetic)?;
+        transform_module_collecting_with_path(module, &tctx, None, &mut synthetic)?;
     let mut all = synthetic.into_items();
     all.append(&mut items);
     Ok((all, unsupported))
@@ -197,11 +195,10 @@ pub fn transform_module_collecting(
 pub fn transform_module_collecting_with_path(
     module: &Module,
     tctx: &TransformContext<'_>,
-    reg: &TypeRegistry,
     current_file_dir: Option<&str>,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<(Vec<Item>, Vec<UnsupportedSyntaxError>)> {
-    let class_map = classes::pre_scan_classes(module, synthetic, tctx, reg);
+    let class_map = classes::pre_scan_classes(module, synthetic, tctx);
     let iface_methods = classes::pre_scan_interface_methods(module);
 
     let mut items = Vec::new();
@@ -211,7 +208,6 @@ pub fn transform_module_collecting_with_path(
         match transform_module_item(
             module_item,
             tctx,
-            reg,
             &class_map,
             &iface_methods,
             true,
@@ -252,7 +248,6 @@ pub fn transform_module_collecting_with_path(
 fn transform_module_item(
     module_item: &ModuleItem,
     tctx: &TransformContext<'_>,
-    reg: &TypeRegistry,
     class_map: &HashMap<String, ClassInfo>,
     iface_methods: &HashMap<String, Vec<String>>,
     resilient: bool,
@@ -264,7 +259,6 @@ fn transform_module_item(
             decl,
             Visibility::Private,
             tctx,
-            reg,
             class_map,
             iface_methods,
             resilient,
@@ -274,7 +268,6 @@ fn transform_module_item(
             &export.decl,
             Visibility::Public,
             tctx,
-            reg,
             class_map,
             iface_methods,
             resilient,
@@ -517,12 +510,12 @@ fn transform_decl(
     decl: &Decl,
     vis: Visibility,
     tctx: &TransformContext<'_>,
-    reg: &TypeRegistry,
     class_map: &HashMap<String, ClassInfo>,
     iface_methods: &HashMap<String, Vec<String>>,
     resilient: bool,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<(Vec<Item>, Vec<String>)> {
+    let reg = tctx.type_registry;
     match decl {
         Decl::TsInterface(interface_decl) => {
             let items = types::convert_interface_items(interface_decl, vis, synthetic, reg)?;
@@ -534,7 +527,7 @@ fn transform_decl(
         }
         Decl::Fn(fn_decl) => {
             let (items, warnings) =
-                functions::convert_fn_decl(fn_decl, vis, tctx, reg, resilient, synthetic)?;
+                functions::convert_fn_decl(fn_decl, vis, tctx, resilient, synthetic)?;
             Ok((items, warnings))
         }
         Decl::Class(class_decl) => {
@@ -542,7 +535,6 @@ fn transform_decl(
                 class_decl,
                 vis,
                 tctx,
-                reg,
                 class_map,
                 iface_methods,
                 synthetic,
@@ -550,7 +542,7 @@ fn transform_decl(
             Ok((items, vec![]))
         }
         Decl::Var(var_decl) => {
-            functions::convert_var_decl_arrow_fns(var_decl, vis, tctx, reg, resilient, synthetic)
+            functions::convert_var_decl_arrow_fns(var_decl, vis, tctx, resilient, synthetic)
         }
         Decl::TsEnum(ts_enum) => {
             let items = convert_ts_enum(ts_enum, vis)?;
@@ -566,7 +558,6 @@ fn transform_decl(
                             inner_decl,
                             vis.clone(),
                             tctx,
-                            reg,
                             class_map,
                             iface_methods,
                             resilient,

@@ -21,7 +21,7 @@
 **Transformer:** AnyTypeAnalyzer 統合済み。to_pascal_case 集約済み。SyntheticTypeRegistry ソート修正済み。
 
 **残存する実装不足:**
-- tctx + reg 二重パラメータ: 112 関数に残存（D5 で削除予定）
+- tctx + type_env + synthetic パラメータ貫通: 105 関数（D-2 で Transformer struct に統合予定）
 
 ## タスク一覧
 
@@ -41,7 +41,9 @@ D-TR〜D4 (型解決の統一)     ─┤
   Phase 1〜3: 完了           │
   Phase 4: TypeEnv 簡素化   │  完了
                              │
-D5 (reg パラメータ削除)     ─┘─→ Phase 4 完了後に実施
+D5 (reg パラメータ削除)     ─┘─→ 完了
+                             │
+D-2 (Transformer struct)    ─┘─→ D5 完了後に実施
 ```
 
 #### D1: import 解決の ModuleGraph 統合 ✅
@@ -78,10 +80,16 @@ D5 (reg パラメータ削除)     ─┘─→ Phase 4 完了後に実施
 
 Phase 2（ExprContext 削除）で `ctx` パラメータが消えた後、シグネチャが安定した状態で実施する。Phase 2 より前に実施すると、シグネチャ変更が二度手間になる。
 
-- [ ] **D5**: 112 関数の `reg: &TypeRegistry` を削除し `tctx.type_registry` に統一
-  - 分析結果: 14 ファイル、112 関数。全箇所で `reg == tctx.type_registry`
-  - `/large-scale-refactor` スキルに従う
-  - **依存**: Phase 2.5 完了後
+- [x] **D5**: 99 関数の `reg: &TypeRegistry` を削除し `tctx.type_registry` に統一（13 ファイル、~350 呼び出し箇所を修正）
+
+#### D-2: Transformer struct 導入
+
+**詳細計画: `tasks.d2-transformer-struct.md`**
+
+`tctx`, `type_env`, `synthetic` の 3 パラメータを `Transformer` struct のフィールドに束ね、105 関数をメソッドに変換する。Phase D-2-A〜I の 9 フェーズで段階的に実施。
+
+- [ ] **D-2**: Transformer struct 導入（105 関数のメソッド化 + ラッパー遷移 + current_file_dir 除去）
+  - **依存**: D5 完了後
 
 ### Phase E: 最終検証
 

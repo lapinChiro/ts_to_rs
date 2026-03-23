@@ -93,7 +93,6 @@ mod tests {
         let old_items = crate::transformer::transform_module_with_path(
             &module,
             &old_tctx,
-            &reg,
             None,
             &mut synthetic_old,
         )

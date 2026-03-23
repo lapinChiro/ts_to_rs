@@ -9,7 +9,6 @@ use swc_ecma_ast as ast;
 use crate::ir::{ClosureBody, Expr, Param, RustType, Stmt};
 use crate::pipeline::type_converter::convert_ts_type;
 use crate::pipeline::SyntheticTypeRegistry;
-use crate::registry::TypeRegistry;
 use crate::transformer::functions::{convert_last_return_to_tail, convert_ts_type_with_fallback};
 use crate::transformer::statements::convert_stmt;
 use crate::transformer::TypeEnv;
@@ -25,12 +24,12 @@ use crate::transformer::context::TransformContext;
 fn convert_function_param_pat(
     pat: &ast::Pat,
     tctx: &TransformContext<'_>,
-    reg: &TypeRegistry,
     params: &mut Vec<Param>,
     expansion_stmts: &mut Vec<Stmt>,
     context: &str,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<()> {
+    let reg = tctx.type_registry;
     match pat {
         ast::Pat::Ident(ident) => {
             let name = ident.id.sym.to_string();
@@ -46,7 +45,7 @@ fn convert_function_param_pat(
         }
         ast::Pat::Object(obj_pat) => {
             let (param, stmts) = crate::transformer::functions::convert_object_destructuring_param(
-                obj_pat, tctx, reg, synthetic,
+                obj_pat, tctx, synthetic,
             )?;
             params.push(param);
             expansion_stmts.extend(stmts);
@@ -116,10 +115,10 @@ fn convert_function_param_pat(
 pub(super) fn convert_fn_expr(
     fn_expr: &ast::FnExpr,
     tctx: &TransformContext<'_>,
-    reg: &TypeRegistry,
     type_env: &TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Expr> {
+    let reg = tctx.type_registry;
     let func = &fn_expr.function;
 
     // Convert parameters — reuse the same logic as arrow functions
@@ -129,7 +128,6 @@ pub(super) fn convert_fn_expr(
         convert_function_param_pat(
             &param.pat,
             tctx,
-            reg,
             &mut params,
             &mut expansion_stmts,
             "function expression",
@@ -160,7 +158,6 @@ pub(super) fn convert_fn_expr(
                 stmts.extend(convert_stmt(
                     stmt,
                     tctx,
-                    reg,
                     return_type.as_ref(),
                     &mut inner_env,
                     synthetic,
@@ -192,7 +189,6 @@ pub(super) fn convert_fn_expr(
 pub fn convert_arrow_expr(
     arrow: &ast::ArrowExpr,
     tctx: &TransformContext<'_>,
-    reg: &TypeRegistry,
     resilient: bool,
     fallback_warnings: &mut Vec<String>,
     type_env: &TypeEnv,
@@ -201,7 +197,6 @@ pub fn convert_arrow_expr(
     convert_arrow_expr_with_return_type(
         arrow,
         tctx,
-        reg,
         resilient,
         fallback_warnings,
         type_env,
@@ -221,7 +216,6 @@ pub fn convert_arrow_expr(
 pub(crate) fn convert_arrow_expr_with_return_type(
     arrow: &ast::ArrowExpr,
     tctx: &TransformContext<'_>,
-    reg: &TypeRegistry,
     resilient: bool,
     fallback_warnings: &mut Vec<String>,
     type_env: &TypeEnv,
@@ -229,6 +223,7 @@ pub(crate) fn convert_arrow_expr_with_return_type(
     override_param_types: Option<&[RustType]>,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Expr> {
+    let reg = tctx.type_registry;
     let mut params = Vec::new();
     let mut expansion_stmts = Vec::new();
     {
@@ -278,7 +273,6 @@ pub(crate) fn convert_arrow_expr_with_return_type(
                 other => convert_function_param_pat(
                     other,
                     tctx,
-                    reg,
                     &mut params,
                     &mut expansion_stmts,
                     "arrow",
@@ -300,7 +294,6 @@ pub(crate) fn convert_arrow_expr_with_return_type(
                 fallback_warnings,
                 synthetic,
                 tctx,
-                reg,
             )
         })
         .transpose()?
@@ -309,7 +302,7 @@ pub(crate) fn convert_arrow_expr_with_return_type(
     let body = if expansion_stmts.is_empty() {
         match arrow.body.as_ref() {
             ast::BlockStmtOrExpr::Expr(expr) => {
-                let ir_expr = super::convert_expr(expr, tctx, reg, type_env, synthetic)?;
+                let ir_expr = super::convert_expr(expr, tctx, type_env, synthetic)?;
                 ClosureBody::Expr(Box::new(ir_expr))
             }
             ast::BlockStmtOrExpr::BlockStmt(block) => {
@@ -319,7 +312,6 @@ pub(crate) fn convert_arrow_expr_with_return_type(
                     stmts.extend(convert_stmt(
                         stmt,
                         tctx,
-                        reg,
                         return_type.as_ref(),
                         &mut inner_env,
                         synthetic,
@@ -334,7 +326,7 @@ pub(crate) fn convert_arrow_expr_with_return_type(
         let mut body_stmts = expansion_stmts;
         match arrow.body.as_ref() {
             ast::BlockStmtOrExpr::Expr(expr) => {
-                let ir_expr = super::convert_expr(expr, tctx, reg, type_env, synthetic)?;
+                let ir_expr = super::convert_expr(expr, tctx, type_env, synthetic)?;
                 body_stmts.push(Stmt::Return(Some(ir_expr)));
             }
             ast::BlockStmtOrExpr::BlockStmt(block) => {
@@ -343,7 +335,6 @@ pub(crate) fn convert_arrow_expr_with_return_type(
                     body_stmts.extend(convert_stmt(
                         stmt,
                         tctx,
-                        reg,
                         return_type.as_ref(),
                         &mut inner_env,
                         synthetic,

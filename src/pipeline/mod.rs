@@ -91,7 +91,6 @@ pub fn transpile_pipeline(input: TranspileInput) -> Result<TranspileOutput> {
         let (items, unsupported) = crate::transformer::transform_module_collecting_with_path(
             &file.module,
             &tctx,
-            &shared_registry,
             tctx.file_path.parent().and_then(|p| p.to_str()),
             &mut file_synthetic,
         )?;

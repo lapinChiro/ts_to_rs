@@ -1006,7 +1006,7 @@ fn test_extract_fn_return_type_from_fn_type() {
     };
     let f = TctxFixture::new();
     let tctx = f.tctx();
-    let result = extract_fn_return_type(&ty, &tctx, f.reg());
+    let result = extract_fn_return_type(&ty, &tctx);
     assert_eq!(result, Some(RustType::String));
 }
 
@@ -1030,7 +1030,7 @@ fn test_extract_fn_return_type_from_named_type_in_registry() {
     };
     let f = TctxFixture::with_reg(reg);
     let tctx = f.tctx();
-    let result = extract_fn_return_type(&ty, &tctx, f.reg());
+    let result = extract_fn_return_type(&ty, &tctx);
     assert_eq!(
         result,
         Some(RustType::Named {
@@ -1045,7 +1045,7 @@ fn test_extract_fn_return_type_unknown_returns_none() {
     let ty = RustType::String;
     let f = TctxFixture::new();
     let tctx = f.tctx();
-    let result = extract_fn_return_type(&ty, &tctx, f.reg());
+    let result = extract_fn_return_type(&ty, &tctx);
     assert_eq!(result, None);
 }
 
@@ -1059,7 +1059,7 @@ fn test_extract_fn_param_types_from_fn_type() {
     };
     let f = TctxFixture::new();
     let tctx = f.tctx();
-    let result = extract_fn_param_types(&ty, &tctx, f.reg());
+    let result = extract_fn_param_types(&ty, &tctx);
     assert_eq!(result, Some(vec![RustType::F64, RustType::String]));
 }
 
@@ -1089,7 +1089,7 @@ fn test_extract_fn_param_types_from_named_type_in_registry() {
     };
     let f = TctxFixture::with_reg(reg);
     let tctx = f.tctx();
-    let result = extract_fn_param_types(&ty, &tctx, f.reg());
+    let result = extract_fn_param_types(&ty, &tctx);
     assert_eq!(
         result,
         Some(vec![RustType::Named {
@@ -1104,7 +1104,7 @@ fn test_extract_fn_param_types_unknown_returns_none() {
     let ty = RustType::String;
     let f = TctxFixture::new();
     let tctx = f.tctx();
-    let result = extract_fn_param_types(&ty, &tctx, f.reg());
+    let result = extract_fn_param_types(&ty, &tctx);
     assert_eq!(result, None);
 }
 

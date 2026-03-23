@@ -17,9 +17,9 @@ use crate::transformer::context::TransformContext;
 pub(super) fn convert_lit(
     lit: &ast::Lit,
     expected: Option<&RustType>,
-    _tctx: &TransformContext<'_>,
-    reg: &TypeRegistry,
+    tctx: &TransformContext<'_>,
 ) -> Result<Expr> {
+    let reg = tctx.type_registry;
     match lit {
         ast::Lit::Num(n) => Ok(Expr::NumberLit(n.value)),
         ast::Lit::Str(s) => {

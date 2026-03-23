@@ -30,10 +30,10 @@ pub fn convert_fn_decl(
     fn_decl: &ast::FnDecl,
     vis: Visibility,
     tctx: &TransformContext<'_>,
-    reg: &TypeRegistry,
     resilient: bool,
     synthetic_out: &mut SyntheticTypeRegistry,
 ) -> Result<(Vec<Item>, Vec<String>)> {
+    let reg = tctx.type_registry;
     let name = fn_decl.ident.sym.to_string();
     let mut fallback_warnings = Vec::new();
     let mut items = Vec::new();
@@ -49,7 +49,6 @@ pub fn convert_fn_decl(
             resilient,
             &mut fallback_warnings,
             tctx,
-            reg,
             &mut synthetic,
         )?;
         params.push(p);
@@ -70,7 +69,6 @@ pub fn convert_fn_decl(
                 &mut fallback_warnings,
                 &mut synthetic,
                 tctx,
-                reg,
             )
         })
         .transpose()?;
@@ -165,7 +163,6 @@ pub fn convert_fn_decl(
         Some(block) => convert_stmt_list(
             &block.stmts,
             tctx,
-            reg,
             return_type.as_ref(),
             &mut fn_type_env,
             &mut synthetic,
@@ -248,9 +245,9 @@ pub(crate) fn convert_ts_type_with_fallback(
     resilient: bool,
     fallback_warnings: &mut Vec<String>,
     synthetic: &mut SyntheticTypeRegistry,
-    _tctx: &TransformContext<'_>,
-    reg: &TypeRegistry,
+    tctx: &TransformContext<'_>,
 ) -> Result<RustType> {
+    let reg = tctx.type_registry;
     match convert_ts_type(ts_type, synthetic, reg) {
         Ok(ty) => Ok(ty),
         Err(e) => {
@@ -278,9 +275,9 @@ fn convert_param(
     resilient: bool,
     fallback_warnings: &mut Vec<String>,
     tctx: &TransformContext<'_>,
-    reg: &TypeRegistry,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<(Param, Vec<Stmt>, Vec<Item>)> {
+    let reg = tctx.type_registry;
     match pat {
         ast::Pat::Ident(ident) => {
             let param_name = ident.id.sym.to_string();
@@ -341,7 +338,6 @@ fn convert_param(
                 fallback_warnings,
                 synthetic,
                 tctx,
-                reg,
             )?;
             // Trait types in parameter position → &dyn Trait
             let rust_type = wrap_trait_for_position(rust_type, TypePosition::Param, reg);
@@ -355,7 +351,7 @@ fn convert_param(
             ))
         }
         ast::Pat::Object(obj_pat) => {
-            let (param, stmts) = convert_object_destructuring_param(obj_pat, tctx, reg, synthetic)?;
+            let (param, stmts) = convert_object_destructuring_param(obj_pat, tctx, synthetic)?;
             Ok((param, stmts, vec![]))
         }
         ast::Pat::Assign(assign) => convert_default_param(
@@ -365,7 +361,6 @@ fn convert_param(
             resilient,
             fallback_warnings,
             tctx,
-            reg,
             synthetic,
         ),
         ast::Pat::Rest(rest) => {
@@ -380,7 +375,6 @@ fn convert_param(
                             fallback_warnings,
                             synthetic,
                             tctx,
-                            reg,
                         )
                     })
                     .transpose()?;
@@ -411,7 +405,6 @@ fn convert_default_param(
     resilient: bool,
     fallback_warnings: &mut Vec<String>,
     tctx: &TransformContext<'_>,
-    reg: &TypeRegistry,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<(Param, Vec<Stmt>, Vec<Item>)> {
     // Recursively convert the inner parameter (left side)
@@ -422,7 +415,6 @@ fn convert_default_param(
         resilient,
         fallback_warnings,
         tctx,
-        reg,
         synthetic,
     )?;
     let param_name = inner_param.name.clone();
@@ -536,7 +528,6 @@ pub(crate) fn convert_default_value(
             let expr = crate::transformer::expressions::convert_expr(
                 other,
                 &dummy_tctx,
-                &dummy_reg,
                 &crate::transformer::TypeEnv::new(),
                 synthetic,
             )?;
@@ -576,9 +567,9 @@ fn infer_type_from_default(expr: &ast::Expr) -> Option<RustType> {
 pub(crate) fn convert_object_destructuring_param(
     obj_pat: &ast::ObjectPat,
     tctx: &TransformContext<'_>,
-    reg: &TypeRegistry,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<(Param, Vec<Stmt>)> {
+    let reg = tctx.type_registry;
     let rust_type = if let Some(type_ann) = obj_pat.type_ann.as_ref() {
         convert_ts_type(&type_ann.type_ann, synthetic, reg)?
     } else {
@@ -618,7 +609,6 @@ pub(crate) fn convert_object_destructuring_param(
                     let default_ir = crate::transformer::expressions::convert_expr(
                         default_expr,
                         tctx,
-                        reg,
                         &crate::transformer::TypeEnv::new(),
                         synthetic,
                     )?;
@@ -674,7 +664,6 @@ pub(crate) fn convert_object_destructuring_param(
                             &nested_source,
                             &mut stmts,
                             tctx,
-                            reg,
                             synthetic,
                         )?;
                     }
@@ -739,7 +728,6 @@ fn expand_fn_param_object_props(
     source_expr: &Expr,
     stmts: &mut Vec<Stmt>,
     tctx: &TransformContext<'_>,
-    reg: &TypeRegistry,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<()> {
     for prop in props {
@@ -755,7 +743,6 @@ fn expand_fn_param_object_props(
                     let default_ir = crate::transformer::expressions::convert_expr(
                         default_expr,
                         tctx,
-                        reg,
                         &crate::transformer::TypeEnv::new(),
                         synthetic,
                     )?;
@@ -810,7 +797,6 @@ fn expand_fn_param_object_props(
                             &nested_source,
                             stmts,
                             tctx,
-                            reg,
                             synthetic,
                         )?;
                     }
@@ -1114,10 +1100,10 @@ pub(crate) fn convert_var_decl_arrow_fns(
     var_decl: &ast::VarDecl,
     vis: Visibility,
     tctx: &TransformContext<'_>,
-    reg: &TypeRegistry,
     resilient: bool,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<(Vec<Item>, Vec<String>)> {
+    let reg = tctx.type_registry;
     let mut items = Vec::new();
     let mut all_warnings = Vec::new();
     for decl in &var_decl.decls {
@@ -1140,10 +1126,10 @@ pub(crate) fn convert_var_decl_arrow_fns(
                     .and_then(|ann| convert_ts_type(&ann.type_ann, synthetic, reg).ok());
                 let ret = var_rust_type
                     .as_ref()
-                    .and_then(|ty| extract_fn_return_type(ty, tctx, reg));
+                    .and_then(|ty| extract_fn_return_type(ty, tctx));
                 let param_types = var_rust_type
                     .as_ref()
-                    .and_then(|ty| extract_fn_param_types(ty, tctx, reg));
+                    .and_then(|ty| extract_fn_param_types(ty, tctx));
                 (n, ret, param_types)
             }
             _ => continue,
@@ -1214,7 +1200,6 @@ pub(crate) fn convert_var_decl_arrow_fns(
         let closure = crate::transformer::expressions::convert_arrow_expr_with_return_type(
             arrow,
             tctx,
-            reg,
             resilient,
             &mut fallback_warnings,
             &arrow_type_env,
@@ -1277,9 +1262,9 @@ pub(crate) fn convert_var_decl_arrow_fns(
 /// - `RustType::Named { name, .. }` → looks up TypeRegistry for `TypeDef::Function` and extracts return_type
 pub(super) fn extract_fn_return_type(
     ty: &RustType,
-    _tctx: &TransformContext<'_>,
-    reg: &TypeRegistry,
+    tctx: &TransformContext<'_>,
 ) -> Option<RustType> {
+    let reg = tctx.type_registry;
     match ty {
         RustType::Fn { return_type, .. } => {
             let rt = return_type.as_ref();
@@ -1307,9 +1292,9 @@ pub(super) fn extract_fn_return_type(
 /// - `RustType::Named { name, .. }` → looks up TypeRegistry for `TypeDef::Function` and extracts params
 pub(super) fn extract_fn_param_types(
     ty: &RustType,
-    _tctx: &TransformContext<'_>,
-    reg: &TypeRegistry,
+    tctx: &TransformContext<'_>,
 ) -> Option<Vec<RustType>> {
+    let reg = tctx.type_registry;
     match ty {
         RustType::Fn { params, .. } => Some(params.clone()),
         RustType::Named { name, .. } => {
