@@ -28,6 +28,34 @@ use crate::registry::TypeRegistry;
 use crate::transformer::classes::ClassInfo;
 use crate::transformer::context::TransformContext;
 
+/// 変換処理の状態を保持する構造体。
+///
+/// 不変コンテキスト (`tctx`) と可変状態 (`type_env`, `synthetic`) を束ね、
+/// 全変換関数をメソッドとして提供する。各サブモジュールに `impl Transformer`
+/// ブロックを配置し、ファイル構成を変更せずにメソッド化する。
+pub(crate) struct Transformer<'a> {
+    /// 不変コンテキスト（TypeRegistry, ModuleGraph, TypeResolution, file path）
+    pub(crate) tctx: &'a TransformContext<'a>,
+    /// ローカル変数の型追跡（可変 — ブロックスコープで push_scope / pop_scope）
+    pub(crate) type_env: &'a mut TypeEnv,
+    /// 合成型レジストリ（可変 — 変換中に型が追加される）
+    pub(crate) synthetic: &'a mut SyntheticTypeRegistry,
+}
+
+impl<'a> Transformer<'a> {
+    /// `tctx.type_registry` へのショートカット。
+    pub(crate) fn reg(&self) -> &'a TypeRegistry {
+        self.tctx.type_registry
+    }
+
+    /// 現在のファイルのディレクトリパス（crate ルート相対）。
+    ///
+    /// `tctx.file_path.parent()` から取得する。import パス解決に使用。
+    pub(crate) fn current_file_dir(&self) -> Option<&'a str> {
+        self.tctx.file_path.parent().and_then(|p| p.to_str())
+    }
+}
+
 /// Extracts the identifier name from a [`ast::Pat::Ident`] pattern.
 ///
 /// Returns an error if the pattern is not an identifier binding.

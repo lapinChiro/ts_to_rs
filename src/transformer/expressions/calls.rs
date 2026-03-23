@@ -15,214 +15,312 @@ use super::literals::needs_debug_format;
 use super::methods::map_method_call;
 use super::type_resolution::get_expr_type;
 use crate::transformer::context::TransformContext;
+use crate::transformer::Transformer;
 
-/// Converts a function/method call expression.
-///
-/// - `foo(x, y)` → `Expr::FnCall { name: "foo", args }`
-/// - `obj.method(x)` → `Expr::MethodCall { object, method, args }`
+impl<'a> Transformer<'a> {
+    /// Converts a function/method call expression.
+    ///
+    /// - `foo(x, y)` → `Expr::FnCall { name: "foo", args }`
+    /// - `obj.method(x)` → `Expr::MethodCall { object, method, args }`
+    pub(crate) fn convert_call_expr(&mut self, call: &ast::CallExpr) -> Result<Expr> {
+        let reg = self.reg();
+
+        match call.callee {
+            ast::Callee::Expr(ref callee) => match callee.as_ref() {
+                ast::Expr::Ident(ident) => {
+                    let fn_name = ident.sym.to_string();
+
+                    // parseInt(s) → s.parse::<f64>().unwrap()
+                    // parseFloat(s) → s.parse::<f64>().unwrap()
+                    // isNaN(x) → x.is_nan()
+                    if let Some(result) = convert_global_builtin(
+                        &fn_name,
+                        &call.args,
+                        self.tctx,
+                        self.type_env,
+                        self.synthetic,
+                    )? {
+                        return Ok(result);
+                    }
+
+                    // Look up function parameter types from the registry or TypeEnv
+                    let typeenv_params: Vec<(String, RustType)>;
+                    let mut has_rest = false;
+                    let param_types: Option<&[(String, RustType)]> =
+                        if let Some(TypeDef::Function {
+                            params,
+                            has_rest: rest,
+                            ..
+                        }) = reg.get(&fn_name)
+                        {
+                            has_rest = *rest;
+                            Some(params.as_slice())
+                        } else if let Some(RustType::Fn { params, .. }) =
+                            self.type_env.get(&fn_name)
+                        {
+                            typeenv_params = params
+                                .iter()
+                                .enumerate()
+                                .map(|(i, ty)| (format!("_p{i}"), ty.clone()))
+                                .collect();
+                            Some(typeenv_params.as_slice())
+                        } else {
+                            None
+                        };
+                    let args = convert_call_args_with_types(
+                        &call.args,
+                        self.tctx,
+                        param_types,
+                        has_rest,
+                        self.type_env,
+                        self.synthetic,
+                    )?;
+                    Ok(Expr::FnCall {
+                        name: fn_name,
+                        args,
+                    })
+                }
+                ast::Expr::Member(member) => {
+                    let method = match &member.prop {
+                        ast::MemberProp::Ident(ident) => ident.sym.to_string(),
+                        ast::MemberProp::PrivateName(private) => format!("_{}", private.name),
+                        _ => return Err(anyhow!("unsupported call target member property")),
+                    };
+
+                    if let ast::Expr::Ident(obj_ident) = member.obj.as_ref() {
+                        // console.log/error/warn → println!/eprintln!
+                        if obj_ident.sym.as_ref() == "console" {
+                            let macro_name = match method.as_str() {
+                                "log" => "println",
+                                "error" | "warn" => "eprintln",
+                                _ => {
+                                    return Err(anyhow!(
+                                        "unsupported console method: {}",
+                                        method
+                                    ))
+                                }
+                            };
+                            let args = convert_call_args(
+                                &call.args,
+                                self.tctx,
+                                self.type_env,
+                                self.synthetic,
+                            )?;
+                            let use_debug = call
+                                .args
+                                .iter()
+                                .map(|arg| {
+                                    let ty = get_expr_type(self.tctx, &arg.expr);
+                                    needs_debug_format(ty)
+                                })
+                                .collect();
+                            return Ok(Expr::MacroCall {
+                                name: macro_name.to_string(),
+                                args,
+                                use_debug,
+                            });
+                        }
+
+                        // Math.method(args) → first_arg.method(rest_args)
+                        if obj_ident.sym.as_ref() == "Math" {
+                            return convert_math_call(
+                                &method,
+                                &call.args,
+                                self.tctx,
+                                self.type_env,
+                                self.synthetic,
+                            );
+                        }
+
+                        // Number.isNaN(x) → x.is_nan(), Number.isFinite(x) → x.is_finite()
+                        if obj_ident.sym.as_ref() == "Number" {
+                            return convert_number_static_call(
+                                &method,
+                                &call.args,
+                                self.tctx,
+                                self.type_env,
+                                self.synthetic,
+                            );
+                        }
+
+                        // fs.readFileSync/writeFileSync/existsSync → std::fs equivalents
+                        if obj_ident.sym.as_ref() == "fs" {
+                            return convert_fs_call(
+                                &method,
+                                &call.args,
+                                self.tctx,
+                                self.type_env,
+                                self.synthetic,
+                            );
+                        }
+                    }
+
+                    // Cat A: method receiver — converted before method resolution
+                    let object =
+                        convert_expr(&member.obj, self.tctx, self.type_env, self.synthetic)?;
+                    // Look up method parameter types from the object's type
+                    let method_sig = get_expr_type(self.tctx, &member.obj).and_then(|ty| {
+                        if let RustType::Named { name, .. } = ty {
+                            if let Some(TypeDef::Struct { methods, .. }) = reg.get(name) {
+                                return methods.get(&method).cloned();
+                            }
+                        }
+                        None
+                    });
+                    let method_params = method_sig.as_ref().map(|sig| sig.params.as_slice());
+                    let args = convert_call_args_with_types(
+                        &call.args,
+                        self.tctx,
+                        method_params,
+                        false,
+                        self.type_env,
+                        self.synthetic,
+                    )?;
+                    let method_call = map_method_call(object, &method, args);
+                    Ok(method_call)
+                }
+                // Unwrap parenthesized expression and retry: (foo)(args) → foo(args)
+                ast::Expr::Paren(paren) => {
+                    let unwrapped_call = ast::CallExpr {
+                        callee: ast::Callee::Expr(paren.expr.clone()),
+                        args: call.args.clone(),
+                        span: call.span,
+                        ctxt: call.ctxt,
+                        type_args: call.type_args.clone(),
+                    };
+                    convert_call_expr(
+                        &unwrapped_call,
+                        self.tctx,
+                        self.type_env,
+                        self.synthetic,
+                    )
+                }
+                // Chained call: f(x)(y) → { let _f = f(x); _f(y) }
+                ast::Expr::Call(inner_call) => {
+                    let inner_result =
+                        convert_call_expr(inner_call, self.tctx, self.type_env, self.synthetic)?;
+                    let args =
+                        convert_call_args(&call.args, self.tctx, self.type_env, self.synthetic)?;
+                    Ok(Expr::Block(vec![
+                        Stmt::Let {
+                            name: "_f".to_string(),
+                            mutable: false,
+                            ty: None,
+                            init: Some(inner_result),
+                        },
+                        Stmt::TailExpr(Expr::FnCall {
+                            name: "_f".to_string(),
+                            args,
+                        }),
+                    ]))
+                }
+                // IIFE: (() => expr)() or (function() { ... })()
+                // Arrow/Fn expressions as callee → convert to closure and call immediately
+                ast::Expr::Arrow(arrow) => {
+                    let mut warnings = Vec::new();
+                    let closure = convert_arrow_expr(
+                        arrow,
+                        self.tctx,
+                        false,
+                        &mut warnings,
+                        self.type_env,
+                        self.synthetic,
+                    )?;
+                    let args =
+                        convert_call_args(&call.args, self.tctx, self.type_env, self.synthetic)?;
+                    Ok(Expr::Block(vec![
+                        Stmt::Let {
+                            name: "__iife".to_string(),
+                            mutable: false,
+                            ty: None,
+                            init: Some(closure),
+                        },
+                        Stmt::TailExpr(Expr::FnCall {
+                            name: "__iife".to_string(),
+                            args,
+                        }),
+                    ]))
+                }
+                ast::Expr::Fn(fn_expr) => {
+                    let closure =
+                        convert_fn_expr(fn_expr, self.tctx, self.type_env, self.synthetic)?;
+                    let args =
+                        convert_call_args(&call.args, self.tctx, self.type_env, self.synthetic)?;
+                    Ok(Expr::Block(vec![
+                        Stmt::Let {
+                            name: "__iife".to_string(),
+                            mutable: false,
+                            ty: None,
+                            init: Some(closure),
+                        },
+                        Stmt::TailExpr(Expr::FnCall {
+                            name: "__iife".to_string(),
+                            args,
+                        }),
+                    ]))
+                }
+                _ => Err(anyhow!("unsupported call target expression")),
+            },
+            ast::Callee::Super(_) => {
+                let args =
+                    convert_call_args(&call.args, self.tctx, self.type_env, self.synthetic)?;
+                Ok(Expr::FnCall {
+                    name: "super".to_string(),
+                    args,
+                })
+            }
+            _ => Err(anyhow!("unsupported callee type")),
+        }
+    }
+
+    /// Converts a `new` expression to a `ClassName::new(args)` call.
+    ///
+    /// `new Foo(x, y)` → `Expr::FnCall { name: "Foo::new", args }`
+    pub(crate) fn convert_new_expr(&mut self, new_expr: &ast::NewExpr) -> Result<Expr> {
+        let reg = self.reg();
+
+        let class_name = match new_expr.callee.as_ref() {
+            ast::Expr::Ident(ident) => ident.sym.to_string(),
+            _ => return Err(anyhow!("unsupported new expression target")),
+        };
+        // Look up constructor param types from struct fields in TypeRegistry
+        let param_types = reg.get(&class_name).and_then(|def| match def {
+            TypeDef::Struct { fields, .. } => Some(fields.clone()),
+            _ => None,
+        });
+        let param_slice = param_types.as_deref();
+        let args = match &new_expr.args {
+            Some(args) => convert_call_args_with_types(
+                args,
+                self.tctx,
+                param_slice,
+                false,
+                self.type_env,
+                self.synthetic,
+            )?,
+            None => vec![],
+        };
+        Ok(Expr::FnCall {
+            name: format!("{class_name}::new"),
+            args,
+        })
+    }
+}
+
+/// Wrapper: delegates to [`Transformer::convert_call_expr`].
 pub(super) fn convert_call_expr(
     call: &ast::CallExpr,
     tctx: &TransformContext<'_>,
     type_env: &TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Expr> {
-    let reg = tctx.type_registry;
-
-    match call.callee {
-        ast::Callee::Expr(ref callee) => match callee.as_ref() {
-            ast::Expr::Ident(ident) => {
-                let fn_name = ident.sym.to_string();
-
-                // parseInt(s) → s.parse::<f64>().unwrap()
-                // parseFloat(s) → s.parse::<f64>().unwrap()
-                // isNaN(x) → x.is_nan()
-                if let Some(result) =
-                    convert_global_builtin(&fn_name, &call.args, tctx, type_env, synthetic)?
-                {
-                    return Ok(result);
-                }
-
-                // Look up function parameter types from the registry or TypeEnv
-                let typeenv_params: Vec<(String, RustType)>;
-                let mut has_rest = false;
-                let param_types: Option<&[(String, RustType)]> = if let Some(TypeDef::Function {
-                    params,
-                    has_rest: rest,
-                    ..
-                }) = reg.get(&fn_name)
-                {
-                    has_rest = *rest;
-                    Some(params.as_slice())
-                } else if let Some(RustType::Fn { params, .. }) = type_env.get(&fn_name) {
-                    typeenv_params = params
-                        .iter()
-                        .enumerate()
-                        .map(|(i, ty)| (format!("_p{i}"), ty.clone()))
-                        .collect();
-                    Some(typeenv_params.as_slice())
-                } else {
-                    None
-                };
-                let args = convert_call_args_with_types(
-                    &call.args,
-                    tctx,
-                    param_types,
-                    has_rest,
-                    type_env,
-                    synthetic,
-                )?;
-                Ok(Expr::FnCall {
-                    name: fn_name,
-                    args,
-                })
-            }
-            ast::Expr::Member(member) => {
-                let method = match &member.prop {
-                    ast::MemberProp::Ident(ident) => ident.sym.to_string(),
-                    ast::MemberProp::PrivateName(private) => format!("_{}", private.name),
-                    _ => return Err(anyhow!("unsupported call target member property")),
-                };
-
-                if let ast::Expr::Ident(obj_ident) = member.obj.as_ref() {
-                    // console.log/error/warn → println!/eprintln!
-                    if obj_ident.sym.as_ref() == "console" {
-                        let macro_name = match method.as_str() {
-                            "log" => "println",
-                            "error" | "warn" => "eprintln",
-                            _ => return Err(anyhow!("unsupported console method: {}", method)),
-                        };
-                        let args = convert_call_args(&call.args, tctx, type_env, synthetic)?;
-                        let use_debug = call
-                            .args
-                            .iter()
-                            .map(|arg| {
-                                let ty = get_expr_type(tctx, &arg.expr);
-                                needs_debug_format(ty)
-                            })
-                            .collect();
-                        return Ok(Expr::MacroCall {
-                            name: macro_name.to_string(),
-                            args,
-                            use_debug,
-                        });
-                    }
-
-                    // Math.method(args) → first_arg.method(rest_args)
-                    if obj_ident.sym.as_ref() == "Math" {
-                        return convert_math_call(&method, &call.args, tctx, type_env, synthetic);
-                    }
-
-                    // Number.isNaN(x) → x.is_nan(), Number.isFinite(x) → x.is_finite()
-                    if obj_ident.sym.as_ref() == "Number" {
-                        return convert_number_static_call(
-                            &method, &call.args, tctx, type_env, synthetic,
-                        );
-                    }
-
-                    // fs.readFileSync/writeFileSync/existsSync → std::fs equivalents
-                    if obj_ident.sym.as_ref() == "fs" {
-                        return convert_fs_call(&method, &call.args, tctx, type_env, synthetic);
-                    }
-                }
-
-                // Cat A: method receiver — converted before method resolution
-                let object = convert_expr(&member.obj, tctx, type_env, synthetic)?;
-                // Look up method parameter types from the object's type
-                let method_sig = get_expr_type(tctx, &member.obj).and_then(|ty| {
-                    if let RustType::Named { name, .. } = ty {
-                        if let Some(TypeDef::Struct { methods, .. }) = reg.get(name) {
-                            return methods.get(&method).cloned();
-                        }
-                    }
-                    None
-                });
-                let method_params = method_sig.as_ref().map(|sig| sig.params.as_slice());
-                let args = convert_call_args_with_types(
-                    &call.args,
-                    tctx,
-                    method_params,
-                    false,
-                    type_env,
-                    synthetic,
-                )?;
-                let method_call = map_method_call(object, &method, args);
-                Ok(method_call)
-            }
-            // Unwrap parenthesized expression and retry: (foo)(args) → foo(args)
-            ast::Expr::Paren(paren) => {
-                let unwrapped_call = ast::CallExpr {
-                    callee: ast::Callee::Expr(paren.expr.clone()),
-                    args: call.args.clone(),
-                    span: call.span,
-                    ctxt: call.ctxt,
-                    type_args: call.type_args.clone(),
-                };
-                convert_call_expr(&unwrapped_call, tctx, type_env, synthetic)
-            }
-            // Chained call: f(x)(y) → { let _f = f(x); _f(y) }
-            ast::Expr::Call(inner_call) => {
-                let inner_result = convert_call_expr(inner_call, tctx, type_env, synthetic)?;
-                let args = convert_call_args(&call.args, tctx, type_env, synthetic)?;
-                Ok(Expr::Block(vec![
-                    Stmt::Let {
-                        name: "_f".to_string(),
-                        mutable: false,
-                        ty: None,
-                        init: Some(inner_result),
-                    },
-                    Stmt::TailExpr(Expr::FnCall {
-                        name: "_f".to_string(),
-                        args,
-                    }),
-                ]))
-            }
-            // IIFE: (() => expr)() or (function() { ... })()
-            // Arrow/Fn expressions as callee → convert to closure and call immediately
-            ast::Expr::Arrow(arrow) => {
-                let mut warnings = Vec::new();
-                let closure =
-                    convert_arrow_expr(arrow, tctx, false, &mut warnings, type_env, synthetic)?;
-                let args = convert_call_args(&call.args, tctx, type_env, synthetic)?;
-                Ok(Expr::Block(vec![
-                    Stmt::Let {
-                        name: "__iife".to_string(),
-                        mutable: false,
-                        ty: None,
-                        init: Some(closure),
-                    },
-                    Stmt::TailExpr(Expr::FnCall {
-                        name: "__iife".to_string(),
-                        args,
-                    }),
-                ]))
-            }
-            ast::Expr::Fn(fn_expr) => {
-                let closure = convert_fn_expr(fn_expr, tctx, type_env, synthetic)?;
-                let args = convert_call_args(&call.args, tctx, type_env, synthetic)?;
-                Ok(Expr::Block(vec![
-                    Stmt::Let {
-                        name: "__iife".to_string(),
-                        mutable: false,
-                        ty: None,
-                        init: Some(closure),
-                    },
-                    Stmt::TailExpr(Expr::FnCall {
-                        name: "__iife".to_string(),
-                        args,
-                    }),
-                ]))
-            }
-            _ => Err(anyhow!("unsupported call target expression")),
-        },
-        ast::Callee::Super(_) => {
-            let args = convert_call_args(&call.args, tctx, type_env, synthetic)?;
-            Ok(Expr::FnCall {
-                name: "super".to_string(),
-                args,
-            })
-        }
-        _ => Err(anyhow!("unsupported callee type")),
+    let mut env = type_env.clone();
+    Transformer {
+        tctx,
+        type_env: &mut env,
+        synthetic,
     }
+    .convert_call_expr(call)
 }
 
 /// Converts global built-in functions (`parseInt`, `parseFloat`, `isNaN`) to Rust equivalents.
@@ -492,36 +590,20 @@ pub(super) fn convert_math_call(
     }
 }
 
-/// Converts a `new` expression to a `ClassName::new(args)` call.
-///
-/// `new Foo(x, y)` → `Expr::FnCall { name: "Foo::new", args }`
+/// Wrapper: delegates to [`Transformer::convert_new_expr`].
 pub(super) fn convert_new_expr(
     new_expr: &ast::NewExpr,
     tctx: &TransformContext<'_>,
     type_env: &TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Expr> {
-    let reg = tctx.type_registry;
-
-    let class_name = match new_expr.callee.as_ref() {
-        ast::Expr::Ident(ident) => ident.sym.to_string(),
-        _ => return Err(anyhow!("unsupported new expression target")),
-    };
-    // Look up constructor param types from struct fields in TypeRegistry
-    let param_types = reg.get(&class_name).and_then(|def| match def {
-        TypeDef::Struct { fields, .. } => Some(fields.as_slice()),
-        _ => None,
-    });
-    let args = match &new_expr.args {
-        Some(args) => {
-            convert_call_args_with_types(args, tctx, param_types, false, type_env, synthetic)?
-        }
-        None => vec![],
-    };
-    Ok(Expr::FnCall {
-        name: format!("{class_name}::new"),
-        args,
-    })
+    let mut env = type_env.clone();
+    Transformer {
+        tctx,
+        type_env: &mut env,
+        synthetic,
+    }
+    .convert_new_expr(new_expr)
 }
 
 /// Converts call arguments from SWC `ExprOrSpread` to IR `Expr`.

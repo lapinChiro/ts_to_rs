@@ -9,69 +9,88 @@ use swc_ecma_ast as ast;
 use crate::ir::{BinOp, Expr, RustType};
 use crate::registry::{TypeDef, TypeRegistry};
 use crate::transformer::context::TransformContext;
+use crate::transformer::Transformer;
 
-/// Converts an SWC literal to an IR expression.
-///
-/// When `expected` is `RustType::String`, string literals are wrapped with `.to_string()`
-/// to produce an owned `String` instead of `&str`.
+impl<'a> Transformer<'a> {
+    /// Converts an SWC literal to an IR expression.
+    ///
+    /// When `expected` is `RustType::String`, string literals are wrapped with `.to_string()`
+    /// to produce an owned `String` instead of `&str`.
+    pub(crate) fn convert_lit(
+        &mut self,
+        lit: &ast::Lit,
+        expected: Option<&RustType>,
+    ) -> Result<Expr> {
+        let reg = self.reg();
+        match lit {
+            ast::Lit::Num(n) => Ok(Expr::NumberLit(n.value)),
+            ast::Lit::Str(s) => {
+                let value = s.value.to_string_lossy().into_owned();
+                // Check if the expected type is a string literal union enum
+                if let Some(RustType::Named { name, .. }) = expected {
+                    if let Some(variant) = lookup_string_enum_variant(reg, name, &value) {
+                        return Ok(Expr::Ident(format!("{name}::{variant}")));
+                    }
+                }
+                let expr = Expr::StringLit(value);
+                if matches!(expected, Some(RustType::String)) {
+                    Ok(Expr::MethodCall {
+                        object: Box::new(expr),
+                        method: "to_string".to_string(),
+                        args: vec![],
+                    })
+                } else {
+                    Ok(expr)
+                }
+            }
+            ast::Lit::Bool(b) => Ok(Expr::BoolLit(b.value)),
+            ast::Lit::Null(_) => Ok(Expr::Ident("None".to_string())),
+            ast::Lit::Regex(regex) => {
+                let pattern = regex.exp.to_string();
+                let flags = regex.flags.to_string();
+                // Embed supported flags as inline flags in the pattern
+                let mut prefix = String::new();
+                if flags.contains('i') {
+                    prefix.push_str("(?i)");
+                }
+                if flags.contains('m') {
+                    prefix.push_str("(?m)");
+                }
+                if flags.contains('s') {
+                    prefix.push_str("(?s)");
+                }
+                // 'u' flag: Rust regex is Unicode-aware by default — no action needed.
+                let full_pattern = format!("{prefix}{pattern}");
+                Ok(Expr::Regex {
+                    pattern: full_pattern,
+                    global: flags.contains('g'),
+                    sticky: flags.contains('y'),
+                })
+            }
+            ast::Lit::BigInt(bigint) => {
+                // BigInt literals (e.g., 123n) → i64 (matching TsBigIntKeyword → i64 type conversion)
+                let value = bigint.value.to_string().parse::<i64>().unwrap_or(0);
+                Ok(Expr::IntLit(value))
+            }
+            _ => Err(anyhow!("unsupported literal: {:?}", lit)),
+        }
+    }
+}
+
+/// Wrapper: delegates to [`Transformer::convert_lit`].
 pub(super) fn convert_lit(
     lit: &ast::Lit,
     expected: Option<&RustType>,
     tctx: &TransformContext<'_>,
 ) -> Result<Expr> {
-    let reg = tctx.type_registry;
-    match lit {
-        ast::Lit::Num(n) => Ok(Expr::NumberLit(n.value)),
-        ast::Lit::Str(s) => {
-            let value = s.value.to_string_lossy().into_owned();
-            // Check if the expected type is a string literal union enum
-            if let Some(RustType::Named { name, .. }) = expected {
-                if let Some(variant) = lookup_string_enum_variant(reg, name, &value) {
-                    return Ok(Expr::Ident(format!("{name}::{variant}")));
-                }
-            }
-            let expr = Expr::StringLit(value);
-            if matches!(expected, Some(RustType::String)) {
-                Ok(Expr::MethodCall {
-                    object: Box::new(expr),
-                    method: "to_string".to_string(),
-                    args: vec![],
-                })
-            } else {
-                Ok(expr)
-            }
-        }
-        ast::Lit::Bool(b) => Ok(Expr::BoolLit(b.value)),
-        ast::Lit::Null(_) => Ok(Expr::Ident("None".to_string())),
-        ast::Lit::Regex(regex) => {
-            let pattern = regex.exp.to_string();
-            let flags = regex.flags.to_string();
-            // Embed supported flags as inline flags in the pattern
-            let mut prefix = String::new();
-            if flags.contains('i') {
-                prefix.push_str("(?i)");
-            }
-            if flags.contains('m') {
-                prefix.push_str("(?m)");
-            }
-            if flags.contains('s') {
-                prefix.push_str("(?s)");
-            }
-            // 'u' flag: Rust regex is Unicode-aware by default — no action needed.
-            let full_pattern = format!("{prefix}{pattern}");
-            Ok(Expr::Regex {
-                pattern: full_pattern,
-                global: flags.contains('g'),
-                sticky: flags.contains('y'),
-            })
-        }
-        ast::Lit::BigInt(bigint) => {
-            // BigInt literals (e.g., 123n) → i64 (matching TsBigIntKeyword → i64 type conversion)
-            let value = bigint.value.to_string().parse::<i64>().unwrap_or(0);
-            Ok(Expr::IntLit(value))
-        }
-        _ => Err(anyhow!("unsupported literal: {:?}", lit)),
+    let mut type_env = crate::transformer::TypeEnv::new();
+    let mut synthetic = crate::pipeline::SyntheticTypeRegistry::new();
+    Transformer {
+        tctx,
+        type_env: &mut type_env,
+        synthetic: &mut synthetic,
     }
+    .convert_lit(lit, expected)
 }
 
 /// 文字列リテラル値から string literal union enum のバリアント名を逆引きする。

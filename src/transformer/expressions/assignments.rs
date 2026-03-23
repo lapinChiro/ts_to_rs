@@ -9,25 +9,22 @@ use crate::transformer::TypeEnv;
 
 use super::member_access::convert_member_expr;
 use crate::transformer::context::TransformContext;
+use crate::transformer::Transformer;
 
-/// Converts an assignment expression (`target = value`) to `Expr::Assign`.
-pub(super) fn convert_assign_expr(
-    assign: &ast::AssignExpr,
-    tctx: &TransformContext<'_>,
-    type_env: &TypeEnv,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Result<Expr> {
-    let target = match &assign.left {
-        ast::AssignTarget::Simple(simple) => match simple {
-            ast::SimpleAssignTarget::Member(member) => {
-                convert_member_expr(member, tctx, type_env, synthetic)?
-            }
-            ast::SimpleAssignTarget::Ident(ident) => Expr::Ident(ident.id.sym.to_string()),
-            _ => return Err(anyhow!("unsupported assignment target")),
-        },
-        _ => return Err(anyhow!("unsupported assignment target pattern")),
-    };
-    let right = super::convert_expr(&assign.right, tctx, type_env, synthetic)?;
+impl<'a> Transformer<'a> {
+    /// Converts an assignment expression (`target = value`) to `Expr::Assign`.
+    pub(crate) fn convert_assign_expr(&mut self, assign: &ast::AssignExpr) -> Result<Expr> {
+        let target = match &assign.left {
+            ast::AssignTarget::Simple(simple) => match simple {
+                ast::SimpleAssignTarget::Member(member) => {
+                    convert_member_expr(member, self.tctx, self.type_env, self.synthetic)?
+                }
+                ast::SimpleAssignTarget::Ident(ident) => Expr::Ident(ident.id.sym.to_string()),
+                _ => return Err(anyhow!("unsupported assignment target")),
+            },
+            _ => return Err(anyhow!("unsupported assignment target pattern")),
+        };
+        let right = super::convert_expr(&assign.right, self.tctx, self.type_env, self.synthetic)?;
 
     // ??= (nullish coalescing assignment): x ??= y → x.get_or_insert_with(|| y)
     if assign.op == ast::AssignOp::NullishAssign {
@@ -116,6 +113,23 @@ pub(super) fn convert_assign_expr(
         target: Box::new(target),
         value: Box::new(value),
     })
+    }
+}
+
+/// Wrapper: delegates to [`Transformer::convert_assign_expr`].
+pub(super) fn convert_assign_expr(
+    assign: &ast::AssignExpr,
+    tctx: &TransformContext<'_>,
+    type_env: &TypeEnv,
+    synthetic: &mut SyntheticTypeRegistry,
+) -> Result<Expr> {
+    let mut env = type_env.clone();
+    Transformer {
+        tctx,
+        type_env: &mut env,
+        synthetic,
+    }
+    .convert_assign_expr(assign)
 }
 
 /// Converts an update expression (`i++`, `i--`, `++i`, `--i`) to `Expr::Assign`.

@@ -151,25 +151,25 @@ pub fn convert_expr(
 
 ### Phase D-2-A: Transformer struct 定義
 
-- [ ] `src/transformer/mod.rs` に `Transformer` struct を定義
-- [ ] `reg()` ヘルパーメソッドを追加
-- [ ] `current_file_dir()` ヘルパーメソッドを追加
-- [ ] `cargo check` 通過確認
+- [x] `src/transformer/mod.rs` に `Transformer` struct を定義
+- [x] `reg()` ヘルパーメソッドを追加
+- [x] `current_file_dir()` ヘルパーメソッドを追加
+- [x] `cargo check` 通過確認（dead_code 警告のみ、エラー 0）
 
 ### Phase D-2-B: expressions モジュールのメソッド化
 
 変換順序: 依存の少ないファイルから。各ファイルで関数をメソッド化 + ラッパー作成。
 
-- [ ] **B-1**: `expressions/literals.rs` — `convert_lit`（1 関数。tctx のみだが変換プロセスの一部）
-- [ ] **B-2**: `expressions/assignments.rs` — 1 関数
-- [ ] **B-3**: `expressions/binary.rs` — 2 関数
-- [ ] **B-4**: `expressions/data_literals.rs` — 5 関数
-- [ ] **B-5**: `expressions/member_access.rs` — 4 関数 + `resolve_member_access`, `resolve_field_type`（計 6 関数。後者 2 つは `reg` のみだが変換プロセスの一部）
-- [ ] **B-6**: `expressions/calls.rs` — 8 関数
-- [ ] **B-7**: `expressions/functions.rs` — 4 関数
-- [ ] **B-8**: `expressions/patterns.rs` — 5 関数 + `resolve_enum_type_name`, `convert_in_operator`, `resolve_typeof_to_enum_variant`, `resolve_instanceof_to_enum_variant`（計 9 関数。後者 4 つは tctx のみ。`if_let_pattern` は NarrowingGuard メソッドのため対象外）
-- [ ] **B-9**: `expressions/mod.rs` — 4 関数 + `needs_trait_box_coercion`（計 5 関数）
-- [ ] **B-10**: `cargo check` 通過確認（全 expressions ラッパー経由で動作）
+- [x] **B-1**: `expressions/literals.rs` — `convert_lit`（1 関数）
+- [x] **B-2**: `expressions/assignments.rs` — 1 関数
+- [x] **B-3**: `expressions/binary.rs` — 2 関数
+- [x] **B-4**: `expressions/data_literals.rs` — 5 関数
+- [x] **B-5**: `expressions/member_access.rs` — 6 関数
+- [x] **B-6**: `expressions/calls.rs` — 2 関数メソッド化 + 6 関数ラッパー付き
+- [x] **B-7**: `expressions/functions.rs` — 4 関数
+- [x] **B-8**: `expressions/patterns.rs` — 5 関数メソッド化（tctx のみの 4 関数はラッパー付き free function）
+- [x] **B-9**: `expressions/mod.rs` — 2 関数メソッド化 + 3 関数ラッパー付き
+- [x] **B-10**: rust-analyzer diagnostics エラー 0 確認（全 expressions ラッパー経由で動作）
 
 各サブタスクの手順:
 1. ファイルを読む
