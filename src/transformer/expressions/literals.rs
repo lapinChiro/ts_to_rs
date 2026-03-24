@@ -76,7 +76,6 @@ impl<'a> Transformer<'a> {
     }
 }
 
-
 /// 文字列リテラル値から string literal union enum のバリアント名を逆引きする。
 pub(super) fn lookup_string_enum_variant<'a>(
     reg: &'a TypeRegistry,

@@ -9,8 +9,6 @@ use swc_ecma_ast as ast;
 use crate::ir::{ClosureBody, Expr, Param, RustType, Stmt};
 use crate::pipeline::type_converter::convert_ts_type;
 use crate::transformer::functions::{convert_last_return_to_tail, convert_ts_type_with_fallback};
-use crate::transformer::statements::convert_stmt;
-
 use crate::transformer::Transformer;
 
 impl<'a> Transformer<'a> {
@@ -146,16 +144,14 @@ impl<'a> Transformer<'a> {
 
         let body = match &func.body {
             Some(block) => {
-                let mut inner_env = self.type_env.clone();
+                let mut sub_t = Transformer {
+                    tctx: self.tctx,
+                    type_env: self.type_env.clone(),
+                    synthetic: &mut *self.synthetic,
+                };
                 let mut stmts = expansion_stmts;
                 for stmt in &block.stmts {
-                    stmts.extend(convert_stmt(
-                        stmt,
-                        self.tctx,
-                        return_type.as_ref(),
-                        &mut inner_env,
-                        self.synthetic,
-                    )?);
+                    stmts.extend(sub_t.convert_stmt(stmt, return_type.as_ref())?);
                 }
                 convert_last_return_to_tail(&mut stmts);
                 ClosureBody::Block(stmts)
@@ -282,16 +278,14 @@ impl<'a> Transformer<'a> {
                     ClosureBody::Expr(Box::new(ir_expr))
                 }
                 ast::BlockStmtOrExpr::BlockStmt(block) => {
-                    let mut inner_env = self.type_env.clone();
+                    let mut sub_t = Transformer {
+                        tctx: self.tctx,
+                        type_env: self.type_env.clone(),
+                        synthetic: &mut *self.synthetic,
+                    };
                     let mut stmts = Vec::new();
                     for stmt in &block.stmts {
-                        stmts.extend(convert_stmt(
-                            stmt,
-                            self.tctx,
-                            return_type.as_ref(),
-                            &mut inner_env,
-                            self.synthetic,
-                        )?);
+                        stmts.extend(sub_t.convert_stmt(stmt, return_type.as_ref())?);
                     }
                     convert_last_return_to_tail(&mut stmts);
                     ClosureBody::Block(stmts)
@@ -306,15 +300,13 @@ impl<'a> Transformer<'a> {
                     body_stmts.push(Stmt::Return(Some(ir_expr)));
                 }
                 ast::BlockStmtOrExpr::BlockStmt(block) => {
-                    let mut inner_env = self.type_env.clone();
+                    let mut sub_t = Transformer {
+                        tctx: self.tctx,
+                        type_env: self.type_env.clone(),
+                        synthetic: &mut *self.synthetic,
+                    };
                     for stmt in &block.stmts {
-                        body_stmts.extend(convert_stmt(
-                            stmt,
-                            self.tctx,
-                            return_type.as_ref(),
-                            &mut inner_env,
-                            self.synthetic,
-                        )?);
+                        body_stmts.extend(sub_t.convert_stmt(stmt, return_type.as_ref())?);
                     }
                     convert_last_return_to_tail(&mut body_stmts);
                 }
@@ -329,4 +321,3 @@ impl<'a> Transformer<'a> {
         })
     }
 }
-

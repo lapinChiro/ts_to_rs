@@ -61,8 +61,7 @@ impl<'a> Transformer<'a> {
                         if key == tag_field {
                             continue; // Skip discriminant field
                         }
-                        let value =
-                            self.convert_expr(&kv.value)?;
+                        let value = self.convert_expr(&kv.value)?;
                         fields.push((key, value));
                     }
                     ast::Prop::Shorthand(ident) => {
@@ -116,8 +115,7 @@ impl<'a> Transformer<'a> {
                         };
                         // Cat A: HashMap computed key — arbitrary expression
                         let key = self.convert_expr(computed_expr)?;
-                        let value =
-                            self.convert_expr(&kv.value)?;
+                        let value = self.convert_expr(&kv.value)?;
                         entries.push(Expr::Tuple {
                             elements: vec![key, value],
                         });
@@ -207,8 +205,8 @@ impl<'a> Transformer<'a> {
                     }
                     _ => {
                         return Err(anyhow!(
-                            "unsupported object literal property (only key-value pairs and shorthand)"
-                        ))
+                        "unsupported object literal property (only key-value pairs and shorthand)"
+                    ))
                     }
                 },
                 ast::PropOrSpread::Spread(spread_elem) => {
@@ -317,9 +315,7 @@ impl<'a> Transformer<'a> {
                 .elems
                 .iter()
                 .filter_map(|elem| elem.as_ref())
-                .map(|elem| {
-                    self.convert_expr(&elem.expr)
-                })
+                .map(|elem| self.convert_expr(&elem.expr))
                 .collect::<Result<Vec<_>>>()?;
             return Ok(Expr::Tuple { elements });
         }
@@ -378,8 +374,7 @@ impl<'a> Transformer<'a> {
                     initialized = true;
                 }
                 // Cat A: spread source — type is the array itself
-                let spread_expr =
-                    self.convert_expr(&elem.expr)?;
+                let spread_expr = self.convert_expr(&elem.expr)?;
                 stmts.push(Stmt::Expr(Expr::MethodCall {
                     object: Box::new(Expr::Ident("_v".to_string())),
                     method: "extend".to_string(),
@@ -394,8 +389,7 @@ impl<'a> Transformer<'a> {
                     }],
                 }));
             } else {
-                let value =
-                    self.convert_expr(&elem.expr)?;
+                let value = self.convert_expr(&elem.expr)?;
                 if initialized {
                     // _v.push(value)
                     stmts.push(Stmt::Expr(Expr::MethodCall {
@@ -420,4 +414,3 @@ impl<'a> Transformer<'a> {
         Ok(Expr::Block(stmts))
     }
 }
-

@@ -12,7 +12,6 @@ use crate::pipeline::type_converter::{
 use crate::pipeline::SyntheticTypeRegistry;
 use crate::registry::TypeRegistry;
 use crate::transformer::context::TransformContext;
-use crate::transformer::statements::convert_stmt_list;
 use crate::transformer::{
     extract_pat_ident_name, extract_prop_name, wrap_trait_for_position, Transformer, TypeEnv,
     TypePosition,
@@ -123,9 +122,9 @@ impl<'a> Transformer<'a> {
                     }
                     let variants =
                         crate::transformer::any_narrowing::build_any_enum_variants(constraint);
-                    let enum_name =
-                        self.synthetic
-                            .register_any_enum(&name, param_name, variants);
+                    let enum_name = self
+                        .synthetic
+                        .register_any_enum(&name, param_name, variants);
                     let enum_type = RustType::Named {
                         name: enum_name,
                         type_args: vec![],
@@ -154,9 +153,7 @@ impl<'a> Transformer<'a> {
                     }
                     let variants =
                         crate::transformer::any_narrowing::build_any_enum_variants(constraint);
-                    let enum_name =
-                        self.synthetic
-                            .register_any_enum(&name, var_name, variants);
+                    let enum_name = self.synthetic.register_any_enum(&name, var_name, variants);
                     let enum_type = RustType::Named {
                         name: enum_name,
                         type_args: vec![],
@@ -179,14 +176,14 @@ impl<'a> Transformer<'a> {
             fn_type_env.insert(var_name.clone(), enum_type.clone());
         }
 
+        // F-3b #1: Sub-Transformer with local fn_type_env + local_synthetic
         let body_stmts = match &fn_decl.function.body {
-            Some(block) => convert_stmt_list(
-                &block.stmts,
+            Some(block) => Transformer {
                 tctx,
-                return_type.as_ref(),
-                &mut fn_type_env,
-                &mut local_synthetic,
-            )?,
+                type_env: fn_type_env,
+                synthetic: &mut local_synthetic,
+            }
+            .convert_stmt_list(&block.stmts, return_type.as_ref())?,
             None => Vec::new(),
         };
         // Prepend destructuring expansion statements
@@ -198,8 +195,11 @@ impl<'a> Transformer<'a> {
             combined
         };
 
-        let type_params =
-            extract_type_params(fn_decl.function.type_params.as_deref(), &mut local_synthetic, reg);
+        let type_params = extract_type_params(
+            fn_decl.function.type_params.as_deref(),
+            &mut local_synthetic,
+            reg,
+        );
 
         // If the function body contains `throw`, wrap return type in Result and returns in Ok()
         let has_throw = fn_decl
@@ -320,16 +320,12 @@ impl<'a> Transformer<'a> {
                     for member in &type_lit.members {
                         match member {
                             ast::TsTypeElement::TsPropertySignature(prop) => {
-                                fields.push(convert_property_signature(
-                                    prop,
-                                    self.synthetic,
-                                    reg,
-                                )?);
+                                fields.push(convert_property_signature(prop, self.synthetic, reg)?);
                             }
                             _ => {
                                 return Err(anyhow!(
-                                    "unsupported inline type literal member (only property signatures)"
-                                ))
+                                "unsupported inline type literal member (only property signatures)"
+                            ))
                             }
                         }
                     }
@@ -353,11 +349,8 @@ impl<'a> Transformer<'a> {
                     ));
                 }
 
-                let rust_type = self.convert_ts_type_with_fallback(
-                    &ty.type_ann,
-                    resilient,
-                    fallback_warnings,
-                )?;
+                let rust_type =
+                    self.convert_ts_type_with_fallback(&ty.type_ann, resilient, fallback_warnings)?;
                 // Trait types in parameter position → &dyn Trait
                 let rust_type = wrap_trait_for_position(rust_type, TypePosition::Param, reg);
                 Ok((
@@ -673,9 +666,7 @@ impl<'a> Transformer<'a> {
                         // { x: newX } — rename
                         _ => {
                             let binding_name = extract_pat_ident_name(kv.value.as_ref())
-                                .map_err(|_| {
-                                    anyhow!("unsupported destructuring value pattern")
-                                })?;
+                                .map_err(|_| anyhow!("unsupported destructuring value pattern"))?;
                             let binding_name = pascal_to_snake(&binding_name);
                             stmts.push(Stmt::Let {
                                 mutable: false,
@@ -804,9 +795,7 @@ impl<'a> Transformer<'a> {
                         }
                         _ => {
                             let binding_name = extract_pat_ident_name(kv.value.as_ref())
-                                .map_err(|_| {
-                                    anyhow!("unsupported destructuring value pattern")
-                                })?;
+                                .map_err(|_| anyhow!("unsupported destructuring value pattern"))?;
                             let binding_name = pascal_to_snake(&binding_name);
                             stmts.push(Stmt::Let {
                                 mutable: false,
@@ -1192,9 +1181,9 @@ impl<'a> Transformer<'a> {
                         }
                         let variants =
                             crate::transformer::any_narrowing::build_any_enum_variants(constraint);
-                        let enum_name =
-                            self.synthetic
-                                .register_any_enum(&name, param_name, variants);
+                        let enum_name = self
+                            .synthetic
+                            .register_any_enum(&name, param_name, variants);
                         let enum_type = RustType::Named {
                             name: enum_name,
                             type_args: vec![],
@@ -1383,7 +1372,10 @@ pub(crate) fn convert_var_decl_arrow_fns(
 }
 
 /// Wrapper: delegates to [`Transformer::extract_fn_return_type`].
-pub(super) fn extract_fn_return_type(ty: &RustType, tctx: &TransformContext<'_>) -> Option<RustType> {
+pub(super) fn extract_fn_return_type(
+    ty: &RustType,
+    tctx: &TransformContext<'_>,
+) -> Option<RustType> {
     let type_env = TypeEnv::new();
     let mut synthetic = SyntheticTypeRegistry::new();
     Transformer {

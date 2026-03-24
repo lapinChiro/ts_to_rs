@@ -13,7 +13,6 @@ use crate::pipeline::SyntheticTypeRegistry;
 use crate::transformer::context::TransformContext;
 use crate::transformer::extract_prop_name;
 use crate::transformer::functions::convert_last_return_to_tail;
-use crate::transformer::statements::convert_stmt;
 use crate::transformer::{Transformer, TypeEnv};
 
 /// Extracted class information for resolving inheritance relationships.
@@ -86,8 +85,7 @@ impl<'a> Transformer<'a> {
                     fields.push(self.convert_class_prop(prop, &vis)?);
                 }
                 ast::ClassMember::Constructor(ctor) => {
-                    let (method, param_prop_fields) =
-                        self.convert_constructor(ctor, &vis)?;
+                    let (method, param_prop_fields) = self.convert_constructor(ctor, &vis)?;
                     constructor = Some(method);
                     fields.extend(param_prop_fields);
                 }
@@ -789,24 +787,18 @@ impl<'a> Transformer<'a> {
         let mut fields = Vec::new();
         let mut other_stmts = Vec::new();
 
+        // F-3b #3/#4: Sub-Transformer for constructor body (unified convert_expr + convert_stmt)
+        let mut sub_t = Transformer {
+            tctx: self.tctx,
+            type_env,
+            synthetic: &mut *self.synthetic,
+        };
         for stmt in stmts {
             if let Some((field_name, value_expr)) = try_extract_this_assignment(stmt) {
-                // Cat B: field type could be looked up from class definition
-                let value = Transformer {
-                    tctx: self.tctx,
-                    type_env: type_env.clone(),
-                    synthetic: self.synthetic,
-                }
-                .convert_expr(value_expr)?;
+                let value = sub_t.convert_expr(value_expr)?;
                 fields.push((field_name, value));
             } else {
-                other_stmts.extend(convert_stmt(
-                    stmt,
-                    self.tctx,
-                    None,
-                    &mut type_env,
-                    self.synthetic,
-                )?);
+                other_stmts.extend(sub_t.convert_stmt(stmt, None)?);
             }
         }
 
@@ -906,15 +898,14 @@ impl<'a> Transformer<'a> {
                         method_env.insert(p.name.clone(), ty.clone());
                     }
                 }
+                let mut sub_t = Transformer {
+                    tctx: self.tctx,
+                    type_env: method_env,
+                    synthetic: &mut *self.synthetic,
+                };
                 let mut stmts = default_expansion_stmts;
                 for stmt in &block.stmts {
-                    stmts.extend(convert_stmt(
-                        stmt,
-                        self.tctx,
-                        return_type.as_ref(),
-                        &mut method_env,
-                        self.synthetic,
-                    )?);
+                    stmts.extend(sub_t.convert_stmt(stmt, return_type.as_ref())?);
                 }
                 convert_last_return_to_tail(&mut stmts);
                 Some(stmts)
@@ -981,10 +972,7 @@ impl<'a> Transformer<'a> {
     /// - `x: number` → simple parameter
     /// - `x: number = 0` → `Option<f64>` + `let x = x.unwrap_or(0.0);`
     /// - `options: Options = {}` → `Option<Options>` + `let options = options.unwrap_or_default();`
-    fn convert_param_pat(
-        &mut self,
-        pat: &ast::Pat,
-    ) -> Result<(Param, Vec<Stmt>)> {
+    fn convert_param_pat(&mut self, pat: &ast::Pat) -> Result<(Param, Vec<Stmt>)> {
         match pat {
             ast::Pat::Ident(ident) => {
                 let param = self.convert_ident_to_param(ident)?;
@@ -996,11 +984,9 @@ impl<'a> Transformer<'a> {
                     ast::Pat::Ident(ident) => {
                         let inner_param = self.convert_ident_to_param(ident)?;
                         let param_name = inner_param.name.clone();
-                        let inner_type = inner_param
-                            .ty
-                            .ok_or_else(|| {
-                                anyhow!("default parameter requires a type annotation")
-                            })?;
+                        let inner_type = inner_param.ty.ok_or_else(|| {
+                            anyhow!("default parameter requires a type annotation")
+                        })?;
                         let option_type = RustType::Option(Box::new(inner_type));
 
                         let (default_expr, use_unwrap_or_default) =
@@ -1049,10 +1035,7 @@ impl<'a> Transformer<'a> {
     ///
     /// Extracts name and type annotation from a `BindingIdent`, converts the type,
     /// and returns a `Param`. Used by both function and class method parameter conversion.
-    fn convert_ident_to_param(
-        &mut self,
-        ident: &ast::BindingIdent,
-    ) -> Result<Param> {
+    fn convert_ident_to_param(&mut self, ident: &ast::BindingIdent) -> Result<Param> {
         let reg = self.reg();
         let name = ident.id.sym.to_string();
         let ty = ident
@@ -1131,10 +1114,7 @@ impl<'a> Transformer<'a> {
     /// Returns a map from class name to [`ClassInfo`]. Only classes that can be
     /// successfully parsed are included; parse failures are silently skipped
     /// (they will be reported during the main transformation pass).
-    pub(crate) fn pre_scan_classes(
-        &mut self,
-        module: &ast::Module,
-    ) -> HashMap<String, ClassInfo> {
+    pub(crate) fn pre_scan_classes(&mut self, module: &ast::Module) -> HashMap<String, ClassInfo> {
         let mut map = HashMap::new();
 
         for module_item in &module.body {

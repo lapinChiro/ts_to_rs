@@ -73,10 +73,7 @@ impl<'a> Transformer<'a> {
     ///
     /// Supports property access, method calls, and computed access.
     /// Chained optional chaining (`x?.y?.z`) is handled recursively.
-    pub(crate) fn convert_opt_chain_expr(
-        &mut self,
-        opt_chain: &ast::OptChainExpr,
-    ) -> Result<Expr> {
+    pub(crate) fn convert_opt_chain_expr(&mut self, opt_chain: &ast::OptChainExpr) -> Result<Expr> {
         let reg = self.reg();
         match opt_chain.base.as_ref() {
             ast::OptChainBase::Member(member) => {
@@ -89,8 +86,7 @@ impl<'a> Transformer<'a> {
                 }
 
                 // Cat A: receiver object for optional chaining
-                let object =
-                    self.convert_expr(&member.obj)?;
+                let object = self.convert_expr(&member.obj)?;
                 let body_expr = match &member.prop {
                     ast::MemberProp::Ident(ident) => {
                         let field = ident.sym.to_string();
@@ -114,12 +110,12 @@ impl<'a> Transformer<'a> {
                 // If the field type is Option, use and_then to avoid Option<Option<T>>
                 let field_type =
                     resolve_field_type(obj_type.unwrap_or(&RustType::Any), &member.prop, reg);
-                let method_name =
-                    if field_type.is_some_and(|ty| matches!(ty, RustType::Option(_))) {
-                        "and_then"
-                    } else {
-                        "map"
-                    };
+                let method_name = if field_type.is_some_and(|ty| matches!(ty, RustType::Option(_)))
+                {
+                    "and_then"
+                } else {
+                    "map"
+                };
 
                 Ok(Expr::MethodCall {
                     object: Box::new(Expr::MethodCall {
@@ -148,17 +144,14 @@ impl<'a> Transformer<'a> {
                     },
                     _ => None,
                 };
-                let is_option =
-                    callee_obj_type.is_some_and(|ty| matches!(ty, RustType::Option(_)));
+                let is_option = callee_obj_type.is_some_and(|ty| matches!(ty, RustType::Option(_)));
 
                 let (object, method) = self.extract_method_from_callee(&opt_call.callee)?;
 
                 let args: Vec<Expr> = opt_call
                     .args
                     .iter()
-                    .map(|arg| {
-                        self.convert_expr(&arg.expr)
-                    })
+                    .map(|arg| self.convert_expr(&arg.expr))
                     .collect::<Result<_>>()?;
 
                 // Non-Option type: plain method call
@@ -194,16 +187,12 @@ impl<'a> Transformer<'a> {
     /// Converts a member expression (`obj.field`) to `Expr::FieldAccess`.
     ///
     /// `this.x` becomes `self.x`.
-    pub(crate) fn convert_member_expr(
-        &mut self,
-        member: &ast::MemberExpr,
-    ) -> Result<Expr> {
+    pub(crate) fn convert_member_expr(&mut self, member: &ast::MemberExpr) -> Result<Expr> {
         let reg = self.reg();
         // Computed property: arr[0], arr[i] → Expr::Index or tuple.N → Expr::FieldAccess
         if let ast::MemberProp::Computed(computed) = &member.prop {
             // Cat A: receiver object
-            let object =
-                self.convert_expr(&member.obj)?;
+            let object = self.convert_expr(&member.obj)?;
 
             // Tuple index access: pair[0] → pair.0 (Rust uses dot notation for tuples)
             if let Some(RustType::Tuple(_)) = get_expr_type(self.tctx, &member.obj) {
@@ -217,8 +206,7 @@ impl<'a> Transformer<'a> {
             }
 
             // Cat A: computed index
-            let index =
-                self.convert_expr(&computed.expr)?;
+            let index = self.convert_expr(&computed.expr)?;
             return Ok(Expr::Index {
                 object: Box::new(object),
                 index: Box::new(index),
@@ -288,8 +276,7 @@ impl<'a> Transformer<'a> {
         }
 
         // Cat A: receiver object
-        let object =
-            self.convert_expr(&member.obj)?;
+        let object = self.convert_expr(&member.obj)?;
         self.resolve_member_access(&object, &field, &member.obj)
     }
 
@@ -351,10 +338,7 @@ impl<'a> Transformer<'a> {
     /// Extracts the object and method name from an optional call's callee.
     ///
     /// Handles both `x.method` (`Member`) and `x?.method` (`OptChain(Member)`) patterns.
-    fn extract_method_from_callee(
-        &mut self,
-        callee: &ast::Expr,
-    ) -> Result<(Expr, String)> {
+    fn extract_method_from_callee(&mut self, callee: &ast::Expr) -> Result<(Expr, String)> {
         let member = match callee {
             ast::Expr::Member(member) => member,
             ast::Expr::OptChain(opt) => match opt.base.as_ref() {

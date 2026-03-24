@@ -7,12 +7,10 @@ use swc_ecma_ast as ast;
 
 use crate::ir::{BinOp, ClosureBody, Expr, MatchArm, MatchPattern, Param, RustType, Stmt, UnOp};
 use crate::pipeline::type_converter::convert_ts_type;
-use crate::pipeline::SyntheticTypeRegistry;
-use crate::transformer::context::TransformContext;
-use crate::transformer::expressions::patterns::extract_narrowing_guards;
 use crate::transformer::expressions::get_expr_type;
-use crate::transformer::TypeEnv;
+use crate::transformer::expressions::patterns::extract_narrowing_guards;
 use crate::transformer::Transformer;
+use crate::transformer::TypeEnv;
 use crate::transformer::{
     extract_pat_ident_name, extract_prop_name, single_declarator, TypePosition,
 };
@@ -42,69 +40,39 @@ impl<'a> Transformer<'a> {
     ) -> Result<Vec<Stmt>> {
         match stmt {
             ast::Stmt::Return(ret) => {
-                if let Some(stmts) =
-                    try_expand_spread_return(ret, self.tctx, &self.type_env, self.synthetic)?
-                {
+                if let Some(stmts) = self.try_expand_spread_return(ret)? {
                     return Ok(stmts);
                 }
-                let expr = ret
-                    .arg
-                    .as_ref()
-                    .map(|e| self.convert_expr(e))
-                    .transpose()?;
+                let expr = ret.arg.as_ref().map(|e| self.convert_expr(e)).transpose()?;
                 Ok(vec![Stmt::Return(expr)])
             }
             ast::Stmt::Decl(ast::Decl::Var(var_decl)) => {
-                if let Some(stmts) =
-                    try_expand_spread_var_decl(var_decl, self.tctx, &self.type_env, self.synthetic)?
-                {
+                if let Some(stmts) = self.try_expand_spread_var_decl(var_decl)? {
                     return Ok(stmts);
                 }
-                if let Some(expanded) =
-                    try_convert_object_destructuring(var_decl, self.tctx, &self.type_env, self.synthetic)?
-                {
+                if let Some(expanded) = self.try_convert_object_destructuring(var_decl)? {
                     Ok(expanded)
-                } else if let Some(expanded) =
-                    try_convert_array_destructuring(var_decl, self.tctx, &self.type_env, self.synthetic)?
-                {
+                } else if let Some(expanded) = self.try_convert_array_destructuring(var_decl)? {
                     Ok(expanded)
                 } else {
-                    convert_var_decl(var_decl, self.tctx, &self.type_env, self.synthetic)
+                    self.convert_var_decl(var_decl)
                 }
             }
-            ast::Stmt::If(if_stmt) => {
-                convert_if_stmt(if_stmt, self.tctx, return_type, &mut self.type_env, self.synthetic)
-            }
+            ast::Stmt::If(if_stmt) => self.convert_if_stmt(if_stmt, return_type),
             ast::Stmt::Expr(expr_stmt) => {
-                if let Some(stmts) =
-                    try_expand_spread_expr_stmt(expr_stmt, self.tctx, &self.type_env, self.synthetic)?
-                {
+                if let Some(stmts) = self.try_expand_spread_expr_stmt(expr_stmt)? {
                     return Ok(stmts);
                 }
                 let expr = self.convert_expr(&expr_stmt.expr)?;
                 Ok(vec![Stmt::Expr(expr)])
             }
-            ast::Stmt::Throw(throw_stmt) => Ok(vec![convert_throw_stmt(
-                throw_stmt, self.tctx, &self.type_env, self.synthetic,
-            )?]),
-            ast::Stmt::While(while_stmt) => {
-                convert_while_stmt(while_stmt, self.tctx, return_type, &mut self.type_env, self.synthetic)
-            }
-            ast::Stmt::ForOf(for_of) => Ok(vec![convert_for_of_stmt(
-                for_of,
-                self.tctx,
-                return_type,
-                &mut self.type_env,
-                self.synthetic,
-            )?]),
-            ast::Stmt::For(for_stmt) => {
-                match convert_for_stmt(for_stmt, self.tctx, return_type, &mut self.type_env, self.synthetic) {
-                    Ok(s) => Ok(vec![s]),
-                    Err(_) => convert_for_stmt_as_loop(
-                        for_stmt, self.tctx, return_type, &mut self.type_env, self.synthetic,
-                    ),
-                }
-            }
+            ast::Stmt::Throw(throw_stmt) => Ok(vec![self.convert_throw_stmt(throw_stmt)?]),
+            ast::Stmt::While(while_stmt) => self.convert_while_stmt(while_stmt, return_type),
+            ast::Stmt::ForOf(for_of) => Ok(vec![self.convert_for_of_stmt(for_of, return_type)?]),
+            ast::Stmt::For(for_stmt) => match self.convert_for_stmt(for_stmt, return_type) {
+                Ok(s) => Ok(vec![s]),
+                Err(_) => self.convert_for_stmt_as_loop(for_stmt, return_type),
+            },
             ast::Stmt::Break(break_stmt) => {
                 let label = break_stmt.label.as_ref().map(|l| l.sym.to_string());
                 Ok(vec![Stmt::Break { label, value: None }])
@@ -113,58 +81,23 @@ impl<'a> Transformer<'a> {
                 let label = cont_stmt.label.as_ref().map(|l| l.sym.to_string());
                 Ok(vec![Stmt::Continue { label }])
             }
-            ast::Stmt::Labeled(labeled_stmt) => Ok(vec![convert_labeled_stmt(
-                labeled_stmt,
-                self.tctx,
-                return_type,
-                &mut self.type_env,
-                self.synthetic,
-            )?]),
-            ast::Stmt::DoWhile(do_while) => Ok(vec![convert_do_while_stmt(
-                do_while,
-                self.tctx,
-                return_type,
-                &mut self.type_env,
-                self.synthetic,
-            )?]),
-            ast::Stmt::Try(try_stmt) => {
-                convert_try_stmt(try_stmt, self.tctx, return_type, &mut self.type_env, self.synthetic)
+            ast::Stmt::Labeled(labeled_stmt) => {
+                Ok(vec![self.convert_labeled_stmt(labeled_stmt, return_type)?])
             }
+            ast::Stmt::DoWhile(do_while) => {
+                Ok(vec![self.convert_do_while_stmt(do_while, return_type)?])
+            }
+            ast::Stmt::Try(try_stmt) => self.convert_try_stmt(try_stmt, return_type),
             ast::Stmt::Decl(ast::Decl::Fn(fn_decl)) => {
-                Ok(vec![convert_nested_fn_decl(fn_decl, self.tctx, self.synthetic)?])
+                Ok(vec![self.convert_nested_fn_decl(fn_decl)?])
             }
-            ast::Stmt::Switch(switch_stmt) => {
-                convert_switch_stmt(switch_stmt, self.tctx, return_type, &mut self.type_env, self.synthetic)
-            }
-            ast::Stmt::ForIn(for_in) => Ok(vec![convert_for_in_stmt(
-                for_in,
-                self.tctx,
-                return_type,
-                &mut self.type_env,
-                self.synthetic,
-            )?]),
+            ast::Stmt::Switch(switch_stmt) => self.convert_switch_stmt(switch_stmt, return_type),
+            ast::Stmt::ForIn(for_in) => Ok(vec![self.convert_for_in_stmt(for_in, return_type)?]),
             ast::Stmt::Decl(ast::Decl::TsInterface(_) | ast::Decl::TsTypeAlias(_)) => Ok(vec![]),
             ast::Stmt::Empty(_) => Ok(vec![]),
             _ => Err(anyhow!("unsupported statement: {:?}", stmt)),
         }
     }
-}
-
-/// Wrapper: delegates to [`Transformer::convert_stmt`].
-pub fn convert_stmt(
-    stmt: &ast::Stmt,
-    tctx: &TransformContext<'_>,
-    return_type: Option<&RustType>,
-    type_env: &mut TypeEnv,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Result<Vec<Stmt>> {
-    let mut t = Transformer { tctx, type_env: std::mem::take(type_env), synthetic };
-    let result = t.convert_stmt(stmt, return_type);
-    *type_env = t.type_env;
-    result
-}
-
-impl<'a> Transformer<'a> {
     /// Converts a variable declaration to IR `Stmt::Let` statements.
     fn convert_var_decl(&mut self, var_decl: &ast::VarDecl) -> Result<Vec<Stmt>> {
         let reg = self.reg();
@@ -215,17 +148,6 @@ impl<'a> Transformer<'a> {
         }
         Ok(stmts)
     }
-}
-
-/// Wrapper: delegates to [`Transformer::convert_var_decl`].
-fn convert_var_decl(
-    var_decl: &ast::VarDecl,
-    tctx: &TransformContext<'_>,
-    type_env: &TypeEnv,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Result<Vec<Stmt>> {
-    let env = type_env.clone();
-    Transformer { tctx, type_env: env, synthetic }.convert_var_decl(var_decl)
 }
 
 /// Infers a `RustType::Fn` from a closure expression for TypeEnv registration.
@@ -421,8 +343,7 @@ impl<'a> Transformer<'a> {
         let rhs_ir = self.convert_expr(ca.rhs)?;
 
         if let Some(outer) = &ca.outer_comparison {
-            let other =
-                self.convert_expr(outer.other_operand)?;
+            let other = self.convert_expr(outer.other_operand)?;
             let ir_op = crate::transformer::expressions::convert_binary_op(outer.op)?;
             let condition = if outer.assign_on_left {
                 Expr::BinaryOp {
@@ -572,35 +493,6 @@ impl<'a> Transformer<'a> {
     }
 }
 
-/// Wrapper: delegates to [`Transformer::convert_if_with_conditional_assignment`].
-fn convert_if_with_conditional_assignment(
-    ca: &ConditionalAssignment<'_>,
-    tctx: &TransformContext<'_>,
-    type_env: &mut TypeEnv,
-    then_body: Vec<Stmt>,
-    else_body: Option<Vec<Stmt>>,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Result<Vec<Stmt>> {
-    let mut t = Transformer { tctx, type_env: std::mem::take(type_env), synthetic };
-    let result = t.convert_if_with_conditional_assignment(ca, then_body, else_body);
-    *type_env = t.type_env;
-    result
-}
-
-/// Wrapper: delegates to [`Transformer::convert_while_with_conditional_assignment`].
-fn convert_while_with_conditional_assignment(
-    ca: &ConditionalAssignment<'_>,
-    tctx: &TransformContext<'_>,
-    type_env: &mut TypeEnv,
-    body: Vec<Stmt>,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Result<Vec<Stmt>> {
-    let mut t = Transformer { tctx, type_env: std::mem::take(type_env), synthetic };
-    let result = t.convert_while_with_conditional_assignment(ca, body);
-    *type_env = t.type_env;
-    result
-}
-
 /// Generates a falsy check condition (the inverse of truthiness) for loop break.
 fn generate_falsy_condition(var_name: &str, ty: &RustType) -> Expr {
     match ty {
@@ -633,28 +525,13 @@ impl<'a> Transformer<'a> {
         return_type: Option<&RustType>,
     ) -> Result<Vec<Stmt>> {
         if let Some(ca) = extract_conditional_assignment(&if_stmt.test) {
-            let then_body = convert_block_or_stmt(
-                &if_stmt.cons,
-                self.tctx,
-                return_type,
-                &mut self.type_env,
-                self.synthetic,
-            )?;
+            let then_body = self.convert_block_or_stmt(&if_stmt.cons, return_type)?;
             let else_body = if_stmt
                 .alt
                 .as_ref()
-                .map(|alt| {
-                    convert_block_or_stmt(alt, self.tctx, return_type, &mut self.type_env, self.synthetic)
-                })
+                .map(|alt| self.convert_block_or_stmt(alt, return_type))
                 .transpose()?;
-            return convert_if_with_conditional_assignment(
-                &ca,
-                self.tctx,
-                &mut self.type_env,
-                then_body,
-                else_body,
-                self.synthetic,
-            );
+            return self.convert_if_with_conditional_assignment(&ca, then_body, else_body);
         }
 
         let compound = extract_narrowing_guards(&if_stmt.test);
@@ -663,7 +540,7 @@ impl<'a> Transformer<'a> {
             let mut if_let = Vec::new();
             let mut non_if_let = Vec::new();
             for (guard, ast_expr) in &compound.guards {
-                if can_generate_if_let(guard, &self.type_env, self.tctx) {
+                if self.can_generate_if_let(guard) {
                     if_let.push(guard);
                 } else {
                     non_if_let.push(*ast_expr);
@@ -673,32 +550,19 @@ impl<'a> Transformer<'a> {
         };
 
         if !if_let_guards.is_empty() {
-            let then_body = convert_block_or_stmt(
-                &if_stmt.cons,
-                self.tctx,
-                return_type,
-                &mut self.type_env,
-                self.synthetic,
-            )?;
+            let then_body = self.convert_block_or_stmt(&if_stmt.cons, return_type)?;
 
             let all_remaining: Vec<&ast::Expr> = non_if_let_ast
                 .iter()
                 .copied()
                 .chain(compound.remaining.iter().copied())
                 .collect();
-            let remaining_condition = convert_and_combine_conditions(
-                &all_remaining,
-                self.tctx,
-                &self.type_env,
-                self.synthetic,
-            )?;
+            let remaining_condition = self.convert_and_combine_conditions(&all_remaining)?;
 
             let else_body = if_stmt
                 .alt
                 .as_ref()
-                .map(|alt| {
-                    convert_block_or_stmt(alt, self.tctx, return_type, &mut self.type_env, self.synthetic)
-                })
+                .map(|alt| self.convert_block_or_stmt(alt, return_type))
                 .transpose()?;
 
             let inner_body = if let Some(cond) = remaining_condition {
@@ -711,13 +575,7 @@ impl<'a> Transformer<'a> {
                 then_body
             };
 
-            let stmt = build_nested_if_let(
-                &if_let_guards,
-                &self.type_env,
-                self.tctx,
-                inner_body,
-                else_body,
-            );
+            let stmt = self.build_nested_if_let(&if_let_guards, inner_body, else_body);
             return Ok(vec![stmt]);
         }
 
@@ -727,68 +585,29 @@ impl<'a> Transformer<'a> {
             None
         };
 
-        let then_body = convert_block_or_stmt(
-            &if_stmt.cons,
-            self.tctx,
-            return_type,
-            &mut self.type_env,
-            self.synthetic,
-        )?;
+        let then_body = self.convert_block_or_stmt(&if_stmt.cons, return_type)?;
 
         let else_body = if let Some(alt) = &if_stmt.alt {
-            Some(convert_block_or_stmt(
-                alt,
-                self.tctx,
-                return_type,
-                &mut self.type_env,
-                self.synthetic,
-            )?)
+            Some(self.convert_block_or_stmt(alt, return_type)?)
         } else {
             None
         };
 
         if let Some(guard) = guard {
-            if can_generate_if_let(guard, &self.type_env, self.tctx) {
-                return Ok(vec![generate_if_let(
-                    guard,
-                    &self.type_env,
-                    self.tctx,
-                    then_body,
-                    else_body,
-                )]);
+            if self.can_generate_if_let(guard) {
+                return Ok(vec![self.generate_if_let(guard, then_body, else_body)]);
             }
         }
 
-        let condition =
-            self.convert_expr(&if_stmt.test)?;
+        let condition = self.convert_expr(&if_stmt.test)?;
         Ok(vec![Stmt::If {
             condition,
             then_body,
             else_body,
         }])
     }
-}
-
-/// Wrapper: delegates to [`Transformer::convert_if_stmt`].
-fn convert_if_stmt(
-    if_stmt: &ast::IfStmt,
-    tctx: &TransformContext<'_>,
-    return_type: Option<&RustType>,
-    type_env: &mut TypeEnv,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Result<Vec<Stmt>> {
-    let mut t = Transformer { tctx, type_env: std::mem::take(type_env), synthetic };
-    let result = t.convert_if_stmt(if_stmt, return_type);
-    *type_env = t.type_env;
-    result
-}
-
-impl<'a> Transformer<'a> {
     /// Converts AST expressions and combines them with `&&`.
-    fn convert_and_combine_conditions(
-        &mut self,
-        exprs: &[&ast::Expr],
-    ) -> Result<Option<Expr>> {
+    fn convert_and_combine_conditions(&mut self, exprs: &[&ast::Expr]) -> Result<Option<Expr>> {
         if exprs.is_empty() {
             return Ok(None);
         }
@@ -808,22 +627,6 @@ impl<'a> Transformer<'a> {
     }
 }
 
-/// Wrapper: delegates to [`Transformer::convert_and_combine_conditions`].
-fn convert_and_combine_conditions(
-    exprs: &[&ast::Expr],
-    tctx: &TransformContext<'_>,
-    type_env: &TypeEnv,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Result<Option<Expr>> {
-    let env = type_env.clone();
-    Transformer {
-        tctx,
-        type_env: env,
-        synthetic,
-    }
-    .convert_and_combine_conditions(exprs)
-}
-
 /// Builds nested `if let` statements from inside out.
 impl<'a> Transformer<'a> {
     fn build_nested_if_let(
@@ -834,7 +637,7 @@ impl<'a> Transformer<'a> {
     ) -> Stmt {
         let mut current_body = inner_body;
         for guard in guards.iter().rev() {
-            let stmt = generate_if_let(guard, &self.type_env, self.tctx, current_body, else_body.clone());
+            let stmt = self.generate_if_let(guard, current_body, else_body.clone());
             current_body = vec![stmt];
         }
         current_body.into_iter().next().unwrap()
@@ -873,46 +676,6 @@ impl<'a> Transformer<'a> {
     }
 }
 
-/// Wrapper: delegates to [`Transformer::build_nested_if_let`].
-fn build_nested_if_let(
-    guards: &[&crate::transformer::expressions::patterns::NarrowingGuard],
-    type_env: &TypeEnv,
-    tctx: &TransformContext<'_>,
-    inner_body: Vec<Stmt>,
-    else_body: Option<Vec<Stmt>>,
-) -> Stmt {
-    let env = type_env.clone();
-    let mut synthetic = SyntheticTypeRegistry::new();
-    Transformer { tctx, type_env: env, synthetic: &mut synthetic }
-        .build_nested_if_let(guards, inner_body, else_body)
-}
-
-/// Wrapper: delegates to [`Transformer::can_generate_if_let`].
-fn can_generate_if_let(
-    guard: &crate::transformer::expressions::patterns::NarrowingGuard,
-    type_env: &TypeEnv,
-    tctx: &TransformContext<'_>,
-) -> bool {
-    let env = type_env.clone();
-    let mut synthetic = SyntheticTypeRegistry::new();
-    Transformer { tctx, type_env: env, synthetic: &mut synthetic }
-        .can_generate_if_let(guard)
-}
-
-/// Wrapper: delegates to [`Transformer::generate_if_let`].
-fn generate_if_let(
-    guard: &crate::transformer::expressions::patterns::NarrowingGuard,
-    type_env: &TypeEnv,
-    tctx: &TransformContext<'_>,
-    then_body: Vec<Stmt>,
-    else_body: Option<Vec<Stmt>>,
-) -> Stmt {
-    let env = type_env.clone();
-    let mut synthetic = SyntheticTypeRegistry::new();
-    Transformer { tctx, type_env: env, synthetic: &mut synthetic }
-        .generate_if_let(guard, then_body, else_body)
-}
-
 // resolve_typeof_to_enum_variant and resolve_instanceof_to_enum_variant
 // are defined in patterns.rs and accessed via NarrowingGuard::if_let_pattern.
 
@@ -933,8 +696,7 @@ impl<'a> Transformer<'a> {
                     .init
                     .as_ref()
                     .ok_or_else(|| anyhow!("unsupported for loop: no initializer"))?;
-                let start_expr =
-                    self.convert_expr(init)?;
+                let start_expr = self.convert_expr(init)?;
                 (name, start_expr)
             }
             _ => {
@@ -949,11 +711,7 @@ impl<'a> Transformer<'a> {
                 ast::Expr::Bin(bin) if bin.op == ast::BinaryOp::Lt => {
                     let left_name = match bin.left.as_ref() {
                         ast::Expr::Ident(ident) => ident.sym.to_string(),
-                        _ => {
-                            return Err(anyhow!(
-                                "unsupported for loop: non-ident in condition"
-                            ))
-                        }
+                        _ => return Err(anyhow!("unsupported for loop: non-ident in condition")),
                     };
                     if left_name != var {
                         return Err(anyhow!("unsupported for loop: condition var mismatch"));
@@ -985,13 +743,7 @@ impl<'a> Transformer<'a> {
             None => return Err(anyhow!("unsupported for loop: no update expression")),
         }
 
-        let mut body = convert_block_or_stmt(
-            &for_stmt.body,
-            self.tctx,
-            return_type,
-            &mut self.type_env,
-            self.synthetic,
-        )?;
+        let mut body = self.convert_block_or_stmt(&for_stmt.body, return_type)?;
 
         body.insert(
             0,
@@ -1050,15 +802,8 @@ impl<'a> Transformer<'a> {
             }
             _ => return Err(anyhow!("unsupported for...of left-hand side")),
         };
-        let iterable =
-            self.convert_expr(&for_of.right)?;
-        let body = convert_block_or_stmt(
-            &for_of.body,
-            self.tctx,
-            return_type,
-            &mut self.type_env,
-            self.synthetic,
-        )?;
+        let iterable = self.convert_expr(&for_of.right)?;
+        let body = self.convert_block_or_stmt(&for_of.body, return_type)?;
         Ok(Stmt::ForIn {
             label: None,
             var,
@@ -1084,20 +829,13 @@ impl<'a> Transformer<'a> {
             }
             _ => return Err(anyhow!("unsupported for...in left-hand side")),
         };
-        let obj =
-            self.convert_expr(&for_in.right)?;
+        let obj = self.convert_expr(&for_in.right)?;
         let iterable = Expr::MethodCall {
             object: Box::new(obj),
             method: "keys".to_string(),
             args: vec![],
         };
-        let body = convert_block_or_stmt(
-            &for_in.body,
-            self.tctx,
-            return_type,
-            &mut self.type_env,
-            self.synthetic,
-        )?;
+        let body = self.convert_block_or_stmt(&for_in.body, return_type)?;
         Ok(Stmt::ForIn {
             label: None,
             var,
@@ -1116,13 +854,7 @@ impl<'a> Transformer<'a> {
         match labeled.body.as_ref() {
             ast::Stmt::While(while_stmt) => {
                 let condition = self.convert_expr(&while_stmt.test)?;
-                let body = convert_block_or_stmt(
-                    &while_stmt.body,
-                    self.tctx,
-                    return_type,
-                    &mut self.type_env,
-                    self.synthetic,
-                )?;
+                let body = self.convert_block_or_stmt(&while_stmt.body, return_type)?;
                 Ok(Stmt::While {
                     label: Some(label_name),
                     condition,
@@ -1130,26 +862,14 @@ impl<'a> Transformer<'a> {
                 })
             }
             ast::Stmt::ForOf(for_of) => {
-                let mut stmt = convert_for_of_stmt(
-                    for_of,
-                    self.tctx,
-                    return_type,
-                    &mut self.type_env,
-                    self.synthetic,
-                )?;
+                let mut stmt = self.convert_for_of_stmt(for_of, return_type)?;
                 if let Stmt::ForIn { ref mut label, .. } = stmt {
                     *label = Some(label_name);
                 }
                 Ok(stmt)
             }
             ast::Stmt::For(for_stmt) => {
-                let mut stmt = convert_for_stmt(
-                    for_stmt,
-                    self.tctx,
-                    return_type,
-                    &mut self.type_env,
-                    self.synthetic,
-                )?;
+                let mut stmt = self.convert_for_stmt(for_stmt, return_type)?;
                 if let Stmt::ForIn { ref mut label, .. } = stmt {
                     *label = Some(label_name);
                 }
@@ -1167,105 +887,19 @@ impl<'a> Transformer<'a> {
         while_stmt: &ast::WhileStmt,
         return_type: Option<&RustType>,
     ) -> Result<Vec<Stmt>> {
-        let body = convert_block_or_stmt(
-            &while_stmt.body,
-            self.tctx,
-            return_type,
-            &mut self.type_env,
-            self.synthetic,
-        )?;
+        let body = self.convert_block_or_stmt(&while_stmt.body, return_type)?;
 
         if let Some(ca) = extract_conditional_assignment(&while_stmt.test) {
-            return convert_while_with_conditional_assignment(
-                &ca,
-                self.tctx,
-                &mut self.type_env,
-                body,
-                self.synthetic,
-            );
+            return self.convert_while_with_conditional_assignment(&ca, body);
         }
 
-        let condition =
-            self.convert_expr(&while_stmt.test)?;
+        let condition = self.convert_expr(&while_stmt.test)?;
         Ok(vec![Stmt::While {
             label: None,
             condition,
             body,
         }])
     }
-}
-
-/// Wrapper: delegates to [`Transformer::convert_for_stmt`].
-fn convert_for_stmt(
-    for_stmt: &ast::ForStmt,
-    tctx: &TransformContext<'_>,
-    return_type: Option<&RustType>,
-    type_env: &mut TypeEnv,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Result<Stmt> {
-    let mut t = Transformer { tctx, type_env: std::mem::take(type_env), synthetic };
-    let result = t.convert_for_stmt(for_stmt, return_type);
-    *type_env = t.type_env;
-    result
-}
-
-/// Wrapper: delegates to [`Transformer::convert_for_of_stmt`].
-fn convert_for_of_stmt(
-    for_of: &ast::ForOfStmt,
-    tctx: &TransformContext<'_>,
-    return_type: Option<&RustType>,
-    type_env: &mut TypeEnv,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Result<Stmt> {
-    let mut t = Transformer { tctx, type_env: std::mem::take(type_env), synthetic };
-    let result = t.convert_for_of_stmt(for_of, return_type);
-    *type_env = t.type_env;
-    result
-}
-
-/// Wrapper: delegates to [`Transformer::convert_for_in_stmt`].
-fn convert_for_in_stmt(
-    for_in: &ast::ForInStmt,
-    tctx: &TransformContext<'_>,
-    return_type: Option<&RustType>,
-    type_env: &mut TypeEnv,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Result<Stmt> {
-    let mut t = Transformer { tctx, type_env: std::mem::take(type_env), synthetic };
-    let result = t.convert_for_in_stmt(for_in, return_type);
-    *type_env = t.type_env;
-    result
-}
-
-/// Wrapper: delegates to [`Transformer::convert_labeled_stmt`].
-fn convert_labeled_stmt(
-    labeled: &ast::LabeledStmt,
-    tctx: &TransformContext<'_>,
-    return_type: Option<&RustType>,
-    type_env: &mut TypeEnv,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Result<Stmt> {
-    let mut t = Transformer { tctx, type_env: std::mem::take(type_env), synthetic };
-    let result = t.convert_labeled_stmt(labeled, return_type);
-    *type_env = t.type_env;
-    result
-}
-
-/// Wrapper: delegates to [`Transformer::convert_while_stmt`].
-fn convert_while_stmt(
-    while_stmt: &ast::WhileStmt,
-    tctx: &TransformContext<'_>,
-    return_type: Option<&RustType>,
-    type_env: &mut TypeEnv,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Result<Vec<Stmt>> {
-    let mut t = Transformer { tctx, type_env: std::mem::take(type_env), synthetic };
-    let result = t.convert_while_stmt(while_stmt, return_type);
-    *type_env = t.type_env;
-    result
-}
-
-impl<'a> Transformer<'a> {
     /// Expands a `try` statement into primitive IR statements.
     fn convert_try_stmt(
         &mut self,
@@ -1275,13 +909,7 @@ impl<'a> Transformer<'a> {
         let mut result = Vec::new();
 
         if let Some(finalizer) = &try_stmt.finalizer {
-            let finally_body = convert_stmt_list(
-                &finalizer.stmts,
-                self.tctx,
-                return_type,
-                &mut self.type_env,
-                self.synthetic,
-            )?;
+            let finally_body = self.convert_stmt_list(&finalizer.stmts, return_type)?;
             result.push(Stmt::Let {
                 mutable: false,
                 name: "_finally_guard".to_string(),
@@ -1303,13 +931,7 @@ impl<'a> Transformer<'a> {
             });
         }
 
-        let try_body = convert_stmt_list(
-            &try_stmt.block.stmts,
-            self.tctx,
-            return_type,
-            &mut self.type_env,
-            self.synthetic,
-        )?;
+        let try_body = self.convert_stmt_list(&try_stmt.block.stmts, return_type)?;
 
         if let Some(handler) = &try_stmt.handler {
             let catch_param = handler
@@ -1320,13 +942,7 @@ impl<'a> Transformer<'a> {
                     _ => None,
                 })
                 .unwrap_or_else(|| "_e".to_string());
-            let catch_body = convert_stmt_list(
-                &handler.body.stmts,
-                self.tctx,
-                return_type,
-                &mut self.type_env,
-                self.synthetic,
-            )?;
+            let catch_body = self.convert_stmt_list(&handler.body.stmts, return_type)?;
 
             result.push(Stmt::Let {
                 mutable: true,
@@ -1407,20 +1023,6 @@ impl<'a> Transformer<'a> {
 
         Ok(result)
     }
-}
-
-/// Wrapper: delegates to [`Transformer::convert_try_stmt`].
-fn convert_try_stmt(
-    try_stmt: &ast::TryStmt,
-    tctx: &TransformContext<'_>,
-    return_type: Option<&RustType>,
-    type_env: &mut TypeEnv,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Result<Vec<Stmt>> {
-    let mut t = Transformer { tctx, type_env: std::mem::take(type_env), synthetic };
-    let result = t.convert_try_stmt(try_stmt, return_type);
-    *type_env = t.type_env;
-    result
 }
 
 /// Checks whether a statement list ends with a return on all exit paths.
@@ -1551,8 +1153,7 @@ fn is_err_call(expr: &Expr) -> bool {
 impl<'a> Transformer<'a> {
     /// Converts a `throw` statement into `return Err(...)`.
     fn convert_throw_stmt(&mut self, throw_stmt: &ast::ThrowStmt) -> Result<Stmt> {
-        let err_arg =
-            extract_error_message(&throw_stmt.arg, self.tctx, &self.type_env, self.synthetic);
+        let err_arg = self.extract_error_message(&throw_stmt.arg);
         let err_expr = Expr::MethodCall {
             object: Box::new(err_arg),
             method: "to_string".to_string(),
@@ -1563,58 +1164,24 @@ impl<'a> Transformer<'a> {
             args: vec![err_expr],
         })))
     }
-}
-
-/// Wrapper: delegates to [`Transformer::convert_throw_stmt`].
-fn convert_throw_stmt(
-    throw_stmt: &ast::ThrowStmt,
-    tctx: &TransformContext<'_>,
-    type_env: &TypeEnv,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Result<Stmt> {
-    let env = type_env.clone();
-    Transformer {
-        tctx,
-        type_env: env,
-        synthetic,
-    }
-    .convert_throw_stmt(throw_stmt)
-}
-
-impl<'a> Transformer<'a> {
     /// Extracts the error message expression from a `throw` argument.
     fn extract_error_message(&mut self, expr: &ast::Expr) -> Expr {
         match expr {
             ast::Expr::New(new_expr) => {
                 if let Some(args) = &new_expr.args {
                     if let Some(first) = args.first() {
-                        if let Ok(e) =
-                            self.convert_expr(&first.expr)
-                        {
+                        if let Ok(e) = self.convert_expr(&first.expr) {
                             return e;
                         }
                     }
                 }
                 Expr::StringLit("unknown error".to_string())
             }
-            other => self.convert_expr(other)
+            other => self
+                .convert_expr(other)
                 .unwrap_or_else(|_| Expr::StringLit("unknown error".to_string())),
         }
     }
-}
-
-/// Wrapper: delegates to [`Transformer::extract_error_message`].
-fn extract_error_message(
-    expr: &ast::Expr,
-    tctx: &TransformContext<'_>,
-    type_env: &TypeEnv,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Expr {
-    let env = type_env.clone();
-    Transformer { tctx, type_env: env, synthetic }.extract_error_message(expr)
-}
-
-impl<'a> Transformer<'a> {
     /// Converts a list of SWC statements into IR statements.
     pub(crate) fn convert_stmt_list(
         &mut self,
@@ -1623,8 +1190,7 @@ impl<'a> Transformer<'a> {
     ) -> Result<Vec<Stmt>> {
         let mut result = Vec::new();
         for stmt in stmts {
-            let converted =
-                convert_stmt(stmt, self.tctx, return_type, &mut self.type_env, self.synthetic)?;
+            let converted = self.convert_stmt(stmt, return_type)?;
             for s in &converted {
                 match s {
                     Stmt::Let {
@@ -1654,20 +1220,6 @@ impl<'a> Transformer<'a> {
         mark_mutated_vars(&mut result);
         Ok(result)
     }
-}
-
-/// Wrapper: delegates to [`Transformer::convert_stmt_list`].
-pub fn convert_stmt_list(
-    stmts: &[ast::Stmt],
-    tctx: &TransformContext<'_>,
-    return_type: Option<&RustType>,
-    type_env: &mut TypeEnv,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Result<Vec<Stmt>> {
-    let mut t = Transformer { tctx, type_env: std::mem::take(type_env), synthetic };
-    let result = t.convert_stmt_list(stmts, return_type);
-    *type_env = t.type_env;
-    result
 }
 
 /// Extracts the init expression from a VarDecl AST statement
@@ -1844,10 +1396,7 @@ fn extract_spread_array_init(var_decl: &ast::VarDecl) -> Option<(&ast::Pat, &ast
 /// Converts spread array elements to IR expressions and marks whether each is a spread.
 impl<'a> Transformer<'a> {
     /// Converts spread array elements to IR expressions.
-    fn convert_spread_segments(
-        &mut self,
-        array_lit: &ast::ArrayLit,
-    ) -> Result<Vec<(bool, Expr)>> {
+    fn convert_spread_segments(&mut self, array_lit: &ast::ArrayLit) -> Result<Vec<(bool, Expr)>> {
         array_lit
             .elems
             .iter()
@@ -1858,17 +1407,6 @@ impl<'a> Transformer<'a> {
             })
             .collect()
     }
-}
-
-/// Wrapper: delegates to [`Transformer::convert_spread_segments`].
-fn convert_spread_segments(
-    array_lit: &ast::ArrayLit,
-    tctx: &TransformContext<'_>,
-    type_env: &TypeEnv,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Result<Vec<(bool, Expr)>> {
-    let env = type_env.clone();
-    Transformer { tctx, type_env: env, synthetic }.convert_spread_segments(array_lit)
 }
 
 /// Generates push/extend statements from spread segments for a given variable name.
@@ -1903,10 +1441,7 @@ fn emit_spread_ops(var_name: &str, segments: &[(bool, Expr)], result: &mut Vec<S
 /// Returns `None` if the VarDecl does not contain a spread array initializer.
 impl<'a> Transformer<'a> {
     /// Detects `let x = [...arr, 1]` and expands to IR statements.
-    fn try_expand_spread_var_decl(
-        &mut self,
-        var_decl: &ast::VarDecl,
-    ) -> Result<Option<Vec<Stmt>>> {
+    fn try_expand_spread_var_decl(&mut self, var_decl: &ast::VarDecl) -> Result<Option<Vec<Stmt>>> {
         let reg = self.reg();
         let (pat, array_lit) = match extract_spread_array_init(var_decl) {
             Some(v) => v,
@@ -1922,8 +1457,7 @@ impl<'a> Transformer<'a> {
             _ => None,
         };
 
-        let segments =
-            convert_spread_segments(array_lit, self.tctx, &self.type_env, self.synthetic)?;
+        let segments = self.convert_spread_segments(array_lit)?;
 
         if segments.len() == 1 && segments[0].0 {
             return Ok(Some(vec![Stmt::Let {
@@ -1953,10 +1487,7 @@ impl<'a> Transformer<'a> {
     }
 
     /// Detects `return [...arr, 1]` and expands to IR statements.
-    fn try_expand_spread_return(
-        &mut self,
-        ret: &ast::ReturnStmt,
-    ) -> Result<Option<Vec<Stmt>>> {
+    fn try_expand_spread_return(&mut self, ret: &ast::ReturnStmt) -> Result<Option<Vec<Stmt>>> {
         let arg = match &ret.arg {
             Some(arg) => arg,
             None => return Ok(None),
@@ -1966,8 +1497,7 @@ impl<'a> Transformer<'a> {
             _ => return Ok(None),
         };
 
-        let segments =
-            convert_spread_segments(array_lit, self.tctx, &self.type_env, self.synthetic)?;
+        let segments = self.convert_spread_segments(array_lit)?;
 
         if segments.len() == 1 && segments[0].0 {
             return Ok(Some(vec![Stmt::Return(Some(Expr::MethodCall {
@@ -2003,8 +1533,7 @@ impl<'a> Transformer<'a> {
             _ => return Ok(None),
         };
 
-        let segments =
-            convert_spread_segments(array_lit, self.tctx, &self.type_env, self.synthetic)?;
+        let segments = self.convert_spread_segments(array_lit)?;
 
         if segments.len() == 1 && segments[0].0 {
             return Ok(Some(vec![Stmt::Expr(Expr::MethodCall {
@@ -2054,66 +1583,16 @@ impl<'a> Transformer<'a> {
         let source_type = get_expr_type(self.tctx, source);
         let mut stmts = Vec::new();
 
-        expand_object_pat_props(
+        self.expand_object_pat_props(
             &obj_pat.props,
             &source_expr,
             mutable,
             &mut stmts,
-            self.tctx,
-            &self.type_env,
             source_type,
-            self.synthetic,
         )?;
 
         Ok(Some(stmts))
     }
-}
-
-/// Wrapper: delegates to [`Transformer::try_expand_spread_var_decl`].
-fn try_expand_spread_var_decl(
-    var_decl: &ast::VarDecl,
-    tctx: &TransformContext<'_>,
-    type_env: &TypeEnv,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Result<Option<Vec<Stmt>>> {
-    let env = type_env.clone();
-    Transformer { tctx, type_env: env, synthetic }.try_expand_spread_var_decl(var_decl)
-}
-
-/// Wrapper: delegates to [`Transformer::try_expand_spread_return`].
-fn try_expand_spread_return(
-    ret: &ast::ReturnStmt,
-    tctx: &TransformContext<'_>,
-    type_env: &TypeEnv,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Result<Option<Vec<Stmt>>> {
-    let env = type_env.clone();
-    Transformer { tctx, type_env: env, synthetic }.try_expand_spread_return(ret)
-}
-
-/// Wrapper: delegates to [`Transformer::try_expand_spread_expr_stmt`].
-fn try_expand_spread_expr_stmt(
-    expr_stmt: &ast::ExprStmt,
-    tctx: &TransformContext<'_>,
-    type_env: &TypeEnv,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Result<Option<Vec<Stmt>>> {
-    let env = type_env.clone();
-    Transformer { tctx, type_env: env, synthetic }.try_expand_spread_expr_stmt(expr_stmt)
-}
-
-/// Wrapper: delegates to [`Transformer::try_convert_object_destructuring`].
-fn try_convert_object_destructuring(
-    var_decl: &ast::VarDecl,
-    tctx: &TransformContext<'_>,
-    type_env: &TypeEnv,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Result<Option<Vec<Stmt>>> {
-    let env = type_env.clone();
-    Transformer { tctx, type_env: env, synthetic }.try_convert_object_destructuring(var_decl)
-}
-
-impl<'a> Transformer<'a> {
     /// Recursively expands object destructuring pattern properties into `let` statements.
     fn expand_object_pat_props(
         &mut self,
@@ -2123,23 +1602,30 @@ impl<'a> Transformer<'a> {
         stmts: &mut Vec<Stmt>,
         source_type: Option<&RustType>,
     ) -> Result<()> {
-        let tctx = self.tctx;
-        let type_env = &self.type_env;
-        let synthetic = &mut *self.synthetic;
-        let reg = tctx.type_registry;
-    for prop in props {
-        match prop {
-            ast::ObjectPatProp::Assign(assign) => {
-                let field_name = assign.key.sym.to_string();
-                let field_access = Expr::FieldAccess {
-                    object: Box::new(source_expr.clone()),
-                    field: field_name.clone(),
-                };
-                let init_expr = if let Some(default_expr) = &assign.value {
-                    let default_ir = crate::transformer::Transformer { tctx, type_env: type_env.clone(), synthetic }.convert_expr(default_expr)?;
-                    match &default_ir {
-                        Expr::MethodCall { method, .. } if method == "to_string" => {
-                            Expr::MethodCall {
+        let reg = self.reg();
+        for prop in props {
+            match prop {
+                ast::ObjectPatProp::Assign(assign) => {
+                    let field_name = assign.key.sym.to_string();
+                    let field_access = Expr::FieldAccess {
+                        object: Box::new(source_expr.clone()),
+                        field: field_name.clone(),
+                    };
+                    let init_expr = if let Some(default_expr) = &assign.value {
+                        let default_ir = self.convert_expr(default_expr)?;
+                        match &default_ir {
+                            Expr::MethodCall { method, .. } if method == "to_string" => {
+                                Expr::MethodCall {
+                                    object: Box::new(field_access),
+                                    method: "unwrap_or_else".to_string(),
+                                    args: vec![Expr::Closure {
+                                        params: vec![],
+                                        return_type: None,
+                                        body: crate::ir::ClosureBody::Expr(Box::new(default_ir)),
+                                    }],
+                                }
+                            }
+                            Expr::StringLit(_) => Expr::MethodCall {
                                 object: Box::new(field_access),
                                 method: "unwrap_or_else".to_string(),
                                 args: vec![Expr::Closure {
@@ -2147,119 +1633,89 @@ impl<'a> Transformer<'a> {
                                     return_type: None,
                                     body: crate::ir::ClosureBody::Expr(Box::new(default_ir)),
                                 }],
-                            }
+                            },
+                            _ => Expr::MethodCall {
+                                object: Box::new(field_access),
+                                method: "unwrap_or".to_string(),
+                                args: vec![default_ir],
+                            },
                         }
-                        Expr::StringLit(_) => Expr::MethodCall {
-                            object: Box::new(field_access),
-                            method: "unwrap_or_else".to_string(),
-                            args: vec![Expr::Closure {
-                                params: vec![],
-                                return_type: None,
-                                body: crate::ir::ClosureBody::Expr(Box::new(default_ir)),
-                            }],
-                        },
-                        _ => Expr::MethodCall {
-                            object: Box::new(field_access),
-                            method: "unwrap_or".to_string(),
-                            args: vec![default_ir],
-                        },
-                    }
-                } else {
-                    field_access
-                };
-                stmts.push(Stmt::Let {
-                    mutable,
-                    name: field_name,
-                    ty: None,
-                    init: Some(init_expr),
-                });
-            }
-            ast::ObjectPatProp::KeyValue(kv) => {
-                let field_name = extract_prop_name(&kv.key)
-                    .map_err(|_| anyhow!("unsupported destructuring key"))?;
-                let nested_source = Expr::FieldAccess {
-                    object: Box::new(source_expr.clone()),
-                    field: field_name,
-                };
-                match kv.value.as_ref() {
-                    ast::Pat::Object(inner_pat) => {
-                        expand_object_pat_props(
-                            &inner_pat.props,
-                            &nested_source,
-                            mutable,
-                            stmts,
-                            tctx,
-                            type_env,
-                            None,
-                            synthetic,
-                        )?;
-                    }
-                    _ => {
-                        let binding_name = extract_pat_ident_name(kv.value.as_ref())
-                            .map_err(|_| anyhow!("unsupported destructuring value pattern"))?;
-                        stmts.push(Stmt::Let {
-                            mutable,
-                            name: binding_name,
-                            ty: None,
-                            init: Some(nested_source),
-                        });
-                    }
+                    } else {
+                        field_access
+                    };
+                    stmts.push(Stmt::Let {
+                        mutable,
+                        name: field_name,
+                        ty: None,
+                        init: Some(init_expr),
+                    });
                 }
-            }
-            ast::ObjectPatProp::Rest(_rest) => {
-                let explicit_fields: Vec<String> = props
-                    .iter()
-                    .filter_map(|p| match p {
-                        ast::ObjectPatProp::Assign(a) => Some(a.key.sym.to_string()),
-                        ast::ObjectPatProp::KeyValue(kv) => extract_prop_name(&kv.key).ok(),
-                        _ => None,
-                    })
-                    .collect();
-
-                let type_name = source_type.and_then(|ty| match ty {
-                    RustType::Named { name, .. } => Some(name.as_str()),
-                    _ => None,
-                });
-                if let Some(crate::registry::TypeDef::Struct { fields, .. }) =
-                    type_name.and_then(|n| reg.get(n))
-                {
-                    for (field_name, _) in fields {
-                        if !explicit_fields.contains(field_name) {
+                ast::ObjectPatProp::KeyValue(kv) => {
+                    let field_name = extract_prop_name(&kv.key)
+                        .map_err(|_| anyhow!("unsupported destructuring key"))?;
+                    let nested_source = Expr::FieldAccess {
+                        object: Box::new(source_expr.clone()),
+                        field: field_name,
+                    };
+                    match kv.value.as_ref() {
+                        ast::Pat::Object(inner_pat) => {
+                            self.expand_object_pat_props(
+                                &inner_pat.props,
+                                &nested_source,
+                                mutable,
+                                stmts,
+                                None,
+                            )?;
+                        }
+                        _ => {
+                            let binding_name = extract_pat_ident_name(kv.value.as_ref())
+                                .map_err(|_| anyhow!("unsupported destructuring value pattern"))?;
                             stmts.push(Stmt::Let {
                                 mutable,
-                                name: field_name.clone(),
+                                name: binding_name,
                                 ty: None,
-                                init: Some(Expr::FieldAccess {
-                                    object: Box::new(source_expr.clone()),
-                                    field: field_name.clone(),
-                                }),
+                                init: Some(nested_source),
                             });
+                        }
+                    }
+                }
+                ast::ObjectPatProp::Rest(_rest) => {
+                    let explicit_fields: Vec<String> = props
+                        .iter()
+                        .filter_map(|p| match p {
+                            ast::ObjectPatProp::Assign(a) => Some(a.key.sym.to_string()),
+                            ast::ObjectPatProp::KeyValue(kv) => extract_prop_name(&kv.key).ok(),
+                            _ => None,
+                        })
+                        .collect();
+
+                    let type_name = source_type.and_then(|ty| match ty {
+                        RustType::Named { name, .. } => Some(name.as_str()),
+                        _ => None,
+                    });
+                    if let Some(crate::registry::TypeDef::Struct { fields, .. }) =
+                        type_name.and_then(|n| reg.get(n))
+                    {
+                        for (field_name, _) in fields {
+                            if !explicit_fields.contains(field_name) {
+                                stmts.push(Stmt::Let {
+                                    mutable,
+                                    name: field_name.clone(),
+                                    ty: None,
+                                    init: Some(Expr::FieldAccess {
+                                        object: Box::new(source_expr.clone()),
+                                        field: field_name.clone(),
+                                    }),
+                                });
+                            }
                         }
                     }
                 }
             }
         }
-    }
 
         Ok(())
     }
-}
-
-/// Wrapper: delegates to [`Transformer::expand_object_pat_props`].
-#[allow(clippy::too_many_arguments)]
-fn expand_object_pat_props(
-    props: &[ast::ObjectPatProp],
-    source_expr: &Expr,
-    mutable: bool,
-    stmts: &mut Vec<Stmt>,
-    tctx: &TransformContext<'_>,
-    type_env: &TypeEnv,
-    source_type: Option<&RustType>,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Result<()> {
-    let env = type_env.clone();
-    Transformer { tctx, type_env: env, synthetic }
-        .expand_object_pat_props(props, source_expr, mutable, stmts, source_type)
 }
 
 /// Checks whether a case body is terminated (break, return, throw, or continue).
@@ -2287,26 +1743,19 @@ impl<'a> Transformer<'a> {
         switch: &ast::SwitchStmt,
         return_type: Option<&RustType>,
     ) -> Result<Vec<Stmt>> {
-        if let Some(result) = try_convert_discriminated_union_switch(
-            switch, self.tctx, return_type, &mut self.type_env, self.synthetic,
-        )? {
+        if let Some(result) = self.try_convert_discriminated_union_switch(switch, return_type)? {
             return Ok(result);
         }
 
-        if let Some(result) = try_convert_typeof_switch(
-            switch, self.tctx, return_type, &mut self.type_env, self.synthetic,
-        )? {
+        if let Some(result) = self.try_convert_typeof_switch(switch, return_type)? {
             return Ok(result);
         }
 
-        if let Some(result) = try_convert_string_enum_switch(
-            switch, self.tctx, return_type, &mut self.type_env, self.synthetic,
-        )? {
+        if let Some(result) = self.try_convert_string_enum_switch(switch, return_type)? {
             return Ok(result);
         }
 
-        let mut discriminant =
-            self.convert_expr(&switch.discriminant)?;
+        let mut discriminant = self.convert_expr(&switch.discriminant)?;
 
         let has_string_cases = switch
             .cases
@@ -2329,39 +1778,11 @@ impl<'a> Transformer<'a> {
         });
 
         if has_code_fallthrough {
-            convert_switch_fallthrough(
-                switch,
-                &discriminant,
-                self.tctx,
-                return_type,
-                &mut self.type_env,
-                self.synthetic,
-            )
+            self.convert_switch_fallthrough(switch, &discriminant, return_type)
         } else {
-            convert_switch_clean_match(
-                switch,
-                discriminant,
-                self.tctx,
-                return_type,
-                &mut self.type_env,
-                self.synthetic,
-            )
+            self.convert_switch_clean_match(switch, discriminant, return_type)
         }
     }
-}
-
-/// Wrapper: delegates to [`Transformer::convert_switch_stmt`].
-fn convert_switch_stmt(
-    switch: &ast::SwitchStmt,
-    tctx: &TransformContext<'_>,
-    return_type: Option<&RustType>,
-    type_env: &mut TypeEnv,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Result<Vec<Stmt>> {
-    let mut t = Transformer { tctx, type_env: std::mem::take(type_env), synthetic };
-    let result = t.convert_switch_stmt(switch, return_type);
-    *type_env = t.type_env;
-    result
 }
 
 /// `switch (typeof x)` を enum match に変換する。
@@ -2410,137 +1831,123 @@ impl<'a> Transformer<'a> {
             return Ok(None);
         }
 
-    // Bail out if any case has code fall-through (non-empty body without terminator
-    // followed by another case). typeof switch with fall-through is unusual and the
-    // regular switch conversion handles it correctly.
-    let case_count = switch.cases.len();
-    let has_code_fallthrough = switch.cases.iter().enumerate().any(|(i, case)| {
-        let is_last = i == case_count - 1;
-        let has_body = !case.cons.is_empty();
-        let is_terminated = is_case_terminated(&case.cons);
-        has_body && !is_terminated && !is_last
-    });
-    if has_code_fallthrough {
-        return Ok(None);
-    }
+        // Bail out if any case has code fall-through (non-empty body without terminator
+        // followed by another case). typeof switch with fall-through is unusual and the
+        // regular switch conversion handles it correctly.
+        let case_count = switch.cases.len();
+        let has_code_fallthrough = switch.cases.iter().enumerate().any(|(i, case)| {
+            let is_last = i == case_count - 1;
+            let has_body = !case.cons.is_empty();
+            let is_terminated = is_case_terminated(&case.cons);
+            has_body && !is_terminated && !is_last
+        });
+        if has_code_fallthrough {
+            return Ok(None);
+        }
 
-    // Build match arms from cases.
-    // Pending entries accumulate during empty-body fall-through (case "string": case "number": ...)
-    // and are flushed when a non-empty body is encountered — each pending entry generates
-    // a separate arm with the same body, because Rust `|` patterns cannot bind different types.
-    let mut arms: Vec<MatchArm> = Vec::new();
-    let mut pending: Vec<MatchPattern> = Vec::new();
+        // Build match arms from cases.
+        // Pending entries accumulate during empty-body fall-through (case "string": case "number": ...)
+        // and are flushed when a non-empty body is encountered — each pending entry generates
+        // a separate arm with the same body, because Rust `|` patterns cannot bind different types.
+        let mut arms: Vec<MatchArm> = Vec::new();
+        let mut pending: Vec<MatchPattern> = Vec::new();
 
-    for case in &switch.cases {
-        if let Some(test) = &case.test {
-            // Extract typeof string from the case: case "string", case "number", etc.
-            let typeof_str = match test.as_ref() {
-                ast::Expr::Lit(ast::Lit::Str(s)) => s.value.to_string_lossy().into_owned(),
-                _ => return Ok(None), // Non-string case — bail out
-            };
+        for case in &switch.cases {
+            if let Some(test) = &case.test {
+                // Extract typeof string from the case: case "string", case "number", etc.
+                let typeof_str = match test.as_ref() {
+                    ast::Expr::Lit(ast::Lit::Str(s)) => s.value.to_string_lossy().into_owned(),
+                    _ => return Ok(None), // Non-string case — bail out
+                };
 
-            // Resolve to enum variant
-            let variant = resolve_typeof_to_enum_variant(&var_type, &typeof_str, self.tctx);
-            let pattern = match variant {
-                Some((ref ename, ref vname)) => {
-                    MatchPattern::Literal(Expr::Ident(format!("{ename}::{vname}({var_name})")))
+                // Resolve to enum variant
+                let variant = resolve_typeof_to_enum_variant(&var_type, &typeof_str, self.tctx);
+                let pattern = match variant {
+                    Some((ref ename, ref vname)) => {
+                        MatchPattern::Literal(Expr::Ident(format!("{ename}::{vname}({var_name})")))
+                    }
+                    None => {
+                        // typeof string doesn't match any variant — skip this conversion
+                        return Ok(None);
+                    }
+                };
+
+                // Accumulate pattern (will be flushed when we hit a non-empty body)
+                pending.push(pattern);
+
+                if case.cons.is_empty() {
+                    continue;
                 }
-                None => {
-                    // typeof string doesn't match any variant — skip this conversion
-                    return Ok(None);
+
+                // Non-empty body: flush all pending patterns as separate arms with this body.
+                for pat in pending.drain(..) {
+                    let body: Vec<Stmt> = case
+                        .cons
+                        .iter()
+                        .filter(|s| !matches!(s, ast::Stmt::Break(_) | ast::Stmt::Continue(_)))
+                        .map(|s| self.convert_stmt(s, return_type))
+                        .collect::<Result<Vec<_>>>()?
+                        .into_iter()
+                        .flatten()
+                        .collect();
+
+                    arms.push(MatchArm {
+                        patterns: vec![pat],
+                        guard: None,
+                        body,
+                    });
                 }
-            };
-
-            // Accumulate pattern (will be flushed when we hit a non-empty body)
-            pending.push(pattern);
-
-            if case.cons.is_empty() {
-                continue;
-            }
-
-            // Non-empty body: flush all pending patterns as separate arms with this body.
-            for pat in pending.drain(..) {
+            } else {
+                // default case — also flush any pending patterns
+                for pat in pending.drain(..) {
+                    let body: Vec<Stmt> = case
+                        .cons
+                        .iter()
+                        .filter(|s| !matches!(s, ast::Stmt::Break(_) | ast::Stmt::Continue(_)))
+                        .map(|s| self.convert_stmt(s, return_type))
+                        .collect::<Result<Vec<_>>>()?
+                        .into_iter()
+                        .flatten()
+                        .collect();
+                    arms.push(MatchArm {
+                        patterns: vec![pat],
+                        guard: None,
+                        body,
+                    });
+                }
                 let body: Vec<Stmt> = case
                     .cons
                     .iter()
                     .filter(|s| !matches!(s, ast::Stmt::Break(_) | ast::Stmt::Continue(_)))
-                    .map(|s| convert_stmt(s, self.tctx, return_type, &mut self.type_env, self.synthetic))
+                    .map(|s| self.convert_stmt(s, return_type))
                     .collect::<Result<Vec<_>>>()?
                     .into_iter()
                     .flatten()
                     .collect();
 
                 arms.push(MatchArm {
-                    patterns: vec![pat],
+                    patterns: vec![MatchPattern::Wildcard],
                     guard: None,
                     body,
                 });
             }
-        } else {
-            // default case — also flush any pending patterns
-            for pat in pending.drain(..) {
-                let body: Vec<Stmt> = case
-                    .cons
-                    .iter()
-                    .filter(|s| !matches!(s, ast::Stmt::Break(_) | ast::Stmt::Continue(_)))
-                    .map(|s| convert_stmt(s, self.tctx, return_type, &mut self.type_env, self.synthetic))
-                    .collect::<Result<Vec<_>>>()?
-                    .into_iter()
-                    .flatten()
-                    .collect();
-                arms.push(MatchArm {
-                    patterns: vec![pat],
-                    guard: None,
-                    body,
-                });
-            }
-            let body: Vec<Stmt> = case
-                .cons
-                .iter()
-                .filter(|s| !matches!(s, ast::Stmt::Break(_) | ast::Stmt::Continue(_)))
-                .map(|s| convert_stmt(s, self.tctx, return_type, &mut self.type_env, self.synthetic))
-                .collect::<Result<Vec<_>>>()?
-                .into_iter()
-                .flatten()
-                .collect();
+        }
 
+        // Flush any remaining pending patterns (trailing empty-body cases that fell off
+        // the end of the switch). Generate arms with empty body to preserve match exhaustiveness.
+        for pat in pending.drain(..) {
             arms.push(MatchArm {
-                patterns: vec![MatchPattern::Wildcard],
+                patterns: vec![pat],
                 guard: None,
-                body,
+                body: vec![],
             });
         }
-    }
-
-    // Flush any remaining pending patterns (trailing empty-body cases that fell off
-    // the end of the switch). Generate arms with empty body to preserve match exhaustiveness.
-    for pat in pending.drain(..) {
-        arms.push(MatchArm {
-            patterns: vec![pat],
-            guard: None,
-            body: vec![],
-        });
-    }
 
         Ok(Some(vec![Stmt::Match {
             expr: Expr::Ident(var_name),
             arms,
         }]))
     }
-}
-
-/// Wrapper: delegates to [`Transformer::try_convert_typeof_switch`].
-fn try_convert_typeof_switch(
-    switch: &ast::SwitchStmt,
-    tctx: &TransformContext<'_>,
-    return_type: Option<&RustType>,
-    type_env: &mut TypeEnv,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Result<Option<Vec<Stmt>>> {
-    let mut t = Transformer { tctx, type_env: std::mem::take(type_env), synthetic };
-    let result = t.try_convert_typeof_switch(switch, return_type);
-    *type_env = t.type_env;
-    result
 }
 
 /// discriminated union の tag フィールドに対する switch を enum match に変換する。
@@ -2551,166 +1958,150 @@ impl<'a> Transformer<'a> {
         switch: &ast::SwitchStmt,
         return_type: Option<&RustType>,
     ) -> Result<Option<Vec<Stmt>>> {
-        let tctx = self.tctx;
-        let type_env = &mut self.type_env;
-        let synthetic = &mut *self.synthetic;
-        let reg = tctx.type_registry;
-    use crate::registry::TypeDef;
-    // Check if discriminant is a member expression (e.g., s.kind)
-    let member = match switch.discriminant.as_ref() {
-        ast::Expr::Member(m) => m,
-        _ => return Ok(None),
-    };
-
-    let field_name = match &member.prop {
-        ast::MemberProp::Ident(ident) => ident.sym.to_string(),
-        _ => return Ok(None),
-    };
-
-    // Resolve the object's type
-    let obj_type = get_expr_type(tctx, &member.obj);
-    let enum_name = match obj_type {
-        Some(RustType::Named { name, .. }) => name.clone(),
-        _ => return Ok(None),
-    };
-
-    // Check if this is a discriminated union and the field is the tag
-    let (string_values, variant_fields) = match reg.get(&enum_name) {
-        Some(TypeDef::Enum {
-            tag_field: Some(tag),
-            string_values,
-            variant_fields,
-            ..
-        }) if *tag == field_name => (string_values, variant_fields),
-        _ => return Ok(None),
-    };
-
-    // Extract the object variable name for field access rewriting (e.g., "s" from "s.kind")
-    let obj_var_name = match member.obj.as_ref() {
-        ast::Expr::Ident(ident) => Some(ident.sym.to_string()),
-        _ => None,
-    };
-
-    // Convert the match: match on &object (not object.tag)
-    // Cat A: receiver object
-    let object = crate::transformer::Transformer { tctx, type_env: type_env.clone(), synthetic }.convert_expr(&member.obj)?;
-    let match_expr = Expr::Ref(Box::new(object));
-
-    let mut arms: Vec<MatchArm> = Vec::new();
-    let mut pending_patterns: Vec<MatchPattern> = Vec::new();
-    let mut pending_variant_names: Vec<String> = Vec::new();
-
-    for case in &switch.cases {
-        if let Some(test) = &case.test {
-            // Extract string literal from case
-            let str_value = match test.as_ref() {
-                ast::Expr::Lit(ast::Lit::Str(s)) => s.value.to_string_lossy().into_owned(),
-                _ => return Ok(None), // Non-string case → fallback to normal switch
-            };
-
-            if let Some(variant_name) = string_values.get(&str_value) {
-                pending_patterns.push(MatchPattern::EnumVariant {
-                    path: format!("{enum_name}::{variant_name}"),
-                    bindings: vec![],
-                });
-                pending_variant_names.push(variant_name.clone());
-            } else {
-                return Ok(None); // Unknown variant → fallback
-            }
-        }
-
-        // Empty body = fall-through, accumulate patterns
-        if case.cons.is_empty() {
-            continue;
-        }
-
-        // Scan body for field accesses on the DU variable (e.g., s.radius)
-        // and collect field names to bind in the match pattern
-        let needed_fields = if let Some(ref var_name) = obj_var_name {
-            collect_du_field_accesses(&case.cons, var_name, &field_name)
-        } else {
-            Vec::new()
+        let reg = self.reg();
+        use crate::registry::TypeDef;
+        // Check if discriminant is a member expression (e.g., s.kind)
+        let member = match switch.discriminant.as_ref() {
+            ast::Expr::Member(m) => m,
+            _ => return Ok(None),
         };
 
-        // Update bindings on pending patterns and register fields in TypeEnv
-        if !needed_fields.is_empty() {
-            for pattern in &mut pending_patterns {
-                if let MatchPattern::EnumVariant { bindings, path, .. } = pattern {
-                    // Extract variant name from path (e.g., "Shape::Circle" → "Circle")
-                    let vname = path.rsplit("::").next().unwrap_or("");
-                    if let Some(fields) = variant_fields.get(vname) {
-                        *bindings = needed_fields
-                            .iter()
-                            .filter(|f| fields.iter().any(|(n, _)| n == *f))
-                            .cloned()
-                            .collect();
+        let field_name = match &member.prop {
+            ast::MemberProp::Ident(ident) => ident.sym.to_string(),
+            _ => return Ok(None),
+        };
+
+        // Resolve the object's type
+        let obj_type = get_expr_type(self.tctx, &member.obj);
+        let enum_name = match obj_type {
+            Some(RustType::Named { name, .. }) => name.clone(),
+            _ => return Ok(None),
+        };
+
+        // Check if this is a discriminated union and the field is the tag
+        let (string_values, variant_fields) = match reg.get(&enum_name) {
+            Some(TypeDef::Enum {
+                tag_field: Some(tag),
+                string_values,
+                variant_fields,
+                ..
+            }) if *tag == field_name => (string_values, variant_fields),
+            _ => return Ok(None),
+        };
+
+        // Extract the object variable name for field access rewriting (e.g., "s" from "s.kind")
+        let obj_var_name = match member.obj.as_ref() {
+            ast::Expr::Ident(ident) => Some(ident.sym.to_string()),
+            _ => None,
+        };
+
+        // Convert the match: match on &object (not object.tag)
+        // Cat A: receiver object
+        let object = self.convert_expr(&member.obj)?;
+        let match_expr = Expr::Ref(Box::new(object));
+
+        let mut arms: Vec<MatchArm> = Vec::new();
+        let mut pending_patterns: Vec<MatchPattern> = Vec::new();
+        let mut pending_variant_names: Vec<String> = Vec::new();
+
+        for case in &switch.cases {
+            if let Some(test) = &case.test {
+                // Extract string literal from case
+                let str_value = match test.as_ref() {
+                    ast::Expr::Lit(ast::Lit::Str(s)) => s.value.to_string_lossy().into_owned(),
+                    _ => return Ok(None), // Non-string case → fallback to normal switch
+                };
+
+                if let Some(variant_name) = string_values.get(&str_value) {
+                    pending_patterns.push(MatchPattern::EnumVariant {
+                        path: format!("{enum_name}::{variant_name}"),
+                        bindings: vec![],
+                    });
+                    pending_variant_names.push(variant_name.clone());
+                } else {
+                    return Ok(None); // Unknown variant → fallback
+                }
+            }
+
+            // Empty body = fall-through, accumulate patterns
+            if case.cons.is_empty() {
+                continue;
+            }
+
+            // Scan body for field accesses on the DU variable (e.g., s.radius)
+            // and collect field names to bind in the match pattern
+            let needed_fields = if let Some(ref var_name) = obj_var_name {
+                collect_du_field_accesses(&case.cons, var_name, &field_name)
+            } else {
+                Vec::new()
+            };
+
+            // Update bindings on pending patterns and register fields in TypeEnv
+            if !needed_fields.is_empty() {
+                for pattern in &mut pending_patterns {
+                    if let MatchPattern::EnumVariant { bindings, path, .. } = pattern {
+                        // Extract variant name from path (e.g., "Shape::Circle" → "Circle")
+                        let vname = path.rsplit("::").next().unwrap_or("");
+                        if let Some(fields) = variant_fields.get(vname) {
+                            *bindings = needed_fields
+                                .iter()
+                                .filter(|f| fields.iter().any(|(n, _)| n == *f))
+                                .cloned()
+                                .collect();
+                        }
                     }
                 }
             }
-        }
 
-        // Collect field types for TypeEnv registration
-        let mut field_types: Vec<(String, RustType)> = Vec::new();
-        for vname in &pending_variant_names {
-            if let Some(fields) = variant_fields.get(vname) {
-                for (fname, ftype) in fields {
-                    if needed_fields.contains(fname) && !field_types.iter().any(|(n, _)| n == fname)
-                    {
-                        field_types.push((fname.clone(), ftype.clone()));
+            // Collect field types for TypeEnv registration
+            let mut field_types: Vec<(String, RustType)> = Vec::new();
+            for vname in &pending_variant_names {
+                if let Some(fields) = variant_fields.get(vname) {
+                    for (fname, ftype) in fields {
+                        if needed_fields.contains(fname)
+                            && !field_types.iter().any(|(n, _)| n == fname)
+                        {
+                            field_types.push((fname.clone(), ftype.clone()));
+                        }
                     }
                 }
             }
+
+            // Push scope with bound fields, convert body, pop scope
+            self.type_env.push_scope();
+            for (fname, ftype) in &field_types {
+                self.type_env.insert(fname.clone(), ftype.clone());
+            }
+
+            let body = case
+                .cons
+                .iter()
+                .filter(|s| !matches!(s, ast::Stmt::Break(_) | ast::Stmt::Continue(_)))
+                .map(|s| self.convert_stmt(s, return_type))
+                .collect::<Result<Vec<_>>>()?
+                .into_iter()
+                .flatten()
+                .collect();
+
+            self.type_env.pop_scope();
+
+            if case.test.is_none() {
+                pending_patterns.push(MatchPattern::Wildcard);
+            }
+
+            arms.push(MatchArm {
+                patterns: std::mem::take(&mut pending_patterns),
+                guard: None,
+                body,
+            });
+            pending_variant_names.clear();
         }
-
-        // Push scope with bound fields, convert body, pop scope
-        type_env.push_scope();
-        for (fname, ftype) in &field_types {
-            type_env.insert(fname.clone(), ftype.clone());
-        }
-
-        let body = case
-            .cons
-            .iter()
-            .filter(|s| !matches!(s, ast::Stmt::Break(_) | ast::Stmt::Continue(_)))
-            .map(|s| convert_stmt(s, tctx, return_type, type_env, synthetic))
-            .collect::<Result<Vec<_>>>()?
-            .into_iter()
-            .flatten()
-            .collect();
-
-        type_env.pop_scope();
-
-        if case.test.is_none() {
-            pending_patterns.push(MatchPattern::Wildcard);
-        }
-
-        arms.push(MatchArm {
-            patterns: std::mem::take(&mut pending_patterns),
-            guard: None,
-            body,
-        });
-        pending_variant_names.clear();
-    }
 
         Ok(Some(vec![Stmt::Match {
             expr: match_expr,
             arms,
         }]))
     }
-}
-
-/// Wrapper: delegates to [`Transformer::try_convert_discriminated_union_switch`].
-fn try_convert_discriminated_union_switch(
-    switch: &ast::SwitchStmt,
-    tctx: &TransformContext<'_>,
-    return_type: Option<&RustType>,
-    type_env: &mut TypeEnv,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Result<Option<Vec<Stmt>>> {
-    let mut t = Transformer { tctx, type_env: std::mem::take(type_env), synthetic };
-    let result = t.try_convert_discriminated_union_switch(switch, return_type);
-    *type_env = t.type_env;
-    result
 }
 
 /// switch arm body 内で `obj_var.field` 形式のフィールドアクセスを収集する。
@@ -2861,97 +2252,80 @@ impl<'a> Transformer<'a> {
         switch: &ast::SwitchStmt,
         return_type: Option<&RustType>,
     ) -> Result<Option<Vec<Stmt>>> {
-        let tctx = self.tctx;
-        let type_env = &mut self.type_env;
-        let synthetic = &mut *self.synthetic;
-        let reg = tctx.type_registry;
-    use crate::registry::TypeDef;
+        let reg = self.reg();
+        use crate::registry::TypeDef;
 
-    // Resolve the discriminant's type
-    let disc_type = get_expr_type(tctx, &switch.discriminant);
-    let enum_name = match disc_type {
-        Some(RustType::Named { name, .. }) => name.clone(),
-        _ => return Ok(None),
-    };
+        // Resolve the discriminant's type
+        let disc_type = get_expr_type(self.tctx, &switch.discriminant);
+        let enum_name = match disc_type {
+            Some(RustType::Named { name, .. }) => name.clone(),
+            _ => return Ok(None),
+        };
 
-    // Check if this is a string enum (non-tagged, with string_values)
-    let string_values = match reg.get(&enum_name) {
-        Some(TypeDef::Enum {
-            tag_field: None,
-            string_values,
-            ..
-        }) if !string_values.is_empty() => string_values,
-        _ => return Ok(None),
-    };
+        // Check if this is a string enum (non-tagged, with string_values)
+        let string_values = match reg.get(&enum_name) {
+            Some(TypeDef::Enum {
+                tag_field: None,
+                string_values,
+                ..
+            }) if !string_values.is_empty() => string_values,
+            _ => return Ok(None),
+        };
 
-    // Convert discriminant
-    let discriminant = crate::transformer::Transformer { tctx, type_env: type_env.clone(), synthetic }.convert_expr(&switch.discriminant)?;
+        // Convert discriminant
+        let discriminant = self.convert_expr(&switch.discriminant)?;
 
-    let mut arms: Vec<MatchArm> = Vec::new();
-    let mut pending_patterns: Vec<MatchPattern> = Vec::new();
+        let mut arms: Vec<MatchArm> = Vec::new();
+        let mut pending_patterns: Vec<MatchPattern> = Vec::new();
 
-    for case in &switch.cases {
-        if let Some(test) = &case.test {
-            // Extract string literal from case
-            let str_value = match test.as_ref() {
-                ast::Expr::Lit(ast::Lit::Str(s)) => s.value.to_string_lossy().into_owned(),
-                _ => return Ok(None), // Non-string case → fallback to normal switch
-            };
+        for case in &switch.cases {
+            if let Some(test) = &case.test {
+                // Extract string literal from case
+                let str_value = match test.as_ref() {
+                    ast::Expr::Lit(ast::Lit::Str(s)) => s.value.to_string_lossy().into_owned(),
+                    _ => return Ok(None), // Non-string case → fallback to normal switch
+                };
 
-            if let Some(variant_name) = string_values.get(&str_value) {
-                let path = format!("{enum_name}::{variant_name}");
-                pending_patterns.push(MatchPattern::Literal(Expr::Ident(path)));
-            } else {
-                return Ok(None); // Unknown variant → fallback
+                if let Some(variant_name) = string_values.get(&str_value) {
+                    let path = format!("{enum_name}::{variant_name}");
+                    pending_patterns.push(MatchPattern::Literal(Expr::Ident(path)));
+                } else {
+                    return Ok(None); // Unknown variant → fallback
+                }
             }
+
+            // Empty body = fall-through, accumulate patterns
+            if case.cons.is_empty() {
+                continue;
+            }
+
+            // Default case
+            if case.test.is_none() {
+                pending_patterns.push(MatchPattern::Wildcard);
+            }
+
+            let body = case
+                .cons
+                .iter()
+                .filter(|s| !matches!(s, ast::Stmt::Break(_) | ast::Stmt::Continue(_)))
+                .map(|s| self.convert_stmt(s, return_type))
+                .collect::<Result<Vec<_>>>()?
+                .into_iter()
+                .flatten()
+                .collect();
+
+            arms.push(MatchArm {
+                patterns: std::mem::take(&mut pending_patterns),
+                guard: None,
+                body,
+            });
         }
-
-        // Empty body = fall-through, accumulate patterns
-        if case.cons.is_empty() {
-            continue;
-        }
-
-        // Default case
-        if case.test.is_none() {
-            pending_patterns.push(MatchPattern::Wildcard);
-        }
-
-        let body = case
-            .cons
-            .iter()
-            .filter(|s| !matches!(s, ast::Stmt::Break(_) | ast::Stmt::Continue(_)))
-            .map(|s| convert_stmt(s, tctx, return_type, type_env, synthetic))
-            .collect::<Result<Vec<_>>>()?
-            .into_iter()
-            .flatten()
-            .collect();
-
-        arms.push(MatchArm {
-            patterns: std::mem::take(&mut pending_patterns),
-            guard: None,
-            body,
-        });
-    }
 
         Ok(Some(vec![Stmt::Match {
             expr: discriminant,
             arms,
         }]))
     }
-}
-
-/// Wrapper: delegates to [`Transformer::try_convert_string_enum_switch`].
-fn try_convert_string_enum_switch(
-    switch: &ast::SwitchStmt,
-    tctx: &TransformContext<'_>,
-    return_type: Option<&RustType>,
-    type_env: &mut TypeEnv,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Result<Option<Vec<Stmt>>> {
-    let mut t = Transformer { tctx, type_env: std::mem::take(type_env), synthetic };
-    let result = t.try_convert_string_enum_switch(switch, return_type);
-    *type_env = t.type_env;
-    result
 }
 
 /// Converts a switch with no code fall-through into a clean `Stmt::Match`.
@@ -2962,86 +2336,65 @@ impl<'a> Transformer<'a> {
         discriminant: Expr,
         return_type: Option<&RustType>,
     ) -> Result<Vec<Stmt>> {
-        let tctx = self.tctx;
-        let type_env = &mut self.type_env;
-        let synthetic = &mut *self.synthetic;
-    let mut arms: Vec<MatchArm> = Vec::new();
-    let mut pending_patterns: Vec<MatchPattern> = Vec::new();
-    let mut pending_exprs: Vec<Expr> = Vec::new();
+        let mut arms: Vec<MatchArm> = Vec::new();
+        let mut pending_patterns: Vec<MatchPattern> = Vec::new();
+        let mut pending_exprs: Vec<Expr> = Vec::new();
 
-    // Build expected type from discriminant type for case value conversion.
-    // Only propagate for enum types (Named types registered in registry), not primitives.
+        // Build expected type from discriminant type for case value conversion.
+        // Only propagate for enum types (Named types registered in registry), not primitives.
 
-    for case in &switch.cases {
-        if let Some(test) = &case.test {
-            let pattern = crate::transformer::Transformer { tctx, type_env: type_env.clone(), synthetic }.convert_expr(test)?;
-            pending_exprs.push(pattern.clone());
-            pending_patterns.push(MatchPattern::Literal(pattern));
+        for case in &switch.cases {
+            if let Some(test) = &case.test {
+                let pattern = self.convert_expr(test)?;
+                pending_exprs.push(pattern.clone());
+                pending_patterns.push(MatchPattern::Literal(pattern));
+            }
+
+            // Empty body = fall-through to next case, accumulate patterns
+            if case.cons.is_empty() {
+                continue;
+            }
+
+            // Non-empty body: create an arm with all accumulated patterns
+            let body = case
+                .cons
+                .iter()
+                .filter(|s| !matches!(s, ast::Stmt::Break(_) | ast::Stmt::Continue(_)))
+                .map(|s| self.convert_stmt(s, return_type))
+                .collect::<Result<Vec<_>>>()?
+                .into_iter()
+                .flatten()
+                .collect();
+
+            if case.test.is_none() {
+                pending_patterns.push(MatchPattern::Wildcard);
+            }
+
+            // Check if any pending pattern is non-literal
+            let has_non_literal = pending_exprs.iter().any(|e| !is_literal_match_pattern(e));
+
+            let (patterns, guard) = if has_non_literal {
+                // Convert to wildcard + guard to avoid variable binding in match
+                let guard = build_combined_guard(&discriminant, std::mem::take(&mut pending_exprs));
+                std::mem::take(&mut pending_patterns);
+                (vec![MatchPattern::Wildcard], Some(guard))
+            } else {
+                pending_exprs.clear();
+                (std::mem::take(&mut pending_patterns), None)
+            };
+
+            arms.push(MatchArm {
+                patterns,
+                guard,
+                body,
+            });
         }
 
-        // Empty body = fall-through to next case, accumulate patterns
-        if case.cons.is_empty() {
-            continue;
-        }
-
-        // Non-empty body: create an arm with all accumulated patterns
-        let body = case
-            .cons
-            .iter()
-            .filter(|s| !matches!(s, ast::Stmt::Break(_) | ast::Stmt::Continue(_)))
-            .map(|s| convert_stmt(s, tctx, return_type, type_env, synthetic))
-            .collect::<Result<Vec<_>>>()?
-            .into_iter()
-            .flatten()
-            .collect();
-
-        if case.test.is_none() {
-            pending_patterns.push(MatchPattern::Wildcard);
-        }
-
-        // Check if any pending pattern is non-literal
-        let has_non_literal = pending_exprs.iter().any(|e| !is_literal_match_pattern(e));
-
-        let (patterns, guard) = if has_non_literal {
-            // Convert to wildcard + guard to avoid variable binding in match
-            let guard = build_combined_guard(&discriminant, std::mem::take(&mut pending_exprs));
-            std::mem::take(&mut pending_patterns);
-            (vec![MatchPattern::Wildcard], Some(guard))
-        } else {
-            pending_exprs.clear();
-            (std::mem::take(&mut pending_patterns), None)
-        };
-
-        arms.push(MatchArm {
-            patterns,
-            guard,
-            body,
-        });
+        Ok(vec![Stmt::Match {
+            expr: discriminant,
+            arms,
+        }])
     }
-
-    Ok(vec![Stmt::Match {
-        expr: discriminant,
-        arms,
-    }])
-    }
-}
-
-/// Wrapper: delegates to [`Transformer::convert_switch_clean_match`].
-fn convert_switch_clean_match(
-    switch: &ast::SwitchStmt,
-    discriminant: Expr,
-    tctx: &TransformContext<'_>,
-    return_type: Option<&RustType>,
-    type_env: &mut TypeEnv,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Result<Vec<Stmt>> {
-    let mut t = Transformer { tctx, type_env: std::mem::take(type_env), synthetic };
-    let result = t.convert_switch_clean_match(switch, discriminant, return_type);
-    *type_env = t.type_env;
-    result
-}
-
-impl<'a> Transformer<'a> {
     /// Converts a switch with code fall-through into a labeled block + flag pattern.
     fn convert_switch_fallthrough(
         &mut self,
@@ -3049,268 +2402,89 @@ impl<'a> Transformer<'a> {
         discriminant: &Expr,
         return_type: Option<&RustType>,
     ) -> Result<Vec<Stmt>> {
-        let tctx = self.tctx;
-        let type_env = &mut self.type_env;
-        let synthetic = &mut *self.synthetic;
-    let mut block_body = Vec::new();
+        let mut block_body = Vec::new();
 
-    // let mut _fall = false;
-    block_body.push(Stmt::Let {
-        mutable: true,
-        name: "_fall".to_string(),
-        ty: None,
-        init: Some(Expr::BoolLit(false)),
-    });
+        // let mut _fall = false;
+        block_body.push(Stmt::Let {
+            mutable: true,
+            name: "_fall".to_string(),
+            ty: None,
+            init: Some(Expr::BoolLit(false)),
+        });
 
-    for case in &switch.cases {
-        let ends_with_break = case
-            .cons
-            .last()
-            .is_some_and(|s| matches!(s, ast::Stmt::Break(_)));
+        for case in &switch.cases {
+            let ends_with_break = case
+                .cons
+                .last()
+                .is_some_and(|s| matches!(s, ast::Stmt::Break(_)));
 
-        let body: Vec<Stmt> = case
-            .cons
-            .iter()
-            .filter(|s| !matches!(s, ast::Stmt::Break(_)))
-            .map(|s| convert_stmt(s, tctx, return_type, type_env, synthetic))
-            .collect::<Result<Vec<_>>>()?
-            .into_iter()
-            .flatten()
-            .collect();
+            let body: Vec<Stmt> = case
+                .cons
+                .iter()
+                .filter(|s| !matches!(s, ast::Stmt::Break(_)))
+                .map(|s| self.convert_stmt(s, return_type))
+                .collect::<Result<Vec<_>>>()?
+                .into_iter()
+                .flatten()
+                .collect();
 
-        if let Some(test) = &case.test {
-            // case val: ...
-            // Only propagate enum types to case values, not primitives
-            let test_expr = crate::transformer::Transformer { tctx, type_env: type_env.clone(), synthetic }.convert_expr(test)?;
-            let condition = Expr::BinaryOp {
-                left: Box::new(Expr::BinaryOp {
-                    left: Box::new(discriminant.clone()),
-                    op: BinOp::Eq,
-                    right: Box::new(test_expr),
-                }),
-                op: BinOp::LogicalOr,
-                right: Box::new(Expr::Ident("_fall".to_string())),
-            };
+            if let Some(test) = &case.test {
+                // case val: ...
+                // Only propagate enum types to case values, not primitives
+                let test_expr = self.convert_expr(test)?;
+                let condition = Expr::BinaryOp {
+                    left: Box::new(Expr::BinaryOp {
+                        left: Box::new(discriminant.clone()),
+                        op: BinOp::Eq,
+                        right: Box::new(test_expr),
+                    }),
+                    op: BinOp::LogicalOr,
+                    right: Box::new(Expr::Ident("_fall".to_string())),
+                };
 
-            let mut then_body = body;
-            if ends_with_break {
-                then_body.push(Stmt::Break {
-                    label: Some("switch".to_string()),
-                    value: None,
+                let mut then_body = body;
+                if ends_with_break {
+                    then_body.push(Stmt::Break {
+                        label: Some("switch".to_string()),
+                        value: None,
+                    });
+                } else {
+                    // No break → set fall-through flag
+                    then_body.push(Stmt::Expr(Expr::Assign {
+                        target: Box::new(Expr::Ident("_fall".to_string())),
+                        value: Box::new(Expr::BoolLit(true)),
+                    }));
+                }
+
+                block_body.push(Stmt::If {
+                    condition,
+                    then_body,
+                    else_body: None,
                 });
             } else {
-                // No break → set fall-through flag
-                then_body.push(Stmt::Expr(Expr::Assign {
-                    target: Box::new(Expr::Ident("_fall".to_string())),
-                    value: Box::new(Expr::BoolLit(true)),
-                }));
+                // default: ... (always executes if reached)
+                block_body.extend(body);
             }
-
-            block_body.push(Stmt::If {
-                condition,
-                then_body,
-                else_body: None,
-            });
-        } else {
-            // default: ... (always executes if reached)
-            block_body.extend(body);
         }
-    }
 
         Ok(vec![Stmt::LabeledBlock {
             label: "switch".to_string(),
             body: block_body,
         }])
     }
-}
-
-/// Wrapper: delegates to [`Transformer::convert_switch_fallthrough`].
-fn convert_switch_fallthrough(
-    switch: &ast::SwitchStmt,
-    discriminant: &Expr,
-    tctx: &TransformContext<'_>,
-    return_type: Option<&RustType>,
-    type_env: &mut TypeEnv,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Result<Vec<Stmt>> {
-    let mut t = Transformer { tctx, type_env: std::mem::take(type_env), synthetic };
-    let result = t.convert_switch_fallthrough(switch, discriminant, return_type);
-    *type_env = t.type_env;
-    result
-}
-
-impl<'a> Transformer<'a> {
     fn convert_do_while_stmt(
         &mut self,
         do_while: &ast::DoWhileStmt,
         return_type: Option<&RustType>,
     ) -> Result<Stmt> {
-        let tctx = self.tctx;
-        let type_env = &mut self.type_env;
-        let synthetic = &mut *self.synthetic;
-    let body_stmts = match do_while.body.as_ref() {
-        ast::Stmt::Block(block) => {
-            convert_stmt_list(&block.stmts, tctx, return_type, type_env, synthetic)?
-        }
-        single => convert_stmt(single, tctx, return_type, type_env, synthetic)?,
-    };
-
-    // Cat A: boolean context (do-while condition)
-    let condition = crate::transformer::Transformer { tctx, type_env: type_env.clone(), synthetic }.convert_expr(&do_while.test)?;
-    let break_check = Stmt::If {
-        condition: Expr::UnaryOp {
-            op: UnOp::Not,
-            operand: Box::new(condition),
-        },
-        then_body: vec![Stmt::Break {
-            label: None,
-            value: None,
-        }],
-        else_body: None,
-    };
-
-    let mut loop_body = body_stmts;
-    loop_body.push(break_check);
-
-        Ok(Stmt::Loop {
-            label: None,
-            body: loop_body,
-        })
-    }
-}
-
-/// Wrapper: delegates to [`Transformer::convert_do_while_stmt`].
-fn convert_do_while_stmt(
-    do_while: &ast::DoWhileStmt,
-    tctx: &TransformContext<'_>,
-    return_type: Option<&RustType>,
-    type_env: &mut TypeEnv,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Result<Stmt> {
-    let mut t = Transformer { tctx, type_env: std::mem::take(type_env), synthetic };
-    let result = t.convert_do_while_stmt(do_while, return_type);
-    *type_env = t.type_env;
-    result
-}
-
-impl<'a> Transformer<'a> {
-    fn try_convert_array_destructuring(
-        &mut self,
-        var_decl: &ast::VarDecl,
-    ) -> Result<Option<Vec<Stmt>>> {
-        let tctx = self.tctx;
-        let type_env = &self.type_env;
-        let synthetic = &mut *self.synthetic;
-    let declarator = match single_declarator(var_decl) {
-        Ok(d) => d,
-        Err(_) => return Ok(None),
-    };
-
-    let arr_pat = match &declarator.name {
-        ast::Pat::Array(arr_pat) => arr_pat,
-        _ => return Ok(None),
-    };
-
-    let source = declarator
-        .init
-        .as_ref()
-        .ok_or_else(|| anyhow!("array destructuring requires an initializer"))?;
-    // Cat A: destructuring source
-    let source_expr = crate::transformer::Transformer { tctx, type_env: type_env.clone(), synthetic }.convert_expr(source)?;
-
-    let mutable = !matches!(var_decl.kind, ast::VarDeclKind::Const);
-    let mut stmts = Vec::new();
-
-    for (i, elem) in arr_pat.elems.iter().enumerate() {
-        let pat = match elem {
-            Some(pat) => pat,
-            None => continue, // skip hole: `[a, , b]`
+        let body_stmts = match do_while.body.as_ref() {
+            ast::Stmt::Block(block) => self.convert_stmt_list(&block.stmts, return_type)?,
+            single => self.convert_stmt(single, return_type)?,
         };
 
-        // Rest element: `[first, ...rest]`
-        if let ast::Pat::Rest(rest_pat) = pat {
-            let name = extract_pat_ident_name(&rest_pat.arg)?;
-            stmts.push(Stmt::Let {
-                mutable,
-                name,
-                ty: None,
-                init: Some(Expr::MethodCall {
-                    object: Box::new(Expr::Index {
-                        object: Box::new(source_expr.clone()),
-                        index: Box::new(Expr::Range {
-                            start: Some(Box::new(Expr::NumberLit(i as f64))),
-                            end: None,
-                        }),
-                    }),
-                    method: "to_vec".to_string(),
-                    args: vec![],
-                }),
-            });
-            break; // rest must be last
-        }
-
-        let name = extract_pat_ident_name(pat)?;
-        stmts.push(Stmt::Let {
-            mutable,
-            name,
-            ty: None,
-            init: Some(Expr::Index {
-                object: Box::new(source_expr.clone()),
-                index: Box::new(Expr::NumberLit(i as f64)),
-            }),
-        });
-    }
-
-        Ok(Some(stmts))
-    }
-
-    fn convert_for_stmt_as_loop(
-        &mut self,
-        for_stmt: &ast::ForStmt,
-        return_type: Option<&RustType>,
-    ) -> Result<Vec<Stmt>> {
-        let tctx = self.tctx;
-        let type_env = &mut self.type_env;
-        let synthetic = &mut *self.synthetic;
-    let mut result = Vec::new();
-
-    // 1. Extract init → Stmt::Let { mutable: true, ... }
-    match &for_stmt.init {
-        Some(ast::VarDeclOrExpr::VarDecl(var_decl)) => {
-            // Support multiple declarators: for (let i = 0, len = n; ...)
-            for decl in &var_decl.decls {
-                let name = extract_pat_ident_name(&decl.name)
-                    .map_err(|_| anyhow!("unsupported for loop: non-ident binding"))?;
-                let init_expr = decl
-                    .init
-                    .as_ref()
-                    // Cat A: for-loop initializer
-                    .map(|e| crate::transformer::Transformer { tctx, type_env: type_env.clone(), synthetic }.convert_expr(e))
-                    .transpose()?;
-                result.push(Stmt::Let {
-                    mutable: true,
-                    name,
-                    ty: None,
-                    init: init_expr,
-                });
-            }
-        }
-        Some(ast::VarDeclOrExpr::Expr(expr)) => {
-            // Cat A: for-loop init expression
-            let e = crate::transformer::Transformer { tctx, type_env: type_env.clone(), synthetic }.convert_expr(expr)?;
-            result.push(Stmt::Expr(e));
-        }
-        None => {}
-    }
-
-    // 2. Build loop body
-    let mut loop_body = Vec::new();
-
-    // 2a. Condition → if !(condition) { break; }
-    if let Some(test) = &for_stmt.test {
-        // Cat A: boolean context (for-loop condition)
-        let condition = crate::transformer::Transformer { tctx, type_env: type_env.clone(), synthetic }.convert_expr(test)?;
-        loop_body.push(Stmt::If {
+        // Cat A: boolean context (do-while condition)
+        let condition = self.convert_expr(&do_while.test)?;
+        let break_check = Stmt::If {
             condition: Expr::UnaryOp {
                 op: UnOp::Not,
                 operand: Box::new(condition),
@@ -3320,65 +2494,188 @@ impl<'a> Transformer<'a> {
                 value: None,
             }],
             else_body: None,
+        };
+
+        let mut loop_body = body_stmts;
+        loop_body.push(break_check);
+
+        Ok(Stmt::Loop {
+            label: None,
+            body: loop_body,
+        })
+    }
+    fn try_convert_array_destructuring(
+        &mut self,
+        var_decl: &ast::VarDecl,
+    ) -> Result<Option<Vec<Stmt>>> {
+        let declarator = match single_declarator(var_decl) {
+            Ok(d) => d,
+            Err(_) => return Ok(None),
+        };
+
+        let arr_pat = match &declarator.name {
+            ast::Pat::Array(arr_pat) => arr_pat,
+            _ => return Ok(None),
+        };
+
+        let source = declarator
+            .init
+            .as_ref()
+            .ok_or_else(|| anyhow!("array destructuring requires an initializer"))?;
+        // Cat A: destructuring source
+        let source_expr = self.convert_expr(source)?;
+
+        let mutable = !matches!(var_decl.kind, ast::VarDeclKind::Const);
+        let mut stmts = Vec::new();
+
+        for (i, elem) in arr_pat.elems.iter().enumerate() {
+            let pat = match elem {
+                Some(pat) => pat,
+                None => continue, // skip hole: `[a, , b]`
+            };
+
+            // Rest element: `[first, ...rest]`
+            if let ast::Pat::Rest(rest_pat) = pat {
+                let name = extract_pat_ident_name(&rest_pat.arg)?;
+                stmts.push(Stmt::Let {
+                    mutable,
+                    name,
+                    ty: None,
+                    init: Some(Expr::MethodCall {
+                        object: Box::new(Expr::Index {
+                            object: Box::new(source_expr.clone()),
+                            index: Box::new(Expr::Range {
+                                start: Some(Box::new(Expr::NumberLit(i as f64))),
+                                end: None,
+                            }),
+                        }),
+                        method: "to_vec".to_string(),
+                        args: vec![],
+                    }),
+                });
+                break; // rest must be last
+            }
+
+            let name = extract_pat_ident_name(pat)?;
+            stmts.push(Stmt::Let {
+                mutable,
+                name,
+                ty: None,
+                init: Some(Expr::Index {
+                    object: Box::new(source_expr.clone()),
+                    index: Box::new(Expr::NumberLit(i as f64)),
+                }),
+            });
+        }
+
+        Ok(Some(stmts))
+    }
+
+    fn convert_for_stmt_as_loop(
+        &mut self,
+        for_stmt: &ast::ForStmt,
+        return_type: Option<&RustType>,
+    ) -> Result<Vec<Stmt>> {
+        let mut result = Vec::new();
+
+        // 1. Extract init → Stmt::Let { mutable: true, ... }
+        match &for_stmt.init {
+            Some(ast::VarDeclOrExpr::VarDecl(var_decl)) => {
+                // Support multiple declarators: for (let i = 0, len = n; ...)
+                for decl in &var_decl.decls {
+                    let name = extract_pat_ident_name(&decl.name)
+                        .map_err(|_| anyhow!("unsupported for loop: non-ident binding"))?;
+                    let init_expr = decl
+                        .init
+                        .as_ref()
+                        // Cat A: for-loop initializer
+                        .map(|e| self.convert_expr(e))
+                        .transpose()?;
+                    result.push(Stmt::Let {
+                        mutable: true,
+                        name,
+                        ty: None,
+                        init: init_expr,
+                    });
+                }
+            }
+            Some(ast::VarDeclOrExpr::Expr(expr)) => {
+                // Cat A: for-loop init expression
+                let e = self.convert_expr(expr)?;
+                result.push(Stmt::Expr(e));
+            }
+            None => {}
+        }
+
+        // 2. Build loop body
+        let mut loop_body = Vec::new();
+
+        // 2a. Condition → if !(condition) { break; }
+        if let Some(test) = &for_stmt.test {
+            // Cat A: boolean context (for-loop condition)
+            let condition = self.convert_expr(test)?;
+            loop_body.push(Stmt::If {
+                condition: Expr::UnaryOp {
+                    op: UnOp::Not,
+                    operand: Box::new(condition),
+                },
+                then_body: vec![Stmt::Break {
+                    label: None,
+                    value: None,
+                }],
+                else_body: None,
+            });
+        }
+
+        // 2b. Original body
+        let body_stmts = self.convert_block_or_stmt(&for_stmt.body, return_type)?;
+        loop_body.extend(body_stmts);
+
+        // 2c. Update expression
+        if let Some(update) = &for_stmt.update {
+            let update_stmt = self.convert_update_to_stmt(update)?;
+            loop_body.push(update_stmt);
+        }
+
+        result.push(Stmt::Loop {
+            label: None,
+            body: loop_body,
         });
-    }
-
-    // 2b. Original body
-    let body_stmts = convert_block_or_stmt(&for_stmt.body, tctx, return_type, type_env, synthetic)?;
-    loop_body.extend(body_stmts);
-
-    // 2c. Update expression
-    if let Some(update) = &for_stmt.update {
-        let update_stmt = convert_update_to_stmt(update, tctx, type_env, synthetic)?;
-        loop_body.push(update_stmt);
-    }
-
-    result.push(Stmt::Loop {
-        label: None,
-        body: loop_body,
-    });
 
         Ok(result)
     }
 
-    fn convert_update_to_stmt(
-        &mut self,
-        expr: &ast::Expr,
-    ) -> Result<Stmt> {
-        let tctx = self.tctx;
-        let type_env = &self.type_env;
-        let synthetic = &mut *self.synthetic;
-    match expr {
-        ast::Expr::Update(up) => {
-            let name = match up.arg.as_ref() {
-                ast::Expr::Ident(ident) => ident.sym.to_string(),
-                _ => return Err(anyhow!("unsupported update expression")),
-            };
-            let op = match up.op {
-                ast::UpdateOp::PlusPlus => BinOp::Add,
-                ast::UpdateOp::MinusMinus => BinOp::Sub,
-            };
-            Ok(Stmt::Expr(Expr::Assign {
-                target: Box::new(Expr::Ident(name.clone())),
-                value: Box::new(Expr::BinaryOp {
-                    left: Box::new(Expr::Ident(name)),
-                    op,
-                    right: Box::new(Expr::NumberLit(1.0)),
-                }),
-            }))
+    fn convert_update_to_stmt(&mut self, expr: &ast::Expr) -> Result<Stmt> {
+        match expr {
+            ast::Expr::Update(up) => {
+                let name = match up.arg.as_ref() {
+                    ast::Expr::Ident(ident) => ident.sym.to_string(),
+                    _ => return Err(anyhow!("unsupported update expression")),
+                };
+                let op = match up.op {
+                    ast::UpdateOp::PlusPlus => BinOp::Add,
+                    ast::UpdateOp::MinusMinus => BinOp::Sub,
+                };
+                Ok(Stmt::Expr(Expr::Assign {
+                    target: Box::new(Expr::Ident(name.clone())),
+                    value: Box::new(Expr::BinaryOp {
+                        left: Box::new(Expr::Ident(name)),
+                        op,
+                        right: Box::new(Expr::NumberLit(1.0)),
+                    }),
+                }))
+            }
+            ast::Expr::Assign(assign) => {
+                // Cat A: for-loop update expression
+                let e = self.convert_expr(&ast::Expr::Assign(assign.clone()))?;
+                Ok(Stmt::Expr(e))
+            }
+            other => {
+                // Cat A: for-loop update expression
+                let e = self.convert_expr(other)?;
+                Ok(Stmt::Expr(e))
+            }
         }
-        ast::Expr::Assign(assign) => {
-            // Cat A: for-loop update expression
-            let e = crate::transformer::Transformer { tctx, type_env: type_env.clone(), synthetic }
-                .convert_expr(&ast::Expr::Assign(assign.clone()))?;
-            Ok(Stmt::Expr(e))
-        }
-        other => {
-            // Cat A: for-loop update expression
-            let e = crate::transformer::Transformer { tctx, type_env: type_env.clone(), synthetic }.convert_expr(other)?;
-            Ok(Stmt::Expr(e))
-        }
-    }
     }
 
     fn convert_block_or_stmt(
@@ -3387,50 +2684,45 @@ impl<'a> Transformer<'a> {
         return_type: Option<&RustType>,
     ) -> Result<Vec<Stmt>> {
         match stmt {
-            ast::Stmt::Block(block) => {
-                convert_stmt_list(&block.stmts, self.tctx, return_type, &mut self.type_env, self.synthetic)
-            }
-            other => convert_stmt(other, self.tctx, return_type, &mut self.type_env, self.synthetic),
+            ast::Stmt::Block(block) => self.convert_stmt_list(&block.stmts, return_type),
+            other => self.convert_stmt(other, return_type),
         }
     }
 
-    fn convert_nested_fn_decl(
-        &mut self,
-        fn_decl: &ast::FnDecl,
-    ) -> Result<Stmt> {
+    fn convert_nested_fn_decl(&mut self, fn_decl: &ast::FnDecl) -> Result<Stmt> {
         let reg = self.reg();
-    let name = fn_decl.ident.sym.to_string();
+        let name = fn_decl.ident.sym.to_string();
 
-    let mut params = Vec::new();
-    for p in &fn_decl.function.params {
-        let param_name = extract_pat_ident_name(&p.pat)?;
-        let ty = match &p.pat {
-            ast::Pat::Ident(ident) => ident
-                .type_ann
-                .as_ref()
-                .map(|ann| convert_ts_type(&ann.type_ann, self.synthetic, reg))
-                .transpose()?,
-            _ => None,
-        };
-        params.push(Param {
-            name: param_name,
-            ty,
-        });
-    }
+        let mut params = Vec::new();
+        for p in &fn_decl.function.params {
+            let param_name = extract_pat_ident_name(&p.pat)?;
+            let ty = match &p.pat {
+                ast::Pat::Ident(ident) => ident
+                    .type_ann
+                    .as_ref()
+                    .map(|ann| convert_ts_type(&ann.type_ann, self.synthetic, reg))
+                    .transpose()?,
+                _ => None,
+            };
+            params.push(Param {
+                name: param_name,
+                ty,
+            });
+        }
 
-    let return_type = fn_decl
-        .function
-        .return_type
-        .as_ref()
-        .map(|ann| convert_ts_type(&ann.type_ann, self.synthetic, reg))
-        .transpose()?
-        .and_then(|ty| {
-            if matches!(ty, RustType::Unit) {
-                None
-            } else {
-                Some(ty)
-            }
-        });
+        let return_type = fn_decl
+            .function
+            .return_type
+            .as_ref()
+            .map(|ann| convert_ts_type(&ann.type_ann, self.synthetic, reg))
+            .transpose()?
+            .and_then(|ty| {
+                if matches!(ty, RustType::Unit) {
+                    None
+                } else {
+                    Some(ty)
+                }
+            });
 
         let mut fn_type_env = TypeEnv::new();
         for param in &params {
@@ -3439,14 +2731,14 @@ impl<'a> Transformer<'a> {
             }
         }
 
+        // F-3b #8: Use sub-Transformer with local fn_type_env
         let body = match &fn_decl.function.body {
-            Some(block) => convert_stmt_list(
-                &block.stmts,
-                self.tctx,
-                return_type.as_ref(),
-                &mut fn_type_env,
-                self.synthetic,
-            )?,
+            Some(block) => Transformer {
+                tctx: self.tctx,
+                type_env: fn_type_env,
+                synthetic: &mut *self.synthetic,
+            }
+            .convert_stmt_list(&block.stmts, return_type.as_ref())?,
             None => Vec::new(),
         };
 
@@ -3461,66 +2753,6 @@ impl<'a> Transformer<'a> {
             }),
         })
     }
-}
-
-/// Wrapper: delegates to [`Transformer::try_convert_array_destructuring`].
-fn try_convert_array_destructuring(
-    var_decl: &ast::VarDecl,
-    tctx: &TransformContext<'_>,
-    type_env: &TypeEnv,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Result<Option<Vec<Stmt>>> {
-    let env = type_env.clone();
-    Transformer { tctx, type_env: env, synthetic }.try_convert_array_destructuring(var_decl)
-}
-
-/// Wrapper: delegates to [`Transformer::convert_for_stmt_as_loop`].
-fn convert_for_stmt_as_loop(
-    for_stmt: &ast::ForStmt,
-    tctx: &TransformContext<'_>,
-    return_type: Option<&RustType>,
-    type_env: &mut TypeEnv,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Result<Vec<Stmt>> {
-    let mut t = Transformer { tctx, type_env: std::mem::take(type_env), synthetic };
-    let result = t.convert_for_stmt_as_loop(for_stmt, return_type);
-    *type_env = t.type_env;
-    result
-}
-
-/// Wrapper: delegates to [`Transformer::convert_update_to_stmt`].
-fn convert_update_to_stmt(
-    expr: &ast::Expr,
-    tctx: &TransformContext<'_>,
-    type_env: &TypeEnv,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Result<Stmt> {
-    let env = type_env.clone();
-    Transformer { tctx, type_env: env, synthetic }.convert_update_to_stmt(expr)
-}
-
-/// Wrapper: delegates to [`Transformer::convert_block_or_stmt`].
-fn convert_block_or_stmt(
-    stmt: &ast::Stmt,
-    tctx: &TransformContext<'_>,
-    return_type: Option<&RustType>,
-    type_env: &mut TypeEnv,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Result<Vec<Stmt>> {
-    let mut t = Transformer { tctx, type_env: std::mem::take(type_env), synthetic };
-    let result = t.convert_block_or_stmt(stmt, return_type);
-    *type_env = t.type_env;
-    result
-}
-
-/// Wrapper: delegates to [`Transformer::convert_nested_fn_decl`].
-fn convert_nested_fn_decl(
-    fn_decl: &ast::FnDecl,
-    tctx: &TransformContext<'_>,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Result<Stmt> {
-    let type_env = TypeEnv::new();
-    Transformer { tctx, type_env: type_env, synthetic }.convert_nested_fn_decl(fn_decl)
 }
 
 #[cfg(test)]

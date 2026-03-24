@@ -11,9 +11,7 @@ impl<'a> Transformer<'a> {
     pub(crate) fn convert_assign_expr(&mut self, assign: &ast::AssignExpr) -> Result<Expr> {
         let target = match &assign.left {
             ast::AssignTarget::Simple(simple) => match simple {
-                ast::SimpleAssignTarget::Member(member) => {
-                    self.convert_member_expr(member)?
-                }
+                ast::SimpleAssignTarget::Member(member) => self.convert_member_expr(member)?,
                 ast::SimpleAssignTarget::Ident(ident) => Expr::Ident(ident.id.sym.to_string()),
                 _ => return Err(anyhow!("unsupported assignment target")),
             },
@@ -21,93 +19,93 @@ impl<'a> Transformer<'a> {
         };
         let right = self.convert_expr(&assign.right)?;
 
-    // ??= (nullish coalescing assignment): x ??= y → x.get_or_insert_with(|| y)
-    if assign.op == ast::AssignOp::NullishAssign {
-        return Ok(Expr::MethodCall {
-            object: Box::new(target),
-            method: "get_or_insert_with".to_string(),
-            args: vec![Expr::Closure {
-                params: vec![],
-                return_type: None,
-                body: ClosureBody::Expr(Box::new(right)),
-            }],
-        });
-    }
+        // ??= (nullish coalescing assignment): x ??= y → x.get_or_insert_with(|| y)
+        if assign.op == ast::AssignOp::NullishAssign {
+            return Ok(Expr::MethodCall {
+                object: Box::new(target),
+                method: "get_or_insert_with".to_string(),
+                args: vec![Expr::Closure {
+                    params: vec![],
+                    return_type: None,
+                    body: ClosureBody::Expr(Box::new(right)),
+                }],
+            });
+        }
 
-    // For compound assignment (+=, -=, *=, /=), desugar to target = target op value
-    let value = match assign.op {
-        ast::AssignOp::Assign => right,
-        ast::AssignOp::AddAssign => Expr::BinaryOp {
-            left: Box::new(target.clone()),
-            op: BinOp::Add,
-            right: Box::new(right),
-        },
-        ast::AssignOp::SubAssign => Expr::BinaryOp {
-            left: Box::new(target.clone()),
-            op: BinOp::Sub,
-            right: Box::new(right),
-        },
-        ast::AssignOp::MulAssign => Expr::BinaryOp {
-            left: Box::new(target.clone()),
-            op: BinOp::Mul,
-            right: Box::new(right),
-        },
-        ast::AssignOp::DivAssign => Expr::BinaryOp {
-            left: Box::new(target.clone()),
-            op: BinOp::Div,
-            right: Box::new(right),
-        },
-        ast::AssignOp::ModAssign => Expr::BinaryOp {
-            left: Box::new(target.clone()),
-            op: BinOp::Mod,
-            right: Box::new(right),
-        },
-        ast::AssignOp::BitAndAssign => Expr::BinaryOp {
-            left: Box::new(target.clone()),
-            op: BinOp::BitAnd,
-            right: Box::new(right),
-        },
-        ast::AssignOp::BitOrAssign => Expr::BinaryOp {
-            left: Box::new(target.clone()),
-            op: BinOp::BitOr,
-            right: Box::new(right),
-        },
-        ast::AssignOp::BitXorAssign => Expr::BinaryOp {
-            left: Box::new(target.clone()),
-            op: BinOp::BitXor,
-            right: Box::new(right),
-        },
-        ast::AssignOp::LShiftAssign => Expr::BinaryOp {
-            left: Box::new(target.clone()),
-            op: BinOp::Shl,
-            right: Box::new(right),
-        },
-        ast::AssignOp::RShiftAssign => Expr::BinaryOp {
-            left: Box::new(target.clone()),
-            op: BinOp::Shr,
-            right: Box::new(right),
-        },
-        ast::AssignOp::AndAssign => Expr::BinaryOp {
-            left: Box::new(target.clone()),
-            op: BinOp::LogicalAnd,
-            right: Box::new(right),
-        },
-        ast::AssignOp::OrAssign => Expr::BinaryOp {
-            left: Box::new(target.clone()),
-            op: BinOp::LogicalOr,
-            right: Box::new(right),
-        },
-        ast::AssignOp::ZeroFillRShiftAssign => Expr::BinaryOp {
-            left: Box::new(target.clone()),
-            op: BinOp::UShr,
-            right: Box::new(right),
-        },
-        _ => return Err(anyhow!("unsupported compound assignment operator")),
-    };
-    Ok(Expr::Assign {
-        target: Box::new(target),
-        value: Box::new(value),
-    })
+        // For compound assignment (+=, -=, *=, /=), desugar to target = target op value
+        let value = match assign.op {
+            ast::AssignOp::Assign => right,
+            ast::AssignOp::AddAssign => Expr::BinaryOp {
+                left: Box::new(target.clone()),
+                op: BinOp::Add,
+                right: Box::new(right),
+            },
+            ast::AssignOp::SubAssign => Expr::BinaryOp {
+                left: Box::new(target.clone()),
+                op: BinOp::Sub,
+                right: Box::new(right),
+            },
+            ast::AssignOp::MulAssign => Expr::BinaryOp {
+                left: Box::new(target.clone()),
+                op: BinOp::Mul,
+                right: Box::new(right),
+            },
+            ast::AssignOp::DivAssign => Expr::BinaryOp {
+                left: Box::new(target.clone()),
+                op: BinOp::Div,
+                right: Box::new(right),
+            },
+            ast::AssignOp::ModAssign => Expr::BinaryOp {
+                left: Box::new(target.clone()),
+                op: BinOp::Mod,
+                right: Box::new(right),
+            },
+            ast::AssignOp::BitAndAssign => Expr::BinaryOp {
+                left: Box::new(target.clone()),
+                op: BinOp::BitAnd,
+                right: Box::new(right),
+            },
+            ast::AssignOp::BitOrAssign => Expr::BinaryOp {
+                left: Box::new(target.clone()),
+                op: BinOp::BitOr,
+                right: Box::new(right),
+            },
+            ast::AssignOp::BitXorAssign => Expr::BinaryOp {
+                left: Box::new(target.clone()),
+                op: BinOp::BitXor,
+                right: Box::new(right),
+            },
+            ast::AssignOp::LShiftAssign => Expr::BinaryOp {
+                left: Box::new(target.clone()),
+                op: BinOp::Shl,
+                right: Box::new(right),
+            },
+            ast::AssignOp::RShiftAssign => Expr::BinaryOp {
+                left: Box::new(target.clone()),
+                op: BinOp::Shr,
+                right: Box::new(right),
+            },
+            ast::AssignOp::AndAssign => Expr::BinaryOp {
+                left: Box::new(target.clone()),
+                op: BinOp::LogicalAnd,
+                right: Box::new(right),
+            },
+            ast::AssignOp::OrAssign => Expr::BinaryOp {
+                left: Box::new(target.clone()),
+                op: BinOp::LogicalOr,
+                right: Box::new(right),
+            },
+            ast::AssignOp::ZeroFillRShiftAssign => Expr::BinaryOp {
+                left: Box::new(target.clone()),
+                op: BinOp::UShr,
+                right: Box::new(right),
+            },
+            _ => return Err(anyhow!("unsupported compound assignment operator")),
+        };
+        Ok(Expr::Assign {
+            target: Box::new(target),
+            value: Box::new(value),
+        })
     }
 }
 

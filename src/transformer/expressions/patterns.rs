@@ -15,10 +15,7 @@ use crate::transformer::Transformer;
 
 impl<'a> Transformer<'a> {
     /// Detects `x === undefined` / `x !== undefined` and converts to `is_none()` / `is_some()`.
-    pub(crate) fn try_convert_undefined_comparison(
-        &mut self,
-        bin: &ast::BinExpr,
-    ) -> Option<Expr> {
+    pub(crate) fn try_convert_undefined_comparison(&mut self, bin: &ast::BinExpr) -> Option<Expr> {
         let is_eq = matches!(bin.op, ast::BinaryOp::EqEq | ast::BinaryOp::EqEqEq);
         let is_neq = matches!(bin.op, ast::BinaryOp::NotEq | ast::BinaryOp::NotEqEq);
         if !is_eq && !is_neq {
@@ -35,8 +32,7 @@ impl<'a> Transformer<'a> {
         }?;
 
         // Cat A: comparison operand
-        let other_ir =
-            self.convert_expr(other_expr).ok()?;
+        let other_ir = self.convert_expr(other_expr).ok()?;
         let method = if is_eq { "is_none" } else { "is_some" };
         Some(Expr::MethodCall {
             object: Box::new(other_ir),
@@ -66,8 +62,7 @@ impl<'a> Transformer<'a> {
             if let Some(enum_name) = resolve_enum_type_name(&bin.left, self.tctx) {
                 if let Some(variant) = lookup_string_enum_variant(reg, &enum_name, &str_value) {
                     // Cat A: comparison operand
-                    let left = self.convert_expr(&bin.left)
-                    .ok()?;
+                    let left = self.convert_expr(&bin.left).ok()?;
                     return Some(Expr::BinaryOp {
                         left: Box::new(left),
                         op,
@@ -82,8 +77,7 @@ impl<'a> Transformer<'a> {
             if let Some(enum_name) = resolve_enum_type_name(&bin.right, self.tctx) {
                 if let Some(variant) = lookup_string_enum_variant(reg, &enum_name, &str_value) {
                     // Cat A: comparison operand
-                    let right = self.convert_expr(&bin.right)
-                    .ok()?;
+                    let right = self.convert_expr(&bin.right).ok()?;
                     return Some(Expr::BinaryOp {
                         left: Box::new(Expr::Ident(format!("{enum_name}::{variant}"))),
                         op,
@@ -98,10 +92,7 @@ impl<'a> Transformer<'a> {
 
     /// Detects `typeof x === "type"` / `typeof x !== "type"` patterns and resolves
     /// them using TypeEnv. Returns `None` if the pattern is not recognized.
-    pub(crate) fn try_convert_typeof_comparison(
-        &mut self,
-        bin: &ast::BinExpr,
-    ) -> Option<Expr> {
+    pub(crate) fn try_convert_typeof_comparison(&mut self, bin: &ast::BinExpr) -> Option<Expr> {
         let reg = self.reg();
         let is_eq = matches!(bin.op, ast::BinaryOp::EqEq | ast::BinaryOp::EqEqEq);
         let is_neq = matches!(bin.op, ast::BinaryOp::NotEq | ast::BinaryOp::NotEqEq);
@@ -130,8 +121,7 @@ impl<'a> Transformer<'a> {
                     _ => "",
                 };
                 if variants.iter().any(|v| v == expected_variant) {
-                    let operand_ir = self.convert_expr(typeof_operand)
-                    .ok()?;
+                    let operand_ir = self.convert_expr(typeof_operand).ok()?;
                     let pattern = format!("{enum_name}::{expected_variant}(_)");
                     let matches_expr = Expr::Matches {
                         expr: Box::new(operand_ir),
@@ -159,8 +149,7 @@ impl<'a> Transformer<'a> {
             TypeofMatch::False => Expr::BoolLit(is_neq),
             TypeofMatch::IsNone => {
                 // Cat A: typeof operand
-                let operand_ir = self.convert_expr(typeof_operand)
-                .ok()?;
+                let operand_ir = self.convert_expr(typeof_operand).ok()?;
                 let method = if is_neq { "is_some" } else { "is_none" };
                 Expr::MethodCall {
                     object: Box::new(operand_ir),
@@ -168,14 +157,12 @@ impl<'a> Transformer<'a> {
                     args: vec![],
                 }
             }
-            TypeofMatch::Placeholder => {
-                Expr::FnCall {
-                    name: "todo!".to_string(),
-                    args: vec![Expr::StringLit(format!(
-                        "typeof {type_str} — cannot resolve type of operand"
-                    ))],
-                }
-            }
+            TypeofMatch::Placeholder => Expr::FnCall {
+                name: "todo!".to_string(),
+                args: vec![Expr::StringLit(format!(
+                    "typeof {type_str} — cannot resolve type of operand"
+                ))],
+            },
         };
 
         Some(expr)

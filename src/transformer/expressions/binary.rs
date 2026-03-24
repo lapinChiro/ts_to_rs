@@ -89,9 +89,9 @@ impl<'a> Transformer<'a> {
             let left_type = get_expr_type(self.tctx, &bin.left);
             let right_type = get_expr_type(self.tctx, &bin.right);
             let left_is_string = left_type.is_some_and(is_string_type) || is_string_like(&left);
-            let left_known_non_string =
-                (left_type.is_some() && !left_type.is_some_and(is_string_type))
-                    && !is_string_like(&left);
+            let left_known_non_string = (left_type.is_some()
+                && !left_type.is_some_and(is_string_type))
+                && !is_string_like(&left);
             let right_known_non_string = (right_type.is_some()
                 && !right_type.is_some_and(is_string_type))
                 && !is_string_like(&right);
@@ -153,8 +153,7 @@ impl<'a> Transformer<'a> {
                 Some(RustType::Option(inner)) => {
                     // Option<T>: runtime branch — is_some() → typeof inner, else "undefined"
                     // Cat A: typeof operand — only used for type discrimination
-                    let operand =
-                        self.convert_expr(&unary.arg)?;
+                    let operand = self.convert_expr(&unary.arg)?;
                     let inner_typeof = typeof_to_string(inner);
                     Expr::If {
                         condition: Box::new(Expr::MethodCall {

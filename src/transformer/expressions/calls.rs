@@ -55,7 +55,8 @@ impl<'a> Transformer<'a> {
                         } else {
                             None
                         };
-                    let args = self.convert_call_args_with_types(&call.args, param_types, has_rest)?;
+                    let args =
+                        self.convert_call_args_with_types(&call.args, param_types, has_rest)?;
                     Ok(Expr::FnCall {
                         name: fn_name,
                         args,
@@ -74,12 +75,7 @@ impl<'a> Transformer<'a> {
                             let macro_name = match method.as_str() {
                                 "log" => "println",
                                 "error" | "warn" => "eprintln",
-                                _ => {
-                                    return Err(anyhow!(
-                                        "unsupported console method: {}",
-                                        method
-                                    ))
-                                }
+                                _ => return Err(anyhow!("unsupported console method: {}", method)),
                             };
                             let args = self.convert_call_args(&call.args)?;
                             let use_debug = call
@@ -114,8 +110,7 @@ impl<'a> Transformer<'a> {
                     }
 
                     // Cat A: method receiver — converted before method resolution
-                    let object =
-                        self.convert_expr(&member.obj)?;
+                    let object = self.convert_expr(&member.obj)?;
                     // Look up method parameter types from the object's type
                     let method_sig = get_expr_type(self.tctx, &member.obj).and_then(|ty| {
                         if let RustType::Named { name, .. } = ty {
@@ -126,7 +121,8 @@ impl<'a> Transformer<'a> {
                         None
                     });
                     let method_params = method_sig.as_ref().map(|sig| sig.params.as_slice());
-                    let args = self.convert_call_args_with_types(&call.args, method_params, false)?;
+                    let args =
+                        self.convert_call_args_with_types(&call.args, method_params, false)?;
                     let method_call = map_method_call(object, &method, args);
                     Ok(method_call)
                 }
@@ -143,10 +139,8 @@ impl<'a> Transformer<'a> {
                 }
                 // Chained call: f(x)(y) → { let _f = f(x); _f(y) }
                 ast::Expr::Call(inner_call) => {
-                    let inner_result =
-                        self.convert_call_expr(inner_call)?;
-                    let args =
-                        self.convert_call_args(&call.args)?;
+                    let inner_result = self.convert_call_expr(inner_call)?;
+                    let args = self.convert_call_args(&call.args)?;
                     Ok(Expr::Block(vec![
                         Stmt::Let {
                             name: "_f".to_string(),
@@ -165,8 +159,7 @@ impl<'a> Transformer<'a> {
                 ast::Expr::Arrow(arrow) => {
                     let mut warnings = Vec::new();
                     let closure = self.convert_arrow_expr(arrow, false, &mut warnings)?;
-                    let args =
-                        self.convert_call_args(&call.args)?;
+                    let args = self.convert_call_args(&call.args)?;
                     Ok(Expr::Block(vec![
                         Stmt::Let {
                             name: "__iife".to_string(),
@@ -181,10 +174,8 @@ impl<'a> Transformer<'a> {
                     ]))
                 }
                 ast::Expr::Fn(fn_expr) => {
-                    let closure =
-                        self.convert_fn_expr(fn_expr)?;
-                    let args =
-                        self.convert_call_args(&call.args)?;
+                    let closure = self.convert_fn_expr(fn_expr)?;
+                    let args = self.convert_call_args(&call.args)?;
                     Ok(Expr::Block(vec![
                         Stmt::Let {
                             name: "__iife".to_string(),
@@ -201,8 +192,7 @@ impl<'a> Transformer<'a> {
                 _ => Err(anyhow!("unsupported call target expression")),
             },
             ast::Callee::Super(_) => {
-                let args =
-                    self.convert_call_args(&call.args)?;
+                let args = self.convert_call_args(&call.args)?;
                 Ok(Expr::FnCall {
                     name: "super".to_string(),
                     args,
@@ -319,11 +309,7 @@ impl<'a> Transformer<'a> {
     }
 
     /// Converts Node.js `fs` module method calls to `std::fs` equivalents.
-    fn convert_fs_call(
-        &mut self,
-        method: &str,
-        args: &[ast::ExprOrSpread],
-    ) -> Result<Expr> {
+    fn convert_fs_call(&mut self, method: &str, args: &[ast::ExprOrSpread]) -> Result<Expr> {
         match method {
             "readFileSync" => {
                 if args.is_empty() {
@@ -389,11 +375,7 @@ impl<'a> Transformer<'a> {
     }
 
     /// Converts `Math.method(args)` to Rust `f64` method calls.
-    fn convert_math_call(
-        &mut self,
-        method: &str,
-        args: &[ast::ExprOrSpread],
-    ) -> Result<Expr> {
+    fn convert_math_call(&mut self, method: &str, args: &[ast::ExprOrSpread]) -> Result<Expr> {
         let converted_args = self.convert_call_args(args)?;
         match method {
             "floor" | "ceil" | "round" | "abs" | "sqrt" | "trunc" => {
@@ -456,10 +438,7 @@ impl<'a> Transformer<'a> {
     }
 
     /// Converts call arguments from SWC `ExprOrSpread` to IR `Expr`.
-    pub(crate) fn convert_call_args(
-        &mut self,
-        args: &[ast::ExprOrSpread],
-    ) -> Result<Vec<Expr>> {
+    pub(crate) fn convert_call_args(&mut self, args: &[ast::ExprOrSpread]) -> Result<Vec<Expr>> {
         self.convert_call_args_with_types(args, None, false)
     }
 

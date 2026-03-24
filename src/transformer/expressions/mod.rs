@@ -102,9 +102,7 @@ impl<'a> Transformer<'a> {
             ast::Expr::This(_) => Ok(Expr::Ident("self".to_string())),
             ast::Expr::Assign(assign) => self.convert_assign_expr(assign),
             ast::Expr::Update(up) => convert_update_expr(up),
-            ast::Expr::Arrow(arrow) => {
-                self.convert_arrow_expr(arrow, false, &mut Vec::new())
-            }
+            ast::Expr::Arrow(arrow) => self.convert_arrow_expr(arrow, false, &mut Vec::new()),
             ast::Expr::Fn(fn_expr) => self.convert_fn_expr(fn_expr),
             ast::Expr::Call(call) => self.convert_call_expr(call),
             ast::Expr::New(new_expr) => self.convert_new_expr(new_expr),
@@ -167,9 +165,7 @@ impl<'a> Transformer<'a> {
     fn convert_cond_expr(&mut self, cond: &ast::CondExpr) -> Result<Expr> {
         // Try narrowing: extract guard from the ternary condition
         if let Some(guard) = patterns::extract_narrowing_guard(&cond.test) {
-            if let Some((pattern, is_swap)) =
-                guard.if_let_pattern(&self.type_env, self.tctx)
-            {
+            if let Some((pattern, is_swap)) = guard.if_let_pattern(&self.type_env, self.tctx) {
                 let (matched_ast, unmatched_ast) = if is_swap {
                     (cond.alt.as_ref(), cond.cons.as_ref())
                 } else {
@@ -185,8 +181,7 @@ impl<'a> Transformer<'a> {
                         guard.narrowed_type_for_then(&original)
                     };
                     if let Some(narrowed) = narrowed {
-                        self.type_env
-                            .insert(guard.var_name().to_string(), narrowed);
+                        self.type_env.insert(guard.var_name().to_string(), narrowed);
                     }
                 }
                 let matched_expr = self.convert_expr(matched_ast)?;

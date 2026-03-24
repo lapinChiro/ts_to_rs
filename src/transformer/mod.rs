@@ -277,18 +277,20 @@ impl<'a> Transformer<'a> {
         current_file_dir: Option<&str>,
     ) -> Result<(Vec<Item>, Vec<String>)> {
         match module_item {
-            ModuleItem::Stmt(Stmt::Decl(decl)) => {
-                self.transform_decl(decl, Visibility::Private, class_map, iface_methods, resilient)
-            }
-            ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(export)) => {
-                self.transform_decl(
-                    &export.decl,
-                    Visibility::Public,
-                    class_map,
-                    iface_methods,
-                    resilient,
-                )
-            }
+            ModuleItem::Stmt(Stmt::Decl(decl)) => self.transform_decl(
+                decl,
+                Visibility::Private,
+                class_map,
+                iface_methods,
+                resilient,
+            ),
+            ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(export)) => self.transform_decl(
+                &export.decl,
+                Visibility::Public,
+                class_map,
+                iface_methods,
+                resilient,
+            ),
             ModuleItem::ModuleDecl(ModuleDecl::Import(import_decl)) => {
                 let items = self.transform_import(import_decl, current_file_dir);
                 Ok((items, vec![]))
@@ -300,8 +302,7 @@ impl<'a> Transformer<'a> {
             ModuleItem::ModuleDecl(ModuleDecl::ExportAll(export_all)) => {
                 let src = export_all.src.value.to_string_lossy().into_owned();
                 if src.starts_with("./") || src.starts_with("../") {
-                    let path =
-                        self.resolve_import_path_with_fallback(&src, "*", current_file_dir);
+                    let path = self.resolve_import_path_with_fallback(&src, "*", current_file_dir);
                     Ok((
                         vec![Item::Use {
                             vis: Visibility::Public,
@@ -340,10 +341,10 @@ impl<'a> Transformer<'a> {
         name: &str,
         current_file_dir: Option<&str>,
     ) -> String {
-        if let Some(resolved) = self
-            .tctx
-            .module_graph
-            .resolve_import(self.tctx.file_path, specifier, name)
+        if let Some(resolved) =
+            self.tctx
+                .module_graph
+                .resolve_import(self.tctx.file_path, specifier, name)
         {
             return resolved.module_path;
         }
@@ -385,8 +386,7 @@ impl<'a> Transformer<'a> {
         // Names resolving to different module paths produce separate use items.
         let mut path_groups: Vec<(String, Vec<String>)> = Vec::new();
         for name in &names {
-            let path =
-                self.resolve_import_path_with_fallback(&src, name, current_file_dir);
+            let path = self.resolve_import_path_with_fallback(&src, name, current_file_dir);
             if let Some(group) = path_groups.iter_mut().find(|(p, _)| p == &path) {
                 group.1.push(name.clone());
             } else {
@@ -434,9 +434,7 @@ impl<'a> Transformer<'a> {
                 swc_ecma_ast::ExportSpecifier::Named(named) => {
                     // Use the original name (not the renamed alias)
                     match &named.orig {
-                        swc_ecma_ast::ModuleExportName::Ident(ident) => {
-                            Some(ident.sym.to_string())
-                        }
+                        swc_ecma_ast::ModuleExportName::Ident(ident) => Some(ident.sym.to_string()),
                         swc_ecma_ast::ModuleExportName::Str(s) => {
                             Some(s.value.to_string_lossy().into_owned())
                         }
@@ -453,8 +451,7 @@ impl<'a> Transformer<'a> {
         // Resolve each name through ModuleGraph (same logic as transform_import)
         let mut path_groups: Vec<(String, Vec<String>)> = Vec::new();
         for name in &names {
-            let path =
-                self.resolve_import_path_with_fallback(&src_str, name, current_file_dir);
+            let path = self.resolve_import_path_with_fallback(&src_str, name, current_file_dir);
             if let Some(group) = path_groups.iter_mut().find(|(p, _)| p == &path) {
                 group.1.push(name.clone());
             } else {
