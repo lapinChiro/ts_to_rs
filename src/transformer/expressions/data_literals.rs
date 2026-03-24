@@ -145,7 +145,6 @@ impl<'a> Transformer<'a> {
         obj_lit: &ast::ObjectLit,
         expected: Option<&RustType>,
     ) -> Result<Expr> {
-        let reg = self.reg();
         // Check if all properties use computed keys → HashMap::from(vec![(k, v), ...])
         if let Some(hashmap) = self.try_convert_as_hashmap(obj_lit)? {
             return Ok(hashmap);
@@ -165,7 +164,7 @@ impl<'a> Transformer<'a> {
             tag_field: Some(tag),
             string_values,
             ..
-        }) = reg.get(struct_name)
+        }) = self.reg().get(struct_name)
         {
             let tag = tag.clone();
             let string_values = string_values.clone();
@@ -178,7 +177,7 @@ impl<'a> Transformer<'a> {
         }
 
         // Look up field types from the registry for spread expansion and optional None completion
-        let struct_fields = reg.get(struct_name).and_then(|def| match def {
+        let struct_fields = self.reg().get(struct_name).and_then(|def| match def {
             TypeDef::Struct { fields, .. } => Some(fields.clone()),
             _ => None,
         });

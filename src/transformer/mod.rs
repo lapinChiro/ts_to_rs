@@ -35,11 +35,11 @@ use crate::transformer::context::TransformContext;
 /// ブロックを配置し、ファイル構成を変更せずにメソッド化する。
 pub(crate) struct Transformer<'a> {
     /// 不変コンテキスト（TypeRegistry, ModuleGraph, TypeResolution, file path）
-    pub(crate) tctx: &'a TransformContext<'a>,
+    tctx: &'a TransformContext<'a>,
     /// ローカル変数の型追跡（可変 — ブロックスコープで push_scope / pop_scope）
-    pub(crate) type_env: TypeEnv,
+    type_env: TypeEnv,
     /// 合成型レジストリ（可変 — 変換中に型が追加される）
-    pub(crate) synthetic: &'a mut SyntheticTypeRegistry,
+    synthetic: &'a mut SyntheticTypeRegistry,
 }
 
 impl<'a> Transformer<'a> {
@@ -67,6 +67,25 @@ impl<'a> Transformer<'a> {
     /// `tctx.file_path.parent()` から取得する。import パス解決に使用。
     pub(crate) fn current_file_dir(&self) -> Option<&'a str> {
         self.tctx.file_path.parent().and_then(|p| p.to_str())
+    }
+
+    /// 単一モジュール変換用のヘルパー。
+    ///
+    /// 空の ModuleGraph / FileTypeResolution / file_path で TransformContext を構築し、
+    /// クロージャに Transformer を渡す。マルチモジュール機能は利用できない。
+    ///
+    /// `synthetic` はパラメータとして渡す（クロージャ完了後に `into_items()` を
+    /// 呼び出す必要があるため、内部作成では呼び出し元に返せない）。
+    fn with_single_module<R>(
+        reg: &TypeRegistry,
+        synthetic: &mut SyntheticTypeRegistry,
+        f: impl FnOnce(&mut Transformer<'_>) -> R,
+    ) -> R {
+        let mg = crate::pipeline::ModuleGraph::empty();
+        let resolution = crate::pipeline::type_resolution::FileTypeResolution::empty();
+        let tctx = context::TransformContext::new(&mg, reg, &resolution, std::path::Path::new(""));
+        let mut t = Transformer::for_module(&tctx, synthetic);
+        f(&mut t)
     }
 }
 
@@ -134,13 +153,8 @@ impl std::error::Error for UnsupportedSyntaxError {}
 /// Returns an error if transformation fails or unsupported syntax is encountered.
 pub fn transform_module(module: &Module, reg: &TypeRegistry) -> Result<Vec<Item>> {
     let mut synthetic = SyntheticTypeRegistry::new();
-    let mg = crate::pipeline::ModuleGraph::empty();
-    let resolution = crate::pipeline::type_resolution::FileTypeResolution::empty();
-    let tctx = context::TransformContext::new(&mg, reg, &resolution, std::path::Path::new(""));
-    let mut items = {
-        let mut t = Transformer::for_module(&tctx, &mut synthetic);
-        t.transform_module(module)?
-    };
+    let mut items =
+        Transformer::with_single_module(reg, &mut synthetic, |t| t.transform_module(module))?;
     let mut all = synthetic.into_items();
     all.append(&mut items);
     Ok(all)
@@ -171,13 +185,9 @@ pub fn transform_module_collecting(
     reg: &TypeRegistry,
 ) -> Result<(Vec<Item>, Vec<UnsupportedSyntaxError>)> {
     let mut synthetic = SyntheticTypeRegistry::new();
-    let mg = crate::pipeline::ModuleGraph::empty();
-    let resolution = crate::pipeline::type_resolution::FileTypeResolution::empty();
-    let tctx = context::TransformContext::new(&mg, reg, &resolution, std::path::Path::new(""));
-    let (mut items, unsupported) = {
-        let mut t = Transformer::for_module(&tctx, &mut synthetic);
-        t.transform_module_collecting(module)?
-    };
+    let (mut items, unsupported) = Transformer::with_single_module(reg, &mut synthetic, |t| {
+        t.transform_module_collecting(module)
+    })?;
     let mut all = synthetic.into_items();
     all.append(&mut items);
     Ok((all, unsupported))
@@ -453,16 +463,23 @@ impl<'a> Transformer<'a> {
         iface_methods: &HashMap<String, Vec<String>>,
         resilient: bool,
     ) -> Result<(Vec<Item>, Vec<String>)> {
-        let reg = self.reg();
         match decl {
             Decl::TsInterface(interface_decl) => {
-                let items =
-                    types::convert_interface_items(interface_decl, vis, self.synthetic, reg)?;
+                let items = types::convert_interface_items(
+                    interface_decl,
+                    vis,
+                    self.synthetic,
+                    self.reg(),
+                )?;
                 Ok((items, vec![]))
             }
             Decl::TsTypeAlias(type_alias_decl) => {
-                let items =
-                    types::convert_type_alias_items(type_alias_decl, vis, self.synthetic, reg)?;
+                let items = types::convert_type_alias_items(
+                    type_alias_decl,
+                    vis,
+                    self.synthetic,
+                    self.reg(),
+                )?;
                 Ok((items, vec![]))
             }
             Decl::Fn(fn_decl) => {

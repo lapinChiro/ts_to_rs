@@ -119,33 +119,33 @@ A, B, C, E は相互に独立。D は全ての完了後に一括実施する（A
 
 課題 B の #1, #2。呼び出し元が全て Transformer メソッドなので単純なメソッド化。
 
-- [ ] **A-1**: `resolve_enum_type_name`（`patterns.rs:340`）を `impl Transformer` ブロックに移動。シグネチャから `tctx` を削除、`&self` を追加。本体の `tctx` → `self.tctx`。呼び出し元 2 箇所（`try_convert_enum_string_comparison` 内）を `self.resolve_enum_type_name()` に更新
-- [ ] **A-2**: `needs_trait_box_coercion`（`expressions/mod.rs:215`）を `impl Transformer` ブロックに移動。同様にメソッド化。呼び出し元 1 箇所（`convert_expr` 内）を `self.needs_trait_box_coercion()` に更新
-- [ ] **A-3**: `cargo check` 通過確認
+- [x] **A-1**: `resolve_enum_type_name`（`patterns.rs:340`）を `impl Transformer` ブロックに移動。シグネチャから `tctx` を削除、`&self` を追加。本体の `tctx` → `self.tctx`。呼び出し元 2 箇所（`try_convert_enum_string_comparison` 内）を `self.resolve_enum_type_name()` に更新
+- [x] **A-2**: `needs_trait_box_coercion`（`expressions/mod.rs:215`）を `impl Transformer` ブロックに移動。同様にメソッド化。呼び出し元 1 箇所（`convert_expr` 内）を `self.needs_trait_box_coercion()` に更新
+- [x] **A-3**: `cargo check` 通過確認
 
 ### Phase D-2-2-B: NarrowingGuard リファクタリング
 
 課題 C。`if_let_pattern` のロジックを Transformer メソッドに移動し、`resolve_typeof_to_enum_variant` と `resolve_instanceof_to_enum_variant` もメソッド化する。
 
-- [ ] **B-1**: `resolve_typeof_to_enum_variant`（`patterns.rs:728`）を `impl Transformer` ブロックに移動。シグネチャから `tctx` を削除、`&self` を追加。本体の `tctx.type_registry` → `self.reg()`
-- [ ] **B-2**: `resolve_instanceof_to_enum_variant`（`patterns.rs:759`）を同様にメソッド化
-- [ ] **B-3**: Transformer メソッド `resolve_if_let_pattern(&self, guard: &NarrowingGuard) -> Option<(String, bool)>` を作成。`NarrowingGuard::if_let_pattern` のロジックを移動。`self.type_env.get(guard.var_name())` と `self.resolve_typeof_to_enum_variant()` / `self.resolve_instanceof_to_enum_variant()` を直接使用
-- [ ] **B-4**: `NarrowingGuard::if_let_pattern` メソッドを削除
-- [ ] **B-5**: 呼び出し元 3 箇所を更新:
+- [x] **B-1**: `resolve_typeof_to_enum_variant`（`patterns.rs:728`）を `impl Transformer` ブロックに移動。シグネチャから `tctx` を削除、`&self` を追加。本体の `tctx.type_registry` → `self.reg()`
+- [x] **B-2**: `resolve_instanceof_to_enum_variant`（`patterns.rs:759`）を同様にメソッド化
+- [x] **B-3**: Transformer メソッド `resolve_if_let_pattern(&self, guard: &NarrowingGuard) -> Option<(String, bool)>` を作成。`NarrowingGuard::if_let_pattern` のロジックを移動。`self.type_env.get(guard.var_name())` と `self.resolve_typeof_to_enum_variant()` / `self.resolve_instanceof_to_enum_variant()` を直接使用
+- [x] **B-4**: `NarrowingGuard::if_let_pattern` メソッドを削除
+- [x] **B-5**: 呼び出し元 3 箇所を更新:
   - `expressions/mod.rs:168`: `guard.if_let_pattern(&self.type_env, self.tctx)` → `self.resolve_if_let_pattern(&guard)`
   - `statements/mod.rs:650`: 同上
   - `statements/mod.rs:659`: 同上
-- [ ] **B-6**: `statements/mod.rs:1864` の `resolve_typeof_to_enum_variant(...)` 呼び出しを `self.resolve_typeof_to_enum_variant(...)` に更新
-- [ ] **B-7**: 不要な `use` 文（`resolve_typeof_to_enum_variant` の import）を削除
-- [ ] **B-8**: `cargo check` 通過確認
+- [x] **B-6**: `statements/mod.rs:1864` の `resolve_typeof_to_enum_variant(...)` 呼び出しを `self.resolve_typeof_to_enum_variant(...)` に更新
+- [x] **B-7**: 不要な `use` 文（`resolve_typeof_to_enum_variant` の import）を削除
+- [x] **B-8**: `cargo check` 通過確認
 
 ### Phase D-2-2-C: Transformer フィールド private 化
 
 課題 E。3 フィールドから `pub(crate)` を削除。
 
-- [ ] **C-1**: `Transformer` struct 定義の `pub(crate) tctx`, `pub(crate) type_env`, `pub(crate) synthetic` から `pub(crate)` を削除
-- [ ] **C-2**: `cargo check` 通過確認。子モジュール内の `impl Transformer` ブロックとテストファイルからは private フィールドにアクセス可能なため、コンパイルエラーは発生しないはず
-- [ ] **C-3**: エラーが発生した場合: `transformer/` モジュール外からのアクセスがないか確認し、アクセサメソッドの追加で対処
+- [x] **C-1**: `Transformer` struct 定義の `pub(crate) tctx`, `pub(crate) type_env`, `pub(crate) synthetic` から `pub(crate)` を削除
+- [x] **C-2**: `cargo check` 通過確認。子モジュール内の `impl Transformer` ブロックとテストファイルからは private フィールドにアクセス可能なため、コンパイルエラーは発生しないはず
+- [x] **C-3**: エラーが発生した場合: `transformer/` モジュール外からのアクセスがないか確認し、アクセサメソッドの追加で対処
 
 ### Phase D-2-2-D: `let reg = self.reg()` / `let reg = tctx.type_registry` 除去
 
@@ -156,23 +156,23 @@ A, B, C, E は相互に独立。D は全ての完了後に一括実施する（A
 - クロージャ内で使用: `reg.xxx()` → `self.tctx.type_registry.xxx()`（`self` 全体のキャプチャ回避）
 - 未使用 binding（18 箇所）: `let reg = self.reg();` を削除するのみ
 
-- [ ] **D-1**: GROUP A（未使用 binding 18 箇所）を削除。`cargo check` 通過確認
-- [ ] **D-2**: GROUP B（使用箇所あり ~17 箇所）を置換。各メソッドで `reg` の全使用箇所を `self.reg()` または `self.tctx.type_registry` に書き換え。クロージャ内使用の有無を確認して適切なパターンを選択
-- [ ] **D-3**: `cargo check` 通過確認
-- [ ] **D-4**: `cargo clippy --all-targets --all-features -- -D warnings` 0 警告
-- [ ] **D-5**: `cargo fmt --all --check` 通過
-- [ ] **D-6**: `cargo test` 全 GREEN
+- [x] **D-1**: GROUP A（未使用 binding 18 箇所）を削除。`cargo check` 通過確認
+- [x] **D-2**: GROUP B（使用箇所あり ~17 箇所）を置換。各メソッドで `reg` の全使用箇所を `self.reg()` または `self.tctx.type_registry` に書き換え。クロージャ内使用の有無を確認して適切なパターンを選択
+- [x] **D-3**: `cargo check` 通過確認
+- [x] **D-4**: `cargo clippy --all-targets --all-features -- -D warnings` 0 警告
+- [x] **D-5**: `cargo fmt --all --check` 通過
+- [x] **D-6**: `cargo test` 全 GREEN
 
 ### Phase D-2-2-E: entry point 簡素化
 
 課題 A。ダミーコンテキスト構築のボイラープレートをファクトリメソッドに集約。
 
-- [ ] **E-1**: `Transformer::for_single_module(reg)` ファクトリメソッドを追加。内部で空の ModuleGraph / FileTypeResolution / file_path を構築し、`for_module()` 相当の Transformer を返す。synthetic も内部で作成し所有する設計を検討（`transform_module` は synthetic を外部に返す必要があるため、返り値に含めるか、別の方法を検討）
-- [ ] **E-2**: `transform_module(module, reg)` を新ファクトリ経由に書き換え
-- [ ] **E-3**: `transform_module_collecting(module, reg)` を新ファクトリ経由に書き換え
-- [ ] **E-4**: `transform_module_with_context` の呼び出し元を `Transformer::for_module()` 直接呼び出しに移行可能か検討。可能であれば移行し、関数を削除
-- [ ] **E-5**: `cargo check` 通過確認
-- [ ] **E-6**: `cargo test` 全 GREEN
+- [x] **E-1**: `Transformer::for_single_module(reg)` ファクトリメソッドを追加。内部で空の ModuleGraph / FileTypeResolution / file_path を構築し、`for_module()` 相当の Transformer を返す。synthetic も内部で作成し所有する設計を検討（`transform_module` は synthetic を外部に返す必要があるため、返り値に含めるか、別の方法を検討）
+- [x] **E-2**: `transform_module(module, reg)` を新ファクトリ経由に書き換え
+- [x] **E-3**: `transform_module_collecting(module, reg)` を新ファクトリ経由に書き換え
+- [x] **E-4**: `transform_module_with_context` の呼び出し元を `Transformer::for_module()` 直接呼び出しに移行可能か検討。可能であれば移行し、関数を削除
+- [x] **E-5**: `cargo check` 通過確認
+- [x] **E-6**: `cargo test` 全 GREEN
 
 ## 完了条件
 

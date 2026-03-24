@@ -10,7 +10,6 @@ use crate::registry::TypeDef;
 
 use super::literals::lookup_string_enum_variant;
 use super::type_resolution::get_expr_type;
-use crate::transformer::context::TransformContext;
 use crate::transformer::Transformer;
 
 impl<'a> Transformer<'a> {
@@ -48,7 +47,6 @@ impl<'a> Transformer<'a> {
         &mut self,
         bin: &ast::BinExpr,
     ) -> Option<Expr> {
-        let reg = self.reg();
         let is_eq = matches!(bin.op, ast::BinaryOp::EqEq | ast::BinaryOp::EqEqEq);
         let is_neq = matches!(bin.op, ast::BinaryOp::NotEq | ast::BinaryOp::NotEqEq);
         if !is_eq && !is_neq {
@@ -59,8 +57,10 @@ impl<'a> Transformer<'a> {
 
         // Try: left is enum variable, right is string literal
         if let Some(str_value) = extract_string_lit(&bin.right) {
-            if let Some(enum_name) = resolve_enum_type_name(&bin.left, self.tctx) {
-                if let Some(variant) = lookup_string_enum_variant(reg, &enum_name, &str_value) {
+            if let Some(enum_name) = self.resolve_enum_type_name(&bin.left) {
+                if let Some(variant) =
+                    lookup_string_enum_variant(self.reg(), &enum_name, &str_value)
+                {
                     // Cat A: comparison operand
                     let left = self.convert_expr(&bin.left).ok()?;
                     return Some(Expr::BinaryOp {
@@ -74,8 +74,10 @@ impl<'a> Transformer<'a> {
 
         // Try: left is string literal, right is enum variable
         if let Some(str_value) = extract_string_lit(&bin.left) {
-            if let Some(enum_name) = resolve_enum_type_name(&bin.right, self.tctx) {
-                if let Some(variant) = lookup_string_enum_variant(reg, &enum_name, &str_value) {
+            if let Some(enum_name) = self.resolve_enum_type_name(&bin.right) {
+                if let Some(variant) =
+                    lookup_string_enum_variant(self.reg(), &enum_name, &str_value)
+                {
                     // Cat A: comparison operand
                     let right = self.convert_expr(&bin.right).ok()?;
                     return Some(Expr::BinaryOp {
@@ -93,7 +95,6 @@ impl<'a> Transformer<'a> {
     /// Detects `typeof x === "type"` / `typeof x !== "type"` patterns and resolves
     /// them using TypeEnv. Returns `None` if the pattern is not recognized.
     pub(crate) fn try_convert_typeof_comparison(&mut self, bin: &ast::BinExpr) -> Option<Expr> {
-        let reg = self.reg();
         let is_eq = matches!(bin.op, ast::BinaryOp::EqEq | ast::BinaryOp::EqEqEq);
         let is_neq = matches!(bin.op, ast::BinaryOp::NotEq | ast::BinaryOp::NotEqEq);
         if !is_eq && !is_neq {
@@ -111,7 +112,8 @@ impl<'a> Transformer<'a> {
             name: enum_name, ..
         }) = operand_type
         {
-            if let Some(crate::registry::TypeDef::Enum { variants, .. }) = reg.get(enum_name) {
+            if let Some(crate::registry::TypeDef::Enum { variants, .. }) = self.reg().get(enum_name)
+            {
                 let expected_variant = match type_str.as_str() {
                     "string" => "String",
                     "number" => "F64",
@@ -174,7 +176,6 @@ impl<'a> Transformer<'a> {
     /// - HashMap → `obj.contains_key("key")`
     /// - unknown type → `todo!()` (no silent `true` fallback)
     pub(crate) fn convert_in_operator(&self, bin: &ast::BinExpr) -> Expr {
-        let reg = self.reg();
         // Extract the key string from LHS (must be a string literal)
         let key = match bin.left.as_ref() {
             ast::Expr::Lit(ast::Lit::Str(s)) => s.value.to_string_lossy().into_owned(),
@@ -213,7 +214,7 @@ impl<'a> Transformer<'a> {
             }
             Some(RustType::Named { name, .. }) => {
                 // Check TypeRegistry for field existence
-                match reg.get(name) {
+                match self.reg().get(name) {
                     Some(TypeDef::Struct { fields, .. }) => {
                         Expr::BoolLit(fields.iter().any(|(f, _)| f == &key))
                     }
@@ -257,7 +258,6 @@ impl<'a> Transformer<'a> {
     /// - `Option<T>` where T matches → `x.is_some()`
     /// - Unknown type → `todo!()` placeholder (compile error, not silent `true`)
     pub(crate) fn convert_instanceof(&self, bin: &ast::BinExpr) -> Expr {
-        let reg = self.reg();
         // Get the class name from the RHS
         let class_name = match bin.right.as_ref() {
             ast::Expr::Ident(ident) => ident.sym.to_string(),
@@ -287,7 +287,8 @@ impl<'a> Transformer<'a> {
             },
             Some(RustType::Named { ref name, .. }) => {
                 // Check if this is a union enum with a matching variant
-                if let Some(crate::registry::TypeDef::Enum { variants, .. }) = reg.get(name) {
+                if let Some(crate::registry::TypeDef::Enum { variants, .. }) = self.reg().get(name)
+                {
                     if variants.iter().any(|v| v == &class_name) {
                         let lhs_ir = match bin.left.as_ref() {
                             ast::Expr::Ident(ident) => Expr::Ident(ident.sym.to_string()),
@@ -325,6 +326,117 @@ impl<'a> Transformer<'a> {
             Some(_) => Expr::BoolLit(false),
         }
     }
+
+    /// 式の型が string literal union enum の場合、その enum 名を返す。
+    fn resolve_enum_type_name(&self, expr: &ast::Expr) -> Option<String> {
+        let ty = get_expr_type(self.tctx, expr)?;
+        if let RustType::Named { name, .. } = ty {
+            if let Some(TypeDef::Enum { string_values, .. }) = self.reg().get(name) {
+                if !string_values.is_empty() {
+                    return Some(name.clone());
+                }
+            }
+        }
+        None
+    }
+
+    /// Resolves a typeof string to an enum variant name.
+    ///
+    /// Given a variable type like `Named { name: "StringOrF64" }` and typeof string `"string"`,
+    /// looks up the enum in TypeRegistry and finds the variant that matches.
+    pub(crate) fn resolve_typeof_to_enum_variant(
+        &self,
+        var_type: &RustType,
+        typeof_str: &str,
+    ) -> Option<(String, String)> {
+        let enum_name = match var_type {
+            RustType::Named { name, type_args } if type_args.is_empty() => name,
+            _ => return None,
+        };
+        let type_def = self.reg().get(enum_name)?;
+        let variants = match type_def {
+            crate::registry::TypeDef::Enum { variants, .. } => variants,
+            _ => return None,
+        };
+        let expected_variant = match typeof_str {
+            "string" => "String",
+            "number" => "F64",
+            "boolean" => "Bool",
+            "object" => "Object",
+            "function" => "Function",
+            _ => return None,
+        };
+        if variants.iter().any(|v| v == expected_variant) {
+            Some((enum_name.clone(), expected_variant.to_string()))
+        } else {
+            None
+        }
+    }
+
+    /// Resolves an instanceof class name to an enum variant.
+    fn resolve_instanceof_to_enum_variant(
+        &self,
+        var_type: &RustType,
+        class_name: &str,
+    ) -> Option<(String, String)> {
+        let enum_name = match var_type {
+            RustType::Named { name, type_args } if type_args.is_empty() => name,
+            _ => return None,
+        };
+        let type_def = self.reg().get(enum_name)?;
+        let variants = match type_def {
+            crate::registry::TypeDef::Enum { variants, .. } => variants,
+            _ => return None,
+        };
+        if variants.iter().any(|v| v == class_name) {
+            Some((enum_name.clone(), class_name.to_string()))
+        } else {
+            None
+        }
+    }
+
+    /// NarrowingGuard から if-let パターン文字列を解決する。
+    ///
+    /// Returns `Some((pattern, is_swap))` where `is_swap` is true for `!==`/`!=` guards
+    /// (meaning then/else branches should be swapped).
+    /// Returns `None` if the guard cannot generate an if-let pattern.
+    pub(crate) fn resolve_if_let_pattern(&self, guard: &NarrowingGuard) -> Option<(String, bool)> {
+        let var_type = self.type_env.get(guard.var_name())?;
+        match guard {
+            NarrowingGuard::NonNullish { is_neq, .. } => {
+                if matches!(var_type, RustType::Option(_)) {
+                    Some((format!("Some({})", guard.var_name()), !is_neq))
+                } else {
+                    None
+                }
+            }
+            NarrowingGuard::Truthy { .. } => {
+                if matches!(var_type, RustType::Option(_)) {
+                    Some((format!("Some({})", guard.var_name()), false))
+                } else {
+                    None
+                }
+            }
+            NarrowingGuard::Typeof {
+                type_name, is_eq, ..
+            } => {
+                let (enum_name, variant) =
+                    self.resolve_typeof_to_enum_variant(var_type, type_name)?;
+                Some((
+                    format!("{enum_name}::{variant}({})", guard.var_name()),
+                    !is_eq,
+                ))
+            }
+            NarrowingGuard::InstanceOf { class_name, .. } => {
+                let (enum_name, variant) =
+                    self.resolve_instanceof_to_enum_variant(var_type, class_name)?;
+                Some((
+                    format!("{enum_name}::{variant}({})", guard.var_name()),
+                    false,
+                ))
+            }
+        }
+    }
 }
 
 /// 式から文字列リテラル値を抽出する。
@@ -334,20 +446,6 @@ fn extract_string_lit(expr: &ast::Expr) -> Option<String> {
     } else {
         None
     }
-}
-
-/// 式の型が string literal union enum の場合、その enum 名を返す。
-fn resolve_enum_type_name(expr: &ast::Expr, tctx: &TransformContext<'_>) -> Option<String> {
-    let reg = tctx.type_registry;
-    let ty = get_expr_type(tctx, expr)?;
-    if let RustType::Named { name, .. } = ty {
-        if let Some(TypeDef::Enum { string_values, .. }) = reg.get(name) {
-            if !string_values.is_empty() {
-                return Some(name.clone());
-            }
-        }
-    }
-    None
 }
 
 /// Returns true if the expression is the `undefined` identifier.
@@ -524,53 +622,6 @@ impl NarrowingGuard {
         }
     }
 
-    /// Returns the if-let pattern string if this guard can generate an if-let.
-    ///
-    /// Returns `Some((pattern, is_swap))` where `is_swap` is true for `!==`/`!=` guards
-    /// (meaning then/else branches should be swapped).
-    /// Returns `None` if the guard cannot generate an if-let pattern.
-    pub(crate) fn if_let_pattern(
-        &self,
-        type_env: &super::super::TypeEnv,
-        tctx: &TransformContext<'_>,
-    ) -> Option<(String, bool)> {
-        let var_type = type_env.get(self.var_name())?;
-        match self {
-            NarrowingGuard::NonNullish { is_neq, .. } => {
-                if matches!(var_type, RustType::Option(_)) {
-                    Some((format!("Some({})", self.var_name()), !is_neq))
-                } else {
-                    None
-                }
-            }
-            NarrowingGuard::Truthy { .. } => {
-                if matches!(var_type, RustType::Option(_)) {
-                    Some((format!("Some({})", self.var_name()), false))
-                } else {
-                    None
-                }
-            }
-            NarrowingGuard::Typeof {
-                type_name, is_eq, ..
-            } => {
-                let (enum_name, variant) =
-                    resolve_typeof_to_enum_variant(var_type, type_name, tctx)?;
-                Some((
-                    format!("{enum_name}::{variant}({})", self.var_name()),
-                    !is_eq,
-                ))
-            }
-            NarrowingGuard::InstanceOf { class_name, .. } => {
-                let (enum_name, variant) =
-                    resolve_instanceof_to_enum_variant(var_type, class_name, tctx)?;
-                Some((
-                    format!("{enum_name}::{variant}({})", self.var_name()),
-                    false,
-                ))
-            }
-        }
-    }
-
     /// Returns the narrowed RustType for the else branch.
     pub(crate) fn narrowed_type_for_else(&self, original: &RustType) -> Option<RustType> {
         match self {
@@ -719,61 +770,4 @@ pub(crate) fn typeof_string_to_rust_type(type_name: &str) -> Option<RustType> {
 fn is_null_or_undefined(expr: &ast::Expr) -> bool {
     matches!(expr, ast::Expr::Lit(ast::Lit::Null(..)))
         || matches!(expr, ast::Expr::Ident(ident) if ident.sym.as_ref() == "undefined")
-}
-
-/// Resolves a typeof string to an enum variant name.
-///
-/// Given a variable type like `Named { name: "StringOrF64" }` and typeof string `"string"`,
-/// looks up the enum in TypeRegistry and finds the variant that matches.
-pub(crate) fn resolve_typeof_to_enum_variant(
-    var_type: &RustType,
-    typeof_str: &str,
-    tctx: &TransformContext<'_>,
-) -> Option<(String, String)> {
-    let reg = tctx.type_registry;
-    let enum_name = match var_type {
-        RustType::Named { name, type_args } if type_args.is_empty() => name,
-        _ => return None,
-    };
-    let type_def = reg.get(enum_name)?;
-    let variants = match type_def {
-        crate::registry::TypeDef::Enum { variants, .. } => variants,
-        _ => return None,
-    };
-    let expected_variant = match typeof_str {
-        "string" => "String",
-        "number" => "F64",
-        "boolean" => "Bool",
-        "object" => "Object",
-        "function" => "Function",
-        _ => return None,
-    };
-    if variants.iter().any(|v| v == expected_variant) {
-        Some((enum_name.clone(), expected_variant.to_string()))
-    } else {
-        None
-    }
-}
-
-/// Resolves an instanceof class name to an enum variant.
-pub(crate) fn resolve_instanceof_to_enum_variant(
-    var_type: &RustType,
-    class_name: &str,
-    tctx: &TransformContext<'_>,
-) -> Option<(String, String)> {
-    let reg = tctx.type_registry;
-    let enum_name = match var_type {
-        RustType::Named { name, type_args } if type_args.is_empty() => name,
-        _ => return None,
-    };
-    let type_def = reg.get(enum_name)?;
-    let variants = match type_def {
-        crate::registry::TypeDef::Enum { variants, .. } => variants,
-        _ => return None,
-    };
-    if variants.iter().any(|v| v == class_name) {
-        Some((enum_name.clone(), class_name.to_string()))
-    } else {
-        None
-    }
 }

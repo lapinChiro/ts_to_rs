@@ -31,7 +31,6 @@ impl<'a> Transformer<'a> {
         vis: Visibility,
         resilient: bool,
     ) -> Result<(Vec<Item>, Vec<String>)> {
-        let reg = self.reg();
         let name = fn_decl.ident.sym.to_string();
         let mut fallback_warnings = Vec::new();
         let mut items = Vec::new();
@@ -97,7 +96,7 @@ impl<'a> Transformer<'a> {
 
         // Trait types in return position → Box<dyn Trait>
         let return_type =
-            return_type.map(|ty| wrap_trait_for_position(ty, TypePosition::Value, reg));
+            return_type.map(|ty| wrap_trait_for_position(ty, TypePosition::Value, self.reg()));
 
         // Lazy type materialization for `any`-typed parameters:
         // Scan body for typeof/instanceof usage and generate enum types
@@ -195,7 +194,7 @@ impl<'a> Transformer<'a> {
         let type_params = extract_type_params(
             fn_decl.function.type_params.as_deref(),
             &mut local_synthetic,
-            reg,
+            self.reg(),
         );
 
         // If the function body contains `throw`, wrap return type in Result and returns in Ok()
@@ -261,8 +260,7 @@ impl<'a> Transformer<'a> {
         resilient: bool,
         fallback_warnings: &mut Vec<String>,
     ) -> Result<RustType> {
-        let reg = self.reg();
-        match convert_ts_type(ts_type, self.synthetic, reg) {
+        match convert_ts_type(ts_type, self.synthetic, self.reg()) {
             Ok(ty) => Ok(ty),
             Err(e) => {
                 if resilient {
@@ -291,7 +289,6 @@ impl<'a> Transformer<'a> {
         resilient: bool,
         fallback_warnings: &mut Vec<String>,
     ) -> Result<(Param, Vec<Stmt>, Vec<Item>)> {
-        let reg = self.reg();
         match pat {
             ast::Pat::Ident(ident) => {
                 let param_name = ident.id.sym.to_string();
@@ -317,7 +314,11 @@ impl<'a> Transformer<'a> {
                     for member in &type_lit.members {
                         match member {
                             ast::TsTypeElement::TsPropertySignature(prop) => {
-                                fields.push(convert_property_signature(prop, self.synthetic, reg)?);
+                                fields.push(convert_property_signature(
+                                    prop,
+                                    self.synthetic,
+                                    self.reg(),
+                                )?);
                             }
                             _ => {
                                 return Err(anyhow!(
@@ -349,7 +350,7 @@ impl<'a> Transformer<'a> {
                 let rust_type =
                     self.convert_ts_type_with_fallback(&ty.type_ann, resilient, fallback_warnings)?;
                 // Trait types in parameter position → &dyn Trait
-                let rust_type = wrap_trait_for_position(rust_type, TypePosition::Param, reg);
+                let rust_type = wrap_trait_for_position(rust_type, TypePosition::Param, self.reg());
                 Ok((
                     Param {
                         name: param_name,
@@ -552,9 +553,8 @@ impl<'a> Transformer<'a> {
         &mut self,
         obj_pat: &ast::ObjectPat,
     ) -> Result<(Param, Vec<Stmt>)> {
-        let reg = self.reg();
         let rust_type = if let Some(type_ann) = obj_pat.type_ann.as_ref() {
-            convert_ts_type(&type_ann.type_ann, self.synthetic, reg)?
+            convert_ts_type(&type_ann.type_ann, self.synthetic, self.reg())?
         } else {
             // No type annotation — fallback to serde_json::Value
             RustType::Named {
@@ -680,7 +680,7 @@ impl<'a> Transformer<'a> {
                         _ => None,
                     };
                     if let Some(crate::registry::TypeDef::Struct { fields, .. }) =
-                        type_name.and_then(|n| reg.get(n))
+                        type_name.and_then(|n| self.reg().get(n))
                     {
                         for (field_name, _) in fields {
                             if !explicit_fields.contains(field_name) {
@@ -1082,7 +1082,6 @@ impl<'a> Transformer<'a> {
         vis: Visibility,
         resilient: bool,
     ) -> Result<(Vec<Item>, Vec<String>)> {
-        let reg = self.reg();
         let mut items = Vec::new();
         let mut all_warnings = Vec::new();
         for decl in &var_decl.decls {
@@ -1099,10 +1098,9 @@ impl<'a> Transformer<'a> {
                 ast::Pat::Ident(ident) => {
                     let n = ident.id.sym.to_string();
                     // Extract variable's type annotation and resolve to return type + param types
-                    let var_rust_type = ident
-                        .type_ann
-                        .as_ref()
-                        .and_then(|ann| convert_ts_type(&ann.type_ann, self.synthetic, reg).ok());
+                    let var_rust_type = ident.type_ann.as_ref().and_then(|ann| {
+                        convert_ts_type(&ann.type_ann, self.synthetic, self.reg()).ok()
+                    });
                     let ret = var_rust_type
                         .as_ref()
                         .and_then(|ty| self.extract_fn_return_type(ty));
@@ -1223,8 +1221,11 @@ impl<'a> Transformer<'a> {
                         }
                     }
 
-                    let type_params =
-                        extract_type_params(arrow.type_params.as_deref(), self.synthetic, reg);
+                    let type_params = extract_type_params(
+                        arrow.type_params.as_deref(),
+                        self.synthetic,
+                        self.reg(),
+                    );
                     items.push(Item::Fn {
                         vis: vis.clone(),
                         attributes: vec![],
@@ -1249,7 +1250,6 @@ impl<'a> Transformer<'a> {
     /// - `RustType::Fn { return_type, .. }` → returns the return_type directly
     /// - `RustType::Named { name, .. }` → looks up TypeRegistry for `TypeDef::Function`
     pub(crate) fn extract_fn_return_type(&self, ty: &RustType) -> Option<RustType> {
-        let reg = self.reg();
         match ty {
             RustType::Fn { return_type, .. } => {
                 let rt = return_type.as_ref();
@@ -1260,7 +1260,8 @@ impl<'a> Transformer<'a> {
                 }
             }
             RustType::Named { name, .. } => {
-                if let Some(crate::registry::TypeDef::Function { return_type, .. }) = reg.get(name)
+                if let Some(crate::registry::TypeDef::Function { return_type, .. }) =
+                    self.reg().get(name)
                 {
                     return_type.clone()
                 } else {
@@ -1277,11 +1278,12 @@ impl<'a> Transformer<'a> {
     /// - `RustType::Fn { params, .. }` → returns the params directly
     /// - `RustType::Named { name, .. }` → looks up TypeRegistry for `TypeDef::Function`
     pub(crate) fn extract_fn_param_types(&self, ty: &RustType) -> Option<Vec<RustType>> {
-        let reg = self.reg();
         match ty {
             RustType::Fn { params, .. } => Some(params.clone()),
             RustType::Named { name, .. } => {
-                if let Some(crate::registry::TypeDef::Function { params, .. }) = reg.get(name) {
+                if let Some(crate::registry::TypeDef::Function { params, .. }) =
+                    self.reg().get(name)
+                {
                     Some(params.iter().map(|(_, ty)| ty.clone()).collect())
                 } else {
                     None

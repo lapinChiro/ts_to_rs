@@ -539,7 +539,6 @@ impl<'a> Transformer<'a> {
         prop: &ast::ClassProp,
         vis: &Visibility,
     ) -> Result<Option<AssocConst>> {
-        let reg = self.reg();
         let name = extract_prop_name(&prop.key)
             .map_err(|_| anyhow!("unsupported static property key (only identifiers)"))?;
 
@@ -547,7 +546,7 @@ impl<'a> Transformer<'a> {
             .type_ann
             .as_ref()
             .ok_or_else(|| anyhow!("static property '{}' has no type annotation", name))?;
-        let ty = convert_ts_type(&type_ann.type_ann, self.synthetic, reg)?;
+        let ty = convert_ts_type(&type_ann.type_ann, self.synthetic, self.reg())?;
 
         let value = match &prop.value {
             Some(init) => Transformer {
@@ -573,12 +572,11 @@ impl<'a> Transformer<'a> {
         prop: &ast::ClassProp,
         class_vis: &Visibility,
     ) -> Result<StructField> {
-        let reg = self.reg();
         let field_name = extract_prop_name(&prop.key)
             .map_err(|_| anyhow!("unsupported class property key (only identifiers)"))?;
 
         let ty = match prop.type_ann.as_ref() {
-            Some(ann) => convert_ts_type(&ann.type_ann, self.synthetic, reg)?,
+            Some(ann) => convert_ts_type(&ann.type_ann, self.synthetic, self.reg())?,
             None => RustType::Any, // Fallback to Any for unannotated class properties
         };
         let member_vis = resolve_member_visibility(prop.accessibility, class_vis);
@@ -831,7 +829,6 @@ impl<'a> Transformer<'a> {
         method: &ast::ClassMethod,
         vis: &Visibility,
     ) -> Result<Method> {
-        let reg = self.reg();
         let raw_name = extract_prop_name(&method.key)
             .map_err(|_| anyhow!("unsupported method key (only identifiers)"))?;
 
@@ -855,7 +852,7 @@ impl<'a> Transformer<'a> {
             .function
             .return_type
             .as_ref()
-            .map(|ann| convert_ts_type(&ann.type_ann, self.synthetic, reg))
+            .map(|ann| convert_ts_type(&ann.type_ann, self.synthetic, self.reg()))
             .transpose()?;
 
         // void → None (Rust omits `-> ()`)
@@ -1010,7 +1007,6 @@ impl<'a> Transformer<'a> {
     /// Extracts name and type annotation from a `BindingIdent`, converts the type,
     /// and returns a `Param`. Used by both function and class method parameter conversion.
     fn convert_ident_to_param(&mut self, ident: &ast::BindingIdent) -> Result<Param> {
-        let reg = self.reg();
         let name = ident.id.sym.to_string();
         let ty = ident
             .type_ann
@@ -1020,7 +1016,7 @@ impl<'a> Transformer<'a> {
             &ty.type_ann,
             crate::transformer::TypePosition::Param,
             self.synthetic,
-            reg,
+            self.reg(),
         )?;
         Ok(Param {
             name,

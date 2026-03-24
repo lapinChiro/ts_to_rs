@@ -17,8 +17,6 @@ impl<'a> Transformer<'a> {
     /// - `foo(x, y)` → `Expr::FnCall { name: "foo", args }`
     /// - `obj.method(x)` → `Expr::MethodCall { object, method, args }`
     pub(crate) fn convert_call_expr(&mut self, call: &ast::CallExpr) -> Result<Expr> {
-        let reg = self.reg();
-
         match call.callee {
             ast::Callee::Expr(ref callee) => match callee.as_ref() {
                 ast::Expr::Ident(ident) => {
@@ -39,7 +37,7 @@ impl<'a> Transformer<'a> {
                             params,
                             has_rest: rest,
                             ..
-                        }) = reg.get(&fn_name)
+                        }) = self.reg().get(&fn_name)
                         {
                             has_rest = *rest;
                             Some(params.as_slice())
@@ -114,7 +112,7 @@ impl<'a> Transformer<'a> {
                     // Look up method parameter types from the object's type
                     let method_sig = get_expr_type(self.tctx, &member.obj).and_then(|ty| {
                         if let RustType::Named { name, .. } = ty {
-                            if let Some(TypeDef::Struct { methods, .. }) = reg.get(name) {
+                            if let Some(TypeDef::Struct { methods, .. }) = self.reg().get(name) {
                                 return methods.get(&method).cloned();
                             }
                         }
@@ -206,14 +204,12 @@ impl<'a> Transformer<'a> {
     ///
     /// `new Foo(x, y)` → `Expr::FnCall { name: "Foo::new", args }`
     pub(crate) fn convert_new_expr(&mut self, new_expr: &ast::NewExpr) -> Result<Expr> {
-        let reg = self.reg();
-
         let class_name = match new_expr.callee.as_ref() {
             ast::Expr::Ident(ident) => ident.sym.to_string(),
             _ => return Err(anyhow!("unsupported new expression target")),
         };
         // Look up constructor param types from struct fields in TypeRegistry
-        let param_types = reg.get(&class_name).and_then(|def| match def {
+        let param_types = self.reg().get(&class_name).and_then(|def| match def {
             TypeDef::Struct { fields, .. } => Some(fields.clone()),
             _ => None,
         });
@@ -455,8 +451,6 @@ impl<'a> Transformer<'a> {
         param_types: Option<&[(String, RustType)]>,
         has_rest: bool,
     ) -> Result<Vec<Expr>> {
-        let reg = self.reg();
-
         let regular_param_count = if has_rest {
             param_types.map(|p| p.len().saturating_sub(1)).unwrap_or(0)
         } else {
@@ -476,7 +470,7 @@ impl<'a> Transformer<'a> {
                 };
             }
             if let Some(RustType::Named { name, .. }) = param_ty {
-                if reg.is_trait_type(name) {
+                if self.reg().is_trait_type(name) {
                     let arg_type = get_expr_type(self.tctx, &arg.expr);
                     if is_box_dyn_trait(arg_type) {
                         expr = Expr::Ref(Box::new(Expr::Deref(Box::new(expr))));

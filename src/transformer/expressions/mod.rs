@@ -45,7 +45,6 @@ impl<'a> Transformer<'a> {
         expr: &ast::Expr,
         expected_override: Option<&RustType>,
     ) -> Result<Expr> {
-        let reg = self.reg();
         let expected = expected_override.or_else(|| {
             self.tctx
                 .type_resolution
@@ -110,16 +109,18 @@ impl<'a> Transformer<'a> {
             ast::Expr::Object(obj_lit) => self.convert_object_lit(obj_lit, expected),
             ast::Expr::Cond(cond) => self.convert_cond_expr(cond),
             ast::Expr::Unary(unary) => self.convert_unary_expr(unary),
-            ast::Expr::TsAs(ts_as) => match convert_ts_type(&ts_as.type_ann, self.synthetic, reg) {
-                Ok(target_ty) if matches!(target_ty, RustType::F64 | RustType::Bool) => {
-                    let inner = self.convert_expr(&ts_as.expr)?;
-                    Ok(Expr::Cast {
-                        expr: Box::new(inner),
-                        target: target_ty,
-                    })
+            ast::Expr::TsAs(ts_as) => {
+                match convert_ts_type(&ts_as.type_ann, self.synthetic, self.reg()) {
+                    Ok(target_ty) if matches!(target_ty, RustType::F64 | RustType::Bool) => {
+                        let inner = self.convert_expr(&ts_as.expr)?;
+                        Ok(Expr::Cast {
+                            expr: Box::new(inner),
+                            target: target_ty,
+                        })
+                    }
+                    _ => self.convert_expr(&ts_as.expr),
                 }
-                _ => self.convert_expr(&ts_as.expr),
-            },
+            }
             ast::Expr::OptChain(opt_chain) => self.convert_opt_chain_expr(opt_chain),
             ast::Expr::Await(await_expr) => {
                 let inner = self.convert_expr(&await_expr.arg)?;
@@ -131,7 +132,7 @@ impl<'a> Transformer<'a> {
 
         // Trait type coercion
         if let Some(expected) = expected {
-            if needs_trait_box_coercion(expected, expr, self.tctx) {
+            if self.needs_trait_box_coercion(expected, expr) {
                 return Ok(Expr::FnCall {
                     name: "Box::new".to_string(),
                     args: vec![result],
@@ -165,7 +166,7 @@ impl<'a> Transformer<'a> {
     fn convert_cond_expr(&mut self, cond: &ast::CondExpr) -> Result<Expr> {
         // Try narrowing: extract guard from the ternary condition
         if let Some(guard) = patterns::extract_narrowing_guard(&cond.test) {
-            if let Some((pattern, is_swap)) = guard.if_let_pattern(&self.type_env, self.tctx) {
+            if let Some((pattern, is_swap)) = self.resolve_if_let_pattern(&guard) {
                 let (matched_ast, unmatched_ast) = if is_swap {
                     (cond.alt.as_ref(), cond.cons.as_ref())
                 } else {
@@ -208,58 +209,56 @@ impl<'a> Transformer<'a> {
             else_expr: Box::new(else_expr),
         })
     }
-}
 
-/// Returns true when the expected type is a trait type (`Box<dyn Trait>`)
-/// and the source expression produces a concrete (non-Box) value that needs wrapping.
-fn needs_trait_box_coercion(
-    expected: &RustType,
-    src_expr: &ast::Expr,
-    tctx: &crate::transformer::context::TransformContext<'_>,
-) -> bool {
-    let reg = tctx.type_registry;
-    let trait_name = match expected {
-        RustType::Named { name, type_args }
-            if name == "Box"
-                && type_args.len() == 1
-                && matches!(&type_args[0], RustType::DynTrait(_)) =>
+    /// Returns true when the expected type is a trait type (`Box<dyn Trait>`)
+    /// and the source expression produces a concrete (non-Box) value that needs wrapping.
+    fn needs_trait_box_coercion(&self, expected: &RustType, src_expr: &ast::Expr) -> bool {
+        let trait_name = match expected {
+            RustType::Named { name, type_args }
+                if name == "Box"
+                    && type_args.len() == 1
+                    && matches!(&type_args[0], RustType::DynTrait(_)) =>
+            {
+                if let RustType::DynTrait(t) = &type_args[0] {
+                    t.as_str()
+                } else {
+                    return false;
+                }
+            }
+            RustType::Named { name, .. } if self.reg().is_trait_type(name) => name.as_str(),
+            _ => return false,
+        };
+
+        let Some(expr_type) = type_resolution::get_expr_type(self.tctx, src_expr) else {
+            return false;
+        };
+        if matches!(expr_type, RustType::Any) {
+            return false;
+        }
+
+        if matches!(
+            expr_type,
+            RustType::Named { name, type_args }
+                if name == "Box" && type_args.first().is_some_and(|a| matches!(a, RustType::DynTrait(t) if t == trait_name))
+        ) {
+            return false;
+        }
+
+        if let RustType::Named {
+            name: expr_name,
+            type_args: expr_args,
+        } = expr_type
         {
-            if let RustType::DynTrait(t) = &type_args[0] {
-                t.as_str()
-            } else {
+            if expr_args.is_empty()
+                && expr_name == trait_name
+                && self.reg().is_trait_type(expr_name)
+            {
                 return false;
             }
         }
-        RustType::Named { name, .. } if reg.is_trait_type(name) => name.as_str(),
-        _ => return false,
-    };
 
-    let Some(expr_type) = type_resolution::get_expr_type(tctx, src_expr) else {
-        return false;
-    };
-    if matches!(expr_type, RustType::Any) {
-        return false;
+        true
     }
-
-    if matches!(
-        expr_type,
-        RustType::Named { name, type_args }
-            if name == "Box" && type_args.first().is_some_and(|a| matches!(a, RustType::DynTrait(t) if t == trait_name))
-    ) {
-        return false;
-    }
-
-    if let RustType::Named {
-        name: expr_name,
-        type_args: expr_args,
-    } = expr_type
-    {
-        if expr_args.is_empty() && expr_name == trait_name && reg.is_trait_type(expr_name) {
-            return false;
-        }
-    }
-
-    true
 }
 
 #[cfg(test)]

@@ -20,14 +20,13 @@ impl<'a> Transformer<'a> {
         lit: &ast::Lit,
         expected: Option<&RustType>,
     ) -> Result<Expr> {
-        let reg = self.reg();
         match lit {
             ast::Lit::Num(n) => Ok(Expr::NumberLit(n.value)),
             ast::Lit::Str(s) => {
                 let value = s.value.to_string_lossy().into_owned();
                 // Check if the expected type is a string literal union enum
                 if let Some(RustType::Named { name, .. }) = expected {
-                    if let Some(variant) = lookup_string_enum_variant(reg, name, &value) {
+                    if let Some(variant) = lookup_string_enum_variant(self.reg(), name, &value) {
                         return Ok(Expr::Ident(format!("{name}::{variant}")));
                     }
                 }

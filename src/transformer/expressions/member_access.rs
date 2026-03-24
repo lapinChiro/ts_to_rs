@@ -22,11 +22,10 @@ impl<'a> Transformer<'a> {
         field: &str,
         ts_obj: &ast::Expr,
     ) -> Result<Expr> {
-        let reg = self.reg();
         // Check if the TS object is an identifier referring to an enum
         if let ast::Expr::Ident(ident) = ts_obj {
             let name = ident.sym.as_ref();
-            if let Some(TypeDef::Enum { .. }) = reg.get(name) {
+            if let Some(TypeDef::Enum { .. }) = self.reg().get(name) {
                 return Ok(Expr::Ident(format!("{name}::{field}")));
             }
         }
@@ -74,7 +73,6 @@ impl<'a> Transformer<'a> {
     /// Supports property access, method calls, and computed access.
     /// Chained optional chaining (`x?.y?.z`) is handled recursively.
     pub(crate) fn convert_opt_chain_expr(&mut self, opt_chain: &ast::OptChainExpr) -> Result<Expr> {
-        let reg = self.reg();
         match opt_chain.base.as_ref() {
             ast::OptChainBase::Member(member) => {
                 let obj_type = get_expr_type(self.tctx, &member.obj);
@@ -108,8 +106,11 @@ impl<'a> Transformer<'a> {
                 };
 
                 // If the field type is Option, use and_then to avoid Option<Option<T>>
-                let field_type =
-                    resolve_field_type(obj_type.unwrap_or(&RustType::Any), &member.prop, reg);
+                let field_type = resolve_field_type(
+                    obj_type.unwrap_or(&RustType::Any),
+                    &member.prop,
+                    self.reg(),
+                );
                 let method_name = if field_type.is_some_and(|ty| matches!(ty, RustType::Option(_)))
                 {
                     "and_then"
@@ -188,7 +189,6 @@ impl<'a> Transformer<'a> {
     ///
     /// `this.x` becomes `self.x`.
     pub(crate) fn convert_member_expr(&mut self, member: &ast::MemberExpr) -> Result<Expr> {
-        let reg = self.reg();
         // Computed property: arr[0], arr[i] → Expr::Index or tuple.N → Expr::FieldAccess
         if let ast::MemberProp::Computed(computed) = &member.prop {
             // Cat A: receiver object
@@ -243,7 +243,7 @@ impl<'a> Transformer<'a> {
                 tag_field: Some(tag),
                 variant_fields,
                 ..
-            }) = reg.get(name)
+            }) = self.reg().get(name)
             {
                 if field == *tag {
                     // Tag field → method call (e.g., s.kind() )

@@ -22,14 +22,13 @@ impl<'a> Transformer<'a> {
         expansion_stmts: &mut Vec<Stmt>,
         context: &str,
     ) -> Result<()> {
-        let reg = self.reg();
         match pat {
             ast::Pat::Ident(ident) => {
                 let name = ident.id.sym.to_string();
                 let rust_type = ident
                     .type_ann
                     .as_ref()
-                    .map(|ann| convert_ts_type(&ann.type_ann, self.synthetic, reg))
+                    .map(|ann| convert_ts_type(&ann.type_ann, self.synthetic, self.reg()))
                     .transpose()?;
                 params.push(Param {
                     name,
@@ -47,7 +46,7 @@ impl<'a> Transformer<'a> {
                     let inner_type = ident
                         .type_ann
                         .as_ref()
-                        .map(|ann| convert_ts_type(&ann.type_ann, self.synthetic, reg))
+                        .map(|ann| convert_ts_type(&ann.type_ann, self.synthetic, self.reg()))
                         .transpose()?
                         .ok_or_else(|| anyhow!("default parameter requires a type annotation"))?;
                     let option_type = RustType::Option(Box::new(inner_type));
@@ -84,7 +83,7 @@ impl<'a> Transformer<'a> {
                     let name = ident.id.sym.to_string();
                     let type_ann = rest.type_ann.as_ref().or(ident.type_ann.as_ref());
                     let rust_type = type_ann
-                        .map(|ann| convert_ts_type(&ann.type_ann, self.synthetic, reg))
+                        .map(|ann| convert_ts_type(&ann.type_ann, self.synthetic, self.reg()))
                         .transpose()?;
                     params.push(Param {
                         name,
@@ -104,7 +103,6 @@ impl<'a> Transformer<'a> {
     /// Function expressions (`function(x) { ... }` or `function name(x) { ... }`)
     /// are treated identically to arrow functions — the optional name is ignored.
     pub(crate) fn convert_fn_expr(&mut self, fn_expr: &ast::FnExpr) -> Result<Expr> {
-        let reg = self.reg();
         let func = &fn_expr.function;
 
         // Convert parameters — reuse the same logic as arrow functions
@@ -122,7 +120,7 @@ impl<'a> Transformer<'a> {
         let return_type = func
             .return_type
             .as_ref()
-            .map(|ann| convert_ts_type(&ann.type_ann, self.synthetic, reg))
+            .map(|ann| convert_ts_type(&ann.type_ann, self.synthetic, self.reg()))
             .transpose()?;
 
         // void → None
@@ -188,7 +186,6 @@ impl<'a> Transformer<'a> {
         override_return_type: Option<&RustType>,
         override_param_types: Option<&[RustType]>,
     ) -> Result<Expr> {
-        let reg = self.reg();
         let mut params = Vec::new();
         let mut expansion_stmts = Vec::new();
         {
@@ -200,7 +197,7 @@ impl<'a> Transformer<'a> {
                         let rust_type = ident
                             .type_ann
                             .as_ref()
-                            .map(|ann| convert_ts_type(&ann.type_ann, self.synthetic, reg))
+                            .map(|ann| convert_ts_type(&ann.type_ann, self.synthetic, self.reg()))
                             .transpose()?;
                         // If no direct annotation, try override from variable type annotation
                         let rust_type = rust_type.or_else(|| {
@@ -228,7 +225,7 @@ impl<'a> Transformer<'a> {
                         let rust_type = arr_pat
                             .type_ann
                             .as_ref()
-                            .map(|ann| convert_ts_type(&ann.type_ann, self.synthetic, reg))
+                            .map(|ann| convert_ts_type(&ann.type_ann, self.synthetic, self.reg()))
                             .transpose()?;
                         params.push(Param {
                             name: tuple_name,

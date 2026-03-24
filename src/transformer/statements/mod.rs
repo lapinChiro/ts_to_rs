@@ -100,25 +100,22 @@ impl<'a> Transformer<'a> {
     }
     /// Converts a variable declaration to IR `Stmt::Let` statements.
     fn convert_var_decl(&mut self, var_decl: &ast::VarDecl) -> Result<Vec<Stmt>> {
-        let reg = self.reg();
         let mut stmts = Vec::new();
         for declarator in &var_decl.decls {
             let name = extract_pat_ident_name(&declarator.name)?;
 
             let ty = match &declarator.name {
                 ast::Pat::Ident(ident) => {
-                    let converted = ident
-                        .type_ann
-                        .as_ref()
-                        .map(|ann| {
-                            crate::pipeline::type_converter::convert_type_for_position(
-                                &ann.type_ann,
-                                TypePosition::Value,
-                                self.synthetic,
-                                reg,
-                            )
-                        })
-                        .transpose()?;
+                    let converted = if let Some(ann) = ident.type_ann.as_ref() {
+                        Some(crate::pipeline::type_converter::convert_type_for_position(
+                            &ann.type_ann,
+                            TypePosition::Value,
+                            self.synthetic,
+                            self.reg(),
+                        )?)
+                    } else {
+                        None
+                    };
                     match converted {
                         Some(RustType::Any) => self.type_env.get(&name).cloned().or(converted),
                         other => other,
@@ -647,7 +644,7 @@ impl<'a> Transformer<'a> {
         &self,
         guard: &crate::transformer::expressions::patterns::NarrowingGuard,
     ) -> bool {
-        guard.if_let_pattern(&self.type_env, self.tctx).is_some()
+        self.resolve_if_let_pattern(guard).is_some()
     }
 
     fn generate_if_let(
@@ -656,7 +653,7 @@ impl<'a> Transformer<'a> {
         then_body: Vec<Stmt>,
         else_body: Option<Vec<Stmt>>,
     ) -> Stmt {
-        let (pattern, is_swap) = guard.if_let_pattern(&self.type_env, self.tctx).unwrap();
+        let (pattern, is_swap) = self.resolve_if_let_pattern(guard).unwrap();
         let expr = Expr::Ident(guard.var_name().to_string());
         if is_swap {
             Stmt::IfLet {
@@ -1442,18 +1439,19 @@ fn emit_spread_ops(var_name: &str, segments: &[(bool, Expr)], result: &mut Vec<S
 impl<'a> Transformer<'a> {
     /// Detects `let x = [...arr, 1]` and expands to IR statements.
     fn try_expand_spread_var_decl(&mut self, var_decl: &ast::VarDecl) -> Result<Option<Vec<Stmt>>> {
-        let reg = self.reg();
         let (pat, array_lit) = match extract_spread_array_init(var_decl) {
             Some(v) => v,
             None => return Ok(None),
         };
         let name = extract_pat_ident_name(pat)?;
         let ty = match pat {
-            ast::Pat::Ident(ident) => ident
-                .type_ann
-                .as_ref()
-                .map(|ann| convert_ts_type(&ann.type_ann, self.synthetic, reg))
-                .transpose()?,
+            ast::Pat::Ident(ident) => {
+                if let Some(ann) = ident.type_ann.as_ref() {
+                    Some(convert_ts_type(&ann.type_ann, self.synthetic, self.reg())?)
+                } else {
+                    None
+                }
+            }
             _ => None,
         };
 
@@ -1602,7 +1600,6 @@ impl<'a> Transformer<'a> {
         stmts: &mut Vec<Stmt>,
         source_type: Option<&RustType>,
     ) -> Result<()> {
-        let reg = self.reg();
         for prop in props {
             match prop {
                 ast::ObjectPatProp::Assign(assign) => {
@@ -1694,7 +1691,7 @@ impl<'a> Transformer<'a> {
                         _ => None,
                     });
                     if let Some(crate::registry::TypeDef::Struct { fields, .. }) =
-                        type_name.and_then(|n| reg.get(n))
+                        type_name.and_then(|n| self.reg().get(n))
                     {
                         for (field_name, _) in fields {
                             if !explicit_fields.contains(field_name) {
@@ -1798,9 +1795,6 @@ impl<'a> Transformer<'a> {
         switch: &ast::SwitchStmt,
         return_type: Option<&RustType>,
     ) -> Result<Option<Vec<Stmt>>> {
-        let reg = self.reg();
-        use crate::transformer::expressions::patterns::resolve_typeof_to_enum_variant;
-
         let typeof_var = match switch.discriminant.as_ref() {
             ast::Expr::Unary(unary) if unary.op == ast::UnaryOp::TypeOf => {
                 if let ast::Expr::Ident(ident) = unary.arg.as_ref() {
@@ -1825,7 +1819,7 @@ impl<'a> Transformer<'a> {
             _ => return Ok(None),
         };
         if !matches!(
-            reg.get(&enum_name),
+            self.reg().get(&enum_name),
             Some(crate::registry::TypeDef::Enum { .. })
         ) {
             return Ok(None);
@@ -1861,7 +1855,7 @@ impl<'a> Transformer<'a> {
                 };
 
                 // Resolve to enum variant
-                let variant = resolve_typeof_to_enum_variant(&var_type, &typeof_str, self.tctx);
+                let variant = self.resolve_typeof_to_enum_variant(&var_type, &typeof_str);
                 let pattern = match variant {
                     Some((ref ename, ref vname)) => {
                         MatchPattern::Literal(Expr::Ident(format!("{ename}::{vname}({var_name})")))
@@ -1958,7 +1952,6 @@ impl<'a> Transformer<'a> {
         switch: &ast::SwitchStmt,
         return_type: Option<&RustType>,
     ) -> Result<Option<Vec<Stmt>>> {
-        let reg = self.reg();
         use crate::registry::TypeDef;
         // Check if discriminant is a member expression (e.g., s.kind)
         let member = match switch.discriminant.as_ref() {
@@ -1979,7 +1972,7 @@ impl<'a> Transformer<'a> {
         };
 
         // Check if this is a discriminated union and the field is the tag
-        let (string_values, variant_fields) = match reg.get(&enum_name) {
+        let (string_values, variant_fields) = match self.reg().get(&enum_name) {
             Some(TypeDef::Enum {
                 tag_field: Some(tag),
                 string_values,
@@ -2252,7 +2245,6 @@ impl<'a> Transformer<'a> {
         switch: &ast::SwitchStmt,
         return_type: Option<&RustType>,
     ) -> Result<Option<Vec<Stmt>>> {
-        let reg = self.reg();
         use crate::registry::TypeDef;
 
         // Resolve the discriminant's type
@@ -2263,7 +2255,7 @@ impl<'a> Transformer<'a> {
         };
 
         // Check if this is a string enum (non-tagged, with string_values)
-        let string_values = match reg.get(&enum_name) {
+        let string_values = match self.reg().get(&enum_name) {
             Some(TypeDef::Enum {
                 tag_field: None,
                 string_values,
@@ -2690,18 +2682,18 @@ impl<'a> Transformer<'a> {
     }
 
     fn convert_nested_fn_decl(&mut self, fn_decl: &ast::FnDecl) -> Result<Stmt> {
-        let reg = self.reg();
         let name = fn_decl.ident.sym.to_string();
-
         let mut params = Vec::new();
         for p in &fn_decl.function.params {
             let param_name = extract_pat_ident_name(&p.pat)?;
             let ty = match &p.pat {
-                ast::Pat::Ident(ident) => ident
-                    .type_ann
-                    .as_ref()
-                    .map(|ann| convert_ts_type(&ann.type_ann, self.synthetic, reg))
-                    .transpose()?,
+                ast::Pat::Ident(ident) => {
+                    if let Some(ann) = ident.type_ann.as_ref() {
+                        Some(convert_ts_type(&ann.type_ann, self.synthetic, self.reg())?)
+                    } else {
+                        None
+                    }
+                }
                 _ => None,
             };
             params.push(Param {
@@ -2710,19 +2702,18 @@ impl<'a> Transformer<'a> {
             });
         }
 
-        let return_type = fn_decl
-            .function
-            .return_type
-            .as_ref()
-            .map(|ann| convert_ts_type(&ann.type_ann, self.synthetic, reg))
-            .transpose()?
-            .and_then(|ty| {
-                if matches!(ty, RustType::Unit) {
-                    None
-                } else {
-                    Some(ty)
-                }
-            });
+        let return_type = if let Some(ann) = fn_decl.function.return_type.as_ref() {
+            Some(convert_ts_type(&ann.type_ann, self.synthetic, self.reg())?)
+        } else {
+            None
+        }
+        .and_then(|ty| {
+            if matches!(ty, RustType::Unit) {
+                None
+            } else {
+                Some(ty)
+            }
+        });
 
         let mut fn_type_env = TypeEnv::new();
         for param in &params {
