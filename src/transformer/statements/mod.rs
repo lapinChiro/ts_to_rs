@@ -7,7 +7,6 @@ use swc_ecma_ast as ast;
 
 use crate::ir::{BinOp, ClosureBody, Expr, MatchArm, MatchPattern, Param, RustType, Stmt, UnOp};
 use crate::pipeline::type_converter::convert_ts_type;
-use crate::transformer::expressions::get_expr_type;
 use crate::transformer::expressions::patterns::extract_narrowing_guards;
 use crate::transformer::Transformer;
 use crate::transformer::TypeEnv;
@@ -336,7 +335,7 @@ impl<'a> Transformer<'a> {
         then_body: Vec<Stmt>,
         else_body: Option<Vec<Stmt>>,
     ) -> Result<Vec<Stmt>> {
-        let rhs_type = get_expr_type(self.tctx, ca.rhs);
+        let rhs_type = self.get_expr_type(ca.rhs);
         let rhs_ir = self.convert_expr(ca.rhs)?;
 
         if let Some(outer) = &ca.outer_comparison {
@@ -425,7 +424,7 @@ impl<'a> Transformer<'a> {
         ca: &ConditionalAssignment<'_>,
         body: Vec<Stmt>,
     ) -> Result<Vec<Stmt>> {
-        let rhs_type = get_expr_type(self.tctx, ca.rhs);
+        let rhs_type = self.get_expr_type(ca.rhs);
         let rhs_ir = self.convert_expr(ca.rhs)?;
 
         match rhs_type {
@@ -1204,7 +1203,7 @@ impl<'a> Transformer<'a> {
                         if let Some(fn_type) = infer_fn_type_from_closure(&Some(init.clone())) {
                             self.type_env.insert(name.clone(), fn_type);
                         } else if let Some(resolved) = extract_var_decl_init(stmt, name)
-                            .and_then(|ast_init| get_expr_type(self.tctx, ast_init).cloned())
+                            .and_then(|ast_init| self.get_expr_type(ast_init).cloned())
                         {
                             self.type_env.insert(name.clone(), resolved);
                         }
@@ -1578,7 +1577,7 @@ impl<'a> Transformer<'a> {
         let source_expr = self.convert_expr(source)?;
 
         let mutable = !matches!(var_decl.kind, ast::VarDeclKind::Const);
-        let source_type = get_expr_type(self.tctx, source);
+        let source_type = self.get_expr_type(source);
         let mut stmts = Vec::new();
 
         self.expand_object_pat_props(
@@ -1965,7 +1964,7 @@ impl<'a> Transformer<'a> {
         };
 
         // Resolve the object's type
-        let obj_type = get_expr_type(self.tctx, &member.obj);
+        let obj_type = self.get_expr_type(&member.obj);
         let enum_name = match obj_type {
             Some(RustType::Named { name, .. }) => name.clone(),
             _ => return Ok(None),
@@ -2248,7 +2247,7 @@ impl<'a> Transformer<'a> {
         use crate::registry::TypeDef;
 
         // Resolve the discriminant's type
-        let disc_type = get_expr_type(self.tctx, &switch.discriminant);
+        let disc_type = self.get_expr_type(&switch.discriminant);
         let enum_name = match disc_type {
             Some(RustType::Named { name, .. }) => name.clone(),
             _ => return Ok(None),

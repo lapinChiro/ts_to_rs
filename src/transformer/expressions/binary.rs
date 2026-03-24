@@ -7,7 +7,6 @@ use crate::ir::{BinOp, Expr, RustType, UnOp};
 
 use super::literals::{is_string_like, is_string_type};
 use super::patterns::typeof_to_string;
-use super::type_resolution::get_expr_type;
 use crate::ir::ClosureBody;
 
 use crate::transformer::Transformer;
@@ -47,7 +46,7 @@ impl<'a> Transformer<'a> {
 
         // `x ?? y` → `x.unwrap_or_else(|| y)` (Option) or `x` (non-Option)
         if bin.op == ast::BinaryOp::NullishCoalescing {
-            let left_type = get_expr_type(self.tctx, &bin.left);
+            let left_type = self.get_expr_type(&bin.left);
             let is_option = left_type.is_some_and(|ty| matches!(ty, RustType::Option(_)));
 
             // Cat A: ?? left operand — type is resolved separately for Option detection
@@ -76,7 +75,7 @@ impl<'a> Transformer<'a> {
         // String concatenation: wrap RHS in Ref(&) when LHS is string-like.
         // Priority: type inference → expected type → IR heuristic (is_string_like fallback).
         let is_string_context = if op == BinOp::Add {
-            let left_type = get_expr_type(self.tctx, &bin.left);
+            let left_type = self.get_expr_type(&bin.left);
             let type_inferred = left_type.is_some_and(is_string_type);
             type_inferred || matches!(expected, Some(RustType::String)) || is_string_like(&left)
         } else {
@@ -86,8 +85,8 @@ impl<'a> Transformer<'a> {
         // Mixed-type concatenation: one side is string, other is known non-string → format!
         // Handles: `42 + " px"` (f64 + &str) and `"val: " + x` (String + f64)
         if op == BinOp::Add && is_string_context {
-            let left_type = get_expr_type(self.tctx, &bin.left);
-            let right_type = get_expr_type(self.tctx, &bin.right);
+            let left_type = self.get_expr_type(&bin.left);
+            let right_type = self.get_expr_type(&bin.right);
             let left_is_string = left_type.is_some_and(is_string_type) || is_string_like(&left);
             let left_known_non_string = (left_type.is_some()
                 && !left_type.is_some_and(is_string_type))
@@ -148,7 +147,7 @@ impl<'a> Transformer<'a> {
     pub(crate) fn convert_unary_expr(&mut self, unary: &ast::UnaryExpr) -> Result<Expr> {
         // typeof x → resolve based on TypeEnv
         if unary.op == ast::UnaryOp::TypeOf {
-            let operand_type = get_expr_type(self.tctx, &unary.arg);
+            let operand_type = self.get_expr_type(&unary.arg);
             return Ok(match operand_type {
                 Some(RustType::Option(inner)) => {
                     // Option<T>: runtime branch — is_some() → typeof inner, else "undefined"
@@ -172,7 +171,7 @@ impl<'a> Transformer<'a> {
 
         // Unary plus: +x → numeric conversion
         if unary.op == ast::UnaryOp::Plus {
-            let operand_type = get_expr_type(self.tctx, &unary.arg);
+            let operand_type = self.get_expr_type(&unary.arg);
             let operand = self.convert_expr(&unary.arg)?;
             return Ok(match operand_type {
                 Some(RustType::F64) => operand, // already numeric, identity

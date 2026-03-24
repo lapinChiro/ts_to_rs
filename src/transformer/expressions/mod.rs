@@ -26,7 +26,6 @@ pub(crate) mod patterns;
 mod type_resolution;
 use assignments::convert_update_expr;
 pub(crate) use binary::convert_binary_op;
-pub(crate) use type_resolution::get_expr_type;
 
 impl<'a> Transformer<'a> {
     /// Converts an SWC [`ast::Expr`] into an IR [`Expr`].
@@ -66,7 +65,7 @@ impl<'a> Transformer<'a> {
                     args: vec![inner_result],
                 });
             }
-            let expr_type = type_resolution::get_expr_type(self.tctx, expr);
+            let expr_type = self.get_expr_type(expr);
             if matches!(expr_type, Some(RustType::Option(_))) {
                 // Already produces Option — skip wrapping, fall through
             } else {
@@ -229,7 +228,7 @@ impl<'a> Transformer<'a> {
             _ => return false,
         };
 
-        let Some(expr_type) = type_resolution::get_expr_type(self.tctx, src_expr) else {
+        let Some(expr_type) = self.get_expr_type(src_expr) else {
             return false;
         };
         if matches!(expr_type, RustType::Any) {

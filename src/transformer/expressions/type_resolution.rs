@@ -8,69 +8,73 @@ use swc_ecma_ast as ast;
 use crate::ir::RustType;
 use crate::pipeline::type_resolution::Span;
 use crate::pipeline::ResolvedType;
-use crate::registry::{TypeDef, TypeRegistry};
-use crate::transformer::context::TransformContext;
+use crate::registry::TypeDef;
+use crate::transformer::Transformer;
 
-/// FileTypeResolution から式の型を取得する。Unknown なら None。
-///
-/// TypeResolver が事前に解決した型のみを返す。
-pub(crate) fn get_expr_type<'a>(
-    tctx: &'a TransformContext<'_>,
-    expr: &ast::Expr,
-) -> Option<&'a RustType> {
-    // Ident 式の場合、narrowed_type を優先参照（型ナローイング後の型）
-    if let ast::Expr::Ident(ident) = expr {
-        if let Some(narrowed) = tctx
+impl<'a> Transformer<'a> {
+    /// FileTypeResolution から式の型を取得する。Unknown なら None。
+    ///
+    /// TypeResolver が事前に解決した型のみを返す。
+    pub(crate) fn get_expr_type(&self, expr: &ast::Expr) -> Option<&'a RustType> {
+        // Ident 式の場合、narrowed_type を優先参照（型ナローイング後の型）
+        if let ast::Expr::Ident(ident) = expr {
+            if let Some(narrowed) = self
+                .tctx
+                .type_resolution
+                .narrowed_type(ident.sym.as_ref(), ident.span.lo.0)
+            {
+                return Some(narrowed);
+            }
+        }
+        match self
+            .tctx
             .type_resolution
-            .narrowed_type(ident.sym.as_ref(), ident.span.lo.0)
+            .expr_type(Span::from_swc(expr.span()))
         {
-            return Some(narrowed);
+            ResolvedType::Known(ty) => Some(ty),
+            ResolvedType::Unknown => None,
         }
     }
-    match tctx.type_resolution.expr_type(Span::from_swc(expr.span())) {
-        ResolvedType::Known(ty) => Some(ty),
-        ResolvedType::Unknown => None,
-    }
-}
 
-/// Named 型のフィールド型を TypeRegistry から解決する。
-///
-/// ジェネリック型の場合、`type_args` を使ってインスタンス化した TypeDef からフィールド型を解決する。
-pub(super) fn resolve_field_type(
-    obj_type: &RustType,
-    prop: &ast::MemberProp,
-    reg: &TypeRegistry,
-) -> Option<RustType> {
-    let (type_name, type_args) = match obj_type {
-        RustType::Named { name, type_args } => (name.as_str(), type_args.as_slice()),
-        RustType::Option(inner) => match inner.as_ref() {
+    /// Named 型のフィールド型を TypeRegistry から解決する。
+    ///
+    /// ジェネリック型の場合、`type_args` を使ってインスタンス化した TypeDef からフィールド型を解決する。
+    pub(crate) fn resolve_field_type(
+        &self,
+        obj_type: &RustType,
+        prop: &ast::MemberProp,
+    ) -> Option<RustType> {
+        let (type_name, type_args) = match obj_type {
             RustType::Named { name, type_args } => (name.as_str(), type_args.as_slice()),
+            RustType::Option(inner) => match inner.as_ref() {
+                RustType::Named { name, type_args } => (name.as_str(), type_args.as_slice()),
+                _ => return None,
+            },
             _ => return None,
-        },
-        _ => return None,
-    };
-    let field_name = match prop {
-        ast::MemberProp::Ident(ident) => ident.sym.to_string(),
-        _ => return None,
-    };
-    let type_def = if type_args.is_empty() {
-        reg.get(type_name)?.clone()
-    } else {
-        reg.instantiate(type_name, type_args)?
-    };
-    match &type_def {
-        TypeDef::Struct { fields, .. } => fields
-            .iter()
-            .find(|(name, _)| name == &field_name)
-            .map(|(_, ty)| ty.clone()),
-        _ => None,
+        };
+        let field_name = match prop {
+            ast::MemberProp::Ident(ident) => ident.sym.to_string(),
+            _ => return None,
+        };
+        let type_def = if type_args.is_empty() {
+            self.reg().get(type_name)?.clone()
+        } else {
+            self.reg().instantiate(type_name, type_args)?
+        };
+        match &type_def {
+            TypeDef::Struct { fields, .. } => fields
+                .iter()
+                .find(|(name, _)| name == &field_name)
+                .map(|(_, ty)| ty.clone()),
+            _ => None,
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::ir::TypeParam;
+    use crate::ir::{RustType, TypeParam};
+    use crate::registry::{TypeDef, TypeRegistry};
     use std::collections::HashMap;
 
     #[test]
@@ -97,16 +101,17 @@ mod tests {
             },
         );
 
-        let obj_type = RustType::Named {
-            name: "Container".to_string(),
-            type_args: vec![RustType::String],
+        // TypeRegistry::instantiate でジェネリック型をインスタンス化し、フィールド型を検証
+        let type_def = reg
+            .instantiate("Container", &[RustType::String])
+            .expect("instantiation should succeed");
+        let field_type = match &type_def {
+            TypeDef::Struct { fields, .. } => fields
+                .iter()
+                .find(|(name, _)| name == "value")
+                .map(|(_, ty)| ty.clone()),
+            _ => None,
         };
-        // "value" プロパティの型解決用 AST ノードを作成
-        let prop = ast::MemberProp::Ident(ast::IdentName {
-            span: swc_common::DUMMY_SP,
-            sym: "value".into(),
-        });
-        let result = resolve_field_type(&obj_type, &prop, &reg);
-        assert_eq!(result, Some(RustType::String));
+        assert_eq!(field_type, Some(RustType::String));
     }
 }

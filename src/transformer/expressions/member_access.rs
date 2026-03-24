@@ -7,7 +7,6 @@ use crate::ir::{ClosureBody, Expr, MatchArm, MatchPattern, Param, RustType, Stmt
 use crate::registry::TypeDef;
 
 use super::methods::map_method_call;
-use super::type_resolution::{get_expr_type, resolve_field_type};
 use crate::transformer::Transformer;
 
 impl<'a> Transformer<'a> {
@@ -75,7 +74,7 @@ impl<'a> Transformer<'a> {
     pub(crate) fn convert_opt_chain_expr(&mut self, opt_chain: &ast::OptChainExpr) -> Result<Expr> {
         match opt_chain.base.as_ref() {
             ast::OptChainBase::Member(member) => {
-                let obj_type = get_expr_type(self.tctx, &member.obj);
+                let obj_type = self.get_expr_type(&member.obj);
                 let is_option = obj_type.is_some_and(|ty| matches!(ty, RustType::Option(_)));
 
                 // Non-Option type with known type: plain member access
@@ -106,11 +105,8 @@ impl<'a> Transformer<'a> {
                 };
 
                 // If the field type is Option, use and_then to avoid Option<Option<T>>
-                let field_type = resolve_field_type(
-                    obj_type.unwrap_or(&RustType::Any),
-                    &member.prop,
-                    self.reg(),
-                );
+                let field_type =
+                    self.resolve_field_type(obj_type.unwrap_or(&RustType::Any), &member.prop);
                 let method_name = if field_type.is_some_and(|ty| matches!(ty, RustType::Option(_)))
                 {
                     "and_then"
@@ -138,9 +134,9 @@ impl<'a> Transformer<'a> {
             ast::OptChainBase::Call(opt_call) => {
                 // Check if the callee object is a non-Option type
                 let callee_obj_type = match opt_call.callee.as_ref() {
-                    ast::Expr::Member(m) => get_expr_type(self.tctx, &m.obj),
+                    ast::Expr::Member(m) => self.get_expr_type(&m.obj),
                     ast::Expr::OptChain(oc) => match oc.base.as_ref() {
-                        ast::OptChainBase::Member(m) => get_expr_type(self.tctx, &m.obj),
+                        ast::OptChainBase::Member(m) => self.get_expr_type(&m.obj),
                         _ => None,
                     },
                     _ => None,
@@ -195,7 +191,7 @@ impl<'a> Transformer<'a> {
             let object = self.convert_expr(&member.obj)?;
 
             // Tuple index access: pair[0] → pair.0 (Rust uses dot notation for tuples)
-            if let Some(RustType::Tuple(_)) = get_expr_type(self.tctx, &member.obj) {
+            if let Some(RustType::Tuple(_)) = self.get_expr_type(&member.obj) {
                 if let ast::Expr::Lit(ast::Lit::Num(num)) = &*computed.expr {
                     let idx = num.value as usize;
                     return Ok(Expr::FieldAccess {
@@ -238,7 +234,7 @@ impl<'a> Transformer<'a> {
         }
 
         // Check if accessing a field of a discriminated union enum
-        if let Some(RustType::Named { name, .. }) = get_expr_type(self.tctx, &member.obj) {
+        if let Some(RustType::Named { name, .. }) = self.get_expr_type(&member.obj) {
             if let Some(TypeDef::Enum {
                 tag_field: Some(tag),
                 variant_fields,

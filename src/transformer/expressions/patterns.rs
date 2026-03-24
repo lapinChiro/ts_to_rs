@@ -9,7 +9,6 @@ use crate::ir::{BinOp, Expr, RustType};
 use crate::registry::TypeDef;
 
 use super::literals::lookup_string_enum_variant;
-use super::type_resolution::get_expr_type;
 use crate::transformer::Transformer;
 
 impl<'a> Transformer<'a> {
@@ -105,7 +104,7 @@ impl<'a> Transformer<'a> {
         let (typeof_operand, type_str) = extract_typeof_and_string(bin)?;
 
         // Resolve the operand's type from TypeEnv
-        let operand_type = get_expr_type(self.tctx, typeof_operand);
+        let operand_type = self.get_expr_type(typeof_operand);
 
         // If the operand is a union enum type, generate a matches!() expression
         if let Some(RustType::Named {
@@ -190,7 +189,7 @@ impl<'a> Transformer<'a> {
         };
 
         // Resolve the RHS object type
-        let obj_type = get_expr_type(self.tctx, &bin.right);
+        let obj_type = self.get_expr_type(&bin.right);
 
         match obj_type {
             Some(RustType::Named { name, .. }) if name == "HashMap" || name == "BTreeMap" => {
@@ -329,7 +328,7 @@ impl<'a> Transformer<'a> {
 
     /// 式の型が string literal union enum の場合、その enum 名を返す。
     fn resolve_enum_type_name(&self, expr: &ast::Expr) -> Option<String> {
-        let ty = get_expr_type(self.tctx, expr)?;
+        let ty = self.get_expr_type(expr)?;
         if let RustType::Named { name, .. } = ty {
             if let Some(TypeDef::Enum { string_values, .. }) = self.reg().get(name) {
                 if !string_values.is_empty() {

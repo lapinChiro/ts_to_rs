@@ -8,7 +8,6 @@ use crate::registry::TypeDef;
 
 use super::literals::needs_debug_format;
 use super::methods::map_method_call;
-use super::type_resolution::get_expr_type;
 use crate::transformer::Transformer;
 
 impl<'a> Transformer<'a> {
@@ -80,7 +79,7 @@ impl<'a> Transformer<'a> {
                                 .args
                                 .iter()
                                 .map(|arg| {
-                                    let ty = get_expr_type(self.tctx, &arg.expr);
+                                    let ty = self.get_expr_type(&arg.expr);
                                     needs_debug_format(ty)
                                 })
                                 .collect();
@@ -110,7 +109,7 @@ impl<'a> Transformer<'a> {
                     // Cat A: method receiver — converted before method resolution
                     let object = self.convert_expr(&member.obj)?;
                     // Look up method parameter types from the object's type
-                    let method_sig = get_expr_type(self.tctx, &member.obj).and_then(|ty| {
+                    let method_sig = self.get_expr_type(&member.obj).and_then(|ty| {
                         if let RustType::Named { name, .. } = ty {
                             if let Some(TypeDef::Struct { methods, .. }) = self.reg().get(name) {
                                 return methods.get(&method).cloned();
@@ -471,7 +470,7 @@ impl<'a> Transformer<'a> {
             }
             if let Some(RustType::Named { name, .. }) = param_ty {
                 if self.reg().is_trait_type(name) {
-                    let arg_type = get_expr_type(self.tctx, &arg.expr);
+                    let arg_type = self.get_expr_type(&arg.expr);
                     if is_box_dyn_trait(arg_type) {
                         expr = Expr::Ref(Box::new(Expr::Deref(Box::new(expr))));
                     }
