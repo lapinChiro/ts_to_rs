@@ -3,6 +3,7 @@
 //! This module provides the new multi-pass pipeline architecture:
 //! Parse → ModuleGraph → TypeCollection → TypeResolution → Transform → Generate → Output.
 
+pub mod any_enum_analyzer;
 pub mod module_graph;
 pub mod module_resolver;
 pub mod output_writer;
@@ -66,13 +67,33 @@ pub fn transpile_pipeline(input: TranspileInput) -> Result<TranspileOutput> {
         shared_registry.merge(&file_registry);
     }
 
-    // Pass 3: Type Resolution (all files first, so SyntheticTypeRegistry becomes immutable before Transform)
+    // Any Enum Analysis (per-file: detect any-typed variables with typeof/instanceof narrowing,
+    // register synthetic enum types, record overrides for TypeResolver)
     let mut synthetic = SyntheticTypeRegistry::new();
-    let mut type_resolutions = Vec::with_capacity(parsed.files.len());
+    let mut per_file_any_synthetics: Vec<SyntheticTypeRegistry> =
+        Vec::with_capacity(parsed.files.len());
+    let mut per_file_any_overrides: Vec<_> = Vec::with_capacity(parsed.files.len());
     for file in &parsed.files {
+        let mut resolution = type_resolution::FileTypeResolution::empty();
+        let mut file_any_synthetic = SyntheticTypeRegistry::new();
+        any_enum_analyzer::analyze_any_enums(
+            &file.module,
+            &mut resolution,
+            &mut file_any_synthetic,
+        );
+        per_file_any_overrides.push(resolution.any_enum_overrides);
+        per_file_any_synthetics.push(file_any_synthetic);
+    }
+
+    // Type Resolution (all files first, so SyntheticTypeRegistry becomes immutable before Transform).
+    // TypeResolver receives any_enum_overrides so it registers the correct enum types
+    // in expr_types from the start, eliminating the need for fallback lookups.
+    let mut type_resolutions = Vec::with_capacity(parsed.files.len());
+    for (file, any_overrides) in parsed.files.iter().zip(per_file_any_overrides.into_iter()) {
         let type_resolution = {
             let mut resolver =
                 type_resolver::TypeResolver::new(&shared_registry, &mut synthetic, &module_graph);
+            resolver.set_any_enum_overrides(any_overrides);
             resolver.resolve_file(file)
         };
         type_resolutions.push(type_resolution);
@@ -80,14 +101,20 @@ pub fn transpile_pipeline(input: TranspileInput) -> Result<TranspileOutput> {
 
     // Pass 4-5: Transformation + Code Generation (per file)
     let mut file_outputs = Vec::new();
-    for (file, type_resolution) in parsed.files.iter().zip(type_resolutions.iter()) {
+    for ((file, type_resolution), any_synthetic) in parsed
+        .files
+        .iter()
+        .zip(type_resolutions.iter())
+        .zip(per_file_any_synthetics.into_iter())
+    {
         let tctx = crate::transformer::context::TransformContext::new(
             &module_graph,
             &shared_registry,
             type_resolution,
             &file.path,
         );
-        let mut file_synthetic = SyntheticTypeRegistry::new();
+        // Start with any-enum types from analysis phase, then Transformer adds more
+        let mut file_synthetic = any_synthetic;
         let (items, unsupported) =
             crate::transformer::Transformer::for_module(&tctx, &mut file_synthetic)
                 .transform_module_collecting(&file.module)?;

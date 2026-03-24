@@ -271,11 +271,8 @@ impl<'a> Transformer<'a> {
             }
         };
 
-        // Get the LHS variable name and type
-        let lhs_type = match bin.left.as_ref() {
-            ast::Expr::Ident(ident) => self.type_env.get(ident.sym.as_ref()).cloned(),
-            _ => None,
-        };
+        // Get the LHS variable type (from FileTypeResolution, including any_enum_override)
+        let lhs_type = self.get_expr_type(&bin.left).cloned();
 
         match lhs_type {
             Some(RustType::Any) | None => Expr::FnCall {

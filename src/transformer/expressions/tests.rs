@@ -4182,47 +4182,27 @@ fn test_typeof_standalone_known_type_resolves_string_lit() {
 
 #[test]
 fn test_instanceof_known_type_match_resolves_true() {
-    let f = TctxFixture::new();
+    // x: Foo, x instanceof Foo → true
+    let f = TctxFixture::from_source("class Foo {} function f(x: Foo) { x instanceof Foo; }");
     let tctx = f.tctx();
-    let swc_expr = parse_expr("x instanceof Foo;");
-    let mut env = TypeEnv::new();
-    env.insert(
-        "x".to_string(),
-        RustType::Named {
-            name: "Foo".to_string(),
-            type_args: vec![],
-        },
-    );
-    let result = Transformer {
-        tctx: &tctx,
-        type_env: env.clone(),
-        synthetic: &mut SyntheticTypeRegistry::new(),
-    }
-    .convert_expr(&swc_expr)
-    .unwrap();
+    let swc_expr = extract_fn_body_expr_stmt(f.module(), 1, 0);
+    let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_expr(&swc_expr)
+        .unwrap();
     assert_eq!(result, Expr::BoolLit(true));
 }
 
 #[test]
 fn test_instanceof_known_type_mismatch_resolves_false() {
-    let f = TctxFixture::new();
-    let tctx = f.tctx();
-    let swc_expr = parse_expr("x instanceof Foo;");
-    let mut env = TypeEnv::new();
-    env.insert(
-        "x".to_string(),
-        RustType::Named {
-            name: "Bar".to_string(),
-            type_args: vec![],
-        },
+    // x: Bar, x instanceof Foo → false
+    let f = TctxFixture::from_source(
+        "class Foo {} class Bar {} function f(x: Bar) { x instanceof Foo; }",
     );
-    let result = Transformer {
-        tctx: &tctx,
-        type_env: env.clone(),
-        synthetic: &mut SyntheticTypeRegistry::new(),
-    }
-    .convert_expr(&swc_expr)
-    .unwrap();
+    let tctx = f.tctx();
+    let swc_expr = extract_fn_body_expr_stmt(f.module(), 2, 0);
+    let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_expr(&swc_expr)
+        .unwrap();
     assert_eq!(result, Expr::BoolLit(false));
 }
 
@@ -6341,49 +6321,26 @@ fn test_convert_instanceof_unknown_type_generates_todo() {
 
 #[test]
 fn test_convert_instanceof_known_matching_type_returns_true() {
-    let f = TctxFixture::new();
+    // x: Foo, x instanceof Foo → true (correct static resolution)
+    let f = TctxFixture::from_source("class Foo {} function f(x: Foo) { x instanceof Foo; }");
     let tctx = f.tctx();
-    // x instanceof Foo where x: Foo → true (correct static resolution)
-    let expr = parse_expr("x instanceof Foo");
-    let mut env = TypeEnv::new();
-    env.insert(
-        "x".to_string(),
-        RustType::Named {
-            name: "Foo".to_string(),
-            type_args: vec![],
-        },
-    );
-    let result = Transformer {
-        tctx: &tctx,
-        type_env: env.clone(),
-        synthetic: &mut SyntheticTypeRegistry::new(),
-    }
-    .convert_expr(&expr)
-    .unwrap();
+    let swc_expr = extract_fn_body_expr_stmt(f.module(), 1, 0);
+    let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_expr(&swc_expr)
+        .unwrap();
     assert_eq!(result, Expr::BoolLit(true));
 }
 
 #[test]
 fn test_convert_instanceof_option_type_returns_is_some() {
-    let f = TctxFixture::new();
+    // x: Foo | null, x instanceof Foo → x.is_some()
+    let f =
+        TctxFixture::from_source("class Foo {} function f(x: Foo | null) { x instanceof Foo; }");
     let tctx = f.tctx();
-    // x instanceof Foo where x: Option<Foo> → x.is_some()
-    let expr = parse_expr("x instanceof Foo");
-    let mut env = TypeEnv::new();
-    env.insert(
-        "x".to_string(),
-        RustType::Option(Box::new(RustType::Named {
-            name: "Foo".to_string(),
-            type_args: vec![],
-        })),
-    );
-    let result = Transformer {
-        tctx: &tctx,
-        type_env: env.clone(),
-        synthetic: &mut SyntheticTypeRegistry::new(),
-    }
-    .convert_expr(&expr)
-    .unwrap();
+    let swc_expr = extract_fn_body_expr_stmt(f.module(), 1, 0);
+    let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_expr(&swc_expr)
+        .unwrap();
     match &result {
         Expr::MethodCall { method, .. } => {
             assert_eq!(method, "is_some");

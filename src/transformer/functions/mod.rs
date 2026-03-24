@@ -98,85 +98,30 @@ impl<'a> Transformer<'a> {
         let return_type =
             return_type.map(|ty| wrap_trait_for_position(ty, TypePosition::Value, self.reg()));
 
-        // Lazy type materialization for `any`-typed parameters:
-        // Scan body for typeof/instanceof usage and generate enum types
-        // register_any_enum goes to self.synthetic (outer) — these are module-level types
-        if let Some(body) = &fn_decl.function.body {
-            let any_param_names: Vec<String> = params
-                .iter()
-                .filter(|p| matches!(&p.ty, Some(RustType::Any)))
-                .map(|p| p.name.clone())
-                .collect();
-            if !any_param_names.is_empty() {
-                let constraints = crate::transformer::any_narrowing::collect_any_constraints(
-                    body,
-                    &any_param_names,
-                );
-                for (param_name, constraint) in &constraints {
-                    if constraint.is_empty() {
-                        continue;
-                    }
-                    let variants =
-                        crate::transformer::any_narrowing::build_any_enum_variants(constraint);
-                    let enum_name = self
-                        .synthetic
-                        .register_any_enum(&name, param_name, variants);
-                    let enum_type = RustType::Named {
-                        name: enum_name,
-                        type_args: vec![],
-                    };
-                    if let Some(p) = params.iter_mut().find(|p| &p.name == param_name) {
-                        p.ty = Some(enum_type);
+        // Override any-typed parameters with enum types from FileTypeResolution
+        // (computed by pipeline's any_enum_analyzer before transformation)
+        {
+            let fn_start = fn_decl.function.span.lo.0;
+            for p in &mut params {
+                if matches!(&p.ty, Some(RustType::Any)) {
+                    if let Some(enum_type) = self
+                        .tctx
+                        .type_resolution
+                        .any_enum_override(&p.name, fn_start)
+                    {
+                        p.ty = Some(enum_type.clone());
                     }
                 }
             }
         }
 
-        // Lazy type materialization for `any`-typed LOCAL variables:
-        // Scan body for local variable declarations with `any` type and typeof checks
-        let mut local_any_overrides: Vec<(String, RustType)> = Vec::new();
-        if let Some(body) = &fn_decl.function.body {
-            let local_any_names =
-                crate::transformer::any_narrowing::collect_any_local_var_names(body);
-            if !local_any_names.is_empty() {
-                let constraints = crate::transformer::any_narrowing::collect_any_constraints(
-                    body,
-                    &local_any_names,
-                );
-                for (var_name, constraint) in &constraints {
-                    if constraint.is_empty() {
-                        continue;
-                    }
-                    let variants =
-                        crate::transformer::any_narrowing::build_any_enum_variants(constraint);
-                    let enum_name = self.synthetic.register_any_enum(&name, var_name, variants);
-                    let enum_type = RustType::Named {
-                        name: enum_name,
-                        type_args: vec![],
-                    };
-                    local_any_overrides.push((var_name.clone(), enum_type));
-                }
-            }
-        }
-
-        let mut fn_type_env = TypeEnv::new();
-        for p in &params {
-            if let Some(ty) = &p.ty {
-                fn_type_env.insert(p.name.clone(), ty.clone());
-            }
-        }
-        // Pre-populate TypeEnv with local any-narrowing enum types so that
-        // convert_var_decl uses the enum type instead of Any, and
-        // convert_if_stmt generates if-let patterns.
-        for (var_name, enum_type) in &local_any_overrides {
-            fn_type_env.insert(var_name.clone(), enum_type.clone());
-        }
-
-        // F-3b #1: Sub-Transformer with local fn_type_env + local_synthetic
+        // Sub-Transformer for function body: uses local SyntheticTypeRegistry.
+        // TypeResolver + FileTypeResolution handle all type tracking.
+        // TypeEnv is empty; remaining type_env uses will be removed in T8.
         let body_stmts = match &fn_decl.function.body {
             Some(block) => Transformer {
                 tctx: self.tctx,
-                type_env: fn_type_env,
+                type_env: TypeEnv::new(),
                 synthetic: &mut local_synthetic,
             }
             .convert_stmt_list(&block.stmts, return_type.as_ref())?,
@@ -1116,71 +1061,12 @@ impl<'a> Transformer<'a> {
             // Pass var_return_type so it propagates into the arrow body
             let mut fallback_warnings = Vec::new();
 
-            // Lazy type materialization for any-typed arrow params:
-            // Pre-populate TypeEnv with enum types from registry (generated by build_registry)
-            let mut arrow_type_env = TypeEnv::new();
-            let mut enum_overrides: Vec<(String, RustType)> = Vec::new();
-            {
-                let any_param_names: Vec<String> = arrow
-                    .params
-                    .iter()
-                    .filter_map(|p| {
-                        if let ast::Pat::Ident(ident) = p {
-                            let has_any_type = ident.type_ann.as_ref().is_none_or(|ann| {
-                                matches!(
-                                    ann.type_ann.as_ref(),
-                                    swc_ecma_ast::TsType::TsKeywordType(kw)
-                                        if kw.kind == swc_ecma_ast::TsKeywordTypeKind::TsAnyKeyword
-                                )
-                            });
-                            if has_any_type {
-                                Some(ident.id.sym.to_string())
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
-                // Collect constraints from either block body or expression body
-                let constraints = match arrow.body.as_ref() {
-                    ast::BlockStmtOrExpr::BlockStmt(body) => {
-                        crate::transformer::any_narrowing::collect_any_constraints(
-                            body,
-                            &any_param_names,
-                        )
-                    }
-                    ast::BlockStmtOrExpr::Expr(expr) => {
-                        crate::transformer::any_narrowing::collect_any_constraints_from_expr(
-                            expr,
-                            &any_param_names,
-                        )
-                    }
-                };
-                if !any_param_names.is_empty() {
-                    for (param_name, constraint) in &constraints {
-                        if constraint.is_empty() {
-                            continue;
-                        }
-                        let variants =
-                            crate::transformer::any_narrowing::build_any_enum_variants(constraint);
-                        let enum_name = self
-                            .synthetic
-                            .register_any_enum(&name, param_name, variants);
-                        let enum_type = RustType::Named {
-                            name: enum_name,
-                            type_args: vec![],
-                        };
-                        enum_overrides.push((param_name.clone(), enum_type.clone()));
-                        arrow_type_env.insert(param_name.clone(), enum_type);
-                    }
-                }
-            }
+            // Use arrow.span (includes params) for override lookup
+            let arrow_scope_start = arrow.span.lo.0;
 
             let closure = crate::transformer::Transformer {
                 tctx: self.tctx,
-                type_env: arrow_type_env,
+                type_env: TypeEnv::new(),
                 synthetic: self.synthetic,
             }
             .convert_arrow_expr_with_return_type(
@@ -1211,10 +1097,12 @@ impl<'a> Transformer<'a> {
                         if p.ty.is_none() {
                             p.ty = Some(RustType::Any);
                         }
-                        // Override Any params with generated enum type from any_narrowing
+                        // Override Any params with generated enum type from FileTypeResolution
                         if matches!(&p.ty, Some(RustType::Any)) {
-                            if let Some((_, enum_ty)) =
-                                enum_overrides.iter().find(|(n, _)| n == &p.name)
+                            if let Some(enum_ty) = self
+                                .tctx
+                                .type_resolution
+                                .any_enum_override(&p.name, arrow_scope_start)
                             {
                                 p.ty = Some(enum_ty.clone());
                             }

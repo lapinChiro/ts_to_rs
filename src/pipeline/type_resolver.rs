@@ -11,7 +11,9 @@ use swc_ecma_ast as ast;
 
 use crate::ir::RustType;
 use crate::pipeline::type_converter::convert_ts_type;
-use crate::pipeline::type_resolution::{FileTypeResolution, NarrowingEvent, Span, VarId};
+use crate::pipeline::type_resolution::{
+    AnyEnumOverride, DuFieldBinding, FileTypeResolution, NarrowingEvent, Span, VarId,
+};
 use crate::pipeline::ModuleGraph;
 use crate::pipeline::ResolvedType;
 use crate::pipeline::SyntheticTypeRegistry;
@@ -33,6 +35,12 @@ pub struct TypeResolver<'a> {
     scope_stack: Vec<Scope>,
     current_fn_return_type: Option<RustType>,
     result: FileTypeResolution,
+
+    /// Any-enum overrides from the any_enum_analyzer (computed before TypeResolver).
+    /// When a variable is declared with `Any` type, this is checked for an override
+    /// with a more specific enum type, so `expr_types` records the correct type
+    /// from the start.
+    any_enum_overrides: Vec<AnyEnumOverride>,
 }
 
 /// A scope containing variable bindings.
@@ -62,7 +70,16 @@ impl<'a> TypeResolver<'a> {
             scope_stack: vec![Scope::default()],
             current_fn_return_type: None,
             result: FileTypeResolution::empty(),
+            any_enum_overrides: Vec::new(),
         }
+    }
+
+    /// Sets the any-enum overrides computed by `any_enum_analyzer`.
+    ///
+    /// When set, `declare_var` will replace `Any` types with the corresponding
+    /// enum type, so all subsequent `expr_types` entries reflect the correct type.
+    pub fn set_any_enum_overrides(&mut self, overrides: Vec<AnyEnumOverride>) {
+        self.any_enum_overrides = overrides;
     }
 
     /// Resolves type information for an entire file.
@@ -70,7 +87,11 @@ impl<'a> TypeResolver<'a> {
         for item in &file.module.body {
             self.visit_module_item(item);
         }
-        std::mem::replace(&mut self.result, FileTypeResolution::empty())
+        let mut result = std::mem::replace(&mut self.result, FileTypeResolution::empty());
+        // Transfer any_enum_overrides to the result for Transformer access
+        // (used by convert_var_decl and param type override)
+        result.any_enum_overrides = std::mem::take(&mut self.any_enum_overrides);
+        result
     }
 
     // --- Scope management ---
@@ -86,6 +107,18 @@ impl<'a> TypeResolver<'a> {
     }
 
     fn declare_var(&mut self, name: &str, ty: ResolvedType, span: Span, mutable: bool) {
+        // Apply any_enum_override: if the variable type is Any and there's a
+        // matching override at this position, use the enum type instead.
+        let ty = if matches!(&ty, ResolvedType::Known(RustType::Any)) {
+            self.any_enum_overrides
+                .iter()
+                .rfind(|o| o.var_name == name && o.scope_start <= span.lo && span.lo < o.scope_end)
+                .map(|o| ResolvedType::Known(o.enum_type.clone()))
+                .unwrap_or(ty)
+        } else {
+            ty
+        };
+
         let var_id = VarId {
             name: name.to_string(),
             declared_at: span,
@@ -255,6 +288,11 @@ impl<'a> TypeResolver<'a> {
                 // const + object type → mut (TS const allows field mutation)
                 // let → initially false, mark_var_mutable() sets true on reassignment
                 let mutable = is_const && is_object_type(&var_type);
+                // Register Fn type on the variable's Ident span so that
+                // get_expr_type(ident) returns the Fn type directly
+                if matches!(&var_type, ResolvedType::Known(RustType::Fn { .. })) {
+                    self.result.expr_types.insert(span, var_type.clone());
+                }
                 self.declare_var(&name, var_type, span, mutable);
             } else {
                 // Non-ident patterns (destructuring): resolve init without expected type
@@ -476,6 +514,8 @@ impl<'a> TypeResolver<'a> {
                         }
                     }
                 }
+                // Detect DU switch and record field bindings
+                self.detect_du_switch_bindings(switch_stmt);
                 for case in &switch_stmt.cases {
                     for s in &case.cons {
                         self.visit_stmt(s);
@@ -796,6 +836,102 @@ impl<'a> TypeResolver<'a> {
         }
     }
 
+    // --- DU switch field binding detection ---
+
+    /// Detects discriminated union switch patterns and records field bindings.
+    ///
+    /// When `switch (s.kind)` where `s` has type `Shape` (a DU enum with
+    /// `tag_field = "kind"`), each case body that accesses `s.radius` etc.
+    /// gets those fields recorded as `DuFieldBinding` entries.
+    fn detect_du_switch_bindings(&mut self, switch_stmt: &ast::SwitchStmt) {
+        // Check if discriminant is obj.field (member expression)
+        let member = match switch_stmt.discriminant.as_ref() {
+            ast::Expr::Member(m) => m,
+            _ => return,
+        };
+        let field_name = match &member.prop {
+            ast::MemberProp::Ident(ident) => ident.sym.to_string(),
+            _ => return,
+        };
+        // Resolve the object variable name
+        let obj_var_name = match member.obj.as_ref() {
+            ast::Expr::Ident(ident) => ident.sym.to_string(),
+            _ => return,
+        };
+        // Resolve the object's type
+        let obj_type = self.lookup_var(&obj_var_name);
+        let enum_name = match &obj_type {
+            ResolvedType::Known(RustType::Named { name, .. }) => name.clone(),
+            _ => return,
+        };
+        // Check if this is a DU enum with matching tag field
+        let variant_fields = match self.registry.get(&enum_name) {
+            Some(TypeDef::Enum {
+                tag_field: Some(tag),
+                variant_fields,
+                string_values,
+                ..
+            }) if *tag == field_name => {
+                // We need both string_values (to map case test → variant) and variant_fields
+                (string_values.clone(), variant_fields.clone())
+            }
+            _ => return,
+        };
+        let (string_values, variant_fields) = variant_fields;
+
+        // For each case, detect field accesses and record bindings
+        let mut pending_variant_names: Vec<String> = Vec::new();
+        for case in &switch_stmt.cases {
+            // Map case test to variant name
+            if let Some(test) = &case.test {
+                let str_value = match test.as_ref() {
+                    ast::Expr::Lit(ast::Lit::Str(s)) => s.value.to_string_lossy().into_owned(),
+                    _ => continue,
+                };
+                if let Some(variant_name) = string_values.get(&str_value) {
+                    pending_variant_names.push(variant_name.clone());
+                }
+            }
+
+            // Empty body = fall-through, accumulate variants
+            if case.cons.is_empty() {
+                continue;
+            }
+
+            // Calculate scope range from case body statements
+            let scope_range = case_body_span_range(&case.cons);
+            let (scope_start, scope_end) = match scope_range {
+                Some(range) => range,
+                None => {
+                    pending_variant_names.clear();
+                    continue;
+                }
+            };
+
+            // Collect field accesses on the DU variable
+            let needed_fields =
+                collect_du_field_accesses_from_stmts(&case.cons, &obj_var_name, &field_name);
+
+            // Record bindings for fields that exist in the pending variants
+            for field in &needed_fields {
+                let field_exists_in_variant = pending_variant_names.iter().any(|vname| {
+                    variant_fields
+                        .get(vname)
+                        .is_some_and(|fields| fields.iter().any(|(n, _)| n == field))
+                });
+                if field_exists_in_variant {
+                    self.result.du_field_bindings.push(DuFieldBinding {
+                        var_name: field.clone(),
+                        scope_start,
+                        scope_end,
+                    });
+                }
+            }
+
+            pending_variant_names.clear();
+        }
+    }
+
     // --- Expression type resolution ---
 
     /// 式の型を解決し、Known な結果を `expr_types` に記録する。
@@ -1089,11 +1225,15 @@ impl<'a> TypeResolver<'a> {
                 ResolvedType::Known(RustType::F64)
             }
             LogicalAnd | LogicalOr => {
+                // Both sides must be resolved to register all sub-expression types
+                // (e.g., `typeof x === "string" && typeof y === "number"` needs both
+                // x and y registered in expr_types for narrowing guard resolution)
+                let left = self.resolve_expr(&bin.left);
                 let right = self.resolve_expr(&bin.right);
                 if !matches!(right, ResolvedType::Unknown) {
                     right
                 } else {
-                    self.resolve_expr(&bin.left)
+                    left
                 }
             }
             NullishCoalescing => {
@@ -1748,6 +1888,121 @@ fn resolve_fn_type_info(
     }
 }
 
+/// Calculates the byte range of a switch case body (first stmt start to last stmt end).
+fn case_body_span_range(stmts: &[ast::Stmt]) -> Option<(u32, u32)> {
+    let first = stmts.first()?;
+    let last = stmts.last()?;
+    Some((first.span().lo.0, last.span().hi.0))
+}
+
+/// Collects field names accessed on `obj_var` in the given statements (e.g., `s.radius` → "radius").
+///
+/// Excludes the tag field itself. Used by DU switch detection to determine which
+/// fields need to be bound in match arm patterns.
+fn collect_du_field_accesses_from_stmts(
+    stmts: &[ast::Stmt],
+    obj_var: &str,
+    tag_field: &str,
+) -> Vec<String> {
+    let mut fields = Vec::new();
+    for stmt in stmts {
+        collect_du_field_accesses_from_stmt_inner(stmt, obj_var, tag_field, &mut fields);
+    }
+    fields.sort();
+    fields.dedup();
+    fields
+}
+
+fn collect_du_field_accesses_from_stmt_inner(
+    stmt: &ast::Stmt,
+    obj_var: &str,
+    tag_field: &str,
+    fields: &mut Vec<String>,
+) {
+    match stmt {
+        ast::Stmt::Expr(expr_stmt) => {
+            collect_du_field_accesses_from_expr_inner(&expr_stmt.expr, obj_var, tag_field, fields);
+        }
+        ast::Stmt::Return(ret) => {
+            if let Some(arg) = &ret.arg {
+                collect_du_field_accesses_from_expr_inner(arg, obj_var, tag_field, fields);
+            }
+        }
+        ast::Stmt::Decl(ast::Decl::Var(var_decl)) => {
+            for decl in &var_decl.decls {
+                if let Some(init) = &decl.init {
+                    collect_du_field_accesses_from_expr_inner(init, obj_var, tag_field, fields);
+                }
+            }
+        }
+        ast::Stmt::If(if_stmt) => {
+            collect_du_field_accesses_from_expr_inner(&if_stmt.test, obj_var, tag_field, fields);
+            collect_du_field_accesses_from_stmt_inner(&if_stmt.cons, obj_var, tag_field, fields);
+            if let Some(alt) = &if_stmt.alt {
+                collect_du_field_accesses_from_stmt_inner(alt, obj_var, tag_field, fields);
+            }
+        }
+        ast::Stmt::Block(block) => {
+            for s in &block.stmts {
+                collect_du_field_accesses_from_stmt_inner(s, obj_var, tag_field, fields);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_du_field_accesses_from_expr_inner(
+    expr: &ast::Expr,
+    obj_var: &str,
+    tag_field: &str,
+    fields: &mut Vec<String>,
+) {
+    match expr {
+        ast::Expr::Member(member) => {
+            if let ast::Expr::Ident(ident) = member.obj.as_ref() {
+                if ident.sym.as_ref() == obj_var {
+                    if let ast::MemberProp::Ident(prop) = &member.prop {
+                        let field_name = prop.sym.to_string();
+                        if field_name != tag_field {
+                            fields.push(field_name);
+                        }
+                    }
+                }
+            }
+            collect_du_field_accesses_from_expr_inner(&member.obj, obj_var, tag_field, fields);
+        }
+        ast::Expr::Call(call) => {
+            if let ast::Callee::Expr(callee) = &call.callee {
+                collect_du_field_accesses_from_expr_inner(callee, obj_var, tag_field, fields);
+            }
+            for arg in &call.args {
+                collect_du_field_accesses_from_expr_inner(&arg.expr, obj_var, tag_field, fields);
+            }
+        }
+        ast::Expr::Bin(bin) => {
+            collect_du_field_accesses_from_expr_inner(&bin.left, obj_var, tag_field, fields);
+            collect_du_field_accesses_from_expr_inner(&bin.right, obj_var, tag_field, fields);
+        }
+        ast::Expr::Tpl(tpl) => {
+            for expr in &tpl.exprs {
+                collect_du_field_accesses_from_expr_inner(expr, obj_var, tag_field, fields);
+            }
+        }
+        ast::Expr::Paren(paren) => {
+            collect_du_field_accesses_from_expr_inner(&paren.expr, obj_var, tag_field, fields);
+        }
+        ast::Expr::Assign(assign) => {
+            collect_du_field_accesses_from_expr_inner(&assign.right, obj_var, tag_field, fields);
+        }
+        ast::Expr::Cond(cond) => {
+            collect_du_field_accesses_from_expr_inner(&cond.test, obj_var, tag_field, fields);
+            collect_du_field_accesses_from_expr_inner(&cond.cons, obj_var, tag_field, fields);
+            collect_du_field_accesses_from_expr_inner(&cond.alt, obj_var, tag_field, fields);
+        }
+        _ => {}
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1755,6 +2010,8 @@ mod tests {
     use crate::pipeline::{parse_files, SyntheticTypeRegistry};
     use crate::registry::build_registry;
     use std::path::PathBuf;
+
+    use crate::registry::TypeDef;
 
     fn resolve(source: &str) -> FileTypeResolution {
         let files = parse_files(vec![(PathBuf::from("test.ts"), source.to_string())]).unwrap();
@@ -2654,9 +2911,9 @@ mod tests {
 
         // Find x's Ident span in the condition `x !== null`
         let fn_decl = match &file.module.body[0] {
-            swc_ecma_ast::ModuleItem::Stmt(swc_ecma_ast::Stmt::Decl(
-                swc_ecma_ast::Decl::Fn(fd),
-            )) => fd,
+            swc_ecma_ast::ModuleItem::Stmt(swc_ecma_ast::Stmt::Decl(swc_ecma_ast::Decl::Fn(
+                fd,
+            ))) => fd,
             _ => panic!("expected fn decl"),
         };
         let return_stmt = &fn_decl.function.body.as_ref().unwrap().stmts[0];
@@ -2684,5 +2941,158 @@ mod tests {
             "x in condition should be resolved to Option<String>, got: {:?}",
             x_type
         );
+    }
+
+    // --- Fn type registration on variable Ident ---
+
+    #[test]
+    fn test_fn_type_registered_on_variable_ident_span() {
+        // const add = (x: number, y: number): number => x + y;
+        // get_expr_type for the "add" Ident should return Fn type
+        let source = r#"const add = (x: number, y: number): number => x + y;"#;
+        let res = resolve(source);
+
+        // Find the "add" ident span — it's the variable declaration name
+        // The source starts at position 0. "const " = 6 chars, "add" starts at 6
+        // But SWC byte positions may differ — let's find it by looking for Fn type entries
+        let fn_type_entries: Vec<_> = res
+            .expr_types
+            .iter()
+            .filter(|(_, ty)| matches!(ty, ResolvedType::Known(RustType::Fn { .. })))
+            .collect();
+        assert!(
+            fn_type_entries.len() >= 2,
+            "should have Fn type for both the arrow expr AND the variable ident, got {} entries: {:?}",
+            fn_type_entries.len(),
+            fn_type_entries
+        );
+    }
+
+    #[test]
+    fn test_fn_type_not_registered_for_non_fn_var() {
+        // const x: number = 42; — should not register Fn type on variable
+        let source = r#"const x: number = 42;"#;
+        let res = resolve(source);
+
+        let fn_type_entries: Vec<_> = res
+            .expr_types
+            .iter()
+            .filter(|(_, ty)| matches!(ty, ResolvedType::Known(RustType::Fn { .. })))
+            .collect();
+        assert!(
+            fn_type_entries.is_empty(),
+            "should not have Fn type entries for non-fn var, got: {:?}",
+            fn_type_entries
+        );
+    }
+
+    // --- DU field binding detection ---
+
+    fn build_shape_registry() -> TypeRegistry {
+        let mut reg = TypeRegistry::new();
+        let mut string_values = std::collections::HashMap::new();
+        string_values.insert("circle".to_string(), "Circle".to_string());
+        string_values.insert("square".to_string(), "Square".to_string());
+        let mut variant_fields = std::collections::HashMap::new();
+        variant_fields.insert(
+            "Circle".to_string(),
+            vec![("radius".to_string(), RustType::F64)],
+        );
+        variant_fields.insert(
+            "Square".to_string(),
+            vec![
+                ("width".to_string(), RustType::F64),
+                ("height".to_string(), RustType::F64),
+            ],
+        );
+        reg.register(
+            "Shape".to_string(),
+            TypeDef::Enum {
+                type_params: vec![],
+                variants: vec!["Circle".to_string(), "Square".to_string()],
+                string_values,
+                tag_field: Some("kind".to_string()),
+                variant_fields,
+            },
+        );
+        reg
+    }
+
+    #[test]
+    fn test_du_field_binding_detected_in_switch_case() {
+        let source = r#"
+function describe(s: Shape): number {
+    switch (s.kind) {
+        case "circle":
+            return s.radius;
+        case "square":
+            return s.width;
+    }
+}
+"#;
+        let reg = build_shape_registry();
+        let res = resolve_with_reg(source, &reg);
+
+        // Should have bindings for "radius" and "width"
+        assert!(
+            !res.du_field_bindings.is_empty(),
+            "should detect DU field bindings, got: {:?}",
+            res.du_field_bindings
+        );
+
+        let radius_bindings: Vec<_> = res
+            .du_field_bindings
+            .iter()
+            .filter(|b| b.var_name == "radius")
+            .collect();
+        assert_eq!(
+            radius_bindings.len(),
+            1,
+            "should have exactly one 'radius' binding"
+        );
+
+        let width_bindings: Vec<_> = res
+            .du_field_bindings
+            .iter()
+            .filter(|b| b.var_name == "width")
+            .collect();
+        assert_eq!(
+            width_bindings.len(),
+            1,
+            "should have exactly one 'width' binding"
+        );
+    }
+
+    #[test]
+    fn test_du_field_binding_outside_scope_returns_false() {
+        let source = r#"
+function describe(s: Shape): number {
+    switch (s.kind) {
+        case "circle":
+            return s.radius;
+        case "square":
+            return 0;
+    }
+}
+"#;
+        let reg = build_shape_registry();
+        let res = resolve_with_reg(source, &reg);
+
+        let radius_binding = res
+            .du_field_bindings
+            .iter()
+            .find(|b| b.var_name == "radius")
+            .expect("should have radius binding");
+
+        // Inside scope: true
+        assert!(res.is_du_field_binding("radius", radius_binding.scope_start));
+        assert!(res.is_du_field_binding("radius", radius_binding.scope_start + 1));
+
+        // Outside scope: false
+        assert!(!res.is_du_field_binding("radius", radius_binding.scope_end));
+        assert!(!res.is_du_field_binding("radius", 0));
+
+        // Non-bound field: false
+        assert!(!res.is_du_field_binding("width", radius_binding.scope_start));
     }
 }

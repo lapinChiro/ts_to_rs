@@ -159,64 +159,88 @@ any-narrowing enum パラメータ（`functions/mod.rs:1176`）は特殊: AnyTyp
 - **実績**: テスト 6 件追加。`get_type_for_var` ヘルパーを `type_resolution.rs` に追加。type_env の完全除去は AnyTypeAnalyzer の enum オーバーライドが FileTypeResolution に移行する T7 で実施
 - **依存**: なし
 
-### T2: FileTypeResolution に DU フィールドバインディング情報を追加
+### T2: FileTypeResolution に DU フィールドバインディング情報を追加 ✅
 
 - **作業内容**: `pipeline/type_resolution.rs` に `DuFieldBinding { var_name: String, scope_start: u32, scope_end: u32 }` 構造体と `du_field_bindings: Vec<DuFieldBinding>` フィールドを追加。`is_du_field_binding(var_name, position)` メソッドを追加。`pipeline/type_resolver.rs` の `visit_switch_stmt` で DU switch を検出し、各 case のフィールドバインディングを記録
-- **完了条件**: `FileTypeResolution::is_du_field_binding()` が DU switch case body 内のフィールド変数に対して `true` を返す。ユニットテスト追加
+- **実績**: テスト 4 件追加（type_resolution 2 件 + type_resolver 2 件）。`detect_du_switch_bindings` メソッドと AST field access 収集ヘルパーを type_resolver.rs に追加
+- **完了条件**: ✅
 - **依存**: なし
 
-### T3: TypeResolver の Fn 型 expr_types 登録を改善
+### T3: TypeResolver の Fn 型 expr_types 登録を改善 ✅
 
 - **作業内容**: `pipeline/type_resolver.rs` の `visit_var_decl` で、initializer がアロー関数式 / 関数式の場合、infer した `RustType::Fn` を変数宣言の initializer スパンだけでなく、変数自体の `Ident` スパンにも `expr_types` に記録する。これにより `get_expr_type(ident_expr)` が Fn 型を返すようになる
-- **完了条件**: `const fn = (x: number) => x + 1` に対して、`fn` の Ident 式で `get_expr_type` が `RustType::Fn` を返す。ユニットテスト追加
+- **実績**: テスト 2 件追加。`visit_var_decl` の `declare_var` 呼び出し前に Fn 型の場合のみ `expr_types.insert(span, var_type)` を追加
+- **完了条件**: ✅
 - **依存**: なし
 
 ### T4: 分類 1（変数宣言の型登録）の TypeEnv insert/get 除去
 
-- **作業内容**: `statements/mod.rs` の 6 箇所の `type_env.insert`（363,392,455,1195,1204,1208）を削除。`statements/mod.rs:119` / `statements/mod.rs:1812` / `calls.rs:44` の `type_env.get` を `get_expr_type` に置換
+- **作業内容**: `statements/mod.rs` の 6 箇所の `type_env.insert`（363,392,455,1195,1204,1208）を削除。`calls.rs:44` の `type_env.get` を `get_expr_type` に置換
+- **T7 で先行除去済みの箇所**: `statements/mod.rs:119`（Any フォールバック → `any_enum_override` に置換）、`statements/mod.rs:1812`（typeof switch → `get_expr_type` に置換。現在は `try_convert_typeof_switch` 内で `get_expr_type` を使用）
+- **レガシーコメント修正**: 変更対象ファイル内に `P-N` / `I-NNN` / `F-Nb` 等のイシュー番号やフェーズ番号のみのコメントがあれば、内容が伝わる説明コメントに書き換える
 - **完了条件**: 分類 1 の全 insert/get が除去。全テスト GREEN
-- **依存**: T3（Fn 型の expr_types 登録が必要）
+- **依存**: T3 ✅（Fn 型の expr_types 登録が必要）
 
 ### T5: 分類 2（Narrowing ガード）の TypeEnv 操作除去
 
-- **作業内容**: `expressions/mod.rs:175-188` の `push_scope` / `insert` / `pop_scope` を削除。`get_expr_type` が narrowed_type を position-based で返すため、スコープ操作は不要。`expressions/patterns.rs:276` の `type_env.get` を `get_expr_type(bin.left)` に置換。`resolve_if_let_pattern` の type_env フォールバックは T7 完了後に除去
-- **完了条件**: `expressions/mod.rs` と `expressions/patterns.rs:276` から TypeEnv 参照が除去。全テスト GREEN
-- **依存**: T1（NarrowingGuard の Span 追加）。`resolve_if_let_pattern` の type_env 完全除去は T7 後
+- **作業内容**: `expressions/mod.rs:175-188` の `push_scope` / `insert` / `pop_scope` を削除。`get_expr_type` が narrowed_type を position-based で返すため、スコープ操作は不要。`resolve_if_let_pattern`（`patterns.rs:404`）の `type_env.get` フォールバックを除去し、`get_type_for_var` のみに一本化する
+- **T7 で先行除去済みの箇所**: `expressions/patterns.rs:276`（`convert_instanceof` の LHS 型取得 → `get_expr_type(&bin.left).cloned()` に置換済み）
+- **注意: TypeResolver `LogicalAnd/Or` の修正（T7 で実施済み）**: 以前は `LogicalAnd` が右辺のみ resolve し、左辺が Known なら左辺をスキップしていた。これにより `typeof x === "string" && typeof y === "number"` の `x` が `expr_types` に未登録だった。T7 で両辺を必ず resolve するよう修正済み。T5 の compound guard テストはこの修正を前提とする
+- **レガシーコメント修正**: 変更対象ファイル内に `P-N` / `I-NNN` / `F-Nb` 等のイシュー番号やフェーズ番号のみのコメントがあれば、内容が伝わる説明コメントに書き換える
+- **完了条件**: `expressions/mod.rs` と `resolve_if_let_pattern` から TypeEnv 参照が完全除去。全テスト GREEN
+- **依存**: T1 ✅, T7 ✅
 
 ### T6: 分類 3（DU match arm）の TypeEnv 操作除去
 
 - **作業内容**: `statements/mod.rs:2063-2078` の `push_scope` / `insert` / `pop_scope` を削除。`member_access.rs:256` の `type_env.get(&field).is_some()` を `self.tctx.type_resolution.is_du_field_binding(&field, span_position)` に置換
+- **span_position の取得**: `member_access.rs` の `convert_member_expr` は `member: &ast::MemberExpr` を受け取る。`member.span.lo.0` を position として使用する
+- **レガシーコメント修正**: 変更対象ファイル内に `P-N` / `I-NNN` / `F-Nb` 等のイシュー番号やフェーズ番号のみのコメントがあれば、内容が伝わる説明コメントに書き換える
 - **完了条件**: DU switch 関連の TypeEnv 操作が完全除去。既存の DU テスト全 GREEN
-- **依存**: T2（DU フィールドバインディング情報の追加）
+- **依存**: T2 ✅
 
-### T7: 分類 4-5（関数パラメータ + Any enum オーバーライド）の除去
+### T7: 分類 4-5（関数パラメータ + Any enum オーバーライド）の除去 ✅
 
-- **作業内容**: `functions/mod.rs:165` / `classes.rs:759` / `statements/mod.rs:2720` のパラメータ insert 削除。`functions/mod.rs:172,1176` / `statements/mod.rs:119` の any-narrowing enum insert 削除。any-narrowing enum の型情報は、AnyTypeAnalyzer の結果を `FileTypeResolution` に格納するフィールド（`any_enum_overrides: HashMap<String, RustType>` — 変数名 → enum 型）を追加し、`get_expr_type` で参照する
-- **完了条件**: 関数パラメータと Any enum 関連の TypeEnv 操作が完全除去。全テスト GREEN
-- **依存**: なし（T4 とは除去対象の insert が完全に別セットのため独立実施可能）
+- **作業内容**: パラメータ insert 全削除。AnyTypeAnalyzer を `pipeline/any_enum_analyzer.rs` に移動し、TypeResolver の前に実行。TypeResolver の `declare_var` で Any → enum 型を自動置換。`get_expr_type` / `get_type_for_var` にフォールバック不要（単一ソース）
+- **実績**:
+  - `pipeline/any_enum_analyzer.rs` 新規作成（テスト 5 件）
+  - `functions/mod.rs:165,172` / `classes.rs:759` / `statements/mod.rs:2720` の insert 削除
+  - `statements/mod.rs:119` の Any フォールバックを `any_enum_override` に置換
+  - `convert_instanceof`（`patterns.rs:276`）の `type_env.get` → `get_expr_type` に先行置換
+  - `try_convert_typeof_switch`（`statements/mod.rs:1812`）の `type_env.get` → `get_expr_type` に先行置換
+  - `convert_constructor_body` から未使用の `params` パラメータを除去
+  - TypeResolver の `LogicalAnd/Or` が左辺を resolve しないバグを修正
+  - レガシーコメント（`F-3b`、`Pass 3.5`、`P4`、`P8`）を修正
+- **完了条件**: ✅ 全テスト GREEN、clippy 0 警告、fmt 通過
+- **依存**: なし
 
 ### T8: Transformer struct から type_env フィールド除去
 
 - **作業内容**: `Transformer` struct から `type_env: TypeEnv` フィールドを削除。`for_module` から TypeEnv 初期化を削除。sub-transformer 作成（`expressions/functions.rs` の clone 3箇所、`functions/mod.rs` の構築箇所）から type_env を除去。`classes.rs` の `MethodContext` から type_env を除去
+- **T7 で先行除去済みの箇所**: `functions/mod.rs` の `convert_fn_decl` と `convert_var_decl_to_fn` 内の sub-transformer 構築は既に `TypeEnv::new()` を使用。`classes.rs` の `convert_constructor_body` の sub-transformer 構築も同様。`statements/mod.rs` のネスト関数 sub-transformer も同様
+- **レガシーコメント修正**: 変更対象ファイル内に `P-N` / `I-NNN` / `F-Nb` 等のイシュー番号やフェーズ番号のみのコメントがあれば、内容が伝わる説明コメントに書き換える。特に `type_resolver.rs` の `propagate_expected` 内の `P-1` 〜 `P-6` ラベルを確認する
 - **完了条件**: `type_env` が Transformer struct と全 sub-transformer から完全除去。全テスト GREEN
-- **依存**: T4, T5, T6, T7（全 TypeEnv 使用箇所の除去が完了）
+- **依存**: T4, T5, T6, T7 ✅（全 TypeEnv 使用箇所の除去が完了）
 
 ### T9: TypeEnv 構造体の削除
 
 - **作業内容**: `src/transformer/type_env.rs` から `TypeEnv` struct とその impl を削除。`pub use type_env::TypeEnv` を `mod.rs` から削除。`wrap_trait_for_position` / `TypePosition` は独立ユーティリティとして残存させる（使用箇所がある限り）
+- **レガシーコメント修正**: 変更対象ファイル内に `P-N` / `I-NNN` / `F-Nb` 等のイシュー番号やフェーズ番号のみのコメントがあれば、内容が伝わる説明コメントに書き換える
 - **完了条件**: `TypeEnv` 型がコードベースに存在しない。コンパイル通過
 - **依存**: T8
 
 ### T10: テストコードの TypeEnv 依存除去
 
 - **作業内容**: `transformer/tests.rs` / `statements/tests.rs` / `expressions/tests.rs` から TypeEnv の構築・操作を全て除去。テストヘルパー `convert_stmts_with_env` を `TctxFixture::from_source` ベースに置換。TypeEnv に依存していたテストは、TypeResolver 経由で同じ型情報が提供されることを検証するテストに書き換える
+- **T7 で先行修正済みのテスト**: `test_instanceof_known_type_match_resolves_true`、`test_instanceof_known_type_mismatch_resolves_false`、`test_convert_instanceof_known_matching_type_returns_true`、`test_convert_instanceof_option_type_returns_is_some` — TypeEnv 構築を `TctxFixture::from_source` に置換済み
+- **レガシーコメント修正**: テストコード内に `P-N` / `I-NNN` / `F-Nb` 等のイシュー番号やフェーズ番号のみのコメントがあれば、内容が伝わる説明コメントに書き換える
 - **完了条件**: テストコードに `TypeEnv` への参照がゼロ。全テスト GREEN
-- **依存**: T8 と並行実施可能（T4-T7 完了後）
+- **依存**: T8 と並行実施可能（T4-T7 ✅ 完了後）
 
 ### T11: 品質チェック + ベンチマーク
 
 - **作業内容**: `cargo test` 全 GREEN、`cargo clippy --all-targets --all-features -- -D warnings` 0 警告、`cargo fmt --all --check` 通過、Hono ベンチマーク実行して結果が維持または改善
-- **完了条件**: 全品質チェック通過。ベンチマーク結果が前回（86 clean / 132 errors）以上
+- **最終レガシーコメント確認**: コードベース全体を `grep -rn 'P-[0-9]\|F-[0-9]\|#[0-9]\+:' src/` でスキャンし、残存するイシュー番号やフェーズ番号のみのコメントがないことを確認する。`I-NNN` は具体的なケースの来歴として許容するが、単独のラベル（`P-1`、`F-3b #1`）は不可
+- **完了条件**: 全品質チェック通過。ベンチマーク結果が前回（86 clean / 132 errors）以上。レガシーコメント残存ゼロ
 - **依存**: T9, T10
 
 ## テスト計画

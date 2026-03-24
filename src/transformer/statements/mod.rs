@@ -116,7 +116,16 @@ impl<'a> Transformer<'a> {
                         None
                     };
                     match converted {
-                        Some(RustType::Any) => self.type_env.get(&name).cloned().or(converted),
+                        Some(RustType::Any) => {
+                            // Check FileTypeResolution for any-enum override
+                            // (computed by pipeline's any_enum_analyzer)
+                            let pos = ident.id.span.lo.0;
+                            self.tctx
+                                .type_resolution
+                                .any_enum_override(&name, pos)
+                                .cloned()
+                                .or(converted)
+                        }
                         other => other,
                     }
                 }
@@ -1794,22 +1803,23 @@ impl<'a> Transformer<'a> {
         switch: &ast::SwitchStmt,
         return_type: Option<&RustType>,
     ) -> Result<Option<Vec<Stmt>>> {
-        let typeof_var = match switch.discriminant.as_ref() {
+        let typeof_ident = match switch.discriminant.as_ref() {
             ast::Expr::Unary(unary) if unary.op == ast::UnaryOp::TypeOf => {
                 if let ast::Expr::Ident(ident) = unary.arg.as_ref() {
-                    Some(ident.sym.to_string())
+                    Some(ident)
                 } else {
                     None
                 }
             }
             _ => None,
         };
-        let var_name = match typeof_var {
-            Some(name) => name,
+        let typeof_ident = match typeof_ident {
+            Some(ident) => ident,
             None => return Ok(None),
         };
+        let var_name = typeof_ident.sym.to_string();
 
-        let var_type = match self.type_env.get(&var_name) {
+        let var_type = match self.get_expr_type(&ast::Expr::Ident(typeof_ident.clone())) {
             Some(ty) => ty.clone(),
             None => return Ok(None),
         };
@@ -2714,18 +2724,12 @@ impl<'a> Transformer<'a> {
             }
         });
 
-        let mut fn_type_env = TypeEnv::new();
-        for param in &params {
-            if let Some(ty) = &param.ty {
-                fn_type_env.insert(param.name.clone(), ty.clone());
-            }
-        }
-
-        // F-3b #8: Use sub-Transformer with local fn_type_env
+        // Sub-Transformer for nested function body.
+        // TypeResolver handles parameter types via scope_stack.
         let body = match &fn_decl.function.body {
             Some(block) => Transformer {
                 tctx: self.tctx,
-                type_env: fn_type_env,
+                type_env: TypeEnv::new(),
                 synthetic: &mut *self.synthetic,
             }
             .convert_stmt_list(&block.stmts, return_type.as_ref())?,

@@ -1855,7 +1855,7 @@ mod tests {
         assert_eq!(instantiated, original);
     }
 
-    // --- P4 テスト計画のテスト ---
+    // --- TypeDef 型パラメータ関連テスト ---
 
     #[test]
     fn test_build_registry_with_union_field() {

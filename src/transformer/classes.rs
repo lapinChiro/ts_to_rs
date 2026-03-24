@@ -631,7 +631,7 @@ impl<'a> Transformer<'a> {
                     .into_iter()
                     .chain(block.stmts.iter().cloned())
                     .collect();
-                let mut body = self.convert_constructor_body(&all_stmts, &params)?;
+                let mut body = self.convert_constructor_body(&all_stmts)?;
                 // Insert default parameter expansion stmts at the beginning
                 for (i, stmt) in default_expansion_stmts.into_iter().enumerate() {
                     body.insert(i, stmt);
@@ -640,7 +640,7 @@ impl<'a> Transformer<'a> {
             }
             None if !param_prop_names.is_empty() => {
                 let synthetic_stmts = build_param_prop_assignments(&param_prop_names);
-                let mut body = self.convert_constructor_body(&synthetic_stmts, &params)?;
+                let mut body = self.convert_constructor_body(&synthetic_stmts)?;
                 for (i, stmt) in default_expansion_stmts.into_iter().enumerate() {
                     body.insert(i, stmt);
                 }
@@ -748,24 +748,15 @@ impl<'a> Transformer<'a> {
     /// Recognizes the pattern of `this.field = value` assignments and converts them
     /// into a `Self { field: value, ... }` tail expression. Statements that don't
     /// match this pattern are converted as normal statements.
-    fn convert_constructor_body(
-        &mut self,
-        stmts: &[ast::Stmt],
-        params: &[Param],
-    ) -> Result<Vec<Stmt>> {
-        let mut type_env = TypeEnv::new();
-        for p in params {
-            if let Some(ty) = &p.ty {
-                type_env.insert(p.name.clone(), ty.clone());
-            }
-        }
+    fn convert_constructor_body(&mut self, stmts: &[ast::Stmt]) -> Result<Vec<Stmt>> {
         let mut fields = Vec::new();
         let mut other_stmts = Vec::new();
 
-        // F-3b #3/#4: Sub-Transformer for constructor body (unified convert_expr + convert_stmt)
+        // Sub-Transformer for constructor body.
+        // TypeResolver handles parameter types via scope_stack.
         let mut sub_t = Transformer {
             tctx: self.tctx,
-            type_env,
+            type_env: TypeEnv::new(),
             synthetic: &mut *self.synthetic,
         };
         for stmt in stmts {

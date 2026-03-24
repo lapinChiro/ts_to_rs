@@ -55,6 +55,39 @@ pub struct NarrowingEvent {
     pub narrowed_type: RustType,
 }
 
+/// Records that a variable is a destructured field binding in a DU match arm.
+///
+/// When a discriminated union switch is converted to `match`, each case arm may
+/// destructure fields (e.g., `Shape::Circle { radius, .. }`). Within the arm body,
+/// `radius` is a local variable bound by reference. This record tracks such bindings
+/// so the Transformer can emit `.clone()` on field access.
+#[derive(Debug, Clone)]
+pub struct DuFieldBinding {
+    /// The field variable name (e.g., "radius").
+    pub var_name: String,
+    /// Start byte position of the match arm body scope.
+    pub scope_start: u32,
+    /// End byte position of the match arm body scope.
+    pub scope_end: u32,
+}
+
+/// Records that an `any`-typed variable should use a synthesized enum type.
+///
+/// When `typeof`/`instanceof` narrowing is detected on an `any`-typed variable,
+/// a synthetic enum type is generated. This override is scoped to the function
+/// or arrow body where the variable resides.
+#[derive(Debug, Clone)]
+pub struct AnyEnumOverride {
+    /// The variable name being overridden (parameter or local variable).
+    pub var_name: String,
+    /// Start byte position of the scope where the override is active.
+    pub scope_start: u32,
+    /// End byte position of the scope where the override is active.
+    pub scope_end: u32,
+    /// The synthesized enum type to use instead of `Any`.
+    pub enum_type: RustType,
+}
+
 /// File-level type resolution results.
 ///
 /// Produced by `TypeResolver::resolve_file()` and consumed by the Transformer.
@@ -86,6 +119,21 @@ pub struct FileTypeResolution {
     /// Determined by `const` vs `let` declaration and whether the variable
     /// is reassigned in the body.
     pub var_mutability: HashMap<VarId, bool>,
+
+    /// DU field bindings: fields destructured in discriminated union match arms.
+    ///
+    /// Used by the Transformer to determine if a field name at a given position
+    /// refers to a match arm binding (requiring `.clone()`) rather than a
+    /// standalone field access (requiring inline match).
+    pub du_field_bindings: Vec<DuFieldBinding>,
+
+    /// Any-narrowing enum type overrides: position-scoped overrides for `any`-typed variables.
+    ///
+    /// When AnyTypeAnalyzer detects that an `any`-typed variable is narrowed via
+    /// `typeof`/`instanceof`, it generates a synthetic enum type. These overrides
+    /// are scoped to the function/arrow body where the variable is declared, so the
+    /// Transformer can use the enum type instead of `Any` for variable declarations.
+    pub any_enum_overrides: Vec<AnyEnumOverride>,
 }
 
 impl FileTypeResolution {
@@ -96,6 +144,8 @@ impl FileTypeResolution {
             expected_types: HashMap::new(),
             narrowing_events: Vec::new(),
             var_mutability: HashMap::new(),
+            du_field_bindings: Vec::new(),
+            any_enum_overrides: Vec::new(),
         }
     }
 
@@ -127,6 +177,30 @@ impl FileTypeResolution {
     /// Gets the mutability for a variable.
     pub fn is_mutable(&self, var_id: &VarId) -> Option<bool> {
         self.var_mutability.get(var_id).copied()
+    }
+
+    /// Gets the any-enum override type for a variable at a given position.
+    ///
+    /// Returns the synthesized enum type if the variable has been overridden
+    /// from `any` within the current scope, or `None` otherwise.
+    pub fn any_enum_override(&self, var_name: &str, position: u32) -> Option<&RustType> {
+        self.any_enum_overrides
+            .iter()
+            .rfind(|o| {
+                o.var_name == var_name && o.scope_start <= position && position < o.scope_end
+            })
+            .map(|o| &o.enum_type)
+    }
+
+    /// Checks if a variable name at a given position is a DU field binding.
+    ///
+    /// Returns `true` if the variable was destructured from a discriminated union
+    /// match arm at this position. The Transformer uses this to emit `.clone()`
+    /// instead of generating a standalone inline match expression.
+    pub fn is_du_field_binding(&self, var_name: &str, position: u32) -> bool {
+        self.du_field_bindings
+            .iter()
+            .any(|b| b.var_name == var_name && b.scope_start <= position && position < b.scope_end)
     }
 }
 
@@ -220,6 +294,43 @@ mod tests {
         // x is narrowed, y is not
         assert!(resolution.narrowed_type("x", 25).is_some());
         assert!(resolution.narrowed_type("y", 25).is_none());
+    }
+
+    #[test]
+    fn test_du_field_binding_detection() {
+        let mut resolution = FileTypeResolution::empty();
+        // "radius" is bound in match arm at [100, 200)
+        resolution.du_field_bindings.push(DuFieldBinding {
+            var_name: "radius".to_string(),
+            scope_start: 100,
+            scope_end: 200,
+        });
+
+        // Inside scope: true
+        assert!(resolution.is_du_field_binding("radius", 100));
+        assert!(resolution.is_du_field_binding("radius", 150));
+
+        // Different variable: false
+        assert!(!resolution.is_du_field_binding("height", 150));
+    }
+
+    #[test]
+    fn test_du_field_binding_outside_scope() {
+        let mut resolution = FileTypeResolution::empty();
+        resolution.du_field_bindings.push(DuFieldBinding {
+            var_name: "radius".to_string(),
+            scope_start: 100,
+            scope_end: 200,
+        });
+
+        // Before scope: false
+        assert!(!resolution.is_du_field_binding("radius", 50));
+
+        // At scope_end (exclusive): false
+        assert!(!resolution.is_du_field_binding("radius", 200));
+
+        // After scope: false
+        assert!(!resolution.is_du_field_binding("radius", 250));
     }
 
     #[test]

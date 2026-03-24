@@ -13,7 +13,7 @@ use crate::registry::TypeRegistry;
 /// Immutable context for the Transformer.
 ///
 /// Contains all read-only references the Transformer needs for conversion.
-/// `SyntheticTypeRegistry` is passed separately as `&mut` (merged in P8).
+/// `SyntheticTypeRegistry` is passed separately as `&mut`.
 pub struct TransformContext<'a> {
     /// Module dependency graph for import resolution.
     pub module_graph: &'a ModuleGraph,

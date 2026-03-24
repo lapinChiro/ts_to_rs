@@ -24,11 +24,7 @@ impl<'a> Transformer<'a> {
         if let Some(narrowed) = self.tctx.type_resolution.narrowed_type(name, span.lo.0) {
             return Some(narrowed);
         }
-        match self
-            .tctx
-            .type_resolution
-            .expr_type(Span::from_swc(span))
-        {
+        match self.tctx.type_resolution.expr_type(Span::from_swc(span)) {
             ResolvedType::Known(ty) => Some(ty),
             ResolvedType::Unknown => None,
         }
@@ -37,6 +33,8 @@ impl<'a> Transformer<'a> {
     /// FileTypeResolution から式の型を取得する。Unknown なら None。
     ///
     /// TypeResolver が事前に解決した型のみを返す。
+    /// any_enum_override は TypeResolver の declare_var 時に既に適用済みのため、
+    /// ここでのフォールバックは不要。
     pub(crate) fn get_expr_type(&self, expr: &ast::Expr) -> Option<&'a RustType> {
         // Ident 式の場合、narrowed_type を優先参照（型ナローイング後の型）
         if let ast::Expr::Ident(ident) = expr {
