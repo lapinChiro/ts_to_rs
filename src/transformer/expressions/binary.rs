@@ -4,19 +4,12 @@ use anyhow::{anyhow, Result};
 use swc_ecma_ast as ast;
 
 use crate::ir::{BinOp, Expr, RustType, UnOp};
-use crate::pipeline::SyntheticTypeRegistry;
-use crate::transformer::TypeEnv;
 
 use super::literals::{is_string_like, is_string_type};
-use super::patterns::{
-    convert_in_operator, convert_instanceof, try_convert_enum_string_comparison,
-    try_convert_typeof_comparison, try_convert_undefined_comparison, typeof_to_string,
-};
+use super::patterns::typeof_to_string;
 use super::type_resolution::get_expr_type;
 use crate::ir::ClosureBody;
 
-use super::convert_expr;
-use crate::transformer::context::TransformContext;
 use crate::transformer::Transformer;
 
 impl<'a> Transformer<'a> {
@@ -28,34 +21,28 @@ impl<'a> Transformer<'a> {
         expected: Option<&RustType>,
     ) -> Result<Expr> {
         // typeof x === "type" / typeof x !== "type" pattern
-        if let Some(result) =
-            try_convert_typeof_comparison(bin, &self.type_env, self.tctx, self.synthetic)
-        {
+        if let Some(result) = self.try_convert_typeof_comparison(bin) {
             return Ok(result);
         }
 
         // x === undefined / x !== undefined pattern
-        if let Some(result) =
-            try_convert_undefined_comparison(bin, &self.type_env, self.tctx, self.synthetic)
-        {
+        if let Some(result) = self.try_convert_undefined_comparison(bin) {
             return Ok(result);
         }
 
         // string literal enum comparison: d == "up" → d == Direction::Up
-        if let Some(result) =
-            try_convert_enum_string_comparison(bin, &self.type_env, self.tctx, self.synthetic)
-        {
+        if let Some(result) = self.try_convert_enum_string_comparison(bin) {
             return Ok(result);
         }
 
         // x instanceof ClassName pattern
         if bin.op == ast::BinaryOp::InstanceOf {
-            return Ok(convert_instanceof(bin, &self.type_env, self.tctx));
+            return Ok(self.convert_instanceof(bin));
         }
 
         // "key" in obj pattern
         if bin.op == ast::BinaryOp::In {
-            return Ok(convert_in_operator(bin, self.tctx));
+            return Ok(self.convert_in_operator(bin));
         }
 
         // `x ?? y` → `x.unwrap_or_else(|| y)` (Option) or `x` (non-Option)
@@ -64,12 +51,12 @@ impl<'a> Transformer<'a> {
             let is_option = left_type.is_some_and(|ty| matches!(ty, RustType::Option(_)));
 
             // Cat A: ?? left operand — type is resolved separately for Option detection
-            let left = convert_expr(&bin.left, self.tctx, &self.type_env, self.synthetic)?;
+            let left = self.convert_expr(&bin.left)?;
             if !is_option && left_type.is_some() {
                 // Non-Option type: nullish coalescing is a no-op, return left as-is
                 return Ok(left);
             }
-            let right = convert_expr(&bin.right, self.tctx, &self.type_env, self.synthetic)?;
+            let right = self.convert_expr(&bin.right)?;
             return Ok(Expr::MethodCall {
                 object: Box::new(left),
                 method: "unwrap_or_else".to_string(),
@@ -82,8 +69,8 @@ impl<'a> Transformer<'a> {
         }
 
         // Cat A: binary operands — result type depends on operator, not context
-        let left = convert_expr(&bin.left, self.tctx, &self.type_env, self.synthetic)?;
-        let right = convert_expr(&bin.right, self.tctx, &self.type_env, self.synthetic)?;
+        let left = self.convert_expr(&bin.left)?;
+        let right = self.convert_expr(&bin.right)?;
         let op = convert_binary_op(bin.op)?;
 
         // String concatenation: wrap RHS in Ref(&) when LHS is string-like.
@@ -167,7 +154,7 @@ impl<'a> Transformer<'a> {
                     // Option<T>: runtime branch — is_some() → typeof inner, else "undefined"
                     // Cat A: typeof operand — only used for type discrimination
                     let operand =
-                        convert_expr(&unary.arg, self.tctx, &self.type_env, self.synthetic)?;
+                        self.convert_expr(&unary.arg)?;
                     let inner_typeof = typeof_to_string(inner);
                     Expr::If {
                         condition: Box::new(Expr::MethodCall {
@@ -187,7 +174,7 @@ impl<'a> Transformer<'a> {
         // Unary plus: +x → numeric conversion
         if unary.op == ast::UnaryOp::Plus {
             let operand_type = get_expr_type(self.tctx, &unary.arg);
-            let operand = convert_expr(&unary.arg, self.tctx, &self.type_env, self.synthetic)?;
+            let operand = self.convert_expr(&unary.arg)?;
             return Ok(match operand_type {
                 Some(RustType::F64) => operand, // already numeric, identity
                 Some(RustType::String) => Expr::MethodCall {
@@ -209,45 +196,12 @@ impl<'a> Transformer<'a> {
             _ => return Err(anyhow!("unsupported unary operator: {:?}", unary.op)),
         };
         // Cat A: unary operand — type depends on operator semantics
-        let operand = convert_expr(&unary.arg, self.tctx, &self.type_env, self.synthetic)?;
+        let operand = self.convert_expr(&unary.arg)?;
         Ok(Expr::UnaryOp {
             op,
             operand: Box::new(operand),
         })
     }
-}
-
-/// Wrapper: delegates to [`Transformer::convert_bin_expr`].
-pub(super) fn convert_bin_expr(
-    bin: &ast::BinExpr,
-    tctx: &TransformContext<'_>,
-    expected: Option<&RustType>,
-    type_env: &TypeEnv,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Result<Expr> {
-    let env = type_env.clone();
-    Transformer {
-        tctx,
-        type_env: env,
-        synthetic,
-    }
-    .convert_bin_expr(bin, expected)
-}
-
-/// Wrapper: delegates to [`Transformer::convert_unary_expr`].
-pub(super) fn convert_unary_expr(
-    unary: &ast::UnaryExpr,
-    tctx: &TransformContext<'_>,
-    type_env: &TypeEnv,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Result<Expr> {
-    let env = type_env.clone();
-    Transformer {
-        tctx,
-        type_env: env,
-        synthetic,
-    }
-    .convert_unary_expr(unary)
 }
 
 /// Converts an SWC binary operator to an IR [`BinOp`].

@@ -9,13 +9,10 @@ use swc_ecma_ast as ast;
 use crate::ir::{Expr, RustType};
 use crate::pipeline::type_converter::convert_ts_type;
 use crate::pipeline::type_resolution::Span;
-use crate::pipeline::SyntheticTypeRegistry;
-use crate::transformer::context::TransformContext;
 // Re-export for tests that use `super::*`
 #[cfg(test)]
 use crate::ir::{ClosureBody, Param};
 use crate::transformer::Transformer;
-use crate::transformer::TypeEnv;
 
 mod assignments;
 mod binary;
@@ -27,16 +24,8 @@ mod member_access;
 mod methods;
 pub(crate) mod patterns;
 mod type_resolution;
-use assignments::{convert_assign_expr, convert_update_expr};
+use assignments::convert_update_expr;
 pub(crate) use binary::convert_binary_op;
-use binary::{convert_bin_expr, convert_unary_expr};
-use calls::{convert_call_expr, convert_new_expr};
-use data_literals::{convert_array_lit, convert_object_lit};
-pub use functions::convert_arrow_expr;
-pub(crate) use functions::convert_arrow_expr_with_return_type;
-use functions::convert_fn_expr;
-use literals::convert_lit;
-use member_access::{convert_member_expr, convert_opt_chain_expr};
 pub(crate) use type_resolution::get_expr_type;
 
 impl<'a> Transformer<'a> {
@@ -72,13 +61,7 @@ impl<'a> Transformer<'a> {
             }
             // Literals → Some(convert(expr, inner_T))
             if matches!(expr, ast::Expr::Lit(_)) {
-                let inner_result = convert_expr_with_expected(
-                    expr,
-                    self.tctx,
-                    Some(inner),
-                    &self.type_env,
-                    self.synthetic,
-                )?;
+                let inner_result = self.convert_expr_with_expected(expr, Some(inner))?;
                 return Ok(Expr::FnCall {
                     name: "Some".to_string(),
                     args: vec![inner_result],
@@ -88,13 +71,7 @@ impl<'a> Transformer<'a> {
             if matches!(expr_type, Some(RustType::Option(_))) {
                 // Already produces Option — skip wrapping, fall through
             } else {
-                let inner_result = convert_expr_with_expected(
-                    expr,
-                    self.tctx,
-                    Some(inner),
-                    &self.type_env,
-                    self.synthetic,
-                )?;
+                let inner_result = self.convert_expr_with_expected(expr, Some(inner))?;
                 if matches!(&inner_result, Expr::Ident(name) if name == "None")
                     || matches!(&inner_result, Expr::FnCall { name, .. } if name == "Some")
                 {
@@ -117,75 +94,40 @@ impl<'a> Transformer<'a> {
                     _ => Ok(Expr::Ident(name)),
                 }
             }
-            ast::Expr::Lit(lit) => convert_lit(lit, expected, self.tctx),
-            ast::Expr::Bin(bin) => {
-                convert_bin_expr(bin, self.tctx, expected, &self.type_env, self.synthetic)
-            }
-            ast::Expr::Tpl(tpl) => {
-                convert_template_literal(tpl, self.tctx, &self.type_env, self.synthetic)
-            }
-            ast::Expr::Paren(paren) => {
-                convert_expr(&paren.expr, self.tctx, &self.type_env, self.synthetic)
-            }
-            ast::Expr::Member(member) => {
-                convert_member_expr(member, self.tctx, &self.type_env, self.synthetic)
-            }
+            ast::Expr::Lit(lit) => self.convert_lit(lit, expected),
+            ast::Expr::Bin(bin) => self.convert_bin_expr(bin, expected),
+            ast::Expr::Tpl(tpl) => self.convert_template_literal(tpl),
+            ast::Expr::Paren(paren) => self.convert_expr(&paren.expr),
+            ast::Expr::Member(member) => self.convert_member_expr(member),
             ast::Expr::This(_) => Ok(Expr::Ident("self".to_string())),
-            ast::Expr::Assign(assign) => {
-                convert_assign_expr(assign, self.tctx, &self.type_env, self.synthetic)
-            }
+            ast::Expr::Assign(assign) => self.convert_assign_expr(assign),
             ast::Expr::Update(up) => convert_update_expr(up),
-            ast::Expr::Arrow(arrow) => convert_arrow_expr(
-                arrow,
-                self.tctx,
-                false,
-                &mut Vec::new(),
-                &self.type_env,
-                self.synthetic,
-            ),
-            ast::Expr::Fn(fn_expr) => {
-                convert_fn_expr(fn_expr, self.tctx, &self.type_env, self.synthetic)
+            ast::Expr::Arrow(arrow) => {
+                self.convert_arrow_expr(arrow, false, &mut Vec::new())
             }
-            ast::Expr::Call(call) => {
-                convert_call_expr(call, self.tctx, &self.type_env, self.synthetic)
-            }
-            ast::Expr::New(new_expr) => {
-                convert_new_expr(new_expr, self.tctx, &self.type_env, self.synthetic)
-            }
-            ast::Expr::Array(array_lit) => {
-                convert_array_lit(array_lit, self.tctx, expected, &self.type_env, self.synthetic)
-            }
-            ast::Expr::Object(obj_lit) => {
-                convert_object_lit(obj_lit, self.tctx, expected, &self.type_env, self.synthetic)
-            }
-            ast::Expr::Cond(cond) => {
-                convert_cond_expr(cond, self.tctx, &self.type_env, self.synthetic)
-            }
-            ast::Expr::Unary(unary) => {
-                convert_unary_expr(unary, self.tctx, &self.type_env, self.synthetic)
-            }
+            ast::Expr::Fn(fn_expr) => self.convert_fn_expr(fn_expr),
+            ast::Expr::Call(call) => self.convert_call_expr(call),
+            ast::Expr::New(new_expr) => self.convert_new_expr(new_expr),
+            ast::Expr::Array(array_lit) => self.convert_array_lit(array_lit, expected),
+            ast::Expr::Object(obj_lit) => self.convert_object_lit(obj_lit, expected),
+            ast::Expr::Cond(cond) => self.convert_cond_expr(cond),
+            ast::Expr::Unary(unary) => self.convert_unary_expr(unary),
             ast::Expr::TsAs(ts_as) => match convert_ts_type(&ts_as.type_ann, self.synthetic, reg) {
                 Ok(target_ty) if matches!(target_ty, RustType::F64 | RustType::Bool) => {
-                    let inner =
-                        convert_expr(&ts_as.expr, self.tctx, &self.type_env, self.synthetic)?;
+                    let inner = self.convert_expr(&ts_as.expr)?;
                     Ok(Expr::Cast {
                         expr: Box::new(inner),
                         target: target_ty,
                     })
                 }
-                _ => convert_expr(&ts_as.expr, self.tctx, &self.type_env, self.synthetic),
+                _ => self.convert_expr(&ts_as.expr),
             },
-            ast::Expr::OptChain(opt_chain) => {
-                convert_opt_chain_expr(opt_chain, self.tctx, &self.type_env, self.synthetic)
-            }
+            ast::Expr::OptChain(opt_chain) => self.convert_opt_chain_expr(opt_chain),
             ast::Expr::Await(await_expr) => {
-                let inner =
-                    convert_expr(&await_expr.arg, self.tctx, &self.type_env, self.synthetic)?;
+                let inner = self.convert_expr(&await_expr.arg)?;
                 Ok(Expr::Await(Box::new(inner)))
             }
-            ast::Expr::TsNonNull(ts_non_null) => {
-                convert_expr(&ts_non_null.expr, self.tctx, &self.type_env, self.synthetic)
-            }
+            ast::Expr::TsNonNull(ts_non_null) => self.convert_expr(&ts_non_null.expr),
             _ => Err(anyhow!("unsupported expression: {:?}", expr)),
         }?;
 
@@ -201,33 +143,76 @@ impl<'a> Transformer<'a> {
 
         Ok(result)
     }
-}
 
-/// Wrapper: delegates to [`Transformer::convert_expr`].
-pub fn convert_expr(
-    expr: &ast::Expr,
-    tctx: &TransformContext<'_>,
-    type_env: &TypeEnv,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Result<Expr> {
-    convert_expr_with_expected(expr, tctx, None, type_env, synthetic)
-}
+    /// Converts a template literal to `Expr::FormatMacro`.
+    ///
+    /// `` `Hello ${name}` `` becomes `format!("Hello {}", name)`.
+    fn convert_template_literal(&mut self, tpl: &ast::Tpl) -> Result<Expr> {
+        let mut template = String::new();
+        let mut args = Vec::new();
 
-/// Wrapper: delegates to Transformer's convert_expr_with_expected.
-fn convert_expr_with_expected(
-    expr: &ast::Expr,
-    tctx: &TransformContext<'_>,
-    expected_override: Option<&RustType>,
-    type_env: &TypeEnv,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Result<Expr> {
-    let env = type_env.clone();
-    Transformer {
-        tctx,
-        type_env: env,
-        synthetic,
+        for (i, quasi) in tpl.quasis.iter().enumerate() {
+            template.push_str(&quasi.raw);
+            if i < tpl.exprs.len() {
+                template.push_str("{}");
+                let arg = self.convert_expr(&tpl.exprs[i])?;
+                args.push(arg);
+            }
+        }
+
+        Ok(Expr::FormatMacro { template, args })
     }
-    .convert_expr_with_expected(expr, expected_override)
+
+    /// Converts an SWC conditional (ternary) expression to `Expr::If` or `Expr::IfLet`.
+    fn convert_cond_expr(&mut self, cond: &ast::CondExpr) -> Result<Expr> {
+        // Try narrowing: extract guard from the ternary condition
+        if let Some(guard) = patterns::extract_narrowing_guard(&cond.test) {
+            if let Some((pattern, is_swap)) =
+                guard.if_let_pattern(&self.type_env, self.tctx)
+            {
+                let (matched_ast, unmatched_ast) = if is_swap {
+                    (cond.alt.as_ref(), cond.cons.as_ref())
+                } else {
+                    (cond.cons.as_ref(), cond.alt.as_ref())
+                };
+
+                let original = self.type_env.get(guard.var_name()).cloned();
+                self.type_env.push_scope();
+                if let Some(original) = original {
+                    let narrowed = if is_swap {
+                        guard.narrowed_type_for_else(&original)
+                    } else {
+                        guard.narrowed_type_for_then(&original)
+                    };
+                    if let Some(narrowed) = narrowed {
+                        self.type_env
+                            .insert(guard.var_name().to_string(), narrowed);
+                    }
+                }
+                let matched_expr = self.convert_expr(matched_ast)?;
+                self.type_env.pop_scope();
+                let unmatched_expr = self.convert_expr(unmatched_ast)?;
+
+                let expr_ir = Expr::Ident(guard.var_name().to_string());
+                return Ok(Expr::IfLet {
+                    pattern,
+                    expr: Box::new(expr_ir),
+                    then_expr: Box::new(matched_expr),
+                    else_expr: Box::new(unmatched_expr),
+                });
+            }
+        }
+
+        // Fallback: regular if expression
+        let condition = self.convert_expr(&cond.test)?;
+        let then_expr = self.convert_expr(&cond.cons)?;
+        let else_expr = self.convert_expr(&cond.alt)?;
+        Ok(Expr::If {
+            condition: Box::new(condition),
+            then_expr: Box::new(then_expr),
+            else_expr: Box::new(else_expr),
+        })
+    }
 }
 
 /// Returns true when the expected type is a trait type (`Box<dyn Trait>`)
@@ -235,10 +220,9 @@ fn convert_expr_with_expected(
 fn needs_trait_box_coercion(
     expected: &RustType,
     src_expr: &ast::Expr,
-    tctx: &TransformContext<'_>,
+    tctx: &crate::transformer::context::TransformContext<'_>,
 ) -> bool {
     let reg = tctx.type_registry;
-    // Check if expected type is Box<dyn Trait> or a Named trait type
     let trait_name = match expected {
         RustType::Named { name, type_args }
             if name == "Box"
@@ -283,88 +267,5 @@ fn needs_trait_box_coercion(
     true
 }
 
-/// Converts a template literal to `Expr::FormatMacro`.
-///
-/// `` `Hello ${name}` `` becomes `format!("Hello {}", name)`.
-fn convert_template_literal(
-    tpl: &ast::Tpl,
-    tctx: &TransformContext<'_>,
-    type_env: &TypeEnv,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Result<Expr> {
-    let mut template = String::new();
-    let mut args = Vec::new();
-
-    for (i, quasi) in tpl.quasis.iter().enumerate() {
-        template.push_str(&quasi.raw);
-        if i < tpl.exprs.len() {
-            template.push_str("{}");
-            let arg = convert_expr(&tpl.exprs[i], tctx, type_env, synthetic)?;
-            args.push(arg);
-        }
-    }
-
-    Ok(Expr::FormatMacro { template, args })
-}
-
-/// Converts an SWC conditional (ternary) expression to `Expr::If` or `Expr::IfLet`.
-fn convert_cond_expr(
-    cond: &ast::CondExpr,
-    tctx: &TransformContext<'_>,
-    type_env: &TypeEnv,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Result<Expr> {
-    // Try narrowing: extract guard from the ternary condition
-    if let Some(guard) = patterns::extract_narrowing_guard(&cond.test) {
-        if let Some((pattern, is_swap)) = guard.if_let_pattern(type_env, tctx) {
-            let (matched_ast, unmatched_ast) = if is_swap {
-                (cond.alt.as_ref(), cond.cons.as_ref())
-            } else {
-                (cond.cons.as_ref(), cond.alt.as_ref())
-            };
-
-            let mut narrowed_env = type_env.clone();
-            narrowed_env.push_scope();
-            if let Some(original) = type_env.get(guard.var_name()).cloned() {
-                let narrowed = if is_swap {
-                    guard.narrowed_type_for_else(&original)
-                } else {
-                    guard.narrowed_type_for_then(&original)
-                };
-                if let Some(narrowed) = narrowed {
-                    narrowed_env.insert(guard.var_name().to_string(), narrowed);
-                }
-            }
-            let matched_expr = convert_expr(matched_ast, tctx, &narrowed_env, synthetic)?;
-            let unmatched_expr = convert_expr(unmatched_ast, tctx, type_env, synthetic)?;
-
-            let expr_ir = Expr::Ident(guard.var_name().to_string());
-            return Ok(Expr::IfLet {
-                pattern,
-                expr: Box::new(expr_ir),
-                then_expr: Box::new(matched_expr),
-                else_expr: Box::new(unmatched_expr),
-            });
-        }
-    }
-
-    // Fallback: regular if expression
-    let condition = convert_expr(&cond.test, tctx, type_env, synthetic)?;
-    let then_expr = convert_expr(&cond.cons, tctx, type_env, synthetic)?;
-    let else_expr = convert_expr(&cond.alt, tctx, type_env, synthetic)?;
-    Ok(Expr::If {
-        condition: Box::new(condition),
-        then_expr: Box::new(then_expr),
-        else_expr: Box::new(else_expr),
-    })
-}
-
-/// Returns true if the AST expression inherently produces `Option` when
-/// expected type is `Option<T>` — based on AST structure, not type resolution.
-///
-/// Detects:
-/// - Optional chaining (`?.`) — always produces Option
-/// - Ternary with null/undefined branch (`x ? y : null`) — produces Option
-///
 #[cfg(test)]
 mod tests;

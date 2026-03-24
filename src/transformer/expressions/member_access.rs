@@ -4,14 +4,10 @@ use anyhow::{anyhow, Result};
 use swc_ecma_ast as ast;
 
 use crate::ir::{ClosureBody, Expr, MatchArm, MatchPattern, Param, RustType, Stmt};
-use crate::pipeline::SyntheticTypeRegistry;
-use crate::registry::{TypeDef, TypeRegistry};
-use crate::transformer::TypeEnv;
+use crate::registry::TypeDef;
 
-use super::convert_expr;
 use super::methods::map_method_call;
 use super::type_resolution::{get_expr_type, resolve_field_type};
-use crate::transformer::context::TransformContext;
 use crate::transformer::Transformer;
 
 impl<'a> Transformer<'a> {
@@ -89,17 +85,12 @@ impl<'a> Transformer<'a> {
 
                 // Non-Option type with known type: plain member access
                 if !is_option && obj_type.is_some() {
-                    return convert_member_expr(
-                        member,
-                        self.tctx,
-                        &self.type_env,
-                        self.synthetic,
-                    );
+                    return self.convert_member_expr(member);
                 }
 
                 // Cat A: receiver object for optional chaining
                 let object =
-                    convert_expr(&member.obj, self.tctx, &self.type_env, self.synthetic)?;
+                    self.convert_expr(&member.obj)?;
                 let body_expr = match &member.prop {
                     ast::MemberProp::Ident(ident) => {
                         let field = ident.sym.to_string();
@@ -111,12 +102,7 @@ impl<'a> Transformer<'a> {
                     }
                     ast::MemberProp::Computed(computed) => {
                         // Cat A: computed index
-                        let index = convert_expr(
-                            &computed.expr,
-                            self.tctx,
-                            &self.type_env,
-                            self.synthetic,
-                        )?;
+                        let index = self.convert_expr(&computed.expr)?;
                         Expr::Index {
                             object: Box::new(Expr::Ident("_v".to_string())),
                             index: Box::new(index),
@@ -165,18 +151,13 @@ impl<'a> Transformer<'a> {
                 let is_option =
                     callee_obj_type.is_some_and(|ty| matches!(ty, RustType::Option(_)));
 
-                let (object, method) = extract_method_from_callee(
-                    &opt_call.callee,
-                    self.tctx,
-                    &self.type_env,
-                    self.synthetic,
-                )?;
+                let (object, method) = self.extract_method_from_callee(&opt_call.callee)?;
 
                 let args: Vec<Expr> = opt_call
                     .args
                     .iter()
                     .map(|arg| {
-                        convert_expr(&arg.expr, self.tctx, &self.type_env, self.synthetic)
+                        self.convert_expr(&arg.expr)
                     })
                     .collect::<Result<_>>()?;
 
@@ -222,7 +203,7 @@ impl<'a> Transformer<'a> {
         if let ast::MemberProp::Computed(computed) = &member.prop {
             // Cat A: receiver object
             let object =
-                convert_expr(&member.obj, self.tctx, &self.type_env, self.synthetic)?;
+                self.convert_expr(&member.obj)?;
 
             // Tuple index access: pair[0] → pair.0 (Rust uses dot notation for tuples)
             if let Some(RustType::Tuple(_)) = get_expr_type(self.tctx, &member.obj) {
@@ -237,7 +218,7 @@ impl<'a> Transformer<'a> {
 
             // Cat A: computed index
             let index =
-                convert_expr(&computed.expr, self.tctx, &self.type_env, self.synthetic)?;
+                self.convert_expr(&computed.expr)?;
             return Ok(Expr::Index {
                 object: Box::new(object),
                 index: Box::new(index),
@@ -279,12 +260,7 @@ impl<'a> Transformer<'a> {
                 if field == *tag {
                     // Tag field → method call (e.g., s.kind() )
                     // Cat A: receiver object
-                    let object = convert_expr(
-                        &member.obj,
-                        self.tctx,
-                        &self.type_env,
-                        self.synthetic,
-                    )?;
+                    let object = self.convert_expr(&member.obj)?;
                     return Ok(Expr::MethodCall {
                         object: Box::new(object),
                         method: tag.clone(),
@@ -313,7 +289,7 @@ impl<'a> Transformer<'a> {
 
         // Cat A: receiver object
         let object =
-            convert_expr(&member.obj, self.tctx, &self.type_env, self.synthetic)?;
+            self.convert_expr(&member.obj)?;
         self.resolve_member_access(&object, &field, &member.obj)
     }
 
@@ -328,7 +304,7 @@ impl<'a> Transformer<'a> {
         variant_fields: &std::collections::HashMap<String, Vec<(String, RustType)>>,
     ) -> Result<Expr> {
         // Cat A: receiver object
-        let object = convert_expr(obj_expr, self.tctx, &self.type_env, self.synthetic)?;
+        let object = self.convert_expr(obj_expr)?;
         let match_expr = Expr::Ref(Box::new(object));
 
         let mut arms: Vec<MatchArm> = Vec::new();
@@ -371,99 +347,27 @@ impl<'a> Transformer<'a> {
     }
 }
 
-/// Wrapper: delegates to [`Transformer::resolve_member_access`].
-pub(super) fn resolve_member_access(
-    object: &Expr,
-    field: &str,
-    ts_obj: &ast::Expr,
-    reg: &TypeRegistry,
-) -> Result<Expr> {
-    let mg = crate::pipeline::ModuleGraph::empty();
-    let resolution = crate::pipeline::type_resolution::FileTypeResolution::empty();
-    let tctx = TransformContext::new(&mg, reg, &resolution, std::path::Path::new(""));
-    let type_env = crate::transformer::TypeEnv::new();
-    let mut synthetic = SyntheticTypeRegistry::new();
-    Transformer {
-        tctx: &tctx,
-        type_env: type_env,
-        synthetic: &mut synthetic,
+impl<'a> Transformer<'a> {
+    /// Extracts the object and method name from an optional call's callee.
+    ///
+    /// Handles both `x.method` (`Member`) and `x?.method` (`OptChain(Member)`) patterns.
+    fn extract_method_from_callee(
+        &mut self,
+        callee: &ast::Expr,
+    ) -> Result<(Expr, String)> {
+        let member = match callee {
+            ast::Expr::Member(member) => member,
+            ast::Expr::OptChain(opt) => match opt.base.as_ref() {
+                ast::OptChainBase::Member(member) => member,
+                _ => return Err(anyhow!("unsupported optional call callee")),
+            },
+            _ => return Err(anyhow!("unsupported optional call callee: {:?}", callee)),
+        };
+        let object = self.convert_expr(&member.obj)?;
+        let method = match &member.prop {
+            ast::MemberProp::Ident(ident) => ident.sym.to_string(),
+            _ => return Err(anyhow!("unsupported optional call property")),
+        };
+        Ok((object, method))
     }
-    .resolve_member_access(object, field, ts_obj)
-}
-
-/// Wrapper: delegates to [`Transformer::convert_opt_chain_expr`].
-pub(super) fn convert_opt_chain_expr(
-    opt_chain: &ast::OptChainExpr,
-    tctx: &TransformContext<'_>,
-    type_env: &TypeEnv,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Result<Expr> {
-    let env = type_env.clone();
-    Transformer {
-        tctx,
-        type_env: env,
-        synthetic,
-    }
-    .convert_opt_chain_expr(opt_chain)
-}
-
-/// Extracts the object and method name from an optional call's callee.
-///
-/// Handles both `x.method` (`Member`) and `x?.method` (`OptChain(Member)`) patterns.
-pub(super) fn extract_method_from_callee(
-    callee: &ast::Expr,
-    tctx: &TransformContext<'_>,
-    type_env: &TypeEnv,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Result<(Expr, String)> {
-    let member = match callee {
-        ast::Expr::Member(member) => member,
-        ast::Expr::OptChain(opt) => match opt.base.as_ref() {
-            ast::OptChainBase::Member(member) => member,
-            _ => return Err(anyhow!("unsupported optional call callee")),
-        },
-        _ => return Err(anyhow!("unsupported optional call callee: {:?}", callee)),
-    };
-    // Cat A: receiver object
-    let object = convert_expr(&member.obj, tctx, type_env, synthetic)?;
-    let method = match &member.prop {
-        ast::MemberProp::Ident(ident) => ident.sym.to_string(),
-        _ => return Err(anyhow!("unsupported optional call property")),
-    };
-    Ok((object, method))
-}
-
-/// Wrapper: delegates to [`Transformer::convert_member_expr`].
-pub(super) fn convert_member_expr(
-    member: &ast::MemberExpr,
-    tctx: &TransformContext<'_>,
-    type_env: &TypeEnv,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Result<Expr> {
-    let env = type_env.clone();
-    Transformer {
-        tctx,
-        type_env: env,
-        synthetic,
-    }
-    .convert_member_expr(member)
-}
-
-/// Wrapper: delegates to [`Transformer::convert_du_standalone_field_access`].
-pub(super) fn convert_du_standalone_field_access(
-    obj_expr: &ast::Expr,
-    enum_name: &str,
-    field: &str,
-    variant_fields: &std::collections::HashMap<String, Vec<(String, RustType)>>,
-    tctx: &TransformContext<'_>,
-    type_env: &TypeEnv,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Result<Expr> {
-    let env = type_env.clone();
-    Transformer {
-        tctx,
-        type_env: env,
-        synthetic,
-    }
-    .convert_du_standalone_field_access(obj_expr, enum_name, field, variant_fields)
 }

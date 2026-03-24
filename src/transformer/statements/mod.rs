@@ -10,7 +10,7 @@ use crate::pipeline::type_converter::convert_ts_type;
 use crate::pipeline::SyntheticTypeRegistry;
 use crate::transformer::context::TransformContext;
 use crate::transformer::expressions::patterns::extract_narrowing_guards;
-use crate::transformer::expressions::{convert_expr, get_expr_type};
+use crate::transformer::expressions::get_expr_type;
 use crate::transformer::TypeEnv;
 use crate::transformer::Transformer;
 use crate::transformer::{
@@ -50,7 +50,7 @@ impl<'a> Transformer<'a> {
                 let expr = ret
                     .arg
                     .as_ref()
-                    .map(|e| convert_expr(e, self.tctx, &self.type_env, self.synthetic))
+                    .map(|e| self.convert_expr(e))
                     .transpose()?;
                 Ok(vec![Stmt::Return(expr)])
             }
@@ -81,7 +81,7 @@ impl<'a> Transformer<'a> {
                 {
                     return Ok(stmts);
                 }
-                let expr = convert_expr(&expr_stmt.expr, self.tctx, &self.type_env, self.synthetic)?;
+                let expr = self.convert_expr(&expr_stmt.expr)?;
                 Ok(vec![Stmt::Expr(expr)])
             }
             ast::Stmt::Throw(throw_stmt) => Ok(vec![convert_throw_stmt(
@@ -203,7 +203,7 @@ impl<'a> Transformer<'a> {
             let init = declarator
                 .init
                 .as_ref()
-                .map(|e| convert_expr(e, self.tctx, &self.type_env, self.synthetic))
+                .map(|e| self.convert_expr(e))
                 .transpose()?;
 
             stmts.push(Stmt::Let {
@@ -418,11 +418,11 @@ impl<'a> Transformer<'a> {
         else_body: Option<Vec<Stmt>>,
     ) -> Result<Vec<Stmt>> {
         let rhs_type = get_expr_type(self.tctx, ca.rhs);
-        let rhs_ir = convert_expr(ca.rhs, self.tctx, &self.type_env, self.synthetic)?;
+        let rhs_ir = self.convert_expr(ca.rhs)?;
 
         if let Some(outer) = &ca.outer_comparison {
             let other =
-                convert_expr(outer.other_operand, self.tctx, &self.type_env, self.synthetic)?;
+                self.convert_expr(outer.other_operand)?;
             let ir_op = crate::transformer::expressions::convert_binary_op(outer.op)?;
             let condition = if outer.assign_on_left {
                 Expr::BinaryOp {
@@ -508,7 +508,7 @@ impl<'a> Transformer<'a> {
         body: Vec<Stmt>,
     ) -> Result<Vec<Stmt>> {
         let rhs_type = get_expr_type(self.tctx, ca.rhs);
-        let rhs_ir = convert_expr(ca.rhs, self.tctx, &self.type_env, self.synthetic)?;
+        let rhs_ir = self.convert_expr(ca.rhs)?;
 
         match rhs_type {
             Some(RustType::Option(_)) => Ok(vec![Stmt::WhileLet {
@@ -760,7 +760,7 @@ impl<'a> Transformer<'a> {
         }
 
         let condition =
-            convert_expr(&if_stmt.test, self.tctx, &self.type_env, self.synthetic)?;
+            self.convert_expr(&if_stmt.test)?;
         Ok(vec![Stmt::If {
             condition,
             then_body,
@@ -794,7 +794,7 @@ impl<'a> Transformer<'a> {
         }
         let mut parts: Vec<Expr> = Vec::new();
         for ast_expr in exprs {
-            parts.push(convert_expr(ast_expr, self.tctx, &self.type_env, self.synthetic)?);
+            parts.push(self.convert_expr(ast_expr)?);
         }
         let combined = parts
             .into_iter()
@@ -934,7 +934,7 @@ impl<'a> Transformer<'a> {
                     .as_ref()
                     .ok_or_else(|| anyhow!("unsupported for loop: no initializer"))?;
                 let start_expr =
-                    convert_expr(init, self.tctx, &self.type_env, self.synthetic)?;
+                    self.convert_expr(init)?;
                 (name, start_expr)
             }
             _ => {
@@ -958,7 +958,7 @@ impl<'a> Transformer<'a> {
                     if left_name != var {
                         return Err(anyhow!("unsupported for loop: condition var mismatch"));
                     }
-                    convert_expr(&bin.right, self.tctx, &self.type_env, self.synthetic)?
+                    self.convert_expr(&bin.right)?
                 }
                 _ => return Err(anyhow!("unsupported for loop: non-simple condition")),
             },
@@ -1051,7 +1051,7 @@ impl<'a> Transformer<'a> {
             _ => return Err(anyhow!("unsupported for...of left-hand side")),
         };
         let iterable =
-            convert_expr(&for_of.right, self.tctx, &self.type_env, self.synthetic)?;
+            self.convert_expr(&for_of.right)?;
         let body = convert_block_or_stmt(
             &for_of.body,
             self.tctx,
@@ -1085,7 +1085,7 @@ impl<'a> Transformer<'a> {
             _ => return Err(anyhow!("unsupported for...in left-hand side")),
         };
         let obj =
-            convert_expr(&for_in.right, self.tctx, &self.type_env, self.synthetic)?;
+            self.convert_expr(&for_in.right)?;
         let iterable = Expr::MethodCall {
             object: Box::new(obj),
             method: "keys".to_string(),
@@ -1115,12 +1115,7 @@ impl<'a> Transformer<'a> {
         let label_name = labeled.label.sym.to_string();
         match labeled.body.as_ref() {
             ast::Stmt::While(while_stmt) => {
-                let condition = convert_expr(
-                    &while_stmt.test,
-                    self.tctx,
-                    &self.type_env,
-                    self.synthetic,
-                )?;
+                let condition = self.convert_expr(&while_stmt.test)?;
                 let body = convert_block_or_stmt(
                     &while_stmt.body,
                     self.tctx,
@@ -1191,7 +1186,7 @@ impl<'a> Transformer<'a> {
         }
 
         let condition =
-            convert_expr(&while_stmt.test, self.tctx, &self.type_env, self.synthetic)?;
+            self.convert_expr(&while_stmt.test)?;
         Ok(vec![Stmt::While {
             label: None,
             condition,
@@ -1594,7 +1589,7 @@ impl<'a> Transformer<'a> {
                 if let Some(args) = &new_expr.args {
                     if let Some(first) = args.first() {
                         if let Ok(e) =
-                            convert_expr(&first.expr, self.tctx, &self.type_env, self.synthetic)
+                            self.convert_expr(&first.expr)
                         {
                             return e;
                         }
@@ -1602,7 +1597,7 @@ impl<'a> Transformer<'a> {
                 }
                 Expr::StringLit("unknown error".to_string())
             }
-            other => convert_expr(other, self.tctx, &self.type_env, self.synthetic)
+            other => self.convert_expr(other)
                 .unwrap_or_else(|_| Expr::StringLit("unknown error".to_string())),
         }
     }
@@ -1858,7 +1853,7 @@ impl<'a> Transformer<'a> {
             .iter()
             .filter_map(|e| e.as_ref())
             .map(|elem| {
-                let expr = convert_expr(&elem.expr, self.tctx, &self.type_env, self.synthetic)?;
+                let expr = self.convert_expr(&elem.expr)?;
                 Ok((elem.spread.is_some(), expr))
             })
             .collect()
@@ -2053,7 +2048,7 @@ impl<'a> Transformer<'a> {
             .init
             .as_ref()
             .ok_or_else(|| anyhow!("object destructuring requires an initializer"))?;
-        let source_expr = convert_expr(source, self.tctx, &self.type_env, self.synthetic)?;
+        let source_expr = self.convert_expr(source)?;
 
         let mutable = !matches!(var_decl.kind, ast::VarDeclKind::Const);
         let source_type = get_expr_type(self.tctx, source);
@@ -2141,7 +2136,7 @@ impl<'a> Transformer<'a> {
                     field: field_name.clone(),
                 };
                 let init_expr = if let Some(default_expr) = &assign.value {
-                    let default_ir = convert_expr(default_expr, tctx, type_env, synthetic)?;
+                    let default_ir = crate::transformer::Transformer { tctx, type_env: type_env.clone(), synthetic }.convert_expr(default_expr)?;
                     match &default_ir {
                         Expr::MethodCall { method, .. } if method == "to_string" => {
                             Expr::MethodCall {
@@ -2311,7 +2306,7 @@ impl<'a> Transformer<'a> {
         }
 
         let mut discriminant =
-            convert_expr(&switch.discriminant, self.tctx, &self.type_env, self.synthetic)?;
+            self.convert_expr(&switch.discriminant)?;
 
         let has_string_cases = switch
             .cases
@@ -2598,7 +2593,7 @@ impl<'a> Transformer<'a> {
 
     // Convert the match: match on &object (not object.tag)
     // Cat A: receiver object
-    let object = convert_expr(&member.obj, tctx, type_env, synthetic)?;
+    let object = crate::transformer::Transformer { tctx, type_env: type_env.clone(), synthetic }.convert_expr(&member.obj)?;
     let match_expr = Expr::Ref(Box::new(object));
 
     let mut arms: Vec<MatchArm> = Vec::new();
@@ -2890,7 +2885,7 @@ impl<'a> Transformer<'a> {
     };
 
     // Convert discriminant
-    let discriminant = convert_expr(&switch.discriminant, tctx, type_env, synthetic)?;
+    let discriminant = crate::transformer::Transformer { tctx, type_env: type_env.clone(), synthetic }.convert_expr(&switch.discriminant)?;
 
     let mut arms: Vec<MatchArm> = Vec::new();
     let mut pending_patterns: Vec<MatchPattern> = Vec::new();
@@ -2979,7 +2974,7 @@ impl<'a> Transformer<'a> {
 
     for case in &switch.cases {
         if let Some(test) = &case.test {
-            let pattern = convert_expr(test, tctx, type_env, synthetic)?;
+            let pattern = crate::transformer::Transformer { tctx, type_env: type_env.clone(), synthetic }.convert_expr(test)?;
             pending_exprs.push(pattern.clone());
             pending_patterns.push(MatchPattern::Literal(pattern));
         }
@@ -3086,7 +3081,7 @@ impl<'a> Transformer<'a> {
         if let Some(test) = &case.test {
             // case val: ...
             // Only propagate enum types to case values, not primitives
-            let test_expr = convert_expr(test, tctx, type_env, synthetic)?;
+            let test_expr = crate::transformer::Transformer { tctx, type_env: type_env.clone(), synthetic }.convert_expr(test)?;
             let condition = Expr::BinaryOp {
                 left: Box::new(Expr::BinaryOp {
                     left: Box::new(discriminant.clone()),
@@ -3161,7 +3156,7 @@ impl<'a> Transformer<'a> {
     };
 
     // Cat A: boolean context (do-while condition)
-    let condition = convert_expr(&do_while.test, tctx, type_env, synthetic)?;
+    let condition = crate::transformer::Transformer { tctx, type_env: type_env.clone(), synthetic }.convert_expr(&do_while.test)?;
     let break_check = Stmt::If {
         condition: Expr::UnaryOp {
             op: UnOp::Not,
@@ -3221,7 +3216,7 @@ impl<'a> Transformer<'a> {
         .as_ref()
         .ok_or_else(|| anyhow!("array destructuring requires an initializer"))?;
     // Cat A: destructuring source
-    let source_expr = convert_expr(source, tctx, type_env, synthetic)?;
+    let source_expr = crate::transformer::Transformer { tctx, type_env: type_env.clone(), synthetic }.convert_expr(source)?;
 
     let mutable = !matches!(var_decl.kind, ast::VarDeclKind::Const);
     let mut stmts = Vec::new();
@@ -3290,7 +3285,7 @@ impl<'a> Transformer<'a> {
                     .init
                     .as_ref()
                     // Cat A: for-loop initializer
-                    .map(|e| convert_expr(e, tctx, type_env, synthetic))
+                    .map(|e| crate::transformer::Transformer { tctx, type_env: type_env.clone(), synthetic }.convert_expr(e))
                     .transpose()?;
                 result.push(Stmt::Let {
                     mutable: true,
@@ -3302,7 +3297,7 @@ impl<'a> Transformer<'a> {
         }
         Some(ast::VarDeclOrExpr::Expr(expr)) => {
             // Cat A: for-loop init expression
-            let e = convert_expr(expr, tctx, type_env, synthetic)?;
+            let e = crate::transformer::Transformer { tctx, type_env: type_env.clone(), synthetic }.convert_expr(expr)?;
             result.push(Stmt::Expr(e));
         }
         None => {}
@@ -3314,7 +3309,7 @@ impl<'a> Transformer<'a> {
     // 2a. Condition → if !(condition) { break; }
     if let Some(test) = &for_stmt.test {
         // Cat A: boolean context (for-loop condition)
-        let condition = convert_expr(test, tctx, type_env, synthetic)?;
+        let condition = crate::transformer::Transformer { tctx, type_env: type_env.clone(), synthetic }.convert_expr(test)?;
         loop_body.push(Stmt::If {
             condition: Expr::UnaryOp {
                 op: UnOp::Not,
@@ -3374,17 +3369,13 @@ impl<'a> Transformer<'a> {
         }
         ast::Expr::Assign(assign) => {
             // Cat A: for-loop update expression
-            let e = convert_expr(
-                &ast::Expr::Assign(assign.clone()),
-                tctx,
-                type_env,
-                synthetic,
-            )?;
+            let e = crate::transformer::Transformer { tctx, type_env: type_env.clone(), synthetic }
+                .convert_expr(&ast::Expr::Assign(assign.clone()))?;
             Ok(Stmt::Expr(e))
         }
         other => {
             // Cat A: for-loop update expression
-            let e = convert_expr(other, tctx, type_env, synthetic)?;
+            let e = crate::transformer::Transformer { tctx, type_env: type_env.clone(), synthetic }.convert_expr(other)?;
             Ok(Stmt::Expr(e))
         }
     }

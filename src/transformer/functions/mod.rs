@@ -530,12 +530,12 @@ pub(crate) fn convert_default_value(
             let dummy_reg = TypeRegistry::new();
             let dummy_tctx =
                 TransformContext::new(&dummy_mg, &dummy_reg, &dummy_res, std::path::Path::new(""));
-            let expr = crate::transformer::expressions::convert_expr(
-                other,
-                &dummy_tctx,
-                &crate::transformer::TypeEnv::new(),
+            let expr = crate::transformer::Transformer {
+                tctx: &dummy_tctx,
+                type_env: crate::transformer::TypeEnv::new(),
                 synthetic,
-            )?;
+            }
+            .convert_expr(other)?;
             Ok((Some(expr), false))
         }
     }
@@ -611,12 +611,12 @@ impl<'a> Transformer<'a> {
                     };
                     let init_expr = if let Some(default_expr) = &assign.value {
                         // Cat B: field type could be looked up from struct definition
-                        let default_ir = crate::transformer::expressions::convert_expr(
-                            default_expr,
-                            self.tctx,
-                            &crate::transformer::TypeEnv::new(),
-                            self.synthetic,
-                        )?;
+                        let default_ir = crate::transformer::Transformer {
+                            tctx: self.tctx,
+                            type_env: crate::transformer::TypeEnv::new(),
+                            synthetic: self.synthetic,
+                        }
+                        .convert_expr(default_expr)?;
                         match &default_ir {
                             Expr::MethodCall { method, .. } if method == "to_string" => {
                                 Expr::MethodCall {
@@ -744,12 +744,12 @@ impl<'a> Transformer<'a> {
                     };
                     let init_expr = if let Some(default_expr) = &assign.value {
                         // Cat B: field type could be looked up from struct definition
-                        let default_ir = crate::transformer::expressions::convert_expr(
-                            default_expr,
-                            self.tctx,
-                            &crate::transformer::TypeEnv::new(),
-                            self.synthetic,
-                        )?;
+                        let default_ir = crate::transformer::Transformer {
+                            tctx: self.tctx,
+                            type_env: crate::transformer::TypeEnv::new(),
+                            synthetic: self.synthetic,
+                        }
+                        .convert_expr(default_expr)?;
                         match &default_ir {
                             Expr::MethodCall { method, .. } if method == "to_string" => {
                                 Expr::MethodCall {
@@ -1204,15 +1204,17 @@ impl<'a> Transformer<'a> {
                 }
             }
 
-            let closure = crate::transformer::expressions::convert_arrow_expr_with_return_type(
+            let closure = crate::transformer::Transformer {
+                tctx: self.tctx,
+                type_env: arrow_type_env.clone(),
+                synthetic: self.synthetic,
+            }
+            .convert_arrow_expr_with_return_type(
                 arrow,
-                self.tctx,
                 resilient,
                 &mut fallback_warnings,
-                &arrow_type_env,
                 var_return_type.as_ref(),
                 var_param_types.as_deref(),
-                self.synthetic,
             )?;
             match closure {
                 Expr::Closure {

@@ -6,9 +6,7 @@
 use swc_ecma_ast as ast;
 
 use crate::ir::{BinOp, Expr, RustType};
-use crate::pipeline::SyntheticTypeRegistry;
 use crate::registry::TypeDef;
-use crate::transformer::TypeEnv;
 
 use super::literals::lookup_string_enum_variant;
 use super::type_resolution::get_expr_type;
@@ -38,7 +36,7 @@ impl<'a> Transformer<'a> {
 
         // Cat A: comparison operand
         let other_ir =
-            super::convert_expr(other_expr, self.tctx, &self.type_env, self.synthetic).ok()?;
+            self.convert_expr(other_expr).ok()?;
         let method = if is_eq { "is_none" } else { "is_some" };
         Some(Expr::MethodCall {
             object: Box::new(other_ir),
@@ -68,12 +66,7 @@ impl<'a> Transformer<'a> {
             if let Some(enum_name) = resolve_enum_type_name(&bin.left, self.tctx) {
                 if let Some(variant) = lookup_string_enum_variant(reg, &enum_name, &str_value) {
                     // Cat A: comparison operand
-                    let left = super::convert_expr(
-                        &bin.left,
-                        self.tctx,
-                        &self.type_env,
-                        self.synthetic,
-                    )
+                    let left = self.convert_expr(&bin.left)
                     .ok()?;
                     return Some(Expr::BinaryOp {
                         left: Box::new(left),
@@ -89,12 +82,7 @@ impl<'a> Transformer<'a> {
             if let Some(enum_name) = resolve_enum_type_name(&bin.right, self.tctx) {
                 if let Some(variant) = lookup_string_enum_variant(reg, &enum_name, &str_value) {
                     // Cat A: comparison operand
-                    let right = super::convert_expr(
-                        &bin.right,
-                        self.tctx,
-                        &self.type_env,
-                        self.synthetic,
-                    )
+                    let right = self.convert_expr(&bin.right)
                     .ok()?;
                     return Some(Expr::BinaryOp {
                         left: Box::new(Expr::Ident(format!("{enum_name}::{variant}"))),
@@ -142,12 +130,7 @@ impl<'a> Transformer<'a> {
                     _ => "",
                 };
                 if variants.iter().any(|v| v == expected_variant) {
-                    let operand_ir = super::convert_expr(
-                        typeof_operand,
-                        self.tctx,
-                        &self.type_env,
-                        self.synthetic,
-                    )
+                    let operand_ir = self.convert_expr(typeof_operand)
                     .ok()?;
                     let pattern = format!("{enum_name}::{expected_variant}(_)");
                     let matches_expr = Expr::Matches {
@@ -176,12 +159,7 @@ impl<'a> Transformer<'a> {
             TypeofMatch::False => Expr::BoolLit(is_neq),
             TypeofMatch::IsNone => {
                 // Cat A: typeof operand
-                let operand_ir = super::convert_expr(
-                    typeof_operand,
-                    self.tctx,
-                    &self.type_env,
-                    self.synthetic,
-                )
+                let operand_ir = self.convert_expr(typeof_operand)
                 .ok()?;
                 let method = if is_neq { "is_some" } else { "is_none" };
                 Expr::MethodCall {
@@ -360,82 +338,6 @@ impl<'a> Transformer<'a> {
             Some(_) => Expr::BoolLit(false),
         }
     }
-}
-
-/// Wrapper: delegates to [`Transformer::try_convert_undefined_comparison`].
-pub(super) fn try_convert_undefined_comparison(
-    bin: &ast::BinExpr,
-    type_env: &TypeEnv,
-    tctx: &TransformContext<'_>,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Option<Expr> {
-    let env = type_env.clone();
-    Transformer {
-        tctx,
-        type_env: env,
-        synthetic,
-    }
-    .try_convert_undefined_comparison(bin)
-}
-
-/// Wrapper: delegates to [`Transformer::try_convert_enum_string_comparison`].
-pub(super) fn try_convert_enum_string_comparison(
-    bin: &ast::BinExpr,
-    type_env: &TypeEnv,
-    tctx: &TransformContext<'_>,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Option<Expr> {
-    let env = type_env.clone();
-    Transformer {
-        tctx,
-        type_env: env,
-        synthetic,
-    }
-    .try_convert_enum_string_comparison(bin)
-}
-
-/// Wrapper: delegates to [`Transformer::try_convert_typeof_comparison`].
-pub(super) fn try_convert_typeof_comparison(
-    bin: &ast::BinExpr,
-    type_env: &TypeEnv,
-    tctx: &TransformContext<'_>,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Option<Expr> {
-    let env = type_env.clone();
-    Transformer {
-        tctx,
-        type_env: env,
-        synthetic,
-    }
-    .try_convert_typeof_comparison(bin)
-}
-
-/// Wrapper: delegates to [`Transformer::convert_in_operator`].
-pub(super) fn convert_in_operator(bin: &ast::BinExpr, tctx: &TransformContext<'_>) -> Expr {
-    let type_env = crate::transformer::TypeEnv::new();
-    let mut synthetic = SyntheticTypeRegistry::new();
-    Transformer {
-        tctx,
-        type_env: type_env,
-        synthetic: &mut synthetic,
-    }
-    .convert_in_operator(bin)
-}
-
-/// Wrapper: delegates to [`Transformer::convert_instanceof`].
-pub(super) fn convert_instanceof(
-    bin: &ast::BinExpr,
-    type_env: &TypeEnv,
-    tctx: &TransformContext<'_>,
-) -> Expr {
-    let env = type_env.clone();
-    let mut synthetic = SyntheticTypeRegistry::new();
-    Transformer {
-        tctx,
-        type_env: env,
-        synthetic: &mut synthetic,
-    }
-    .convert_instanceof(bin)
 }
 
 /// 式から文字列リテラル値を抽出する。

@@ -8,12 +8,9 @@ use swc_ecma_ast as ast;
 
 use crate::ir::{ClosureBody, Expr, Param, RustType, Stmt};
 use crate::pipeline::type_converter::convert_ts_type;
-use crate::pipeline::SyntheticTypeRegistry;
 use crate::transformer::functions::{convert_last_return_to_tail, convert_ts_type_with_fallback};
 use crate::transformer::statements::convert_stmt;
-use crate::transformer::TypeEnv;
 
-use crate::transformer::context::TransformContext;
 use crate::transformer::Transformer;
 
 impl<'a> Transformer<'a> {
@@ -281,12 +278,7 @@ impl<'a> Transformer<'a> {
         let body = if expansion_stmts.is_empty() {
             match arrow.body.as_ref() {
                 ast::BlockStmtOrExpr::Expr(expr) => {
-                    let ir_expr = super::convert_expr(
-                        expr,
-                        self.tctx,
-                        &self.type_env,
-                        self.synthetic,
-                    )?;
+                    let ir_expr = self.convert_expr(expr)?;
                     ClosureBody::Expr(Box::new(ir_expr))
                 }
                 ast::BlockStmtOrExpr::BlockStmt(block) => {
@@ -310,12 +302,7 @@ impl<'a> Transformer<'a> {
             let mut body_stmts = expansion_stmts;
             match arrow.body.as_ref() {
                 ast::BlockStmtOrExpr::Expr(expr) => {
-                    let ir_expr = super::convert_expr(
-                        expr,
-                        self.tctx,
-                        &self.type_env,
-                        self.synthetic,
-                    )?;
+                    let ir_expr = self.convert_expr(expr)?;
                     body_stmts.push(Stmt::Return(Some(ir_expr)));
                 }
                 ast::BlockStmtOrExpr::BlockStmt(block) => {
@@ -343,63 +330,3 @@ impl<'a> Transformer<'a> {
     }
 }
 
-/// Wrapper: delegates to [`Transformer::convert_fn_expr`].
-pub(super) fn convert_fn_expr(
-    fn_expr: &ast::FnExpr,
-    tctx: &TransformContext<'_>,
-    type_env: &TypeEnv,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Result<Expr> {
-    let env = type_env.clone();
-    Transformer {
-        tctx,
-        type_env: env,
-        synthetic,
-    }
-    .convert_fn_expr(fn_expr)
-}
-
-/// Wrapper: delegates to [`Transformer::convert_arrow_expr`].
-pub fn convert_arrow_expr(
-    arrow: &ast::ArrowExpr,
-    tctx: &TransformContext<'_>,
-    resilient: bool,
-    fallback_warnings: &mut Vec<String>,
-    type_env: &TypeEnv,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Result<Expr> {
-    let env = type_env.clone();
-    Transformer {
-        tctx,
-        type_env: env,
-        synthetic,
-    }
-    .convert_arrow_expr(arrow, resilient, fallback_warnings)
-}
-
-/// Wrapper: delegates to [`Transformer::convert_arrow_expr_with_return_type`].
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn convert_arrow_expr_with_return_type(
-    arrow: &ast::ArrowExpr,
-    tctx: &TransformContext<'_>,
-    resilient: bool,
-    fallback_warnings: &mut Vec<String>,
-    type_env: &TypeEnv,
-    override_return_type: Option<&RustType>,
-    override_param_types: Option<&[RustType]>,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Result<Expr> {
-    let env = type_env.clone();
-    Transformer {
-        tctx,
-        type_env: env,
-        synthetic,
-    }
-    .convert_arrow_expr_with_return_type(
-        arrow,
-        resilient,
-        fallback_warnings,
-        override_return_type,
-        override_param_types,
-    )
-}

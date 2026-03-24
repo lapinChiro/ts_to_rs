@@ -11,7 +11,6 @@ use crate::ir::{AssocConst, Expr, Item, Method, Param, RustType, Stmt, StructFie
 use crate::pipeline::type_converter::convert_ts_type;
 use crate::pipeline::SyntheticTypeRegistry;
 use crate::transformer::context::TransformContext;
-use crate::transformer::expressions::convert_expr;
 use crate::transformer::extract_prop_name;
 use crate::transformer::functions::convert_last_return_to_tail;
 use crate::transformer::statements::convert_stmt;
@@ -576,7 +575,12 @@ impl<'a> Transformer<'a> {
         let ty = convert_ts_type(&type_ann.type_ann, self.synthetic, reg)?;
 
         let value = match &prop.value {
-            Some(init) => convert_expr(init, self.tctx, &TypeEnv::new(), self.synthetic)?,
+            Some(init) => Transformer {
+                tctx: self.tctx,
+                type_env: TypeEnv::new(),
+                synthetic: self.synthetic,
+            }
+            .convert_expr(init)?,
             None => return Ok(None), // No initializer — skip
         };
 
@@ -788,7 +792,12 @@ impl<'a> Transformer<'a> {
         for stmt in stmts {
             if let Some((field_name, value_expr)) = try_extract_this_assignment(stmt) {
                 // Cat B: field type could be looked up from class definition
-                let value = convert_expr(value_expr, self.tctx, &type_env, self.synthetic)?;
+                let value = Transformer {
+                    tctx: self.tctx,
+                    type_env: type_env.clone(),
+                    synthetic: self.synthetic,
+                }
+                .convert_expr(value_expr)?;
                 fields.push((field_name, value));
             } else {
                 other_stmts.extend(convert_stmt(

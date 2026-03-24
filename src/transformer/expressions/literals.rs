@@ -8,7 +8,6 @@ use swc_ecma_ast as ast;
 
 use crate::ir::{BinOp, Expr, RustType};
 use crate::registry::{TypeDef, TypeRegistry};
-use crate::transformer::context::TransformContext;
 use crate::transformer::Transformer;
 
 impl<'a> Transformer<'a> {
@@ -77,21 +76,6 @@ impl<'a> Transformer<'a> {
     }
 }
 
-/// Wrapper: delegates to [`Transformer::convert_lit`].
-pub(super) fn convert_lit(
-    lit: &ast::Lit,
-    expected: Option<&RustType>,
-    tctx: &TransformContext<'_>,
-) -> Result<Expr> {
-    let type_env = crate::transformer::TypeEnv::new();
-    let mut synthetic = crate::pipeline::SyntheticTypeRegistry::new();
-    Transformer {
-        tctx,
-        type_env: type_env,
-        synthetic: &mut synthetic,
-    }
-    .convert_lit(lit, expected)
-}
 
 /// 文字列リテラル値から string literal union enum のバリアント名を逆引きする。
 pub(super) fn lookup_string_enum_variant<'a>(
