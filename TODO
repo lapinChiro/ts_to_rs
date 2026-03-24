@@ -45,6 +45,7 @@
 - **ディレクトリモード改善**: 中間ディレクトリ（サブディレクトリのみ）の mod.rs 生成。`../` import パスの `crate::` パス解決。ハイフン入りファイル名のアンダースコア変換。ディレクトリ単位コンパイルチェック（ベンチマーク 2 指標並行計測）
 - **モジュール参照解決の一本化**: `ModuleGraph` が全ファイルの import/export を事前解析し re-export チェーンを解決。`TrivialResolver`（単一ファイルモード用）導入。フォールバック（`convert_relative_path_to_crate_path`）を廃止し、パス→モジュールパス変換を `file_path_to_module_path()` に集約
 - **I-212 union 型 enum 重複定義の解消**: per-file `SyntheticTypeRegistry` の `register_union` dedup により、同一ファイル内の同じ union 型は 1 つの enum に統一
+- **I-226 TypeEnv 完全除去**: TypeEnv 構造体を完全削除。全型情報を FileTypeResolution 経由に一本化。TypeResolver から未使用の module_graph フィールドも除去
 
 ---
 
@@ -82,22 +83,6 @@
   - 解決策: default を常に最後のアームに移動する
   - 発生頻度は極めて低いが、サイレント意味変更カテゴリのため Tier 1
 
-#### アーキテクチャ（伝播防止最優先）
-
-- **[I-226]** **`TypeEnv` の完全除去 — Transformer から `type_env` を除去** — 伝播リスク最大
-  - **理想的な姿**: 全ての型情報を TypeResolver の pre-pass 結果（`FileTypeResolution`）から読み取る。型情報の源泉が一本化され、TypeResolver と Transformer の間の型不整合が構造的に排除される
-  - **除去すべき理由**: TypeResolver（`src/pipeline/type_resolver.rs`）と TypeEnv（`src/transformer/type_env.rs`）が同一の情報を並行保持する DRY 違反。新しい変換構文を追加するたびに両方を更新する必要があり、一方の更新漏れがサイレントな型不整合を生む。**対応構文が増えるほど除去コストが膨らむため、他の型関連タスク（I-112c, I-218 等）より先に対応すべき**
-  - **現在の `type_env` 用途（プロダクションコード）**: `get()` 8箇所（6ファイル）、`insert()` 16箇所（5ファイル）、`push_scope()`/`pop_scope()` 各2箇所（`statements/mod.rs`, `expressions/mod.rs`）
-  - **用途の分類と置換方針**:
-    1. **Narrowing ガード** (`expressions/mod.rs:175-188`, `expressions/patterns.rs:276,403`): if/else の narrowing スコープ。`type_env.get(var_name)` で元の型を取得し、`push_scope` → `insert(narrowed)` → body 変換 → `pop_scope`。**置換方針**: TypeResolver の `FileTypeResolution` が同じ情報を提供済み。TypeEnv の narrowing 用 push_scope/pop_scope を削除すれば、この分類の全用途が消滅する
-    2. **DU match arm フィールドバインディング** (`statements/mod.rs:2063-2078`, `member_access.rs:256`): switch → match 変換時に destructuring されたフィールド変数を match arm スコープに登録。`member_access.rs:256` で「この変数名が TypeEnv に存在するか」をチェックし、match arm 内のフィールドアクセスを clone に変換。**置換方針**: Transformer が match arm 生成時に IR レベルでバインディング情報を保持し、member_access 変換で参照する
-    3. **変数宣言の型登録** (`statements/mod.rs:363,392,455,1195,1204,1208`): 明示的型注釈 or `get_expr_type` で推論した型を登録。後続の式変換で `type_env.get(name)` により参照される。**置換方針**: TypeResolver は既に全変数の型を `scope_stack` で追跡しており、`expr_types` 経由で参照可能。ただし名前（文字列）で参照する箇所は、AST ノードのスパンが必要になるため参照方法の変更が必要
-    4. **関数パラメータの型登録** (`functions/mod.rs:165`, `classes.rs:759`, `statements/mod.rs:2720`): 関数 body 変換前にパラメータ型を登録。**置換方針**: TypeResolver が既にパラメータをスコープに登録し、body 内の式の型を解決済み。`expr_types` 経由で参照可能
-    5. **any-narrowing enum オーバーライド** (`functions/mod.rs:172,1176`, `statements/mod.rs:119`): AnyTypeAnalyzer が生成した enum 型で Any 型を上書き。**置換方針**: AnyTypeAnalyzer の結果を TypeResolver に統合し、`resolve_expr` が Any 型の変数に対して enum 型を返すようにする
-    6. **関数型変数の参照** (`calls.rs:44`): `type_env.get(&fn_name)` で Fn 型を参照し、パラメータ型を取得。**置換方針**: `get_expr_type(tctx, callee_expr)` で Fn 型を取得可能
-  - **依存**: 分類 1 の除去（TypeEnv の narrowing 用 push_scope/pop_scope 削除）が前提。これが完了すると残る用途は分類 2〜6 のみ
-  - 伝播リスク: 新機能追加時に TypeResolver と TypeEnv の両方を更新する必要がある現状が続く
-
 #### 型基盤の穴埋め（伝播防止）
 
 - **[I-218]** **ジェネリクス基盤の残課題** — `TypeParam`/`instantiate`/`substitute` の基盤は構築済みだが、以下が未対応。**`type_params` 参照が 169箇所、`Item::Impl` 生成が 43箇所あり、ジェネリクスに依存する機能（I-112c, I-101 等）を先に実装すると「type_params が空のときの回避策」が蓄積するため、I-112c より先に対応すべき**
@@ -113,7 +98,7 @@
   - エラーメッセージ: `object literal requires a type annotation to determine struct name`
   - Hono の最大のエラーカテゴリ。解消すれば変換成功率が大幅に改善する
   - 解決策: 代入先の型、関数引数の型、return 文の戻り値型などから struct 名を推定する。推定できない場合は匿名構造体（タプル struct or インライン定義）を検討
-  - 🔗 I-226（TypeEnv 除去）と I-218（ジェネリクス穴埋め）の完了後に着手すべき。TypeResolver 一本化済み + ジェネリクス正常化済みの状態で実装することで、workaround を避けられる
+  - 🔗 I-218（ジェネリクス穴埋め）の完了後に着手すべき。TypeResolver 一本化は I-226 で達成済み。ジェネリクス正常化済みの状態で実装することで、workaround を避けられる
 
 #### ビルトイン型
 
@@ -147,9 +132,9 @@
 #### 型 narrowing 残課題
 
 - **[I-215]** **typeof "object"/"function" の narrowing 内部型解決** — 型 narrowing
-  - `typeof_string_to_rust_type` が "string"/"number"/"boolean" のみ対応し、"object"/"function" は `None` を返す
-  - パターンマッチ自体は正しいが、case body / then ブランチ内で変数の type_env が narrowing されず型依存変換が不正確になりうる
-  - 解決策: enum バリアントの内部型を TypeRegistry から解決し、narrowing に使用する
+  - TypeResolver の narrowing_events は "string"/"number"/"boolean" のみ narrowed type を設定し、"object"/"function" は未対応
+  - パターンマッチ自体は正しいが、case body / then ブランチ内で変数の narrowed type が設定されず型依存変換が不正確になりうる
+  - 解決策: enum バリアントの内部型を TypeRegistry から解決し、TypeResolver の narrowing_events に設定する
   - if let・三項演算子・switch typeof の全てに影響
 - **[I-213]** **`!==` / `!=` ガードの排除 narrowing** — 型 narrowing
   - `typeof x !== "number"` の if 文 then ブランチで `x` が `String` に narrowing されない（`StringOrF64` のまま）
