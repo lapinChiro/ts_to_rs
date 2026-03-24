@@ -145,7 +145,7 @@ impl<'a> Transformer<'a> {
 
     /// Converts a unary expression (`!x`, `-x`, `typeof x`) to IR.
     pub(crate) fn convert_unary_expr(&mut self, unary: &ast::UnaryExpr) -> Result<Expr> {
-        // typeof x → resolve based on TypeEnv
+        // typeof x → resolve based on FileTypeResolution
         if unary.op == ast::UnaryOp::TypeOf {
             let operand_type = self.get_expr_type(&unary.arg);
             return Ok(match operand_type {

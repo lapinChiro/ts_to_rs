@@ -78,8 +78,7 @@ impl TctxFixture {
             source: source.to_string(),
             module,
         };
-        let mut resolver =
-            crate::pipeline::type_resolver::TypeResolver::new(&reg, &mut synthetic);
+        let mut resolver = crate::pipeline::type_resolver::TypeResolver::new(&reg, &mut synthetic);
         let res = resolver.resolve_file(&parsed);
         let module = parsed.module;
         Self {
@@ -94,7 +93,6 @@ impl TctxFixture {
     pub fn tctx(&self) -> TransformContext<'_> {
         TransformContext::new(&self.mg, &self.reg, &self.res, Path::new("test.ts"))
     }
-
 
     /// 解析済み Module への参照を返す。
     ///

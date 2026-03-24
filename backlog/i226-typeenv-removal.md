@@ -217,12 +217,12 @@ any-narrowing enum パラメータ（`functions/mod.rs:1176`）は特殊: AnyTyp
 - **完了条件**: ✅
 - **依存**: T4 ✅, T5 ✅, T6 ✅, T7 ✅
 
-### T9: TypeEnv 構造体の削除
+### T9: TypeEnv 構造体の削除 ✅
 
 - **作業内容**: `src/transformer/type_env.rs` から `TypeEnv` struct とその impl を削除。`pub use type_env::TypeEnv` を `mod.rs` から削除。`wrap_trait_for_position` / `TypePosition` は独立ユーティリティとして残存させる（使用箇所がある限り）
-- **レガシーコメント修正**: 変更対象ファイル内に `P-N` / `I-NNN` / `F-Nb` 等のイシュー番号やフェーズ番号のみのコメントがあれば、内容が伝わる説明コメントに書き換える
-- **完了条件**: `TypeEnv` 型がコードベースに存在しない。コンパイル通過
-- **依存**: T8
+- **実績**: TypeEnv struct + Default impl + 全メソッドを削除。`mod.rs` の `pub use type_env::TypeEnv` を削除。コメント内の `TypeEnv` 参照 6 箇所を `FileTypeResolution` に修正。`type_env.rs` のモジュールコメントを更新
+- **完了条件**: ✅
+- **依存**: T8 ✅, T10 ✅
 
 ### T10: テストコードの TypeEnv 依存除去 ✅
 
@@ -231,12 +231,12 @@ any-narrowing enum パラメータ（`functions/mod.rs:1176`）は特殊: AnyTyp
 - **完了条件**: ✅
 - **依存**: T8 ✅
 
-### T11: 品質チェック + ベンチマーク
+### T11: 品質チェック + ベンチマーク ✅
 
 - **作業内容**: `cargo test` 全 GREEN、`cargo clippy --all-targets --all-features -- -D warnings` 0 警告、`cargo fmt --all --check` 通過、Hono ベンチマーク実行して結果が維持または改善
-- **最終レガシーコメント確認**: コードベース全体を `grep -rn 'P-[0-9]\|F-[0-9]\|#[0-9]\+:' src/` でスキャンし、残存するイシュー番号やフェーズ番号のみのコメントがないことを確認する。`I-NNN` は具体的なケースの来歴として許容するが、単独のラベル（`P-1`、`F-3b #1`）は不可
-- **完了条件**: 全品質チェック通過。ベンチマーク結果が前回（86 clean / 132 errors）以上。レガシーコメント残存ゼロ
-- **依存**: T9, T10
+- **実績**: 全テスト 1099+3+2+60+69=1233 通過。clippy 0 警告。fmt 通過。Hono ベンチマーク 86 clean / 132 errors（前回同一）。レガシーコメント(`P-N`/`F-N`)残存ゼロ
+- **完了条件**: ✅
+- **依存**: T9 ✅, T10 ✅
 
 ## テスト計画
 
@@ -254,11 +254,11 @@ any-narrowing enum パラメータ（`functions/mod.rs:1176`）は特殊: AnyTyp
 
 ## 完了条件
 
-- [ ] `TypeEnv` 構造体がコードベースから削除されている
-- [ ] `type_env` フィールドが Transformer struct から削除されている
-- [ ] 全ての型情報の読み取りが FileTypeResolution 経由に一本化されている
-- [ ] テストコードに TypeEnv への参照がゼロ
-- [ ] `cargo test` 全 GREEN
-- [ ] `cargo clippy --all-targets --all-features -- -D warnings` 0 警告
-- [ ] `cargo fmt --all --check` 通過
-- [ ] Hono ベンチマーク結果が 86 clean / 132 errors 以上
+- [x] `TypeEnv` 構造体がコードベースから削除されている
+- [x] `type_env` フィールドが Transformer struct から削除されている
+- [x] 全ての型情報の読み取りが FileTypeResolution 経由に一本化されている
+- [x] テストコードに TypeEnv への参照がゼロ
+- [x] `cargo test` 全 GREEN
+- [x] `cargo clippy --all-targets --all-features -- -D warnings` 0 警告
+- [x] `cargo fmt --all --check` 通過
+- [x] Hono ベンチマーク結果が 86 clean / 132 errors 以上

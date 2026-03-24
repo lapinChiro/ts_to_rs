@@ -55,10 +55,7 @@ struct VarInfo {
 
 impl<'a> TypeResolver<'a> {
     /// Creates a new TypeResolver.
-    pub fn new(
-        registry: &'a TypeRegistry,
-        synthetic: &'a mut SyntheticTypeRegistry,
-    ) -> Self {
+    pub fn new(registry: &'a TypeRegistry, synthetic: &'a mut SyntheticTypeRegistry) -> Self {
         Self {
             registry,
             synthetic,

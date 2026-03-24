@@ -91,8 +91,7 @@ pub fn transpile_pipeline(input: TranspileInput) -> Result<TranspileOutput> {
     let mut type_resolutions = Vec::with_capacity(parsed.files.len());
     for (file, any_overrides) in parsed.files.iter().zip(per_file_any_overrides.into_iter()) {
         let type_resolution = {
-            let mut resolver =
-                type_resolver::TypeResolver::new(&shared_registry, &mut synthetic);
+            let mut resolver = type_resolver::TypeResolver::new(&shared_registry, &mut synthetic);
             resolver.set_any_enum_overrides(any_overrides);
             resolver.resolve_file(file)
         };

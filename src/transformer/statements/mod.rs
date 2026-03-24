@@ -1962,7 +1962,7 @@ impl<'a> Transformer<'a> {
                 Vec::new()
             };
 
-            // Update bindings on pending patterns and register fields in TypeEnv
+            // Update bindings on pending patterns with needed field names
             if !needed_fields.is_empty() {
                 for pattern in &mut pending_patterns {
                     if let MatchPattern::EnumVariant { bindings, path, .. } = pattern {

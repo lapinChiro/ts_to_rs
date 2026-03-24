@@ -92,7 +92,7 @@ impl<'a> Transformer<'a> {
     }
 
     /// Detects `typeof x === "type"` / `typeof x !== "type"` patterns and resolves
-    /// them using TypeEnv. Returns `None` if the pattern is not recognized.
+    /// them using FileTypeResolution. Returns `None` if the pattern is not recognized.
     pub(crate) fn try_convert_typeof_comparison(&mut self, bin: &ast::BinExpr) -> Option<Expr> {
         let is_eq = matches!(bin.op, ast::BinaryOp::EqEq | ast::BinaryOp::EqEqEq);
         let is_neq = matches!(bin.op, ast::BinaryOp::NotEq | ast::BinaryOp::NotEqEq);
@@ -103,7 +103,7 @@ impl<'a> Transformer<'a> {
         // Extract (typeof operand, type string) from either order
         let (typeof_operand, type_str) = extract_typeof_and_string(bin)?;
 
-        // Resolve the operand's type from TypeEnv
+        // Resolve the operand's type from FileTypeResolution
         let operand_type = self.get_expr_type(typeof_operand);
 
         // If the operand is a union enum type, generate a matches!() expression
@@ -250,7 +250,7 @@ impl<'a> Transformer<'a> {
         }
     }
 
-    /// Converts `x instanceof ClassName` using TypeEnv.
+    /// Converts `x instanceof ClassName` using FileTypeResolution.
     ///
     /// - Known matching type → `true`
     /// - Known non-matching type → `false`
@@ -535,7 +535,7 @@ fn resolve_typeof_match(ty: &RustType, typeof_str: &str) -> TypeofMatch {
     }
 }
 
-/// Resolves typeof to a string literal based on TypeEnv type.
+/// Resolves typeof to a string literal based on FileTypeResolution type.
 pub(super) fn typeof_to_string(ty: &RustType) -> &'static str {
     match ty {
         RustType::String => "string",

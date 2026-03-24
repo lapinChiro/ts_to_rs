@@ -1,6 +1,4 @@
-//! Type environment for tracking local variable types during transformation.
-
-use std::collections::HashMap;
+//! Type position utilities for trait type wrapping.
 
 use crate::ir::RustType;
 use crate::registry::TypeRegistry;
@@ -47,62 +45,10 @@ pub(crate) fn wrap_trait_for_position(
     ty
 }
 
-/// ローカル変数の型情報を保持する型環境。
-///
-/// スコープチェーンにより、ブロックスコープでの変数シャドウイングを正しく追跡する。
-/// 変数宣言時にエントリを追加し、後続の式変換で参照する。
-#[derive(Debug, Clone)]
-pub struct TypeEnv {
-    scopes: Vec<HashMap<String, RustType>>,
-}
-
-impl Default for TypeEnv {
-    fn default() -> Self {
-        Self {
-            scopes: vec![HashMap::new()],
-        }
-    }
-}
-
-impl TypeEnv {
-    /// 新しい空の型環境を作成する。ルートスコープが 1 つ含まれる。
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// 新しい子スコープを開始する。
-    pub fn push_scope(&mut self) {
-        self.scopes.push(HashMap::new());
-    }
-
-    /// 現在のスコープを終了し、その中の変数を破棄する。
-    /// ルートスコープは pop しない。
-    pub fn pop_scope(&mut self) {
-        if self.scopes.len() > 1 {
-            self.scopes.pop();
-        }
-    }
-
-    /// 変数の型を現在のスコープに登録する。同スコープ内の同名変数は上書きされる。
-    pub fn insert(&mut self, name: String, ty: RustType) {
-        if let Some(scope) = self.scopes.last_mut() {
-            scope.insert(name, ty);
-        }
-    }
-
-    /// 変数名から型を取得する。最内スコープから順に探索する。
-    pub fn get(&self, name: &str) -> Option<&RustType> {
-        for scope in self.scopes.iter().rev() {
-            if let Some(ty) = scope.get(name) {
-                return Some(ty);
-            }
-        }
-        None
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use super::*;
     use crate::registry::{MethodSignature, TypeDef};
 

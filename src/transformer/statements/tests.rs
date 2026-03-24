@@ -26,7 +26,6 @@ fn convert_single_stmt(
     stmts.remove(0)
 }
 
-
 /// Helper: convert a single statement from source, running TypeResolver first.
 ///
 /// Unlike `convert_single_stmt`, this runs TypeResolver to populate expected types.

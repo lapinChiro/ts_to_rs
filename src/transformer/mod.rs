@@ -12,7 +12,6 @@ pub mod statements;
 pub(crate) mod type_env;
 pub mod types;
 
-pub use type_env::TypeEnv;
 pub(crate) use type_env::{wrap_trait_for_position, TypePosition};
 
 use anyhow::Result;
