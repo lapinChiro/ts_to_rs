@@ -6803,3 +6803,129 @@ fn test_convert_expr_unary_plus_unknown_returns_identity() {
         .unwrap();
     assert_eq!(result, Expr::Ident("x".to_string()));
 }
+
+// --- NarrowingGuard var_span tests ---
+
+/// extract_narrowing_guard should capture var_span from the AST Ident node.
+#[test]
+fn test_narrowing_guard_typeof_captures_var_span() {
+    // typeof y === "string" — y's span should be captured
+    let module = parse_typescript(r#"typeof y === "string";"#).unwrap();
+    let expr = match &module.body[0] {
+        ModuleItem::Stmt(Stmt::Expr(expr_stmt)) => &*expr_stmt.expr,
+        _ => panic!("expected expression statement"),
+    };
+    let guard = patterns::extract_narrowing_guard(expr).expect("should extract guard");
+    match &guard {
+        patterns::NarrowingGuard::Typeof {
+            var_name, var_span, ..
+        } => {
+            assert_eq!(var_name, "y");
+            // var_span should not be a dummy span (lo > 0 for real AST nodes)
+            assert!(var_span.lo.0 > 0, "var_span should be a real span from AST");
+        }
+        _ => panic!("expected Typeof guard, got: {:?}", guard),
+    }
+}
+
+/// extract_narrowing_guard should capture var_span for NonNullish guards.
+#[test]
+fn test_narrowing_guard_nonnullish_captures_var_span() {
+    let module = parse_typescript("x !== null;").unwrap();
+    let expr = match &module.body[0] {
+        ModuleItem::Stmt(Stmt::Expr(expr_stmt)) => &*expr_stmt.expr,
+        _ => panic!("expected expression statement"),
+    };
+    let guard = patterns::extract_narrowing_guard(expr).expect("should extract guard");
+    match &guard {
+        patterns::NarrowingGuard::NonNullish {
+            var_name, var_span, ..
+        } => {
+            assert_eq!(var_name, "x");
+            assert!(var_span.lo.0 > 0, "var_span should be a real span from AST");
+        }
+        _ => panic!("expected NonNullish guard, got: {:?}", guard),
+    }
+}
+
+/// extract_narrowing_guard should capture var_span for InstanceOf guards.
+#[test]
+fn test_narrowing_guard_instanceof_captures_var_span() {
+    let module = parse_typescript("x instanceof Error;").unwrap();
+    let expr = match &module.body[0] {
+        ModuleItem::Stmt(Stmt::Expr(expr_stmt)) => &*expr_stmt.expr,
+        _ => panic!("expected expression statement"),
+    };
+    let guard = patterns::extract_narrowing_guard(expr).expect("should extract guard");
+    match &guard {
+        patterns::NarrowingGuard::InstanceOf {
+            var_name, var_span, ..
+        } => {
+            assert_eq!(var_name, "x");
+            assert!(var_span.lo.0 > 0, "var_span should be a real span from AST");
+        }
+        _ => panic!("expected InstanceOf guard, got: {:?}", guard),
+    }
+}
+
+/// extract_narrowing_guard should capture var_span for Truthy guards.
+#[test]
+fn test_narrowing_guard_truthy_captures_var_span() {
+    let module = parse_typescript("x;").unwrap();
+    let expr = match &module.body[0] {
+        ModuleItem::Stmt(Stmt::Expr(expr_stmt)) => &*expr_stmt.expr,
+        _ => panic!("expected expression statement"),
+    };
+    let guard = patterns::extract_narrowing_guard(expr).expect("should extract guard");
+    match &guard {
+        patterns::NarrowingGuard::Truthy {
+            var_name, var_span, ..
+        } => {
+            assert_eq!(var_name, "x");
+            assert!(var_span.lo.0 > 0, "var_span should be a real span from AST");
+        }
+        _ => panic!("expected Truthy guard, got: {:?}", guard),
+    }
+}
+
+/// resolve_if_let_pattern should retrieve variable type from FileTypeResolution,
+/// not from type_env. This test creates a Transformer with empty type_env but
+/// a properly populated FileTypeResolution.
+#[test]
+fn test_resolve_if_let_pattern_option_via_type_resolution() {
+    let source = r#"function f(x: string | null): string { return x !== null ? x : ""; }"#;
+    let f = TctxFixture::from_source(source);
+    let tctx = f.tctx();
+
+    // Create Transformer — type_env is empty (we did NOT call convert_fn_decl)
+    let mut synthetic = SyntheticTypeRegistry::new();
+    let transformer = Transformer::for_module(&tctx, &mut synthetic);
+
+    // Extract the CondExpr from the AST
+    let fn_decl = match &f.module().body[0] {
+        ModuleItem::Stmt(Stmt::Decl(Decl::Fn(fd))) => fd,
+        _ => panic!("expected fn decl"),
+    };
+    let return_stmt = &fn_decl.function.body.as_ref().unwrap().stmts[0];
+    let cond_expr = match return_stmt {
+        Stmt::Return(ret) => match ret.arg.as_deref() {
+            Some(ast::Expr::Cond(cond)) => cond,
+            _ => panic!("expected cond expr in return"),
+        },
+        _ => panic!("expected return stmt"),
+    };
+
+    // Extract narrowing guard from the condition
+    let guard = patterns::extract_narrowing_guard(&cond_expr.test)
+        .expect("should extract NonNullish guard from x !== null");
+
+    // resolve_if_let_pattern should work via FileTypeResolution (type_env is empty)
+    let result = transformer.resolve_if_let_pattern(&guard);
+    // is_swap=false because `!==` means is_neq=true, and !is_neq=false (no swap needed:
+    // then-branch is the "matched" branch, else-branch is the fallback)
+    assert_eq!(
+        result,
+        Some(("Some(x)".to_string(), false)),
+        "should resolve NonNullish guard on Option<String> to Some(x) pattern"
+    );
+}

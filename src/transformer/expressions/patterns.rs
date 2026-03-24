@@ -400,7 +400,14 @@ impl<'a> Transformer<'a> {
     /// (meaning then/else branches should be swapped).
     /// Returns `None` if the guard cannot generate an if-let pattern.
     pub(crate) fn resolve_if_let_pattern(&self, guard: &NarrowingGuard) -> Option<(String, bool)> {
-        let var_type = self.type_env.get(guard.var_name())?;
+        // type_env has priority: AnyTypeAnalyzer overrides (e.g., any → enum type) are
+        // only in type_env, not yet in FileTypeResolution (migrated in T7).
+        // Fall back to FileTypeResolution for cases where type_env is empty
+        // (e.g., top-level or when Transformer was created without param registration).
+        let var_type = self
+            .type_env
+            .get(guard.var_name())
+            .or_else(|| self.get_type_for_var(guard.var_name(), guard.var_span()))?;
         match guard {
             NarrowingGuard::NonNullish { is_neq, .. } => {
                 if matches!(var_type, RustType::Option(_)) {
@@ -557,18 +564,31 @@ pub(crate) enum NarrowingGuard {
     /// `typeof x === "string"` (or "number", "boolean", etc.)
     Typeof {
         var_name: String,
+        /// The span of the variable Ident in the condition AST.
+        var_span: swc_common::Span,
         type_name: String,
         /// true if the comparison is `===`/`==` (narrows in then branch)
         /// false if `!==`/`!=` (narrows in else branch)
         is_eq: bool,
     },
     /// `x !== null` / `x !== undefined`
-    NonNullish { var_name: String, is_neq: bool },
+    NonNullish {
+        var_name: String,
+        /// The span of the variable Ident in the condition AST.
+        var_span: swc_common::Span,
+        is_neq: bool,
+    },
     /// `if (x)` — truthy check, narrows `Option<T>` to `T`
-    Truthy { var_name: String },
+    Truthy {
+        var_name: String,
+        /// The span of the variable Ident in the condition AST.
+        var_span: swc_common::Span,
+    },
     /// `x instanceof Foo`
     InstanceOf {
         var_name: String,
+        /// The span of the variable Ident in the condition AST.
+        var_span: swc_common::Span,
         class_name: String,
     },
 }
@@ -578,9 +598,19 @@ impl NarrowingGuard {
     pub(crate) fn var_name(&self) -> &str {
         match self {
             NarrowingGuard::Typeof { var_name, .. }
-            | NarrowingGuard::Truthy { var_name }
+            | NarrowingGuard::Truthy { var_name, .. }
             | NarrowingGuard::InstanceOf { var_name, .. }
             | NarrowingGuard::NonNullish { var_name, .. } => var_name,
+        }
+    }
+
+    /// Returns the SWC span of the variable Ident in the condition AST.
+    pub(crate) fn var_span(&self) -> swc_common::Span {
+        match self {
+            NarrowingGuard::Typeof { var_span, .. }
+            | NarrowingGuard::Truthy { var_span, .. }
+            | NarrowingGuard::InstanceOf { var_span, .. }
+            | NarrowingGuard::NonNullish { var_span, .. } => *var_span,
         }
     }
 
@@ -702,6 +732,7 @@ pub(crate) fn extract_narrowing_guard(condition: &ast::Expr) -> Option<Narrowing
                 {
                     return Some(NarrowingGuard::InstanceOf {
                         var_name: lhs.sym.to_string(),
+                        var_span: lhs.span,
                         class_name: rhs.sym.to_string(),
                     });
                 }
@@ -718,6 +749,7 @@ pub(crate) fn extract_narrowing_guard(condition: &ast::Expr) -> Option<Narrowing
             if let Some((ast::Expr::Ident(ident), type_str)) = extract_typeof_and_string(bin) {
                 return Some(NarrowingGuard::Typeof {
                     var_name: ident.sym.to_string(),
+                    var_span: ident.span,
                     type_name: type_str,
                     is_eq,
                 });
@@ -735,6 +767,7 @@ pub(crate) fn extract_narrowing_guard(condition: &ast::Expr) -> Option<Narrowing
                 if let Some(ast::Expr::Ident(ident)) = var_expr {
                     return Some(NarrowingGuard::NonNullish {
                         var_name: ident.sym.to_string(),
+                        var_span: ident.span,
                         is_neq,
                     });
                 }
@@ -749,7 +782,10 @@ pub(crate) fn extract_narrowing_guard(condition: &ast::Expr) -> Option<Narrowing
             if name == "undefined" || name == "null" || name == "true" || name == "false" {
                 return None;
             }
-            Some(NarrowingGuard::Truthy { var_name: name })
+            Some(NarrowingGuard::Truthy {
+                var_name: name,
+                var_span: ident.span,
+            })
         }
         _ => None,
     }

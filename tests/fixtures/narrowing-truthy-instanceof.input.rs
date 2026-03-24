@@ -1,0 +1,28 @@
+#[derive(Debug, Clone, PartialEq)]
+pub enum InstanceofAnyXType {
+    MyError(MyError),
+    Other(serde_json::Value),
+}
+
+fn truthyCheck(x: Option<String>) {
+    if let Some(x) = x {
+        println!("{}", x);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct MyError {
+    message: String,
+}
+
+impl MyError {
+    fn new(msg: String) -> Self {
+        Self { message: msg }
+    }
+}
+
+fn instanceofAny(x: InstanceofAnyXType) {
+    if matches!(x, InstanceofAnyXType::MyError(_)) {
+        println!("{}", x.message);
+    }
+}

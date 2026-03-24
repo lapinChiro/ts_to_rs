@@ -855,7 +855,10 @@ impl<'a> TypeResolver<'a> {
                 self.resolve_expr(&assign.right)
             }
             ast::Expr::Cond(cond) => {
-                // Ternary: resolve both branches.
+                // Ternary: resolve test and both branches.
+                // Test must be resolved so sub-expression types (e.g., variable Idents
+                // in `x !== null`) are available in expr_types for NarrowingGuard lookup.
+                self.resolve_expr(&cond.test);
                 // If either branch is null/undefined or already Option<T>,
                 // the result is Option<T>.
                 let cons = self.resolve_expr(&cond.cons);
@@ -2629,6 +2632,57 @@ mod tests {
         assert!(
             has_f64_expected,
             "arrow's own return annotation (number) should take priority"
+        );
+    }
+
+    #[test]
+    fn test_cond_expr_test_subexpressions_resolved() {
+        // TypeResolver should resolve CondExpr's test sub-expressions
+        // so that variable types in conditions are available in expr_types.
+        let source = r#"
+            function f(x: string | null): string {
+                return x !== null ? x : "";
+            }
+        "#;
+        let files = parse_files(vec![(PathBuf::from("test.ts"), source.to_string())]).unwrap();
+        let file = &files.files[0];
+        let reg = build_registry(&file.module);
+        let mut synthetic = SyntheticTypeRegistry::new();
+        let module_graph = ModuleGraph::empty();
+        let mut resolver = TypeResolver::new(&reg, &mut synthetic, &module_graph);
+        let res = resolver.resolve_file(file);
+
+        // Find x's Ident span in the condition `x !== null`
+        let fn_decl = match &file.module.body[0] {
+            swc_ecma_ast::ModuleItem::Stmt(swc_ecma_ast::Stmt::Decl(
+                swc_ecma_ast::Decl::Fn(fd),
+            )) => fd,
+            _ => panic!("expected fn decl"),
+        };
+        let return_stmt = &fn_decl.function.body.as_ref().unwrap().stmts[0];
+        let cond_expr = match return_stmt {
+            swc_ecma_ast::Stmt::Return(ret) => match ret.arg.as_deref() {
+                Some(swc_ecma_ast::Expr::Cond(cond)) => cond,
+                _ => panic!("expected cond expr"),
+            },
+            _ => panic!("expected return stmt"),
+        };
+        // test is `x !== null`, left is `x`
+        let x_ident = match cond_expr.test.as_ref() {
+            swc_ecma_ast::Expr::Bin(bin) => match bin.left.as_ref() {
+                swc_ecma_ast::Expr::Ident(ident) => ident,
+                _ => panic!("expected ident"),
+            },
+            _ => panic!("expected bin expr"),
+        };
+        let x_span = Span::from_swc(x_ident.span);
+
+        // x in the condition should have its type resolved
+        let x_type = res.expr_type(x_span);
+        assert!(
+            matches!(x_type, ResolvedType::Known(RustType::Option(_))),
+            "x in condition should be resolved to Option<String>, got: {:?}",
+            x_type
         );
     }
 }

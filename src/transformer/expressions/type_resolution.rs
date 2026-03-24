@@ -12,6 +12,28 @@ use crate::registry::TypeDef;
 use crate::transformer::Transformer;
 
 impl<'a> Transformer<'a> {
+    /// FileTypeResolution から変数名と Span で型を取得する。
+    ///
+    /// `get_expr_type` の Ident 特化版。NarrowingGuard のように AST Expr への参照を
+    /// 持たないが変数名と Span を持つ場合に使用する。
+    pub(crate) fn get_type_for_var(
+        &self,
+        name: &str,
+        span: swc_common::Span,
+    ) -> Option<&'a RustType> {
+        if let Some(narrowed) = self.tctx.type_resolution.narrowed_type(name, span.lo.0) {
+            return Some(narrowed);
+        }
+        match self
+            .tctx
+            .type_resolution
+            .expr_type(Span::from_swc(span))
+        {
+            ResolvedType::Known(ty) => Some(ty),
+            ResolvedType::Unknown => None,
+        }
+    }
+
     /// FileTypeResolution から式の型を取得する。Unknown なら None。
     ///
     /// TypeResolver が事前に解決した型のみを返す。
