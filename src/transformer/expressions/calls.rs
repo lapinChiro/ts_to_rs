@@ -40,8 +40,7 @@ impl<'a> Transformer<'a> {
                         {
                             has_rest = *rest;
                             Some(params.as_slice())
-                        } else if let Some(RustType::Fn { params, .. }) =
-                            self.get_expr_type(callee)
+                        } else if let Some(RustType::Fn { params, .. }) = self.get_expr_type(callee)
                         {
                             resolved_params = params
                                 .iter()

@@ -603,7 +603,6 @@ impl NarrowingGuard {
             | NarrowingGuard::NonNullish { var_span, .. } => *var_span,
         }
     }
-
 }
 
 /// Result of extracting narrowing guards from a compound condition.

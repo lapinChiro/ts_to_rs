@@ -46,21 +46,25 @@ T1 ✅
 |---|---|---|
 | T8 | ✅ | `Transformer` struct から `type_env` フィールド除去。全 sub-transformer 構築箇所から type_env を除去。`type_resolver.rs` の `P-1`〜`P-6` レガシーコメントを修正 |
 
-#### 次の作業: 第 3 波後半（T10）→ 第 4 波（T9, T11）
+#### 第 3 波後半（完了: T10）
+
+| タスク | 状態 | 主な変更 |
+|---|---|---|
+| T10 | ✅ | テストコードの TypeEnv 構築・操作を全除去。TypeEnv ユニットテスト 8 件削除。`TctxFixture::from_source` ベースに書き換え |
+
+#### 次の作業: 第 4 波（T9, T11）
 
 | タスク | 依存 | 主な変更対象 |
 |---|---|---|
-| T10 | T4-T8 ✅ | テストコードの TypeEnv 構築・操作を除去 |
-| T9 | T8 ✅ | TypeEnv 構造体の削除（`type_env.rs` から TypeEnv struct 除去） |
-| T11 | T9, T10 | 品質チェック + ベンチマーク |
+| T9 | T8 ✅, T10 ✅ | TypeEnv 構造体の削除（`type_env.rs` から TypeEnv struct 除去） |
+| T11 | T9 | 品質チェック + ベンチマーク |
 
 ## 引継ぎ事項
 
-### 第 2 波 + T8 完了時の状態
+### 第 2 波 + T8 + T10 完了時の状態
 
-- **production code に `type_env` の使用箇所はゼロ**。Transformer struct から `type_env` フィールドが除去済み
-- テストコード（`expressions/tests.rs`, `statements/tests.rs`, `tests.rs`）にはまだ `type_env` 参照が残存 → T10 で除去
-- `mod.rs:12,15` の `pub(crate) mod type_env` / `pub use type_env::TypeEnv` はテストコードが参照中のため残存 → T9（T10 完了後）で除去
+- **production code + テストコードの両方から `type_env` の使用箇所がゼロ**
+- `mod.rs:12,15` の `pub(crate) mod type_env` / `pub use type_env::TypeEnv` のみ残存 → T9 で除去
 - `NarrowingGuard` の `narrowed_type_for_then/else` メソッドおよび `typeof_string_to_rust_type` は T5 で削除済み（TypeResolver の narrowing_events が position-based で narrowed type を提供するため不要）
 - `type_resolver.rs` の `propagate_expected` 内の `P-1`〜`P-6` ラベルを説明的なコメントに修正済み
 

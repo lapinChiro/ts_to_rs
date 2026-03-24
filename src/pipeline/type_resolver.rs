@@ -14,7 +14,6 @@ use crate::pipeline::type_converter::convert_ts_type;
 use crate::pipeline::type_resolution::{
     AnyEnumOverride, DuFieldBinding, FileTypeResolution, NarrowingEvent, Span, VarId,
 };
-use crate::pipeline::ModuleGraph;
 use crate::pipeline::ResolvedType;
 use crate::pipeline::SyntheticTypeRegistry;
 use crate::registry::{TypeDef, TypeRegistry};
@@ -28,8 +27,6 @@ use crate::transformer::type_env::{wrap_trait_for_position, TypePosition};
 pub struct TypeResolver<'a> {
     registry: &'a TypeRegistry,
     synthetic: &'a mut SyntheticTypeRegistry,
-    #[allow(dead_code)]
-    module_graph: &'a ModuleGraph,
 
     // Internal state during resolution
     scope_stack: Vec<Scope>,
@@ -61,12 +58,10 @@ impl<'a> TypeResolver<'a> {
     pub fn new(
         registry: &'a TypeRegistry,
         synthetic: &'a mut SyntheticTypeRegistry,
-        module_graph: &'a ModuleGraph,
     ) -> Self {
         Self {
             registry,
             synthetic,
-            module_graph,
             scope_stack: vec![Scope::default()],
             current_fn_return_type: None,
             result: FileTypeResolution::empty(),
@@ -2004,7 +1999,6 @@ fn collect_du_field_accesses_from_expr_inner(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pipeline::module_graph::ModuleGraph;
     use crate::pipeline::{parse_files, SyntheticTypeRegistry};
     use crate::registry::build_registry;
     use std::path::PathBuf;
@@ -2016,8 +2010,8 @@ mod tests {
         let file = &files.files[0];
         let reg = build_registry(&file.module);
         let mut synthetic = SyntheticTypeRegistry::new();
-        let module_graph = ModuleGraph::empty();
-        let mut resolver = TypeResolver::new(&reg, &mut synthetic, &module_graph);
+
+        let mut resolver = TypeResolver::new(&reg, &mut synthetic);
         resolver.resolve_file(file)
     }
 
@@ -2234,8 +2228,8 @@ mod tests {
         let file = &files.files[0];
         let reg = build_registry(&file.module);
         let mut synthetic = SyntheticTypeRegistry::new();
-        let module_graph = ModuleGraph::empty();
-        let mut resolver = TypeResolver::new(&reg, &mut synthetic, &module_graph);
+
+        let mut resolver = TypeResolver::new(&reg, &mut synthetic);
         let _res = resolver.resolve_file(file);
         // The union type string | number in the body should have registered a synthetic enum
         assert!(
@@ -2369,8 +2363,8 @@ mod tests {
         let file = &files.files[0];
         let reg = build_registry(&file.module);
         let mut synthetic = SyntheticTypeRegistry::new();
-        let module_graph = ModuleGraph::empty();
-        let mut resolver = TypeResolver::new(&reg, &mut synthetic, &module_graph);
+
+        let mut resolver = TypeResolver::new(&reg, &mut synthetic);
         let res = resolver.resolve_file(file);
 
         // g.greet() should resolve to String (from Greeter.greet return type)
@@ -2452,8 +2446,8 @@ mod tests {
         let files = parse_files(vec![(PathBuf::from("test.ts"), source.to_string())]).unwrap();
         let file = &files.files[0];
         let mut synthetic = SyntheticTypeRegistry::new();
-        let module_graph = ModuleGraph::empty();
-        let mut resolver = TypeResolver::new(reg, &mut synthetic, &module_graph);
+
+        let mut resolver = TypeResolver::new(reg, &mut synthetic);
         resolver.resolve_file(file)
     }
 
@@ -2903,8 +2897,8 @@ mod tests {
         let file = &files.files[0];
         let reg = build_registry(&file.module);
         let mut synthetic = SyntheticTypeRegistry::new();
-        let module_graph = ModuleGraph::empty();
-        let mut resolver = TypeResolver::new(&reg, &mut synthetic, &module_graph);
+
+        let mut resolver = TypeResolver::new(&reg, &mut synthetic);
         let res = resolver.resolve_file(file);
 
         // Find x's Ident span in the condition `x !== null`

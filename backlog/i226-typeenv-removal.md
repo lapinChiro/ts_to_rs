@@ -224,13 +224,12 @@ any-narrowing enum パラメータ（`functions/mod.rs:1176`）は特殊: AnyTyp
 - **完了条件**: `TypeEnv` 型がコードベースに存在しない。コンパイル通過
 - **依存**: T8
 
-### T10: テストコードの TypeEnv 依存除去
+### T10: テストコードの TypeEnv 依存除去 ✅
 
 - **作業内容**: `transformer/tests.rs` / `statements/tests.rs` / `expressions/tests.rs` から TypeEnv の構築・操作を全て除去。テストヘルパー `convert_stmts_with_env` を `TctxFixture::from_source` ベースに置換。TypeEnv に依存していたテストは、TypeResolver 経由で同じ型情報が提供されることを検証するテストに書き換える
-- **T7 で先行修正済みのテスト**: `test_instanceof_known_type_match_resolves_true`、`test_instanceof_known_type_mismatch_resolves_false`、`test_convert_instanceof_known_matching_type_returns_true`、`test_convert_instanceof_option_type_returns_is_some` — TypeEnv 構築を `TctxFixture::from_source` に置換済み
-- **レガシーコメント修正**: テストコード内に `P-N` / `I-NNN` / `F-Nb` 等のイシュー番号やフェーズ番号のみのコメントがあれば、内容が伝わる説明コメントに書き換える
-- **完了条件**: テストコードに `TypeEnv` への参照がゼロ。全テスト GREEN
-- **依存**: T8 と並行実施可能（T4-T7 ✅ 完了後）
+- **実績**: TypeEnv ユニットテスト 8 件削除（`tests.rs`）。`convert_stmts_with_env` ヘルパーを削除し、4 テストを `TctxFixture::from_source_with_reg` + `convert_stmt_list` に書き換え（`statements/tests.rs`）。`expressions/tests.rs` の約 30 箇所の `type_env` 参照を除去し、型依存テスト 10 件を `TctxFixture::from_source` ベースに書き換え。`TctxFixture::reg()` メソッドを削除（未使用化）。`context.rs` のテスト関数名から `type_env` を除去
+- **完了条件**: ✅
+- **依存**: T8 ✅
 
 ### T11: 品質チェック + ベンチマーク
 

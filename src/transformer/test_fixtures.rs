@@ -13,7 +13,7 @@ use crate::transformer::context::TransformContext;
 /// Test fixture: TransformContext + TypeRegistry の所有者。
 ///
 /// テスト関数で `let f = TctxFixture::new();` と 1 行書くだけで
-/// `f.tctx()` と `f.reg()` が使える。
+/// `f.tctx()` が使える。
 ///
 /// `from_source` / `from_source_with_reg` で構築した場合、TypeResolver 経由で
 /// expected type が設定された FileTypeResolution と、解析済み Module を保持する。
@@ -79,7 +79,7 @@ impl TctxFixture {
             module,
         };
         let mut resolver =
-            crate::pipeline::type_resolver::TypeResolver::new(&reg, &mut synthetic, &mg);
+            crate::pipeline::type_resolver::TypeResolver::new(&reg, &mut synthetic);
         let res = resolver.resolve_file(&parsed);
         let module = parsed.module;
         Self {
@@ -95,10 +95,6 @@ impl TctxFixture {
         TransformContext::new(&self.mg, &self.reg, &self.res, Path::new("test.ts"))
     }
 
-    /// TypeRegistry への参照を返す。
-    pub fn reg(&self) -> &TypeRegistry {
-        &self.reg
-    }
 
     /// 解析済み Module への参照を返す。
     ///

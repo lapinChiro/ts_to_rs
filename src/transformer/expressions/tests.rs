@@ -4,7 +4,7 @@ use crate::parser::parse_typescript;
 use crate::pipeline::SyntheticTypeRegistry;
 use crate::registry::{MethodSignature, TypeDef, TypeRegistry};
 use crate::transformer::test_fixtures::TctxFixture;
-use crate::transformer::{Transformer, TypeEnv};
+use crate::transformer::Transformer;
 use swc_ecma_ast::{Decl, ModuleItem, Stmt};
 /// Helper: parse a TS expression statement and return the SWC Expr.
 fn parse_expr(source: &str) -> ast::Expr {
@@ -3243,7 +3243,7 @@ fn test_convert_opt_chain_normal_field_unchanged() {
     );
 }
 
-// --- TypeEnv-aware optional chaining tests ---
+// --- Type-aware optional chaining tests ---
 
 #[test]
 fn test_convert_opt_chain_non_option_type_returns_plain_access() {
@@ -3274,25 +3274,13 @@ fn test_convert_opt_chain_non_option_type_returns_plain_access() {
 
 #[test]
 fn test_convert_opt_chain_option_type_returns_map_pattern() {
-    let f = TctxFixture::new();
+    let f = TctxFixture::from_source("function f(x: Foo | null) { x?.y; }");
     let tctx = f.tctx();
-    let expr = parse_expr("x?.y;");
-    let mut env = TypeEnv::new();
-    env.insert(
-        "x".to_string(),
-        RustType::Option(Box::new(RustType::Named {
-            name: "Foo".to_string(),
-            type_args: vec![],
-        })),
-    );
+    let swc_expr = extract_fn_body_expr_stmt(f.module(), 0, 0);
 
-    let result = Transformer {
-        tctx: &tctx,
-        type_env: env.clone(),
-        synthetic: &mut SyntheticTypeRegistry::new(),
-    }
-    .convert_expr(&expr)
-    .unwrap();
+    let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_expr(&swc_expr)
+        .unwrap();
     assert!(matches!(
         &result,
         Expr::MethodCall { method, .. } if method == "map"
@@ -3304,11 +3292,10 @@ fn test_convert_opt_chain_unknown_type_returns_map_pattern() {
     let f = TctxFixture::new();
     let tctx = f.tctx();
     let expr = parse_expr("x?.y;");
-    let env = TypeEnv::new();
 
     let result = Transformer {
         tctx: &tctx,
-        type_env: env.clone(),
+
         synthetic: &mut SyntheticTypeRegistry::new(),
     }
     .convert_expr(&expr)
@@ -3323,22 +3310,14 @@ fn test_convert_opt_chain_unknown_type_returns_map_pattern() {
 
 #[test]
 fn test_opt_chain_method_call_maps_to_rust_name() {
-    let f = TctxFixture::new();
-    let tctx = f.tctx();
     // s?.toUpperCase() → s.as_ref().map(|_v| _v.to_uppercase())
-    let expr = parse_expr("s?.toUpperCase();");
-    let mut env = TypeEnv::new();
-    env.insert(
-        "s".to_string(),
-        RustType::Option(Box::new(RustType::String)),
-    );
-    let result = Transformer {
-        tctx: &tctx,
-        type_env: env.clone(),
-        synthetic: &mut SyntheticTypeRegistry::new(),
-    }
-    .convert_expr(&expr)
-    .unwrap();
+    let f = TctxFixture::from_source("function f(s: string | null) { s?.toUpperCase(); }");
+    let tctx = f.tctx();
+    let swc_expr = extract_fn_body_expr_stmt(f.module(), 0, 0);
+
+    let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_expr(&swc_expr)
+        .unwrap();
     // Dig into the map closure body and verify method name is to_uppercase
     if let Expr::MethodCall {
         method: outer_method,
@@ -3364,7 +3343,7 @@ fn test_opt_chain_method_call_maps_to_rust_name() {
     panic!("unexpected IR structure: {result:?}");
 }
 
-// --- TypeEnv-aware nullish coalescing tests ---
+// --- Type-aware nullish coalescing tests ---
 
 #[test]
 fn test_convert_nullish_coalescing_non_option_returns_left() {
@@ -3380,22 +3359,13 @@ fn test_convert_nullish_coalescing_non_option_returns_left() {
 
 #[test]
 fn test_convert_nullish_coalescing_option_returns_unwrap_or_else() {
-    let f = TctxFixture::new();
+    let f = TctxFixture::from_source("function f(x: string | null, y: string) { x ?? y; }");
     let tctx = f.tctx();
-    let expr = parse_expr("x ?? y;");
-    let mut env = TypeEnv::new();
-    env.insert(
-        "x".to_string(),
-        RustType::Option(Box::new(RustType::String)),
-    );
+    let swc_expr = extract_fn_body_expr_stmt(f.module(), 0, 0);
 
-    let result = Transformer {
-        tctx: &tctx,
-        type_env: env.clone(),
-        synthetic: &mut SyntheticTypeRegistry::new(),
-    }
-    .convert_expr(&expr)
-    .unwrap();
+    let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_expr(&swc_expr)
+        .unwrap();
     assert!(matches!(
         &result,
         Expr::MethodCall { method, .. } if method == "unwrap_or_else"
@@ -3407,11 +3377,10 @@ fn test_convert_nullish_coalescing_unknown_type_returns_unwrap_or_else() {
     let f = TctxFixture::new();
     let tctx = f.tctx();
     let expr = parse_expr("x ?? y;");
-    let env = TypeEnv::new();
 
     let result = Transformer {
         tctx: &tctx,
-        type_env: env.clone(),
+
         synthetic: &mut SyntheticTypeRegistry::new(),
     }
     .convert_expr(&expr)
@@ -3656,15 +3625,9 @@ fn test_convert_bin_expr_expected_string_enables_concat() {
     let f = TctxFixture::from_source("const s: string = a + b;");
     let tctx = f.tctx();
     let swc_expr = extract_var_init(f.module());
-    let env = TypeEnv::new(); // a, b not registered → types unknown
-
-    let result = Transformer {
-        tctx: &tctx,
-        type_env: env.clone(),
-        synthetic: &mut SyntheticTypeRegistry::new(),
-    }
-    .convert_expr(&swc_expr)
-    .unwrap();
+    let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_expr(&swc_expr)
+        .unwrap();
 
     // In string concat context, RHS should be wrapped in Ref
     match &result {
@@ -3686,11 +3649,10 @@ fn test_convert_bin_expr_no_expected_numeric_add() {
     let swc_expr = parse_expr("a + b;");
     let f = TctxFixture::new();
     let tctx = f.tctx();
-    let env = TypeEnv::new();
 
     let result = Transformer {
         tctx: &tctx,
-        type_env: env.clone(),
+
         synthetic: &mut SyntheticTypeRegistry::new(),
     }
     .convert_expr(&swc_expr)
@@ -3718,12 +3680,11 @@ fn test_convert_call_expr_typeenv_fn_provides_param_expected() {
     "#;
     let f = TctxFixture::from_source(source);
     let tctx = f.tctx();
-    let env = TypeEnv::new();
 
     let swc_expr = extract_expr_stmt(f.module(), 1);
     let result = Transformer {
         tctx: &tctx,
-        type_env: env.clone(),
+
         synthetic: &mut SyntheticTypeRegistry::new(),
     }
     .convert_expr(&swc_expr)
@@ -3749,15 +3710,14 @@ fn test_convert_call_expr_typeenv_fn_provides_param_expected() {
 
 #[test]
 fn test_convert_call_expr_no_typeenv_fn_no_expected() {
-    // f("hello") where TypeEnv is empty → "hello" stays as StringLit (no .to_string())
+    // f("hello") where type info is unavailable → "hello" stays as StringLit (no .to_string())
     let swc_expr = parse_expr("f(\"hello\");");
     let f = TctxFixture::new();
     let tctx = f.tctx();
-    let env = TypeEnv::new();
 
     let result = Transformer {
         tctx: &tctx,
-        type_env: env.clone(),
+
         synthetic: &mut SyntheticTypeRegistry::new(),
     }
     .convert_expr(&swc_expr)
@@ -3972,11 +3932,10 @@ fn test_convert_array_lit_empty_with_expected_vec_string() {
     let f = TctxFixture::from_source("const x: string[] = [];");
     let tctx = f.tctx();
     let swc_expr = extract_var_init(f.module());
-    let env = TypeEnv::new();
 
     let result = Transformer {
         tctx: &tctx,
-        type_env: env.clone(),
+
         synthetic: &mut SyntheticTypeRegistry::new(),
     }
     .convert_expr(&swc_expr)
@@ -3991,11 +3950,10 @@ fn test_convert_array_lit_elements_get_expected_element_type() {
     let f = TctxFixture::from_source(r#"const x: string[] = ["a", "b"];"#);
     let tctx = f.tctx();
     let swc_expr = extract_var_init(f.module());
-    let env = TypeEnv::new();
 
     let result = Transformer {
         tctx: &tctx,
-        type_env: env.clone(),
+
         synthetic: &mut SyntheticTypeRegistry::new(),
     }
     .convert_expr(&swc_expr)
@@ -4068,88 +4026,63 @@ fn test_typeof_equals_string_unknown_type_generates_todo() {
     let f = TctxFixture::new();
     let tctx = f.tctx();
     let swc_expr = parse_expr("typeof x === \"string\";");
-    let env = TypeEnv::new(); // x not registered
-    let result = Transformer {
-        tctx: &tctx,
-        type_env: env.clone(),
-        synthetic: &mut SyntheticTypeRegistry::new(),
-    }
-    .convert_expr(&swc_expr)
-    .unwrap();
+    let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_expr(&swc_expr)
+        .unwrap();
     // Unknown type → todo!() (compile error, not silent true)
     assert!(matches!(&result, Expr::FnCall { name, .. } if name == "todo!"));
 }
 
 #[test]
 fn test_typeof_equals_string_any_type_generates_todo() {
-    let f = TctxFixture::new();
-    let tctx = f.tctx();
     // Any type → todo!() (compile error, not silent true).
     // For function params, any_narrowing generates enum and if-let instead.
-    let swc_expr = parse_expr("typeof x === \"string\";");
-    let mut env = TypeEnv::new();
-    env.insert("x".to_string(), RustType::Any);
-    let result = Transformer {
-        tctx: &tctx,
-        type_env: env.clone(),
-        synthetic: &mut SyntheticTypeRegistry::new(),
-    }
-    .convert_expr(&swc_expr)
-    .unwrap();
+    let f = TctxFixture::from_source(r#"function f(x: any) { typeof x === "string"; }"#);
+    let tctx = f.tctx();
+    let swc_expr = extract_fn_body_expr_stmt(f.module(), 0, 0);
+
+    let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_expr(&swc_expr)
+        .unwrap();
     assert!(matches!(&result, Expr::FnCall { name, .. } if name == "todo!"));
 }
 
 #[test]
 fn test_typeof_equals_number_any_type_generates_todo() {
-    let f = TctxFixture::new();
+    let f = TctxFixture::from_source(r#"function f(x: any) { typeof x === "number"; }"#);
     let tctx = f.tctx();
-    let swc_expr = parse_expr("typeof x === \"number\";");
-    let mut env = TypeEnv::new();
-    env.insert("x".to_string(), RustType::Any);
-    let result = Transformer {
-        tctx: &tctx,
-        type_env: env.clone(),
-        synthetic: &mut SyntheticTypeRegistry::new(),
-    }
-    .convert_expr(&swc_expr)
-    .unwrap();
+    let swc_expr = extract_fn_body_expr_stmt(f.module(), 0, 0);
+
+    let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_expr(&swc_expr)
+        .unwrap();
     assert!(matches!(&result, Expr::FnCall { name, .. } if name == "todo!"));
 }
 
 #[test]
 fn test_typeof_not_equals_string_any_type_generates_todo() {
-    let f = TctxFixture::new();
-    let tctx = f.tctx();
     // !== with Any → todo!() (compile error, not silent true).
-    let swc_expr = parse_expr("typeof x !== \"string\";");
-    let mut env = TypeEnv::new();
-    env.insert("x".to_string(), RustType::Any);
-    let result = Transformer {
-        tctx: &tctx,
-        type_env: env.clone(),
-        synthetic: &mut SyntheticTypeRegistry::new(),
-    }
-    .convert_expr(&swc_expr)
-    .unwrap();
+    let f = TctxFixture::from_source(r#"function f(x: any) { typeof x !== "string"; }"#);
+    let tctx = f.tctx();
+    let swc_expr = extract_fn_body_expr_stmt(f.module(), 0, 0);
+
+    let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_expr(&swc_expr)
+        .unwrap();
     assert!(matches!(&result, Expr::FnCall { name, .. } if name == "todo!"));
 }
 
 #[test]
 fn test_instanceof_any_type_generates_todo() {
-    let f = TctxFixture::new();
-    let tctx = f.tctx();
     // Any type → todo!() (compile error, not silent true).
     // For function params, any_narrowing generates enum and if-let instead.
-    let swc_expr = parse_expr("x instanceof Foo;");
-    let mut env = TypeEnv::new();
-    env.insert("x".to_string(), RustType::Any);
-    let result = Transformer {
-        tctx: &tctx,
-        type_env: env.clone(),
-        synthetic: &mut SyntheticTypeRegistry::new(),
-    }
-    .convert_expr(&swc_expr)
-    .unwrap();
+    let f = TctxFixture::from_source("function f(x: any) { x instanceof Foo; }");
+    let tctx = f.tctx();
+    let swc_expr = extract_fn_body_expr_stmt(f.module(), 0, 0);
+
+    let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_expr(&swc_expr)
+        .unwrap();
     assert!(matches!(&result, Expr::FnCall { name, .. } if name == "todo!"));
 }
 
@@ -4212,10 +4145,10 @@ fn test_instanceof_unknown_type_generates_todo() {
     let tctx = f.tctx();
     // Unknown type → todo!() (compile error, not silent true).
     let swc_expr = parse_expr("x instanceof Foo;");
-    let env = TypeEnv::new();
+
     let result = Transformer {
         tctx: &tctx,
-        type_env: env.clone(),
+
         synthetic: &mut SyntheticTypeRegistry::new(),
     }
     .convert_expr(&swc_expr)
@@ -4231,22 +4164,10 @@ fn test_self_field_string_concat_gets_clone() {
     let f = TctxFixture::from_source(r#"const s: string = this.name + " suffix";"#);
     let tctx = f.tctx();
     let swc_expr = extract_var_init(f.module());
-    let mut env = TypeEnv::new();
-    // Mark "this" as having a string field to trigger string concat context
-    env.insert(
-        "this".to_string(),
-        RustType::Named {
-            name: "Self".to_string(),
-            type_args: vec![],
-        },
-    );
-    let result = Transformer {
-        tctx: &tctx,
-        type_env: env.clone(),
-        synthetic: &mut SyntheticTypeRegistry::new(),
-    }
-    .convert_expr(&swc_expr)
-    .unwrap();
+
+    let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_expr(&swc_expr)
+        .unwrap();
     match &result {
         Expr::BinaryOp { left, op, .. } => {
             assert_eq!(*op, BinOp::Add);
@@ -4276,18 +4197,13 @@ fn test_undefined_literal_converts_to_none() {
 
 #[test]
 fn test_equals_undefined_converts_to_is_none() {
-    let f = TctxFixture::new();
+    let f = TctxFixture::from_source("function f(x: number | null) { x === undefined; }");
     let tctx = f.tctx();
-    let swc_expr = parse_expr("x === undefined;");
-    let mut env = TypeEnv::new();
-    env.insert("x".to_string(), RustType::Option(Box::new(RustType::F64)));
-    let result = Transformer {
-        tctx: &tctx,
-        type_env: env.clone(),
-        synthetic: &mut SyntheticTypeRegistry::new(),
-    }
-    .convert_expr(&swc_expr)
-    .unwrap();
+    let swc_expr = extract_fn_body_expr_stmt(f.module(), 0, 0);
+
+    let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_expr(&swc_expr)
+        .unwrap();
     assert!(
         matches!(&result, Expr::MethodCall { method, .. } if method == "is_none"),
         "expected is_none, got: {:?}",
@@ -4297,18 +4213,13 @@ fn test_equals_undefined_converts_to_is_none() {
 
 #[test]
 fn test_not_equals_undefined_converts_to_is_some() {
-    let f = TctxFixture::new();
+    let f = TctxFixture::from_source("function f(x: number | null) { x !== undefined; }");
     let tctx = f.tctx();
-    let swc_expr = parse_expr("x !== undefined;");
-    let mut env = TypeEnv::new();
-    env.insert("x".to_string(), RustType::Option(Box::new(RustType::F64)));
-    let result = Transformer {
-        tctx: &tctx,
-        type_env: env.clone(),
-        synthetic: &mut SyntheticTypeRegistry::new(),
-    }
-    .convert_expr(&swc_expr)
-    .unwrap();
+    let swc_expr = extract_fn_body_expr_stmt(f.module(), 0, 0);
+
+    let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_expr(&swc_expr)
+        .unwrap();
     assert!(
         matches!(&result, Expr::MethodCall { method, .. } if method == "is_some"),
         "expected is_some, got: {:?}",
@@ -4699,8 +4610,6 @@ fn test_convert_member_expr_tuple_second_index_generates_field_access() {
 fn test_convert_member_expr_non_tuple_index_unchanged() {
     let f = TctxFixture::new();
     let tctx = f.tctx();
-    let mut type_env = TypeEnv::new();
-    type_env.insert("arr".to_string(), RustType::Vec(Box::new(RustType::F64)));
 
     let swc_expr = parse_expr("arr[0];");
     let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
@@ -4725,16 +4634,11 @@ fn test_convert_nullish_coalescing_rhs_string_gets_to_string_when_lhs_is_option_
     "#;
     let f = TctxFixture::from_source(source);
     let tctx = f.tctx();
-    let type_env = TypeEnv::new();
 
     let swc_expr = extract_var_init_at(f.module(), 1);
-    let result = Transformer {
-        tctx: &tctx,
-        type_env: type_env.clone(),
-        synthetic: &mut SyntheticTypeRegistry::new(),
-    }
-    .convert_expr(&swc_expr)
-    .unwrap();
+    let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_expr(&swc_expr)
+        .unwrap();
 
     // Should be s.unwrap_or_else(|| "default".to_string())
     if let Expr::MethodCall { method, args, .. } = &result {
@@ -4784,14 +4688,10 @@ fn test_convert_method_call_string_arg_gets_to_string_with_registry() {
     let f = TctxFixture::from_source_with_reg(source, reg);
     let tctx = f.tctx();
     let swc_expr = extract_expr_stmt(f.module(), 1);
-    let type_env = TypeEnv::new();
-    let result = Transformer {
-        tctx: &tctx,
-        type_env: type_env.clone(),
-        synthetic: &mut SyntheticTypeRegistry::new(),
-    }
-    .convert_expr(&swc_expr)
-    .unwrap();
+
+    let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_expr(&swc_expr)
+        .unwrap();
 
     // Should have .to_string() on the string arg
     if let Expr::MethodCall { args, .. } = &result {
@@ -4929,10 +4829,10 @@ fn test_in_operator_unknown_type_generates_todo() {
     let tctx = f.tctx();
     // "x" in unknown → todo!() (not silent true)
     let expr = parse_expr(r#""x" in unknown"#);
-    let env = TypeEnv::new();
+
     let result = Transformer {
         tctx: &tctx,
-        type_env: env.clone(),
+
         synthetic: &mut SyntheticTypeRegistry::new(),
     }
     .convert_expr(&expr)
@@ -5098,10 +4998,10 @@ fn test_convert_expr_postfix_increment_returns_old_value() {
     // i++ → { let _old = i; i = i + 1.0; _old }
     use crate::ir::Stmt as IrStmt;
     let expr = parse_expr("i++");
-    let env = TypeEnv::new();
+
     let result = Transformer {
         tctx: &tctx,
-        type_env: env.clone(),
+
         synthetic: &mut SyntheticTypeRegistry::new(),
     }
     .convert_expr(&expr)
@@ -5123,10 +5023,10 @@ fn test_convert_expr_prefix_increment_returns_new_value() {
     // ++i → { i = i + 1.0; i }
     use crate::ir::Stmt as IrStmt;
     let expr = parse_expr("++i");
-    let env = TypeEnv::new();
+
     let result = Transformer {
         tctx: &tctx,
-        type_env: env.clone(),
+
         synthetic: &mut SyntheticTypeRegistry::new(),
     }
     .convert_expr(&expr)
@@ -5148,10 +5048,10 @@ fn test_convert_expr_postfix_decrement_returns_old_value() {
     // i-- → { let _old = i; i = i - 1.0; _old }
     use crate::ir::Stmt as IrStmt;
     let expr = parse_expr("i--");
-    let env = TypeEnv::new();
+
     let result = Transformer {
         tctx: &tctx,
-        type_env: env.clone(),
+
         synthetic: &mut SyntheticTypeRegistry::new(),
     }
     .convert_expr(&expr)
@@ -5172,10 +5072,10 @@ fn test_convert_expr_prefix_decrement_returns_new_value() {
     // --i → { i = i - 1.0; i }
     use crate::ir::Stmt as IrStmt;
     let expr = parse_expr("--i");
-    let env = TypeEnv::new();
+
     let result = Transformer {
         tctx: &tctx,
-        type_env: env.clone(),
+
         synthetic: &mut SyntheticTypeRegistry::new(),
     }
     .convert_expr(&expr)
@@ -5794,15 +5694,9 @@ fn test_convert_expr_compound_assign_ushr_generates_desugar() {
     let f = TctxFixture::new();
     let tctx = f.tctx();
     let expr = parse_expr("x >>>= 2");
-    let mut type_env = TypeEnv::new();
-    type_env.insert("x".to_string(), RustType::F64);
-    let result = Transformer {
-        tctx: &tctx,
-        type_env: type_env.clone(),
-        synthetic: &mut SyntheticTypeRegistry::new(),
-    }
-    .convert_expr(&expr)
-    .unwrap();
+    let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_expr(&expr)
+        .unwrap();
     // Should be Assign { target: x, value: BinaryOp { op: UShr, ... } }
     if let Expr::Assign { value, .. } = &result {
         assert!(
@@ -6575,10 +6469,10 @@ fn test_convert_object_lit_all_computed_keys_generates_hashmap() {
 
 // --- Expected type propagation (Category B improvements) ---
 
-/// Step 5: Assignment RHS should propagate type from TypeEnv.
+/// Step 5: Assignment RHS should propagate type from TypeResolver.
 /// `x = { name: "test" }` where x: Config → `Config { name: "test".to_string() }`
 #[test]
-fn test_convert_assign_expr_propagates_type_from_type_env() {
+fn test_convert_assign_expr_propagates_type_from_resolution() {
     let mut reg = TypeRegistry::new();
     reg.register(
         "Config".to_string(),
@@ -6715,18 +6609,12 @@ fn test_convert_opt_chain_method_call_propagates_param_types() {
 /// +x where x: number → x (identity, no-op)
 #[test]
 fn test_convert_expr_unary_plus_number_returns_identity() {
-    let f = TctxFixture::new();
+    let f = TctxFixture::from_source("function f(x: number) { +x; }");
     let tctx = f.tctx();
-    let mut type_env = TypeEnv::new();
-    type_env.insert("x".to_string(), crate::ir::RustType::F64);
-    let swc_expr = parse_expr("+x;");
-    let result = Transformer {
-        tctx: &tctx,
-        type_env: type_env.clone(),
-        synthetic: &mut SyntheticTypeRegistry::new(),
-    }
-    .convert_expr(&swc_expr)
-    .unwrap();
+    let swc_expr = extract_fn_body_expr_stmt(f.module(), 0, 0);
+    let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_expr(&swc_expr)
+        .unwrap();
     assert_eq!(result, Expr::Ident("x".to_string()));
 }
 
@@ -6845,16 +6733,14 @@ fn test_narrowing_guard_truthy_captures_var_span() {
     }
 }
 
-/// resolve_if_let_pattern should retrieve variable type from FileTypeResolution,
-/// not from type_env. This test creates a Transformer with empty type_env but
-/// a properly populated FileTypeResolution.
+/// resolve_if_let_pattern should retrieve variable type from FileTypeResolution.
 #[test]
 fn test_resolve_if_let_pattern_option_via_type_resolution() {
     let source = r#"function f(x: string | null): string { return x !== null ? x : ""; }"#;
     let f = TctxFixture::from_source(source);
     let tctx = f.tctx();
 
-    // Create Transformer — type_env is empty (we did NOT call convert_fn_decl)
+    // Create Transformer — FileTypeResolution provides the type info
     let mut synthetic = SyntheticTypeRegistry::new();
     let transformer = Transformer::for_module(&tctx, &mut synthetic);
 
@@ -6876,7 +6762,7 @@ fn test_resolve_if_let_pattern_option_via_type_resolution() {
     let guard = patterns::extract_narrowing_guard(&cond_expr.test)
         .expect("should extract NonNullish guard from x !== null");
 
-    // resolve_if_let_pattern should work via FileTypeResolution (type_env is empty)
+    // resolve_if_let_pattern should work via FileTypeResolution
     let result = transformer.resolve_if_let_pattern(&guard);
     // is_swap=false because `!==` means is_neq=true, and !is_neq=false (no swap needed:
     // then-branch is the "matched" branch, else-branch is the fallback)

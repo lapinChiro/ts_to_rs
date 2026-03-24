@@ -11,8 +11,7 @@ use crate::pipeline::type_converter::{
 };
 use crate::pipeline::SyntheticTypeRegistry;
 use crate::transformer::{
-    extract_pat_ident_name, extract_prop_name, wrap_trait_for_position, Transformer,
-    TypePosition,
+    extract_pat_ident_name, extract_prop_name, wrap_trait_for_position, Transformer, TypePosition,
 };
 
 impl<'a> Transformer<'a> {

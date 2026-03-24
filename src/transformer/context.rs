@@ -156,7 +156,7 @@ mod tests {
     // ===== narrowing lookup =====
 
     #[test]
-    fn test_narrowing_from_resolution_events_overrides_type_env() {
+    fn test_narrowing_from_resolution_events_provides_narrowed_type() {
         let source = r#"
 function check(x: string | number): string {
     if (typeof x === "string") {
