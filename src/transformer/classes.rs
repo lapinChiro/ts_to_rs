@@ -11,7 +11,7 @@ use crate::ir::{AssocConst, Expr, Item, Method, Param, RustType, Stmt, StructFie
 use crate::pipeline::type_converter::convert_ts_type;
 use crate::transformer::extract_prop_name;
 use crate::transformer::functions::convert_last_return_to_tail;
-use crate::transformer::{Transformer, TypeEnv};
+use crate::transformer::Transformer;
 
 /// Extracted class information for resolving inheritance relationships.
 #[derive(Debug, Clone)]
@@ -551,7 +551,7 @@ impl<'a> Transformer<'a> {
         let value = match &prop.value {
             Some(init) => Transformer {
                 tctx: self.tctx,
-                type_env: TypeEnv::new(),
+
                 synthetic: self.synthetic,
             }
             .convert_expr(init)?,
@@ -756,7 +756,6 @@ impl<'a> Transformer<'a> {
         // TypeResolver handles parameter types via scope_stack.
         let mut sub_t = Transformer {
             tctx: self.tctx,
-            type_env: TypeEnv::new(),
             synthetic: &mut *self.synthetic,
         };
         for stmt in stmts {
@@ -857,15 +856,8 @@ impl<'a> Transformer<'a> {
 
         let body = match &method.function.body {
             Some(block) => {
-                let mut method_env = TypeEnv::new();
-                for p in &params {
-                    if let Some(ty) = &p.ty {
-                        method_env.insert(p.name.clone(), ty.clone());
-                    }
-                }
                 let mut sub_t = Transformer {
                     tctx: self.tctx,
-                    type_env: method_env,
                     synthetic: &mut *self.synthetic,
                 };
                 let mut stmts = default_expansion_stmts;

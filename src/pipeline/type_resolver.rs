@@ -734,14 +734,13 @@ impl<'a> TypeResolver<'a> {
     /// expressions (object literal fields, array elements, ternary branches, etc.).
     fn propagate_expected(&mut self, expr: &ast::Expr, expected: &RustType) {
         match expr {
-            // P-1: Object literal + Named(struct/enum) → set field types
-            // P-2: Object literal + HashMap<K, V> → set value type V
+            // Object literal: propagate field types from struct/enum or HashMap value type
             ast::Expr::Object(obj) => {
                 match expected {
                     RustType::Named { name, type_args }
                         if name == "HashMap" && type_args.len() == 2 =>
                     {
-                        // P-2: HashMap<K, V> — set value type V for each computed property
+                        // HashMap<K, V> — set value type V for each computed property
                         let value_type = &type_args[1];
                         for prop in &obj.props {
                             if let ast::PropOrSpread::Prop(prop) = prop {
@@ -754,7 +753,7 @@ impl<'a> TypeResolver<'a> {
                         }
                     }
                     RustType::Named { name, .. } => {
-                        // P-1: Struct or DU — set field types
+                        // Struct or DU — set field types from type registry
                         let fields = self.resolve_object_lit_fields(name, obj);
                         if let Some(fields) = fields {
                             for prop in &obj.props {
@@ -792,8 +791,7 @@ impl<'a> TypeResolver<'a> {
                     _ => {}
                 }
             }
-            // P-3: Array literal + Vec<T> → set element type T
-            // P-4: Array literal + Tuple(T1, ...) → set positional types
+            // Array literal: propagate Vec element type or Tuple positional types
             ast::Expr::Array(arr) => match expected {
                 RustType::Vec(inner) => {
                     for elem in arr.elems.iter().flatten() {
@@ -813,13 +811,13 @@ impl<'a> TypeResolver<'a> {
                 }
                 _ => {}
             },
-            // P-5: Paren expr → propagate to inner
+            // Parenthesized expr → propagate to inner expression
             ast::Expr::Paren(paren) => {
                 let span = Span::from_swc(paren.expr.span());
                 self.result.expected_types.insert(span, expected.clone());
                 self.propagate_expected(&paren.expr, expected);
             }
-            // P-6: Cond (ternary) → propagate to both branches
+            // Ternary conditional → propagate to both branches
             ast::Expr::Cond(cond) => {
                 let cons_span = Span::from_swc(cond.cons.span());
                 self.result
@@ -2498,7 +2496,7 @@ mod tests {
 
     #[test]
     fn test_propagate_expected_var_decl_array_vec_sets_element_type() {
-        // 1-2 + P-3: const a: number[] = [1, 2] → each element gets F64
+        // VarDecl + array literal propagation: const a: number[] = [1, 2] → each element gets F64
         let res = resolve("const a: number[] = [1, 2];");
 
         let f64_expected_count = res
@@ -2516,7 +2514,7 @@ mod tests {
 
     #[test]
     fn test_propagate_expected_var_decl_tuple_sets_positional_types() {
-        // 1-2 + P-4: const t: [string, number] = ["a", 1]
+        // VarDecl + tuple propagation: const t: [string, number] = ["a", 1]
         let res = resolve(r#"const t: [string, number] = ["a", 1];"#);
 
         let has_string_expected = res

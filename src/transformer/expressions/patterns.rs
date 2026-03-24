@@ -397,14 +397,7 @@ impl<'a> Transformer<'a> {
     /// (meaning then/else branches should be swapped).
     /// Returns `None` if the guard cannot generate an if-let pattern.
     pub(crate) fn resolve_if_let_pattern(&self, guard: &NarrowingGuard) -> Option<(String, bool)> {
-        // type_env has priority: AnyTypeAnalyzer overrides (e.g., any → enum type) are
-        // only in type_env, not yet in FileTypeResolution (migrated in T7).
-        // Fall back to FileTypeResolution for cases where type_env is empty
-        // (e.g., top-level or when Transformer was created without param registration).
-        let var_type = self
-            .type_env
-            .get(guard.var_name())
-            .or_else(|| self.get_type_for_var(guard.var_name(), guard.var_span()))?;
+        let var_type = self.get_type_for_var(guard.var_name(), guard.var_span())?;
         match guard {
             NarrowingGuard::NonNullish { is_neq, .. } => {
                 if matches!(var_type, RustType::Option(_)) {
@@ -611,70 +604,6 @@ impl NarrowingGuard {
         }
     }
 
-    /// Returns the narrowed RustType for the then branch.
-    pub(crate) fn narrowed_type_for_then(&self, original: &RustType) -> Option<RustType> {
-        match self {
-            NarrowingGuard::Typeof {
-                type_name, is_eq, ..
-            } => {
-                if *is_eq {
-                    typeof_string_to_rust_type(type_name)
-                } else {
-                    None
-                }
-            }
-            NarrowingGuard::NonNullish { is_neq, .. } => {
-                if *is_neq {
-                    if let RustType::Option(inner) = original {
-                        Some(inner.as_ref().clone())
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            }
-            NarrowingGuard::Truthy { .. } => {
-                if let RustType::Option(inner) = original {
-                    Some(inner.as_ref().clone())
-                } else {
-                    None
-                }
-            }
-            NarrowingGuard::InstanceOf { class_name, .. } => Some(RustType::Named {
-                name: class_name.clone(),
-                type_args: vec![],
-            }),
-        }
-    }
-
-    /// Returns the narrowed RustType for the else branch.
-    pub(crate) fn narrowed_type_for_else(&self, original: &RustType) -> Option<RustType> {
-        match self {
-            NarrowingGuard::Typeof {
-                type_name, is_eq, ..
-            } => {
-                if !*is_eq {
-                    typeof_string_to_rust_type(type_name)
-                } else {
-                    None
-                }
-            }
-            NarrowingGuard::NonNullish { is_neq, .. } => {
-                if !*is_neq {
-                    if let RustType::Option(inner) = original {
-                        Some(inner.as_ref().clone())
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            }
-            NarrowingGuard::Truthy { .. } => None,
-            NarrowingGuard::InstanceOf { .. } => None,
-        }
-    }
 }
 
 /// Result of extracting narrowing guards from a compound condition.
@@ -784,16 +713,6 @@ pub(crate) fn extract_narrowing_guard(condition: &ast::Expr) -> Option<Narrowing
                 var_span: ident.span,
             })
         }
-        _ => None,
-    }
-}
-
-/// Maps a typeof string to a RustType.
-pub(crate) fn typeof_string_to_rust_type(type_name: &str) -> Option<RustType> {
-    match type_name {
-        "string" => Some(RustType::String),
-        "number" => Some(RustType::F64),
-        "boolean" => Some(RustType::Bool),
         _ => None,
     }
 }

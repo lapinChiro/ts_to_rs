@@ -173,29 +173,26 @@ any-narrowing enum パラメータ（`functions/mod.rs:1176`）は特殊: AnyTyp
 - **完了条件**: ✅
 - **依存**: なし
 
-### T4: 分類 1（変数宣言の型登録）の TypeEnv insert/get 除去
+### T4: 分類 1（変数宣言の型登録）の TypeEnv insert/get 除去 ✅
 
 - **作業内容**: `statements/mod.rs` の 6 箇所の `type_env.insert`（363,392,455,1195,1204,1208）を削除。`calls.rs:44` の `type_env.get` を `get_expr_type` に置換
 - **T7 で先行除去済みの箇所**: `statements/mod.rs:119`（Any フォールバック → `any_enum_override` に置換）、`statements/mod.rs:1812`（typeof switch → `get_expr_type` に置換。現在は `try_convert_typeof_switch` 内で `get_expr_type` を使用）
-- **レガシーコメント修正**: 変更対象ファイル内に `P-N` / `I-NNN` / `F-Nb` 等のイシュー番号やフェーズ番号のみのコメントがあれば、内容が伝わる説明コメントに書き換える
-- **完了条件**: 分類 1 の全 insert/get が除去。全テスト GREEN
-- **依存**: T3 ✅（Fn 型の expr_types 登録が必要）
+- **実績**: insert 6 箇所 + get 1 箇所を除去。`infer_fn_type_from_closure` / `extract_var_decl_init`（未使用化）を削除。`convert_stmt_list` の TypeEnv 登録ループを全削除。テスト `test_type_env_stmt_list_registers_let_binding_type`（TypeEnv insert を検証するテスト）を削除
+- **完了条件**: ✅
+- **依存**: T3 ✅
 
-### T5: 分類 2（Narrowing ガード）の TypeEnv 操作除去
+### T5: 分類 2（Narrowing ガード）の TypeEnv 操作除去 ✅
 
 - **作業内容**: `expressions/mod.rs:175-188` の `push_scope` / `insert` / `pop_scope` を削除。`get_expr_type` が narrowed_type を position-based で返すため、スコープ操作は不要。`resolve_if_let_pattern`（`patterns.rs:404`）の `type_env.get` フォールバックを除去し、`get_type_for_var` のみに一本化する
-- **T7 で先行除去済みの箇所**: `expressions/patterns.rs:276`（`convert_instanceof` の LHS 型取得 → `get_expr_type(&bin.left).cloned()` に置換済み）
-- **注意: TypeResolver `LogicalAnd/Or` の修正（T7 で実施済み）**: 以前は `LogicalAnd` が右辺のみ resolve し、左辺が Known なら左辺をスキップしていた。これにより `typeof x === "string" && typeof y === "number"` の `x` が `expr_types` に未登録だった。T7 で両辺を必ず resolve するよう修正済み。T5 の compound guard テストはこの修正を前提とする
-- **レガシーコメント修正**: 変更対象ファイル内に `P-N` / `I-NNN` / `F-Nb` 等のイシュー番号やフェーズ番号のみのコメントがあれば、内容が伝わる説明コメントに書き換える
-- **完了条件**: `expressions/mod.rs` と `resolve_if_let_pattern` から TypeEnv 参照が完全除去。全テスト GREEN
+- **実績**: cond_expr の TypeEnv スコープ操作を全削除。`resolve_if_let_pattern` を `get_type_for_var` のみに一本化。`narrowed_type_for_then/else` と `typeof_string_to_rust_type`（未使用化）を削除
+- **完了条件**: ✅
 - **依存**: T1 ✅, T7 ✅
 
-### T6: 分類 3（DU match arm）の TypeEnv 操作除去
+### T6: 分類 3（DU match arm）の TypeEnv 操作除去 ✅
 
 - **作業内容**: `statements/mod.rs:2063-2078` の `push_scope` / `insert` / `pop_scope` を削除。`member_access.rs:256` の `type_env.get(&field).is_some()` を `self.tctx.type_resolution.is_du_field_binding(&field, span_position)` に置換
-- **span_position の取得**: `member_access.rs` の `convert_member_expr` は `member: &ast::MemberExpr` を受け取る。`member.span.lo.0` を position として使用する
-- **レガシーコメント修正**: 変更対象ファイル内に `P-N` / `I-NNN` / `F-Nb` 等のイシュー番号やフェーズ番号のみのコメントがあれば、内容が伝わる説明コメントに書き換える
-- **完了条件**: DU switch 関連の TypeEnv 操作が完全除去。既存の DU テスト全 GREEN
+- **実績**: DU switch の field_types 収集と push_scope/pop_scope を全削除。`member_access.rs` を `is_du_field_binding` に置換
+- **完了条件**: ✅
 - **依存**: T2 ✅
 
 ### T7: 分類 4-5（関数パラメータ + Any enum オーバーライド）の除去 ✅
@@ -213,13 +210,12 @@ any-narrowing enum パラメータ（`functions/mod.rs:1176`）は特殊: AnyTyp
 - **完了条件**: ✅ 全テスト GREEN、clippy 0 警告、fmt 通過
 - **依存**: なし
 
-### T8: Transformer struct から type_env フィールド除去
+### T8: Transformer struct から type_env フィールド除去 ✅
 
 - **作業内容**: `Transformer` struct から `type_env: TypeEnv` フィールドを削除。`for_module` から TypeEnv 初期化を削除。sub-transformer 作成（`expressions/functions.rs` の clone 3箇所、`functions/mod.rs` の構築箇所）から type_env を除去。`classes.rs` の `MethodContext` から type_env を除去
-- **T7 で先行除去済みの箇所**: `functions/mod.rs` の `convert_fn_decl` と `convert_var_decl_to_fn` 内の sub-transformer 構築は既に `TypeEnv::new()` を使用。`classes.rs` の `convert_constructor_body` の sub-transformer 構築も同様。`statements/mod.rs` のネスト関数 sub-transformer も同様
-- **レガシーコメント修正**: 変更対象ファイル内に `P-N` / `I-NNN` / `F-Nb` 等のイシュー番号やフェーズ番号のみのコメントがあれば、内容が伝わる説明コメントに書き換える。特に `type_resolver.rs` の `propagate_expected` 内の `P-1` 〜 `P-6` ラベルを確認する
-- **完了条件**: `type_env` が Transformer struct と全 sub-transformer から完全除去。全テスト GREEN
-- **依存**: T4, T5, T6, T7 ✅（全 TypeEnv 使用箇所の除去が完了）
+- **実績**: Transformer struct から `type_env` フィールドを除去。`for_module` / 全 sub-transformer 構築箇所（`functions/mod.rs` 5箇所、`classes.rs` 3箇所、`expressions/functions.rs` 3箇所、`statements/mod.rs` 1箇所）から type_env を除去。`type_resolver.rs` の `P-1`〜`P-6` レガシーコメントを説明的なコメントに修正
+- **完了条件**: ✅
+- **依存**: T4 ✅, T5 ✅, T6 ✅, T7 ✅
 
 ### T9: TypeEnv 構造体の削除
 

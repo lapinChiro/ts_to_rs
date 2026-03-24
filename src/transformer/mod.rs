@@ -30,31 +30,23 @@ use crate::transformer::context::TransformContext;
 
 /// 変換処理の状態を保持する構造体。
 ///
-/// 不変コンテキスト (`tctx`) と可変状態 (`type_env`, `synthetic`) を束ね、
+/// 不変コンテキスト (`tctx`) と可変状態 (`synthetic`) を束ね、
 /// 全変換関数をメソッドとして提供する。各サブモジュールに `impl Transformer`
 /// ブロックを配置し、ファイル構成を変更せずにメソッド化する。
 pub(crate) struct Transformer<'a> {
     /// 不変コンテキスト（TypeRegistry, ModuleGraph, TypeResolution, file path）
     tctx: &'a TransformContext<'a>,
-    /// ローカル変数の型追跡（可変 — ブロックスコープで push_scope / pop_scope）
-    type_env: TypeEnv,
     /// 合成型レジストリ（可変 — 変換中に型が追加される）
     synthetic: &'a mut SyntheticTypeRegistry,
 }
 
 impl<'a> Transformer<'a> {
     /// モジュール変換用の Transformer を構築する。
-    ///
-    /// `TypeEnv` は内部で新規作成される。呼び出し側で構築する必要はない。
     pub(crate) fn for_module(
         tctx: &'a TransformContext<'a>,
         synthetic: &'a mut SyntheticTypeRegistry,
     ) -> Self {
-        Self {
-            tctx,
-            type_env: TypeEnv::new(),
-            synthetic,
-        }
+        Self { tctx, synthetic }
     }
 
     /// `tctx.type_registry` へのショートカット。

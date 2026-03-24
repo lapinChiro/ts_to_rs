@@ -172,20 +172,9 @@ impl<'a> Transformer<'a> {
                     (cond.cons.as_ref(), cond.alt.as_ref())
                 };
 
-                let original = self.type_env.get(guard.var_name()).cloned();
-                self.type_env.push_scope();
-                if let Some(original) = original {
-                    let narrowed = if is_swap {
-                        guard.narrowed_type_for_else(&original)
-                    } else {
-                        guard.narrowed_type_for_then(&original)
-                    };
-                    if let Some(narrowed) = narrowed {
-                        self.type_env.insert(guard.var_name().to_string(), narrowed);
-                    }
-                }
+                // TypeResolver's narrowing_events provide position-based narrowed types,
+                // so no explicit scope manipulation is needed here.
                 let matched_expr = self.convert_expr(matched_ast)?;
-                self.type_env.pop_scope();
                 let unmatched_expr = self.convert_expr(unmatched_ast)?;
 
                 let expr_ir = Expr::Ident(guard.var_name().to_string());

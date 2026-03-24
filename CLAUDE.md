@@ -18,6 +18,7 @@ cargo build                # デバッグビルド
 cargo build --release      # リリースビルド
 cargo check                # 高速な型チェック
 cargo test                 # 全テスト実行
+cargo fix --allow-dirty --allow-staged  # 未使用 import 等の auto fix
 cargo clippy --all-targets --all-features -- -D warnings  # lint
 cargo fmt --all --check    # フォーマットチェック
 cargo llvm-cov --ignore-filename-regex 'main\.rs' --fail-under-lines 89  # カバレッジ計測（閾値89%、main.rs除外）

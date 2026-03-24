@@ -136,7 +136,7 @@ impl<'a> Transformer<'a> {
             Some(block) => {
                 let mut sub_t = Transformer {
                     tctx: self.tctx,
-                    type_env: self.type_env.clone(),
+
                     synthetic: &mut *self.synthetic,
                 };
                 let mut stmts = expansion_stmts;
@@ -263,7 +263,7 @@ impl<'a> Transformer<'a> {
                 ast::BlockStmtOrExpr::BlockStmt(block) => {
                     let mut sub_t = Transformer {
                         tctx: self.tctx,
-                        type_env: self.type_env.clone(),
+    
                         synthetic: &mut *self.synthetic,
                     };
                     let mut stmts = Vec::new();
@@ -285,7 +285,7 @@ impl<'a> Transformer<'a> {
                 ast::BlockStmtOrExpr::BlockStmt(block) => {
                     let mut sub_t = Transformer {
                         tctx: self.tctx,
-                        type_env: self.type_env.clone(),
+    
                         synthetic: &mut *self.synthetic,
                     };
                     for stmt in &block.stmts {

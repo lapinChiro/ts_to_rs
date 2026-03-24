@@ -1374,42 +1374,6 @@ fn test_convert_stmt_nested_fn_decl_generates_closure_let() {
     }
 }
 
-#[test]
-fn test_type_env_stmt_list_registers_let_binding_type() {
-    let f = TctxFixture::new();
-    let tctx = f.tctx();
-    let source = "const x: number = 1;";
-    let module = parse_typescript(source).expect("parse failed");
-    let stmts: Vec<&ast::Stmt> = module
-        .body
-        .iter()
-        .filter_map(|item| match item {
-            ModuleItem::Stmt(s) => Some(s),
-            _ => None,
-        })
-        .collect();
-    let stmts_ref: Vec<ast::Stmt> = stmts.into_iter().cloned().collect();
-
-    let mut type_env = TypeEnv::new();
-    let _result = {
-        let mut synthetic = SyntheticTypeRegistry::new();
-        let mut t = Transformer {
-            tctx: &tctx,
-            type_env: std::mem::take(&mut type_env),
-            synthetic: &mut synthetic,
-        };
-        let r = t.convert_stmt_list(&stmts_ref, None);
-        type_env = t.type_env;
-        r
-    }
-    .unwrap();
-
-    assert_eq!(
-        type_env.get("x"),
-        Some(&RustType::F64),
-        "convert_stmt_list should register Let binding types in TypeEnv"
-    );
-}
 
 // --- Spread array expansion tests (SWC AST level) ---
 

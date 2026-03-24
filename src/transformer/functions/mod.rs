@@ -11,7 +11,7 @@ use crate::pipeline::type_converter::{
 };
 use crate::pipeline::SyntheticTypeRegistry;
 use crate::transformer::{
-    extract_pat_ident_name, extract_prop_name, wrap_trait_for_position, Transformer, TypeEnv,
+    extract_pat_ident_name, extract_prop_name, wrap_trait_for_position, Transformer,
     TypePosition,
 };
 
@@ -41,10 +41,8 @@ impl<'a> Transformer<'a> {
         let mut params = Vec::new();
         let mut destructuring_stmts = Vec::new();
         let return_type = {
-            let sub_type_env = TypeEnv::new();
             let mut sub = Transformer {
                 tctx: self.tctx,
-                type_env: sub_type_env,
                 synthetic: &mut local_synthetic,
             };
 
@@ -117,11 +115,9 @@ impl<'a> Transformer<'a> {
 
         // Sub-Transformer for function body: uses local SyntheticTypeRegistry.
         // TypeResolver + FileTypeResolution handle all type tracking.
-        // TypeEnv is empty; remaining type_env uses will be removed in T8.
         let body_stmts = match &fn_decl.function.body {
             Some(block) => Transformer {
                 tctx: self.tctx,
-                type_env: TypeEnv::new(),
                 synthetic: &mut local_synthetic,
             }
             .convert_stmt_list(&block.stmts, return_type.as_ref())?,
@@ -536,7 +532,7 @@ impl<'a> Transformer<'a> {
                         // Cat B: field type could be looked up from struct definition
                         let default_ir = crate::transformer::Transformer {
                             tctx: self.tctx,
-                            type_env: crate::transformer::TypeEnv::new(),
+
                             synthetic: self.synthetic,
                         }
                         .convert_expr(default_expr)?;
@@ -667,7 +663,7 @@ impl<'a> Transformer<'a> {
                         // Cat B: field type could be looked up from struct definition
                         let default_ir = crate::transformer::Transformer {
                             tctx: self.tctx,
-                            type_env: crate::transformer::TypeEnv::new(),
+
                             synthetic: self.synthetic,
                         }
                         .convert_expr(default_expr)?;
@@ -1066,7 +1062,6 @@ impl<'a> Transformer<'a> {
 
             let closure = crate::transformer::Transformer {
                 tctx: self.tctx,
-                type_env: TypeEnv::new(),
                 synthetic: self.synthetic,
             }
             .convert_arrow_expr_with_return_type(

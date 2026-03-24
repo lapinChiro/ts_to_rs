@@ -251,9 +251,13 @@ impl<'a> Transformer<'a> {
                         args: vec![],
                     });
                 }
-                // Non-tag field: if bound in TypeEnv (match arm destructuring),
+                // Non-tag field: if bound in match arm destructuring,
                 // clone the reference (match on &obj binds fields by reference)
-                if self.type_env.get(&field).is_some() {
+                if self
+                    .tctx
+                    .type_resolution
+                    .is_du_field_binding(&field, member.span.lo.0)
+                {
                     return Ok(Expr::MethodCall {
                         object: Box::new(Expr::Ident(field)),
                         method: "clone".to_string(),

@@ -9,7 +9,6 @@ use crate::ir::{BinOp, ClosureBody, Expr, MatchArm, MatchPattern, Param, RustTyp
 use crate::pipeline::type_converter::convert_ts_type;
 use crate::transformer::expressions::patterns::extract_narrowing_guards;
 use crate::transformer::Transformer;
-use crate::transformer::TypeEnv;
 use crate::transformer::{
     extract_pat_ident_name, extract_prop_name, single_declarator, TypePosition,
 };
@@ -152,33 +151,6 @@ impl<'a> Transformer<'a> {
             });
         }
         Ok(stmts)
-    }
-}
-
-/// Infers a `RustType::Fn` from a closure expression for TypeEnv registration.
-///
-/// When `const greet = (name: string): string => ...` is converted, the variable's type
-/// annotation is absent. This function extracts param/return types from the `Expr::Closure`
-/// so the `Fn` type can be registered in TypeEnv, enabling `.to_string()` at call sites.
-fn infer_fn_type_from_closure(init: &Option<Expr>) -> Option<RustType> {
-    if let Some(Expr::Closure {
-        params,
-        return_type,
-        ..
-    }) = init
-    {
-        let param_types: Vec<RustType> = params.iter().filter_map(|p| p.ty.clone()).collect();
-        // Only infer if at least one parameter has a type annotation
-        if param_types.is_empty() && return_type.is_none() {
-            return None;
-        }
-        let ret = return_type.clone().unwrap_or(RustType::Unit);
-        Some(RustType::Fn {
-            params: param_types,
-            return_type: Box::new(ret),
-        })
-    } else {
-        None
     }
 }
 
@@ -369,10 +341,6 @@ impl<'a> Transformer<'a> {
                 ty: rhs_type.cloned(),
                 init: Some(rhs_ir),
             };
-            self.type_env.insert(
-                ca.var_name.clone(),
-                rhs_type.cloned().unwrap_or(RustType::Any),
-            );
             return Ok(vec![
                 let_stmt,
                 Stmt::If {
@@ -398,7 +366,6 @@ impl<'a> Transformer<'a> {
                     ty: rhs_type.cloned(),
                     init: Some(rhs_ir),
                 };
-                self.type_env.insert(ca.var_name.clone(), ty.clone());
                 Ok(vec![
                     let_stmt,
                     Stmt::If {
@@ -461,7 +428,6 @@ impl<'a> Transformer<'a> {
                         else_body: None,
                     },
                 ];
-                self.type_env.insert(ca.var_name.clone(), ty.clone());
                 loop_body.extend(body);
                 Ok(vec![Stmt::Loop {
                     label: None,
@@ -1196,54 +1162,11 @@ impl<'a> Transformer<'a> {
         let mut result = Vec::new();
         for stmt in stmts {
             let converted = self.convert_stmt(stmt, return_type)?;
-            for s in &converted {
-                match s {
-                    Stmt::Let {
-                        name, ty: Some(ty), ..
-                    } => {
-                        self.type_env.insert(name.clone(), ty.clone());
-                    }
-                    Stmt::Let {
-                        name,
-                        ty: None,
-                        init: Some(init),
-                        ..
-                    } => {
-                        if let Some(fn_type) = infer_fn_type_from_closure(&Some(init.clone())) {
-                            self.type_env.insert(name.clone(), fn_type);
-                        } else if let Some(resolved) = extract_var_decl_init(stmt, name)
-                            .and_then(|ast_init| self.get_expr_type(ast_init).cloned())
-                        {
-                            self.type_env.insert(name.clone(), resolved);
-                        }
-                    }
-                    _ => {}
-                }
-            }
             result.extend(converted);
         }
         mark_mutated_vars(&mut result);
         Ok(result)
     }
-}
-
-/// Extracts the init expression from a VarDecl AST statement
-/// when the declarator has a simple identifier matching `expected_name`.
-///
-/// Returns `None` for destructuring patterns (array/object) because a single
-/// AST VarDecl expands into multiple IR `Stmt::Let`, and the init expression
-/// does not correspond to any individual destructured variable.
-fn extract_var_decl_init<'a>(stmt: &'a ast::Stmt, expected_name: &str) -> Option<&'a ast::Expr> {
-    if let ast::Stmt::Decl(ast::Decl::Var(var_decl)) = stmt {
-        let decl = var_decl.decls.first()?;
-        // Only match simple identifiers, not destructuring patterns
-        if let ast::Pat::Ident(ident) = &decl.name {
-            if ident.sym.as_ref() == expected_name {
-                return decl.init.as_deref();
-            }
-        }
-    }
-    None
 }
 
 /// Mutating methods that require `&mut self` on the receiver.
@@ -1795,7 +1718,8 @@ impl<'a> Transformer<'a> {
 /// `switch (typeof x) { case "string": ... case "number": ... }` →
 /// `match x { Enum::String(x) => { ... }, Enum::F64(x) => { ... } }`
 ///
-/// 各 case body 内では destructured なフィールドが type_env に登録される。
+/// TypeResolver の DU フィールドバインディング検出により、各 case body 内のフィールド変数は
+/// FileTypeResolution 経由で解決される。
 impl<'a> Transformer<'a> {
     /// `switch (typeof x)` を enum match に変換する。
     fn try_convert_typeof_switch(
@@ -2055,26 +1979,8 @@ impl<'a> Transformer<'a> {
                 }
             }
 
-            // Collect field types for TypeEnv registration
-            let mut field_types: Vec<(String, RustType)> = Vec::new();
-            for vname in &pending_variant_names {
-                if let Some(fields) = variant_fields.get(vname) {
-                    for (fname, ftype) in fields {
-                        if needed_fields.contains(fname)
-                            && !field_types.iter().any(|(n, _)| n == fname)
-                        {
-                            field_types.push((fname.clone(), ftype.clone()));
-                        }
-                    }
-                }
-            }
-
-            // Push scope with bound fields, convert body, pop scope
-            self.type_env.push_scope();
-            for (fname, ftype) in &field_types {
-                self.type_env.insert(fname.clone(), ftype.clone());
-            }
-
+            // TypeResolver's DU field binding detection (is_du_field_binding)
+            // handles field variable resolution, so no explicit scope needed.
             let body = case
                 .cons
                 .iter()
@@ -2084,8 +1990,6 @@ impl<'a> Transformer<'a> {
                 .into_iter()
                 .flatten()
                 .collect();
-
-            self.type_env.pop_scope();
 
             if case.test.is_none() {
                 pending_patterns.push(MatchPattern::Wildcard);
@@ -2729,7 +2633,6 @@ impl<'a> Transformer<'a> {
         let body = match &fn_decl.function.body {
             Some(block) => Transformer {
                 tctx: self.tctx,
-                type_env: TypeEnv::new(),
                 synthetic: &mut *self.synthetic,
             }
             .convert_stmt_list(&block.stmts, return_type.as_ref())?,

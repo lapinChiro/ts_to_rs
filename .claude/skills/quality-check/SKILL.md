@@ -1,6 +1,6 @@
 ---
 name: quality-check
-description: 作業完了時（コミット前）の品質チェック手順。cargo fmt, clippy, test を全て実行し 0 エラー・0 警告を確認する
+description: 作業完了時（コミット前）の品質チェック手順。cargo fix, fmt, clippy, test を全て実行し 0 エラー・0 警告を確認する
 user-invocable: true
 ---
 
@@ -15,10 +15,13 @@ user-invocable: true
 以下を全て実行し **0 エラー・0 警告** であることを確認する:
 
 ```bash
+cargo fix --allow-dirty --allow-staged > /tmp/fix-result.txt 2>&1
 cargo fmt --all --check > /tmp/fmt-result.txt 2>&1
 cargo clippy --all-targets --all-features -- -D warnings > /tmp/clippy-result.txt 2>&1
 cargo test > /tmp/test-result.txt 2>&1
 ```
+
+`cargo fix` は未使用 import 等のコンパイラ警告を自動修正する。`cargo fmt` / `cargo clippy` の前に実行することで手動修正の手間を省く。
 
 コマンド出力の確認方法は `.claude/rules/command-output-verification.md` に従う。
 

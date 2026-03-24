@@ -28,8 +28,8 @@ impl<'a> Transformer<'a> {
                         return Ok(result);
                     }
 
-                    // Look up function parameter types from the registry or TypeEnv
-                    let typeenv_params: Vec<(String, RustType)>;
+                    // Look up function parameter types from the registry or FileTypeResolution
+                    let resolved_params: Vec<(String, RustType)>;
                     let mut has_rest = false;
                     let param_types: Option<&[(String, RustType)]> =
                         if let Some(TypeDef::Function {
@@ -41,14 +41,14 @@ impl<'a> Transformer<'a> {
                             has_rest = *rest;
                             Some(params.as_slice())
                         } else if let Some(RustType::Fn { params, .. }) =
-                            self.type_env.get(&fn_name)
+                            self.get_expr_type(callee)
                         {
-                            typeenv_params = params
+                            resolved_params = params
                                 .iter()
                                 .enumerate()
                                 .map(|(i, ty)| (format!("_p{i}"), ty.clone()))
                                 .collect();
-                            Some(typeenv_params.as_slice())
+                            Some(resolved_params.as_slice())
                         } else {
                             None
                         };
