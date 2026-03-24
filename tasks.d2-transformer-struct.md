@@ -187,9 +187,9 @@ pub fn convert_expr(
 
 ### Phase D-2-D: functions, classes モジュールのメソッド化
 
-- [ ] **D-1**: `functions/mod.rs` — 7 関数 + `extract_fn_return_type`, `extract_fn_param_types`（計 9 関数）
-- [ ] **D-2**: `classes.rs` — 11 関数 + `convert_ident_to_param`（`mod.rs` から移動。呼び出し元が全て classes なため）
-- [ ] **D-3**: `cargo check` 通過確認
+- [x] **D-1**: `functions/mod.rs` — 7 関数 + `extract_fn_return_type`, `extract_fn_param_types`（計 9 関数）
+- [x] **D-2**: `classes.rs` — 11 関数 + `convert_ident_to_param`（`mod.rs` から移動。呼び出し元が全て classes なため）
+- [x] **D-3**: `cargo check` 通過確認
 
 ### Phase D-2-E: mod.rs のメソッド化 + entry point 変更
 

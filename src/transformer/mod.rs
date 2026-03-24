@@ -78,28 +78,6 @@ pub fn single_declarator(var_decl: &ast::VarDecl) -> Result<&ast::VarDeclarator>
     Ok(&var_decl.decls[0])
 }
 
-/// Converts an identifier parameter pattern into an IR [`Param`].
-///
-/// Extracts name and type annotation from a `BindingIdent`, converts the type,
-/// and returns a `Param`. Used by both function and class method parameter conversion.
-pub fn convert_ident_to_param(
-    ident: &ast::BindingIdent,
-    synthetic: &mut SyntheticTypeRegistry,
-    reg: &crate::registry::TypeRegistry,
-) -> Result<crate::ir::Param> {
-    let name = ident.id.sym.to_string();
-    let ty = ident
-        .type_ann
-        .as_ref()
-        .ok_or_else(|| anyhow::anyhow!("parameter '{}' has no type annotation", name))?;
-    let rust_type =
-        types::convert_type_for_position(&ty.type_ann, TypePosition::Param, synthetic, reg)?;
-    Ok(crate::ir::Param {
-        name,
-        ty: Some(rust_type),
-    })
-}
-
 /// Extracts the property name string from a [`ast::PropName::Ident`].
 ///
 /// Returns an error if the property name is not a simple identifier.

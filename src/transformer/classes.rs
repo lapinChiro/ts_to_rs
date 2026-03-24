@@ -15,7 +15,7 @@ use crate::transformer::expressions::convert_expr;
 use crate::transformer::extract_prop_name;
 use crate::transformer::functions::convert_last_return_to_tail;
 use crate::transformer::statements::convert_stmt;
-use crate::transformer::TypeEnv;
+use crate::transformer::{Transformer, TypeEnv};
 
 /// Extracted class information for resolving inheritance relationships.
 #[derive(Debug, Clone)]
@@ -40,96 +40,97 @@ pub struct ClassInfo {
     pub static_consts: Vec<AssocConst>,
 }
 
-/// Extracts [`ClassInfo`] from an SWC class declaration without generating IR items.
-///
-/// Used in the first pass to collect class metadata for inheritance resolution.
-pub fn extract_class_info(
-    class_decl: &ast::ClassDecl,
-    vis: Visibility,
-    synthetic: &mut SyntheticTypeRegistry,
-    tctx: &TransformContext<'_>,
-) -> Result<ClassInfo> {
-    let name = class_decl.ident.sym.to_string();
-    let parent = class_decl.class.super_class.as_ref().and_then(|sc| {
-        if let ast::Expr::Ident(ident) = sc.as_ref() {
-            Some(ident.sym.to_string())
-        } else {
-            None
-        }
-    });
-
-    let implements: Vec<String> = class_decl
-        .class
-        .implements
-        .iter()
-        .filter_map(|impl_clause| {
-            if let ast::Expr::Ident(ident) = impl_clause.expr.as_ref() {
+impl<'a> Transformer<'a> {
+    /// Extracts [`ClassInfo`] from an SWC class declaration without generating IR items.
+    ///
+    /// Used in the first pass to collect class metadata for inheritance resolution.
+    pub(crate) fn extract_class_info(
+        &mut self,
+        class_decl: &ast::ClassDecl,
+        vis: Visibility,
+    ) -> Result<ClassInfo> {
+        let name = class_decl.ident.sym.to_string();
+        let parent = class_decl.class.super_class.as_ref().and_then(|sc| {
+            if let ast::Expr::Ident(ident) = sc.as_ref() {
                 Some(ident.sym.to_string())
             } else {
                 None
             }
-        })
-        .collect();
+        });
 
-    let mut fields = Vec::new();
-    let mut static_consts = Vec::new();
-    let mut constructor = None;
-    let mut methods = Vec::new();
-
-    for member in &class_decl.class.body {
-        match member {
-            ast::ClassMember::ClassProp(prop) if prop.is_static => {
-                if let Some(ac) = convert_static_prop(prop, &vis, synthetic, tctx)? {
-                    static_consts.push(ac);
+        let implements: Vec<String> = class_decl
+            .class
+            .implements
+            .iter()
+            .filter_map(|impl_clause| {
+                if let ast::Expr::Ident(ident) = impl_clause.expr.as_ref() {
+                    Some(ident.sym.to_string())
+                } else {
+                    None
                 }
+            })
+            .collect();
+
+        let mut fields = Vec::new();
+        let mut static_consts = Vec::new();
+        let mut constructor = None;
+        let mut methods = Vec::new();
+
+        for member in &class_decl.class.body {
+            match member {
+                ast::ClassMember::ClassProp(prop) if prop.is_static => {
+                    if let Some(ac) = self.convert_static_prop(prop, &vis)? {
+                        static_consts.push(ac);
+                    }
+                }
+                ast::ClassMember::ClassProp(prop) => {
+                    fields.push(self.convert_class_prop(prop, &vis)?);
+                }
+                ast::ClassMember::Constructor(ctor) => {
+                    let (method, param_prop_fields) =
+                        self.convert_constructor(ctor, &vis)?;
+                    constructor = Some(method);
+                    fields.extend(param_prop_fields);
+                }
+                ast::ClassMember::Method(method) => {
+                    methods.push(self.convert_class_method(method, &vis)?);
+                }
+                _ => {}
             }
-            ast::ClassMember::ClassProp(prop) => {
-                fields.push(convert_class_prop(prop, &vis, synthetic, tctx)?);
-            }
-            ast::ClassMember::Constructor(ctor) => {
-                let (method, param_prop_fields) = convert_constructor(ctor, &vis, synthetic, tctx)?;
-                constructor = Some(method);
-                fields.extend(param_prop_fields);
-            }
-            ast::ClassMember::Method(method) => {
-                methods.push(convert_class_method(method, &vis, synthetic, tctx)?);
-            }
-            _ => {}
         }
+
+        Ok(ClassInfo {
+            name,
+            parent,
+            fields,
+            constructor,
+            methods,
+            vis,
+            implements,
+            is_abstract: class_decl.class.is_abstract,
+            static_consts,
+        })
     }
 
-    Ok(ClassInfo {
-        name,
-        parent,
-        fields,
-        constructor,
-        methods,
-        vis,
-        implements,
-        is_abstract: class_decl.class.is_abstract,
-        static_consts,
-    })
-}
-
-/// Converts an SWC [`ast::ClassDecl`] into IR items (struct + impl).
-///
-/// Properties become struct fields, methods become impl methods,
-/// and `constructor` becomes `pub fn new() -> Self`.
-///
-/// # Errors
-///
-/// Returns an error if unsupported class members are encountered.
-pub fn convert_class_decl(
-    class_decl: &ast::ClassDecl,
-    vis: Visibility,
-    synthetic: &mut SyntheticTypeRegistry,
-    tctx: &TransformContext<'_>,
-) -> Result<Vec<Item>> {
-    let info = extract_class_info(class_decl, vis, synthetic, tctx)?;
-    if info.is_abstract {
-        generate_abstract_class_items(&info)
-    } else {
-        generate_items_for_class(&info, None)
+    /// Converts an SWC [`ast::ClassDecl`] into IR items (struct + impl).
+    ///
+    /// Properties become struct fields, methods become impl methods,
+    /// and `constructor` becomes `pub fn new() -> Self`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if unsupported class members are encountered.
+    pub(crate) fn convert_class_decl(
+        &mut self,
+        class_decl: &ast::ClassDecl,
+        vis: Visibility,
+    ) -> Result<Vec<Item>> {
+        let info = self.extract_class_info(class_decl, vis)?;
+        if info.is_abstract {
+            generate_abstract_class_items(&info)
+        } else {
+            generate_items_for_class(&info, None)
+        }
     }
 }
 
@@ -555,180 +556,176 @@ fn try_extract_super_call(stmt: &Stmt) -> Option<Vec<Expr>> {
     }
 }
 
-/// Converts a static class property to an associated constant.
-///
-/// Returns `None` if the property has no initializer (cannot become a const without a value).
-fn convert_static_prop(
-    prop: &ast::ClassProp,
-    vis: &Visibility,
-    synthetic: &mut SyntheticTypeRegistry,
-    tctx: &TransformContext<'_>,
-) -> Result<Option<AssocConst>> {
-    let reg = tctx.type_registry;
-    let name = extract_prop_name(&prop.key)
-        .map_err(|_| anyhow!("unsupported static property key (only identifiers)"))?;
+impl<'a> Transformer<'a> {
+    /// Converts a static class property to an associated constant.
+    ///
+    /// Returns `None` if the property has no initializer (cannot become a const without a value).
+    fn convert_static_prop(
+        &mut self,
+        prop: &ast::ClassProp,
+        vis: &Visibility,
+    ) -> Result<Option<AssocConst>> {
+        let reg = self.reg();
+        let name = extract_prop_name(&prop.key)
+            .map_err(|_| anyhow!("unsupported static property key (only identifiers)"))?;
 
-    let type_ann = prop
-        .type_ann
-        .as_ref()
-        .ok_or_else(|| anyhow!("static property '{}' has no type annotation", name))?;
-    let ty = convert_ts_type(&type_ann.type_ann, synthetic, reg)?;
+        let type_ann = prop
+            .type_ann
+            .as_ref()
+            .ok_or_else(|| anyhow!("static property '{}' has no type annotation", name))?;
+        let ty = convert_ts_type(&type_ann.type_ann, self.synthetic, reg)?;
 
-    let value = match &prop.value {
-        Some(init) => convert_expr(init, tctx, &TypeEnv::new(), synthetic)?,
-        None => return Ok(None), // No initializer — skip
-    };
+        let value = match &prop.value {
+            Some(init) => convert_expr(init, self.tctx, &TypeEnv::new(), self.synthetic)?,
+            None => return Ok(None), // No initializer — skip
+        };
 
-    Ok(Some(AssocConst {
-        vis: vis.clone(),
-        name,
-        ty,
-        value,
-    }))
-}
-
-/// Converts a class property to a struct field.
-fn convert_class_prop(
-    prop: &ast::ClassProp,
-    class_vis: &Visibility,
-    synthetic: &mut SyntheticTypeRegistry,
-    tctx: &TransformContext<'_>,
-) -> Result<StructField> {
-    let reg = tctx.type_registry;
-    let field_name = extract_prop_name(&prop.key)
-        .map_err(|_| anyhow!("unsupported class property key (only identifiers)"))?;
-
-    let ty = match prop.type_ann.as_ref() {
-        Some(ann) => convert_ts_type(&ann.type_ann, synthetic, reg)?,
-        None => RustType::Any, // Fallback to Any for unannotated class properties
-    };
-    let member_vis = resolve_member_visibility(prop.accessibility, class_vis);
-
-    Ok(StructField {
-        vis: Some(member_vis),
-        name: field_name,
-        ty,
-    })
-}
-
-/// Converts a constructor to a `new()` associated function.
-///
-/// Returns the method and any additional struct fields extracted from
-/// `TsParamProp` (parameter properties like `constructor(public x: number)`).
-fn convert_constructor(
-    ctor: &ast::Constructor,
-    vis: &Visibility,
-    synthetic: &mut SyntheticTypeRegistry,
-    tctx: &TransformContext<'_>,
-) -> Result<(Method, Vec<StructField>)> {
-    let mut params = Vec::new();
-    let mut param_prop_fields = Vec::new();
-    // Names of parameter properties — used to inject `this.field = param`
-    // assignments into the constructor body.
-    let mut param_prop_names = Vec::new();
-
-    let mut default_expansion_stmts = Vec::new();
-    for param in &ctor.params {
-        match param {
-            ast::ParamOrTsParamProp::Param(p) => {
-                let (param, expansion) = convert_param_pat(&p.pat, synthetic, tctx)?;
-                default_expansion_stmts.extend(expansion);
-                params.push(param);
-            }
-            ast::ParamOrTsParamProp::TsParamProp(prop) => {
-                let (ir_param, field) = convert_ts_param_prop(prop, vis, synthetic, tctx)?;
-                param_prop_names.push(ir_param.name.clone());
-                params.push(ir_param);
-                param_prop_fields.push(field);
-            }
-        }
+        Ok(Some(AssocConst {
+            vis: vis.clone(),
+            name,
+            ty,
+            value,
+        }))
     }
 
-    let body = match &ctor.body {
-        Some(block) => {
-            // Prepend synthetic `this.field = field` for each param prop
-            // before the original body statements, then run through the
-            // existing constructor body conversion which recognises
-            // `this.field = value` patterns and folds them into `Self { ... }`.
-            let synthetic_stmts = build_param_prop_assignments(&param_prop_names);
-            let all_stmts: Vec<ast::Stmt> = synthetic_stmts
-                .into_iter()
-                .chain(block.stmts.iter().cloned())
-                .collect();
-            let mut body = convert_constructor_body(&all_stmts, tctx, &params, synthetic)?;
-            // Insert default parameter expansion stmts at the beginning
-            for (i, stmt) in default_expansion_stmts.into_iter().enumerate() {
-                body.insert(i, stmt);
-            }
-            Some(body)
-        }
-        None if !param_prop_names.is_empty() => {
-            let synthetic_stmts = build_param_prop_assignments(&param_prop_names);
-            let mut body = convert_constructor_body(&synthetic_stmts, tctx, &params, synthetic)?;
-            for (i, stmt) in default_expansion_stmts.into_iter().enumerate() {
-                body.insert(i, stmt);
-            }
-            Some(body)
-        }
-        None if !default_expansion_stmts.is_empty() => {
-            // No body but has default params — need to create body with expansion stmts
-            Some(default_expansion_stmts)
-        }
-        None => None,
-    };
+    /// Converts a class property to a struct field.
+    fn convert_class_prop(
+        &mut self,
+        prop: &ast::ClassProp,
+        class_vis: &Visibility,
+    ) -> Result<StructField> {
+        let reg = self.reg();
+        let field_name = extract_prop_name(&prop.key)
+            .map_err(|_| anyhow!("unsupported class property key (only identifiers)"))?;
 
-    let method = Method {
-        vis: vis.clone(),
-        name: "new".to_string(),
-        has_self: false,
-        has_mut_self: false,
-        params,
-        return_type: Some(RustType::Named {
-            name: "Self".to_string(),
-            type_args: vec![],
-        }),
-        body,
-    };
-    Ok((method, param_prop_fields))
-}
+        let ty = match prop.type_ann.as_ref() {
+            Some(ann) => convert_ts_type(&ann.type_ann, self.synthetic, reg)?,
+            None => RustType::Any, // Fallback to Any for unannotated class properties
+        };
+        let member_vis = resolve_member_visibility(prop.accessibility, class_vis);
 
-/// Converts a `TsParamProp` into an IR parameter and a struct field.
-fn convert_ts_param_prop(
-    prop: &ast::TsParamProp,
-    class_vis: &Visibility,
-    synthetic: &mut SyntheticTypeRegistry,
-    tctx: &TransformContext<'_>,
-) -> Result<(Param, StructField)> {
-    let reg = tctx.type_registry;
-    let (name, ty) = match &prop.param {
-        ast::TsParamPropParam::Ident(ident) => {
-            let ir_param = crate::transformer::convert_ident_to_param(ident, synthetic, reg)?;
-            (ir_param.name, ir_param.ty)
-        }
-        ast::TsParamPropParam::Assign(assign) => {
-            // `public x: number = 42` — extract name and type from the left side
-            match assign.left.as_ref() {
-                ast::Pat::Ident(ident) => {
-                    let ir_param =
-                        crate::transformer::convert_ident_to_param(ident, synthetic, reg)?;
-                    (ir_param.name, ir_param.ty)
+        Ok(StructField {
+            vis: Some(member_vis),
+            name: field_name,
+            ty,
+        })
+    }
+
+    /// Converts a constructor to a `new()` associated function.
+    ///
+    /// Returns the method and any additional struct fields extracted from
+    /// `TsParamProp` (parameter properties like `constructor(public x: number)`).
+    fn convert_constructor(
+        &mut self,
+        ctor: &ast::Constructor,
+        vis: &Visibility,
+    ) -> Result<(Method, Vec<StructField>)> {
+        let mut params = Vec::new();
+        let mut param_prop_fields = Vec::new();
+        // Names of parameter properties — used to inject `this.field = param`
+        // assignments into the constructor body.
+        let mut param_prop_names = Vec::new();
+
+        let mut default_expansion_stmts = Vec::new();
+        for param in &ctor.params {
+            match param {
+                ast::ParamOrTsParamProp::Param(p) => {
+                    let (param, expansion) = self.convert_param_pat(&p.pat)?;
+                    default_expansion_stmts.extend(expansion);
+                    params.push(param);
                 }
-                _ => return Err(anyhow!("unsupported parameter property pattern")),
+                ast::ParamOrTsParamProp::TsParamProp(prop) => {
+                    let (ir_param, field) = self.convert_ts_param_prop(prop, vis)?;
+                    param_prop_names.push(ir_param.name.clone());
+                    params.push(ir_param);
+                    param_prop_fields.push(field);
+                }
             }
         }
-    };
 
-    let field_vis = resolve_member_visibility(prop.accessibility, class_vis);
+        let body = match &ctor.body {
+            Some(block) => {
+                // Prepend synthetic `this.field = field` for each param prop
+                // before the original body statements, then run through the
+                // existing constructor body conversion which recognises
+                // `this.field = value` patterns and folds them into `Self { ... }`.
+                let synthetic_stmts = build_param_prop_assignments(&param_prop_names);
+                let all_stmts: Vec<ast::Stmt> = synthetic_stmts
+                    .into_iter()
+                    .chain(block.stmts.iter().cloned())
+                    .collect();
+                let mut body = self.convert_constructor_body(&all_stmts, &params)?;
+                // Insert default parameter expansion stmts at the beginning
+                for (i, stmt) in default_expansion_stmts.into_iter().enumerate() {
+                    body.insert(i, stmt);
+                }
+                Some(body)
+            }
+            None if !param_prop_names.is_empty() => {
+                let synthetic_stmts = build_param_prop_assignments(&param_prop_names);
+                let mut body = self.convert_constructor_body(&synthetic_stmts, &params)?;
+                for (i, stmt) in default_expansion_stmts.into_iter().enumerate() {
+                    body.insert(i, stmt);
+                }
+                Some(body)
+            }
+            None if !default_expansion_stmts.is_empty() => {
+                // No body but has default params — need to create body with expansion stmts
+                Some(default_expansion_stmts)
+            }
+            None => None,
+        };
 
-    let field = StructField {
-        vis: Some(field_vis),
-        name: name.clone(),
-        ty: ty.clone().unwrap_or(RustType::Any),
-    };
+        let method = Method {
+            vis: vis.clone(),
+            name: "new".to_string(),
+            has_self: false,
+            has_mut_self: false,
+            params,
+            return_type: Some(RustType::Named {
+                name: "Self".to_string(),
+                type_args: vec![],
+            }),
+            body,
+        };
+        Ok((method, param_prop_fields))
+    }
 
-    let param = Param { name, ty };
+    /// Converts a `TsParamProp` into an IR parameter and a struct field.
+    fn convert_ts_param_prop(
+        &mut self,
+        prop: &ast::TsParamProp,
+        class_vis: &Visibility,
+    ) -> Result<(Param, StructField)> {
+        let (name, ty) = match &prop.param {
+            ast::TsParamPropParam::Ident(ident) => {
+                let ir_param = self.convert_ident_to_param(ident)?;
+                (ir_param.name, ir_param.ty)
+            }
+            ast::TsParamPropParam::Assign(assign) => {
+                // `public x: number = 42` — extract name and type from the left side
+                match assign.left.as_ref() {
+                    ast::Pat::Ident(ident) => {
+                        let ir_param = self.convert_ident_to_param(ident)?;
+                        (ir_param.name, ir_param.ty)
+                    }
+                    _ => return Err(anyhow!("unsupported parameter property pattern")),
+                }
+            }
+        };
 
-    Ok((param, field))
+        let field_vis = resolve_member_visibility(prop.accessibility, class_vis);
+
+        let field = StructField {
+            vis: Some(field_vis),
+            name: name.clone(),
+            ty: ty.clone().unwrap_or(RustType::Any),
+        };
+
+        let param = Param { name, ty };
+
+        Ok((param, field))
+    }
 }
 
 /// Builds synthetic `this.<name> = <name>` assignment statements (SWC AST nodes).
@@ -768,46 +765,53 @@ fn build_param_prop_assignments(names: &[String]) -> Vec<ast::Stmt> {
         .collect()
 }
 
-/// Converts constructor body statements.
-///
-/// Recognizes the pattern of `this.field = value` assignments and converts them
-/// into a `Self { field: value, ... }` tail expression. Statements that don't
-/// match this pattern are converted as normal statements.
-fn convert_constructor_body(
-    stmts: &[ast::Stmt],
-    tctx: &TransformContext<'_>,
-    params: &[Param],
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Result<Vec<Stmt>> {
-    let mut type_env = TypeEnv::new();
-    for p in params {
-        if let Some(ty) = &p.ty {
-            type_env.insert(p.name.clone(), ty.clone());
+impl<'a> Transformer<'a> {
+    /// Converts constructor body statements.
+    ///
+    /// Recognizes the pattern of `this.field = value` assignments and converts them
+    /// into a `Self { field: value, ... }` tail expression. Statements that don't
+    /// match this pattern are converted as normal statements.
+    fn convert_constructor_body(
+        &mut self,
+        stmts: &[ast::Stmt],
+        params: &[Param],
+    ) -> Result<Vec<Stmt>> {
+        let mut type_env = TypeEnv::new();
+        for p in params {
+            if let Some(ty) = &p.ty {
+                type_env.insert(p.name.clone(), ty.clone());
+            }
         }
-    }
-    let mut fields = Vec::new();
-    let mut other_stmts = Vec::new();
+        let mut fields = Vec::new();
+        let mut other_stmts = Vec::new();
 
-    for stmt in stmts {
-        if let Some((field_name, value_expr)) = try_extract_this_assignment(stmt) {
-            // Cat B: field type could be looked up from class definition
-            let value = convert_expr(value_expr, tctx, &type_env, synthetic)?;
-            fields.push((field_name, value));
-        } else {
-            other_stmts.extend(convert_stmt(stmt, tctx, None, &mut type_env, synthetic)?);
+        for stmt in stmts {
+            if let Some((field_name, value_expr)) = try_extract_this_assignment(stmt) {
+                // Cat B: field type could be looked up from class definition
+                let value = convert_expr(value_expr, self.tctx, &type_env, self.synthetic)?;
+                fields.push((field_name, value));
+            } else {
+                other_stmts.extend(convert_stmt(
+                    stmt,
+                    self.tctx,
+                    None,
+                    &mut type_env,
+                    self.synthetic,
+                )?);
+            }
         }
-    }
 
-    if !fields.is_empty() {
-        other_stmts.push(Stmt::Return(Some(Expr::StructInit {
-            name: "Self".to_string(),
-            fields,
-            base: None,
-        })));
-    }
+        if !fields.is_empty() {
+            other_stmts.push(Stmt::Return(Some(Expr::StructInit {
+                name: "Self".to_string(),
+                fields,
+                base: None,
+            })));
+        }
 
-    convert_last_return_to_tail(&mut other_stmts);
-    Ok(other_stmts)
+        convert_last_return_to_tail(&mut other_stmts);
+        Ok(other_stmts)
+    }
 }
 
 /// Tries to extract a `this.field = value` pattern from a statement.
@@ -838,92 +842,93 @@ fn try_extract_this_assignment(stmt: &ast::Stmt) -> Option<(String, &ast::Expr)>
     Some((field_name, assign.right.as_ref()))
 }
 
-/// Converts a class method (including getters/setters) to an impl method.
-///
-/// - `MethodKind::Getter` → `fn name(&self) -> T { ... }`
-/// - `MethodKind::Setter` → `fn set_name(&mut self, v: T) { ... }`
-/// - `MethodKind::Method` → `fn name(&self, ...) -> T { ... }`
-fn convert_class_method(
-    method: &ast::ClassMethod,
-    vis: &Visibility,
-    synthetic: &mut SyntheticTypeRegistry,
-    tctx: &TransformContext<'_>,
-) -> Result<Method> {
-    let reg = tctx.type_registry;
-    let raw_name = extract_prop_name(&method.key)
-        .map_err(|_| anyhow!("unsupported method key (only identifiers)"))?;
+impl<'a> Transformer<'a> {
+    /// Converts a class method (including getters/setters) to an impl method.
+    ///
+    /// - `MethodKind::Getter` → `fn name(&self) -> T { ... }`
+    /// - `MethodKind::Setter` → `fn set_name(&mut self, v: T) { ... }`
+    /// - `MethodKind::Method` → `fn name(&self, ...) -> T { ... }`
+    fn convert_class_method(
+        &mut self,
+        method: &ast::ClassMethod,
+        vis: &Visibility,
+    ) -> Result<Method> {
+        let reg = self.reg();
+        let raw_name = extract_prop_name(&method.key)
+            .map_err(|_| anyhow!("unsupported method key (only identifiers)"))?;
 
-    let is_setter = method.kind == ast::MethodKind::Setter;
+        let is_setter = method.kind == ast::MethodKind::Setter;
 
-    let name = if is_setter {
-        format!("set_{raw_name}")
-    } else {
-        raw_name
-    };
-
-    let mut params = Vec::new();
-    let mut default_expansion_stmts = Vec::new();
-    for param in &method.function.params {
-        let (p, expansion) = convert_param_pat(&param.pat, synthetic, tctx)?;
-        default_expansion_stmts.extend(expansion);
-        params.push(p);
-    }
-
-    let return_type = method
-        .function
-        .return_type
-        .as_ref()
-        .map(|ann| convert_ts_type(&ann.type_ann, synthetic, reg))
-        .transpose()?;
-
-    // void → None (Rust omits `-> ()`)
-    let return_type = return_type.and_then(|ty| {
-        if matches!(ty, RustType::Unit) {
-            None
+        let name = if is_setter {
+            format!("set_{raw_name}")
         } else {
-            Some(ty)
-        }
-    });
+            raw_name
+        };
 
-    let body = match &method.function.body {
-        Some(block) => {
-            let mut method_env = TypeEnv::new();
-            for p in &params {
-                if let Some(ty) = &p.ty {
-                    method_env.insert(p.name.clone(), ty.clone());
+        let mut params = Vec::new();
+        let mut default_expansion_stmts = Vec::new();
+        for param in &method.function.params {
+            let (p, expansion) = self.convert_param_pat(&param.pat)?;
+            default_expansion_stmts.extend(expansion);
+            params.push(p);
+        }
+
+        let return_type = method
+            .function
+            .return_type
+            .as_ref()
+            .map(|ann| convert_ts_type(&ann.type_ann, self.synthetic, reg))
+            .transpose()?;
+
+        // void → None (Rust omits `-> ()`)
+        let return_type = return_type.and_then(|ty| {
+            if matches!(ty, RustType::Unit) {
+                None
+            } else {
+                Some(ty)
+            }
+        });
+
+        let body = match &method.function.body {
+            Some(block) => {
+                let mut method_env = TypeEnv::new();
+                for p in &params {
+                    if let Some(ty) = &p.ty {
+                        method_env.insert(p.name.clone(), ty.clone());
+                    }
                 }
+                let mut stmts = default_expansion_stmts;
+                for stmt in &block.stmts {
+                    stmts.extend(convert_stmt(
+                        stmt,
+                        self.tctx,
+                        return_type.as_ref(),
+                        &mut method_env,
+                        self.synthetic,
+                    )?);
+                }
+                convert_last_return_to_tail(&mut stmts);
+                Some(stmts)
             }
-            let mut stmts = default_expansion_stmts;
-            for stmt in &block.stmts {
-                stmts.extend(convert_stmt(
-                    stmt,
-                    tctx,
-                    return_type.as_ref(),
-                    &mut method_env,
-                    synthetic,
-                )?);
-            }
-            convert_last_return_to_tail(&mut stmts);
-            Some(stmts)
-        }
-        None => None,
-    };
+            None => None,
+        };
 
-    // Setter or method that assigns to `this.field` needs `&mut self`
-    let body_stmts = body.as_deref().unwrap_or(&[]);
-    let needs_mut = is_setter || body_has_self_assignment(body_stmts);
+        // Setter or method that assigns to `this.field` needs `&mut self`
+        let body_stmts = body.as_deref().unwrap_or(&[]);
+        let needs_mut = is_setter || body_has_self_assignment(body_stmts);
 
-    let member_vis = resolve_member_visibility(method.accessibility, vis);
+        let member_vis = resolve_member_visibility(method.accessibility, vis);
 
-    Ok(Method {
-        vis: member_vis,
-        name,
-        has_self: !method.is_static,
-        has_mut_self: !method.is_static && needs_mut,
-        params,
-        return_type,
-        body,
-    })
+        Ok(Method {
+            vis: member_vis,
+            name,
+            has_self: !method.is_static,
+            has_mut_self: !method.is_static && needs_mut,
+            params,
+            return_type,
+            body,
+        })
+    }
 }
 
 /// Resolves the effective visibility of a class member based on its TypeScript accessibility modifier.
@@ -960,109 +965,102 @@ fn is_self_field_access(expr: &Expr) -> bool {
     )
 }
 
-/// Converts a parameter pattern into an IR [`Param`] and optional expansion statements.
-///
-/// Supports:
-/// - `x: number` → simple parameter
-/// - `x: number = 0` → `Option<f64>` + `let x = x.unwrap_or(0.0);`
-/// - `options: Options = {}` → `Option<Options>` + `let options = options.unwrap_or_default();`
-fn convert_param_pat(
-    pat: &ast::Pat,
-    synthetic: &mut SyntheticTypeRegistry,
-    tctx: &TransformContext<'_>,
-) -> Result<(Param, Vec<Stmt>)> {
-    let reg = tctx.type_registry;
-    match pat {
-        ast::Pat::Ident(ident) => {
-            let param = crate::transformer::convert_ident_to_param(ident, synthetic, reg)?;
-            Ok((param, vec![]))
-        }
-        ast::Pat::Assign(assign) => {
-            // Default value parameter: x: T = value
-            match assign.left.as_ref() {
-                ast::Pat::Ident(ident) => {
-                    let inner_param =
-                        crate::transformer::convert_ident_to_param(ident, synthetic, reg)?;
-                    let param_name = inner_param.name.clone();
-                    let inner_type = inner_param
-                        .ty
-                        .ok_or_else(|| anyhow!("default parameter requires a type annotation"))?;
-                    let option_type = RustType::Option(Box::new(inner_type));
-
-                    let (default_expr, use_unwrap_or_default) =
-                        crate::transformer::functions::convert_default_value(
-                            &assign.right,
-                            synthetic,
-                        )?;
-
-                    let unwrap_call = if use_unwrap_or_default {
-                        Expr::MethodCall {
-                            object: Box::new(Expr::Ident(param_name.clone())),
-                            method: "unwrap_or_default".to_string(),
-                            args: vec![],
-                        }
-                    } else {
-                        Expr::MethodCall {
-                            object: Box::new(Expr::Ident(param_name.clone())),
-                            method: "unwrap_or".to_string(),
-                            args: vec![default_expr.unwrap()],
-                        }
-                    };
-
-                    let expansion_stmt = Stmt::Let {
-                        mutable: false,
-                        name: param_name.clone(),
-                        ty: None,
-                        init: Some(unwrap_call),
-                    };
-
-                    Ok((
-                        Param {
-                            name: param_name,
-                            ty: Some(option_type),
-                        },
-                        vec![expansion_stmt],
-                    ))
-                }
-                _ => Err(anyhow!("unsupported parameter pattern")),
+impl<'a> Transformer<'a> {
+    /// Converts a parameter pattern into an IR [`Param`] and optional expansion statements.
+    ///
+    /// Supports:
+    /// - `x: number` → simple parameter
+    /// - `x: number = 0` → `Option<f64>` + `let x = x.unwrap_or(0.0);`
+    /// - `options: Options = {}` → `Option<Options>` + `let options = options.unwrap_or_default();`
+    fn convert_param_pat(
+        &mut self,
+        pat: &ast::Pat,
+    ) -> Result<(Param, Vec<Stmt>)> {
+        match pat {
+            ast::Pat::Ident(ident) => {
+                let param = self.convert_ident_to_param(ident)?;
+                Ok((param, vec![]))
             }
-        }
-        _ => Err(anyhow!("unsupported parameter pattern")),
-    }
-}
+            ast::Pat::Assign(assign) => {
+                // Default value parameter: x: T = value
+                match assign.left.as_ref() {
+                    ast::Pat::Ident(ident) => {
+                        let inner_param = self.convert_ident_to_param(ident)?;
+                        let param_name = inner_param.name.clone();
+                        let inner_type = inner_param
+                            .ty
+                            .ok_or_else(|| {
+                                anyhow!("default parameter requires a type annotation")
+                            })?;
+                        let option_type = RustType::Option(Box::new(inner_type));
 
-/// Pre-scans all class declarations in the module to collect inheritance info.
-///
-/// Returns a map from class name to [`ClassInfo`]. Only classes that can be
-/// successfully parsed are included; parse failures are silently skipped
-/// (they will be reported during the main transformation pass).
-pub(super) fn pre_scan_classes(
-    module: &ast::Module,
-    synthetic: &mut SyntheticTypeRegistry,
-    tctx: &TransformContext<'_>,
-) -> HashMap<String, ClassInfo> {
-    let mut map = HashMap::new();
+                        let (default_expr, use_unwrap_or_default) =
+                            crate::transformer::functions::convert_default_value(
+                                &assign.right,
+                                self.synthetic,
+                            )?;
 
-    for module_item in &module.body {
-        let (decl, vis) = match module_item {
-            ast::ModuleItem::Stmt(ast::Stmt::Decl(ast::Decl::Class(cd))) => {
-                (cd, Visibility::Private)
-            }
-            ast::ModuleItem::ModuleDecl(ast::ModuleDecl::ExportDecl(export)) => {
-                if let ast::Decl::Class(cd) = &export.decl {
-                    (cd, Visibility::Public)
-                } else {
-                    continue;
+                        let unwrap_call = if use_unwrap_or_default {
+                            Expr::MethodCall {
+                                object: Box::new(Expr::Ident(param_name.clone())),
+                                method: "unwrap_or_default".to_string(),
+                                args: vec![],
+                            }
+                        } else {
+                            Expr::MethodCall {
+                                object: Box::new(Expr::Ident(param_name.clone())),
+                                method: "unwrap_or".to_string(),
+                                args: vec![default_expr.unwrap()],
+                            }
+                        };
+
+                        let expansion_stmt = Stmt::Let {
+                            mutable: false,
+                            name: param_name.clone(),
+                            ty: None,
+                            init: Some(unwrap_call),
+                        };
+
+                        Ok((
+                            Param {
+                                name: param_name,
+                                ty: Some(option_type),
+                            },
+                            vec![expansion_stmt],
+                        ))
+                    }
+                    _ => Err(anyhow!("unsupported parameter pattern")),
                 }
             }
-            _ => continue,
-        };
-        if let Ok(info) = extract_class_info(decl, vis, synthetic, tctx) {
-            map.insert(info.name.clone(), info);
+            _ => Err(anyhow!("unsupported parameter pattern")),
         }
     }
 
-    map
+    /// Converts an identifier parameter pattern into an IR [`Param`].
+    ///
+    /// Extracts name and type annotation from a `BindingIdent`, converts the type,
+    /// and returns a `Param`. Used by both function and class method parameter conversion.
+    fn convert_ident_to_param(
+        &mut self,
+        ident: &ast::BindingIdent,
+    ) -> Result<Param> {
+        let reg = self.reg();
+        let name = ident.id.sym.to_string();
+        let ty = ident
+            .type_ann
+            .as_ref()
+            .ok_or_else(|| anyhow!("parameter '{}' has no type annotation", name))?;
+        let rust_type = crate::transformer::types::convert_type_for_position(
+            &ty.type_ann,
+            crate::transformer::TypePosition::Param,
+            self.synthetic,
+            reg,
+        )?;
+        Ok(Param {
+            name,
+            ty: Some(rust_type),
+        })
+    }
 }
 
 /// Pre-scans all interface declarations to collect method names per interface.
@@ -1118,12 +1116,134 @@ fn find_parent_class_names(
         .collect()
 }
 
-/// Transforms a class declaration, handling inheritance and `implements` if applicable.
-///
-/// - If the class is a parent (extended by another class): generates struct + trait + impls
-/// - If the class is a child (extends another class): generates struct + impl + trait impl
-/// - If the class implements interfaces: generates struct + impl + impl Trait for Struct
-/// - Otherwise: generates struct + impl (no trait)
+impl<'a> Transformer<'a> {
+    /// Pre-scans all class declarations in the module to collect inheritance info.
+    ///
+    /// Returns a map from class name to [`ClassInfo`]. Only classes that can be
+    /// successfully parsed are included; parse failures are silently skipped
+    /// (they will be reported during the main transformation pass).
+    pub(crate) fn pre_scan_classes(
+        &mut self,
+        module: &ast::Module,
+    ) -> HashMap<String, ClassInfo> {
+        let mut map = HashMap::new();
+
+        for module_item in &module.body {
+            let (decl, vis) = match module_item {
+                ast::ModuleItem::Stmt(ast::Stmt::Decl(ast::Decl::Class(cd))) => {
+                    (cd, Visibility::Private)
+                }
+                ast::ModuleItem::ModuleDecl(ast::ModuleDecl::ExportDecl(export)) => {
+                    if let ast::Decl::Class(cd) = &export.decl {
+                        (cd, Visibility::Public)
+                    } else {
+                        continue;
+                    }
+                }
+                _ => continue,
+            };
+            if let Ok(info) = self.extract_class_info(decl, vis) {
+                map.insert(info.name.clone(), info);
+            }
+        }
+
+        map
+    }
+
+    /// Transforms a class declaration, handling inheritance and `implements` if applicable.
+    ///
+    /// - If the class is a parent (extended by another class): generates struct + trait + impls
+    /// - If the class is a child (extends another class): generates struct + impl + trait impl
+    /// - If the class implements interfaces: generates struct + impl + impl Trait for Struct
+    /// - Otherwise: generates struct + impl (no trait)
+    pub(crate) fn transform_class_with_inheritance(
+        &mut self,
+        class_decl: &ast::ClassDecl,
+        vis: Visibility,
+        class_map: &HashMap<String, ClassInfo>,
+        iface_methods: &HashMap<String, Vec<String>>,
+    ) -> Result<Vec<Item>> {
+        let info = self.extract_class_info(class_decl, vis)?;
+        let parent_names = find_parent_class_names(class_map);
+
+        if info.is_abstract {
+            // Abstract class — generate trait (not struct)
+            generate_abstract_class_items(&info)
+        } else if parent_names.contains(&info.name) {
+            // This class is a parent — generate struct + trait + impls
+            generate_parent_class_items(&info)
+        } else if let Some(parent_name) = &info.parent {
+            let parent_info = class_map.get(parent_name);
+            if parent_info.is_some_and(|p| p.is_abstract) {
+                // Parent is abstract — generate struct + impl AbstractParent for Child
+                generate_child_of_abstract(&info, parent_name)
+            } else if !info.implements.is_empty() {
+                // Child class with interface implementations
+                generate_child_class_with_implements(&info, parent_info, iface_methods)
+            } else {
+                // This class is a child — generate struct + impl + trait impl
+                generate_items_for_class(&info, parent_info)
+            }
+        } else if !info.implements.is_empty() {
+            // Class implements interfaces — split methods into trait impls
+            generate_class_with_implements(&info, iface_methods)
+        } else {
+            // Standalone class — no inheritance
+            generate_items_for_class(&info, None)
+        }
+    }
+}
+
+// --- Wrapper free functions (transition period — will be removed in Phase D-2-F) ---
+
+/// Wrapper: delegates to [`Transformer::extract_class_info`].
+pub fn extract_class_info(
+    class_decl: &ast::ClassDecl,
+    vis: Visibility,
+    synthetic: &mut SyntheticTypeRegistry,
+    tctx: &TransformContext<'_>,
+) -> Result<ClassInfo> {
+    let mut type_env = TypeEnv::new();
+    Transformer {
+        tctx,
+        type_env: &mut type_env,
+        synthetic,
+    }
+    .extract_class_info(class_decl, vis)
+}
+
+/// Wrapper: delegates to [`Transformer::convert_class_decl`].
+pub fn convert_class_decl(
+    class_decl: &ast::ClassDecl,
+    vis: Visibility,
+    synthetic: &mut SyntheticTypeRegistry,
+    tctx: &TransformContext<'_>,
+) -> Result<Vec<Item>> {
+    let mut type_env = TypeEnv::new();
+    Transformer {
+        tctx,
+        type_env: &mut type_env,
+        synthetic,
+    }
+    .convert_class_decl(class_decl, vis)
+}
+
+/// Wrapper: delegates to [`Transformer::pre_scan_classes`].
+pub(super) fn pre_scan_classes(
+    module: &ast::Module,
+    synthetic: &mut SyntheticTypeRegistry,
+    tctx: &TransformContext<'_>,
+) -> HashMap<String, ClassInfo> {
+    let mut type_env = TypeEnv::new();
+    Transformer {
+        tctx,
+        type_env: &mut type_env,
+        synthetic,
+    }
+    .pre_scan_classes(module)
+}
+
+/// Wrapper: delegates to [`Transformer::transform_class_with_inheritance`].
 pub(super) fn transform_class_with_inheritance(
     class_decl: &ast::ClassDecl,
     vis: Visibility,
@@ -1132,34 +1252,13 @@ pub(super) fn transform_class_with_inheritance(
     iface_methods: &HashMap<String, Vec<String>>,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Vec<Item>> {
-    let info = extract_class_info(class_decl, vis, synthetic, tctx)?;
-    let parent_names = find_parent_class_names(class_map);
-
-    if info.is_abstract {
-        // Abstract class — generate trait (not struct)
-        generate_abstract_class_items(&info)
-    } else if parent_names.contains(&info.name) {
-        // This class is a parent — generate struct + trait + impls
-        generate_parent_class_items(&info)
-    } else if let Some(parent_name) = &info.parent {
-        let parent_info = class_map.get(parent_name);
-        if parent_info.is_some_and(|p| p.is_abstract) {
-            // Parent is abstract — generate struct + impl AbstractParent for Child
-            generate_child_of_abstract(&info, parent_name)
-        } else if !info.implements.is_empty() {
-            // Child class with interface implementations
-            generate_child_class_with_implements(&info, parent_info, iface_methods)
-        } else {
-            // This class is a child — generate struct + impl + trait impl
-            generate_items_for_class(&info, parent_info)
-        }
-    } else if !info.implements.is_empty() {
-        // Class implements interfaces — split methods into trait impls
-        generate_class_with_implements(&info, iface_methods)
-    } else {
-        // Standalone class — no inheritance
-        generate_items_for_class(&info, None)
+    let mut type_env = TypeEnv::new();
+    Transformer {
+        tctx,
+        type_env: &mut type_env,
+        synthetic,
     }
+    .transform_class_with_inheritance(class_decl, vis, class_map, iface_methods)
 }
 
 #[cfg(test)]
