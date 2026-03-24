@@ -18,12 +18,11 @@
 **パイプライン:** 全 Pass 接続済み。`transpile_pipeline` 本実装。
 **lib.rs:** `transpile()` / `transpile_collecting()` の 2 関数のみ。旧 API 削除済み。
 **main.rs:** `TranspileInput` + `transpile_pipeline` + `OutputWriter` 直接使用。旧 API 依存なし。
-**Transformer:** AnyTypeAnalyzer 統合済み。to_pascal_case 集約済み。SyntheticTypeRegistry ソート修正済み。Transformer struct 導入 D-2-A〜E + F-0〜F-2 + F-3b 完了（全モジュールのメソッド化 + TypeEnv 所有化 + ファクトリメソッド導入 + expressions/ と statements/ の全ラッパー削除 + 全 F-3b サブ Transformer 書き換え）。
+**Transformer:** AnyTypeAnalyzer 統合済み。to_pascal_case 集約済み。SyntheticTypeRegistry ソート修正済み。Transformer struct 導入 D-2-A〜F 全完了（全モジュールのメソッド化 + TypeEnv 所有化 + ファクトリメソッド導入 + 全ラッパー削除 + `convert_default_value` メソッド化 + `convert_class_decl` 削除）。
 
 **残存する実装不足:**
-- D-2-F（F-3〜F-8）: functions/ と classes/ と mod.rs のラッパー削除 + pipeline 更新
 - D-2-G: current_file_dir パラメータ除去
-- D-2-H: テスト更新（statements/tests.rs は F-2 で対応済み。残り: expressions/, functions/, classes/, context, test_fixtures）
+- D-2-H: テスト更新（statements/tests.rs は F-2 で対応済み、functions/tests.rs と classes.rs テストは F-3/F-4 で対応済み。残り: expressions/tests.rs, context.rs, test_fixtures.rs）
 - D-2-I: クリーンアップ + 最終検証
 
 ## タスク一覧
@@ -89,9 +88,9 @@ Phase 2（ExprContext 削除）で `ctx` パラメータが消えた後、シグ
 
 **詳細計画: `tasks.d2-transformer-struct.md`**
 
-`tctx`, `type_env`, `synthetic` の 3 パラメータを `Transformer` struct のフィールドに束ね、105 関数をメソッドに変換する。Phase D-2-A〜I の 9 フェーズで段階的に実施。
+`tctx`, `type_env`, `synthetic` の 3 パラメータを `Transformer` struct のフィールドに束ね、106 関数をメソッドに変換する。Phase D-2-A〜I の 9 フェーズで段階的に実施。
 
-- [ ] **D-2**: Transformer struct 導入（105 関数のメソッド化 + ラッパー遷移 + current_file_dir 除去）
+- [ ] **D-2**: Transformer struct 導入（106 関数のメソッド化 + ラッパー遷移 + current_file_dir 除去）
   - **依存**: D5 完了後
 
 ### Phase E: 最終検証

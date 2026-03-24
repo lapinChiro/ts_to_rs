@@ -8,7 +8,7 @@ use swc_ecma_ast as ast;
 
 use crate::ir::{ClosureBody, Expr, Param, RustType, Stmt};
 use crate::pipeline::type_converter::convert_ts_type;
-use crate::transformer::functions::{convert_last_return_to_tail, convert_ts_type_with_fallback};
+use crate::transformer::functions::convert_last_return_to_tail;
 use crate::transformer::Transformer;
 
 impl<'a> Transformer<'a> {
@@ -37,12 +37,7 @@ impl<'a> Transformer<'a> {
                 });
             }
             ast::Pat::Object(obj_pat) => {
-                let (param, stmts) =
-                    crate::transformer::functions::convert_object_destructuring_param(
-                        obj_pat,
-                        self.tctx,
-                        self.synthetic,
-                    )?;
+                let (param, stmts) = self.convert_object_destructuring_param(obj_pat)?;
                 params.push(param);
                 expansion_stmts.extend(stmts);
             }
@@ -57,10 +52,7 @@ impl<'a> Transformer<'a> {
                         .ok_or_else(|| anyhow!("default parameter requires a type annotation"))?;
                     let option_type = RustType::Option(Box::new(inner_type));
                     let (default_expr, use_unwrap_or_default) =
-                        crate::transformer::functions::convert_default_value(
-                            &assign.right,
-                            self.synthetic,
-                        )?;
+                        self.convert_default_value(&assign.right)?;
                     let unwrap_call = if use_unwrap_or_default {
                         Expr::MethodCall {
                             object: Box::new(Expr::Ident(name.clone())),
@@ -260,13 +252,7 @@ impl<'a> Transformer<'a> {
             .return_type
             .as_ref()
             .map(|ann| {
-                convert_ts_type_with_fallback(
-                    &ann.type_ann,
-                    resilient,
-                    fallback_warnings,
-                    self.synthetic,
-                    self.tctx,
-                )
+                self.convert_ts_type_with_fallback(&ann.type_ann, resilient, fallback_warnings)
             })
             .transpose()?
             .or_else(|| override_return_type.cloned());

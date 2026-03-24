@@ -544,38 +544,6 @@ impl<'a> Transformer<'a> {
     }
 } // end impl Transformer (module-level transformation)
 
-// --- Wrapper free functions (transition period — will be removed in Phase D-2-F) ---
-
-/// Wrapper: delegates to [`Transformer::transform_module_with_path`].
-pub fn transform_module_with_path(
-    module: &Module,
-    tctx: &TransformContext<'_>,
-    current_file_dir: Option<&str>,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Result<Vec<Item>> {
-    Transformer {
-        tctx,
-        type_env: TypeEnv::new(),
-        synthetic,
-    }
-    .transform_module_with_path(module, current_file_dir)
-}
-
-/// Wrapper: delegates to [`Transformer::transform_module_collecting_with_path`].
-pub fn transform_module_collecting_with_path(
-    module: &Module,
-    tctx: &TransformContext<'_>,
-    current_file_dir: Option<&str>,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Result<(Vec<Item>, Vec<UnsupportedSyntaxError>)> {
-    Transformer {
-        tctx,
-        type_env: TypeEnv::new(),
-        synthetic,
-    }
-    .transform_module_collecting_with_path(module, current_file_dir)
-}
-
 /// Converts a TypeScript relative import path to a Rust `crate::` path.
 ///
 /// `current_file_dir` is the directory of the importing file, relative to the

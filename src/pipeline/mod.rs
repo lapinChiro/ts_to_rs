@@ -88,12 +88,12 @@ pub fn transpile_pipeline(input: TranspileInput) -> Result<TranspileOutput> {
             &file.path,
         );
         let mut file_synthetic = SyntheticTypeRegistry::new();
-        let (items, unsupported) = crate::transformer::transform_module_collecting_with_path(
-            &file.module,
-            &tctx,
-            tctx.file_path.parent().and_then(|p| p.to_str()),
-            &mut file_synthetic,
-        )?;
+        let (items, unsupported) =
+            crate::transformer::Transformer::for_module(&tctx, &mut file_synthetic)
+                .transform_module_collecting_with_path(
+                    &file.module,
+                    tctx.file_path.parent().and_then(|p| p.to_str()),
+                )?;
 
         // per-file synthetic types をファイル出力に含める（旧 API 互換）
         // 同時に共有 synthetic にも蓄積する（OutputWriter 用）

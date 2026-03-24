@@ -207,7 +207,7 @@ let rust_source = pipeline::transpile_single(&source)?;
 
 ### 残作業（実施順）
 
-1. **D-2**: Transformer struct 導入（105 関数のメソッド化）— `tasks.d2-transformer-struct.md`
+1. **D-2**: Transformer struct 導入（106 関数のメソッド化）— `tasks.d2-transformer-struct.md`
 2. **Phase E**: 最終検証
 
 ## 作業ステップ

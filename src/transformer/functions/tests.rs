@@ -5,6 +5,7 @@ use crate::ir::{BinOp, Expr, Item, Param, RustType, Stmt, StructField, TypeParam
 use crate::parser::parse_typescript;
 use crate::registry::{MethodSignature, TypeDef, TypeRegistry};
 use crate::transformer::test_fixtures::TctxFixture;
+use crate::transformer::Transformer;
 use swc_ecma_ast::{Decl, ModuleItem};
 /// Helper: parse TS source and extract the first FnDecl.
 fn parse_fn_decl(source: &str) -> ast::FnDecl {
@@ -20,15 +21,10 @@ fn test_convert_fn_decl_add() {
     let f = TctxFixture::new();
     let tctx = f.tctx();
     let fn_decl = parse_fn_decl("function add(a: number, b: number): number { return a + b; }");
-    let items = convert_fn_decl(
-        &fn_decl,
-        Visibility::Public,
-        &tctx,
-        false,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap()
-    .0;
+    let items = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_fn_decl(&fn_decl, Visibility::Public, false)
+        .unwrap()
+        .0;
     let item = items.last().unwrap().clone();
     assert_eq!(
         item,
@@ -63,15 +59,10 @@ fn test_convert_fn_decl_no_return_type() {
     let f = TctxFixture::new();
     let tctx = f.tctx();
     let fn_decl = parse_fn_decl("function greet(name: string) { return name; }");
-    let items = convert_fn_decl(
-        &fn_decl,
-        Visibility::Public,
-        &tctx,
-        false,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap()
-    .0;
+    let items = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_fn_decl(&fn_decl, Visibility::Public, false)
+        .unwrap()
+        .0;
     let item = items.last().unwrap().clone();
     match item {
         Item::Fn {
@@ -89,15 +80,10 @@ fn test_convert_fn_decl_no_params() {
     let f = TctxFixture::new();
     let tctx = f.tctx();
     let fn_decl = parse_fn_decl("function noop(): boolean { return true; }");
-    let items = convert_fn_decl(
-        &fn_decl,
-        Visibility::Public,
-        &tctx,
-        false,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap()
-    .0;
+    let items = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_fn_decl(&fn_decl, Visibility::Public, false)
+        .unwrap()
+        .0;
     let item = items.last().unwrap().clone();
     match item {
         Item::Fn { params, body, .. } => {
@@ -114,15 +100,10 @@ fn test_convert_fn_decl_with_local_vars() {
     let tctx = f.tctx();
     let fn_decl =
         parse_fn_decl("function calc(x: number): number { const result = x + 1; return result; }");
-    let items = convert_fn_decl(
-        &fn_decl,
-        Visibility::Public,
-        &tctx,
-        false,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap()
-    .0;
+    let items = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_fn_decl(&fn_decl, Visibility::Public, false)
+        .unwrap()
+        .0;
     let item = items.last().unwrap().clone();
     match item {
         Item::Fn { body, .. } => {
@@ -151,15 +132,10 @@ fn test_convert_fn_decl_generic_single_param() {
     let f = TctxFixture::new();
     let tctx = f.tctx();
     let fn_decl = parse_fn_decl("function identity<T>(x: T): T { return x; }");
-    let items = convert_fn_decl(
-        &fn_decl,
-        Visibility::Public,
-        &tctx,
-        false,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap()
-    .0;
+    let items = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_fn_decl(&fn_decl, Visibility::Public, false)
+        .unwrap()
+        .0;
     let item = items.last().unwrap().clone();
     match item {
         Item::Fn { type_params, .. } => {
@@ -180,15 +156,10 @@ fn test_convert_fn_decl_generic_multiple_params() {
     let f = TctxFixture::new();
     let tctx = f.tctx();
     let fn_decl = parse_fn_decl("function pair<A, B>(a: A, b: B): A { return a; }");
-    let items = convert_fn_decl(
-        &fn_decl,
-        Visibility::Public,
-        &tctx,
-        false,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap()
-    .0;
+    let items = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_fn_decl(&fn_decl, Visibility::Public, false)
+        .unwrap()
+        .0;
     let item = items.last().unwrap().clone();
     match item {
         Item::Fn { type_params, .. } => {
@@ -216,15 +187,10 @@ fn test_convert_fn_decl_throw_wraps_return_type_in_result() {
     let tctx = f.tctx();
     let fn_decl =
             parse_fn_decl("function validate(x: number): string { if (x < 0) { throw new Error(\"negative\"); } return \"ok\"; }");
-    let items = convert_fn_decl(
-        &fn_decl,
-        Visibility::Public,
-        &tctx,
-        false,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap()
-    .0;
+    let items = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_fn_decl(&fn_decl, Visibility::Public, false)
+        .unwrap()
+        .0;
     let item = items.last().unwrap().clone();
     match item {
         Item::Fn { return_type, .. } => {
@@ -249,15 +215,10 @@ fn test_convert_fn_decl_throw_wraps_return_in_ok() {
         ModuleItem::Stmt(ast::Stmt::Decl(Decl::Fn(fn_decl))) => fn_decl.clone(),
         _ => panic!("expected function declaration"),
     };
-    let items = convert_fn_decl(
-        &fn_decl,
-        Visibility::Public,
-        &tctx,
-        false,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap()
-    .0;
+    let items = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_fn_decl(&fn_decl, Visibility::Public, false)
+        .unwrap()
+        .0;
     let item = items.last().unwrap().clone();
     match item {
         Item::Fn { body, .. } => {
@@ -284,15 +245,10 @@ fn test_convert_fn_decl_throw_no_return_type_becomes_result_unit() {
     let f = TctxFixture::new();
     let tctx = f.tctx();
     let fn_decl = parse_fn_decl("function fail() { throw new Error(\"boom\"); }");
-    let items = convert_fn_decl(
-        &fn_decl,
-        Visibility::Public,
-        &tctx,
-        false,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap()
-    .0;
+    let items = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_fn_decl(&fn_decl, Visibility::Public, false)
+        .unwrap()
+        .0;
     let item = items.last().unwrap().clone();
     match item {
         Item::Fn { return_type, .. } => {
@@ -316,12 +272,10 @@ fn test_convert_fn_decl_missing_param_type_annotation_falls_back_to_any() {
     let f = TctxFixture::new();
     let tctx = f.tctx();
     let fn_decl = parse_fn_decl("function bad(x) { return x; }");
-    let result = convert_fn_decl(
+    let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new()).convert_fn_decl(
         &fn_decl,
         Visibility::Public,
-        &tctx,
         false,
-        &mut SyntheticTypeRegistry::new(),
     );
     assert!(result.is_ok(), "should fall back to Any, not error");
     let items = result.unwrap().0;
@@ -340,15 +294,10 @@ fn test_convert_fn_decl_async_is_async() {
     let f = TctxFixture::new();
     let tctx = f.tctx();
     let fn_decl = parse_fn_decl("async function fetchData(): Promise<number> { return 42; }");
-    let items = convert_fn_decl(
-        &fn_decl,
-        Visibility::Public,
-        &tctx,
-        false,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap()
-    .0;
+    let items = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_fn_decl(&fn_decl, Visibility::Public, false)
+        .unwrap()
+        .0;
     let item = items.last().unwrap().clone();
     match item {
         Item::Fn {
@@ -369,15 +318,10 @@ fn test_convert_fn_decl_async_no_return_type() {
     let f = TctxFixture::new();
     let tctx = f.tctx();
     let fn_decl = parse_fn_decl("async function doWork() { return; }");
-    let items = convert_fn_decl(
-        &fn_decl,
-        Visibility::Public,
-        &tctx,
-        false,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap()
-    .0;
+    let items = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_fn_decl(&fn_decl, Visibility::Public, false)
+        .unwrap()
+        .0;
     let item = items.last().unwrap().clone();
     match item {
         Item::Fn {
@@ -397,15 +341,10 @@ fn test_convert_fn_decl_sync_is_not_async() {
     let f = TctxFixture::new();
     let tctx = f.tctx();
     let fn_decl = parse_fn_decl("function add(a: number, b: number): number { return a + b; }");
-    let items = convert_fn_decl(
-        &fn_decl,
-        Visibility::Public,
-        &tctx,
-        false,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap()
-    .0;
+    let items = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_fn_decl(&fn_decl, Visibility::Public, false)
+        .unwrap()
+        .0;
     let item = items.last().unwrap().clone();
     match item {
         Item::Fn { is_async, .. } => {
@@ -420,15 +359,10 @@ fn test_convert_fn_decl_async_main_has_tokio_main_attribute() {
     let f = TctxFixture::new();
     let tctx = f.tctx();
     let fn_decl = parse_fn_decl("async function main(): Promise<void> { }");
-    let items = convert_fn_decl(
-        &fn_decl,
-        Visibility::Public,
-        &tctx,
-        false,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap()
-    .0;
+    let items = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_fn_decl(&fn_decl, Visibility::Public, false)
+        .unwrap()
+        .0;
     let item = items.last().unwrap().clone();
     match item {
         Item::Fn {
@@ -450,15 +384,10 @@ fn test_convert_fn_decl_async_non_main_has_no_attributes() {
     let f = TctxFixture::new();
     let tctx = f.tctx();
     let fn_decl = parse_fn_decl("async function fetchData(): Promise<number> { return 42; }");
-    let items = convert_fn_decl(
-        &fn_decl,
-        Visibility::Public,
-        &tctx,
-        false,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap()
-    .0;
+    let items = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_fn_decl(&fn_decl, Visibility::Public, false)
+        .unwrap()
+        .0;
     let item = items.last().unwrap().clone();
     match item {
         Item::Fn { attributes, .. } => {
@@ -473,15 +402,10 @@ fn test_convert_fn_decl_sync_main_has_no_attributes() {
     let f = TctxFixture::new();
     let tctx = f.tctx();
     let fn_decl = parse_fn_decl("function main(): void { }");
-    let items = convert_fn_decl(
-        &fn_decl,
-        Visibility::Public,
-        &tctx,
-        false,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap()
-    .0;
+    let items = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_fn_decl(&fn_decl, Visibility::Public, false)
+        .unwrap()
+        .0;
     let item = items.last().unwrap().clone();
     match item {
         Item::Fn { attributes, .. } => {
@@ -496,15 +420,10 @@ fn test_convert_fn_decl_object_destructuring_param_generates_expansion() {
     let f = TctxFixture::new();
     let tctx = f.tctx();
     let fn_decl = parse_fn_decl("function foo({ x, y }: Point): void { console.log(x); }");
-    let items = convert_fn_decl(
-        &fn_decl,
-        Visibility::Public,
-        &tctx,
-        false,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap()
-    .0;
+    let items = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_fn_decl(&fn_decl, Visibility::Public, false)
+        .unwrap()
+        .0;
     let item = items.last().unwrap().clone();
 
     match item {
@@ -555,15 +474,10 @@ fn test_convert_fn_decl_object_destructuring_rename() {
     let f = TctxFixture::new();
     let tctx = f.tctx();
     let fn_decl = parse_fn_decl("function foo({ x: newX, y: newY }: Point): void {}");
-    let items = convert_fn_decl(
-        &fn_decl,
-        Visibility::Public,
-        &tctx,
-        false,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap()
-    .0;
+    let items = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_fn_decl(&fn_decl, Visibility::Public, false)
+        .unwrap()
+        .0;
     let item = items.last().unwrap().clone();
 
     match item {
@@ -590,15 +504,10 @@ fn test_convert_fn_decl_destructuring_with_normal_params() {
     let f = TctxFixture::new();
     let tctx = f.tctx();
     let fn_decl = parse_fn_decl("function foo(name: string, { x, y }: Point): void {}");
-    let items = convert_fn_decl(
-        &fn_decl,
-        Visibility::Public,
-        &tctx,
-        false,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap()
-    .0;
+    let items = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_fn_decl(&fn_decl, Visibility::Public, false)
+        .unwrap()
+        .0;
     let item = items.last().unwrap().clone();
 
     match item {
@@ -618,12 +527,10 @@ fn test_convert_fn_decl_destructuring_no_type_annotation_falls_back_to_value() {
     let f = TctxFixture::new();
     let tctx = f.tctx();
     let fn_decl = parse_fn_decl("function foo({ x, y }): void {}");
-    let result = convert_fn_decl(
+    let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new()).convert_fn_decl(
         &fn_decl,
         Visibility::Public,
-        &tctx,
         false,
-        &mut SyntheticTypeRegistry::new(),
     );
     assert!(
         result.is_ok(),
@@ -636,15 +543,10 @@ fn test_convert_fn_decl_default_number_param_wraps_in_option() {
     let f = TctxFixture::new();
     let tctx = f.tctx();
     let fn_decl = parse_fn_decl("function foo(x: number = 0): void {}");
-    let items = convert_fn_decl(
-        &fn_decl,
-        Visibility::Public,
-        &tctx,
-        false,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap()
-    .0;
+    let items = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_fn_decl(&fn_decl, Visibility::Public, false)
+        .unwrap()
+        .0;
     let item = items.last().unwrap().clone();
     match item {
         Item::Fn { params, body, .. } => {
@@ -698,15 +600,10 @@ fn test_convert_fn_decl_default_string_param_wraps_in_option() {
     let f = TctxFixture::new();
     let tctx = f.tctx();
     let fn_decl = parse_fn_decl("function foo(name: string = \"hello\"): void {}");
-    let items = convert_fn_decl(
-        &fn_decl,
-        Visibility::Public,
-        &tctx,
-        false,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap()
-    .0;
+    let items = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_fn_decl(&fn_decl, Visibility::Public, false)
+        .unwrap()
+        .0;
     let item = items.last().unwrap().clone();
     match item {
         Item::Fn { params, body, .. } => {
@@ -747,15 +644,10 @@ fn test_convert_fn_decl_default_bool_param_wraps_in_option() {
     let f = TctxFixture::new();
     let tctx = f.tctx();
     let fn_decl = parse_fn_decl("function foo(flag: boolean = true): void {}");
-    let items = convert_fn_decl(
-        &fn_decl,
-        Visibility::Public,
-        &tctx,
-        false,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap()
-    .0;
+    let items = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_fn_decl(&fn_decl, Visibility::Public, false)
+        .unwrap()
+        .0;
     let item = items.last().unwrap().clone();
     match item {
         Item::Fn { params, body, .. } => {
@@ -783,15 +675,10 @@ fn test_convert_fn_decl_default_empty_object_uses_unwrap_or_default() {
     let f = TctxFixture::new();
     let tctx = f.tctx();
     let fn_decl = parse_fn_decl("function foo(options: Config = {}): void {}");
-    let items = convert_fn_decl(
-        &fn_decl,
-        Visibility::Public,
-        &tctx,
-        false,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap()
-    .0;
+    let items = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_fn_decl(&fn_decl, Visibility::Public, false)
+        .unwrap()
+        .0;
     let item = items.last().unwrap().clone();
     match item {
         Item::Fn { params, body, .. } => {
@@ -822,15 +709,10 @@ fn test_convert_fn_decl_default_param_mixed_with_normal() {
     let f = TctxFixture::new();
     let tctx = f.tctx();
     let fn_decl = parse_fn_decl("function foo(a: number, b: number = 10): void {}");
-    let items = convert_fn_decl(
-        &fn_decl,
-        Visibility::Public,
-        &tctx,
-        false,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap()
-    .0;
+    let items = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_fn_decl(&fn_decl, Visibility::Public, false)
+        .unwrap()
+        .0;
     let item = items.last().unwrap().clone();
     match item {
         Item::Fn { params, body, .. } => {
@@ -859,14 +741,9 @@ fn test_convert_fn_decl_default_new_expr_uses_unwrap_or_default() {
     let tctx = f.tctx();
     // new Map() → unwrap_or_default()
     let fn_decl = parse_fn_decl("function foo(m: Map = new Map()): void {}");
-    let (items, _) = convert_fn_decl(
-        &fn_decl,
-        Visibility::Public,
-        &tctx,
-        false,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap();
+    let (items, _) = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_fn_decl(&fn_decl, Visibility::Public, false)
+        .unwrap();
     assert!(!items.is_empty());
 }
 
@@ -876,14 +753,9 @@ fn test_convert_fn_decl_default_variable_ref_uses_unwrap_or() {
     let tctx = f.tctx();
     // = baseMimes → unwrap_or(baseMimes)
     let fn_decl = parse_fn_decl("function foo(x: number = defaultVal): void {}");
-    let (items, _) = convert_fn_decl(
-        &fn_decl,
-        Visibility::Public,
-        &tctx,
-        false,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap();
+    let (items, _) = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_fn_decl(&fn_decl, Visibility::Public, false)
+        .unwrap();
     assert!(!items.is_empty());
 }
 
@@ -893,14 +765,9 @@ fn test_convert_fn_decl_default_empty_array_uses_unwrap_or_default() {
     let tctx = f.tctx();
     // = [] → unwrap_or_default()
     let fn_decl = parse_fn_decl("function foo(x: string[] = []): void {}");
-    let (items, _) = convert_fn_decl(
-        &fn_decl,
-        Visibility::Public,
-        &tctx,
-        false,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap();
+    let (items, _) = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_fn_decl(&fn_decl, Visibility::Public, false)
+        .unwrap();
     assert!(!items.is_empty());
 }
 
@@ -910,14 +777,9 @@ fn test_convert_fn_decl_default_negative_number() {
     let tctx = f.tctx();
     // = -1 → unwrap_or(-1.0)
     let fn_decl = parse_fn_decl("function foo(x: number = -1): void {}");
-    let (items, _) = convert_fn_decl(
-        &fn_decl,
-        Visibility::Public,
-        &tctx,
-        false,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap();
+    let (items, _) = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_fn_decl(&fn_decl, Visibility::Public, false)
+        .unwrap();
     assert!(!items.is_empty());
 }
 
@@ -927,14 +789,9 @@ fn test_convert_fn_decl_rest_param() {
     let tctx = f.tctx();
     // ...args: number[] → args: Vec<f64>
     let fn_decl = parse_fn_decl("function foo(...args: number[]): void {}");
-    let (items, _) = convert_fn_decl(
-        &fn_decl,
-        Visibility::Public,
-        &tctx,
-        false,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap();
+    let (items, _) = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_fn_decl(&fn_decl, Visibility::Public, false)
+        .unwrap();
     match &items[0] {
         Item::Fn { params, .. } => {
             assert_eq!(params.len(), 1);
@@ -949,14 +806,9 @@ fn test_convert_fn_decl_inline_type_literal_single_field_generates_struct() {
     let f = TctxFixture::new();
     let tctx = f.tctx();
     let fn_decl = parse_fn_decl("function foo(opts: { x: number }): void {}");
-    let (items, _) = convert_fn_decl(
-        &fn_decl,
-        Visibility::Public,
-        &tctx,
-        false,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap();
+    let (items, _) = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_fn_decl(&fn_decl, Visibility::Public, false)
+        .unwrap();
     assert_eq!(items.len(), 2);
     assert_eq!(
         items[0],
@@ -990,14 +842,9 @@ fn test_convert_fn_decl_inline_type_literal_multiple_fields_generates_struct() {
     let f = TctxFixture::new();
     let tctx = f.tctx();
     let fn_decl = parse_fn_decl("function bar(config: { x: number, y: string }): void {}");
-    let (items, _) = convert_fn_decl(
-        &fn_decl,
-        Visibility::Public,
-        &tctx,
-        false,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap();
+    let (items, _) = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_fn_decl(&fn_decl, Visibility::Public, false)
+        .unwrap();
     assert_eq!(items.len(), 2);
     assert_eq!(
         items[0],
@@ -1026,14 +873,9 @@ fn test_convert_fn_decl_inline_type_literal_mixed_with_normal_param_generates_st
     let f = TctxFixture::new();
     let tctx = f.tctx();
     let fn_decl = parse_fn_decl("function baz(name: string, opts: { x: number }): void {}");
-    let (items, _) = convert_fn_decl(
-        &fn_decl,
-        Visibility::Public,
-        &tctx,
-        false,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap();
+    let (items, _) = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_fn_decl(&fn_decl, Visibility::Public, false)
+        .unwrap();
     assert_eq!(items.len(), 2);
     match &items[0] {
         Item::Struct { name, .. } => assert_eq!(name, "BazOpts"),
@@ -1059,14 +901,9 @@ fn test_convert_fn_decl_inline_type_literal_empty_generates_empty_struct() {
     let f = TctxFixture::new();
     let tctx = f.tctx();
     let fn_decl = parse_fn_decl("function qux(opts: {}): void {}");
-    let (items, _) = convert_fn_decl(
-        &fn_decl,
-        Visibility::Public,
-        &tctx,
-        false,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap();
+    let (items, _) = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_fn_decl(&fn_decl, Visibility::Public, false)
+        .unwrap();
     assert_eq!(items.len(), 2);
     assert_eq!(
         items[0],
@@ -1084,14 +921,9 @@ fn test_convert_fn_decl_default_param_inline_type_generates_struct() {
     let f = TctxFixture::new();
     let tctx = f.tctx();
     let decl = parse_fn_decl("function f(x: { a: string } = {}): void { }");
-    let (items, _warnings) = convert_fn_decl(
-        &decl,
-        Visibility::Public,
-        &tctx,
-        false,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap();
+    let (items, _warnings) = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_fn_decl(&decl, Visibility::Public, false)
+        .unwrap();
     // Should produce: struct + function
     let has_struct = items
         .iter()
@@ -1109,15 +941,10 @@ fn fn_returns_result(source: &str) -> bool {
     let fn_decl = parse_fn_decl(source);
     let f = TctxFixture::new();
     let tctx = f.tctx();
-    let items = convert_fn_decl(
-        &fn_decl,
-        Visibility::Public,
-        &tctx,
-        false,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap()
-    .0;
+    let items = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_fn_decl(&fn_decl, Visibility::Public, false)
+        .unwrap()
+        .0;
     let item = items.last().unwrap();
     matches!(
         item,
@@ -1236,14 +1063,9 @@ fn test_object_destructuring_param_default_number_generates_unwrap_or() {
     let fn_decl = parse_fn_decl("function f({ x = 0 }: { x?: number }): void { console.log(x); }");
     let f = TctxFixture::new();
     let tctx = f.tctx();
-    let (items, _) = convert_fn_decl(
-        &fn_decl,
-        Visibility::Private,
-        &tctx,
-        false,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap();
+    let (items, _) = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_fn_decl(&fn_decl, Visibility::Private, false)
+        .unwrap();
     match &items[0] {
         Item::Fn { body, .. } => {
             // First statement should be the destructuring expansion with unwrap_or
@@ -1297,15 +1119,10 @@ fn test_convert_fn_param_trait_type_generates_dyn_ref() {
     let f = TctxFixture::with_reg(reg);
     let tctx = f.tctx();
     let fn_decl = parse_fn_decl("function foo(g: Greeter): void { }");
-    let items = convert_fn_decl(
-        &fn_decl,
-        Visibility::Public,
-        &tctx,
-        false,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap()
-    .0;
+    let items = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_fn_decl(&fn_decl, Visibility::Public, false)
+        .unwrap()
+        .0;
     let item = items.last().unwrap();
     match item {
         Item::Fn { params, .. } => {
@@ -1328,15 +1145,10 @@ fn test_convert_fn_return_trait_type_generates_box_dyn() {
     let f = TctxFixture::with_reg(reg);
     let tctx = f.tctx();
     let fn_decl = parse_fn_decl("function make(): Greeter { return null as any; }");
-    let items = convert_fn_decl(
-        &fn_decl,
-        Visibility::Public,
-        &tctx,
-        true,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap()
-    .0;
+    let items = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_fn_decl(&fn_decl, Visibility::Public, true)
+        .unwrap()
+        .0;
     let item = items.last().unwrap();
     match item {
         Item::Fn { return_type, .. } => {
@@ -1367,15 +1179,10 @@ fn test_convert_fn_param_struct_type_unchanged() {
     let f = TctxFixture::with_reg(reg);
     let tctx = f.tctx();
     let fn_decl = parse_fn_decl("function foo(p: Point): void { }");
-    let items = convert_fn_decl(
-        &fn_decl,
-        Visibility::Public,
-        &tctx,
-        false,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap()
-    .0;
+    let items = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_fn_decl(&fn_decl, Visibility::Public, false)
+        .unwrap()
+        .0;
     let item = items.last().unwrap();
     match item {
         Item::Fn { params, .. } => {
@@ -1400,14 +1207,9 @@ fn test_convert_fn_default_param_number_no_annotation_infers_f64() {
     let tctx = f.tctx();
     // function foo(x = 0) → fn foo(x: Option<f64>)
     let fn_decl = parse_fn_decl("function foo(x = 0): void {}");
-    let (items, _) = convert_fn_decl(
-        &fn_decl,
-        Visibility::Public,
-        &tctx,
-        false,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap();
+    let (items, _) = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_fn_decl(&fn_decl, Visibility::Public, false)
+        .unwrap();
     match &items[0] {
         Item::Fn { params, .. } => {
             assert_eq!(
@@ -1424,14 +1226,9 @@ fn test_convert_fn_default_param_string_no_annotation_infers_string() {
     let f = TctxFixture::new();
     let tctx = f.tctx();
     let fn_decl = parse_fn_decl(r#"function foo(s = "hi"): void {}"#);
-    let (items, _) = convert_fn_decl(
-        &fn_decl,
-        Visibility::Public,
-        &tctx,
-        false,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap();
+    let (items, _) = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_fn_decl(&fn_decl, Visibility::Public, false)
+        .unwrap();
     match &items[0] {
         Item::Fn { params, .. } => {
             assert_eq!(
@@ -1448,14 +1245,9 @@ fn test_convert_fn_default_param_bool_no_annotation_infers_bool() {
     let f = TctxFixture::new();
     let tctx = f.tctx();
     let fn_decl = parse_fn_decl("function foo(b = true): void {}");
-    let (items, _) = convert_fn_decl(
-        &fn_decl,
-        Visibility::Public,
-        &tctx,
-        false,
-        &mut SyntheticTypeRegistry::new(),
-    )
-    .unwrap();
+    let (items, _) = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_fn_decl(&fn_decl, Visibility::Public, false)
+        .unwrap();
     match &items[0] {
         Item::Fn { params, .. } => {
             assert_eq!(

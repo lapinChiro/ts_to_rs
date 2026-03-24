@@ -2,9 +2,10 @@ use super::*;
 use crate::ir::Stmt;
 use crate::ir::{BinOp, Expr, Param, RustType, StructField, Visibility};
 use crate::parser::parse_typescript;
+use crate::pipeline::SyntheticTypeRegistry;
 use crate::registry::TypeRegistry;
-use crate::transformer::functions::{extract_fn_param_types, extract_fn_return_type};
 use crate::transformer::test_fixtures::TctxFixture;
+use crate::transformer::Transformer;
 #[test]
 fn test_transform_module_empty() {
     let module = parse_typescript("").expect("parse failed");
@@ -1006,7 +1007,9 @@ fn test_extract_fn_return_type_from_fn_type() {
     };
     let f = TctxFixture::new();
     let tctx = f.tctx();
-    let result = extract_fn_return_type(&ty, &tctx);
+    let mut synthetic = SyntheticTypeRegistry::new();
+    let t = Transformer::for_module(&tctx, &mut synthetic);
+    let result = t.extract_fn_return_type(&ty);
     assert_eq!(result, Some(RustType::String));
 }
 
@@ -1030,7 +1033,9 @@ fn test_extract_fn_return_type_from_named_type_in_registry() {
     };
     let f = TctxFixture::with_reg(reg);
     let tctx = f.tctx();
-    let result = extract_fn_return_type(&ty, &tctx);
+    let mut synthetic = SyntheticTypeRegistry::new();
+    let t = Transformer::for_module(&tctx, &mut synthetic);
+    let result = t.extract_fn_return_type(&ty);
     assert_eq!(
         result,
         Some(RustType::Named {
@@ -1045,7 +1050,9 @@ fn test_extract_fn_return_type_unknown_returns_none() {
     let ty = RustType::String;
     let f = TctxFixture::new();
     let tctx = f.tctx();
-    let result = extract_fn_return_type(&ty, &tctx);
+    let mut synthetic = SyntheticTypeRegistry::new();
+    let t = Transformer::for_module(&tctx, &mut synthetic);
+    let result = t.extract_fn_return_type(&ty);
     assert_eq!(result, None);
 }
 
@@ -1059,7 +1066,9 @@ fn test_extract_fn_param_types_from_fn_type() {
     };
     let f = TctxFixture::new();
     let tctx = f.tctx();
-    let result = extract_fn_param_types(&ty, &tctx);
+    let mut synthetic = SyntheticTypeRegistry::new();
+    let t = Transformer::for_module(&tctx, &mut synthetic);
+    let result = t.extract_fn_param_types(&ty);
     assert_eq!(result, Some(vec![RustType::F64, RustType::String]));
 }
 
@@ -1089,7 +1098,9 @@ fn test_extract_fn_param_types_from_named_type_in_registry() {
     };
     let f = TctxFixture::with_reg(reg);
     let tctx = f.tctx();
-    let result = extract_fn_param_types(&ty, &tctx);
+    let mut synthetic = SyntheticTypeRegistry::new();
+    let t = Transformer::for_module(&tctx, &mut synthetic);
+    let result = t.extract_fn_param_types(&ty);
     assert_eq!(
         result,
         Some(vec![RustType::Named {
@@ -1104,7 +1115,9 @@ fn test_extract_fn_param_types_unknown_returns_none() {
     let ty = RustType::String;
     let f = TctxFixture::new();
     let tctx = f.tctx();
-    let result = extract_fn_param_types(&ty, &tctx);
+    let mut synthetic = SyntheticTypeRegistry::new();
+    let t = Transformer::for_module(&tctx, &mut synthetic);
+    let result = t.extract_fn_param_types(&ty);
     assert_eq!(result, None);
 }
 

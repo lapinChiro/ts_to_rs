@@ -10,8 +10,6 @@ use crate::pipeline::type_converter::{
     convert_property_signature, convert_ts_type, extract_type_params,
 };
 use crate::pipeline::SyntheticTypeRegistry;
-use crate::registry::TypeRegistry;
-use crate::transformer::context::TransformContext;
 use crate::transformer::{
     extract_pat_ident_name, extract_prop_name, wrap_trait_for_position, Transformer, TypeEnv,
     TypePosition,
@@ -426,8 +424,7 @@ impl<'a> Transformer<'a> {
         let option_type = RustType::Option(Box::new(inner_type));
 
         // Convert default value to IR expression
-        let (default_expr, use_unwrap_or_default) =
-            convert_default_value(&assign.right, self.synthetic)?;
+        let (default_expr, use_unwrap_or_default) = self.convert_default_value(&assign.right)?;
 
         // Generate expansion statement: `let x = x.unwrap_or(value);` or `let x = x.unwrap_or_default();`
         let unwrap_call = if use_unwrap_or_default {
@@ -463,73 +460,62 @@ impl<'a> Transformer<'a> {
             extra,
         ))
     }
-}
 
-/// Converts a default value expression to an IR [`Expr`].
-///
-/// Returns `(Some(expr), false)` for literal values (use `unwrap_or`),
-/// or `(None, true)` for empty objects (use `unwrap_or_default`).
-pub(crate) fn convert_default_value(
-    expr: &ast::Expr,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Result<(Option<Expr>, bool)> {
-    match expr {
-        ast::Expr::Lit(lit) => match lit {
-            ast::Lit::Num(n) => Ok((Some(Expr::NumberLit(n.value)), false)),
-            ast::Lit::Str(s) => Ok((
-                Some(Expr::MethodCall {
-                    object: Box::new(Expr::StringLit(s.value.to_string_lossy().into_owned())),
-                    method: "to_string".to_string(),
-                    args: vec![],
-                }),
-                false,
-            )),
-            ast::Lit::Bool(b) => Ok((Some(Expr::BoolLit(b.value)), false)),
-            _ => Err(anyhow!("unsupported default parameter value")),
-        },
-        ast::Expr::Object(obj) if obj.props.is_empty() => {
-            // `= {}` → unwrap_or_default()
-            Ok((None, true))
-        }
-        ast::Expr::Ident(ident) => {
-            // `= someVariable` → unwrap_or(someVariable)
-            Ok((Some(Expr::Ident(ident.sym.to_string())), false))
-        }
-        ast::Expr::Array(arr) if arr.elems.is_empty() => {
-            // `= []` → unwrap_or_default()
-            Ok((None, true))
-        }
-        ast::Expr::New(_) => {
-            // `= new Map()` → unwrap_or_default()
-            Ok((None, true))
-        }
-        ast::Expr::Unary(unary)
-            if unary.op == ast::UnaryOp::Minus
-                && matches!(unary.arg.as_ref(), ast::Expr::Lit(ast::Lit::Num(_))) =>
-        {
-            // `= -1` → unwrap_or(-1.0)
-            if let ast::Expr::Lit(ast::Lit::Num(n)) = unary.arg.as_ref() {
-                Ok((Some(Expr::NumberLit(-n.value)), false))
-            } else {
-                unreachable!()
+    /// Converts a default value expression to an IR [`Expr`].
+    ///
+    /// Returns `(Some(expr), false)` for literal values (use `unwrap_or`),
+    /// or `(None, true)` for empty objects (use `unwrap_or_default`).
+    pub(crate) fn convert_default_value(
+        &mut self,
+        expr: &ast::Expr,
+    ) -> Result<(Option<Expr>, bool)> {
+        match expr {
+            ast::Expr::Lit(lit) => match lit {
+                ast::Lit::Num(n) => Ok((Some(Expr::NumberLit(n.value)), false)),
+                ast::Lit::Str(s) => Ok((
+                    Some(Expr::MethodCall {
+                        object: Box::new(Expr::StringLit(s.value.to_string_lossy().into_owned())),
+                        method: "to_string".to_string(),
+                        args: vec![],
+                    }),
+                    false,
+                )),
+                ast::Lit::Bool(b) => Ok((Some(Expr::BoolLit(b.value)), false)),
+                _ => Err(anyhow!("unsupported default parameter value")),
+            },
+            ast::Expr::Object(obj) if obj.props.is_empty() => {
+                // `= {}` → unwrap_or_default()
+                Ok((None, true))
             }
-        }
-        // General expression: use unwrap_or_else(|| expr) for any expression
-        // that can be converted (e.g., console.log, function calls, member access)
-        other => {
-            // Cat B: parameter type annotation available
-            let dummy_mg = crate::pipeline::ModuleGraph::empty();
-            let dummy_res = crate::pipeline::type_resolution::FileTypeResolution::empty();
-            let dummy_reg = TypeRegistry::new();
-            let dummy_tctx =
-                TransformContext::new(&dummy_mg, &dummy_reg, &dummy_res, std::path::Path::new(""));
-            let expr = crate::transformer::Transformer {
-                tctx: &dummy_tctx,
-                type_env: crate::transformer::TypeEnv::new(),
-                synthetic,
+            ast::Expr::Ident(ident) => {
+                // `= someVariable` → unwrap_or(someVariable)
+                Ok((Some(Expr::Ident(ident.sym.to_string())), false))
             }
-            .convert_expr(other)?;
-            Ok((Some(expr), false))
+            ast::Expr::Array(arr) if arr.elems.is_empty() => {
+                // `= []` → unwrap_or_default()
+                Ok((None, true))
+            }
+            ast::Expr::New(_) => {
+                // `= new Map()` → unwrap_or_default()
+                Ok((None, true))
+            }
+            ast::Expr::Unary(unary)
+                if unary.op == ast::UnaryOp::Minus
+                    && matches!(unary.arg.as_ref(), ast::Expr::Lit(ast::Lit::Num(_))) =>
+            {
+                // `= -1` → unwrap_or(-1.0)
+                if let ast::Expr::Lit(ast::Lit::Num(n)) = unary.arg.as_ref() {
+                    Ok((Some(Expr::NumberLit(-n.value)), false))
+                } else {
+                    unreachable!()
+                }
+            }
+            // General expression: use unwrap_or_else(|| expr) for any expression
+            // that can be converted (e.g., console.log, function calls, member access)
+            other => {
+                let ir_expr = self.convert_expr(other)?;
+                Ok((Some(ir_expr), false))
+            }
         }
     }
 }
@@ -1136,6 +1122,7 @@ impl<'a> Transformer<'a> {
             // Lazy type materialization for any-typed arrow params:
             // Pre-populate TypeEnv with enum types from registry (generated by build_registry)
             let mut arrow_type_env = TypeEnv::new();
+            let mut enum_overrides: Vec<(String, RustType)> = Vec::new();
             {
                 let any_param_names: Vec<String> = arrow
                     .params
@@ -1188,6 +1175,7 @@ impl<'a> Transformer<'a> {
                             name: enum_name,
                             type_args: vec![],
                         };
+                        enum_overrides.push((param_name.clone(), enum_type.clone()));
                         arrow_type_env.insert(param_name.clone(), enum_type);
                     }
                 }
@@ -1195,7 +1183,7 @@ impl<'a> Transformer<'a> {
 
             let closure = crate::transformer::Transformer {
                 tctx: self.tctx,
-                type_env: arrow_type_env.clone(),
+                type_env: arrow_type_env,
                 synthetic: self.synthetic,
             }
             .convert_arrow_expr_with_return_type(
@@ -1228,7 +1216,9 @@ impl<'a> Transformer<'a> {
                         }
                         // Override Any params with generated enum type from any_narrowing
                         if matches!(&p.ty, Some(RustType::Any)) {
-                            if let Some(enum_ty) = arrow_type_env.get(&p.name) {
+                            if let Some((_, enum_ty)) =
+                                enum_overrides.iter().find(|(n, _)| n == &p.name)
+                            {
                                 p.ty = Some(enum_ty.clone());
                             }
                         }
@@ -1301,104 +1291,6 @@ impl<'a> Transformer<'a> {
             _ => None,
         }
     }
-}
-
-// --- Wrapper free functions (transition period — will be removed in Phase D-2-F) ---
-
-/// Wrapper: delegates to [`Transformer::convert_fn_decl`].
-pub fn convert_fn_decl(
-    fn_decl: &ast::FnDecl,
-    vis: Visibility,
-    tctx: &TransformContext<'_>,
-    resilient: bool,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Result<(Vec<Item>, Vec<String>)> {
-    let type_env = TypeEnv::new();
-    Transformer {
-        tctx,
-        type_env: type_env,
-        synthetic,
-    }
-    .convert_fn_decl(fn_decl, vis, resilient)
-}
-
-/// Wrapper: delegates to [`Transformer::convert_ts_type_with_fallback`].
-pub(crate) fn convert_ts_type_with_fallback(
-    ts_type: &swc_ecma_ast::TsType,
-    resilient: bool,
-    fallback_warnings: &mut Vec<String>,
-    synthetic: &mut SyntheticTypeRegistry,
-    tctx: &TransformContext<'_>,
-) -> Result<RustType> {
-    let type_env = TypeEnv::new();
-    Transformer {
-        tctx,
-        type_env: type_env,
-        synthetic,
-    }
-    .convert_ts_type_with_fallback(ts_type, resilient, fallback_warnings)
-}
-
-/// Wrapper: delegates to [`Transformer::convert_object_destructuring_param`].
-pub(crate) fn convert_object_destructuring_param(
-    obj_pat: &ast::ObjectPat,
-    tctx: &TransformContext<'_>,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Result<(Param, Vec<Stmt>)> {
-    let type_env = TypeEnv::new();
-    Transformer {
-        tctx,
-        type_env: type_env,
-        synthetic,
-    }
-    .convert_object_destructuring_param(obj_pat)
-}
-
-/// Wrapper: delegates to [`Transformer::convert_var_decl_arrow_fns`].
-pub(crate) fn convert_var_decl_arrow_fns(
-    var_decl: &ast::VarDecl,
-    vis: Visibility,
-    tctx: &TransformContext<'_>,
-    resilient: bool,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Result<(Vec<Item>, Vec<String>)> {
-    let type_env = TypeEnv::new();
-    Transformer {
-        tctx,
-        type_env: type_env,
-        synthetic,
-    }
-    .convert_var_decl_arrow_fns(var_decl, vis, resilient)
-}
-
-/// Wrapper: delegates to [`Transformer::extract_fn_return_type`].
-pub(super) fn extract_fn_return_type(
-    ty: &RustType,
-    tctx: &TransformContext<'_>,
-) -> Option<RustType> {
-    let type_env = TypeEnv::new();
-    let mut synthetic = SyntheticTypeRegistry::new();
-    Transformer {
-        tctx,
-        type_env: type_env,
-        synthetic: &mut synthetic,
-    }
-    .extract_fn_return_type(ty)
-}
-
-/// Wrapper: delegates to [`Transformer::extract_fn_param_types`].
-pub(super) fn extract_fn_param_types(
-    ty: &RustType,
-    tctx: &TransformContext<'_>,
-) -> Option<Vec<RustType>> {
-    let type_env = TypeEnv::new();
-    let mut synthetic = SyntheticTypeRegistry::new();
-    Transformer {
-        tctx,
-        type_env: type_env,
-        synthetic: &mut synthetic,
-    }
-    .extract_fn_param_types(ty)
 }
 
 #[cfg(test)]

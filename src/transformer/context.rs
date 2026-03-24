@@ -90,13 +90,9 @@ mod tests {
         let resolution = FileTypeResolution::empty();
         let old_tctx = TransformContext::new(&mg, &reg, &resolution, Path::new("test.ts"));
         let mut synthetic_old = SyntheticTypeRegistry::new();
-        let old_items = crate::transformer::transform_module_with_path(
-            &module,
-            &old_tctx,
-            None,
-            &mut synthetic_old,
-        )
-        .unwrap();
+        let old_items = crate::transformer::Transformer::for_module(&old_tctx, &mut synthetic_old)
+            .transform_module_with_path(&module, None)
+            .unwrap();
 
         // New API with empty resolution
         let f = TctxFixture::new();

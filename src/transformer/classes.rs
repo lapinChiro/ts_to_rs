@@ -9,8 +9,6 @@ use swc_ecma_ast as ast;
 
 use crate::ir::{AssocConst, Expr, Item, Method, Param, RustType, Stmt, StructField, Visibility};
 use crate::pipeline::type_converter::convert_ts_type;
-use crate::pipeline::SyntheticTypeRegistry;
-use crate::transformer::context::TransformContext;
 use crate::transformer::extract_prop_name;
 use crate::transformer::functions::convert_last_return_to_tail;
 use crate::transformer::{Transformer, TypeEnv};
@@ -107,27 +105,6 @@ impl<'a> Transformer<'a> {
             is_abstract: class_decl.class.is_abstract,
             static_consts,
         })
-    }
-
-    /// Converts an SWC [`ast::ClassDecl`] into IR items (struct + impl).
-    ///
-    /// Properties become struct fields, methods become impl methods,
-    /// and `constructor` becomes `pub fn new() -> Self`.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if unsupported class members are encountered.
-    pub(crate) fn convert_class_decl(
-        &mut self,
-        class_decl: &ast::ClassDecl,
-        vis: Visibility,
-    ) -> Result<Vec<Item>> {
-        let info = self.extract_class_info(class_decl, vis)?;
-        if info.is_abstract {
-            generate_abstract_class_items(&info)
-        } else {
-            generate_items_for_class(&info, None)
-        }
     }
 }
 
@@ -990,10 +967,7 @@ impl<'a> Transformer<'a> {
                         let option_type = RustType::Option(Box::new(inner_type));
 
                         let (default_expr, use_unwrap_or_default) =
-                            crate::transformer::functions::convert_default_value(
-                                &assign.right,
-                                self.synthetic,
-                            )?;
+                            self.convert_default_value(&assign.right)?;
 
                         let unwrap_call = if use_unwrap_or_default {
                             Expr::MethodCall {
@@ -1183,80 +1157,15 @@ impl<'a> Transformer<'a> {
     }
 }
 
-// --- Wrapper free functions (transition period — will be removed in Phase D-2-F) ---
-
-/// Wrapper: delegates to [`Transformer::extract_class_info`].
-pub fn extract_class_info(
-    class_decl: &ast::ClassDecl,
-    vis: Visibility,
-    synthetic: &mut SyntheticTypeRegistry,
-    tctx: &TransformContext<'_>,
-) -> Result<ClassInfo> {
-    let type_env = TypeEnv::new();
-    Transformer {
-        tctx,
-        type_env: type_env,
-        synthetic,
-    }
-    .extract_class_info(class_decl, vis)
-}
-
-/// Wrapper: delegates to [`Transformer::convert_class_decl`].
-pub fn convert_class_decl(
-    class_decl: &ast::ClassDecl,
-    vis: Visibility,
-    synthetic: &mut SyntheticTypeRegistry,
-    tctx: &TransformContext<'_>,
-) -> Result<Vec<Item>> {
-    let type_env = TypeEnv::new();
-    Transformer {
-        tctx,
-        type_env: type_env,
-        synthetic,
-    }
-    .convert_class_decl(class_decl, vis)
-}
-
-/// Wrapper: delegates to [`Transformer::pre_scan_classes`].
-pub(super) fn pre_scan_classes(
-    module: &ast::Module,
-    synthetic: &mut SyntheticTypeRegistry,
-    tctx: &TransformContext<'_>,
-) -> HashMap<String, ClassInfo> {
-    let type_env = TypeEnv::new();
-    Transformer {
-        tctx,
-        type_env: type_env,
-        synthetic,
-    }
-    .pre_scan_classes(module)
-}
-
-/// Wrapper: delegates to [`Transformer::transform_class_with_inheritance`].
-pub(super) fn transform_class_with_inheritance(
-    class_decl: &ast::ClassDecl,
-    vis: Visibility,
-    tctx: &TransformContext<'_>,
-    class_map: &HashMap<String, ClassInfo>,
-    iface_methods: &HashMap<String, Vec<String>>,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Result<Vec<Item>> {
-    let type_env = TypeEnv::new();
-    Transformer {
-        tctx,
-        type_env: type_env,
-        synthetic,
-    }
-    .transform_class_with_inheritance(class_decl, vis, class_map, iface_methods)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::ir::{Item, Param, RustType, StructField, Visibility};
     use crate::parser::parse_typescript;
+    use crate::pipeline::SyntheticTypeRegistry;
     use crate::registry::TypeRegistry;
     use crate::transformer::test_fixtures::TctxFixture;
+    use crate::transformer::Transformer;
     use swc_ecma_ast::{Decl, ModuleItem};
     /// Helper: parse TS source and extract the first ClassDecl.
     fn parse_class_decl(source: &str) -> ast::ClassDecl {
@@ -1272,13 +1181,14 @@ mod tests {
         let f = TctxFixture::new();
         let tctx = f.tctx();
         let decl = parse_class_decl("class Foo { x: number; y: string; }");
-        let items = convert_class_decl(
-            &decl,
-            Visibility::Private,
-            &mut SyntheticTypeRegistry::new(),
-            &tctx,
-        )
-        .unwrap();
+        let items = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+            .transform_class_with_inheritance(
+                &decl,
+                Visibility::Private,
+                &HashMap::new(),
+                &HashMap::new(),
+            )
+            .unwrap();
 
         assert_eq!(items.len(), 1);
         assert_eq!(
@@ -1309,13 +1219,14 @@ mod tests {
         let tctx = f.tctx();
         let decl =
             parse_class_decl("class Foo { x: number; constructor(x: number) { this.x = x; } }");
-        let items = convert_class_decl(
-            &decl,
-            Visibility::Private,
-            &mut SyntheticTypeRegistry::new(),
-            &tctx,
-        )
-        .unwrap();
+        let items = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+            .transform_class_with_inheritance(
+                &decl,
+                Visibility::Private,
+                &HashMap::new(),
+                &HashMap::new(),
+            )
+            .unwrap();
 
         assert_eq!(items.len(), 2);
         match &items[1] {
@@ -1353,13 +1264,14 @@ mod tests {
         let tctx = f.tctx();
         let decl =
             parse_class_decl("class Foo { name: string; greet(): string { return this.name; } }");
-        let items = convert_class_decl(
-            &decl,
-            Visibility::Private,
-            &mut SyntheticTypeRegistry::new(),
-            &tctx,
-        )
-        .unwrap();
+        let items = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+            .transform_class_with_inheritance(
+                &decl,
+                Visibility::Private,
+                &HashMap::new(),
+                &HashMap::new(),
+            )
+            .unwrap();
 
         assert_eq!(items.len(), 2);
         match &items[1] {
@@ -1378,13 +1290,14 @@ mod tests {
         let f = TctxFixture::new();
         let tctx = f.tctx();
         let decl = parse_class_decl("class Foo { x: number; greet(): string { return this.x; } }");
-        let items = convert_class_decl(
-            &decl,
-            Visibility::Public,
-            &mut SyntheticTypeRegistry::new(),
-            &tctx,
-        )
-        .unwrap();
+        let items = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+            .transform_class_with_inheritance(
+                &decl,
+                Visibility::Public,
+                &HashMap::new(),
+                &HashMap::new(),
+            )
+            .unwrap();
 
         match &items[0] {
             Item::Struct { vis, .. } => assert_eq!(*vis, Visibility::Public),
@@ -1403,13 +1316,14 @@ mod tests {
         let f = TctxFixture::new();
         let tctx = f.tctx();
         let decl = parse_class_decl("class Foo { x: number; static bar(): number { return 1; } }");
-        let items = convert_class_decl(
-            &decl,
-            Visibility::Private,
-            &mut SyntheticTypeRegistry::new(),
-            &tctx,
-        )
-        .unwrap();
+        let items = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+            .transform_class_with_inheritance(
+                &decl,
+                Visibility::Private,
+                &HashMap::new(),
+                &HashMap::new(),
+            )
+            .unwrap();
 
         assert_eq!(items.len(), 2);
         match &items[1] {
@@ -1436,13 +1350,9 @@ mod tests {
         let tctx = f.tctx();
         let decl =
             parse_class_decl("class Foo implements Greeter { greet(): string { return 'hi'; } }");
-        let info = extract_class_info(
-            &decl,
-            Visibility::Private,
-            &mut SyntheticTypeRegistry::new(),
-            &tctx,
-        )
-        .unwrap();
+        let info = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+            .extract_class_info(&decl, Visibility::Private)
+            .unwrap();
 
         assert_eq!(info.implements, vec!["Greeter".to_string()]);
     }
@@ -1452,13 +1362,9 @@ mod tests {
         let f = TctxFixture::new();
         let tctx = f.tctx();
         let decl = parse_class_decl("class Foo implements A, B { foo(): void {} bar(): void {} }");
-        let info = extract_class_info(
-            &decl,
-            Visibility::Private,
-            &mut SyntheticTypeRegistry::new(),
-            &tctx,
-        )
-        .unwrap();
+        let info = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+            .extract_class_info(&decl, Visibility::Private)
+            .unwrap();
 
         assert_eq!(info.implements, vec!["A".to_string(), "B".to_string()]);
     }
@@ -1468,13 +1374,9 @@ mod tests {
         let f = TctxFixture::new();
         let tctx = f.tctx();
         let decl = parse_class_decl("class Foo { x: number; }");
-        let info = extract_class_info(
-            &decl,
-            Visibility::Private,
-            &mut SyntheticTypeRegistry::new(),
-            &tctx,
-        )
-        .unwrap();
+        let info = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+            .extract_class_info(&decl, Visibility::Private)
+            .unwrap();
 
         assert!(info.implements.is_empty());
     }
@@ -1486,13 +1388,14 @@ mod tests {
         let decl = parse_class_decl(
             "class Foo { name: string; constructor(name: string) { this.name = name; } }",
         );
-        let items = convert_class_decl(
-            &decl,
-            Visibility::Private,
-            &mut SyntheticTypeRegistry::new(),
-            &tctx,
-        )
-        .unwrap();
+        let items = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+            .transform_class_with_inheritance(
+                &decl,
+                Visibility::Private,
+                &HashMap::new(),
+                &HashMap::new(),
+            )
+            .unwrap();
 
         match &items[1] {
             Item::Impl { methods, .. } => {
@@ -1509,13 +1412,9 @@ mod tests {
         let f = TctxFixture::new();
         let tctx = f.tctx();
         let decl = parse_class_decl("abstract class Shape { abstract area(): number; }");
-        let info = extract_class_info(
-            &decl,
-            Visibility::Private,
-            &mut SyntheticTypeRegistry::new(),
-            &tctx,
-        )
-        .unwrap();
+        let info = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+            .extract_class_info(&decl, Visibility::Private)
+            .unwrap();
         assert!(info.is_abstract);
     }
 
@@ -1524,13 +1423,14 @@ mod tests {
         let f = TctxFixture::new();
         let tctx = f.tctx();
         let decl = parse_class_decl("abstract class Shape { abstract area(): number; }");
-        let items = convert_class_decl(
-            &decl,
-            Visibility::Public,
-            &mut SyntheticTypeRegistry::new(),
-            &tctx,
-        )
-        .unwrap();
+        let items = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+            .transform_class_with_inheritance(
+                &decl,
+                Visibility::Public,
+                &HashMap::new(),
+                &HashMap::new(),
+            )
+            .unwrap();
         // Should produce a single Trait item, not Struct + Impl
         assert_eq!(items.len(), 1);
         match &items[0] {
@@ -1558,13 +1458,14 @@ mod tests {
         let decl = parse_class_decl(
             "abstract class Shape { abstract area(): number; describe(): string { return \"shape\"; } }",
         );
-        let items = convert_class_decl(
-            &decl,
-            Visibility::Public,
-            &mut SyntheticTypeRegistry::new(),
-            &tctx,
-        )
-        .unwrap();
+        let items = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+            .transform_class_with_inheritance(
+                &decl,
+                Visibility::Public,
+                &HashMap::new(),
+                &HashMap::new(),
+            )
+            .unwrap();
         assert_eq!(items.len(), 1);
         match &items[0] {
             Item::Trait { methods, .. } => {
@@ -1585,13 +1486,14 @@ mod tests {
         let f = TctxFixture::new();
         let tctx = f.tctx();
         let decl = parse_class_decl("abstract class Foo { bar(): number { return 1; } }");
-        let items = convert_class_decl(
-            &decl,
-            Visibility::Public,
-            &mut SyntheticTypeRegistry::new(),
-            &tctx,
-        )
-        .unwrap();
+        let items = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+            .transform_class_with_inheritance(
+                &decl,
+                Visibility::Public,
+                &HashMap::new(),
+                &HashMap::new(),
+            )
+            .unwrap();
         assert_eq!(items.len(), 1);
         match &items[0] {
             Item::Trait { methods, .. } => {
@@ -1663,13 +1565,14 @@ mod tests {
         let decl = parse_class_decl(
             "class Config { static readonly MAX_SIZE: number = 100; value: number; }",
         );
-        let items = convert_class_decl(
-            &decl,
-            Visibility::Public,
-            &mut SyntheticTypeRegistry::new(),
-            &tctx,
-        )
-        .unwrap();
+        let items = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+            .transform_class_with_inheritance(
+                &decl,
+                Visibility::Public,
+                &HashMap::new(),
+                &HashMap::new(),
+            )
+            .unwrap();
         // Should have: Struct (only value field) + Impl (with const MAX_SIZE)
         match &items[0] {
             Item::Struct { fields, .. } => {
@@ -1698,13 +1601,14 @@ mod tests {
         let f = TctxFixture::new();
         let tctx = f.tctx();
         let decl = parse_class_decl("class Foo { static NAME: string = \"hello\"; x: number; }");
-        let items = convert_class_decl(
-            &decl,
-            Visibility::Public,
-            &mut SyntheticTypeRegistry::new(),
-            &tctx,
-        )
-        .unwrap();
+        let items = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+            .transform_class_with_inheritance(
+                &decl,
+                Visibility::Public,
+                &HashMap::new(),
+                &HashMap::new(),
+            )
+            .unwrap();
         match &items[1] {
             Item::Impl { consts, .. } => {
                 assert_eq!(consts.len(), 1);
@@ -1720,13 +1624,14 @@ mod tests {
         let f = TctxFixture::new();
         let tctx = f.tctx();
         let decl = parse_class_decl("class Foo { protected greet(): string { return 'hi'; } }");
-        let items = convert_class_decl(
-            &decl,
-            Visibility::Public,
-            &mut SyntheticTypeRegistry::new(),
-            &tctx,
-        )
-        .unwrap();
+        let items = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+            .transform_class_with_inheritance(
+                &decl,
+                Visibility::Public,
+                &HashMap::new(),
+                &HashMap::new(),
+            )
+            .unwrap();
         match &items[1] {
             Item::Impl { methods, .. } => {
                 assert_eq!(methods.len(), 1);
@@ -1742,13 +1647,14 @@ mod tests {
         let f = TctxFixture::new();
         let tctx = f.tctx();
         let decl = parse_class_decl("class Foo { protected x: number; }");
-        let items = convert_class_decl(
-            &decl,
-            Visibility::Public,
-            &mut SyntheticTypeRegistry::new(),
-            &tctx,
-        )
-        .unwrap();
+        let items = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+            .transform_class_with_inheritance(
+                &decl,
+                Visibility::Public,
+                &HashMap::new(),
+                &HashMap::new(),
+            )
+            .unwrap();
         // Verify via generator output since StructField doesn't have vis yet
         let output = crate::generator::generate(&items);
         assert!(output.contains("pub(crate) x: f64"));
@@ -1761,13 +1667,14 @@ mod tests {
         let f = TctxFixture::new();
         let tctx = f.tctx();
         let decl = parse_class_decl("class Foo { constructor(public x: number) {} }");
-        let items = convert_class_decl(
-            &decl,
-            Visibility::Public,
-            &mut SyntheticTypeRegistry::new(),
-            &tctx,
-        )
-        .unwrap();
+        let items = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+            .transform_class_with_inheritance(
+                &decl,
+                Visibility::Public,
+                &HashMap::new(),
+                &HashMap::new(),
+            )
+            .unwrap();
 
         // Struct should have field `x`
         match &items[0] {
@@ -1802,13 +1709,14 @@ mod tests {
         let f = TctxFixture::new();
         let tctx = f.tctx();
         let decl = parse_class_decl("class Foo { constructor(private x: number) {} }");
-        let items = convert_class_decl(
-            &decl,
-            Visibility::Public,
-            &mut SyntheticTypeRegistry::new(),
-            &tctx,
-        )
-        .unwrap();
+        let items = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+            .transform_class_with_inheritance(
+                &decl,
+                Visibility::Public,
+                &HashMap::new(),
+                &HashMap::new(),
+            )
+            .unwrap();
 
         match &items[0] {
             Item::Struct { fields, .. } => {
@@ -1825,13 +1733,14 @@ mod tests {
         let f = TctxFixture::new();
         let tctx = f.tctx();
         let decl = parse_class_decl("class Foo { constructor(public readonly x: string) {} }");
-        let items = convert_class_decl(
-            &decl,
-            Visibility::Public,
-            &mut SyntheticTypeRegistry::new(),
-            &tctx,
-        )
-        .unwrap();
+        let items = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+            .transform_class_with_inheritance(
+                &decl,
+                Visibility::Public,
+                &HashMap::new(),
+                &HashMap::new(),
+            )
+            .unwrap();
 
         match &items[0] {
             Item::Struct { fields, .. } => {
@@ -1849,13 +1758,14 @@ mod tests {
         let f = TctxFixture::new();
         let tctx = f.tctx();
         let decl = parse_class_decl("class Foo { constructor(public x: number = 42) {} }");
-        let items = convert_class_decl(
-            &decl,
-            Visibility::Public,
-            &mut SyntheticTypeRegistry::new(),
-            &tctx,
-        )
-        .unwrap();
+        let items = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+            .transform_class_with_inheritance(
+                &decl,
+                Visibility::Public,
+                &HashMap::new(),
+                &HashMap::new(),
+            )
+            .unwrap();
 
         match &items[0] {
             Item::Struct { fields, .. } => {
@@ -1883,13 +1793,14 @@ mod tests {
         let decl = parse_class_decl(
             "class Foo { constructor(public x: number, y: string) { console.log(y); } }",
         );
-        let items = convert_class_decl(
-            &decl,
-            Visibility::Public,
-            &mut SyntheticTypeRegistry::new(),
-            &tctx,
-        )
-        .unwrap();
+        let items = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+            .transform_class_with_inheritance(
+                &decl,
+                Visibility::Public,
+                &HashMap::new(),
+                &HashMap::new(),
+            )
+            .unwrap();
 
         // Struct should only have field `x` (not `y`)
         match &items[0] {
@@ -1917,13 +1828,14 @@ mod tests {
         let tctx = f.tctx();
         let decl =
             parse_class_decl("class Foo { constructor(public x: number, private y: string) {} }");
-        let items = convert_class_decl(
-            &decl,
-            Visibility::Public,
-            &mut SyntheticTypeRegistry::new(),
-            &tctx,
-        )
-        .unwrap();
+        let items = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+            .transform_class_with_inheritance(
+                &decl,
+                Visibility::Public,
+                &HashMap::new(),
+                &HashMap::new(),
+            )
+            .unwrap();
 
         match &items[0] {
             Item::Struct { fields, .. } => {
@@ -1944,13 +1856,14 @@ mod tests {
         let decl = parse_class_decl(
             "class Foo { z: boolean; constructor(public x: number) { this.z = true; } }",
         );
-        let items = convert_class_decl(
-            &decl,
-            Visibility::Public,
-            &mut SyntheticTypeRegistry::new(),
-            &tctx,
-        )
-        .unwrap();
+        let items = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+            .transform_class_with_inheritance(
+                &decl,
+                Visibility::Public,
+                &HashMap::new(),
+                &HashMap::new(),
+            )
+            .unwrap();
 
         // Struct should have both `z` (explicit) and `x` (param prop)
         match &items[0] {
@@ -1970,13 +1883,14 @@ mod tests {
         let tctx = f.tctx();
         let decl =
             parse_class_decl("class Foo { constructor(public x: number) { console.log(x); } }");
-        let items = convert_class_decl(
-            &decl,
-            Visibility::Public,
-            &mut SyntheticTypeRegistry::new(),
-            &tctx,
-        )
-        .unwrap();
+        let items = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+            .transform_class_with_inheritance(
+                &decl,
+                Visibility::Public,
+                &HashMap::new(),
+                &HashMap::new(),
+            )
+            .unwrap();
 
         match &items[1] {
             Item::Impl { methods, .. } => {
@@ -1999,13 +1913,14 @@ mod tests {
         // constructor(x: number = 0) should produce Option<f64> param + unwrap_or
         let decl =
             parse_class_decl("class Foo { x: number; constructor(x: number = 0) { this.x = x; } }");
-        let items = convert_class_decl(
-            &decl,
-            Visibility::Private,
-            &mut SyntheticTypeRegistry::new(),
-            &tctx,
-        )
-        .unwrap();
+        let items = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+            .transform_class_with_inheritance(
+                &decl,
+                Visibility::Private,
+                &HashMap::new(),
+                &HashMap::new(),
+            )
+            .unwrap();
 
         // Find the Impl item
         let impl_item = items.iter().find(|i| matches!(i, Item::Impl { .. }));
@@ -2040,13 +1955,14 @@ mod tests {
         let tctx = f.tctx();
         // constructor(options: Options = {}) should produce Option<Options> + unwrap_or_default
         let decl = parse_class_decl("class Foo { constructor(options: Options = {}) {} }");
-        let items = convert_class_decl(
-            &decl,
-            Visibility::Private,
-            &mut SyntheticTypeRegistry::new(),
-            &tctx,
-        )
-        .unwrap();
+        let items = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+            .transform_class_with_inheritance(
+                &decl,
+                Visibility::Private,
+                &HashMap::new(),
+                &HashMap::new(),
+            )
+            .unwrap();
 
         let impl_item = items.iter().find(|i| matches!(i, Item::Impl { .. }));
         assert!(impl_item.is_some(), "expected Impl item");
@@ -2094,13 +2010,14 @@ mod tests {
             ModuleItem::Stmt(ast::Stmt::Decl(Decl::Class(decl))) => decl.clone(),
             _ => panic!("expected ClassDecl"),
         };
-        let items = convert_class_decl(
-            &decl,
-            Visibility::Private,
-            &mut SyntheticTypeRegistry::new(),
-            &tctx,
-        )
-        .unwrap();
+        let items = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+            .transform_class_with_inheritance(
+                &decl,
+                Visibility::Private,
+                &HashMap::new(),
+                &HashMap::new(),
+            )
+            .unwrap();
 
         // Find the Impl item with static consts
         let impl_item = items
