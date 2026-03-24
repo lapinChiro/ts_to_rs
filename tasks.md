@@ -21,9 +21,8 @@
 **Transformer:** AnyTypeAnalyzer 統合済み。to_pascal_case 集約済み。SyntheticTypeRegistry ソート修正済み。Transformer struct 導入 D-2-A〜F 全完了（全モジュールのメソッド化 + TypeEnv 所有化 + ファクトリメソッド導入 + 全ラッパー削除 + `convert_default_value` メソッド化 + `convert_class_decl` 削除）。
 
 **残存する実装不足:**
-- D-2-G: current_file_dir パラメータ除去
-- D-2-H: テスト更新（statements/tests.rs は F-2 で対応済み、functions/tests.rs と classes.rs テストは F-3/F-4 で対応済み。残り: expressions/tests.rs, context.rs, test_fixtures.rs）
-- D-2-I: クリーンアップ + 最終検証
+- D-2-2: 監査指摘対応（4 関数メソッド化漏れ、NarrowingGuard リファクタリング、フィールド private 化、`let reg` 除去）
+- Phase E: 最終検証
 
 ## タスク一覧
 
@@ -58,25 +57,9 @@ D-2 (Transformer struct)    ─┘─→ D5 完了後に実施
 
 - [x] **D6**: `FileOutput` に `source: String` フィールドを追加し `main.rs` の `files.clone()` を解消
 
-#### D-TR 〜 D4: 型解決の統一
+#### D-TR 〜 D4: 型解決の統一 ✅
 
-**詳細計画: `tasks.type-resolution-unification.md`（Phase 1〜4）**
-
-根本的な設計問題: TypeResolver（pre-pass）と runtime fallback（ExprContext / heuristic / TypeEnv narrowing）が同一機能を並行実装している。TypeResolver を完全化し、全 fallback を削除する。
-
-- [x] **D-TR-1**: TypeResolver カバレッジギャップ調査（`report/d-tr1-type-resolver-coverage-gaps.md`）
-  - heuristic 無効化: 50 テスト失敗（大半はテスト構造の問題。TypeResolver は heuristic のスーパーセット）
-  - ExprContext 無効化: 47 テスト失敗（TypeResolver の expected_types が 3 パターンのみで不完全）
-  - TypeEnv narrowing 無効化: 4 テスト失敗（TypeEnv 自体のユニットテストのみ。narrowing_events で完全カバー済み）
-- [x] **Phase 1** (1-1〜1-12): TypeResolver expected_types 完全化 — `propagate_expected` で expected_type の再帰的伝搬を実装（テスト 11 件追加）
-- [x] **Phase 2**: ExprContext 完全削除 — struct 削除、テスト 29 件修正、clippy 0 警告、E2E 60/60 GREEN
-- [x] **Phase 2.5**: Expected Type 伝搬の一本化 — TypeResolver と Transformer の二重伝搬を解消（全完了条件達成済み）
-  - [x] **Phase 2.5-A**: TypeResolver ギャップ埋め（5 パターン追加）+ `visit_var_decl` 再構成 + `resolve_arrow_expr`/`resolve_fn_expr` expected type 読み取り
-  - [x] **Phase 2.5-B**: テストヘルパー整備（`TctxFixture::from_source`）
-  - [x] **Phase 2.5-C**: unit test の TypeResolver 経由移行（50+ テスト書き換え）
-  - [x] **Phase 2.5-D**: Transformer の手動伝搬削除（19 箇所）+ 設計レビュー修正
-- [x] **Phase 3** (3-1〜3-7): Heuristic 削除 — 全完了。`resolve_expr_type` 関連関数削除、`set_expected_types_in_nested_calls` 廃止、`type_resolution.rs` の `type_env` 除去、`ast_produces_option` 削除（TypeResolver Cond/OptChain 強化）
-- [x] **Phase 4** (4-1〜4-3): TypeEnv 簡素化 — narrowing 用 push_scope/pop_scope 削除、update() 削除、関連テスト 2 件削除
+TypeResolver（pre-pass）を完全化し、runtime fallback（ExprContext / heuristic / TypeEnv narrowing）を全削除。Phase 1〜4 全完了。詳細は git history 参照。
 
 #### D5: tctx + reg 二重パラメータ統合
 
@@ -84,14 +67,18 @@ Phase 2（ExprContext 削除）で `ctx` パラメータが消えた後、シグ
 
 - [x] **D5**: 99 関数の `reg: &TypeRegistry` を削除し `tctx.type_registry` に統一（13 ファイル、~350 呼び出し箇所を修正）
 
-#### D-2: Transformer struct 導入
+#### D-2: Transformer struct 導入 ✅
 
-**詳細計画: `tasks.d2-transformer-struct.md`**
+`tctx`, `type_env`, `synthetic` の 3 パラメータを `Transformer` struct のフィールドに束ね、106 関数をメソッドに変換。全ラッパー削除、current_file_dir 除去、メソッドリネーム完了。詳細は git history 参照。
 
-`tctx`, `type_env`, `synthetic` の 3 パラメータを `Transformer` struct のフィールドに束ね、106 関数をメソッドに変換する。Phase D-2-A〜I の 9 フェーズで段階的に実施。
+#### D-2-2: Transformer struct 監査指摘対応
 
-- [ ] **D-2**: Transformer struct 導入（106 関数のメソッド化 + ラッパー遷移 + current_file_dir 除去）
-  - **依存**: D5 完了後
+**詳細計画: `tasks.d-2-2.md`**
+
+D-2 完了後の監査で検出された 5 課題の対応。4 関数のメソッド化漏れ、NarrowingGuard リファクタリング、フィールド private 化、`let reg` 除去。
+
+- [ ] **D-2-2**: 監査指摘対応（A〜E の 5 フェーズ）
+  - **依存**: D-2 完了後
 
 ### Phase E: 最終検証
 

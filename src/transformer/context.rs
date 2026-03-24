@@ -1,9 +1,8 @@
 //! Immutable context for the Transformer.
 //!
 //! `TransformContext` bundles all read-only data that the Transformer needs,
-//! replacing the individual `&TypeRegistry`, `current_file_dir`, etc. parameters.
-//! `SyntheticTypeRegistry` is excluded because it requires `&mut` access;
-//! it will be integrated in P8 when the unified pipeline makes it immutable.
+//! replacing the individual `&TypeRegistry`, etc. parameters.
+//! `current_file_dir` is derived from `file_path` via `Transformer::current_file_dir()`.
 
 use std::path::Path;
 
@@ -91,7 +90,7 @@ mod tests {
         let old_tctx = TransformContext::new(&mg, &reg, &resolution, Path::new("test.ts"));
         let mut synthetic_old = SyntheticTypeRegistry::new();
         let old_items = crate::transformer::Transformer::for_module(&old_tctx, &mut synthetic_old)
-            .transform_module_with_path(&module, None)
+            .transform_module(&module)
             .unwrap();
 
         // New API with empty resolution

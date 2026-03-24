@@ -32,7 +32,6 @@ impl<'a> Transformer<'a> {
         resilient: bool,
     ) -> Result<(Vec<Item>, Vec<String>)> {
         let reg = self.reg();
-        let tctx = self.tctx;
         let name = fn_decl.ident.sym.to_string();
         let mut fallback_warnings = Vec::new();
         let mut items = Vec::new();
@@ -45,7 +44,7 @@ impl<'a> Transformer<'a> {
         let return_type = {
             let sub_type_env = TypeEnv::new();
             let mut sub = Transformer {
-                tctx,
+                tctx: self.tctx,
                 type_env: sub_type_env,
                 synthetic: &mut local_synthetic,
             };
@@ -177,7 +176,7 @@ impl<'a> Transformer<'a> {
         // F-3b #1: Sub-Transformer with local fn_type_env + local_synthetic
         let body_stmts = match &fn_decl.function.body {
             Some(block) => Transformer {
-                tctx,
+                tctx: self.tctx,
                 type_env: fn_type_env,
                 synthetic: &mut local_synthetic,
             }

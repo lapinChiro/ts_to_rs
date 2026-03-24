@@ -139,7 +139,7 @@ pub fn transform_module(module: &Module, reg: &TypeRegistry) -> Result<Vec<Item>
     let tctx = context::TransformContext::new(&mg, reg, &resolution, std::path::Path::new(""));
     let mut items = {
         let mut t = Transformer::for_module(&tctx, &mut synthetic);
-        t.transform_module_with_path(module, None)?
+        t.transform_module(module)?
     };
     let mut all = synthetic.into_items();
     all.append(&mut items);
@@ -153,8 +153,7 @@ pub fn transform_module_with_context(
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Vec<Item>> {
     let mut t = Transformer::for_module(ctx, synthetic);
-    let current_file_dir = t.current_file_dir();
-    t.transform_module_with_path(module, current_file_dir)
+    t.transform_module(module)
 }
 
 /// Transforms an SWC [`Module`], collecting unsupported syntax instead of aborting.
@@ -177,7 +176,7 @@ pub fn transform_module_collecting(
     let tctx = context::TransformContext::new(&mg, reg, &resolution, std::path::Path::new(""));
     let (mut items, unsupported) = {
         let mut t = Transformer::for_module(&tctx, &mut synthetic);
-        t.transform_module_collecting_with_path(module, None)?
+        t.transform_module_collecting(module)?
     };
     let mut all = synthetic.into_items();
     all.append(&mut items);
@@ -187,29 +186,19 @@ pub fn transform_module_collecting(
 // --- Transformer methods for module-level transformation ---
 
 impl<'a> Transformer<'a> {
-    /// Transforms an SWC [`Module`] into IR items, with the file's crate-relative directory.
+    /// Transforms an SWC [`Module`] into IR items.
     ///
-    /// `current_file_dir` is the directory of the source file relative to the crate root
-    /// (e.g., `Some("adapter/bun")` for `adapter/bun/server.ts`). This is used to resolve
-    /// `../` in import paths. When `None`, the file is assumed to be at the crate root.
-    pub(crate) fn transform_module_with_path(
-        &mut self,
-        module: &Module,
-        current_file_dir: Option<&str>,
-    ) -> Result<Vec<Item>> {
+    /// The file's crate-relative directory (used for `../` import path resolution) is
+    /// derived from `self.tctx.file_path` via [`current_file_dir()`](Self::current_file_dir).
+    pub(crate) fn transform_module(&mut self, module: &Module) -> Result<Vec<Item>> {
         // Pre-scan: collect class info for inheritance resolution
         let class_map = self.pre_scan_classes(module);
         let iface_methods = classes::pre_scan_interface_methods(module);
 
         let mut items = Vec::new();
         for module_item in &module.body {
-            let (converted, _warnings) = self.transform_module_item(
-                module_item,
-                &class_map,
-                &iface_methods,
-                false,
-                current_file_dir,
-            )?;
+            let (converted, _warnings) =
+                self.transform_module_item(module_item, &class_map, &iface_methods, false)?;
             items.extend(converted);
         }
 
@@ -217,11 +206,10 @@ impl<'a> Transformer<'a> {
         Ok(items)
     }
 
-    /// Like [`transform_module_collecting`] but with file path context for import resolution.
-    pub(crate) fn transform_module_collecting_with_path(
+    /// Transforms an SWC [`Module`], collecting unsupported syntax instead of aborting.
+    pub(crate) fn transform_module_collecting(
         &mut self,
         module: &Module,
-        current_file_dir: Option<&str>,
     ) -> Result<(Vec<Item>, Vec<UnsupportedSyntaxError>)> {
         let class_map = self.pre_scan_classes(module);
         let iface_methods = classes::pre_scan_interface_methods(module);
@@ -230,13 +218,7 @@ impl<'a> Transformer<'a> {
         let mut unsupported = Vec::new();
 
         for module_item in &module.body {
-            match self.transform_module_item(
-                module_item,
-                &class_map,
-                &iface_methods,
-                true,
-                current_file_dir,
-            ) {
+            match self.transform_module_item(module_item, &class_map, &iface_methods, true) {
                 Ok((converted, warnings)) => {
                     items.extend(converted);
                     for warning in warnings {
@@ -274,7 +256,6 @@ impl<'a> Transformer<'a> {
         class_map: &HashMap<String, ClassInfo>,
         iface_methods: &HashMap<String, Vec<String>>,
         resilient: bool,
-        current_file_dir: Option<&str>,
     ) -> Result<(Vec<Item>, Vec<String>)> {
         match module_item {
             ModuleItem::Stmt(Stmt::Decl(decl)) => self.transform_decl(
@@ -292,17 +273,17 @@ impl<'a> Transformer<'a> {
                 resilient,
             ),
             ModuleItem::ModuleDecl(ModuleDecl::Import(import_decl)) => {
-                let items = self.transform_import(import_decl, current_file_dir);
+                let items = self.transform_import(import_decl);
                 Ok((items, vec![]))
             }
             ModuleItem::ModuleDecl(ModuleDecl::ExportNamed(export)) => {
-                let items = self.transform_export_named(export, current_file_dir);
+                let items = self.transform_export_named(export);
                 Ok((items, vec![]))
             }
             ModuleItem::ModuleDecl(ModuleDecl::ExportAll(export_all)) => {
                 let src = export_all.src.value.to_string_lossy().into_owned();
                 if src.starts_with("./") || src.starts_with("../") {
-                    let path = self.resolve_import_path_with_fallback(&src, "*", current_file_dir);
+                    let path = self.resolve_import_path_with_fallback(&src, "*");
                     Ok((
                         vec![Item::Use {
                             vis: Visibility::Public,
@@ -335,12 +316,7 @@ impl<'a> Transformer<'a> {
     ///
     /// When resolution fails (single-file mode, external packages, or unresolvable paths),
     /// falls back to [`convert_relative_path_to_crate_path`].
-    fn resolve_import_path_with_fallback(
-        &self,
-        specifier: &str,
-        name: &str,
-        current_file_dir: Option<&str>,
-    ) -> String {
+    fn resolve_import_path_with_fallback(&self, specifier: &str, name: &str) -> String {
         if let Some(resolved) =
             self.tctx
                 .module_graph
@@ -348,7 +324,7 @@ impl<'a> Transformer<'a> {
         {
             return resolved.module_path;
         }
-        convert_relative_path_to_crate_path(specifier, current_file_dir)
+        convert_relative_path_to_crate_path(specifier, self.current_file_dir())
     }
 
     /// Transforms an import declaration into IR [`Item::Use`] items.
@@ -356,11 +332,7 @@ impl<'a> Transformer<'a> {
     /// Uses `ModuleGraph.resolve_import()` to resolve import paths through re-export chains.
     /// Falls back to heuristic path conversion when resolution fails.
     /// Only relative path imports with named specifiers are converted.
-    fn transform_import(
-        &self,
-        import_decl: &swc_ecma_ast::ImportDecl,
-        current_file_dir: Option<&str>,
-    ) -> Vec<Item> {
+    fn transform_import(&self, import_decl: &swc_ecma_ast::ImportDecl) -> Vec<Item> {
         let src = import_decl.src.value.to_string_lossy().into_owned();
 
         // Only handle relative imports
@@ -386,7 +358,7 @@ impl<'a> Transformer<'a> {
         // Names resolving to different module paths produce separate use items.
         let mut path_groups: Vec<(String, Vec<String>)> = Vec::new();
         for name in &names {
-            let path = self.resolve_import_path_with_fallback(&src, name, current_file_dir);
+            let path = self.resolve_import_path_with_fallback(&src, name);
             if let Some(group) = path_groups.iter_mut().find(|(p, _)| p == &path) {
                 group.1.push(name.clone());
             } else {
@@ -410,11 +382,7 @@ impl<'a> Transformer<'a> {
     /// - Local name exports (`export { Foo }`) are skipped (declarations are already `pub`)
     ///
     /// Uses `ModuleGraph.resolve_import()` to resolve re-export chains.
-    fn transform_export_named(
-        &self,
-        export: &swc_ecma_ast::NamedExport,
-        current_file_dir: Option<&str>,
-    ) -> Vec<Item> {
+    fn transform_export_named(&self, export: &swc_ecma_ast::NamedExport) -> Vec<Item> {
         // Local name exports (no source path) are skipped
         let src = match export.src.as_ref() {
             Some(s) => s,
@@ -451,7 +419,7 @@ impl<'a> Transformer<'a> {
         // Resolve each name through ModuleGraph (same logic as transform_import)
         let mut path_groups: Vec<(String, Vec<String>)> = Vec::new();
         for name in &names {
-            let path = self.resolve_import_path_with_fallback(&src_str, name, current_file_dir);
+            let path = self.resolve_import_path_with_fallback(&src_str, name);
             if let Some(group) = path_groups.iter_mut().find(|(p, _)| p == &path) {
                 group.1.push(name.clone());
             } else {
