@@ -123,7 +123,14 @@ pub fn transform_module(module: &Module, reg: &TypeRegistry) -> Result<Vec<Item>
     let mg = crate::pipeline::ModuleGraph::empty();
     let resolution = crate::pipeline::type_resolution::FileTypeResolution::empty();
     let tctx = context::TransformContext::new(&mg, reg, &resolution, std::path::Path::new(""));
-    let mut items = transform_module_with_path(module, &tctx, None, &mut synthetic)?;
+    let mut type_env = TypeEnv::new();
+    let mut t = Transformer {
+        tctx: &tctx,
+        type_env: &mut type_env,
+        synthetic: &mut synthetic,
+    };
+    let mut items = t.transform_module_with_path(module, None)?;
+    drop(t);
     let mut all = synthetic.into_items();
     all.append(&mut items);
     Ok(all)
@@ -135,41 +142,14 @@ pub fn transform_module_with_context(
     ctx: &context::TransformContext<'_>,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Vec<Item>> {
-    let current_file_dir = ctx.file_path.parent().and_then(|p| p.to_str());
-    transform_module_with_path(module, ctx, current_file_dir, synthetic)
-}
-
-/// Transforms an SWC [`Module`] into IR items, with the file's crate-relative directory.
-///
-/// `current_file_dir` is the directory of the source file relative to the crate root
-/// (e.g., `Some("adapter/bun")` for `adapter/bun/server.ts`). This is used to resolve
-/// `../` in import paths. When `None`, the file is assumed to be at the crate root.
-pub fn transform_module_with_path(
-    module: &Module,
-    tctx: &TransformContext<'_>,
-    current_file_dir: Option<&str>,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Result<Vec<Item>> {
-    // Pre-scan: collect class info for inheritance resolution
-    let class_map = classes::pre_scan_classes(module, synthetic, tctx);
-    let iface_methods = classes::pre_scan_interface_methods(module);
-
-    let mut items = Vec::new();
-    for module_item in &module.body {
-        let (converted, _warnings) = transform_module_item(
-            module_item,
-            tctx,
-            &class_map,
-            &iface_methods,
-            false,
-            current_file_dir,
-            synthetic,
-        )?;
-        items.extend(converted);
-    }
-
-    inject_regex_import_if_needed(&mut items);
-    Ok(items)
+    let mut type_env = TypeEnv::new();
+    let mut t = Transformer {
+        tctx: ctx,
+        type_env: &mut type_env,
+        synthetic,
+    };
+    let current_file_dir = t.current_file_dir();
+    t.transform_module_with_path(module, current_file_dir)
 }
 
 /// Transforms an SWC [`Module`], collecting unsupported syntax instead of aborting.
@@ -190,270 +170,414 @@ pub fn transform_module_collecting(
     let mg = crate::pipeline::ModuleGraph::empty();
     let resolution = crate::pipeline::type_resolution::FileTypeResolution::empty();
     let tctx = context::TransformContext::new(&mg, reg, &resolution, std::path::Path::new(""));
-    let (mut items, unsupported) =
-        transform_module_collecting_with_path(module, &tctx, None, &mut synthetic)?;
+    let mut type_env = TypeEnv::new();
+    let mut t = Transformer {
+        tctx: &tctx,
+        type_env: &mut type_env,
+        synthetic: &mut synthetic,
+    };
+    let (mut items, unsupported) = t.transform_module_collecting_with_path(module, None)?;
+    drop(t);
     let mut all = synthetic.into_items();
     all.append(&mut items);
     Ok((all, unsupported))
 }
 
-/// Like [`transform_module_collecting`] but with file path context for import resolution.
+// --- Transformer methods for module-level transformation ---
+
+impl<'a> Transformer<'a> {
+    /// Transforms an SWC [`Module`] into IR items, with the file's crate-relative directory.
+    ///
+    /// `current_file_dir` is the directory of the source file relative to the crate root
+    /// (e.g., `Some("adapter/bun")` for `adapter/bun/server.ts`). This is used to resolve
+    /// `../` in import paths. When `None`, the file is assumed to be at the crate root.
+    pub(crate) fn transform_module_with_path(
+        &mut self,
+        module: &Module,
+        current_file_dir: Option<&str>,
+    ) -> Result<Vec<Item>> {
+        // Pre-scan: collect class info for inheritance resolution
+        let class_map = self.pre_scan_classes(module);
+        let iface_methods = classes::pre_scan_interface_methods(module);
+
+        let mut items = Vec::new();
+        for module_item in &module.body {
+            let (converted, _warnings) = self.transform_module_item(
+                module_item,
+                &class_map,
+                &iface_methods,
+                false,
+                current_file_dir,
+            )?;
+            items.extend(converted);
+        }
+
+        inject_regex_import_if_needed(&mut items);
+        Ok(items)
+    }
+
+    /// Like [`transform_module_collecting`] but with file path context for import resolution.
+    pub(crate) fn transform_module_collecting_with_path(
+        &mut self,
+        module: &Module,
+        current_file_dir: Option<&str>,
+    ) -> Result<(Vec<Item>, Vec<UnsupportedSyntaxError>)> {
+        let class_map = self.pre_scan_classes(module);
+        let iface_methods = classes::pre_scan_interface_methods(module);
+
+        let mut items = Vec::new();
+        let mut unsupported = Vec::new();
+
+        for module_item in &module.body {
+            match self.transform_module_item(
+                module_item,
+                &class_map,
+                &iface_methods,
+                true,
+                current_file_dir,
+            ) {
+                Ok((converted, warnings)) => {
+                    items.extend(converted);
+                    for warning in warnings {
+                        unsupported.push(UnsupportedSyntaxError {
+                            kind: warning,
+                            byte_pos: module_item.span().lo.0,
+                        });
+                    }
+                }
+                Err(e) => match e.downcast::<UnsupportedSyntaxError>() {
+                    Ok(unsup) => unsupported.push(unsup),
+                    Err(other) => {
+                        // Transformer-internal errors (e.g. unsupported parameter patterns
+                        // inside functions/classes) are collected instead of aborting.
+                        unsupported.push(UnsupportedSyntaxError {
+                            kind: other.to_string(),
+                            byte_pos: module_item.span().lo.0,
+                        });
+                    }
+                },
+            }
+        }
+
+        inject_regex_import_if_needed(&mut items);
+        Ok((items, unsupported))
+    }
+
+    /// Transforms a single module item into IR [`Item`]s.
+    ///
+    /// When `resilient` is true, type conversion failures in function parameters and
+    /// return types fall back to `RustType::Any` instead of aborting.
+    fn transform_module_item(
+        &mut self,
+        module_item: &ModuleItem,
+        class_map: &HashMap<String, ClassInfo>,
+        iface_methods: &HashMap<String, Vec<String>>,
+        resilient: bool,
+        current_file_dir: Option<&str>,
+    ) -> Result<(Vec<Item>, Vec<String>)> {
+        match module_item {
+            ModuleItem::Stmt(Stmt::Decl(decl)) => {
+                self.transform_decl(decl, Visibility::Private, class_map, iface_methods, resilient)
+            }
+            ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(export)) => {
+                self.transform_decl(
+                    &export.decl,
+                    Visibility::Public,
+                    class_map,
+                    iface_methods,
+                    resilient,
+                )
+            }
+            ModuleItem::ModuleDecl(ModuleDecl::Import(import_decl)) => {
+                let items = self.transform_import(import_decl, current_file_dir);
+                Ok((items, vec![]))
+            }
+            ModuleItem::ModuleDecl(ModuleDecl::ExportNamed(export)) => {
+                let items = self.transform_export_named(export, current_file_dir);
+                Ok((items, vec![]))
+            }
+            ModuleItem::ModuleDecl(ModuleDecl::ExportAll(export_all)) => {
+                let src = export_all.src.value.to_string_lossy().into_owned();
+                if src.starts_with("./") || src.starts_with("../") {
+                    let path =
+                        self.resolve_import_path_with_fallback(&src, "*", current_file_dir);
+                    Ok((
+                        vec![Item::Use {
+                            vis: Visibility::Public,
+                            path,
+                            names: vec!["*".to_string()],
+                        }],
+                        vec![],
+                    ))
+                } else {
+                    // External package re-exports are skipped
+                    Ok((vec![], vec![]))
+                }
+            }
+            // Top-level expression statements (e.g., `globalThis.crypto ??= crypto`)
+            // Rust has no top-level expressions; skip silently
+            ModuleItem::Stmt(Stmt::Expr(_)) => Ok((vec![], vec![])),
+            _ => Err(UnsupportedSyntaxError {
+                kind: format_module_item_kind(module_item),
+                byte_pos: module_item.span().lo.0,
+            }
+            .into()),
+        }
+    }
+
+    /// Resolves an import path using ModuleGraph first, falling back to heuristic path conversion.
+    ///
+    /// When `ModuleGraph.resolve_import()` succeeds, the resolved module path is used.
+    /// This handles re-export chains correctly (e.g., importing `Config` from `./index`
+    /// which re-exports from `./types` → resolves to `crate::types`).
+    ///
+    /// When resolution fails (single-file mode, external packages, or unresolvable paths),
+    /// falls back to [`convert_relative_path_to_crate_path`].
+    fn resolve_import_path_with_fallback(
+        &self,
+        specifier: &str,
+        name: &str,
+        current_file_dir: Option<&str>,
+    ) -> String {
+        if let Some(resolved) = self
+            .tctx
+            .module_graph
+            .resolve_import(self.tctx.file_path, specifier, name)
+        {
+            return resolved.module_path;
+        }
+        convert_relative_path_to_crate_path(specifier, current_file_dir)
+    }
+
+    /// Transforms an import declaration into IR [`Item::Use`] items.
+    ///
+    /// Uses `ModuleGraph.resolve_import()` to resolve import paths through re-export chains.
+    /// Falls back to heuristic path conversion when resolution fails.
+    /// Only relative path imports with named specifiers are converted.
+    fn transform_import(
+        &self,
+        import_decl: &swc_ecma_ast::ImportDecl,
+        current_file_dir: Option<&str>,
+    ) -> Vec<Item> {
+        let src = import_decl.src.value.to_string_lossy().into_owned();
+
+        // Only handle relative imports
+        if !src.starts_with("./") && !src.starts_with("../") {
+            return vec![];
+        }
+
+        // Collect named specifiers only
+        let names: Vec<String> = import_decl
+            .specifiers
+            .iter()
+            .filter_map(|spec| match spec {
+                ImportSpecifier::Named(named) => Some(named.local.sym.to_string()),
+                _ => None,
+            })
+            .collect();
+
+        if names.is_empty() {
+            return vec![];
+        }
+
+        // Resolve each name through ModuleGraph to handle re-export chains.
+        // Names resolving to different module paths produce separate use items.
+        let mut path_groups: Vec<(String, Vec<String>)> = Vec::new();
+        for name in &names {
+            let path =
+                self.resolve_import_path_with_fallback(&src, name, current_file_dir);
+            if let Some(group) = path_groups.iter_mut().find(|(p, _)| p == &path) {
+                group.1.push(name.clone());
+            } else {
+                path_groups.push((path, vec![name.clone()]));
+            }
+        }
+
+        path_groups
+            .into_iter()
+            .map(|(path, names)| Item::Use {
+                vis: Visibility::Private,
+                path,
+                names,
+            })
+            .collect()
+    }
+
+    /// Transforms a named export into IR [`Item::Use`] items with public visibility.
+    ///
+    /// - Re-exports (`export { Foo } from "./bar"`) become `pub use bar::Foo;`
+    /// - Local name exports (`export { Foo }`) are skipped (declarations are already `pub`)
+    ///
+    /// Uses `ModuleGraph.resolve_import()` to resolve re-export chains.
+    fn transform_export_named(
+        &self,
+        export: &swc_ecma_ast::NamedExport,
+        current_file_dir: Option<&str>,
+    ) -> Vec<Item> {
+        // Local name exports (no source path) are skipped
+        let src = match export.src.as_ref() {
+            Some(s) => s,
+            None => return vec![],
+        };
+        let src_str = src.value.to_string_lossy().into_owned();
+
+        // Only handle relative imports
+        if !src_str.starts_with("./") && !src_str.starts_with("../") {
+            return vec![];
+        }
+
+        let names: Vec<String> = export
+            .specifiers
+            .iter()
+            .filter_map(|spec| match spec {
+                swc_ecma_ast::ExportSpecifier::Named(named) => {
+                    // Use the original name (not the renamed alias)
+                    match &named.orig {
+                        swc_ecma_ast::ModuleExportName::Ident(ident) => {
+                            Some(ident.sym.to_string())
+                        }
+                        swc_ecma_ast::ModuleExportName::Str(s) => {
+                            Some(s.value.to_string_lossy().into_owned())
+                        }
+                    }
+                }
+                _ => None,
+            })
+            .collect();
+
+        if names.is_empty() {
+            return vec![];
+        }
+
+        // Resolve each name through ModuleGraph (same logic as transform_import)
+        let mut path_groups: Vec<(String, Vec<String>)> = Vec::new();
+        for name in &names {
+            let path =
+                self.resolve_import_path_with_fallback(&src_str, name, current_file_dir);
+            if let Some(group) = path_groups.iter_mut().find(|(p, _)| p == &path) {
+                group.1.push(name.clone());
+            } else {
+                path_groups.push((path, vec![name.clone()]));
+            }
+        }
+
+        path_groups
+            .into_iter()
+            .map(|(path, names)| Item::Use {
+                vis: Visibility::Public,
+                path,
+                names,
+            })
+            .collect()
+    }
+
+    /// Transforms a single declaration into IR [`Item`]s.
+    ///
+    /// When `resilient` is true, type conversion failures in functions fall back to
+    /// `RustType::Any` instead of aborting.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`UnsupportedSyntaxError`] for unhandled declaration types.
+    fn transform_decl(
+        &mut self,
+        decl: &Decl,
+        vis: Visibility,
+        class_map: &HashMap<String, ClassInfo>,
+        iface_methods: &HashMap<String, Vec<String>>,
+        resilient: bool,
+    ) -> Result<(Vec<Item>, Vec<String>)> {
+        let reg = self.reg();
+        match decl {
+            Decl::TsInterface(interface_decl) => {
+                let items =
+                    types::convert_interface_items(interface_decl, vis, self.synthetic, reg)?;
+                Ok((items, vec![]))
+            }
+            Decl::TsTypeAlias(type_alias_decl) => {
+                let items =
+                    types::convert_type_alias_items(type_alias_decl, vis, self.synthetic, reg)?;
+                Ok((items, vec![]))
+            }
+            Decl::Fn(fn_decl) => {
+                let (items, warnings) = self.convert_fn_decl(fn_decl, vis, resilient)?;
+                Ok((items, warnings))
+            }
+            Decl::Class(class_decl) => {
+                let items = self.transform_class_with_inheritance(
+                    class_decl,
+                    vis,
+                    class_map,
+                    iface_methods,
+                )?;
+                Ok((items, vec![]))
+            }
+            Decl::Var(var_decl) => self.convert_var_decl_arrow_fns(var_decl, vis, resilient),
+            Decl::TsEnum(ts_enum) => {
+                let items = convert_ts_enum(ts_enum, vis)?;
+                Ok((items, vec![]))
+            }
+            Decl::TsModule(ts_module) => {
+                // `declare module 'name' { ... }` — process internal declarations
+                let mut items = Vec::new();
+                if let Some(ast::TsNamespaceBody::TsModuleBlock(block)) = &ts_module.body {
+                    for item in &block.body {
+                        if let ModuleItem::Stmt(ast::Stmt::Decl(inner_decl)) = item {
+                            if let Ok((inner_items, _)) = self.transform_decl(
+                                inner_decl,
+                                vis.clone(),
+                                class_map,
+                                iface_methods,
+                                resilient,
+                            ) {
+                                items.extend(inner_items);
+                            }
+                        }
+                    }
+                }
+                Ok((items, vec![]))
+            }
+            _ => Err(UnsupportedSyntaxError {
+                kind: format_decl_kind(decl),
+                byte_pos: decl.span().lo.0,
+            }
+            .into()),
+        }
+    }
+} // end impl Transformer (module-level transformation)
+
+// --- Wrapper free functions (transition period — will be removed in Phase D-2-F) ---
+
+/// Wrapper: delegates to [`Transformer::transform_module_with_path`].
+pub fn transform_module_with_path(
+    module: &Module,
+    tctx: &TransformContext<'_>,
+    current_file_dir: Option<&str>,
+    synthetic: &mut SyntheticTypeRegistry,
+) -> Result<Vec<Item>> {
+    let mut type_env = TypeEnv::new();
+    Transformer {
+        tctx,
+        type_env: &mut type_env,
+        synthetic,
+    }
+    .transform_module_with_path(module, current_file_dir)
+}
+
+/// Wrapper: delegates to [`Transformer::transform_module_collecting_with_path`].
 pub fn transform_module_collecting_with_path(
     module: &Module,
     tctx: &TransformContext<'_>,
     current_file_dir: Option<&str>,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<(Vec<Item>, Vec<UnsupportedSyntaxError>)> {
-    let class_map = classes::pre_scan_classes(module, synthetic, tctx);
-    let iface_methods = classes::pre_scan_interface_methods(module);
-
-    let mut items = Vec::new();
-    let mut unsupported = Vec::new();
-
-    for module_item in &module.body {
-        match transform_module_item(
-            module_item,
-            tctx,
-            &class_map,
-            &iface_methods,
-            true,
-            current_file_dir,
-            synthetic,
-        ) {
-            Ok((converted, warnings)) => {
-                items.extend(converted);
-                for warning in warnings {
-                    unsupported.push(UnsupportedSyntaxError {
-                        kind: warning,
-                        byte_pos: module_item.span().lo.0,
-                    });
-                }
-            }
-            Err(e) => match e.downcast::<UnsupportedSyntaxError>() {
-                Ok(unsup) => unsupported.push(unsup),
-                Err(other) => {
-                    // Transformer-internal errors (e.g. unsupported parameter patterns
-                    // inside functions/classes) are collected instead of aborting.
-                    unsupported.push(UnsupportedSyntaxError {
-                        kind: other.to_string(),
-                        byte_pos: module_item.span().lo.0,
-                    });
-                }
-            },
-        }
+    let mut type_env = TypeEnv::new();
+    Transformer {
+        tctx,
+        type_env: &mut type_env,
+        synthetic,
     }
-
-    inject_regex_import_if_needed(&mut items);
-    Ok((items, unsupported))
-}
-
-/// Transforms a single module item into IR [`Item`]s.
-///
-/// When `resilient` is true, type conversion failures in function parameters and
-/// return types fall back to `RustType::Any` instead of aborting.
-fn transform_module_item(
-    module_item: &ModuleItem,
-    tctx: &TransformContext<'_>,
-    class_map: &HashMap<String, ClassInfo>,
-    iface_methods: &HashMap<String, Vec<String>>,
-    resilient: bool,
-    current_file_dir: Option<&str>,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Result<(Vec<Item>, Vec<String>)> {
-    match module_item {
-        ModuleItem::Stmt(Stmt::Decl(decl)) => transform_decl(
-            decl,
-            Visibility::Private,
-            tctx,
-            class_map,
-            iface_methods,
-            resilient,
-            synthetic,
-        ),
-        ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(export)) => transform_decl(
-            &export.decl,
-            Visibility::Public,
-            tctx,
-            class_map,
-            iface_methods,
-            resilient,
-            synthetic,
-        ),
-        ModuleItem::ModuleDecl(ModuleDecl::Import(import_decl)) => {
-            let items = transform_import(import_decl, tctx, current_file_dir);
-            Ok((items, vec![]))
-        }
-        ModuleItem::ModuleDecl(ModuleDecl::ExportNamed(export)) => {
-            let items = transform_export_named(export, tctx, current_file_dir);
-            Ok((items, vec![]))
-        }
-        ModuleItem::ModuleDecl(ModuleDecl::ExportAll(export_all)) => {
-            let src = export_all.src.value.to_string_lossy().into_owned();
-            if src.starts_with("./") || src.starts_with("../") {
-                let path = resolve_import_path_with_fallback(&src, "*", tctx, current_file_dir);
-                Ok((
-                    vec![Item::Use {
-                        vis: Visibility::Public,
-                        path,
-                        names: vec!["*".to_string()],
-                    }],
-                    vec![],
-                ))
-            } else {
-                // External package re-exports are skipped
-                Ok((vec![], vec![]))
-            }
-        }
-        // Top-level expression statements (e.g., `globalThis.crypto ??= crypto`)
-        // Rust has no top-level expressions; skip silently
-        ModuleItem::Stmt(Stmt::Expr(_)) => Ok((vec![], vec![])),
-        _ => Err(UnsupportedSyntaxError {
-            kind: format_module_item_kind(module_item),
-            byte_pos: module_item.span().lo.0,
-        }
-        .into()),
-    }
-}
-
-/// Resolves an import path using ModuleGraph first, falling back to heuristic path conversion.
-///
-/// When `ModuleGraph.resolve_import()` succeeds, the resolved module path is used.
-/// This handles re-export chains correctly (e.g., importing `Config` from `./index`
-/// which re-exports from `./types` → resolves to `crate::types`).
-///
-/// When resolution fails (single-file mode, external packages, or unresolvable paths),
-/// falls back to [`convert_relative_path_to_crate_path`].
-fn resolve_import_path_with_fallback(
-    specifier: &str,
-    name: &str,
-    tctx: &TransformContext<'_>,
-    current_file_dir: Option<&str>,
-) -> String {
-    if let Some(resolved) = tctx
-        .module_graph
-        .resolve_import(tctx.file_path, specifier, name)
-    {
-        return resolved.module_path;
-    }
-    convert_relative_path_to_crate_path(specifier, current_file_dir)
-}
-
-/// Transforms an import declaration into IR [`Item::Use`] items.
-///
-/// Uses `ModuleGraph.resolve_import()` to resolve import paths through re-export chains.
-/// Falls back to heuristic path conversion when resolution fails.
-/// Only relative path imports with named specifiers are converted.
-fn transform_import(
-    import_decl: &swc_ecma_ast::ImportDecl,
-    tctx: &TransformContext<'_>,
-    current_file_dir: Option<&str>,
-) -> Vec<Item> {
-    let src = import_decl.src.value.to_string_lossy().into_owned();
-
-    // Only handle relative imports
-    if !src.starts_with("./") && !src.starts_with("../") {
-        return vec![];
-    }
-
-    // Collect named specifiers only
-    let names: Vec<String> = import_decl
-        .specifiers
-        .iter()
-        .filter_map(|spec| match spec {
-            ImportSpecifier::Named(named) => Some(named.local.sym.to_string()),
-            _ => None,
-        })
-        .collect();
-
-    if names.is_empty() {
-        return vec![];
-    }
-
-    // Resolve each name through ModuleGraph to handle re-export chains.
-    // Names resolving to different module paths produce separate use items.
-    let mut path_groups: Vec<(String, Vec<String>)> = Vec::new();
-    for name in &names {
-        let path = resolve_import_path_with_fallback(&src, name, tctx, current_file_dir);
-        if let Some(group) = path_groups.iter_mut().find(|(p, _)| p == &path) {
-            group.1.push(name.clone());
-        } else {
-            path_groups.push((path, vec![name.clone()]));
-        }
-    }
-
-    path_groups
-        .into_iter()
-        .map(|(path, names)| Item::Use {
-            vis: Visibility::Private,
-            path,
-            names,
-        })
-        .collect()
-}
-
-/// Transforms a named export into IR [`Item::Use`] items with public visibility.
-///
-/// - Re-exports (`export { Foo } from "./bar"`) become `pub use bar::Foo;`
-/// - Local name exports (`export { Foo }`) are skipped (declarations are already `pub`)
-///
-/// Uses `ModuleGraph.resolve_import()` to resolve re-export chains.
-fn transform_export_named(
-    export: &swc_ecma_ast::NamedExport,
-    tctx: &TransformContext<'_>,
-    current_file_dir: Option<&str>,
-) -> Vec<Item> {
-    // Local name exports (no source path) are skipped
-    let src = match export.src.as_ref() {
-        Some(s) => s,
-        None => return vec![],
-    };
-    let src_str = src.value.to_string_lossy().into_owned();
-
-    // Only handle relative imports
-    if !src_str.starts_with("./") && !src_str.starts_with("../") {
-        return vec![];
-    }
-
-    let names: Vec<String> = export
-        .specifiers
-        .iter()
-        .filter_map(|spec| match spec {
-            swc_ecma_ast::ExportSpecifier::Named(named) => {
-                // Use the original name (not the renamed alias)
-                match &named.orig {
-                    swc_ecma_ast::ModuleExportName::Ident(ident) => Some(ident.sym.to_string()),
-                    swc_ecma_ast::ModuleExportName::Str(s) => {
-                        Some(s.value.to_string_lossy().into_owned())
-                    }
-                }
-            }
-            _ => None,
-        })
-        .collect();
-
-    if names.is_empty() {
-        return vec![];
-    }
-
-    // Resolve each name through ModuleGraph (same logic as transform_import)
-    let mut path_groups: Vec<(String, Vec<String>)> = Vec::new();
-    for name in &names {
-        let path = resolve_import_path_with_fallback(&src_str, name, tctx, current_file_dir);
-        if let Some(group) = path_groups.iter_mut().find(|(p, _)| p == &path) {
-            group.1.push(name.clone());
-        } else {
-            path_groups.push((path, vec![name.clone()]));
-        }
-    }
-
-    path_groups
-        .into_iter()
-        .map(|(path, names)| Item::Use {
-            vis: Visibility::Public,
-            path,
-            names,
-        })
-        .collect()
+    .transform_module_collecting_with_path(module, current_file_dir)
 }
 
 /// Converts a TypeScript relative import path to a Rust `crate::` path.
@@ -502,86 +626,6 @@ fn convert_relative_path_to_crate_path(rel_path: &str, current_file_dir: Option<
         .map(|seg| seg.replace('-', "_"))
         .collect();
     format!("crate::{}", crate_path.join("::"))
-}
-
-/// Transforms a single declaration into IR [`Item`]s.
-///
-/// When `resilient` is true, type conversion failures in functions fall back to
-/// `RustType::Any` instead of aborting.
-///
-/// # Errors
-///
-/// Returns an [`UnsupportedSyntaxError`] for unhandled declaration types.
-fn transform_decl(
-    decl: &Decl,
-    vis: Visibility,
-    tctx: &TransformContext<'_>,
-    class_map: &HashMap<String, ClassInfo>,
-    iface_methods: &HashMap<String, Vec<String>>,
-    resilient: bool,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Result<(Vec<Item>, Vec<String>)> {
-    let reg = tctx.type_registry;
-    match decl {
-        Decl::TsInterface(interface_decl) => {
-            let items = types::convert_interface_items(interface_decl, vis, synthetic, reg)?;
-            Ok((items, vec![]))
-        }
-        Decl::TsTypeAlias(type_alias_decl) => {
-            let items = types::convert_type_alias_items(type_alias_decl, vis, synthetic, reg)?;
-            Ok((items, vec![]))
-        }
-        Decl::Fn(fn_decl) => {
-            let (items, warnings) =
-                functions::convert_fn_decl(fn_decl, vis, tctx, resilient, synthetic)?;
-            Ok((items, warnings))
-        }
-        Decl::Class(class_decl) => {
-            let items = classes::transform_class_with_inheritance(
-                class_decl,
-                vis,
-                tctx,
-                class_map,
-                iface_methods,
-                synthetic,
-            )?;
-            Ok((items, vec![]))
-        }
-        Decl::Var(var_decl) => {
-            functions::convert_var_decl_arrow_fns(var_decl, vis, tctx, resilient, synthetic)
-        }
-        Decl::TsEnum(ts_enum) => {
-            let items = convert_ts_enum(ts_enum, vis)?;
-            Ok((items, vec![]))
-        }
-        Decl::TsModule(ts_module) => {
-            // `declare module 'name' { ... }` — process internal declarations
-            let mut items = Vec::new();
-            if let Some(ast::TsNamespaceBody::TsModuleBlock(block)) = &ts_module.body {
-                for item in &block.body {
-                    if let ModuleItem::Stmt(ast::Stmt::Decl(inner_decl)) = item {
-                        if let Ok((inner_items, _)) = transform_decl(
-                            inner_decl,
-                            vis.clone(),
-                            tctx,
-                            class_map,
-                            iface_methods,
-                            resilient,
-                            synthetic,
-                        ) {
-                            items.extend(inner_items);
-                        }
-                    }
-                }
-            }
-            Ok((items, vec![]))
-        }
-        _ => Err(UnsupportedSyntaxError {
-            kind: format_decl_kind(decl),
-            byte_pos: decl.span().lo.0,
-        }
-        .into()),
-    }
 }
 
 /// Converts a TS enum declaration into an IR [`Item::Enum`].

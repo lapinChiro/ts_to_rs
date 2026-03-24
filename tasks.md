@@ -18,10 +18,10 @@
 **パイプライン:** 全 Pass 接続済み。`transpile_pipeline` 本実装。
 **lib.rs:** `transpile()` / `transpile_collecting()` の 2 関数のみ。旧 API 削除済み。
 **main.rs:** `TranspileInput` + `transpile_pipeline` + `OutputWriter` 直接使用。旧 API 依存なし。
-**Transformer:** AnyTypeAnalyzer 統合済み。to_pascal_case 集約済み。SyntheticTypeRegistry ソート修正済み。Transformer struct 導入 D-2-A〜D 完了（expressions/statements/functions/classes の全メソッド化 + ラッパー遷移）。
+**Transformer:** AnyTypeAnalyzer 統合済み。to_pascal_case 集約済み。SyntheticTypeRegistry ソート修正済み。Transformer struct 導入 D-2-A〜E 完了（全モジュールのメソッド化 + entry point / pipeline 更新）。
 
 **残存する実装不足:**
-- D-2-E〜I: mod.rs メソッド化 + entry point 変更 → ラッパー削除 → current_file_dir 除去 → テスト更新 → クリーンアップ
+- D-2-F〜I: ファクトリメソッド導入 + ラッパー削除 → current_file_dir 除去 → テスト更新 → クリーンアップ
 
 ## タスク一覧
 
