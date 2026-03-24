@@ -284,7 +284,7 @@ impl<'a> Transformer<'a> {
                     let ir_expr = super::convert_expr(
                         expr,
                         self.tctx,
-                        self.type_env,
+                        &self.type_env,
                         self.synthetic,
                     )?;
                     ClosureBody::Expr(Box::new(ir_expr))
@@ -313,7 +313,7 @@ impl<'a> Transformer<'a> {
                     let ir_expr = super::convert_expr(
                         expr,
                         self.tctx,
-                        self.type_env,
+                        &self.type_env,
                         self.synthetic,
                     )?;
                     body_stmts.push(Stmt::Return(Some(ir_expr)));
@@ -350,10 +350,10 @@ pub(super) fn convert_fn_expr(
     type_env: &TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Expr> {
-    let mut env = type_env.clone();
+    let env = type_env.clone();
     Transformer {
         tctx,
-        type_env: &mut env,
+        type_env: env,
         synthetic,
     }
     .convert_fn_expr(fn_expr)
@@ -368,10 +368,10 @@ pub fn convert_arrow_expr(
     type_env: &TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Expr> {
-    let mut env = type_env.clone();
+    let env = type_env.clone();
     Transformer {
         tctx,
-        type_env: &mut env,
+        type_env: env,
         synthetic,
     }
     .convert_arrow_expr(arrow, resilient, fallback_warnings)
@@ -389,10 +389,10 @@ pub(crate) fn convert_arrow_expr_with_return_type(
     override_param_types: Option<&[RustType]>,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Expr> {
-    let mut env = type_env.clone();
+    let env = type_env.clone();
     Transformer {
         tctx,
-        type_env: &mut env,
+        type_env: env,
         synthetic,
     }
     .convert_arrow_expr_with_return_type(

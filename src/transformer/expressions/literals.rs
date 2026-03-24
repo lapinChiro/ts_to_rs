@@ -83,11 +83,11 @@ pub(super) fn convert_lit(
     expected: Option<&RustType>,
     tctx: &TransformContext<'_>,
 ) -> Result<Expr> {
-    let mut type_env = crate::transformer::TypeEnv::new();
+    let type_env = crate::transformer::TypeEnv::new();
     let mut synthetic = crate::pipeline::SyntheticTypeRegistry::new();
     Transformer {
         tctx,
-        type_env: &mut type_env,
+        type_env: type_env,
         synthetic: &mut synthetic,
     }
     .convert_lit(lit, expected)

@@ -76,7 +76,7 @@ impl<'a> Transformer<'a> {
                     expr,
                     self.tctx,
                     Some(inner),
-                    self.type_env,
+                    &self.type_env,
                     self.synthetic,
                 )?;
                 return Ok(Expr::FnCall {
@@ -92,7 +92,7 @@ impl<'a> Transformer<'a> {
                     expr,
                     self.tctx,
                     Some(inner),
-                    self.type_env,
+                    &self.type_env,
                     self.synthetic,
                 )?;
                 if matches!(&inner_result, Expr::Ident(name) if name == "None")
@@ -119,20 +119,20 @@ impl<'a> Transformer<'a> {
             }
             ast::Expr::Lit(lit) => convert_lit(lit, expected, self.tctx),
             ast::Expr::Bin(bin) => {
-                convert_bin_expr(bin, self.tctx, expected, self.type_env, self.synthetic)
+                convert_bin_expr(bin, self.tctx, expected, &self.type_env, self.synthetic)
             }
             ast::Expr::Tpl(tpl) => {
-                convert_template_literal(tpl, self.tctx, self.type_env, self.synthetic)
+                convert_template_literal(tpl, self.tctx, &self.type_env, self.synthetic)
             }
             ast::Expr::Paren(paren) => {
-                convert_expr(&paren.expr, self.tctx, self.type_env, self.synthetic)
+                convert_expr(&paren.expr, self.tctx, &self.type_env, self.synthetic)
             }
             ast::Expr::Member(member) => {
-                convert_member_expr(member, self.tctx, self.type_env, self.synthetic)
+                convert_member_expr(member, self.tctx, &self.type_env, self.synthetic)
             }
             ast::Expr::This(_) => Ok(Expr::Ident("self".to_string())),
             ast::Expr::Assign(assign) => {
-                convert_assign_expr(assign, self.tctx, self.type_env, self.synthetic)
+                convert_assign_expr(assign, self.tctx, &self.type_env, self.synthetic)
             }
             ast::Expr::Update(up) => convert_update_expr(up),
             ast::Expr::Arrow(arrow) => convert_arrow_expr(
@@ -140,51 +140,51 @@ impl<'a> Transformer<'a> {
                 self.tctx,
                 false,
                 &mut Vec::new(),
-                self.type_env,
+                &self.type_env,
                 self.synthetic,
             ),
             ast::Expr::Fn(fn_expr) => {
-                convert_fn_expr(fn_expr, self.tctx, self.type_env, self.synthetic)
+                convert_fn_expr(fn_expr, self.tctx, &self.type_env, self.synthetic)
             }
             ast::Expr::Call(call) => {
-                convert_call_expr(call, self.tctx, self.type_env, self.synthetic)
+                convert_call_expr(call, self.tctx, &self.type_env, self.synthetic)
             }
             ast::Expr::New(new_expr) => {
-                convert_new_expr(new_expr, self.tctx, self.type_env, self.synthetic)
+                convert_new_expr(new_expr, self.tctx, &self.type_env, self.synthetic)
             }
             ast::Expr::Array(array_lit) => {
-                convert_array_lit(array_lit, self.tctx, expected, self.type_env, self.synthetic)
+                convert_array_lit(array_lit, self.tctx, expected, &self.type_env, self.synthetic)
             }
             ast::Expr::Object(obj_lit) => {
-                convert_object_lit(obj_lit, self.tctx, expected, self.type_env, self.synthetic)
+                convert_object_lit(obj_lit, self.tctx, expected, &self.type_env, self.synthetic)
             }
             ast::Expr::Cond(cond) => {
-                convert_cond_expr(cond, self.tctx, self.type_env, self.synthetic)
+                convert_cond_expr(cond, self.tctx, &self.type_env, self.synthetic)
             }
             ast::Expr::Unary(unary) => {
-                convert_unary_expr(unary, self.tctx, self.type_env, self.synthetic)
+                convert_unary_expr(unary, self.tctx, &self.type_env, self.synthetic)
             }
             ast::Expr::TsAs(ts_as) => match convert_ts_type(&ts_as.type_ann, self.synthetic, reg) {
                 Ok(target_ty) if matches!(target_ty, RustType::F64 | RustType::Bool) => {
                     let inner =
-                        convert_expr(&ts_as.expr, self.tctx, self.type_env, self.synthetic)?;
+                        convert_expr(&ts_as.expr, self.tctx, &self.type_env, self.synthetic)?;
                     Ok(Expr::Cast {
                         expr: Box::new(inner),
                         target: target_ty,
                     })
                 }
-                _ => convert_expr(&ts_as.expr, self.tctx, self.type_env, self.synthetic),
+                _ => convert_expr(&ts_as.expr, self.tctx, &self.type_env, self.synthetic),
             },
             ast::Expr::OptChain(opt_chain) => {
-                convert_opt_chain_expr(opt_chain, self.tctx, self.type_env, self.synthetic)
+                convert_opt_chain_expr(opt_chain, self.tctx, &self.type_env, self.synthetic)
             }
             ast::Expr::Await(await_expr) => {
                 let inner =
-                    convert_expr(&await_expr.arg, self.tctx, self.type_env, self.synthetic)?;
+                    convert_expr(&await_expr.arg, self.tctx, &self.type_env, self.synthetic)?;
                 Ok(Expr::Await(Box::new(inner)))
             }
             ast::Expr::TsNonNull(ts_non_null) => {
-                convert_expr(&ts_non_null.expr, self.tctx, self.type_env, self.synthetic)
+                convert_expr(&ts_non_null.expr, self.tctx, &self.type_env, self.synthetic)
             }
             _ => Err(anyhow!("unsupported expression: {:?}", expr)),
         }?;
@@ -221,10 +221,10 @@ fn convert_expr_with_expected(
     type_env: &TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Expr> {
-    let mut env = type_env.clone();
+    let env = type_env.clone();
     Transformer {
         tctx,
-        type_env: &mut env,
+        type_env: env,
         synthetic,
     }
     .convert_expr_with_expected(expr, expected_override)

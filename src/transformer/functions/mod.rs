@@ -46,10 +46,10 @@ impl<'a> Transformer<'a> {
         let mut params = Vec::new();
         let mut destructuring_stmts = Vec::new();
         let return_type = {
-            let mut sub_type_env = TypeEnv::new();
+            let sub_type_env = TypeEnv::new();
             let mut sub = Transformer {
                 tctx,
-                type_env: &mut sub_type_env,
+                type_env: sub_type_env,
                 synthetic: &mut local_synthetic,
             };
 
@@ -1322,10 +1322,10 @@ pub fn convert_fn_decl(
     resilient: bool,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<(Vec<Item>, Vec<String>)> {
-    let mut type_env = TypeEnv::new();
+    let type_env = TypeEnv::new();
     Transformer {
         tctx,
-        type_env: &mut type_env,
+        type_env: type_env,
         synthetic,
     }
     .convert_fn_decl(fn_decl, vis, resilient)
@@ -1339,10 +1339,10 @@ pub(crate) fn convert_ts_type_with_fallback(
     synthetic: &mut SyntheticTypeRegistry,
     tctx: &TransformContext<'_>,
 ) -> Result<RustType> {
-    let mut type_env = TypeEnv::new();
+    let type_env = TypeEnv::new();
     Transformer {
         tctx,
-        type_env: &mut type_env,
+        type_env: type_env,
         synthetic,
     }
     .convert_ts_type_with_fallback(ts_type, resilient, fallback_warnings)
@@ -1354,10 +1354,10 @@ pub(crate) fn convert_object_destructuring_param(
     tctx: &TransformContext<'_>,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<(Param, Vec<Stmt>)> {
-    let mut type_env = TypeEnv::new();
+    let type_env = TypeEnv::new();
     Transformer {
         tctx,
-        type_env: &mut type_env,
+        type_env: type_env,
         synthetic,
     }
     .convert_object_destructuring_param(obj_pat)
@@ -1371,10 +1371,10 @@ pub(crate) fn convert_var_decl_arrow_fns(
     resilient: bool,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<(Vec<Item>, Vec<String>)> {
-    let mut type_env = TypeEnv::new();
+    let type_env = TypeEnv::new();
     Transformer {
         tctx,
-        type_env: &mut type_env,
+        type_env: type_env,
         synthetic,
     }
     .convert_var_decl_arrow_fns(var_decl, vis, resilient)
@@ -1382,11 +1382,11 @@ pub(crate) fn convert_var_decl_arrow_fns(
 
 /// Wrapper: delegates to [`Transformer::extract_fn_return_type`].
 pub(super) fn extract_fn_return_type(ty: &RustType, tctx: &TransformContext<'_>) -> Option<RustType> {
-    let mut type_env = TypeEnv::new();
+    let type_env = TypeEnv::new();
     let mut synthetic = SyntheticTypeRegistry::new();
     Transformer {
         tctx,
-        type_env: &mut type_env,
+        type_env: type_env,
         synthetic: &mut synthetic,
     }
     .extract_fn_return_type(ty)
@@ -1397,11 +1397,11 @@ pub(super) fn extract_fn_param_types(
     ty: &RustType,
     tctx: &TransformContext<'_>,
 ) -> Option<Vec<RustType>> {
-    let mut type_env = TypeEnv::new();
+    let type_env = TypeEnv::new();
     let mut synthetic = SyntheticTypeRegistry::new();
     Transformer {
         tctx,
-        type_env: &mut type_env,
+        type_env: type_env,
         synthetic: &mut synthetic,
     }
     .extract_fn_param_types(ty)

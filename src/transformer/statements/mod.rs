@@ -43,65 +43,65 @@ impl<'a> Transformer<'a> {
         match stmt {
             ast::Stmt::Return(ret) => {
                 if let Some(stmts) =
-                    try_expand_spread_return(ret, self.tctx, self.type_env, self.synthetic)?
+                    try_expand_spread_return(ret, self.tctx, &self.type_env, self.synthetic)?
                 {
                     return Ok(stmts);
                 }
                 let expr = ret
                     .arg
                     .as_ref()
-                    .map(|e| convert_expr(e, self.tctx, self.type_env, self.synthetic))
+                    .map(|e| convert_expr(e, self.tctx, &self.type_env, self.synthetic))
                     .transpose()?;
                 Ok(vec![Stmt::Return(expr)])
             }
             ast::Stmt::Decl(ast::Decl::Var(var_decl)) => {
                 if let Some(stmts) =
-                    try_expand_spread_var_decl(var_decl, self.tctx, self.type_env, self.synthetic)?
+                    try_expand_spread_var_decl(var_decl, self.tctx, &self.type_env, self.synthetic)?
                 {
                     return Ok(stmts);
                 }
                 if let Some(expanded) =
-                    try_convert_object_destructuring(var_decl, self.tctx, self.type_env, self.synthetic)?
+                    try_convert_object_destructuring(var_decl, self.tctx, &self.type_env, self.synthetic)?
                 {
                     Ok(expanded)
                 } else if let Some(expanded) =
-                    try_convert_array_destructuring(var_decl, self.tctx, self.type_env, self.synthetic)?
+                    try_convert_array_destructuring(var_decl, self.tctx, &self.type_env, self.synthetic)?
                 {
                     Ok(expanded)
                 } else {
-                    convert_var_decl(var_decl, self.tctx, self.type_env, self.synthetic)
+                    convert_var_decl(var_decl, self.tctx, &self.type_env, self.synthetic)
                 }
             }
             ast::Stmt::If(if_stmt) => {
-                convert_if_stmt(if_stmt, self.tctx, return_type, self.type_env, self.synthetic)
+                convert_if_stmt(if_stmt, self.tctx, return_type, &mut self.type_env, self.synthetic)
             }
             ast::Stmt::Expr(expr_stmt) => {
                 if let Some(stmts) =
-                    try_expand_spread_expr_stmt(expr_stmt, self.tctx, self.type_env, self.synthetic)?
+                    try_expand_spread_expr_stmt(expr_stmt, self.tctx, &self.type_env, self.synthetic)?
                 {
                     return Ok(stmts);
                 }
-                let expr = convert_expr(&expr_stmt.expr, self.tctx, self.type_env, self.synthetic)?;
+                let expr = convert_expr(&expr_stmt.expr, self.tctx, &self.type_env, self.synthetic)?;
                 Ok(vec![Stmt::Expr(expr)])
             }
             ast::Stmt::Throw(throw_stmt) => Ok(vec![convert_throw_stmt(
-                throw_stmt, self.tctx, self.type_env, self.synthetic,
+                throw_stmt, self.tctx, &self.type_env, self.synthetic,
             )?]),
             ast::Stmt::While(while_stmt) => {
-                convert_while_stmt(while_stmt, self.tctx, return_type, self.type_env, self.synthetic)
+                convert_while_stmt(while_stmt, self.tctx, return_type, &mut self.type_env, self.synthetic)
             }
             ast::Stmt::ForOf(for_of) => Ok(vec![convert_for_of_stmt(
                 for_of,
                 self.tctx,
                 return_type,
-                self.type_env,
+                &mut self.type_env,
                 self.synthetic,
             )?]),
             ast::Stmt::For(for_stmt) => {
-                match convert_for_stmt(for_stmt, self.tctx, return_type, self.type_env, self.synthetic) {
+                match convert_for_stmt(for_stmt, self.tctx, return_type, &mut self.type_env, self.synthetic) {
                     Ok(s) => Ok(vec![s]),
                     Err(_) => convert_for_stmt_as_loop(
-                        for_stmt, self.tctx, return_type, self.type_env, self.synthetic,
+                        for_stmt, self.tctx, return_type, &mut self.type_env, self.synthetic,
                     ),
                 }
             }
@@ -117,30 +117,30 @@ impl<'a> Transformer<'a> {
                 labeled_stmt,
                 self.tctx,
                 return_type,
-                self.type_env,
+                &mut self.type_env,
                 self.synthetic,
             )?]),
             ast::Stmt::DoWhile(do_while) => Ok(vec![convert_do_while_stmt(
                 do_while,
                 self.tctx,
                 return_type,
-                self.type_env,
+                &mut self.type_env,
                 self.synthetic,
             )?]),
             ast::Stmt::Try(try_stmt) => {
-                convert_try_stmt(try_stmt, self.tctx, return_type, self.type_env, self.synthetic)
+                convert_try_stmt(try_stmt, self.tctx, return_type, &mut self.type_env, self.synthetic)
             }
             ast::Stmt::Decl(ast::Decl::Fn(fn_decl)) => {
                 Ok(vec![convert_nested_fn_decl(fn_decl, self.tctx, self.synthetic)?])
             }
             ast::Stmt::Switch(switch_stmt) => {
-                convert_switch_stmt(switch_stmt, self.tctx, return_type, self.type_env, self.synthetic)
+                convert_switch_stmt(switch_stmt, self.tctx, return_type, &mut self.type_env, self.synthetic)
             }
             ast::Stmt::ForIn(for_in) => Ok(vec![convert_for_in_stmt(
                 for_in,
                 self.tctx,
                 return_type,
-                self.type_env,
+                &mut self.type_env,
                 self.synthetic,
             )?]),
             ast::Stmt::Decl(ast::Decl::TsInterface(_) | ast::Decl::TsTypeAlias(_)) => Ok(vec![]),
@@ -158,12 +158,10 @@ pub fn convert_stmt(
     type_env: &mut TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Vec<Stmt>> {
-    Transformer {
-        tctx,
-        type_env,
-        synthetic,
-    }
-    .convert_stmt(stmt, return_type)
+    let mut t = Transformer { tctx, type_env: std::mem::take(type_env), synthetic };
+    let result = t.convert_stmt(stmt, return_type);
+    *type_env = t.type_env;
+    result
 }
 
 impl<'a> Transformer<'a> {
@@ -205,7 +203,7 @@ impl<'a> Transformer<'a> {
             let init = declarator
                 .init
                 .as_ref()
-                .map(|e| convert_expr(e, self.tctx, self.type_env, self.synthetic))
+                .map(|e| convert_expr(e, self.tctx, &self.type_env, self.synthetic))
                 .transpose()?;
 
             stmts.push(Stmt::Let {
@@ -226,8 +224,8 @@ fn convert_var_decl(
     type_env: &TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Vec<Stmt>> {
-    let mut env = type_env.clone();
-    Transformer { tctx, type_env: &mut env, synthetic }.convert_var_decl(var_decl)
+    let env = type_env.clone();
+    Transformer { tctx, type_env: env, synthetic }.convert_var_decl(var_decl)
 }
 
 /// Infers a `RustType::Fn` from a closure expression for TypeEnv registration.
@@ -420,11 +418,11 @@ impl<'a> Transformer<'a> {
         else_body: Option<Vec<Stmt>>,
     ) -> Result<Vec<Stmt>> {
         let rhs_type = get_expr_type(self.tctx, ca.rhs);
-        let rhs_ir = convert_expr(ca.rhs, self.tctx, self.type_env, self.synthetic)?;
+        let rhs_ir = convert_expr(ca.rhs, self.tctx, &self.type_env, self.synthetic)?;
 
         if let Some(outer) = &ca.outer_comparison {
             let other =
-                convert_expr(outer.other_operand, self.tctx, self.type_env, self.synthetic)?;
+                convert_expr(outer.other_operand, self.tctx, &self.type_env, self.synthetic)?;
             let ir_op = crate::transformer::expressions::convert_binary_op(outer.op)?;
             let condition = if outer.assign_on_left {
                 Expr::BinaryOp {
@@ -510,7 +508,7 @@ impl<'a> Transformer<'a> {
         body: Vec<Stmt>,
     ) -> Result<Vec<Stmt>> {
         let rhs_type = get_expr_type(self.tctx, ca.rhs);
-        let rhs_ir = convert_expr(ca.rhs, self.tctx, self.type_env, self.synthetic)?;
+        let rhs_ir = convert_expr(ca.rhs, self.tctx, &self.type_env, self.synthetic)?;
 
         match rhs_type {
             Some(RustType::Option(_)) => Ok(vec![Stmt::WhileLet {
@@ -583,12 +581,10 @@ fn convert_if_with_conditional_assignment(
     else_body: Option<Vec<Stmt>>,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Vec<Stmt>> {
-    Transformer {
-        tctx,
-        type_env,
-        synthetic,
-    }
-    .convert_if_with_conditional_assignment(ca, then_body, else_body)
+    let mut t = Transformer { tctx, type_env: std::mem::take(type_env), synthetic };
+    let result = t.convert_if_with_conditional_assignment(ca, then_body, else_body);
+    *type_env = t.type_env;
+    result
 }
 
 /// Wrapper: delegates to [`Transformer::convert_while_with_conditional_assignment`].
@@ -599,12 +595,10 @@ fn convert_while_with_conditional_assignment(
     body: Vec<Stmt>,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Vec<Stmt>> {
-    Transformer {
-        tctx,
-        type_env,
-        synthetic,
-    }
-    .convert_while_with_conditional_assignment(ca, body)
+    let mut t = Transformer { tctx, type_env: std::mem::take(type_env), synthetic };
+    let result = t.convert_while_with_conditional_assignment(ca, body);
+    *type_env = t.type_env;
+    result
 }
 
 /// Generates a falsy check condition (the inverse of truthiness) for loop break.
@@ -643,20 +637,20 @@ impl<'a> Transformer<'a> {
                 &if_stmt.cons,
                 self.tctx,
                 return_type,
-                self.type_env,
+                &mut self.type_env,
                 self.synthetic,
             )?;
             let else_body = if_stmt
                 .alt
                 .as_ref()
                 .map(|alt| {
-                    convert_block_or_stmt(alt, self.tctx, return_type, self.type_env, self.synthetic)
+                    convert_block_or_stmt(alt, self.tctx, return_type, &mut self.type_env, self.synthetic)
                 })
                 .transpose()?;
             return convert_if_with_conditional_assignment(
                 &ca,
                 self.tctx,
-                self.type_env,
+                &mut self.type_env,
                 then_body,
                 else_body,
                 self.synthetic,
@@ -669,7 +663,7 @@ impl<'a> Transformer<'a> {
             let mut if_let = Vec::new();
             let mut non_if_let = Vec::new();
             for (guard, ast_expr) in &compound.guards {
-                if can_generate_if_let(guard, self.type_env, self.tctx) {
+                if can_generate_if_let(guard, &self.type_env, self.tctx) {
                     if_let.push(guard);
                 } else {
                     non_if_let.push(*ast_expr);
@@ -683,7 +677,7 @@ impl<'a> Transformer<'a> {
                 &if_stmt.cons,
                 self.tctx,
                 return_type,
-                self.type_env,
+                &mut self.type_env,
                 self.synthetic,
             )?;
 
@@ -695,7 +689,7 @@ impl<'a> Transformer<'a> {
             let remaining_condition = convert_and_combine_conditions(
                 &all_remaining,
                 self.tctx,
-                self.type_env,
+                &self.type_env,
                 self.synthetic,
             )?;
 
@@ -703,7 +697,7 @@ impl<'a> Transformer<'a> {
                 .alt
                 .as_ref()
                 .map(|alt| {
-                    convert_block_or_stmt(alt, self.tctx, return_type, self.type_env, self.synthetic)
+                    convert_block_or_stmt(alt, self.tctx, return_type, &mut self.type_env, self.synthetic)
                 })
                 .transpose()?;
 
@@ -719,7 +713,7 @@ impl<'a> Transformer<'a> {
 
             let stmt = build_nested_if_let(
                 &if_let_guards,
-                self.type_env,
+                &self.type_env,
                 self.tctx,
                 inner_body,
                 else_body,
@@ -737,7 +731,7 @@ impl<'a> Transformer<'a> {
             &if_stmt.cons,
             self.tctx,
             return_type,
-            self.type_env,
+            &mut self.type_env,
             self.synthetic,
         )?;
 
@@ -746,7 +740,7 @@ impl<'a> Transformer<'a> {
                 alt,
                 self.tctx,
                 return_type,
-                self.type_env,
+                &mut self.type_env,
                 self.synthetic,
             )?)
         } else {
@@ -754,10 +748,10 @@ impl<'a> Transformer<'a> {
         };
 
         if let Some(guard) = guard {
-            if can_generate_if_let(guard, self.type_env, self.tctx) {
+            if can_generate_if_let(guard, &self.type_env, self.tctx) {
                 return Ok(vec![generate_if_let(
                     guard,
-                    self.type_env,
+                    &self.type_env,
                     self.tctx,
                     then_body,
                     else_body,
@@ -766,7 +760,7 @@ impl<'a> Transformer<'a> {
         }
 
         let condition =
-            convert_expr(&if_stmt.test, self.tctx, self.type_env, self.synthetic)?;
+            convert_expr(&if_stmt.test, self.tctx, &self.type_env, self.synthetic)?;
         Ok(vec![Stmt::If {
             condition,
             then_body,
@@ -783,12 +777,10 @@ fn convert_if_stmt(
     type_env: &mut TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Vec<Stmt>> {
-    Transformer {
-        tctx,
-        type_env,
-        synthetic,
-    }
-    .convert_if_stmt(if_stmt, return_type)
+    let mut t = Transformer { tctx, type_env: std::mem::take(type_env), synthetic };
+    let result = t.convert_if_stmt(if_stmt, return_type);
+    *type_env = t.type_env;
+    result
 }
 
 impl<'a> Transformer<'a> {
@@ -802,7 +794,7 @@ impl<'a> Transformer<'a> {
         }
         let mut parts: Vec<Expr> = Vec::new();
         for ast_expr in exprs {
-            parts.push(convert_expr(ast_expr, self.tctx, self.type_env, self.synthetic)?);
+            parts.push(convert_expr(ast_expr, self.tctx, &self.type_env, self.synthetic)?);
         }
         let combined = parts
             .into_iter()
@@ -823,10 +815,10 @@ fn convert_and_combine_conditions(
     type_env: &TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Option<Expr>> {
-    let mut env = type_env.clone();
+    let env = type_env.clone();
     Transformer {
         tctx,
-        type_env: &mut env,
+        type_env: env,
         synthetic,
     }
     .convert_and_combine_conditions(exprs)
@@ -842,7 +834,7 @@ impl<'a> Transformer<'a> {
     ) -> Stmt {
         let mut current_body = inner_body;
         for guard in guards.iter().rev() {
-            let stmt = generate_if_let(guard, self.type_env, self.tctx, current_body, else_body.clone());
+            let stmt = generate_if_let(guard, &self.type_env, self.tctx, current_body, else_body.clone());
             current_body = vec![stmt];
         }
         current_body.into_iter().next().unwrap()
@@ -852,7 +844,7 @@ impl<'a> Transformer<'a> {
         &self,
         guard: &crate::transformer::expressions::patterns::NarrowingGuard,
     ) -> bool {
-        guard.if_let_pattern(self.type_env, self.tctx).is_some()
+        guard.if_let_pattern(&self.type_env, self.tctx).is_some()
     }
 
     fn generate_if_let(
@@ -861,7 +853,7 @@ impl<'a> Transformer<'a> {
         then_body: Vec<Stmt>,
         else_body: Option<Vec<Stmt>>,
     ) -> Stmt {
-        let (pattern, is_swap) = guard.if_let_pattern(self.type_env, self.tctx).unwrap();
+        let (pattern, is_swap) = guard.if_let_pattern(&self.type_env, self.tctx).unwrap();
         let expr = Expr::Ident(guard.var_name().to_string());
         if is_swap {
             Stmt::IfLet {
@@ -889,9 +881,9 @@ fn build_nested_if_let(
     inner_body: Vec<Stmt>,
     else_body: Option<Vec<Stmt>>,
 ) -> Stmt {
-    let mut env = type_env.clone();
+    let env = type_env.clone();
     let mut synthetic = SyntheticTypeRegistry::new();
-    Transformer { tctx, type_env: &mut env, synthetic: &mut synthetic }
+    Transformer { tctx, type_env: env, synthetic: &mut synthetic }
         .build_nested_if_let(guards, inner_body, else_body)
 }
 
@@ -901,9 +893,9 @@ fn can_generate_if_let(
     type_env: &TypeEnv,
     tctx: &TransformContext<'_>,
 ) -> bool {
-    let mut env = type_env.clone();
+    let env = type_env.clone();
     let mut synthetic = SyntheticTypeRegistry::new();
-    Transformer { tctx, type_env: &mut env, synthetic: &mut synthetic }
+    Transformer { tctx, type_env: env, synthetic: &mut synthetic }
         .can_generate_if_let(guard)
 }
 
@@ -915,9 +907,9 @@ fn generate_if_let(
     then_body: Vec<Stmt>,
     else_body: Option<Vec<Stmt>>,
 ) -> Stmt {
-    let mut env = type_env.clone();
+    let env = type_env.clone();
     let mut synthetic = SyntheticTypeRegistry::new();
-    Transformer { tctx, type_env: &mut env, synthetic: &mut synthetic }
+    Transformer { tctx, type_env: env, synthetic: &mut synthetic }
         .generate_if_let(guard, then_body, else_body)
 }
 
@@ -942,7 +934,7 @@ impl<'a> Transformer<'a> {
                     .as_ref()
                     .ok_or_else(|| anyhow!("unsupported for loop: no initializer"))?;
                 let start_expr =
-                    convert_expr(init, self.tctx, self.type_env, self.synthetic)?;
+                    convert_expr(init, self.tctx, &self.type_env, self.synthetic)?;
                 (name, start_expr)
             }
             _ => {
@@ -966,7 +958,7 @@ impl<'a> Transformer<'a> {
                     if left_name != var {
                         return Err(anyhow!("unsupported for loop: condition var mismatch"));
                     }
-                    convert_expr(&bin.right, self.tctx, self.type_env, self.synthetic)?
+                    convert_expr(&bin.right, self.tctx, &self.type_env, self.synthetic)?
                 }
                 _ => return Err(anyhow!("unsupported for loop: non-simple condition")),
             },
@@ -997,7 +989,7 @@ impl<'a> Transformer<'a> {
             &for_stmt.body,
             self.tctx,
             return_type,
-            self.type_env,
+            &mut self.type_env,
             self.synthetic,
         )?;
 
@@ -1059,12 +1051,12 @@ impl<'a> Transformer<'a> {
             _ => return Err(anyhow!("unsupported for...of left-hand side")),
         };
         let iterable =
-            convert_expr(&for_of.right, self.tctx, self.type_env, self.synthetic)?;
+            convert_expr(&for_of.right, self.tctx, &self.type_env, self.synthetic)?;
         let body = convert_block_or_stmt(
             &for_of.body,
             self.tctx,
             return_type,
-            self.type_env,
+            &mut self.type_env,
             self.synthetic,
         )?;
         Ok(Stmt::ForIn {
@@ -1093,7 +1085,7 @@ impl<'a> Transformer<'a> {
             _ => return Err(anyhow!("unsupported for...in left-hand side")),
         };
         let obj =
-            convert_expr(&for_in.right, self.tctx, self.type_env, self.synthetic)?;
+            convert_expr(&for_in.right, self.tctx, &self.type_env, self.synthetic)?;
         let iterable = Expr::MethodCall {
             object: Box::new(obj),
             method: "keys".to_string(),
@@ -1103,7 +1095,7 @@ impl<'a> Transformer<'a> {
             &for_in.body,
             self.tctx,
             return_type,
-            self.type_env,
+            &mut self.type_env,
             self.synthetic,
         )?;
         Ok(Stmt::ForIn {
@@ -1126,14 +1118,14 @@ impl<'a> Transformer<'a> {
                 let condition = convert_expr(
                     &while_stmt.test,
                     self.tctx,
-                    self.type_env,
+                    &self.type_env,
                     self.synthetic,
                 )?;
                 let body = convert_block_or_stmt(
                     &while_stmt.body,
                     self.tctx,
                     return_type,
-                    self.type_env,
+                    &mut self.type_env,
                     self.synthetic,
                 )?;
                 Ok(Stmt::While {
@@ -1147,7 +1139,7 @@ impl<'a> Transformer<'a> {
                     for_of,
                     self.tctx,
                     return_type,
-                    self.type_env,
+                    &mut self.type_env,
                     self.synthetic,
                 )?;
                 if let Stmt::ForIn { ref mut label, .. } = stmt {
@@ -1160,7 +1152,7 @@ impl<'a> Transformer<'a> {
                     for_stmt,
                     self.tctx,
                     return_type,
-                    self.type_env,
+                    &mut self.type_env,
                     self.synthetic,
                 )?;
                 if let Stmt::ForIn { ref mut label, .. } = stmt {
@@ -1184,7 +1176,7 @@ impl<'a> Transformer<'a> {
             &while_stmt.body,
             self.tctx,
             return_type,
-            self.type_env,
+            &mut self.type_env,
             self.synthetic,
         )?;
 
@@ -1192,14 +1184,14 @@ impl<'a> Transformer<'a> {
             return convert_while_with_conditional_assignment(
                 &ca,
                 self.tctx,
-                self.type_env,
+                &mut self.type_env,
                 body,
                 self.synthetic,
             );
         }
 
         let condition =
-            convert_expr(&while_stmt.test, self.tctx, self.type_env, self.synthetic)?;
+            convert_expr(&while_stmt.test, self.tctx, &self.type_env, self.synthetic)?;
         Ok(vec![Stmt::While {
             label: None,
             condition,
@@ -1216,7 +1208,10 @@ fn convert_for_stmt(
     type_env: &mut TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Stmt> {
-    Transformer { tctx, type_env, synthetic }.convert_for_stmt(for_stmt, return_type)
+    let mut t = Transformer { tctx, type_env: std::mem::take(type_env), synthetic };
+    let result = t.convert_for_stmt(for_stmt, return_type);
+    *type_env = t.type_env;
+    result
 }
 
 /// Wrapper: delegates to [`Transformer::convert_for_of_stmt`].
@@ -1227,7 +1222,10 @@ fn convert_for_of_stmt(
     type_env: &mut TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Stmt> {
-    Transformer { tctx, type_env, synthetic }.convert_for_of_stmt(for_of, return_type)
+    let mut t = Transformer { tctx, type_env: std::mem::take(type_env), synthetic };
+    let result = t.convert_for_of_stmt(for_of, return_type);
+    *type_env = t.type_env;
+    result
 }
 
 /// Wrapper: delegates to [`Transformer::convert_for_in_stmt`].
@@ -1238,7 +1236,10 @@ fn convert_for_in_stmt(
     type_env: &mut TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Stmt> {
-    Transformer { tctx, type_env, synthetic }.convert_for_in_stmt(for_in, return_type)
+    let mut t = Transformer { tctx, type_env: std::mem::take(type_env), synthetic };
+    let result = t.convert_for_in_stmt(for_in, return_type);
+    *type_env = t.type_env;
+    result
 }
 
 /// Wrapper: delegates to [`Transformer::convert_labeled_stmt`].
@@ -1249,7 +1250,10 @@ fn convert_labeled_stmt(
     type_env: &mut TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Stmt> {
-    Transformer { tctx, type_env, synthetic }.convert_labeled_stmt(labeled, return_type)
+    let mut t = Transformer { tctx, type_env: std::mem::take(type_env), synthetic };
+    let result = t.convert_labeled_stmt(labeled, return_type);
+    *type_env = t.type_env;
+    result
 }
 
 /// Wrapper: delegates to [`Transformer::convert_while_stmt`].
@@ -1260,7 +1264,10 @@ fn convert_while_stmt(
     type_env: &mut TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Vec<Stmt>> {
-    Transformer { tctx, type_env, synthetic }.convert_while_stmt(while_stmt, return_type)
+    let mut t = Transformer { tctx, type_env: std::mem::take(type_env), synthetic };
+    let result = t.convert_while_stmt(while_stmt, return_type);
+    *type_env = t.type_env;
+    result
 }
 
 impl<'a> Transformer<'a> {
@@ -1277,7 +1284,7 @@ impl<'a> Transformer<'a> {
                 &finalizer.stmts,
                 self.tctx,
                 return_type,
-                self.type_env,
+                &mut self.type_env,
                 self.synthetic,
             )?;
             result.push(Stmt::Let {
@@ -1305,7 +1312,7 @@ impl<'a> Transformer<'a> {
             &try_stmt.block.stmts,
             self.tctx,
             return_type,
-            self.type_env,
+            &mut self.type_env,
             self.synthetic,
         )?;
 
@@ -1322,7 +1329,7 @@ impl<'a> Transformer<'a> {
                 &handler.body.stmts,
                 self.tctx,
                 return_type,
-                self.type_env,
+                &mut self.type_env,
                 self.synthetic,
             )?;
 
@@ -1415,7 +1422,10 @@ fn convert_try_stmt(
     type_env: &mut TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Vec<Stmt>> {
-    Transformer { tctx, type_env, synthetic }.convert_try_stmt(try_stmt, return_type)
+    let mut t = Transformer { tctx, type_env: std::mem::take(type_env), synthetic };
+    let result = t.convert_try_stmt(try_stmt, return_type);
+    *type_env = t.type_env;
+    result
 }
 
 /// Checks whether a statement list ends with a return on all exit paths.
@@ -1547,7 +1557,7 @@ impl<'a> Transformer<'a> {
     /// Converts a `throw` statement into `return Err(...)`.
     fn convert_throw_stmt(&mut self, throw_stmt: &ast::ThrowStmt) -> Result<Stmt> {
         let err_arg =
-            extract_error_message(&throw_stmt.arg, self.tctx, self.type_env, self.synthetic);
+            extract_error_message(&throw_stmt.arg, self.tctx, &self.type_env, self.synthetic);
         let err_expr = Expr::MethodCall {
             object: Box::new(err_arg),
             method: "to_string".to_string(),
@@ -1567,10 +1577,10 @@ fn convert_throw_stmt(
     type_env: &TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Stmt> {
-    let mut env = type_env.clone();
+    let env = type_env.clone();
     Transformer {
         tctx,
-        type_env: &mut env,
+        type_env: env,
         synthetic,
     }
     .convert_throw_stmt(throw_stmt)
@@ -1584,7 +1594,7 @@ impl<'a> Transformer<'a> {
                 if let Some(args) = &new_expr.args {
                     if let Some(first) = args.first() {
                         if let Ok(e) =
-                            convert_expr(&first.expr, self.tctx, self.type_env, self.synthetic)
+                            convert_expr(&first.expr, self.tctx, &self.type_env, self.synthetic)
                         {
                             return e;
                         }
@@ -1592,7 +1602,7 @@ impl<'a> Transformer<'a> {
                 }
                 Expr::StringLit("unknown error".to_string())
             }
-            other => convert_expr(other, self.tctx, self.type_env, self.synthetic)
+            other => convert_expr(other, self.tctx, &self.type_env, self.synthetic)
                 .unwrap_or_else(|_| Expr::StringLit("unknown error".to_string())),
         }
     }
@@ -1605,8 +1615,8 @@ fn extract_error_message(
     type_env: &TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Expr {
-    let mut env = type_env.clone();
-    Transformer { tctx, type_env: &mut env, synthetic }.extract_error_message(expr)
+    let env = type_env.clone();
+    Transformer { tctx, type_env: env, synthetic }.extract_error_message(expr)
 }
 
 impl<'a> Transformer<'a> {
@@ -1619,7 +1629,7 @@ impl<'a> Transformer<'a> {
         let mut result = Vec::new();
         for stmt in stmts {
             let converted =
-                convert_stmt(stmt, self.tctx, return_type, self.type_env, self.synthetic)?;
+                convert_stmt(stmt, self.tctx, return_type, &mut self.type_env, self.synthetic)?;
             for s in &converted {
                 match s {
                     Stmt::Let {
@@ -1659,12 +1669,10 @@ pub fn convert_stmt_list(
     type_env: &mut TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Vec<Stmt>> {
-    Transformer {
-        tctx,
-        type_env,
-        synthetic,
-    }
-    .convert_stmt_list(stmts, return_type)
+    let mut t = Transformer { tctx, type_env: std::mem::take(type_env), synthetic };
+    let result = t.convert_stmt_list(stmts, return_type);
+    *type_env = t.type_env;
+    result
 }
 
 /// Extracts the init expression from a VarDecl AST statement
@@ -1850,7 +1858,7 @@ impl<'a> Transformer<'a> {
             .iter()
             .filter_map(|e| e.as_ref())
             .map(|elem| {
-                let expr = convert_expr(&elem.expr, self.tctx, self.type_env, self.synthetic)?;
+                let expr = convert_expr(&elem.expr, self.tctx, &self.type_env, self.synthetic)?;
                 Ok((elem.spread.is_some(), expr))
             })
             .collect()
@@ -1864,8 +1872,8 @@ fn convert_spread_segments(
     type_env: &TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Vec<(bool, Expr)>> {
-    let mut env = type_env.clone();
-    Transformer { tctx, type_env: &mut env, synthetic }.convert_spread_segments(array_lit)
+    let env = type_env.clone();
+    Transformer { tctx, type_env: env, synthetic }.convert_spread_segments(array_lit)
 }
 
 /// Generates push/extend statements from spread segments for a given variable name.
@@ -1920,7 +1928,7 @@ impl<'a> Transformer<'a> {
         };
 
         let segments =
-            convert_spread_segments(array_lit, self.tctx, self.type_env, self.synthetic)?;
+            convert_spread_segments(array_lit, self.tctx, &self.type_env, self.synthetic)?;
 
         if segments.len() == 1 && segments[0].0 {
             return Ok(Some(vec![Stmt::Let {
@@ -1964,7 +1972,7 @@ impl<'a> Transformer<'a> {
         };
 
         let segments =
-            convert_spread_segments(array_lit, self.tctx, self.type_env, self.synthetic)?;
+            convert_spread_segments(array_lit, self.tctx, &self.type_env, self.synthetic)?;
 
         if segments.len() == 1 && segments[0].0 {
             return Ok(Some(vec![Stmt::Return(Some(Expr::MethodCall {
@@ -2001,7 +2009,7 @@ impl<'a> Transformer<'a> {
         };
 
         let segments =
-            convert_spread_segments(array_lit, self.tctx, self.type_env, self.synthetic)?;
+            convert_spread_segments(array_lit, self.tctx, &self.type_env, self.synthetic)?;
 
         if segments.len() == 1 && segments[0].0 {
             return Ok(Some(vec![Stmt::Expr(Expr::MethodCall {
@@ -2045,7 +2053,7 @@ impl<'a> Transformer<'a> {
             .init
             .as_ref()
             .ok_or_else(|| anyhow!("object destructuring requires an initializer"))?;
-        let source_expr = convert_expr(source, self.tctx, self.type_env, self.synthetic)?;
+        let source_expr = convert_expr(source, self.tctx, &self.type_env, self.synthetic)?;
 
         let mutable = !matches!(var_decl.kind, ast::VarDeclKind::Const);
         let source_type = get_expr_type(self.tctx, source);
@@ -2057,7 +2065,7 @@ impl<'a> Transformer<'a> {
             mutable,
             &mut stmts,
             self.tctx,
-            self.type_env,
+            &self.type_env,
             source_type,
             self.synthetic,
         )?;
@@ -2073,8 +2081,8 @@ fn try_expand_spread_var_decl(
     type_env: &TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Option<Vec<Stmt>>> {
-    let mut env = type_env.clone();
-    Transformer { tctx, type_env: &mut env, synthetic }.try_expand_spread_var_decl(var_decl)
+    let env = type_env.clone();
+    Transformer { tctx, type_env: env, synthetic }.try_expand_spread_var_decl(var_decl)
 }
 
 /// Wrapper: delegates to [`Transformer::try_expand_spread_return`].
@@ -2084,8 +2092,8 @@ fn try_expand_spread_return(
     type_env: &TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Option<Vec<Stmt>>> {
-    let mut env = type_env.clone();
-    Transformer { tctx, type_env: &mut env, synthetic }.try_expand_spread_return(ret)
+    let env = type_env.clone();
+    Transformer { tctx, type_env: env, synthetic }.try_expand_spread_return(ret)
 }
 
 /// Wrapper: delegates to [`Transformer::try_expand_spread_expr_stmt`].
@@ -2095,8 +2103,8 @@ fn try_expand_spread_expr_stmt(
     type_env: &TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Option<Vec<Stmt>>> {
-    let mut env = type_env.clone();
-    Transformer { tctx, type_env: &mut env, synthetic }.try_expand_spread_expr_stmt(expr_stmt)
+    let env = type_env.clone();
+    Transformer { tctx, type_env: env, synthetic }.try_expand_spread_expr_stmt(expr_stmt)
 }
 
 /// Wrapper: delegates to [`Transformer::try_convert_object_destructuring`].
@@ -2106,8 +2114,8 @@ fn try_convert_object_destructuring(
     type_env: &TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Option<Vec<Stmt>>> {
-    let mut env = type_env.clone();
-    Transformer { tctx, type_env: &mut env, synthetic }.try_convert_object_destructuring(var_decl)
+    let env = type_env.clone();
+    Transformer { tctx, type_env: env, synthetic }.try_convert_object_destructuring(var_decl)
 }
 
 impl<'a> Transformer<'a> {
@@ -2121,7 +2129,7 @@ impl<'a> Transformer<'a> {
         source_type: Option<&RustType>,
     ) -> Result<()> {
         let tctx = self.tctx;
-        let type_env = &*self.type_env;
+        let type_env = &self.type_env;
         let synthetic = &mut *self.synthetic;
         let reg = tctx.type_registry;
     for prop in props {
@@ -2254,8 +2262,8 @@ fn expand_object_pat_props(
     source_type: Option<&RustType>,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<()> {
-    let mut env = type_env.clone();
-    Transformer { tctx, type_env: &mut env, synthetic }
+    let env = type_env.clone();
+    Transformer { tctx, type_env: env, synthetic }
         .expand_object_pat_props(props, source_expr, mutable, stmts, source_type)
 }
 
@@ -2285,25 +2293,25 @@ impl<'a> Transformer<'a> {
         return_type: Option<&RustType>,
     ) -> Result<Vec<Stmt>> {
         if let Some(result) = try_convert_discriminated_union_switch(
-            switch, self.tctx, return_type, self.type_env, self.synthetic,
+            switch, self.tctx, return_type, &mut self.type_env, self.synthetic,
         )? {
             return Ok(result);
         }
 
         if let Some(result) = try_convert_typeof_switch(
-            switch, self.tctx, return_type, self.type_env, self.synthetic,
+            switch, self.tctx, return_type, &mut self.type_env, self.synthetic,
         )? {
             return Ok(result);
         }
 
         if let Some(result) = try_convert_string_enum_switch(
-            switch, self.tctx, return_type, self.type_env, self.synthetic,
+            switch, self.tctx, return_type, &mut self.type_env, self.synthetic,
         )? {
             return Ok(result);
         }
 
         let mut discriminant =
-            convert_expr(&switch.discriminant, self.tctx, self.type_env, self.synthetic)?;
+            convert_expr(&switch.discriminant, self.tctx, &self.type_env, self.synthetic)?;
 
         let has_string_cases = switch
             .cases
@@ -2331,7 +2339,7 @@ impl<'a> Transformer<'a> {
                 &discriminant,
                 self.tctx,
                 return_type,
-                self.type_env,
+                &mut self.type_env,
                 self.synthetic,
             )
         } else {
@@ -2340,7 +2348,7 @@ impl<'a> Transformer<'a> {
                 discriminant,
                 self.tctx,
                 return_type,
-                self.type_env,
+                &mut self.type_env,
                 self.synthetic,
             )
         }
@@ -2355,7 +2363,10 @@ fn convert_switch_stmt(
     type_env: &mut TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Vec<Stmt>> {
-    Transformer { tctx, type_env, synthetic }.convert_switch_stmt(switch, return_type)
+    let mut t = Transformer { tctx, type_env: std::mem::take(type_env), synthetic };
+    let result = t.convert_switch_stmt(switch, return_type);
+    *type_env = t.type_env;
+    result
 }
 
 /// `switch (typeof x)` を enum match に変換する。
@@ -2458,7 +2469,7 @@ impl<'a> Transformer<'a> {
                     .cons
                     .iter()
                     .filter(|s| !matches!(s, ast::Stmt::Break(_) | ast::Stmt::Continue(_)))
-                    .map(|s| convert_stmt(s, self.tctx, return_type, self.type_env, self.synthetic))
+                    .map(|s| convert_stmt(s, self.tctx, return_type, &mut self.type_env, self.synthetic))
                     .collect::<Result<Vec<_>>>()?
                     .into_iter()
                     .flatten()
@@ -2477,7 +2488,7 @@ impl<'a> Transformer<'a> {
                     .cons
                     .iter()
                     .filter(|s| !matches!(s, ast::Stmt::Break(_) | ast::Stmt::Continue(_)))
-                    .map(|s| convert_stmt(s, self.tctx, return_type, self.type_env, self.synthetic))
+                    .map(|s| convert_stmt(s, self.tctx, return_type, &mut self.type_env, self.synthetic))
                     .collect::<Result<Vec<_>>>()?
                     .into_iter()
                     .flatten()
@@ -2492,7 +2503,7 @@ impl<'a> Transformer<'a> {
                 .cons
                 .iter()
                 .filter(|s| !matches!(s, ast::Stmt::Break(_) | ast::Stmt::Continue(_)))
-                .map(|s| convert_stmt(s, self.tctx, return_type, self.type_env, self.synthetic))
+                .map(|s| convert_stmt(s, self.tctx, return_type, &mut self.type_env, self.synthetic))
                 .collect::<Result<Vec<_>>>()?
                 .into_iter()
                 .flatten()
@@ -2531,7 +2542,10 @@ fn try_convert_typeof_switch(
     type_env: &mut TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Option<Vec<Stmt>>> {
-    Transformer { tctx, type_env, synthetic }.try_convert_typeof_switch(switch, return_type)
+    let mut t = Transformer { tctx, type_env: std::mem::take(type_env), synthetic };
+    let result = t.try_convert_typeof_switch(switch, return_type);
+    *type_env = t.type_env;
+    result
 }
 
 /// discriminated union の tag フィールドに対する switch を enum match に変換する。
@@ -2543,7 +2557,7 @@ impl<'a> Transformer<'a> {
         return_type: Option<&RustType>,
     ) -> Result<Option<Vec<Stmt>>> {
         let tctx = self.tctx;
-        let type_env = &mut *self.type_env;
+        let type_env = &mut self.type_env;
         let synthetic = &mut *self.synthetic;
         let reg = tctx.type_registry;
     use crate::registry::TypeDef;
@@ -2698,8 +2712,10 @@ fn try_convert_discriminated_union_switch(
     type_env: &mut TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Option<Vec<Stmt>>> {
-    Transformer { tctx, type_env, synthetic }
-        .try_convert_discriminated_union_switch(switch, return_type)
+    let mut t = Transformer { tctx, type_env: std::mem::take(type_env), synthetic };
+    let result = t.try_convert_discriminated_union_switch(switch, return_type);
+    *type_env = t.type_env;
+    result
 }
 
 /// switch arm body 内で `obj_var.field` 形式のフィールドアクセスを収集する。
@@ -2851,7 +2867,7 @@ impl<'a> Transformer<'a> {
         return_type: Option<&RustType>,
     ) -> Result<Option<Vec<Stmt>>> {
         let tctx = self.tctx;
-        let type_env = &mut *self.type_env;
+        let type_env = &mut self.type_env;
         let synthetic = &mut *self.synthetic;
         let reg = tctx.type_registry;
     use crate::registry::TypeDef;
@@ -2937,8 +2953,10 @@ fn try_convert_string_enum_switch(
     type_env: &mut TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Option<Vec<Stmt>>> {
-    Transformer { tctx, type_env, synthetic }
-        .try_convert_string_enum_switch(switch, return_type)
+    let mut t = Transformer { tctx, type_env: std::mem::take(type_env), synthetic };
+    let result = t.try_convert_string_enum_switch(switch, return_type);
+    *type_env = t.type_env;
+    result
 }
 
 /// Converts a switch with no code fall-through into a clean `Stmt::Match`.
@@ -2950,7 +2968,7 @@ impl<'a> Transformer<'a> {
         return_type: Option<&RustType>,
     ) -> Result<Vec<Stmt>> {
         let tctx = self.tctx;
-        let type_env = &mut *self.type_env;
+        let type_env = &mut self.type_env;
         let synthetic = &mut *self.synthetic;
     let mut arms: Vec<MatchArm> = Vec::new();
     let mut pending_patterns: Vec<MatchPattern> = Vec::new();
@@ -3022,8 +3040,10 @@ fn convert_switch_clean_match(
     type_env: &mut TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Vec<Stmt>> {
-    Transformer { tctx, type_env, synthetic }
-        .convert_switch_clean_match(switch, discriminant, return_type)
+    let mut t = Transformer { tctx, type_env: std::mem::take(type_env), synthetic };
+    let result = t.convert_switch_clean_match(switch, discriminant, return_type);
+    *type_env = t.type_env;
+    result
 }
 
 impl<'a> Transformer<'a> {
@@ -3035,7 +3055,7 @@ impl<'a> Transformer<'a> {
         return_type: Option<&RustType>,
     ) -> Result<Vec<Stmt>> {
         let tctx = self.tctx;
-        let type_env = &mut *self.type_env;
+        let type_env = &mut self.type_env;
         let synthetic = &mut *self.synthetic;
     let mut block_body = Vec::new();
 
@@ -3118,8 +3138,10 @@ fn convert_switch_fallthrough(
     type_env: &mut TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Vec<Stmt>> {
-    Transformer { tctx, type_env, synthetic }
-        .convert_switch_fallthrough(switch, discriminant, return_type)
+    let mut t = Transformer { tctx, type_env: std::mem::take(type_env), synthetic };
+    let result = t.convert_switch_fallthrough(switch, discriminant, return_type);
+    *type_env = t.type_env;
+    result
 }
 
 impl<'a> Transformer<'a> {
@@ -3129,7 +3151,7 @@ impl<'a> Transformer<'a> {
         return_type: Option<&RustType>,
     ) -> Result<Stmt> {
         let tctx = self.tctx;
-        let type_env = &mut *self.type_env;
+        let type_env = &mut self.type_env;
         let synthetic = &mut *self.synthetic;
     let body_stmts = match do_while.body.as_ref() {
         ast::Stmt::Block(block) => {
@@ -3170,7 +3192,10 @@ fn convert_do_while_stmt(
     type_env: &mut TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Stmt> {
-    Transformer { tctx, type_env, synthetic }.convert_do_while_stmt(do_while, return_type)
+    let mut t = Transformer { tctx, type_env: std::mem::take(type_env), synthetic };
+    let result = t.convert_do_while_stmt(do_while, return_type);
+    *type_env = t.type_env;
+    result
 }
 
 impl<'a> Transformer<'a> {
@@ -3179,7 +3204,7 @@ impl<'a> Transformer<'a> {
         var_decl: &ast::VarDecl,
     ) -> Result<Option<Vec<Stmt>>> {
         let tctx = self.tctx;
-        let type_env = &*self.type_env;
+        let type_env = &self.type_env;
         let synthetic = &mut *self.synthetic;
     let declarator = match single_declarator(var_decl) {
         Ok(d) => d,
@@ -3250,7 +3275,7 @@ impl<'a> Transformer<'a> {
         return_type: Option<&RustType>,
     ) -> Result<Vec<Stmt>> {
         let tctx = self.tctx;
-        let type_env = &mut *self.type_env;
+        let type_env = &mut self.type_env;
         let synthetic = &mut *self.synthetic;
     let mut result = Vec::new();
 
@@ -3326,7 +3351,7 @@ impl<'a> Transformer<'a> {
         expr: &ast::Expr,
     ) -> Result<Stmt> {
         let tctx = self.tctx;
-        let type_env = &*self.type_env;
+        let type_env = &self.type_env;
         let synthetic = &mut *self.synthetic;
     match expr {
         ast::Expr::Update(up) => {
@@ -3372,9 +3397,9 @@ impl<'a> Transformer<'a> {
     ) -> Result<Vec<Stmt>> {
         match stmt {
             ast::Stmt::Block(block) => {
-                convert_stmt_list(&block.stmts, self.tctx, return_type, self.type_env, self.synthetic)
+                convert_stmt_list(&block.stmts, self.tctx, return_type, &mut self.type_env, self.synthetic)
             }
-            other => convert_stmt(other, self.tctx, return_type, self.type_env, self.synthetic),
+            other => convert_stmt(other, self.tctx, return_type, &mut self.type_env, self.synthetic),
         }
     }
 
@@ -3454,8 +3479,8 @@ fn try_convert_array_destructuring(
     type_env: &TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Option<Vec<Stmt>>> {
-    let mut env = type_env.clone();
-    Transformer { tctx, type_env: &mut env, synthetic }.try_convert_array_destructuring(var_decl)
+    let env = type_env.clone();
+    Transformer { tctx, type_env: env, synthetic }.try_convert_array_destructuring(var_decl)
 }
 
 /// Wrapper: delegates to [`Transformer::convert_for_stmt_as_loop`].
@@ -3466,7 +3491,10 @@ fn convert_for_stmt_as_loop(
     type_env: &mut TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Vec<Stmt>> {
-    Transformer { tctx, type_env, synthetic }.convert_for_stmt_as_loop(for_stmt, return_type)
+    let mut t = Transformer { tctx, type_env: std::mem::take(type_env), synthetic };
+    let result = t.convert_for_stmt_as_loop(for_stmt, return_type);
+    *type_env = t.type_env;
+    result
 }
 
 /// Wrapper: delegates to [`Transformer::convert_update_to_stmt`].
@@ -3476,8 +3504,8 @@ fn convert_update_to_stmt(
     type_env: &TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Stmt> {
-    let mut env = type_env.clone();
-    Transformer { tctx, type_env: &mut env, synthetic }.convert_update_to_stmt(expr)
+    let env = type_env.clone();
+    Transformer { tctx, type_env: env, synthetic }.convert_update_to_stmt(expr)
 }
 
 /// Wrapper: delegates to [`Transformer::convert_block_or_stmt`].
@@ -3488,7 +3516,10 @@ fn convert_block_or_stmt(
     type_env: &mut TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Vec<Stmt>> {
-    Transformer { tctx, type_env, synthetic }.convert_block_or_stmt(stmt, return_type)
+    let mut t = Transformer { tctx, type_env: std::mem::take(type_env), synthetic };
+    let result = t.convert_block_or_stmt(stmt, return_type);
+    *type_env = t.type_env;
+    result
 }
 
 /// Wrapper: delegates to [`Transformer::convert_nested_fn_decl`].
@@ -3497,8 +3528,8 @@ fn convert_nested_fn_decl(
     tctx: &TransformContext<'_>,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Stmt> {
-    let mut type_env = TypeEnv::new();
-    Transformer { tctx, type_env: &mut type_env, synthetic }.convert_nested_fn_decl(fn_decl)
+    let type_env = TypeEnv::new();
+    Transformer { tctx, type_env: type_env, synthetic }.convert_nested_fn_decl(fn_decl)
 }
 
 #[cfg(test)]

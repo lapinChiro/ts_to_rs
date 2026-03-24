@@ -1203,10 +1203,10 @@ pub fn extract_class_info(
     synthetic: &mut SyntheticTypeRegistry,
     tctx: &TransformContext<'_>,
 ) -> Result<ClassInfo> {
-    let mut type_env = TypeEnv::new();
+    let type_env = TypeEnv::new();
     Transformer {
         tctx,
-        type_env: &mut type_env,
+        type_env: type_env,
         synthetic,
     }
     .extract_class_info(class_decl, vis)
@@ -1219,10 +1219,10 @@ pub fn convert_class_decl(
     synthetic: &mut SyntheticTypeRegistry,
     tctx: &TransformContext<'_>,
 ) -> Result<Vec<Item>> {
-    let mut type_env = TypeEnv::new();
+    let type_env = TypeEnv::new();
     Transformer {
         tctx,
-        type_env: &mut type_env,
+        type_env: type_env,
         synthetic,
     }
     .convert_class_decl(class_decl, vis)
@@ -1234,10 +1234,10 @@ pub(super) fn pre_scan_classes(
     synthetic: &mut SyntheticTypeRegistry,
     tctx: &TransformContext<'_>,
 ) -> HashMap<String, ClassInfo> {
-    let mut type_env = TypeEnv::new();
+    let type_env = TypeEnv::new();
     Transformer {
         tctx,
-        type_env: &mut type_env,
+        type_env: type_env,
         synthetic,
     }
     .pre_scan_classes(module)
@@ -1252,10 +1252,10 @@ pub(super) fn transform_class_with_inheritance(
     iface_methods: &HashMap<String, Vec<String>>,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Vec<Item>> {
-    let mut type_env = TypeEnv::new();
+    let type_env = TypeEnv::new();
     Transformer {
         tctx,
-        type_env: &mut type_env,
+        type_env: type_env,
         synthetic,
     }
     .transform_class_with_inheritance(class_decl, vis, class_map, iface_methods)

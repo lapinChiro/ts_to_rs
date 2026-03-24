@@ -92,14 +92,14 @@ impl<'a> Transformer<'a> {
                     return convert_member_expr(
                         member,
                         self.tctx,
-                        self.type_env,
+                        &self.type_env,
                         self.synthetic,
                     );
                 }
 
                 // Cat A: receiver object for optional chaining
                 let object =
-                    convert_expr(&member.obj, self.tctx, self.type_env, self.synthetic)?;
+                    convert_expr(&member.obj, self.tctx, &self.type_env, self.synthetic)?;
                 let body_expr = match &member.prop {
                     ast::MemberProp::Ident(ident) => {
                         let field = ident.sym.to_string();
@@ -114,7 +114,7 @@ impl<'a> Transformer<'a> {
                         let index = convert_expr(
                             &computed.expr,
                             self.tctx,
-                            self.type_env,
+                            &self.type_env,
                             self.synthetic,
                         )?;
                         Expr::Index {
@@ -168,7 +168,7 @@ impl<'a> Transformer<'a> {
                 let (object, method) = extract_method_from_callee(
                     &opt_call.callee,
                     self.tctx,
-                    self.type_env,
+                    &self.type_env,
                     self.synthetic,
                 )?;
 
@@ -176,7 +176,7 @@ impl<'a> Transformer<'a> {
                     .args
                     .iter()
                     .map(|arg| {
-                        convert_expr(&arg.expr, self.tctx, self.type_env, self.synthetic)
+                        convert_expr(&arg.expr, self.tctx, &self.type_env, self.synthetic)
                     })
                     .collect::<Result<_>>()?;
 
@@ -222,7 +222,7 @@ impl<'a> Transformer<'a> {
         if let ast::MemberProp::Computed(computed) = &member.prop {
             // Cat A: receiver object
             let object =
-                convert_expr(&member.obj, self.tctx, self.type_env, self.synthetic)?;
+                convert_expr(&member.obj, self.tctx, &self.type_env, self.synthetic)?;
 
             // Tuple index access: pair[0] → pair.0 (Rust uses dot notation for tuples)
             if let Some(RustType::Tuple(_)) = get_expr_type(self.tctx, &member.obj) {
@@ -237,7 +237,7 @@ impl<'a> Transformer<'a> {
 
             // Cat A: computed index
             let index =
-                convert_expr(&computed.expr, self.tctx, self.type_env, self.synthetic)?;
+                convert_expr(&computed.expr, self.tctx, &self.type_env, self.synthetic)?;
             return Ok(Expr::Index {
                 object: Box::new(object),
                 index: Box::new(index),
@@ -282,7 +282,7 @@ impl<'a> Transformer<'a> {
                     let object = convert_expr(
                         &member.obj,
                         self.tctx,
-                        self.type_env,
+                        &self.type_env,
                         self.synthetic,
                     )?;
                     return Ok(Expr::MethodCall {
@@ -313,7 +313,7 @@ impl<'a> Transformer<'a> {
 
         // Cat A: receiver object
         let object =
-            convert_expr(&member.obj, self.tctx, self.type_env, self.synthetic)?;
+            convert_expr(&member.obj, self.tctx, &self.type_env, self.synthetic)?;
         self.resolve_member_access(&object, &field, &member.obj)
     }
 
@@ -328,7 +328,7 @@ impl<'a> Transformer<'a> {
         variant_fields: &std::collections::HashMap<String, Vec<(String, RustType)>>,
     ) -> Result<Expr> {
         // Cat A: receiver object
-        let object = convert_expr(obj_expr, self.tctx, self.type_env, self.synthetic)?;
+        let object = convert_expr(obj_expr, self.tctx, &self.type_env, self.synthetic)?;
         let match_expr = Expr::Ref(Box::new(object));
 
         let mut arms: Vec<MatchArm> = Vec::new();
@@ -381,11 +381,11 @@ pub(super) fn resolve_member_access(
     let mg = crate::pipeline::ModuleGraph::empty();
     let resolution = crate::pipeline::type_resolution::FileTypeResolution::empty();
     let tctx = TransformContext::new(&mg, reg, &resolution, std::path::Path::new(""));
-    let mut type_env = crate::transformer::TypeEnv::new();
+    let type_env = crate::transformer::TypeEnv::new();
     let mut synthetic = SyntheticTypeRegistry::new();
     Transformer {
         tctx: &tctx,
-        type_env: &mut type_env,
+        type_env: type_env,
         synthetic: &mut synthetic,
     }
     .resolve_member_access(object, field, ts_obj)
@@ -398,10 +398,10 @@ pub(super) fn convert_opt_chain_expr(
     type_env: &TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Expr> {
-    let mut env = type_env.clone();
+    let env = type_env.clone();
     Transformer {
         tctx,
-        type_env: &mut env,
+        type_env: env,
         synthetic,
     }
     .convert_opt_chain_expr(opt_chain)
@@ -440,10 +440,10 @@ pub(super) fn convert_member_expr(
     type_env: &TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Expr> {
-    let mut env = type_env.clone();
+    let env = type_env.clone();
     Transformer {
         tctx,
-        type_env: &mut env,
+        type_env: env,
         synthetic,
     }
     .convert_member_expr(member)
@@ -459,10 +459,10 @@ pub(super) fn convert_du_standalone_field_access(
     type_env: &TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Expr> {
-    let mut env = type_env.clone();
+    let env = type_env.clone();
     Transformer {
         tctx,
-        type_env: &mut env,
+        type_env: env,
         synthetic,
     }
     .convert_du_standalone_field_access(obj_expr, enum_name, field, variant_fields)

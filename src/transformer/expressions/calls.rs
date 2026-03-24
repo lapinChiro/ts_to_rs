@@ -37,7 +37,7 @@ impl<'a> Transformer<'a> {
                         &fn_name,
                         &call.args,
                         self.tctx,
-                        self.type_env,
+                        &self.type_env,
                         self.synthetic,
                     )? {
                         return Ok(result);
@@ -72,7 +72,7 @@ impl<'a> Transformer<'a> {
                         self.tctx,
                         param_types,
                         has_rest,
-                        self.type_env,
+                        &self.type_env,
                         self.synthetic,
                     )?;
                     Ok(Expr::FnCall {
@@ -103,7 +103,7 @@ impl<'a> Transformer<'a> {
                             let args = convert_call_args(
                                 &call.args,
                                 self.tctx,
-                                self.type_env,
+                                &self.type_env,
                                 self.synthetic,
                             )?;
                             let use_debug = call
@@ -127,7 +127,7 @@ impl<'a> Transformer<'a> {
                                 &method,
                                 &call.args,
                                 self.tctx,
-                                self.type_env,
+                                &self.type_env,
                                 self.synthetic,
                             );
                         }
@@ -138,7 +138,7 @@ impl<'a> Transformer<'a> {
                                 &method,
                                 &call.args,
                                 self.tctx,
-                                self.type_env,
+                                &self.type_env,
                                 self.synthetic,
                             );
                         }
@@ -149,7 +149,7 @@ impl<'a> Transformer<'a> {
                                 &method,
                                 &call.args,
                                 self.tctx,
-                                self.type_env,
+                                &self.type_env,
                                 self.synthetic,
                             );
                         }
@@ -157,7 +157,7 @@ impl<'a> Transformer<'a> {
 
                     // Cat A: method receiver — converted before method resolution
                     let object =
-                        convert_expr(&member.obj, self.tctx, self.type_env, self.synthetic)?;
+                        convert_expr(&member.obj, self.tctx, &self.type_env, self.synthetic)?;
                     // Look up method parameter types from the object's type
                     let method_sig = get_expr_type(self.tctx, &member.obj).and_then(|ty| {
                         if let RustType::Named { name, .. } = ty {
@@ -173,7 +173,7 @@ impl<'a> Transformer<'a> {
                         self.tctx,
                         method_params,
                         false,
-                        self.type_env,
+                        &self.type_env,
                         self.synthetic,
                     )?;
                     let method_call = map_method_call(object, &method, args);
@@ -191,16 +191,16 @@ impl<'a> Transformer<'a> {
                     convert_call_expr(
                         &unwrapped_call,
                         self.tctx,
-                        self.type_env,
+                        &self.type_env,
                         self.synthetic,
                     )
                 }
                 // Chained call: f(x)(y) → { let _f = f(x); _f(y) }
                 ast::Expr::Call(inner_call) => {
                     let inner_result =
-                        convert_call_expr(inner_call, self.tctx, self.type_env, self.synthetic)?;
+                        convert_call_expr(inner_call, self.tctx, &self.type_env, self.synthetic)?;
                     let args =
-                        convert_call_args(&call.args, self.tctx, self.type_env, self.synthetic)?;
+                        convert_call_args(&call.args, self.tctx, &self.type_env, self.synthetic)?;
                     Ok(Expr::Block(vec![
                         Stmt::Let {
                             name: "_f".to_string(),
@@ -223,11 +223,11 @@ impl<'a> Transformer<'a> {
                         self.tctx,
                         false,
                         &mut warnings,
-                        self.type_env,
+                        &self.type_env,
                         self.synthetic,
                     )?;
                     let args =
-                        convert_call_args(&call.args, self.tctx, self.type_env, self.synthetic)?;
+                        convert_call_args(&call.args, self.tctx, &self.type_env, self.synthetic)?;
                     Ok(Expr::Block(vec![
                         Stmt::Let {
                             name: "__iife".to_string(),
@@ -243,9 +243,9 @@ impl<'a> Transformer<'a> {
                 }
                 ast::Expr::Fn(fn_expr) => {
                     let closure =
-                        convert_fn_expr(fn_expr, self.tctx, self.type_env, self.synthetic)?;
+                        convert_fn_expr(fn_expr, self.tctx, &self.type_env, self.synthetic)?;
                     let args =
-                        convert_call_args(&call.args, self.tctx, self.type_env, self.synthetic)?;
+                        convert_call_args(&call.args, self.tctx, &self.type_env, self.synthetic)?;
                     Ok(Expr::Block(vec![
                         Stmt::Let {
                             name: "__iife".to_string(),
@@ -263,7 +263,7 @@ impl<'a> Transformer<'a> {
             },
             ast::Callee::Super(_) => {
                 let args =
-                    convert_call_args(&call.args, self.tctx, self.type_env, self.synthetic)?;
+                    convert_call_args(&call.args, self.tctx, &self.type_env, self.synthetic)?;
                 Ok(Expr::FnCall {
                     name: "super".to_string(),
                     args,
@@ -295,7 +295,7 @@ impl<'a> Transformer<'a> {
                 self.tctx,
                 param_slice,
                 false,
-                self.type_env,
+                &self.type_env,
                 self.synthetic,
             )?,
             None => vec![],
@@ -314,10 +314,10 @@ pub(super) fn convert_call_expr(
     type_env: &TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Expr> {
-    let mut env = type_env.clone();
+    let env = type_env.clone();
     Transformer {
         tctx,
-        type_env: &mut env,
+        type_env: env,
         synthetic,
     }
     .convert_call_expr(call)
@@ -597,10 +597,10 @@ pub(super) fn convert_new_expr(
     type_env: &TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Expr> {
-    let mut env = type_env.clone();
+    let env = type_env.clone();
     Transformer {
         tctx,
-        type_env: &mut env,
+        type_env: env,
         synthetic,
     }
     .convert_new_expr(new_expr)

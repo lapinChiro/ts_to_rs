@@ -17,14 +17,14 @@ impl<'a> Transformer<'a> {
         let target = match &assign.left {
             ast::AssignTarget::Simple(simple) => match simple {
                 ast::SimpleAssignTarget::Member(member) => {
-                    convert_member_expr(member, self.tctx, self.type_env, self.synthetic)?
+                    convert_member_expr(member, self.tctx, &self.type_env, self.synthetic)?
                 }
                 ast::SimpleAssignTarget::Ident(ident) => Expr::Ident(ident.id.sym.to_string()),
                 _ => return Err(anyhow!("unsupported assignment target")),
             },
             _ => return Err(anyhow!("unsupported assignment target pattern")),
         };
-        let right = super::convert_expr(&assign.right, self.tctx, self.type_env, self.synthetic)?;
+        let right = super::convert_expr(&assign.right, self.tctx, &self.type_env, self.synthetic)?;
 
     // ??= (nullish coalescing assignment): x ??= y → x.get_or_insert_with(|| y)
     if assign.op == ast::AssignOp::NullishAssign {
@@ -123,10 +123,10 @@ pub(super) fn convert_assign_expr(
     type_env: &TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Expr> {
-    let mut env = type_env.clone();
+    let env = type_env.clone();
     Transformer {
         tctx,
-        type_env: &mut env,
+        type_env: env,
         synthetic,
     }
     .convert_assign_expr(assign)

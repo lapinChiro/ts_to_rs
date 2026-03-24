@@ -37,12 +37,26 @@ pub(crate) struct Transformer<'a> {
     /// 不変コンテキスト（TypeRegistry, ModuleGraph, TypeResolution, file path）
     pub(crate) tctx: &'a TransformContext<'a>,
     /// ローカル変数の型追跡（可変 — ブロックスコープで push_scope / pop_scope）
-    pub(crate) type_env: &'a mut TypeEnv,
+    pub(crate) type_env: TypeEnv,
     /// 合成型レジストリ（可変 — 変換中に型が追加される）
     pub(crate) synthetic: &'a mut SyntheticTypeRegistry,
 }
 
 impl<'a> Transformer<'a> {
+    /// モジュール変換用の Transformer を構築する。
+    ///
+    /// `TypeEnv` は内部で新規作成される。呼び出し側で構築する必要はない。
+    pub(crate) fn for_module(
+        tctx: &'a TransformContext<'a>,
+        synthetic: &'a mut SyntheticTypeRegistry,
+    ) -> Self {
+        Self {
+            tctx,
+            type_env: TypeEnv::new(),
+            synthetic,
+        }
+    }
+
     /// `tctx.type_registry` へのショートカット。
     pub(crate) fn reg(&self) -> &'a TypeRegistry {
         self.tctx.type_registry
@@ -123,14 +137,10 @@ pub fn transform_module(module: &Module, reg: &TypeRegistry) -> Result<Vec<Item>
     let mg = crate::pipeline::ModuleGraph::empty();
     let resolution = crate::pipeline::type_resolution::FileTypeResolution::empty();
     let tctx = context::TransformContext::new(&mg, reg, &resolution, std::path::Path::new(""));
-    let mut type_env = TypeEnv::new();
-    let mut t = Transformer {
-        tctx: &tctx,
-        type_env: &mut type_env,
-        synthetic: &mut synthetic,
+    let mut items = {
+        let mut t = Transformer::for_module(&tctx, &mut synthetic);
+        t.transform_module_with_path(module, None)?
     };
-    let mut items = t.transform_module_with_path(module, None)?;
-    drop(t);
     let mut all = synthetic.into_items();
     all.append(&mut items);
     Ok(all)
@@ -142,12 +152,7 @@ pub fn transform_module_with_context(
     ctx: &context::TransformContext<'_>,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Vec<Item>> {
-    let mut type_env = TypeEnv::new();
-    let mut t = Transformer {
-        tctx: ctx,
-        type_env: &mut type_env,
-        synthetic,
-    };
+    let mut t = Transformer::for_module(ctx, synthetic);
     let current_file_dir = t.current_file_dir();
     t.transform_module_with_path(module, current_file_dir)
 }
@@ -170,14 +175,10 @@ pub fn transform_module_collecting(
     let mg = crate::pipeline::ModuleGraph::empty();
     let resolution = crate::pipeline::type_resolution::FileTypeResolution::empty();
     let tctx = context::TransformContext::new(&mg, reg, &resolution, std::path::Path::new(""));
-    let mut type_env = TypeEnv::new();
-    let mut t = Transformer {
-        tctx: &tctx,
-        type_env: &mut type_env,
-        synthetic: &mut synthetic,
+    let (mut items, unsupported) = {
+        let mut t = Transformer::for_module(&tctx, &mut synthetic);
+        t.transform_module_collecting_with_path(module, None)?
     };
-    let (mut items, unsupported) = t.transform_module_collecting_with_path(module, None)?;
-    drop(t);
     let mut all = synthetic.into_items();
     all.append(&mut items);
     Ok((all, unsupported))
@@ -555,10 +556,9 @@ pub fn transform_module_with_path(
     current_file_dir: Option<&str>,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Vec<Item>> {
-    let mut type_env = TypeEnv::new();
     Transformer {
         tctx,
-        type_env: &mut type_env,
+        type_env: TypeEnv::new(),
         synthetic,
     }
     .transform_module_with_path(module, current_file_dir)
@@ -571,10 +571,9 @@ pub fn transform_module_collecting_with_path(
     current_file_dir: Option<&str>,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<(Vec<Item>, Vec<UnsupportedSyntaxError>)> {
-    let mut type_env = TypeEnv::new();
     Transformer {
         tctx,
-        type_env: &mut type_env,
+        type_env: TypeEnv::new(),
         synthetic,
     }
     .transform_module_collecting_with_path(module, current_file_dir)

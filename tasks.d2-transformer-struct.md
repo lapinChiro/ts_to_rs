@@ -17,19 +17,30 @@
 pub(crate) struct Transformer<'a> {
     /// 不変コンテキスト（TypeRegistry, ModuleGraph, TypeResolution, file path）
     pub(crate) tctx: &'a TransformContext<'a>,
-    /// ローカル変数の型追跡（可変 — ブロックスコープで push_scope / pop_scope）
-    pub(crate) type_env: &'a mut TypeEnv,
+    /// ローカル変数の型追跡（所有 — ブロックスコープで push_scope / pop_scope）
+    pub(crate) type_env: TypeEnv,
     /// 合成型レジストリ（可変 — 変換中に型が追加される）
     pub(crate) synthetic: &'a mut SyntheticTypeRegistry,
 }
 
 impl<'a> Transformer<'a> {
+    /// モジュール変換用の Transformer を構築する。
+    pub(crate) fn for_module(
+        tctx: &'a TransformContext<'a>,
+        synthetic: &'a mut SyntheticTypeRegistry,
+    ) -> Self { ... }
+
     /// `tctx.type_registry` へのショートカット。
     pub(crate) fn reg(&self) -> &'a TypeRegistry {
         self.tctx.type_registry
     }
 }
 ```
+
+**設計判断（F-0a で確定）**: `type_env` を所有フィールド（`TypeEnv`）にした。理由:
+- ファクトリメソッド `for_module()` で TypeEnv を内部作成でき、外部に構築詳細が漏れない
+- `convert_fn_decl` 等は `self.type_env` を使用せず独自のローカル TypeEnv を作成するため、所有化によるセマンティクスの変化はゼロ（D-2-E で検証済み）
+- サブ Transformer パターンでは、ローカル TypeEnv を move で渡せるため自然
 
 ### borrow checker との整合性
 
@@ -116,10 +127,10 @@ impl<'a> Transformer<'a> {
 4. `cargo check` 通過を確認
 5. 次のファイルへ
 
-ラッパーの実装パターン:
+ラッパーの実装パターン（F-0 で TypeEnv 所有化後の現在の状態）:
 
 ```rust
-// &mut TypeEnv を取る関数のラッパー（直接委譲）
+// &mut TypeEnv を取る関数のラッパー（take+restore パターン）
 pub fn convert_stmt(
     stmt: &ast::Stmt,
     tctx: &TransformContext<'_>,
@@ -127,7 +138,10 @@ pub fn convert_stmt(
     type_env: &mut TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Vec<Stmt>> {
-    Transformer { tctx, type_env, synthetic }.convert_stmt(stmt, return_type)
+    let mut t = Transformer { tctx, type_env: std::mem::take(type_env), synthetic };
+    let result = t.convert_stmt(stmt, return_type);
+    *type_env = t.type_env;
+    result
 }
 
 // &TypeEnv を取る関数のラッパー（clone 経由）
@@ -137,15 +151,21 @@ pub fn convert_expr(
     type_env: &TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Expr> {
-    let mut env = type_env.clone();
-    Transformer { tctx, type_env: &mut env, synthetic }.convert_expr(expr)
+    let env = type_env.clone();
+    Transformer { tctx, type_env: env, synthetic }.convert_expr(expr)
 }
 ```
+
+take+restore パターンの安全性:
+- `std::mem::take(type_env)` で TypeEnv を取得（元は Default = 空になる）
+- Transformer メソッド呼び出し後、`*type_env = t.type_env` で復元（Err 時も実行される）
+- エラー伝搬は `result` 変数経由で復元後に行われるため、TypeEnv は常に正しく戻る
 
 `&TypeEnv` ラッパーの `clone()` が安全な理由:
 - `&TypeEnv` を取る関数は type_env を**読み取りのみ**
 - clone した env は元と同じ値を持ち、読み取り結果は同一
-- 変換中に sub-call が env を変更しても、それは clone 上の変更で元には影響しない（元も影響されない設計 — push_scope/pop_scope は常にバランス）
+
+**これらのラッパーは F-1〜F-5 で全て削除される。** 削除後は `self.method()` の直接呼び出しになり、take+restore / clone は不要になる。
 
 ## 実装タスク
 
@@ -225,22 +245,31 @@ impl<'a> Transformer<'a> {
 }
 ```
 
-**設計判断**: `TypeEnv` を Transformer のフィールドとして所有（`type_env: TypeEnv`）に変更するか、現状の参照（`&'a mut TypeEnv`）を維持するか。
+**設計判断（確定）**: `TypeEnv` を所有フィールド（`type_env: TypeEnv`）に変更した。検討過程と根拠は設計セクションの「設計判断（F-0a で確定）」を参照。
 
-- **所有に変更する場合**: ファクトリメソッドが TypeEnv を内部で作成でき、外部に構築詳細が漏れない。`drop(t)` も不要になる（Transformer が drop されれば TypeEnv も自動 drop）。ただし、サブ Transformer パターン（後述 F-3b）で TypeEnv の共有が必要な箇所がないか要確認。
-- **参照を維持する場合**: ファクトリメソッドは使えない（ローカル変数への参照を返せない）。マクロまたは closure ベースの API（`Transformer::with_module(tctx, synthetic, |t| { ... })`）が代替案。
-
-**D-2-E の検証結果**: `convert_fn_decl`, `transform_class_with_inheritance`, `convert_var_decl_arrow_fns` は全て `self.type_env` を**使用していない**。各関数が独自のローカル TypeEnv を作成している。mod.rs のメソッド群（`transform_module_with_path` 等）も type_env を直接操作しない。**TypeEnv を所有に変更しても既存のセマンティクスに影響なし**。
-
-- [ ] **F-0a**: `Transformer` の `type_env` フィールドを `TypeEnv`（所有）に変更するか `&'a mut TypeEnv`（参照）を維持するか決定。上記の検証結果を踏まえ、所有への変更を推奨
-- [ ] **F-0b**: ファクトリメソッド `Transformer::for_module()` を実装
-- [ ] **F-0c**: entry point 3 関数（`transform_module`, `transform_module_collecting`, `transform_module_with_context`）をファクトリメソッド経由に統一
-- [ ] **F-0d**: `cargo check` 通過確認
+- [x] **F-0a**: `Transformer` の `type_env` フィールドを `TypeEnv`（所有）に変更。`&'a mut TypeEnv` ラッパーは `std::mem::take` + 復元パターンで過渡的に対応
+- [x] **F-0b**: ファクトリメソッド `Transformer::for_module()` を実装
+- [x] **F-0c**: entry point 3 関数（`transform_module`, `transform_module_collecting`, `transform_module_with_context`）をファクトリメソッド経由に統一
+- [x] **F-0d**: `cargo check` 通過確認（0 エラー、全テスト GREEN）
 
 #### F-1〜F-5: ラッパー削除
 
-- [ ] **F-1**: `expressions/` の全ラッパーを削除
-- [ ] **F-2**: `statements/mod.rs` のラッパーを削除
+F-0 で TypeEnv を所有に変更した結果、以下の過渡的パターンが導入されている。F-1〜F-5 でラッパーを削除し、これらを全て解消する。
+
+**F-0 で導入された過渡的パターン（F-1〜F-5 で解消）**:
+
+1. **take+restore パターン（22 箇所、statements/mod.rs）**: `&mut TypeEnv` を受け取るラッパーが `std::mem::take(type_env)` で TypeEnv を取得し、Transformer に渡し、処理後に `*type_env = t.type_env` で復元する。ラッパー削除後は `self.convert_xxx()` の直接呼び出しになり、`self.type_env` を直接操作するため不要になる。
+2. **clone パターン（約 35 箇所、expressions/ 等）**: `&TypeEnv` を受け取るラッパーが `type_env.clone()` で所有値を作成し Transformer に渡す。式変換は TypeEnv を読み取り専用で使用するため clone 自体は安全だが、無駄なコピー。ラッパー削除後は `self.type_env` を直接参照するため不要になる。
+
+**ラッパー削除の手順**: 各ファイルについて以下を行う。
+1. ラッパー free function を削除
+2. ラッパーの呼び出し元を `self.method()` の直接呼び出しに書き換え
+   - take+restore 呼び出し元: `convert_stmt(stmt, self.tctx, ret, &mut self.type_env, self.synthetic)` → `self.convert_stmt(stmt, ret)`
+   - clone 呼び出し元: `convert_expr(expr, self.tctx, &self.type_env, self.synthetic)` → `self.convert_expr(expr)`
+3. `cargo check` 通過確認
+
+- [ ] **F-1**: `expressions/` の全ラッパーを削除（clone パターン約 35 箇所が解消される）
+- [ ] **F-2**: `statements/mod.rs` のラッパーを削除（take+restore 22 箇所 + clone 約 15 箇所が解消される）
 - [ ] **F-3**: `functions/mod.rs` のラッパーを削除
 - [ ] **F-4**: `classes.rs` のラッパーを削除
 - [ ] **F-5**: `mod.rs` のラッパー（`transform_module_with_path`, `transform_module_collecting_with_path`）を削除
@@ -260,16 +289,16 @@ impl<'a> Transformer<'a> {
 | 7 | `functions/mod.rs:747` | `convert_fn_rest_params_to_struct` | `convert_expr` | `TypeEnv::new()` |
 | 8 | `statements/mod.rs:3427` | `convert_nested_fn_decl` | `convert_stmt_list` | `fn_type_env` |
 
-**変換パターン**: ラッパー呼び出しをサブ Transformer 構築に置き換える。
+**変換パターン**: ラッパー呼び出しをサブ Transformer 構築に置き換える。TypeEnv は所有フィールドなので、ローカル変数を move で渡す。
 
 ```rust
 // Before (wrapper)
 let result = convert_stmt_list(&stmts, self.tctx, ret, &mut fn_type_env, &mut local_synthetic)?;
 
-// After (sub-Transformer)
+// After (sub-Transformer with owned TypeEnv)
 let result = Transformer {
     tctx: self.tctx,
-    type_env: &mut fn_type_env,      // or TypeEnv field if owned
+    type_env: fn_type_env,             // move（所有値）
     synthetic: &mut local_synthetic,
 }.convert_stmt_list(&stmts, ret)?;
 ```
@@ -352,8 +381,6 @@ let result = Transformer {
 
 **対策**: 可視性の変更は意味的に正しい（メソッドは型を通じてアクセスされるため、モジュール可視性ではなく型の可視性が支配的）。
 
-### リスク 4: サブ Transformer パターンと TypeEnv 所有の両立（Phase F-0 で検討）
+### リスク 4: サブ Transformer パターンと TypeEnv 所有の両立 ✅ 解決済み
 
-`convert_fn_decl` 等がローカル TypeEnv でサブ Transformer を構築するパターンがある。TypeEnv を所有フィールドに変更した場合でも、サブ Transformer は別の TypeEnv（ローカル）を所有できるため問題ない。
-
-**検証済み**: `self.type_env` を使用しているメソッドは statements / expressions モジュールの変換関数のみ。mod.rs, functions, classes のメソッドは `self.type_env` を一切使用しておらず、独自のローカル TypeEnv を作成している。
+F-0a で TypeEnv を所有に変更。サブ Transformer は独自のローカル TypeEnv を move で所有するため問題なし（F-0 実装時に検証済み）。

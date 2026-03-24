@@ -38,7 +38,7 @@ impl<'a> Transformer<'a> {
 
         // Cat A: comparison operand
         let other_ir =
-            super::convert_expr(other_expr, self.tctx, self.type_env, self.synthetic).ok()?;
+            super::convert_expr(other_expr, self.tctx, &self.type_env, self.synthetic).ok()?;
         let method = if is_eq { "is_none" } else { "is_some" };
         Some(Expr::MethodCall {
             object: Box::new(other_ir),
@@ -71,7 +71,7 @@ impl<'a> Transformer<'a> {
                     let left = super::convert_expr(
                         &bin.left,
                         self.tctx,
-                        self.type_env,
+                        &self.type_env,
                         self.synthetic,
                     )
                     .ok()?;
@@ -92,7 +92,7 @@ impl<'a> Transformer<'a> {
                     let right = super::convert_expr(
                         &bin.right,
                         self.tctx,
-                        self.type_env,
+                        &self.type_env,
                         self.synthetic,
                     )
                     .ok()?;
@@ -145,7 +145,7 @@ impl<'a> Transformer<'a> {
                     let operand_ir = super::convert_expr(
                         typeof_operand,
                         self.tctx,
-                        self.type_env,
+                        &self.type_env,
                         self.synthetic,
                     )
                     .ok()?;
@@ -179,7 +179,7 @@ impl<'a> Transformer<'a> {
                 let operand_ir = super::convert_expr(
                     typeof_operand,
                     self.tctx,
-                    self.type_env,
+                    &self.type_env,
                     self.synthetic,
                 )
                 .ok()?;
@@ -369,10 +369,10 @@ pub(super) fn try_convert_undefined_comparison(
     tctx: &TransformContext<'_>,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Option<Expr> {
-    let mut env = type_env.clone();
+    let env = type_env.clone();
     Transformer {
         tctx,
-        type_env: &mut env,
+        type_env: env,
         synthetic,
     }
     .try_convert_undefined_comparison(bin)
@@ -385,10 +385,10 @@ pub(super) fn try_convert_enum_string_comparison(
     tctx: &TransformContext<'_>,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Option<Expr> {
-    let mut env = type_env.clone();
+    let env = type_env.clone();
     Transformer {
         tctx,
-        type_env: &mut env,
+        type_env: env,
         synthetic,
     }
     .try_convert_enum_string_comparison(bin)
@@ -401,10 +401,10 @@ pub(super) fn try_convert_typeof_comparison(
     tctx: &TransformContext<'_>,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Option<Expr> {
-    let mut env = type_env.clone();
+    let env = type_env.clone();
     Transformer {
         tctx,
-        type_env: &mut env,
+        type_env: env,
         synthetic,
     }
     .try_convert_typeof_comparison(bin)
@@ -412,11 +412,11 @@ pub(super) fn try_convert_typeof_comparison(
 
 /// Wrapper: delegates to [`Transformer::convert_in_operator`].
 pub(super) fn convert_in_operator(bin: &ast::BinExpr, tctx: &TransformContext<'_>) -> Expr {
-    let mut type_env = crate::transformer::TypeEnv::new();
+    let type_env = crate::transformer::TypeEnv::new();
     let mut synthetic = SyntheticTypeRegistry::new();
     Transformer {
         tctx,
-        type_env: &mut type_env,
+        type_env: type_env,
         synthetic: &mut synthetic,
     }
     .convert_in_operator(bin)
@@ -428,11 +428,11 @@ pub(super) fn convert_instanceof(
     type_env: &TypeEnv,
     tctx: &TransformContext<'_>,
 ) -> Expr {
-    let mut env = type_env.clone();
+    let env = type_env.clone();
     let mut synthetic = SyntheticTypeRegistry::new();
     Transformer {
         tctx,
-        type_env: &mut env,
+        type_env: env,
         synthetic: &mut synthetic,
     }
     .convert_instanceof(bin)

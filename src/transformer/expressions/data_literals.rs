@@ -66,7 +66,7 @@ impl<'a> Transformer<'a> {
                             continue; // Skip discriminant field
                         }
                         let value =
-                            convert_expr(&kv.value, self.tctx, self.type_env, self.synthetic)?;
+                            convert_expr(&kv.value, self.tctx, &self.type_env, self.synthetic)?;
                         fields.push((key, value));
                     }
                     ast::Prop::Shorthand(ident) => {
@@ -77,7 +77,7 @@ impl<'a> Transformer<'a> {
                         let value = convert_expr(
                             &ast::Expr::Ident(ident.clone()),
                             self.tctx,
-                            self.type_env,
+                            &self.type_env,
                             self.synthetic,
                         )?;
                         fields.push((key, value));
@@ -127,11 +127,11 @@ impl<'a> Transformer<'a> {
                         let key = convert_expr(
                             computed_expr,
                             self.tctx,
-                            self.type_env,
+                            &self.type_env,
                             self.synthetic,
                         )?;
                         let value =
-                            convert_expr(&kv.value, self.tctx, self.type_env, self.synthetic)?;
+                            convert_expr(&kv.value, self.tctx, &self.type_env, self.synthetic)?;
                         entries.push(Expr::Tuple {
                             elements: vec![key, value],
                         });
@@ -214,7 +214,7 @@ impl<'a> Transformer<'a> {
                         let value = convert_expr(
                             &kv.value,
                             self.tctx,
-                            self.type_env,
+                            &self.type_env,
                             self.synthetic,
                         )?;
                         fields.push((key, value));
@@ -224,7 +224,7 @@ impl<'a> Transformer<'a> {
                         let value = convert_expr(
                             &ast::Expr::Ident(ident.clone()),
                             self.tctx,
-                            self.type_env,
+                            &self.type_env,
                             self.synthetic,
                         )?;
                         fields.push((key, value));
@@ -240,7 +240,7 @@ impl<'a> Transformer<'a> {
                     let spread_expr = convert_expr(
                         &spread_elem.expr,
                         self.tctx,
-                        self.type_env,
+                        &self.type_env,
                         self.synthetic,
                     )?;
                     spreads.push(spread_expr);
@@ -347,7 +347,7 @@ impl<'a> Transformer<'a> {
                 .iter()
                 .filter_map(|elem| elem.as_ref())
                 .map(|elem| {
-                    convert_expr(&elem.expr, self.tctx, self.type_env, self.synthetic)
+                    convert_expr(&elem.expr, self.tctx, &self.type_env, self.synthetic)
                 })
                 .collect::<Result<Vec<_>>>()?;
             return Ok(Expr::Tuple { elements });
@@ -361,7 +361,7 @@ impl<'a> Transformer<'a> {
             .elems
             .iter()
             .filter_map(|elem| elem.as_ref())
-            .map(|elem| convert_expr(&elem.expr, self.tctx, self.type_env, self.synthetic))
+            .map(|elem| convert_expr(&elem.expr, self.tctx, &self.type_env, self.synthetic))
             .collect::<Result<Vec<_>>>()?;
         Ok(Expr::Vec { elements })
     }
@@ -408,7 +408,7 @@ impl<'a> Transformer<'a> {
                 }
                 // Cat A: spread source — type is the array itself
                 let spread_expr =
-                    convert_expr(&elem.expr, self.tctx, self.type_env, self.synthetic)?;
+                    convert_expr(&elem.expr, self.tctx, &self.type_env, self.synthetic)?;
                 stmts.push(Stmt::Expr(Expr::MethodCall {
                     object: Box::new(Expr::Ident("_v".to_string())),
                     method: "extend".to_string(),
@@ -424,7 +424,7 @@ impl<'a> Transformer<'a> {
                 }));
             } else {
                 let value =
-                    convert_expr(&elem.expr, self.tctx, self.type_env, self.synthetic)?;
+                    convert_expr(&elem.expr, self.tctx, &self.type_env, self.synthetic)?;
                 if initialized {
                     // _v.push(value)
                     stmts.push(Stmt::Expr(Expr::MethodCall {
@@ -460,10 +460,10 @@ pub(super) fn convert_discriminated_union_object_lit(
     string_values: &std::collections::HashMap<String, String>,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Expr> {
-    let mut env = type_env.clone();
+    let env = type_env.clone();
     Transformer {
         tctx,
-        type_env: &mut env,
+        type_env: env,
         synthetic,
     }
     .convert_discriminated_union_object_lit(obj_lit, enum_name, tag_field, string_values)
@@ -476,10 +476,10 @@ pub(super) fn try_convert_as_hashmap(
     type_env: &TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Option<Expr>> {
-    let mut env = type_env.clone();
+    let env = type_env.clone();
     Transformer {
         tctx,
-        type_env: &mut env,
+        type_env: env,
         synthetic,
     }
     .try_convert_as_hashmap(obj_lit)
@@ -493,10 +493,10 @@ pub(super) fn convert_object_lit(
     type_env: &TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Expr> {
-    let mut env = type_env.clone();
+    let env = type_env.clone();
     Transformer {
         tctx,
-        type_env: &mut env,
+        type_env: env,
         synthetic,
     }
     .convert_object_lit(obj_lit, expected)
@@ -510,10 +510,10 @@ pub(super) fn convert_array_lit(
     type_env: &TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Expr> {
-    let mut env = type_env.clone();
+    let env = type_env.clone();
     Transformer {
         tctx,
-        type_env: &mut env,
+        type_env: env,
         synthetic,
     }
     .convert_array_lit(array_lit, expected)
@@ -526,10 +526,10 @@ pub(super) fn convert_spread_array_to_block(
     type_env: &TypeEnv,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<Expr> {
-    let mut env = type_env.clone();
+    let env = type_env.clone();
     Transformer {
         tctx,
-        type_env: &mut env,
+        type_env: env,
         synthetic,
     }
     .convert_spread_array_to_block(array_lit)
