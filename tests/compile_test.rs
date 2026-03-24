@@ -2,7 +2,8 @@ use std::fs;
 use std::process::Command;
 use std::sync::Mutex;
 
-use ts_to_rs::pipeline::{NullModuleResolver, TranspileInput};
+use ts_to_rs::pipeline::module_resolver::TrivialResolver;
+use ts_to_rs::pipeline::TranspileInput;
 use ts_to_rs::transpile_collecting;
 
 /// Path to the fixed Cargo project used for compile checking.
@@ -187,7 +188,7 @@ fn assert_compiles_directory(dir: &str, fixture_name: &str) {
     let input = TranspileInput {
         files,
         builtin_types: None,
-        module_resolver: Box::new(NullModuleResolver),
+        module_resolver: Box::new(TrivialResolver),
     };
     let output = ts_to_rs::pipeline::transpile_pipeline(input)
         .unwrap_or_else(|e| panic!("transpile_pipeline failed for '{fixture_name}': {e}"));

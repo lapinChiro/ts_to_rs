@@ -15,7 +15,8 @@ pub mod transformer;
 use anyhow::Result;
 use serde::Serialize;
 
-use crate::pipeline::{NullModuleResolver, TranspileInput};
+use crate::pipeline::module_resolver::TrivialResolver;
+use crate::pipeline::TranspileInput;
 use crate::transformer::UnsupportedSyntaxError;
 
 /// A report entry for an unsupported TypeScript syntax encountered during transformation.
@@ -126,7 +127,7 @@ fn run_single_file_pipeline(
     let input = TranspileInput {
         files: vec![(std::path::PathBuf::from("input.ts"), ts_source.to_string())],
         builtin_types,
-        module_resolver: Box::new(NullModuleResolver),
+        module_resolver: Box::new(TrivialResolver),
     };
     pipeline::transpile_pipeline(input)
 }

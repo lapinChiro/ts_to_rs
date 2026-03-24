@@ -119,6 +119,7 @@ def analyze(
     hono_clean_dir: str,
     compile_clean_files: int | None = None,
     dir_compile_clean_files: int | None = None,
+    hono_sha: str | None = None,
 ) -> dict:
     """エラー JSON を解析し、結果レコードを返す。"""
     with open(json_path) as f:
@@ -139,6 +140,7 @@ def analyze(
     record = {
         "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "git_sha": get_git_sha(),
+        "hono_sha": hono_sha or "unknown",
         "total_files": total_files,
         "clean_files": clean_files,
         "clean_pct": round(clean_files * 100 / total_files, 1) if total_files > 0 else 0,
@@ -265,9 +267,15 @@ def main() -> None:
     hono_clean_dir = sys.argv[3]
     compile_clean_files = int(sys.argv[4]) if len(sys.argv) > 4 else None
     dir_compile_clean_files = int(sys.argv[5]) if len(sys.argv) > 5 else None
+    hono_sha = sys.argv[6] if len(sys.argv) > 6 else None
 
     record = analyze(
-        json_path, total_files, hono_clean_dir, compile_clean_files, dir_compile_clean_files
+        json_path,
+        total_files,
+        hono_clean_dir,
+        compile_clean_files,
+        dir_compile_clean_files,
+        hono_sha,
     )
 
     # bench-history.jsonl のパスを特定

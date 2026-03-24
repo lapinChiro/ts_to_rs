@@ -130,7 +130,7 @@ pub fn transpile_single(source: &str) -> Result<String> {
     let input = TranspileInput {
         files: vec![(std::path::PathBuf::from("input.ts"), source.to_string())],
         builtin_types: None,
-        module_resolver: Box::new(NullModuleResolver),
+        module_resolver: Box::new(crate::pipeline::module_resolver::TrivialResolver),
     };
     let output = transpile_pipeline(input)?;
     Ok(output
@@ -250,7 +250,7 @@ mod tests {
                 "interface Foo { name: string; }".to_string(),
             )],
             builtin_types: None,
-            module_resolver: Box::new(NullModuleResolver),
+            module_resolver: Box::new(crate::pipeline::module_resolver::TrivialResolver),
         };
         let output = transpile_pipeline(input).unwrap();
         assert_eq!(output.files.len(), 1);
@@ -279,7 +279,7 @@ mod tests {
                 ),
             ],
             builtin_types: None,
-            module_resolver: Box::new(NullModuleResolver),
+            module_resolver: Box::new(crate::pipeline::module_resolver::TrivialResolver),
         };
         let output = transpile_pipeline(input).unwrap();
         assert_eq!(output.files.len(), 3);
@@ -293,7 +293,7 @@ mod tests {
         let input = TranspileInput {
             files: vec![(PathBuf::from("test.ts"), "export default 42;".to_string())],
             builtin_types: None,
-            module_resolver: Box::new(NullModuleResolver),
+            module_resolver: Box::new(crate::pipeline::module_resolver::TrivialResolver),
         };
         let output = transpile_pipeline(input).unwrap();
         assert_eq!(output.files.len(), 1);
@@ -308,7 +308,7 @@ mod tests {
         let input = TranspileInput {
             files: vec![(PathBuf::from("src/foo.ts"), "interface Foo {}".to_string())],
             builtin_types: None,
-            module_resolver: Box::new(NullModuleResolver),
+            module_resolver: Box::new(crate::pipeline::module_resolver::TrivialResolver),
         };
         let output = transpile_pipeline(input).unwrap();
         assert_eq!(output.files[0].path, PathBuf::from("src/foo.rs"));
@@ -373,5 +373,120 @@ mod tests {
         ])
         .unwrap();
         assert_eq!(find_common_root(&parsed), PathBuf::from("project/src"));
+    }
+
+    // ===== Absolute path pipeline integration tests =====
+
+    #[test]
+    fn test_pipeline_absolute_paths_export_all_no_path_leak() {
+        // Regression test: absolute file paths must not leak into generated `use` paths.
+        // Previously, `export * from './types'` with absolute file paths generated
+        // `pub use crate::/tmp/project/helper/conninfo::types::*` instead of
+        // `pub use crate::types::*`.
+        use crate::pipeline::module_resolver::NodeModuleResolver;
+
+        // In production, known_files are absolute paths from collect_ts_files()
+        let root = PathBuf::from("/tmp/project");
+        let known: std::collections::HashSet<PathBuf> = [
+            "/tmp/project/adapter/server.ts",
+            "/tmp/project/adapter/types.ts",
+        ]
+        .iter()
+        .map(PathBuf::from)
+        .collect();
+        let resolver = NodeModuleResolver::new(root, known);
+
+        let input = TranspileInput {
+            files: vec![
+                (
+                    PathBuf::from("/tmp/project/adapter/server.ts"),
+                    "export * from './types';".to_string(),
+                ),
+                (
+                    PathBuf::from("/tmp/project/adapter/types.ts"),
+                    "export interface ConnInfo { address: string; }".to_string(),
+                ),
+            ],
+            builtin_types: None,
+            module_resolver: Box::new(resolver),
+        };
+        let output = transpile_pipeline(input).unwrap();
+
+        // Find the server.ts output (re-export file)
+        let server_output = output
+            .files
+            .iter()
+            .find(|f| f.path.to_str().unwrap().contains("server"))
+            .expect("should have server output");
+
+        // Must contain correct crate path, not absolute filesystem path
+        assert!(
+            server_output.rust_source.contains("crate::"),
+            "output should contain crate:: path: {}",
+            server_output.rust_source
+        );
+        assert!(
+            !server_output.rust_source.contains("/tmp"),
+            "output must not contain absolute path: {}",
+            server_output.rust_source
+        );
+    }
+
+    #[test]
+    fn test_pipeline_absolute_paths_import() {
+        use crate::pipeline::module_resolver::NodeModuleResolver;
+
+        let root = PathBuf::from("/tmp/project");
+        let known: std::collections::HashSet<PathBuf> =
+            ["/tmp/project/adapter/server.ts", "/tmp/project/types.ts"]
+                .iter()
+                .map(PathBuf::from)
+                .collect();
+        let resolver = NodeModuleResolver::new(root, known);
+
+        let input = TranspileInput {
+            files: vec![
+                (
+                    PathBuf::from("/tmp/project/adapter/server.ts"),
+                    "import { Config } from '../types';\nexport const port: number = 8080;"
+                        .to_string(),
+                ),
+                (
+                    PathBuf::from("/tmp/project/types.ts"),
+                    "export interface Config { port: number; }".to_string(),
+                ),
+            ],
+            builtin_types: None,
+            module_resolver: Box::new(resolver),
+        };
+        let output = transpile_pipeline(input).unwrap();
+
+        let server_output = output
+            .files
+            .iter()
+            .find(|f| f.path.to_str().unwrap().contains("server"))
+            .expect("should have server output");
+
+        assert!(
+            !server_output.rust_source.contains("/tmp"),
+            "output must not contain absolute path: {}",
+            server_output.rust_source
+        );
+    }
+
+    #[test]
+    fn test_find_common_root_absolute_paths() {
+        let parsed = parse_files(vec![
+            (
+                PathBuf::from("/tmp/project/adapter/server.ts"),
+                "const x = 1;".to_string(),
+            ),
+            (
+                PathBuf::from("/tmp/project/types.ts"),
+                "const y = 2;".to_string(),
+            ),
+        ])
+        .unwrap();
+        assert_eq!(find_common_root(&parsed), PathBuf::from("/tmp/project"));
     }
 }

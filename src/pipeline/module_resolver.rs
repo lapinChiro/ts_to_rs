@@ -71,6 +71,29 @@ impl ModuleResolver for NodeModuleResolver {
     }
 }
 
+/// Trivial module resolver for single-file mode.
+///
+/// Resolves relative import specifiers (`./foo`, `../bar`) to file paths
+/// using path manipulation only, without filesystem access or known-file validation.
+/// Always adds `.ts` extension. External packages return `None`.
+///
+/// Used instead of [`NullModuleResolver`](super::NullModuleResolver) so that
+/// `ModuleGraph.resolve_import()` can compute module paths even in single-file mode,
+/// eliminating the need for a separate fallback path resolution mechanism.
+pub struct TrivialResolver;
+
+impl ModuleResolver for TrivialResolver {
+    fn resolve(&self, from_file: &Path, specifier: &str) -> Option<PathBuf> {
+        if !specifier.starts_with("./") && !specifier.starts_with("../") {
+            return None;
+        }
+        let from_dir = from_file.parent().unwrap_or(Path::new(""));
+        let joined = from_dir.join(specifier);
+        let normalized = normalize_path(&joined);
+        Some(normalized.with_extension("ts"))
+    }
+}
+
 /// Normalizes a path by resolving `.` and `..` components without filesystem access.
 ///
 /// Example: `adapter/bun/../../helper/conninfo` → `helper/conninfo`
@@ -196,6 +219,58 @@ mod tests {
         let resolver = make_resolver(&["helper/conninfo.ts", "helper/conninfo/index.ts"]);
         let result = resolver.resolve(Path::new("adapter.ts"), "./helper/conninfo");
         assert_eq!(result, Some(PathBuf::from("/project/helper/conninfo.ts")));
+    }
+
+    // --- TrivialResolver tests ---
+
+    #[test]
+    fn test_trivial_resolver_relative_sibling() {
+        let resolver = TrivialResolver;
+        let result = resolver.resolve(Path::new("foo.ts"), "./bar");
+        assert_eq!(result, Some(PathBuf::from("bar.ts")));
+    }
+
+    #[test]
+    fn test_trivial_resolver_relative_parent() {
+        let resolver = TrivialResolver;
+        let result = resolver.resolve(Path::new("sub/foo.ts"), "../bar");
+        assert_eq!(result, Some(PathBuf::from("bar.ts")));
+    }
+
+    #[test]
+    fn test_trivial_resolver_nested_relative() {
+        let resolver = TrivialResolver;
+        let result = resolver.resolve(Path::new("a/b/foo.ts"), "../../c");
+        assert_eq!(result, Some(PathBuf::from("c.ts")));
+    }
+
+    #[test]
+    fn test_trivial_resolver_external_package_returns_none() {
+        let resolver = TrivialResolver;
+        assert_eq!(resolver.resolve(Path::new("foo.ts"), "lodash"), None);
+        assert_eq!(resolver.resolve(Path::new("foo.ts"), "node:fs"), None);
+        assert_eq!(resolver.resolve(Path::new("foo.ts"), "@scope/pkg"), None);
+    }
+
+    #[test]
+    fn test_trivial_resolver_root_level_file() {
+        let resolver = TrivialResolver;
+        let result = resolver.resolve(Path::new("app.ts"), "./utils");
+        assert_eq!(result, Some(PathBuf::from("utils.ts")));
+    }
+
+    #[test]
+    fn test_trivial_resolver_nested_subpath() {
+        let resolver = TrivialResolver;
+        let result = resolver.resolve(Path::new("adapter/bun/server.ts"), "./websocket");
+        assert_eq!(result, Some(PathBuf::from("adapter/bun/websocket.ts")));
+    }
+
+    #[test]
+    fn test_trivial_resolver_deeply_nested_parent() {
+        let resolver = TrivialResolver;
+        let result = resolver.resolve(Path::new("adapter/bun/server.ts"), "../../helper/conninfo");
+        assert_eq!(result, Some(PathBuf::from("helper/conninfo.ts")));
     }
 
     // --- normalize_path tests ---

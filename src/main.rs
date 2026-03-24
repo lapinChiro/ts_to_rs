@@ -8,8 +8,9 @@ use clap::{Parser, Subcommand};
 
 use ts_to_rs::directory;
 use ts_to_rs::pipeline::module_resolver::NodeModuleResolver;
+use ts_to_rs::pipeline::module_resolver::TrivialResolver;
 use ts_to_rs::pipeline::output_writer::OutputWriter;
-use ts_to_rs::pipeline::{NullModuleResolver, TranspileInput};
+use ts_to_rs::pipeline::TranspileInput;
 use ts_to_rs::registry::TypeRegistry;
 use ts_to_rs::UnsupportedSyntax;
 
@@ -104,7 +105,7 @@ fn transpile_file(
     let pipeline_input = TranspileInput {
         files: vec![(input.to_path_buf(), ts_source)],
         builtin_types: Some(builtin_types),
-        module_resolver: Box::new(NullModuleResolver),
+        module_resolver: Box::new(TrivialResolver),
     };
     let pipeline_output = ts_to_rs::pipeline::transpile_pipeline(pipeline_input)
         .with_context(|| format!("failed to transpile: {}", input.display()))?;

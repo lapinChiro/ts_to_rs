@@ -73,8 +73,12 @@ run_directory_mode() {
     local dir_compile_clean
     dir_compile_clean=$(run_directory_compile_check "$output_dir")
 
+    # Get Hono commit SHA for reproducibility tracking
+    local hono_sha
+    hono_sha=$(cd "$HONO_SRC" && git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+
     # Analyze and append to history
-    python3 "$SCRIPT_DIR/analyze-bench.py" "$json_file" "$total" "$HONO_CLEAN" "$compile_clean" "$dir_compile_clean"
+    python3 "$SCRIPT_DIR/analyze-bench.py" "$json_file" "$total" "$HONO_CLEAN" "$compile_clean" "$dir_compile_clean" "$hono_sha"
 }
 
 run_compile_check() {

@@ -62,13 +62,6 @@ impl<'a> Transformer<'a> {
         self.tctx.type_registry
     }
 
-    /// 現在のファイルのディレクトリパス（crate ルート相対）。
-    ///
-    /// `tctx.file_path.parent()` から取得する。import パス解決に使用。
-    pub(crate) fn current_file_dir(&self) -> Option<&'a str> {
-        self.tctx.file_path.parent().and_then(|p| p.to_str())
-    }
-
     /// 単一モジュール変換用のヘルパー。
     ///
     /// 空の ModuleGraph / FileTypeResolution / file_path で TransformContext を構築し、
@@ -292,8 +285,7 @@ impl<'a> Transformer<'a> {
             }
             ModuleItem::ModuleDecl(ModuleDecl::ExportAll(export_all)) => {
                 let src = export_all.src.value.to_string_lossy().into_owned();
-                if src.starts_with("./") || src.starts_with("../") {
-                    let path = self.resolve_import_path_with_fallback(&src, "*");
+                if let Some(path) = self.resolve_import_path(&src, "*") {
                     Ok((
                         vec![Item::Use {
                             vis: Visibility::Public,
@@ -303,7 +295,7 @@ impl<'a> Transformer<'a> {
                         vec![],
                     ))
                 } else {
-                    // External package re-exports are skipped
+                    // External package or unresolvable re-exports are skipped
                     Ok((vec![], vec![]))
                 }
             }
@@ -318,23 +310,19 @@ impl<'a> Transformer<'a> {
         }
     }
 
-    /// Resolves an import path using ModuleGraph first, falling back to heuristic path conversion.
+    /// Resolves an import path to a Rust `crate::` module path via ModuleGraph.
     ///
-    /// When `ModuleGraph.resolve_import()` succeeds, the resolved module path is used.
-    /// This handles re-export chains correctly (e.g., importing `Config` from `./index`
-    /// which re-exports from `./types` → resolves to `crate::types`).
+    /// Handles re-export chains (e.g., importing `Config` from `./index`
+    /// which re-exports from `./types` → resolves to `crate::types`),
+    /// wildcard re-exports (`export * from './types'`), and single-file mode
+    /// (where import targets are not in parsed files).
     ///
-    /// When resolution fails (single-file mode, external packages, or unresolvable paths),
-    /// falls back to [`convert_relative_path_to_crate_path`].
-    fn resolve_import_path_with_fallback(&self, specifier: &str, name: &str) -> String {
-        if let Some(resolved) =
-            self.tctx
-                .module_graph
-                .resolve_import(self.tctx.file_path, specifier, name)
-        {
-            return resolved.module_path;
-        }
-        convert_relative_path_to_crate_path(specifier, self.current_file_dir())
+    /// Returns `None` for external packages or unresolvable specifiers.
+    fn resolve_import_path(&self, specifier: &str, name: &str) -> Option<String> {
+        self.tctx
+            .module_graph
+            .resolve_import(self.tctx.file_path, specifier, name)
+            .map(|resolved| resolved.module_path)
     }
 
     /// Transforms an import declaration into IR [`Item::Use`] items.
@@ -366,13 +354,15 @@ impl<'a> Transformer<'a> {
 
         // Resolve each name through ModuleGraph to handle re-export chains.
         // Names resolving to different module paths produce separate use items.
+        // Unresolvable names (external packages) are silently dropped.
         let mut path_groups: Vec<(String, Vec<String>)> = Vec::new();
         for name in &names {
-            let path = self.resolve_import_path_with_fallback(&src, name);
-            if let Some(group) = path_groups.iter_mut().find(|(p, _)| p == &path) {
-                group.1.push(name.clone());
-            } else {
-                path_groups.push((path, vec![name.clone()]));
+            if let Some(path) = self.resolve_import_path(&src, name) {
+                if let Some(group) = path_groups.iter_mut().find(|(p, _)| p == &path) {
+                    group.1.push(name.clone());
+                } else {
+                    path_groups.push((path, vec![name.clone()]));
+                }
             }
         }
 
@@ -429,11 +419,12 @@ impl<'a> Transformer<'a> {
         // Resolve each name through ModuleGraph (same logic as transform_import)
         let mut path_groups: Vec<(String, Vec<String>)> = Vec::new();
         for name in &names {
-            let path = self.resolve_import_path_with_fallback(&src_str, name);
-            if let Some(group) = path_groups.iter_mut().find(|(p, _)| p == &path) {
-                group.1.push(name.clone());
-            } else {
-                path_groups.push((path, vec![name.clone()]));
+            if let Some(path) = self.resolve_import_path(&src_str, name) {
+                if let Some(group) = path_groups.iter_mut().find(|(p, _)| p == &path) {
+                    group.1.push(name.clone());
+                } else {
+                    path_groups.push((path, vec![name.clone()]));
+                }
             }
         }
 
@@ -528,54 +519,6 @@ impl<'a> Transformer<'a> {
         }
     }
 } // end impl Transformer (module-level transformation)
-
-/// Converts a TypeScript relative import path to a Rust `crate::` path.
-///
-/// `current_file_dir` is the directory of the importing file, relative to the
-/// crate root (e.g., `Some("adapter/bun")` for `adapter/bun/server.ts`).
-/// When `None`, the file is assumed to be at the crate root.
-/// Hyphens in path segments are replaced with underscores.
-fn convert_relative_path_to_crate_path(rel_path: &str, current_file_dir: Option<&str>) -> String {
-    let resolved = if rel_path.starts_with("../") {
-        // Resolve parent-relative paths using the current file's directory
-        let base_parts: Vec<&str> = current_file_dir
-            .unwrap_or("")
-            .split('/')
-            .filter(|s| !s.is_empty())
-            .collect();
-        let mut parts = base_parts;
-        let mut remaining = rel_path;
-        while let Some(rest) = remaining.strip_prefix("../") {
-            parts.pop();
-            remaining = rest;
-        }
-        // remaining may still have ./ prefix
-        let remaining = remaining.strip_prefix("./").unwrap_or(remaining);
-        if remaining.is_empty() {
-            parts.join("/")
-        } else {
-            let suffix = remaining;
-            if parts.is_empty() {
-                suffix.to_string()
-            } else {
-                format!("{}/{suffix}", parts.join("/"))
-            }
-        }
-    } else {
-        // ./foo or ./sub/bar — resolve relative to current file's directory
-        let stripped = rel_path.strip_prefix("./").unwrap_or(rel_path);
-        match current_file_dir {
-            Some(dir) if !dir.is_empty() => format!("{dir}/{stripped}"),
-            _ => stripped.to_string(),
-        }
-    };
-
-    let crate_path: Vec<String> = resolved
-        .split('/')
-        .map(|seg| seg.replace('-', "_"))
-        .collect();
-    format!("crate::{}", crate_path.join("::"))
-}
 
 /// Converts a TS enum declaration into an IR [`Item::Enum`].
 ///

@@ -35,7 +35,7 @@ P1〜P7 で新パイプラインの全コンポーネントが実装された。
   - 旧ラッパー API（`transpile_with_registry` / `transpile_with_registry_and_path` / `transpile_collecting_with_registry` / `transpile_collecting_with_registry_and_path`）と `build_shared_registry` は削除済み
 - 既存 `main.rs` の置換 → **Phase C で実施済み**:
   - ディレクトリモード: `TranspileInput` + `NodeModuleResolver` → `transpile_pipeline` → `OutputWriter`
-  - 単一ファイルモード: `TranspileInput` + `NullModuleResolver` → `transpile_pipeline` → ファイル書き出し
+  - 単一ファイルモード: `TranspileInput` + `TrivialResolver` → `transpile_pipeline` → ファイル書き出し
 - AnyTypeAnalyzer の SyntheticTypeRegistry 完全統合（P4 から繰り越し）:
   - `generate_any_enum`（`src/transformer/any_narrowing.rs:84`）が現在 `(Item, RustType)` を直接返し、呼び出し元（`src/transformer/functions/mod.rs:106,136,1173`、`src/registry.rs:1067,1100`）が Item を `items` に push する方式
   - 統一パイプラインでは、`generate_any_enum` が SyntheticTypeRegistry に登録し、Item は返さない方式に変更。Transformer は SyntheticTypeRegistry から `all_items()` で取得する
@@ -44,7 +44,7 @@ P1〜P7 で新パイプラインの全コンポーネントが実装された。
   - Transformer 内の合成型直接 push が全て SyntheticTypeRegistry 経由になった時点で達成される
   - コンパイルテスト `type-narrowing` のスキップ解除もここで行う
 - 不要コードの削除（完了済み / 残作業の状態）:
-  - `convert_relative_path_to_crate_path` → **D1 で削除済み**（ModuleGraph lookup + fallback に置換）
+  - `convert_relative_path_to_crate_path` → **Phase E で完全削除（C案: フォールバック廃止、TrivialResolver 導入）**（ModuleGraph lookup + fallback に置換）
   - `ExprContext` → **Phase 2 で削除済み**（TypeResolver の expected_types に一本化）
   - `resolve_expr_type` / `resolve_expr_type_heuristic` → **Phase 3-2 で削除済み**（TypeResolver の expr_types に一本化）
   - `set_expected_types_in_nested_calls` → **Phase 3-5 で削除済み**（resolve_call_expr の再帰で自然に解消）
@@ -138,7 +138,7 @@ pub fn transpile_single(source: &str) -> Result<String> {
     let input = TranspileInput {
         files: vec![(PathBuf::from("input.ts"), source.to_string())],
         builtin_types: None,
-        module_resolver: Box::new(NullModuleResolver),
+        module_resolver: Box::new(TrivialResolver),
     };
     let output = transpile(input)?;
     Ok(output.files.into_iter().next().unwrap().rust_source)
@@ -159,7 +159,7 @@ pub fn transpile_collecting(source: &str) -> Result<(String, Vec<UnsupportedSynt
     let input = TranspileInput {
         files: vec![(PathBuf::from("input.ts"), source.to_string())],
         builtin_types: None,
-        module_resolver: Box::new(NullModuleResolver),
+        module_resolver: Box::new(TrivialResolver),
     };
     let output = pipeline::transpile(input)?;
     let file = output.files.into_iter().next().unwrap();
@@ -194,7 +194,7 @@ let rust_source = pipeline::transpile_single(&source)?;
 
 | 削除対象 | ファイル | 置換先 | 現在の状態 |
 |---------|---------|--------|------|
-| `convert_relative_path_to_crate_path` | `src/transformer/mod.rs` | `ModuleGraph.resolve_import()` | **D1 で完了済み** |
+| `convert_relative_path_to_crate_path` | `src/transformer/mod.rs` | `ModuleGraph.resolve_import()` + `TrivialResolver` | **Phase E で完全削除（C案: フォールバック廃止）** |
 | `transpile_directory` (旧実装) | `src/main.rs` | 統一パイプライン + `OutputWriter` | **Phase C で削除済み** |
 | `build_shared_registry` | `src/lib.rs` | `transpile_pipeline` 内の型収集 | **リファクタリングで削除済み** |
 | `transpile_with_registry` 系 4 関数 | `src/lib.rs` | `transpile()` / `transpile_collecting()` | **リファクタリングで削除済み** |
@@ -207,8 +207,8 @@ let rust_source = pipeline::transpile_single(&source)?;
 
 ### 残作業（実施順）
 
-1. **D-2**: Transformer struct 導入（106 関数のメソッド化）— `tasks.d2-transformer-struct.md`
-2. **Phase E**: 最終検証
+1. ~~**D-2**: Transformer struct 導入~~ → 完了済み
+2. **Phase E**: 最終検証（E5: doc コメント確認 + E-commit が残り）
 
 ## 作業ステップ
 
@@ -246,7 +246,7 @@ let rust_source = pipeline::transpile_single(&source)?;
 削除済み:
 - ~~`ExprContext` の削除~~ → Phase 2 で完了
 - ~~`resolve_expr_type` / `resolve_expr_type_heuristic` の削除~~ → Phase 3-2 で完了
-- ~~`convert_relative_path_to_crate_path` の削除~~ → D1 で完了
+- ~~`convert_relative_path_to_crate_path` の削除~~ → Phase E で完全削除（C案: TrivialResolver 導入 + ModuleGraph 一本化）
 - ~~`transpile_directory` 旧実装の削除~~ → Phase C で完了
 - ~~分散した合成型生成の残骸の削除~~ → D0a で完了
 - ~~P1 のブリッジ実装の削除~~ → Phase A で完了
@@ -289,7 +289,7 @@ let rust_source = pipeline::transpile_single(&source)?;
 ## 完了条件
 
 **注記**: P2〜P7 からの繰り越し項目の進捗:
-- `convert_relative_path_to_crate_path` → **D1 で削除済み**
+- `convert_relative_path_to_crate_path` → **Phase E で完全削除（C案: フォールバック廃止、TrivialResolver 導入）**
 - `SyntheticTypeRegistry` で合成型一元管理 → **D0a で達成済み**
 - I-212（enum 重複定義）→ **P8 で構造的に解消済み**
 - `ExprContext` → **Phase 2 で削除済み**

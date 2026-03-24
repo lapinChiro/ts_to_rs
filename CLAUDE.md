@@ -41,7 +41,8 @@ cat bench-history.jsonl | python3 -c "
 import sys, json
 entries = sorted([json.loads(l) for l in sys.stdin if l.strip()], key=lambda e: e['timestamp'])
 for r in entries:
-    print(f\"{r['timestamp'][:10]}  {r['git_sha']}  clean={r['clean_files']}/{r['total_files']} ({r['clean_pct']}%)  errors={r['error_instances']}\")
+    hono = r.get('hono_sha', 'N/A')
+    print(f\"{r['timestamp'][:10]}  {r['git_sha']}  hono={hono}  clean={r['clean_files']}/{r['total_files']} ({r['clean_pct']}%)  errors={r['error_instances']}\")
 "
 ```
 

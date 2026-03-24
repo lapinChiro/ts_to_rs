@@ -107,7 +107,11 @@ impl<'a> ModuleGraphBuilder<'a> {
             file_to_module,
             exports,
             root_dir: self.root_dir.to_path_buf(),
-            resolver: Box::new(SnapshotResolver::new(self.resolver, self.parsed_files)),
+            resolver: Box::new(SnapshotResolver::new(
+                self.resolver,
+                self.parsed_files,
+                self.root_dir,
+            )),
         }
     }
 
@@ -223,13 +227,18 @@ impl<'a> ModuleGraphBuilder<'a> {
 }
 
 impl ModuleGraph {
-    /// Creates an empty module graph (for single-file mode or testing).
+    /// Creates an empty module graph with a `TrivialResolver`.
+    ///
+    /// Used for single-file mode and testing. The `TrivialResolver` resolves
+    /// relative import specifiers to file paths by path manipulation,
+    /// allowing `resolve_import()` to compute module paths dynamically
+    /// without requiring parsed target files.
     pub fn empty() -> Self {
         Self {
             file_to_module: HashMap::new(),
             exports: HashMap::new(),
             root_dir: PathBuf::new(),
-            resolver: Box::new(super::NullModuleResolver),
+            resolver: Box::new(super::module_resolver::TrivialResolver),
         }
     }
 
@@ -243,23 +252,35 @@ impl ModuleGraph {
         specifier: &str,
         name: &str,
     ) -> Option<ResolvedImport> {
-        let from_rel = strip_root(from_file, &self.root_dir);
-        let target_path = self.resolver.resolve(&from_rel, specifier)?;
+        let target_path = self.resolver.resolve(from_file, specifier)?;
 
-        // Check exports map for re-export chain resolution
-        if let Some(exports) = self.exports.get(&target_path) {
-            if let Some(origin) = exports.get(name) {
-                return Some(ResolvedImport {
-                    module_path: origin.module_path.clone(),
-                    name: origin.name.clone(),
-                });
+        // Wildcard exports (`export * from './types'`) don't have named entries
+        // in the exports map. Return the target file's module path directly.
+        if name != "*" {
+            // Check exports map for re-export chain resolution
+            if let Some(exports) = self.exports.get(&target_path) {
+                if let Some(origin) = exports.get(name) {
+                    return Some(ResolvedImport {
+                        module_path: origin.module_path.clone(),
+                        name: origin.name.clone(),
+                    });
+                }
             }
         }
 
-        // Fallback: use the target file's module path directly
-        let module_path = self.file_to_module.get(&target_path)?;
+        // Use the target file's module path from the file_to_module map,
+        // or compute it dynamically for files not in the parsed set
+        // (e.g., single-file mode where import targets are not parsed).
+        let module_path = self
+            .file_to_module
+            .get(&target_path)
+            .cloned()
+            .unwrap_or_else(|| {
+                let rel = strip_root(&target_path, &self.root_dir);
+                file_path_to_module_path(&rel)
+            });
         Some(ResolvedImport {
-            module_path: module_path.clone(),
+            module_path,
             name: name.to_string(),
         })
     }
@@ -354,7 +375,10 @@ impl std::fmt::Debug for SnapshotResolver {
 
 impl SnapshotResolver {
     /// Builds a snapshot by pre-resolving all imports found in parsed files.
-    fn new(resolver: &dyn ModuleResolver, parsed_files: &ParsedFiles) -> Self {
+    ///
+    /// Cache keys use root-relative paths (via `strip_root`) to ensure consistency
+    /// with `resolve_import()`, which also strips the root before querying.
+    fn new(resolver: &dyn ModuleResolver, parsed_files: &ParsedFiles, _root_dir: &Path) -> Self {
         let mut cache = HashMap::new();
         for file in &parsed_files.files {
             for item in &file.module.body {
@@ -372,7 +396,6 @@ impl SnapshotResolver {
                     _ => None,
                 };
                 if let Some(spec) = specifier {
-                    // Use the file path directly as the from_file for resolution
                     if let Some(target) = resolver.resolve(&file.path, &spec) {
                         cache.insert((file.path.clone(), spec), target);
                     }
@@ -864,5 +887,152 @@ mod tests {
     fn test_sanitize_module_name_normal() {
         assert_eq!(sanitize_module_name("foo"), "foo");
         assert_eq!(sanitize_module_name("bar_baz"), "bar_baz");
+    }
+
+    // --- resolve_import: wildcard (export *) ---
+
+    #[test]
+    fn test_resolve_import_wildcard_returns_target_module_path() {
+        // `export * from './types'` should resolve to the target file's module path
+        let graph = build_graph(&[
+            ("index.ts", "export * from './types';"),
+            ("types.ts", "export interface Foo {}"),
+        ]);
+        let result = graph.resolve_import(Path::new("index.ts"), "./types", "*");
+        assert_eq!(
+            result,
+            Some(ResolvedImport {
+                module_path: "crate::types".to_string(),
+                name: "*".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn test_resolve_import_wildcard_nested_dir() {
+        let graph = build_graph(&[
+            (
+                "adapter/bun/index.ts",
+                "export * from '../../helper/types';",
+            ),
+            ("helper/types.ts", "export interface Config {}"),
+        ]);
+        let result =
+            graph.resolve_import(Path::new("adapter/bun/index.ts"), "../../helper/types", "*");
+        assert_eq!(
+            result,
+            Some(ResolvedImport {
+                module_path: "crate::helper::types".to_string(),
+                name: "*".to_string(),
+            })
+        );
+    }
+
+    // --- resolve_import: unknown target file (not in parsed files) ---
+
+    #[test]
+    fn test_resolve_import_unknown_file_computes_module_path() {
+        // When the target file is resolved by the resolver but not in file_to_module,
+        // resolve_import should compute the module path dynamically
+        use crate::pipeline::module_resolver::TrivialResolver;
+
+        let parsed = make_parsed_files(&[("app.ts", "import { Foo } from './unknown';")]);
+        let resolver = TrivialResolver;
+        let root = Path::new("");
+        let graph = ModuleGraphBuilder::new(&parsed, &resolver, root).build();
+
+        let result = graph.resolve_import(Path::new("app.ts"), "./unknown", "Foo");
+        assert_eq!(
+            result,
+            Some(ResolvedImport {
+                module_path: "crate::unknown".to_string(),
+                name: "Foo".to_string(),
+            })
+        );
+    }
+
+    // --- absolute paths ---
+
+    #[test]
+    fn test_resolve_import_absolute_paths_export_all() {
+        // Simulates directory mode with absolute paths (the production scenario).
+        // In production, collect_ts_files() returns absolute paths and
+        // known_files are also absolute paths.
+        use crate::pipeline::module_resolver::NodeModuleResolver;
+
+        let root = PathBuf::from("/tmp/project");
+        let known: HashSet<PathBuf> = [
+            "/tmp/project/helper/conninfo/index.ts",
+            "/tmp/project/helper/conninfo/types.ts",
+        ]
+        .iter()
+        .map(PathBuf::from)
+        .collect();
+        let resolver = NodeModuleResolver::new(root.clone(), known);
+
+        let parsed = make_parsed_files(&[
+            (
+                "/tmp/project/helper/conninfo/index.ts",
+                "export * from './types';",
+            ),
+            (
+                "/tmp/project/helper/conninfo/types.ts",
+                "export interface ConnInfo {}",
+            ),
+        ]);
+
+        let graph = ModuleGraphBuilder::new(&parsed, &resolver, &root).build();
+
+        // resolve_import should work with absolute from_file
+        let result = graph.resolve_import(
+            Path::new("/tmp/project/helper/conninfo/index.ts"),
+            "./types",
+            "*",
+        );
+        assert_eq!(
+            result,
+            Some(ResolvedImport {
+                module_path: "crate::helper::conninfo::types".to_string(),
+                name: "*".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn test_resolve_import_absolute_paths_named_import() {
+        use crate::pipeline::module_resolver::NodeModuleResolver;
+
+        let root = PathBuf::from("/tmp/project");
+        let known: HashSet<PathBuf> = [
+            "/tmp/project/adapter/bun/server.ts",
+            "/tmp/project/context.ts",
+        ]
+        .iter()
+        .map(PathBuf::from)
+        .collect();
+        let resolver = NodeModuleResolver::new(root.clone(), known);
+
+        let parsed = make_parsed_files(&[
+            (
+                "/tmp/project/adapter/bun/server.ts",
+                "import { Context } from '../../context';",
+            ),
+            ("/tmp/project/context.ts", "export class Context {}"),
+        ]);
+
+        let graph = ModuleGraphBuilder::new(&parsed, &resolver, &root).build();
+
+        let result = graph.resolve_import(
+            Path::new("/tmp/project/adapter/bun/server.ts"),
+            "../../context",
+            "Context",
+        );
+        assert_eq!(
+            result,
+            Some(ResolvedImport {
+                module_path: "crate::context".to_string(),
+                name: "Context".to_string(),
+            })
+        );
     }
 }
