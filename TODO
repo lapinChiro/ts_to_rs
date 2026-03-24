@@ -8,7 +8,6 @@
 - **Rules/Skills/CLAUDE.mdの言語**: これらは英語で記載した方が効率的なのではないか。レスポンスだけ日本語にして、読み込まれるファイルはすべて英語の方が良いのではないか
 - **数1000行になっているファイルの見直し**: ファイル行数が多くなりすぎると、作業効率が急激に低下する。DRYであり直交性が保たれていることを担保したうえでリファクタリングし、全てのファイルの行数を1000行以下になるようにする。800行を超えるが分割が合理的ではない理由がある場合は相談する。対象はプロダクションコードとテストコードのすべてとする
 - **現在の実装の徹底的なレビュー**: どのような実装が理想的であるか、どのような観点でレビューしなければいけないかを言語化し、詳細な観点リストを作成したうえで、レビューを行う。作成した観点リスト、理想的な実装の説明文書はルールやスキルなど、適切な方法で永続化し、今後の実装が理想的にあり続けるようにする。
-- **モジュール参照の解決システム検討**: import/exportマップを作成し、それを解析することで参照を再構築する。このようにした方が、確実にuseすることができるのではないか。つまり、import/exportは逐次変換するのではなく、先に解析し、それに基づいてRust側でモジュール間の関係性をマッピングし構築しなおす、という手法の可能性と合理的な方法かの検討を行う
 
 
 ## 運用ルール
@@ -27,7 +26,7 @@
 - **スコープ外** — 明示的に対象外。需要発生時に再評価
 
 件数は Hono ベンチマーク（`./scripts/hono-bench.sh`）の実測値に基づく。
-158 ファイル中 84 ファイルがクリーン（53.2%）、133 エラーインスタンス。コンパイルクリーン: ファイル単位 83（52.5%）、ディレクトリ単位 145（91.8%）。
+158 ファイル中 86 ファイルがクリーン（54.4%）、132 エラーインスタンス。コンパイルクリーン: ファイル単位 85（53.8%）、ディレクトリ単位 156（98.7%）。
 **注意**: ベンチマーク実行前に `cargo build --release` が必要。古いビルドで実行すると数値が不正確になる。
 **補足**: 「クリーン」は変換エラーなし（`--report-unsupported` でエラー 0）を意味する。コンパイルクリーンは2指標: ファイル単位（use 除去後の個別コンパイル）とディレクトリ単位（全ファイルを1クレートとしてコンパイル）。
 
@@ -42,6 +41,8 @@
 - **チェーンメソッド型追跡**: `MethodSignature`（パラメータ + 戻り値型）を TypeRegistry に格納。`TypeResolver::resolve_method_return_type` でメソッド呼び出しの戻り値型を解決。ユーザー定義型・外部型のチェーンメソッドで動作。ビルトイン String/Array は I-211（ECMAScript 標準型追加）待ち
 - **ジェネリクス基盤**: `TypeParam`（名前 + 制約）を IR に定義。`TypeDef::Struct`/`Enum` に `type_params` 格納。`RustType::substitute` で型パラメータの具体型置換。`TypeRegistry::instantiate` でジェネリック型のインスタンス化。`resolve_field_type`/`TypeResolver::resolve_method_return_type` で `type_args` を使った具体型解決。`Item::Struct`/`Trait`/`Fn`/`TypeAlias` の型パラメータに制約（`T: Bound`）を出力
 - **ディレクトリモード改善**: 中間ディレクトリ（サブディレクトリのみ）の mod.rs 生成。`../` import パスの `crate::` パス解決。ハイフン入りファイル名のアンダースコア変換。ディレクトリ単位コンパイルチェック（ベンチマーク 2 指標並行計測）
+- **モジュール参照解決の一本化**: `ModuleGraph` が全ファイルの import/export を事前解析し re-export チェーンを解決。`TrivialResolver`（単一ファイルモード用）導入。フォールバック（`convert_relative_path_to_crate_path`）を廃止し、パス→モジュールパス変換を `file_path_to_module_path()` に集約
+- **I-212 union 型 enum 重複定義の解消**: per-file `SyntheticTypeRegistry` の `register_union` dedup により、同一ファイル内の同じ union 型は 1 つの enum に統一
 
 ---
 
@@ -54,8 +55,8 @@
 | **完了: E2E I/O テスト基盤** | ~~I-49/I-50~~ **達成** | fs/process.env/stdin + E2E テスト基盤 |
 | **完了: Interface → Trait** | ~~I-137/I-127~~ **達成** | interface 3 分類 + extends + 交差型 |
 | **完了: コンパイル可能性の基盤** | ~~I-61/I-100~~ **達成** | チェーンメソッド型追跡 + ジェネリクス基盤 |
-| **次: 変換率の大幅改善** | エラーインスタンス < 50 件 | I-112c（74 件、全エラーの 55.6%）が最大のレバレッジ。I-218（ジェネリクス残課題）、I-211（ビルトイン型）で基盤強化 |
-| **その次: コンパイル品質** | ディレクトリコンパイルエラー 0 件 | 構文エラー修正（I-222, I-223）、個別未対応構文の解消 |
+| **次: 変換率の大幅改善** | エラーインスタンス < 50 件 | I-112c（70 件、全エラーの 53.0%）が最大のレバレッジ。I-218（ジェネリクス残課題）、I-211（ビルトイン型）で基盤強化 |
+| **その次: コンパイル品質** | ディレクトリコンパイルエラー 0 件 | I-227（enum 名生成）、I-223（エスケープ）、I-236（re-export 余分 `}`）の解消 |
 | **その次: テスト拡充** | E2E テスト網羅性 | E2E テストの拡充（I-20, I-71, I-72, I-74）、HTTP 対応（I-183） |
 
 ---
@@ -79,18 +80,38 @@
   - 解決策: default を常に最後のアームに移動する
   - 発生頻度は極めて低いが、サイレント意味変更カテゴリのため Tier 1
 
+#### アーキテクチャ（伝播防止最優先）
+
+- **[I-226]** **`TypeEnv` の完全除去 — Transformer から `type_env` を除去** — 伝播リスク最大
+  - **理想的な姿**: 全ての型情報を TypeResolver の pre-pass 結果（`FileTypeResolution`）から読み取る。型情報の源泉が一本化され、TypeResolver と Transformer の間の型不整合が構造的に排除される
+  - **除去すべき理由**: TypeResolver（`src/pipeline/type_resolver.rs`）と TypeEnv（`src/transformer/type_env.rs`）が同一の情報を並行保持する DRY 違反。新しい変換構文を追加するたびに両方を更新する必要があり、一方の更新漏れがサイレントな型不整合を生む。**対応構文が増えるほど除去コストが膨らむため、他の型関連タスク（I-112c, I-218 等）より先に対応すべき**
+  - **現在の `type_env` 用途（プロダクションコード）**: `get()` 8箇所（6ファイル）、`insert()` 16箇所（5ファイル）、`push_scope()`/`pop_scope()` 各2箇所（`statements/mod.rs`, `expressions/mod.rs`）
+  - **用途の分類と置換方針**:
+    1. **Narrowing ガード** (`expressions/mod.rs:175-188`, `expressions/patterns.rs:276,403`): if/else の narrowing スコープ。`type_env.get(var_name)` で元の型を取得し、`push_scope` → `insert(narrowed)` → body 変換 → `pop_scope`。**置換方針**: TypeResolver の `FileTypeResolution` が同じ情報を提供済み。TypeEnv の narrowing 用 push_scope/pop_scope を削除すれば、この分類の全用途が消滅する
+    2. **DU match arm フィールドバインディング** (`statements/mod.rs:2063-2078`, `member_access.rs:256`): switch → match 変換時に destructuring されたフィールド変数を match arm スコープに登録。`member_access.rs:256` で「この変数名が TypeEnv に存在するか」をチェックし、match arm 内のフィールドアクセスを clone に変換。**置換方針**: Transformer が match arm 生成時に IR レベルでバインディング情報を保持し、member_access 変換で参照する
+    3. **変数宣言の型登録** (`statements/mod.rs:363,392,455,1195,1204,1208`): 明示的型注釈 or `get_expr_type` で推論した型を登録。後続の式変換で `type_env.get(name)` により参照される。**置換方針**: TypeResolver は既に全変数の型を `scope_stack` で追跡しており、`expr_types` 経由で参照可能。ただし名前（文字列）で参照する箇所は、AST ノードのスパンが必要になるため参照方法の変更が必要
+    4. **関数パラメータの型登録** (`functions/mod.rs:165`, `classes.rs:759`, `statements/mod.rs:2720`): 関数 body 変換前にパラメータ型を登録。**置換方針**: TypeResolver が既にパラメータをスコープに登録し、body 内の式の型を解決済み。`expr_types` 経由で参照可能
+    5. **any-narrowing enum オーバーライド** (`functions/mod.rs:172,1176`, `statements/mod.rs:119`): AnyTypeAnalyzer が生成した enum 型で Any 型を上書き。**置換方針**: AnyTypeAnalyzer の結果を TypeResolver に統合し、`resolve_expr` が Any 型の変数に対して enum 型を返すようにする
+    6. **関数型変数の参照** (`calls.rs:44`): `type_env.get(&fn_name)` で Fn 型を参照し、パラメータ型を取得。**置換方針**: `get_expr_type(tctx, callee_expr)` で Fn 型を取得可能
+  - **依存**: 分類 1 の除去（TypeEnv の narrowing 用 push_scope/pop_scope 削除）が前提。これが完了すると残る用途は分類 2〜6 のみ
+  - 伝播リスク: 新機能追加時に TypeResolver と TypeEnv の両方を更新する必要がある現状が続く
+
+#### 型基盤の穴埋め（伝播防止）
+
+- **[I-218]** **ジェネリクス基盤の残課題** — `TypeParam`/`instantiate`/`substitute` の基盤は構築済みだが、以下が未対応。**`type_params` 参照が 169箇所、`Item::Impl` 生成が 43箇所あり、ジェネリクスに依存する機能（I-112c, I-101 等）を先に実装すると「type_params が空のときの回避策」が蓄積するため、I-112c より先に対応すべき**
+  - `collect_class_info`（`src/registry.rs:500`）が class の `type_params` を収集しない。`class Foo<T> { value: T }` の TypeDef に type_params が格納されず、`instantiate` が効かない。`class.class.type_params` から `collect_type_params`（`src/registry.rs:565`）で収集すべき
+  - `Item::Impl`（`src/ir.rs:303`）に `type_params` がない。`impl<T> Container<T>` のような generic impl が生成できず `impl Container` になる。ジェネリック struct の impl ブロック全てに影響
+  - `substitute_types`（`src/registry.rs:108`）が `TypeDef::Enum` の `variant_fields` を代入しない（147行目で `clone()` のみ）。ジェネリック discriminated union で型パラメータが具体化されない
+  - `collect_decl`（`src/registry.rs:366`）の `TsTypeAlias` 分岐（`src/registry.rs:402`）で `type_params` を収集していない。`type Pair<A,B> = { ... }` が非ジェネリックとして登録される
+
 #### 型変換・型推論（レバレッジ最大）
 
-- **[I-112c]** **型注釈なし変数のオブジェクトリテラル** — **74 インスタンス**（全 133 エラーの 55.6%）
+- **[I-112c]** **型注釈なし変数のオブジェクトリテラル** — **70 インスタンス**（全 132 エラーの 53.0%）
   - `const obj = { key: value }` のように型注釈がないオブジェクトリテラルで、struct 名が推定できずエラーになる
   - エラーメッセージ: `object literal requires a type annotation to determine struct name`
   - Hono の最大のエラーカテゴリ。解消すれば変換成功率が大幅に改善する
   - 解決策: 代入先の型、関数引数の型、return 文の戻り値型などから struct 名を推定する。推定できない場合は匿名構造体（タプル struct or インライン定義）を検討
-- **[I-218]** **ジェネリクス基盤の残課題** — I-100 で構築した基盤の未対応箇所
-  - `collect_class_info`（`src/registry.rs:482`）が class の `type_params` を収集しない。`class Foo<T> { value: T }` の TypeDef に type_params が格納されず、`instantiate` が効かない。`class.class.type_params` から `collect_type_params` で収集すべき
-  - `Item::Impl`（`src/ir.rs:303`）に `type_params` がない。`impl<T> Container<T>` のような generic impl が生成できず `impl Container` になる。ジェネリック struct の impl ブロック全てに影響
-  - `substitute_types`（`src/registry.rs:114`）が `TypeDef::Enum` の `variant_fields` を代入しない（`clone()` のみ）。ジェネリック discriminated union で型パラメータが具体化されない
-  - type alias の registry 登録時（`src/registry.rs` の `collect_decl` 内 `TsTypeAlias` 分岐）に `type_params` を収集していない。`type Pair<A,B> = { ... }` が非ジェネリックとして登録される
+  - 🔗 I-226（TypeEnv 除去）と I-218（ジェネリクス穴埋め）の完了後に着手すべき。TypeResolver 一本化済み + ジェネリクス正常化済みの状態で実装することで、workaround を避けられる
 
 #### ビルトイン型
 
@@ -104,13 +125,11 @@
     2. `[1,2,3].map(...).filter(...)` で `filter` のレシーバ型が `Vec<f64>` と解決される
     3. E2E テスト `method_chain.ts` に配列チェーンのテストケースを追加する（I-217 の解消も前提）
 
+### Tier 2: 中優先度 — 変換品質・基盤整備
+
 #### import/export
 
-- **[I-18]** **re-export の追跡** — import/export
-  - `export * from './module'`（`ExportAll`）は部分的に動作。予約語モジュール名でコンパイルエラーになるケースあり
-  - 名前付き re-export `export { X } from './module'` の追跡も含む
-
-### Tier 2: 中優先度 — 変換品質・基盤整備
+- **[I-18]** **re-export の残課題** — ワイルドカード・re-export チェーンは対応済み。残存: 予約語モジュール名でのコンパイルエラー、EXPORT_ALL 1 インスタンス
 
 #### 生成コードの品質基盤
 
@@ -146,29 +165,14 @@
   - クラス宣言の走査時（`visit_class_decl`）に、メソッドスコープ内で `this` の型をクラス自身の `Named` 型としてスコープに登録する必要がある
   - `this.field` のフィールドアクセスや `this.method()` のメソッド呼び出しの型解決に影響
   - 解決策: `visit_class_decl` でクラス名を記録し、メソッド走査時にスコープに `self` / `this` を `RustType::Named { name: class_name }` として登録する
-- **[I-226]** **`TypeEnv` の完全除去 — Transformer から `type_env` パラメータを除去** — アーキテクチャ
-  - **理想的な姿**: Transformer が独自の型追跡（`type_env.insert`/`get`）を一切持たず、全ての型情報を TypeResolver の pre-pass 結果（`FileTypeResolution`）から読み取る。型情報の源泉が一本化され、TypeResolver と Transformer の間の型不整合が構造的に排除される
-  - **除去すべき理由**: 現在 TypeResolver（`src/pipeline/type_resolver.rs`）と TypeEnv（`src/transformer/type_env.rs`）が同一の情報（変数の型、narrowing 後の型）を並行して保持しており、DRY 違反。Transformer が `type_env.insert` で型を記録しても TypeResolver の結果には反映されず、逆も然り。新機能追加時に両方を更新する必要があり、一方の更新漏れがサイレントな型不整合を生む
-  - **現在の `type_env` 用途（プロダクションコード）**: `get()` 11箇所、`insert()` 15箇所、`push_scope()`/`pop_scope()` 各5箇所。55関数が `type_env` をパラメータに取る
-  - **用途の分類と置換方針**:
-    1. **Narrowing ガード — `get()` 7箇所 + `insert()` 5箇所 + `push_scope`/`pop_scope` 3ペア** (`statements/mod.rs:715-788`, `expressions/mod.rs:323`, `expressions/patterns.rs:580`): if/else の narrowing スコープ。`type_env.get(var_name)` で元の型を取得し、`narrowed_type_for_then/else` を計算し、`push_scope` → `insert(narrowed)` → body 変換 → `pop_scope`。**置換方針**: TypeResolver の `FileTypeResolution.narrowed_type(var_name, pos)` が同じ情報を提供済み（TypeEnv narrowing を無効化しても全テスト GREEN であることを検証済み）。TypeEnv の narrowing 用 push_scope/pop_scope を削除すれば、この分類の全用途が消滅する
-    2. **DU match arm フィールドバインディング — `insert()` 1箇所 + `push_scope`/`pop_scope` 1ペア + `get()` 1箇所** (`statements/mod.rs:2505-2520`, `member_access.rs:294`): switch → match 変換時に destructuring されたフィールド変数を match arm スコープに登録。`member_access.rs:294` で「この変数名が TypeEnv に存在するか」をチェックし、match arm 内のフィールドアクセスを clone に変換。**置換方針**: TypeResolver が DU switch の各 case で destructure されるフィールドを事前解析し、`FileTypeResolution` に per-span のフィールドバインディング情報を記録する。または、Transformer が match arm 生成時に IR レベルでバインディング情報を保持し、member_access 変換で参照する（TypeEnv ではなく IR コンテキストとして）
-    3. **typeof switch case narrowing — `insert()` 1箇所 + `push_scope`/`pop_scope` 1ペア** (`statements/mod.rs:2313-2326`): typeof switch の case body 内で narrowed type を設定。分類 1 と同じ方針で FileTypeResolution に置換可能
-    4. **変数宣言の型登録 — `insert()` 5箇所** (`statements/mod.rs:448,481,553,1539,1550,1555`): 明示的型注釈 or `get_expr_type` で推論した型を登録。後続の式変換で `type_env.get(name)` により参照される。**置換方針**: TypeResolver は既に全変数の型を `scope_stack` で追跡しており、`resolve_expr` で Ident 式の型を `expr_types` に記録済み。Transformer は `get_expr_type(tctx, ident_expr)` で同じ情報を取得可能。ただし、Transformer が名前（文字列）で参照する箇所（`type_env.get(&name)`）は、対応する AST ノードのスパンが必要になるため、参照方法の変更が必要
-    5. **関数パラメータの型登録 — `insert()` 3箇所** (`functions/mod.rs:154`, `classes.rs:792`, `statements/mod.rs:3236`): 関数 body 変換前にパラメータ型を登録。**置換方針**: TypeResolver の `resolve_arrow_expr`/`resolve_fn_expr` が既にパラメータをスコープに登録し、body 内の式の型を解決済み。`expr_types` 経由で参照可能
-    6. **any-narrowing enum オーバーライド — `insert()` 2箇所 + `get()` 2箇所** (`functions/mod.rs:161,1209`, `statements/mod.rs:199`, `functions/mod.rs:1248`): AnyTypeAnalyzer が生成した enum 型で Any 型を上書き。**置換方針**: AnyTypeAnalyzer の結果を TypeResolver に統合し、`resolve_expr` が Any 型の変数に対して enum 型を返すようにする
-    7. **関数型変数の参照 — `get()` 1箇所** (`calls.rs:55`): `type_env.get(&fn_name)` で Fn 型を参照し、パラメータ型を取得。**置換方針**: TypeResolver が `lookup_var` で同じ情報を提供済み。`get_expr_type(tctx, callee_expr)` で Fn 型を取得可能
-  - **依存**: 分類 1, 3 の除去（TypeEnv の narrowing 用 push_scope/pop_scope 削除）が前提。これが完了すると残る用途は分類 2, 4, 5, 6, 7 のみ
-  - 伝播リスク: 新機能追加時に TypeResolver と TypeEnv の両方を更新する必要がある現状が続く
 - **[I-101]** **ジェネリック型を含む intersection** — 型変換
   - `interface A<T> extends B<T>, C<T>` のようなジェネリック intersection が未対応
-  - I-100（ジェネリクス基盤）完了により `TypeRegistry::instantiate` と `TypeParam` が利用可能。intersection 変換（`try_convert_intersection_type`）と統合すればよい
-  - 🔗 I-218（ジェネリクス残課題）の一部（class type_params）が先行すると実装が容易
+  - `TypeRegistry::instantiate` と `TypeParam` は利用可能（ジェネリクス基盤構築済み）。intersection 変換（`try_convert_intersection_type`）と統合すればよい
+  - 🔗 I-218（class type_params 収集）が先行すると実装が容易
 - **[I-181]** **call signature のジェネリック型パラメータ** — 型変換
   - `interface Fn<T> { (arg: T): T }` のような call signature のジェネリクス
   - `convert_interface_as_fn_type` は既に `type_params: Vec<TypeParam>` を受け取るが、制約の伝搬が未検証
-  - I-100 完了により基盤は整備済み
-- **[I-194]** **typeof 未登録識別子の解決** — 型変換（**3 インスタンス**: `typeof fetch` ×2, `typeof WebSocket` ×1）
+- **[I-194]** **typeof 未登録識別子の解決** — 型変換（**2 インスタンス**: `typeof fetch` ×1, `typeof WebSocket` ×1）
   - TypeRegistry に `fetch`/`WebSocket` が未登録のため `TsTypeQuery` が失敗
 - **[I-93]** **ネストしたフィールド/メソッド経由の変更検出** — ミュータビリティ推論
 - **[I-62]** **`is_string_type` の `Option<String>` ハック除去** — 型推論
@@ -184,11 +188,13 @@
   - `iter().cloned().filter()` パターンでは問題ないが、`.iter().filter()` では `&T` が渡される
   - 現在の変換は `nums.map(...).collect::<Vec<_>>().iter().cloned().filter(...)` のように `.cloned()` を挿入するが、一部のパスで `.filter()` の引数が参照を考慮していない
   - E2E テスト `method_chain.ts` でこの問題のため配列チェーン（`map → filter`）のテストケースを除外している。解消後に `method_chain.ts` に `nums.map(...).filter(...)` パターンを追加すること
-- **[I-212]** **同一 union 型の enum 重複定義** — **P8 で解消済み**
-  - P8 の統一パイプラインで per-file `SyntheticTypeRegistry` の `register_union` dedup が機能し、同一ファイル内の同じ union 型は 1 つの enum に統一される
-  - コンパイルテスト `type-narrowing` の I-212 由来のスキップ原因は解消。ただし残存する別のコンパイルエラーのためスキップは維持:
-    - `f64.toFixed(2)`: JS の `Number.prototype.toFixed()` が Rust に未変換。Rust では `format!("{:.2}", v)` に変換すべき（`src/transformer/expressions/calls.rs` の `convert_call_expr` で対応が必要）
-    - `StringOrF64` の `Display` 未実装: `println!("{}", x)` で `StringOrF64` enum を表示するには `Display` trait の `impl` が必要。Generator が `#[derive(Debug)]` のみ付加し `Display` は未生成（`src/generator/mod.rs` の `generate_enum` で対応が必要）
+- **[I-237]** **`Number.prototype.toFixed()` の Rust 変換** — コンパイルエラー（コンパイルテスト `type-narrowing` のスキップ原因の一つ）
+  - `f64.toFixed(2)` が Rust に未変換。`format!("{:.2}", v)` に変換すべき
+  - 変換器の該当: `src/transformer/expressions/calls.rs` の `convert_call_expr`
+- **[I-238]** **合成 enum の `Display` trait 自動生成** — コンパイルエラー（コンパイルテスト `type-narrowing` のスキップ原因の一つ）
+  - `println!("{}", x)` で合成 enum を表示するには `Display` trait の `impl` が必要
+  - Generator が `#[derive(Debug)]` のみ付加し `Display` は未生成
+  - 変換器の該当: `src/generator/mod.rs` の `generate_enum`
 - **[I-201]** **`null as any` / `null` の非 Option 型への代入** — コンパイルエラー
   - `null as any` → trait 型文脈で `None` 生成（`Box<dyn Trait>` に代入不可）
   - `null` → any-narrowing enum 文脈で `None` 生成（enum に代入不可）
@@ -204,14 +210,11 @@
 
 #### 未対応型（ベンチマークで検出）
 
-- **[I-219]** **conditional type (`T extends U ? X : Y`)** — **5 インスタンス**
+- **[I-219]** **conditional type (`T extends U ? X : Y`) + infer type + 複合ユーティリティ型** — **8 インスタンス**（Discriminant(15): 5件 + Discriminant(3): 3件）
   - `type IsString<T> = T extends string ? "yes" : "no"` のような conditional type が未対応
-  - エラーメッセージ: `unsupported type alias body: Discriminant(15)`
+  - `infer R` を使う `ReturnType<T>` 等のパターンも含む（conditional type と組み合わせて使用されるため独立検出なし）
+  - エラーメッセージ: `unsupported type alias body: Discriminant(15)`, `Discriminant(3)`
   - Rust では trait の associated type + specialization で部分的に表現可能だが、完全な対応は困難
-- **[I-220]** **infer type (`infer R`)** — **4 インスタンス**
-  - `type ReturnType<T> = T extends (...args: any[]) => infer R ? R : never` のような infer type が未対応
-  - エラーメッセージ: `unsupported type alias body: Discriminant(16)`
-  - conditional type（I-219）の前提
 - **[I-221]** **unsupported intersection member type** — **8 インスタンス**
   - intersection の一部メンバー型が未対応（`try_convert_intersection_type` で処理できない型）
   - 🔗 I-101（ジェネリック intersection）と関連するが、ジェネリクスに限らず intersection の一般的な制限
@@ -223,15 +226,17 @@
 
 #### コンパイルエラー修正（ディレクトリコンパイルで検出）
 
-- **[I-222]** **相対 import パスのエッジケース修正** — **3 ファイル**のコンパイルエラー
-  - `../..`（2段上）が `crate::adapter::..::` に変換される。`convert_relative_path_to_crate_path`（`src/transformer/mod.rs:366`）で `../` ループ後の残余が空になるケースが未処理
-  - `./`（カレントディレクトリの index）が空モジュール名になり `crate::helper::streaming::::stream` のように `::` 重複
-  - 影響ファイル: `adapter/bun/conninfo.rs`, `middleware/ip_restriction/index.rs`, `helper/streaming/text.rs`
 - **[I-223]** **文字列リテラルのエスケープ不正** — **3 ファイル**のコンパイルエラー
   - 正規表現内の `\?`, `\$` が Rust 文字列リテラルで無効なエスケープになる。raw string `r"..."` を使うべき
   - バックスラッシュ `\\` が `"\"` に変換され文字列が閉じない（`utils/accept.rs:146`）
   - 影響ファイル: `utils/accept.rs`, `client/utils.rs`, `helper/css/common.rs`
   - 変換器の該当: `src/generator/expressions.rs` の `Expr::StringLit` 生成、`src/transformer/expressions/literals.rs` の文字列変換
+
+- **[I-227]** **union enum 名に `serde_json::Value` のパス区切りが混入** — ディレクトリコンパイルエラー **1 ファイル**（`types.rs`）
+  - `StringOrserde_json::Value` のように `::` がそのまま enum 名に入り、不正な識別子になる
+  - `serde_json::Value` を enum バリアント名に使う際に `::` を `_` に置換すべき
+  - 変換器の該当: union 型の enum 名生成（`src/transformer/types/mod.rs` または `src/pipeline/synthetic_registry.rs`）
+- **[I-236]** **re-export のみのファイルで余分な `}` 生成** — ファイル単位コンパイルエラー **1 インスタンス**（`index.ts`）。re-export のみのモジュールの generator 出力に余分な閉じ波括弧が含まれる
 
 #### コード生成基盤
 
@@ -240,7 +245,7 @@
 
 #### 未対応構文（小修正）
 
-- **[I-195]** **arrow デフォルトパラメータの残存パターン** — **3 インスタンス**
+- **[I-195]** **arrow デフォルトパラメータの残存パターン** — **4 インスタンス**（arrow default ×3 + default param value ×1）
 - **[I-196]** **`parseInt` の radix 引数対応** — **1 インスタンス**
 
 #### ベンチマーク・テスト基盤
@@ -262,7 +267,7 @@
 
 ### Tier 3: 低優先度 — 孤立した問題・コード品質
 
-- **[I-192]** **大規模ファイルの分割** — `statements/mod.rs`（3357 行）、`expressions/tests.rs`（8891 行）等
+- **[I-192]** **大規模ファイルの分割** — `statements/mod.rs`（2749 行）、`expressions/tests.rs`（6805 行）等
 - **[I-193]** **API 表面積の最小化** — `pub fn` → `pub(crate) fn`
 - **[I-191]** **README.md の記述内容の見直し**
 - **[I-99]** **`collect_du_field_accesses_from_expr` の AST ノード網羅性改善**
@@ -271,14 +276,14 @@
 - **[I-29]** **ネスト async 関数**
 - **[I-33]** **非プリミティブ type assertion のコメント保持**
 - **[I-34]** **Math.random() → `rand` クレート** — 🔗 I-30（Cargo.toml 依存追加）が前提
-- **[I-35]** **indexed access type の非文字列キー対応** — **3 インスタンス**（非文字列キー）+ **2 インスタンス**（非対応ベース型）
+- **[I-35]** **indexed access type の非文字列キー対応** — **3 インスタンス**（非文字列キー）+ **3 インスタンス**（非対応ベース型）
 - **[I-36]** **qualified type name (`A.B` 形式)** — **3 インスタンス**
 - **[I-59]** **Pick/Omit のネストしたユーティリティ型未対応**
 - **[I-105]** **デコレータ付き TsParamProp**
 - **[I-106]** **ラベル付き while での条件内代入**
 - **[I-148]** **for...of デストラクチャリングの残存パターン** — **1 インスタンス**
 - **[I-138]** **タグ付きテンプレートリテラル** — **1 インスタンス**
-- **[I-139]** **関数型パラメータパターン** — **3 インスタンス**
+- **[I-139]** **関数型パラメータパターン** — **4 インスタンス**
 - **[I-151]** **代入ターゲットパターン** — **2 インスタンス**
 - **[I-154]** **カンマ式 (`SeqExpr`)** — **1 インスタンス**
 - **[I-155]** **`satisfies` 式** — **1 インスタンス**
@@ -287,7 +292,15 @@
 - **[I-197]** **template literal type** — ベンチマークでは直接検出されず。conditional type（I-219）として報告されている可能性
 - **[I-198]** **ビット否定・void・delete 演算子** — delete は **1 インスタンス**
 - **[I-199]** **型の構造的一致による推論**
-- **[I-200]** **マップ型 (`{ [K in keyof T]: V }`)** — **3 インスタンス**
+- **[I-200]** **マップ型 (`{ [K in keyof T]: V }`)** — **5 インスタンス**（Discriminant(16) として検出）
+- **[I-228]** **interface の非プロパティメンバー** — **2 インスタンス**（`adapter/lambda-edge/handler.ts:15`, `helper/ssg/middleware.ts:24`）。method signature / index signature 等、property signature 以外の interface メンバーが未対応
+- **[I-229]** **プロパティ経由の関数呼び出し** — **2 インスタンス**（`client/fetch-result-please.ts:14`, `request.ts:460`）。`obj.prop()` で `prop` が動的プロパティアクセスの場合に call target として未対応
+- **[I-230]** **無名クラス式** — **1 インスタンス**（`router/reg-exp-router/prepared-router.ts:95`）。`class extends RegExpRouter<T> { ... }` のような無名クラス式が未対応
+- **[I-231]** **型位置での rest type (`...T[]`)** — **1 インスタンス**（`types.ts:127`）。関数パラメータの型注釈での `TsRestType` が未対応
+- **[I-232]** **for ループの複数宣言子** — **1 インスタンス**（`router/linear-router/router.ts:11`）。`for (let i = 0, j = n; ...)` の複数変数宣言が未対応
+- **[I-233]** **複雑な update 式ターゲット** — **1 インスタンス**（`router/reg-exp-router/node.ts:45`）。配列要素等の複雑なターゲットへの `++`/`--` が未対応
+- **[I-234]** **アロー関数の配列デストラクチャリング引数** — **1 インスタンス**（`helper/route/index.ts:32`）。`([a, b]) => ...` パターンが未対応
+- **[I-235]** **複数スプレッドで未登録型のフィールド展開** — **1 インスタンス**（`middleware/language/language.ts:280`）。`{ ...a, ...b }` で型が TypeRegistry 未登録の場合にフィールド展開が失敗
 
 ---
 
@@ -295,7 +308,7 @@
 
 ### 前提タスクの完了待ち
 
-- **[I-32]** **コンパイルテストのスキップ解消（残り 5 件）** — indexed-access-type（I-35）、trait-coercion（I-201）、union-fallback（I-202）、any-type-narrowing（I-209）、type-narrowing（I-212）。各原因の修正が前提
+- **[I-32]** **コンパイルテストのスキップ解消（残り 5 件）** — indexed-access-type（I-35）、trait-coercion（I-201）、union-fallback（I-202）、any-type-narrowing（I-209）、type-narrowing（I-237 toFixed + I-238 Display）。各原因の修正が前提
 - **[I-183]** **HTTP E2E テスト基盤 + fetch 変換** — I-30（Cargo.toml 依存追加）の解消が前提
 
 ---
