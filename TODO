@@ -128,6 +128,21 @@
     1. `"hello".trim().split(" ")` で `split` のレシーバ型が `String` と解決される
     2. `[1,2,3].map(...).filter(...)` で `filter` のレシーバ型が `Vec<f64>` と解決される
     3. E2E テスト `method_chain.ts` に配列チェーンのテストケースを追加する（I-217 の解消も前提）
+  - PRD 化済み → `backlog/i-211-a-overload-support.md`, `backlog/i-211-b-ecmascript-extraction.md`, `backlog/i-211-c-verification.md`
+- **[I-261]** **ES2016〜ES2024 の追加メソッド** — ビルトイン型拡張
+  - I-211 では ES5 + ES2015 のみ対象。ES2016 以降に追加されたメソッド・型が TypeRegistry に不足
+  - 例: `Array.prototype.includes`（ES2016）、`Object.entries`/`Object.values`（ES2017）、`Promise.allSettled`（ES2020）、`Array.prototype.at`（ES2022）、`structuredClone`（ES2024）
+  - `tools/extract-types/src/index.ts` の `libMap` に `es2016`〜`es2024` のサブモジュールを追加し、`src/builtin_types/ecmascript.json` を再生成すれば解決
+  - I-211 完了後に需要に応じて対応
+- **[I-262]** **`Intl` 名前空間の型定義** — ビルトイン型拡張
+  - `Intl.NumberFormat`, `Intl.DateTimeFormat` 等のロケール依存型群が TypeRegistry に未登録
+  - `lib.es5.d.ts` に `Intl` namespace として定義。抽出スクリプトの namespace 抽出に対応が必要（現在は interface/class/function/type alias のみ抽出）
+  - Hono ベンチマークでの検出なし。需要発生時に対応
+- **[I-263]** **型エイリアス（`kind: "alias"`）の TypeRegistry 登録** — 型解決基盤
+  - `src/external_types.rs:259` で `ExternalTypeDef::Alias` が `None` を返し、TypeRegistry に登録されない
+  - 例: `type RequestInfo = Request | string | URL` のような型エイリアスが external_types.json に含まれるが、TypeRegistry から参照できない
+  - 解決策: `convert_external_typedef` で `Alias { resolved_type }` を `TypeDef` の適切なバリアント（または新バリアント `TypeDef::Alias`）に変換する
+  - `RustType::Union` 追加（I-211-a）後は union alias も表現可能になるため、I-211 完了後に着手が合理的
 
 ### Tier 2: 中優先度 — 変換品質・基盤整備
 
