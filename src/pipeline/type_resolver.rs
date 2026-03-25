@@ -429,14 +429,17 @@ impl<'a> TypeResolver<'a> {
             ast::Stmt::Return(ret) => {
                 if let Some(arg) = &ret.arg {
                     let span = Span::from_swc(arg.span());
-                    let ty = self.resolve_expr(arg);
-                    self.result.expr_types.insert(span, ty);
 
-                    // Set expected type from function return type and propagate
+                    // Set expected type BEFORE resolving the expression, so that
+                    // anonymous struct generation in resolve_expr_inner can see
+                    // that an expected type exists and avoid unnecessary generation.
                     if let Some(return_ty) = self.current_fn_return_type.clone() {
                         self.result.expected_types.insert(span, return_ty.clone());
                         self.propagate_expected(arg, &return_ty);
                     }
+
+                    let ty = self.resolve_expr(arg);
+                    self.result.expr_types.insert(span, ty);
                 }
             }
             ast::Stmt::If(if_stmt) => self.visit_if_stmt(if_stmt),
@@ -717,6 +720,54 @@ impl<'a> TypeResolver<'a> {
             }
             _ => None,
         }
+    }
+
+    /// Merges fields from spread sources and explicit properties into a unified field list.
+    ///
+    /// Spread source types are resolved through TypeRegistry to extract their fields.
+    /// Explicit fields override spread fields with the same name (TS semantics).
+    ///
+    /// Returns `None` if any spread source's fields cannot be resolved (the type is not
+    /// a Named type with a Struct definition in the registry). This prevents generating
+    /// anonymous structs with incomplete field information, which would silently drop
+    /// spread fields — a semantic change.
+    fn merge_object_fields(
+        &self,
+        spread_types: &[RustType],
+        explicit_fields: &[(String, RustType)],
+    ) -> Option<Vec<(String, RustType)>> {
+        let mut merged: Vec<(String, RustType)> = Vec::new();
+
+        // Collect fields from spread sources (in order)
+        for spread_ty in spread_types {
+            let fields = match spread_ty {
+                RustType::Named { name, .. } => match self.registry.get(name) {
+                    Some(TypeDef::Struct { fields, .. }) => fields,
+                    // Named type but not a Struct in registry (enum, function, etc.)
+                    _ => return None,
+                },
+                // Non-Named type (any, Vec, HashMap, etc.) — cannot extract fields
+                _ => return None,
+            };
+            for (field_name, field_ty) in fields {
+                if let Some(pos) = merged.iter().position(|(n, _)| n == field_name) {
+                    merged[pos] = (field_name.clone(), field_ty.clone());
+                } else {
+                    merged.push((field_name.clone(), field_ty.clone()));
+                }
+            }
+        }
+
+        // Explicit fields override spread fields
+        for (name, ty) in explicit_fields {
+            if let Some(pos) = merged.iter().position(|(n, _)| n == name) {
+                merged[pos] = (name.clone(), ty.clone());
+            } else {
+                merged.push((name.clone(), ty.clone()));
+            }
+        }
+
+        Some(merged)
     }
 
     /// Propagates an expected type into compound expressions recursively.
@@ -1054,25 +1105,104 @@ impl<'a> TypeResolver<'a> {
                 self.resolve_expr(&const_assertion.expr)
             }
             ast::Expr::Object(obj) => {
-                // Walk property values to resolve their types
+                // Walk property values to resolve their types and collect field info.
+                // For spread sources, resolve their types and extract fields from
+                // TypeRegistry to build a complete field list.
+                let mut explicit_fields: Vec<(String, RustType)> = Vec::new();
+                let mut spread_types: Vec<RustType> = Vec::new();
+                // Track the total number of non-spread properties to detect partial
+                // resolution (some fields resolved, some didn't). We must not generate
+                // an anonymous struct with missing fields — that would silently drop them.
+                let mut total_explicit_props = 0u32;
+
                 for prop in &obj.props {
                     match prop {
-                        ast::PropOrSpread::Prop(prop) => {
-                            if let ast::Prop::KeyValue(kv) = prop.as_ref() {
+                        ast::PropOrSpread::Prop(prop) => match prop.as_ref() {
+                            ast::Prop::KeyValue(kv) => {
+                                total_explicit_props += 1;
                                 let span = Span::from_swc(kv.value.span());
                                 let ty = self.resolve_expr(&kv.value);
-                                self.result.expr_types.insert(span, ty);
+                                self.result.expr_types.insert(span, ty.clone());
+
+                                let key = extract_prop_name(&kv.key);
+                                if let (Some(key), ResolvedType::Known(rust_ty)) = (key, ty) {
+                                    explicit_fields.push((key, rust_ty));
+                                }
                             }
-                        }
+                            ast::Prop::Shorthand(ident) => {
+                                total_explicit_props += 1;
+                                let span = Span::from_swc(ident.span);
+                                let name = ident.sym.to_string();
+                                let ty = self.lookup_var(&name);
+                                self.result.expr_types.insert(span, ty.clone());
+
+                                if let ResolvedType::Known(rust_ty) = ty {
+                                    explicit_fields.push((name, rust_ty));
+                                }
+                            }
+                            _ => {
+                                total_explicit_props += 1;
+                            }
+                        },
                         ast::PropOrSpread::Spread(spread) => {
                             let span = Span::from_swc(spread.expr.span());
                             let ty = self.resolve_expr(&spread.expr);
-                            self.result.expr_types.insert(span, ty);
+                            self.result.expr_types.insert(span, ty.clone());
+                            if let ResolvedType::Known(rust_ty) = ty {
+                                spread_types.push(rust_ty);
+                            }
                         }
                     }
                 }
-                // Object literal's own type depends on expected type context
-                ResolvedType::Unknown
+
+                let obj_span = Span::from_swc(obj.span);
+                if self.result.expected_types.contains_key(&obj_span) {
+                    // Expected type already set (from annotation, return type, etc.)
+                    // — skip anonymous struct generation
+                    return ResolvedType::Unknown;
+                }
+
+                // Abort if any explicit field's type couldn't be resolved.
+                // Generating an anonymous struct with missing fields would cause confusing
+                // Rust compile errors (unknown field) rather than the clear "requires type
+                // annotation" error from the Transformer.
+                if explicit_fields.len() != total_explicit_props as usize {
+                    return ResolvedType::Unknown;
+                }
+
+                // Build merged field list: spread source fields + explicit fields.
+                // Returns None if any spread source's fields can't be resolved
+                // (prevents generating incomplete structs that silently drop fields).
+                let merged = match self.merge_object_fields(&spread_types, &explicit_fields) {
+                    Some(fields) if !fields.is_empty() => fields,
+                    _ => return ResolvedType::Unknown,
+                };
+
+                // Determine the expected type:
+                // - If all spread sources are the same Named type (including type_args)
+                //   and no extra explicit fields, use that type directly.
+                // - Otherwise, generate an anonymous struct from the merged fields.
+                let expected_ty = if explicit_fields.is_empty() && !spread_types.is_empty() {
+                    if let Some(common_type) = common_named_type(&spread_types) {
+                        common_type
+                    } else {
+                        let name = self.synthetic.register_inline_struct(&merged);
+                        RustType::Named {
+                            name,
+                            type_args: vec![],
+                        }
+                    }
+                } else {
+                    let name = self.synthetic.register_inline_struct(&merged);
+                    RustType::Named {
+                        name,
+                        type_args: vec![],
+                    }
+                };
+                self.result
+                    .expected_types
+                    .insert(obj_span, expected_ty.clone());
+                ResolvedType::Known(expected_ty)
             }
             ast::Expr::OptChain(opt) => {
                 // Optional chaining: x?.y or x?.method(args)
@@ -1323,18 +1453,26 @@ impl<'a> TypeResolver<'a> {
         let result = match callee {
             ast::Expr::Ident(ident) => {
                 let fn_name = ident.sym.to_string();
-                // Check scope for Fn type
-                if let ResolvedType::Known(RustType::Fn { return_type, .. }) =
-                    self.lookup_var(&fn_name)
-                {
-                    ResolvedType::Known(return_type.as_ref().clone())
-                } else if let Some(TypeDef::Function { return_type, .. }) =
-                    self.registry.get(&fn_name)
-                {
-                    // Check TypeRegistry
-                    ResolvedType::Known(return_type.clone().unwrap_or(RustType::Unit))
-                } else {
-                    ResolvedType::Unknown
+                // Check scope for Fn type or Named function type alias
+                match self.lookup_var(&fn_name) {
+                    ResolvedType::Known(RustType::Fn { return_type, .. }) => {
+                        ResolvedType::Known(return_type.as_ref().clone())
+                    }
+                    ResolvedType::Known(ref var_ty @ RustType::Named { .. }) => {
+                        let (ret, _) = resolve_fn_type_info(var_ty, self.registry);
+                        ret.map(ResolvedType::Known)
+                            .unwrap_or(ResolvedType::Unknown)
+                    }
+                    _ => {
+                        // Fall back to TypeRegistry
+                        if let Some(TypeDef::Function { return_type, .. }) =
+                            self.registry.get(&fn_name)
+                        {
+                            ResolvedType::Known(return_type.clone().unwrap_or(RustType::Unit))
+                        } else {
+                            ResolvedType::Unknown
+                        }
+                    }
                 }
             }
             ast::Expr::Member(member) => {
@@ -1392,11 +1530,21 @@ impl<'a> TypeResolver<'a> {
                 }) = self.registry.get(&fn_name)
                 {
                     Some((params.iter().map(|(_, ty)| ty.clone()).collect(), *has_rest))
-                } else if let ResolvedType::Known(RustType::Fn { params, .. }) =
-                    self.lookup_var(&fn_name)
-                {
-                    // Scope lookup for Fn type variables (no rest info available)
-                    Some((params, false))
+                } else if let ResolvedType::Known(ref var_ty) = self.lookup_var(&fn_name) {
+                    match var_ty {
+                        RustType::Fn { params, .. } => {
+                            // Scope lookup for Fn type variables (no rest info available)
+                            Some((params.clone(), false))
+                        }
+                        RustType::Named { .. } => {
+                            // Named type variable (e.g., `encode: Encoder` where Encoder
+                            // is a function type alias) — resolve via registry
+                            let (ret, params) = resolve_fn_type_info(var_ty, self.registry);
+                            let _ = ret; // return type not needed here
+                            params.map(|p| (p, false))
+                        }
+                        _ => None,
+                    }
                 } else {
                     None
                 }
@@ -1768,6 +1916,32 @@ fn find_string_prop_value(obj: &ast::ObjectLit, prop_name: &str) -> Option<Strin
                     }
                 }
             }
+        }
+    }
+    None
+}
+
+/// Returns the common `RustType::Named` type if all types in the slice are identical Named types.
+///
+/// Used for spread merging: `{ ...a, ...b }` where both `a` and `b` are `CORSOptions`
+/// → the result is `CORSOptions` (not an anonymous struct).
+///
+/// Requires both `name` and `type_args` to match. `Container<f64>` and `Container<String>`
+/// are NOT considered the same type and will produce an anonymous struct instead.
+fn common_named_type(types: &[RustType]) -> Option<RustType> {
+    if types.is_empty() {
+        return None;
+    }
+    let first = types.first()?;
+    if let RustType::Named {
+        name,
+        type_args: first_args,
+    } = first
+    {
+        if types.iter().all(|t| {
+            matches!(t, RustType::Named { name: n, type_args } if n == name && type_args == first_args)
+        }) {
+            return Some(first.clone());
         }
     }
     None
@@ -3083,5 +3257,220 @@ function describe(s: Shape): number {
 
         // Non-bound field: false
         assert!(!res.is_du_field_binding("width", radius_binding.scope_start));
+    }
+
+    fn resolve_with_reg_and_synthetic(
+        source: &str,
+        reg: &TypeRegistry,
+    ) -> (FileTypeResolution, SyntheticTypeRegistry) {
+        let files = parse_files(vec![(PathBuf::from("test.ts"), source.to_string())]).unwrap();
+        let file = &files.files[0];
+        let mut synthetic = SyntheticTypeRegistry::new();
+
+        let mut resolver = TypeResolver::new(reg, &mut synthetic);
+        let result = resolver.resolve_file(file);
+        (result, synthetic)
+    }
+
+    #[test]
+    fn test_resolve_spread_same_type_uses_source_type() {
+        // { ...defaults, ...options } where both are CORSOptions → CORSOptions
+        let mut reg = TypeRegistry::new();
+        reg.register(
+            "CORSOptions".to_string(),
+            TypeDef::new_struct(
+                vec![
+                    ("origin".to_string(), RustType::String),
+                    ("methods".to_string(), RustType::String),
+                ],
+                Default::default(),
+                vec![],
+            ),
+        );
+        let (res, _) = resolve_with_reg_and_synthetic(
+            r#"
+            function cors(defaults: CORSOptions, options: CORSOptions) {
+                const opts = { ...defaults, ...options };
+            }
+            "#,
+            &reg,
+        );
+        let has_cors_expected = res
+            .expected_types
+            .values()
+            .any(|t| matches!(t, RustType::Named { name, .. } if name == "CORSOptions"));
+        assert!(
+            has_cors_expected,
+            "spread of same-type sources should use source type as expected type"
+        );
+    }
+
+    #[test]
+    fn test_resolve_spread_with_extra_field_creates_anon_struct() {
+        // { ...base, extra: 1 } where base is Point → anonymous struct with merged fields
+        let mut reg = TypeRegistry::new();
+        reg.register(
+            "Point".to_string(),
+            TypeDef::new_struct(
+                vec![
+                    ("x".to_string(), RustType::F64),
+                    ("y".to_string(), RustType::F64),
+                ],
+                Default::default(),
+                vec![],
+            ),
+        );
+        let (res, synthetic) = resolve_with_reg_and_synthetic(
+            r#"
+            function make(base: Point) {
+                const extended = { ...base, z: 1 };
+            }
+            "#,
+            &reg,
+        );
+        // Should create an anonymous struct with x, y (from Point) + z (explicit)
+        let has_anon = res
+            .expected_types
+            .values()
+            .any(|t| matches!(t, RustType::Named { name, .. } if name.starts_with("_TypeLit")));
+        assert!(
+            has_anon,
+            "spread with extra fields should create anonymous struct"
+        );
+        // Verify the struct has 3 fields
+        let struct_items: Vec<_> = synthetic
+            .all_items()
+            .iter()
+            .filter_map(|item| match item {
+                crate::ir::Item::Struct { fields, .. } if fields.len() == 3 => Some(fields),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            !struct_items.is_empty(),
+            "anonymous struct should have 3 fields (x, y from Point + z)"
+        );
+    }
+
+    fn resolve_with_synthetic(source: &str) -> (FileTypeResolution, SyntheticTypeRegistry) {
+        let files = parse_files(vec![(PathBuf::from("test.ts"), source.to_string())]).unwrap();
+        let file = &files.files[0];
+        let reg = build_registry(&file.module);
+        let mut synthetic = SyntheticTypeRegistry::new();
+
+        let mut resolver = TypeResolver::new(&reg, &mut synthetic);
+        let result = resolver.resolve_file(file);
+        (result, synthetic)
+    }
+
+    #[test]
+    fn test_resolve_anon_struct_generated_for_untyped_object_literal() {
+        let (res, synthetic) = resolve_with_synthetic("const obj = { x: 1, y: 'hello' };");
+        // The object literal should get an expected type (anonymous struct)
+        let has_anon_expected = res
+            .expected_types
+            .values()
+            .any(|t| matches!(t, RustType::Named { name, .. } if name.starts_with("_TypeLit")));
+        assert!(
+            has_anon_expected,
+            "untyped object literal should generate anonymous struct as expected type"
+        );
+        // The synthetic registry should have the anonymous struct registered
+        let has_struct = synthetic
+            .all_items()
+            .iter()
+            .any(|item| matches!(item, crate::ir::Item::Struct { name, .. } if name.starts_with("_TypeLit")));
+        assert!(
+            has_struct,
+            "synthetic registry should contain the anonymous struct"
+        );
+    }
+
+    #[test]
+    fn test_resolve_anon_struct_dedup_same_fields() {
+        let (_, synthetic) = resolve_with_synthetic(
+            r#"
+            const a = { x: 1, y: 2 };
+            const b = { x: 3, y: 4 };
+            "#,
+        );
+        // Both objects have the same field structure (x: f64, y: f64)
+        // → should share one anonymous struct, not two
+        let struct_count = synthetic
+            .all_items()
+            .iter()
+            .filter(|item| matches!(item, crate::ir::Item::Struct { name, .. } if name.starts_with("_TypeLit")))
+            .count();
+        assert_eq!(
+            struct_count, 1,
+            "same field structure should be deduped to one anonymous struct"
+        );
+    }
+
+    #[test]
+    fn test_resolve_anon_struct_nested_object_literal() {
+        let (res, synthetic) = resolve_with_synthetic("const obj = { inner: { a: 1 } };");
+        // Both the outer and inner object should get anonymous struct expected types
+        let anon_count = res
+            .expected_types
+            .values()
+            .filter(|t| matches!(t, RustType::Named { name, .. } if name.starts_with("_TypeLit")))
+            .count();
+        assert!(
+            anon_count >= 2,
+            "nested objects should each get an anonymous struct expected type, got {anon_count}"
+        );
+        let struct_count = synthetic
+            .all_items()
+            .iter()
+            .filter(|item| matches!(item, crate::ir::Item::Struct { .. }))
+            .count();
+        assert!(
+            struct_count >= 2,
+            "should generate at least 2 anonymous structs (outer + inner)"
+        );
+    }
+
+    #[test]
+    fn test_resolve_named_fn_variable_propagates_arg_expected_type() {
+        // When a variable has a Named type that resolves to TypeDef::Function,
+        // calling it should propagate parameter types as expected types on arguments
+        let res = resolve(
+            r#"
+            type Encoder = { (payload: Record<string, unknown>): string };
+            function run(encode: Encoder) {
+                encode({ alg: "HS256", typ: "JWT" });
+            }
+            "#,
+        );
+        // The object literal argument should have expected type from Encoder's first param
+        let has_expected = res
+            .expected_types
+            .values()
+            .any(|t| matches!(t, RustType::Named { name, .. } if name == "HashMap"));
+        assert!(
+            has_expected,
+            "object literal argument should have expected type from Named fn variable's param type"
+        );
+    }
+
+    #[test]
+    fn test_resolve_call_signature_type_alias_sets_return_expected_type() {
+        // Arrow function assigned to a call-signature type alias variable
+        // should propagate the return type to the return statement
+        let res = resolve(
+            r#"
+            type Handler = { (c: string): number };
+            const handler: Handler = (c) => { return 42; };
+            "#,
+        );
+        let has_f64_expected = res
+            .expected_types
+            .values()
+            .any(|t| matches!(t, RustType::F64));
+        assert!(
+            has_f64_expected,
+            "return expression should have expected type f64 from call-signature type alias"
+        );
     }
 }

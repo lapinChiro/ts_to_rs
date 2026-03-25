@@ -934,8 +934,59 @@ fn try_collect_fn_type_alias(
                 has_rest: false,
             })
         }
+        // Object literal type with call signatures only: `type F = { (x: T): U }`
+        ast::TsType::TsTypeLit(lit) => try_collect_call_signature_fn(lit, lookup, synthetic),
         _ => None,
     }
+}
+
+/// Extracts a `TypeDef::Function` from a type literal that contains only call signatures.
+///
+/// `type Handler = { (c: string): number }` → `TypeDef::Function { params: [(c, String)], return_type: Some(f64) }`
+///
+/// If the type literal contains any non-call-signature members (properties, methods, index
+/// signatures), returns `None` so the type is handled as a struct instead.
+/// For overloaded call signatures, picks the one with the most parameters.
+fn try_collect_call_signature_fn(
+    lit: &ast::TsTypeLit,
+    lookup: &TypeRegistry,
+    synthetic: &mut SyntheticTypeRegistry,
+) -> Option<TypeDef> {
+    let mut call_sigs = Vec::new();
+    for member in &lit.members {
+        match member {
+            ast::TsTypeElement::TsCallSignatureDecl(sig) => call_sigs.push(sig),
+            // Non-call-signature member → not a pure function type
+            _ => return None,
+        }
+    }
+
+    // Pick the overload with the most parameters
+    let sig = call_sigs.iter().max_by_key(|s| s.params.len())?;
+
+    let mut params = Vec::new();
+    for param in &sig.params {
+        if let ast::TsFnParam::Ident(ident) = param {
+            let name = ident.id.sym.to_string();
+            let ty = ident
+                .type_ann
+                .as_ref()
+                .and_then(|ann| convert_ts_type(&ann.type_ann, synthetic, lookup).ok())
+                .unwrap_or(RustType::Any);
+            params.push((name, ty));
+        }
+    }
+
+    let return_type = sig
+        .type_ann
+        .as_ref()
+        .and_then(|ann| convert_ts_type(&ann.type_ann, synthetic, lookup).ok());
+
+    Some(TypeDef::Function {
+        params,
+        return_type,
+        has_rest: false,
+    })
 }
 
 fn collect_type_alias_fields(
@@ -2223,6 +2274,113 @@ mod tests {
                 assert_eq!(err_fields[0].1, RustType::F64);
             }
             other => panic!("expected Enum, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_build_registry_call_signature_type_alias_registers_as_function() {
+        // type Handler = { (c: string): number }
+        let module = parse_typescript("type Handler = { (c: string): number };").unwrap();
+        let reg = build_registry(&module);
+        let def = reg.get("Handler").expect("Handler should be registered");
+        match def {
+            TypeDef::Function {
+                params,
+                return_type,
+                ..
+            } => {
+                assert_eq!(params.len(), 1);
+                assert_eq!(params[0].0, "c");
+                assert_eq!(params[0].1, RustType::String);
+                assert_eq!(*return_type, Some(RustType::F64));
+            }
+            other => panic!("expected Function, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_build_registry_call_signature_type_alias_multiple_params() {
+        // type Callback = { (a: string, b: number): boolean }
+        let module =
+            parse_typescript("type Callback = { (a: string, b: number): boolean };").unwrap();
+        let reg = build_registry(&module);
+        let def = reg.get("Callback").expect("Callback should be registered");
+        match def {
+            TypeDef::Function {
+                params,
+                return_type,
+                ..
+            } => {
+                assert_eq!(params.len(), 2);
+                assert_eq!(params[0], ("a".to_string(), RustType::String));
+                assert_eq!(params[1], ("b".to_string(), RustType::F64));
+                assert_eq!(*return_type, Some(RustType::Bool));
+            }
+            other => panic!("expected Function, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_build_registry_call_signature_type_alias_no_params() {
+        // type Factory = { (): string }
+        let module = parse_typescript("type Factory = { (): string };").unwrap();
+        let reg = build_registry(&module);
+        let def = reg.get("Factory").expect("Factory should be registered");
+        match def {
+            TypeDef::Function {
+                params,
+                return_type,
+                ..
+            } => {
+                assert!(params.is_empty());
+                assert_eq!(*return_type, Some(RustType::String));
+            }
+            other => panic!("expected Function, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_build_registry_call_signature_overload_picks_longest() {
+        // type GetCookie = { (c: string): string; (c: string, key: string): number }
+        let module = parse_typescript(
+            "type GetCookie = { (c: string): string; (c: string, key: string): number };",
+        )
+        .unwrap();
+        let reg = build_registry(&module);
+        let def = reg
+            .get("GetCookie")
+            .expect("GetCookie should be registered");
+        match def {
+            TypeDef::Function {
+                params,
+                return_type,
+                ..
+            } => {
+                // Picks the overload with the most params: (c: string, key: string): number
+                assert_eq!(params.len(), 2);
+                assert_eq!(params[0].0, "c");
+                assert_eq!(params[1].0, "key");
+                assert_eq!(*return_type, Some(RustType::F64));
+            }
+            other => panic!("expected Function, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_build_registry_call_signature_with_properties_stays_struct() {
+        // type Mixed = { name: string; (x: number): void }
+        // Properties + call signature → should stay as Struct (not Function)
+        let module = parse_typescript("type Mixed = { name: string; (x: number): void };").unwrap();
+        let reg = build_registry(&module);
+        let def = reg.get("Mixed").expect("Mixed should be registered");
+        match def {
+            TypeDef::Struct { fields, .. } => {
+                assert!(
+                    fields.iter().any(|(n, _)| n == "name"),
+                    "should have 'name' field"
+                );
+            }
+            other => panic!("expected Struct (mixed call sig + properties), got {other:?}"),
         }
     }
 }

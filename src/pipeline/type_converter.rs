@@ -1979,17 +1979,12 @@ fn convert_type_lit_in_annotation(
             _ => return Err(anyhow!("unsupported type literal member")),
         }
     }
-    let struct_name = synthetic.generate_name("TypeLit");
-    synthetic.push_item(
-        struct_name.clone(),
-        crate::pipeline::SyntheticTypeKind::InlineStruct,
-        Item::Struct {
-            vis: Visibility::Public,
-            name: struct_name.clone(),
-            type_params: vec![],
-            fields,
-        },
-    );
+    // Use register_inline_struct for deduplication (same field structure → same name)
+    let field_pairs: Vec<(String, RustType)> = fields
+        .iter()
+        .map(|f| (f.name.clone(), f.ty.clone()))
+        .collect();
+    let struct_name = synthetic.register_inline_struct(&field_pairs);
     Ok(RustType::Named {
         name: struct_name,
         type_args: vec![],

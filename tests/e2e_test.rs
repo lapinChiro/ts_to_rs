@@ -660,3 +660,8 @@ fn test_e2e_file_io_ts_rust_stdout_match() {
 fn test_e2e_method_chain_ts_rust_stdout_match() {
     run_e2e_test("method_chain");
 }
+
+#[test]
+fn test_e2e_object_literal_inference_ts_rust_stdout_match() {
+    run_e2e_test("object_literal_inference");
+}

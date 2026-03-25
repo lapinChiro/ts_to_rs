@@ -1,0 +1,30 @@
+---
+source: tests/integration_test.rs
+expression: output
+---
+#[derive(Debug, Clone, PartialEq)]
+pub struct _TypeLit0 {
+    pub x: f64,
+    pub y: f64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct _TypeLit1 {
+    pub a: f64,
+    pub b: f64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct _TypeLit2 {
+    pub inner: _TypeLit1,
+}
+
+fn testBasic() {
+    let point = _TypeLit0 { x: 1.0, y: 2.0 };
+    println!("{}", point.x);
+}
+
+fn testNested() {
+    let nested = _TypeLit2 { inner: _TypeLit1 { a: 10.0, b: 20.0 } };
+    println!("{}", nested.inner.a);
+}

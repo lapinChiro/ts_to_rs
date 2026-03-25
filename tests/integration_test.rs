@@ -514,3 +514,10 @@ fn test_generic_class() {
     let output = transpile(&input).unwrap();
     insta::assert_snapshot!(output);
 }
+
+#[test]
+fn test_anon_struct_inference() {
+    let input = fs::read_to_string("tests/fixtures/anon-struct-inference.input.ts").unwrap();
+    let (output, _unsupported) = transpile_collecting(&input).unwrap();
+    insta::assert_snapshot!(output);
+}

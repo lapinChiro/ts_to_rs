@@ -29,7 +29,7 @@
 - **スコープ外** — 明示的に対象外。需要発生時に再評価
 
 件数は Hono ベンチマーク（`./scripts/hono-bench.sh`）の実測値に基づく。
-158 ファイル中 86 ファイルがクリーン（54.4%）、132 エラーインスタンス。コンパイルクリーン: ファイル単位 85（53.8%）、ディレクトリ単位 156（98.7%）。
+158 ファイル中 92 ファイルがクリーン（58.2%）、116 エラーインスタンス。コンパイルクリーン: ファイル単位 91（57.6%）、ディレクトリ単位 156（98.7%）。
 **注意**: ベンチマーク実行前に `cargo build --release` が必要。古いビルドで実行すると数値が不正確になる。
 **補足**: 「クリーン」は変換エラーなし（`--report-unsupported` でエラー 0）を意味する。コンパイルクリーンは2指標: ファイル単位（use 除去後の個別コンパイル）とディレクトリ単位（全ファイルを1クレートとしてコンパイル）。
 
@@ -60,7 +60,7 @@
 | **完了: E2E I/O テスト基盤** | ~~I-49/I-50~~ **達成** | fs/process.env/stdin + E2E テスト基盤 |
 | **完了: Interface → Trait** | ~~I-137/I-127~~ **達成** | interface 3 分類 + extends + 交差型 |
 | **完了: コンパイル可能性の基盤** | ~~I-61/I-100~~ **達成** | チェーンメソッド型追跡 + ジェネリクス基盤 |
-| **次: 変換率の大幅改善** | エラーインスタンス < 50 件 | I-112c（70 件、全エラーの 53.0%）が最大のレバレッジ。I-218（ジェネリクス残課題）完了済み。I-211（ビルトイン型）で基盤強化 |
+| **次: 変換率の大幅改善** | エラーインスタンス < 50 件 | I-112c Phase 1-3 実装済み（70→54）。残り 54 件は I-211（ECMAScript 標準型）+ I-224（`this` 型解決）+ I-112c 追加改善で段階解消 |
 | **その次: コンパイル品質** | ディレクトリコンパイルエラー 0 件 | I-227（enum 名生成）、I-223（エスケープ）、I-236（re-export 余分 `}`）の解消 |
 | **その次: テスト拡充** | E2E テスト網羅性 | E2E テストの拡充（I-20, I-71, I-72, I-74）、HTTP 対応（I-183） |
 
@@ -114,12 +114,8 @@
 
 #### 型変換・型推論（レバレッジ最大）
 
-- **[I-112c]** **型注釈なし変数のオブジェクトリテラル** — **70 インスタンス**（全 132 エラーの 53.0%）
-  - `const obj = { key: value }` のように型注釈がないオブジェクトリテラルで、struct 名が推定できずエラーになる
-  - エラーメッセージ: `object literal requires a type annotation to determine struct name`
-  - Hono の最大のエラーカテゴリ。解消すれば変換成功率が大幅に改善する
-  - 解決策: 代入先の型、関数引数の型、return 文の戻り値型などから struct 名を推定する。推定できない場合は匿名構造体（タプル struct or インライン定義）を検討
-  - TypeResolver 一本化（I-226）とジェネリクス基盤完成（I-218）が前提。両方完了済み
+- **[I-112c]** **型注釈なし変数のオブジェクトリテラル** — **54 インスタンス**（全 116 エラーの 46.6%）
+  - Phase 1-3 実装済み（16 件解消: 70→54）。残りは TypeRegistry に型情報がないケース（関数引数位置、ジェネリクス戻り値型、未登録型のスプレッドソース）。I-211（ECMAScript 標準型追加）で追加解消が見込まれる
 
 #### ビルトイン型
 
@@ -271,6 +267,8 @@
 - **[I-256]** **any-narrowing の typeof 検出がトップレベル if/expr のみ** — `src/transformer/any_narrowing.rs:168` で `Switch`/`While`/`For`/`Try` 内の typeof/instanceof チェックが検出されない。any-narrowing enum のバリアント不足の原因
 - **[I-257]** **TypeResolver が rest パターンの変数を未登録** — `src/pipeline/type_resolver.rs:333` で `Rest` パターンの変数が型解決スコープに登録されない
 - **[I-258]** **クロージャ内の制御フロー内代入が mut 検出されない** — `src/transformer/statements/mod.rs:1226` で `If`/`While` 等のブロック内の代入がクロージャのキャプチャ変数の可変性推論で検出されない
+- **[I-259]** **関数型エイリアスの rest パラメータが TypeDef::Function に含まれない** — `src/registry.rs:968` の `try_collect_call_signature_fn` と `:920` の `try_collect_fn_type_alias` が `TsFnParam::Ident` のみ処理し、`TsFnParam::Rest` を無視する。`type Handler = { (...args: string[]): void }` や `type F = (...args: number[]) => void` で rest パラメータが `TypeDef::Function.params` に含まれず `has_rest` が常に `false` になる。解決策: transformer の `convert_interface_as_fn_type` (`src/pipeline/type_converter.rs:570`) が既に `Rest` を処理しているので、同じロジックを registry 側にも適用する
+- **[I-260]** **`undefined` リテラルの型解決が Unknown** — TypeResolver の `resolve_expr_inner` が `undefined` 識別子に対して `ResolvedType::Unknown` を返す。`const obj = { key: undefined }` のような場合に匿名構造体のフィールド型が不明になり、匿名構造体が生成されない。解決策: `undefined` を `RustType::Option(Box::new(RustType::Any))` として解決するか、コンテキストの expected type から内側の型を推定する
 
 #### ベンチマーク・テスト基盤
 

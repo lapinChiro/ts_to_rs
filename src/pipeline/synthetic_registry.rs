@@ -226,6 +226,22 @@ impl SyntheticTypeRegistry {
         self.struct_counter = self.struct_counter.max(other.struct_counter);
     }
 
+    /// Creates a new registry that inherits deduplication state from `self`.
+    ///
+    /// The returned registry has no types registered, but knows the dedup signatures
+    /// and counters from `self`. This prevents duplicate generation when a second pass
+    /// (e.g., TypeResolver) processes the same file that already had synthetic types
+    /// generated in a first pass (e.g., TypeCollector).
+    pub fn fork_dedup_state(&self) -> Self {
+        Self {
+            types: BTreeMap::new(),
+            union_dedup: self.union_dedup.clone(),
+            struct_dedup: self.struct_dedup.clone(),
+            struct_counter: self.struct_counter,
+            synthetic_counter: self.synthetic_counter,
+        }
+    }
+
     /// Consumes the registry and returns all items as owned values.
     ///
     /// Iteration order is deterministic (name-sorted) because `types` is a `BTreeMap`.
