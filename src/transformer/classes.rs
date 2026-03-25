@@ -7,7 +7,10 @@ use std::collections::HashMap;
 use anyhow::{anyhow, Result};
 use swc_ecma_ast as ast;
 
-use crate::ir::{AssocConst, Expr, Item, Method, Param, RustType, Stmt, StructField, Visibility};
+use crate::ir::{
+    AssocConst, Expr, Item, Method, Param, RustType, Stmt, StructField, TraitRef, TypeParam,
+    Visibility,
+};
 use crate::pipeline::type_converter::convert_ts_type;
 use crate::transformer::extract_prop_name;
 use crate::transformer::functions::convert_last_return_to_tail;
@@ -18,8 +21,12 @@ use crate::transformer::Transformer;
 pub struct ClassInfo {
     /// Class name
     pub name: String,
+    /// Generic type parameters
+    pub type_params: Vec<TypeParam>,
     /// Parent class name (from `extends`)
     pub parent: Option<String>,
+    /// Parent class type arguments (e.g., `extends Parent<string>` → `[String]`)
+    pub parent_type_args: Vec<RustType>,
     /// Struct fields
     pub fields: Vec<StructField>,
     /// Constructor method (if any)
@@ -28,8 +35,8 @@ pub struct ClassInfo {
     pub methods: Vec<Method>,
     /// Visibility
     pub vis: Visibility,
-    /// Interface names from `implements` clause
-    pub implements: Vec<String>,
+    /// Interface references from `implements` clause (name + type arguments)
+    pub implements: Vec<TraitRef>,
     /// Whether this class is abstract
     pub is_abstract: bool,
     /// Static properties (converted to associated constants)
@@ -53,14 +60,38 @@ impl<'a> Transformer<'a> {
                 None
             }
         });
+        let parent_type_args: Vec<RustType> = class_decl
+            .class
+            .super_type_params
+            .as_ref()
+            .map(|tp| {
+                tp.params
+                    .iter()
+                    .filter_map(|t| convert_ts_type(t, self.synthetic, self.reg()).ok())
+                    .collect()
+            })
+            .unwrap_or_default();
 
-        let implements: Vec<String> = class_decl
+        let implements: Vec<TraitRef> = class_decl
             .class
             .implements
             .iter()
             .filter_map(|impl_clause| {
                 if let ast::Expr::Ident(ident) = impl_clause.expr.as_ref() {
-                    Some(ident.sym.to_string())
+                    let type_args = impl_clause
+                        .type_args
+                        .as_ref()
+                        .map(|ta| {
+                            ta.params
+                                .iter()
+                                .filter_map(|t| convert_ts_type(t, self.synthetic, self.reg()).ok())
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    Some(TraitRef {
+                        name: ident.sym.to_string(),
+                        type_args,
+                    })
                 } else {
                     None
                 }
@@ -94,9 +125,17 @@ impl<'a> Transformer<'a> {
             }
         }
 
+        let type_params = crate::registry::collect_type_params(
+            class_decl.class.type_params.as_deref(),
+            self.reg(),
+            self.synthetic,
+        );
+
         Ok(ClassInfo {
             name,
+            type_params,
             parent,
+            parent_type_args,
             fields,
             constructor,
             methods,
@@ -110,13 +149,34 @@ impl<'a> Transformer<'a> {
 
 // --- Helpers for class item generation ---
 
-/// Creates an `Item::Struct` from a name, visibility, and fields.
-pub(crate) fn make_struct(name: &str, vis: &Visibility, fields: Vec<StructField>) -> Item {
+/// Creates an `Item::Struct` from a name, visibility, type parameters, and fields.
+pub(crate) fn make_struct(
+    name: &str,
+    vis: &Visibility,
+    type_params: Vec<TypeParam>,
+    fields: Vec<StructField>,
+) -> Item {
     Item::Struct {
         vis: vis.clone(),
         name: name.to_string(),
-        type_params: vec![],
+        type_params,
         fields,
+    }
+}
+
+/// 型パラメータのリストから trait 参照を生成する。
+///
+/// 例: `type_params: [T, U]` → `TraitRef { name: "FooTrait", type_args: [Named("T"), Named("U")] }`
+fn make_trait_ref(name: &str, type_params: &[TypeParam]) -> TraitRef {
+    TraitRef {
+        name: name.to_string(),
+        type_args: type_params
+            .iter()
+            .map(|p| RustType::Named {
+                name: p.name.clone(),
+                type_args: vec![],
+            })
+            .collect(),
     }
 }
 
@@ -131,12 +191,13 @@ pub(crate) fn strip_method_visibility(methods: &[Method]) -> Vec<Method> {
         .collect()
 }
 
-/// Creates an `Item::Impl` block from constants, constructor, and/or methods.
+/// Creates an `Item::Impl` block from type parameters, constants, constructor, and/or methods.
 ///
 /// Returns `None` if constants, constructor, and methods are all empty.
 pub(crate) fn make_impl(
     struct_name: &str,
-    for_trait: Option<&str>,
+    type_params: Vec<TypeParam>,
+    for_trait: Option<TraitRef>,
     consts: Vec<AssocConst>,
     ctor: Option<&Method>,
     methods: Vec<Method>,
@@ -153,7 +214,8 @@ pub(crate) fn make_impl(
 
     Some(Item::Impl {
         struct_name: struct_name.to_string(),
-        for_trait: for_trait.map(|s| s.to_string()),
+        type_params,
+        for_trait,
         consts,
         methods: all_methods,
     })
@@ -177,7 +239,12 @@ pub fn generate_items_for_class(info: &ClassInfo, parent: Option<&ClassInfo>) ->
 /// Produces: struct + trait + impl (constructor) + impl trait for struct
 pub fn generate_parent_class_items(info: &ClassInfo) -> Result<Vec<Item>> {
     let trait_name = format!("{}Trait", info.name);
-    let mut items = vec![make_struct(&info.name, &info.vis, info.fields.clone())];
+    let mut items = vec![make_struct(
+        &info.name,
+        &info.vis,
+        info.type_params.clone(),
+        info.fields.clone(),
+    )];
 
     // Trait with method signatures (no bodies)
     let trait_methods: Vec<Method> = info
@@ -192,7 +259,7 @@ pub fn generate_parent_class_items(info: &ClassInfo) -> Result<Vec<Item>> {
     items.push(Item::Trait {
         vis: info.vis.clone(),
         name: trait_name.clone(),
-        type_params: vec![],
+        type_params: info.type_params.clone(),
         supertraits: vec![],
         methods: trait_methods,
         associated_types: vec![],
@@ -201,6 +268,7 @@ pub fn generate_parent_class_items(info: &ClassInfo) -> Result<Vec<Item>> {
     // impl (constructor + static consts)
     items.extend(make_impl(
         &info.name,
+        info.type_params.clone(),
         None,
         info.static_consts.clone(),
         info.constructor.as_ref(),
@@ -210,7 +278,8 @@ pub fn generate_parent_class_items(info: &ClassInfo) -> Result<Vec<Item>> {
     // impl Trait for Struct (method bodies)
     items.extend(make_impl(
         &info.name,
-        Some(&trait_name),
+        info.type_params.clone(),
+        Some(make_trait_ref(&trait_name, &info.type_params)),
         vec![],
         None,
         strip_method_visibility(&info.methods),
@@ -238,7 +307,7 @@ pub fn generate_abstract_class_items(info: &ClassInfo) -> Result<Vec<Item>> {
     Ok(vec![Item::Trait {
         vis: info.vis.clone(),
         name: info.name.clone(),
-        type_params: vec![],
+        type_params: info.type_params.clone(),
         supertraits: vec![],
         methods,
         associated_types: vec![],
@@ -252,10 +321,16 @@ pub fn generate_child_of_abstract(
     info: &ClassInfo,
     abstract_trait_name: &str,
 ) -> Result<Vec<Item>> {
-    let mut items = vec![make_struct(&info.name, &info.vis, info.fields.clone())];
+    let mut items = vec![make_struct(
+        &info.name,
+        &info.vis,
+        info.type_params.clone(),
+        info.fields.clone(),
+    )];
 
     items.extend(make_impl(
         &info.name,
+        info.type_params.clone(),
         None,
         info.static_consts.clone(),
         info.constructor.as_ref(),
@@ -263,7 +338,8 @@ pub fn generate_child_of_abstract(
     ));
     items.extend(make_impl(
         &info.name,
-        Some(abstract_trait_name),
+        info.type_params.clone(),
+        Some(make_trait_ref(abstract_trait_name, &info.type_params)),
         vec![],
         None,
         strip_method_visibility(&info.methods),
@@ -274,10 +350,16 @@ pub fn generate_child_of_abstract(
 
 /// Generates IR items for a standalone class (no inheritance).
 fn generate_standalone_class(info: &ClassInfo) -> Result<Vec<Item>> {
-    let mut items = vec![make_struct(&info.name, &info.vis, info.fields.clone())];
+    let mut items = vec![make_struct(
+        &info.name,
+        &info.vis,
+        info.type_params.clone(),
+        info.fields.clone(),
+    )];
 
     items.extend(make_impl(
         &info.name,
+        info.type_params.clone(),
         None,
         info.static_consts.clone(),
         info.constructor.as_ref(),
@@ -296,7 +378,12 @@ fn generate_child_class(info: &ClassInfo, parent: &ClassInfo) -> Result<Vec<Item
     // Struct with parent + child fields
     let mut fields = parent.fields.clone();
     fields.extend(info.fields.clone());
-    let mut items = vec![make_struct(&info.name, &info.vis, fields)];
+    let mut items = vec![make_struct(
+        &info.name,
+        &info.vis,
+        info.type_params.clone(),
+        fields,
+    )];
 
     // impl (rewritten constructor + own methods + static consts)
     let ctor = info
@@ -306,6 +393,7 @@ fn generate_child_class(info: &ClassInfo, parent: &ClassInfo) -> Result<Vec<Item
         .transpose()?;
     items.extend(make_impl(
         &info.name,
+        info.type_params.clone(),
         None,
         info.static_consts.clone(),
         ctor.as_ref(),
@@ -313,9 +401,15 @@ fn generate_child_class(info: &ClassInfo, parent: &ClassInfo) -> Result<Vec<Item
     ));
 
     // impl ParentTrait for Child (parent method bodies)
+    // trait 型引数は child の extends 型引数（例: extends Parent<string> → <String>）
+    let parent_trait_ref = TraitRef {
+        name: trait_name,
+        type_args: info.parent_type_args.clone(),
+    };
     items.extend(make_impl(
         &info.name,
-        Some(&trait_name),
+        info.type_params.clone(),
+        Some(parent_trait_ref),
         vec![],
         None,
         strip_method_visibility(&parent.methods),
@@ -339,8 +433,8 @@ pub fn generate_child_class_with_implements(
     // Add interface trait impls by moving matching methods from impl Child to impl Interface
     let mut claimed_methods: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-    for iface_name in &info.implements {
-        if let Some(method_names) = iface_methods.get(iface_name) {
+    for iface_ref in &info.implements {
+        if let Some(method_names) = iface_methods.get(&iface_ref.name) {
             let trait_methods = strip_method_visibility(
                 &info
                     .methods
@@ -356,7 +450,8 @@ pub fn generate_child_class_with_implements(
                 }
                 items.extend(make_impl(
                     &info.name,
-                    Some(iface_name),
+                    info.type_params.clone(),
+                    Some(iface_ref.clone()),
                     vec![],
                     None,
                     trait_methods,
@@ -393,12 +488,17 @@ pub fn generate_class_with_implements(
     info: &ClassInfo,
     iface_methods: &std::collections::HashMap<String, Vec<String>>,
 ) -> Result<Vec<Item>> {
-    let mut items = vec![make_struct(&info.name, &info.vis, info.fields.clone())];
+    let mut items = vec![make_struct(
+        &info.name,
+        &info.vis,
+        info.type_params.clone(),
+        info.fields.clone(),
+    )];
 
     let mut claimed_methods: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-    for iface_name in &info.implements {
-        if let Some(method_names) = iface_methods.get(iface_name) {
+    for iface_ref in &info.implements {
+        if let Some(method_names) = iface_methods.get(&iface_ref.name) {
             let trait_methods = strip_method_visibility(
                 &info
                     .methods
@@ -414,7 +514,8 @@ pub fn generate_class_with_implements(
                 }
                 items.extend(make_impl(
                     &info.name,
-                    Some(iface_name),
+                    info.type_params.clone(),
+                    Some(iface_ref.clone()),
                     vec![],
                     None,
                     trait_methods,
@@ -431,6 +532,7 @@ pub fn generate_class_with_implements(
         .collect();
     items.extend(make_impl(
         &info.name,
+        info.type_params.clone(),
         None,
         info.static_consts.clone(),
         info.constructor.as_ref(),
@@ -1333,7 +1435,8 @@ mod tests {
             .extract_class_info(&decl, Visibility::Private)
             .unwrap();
 
-        assert_eq!(info.implements, vec!["Greeter".to_string()]);
+        let impl_names: Vec<&str> = info.implements.iter().map(|t| t.name.as_str()).collect();
+        assert_eq!(impl_names, vec!["Greeter"]);
     }
 
     #[test]
@@ -1345,7 +1448,8 @@ mod tests {
             .extract_class_info(&decl, Visibility::Private)
             .unwrap();
 
-        assert_eq!(info.implements, vec!["A".to_string(), "B".to_string()]);
+        let impl_names: Vec<&str> = info.implements.iter().map(|t| t.name.as_str()).collect();
+        assert_eq!(impl_names, vec!["A", "B"]);
     }
 
     #[test]
@@ -1489,7 +1593,9 @@ mod tests {
         // Parent has 2 fields but child's super() only passes 1 arg
         let parent_info = ClassInfo {
             name: "Parent".to_string(),
+            type_params: vec![],
             parent: None,
+            parent_type_args: vec![],
             fields: vec![
                 StructField {
                     vis: None,

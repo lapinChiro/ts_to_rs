@@ -144,6 +144,30 @@ impl TypeDef {
                 extends: extends.clone(),
                 is_interface: *is_interface,
             },
+            TypeDef::Enum {
+                type_params,
+                variants,
+                string_values,
+                tag_field,
+                variant_fields,
+            } => TypeDef::Enum {
+                type_params: type_params.clone(),
+                variants: variants.clone(),
+                string_values: string_values.clone(),
+                tag_field: tag_field.clone(),
+                variant_fields: variant_fields
+                    .iter()
+                    .map(|(variant, fields)| {
+                        (
+                            variant.clone(),
+                            fields
+                                .iter()
+                                .map(|(name, ty)| (name.clone(), ty.substitute(bindings)))
+                                .collect(),
+                        )
+                    })
+                    .collect(),
+            },
             other => other.clone(),
         }
     }
@@ -402,8 +426,20 @@ fn collect_decl(
         ast::Decl::TsTypeAlias(alias) => {
             if let Some(enum_def) = try_collect_string_literal_union(alias) {
                 reg.register(alias.id.sym.to_string(), enum_def);
-            } else if let Some(enum_def) = try_collect_discriminated_union(alias, lookup, synthetic)
+            } else if let Some(mut enum_def) =
+                try_collect_discriminated_union(alias, lookup, synthetic)
             {
+                // DU enum に型パラメータを設定（try_collect_discriminated_union は
+                // 型パラメータの概念に無関係なため、呼び出し元で上書きする）
+                let type_params =
+                    collect_type_params(alias.type_params.as_deref(), lookup, synthetic);
+                if let TypeDef::Enum {
+                    type_params: ref mut tp,
+                    ..
+                } = enum_def
+                {
+                    *tp = type_params;
+                }
                 reg.register(alias.id.sym.to_string(), enum_def);
             } else if let Some(func_def) = try_collect_fn_type_alias(alias, lookup, synthetic) {
                 reg.register(alias.id.sym.to_string(), func_def);
@@ -413,9 +449,17 @@ fn collect_decl(
                 // Use `reg` which accumulates resolved types during pass 2.
                 let fields = collect_type_alias_fields(alias, reg, synthetic);
                 if let Some(fields) = fields {
+                    let type_params =
+                        collect_type_params(alias.type_params.as_deref(), lookup, synthetic);
                     reg.register(
                         alias.id.sym.to_string(),
-                        TypeDef::new_struct(fields, HashMap::new(), vec![]),
+                        TypeDef::Struct {
+                            type_params,
+                            fields,
+                            methods: HashMap::new(),
+                            extends: vec![],
+                            is_interface: false,
+                        },
                     );
                 }
             }
@@ -558,11 +602,18 @@ fn collect_class_info(
         }
     }
 
-    TypeDef::new_struct(fields, methods, vec![])
+    let type_params = collect_type_params(class.class.type_params.as_deref(), lookup, synthetic);
+    TypeDef::Struct {
+        type_params,
+        fields,
+        methods,
+        extends: vec![],
+        is_interface: false,
+    }
 }
 
 /// TS の型パラメータ宣言から TypeParam を収集する。
-fn collect_type_params(
+pub fn collect_type_params(
     decl: Option<&ast::TsTypeParamDecl>,
     lookup: &TypeRegistry,
     synthetic: &mut SyntheticTypeRegistry,
@@ -1960,5 +2011,218 @@ mod tests {
             output.contains("fn foo"),
             "transpile output should contain the function"
         );
+    }
+
+    // --- I-218: class / type alias 型パラメータ収集 ---
+
+    #[test]
+    fn test_collect_class_type_params_single() {
+        // class Foo<T> { value: T } → TypeDef::Struct に type_params: [T] が格納される
+        let module = parse_typescript("class Foo<T> { value: T; }").unwrap();
+        let reg = build_registry(&module);
+        match reg.get("Foo").unwrap() {
+            TypeDef::Struct {
+                type_params,
+                fields,
+                ..
+            } => {
+                assert_eq!(type_params.len(), 1);
+                assert_eq!(type_params[0].name, "T");
+                assert_eq!(type_params[0].constraint, None);
+                assert_eq!(fields.len(), 1);
+                assert_eq!(fields[0].0, "value");
+                assert!(
+                    matches!(&fields[0].1, RustType::Named { name, .. } if name == "T"),
+                    "expected Named(T), got {:?}",
+                    fields[0].1
+                );
+            }
+            other => panic!("expected Struct, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_collect_class_type_params_multiple_with_constraint() {
+        // class Foo<T extends Bar, U> → type_params: [T: Bar, U]
+        let module = parse_typescript(
+            "interface Bar { name: string; } \
+             class Foo<T extends Bar, U> { first: T; second: U; }",
+        )
+        .unwrap();
+        let reg = build_registry(&module);
+        match reg.get("Foo").unwrap() {
+            TypeDef::Struct { type_params, .. } => {
+                assert_eq!(type_params.len(), 2);
+                assert_eq!(type_params[0].name, "T");
+                assert_eq!(
+                    type_params[0].constraint,
+                    Some(RustType::Named {
+                        name: "Bar".to_string(),
+                        type_args: vec![],
+                    })
+                );
+                assert_eq!(type_params[1].name, "U");
+                assert_eq!(type_params[1].constraint, None);
+            }
+            other => panic!("expected Struct, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_collect_type_alias_struct_type_params() {
+        // type Pair<A, B> = { first: A, second: B } → TypeDef::Struct に type_params: [A, B]
+        let module = parse_typescript("type Pair<A, B> = { first: A; second: B; }").unwrap();
+        let reg = build_registry(&module);
+        match reg.get("Pair").unwrap() {
+            TypeDef::Struct {
+                type_params,
+                fields,
+                ..
+            } => {
+                assert_eq!(type_params.len(), 2);
+                assert_eq!(type_params[0].name, "A");
+                assert_eq!(type_params[1].name, "B");
+                assert_eq!(fields.len(), 2);
+            }
+            other => panic!("expected Struct, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_collect_type_alias_du_enum_type_params() {
+        // type Result<T> = { kind: "ok", value: T } | { kind: "error", msg: string }
+        // → TypeDef::Enum に type_params: [T]
+        let module = parse_typescript(
+            r#"type Result<T> = { kind: "ok"; value: T } | { kind: "error"; msg: string }"#,
+        )
+        .unwrap();
+        let reg = build_registry(&module);
+        match reg.get("Result").unwrap() {
+            TypeDef::Enum {
+                type_params,
+                variants,
+                tag_field,
+                variant_fields,
+                ..
+            } => {
+                assert_eq!(type_params.len(), 1);
+                assert_eq!(type_params[0].name, "T");
+                assert_eq!(tag_field.as_deref(), Some("kind"));
+                assert_eq!(variants.len(), 2);
+                // "ok" variant should have field "value" of type T
+                let ok_fields = variant_fields.get("Ok").expect("Ok variant should exist");
+                assert!(
+                    ok_fields.iter().any(|(name, ty)| name == "value"
+                        && matches!(ty, RustType::Named { name, .. } if name == "T")),
+                    "expected Ok variant to have field 'value: T', got {ok_fields:?}"
+                );
+            }
+            other => panic!("expected Enum, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_substitute_types_enum_variant_fields() {
+        // DU Enum の instantiate: T → String で variant_fields 内の T が置換される
+        let enum_def = TypeDef::Enum {
+            type_params: vec![TypeParam {
+                name: "T".to_string(),
+                constraint: None,
+            }],
+            variants: vec!["Ok".to_string(), "Error".to_string()],
+            string_values: HashMap::new(),
+            tag_field: Some("kind".to_string()),
+            variant_fields: HashMap::from([
+                (
+                    "Ok".to_string(),
+                    vec![(
+                        "value".to_string(),
+                        RustType::Named {
+                            name: "T".to_string(),
+                            type_args: vec![],
+                        },
+                    )],
+                ),
+                (
+                    "Error".to_string(),
+                    vec![("msg".to_string(), RustType::String)],
+                ),
+            ]),
+        };
+        let bindings = HashMap::from([("T".to_string(), RustType::String)]);
+        let result = enum_def.substitute_types(&bindings);
+        match &result {
+            TypeDef::Enum { variant_fields, .. } => {
+                let ok_fields = variant_fields.get("Ok").unwrap();
+                assert_eq!(
+                    ok_fields[0].1,
+                    RustType::String,
+                    "T should be substituted to String"
+                );
+                let err_fields = variant_fields.get("Error").unwrap();
+                assert_eq!(
+                    err_fields[0].1,
+                    RustType::String,
+                    "String should remain unchanged"
+                );
+            }
+            other => panic!("expected Enum, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_substitute_types_enum_multiple_params() {
+        // 複数型パラメータの DU Enum: T → String, E → i64
+        let enum_def = TypeDef::Enum {
+            type_params: vec![
+                TypeParam {
+                    name: "T".to_string(),
+                    constraint: None,
+                },
+                TypeParam {
+                    name: "E".to_string(),
+                    constraint: None,
+                },
+            ],
+            variants: vec!["Ok".to_string(), "Err".to_string()],
+            string_values: HashMap::new(),
+            tag_field: Some("kind".to_string()),
+            variant_fields: HashMap::from([
+                (
+                    "Ok".to_string(),
+                    vec![(
+                        "value".to_string(),
+                        RustType::Named {
+                            name: "T".to_string(),
+                            type_args: vec![],
+                        },
+                    )],
+                ),
+                (
+                    "Err".to_string(),
+                    vec![(
+                        "error".to_string(),
+                        RustType::Named {
+                            name: "E".to_string(),
+                            type_args: vec![],
+                        },
+                    )],
+                ),
+            ]),
+        };
+        let bindings = HashMap::from([
+            ("T".to_string(), RustType::String),
+            ("E".to_string(), RustType::F64),
+        ]);
+        let result = enum_def.substitute_types(&bindings);
+        match &result {
+            TypeDef::Enum { variant_fields, .. } => {
+                let ok_fields = variant_fields.get("Ok").unwrap();
+                assert_eq!(ok_fields[0].1, RustType::String);
+                let err_fields = variant_fields.get("Err").unwrap();
+                assert_eq!(err_fields[0].1, RustType::F64);
+            }
+            other => panic!("expected Enum, got {other:?}"),
+        }
     }
 }

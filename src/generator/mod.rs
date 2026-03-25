@@ -5,7 +5,9 @@ pub mod types;
 mod expressions;
 mod statements;
 
-use crate::ir::{EnumValue, EnumVariant, Item, Method, Param, RustType, TypeParam, Visibility};
+use crate::ir::{
+    EnumValue, EnumVariant, Item, Method, Param, RustType, TraitRef, TypeParam, Visibility,
+};
 
 use expressions::{escape_ident, generate_expr};
 use statements::generate_stmt;
@@ -115,7 +117,8 @@ fn generate_item(item: &Item) -> String {
             let bounds = if supertraits.is_empty() {
                 String::new()
             } else {
-                format!(": {}", supertraits.join(" + "))
+                let refs: Vec<String> = supertraits.iter().map(generate_trait_ref).collect();
+                format!(": {}", refs.join(" + "))
             };
             let mut out = format!("{vis_str}trait {name}{generics}{bounds} {{\n");
             for assoc_type in associated_types {
@@ -129,13 +132,24 @@ fn generate_item(item: &Item) -> String {
         }
         Item::Impl {
             struct_name,
+            type_params,
             for_trait,
             consts,
             methods,
         } => {
+            let tp = generate_type_params(type_params);
+            let type_args = if type_params.is_empty() {
+                String::new()
+            } else {
+                let args: Vec<&str> = type_params.iter().map(|p| p.name.as_str()).collect();
+                format!("<{}>", args.join(", "))
+            };
             let header = match for_trait {
-                Some(trait_name) => format!("impl {trait_name} for {struct_name}"),
-                None => format!("impl {struct_name}"),
+                Some(trait_ref) => {
+                    let trait_str = generate_trait_ref(trait_ref);
+                    format!("impl{tp} {trait_str} for {struct_name}{type_args}")
+                }
+                None => format!("impl{tp} {struct_name}{type_args}"),
             };
             let mut out = format!("{header} {{\n");
             let mut first = true;
@@ -545,12 +559,22 @@ fn generate_type_params(type_params: &[TypeParam]) -> String {
     }
 }
 
+/// trait 参照を Rust コード文字列に変換する（例: `TraitName<T, U>`）。
+fn generate_trait_ref(tr: &TraitRef) -> String {
+    if tr.type_args.is_empty() {
+        tr.name.clone()
+    } else {
+        let args: Vec<String> = tr.type_args.iter().map(generate_type).collect();
+        format!("{}<{}>", tr.name, args.join(", "))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::ir::{
         BinOp, EnumValue, EnumVariant, Expr, Item, Method, Param, RustType, Stmt, StructField,
-        TypeParam, Visibility,
+        TraitRef, TypeParam, Visibility,
     };
 
     // --- Item::Use tests ---
@@ -966,6 +990,7 @@ pub fn identity<T>(x: T) -> T {
     fn test_generate_impl_new() {
         let item = Item::Impl {
             struct_name: "Foo".to_string(),
+            type_params: vec![],
             for_trait: None,
             consts: vec![],
             methods: vec![Method {
@@ -997,6 +1022,7 @@ impl Foo {
     fn test_generate_impl_self_method() {
         let item = Item::Impl {
             struct_name: "Foo".to_string(),
+            type_params: vec![],
             for_trait: None,
             consts: vec![],
             methods: vec![Method {
@@ -1083,7 +1109,16 @@ pub trait AnimalTrait {
             vis: Visibility::Public,
             name: "Dog".to_string(),
             type_params: vec![],
-            supertraits: vec!["Animal".to_string(), "Debug".to_string()],
+            supertraits: vec![
+                TraitRef {
+                    name: "Animal".to_string(),
+                    type_args: vec![],
+                },
+                TraitRef {
+                    name: "Debug".to_string(),
+                    type_args: vec![],
+                },
+            ],
             methods: vec![Method {
                 vis: Visibility::Private,
                 name: "bark".to_string(),
@@ -1106,7 +1141,11 @@ pub trait Dog: Animal + Debug {
     fn test_generate_impl_for_trait() {
         let item = Item::Impl {
             struct_name: "Dog".to_string(),
-            for_trait: Some("AnimalTrait".to_string()),
+            type_params: vec![],
+            for_trait: Some(TraitRef {
+                name: "AnimalTrait".to_string(),
+                type_args: vec![],
+            }),
             consts: vec![],
             methods: vec![Method {
                 vis: Visibility::Private,
@@ -1241,5 +1280,128 @@ async fn main() {
         };
         let output = generate_expr(&expr);
         assert_eq!(output, r#"Regex::new(r"pattern").unwrap()"#);
+    }
+
+    // --- I-218: Item::Impl type_params ---
+
+    #[test]
+    fn test_generate_impl_with_type_params() {
+        let item = Item::Impl {
+            struct_name: "Foo".to_string(),
+            type_params: vec![TypeParam {
+                name: "T".to_string(),
+                constraint: None,
+            }],
+            for_trait: None,
+            consts: vec![],
+            methods: vec![],
+        };
+        let output = generate_item(&item);
+        assert_eq!(output, "impl<T> Foo<T> {\n}");
+    }
+
+    #[test]
+    fn test_generate_impl_with_constraint() {
+        let item = Item::Impl {
+            struct_name: "Foo".to_string(),
+            type_params: vec![TypeParam {
+                name: "T".to_string(),
+                constraint: Some(RustType::Named {
+                    name: "Clone".to_string(),
+                    type_args: vec![],
+                }),
+            }],
+            for_trait: None,
+            consts: vec![],
+            methods: vec![],
+        };
+        let output = generate_item(&item);
+        assert_eq!(output, "impl<T: Clone> Foo<T> {\n}");
+    }
+
+    #[test]
+    fn test_generate_impl_for_trait_with_type_params() {
+        let item = Item::Impl {
+            struct_name: "Foo".to_string(),
+            type_params: vec![TypeParam {
+                name: "T".to_string(),
+                constraint: None,
+            }],
+            for_trait: Some(TraitRef {
+                name: "Display".to_string(),
+                type_args: vec![],
+            }),
+            consts: vec![],
+            methods: vec![],
+        };
+        let output = generate_item(&item);
+        assert_eq!(output, "impl<T> Display for Foo<T> {\n}");
+    }
+
+    #[test]
+    fn test_generate_impl_for_trait_with_trait_type_args() {
+        // impl<T> Container<T> for FooData<T>
+        let item = Item::Impl {
+            struct_name: "FooData".to_string(),
+            type_params: vec![TypeParam {
+                name: "T".to_string(),
+                constraint: None,
+            }],
+            for_trait: Some(TraitRef {
+                name: "Container".to_string(),
+                type_args: vec![RustType::Named {
+                    name: "T".to_string(),
+                    type_args: vec![],
+                }],
+            }),
+            consts: vec![],
+            methods: vec![],
+        };
+        let output = generate_item(&item);
+        assert_eq!(output, "impl<T> Container<T> for FooData<T> {\n}");
+    }
+
+    #[test]
+    fn test_generate_impl_for_trait_with_concrete_type_args() {
+        // impl ParentTrait<String> for Child (no generic on impl itself)
+        let item = Item::Impl {
+            struct_name: "Child".to_string(),
+            type_params: vec![],
+            for_trait: Some(TraitRef {
+                name: "ParentTrait".to_string(),
+                type_args: vec![RustType::String],
+            }),
+            consts: vec![],
+            methods: vec![],
+        };
+        let output = generate_item(&item);
+        assert_eq!(output, "impl ParentTrait<String> for Child {\n}");
+    }
+
+    #[test]
+    fn test_generate_trait_with_supertrait_type_args() {
+        // trait Foo<T>: Bar<T>
+        let item = Item::Trait {
+            vis: Visibility::Public,
+            name: "Foo".to_string(),
+            type_params: vec![TypeParam {
+                name: "T".to_string(),
+                constraint: None,
+            }],
+            supertraits: vec![TraitRef {
+                name: "Bar".to_string(),
+                type_args: vec![RustType::Named {
+                    name: "T".to_string(),
+                    type_args: vec![],
+                }],
+            }],
+            methods: vec![],
+            associated_types: vec![],
+        };
+        let output = generate_item(&item);
+        assert!(
+            output.starts_with("pub trait Foo<T>: Bar<T>"),
+            "expected 'pub trait Foo<T>: Bar<T>', got: {output}"
+        );
     }
 }

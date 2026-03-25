@@ -89,7 +89,7 @@ pub fn transpile_pipeline(input: TranspileInput) -> Result<TranspileOutput> {
     // TypeResolver receives any_enum_overrides so it registers the correct enum types
     // in expr_types from the start, eliminating the need for fallback lookups.
     let mut type_resolutions = Vec::with_capacity(parsed.files.len());
-    for (file, any_overrides) in parsed.files.iter().zip(per_file_any_overrides.into_iter()) {
+    for (file, any_overrides) in parsed.files.iter().zip(per_file_any_overrides) {
         let type_resolution = {
             let mut resolver = type_resolver::TypeResolver::new(&shared_registry, &mut synthetic);
             resolver.set_any_enum_overrides(any_overrides);
@@ -104,7 +104,7 @@ pub fn transpile_pipeline(input: TranspileInput) -> Result<TranspileOutput> {
         .files
         .iter()
         .zip(type_resolutions.iter())
-        .zip(per_file_any_synthetics.into_iter())
+        .zip(per_file_any_synthetics)
     {
         let tctx = crate::transformer::context::TransformContext::new(
             &module_graph,

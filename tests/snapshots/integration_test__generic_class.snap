@@ -1,0 +1,26 @@
+---
+source: tests/integration_test.rs
+expression: output
+---
+#[derive(Debug, Clone, PartialEq)]
+pub struct Box<T> {
+    pub value: T,
+}
+
+impl<T> Box<T> {
+    pub fn new(val: T) -> Self {
+        Self { value: val }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Pair<A, B> {
+    pub first: A,
+    pub second: B,
+}
+
+impl<A, B> Pair<A, B> {
+    pub fn new(a: A, b: B) -> Self {
+        Self { first: a, second: b }
+    }
+}

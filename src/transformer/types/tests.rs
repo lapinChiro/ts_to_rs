@@ -1640,7 +1640,7 @@ fn test_convert_interface_mixed_props_and_methods_generates_struct_and_trait() {
             ..
         } => {
             assert_eq!(struct_name, "CtxData");
-            assert_eq!(for_trait.as_deref(), Some("Ctx"));
+            assert_eq!(for_trait.as_ref().map(|t| t.name.as_str()), Some("Ctx"));
         }
         _ => panic!("expected Item::Impl, got {:?}", items[2]),
     }

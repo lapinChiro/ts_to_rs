@@ -458,7 +458,7 @@ class Foo implements Greeter { greet(): string { return "hi"; } }
                 struct_name,
                 for_trait: Some(trait_name),
                 ..
-            } if struct_name == "Foo" && trait_name == "Greeter"
+            } if struct_name == "Foo" && trait_name.name == "Greeter"
         )
     });
     assert!(
@@ -487,7 +487,7 @@ class Foo implements A, B {
                 struct_name,
                 for_trait: Some(trait_name),
                 ..
-            } if struct_name == "Foo" && trait_name == "A"
+            } if struct_name == "Foo" && trait_name.name == "A"
         )
     });
     assert!(has_impl_a, "should have impl A for Foo, got: {items:?}");
@@ -499,7 +499,7 @@ class Foo implements A, B {
                 struct_name,
                 for_trait: Some(trait_name),
                 ..
-            } if struct_name == "Foo" && trait_name == "B"
+            } if struct_name == "Foo" && trait_name.name == "B"
         )
     });
     assert!(has_impl_b, "should have impl B for Foo, got: {items:?}");
@@ -524,7 +524,7 @@ class Foo implements Greeter {
             Item::Impl {
                 for_trait: Some(t),
                 ..
-            } if t == "Greeter"
+            } if t.name == "Greeter"
         )
     });
     assert!(trait_impl.is_some(), "should have impl Greeter for Foo");
@@ -608,7 +608,7 @@ class Child extends Parent implements Greeter {
                 struct_name,
                 for_trait: Some(trait_name),
                 ..
-            } if struct_name == "Child" && trait_name == "ParentTrait"
+            } if struct_name == "Child" && trait_name.name == "ParentTrait"
         )
     });
     assert!(
@@ -624,7 +624,7 @@ class Child extends Parent implements Greeter {
                 struct_name,
                 for_trait: Some(trait_name),
                 ..
-            } if struct_name == "Child" && trait_name == "Greeter"
+            } if struct_name == "Child" && trait_name.name == "Greeter"
         )
     });
     assert!(

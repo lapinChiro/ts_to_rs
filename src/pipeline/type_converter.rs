@@ -11,7 +11,8 @@ use swc_ecma_ast::{
 };
 
 use crate::ir::{
-    EnumValue, EnumVariant, Item, Method, Param, RustType, StructField, TypeParam, Visibility,
+    EnumValue, EnumVariant, Item, Method, Param, RustType, StructField, TraitRef, TypeParam,
+    Visibility,
 };
 use crate::pipeline::SyntheticTypeRegistry;
 use crate::registry::{TypeDef, TypeRegistry};
@@ -653,7 +654,17 @@ fn convert_interface_as_struct_and_trait(
     }
 
     let struct_name = format!("{name}Data");
-    let supertraits = collect_extends_names(decl);
+    let supertraits = collect_extends_refs(decl, synthetic, reg);
+
+    // trait 自身の型パラメータを型引数として TraitRef に変換
+    // （例: interface Foo<T> → impl<T> Foo<T> for FooData<T>）
+    let trait_type_args: Vec<RustType> = type_params
+        .iter()
+        .map(|p| RustType::Named {
+            name: p.name.clone(),
+            type_args: vec![],
+        })
+        .collect();
 
     let struct_item = Item::Struct {
         vis: vis.clone(),
@@ -673,7 +684,11 @@ fn convert_interface_as_struct_and_trait(
 
     let impl_item = Item::Impl {
         struct_name,
-        for_trait: Some(name.to_string()),
+        type_params: type_params.clone(),
+        for_trait: Some(TraitRef {
+            name: name.to_string(),
+            type_args: trait_type_args,
+        }),
         consts: vec![],
         methods,
     };
@@ -710,7 +725,7 @@ fn convert_interface_as_trait(
         }
     }
 
-    let supertraits = collect_extends_names(decl);
+    let supertraits = collect_extends_refs(decl, synthetic, reg);
 
     Ok(Item::Trait {
         vis,
@@ -723,6 +738,37 @@ fn convert_interface_as_trait(
 }
 
 /// Collects parent interface names from the `extends` clause of an interface declaration.
+fn collect_extends_refs(
+    decl: &TsInterfaceDecl,
+    synthetic: &mut SyntheticTypeRegistry,
+    reg: &TypeRegistry,
+) -> Vec<TraitRef> {
+    decl.extends
+        .iter()
+        .filter_map(|e| {
+            if let swc_ecma_ast::Expr::Ident(ident) = e.expr.as_ref() {
+                let type_args = e
+                    .type_args
+                    .as_ref()
+                    .map(|ta| {
+                        ta.params
+                            .iter()
+                            .filter_map(|t| convert_ts_type(t, synthetic, reg).ok())
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                Some(TraitRef {
+                    name: ident.sym.to_string(),
+                    type_args,
+                })
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+/// `collect_extends_refs` から名前のみを抽出する（TypeRegistry のフィールド展開用）。
 fn collect_extends_names(decl: &TsInterfaceDecl) -> Vec<String> {
     decl.extends
         .iter()
@@ -1849,7 +1895,7 @@ fn try_convert_intersection_type(
 
     // If all intersection members are named type refs that resolve to method-only types
     // (traits), generate a supertrait composition instead of a struct.
-    let trait_names: Vec<String> = intersection
+    let trait_names: Vec<TraitRef> = intersection
         .types
         .iter()
         .filter_map(|ty| {
@@ -1863,7 +1909,17 @@ fn try_convert_intersection_type(
                     }) = reg.get(&name)
                     {
                         if f.is_empty() && !m.is_empty() {
-                            return Some(name);
+                            let type_args = type_ref
+                                .type_params
+                                .as_ref()
+                                .map(|ta| {
+                                    ta.params
+                                        .iter()
+                                        .filter_map(|t| convert_ts_type(t, synthetic, reg).ok())
+                                        .collect()
+                                })
+                                .unwrap_or_default();
+                            return Some(TraitRef { name, type_args });
                         }
                     }
                 }

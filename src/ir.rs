@@ -14,6 +14,17 @@ pub struct TypeParam {
     pub constraint: Option<RustType>,
 }
 
+/// trait への参照（名前 + 型引数）。
+///
+/// `impl TraitName<T>` の `TraitName<T>` や `trait Foo: Bar<T>` の `Bar<T>` を表す。
+#[derive(Debug, Clone, PartialEq)]
+pub struct TraitRef {
+    /// trait 名
+    pub name: String,
+    /// 型引数（例: `Trait<String, T>` → `[String, Named("T")]`）
+    pub type_args: Vec<RustType>,
+}
+
 /// Represents a Rust type.
 #[derive(Debug, Clone, PartialEq)]
 pub enum RustType {
@@ -292,8 +303,8 @@ pub enum Item {
         name: String,
         /// Generic type parameters
         type_params: Vec<TypeParam>,
-        /// Supertrait bounds (e.g., `["Animal", "Debug"]` → `trait Dog: Animal + Debug`)
-        supertraits: Vec<String>,
+        /// Supertrait bounds (e.g., `[TraitRef("Animal"), TraitRef("Debug")]` → `trait Dog: Animal + Debug`)
+        supertraits: Vec<TraitRef>,
         /// Method signatures (body is empty — signatures only)
         methods: Vec<Method>,
         /// Associated type declarations (e.g., `type Output;`)
@@ -303,8 +314,10 @@ pub enum Item {
     Impl {
         /// Struct name this impl is for
         struct_name: String,
-        /// If `Some`, this is a trait impl: `impl TraitName for StructName`
-        for_trait: Option<String>,
+        /// Generic type parameters (e.g., `impl<T> Foo<T>`)
+        type_params: Vec<TypeParam>,
+        /// If `Some`, this is a trait impl: `impl TraitName<T> for StructName<T>`
+        for_trait: Option<TraitRef>,
         /// Associated constants (e.g., `pub const MAX: f64 = 100.0;`)
         consts: Vec<AssocConst>,
         /// Methods in the impl block

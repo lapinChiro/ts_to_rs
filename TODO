@@ -11,6 +11,7 @@
 - **Rules/Skills/CLAUDE.mdの言語**: これらは英語で記載した方が効率的なのではないか。レスポンスだけ日本語にして、読み込まれるファイルはすべて英語の方が良いのではないか
 - **数1000行になっているファイルの見直し**: ファイル行数が多くなりすぎると、作業効率が急激に低下する。DRYであり直交性が保たれていることを担保したうえでリファクタリングし、全てのファイルの行数を1000行以下になるようにする。800行を超えるが分割が合理的ではない理由がある場合は相談する。対象はプロダクションコードとテストコードのすべてとする
 - **現在の実装の徹底的なレビュー**: どのような実装が理想的であるか、どのような観点でレビューしなければいけないかを言語化し、詳細な観点リストを作成したうえで、レビューを行う。作成した観点リスト、理想的な実装の説明文書はルールやスキルなど、適切な方法で永続化し、今後の実装が理想的にあり続けるようにする。
+- テストケースの徹底的なレビューとテスト技法の適用
 
 ## 運用ルール
 
@@ -46,6 +47,7 @@
 - **モジュール参照解決の一本化**: `ModuleGraph` が全ファイルの import/export を事前解析し re-export チェーンを解決。`TrivialResolver`（単一ファイルモード用）導入。フォールバック（`convert_relative_path_to_crate_path`）を廃止し、パス→モジュールパス変換を `file_path_to_module_path()` に集約
 - **I-212 union 型 enum 重複定義の解消**: per-file `SyntheticTypeRegistry` の `register_union` dedup により、同一ファイル内の同じ union 型は 1 つの enum に統一
 - **I-226 TypeEnv 完全除去**: TypeEnv 構造体を完全削除。全型情報を FileTypeResolution 経由に一本化。TypeResolver から未使用の module_graph フィールドも除去
+- **I-218 ジェネリクス基盤の残課題**: class/type alias の type_params 収集。substitute_types の Enum 対応。Item::Impl に type_params 追加（`impl<T> Foo<T>` 生成）。ClassInfo への type_params 伝播。`TraitRef { name, type_args }` 導入で for_trait/supertraits/implements の型引数を表現。class extends/interface extends の型引数収集
 
 ---
 
@@ -58,7 +60,7 @@
 | **完了: E2E I/O テスト基盤** | ~~I-49/I-50~~ **達成** | fs/process.env/stdin + E2E テスト基盤 |
 | **完了: Interface → Trait** | ~~I-137/I-127~~ **達成** | interface 3 分類 + extends + 交差型 |
 | **完了: コンパイル可能性の基盤** | ~~I-61/I-100~~ **達成** | チェーンメソッド型追跡 + ジェネリクス基盤 |
-| **次: 変換率の大幅改善** | エラーインスタンス < 50 件 | I-112c（70 件、全エラーの 53.0%）が最大のレバレッジ。I-218（ジェネリクス残課題）、I-211（ビルトイン型）で基盤強化 |
+| **次: 変換率の大幅改善** | エラーインスタンス < 50 件 | I-112c（70 件、全エラーの 53.0%）が最大のレバレッジ。I-218（ジェネリクス残課題）完了済み。I-211（ビルトイン型）で基盤強化 |
 | **その次: コンパイル品質** | ディレクトリコンパイルエラー 0 件 | I-227（enum 名生成）、I-223（エスケープ）、I-236（re-export 余分 `}`）の解消 |
 | **その次: テスト拡充** | E2E テスト網羅性 | E2E テストの拡充（I-20, I-71, I-72, I-74）、HTTP 対応（I-183） |
 
@@ -76,20 +78,39 @@
 
 #### 変換正確性（サイレント意味変更）
 
+- **[I-241]** **BigInt リテラルのオーバーフローが暗黙的に 0 になる** — サイレント意味変更
+  - `src/transformer/expressions/literals.rs:70` で `bigint.value.to_string().parse::<i64>().unwrap_or(0)` — i64 範囲を超える BigInt が暗黙的に 0 に変換される
+  - 解決策: `i128` へのパース、または `unwrap_or(0)` を除去してエラーを報告する
+- **[I-242]** **`typeof` 未解決型のフォールバックが `"object"` 固定** — サイレント意味変更
+  - `src/transformer/expressions/binary.rs:168` で型が解決できない変数の `typeof` が常に `"object"` を返す
+  - 実際には `"string"` や `"number"` の可能性があり、`typeof x === "string"` ガードが常に false になる
+  - 解決策: 型未解決時は `todo!()` またはコンパイルエラーにする。暗黙的な `"object"` フォールバックを除去
+- **[I-243]** **トップレベル式文（副作用）が暗黙的に消失** — サイレント意味変更
+  - `src/transformer/mod.rs:295` で `ModuleItem::Stmt(Stmt::Expr(_))` が `Ok((vec![], vec![]))` を返す
+  - `globalThis.crypto ??= crypto`、`console.log("init")`、IIFE 等の初期化コードが暗黙的に消失する
+  - Rust にトップレベル式はないため直接対応は困難だが、少なくとも unsupported 警告を出すべき
+- **[I-244]** **ネスト destructuring の rest パラメータが暗黙消失** — サイレント意味変更
+  - `src/transformer/functions/mod.rs:734` で `{ a, ...rest }` のネスト destructuring 内の rest が暗黙的にスキップされる
+  - 解決策: unsupported エラーを報告するか、rest をフラット化して収集する
+- **[I-245]** **`declare module` 内の変換エラーが暗黙消失** — サイレント意味変更
+  - `src/transformer/mod.rs:491` で `if let Ok(...)` パターンにより、エラーが発生した宣言が暗黙的にスキップされる
+  - 解決策: エラーを `?` で伝播するか、unsupported として記録する
+- **[I-246]** **PrivateMethod/StaticBlock/PrivateProp が暗黙的に消失** — サイレント意味変更
+  - `src/transformer/classes.rs:124` の `_ => {}` でこれらの ClassMember が暗黙的にスキップされる
+  - PrivateMethod はロジックを含む可能性があり、暗黙消失は危険
+  - 解決策: 少なくとも unsupported エラーを報告する。PrivateMethod は通常メソッドとして変換可能
+- **[I-247]** **union 内の `bigint`/`symbol`/`undefined` キーワード型が暗黙消失** — サイレント意味変更
+  - `src/pipeline/type_converter.rs:1735` で `string | bigint` の `bigint` バリアントが暗黙的にスキップされる（エラーも出ない）
+  - 解決策: 未対応キーワード型に対して `serde_json::Value` フォールバックか unsupported エラーを出す
+- **[I-248]** **intersection 内型リテラルのメソッドシグネチャが暗黙スキップ** — サイレント意味変更
+  - `src/pipeline/type_converter.rs:1847` と `:2024` に TODO コメントあり。メソッドシグネチャを持つ型リテラルの intersection で、メソッドが暗黙的にスキップされる
+  - 解決策: impl ブロックのメソッドとして変換する
 - **[I-216]** **switch 文の default 後の case が unreachable になる** — サイレント意味変更
   - TypeScript では `default` は「全 case 不一致時」に評価されるため、default 後の case にも到達可能
   - Rust の `match` では `_` wildcard が先にマッチし、後続アームが unreachable になる
   - typeof switch（`try_convert_typeof_switch`）と通常 switch（`convert_switch_clean_match`）の両方に影響
   - 解決策: default を常に最後のアームに移動する
   - 発生頻度は極めて低いが、サイレント意味変更カテゴリのため Tier 1
-
-#### 型基盤の穴埋め（伝播防止）
-
-- **[I-218]** **ジェネリクス基盤の残課題** — `TypeParam`/`instantiate`/`substitute` の基盤は構築済みだが、以下が未対応。**`type_params` 参照が 169箇所、`Item::Impl` 生成が 43箇所あり、ジェネリクスに依存する機能（I-112c, I-101 等）を先に実装すると「type_params が空のときの回避策」が蓄積するため、I-112c より先に対応すべき**
-  - `collect_class_info`（`src/registry.rs:500`）が class の `type_params` を収集しない。`class Foo<T> { value: T }` の TypeDef に type_params が格納されず、`instantiate` が効かない。`class.class.type_params` から `collect_type_params`（`src/registry.rs:565`）で収集すべき
-  - `Item::Impl`（`src/ir.rs:303`）に `type_params` がない。`impl<T> Container<T>` のような generic impl が生成できず `impl Container` になる。ジェネリック struct の impl ブロック全てに影響
-  - `substitute_types`（`src/registry.rs:108`）が `TypeDef::Enum` の `variant_fields` を代入しない（147行目で `clone()` のみ）。ジェネリック discriminated union で型パラメータが具体化されない
-  - `collect_decl`（`src/registry.rs:366`）の `TsTypeAlias` 分岐（`src/registry.rs:402`）で `type_params` を収集していない。`type Pair<A,B> = { ... }` が非ジェネリックとして登録される
 
 #### 型変換・型推論（レバレッジ最大）
 
@@ -98,7 +119,7 @@
   - エラーメッセージ: `object literal requires a type annotation to determine struct name`
   - Hono の最大のエラーカテゴリ。解消すれば変換成功率が大幅に改善する
   - 解決策: 代入先の型、関数引数の型、return 文の戻り値型などから struct 名を推定する。推定できない場合は匿名構造体（タプル struct or インライン定義）を検討
-  - 🔗 I-218（ジェネリクス穴埋め）の完了後に着手すべき。TypeResolver 一本化は I-226 で達成済み。ジェネリクス正常化済みの状態で実装することで、workaround を避けられる
+  - TypeResolver 一本化（I-226）とジェネリクス基盤完成（I-218）が前提。両方完了済み
 
 #### ビルトイン型
 
@@ -123,6 +144,7 @@
 - **[I-104]** **所有権推論** — 全ファイルに影響
   - 現在は全 clone。理想的には変数のライフタイム分析に基づき clone/borrow/move を判定
   - 伝播リスク高: 全ての新機能が clone 前提で構築される
+  - ジェネリック型の `return self.value` が `cannot move out of self.value which is behind a shared reference` でコンパイルエラーになる。`T` に `Clone` bound がないため `.clone()` も呼べない。解決には「`&self` メソッドでフィールドを返す場合に参照を返すか、Clone bound を推論する」ロジックが必要
 - **[I-103]** **エラー型戦略** — 全ファイルに影響
   - 現在は `String` 固定。理想的には thiserror/anyhow 等
 - **[I-102]** **`any`/`unknown` の残課題** — 型変換基盤
@@ -155,11 +177,11 @@
 - **[I-101]** **ジェネリック型を含む intersection** — 型変換
   - `interface A<T> extends B<T>, C<T>` のようなジェネリック intersection が未対応
   - `TypeRegistry::instantiate` と `TypeParam` は利用可能（ジェネリクス基盤構築済み）。intersection 変換（`try_convert_intersection_type`）と統合すればよい
-  - 🔗 I-218（class type_params 収集）が先行すると実装が容易
+  - I-218（ジェネリクス基盤）完了済み。`TraitRef` の `type_args` で supertrait・extends の型引数が収集可能。`collect_extends_refs`（`src/pipeline/type_converter.rs`）が interface extends の型引数を収集済み
 - **[I-181]** **call signature のジェネリック型パラメータ** — 型変換
   - `interface Fn<T> { (arg: T): T }` のような call signature のジェネリクス
   - `convert_interface_as_fn_type` は既に `type_params: Vec<TypeParam>` を受け取るが、制約の伝搬が未検証
-- **[I-194]** **typeof 未登録識別子の解決** — 型変換（**2 インスタンス**: `typeof fetch` ×1, `typeof WebSocket` ×1）
+- **[I-194]** **typeof 未登録識別子の解決** — 型変換（**3 インスタンス**: `typeof fetch` ×2, `typeof WebSocket` ×1）
   - TypeRegistry に `fetch`/`WebSocket` が未登録のため `TsTypeQuery` が失敗
 - **[I-93]** **ネストしたフィールド/メソッド経由の変更検出** — ミュータビリティ推論
 - **[I-62]** **`is_string_type` の `Option<String>` ハック除去** — 型推論
@@ -174,7 +196,7 @@
   - `arr.filter(|x| x > 4.0)` で `x` が `&f64` だが `4.0` は `f64`。`*x > 4.0` が正しい
   - `iter().cloned().filter()` パターンでは問題ないが、`.iter().filter()` では `&T` が渡される
   - 現在の変換は `nums.map(...).collect::<Vec<_>>().iter().cloned().filter(...)` のように `.cloned()` を挿入するが、一部のパスで `.filter()` の引数が参照を考慮していない
-  - E2E テスト `method_chain.ts` でこの問題のため配列チェーン（`map → filter`）のテストケースを除外している。解消後に `method_chain.ts` に `nums.map(...).filter(...)` パターンを追加すること
+  - E2E テスト `method_chain.ts` にはこの問題のため配列チェーン（`map → filter`）のテストケースが未追加。解消後に `method_chain.ts` に `nums.map(...).filter(...)` パターンを追加すること
 - **[I-237]** **`Number.prototype.toFixed()` の Rust 変換** — コンパイルエラー（コンパイルテスト `type-narrowing` のスキップ原因の一つ）
   - `f64.toFixed(2)` が Rust に未変換。`format!("{:.2}", v)` に変換すべき
   - 変換器の該当: `src/transformer/expressions/calls.rs` の `convert_call_expr`
@@ -205,7 +227,6 @@
 - **[I-221]** **unsupported intersection member type** — **8 インスタンス**
   - intersection の一部メンバー型が未対応（`try_convert_intersection_type` で処理できない型）
   - 🔗 I-101（ジェネリック intersection）と関連するが、ジェネリクスに限らず intersection の一般的な制限
-
 #### セマンティクス正確性
 
 - **[I-188]** **`substring`/`slice` のバイト境界安全性** — 文字列変換
@@ -235,6 +256,22 @@
 - **[I-195]** **arrow デフォルトパラメータの残存パターン** — **4 インスタンス**（arrow default ×3 + default param value ×1）
 - **[I-196]** **`parseInt` の radix 引数対応** — **1 インスタンス**
 
+#### 未対応構文（ベンチマーク外で検出）
+
+- **[I-249]** **`bigint`/`symbol` キーワード型** — `src/pipeline/type_converter.rs:90` で unsupported エラー。Hono には出現しないが TS 標準型
+- **[I-250]** **`keyof`/`unique` 型演算子** — `src/pipeline/type_converter.rs:152` で unsupported エラー。`keyof T` は Rust では表現困難だが、具体型に対しては文字列リテラルの union に展開可能
+- **[I-251]** **`**` 累乗演算子** — `src/transformer/expressions/binary.rs:227` で unsupported エラー。`f64::powf()` に変換可能
+- **[I-252]** **`??=`/`&&=`/`||=` 複合代入** — `src/transformer/expressions/assignments.rs:103` で unsupported エラー。`??=` は `if x.is_none() { x = Some(y) }`、`&&=`/`||=` は条件付き代入に変換可能
+- **[I-253]** **`console.info`/`debug`/`trace`/`table` 未対応** — `src/transformer/expressions/calls.rs:74` で unsupported エラー。`console.log`/`error`/`warn` のみ対応。`info`/`debug` は `eprintln!`、`trace` は `dbg!` に変換可能
+- **[I-254]** **一部の `Math` メソッド未対応** — `src/transformer/expressions/calls.rs:430` で unsupported エラー。対応済みメソッド以外は未変換
+
+#### 解析精度の改善
+
+- **[I-255]** **`x++`/`x--` (UpdateExpr) が変数の mutation として検出されない** — `src/transformer/statements/mod.rs:1294` の `collect_mutated_vars_from_expr` で `Assign` と `MethodCall` のみチェック。`let mut` 推論が不正確になる。コンパイルエラーの原因
+- **[I-256]** **any-narrowing の typeof 検出がトップレベル if/expr のみ** — `src/transformer/any_narrowing.rs:168` で `Switch`/`While`/`For`/`Try` 内の typeof/instanceof チェックが検出されない。any-narrowing enum のバリアント不足の原因
+- **[I-257]** **TypeResolver が rest パターンの変数を未登録** — `src/pipeline/type_resolver.rs:333` で `Rest` パターンの変数が型解決スコープに登録されない
+- **[I-258]** **クロージャ内の制御フロー内代入が mut 検出されない** — `src/transformer/statements/mod.rs:1226` で `If`/`While` 等のブロック内の代入がクロージャのキャプチャ変数の可変性推論で検出されない
+
 #### ベンチマーク・テスト基盤
 
 - **[I-182]** **Hono クリーンファイルのコンパイルテスト導入**
@@ -254,7 +291,7 @@
 
 ### Tier 3: 低優先度 — 孤立した問題・コード品質
 
-- **[I-192]** **大規模ファイルの分割** — `statements/mod.rs`（2749 行）、`expressions/tests.rs`（6805 行）等
+- **[I-192]** **大規模ファイルの分割** — `statements/mod.rs`（2656 行）、`expressions/tests.rs`（6774 行）等
 - **[I-193]** **API 表面積の最小化** — `pub fn` → `pub(crate) fn`
 - **[I-191]** **README.md の記述内容の見直し**
 - **[I-99]** **`collect_du_field_accesses_from_expr` の AST ノード網羅性改善**
@@ -271,6 +308,7 @@
 - **[I-148]** **for...of デストラクチャリングの残存パターン** — **1 インスタンス**
 - **[I-138]** **タグ付きテンプレートリテラル** — **1 インスタンス**
 - **[I-139]** **関数型パラメータパターン** — **4 インスタンス**
+- **[I-240]** **代入ターゲット（非パターン）** — **1 インスタンス**。`unsupported assignment target` エラー。I-151（パターン版）とは別のエラーカテゴリ
 - **[I-151]** **代入ターゲットパターン** — **2 インスタンス**
 - **[I-154]** **カンマ式 (`SeqExpr`)** — **1 インスタンス**
 - **[I-155]** **`satisfies` 式** — **1 インスタンス**

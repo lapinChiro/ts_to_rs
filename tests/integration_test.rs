@@ -507,3 +507,10 @@ fn test_trait_coercion() {
     let output = transpile_collecting(&input).unwrap().0;
     insta::assert_snapshot!(output);
 }
+
+#[test]
+fn test_generic_class() {
+    let input = fs::read_to_string("tests/fixtures/generic_class.input.ts").unwrap();
+    let output = transpile(&input).unwrap();
+    insta::assert_snapshot!(output);
+}
