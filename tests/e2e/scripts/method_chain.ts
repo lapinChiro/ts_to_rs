@@ -14,4 +14,11 @@ function main(): void {
     // String chain: toUpperCase → split → join
     const result4: string = "hello world".toUpperCase().split(" ").join("_");
     console.log("chain4:", result4);
+
+    // Without type annotation — relies on TypeRegistry for String.split return type
+    const parts = "hello world".split(" ");
+    console.log("parts:", parts.join(","));
+
+    const trimmed = "  hello  ".trim();
+    console.log("trimmed:", trimmed);
 }

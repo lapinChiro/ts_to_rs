@@ -521,3 +521,17 @@ fn test_anon_struct_inference() {
     let (output, _unsupported) = transpile_collecting(&input).unwrap();
     insta::assert_snapshot!(output);
 }
+
+#[test]
+fn test_array_builtin_methods() {
+    let input = fs::read_to_string("tests/fixtures/array-builtin-methods.input.ts").unwrap();
+    let output = transpile(&input).unwrap();
+    insta::assert_snapshot!(output);
+}
+
+#[test]
+fn test_instanceof_builtin() {
+    let input = fs::read_to_string("tests/fixtures/instanceof-builtin.input.ts").unwrap();
+    let (output, _unsupported) = transpile_collecting(&input).unwrap();
+    insta::assert_snapshot!(output);
+}

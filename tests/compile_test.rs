@@ -122,6 +122,14 @@ fn test_all_fixtures_compile() {
         //   - f64.toFixed(2): JS 固有メソッドの Rust 変換が未対応（TODO: format!("{:.N}", v) に変換）
         //   - StringOrF64 の Display 未実装: println! で enum を表示するには Display trait が必要
         "type-narrowing",
+        // array-builtin-methods: filter/find closure receives &f64 but compares with f64 (I-217),
+        // and find() returns Option<f64> but return wraps in Some() causing double-wrap (I-265).
+        "array-builtin-methods",
+        // instanceof-builtin: any-narrowing generates enum variants Date(Date), Error(Error), RegExp(RegExp)
+        // but the struct definitions for these builtin types don't exist in the transpiled output.
+        // String(x) constructor call also doesn't compile. These are expected: builtin types are in
+        // TypeRegistry for type tracking, not for struct generation.
+        "instanceof-builtin",
     ];
 
     let mut entries: Vec<_> = fs::read_dir(fixture_dir)
