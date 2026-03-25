@@ -34,8 +34,8 @@ pub enum TypeDef {
         type_params: Vec<TypeParam>,
         /// フィールド名と型のペア
         fields: Vec<(String, RustType)>,
-        /// メソッドシグネチャ（メソッド名 → シグネチャ）
-        methods: HashMap<String, MethodSignature>,
+        /// メソッドシグネチャ（メソッド名 → オーバーロードを含む全シグネチャ）
+        methods: HashMap<String, Vec<MethodSignature>>,
         /// 親 interface 名のリスト（`interface B extends A` の `A`）
         extends: Vec<String>,
         /// Whether this type comes from a TS interface declaration (true) or class/type alias (false)
@@ -69,7 +69,7 @@ impl TypeDef {
     /// Creates a new struct TypeDef (from class, type alias, or other non-interface source).
     pub fn new_struct(
         fields: Vec<(String, RustType)>,
-        methods: HashMap<String, MethodSignature>,
+        methods: HashMap<String, Vec<MethodSignature>>,
         extends: Vec<String>,
     ) -> Self {
         TypeDef::Struct {
@@ -84,7 +84,7 @@ impl TypeDef {
     /// Creates a new interface TypeDef (from TS interface declaration).
     pub fn new_interface(
         fields: Vec<(String, RustType)>,
-        methods: HashMap<String, MethodSignature>,
+        methods: HashMap<String, Vec<MethodSignature>>,
         extends: Vec<String>,
     ) -> Self {
         TypeDef::Struct {
@@ -124,20 +124,22 @@ impl TypeDef {
                     .collect(),
                 methods: methods
                     .iter()
-                    .map(|(name, sig)| {
+                    .map(|(name, sigs)| {
                         (
                             name.clone(),
-                            MethodSignature {
-                                params: sig
-                                    .params
-                                    .iter()
-                                    .map(|(n, ty)| (n.clone(), ty.substitute(bindings)))
-                                    .collect(),
-                                return_type: sig
-                                    .return_type
-                                    .as_ref()
-                                    .map(|ty| ty.substitute(bindings)),
-                            },
+                            sigs.iter()
+                                .map(|sig| MethodSignature {
+                                    params: sig
+                                        .params
+                                        .iter()
+                                        .map(|(n, ty)| (n.clone(), ty.substitute(bindings)))
+                                        .collect(),
+                                    return_type: sig
+                                        .return_type
+                                        .as_ref()
+                                        .map(|ty| ty.substitute(bindings)),
+                                })
+                                .collect(),
                         )
                     })
                     .collect(),
@@ -547,7 +549,7 @@ fn collect_class_info(
     synthetic: &mut SyntheticTypeRegistry,
 ) -> TypeDef {
     let mut fields = Vec::new();
-    let mut methods = HashMap::new();
+    let mut methods: HashMap<String, Vec<MethodSignature>> = HashMap::new();
 
     for member in &class.class.body {
         match member {
@@ -590,13 +592,10 @@ fn collect_class_info(
                     .return_type
                     .as_ref()
                     .and_then(|ann| convert_ts_type(&ann.type_ann, synthetic, lookup).ok());
-                methods.insert(
-                    name,
-                    MethodSignature {
-                        params,
-                        return_type,
-                    },
-                );
+                methods.entry(name).or_default().push(MethodSignature {
+                    params,
+                    return_type,
+                });
             }
             _ => {}
         }
@@ -655,8 +654,8 @@ fn collect_interface_methods(
     iface: &ast::TsInterfaceDecl,
     lookup: &TypeRegistry,
     synthetic: &mut SyntheticTypeRegistry,
-) -> HashMap<String, MethodSignature> {
-    let mut methods = HashMap::new();
+) -> HashMap<String, Vec<MethodSignature>> {
+    let mut methods: HashMap<String, Vec<MethodSignature>> = HashMap::new();
     for member in &iface.body.body {
         if let ast::TsTypeElement::TsMethodSignature(method) = member {
             let name = match method.key.as_ref() {
@@ -686,13 +685,10 @@ fn collect_interface_methods(
                 .type_ann
                 .as_ref()
                 .and_then(|ann| convert_ts_type(&ann.type_ann, synthetic, lookup).ok());
-            methods.insert(
-                name,
-                MethodSignature {
-                    params,
-                    return_type,
-                },
-            );
+            methods.entry(name).or_default().push(MethodSignature {
+                params,
+                return_type,
+            });
         }
     }
     methods
@@ -1739,10 +1735,10 @@ mod tests {
         let mut methods = HashMap::new();
         methods.insert(
             "greet".to_string(),
-            MethodSignature {
+            vec![MethodSignature {
                 params: vec![("msg".to_string(), RustType::String)],
                 return_type: None,
-            },
+            }],
         );
         reg.register(
             "Greeter".to_string(),
@@ -1771,10 +1767,10 @@ mod tests {
         let mut methods = HashMap::new();
         methods.insert(
             "greet".to_string(),
-            MethodSignature {
+            vec![MethodSignature {
                 params: vec![],
                 return_type: None,
-            },
+            }],
         );
         reg.register(
             "Ctx".to_string(),
@@ -1821,7 +1817,8 @@ mod tests {
         let reg = build_registry(&module);
         match reg.get("Formatter").unwrap() {
             TypeDef::Struct { methods, .. } => {
-                let sig = methods.get("format").expect("format method should exist");
+                let sigs = methods.get("format").expect("format method should exist");
+                let sig = sigs.first().expect("should have at least one signature");
                 assert_eq!(sig.params, vec![("input".to_string(), RustType::String)]);
                 assert_eq!(sig.return_type, Some(RustType::String));
             }
@@ -1836,7 +1833,8 @@ mod tests {
         let reg = build_registry(&module);
         match reg.get("Logger").unwrap() {
             TypeDef::Struct { methods, .. } => {
-                let sig = methods.get("log").expect("log method should exist");
+                let sigs = methods.get("log").expect("log method should exist");
+                let sig = sigs.first().expect("should have at least one signature");
                 assert_eq!(sig.return_type, None);
             }
             other => panic!("expected Struct, got {other:?}"),
@@ -1852,7 +1850,8 @@ mod tests {
         let reg = build_registry(&module);
         match reg.get("Parser").unwrap() {
             TypeDef::Struct { methods, .. } => {
-                let sig = methods.get("parse").expect("parse method should exist");
+                let sigs = methods.get("parse").expect("parse method should exist");
+                let sig = sigs.first().expect("should have at least one signature");
                 assert_eq!(sig.return_type, Some(RustType::F64));
             }
             other => panic!("expected Struct, got {other:?}"),

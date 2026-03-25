@@ -4671,10 +4671,10 @@ fn test_convert_method_call_string_arg_gets_to_string_with_registry() {
     let mut methods = std::collections::HashMap::new();
     methods.insert(
         "greet".to_string(),
-        MethodSignature {
+        vec![MethodSignature {
             params: vec![("name".to_string(), RustType::String)],
             return_type: None,
-        },
+        }],
     );
     reg.register(
         "Greeter".to_string(),
@@ -6555,10 +6555,10 @@ fn test_convert_opt_chain_method_call_propagates_param_types() {
     let mut methods = std::collections::HashMap::new();
     methods.insert(
         "greet".to_string(),
-        MethodSignature {
+        vec![MethodSignature {
             params: vec![("name".to_string(), RustType::String)],
             return_type: None,
-        },
+        }],
     );
     reg.register(
         "Greeter".to_string(),

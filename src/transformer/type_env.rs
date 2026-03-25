@@ -57,10 +57,10 @@ mod tests {
         let mut methods = HashMap::new();
         methods.insert(
             "greet".to_string(),
-            MethodSignature {
+            vec![MethodSignature {
                 params: vec![],
                 return_type: None,
-            },
+            }],
         );
         reg.register(
             "Greeter".to_string(),

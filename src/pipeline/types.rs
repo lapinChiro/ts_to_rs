@@ -3,6 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::ir::RustType;
+use crate::pipeline::SyntheticTypeRegistry;
 use crate::registry::TypeRegistry;
 use crate::transformer::UnsupportedSyntaxError;
 
@@ -57,6 +58,8 @@ pub struct TranspileInput {
     pub files: Vec<(PathBuf, String)>,
     /// Optional pre-built type registry (e.g., built-in types).
     pub builtin_types: Option<TypeRegistry>,
+    /// Base synthetic type registry (e.g., synthetic enums from builtin union types).
+    pub base_synthetic: Option<SyntheticTypeRegistry>,
     /// Module resolver for import path resolution.
     pub module_resolver: Box<dyn ModuleResolver>,
 }

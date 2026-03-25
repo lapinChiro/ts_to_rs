@@ -127,6 +127,7 @@ fn run_single_file_pipeline(
     let input = TranspileInput {
         files: vec![(std::path::PathBuf::from("input.ts"), ts_source.to_string())],
         builtin_types,
+        base_synthetic: None,
         module_resolver: Box::new(TrivialResolver),
     };
     pipeline::transpile_pipeline(input)

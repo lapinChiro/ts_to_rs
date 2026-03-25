@@ -69,7 +69,7 @@ pub fn transpile_pipeline(input: TranspileInput) -> Result<TranspileOutput> {
 
     // Any Enum Analysis (per-file: detect any-typed variables with typeof/instanceof narrowing,
     // register synthetic enum types, record overrides for TypeResolver)
-    let mut synthetic = SyntheticTypeRegistry::new();
+    let mut synthetic = input.base_synthetic.unwrap_or_default();
     let mut per_file_any_synthetics: Vec<SyntheticTypeRegistry> =
         Vec::with_capacity(parsed.files.len());
     let mut per_file_any_overrides: Vec<_> = Vec::with_capacity(parsed.files.len());
@@ -210,6 +210,7 @@ pub fn transpile_single(source: &str) -> Result<String> {
     let input = TranspileInput {
         files: vec![(std::path::PathBuf::from("input.ts"), source.to_string())],
         builtin_types: None,
+        base_synthetic: None,
         module_resolver: Box::new(crate::pipeline::module_resolver::TrivialResolver),
     };
     let output = transpile_pipeline(input)?;
@@ -330,6 +331,7 @@ mod tests {
                 "interface Foo { name: string; }".to_string(),
             )],
             builtin_types: None,
+            base_synthetic: None,
             module_resolver: Box::new(crate::pipeline::module_resolver::TrivialResolver),
         };
         let output = transpile_pipeline(input).unwrap();
@@ -359,6 +361,7 @@ mod tests {
                 ),
             ],
             builtin_types: None,
+            base_synthetic: None,
             module_resolver: Box::new(crate::pipeline::module_resolver::TrivialResolver),
         };
         let output = transpile_pipeline(input).unwrap();
@@ -373,6 +376,7 @@ mod tests {
         let input = TranspileInput {
             files: vec![(PathBuf::from("test.ts"), "export default 42;".to_string())],
             builtin_types: None,
+            base_synthetic: None,
             module_resolver: Box::new(crate::pipeline::module_resolver::TrivialResolver),
         };
         let output = transpile_pipeline(input).unwrap();
@@ -388,6 +392,7 @@ mod tests {
         let input = TranspileInput {
             files: vec![(PathBuf::from("src/foo.ts"), "interface Foo {}".to_string())],
             builtin_types: None,
+            base_synthetic: None,
             module_resolver: Box::new(crate::pipeline::module_resolver::TrivialResolver),
         };
         let output = transpile_pipeline(input).unwrap();
@@ -488,6 +493,7 @@ mod tests {
                 ),
             ],
             builtin_types: None,
+            base_synthetic: None,
             module_resolver: Box::new(resolver),
         };
         let output = transpile_pipeline(input).unwrap();
@@ -537,6 +543,7 @@ mod tests {
                 ),
             ],
             builtin_types: None,
+            base_synthetic: None,
             module_resolver: Box::new(resolver),
         };
         let output = transpile_pipeline(input).unwrap();

@@ -107,11 +107,18 @@ impl<'a> Transformer<'a> {
 
                     // Cat A: method receiver — converted before method resolution
                     let object = self.convert_expr(&member.obj)?;
-                    // Look up method parameter types from the object's type
+                    // Look up method parameter types from the object's type,
+                    // selecting the overload that matches the argument count.
                     let method_sig = self.get_expr_type(&member.obj).and_then(|ty| {
                         if let RustType::Named { name, .. } = ty {
                             if let Some(TypeDef::Struct { methods, .. }) = self.reg().get(name) {
-                                return methods.get(&method).cloned();
+                                let sigs = methods.get(&method)?;
+                                let arg_count = call.args.len();
+                                let sig = sigs
+                                    .iter()
+                                    .find(|s| s.params.len() == arg_count)
+                                    .or_else(|| sigs.first())?;
+                                return Some(sig.clone());
                             }
                         }
                         None

@@ -1100,10 +1100,10 @@ fn reg_with_trait(name: &str) -> TypeRegistry {
     let mut methods = HashMap::new();
     methods.insert(
         "greet".to_string(),
-        MethodSignature {
+        vec![MethodSignature {
             params: vec![("msg".to_string(), RustType::String)],
             return_type: None,
-        },
+        }],
     );
     reg.register(
         name.to_string(),

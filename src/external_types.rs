@@ -10,6 +10,7 @@ use anyhow::{bail, Context, Result};
 use serde::Deserialize;
 
 use crate::ir::RustType;
+use crate::pipeline::SyntheticTypeRegistry;
 use crate::registry::{MethodSignature, TypeDef, TypeRegistry};
 
 /// JSON interchange format version. Must match the tsc extraction script's output.
@@ -148,18 +149,37 @@ const BUILTIN_TYPES_JSON: &str = include_str!("builtin_types.json");
 ///
 /// Returns an error if the embedded JSON is malformed (should not happen
 /// in a correctly built binary).
-pub fn load_builtin_types() -> Result<TypeRegistry> {
-    load_types_json(BUILTIN_TYPES_JSON)
+pub fn load_builtin_types() -> Result<(TypeRegistry, SyntheticTypeRegistry)> {
+    let mut synthetic = SyntheticTypeRegistry::new();
+    let registry = load_types_json_with_synthetic(BUILTIN_TYPES_JSON, &mut synthetic)?;
+    Ok((registry, synthetic))
 }
 
 // ── Conversion logic ───────────────────────────────────────────────
 
 /// Loads external type definitions from a JSON string and returns a [`TypeRegistry`].
 ///
+/// Union types with multiple non-null members are simplified to the first member.
+/// Use [`load_types_json_with_synthetic`] to preserve unions as synthetic enums.
+///
 /// # Errors
 ///
 /// Returns an error if JSON is malformed or the format version is unsupported.
 pub fn load_types_json(json: &str) -> Result<TypeRegistry> {
+    let mut synthetic = SyntheticTypeRegistry::new();
+    load_types_json_with_synthetic(json, &mut synthetic)
+}
+
+/// Loads external type definitions from a JSON string, registering union types
+/// as synthetic enums in the provided [`SyntheticTypeRegistry`].
+///
+/// # Errors
+///
+/// Returns an error if JSON is malformed or the format version is unsupported.
+fn load_types_json_with_synthetic(
+    json: &str,
+    synthetic: &mut SyntheticTypeRegistry,
+) -> Result<TypeRegistry> {
     let parsed: ExternalTypesJson =
         serde_json::from_str(json).context("failed to parse external types JSON")?;
     if parsed.version != FORMAT_VERSION {
@@ -171,7 +191,7 @@ pub fn load_types_json(json: &str) -> Result<TypeRegistry> {
     }
     let mut registry = TypeRegistry::new();
     for (name, def) in parsed.types {
-        if let Some(type_def) = convert_external_typedef(&def) {
+        if let Some(type_def) = convert_external_typedef(&def, synthetic) {
             registry.register(name.clone(), type_def);
         }
     }
@@ -179,7 +199,10 @@ pub fn load_types_json(json: &str) -> Result<TypeRegistry> {
 }
 
 /// Converts an [`ExternalTypeDef`] to a [`TypeDef`].
-fn convert_external_typedef(def: &ExternalTypeDef) -> Option<TypeDef> {
+fn convert_external_typedef(
+    def: &ExternalTypeDef,
+    synthetic: &mut SyntheticTypeRegistry,
+) -> Option<TypeDef> {
     match def {
         ExternalTypeDef::Interface {
             fields,
@@ -189,7 +212,7 @@ fn convert_external_typedef(def: &ExternalTypeDef) -> Option<TypeDef> {
             let converted_fields: Vec<(String, RustType)> = fields
                 .iter()
                 .map(|f| {
-                    let ty = convert_external_type(&f.field_type);
+                    let ty = convert_external_type(&f.field_type, synthetic);
                     let ty = if f.optional {
                         RustType::Option(Box::new(ty))
                     } else {
@@ -199,32 +222,41 @@ fn convert_external_typedef(def: &ExternalTypeDef) -> Option<TypeDef> {
                 })
                 .collect();
 
-            let converted_methods: HashMap<String, MethodSignature> = methods
+            let converted_methods: HashMap<String, Vec<MethodSignature>> = methods
                 .iter()
                 .filter_map(|(name, method)| {
-                    // Use the first signature (most general for overloads)
-                    let sig = method.signatures.first()?;
-                    let params = sig
-                        .params
+                    let sigs: Vec<MethodSignature> = method
+                        .signatures
                         .iter()
-                        .map(|p| {
-                            let ty = convert_external_type(&p.param_type);
-                            let ty = if p.optional {
-                                RustType::Option(Box::new(ty))
-                            } else {
-                                ty
-                            };
-                            (p.name.clone(), ty)
+                        .map(|sig| {
+                            let params = sig
+                                .params
+                                .iter()
+                                .map(|p| {
+                                    let ty = convert_external_type(&p.param_type, synthetic);
+                                    let ty = if p.optional {
+                                        RustType::Option(Box::new(ty))
+                                    } else {
+                                        ty
+                                    };
+                                    (p.name.clone(), ty)
+                                })
+                                .collect();
+                            let return_type = sig
+                                .return_type
+                                .as_ref()
+                                .map(|rt| convert_external_type(rt, synthetic));
+                            MethodSignature {
+                                params,
+                                return_type,
+                            }
                         })
                         .collect();
-                    let return_type = sig.return_type.as_ref().map(convert_external_type);
-                    Some((
-                        name.clone(),
-                        MethodSignature {
-                            params,
-                            return_type,
-                        },
-                    ))
+                    if sigs.is_empty() {
+                        None
+                    } else {
+                        Some((name.clone(), sigs))
+                    }
                 })
                 .collect();
 
@@ -240,7 +272,7 @@ fn convert_external_typedef(def: &ExternalTypeDef) -> Option<TypeDef> {
                 .params
                 .iter()
                 .map(|p| {
-                    let ty = convert_external_type(&p.param_type);
+                    let ty = convert_external_type(&p.param_type, synthetic);
                     let ty = if p.optional {
                         RustType::Option(Box::new(ty))
                     } else {
@@ -249,7 +281,10 @@ fn convert_external_typedef(def: &ExternalTypeDef) -> Option<TypeDef> {
                     (p.name.clone(), ty)
                 })
                 .collect();
-            let return_type = sig.return_type.as_ref().map(convert_external_type);
+            let return_type = sig
+                .return_type
+                .as_ref()
+                .map(|rt| convert_external_type(rt, synthetic));
             let has_rest = sig.params.last().is_some_and(|p| p.rest);
             Some(TypeDef::Function {
                 params,
@@ -270,7 +305,7 @@ fn convert_external_typedef(def: &ExternalTypeDef) -> Option<TypeDef> {
 }
 
 /// Converts an [`ExternalType`] to a [`RustType`].
-fn convert_external_type(ty: &ExternalType) -> RustType {
+fn convert_external_type(ty: &ExternalType, synthetic: &mut SyntheticTypeRegistry) -> RustType {
     match ty {
         ExternalType::String => RustType::String,
         ExternalType::Number => RustType::F64,
@@ -281,25 +316,39 @@ fn convert_external_type(ty: &ExternalType) -> RustType {
         ExternalType::Null | ExternalType::Undefined => RustType::Option(Box::new(RustType::Any)),
         ExternalType::Named { name, type_args } => RustType::Named {
             name: name.clone(),
-            type_args: type_args.iter().map(convert_external_type).collect(),
+            type_args: type_args
+                .iter()
+                .map(|t| convert_external_type(t, synthetic))
+                .collect(),
         },
-        ExternalType::Array { element } => RustType::Vec(Box::new(convert_external_type(element))),
-        ExternalType::Tuple { elements } => {
-            RustType::Tuple(elements.iter().map(convert_external_type).collect())
+        ExternalType::Array { element } => {
+            RustType::Vec(Box::new(convert_external_type(element, synthetic)))
         }
-        ExternalType::Union { members } => convert_union_type(members),
+        ExternalType::Tuple { elements } => RustType::Tuple(
+            elements
+                .iter()
+                .map(|t| convert_external_type(t, synthetic))
+                .collect(),
+        ),
+        ExternalType::Union { members } => convert_union_type(members, synthetic),
         ExternalType::Function {
             params,
             return_type,
         } => RustType::Fn {
-            params: params.iter().map(convert_external_type).collect(),
-            return_type: Box::new(convert_external_type(return_type)),
+            params: params
+                .iter()
+                .map(|t| convert_external_type(t, synthetic))
+                .collect(),
+            return_type: Box::new(convert_external_type(return_type, synthetic)),
         },
     }
 }
 
 /// Converts a union type, handling the `T | null` → `Option<T>` pattern.
-fn convert_union_type(members: &[ExternalType]) -> RustType {
+///
+/// Multi-member non-nullable unions are converted to synthetic enums via
+/// [`SyntheticTypeRegistry::register_union`].
+fn convert_union_type(members: &[ExternalType], synthetic: &mut SyntheticTypeRegistry) -> RustType {
     let mut non_null: Vec<&ExternalType> = Vec::new();
     let mut has_null = false;
 
@@ -311,13 +360,19 @@ fn convert_union_type(members: &[ExternalType]) -> RustType {
     }
 
     let inner = if non_null.len() == 1 {
-        convert_external_type(non_null[0])
+        convert_external_type(non_null[0], synthetic)
     } else if non_null.is_empty() {
         RustType::Any
     } else {
-        // Non-nullable union with multiple members — use the first member as a fallback.
-        // A proper union → enum conversion would need more context.
-        convert_external_type(non_null[0])
+        let member_types: Vec<RustType> = non_null
+            .iter()
+            .map(|m| convert_external_type(m, synthetic))
+            .collect();
+        let enum_name = synthetic.register_union(&member_types);
+        RustType::Named {
+            name: enum_name,
+            type_args: vec![],
+        }
     };
 
     if has_null {
@@ -331,48 +386,53 @@ fn convert_union_type(members: &[ExternalType]) -> RustType {
 mod tests {
     use super::*;
 
+    /// Helper: convert an ExternalType with a fresh SyntheticTypeRegistry.
+    fn conv(ty: &ExternalType) -> RustType {
+        convert_external_type(ty, &mut SyntheticTypeRegistry::new())
+    }
+
     // ── Primitive type parsing ─────────────────────────────────────
 
     #[test]
     fn test_parse_type_string_returns_rust_string() {
         let ty: ExternalType = serde_json::from_str(r#"{"kind":"string"}"#).unwrap();
-        assert_eq!(convert_external_type(&ty), RustType::String);
+        assert_eq!(conv(&ty), RustType::String);
     }
 
     #[test]
     fn test_parse_type_number_returns_f64() {
         let ty: ExternalType = serde_json::from_str(r#"{"kind":"number"}"#).unwrap();
-        assert_eq!(convert_external_type(&ty), RustType::F64);
+        assert_eq!(conv(&ty), RustType::F64);
     }
 
     #[test]
     fn test_parse_type_boolean_returns_bool() {
         let ty: ExternalType = serde_json::from_str(r#"{"kind":"boolean"}"#).unwrap();
-        assert_eq!(convert_external_type(&ty), RustType::Bool);
+        assert_eq!(conv(&ty), RustType::Bool);
     }
 
     #[test]
     fn test_parse_type_void_returns_unit() {
         let ty: ExternalType = serde_json::from_str(r#"{"kind":"void"}"#).unwrap();
-        assert_eq!(convert_external_type(&ty), RustType::Unit);
+        assert_eq!(conv(&ty), RustType::Unit);
     }
 
     #[test]
     fn test_parse_type_any_returns_any() {
         let ty: ExternalType = serde_json::from_str(r#"{"kind":"any"}"#).unwrap();
-        assert_eq!(convert_external_type(&ty), RustType::Any);
+        assert_eq!(conv(&ty), RustType::Any);
     }
 
     #[test]
     fn test_parse_type_unknown_returns_any() {
         let ty: ExternalType = serde_json::from_str(r#"{"kind":"unknown"}"#).unwrap();
-        assert_eq!(convert_external_type(&ty), RustType::Any);
+        assert_eq!(conv(&ty), RustType::Any);
     }
 
     #[test]
     fn test_parse_type_never_returns_never() {
         let ty: ExternalType = serde_json::from_str(r#"{"kind":"never"}"#).unwrap();
-        assert_eq!(convert_external_type(&ty), RustType::Never);
+        assert_eq!(conv(&ty), RustType::Never);
     }
 
     // ── Composite type parsing ─────────────────────────────────────
@@ -383,20 +443,14 @@ mod tests {
             r#"{"kind":"union","members":[{"kind":"string"},{"kind":"null"}]}"#,
         )
         .unwrap();
-        assert_eq!(
-            convert_external_type(&ty),
-            RustType::Option(Box::new(RustType::String))
-        );
+        assert_eq!(conv(&ty), RustType::Option(Box::new(RustType::String)));
     }
 
     #[test]
     fn test_parse_type_array_returns_vec() {
         let ty: ExternalType =
             serde_json::from_str(r#"{"kind":"array","element":{"kind":"number"}}"#).unwrap();
-        assert_eq!(
-            convert_external_type(&ty),
-            RustType::Vec(Box::new(RustType::F64))
-        );
+        assert_eq!(conv(&ty), RustType::Vec(Box::new(RustType::F64)));
     }
 
     #[test]
@@ -406,7 +460,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            convert_external_type(&ty),
+            conv(&ty),
             RustType::Tuple(vec![RustType::String, RustType::F64])
         );
     }
@@ -416,7 +470,7 @@ mod tests {
         let ty: ExternalType =
             serde_json::from_str(r#"{"kind":"named","name":"Response"}"#).unwrap();
         assert_eq!(
-            convert_external_type(&ty),
+            conv(&ty),
             RustType::Named {
                 name: "Response".to_string(),
                 type_args: vec![],
@@ -431,7 +485,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            convert_external_type(&ty),
+            conv(&ty),
             RustType::Named {
                 name: "Promise".to_string(),
                 type_args: vec![RustType::Any],
@@ -446,7 +500,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            convert_external_type(&ty),
+            conv(&ty),
             RustType::Fn {
                 params: vec![RustType::String],
                 return_type: Box::new(RustType::F64),
@@ -473,7 +527,7 @@ mod tests {
             }
         }"#;
         let def: ExternalTypeDef = serde_json::from_str(json).unwrap();
-        let type_def = convert_external_typedef(&def).unwrap();
+        let type_def = convert_external_typedef(&def, &mut SyntheticTypeRegistry::new()).unwrap();
         match type_def {
             TypeDef::Struct {
                 fields, methods, ..
@@ -511,7 +565,7 @@ mod tests {
             }
         }"#;
         let def: ExternalTypeDef = serde_json::from_str(json).unwrap();
-        let type_def = convert_external_typedef(&def).unwrap();
+        let type_def = convert_external_typedef(&def, &mut SyntheticTypeRegistry::new()).unwrap();
         match type_def {
             TypeDef::Struct { methods, .. } => {
                 assert!(methods.contains_key("json"), "should have inherited json()");
@@ -531,7 +585,7 @@ mod tests {
             "methods": {}
         }"#;
         let def: ExternalTypeDef = serde_json::from_str(json).unwrap();
-        let type_def = convert_external_typedef(&def).unwrap();
+        let type_def = convert_external_typedef(&def, &mut SyntheticTypeRegistry::new()).unwrap();
         match type_def {
             TypeDef::Struct { fields, .. } => {
                 assert_eq!(fields[0].1, RustType::Option(Box::new(RustType::F64)));
@@ -557,7 +611,7 @@ mod tests {
             ]
         }"#;
         let def: ExternalTypeDef = serde_json::from_str(json).unwrap();
-        let type_def = convert_external_typedef(&def).unwrap();
+        let type_def = convert_external_typedef(&def, &mut SyntheticTypeRegistry::new()).unwrap();
         match type_def {
             TypeDef::Function {
                 params,
@@ -672,7 +726,7 @@ mod tests {
 
     #[test]
     fn test_load_builtin_types_succeeds() {
-        let registry = load_builtin_types().unwrap();
+        let (registry, _) = load_builtin_types().unwrap();
         // Should contain key Web API types
         assert!(
             registry.get("Response").is_some(),
@@ -694,7 +748,7 @@ mod tests {
 
     #[test]
     fn test_builtin_response_has_status_field() {
-        let registry = load_builtin_types().unwrap();
+        let (registry, _) = load_builtin_types().unwrap();
         let response = registry.get("Response").unwrap();
         match response {
             TypeDef::Struct { fields, .. } => {
@@ -709,7 +763,7 @@ mod tests {
 
     #[test]
     fn test_builtin_response_has_inherited_body_methods() {
-        let registry = load_builtin_types().unwrap();
+        let (registry, _) = load_builtin_types().unwrap();
         let response = registry.get("Response").unwrap();
         match response {
             TypeDef::Struct { methods, .. } => {
@@ -730,7 +784,7 @@ mod tests {
 
     #[test]
     fn test_builtin_headers_has_get_method() {
-        let registry = load_builtin_types().unwrap();
+        let (registry, _) = load_builtin_types().unwrap();
         let headers = registry.get("Headers").unwrap();
         match headers {
             TypeDef::Struct { methods, .. } => {
@@ -748,6 +802,92 @@ mod tests {
                 );
             }
             _ => panic!("Headers should be a Struct"),
+        }
+    }
+
+    // ── Multiple signatures (overloads) ───────────────────────────
+
+    #[test]
+    fn test_parse_interface_multiple_signatures_all_stored() {
+        let json = r#"{
+            "kind": "interface",
+            "fields": [],
+            "methods": {
+                "from": {
+                    "signatures": [
+                        {"params": [{"name": "iterable", "type": {"kind": "any"}}], "return_type": {"kind": "named", "name": "Array"}},
+                        {"params": [{"name": "iterable", "type": {"kind": "any"}}, {"name": "mapfn", "type": {"kind": "any"}}], "return_type": {"kind": "named", "name": "Array"}}
+                    ]
+                }
+            }
+        }"#;
+        let def: ExternalTypeDef = serde_json::from_str(json).unwrap();
+        let mut synthetic = crate::pipeline::SyntheticTypeRegistry::new();
+        let type_def = convert_external_typedef(&def, &mut synthetic).unwrap();
+        match type_def {
+            TypeDef::Struct { methods, .. } => {
+                let sigs = methods.get("from").expect("from method should exist");
+                assert_eq!(sigs.len(), 2, "should store all overload signatures");
+                assert_eq!(sigs[0].params.len(), 1);
+                assert_eq!(sigs[1].params.len(), 2);
+            }
+            _ => panic!("expected Struct"),
+        }
+    }
+
+    // ── Union → synthetic enum ────────────────────────────────────
+
+    #[test]
+    fn test_convert_union_multi_member_returns_named_synthetic_enum() {
+        let mut synthetic = crate::pipeline::SyntheticTypeRegistry::new();
+        let members = vec![ExternalType::String, ExternalType::Number];
+        let result = convert_union_type(&members, &mut synthetic);
+        // register_union sorts variants alphabetically, so F64 comes before String
+        let expected_name = "F64OrString";
+        match &result {
+            RustType::Named { name, .. } => {
+                assert_eq!(name, expected_name);
+            }
+            _ => panic!("expected Named (synthetic enum), got: {result:?}"),
+        }
+        // Verify the enum is registered in synthetic
+        assert!(
+            synthetic.all_items().iter().any(|item| {
+                if let crate::ir::Item::Enum { name, .. } = item {
+                    name == expected_name
+                } else {
+                    false
+                }
+            }),
+            "{expected_name} should be registered in SyntheticTypeRegistry"
+        );
+    }
+
+    #[test]
+    fn test_convert_union_nullable_preserves_option_pattern() {
+        let mut synthetic = crate::pipeline::SyntheticTypeRegistry::new();
+        let members = vec![ExternalType::String, ExternalType::Null];
+        let result = convert_union_type(&members, &mut synthetic);
+        assert_eq!(result, RustType::Option(Box::new(RustType::String)));
+    }
+
+    #[test]
+    fn test_convert_union_nullable_multi_member_returns_option_named() {
+        let mut synthetic = crate::pipeline::SyntheticTypeRegistry::new();
+        let members = vec![
+            ExternalType::String,
+            ExternalType::Number,
+            ExternalType::Null,
+        ];
+        let result = convert_union_type(&members, &mut synthetic);
+        match &result {
+            RustType::Option(inner) => match inner.as_ref() {
+                RustType::Named { name, .. } => {
+                    assert_eq!(name, "F64OrString");
+                }
+                _ => panic!("expected Named inside Option, got: {inner:?}"),
+            },
+            _ => panic!("expected Option, got: {result:?}"),
         }
     }
 }

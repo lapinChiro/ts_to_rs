@@ -100,11 +100,12 @@ fn transpile_file(
         .with_context(|| format!("failed to read input file: {}", input.display()))?;
 
     let input_dir = input.parent().unwrap_or(Path::new("."));
-    let builtin_types = build_base_registry(input_dir, use_builtin_types);
+    let (builtin_types, base_synthetic) = build_base_registry(input_dir, use_builtin_types);
 
     let pipeline_input = TranspileInput {
         files: vec![(input.to_path_buf(), ts_source)],
         builtin_types: Some(builtin_types),
+        base_synthetic: Some(base_synthetic),
         module_resolver: Box::new(TrivialResolver),
     };
     let pipeline_output = ts_to_rs::pipeline::transpile_pipeline(pipeline_input)
@@ -168,12 +169,13 @@ fn transpile_directory(
         files.push((ts_path.clone(), ts_source));
     }
 
-    let builtin_types = build_base_registry(input_dir, use_builtin_types);
+    let (builtin_types, base_synthetic) = build_base_registry(input_dir, use_builtin_types);
     let known_files: HashSet<PathBuf> = ts_files.iter().cloned().collect();
 
     let pipeline_input = TranspileInput {
         files,
         builtin_types: Some(builtin_types),
+        base_synthetic: Some(base_synthetic),
         module_resolver: Box::new(NodeModuleResolver::new(
             input_dir.to_path_buf(),
             known_files,
@@ -262,11 +264,22 @@ fn resolve_unsupported(
 }
 
 /// Builds a base registry from built-in types and optional external types.json.
-fn build_base_registry(input_dir: &Path, use_builtin_types: bool) -> TypeRegistry {
-    let mut registry = if use_builtin_types {
-        ts_to_rs::external_types::load_builtin_types().unwrap_or_default()
+fn build_base_registry(
+    input_dir: &Path,
+    use_builtin_types: bool,
+) -> (TypeRegistry, ts_to_rs::pipeline::SyntheticTypeRegistry) {
+    let (mut registry, base_synthetic) = if use_builtin_types {
+        ts_to_rs::external_types::load_builtin_types().unwrap_or_else(|_| {
+            (
+                TypeRegistry::new(),
+                ts_to_rs::pipeline::SyntheticTypeRegistry::new(),
+            )
+        })
     } else {
-        TypeRegistry::new()
+        (
+            TypeRegistry::new(),
+            ts_to_rs::pipeline::SyntheticTypeRegistry::new(),
+        )
     };
 
     // Auto-detect .ts_to_rs/types.json
@@ -274,7 +287,7 @@ fn build_base_registry(input_dir: &Path, use_builtin_types: bool) -> TypeRegistr
         registry.merge(&external);
     }
 
-    registry
+    (registry, base_synthetic)
 }
 
 /// Loads external types from `.ts_to_rs/types.json` if it exists in the input directory.

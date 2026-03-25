@@ -188,6 +188,7 @@ fn assert_compiles_directory(dir: &str, fixture_name: &str) {
     let input = TranspileInput {
         files,
         builtin_types: None,
+        base_synthetic: None,
         module_resolver: Box::new(TrivialResolver),
     };
     let output = ts_to_rs::pipeline::transpile_pipeline(input)
