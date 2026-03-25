@@ -120,6 +120,9 @@ function extractInterface(
   // Get all properties including inherited ones (checker resolves extends)
   for (const prop of type.getProperties()) {
     const propName = prop.getName();
+    // Skip Symbol-keyed properties (tsc internal names like __@iterator@35)
+    if (isSymbolProperty(propName)) continue;
+
     const propType = checker.getTypeOfSymbol(prop);
     const propDecl = prop.getDeclarations()?.[0];
 
@@ -170,6 +173,9 @@ function extractClass(
 
   for (const prop of type.getProperties()) {
     const propName = prop.getName();
+    // Skip Symbol-keyed properties (tsc internal names like __@iterator@35)
+    if (isSymbolProperty(propName)) continue;
+
     const propType = checker.getTypeOfSymbol(prop);
     const propDecl = prop.getDeclarations()?.[0];
 
@@ -393,6 +399,11 @@ function stripUndefined(type: ts.Type, checker: ts.TypeChecker): ts.Type {
     return type;
   }
   return type;
+}
+
+/** Returns true if the property name is a Symbol-keyed property (tsc internal format: `__@name@NNN`). */
+function isSymbolProperty(name: string): boolean {
+  return name.startsWith("__@");
 }
 
 function hasReadonlyModifier(node: ts.Node): boolean {

@@ -5,6 +5,27 @@
 
 import type { ExternalTypesJson, ExternalTypeDef, ExternalType } from "./types.js";
 
+/** ECMAScript standard built-in types (ES5 + ES2015). */
+export const ECMASCRIPT_TYPES: string[] = [
+  // ES5 core
+  "String", "Number", "Boolean", "Object", "Function",
+  "Array", "Date", "Error", "RegExp", "JSON", "Math",
+  // ES5 error types
+  "TypeError", "RangeError", "SyntaxError", "ReferenceError", "EvalError", "URIError",
+  // ES2015 collections
+  "Map", "Set", "WeakMap", "WeakSet",
+  // ES2015 other
+  "Symbol", "Promise",
+  // TypedArray
+  "ArrayBuffer", "DataView",
+  "Int8Array", "Uint8Array", "Uint8ClampedArray",
+  "Int16Array", "Uint16Array", "Int32Array", "Uint32Array",
+  "Float32Array", "Float64Array",
+  // Iterator/Generator
+  "Iterator", "Generator", "GeneratorFunction",
+  "IterableIterator", "IteratorResult",
+];
+
 /** Server-side Web API types needed for Hono and similar frameworks. */
 export const SERVER_WEB_API_TYPES = [
   // Fetch API

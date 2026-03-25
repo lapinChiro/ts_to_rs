@@ -35,13 +35,13 @@
 
 ### 完了済み機能（参照用）
 
-- **ビルトイン型**: Web API ビルトイン型（Response, Request, Headers 等 106 型）はバイナリ埋め込み済み。ただし ECMAScript 標準組み込み型（Date, Error, RegExp, Map, Set 等）は未収録（抽出元が `lib.dom.d.ts` のみのため）
+- **ビルトイン型**: Web API 型（106 型）+ ECMAScript 標準型（58 型: String, Array, Date, Error, RegExp, Map, Set, Promise 等）がバイナリ埋め込み済み。`src/builtin_types/web_api.json` + `ecmascript.json` に分割管理
 - **Node.js API**: `fs.readFileSync/writeFileSync/existsSync`、`process.env.VAR`、stdin パターンの変換が動作
 - **Interface → Trait**: interface は内容に応じて struct/trait/struct+trait+impl に 3 分類変換。extends, 交差型 trait 合成対応
 - **Trait パラメータ型**: `&dyn Trait` / `Box<dyn Trait>` 変換 + 呼び出し側型強制（`&*` / `Box::new()`）
 - **resolve-types**: `ts_to_rs resolve-types --tsconfig ...` サブコマンド実装済み
 - **型 narrowing**: typeof/instanceof/null-check/truthy → `if let` パターン生成。any 型 → enum 自動生成。typeof "object"/"function" バリアント解決。複合条件 (&&) のネスト if let。三項演算子の `Expr::IfLet`。switch (typeof x) の match 変換。楽観的 `true` フォールバックは `todo!()` に置換済み
-- **チェーンメソッド型追跡**: `MethodSignature`（パラメータ + 戻り値型）を TypeRegistry に格納。`TypeResolver::resolve_method_return_type` でメソッド呼び出しの戻り値型を解決。ユーザー定義型・外部型のチェーンメソッドで動作。ビルトイン String/Array は I-211（ECMAScript 標準型追加）待ち
+- **チェーンメソッド型追跡**: `MethodSignature`（パラメータ + 戻り値型）を TypeRegistry に格納。`TypeResolver::resolve_method_return_type` でメソッド呼び出しの戻り値型を解決。ユーザー定義型・外部型・ビルトイン型（String/Array/Map/Set 等）のチェーンメソッドで動作
 - **ジェネリクス基盤**: `TypeParam`（名前 + 制約）を IR に定義。`TypeDef::Struct`/`Enum` に `type_params` 格納。`RustType::substitute` で型パラメータの具体型置換。`TypeRegistry::instantiate` でジェネリック型のインスタンス化。`resolve_field_type`/`TypeResolver::resolve_method_return_type` で `type_args` を使った具体型解決。`Item::Struct`/`Trait`/`Fn`/`TypeAlias` の型パラメータに制約（`T: Bound`）を出力
 - **ディレクトリモード改善**: 中間ディレクトリ（サブディレクトリのみ）の mod.rs 生成。`../` import パスの `crate::` パス解決。ハイフン入りファイル名のアンダースコア変換。ディレクトリ単位コンパイルチェック（ベンチマーク 2 指標並行計測）
 - **モジュール参照解決の一本化**: `ModuleGraph` が全ファイルの import/export を事前解析し re-export チェーンを解決。`TrivialResolver`（単一ファイルモード用）導入。フォールバック（`convert_relative_path_to_crate_path`）を廃止し、パス→モジュールパス変換を `file_path_to_module_path()` に集約
@@ -138,6 +138,11 @@
   - `Intl.NumberFormat`, `Intl.DateTimeFormat` 等のロケール依存型群が TypeRegistry に未登録
   - `lib.es5.d.ts` に `Intl` namespace として定義。抽出スクリプトの namespace 抽出に対応が必要（現在は interface/class/function/type alias のみ抽出）
   - Hono ベンチマークでの検出なし。需要発生時に対応
+- **[I-264]** **`Proxy`/`Reflect` の型抽出未対応** — ビルトイン型拡張
+  - `Proxy` は `declare var Proxy: ProxyConstructor` 形式（interface 名と var 名が不一致）で定義されており、extractor が `Proxy` 名で抽出できない
+  - `Reflect` は `declare namespace Reflect { function apply(...): any; ... }` 形式で定義されており、extractor が namespace 内の関数を namespace 名下にまとめる機構がない（`tools/extract-types/src/extractor.ts:84` の `processModuleBody` は namespace 内を再帰するが、関数をトップレベル名で個別登録するため `Reflect.apply` ではなく `apply` として登録される）
+  - 解決策: extractor に (1) `declare var X: XConstructor` パターンで `X` を `XConstructor` の alias として登録する機構、(2) namespace 内の宣言を `NamespaceName.MemberName` としてまとめる機構を追加する
+  - 🔗 I-262 と同根の課題（namespace 抽出の未対応）。需要発生時に対応
 - **[I-263]** **型エイリアス（`kind: "alias"`）の TypeRegistry 登録** — 型解決基盤
   - `src/external_types.rs:259` で `ExternalTypeDef::Alias` が `None` を返し、TypeRegistry に登録されない
   - 例: `type RequestInfo = Request | string | URL` のような型エイリアスが external_types.json に含まれるが、TypeRegistry から参照できない

@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import ts from "typescript";
 import { extractTypes } from "./extractor.js";
+import { filterTypes, ECMASCRIPT_TYPES } from "./filter.js";
 import type { ExternalInterfaceDef, ExternalTypesJson } from "./types.js";
 
 /** Helper: create a program from inline TypeScript source. */
@@ -267,5 +268,231 @@ describe("lib.dom.d.ts integration", { timeout: 30_000 }, () => {
     expect(headers.methods["get"]).toBeDefined();
     expect(headers.methods["set"]).toBeDefined();
     expect(headers.methods["append"]).toBeDefined();
+  });
+});
+
+describe("lib.es5.d.ts integration", { timeout: 30_000 }, () => {
+  it("extracts String with core methods", () => {
+    const program = createProgramFromSource("export {};", [
+      "lib.es5.d.ts",
+    ]);
+    const result = extractTypes(program);
+
+    expect(result.types["String"]).toBeDefined();
+    const str = result.types["String"] as ExternalInterfaceDef;
+    expect(str.kind).toBe("interface");
+    expect(str.methods["trim"]).toBeDefined();
+    expect(str.methods["split"]).toBeDefined();
+    expect(str.methods["toLowerCase"]).toBeDefined();
+    expect(str.methods["toUpperCase"]).toBeDefined();
+    expect(str.methods["indexOf"]).toBeDefined();
+    expect(str.methods["slice"]).toBeDefined();
+    expect(str.methods["replace"]).toBeDefined();
+  });
+
+  it("extracts String.split with array return type", () => {
+    const program = createProgramFromSource("export {};", [
+      "lib.es5.d.ts",
+    ]);
+    const result = extractTypes(program);
+
+    const str = result.types["String"] as ExternalInterfaceDef;
+    const splitSigs = str.methods["split"].signatures;
+    expect(splitSigs.length).toBeGreaterThan(0);
+    // At least one signature should return string[]
+    const hasArrayReturn = splitSigs.some(
+      (sig) =>
+        sig.return_type?.kind === "array" &&
+        sig.return_type.element.kind === "string",
+    );
+    expect(hasArrayReturn).toBe(true);
+  });
+
+  it("extracts Array with core methods", () => {
+    const program = createProgramFromSource("export {};", [
+      "lib.es5.d.ts",
+    ]);
+    const result = extractTypes(program);
+
+    expect(result.types["Array"]).toBeDefined();
+    const arr = result.types["Array"] as ExternalInterfaceDef;
+    expect(arr.kind).toBe("interface");
+    expect(arr.methods["map"]).toBeDefined();
+    expect(arr.methods["filter"]).toBeDefined();
+    expect(arr.methods["indexOf"]).toBeDefined();
+    expect(arr.methods["push"]).toBeDefined();
+    expect(arr.methods["pop"]).toBeDefined();
+    expect(arr.methods["join"]).toBeDefined();
+    expect(arr.methods["slice"]).toBeDefined();
+  });
+
+  it("extracts Date with core methods", () => {
+    const program = createProgramFromSource("export {};", [
+      "lib.es5.d.ts",
+    ]);
+    const result = extractTypes(program);
+
+    expect(result.types["Date"]).toBeDefined();
+    const date = result.types["Date"] as ExternalInterfaceDef;
+    expect(date.kind).toBe("interface");
+    expect(date.methods["getTime"]).toBeDefined();
+    expect(date.methods["toISOString"]).toBeDefined();
+  });
+
+  it("extracts Error with message field", () => {
+    const program = createProgramFromSource("export {};", [
+      "lib.es5.d.ts",
+    ]);
+    const result = extractTypes(program);
+
+    expect(result.types["Error"]).toBeDefined();
+    const error = result.types["Error"] as ExternalInterfaceDef;
+    expect(error.kind).toBe("interface");
+    const fieldNames = error.fields.map((f) => f.name);
+    expect(fieldNames).toContain("message");
+  });
+
+  it("extracts RegExp with core methods", () => {
+    const program = createProgramFromSource("export {};", [
+      "lib.es5.d.ts",
+    ]);
+    const result = extractTypes(program);
+
+    expect(result.types["RegExp"]).toBeDefined();
+    const regexp = result.types["RegExp"] as ExternalInterfaceDef;
+    expect(regexp.kind).toBe("interface");
+    expect(regexp.methods["test"]).toBeDefined();
+    expect(regexp.methods["exec"]).toBeDefined();
+  });
+
+  it("extracts JSON with parse and stringify", () => {
+    const program = createProgramFromSource("export {};", [
+      "lib.es5.d.ts",
+    ]);
+    const result = extractTypes(program);
+
+    expect(result.types["JSON"]).toBeDefined();
+    const json = result.types["JSON"] as ExternalInterfaceDef;
+    expect(json.kind).toBe("interface");
+    expect(json.methods["parse"]).toBeDefined();
+    expect(json.methods["stringify"]).toBeDefined();
+  });
+
+  it("extracts Math with core methods", () => {
+    const program = createProgramFromSource("export {};", [
+      "lib.es5.d.ts",
+    ]);
+    const result = extractTypes(program);
+
+    expect(result.types["Math"]).toBeDefined();
+    const math = result.types["Math"] as ExternalInterfaceDef;
+    expect(math.kind).toBe("interface");
+    expect(math.methods["floor"]).toBeDefined();
+    expect(math.methods["ceil"]).toBeDefined();
+    expect(math.methods["round"]).toBeDefined();
+    expect(math.methods["max"]).toBeDefined();
+    expect(math.methods["min"]).toBeDefined();
+    expect(math.methods["random"]).toBeDefined();
+  });
+});
+
+describe("lib.es2015 integration", { timeout: 30_000 }, () => {
+  it("extracts Map with core methods", () => {
+    const program = createProgramFromSource("export {};", [
+      "lib.es2015.collection.d.ts",
+      "lib.es2015.iterable.d.ts",
+      "lib.es2015.symbol.d.ts",
+      "lib.es5.d.ts",
+    ]);
+    const result = extractTypes(program);
+
+    expect(result.types["Map"]).toBeDefined();
+    const map = result.types["Map"] as ExternalInterfaceDef;
+    expect(map.kind).toBe("interface");
+    expect(map.methods["get"]).toBeDefined();
+    expect(map.methods["set"]).toBeDefined();
+    expect(map.methods["has"]).toBeDefined();
+    expect(map.methods["delete"]).toBeDefined();
+  });
+
+  it("extracts Set with core methods", () => {
+    const program = createProgramFromSource("export {};", [
+      "lib.es2015.collection.d.ts",
+      "lib.es2015.iterable.d.ts",
+      "lib.es2015.symbol.d.ts",
+      "lib.es5.d.ts",
+    ]);
+    const result = extractTypes(program);
+
+    expect(result.types["Set"]).toBeDefined();
+    const set = result.types["Set"] as ExternalInterfaceDef;
+    expect(set.kind).toBe("interface");
+    expect(set.methods["add"]).toBeDefined();
+    expect(set.methods["has"]).toBeDefined();
+    expect(set.methods["delete"]).toBeDefined();
+  });
+
+  it("extracts Promise with then/catch methods", () => {
+    const program = createProgramFromSource("export {};", [
+      "lib.es2015.promise.d.ts",
+      "lib.es2015.iterable.d.ts",
+      "lib.es2015.symbol.d.ts",
+      "lib.es5.d.ts",
+    ]);
+    const result = extractTypes(program);
+
+    expect(result.types["Promise"]).toBeDefined();
+    const promise = result.types["Promise"] as ExternalInterfaceDef;
+    expect(promise.kind).toBe("interface");
+    expect(promise.methods["then"]).toBeDefined();
+    expect(promise.methods["catch"]).toBeDefined();
+  });
+});
+
+describe("ECMAScript filter", { timeout: 30_000 }, () => {
+  it("includes only ECMAScript types and excludes DOM types", () => {
+    // Extract from both ES5 and DOM
+    const program = createProgramFromSource("export {};", [
+      "lib.es5.d.ts",
+      "lib.dom.d.ts",
+    ]);
+    const raw = extractTypes(program);
+
+    // DOM types should be present in raw
+    expect(raw.types["HTMLElement"]).toBeDefined();
+
+    // Apply ECMAScript filter
+    const filtered = filterTypes(raw, ECMASCRIPT_TYPES);
+
+    // ECMAScript types should be present
+    expect(filtered.types["String"]).toBeDefined();
+    expect(filtered.types["Array"]).toBeDefined();
+    expect(filtered.types["Date"]).toBeDefined();
+    expect(filtered.types["Error"]).toBeDefined();
+    expect(filtered.types["Math"]).toBeDefined();
+    expect(filtered.types["JSON"]).toBeDefined();
+
+    // DOM types should be excluded
+    expect(filtered.types["HTMLElement"]).toBeUndefined();
+    expect(filtered.types["Document"]).toBeUndefined();
+    expect(filtered.types["Window"]).toBeUndefined();
+    expect(filtered.types["Response"]).toBeUndefined();
+  });
+
+  it("ECMASCRIPT_TYPES includes expected root types", () => {
+    expect(ECMASCRIPT_TYPES).toContain("String");
+    expect(ECMASCRIPT_TYPES).toContain("Number");
+    expect(ECMASCRIPT_TYPES).toContain("Array");
+    expect(ECMASCRIPT_TYPES).toContain("Date");
+    expect(ECMASCRIPT_TYPES).toContain("Error");
+    expect(ECMASCRIPT_TYPES).toContain("RegExp");
+    expect(ECMASCRIPT_TYPES).toContain("Map");
+    expect(ECMASCRIPT_TYPES).toContain("Set");
+    expect(ECMASCRIPT_TYPES).toContain("WeakMap");
+    expect(ECMASCRIPT_TYPES).toContain("WeakSet");
+    expect(ECMASCRIPT_TYPES).toContain("Symbol");
+    expect(ECMASCRIPT_TYPES).toContain("Promise");
+    expect(ECMASCRIPT_TYPES).toContain("JSON");
+    expect(ECMASCRIPT_TYPES).toContain("Math");
   });
 });

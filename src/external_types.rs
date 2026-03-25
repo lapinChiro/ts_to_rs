@@ -137,21 +137,27 @@ pub enum ExternalType {
 
 /// Pre-generated Web API type definitions (Response, Request, Headers, etc.)
 /// extracted from lib.dom.d.ts using the tsc type extraction script.
-const BUILTIN_TYPES_JSON: &str = include_str!("builtin_types.json");
+const WEB_API_TYPES_JSON: &str = include_str!("builtin_types/web_api.json");
 
-/// Loads the built-in Web API type definitions into a [`TypeRegistry`].
+/// Pre-generated ECMAScript standard type definitions (String, Array, Date, etc.)
+/// extracted from lib.es5.d.ts and lib.es2015.*.d.ts using the tsc type extraction script.
+const ECMASCRIPT_TYPES_JSON: &str = include_str!("builtin_types/ecmascript.json");
+
+/// Loads the built-in type definitions into a [`TypeRegistry`].
 ///
-/// These types are pre-generated from TypeScript's lib.dom.d.ts using the
-/// tsc Compiler API, ensuring full inheritance resolution (e.g., Response
-/// includes Body's methods like json() and text()).
+/// Loads ECMAScript standard types first, then Web API types. Types defined in
+/// both (e.g., `Promise`) use the Web API version, which includes DOM-specific
+/// declaration merging extensions.
 ///
 /// # Errors
 ///
 /// Returns an error if the embedded JSON is malformed (should not happen
 /// in a correctly built binary).
 pub fn load_builtin_types() -> Result<(TypeRegistry, SyntheticTypeRegistry)> {
+    let mut registry = TypeRegistry::new();
     let mut synthetic = SyntheticTypeRegistry::new();
-    let registry = load_types_json_inner(BUILTIN_TYPES_JSON, &mut synthetic)?;
+    load_types_into(&mut registry, &mut synthetic, ECMASCRIPT_TYPES_JSON)?;
+    load_types_into(&mut registry, &mut synthetic, WEB_API_TYPES_JSON)?;
     Ok((registry, synthetic))
 }
 
@@ -166,17 +172,26 @@ pub fn load_builtin_types() -> Result<(TypeRegistry, SyntheticTypeRegistry)> {
 ///
 /// Returns an error if JSON is malformed or the format version is unsupported.
 pub fn load_types_json(json: &str) -> Result<(TypeRegistry, SyntheticTypeRegistry)> {
+    let mut registry = TypeRegistry::new();
     let mut synthetic = SyntheticTypeRegistry::new();
-    let registry = load_types_json_inner(json, &mut synthetic)?;
+    load_types_into(&mut registry, &mut synthetic, json)?;
     Ok((registry, synthetic))
 }
 
-/// Internal implementation: loads external type definitions, registering union types
-/// as synthetic enums in the provided [`SyntheticTypeRegistry`].
-fn load_types_json_inner(
-    json: &str,
+/// Loads external type definitions from a JSON string into an existing
+/// [`TypeRegistry`] and [`SyntheticTypeRegistry`].
+///
+/// Types are added via [`TypeRegistry::register`] (`HashMap::insert`),
+/// so later calls overwrite earlier entries with the same name.
+///
+/// # Errors
+///
+/// Returns an error if JSON is malformed or the format version is unsupported.
+pub fn load_types_into(
+    registry: &mut TypeRegistry,
     synthetic: &mut SyntheticTypeRegistry,
-) -> Result<TypeRegistry> {
+    json: &str,
+) -> Result<()> {
     let parsed: ExternalTypesJson =
         serde_json::from_str(json).context("failed to parse external types JSON")?;
     if parsed.version != FORMAT_VERSION {
@@ -186,13 +201,12 @@ fn load_types_json_inner(
             FORMAT_VERSION
         );
     }
-    let mut registry = TypeRegistry::new();
     for (name, def) in parsed.types {
         if let Some(type_def) = convert_external_typedef(&def, synthetic) {
             registry.register(name.clone(), type_def);
         }
     }
-    Ok(registry)
+    Ok(())
 }
 
 /// Converts an [`ExternalTypeDef`] to a [`TypeDef`].
@@ -832,6 +846,141 @@ mod tests {
             }
             _ => panic!("Headers should be a Struct"),
         }
+    }
+
+    // ── ECMAScript built-in types ─────────────────────────────────
+
+    #[test]
+    fn test_load_builtin_types_contains_ecmascript_string() {
+        let (registry, _) = load_builtin_types().unwrap();
+        let string_type = registry
+            .get("String")
+            .expect("builtin types should contain String");
+        match string_type {
+            TypeDef::Struct { methods, .. } => {
+                assert!(methods.contains_key("trim"), "String should have trim()");
+                assert!(methods.contains_key("split"), "String should have split()");
+                assert!(
+                    methods.contains_key("toLowerCase"),
+                    "String should have toLowerCase()"
+                );
+            }
+            _ => panic!("String should be a Struct"),
+        }
+    }
+
+    #[test]
+    fn test_load_builtin_types_contains_ecmascript_array() {
+        let (registry, _) = load_builtin_types().unwrap();
+        let array_type = registry
+            .get("Array")
+            .expect("builtin types should contain Array");
+        match array_type {
+            TypeDef::Struct { methods, .. } => {
+                assert!(methods.contains_key("map"), "Array should have map()");
+                assert!(methods.contains_key("filter"), "Array should have filter()");
+                assert!(methods.contains_key("find"), "Array should have find()");
+            }
+            _ => panic!("Array should be a Struct"),
+        }
+    }
+
+    #[test]
+    fn test_load_builtin_types_contains_ecmascript_date() {
+        let (registry, _) = load_builtin_types().unwrap();
+        assert!(
+            registry.get("Date").is_some(),
+            "builtin types should contain Date"
+        );
+    }
+
+    #[test]
+    fn test_load_builtin_types_contains_ecmascript_error() {
+        let (registry, _) = load_builtin_types().unwrap();
+        assert!(
+            registry.get("Error").is_some(),
+            "builtin types should contain Error"
+        );
+    }
+
+    #[test]
+    fn test_load_builtin_types_contains_ecmascript_map() {
+        let (registry, _) = load_builtin_types().unwrap();
+        let map_type = registry
+            .get("Map")
+            .expect("builtin types should contain Map");
+        match map_type {
+            TypeDef::Struct { methods, .. } => {
+                assert!(methods.contains_key("get"), "Map should have get()");
+                assert!(methods.contains_key("set"), "Map should have set()");
+                assert!(methods.contains_key("has"), "Map should have has()");
+            }
+            _ => panic!("Map should be a Struct"),
+        }
+    }
+
+    #[test]
+    fn test_load_builtin_types_contains_ecmascript_set() {
+        let (registry, _) = load_builtin_types().unwrap();
+        let set_type = registry
+            .get("Set")
+            .expect("builtin types should contain Set");
+        match set_type {
+            TypeDef::Struct { methods, .. } => {
+                assert!(methods.contains_key("add"), "Set should have add()");
+                assert!(methods.contains_key("has"), "Set should have has()");
+                assert!(methods.contains_key("delete"), "Set should have delete()");
+            }
+            _ => panic!("Set should be a Struct"),
+        }
+    }
+
+    #[test]
+    fn test_load_builtin_types_web_api_still_present_after_ecmascript_addition() {
+        let (registry, _) = load_builtin_types().unwrap();
+        // Web API types should still be loaded
+        assert!(
+            registry.get("Response").is_some(),
+            "Response should still be present"
+        );
+        assert!(
+            registry.get("Request").is_some(),
+            "Request should still be present"
+        );
+        assert!(
+            registry.get("Headers").is_some(),
+            "Headers should still be present"
+        );
+    }
+
+    #[test]
+    fn test_load_types_into_merges_into_existing_registry() {
+        let json_a = r#"{
+            "version": 1,
+            "types": {
+                "Foo": {
+                    "kind": "interface",
+                    "fields": [{"name": "x", "type": {"kind": "string"}}],
+                    "methods": {}
+                }
+            }
+        }"#;
+        let json_b = r#"{
+            "version": 1,
+            "types": {
+                "Bar": {
+                    "kind": "interface",
+                    "fields": [{"name": "y", "type": {"kind": "number"}}],
+                    "methods": {}
+                }
+            }
+        }"#;
+        let mut registry = TypeRegistry::new();
+        let mut synthetic = SyntheticTypeRegistry::new();
+        load_types_into(&mut registry, &mut synthetic, json_a).unwrap();
+        load_types_into(&mut registry, &mut synthetic, json_b).unwrap();
+        assert!(registry.get("Foo").is_some(), "Foo should be present");
+        assert!(registry.get("Bar").is_some(), "Bar should be present");
     }
 
     // ── Multiple signatures (overloads) ───────────────────────────

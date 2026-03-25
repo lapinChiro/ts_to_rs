@@ -12,11 +12,17 @@
 
 import ts from "typescript";
 import { extractTypes } from "./extractor.js";
-import { filterTypes, SERVER_WEB_API_TYPES } from "./filter.js";
+import { filterTypes, SERVER_WEB_API_TYPES, ECMASCRIPT_TYPES } from "./filter.js";
 
 function main(): void {
   const args = process.argv.slice(2);
   const serverWebApi = args.includes("--server-web-api");
+  const ecmascript = args.includes("--ecmascript");
+
+  if (serverWebApi && ecmascript) {
+    console.error("--server-web-api and --ecmascript are mutually exclusive");
+    process.exit(1);
+  }
 
   let program: ts.Program;
 
@@ -50,6 +56,8 @@ function main(): void {
   let result = extractTypes(program);
   if (serverWebApi) {
     result = filterTypes(result, SERVER_WEB_API_TYPES);
+  } else if (ecmascript) {
+    result = filterTypes(result, ECMASCRIPT_TYPES);
   }
   process.stdout.write(JSON.stringify(result, null, 2));
 }
@@ -60,6 +68,16 @@ function createLibProgram(libs: string[]): ts.Program {
     dom: "lib.dom.d.ts",
     webworker: "lib.webworker.d.ts",
     es2024: "lib.es2024.d.ts",
+    es5: "lib.es5.d.ts",
+    "es2015.core": "lib.es2015.core.d.ts",
+    "es2015.collection": "lib.es2015.collection.d.ts",
+    "es2015.symbol": "lib.es2015.symbol.d.ts",
+    "es2015.symbol.wellknown": "lib.es2015.symbol.wellknown.d.ts",
+    "es2015.promise": "lib.es2015.promise.d.ts",
+    "es2015.iterable": "lib.es2015.iterable.d.ts",
+    "es2015.generator": "lib.es2015.generator.d.ts",
+    "es2015.proxy": "lib.es2015.proxy.d.ts",
+    "es2015.reflect": "lib.es2015.reflect.d.ts",
   };
 
   const libFiles = libs.map((lib) => {
