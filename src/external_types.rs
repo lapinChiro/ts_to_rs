@@ -151,32 +151,29 @@ const BUILTIN_TYPES_JSON: &str = include_str!("builtin_types.json");
 /// in a correctly built binary).
 pub fn load_builtin_types() -> Result<(TypeRegistry, SyntheticTypeRegistry)> {
     let mut synthetic = SyntheticTypeRegistry::new();
-    let registry = load_types_json_with_synthetic(BUILTIN_TYPES_JSON, &mut synthetic)?;
+    let registry = load_types_json_inner(BUILTIN_TYPES_JSON, &mut synthetic)?;
     Ok((registry, synthetic))
 }
 
 // ── Conversion logic ───────────────────────────────────────────────
 
-/// Loads external type definitions from a JSON string and returns a [`TypeRegistry`].
+/// Loads external type definitions from a JSON string.
 ///
-/// Union types with multiple non-null members are simplified to the first member.
-/// Use [`load_types_json_with_synthetic`] to preserve unions as synthetic enums.
+/// Returns both a [`TypeRegistry`] and a [`SyntheticTypeRegistry`] containing
+/// synthetic enums generated from multi-member union types.
 ///
 /// # Errors
 ///
 /// Returns an error if JSON is malformed or the format version is unsupported.
-pub fn load_types_json(json: &str) -> Result<TypeRegistry> {
+pub fn load_types_json(json: &str) -> Result<(TypeRegistry, SyntheticTypeRegistry)> {
     let mut synthetic = SyntheticTypeRegistry::new();
-    load_types_json_with_synthetic(json, &mut synthetic)
+    let registry = load_types_json_inner(json, &mut synthetic)?;
+    Ok((registry, synthetic))
 }
 
-/// Loads external type definitions from a JSON string, registering union types
+/// Internal implementation: loads external type definitions, registering union types
 /// as synthetic enums in the provided [`SyntheticTypeRegistry`].
-///
-/// # Errors
-///
-/// Returns an error if JSON is malformed or the format version is unsupported.
-fn load_types_json_with_synthetic(
+fn load_types_json_inner(
     json: &str,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<TypeRegistry> {
@@ -661,7 +658,7 @@ mod tests {
                 }
             }
         }"#;
-        let registry = load_types_json(json).unwrap();
+        let (registry, _synthetic) = load_types_json(json).unwrap();
         assert!(registry.get("Response").is_some());
         assert!(registry.get("Headers").is_some());
     }
@@ -685,6 +682,38 @@ mod tests {
     }
 
     #[test]
+    fn test_load_types_json_union_registers_synthetic_enum() {
+        let json = r#"{
+            "version": 1,
+            "types": {
+                "Formatter": {
+                    "kind": "interface",
+                    "fields": [],
+                    "methods": {
+                        "format": {
+                            "signatures": [
+                                {
+                                    "params": [{"name": "input", "type": {"kind": "union", "members": [{"kind": "string"}, {"kind": "number"}]}}],
+                                    "return_type": {"kind": "string"}
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        }"#;
+        let (_registry, synthetic) = load_types_json(json).unwrap();
+        // The union {string | number} should be registered as a synthetic enum
+        let has_enum = synthetic.all_items().iter().any(
+            |item| matches!(item, crate::ir::Item::Enum { name, .. } if name == "F64OrString"),
+        );
+        assert!(
+            has_enum,
+            "SyntheticTypeRegistry should contain F64OrString enum from union type"
+        );
+    }
+
+    #[test]
     fn test_merge_external_types_local_takes_precedence() {
         let external_json = r#"{
             "version": 1,
@@ -696,7 +725,7 @@ mod tests {
                 }
             }
         }"#;
-        let external_reg = load_types_json(external_json).unwrap();
+        let (external_reg, _) = load_types_json(external_json).unwrap();
 
         // Simulate local file defining Foo differently
         let local_source = "interface Foo { local_field: number; }";

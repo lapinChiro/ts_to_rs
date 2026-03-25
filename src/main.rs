@@ -268,7 +268,7 @@ fn build_base_registry(
     input_dir: &Path,
     use_builtin_types: bool,
 ) -> (TypeRegistry, ts_to_rs::pipeline::SyntheticTypeRegistry) {
-    let (mut registry, base_synthetic) = if use_builtin_types {
+    let (mut registry, mut base_synthetic) = if use_builtin_types {
         ts_to_rs::external_types::load_builtin_types().unwrap_or_else(|_| {
             (
                 TypeRegistry::new(),
@@ -283,24 +283,27 @@ fn build_base_registry(
     };
 
     // Auto-detect .ts_to_rs/types.json
-    if let Some(external) = load_external_types_json(input_dir) {
-        registry.merge(&external);
+    if let Some((external_reg, external_synthetic)) = load_external_types_json(input_dir) {
+        registry.merge(&external_reg);
+        base_synthetic.merge(external_synthetic);
     }
 
     (registry, base_synthetic)
 }
 
 /// Loads external types from `.ts_to_rs/types.json` if it exists in the input directory.
-fn load_external_types_json(input_dir: &Path) -> Option<TypeRegistry> {
+fn load_external_types_json(
+    input_dir: &Path,
+) -> Option<(TypeRegistry, ts_to_rs::pipeline::SyntheticTypeRegistry)> {
     let types_json = input_dir.join(".ts_to_rs/types.json");
     if !types_json.exists() {
         return None;
     }
     let json = fs::read_to_string(&types_json).ok()?;
     match ts_to_rs::external_types::load_types_json(&json) {
-        Ok(reg) => {
+        Ok((reg, synthetic)) => {
             eprintln!("Loaded external types from {}", types_json.display());
-            Some(reg)
+            Some((reg, synthetic))
         }
         Err(e) => {
             eprintln!("Warning: failed to load {}: {e}", types_json.display());

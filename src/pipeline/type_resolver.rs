@@ -1251,7 +1251,7 @@ impl<'a> TypeResolver<'a> {
                                 let n_args = opt_call.args.len();
                                 // Set expected types for args
                                 if let Some(params) = method_name.as_deref().and_then(|name| {
-                                    self.lookup_method_params(inner_ty, name, n_args)
+                                    self.lookup_method_params(inner_ty, name, n_args, &[])
                                 }) {
                                     for (arg, param_ty) in opt_call.args.iter().zip(params.iter()) {
                                         let arg_span = Span::from_swc(arg.expr.span());
@@ -1262,20 +1262,7 @@ impl<'a> TypeResolver<'a> {
                                     }
                                 }
                                 // Collect resolved arg types for overload resolution
-                                let arg_types: Vec<Option<RustType>> = opt_call
-                                    .args
-                                    .iter()
-                                    .map(|arg| {
-                                        let span = Span::from_swc(arg.expr.span());
-                                        self.result.expr_types.get(&span).and_then(|rt| {
-                                            if let ResolvedType::Known(ty) = rt {
-                                                Some(ty.clone())
-                                            } else {
-                                                None
-                                            }
-                                        })
-                                    })
-                                    .collect();
+                                let arg_types = self.collect_resolved_arg_types(&opt_call.args);
                                 // Resolve return type
                                 method_name
                                     .as_deref()
@@ -1516,20 +1503,7 @@ impl<'a> TypeResolver<'a> {
                     }
                 };
                 // Collect resolved arg types for overload resolution
-                let arg_types: Vec<Option<RustType>> = call
-                    .args
-                    .iter()
-                    .map(|arg| {
-                        let span = Span::from_swc(arg.expr.span());
-                        self.result.expr_types.get(&span).and_then(|rt| {
-                            if let ResolvedType::Known(ty) = rt {
-                                Some(ty.clone())
-                            } else {
-                                None
-                            }
-                        })
-                    })
-                    .collect();
+                let arg_types = self.collect_resolved_arg_types(&call.args);
                 self.resolve_method_return_type(
                     obj_rust_type,
                     &method_name,
@@ -1602,7 +1576,9 @@ impl<'a> TypeResolver<'a> {
                         _ => None,
                     };
                     method_name
-                        .and_then(|name| self.lookup_method_params(inner_ty, &name, args.len()))
+                        .and_then(|name| {
+                            self.lookup_method_params(inner_ty, &name, args.len(), &[])
+                        })
                         .map(|params| (params, false))
                 } else {
                     None
@@ -1647,6 +1623,25 @@ impl<'a> TypeResolver<'a> {
         }
     }
 
+    /// Collects resolved argument types from already-resolved expressions.
+    ///
+    /// Returns `Some(ty)` for arguments whose type is known, `None` otherwise.
+    /// Used by overload resolution to select the best matching signature.
+    fn collect_resolved_arg_types(&self, args: &[ast::ExprOrSpread]) -> Vec<Option<RustType>> {
+        args.iter()
+            .map(|arg| {
+                let span = Span::from_swc(arg.expr.span());
+                self.result.expr_types.get(&span).and_then(|rt| {
+                    if let ResolvedType::Known(ty) = rt {
+                        Some(ty.clone())
+                    } else {
+                        None
+                    }
+                })
+            })
+            .collect()
+    }
+
     /// Looks up method signatures from the object type's definition.
     fn lookup_method_sigs(
         &self,
@@ -1669,15 +1664,17 @@ impl<'a> TypeResolver<'a> {
 
     /// Looks up method parameter types from the object type's definition.
     ///
-    /// When multiple overloads exist, selects the best match based on `arg_count`.
+    /// When multiple overloads exist, selects the best match using `select_overload`.
+    /// `arg_types` should be `&[]` when resolved argument types are not yet available.
     fn lookup_method_params(
         &self,
         obj_type: &RustType,
         method_name: &str,
         arg_count: usize,
+        arg_types: &[Option<RustType>],
     ) -> Option<Vec<RustType>> {
         let sigs = self.lookup_method_sigs(obj_type, method_name)?;
-        let sig = select_overload_by_arg_count(&sigs, arg_count);
+        let sig = select_overload(&sigs, arg_count, arg_types);
         Some(sig.params.iter().map(|(_, ty)| ty.clone()).collect())
     }
 
@@ -1691,7 +1688,13 @@ impl<'a> TypeResolver<'a> {
         arg_types: &[Option<RustType>],
     ) -> ResolvedType {
         match self.lookup_method_sigs(obj_type, method_name) {
-            Some(sigs) => resolve_overload(&sigs, arg_count, arg_types),
+            Some(sigs) => {
+                let sig = select_overload(&sigs, arg_count, arg_types);
+                sig.return_type
+                    .clone()
+                    .map(ResolvedType::Known)
+                    .unwrap_or(ResolvedType::Unknown)
+            }
             None => ResolvedType::Unknown,
         }
     }
@@ -2037,51 +2040,36 @@ fn extract_type_name_for_registry(ty: &RustType) -> Option<(&str, &[RustType])> 
     }
 }
 
-/// Selects the best overload signature based on argument count.
+/// Selects the best matching overload from a set of method signatures.
 ///
-/// Returns the first signature whose parameter count matches `arg_count`,
-/// or the first signature as fallback.
-fn select_overload_by_arg_count(
-    sigs: &[crate::registry::MethodSignature],
-    arg_count: usize,
-) -> &crate::registry::MethodSignature {
-    if sigs.len() == 1 {
-        return &sigs[0];
-    }
-    sigs.iter()
-        .find(|sig| sig.params.len() == arg_count)
-        .unwrap_or(&sigs[0])
-}
-
-/// Resolves the return type from a set of overloaded method signatures.
+/// Returns the full `MethodSignature` so callers can extract both parameter types
+/// and return type from the **same** signature, avoiding inconsistency.
 ///
 /// Resolution strategy (5 stages):
 /// 1. Single signature → use it
-/// 2. All signatures have the same return type → use that type
+/// 2. All signatures have the same return type → use first (selection is irrelevant for return type)
 /// 3. Filter by argument count → if exactly one matches, use it
 /// 4. Filter by argument type compatibility → if exactly one matches, use it
 /// 5. Fallback: first signature
-fn resolve_overload(
-    sigs: &[crate::registry::MethodSignature],
+fn select_overload<'a>(
+    sigs: &'a [crate::registry::MethodSignature],
     arg_count: usize,
     arg_types: &[Option<RustType>],
-) -> ResolvedType {
+) -> &'a crate::registry::MethodSignature {
+    debug_assert!(
+        !sigs.is_empty(),
+        "select_overload called with empty signatures"
+    );
+
     // Stage 1: single signature
     if sigs.len() == 1 {
-        return sigs[0]
-            .return_type
-            .clone()
-            .map(ResolvedType::Known)
-            .unwrap_or(ResolvedType::Unknown);
+        return &sigs[0];
     }
 
-    // Stage 2: all return types identical
+    // Stage 2: all return types identical — selection doesn't affect return type
     let first_ret = &sigs[0].return_type;
     if sigs.iter().all(|s| &s.return_type == first_ret) {
-        return first_ret
-            .clone()
-            .map(ResolvedType::Known)
-            .unwrap_or(ResolvedType::Unknown);
+        return &sigs[0];
     }
 
     // Stage 3: filter by argument count
@@ -2090,11 +2078,7 @@ fn resolve_overload(
         .filter(|sig| sig.params.len() == arg_count)
         .collect();
     if by_count.len() == 1 {
-        return by_count[0]
-            .return_type
-            .clone()
-            .map(ResolvedType::Known)
-            .unwrap_or(ResolvedType::Unknown);
+        return by_count[0];
     }
 
     // Stage 4: filter by argument type compatibility
@@ -2116,20 +2100,12 @@ fn resolve_overload(
             })
             .collect();
         if compatible.len() == 1 {
-            return compatible[0]
-                .return_type
-                .clone()
-                .map(ResolvedType::Known)
-                .unwrap_or(ResolvedType::Unknown);
+            return compatible[0];
         }
     }
 
     // Stage 5: fallback to first signature
-    sigs[0]
-        .return_type
-        .clone()
-        .map(ResolvedType::Known)
-        .unwrap_or(ResolvedType::Unknown)
+    &sigs[0]
 }
 
 /// Promise<T> → T に展開し、Unit（void）は None にする。
@@ -3613,7 +3589,7 @@ function describe(s: Shape): number {
         );
     }
 
-    // ── resolve_overload tests ─────────────────────────────────────
+    // ── select_overload tests ─────────────────────────────────────
 
     use crate::registry::MethodSignature;
 
@@ -3629,71 +3605,88 @@ function describe(s: Shape): number {
     }
 
     #[test]
-    fn test_resolve_overload_single_signature_returns_its_type() {
+    fn test_select_overload_single_sig_returns_it() {
         let sigs = vec![make_sig(vec![], Some(RustType::String))];
-        let result = super::resolve_overload(&sigs, 0, &[]);
-        assert_eq!(result, ResolvedType::Known(RustType::String));
+        let selected = super::select_overload(&sigs, 0, &[]);
+        assert_eq!(selected.return_type, Some(RustType::String));
+        assert_eq!(selected.params.len(), 0);
     }
 
     #[test]
-    fn test_resolve_overload_all_same_return_type_returns_that_type() {
+    fn test_select_overload_all_same_return_skips_to_first() {
         let sigs = vec![
             make_sig(vec![], Some(RustType::String)),
             make_sig(vec![RustType::F64], Some(RustType::String)),
             make_sig(vec![RustType::F64, RustType::Bool], Some(RustType::String)),
         ];
-        let result = super::resolve_overload(&sigs, 1, &[Some(RustType::F64)]);
-        assert_eq!(result, ResolvedType::Known(RustType::String));
+        // All return types identical → returns first signature
+        let selected = super::select_overload(&sigs, 1, &[Some(RustType::F64)]);
+        assert_eq!(selected.return_type, Some(RustType::String));
+        // First signature is selected (0-arg)
+        assert_eq!(selected.params.len(), 0);
     }
 
     #[test]
-    fn test_resolve_overload_arg_count_selects_matching_signature() {
+    fn test_select_overload_arg_count_selects_match() {
         let sigs = vec![
             make_sig(vec![], Some(RustType::String)),
             make_sig(vec![RustType::F64], Some(RustType::F64)),
         ];
-        // 0 args → String
-        assert_eq!(
-            super::resolve_overload(&sigs, 0, &[]),
-            ResolvedType::Known(RustType::String)
-        );
-        // 1 arg → F64
-        assert_eq!(
-            super::resolve_overload(&sigs, 1, &[None]),
-            ResolvedType::Known(RustType::F64)
-        );
-    }
-
-    #[test]
-    fn test_resolve_overload_no_match_falls_back_to_first() {
-        let sigs = vec![
-            make_sig(vec![], Some(RustType::String)),
-            make_sig(vec![RustType::F64], Some(RustType::F64)),
-        ];
-        // 3 args → no match → fallback to first (String)
-        assert_eq!(
-            super::resolve_overload(&sigs, 3, &[None, None, None]),
-            ResolvedType::Known(RustType::String)
-        );
-    }
-
-    #[test]
-    fn test_select_overload_by_arg_count_returns_matching() {
-        let sigs = vec![
-            make_sig(vec![], Some(RustType::String)),
-            make_sig(vec![RustType::F64], Some(RustType::F64)),
-        ];
-        let selected = super::select_overload_by_arg_count(&sigs, 1);
+        // 0 args → sig[0]
+        let selected = super::select_overload(&sigs, 0, &[]);
+        assert_eq!(selected.return_type, Some(RustType::String));
+        assert_eq!(selected.params.len(), 0);
+        // 1 arg → sig[1]
+        let selected = super::select_overload(&sigs, 1, &[None]);
+        assert_eq!(selected.return_type, Some(RustType::F64));
         assert_eq!(selected.params.len(), 1);
     }
 
     #[test]
-    fn test_select_overload_by_arg_count_fallback_to_first() {
+    fn test_select_overload_arg_type_selects_compatible() {
+        let sigs = vec![
+            make_sig(vec![RustType::String], Some(RustType::String)),
+            make_sig(vec![RustType::F64], Some(RustType::F64)),
+        ];
+        // arg_type=F64 → sig[1]
+        let selected = super::select_overload(&sigs, 1, &[Some(RustType::F64)]);
+        assert_eq!(selected.return_type, Some(RustType::F64));
+        assert_eq!(selected.params[0].1, RustType::F64);
+    }
+
+    #[test]
+    fn test_select_overload_no_match_falls_back_to_first() {
         let sigs = vec![
             make_sig(vec![], Some(RustType::String)),
             make_sig(vec![RustType::F64], Some(RustType::F64)),
         ];
-        let selected = super::select_overload_by_arg_count(&sigs, 5);
-        assert_eq!(selected.params.len(), 0); // first signature
+        // 3 args → no match → fallback to first
+        let selected = super::select_overload(&sigs, 3, &[None, None, None]);
+        assert_eq!(selected.return_type, Some(RustType::String));
+        assert_eq!(selected.params.len(), 0);
+    }
+
+    #[test]
+    fn test_select_overload_arg_types_empty_uses_arg_count_only() {
+        let sigs = vec![
+            make_sig(vec![RustType::String], Some(RustType::String)),
+            make_sig(vec![RustType::F64], Some(RustType::F64)),
+        ];
+        // Same arg_count, empty arg_types → Stage 4 skipped → first of count-matched (sig[0])
+        let selected = super::select_overload(&sigs, 1, &[]);
+        assert_eq!(selected.params[0].1, RustType::String);
+    }
+
+    #[test]
+    fn test_select_overload_params_and_return_from_same_sig() {
+        // The core invariant: params and return type must come from the same signature
+        let sigs = vec![
+            make_sig(vec![RustType::String], Some(RustType::String)),
+            make_sig(vec![RustType::F64], Some(RustType::F64)),
+        ];
+        let selected = super::select_overload(&sigs, 1, &[Some(RustType::F64)]);
+        // Both params and return_type should be from sig[1] (F64 variant)
+        assert_eq!(selected.params[0].1, RustType::F64);
+        assert_eq!(selected.return_type, Some(RustType::F64));
     }
 }

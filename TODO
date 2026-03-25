@@ -128,7 +128,7 @@
     1. `"hello".trim().split(" ")` で `split` のレシーバ型が `String` と解決される
     2. `[1,2,3].map(...).filter(...)` で `filter` のレシーバ型が `Vec<f64>` と解決される
     3. E2E テスト `method_chain.ts` に配列チェーンのテストケースを追加する（I-217 の解消も前提）
-  - PRD 化済み → `backlog/i-211-a-overload-support.md`, `backlog/i-211-b-ecmascript-extraction.md`, `backlog/i-211-c-verification.md`
+  - PRD 化済み → `backlog/i-211-b-ecmascript-extraction.md`, `backlog/i-211-c-verification.md`（I-211-a は完了済み）
 - **[I-261]** **ES2016〜ES2024 の追加メソッド** — ビルトイン型拡張
   - I-211 では ES5 + ES2015 のみ対象。ES2016 以降に追加されたメソッド・型が TypeRegistry に不足
   - 例: `Array.prototype.includes`（ES2016）、`Object.entries`/`Object.values`（ES2017）、`Promise.allSettled`（ES2020）、`Array.prototype.at`（ES2022）、`structuredClone`（ES2024）
@@ -142,7 +142,7 @@
   - `src/external_types.rs:259` で `ExternalTypeDef::Alias` が `None` を返し、TypeRegistry に登録されない
   - 例: `type RequestInfo = Request | string | URL` のような型エイリアスが external_types.json に含まれるが、TypeRegistry から参照できない
   - 解決策: `convert_external_typedef` で `Alias { resolved_type }` を `TypeDef` の適切なバリアント（または新バリアント `TypeDef::Alias`）に変換する
-  - `RustType::Union` 追加（I-211-a）後は union alias も表現可能になるため、I-211 完了後に着手が合理的
+  - I-211-a で union は `SyntheticTypeRegistry::register_union` により合成 enum（`RustType::Named`）に変換される仕組みが整った。alias の `resolved_type` が union なら同じ基盤で処理可能。I-211 完了後に着手が合理的
 
 ### Tier 2: 中優先度 — 変換品質・基盤整備
 
