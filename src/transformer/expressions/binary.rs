@@ -148,13 +148,12 @@ impl<'a> Transformer<'a> {
         // typeof x → resolve based on FileTypeResolution
         if unary.op == ast::UnaryOp::TypeOf {
             let operand_type = self.get_expr_type(&unary.arg);
-            return Ok(match operand_type {
+            return match operand_type {
                 Some(RustType::Option(inner)) => {
                     // Option<T>: runtime branch — is_some() → typeof inner, else "undefined"
-                    // Cat A: typeof operand — only used for type discrimination
                     let operand = self.convert_expr(&unary.arg)?;
                     let inner_typeof = typeof_to_string(inner);
-                    Expr::If {
+                    Ok(Expr::If {
                         condition: Box::new(Expr::MethodCall {
                             object: Box::new(operand),
                             method: "is_some".to_string(),
@@ -162,11 +161,25 @@ impl<'a> Transformer<'a> {
                         }),
                         then_expr: Box::new(Expr::StringLit(inner_typeof.to_string())),
                         else_expr: Box::new(Expr::StringLit("undefined".to_string())),
-                    }
+                    })
                 }
-                Some(ty) => Expr::StringLit(typeof_to_string(ty).to_string()),
-                None => Expr::StringLit("object".to_string()),
-            });
+                Some(RustType::Any) => {
+                    // Any type: runtime typeof via js_typeof helper
+                    let operand = self.convert_expr(&unary.arg)?;
+                    Ok(Expr::RuntimeTypeof {
+                        operand: Box::new(operand),
+                    })
+                }
+                Some(ty) => Ok(Expr::StringLit(typeof_to_string(ty).to_string())),
+                None => {
+                    // Type unresolvable: report as unsupported instead of silent "object"
+                    Err(super::super::UnsupportedSyntaxError::new(
+                        "typeof on unresolved type",
+                        unary.span,
+                    )
+                    .into())
+                }
+            };
         }
 
         // Unary plus: +x → numeric conversion

@@ -159,6 +159,29 @@ fn test_convert_expr_bigint_zero_generates_int_lit() {
 }
 
 #[test]
+fn test_convert_expr_bigint_i64_overflow_i128_range_generates_i128_lit() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
+    // 2^63 = 9223372036854775808 — exceeds i64::MAX but fits i128
+    let swc_expr = parse_expr("9223372036854775808n;");
+    let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_expr(&swc_expr)
+        .unwrap();
+    assert_eq!(result, Expr::IntLit(9_223_372_036_854_775_808));
+}
+
+#[test]
+fn test_convert_expr_bigint_i128_overflow_returns_error() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
+    // i128::MAX + 1 = 170141183460469231731687303715884105728 — exceeds i128
+    let swc_expr = parse_expr("170141183460469231731687303715884105728n;");
+    let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_expr(&swc_expr);
+    assert!(result.is_err());
+}
+
+#[test]
 fn test_convert_expr_string_literal() {
     let f = TctxFixture::new();
     let tctx = f.tctx();
@@ -6277,15 +6300,29 @@ fn test_convert_typeof_option_type_returns_runtime_if() {
 }
 
 #[test]
-fn test_convert_typeof_unknown_type_returns_object() {
+fn test_convert_typeof_unknown_type_returns_error() {
+    // typeof x where type is unresolvable → UnsupportedSyntaxError (not silent "object")
     let f = TctxFixture::new();
     let tctx = f.tctx();
-    // typeof x where x: unknown → "object" (JS default, not "unknown")
     let expr = parse_expr("typeof x");
     let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
-        .convert_expr(&expr)
+        .convert_expr(&expr);
+    assert!(result.is_err(), "typeof on unresolved type should return error, not silent 'object'");
+}
+
+#[test]
+fn test_convert_typeof_any_type_standalone_generates_runtime_typeof() {
+    // typeof x where x: any → Expr::RuntimeTypeof (runtime helper call)
+    let f = TctxFixture::from_source("function f(x: any) { typeof x; }");
+    let tctx = f.tctx();
+    let swc_expr = extract_fn_body_expr_stmt(f.module(), 0, 0);
+    let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_expr(&swc_expr)
         .unwrap();
-    assert_eq!(result, Expr::StringLit("object".to_string()));
+    match result {
+        Expr::RuntimeTypeof { .. } => {} // correct — runtime helper
+        other => panic!("expected RuntimeTypeof for typeof any, got: {other:?}"),
+    }
 }
 
 // --- process.env ---

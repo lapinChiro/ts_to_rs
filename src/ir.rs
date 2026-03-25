@@ -353,6 +353,11 @@ pub enum Item {
         /// Function body
         body: Vec<Stmt>,
     },
+    /// Raw Rust code emitted verbatim by the generator.
+    ///
+    /// Used for helper functions whose structure is not worth modelling in IR
+    /// (e.g., `js_typeof`). Should be used sparingly — prefer structured IR.
+    RawCode(String),
 }
 
 /// A statement inside a function body.
@@ -601,7 +606,21 @@ pub enum Expr {
     /// The unit value: `()`
     Unit,
     /// An integer literal: `42`
-    IntLit(i64),
+    IntLit(i128),
+    /// Raw Rust code that is emitted verbatim by the generator.
+    ///
+    /// Used for helper functions whose body is more naturally expressed as
+    /// literal Rust than as IR nodes (e.g., `js_typeof`'s match expression).
+    RawCode(String),
+    /// A runtime `typeof` check: `js_typeof(&operand)`.
+    ///
+    /// Used when the operand's type cannot be statically resolved (e.g., `any`/`unknown` types).
+    /// The generator emits a `js_typeof` helper function that maps `serde_json::Value`
+    /// variants to JavaScript typeof strings at runtime.
+    RuntimeTypeof {
+        /// The operand expression
+        operand: Box<Expr>,
+    },
     /// An index access expression: `object[index]`
     Index {
         /// The object expression (e.g., `arr`)

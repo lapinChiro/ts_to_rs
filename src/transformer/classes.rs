@@ -121,7 +121,26 @@ impl<'a> Transformer<'a> {
                 ast::ClassMember::Method(method) => {
                     methods.push(self.convert_class_method(method, &vis)?);
                 }
-                _ => {}
+                ast::ClassMember::PrivateMethod(pm) => {
+                    methods.push(self.convert_private_method(pm)?);
+                }
+                ast::ClassMember::PrivateProp(pp) => {
+                    if pp.is_static {
+                        // Static private props — skip for now (rare pattern)
+                    } else {
+                        fields.push(self.convert_private_prop(pp)?);
+                    }
+                }
+                ast::ClassMember::StaticBlock(sb) => {
+                    methods.push(self.convert_static_block(sb)?);
+                }
+                ast::ClassMember::TsIndexSignature(_) | ast::ClassMember::Empty(_) => {}
+                ast::ClassMember::AutoAccessor(aa) => {
+                    return Err(
+                        crate::transformer::UnsupportedSyntaxError::new("AutoAccessor", aa.span)
+                            .into(),
+                    );
+                }
             }
         }
 
@@ -923,9 +942,35 @@ impl<'a> Transformer<'a> {
     ) -> Result<Method> {
         let raw_name = extract_prop_name(&method.key)
             .map_err(|_| anyhow!("unsupported method key (only identifiers)"))?;
+        let member_vis = resolve_member_visibility(method.accessibility, vis);
+        self.build_method(
+            raw_name,
+            member_vis,
+            method.kind,
+            &method.function,
+            method.is_static,
+        )
+    }
 
-        let is_setter = method.kind == ast::MethodKind::Setter;
+    /// Converts a private method (`#method()`) to a non-pub impl method.
+    ///
+    /// ECMAScript private methods (`#name`) are converted to Rust module-private
+    /// methods (no `pub` modifier). The `#` prefix is stripped from the name.
+    fn convert_private_method(&mut self, pm: &ast::PrivateMethod) -> Result<Method> {
+        let name = pm.key.name.to_string();
+        self.build_method(name, Visibility::Private, pm.kind, &pm.function, pm.is_static)
+    }
 
+    /// Shared implementation for converting a TS method (public or private) to an IR [`Method`].
+    fn build_method(
+        &mut self,
+        raw_name: String,
+        vis: Visibility,
+        kind: ast::MethodKind,
+        function: &ast::Function,
+        is_static: bool,
+    ) -> Result<Method> {
+        let is_setter = kind == ast::MethodKind::Setter;
         let name = if is_setter {
             format!("set_{raw_name}")
         } else {
@@ -934,29 +979,20 @@ impl<'a> Transformer<'a> {
 
         let mut params = Vec::new();
         let mut default_expansion_stmts = Vec::new();
-        for param in &method.function.params {
+        for param in &function.params {
             let (p, expansion) = self.convert_param_pat(&param.pat)?;
             default_expansion_stmts.extend(expansion);
             params.push(p);
         }
 
-        let return_type = method
-            .function
+        let return_type = function
             .return_type
             .as_ref()
             .map(|ann| convert_ts_type(&ann.type_ann, self.synthetic, self.reg()))
-            .transpose()?;
+            .transpose()?
+            .and_then(|ty| if matches!(ty, RustType::Unit) { None } else { Some(ty) });
 
-        // void → None (Rust omits `-> ()`)
-        let return_type = return_type.and_then(|ty| {
-            if matches!(ty, RustType::Unit) {
-                None
-            } else {
-                Some(ty)
-            }
-        });
-
-        let body = match &method.function.body {
+        let body = match &function.body {
             Some(block) => {
                 let mut sub_t = Transformer {
                     tctx: self.tctx,
@@ -972,20 +1008,53 @@ impl<'a> Transformer<'a> {
             None => None,
         };
 
-        // Setter or method that assigns to `this.field` needs `&mut self`
         let body_stmts = body.as_deref().unwrap_or(&[]);
         let needs_mut = is_setter || body_has_self_assignment(body_stmts);
 
-        let member_vis = resolve_member_visibility(method.accessibility, vis);
-
         Ok(Method {
-            vis: member_vis,
+            vis,
             name,
-            has_self: !method.is_static,
-            has_mut_self: !method.is_static && needs_mut,
+            has_self: !is_static,
+            has_mut_self: !is_static && needs_mut,
             params,
             return_type,
             body,
+        })
+    }
+
+    /// Converts a private property (`#field`) to a non-pub struct field.
+    ///
+    /// The `#` prefix is stripped. Visibility is set to `Private`.
+    fn convert_private_prop(&mut self, pp: &ast::PrivateProp) -> Result<StructField> {
+        let field_name = pp.key.name.to_string();
+        let ty = match pp.type_ann.as_ref() {
+            Some(ann) => convert_ts_type(&ann.type_ann, self.synthetic, self.reg())?,
+            None => RustType::Any,
+        };
+        Ok(StructField {
+            vis: Some(Visibility::Private),
+            name: field_name,
+            ty,
+        })
+    }
+
+    /// Converts a static block (`static { ... }`) to a `_init_static()` method.
+    ///
+    /// The block's statements become the method body. The method is static
+    /// (`has_self: false`) and non-pub.
+    fn convert_static_block(&mut self, sb: &ast::StaticBlock) -> Result<Method> {
+        let mut stmts = Vec::new();
+        for stmt in &sb.body.stmts {
+            stmts.extend(self.convert_stmt(stmt, None)?);
+        }
+        Ok(Method {
+            vis: Visibility::Private,
+            name: "_init_static".to_string(),
+            has_self: false,
+            has_mut_self: false,
+            params: vec![],
+            return_type: None,
+            body: Some(stmts),
         })
     }
 }

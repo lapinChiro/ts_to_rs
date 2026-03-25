@@ -66,8 +66,13 @@ impl<'a> Transformer<'a> {
                 })
             }
             ast::Lit::BigInt(bigint) => {
-                // BigInt literals (e.g., 123n) → i64 (matching TsBigIntKeyword → i64 type conversion)
-                let value = bigint.value.to_string().parse::<i64>().unwrap_or(0);
+                // BigInt literals (e.g., 123n) → i128
+                let value: i128 = bigint.value.to_string().parse().map_err(|_| {
+                    super::super::UnsupportedSyntaxError::new(
+                        format!("BigInt literal out of i128 range: {}n", bigint.value),
+                        bigint.span,
+                    )
+                })?;
                 Ok(Expr::IntLit(value))
             }
             _ => Err(anyhow!("unsupported literal: {:?}", lit)),

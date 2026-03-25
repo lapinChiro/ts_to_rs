@@ -3018,7 +3018,7 @@ fn test_convert_ts_type_null_keyword_returns_unit() {
 // -- TsBigIntKeyword → i64 --
 
 #[test]
-fn test_convert_ts_type_bigint_keyword_returns_i64() {
+fn test_convert_ts_type_bigint_keyword_returns_i128() {
     let decl = parse_interface("interface T { x: bigint; }");
     let prop = match &decl.body.body[0] {
         TsTypeElement::TsPropertySignature(p) => p,
@@ -3033,7 +3033,7 @@ fn test_convert_ts_type_bigint_keyword_returns_i64() {
     assert_eq!(
         ty,
         RustType::Named {
-            name: "i64".to_string(),
+            name: "i128".to_string(),
             type_args: vec![],
         }
     );

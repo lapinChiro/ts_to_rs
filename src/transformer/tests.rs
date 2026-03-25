@@ -986,24 +986,180 @@ fn test_extract_fn_param_types_unknown_returns_none() {
 // --- Top-level expression statements (I-180) ---
 
 #[test]
-fn test_transform_module_top_level_expr_stmt_does_not_error() {
-    // Top-level expression like `globalThis.crypto ??= crypto` should not cause an error
+fn test_transform_module_top_level_expr_stmt_generates_init_fn() {
+    // Top-level expression like `console.log("init")` → pub fn init() { ... }
     let source = r#"
         interface Foo { name: string; }
         console.log("init");
     "#;
     let module = parse_typescript(source).expect("parse failed");
-    // Use collecting mode since transform_module errors on unsupported
     let (items, unsupported) = transform_module_collecting(&module, &TypeRegistry::new()).unwrap();
     // Foo should be converted
     assert!(items
         .iter()
         .any(|i| matches!(i, Item::Struct { name, .. } if name == "Foo")));
-    // console.log should be converted (not unsupported)
+    // console.log should be in init() function
+    let init_fn = items.iter().find(|i| matches!(i, Item::Fn { name, .. } if name == "init"));
+    assert!(
+        init_fn.is_some(),
+        "expected init() function from top-level expression, got items: {items:?}"
+    );
     assert!(
         unsupported.is_empty(),
         "expected no unsupported errors, got: {unsupported:?}"
     );
+}
+
+#[test]
+fn test_transform_module_multiple_top_level_exprs_merge_into_single_init() {
+    let source = r#"
+        console.log("first");
+        console.log("second");
+    "#;
+    let module = parse_typescript(source).expect("parse failed");
+    let (items, _) = transform_module_collecting(&module, &TypeRegistry::new()).unwrap();
+    let init_fns: Vec<_> = items
+        .iter()
+        .filter(|i| matches!(i, Item::Fn { name, .. } if name == "init"))
+        .collect();
+    assert_eq!(
+        init_fns.len(),
+        1,
+        "expected exactly 1 init() function, got {}",
+        init_fns.len()
+    );
+}
+
+#[test]
+fn test_transform_module_no_top_level_exprs_no_init_fn() {
+    let source = "interface Foo { name: string; }";
+    let module = parse_typescript(source).expect("parse failed");
+    let (items, _) = transform_module_collecting(&module, &TypeRegistry::new()).unwrap();
+    let has_init = items
+        .iter()
+        .any(|i| matches!(i, Item::Fn { name, .. } if name == "init"));
+    assert!(!has_init, "no init() should be generated when no top-level expressions exist");
+}
+
+// --- private class members ---
+
+#[test]
+fn test_private_method_generates_non_pub_method() {
+    let source = r#"
+        class Foo {
+            #helper(): string { return "help"; }
+            public greet(): string { return this.#helper(); }
+        }
+    "#;
+    let module = parse_typescript(source).expect("parse failed");
+    let (items, unsupported) = transform_module_collecting(&module, &TypeRegistry::new()).unwrap();
+    assert!(
+        unsupported.is_empty(),
+        "private method should not be unsupported: {unsupported:?}"
+    );
+    // Find the impl block
+    let impl_item = items
+        .iter()
+        .find(|i| matches!(i, Item::Impl { methods, .. } if methods.iter().any(|m| m.name == "helper")));
+    assert!(
+        impl_item.is_some(),
+        "expected 'helper' method in impl block, items: {items:?}"
+    );
+    if let Some(Item::Impl { methods, .. }) = impl_item {
+        let helper = methods.iter().find(|m| m.name == "helper").unwrap();
+        assert_eq!(helper.vis, Visibility::Private, "private method should have Private visibility");
+    }
+}
+
+#[test]
+fn test_private_prop_generates_non_pub_field() {
+    let source = r#"
+        class Counter {
+            #count: number;
+            public value: string;
+        }
+    "#;
+    let module = parse_typescript(source).expect("parse failed");
+    let (items, unsupported) = transform_module_collecting(&module, &TypeRegistry::new()).unwrap();
+    assert!(
+        unsupported.is_empty(),
+        "private prop should not be unsupported: {unsupported:?}"
+    );
+    let struct_item = items
+        .iter()
+        .find(|i| matches!(i, Item::Struct { name, .. } if name == "Counter"));
+    assert!(struct_item.is_some(), "expected Counter struct");
+    if let Some(Item::Struct { fields, .. }) = struct_item {
+        let count_field = fields.iter().find(|f| f.name == "count");
+        assert!(count_field.is_some(), "expected 'count' field (# prefix removed)");
+        if let Some(f) = count_field {
+            assert_eq!(f.vis, Some(Visibility::Private), "private prop should have Private visibility");
+        }
+    }
+}
+
+#[test]
+fn test_static_block_generates_init_static_method() {
+    let source = r#"
+        class Cache {
+            static {
+                console.log("initializing");
+            }
+        }
+    "#;
+    let module = parse_typescript(source).expect("parse failed");
+    let (items, unsupported) = transform_module_collecting(&module, &TypeRegistry::new()).unwrap();
+    assert!(
+        unsupported.is_empty(),
+        "static block should not be unsupported: {unsupported:?}"
+    );
+    let impl_item = items
+        .iter()
+        .find(|i| matches!(i, Item::Impl { methods, .. } if methods.iter().any(|m| m.name == "_init_static")));
+    assert!(
+        impl_item.is_some(),
+        "expected '_init_static' method, items: {items:?}"
+    );
+}
+
+// --- declare module error propagation ---
+
+#[test]
+fn test_declare_module_inner_error_reported_in_resilient_mode() {
+    // An unsupported declaration inside `declare module` should be reported, not silently dropped
+    let source = r#"
+        declare module 'test' {
+            interface Valid { x: string; }
+            using y = something;
+        }
+    "#;
+    let module = parse_typescript(source).expect("parse failed");
+    let (items, unsupported) = transform_module_collecting(&module, &TypeRegistry::new()).unwrap();
+    // Valid interface should still be converted
+    assert!(
+        items
+            .iter()
+            .any(|i| matches!(i, Item::Struct { name, .. } if name == "Valid")),
+        "valid interface should be converted: {items:?}"
+    );
+    // `using` declaration should be reported as unsupported
+    assert!(
+        !unsupported.is_empty(),
+        "unsupported declaration inside declare module should be reported"
+    );
+}
+
+#[test]
+fn test_declare_module_inner_error_propagates_in_strict_mode() {
+    // In strict mode (non-resilient), unsupported inside declare module should error
+    let source = r#"
+        declare module 'test' {
+            using y = something;
+        }
+    "#;
+    let module = parse_typescript(source).expect("parse failed");
+    let result = transform_module(&module, &TypeRegistry::new());
+    assert!(result.is_err(), "unsupported inside declare module should error in strict mode");
 }
 
 // --- D1: import resolution with ModuleGraph ---
@@ -1135,4 +1291,26 @@ fn test_transform_import_module_graph_resolves_reexport_chain() {
             names: vec!["Config".to_string()],
         }
     );
+}
+
+#[test]
+fn test_unsupported_syntax_error_new_creates_correct_instance() {
+    use swc_common::{BytePos, Span};
+    let span = Span::new(BytePos(42), BytePos(50));
+    let err = super::UnsupportedSyntaxError::new("TestKind", span);
+    assert_eq!(err.kind, "TestKind");
+    assert_eq!(err.byte_pos, 42);
+}
+
+#[test]
+fn test_unsupported_syntax_error_new_converts_to_anyhow() {
+    use swc_common::{BytePos, Span};
+    let span = Span::new(BytePos(10), BytePos(20));
+    let err = super::UnsupportedSyntaxError::new("SomeError", span);
+    let anyhow_err: anyhow::Error = err.into();
+    let downcasted = anyhow_err
+        .downcast::<super::UnsupportedSyntaxError>()
+        .unwrap();
+    assert_eq!(downcasted.kind, "SomeError");
+    assert_eq!(downcasted.byte_pos, 10);
 }

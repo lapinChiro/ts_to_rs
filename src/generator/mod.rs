@@ -43,6 +43,7 @@ fn generate_item(item: &Item) -> String {
             .map(|line| format!("// {line}"))
             .collect::<Vec<_>>()
             .join("\n"),
+        Item::RawCode(code) => code.clone(),
         Item::Use { vis, path, names } => {
             let vis_prefix = generate_vis(vis);
             if names.len() == 1 {

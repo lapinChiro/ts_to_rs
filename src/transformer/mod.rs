@@ -119,6 +119,19 @@ pub struct UnsupportedSyntaxError {
     pub byte_pos: u32,
 }
 
+impl UnsupportedSyntaxError {
+    /// Creates a new `UnsupportedSyntaxError` from a kind string and an SWC `Span`.
+    ///
+    /// Extracts `byte_pos` from the span's lower bound (`span.lo`).
+    /// Prefer this over manual struct construction for consistency.
+    pub fn new(kind: impl Into<String>, span: swc_common::Span) -> Self {
+        Self {
+            kind: kind.into(),
+            byte_pos: span.lo.0,
+        }
+    }
+}
+
 impl std::fmt::Display for UnsupportedSyntaxError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "unsupported syntax: {}", self.kind)
@@ -190,13 +203,25 @@ impl<'a> Transformer<'a> {
         let iface_methods = classes::pre_scan_interface_methods(module);
 
         let mut items = Vec::new();
+        let mut init_stmts = Vec::new();
         for module_item in &module.body {
+            // Collect top-level expression statements for init() function
+            if let ModuleItem::Stmt(Stmt::Expr(expr_stmt)) = module_item {
+                let expr = self.convert_expr(&expr_stmt.expr)?;
+                init_stmts.push(crate::ir::Stmt::Expr(expr));
+                continue;
+            }
             let (converted, _warnings) =
                 self.transform_module_item(module_item, &class_map, &iface_methods, false)?;
             items.extend(converted);
         }
 
+        if !init_stmts.is_empty() {
+            items.push(build_init_fn(init_stmts));
+        }
+
         inject_regex_import_if_needed(&mut items);
+        inject_js_typeof_if_needed(&mut items);
         Ok(items)
     }
 
@@ -210,16 +235,39 @@ impl<'a> Transformer<'a> {
 
         let mut items = Vec::new();
         let mut unsupported = Vec::new();
+        let mut init_stmts = Vec::new();
 
         for module_item in &module.body {
+            // Collect top-level expression statements for init() function
+            if let ModuleItem::Stmt(Stmt::Expr(expr_stmt)) = module_item {
+                match self.convert_expr(&expr_stmt.expr) {
+                    Ok(expr) => {
+                        init_stmts.push(crate::ir::Stmt::Expr(expr));
+                        continue;
+                    }
+                    Err(e) => {
+                        // Record as unsupported and continue
+                        match e.downcast::<UnsupportedSyntaxError>() {
+                            Ok(unsup) => unsupported.push(unsup),
+                            Err(other) => {
+                                unsupported.push(UnsupportedSyntaxError::new(
+                                    other.to_string(),
+                                    module_item.span(),
+                                ));
+                            }
+                        }
+                        continue;
+                    }
+                }
+            }
             match self.transform_module_item(module_item, &class_map, &iface_methods, true) {
                 Ok((converted, warnings)) => {
                     items.extend(converted);
                     for warning in warnings {
-                        unsupported.push(UnsupportedSyntaxError {
-                            kind: warning,
-                            byte_pos: module_item.span().lo.0,
-                        });
+                        unsupported.push(UnsupportedSyntaxError::new(
+                            warning,
+                            module_item.span(),
+                        ));
                     }
                 }
                 Err(e) => match e.downcast::<UnsupportedSyntaxError>() {
@@ -227,16 +275,21 @@ impl<'a> Transformer<'a> {
                     Err(other) => {
                         // Transformer-internal errors (e.g. unsupported parameter patterns
                         // inside functions/classes) are collected instead of aborting.
-                        unsupported.push(UnsupportedSyntaxError {
-                            kind: other.to_string(),
-                            byte_pos: module_item.span().lo.0,
-                        });
+                        unsupported.push(UnsupportedSyntaxError::new(
+                            other.to_string(),
+                            module_item.span(),
+                        ));
                     }
                 },
             }
         }
 
+        if !init_stmts.is_empty() {
+            items.push(build_init_fn(init_stmts));
+        }
+
         inject_regex_import_if_needed(&mut items);
+        inject_js_typeof_if_needed(&mut items);
         Ok((items, unsupported))
     }
 
@@ -293,10 +346,10 @@ impl<'a> Transformer<'a> {
             // Top-level expression statements (e.g., `globalThis.crypto ??= crypto`)
             // Rust has no top-level expressions; skip silently
             ModuleItem::Stmt(Stmt::Expr(_)) => Ok((vec![], vec![])),
-            _ => Err(UnsupportedSyntaxError {
-                kind: format_module_item_kind(module_item),
-                byte_pos: module_item.span().lo.0,
-            }
+            _ => Err(UnsupportedSyntaxError::new(
+                format_module_item_kind(module_item),
+                module_item.span(),
+            )
             .into()),
         }
     }
@@ -485,28 +538,32 @@ impl<'a> Transformer<'a> {
             Decl::TsModule(ts_module) => {
                 // `declare module 'name' { ... }` — process internal declarations
                 let mut items = Vec::new();
+                let mut warnings = Vec::new();
                 if let Some(ast::TsNamespaceBody::TsModuleBlock(block)) = &ts_module.body {
                     for item in &block.body {
                         if let ModuleItem::Stmt(ast::Stmt::Decl(inner_decl)) = item {
-                            if let Ok((inner_items, _)) = self.transform_decl(
+                            match self.transform_decl(
                                 inner_decl,
                                 vis.clone(),
                                 class_map,
                                 iface_methods,
                                 resilient,
                             ) {
-                                items.extend(inner_items);
+                                Ok((inner_items, inner_warnings)) => {
+                                    items.extend(inner_items);
+                                    warnings.extend(inner_warnings);
+                                }
+                                Err(e) if resilient => {
+                                    warnings.push(e.to_string());
+                                }
+                                Err(e) => return Err(e),
                             }
                         }
                     }
                 }
-                Ok((items, vec![]))
+                Ok((items, warnings))
             }
-            _ => Err(UnsupportedSyntaxError {
-                kind: format_decl_kind(decl),
-                byte_pos: decl.span().lo.0,
-            }
-            .into()),
+            _ => Err(UnsupportedSyntaxError::new(format_decl_kind(decl), decl.span()).into()),
         }
     }
 } // end impl Transformer (module-level transformation)
@@ -614,6 +671,73 @@ fn format_decl_kind(decl: &Decl) -> String {
     }
 }
 
+/// Injects a `js_typeof` helper function if any item contains `Expr::RuntimeTypeof`.
+///
+/// The helper maps `serde_json::Value` variants to JavaScript typeof strings at runtime,
+/// preserving TypeScript's `typeof` semantics for dynamically-typed values.
+fn inject_js_typeof_if_needed(items: &mut Vec<Item>) {
+    if !items_contain_runtime_typeof(items) {
+        return;
+    }
+    items.push(Item::RawCode(
+        r#"fn js_typeof(val: &serde_json::Value) -> &'static str {
+    match val {
+        serde_json::Value::String(_) => "string",
+        serde_json::Value::Number(_) => "number",
+        serde_json::Value::Bool(_) => "boolean",
+        serde_json::Value::Null => "undefined",
+        _ => "object",
+    }
+}"#
+        .to_string(),
+    ));
+}
+
+fn items_contain_runtime_typeof(items: &[Item]) -> bool {
+    use crate::ir::Method;
+    items.iter().any(|item| match item {
+        Item::Fn { body, .. } => stmts_contain_runtime_typeof(body),
+        Item::Impl { methods, .. } => methods
+            .iter()
+            .any(|m: &Method| m.body.as_ref().is_some_and(|b| stmts_contain_runtime_typeof(b))),
+        _ => false,
+    })
+}
+
+fn stmts_contain_runtime_typeof(stmts: &[crate::ir::Stmt]) -> bool {
+    stmts.iter().any(|stmt| match stmt {
+        crate::ir::Stmt::Expr(e) | crate::ir::Stmt::Return(Some(e)) | crate::ir::Stmt::TailExpr(e) => expr_contains_runtime_typeof(e),
+        crate::ir::Stmt::Let { init, .. } => init.as_ref().is_some_and(expr_contains_runtime_typeof),
+        crate::ir::Stmt::If { then_body, else_body, .. } => {
+            stmts_contain_runtime_typeof(then_body)
+                || else_body.as_ref().is_some_and(|b| stmts_contain_runtime_typeof(b.as_slice()))
+        }
+        crate::ir::Stmt::Match { arms, .. } => arms.iter().any(|arm| stmts_contain_runtime_typeof(&arm.body)),
+        crate::ir::Stmt::While { body, .. } | crate::ir::Stmt::ForIn { body, .. } => stmts_contain_runtime_typeof(body),
+        crate::ir::Stmt::LabeledBlock { body, .. } => stmts_contain_runtime_typeof(body),
+        _ => false,
+    })
+}
+
+fn expr_contains_runtime_typeof(expr: &crate::ir::Expr) -> bool {
+    use crate::ir::Expr;
+    match expr {
+        Expr::RuntimeTypeof { .. } => true,
+        Expr::MethodCall { object, args, .. } => {
+            expr_contains_runtime_typeof(object) || args.iter().any(expr_contains_runtime_typeof)
+        }
+        Expr::FnCall { args, .. } => args.iter().any(expr_contains_runtime_typeof),
+        Expr::Ref(inner) | Expr::Await(inner) | Expr::Deref(inner) => expr_contains_runtime_typeof(inner),
+        Expr::BinaryOp { left, right, .. } => expr_contains_runtime_typeof(left) || expr_contains_runtime_typeof(right),
+        Expr::If { condition, then_expr, else_expr } => {
+            expr_contains_runtime_typeof(condition)
+                || expr_contains_runtime_typeof(then_expr)
+                || expr_contains_runtime_typeof(else_expr)
+        }
+        _ => false,
+    }
+}
+
 fn inject_regex_import_if_needed(items: &mut Vec<Item>) {
     if items_contain_regex(items) {
         items.insert(
@@ -671,6 +795,24 @@ fn expr_contains_regex(expr: &crate::ir::Expr) -> bool {
         Expr::Ref(inner) | Expr::Await(inner) | Expr::Deref(inner) => expr_contains_regex(inner),
         Expr::Block(stmts) => stmts_contain_regex(stmts),
         _ => false,
+    }
+}
+
+/// Builds an `init()` function from accumulated top-level expression statements.
+///
+/// TypeScript modules can have top-level expressions that run once when the module
+/// is first imported. Rust has no module-load-time execution, so these are collected
+/// into a `pub fn init()` that the consumer can call explicitly.
+fn build_init_fn(stmts: Vec<crate::ir::Stmt>) -> Item {
+    Item::Fn {
+        name: "init".to_string(),
+        vis: Visibility::Public,
+        attributes: vec![],
+        params: vec![],
+        return_type: None,
+        body: stmts,
+        is_async: false,
+        type_params: vec![],
     }
 }
 

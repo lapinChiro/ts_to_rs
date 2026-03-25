@@ -213,7 +213,7 @@ fn synthetic_type_name(item: &Item) -> String {
         | Item::Trait { name, .. } => name.clone(),
         Item::Impl { struct_name, .. } => struct_name.clone(),
         Item::Use { path, .. } => path.clone(),
-        Item::Comment(text) => text.clone(),
+        Item::Comment(text) | Item::RawCode(text) => text.clone(),
     }
 }
 

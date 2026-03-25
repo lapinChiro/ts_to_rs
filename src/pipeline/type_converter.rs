@@ -84,7 +84,7 @@ pub fn convert_ts_type(
                 Ok(RustType::Unit)
             }
             TsKeywordTypeKind::TsBigIntKeyword => Ok(RustType::Named {
-                name: "i64".to_string(),
+                name: "i128".to_string(),
                 type_args: vec![],
             }),
             other => Err(anyhow!("unsupported keyword type: {:?}", other)),
@@ -121,7 +121,7 @@ pub fn convert_ts_type(
             swc_ecma_ast::TsLit::Bool(_) => Ok(RustType::Bool),
             swc_ecma_ast::TsLit::Number(_) => Ok(RustType::F64),
             swc_ecma_ast::TsLit::BigInt(_) => Ok(RustType::Named {
-                name: "i64".to_string(),
+                name: "i128".to_string(),
                 type_args: vec![],
             }),
         },
@@ -1719,9 +1719,9 @@ fn try_convert_general_union(
                     TsKeywordTypeKind::TsNumberKeyword => ("F64".to_string(), RustType::F64),
                     TsKeywordTypeKind::TsBooleanKeyword => ("Bool".to_string(), RustType::Bool),
                     TsKeywordTypeKind::TsBigIntKeyword => (
-                        "I64".to_string(),
+                        "I128".to_string(),
                         RustType::Named {
-                            name: "i64".to_string(),
+                            name: "i128".to_string(),
                             type_args: vec![],
                         },
                     ),

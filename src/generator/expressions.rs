@@ -307,6 +307,8 @@ pub(super) fn generate_expr(expr: &Expr) -> String {
         }
         Expr::Unit => "()".to_string(),
         Expr::IntLit(n) => format!("{n}"),
+        Expr::RuntimeTypeof { operand } => format!("js_typeof(&{})", generate_expr(operand)),
+        Expr::RawCode(code) => code.clone(),
         Expr::Block(stmts) => {
             use super::statements::generate_stmt;
             let mut out = "{\n".to_string();
@@ -1194,5 +1196,13 @@ mod tests {
         };
         let expected = "match &s {\n    Shape::Circle { radius, .. } => {\n        radius.clone()\n    }\n    _ => {\n        panic!(\"unexpected variant\")\n    }\n}";
         assert_eq!(generate_expr(&expr), expected);
+    }
+
+    #[test]
+    fn test_generate_expr_runtime_typeof_produces_helper_call() {
+        let expr = Expr::RuntimeTypeof {
+            operand: Box::new(Expr::Ident("x".to_string())),
+        };
+        assert_eq!(generate_expr(&expr), "js_typeof(&x)");
     }
 }
