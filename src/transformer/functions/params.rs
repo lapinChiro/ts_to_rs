@@ -1,0 +1,278 @@
+//! Function parameter conversion from SWC TypeScript AST to IR.
+//!
+//! Handles simple identifier parameters, inline type literals, default parameters,
+//! and rest parameters.
+
+use super::*;
+
+impl<'a> Transformer<'a> {
+    /// Converts a function parameter pattern into an IR [`Param`] and optional expansion
+    /// statements.
+    ///
+    /// For simple identifier parameters, returns the param with no expansion.
+    /// For object destructuring parameters (`{ x, y }: Point`), returns a synthetic
+    /// parameter (named from the type annotation) and `let` statements to expand the fields.
+    ///
+    /// When `resilient` is true, unsupported type annotations fall back to [`RustType::Any`].
+    pub(super) fn convert_param(
+        &mut self,
+        pat: &ast::Pat,
+        fn_name: &str,
+        vis: Visibility,
+        resilient: bool,
+        fallback_warnings: &mut Vec<String>,
+    ) -> Result<(Param, Vec<Stmt>, Vec<Item>)> {
+        match pat {
+            ast::Pat::Ident(ident) => {
+                let param_name = ident.id.sym.to_string();
+                let ty = match ident.type_ann.as_ref() {
+                    Some(ann) => ann,
+                    None => {
+                        // No type annotation — fallback to Any
+                        return Ok((
+                            Param {
+                                name: param_name,
+                                ty: Some(RustType::Any),
+                            },
+                            vec![],
+                            vec![],
+                        ));
+                    }
+                };
+
+                // Check if the type annotation is an inline type literal
+                if let ast::TsType::TsTypeLit(type_lit) = ty.type_ann.as_ref() {
+                    let struct_name = to_pascal_case(&format!("{fn_name}_{param_name}"));
+                    let mut fields = Vec::new();
+                    for member in &type_lit.members {
+                        match member {
+                            ast::TsTypeElement::TsPropertySignature(prop) => {
+                                fields.push(convert_property_signature(
+                                    prop,
+                                    self.synthetic,
+                                    self.reg(),
+                                )?);
+                            }
+                            _ => {
+                                return Err(anyhow!(
+                                "unsupported inline type literal member (only property signatures)"
+                            ))
+                            }
+                        }
+                    }
+                    let struct_item = Item::Struct {
+                        vis,
+                        name: struct_name.clone(),
+                        type_params: vec![],
+                        fields,
+                    };
+                    let rust_type = RustType::Named {
+                        name: struct_name,
+                        type_args: vec![],
+                    };
+                    return Ok((
+                        Param {
+                            name: param_name,
+                            ty: Some(rust_type),
+                        },
+                        vec![],
+                        vec![struct_item],
+                    ));
+                }
+
+                let rust_type =
+                    self.convert_ts_type_with_fallback(&ty.type_ann, resilient, fallback_warnings)?;
+                // Trait types in parameter position → &dyn Trait
+                let rust_type = wrap_trait_for_position(rust_type, TypePosition::Param, self.reg());
+                Ok((
+                    Param {
+                        name: param_name,
+                        ty: Some(rust_type),
+                    },
+                    vec![],
+                    vec![],
+                ))
+            }
+            ast::Pat::Object(obj_pat) => {
+                let (param, stmts) = self.convert_object_destructuring_param(obj_pat)?;
+                Ok((param, stmts, vec![]))
+            }
+            ast::Pat::Assign(assign) => {
+                self.convert_default_param(assign, fn_name, vis, resilient, fallback_warnings)
+            }
+            ast::Pat::Rest(rest) => {
+                if let ast::Pat::Ident(ident) = rest.arg.as_ref() {
+                    let name = ident.id.sym.to_string();
+                    let type_ann = rest.type_ann.as_ref().or(ident.type_ann.as_ref());
+                    let rust_type = type_ann
+                        .map(|ann| {
+                            self.convert_ts_type_with_fallback(
+                                &ann.type_ann,
+                                resilient,
+                                fallback_warnings,
+                            )
+                        })
+                        .transpose()?;
+                    Ok((
+                        Param {
+                            name,
+                            ty: rust_type,
+                        },
+                        vec![],
+                        vec![],
+                    ))
+                } else {
+                    Err(anyhow!("unsupported rest parameter pattern"))
+                }
+            }
+            _ => Err(anyhow!("unsupported parameter pattern")),
+        }
+    }
+
+    /// Converts a parameter with a default value into an `Option<T>` parameter
+    /// with an `unwrap_or` / `unwrap_or_default` expansion statement.
+    ///
+    /// Example: `(x: number = 0)` → param `x: Option<f64>` + `let x = x.unwrap_or(0.0);`
+    fn convert_default_param(
+        &mut self,
+        assign: &ast::AssignPat,
+        fn_name: &str,
+        vis: Visibility,
+        resilient: bool,
+        fallback_warnings: &mut Vec<String>,
+    ) -> Result<(Param, Vec<Stmt>, Vec<Item>)> {
+        // Recursively convert the inner parameter (left side)
+        let (inner_param, mut stmts, extra) =
+            self.convert_param(&assign.left, fn_name, vis, resilient, fallback_warnings)?;
+        let param_name = inner_param.name.clone();
+
+        // Wrap the type in Option<T>
+        // If no type annotation (or Any fallback), infer from default value literal
+        let inner_type = match inner_param.ty {
+            Some(RustType::Any) | None => {
+                infer_type_from_default(&assign.right).unwrap_or(RustType::Any)
+            }
+            Some(ty) => ty,
+        };
+        let option_type = RustType::Option(Box::new(inner_type));
+
+        // Convert default value to IR expression
+        let (default_expr, use_unwrap_or_default) = self.convert_default_value(&assign.right)?;
+
+        // Generate expansion statement: `let x = x.unwrap_or(value);` or `let x = x.unwrap_or_default();`
+        let unwrap_call = if use_unwrap_or_default {
+            Expr::MethodCall {
+                object: Box::new(Expr::Ident(param_name.clone())),
+                method: "unwrap_or_default".to_string(),
+                args: vec![],
+            }
+        } else {
+            Expr::MethodCall {
+                object: Box::new(Expr::Ident(param_name.clone())),
+                method: "unwrap_or".to_string(),
+                args: vec![default_expr.unwrap()],
+            }
+        };
+
+        stmts.insert(
+            0,
+            Stmt::Let {
+                mutable: false,
+                name: param_name.clone(),
+                ty: None,
+                init: Some(unwrap_call),
+            },
+        );
+
+        Ok((
+            Param {
+                name: param_name,
+                ty: Some(option_type),
+            },
+            stmts,
+            extra,
+        ))
+    }
+
+    /// Converts a default value expression to an IR [`Expr`].
+    ///
+    /// Returns `(Some(expr), false)` for literal values (use `unwrap_or`),
+    /// or `(None, true)` for empty objects (use `unwrap_or_default`).
+    pub(crate) fn convert_default_value(
+        &mut self,
+        expr: &ast::Expr,
+    ) -> Result<(Option<Expr>, bool)> {
+        match expr {
+            ast::Expr::Lit(lit) => match lit {
+                ast::Lit::Num(n) => Ok((Some(Expr::NumberLit(n.value)), false)),
+                ast::Lit::Str(s) => Ok((
+                    Some(Expr::MethodCall {
+                        object: Box::new(Expr::StringLit(s.value.to_string_lossy().into_owned())),
+                        method: "to_string".to_string(),
+                        args: vec![],
+                    }),
+                    false,
+                )),
+                ast::Lit::Bool(b) => Ok((Some(Expr::BoolLit(b.value)), false)),
+                _ => Err(anyhow!("unsupported default parameter value")),
+            },
+            ast::Expr::Object(obj) if obj.props.is_empty() => {
+                // `= {}` → unwrap_or_default()
+                Ok((None, true))
+            }
+            ast::Expr::Ident(ident) => {
+                // `= someVariable` → unwrap_or(someVariable)
+                Ok((Some(Expr::Ident(ident.sym.to_string())), false))
+            }
+            ast::Expr::Array(arr) if arr.elems.is_empty() => {
+                // `= []` → unwrap_or_default()
+                Ok((None, true))
+            }
+            ast::Expr::New(_) => {
+                // `= new Map()` → unwrap_or_default()
+                Ok((None, true))
+            }
+            ast::Expr::Unary(unary)
+                if unary.op == ast::UnaryOp::Minus
+                    && matches!(unary.arg.as_ref(), ast::Expr::Lit(ast::Lit::Num(_))) =>
+            {
+                // `= -1` → unwrap_or(-1.0)
+                if let ast::Expr::Lit(ast::Lit::Num(n)) = unary.arg.as_ref() {
+                    Ok((Some(Expr::NumberLit(-n.value)), false))
+                } else {
+                    unreachable!()
+                }
+            }
+            // General expression: use unwrap_or_else(|| expr) for any expression
+            // that can be converted (e.g., console.log, function calls, member access)
+            other => {
+                let ir_expr = self.convert_expr(other)?;
+                Ok((Some(ir_expr), false))
+            }
+        }
+    }
+}
+
+/// Infers the type of a default parameter from its literal value.
+///
+/// - Number literal → `f64`
+/// - String literal → `String`
+/// - Boolean literal → `bool`
+/// - Other expressions → `None`
+fn infer_type_from_default(expr: &ast::Expr) -> Option<RustType> {
+    match expr {
+        ast::Expr::Lit(lit) => match lit {
+            ast::Lit::Num(_) => Some(RustType::F64),
+            ast::Lit::Str(_) => Some(RustType::String),
+            ast::Lit::Bool(_) => Some(RustType::Bool),
+            _ => None,
+        },
+        ast::Expr::Unary(unary)
+            if unary.op == ast::UnaryOp::Minus
+                && matches!(unary.arg.as_ref(), ast::Expr::Lit(ast::Lit::Num(_))) =>
+        {
+            Some(RustType::F64)
+        }
+        _ => None,
+    }
+}

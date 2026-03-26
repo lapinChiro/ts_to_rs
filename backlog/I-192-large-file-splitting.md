@@ -81,30 +81,19 @@
 
 ### 分割設計
 
-#### 1-5: 完了済み（実績は git history 参照）
+#### 1-7: 完了済み（実績は git history 参照）
 
 - **T1**: `type_resolver.rs` (3692行) → 7 サブモジュール + テスト分割 (T1b)
 - **T2**: `type_converter.rs` (2691行) → 6 サブモジュール + tests
 - **T3**: `statements/mod.rs` (2656行) → 7 サブモジュール + テスト分割 (T3b)
 - **T4**: `registry.rs` (2414行) → 6 サブモジュール + テスト分割 (T4b)
 - **T5**: `classes.rs` (2215行) → 5 サブモジュール + tests
+- **T6**: `functions/mod.rs` (1298行) → 4 サブモジュール + テスト分割 (T6b: 4 ファイル)
+- **T7**: `expressions/tests.rs` (6814行) → テスト分割 (19 ファイル、論理分類ベース)
 
-#### 6. `src/transformer/functions/mod.rs` (1298 行) → サブモジュール分割
+#### 8-11. テストファイル分割
 
-```
-functions/
-├── mod.rs              # convert_fn_decl + convert_param (impl Transformer) (~500 行)
-├── closures.rs         # アロー関数・クロージャ変換 (impl Transformer) (~200 行)
-├── params.rs           # destructuring params + default value 推論 (~300 行)
-└── helpers.rs          # mutability/throw 検出、return wrap、promise unwrap (~300 行)
-```
-
-#### 7-11. テストファイル分割
-
-各テストファイルは、プロダクションコードのモジュール構造に対応したサブモジュールに分割する。テスト間に依存関係はないため、テストカテゴリごとに分割する。
-
-**7. `expressions/tests.rs` (6814 行, 291 テスト) → `expressions/tests/`**:
-`mod.rs`（ヘルパー）, `literals.rs`, `closures.rs`, `calls.rs`, `constructors.rs`, `type_inference.rs`, `optional.rs`, `operators.rs`, `string_methods.rs`, `array_methods.rs`, `builtins.rs`, `type_assertions.rs`, `discriminated_unions.rs`, `computed_access.rs`, `spread_rest.rs`
+各テストファイルは、テスト対象の機能単位で論理的に分類したサブモジュールに分割する。
 
 **8. `types/tests.rs` (3333 行, 130 テスト) → `types/tests/`**:
 `mod.rs`（ヘルパー）, `primitives.rs`, `interfaces.rs`, `unions.rs`, `aliases.rs`, `utility_types.rs`, `advanced.rs`
@@ -194,22 +183,25 @@ functions/
 
 - **結果**: 5 サブモジュール + tests に分割。`mod.rs` (171), `generation.rs` (329), `inheritance.rs` (181), `members.rs` (513), `helpers.rs` (170), `tests.rs` (894)。全テスト pass
 
-### T6: `functions/mod.rs` サブモジュール分割
+### T6: `functions/mod.rs` サブモジュール分割 ✅
 
-- **作業内容**: `src/transformer/functions/mod.rs` を上記設計に従い 4 サブモジュール（`closures.rs`, `params.rs`, `helpers.rs`）に分割する
-- **完了条件**: 全サブモジュールが 1000 行以下。`cargo test -- functions` 全 pass
+- **作業内容**: `src/transformer/functions/mod.rs` (1298行) を 4 サブモジュールに分割
+- **結果**: `mod.rs` (236), `helpers.rs` (272), `params.rs` (278), `destructuring.rs` (381), `arrow_fns.rs` (173)。全テスト pass。外部 API パス不変
+- **PRD 設計との差異**: `closures.rs` → `arrow_fns.rs` に名称変更（アロー関数変換に特化）。`destructuring.rs` を `params.rs` から分離して凝集度を向上
 - **依存**: なし
 
-### T6b: `functions/tests.rs` テスト分割
+### T6b: `functions/tests.rs` テスト分割 ✅
 
-- **作業内容**: `src/transformer/functions/tests.rs`（1422 行）を `tests/` ディレクトリに分割（`declarations.rs`, `params.rs`, `destructuring.rs`, `async_fn.rs`, `return_handling.rs`）
-- **完了条件**: 全テストファイルが 1000 行以下。全テスト pass
+- **作業内容**: `src/transformer/functions/tests.rs`（1422 行）を `tests/` ディレクトリに 4 サブモジュール分割
+- **結果**: `tests/mod.rs` (23), `fn_decl.rs` (400), `params.rs` (559), `destructuring.rs` (322), `helpers.rs` (125)。57 テスト全 pass
+- **PRD 設計との差異**: `declarations.rs`/`async_fn.rs`/`return_handling.rs` → `fn_decl.rs`/`helpers.rs` に統合。async/return テストは fn_decl の一部として凝集度が高い
 - **依存**: T6
 
-### T7: `expressions/tests.rs` テスト分割
+### T7: `expressions/tests.rs` テスト分割 ✅
 
-- **作業内容**: `src/transformer/expressions/tests.rs`（6814 行）を `tests/` ディレクトリに分割（15 サブモジュール: `mod.rs` + 14 カテゴリファイル）
-- **完了条件**: 全テストファイルが 1000 行以下。全 291 テスト pass
+- **作業内容**: `src/transformer/expressions/tests.rs`（6814 行）を `tests/` ディレクトリに 19 サブモジュール分割
+- **結果**: `mod.rs` (134, 共有ヘルパー), `literals.rs` (185), `binary_unary.rs` (519), `ternary.rs` (109), `calls.rs` (726), `math_number.rs` (397), `arrows.rs` (396), `fn_exprs.rs` (167), `arrays.rs` (874), `objects.rs` (489), `strings.rs` (311), `regex.rs` (305), `member_access.rs` (183), `optional_chaining.rs` (315), `optional_semantics.rs` (188), `type_guards.rs` (389), `enums.rs` (337), `expected_type.rs` (410), `update_exprs.rs` (115), `builtins.rs` (142)。全 291 テスト pass
+- **PRD 設計との差異**: 15 ファイル → 19 ファイルに増加。テスト対象の機能単位で論理的に分類（リテラル、演算子、呼び出し、Math/Number、配列メソッド等）。PRD の `closures.rs`/`constructors.rs`/`type_inference.rs` 等は実際のテスト内容に基づき `arrows.rs`/`calls.rs`/`expected_type.rs` 等に再分類
 - **依存**: なし
 
 ### T8: `types/tests.rs` テスト分割
