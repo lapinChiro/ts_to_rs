@@ -20,10 +20,13 @@ PRD: `backlog/I-192-large-file-splitting.md`
 - **T1b: `type_resolver` テスト分割** — `tests.rs` (1405行) を `tests/` ディレクトリに分割
   - `tests/mod.rs` (95), `tests/basics.rs` (425), `tests/expected_types.rs` (434), `tests/complex_features.rs` (456)
   - テスト 65 個全 pass、数不変
+- **T2: `type_converter.rs` → `type_converter/` ディレクトリ化** — `type_converter.rs` (2691行) を 7 サブモジュールに分割
+  - `mod.rs` (289), `interfaces.rs` (433), `intersections.rs` (325), `type_aliases.rs` (518), `unions.rs` (585), `utilities.rs` (467), `tests.rs` (95)
+  - テスト 4 個全 pass、全テスト pass
 
 ### 次のタスク（上から順に実施）
 
-1. **T2: `type_converter.rs` → `type_converter/` ディレクトリ化** — `type_converter.rs` (2691行) を 8 サブモジュールに分割
+1. **T3: `statements/mod.rs` サブモジュール分割** — `statements/mod.rs` (2656行) を 7 サブモジュールに分割
 2. **T2: `type_converter.rs` → `type_converter/` ディレクトリ化** — `type_converter.rs` (2691行) を 8 サブモジュールに分割
 3. **T3: `statements/mod.rs` サブモジュール分割** — `statements/mod.rs` (2656行) を 7 サブモジュールに分割
 4. **T3b: `statements/tests.rs` テスト分割** — `tests.rs` (2766行) を `tests/` ディレクトリに分割。T3 に依存
