@@ -13,14 +13,17 @@ PRD: `backlog/I-192-large-file-splitting.md`
 
 ### 完了済みタスク
 
-- **T1: `type_resolver.rs` → `type_resolver/` ディレクトリ化** — staged 済み
+- **T1: `type_resolver.rs` → `type_resolver/` ディレクトリ化** — committed
   - `type_resolver.rs` (3692行) を 7 サブモジュールに分割
   - `mod.rs` (148), `visitors.rs` (431), `narrowing.rs` (146), `expected_types.rs` (194), `expressions.rs` (976), `du_analysis.rs` (221), `helpers.rs` (243)
   - テスト全 pass、外部 API パス不変
+- **T1b: `type_resolver` テスト分割** — `tests.rs` (1405行) を `tests/` ディレクトリに分割
+  - `tests/mod.rs` (95), `tests/basics.rs` (425), `tests/expected_types.rs` (434), `tests/complex_features.rs` (456)
+  - テスト 65 個全 pass、数不変
 
 ### 次のタスク（上から順に実施）
 
-1. **T1b: `type_resolver` テスト分割** — T1 で抽出した `tests.rs` (1405行) を `tests/` ディレクトリに分割。1000 行以下のサブモジュール群にする
+1. **T2: `type_converter.rs` → `type_converter/` ディレクトリ化** — `type_converter.rs` (2691行) を 8 サブモジュールに分割
 2. **T2: `type_converter.rs` → `type_converter/` ディレクトリ化** — `type_converter.rs` (2691行) を 8 サブモジュールに分割
 3. **T3: `statements/mod.rs` サブモジュール分割** — `statements/mod.rs` (2656行) を 7 サブモジュールに分割
 4. **T3b: `statements/tests.rs` テスト分割** — `tests.rs` (2766行) を `tests/` ディレクトリに分割。T3 に依存
