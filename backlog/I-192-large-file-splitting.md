@@ -81,160 +81,13 @@
 
 ### 分割設計
 
-#### 1. `src/pipeline/type_resolver.rs` (3692 行) → `src/pipeline/type_resolver/`
+#### 1-5: 完了済み（実績は git history 参照）
 
-```
-type_resolver/
-├── mod.rs              # struct 定義, new(), resolve_file(), scope 管理 (~200 行)
-├── visitors.rs         # visit_* メソッド群 (impl TypeResolver) (~420 行)
-├── narrowing.rs        # narrowing 検出 (impl TypeResolver) (~135 行)
-├── expected_types.rs   # expected type 伝播 (impl TypeResolver) (~180 行)
-├── expressions.rs      # 式の型解決 (impl TypeResolver) (~960 行)
-├── du_analysis.rs      # DU switch 検出・フィールド収集 (~100 行)
-└── helpers.rs          # 独立ヘルパー関数 (~350 行)
-```
-
-**mod.rs**: `TypeResolver` struct 定義（フィールドは private のまま）、`Scope`/`VarInfo` struct、`new()`、`set_any_enum_overrides()`、`resolve_file()`、scope 管理メソッド（`enter_scope`, `leave_scope`, `declare_var`, `lookup_var`, `mark_var_mutable`）
-
-**visitors.rs**: `visit_module_item`, `visit_decl`, `visit_fn_decl`, `visit_param_pat`, `visit_var_decl`, `register_pat_vars`, `visit_class_decl`, `visit_block_stmt`, `visit_stmt`, `visit_if_stmt`
-
-**narrowing.rs**: `detect_narrowing_guard`, `extract_typeof_narrowing`, `extract_typeof_and_string`, `extract_null_check_narrowing`
-
-**expected_types.rs**: `resolve_object_lit_fields`, `merge_object_fields`, `propagate_expected`
-
-**expressions.rs**: `resolve_expr`, `resolve_expr_inner`, `resolve_bin_expr`, `resolve_member_expr`, `resolve_member_type`, `resolve_call_expr`, `set_call_arg_expected_types`, `collect_resolved_arg_types`, `lookup_method_sigs`, `lookup_method_params`, `resolve_method_return_type`, `resolve_new_expr`, `resolve_arrow_expr`, `resolve_fn_expr`, `resolve_array_expr`
-- 960 行は 1000 行未満だが上限に近い。`resolve_expr_inner` の巨大 match が単独で ~330 行を占めるため、これ以上の分割は match アームの分断を伴い凝集度を下げる
-
-**du_analysis.rs**: `detect_du_switch_bindings`, `collect_du_field_accesses_from_stmts`, `collect_du_field_accesses_from_stmt_inner`, `collect_du_field_accesses_from_expr_inner`, `case_body_span_range`
-
-**helpers.rs**: `is_null_or_undefined`, `extract_prop_name`, `find_string_prop_value`, `common_named_type`, `is_null_literal`, `is_object_type`, `extract_type_name_for_registry`, `select_overload`, `unwrap_promise_and_unit`, `resolve_fn_type_info`
-
-**依存方向**:
-```
-mod.rs (struct 定義 + scope)
-  ↑ 全サブモジュールが super:: で参照
-visitors.rs → narrowing.rs, expressions.rs, helpers.rs
-narrowing.rs → helpers.rs
-expected_types.rs → helpers.rs
-expressions.rs → expected_types.rs, narrowing.rs, helpers.rs
-du_analysis.rs → helpers.rs
-```
-
-#### 2. `src/pipeline/type_converter.rs` (2691 行) → `src/pipeline/type_converter/`
-
-**実装済み**。PRD 設計時は 8 ファイルだったが、依存関係の分析により 6 サブモジュール + tests に最適化した。
-
-```
-type_converter/
-├── mod.rs              # pub API + core dispatcher (convert_ts_type, convert_type_ref) (289 行)
-├── unions.rs           # union 型変換 + DU + string literal union + string_to_pascal_case (585 行)
-├── interfaces.rs       # interface → struct/trait 変換 + convert_method_signature (433 行)
-├── type_aliases.rs     # type alias 変換 + conditional type + infer pattern (518 行)
-├── intersections.rs    # intersection 型変換 + 型リテラル・関数型・indexed access (325 行)
-├── utilities.rs        # extract_type_params + convert_property_signature + Partial/Pick/Omit 等 (467 行)
-└── tests.rs            # テスト (95 行)
-```
-
-PRD 設計からの変更点:
-- `annotations.rs` の関数を `intersections.rs`（`convert_fn_type`, `convert_type_lit_in_annotation`, `convert_intersection_in_annotation`, `convert_indexed_access_type`）と `type_aliases.rs`（`convert_conditional_type`, `try_convert_infer_pattern`, `extract_infer_info`, `is_true_false_literal`, `try_convert_function_type_alias`, `try_convert_tuple_type_alias`）に統合。理由: これらは意味的に交差型操作・型エイリアス変換に属し、独立ファイルにする凝集度がなかった
-- `helpers.rs`（`string_to_pascal_case` 1 関数のみ）を `unions.rs` に統合。理由: この関数の唯一の呼び出し元が union 関連関数群
-- `utility_types.rs` を `utilities.rs` に名称変更し、`extract_type_params` + `convert_property_signature` + `convert_unsupported_union_member` + `convert_fn_type_to_rust` も含む。理由: 元の `unwrap_promise` は `unions.rs` に配置、`is_nullable_keyword` は `mod.rs` に残置した方が依存が自然
-
-**mod.rs**: `convert_type_for_position`（pub）, `convert_ts_type`（pub）, `convert_type_ref`, `is_nullable_keyword`。`pub use` で外部 API を re-export
-
-**unions.rs**: `convert_union_type`, `unwrap_promise`, `try_convert_discriminated_union`, `find_discriminant_field`, `extract_variant_info`, `is_string_literal_type`, `try_convert_string_literal_union`, `try_convert_single_string_literal`, `string_to_pascal_case`（pub(crate)）, `try_convert_general_union`
-
-**interfaces.rs**: `convert_interface_items`（pub）, `convert_interface`（pub）, `convert_interface_as_struct`, `convert_interface_as_fn_type`, `convert_interface_as_struct_and_trait`, `convert_interface_as_trait`, `convert_method_signature`, `collect_extends_refs`, `collect_extends_names`
-
-**type_aliases.rs**: `convert_type_alias_items`（pub）, `convert_type_alias`（pub）, `try_convert_keyof_typeof_alias`, `convert_conditional_type`, `is_true_false_literal`, `try_convert_infer_pattern`, `extract_infer_info`, `try_convert_function_type_alias`, `try_convert_tuple_type_alias`
-
-**intersections.rs**: `extract_intersection_members`, `try_convert_intersection_type`, `convert_type_lit_in_annotation`, `convert_intersection_in_annotation`, `convert_fn_type`, `convert_indexed_access_type`
-
-**utilities.rs**: `extract_type_params`（pub）, `convert_property_signature`（pub(crate)）, `convert_utility_partial`, `convert_utility_required`, `convert_utility_pick`, `convert_utility_omit`, `convert_utility_non_nullable`, `resolve_utility_inner_fields`, `resolve_utility_inner_with_conversion`, `extract_string_keys`, `capitalize_first`, `convert_unsupported_union_member`, `convert_fn_type_to_rust`
-
-**依存方向**:
-```
-mod.rs (core dispatcher + convert_type_ref)
-  ↑ unions.rs, interfaces.rs, type_aliases.rs, intersections.rs, utilities.rs
-mod.rs → utilities.rs (convert_utility_* を convert_type_ref から呼出)
-type_aliases.rs → unions.rs (try_convert_discriminated_union 等), intersections.rs (try_convert_intersection_type)
-unions.rs → utilities.rs (convert_unsupported_union_member)
-```
-
-#### 3. `src/transformer/statements/mod.rs` (2656 行) → サブモジュール分割
-
-```
-statements/
-├── mod.rs              # convert_stmt dispatcher + convert_var_decl + convert_stmt_list (~300 行)
-├── control_flow.rs     # if/while/for/do-while/labeled (impl Transformer) (~500 行)
-├── switch.rs           # switch 文の全変換 (impl Transformer) (~730 行)
-├── error_handling.rs   # try/catch/throw + TryBodyRewrite (impl Transformer) (~300 行)
-├── spread.rs           # spread array 展開 (impl Transformer) (~250 行)
-├── destructuring.rs    # object/array destructuring (impl Transformer) (~150 行)
-├── mutability.rs       # let mut 推論 (~130 行)
-└── helpers.rs          # conditional assignment 抽出、truthiness/falsy 条件生成 (~300 行)
-```
-
-**mod.rs**: `convert_stmt`（pub(crate)、main dispatcher）、`convert_var_decl`、`convert_stmt_list`（pub(crate)）、`convert_block_or_stmt`、`convert_nested_fn_decl`、`is_object_type`、サブモジュール宣言
-
-**control_flow.rs**: `convert_if_stmt`, `convert_if_with_conditional_assignment`, `convert_while_stmt`, `convert_while_with_conditional_assignment`, `convert_for_stmt`, `convert_for_of_stmt`, `convert_for_in_stmt`, `convert_labeled_stmt`, `convert_do_while_stmt`, `convert_for_stmt_as_loop`, `convert_update_to_stmt`, `convert_and_combine_conditions`, `build_nested_if_let`, `can_generate_if_let`, `generate_if_let`
-
-**switch.rs**: `convert_switch_stmt`, `try_convert_typeof_switch`, `try_convert_discriminated_union_switch`, `try_convert_string_enum_switch`, `convert_switch_clean_match`, `convert_switch_fallthrough`, `is_case_terminated`, `is_literal_match_pattern`, `build_combined_guard`, `collect_du_field_accesses`, `collect_du_field_accesses_from_stmt`, `collect_du_field_accesses_from_expr`
-
-**error_handling.rs**: `convert_try_stmt`, `convert_throw_stmt`, `extract_error_message`, `ends_with_return`, `is_err_call`, `TryBodyRewrite` struct + `rewrite()` impl
-
-**spread.rs**: `try_expand_spread_var_decl`, `try_expand_spread_return`, `try_expand_spread_expr_stmt`, `convert_spread_segments`, `emit_spread_ops`, `has_spread_elements`, `extract_spread_array_init`
-
-**destructuring.rs**: `try_convert_object_destructuring`, `expand_object_pat_props`, `try_convert_array_destructuring`
-
-**mutability.rs**: `mark_mutated_vars`, `collect_mutated_vars`, `collect_mutated_vars_from_expr`, `collect_closure_assigns`, `collect_assigns_from_expr`, `MUTATING_METHODS`
-
-**helpers.rs**: `ConditionalAssignment` struct, `OuterComparison` struct, `extract_conditional_assignment`, `unwrap_parens`, `extract_assign_target_name`, `extract_assign_from_expr`, `is_comparison_op`, `generate_truthiness_condition`, `generate_falsy_condition`
-
-#### 4. `src/registry.rs` (2409 行) → `src/registry/`
-
-```
-registry/
-├── mod.rs              # TypeDef, TypeRegistry struct + impl + build_registry() (~400 行)
-├── collection.rs       # 2-pass 型収集 (collect_type_name, collect_decl 等) (~350 行)
-├── interfaces.rs       # interface フィールド・メソッド収集 (~150 行)
-├── unions.rs           # string literal / discriminated union 検出 (~250 行)
-├── functions.rs        # 関数型・アロー関数定義収集 (~200 行)
-└── enums.rs            # 合成 enum 登録 + any-narrowing enum (~200 行)
-```
-
-**mod.rs**: `MethodSignature` struct、`TypeDef` enum + impl、`TypeRegistry` struct + impl（`new`, `register`, `register_external`, `is_external`, `get`, `is_trait_type`, `instantiate`, `merge`）、`build_registry`（pub）、`build_registry_with_synthetic`（pub）
-
-**collection.rs**: `collect_type_name`（Pass 1）、`collect_decl`（Pass 2 dispatcher）、`collect_class_info`、`collect_type_params`、`collect_type_alias_fields`
-
-**interfaces.rs**: `collect_interface_fields`, `collect_interface_methods`, `collect_property_signature`
-
-**unions.rs**: `try_collect_string_literal_union`, `try_collect_discriminated_union`, `find_registry_discriminant_field`, `extract_registry_variant_info`
-
-**functions.rs**: `try_collect_fn_type_alias`, `try_collect_call_signature_fn`, `collect_fn_def_with_extras`, `collect_arrow_def_with_extras`
-
-**enums.rs**: `register_extra_enums`, `register_single_enum`, `register_single_enum_by_name`, `register_enum_typedef`, `register_any_narrowing_enums`, `register_any_narrowing_enums_from_expr`
-
-#### 5. `src/transformer/classes.rs` (2215 行) → `src/transformer/classes/`
-
-```
-classes/
-├── mod.rs              # ClassInfo struct + extract_class_info + public API (~300 行)
-├── generation.rs       # struct/impl/trait 生成 (impl Transformer) (~350 行)
-├── inheritance.rs      # 継承・super constructor 処理 (impl Transformer) (~300 行)
-├── members.rs          # フィールド・メソッド・プロパティ変換 (impl Transformer) (~350 行)
-└── helpers.rs          # visibility 解決、parent 探索 (~150 行)
-```
-
-**mod.rs**: `ClassInfo` struct 定義、`extract_class_info`、pub API（`generate_items_for_class`, `generate_parent_class_items`, `generate_abstract_class_items`, `generate_child_of_abstract`, `generate_child_class_with_implements`, `generate_class_with_implements`）
-
-**generation.rs**: `generate_standalone_class`, `generate_child_class`, pub API の実装本体
-
-**inheritance.rs**: `rewrite_super_constructor`, `try_extract_super_call`, `transform_class_with_inheritance`, `pre_scan_classes`, `find_parent_class_names`
-
-**members.rs**: `convert_constructor`, `convert_constructor_body`, `convert_class_prop`, `convert_private_prop`, `convert_class_method`, `convert_private_method`, `convert_param_pat`, `convert_ts_param_prop`, `build_param_prop_assignments`, `try_extract_this_assignment`
-
-**helpers.rs**: `resolve_member_visibility`, `body_has_self_assignment`, `is_self_field_access`
+- **T1**: `type_resolver.rs` (3692行) → 7 サブモジュール + テスト分割 (T1b)
+- **T2**: `type_converter.rs` (2691行) → 6 サブモジュール + tests
+- **T3**: `statements/mod.rs` (2656行) → 7 サブモジュール + テスト分割 (T3b)
+- **T4**: `registry.rs` (2414行) → 6 サブモジュール + テスト分割 (T4b)
+- **T5**: `classes.rs` (2215行) → 5 サブモジュール + tests
 
 #### 6. `src/transformer/functions/mod.rs` (1298 行) → サブモジュール分割
 
@@ -319,35 +172,27 @@ functions/
 - **PRD 設計との差異**: 詳細は上記設計セクション参照
 - **依存**: なし
 
-### T3: `statements/mod.rs` サブモジュール分割
+### T3: `statements/mod.rs` サブモジュール分割 ✅
 
-- **作業内容**: `src/transformer/statements/mod.rs` を上記設計に従い 7 サブモジュール（`control_flow.rs`, `switch.rs`, `error_handling.rs`, `spread.rs`, `destructuring.rs`, `mutability.rs`, `helpers.rs`）に分割する
-- **完了条件**: 全サブモジュールが 1000 行以下。`cargo test -- statements` 全 pass
-- **依存**: なし
+- **結果**: 7 サブモジュールに分割。`mod.rs` (198), `control_flow.rs` (753), `switch.rs` (727), `error_handling.rs` (294), `spread.rs` (202), `destructuring.rs` (239), `mutability.rs` (132), `helpers.rs` (180)。全テスト pass
 
-### T3b: `statements/tests.rs` テスト分割
+### T3b: `statements/tests.rs` テスト分割 ✅
 
-- **作業内容**: `src/transformer/statements/tests.rs`（2766 行）を `tests/` ディレクトリに分割（`variables.rs`, `control_flow.rs`, `loops.rs`, `destructuring.rs`, `switch.rs`, `error_handling.rs`, `expected_types.rs`）
-- **完了条件**: 全テストファイルが 1000 行以下。全テスト pass
+- **結果**: `tests/` に 7 サブモジュール分割。96 テスト全 pass
 - **依存**: T3
 
-### T4: `registry.rs` → `registry/` ディレクトリ化
+### T4: `registry.rs` → `registry/` ディレクトリ化 ✅
 
-- **作業内容**: `src/registry.rs` を上記設計に従い 6 サブモジュール（`collection.rs`, `interfaces.rs`, `unions.rs`, `functions.rs`, `enums.rs`）に分割する。テスト（1129 行）は `tests.rs` に抽出し、1000 行超の場合は T4b で分割
-- **完了条件**: 全サブモジュールが 1000 行以下。`cargo test -- registry` 全 pass。外部の `use crate::registry::*` パスが不変
-- **依存**: なし
+- **結果**: 6 サブモジュール + tests に分割。`mod.rs` (350), `collection.rs` (400), `interfaces.rs` (98), `unions.rs` (194), `functions.rs` (177), `enums.rs` (132), `tests.rs` (1131→T4bで分割)。全テスト pass
 
-### T4b: `registry` テスト分割（条件付き）
+### T4b: `registry` テスト分割 ✅
 
-- **作業内容**: T4 で抽出した `tests.rs` が 1000 行超の場合、テストカテゴリごとに分割する
-- **完了条件**: 全テストファイルが 1000 行以下。全テスト pass
+- **結果**: tests.rs (1131行) → `tests/` に 4 サブモジュール分割。52 テスト全 pass
 - **依存**: T4
 
-### T5: `classes.rs` → `classes/` ディレクトリ化
+### T5: `classes.rs` → `classes/` ディレクトリ化 ✅
 
-- **作業内容**: `src/transformer/classes.rs` を上記設計に従い 5 サブモジュール（`generation.rs`, `inheritance.rs`, `members.rs`, `helpers.rs`）に分割する。テスト（893 行）は `tests.rs` に抽出（1000 行未満のため分割不要）
-- **完了条件**: 全サブモジュールが 1000 行以下。`cargo test -- classes` 全 pass
-- **依存**: なし
+- **結果**: 5 サブモジュール + tests に分割。`mod.rs` (171), `generation.rs` (329), `inheritance.rs` (181), `members.rs` (513), `helpers.rs` (170), `tests.rs` (894)。全テスト pass
 
 ### T6: `functions/mod.rs` サブモジュール分割
 

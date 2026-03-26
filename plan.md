@@ -11,49 +11,31 @@ PRD: `backlog/I-192-large-file-splitting.md`
 - テスト数: 1293 (1225 + 3 + 2 + 63)
 - 1000 行超ファイル: 元 18 個
 
-### 完了済みタスク
+### 完了済みタスク（T1-T5, T1b-T4b）
 
-- **T1: `type_resolver.rs` → `type_resolver/` ディレクトリ化**
-  - `type_resolver.rs` (3692行) を 7 サブモジュールに分割
-  - `mod.rs` (146), `visitors.rs` (431), `narrowing.rs` (146), `expected_types.rs` (194), `expressions.rs` (976), `du_analysis.rs` (221), `helpers.rs` (243)
-  - テスト全 pass、外部 API パス不変
-- **T1b: `type_resolver` テスト分割**
-  - `tests.rs` (1405行) を `tests/` ディレクトリに 3 サブモジュールに分割
-  - `tests/mod.rs` (93), `tests/basics.rs` (425), `tests/expected_types.rs` (434), `tests/complex_features.rs` (453)
-  - テスト 65 個全 pass、数不変
-- **T2: `type_converter.rs` → `type_converter/` ディレクトリ化**
-  - `type_converter.rs` (2691行) を 6 サブモジュールに分割
-  - `mod.rs` (289), `interfaces.rs` (433), `intersections.rs` (325), `type_aliases.rs` (518), `unions.rs` (585), `utilities.rs` (467), `tests.rs` (95)
-  - PRD 設計（8 ファイル）から実装時に最適化: `annotations.rs` → `intersections.rs`/`type_aliases.rs` に統合、`helpers.rs`（1関数のみ）→ `unions.rs` に統合、`utility_types.rs` → `utilities.rs` に名称変更し共通ヘルパーも含む
-  - テスト 4 個全 pass、全テスト pass
-- **T3: `statements/mod.rs` サブモジュール分割**
-  - `statements/mod.rs` (2656行) を 7 サブモジュールに分割
-  - `mod.rs` (198), `control_flow.rs` (753), `switch.rs` (727), `error_handling.rs` (294), `spread.rs` (202), `destructuring.rs` (239), `mutability.rs` (132), `helpers.rs` (180)
-  - PRD 設計では `convert_nested_fn_decl` を mod.rs に残す想定だったが、関数本体のネスト変換は制御フローの責務であるため control_flow.rs に配置
-  - テスト全 pass、外部 API パス不変
-- **T3b: `statements/tests.rs` テスト分割**
-  - `tests.rs` (2766行) を `tests/` ディレクトリに 7 サブモジュールに分割
-  - `tests/mod.rs` (105), `tests/variables.rs` (448), `tests/control_flow.rs` (319), `tests/loops.rs` (261), `tests/destructuring.rs` (439), `tests/switch.rs` (590), `tests/error_handling.rs` (498), `tests/expected_types.rs` (107)
-  - テスト 96 個全 pass、数不変
-- **T4: `registry.rs` → `registry/` ディレクトリ化**
-  - `registry.rs` (2414行) を 6 サブモジュール + tests に分割
-  - `mod.rs` (350), `collection.rs` (400), `interfaces.rs` (98), `unions.rs` (194), `functions.rs` (177), `enums.rs` (132), `tests.rs` (1131)
-  - PRD 設計どおりの分割。全テスト pass、外部 API パス不変
-  - tests.rs が 1131 行で 1000 行超のため T4b が必要
+カテゴリ A（プロダクションコード分割）6 ファイル中 5 ファイル完了:
+
+| タスク | 元ファイル | 元行数 | サブモジュール数 |
+|--------|-----------|--------|----------------|
+| T1+T1b | `type_resolver.rs` | 3692 | 7 + tests/3 |
+| T2 | `type_converter.rs` | 2691 | 6 + tests |
+| T3+T3b | `statements/mod.rs` + `tests.rs` | 2656+2766 | 7 + tests/7 |
+| T4+T4b | `registry.rs` | 2414 | 6 + tests/4 |
+| T5 | `classes.rs` | 2215 | 5 + tests |
+
+全タスクでテスト数不変、外部 API パス不変を確認済み。
 
 ### 次のタスク（上から順に実施）
 
-1. **T4b: `registry` テスト分割** — T4 で抽出した `tests.rs` (1131行) が 1000 行超のため分割が必要
-5. **T5: `classes.rs` → `classes/` ディレクトリ化** — `classes.rs` (2215行) を 5 サブモジュールに分割
-6. **T6: `functions/mod.rs` サブモジュール分割** — `functions/mod.rs` (1298行) を 4 サブモジュールに分割
-7. **T6b: `functions/tests.rs` テスト分割** — `tests.rs` (1422行) を `tests/` ディレクトリに分割。T6 に依存
-8. **T7: `expressions/tests.rs` テスト分割** — `tests.rs` (6814行) を 15 サブモジュールに分割
-9. **T8: `types/tests.rs` テスト分割** — `tests.rs` (3333行) を 7 サブモジュールに分割
-10. **T9: `transformer/tests.rs` テスト分割** — `tests.rs` (1335行) を 7 サブモジュールに分割
-11. **T10: `generator/` テスト抽出** — `mod.rs` (1410行), `expressions.rs` (1267行), `statements.rs` (1019行) のインラインテストを別ファイルに抽出
-12. **T11: `ir.rs` テスト抽出** — `ir.rs` (1416行) → `ir/mod.rs` + `ir/tests.rs`
-13. **T12: `pipeline/` テスト抽出** — `external_types.rs` (1156行), `module_graph.rs` (1038行), `external_struct_generator.rs` (1132行) のテスト抽出
-14. **T13: 最終検証** — 全ファイル 1000 行以下、全テスト pass、clippy 0 警告、fmt pass、Hono ベンチ同一
+1. **T6: `functions/mod.rs` サブモジュール分割** — (1298行) → 4 サブモジュール
+2. **T6b: `functions/tests.rs` テスト分割** — (1422行) → `tests/` ディレクトリ。T6 に依存
+3. **T7: `expressions/tests.rs` テスト分割** — (6814行) → 15 サブモジュール
+4. **T8: `types/tests.rs` テスト分割** — (3333行) → 7 サブモジュール
+5. **T9: `transformer/tests.rs` テスト分割** — (1335行) → 7 サブモジュール
+6. **T10: `generator/` テスト抽出** — `mod.rs` (1410行), `expressions.rs` (1267行), `statements.rs` (1019行)
+7. **T11: `ir.rs` テスト抽出** — (1416行) → `ir/mod.rs` + `ir/tests.rs`
+8. **T12: `pipeline/` テスト抽出** — `external_types.rs` (1156行), `module_graph.rs` (1038行), `external_struct_generator.rs` (1132行)
+9. **T13: 最終検証** — 全ファイル 1000 行以下、全テスト pass、clippy 0 警告、fmt pass、Hono ベンチ同一
 
 ### 作業上の注意事項
 
