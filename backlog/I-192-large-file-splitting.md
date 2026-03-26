@@ -204,22 +204,24 @@
 - **PRD 設計との差異**: 15 ファイル → 19 ファイルに増加。テスト対象の機能単位で論理的に分類（リテラル、演算子、呼び出し、Math/Number、配列メソッド等）。PRD の `closures.rs`/`constructors.rs`/`type_inference.rs` 等は実際のテスト内容に基づき `arrows.rs`/`calls.rs`/`expected_type.rs` 等に再分類
 - **依存**: なし
 
-### T8: `types/tests.rs` テスト分割
+### T8: `types/tests.rs` テスト分割 ✅
 
-- **作業内容**: `src/transformer/types/tests.rs`（3333 行）を `tests/` ディレクトリに分割（`primitives.rs`, `interfaces.rs`, `unions.rs`, `aliases.rs`, `utility_types.rs`, `advanced.rs`）
-- **完了条件**: 全テストファイルが 1000 行以下。全 130 テスト pass
+- **作業内容**: `src/transformer/types/tests.rs`（3333 行）を `tests/` ディレクトリに 7 サブモジュール分割
+- **結果**: `tests/mod.rs` (61, 共有ヘルパー), `primitives.rs` (313), `collections.rs` (421), `interfaces.rs` (437), `type_aliases.rs` (566), `unions.rs` (813), `intersections.rs` (421), `structural_transforms.rs` (338)。全 130 テスト pass
+- **PRD 設計との差異**: `aliases.rs`/`utility_types.rs`/`advanced.rs` → `type_aliases.rs`/`collections.rs`/`structural_transforms.rs` に再分類。テスト対象の論理的凝集度に基づく分類（プリミティブ型、コレクション型、インターフェース、型エイリアス、ユニオン型、インターセクション型、構造型変換）
 - **依存**: なし
 
-### T9: `transformer/tests.rs` テスト分割
+### T9: `transformer/tests.rs` テスト分割 ✅
 
-- **作業内容**: `src/transformer/tests.rs`（1335 行）を `tests/` ディレクトリに分割（`imports.rs`, `exports.rs`, `types.rs`, `classes.rs`, `enums.rs`, `functions.rs`）
-- **完了条件**: 全テストファイルが 1000 行以下。全 57 テスト pass
+- **作業内容**: `src/transformer/tests.rs`（1335 行）を `tests/` ディレクトリに 6 サブモジュール分割
+- **結果**: `tests/mod.rs` (15), `imports_and_exports.rs` (317), `module_items.rs` (219), `enums.rs` (136), `classes.rs` (318), `variable_type_propagation.rs` (278), `error_handling.rs` (68)。全 57 テスト pass
+- **PRD 設計との差異**: 7 サブモジュール → 6 サブモジュール。`imports.rs`/`exports.rs` → `imports_and_exports.rs` に統合（同一ロジック）。`types.rs`/`functions.rs` → `module_items.rs`/`variable_type_propagation.rs` に再分類。テスト内容の論理的凝集度に基づく
 - **依存**: なし
 
-### T10: `generator/` テスト抽出
+### T10: `generator/` テスト抽出 ✅
 
-- **作業内容**: `src/generator/mod.rs`（836 行テスト）、`src/generator/expressions.rs`（783 行テスト）、`src/generator/statements.rs`（780 行テスト）のインラインテストを別ファイルに抽出する。`expressions.rs` と `statements.rs` は `.rs` → ディレクトリ化（`mod.rs` + `tests.rs`）
-- **完了条件**: 全ファイルが 1000 行以下。全テスト pass
+- **作業内容**: `src/generator/mod.rs`（836 行テスト）、`src/generator/expressions.rs`（783 行テスト）、`src/generator/statements.rs`（780 行テスト）のインラインテストを別ファイルに抽出。`expressions.rs` と `statements.rs` はディレクトリ化
+- **結果**: `mod.rs` (576) + `tests.rs` (828)、`expressions/mod.rs` (486) + `expressions/tests.rs` (771)、`statements/mod.rs` (241) + `statements/tests.rs` (774)。全テスト pass
 - **依存**: なし
 
 ### T11: `ir.rs` テスト抽出
@@ -234,9 +236,9 @@
 - **完了条件**: 全ファイルが 1000 行以下。全テスト pass
 - **依存**: なし
 
-### T13: 最終検証
+### T13: 最終検証＆clippy.toml最適化
 
-- **作業内容**: 全ファイルの行数が 1000 行以下であることを検証する。`cargo test` 全 pass、`cargo clippy --all-targets --all-features -- -D warnings` 0 警告、`cargo fmt --all --check` pass を確認する
+- **作業内容**: 全ファイルの行数が 1000 行以下であることを検証する。さらに、clippy.tomlに最適なファイル行数制限のルールを追加する。`cargo test` 全 pass、`cargo clippy --all-targets --all-features -- -D warnings` 0 警告、`cargo fmt --all --check` pass を確認する
 - **完了条件**: 0 エラー・0 警告。1000 行超のファイルが 0 個
 - **依存**: T1-T12 全て
 

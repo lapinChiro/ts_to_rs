@@ -26,15 +26,15 @@ PRD: `backlog/I-192-large-file-splitting.md`
 | T7 | `expressions/tests.rs` | 6814 | tests/19 (論理分類ベース) |
 | T8 | `types/tests.rs` | 3333 | tests/7 (論理分類: primitives, collections, interfaces, type_aliases, unions, intersections, structural_transforms) |
 | T9 | `transformer/tests.rs` | 1335 | tests/6 (論理分類: imports_and_exports, module_items, enums, classes, variable_type_propagation, error_handling) |
-| T10 | `generator/` テスト抽出 | mod.rs:1410, expressions.rs:1267, statements.rs:1019 | mod.rs→576+tests.rs:828, expressions.rs→487+expressions_tests.rs:771, statements.rs→242+statements_tests.rs:774 |
+| T10 | `generator/` テスト抽出 | mod.rs:1410, expressions.rs:1267, statements.rs:1019 | mod.rs→576+tests.rs:828, expressions/mod.rs:486+tests.rs:771, statements/mod.rs:241+tests.rs:774 |
 
 全タスクでテスト数不変（1369）、外部 API パス不変を確認済み。
 
 ### 次のタスク（上から順に実施）
 
-4. **T11: `ir.rs` テスト抽出** — (1416行) → `ir/mod.rs` + `ir/tests.rs`
-5. **T12: `pipeline/` テスト抽出** — `external_types.rs` (1156行), `module_graph.rs` (1038行), `external_struct_generator.rs` (1132行)
-6. **T13: 最終検証** — 全ファイル 1000 行以下、全テスト pass、clippy 0 警告、fmt pass、Hono ベンチ同一
+1. **T11: `ir.rs` テスト抽出** — (1416行) → `ir/mod.rs` + `ir/tests.rs`
+2. **T12: `pipeline/` テスト抽出** — `external_types.rs` (1156行), `module_graph.rs` (1038行), `external_struct_generator.rs` (1132行)
+3. **T13: 最終検証** — 全ファイル 1000 行以下、全テスト pass、clippy 0 警告、fmt pass、Hono ベンチ同一
 
 ### 作業上の注意事項
 
