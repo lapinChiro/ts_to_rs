@@ -1732,7 +1732,11 @@ fn try_convert_general_union(
                     TsKeywordTypeKind::TsNeverKeyword | TsKeywordTypeKind::TsVoidKeyword => {
                         continue
                     }
-                    _ => continue,
+                    // undefined/null are typically handled via Option wrapping,
+                    // not as union variants. Intrinsic is a TS compiler-internal type.
+                    TsKeywordTypeKind::TsUndefinedKeyword
+                    | TsKeywordTypeKind::TsNullKeyword
+                    | TsKeywordTypeKind::TsIntrinsicKeyword => continue,
                 };
                 variants.push(EnumVariant {
                     name: variant_name,
@@ -1810,25 +1814,18 @@ fn try_convert_general_union(
     Ok(Some(enum_item))
 }
 
-/// Tries to convert a type alias with an intersection type body into a struct.
+/// Extracts fields and methods from an intersection type's member types.
 ///
-/// Handles intersections of object type literals (`{ a: T } & { b: U }`) by merging
-/// all fields into a single struct. Returns `None` if the type alias body is not
-/// an intersection type.
-fn try_convert_intersection_type(
-    decl: &TsTypeAliasDecl,
-    vis: Visibility,
-    reg: &TypeRegistry,
+/// Shared logic for both type alias intersections and annotation-position intersections.
+/// Handles `TsTypeLit` (property sigs → fields, method sigs → methods),
+/// `TsTypeRef` (resolved from registry or embedded), and `TsKeywordType` (skipped).
+fn extract_intersection_members(
+    intersection: &swc_ecma_ast::TsIntersectionType,
     synthetic: &mut SyntheticTypeRegistry,
-) -> Result<Option<Item>> {
-    let intersection = match decl.type_ann.as_ref() {
-        TsType::TsUnionOrIntersectionType(
-            swc_ecma_ast::TsUnionOrIntersectionType::TsIntersectionType(i),
-        ) => i,
-        _ => return Ok(None),
-    };
-
+    reg: &TypeRegistry,
+) -> Result<(Vec<StructField>, Vec<Method>)> {
     let mut fields = Vec::new();
+    let mut methods = Vec::new();
     for (i, ty) in intersection.types.iter().enumerate() {
         match ty.as_ref() {
             TsType::TsTypeLit(lit) => {
@@ -1844,9 +1841,9 @@ fn try_convert_intersection_type(
                             }
                             fields.push(field);
                         }
-                        // TODO: intersection 内の型リテラルにメソッドシグネチャが含まれる場合、
-                        // struct フィールドではなく impl ブロックのメソッドとして変換すべき。
-                        // 現時点ではスキップ。
+                        TsTypeElement::TsMethodSignature(sig) => {
+                            methods.push(convert_method_signature(sig, synthetic, reg)?);
+                        }
                         _ => continue,
                     }
                 }
@@ -1856,7 +1853,7 @@ fn try_convert_intersection_type(
                     swc_ecma_ast::TsEntityName::Ident(ident) => ident.sym.to_string(),
                     _ => return Err(anyhow!("unsupported qualified type name in intersection")),
                 };
-                // Try to resolve fields from TypeRegistry
+                // Try to resolve and merge fields from TypeRegistry
                 if let Some(crate::registry::TypeDef::Struct {
                     fields: resolved_fields,
                     ..
@@ -1890,6 +1887,28 @@ fn try_convert_intersection_type(
             }
         }
     }
+    Ok((fields, methods))
+}
+
+/// Tries to convert a type alias with an intersection type body into a struct.
+///
+/// Handles intersections of object type literals (`{ a: T } & { b: U }`) by merging
+/// all fields into a single struct. Returns `None` if the type alias body is not
+/// an intersection type.
+fn try_convert_intersection_type(
+    decl: &TsTypeAliasDecl,
+    vis: Visibility,
+    reg: &TypeRegistry,
+    synthetic: &mut SyntheticTypeRegistry,
+) -> Result<Option<Item>> {
+    let intersection = match decl.type_ann.as_ref() {
+        TsType::TsUnionOrIntersectionType(
+            swc_ecma_ast::TsUnionOrIntersectionType::TsIntersectionType(i),
+        ) => i,
+        _ => return Ok(None),
+    };
+
+    let (fields, methods) = extract_intersection_members(intersection, synthetic, reg)?;
 
     let type_params = extract_type_params(decl.type_params.as_deref(), synthetic, reg);
 
@@ -1940,9 +1959,26 @@ fn try_convert_intersection_type(
         }));
     }
 
+    let struct_name = decl.id.sym.to_string();
+
+    // If intersection contains method signatures, generate an impl block
+    if !methods.is_empty() {
+        synthetic.push_item(
+            format!("{struct_name}__impl"),
+            crate::pipeline::SyntheticTypeKind::ImplBlock,
+            Item::Impl {
+                struct_name: struct_name.clone(),
+                type_params: type_params.clone(),
+                for_trait: None,
+                consts: vec![],
+                methods,
+            },
+        );
+    }
+
     Ok(Some(Item::Struct {
         vis,
-        name: decl.id.sym.to_string(),
+        name: struct_name,
         type_params,
         fields,
     }))
@@ -2000,44 +2036,7 @@ fn convert_intersection_in_annotation(
     synthetic: &mut SyntheticTypeRegistry,
     reg: &TypeRegistry,
 ) -> Result<RustType> {
-    let mut fields = Vec::new();
-    for (i, ty) in intersection.types.iter().enumerate() {
-        match ty.as_ref() {
-            TsType::TsTypeLit(lit) => {
-                for member in &lit.members {
-                    match member {
-                        TsTypeElement::TsPropertySignature(prop) => {
-                            let field = convert_property_signature(prop, synthetic, reg)?;
-                            if fields.iter().any(|f: &StructField| f.name == field.name) {
-                                return Err(anyhow!(
-                                    "duplicate field '{}' in intersection type",
-                                    field.name
-                                ));
-                            }
-                            fields.push(field);
-                        }
-                        // TODO: intersection 内の型リテラルにメソッドシグネチャが含まれる場合、
-                        // struct フィールドではなく impl ブロックのメソッドとして変換すべき。
-                        // 現時点ではスキップ。
-                        _ => continue,
-                    }
-                }
-            }
-            TsType::TsTypeRef(type_ref) => {
-                let rust_type = convert_type_ref(type_ref, synthetic, reg)?;
-                fields.push(StructField {
-                    vis: None,
-                    name: format!("_{i}"),
-                    ty: rust_type,
-                });
-            }
-            // Skip keyword types in intersections (branding patterns like `string & {}`)
-            TsType::TsKeywordType(_) => continue,
-            _ => {
-                return Err(anyhow!("unsupported intersection member type"));
-            }
-        }
-    }
+    let (fields, methods) = extract_intersection_members(intersection, synthetic, reg)?;
 
     let struct_name = synthetic.generate_name("Intersection");
     synthetic.push_item(
@@ -2050,6 +2049,22 @@ fn convert_intersection_in_annotation(
             fields,
         },
     );
+
+    // If intersection contains method signatures, generate an impl block
+    if !methods.is_empty() {
+        synthetic.push_item(
+            format!("{struct_name}__impl"),
+            crate::pipeline::SyntheticTypeKind::ImplBlock,
+            Item::Impl {
+                struct_name: struct_name.clone(),
+                type_params: vec![],
+                for_trait: None,
+                consts: vec![],
+                methods,
+            },
+        );
+    }
+
     Ok(RustType::Named {
         name: struct_name,
         type_args: vec![],

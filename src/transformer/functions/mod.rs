@@ -577,15 +577,17 @@ impl<'a> Transformer<'a> {
                         .map_err(|_| anyhow!("unsupported destructuring key"))?;
                     let nested_source = Expr::FieldAccess {
                         object: Box::new(Expr::Ident(param_name.clone())),
-                        field: field_name,
+                        field: field_name.clone(),
                     };
                     match kv.value.as_ref() {
                         // { a: { b, c } } — nested destructuring
                         ast::Pat::Object(inner_pat) => {
+                            let field_type = self.lookup_field_type(&rust_type, &field_name);
                             self.expand_fn_param_object_props(
                                 &inner_pat.props,
                                 &nested_source,
                                 &mut stmts,
+                                field_type.as_ref(),
                             )?;
                         }
                         // { x: newX } — rename
@@ -602,40 +604,15 @@ impl<'a> Transformer<'a> {
                         }
                     }
                 }
-                ast::ObjectPatProp::Rest(_rest) => {
-                    // Collect explicitly named fields
-                    let explicit_fields: Vec<String> = obj_pat
-                        .props
-                        .iter()
-                        .filter_map(|p| match p {
-                            ast::ObjectPatProp::Assign(a) => Some(a.key.sym.to_string()),
-                            ast::ObjectPatProp::KeyValue(kv) => extract_prop_name(&kv.key).ok(),
-                            _ => None,
-                        })
-                        .collect();
-
-                    // Expand remaining fields from TypeRegistry
-                    let type_name = match &rust_type {
-                        RustType::Named { name, .. } => Some(name.as_str()),
-                        _ => None,
-                    };
-                    if let Some(crate::registry::TypeDef::Struct { fields, .. }) =
-                        type_name.and_then(|n| self.reg().get(n))
-                    {
-                        for (field_name, _) in fields {
-                            if !explicit_fields.contains(field_name) {
-                                stmts.push(Stmt::Let {
-                                    mutable: false,
-                                    name: field_name.clone(),
-                                    ty: None,
-                                    init: Some(Expr::FieldAccess {
-                                        object: Box::new(Expr::Ident(param_name.clone())),
-                                        field: field_name.clone(),
-                                    }),
-                                });
-                            }
-                        }
-                    }
+                ast::ObjectPatProp::Rest(rest) => {
+                    let source_expr = Expr::Ident(param_name.clone());
+                    self.expand_rest_as_synthetic_struct(
+                        rest,
+                        &obj_pat.props,
+                        &source_expr,
+                        Some(&rust_type),
+                        &mut stmts,
+                    )?;
                 }
             }
         }
@@ -644,11 +621,15 @@ impl<'a> Transformer<'a> {
     }
 
     /// Recursively expands nested object destructuring properties for function parameters.
+    ///
+    /// `parent_type` is the RustType of the object being destructured at this nesting level.
+    /// It is used to look up remaining field types when expanding rest patterns (`...rest`).
     fn expand_fn_param_object_props(
         &mut self,
         props: &[ast::ObjectPatProp],
         source_expr: &Expr,
         stmts: &mut Vec<Stmt>,
+        parent_type: Option<&RustType>,
     ) -> Result<()> {
         for prop in props {
             match prop {
@@ -708,14 +689,17 @@ impl<'a> Transformer<'a> {
                         .map_err(|_| anyhow!("unsupported destructuring key"))?;
                     let nested_source = Expr::FieldAccess {
                         object: Box::new(source_expr.clone()),
-                        field: field_name,
+                        field: field_name.clone(),
                     };
                     match kv.value.as_ref() {
                         ast::Pat::Object(inner_pat) => {
+                            let nested_type =
+                                parent_type.and_then(|pt| self.lookup_field_type(pt, &field_name));
                             self.expand_fn_param_object_props(
                                 &inner_pat.props,
                                 &nested_source,
                                 stmts,
+                                nested_type.as_ref(),
                             )?;
                         }
                         _ => {
@@ -731,12 +715,146 @@ impl<'a> Transformer<'a> {
                         }
                     }
                 }
-                ast::ObjectPatProp::Rest(_) => {
-                    // Rest in nested destructuring: silently skip
-                    // (type info not available at this level)
+                ast::ObjectPatProp::Rest(rest) => {
+                    self.expand_rest_as_synthetic_struct(
+                        rest,
+                        props,
+                        source_expr,
+                        parent_type,
+                        stmts,
+                    )?;
                 }
             }
         }
+        Ok(())
+    }
+
+    /// Looks up a field's RustType from a parent struct type via TypeRegistry.
+    ///
+    /// Handles `Option<Named>` unwrapping and generic type instantiation,
+    /// consistent with `resolve_field_type` in `type_resolution.rs`.
+    fn lookup_field_type(&self, parent_type: &RustType, field_name: &str) -> Option<RustType> {
+        let (type_name, type_args) = match parent_type {
+            RustType::Named { name, type_args } => (name.as_str(), type_args.as_slice()),
+            RustType::Option(inner) => match inner.as_ref() {
+                RustType::Named { name, type_args } => (name.as_str(), type_args.as_slice()),
+                _ => return None,
+            },
+            _ => return None,
+        };
+        let type_def = if type_args.is_empty() {
+            self.reg().get(type_name)?.clone()
+        } else {
+            self.reg().instantiate(type_name, type_args)?
+        };
+        match &type_def {
+            crate::registry::TypeDef::Struct { fields, .. } => fields
+                .iter()
+                .find(|(name, _)| name == field_name)
+                .map(|(_, ty)| ty.clone()),
+            _ => None,
+        }
+    }
+
+    /// Expands a rest pattern (`...rest`) into a synthetic struct initialization.
+    ///
+    /// Creates a synthetic struct containing the remaining fields (those not explicitly
+    /// destructured by sibling patterns), and generates a `let rest = RestStruct { ... }`.
+    fn expand_rest_as_synthetic_struct(
+        &mut self,
+        rest: &ast::RestPat,
+        sibling_props: &[ast::ObjectPatProp],
+        source_expr: &Expr,
+        parent_type: Option<&RustType>,
+        stmts: &mut Vec<Stmt>,
+    ) -> Result<()> {
+        use swc_common::Spanned;
+
+        let rest_name = extract_pat_ident_name(&rest.arg)
+            .map_err(|_| anyhow!("unsupported rest pattern binding"))?;
+        let rest_name = pascal_to_snake(&rest_name);
+
+        // Determine parent struct type (with generic instantiation support)
+        let (type_name, type_args) = parent_type
+            .and_then(|t| match t {
+                RustType::Named { name, type_args } => Some((name.as_str(), type_args.as_slice())),
+                RustType::Option(inner) => match inner.as_ref() {
+                    RustType::Named { name, type_args } => {
+                        Some((name.as_str(), type_args.as_slice()))
+                    }
+                    _ => None,
+                },
+                _ => None,
+            })
+            .ok_or_else(|| {
+                super::UnsupportedSyntaxError::new(
+                    "rest in nested destructuring requires known struct type",
+                    rest.span(),
+                )
+            })?;
+
+        let type_def = if type_args.is_empty() {
+            self.reg().get(type_name).cloned()
+        } else {
+            self.reg().instantiate(type_name, type_args)
+        };
+        let struct_fields = match type_def {
+            Some(crate::registry::TypeDef::Struct { fields, .. }) => fields,
+            _ => {
+                return Err(super::UnsupportedSyntaxError::new(
+                    format!(
+                        "rest in nested destructuring: type '{type_name}' not found in registry"
+                    ),
+                    rest.span(),
+                )
+                .into());
+            }
+        };
+
+        // Collect explicitly destructured field names from sibling props
+        let explicit_fields: Vec<String> = sibling_props
+            .iter()
+            .filter_map(|p| match p {
+                ast::ObjectPatProp::Assign(a) => Some(a.key.sym.to_string()),
+                ast::ObjectPatProp::KeyValue(kv) => extract_prop_name(&kv.key).ok(),
+                _ => None,
+            })
+            .collect();
+
+        // Remaining fields = struct fields - explicit fields
+        let remaining_fields: Vec<(String, RustType)> = struct_fields
+            .into_iter()
+            .filter(|(name, _)| !explicit_fields.contains(name))
+            .collect();
+
+        // Register synthetic rest struct (content-based deduplication)
+        let rest_struct_name = self.synthetic.register_inline_struct(&remaining_fields);
+
+        // Create StructInit expression: RestStruct { field: source.field, ... }
+        let init_fields: Vec<(String, Expr)> = remaining_fields
+            .iter()
+            .map(|(name, _)| {
+                (
+                    name.clone(),
+                    Expr::FieldAccess {
+                        object: Box::new(source_expr.clone()),
+                        field: name.clone(),
+                    },
+                )
+            })
+            .collect();
+
+        stmts.push(Stmt::Let {
+            mutable: false,
+            name: rest_name,
+            ty: None,
+            init: Some(Expr::StructInit {
+                name: rest_struct_name,
+                fields: init_fields,
+                base: None,
+            }),
+        });
+
         Ok(())
     }
 }

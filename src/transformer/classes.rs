@@ -136,10 +136,11 @@ impl<'a> Transformer<'a> {
                 }
                 ast::ClassMember::TsIndexSignature(_) | ast::ClassMember::Empty(_) => {}
                 ast::ClassMember::AutoAccessor(aa) => {
-                    return Err(
-                        crate::transformer::UnsupportedSyntaxError::new("AutoAccessor", aa.span)
-                            .into(),
-                    );
+                    return Err(crate::transformer::UnsupportedSyntaxError::new(
+                        "AutoAccessor",
+                        aa.span,
+                    )
+                    .into());
                 }
             }
         }
@@ -958,7 +959,13 @@ impl<'a> Transformer<'a> {
     /// methods (no `pub` modifier). The `#` prefix is stripped from the name.
     fn convert_private_method(&mut self, pm: &ast::PrivateMethod) -> Result<Method> {
         let name = pm.key.name.to_string();
-        self.build_method(name, Visibility::Private, pm.kind, &pm.function, pm.is_static)
+        self.build_method(
+            name,
+            Visibility::Private,
+            pm.kind,
+            &pm.function,
+            pm.is_static,
+        )
     }
 
     /// Shared implementation for converting a TS method (public or private) to an IR [`Method`].
@@ -990,7 +997,13 @@ impl<'a> Transformer<'a> {
             .as_ref()
             .map(|ann| convert_ts_type(&ann.type_ann, self.synthetic, self.reg()))
             .transpose()?
-            .and_then(|ty| if matches!(ty, RustType::Unit) { None } else { Some(ty) });
+            .and_then(|ty| {
+                if matches!(ty, RustType::Unit) {
+                    None
+                } else {
+                    Some(ty)
+                }
+            });
 
         let body = match &function.body {
             Some(block) => {

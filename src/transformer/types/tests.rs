@@ -3205,3 +3205,129 @@ fn test_convert_type_alias_type_literal_method_generates_trait() {
         "expected trait X, got {items:?}"
     );
 }
+
+// -- intersection method signature impl generation (I-248) --
+
+#[test]
+fn test_intersection_with_method_generates_impl_in_synthetic() {
+    let decl = parse_type_alias("type X = { a: string } & { foo(): void };");
+    let mut synthetic = SyntheticTypeRegistry::new();
+    let item = convert_type_alias(
+        &decl,
+        Visibility::Public,
+        &mut synthetic,
+        &TypeRegistry::new(),
+    )
+    .unwrap();
+
+    // Primary item should be a struct with the property field
+    match &item {
+        Item::Struct { name, fields, .. } => {
+            assert_eq!(name, "X");
+            assert_eq!(fields.len(), 1);
+            assert_eq!(fields[0].name, "a");
+        }
+        other => panic!("expected Item::Struct, got {other:?}"),
+    }
+
+    // Synthetic should contain an Item::Impl for X with the method
+    let impl_items: Vec<_> = synthetic
+        .all_items()
+        .into_iter()
+        .filter(|i| matches!(i, Item::Impl { .. }))
+        .collect();
+    assert_eq!(impl_items.len(), 1, "expected 1 impl block in synthetic");
+    match impl_items[0] {
+        Item::Impl {
+            struct_name,
+            methods,
+            for_trait,
+            ..
+        } => {
+            assert_eq!(struct_name, "X");
+            assert!(for_trait.is_none());
+            assert_eq!(methods.len(), 1);
+            assert_eq!(methods[0].name, "foo");
+            assert!(methods[0].has_self);
+            assert!(methods[0].return_type.is_none()); // void → None
+        }
+        other => panic!("expected Item::Impl, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_intersection_properties_only_no_impl_generated() {
+    let decl = parse_type_alias("type X = { a: string } & { b: number };");
+    let mut synthetic = SyntheticTypeRegistry::new();
+    let _item = convert_type_alias(
+        &decl,
+        Visibility::Public,
+        &mut synthetic,
+        &TypeRegistry::new(),
+    )
+    .unwrap();
+
+    // No impl blocks should be generated
+    let impl_items: Vec<_> = synthetic
+        .all_items()
+        .into_iter()
+        .filter(|i| matches!(i, Item::Impl { .. }))
+        .collect();
+    assert!(
+        impl_items.is_empty(),
+        "no impl should be generated for properties-only intersection"
+    );
+}
+
+#[test]
+fn test_intersection_in_annotation_with_method_generates_impl() {
+    let decl =
+        parse_interface("interface T { x: { a: string } & { greet(name: string): string }; }");
+    let prop = match &decl.body.body[0] {
+        TsTypeElement::TsPropertySignature(p) => p,
+        _ => panic!("expected property signature"),
+    };
+    let mut synthetic = SyntheticTypeRegistry::new();
+    let ty = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut synthetic,
+        &TypeRegistry::new(),
+    )
+    .unwrap();
+
+    // Type should be a named reference to the synthetic struct
+    let struct_name = match &ty {
+        RustType::Named { name, .. } => name.clone(),
+        other => panic!("expected Named, got: {other:?}"),
+    };
+
+    // Synthetic should contain both a struct and an impl
+    let all = synthetic.all_items();
+    let structs: Vec<_> = all
+        .iter()
+        .filter(|i| matches!(i, Item::Struct { .. }))
+        .collect();
+    let impls: Vec<_> = all
+        .iter()
+        .filter(|i| matches!(i, Item::Impl { .. }))
+        .collect();
+
+    assert_eq!(structs.len(), 1);
+    assert_eq!(impls.len(), 1);
+
+    match impls[0] {
+        Item::Impl {
+            struct_name: impl_for,
+            methods,
+            ..
+        } => {
+            assert_eq!(impl_for, &struct_name);
+            assert_eq!(methods.len(), 1);
+            assert_eq!(methods[0].name, "greet");
+            assert_eq!(methods[0].params.len(), 1);
+            assert_eq!(methods[0].params[0].name, "name");
+            assert_eq!(methods[0].return_type, Some(RustType::String));
+        }
+        other => panic!("expected Item::Impl, got {other:?}"),
+    }
+}

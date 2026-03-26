@@ -1,0 +1,21 @@
+---
+source: tests/integration_test.rs
+assertion_line: 543
+expression: output
+---
+impl Named {
+    pub fn greet(&self, name: String) -> String {
+        todo!()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct Named {
+    name: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct PropsOnly {
+    a: String,
+    b: f64,
+}

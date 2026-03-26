@@ -264,10 +264,7 @@ impl<'a> Transformer<'a> {
                 Ok((converted, warnings)) => {
                     items.extend(converted);
                     for warning in warnings {
-                        unsupported.push(UnsupportedSyntaxError::new(
-                            warning,
-                            module_item.span(),
-                        ));
+                        unsupported.push(UnsupportedSyntaxError::new(warning, module_item.span()));
                     }
                 }
                 Err(e) => match e.downcast::<UnsupportedSyntaxError>() {
@@ -697,23 +694,39 @@ fn items_contain_runtime_typeof(items: &[Item]) -> bool {
     use crate::ir::Method;
     items.iter().any(|item| match item {
         Item::Fn { body, .. } => stmts_contain_runtime_typeof(body),
-        Item::Impl { methods, .. } => methods
-            .iter()
-            .any(|m: &Method| m.body.as_ref().is_some_and(|b| stmts_contain_runtime_typeof(b))),
+        Item::Impl { methods, .. } => methods.iter().any(|m: &Method| {
+            m.body
+                .as_ref()
+                .is_some_and(|b| stmts_contain_runtime_typeof(b))
+        }),
         _ => false,
     })
 }
 
 fn stmts_contain_runtime_typeof(stmts: &[crate::ir::Stmt]) -> bool {
     stmts.iter().any(|stmt| match stmt {
-        crate::ir::Stmt::Expr(e) | crate::ir::Stmt::Return(Some(e)) | crate::ir::Stmt::TailExpr(e) => expr_contains_runtime_typeof(e),
-        crate::ir::Stmt::Let { init, .. } => init.as_ref().is_some_and(expr_contains_runtime_typeof),
-        crate::ir::Stmt::If { then_body, else_body, .. } => {
-            stmts_contain_runtime_typeof(then_body)
-                || else_body.as_ref().is_some_and(|b| stmts_contain_runtime_typeof(b.as_slice()))
+        crate::ir::Stmt::Expr(e)
+        | crate::ir::Stmt::Return(Some(e))
+        | crate::ir::Stmt::TailExpr(e) => expr_contains_runtime_typeof(e),
+        crate::ir::Stmt::Let { init, .. } => {
+            init.as_ref().is_some_and(expr_contains_runtime_typeof)
         }
-        crate::ir::Stmt::Match { arms, .. } => arms.iter().any(|arm| stmts_contain_runtime_typeof(&arm.body)),
-        crate::ir::Stmt::While { body, .. } | crate::ir::Stmt::ForIn { body, .. } => stmts_contain_runtime_typeof(body),
+        crate::ir::Stmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            stmts_contain_runtime_typeof(then_body)
+                || else_body
+                    .as_ref()
+                    .is_some_and(|b| stmts_contain_runtime_typeof(b.as_slice()))
+        }
+        crate::ir::Stmt::Match { arms, .. } => arms
+            .iter()
+            .any(|arm| stmts_contain_runtime_typeof(&arm.body)),
+        crate::ir::Stmt::While { body, .. } | crate::ir::Stmt::ForIn { body, .. } => {
+            stmts_contain_runtime_typeof(body)
+        }
         crate::ir::Stmt::LabeledBlock { body, .. } => stmts_contain_runtime_typeof(body),
         _ => false,
     })
@@ -727,9 +740,17 @@ fn expr_contains_runtime_typeof(expr: &crate::ir::Expr) -> bool {
             expr_contains_runtime_typeof(object) || args.iter().any(expr_contains_runtime_typeof)
         }
         Expr::FnCall { args, .. } => args.iter().any(expr_contains_runtime_typeof),
-        Expr::Ref(inner) | Expr::Await(inner) | Expr::Deref(inner) => expr_contains_runtime_typeof(inner),
-        Expr::BinaryOp { left, right, .. } => expr_contains_runtime_typeof(left) || expr_contains_runtime_typeof(right),
-        Expr::If { condition, then_expr, else_expr } => {
+        Expr::Ref(inner) | Expr::Await(inner) | Expr::Deref(inner) => {
+            expr_contains_runtime_typeof(inner)
+        }
+        Expr::BinaryOp { left, right, .. } => {
+            expr_contains_runtime_typeof(left) || expr_contains_runtime_typeof(right)
+        }
+        Expr::If {
+            condition,
+            then_expr,
+            else_expr,
+        } => {
             expr_contains_runtime_typeof(condition)
                 || expr_contains_runtime_typeof(then_expr)
                 || expr_contains_runtime_typeof(else_expr)

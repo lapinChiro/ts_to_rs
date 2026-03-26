@@ -999,7 +999,9 @@ fn test_transform_module_top_level_expr_stmt_generates_init_fn() {
         .iter()
         .any(|i| matches!(i, Item::Struct { name, .. } if name == "Foo")));
     // console.log should be in init() function
-    let init_fn = items.iter().find(|i| matches!(i, Item::Fn { name, .. } if name == "init"));
+    let init_fn = items
+        .iter()
+        .find(|i| matches!(i, Item::Fn { name, .. } if name == "init"));
     assert!(
         init_fn.is_some(),
         "expected init() function from top-level expression, got items: {items:?}"
@@ -1038,7 +1040,10 @@ fn test_transform_module_no_top_level_exprs_no_init_fn() {
     let has_init = items
         .iter()
         .any(|i| matches!(i, Item::Fn { name, .. } if name == "init"));
-    assert!(!has_init, "no init() should be generated when no top-level expressions exist");
+    assert!(
+        !has_init,
+        "no init() should be generated when no top-level expressions exist"
+    );
 }
 
 // --- private class members ---
@@ -1058,16 +1063,20 @@ fn test_private_method_generates_non_pub_method() {
         "private method should not be unsupported: {unsupported:?}"
     );
     // Find the impl block
-    let impl_item = items
-        .iter()
-        .find(|i| matches!(i, Item::Impl { methods, .. } if methods.iter().any(|m| m.name == "helper")));
+    let impl_item = items.iter().find(
+        |i| matches!(i, Item::Impl { methods, .. } if methods.iter().any(|m| m.name == "helper")),
+    );
     assert!(
         impl_item.is_some(),
         "expected 'helper' method in impl block, items: {items:?}"
     );
     if let Some(Item::Impl { methods, .. }) = impl_item {
         let helper = methods.iter().find(|m| m.name == "helper").unwrap();
-        assert_eq!(helper.vis, Visibility::Private, "private method should have Private visibility");
+        assert_eq!(
+            helper.vis,
+            Visibility::Private,
+            "private method should have Private visibility"
+        );
     }
 }
 
@@ -1091,9 +1100,16 @@ fn test_private_prop_generates_non_pub_field() {
     assert!(struct_item.is_some(), "expected Counter struct");
     if let Some(Item::Struct { fields, .. }) = struct_item {
         let count_field = fields.iter().find(|f| f.name == "count");
-        assert!(count_field.is_some(), "expected 'count' field (# prefix removed)");
+        assert!(
+            count_field.is_some(),
+            "expected 'count' field (# prefix removed)"
+        );
         if let Some(f) = count_field {
-            assert_eq!(f.vis, Some(Visibility::Private), "private prop should have Private visibility");
+            assert_eq!(
+                f.vis,
+                Some(Visibility::Private),
+                "private prop should have Private visibility"
+            );
         }
     }
 }
@@ -1159,7 +1175,10 @@ fn test_declare_module_inner_error_propagates_in_strict_mode() {
     "#;
     let module = parse_typescript(source).expect("parse failed");
     let result = transform_module(&module, &TypeRegistry::new());
-    assert!(result.is_err(), "unsupported inside declare module should error in strict mode");
+    assert!(
+        result.is_err(),
+        "unsupported inside declare module should error in strict mode"
+    );
 }
 
 // --- D1: import resolution with ModuleGraph ---

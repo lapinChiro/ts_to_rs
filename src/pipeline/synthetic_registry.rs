@@ -47,6 +47,8 @@ pub enum SyntheticTypeKind {
     AnyEnum,
     /// An inline type literal struct (e.g., `{ x: number }` → `_TypeLit0`).
     InlineStruct,
+    /// An impl block for a synthetic or named struct.
+    ImplBlock,
 }
 
 impl SyntheticTypeRegistry {

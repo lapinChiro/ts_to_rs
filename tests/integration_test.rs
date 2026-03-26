@@ -535,3 +535,10 @@ fn test_instanceof_builtin() {
     let (output, _unsupported) = transpile_collecting(&input).unwrap();
     insta::assert_snapshot!(output);
 }
+
+#[test]
+fn test_intersection_methods() {
+    let input = fs::read_to_string("tests/fixtures/intersection-methods.input.ts").unwrap();
+    let output = transpile(&input).unwrap();
+    insta::assert_snapshot!(output);
+}

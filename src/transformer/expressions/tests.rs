@@ -176,8 +176,8 @@ fn test_convert_expr_bigint_i128_overflow_returns_error() {
     let tctx = f.tctx();
     // i128::MAX + 1 = 170141183460469231731687303715884105728 — exceeds i128
     let swc_expr = parse_expr("170141183460469231731687303715884105728n;");
-    let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
-        .convert_expr(&swc_expr);
+    let result =
+        Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new()).convert_expr(&swc_expr);
     assert!(result.is_err());
 }
 
@@ -6305,9 +6305,12 @@ fn test_convert_typeof_unknown_type_returns_error() {
     let f = TctxFixture::new();
     let tctx = f.tctx();
     let expr = parse_expr("typeof x");
-    let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
-        .convert_expr(&expr);
-    assert!(result.is_err(), "typeof on unresolved type should return error, not silent 'object'");
+    let result =
+        Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new()).convert_expr(&expr);
+    assert!(
+        result.is_err(),
+        "typeof on unresolved type should return error, not silent 'object'"
+    );
 }
 
 #[test]

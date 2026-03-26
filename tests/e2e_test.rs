@@ -435,6 +435,11 @@ fn test_e2e_destructuring_ts_rust_stdout_match() {
 }
 
 #[test]
+fn test_e2e_nested_rest_destructuring_ts_rust_stdout_match() {
+    run_e2e_test("nested_rest_destructuring");
+}
+
+#[test]
 fn test_e2e_spread_ops_ts_rust_stdout_match() {
     run_e2e_test("spread_ops");
 }

@@ -1258,3 +1258,165 @@ fn test_convert_fn_default_param_bool_no_annotation_infers_bool() {
         other => panic!("expected Fn item, got: {other:?}"),
     }
 }
+
+// --- Nested destructuring rest parameter (I-244) ---
+
+/// Helper: build TypeRegistry with Outer { inner: Inner } and Inner { a: String, b: f64, c: bool }.
+fn reg_with_outer_inner() -> TypeRegistry {
+    let mut reg = TypeRegistry::new();
+    reg.register(
+        "Inner".to_string(),
+        TypeDef::new_struct(
+            vec![
+                ("a".to_string(), RustType::String),
+                ("b".to_string(), RustType::F64),
+                ("c".to_string(), RustType::Bool),
+            ],
+            HashMap::new(),
+            vec![],
+        ),
+    );
+    reg.register(
+        "Outer".to_string(),
+        TypeDef::new_struct(
+            vec![(
+                "inner".to_string(),
+                RustType::Named {
+                    name: "Inner".to_string(),
+                    type_args: vec![],
+                },
+            )],
+            HashMap::new(),
+            vec![],
+        ),
+    );
+    reg
+}
+
+#[test]
+fn test_nested_destructuring_rest_with_type_info_generates_struct_init() {
+    let reg = reg_with_outer_inner();
+    let f = TctxFixture::with_reg(reg);
+    let tctx = f.tctx();
+    let fn_decl = parse_fn_decl("function foo({ inner: { a, ...rest } }: Outer): void {}");
+    let mut synthetic = SyntheticTypeRegistry::new();
+    let (items, _) = Transformer::for_module(&tctx, &mut synthetic)
+        .convert_fn_decl(&fn_decl, Visibility::Public, false)
+        .unwrap();
+
+    match items.last().unwrap() {
+        Item::Fn { body, params, .. } => {
+            // Parameter should be outer: Outer
+            assert_eq!(params[0].name, "outer");
+
+            // body[0] = let a = outer.inner.a;
+            assert_eq!(
+                body[0],
+                Stmt::Let {
+                    mutable: false,
+                    name: "a".to_string(),
+                    ty: None,
+                    init: Some(Expr::FieldAccess {
+                        object: Box::new(Expr::FieldAccess {
+                            object: Box::new(Expr::Ident("outer".to_string())),
+                            field: "inner".to_string(),
+                        }),
+                        field: "a".to_string(),
+                    }),
+                }
+            );
+
+            // body[1] = let rest = _TypeLitN { b: outer.inner.b, c: outer.inner.c };
+            match &body[1] {
+                Stmt::Let {
+                    name,
+                    init:
+                        Some(Expr::StructInit {
+                            name: struct_name,
+                            fields,
+                            base,
+                        }),
+                    ..
+                } => {
+                    assert_eq!(name, "rest");
+                    assert!(
+                        struct_name.starts_with("_TypeLit"),
+                        "expected synthetic struct name, got {struct_name}"
+                    );
+                    assert!(base.is_none());
+                    assert_eq!(fields.len(), 2);
+                    assert_eq!(fields[0].0, "b");
+                    assert_eq!(fields[1].0, "c");
+                }
+                other => panic!("expected Let with StructInit, got {other:?}"),
+            }
+        }
+        other => panic!("expected Item::Fn, got {other:?}"),
+    }
+
+    // Synthetic rest struct should be registered
+    let rest_types: Vec<_> = synthetic
+        .all_items()
+        .into_iter()
+        .filter(|item| matches!(item, Item::Struct { .. }))
+        .collect();
+    assert!(
+        !rest_types.is_empty(),
+        "expected synthetic rest struct to be registered"
+    );
+}
+
+#[test]
+fn test_nested_destructuring_rest_all_fields_explicit_generates_empty_struct() {
+    let reg = reg_with_outer_inner();
+    let f = TctxFixture::with_reg(reg);
+    let tctx = f.tctx();
+    let fn_decl = parse_fn_decl("function foo({ inner: { a, b, c, ...rest } }: Outer): void {}");
+    let mut synthetic = SyntheticTypeRegistry::new();
+    let (items, _) = Transformer::for_module(&tctx, &mut synthetic)
+        .convert_fn_decl(&fn_decl, Visibility::Public, false)
+        .unwrap();
+
+    match items.last().unwrap() {
+        Item::Fn { body, .. } => {
+            // body should have 3 field expansions (a, b, c) + 1 empty rest struct
+            let rest_stmt = body.iter().find(|s| match s {
+                Stmt::Let { name, .. } => name == "rest",
+                _ => false,
+            });
+            match rest_stmt {
+                Some(Stmt::Let {
+                    init: Some(Expr::StructInit { fields, .. }),
+                    ..
+                }) => {
+                    assert_eq!(
+                        fields.len(),
+                        0,
+                        "rest should be empty struct when all fields are explicit"
+                    );
+                }
+                other => panic!("expected Let with empty StructInit, got {other:?}"),
+            }
+        }
+        other => panic!("expected Item::Fn, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_nested_destructuring_rest_without_type_info_returns_error() {
+    // Outer type not registered → field type unknown → UnsupportedSyntaxError
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
+    let fn_decl = parse_fn_decl("function foo({ inner: { a, ...rest } }: Outer): void {}");
+    let mut synthetic = SyntheticTypeRegistry::new();
+    let result = Transformer::for_module(&tctx, &mut synthetic).convert_fn_decl(
+        &fn_decl,
+        Visibility::Public,
+        false,
+    );
+
+    assert!(
+        result.is_err(),
+        "should fail when type info is unavailable for nested rest"
+    );
+}
