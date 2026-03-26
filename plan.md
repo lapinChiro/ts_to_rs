@@ -2,11 +2,47 @@
 
 PRD 化済みタスクの消化順序。次のタスクから順に着手する。
 
-## 次のタスク
+## 現在のタスク: I-192 大規模ファイルの分割
 
-- **I-192: 大規模ファイルの分割** → `backlog/I-192-large-file-splitting.md`
-  - 1000 行超の全 18 ファイルを分割。プロダクション 6 + テスト 5 + テスト抽出 7
-  - T1〜T13 の段階的タスク。各タスクは独立して実行可能（T*b のみ親タスクに依存）
+PRD: `backlog/I-192-large-file-splitting.md`
+
+### ベースライン
+
+- テスト数: 1293 (1225 + 3 + 2 + 63)
+- 1000 行超ファイル: 元 18 個
+
+### 完了済みタスク
+
+- **T1: `type_resolver.rs` → `type_resolver/` ディレクトリ化** — staged 済み
+  - `type_resolver.rs` (3692行) を 7 サブモジュールに分割
+  - `mod.rs` (148), `visitors.rs` (431), `narrowing.rs` (146), `expected_types.rs` (194), `expressions.rs` (976), `du_analysis.rs` (221), `helpers.rs` (243)
+  - テスト全 pass、外部 API パス不変
+
+### 次のタスク（上から順に実施）
+
+1. **T1b: `type_resolver` テスト分割** — T1 で抽出した `tests.rs` (1405行) を `tests/` ディレクトリに分割。1000 行以下のサブモジュール群にする
+2. **T2: `type_converter.rs` → `type_converter/` ディレクトリ化** — `type_converter.rs` (2691行) を 8 サブモジュールに分割
+3. **T3: `statements/mod.rs` サブモジュール分割** — `statements/mod.rs` (2656行) を 7 サブモジュールに分割
+4. **T3b: `statements/tests.rs` テスト分割** — `tests.rs` (2766行) を `tests/` ディレクトリに分割。T3 に依存
+5. **T4: `registry.rs` → `registry/` ディレクトリ化** — `registry.rs` (2414行) を 6 サブモジュールに分割 + テスト抽出
+6. **T4b: `registry` テスト分割（条件付き）** — T4 で抽出した `tests.rs` が 1000 行超の場合に分割。T4 に依存
+7. **T5: `classes.rs` → `classes/` ディレクトリ化** — `classes.rs` (2215行) を 5 サブモジュールに分割
+8. **T6: `functions/mod.rs` サブモジュール分割** — `functions/mod.rs` (1298行) を 4 サブモジュールに分割
+9. **T6b: `functions/tests.rs` テスト分割** — `tests.rs` (1422行) を `tests/` ディレクトリに分割。T6 に依存
+10. **T7: `expressions/tests.rs` テスト分割** — `tests.rs` (6814行) を 15 サブモジュールに分割
+11. **T8: `types/tests.rs` テスト分割** — `tests.rs` (3333行) を 7 サブモジュールに分割
+12. **T9: `transformer/tests.rs` テスト分割** — `tests.rs` (1335行) を 7 サブモジュールに分割
+13. **T10: `generator/` テスト抽出** — `mod.rs` (1410行), `expressions.rs` (1267行), `statements.rs` (1019行) のインラインテストを別ファイルに抽出
+14. **T11: `ir.rs` テスト抽出** — `ir.rs` (1416行) → `ir/mod.rs` + `ir/tests.rs`
+15. **T12: `pipeline/` テスト抽出** — `external_types.rs` (1156行), `module_graph.rs` (1038行), `external_struct_generator.rs` (1132行) のテスト抽出
+16. **T13: 最終検証** — 全ファイル 1000 行以下、全テスト pass、clippy 0 警告、fmt pass、Hono ベンチ同一
+
+### 作業上の注意事項
+
+- **並列エージェント禁止**: 同一リポジトリで複数エージェントが同時にファイル操作すると破壊が起きた。全タスクを直列で実施する
+- **スクリプトによる一括置換禁止**: sed/Python の一括置換でミスが発生した。手動で正確に編集する
+- **分割パターン**: Rust の `impl` ブロック分割パターンを使用。各サブモジュールに `use super::*;` + 独自の `impl` ブロック。サブモジュール間で呼ばれる関数は `pub(super)`。mod.rs で `use helpers::*;` 等で re-export
+- **検証**: 各タスク完了後に `cargo check` + `cargo test` でテスト数不変を確認
 
 ## OBJECT_LITERAL_NO_TYPE 完全解消ロードマップ
 
