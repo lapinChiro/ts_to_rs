@@ -40,9 +40,7 @@ pub(super) fn resolve_with_reg_and_synthetic(
     (result, synthetic)
 }
 
-pub(super) fn resolve_with_synthetic(
-    source: &str,
-) -> (FileTypeResolution, SyntheticTypeRegistry) {
+pub(super) fn resolve_with_synthetic(source: &str) -> (FileTypeResolution, SyntheticTypeRegistry) {
     let files = parse_files(vec![(PathBuf::from("test.ts"), source.to_string())]).unwrap();
     let file = &files.files[0];
     let reg = build_registry(&file.module);

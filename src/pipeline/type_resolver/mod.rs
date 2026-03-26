@@ -16,9 +16,7 @@ use helpers::*;
 use std::collections::HashMap;
 
 use crate::ir::RustType;
-use crate::pipeline::type_resolution::{
-    AnyEnumOverride, FileTypeResolution, Span, VarId,
-};
+use crate::pipeline::type_resolution::{AnyEnumOverride, FileTypeResolution, Span, VarId};
 use crate::pipeline::ResolvedType;
 use crate::pipeline::SyntheticTypeRegistry;
 use crate::registry::{TypeDef, TypeRegistry};

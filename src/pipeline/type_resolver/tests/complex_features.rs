@@ -19,9 +19,7 @@ fn test_cond_expr_test_subexpressions_resolved() {
 
     // Find x's Ident span in the condition `x !== null`
     let fn_decl = match &file.module.body[0] {
-        swc_ecma_ast::ModuleItem::Stmt(swc_ecma_ast::Stmt::Decl(swc_ecma_ast::Decl::Fn(
-            fd,
-        ))) => fd,
+        swc_ecma_ast::ModuleItem::Stmt(swc_ecma_ast::Stmt::Decl(swc_ecma_ast::Decl::Fn(fd))) => fd,
         _ => panic!("expected fn decl"),
     };
     let return_stmt = &fn_decl.function.body.as_ref().unwrap().stmts[0];
@@ -269,10 +267,9 @@ fn test_resolve_anon_struct_generated_for_untyped_object_literal() {
         "untyped object literal should generate anonymous struct as expected type"
     );
     // The synthetic registry should have the anonymous struct registered
-    let has_struct = synthetic
-        .all_items()
-        .iter()
-        .any(|item| matches!(item, crate::ir::Item::Struct { name, .. } if name.starts_with("_TypeLit")));
+    let has_struct = synthetic.all_items().iter().any(
+        |item| matches!(item, crate::ir::Item::Struct { name, .. } if name.starts_with("_TypeLit")),
+    );
     assert!(
         has_struct,
         "synthetic registry should contain the anonymous struct"

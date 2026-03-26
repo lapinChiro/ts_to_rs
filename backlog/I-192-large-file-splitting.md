@@ -120,44 +120,45 @@ expressions.rs → expected_types.rs, narrowing.rs, helpers.rs
 du_analysis.rs → helpers.rs
 ```
 
-#### 2. `src/pipeline/type_converter.rs` (2688 行) → `src/pipeline/type_converter/`
+#### 2. `src/pipeline/type_converter.rs` (2691 行) → `src/pipeline/type_converter/`
+
+**実装済み**。PRD 設計時は 8 ファイルだったが、依存関係の分析により 6 サブモジュール + tests に最適化した。
 
 ```
 type_converter/
-├── mod.rs              # pub API + core dispatcher (convert_ts_type, convert_type_ref) (~300 行)
-├── unions.rs           # union 型変換 (~250 行)
-├── interfaces.rs       # interface → struct/trait 変換 (~360 行)
-├── type_aliases.rs     # type alias 変換 (~600 行)
-├── utility_types.rs    # Partial/Pick/Omit 等 (~310 行)
-├── intersections.rs    # intersection 型変換 (~170 行)
-├── annotations.rs      # 型リテラル・関数型・indexed access (~200 行)
-└── helpers.rs          # 共有ユーティリティ (~100 行)
+├── mod.rs              # pub API + core dispatcher (convert_ts_type, convert_type_ref) (289 行)
+├── unions.rs           # union 型変換 + DU + string literal union + string_to_pascal_case (585 行)
+├── interfaces.rs       # interface → struct/trait 変換 + convert_method_signature (433 行)
+├── type_aliases.rs     # type alias 変換 + conditional type + infer pattern (518 行)
+├── intersections.rs    # intersection 型変換 + 型リテラル・関数型・indexed access (325 行)
+├── utilities.rs        # extract_type_params + convert_property_signature + Partial/Pick/Omit 等 (467 行)
+└── tests.rs            # テスト (95 行)
 ```
 
-**mod.rs**: `convert_type_for_position`（pub）, `convert_ts_type`（pub）, `extract_type_params`（pub）, `convert_type_ref`, `is_nullable_keyword`, `unwrap_promise`, `convert_property_signature`（pub(crate)）
+PRD 設計からの変更点:
+- `annotations.rs` の関数を `intersections.rs`（`convert_fn_type`, `convert_type_lit_in_annotation`, `convert_intersection_in_annotation`, `convert_indexed_access_type`）と `type_aliases.rs`（`convert_conditional_type`, `try_convert_infer_pattern`, `extract_infer_info`, `is_true_false_literal`, `try_convert_function_type_alias`, `try_convert_tuple_type_alias`）に統合。理由: これらは意味的に交差型操作・型エイリアス変換に属し、独立ファイルにする凝集度がなかった
+- `helpers.rs`（`string_to_pascal_case` 1 関数のみ）を `unions.rs` に統合。理由: この関数の唯一の呼び出し元が union 関連関数群
+- `utility_types.rs` を `utilities.rs` に名称変更し、`extract_type_params` + `convert_property_signature` + `convert_unsupported_union_member` + `convert_fn_type_to_rust` も含む。理由: 元の `unwrap_promise` は `unions.rs` に配置、`is_nullable_keyword` は `mod.rs` に残置した方が依存が自然
 
-**unions.rs**: `convert_union_type`, `convert_unsupported_union_member`, `convert_fn_type_to_rust`
+**mod.rs**: `convert_type_for_position`（pub）, `convert_ts_type`（pub）, `convert_type_ref`, `is_nullable_keyword`。`pub use` で外部 API を re-export
+
+**unions.rs**: `convert_union_type`, `unwrap_promise`, `try_convert_discriminated_union`, `find_discriminant_field`, `extract_variant_info`, `is_string_literal_type`, `try_convert_string_literal_union`, `try_convert_single_string_literal`, `string_to_pascal_case`（pub(crate)）, `try_convert_general_union`
 
 **interfaces.rs**: `convert_interface_items`（pub）, `convert_interface`（pub）, `convert_interface_as_struct`, `convert_interface_as_fn_type`, `convert_interface_as_struct_and_trait`, `convert_interface_as_trait`, `convert_method_signature`, `collect_extends_refs`, `collect_extends_names`
 
-**type_aliases.rs**: `convert_type_alias_items`（pub）, `convert_type_alias`（pub）, `try_convert_keyof_typeof_alias`, `try_convert_string_literal_union`, `try_convert_single_string_literal`, `try_convert_discriminated_union`, `try_convert_general_union`, `find_discriminant_field`, `extract_variant_info`, `is_string_literal_type`
-- 600 行だが `convert_type_alias` の巨大 match + 7 つの `try_convert_*` が密結合しており分割不適
+**type_aliases.rs**: `convert_type_alias_items`（pub）, `convert_type_alias`（pub）, `try_convert_keyof_typeof_alias`, `convert_conditional_type`, `is_true_false_literal`, `try_convert_infer_pattern`, `extract_infer_info`, `try_convert_function_type_alias`, `try_convert_tuple_type_alias`
 
-**utility_types.rs**: `convert_utility_partial`, `convert_utility_required`, `convert_utility_pick`, `convert_utility_omit`, `convert_utility_non_nullable`, `resolve_utility_inner_fields`, `resolve_utility_inner_with_conversion`, `extract_string_keys`, `capitalize_first`
+**intersections.rs**: `extract_intersection_members`, `try_convert_intersection_type`, `convert_type_lit_in_annotation`, `convert_intersection_in_annotation`, `convert_fn_type`, `convert_indexed_access_type`
 
-**intersections.rs**: `try_convert_intersection_type`, `extract_intersection_members`
-
-**annotations.rs**: `convert_type_lit_in_annotation`, `convert_intersection_in_annotation`, `convert_fn_type`, `convert_indexed_access_type`, `convert_conditional_type`, `try_convert_infer_pattern`, `extract_infer_info`, `is_true_false_literal`, `try_convert_function_type_alias`, `try_convert_tuple_type_alias`
-
-**helpers.rs**: `string_to_pascal_case`（pub(crate)）
+**utilities.rs**: `extract_type_params`（pub）, `convert_property_signature`（pub(crate)）, `convert_utility_partial`, `convert_utility_required`, `convert_utility_pick`, `convert_utility_omit`, `convert_utility_non_nullable`, `resolve_utility_inner_fields`, `resolve_utility_inner_with_conversion`, `extract_string_keys`, `capitalize_first`, `convert_unsupported_union_member`, `convert_fn_type_to_rust`
 
 **依存方向**:
 ```
-mod.rs (core dispatcher)
-  ↑ unions.rs, interfaces.rs, type_aliases.rs, annotations.rs
-helpers.rs ← 全モジュール
-utility_types.rs ← mod.rs (convert_type_ref から呼出)
-intersections.rs ← type_aliases.rs, annotations.rs
+mod.rs (core dispatcher + convert_type_ref)
+  ↑ unions.rs, interfaces.rs, type_aliases.rs, intersections.rs, utilities.rs
+mod.rs → utilities.rs (convert_utility_* を convert_type_ref から呼出)
+type_aliases.rs → unions.rs (try_convert_discriminated_union 等), intersections.rs (try_convert_intersection_type)
+unions.rs → utilities.rs (convert_unsupported_union_member)
 ```
 
 #### 3. `src/transformer/statements/mod.rs` (2656 行) → サブモジュール分割
@@ -298,22 +299,24 @@ functions/
 
 ## タスク一覧
 
-### T1: `type_resolver.rs` → `type_resolver/` ディレクトリ化
+### T1: `type_resolver.rs` → `type_resolver/` ディレクトリ化 ✅
 
-- **作業内容**: `src/pipeline/type_resolver.rs` を `src/pipeline/type_resolver/mod.rs` にリネームし、上記設計に従い 7 サブモジュール（`visitors.rs`, `narrowing.rs`, `expected_types.rs`, `expressions.rs`, `du_analysis.rs`, `helpers.rs`）に分割する。テストは `tests.rs`（テスト行数 1408 行、1000 行超のため T1b で分割）に抽出する
-- **完了条件**: 全サブモジュールが 1000 行以下。`cargo test -- type_resolver` 全 pass。外部の `use crate::pipeline::type_resolver::*` パスが不変
+- **作業内容**: `src/pipeline/type_resolver.rs` (3692行) を 7 サブモジュールに分割
+- **結果**: `mod.rs` (146), `visitors.rs` (431), `narrowing.rs` (146), `expected_types.rs` (194), `expressions.rs` (976), `du_analysis.rs` (221), `helpers.rs` (243)。テスト 65 個全 pass。外部 API パス不変
 - **依存**: なし
 
-### T1b: `type_resolver` テスト分割
+### T1b: `type_resolver` テスト分割 ✅
 
-- **作業内容**: T1 で抽出した `tests.rs`（1408 行）を `tests/` ディレクトリに分割（`variables.rs`, `narrowing.rs`, `expressions.rs` 等）
-- **完了条件**: 全テストファイルが 1000 行以下。全テスト pass
+- **作業内容**: T1 で抽出した `tests.rs` (1405行) を `tests/` ディレクトリに 3 サブモジュールに分割
+- **結果**: `tests/mod.rs` (93, 共有ヘルパー), `tests/basics.rs` (425), `tests/expected_types.rs` (434), `tests/complex_features.rs` (453)。テスト 65 個全 pass
+- **PRD 設計との差異**: ファイル名を `variables.rs`/`narrowing.rs`/`expressions.rs` から `basics.rs`/`expected_types.rs`/`complex_features.rs` に変更。テスト内容の論理的カテゴリに対応させた
 - **依存**: T1
 
-### T2: `type_converter.rs` → `type_converter/` ディレクトリ化
+### T2: `type_converter.rs` → `type_converter/` ディレクトリ化 ✅
 
-- **作業内容**: `src/pipeline/type_converter.rs` を上記設計に従い 8 サブモジュール（`unions.rs`, `interfaces.rs`, `type_aliases.rs`, `utility_types.rs`, `intersections.rs`, `annotations.rs`, `helpers.rs`）に分割する。テスト（98 行）は `mod.rs` 内に残置
-- **完了条件**: 全サブモジュールが 1000 行以下。`cargo test` 全 pass。外部の `use crate::pipeline::type_converter::*` パスが不変
+- **作業内容**: `src/pipeline/type_converter.rs` (2691行) を 6 サブモジュール + tests に分割（PRD 設計の 8 ファイルから最適化）
+- **結果**: `mod.rs` (289), `interfaces.rs` (433), `intersections.rs` (325), `type_aliases.rs` (518), `unions.rs` (585), `utilities.rs` (467), `tests.rs` (95)。テスト 4 個全 pass。外部 API パス不変
+- **PRD 設計との差異**: 詳細は上記設計セクション参照
 - **依存**: なし
 
 ### T3: `statements/mod.rs` サブモジュール分割
