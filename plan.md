@@ -35,12 +35,15 @@ PRD: `backlog/I-192-large-file-splitting.md`
   - `tests.rs` (2766行) を `tests/` ディレクトリに 7 サブモジュールに分割
   - `tests/mod.rs` (105), `tests/variables.rs` (448), `tests/control_flow.rs` (319), `tests/loops.rs` (261), `tests/destructuring.rs` (439), `tests/switch.rs` (590), `tests/error_handling.rs` (498), `tests/expected_types.rs` (107)
   - テスト 96 個全 pass、数不変
+- **T4: `registry.rs` → `registry/` ディレクトリ化**
+  - `registry.rs` (2414行) を 6 サブモジュール + tests に分割
+  - `mod.rs` (350), `collection.rs` (400), `interfaces.rs` (98), `unions.rs` (194), `functions.rs` (177), `enums.rs` (132), `tests.rs` (1131)
+  - PRD 設計どおりの分割。全テスト pass、外部 API パス不変
+  - tests.rs が 1131 行で 1000 行超のため T4b が必要
 
 ### 次のタスク（上から順に実施）
 
-1. **T4: `registry.rs` → `registry/` ディレクトリ化** — `registry.rs` (2414行) を 6 サブモジュールに分割 + テスト抽出
-3. **T4: `registry.rs` → `registry/` ディレクトリ化** — `registry.rs` (2414行) を 6 サブモジュールに分割 + テスト抽出
-4. **T4b: `registry` テスト分割（条件付き）** — T4 で抽出した `tests.rs` が 1000 行超の場合に分割。T4 に依存
+1. **T4b: `registry` テスト分割** — T4 で抽出した `tests.rs` (1131行) が 1000 行超のため分割が必要
 5. **T5: `classes.rs` → `classes/` ディレクトリ化** — `classes.rs` (2215行) を 5 サブモジュールに分割
 6. **T6: `functions/mod.rs` サブモジュール分割** — `functions/mod.rs` (1298行) を 4 サブモジュールに分割
 7. **T6b: `functions/tests.rs` テスト分割** — `tests.rs` (1422行) を `tests/` ディレクトリに分割。T6 に依存
