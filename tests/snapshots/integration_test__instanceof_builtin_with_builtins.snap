@@ -1,0 +1,48 @@
+---
+source: tests/integration_test.rs
+expression: output
+---
+#[derive(Debug, Clone, PartialEq)]
+pub enum HandleValueXType {
+    Date(Date),
+    Error(Error),
+    RegExp(RegExp),
+    Other(serde_json::Value),
+}
+
+fn handleValue(x: HandleValueXType) -> String {
+    if let HandleValueXType::Date(x) = x {
+        return x.toISOString();
+    }
+    if let HandleValueXType::Error(x) = x {
+        return x.message;
+    }
+    if let HandleValueXType::RegExp(x) = x {
+        return x.source;
+    }
+    String(x)
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Date {
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Error {
+    pub name: String,
+    pub message: String,
+    pub stack: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RegExp {
+    pub source: String,
+    pub global: bool,
+    pub ignore_case: bool,
+    pub multiline: bool,
+    pub last_index: f64,
+    pub flags: String,
+    pub sticky: bool,
+    pub unicode: bool,
+    pub dot_all: bool,
+}

@@ -10,6 +10,7 @@ fn acceptUnknown(x: serde_json::Value) {
     return;
 }
 
+#[derive(Debug, Clone, PartialEq)]
 struct Flexible {
     data: serde_json::Value,
     value: serde_json::Value,

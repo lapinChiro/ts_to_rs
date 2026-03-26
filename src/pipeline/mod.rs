@@ -4,6 +4,7 @@
 //! Parse → ModuleGraph → TypeCollection → TypeResolution → Transform → Generate → Output.
 
 pub mod any_enum_analyzer;
+pub mod external_struct_generator;
 pub mod module_graph;
 pub mod module_resolver;
 pub mod output_writer;
@@ -142,6 +143,11 @@ pub fn transpile_pipeline(input: TranspileInput) -> Result<TranspileOutput> {
 
         let mut all_items = file_synthetic_items;
         all_items.extend(items);
+
+        // 外部型 struct 生成: 参照されているが定義がないビルトイン型の struct を追加
+        // 推移的依存を解決するため固定点に達するまでループ
+        generate_external_structs_to_fixpoint(&mut all_items, &shared_registry);
+
         let rust_source = crate::generator::generate(&all_items);
 
         file_outputs.push(FileOutput {
@@ -152,7 +158,10 @@ pub fn transpile_pipeline(input: TranspileInput) -> Result<TranspileOutput> {
         });
     }
 
-    let synthetic_items = synthetic.into_items();
+    let mut synthetic_items = synthetic.into_items();
+
+    // 共有 synthetic items 内で参照されている外部型の struct も生成（推移的依存を含む）
+    generate_external_structs_to_fixpoint(&mut synthetic_items, &shared_registry);
 
     Ok(TranspileOutput {
         files: file_outputs,
@@ -194,6 +203,33 @@ fn register_synthetic_structs_in_registry(
                         is_interface: false,
                     },
                 );
+            }
+        }
+    }
+}
+
+/// 外部型 struct を固定点に達するまで反復生成する。
+///
+/// 1 回の走査で検出した外部型 struct を追加した結果、そのフィールドが新たな外部型を参照する
+/// 可能性がある（推移的依存）。新しい型が検出されなくなるまでループする。
+fn generate_external_structs_to_fixpoint(
+    items: &mut Vec<crate::ir::Item>,
+    registry: &crate::registry::TypeRegistry,
+) {
+    const MAX_ITERATIONS: usize = 10;
+    for _ in 0..MAX_ITERATIONS {
+        let undefined_refs =
+            external_struct_generator::collect_undefined_type_references(items, registry);
+        if undefined_refs.is_empty() {
+            break;
+        }
+        let mut names: Vec<String> = undefined_refs.into_iter().collect();
+        names.sort();
+        for type_name in &names {
+            if let Some(struct_item) =
+                external_struct_generator::generate_external_struct(type_name, registry)
+            {
+                items.push(struct_item);
             }
         }
     }

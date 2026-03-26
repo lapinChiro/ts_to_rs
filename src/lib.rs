@@ -66,6 +66,32 @@ pub fn transpile_collecting(ts_source: &str) -> Result<(String, Vec<UnsupportedS
     Ok((file.rust_source, unsupported))
 }
 
+/// Transpiles TypeScript source with built-in type definitions loaded.
+///
+/// Unlike [`transpile_collecting`], this loads the embedded Web API and ECMAScript type
+/// definitions, enabling external type struct generation for referenced builtin types.
+///
+/// # Errors
+///
+/// Returns an error if parsing fails or builtin type loading fails.
+pub fn transpile_with_builtins(ts_source: &str) -> Result<(String, Vec<UnsupportedSyntax>)> {
+    let (builtin_registry, base_synthetic) = external_types::load_builtin_types()?;
+    let input = TranspileInput {
+        files: vec![(std::path::PathBuf::from("input.ts"), ts_source.to_string())],
+        builtin_types: Some(builtin_registry),
+        base_synthetic: Some(base_synthetic),
+        module_resolver: Box::new(TrivialResolver),
+    };
+    let output = pipeline::transpile_pipeline(input)?;
+    let file = extract_single_output(output)?;
+    let unsupported = file
+        .unsupported
+        .into_iter()
+        .map(|raw| resolve_unsupported(ts_source, raw))
+        .collect();
+    Ok((file.rust_source, unsupported))
+}
+
 /// Resolves an [`UnsupportedSyntaxError`] into an [`UnsupportedSyntax`] with line/col info.
 pub fn resolve_unsupported(source: &str, raw: UnsupportedSyntaxError) -> UnsupportedSyntax {
     let (line, col) = byte_pos_to_line_col(source, raw.byte_pos);

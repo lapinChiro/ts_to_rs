@@ -77,6 +77,34 @@
 1. **変換の正確性**: 意味の違う Rust コードを生成するなら、その機能は存在しないのと同じ
 2. **相乗効果**: 解決すると他の課題も副次的に解消・簡素化する度合い
 3. **伝播防止**: 未解決のまま放置すると今後の開発に悪影響が蓄積する度合い
+4. **開発生産性**: 解決すると今後の全作業（機能追加・バグ修正・リファクタリング）の速度が向上する度合い
+
+### Tier 0: 最優先 — 開発生産性・DX
+
+今後の全作業の効率に直接影響するインフラ・DX 改善。変換機能の優先度とは独立した軸。
+
+- **[I-192]** **大規模ファイルの分割** — `statements/mod.rs`（2656 行）、`expressions/tests.rs`（6774 行）等
+  - Claude の読み書き精度はファイルサイズに強く依存する。6774 行のファイルはコンテキスト圧迫・誤編集・読み直し頻度を跳ね上げる。人間のコードレビューも同様
+  - 今後の全作業（変換機能追加、バグ修正、リファクタリング）の速度が向上する
+  - ユーザー記載アイディア「数1000行になっているファイルの見直し」と同一。全ファイルを 1000 行以下に
+- **[I-225]** **compile_test 失敗時のフィクスチャ名表示改善** — 小工数・即効性
+  - `test_all_fixtures_compile` 失敗時に原因フィクスチャを即座に特定できるよう改善
+  - デバッグサイクルの短縮。テスト失敗のたびに発生する調査コストを削減
+- **[I-271]** **clippy.toml でファイル行数制限を導入** — I-192 の再発防止
+  - I-192 を解消しても制限がなければ再び肥大化する。構造的に防止する品質ゲート
+  - `too_many_lines` lint で閾値を設定し、CI で自動検出
+- **[I-30]** **生成コードの Cargo.toml への依存クレート追加** — ゲート解除・レバレッジ高
+  - I-183（HTTP E2E テスト基盤 + fetch 変換）と I-34（Math.random → rand）の前提条件
+  - これが未解決だと後続 2 機能が全て blocked
+- **[I-182]** **Hono クリーンファイルのコンパイルテスト導入** — 回帰検出の自動化
+  - 変換変更のたびに手動コンパイル確認する工数を CI 自動検出に置き換える
+  - 変換機能変更時の検証コスト削減
+- **[I-193]** **API 表面積の最小化** — リファクタリング容易性
+  - `pub fn` → `pub(crate) fn` で影響範囲を自明にする
+  - リファクタリング・機能追加時の「この関数は外部から使われているか」調査コストを削減
+- **[I-272]** **Rules/Skills/CLAUDE.md の英語化検討** — AI 効率向上
+  - 日本語は英語比で約 1.5-2 倍のトークンを消費。ルール・スキルファイルは毎会話で読み込まれる
+  - 効果の検証（トークン消費量の before/after 計測）を先に行い、有意なら実施
 
 ### Tier 1: 高優先度 — 正確性・伝播リスク・レバレッジ
 
@@ -151,6 +179,21 @@ I-112c Phase 1-3 + I-211 で 70→53 件に削減済み。残 53 件は以下の
   - `Intl.NumberFormat`, `Intl.DateTimeFormat` 等のロケール依存型群が TypeRegistry に未登録
   - `lib.es5.d.ts` に `Intl` namespace として定義。抽出スクリプトの namespace 抽出に対応が必要（現在は interface/class/function/type alias のみ抽出）
   - Hono ベンチマークでの検出なし。需要発生時に対応
+- **[I-270c]** **ビルトイン型のメソッド impl 生成（trait 定義 + impl ブロック）** — ビルトイン型拡張
+  - I-270 で外部型の struct 定義（フィールドのみ）が自動生成されるが、メソッドの impl ブロックは生成されない
+  - 生成コードが `x.toISOString()`（`Date`）、`x.exec()`（`RegExp`）、`req.clone()`（`Request`）等のメソッド呼び出しを含む場合、struct にメソッドが存在せずコンパイルエラー（`method not found`）になる
+  - **現状**: `TypeRegistry` には各外部型のメソッドシグネチャが格納済み（`TypeDef::Struct.methods: HashMap<String, Vec<MethodSignature>>`）。例: `Date` には `toString`, `toDateString`, `toISOString`, `getTime`, `valueOf` 等 40+ メソッド。`RegExp` には `exec`, `test`, `compile` の 3 メソッド
+  - **設計方針**: trait 定義 + impl ブロック方式が最も理想的。各外部型に対応する trait（例: `trait DateMethods { fn to_iso_string(&self) -> String; ... }`）を定義し、生成 struct に impl する。理由:
+    - (1) ユーザーが trait をモック可能（テスト容易性）
+    - (2) 型ごとのメソッドが名前空間で分離される（直交性）
+    - (3) TypeScript の interface → Rust の trait は既存の変換パターン（`src/pipeline/type_converter.rs` の interface → trait 変換）と一貫
+  - **impl 本体**: 外部型のメソッドはランタイムの実装がないため、本体は `todo!("runtime implementation required")` とする。ユーザーが実装を差し替える前提
+  - **メソッド名変換**: TypeScript の camelCase → Rust の snake_case（例: `toISOString` → `to_iso_string`）。既存の `to_snake_case` 関数を使用
+  - **パラメータ型・戻り値型**: `MethodSignature` の `params: Vec<(String, RustType)>` と `return_type: RustType` をそのまま使用。`&self` を第一引数に追加
+  - **オーバーロード**: `TypeDef::Struct.methods` は `Vec<MethodSignature>` だが、現在は `signatures.first()` のみ使用（`src/external_types.rs:105` のコメント参照）。オーバーロード対応は `TypeDef::Function` の構造変更が前提（I-211 引継ぎ事項）
+  - **影響範囲**: `src/pipeline/external_struct_generator.rs`（I-270 で新規作成）に impl 生成ロジックを追加。`src/ir.rs` の `Item::Impl` を使用（既存）
+  - **完了すると**: コンパイルテスト `instanceof-builtin` のスキップ理由が完全解消（struct 定義 + メソッド impl の両方が揃う）
+  - 🔗 I-270（struct 定義生成）の拡張。I-270 完了が前提条件
 - **[I-264]** **`Proxy`/`Reflect` の型抽出未対応** — ビルトイン型拡張
   - `Proxy` は `declare var Proxy: ProxyConstructor` 形式（interface 名と var 名が不一致）で定義されており、extractor が `Proxy` 名で抽出できない
   - `Reflect` は `declare namespace Reflect { function apply(...): any; ... }` 形式で定義されており、extractor が namespace 内の関数を namespace 名下にまとめる機構がない（`tools/extract-types/src/extractor.ts:84` の `processModuleBody` は namespace 内を再帰するが、関数をトップレベル名で個別登録するため `Reflect.apply` ではなく `apply` として登録される）
@@ -264,10 +307,8 @@ I-112c Phase 1-3 + I-211 で 70→53 件に削減済み。残 53 件は以下の
   - 影響: ディレクトリコンパイル 156/158 → 157/158 に阻害（`types.rs` の I-227 エラーは解消済み、残りはこの問題）
   - コンパイルテスト `instanceof-builtin` のスキップ原因とも同根
 
-
 #### コード生成基盤
 
-- **[I-30]** **生成コードの Cargo.toml への依存クレート追加** — レバレッジ高: I-183, I-34 を unblock
 - **[I-190]** **HashMap 変換時の `use std::collections::HashMap` 自動追加**
 
 #### 未対応構文（小修正）
@@ -288,11 +329,6 @@ I-112c Phase 1-3 + I-211 で 70→53 件に削減済み。残 53 件は以下の
 - **[I-253]** **`console.info`/`debug`/`trace`/`table` 未対応** — `src/transformer/expressions/calls.rs:74` で unsupported エラー。`console.log`/`error`/`warn` のみ対応。`info`/`debug` は `eprintln!`、`trace` は `dbg!` に変換可能
 - **[I-254]** **一部の `Math` メソッド未対応** — `src/transformer/expressions/calls.rs:430` で unsupported エラー。対応済みメソッド以外は未変換
 
-#### ベンチマーク・テスト基盤
-
-- **[I-182]** **Hono クリーンファイルのコンパイルテスト導入**
-- **[I-225]** **compile_test 失敗時のフィクスチャ名表示改善** — `test_all_fixtures_compile` が失敗した際、どのフィクスチャが原因かをテスト出力で即座に特定できるようにする。現在は `cargo check failed for fixture 'xxx':` と表示されるが、複数失敗時の視認性を改善する（例: 全フィクスチャの結果を一覧表示してから assert する）
-
 #### E2E テスト拡充
 
 - **[I-20]** **discriminated union の拡張パターン**
@@ -307,8 +343,6 @@ I-112c Phase 1-3 + I-211 で 70→53 件に削減済み。残 53 件は以下の
 
 ### Tier 3: 低優先度 — 孤立した問題・コード品質
 
-- **[I-192]** **大規模ファイルの分割** — `statements/mod.rs`（2656 行）、`expressions/tests.rs`（6774 行）等
-- **[I-193]** **API 表面積の最小化** — `pub fn` → `pub(crate) fn`
 - **[I-191]** **README.md の記述内容の見直し**
 - **[I-99]** **`collect_du_field_accesses_from_expr` の AST ノード網羅性改善**
 - **[I-39]** **Transformer の Range 生成で `Expr::IntLit` を使用**

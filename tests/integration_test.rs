@@ -1,5 +1,5 @@
 use std::fs;
-use ts_to_rs::{transpile, transpile_collecting};
+use ts_to_rs::{transpile, transpile_collecting, transpile_with_builtins};
 
 #[test]
 fn test_import_export() {
@@ -533,6 +533,20 @@ fn test_array_builtin_methods() {
 fn test_instanceof_builtin() {
     let input = fs::read_to_string("tests/fixtures/instanceof-builtin.input.ts").unwrap();
     let (output, _unsupported) = transpile_collecting(&input).unwrap();
+    insta::assert_snapshot!(output);
+}
+
+#[test]
+fn test_external_type_struct() {
+    let input = fs::read_to_string("tests/fixtures/external-type-struct.input.ts").unwrap();
+    let (output, _unsupported) = transpile_with_builtins(&input).unwrap();
+    insta::assert_snapshot!(output);
+}
+
+#[test]
+fn test_instanceof_builtin_with_builtins() {
+    let input = fs::read_to_string("tests/fixtures/instanceof-builtin.input.ts").unwrap();
+    let (output, _unsupported) = transpile_with_builtins(&input).unwrap();
     insta::assert_snapshot!(output);
 }
 

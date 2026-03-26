@@ -203,7 +203,7 @@ pub fn load_types_into(
     }
     for (name, def) in parsed.types {
         if let Some(type_def) = convert_external_typedef(&def, synthetic) {
-            registry.register(name.clone(), type_def);
+            registry.register_external(name.clone(), type_def);
         }
     }
     Ok(())

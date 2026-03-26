@@ -125,11 +125,15 @@ fn test_all_fixtures_compile() {
         // array-builtin-methods: filter/find closure receives &f64 but compares with f64 (I-217),
         // and find() returns Option<f64> but return wraps in Some() causing double-wrap (I-265).
         "array-builtin-methods",
-        // instanceof-builtin: any-narrowing generates enum variants Date(Date), Error(Error), RegExp(RegExp)
-        // but the struct definitions for these builtin types don't exist in the transpiled output.
-        // String(x) constructor call also doesn't compile. These are expected: builtin types are in
-        // TypeRegistry for type tracking, not for struct generation.
+        // instanceof-builtin: any-narrowing generates enum variants Date(Date), Error(Error), RegExp(RegExp).
+        // With builtins loaded, struct definitions are generated (I-270). However, method calls
+        // (e.g., x.toISOString()) require impl blocks which are not yet generated (I-270c).
+        // String(x) constructor call also doesn't compile.
         "instanceof-builtin",
+        // external-type-struct: requires builtin types loaded (transpile_with_builtins) to generate
+        // external type struct definitions. The compile test uses transpile_collecting (no builtins).
+        // Tested separately in test_external_type_struct integration test with builtins.
+        "external-type-struct",
     ];
 
     let mut entries: Vec<_> = fs::read_dir(fixture_dir)

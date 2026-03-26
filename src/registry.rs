@@ -7,7 +7,7 @@
 //! これにより前方参照（`interface A { b: B }` が `interface B` より前に宣言される場合）
 //! でも正しく型を解決できる。
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use anyhow::Result;
 use swc_ecma_ast as ast;
@@ -179,9 +179,15 @@ impl TypeDef {
 ///
 /// 型名をキーにして `TypeDef` を引くことで、変換時にフィールド型や
 /// enum バリアントを解決できる。
+///
+/// 外部型（JSON から読み込まれたビルトイン型）とユーザー定義型（TS ソースから登録された型）を区別するため、
+/// 外部型の名前セットを保持する。
 #[derive(Debug, Clone)]
 pub struct TypeRegistry {
     types: HashMap<String, TypeDef>,
+    /// 外部型（JSON ビルトイン定義）として登録された型名のセット。
+    /// `register_external` で登録された型のみ含まれる。
+    external_types: HashSet<String>,
 }
 
 impl TypeRegistry {
@@ -189,12 +195,27 @@ impl TypeRegistry {
     pub fn new() -> Self {
         Self {
             types: HashMap::new(),
+            external_types: HashSet::new(),
         }
     }
 
     /// 型定義を登録する。
     pub fn register(&mut self, name: String, def: TypeDef) {
         self.types.insert(name, def);
+    }
+
+    /// 外部型（JSON ビルトイン定義）として型定義を登録する。
+    ///
+    /// 通常の `register` と同じく TypeDef を登録するが、追加で外部型として記録する。
+    /// `is_external` で判定可能になる。
+    pub fn register_external(&mut self, name: String, def: TypeDef) {
+        self.external_types.insert(name.clone());
+        self.types.insert(name, def);
+    }
+
+    /// 指定された型名が外部型（JSON ビルトイン定義）かどうかを判定する。
+    pub fn is_external(&self, name: &str) -> bool {
+        self.external_types.contains(name)
     }
 
     /// 型名から TypeDef を取得する。
@@ -242,6 +263,9 @@ impl TypeRegistry {
     pub fn merge(&mut self, other: &TypeRegistry) {
         for (name, def) in &other.types {
             self.types.insert(name.clone(), def.clone());
+        }
+        for name in &other.external_types {
+            self.external_types.insert(name.clone());
         }
     }
 }
