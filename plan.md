@@ -26,11 +26,19 @@ PRD: `backlog/I-192-large-file-splitting.md`
   - `mod.rs` (289), `interfaces.rs` (433), `intersections.rs` (325), `type_aliases.rs` (518), `unions.rs` (585), `utilities.rs` (467), `tests.rs` (95)
   - PRD 設計（8 ファイル）から実装時に最適化: `annotations.rs` → `intersections.rs`/`type_aliases.rs` に統合、`helpers.rs`（1関数のみ）→ `unions.rs` に統合、`utility_types.rs` → `utilities.rs` に名称変更し共通ヘルパーも含む
   - テスト 4 個全 pass、全テスト pass
+- **T3: `statements/mod.rs` サブモジュール分割**
+  - `statements/mod.rs` (2656行) を 7 サブモジュールに分割
+  - `mod.rs` (198), `control_flow.rs` (753), `switch.rs` (727), `error_handling.rs` (294), `spread.rs` (202), `destructuring.rs` (239), `mutability.rs` (132), `helpers.rs` (180)
+  - PRD 設計では `convert_nested_fn_decl` を mod.rs に残す想定だったが、関数本体のネスト変換は制御フローの責務であるため control_flow.rs に配置
+  - テスト全 pass、外部 API パス不変
+- **T3b: `statements/tests.rs` テスト分割**
+  - `tests.rs` (2766行) を `tests/` ディレクトリに 7 サブモジュールに分割
+  - `tests/mod.rs` (105), `tests/variables.rs` (448), `tests/control_flow.rs` (319), `tests/loops.rs` (261), `tests/destructuring.rs` (439), `tests/switch.rs` (590), `tests/error_handling.rs` (498), `tests/expected_types.rs` (107)
+  - テスト 96 個全 pass、数不変
 
 ### 次のタスク（上から順に実施）
 
-1. **T3: `statements/mod.rs` サブモジュール分割** — `statements/mod.rs` (2656行) を 7 サブモジュールに分割
-2. **T3b: `statements/tests.rs` テスト分割** — `tests.rs` (2766行) を `tests/` ディレクトリに分割。T3 に依存
+1. **T4: `registry.rs` → `registry/` ディレクトリ化** — `registry.rs` (2414行) を 6 サブモジュールに分割 + テスト抽出
 3. **T4: `registry.rs` → `registry/` ディレクトリ化** — `registry.rs` (2414行) を 6 サブモジュールに分割 + テスト抽出
 4. **T4b: `registry` テスト分割（条件付き）** — T4 で抽出した `tests.rs` が 1000 行超の場合に分割。T4 に依存
 5. **T5: `classes.rs` → `classes/` ディレクトリ化** — `classes.rs` (2215行) を 5 サブモジュールに分割
