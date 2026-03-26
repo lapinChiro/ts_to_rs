@@ -63,8 +63,8 @@
 | **完了: E2E I/O テスト基盤** | ~~I-49/I-50~~ **達成** | fs/process.env/stdin + E2E テスト基盤 |
 | **完了: Interface → Trait** | ~~I-137/I-127~~ **達成** | interface 3 分類 + extends + 交差型 |
 | **完了: コンパイル可能性の基盤** | ~~I-61/I-100~~ **達成** | チェーンメソッド型追跡 + ジェネリクス基盤 |
-| **次: 変換率の大幅改善** | エラーインスタンス < 50 件 | 残 52 件を I-224（`this` 型）+ I-266（関数引数 20件）+ I-267（return/new 14件）+ I-268（ジェネリクス展開 14件）+ I-269（Optional unwrap 4件）で段階解消。詳細は `report/hono-error-analysis-2026-03-25.md` |
-| **その次: コンパイル品質** | ディレクトリコンパイルエラー 0 件 | I-227（enum 名生成）、I-223（エスケープ）、I-236（re-export 余分 `}`）の解消 |
+| **次: 変換率の大幅改善** | エラーインスタンス < 50 件 | 残 53 件を I-224（`this` 型）+ I-266（関数引数 20件）+ I-267（return/new 14件）+ I-268（ジェネリクス展開 14件）+ I-269（Optional unwrap 4件）で段階解消。詳細は `report/hono-error-analysis-2026-03-25.md` |
+| **その次: コンパイル品質** | ディレクトリコンパイルエラー 0 件 | I-227（enum 名生成）、I-223（エスケープ）の解消 |
 | **その次: テスト拡充** | E2E テスト網羅性 | E2E テストの拡充（I-20, I-71, I-72, I-74）、HTTP 対応（I-183） |
 
 ---
@@ -90,7 +90,7 @@
 
 #### 型変換・型推論（レバレッジ最大 — OBJECT_LITERAL_NO_TYPE 52 件）
 
-I-112c Phase 1-3 + I-211 で 70→52 件に削減済み。残 52 件は以下の 4 イシューで段階解消（`report/hono-error-analysis-2026-03-25.md` で詳細分析済み）。
+I-112c Phase 1-3 + I-211 で 70→53 件に削減済み。残 53 件は以下の 4 イシューで段階解消（`report/hono-error-analysis-2026-03-25.md` で詳細分析済み）。
 
 - **[I-266]** **関数引数位置のオブジェクトリテラル型推定** — **20 インスタンス**
   - 関数呼び出し時にシグネチャのパラメータ型を TypeRegistry から取得し、オブジェクトリテラル引数の expected type として設定する
@@ -246,11 +246,11 @@ I-112c Phase 1-3 + I-211 で 70→52 件に削減済み。残 52 件は以下の
 - **[I-188]** **`substring`/`slice` のバイト境界安全性** — 文字列変換。TS は UTF-16 コードユニット、Rust はバイト。マルチバイト文字でパニック
 - **[I-93]** **ネストしたフィールド/メソッド経由の変更検出** — ミュータビリティ推論
 - **[I-62]** **`is_string_type` の `Option<String>` ハック除去** — 型推論
-- **[I-255]** **`x++`/`x--` (UpdateExpr) が変数の mutation として検出されない** — `src/transformer/statements/mod.rs:1294` の `collect_mutated_vars_from_expr` で `Assign` と `MethodCall` のみチェック。`let mut` 推論が不正確になる。コンパイルエラーの原因
+- **[I-255]** **`x++`/`x--` (UpdateExpr) が変数の mutation として検出されない** — `src/transformer/statements/mod.rs:1274` の `collect_mutated_vars_from_expr` で `Assign` と `MethodCall` のみチェック。`let mut` 推論が不正確になる。コンパイルエラーの原因
 - **[I-256]** **any-narrowing の typeof 検出がトップレベル if/expr のみ** — `src/transformer/any_narrowing.rs:168` で `Switch`/`While`/`For`/`Try` 内の typeof/instanceof チェックが検出されない。any-narrowing enum のバリアント不足の原因
-- **[I-257]** **TypeResolver が rest パターンの変数を未登録** — `src/pipeline/type_resolver.rs:333` で `Rest` パターンの変数が型解決スコープに登録されない
+- **[I-257]** **TypeResolver が rest パターンの変数を未登録** — `src/pipeline/type_resolver.rs:315,326` で `Rest` パターンの変数は `register_pat_vars` 経由で登録されるが、型が `ResolvedType::Unknown` のまま。rest 変数に適切な型（残余フィールドの構造体型）が設定されない
 - **[I-258]** **クロージャ内の制御フロー内代入が mut 検出されない** — `src/transformer/statements/mod.rs:1226` で `If`/`While` 等のブロック内の代入がクロージャのキャプチャ変数の可変性推論で検出されない
-- **[I-259]** **関数型エイリアスの rest パラメータが TypeDef::Function に含まれない** — `src/registry.rs:968` の `try_collect_call_signature_fn` と `:920` の `try_collect_fn_type_alias` が `TsFnParam::Ident` のみ処理し、`TsFnParam::Rest` を無視する。`type Handler = { (...args: string[]): void }` や `type F = (...args: number[]) => void` で rest パラメータが `TypeDef::Function.params` に含まれず `has_rest` が常に `false` になる。解決策: transformer の `convert_interface_as_fn_type` (`src/pipeline/type_converter.rs:570`) が既に `Rest` を処理しているので、同じロジックを registry 側にも適用する
+- **[I-259]** **関数型エイリアスの rest パラメータが TypeDef::Function に含まれない** — `src/registry.rs:946` の `try_collect_call_signature_fn` と `:908` の `try_collect_fn_type_alias` が `TsFnParam::Ident` のみ処理し、`TsFnParam::Rest` を無視する。`type Handler = { (...args: string[]): void }` や `type F = (...args: number[]) => void` で rest パラメータが `TypeDef::Function.params` に含まれず `has_rest` が常に `false` になる。解決策: transformer の `convert_interface_as_fn_type` (`src/pipeline/type_converter.rs:570`) が既に `Rest` を処理しているので、同じロジックを registry 側にも適用する
 - **[I-260]** **`undefined` リテラルの型解決が Unknown** — TypeResolver の `resolve_expr_inner` が `undefined` 識別子に対して `ResolvedType::Unknown` を返す。`const obj = { key: undefined }` のような場合に匿名構造体のフィールド型が不明になり、匿名構造体が生成されない。解決策: `undefined` を `RustType::Option(Box::new(RustType::Any))` として解決するか、コンテキストの expected type から内側の型を推定する
 
 #### コンパイルエラー修正（ディレクトリコンパイルで検出）
@@ -264,7 +264,7 @@ I-112c Phase 1-3 + I-211 で 70→52 件に削減済み。残 52 件は以下の
   - `StringOrserde_json::Value` のように `::` がそのまま enum 名に入り、不正な識別子になる
   - `serde_json::Value` を enum バリアント名に使う際に `::` を `_` に置換すべき
   - 変換器の該当: union 型の enum 名生成（`src/transformer/types/mod.rs` または `src/pipeline/synthetic_registry.rs`）
-- **[I-236]** **re-export のみのファイルで余分な `}` 生成** — ファイル単位コンパイルエラー **1 インスタンス**（`index.ts`）。re-export のみのモジュールの generator 出力に余分な閉じ波括弧が含まれる
+
 
 #### コード生成基盤
 
@@ -322,7 +322,7 @@ I-112c Phase 1-3 + I-211 で 70→52 件に削減済み。残 52 件は以下の
 - **[I-59]** **Pick/Omit のネストしたユーティリティ型未対応**
 - **[I-105]** **デコレータ付き TsParamProp**
 - **[I-106]** **ラベル付き while での条件内代入**
-- **[I-139]** **関数型パラメータパターン** — **4 インスタンス**
+- **[I-139]** **関数型パラメータパターン** — **3 インスタンス**
 - **[I-148]** **for...of デストラクチャリングの残存パターン** — **1 インスタンス**
 - **[I-138]** **タグ付きテンプレートリテラル** — **1 インスタンス**
 - **[I-240]** **代入ターゲット（非パターン）** — **1 インスタンス**。`unsupported assignment target` エラー
