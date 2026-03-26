@@ -11,9 +11,9 @@ PRD: `backlog/I-192-large-file-splitting.md`
 - テスト数: 1369 (1225 + 3 + 2 + 63 + 76)
 - 1000 行超ファイル: 元 18 個
 
-### 完了済みタスク（T1-T7）
+### 完了済みタスク（T1-T10）
 
-カテゴリ A（プロダクションコード分割）6 ファイル全完了 + テスト分割 3 ファイル完了:
+カテゴリ A（プロダクションコード分割）6 ファイル全完了 + テスト分割 6 ファイル完了:
 
 | タスク | 元ファイル | 元行数 | サブモジュール数 |
 |--------|-----------|--------|----------------|
@@ -24,14 +24,14 @@ PRD: `backlog/I-192-large-file-splitting.md`
 | T5 | `classes.rs` | 2215 | 5 + tests |
 | T6+T6b | `functions/mod.rs` + `tests.rs` | 1298+1422 | 4 + tests/4 |
 | T7 | `expressions/tests.rs` | 6814 | tests/19 (論理分類ベース) |
+| T8 | `types/tests.rs` | 3333 | tests/7 (論理分類: primitives, collections, interfaces, type_aliases, unions, intersections, structural_transforms) |
+| T9 | `transformer/tests.rs` | 1335 | tests/6 (論理分類: imports_and_exports, module_items, enums, classes, variable_type_propagation, error_handling) |
+| T10 | `generator/` テスト抽出 | mod.rs:1410, expressions.rs:1267, statements.rs:1019 | mod.rs→576+tests.rs:828, expressions.rs→487+expressions_tests.rs:771, statements.rs→242+statements_tests.rs:774 |
 
 全タスクでテスト数不変（1369）、外部 API パス不変を確認済み。
 
 ### 次のタスク（上から順に実施）
 
-1. **T8: `types/tests.rs` テスト分割** — (3333行) → 7 サブモジュール
-2. **T9: `transformer/tests.rs` テスト分割** — (1335行) → 7 サブモジュール
-3. **T10: `generator/` テスト抽出** — `mod.rs` (1410行), `expressions.rs` (1267行), `statements.rs` (1019行)
 4. **T11: `ir.rs` テスト抽出** — (1416行) → `ir/mod.rs` + `ir/tests.rs`
 5. **T12: `pipeline/` テスト抽出** — `external_types.rs` (1156行), `module_graph.rs` (1038行), `external_struct_generator.rs` (1132行)
 6. **T13: 最終検証** — 全ファイル 1000 行以下、全テスト pass、clippy 0 警告、fmt pass、Hono ベンチ同一
