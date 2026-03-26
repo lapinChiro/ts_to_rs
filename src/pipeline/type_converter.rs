@@ -291,7 +291,7 @@ fn convert_union_type(
             match convert_ts_type(ty, synthetic, reg) {
                 Ok(rust_type) => {
                     let unwrapped = unwrap_promise(rust_type);
-                    let variant_name = variant_name_from_type(&unwrapped);
+                    let variant_name = variant_name_for_type(&unwrapped);
                     // Deduplicate
                     if !name_parts.contains(&variant_name) {
                         name_parts.push(variant_name.clone());
@@ -341,7 +341,7 @@ fn convert_union_type(
             match convert_ts_type(ty, synthetic, reg) {
                 Ok(rust_type) => {
                     let unwrapped = unwrap_promise(rust_type);
-                    let variant_name = variant_name_from_type(&unwrapped);
+                    let variant_name = variant_name_for_type(&unwrapped);
                     if !name_parts.contains(&variant_name) {
                         name_parts.push(variant_name.clone());
                         variants.push(EnumVariant {
@@ -1609,25 +1609,7 @@ pub(crate) fn string_to_pascal_case(s: &str) -> String {
         .collect()
 }
 
-/// Generates a PascalCase variant name from a [`RustType`].
-fn variant_name_from_type(ty: &RustType) -> String {
-    match ty {
-        RustType::String => "String".to_string(),
-        RustType::F64 => "F64".to_string(),
-        RustType::Bool => "Bool".to_string(),
-        RustType::Unit => "Unit".to_string(),
-        RustType::Any => "Any".to_string(),
-        RustType::Never => "Never".to_string(),
-        RustType::Named { name, .. } => name.clone(),
-        RustType::Vec(inner) => format!("Vec{}", variant_name_from_type(inner)),
-        RustType::Option(inner) => format!("Option{}", variant_name_from_type(inner)),
-        RustType::Tuple(_) => "Tuple".to_string(),
-        RustType::Fn { .. } => "Fn".to_string(),
-        RustType::Result { .. } => "Result".to_string(),
-        RustType::Ref(inner) => format!("Ref{}", variant_name_from_type(inner)),
-        RustType::DynTrait(name) => format!("Dyn{name}"),
-    }
-}
+use super::synthetic_registry::variant_name_for_type;
 
 /// Tries to convert a type alias with a union type body into an enum.
 ///

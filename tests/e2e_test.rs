@@ -670,3 +670,8 @@ fn test_e2e_method_chain_ts_rust_stdout_match() {
 fn test_e2e_object_literal_inference_ts_rust_stdout_match() {
     run_e2e_test("object_literal_inference");
 }
+
+#[test]
+fn test_e2e_string_escape_ts_rust_stdout_match() {
+    run_e2e_test("string_escape");
+}

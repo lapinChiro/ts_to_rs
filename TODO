@@ -51,6 +51,7 @@
 - **I-211 ECMAScript 標準型**: オーバーロード解決（I-211-a）、ECMAScript 型抽出・JSON 分割（I-211-b）、検証・E2E テスト・ベンチマーク（I-211-c）完了。Web API 105 型 + ECMAScript 57 型が TypeRegistry に登録済み。String/Array/Map/Set 等のメソッドチェーン型追跡が動作
 - **I-112c オブジェクトリテラル型推定 Phase 1-3**: TypeResolver の expected type 設定強化、匿名構造体自動生成、スプレッドマージ型推定。70→52 件に削減。残 52 件は I-266〜I-269 の独立イシューとして追跡
 - **I-241〜I-248 サイレント意味変更の完全解消**: エラー報告統一（UnsupportedSyntaxError::new）、BigInt i128 拡張、RuntimeTypeof ヘルパー、トップレベル init() 関数、ネスト destructuring rest の合成構造体変換、declare module エラー伝播、private class members 変換、intersection メソッドシグネチャの impl 生成、union キーワード型の明示的パターンマッチ化
+- **I-223/I-227 コンパイルエラーのクイックウィン**: 文字列リテラルの Rust エスケープ（`escape_rust_string` ヘルパー）。union enum 名の識別子サニタイズ（`variant_name_for_type` を `pub(crate)` に統一、`type_converter.rs` の重複実装 `variant_name_from_type` を削除）
 
 ---
 
@@ -64,7 +65,7 @@
 | **完了: Interface → Trait** | ~~I-137/I-127~~ **達成** | interface 3 分類 + extends + 交差型 |
 | **完了: コンパイル可能性の基盤** | ~~I-61/I-100~~ **達成** | チェーンメソッド型追跡 + ジェネリクス基盤 |
 | **次: 変換率の大幅改善** | エラーインスタンス < 50 件 | 残 53 件を I-224（`this` 型）+ I-266（関数引数 20件）+ I-267（return/new 14件）+ I-268（ジェネリクス展開 14件）+ I-269（Optional unwrap 4件）で段階解消。詳細は `report/hono-error-analysis-2026-03-25.md` |
-| **その次: コンパイル品質** | ディレクトリコンパイルエラー 0 件 | I-227（enum 名生成）、I-223（エスケープ）の解消 |
+| **その次: コンパイル品質** | ディレクトリコンパイルエラー 0 件 | I-270（ビルトイン型 struct 定義不在）の解消。I-227/I-223 は解消済み |
 | **その次: テスト拡充** | E2E テスト網羅性 | E2E テストの拡充（I-20, I-71, I-72, I-74）、HTTP 対応（I-183） |
 
 ---
@@ -255,15 +256,13 @@ I-112c Phase 1-3 + I-211 で 70→53 件に削減済み。残 53 件は以下の
 
 #### コンパイルエラー修正（ディレクトリコンパイルで検出）
 
-- **[I-223]** **文字列リテラルのエスケープ不正** — **3 ファイル**のコンパイルエラー
-  - 正規表現内の `\?`, `\$` が Rust 文字列リテラルで無効なエスケープになる。raw string `r"..."` を使うべき
-  - バックスラッシュ `\\` が `"\"` に変換され文字列が閉じない（`utils/accept.rs:146`）
-  - 影響ファイル: `utils/accept.rs`, `client/utils.rs`, `helper/css/common.rs`
-  - 変換器の該当: `src/generator/expressions.rs` の `Expr::StringLit` 生成、`src/transformer/expressions/literals.rs` の文字列変換
-- **[I-227]** **union enum 名に `serde_json::Value` のパス区切りが混入** — ディレクトリコンパイルエラー **1 ファイル**（`types.rs`）
-  - `StringOrserde_json::Value` のように `::` がそのまま enum 名に入り、不正な識別子になる
-  - `serde_json::Value` を enum バリアント名に使う際に `::` を `_` に置換すべき
-  - 変換器の該当: union 型の enum 名生成（`src/transformer/types/mod.rs` または `src/pipeline/synthetic_registry.rs`）
+- **[I-270]** **ビルトイン型（ArrayBuffer/ArrayBufferView 等）の struct 定義が変換出力に不在** — ディレクトリコンパイルエラー **1 ファイル**（`types.rs`）
+  - `ArrayBuffer`, `ArrayBufferView` 等の Web API 型が TypeRegistry に型情報として登録されているが、変換出力に struct 定義が含まれない
+  - 外部型（`web_api.json`/`ecmascript.json`）は型情報の照合のみに使われ、struct/trait 定義の Rust コードは生成されない設計
+  - union enum のバリアントが `ArrayBuffer(ArrayBuffer)` のように未定義型を参照し、コンパイルエラーになる
+  - 解決方向: (1) 変換出力で参照される外部型の stub struct を自動生成する、(2) 外部型を `serde_json::Value` 等に型消去する、(3) `type ArrayBuffer = Vec<u8>` のような型エイリアスを生成する。設計判断が必要
+  - 影響: ディレクトリコンパイル 156/158 → 157/158 に阻害（`types.rs` の I-227 エラーは解消済み、残りはこの問題）
+  - コンパイルテスト `instanceof-builtin` のスキップ原因とも同根
 
 
 #### コード生成基盤
@@ -349,7 +348,7 @@ I-112c Phase 1-3 + I-211 で 70→53 件に削減済み。残 53 件は以下の
 
 ### 前提タスクの完了待ち
 
-- **[I-32]** **コンパイルテストのスキップ解消（残り 7 件）** — indexed-access-type（I-35）、trait-coercion（I-201）、union-fallback（I-202）、any-type-narrowing（I-209）、type-narrowing（I-237+I-238）、array-builtin-methods（I-217+I-265）、instanceof-builtin（ビルトイン型 struct 未定義）。各原因の修正が前提
+- **[I-32]** **コンパイルテストのスキップ解消（残り 7 件）** — indexed-access-type（I-35）、trait-coercion（I-201）、union-fallback（I-202）、any-type-narrowing（I-209）、type-narrowing（I-237+I-238）、array-builtin-methods（I-217+I-265）、instanceof-builtin（I-270: ビルトイン型 struct 未定義）。各原因の修正が前提
 - **[I-183]** **HTTP E2E テスト基盤 + fetch 変換** — I-30（Cargo.toml 依存追加）の解消が前提
 
 ---

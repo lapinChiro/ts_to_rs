@@ -283,7 +283,10 @@ fn generate_union_name(member_types: &[RustType]) -> String {
 }
 
 /// Returns a variant name for a RustType (e.g., `String` → `String`, `f64` → `F64`).
-fn variant_name_for_type(ty: &RustType) -> String {
+///
+/// For path-qualified types (e.g., `serde_json::Value`), extracts the last segment
+/// to produce a valid Rust identifier (e.g., `Value`).
+pub(crate) fn variant_name_for_type(ty: &RustType) -> String {
     match ty {
         RustType::String => "String".to_string(),
         RustType::F64 => "F64".to_string(),
@@ -293,9 +296,15 @@ fn variant_name_for_type(ty: &RustType) -> String {
         RustType::Never => "Never".to_string(),
         RustType::Vec(inner) => format!("Vec{}", variant_name_for_type(inner)),
         RustType::Option(inner) => format!("Option{}", variant_name_for_type(inner)),
-        RustType::Named { name, .. } => name.clone(),
+        RustType::Named { name, .. } => match name.rsplit_once("::") {
+            Some((_, last)) => last.to_string(),
+            None => name.clone(),
+        },
         RustType::Ref(inner) => variant_name_for_type(inner),
-        RustType::DynTrait(name) => name.clone(),
+        RustType::DynTrait(name) => match name.rsplit_once("::") {
+            Some((_, last)) => last.to_string(),
+            None => name.clone(),
+        },
         RustType::Fn { .. } => "Fn".to_string(),
         RustType::Result { .. } => "Result".to_string(),
         RustType::Tuple(_) => "Tuple".to_string(),
@@ -522,5 +531,48 @@ mod tests {
         reg1.merge(reg2);
         // After merge, counter should be max(1, 3) = 3
         assert_eq!(reg1.generate_name("TypeLit"), "_TypeLit3");
+    }
+
+    #[test]
+    fn test_variant_name_named_with_path_uses_last_segment() {
+        let ty = RustType::Named {
+            name: "serde_json::Value".to_string(),
+            type_args: vec![],
+        };
+        assert_eq!(variant_name_for_type(&ty), "Value");
+    }
+
+    #[test]
+    fn test_variant_name_named_without_path_unchanged() {
+        let ty = RustType::Named {
+            name: "String".to_string(),
+            type_args: vec![],
+        };
+        assert_eq!(variant_name_for_type(&ty), "String");
+    }
+
+    #[test]
+    fn test_variant_name_dyn_trait_with_path_uses_last_segment() {
+        let ty = RustType::DynTrait("std::fmt::Display".to_string());
+        assert_eq!(variant_name_for_type(&ty), "Display");
+    }
+
+    #[test]
+    fn test_variant_name_dyn_trait_without_path_unchanged() {
+        let ty = RustType::DynTrait("Fn".to_string());
+        assert_eq!(variant_name_for_type(&ty), "Fn");
+    }
+
+    #[test]
+    fn test_union_name_with_path_type_produces_valid_identifier() {
+        let mut reg = SyntheticTypeRegistry::new();
+        let name = reg.register_union(&[
+            RustType::String,
+            RustType::Named {
+                name: "serde_json::Value".to_string(),
+                type_args: vec![],
+            },
+        ]);
+        assert_eq!(name, "StringOrValue");
     }
 }

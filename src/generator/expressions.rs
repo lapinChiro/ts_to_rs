@@ -98,6 +98,32 @@ fn needs_parens_in_binop(child: &Expr, parent_op: BinOp) -> bool {
     }
 }
 
+/// Escapes a string value for use in a Rust string literal.
+///
+/// SWC's `Str.value` contains the decoded value (e.g., a literal newline character),
+/// so this function re-encodes it into Rust source escape sequences.
+fn escape_rust_string(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '\0' => out.push_str("\\0"),
+            c if c.is_control() => {
+                // Other control characters as \xNN
+                for byte in c.to_string().bytes() {
+                    out.push_str(&format!("\\x{byte:02x}"));
+                }
+            }
+            c => out.push(c),
+        }
+    }
+    out
+}
+
 /// Generates an expression as a Rust source string.
 pub(super) fn generate_expr(expr: &Expr) -> String {
     match expr {
@@ -110,7 +136,7 @@ pub(super) fn generate_expr(expr: &Expr) -> String {
             }
         }
         Expr::BoolLit(b) => format!("{b}"),
-        Expr::StringLit(s) => format!("\"{s}\""),
+        Expr::StringLit(s) => format!("\"{}\"", escape_rust_string(s)),
         Expr::Ident(name) => escape_ident(name),
         Expr::FormatMacro { template, args } => {
             if args.is_empty() {
@@ -384,7 +410,7 @@ fn generate_macro_call(name: &str, args: &[Expr], use_debug: &[bool]) -> String 
     // Single string literal: output directly without format placeholders
     if args.len() == 1 {
         if let Expr::StringLit(s) = &args[0] {
-            return format!("{name}!(\"{s}\")");
+            return format!("{name}!(\"{}\")", escape_rust_string(s));
         }
     }
 
@@ -1204,5 +1230,38 @@ mod tests {
             operand: Box::new(Expr::Ident("x".to_string())),
         };
         assert_eq!(generate_expr(&expr), "js_typeof(&x)");
+    }
+
+    #[test]
+    fn test_escape_rust_string_backslash() {
+        assert_eq!(escape_rust_string(r"a\b"), r"a\\b");
+    }
+
+    #[test]
+    fn test_escape_rust_string_double_quote() {
+        assert_eq!(escape_rust_string(r#"say "hello""#), r#"say \"hello\""#);
+    }
+
+    #[test]
+    fn test_escape_rust_string_newline_tab() {
+        assert_eq!(escape_rust_string("a\nb"), r"a\nb");
+        assert_eq!(escape_rust_string("a\tb"), r"a\tb");
+    }
+
+    #[test]
+    fn test_escape_rust_string_plain_text_unchanged() {
+        assert_eq!(escape_rust_string("hello world"), "hello world");
+    }
+
+    #[test]
+    fn test_escape_rust_string_null_and_control_chars() {
+        assert_eq!(escape_rust_string("\0"), r"\0");
+        assert_eq!(escape_rust_string("\r"), r"\r");
+    }
+
+    #[test]
+    fn test_generate_string_lit_with_special_chars() {
+        let expr = Expr::StringLit(r#"a"b\c"#.to_string());
+        assert_eq!(generate_expr(&expr), r#""a\"b\\c""#);
     }
 }
