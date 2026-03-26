@@ -1107,7 +1107,7 @@ fn reg_with_trait(name: &str) -> TypeRegistry {
     );
     reg.register(
         name.to_string(),
-        TypeDef::new_interface(vec![], methods, vec![]),
+        TypeDef::new_interface(vec![], vec![], methods, vec![]),
     );
     reg
 }

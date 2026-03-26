@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "types": {
     "IteratorResult": {
       "kind": "alias",
@@ -31,6 +31,11 @@
     },
     "IteratorReturnResult": {
       "kind": "interface",
+      "type_params": [
+        {
+          "name": "TReturn"
+        }
+      ],
       "fields": [
         {
           "name": "done",
@@ -51,6 +56,11 @@
     },
     "IteratorYieldResult": {
       "kind": "interface",
+      "type_params": [
+        {
+          "name": "TYield"
+        }
+      ],
       "fields": [
         {
           "name": "done",
@@ -72,6 +82,17 @@
     },
     "IterableIterator": {
       "kind": "interface",
+      "type_params": [
+        {
+          "name": "T"
+        },
+        {
+          "name": "TReturn"
+        },
+        {
+          "name": "TNext"
+        }
+      ],
       "fields": [],
       "methods": {
         "next": {
@@ -312,6 +333,17 @@
     },
     "Generator": {
       "kind": "interface",
+      "type_params": [
+        {
+          "name": "T"
+        },
+        {
+          "name": "TReturn"
+        },
+        {
+          "name": "TNext"
+        }
+      ],
       "fields": [],
       "methods": {
         "next": {
@@ -453,6 +485,17 @@
     },
     "Iterator": {
       "kind": "interface",
+      "type_params": [
+        {
+          "name": "T"
+        },
+        {
+          "name": "TReturn"
+        },
+        {
+          "name": "TNext"
+        }
+      ],
       "fields": [],
       "methods": {
         "next": {
@@ -594,6 +637,24 @@
     },
     "Float64Array": {
       "kind": "interface",
+      "type_params": [
+        {
+          "name": "TArrayBuffer",
+          "constraint": {
+            "kind": "union",
+            "members": [
+              {
+                "kind": "named",
+                "name": "ArrayBuffer"
+              },
+              {
+                "kind": "named",
+                "name": "SharedArrayBuffer"
+              }
+            ]
+          }
+        }
+      ],
       "fields": [
         {
           "name": "BYTES_PER_ELEMENT",
@@ -1838,12 +1899,28 @@
     },
     "Iterable": {
       "kind": "interface",
+      "type_params": [
+        {
+          "name": "T"
+        },
+        {
+          "name": "TReturn"
+        },
+        {
+          "name": "TNext"
+        }
+      ],
       "fields": [],
       "methods": {},
       "constructors": []
     },
     "ArrayIterator": {
       "kind": "interface",
+      "type_params": [
+        {
+          "name": "T"
+        }
+      ],
       "fields": [],
       "methods": {
         "next": {
@@ -2106,6 +2183,11 @@
     },
     "ArrayLike": {
       "kind": "interface",
+      "type_params": [
+        {
+          "name": "T"
+        }
+      ],
       "fields": [
         {
           "name": "length",
@@ -2181,6 +2263,24 @@
     },
     "Float32Array": {
       "kind": "interface",
+      "type_params": [
+        {
+          "name": "TArrayBuffer",
+          "constraint": {
+            "kind": "union",
+            "members": [
+              {
+                "kind": "named",
+                "name": "ArrayBuffer"
+              },
+              {
+                "kind": "named",
+                "name": "SharedArrayBuffer"
+              }
+            ]
+          }
+        }
+      ],
       "fields": [
         {
           "name": "BYTES_PER_ELEMENT",
@@ -3425,6 +3525,24 @@
     },
     "Uint32Array": {
       "kind": "interface",
+      "type_params": [
+        {
+          "name": "TArrayBuffer",
+          "constraint": {
+            "kind": "union",
+            "members": [
+              {
+                "kind": "named",
+                "name": "ArrayBuffer"
+              },
+              {
+                "kind": "named",
+                "name": "SharedArrayBuffer"
+              }
+            ]
+          }
+        }
+      ],
       "fields": [
         {
           "name": "BYTES_PER_ELEMENT",
@@ -4669,6 +4787,24 @@
     },
     "Int32Array": {
       "kind": "interface",
+      "type_params": [
+        {
+          "name": "TArrayBuffer",
+          "constraint": {
+            "kind": "union",
+            "members": [
+              {
+                "kind": "named",
+                "name": "ArrayBuffer"
+              },
+              {
+                "kind": "named",
+                "name": "SharedArrayBuffer"
+              }
+            ]
+          }
+        }
+      ],
       "fields": [
         {
           "name": "BYTES_PER_ELEMENT",
@@ -5913,6 +6049,24 @@
     },
     "Uint16Array": {
       "kind": "interface",
+      "type_params": [
+        {
+          "name": "TArrayBuffer",
+          "constraint": {
+            "kind": "union",
+            "members": [
+              {
+                "kind": "named",
+                "name": "ArrayBuffer"
+              },
+              {
+                "kind": "named",
+                "name": "SharedArrayBuffer"
+              }
+            ]
+          }
+        }
+      ],
       "fields": [
         {
           "name": "BYTES_PER_ELEMENT",
@@ -7157,6 +7311,24 @@
     },
     "Int16Array": {
       "kind": "interface",
+      "type_params": [
+        {
+          "name": "TArrayBuffer",
+          "constraint": {
+            "kind": "union",
+            "members": [
+              {
+                "kind": "named",
+                "name": "ArrayBuffer"
+              },
+              {
+                "kind": "named",
+                "name": "SharedArrayBuffer"
+              }
+            ]
+          }
+        }
+      ],
       "fields": [
         {
           "name": "BYTES_PER_ELEMENT",
@@ -8401,6 +8573,24 @@
     },
     "Uint8ClampedArray": {
       "kind": "interface",
+      "type_params": [
+        {
+          "name": "TArrayBuffer",
+          "constraint": {
+            "kind": "union",
+            "members": [
+              {
+                "kind": "named",
+                "name": "ArrayBuffer"
+              },
+              {
+                "kind": "named",
+                "name": "SharedArrayBuffer"
+              }
+            ]
+          }
+        }
+      ],
       "fields": [
         {
           "name": "BYTES_PER_ELEMENT",
@@ -9645,6 +9835,24 @@
     },
     "Uint8Array": {
       "kind": "interface",
+      "type_params": [
+        {
+          "name": "TArrayBuffer",
+          "constraint": {
+            "kind": "union",
+            "members": [
+              {
+                "kind": "named",
+                "name": "ArrayBuffer"
+              },
+              {
+                "kind": "named",
+                "name": "SharedArrayBuffer"
+              }
+            ]
+          }
+        }
+      ],
       "fields": [
         {
           "name": "BYTES_PER_ELEMENT",
@@ -10889,6 +11097,24 @@
     },
     "Int8Array": {
       "kind": "interface",
+      "type_params": [
+        {
+          "name": "TArrayBuffer",
+          "constraint": {
+            "kind": "union",
+            "members": [
+              {
+                "kind": "named",
+                "name": "ArrayBuffer"
+              },
+              {
+                "kind": "named",
+                "name": "SharedArrayBuffer"
+              }
+            ]
+          }
+        }
+      ],
       "fields": [
         {
           "name": "BYTES_PER_ELEMENT",
@@ -12133,6 +12359,24 @@
     },
     "DataView": {
       "kind": "interface",
+      "type_params": [
+        {
+          "name": "TArrayBuffer",
+          "constraint": {
+            "kind": "union",
+            "members": [
+              {
+                "kind": "named",
+                "name": "ArrayBuffer"
+              },
+              {
+                "kind": "named",
+                "name": "SharedArrayBuffer"
+              }
+            ]
+          }
+        }
+      ],
       "fields": [
         {
           "name": "buffer",
@@ -12749,6 +12993,11 @@
     },
     "Promise": {
       "kind": "interface",
+      "type_params": [
+        {
+          "name": "T"
+        }
+      ],
       "fields": [],
       "methods": {
         "then": {
@@ -12993,6 +13242,11 @@
     },
     "PromiseLike": {
       "kind": "interface",
+      "type_params": [
+        {
+          "name": "T"
+        }
+      ],
       "fields": [],
       "methods": {
         "then": {
@@ -13124,6 +13378,15 @@
     },
     "WeakSet": {
       "kind": "interface",
+      "type_params": [
+        {
+          "name": "T",
+          "constraint": {
+            "kind": "named",
+            "name": "object"
+          }
+        }
+      ],
       "fields": [],
       "methods": {
         "add": {
@@ -13250,6 +13513,18 @@
     },
     "WeakMap": {
       "kind": "interface",
+      "type_params": [
+        {
+          "name": "K",
+          "constraint": {
+            "kind": "named",
+            "name": "object"
+          }
+        },
+        {
+          "name": "V"
+        }
+      ],
       "fields": [],
       "methods": {
         "delete": {
@@ -13432,6 +13707,11 @@
     },
     "Set": {
       "kind": "interface",
+      "type_params": [
+        {
+          "name": "T"
+        }
+      ],
       "fields": [
         {
           "name": "size",
@@ -13682,6 +13962,11 @@
     },
     "SetIterator": {
       "kind": "interface",
+      "type_params": [
+        {
+          "name": "T"
+        }
+      ],
       "fields": [],
       "methods": {
         "next": {
@@ -13818,6 +14103,14 @@
     },
     "Map": {
       "kind": "interface",
+      "type_params": [
+        {
+          "name": "K"
+        },
+        {
+          "name": "V"
+        }
+      ],
       "fields": [
         {
           "name": "size",
@@ -14158,6 +14451,11 @@
     },
     "MapIterator": {
       "kind": "interface",
+      "type_params": [
+        {
+          "name": "T"
+        }
+      ],
       "fields": [],
       "methods": {
         "next": {
@@ -16980,6 +17278,11 @@
     },
     "ConcatArray": {
       "kind": "interface",
+      "type_params": [
+        {
+          "name": "T"
+        }
+      ],
       "fields": [
         {
           "name": "length",
@@ -18383,6 +18686,11 @@
     },
     "Array": {
       "kind": "interface",
+      "type_params": [
+        {
+          "name": "T"
+        }
+      ],
       "fields": [
         {
           "name": "length",
@@ -21429,6 +21737,11 @@
     },
     "RegExpStringIterator": {
       "kind": "interface",
+      "type_params": [
+        {
+          "name": "T"
+        }
+      ],
       "fields": [],
       "methods": {
         "next": {

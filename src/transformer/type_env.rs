@@ -64,7 +64,7 @@ mod tests {
         );
         reg.register(
             "Greeter".to_string(),
-            TypeDef::new_interface(vec![], methods, vec![]),
+            TypeDef::new_interface(vec![], vec![], methods, vec![]),
         );
         reg
     }

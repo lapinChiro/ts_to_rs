@@ -191,6 +191,68 @@ pub struct StructField {
     pub ty: RustType,
 }
 
+/// struct フィールド名を有効な Rust 識別子文字列に変換する（文字レベルのサニタイズ）。
+///
+/// TypeScript のオブジェクトキーは任意の文字列だが、Rust の識別子には制約がある。
+/// 以下の変換を適用:
+/// 1. ハイフン → アンダースコア（`Content-Type` → `Content_Type`）
+/// 2. ブラケット除去（`foo[]` → `foo`）
+/// 3. `_` のみ → `_field`（Rust では `_` は破棄パターン）
+/// 4. 先頭が数字 → `_` プレフィクス
+/// 5. 空文字列 → `_empty`
+///
+/// 注意: Rust 予約語のエスケープ（`r#` プレフィクス）は行わない。
+/// それは generator の `escape_ident` の責務。
+pub fn sanitize_field_name(name: &str) -> String {
+    let mut sanitized = String::with_capacity(name.len());
+    for ch in name.chars() {
+        match ch {
+            '-' => sanitized.push('_'),
+            '[' | ']' => {}
+            _ => sanitized.push(ch),
+        }
+    }
+
+    if sanitized == "_" {
+        return "_field".to_string();
+    }
+
+    if sanitized.starts_with(|c: char| c.is_ascii_digit()) {
+        sanitized.insert(0, '_');
+    }
+
+    if sanitized.is_empty() {
+        return "_empty".to_string();
+    }
+
+    sanitized
+}
+
+/// camelCase を snake_case に変換する。
+///
+/// 連続する大文字は略語として扱い、最後の大文字を次の単語の先頭とする。
+/// 例: `"byteLength"` → `"byte_length"`, `"toISOString"` → `"to_iso_string"`
+pub fn camel_to_snake(name: &str) -> String {
+    let mut result = String::with_capacity(name.len() + 4);
+    let chars: Vec<char> = name.chars().collect();
+
+    for (i, &ch) in chars.iter().enumerate() {
+        if ch.is_uppercase() {
+            if i > 0 {
+                let prev_upper = chars[i - 1].is_uppercase();
+                let next_lower = chars.get(i + 1).is_some_and(|c| c.is_lowercase());
+                if !prev_upper || next_lower {
+                    result.push('_');
+                }
+            }
+            result.push(ch.to_lowercase().next().unwrap_or(ch));
+        } else {
+            result.push(ch);
+        }
+    }
+    result
+}
+
 /// A pattern in a match arm.
 #[derive(Debug, Clone, PartialEq)]
 pub enum MatchPattern {
@@ -1284,5 +1346,71 @@ mod tests {
                 type_args: vec![RustType::String],
             }
         );
+    }
+
+    // -- sanitize_field_name tests --
+
+    #[test]
+    fn test_sanitize_field_name_hyphen_replaced() {
+        assert_eq!(sanitize_field_name("Content-Type"), "Content_Type");
+    }
+
+    #[test]
+    fn test_sanitize_field_name_brackets_removed() {
+        assert_eq!(sanitize_field_name("foo[0]"), "foo0");
+    }
+
+    #[test]
+    fn test_sanitize_field_name_underscore_only_becomes_field() {
+        assert_eq!(sanitize_field_name("_"), "_field");
+    }
+
+    #[test]
+    fn test_sanitize_field_name_digit_prefix_escaped() {
+        assert_eq!(sanitize_field_name("0abc"), "_0abc");
+    }
+
+    #[test]
+    fn test_sanitize_field_name_empty_becomes_empty_sentinel() {
+        assert_eq!(sanitize_field_name(""), "_empty");
+    }
+
+    #[test]
+    fn test_sanitize_field_name_normal_passthrough() {
+        assert_eq!(sanitize_field_name("name"), "name");
+    }
+
+    #[test]
+    fn test_sanitize_field_name_keyword_not_escaped() {
+        // キーワードエスケープは generator (escape_ident) の責務。
+        // sanitize_field_name は文字レベルのサニタイズのみ。
+        assert_eq!(sanitize_field_name("type"), "type");
+    }
+
+    // -- camel_to_snake tests --
+
+    #[test]
+    fn test_camel_to_snake_simple() {
+        assert_eq!(camel_to_snake("byteLength"), "byte_length");
+    }
+
+    #[test]
+    fn test_camel_to_snake_acronym() {
+        assert_eq!(camel_to_snake("toISOString"), "to_iso_string");
+    }
+
+    #[test]
+    fn test_camel_to_snake_all_upper_acronym() {
+        assert_eq!(camel_to_snake("XMLHTTPRequest"), "xmlhttp_request");
+    }
+
+    #[test]
+    fn test_camel_to_snake_already_snake() {
+        assert_eq!(camel_to_snake("already_snake"), "already_snake");
+    }
+
+    #[test]
+    fn test_camel_to_snake_single_word() {
+        assert_eq!(camel_to_snake("name"), "name");
     }
 }

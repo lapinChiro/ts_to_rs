@@ -148,6 +148,9 @@ pub fn transpile_pipeline(input: TranspileInput) -> Result<TranspileOutput> {
         // 推移的依存を解決するため固定点に達するまでループ
         generate_external_structs_to_fixpoint(&mut all_items, &shared_registry);
 
+        // 非外部型のスタブ生成（enum バリアント内の Hono 固有型等）
+        external_struct_generator::generate_stub_structs(&mut all_items, &shared_registry);
+
         let rust_source = crate::generator::generate(&all_items);
 
         file_outputs.push(FileOutput {
@@ -162,6 +165,9 @@ pub fn transpile_pipeline(input: TranspileInput) -> Result<TranspileOutput> {
 
     // 共有 synthetic items 内で参照されている外部型の struct も生成（推移的依存を含む）
     generate_external_structs_to_fixpoint(&mut synthetic_items, &shared_registry);
+
+    // types.rs 用: 外部型でない未定義型にもスタブ struct を生成（コンパイル可能にする）
+    external_struct_generator::generate_stub_structs(&mut synthetic_items, &shared_registry);
 
     Ok(TranspileOutput {
         files: file_outputs,

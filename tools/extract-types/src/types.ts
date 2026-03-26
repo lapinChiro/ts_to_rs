@@ -3,12 +3,12 @@
  * the tsc type extraction script and the Rust loader.
  *
  * These types define the structure of the JSON output.
- * Version must match FORMAT_VERSION in src/external_types.rs.
+ * Version must match FORMAT_VERSION (= 2) in src/external_types.rs.
  */
 
 /** Top-level output structure. */
 export interface ExternalTypesJson {
-  version: 1;
+  version: 2;
   types: Record<string, ExternalTypeDef>;
 }
 
@@ -18,8 +18,14 @@ export type ExternalTypeDef =
   | ExternalFunctionDef
   | ExternalAliasDef;
 
+export interface ExternalTypeParam {
+  name: string;
+  constraint?: ExternalType;
+}
+
 export interface ExternalInterfaceDef {
   kind: "interface";
+  type_params?: ExternalTypeParam[];
   fields: ExternalField[];
   methods: Record<string, ExternalMethod>;
   constructors: ExternalSignature[];

@@ -11,8 +11,8 @@ use swc_ecma_ast::{
 };
 
 use crate::ir::{
-    EnumValue, EnumVariant, Item, Method, Param, RustType, StructField, TraitRef, TypeParam,
-    Visibility,
+    sanitize_field_name, EnumValue, EnumVariant, Item, Method, Param, RustType, StructField,
+    TraitRef, TypeParam, Visibility,
 };
 use crate::pipeline::SyntheticTypeRegistry;
 use crate::registry::{TypeDef, TypeRegistry};
@@ -493,10 +493,11 @@ fn convert_interface_as_struct(
         }) = reg.get(&parent_name)
         {
             for (fname, ftype) in parent_fields {
-                if !fields.iter().any(|f: &StructField| f.name == *fname) {
+                let sanitized = sanitize_field_name(fname);
+                if !fields.iter().any(|f: &StructField| f.name == sanitized) {
                     fields.push(StructField {
                         vis: Some(Visibility::Public),
-                        name: fname.clone(),
+                        name: sanitized,
                         ty: ftype.clone(),
                     });
                 }
@@ -628,10 +629,11 @@ fn convert_interface_as_struct_and_trait(
         }) = reg.get(&parent_name)
         {
             for (fname, ftype) in parent_fields {
-                if !fields.iter().any(|f: &StructField| f.name == *fname) {
+                let sanitized = sanitize_field_name(fname);
+                if !fields.iter().any(|f: &StructField| f.name == sanitized) {
                     fields.push(StructField {
                         vis: Some(Visibility::Public),
-                        name: fname.clone(),
+                        name: sanitized,
                         ty: ftype.clone(),
                     });
                 }
@@ -1842,12 +1844,13 @@ fn extract_intersection_members(
                 }) = reg.get(&type_name)
                 {
                     for (name, ty) in resolved_fields {
-                        if fields.iter().any(|f: &StructField| f.name == *name) {
+                        let sanitized = sanitize_field_name(name);
+                        if fields.iter().any(|f: &StructField| f.name == sanitized) {
                             return Err(anyhow!("duplicate field '{}' in intersection type", name));
                         }
                         fields.push(StructField {
                             vis: None,
-                            name: name.clone(),
+                            name: sanitized,
                             ty: ty.clone(),
                         });
                     }
@@ -2174,7 +2177,7 @@ pub(crate) fn convert_property_signature(
 
     Ok(StructField {
         vis: None,
-        name: field_name,
+        name: sanitize_field_name(&field_name),
         ty,
     })
 }
@@ -2284,7 +2287,7 @@ fn convert_utility_partial(
         .into_iter()
         .map(|(name, ty)| StructField {
             vis: None,
-            name,
+            name: sanitize_field_name(&name),
             ty: if matches!(ty, RustType::Option(_)) {
                 ty
             } else {
@@ -2331,7 +2334,7 @@ fn convert_utility_required(
         .into_iter()
         .map(|(name, ty)| StructField {
             vis: None,
-            name,
+            name: sanitize_field_name(&name),
             ty: match ty {
                 RustType::Option(inner) => *inner,
                 other => other,
@@ -2398,7 +2401,7 @@ fn convert_utility_pick(
         .filter(|(name, _)| keys.contains(name))
         .map(|(name, ty)| StructField {
             vis: None,
-            name,
+            name: sanitize_field_name(&name),
             ty,
         })
         .collect();
@@ -2447,7 +2450,7 @@ fn convert_utility_omit(
         .filter(|(name, _)| !keys.contains(name))
         .map(|(name, ty)| StructField {
             vis: None,
-            name,
+            name: sanitize_field_name(&name),
             ty,
         })
         .collect();

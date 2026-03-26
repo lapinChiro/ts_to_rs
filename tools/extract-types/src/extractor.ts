@@ -15,6 +15,7 @@ import type {
   ExternalSignature,
   ExternalParam,
   ExternalInterfaceDef,
+  ExternalTypeParam,
 } from "./types.js";
 
 /**
@@ -45,7 +46,7 @@ export function extractTypes(program: ts.Program): ExternalTypesJson {
     });
   }
 
-  return { version: 1, types };
+  return { version: 2, types };
 }
 
 function processNode(
@@ -158,7 +159,20 @@ function extractInterface(
     constructors.push(extractSignature(sig, checker));
   }
 
-  return { kind: "interface", fields, methods, constructors };
+  // Extract type parameters from AST node (not resolved type)
+  const typeParams = extractTypeParams(node.typeParameters, checker);
+
+  // For declaration merging, keep type_params from first declaration only
+  const existingTypeParams = existing?.kind === "interface" ? existing.type_params : undefined;
+  const finalTypeParams = existingTypeParams ?? (typeParams.length > 0 ? typeParams : undefined);
+
+  return {
+    kind: "interface",
+    ...(finalTypeParams ? { type_params: finalTypeParams } : {}),
+    fields,
+    methods,
+    constructors,
+  };
 }
 
 function extractClass(
@@ -207,7 +221,16 @@ function extractClass(
     constructors.push(extractSignature(sig, checker));
   }
 
-  return { kind: "interface", fields, methods, constructors };
+  // Extract type parameters
+  const typeParams = extractTypeParams(node.typeParameters, checker);
+
+  return {
+    kind: "interface",
+    ...(typeParams.length > 0 ? { type_params: typeParams } : {}),
+    fields,
+    methods,
+    constructors,
+  };
 }
 
 function extractFunction(
@@ -264,6 +287,20 @@ function mergeConstructors(
   for (const sig of type.getConstructSignatures()) {
     existing.constructors.push(extractSignature(sig, checker));
   }
+}
+
+/** Extracts type parameters from a TypeParameterDeclaration (AST node). */
+function extractTypeParams(
+  typeParameters: ts.NodeArray<ts.TypeParameterDeclaration> | undefined,
+  checker: ts.TypeChecker,
+): ExternalTypeParam[] {
+  if (!typeParameters) return [];
+  return typeParameters.map((tp) => ({
+    name: tp.name.text,
+    ...(tp.constraint
+      ? { constraint: convertType(checker.getTypeAtLocation(tp.constraint), checker) }
+      : {}),
+  }));
 }
 
 // ── Type conversion ────────────────────────────────────────────────

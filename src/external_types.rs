@@ -14,7 +14,7 @@ use crate::pipeline::SyntheticTypeRegistry;
 use crate::registry::{MethodSignature, TypeDef, TypeRegistry};
 
 /// JSON interchange format version. Must match the tsc extraction script's output.
-const FORMAT_VERSION: u64 = 1;
+const FORMAT_VERSION: u64 = 2;
 
 // ── JSON schema types ──────────────────────────────────────────────
 
@@ -27,6 +27,14 @@ pub struct ExternalTypesJson {
     pub types: HashMap<String, ExternalTypeDef>,
 }
 
+/// A type parameter in an external type definition.
+#[derive(Debug, Deserialize)]
+pub struct ExternalTypeParam {
+    pub name: String,
+    #[serde(default)]
+    pub constraint: Option<ExternalType>,
+}
+
 /// A single type definition in the JSON interchange format.
 #[derive(Debug, Deserialize)]
 #[serde(tag = "kind")]
@@ -34,6 +42,8 @@ pub enum ExternalTypeDef {
     /// An interface or object type.
     #[serde(rename = "interface")]
     Interface {
+        #[serde(default)]
+        type_params: Vec<ExternalTypeParam>,
         #[serde(default)]
         fields: Vec<ExternalField>,
         #[serde(default)]
@@ -216,10 +226,22 @@ fn convert_external_typedef(
 ) -> Option<TypeDef> {
     match def {
         ExternalTypeDef::Interface {
+            type_params,
             fields,
             methods,
             constructors: _,
         } => {
+            let converted_type_params: Vec<crate::ir::TypeParam> = type_params
+                .iter()
+                .map(|tp| crate::ir::TypeParam {
+                    name: tp.name.clone(),
+                    constraint: tp
+                        .constraint
+                        .as_ref()
+                        .map(|c| convert_external_type(c, synthetic)),
+                })
+                .collect();
+
             let converted_fields: Vec<(String, RustType)> = fields
                 .iter()
                 .map(|f| {
@@ -272,6 +294,7 @@ fn convert_external_typedef(
                 .collect();
 
             Some(TypeDef::new_interface(
+                converted_type_params,
                 converted_fields,
                 converted_methods,
                 vec![],
@@ -652,7 +675,7 @@ mod tests {
     #[test]
     fn test_load_types_json_registers_all_types() {
         let json = r#"{
-            "version": 1,
+            "version": 2,
             "types": {
                 "Response": {
                     "kind": "interface",
@@ -698,7 +721,7 @@ mod tests {
     #[test]
     fn test_load_types_json_union_registers_synthetic_enum() {
         let json = r#"{
-            "version": 1,
+            "version": 2,
             "types": {
                 "Formatter": {
                     "kind": "interface",
@@ -730,7 +753,7 @@ mod tests {
     #[test]
     fn test_merge_external_types_local_takes_precedence() {
         let external_json = r#"{
-            "version": 1,
+            "version": 2,
             "types": {
                 "Foo": {
                     "kind": "interface",
@@ -956,7 +979,7 @@ mod tests {
     #[test]
     fn test_load_types_into_merges_into_existing_registry() {
         let json_a = r#"{
-            "version": 1,
+            "version": 2,
             "types": {
                 "Foo": {
                     "kind": "interface",
@@ -966,7 +989,7 @@ mod tests {
             }
         }"#;
         let json_b = r#"{
-            "version": 1,
+            "version": 2,
             "types": {
                 "Bar": {
                     "kind": "interface",
@@ -1067,5 +1090,67 @@ mod tests {
             },
             _ => panic!("expected Option, got: {result:?}"),
         }
+    }
+
+    // ── type_params tests ────────────────────────────────────────────
+
+    #[test]
+    fn test_external_type_params_deserialized() {
+        let json = r#"{
+            "version": 2,
+            "types": {
+                "Container": {
+                    "kind": "interface",
+                    "type_params": [{"name": "T"}],
+                    "fields": [{"name": "value", "type": {"kind": "named", "name": "T"}}],
+                    "methods": {}
+                }
+            }
+        }"#;
+        let (registry, _) = load_types_json(json).unwrap();
+        let typedef = registry.get("Container").unwrap();
+        assert_eq!(typedef.type_params().len(), 1);
+        assert_eq!(typedef.type_params()[0].name, "T");
+        assert!(typedef.type_params()[0].constraint.is_none());
+    }
+
+    #[test]
+    fn test_external_type_params_with_constraint() {
+        let json = r#"{
+            "version": 2,
+            "types": {
+                "Bounded": {
+                    "kind": "interface",
+                    "type_params": [{"name": "T", "constraint": {"kind": "named", "name": "Foo"}}],
+                    "fields": [],
+                    "methods": {}
+                }
+            }
+        }"#;
+        let (registry, _) = load_types_json(json).unwrap();
+        let typedef = registry.get("Bounded").unwrap();
+        assert_eq!(typedef.type_params().len(), 1);
+        assert_eq!(typedef.type_params()[0].name, "T");
+        assert!(matches!(
+            &typedef.type_params()[0].constraint,
+            Some(RustType::Named { name, .. }) if name == "Foo"
+        ));
+    }
+
+    #[test]
+    fn test_external_type_params_absent_defaults_empty() {
+        let json = r#"{
+            "version": 2,
+            "types": {
+                "Simple": {
+                    "kind": "interface",
+                    "fields": [{"name": "x", "type": {"kind": "number"}}],
+                    "methods": {}
+                }
+            }
+        }"#;
+        let (registry, _) = load_types_json(json).unwrap();
+        let typedef = registry.get("Simple").unwrap();
+        assert!(typedef.type_params().is_empty());
     }
 }

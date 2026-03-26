@@ -83,12 +83,13 @@ impl TypeDef {
 
     /// Creates a new interface TypeDef (from TS interface declaration).
     pub fn new_interface(
+        type_params: Vec<TypeParam>,
         fields: Vec<(String, RustType)>,
         methods: HashMap<String, Vec<MethodSignature>>,
         extends: Vec<String>,
     ) -> Self {
         TypeDef::Struct {
-            type_params: vec![],
+            type_params,
             fields,
             methods,
             extends,
@@ -348,7 +349,7 @@ fn collect_type_name(reg: &mut TypeRegistry, decl: &ast::Decl) {
         ast::Decl::TsInterface(iface) => {
             reg.register(
                 iface.id.sym.to_string(),
-                TypeDef::new_interface(vec![], HashMap::new(), vec![]),
+                TypeDef::new_interface(vec![], vec![], HashMap::new(), vec![]),
             );
         }
         ast::Decl::TsTypeAlias(alias) => {
@@ -1407,6 +1408,7 @@ mod tests {
         assert_eq!(
             reg.get("Point").unwrap(),
             &TypeDef::new_interface(
+                vec![],
                 vec![
                     ("x".to_string(), RustType::F64),
                     ("y".to_string(), RustType::F64),
@@ -1565,6 +1567,7 @@ mod tests {
         assert_eq!(
             reg.get("Config").unwrap(),
             &TypeDef::new_interface(
+                vec![],
                 vec![(
                     "name".to_string(),
                     RustType::Option(Box::new(RustType::String)),
@@ -1766,7 +1769,7 @@ mod tests {
         );
         reg.register(
             "Greeter".to_string(),
-            TypeDef::new_interface(vec![], methods, vec![]),
+            TypeDef::new_interface(vec![], vec![], methods, vec![]),
         );
         assert!(reg.is_trait_type("Greeter"));
     }
@@ -1777,6 +1780,7 @@ mod tests {
         reg.register(
             "Point".to_string(),
             TypeDef::new_interface(
+                vec![],
                 vec![("x".to_string(), RustType::F64)],
                 HashMap::new(),
                 vec![],
@@ -1799,6 +1803,7 @@ mod tests {
         reg.register(
             "Ctx".to_string(),
             TypeDef::new_interface(
+                vec![],
                 vec![("name".to_string(), RustType::String)],
                 methods,
                 vec![],

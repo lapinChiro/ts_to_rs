@@ -5,7 +5,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use crate::ir::{EnumVariant, Item, RustType, StructField, Visibility};
+use crate::ir::{sanitize_field_name, EnumVariant, Item, RustType, StructField, Visibility};
 
 /// A registry of synthetic types with automatic deduplication.
 ///
@@ -153,7 +153,7 @@ impl SyntheticTypeRegistry {
             .iter()
             .map(|(name, ty)| StructField {
                 vis: None,
-                name: name.clone(),
+                name: sanitize_field_name(name),
                 ty: ty.clone(),
             })
             .collect();

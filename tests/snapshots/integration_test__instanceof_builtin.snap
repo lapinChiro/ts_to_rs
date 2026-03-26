@@ -22,3 +22,15 @@ fn handleValue(x: HandleValueXType) -> String {
     }
     String(x)
 }
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Date {
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Error {
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RegExp {
+}

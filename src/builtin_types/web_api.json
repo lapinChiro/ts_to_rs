@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "types": {
     "Console": {
       "kind": "interface",
@@ -15,29 +15,6 @@
       "methods": {
         "assert": {
           "signatures": [
-            {
-              "params": [
-                {
-                  "name": "condition",
-                  "type": {
-                    "kind": "boolean"
-                  }
-                },
-                {
-                  "name": "data",
-                  "type": {
-                    "kind": "array",
-                    "element": {
-                      "kind": "any"
-                    }
-                  },
-                  "rest": true
-                }
-              ],
-              "return_type": {
-                "kind": "void"
-              }
-            },
             {
               "params": [
                 {
@@ -105,30 +82,11 @@
               "return_type": {
                 "kind": "void"
               }
-            },
-            {
-              "params": [],
-              "return_type": {
-                "kind": "void"
-              }
             }
           ]
         },
         "count": {
           "signatures": [
-            {
-              "params": [
-                {
-                  "name": "label",
-                  "type": {
-                    "kind": "string"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "void"
-              }
-            },
             {
               "params": [
                 {
@@ -184,41 +142,11 @@
               "return_type": {
                 "kind": "void"
               }
-            },
-            {
-              "params": [
-                {
-                  "name": "label",
-                  "type": {
-                    "kind": "string"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "void"
-              }
             }
           ]
         },
         "debug": {
           "signatures": [
-            {
-              "params": [
-                {
-                  "name": "data",
-                  "type": {
-                    "kind": "array",
-                    "element": {
-                      "kind": "any"
-                    }
-                  },
-                  "rest": true
-                }
-              ],
-              "return_type": {
-                "kind": "void"
-              }
-            },
             {
               "params": [
                 {
@@ -263,25 +191,6 @@
         },
         "dir": {
           "signatures": [
-            {
-              "params": [
-                {
-                  "name": "item",
-                  "type": {
-                    "kind": "any"
-                  }
-                },
-                {
-                  "name": "options",
-                  "type": {
-                    "kind": "any"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "void"
-              }
-            },
             {
               "params": [
                 {
@@ -358,45 +267,11 @@
               "return_type": {
                 "kind": "void"
               }
-            },
-            {
-              "params": [
-                {
-                  "name": "data",
-                  "type": {
-                    "kind": "array",
-                    "element": {
-                      "kind": "any"
-                    }
-                  },
-                  "rest": true
-                }
-              ],
-              "return_type": {
-                "kind": "void"
-              }
             }
           ]
         },
         "error": {
           "signatures": [
-            {
-              "params": [
-                {
-                  "name": "data",
-                  "type": {
-                    "kind": "array",
-                    "element": {
-                      "kind": "any"
-                    }
-                  },
-                  "rest": true
-                }
-              ],
-              "return_type": {
-                "kind": "void"
-              }
-            },
             {
               "params": [
                 {
@@ -461,23 +336,6 @@
             {
               "params": [
                 {
-                  "name": "data",
-                  "type": {
-                    "kind": "array",
-                    "element": {
-                      "kind": "any"
-                    }
-                  },
-                  "rest": true
-                }
-              ],
-              "return_type": {
-                "kind": "void"
-              }
-            },
-            {
-              "params": [
-                {
                   "name": "label",
                   "type": {
                     "kind": "array",
@@ -496,23 +354,6 @@
         },
         "groupCollapsed": {
           "signatures": [
-            {
-              "params": [
-                {
-                  "name": "data",
-                  "type": {
-                    "kind": "array",
-                    "element": {
-                      "kind": "any"
-                    }
-                  },
-                  "rest": true
-                }
-              ],
-              "return_type": {
-                "kind": "void"
-              }
-            },
             {
               "params": [
                 {
@@ -562,34 +403,11 @@
               "return_type": {
                 "kind": "void"
               }
-            },
-            {
-              "params": [],
-              "return_type": {
-                "kind": "void"
-              }
             }
           ]
         },
         "info": {
           "signatures": [
-            {
-              "params": [
-                {
-                  "name": "data",
-                  "type": {
-                    "kind": "array",
-                    "element": {
-                      "kind": "any"
-                    }
-                  },
-                  "rest": true
-                }
-              ],
-              "return_type": {
-                "kind": "void"
-              }
-            },
             {
               "params": [
                 {
@@ -634,23 +452,6 @@
         },
         "log": {
           "signatures": [
-            {
-              "params": [
-                {
-                  "name": "data",
-                  "type": {
-                    "kind": "array",
-                    "element": {
-                      "kind": "any"
-                    }
-                  },
-                  "rest": true
-                }
-              ],
-              "return_type": {
-                "kind": "void"
-              }
-            },
             {
               "params": [
                 {
@@ -738,28 +539,6 @@
               "return_type": {
                 "kind": "void"
               }
-            },
-            {
-              "params": [
-                {
-                  "name": "tabularData",
-                  "type": {
-                    "kind": "any"
-                  }
-                },
-                {
-                  "name": "properties",
-                  "type": {
-                    "kind": "array",
-                    "element": {
-                      "kind": "string"
-                    }
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "void"
-              }
             }
           ]
         },
@@ -790,37 +569,11 @@
               "return_type": {
                 "kind": "void"
               }
-            },
-            {
-              "params": [
-                {
-                  "name": "label",
-                  "type": {
-                    "kind": "string"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "void"
-              }
             }
           ]
         },
         "timeEnd": {
           "signatures": [
-            {
-              "params": [
-                {
-                  "name": "label",
-                  "type": {
-                    "kind": "string"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "void"
-              }
-            },
             {
               "params": [
                 {
@@ -896,47 +649,11 @@
               "return_type": {
                 "kind": "void"
               }
-            },
-            {
-              "params": [
-                {
-                  "name": "label",
-                  "type": {
-                    "kind": "string"
-                  }
-                },
-                {
-                  "name": "data",
-                  "type": {
-                    "kind": "array",
-                    "element": {
-                      "kind": "any"
-                    }
-                  },
-                  "rest": true
-                }
-              ],
-              "return_type": {
-                "kind": "void"
-              }
             }
           ]
         },
         "timeStamp": {
           "signatures": [
-            {
-              "params": [
-                {
-                  "name": "label",
-                  "type": {
-                    "kind": "string"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "void"
-              }
-            },
             {
               "params": [
                 {
@@ -987,23 +704,6 @@
             {
               "params": [
                 {
-                  "name": "data",
-                  "type": {
-                    "kind": "array",
-                    "element": {
-                      "kind": "any"
-                    }
-                  },
-                  "rest": true
-                }
-              ],
-              "return_type": {
-                "kind": "void"
-              }
-            },
-            {
-              "params": [
-                {
                   "name": "message",
                   "type": {
                     "kind": "any"
@@ -1028,23 +728,6 @@
         },
         "warn": {
           "signatures": [
-            {
-              "params": [
-                {
-                  "name": "data",
-                  "type": {
-                    "kind": "array",
-                    "element": {
-                      "kind": "any"
-                    }
-                  },
-                  "rest": true
-                }
-              ],
-              "return_type": {
-                "kind": "void"
-              }
-            },
             {
               "params": [
                 {
@@ -1143,19 +826,6 @@
         {
           "params": [
             {
-              "name": "id",
-              "type": {
-                "kind": "number"
-              }
-            }
-          ],
-          "return_type": {
-            "kind": "void"
-          }
-        },
-        {
-          "params": [
-            {
               "name": "timeout",
               "type": {
                 "kind": "union",
@@ -1184,44 +854,6 @@
     "setInterval": {
       "kind": "function",
       "signatures": [
-        {
-          "params": [
-            {
-              "name": "handler",
-              "type": {
-                "kind": "union",
-                "members": [
-                  {
-                    "kind": "string"
-                  },
-                  {
-                    "kind": "named",
-                    "name": "Function"
-                  }
-                ]
-              }
-            },
-            {
-              "name": "timeout",
-              "type": {
-                "kind": "number"
-              }
-            },
-            {
-              "name": "arguments",
-              "type": {
-                "kind": "array",
-                "element": {
-                  "kind": "any"
-                }
-              },
-              "rest": true
-            }
-          ],
-          "return_type": {
-            "kind": "number"
-          }
-        },
         {
           "params": [
             {
@@ -1495,19 +1127,6 @@
         {
           "params": [
             {
-              "name": "id",
-              "type": {
-                "kind": "number"
-              }
-            }
-          ],
-          "return_type": {
-            "kind": "void"
-          }
-        },
-        {
-          "params": [
-            {
               "name": "timeout",
               "type": {
                 "kind": "union",
@@ -1536,44 +1155,6 @@
     "setTimeout": {
       "kind": "function",
       "signatures": [
-        {
-          "params": [
-            {
-              "name": "handler",
-              "type": {
-                "kind": "union",
-                "members": [
-                  {
-                    "kind": "string"
-                  },
-                  {
-                    "kind": "named",
-                    "name": "Function"
-                  }
-                ]
-              }
-            },
-            {
-              "name": "timeout",
-              "type": {
-                "kind": "number"
-              }
-            },
-            {
-              "name": "arguments",
-              "type": {
-                "kind": "array",
-                "element": {
-                  "kind": "any"
-                }
-              },
-              "rest": true
-            }
-          ],
-          "return_type": {
-            "kind": "number"
-          }
-        },
         {
           "params": [
             {
@@ -1792,55 +1373,6 @@
               "return_type": {
                 "kind": "string"
               }
-            },
-            {
-              "params": [
-                {
-                  "name": "input",
-                  "type": {
-                    "kind": "union",
-                    "members": [
-                      {
-                        "kind": "named",
-                        "name": "ArrayBuffer"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "SharedArrayBuffer"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "ArrayBufferView",
-                        "type_args": [
-                          {
-                            "kind": "union",
-                            "members": [
-                              {
-                                "kind": "named",
-                                "name": "ArrayBuffer"
-                              },
-                              {
-                                "kind": "named",
-                                "name": "SharedArrayBuffer"
-                              }
-                            ]
-                          }
-                        ]
-                      }
-                    ]
-                  }
-                },
-                {
-                  "name": "options",
-                  "type": {
-                    "kind": "named",
-                    "name": "TextDecodeOptions"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "string"
-              }
             }
           ]
         }
@@ -1866,32 +1398,29 @@
             "kind": "named",
             "name": "TextDecoder"
           }
-        },
-        {
-          "params": [
-            {
-              "name": "label",
-              "type": {
-                "kind": "string"
-              }
-            },
-            {
-              "name": "options",
-              "type": {
-                "kind": "named",
-                "name": "TextDecoderOptions"
-              }
-            }
-          ],
-          "return_type": {
-            "kind": "named",
-            "name": "TextDecoder"
-          }
         }
       ]
     },
     "ArrayBufferView": {
       "kind": "interface",
+      "type_params": [
+        {
+          "name": "TArrayBuffer",
+          "constraint": {
+            "kind": "union",
+            "members": [
+              {
+                "kind": "named",
+                "name": "ArrayBuffer"
+              },
+              {
+                "kind": "named",
+                "name": "SharedArrayBuffer"
+              }
+            ]
+          }
+        }
+      ],
       "fields": [
         {
           "name": "buffer",
@@ -1928,18 +1457,6 @@
             "kind": "number"
           },
           "readonly": true
-        },
-        {
-          "name": "growable",
-          "type": {
-            "kind": "boolean"
-          }
-        },
-        {
-          "name": "maxByteLength",
-          "type": {
-            "kind": "number"
-          }
         }
       ],
       "methods": {
@@ -1966,23 +1483,6 @@
               }
             }
           ]
-        },
-        "grow": {
-          "signatures": [
-            {
-              "params": [
-                {
-                  "name": "newByteLength",
-                  "type": {
-                    "kind": "number"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "void"
-              }
-            }
-          ]
         }
       },
       "constructors": [
@@ -1992,27 +1492,6 @@
               "name": "byteLength",
               "type": {
                 "kind": "number"
-              }
-            }
-          ],
-          "return_type": {
-            "kind": "named",
-            "name": "SharedArrayBuffer"
-          }
-        },
-        {
-          "params": [
-            {
-              "name": "byteLength",
-              "type": {
-                "kind": "number"
-              }
-            },
-            {
-              "name": "options",
-              "type": {
-                "kind": "named",
-                "name": "__type"
               }
             }
           ],
@@ -2032,24 +1511,6 @@
             "kind": "number"
           },
           "readonly": true
-        },
-        {
-          "name": "maxByteLength",
-          "type": {
-            "kind": "number"
-          }
-        },
-        {
-          "name": "resizable",
-          "type": {
-            "kind": "boolean"
-          }
-        },
-        {
-          "name": "detached",
-          "type": {
-            "kind": "boolean"
-          }
         }
       ],
       "methods": {
@@ -2065,59 +1526,6 @@
                 },
                 {
                   "name": "end",
-                  "type": {
-                    "kind": "number"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "named",
-                "name": "ArrayBuffer"
-              }
-            }
-          ]
-        },
-        "resize": {
-          "signatures": [
-            {
-              "params": [
-                {
-                  "name": "newByteLength",
-                  "type": {
-                    "kind": "number"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "void"
-              }
-            }
-          ]
-        },
-        "transfer": {
-          "signatures": [
-            {
-              "params": [
-                {
-                  "name": "newByteLength",
-                  "type": {
-                    "kind": "number"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "named",
-                "name": "ArrayBuffer"
-              }
-            }
-          ]
-        },
-        "transferToFixedLength": {
-          "signatures": [
-            {
-              "params": [
-                {
-                  "name": "newByteLength",
                   "type": {
                     "kind": "number"
                   }
@@ -2152,27 +1560,6 @@
             "kind": "named",
             "name": "ArrayBuffer"
           }
-        },
-        {
-          "params": [
-            {
-              "name": "byteLength",
-              "type": {
-                "kind": "number"
-              }
-            },
-            {
-              "name": "options",
-              "type": {
-                "kind": "named",
-                "name": "__type"
-              }
-            }
-          ],
-          "return_type": {
-            "kind": "named",
-            "name": "ArrayBuffer"
-          }
         }
       ]
     },
@@ -2190,26 +1577,6 @@
       "methods": {
         "encode": {
           "signatures": [
-            {
-              "params": [
-                {
-                  "name": "input",
-                  "type": {
-                    "kind": "string"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "named",
-                "name": "Uint8Array",
-                "type_args": [
-                  {
-                    "kind": "named",
-                    "name": "ArrayBuffer"
-                  }
-                ]
-              }
-            },
             {
               "params": [
                 {
@@ -2269,54 +1636,11 @@
                 "kind": "named",
                 "name": "TextEncoderEncodeIntoResult"
               }
-            },
-            {
-              "params": [
-                {
-                  "name": "source",
-                  "type": {
-                    "kind": "string"
-                  }
-                },
-                {
-                  "name": "destination",
-                  "type": {
-                    "kind": "named",
-                    "name": "Uint8Array",
-                    "type_args": [
-                      {
-                        "kind": "union",
-                        "members": [
-                          {
-                            "kind": "named",
-                            "name": "ArrayBuffer"
-                          },
-                          {
-                            "kind": "named",
-                            "name": "SharedArrayBuffer"
-                          }
-                        ]
-                      }
-                    ]
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "named",
-                "name": "TextEncoderEncodeIntoResult"
-              }
             }
           ]
         }
       },
       "constructors": [
-        {
-          "params": [],
-          "return_type": {
-            "kind": "named",
-            "name": "TextEncoder"
-          }
-        },
         {
           "params": [],
           "return_type": {
@@ -2347,6 +1671,24 @@
     },
     "Uint8Array": {
       "kind": "interface",
+      "type_params": [
+        {
+          "name": "TArrayBuffer",
+          "constraint": {
+            "kind": "union",
+            "members": [
+              {
+                "kind": "named",
+                "name": "ArrayBuffer"
+              },
+              {
+                "kind": "named",
+                "name": "SharedArrayBuffer"
+              }
+            ]
+          }
+        }
+      ],
       "fields": [
         {
           "name": "BYTES_PER_ELEMENT",
@@ -3392,234 +2734,6 @@
               }
             }
           ]
-        },
-        "at": {
-          "signatures": [
-            {
-              "params": [
-                {
-                  "name": "index",
-                  "type": {
-                    "kind": "number"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "number"
-              }
-            }
-          ]
-        },
-        "findLast": {
-          "signatures": [
-            {
-              "params": [
-                {
-                  "name": "predicate",
-                  "type": {
-                    "kind": "function",
-                    "params": [
-                      {
-                        "kind": "number"
-                      },
-                      {
-                        "kind": "number"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "Uint8Array",
-                        "type_args": [
-                          {
-                            "kind": "named",
-                            "name": "TArrayBuffer"
-                          }
-                        ]
-                      }
-                    ],
-                    "return_type": {
-                      "kind": "boolean"
-                    }
-                  }
-                },
-                {
-                  "name": "thisArg",
-                  "type": {
-                    "kind": "any"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "named",
-                "name": "S"
-              }
-            },
-            {
-              "params": [
-                {
-                  "name": "predicate",
-                  "type": {
-                    "kind": "function",
-                    "params": [
-                      {
-                        "kind": "number"
-                      },
-                      {
-                        "kind": "number"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "Uint8Array",
-                        "type_args": [
-                          {
-                            "kind": "named",
-                            "name": "TArrayBuffer"
-                          }
-                        ]
-                      }
-                    ],
-                    "return_type": {
-                      "kind": "unknown"
-                    }
-                  }
-                },
-                {
-                  "name": "thisArg",
-                  "type": {
-                    "kind": "any"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "number"
-              }
-            }
-          ]
-        },
-        "findLastIndex": {
-          "signatures": [
-            {
-              "params": [
-                {
-                  "name": "predicate",
-                  "type": {
-                    "kind": "function",
-                    "params": [
-                      {
-                        "kind": "number"
-                      },
-                      {
-                        "kind": "number"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "Uint8Array",
-                        "type_args": [
-                          {
-                            "kind": "named",
-                            "name": "TArrayBuffer"
-                          }
-                        ]
-                      }
-                    ],
-                    "return_type": {
-                      "kind": "unknown"
-                    }
-                  }
-                },
-                {
-                  "name": "thisArg",
-                  "type": {
-                    "kind": "any"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "number"
-              }
-            }
-          ]
-        },
-        "toReversed": {
-          "signatures": [
-            {
-              "params": [],
-              "return_type": {
-                "kind": "named",
-                "name": "Uint8Array",
-                "type_args": [
-                  {
-                    "kind": "named",
-                    "name": "ArrayBuffer"
-                  }
-                ]
-              }
-            }
-          ]
-        },
-        "toSorted": {
-          "signatures": [
-            {
-              "params": [
-                {
-                  "name": "compareFn",
-                  "type": {
-                    "kind": "function",
-                    "params": [
-                      {
-                        "kind": "number"
-                      },
-                      {
-                        "kind": "number"
-                      }
-                    ],
-                    "return_type": {
-                      "kind": "number"
-                    }
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "named",
-                "name": "Uint8Array",
-                "type_args": [
-                  {
-                    "kind": "named",
-                    "name": "ArrayBuffer"
-                  }
-                ]
-              }
-            }
-          ]
-        },
-        "with": {
-          "signatures": [
-            {
-              "params": [
-                {
-                  "name": "index",
-                  "type": {
-                    "kind": "number"
-                  }
-                },
-                {
-                  "name": "value",
-                  "type": {
-                    "kind": "number"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "named",
-                "name": "Uint8Array",
-                "type_args": [
-                  {
-                    "kind": "named",
-                    "name": "ArrayBuffer"
-                  }
-                ]
-              }
-            }
-          ]
         }
       },
       "constructors": [
@@ -3819,12 +2933,28 @@
     },
     "Iterable": {
       "kind": "interface",
+      "type_params": [
+        {
+          "name": "T"
+        },
+        {
+          "name": "TReturn"
+        },
+        {
+          "name": "TNext"
+        }
+      ],
       "fields": [],
       "methods": {},
       "constructors": []
     },
     "ArrayIterator": {
       "kind": "interface",
+      "type_params": [
+        {
+          "name": "T"
+        }
+      ],
       "fields": [],
       "methods": {
         "next": {
@@ -3961,6 +3091,11 @@
     },
     "IteratorYieldResult": {
       "kind": "interface",
+      "type_params": [
+        {
+          "name": "TYield"
+        }
+      ],
       "fields": [
         {
           "name": "done",
@@ -3982,6 +3117,11 @@
     },
     "IteratorReturnResult": {
       "kind": "interface",
+      "type_params": [
+        {
+          "name": "TReturn"
+        }
+      ],
       "fields": [
         {
           "name": "done",
@@ -4034,15 +3174,7 @@
         {
           "name": "useGrouping",
           "type": {
-            "kind": "union",
-            "members": [
-              {
-                "kind": "boolean"
-              },
-              {
-                "kind": "string"
-              }
-            ]
+            "kind": "boolean"
           },
           "optional": true
         },
@@ -4129,34 +3261,6 @@
             "kind": "string"
           },
           "optional": true
-        },
-        {
-          "name": "roundingPriority",
-          "type": {
-            "kind": "string"
-          },
-          "optional": true
-        },
-        {
-          "name": "roundingIncrement",
-          "type": {
-            "kind": "number"
-          },
-          "optional": true
-        },
-        {
-          "name": "roundingMode",
-          "type": {
-            "kind": "string"
-          },
-          "optional": true
-        },
-        {
-          "name": "trailingZeroDisplay",
-          "type": {
-            "kind": "string"
-          },
-          "optional": true
         }
       ],
       "methods": {},
@@ -4164,6 +3268,11 @@
     },
     "ArrayLike": {
       "kind": "interface",
+      "type_params": [
+        {
+          "name": "T"
+        }
+      ],
       "fields": [
         {
           "name": "length",
@@ -4207,21 +3316,6 @@
       "methods": {
         "handleEvent": {
           "signatures": [
-            {
-              "params": [
-                {
-                  "name": "object",
-                  "type": {
-                    "kind": "named",
-                    "name": "Event",
-                    "type_args": []
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "void"
-              }
-            },
             {
               "params": [
                 {
@@ -4382,47 +3476,11 @@
                   "type_args": []
                 }
               }
-            },
-            {
-              "params": [],
-              "return_type": {
-                "kind": "array",
-                "element": {
-                  "kind": "named",
-                  "name": "EventTarget",
-                  "type_args": []
-                }
-              }
             }
           ]
         },
         "initEvent": {
           "signatures": [
-            {
-              "params": [
-                {
-                  "name": "type",
-                  "type": {
-                    "kind": "string"
-                  }
-                },
-                {
-                  "name": "bubbles",
-                  "type": {
-                    "kind": "boolean"
-                  }
-                },
-                {
-                  "name": "cancelable",
-                  "type": {
-                    "kind": "boolean"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "void"
-              }
-            },
             {
               "params": [
                 {
@@ -4457,23 +3515,11 @@
               "return_type": {
                 "kind": "void"
               }
-            },
-            {
-              "params": [],
-              "return_type": {
-                "kind": "void"
-              }
             }
           ]
         },
         "stopImmediatePropagation": {
           "signatures": [
-            {
-              "params": [],
-              "return_type": {
-                "kind": "void"
-              }
-            },
             {
               "params": [],
               "return_type": {
@@ -4489,39 +3535,11 @@
               "return_type": {
                 "kind": "void"
               }
-            },
-            {
-              "params": [],
-              "return_type": {
-                "kind": "void"
-              }
             }
           ]
         }
       },
       "constructors": [
-        {
-          "params": [
-            {
-              "name": "type",
-              "type": {
-                "kind": "string"
-              }
-            },
-            {
-              "name": "eventInitDict",
-              "type": {
-                "kind": "named",
-                "name": "EventInit"
-              }
-            }
-          ],
-          "return_type": {
-            "kind": "named",
-            "name": "Event",
-            "type_args": []
-          }
-        },
         {
           "params": [
             {
@@ -4633,80 +3651,11 @@
               "return_type": {
                 "kind": "void"
               }
-            },
-            {
-              "params": [
-                {
-                  "name": "type",
-                  "type": {
-                    "kind": "string"
-                  }
-                },
-                {
-                  "name": "callback",
-                  "type": {
-                    "kind": "union",
-                    "members": [
-                      {
-                        "kind": "function",
-                        "params": [
-                          {
-                            "kind": "named",
-                            "name": "Event",
-                            "type_args": []
-                          }
-                        ],
-                        "return_type": {
-                          "kind": "void"
-                        }
-                      },
-                      {
-                        "kind": "named",
-                        "name": "EventListenerObject"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "name": "options",
-                  "type": {
-                    "kind": "union",
-                    "members": [
-                      {
-                        "kind": "boolean"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "AddEventListenerOptions",
-                        "type_args": []
-                      }
-                    ]
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "void"
-              }
             }
           ]
         },
         "dispatchEvent": {
           "signatures": [
-            {
-              "params": [
-                {
-                  "name": "event",
-                  "type": {
-                    "kind": "named",
-                    "name": "Event",
-                    "type_args": []
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "boolean"
-              }
-            },
             {
               "params": [
                 {
@@ -4779,73 +3728,11 @@
               "return_type": {
                 "kind": "void"
               }
-            },
-            {
-              "params": [
-                {
-                  "name": "type",
-                  "type": {
-                    "kind": "string"
-                  }
-                },
-                {
-                  "name": "callback",
-                  "type": {
-                    "kind": "union",
-                    "members": [
-                      {
-                        "kind": "function",
-                        "params": [
-                          {
-                            "kind": "named",
-                            "name": "Event",
-                            "type_args": []
-                          }
-                        ],
-                        "return_type": {
-                          "kind": "void"
-                        }
-                      },
-                      {
-                        "kind": "named",
-                        "name": "EventListenerObject"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "name": "options",
-                  "type": {
-                    "kind": "union",
-                    "members": [
-                      {
-                        "kind": "boolean"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "EventListenerOptions",
-                        "type_args": []
-                      }
-                    ]
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "void"
-              }
             }
           ]
         }
       },
       "constructors": [
-        {
-          "params": [],
-          "return_type": {
-            "kind": "named",
-            "name": "EventTarget",
-            "type_args": []
-          }
-        },
         {
           "params": [],
           "return_type": {
@@ -4947,12 +3834,6 @@
         },
         "throwIfAborted": {
           "signatures": [
-            {
-              "params": [],
-              "return_type": {
-                "kind": "void"
-              }
-            },
             {
               "params": [],
               "return_type": {
@@ -5061,209 +3942,11 @@
               "return_type": {
                 "kind": "void"
               }
-            },
-            {
-              "params": [
-                {
-                  "name": "type",
-                  "type": {
-                    "kind": "named",
-                    "name": "K"
-                  }
-                },
-                {
-                  "name": "listener",
-                  "type": {
-                    "kind": "function",
-                    "params": [
-                      {
-                        "kind": "named",
-                        "name": "AbortSignalEventMap[K]"
-                      }
-                    ],
-                    "return_type": {
-                      "kind": "any"
-                    }
-                  }
-                },
-                {
-                  "name": "options",
-                  "type": {
-                    "kind": "union",
-                    "members": [
-                      {
-                        "kind": "boolean"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "AddEventListenerOptions",
-                        "type_args": []
-                      }
-                    ]
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "void"
-              }
-            },
-            {
-              "params": [
-                {
-                  "name": "type",
-                  "type": {
-                    "kind": "string"
-                  }
-                },
-                {
-                  "name": "listener",
-                  "type": {
-                    "kind": "union",
-                    "members": [
-                      {
-                        "kind": "function",
-                        "params": [
-                          {
-                            "kind": "named",
-                            "name": "Event",
-                            "type_args": []
-                          }
-                        ],
-                        "return_type": {
-                          "kind": "void"
-                        }
-                      },
-                      {
-                        "kind": "named",
-                        "name": "EventListenerObject"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "name": "options",
-                  "type": {
-                    "kind": "union",
-                    "members": [
-                      {
-                        "kind": "boolean"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "AddEventListenerOptions",
-                        "type_args": []
-                      }
-                    ]
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "void"
-              }
             }
           ]
         },
         "removeEventListener": {
           "signatures": [
-            {
-              "params": [
-                {
-                  "name": "type",
-                  "type": {
-                    "kind": "named",
-                    "name": "K"
-                  }
-                },
-                {
-                  "name": "listener",
-                  "type": {
-                    "kind": "function",
-                    "params": [
-                      {
-                        "kind": "named",
-                        "name": "AbortSignalEventMap[K]"
-                      }
-                    ],
-                    "return_type": {
-                      "kind": "any"
-                    }
-                  }
-                },
-                {
-                  "name": "options",
-                  "type": {
-                    "kind": "union",
-                    "members": [
-                      {
-                        "kind": "boolean"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "EventListenerOptions",
-                        "type_args": []
-                      }
-                    ]
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "void"
-              }
-            },
-            {
-              "params": [
-                {
-                  "name": "type",
-                  "type": {
-                    "kind": "string"
-                  }
-                },
-                {
-                  "name": "listener",
-                  "type": {
-                    "kind": "union",
-                    "members": [
-                      {
-                        "kind": "function",
-                        "params": [
-                          {
-                            "kind": "named",
-                            "name": "Event",
-                            "type_args": []
-                          }
-                        ],
-                        "return_type": {
-                          "kind": "void"
-                        }
-                      },
-                      {
-                        "kind": "named",
-                        "name": "EventListenerObject"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "name": "options",
-                  "type": {
-                    "kind": "union",
-                    "members": [
-                      {
-                        "kind": "boolean"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "EventListenerOptions",
-                        "type_args": []
-                      }
-                    ]
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "void"
-              }
-            },
             {
               "params": [
                 {
@@ -5381,34 +4064,11 @@
               "return_type": {
                 "kind": "boolean"
               }
-            },
-            {
-              "params": [
-                {
-                  "name": "event",
-                  "type": {
-                    "kind": "named",
-                    "name": "Event",
-                    "type_args": []
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "boolean"
-              }
             }
           ]
         }
       },
       "constructors": [
-        {
-          "params": [],
-          "return_type": {
-            "kind": "named",
-            "name": "AbortSignal",
-            "type_args": []
-          }
-        },
         {
           "params": [],
           "return_type": {
@@ -5453,32 +4113,11 @@
               "return_type": {
                 "kind": "void"
               }
-            },
-            {
-              "params": [
-                {
-                  "name": "reason",
-                  "type": {
-                    "kind": "any"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "void"
-              }
             }
           ]
         }
       },
       "constructors": [
-        {
-          "params": [],
-          "return_type": {
-            "kind": "named",
-            "name": "AbortController",
-            "type_args": []
-          }
-        },
         {
           "params": [],
           "return_type": {
@@ -5564,43 +4203,11 @@
                   }
                 ]
               }
-            },
-            {
-              "params": [],
-              "return_type": {
-                "kind": "named",
-                "name": "Promise",
-                "type_args": [
-                  {
-                    "kind": "named",
-                    "name": "ArrayBuffer"
-                  }
-                ]
-              }
             }
           ]
         },
         "bytes": {
           "signatures": [
-            {
-              "params": [],
-              "return_type": {
-                "kind": "named",
-                "name": "Promise",
-                "type_args": [
-                  {
-                    "kind": "named",
-                    "name": "Uint8Array",
-                    "type_args": [
-                      {
-                        "kind": "named",
-                        "name": "ArrayBuffer"
-                      }
-                    ]
-                  }
-                ]
-              }
-            },
             {
               "params": [],
               "return_type": {
@@ -5650,57 +4257,11 @@
                 "name": "Blob",
                 "type_args": []
               }
-            },
-            {
-              "params": [
-                {
-                  "name": "start",
-                  "type": {
-                    "kind": "number"
-                  }
-                },
-                {
-                  "name": "end",
-                  "type": {
-                    "kind": "number"
-                  }
-                },
-                {
-                  "name": "contentType",
-                  "type": {
-                    "kind": "string"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "named",
-                "name": "Blob",
-                "type_args": []
-              }
             }
           ]
         },
         "stream": {
           "signatures": [
-            {
-              "params": [],
-              "return_type": {
-                "kind": "named",
-                "name": "ReadableStream",
-                "type_args": [
-                  {
-                    "kind": "named",
-                    "name": "Uint8Array",
-                    "type_args": [
-                      {
-                        "kind": "named",
-                        "name": "ArrayBuffer"
-                      }
-                    ]
-                  }
-                ]
-              }
-            },
             {
               "params": [],
               "return_type": {
@@ -5735,78 +4296,11 @@
                   }
                 ]
               }
-            },
-            {
-              "params": [],
-              "return_type": {
-                "kind": "named",
-                "name": "Promise",
-                "type_args": [
-                  {
-                    "kind": "string"
-                  }
-                ]
-              }
             }
           ]
         }
       },
       "constructors": [
-        {
-          "params": [
-            {
-              "name": "fileBits",
-              "type": {
-                "kind": "array",
-                "element": {
-                  "kind": "union",
-                  "members": [
-                    {
-                      "kind": "string"
-                    },
-                    {
-                      "kind": "named",
-                      "name": "ArrayBuffer"
-                    },
-                    {
-                      "kind": "named",
-                      "name": "ArrayBufferView",
-                      "type_args": [
-                        {
-                          "kind": "named",
-                          "name": "ArrayBuffer"
-                        }
-                      ]
-                    },
-                    {
-                      "kind": "named",
-                      "name": "Blob",
-                      "type_args": []
-                    }
-                  ]
-                }
-              }
-            },
-            {
-              "name": "fileName",
-              "type": {
-                "kind": "string"
-              }
-            },
-            {
-              "name": "options",
-              "type": {
-                "kind": "named",
-                "name": "FilePropertyBag"
-              }
-            }
-          ],
-          "return_type": {
-            "kind": "named",
-            "name": "File",
-            "type_args": []
-          }
-        },
         {
           "params": [
             {
@@ -5894,6 +4388,11 @@
     },
     "ReadableStream": {
       "kind": "interface",
+      "type_params": [
+        {
+          "name": "R"
+        }
+      ],
       "fields": [
         {
           "name": "locked",
@@ -5924,90 +4423,11 @@
                   }
                 ]
               }
-            },
-            {
-              "params": [
-                {
-                  "name": "reason",
-                  "type": {
-                    "kind": "any"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "named",
-                "name": "Promise",
-                "type_args": [
-                  {
-                    "kind": "void"
-                  }
-                ]
-              }
             }
           ]
         },
         "getReader": {
           "signatures": [
-            {
-              "params": [
-                {
-                  "name": "options",
-                  "type": {
-                    "kind": "named",
-                    "name": "__type"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "named",
-                "name": "ReadableStreamBYOBReader",
-                "type_args": []
-              }
-            },
-            {
-              "params": [],
-              "return_type": {
-                "kind": "named",
-                "name": "ReadableStreamDefaultReader",
-                "type_args": [
-                  {
-                    "kind": "named",
-                    "name": "R"
-                  }
-                ]
-              }
-            },
-            {
-              "params": [
-                {
-                  "name": "options",
-                  "type": {
-                    "kind": "named",
-                    "name": "ReadableStreamGetReaderOptions"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "union",
-                "members": [
-                  {
-                    "kind": "named",
-                    "name": "ReadableStreamBYOBReader",
-                    "type_args": []
-                  },
-                  {
-                    "kind": "named",
-                    "name": "ReadableStreamDefaultReader",
-                    "type_args": [
-                      {
-                        "kind": "named",
-                        "name": "R"
-                      }
-                    ]
-                  }
-                ]
-              }
-            },
             {
               "params": [
                 {
@@ -6109,82 +4529,11 @@
                   }
                 ]
               }
-            },
-            {
-              "params": [
-                {
-                  "name": "transform",
-                  "type": {
-                    "kind": "named",
-                    "name": "ReadableWritablePair",
-                    "type_args": [
-                      {
-                        "kind": "named",
-                        "name": "T"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "R"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "name": "options",
-                  "type": {
-                    "kind": "named",
-                    "name": "StreamPipeOptions"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "named",
-                "name": "ReadableStream",
-                "type_args": [
-                  {
-                    "kind": "named",
-                    "name": "T"
-                  }
-                ]
-              }
             }
           ]
         },
         "pipeTo": {
           "signatures": [
-            {
-              "params": [
-                {
-                  "name": "destination",
-                  "type": {
-                    "kind": "named",
-                    "name": "WritableStream",
-                    "type_args": [
-                      {
-                        "kind": "named",
-                        "name": "R"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "name": "options",
-                  "type": {
-                    "kind": "named",
-                    "name": "StreamPipeOptions"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "named",
-                "name": "Promise",
-                "type_args": [
-                  {
-                    "kind": "void"
-                  }
-                ]
-              }
-            },
             {
               "params": [
                 {
@@ -6249,153 +4598,11 @@
                   }
                 ]
               }
-            },
-            {
-              "params": [],
-              "return_type": {
-                "kind": "tuple",
-                "elements": [
-                  {
-                    "kind": "named",
-                    "name": "ReadableStream",
-                    "type_args": [
-                      {
-                        "kind": "named",
-                        "name": "R"
-                      }
-                    ]
-                  },
-                  {
-                    "kind": "named",
-                    "name": "ReadableStream",
-                    "type_args": [
-                      {
-                        "kind": "named",
-                        "name": "R"
-                      }
-                    ]
-                  }
-                ]
-              }
             }
           ]
         }
       },
       "constructors": [
-        {
-          "params": [
-            {
-              "name": "underlyingSource",
-              "type": {
-                "kind": "named",
-                "name": "UnderlyingByteSource"
-              }
-            },
-            {
-              "name": "strategy",
-              "type": {
-                "kind": "named",
-                "name": "__type"
-              }
-            }
-          ],
-          "return_type": {
-            "kind": "named",
-            "name": "ReadableStream",
-            "type_args": [
-              {
-                "kind": "named",
-                "name": "Uint8Array",
-                "type_args": [
-                  {
-                    "kind": "named",
-                    "name": "ArrayBuffer"
-                  }
-                ]
-              }
-            ]
-          }
-        },
-        {
-          "params": [
-            {
-              "name": "underlyingSource",
-              "type": {
-                "kind": "named",
-                "name": "UnderlyingDefaultSource",
-                "type_args": [
-                  {
-                    "kind": "named",
-                    "name": "R"
-                  }
-                ]
-              }
-            },
-            {
-              "name": "strategy",
-              "type": {
-                "kind": "named",
-                "name": "QueuingStrategy",
-                "type_args": [
-                  {
-                    "kind": "named",
-                    "name": "R"
-                  }
-                ]
-              }
-            }
-          ],
-          "return_type": {
-            "kind": "named",
-            "name": "ReadableStream",
-            "type_args": [
-              {
-                "kind": "named",
-                "name": "R"
-              }
-            ]
-          }
-        },
-        {
-          "params": [
-            {
-              "name": "underlyingSource",
-              "type": {
-                "kind": "named",
-                "name": "UnderlyingSource",
-                "type_args": [
-                  {
-                    "kind": "named",
-                    "name": "R"
-                  }
-                ]
-              }
-            },
-            {
-              "name": "strategy",
-              "type": {
-                "kind": "named",
-                "name": "QueuingStrategy",
-                "type_args": [
-                  {
-                    "kind": "named",
-                    "name": "R"
-                  }
-                ]
-              }
-            }
-          ],
-          "return_type": {
-            "kind": "named",
-            "name": "ReadableStream",
-            "type_args": [
-              {
-                "kind": "named",
-                "name": "R"
-              }
-            ]
-          }
-        },
         {
           "params": [
             {
@@ -6514,6 +4721,11 @@
     },
     "UnderlyingSource": {
       "kind": "interface",
+      "type_params": [
+        {
+          "name": "R"
+        }
+      ],
       "fields": [
         {
           "name": "autoAllocateChunkSize",
@@ -6559,82 +4771,11 @@
                   }
                 ]
               }
-            },
-            {
-              "params": [
-                {
-                  "name": "reason",
-                  "type": {
-                    "kind": "any"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "union",
-                "members": [
-                  {
-                    "kind": "void"
-                  },
-                  {
-                    "kind": "named",
-                    "name": "PromiseLike",
-                    "type_args": [
-                      {
-                        "kind": "void"
-                      }
-                    ]
-                  }
-                ]
-              }
             }
           ]
         },
         "pull": {
           "signatures": [
-            {
-              "params": [
-                {
-                  "name": "controller",
-                  "type": {
-                    "kind": "union",
-                    "members": [
-                      {
-                        "kind": "named",
-                        "name": "ReadableByteStreamController",
-                        "type_args": []
-                      },
-                      {
-                        "kind": "named",
-                        "name": "ReadableStreamDefaultController",
-                        "type_args": [
-                          {
-                            "kind": "named",
-                            "name": "R"
-                          }
-                        ]
-                      }
-                    ]
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "union",
-                "members": [
-                  {
-                    "kind": "void"
-                  },
-                  {
-                    "kind": "named",
-                    "name": "PromiseLike",
-                    "type_args": [
-                      {
-                        "kind": "void"
-                      }
-                    ]
-                  }
-                ]
-              }
-            },
             {
               "params": [
                 {
@@ -6712,36 +4853,6 @@
               "return_type": {
                 "kind": "any"
               }
-            },
-            {
-              "params": [
-                {
-                  "name": "controller",
-                  "type": {
-                    "kind": "union",
-                    "members": [
-                      {
-                        "kind": "named",
-                        "name": "ReadableByteStreamController",
-                        "type_args": []
-                      },
-                      {
-                        "kind": "named",
-                        "name": "ReadableStreamDefaultController",
-                        "type_args": [
-                          {
-                            "kind": "named",
-                            "name": "R"
-                          }
-                        ]
-                      }
-                    ]
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "any"
-              }
             }
           ]
         }
@@ -6750,6 +4861,11 @@
     },
     "ReadableStreamDefaultController": {
       "kind": "interface",
+      "type_params": [
+        {
+          "name": "R"
+        }
+      ],
       "fields": [
         {
           "name": "desiredSize",
@@ -6767,31 +4883,11 @@
               "return_type": {
                 "kind": "void"
               }
-            },
-            {
-              "params": [],
-              "return_type": {
-                "kind": "void"
-              }
             }
           ]
         },
         "enqueue": {
           "signatures": [
-            {
-              "params": [
-                {
-                  "name": "chunk",
-                  "type": {
-                    "kind": "named",
-                    "name": "R"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "void"
-              }
-            },
             {
               "params": [
                 {
@@ -6822,36 +4918,11 @@
               "return_type": {
                 "kind": "void"
               }
-            },
-            {
-              "params": [
-                {
-                  "name": "e",
-                  "type": {
-                    "kind": "any"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "void"
-              }
             }
           ]
         }
       },
       "constructors": [
-        {
-          "params": [],
-          "return_type": {
-            "kind": "named",
-            "name": "ReadableStreamDefaultController",
-            "type_args": [
-              {
-                "kind": "any"
-              }
-            ]
-          }
-        },
         {
           "params": [],
           "return_type": {
@@ -6894,37 +4965,11 @@
               "return_type": {
                 "kind": "void"
               }
-            },
-            {
-              "params": [],
-              "return_type": {
-                "kind": "void"
-              }
             }
           ]
         },
         "enqueue": {
           "signatures": [
-            {
-              "params": [
-                {
-                  "name": "chunk",
-                  "type": {
-                    "kind": "named",
-                    "name": "ArrayBufferView",
-                    "type_args": [
-                      {
-                        "kind": "named",
-                        "name": "ArrayBuffer"
-                      }
-                    ]
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "void"
-              }
-            },
             {
               "params": [
                 {
@@ -6961,32 +5006,11 @@
               "return_type": {
                 "kind": "void"
               }
-            },
-            {
-              "params": [
-                {
-                  "name": "e",
-                  "type": {
-                    "kind": "any"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "void"
-              }
             }
           ]
         }
       },
       "constructors": [
-        {
-          "params": [],
-          "return_type": {
-            "kind": "named",
-            "name": "ReadableByteStreamController",
-            "type_args": []
-          }
-        },
         {
           "params": [],
           "return_type": {
@@ -7030,44 +5054,11 @@
               "return_type": {
                 "kind": "void"
               }
-            },
-            {
-              "params": [
-                {
-                  "name": "bytesWritten",
-                  "type": {
-                    "kind": "number"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "void"
-              }
             }
           ]
         },
         "respondWithNewView": {
           "signatures": [
-            {
-              "params": [
-                {
-                  "name": "view",
-                  "type": {
-                    "kind": "named",
-                    "name": "ArrayBufferView",
-                    "type_args": [
-                      {
-                        "kind": "named",
-                        "name": "ArrayBuffer"
-                      }
-                    ]
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "void"
-              }
-            },
             {
               "params": [
                 {
@@ -7099,19 +5090,16 @@
             "name": "ReadableStreamBYOBRequest",
             "type_args": []
           }
-        },
-        {
-          "params": [],
-          "return_type": {
-            "kind": "named",
-            "name": "ReadableStreamBYOBRequest",
-            "type_args": []
-          }
         }
       ]
     },
     "PromiseLike": {
       "kind": "interface",
+      "type_params": [
+        {
+          "name": "T"
+        }
+      ],
       "fields": [],
       "methods": {
         "then": {
@@ -7207,6 +5195,11 @@
     },
     "QueuingStrategy": {
       "kind": "interface",
+      "type_params": [
+        {
+          "name": "T"
+        }
+      ],
       "fields": [
         {
           "name": "highWaterMark",
@@ -7232,20 +5225,6 @@
               "return_type": {
                 "kind": "number"
               }
-            },
-            {
-              "params": [
-                {
-                  "name": "chunk",
-                  "type": {
-                    "kind": "named",
-                    "name": "T"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "number"
-              }
             }
           ]
         }
@@ -7254,6 +5233,11 @@
     },
     "UnderlyingDefaultSource": {
       "kind": "interface",
+      "type_params": [
+        {
+          "name": "R"
+        }
+      ],
       "fields": [
         {
           "name": "type",
@@ -7266,33 +5250,6 @@
       "methods": {
         "cancel": {
           "signatures": [
-            {
-              "params": [
-                {
-                  "name": "reason",
-                  "type": {
-                    "kind": "any"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "union",
-                "members": [
-                  {
-                    "kind": "void"
-                  },
-                  {
-                    "kind": "named",
-                    "name": "PromiseLike",
-                    "type_args": [
-                      {
-                        "kind": "void"
-                      }
-                    ]
-                  }
-                ]
-              }
-            },
             {
               "params": [
                 {
@@ -7433,33 +5390,6 @@
                   }
                 ]
               }
-            },
-            {
-              "params": [
-                {
-                  "name": "reason",
-                  "type": {
-                    "kind": "any"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "union",
-                "members": [
-                  {
-                    "kind": "void"
-                  },
-                  {
-                    "kind": "named",
-                    "name": "PromiseLike",
-                    "type_args": [
-                      {
-                        "kind": "void"
-                      }
-                    ]
-                  }
-                ]
-              }
             }
           ]
         },
@@ -7520,6 +5450,11 @@
     },
     "WritableStream": {
       "kind": "interface",
+      "type_params": [
+        {
+          "name": "W"
+        }
+      ],
       "fields": [
         {
           "name": "locked",
@@ -7532,25 +5467,6 @@
       "methods": {
         "abort": {
           "signatures": [
-            {
-              "params": [
-                {
-                  "name": "reason",
-                  "type": {
-                    "kind": "any"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "named",
-                "name": "Promise",
-                "type_args": [
-                  {
-                    "kind": "void"
-                  }
-                ]
-              }
-            },
             {
               "params": [
                 {
@@ -7585,36 +5501,11 @@
                   }
                 ]
               }
-            },
-            {
-              "params": [],
-              "return_type": {
-                "kind": "named",
-                "name": "Promise",
-                "type_args": [
-                  {
-                    "kind": "void"
-                  }
-                ]
-              }
             }
           ]
         },
         "getWriter": {
           "signatures": [
-            {
-              "params": [],
-              "return_type": {
-                "kind": "named",
-                "name": "WritableStreamDefaultWriter",
-                "type_args": [
-                  {
-                    "kind": "named",
-                    "name": "W"
-                  }
-                ]
-              }
-            },
             {
               "params": [],
               "return_type": {
@@ -7671,51 +5562,16 @@
               }
             ]
           }
-        },
-        {
-          "params": [
-            {
-              "name": "underlyingSink",
-              "type": {
-                "kind": "named",
-                "name": "UnderlyingSink",
-                "type_args": [
-                  {
-                    "kind": "named",
-                    "name": "W"
-                  }
-                ]
-              }
-            },
-            {
-              "name": "strategy",
-              "type": {
-                "kind": "named",
-                "name": "QueuingStrategy",
-                "type_args": [
-                  {
-                    "kind": "named",
-                    "name": "W"
-                  }
-                ]
-              }
-            }
-          ],
-          "return_type": {
-            "kind": "named",
-            "name": "WritableStream",
-            "type_args": [
-              {
-                "kind": "named",
-                "name": "W"
-              }
-            ]
-          }
         }
       ]
     },
     "UnderlyingSink": {
       "kind": "interface",
+      "type_params": [
+        {
+          "name": "W"
+        }
+      ],
       "fields": [
         {
           "name": "type",
@@ -7728,33 +5584,6 @@
       "methods": {
         "abort": {
           "signatures": [
-            {
-              "params": [
-                {
-                  "name": "reason",
-                  "type": {
-                    "kind": "any"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "union",
-                "members": [
-                  {
-                    "kind": "void"
-                  },
-                  {
-                    "kind": "named",
-                    "name": "PromiseLike",
-                    "type_args": [
-                      {
-                        "kind": "void"
-                      }
-                    ]
-                  }
-                ]
-              }
-            },
             {
               "params": [
                 {
@@ -7805,26 +5634,6 @@
                   }
                 ]
               }
-            },
-            {
-              "params": [],
-              "return_type": {
-                "kind": "union",
-                "members": [
-                  {
-                    "kind": "void"
-                  },
-                  {
-                    "kind": "named",
-                    "name": "PromiseLike",
-                    "type_args": [
-                      {
-                        "kind": "void"
-                      }
-                    ]
-                  }
-                ]
-              }
             }
           ]
         },
@@ -7844,62 +5653,11 @@
               "return_type": {
                 "kind": "any"
               }
-            },
-            {
-              "params": [
-                {
-                  "name": "controller",
-                  "type": {
-                    "kind": "named",
-                    "name": "WritableStreamDefaultController",
-                    "type_args": []
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "any"
-              }
             }
           ]
         },
         "write": {
           "signatures": [
-            {
-              "params": [
-                {
-                  "name": "chunk",
-                  "type": {
-                    "kind": "named",
-                    "name": "W"
-                  }
-                },
-                {
-                  "name": "controller",
-                  "type": {
-                    "kind": "named",
-                    "name": "WritableStreamDefaultController",
-                    "type_args": []
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "union",
-                "members": [
-                  {
-                    "kind": "void"
-                  },
-                  {
-                    "kind": "named",
-                    "name": "PromiseLike",
-                    "type_args": [
-                      {
-                        "kind": "void"
-                      }
-                    ]
-                  }
-                ]
-              }
-            },
             {
               "params": [
                 {
@@ -7969,19 +5727,6 @@
               "return_type": {
                 "kind": "void"
               }
-            },
-            {
-              "params": [
-                {
-                  "name": "e",
-                  "type": {
-                    "kind": "any"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "void"
-              }
             }
           ]
         }
@@ -7994,19 +5739,16 @@
             "name": "WritableStreamDefaultController",
             "type_args": []
           }
-        },
-        {
-          "params": [],
-          "return_type": {
-            "kind": "named",
-            "name": "WritableStreamDefaultController",
-            "type_args": []
-          }
         }
       ]
     },
     "WritableStreamDefaultWriter": {
       "kind": "interface",
+      "type_params": [
+        {
+          "name": "W"
+        }
+      ],
       "fields": [
         {
           "name": "closed",
@@ -8063,42 +5805,11 @@
                   }
                 ]
               }
-            },
-            {
-              "params": [
-                {
-                  "name": "reason",
-                  "type": {
-                    "kind": "any"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "named",
-                "name": "Promise",
-                "type_args": [
-                  {
-                    "kind": "void"
-                  }
-                ]
-              }
             }
           ]
         },
         "close": {
           "signatures": [
-            {
-              "params": [],
-              "return_type": {
-                "kind": "named",
-                "name": "Promise",
-                "type_args": [
-                  {
-                    "kind": "void"
-                  }
-                ]
-              }
-            },
             {
               "params": [],
               "return_type": {
@@ -8120,37 +5831,11 @@
               "return_type": {
                 "kind": "void"
               }
-            },
-            {
-              "params": [],
-              "return_type": {
-                "kind": "void"
-              }
             }
           ]
         },
         "write": {
           "signatures": [
-            {
-              "params": [
-                {
-                  "name": "chunk",
-                  "type": {
-                    "kind": "named",
-                    "name": "W"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "named",
-                "name": "Promise",
-                "type_args": [
-                  {
-                    "kind": "void"
-                  }
-                ]
-              }
-            },
             {
               "params": [
                 {
@@ -8201,38 +5886,16 @@
               }
             ]
           }
-        },
-        {
-          "params": [
-            {
-              "name": "stream",
-              "type": {
-                "kind": "named",
-                "name": "WritableStream",
-                "type_args": [
-                  {
-                    "kind": "named",
-                    "name": "W"
-                  }
-                ]
-              }
-            }
-          ],
-          "return_type": {
-            "kind": "named",
-            "name": "WritableStreamDefaultWriter",
-            "type_args": [
-              {
-                "kind": "named",
-                "name": "W"
-              }
-            ]
-          }
         }
       ]
     },
     "Promise": {
       "kind": "interface",
+      "type_params": [
+        {
+          "name": "T"
+        }
+      ],
       "fields": [],
       "methods": {
         "then": {
@@ -8514,6 +6177,14 @@
     },
     "ReadableWritablePair": {
       "kind": "interface",
+      "type_params": [
+        {
+          "name": "R"
+        },
+        {
+          "name": "W"
+        }
+      ],
       "fields": [
         {
           "name": "readable",
@@ -8561,6 +6232,11 @@
     },
     "ReadableStreamDefaultReader": {
       "kind": "interface",
+      "type_params": [
+        {
+          "name": "R"
+        }
+      ],
       "fields": [
         {
           "name": "closed",
@@ -8612,40 +6288,6 @@
                   }
                 ]
               }
-            },
-            {
-              "params": [],
-              "return_type": {
-                "kind": "named",
-                "name": "Promise",
-                "type_args": [
-                  {
-                    "kind": "union",
-                    "members": [
-                      {
-                        "kind": "named",
-                        "name": "ReadableStreamReadValueResult",
-                        "type_args": [
-                          {
-                            "kind": "named",
-                            "name": "R"
-                          }
-                        ]
-                      },
-                      {
-                        "kind": "named",
-                        "name": "ReadableStreamReadDoneResult",
-                        "type_args": [
-                          {
-                            "kind": "named",
-                            "name": "R"
-                          }
-                        ]
-                      }
-                    ]
-                  }
-                ]
-              }
             }
           ]
         },
@@ -8656,36 +6298,11 @@
               "return_type": {
                 "kind": "void"
               }
-            },
-            {
-              "params": [],
-              "return_type": {
-                "kind": "void"
-              }
             }
           ]
         },
         "cancel": {
           "signatures": [
-            {
-              "params": [
-                {
-                  "name": "reason",
-                  "type": {
-                    "kind": "any"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "named",
-                "name": "Promise",
-                "type_args": [
-                  {
-                    "kind": "void"
-                  }
-                ]
-              }
-            },
             {
               "params": [
                 {
@@ -8735,38 +6352,16 @@
               }
             ]
           }
-        },
-        {
-          "params": [
-            {
-              "name": "stream",
-              "type": {
-                "kind": "named",
-                "name": "ReadableStream",
-                "type_args": [
-                  {
-                    "kind": "named",
-                    "name": "R"
-                  }
-                ]
-              }
-            }
-          ],
-          "return_type": {
-            "kind": "named",
-            "name": "ReadableStreamDefaultReader",
-            "type_args": [
-              {
-                "kind": "named",
-                "name": "R"
-              }
-            ]
-          }
         }
       ]
     },
     "ReadableStreamReadDoneResult": {
       "kind": "interface",
+      "type_params": [
+        {
+          "name": "T"
+        }
+      ],
       "fields": [
         {
           "name": "done",
@@ -8787,6 +6382,11 @@
     },
     "ReadableStreamReadValueResult": {
       "kind": "interface",
+      "type_params": [
+        {
+          "name": "T"
+        }
+      ],
       "fields": [
         {
           "name": "done",
@@ -8866,59 +6466,11 @@
                   }
                 ]
               }
-            },
-            {
-              "params": [
-                {
-                  "name": "view",
-                  "type": {
-                    "kind": "named",
-                    "name": "T"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "named",
-                "name": "Promise",
-                "type_args": [
-                  {
-                    "kind": "union",
-                    "members": [
-                      {
-                        "kind": "named",
-                        "name": "ReadableStreamReadValueResult",
-                        "type_args": [
-                          {
-                            "kind": "named",
-                            "name": "T"
-                          }
-                        ]
-                      },
-                      {
-                        "kind": "named",
-                        "name": "ReadableStreamReadDoneResult",
-                        "type_args": [
-                          {
-                            "kind": "named",
-                            "name": "T"
-                          }
-                        ]
-                      }
-                    ]
-                  }
-                ]
-              }
             }
           ]
         },
         "releaseLock": {
           "signatures": [
-            {
-              "params": [],
-              "return_type": {
-                "kind": "void"
-              }
-            },
             {
               "params": [],
               "return_type": {
@@ -8947,58 +6499,11 @@
                   }
                 ]
               }
-            },
-            {
-              "params": [
-                {
-                  "name": "reason",
-                  "type": {
-                    "kind": "any"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "named",
-                "name": "Promise",
-                "type_args": [
-                  {
-                    "kind": "void"
-                  }
-                ]
-              }
             }
           ]
         }
       },
       "constructors": [
-        {
-          "params": [
-            {
-              "name": "stream",
-              "type": {
-                "kind": "named",
-                "name": "ReadableStream",
-                "type_args": [
-                  {
-                    "kind": "named",
-                    "name": "Uint8Array",
-                    "type_args": [
-                      {
-                        "kind": "named",
-                        "name": "ArrayBuffer"
-                      }
-                    ]
-                  }
-                ]
-              }
-            }
-          ],
-          "return_type": {
-            "kind": "named",
-            "name": "ReadableStreamBYOBReader",
-            "type_args": []
-          }
-        },
         {
           "params": [
             {
@@ -9062,43 +6567,11 @@
                   }
                 ]
               }
-            },
-            {
-              "params": [],
-              "return_type": {
-                "kind": "named",
-                "name": "Promise",
-                "type_args": [
-                  {
-                    "kind": "named",
-                    "name": "ArrayBuffer"
-                  }
-                ]
-              }
             }
           ]
         },
         "bytes": {
           "signatures": [
-            {
-              "params": [],
-              "return_type": {
-                "kind": "named",
-                "name": "Promise",
-                "type_args": [
-                  {
-                    "kind": "named",
-                    "name": "Uint8Array",
-                    "type_args": [
-                      {
-                        "kind": "named",
-                        "name": "ArrayBuffer"
-                      }
-                    ]
-                  }
-                ]
-              }
-            },
             {
               "params": [],
               "return_type": {
@@ -9148,57 +6621,11 @@
                 "name": "Blob",
                 "type_args": []
               }
-            },
-            {
-              "params": [
-                {
-                  "name": "start",
-                  "type": {
-                    "kind": "number"
-                  }
-                },
-                {
-                  "name": "end",
-                  "type": {
-                    "kind": "number"
-                  }
-                },
-                {
-                  "name": "contentType",
-                  "type": {
-                    "kind": "string"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "named",
-                "name": "Blob",
-                "type_args": []
-              }
             }
           ]
         },
         "stream": {
           "signatures": [
-            {
-              "params": [],
-              "return_type": {
-                "kind": "named",
-                "name": "ReadableStream",
-                "type_args": [
-                  {
-                    "kind": "named",
-                    "name": "Uint8Array",
-                    "type_args": [
-                      {
-                        "kind": "named",
-                        "name": "ArrayBuffer"
-                      }
-                    ]
-                  }
-                ]
-              }
-            },
             {
               "params": [],
               "return_type": {
@@ -9233,72 +6660,11 @@
                   }
                 ]
               }
-            },
-            {
-              "params": [],
-              "return_type": {
-                "kind": "named",
-                "name": "Promise",
-                "type_args": [
-                  {
-                    "kind": "string"
-                  }
-                ]
-              }
             }
           ]
         }
       },
       "constructors": [
-        {
-          "params": [
-            {
-              "name": "blobParts",
-              "type": {
-                "kind": "array",
-                "element": {
-                  "kind": "union",
-                  "members": [
-                    {
-                      "kind": "string"
-                    },
-                    {
-                      "kind": "named",
-                      "name": "ArrayBuffer"
-                    },
-                    {
-                      "kind": "named",
-                      "name": "ArrayBufferView",
-                      "type_args": [
-                        {
-                          "kind": "named",
-                          "name": "ArrayBuffer"
-                        }
-                      ]
-                    },
-                    {
-                      "kind": "named",
-                      "name": "Blob",
-                      "type_args": []
-                    }
-                  ]
-                }
-              }
-            },
-            {
-              "name": "options",
-              "type": {
-                "kind": "named",
-                "name": "BlobPropertyBag"
-              }
-            }
-          ],
-          "return_type": {
-            "kind": "named",
-            "name": "Blob",
-            "type_args": []
-          }
-        },
         {
           "params": [
             {
@@ -9430,81 +6796,6 @@
               "return_type": {
                 "kind": "void"
               }
-            },
-            {
-              "params": [
-                {
-                  "name": "name",
-                  "type": {
-                    "kind": "string"
-                  }
-                },
-                {
-                  "name": "value",
-                  "type": {
-                    "kind": "union",
-                    "members": [
-                      {
-                        "kind": "string"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "Blob",
-                        "type_args": []
-                      }
-                    ]
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "void"
-              }
-            },
-            {
-              "params": [
-                {
-                  "name": "name",
-                  "type": {
-                    "kind": "string"
-                  }
-                },
-                {
-                  "name": "value",
-                  "type": {
-                    "kind": "string"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "void"
-              }
-            },
-            {
-              "params": [
-                {
-                  "name": "name",
-                  "type": {
-                    "kind": "string"
-                  }
-                },
-                {
-                  "name": "blobValue",
-                  "type": {
-                    "kind": "named",
-                    "name": "Blob",
-                    "type_args": []
-                  }
-                },
-                {
-                  "name": "filename",
-                  "type": {
-                    "kind": "string"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "void"
-              }
             }
           ]
         },
@@ -9522,47 +6813,11 @@
               "return_type": {
                 "kind": "void"
               }
-            },
-            {
-              "params": [
-                {
-                  "name": "name",
-                  "type": {
-                    "kind": "string"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "void"
-              }
             }
           ]
         },
         "get": {
           "signatures": [
-            {
-              "params": [
-                {
-                  "name": "name",
-                  "type": {
-                    "kind": "string"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "union",
-                "members": [
-                  {
-                    "kind": "string"
-                  },
-                  {
-                    "kind": "named",
-                    "name": "File",
-                    "type_args": []
-                  }
-                ]
-              }
-            },
             {
               "params": [
                 {
@@ -9615,32 +6870,6 @@
                   ]
                 }
               }
-            },
-            {
-              "params": [
-                {
-                  "name": "name",
-                  "type": {
-                    "kind": "string"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "array",
-                "element": {
-                  "kind": "union",
-                  "members": [
-                    {
-                      "kind": "string"
-                    },
-                    {
-                      "kind": "named",
-                      "name": "File",
-                      "type_args": []
-                    }
-                  ]
-                }
-              }
             }
           ]
         },
@@ -9658,99 +6887,11 @@
               "return_type": {
                 "kind": "boolean"
               }
-            },
-            {
-              "params": [
-                {
-                  "name": "name",
-                  "type": {
-                    "kind": "string"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "boolean"
-              }
             }
           ]
         },
         "set": {
           "signatures": [
-            {
-              "params": [
-                {
-                  "name": "name",
-                  "type": {
-                    "kind": "string"
-                  }
-                },
-                {
-                  "name": "value",
-                  "type": {
-                    "kind": "union",
-                    "members": [
-                      {
-                        "kind": "string"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "Blob",
-                        "type_args": []
-                      }
-                    ]
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "void"
-              }
-            },
-            {
-              "params": [
-                {
-                  "name": "name",
-                  "type": {
-                    "kind": "string"
-                  }
-                },
-                {
-                  "name": "value",
-                  "type": {
-                    "kind": "string"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "void"
-              }
-            },
-            {
-              "params": [
-                {
-                  "name": "name",
-                  "type": {
-                    "kind": "string"
-                  }
-                },
-                {
-                  "name": "blobValue",
-                  "type": {
-                    "kind": "named",
-                    "name": "Blob",
-                    "type_args": []
-                  }
-                },
-                {
-                  "name": "filename",
-                  "type": {
-                    "kind": "string"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "void"
-              }
-            },
             {
               "params": [
                 {
@@ -9874,51 +7015,6 @@
               "return_type": {
                 "kind": "void"
               }
-            },
-            {
-              "params": [
-                {
-                  "name": "callbackfn",
-                  "type": {
-                    "kind": "function",
-                    "params": [
-                      {
-                        "kind": "union",
-                        "members": [
-                          {
-                            "kind": "string"
-                          },
-                          {
-                            "kind": "named",
-                            "name": "File",
-                            "type_args": []
-                          }
-                        ]
-                      },
-                      {
-                        "kind": "string"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "FormData",
-                        "type_args": []
-                      }
-                    ],
-                    "return_type": {
-                      "kind": "void"
-                    }
-                  }
-                },
-                {
-                  "name": "thisArg",
-                  "type": {
-                    "kind": "any"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "void"
-              }
             }
           ]
         }
@@ -9943,14 +7039,6 @@
               }
             }
           ],
-          "return_type": {
-            "kind": "named",
-            "name": "FormData",
-            "type_args": []
-          }
-        },
-        {
-          "params": [],
           "return_type": {
             "kind": "named",
             "name": "FormData",
@@ -10052,13 +7140,6 @@
             "kind": "named",
             "name": "CryptoKey"
           }
-        },
-        {
-          "params": [],
-          "return_type": {
-            "kind": "named",
-            "name": "CryptoKey"
-          }
         }
       ]
     },
@@ -10154,139 +7235,11 @@
                   }
                 ]
               }
-            },
-            {
-              "params": [
-                {
-                  "name": "algorithm",
-                  "type": {
-                    "kind": "union",
-                    "members": [
-                      {
-                        "kind": "string"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "AesCbcParams"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "Algorithm"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "AesCtrParams"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "AesGcmParams"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "RsaOaepParams"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "name": "key",
-                  "type": {
-                    "kind": "named",
-                    "name": "CryptoKey"
-                  }
-                },
-                {
-                  "name": "data",
-                  "type": {
-                    "kind": "union",
-                    "members": [
-                      {
-                        "kind": "named",
-                        "name": "ArrayBuffer"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "ArrayBufferView",
-                        "type_args": [
-                          {
-                            "kind": "named",
-                            "name": "ArrayBuffer"
-                          }
-                        ]
-                      }
-                    ]
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "named",
-                "name": "Promise",
-                "type_args": [
-                  {
-                    "kind": "named",
-                    "name": "ArrayBuffer"
-                  }
-                ]
-              }
             }
           ]
         },
         "deriveBits": {
           "signatures": [
-            {
-              "params": [
-                {
-                  "name": "algorithm",
-                  "type": {
-                    "kind": "union",
-                    "members": [
-                      {
-                        "kind": "string"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "Algorithm"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "EcdhKeyDeriveParams"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "HkdfParams"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "Pbkdf2Params"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "name": "baseKey",
-                  "type": {
-                    "kind": "named",
-                    "name": "CryptoKey"
-                  }
-                },
-                {
-                  "name": "length",
-                  "type": {
-                    "kind": "number"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "named",
-                "name": "Promise",
-                "type_args": [
-                  {
-                    "kind": "named",
-                    "name": "ArrayBuffer"
-                  }
-                ]
-              }
-            },
             {
               "params": [
                 {
@@ -10438,100 +7391,6 @@
                   }
                 ]
               }
-            },
-            {
-              "params": [
-                {
-                  "name": "algorithm",
-                  "type": {
-                    "kind": "union",
-                    "members": [
-                      {
-                        "kind": "string"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "Algorithm"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "EcdhKeyDeriveParams"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "HkdfParams"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "Pbkdf2Params"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "name": "baseKey",
-                  "type": {
-                    "kind": "named",
-                    "name": "CryptoKey"
-                  }
-                },
-                {
-                  "name": "derivedKeyType",
-                  "type": {
-                    "kind": "union",
-                    "members": [
-                      {
-                        "kind": "string"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "Algorithm"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "AesDerivedKeyParams"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "HkdfParams"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "HmacImportParams"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "Pbkdf2Params"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "name": "extractable",
-                  "type": {
-                    "kind": "boolean"
-                  }
-                },
-                {
-                  "name": "keyUsages",
-                  "type": {
-                    "kind": "array",
-                    "element": {
-                      "kind": "string"
-                    }
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "named",
-                "name": "Promise",
-                "type_args": [
-                  {
-                    "kind": "named",
-                    "name": "CryptoKey"
-                  }
-                ]
-              }
             }
           ]
         },
@@ -10587,136 +7446,11 @@
                   }
                 ]
               }
-            },
-            {
-              "params": [
-                {
-                  "name": "algorithm",
-                  "type": {
-                    "kind": "union",
-                    "members": [
-                      {
-                        "kind": "string"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "Algorithm"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "name": "data",
-                  "type": {
-                    "kind": "union",
-                    "members": [
-                      {
-                        "kind": "named",
-                        "name": "ArrayBuffer"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "ArrayBufferView",
-                        "type_args": [
-                          {
-                            "kind": "named",
-                            "name": "ArrayBuffer"
-                          }
-                        ]
-                      }
-                    ]
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "named",
-                "name": "Promise",
-                "type_args": [
-                  {
-                    "kind": "named",
-                    "name": "ArrayBuffer"
-                  }
-                ]
-              }
             }
           ]
         },
         "encrypt": {
           "signatures": [
-            {
-              "params": [
-                {
-                  "name": "algorithm",
-                  "type": {
-                    "kind": "union",
-                    "members": [
-                      {
-                        "kind": "string"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "AesCbcParams"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "Algorithm"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "AesCtrParams"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "AesGcmParams"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "RsaOaepParams"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "name": "key",
-                  "type": {
-                    "kind": "named",
-                    "name": "CryptoKey"
-                  }
-                },
-                {
-                  "name": "data",
-                  "type": {
-                    "kind": "union",
-                    "members": [
-                      {
-                        "kind": "named",
-                        "name": "ArrayBuffer"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "ArrayBufferView",
-                        "type_args": [
-                          {
-                            "kind": "named",
-                            "name": "ArrayBuffer"
-                          }
-                        ]
-                      }
-                    ]
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "named",
-                "name": "Promise",
-                "type_args": [
-                  {
-                    "kind": "named",
-                    "name": "ArrayBuffer"
-                  }
-                ]
-              }
-            },
             {
               "params": [
                 {
@@ -10884,292 +7618,11 @@
                   }
                 ]
               }
-            },
-            {
-              "params": [
-                {
-                  "name": "format",
-                  "type": {
-                    "kind": "string"
-                  }
-                },
-                {
-                  "name": "key",
-                  "type": {
-                    "kind": "named",
-                    "name": "CryptoKey"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "named",
-                "name": "Promise",
-                "type_args": [
-                  {
-                    "kind": "named",
-                    "name": "JsonWebKey"
-                  }
-                ]
-              }
-            },
-            {
-              "params": [
-                {
-                  "name": "format",
-                  "type": {
-                    "kind": "string"
-                  }
-                },
-                {
-                  "name": "key",
-                  "type": {
-                    "kind": "named",
-                    "name": "CryptoKey"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "named",
-                "name": "Promise",
-                "type_args": [
-                  {
-                    "kind": "named",
-                    "name": "ArrayBuffer"
-                  }
-                ]
-              }
-            },
-            {
-              "params": [
-                {
-                  "name": "format",
-                  "type": {
-                    "kind": "string"
-                  }
-                },
-                {
-                  "name": "key",
-                  "type": {
-                    "kind": "named",
-                    "name": "CryptoKey"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "named",
-                "name": "Promise",
-                "type_args": [
-                  {
-                    "kind": "union",
-                    "members": [
-                      {
-                        "kind": "named",
-                        "name": "ArrayBuffer"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "JsonWebKey"
-                      }
-                    ]
-                  }
-                ]
-              }
             }
           ]
         },
         "generateKey": {
           "signatures": [
-            {
-              "params": [
-                {
-                  "name": "algorithm",
-                  "type": {
-                    "kind": "union",
-                    "members": [
-                      {
-                        "kind": "string"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "__type"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "name": "extractable",
-                  "type": {
-                    "kind": "boolean"
-                  }
-                },
-                {
-                  "name": "keyUsages",
-                  "type": {
-                    "kind": "array",
-                    "element": {
-                      "kind": "string"
-                    }
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "named",
-                "name": "Promise",
-                "type_args": [
-                  {
-                    "kind": "named",
-                    "name": "CryptoKeyPair"
-                  }
-                ]
-              }
-            },
-            {
-              "params": [
-                {
-                  "name": "algorithm",
-                  "type": {
-                    "kind": "union",
-                    "members": [
-                      {
-                        "kind": "named",
-                        "name": "EcKeyGenParams"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "RsaHashedKeyGenParams"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "name": "extractable",
-                  "type": {
-                    "kind": "boolean"
-                  }
-                },
-                {
-                  "name": "keyUsages",
-                  "type": {
-                    "kind": "array",
-                    "element": {
-                      "kind": "string"
-                    }
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "named",
-                "name": "Promise",
-                "type_args": [
-                  {
-                    "kind": "named",
-                    "name": "CryptoKeyPair"
-                  }
-                ]
-              }
-            },
-            {
-              "params": [
-                {
-                  "name": "algorithm",
-                  "type": {
-                    "kind": "union",
-                    "members": [
-                      {
-                        "kind": "named",
-                        "name": "AesKeyGenParams"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "HmacKeyGenParams"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "Pbkdf2Params"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "name": "extractable",
-                  "type": {
-                    "kind": "boolean"
-                  }
-                },
-                {
-                  "name": "keyUsages",
-                  "type": {
-                    "kind": "array",
-                    "element": {
-                      "kind": "string"
-                    }
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "named",
-                "name": "Promise",
-                "type_args": [
-                  {
-                    "kind": "named",
-                    "name": "CryptoKey"
-                  }
-                ]
-              }
-            },
-            {
-              "params": [
-                {
-                  "name": "algorithm",
-                  "type": {
-                    "kind": "union",
-                    "members": [
-                      {
-                        "kind": "string"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "Algorithm"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "name": "extractable",
-                  "type": {
-                    "kind": "boolean"
-                  }
-                },
-                {
-                  "name": "keyUsages",
-                  "type": {
-                    "kind": "array",
-                    "element": {
-                      "kind": "string"
-                    }
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "named",
-                "name": "Promise",
-                "type_args": [
-                  {
-                    "kind": "union",
-                    "members": [
-                      {
-                        "kind": "named",
-                        "name": "CryptoKeyPair"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "CryptoKey"
-                      }
-                    ]
-                  }
-                ]
-              }
-            },
             {
               "params": [
                 {
@@ -11525,167 +7978,6 @@
                   }
                 ]
               }
-            },
-            {
-              "params": [
-                {
-                  "name": "format",
-                  "type": {
-                    "kind": "string"
-                  }
-                },
-                {
-                  "name": "keyData",
-                  "type": {
-                    "kind": "named",
-                    "name": "JsonWebKey"
-                  }
-                },
-                {
-                  "name": "algorithm",
-                  "type": {
-                    "kind": "union",
-                    "members": [
-                      {
-                        "kind": "string"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "Algorithm"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "AesKeyAlgorithm"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "EcKeyImportParams"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "HmacImportParams"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "RsaHashedImportParams"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "name": "extractable",
-                  "type": {
-                    "kind": "boolean"
-                  }
-                },
-                {
-                  "name": "keyUsages",
-                  "type": {
-                    "kind": "array",
-                    "element": {
-                      "kind": "string"
-                    }
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "named",
-                "name": "Promise",
-                "type_args": [
-                  {
-                    "kind": "named",
-                    "name": "CryptoKey"
-                  }
-                ]
-              }
-            },
-            {
-              "params": [
-                {
-                  "name": "format",
-                  "type": {
-                    "kind": "string"
-                  }
-                },
-                {
-                  "name": "keyData",
-                  "type": {
-                    "kind": "union",
-                    "members": [
-                      {
-                        "kind": "named",
-                        "name": "ArrayBuffer"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "ArrayBufferView",
-                        "type_args": [
-                          {
-                            "kind": "named",
-                            "name": "ArrayBuffer"
-                          }
-                        ]
-                      }
-                    ]
-                  }
-                },
-                {
-                  "name": "algorithm",
-                  "type": {
-                    "kind": "union",
-                    "members": [
-                      {
-                        "kind": "string"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "Algorithm"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "AesKeyAlgorithm"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "EcKeyImportParams"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "HmacImportParams"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "RsaHashedImportParams"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "name": "extractable",
-                  "type": {
-                    "kind": "boolean"
-                  }
-                },
-                {
-                  "name": "keyUsages",
-                  "type": {
-                    "kind": "array",
-                    "element": {
-                      "kind": "string"
-                    }
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "named",
-                "name": "Promise",
-                "type_args": [
-                  {
-                    "kind": "named",
-                    "name": "CryptoKey"
-                  }
-                ]
-              }
             }
           ]
         },
@@ -11756,203 +8048,11 @@
                   }
                 ]
               }
-            },
-            {
-              "params": [
-                {
-                  "name": "algorithm",
-                  "type": {
-                    "kind": "union",
-                    "members": [
-                      {
-                        "kind": "string"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "Algorithm"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "EcdsaParams"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "RsaPssParams"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "name": "key",
-                  "type": {
-                    "kind": "named",
-                    "name": "CryptoKey"
-                  }
-                },
-                {
-                  "name": "data",
-                  "type": {
-                    "kind": "union",
-                    "members": [
-                      {
-                        "kind": "named",
-                        "name": "ArrayBuffer"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "ArrayBufferView",
-                        "type_args": [
-                          {
-                            "kind": "named",
-                            "name": "ArrayBuffer"
-                          }
-                        ]
-                      }
-                    ]
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "named",
-                "name": "Promise",
-                "type_args": [
-                  {
-                    "kind": "named",
-                    "name": "ArrayBuffer"
-                  }
-                ]
-              }
             }
           ]
         },
         "unwrapKey": {
           "signatures": [
-            {
-              "params": [
-                {
-                  "name": "format",
-                  "type": {
-                    "kind": "string"
-                  }
-                },
-                {
-                  "name": "wrappedKey",
-                  "type": {
-                    "kind": "union",
-                    "members": [
-                      {
-                        "kind": "named",
-                        "name": "ArrayBuffer"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "ArrayBufferView",
-                        "type_args": [
-                          {
-                            "kind": "named",
-                            "name": "ArrayBuffer"
-                          }
-                        ]
-                      }
-                    ]
-                  }
-                },
-                {
-                  "name": "unwrappingKey",
-                  "type": {
-                    "kind": "named",
-                    "name": "CryptoKey"
-                  }
-                },
-                {
-                  "name": "unwrapAlgorithm",
-                  "type": {
-                    "kind": "union",
-                    "members": [
-                      {
-                        "kind": "string"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "AesCbcParams"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "Algorithm"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "AesCtrParams"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "AesGcmParams"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "RsaOaepParams"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "name": "unwrappedKeyAlgorithm",
-                  "type": {
-                    "kind": "union",
-                    "members": [
-                      {
-                        "kind": "string"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "Algorithm"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "AesKeyAlgorithm"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "EcKeyImportParams"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "HmacImportParams"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "RsaHashedImportParams"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "name": "extractable",
-                  "type": {
-                    "kind": "boolean"
-                  }
-                },
-                {
-                  "name": "keyUsages",
-                  "type": {
-                    "kind": "array",
-                    "element": {
-                      "kind": "string"
-                    }
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "named",
-                "name": "Promise",
-                "type_args": [
-                  {
-                    "kind": "named",
-                    "name": "CryptoKey"
-                  }
-                ]
-              }
-            },
             {
               "params": [
                 {
@@ -12169,93 +8269,6 @@
                   }
                 ]
               }
-            },
-            {
-              "params": [
-                {
-                  "name": "algorithm",
-                  "type": {
-                    "kind": "union",
-                    "members": [
-                      {
-                        "kind": "string"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "Algorithm"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "EcdsaParams"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "RsaPssParams"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "name": "key",
-                  "type": {
-                    "kind": "named",
-                    "name": "CryptoKey"
-                  }
-                },
-                {
-                  "name": "signature",
-                  "type": {
-                    "kind": "union",
-                    "members": [
-                      {
-                        "kind": "named",
-                        "name": "ArrayBuffer"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "ArrayBufferView",
-                        "type_args": [
-                          {
-                            "kind": "named",
-                            "name": "ArrayBuffer"
-                          }
-                        ]
-                      }
-                    ]
-                  }
-                },
-                {
-                  "name": "data",
-                  "type": {
-                    "kind": "union",
-                    "members": [
-                      {
-                        "kind": "named",
-                        "name": "ArrayBuffer"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "ArrayBufferView",
-                        "type_args": [
-                          {
-                            "kind": "named",
-                            "name": "ArrayBuffer"
-                          }
-                        ]
-                      }
-                    ]
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "named",
-                "name": "Promise",
-                "type_args": [
-                  {
-                    "kind": "boolean"
-                  }
-                ]
-              }
             }
           ]
         },
@@ -12325,83 +8338,11 @@
                   }
                 ]
               }
-            },
-            {
-              "params": [
-                {
-                  "name": "format",
-                  "type": {
-                    "kind": "string"
-                  }
-                },
-                {
-                  "name": "key",
-                  "type": {
-                    "kind": "named",
-                    "name": "CryptoKey"
-                  }
-                },
-                {
-                  "name": "wrappingKey",
-                  "type": {
-                    "kind": "named",
-                    "name": "CryptoKey"
-                  }
-                },
-                {
-                  "name": "wrapAlgorithm",
-                  "type": {
-                    "kind": "union",
-                    "members": [
-                      {
-                        "kind": "string"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "AesCbcParams"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "Algorithm"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "AesCtrParams"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "AesGcmParams"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "RsaOaepParams"
-                      }
-                    ]
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "named",
-                "name": "Promise",
-                "type_args": [
-                  {
-                    "kind": "named",
-                    "name": "ArrayBuffer"
-                  }
-                ]
-              }
             }
           ]
         }
       },
       "constructors": [
-        {
-          "params": [],
-          "return_type": {
-            "kind": "named",
-            "name": "SubtleCrypto"
-          }
-        },
         {
           "params": [],
           "return_type": {
@@ -13220,33 +9161,11 @@
                 "kind": "named",
                 "name": "T"
               }
-            },
-            {
-              "params": [
-                {
-                  "name": "array",
-                  "type": {
-                    "kind": "named",
-                    "name": "T"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "named",
-                "name": "T"
-              }
             }
           ]
         },
         "randomUUID": {
           "signatures": [
-            {
-              "params": [],
-              "return_type": {
-                "kind": "named",
-                "name": "`${string}-${string}-${string}-${string}-${string}`"
-              }
-            },
             {
               "params": [],
               "return_type": {
@@ -13264,18 +9183,19 @@
             "kind": "named",
             "name": "Crypto"
           }
-        },
-        {
-          "params": [],
-          "return_type": {
-            "kind": "named",
-            "name": "Crypto"
-          }
         }
       ]
     },
     "TransformStream": {
       "kind": "interface",
+      "type_params": [
+        {
+          "name": "I"
+        },
+        {
+          "name": "O"
+        }
+      ],
       "fields": [
         {
           "name": "readable",
@@ -13368,72 +9288,19 @@
               }
             ]
           }
-        },
-        {
-          "params": [
-            {
-              "name": "transformer",
-              "type": {
-                "kind": "named",
-                "name": "Transformer",
-                "type_args": [
-                  {
-                    "kind": "named",
-                    "name": "I"
-                  },
-                  {
-                    "kind": "named",
-                    "name": "O"
-                  }
-                ]
-              }
-            },
-            {
-              "name": "writableStrategy",
-              "type": {
-                "kind": "named",
-                "name": "QueuingStrategy",
-                "type_args": [
-                  {
-                    "kind": "named",
-                    "name": "I"
-                  }
-                ]
-              }
-            },
-            {
-              "name": "readableStrategy",
-              "type": {
-                "kind": "named",
-                "name": "QueuingStrategy",
-                "type_args": [
-                  {
-                    "kind": "named",
-                    "name": "O"
-                  }
-                ]
-              }
-            }
-          ],
-          "return_type": {
-            "kind": "named",
-            "name": "TransformStream",
-            "type_args": [
-              {
-                "kind": "named",
-                "name": "I"
-              },
-              {
-                "kind": "named",
-                "name": "O"
-              }
-            ]
-          }
         }
       ]
     },
     "Transformer": {
       "kind": "interface",
+      "type_params": [
+        {
+          "name": "I"
+        },
+        {
+          "name": "O"
+        }
+      ],
       "fields": [
         {
           "name": "readableType",
@@ -13486,65 +9353,11 @@
                   }
                 ]
               }
-            },
-            {
-              "params": [
-                {
-                  "name": "controller",
-                  "type": {
-                    "kind": "named",
-                    "name": "TransformStreamDefaultController",
-                    "type_args": [
-                      {
-                        "kind": "named",
-                        "name": "O"
-                      }
-                    ]
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "union",
-                "members": [
-                  {
-                    "kind": "void"
-                  },
-                  {
-                    "kind": "named",
-                    "name": "PromiseLike",
-                    "type_args": [
-                      {
-                        "kind": "void"
-                      }
-                    ]
-                  }
-                ]
-              }
             }
           ]
         },
         "start": {
           "signatures": [
-            {
-              "params": [
-                {
-                  "name": "controller",
-                  "type": {
-                    "kind": "named",
-                    "name": "TransformStreamDefaultController",
-                    "type_args": [
-                      {
-                        "kind": "named",
-                        "name": "O"
-                      }
-                    ]
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "any"
-              }
-            },
             {
               "params": [
                 {
@@ -13609,47 +9422,6 @@
                   }
                 ]
               }
-            },
-            {
-              "params": [
-                {
-                  "name": "chunk",
-                  "type": {
-                    "kind": "named",
-                    "name": "I"
-                  }
-                },
-                {
-                  "name": "controller",
-                  "type": {
-                    "kind": "named",
-                    "name": "TransformStreamDefaultController",
-                    "type_args": [
-                      {
-                        "kind": "named",
-                        "name": "O"
-                      }
-                    ]
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "union",
-                "members": [
-                  {
-                    "kind": "void"
-                  },
-                  {
-                    "kind": "named",
-                    "name": "PromiseLike",
-                    "type_args": [
-                      {
-                        "kind": "void"
-                      }
-                    ]
-                  }
-                ]
-              }
             }
           ]
         }
@@ -13658,6 +9430,11 @@
     },
     "TransformStreamDefaultController": {
       "kind": "interface",
+      "type_params": [
+        {
+          "name": "O"
+        }
+      ],
       "fields": [
         {
           "name": "desiredSize",
@@ -13670,20 +9447,6 @@
       "methods": {
         "enqueue": {
           "signatures": [
-            {
-              "params": [
-                {
-                  "name": "chunk",
-                  "type": {
-                    "kind": "named",
-                    "name": "O"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "void"
-              }
-            },
             {
               "params": [
                 {
@@ -13714,19 +9477,6 @@
               "return_type": {
                 "kind": "void"
               }
-            },
-            {
-              "params": [
-                {
-                  "name": "reason",
-                  "type": {
-                    "kind": "any"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "void"
-              }
             }
           ]
         },
@@ -13737,29 +9487,11 @@
               "return_type": {
                 "kind": "void"
               }
-            },
-            {
-              "params": [],
-              "return_type": {
-                "kind": "void"
-              }
             }
           ]
         }
       },
       "constructors": [
-        {
-          "params": [],
-          "return_type": {
-            "kind": "named",
-            "name": "TransformStreamDefaultController",
-            "type_args": [
-              {
-                "kind": "any"
-              }
-            ]
-          }
-        },
         {
           "params": [],
           "return_type": {
@@ -13806,49 +9538,11 @@
               "return_type": {
                 "kind": "void"
               }
-            },
-            {
-              "params": [
-                {
-                  "name": "name",
-                  "type": {
-                    "kind": "string"
-                  }
-                },
-                {
-                  "name": "value",
-                  "type": {
-                    "kind": "string"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "void"
-              }
             }
           ]
         },
         "delete": {
           "signatures": [
-            {
-              "params": [
-                {
-                  "name": "name",
-                  "type": {
-                    "kind": "string"
-                  }
-                },
-                {
-                  "name": "value",
-                  "type": {
-                    "kind": "string"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "void"
-              }
-            },
             {
               "params": [
                 {
@@ -13884,19 +9578,6 @@
               "return_type": {
                 "kind": "string"
               }
-            },
-            {
-              "params": [
-                {
-                  "name": "name",
-                  "type": {
-                    "kind": "string"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "string"
-              }
             }
           ]
         },
@@ -13917,46 +9598,11 @@
                   "kind": "string"
                 }
               }
-            },
-            {
-              "params": [
-                {
-                  "name": "name",
-                  "type": {
-                    "kind": "string"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "array",
-                "element": {
-                  "kind": "string"
-                }
-              }
             }
           ]
         },
         "has": {
           "signatures": [
-            {
-              "params": [
-                {
-                  "name": "name",
-                  "type": {
-                    "kind": "string"
-                  }
-                },
-                {
-                  "name": "value",
-                  "type": {
-                    "kind": "string"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "boolean"
-              }
-            },
             {
               "params": [
                 {
@@ -13998,36 +9644,11 @@
               "return_type": {
                 "kind": "void"
               }
-            },
-            {
-              "params": [
-                {
-                  "name": "name",
-                  "type": {
-                    "kind": "string"
-                  }
-                },
-                {
-                  "name": "value",
-                  "type": {
-                    "kind": "string"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "void"
-              }
             }
           ]
         },
         "sort": {
           "signatures": [
-            {
-              "params": [],
-              "return_type": {
-                "kind": "void"
-              }
-            },
             {
               "params": [],
               "return_type": {
@@ -14043,52 +9664,11 @@
               "return_type": {
                 "kind": "string"
               }
-            },
-            {
-              "params": [],
-              "return_type": {
-                "kind": "string"
-              }
             }
           ]
         },
         "forEach": {
           "signatures": [
-            {
-              "params": [
-                {
-                  "name": "callbackfn",
-                  "type": {
-                    "kind": "function",
-                    "params": [
-                      {
-                        "kind": "string"
-                      },
-                      {
-                        "kind": "string"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "URLSearchParams",
-                        "type_args": []
-                      }
-                    ],
-                    "return_type": {
-                      "kind": "void"
-                    }
-                  }
-                },
-                {
-                  "name": "thisArg",
-                  "type": {
-                    "kind": "any"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "void"
-              }
-            },
             {
               "params": [
                 {
@@ -14221,44 +9801,6 @@
             "name": "URLSearchParams",
             "type_args": []
           }
-        },
-        {
-          "params": [
-            {
-              "name": "init",
-              "type": {
-                "kind": "union",
-                "members": [
-                  {
-                    "kind": "string"
-                  },
-                  {
-                    "kind": "named",
-                    "name": "__type"
-                  },
-                  {
-                    "kind": "named",
-                    "name": "URLSearchParams",
-                    "type_args": []
-                  },
-                  {
-                    "kind": "array",
-                    "element": {
-                      "kind": "array",
-                      "element": {
-                        "kind": "string"
-                      }
-                    }
-                  }
-                ]
-              }
-            }
-          ],
-          "return_type": {
-            "kind": "named",
-            "name": "URLSearchParams",
-            "type_args": []
-          }
         }
       ]
     },
@@ -14350,12 +9892,6 @@
               "return_type": {
                 "kind": "string"
               }
-            },
-            {
-              "params": [],
-              "return_type": {
-                "kind": "string"
-              }
             }
           ]
         },
@@ -14366,58 +9902,11 @@
               "return_type": {
                 "kind": "string"
               }
-            },
-            {
-              "params": [],
-              "return_type": {
-                "kind": "string"
-              }
             }
           ]
         }
       },
       "constructors": [
-        {
-          "params": [
-            {
-              "name": "url",
-              "type": {
-                "kind": "union",
-                "members": [
-                  {
-                    "kind": "string"
-                  },
-                  {
-                    "kind": "named",
-                    "name": "URL",
-                    "type_args": []
-                  }
-                ]
-              }
-            },
-            {
-              "name": "base",
-              "type": {
-                "kind": "union",
-                "members": [
-                  {
-                    "kind": "string"
-                  },
-                  {
-                    "kind": "named",
-                    "name": "URL",
-                    "type_args": []
-                  }
-                ]
-              }
-            }
-          ],
-          "return_type": {
-            "kind": "named",
-            "name": "URL",
-            "type_args": []
-          }
-        },
         {
           "params": [
             {
@@ -14549,38 +10038,11 @@
                   }
                 ]
               }
-            },
-            {
-              "params": [],
-              "return_type": {
-                "kind": "named",
-                "name": "Promise",
-                "type_args": [
-                  {
-                    "kind": "named",
-                    "name": "ArrayBuffer"
-                  }
-                ]
-              }
             }
           ]
         },
         "blob": {
           "signatures": [
-            {
-              "params": [],
-              "return_type": {
-                "kind": "named",
-                "name": "Promise",
-                "type_args": [
-                  {
-                    "kind": "named",
-                    "name": "Blob",
-                    "type_args": []
-                  }
-                ]
-              }
-            },
             {
               "params": [],
               "return_type": {
@@ -14617,44 +10079,11 @@
                   }
                 ]
               }
-            },
-            {
-              "params": [],
-              "return_type": {
-                "kind": "named",
-                "name": "Promise",
-                "type_args": [
-                  {
-                    "kind": "named",
-                    "name": "Uint8Array",
-                    "type_args": [
-                      {
-                        "kind": "named",
-                        "name": "ArrayBuffer"
-                      }
-                    ]
-                  }
-                ]
-              }
             }
           ]
         },
         "formData": {
           "signatures": [
-            {
-              "params": [],
-              "return_type": {
-                "kind": "named",
-                "name": "Promise",
-                "type_args": [
-                  {
-                    "kind": "named",
-                    "name": "FormData",
-                    "type_args": []
-                  }
-                ]
-              }
-            },
             {
               "params": [],
               "return_type": {
@@ -14684,35 +10113,11 @@
                   }
                 ]
               }
-            },
-            {
-              "params": [],
-              "return_type": {
-                "kind": "named",
-                "name": "Promise",
-                "type_args": [
-                  {
-                    "kind": "any"
-                  }
-                ]
-              }
             }
           ]
         },
         "text": {
           "signatures": [
-            {
-              "params": [],
-              "return_type": {
-                "kind": "named",
-                "name": "Promise",
-                "type_args": [
-                  {
-                    "kind": "string"
-                  }
-                ]
-              }
-            },
             {
               "params": [],
               "return_type": {
@@ -14764,17 +10169,17 @@
           },
           {
             "kind": "named",
-            "name": "URLSearchParams",
-            "type_args": []
-          },
-          {
-            "kind": "named",
             "name": "ReadableStream",
             "type_args": [
               {
                 "kind": "any"
               }
             ]
+          },
+          {
+            "kind": "named",
+            "name": "URLSearchParams",
+            "type_args": []
           }
         ]
       }
@@ -14931,14 +10336,6 @@
                 "name": "Request",
                 "type_args": []
               }
-            },
-            {
-              "params": [],
-              "return_type": {
-                "kind": "named",
-                "name": "Request",
-                "type_args": []
-              }
             }
           ]
         },
@@ -14956,38 +10353,11 @@
                   }
                 ]
               }
-            },
-            {
-              "params": [],
-              "return_type": {
-                "kind": "named",
-                "name": "Promise",
-                "type_args": [
-                  {
-                    "kind": "named",
-                    "name": "ArrayBuffer"
-                  }
-                ]
-              }
             }
           ]
         },
         "blob": {
           "signatures": [
-            {
-              "params": [],
-              "return_type": {
-                "kind": "named",
-                "name": "Promise",
-                "type_args": [
-                  {
-                    "kind": "named",
-                    "name": "Blob",
-                    "type_args": []
-                  }
-                ]
-              }
-            },
             {
               "params": [],
               "return_type": {
@@ -15024,44 +10394,11 @@
                   }
                 ]
               }
-            },
-            {
-              "params": [],
-              "return_type": {
-                "kind": "named",
-                "name": "Promise",
-                "type_args": [
-                  {
-                    "kind": "named",
-                    "name": "Uint8Array",
-                    "type_args": [
-                      {
-                        "kind": "named",
-                        "name": "ArrayBuffer"
-                      }
-                    ]
-                  }
-                ]
-              }
             }
           ]
         },
         "formData": {
           "signatures": [
-            {
-              "params": [],
-              "return_type": {
-                "kind": "named",
-                "name": "Promise",
-                "type_args": [
-                  {
-                    "kind": "named",
-                    "name": "FormData",
-                    "type_args": []
-                  }
-                ]
-              }
-            },
             {
               "params": [],
               "return_type": {
@@ -15091,18 +10428,6 @@
                   }
                 ]
               }
-            },
-            {
-              "params": [],
-              "return_type": {
-                "kind": "named",
-                "name": "Promise",
-                "type_args": [
-                  {
-                    "kind": "any"
-                  }
-                ]
-              }
             }
           ]
         },
@@ -15119,61 +10444,11 @@
                   }
                 ]
               }
-            },
-            {
-              "params": [],
-              "return_type": {
-                "kind": "named",
-                "name": "Promise",
-                "type_args": [
-                  {
-                    "kind": "string"
-                  }
-                ]
-              }
             }
           ]
         }
       },
       "constructors": [
-        {
-          "params": [
-            {
-              "name": "input",
-              "type": {
-                "kind": "union",
-                "members": [
-                  {
-                    "kind": "string"
-                  },
-                  {
-                    "kind": "named",
-                    "name": "URL",
-                    "type_args": []
-                  },
-                  {
-                    "kind": "named",
-                    "name": "Request",
-                    "type_args": []
-                  }
-                ]
-              }
-            },
-            {
-              "name": "init",
-              "type": {
-                "kind": "named",
-                "name": "RequestInit",
-                "type_args": []
-              }
-            }
-          ],
-          "return_type": {
-            "kind": "named",
-            "name": "Request",
-            "type_args": []
-          }
-        },
         {
           "params": [
             {
@@ -15413,43 +10688,11 @@
               "return_type": {
                 "kind": "void"
               }
-            },
-            {
-              "params": [
-                {
-                  "name": "name",
-                  "type": {
-                    "kind": "string"
-                  }
-                },
-                {
-                  "name": "value",
-                  "type": {
-                    "kind": "string"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "void"
-              }
             }
           ]
         },
         "delete": {
           "signatures": [
-            {
-              "params": [
-                {
-                  "name": "name",
-                  "type": {
-                    "kind": "string"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "void"
-              }
-            },
             {
               "params": [
                 {
@@ -15479,33 +10722,11 @@
               "return_type": {
                 "kind": "string"
               }
-            },
-            {
-              "params": [
-                {
-                  "name": "name",
-                  "type": {
-                    "kind": "string"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "string"
-              }
             }
           ]
         },
         "getSetCookie": {
           "signatures": [
-            {
-              "params": [],
-              "return_type": {
-                "kind": "array",
-                "element": {
-                  "kind": "string"
-                }
-              }
-            },
             {
               "params": [],
               "return_type": {
@@ -15531,43 +10752,11 @@
               "return_type": {
                 "kind": "boolean"
               }
-            },
-            {
-              "params": [
-                {
-                  "name": "name",
-                  "type": {
-                    "kind": "string"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "boolean"
-              }
             }
           ]
         },
         "set": {
           "signatures": [
-            {
-              "params": [
-                {
-                  "name": "name",
-                  "type": {
-                    "kind": "string"
-                  }
-                },
-                {
-                  "name": "value",
-                  "type": {
-                    "kind": "string"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "void"
-              }
-            },
             {
               "params": [
                 {
@@ -15625,86 +10814,11 @@
               "return_type": {
                 "kind": "void"
               }
-            },
-            {
-              "params": [
-                {
-                  "name": "callbackfn",
-                  "type": {
-                    "kind": "function",
-                    "params": [
-                      {
-                        "kind": "string"
-                      },
-                      {
-                        "kind": "string"
-                      },
-                      {
-                        "kind": "named",
-                        "name": "Headers",
-                        "type_args": []
-                      }
-                    ],
-                    "return_type": {
-                      "kind": "void"
-                    }
-                  }
-                },
-                {
-                  "name": "thisArg",
-                  "type": {
-                    "kind": "any"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "void"
-              }
             }
           ]
         }
       },
       "constructors": [
-        {
-          "params": [
-            {
-              "name": "init",
-              "type": {
-                "kind": "union",
-                "members": [
-                  {
-                    "kind": "named",
-                    "name": "__type"
-                  },
-                  {
-                    "kind": "array",
-                    "element": {
-                      "kind": "tuple",
-                      "elements": [
-                        {
-                          "kind": "string"
-                        },
-                        {
-                          "kind": "string"
-                        }
-                      ]
-                    }
-                  },
-                  {
-                    "kind": "named",
-                    "name": "Headers",
-                    "type_args": []
-                  }
-                ]
-              }
-            }
-          ],
-          "return_type": {
-            "kind": "named",
-            "name": "Headers",
-            "type_args": []
-          }
-        },
         {
           "params": [
             {
@@ -15923,14 +11037,6 @@
                 "name": "Response",
                 "type_args": []
               }
-            },
-            {
-              "params": [],
-              "return_type": {
-                "kind": "named",
-                "name": "Response",
-                "type_args": []
-              }
             }
           ]
         },
@@ -15948,38 +11054,11 @@
                   }
                 ]
               }
-            },
-            {
-              "params": [],
-              "return_type": {
-                "kind": "named",
-                "name": "Promise",
-                "type_args": [
-                  {
-                    "kind": "named",
-                    "name": "ArrayBuffer"
-                  }
-                ]
-              }
             }
           ]
         },
         "blob": {
           "signatures": [
-            {
-              "params": [],
-              "return_type": {
-                "kind": "named",
-                "name": "Promise",
-                "type_args": [
-                  {
-                    "kind": "named",
-                    "name": "Blob",
-                    "type_args": []
-                  }
-                ]
-              }
-            },
             {
               "params": [],
               "return_type": {
@@ -16016,44 +11095,11 @@
                   }
                 ]
               }
-            },
-            {
-              "params": [],
-              "return_type": {
-                "kind": "named",
-                "name": "Promise",
-                "type_args": [
-                  {
-                    "kind": "named",
-                    "name": "Uint8Array",
-                    "type_args": [
-                      {
-                        "kind": "named",
-                        "name": "ArrayBuffer"
-                      }
-                    ]
-                  }
-                ]
-              }
             }
           ]
         },
         "formData": {
           "signatures": [
-            {
-              "params": [],
-              "return_type": {
-                "kind": "named",
-                "name": "Promise",
-                "type_args": [
-                  {
-                    "kind": "named",
-                    "name": "FormData",
-                    "type_args": []
-                  }
-                ]
-              }
-            },
             {
               "params": [],
               "return_type": {
@@ -16083,18 +11129,6 @@
                   }
                 ]
               }
-            },
-            {
-              "params": [],
-              "return_type": {
-                "kind": "named",
-                "name": "Promise",
-                "type_args": [
-                  {
-                    "kind": "any"
-                  }
-                ]
-              }
             }
           ]
         },
@@ -16111,89 +11145,11 @@
                   }
                 ]
               }
-            },
-            {
-              "params": [],
-              "return_type": {
-                "kind": "named",
-                "name": "Promise",
-                "type_args": [
-                  {
-                    "kind": "string"
-                  }
-                ]
-              }
             }
           ]
         }
       },
       "constructors": [
-        {
-          "params": [
-            {
-              "name": "body",
-              "type": {
-                "kind": "union",
-                "members": [
-                  {
-                    "kind": "string"
-                  },
-                  {
-                    "kind": "named",
-                    "name": "ArrayBuffer"
-                  },
-                  {
-                    "kind": "named",
-                    "name": "ArrayBufferView",
-                    "type_args": [
-                      {
-                        "kind": "named",
-                        "name": "ArrayBuffer"
-                      }
-                    ]
-                  },
-                  {
-                    "kind": "named",
-                    "name": "Blob",
-                    "type_args": []
-                  },
-                  {
-                    "kind": "named",
-                    "name": "FormData",
-                    "type_args": []
-                  },
-                  {
-                    "kind": "named",
-                    "name": "ReadableStream",
-                    "type_args": [
-                      {
-                        "kind": "any"
-                      }
-                    ]
-                  },
-                  {
-                    "kind": "named",
-                    "name": "URLSearchParams",
-                    "type_args": []
-                  }
-                ]
-              }
-            },
-            {
-              "name": "init",
-              "type": {
-                "kind": "named",
-                "name": "ResponseInit",
-                "type_args": []
-              }
-            }
-          ],
-          "return_type": {
-            "kind": "named",
-            "name": "Response",
-            "type_args": []
-          }
-        },
         {
           "params": [
             {

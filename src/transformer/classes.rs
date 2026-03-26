@@ -8,8 +8,8 @@ use anyhow::{anyhow, Result};
 use swc_ecma_ast as ast;
 
 use crate::ir::{
-    AssocConst, Expr, Item, Method, Param, RustType, Stmt, StructField, TraitRef, TypeParam,
-    Visibility,
+    sanitize_field_name, AssocConst, Expr, Item, Method, Param, RustType, Stmt, StructField,
+    TraitRef, TypeParam, Visibility,
 };
 use crate::pipeline::type_converter::convert_ts_type;
 use crate::transformer::extract_prop_name;
@@ -705,7 +705,7 @@ impl<'a> Transformer<'a> {
 
         Ok(StructField {
             vis: Some(member_vis),
-            name: field_name,
+            name: sanitize_field_name(&field_name),
             ty,
         })
     }
@@ -817,7 +817,7 @@ impl<'a> Transformer<'a> {
 
         let field = StructField {
             vis: Some(field_vis),
-            name: name.clone(),
+            name: sanitize_field_name(&name),
             ty: ty.clone().unwrap_or(RustType::Any),
         };
 
@@ -1046,7 +1046,7 @@ impl<'a> Transformer<'a> {
         };
         Ok(StructField {
             vis: Some(Visibility::Private),
-            name: field_name,
+            name: sanitize_field_name(&field_name),
             ty,
         })
     }

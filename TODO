@@ -6,6 +6,7 @@
 
 - TypeScript, crateなどのバージョンアップ
 - package.jsonにTypeScriptのバージョン指定を入れる
+- 外部型生成ツールのDocker化
 - clippy.tomlでファイル行数の制限を入れる
 - node_modulesの依存を解析して木構造を作成し、lockファイルから依存を全て特定して全てトランスパイルする
 - **Rules/Skills/CLAUDE.mdの言語**: これらは英語で記載した方が効率的なのではないか。レスポンスだけ日本語にして、読み込まれるファイルはすべて英語の方が良いのではないか
@@ -52,6 +53,7 @@
 - **I-112c オブジェクトリテラル型推定 Phase 1-3**: TypeResolver の expected type 設定強化、匿名構造体自動生成、スプレッドマージ型推定。70→52 件に削減。残 52 件は I-266〜I-269 の独立イシューとして追跡
 - **I-241〜I-248 サイレント意味変更の完全解消**: エラー報告統一（UnsupportedSyntaxError::new）、BigInt i128 拡張、RuntimeTypeof ヘルパー、トップレベル init() 関数、ネスト destructuring rest の合成構造体変換、declare module エラー伝播、private class members 変換、intersection メソッドシグネチャの impl 生成、union キーワード型の明示的パターンマッチ化
 - **I-223/I-227 コンパイルエラーのクイックウィン**: 文字列リテラルの Rust エスケープ（`escape_rust_string` ヘルパー）。union enum 名の識別子サニタイズ（`variant_name_for_type` を `pub(crate)` に統一、`type_converter.rs` の重複実装 `variant_name_from_type` を削除）
+- **I-270 ビルトイン型 struct 定義自動生成**: 外部型 struct の JSON フィールド情報ベース自動生成（推移的依存の固定点計算）。type_params 抽出パイプライン（FORMAT_VERSION 2）。フィールド名サニタイズの IR レベル移動（`sanitize_field_name`/`camel_to_snake` を `ir.rs` に配置）。未定義型のスタブ struct 自動生成。types.rs インポート自動生成（`serde_json`, `HashMap`）。types.rs エラー 36→5（残 5 件は I-273 として追跡）。HashMap 変換時の自動インポート（旧 I-190）も同時解決
 
 ---
 
@@ -65,7 +67,7 @@
 | **完了: Interface → Trait** | ~~I-137/I-127~~ **達成** | interface 3 分類 + extends + 交差型 |
 | **完了: コンパイル可能性の基盤** | ~~I-61/I-100~~ **達成** | チェーンメソッド型追跡 + ジェネリクス基盤 |
 | **次: 変換率の大幅改善** | エラーインスタンス < 50 件 | 残 53 件を I-224（`this` 型）+ I-266（関数引数 20件）+ I-267（return/new 14件）+ I-268（ジェネリクス展開 14件）+ I-269（Optional unwrap 4件）で段階解消。詳細は `report/hono-error-analysis-2026-03-25.md` |
-| **その次: コンパイル品質** | ディレクトリコンパイルエラー 0 件 | I-270（ビルトイン型 struct 定義不在）の解消。I-227/I-223 は解消済み |
+| **その次: コンパイル品質** | ディレクトリコンパイルエラー 0 件 | I-270 完了（types.rs 36→5 エラー）。残 5 件は I-273（trait/struct 混同）。I-227/I-223 は解消済み |
 | **その次: テスト拡充** | E2E テスト網羅性 | E2E テストの拡充（I-20, I-71, I-72, I-74）、HTTP 対応（I-183） |
 
 ---
@@ -193,7 +195,7 @@ I-112c Phase 1-3 + I-211 で 70→53 件に削減済み。残 53 件は以下の
   - **オーバーロード**: `TypeDef::Struct.methods` は `Vec<MethodSignature>` だが、現在は `signatures.first()` のみ使用（`src/external_types.rs:105` のコメント参照）。オーバーロード対応は `TypeDef::Function` の構造変更が前提（I-211 引継ぎ事項）
   - **影響範囲**: `src/pipeline/external_struct_generator.rs`（I-270 で新規作成）に impl 生成ロジックを追加。`src/ir.rs` の `Item::Impl` を使用（既存）
   - **完了すると**: コンパイルテスト `instanceof-builtin` のスキップ理由が完全解消（struct 定義 + メソッド impl の両方が揃う）
-  - 🔗 I-270（struct 定義生成）の拡張。I-270 完了が前提条件
+  - 🔗 I-270（struct 定義生成）の拡張。I-270 完了済み、着手可能。ただし I-274（フィールド名不一致）の解消が望ましい
 - **[I-264]** **`Proxy`/`Reflect` の型抽出未対応** — ビルトイン型拡張
   - `Proxy` は `declare var Proxy: ProxyConstructor` 形式（interface 名と var 名が不一致）で定義されており、extractor が `Proxy` 名で抽出できない
   - `Reflect` は `declare namespace Reflect { function apply(...): any; ... }` 形式で定義されており、extractor が namespace 内の関数を namespace 名下にまとめる機構がない（`tools/extract-types/src/extractor.ts:84` の `processModuleBody` は namespace 内を再帰するが、関数をトップレベル名で個別登録するため `Reflect.apply` ではなく `apply` として登録される）
@@ -299,17 +301,33 @@ I-112c Phase 1-3 + I-211 で 70→53 件に削減済み。残 53 件は以下の
 
 #### コンパイルエラー修正（ディレクトリコンパイルで検出）
 
-- **[I-270]** **ビルトイン型（ArrayBuffer/ArrayBufferView 等）の struct 定義が変換出力に不在** — ディレクトリコンパイルエラー **1 ファイル**（`types.rs`）
-  - `ArrayBuffer`, `ArrayBufferView` 等の Web API 型が TypeRegistry に型情報として登録されているが、変換出力に struct 定義が含まれない
-  - 外部型（`web_api.json`/`ecmascript.json`）は型情報の照合のみに使われ、struct/trait 定義の Rust コードは生成されない設計
-  - union enum のバリアントが `ArrayBuffer(ArrayBuffer)` のように未定義型を参照し、コンパイルエラーになる
-  - 解決方向: (1) 変換出力で参照される外部型の stub struct を自動生成する、(2) 外部型を `serde_json::Value` 等に型消去する、(3) `type ArrayBuffer = Vec<u8>` のような型エイリアスを生成する。設計判断が必要
-  - 影響: ディレクトリコンパイル 156/158 → 157/158 に阻害（`types.rs` の I-227 エラーは解消済み、残りはこの問題）
-  - コンパイルテスト `instanceof-builtin` のスキップ原因とも同根
-
-#### コード生成基盤
-
-- **[I-190]** **HashMap 変換時の `use std::collections::HashMap` 自動追加**
+- **[I-273]** **types.rs の trait/struct 混同エラー（E0404/E0405）** — ディレクトリコンパイルエラー **5 インスタンス**（`types.rs`）
+  - I-270 で types.rs の struct 定義不在エラーを 36→5 に削減したが、残り 5 件は変換ロジックの問題
+  - **根本原因**: 変換器が enum 型や struct 型を trait bound position に出力している。TypeScript の `extends` や `implements` から変換する際、参照先が interface（→ trait）か class（→ struct）かの判別が不正確
+  - **E0404 (4件)**: `expected trait, found enum/struct`
+    - `ArrayBufferOrSharedArrayBuffer`: 合成 enum が trait position に出力されている。types.rs 内の `impl ... for ... where T: ArrayBufferOrSharedArrayBuffer` のような箇所
+    - `String`: Rust の `String` 型が trait bound として使われている（例: `T: String`）。TypeScript の `extends string` が Rust の trait bound に誤変換
+    - `StatusCode`: Hono 固有型。struct として生成されたが trait position で参照
+    - `ResponseFormat`: 同上
+  - **E0405 (1件)**: `cannot find trait 'out' in 'Input'`
+    - `Input::out` というパス形式の型が trait として解決できない。TypeScript の `Input["out"]` indexed access type の変換残課題
+  - 解決策: `src/pipeline/type_converter.rs` の `convert_ts_type` で `TsType::TsTypeRef` を変換する際、参照先が trait か struct かを `TypeRegistry` で確認し、trait bound position では trait のみを受け入れる。struct の場合は `impl Trait for Struct` パターンに変換するか、trait bound を省略する
+  - 影響: ディレクトリコンパイル 156/158 → 157+/158 の阻害要因。types.rs 以外のファイルにも同様のパターンが潜在する可能性あり
+  - 🔗 I-270（struct 定義生成）の後続課題。I-270 で struct/stub は生成済みだが、trait/struct の使い分けが不正確
+- **[I-274]** **フィールドアクセス・struct リテラルのフィールド名が IR のサニタイズ済み名前と不一致** — サイレント意味変更の可能性
+  - I-270 T1-fix で IR の `StructField.name` にサニタイズ（`sanitize_field_name`）を適用し、struct 定義のフィールド名は有効な Rust 識別子になった
+  - しかし、`Expr::FieldAccess { field }` と `Expr::StructInit { fields }` のフィールド名は TS AST から直接取得されるため、サニタイズされていない
+  - **現在の影響**: TypeScript のプロパティ名は有効な JS 識別子（ハイフン・ブラケットなし）であるため、`sanitize_field_name` は no-op。**現時点では実害なし**
+  - **将来の影響**: 外部型の camelCase フィールド（例: `byteLength`）は `camel_to_snake` で `byte_length` に変換されるが、フィールドアクセス `obj.byteLength` は原名のまま。外部型のメソッド/フィールドアクセスが実装される際（I-270c）に顕在化する
+  - 解決策: transformer が `Expr::FieldAccess` / `Expr::StructInit` を生成する際、TypeDef のフィールド名マッピング（original → sanitized）を参照して変換する。TypeDef にフィールド名の原名→サニタイズ名マッピングを保持するか、フィールドアクセス時に `sanitize_field_name` を適用する
+  - 影響箇所: `src/transformer/expressions/member_access.rs`（`Expr::FieldAccess` 生成）、`src/transformer/expressions/data_literals.rs`（`Expr::StructInit` 生成）
+  - 🔗 I-270c（メソッド impl 生成）の前提条件。外部型のメソッド呼び出し変換を正しく行うには、フィールド名の一貫性が必要
+- **[I-275]** **`resolve_synthetic_placement` の合成型相互参照チェックが O(n²)** — パフォーマンス
+  - `src/pipeline/output_writer.rs:110-112` で各 synthetic item について、他の全 synthetic item のコード文字列を `contains()` で検索している
+  - 計算量: O(n² × k)（n = 合成型数、k = 平均コード長）
+  - Hono 規模（合成型 ~200）では問題ないが、大規模プロジェクトではボトルネックになりうる
+  - 解決策: (1) 事前に全合成型名の `HashSet` を構築し、各コード文字列を 1 回スキャンして参照型名を収集（O(n×k)）。(2) または IR レベルで `collect_type_refs_from_item` を使い、生成コード文字列ではなく IR の型参照グラフで判定する（より正確で高速）
+  - 影響: `output_writer.rs:95-135` の `resolve_synthetic_placement` メソッド全体
 
 #### 未対応構文（小修正）
 
@@ -382,7 +400,7 @@ I-112c Phase 1-3 + I-211 で 70→53 件に削減済み。残 53 件は以下の
 
 ### 前提タスクの完了待ち
 
-- **[I-32]** **コンパイルテストのスキップ解消（残り 7 件）** — indexed-access-type（I-35）、trait-coercion（I-201）、union-fallback（I-202）、any-type-narrowing（I-209）、type-narrowing（I-237+I-238）、array-builtin-methods（I-217+I-265）、instanceof-builtin（I-270: ビルトイン型 struct 未定義）。各原因の修正が前提
+- **[I-32]** **コンパイルテストのスキップ解消（残り 7 件）** — indexed-access-type（I-35）、trait-coercion（I-201）、union-fallback（I-202）、any-type-narrowing（I-209）、type-narrowing（I-237+I-238）、array-builtin-methods（I-217+I-265）、instanceof-builtin（I-270c: メソッド impl 不在。struct 定義は I-270 で解決済み）。各原因の修正が前提
 - **[I-183]** **HTTP E2E テスト基盤 + fetch 変換** — I-30（Cargo.toml 依存追加）の解消が前提
 
 ---

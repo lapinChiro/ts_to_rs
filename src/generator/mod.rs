@@ -71,7 +71,7 @@ fn generate_item(item: &Item) -> String {
                 let field_vis = generate_vis(field.vis.as_ref().unwrap_or(vis));
                 out.push_str(&format!(
                     "    {field_vis}{}: {},\n",
-                    sanitize_field_name(&field.name),
+                    escape_ident(&field.name),
                     generate_type(&field.ty)
                 ));
             }
@@ -518,45 +518,6 @@ fn is_derivable_type(ty: &RustType) -> bool {
         RustType::Named { type_args, .. } => type_args.iter().all(is_derivable_type),
         _ => true,
     }
-}
-
-/// struct フィールド名を有効な Rust 識別子に変換する。
-///
-/// TypeScript のオブジェクトキーは任意の文字列だが、Rust の識別子には制約がある。
-/// 以下の変換を適用:
-/// 1. ハイフン → アンダースコア（`Content-Type` → `content_type`）
-/// 2. ブラケット除去（`foo[]` → `foo`）
-/// 3. `_` のみ → `_field`（Rust では `_` は破棄パターン）
-/// 4. 先頭が数字 → `_` プレフィクス
-/// 5. Rust 予約語 → `r#` プレフィクス
-fn sanitize_field_name(name: &str) -> String {
-    // Step 1-2: 不正な文字の置換・除去
-    let mut sanitized = String::with_capacity(name.len());
-    for ch in name.chars() {
-        match ch {
-            '-' => sanitized.push('_'),
-            '[' | ']' => {} // 除去
-            _ => sanitized.push(ch),
-        }
-    }
-
-    // Step 3: `_` のみ
-    if sanitized == "_" {
-        return "_field".to_string();
-    }
-
-    // Step 4: 先頭が数字
-    if sanitized.starts_with(|c: char| c.is_ascii_digit()) {
-        sanitized.insert(0, '_');
-    }
-
-    // Step 5: 空文字チェック
-    if sanitized.is_empty() {
-        return "_empty".to_string();
-    }
-
-    // Step 6: Rust 予約語エスケープ
-    escape_ident(&sanitized)
 }
 
 /// Rust の予約語をエスケープする（`type` → `r#type`）。

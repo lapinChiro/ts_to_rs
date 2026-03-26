@@ -88,31 +88,48 @@ impl<'a> OutputWriter<'a> {
         let mut inline: HashMap<PathBuf, Vec<String>> = HashMap::new();
         let mut shared_items: Vec<String> = Vec::new();
 
-        for item in synthetic_items {
-            let name = synthetic_type_name(item);
-            let code = crate::generator::generate(std::slice::from_ref(item));
+        // 全 synthetic item のコード生成と名前の収集
+        let generated: Vec<(String, String)> = synthetic_items
+            .iter()
+            .map(|item| {
+                let name = synthetic_type_name(item);
+                let code = crate::generator::generate(std::slice::from_ref(item));
+                (name, code)
+            })
+            .collect();
 
+        for (name, code) in &generated {
             // 合成型名を参照しているファイルを検索
             let referencing_files: Vec<&PathBuf> = file_outputs
                 .iter()
-                .filter(|(_, source)| source.contains(&name))
+                .filter(|(_, source)| source.contains(name))
                 .map(|(path, _)| path)
                 .collect();
 
+            // 他の synthetic item から参照されているかチェック
+            let referenced_by_synthetic = generated
+                .iter()
+                .any(|(other_name, other_code)| other_name != name && other_code.contains(name));
+
             match referencing_files.len() {
-                0 => {
-                    // 未使用 — 配置しない
+                0 if referenced_by_synthetic => {
+                    // file_outputs からは未参照だが、他の synthetic item から参照される
+                    // → shared module に配置（types.rs 内の相互依存を解決）
+                    shared_items.push(code.clone());
                 }
-                1 => {
+                0 => {
+                    // 完全に未使用 — 配置しない
+                }
+                1 if !referenced_by_synthetic => {
                     // 1 ファイルのみ → inline
                     inline
                         .entry(referencing_files[0].clone())
                         .or_default()
-                        .push(code);
+                        .push(code.clone());
                 }
                 _ => {
-                    // 2+ ファイル → shared module
-                    shared_items.push(code);
+                    // 2+ ファイル、または 1 ファイル + synthetic 参照 → shared module
+                    shared_items.push(code.clone());
                 }
             }
         }
@@ -120,7 +137,14 @@ impl<'a> OutputWriter<'a> {
         let shared_module = if shared_items.is_empty() {
             None
         } else {
-            Some((PathBuf::from("types.rs"), shared_items.join("\n\n")))
+            let body = shared_items.join("\n\n");
+            let imports = generate_types_rs_imports(&body);
+            let content = if imports.is_empty() {
+                body
+            } else {
+                format!("{imports}\n\n{body}")
+            };
+            Some((PathBuf::from("types.rs"), content))
         };
 
         SyntheticPlacement {
@@ -215,6 +239,23 @@ fn synthetic_type_name(item: &Item) -> String {
         Item::Use { path, .. } => path.clone(),
         Item::Comment(text) | Item::RawCode(text) => text.clone(),
     }
+}
+
+/// types.rs に必要なインポート文を生成する。
+///
+/// 生成されたコード内で使用されているが、types.rs 自身ではインポートされていない
+/// クレートや標準ライブラリ型のインポートを検出して生成する。
+fn generate_types_rs_imports(code: &str) -> String {
+    let mut imports = Vec::new();
+
+    if code.contains("serde_json::") {
+        imports.push("use serde_json;");
+    }
+    if code.contains("HashMap<") {
+        imports.push("use std::collections::HashMap;");
+    }
+
+    imports.join("\n")
 }
 
 /// file_outputs のパスからディレクトリ一覧を取得する（深い方から順）。

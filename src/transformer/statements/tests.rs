@@ -2677,7 +2677,7 @@ fn test_convert_var_decl_trait_type_generates_box_dyn() {
     );
     reg.register(
         "Greeter".to_string(),
-        TypeDef::new_interface(vec![], methods, vec![]),
+        TypeDef::new_interface(vec![], vec![], methods, vec![]),
     );
     let stmts = parse_fn_body("function _f(): void { const g: Greeter = null as any; }");
     let stmt = &stmts[0];
