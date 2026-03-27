@@ -176,11 +176,22 @@ impl<'a> Transformer<'a> {
             );
         }
 
-        // Look up field types from the registry for spread expansion and optional None completion
-        let struct_fields = self.reg().get(struct_name).and_then(|def| match def {
-            TypeDef::Struct { fields, .. } => Some(fields.clone()),
-            _ => None,
-        });
+        // Look up field types for spread expansion and optional None completion.
+        // Priority: pre-resolved spread_fields from TypeResolver (handles type param
+        // constraints, Option unwrap, type_args instantiation) → TypeRegistry fallback.
+        let obj_span = crate::pipeline::type_resolution::Span::from_swc(obj_lit.span);
+        let struct_fields = self
+            .tctx
+            .type_resolution
+            .spread_fields
+            .get(&obj_span)
+            .cloned()
+            .or_else(|| {
+                self.reg().get(struct_name).and_then(|def| match def {
+                    TypeDef::Struct { fields, .. } => Some(fields.clone()),
+                    _ => None,
+                })
+            });
 
         let mut fields = Vec::new();
         let mut spreads: Vec<Expr> = Vec::new();

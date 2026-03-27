@@ -5,8 +5,12 @@
 
 use swc_ecma_ast as ast;
 
+use std::collections::HashMap;
+
 use crate::ir::RustType;
+use crate::pipeline::type_converter::convert_ts_type;
 use crate::pipeline::ResolvedType;
+use crate::pipeline::SyntheticTypeRegistry;
 use crate::registry::{TypeDef, TypeRegistry};
 
 /// Returns true if the expression is a `null` literal or `undefined` identifier.
@@ -181,6 +185,26 @@ pub(super) fn select_overload<'a>(
 
     // Stage 5: fallback to first signature
     &sigs[0]
+}
+
+/// Extracts type parameter constraints from a `TsTypeParamDecl`.
+///
+/// For each type parameter with an `extends` constraint, converts the constraint
+/// type and adds it to the map. Unconstrained type parameters are skipped.
+pub(super) fn collect_type_param_constraints(
+    type_params: &ast::TsTypeParamDecl,
+    synthetic: &mut SyntheticTypeRegistry,
+    registry: &TypeRegistry,
+) -> HashMap<String, RustType> {
+    let mut constraints = HashMap::new();
+    for param in &type_params.params {
+        if let Some(constraint) = &param.constraint {
+            if let Ok(rust_ty) = convert_ts_type(constraint, synthetic, registry) {
+                constraints.insert(param.name.sym.to_string(), rust_ty);
+            }
+        }
+    }
+    constraints
 }
 
 /// Promise<T> → T に展開し、Unit（void）は None にする。

@@ -193,6 +193,19 @@ impl<'a> TypeResolver<'a> {
                 }
 
                 let obj_span = Span::from_swc(obj.span);
+
+                // Store resolved spread fields for Transformer's spread expansion.
+                // Must be done before the early return for pre-set expected types,
+                // because the Transformer needs field names/types to convert `...spread`
+                // into individual `field: spread.field` accesses regardless of how the
+                // expected type was determined.
+                if !spread_types.is_empty() {
+                    if let Some(fields) = self.merge_object_fields(&spread_types, &explicit_fields)
+                    {
+                        self.result.spread_fields.insert(obj_span, fields);
+                    }
+                }
+
                 if self.result.expected_types.contains_key(&obj_span) {
                     // Expected type already set (from annotation, return type, etc.)
                     // — skip anonymous struct generation
@@ -208,11 +221,18 @@ impl<'a> TypeResolver<'a> {
                 }
 
                 // Build merged field list: spread source fields + explicit fields.
-                // Returns None if any spread source's fields can't be resolved
-                // (prevents generating incomplete structs that silently drop fields).
-                let merged = match self.merge_object_fields(&spread_types, &explicit_fields) {
-                    Some(fields) if !fields.is_empty() => fields,
-                    _ => return ResolvedType::Unknown,
+                // When spreads exist, use the pre-stored spread_fields (computed above).
+                // When no spreads, merge from explicit fields only.
+                let merged = if !spread_types.is_empty() {
+                    match self.result.spread_fields.get(&obj_span).cloned() {
+                        Some(fields) if !fields.is_empty() => fields,
+                        _ => return ResolvedType::Unknown,
+                    }
+                } else {
+                    match self.merge_object_fields(&[], &explicit_fields) {
+                        Some(fields) if !fields.is_empty() => fields,
+                        _ => return ResolvedType::Unknown,
+                    }
                 };
 
                 // Determine the expected type:
@@ -538,6 +558,16 @@ impl<'a> TypeResolver<'a> {
     fn resolve_arrow_expr(&mut self, arrow: &ast::ArrowExpr) -> ResolvedType {
         self.enter_scope();
 
+        // Register type parameter constraints (e.g., `<E extends Env>` → {"E": Named("Env")})
+        let prev_constraints = if let Some(type_params) = &arrow.type_params {
+            let constraints =
+                collect_type_param_constraints(type_params, self.synthetic, self.registry);
+            let prev = std::mem::replace(&mut self.type_param_constraints, constraints);
+            Some(prev)
+        } else {
+            None
+        };
+
         // Save and set return type (Promise<T> → T, void → None, trait → Box<dyn Trait>)
         let prev_return_type = self.current_fn_return_type.take();
         if let Some(return_ann) = &arrow.return_type {
@@ -639,6 +669,9 @@ impl<'a> TypeResolver<'a> {
 
         let return_type = self.current_fn_return_type.take().unwrap_or(RustType::Unit);
         self.current_fn_return_type = prev_return_type;
+        if let Some(prev) = prev_constraints {
+            self.type_param_constraints = prev;
+        }
         self.leave_scope();
 
         ResolvedType::Known(RustType::Fn {
@@ -650,6 +683,16 @@ impl<'a> TypeResolver<'a> {
     /// Resolves a function expression, walking its body.
     fn resolve_fn_expr(&mut self, fn_expr: &ast::FnExpr) -> ResolvedType {
         self.enter_scope();
+
+        // Register type parameter constraints
+        let prev_constraints = if let Some(type_params) = &fn_expr.function.type_params {
+            let constraints =
+                collect_type_param_constraints(type_params, self.synthetic, self.registry);
+            let prev = std::mem::replace(&mut self.type_param_constraints, constraints);
+            Some(prev)
+        } else {
+            None
+        };
 
         let prev_return_type = self.current_fn_return_type.take();
         if let Some(return_ann) = &fn_expr.function.return_type {
@@ -694,6 +737,9 @@ impl<'a> TypeResolver<'a> {
 
         let return_type = self.current_fn_return_type.take().unwrap_or(RustType::Unit);
         self.current_fn_return_type = prev_return_type;
+        if let Some(prev) = prev_constraints {
+            self.type_param_constraints = prev;
+        }
         self.leave_scope();
 
         ResolvedType::Known(RustType::Fn {

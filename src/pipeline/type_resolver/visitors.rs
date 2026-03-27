@@ -36,6 +36,7 @@ impl<'a> TypeResolver<'a> {
         // the function is visible to sibling statements (TS hoisting semantics).
         let fn_name = fn_decl.ident.sym.to_string();
         let fn_span = Span::from_swc(fn_decl.ident.span);
+
         let params: Vec<(String, RustType)> = fn_decl
             .function
             .params
@@ -72,6 +73,17 @@ impl<'a> TypeResolver<'a> {
 
         self.enter_scope();
 
+        // Register type parameter constraints after entering scope
+        // (consistent with resolve_arrow_expr / resolve_fn_expr)
+        let prev_constraints = if let Some(type_params) = &fn_decl.function.type_params {
+            let constraints =
+                collect_type_param_constraints(type_params, self.synthetic, self.registry);
+            let prev = std::mem::replace(&mut self.type_param_constraints, constraints);
+            Some(prev)
+        } else {
+            None
+        };
+
         // Record return type for expected_types on return statements
         // Promise<T> → T, void → None (Rust omits `-> ()`)
         let prev_return_type = self.current_fn_return_type.take();
@@ -88,6 +100,9 @@ impl<'a> TypeResolver<'a> {
         }
 
         self.current_fn_return_type = prev_return_type;
+        if let Some(prev) = prev_constraints {
+            self.type_param_constraints = prev;
+        }
         self.leave_scope();
     }
 
@@ -223,6 +238,18 @@ impl<'a> TypeResolver<'a> {
         class_span: Span,
     ) {
         self.enter_scope();
+
+        // Register class type parameter constraints after entering scope
+        // (consistent with visit_fn_decl / resolve_arrow_expr / resolve_fn_expr)
+        let prev_constraints = if let Some(type_params) = &class.type_params {
+            let constraints =
+                collect_type_param_constraints(type_params, self.synthetic, self.registry);
+            let prev = std::mem::replace(&mut self.type_param_constraints, constraints);
+            Some(prev)
+        } else {
+            None
+        };
+
         // Register `this` as the class's Named type.
         let this_type = ResolvedType::Known(RustType::Named {
             name: class_name.to_string(),
@@ -261,6 +288,22 @@ impl<'a> TypeResolver<'a> {
                                 );
                             }
                         }
+                        // Register method type parameter constraints
+                        let prev_method_constraints = if let Some(type_params) =
+                            &method.function.type_params
+                        {
+                            let constraints = collect_type_param_constraints(
+                                type_params,
+                                self.synthetic,
+                                self.registry,
+                            );
+                            let prev =
+                                std::mem::replace(&mut self.type_param_constraints, constraints);
+                            Some(prev)
+                        } else {
+                            None
+                        };
+
                         // Register parameters
                         for param in &method.function.params {
                             self.visit_param_pat(&param.pat);
@@ -286,6 +329,9 @@ impl<'a> TypeResolver<'a> {
                             self.visit_stmt(stmt);
                         }
                         self.current_fn_return_type = prev_return_type;
+                        if let Some(prev) = prev_method_constraints {
+                            self.type_param_constraints = prev;
+                        }
                         self.leave_scope();
                     }
                 }
@@ -326,6 +372,9 @@ impl<'a> TypeResolver<'a> {
                 }
                 _ => {}
             }
+        }
+        if let Some(prev) = prev_constraints {
+            self.type_param_constraints = prev;
         }
         self.leave_scope();
     }

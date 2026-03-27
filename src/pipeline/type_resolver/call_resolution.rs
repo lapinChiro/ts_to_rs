@@ -177,12 +177,12 @@ impl<'a> TypeResolver<'a> {
 
             // Set element type for rest parameter arguments
             if let Some(ref elem_ty) = rest_element_type {
-                let rest_types: Vec<RustType> = std::iter::repeat_n(
-                    elem_ty.clone(),
-                    args.len().saturating_sub(regular_params.len()),
-                )
-                .collect();
-                self.propagate_arg_expected_types(&args[regular_params.len()..], &rest_types);
+                if args.len() > regular_params.len() {
+                    let rest_types: Vec<RustType> =
+                        std::iter::repeat_n(elem_ty.clone(), args.len() - regular_params.len())
+                            .collect();
+                    self.propagate_arg_expected_types(&args[regular_params.len()..], &rest_types);
+                }
             }
         }
     }

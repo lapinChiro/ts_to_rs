@@ -103,6 +103,8 @@ Overview of tests to add/modify. Include normal cases, error cases, and boundary
 ## Completion Criteria
 
 Conditions for this PRD's work to be considered "complete". Include quality checks (clippy, fmt, test).
+
+**Impact estimates (error count reduction) must be verified by tracing actual code paths for at least 3 representative error instances.** Label-based estimation (counting by error category name) is prohibited. Each traced instance must confirm that the proposed fix resolves the specific failure point in the execution path.
 ```
 
 ## Design Decision Principles
@@ -124,3 +126,4 @@ Conditions for this PRD's work to be considered "complete". Include quality chec
 - Declaring something out of scope because "Rust has no directly corresponding syntax" or "cannot be expressed in Rust" — this is a design challenge, not proof of conversion impossibility. If no method is found, interview the user
 - Omitting the design integrity review (even if no issues, state "verified")
 - Writing vague task work descriptions, completion criteria, or dependencies (specifically name target files, functions, and types)
+- Estimating error count reduction based solely on error category labels without tracing actual code paths for representative instances (at least 3). The estimate must be grounded in confirmed execution path analysis, not hypothetical pattern matching

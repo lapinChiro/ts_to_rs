@@ -41,6 +41,11 @@ pub struct TypeResolver<'a> {
     /// with a more specific enum type, so `expr_types` records the correct type
     /// from the start.
     any_enum_overrides: Vec<AnyEnumOverride>,
+
+    /// Type parameter constraints in the current scope.
+    /// `E extends Env` → {"E": Named("Env")}.
+    /// Populated when entering generic functions/classes, cleared on scope exit.
+    type_param_constraints: HashMap<String, RustType>,
 }
 
 /// A scope containing variable bindings.
@@ -66,6 +71,7 @@ impl<'a> TypeResolver<'a> {
             current_fn_return_type: None,
             result: FileTypeResolution::empty(),
             any_enum_overrides: Vec::new(),
+            type_param_constraints: HashMap::new(),
         }
     }
 

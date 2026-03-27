@@ -37,6 +37,45 @@ impl<'a> TypeResolver<'a> {
         }
     }
 
+    /// Resolves the field list from a spread source type.
+    ///
+    /// Handles three resolution strategies in order:
+    /// 1. `Option<T>` → unwrap and resolve inner type's fields
+    /// 2. `Named` type → registry lookup (with type_args instantiation if present)
+    /// 3. `Named` type not in registry → type parameter constraint lookup
+    fn resolve_spread_source_fields(
+        &self,
+        spread_ty: &RustType,
+    ) -> Option<Vec<(String, RustType)>> {
+        match spread_ty {
+            // 1. Option<T> → unwrap and resolve inner
+            RustType::Option(inner) => self.resolve_spread_source_fields(inner),
+            // 2. Named type
+            RustType::Named { name, type_args } => {
+                // 2a. Instantiate with type_args if present
+                let type_def = if type_args.is_empty() {
+                    self.registry.get(name).cloned()
+                } else {
+                    self.registry.instantiate(name, type_args)
+                };
+                if let Some(TypeDef::Struct { fields, .. }) = type_def {
+                    return Some(fields);
+                }
+                // 2b. Type parameter → resolve via constraint.
+                // Only applies when type_args is empty (bare type parameter like `E`).
+                // A name with type_args (like `Foo<Bar>`) is a concrete type, not a
+                // type parameter, so constraint lookup would be semantically wrong.
+                if type_args.is_empty() {
+                    if let Some(constraint) = self.type_param_constraints.get(name) {
+                        return self.resolve_spread_source_fields(constraint);
+                    }
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+
     /// Merges fields from spread sources and explicit properties into a unified field list.
     ///
     /// Spread source types are resolved through TypeRegistry to extract their fields.
@@ -55,16 +94,8 @@ impl<'a> TypeResolver<'a> {
 
         // Collect fields from spread sources (in order)
         for spread_ty in spread_types {
-            let fields = match spread_ty {
-                RustType::Named { name, .. } => match self.registry.get(name) {
-                    Some(TypeDef::Struct { fields, .. }) => fields,
-                    // Named type but not a Struct in registry (enum, function, etc.)
-                    _ => return None,
-                },
-                // Non-Named type (any, Vec, HashMap, etc.) — cannot extract fields
-                _ => return None,
-            };
-            for (field_name, field_ty) in fields {
+            let fields = self.resolve_spread_source_fields(spread_ty)?;
+            for (field_name, field_ty) in &fields {
                 if let Some(pos) = merged.iter().position(|(n, _)| n == field_name) {
                     merged[pos] = (field_name.clone(), field_ty.clone());
                 } else {

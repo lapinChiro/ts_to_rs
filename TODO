@@ -11,6 +11,9 @@
 - **Rules/Skills/CLAUDE.mdの言語**: これらは英語で記載した方が効率的なのではないか。レスポンスだけ日本語にして、読み込まれるファイルはすべて英語の方が良いのではないか
 - **現在の実装の徹底的なレビュー**: どのような実装が理想的であるか、どのような観点でレビューしなければいけないかを言語化し、詳細な観点リストを作成したうえで、レビューを行う。作成した観点リスト、理想的な実装の説明文書はルールやスキルなど、適切な方法で永続化し、今後の実装が理想的にあり続けるようにする。
 - テストケースの徹底的なレビューとテスト技法の適用
+- cargo nextest導入検討
+- テストケースの徹底的な見直し
+- テスト実行環境の改修、高速化
 
 ## 運用ルール
 
@@ -42,7 +45,7 @@
 
 | フェーズ | 移行基準 | 対象 |
 |---------|---------|------|
-| **現在: 変換率の大幅改善** | エラーインスタンス < 50 件 | 残 48 件を I-267（return/new ~10件）+ I-268（ジェネリクス展開 14件）+ I-269（Optional unwrap 4件）で段階解消。I-266（コンストラクタ引数）完了で 53→48 件に削減 |
+| **現在: 変換率の大幅改善** | エラーインスタンス < 50 件 | 残 48 件。I-268/I-269 は TypeResolver 実装完了だが Hono の 48 件はクロスモジュール型参照が主因で削減に至らず。I-267（return/new ~10件）+ I-275（multiple spread 順序）で段階解消 |
 | **次: コンパイル品質** | ディレクトリコンパイルエラー 0 件 | 残 5 件は I-273（trait/struct 混同） |
 | **その次: テスト拡充** | E2E テスト網羅性 | E2E テストの拡充（I-20, I-71, I-72, I-74）、HTTP 対応（I-183） |
 
@@ -82,9 +85,9 @@
   - 解決策: default を常に最後のアームに移動する
   - 発生頻度は極めて低いが、サイレント意味変更カテゴリのため Tier 1
 
-#### 型変換・型推論（レバレッジ最大 — OBJECT_LITERAL_NO_TYPE 48 件）
+#### 型変換・型推論（OBJECT_LITERAL_NO_TYPE 48 件）
 
-I-112c Phase 1-3 + I-211 + I-266 で 70→48 件に削減済み（2026-03-27 実測値）。残 48 件は以下の 3 イシューで段階解消。
+I-112c Phase 1-3 + I-211 + I-266 + I-268 + I-269 で 70→48 件に削減済み（2026-03-28 実測値）。I-268/I-269 は TypeResolver の機能実装として完了したが、Hono ベンチの 48 件は主にクロスモジュール型参照未解決に起因しており、I-268/I-269 の対象パターンではなかった（PRD 見積もり誤り。詳細: I-268/I-269 の PRD で件数見積もりをエラーラベルベースの推定で行い、実際のコードパストレースを怠った）。
 
 - **[I-267]** **return 式のオブジェクトリテラル型推定** — **~10 インスタンス**
   - `return { field: value }` で関数の戻り値型から expected type を逆引きする
@@ -93,21 +96,14 @@ I-112c Phase 1-3 + I-211 + I-266 で 70→48 件に削減済み（2026-03-27 実
   - 解決策: `return { ... }` は関数の戻り値型から expected type を逆引き（既存の return 文 expected type 基盤を拡張）
   - 🔗 I-112c の子イシュー。I-266 完了済み、着手可能
 
-- **[I-268]** **ジェネリクスパラメータのフィールド展開** — **14 インスタンス**（I-112c の 26.9%）
-  - `E extends Env` のようなジェネリクス型パラメータをスプレッドソースとして展開する
-  - 例: `adapter/bun/serve-static.ts:8`, `adapter/deno/serve-static.ts:8` — `serveStatic<E extends Env>` 内の `getFilePath({ filename: ... })`
-  - 例: `hono.ts:16`, `preset/quick.ts:13` — `Hono<E extends Env>` クラス
-  - 例: `request.ts:36` — `HonoRequest<P extends string>` クラス
-  - 影響ファイル: `adapter/cloudflare-pages/handler.ts` (2件), `helper/dev/index.ts` (2件), 他 10 ファイル (各1件)
-  - 解決策: `TypeRegistry::instantiate` で制約型（`Env` 等）のフィールド情報を取得し、ジェネリクス型パラメータをスプレッドソースとしてフィールド展開する。`type_converter.rs` の `resolve_spread_fields` を拡張
-  - 🔗 I-112c の子イシュー
-
-- **[I-269]** **Optional 型スプレッドの unwrap** — **4 インスタンス**（I-112c の 7.7%）
-  - `options?: CORSOptions` のスプレッドで `Option<CORSOptions>` → `CORSOptions` のフィールド展開
-  - 例: `middleware/cors/index.ts:63` — `const defaults = { origin: "*", ...options }` で `options?: CORSOptions`
-  - 例: `middleware/csrf/index.ts:94`, `middleware/etag/index.ts:79`, `helper/proxy/index.ts:160`
-  - 解決策: スプレッドソースの型が `Option<T>` の場合、`T` のフィールド情報を取得してフィールド展開する。`type_converter.rs` の `resolve_spread_fields` で `RustType::Option(inner)` を unwrap
-  - 🔗 I-112c の子イシュー。I-268（ジェネリクス展開）と同じ基盤
+- **[I-275]** **multiple spread のフィールド上書き順序が TS と逆転する** — サイレント意味変更
+  - `{ ...a, ...b }` で TS のセマンティクスは「b のフィールドが a のフィールドを上書き」だが、生成 Rust コードでは `a` のフィールドが先に展開され `b` が struct update base になるため、`a` の値が残り `b` の値で上書きされない
+  - 発生箇所: `src/transformer/expressions/data_literals.rs:254-279` — multiple spread 処理
+  - 具体例: `const merged = { ...a, ...b }` で `a = {host: "a.com", port: 80}`, `b = {host: "b.com", port: 443}` → TS では `merged.host === "b.com"` だが Rust では `merged.host == "a.com"`
+  - 根本原因: line 258 で `earlier`（先のスプレッド群）のフィールドを明示展開し、`last`（最後のスプレッド）を struct update base にしている。struct update syntax は「明示されていないフィールドのみ base から補完」するため、`earlier` で展開済みのフィールドは `last` の値で上書きされない
+  - 解決策: フィールド展開の順序を逆にする — `last` のフィールドを先に展開し、`earlier` のフィールドは `last` に含まれないもののみ補完する。または struct update syntax を使わず全スプレッドソースのフィールドを展開し、後のスプレッドが同名フィールドを上書きする方式にする
+  - E2E テスト `object_spread.ts` で発見（multiple spread ケースを検証した際に不一致を確認）。現在は E2E テストから除外済み
+  - サイレント意味変更カテゴリだが、multiple spread パターンの発生頻度は低い
 
 - **[I-221]** **unsupported intersection member type** — **9 インスタンス**
   - intersection の一部メンバー型が未対応（`try_convert_intersection_type` で処理できない型）

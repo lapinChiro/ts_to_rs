@@ -134,6 +134,14 @@ pub struct FileTypeResolution {
     /// are scoped to the function/arrow body where the variable is declared, so the
     /// Transformer can use the enum type instead of `Any` for variable declarations.
     pub any_enum_overrides: Vec<AnyEnumOverride>,
+
+    /// Pre-resolved struct field lists for object literals with spread sources.
+    ///
+    /// When TypeResolver resolves spread source fields (via `resolve_spread_source_fields`),
+    /// the result is stored here keyed by the object literal's span. The Transformer
+    /// reads this to expand spreads into individual field accesses, avoiding the need
+    /// to re-resolve type parameter constraints or Option unwrapping.
+    pub spread_fields: HashMap<Span, Vec<(String, RustType)>>,
 }
 
 impl FileTypeResolution {
@@ -146,6 +154,7 @@ impl FileTypeResolution {
             var_mutability: HashMap::new(),
             du_field_bindings: Vec::new(),
             any_enum_overrides: Vec::new(),
+            spread_fields: HashMap::new(),
         }
     }
 

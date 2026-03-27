@@ -1,6 +1,7 @@
 use std::fs;
 use std::process::Command;
 use std::sync::Mutex;
+use std::time::{Duration, SystemTime};
 
 use ts_to_rs::transpile;
 
@@ -15,6 +16,32 @@ const TSX_BIN: &str = "tests/e2e/node_modules/.bin/tsx";
 
 /// Mutex to serialize E2E tests (they share the same rust-runner project).
 static E2E_LOCK: Mutex<()> = Mutex::new(());
+
+/// Tracks the last mtime set on rust-runner source files.
+///
+/// Cargo detects source changes via mtime comparison. On WSL2's ext4, rapid
+/// consecutive writes can share the same mtime (nanosecond resolution but
+/// batched updates), causing cargo to skip rebuilds. This tracks the last
+/// mtime we set, ensuring each write gets a strictly later mtime.
+static LAST_MTIME: Mutex<Option<SystemTime>> = Mutex::new(None);
+
+/// Writes content to a file and ensures its mtime is strictly newer than any
+/// previous call, so cargo's fingerprint check always detects the change.
+fn write_with_advancing_mtime(path: &str, content: &str) {
+    fs::write(path, content).unwrap_or_else(|e| panic!("failed to write {path}: {e}"));
+    let mut last = LAST_MTIME.lock().unwrap();
+    let prev = last.unwrap_or(SystemTime::UNIX_EPOCH);
+    // Use the later of "now" or "previous mtime + 1s" to guarantee monotonic increase
+    // without accumulating unbounded future offsets.
+    let next = SystemTime::now().max(prev + Duration::from_secs(1));
+    *last = Some(next);
+    let file = fs::File::options()
+        .write(true)
+        .open(path)
+        .unwrap_or_else(|e| panic!("failed to open {path} for mtime update: {e}"));
+    file.set_modified(next)
+        .unwrap_or_else(|e| panic!("failed to set mtime on {path}: {e}"));
+}
 
 /// Strips internal module `use` statements while preserving external crate imports.
 fn strip_internal_use_statements(rs_source: &str) -> String {
@@ -67,8 +94,7 @@ fn execute_e2e_with_options(name: &str, opts: &E2eOptions) -> E2eResult {
 
     // Step 2: Write Rust source and run
     let main_path = format!("{RUST_RUNNER_DIR}/src/main.rs");
-    fs::write(&main_path, &rs_source)
-        .unwrap_or_else(|e| panic!("failed to write {main_path}: {e}"));
+    write_with_advancing_mtime(&main_path, &rs_source);
 
     let mut rust_cmd = Command::new("cargo");
     rust_cmd
@@ -277,8 +303,7 @@ fn run_e2e_multi_file_test(name: &str) {
             main_rs = rs_source;
         } else {
             let mod_path = format!("{RUST_RUNNER_DIR}/src/{stem}.rs");
-            fs::write(&mod_path, &rs_source)
-                .unwrap_or_else(|e| panic!("failed to write {mod_path}: {e}"));
+            write_with_advancing_mtime(&mod_path, &rs_source);
             mod_names.push(stem);
         }
     }
@@ -288,8 +313,7 @@ fn run_e2e_multi_file_test(name: &str) {
     let full_main = format!("{mod_decls}{main_rs}");
 
     let main_path = format!("{RUST_RUNNER_DIR}/src/main.rs");
-    fs::write(&main_path, &full_main)
-        .unwrap_or_else(|e| panic!("failed to write {main_path}: {e}"));
+    write_with_advancing_mtime(&main_path, &full_main);
 
     // Run Rust
     let rust_output = Command::new("cargo")
@@ -674,4 +698,9 @@ fn test_e2e_object_literal_inference_ts_rust_stdout_match() {
 #[test]
 fn test_e2e_string_escape_ts_rust_stdout_match() {
     run_e2e_test("string_escape");
+}
+
+#[test]
+fn test_e2e_object_spread_ts_rust_stdout_match() {
+    run_e2e_test("object_spread");
 }
