@@ -39,14 +39,30 @@
 
 最大カテゴリである OBJECT_LITERAL_NO_TYPE 52 件を、型が解決できない根本原因で細分類した。
 
+> **⚠️ 訂正（2026-03-27）**: 当初の `function_arg` 分類は不正確だった。2026-03-27 の詳細調査（デバッグ出力による全 66 件の個別分析）により、`function_arg` と分類した 20 件の実際の根本原因は多様であることが判明した。既存の `set_call_arg_expected_types` は正常に動作しており、「関数引数位置の expected type 逆引き機構が不在」という前提が誤りだった。正確な分類は `backlog/I-266-constructor-and-call-arg-expected-types.md` を参照。
+
 | 根本原因 | 件数 | 割合 | 解消に必要な開発 |
 |----------|------|------|------------------|
-| **function_arg** | 20 | 38.5% | 関数引数位置のオブジェクトリテラルに対し、関数シグネチャのパラメータ型から expected type を逆引きする |
+| ~~**function_arg**~~ | ~~20~~ | ~~38.5%~~ | ~~関数引数位置のオブジェクトリテラルに対し、関数シグネチャのパラメータ型から expected type を逆引きする~~ |
 | **return_new** | 14 | 26.9% | `return new Xxx({...})` や `return {...}` でクラスコンストラクタ/関数の戻り値型から型を推定する |
 | **generic_param** | 14 | 26.9% | `E extends Env` のようなジェネリクス型パラメータのフィールドを `TypeRegistry::instantiate` で展開する |
 | **optional_spread** | 4 | 7.7% | `options?: CORSOptions` のスプレッドで `Option<T>` を unwrap してフィールド展開する |
 
-### function_arg（20 件）の例
+**2026-03-27 訂正後の正確な分類**（ディレクトリモード変換で全 66 件のオブジェクトリテラルをデバッグ出力で個別分析）:
+
+| 根本原因 | 件数 | 説明 |
+|----------|------|------|
+| PROPS_NO_EXPECTED | 29 | プロパティあり・expected 未設定（`new` 式引数、型注釈なし変数等） |
+| EMPTY_OBJ_NO_EXPECTED | 19 | `return {}`、`|| {}` 等の空オブジェクト |
+| SPREAD_NO_EXPECTED | 7 | スプレッド含むが expected 未設定 |
+| WRONG_EXPECTED(String) | 6 | `resolve_new_expr` が struct フィールドをコンストラクタパラメータと誤認 |
+| WRONG_EXPECTED(Tuple) | 2 | 同上 |
+| WRONG_EXPECTED(Bool) | 2 | 同上 |
+| WRONG_EXPECTED(Any) | 1 | パラメータ型 `unknown` で構造体名特定不可 |
+
+最大の根本原因は **`resolve_new_expr` がコンストラクタパラメータではなく struct フィールドを引数の expected type として使用するバグ**（WRONG_EXPECTED 計 10 件 + PROPS_NO_EXPECTED の多数）。
+
+### ~~function_arg（20 件）の例~~ — 訂正: 分類が不正確
 
 ```typescript
 // middleware/basic-auth/index.ts:80
@@ -58,7 +74,9 @@ const basicAuth = (options: BasicAuthOptions) => {
 }
 ```
 
-オブジェクトリテラルが関数のローカル変数として宣言され、型注釈がない。関数引数のパラメータ型や、その後の代入先から型を推定する必要がある。
+~~オブジェクトリテラルが関数のローカル変数として宣言され、型注釈がない。関数引数のパラメータ型や、その後の代入先から型を推定する必要がある。~~
+
+**訂正**: 上記の例を含む 20 件は、実際には `new Response(body, { status })` のコンストラクタ引数、型注釈なし変数宣言、コンディショナル型パラメータ等の混合であり、単一の「関数引数 expected type」施策では解消できない。詳細は `backlog/I-266-constructor-and-call-arg-expected-types.md` を参照。
 
 ### return_new（14 件）の例
 
@@ -97,16 +115,18 @@ const cors = (options?: CORSOptions) => {
 
 以下、各施策の実装により解消が見込まれるエラー数を予測する。
 
-### 施策 A: 関数引数位置の expected type 逆引き（最大効果）
+### 施策 A: ~~関数引数位置の expected type 逆引き~~ → コンストラクタ引数 expected type 修正
+
+> **⚠️ 訂正（2026-03-27）**: 通常の関数呼び出しの expected type 伝播（`set_call_arg_expected_types`）は既に正常動作していた。真の問題は `resolve_new_expr` がコンストラクタパラメータではなく struct フィールドを使用するバグ。詳細は `backlog/I-266-constructor-and-call-arg-expected-types.md` を参照。
 
 | 項目 | 値 |
 |------|-----|
-| 対象カテゴリ | OBJECT_LITERAL_NO_TYPE (function_arg) |
-| 解消見込み | **20 件** |
-| 残エラー予測 | 114 → 94 |
-| 技術概要 | 関数呼び出し時にシグネチャのパラメータ型を TypeRegistry から取得し、オブジェクトリテラル引数の expected type として設定する。`return_new` の一部（コンストラクタ引数）も解消可能 |
-| 依存 | TypeRegistry にユーザー定義型が登録されていること（per-file registry で対応済み） |
-| 関連 TODO | I-112c の残タスク |
+| 対象カテゴリ | OBJECT_LITERAL_NO_TYPE（WRONG_EXPECTED + PROPS_NO_EXPECTED の `new` 式部分） |
+| 解消見込み | **10-20 件**（WRONG_EXPECTED 10 件確実 + PROPS_NO_EXPECTED の `new` 式部分） |
+| 残エラー予測 | 114 → 94-104 |
+| 技術概要 | (1) TypeDef::Struct にコンストラクタシグネチャを追加 (2) `collect_class_info` で Constructor を収集 (3) ビルトイン型にコンストラクタ情報追加 (4) `resolve_new_expr` をコンストラクタパラメータ優先に変更 |
+| 依存 | なし |
+| 関連 TODO | I-266 |
 
 ### 施策 B: ジェネリクスパラメータのフィールド展開
 
@@ -194,7 +214,7 @@ const cors = (options?: CORSOptions) => {
 | 順序 | 施策 | 解消件数 | 累積残エラー | 工数感 |
 |------|------|----------|-------------|--------|
 | 1 | **E: `this` 型解決** | 3-5 | 109-111 | 小 |
-| 2 | **A: 関数引数 expected type** | ~20 | 89-91 | 中 |
+| 2 | **A: コンストラクタ引数 expected type 修正** | 10-20 | 89-101 | 中 |
 | 3 | **B: ジェネリクスフィールド展開** | ~14 | 75-77 | 中 |
 | 4 | **D: Optional スプレッド unwrap** | 4 | 71-73 | 小 |
 | 5 | **C: return_new 型逆引き** | ~10 | 61-63 | 中（A の拡張） |

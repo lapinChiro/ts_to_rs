@@ -342,8 +342,8 @@ impl<'a> TypeResolver<'a> {
                 ResolvedType::Known(RustType::F64)
             }
             ast::Expr::This(_) => {
-                // `this` — type depends on class context; Unknown for now
-                ResolvedType::Unknown
+                // `this` — resolve from scope (registered by visit_class_decl)
+                self.lookup_var("this")
             }
             ast::Expr::Seq(seq) => {
                 // Comma expression: evaluate all, return last
@@ -355,6 +355,21 @@ impl<'a> TypeResolver<'a> {
                     last = ty;
                 }
                 last
+            }
+            ast::Expr::Class(class_expr) => {
+                // Class expression: `const C = class Foo { ... }` or `const C = class { ... }`
+                let class_name = class_expr
+                    .ident
+                    .as_ref()
+                    .map(|id| id.sym.to_string())
+                    .unwrap_or_default();
+                let class_span = class_expr
+                    .ident
+                    .as_ref()
+                    .map(|id| Span::from_swc(id.span))
+                    .unwrap_or_else(|| Span::from_swc(class_expr.class.span));
+                self.visit_class_body(&class_expr.class, &class_name, class_span);
+                ResolvedType::Unknown
             }
             _ => ResolvedType::Unknown,
         }

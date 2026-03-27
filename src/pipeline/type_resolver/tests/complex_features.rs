@@ -1,4 +1,5 @@
 use super::*;
+use swc_common::Spanned;
 
 #[test]
 fn test_cond_expr_test_subexpressions_resolved() {
@@ -450,4 +451,214 @@ fn test_select_overload_params_and_return_from_same_sig() {
     // Both params and return_type should be from sig[1] (F64 variant)
     assert_eq!(selected.params[0].1, RustType::F64);
     assert_eq!(selected.return_type, Some(RustType::F64));
+}
+
+#[test]
+fn test_this_resolves_to_class_named_type_in_method() {
+    // `this` in a class method should resolve to the class's Named type.
+    // `this.field` should resolve to the field's type via TypeRegistry.
+    let source = r#"
+        class Greeter {
+            name: string;
+            greet(): string {
+                return this.name;
+            }
+        }
+    "#;
+    let files = parse_files(vec![(PathBuf::from("test.ts"), source.to_string())]).unwrap();
+    let file = &files.files[0];
+    let reg = build_registry(&file.module);
+    let mut synthetic = SyntheticTypeRegistry::new();
+    let mut resolver = TypeResolver::new(&reg, &mut synthetic);
+    let res = resolver.resolve_file(file);
+
+    // Find the class → method → return → this.name member expr
+    let class = match &file.module.body[0] {
+        swc_ecma_ast::ModuleItem::Stmt(swc_ecma_ast::Stmt::Decl(swc_ecma_ast::Decl::Class(c))) => c,
+        _ => panic!("expected class decl"),
+    };
+    let method = match &class.class.body[1] {
+        swc_ecma_ast::ClassMember::Method(m) => m,
+        _ => panic!("expected method"),
+    };
+    let body = method.function.body.as_ref().unwrap();
+    let ret_stmt = match &body.stmts[0] {
+        swc_ecma_ast::Stmt::Return(r) => r,
+        _ => panic!("expected return"),
+    };
+    // return this.name → MemberExpr
+    let member = match ret_stmt.arg.as_deref() {
+        Some(swc_ecma_ast::Expr::Member(m)) => m,
+        _ => panic!("expected member expr"),
+    };
+
+    // Verify `this` resolves to Named("Greeter")
+    let this_span = Span::from_swc(member.obj.span());
+    let this_ty = res
+        .expr_types
+        .get(&this_span)
+        .expect("this should have type");
+    assert!(
+        matches!(this_ty, ResolvedType::Known(RustType::Named { name, .. }) if name == "Greeter"),
+        "this should resolve to Named('Greeter'), got {:?}",
+        this_ty
+    );
+
+    // Verify `this.name` resolves to String
+    let member_span = Span::from_swc(member.span);
+    let member_ty = res
+        .expr_types
+        .get(&member_span)
+        .expect("this.name should have type");
+    assert!(
+        matches!(member_ty, ResolvedType::Known(RustType::String)),
+        "this.name should resolve to String, got {:?}",
+        member_ty
+    );
+}
+
+#[test]
+fn test_this_resolves_in_constructor() {
+    // `this` in a constructor should resolve to the class type.
+    let source = r#"
+        class Counter {
+            count: number;
+            constructor() {
+                this.count = 0;
+            }
+        }
+    "#;
+    let files = parse_files(vec![(PathBuf::from("test.ts"), source.to_string())]).unwrap();
+    let file = &files.files[0];
+    let reg = build_registry(&file.module);
+    let mut synthetic = SyntheticTypeRegistry::new();
+    let mut resolver = TypeResolver::new(&reg, &mut synthetic);
+    let res = resolver.resolve_file(file);
+
+    // Find constructor → this.count = 0 → this (the LHS of the assignment)
+    let class = match &file.module.body[0] {
+        swc_ecma_ast::ModuleItem::Stmt(swc_ecma_ast::Stmt::Decl(swc_ecma_ast::Decl::Class(c))) => c,
+        _ => panic!("expected class decl"),
+    };
+    let ctor = match &class.class.body[1] {
+        swc_ecma_ast::ClassMember::Constructor(c) => c,
+        _ => panic!("expected constructor"),
+    };
+    let body = ctor.body.as_ref().unwrap();
+    let expr_stmt = match &body.stmts[0] {
+        swc_ecma_ast::Stmt::Expr(e) => e,
+        _ => panic!("expected expr stmt"),
+    };
+    // this.count = 0 → the RHS `0` should be resolved
+    let assign = match expr_stmt.expr.as_ref() {
+        swc_ecma_ast::Expr::Assign(a) => a,
+        _ => panic!("expected assign"),
+    };
+    // Verify `0` is resolved as F64
+    let rhs_span = Span::from_swc(assign.right.span());
+    let rhs_ty = res.expr_types.get(&rhs_span).expect("RHS should have type");
+    assert!(
+        matches!(rhs_ty, ResolvedType::Known(RustType::F64)),
+        "RHS should be F64, got {:?}",
+        rhs_ty
+    );
+}
+
+#[test]
+fn test_this_unknown_in_static_method() {
+    // `this` in a static method should resolve to Unknown, not the class type.
+    let source = r#"
+        class Utils {
+            name: string;
+            static create(): Utils {
+                const x = this;
+                return x;
+            }
+        }
+    "#;
+    let files = parse_files(vec![(PathBuf::from("test.ts"), source.to_string())]).unwrap();
+    let file = &files.files[0];
+    let reg = build_registry(&file.module);
+    let mut synthetic = SyntheticTypeRegistry::new();
+    let mut resolver = TypeResolver::new(&reg, &mut synthetic);
+    let res = resolver.resolve_file(file);
+
+    // Find the static method → const x = this → `this` expr
+    let class = match &file.module.body[0] {
+        swc_ecma_ast::ModuleItem::Stmt(swc_ecma_ast::Stmt::Decl(swc_ecma_ast::Decl::Class(c))) => c,
+        _ => panic!("expected class decl"),
+    };
+    let method = match &class.class.body[1] {
+        swc_ecma_ast::ClassMember::Method(m) => m,
+        _ => panic!("expected method"),
+    };
+    assert!(method.is_static, "method should be static");
+    let body = method.function.body.as_ref().unwrap();
+    let var_decl = match &body.stmts[0] {
+        swc_ecma_ast::Stmt::Decl(swc_ecma_ast::Decl::Var(v)) => v,
+        _ => panic!("expected var decl"),
+    };
+    let init = var_decl.decls[0].init.as_ref().unwrap();
+    let this_span = Span::from_swc(init.span());
+    let this_ty = res
+        .expr_types
+        .get(&this_span)
+        .expect("this should have type");
+    assert!(
+        matches!(this_ty, ResolvedType::Unknown),
+        "this in static method should be Unknown, got {:?}",
+        this_ty
+    );
+}
+
+#[test]
+fn test_this_unknown_outside_class() {
+    // `this` outside a class should resolve to Unknown.
+    let source = r#"
+        function standalone(): void {
+            const x = this;
+        }
+    "#;
+    let result = resolve(source);
+
+    // All `this` expressions outside class should be Unknown
+    let this_types: Vec<_> = result
+        .expr_types
+        .values()
+        .filter(|ty| matches!(ty, ResolvedType::Unknown))
+        .collect();
+    assert!(
+        !this_types.is_empty(),
+        "this outside class should resolve to Unknown"
+    );
+}
+
+#[test]
+fn test_this_in_arrow_function_inside_method() {
+    // Arrow functions lexically capture `this` from the enclosing method scope.
+    let source = r#"
+        class Timer {
+            delay: number;
+            start(): void {
+                const cb = () => { return this.delay; };
+            }
+        }
+    "#;
+    let files = parse_files(vec![(PathBuf::from("test.ts"), source.to_string())]).unwrap();
+    let file = &files.files[0];
+    let reg = build_registry(&file.module);
+    let mut synthetic = SyntheticTypeRegistry::new();
+    let mut resolver = TypeResolver::new(&reg, &mut synthetic);
+    let res = resolver.resolve_file(file);
+
+    // `this.delay` inside the arrow function should resolve to F64
+    // because `this` is lexically captured from the enclosing method
+    let has_f64 = res
+        .expr_types
+        .values()
+        .any(|ty| matches!(ty, ResolvedType::Known(RustType::F64)));
+    assert!(
+        has_f64,
+        "this.delay in arrow function should resolve to F64 via lexical this"
+    );
 }

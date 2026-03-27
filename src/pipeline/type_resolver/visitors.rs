@@ -206,12 +206,61 @@ impl<'a> TypeResolver<'a> {
     }
 
     fn visit_class_decl(&mut self, class_decl: &ast::ClassDecl) {
+        let class_name = class_decl.ident.sym.to_string();
+        let class_span = Span::from_swc(class_decl.ident.span);
+        self.visit_class_body(&class_decl.class, &class_name, class_span);
+    }
+
+    /// Walks a class body (shared by class declarations and class expressions).
+    ///
+    /// Registers `this` as the class's Named type at class scope, so that
+    /// `this.field` / `this.method()` can be resolved via TypeRegistry.
+    /// Static methods shadow `this` with Unknown to prevent incorrect resolution.
+    pub(super) fn visit_class_body(
+        &mut self,
+        class: &ast::Class,
+        class_name: &str,
+        class_span: Span,
+    ) {
         self.enter_scope();
-        for member in &class_decl.class.body {
+        // Register `this` as the class's Named type.
+        let this_type = ResolvedType::Known(RustType::Named {
+            name: class_name.to_string(),
+            type_args: vec![],
+        });
+        if let Some(scope) = self.scope_stack.last_mut() {
+            scope.vars.insert(
+                "this".to_string(),
+                VarInfo {
+                    ty: this_type,
+                    var_id: VarId {
+                        name: "this".to_string(),
+                        declared_at: class_span,
+                    },
+                },
+            );
+        }
+        for member in &class.body {
             match member {
                 ast::ClassMember::Method(method) => {
                     if let Some(body) = &method.function.body {
                         self.enter_scope();
+                        // Static methods don't have `this` bound to the instance.
+                        // Shadow `this` with Unknown so it resolves correctly.
+                        if method.is_static {
+                            if let Some(scope) = self.scope_stack.last_mut() {
+                                scope.vars.insert(
+                                    "this".to_string(),
+                                    VarInfo {
+                                        ty: ResolvedType::Unknown,
+                                        var_id: VarId {
+                                            name: "this".to_string(),
+                                            declared_at: class_span,
+                                        },
+                                    },
+                                );
+                            }
+                        }
                         // Register parameters
                         for param in &method.function.params {
                             self.visit_param_pat(&param.pat);

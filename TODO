@@ -82,26 +82,24 @@
   - 解決策: default を常に最後のアームに移動する
   - 発生頻度は極めて低いが、サイレント意味変更カテゴリのため Tier 1
 
-#### 型変換・型推論（レバレッジ最大 — OBJECT_LITERAL_NO_TYPE 53 件）
+#### 型変換・型推論（レバレッジ最大 — OBJECT_LITERAL_NO_TYPE 54 件）
 
-I-112c Phase 1-3 + I-211 で 70→53 件に削減済み。残 53 件は以下の 4 イシューで段階解消（`report/hono-error-analysis-2026-03-25.md` で詳細分析済み）。
+I-112c Phase 1-3 + I-211 で 70→54 件に削減済み（2026-03-27 実測値）。残 54 件は以下の 4 イシューで段階解消。分析詳細は `backlog/I-266-constructor-and-call-arg-expected-types.md` を参照（`report/hono-error-analysis-2026-03-25.md` の `function_arg` 分類は不正確であり、I-266 PRD が正確な情報源）。
 
-- **[I-266]** **関数引数位置のオブジェクトリテラル型推定** — **20 インスタンス**
-  - 関数呼び出し時にシグネチャのパラメータ型を TypeRegistry から取得し、オブジェクトリテラル引数の expected type として設定する
-  - 例: `middleware/basic-auth/index.ts:80` — `const requestUser = { username: "", password: "" }` で型注釈なし
-  - 例: `middleware/jwt/jwt.ts:53` — jwt middleware の options パラメータ内オブジェクトリテラル
-  - 影響ファイル: `helper/cookie/index.ts` (3件), `middleware/jwk/jwk.ts` (2件), `middleware/jwt/jwt.ts` (2件), `utils/jwt/jwt.ts` (2件), 他 13 ファイル (各1件)
-  - 解決策: `TypeResolver::resolve_expr` で `CallExpr` の引数を処理する際、呼び出し先の `TypeDef::Function.params` から引数位置の型を取得し、`expected_type` として子式に伝播する
-  - 🔗 I-112c の子イシュー。return_new（I-267）の一部（コンストラクタ引数）も施策 A で解消可能
+- **[I-266]** **コンストラクタ引数・関数呼出し引数の expected type 修正** — **10-20 インスタンス**
+  - `resolve_new_expr` が `new Xxx(args)` の引数 expected type を設定する際、コンストラクタパラメータではなく struct フィールド型を使用するバグ。WRONG_EXPECTED_TYPE 10 件の直接原因
+  - 通常の関数呼び出し（CallExpr）の `set_call_arg_expected_types` は既に正常動作（2026-03-27 検証済み）
+  - 例: `new Response("body", { status: 200 })` で 2 番目の引数に `ResponseInit` ではなく `Bool`（struct の 2 番目のフィールド `ok: bool`）が設定される
+  - 根本原因: (1) `collect_class_info` が `ClassMember::Constructor` を無視 (2) ビルトイン型（`web_api.json`）にコンストラクタ情報なし (3) `resolve_new_expr` がフィールドをパラメータと誤用
+  - 解決策: TypeDef::Struct にコンストラクタシグネチャ追加、`collect_class_info` でコンストラクタ収集、ビルトイン型にコンストラクタ情報追加、`resolve_new_expr` をコンストラクタ優先に変更
+  - 🔗 I-112c の子イシュー。PRD 作成済み: `backlog/I-266-constructor-and-call-arg-expected-types.md`
 
-- **[I-267]** **return/new 式のオブジェクトリテラル型推定** — **14 インスタンス**（I-112c の 26.9%）
-  - `return new Response(body, { status, headers })` や `return { field: value }` で、コンストラクタ・関数の戻り値型からオブジェクトリテラルの型を逆引きする
-  - 例: `adapter/aws-lambda/handler.ts:268,429,496,578` — EventProcessor サブクラスの return new Response
-  - 例: `http-exception.ts:46` — HTTPException class
-  - 例: `router/trie-router/node.ts:25` — Node class
-  - 影響ファイル: `adapter/aws-lambda/handler.ts` (4件), `adapter/lambda-edge/handler.ts` (1件), `helper/css/index.ts` (1件), `helper/ssg/plugins.ts` (1件), 他 7 ファイル (各1件)
-  - 解決策: (1) コンストラクタ引数位置は I-266（関数引数 expected type）で解消。(2) `return { ... }` は関数の戻り値型から expected type を逆引き（既存の return 文 expected type 基盤を拡張）
-  - 🔗 I-112c の子イシュー。I-266 の拡張として実装可能
+- **[I-267]** **return 式のオブジェクトリテラル型推定** — **~10 インスタンス**
+  - `return { field: value }` で関数の戻り値型から expected type を逆引きする
+  - コンストラクタ引数位置（`new Response(body, { status, headers })`）は I-266 で解消
+  - 例: `adapter/aws-lambda/handler.ts:268,429,496,578` — EventProcessor サブクラス
+  - 解決策: `return { ... }` は関数の戻り値型から expected type を逆引き（既存の return 文 expected type 基盤を拡張）
+  - 🔗 I-112c の子イシュー。I-266 完了後に実施
 
 - **[I-268]** **ジェネリクスパラメータのフィールド展開** — **14 インスタンス**（I-112c の 26.9%）
   - `E extends Env` のようなジェネリクス型パラメータをスプレッドソースとして展開する
@@ -119,11 +117,6 @@ I-112c Phase 1-3 + I-211 で 70→53 件に削減済み。残 53 件は以下の
   - 解決策: スプレッドソースの型が `Option<T>` の場合、`T` のフィールド情報を取得してフィールド展開する。`type_converter.rs` の `resolve_spread_fields` で `RustType::Option(inner)` を unwrap
   - 🔗 I-112c の子イシュー。I-268（ジェネリクス展開）と同じ基盤
 
-- **[I-224]** **TypeResolver の `this` 型解決** — 型推論（**3-5 インスタンス直接解消** + 間接効果）
-  - TypeResolver（`src/pipeline/type_resolver.rs`）がクラスメソッド内の `this` 式に対して `ResolvedType::Unknown` を返す
-  - クラス宣言の走査時（`visit_class_decl`）に、メソッドスコープ内で `this` の型をクラス自身の `Named` 型としてスコープに登録する必要がある
-  - `this.field` のフィールドアクセスや `this.method()` のメソッド呼び出しの型解決に影響
-  - 解決策: `visit_class_decl` でクラス名を記録し、メソッド走査時にスコープに `self` / `this` を `RustType::Named { name: class_name }` として登録する
 - **[I-221]** **unsupported intersection member type** — **9 インスタンス**
   - intersection の一部メンバー型が未対応（`try_convert_intersection_type` で処理できない型）
   - 発生箇所: `adapter/aws-lambda/handler.ts:108`, `client/types.ts:67`, `context.ts:293`, `helper/conninfo/types.ts:5`, `middleware/method-override/index.ts:11`, `request.ts:30`, `utils/body.ts:12`, `utils/types.ts:89`, `validator/utils.ts:23`
