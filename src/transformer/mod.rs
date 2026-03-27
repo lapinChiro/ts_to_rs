@@ -9,10 +9,10 @@ pub mod context;
 pub mod expressions;
 pub mod functions;
 pub mod statements;
-pub(crate) mod type_env;
+pub(crate) mod type_position;
 pub mod types;
 
-pub(crate) use type_env::{wrap_trait_for_position, TypePosition};
+pub(crate) use type_position::{wrap_trait_for_position, TypePosition};
 
 use anyhow::Result;
 use swc_common::Spanned;

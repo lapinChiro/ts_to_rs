@@ -46,7 +46,7 @@ use crate::ir::{
 };
 use crate::pipeline::SyntheticTypeRegistry;
 use crate::registry::{TypeDef, TypeRegistry};
-use crate::transformer::type_env::{wrap_trait_for_position, TypePosition};
+use crate::transformer::type_position::{wrap_trait_for_position, TypePosition};
 
 /// Returns true if the keyword type is a nullable sentinel (`null`, `undefined`, `void`).
 ///

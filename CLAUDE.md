@@ -54,7 +54,17 @@ for r in entries:
 
 ディレクトリ構成は [README.md](README.md#ディレクトリ構成) を参照。
 
-変換パイプライン: TS source → `parser` (SWC AST) → `transformer` (IR) → `generator` (Rust source)
+変換パイプライン:
+
+```
+TS source → Parser (SWC AST)
+  → ModuleGraph (import/export 解析)
+  → TypeCollector + TypeConverter (TypeRegistry 構築)
+  → TypeResolver (式の型・期待型・narrowing を事前計算)
+  → Transformer (AST + 型情報 → IR)
+  → Generator (IR → Rust ソースコード)
+  → OutputWriter (ファイル出力・mod.rs 生成)
+```
 
 ## Core Principles
 

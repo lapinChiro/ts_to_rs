@@ -9,7 +9,7 @@ use swc_ecma_ast as ast;
 use super::*;
 use crate::pipeline::type_converter::convert_ts_type;
 use crate::pipeline::type_resolution::Span;
-use crate::transformer::type_env::{wrap_trait_for_position, TypePosition};
+use crate::transformer::type_position::{wrap_trait_for_position, TypePosition};
 
 impl<'a> TypeResolver<'a> {
     /// 式の型を解決し、Known な結果を `expr_types` に記録する。

@@ -283,36 +283,39 @@ src/
 ├── main.rs              # CLI エントリポイント
 ├── lib.rs               # ライブラリエントリポイント（transpile 関数）
 ├── parser.rs            # SWC で TS ファイルを AST 化
-├── ir.rs                # 中間表現の型定義
-├── registry.rs          # TypeRegistry（型定義の事前収集）
-├── external_types.rs    # ビルトイン Web API 型定義（バイナリ埋め込み）
+├── ir/                  # 中間表現の型定義
+├── registry/            # TypeRegistry（型定義の事前収集）
+├── external_types/      # ビルトイン型定義のロード・変換（バイナリ埋め込み JSON）
+├── builtin_types/       # ビルトイン型 JSON（web_api.json + ecmascript.json）
 ├── directory.rs         # ディレクトリモードのユーティリティ
 ├── pipeline/            # 変換パイプラインの各パス
-│   ├── module_resolver.rs   # import specifier → ファイルパス解決
-│   ├── module_graph.rs      # ModuleGraph（import/export 解析）
-│   ├── type_converter.rs    # TS 型注釈 → RustType 変換
-│   ├── type_resolver.rs     # 式の型・期待型・narrowing の事前計算
-│   ├── type_resolution.rs   # FileTypeResolution（型解決結果のデータ構造）
-│   ├── synthetic_registry.rs # SyntheticTypeRegistry（合成型の重複排除）
-│   ├── output_writer.rs     # ファイル出力・mod.rs 生成
-│   └── types.rs             # パイプライン共通の型定義
+│   ├── module_resolver.rs       # import specifier → ファイルパス解決
+│   ├── module_graph/            # ModuleGraph（import/export 解析・re-export 解決）
+│   ├── type_converter/          # TS 型注釈 → RustType 変換
+│   ├── type_resolver/           # 式の型・期待型・narrowing の事前計算
+│   ├── type_resolution.rs       # FileTypeResolution（型解決結果のデータ構造）
+│   ├── synthetic_registry.rs    # SyntheticTypeRegistry（合成型の重複排除）
+│   ├── external_struct_generator/ # 外部型 struct 定義の自動生成
+│   ├── any_enum_analyzer.rs     # any-narrowing enum の分析
+│   ├── output_writer.rs         # ファイル出力・mod.rs 生成
+│   └── types.rs                 # パイプライン共通の型定義
 ├── transformer/         # AST → IR 変換
 │   ├── mod.rs           # 変換エントリポイント
 │   ├── context.rs       # TransformContext（変換コンテキスト）
-│   ├── type_env.rs      # TypeEnv（スコープベースの型環境）
+│   ├── type_position.rs # TypePosition（型位置に基づく trait ラップ）
 │   ├── any_narrowing.rs # any 型の typeof/instanceof narrowing
-│   ├── classes.rs       # クラス変換
+│   ├── classes/         # クラス変換
 │   ├── types/           # 型変換 (TS 型 → Rust 型)
 │   ├── functions/       # 関数変換
-│   ├── statements/      # 文の変換
+│   ├── statements/      # 文の変換（mutability 推論含む）
 │   └── expressions/     # 式の変換
 ├── generator/           # IR → Rust ソースコード生成
 │   ├── mod.rs           # 公開 API + Item 生成
 │   ├── types.rs         # 型の生成
-│   ├── statements.rs    # 文の生成
-│   └── expressions.rs   # 式の生成
+│   ├── statements/      # 文の生成
+│   └── expressions/     # 式の生成
 tests/
-├── fixtures/            # 変換テスト用 .ts 入力ファイル（69 件）
+├── fixtures/            # 変換テスト用 .ts 入力ファイル（74 件）
 ├── snapshots/           # insta スナップショット（自動生成）
 ├── integration_test.rs  # スナップショットテスト
 ├── compile_test.rs      # 生成 Rust のコンパイル検証テスト
@@ -320,9 +323,13 @@ tests/
 ├── e2e_test.rs          # E2E テスト（変換→コンパイル→実行→出力検証）
 ├── e2e/                 # E2E テスト用リソース
 └── compile-check/       # コンパイルチェック用 Cargo プロジェクト
+doc/
+├── completed-features.md  # 完了済み機能一覧
+└── design-decisions.md    # 設計判断の記録
 scripts/
 ├── hono-bench.sh        # Hono フレームワーク変換率ベンチマーク
-└── analyze-bench.py     # ベンチマーク結果のエラー分類・集計
+├── analyze-bench.py     # ベンチマーク結果のエラー分類・集計
+└── check-file-lines.sh  # .rs ファイル行数チェック（閾値 1000 行）
 ```
 
 ## 開発
