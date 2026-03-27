@@ -1,45 +1,39 @@
 # ts_to_rs 開発計画
 
-PRD 化済みタスクの消化順序。次のタスクから順に着手する。
+## 現在のベースライン（2026-03-28）
 
-## 完了: I-192 大規模ファイルの分割
+| 指標 | 値 |
+|------|-----|
+| Hono クリーン | 95/158 (60.1%) |
+| エラーインスタンス | 111 |
+| コンパイル(file) | 94/158 (59.5%) |
+| コンパイル(dir) | 156/158 (98.7%) |
+| テスト数 | 1369 |
+| 1000行超ファイル | 0 |
+| コンパイルテストスキップ | 8 件 |
 
-### ベースライン
+OBJECT_LITERAL_NO_TYPE: I-112c Phase 1-3 + I-211 + I-224 + I-266 + I-268 + I-269 で 70→48 件に削減済み。I-195 修正で 48→51 件に増加（パラメータ変換成功により隠れていた本体エラーが顕在化）。
 
-- テスト数: 1369 (1225 + 3 + 2 + 63 + 76)
-- 1000 行超ファイル: 元 18 個
+## 次の開発: エラーインスタンス効率削減（110→~79 目標）
 
-### 完了済みタスク（T1-T13）
+開発コストと削減数の比率で選定。フェーズ移行基準（< 80）達成を目指す。
 
-カテゴリ A（プロダクションコード分割）6 ファイル全完了 + テスト分割 10 ファイル完了:
+| 順序 | イシュー | 削減見込 | コスト | 概要 |
+|------|---------|---------|--------|------|
+| ~~1~~ | ~~I-195~~ | ~~4件~~ | ~~低~~ | ~~arrow デフォルトパラメータの残存パターン~~ **完了（110件に削減）** |
+| 1 | I-194 | 3件 | 低 | typeof 未登録識別子（fetch ×2, WebSocket ×1） |
+| 2 | I-267 | ~10件 | 中 | return 式のオブジェクトリテラル型推定（OBJECT_LITERAL_NO_TYPE 最大サブセット） |
+| 3 | I-221 | 9件 | 中 | unsupported intersection member type |
+| 4 | I-35 | 6件 | 中 | indexed access type の非文字列キー対応（コンパイルテストスキップ解消にも寄与） |
+| 5 | I-219 | 8件 | 要設計 | conditional type (`T extends U ? X : Y`) + infer type |
+| 6 | I-200 | 5件 | 要設計 | マップ型 (`{ [K in keyof T]: V }`) |
 
-| タスク | 元ファイル | 元行数 | サブモジュール数 |
-|--------|-----------|--------|----------------|
-| T1+T1b | `type_resolver.rs` | 3692 | 7 + tests/3 |
-| T2 | `type_converter.rs` | 2691 | 6 + tests |
-| T3+T3b | `statements/mod.rs` + `tests.rs` | 2656+2766 | 7 + tests/7 |
-| T4+T4b | `registry.rs` | 2414 | 6 + tests/4 |
-| T5 | `classes.rs` | 2215 | 5 + tests |
-| T6+T6b | `functions/mod.rs` + `tests.rs` | 1298+1422 | 4 + tests/4 |
-| T7 | `expressions/tests.rs` | 6814 | tests/19 (論理分類ベース) |
-| T8 | `types/tests.rs` | 3333 | tests/7 |
-| T9 | `transformer/tests.rs` | 1335 | tests/6 |
-| T10 | `generator/` テスト抽出 | mod.rs:1410, expressions.rs:1267, statements.rs:1019 | 3ファイル分割 |
-| T11 | `ir.rs` テスト抽出 | 1416 | ir/mod.rs:858 + ir/tests.rs:558 |
-| T12 | テスト抽出 | external_types.rs:1156, external_struct_generator.rs:1132, module_graph.rs:1038 | 3ファイル分割 |
-| T13 | 最終検証 | — | 全ファイル1000行以下、テスト1369不変、clippy 0警告、fmt pass |
+### 順序の根拠
 
-全タスク完了。テスト数不変（1369）、1000行超ファイル 0 個。
-
-### 再発防止
-
-`scripts/check-file-lines.sh`（閾値 1000 行）を `/quality-check` スキルに組み込み済み。
-
-## OBJECT_LITERAL_NO_TYPE 解消状況
-
-I-112c Phase 1-3 + I-211 + I-224 + I-266 + I-268 + I-269 実装済み（70→48 件）。I-268/I-269 は TypeResolver の機能として完了したが、Hono ベンチの 48 件はクロスモジュール型参照が主因であり件数削減に至らず。
-
-backlog は空。次の PRD は TODO から選定する。
+- **I-194 を先行**: 低コストで早期に 3 件削減
+- **I-267 を 2 番目**: I-266 で構築済みの expected type 伝播基盤を return 文に拡張。最大の単一削減効果（~10 件）
+- **I-221 → I-35**: 独立した中規模タスク。件数順に消化
+- **I-219, I-200 を後半に**: 変換戦略の設計検討が必要なため、先行タスクでコードベース理解を深めてから着手。ただし「困難」は見送り理由ではなく、実現方法を徹底的に検証する
 
 ## 引継ぎ事項
 
@@ -47,11 +41,17 @@ backlog は空。次の PRD は TODO から選定する。
 
 ### コンパイルテストのスキップ（8 件）
 
-1. `indexed-access-type` — I-35（indexed access type の非文字列キー）
-2. `trait-coercion` — I-201（null as any → None）
-3. `union-fallback` — I-202（Box<dyn Fn> derive 不適合）
-4. `any-type-narrowing` — I-209（serde_json::Value → enum 型強制）
-5. `type-narrowing` — I-237 (toFixed 未対応) + I-238 (Display 未実装)
-6. `array-builtin-methods` — I-217（filter/find closure の &f64 比較）+ I-265（find の Option 二重ラップ）
-7. `instanceof-builtin` — I-270c（メソッド impl 不在。struct 定義は I-270 で生成済み）
-8. `external-type-struct` — I-270（ビルトイン型読み込みが必要。compile_test は builtins なしで実行）
+| テスト名 | 原因イシュー | 概要 |
+|----------|-------------|------|
+| `indexed-access-type` | I-35 | 非文字列キーの indexed access（**今回 I-35 で解消予定**） |
+| `trait-coercion` | I-201 | `null as any` → `None` が `Box<dyn Trait>` に代入不可 |
+| `union-fallback` | I-202 | `Box<dyn Fn>` を含む enum に derive 不適合 |
+| `any-type-narrowing` | I-209 | `serde_json::Value` → enum 型の自動変換 |
+| `type-narrowing` | I-237+I-238 | `toFixed` 未変換 + `Display` 未生成 |
+| `array-builtin-methods` | I-217+I-265 | filter/find の参照型 + Option 二重ラップ |
+| `instanceof-builtin` | I-270c | メソッド impl 不在（struct 定義は生成済み） |
+| `external-type-struct` | I-270 | builtins なし環境で外部型 struct 未生成 |
+
+### 完了済みの大規模タスク
+
+- **I-192 大規模ファイル分割**: 18 ファイル → 全ファイル 1000 行以下（T1-T13、テスト数不変 1369）。再発防止: `scripts/check-file-lines.sh` を `/quality-check` に組み込み済み

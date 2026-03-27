@@ -318,6 +318,112 @@ fn test_convert_call_expr_arrow_iife_with_args_generates_closure_call() {
 }
 
 #[test]
+fn test_convert_expr_arrow_default_param_no_annotation_infers_f64() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
+    // (x = 42) => x — no type annotation, infer f64 from number literal
+    let swc_expr = parse_var_init("const f = (x = 42) => x;");
+    let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_expr(&swc_expr)
+        .unwrap();
+    match result {
+        Expr::Closure { params, body, .. } => {
+            assert_eq!(params.len(), 1);
+            assert_eq!(params[0].name, "x");
+            assert_eq!(
+                params[0].ty,
+                Some(RustType::Option(Box::new(RustType::F64)))
+            );
+            match body {
+                crate::ir::ClosureBody::Block(stmts) => {
+                    assert!(stmts.len() >= 2, "expected unwrap_or expansion + body");
+                    // First stmt should be `let x = x.unwrap_or(42.0);`
+                    match &stmts[0] {
+                        crate::ir::Stmt::Let { name, init, .. } => {
+                            assert_eq!(name, "x");
+                            match init.as_ref().unwrap() {
+                                Expr::MethodCall { method, args, .. } => {
+                                    assert_eq!(method, "unwrap_or");
+                                    assert!(matches!(args[0], Expr::NumberLit(v) if v == 42.0));
+                                }
+                                other => panic!("expected unwrap_or call, got {:?}", other),
+                            }
+                        }
+                        other => panic!("expected Let stmt, got {:?}", other),
+                    }
+                }
+                _ => panic!("expected Block body"),
+            }
+        }
+        _ => panic!("expected Closure"),
+    }
+}
+
+#[test]
+fn test_convert_expr_arrow_default_param_no_annotation_infers_string() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
+    // (s = "hi") => s — no type annotation, infer String from string literal
+    let swc_expr = parse_var_init(r#"const f = (s = "hi") => s;"#);
+    let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_expr(&swc_expr)
+        .unwrap();
+    match result {
+        Expr::Closure { params, .. } => {
+            assert_eq!(params[0].name, "s");
+            assert_eq!(
+                params[0].ty,
+                Some(RustType::Option(Box::new(RustType::String)))
+            );
+        }
+        _ => panic!("expected Closure"),
+    }
+}
+
+#[test]
+fn test_convert_expr_arrow_default_param_object_destructuring_with_empty_default() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
+    // ({ x }: { x?: number } = {}) => x — object destructuring + default
+    let swc_expr = parse_var_init("const f = ({ x }: { x?: number } = {}) => x;");
+    let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_expr(&swc_expr)
+        .unwrap();
+    match result {
+        Expr::Closure { params, body, .. } => {
+            assert_eq!(params.len(), 1);
+            // Param type should be Option<...> (wrapped)
+            match &params[0].ty {
+                Some(RustType::Option(_)) => {} // good
+                other => panic!("expected Option<...> param type, got {:?}", other),
+            }
+            // Body should contain unwrap_or_default expansion + field expansion
+            match body {
+                crate::ir::ClosureBody::Block(stmts) => {
+                    assert!(
+                        stmts.len() >= 2,
+                        "expected unwrap_or_default + field expansion, got {} stmts",
+                        stmts.len()
+                    );
+                    // First stmt: unwrap_or_default
+                    match &stmts[0] {
+                        crate::ir::Stmt::Let { init, .. } => match init.as_ref().unwrap() {
+                            Expr::MethodCall { method, .. } => {
+                                assert_eq!(method, "unwrap_or_default");
+                            }
+                            other => panic!("expected unwrap_or_default call, got {:?}", other),
+                        },
+                        other => panic!("expected Let stmt, got {:?}", other),
+                    }
+                }
+                _ => panic!("expected Block body"),
+            }
+        }
+        _ => panic!("expected Closure"),
+    }
+}
+
+#[test]
 fn test_narrowing_guard_typeof_captures_var_span() {
     // typeof y === "string" — y's span should be captured
     let module = parse_typescript(r#"typeof y === "string";"#).unwrap();

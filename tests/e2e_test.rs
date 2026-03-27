@@ -454,6 +454,11 @@ fn test_e2e_closures_ts_rust_stdout_match() {
 }
 
 #[test]
+fn test_e2e_default_params_ts_rust_stdout_match() {
+    run_e2e_test("default_params");
+}
+
+#[test]
 fn test_e2e_destructuring_ts_rust_stdout_match() {
     run_e2e_test("destructuring");
 }

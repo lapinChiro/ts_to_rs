@@ -60,7 +60,7 @@ def categorize(kind: str) -> str:
         return "BIGINT"
     if "TsModuleDecl" in kind:
         return "TS_MODULE_DECL"
-    if "ExportAll" in kind:
+    if "ExportAll" in kind and "unsupported" in kind.lower() and "Class(" not in kind:
         return "EXPORT_ALL"
     if "for...of binding" in kind:
         return "FOR_OF_BINDING"

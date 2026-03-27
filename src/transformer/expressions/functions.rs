@@ -40,44 +40,26 @@ impl<'a> Transformer<'a> {
                 params.push(param);
                 expansion_stmts.extend(stmts);
             }
-            ast::Pat::Assign(assign) => match assign.left.as_ref() {
-                ast::Pat::Ident(ident) => {
-                    let name = ident.id.sym.to_string();
-                    let inner_type = ident
-                        .type_ann
-                        .as_ref()
-                        .map(|ann| convert_ts_type(&ann.type_ann, self.synthetic, self.reg()))
-                        .transpose()?
-                        .ok_or_else(|| anyhow!("default parameter requires a type annotation"))?;
-                    let option_type = RustType::Option(Box::new(inner_type));
-                    let (default_expr, use_unwrap_or_default) =
-                        self.convert_default_value(&assign.right)?;
-                    let unwrap_call = if use_unwrap_or_default {
-                        Expr::MethodCall {
-                            object: Box::new(Expr::Ident(name.clone())),
-                            method: "unwrap_or_default".to_string(),
-                            args: vec![],
-                        }
-                    } else {
-                        Expr::MethodCall {
-                            object: Box::new(Expr::Ident(name.clone())),
-                            method: "unwrap_or".to_string(),
-                            args: vec![default_expr.unwrap()],
-                        }
-                    };
-                    expansion_stmts.push(Stmt::Let {
-                        mutable: false,
-                        name: name.clone(),
-                        ty: None,
-                        init: Some(unwrap_call),
-                    });
-                    params.push(Param {
-                        name,
-                        ty: Some(option_type),
-                    });
-                }
-                _ => return Err(anyhow!("unsupported {context} default parameter")),
-            },
+            ast::Pat::Assign(assign) => {
+                // Recursively convert the inner pattern (left side of assignment)
+                let mut inner_params = Vec::new();
+                let mut inner_stmts = Vec::new();
+                self.convert_function_param_pat(
+                    &assign.left,
+                    &mut inner_params,
+                    &mut inner_stmts,
+                    context,
+                )?;
+                let inner_param = inner_params
+                    .pop()
+                    .ok_or_else(|| anyhow!("default parameter produced no inner param"))?;
+
+                // Wrap with Option<T> + unwrap_or expansion via shared helper
+                let (wrapped_param, wrapped_stmts) =
+                    self.wrap_param_with_default(inner_param, inner_stmts, &assign.right)?;
+                params.push(wrapped_param);
+                expansion_stmts.extend(wrapped_stmts);
+            }
             ast::Pat::Rest(rest) => {
                 if let ast::Pat::Ident(ident) = rest.arg.as_ref() {
                     let name = ident.id.sym.to_string();

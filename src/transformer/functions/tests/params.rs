@@ -78,17 +78,24 @@ fn test_convert_fn_decl_default_string_param_wraps_in_option() {
                     assert_eq!(name, "name");
                     match init.as_ref().unwrap() {
                         Expr::MethodCall { method, args, .. } => {
-                            assert_eq!(method, "unwrap_or");
-                            // arg should be "hello".to_string()
+                            assert_eq!(method, "unwrap_or_else");
+                            // arg should be || "hello".to_string()
                             assert_eq!(args.len(), 1);
                             match &args[0] {
-                                Expr::MethodCall { object, method, .. } => {
-                                    assert_eq!(method, "to_string");
-                                    assert!(
-                                        matches!(object.as_ref(), Expr::StringLit(s) if s == "hello")
-                                    );
-                                }
-                                other => panic!("expected MethodCall, got {other:?}"),
+                                Expr::Closure { body, .. } => match body {
+                                    crate::ir::ClosureBody::Expr(expr) => match expr.as_ref() {
+                                        Expr::MethodCall { object, method, .. } => {
+                                            assert_eq!(method, "to_string");
+                                            assert!(matches!(
+                                                object.as_ref(),
+                                                Expr::StringLit(s) if s == "hello"
+                                            ));
+                                        }
+                                        other => panic!("expected MethodCall, got {other:?}"),
+                                    },
+                                    other => panic!("expected ClosureBody::Expr, got {other:?}"),
+                                },
+                                other => panic!("expected Closure, got {other:?}"),
                             }
                         }
                         other => panic!("expected MethodCall, got {other:?}"),

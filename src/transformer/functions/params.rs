@@ -142,24 +142,44 @@ impl<'a> Transformer<'a> {
         fallback_warnings: &mut Vec<String>,
     ) -> Result<(Param, Vec<Stmt>, Vec<Item>)> {
         // Recursively convert the inner parameter (left side)
-        let (inner_param, mut stmts, extra) =
+        let (inner_param, inner_stmts, extra) =
             self.convert_param(&assign.left, fn_name, vis, resilient, fallback_warnings)?;
+
+        let (param, stmts) =
+            self.wrap_param_with_default(inner_param, inner_stmts, &assign.right)?;
+        Ok((param, stmts, extra))
+    }
+
+    /// Wraps a converted inner parameter with `Option<T>` and generates
+    /// the `unwrap_or` / `unwrap_or_default` expansion statement.
+    ///
+    /// Shared logic for both regular function and arrow/fn_expr default parameters.
+    /// If the inner type is `None` or `Any`, infers the type from the default value literal.
+    pub(crate) fn wrap_param_with_default(
+        &mut self,
+        inner_param: Param,
+        mut inner_stmts: Vec<Stmt>,
+        default_expr: &ast::Expr,
+    ) -> Result<(Param, Vec<Stmt>)> {
         let param_name = inner_param.name.clone();
 
         // Wrap the type in Option<T>
         // If no type annotation (or Any fallback), infer from default value literal
         let inner_type = match inner_param.ty {
             Some(RustType::Any) | None => {
-                infer_type_from_default(&assign.right).unwrap_or(RustType::Any)
+                infer_type_from_default(default_expr).unwrap_or(RustType::Any)
             }
             Some(ty) => ty,
         };
         let option_type = RustType::Option(Box::new(inner_type));
 
         // Convert default value to IR expression
-        let (default_expr, use_unwrap_or_default) = self.convert_default_value(&assign.right)?;
+        let (default_ir, use_unwrap_or_default) = self.convert_default_value(default_expr)?;
 
-        // Generate expansion statement: `let x = x.unwrap_or(value);` or `let x = x.unwrap_or_default();`
+        // Generate expansion statement:
+        //   `let x = x.unwrap_or_default();`       — for empty objects/arrays/new
+        //   `let x = x.unwrap_or_else(|| expr);`   — for allocating expressions (strings, method calls)
+        //   `let x = x.unwrap_or(value);`           — for cheap values (numbers, bools, idents)
         let unwrap_call = if use_unwrap_or_default {
             Expr::MethodCall {
                 object: Box::new(Expr::Ident(param_name.clone())),
@@ -167,14 +187,31 @@ impl<'a> Transformer<'a> {
                 args: vec![],
             }
         } else {
-            Expr::MethodCall {
-                object: Box::new(Expr::Ident(param_name.clone())),
-                method: "unwrap_or".to_string(),
-                args: vec![default_expr.unwrap()],
+            let default_ir = default_ir.unwrap();
+            let needs_lazy_eval = matches!(
+                &default_ir,
+                Expr::MethodCall { method, .. } if method == "to_string"
+            ) || matches!(&default_ir, Expr::StringLit(_));
+            if needs_lazy_eval {
+                Expr::MethodCall {
+                    object: Box::new(Expr::Ident(param_name.clone())),
+                    method: "unwrap_or_else".to_string(),
+                    args: vec![Expr::Closure {
+                        params: vec![],
+                        return_type: None,
+                        body: crate::ir::ClosureBody::Expr(Box::new(default_ir)),
+                    }],
+                }
+            } else {
+                Expr::MethodCall {
+                    object: Box::new(Expr::Ident(param_name.clone())),
+                    method: "unwrap_or".to_string(),
+                    args: vec![default_ir],
+                }
             }
         };
 
-        stmts.insert(
+        inner_stmts.insert(
             0,
             Stmt::Let {
                 mutable: false,
@@ -189,8 +226,7 @@ impl<'a> Transformer<'a> {
                 name: param_name,
                 ty: Some(option_type),
             },
-            stmts,
-            extra,
+            inner_stmts,
         ))
     }
 
