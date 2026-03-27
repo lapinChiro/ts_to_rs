@@ -118,6 +118,7 @@ pub(super) fn collect_decl(
                         type_params,
                         fields,
                         methods,
+                        constructor: None,
                         extends,
                         is_interface: true,
                     },
@@ -160,6 +161,7 @@ pub(super) fn collect_decl(
                             type_params,
                             fields,
                             methods: HashMap::new(),
+                            constructor: None,
                             extends: vec![],
                             is_interface: false,
                         },
@@ -255,6 +257,7 @@ fn collect_class_info(
 ) -> TypeDef {
     let mut fields = Vec::new();
     let mut methods: HashMap<String, Vec<MethodSignature>> = HashMap::new();
+    let mut constructor_sigs: Vec<MethodSignature> = Vec::new();
 
     for member in &class.class.body {
         match member {
@@ -268,6 +271,38 @@ fn collect_class_info(
                         fields.push((name, ty));
                     }
                 }
+            }
+            ast::ClassMember::Constructor(ctor) => {
+                let params: Vec<(String, RustType)> = ctor
+                    .params
+                    .iter()
+                    .filter_map(|p| match p {
+                        ast::ParamOrTsParamProp::Param(param) => {
+                            let ident = match &param.pat {
+                                ast::Pat::Ident(ident) => ident,
+                                _ => return None,
+                            };
+                            let ty = ident.type_ann.as_ref().and_then(|ann| {
+                                convert_ts_type(&ann.type_ann, synthetic, lookup).ok()
+                            })?;
+                            Some((ident.id.sym.to_string(), ty))
+                        }
+                        ast::ParamOrTsParamProp::TsParamProp(param_prop) => {
+                            let ident = match &param_prop.param {
+                                ast::TsParamPropParam::Ident(ident) => ident,
+                                _ => return None,
+                            };
+                            let ty = ident.type_ann.as_ref().and_then(|ann| {
+                                convert_ts_type(&ann.type_ann, synthetic, lookup).ok()
+                            })?;
+                            Some((ident.id.sym.to_string(), ty))
+                        }
+                    })
+                    .collect();
+                constructor_sigs.push(MethodSignature {
+                    params,
+                    return_type: None,
+                });
             }
             ast::ClassMember::Method(method) => {
                 let name = match &method.key {
@@ -307,10 +342,16 @@ fn collect_class_info(
     }
 
     let type_params = collect_type_params(class.class.type_params.as_deref(), lookup, synthetic);
+    let constructor = if constructor_sigs.is_empty() {
+        None
+    } else {
+        Some(constructor_sigs)
+    };
     TypeDef::Struct {
         type_params,
         fields,
         methods,
+        constructor,
         extends: vec![],
         is_interface: false,
     }

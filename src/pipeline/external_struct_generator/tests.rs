@@ -18,6 +18,7 @@ fn register_external_struct(
                 .map(|(n, ty)| (n.to_string(), ty))
                 .collect(),
             methods: HashMap::new(),
+            constructor: None,
             extends: vec![],
             is_interface: true,
         },
@@ -220,6 +221,7 @@ fn test_collect_refs_user_defined_type_excluded() {
             type_params: vec![],
             fields: vec![("db_url".to_string(), RustType::String)],
             methods: HashMap::new(),
+            constructor: None,
             extends: vec![],
             is_interface: true,
         },

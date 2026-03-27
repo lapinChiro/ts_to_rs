@@ -45,6 +45,8 @@ pub enum TypeDef {
         fields: Vec<(String, RustType)>,
         /// メソッドシグネチャ（メソッド名 → オーバーロードを含む全シグネチャ）
         methods: HashMap<String, Vec<MethodSignature>>,
+        /// コンストラクタシグネチャ（オーバーロード対応）
+        constructor: Option<Vec<MethodSignature>>,
         /// 親 interface 名のリスト（`interface B extends A` の `A`）
         extends: Vec<String>,
         /// Whether this type comes from a TS interface declaration (true) or class/type alias (false)
@@ -85,6 +87,7 @@ impl TypeDef {
             type_params: vec![],
             fields,
             methods,
+            constructor: None,
             extends,
             is_interface: false,
         }
@@ -101,6 +104,7 @@ impl TypeDef {
             type_params,
             fields,
             methods,
+            constructor: None,
             extends,
             is_interface: true,
         }
@@ -124,38 +128,37 @@ impl TypeDef {
                 type_params,
                 fields,
                 methods,
+                constructor,
                 extends,
                 is_interface,
-            } => TypeDef::Struct {
-                type_params: type_params.clone(),
-                fields: fields
-                    .iter()
-                    .map(|(name, ty)| (name.clone(), ty.substitute(bindings)))
-                    .collect(),
-                methods: methods
-                    .iter()
-                    .map(|(name, sigs)| {
-                        (
-                            name.clone(),
-                            sigs.iter()
-                                .map(|sig| MethodSignature {
-                                    params: sig
-                                        .params
-                                        .iter()
-                                        .map(|(n, ty)| (n.clone(), ty.substitute(bindings)))
-                                        .collect(),
-                                    return_type: sig
-                                        .return_type
-                                        .as_ref()
-                                        .map(|ty| ty.substitute(bindings)),
-                                })
+            } => {
+                let substitute_sigs = |sigs: &[MethodSignature]| -> Vec<MethodSignature> {
+                    sigs.iter()
+                        .map(|sig| MethodSignature {
+                            params: sig
+                                .params
+                                .iter()
+                                .map(|(n, ty)| (n.clone(), ty.substitute(bindings)))
                                 .collect(),
-                        )
-                    })
-                    .collect(),
-                extends: extends.clone(),
-                is_interface: *is_interface,
-            },
+                            return_type: sig.return_type.as_ref().map(|ty| ty.substitute(bindings)),
+                        })
+                        .collect()
+                };
+                TypeDef::Struct {
+                    type_params: type_params.clone(),
+                    fields: fields
+                        .iter()
+                        .map(|(name, ty)| (name.clone(), ty.substitute(bindings)))
+                        .collect(),
+                    methods: methods
+                        .iter()
+                        .map(|(name, sigs)| (name.clone(), substitute_sigs(sigs)))
+                        .collect(),
+                    constructor: constructor.as_ref().map(|sigs| substitute_sigs(sigs)),
+                    extends: extends.clone(),
+                    is_interface: *is_interface,
+                }
+            }
             TypeDef::Enum {
                 type_params,
                 variants,

@@ -116,6 +116,7 @@ mod tests {
                     },
                 )],
                 methods: HashMap::new(),
+                constructor: None,
                 extends: vec![],
                 is_interface: false,
             },

@@ -191,4 +191,22 @@ impl<'a> TypeResolver<'a> {
             _ => {}
         }
     }
+
+    /// Sets expected types for function/constructor arguments from resolved parameter types.
+    ///
+    /// Zips arguments with parameter types and propagates each expected type
+    /// into the argument expression. Extra arguments (beyond param count) are ignored.
+    pub(super) fn propagate_arg_expected_types(
+        &mut self,
+        args: &[ast::ExprOrSpread],
+        param_types: &[RustType],
+    ) {
+        for (arg, param_ty) in args.iter().zip(param_types.iter()) {
+            let arg_span = Span::from_swc(arg.expr.span());
+            self.result
+                .expected_types
+                .insert(arg_span, param_ty.clone());
+            self.propagate_expected(&arg.expr, param_ty);
+        }
+    }
 }

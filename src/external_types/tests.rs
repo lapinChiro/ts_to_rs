@@ -731,3 +731,71 @@ fn test_external_type_params_absent_defaults_empty() {
     let typedef = registry.get("Simple").unwrap();
     assert!(typedef.type_params().is_empty());
 }
+
+#[test]
+fn test_load_interface_with_constructors() {
+    let json = r#"{
+        "version": 2,
+        "types": {
+            "MyClass": {
+                "kind": "interface",
+                "fields": [
+                    {"name": "running", "type": {"kind": "boolean"}}
+                ],
+                "methods": {},
+                "constructors": [
+                    {
+                        "params": [
+                            {"name": "name", "type": {"kind": "string"}},
+                            {"name": "port", "type": {"kind": "number"}}
+                        ],
+                        "return_type": {"kind": "named", "name": "MyClass"}
+                    }
+                ]
+            }
+        }
+    }"#;
+    let (registry, _) = load_types_json(json).unwrap();
+    let typedef = registry.get("MyClass").unwrap();
+    match typedef {
+        TypeDef::Struct { constructor, .. } => {
+            let sigs = constructor
+                .as_ref()
+                .expect("should have constructor signatures");
+            assert_eq!(sigs.len(), 1);
+            assert_eq!(sigs[0].params.len(), 2);
+            assert_eq!(sigs[0].params[0].0, "name");
+            assert_eq!(sigs[0].params[0].1, RustType::String);
+            assert_eq!(sigs[0].params[1].0, "port");
+            assert_eq!(sigs[0].params[1].1, RustType::F64);
+        }
+        _ => panic!("expected Struct"),
+    }
+}
+
+#[test]
+fn test_builtin_response_has_constructor() {
+    // Verify that the builtin Response type has constructor signatures loaded
+    let (registry, _synthetic) = load_builtin_types().unwrap();
+    let typedef = registry
+        .get("Response")
+        .expect("Response should be registered");
+    match typedef {
+        TypeDef::Struct { constructor, .. } => {
+            let sigs = constructor
+                .as_ref()
+                .expect("Response should have constructor signatures");
+            assert!(!sigs.is_empty(), "should have at least one constructor");
+            // Response constructor: (body?, init?: ResponseInit)
+            let sig = &sigs[0];
+            assert_eq!(sig.params.len(), 2, "Response constructor has 2 params");
+            assert_eq!(sig.params[1].0, "init");
+            // init param type should be Named("ResponseInit")
+            match &sig.params[1].1 {
+                RustType::Named { name, .. } => assert_eq!(name, "ResponseInit"),
+                other => panic!("expected Named(ResponseInit), got {other:?}"),
+            }
+        }
+        _ => panic!("expected Struct"),
+    }
+}

@@ -4,6 +4,7 @@
 //! expected types, narrowing events, and variable mutability. The results are
 //! stored in [`FileTypeResolution`] which the Transformer reads as immutable data.
 
+mod call_resolution;
 mod du_analysis;
 mod expected_types;
 mod expressions;

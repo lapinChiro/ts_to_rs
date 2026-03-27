@@ -205,6 +205,7 @@ fn register_synthetic_structs_in_registry(
                         type_params: type_params.clone(),
                         fields: field_tuples,
                         methods: std::collections::HashMap::new(),
+                        constructor: None,
                         extends: vec![],
                         is_interface: false,
                     },

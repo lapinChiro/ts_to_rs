@@ -229,7 +229,7 @@ fn convert_external_typedef(
             type_params,
             fields,
             methods,
-            constructors: _,
+            constructors,
         } => {
             let converted_type_params: Vec<crate::ir::TypeParam> = type_params
                 .iter()
@@ -261,29 +261,7 @@ fn convert_external_typedef(
                     let sigs: Vec<MethodSignature> = method
                         .signatures
                         .iter()
-                        .map(|sig| {
-                            let params = sig
-                                .params
-                                .iter()
-                                .map(|p| {
-                                    let ty = convert_external_type(&p.param_type, synthetic);
-                                    let ty = if p.optional {
-                                        RustType::Option(Box::new(ty))
-                                    } else {
-                                        ty
-                                    };
-                                    (p.name.clone(), ty)
-                                })
-                                .collect();
-                            let return_type = sig
-                                .return_type
-                                .as_ref()
-                                .map(|rt| convert_external_type(rt, synthetic));
-                            MethodSignature {
-                                params,
-                                return_type,
-                            }
-                        })
+                        .map(|sig| convert_external_signature(sig, synthetic))
                         .collect();
                     if sigs.is_empty() {
                         None
@@ -293,28 +271,30 @@ fn convert_external_typedef(
                 })
                 .collect();
 
-            Some(TypeDef::new_interface(
-                converted_type_params,
-                converted_fields,
-                converted_methods,
-                vec![],
-            ))
+            let converted_constructors: Option<Vec<MethodSignature>> = {
+                let sigs: Vec<MethodSignature> = constructors
+                    .iter()
+                    .map(|sig| convert_external_signature(sig, synthetic))
+                    .collect();
+                if sigs.is_empty() {
+                    None
+                } else {
+                    Some(sigs)
+                }
+            };
+
+            Some(TypeDef::Struct {
+                type_params: converted_type_params,
+                fields: converted_fields,
+                methods: converted_methods,
+                constructor: converted_constructors,
+                extends: vec![],
+                is_interface: true,
+            })
         }
         ExternalTypeDef::Function { signatures } => {
             let sig = signatures.first()?;
-            let params = sig
-                .params
-                .iter()
-                .map(|p| {
-                    let ty = convert_external_type(&p.param_type, synthetic);
-                    let ty = if p.optional {
-                        RustType::Option(Box::new(ty))
-                    } else {
-                        ty
-                    };
-                    (p.name.clone(), ty)
-                })
-                .collect();
+            let params = convert_external_params(&sig.params, synthetic);
             let return_type = sig
                 .return_type
                 .as_ref()
@@ -413,6 +393,43 @@ fn convert_union_type(members: &[ExternalType], synthetic: &mut SyntheticTypeReg
         RustType::Option(Box::new(inner))
     } else {
         inner
+    }
+}
+
+/// Converts external parameters to `(name, RustType)` pairs.
+///
+/// Handles optional parameters by wrapping their types in `Option<T>`.
+fn convert_external_params(
+    params: &[ExternalParam],
+    synthetic: &mut SyntheticTypeRegistry,
+) -> Vec<(String, RustType)> {
+    params
+        .iter()
+        .map(|p| {
+            let ty = convert_external_type(&p.param_type, synthetic);
+            let ty = if p.optional {
+                RustType::Option(Box::new(ty))
+            } else {
+                ty
+            };
+            (p.name.clone(), ty)
+        })
+        .collect()
+}
+
+/// Converts an [`ExternalSignature`] to a [`MethodSignature`].
+fn convert_external_signature(
+    sig: &ExternalSignature,
+    synthetic: &mut SyntheticTypeRegistry,
+) -> MethodSignature {
+    let params = convert_external_params(&sig.params, synthetic);
+    let return_type = sig
+        .return_type
+        .as_ref()
+        .map(|rt| convert_external_type(rt, synthetic));
+    MethodSignature {
+        params,
+        return_type,
     }
 }
 
