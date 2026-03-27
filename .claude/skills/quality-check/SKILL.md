@@ -19,9 +19,10 @@ cargo fix --allow-dirty --allow-staged > /tmp/fix-result.txt 2>&1
 cargo fmt --all --check > /tmp/fmt-result.txt 2>&1
 cargo clippy --all-targets --all-features -- -D warnings > /tmp/clippy-result.txt 2>&1
 cargo test > /tmp/test-result.txt 2>&1
+./scripts/check-file-lines.sh > /tmp/file-lines-result.txt 2>&1
 ```
 
-`cargo fix` は未使用 import 等のコンパイラ警告を自動修正する。`cargo fmt` / `cargo clippy` の前に実行することで手動修正の手間を省く。
+`cargo fix` は未使用 import 等のコンパイラ警告を自動修正する。`cargo fmt` / `cargo clippy` の前に実行することで手動修正の手間を省く。`check-file-lines.sh` は `src/` 配下の `.rs` ファイルが 1000 行以下であることを検証する。
 
 コマンド出力の確認方法は `.claude/rules/command-output-verification.md` に従う。
 
@@ -40,5 +41,5 @@ cargo test > /tmp/test-result.txt 2>&1
 
 ## 検証
 
-- 3 コマンド全てが終了コード 0 で完了している
+- 全コマンドが終了コード 0 で完了している
 - 出力ファイルの全文を Read ツールで確認した履歴がある

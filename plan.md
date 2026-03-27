@@ -2,18 +2,16 @@
 
 PRD 化済みタスクの消化順序。次のタスクから順に着手する。
 
-## 現在のタスク: I-192 大規模ファイルの分割
-
-PRD: `backlog/I-192-large-file-splitting.md`
+## 完了: I-192 大規模ファイルの分割
 
 ### ベースライン
 
 - テスト数: 1369 (1225 + 3 + 2 + 63 + 76)
 - 1000 行超ファイル: 元 18 個
 
-### 完了済みタスク（T1-T10）
+### 完了済みタスク（T1-T13）
 
-カテゴリ A（プロダクションコード分割）6 ファイル全完了 + テスト分割 6 ファイル完了:
+カテゴリ A（プロダクションコード分割）6 ファイル全完了 + テスト分割 10 ファイル完了:
 
 | タスク | 元ファイル | 元行数 | サブモジュール数 |
 |--------|-----------|--------|----------------|
@@ -24,24 +22,18 @@ PRD: `backlog/I-192-large-file-splitting.md`
 | T5 | `classes.rs` | 2215 | 5 + tests |
 | T6+T6b | `functions/mod.rs` + `tests.rs` | 1298+1422 | 4 + tests/4 |
 | T7 | `expressions/tests.rs` | 6814 | tests/19 (論理分類ベース) |
-| T8 | `types/tests.rs` | 3333 | tests/7 (論理分類: primitives, collections, interfaces, type_aliases, unions, intersections, structural_transforms) |
-| T9 | `transformer/tests.rs` | 1335 | tests/6 (論理分類: imports_and_exports, module_items, enums, classes, variable_type_propagation, error_handling) |
-| T10 | `generator/` テスト抽出 | mod.rs:1410, expressions.rs:1267, statements.rs:1019 | mod.rs→576+tests.rs:828, expressions/mod.rs:486+tests.rs:771, statements/mod.rs:241+tests.rs:774 |
+| T8 | `types/tests.rs` | 3333 | tests/7 |
+| T9 | `transformer/tests.rs` | 1335 | tests/6 |
+| T10 | `generator/` テスト抽出 | mod.rs:1410, expressions.rs:1267, statements.rs:1019 | 3ファイル分割 |
+| T11 | `ir.rs` テスト抽出 | 1416 | ir/mod.rs:858 + ir/tests.rs:558 |
+| T12 | テスト抽出 | external_types.rs:1156, external_struct_generator.rs:1132, module_graph.rs:1038 | 3ファイル分割 |
+| T13 | 最終検証 | — | 全ファイル1000行以下、テスト1369不変、clippy 0警告、fmt pass |
 
-全タスクでテスト数不変（1369）、外部 API パス不変を確認済み。
+全タスク完了。テスト数不変（1369）、1000行超ファイル 0 個。
 
-### 次のタスク（上から順に実施）
+### 再発防止
 
-1. **T11: `ir.rs` テスト抽出** — (1416行) → `ir/mod.rs` + `ir/tests.rs`
-2. **T12: `pipeline/` テスト抽出** — `external_types.rs` (1156行), `module_graph.rs` (1038行), `external_struct_generator.rs` (1132行)
-3. **T13: 最終検証** — 全ファイル 1000 行以下、全テスト pass、clippy 0 警告、fmt pass、Hono ベンチ同一
-
-### 作業上の注意事項
-
-- **並列エージェント禁止**: 同一リポジトリで複数エージェントが同時にファイル操作すると破壊が起きた。全タスクを直列で実施する
-- **スクリプトによる一括置換禁止**: sed/Python の一括置換でミスが発生した。手動で正確に編集する
-- **分割パターン**: サブモジュールに `use super::*;` で親の名前空間を取り込み、サブモジュール間で呼ばれる関数は `pub(super)`。外部公開 API は mod.rs で `pub use submodule::func;` で re-export
-- **検証**: 各タスク完了後に `cargo check` + `cargo test` でテスト数不変を確認。`cargo fmt` も実行する
+`scripts/check-file-lines.sh`（閾値 1000 行）を `/quality-check` スキルに組み込み済み。
 
 ## OBJECT_LITERAL_NO_TYPE 完全解消ロードマップ
 

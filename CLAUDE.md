@@ -23,6 +23,7 @@ cargo clippy --all-targets --all-features -- -D warnings  # lint
 cargo fmt --all --check    # フォーマットチェック
 cargo llvm-cov --ignore-filename-regex 'main\.rs' --fail-under-lines 89  # カバレッジ計測（閾値89%、main.rs除外）
 cargo llvm-cov --html                  # HTMLレポート生成（target/llvm-cov/html/）
+./scripts/check-file-lines.sh        # .rs ファイル行数チェック（閾値: 1000行）
 ./scripts/hono-bench.sh              # Hono 変換率ベンチマーク（ディレクトリモード）
 ./scripts/hono-bench.sh --both       # ディレクトリ + 単一ファイル両方
 ```
