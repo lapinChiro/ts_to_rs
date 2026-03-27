@@ -1,38 +1,38 @@
-# TODO 優先順位付けの判断軸
+# TODO Prioritization Criteria
 
-## 適用条件
+## When to Apply
 
-TODO や backlog の項目に優先順位を付けるとき。
+When prioritizing TODO or backlog items.
 
-## 制約
+## Constraints
 
-3 つの軸で各項目を評価し、総合的に優先順位を決定する:
+Evaluate each item on 3 axes and determine overall priority:
 
-### 軸 1: 直接的な価値（既存の判断基準）
+### Axis 1: Direct Value (existing criteria)
 
-プロジェクト固有の基準に従う。変換の正確性が最上位であり、その中でも深刻度で 3 段階に分かれる（詳細は `conversion-correctness-priority.md`）:
+Follow project-specific criteria. Conversion correctness is highest priority, further divided into 3 severity tiers (see `conversion-correctness-priority.md`):
 
-1. サイレントに意味が変わる問題（最優先）
-2. コンパイルエラーになる問題
-3. 未対応構文
+1. Silent semantic changes (highest priority)
+2. Compile errors
+3. Unsupported syntax
 
-### 軸 2: 相乗効果（レバレッジ）
+### Axis 2: Leverage (synergy)
 
-その課題を解決すると、他の課題も副次的に解消・簡素化されるか。
+Does solving this issue also resolve or simplify other issues?
 
-- 同じ基盤・パターンを共有する課題群を特定する
-- 「基盤を作る側」の課題を先に解決することで、後続の課題の工数が減る
-- 複数の小課題を 1 つの PRD にバッチ化できるか検討する
+- Identify groups of issues sharing the same foundation/pattern
+- Solving "foundation-building" issues first reduces effort for downstream issues
+- Consider whether multiple small issues can be batched into a single PRD
 
-### 軸 3: 伝播防止（技術的負債の蓄積回避）
+### Axis 3: Propagation Prevention (tech debt accumulation)
 
-その課題を未解決のまま放置すると、今後の開発に悪影響が蓄積するか。
+Does leaving this issue unresolved cause accumulating negative impact on future development?
 
-- 今後追加する機能が、この未解決課題の workaround を必要とするか
-- workaround が増えた後に本来の修正を行うと、修正箇所が N 倍に膨らむか
-- 逆に、孤立した問題（他の開発に影響しない）は後回しにしても安全
+- Will future features require workarounds for this unresolved issue?
+- After workarounds accumulate, does fixing the original issue require N-fold more changes?
+- Conversely, isolated problems (no impact on other development) are safe to defer
 
-### 統合判断
+### Integrated Judgment
 
-- 「直接的価値が高い」だけでは優先しない。伝播リスクが低く孤立した Critical 課題より、伝播リスクが高い Important 課題を先に解決する方が、全体の開発効率は高くなることがある
-- 判断の根拠を明示する（「I-XX を後回しにした理由: 影響範囲が Y に限定され、他の開発に伝播しないため」）
+- High direct value alone is not sufficient for prioritization. An Important issue with high propagation risk may deserve higher priority than an isolated Critical issue with low propagation risk, improving overall development efficiency
+- Explicitly state the reasoning for judgments (e.g., "Deferred I-XX because: impact is limited to Y and does not propagate to other development")

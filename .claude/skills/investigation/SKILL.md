@@ -1,32 +1,32 @@
 ---
 name: investigation
-description: ユーザーから調査・分析を依頼されたときの実施手順。ソースコード・ドキュメント・Web リソースを徹底的に読み込み、report/ にレポートを保存する
+description: Investigation procedure when user requests research/analysis. Thoroughly read source code, docs, and web resources, saving reports to report/
 user-invocable: true
 ---
 
-# 調査タスクの実施
+# Investigation Task Execution
 
-## トリガー
+## Trigger
 
-ユーザーから調査・分析を依頼されたとき。
+When the user requests an investigation or analysis.
 
-## アクション
+## Actions
 
-1. 調査対象に関連するソースコード、ドキュメント、Web リソースを **徹底的に** 読み込む
-   - ソースコード: 関連するモジュールを全文読む（部分的な読み取りで済ませない）
-   - ドキュメント: README, CLAUDE.md, TODO, plan.md, backlog/ を確認する
-   - 外部リソース: 必要に応じて Web 検索・ドキュメント取得を行う
-2. 調査結果を `report/<テーマ名>.md` に保存する
-   - テーマ名はケバブケースで、調査内容が推測できる名前にする（例: `report/design-issues.md`, `report/swc-api-changes.md`）
-   - レポートの冒頭に以下のメタ情報を記載する:
-     - **基準コミット**: `git rev-parse --short HEAD` の出力（調査時点のコードベースを特定するため）
-     - 未コミットの変更がある状態で調査した場合は、その旨を注記する
-   - レポートには要約、詳細な分析、根拠となるコード箇所・ドキュメントの参照を含める
-3. 調査結果の要約をユーザーに報告する
+1. **Thoroughly** read all relevant source code, documentation, and web resources
+   - Source code: Read related modules in full (do not settle for partial reads)
+   - Documentation: Check README, CLAUDE.md, TODO, plan.md, backlog/
+   - External resources: Perform web searches and document retrieval as needed
+2. Save results to `report/<theme-name>.md`
+   - Use kebab-case theme names that indicate the investigation content (e.g., `report/design-issues.md`, `report/swc-api-changes.md`)
+   - Include the following metadata at the top of the report:
+     - **Base commit**: Output of `git rev-parse --short HEAD` (to identify the codebase at investigation time)
+     - If investigating with uncommitted changes, note this
+   - Include a summary, detailed analysis, and references to supporting code locations/documentation
+3. Report a summary of findings to the user
 
-## 禁止事項
+## Prohibited
 
-- 一部のファイルだけ読んで「全体を確認した」と報告すること
-- 推測や一般論だけでレポートを構成すること（具体的なコード箇所・ファイル名・行番号で裏付ける）
-- レポートファイルを作成せずに口頭のみで報告すること
-- 基準コミットを記載せずにレポートを作成すること
+- Reading only some files and reporting "confirmed the whole thing"
+- Composing reports from speculation or generalities only (support with specific code locations, file names, and line numbers)
+- Reporting verbally only without creating a report file
+- Creating a report without documenting the base commit

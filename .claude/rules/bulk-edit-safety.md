@@ -1,29 +1,29 @@
-# 一括編集の安全手順
+# Bulk Edit Safety Procedure
 
-## 適用条件
+## When to Apply
 
-Python スクリプト、sed、awk、正規表現による一括置換でファイルを編集するとき。
+When editing files via Python scripts, sed, awk, or regex-based bulk replacements.
 
-## 制約
+## Constraints
 
-以下の手順を **必ず** 実行する:
+The following steps **must** be executed:
 
-1. **対象の特定**: 変換対象の全箇所を `grep` で列挙し、件数を記録する
-2. **Dry run**: 実際のファイル書き込みを行わず、変換結果を stdout に出力する。具体的には:
-   - Python スクリプト: ファイルを読み込み、変換結果を表示するが書き込まない
-   - sed: `-i` なしで stdout に出力
-3. **差分確認**: dry run の出力を検査し、以下を確認する:
-   - 変換対象の全件が正しく変換されている（漏れがない）
-   - 変換対象外の箇所が変換されていない（誤マッチがない）
-   - 変換パターンが曖昧な場合、代表的な 3-5 件を目視確認する
-4. **実行**: dry run で問題がないことを確認した後に、実際のファイル書き込みを行う
-5. **検証**: 変換後に `cargo check` / `cargo test` で結果を確認する
+1. **Identify targets**: List all target locations with `grep` and record the count
+2. **Dry run**: Output the transformation result to stdout without writing to files:
+   - Python scripts: Read files and display results, but do not write
+   - sed: Output to stdout without `-i`
+3. **Diff review**: Inspect the dry run output and verify:
+   - All targets are correctly transformed (no omissions)
+   - Non-target locations are untouched (no false matches)
+   - If patterns are ambiguous, visually verify 3-5 representative cases
+4. **Execute**: Write to files only after confirming no issues in the dry run
+5. **Verify**: Run `cargo check` / `cargo test` after the transformation
 
-## 禁止事項
+## Prohibited
 
-- dry run なしに一括置換を実行すること
-- `, reg,` のような短い汎用パターンでの一括置換（関数呼び出しの引数名は他の文脈でも出現する。関数名を含むパターンで限定すること）
-- multi-line regex（DOTALL、行をまたぐパターン）を使用すること（予期しない複数マッチや無限挿入を引き起こす。行をまたぐ変更は手動で対応する）
-- Rust の構文レベルの判定（関数本体の開始位置、match 文の判別等）を正規表現で行うこと
-- 変換スクリプトの出力を確認せずに「問題なさそう」と判断すること
-- 除外リストを `grep` パターンのみで作成すること（`reg: &TypeRegistry` と `reg: &crate::registry::TypeRegistry` のような表記揺れを見落とす。実際のシグネチャを全件目視確認する）
+- Running bulk replacements without a dry run
+- Bulk replacements using short generic patterns like `, reg,` (argument names appear in other contexts — use function-name-qualified patterns)
+- Multi-line regex (DOTALL, cross-line patterns) (causes unexpected multiple matches or infinite insertions — handle cross-line changes manually)
+- Using regex for Rust syntax-level decisions (function body start positions, match statement detection, etc.)
+- Judging output as "looks fine" without reviewing the transformation script's output
+- Building exclusion lists using `grep` patterns only (misses notation variations like `reg: &TypeRegistry` vs `reg: &crate::registry::TypeRegistry` — visually verify all actual signatures)

@@ -1,103 +1,103 @@
 ---
 name: todo-grooming
-description: TODO 全体の定期的な棚卸し。保留・スコープ外の再評価、記載内容の精査、優先順位の再評価を行う
+description: Periodic TODO inventory. Re-evaluate holds, out-of-scope items, content accuracy, and priorities
 user-invocable: true
 ---
 
-# TODO の棚卸し
+# TODO Grooming
 
-## トリガー
+## Trigger
 
-- ユーザーから TODO の整理を依頼されたとき
-- 大きな機能追加の完了後（前提条件が変わっている可能性があるとき）
-- backlog が空で次の作業を選定する前
+- User requests TODO cleanup
+- After major feature additions (prerequisites may have changed)
+- Before selecting next work when backlog is empty
 
-## アクション
+## Actions
 
-以下の 4 ステップを順番に実行する。各ステップで変更が生じた場合、変更内容と理由をユーザーに報告する。
+Execute the following 5 steps in order. Report changes and reasoning to the user for each step.
 
-### ステップ 1: 保留項目の精査
+### Step 1: Hold Item Review
 
-`## 保留` セクションの全項目について、保留理由がまだ有効かを確認する。
+For all items in the `## Hold` section, verify whether hold reasons are still valid.
 
-**「前提タスクの完了待ち」の項目:**
-- コードベースとテストを確認し、前提タスクが完了しているか自分で判定する
-- 完了している場合 → `PRD 化可能` セクションに移動し、適切な Tier に配置する
-- ユーザーへの確認は不要（コードで判定可能）
+**"Waiting for prerequisite task completion" items:**
+- Check codebase and tests to self-determine if the prerequisite task is complete
+- If complete → Move to `PRD-eligible` section at the appropriate Tier
+- No user confirmation needed (determinable from code)
 
-**「設計方針の決定待ち」の項目:**
-- ユーザーに確認が必要な場合、1 つずつ順番に聞く
-- 確認不要で判断できる場合（例: 既に類似の方針が他の機能で決まっている）は自分で判定する
+**"Waiting for design direction decision" items:**
+- If user confirmation is needed, ask one at a time
+- If determinable without confirmation (e.g., a similar direction was already decided for another feature), self-determine
 
-### ステップ 2: スコープ外の再評価
+### Step 2: Out-of-Scope Re-evaluation
 
-`## スコープ外` セクションの全項目について、以下の観点で再評価する:
+Re-evaluate all items in the `## Out of Scope` section from these perspectives:
 
-- **前提の変化**: 当時スコープ外とした理由が、現在も有効か
-- **需要の発生**: 最近の開発で関連する機能が追加され、需要が生まれていないか
-- **工数の変化**: 他の機能の実装により、以前は高コストだった機能が低コストで実現可能になっていないか
-- **変換可能性の再検討**: 「Rust に直接対応する構文がない」を理由にスコープ外としている項目について、本当に変換方法がないか再検討する。proc macro、trait、enum 等を用いた代替表現の可能性を評価する。変換方法が見つからない場合はユーザーにヒヤリングする（独断で「不可能」と判断しない）
+- **Changed prerequisites**: Is the original reason for scoping out still valid?
+- **Emerged demand**: Have recent developments added related features, creating demand?
+- **Changed effort**: Have other feature implementations made a previously expensive feature cheaper?
+- **Conversion feasibility reconsideration**: For items scoped out because "Rust has no direct syntax equivalent", reconsider whether conversion is truly impossible. Evaluate alternative representations using proc macros, traits, enums, etc. If no conversion method is found, interview the user (do not independently judge "impossible")
 
-再評価の結果、`PRD 化可能` に移動すべき項目があれば移動する。
+Move items to `PRD-eligible` if re-evaluation warrants it.
 
-### ステップ 3: PRD 化可能項目の精査
+### Step 3: PRD-eligible Item Review
 
-`## PRD 化可能` セクションの全項目について、以下を確認する:
+For all items in the `## PRD-eligible` section, verify:
 
-- **インスタンス数の検証**: `./scripts/hono-bench.sh` を実行し、エラー JSON（`/tmp/hono-bench-errors.json`）の `kind` フィールドで集計する。TODO 記載のインスタンス数と乖離があれば更新する
-- **未記載エラーカテゴリの追加**: ベンチマークで検出されたエラーカテゴリが TODO に存在しない場合、新規 ID を採番して追加する。既存の項目と同じ根本原因であれば既存項目に追記する
-- **記載内容の正確性**: 以下の基準で全項目を検証する:
-  - ソースコード参照（関数名・ファイルパス）は現在のコードベースと一致しているか。参照先が移動・改名されていれば更新する
-  - ソースコードの具体的な箇所に言及する場合は `ファイルパス:行番号` 形式で記載する（例: `src/registry.rs:482`）
-  - エラーメッセージは実際の出力を引用する（推測ではなく `kind` フィールドの値をそのまま記載）
-  - ファイル行数などの数値は実測値で記載する
-- **重複の統合**: 複数の項目が同じ根本原因を共有している場合、バッチ化を検討する
-- **依存関係の更新**: 他の項目への依存（`🔗 依存:` マーク）が解消されていないか。完了した PRD に依存していた項目は依存の記述を更新する
-- **完了済み項目の除去**: 既に実装済みの項目が残っていないか。`backlog/` に削除漏れの PRD ファイルがないかも確認する
+- **Instance count verification**: Run `./scripts/hono-bench.sh` and aggregate by `kind` field in error JSON (`/tmp/hono-bench-errors.json`). Update if counts diverge from TODO entries
+- **Add undocumented error categories**: If benchmark detects error categories not in TODO, assign new IDs and add. If same root cause as existing items, append to existing
+- **Description accuracy**: Verify all items against these criteria:
+  - Source code references (function names, file paths) match current codebase. Update if moved/renamed
+  - When referring to specific source locations, use `file_path:line_number` format (e.g., `src/registry.rs:482`)
+  - Error messages quote actual output (use `kind` field values verbatim, not estimates)
+  - Numeric values like file line counts are measured values
+- **Duplicate consolidation**: If multiple items share the same root cause, consider batching
+- **Dependency updates**: Check if `🔗 Depends on:` marks have been resolved. Update dependency descriptions for items that depended on completed PRDs
+- **Remove completed items**: Check for already-implemented items remaining. Also check for orphaned PRD files in `backlog/`
 
-### ステップ 4: スキルフィードバックの処理
+### Step 4: Skill Feedback Processing
 
-`[skill-feedback:<スキル名>]` タグが付いた TODO 項目を確認する:
+Check TODO items tagged with `[skill-feedback:<skill-name>]`:
 
-- 同じスキルに対するフィードバックが **2件以上** 蓄積している場合、パターンを分析し、スキルの修正案をユーザーに提案する
-- フィードバックが **1件** でも、スキルの指示と現在の環境の乖離が明白な場合は修正を提案する
-- 修正が承認・適用されたら、対応するフィードバック項目を TODO から削除する
-- 修正が不要と判断された場合、その理由をフィードバック項目に追記し、次回の棚卸しで再評価する
+- If **2+ feedback items** accumulated for the same skill, analyze patterns and propose skill modifications to the user
+- If **1 feedback item** but the divergence between skill instructions and current environment is obvious, propose a fix
+- If fix is approved and applied, delete corresponding feedback items from TODO
+- If fix is deemed unnecessary, append the reasoning to the feedback item for re-evaluation in the next grooming
 
-### ステップ 5: 優先順位の再評価
+### Step 5: Priority Re-evaluation
 
-`.claude/rules/todo-prioritization.md` の 3 軸（直接的価値・相乗効果・伝播防止）で全項目を再評価し、Tier 間の移動を行う。
+Re-evaluate all items using the 3 axes from `.claude/rules/todo-prioritization.md` (direct value, leverage, propagation prevention) and perform inter-Tier moves.
 
-#### Tier 配置基準
+#### Tier Placement Criteria
 
-| Tier | 基準 |
-|------|------|
-| **Tier 1** | 伝播リスクが高い、または 3 軸全てで高評価。放置するとコスト増 |
-| **Tier 2** | 直接的な価値が高いが、伝播リスクは中〜低。Tier 内は価値の高い順 |
-| **Tier 3** | 直接的な価値が低い、または孤立した問題。後回しにしても安全 |
+| Tier | Criteria |
+|------|----------|
+| **Tier 1** | High propagation risk, or high score on all 3 axes. Deferral increases cost |
+| **Tier 2** | High direct value but medium-low propagation risk. Ordered by value within Tier |
+| **Tier 3** | Low direct value, or isolated problems. Safe to defer |
 
-判断の根拠を明示する（「I-XX を Tier 3 に移動した理由: ...」）。
+Explicitly state reasoning for judgments (e.g., "Moved I-XX to Tier 3 because: ...").
 
-### 出力
+### Output
 
-棚卸しの結果を以下の形式でユーザーに報告する:
+Report grooming results to the user in this format:
 
-1. **移動した項目**: どこからどこへ、なぜ
-2. **更新した項目**: 何を、なぜ
-3. **削除した項目**: 何を、なぜ
-4. **Tier 変更**: どの項目がどの Tier に移動したか、なぜ
+1. **Moved items**: From where to where, and why
+2. **Updated items**: What was changed, and why
+3. **Deleted items**: What was removed, and why
+4. **Tier changes**: Which items moved to which Tier, and why
 
-## 禁止事項
+## Prohibited
 
-- ステップ 1〜4 をスキップしてステップ 5 だけ実行すること（情報が古いまま優先順位を付けても無意味）
-- 保留理由の有効性を確認せずに「まだ有効」と判断すること
-- 記載内容の正確性を確認せずに「問題なし」と判断すること
-- 優先順位の判断根拠を省略すること
+- Skipping Steps 1-4 and only executing Step 5 (prioritizing with stale information is pointless)
+- Judging hold reasons as "still valid" without verification
+- Judging description accuracy as "fine" without verification
+- Omitting priority judgment reasoning
 
-## 検証
+## Verification
 
-- 保留セクションの全項目について、保留理由の有効性が確認されている
-- スコープ外セクションの全項目について、再評価が行われている
-- PRD 化可能セクションの全項目の記載内容が現在のコードベースと一致している
-- 優先順位の変更には全て根拠が明示されている
-- `[skill-feedback:*]` タグ付き項目が存在する場合、パターン分析と対応判断が行われている
+- All hold section items have verified hold reason validity
+- All out-of-scope section items have been re-evaluated
+- All PRD-eligible section item descriptions match current codebase
+- All priority changes have explicit reasoning
+- `[skill-feedback:*]` tagged items have been analyzed for patterns and a disposition determined

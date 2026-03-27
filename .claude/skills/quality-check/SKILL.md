@@ -1,18 +1,18 @@
 ---
 name: quality-check
-description: 作業完了時（コミット前）の品質チェック手順。cargo fix, fmt, clippy, test を全て実行し 0 エラー・0 警告を確認する
+description: Post-completion quality check procedure. Run cargo fix, fmt, clippy, test and verify 0 errors, 0 warnings
 user-invocable: true
 ---
 
-# 作業完了時の品質チェック
+# Quality Check on Completion
 
-## トリガー
+## Trigger
 
-ユーザーから依頼された作業が完了したとき（コミット前）。
+When user-requested work is complete (before commit).
 
-## アクション
+## Actions
 
-以下を全て実行し **0 エラー・0 警告** であることを確認する:
+Run all of the following and verify **0 errors, 0 warnings**:
 
 ```bash
 cargo fix --allow-dirty --allow-staged > /tmp/fix-result.txt 2>&1
@@ -22,24 +22,24 @@ cargo test > /tmp/test-result.txt 2>&1
 ./scripts/check-file-lines.sh > /tmp/file-lines-result.txt 2>&1
 ```
 
-`cargo fix` は未使用 import 等のコンパイラ警告を自動修正する。`cargo fmt` / `cargo clippy` の前に実行することで手動修正の手間を省く。`check-file-lines.sh` は `src/` 配下の `.rs` ファイルが 1000 行以下であることを検証する。
+`cargo fix` auto-fixes compiler warnings like unused imports. Running it before `cargo fmt` / `cargo clippy` reduces manual fixes. `check-file-lines.sh` verifies that `.rs` files under `src/` are 1000 lines or fewer.
 
-コマンド出力の確認方法は `.claude/rules/command-output-verification.md` に従う。
+Follow `.claude/rules/command-output-verification.md` for command output verification.
 
-エラーがあった場合:
+On errors:
 
-1. 今回の変更に起因しないエラーも含め、全て修正する
-2. 修正できないエラーは原因と影響を明記し、ユーザーに報告する
+1. Fix all errors, including those not caused by the current changes
+2. If an error cannot be fixed, document the cause and impact and report to the user
 
-## 禁止事項
+## Prohibited
 
-- テストを削除・弱体化してエラーを消すこと
-- clippy 警告を `#[allow(...)]` で黙らせること（根本原因を修正する）
-- 品質チェックを実行せずに「完了」と報告すること
-- 出力を流し読みして「問題なさそう」と判断すること。各コマンドの終了メッセージまで確認する
-- 「今回の変更に起因しない」「スコープ外」を理由に、発見した警告・エラーの修正を先送りすること。発見した時点で修正可能なら修正し、誤検知であれば調査の上その旨を報告する
+- Deleting or weakening tests to eliminate errors
+- Suppressing clippy warnings with `#[allow(...)]` (fix the root cause)
+- Reporting "complete" without running quality checks
+- Skimming output and judging it as "looks fine". Verify through each command's final message
+- Deferring discovered warnings/errors because they're "not caused by this change" or "out of scope". If fixable when discovered, fix it; if it's a false positive, investigate and report accordingly
 
-## 検証
+## Verification
 
-- 全コマンドが終了コード 0 で完了している
-- 出力ファイルの全文を Read ツールで確認した履歴がある
+- All commands completed with exit code 0
+- Full output of each output file has been reviewed via the Read tool

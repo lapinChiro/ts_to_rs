@@ -5,21 +5,21 @@ paths:
   - "src/ir.rs"
 ---
 
-# パイプライン整合性
+# Pipeline Integrity
 
-## 適用条件
+## When to Apply
 
-変換パイプライン（parser → transformer → generator）に関わるコードを追加・変更するとき。
+When adding or modifying code related to the conversion pipeline (parser → transformer → generator).
 
-## 制約
+## Constraints
 
-- **IR は構造化データで表現する**: IR の型（`Item::*`, `RustType` 等）に表示用に整形された文字列を格納しない。文字列化は generator の責務
-- **パイプラインの依存方向を守る**: transformer は IR を生成する。generator は IR を消費する。transformer が `crate::generator` を import してはならない（テストコードを除く）
-- **IR に新しいフィールドを追加するとき、全ての Item バリアントに一貫して適用する**: 例えば `type_params` を `Item::Trait` に追加するなら、`Item::Struct`, `Item::Fn`, `Item::TypeAlias` にも同じ構造化型で追加する
-- **新しい解決メカニズム（例: `instantiate`）を実装したら、使用箇所への統合テストを書く**: 単体テストだけでは統合漏れを検出できない
+- **IR must be represented as structured data**: Do not store display-formatted strings in IR types (`Item::*`, `RustType`, etc.). String formatting is the generator's responsibility
+- **Maintain pipeline dependency direction**: Transformer produces IR. Generator consumes IR. Transformer must not import `crate::generator` (except in test code)
+- **When adding new fields to IR, apply consistently across all Item variants**: For example, if adding `type_params` to `Item::Trait`, also add it with the same structured type to `Item::Struct`, `Item::Fn`, `Item::TypeAlias`
+- **When implementing a new resolution mechanism (e.g., `instantiate`), write integration tests for usage sites**: Unit tests alone cannot detect integration gaps
 
-## 禁止事項
+## Prohibited
 
-- transformer 内で `crate::generator::types::generate_type` 等の generator 関数を呼び出すこと
-- `Vec<String>` に `"T: Bound"` のような整形済み文字列を格納して IR として扱うこと（代わりに構造体を使う）
-- 新しいメソッド（例: `instantiate`）を実装して単体テストだけ書き、変換パイプラインへの統合テストを書かないこと
+- Calling generator functions like `crate::generator::types::generate_type` from within the transformer
+- Storing pre-formatted strings like `"T: Bound"` in `Vec<String>` and treating them as IR (use structs instead)
+- Implementing a new method (e.g., `instantiate`) with only unit tests and no integration tests for the conversion pipeline

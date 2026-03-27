@@ -1,126 +1,126 @@
 ---
 name: prd-template
-description: backlog/ に新しい PRD を作成するときのテンプレートと手順。Discovery（明確化質問）→ PRD 起草の順で進める
+description: Template and procedure for creating new PRDs in backlog/. Proceeds through Discovery (clarification questions) → PRD drafting
 user-invocable: true
 ---
 
-# PRD テンプレート
+# PRD Template
 
-## トリガー
+## Trigger
 
-`backlog/` に新しい PRD を作成するとき。
+When creating a new PRD in `backlog/`.
 
-## アクション
+## Actions
 
-### 0. バッチ化確認
+### 0. Batch Check
 
-PRD の対象項目を決めたら、`TODO` を確認し、以下の基準で一緒に PRD 化すべき項目がないか検討する:
+Once the target item is determined, check `TODO` for items that should be batched together:
 
-- **同じコードパス**を通る項目（同じ関数・モジュールの変更で対応できる）
-- **明示的に重複・関連が記載されている**項目（🔗 で相互参照されている等）
-- **同じ抽象パターン**の項目（例: 複数の `TsTypeOperator` バリアント対応）
+- Items on the **same code path** (addressable by modifying the same functions/modules)
+- Items with **explicit overlap/relation** (cross-referenced with 🔗, etc.)
+- Items with the **same abstract pattern** (e.g., multiple `TsTypeOperator` variant support)
 
-該当項目がある場合、PRD のスコープにまとめて含める。ただし、独立した異なるコードパスの項目を無理にまとめない。
+If applicable items exist, include them in the PRD scope. However, do not force-combine items on independent code paths.
 
 ### 1. Discovery
 
-PRD を書き始める前に、以下を行う:
+Before writing the PRD, do the following:
 
-1. 最低 2 つの明確化質問をユーザーに投げる:
-   - なぜ今これを作るのか（動機・優先度の確認）
-   - 何をもって成功とするか（完了条件の認識合わせ）
-   - 制約はあるか（技術的制約、既存機能との整合性等）
-2. 回答を得てから PRD を起草する
+1. Ask the user at least 2 clarification questions:
+   - Why build this now? (motivation/priority confirmation)
+   - What defines success? (completion criteria alignment)
+   - Are there constraints? (technical constraints, compatibility with existing features, etc.)
+2. Draft the PRD only after receiving answers
 
-### 2. PRD 起草
+### 2. PRD Drafting
 
-以下のテンプレートに従って記述する:
+Follow this template:
 
 ```markdown
-# <タイトル>
+# <Title>
 
-## 背景・動機
+## Background
 
-なぜこの機能が必要か。現状の課題や、この機能がないことで生じている問題。
+Why this feature is needed. Current problems or issues caused by its absence.
 
-## ゴール
+## Goal
 
-この PRD が完了したとき、何ができるようになっているか。具体的・検証可能な形で書く。
-曖昧な表現（「速い」「簡単」「直感的」等）を避け、具体的な数値・閾値・観測可能な挙動で記述する。
+What should be achievable when this PRD is complete. Write in specific, verifiable terms.
+Avoid vague expressions ("fast", "easy", "intuitive") — use specific numbers, thresholds, and observable behaviors.
 
-## スコープ
+## Scope
 
-### 対象
+### In Scope
 
-この PRD で実装する範囲を箇条書きで列挙する。
+Bullet list of what this PRD implements.
 
-### 対象外
+### Out of Scope
 
-明示的に対象外とするものを列挙する。スコープクリープを防ぐ。
+Explicitly list what is excluded. Prevents scope creep.
 
-## 設計
+## Design
 
-### 技術的アプローチ
+### Technical Approach
 
-実装方針。既存のアーキテクチャとの関係、変更が必要なモジュール、新規追加するモジュール。
+Implementation strategy. Relationship to existing architecture, modules to modify, new modules to add.
 
-### 設計整合性レビュー
+### Design Integrity Review
 
-`.claude/rules/design-integrity.md` のチェック項目に従い、以下を記述する:
+Per `.claude/rules/design-integrity.md` checklist:
 
-- **高次の整合性**: 変更対象の 1 つ上のレイヤー（呼び出し元・依存先・兄弟モジュール）との一貫性
-- **DRY / 直交性 / 結合度**: 問題がある場合、その内容と対処方針
-- **割れ窓**: 既存コードに発見した問題と、スコープ内で修正するか TODO に記録するかの判断
+- **Higher-level consistency**: Consistency with one layer above (callers, dependencies, sibling modules)
+- **DRY / Orthogonality / Coupling**: Issues found and resolution approach
+- **Broken windows**: Existing code problems found, and decision to fix in-scope or record in TODO
 
-問題なしの場合も「確認済み、問題なし」と明記する。
+If no issues, explicitly state "Verified, no issues."
 
-### 影響範囲
+### Impact Area
 
-変更が及ぶファイル・モジュールの一覧。
+List of affected files/modules.
 
-## タスク一覧
+## Task List
 
-実装を詳細に分析し、以下の形式で各タスクを記述する。TDD で進める前提で、RED → GREEN → REFACTOR の順序を意識する。
+Analyze implementation in detail. Describe each task in the following format. Assumes TDD: RED → GREEN → REFACTOR order.
 
-### T1: <タスク名>
+### T1: <Task name>
 
-- **作業内容**: 具体的に何を変更・追加するか。対象ファイル・関数・型を明記する
-- **完了条件**: このタスクが完了したと言える条件。テストの追加・パスを含む
-- **依存**: なし / T2, T3（先に完了すべきタスクの ID）
-- **前提条件**: このタスクに着手するために満たされているべき状態（あれば）
+- **Work**: What specifically to change/add. Specify target files, functions, and types
+- **Completion criteria**: Conditions for this task to be considered complete. Include test additions/passing
+- **Depends on**: None / T2, T3 (task IDs that must complete first)
+- **Prerequisites**: State that must be satisfied before starting this task (if any)
 
-### T2: <タスク名>
+### T2: <Task name>
 
-- **作業内容**: ...
-- **完了条件**: ...
-- **依存**: T1
-- **前提条件**: ...
+- **Work**: ...
+- **Completion criteria**: ...
+- **Depends on**: T1
+- **Prerequisites**: ...
 
-## テスト計画
+## Test Plan
 
-追加・変更するテストの概要。正常系・異常系・境界値を含む。
+Overview of tests to add/modify. Include normal cases, error cases, and boundary values.
 
-## 完了条件
+## Completion Criteria
 
-この PRD の作業が「完了」と言える条件。品質チェック（clippy, fmt, test）を含む。
+Conditions for this PRD's work to be considered "complete". Include quality checks (clippy, fmt, test).
 ```
 
-## 設計判断の原則
+## Design Decision Principles
 
-- **唯一の判断基準は理想の実装**: 「理論的に最も理想的な実装か」だけが設計判断の基準。開発工数・コスト・影響範囲の大きさは設計の根拠にならない。「工数が大きいから対象外」「影響範囲が広いから簡易版で」は禁止
-- **現在の実装も評価する**: 新しい設計だけでなく、変更対象の既存実装が理想から乖離していないかを確認する。乖離があればスコープ内で修正するか TODO に記録する
-- **一貫性**: 型システム・アーキテクチャとして一貫した解法を選ぶ。特定ケースだけを場当たり的に処理するハックを避ける
-- **スコープ判断**: 論理的に同じ問題の一部であるものは含める。独立した別の問題は含めない。コストはスコープ判断の基準にならない
-- **設計整合性**: `.claude/rules/design-integrity.md` のチェックを設計確定前に必ず実施する
+- **The only criterion is the ideal implementation**: "Is this the theoretically most ideal implementation?" is the sole design criterion. Development effort, cost, and impact scope are not valid design justifications. "Out of scope because effort is large" or "simplified version because impact scope is wide" are prohibited
+- **Evaluate current implementation too**: Beyond new design, verify whether existing implementations diverge from ideal. If so, fix in-scope or record in TODO
+- **Consistency**: Choose solutions consistent as a type system and architecture. Avoid ad-hoc hacks that handle only specific cases
+- **Scope judgment**: Include what is logically part of the same problem. Exclude independently separate problems. Cost is not a criterion for scope decisions
+- **Design integrity**: Always perform `.claude/rules/design-integrity.md` checks before finalizing design
 
-## 禁止事項
+## Prohibited
 
-- Discovery（明確化質問）をスキップして PRD を書くこと
-- 曖昧な完了条件（「適切に動作する」「問題なく使える」等）を書くこと
-- 将来の拡張を見越した設計を PRD に盛り込むこと（YAGNI）
-- 1 つの PRD に複数の独立した機能を詰め込むこと
-- 「工数が大きい」「影響範囲が広い」を理由にスコープを狭めること、または理想的でない設計を選ぶこと
-- アドホックな対応（特定ケースの if 分岐等）で理想的な設計を回避すること
-- 「Rust に直接対応する構文がない」「Rust では表現できない」を理由に対象外とすること — これは設計課題であり、変換不可能の証明ではない。方法が見つからない場合はユーザーにヒヤリングする
-- 設計整合性レビューを省略すること（問題なしでも「確認済み」と明記する）
-- タスクの作業内容・完了条件・依存関係を曖昧に記述すること（対象ファイル・関数・型を具体的に明記する）
+- Skipping Discovery (clarification questions) and writing a PRD
+- Writing vague completion criteria ("works properly", "can be used without issues", etc.)
+- Including future-proofing design in the PRD (YAGNI)
+- Cramming multiple independent features into a single PRD
+- Narrowing scope or choosing a non-ideal design because "effort is large" or "impact scope is wide"
+- Using ad-hoc solutions (specific-case if branches, etc.) to avoid ideal design
+- Declaring something out of scope because "Rust has no directly corresponding syntax" or "cannot be expressed in Rust" — this is a design challenge, not proof of conversion impossibility. If no method is found, interview the user
+- Omitting the design integrity review (even if no issues, state "verified")
+- Writing vague task work descriptions, completion criteria, or dependencies (specifically name target files, functions, and types)

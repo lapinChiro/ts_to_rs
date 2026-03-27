@@ -1,27 +1,27 @@
 ---
 name: todo-replenishment
-description: TODO が空の状態でユーザーから作業依頼を受けたときの補充手順。現在の実装を分析し、具体的な提案とともにユーザーにヒヤリングする
+description: Replenishment procedure when TODO is empty and user requests work. Analyze current implementation and propose with user hearing
 user-invocable: true
 ---
 
-# TODO の補充
+# TODO Replenishment
 
-## トリガー
+## Trigger
 
-`TODO` が空（未整理のアイデアがない）の状態でユーザーから作業依頼を受けたとき。
+When `TODO` is empty (no unrefined ideas) and the user requests work.
 
-## アクション
+## Actions
 
-1. 現在の実装を分析する（対応している変換、未対応の構文、既知の制約）
-2. リポジトリの目的（TS → Rust 変換の実用化）を考慮し、次に価値のある機能・改善を提案する
-   - 未対応の TS 構文（変換機能の拡張）
-   - 生成コードの品質改善（所有権、エラーハンドリング等）
-   - 開発基盤の整備（テスト、CI、DX）
-3. ユーザーにヒヤリングし、優先度と方向性を確認する
-4. 合意した項目を `TODO` に書き込む
+1. Analyze the current implementation (supported conversions, unsupported syntax, known limitations)
+2. Considering the repo's purpose (practical TS → Rust conversion), propose next valuable features/improvements:
+   - Unsupported TS syntax (conversion feature expansion)
+   - Generated code quality improvements (ownership, error handling, etc.)
+   - Development infrastructure (tests, CI, DX)
+3. Interview the user to confirm priorities and direction
+4. Write agreed items to `TODO`
 
-## 禁止事項
+## Prohibited
 
-- ユーザーへのヒヤリングをせずに `TODO` に項目を書き込むこと
-- 分析結果を提示せずに「何をやりましょうか？」とだけ聞くこと（具体的な提案を伴うこと）
-- 「Rust に直接対応する構文がない」を理由に TS 構文を提案対象から除外すること — 変換方法が見つからない場合はユーザーにヒヤリングする
+- Writing items to `TODO` without user interview
+- Asking only "What should we do?" without presenting analysis results (must include concrete proposals)
+- Excluding TS syntax from proposals because "Rust has no direct syntax equivalent" — if no conversion method is found, interview the user (do not independently judge "impossible")

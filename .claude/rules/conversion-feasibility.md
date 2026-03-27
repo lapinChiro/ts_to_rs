@@ -3,24 +3,24 @@ paths:
   - "src/transformer/**"
 ---
 
-# 変換可能性の判断基準
+# Conversion Feasibility Criteria
 
-## 適用条件
+## When to Apply
 
-TypeScript の構文・パターンについて「自動変換できない」「Rust で表現できない」と判断しようとする場面すべて。
+Any situation where you are about to judge a TypeScript syntax/pattern as "cannot be auto-converted" or "cannot be expressed in Rust".
 
-## 制約
+## Constraints
 
-- 変換可能性の判断は **構文の一致** ではなく **目的の一致** で行う。TypeScript のある構文が Rust に直接対応する構文を持たないことは、自動変換が不可能であることを意味しない
-- 「Rust で表現できない」と結論する前に、以下の 3 ステップを必ず踏む:
-  1. **目的の特定**: その TypeScript コードは何を達成しようとしているか（型安全性、コード生成、制約の表現等）
-  2. **Rust での代替手段の調査**: 同じ目的を達成する Rust のイディオム・パターンを調査する（trait, associated type, proc macro, serde, generics, enum 等）
-  3. **変換戦略の設計**: TS の構文から Rust の代替手段への変換パスを具体的に設計する
-- 3 ステップを踏んだ上でなお変換戦略が見つからない場合のみ「現時点では自動変換の方法が見つかっていない」と記録する。「不可能」とは書かない
+- Conversion feasibility is determined by **purpose alignment**, not **syntax matching**. The absence of a direct Rust equivalent for a TS syntax does not mean auto-conversion is impossible
+- Before concluding "cannot be expressed in Rust", always follow these 3 steps:
+  1. **Identify the purpose**: What is the TypeScript code trying to achieve? (type safety, code generation, constraint expression, etc.)
+  2. **Research Rust alternatives**: Investigate Rust idioms/patterns that achieve the same purpose (trait, associated type, proc macro, serde, generics, enum, etc.)
+  3. **Design conversion strategy**: Concretely design the conversion path from TS syntax to the Rust alternative
+- Only after completing all 3 steps and still finding no conversion strategy, record it as "no auto-conversion method found at this time". Never write "impossible"
 
-## 禁止事項
+## Prohibited
 
-- 「Rust の型システムで表現できない」「自動変換は不可能」と断定すること
-- 構文レベルの対応がないことを根拠に変換不可と判断すること
-- 目的の分析をせずに「複雑だから無理」と結論すること
-- TypeScript 固有の制約への対処コード（IDE 表示改善、any の回避等）を、そのまま Rust に移植しようとして「移植できない」と判断すること。Rust でその制約自体が存在しないなら、そのコードは不要である
+- Making definitive statements like "cannot be expressed in Rust's type system" or "auto-conversion is impossible"
+- Judging conversion as infeasible based on the absence of syntax-level correspondence
+- Concluding "too complex, can't be done" without analyzing the purpose
+- Attempting to directly port TS-specific constraint workaround code (IDE display improvements, `any` avoidance, etc.) to Rust and judging it as "cannot be ported". If the constraint doesn't exist in Rust, the code is unnecessary

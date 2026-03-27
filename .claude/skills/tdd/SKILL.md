@@ -1,52 +1,52 @@
 ---
 name: tdd
-description: 新機能の追加またはバグ修正に着手するときの TDD 開発手順。テスト設計 → RED → GREEN → REFACTOR → E2E の順序で実装する
+description: TDD development procedure for new features or bug fixes. Implement in order: test design → RED → GREEN → REFACTOR → E2E
 user-invocable: true
 ---
 
-# TDD 開発手順
+# TDD Development Procedure
 
-## トリガー
+## Trigger
 
-新機能の追加またはバグ修正に着手するとき。
+When starting a new feature or bug fix.
 
-## アクション
+## Actions
 
-以下の順序で実装する:
+Implement in the following order:
 
-1. **テスト設計**: テストコードを書く前に、検証項目を洗い出す
-   - 正常系・異常系・境界値を MECE に列挙する
-   - 各項目について、入力と期待される出力・挙動を定義する
-   - テスト名 `test_<対象>_<条件>_<期待結果>` でこれを表現する
-   - **E2E テストの要否を判断する**（後述の「E2E テスト判断基準」参照）
-   - **パイプライン横断機能の場合、IR 構造の検証テストを含める**: 最終出力（スナップショット）だけでなく、IR が正しい構造を持つことを検証する。「正しい出力が間違った IR から生成される」状態を検出するため
-   - **新しいメソッドを追加する場合、統合テストを含める**: 単体テストに加え、そのメソッドが実際の変換パイプラインで使用されることを検証する
-2. **RED**: 設計した検証項目をテストコードに落とし、失敗することを確認する
-   - `cargo test -- <test_name>` で対象テストだけ実行する
-   - コマンド出力の確認方法は `.claude/rules/command-output-verification.md` に従う
-3. **GREEN**: テストを通す最小限のコードを書く
-   - コマンド出力の確認方法は `.claude/rules/command-output-verification.md` に従う
-4. **REFACTOR**: テストが通る状態を維持しながらリファクタする
-   - `cargo clippy` も通すこと
-5. **E2E**: 変換機能の変更の場合、対応する E2E テストスクリプトを追加・拡充する
-   - `tests/e2e/scripts/` に TS スクリプトを追加または既存スクリプトを拡充する
-   - `tests/e2e_test.rs` にテスト関数を追加する（新規スクリプトの場合）
-   - `cargo test -- test_e2e_<name>` で E2E テストが通ることを確認する
+1. **Test design**: Before writing test code, enumerate verification items
+   - List normal cases, error cases, and boundary values (MECE)
+   - For each item, define input and expected output/behavior
+   - Express this in test names: `test_<target>_<condition>_<expected_result>`
+   - **Determine E2E test necessity** (see "E2E Test Decision Criteria" below)
+   - **For pipeline-crossing features, include IR structure verification tests**: Verify not just final output (snapshots) but that IR has the correct structure. This detects "correct output generated from incorrect IR"
+   - **For new methods, include integration tests**: Beyond unit tests, verify the method is used in the actual conversion pipeline
+2. **RED**: Write the designed verification items as test code and confirm they fail
+   - Run only target tests with `cargo test -- <test_name>`
+   - Follow `.claude/rules/command-output-verification.md` for output verification
+3. **GREEN**: Write minimal code to pass the tests
+   - Follow `.claude/rules/command-output-verification.md` for output verification
+4. **REFACTOR**: Refactor while maintaining passing tests
+   - Ensure `cargo clippy` also passes
+5. **E2E**: For conversion feature changes, add/expand corresponding E2E test scripts
+   - Add TS scripts to `tests/e2e/scripts/` or expand existing scripts
+   - Add test functions to `tests/e2e_test.rs` (for new scripts)
+   - Confirm E2E tests pass with `cargo test -- test_e2e_<name>`
 
-## E2E テスト
+## E2E Tests
 
-E2E テストの判断基準・書き方は `.claude/rules/testing.md` の「E2E テスト」セクションを参照。変換機能の変更では E2E テストの追加・拡充が必須。
+See `.claude/rules/testing.md` "E2E Tests" section for decision criteria and writing guidelines. E2E test addition/expansion is mandatory for conversion feature changes.
 
-## 禁止事項
+## Prohibited
 
-- 実装コードを先に書き、テストを後から書くこと
-- テスト設計（検証項目の洗い出し）をせずにテストコードを書くこと
-- テストを書いた後に RED（失敗）を確認せず GREEN に進むこと。テストが最初から通る場合、そのテストは何も検証していない可能性がある
-- 期待結果を事前に定義せず、実行結果を見てから「これが正しい」と後付けで判断すること
-- **変換機能の変更で E2E テストを書かずに完了とすること**
+- Writing implementation code first and tests afterward
+- Writing test code without test design (enumerating verification items)
+- Proceeding to GREEN without confirming RED (failure). If a test passes immediately, it may not be verifying anything
+- Not defining expected results in advance and making post-hoc "this is correct" judgments based on actual results
+- **Completing conversion feature changes without writing E2E tests**
 
-## 検証
+## Verification
 
-- 実装コードの差分より前にテストコードの差分が存在する（git history で確認可能）
-- すべてのテストが `test_<対象>_<条件>_<期待結果>` の命名規約に従っている
-- 変換機能の変更の場合、対応する E2E テストスクリプトの差分が存在する
+- Test code diffs exist before implementation code diffs (verifiable via git history)
+- All tests follow the `test_<target>_<condition>_<expected_result>` naming convention
+- For conversion feature changes, corresponding E2E test script diffs exist

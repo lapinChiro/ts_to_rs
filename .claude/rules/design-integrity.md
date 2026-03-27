@@ -1,37 +1,37 @@
-# 設計整合性チェック
+# Design Integrity Check
 
-## 適用条件
+## When to Apply
 
-PRD の設計セクションを書くとき、リファクタリングを評価するとき、または設計判断を行うとき。
+When writing a PRD's design section, evaluating refactoring, or making design decisions.
 
-## 制約
+## Constraints
 
-設計を確定する前に、変更対象だけでなく **1 つ上のレイヤー**（呼び出し元、依存先、同階層の兄弟モジュール）を含めて以下の観点で検証する。
+Before finalizing a design, verify from the following perspectives, including not just the change target but **one layer above** (callers, dependencies, sibling modules at the same level).
 
-### チェック項目
+### Checklist
 
-1. **高次の設計整合性**: この変更は上位モジュールのインターフェースや、同じ抽象化レベルの他モジュールと一貫しているか。変換パイプライン全体（parser → transformer → generator）の設計方針に沿っているか
-2. **DRY（知識の重複）**: 同じ知識（変換ルール、型マッピング、ビジネスロジック）が複数箇所に存在していないか。ただし共通化でモジュール間結合が増えるなら重複を許容する
-3. **直交性**: 変更対象は 1 つの責務に集中しているか。無関係なモジュールに副作用を与えないか
-4. **結合度**: モジュール間の依存が不必要に増えていないか。増える場合、それは本質的に必要な依存か
+1. **Higher-level design consistency**: Is this change consistent with the interfaces of parent modules and other modules at the same abstraction level? Does it align with the overall conversion pipeline design (parser → transformer → generator)?
+2. **DRY (knowledge duplication)**: Does the same knowledge (conversion rules, type mappings, business logic) exist in multiple places? However, allow duplication if shared code would increase inter-module coupling
+3. **Orthogonality**: Does the change target focus on a single responsibility? Does it avoid side effects on unrelated modules?
+4. **Coupling**: Are inter-module dependencies not increasing unnecessarily? If they are, is the dependency inherently necessary?
 
-### 割れ窓の検出と対処
+### Broken Window Detection and Response
 
-チェック中に既存コードの問題を発見した場合:
+When existing code issues are found during the check:
 
-- PRD のスコープ内で修正可能 → タスクに含める
-- PRD のスコープ外 → TODO に記録する（放置しない）
+- Fixable within PRD scope → Include in tasks
+- Outside PRD scope → Record in TODO (do not leave unaddressed)
 
-「既存コードがそうなっているから」は設計の正当化にならない（割れ窓の追認）。
+"That's how the existing code works" does not justify a design decision (broken window ratification).
 
-## 判断基準
+## Decision Criteria
 
-- 開発工数・コスト・影響範囲の大きさは設計判断の根拠に**ならない**
-- 唯一の基準は「理論的に最も理想的な実装になっているか」である
-- 現在の実装が理想から乖離している場合、この PRD で修正するか TODO に記録するかを判断する
+- Development effort, cost, or scope of impact are **not** valid grounds for design decisions
+- The only criterion is "is this the theoretically most ideal implementation?"
+- If the current implementation diverges from ideal, decide whether to fix it in this PRD or record in TODO
 
-## 禁止事項
+## Prohibited
 
-- 影響範囲の確認を変更対象のモジュールだけに限定すること
-- 「工数が大きい」「影響範囲が広い」を理由に理想的でない設計を選ぶこと
-- 既存の割れ窓を発見しながら記録も修正もせず放置すること
+- Limiting impact analysis to only the target module
+- Choosing a non-ideal design because "the effort is large" or "the impact scope is wide"
+- Discovering existing broken windows but neither recording nor fixing them

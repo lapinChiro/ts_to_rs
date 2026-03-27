@@ -1,116 +1,116 @@
 ---
 name: hono-cycle
-description: Hono変換→エラー分析→TODO整理→PRD作成→TDD実装→再変換の1サイクルを実行する開発ループ
+description: Single cycle of Hono conversion → error analysis → TODO grooming → PRD creation → TDD implementation → re-conversion
 user-invocable: true
 ---
 
-# Hono 変換改善サイクル
+# Hono Conversion Improvement Cycle
 
-## トリガー
+## Trigger
 
-ユーザーが `/hono-cycle` を実行したとき、または `/loop` 経由で自動実行されたとき。
+When the user runs `/hono-cycle`, or when auto-executed via `/loop`.
 
-## 前提
+## Prerequisites
 
-- Hono ソースが `/tmp/hono-src/` に存在すること（なければ `git clone --depth 1 https://github.com/honojs/hono.git /tmp/hono-src` で取得）
-- `cargo build --release` が成功すること
+- Hono source exists at `/tmp/hono-src/` (if not, fetch with `git clone --depth 1 https://github.com/honojs/hono.git /tmp/hono-src`)
+- `cargo build --release` succeeds
 
-## 計測モードの原則
+## Measurement Mode Principle
 
-**Hono の変換計測は必ずディレクトリモードで行う。** 単一ファイルモードはプロジェクト内のクロスファイル型解決が効かず、実態と乖離した結果になる。
+**Hono conversion measurement must always use directory mode.** Single-file mode lacks cross-file type resolution within the project and produces results that diverge from reality.
 
-- **ディレクトリモード**（必須）: `./target/release/ts_to_rs /tmp/hono-src/src/` — `build_shared_registry()` で全ファイルの型定義を共有した状態で変換。これが「実際の変換能力」を示す
-- **単一ファイルモード**（参考値）: `./target/release/ts_to_rs file.ts` — 型共有なし。個別ファイルのデバッグ時のみ使用
+- **Directory mode** (required): `./target/release/ts_to_rs /tmp/hono-src/src/` — Converts with all file type definitions shared via `build_shared_registry()`. This represents "actual conversion capability"
+- **Single-file mode** (reference only): `./target/release/ts_to_rs file.ts` — No type sharing. Use only for individual file debugging
 
-レポートにはディレクトリモードの結果を主指標として記載し、単一ファイルモードとの差分がある場合は併記する。
+Report directory mode results as the primary metric. If there's a difference from single-file mode, include both.
 
-## サイクル手順
+## Cycle Steps
 
-以下の 6 ステップを順に実行する。各ステップの完了を確認してから次に進む。
+Execute the following 6 steps in order. Confirm each step's completion before proceeding.
 
-### ステップ 1: Hono 変換の実行とエラー収集
+### Step 1: Run Hono Conversion and Collect Errors
 
-1. `cargo build --release` でツールをビルド
-2. **ベンチマークスクリプトを実行**してエラーを収集する:
+1. Build the tool with `cargo build --release`
+2. **Run the benchmark script** to collect errors:
 
 ```bash
-# ディレクトリモード（主計測） — 必ずこちらを使う
+# Directory mode (primary measurement) — always use this
 ./scripts/hono-bench.sh
 
-# 両モード比較（差分分析が必要な場合）
+# Both modes comparison (when diff analysis is needed)
 ./scripts/hono-bench.sh --both
 
-# 個別ファイルのデバッグ時のみ単一ファイルモードを補助的に使用
+# Single-file mode only for individual file debugging
 ./target/release/ts_to_rs /tmp/hono-src/src/some/file.ts 2>&1
 ```
 
-3. スクリプトの出力からエラーカテゴリ別のインスタンス数を確認する
-4. 実行結果は自動的に `bench-history.jsonl` に追記され、前回エントリとの差分が表示される
-5. 差分は `timestamp` フィールドで最新を特定して比較する（行順序には依存しない）
+3. Check instance counts by error category from script output
+4. Results are auto-appended to `bench-history.jsonl` and diffs from previous entry are displayed
+5. Identify the latest entry by `timestamp` field for comparison (do not rely on line order)
 
-**ファイル構成**:
-- `scripts/hono-bench.sh` — ベンチマーク実行スクリプト（エントリポイント）
-- `scripts/analyze-bench.py` — エラー JSON の解析（hono-bench.sh が自動呼出し）
-- `bench-history.jsonl` — 結果履歴（毎回追記）。スキーマ: `{timestamp, git_sha, total_files, clean_files, clean_pct, error_instances, categories}`
-- `/tmp/hono-bench-errors.json` — 生エラーデータ（一時ファイル、実行ごとに上書き）
+**File structure**:
+- `scripts/hono-bench.sh` — Benchmark execution script (entry point)
+- `scripts/analyze-bench.py` — Error JSON analysis (auto-invoked by hono-bench.sh)
+- `bench-history.jsonl` — Result history (appended each run). Schema: `{timestamp, git_sha, total_files, clean_files, clean_pct, error_instances, categories}`
+- `/tmp/hono-bench-errors.json` — Raw error data (temp file, overwritten each run)
 
-### ステップ 2: エラー分析と TODO 更新
+### Step 2: Error Analysis and TODO Update
 
-1. `bench-history.jsonl` の直前エントリと比較し、変化を確認する（`clean_pct` と `error_instances` の増減、カテゴリ別の変動）
-2. **新しく表面化したエラー**を特定する（前回なかったカテゴリ、または件数が増えたカテゴリ）
-3. 新しいエラーについて:
-   - ソースコードを確認し、具体的な TS パターンを特定する
-   - **対応済みのはずなのに失敗しているか**を重点的に確認する（テスト不足のシグナル）
-   - `TODO` に未記載なら新規 ID を採番して追加する
-4. `report/hono-conversion-rate-analysis.md` を最新の結果で更新する
+1. Compare with the previous entry in `bench-history.jsonl` and check changes (`clean_pct` and `error_instances` increase/decrease, category-level changes)
+2. **Identify newly surfaced errors** (categories not present before, or categories with increased counts)
+3. For new errors:
+   - Check source code and identify specific TS patterns
+   - **Focus on whether errors are occurring for patterns that should already be handled** (signal for insufficient tests)
+   - If not in `TODO`, assign a new ID and add
+4. Update `report/hono-conversion-rate-analysis.md` with latest results
 
-### ステップ 3: TODO の優先度整理
+### Step 3: TODO Priority Grooming
 
-1. TODO の Tier 全体を見直す。`.claude/rules/todo-prioritization.md` の 3 軸で評価する
-2. Hono の影響ファイル数を根拠に優先度を更新する
-3. **対応済みなのに失敗しているパターン**は常に最優先とする
+1. Review all TODO Tiers. Evaluate using the 3 axes from `.claude/rules/todo-prioritization.md`
+2. Update priorities based on Hono impact file counts
+3. **Patterns that should be handled but are failing** always get highest priority
 
-### ステップ 4: PRD 作成
+### Step 4: PRD Creation
 
-1. TODO の最上位の PRD 化可能な項目を選択する
-2. 関連する項目をバッチ化できないか検討する（同じ根本原因、同じモジュールの修正）
-3. `/prd-template` のフォーマットに従って PRD を作成する
-   - ただし Discovery の明確化質問はスキップする（理由: ループ内で毎回 Discovery を行うと非効率。ステップ 1〜3 で十分な情報が揃っており、自律的に判断できる）
-   - 完了条件に「Hono 再変換でのエラー解消確認」を必ず含める
-4. `backlog/` に PRD を配置し、`plan.md` を更新する
+1. Select the top PRD-eligible item from TODO
+2. Consider whether related items can be batched (same root cause, same module fix)
+3. Create a PRD per `/prd-template` format
+   - Skip Discovery clarification questions (reason: inefficient to run Discovery every loop iteration. Steps 1-3 provide sufficient information for autonomous judgment)
+   - Always include "confirm error resolution in Hono re-conversion" as a completion criterion
+4. Place PRD in `backlog/` and update `plan.md`
 
-### ステップ 5: TDD 実装
+### Step 5: TDD Implementation
 
-1. `/tdd` のワークフローに従って実装する:
-   - テスト設計 → RED → GREEN → REFACTOR → E2E
-2. 実装完了後、`/quality-check` を実行する（cargo fmt, clippy, test が全て 0 エラー・0 警告）
-3. 品質チェック通過後、Hono の該当ファイルで修正対象のエラーが解消されていることを確認する
+1. Implement following the `/tdd` workflow:
+   - Test design → RED → GREEN → REFACTOR → E2E
+2. After implementation, run `/quality-check` (cargo fmt, clippy, test all at 0 errors, 0 warnings)
+3. After passing quality check, verify the target errors are resolved in the relevant Hono files
 
-### ステップ 6: サイクル完了処理
+### Step 6: Cycle Completion
 
-1. `/backlog-management` の手順に従って後処理する:
-   - TODO 更新（作業中に発見した課題を追加）
-   - 完了した PRD を backlog/ から削除
-   - plan.md を更新
-2. サイクルの結果をユーザーに報告する:
-   - 修正した構文パターン
-   - 変換成功ファイル数の変化（ディレクトリモード基準）
-   - 次のサイクルで対応すべき最優先課題
+1. Follow `/backlog-management` procedure for post-processing:
+   - Update TODO (add issues discovered during work)
+   - Delete completed PRD from backlog/
+   - Update plan.md
+2. Report cycle results to the user:
+   - Fixed syntax patterns
+   - Change in clean file count (directory mode basis)
+   - Highest priority issue for the next cycle
 
-## 中断条件
+## Interruption Conditions
 
-以下のいずれかに該当する場合、サイクルを中断してユーザーに報告する:
+Interrupt the cycle and report to the user if any of the following apply:
 
-- **TODO が空**: 新しい課題が見つからない（変換率が十分に高い）
-- **設計判断が必要**: 複数のアプローチがあり、ユーザーの方針決定が必要
-- **大規模な設計変更が必要**: 既存アーキテクチャの変更を伴う課題（例: IR の拡張）
-- **3 サイクル連続で変換率が変わらない**: 残りの課題が全て高難度で、戦略の見直しが必要
+- **TODO is empty**: No new issues found (conversion rate is sufficiently high)
+- **Design decision needed**: Multiple approaches exist and user's direction decision is required
+- **Major design change needed**: Issue requires existing architecture changes (e.g., IR extension)
+- **3 consecutive cycles with no conversion rate change**: All remaining issues are high difficulty; strategy reassessment needed
 
-## 禁止事項
+## Prohibited
 
-- **単一ファイルモードの結果のみでエラー分布を判断すること** — 必ずディレクトリモードで計測する
-- エラー分析をせずに実装に入ること
-- TODO の優先度整理をスキップすること
-- 品質チェックを通さずにサイクル完了とすること
-- git commit / push を自動で行うこと（ユーザーのみが行う）
-- 1 サイクルで複数の PRD を同時に実装すること（1 PRD ずつ確実に完了させる）
+- **Judging error distribution from single-file mode results only** — always measure in directory mode
+- Entering implementation without error analysis
+- Skipping TODO priority grooming
+- Reporting cycle completion without passing quality check
+- Auto-executing git commit / push (only the user does this)
+- Implementing multiple PRDs simultaneously in one cycle (complete one PRD at a time)

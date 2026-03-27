@@ -1,20 +1,20 @@
-# コミット前のドキュメント同期
+# Pre-Commit Document Sync
 
-## 適用条件
+## When to Apply
 
-コミットメッセージを作成・提案するとき（`[WIP]` コミット含む）。
+When creating or proposing a commit message (including `[WIP]` commits).
 
-## 制約
+## Constraints
 
-コミットメッセージの作成 **前に** 以下のドキュメントが存在する場合、それぞれを最新化する:
+**Before** creating the commit message, update the following documents if they exist:
 
-1. **タスク管理ファイル** (`tasks.md`, `tasks.*.md` 等): 完了したタスクにチェックを入れる。状況説明セクションが変更内容を正確に反映していることを確認する
-2. **計画ファイル** (`plan.md`): 引継ぎ事項の完了済み一覧と次に着手すべき作業が変更後の状態を正確に記述していることを確認する
+1. **Task management files** (`tasks.md`, `tasks.*.md`, etc.): Check completed tasks. Verify that the status sections accurately reflect the changes
+2. **Planning file** (`plan.md`): Verify that the completed items list and next work items accurately describe the post-change state
 
-ファイルが存在しない場合はスキップする。最新化の結果、変更が不要であった場合は変更しない。
+Skip if the file does not exist. Do not modify if no update is needed.
 
-## 禁止事項
+## Prohibited
 
-- ドキュメントを最新化せずにコミットメッセージを提案すること
-- 「後でまとめて更新する」として複数コミット分のドキュメント更新を先送りすること
-- コミット対象のコード変更と無関係なドキュメント変更を同じコミットに含めること（ドキュメントはコード変更に対応する内容のみ更新する）
+- Proposing a commit message without updating documents
+- Deferring document updates across multiple commits ("will update later in batch")
+- Including document changes unrelated to the code changes in the same commit (only update documents corresponding to the code changes)

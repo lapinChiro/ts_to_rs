@@ -1,87 +1,87 @@
 ---
 name: backlog-management
-description: backlog/、TODO、plan.md のいずれかを変更するときの管理ルール。三層構造（plan.md / backlog/ / TODO）のフローと整合性を維持する
+description: Management rules when modifying backlog/, TODO, or plan.md. Maintains the three-layer structure flow and consistency
 user-invocable: true
 ---
 
-# バックログ管理
+# Backlog Management
 
-## トリガー
+## Trigger
 
-- `backlog/`、`TODO`、`plan.md` のいずれかを変更するとき
-- **PRD の作業が完了したとき**（/quality-check の後、次の PRD に着手する前）
+- When modifying `backlog/`, `TODO`, or `plan.md`
+- **When PRD work is complete** (after /quality-check, before starting next PRD)
 
-## 三層構造
+## Three-Layer Structure
 
-| 場所 | 役割 | 扱う対象 |
-|------|------|----------|
-| `plan.md` | PRD 化済みタスクの消化順序 | `backlog/` 内の PRD の実行順序を管理。何を次にやるかを示す |
-| `backlog/` | 設計済み・着手可能な PRD | 1 機能 = 1 ファイル。PRD テンプレートに従う |
-| `TODO` | PRD 化前の課題・アイデア | 優先順位付けと PRD 化判定を行う inbox。何から PRD 化するかを示す |
+| Location | Role | Scope |
+|----------|------|-------|
+| `plan.md` | Execution order for PRD-ified tasks | Manages execution order of PRDs in `backlog/`. Shows what to do next |
+| `backlog/` | Designed, ready-to-start PRDs | 1 feature = 1 file. Follows PRD template |
+| `TODO` | Pre-PRD issues and ideas | Inbox for prioritization and PRD eligibility assessment. Shows what to PRD-ify next |
 
-### パイプライン
+### Pipeline
 
 ```
-TODO（課題発見） → backlog/（PRD 化） → plan.md（消化順序決定） → 着手 → 完了 → 削除
+TODO (issue discovery) → backlog/ (PRD creation) → plan.md (execution order) → start → complete → delete
 ```
 
-## アクション
+## Actions
 
-### フロー
+### Flow
 
-1. 思いついたことは `TODO` に書く
-2. **新しい項目を追加したとき、Tier 全体を見直す** — `.claude/rules/todo-prioritization.md` の 3 軸で新項目の位置を評価し、既存項目との相対的な優先度を確認する。新項目が既存の Tier 1 より高優先度なら Tier 1 に挿入し、既存項目を押し下げる
-3. 整理のタイミングで `TODO` の項目を精査する
-4. 設計が十分にできる項目は PRD を書いて `backlog/<name>.md` に配置する
-5. `backlog/` に移した項目は `TODO` から削除する
-6. まだ曖昧・情報不足な項目は `TODO` に残す
+1. Write new ideas to `TODO`
+2. **When adding new items, review the entire Tier** — Evaluate the new item's position using the 3 axes from `.claude/rules/todo-prioritization.md` and check relative priority against existing items. If the new item has higher priority than existing Tier 1 items, insert it into Tier 1 and push existing items down
+3. Refine `TODO` items during grooming
+4. Write PRDs for items with sufficient design clarity and place in `backlog/<name>.md`
+5. Delete items from `TODO` once moved to `backlog/`
+6. Leave vague/insufficient-info items in `TODO`
 
-### `plan.md` の更新
+### `plan.md` Updates
 
-- `backlog/` にアイテムが**追加**されたとき — 新アイテムを順序リストの適切な位置に挿入する
-- `backlog/` のアイテムが**完了**したとき — 該当エントリを `plan.md` から**完全に削除**する
-- `plan.md` には PRD 化済みタスクの消化順序のみを記載する。TODO の内容を転記しない
+- When items are **added** to `backlog/` — Insert the new item at the appropriate position in the ordered list
+- When `backlog/` items are **completed** — **Delete** the entry from `plan.md`
+- `plan.md` contains only PRD-ified task execution order. Do not transcribe TODO content
 
-### PRD 完了時の必須手順（この順序を厳守）
+### Mandatory Steps on PRD Completion (follow this order strictly)
 
-1 つの PRD を消化したら、次の PRD に着手する**前に**以下を順に実行する:
+After completing one PRD, execute the following in order **before** starting the next PRD:
 
-1. **TODO 更新（追加 + 陳腐化チェック + 波及確認）**:
-   - 作業中に発見した課題・制限事項を `TODO` に記載する（記載基準は `.claude/rules/todo-entry-standards.md` に従う）
-   - 完了した PRD が直接解消した TODO 項目を**削除**する（完了の記録は git history で追える）
-   - 完了した PRD の変更が**間接的に影響する TODO 項目**の記載内容を確認し、必要なら更新する（例: 依存先の PRD が完了したことで保留理由が消滅、前提条件が変化、記述が古くなった等）
-   - **保留セクション**の各項目の保留理由が引き続き有効か確認する（前提タスクが完了していれば PRD 化可能に移動）
-   - フェーズ移行基準の記載が実態と乖離していないか確認し、必要なら更新する
-   - ベンチマーク数値が変わった場合、冒頭の実績値を更新する
-2. **backlog 整理** — 完了した PRD ファイルの内容を確認し、**削除**する
-3. **plan.md 整理** — 完了した PRD のエントリを**削除**し、キューから次のタスクを「次のタスク」に昇格させる
-4. **次の PRD に着手** — 上記 1〜3 が完了してから着手する
+1. **TODO update (add + staleness check + ripple effect check)**:
+   - Record issues/limitations discovered during work in `TODO` (follow `.claude/rules/todo-entry-standards.md`)
+   - **Delete** TODO items directly resolved by the completed PRD (completion records are traceable via git history)
+   - Check TODO items **indirectly affected** by the completed PRD's changes and update if needed (e.g., hold reasons expired because a dependency PRD completed, prerequisites changed, descriptions became stale)
+   - Verify each item in the **hold section** still has valid hold reasons (move to PRD-eligible if prerequisite tasks completed)
+   - Verify phase transition criteria descriptions match reality; update if needed
+   - Update benchmark numbers at the top if they changed
+2. **Backlog cleanup** — Review the completed PRD file content and **delete** it
+3. **plan.md cleanup** — **Delete** the completed PRD entry and promote the next task in queue to "next task"
+4. **Start next PRD** — Only after steps 1-3 are complete
 
-連続で PRD を消化する場合でも、**PRD ごとにこの手順を必ず実行する**。
+Even when completing PRDs consecutively, **execute this procedure for each PRD**.
 
-### 完了したアイテムの扱い
+### Completed Item Handling
 
-- 作業が完了した `backlog/` の PRD ファイルは**削除**する
-- `plan.md` の該当エントリも**削除**する
-- 完了の記録は git history で追える。ファイルやエントリを残す必要はない
+- **Delete** completed PRD files from `backlog/`
+- **Delete** corresponding entries from `plan.md`
+- Completion records are traceable via git history. No need to retain files or entries
 
-### backlog ファイルの命名
+### Backlog File Naming
 
-- ケバブケース: `import-export.md`, `directory-support.md`
-- 機能の内容が名前から推測できること
+- Kebab-case: `import-export.md`, `directory-support.md`
+- Feature content should be guessable from the name
 
-## 禁止事項
+## Prohibited
 
-- `plan.md` に完了済みの情報を残すこと（打ち消し線、完了マーク、「完了」ラベル等、いかなる形式も不可）
-- `plan.md` に PRD 化前の情報（TODO の内容）を記載すること
-- 完了した PRD ファイルを `backlog/` に残すこと
-- `backlog/` に移した項目を `TODO` に残すこと
+- Keeping completed information in `plan.md` (strikethrough, completion marks, "completed" labels — no form is acceptable)
+- Writing pre-PRD information (TODO content) in `plan.md`
+- Keeping completed PRD files in `backlog/`
+- Keeping items in `TODO` after moving to `backlog/`
 
-## 検証
+## Verification
 
-- `plan.md` に完了済みの項目が存在しない
-- `plan.md` の全項目が `backlog/` 内の PRD に対応している
-- `backlog/` 内の全 PRD が `plan.md` に記載されている
-- `backlog/` に記載されている項目が `TODO` に重複して存在しない
-- `TODO` に完了済みの項目が残っていない（完了した PRD の対象 TODO ID が削除されている）
-- `TODO` のフェーズ移行基準とベンチマーク数値が実態と一致している
+- No completed items exist in `plan.md`
+- All items in `plan.md` correspond to PRDs in `backlog/`
+- All PRDs in `backlog/` are listed in `plan.md`
+- Items in `backlog/` do not have duplicates in `TODO`
+- No completed items remain in `TODO` (TODO IDs targeted by completed PRDs are deleted)
+- Phase transition criteria and benchmark numbers in `TODO` match reality

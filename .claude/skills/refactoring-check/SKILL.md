@@ -1,40 +1,40 @@
 ---
 name: refactoring-check
-description: 機能追加・変更の完了後にリファクタリング候補を評価・記録する手順
+description: Post-completion procedure to evaluate and record refactoring candidates after feature additions/changes
 user-invocable: true
 ---
 
-# リファクタリング候補の記録
+# Refactoring Candidate Recording
 
-## トリガー
+## Trigger
 
-機能追加・変更の作業が完了したとき。
+When feature addition/change work is complete.
 
-## アクション
+## Actions
 
-1. 今回の変更の影響範囲にあるファイルを特定する
-2. 影響範囲の各ファイルをまっさらな目で読み、以下の観点でリファクタリングの必要性を評価する:
-   - `.claude/rules/design-integrity.md` のチェック項目に従い、**高次の設計整合性**・**DRY（知識の重複）**・**直交性**・**結合度** を検証する
-   - 命名が実態と乖離していないか
-   - 本来あるべき設計になっていないために、無理な実装で動作させている箇所がないか（workaround が根付いていないか）
-   - **割れ窓が存在しないか** — あるモジュールが本来の責務を超えた処理を行っている、レイヤー境界を越えた依存がある、等の設計上の妥協が放置されていないか。割れ窓は最初は小さくても、それを起点として徐々に拡大する。発見したタイミングで対応することが最も低コストである
-3. リファクタリングが必要と判断した場合、状況に応じた対応を取る:
-   - 既に `backlog/` に関連する PRD がある → `plan.md` で優先度を上げる
-   - PRD 化できる具体性がある → `backlog/` に PRD を作成する
-   - まだ曖昧・情報不足 → `TODO` に記録する（何が問題か、なぜ必要かを具体的に書く）
-   - **割れ窓の場合** → 影響範囲がこれ以上広がる前に即座に PRD 化し、`plan.md` で優先度を上げる
-4. 対応を取った場合、その理由をユーザーに報告する
+1. Identify files in the impact area of the current changes
+2. Read each file in the impact area with fresh eyes, evaluating refactoring needs from these perspectives:
+   - Follow `.claude/rules/design-integrity.md` checklist: verify **higher-level design consistency**, **DRY (knowledge duplication)**, **orthogonality**, **coupling**
+   - Are names diverging from actual behavior?
+   - Are there places forced into workarounds because the design isn't what it should be? (Are workarounds becoming entrenched?)
+   - **Do broken windows exist?** — A module exceeding its proper responsibilities, cross-layer dependencies, design compromises left unaddressed. Broken windows start small but gradually expand from that point. Addressing them when discovered is the lowest cost
+3. If refactoring is needed, take the appropriate action:
+   - Related PRD already exists in `backlog/` → Raise its priority in `plan.md`
+   - Concrete enough to create a PRD → Create a PRD in `backlog/`
+   - Still vague/insufficient information → Record in `TODO` (specifically describe what's wrong and why it needs fixing)
+   - **For broken windows** → Immediately create a PRD before the impact area expands further, and raise its priority in `plan.md`
+4. If action was taken, report the reasoning to the user
 
-## 禁止事項
+## Prohibited
 
-- 機能追加の作業中にリファクタリングを同時に行うこと（スコープを混ぜない）
-- 「コードが汚い」「改善の余地がある」等の曖昧な記述で記録すること
-- リファクタリング候補の確認をスキップして作業完了とすること
-- `backlog/` に既に PRD がある項目を `TODO` に重複記載すること
-- 今回の変更量が小さいことを理由にリファクタリング評価を省略・軽視すること（変更量と改善の余地は無関係）
+- Performing refactoring simultaneously during feature addition work (do not mix scopes)
+- Recording with vague descriptions like "code is messy" or "room for improvement"
+- Skipping refactoring candidate review and reporting work as complete
+- Duplicating items in `TODO` that already have PRDs in `backlog/`
+- Skipping or minimizing refactoring evaluation because the current change is small (change volume is unrelated to improvement potential)
 
-## 検証
+## Verification
 
-- 作業完了時に影響範囲のコードを確認した形跡がある
-- 記録した項目には具体的な問題と理由が記載されている
-- 既存の `backlog/` や `plan.md` との重複がない
+- Evidence exists of reviewing code in the impact area upon work completion
+- Recorded items include specific problems and reasoning
+- No duplication with existing `backlog/` or `plan.md` entries

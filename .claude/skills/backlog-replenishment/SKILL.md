@@ -1,52 +1,52 @@
 ---
 name: backlog-replenishment
-description: backlog/ が空の状態でユーザーから作業依頼を受けたときの補充手順。TODO から PRD 化可能な項目を判定し、Discovery を経て PRD を作成する
+description: Replenishment procedure when backlog/ is empty and user requests work. Identify PRD-eligible TODO items, then create PRDs through Discovery
 user-invocable: true
 ---
 
-# backlog の補充
+# Backlog Replenishment
 
-## トリガー
+## Trigger
 
-`backlog/` が空の状態でユーザーから作業依頼を受けたとき。
+When `backlog/` is empty and the user requests work.
 
-## アクション
+## Actions
 
-1. `TODO` を確認する
-2. 全項目について PRD 化の可否を判定する（判定基準は後述）
-3. 保留理由がある項目について、解消の可能性を自分で評価し、可能性が高い順に最大 2 つまで選ぶ
-   - 保留理由が「別の実装の完了待ち」の場合、コードベースとテストを確認して自分で解消判定を行う。ユーザーに確認不要
-   - ユーザーに確認が必要なのは、外部の意思決定やユーザーの実体験など、自分では判断できない情報が前提の場合のみ
-4. 自分で判断できない保留理由がある項目について、1 つずつ順番にユーザーに確認する（一度にまとめて聞かない）
-5. 解消済みと判定・確認された項目は PRD 化の対象に含める
-6. PRD テンプレート（/prd-template）に従い、Discovery → PRD 起草の順で進める
-7. 作成した PRD を `backlog/` に配置し、`TODO` から該当項目を削除する
-8. `plan.md` の消化順序に新アイテムを挿入する
+1. Review `TODO`
+2. Assess all items for PRD eligibility (criteria below)
+3. For items with hold reasons, self-evaluate resolution likelihood and select up to 2 with highest probability:
+   - If the hold reason is "waiting for another implementation to complete", check the codebase and tests yourself. No user confirmation needed
+   - User confirmation is only needed when the prerequisite involves external decisions or user experience that you cannot judge yourself
+4. For items with hold reasons you cannot self-resolve, confirm with the user one at a time (do not batch)
+5. Include items confirmed/determined as resolved in PRD candidates
+6. Follow the PRD template (/prd-template): Discovery → PRD drafting
+7. Place the created PRD in `backlog/` and delete the corresponding item from `TODO`
+8. Insert the new item into `plan.md` execution order
 
-### PRD 化の可否判定基準
+### PRD Eligibility Criteria
 
-TODO の各項目について、以下の基準で PRD 化の可否を判定する:
+Assess each TODO item against these criteria:
 
-**PRD 化可能:**
-- 保留理由が明記されていない項目
-- 保留理由が「設計が必要」「調査が必要」「判断が必要」のみの項目 — これらは PRD の Discovery フェーズで解決できる。設計・調査・判断は PRD プロセスの一部であり、PRD 化の前提条件ではない
+**PRD-eligible:**
+- Items with no stated hold reason
+- Items whose only hold reason is "needs design", "needs investigation", or "needs decision" — these are resolved during the PRD's Discovery phase. Design, investigation, and decisions are part of the PRD process, not prerequisites for PRD creation
 
-**PRD 化不可（正当な保留理由）:**
-- 別の機能・PRD が前提条件として必要（「X の実装後に着手」）
-- 実際の運用データ・実績が必要（「実プロジェクトでの使用実績を見てから判断」）
-- 外部の意思決定待ち（「ユーザーの方針決定待ち」）
+**Not PRD-eligible (legitimate hold reasons):**
+- Another feature/PRD is a prerequisite ("start after X is implemented")
+- Real operational data/results are needed ("decide after seeing usage in real projects")
+- Waiting on external decisions ("waiting for user's policy decision")
 
-**判定の原則:**
-「この項目について PRD の Discovery（明確化質問）を開始できるか？」が判定基準。Discovery を開始できるなら PRD 化可能。Discovery の前に別の作業が完了している必要があるなら PRD 化不可。
+**Judgment principle:**
+The criterion is "Can we start Discovery (clarification questions) for this item?" If Discovery can start, it's PRD-eligible. If another task must complete before Discovery, it's not PRD-eligible.
 
-## 禁止事項
+## Prohibited
 
-- 保留理由の有効性を確認せずに「PRD 化不可」と判断すること（実装状況は自分で確認、外部要因はユーザーに確認）
-- 保留理由の確認を一度にまとめて聞くこと（1 つずつ順番に確認する）
-- ユーザーが「未解消」と確認した保留理由がある項目を PRD 化すること
-- Discovery（明確化質問）をスキップして PRD を書くこと
-- PRD 作成後に `TODO` から該当項目を削除し忘れること
-- PRD 作成後に `plan.md` への挿入を忘れること
-- 「設計が必要」「調査が必要」を保留理由として扱うこと — これらは Discovery で解決すべき事項であり、PRD 化を阻む理由にならない
-- 保留理由が明記されていない項目を、暗黙の理由を推測して「PRD 化不可」と判断すること
-- 「Rust に直接対応する構文がない」を理由に PRD 化不可と判断すること — 変換方法が見つからない場合はユーザーにヒヤリングする
+- Judging "not PRD-eligible" without verifying hold reason validity (check implementation status yourself; confirm external factors with user)
+- Batching hold reason confirmations (confirm one at a time)
+- Creating a PRD for items whose hold reasons the user confirmed as unresolved
+- Skipping Discovery (clarification questions) when writing a PRD
+- Forgetting to delete the corresponding TODO item after PRD creation
+- Forgetting to insert into `plan.md` after PRD creation
+- Treating "needs design" or "needs investigation" as hold reasons — these should be resolved in Discovery and do not block PRD creation
+- Inferring implicit reasons and judging items without stated hold reasons as "not PRD-eligible"
+- Judging as not PRD-eligible because "Rust has no direct syntax equivalent" — if no conversion method is found, interview the user

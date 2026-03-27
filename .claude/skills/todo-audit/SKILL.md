@@ -1,74 +1,74 @@
 ---
 name: todo-audit
-description: 開発完了時に TODO の記載漏れと既存項目の陳腐化を監査する手順
+description: Post-development audit for TODO omissions and staleness of existing items
 user-invocable: true
 ---
 
-# TODO 監査
+# TODO Audit
 
-## トリガー
+## Trigger
 
-1 回の開発セッション（1 つ以上のタスク完了）の最後。/quality-check, /refactoring-check の後に実行する。
+End of a development session (one or more tasks completed). Run after /quality-check and /refactoring-check.
 
-## アクション
+## Actions
 
-TODO の監査は 2 つの観点で行う:
+The TODO audit covers two perspectives:
 
-- **追加監査**（ステップ 1〜2）: 記載すべき未記載の課題を検出する
-- **鮮度監査**（ステップ 3）: 既存項目の記述が現状と乖離していないか検出する
+- **Addition audit** (Steps 1-2): Detect issues that should be recorded but aren't
+- **Freshness audit** (Step 3): Detect existing items whose descriptions diverge from current state
 
-最後にステップ 4 で検出結果を反映する。
+Step 4 reflects the findings.
 
-### ステップ 1: コード内マーカーの確認
+### Step 1: Code Marker Check
 
-変更したファイルおよび影響範囲のファイルを対象に、以下のパターンを `grep` で検索する:
+Search for the following patterns in changed files and files in the impact area:
 
 ```bash
 grep -rn "todo!\|TODO\|FIXME\|HACK\|WORKAROUND\|XXX" src/ --include="*.rs"
 ```
 
-検出された各マーカーについて:
-- `TODO` に対応する項目が存在するか確認する
-- 存在しなければ `TODO` に追加する
-- コード内の `todo!()` マクロは実行時パニックを引き起こすため、特に注意する
+For each detected marker:
+- Check if a corresponding item exists in `TODO`
+- If not, add it to `TODO`
+- Pay special attention to `todo!()` macros as they cause runtime panics
 
-### ステップ 2: 暫定実装の確認
+### Step 2: Interim Implementation Check
 
-今回の変更で以下のパターンが導入されていないか確認する:
+Check whether the current changes introduced any of the following patterns:
 
-- **フォールバック値**: `unwrap_or(RustType::Any)`, `unwrap_or(RustType::Unit)` 等 — 型推論の不足による暫定実装
-- **情報の消失**: 入力の一部を無視している（例: conditional type で false branch を捨てる）
-- **ハードコードされた回避策**: 特定のケースを特別扱いするコード
-- **不完全なパターンマッチ**: `_ => Err(...)` や `_ => todo!()` で未対応パターンを握りつぶしている
-- **コンパイルテストのスキップ**: `skip_compile` に新しい項目を追加した場合
+- **Fallback values**: `unwrap_or(RustType::Any)`, `unwrap_or(RustType::Unit)`, etc. — interim implementations due to insufficient type inference
+- **Information loss**: Ignoring part of the input (e.g., discarding the false branch in conditional types)
+- **Hardcoded workarounds**: Code that special-cases specific scenarios
+- **Incomplete pattern matches**: Swallowing unhandled patterns with `_ => Err(...)` or `_ => todo!()`
+- **Compile test skips**: If new items were added to `skip_compile`
 
-各項目について、`TODO` の既存項目に影響範囲として記載されているか確認する。
+For each item, verify it's documented as impact area in existing `TODO` items.
 
-### ステップ 3: 既存項目の鮮度確認
+### Step 3: Existing Item Freshness Check
 
-今回完了したタスクの内容を踏まえ、`TODO` の既存項目が現状と整合しているか確認する:
+Based on completed tasks, verify existing `TODO` items are consistent with current state:
 
-- **保留項目の前提解消**: 保留セクションの各項目について、前提として参照されているタスクが今回完了していないか確認する。前提が解消された項目は「PRD 化可能」セクションの適切な Tier に移動する
-- **相互参照の有効性**: 今回完了・削除された ID を参照している項目がないか確認する。参照先が消滅した記述は自己完結的な記述に書き換える
-- **記述の正確性**: 今回の変更で影響を受ける既存項目の記述（件数、前提条件、影響範囲等）が不正確になっていないか確認する
+- **Hold item prerequisite resolution**: For items in the hold section, check if referenced prerequisite tasks were completed in this session. Move resolved items to the appropriate Tier in "PRD-eligible"
+- **Cross-reference validity**: Check for items referencing completed/deleted IDs. Rewrite references to non-existent targets as self-contained descriptions
+- **Description accuracy**: Check whether existing items affected by current changes have inaccurate descriptions (counts, prerequisites, impact scope, etc.)
 
-### ステップ 4: 検出結果の反映
+### Step 4: Reflect Findings
 
-ステップ 1〜3 で検出した変更を `TODO` に反映する。記載基準は `.claude/rules/todo-entry-standards.md` に従う。
-- 新規課題: 既存の項目に追記できる場合は追記する。独立した新規課題の場合は新しい ID を採番して追加する
-- 保留解除・記述修正: ステップ 3 で検出した変更を適用する
+Apply changes detected in Steps 1-3 to `TODO`. Follow `.claude/rules/todo-entry-standards.md` for entry criteria.
+- New issues: Append to existing items if possible. For independent new issues, assign a new ID and add
+- Hold releases and description fixes: Apply changes detected in Step 3
 
-## 禁止事項
+## Prohibited
 
-- 「特に問題なし」と結論する前に、ステップ 1〜3 の検索・確認を実行せずに判断すること
-- コード内の `TODO` コメントを `TODO` ファイルに転記せずに放置すること
-- 暫定実装を発見しても「動いているから問題ない」と判断すること — 暫定実装は技術的負債であり、記録が必要
-- **参照先が不明な相互参照を書くこと** — 他の `I-XX` を参照するとき、その ID が TODO 内に存在しない場合（PRD 化済み・完了済み等）は、背景を自己完結的に記述する。後から読む人が参照先を探さなくても内容が理解できること
+- Concluding "no issues" without executing the searches/checks in Steps 1-3
+- Leaving code `TODO` comments without transcribing them to the `TODO` file
+- Judging discovered interim implementations as "no problem since it's working" — interim implementations are tech debt that requires recording
+- **Writing cross-references to unknown targets** — When referencing other `I-XX` items, if that ID doesn't exist in TODO (PRD-ified, completed, etc.), write self-contained context. Readers must understand the content without searching for the reference target
 
-## 検証
+## Verification
 
-- `grep` による検索を実行した形跡がある
-- 今回の変更で導入された暫定実装が全て `TODO` に記載されている
-- コード内の `todo!()` マクロが `TODO` に対応項目を持っている
-- 保留項目の前提条件が今回の完了タスクで解消されていないか確認した形跡がある
-- 既存項目の相互参照・記述が現状と整合している
+- Evidence of `grep` search execution exists
+- All interim implementations introduced by current changes are recorded in `TODO`
+- Code `todo!()` macros have corresponding items in `TODO`
+- Evidence of checking whether hold item prerequisites were resolved by completed tasks
+- Existing item cross-references and descriptions are consistent with current state

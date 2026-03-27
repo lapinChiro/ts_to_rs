@@ -3,20 +3,20 @@ paths:
   - "Cargo.toml"
 ---
 
-# 依存関係のバージョン管理
+# Dependency Version Management
 
-## トリガー
+## Trigger
 
-`Cargo.toml` に依存を追加する、または既存の依存を更新するとき。
+When adding or updating dependencies in `Cargo.toml`.
 
-## アクション
+## Actions
 
-1. 追加・更新する依存の最新バージョンを確認する
-2. 最新バージョンを指定する
-3. 既存の依存との整合性を確認する（`cargo check` が通ること）
-4. 整合性が取れない場合、関連する依存も含めて最新に揃える
+1. Verify the latest version of the dependency being added/updated
+2. Specify the latest version
+3. Verify compatibility with existing dependencies (`cargo check` must pass)
+4. If incompatible, align related dependencies to their latest versions as well
 
-## 禁止事項
+## Prohibited
 
-- 理由なく古いバージョンを指定すること
-- バージョンを固定するために `=` で指定すること（互換性のある範囲を許容する）
+- Specifying an older version without justification
+- Pinning versions with `=` (allow compatible ranges)

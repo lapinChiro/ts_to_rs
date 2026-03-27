@@ -1,4 +1,4 @@
-@plan.md を確認し、作業を続行してください。
-どのような理由があっても妥協した実装にしてはいけません。
-最も理想的でクリーンな実装にすることだけを考えてください。
-開発工数や修正規模の大きさは判断基準にはなりません。最も理想的でクリーンな実装にすることだけを考えてください。
+Review @plan.md and continue work.
+Never compromise on implementation, regardless of the reason.
+Focus solely on achieving the most ideal and clean implementation.
+Development effort or scope of changes is not a valid criterion. Focus solely on the most ideal and clean implementation.

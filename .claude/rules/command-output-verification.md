@@ -1,17 +1,17 @@
-# コマンド出力の確認方法
+# Command Output Verification
 
-## 適用条件
+## When to Apply
 
-`cargo test`, `cargo clippy`, `cargo fmt --check` 等のビルド・テストコマンドの出力を確認するとき。
+When verifying output of build/test commands such as `cargo test`, `cargo clippy`, `cargo fmt --check`.
 
-## 制約
+## Constraints
 
-- **対象テストのみの実行**（`cargo test -- <test_name>`）: 出力が少ないため、直接 stdout で確認してよい。フィルタには `grep -E "test result:|FAILED|panicked"` を使う
-- **全テスト・全チェックの実行**: 出力をファイルにリダイレクトし、Read ツールで全文を確認する。例: `cargo test > /tmp/test-result.txt 2>&1`
-- 1 回のコマンド実行で必要な情報を取得する。出力フィルタは実行前に決定する
+- **Targeted test runs** (`cargo test -- <test_name>`): Output is small enough to verify directly on stdout. Filter with `grep -E "test result:|FAILED|panicked"`
+- **Full test/check runs**: Redirect output to a file and verify the full content with the Read tool. Example: `cargo test > /tmp/test-result.txt 2>&1`
+- Obtain all necessary information in a single command execution. Determine output filters before execution
 
-## 禁止事項
+## Prohibited
 
-- 同じコマンドを出力フィルタを変えて 2 回実行すること（テスト実行は時間がかかるため非効率）
-- `tail` で出力末尾を取得すること（行数が予測できず必要な情報が欠落する）
-- 出力を確認せずに「問題なさそう」と判断すること
+- Running the same command twice with different output filters (test execution is time-consuming and this is inefficient)
+- Using `tail` to get output end (line count is unpredictable and necessary information may be lost)
+- Judging output as "looks fine" without reviewing it

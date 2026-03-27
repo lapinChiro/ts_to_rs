@@ -1,87 +1,87 @@
 ---
 name: large-scale-refactor
-description: 大規模リファクタリング手順。分析→設計→タスクばらし→見直し→実装の5ステップで、フェーズごとにコミットしながら進める
+description: Large-scale refactoring procedure. 5 steps: analysis → design → task breakdown → review → implementation, committing per phase
 user-invocable: true
 ---
 
-# 大規模リファクタリング手順
+# Large-Scale Refactoring Procedure
 
-## トリガー
+## Trigger
 
-以下のいずれかに該当する作業に着手するとき:
-- 10 箇所以上の関数シグネチャを変更する
-- 5 ファイル以上にまたがる機械的な変更を行う
-- 変更対象の関数間に依存関係があり、全て同時に変更しないとコンパイルが通らない
+When starting work that matches any of the following:
+- Changing 10+ function signatures
+- Mechanical changes spanning 5+ files
+- Dependencies between changed functions require simultaneous modification for compilation
 
-## アクション
+## Actions
 
-以下の 5 ステップを **順序厳守** で実行する。ステップを飛ばさない。
+Execute the following 5 steps in **strict order**. Do not skip steps.
 
-### Step 1: 分析
+### Step 1: Analysis
 
-変更対象の全箇所を **網羅的に** 列挙する。
+**Exhaustively** enumerate all locations requiring changes.
 
-1. 変更が必要な全関数を `grep` で特定する（ファイルパス・行番号・現在のシグネチャ）
-2. 各関数の呼び出し元（caller）を特定する
-3. 依存グラフを構築する: 「A を変更するには B も変更が必要」の関係
-4. 結果を `tasks.md` の「分析結果」セクションに記録する
+1. Identify all functions needing changes with `grep` (file path, line number, current signature)
+2. Identify each function's callers
+3. Build the dependency graph: "changing A requires also changing B"
+4. Record results in the "Analysis" section of `tasks.md`
 
-### Step 2: 設計
+### Step 2: Design
 
-変更パターンを **具体的なコード例** で定義する。
+Define change patterns with **concrete code examples**.
 
-1. 変更前 → 変更後のシグネチャ変換パターンを定義する
-2. 呼び出し元の変換パターンを定義する
-3. エッジケース（特殊なシグネチャ、条件分岐内の呼び出し等）を列挙し、それぞれの対処法を決定する
-4. 新しい型・関数・ヘルパーが必要な場合、その定義を設計する
-5. `.claude/rules/design-integrity.md` に従い、設計の整合性を検証する（高次の設計整合性・DRY・直交性・結合度。割れ窓を発見した場合はタスクに含めるか TODO に記録する）
-6. 結果を `tasks.md` の「設計」セクションに記録する
+1. Define before → after signature transformation patterns
+2. Define caller transformation patterns
+3. List edge cases (special signatures, calls within conditionals, etc.) and determine handling for each
+4. Design new types, functions, or helpers if needed
+5. Verify design integrity per `.claude/rules/design-integrity.md` (higher-level consistency, DRY, orthogonality, coupling. If broken windows are found, include in tasks or record in TODO)
+6. Record results in the "Design" section of `tasks.md`
 
-### Step 3: タスクばらし
+### Step 3: Task Breakdown
 
-`tasks.md` の「実装タスク」セクションに、以下の条件を満たすタスクリストを作成する:
+Create a task list in the "Implementation Tasks" section of `tasks.md` meeting these conditions:
 
-- タスクを **フェーズ** に分割する。各フェーズは `cargo check` が通る状態で完了し、**コミット可能な単位** とする
-- フェーズ内の各タスクは **1 ファイル以内** の変更に収まる
-- タスクの実行順序を明記する（依存関係に基づく）
-- 各タスクに **完了判定基準** を記載する（「cargo check でこのファイルのエラーが 0 になる」等）
-- 各フェーズの末尾に **コミットタスク** を含める（`.claude/rules/incremental-commit.md` に従い `[WIP]` コミット）
-- 全タスク完了後の **最終検証手順** を記載する（cargo test、clippy 等）
-- チェックボックス `- [ ]` 形式で記載する
+- Divide tasks into **phases**. Each phase completes in a `cargo check`-passing state and is a **committable unit**
+- Each task within a phase involves changes to **at most 1 file**
+- Specify task execution order (based on dependencies)
+- Include **completion criteria** for each task (e.g., "cargo check shows 0 errors for this file")
+- Include a **commit task** at the end of each phase (per `.claude/rules/incremental-commit.md`, `[WIP]` commit)
+- Include **final verification steps** after all tasks (cargo test, clippy, etc.)
+- Use checkbox `- [ ]` format
 
-### Step 4: 見直し
+### Step 4: Review
 
-`tasks.md` を以下の観点で見直し、問題があれば修正する:
+Review `tasks.md` from these perspectives and fix any issues:
 
-1. **網羅性**: 分析で列挙した全箇所がタスクでカバーされているか。`grep` で再確認する
-2. **依存関係の整合性**: タスク A が タスク B に依存する場合、B が A より先に実行される順序になっているか
-3. **コンパイル可能性**: 各タスクの完了時点で `cargo check` が通る設計になっているか。通らない場合、タスクの粒度を調整する（複数ファイルを 1 タスクにまとめる等）
-4. **エッジケースの漏れ**: 設計のエッジケースが全てタスクに反映されているか
-5. **テストへの影響**: テストファイルのシグネチャ変更が必要な場合、専用タスクとして分離されているか
+1. **Completeness**: Are all locations from the analysis covered by tasks? Re-verify with `grep`
+2. **Dependency consistency**: If task A depends on task B, is B ordered before A?
+3. **Compilability**: Is the design such that `cargo check` passes at each task's completion? If not, adjust granularity (e.g., combine multiple files into one task)
+4. **Edge case coverage**: Are all design edge cases reflected in tasks?
+5. **Test impact**: If test file signature changes are needed, are they separated as dedicated tasks?
 
-見直し結果を `tasks.md` の「見直し結果」セクションに記録する（問題なし / 修正内容）。
+Record review results in the "Review Results" section of `tasks.md` (no issues / corrections made).
 
-### Step 5: 実装
+### Step 5: Implementation
 
-`tasks.md` のタスクリストに従い、上から順に実行する。
+Execute tasks from `tasks.md` in order, top to bottom.
 
-1. タスクを開始する前に `tasks.md` を読み、現在のタスクを確認する
-2. 一括置換（Python スクリプト、sed 等）を使う場合は `.claude/rules/bulk-edit-safety.md` の手順に従う（dry run → 確認 → 実行）
-3. タスクを完了したら、チェックボックスを `- [x]` に更新する
-4. 完了判定基準を実行し、基準を満たすことを確認する。コマンド出力の確認方法は `.claude/rules/command-output-verification.md` に従う
-5. フェーズの全タスクが完了したら `.claude/rules/incremental-commit.md` に従いコミットする
-6. 全タスク完了後、最終検証手順を実行する
+1. Read `tasks.md` before starting a task and confirm the current task
+2. When using bulk replacements (Python scripts, sed, etc.), follow `.claude/rules/bulk-edit-safety.md` (dry run → review → execute)
+3. Update checkbox to `- [x]` upon task completion
+4. Execute completion criteria and confirm they're met. Follow `.claude/rules/command-output-verification.md` for output verification
+5. When all tasks in a phase are complete, commit per `.claude/rules/incremental-commit.md`
+6. After all tasks are complete, execute final verification steps
 
-## 禁止事項
+## Prohibited
 
-- Step 1-4 を完了せずに Step 5（実装）に着手すること
-- 分析結果に含まれない変更箇所を実装中に「発見」して場当たり的に対処すること（発見した場合は tasks.md に追記してから対処する）
-- サブエージェントに実装を委任すること（分析の補助には使ってよい）
-- `tasks.md` を更新せずにタスクを完了とすること
-- 1 タスクの作業中に別タスクの変更を混ぜること
+- Starting Step 5 (implementation) without completing Steps 1-4
+- "Discovering" change locations not in the analysis during implementation and handling them ad-hoc (if discovered, add to tasks.md before addressing)
+- Delegating implementation to sub-agents (sub-agents may be used for analysis support)
+- Completing tasks without updating `tasks.md`
+- Mixing changes from different tasks in one task's work
 
-## 検証
+## Verification
 
-- `tasks.md` が存在し、「分析結果」「設計」「実装タスク」「見直し結果」の 4 セクションを含む
-- 全タスクのチェックボックスが `[x]` になっている
-- 最終検証手順の実行結果が記録されている
+- `tasks.md` exists and contains "Analysis", "Design", "Implementation Tasks", and "Review Results" sections
+- All task checkboxes are `[x]`
+- Final verification step execution results are recorded

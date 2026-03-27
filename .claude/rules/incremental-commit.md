@@ -1,18 +1,18 @@
-# 段階的コミットの原則
+# Incremental Commit Principle
 
-## 適用条件
+## When to Apply
 
-複数のフェーズ（Phase A, Phase B 等）や複数のステップ（Step 1, Step 2 等）で構成される作業を行うとき。
+When performing work consisting of multiple phases (Phase A, Phase B, etc.) or multiple steps (Step 1, Step 2, etc.).
 
-## 制約
+## Constraints
 
-- 各フェーズ / ステップが完了し、`cargo check` または `cargo test` が通る状態になったら、次のフェーズに進む **前に** コミットする
-- コミットメッセージの作成前に、`pre-commit-doc-sync.md` に従いタスク管理・計画ファイルを最新化する
-- コミットメッセージには `[WIP]` プレフィクスを付け、完了したフェーズを明記する（例: `[WIP] P6: Phase A — tctx パラメータ追加`）
-- `git checkout` / `git stash` を実行する前に、保全すべき変更がコミット済みであることを確認する
+- When a phase/step is complete and `cargo check` or `cargo test` passes, commit **before** proceeding to the next phase
+- Before creating the commit message, update task management and planning files per `pre-commit-doc-sync.md`
+- Prefix commit messages with `[WIP]` and specify the completed phase (e.g., `[WIP] P6: Phase A — add tctx parameter`)
+- Before running `git checkout` / `git stash`, verify that changes to preserve have been committed
 
-## 禁止事項
+## Prohibited
 
-- コミットしていない状態で `git checkout -- <dir>` を実行すること（未コミットの別フェーズの変更が巻き込まれる）
-- 複数フェーズの変更を 1 つのコミットにまとめること（リセット時に全フェーズが失われる）
-- `[WIP]` コミットを作らずに次のフェーズに着手すること
+- Running `git checkout -- <dir>` with uncommitted changes (uncommitted changes from other phases get swept in)
+- Bundling multiple phases' changes into a single commit (all phases are lost on reset)
+- Proceeding to the next phase without creating a `[WIP]` commit

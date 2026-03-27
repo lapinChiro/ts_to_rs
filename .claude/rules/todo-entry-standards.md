@@ -1,21 +1,21 @@
-# TODO 項目の記載基準
+# TODO Entry Standards
 
-## 適用条件
+## When to Apply
 
-TODO に項目を新規追加、または既存項目を修正するとき。
+When adding new items to TODO or modifying existing items.
 
-## 制約
+## Constraints
 
-- **インスタンス数はベンチマーク実測値で記載する**: `./scripts/hono-bench.sh` 実行後の `/tmp/hono-bench-errors.json` の `kind` フィールドで集計した値を使う。推測や過去の記憶で書かない
-- **ソースコード参照には `ファイルパス:行番号` を含める**: 関数名・変数名だけでなく、具体的な場所を記載する（例: `src/registry.rs:482`）。後から読む人が即座に該当箇所を開けること
-- **エラーメッセージは実際の出力を引用する**: ベンチマークの `kind` フィールドの値、またはコンパイラの出力をそのまま記載する
-- **解決策の記載**: 問題の説明だけでなく、解決の方向性（具体的な関数名・アプローチ）を記載する。PRD 化時の Discovery を省略するためではなく、後から優先順位を判断する材料として
-- **依存関係の記載**: 他の TODO 項目が前提になる場合は `🔗` マークで明示する。参照先が TODO 内に存在しない場合（完了済み等）は背景を自己完結的に記述する
-- **完了した項目は即座に削除する**: 完了の記録は git history で追える。「完了済み機能（参照用）」セクションに 1 行の要約を追加するのみ
+- **Instance counts must be benchmark-measured values**: Use values aggregated from the `kind` field in `/tmp/hono-bench-errors.json` after running `./scripts/hono-bench.sh`. Do not write from estimates or past memory
+- **Source code references must include `file_path:line_number`**: Specify concrete locations, not just function/variable names (e.g., `src/registry.rs:482`). Readers must be able to immediately navigate to the location
+- **Error messages must quote actual output**: Use the benchmark `kind` field values or compiler output verbatim
+- **Include solution direction**: Beyond describing the problem, document the resolution direction (specific function names, approaches). This provides material for later priority judgments, not to skip Discovery during PRD creation
+- **Document dependencies**: When other TODO items are prerequisites, mark with `🔗`. If the reference target doesn't exist in TODO (completed, etc.), write self-contained context
+- **Delete completed items immediately**: Completion records are traceable via git history. Only add a one-line summary to the "Completed features (reference)" section
 
-## 禁止事項
+## Prohibited
 
-- 「N ファイルに影響」のような曖昧な影響範囲の記載（実測のインスタンス数で書く）
-- ベンチマークを実行せずにインスタンス数を記載すること
-- ソースコードのファイルパスや行番号なしに「この関数が」「この処理が」と言及すること
-- 完了した PRD の項目を「PRD 化済み → backlog/...」の形式で残し続けること（削除する）
+- Vague impact descriptions like "affects N files" (use measured instance counts)
+- Documenting instance counts without running the benchmark
+- Referring to "this function" or "this process" without file path or line number
+- Keeping completed PRD items in "PRD created → backlog/..." format (delete them)

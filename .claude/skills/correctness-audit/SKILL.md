@@ -1,88 +1,88 @@
 ---
 name: correctness-audit
-description: 変換ロジックとテストの論理的正当性を徹底的に監査し、問題を PRD 化する。定期的な品質ゲートとして使用
+description: Thorough audit of conversion logic and test correctness, PRD-ifying issues found. Used as a periodic quality gate
 user-invocable: true
 ---
 
-# 変換正当性の監査
+# Conversion Correctness Audit
 
-## トリガー
+## Trigger
 
-- ユーザーから正当性チェック・監査を依頼されたとき
-- 大きな機能追加サイクル（5 件以上の PRD 消化）が完了したとき
+- User requests a correctness check or audit
+- After a major feature addition cycle (5+ PRDs completed)
 
-## アクション
+## Actions
 
-以下の 3 つの調査を**並列**で実施し、結果を `report/` にレポートとして保存する。
+Execute the following 3 investigations **in parallel**, saving results as a report in `report/`.
 
-### 1. 型変換の正確性監査
+### 1. Type Conversion Accuracy Audit
 
-対象ファイル: `src/transformer/types/`, `src/ir.rs`, `src/generator/types.rs`
+Target files: `src/transformer/types/`, `src/ir.rs`, `src/generator/types.rs`
 
-全ての型マッピングについて以下を検証する:
+Verify the following for all type mappings:
 
-- **型の等価性**: TS の型が Rust の型に正しく対応しているか。情報が欠落・追加されていないか
-- **コンパイル可能性**: 生成される Rust コードが rustc でコンパイルできるか
-- **エッジケース**: 型の組み合わせ（union 内の特殊型、ネストしたジェネリクス等）で壊れないか
+- **Type equivalence**: Does the TS type correctly map to the Rust type? No information lost or added?
+- **Compilability**: Can the generated Rust code compile with rustc?
+- **Edge cases**: Do type combinations (special types in unions, nested generics, etc.) break anything?
 
-具体的なチェック項目:
-- 各 `TsKeywordTypeKind` → `RustType` マッピングの妥当性
-- union/intersection の全パターン（nullable, 非 nullable, 複合）
-- ジェネリクス・型パラメータの伝搬
-- 型注記位置 vs type alias 位置での挙動差異
+Specific check items:
+- Validity of each `TsKeywordTypeKind` → `RustType` mapping
+- All union/intersection patterns (nullable, non-nullable, compound)
+- Generics and type parameter propagation
+- Behavior differences between type annotation positions vs type alias positions
 
-### 2. 文・式のセマンティクス監査
+### 2. Statement/Expression Semantics Audit
 
-対象ファイル: `src/transformer/statements/`, `src/transformer/expressions/`, `src/transformer/functions/`, `src/transformer/classes.rs`, `src/generator/statements.rs`, `src/generator/expressions.rs`
+Target files: `src/transformer/statements/`, `src/transformer/expressions/`, `src/transformer/functions/`, `src/transformer/classes.rs`, `src/generator/statements.rs`, `src/generator/expressions.rs`
 
-全ての変換パターンについて以下を検証する:
+Verify the following for all conversion patterns:
 
-- **制御フローの保持**: break/continue/return/throw が正しいスコープで動作するか
-- **式の型安全性**: 生成される式がコンパイル可能か（型の不一致、メソッドの有無）
-- **ランタイム挙動の等価性**: パニック vs NaN、ミュータビリティ、所有権等の差異
-- **エッジケース**: ネストした構造、複合パターン、暗黙の型変換
+- **Control flow preservation**: Do break/continue/return/throw operate in the correct scope?
+- **Expression type safety**: Are generated expressions compilable? (type mismatches, method availability)
+- **Runtime behavior equivalence**: Differences in panic vs NaN, mutability, ownership, etc.
+- **Edge cases**: Nested structures, compound patterns, implicit type conversions
 
-### 3. テスト品質の監査
+### 3. Test Quality Audit
 
-対象ファイル: `src/**/tests.rs`, `tests/integration_test.rs`, `tests/compile_test.rs`, `tests/snapshots/`
+Target files: `src/**/tests.rs`, `tests/integration_test.rs`, `tests/compile_test.rs`, `tests/snapshots/`
 
-全テストについて以下を検証する:
+Verify the following for all tests:
 
-- **期待値の正確性**: 期待される Rust コードは実際にコンパイル可能か。セマンティクスは正しいか
-- **アサーションの強度**: `matches!()` や `is_ok()` のみで内容を検証していないテストはないか
-- **欠落テスト**: 各変換パターンに対して正常系・異常系・境界値のテストがあるか
-- **スナップショットの正当性**: compile_test でスキップされているスナップショットのコードは正しいか
-- **テストが本来テストすべきことをテストしているか**: テスト名と実際の検証内容が一致しているか
+- **Expected value accuracy**: Can the expected Rust code actually compile? Are the semantics correct?
+- **Assertion strength**: Are there tests using only `matches!()` or `is_ok()` without verifying content?
+- **Missing tests**: Do normal cases, error cases, and boundary value tests exist for each conversion pattern?
+- **Snapshot validity**: Is the code in snapshots skipped in compile_test correct?
+- **Tests verify what they should**: Do test names match actual verification content?
 
-### 4. レポート作成
+### 4. Report Creation
 
-調査結果を `report/conversion-correctness-audit.md` に保存する。レポートには:
+Save findings to `report/conversion-correctness-audit.md`. The report must:
 
-- 基準コミットを記載する
-- 問題を深刻度別（Critical / High / Medium）に分類する
-- 各問題に ID を付与し、具体的なコード箇所（ファイル:行番号）を記載する
-- 前回の監査結果がある場合、前回からの変化（解消・新規・変化なし）を記録する
+- Include the base commit
+- Classify problems by severity (Critical / High / Medium)
+- Assign IDs to each problem with specific code locations (file:line_number)
+- If a previous audit exists, record changes from last time (resolved, new, unchanged)
 
-### 5. PRD 化
+### 5. PRD Creation
 
-発見した全ての Critical / High の問題について:
+For all discovered Critical / High problems:
 
-- 既存の backlog に該当する PRD がないか確認する
-- ない場合は `/prd-template` に従って PRD を作成し `backlog/` に配置する
-- `plan.md` の消化順序に挿入する
-- Medium の問題は `TODO` に記録する（PRD 化は任意）
+- Check if a related PRD already exists in backlog
+- If not, create a PRD per `/prd-template` and place in `backlog/`
+- Insert into `plan.md` execution order
+- Record Medium problems in `TODO` (PRD creation is optional)
 
-## 禁止事項
+## Prohibited
 
-- 一部のファイルだけ読んで「全体を確認した」と報告すること
-- 推測や一般論だけで問題を報告すること（具体的なコード箇所で裏付ける）
-- 前回の監査で報告済みの問題を見落とすこと（前回レポートを参照して差分を出す）
-- 「問題なし」と報告して終わること（全ての変換パスについて明示的に OK/NG を判定する）
-- テストの期待値を「テストが通っているから正しい」と判断すること（期待値自体の正しさを独立に検証する）
+- Reading only some files and reporting "confirmed the whole thing"
+- Reporting problems based only on speculation or generalities (support with specific code locations)
+- Missing problems reported in the previous audit (reference the previous report and produce diffs)
+- Reporting "no issues" and stopping (explicitly judge OK/NG for every conversion path)
+- Judging test expected values as "correct because tests pass" (independently verify the expected values themselves)
 
-## 検証
+## Verification
 
-- `report/conversion-correctness-audit.md` が作成・更新されている
-- 全ての型マッピング、文/式変換パターンについて検証結果が記載されている
-- 発見された Critical / High の問題が全て `backlog/` に PRD として存在する
-- 前回の監査結果との差分が記録されている（初回の場合は不要）
+- `report/conversion-correctness-audit.md` is created/updated
+- Verification results are documented for all type mappings and statement/expression conversion patterns
+- All discovered Critical / High problems exist as PRDs in `backlog/`
+- Diffs from previous audit results are recorded (not required for first audit)

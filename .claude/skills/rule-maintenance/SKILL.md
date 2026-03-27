@@ -1,44 +1,44 @@
 ---
 name: rule-maintenance
-description: ルールの作成・更新・削除時のメンテナンス手順。個別レビューと全体統合チェックを行う
+description: Maintenance procedure for rule creation, updates, and deletion. Perform individual review and overall integration check
 user-invocable: true
 ---
 
-# ルールのメンテナンス
+# Rule Maintenance
 
-## トリガー
+## Trigger
 
-ルールの作成・更新・削除を行うとき。
+When creating, updating, or deleting rules.
 
-## アクション
+## Actions
 
-### 個別ルールのレビュー（毎回実施）
+### Individual Rule Review (every time)
 
-1. 操作対象のルールが /rule-writing の構造に従っているかを確認する
-2. ランダムに選んだ 2 つの既存ルールについても同様に確認する
-3. レビューの結果、更新が必要なルールがあれば対応する
-4. ルールの削除が妥当と判断した場合、削除理由と影響範囲を明示してユーザーの確認を取る
+1. Verify the target rule follows /rule-writing structure
+2. Verify 2 randomly selected existing rules similarly
+3. Update any rules found to need changes
+4. If rule deletion is warranted, state the reason and impact area and get user confirmation
 
-### ルール全体の統合チェック（約 30% の確率で実施）
+### Full Integration Check (~30% probability)
 
-1. `.claude/rules/` 内の全ルールファイルを一覧する
-2. 以下の観点で全体を評価する:
-   - ルール数が多すぎないか（目安: 20 ファイル以上は要注意）
-   - トリガーが重複するルール同士を合併できないか
-   - 同じ関心事を扱うルールが分散していないか
-   - 陳腐化したルール（プロジェクトの現状と乖離しているもの）がないか
-3. 合併・削除の提案がある場合、理由と影響範囲を明示してユーザーに確認する
+1. List all rule files in `.claude/rules/`
+2. Evaluate from these perspectives:
+   - Too many rules? (guideline: 20+ files is a warning sign)
+   - Can rules with overlapping triggers be merged?
+   - Are rules addressing the same concern scattered across files?
+   - Are there stale rules (diverged from current project state)?
+3. If merge/deletion proposals exist, state reasons and impact area and confirm with user
 
-### レビュー観点
+### Review Perspectives
 
-- そのルールが解決しようとしている問題は何か
-- 現在の記述でその問題は解決できているか
-- /rule-writing の構造（トリガー・アクション・禁止事項・検証）に従っているか
-- `paths:` フロントマターが適切か（/rule-writing の「判断基準」参照）。特定ディレクトリにのみ適用されるルールに `paths:` がない場合はコンテキストの無駄遣い。全体適用のルールに不要な `paths:` がある場合はルールが発動しないリスク
-- 他のルールと矛盾・重複していないか
-- プロジェクトの現状に照らして陳腐化していないか
+- What problem is the rule trying to solve?
+- Does the current wording solve that problem?
+- Does it follow /rule-writing structure (trigger, actions, prohibited, verification)?
+- Is `paths:` frontmatter appropriate? (see /rule-writing "Decision Criteria"). A directory-specific rule without `paths:` wastes context. A global rule with unnecessary `paths:` risks not firing
+- Does it contradict or duplicate other rules?
+- Is it stale relative to current project state?
 
-## 禁止事項
+## Prohibited
 
-- ユーザーの確認なしにルールを削除すること
-- レビュー観点を確認せずにルールの更新を完了とすること
+- Deleting rules without user confirmation
+- Completing rule updates without checking review perspectives

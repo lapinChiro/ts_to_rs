@@ -1,24 +1,24 @@
-# PRD 完了条件の厳守
+# Strict PRD Completion Criteria
 
-## 適用条件
+## When to Apply
 
-PRD の作業を「完了」と報告するとき。
+When reporting PRD work as "complete".
 
-## 制約
+## Constraints
 
-- PRD の**全ての完了条件**が達成されていなければ、PRD は完了ではない
-- 完了条件の一部が未達成の場合、以下のいずれかを行う:
-  1. 未達成の条件を達成してから完了と報告する
-  2. ユーザーに「完了条件 X が未達成である。理由は Y。どう進めるか」を確認し、ユーザーの判断を仰ぐ
-- 完了条件の達成が困難な場合でも、**勝手にスコープを縮小して完了と報告してはならない**
+- A PRD is not complete unless **all completion criteria** are met
+- If some criteria are unmet, do one of the following:
+  1. Meet the unmet criteria before reporting completion
+  2. Ask the user: "Completion criterion X is unmet. Reason is Y. How should we proceed?" and defer to their judgment
+- Even if meeting criteria is difficult, **never unilaterally reduce scope and report completion**
 
-## 禁止事項
+## Prohibited
 
-- 完了条件が未達成のまま PRD を完了と報告すること
-- 「後続の PRD で対応する」として未達成の条件を先送りし、ユーザーに確認せず完了と報告すること
-- 実装の難しさ・工数の大きさを理由にスコープを勝手に縮小すること
-- 先送りした事項を後続 PRD に黙って追加すること（後続 PRD の前提を壊す）
+- Reporting a PRD as complete with unmet completion criteria
+- Deferring unmet criteria to "a subsequent PRD" and reporting completion without user confirmation
+- Unilaterally reducing scope due to implementation difficulty or large effort
+- Silently adding deferred items to subsequent PRDs (this breaks subsequent PRDs' assumptions)
 
-## 理由
+## Rationale
 
-PRD の完了条件は後続 PRD の前提条件になっている。完了条件を未達成のまま完了と報告すると、後続 PRD の前提が崩れ、サイレントな影響が連鎖する。この種の問題は発見が遅れるほど修正コストが膨らむ。
+PRD completion criteria serve as prerequisites for subsequent PRDs. Reporting completion with unmet criteria breaks subsequent PRD assumptions, causing silent cascading impacts. The later these issues are discovered, the higher the correction cost.

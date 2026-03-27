@@ -1,48 +1,48 @@
 ---
 name: rule-writing
-description: ルールを新規作成・更新するときの書き方ガイド。手続きルールと制約ルールの2類型、必須セクション、原則を定める
+description: Guide for creating and updating rules. Defines two rule types (procedural and constraint), required sections, and principles
 user-invocable: true
 ---
 
-# ルールの書き方
+# Rule Writing Guide
 
-## トリガー
+## Trigger
 
-ルールを新規作成・更新するとき。
+When creating or updating rules.
 
-## ルールの2類型
+## Two Rule Types
 
-ルールは以下の2種類に分類される。種類に応じて必須セクションが異なる。
+Rules are classified into two types. Required sections differ by type.
 
-| 種類 | 性質 | 例 |
-|------|------|-----|
-| **手続きルール** | 特定のイベントで発動し、具体的なステップを実行する | 「作業完了時に品質チェックを実行する」 |
-| **制約ルール** | 常時適用される条件・禁止事項を定める | 「検証時には期待結果を事前に定義せよ」 |
+| Type | Nature | Example |
+|------|--------|---------|
+| **Procedural rule** | Fires on a specific event and executes concrete steps | "Run quality check on work completion" |
+| **Constraint rule** | Defines always-applicable conditions and prohibitions | "Define expected results before verification" |
 
-## 構造
+## Structure
 
-### 手続きルール
+### Procedural Rules
 
-| セクション | 必須 | 内容 |
-|------------|------|------|
-| **トリガー** | 必須 | いつ発動するか。具体的なイベントや状態を記述する |
-| **アクション** | 必須 | 何をするか。機械的に実行できる具体的ステップ |
-| **禁止事項** | 推奨 | やってはいけないこと。抜け道になりがちな行動を列挙する |
-| **検証** | 推奨 | ルールに従ったかの判定基準。第三者が客観的に判定できる形 |
+| Section | Required | Content |
+|---------|----------|---------|
+| **Trigger** | Required | When it fires. Describe the specific event or state |
+| **Actions** | Required | What to do. Concrete steps that can be executed mechanically |
+| **Prohibited** | Recommended | What not to do. List actions that tend to become loopholes |
+| **Verification** | Recommended | Criteria for judging compliance. Must be objectively assessable by a third party |
 
-手続きルールでトリガーが書けない場合、そのルールは抽象的すぎるか、制約ルールとして書き直すべきである。
+If a trigger cannot be written for a procedural rule, the rule is either too abstract or should be rewritten as a constraint rule.
 
-### 制約ルール
+### Constraint Rules
 
-| セクション | 必須 | 内容 |
-|------------|------|------|
-| **適用条件** | 必須 | どのような場面で常時適用されるか |
-| **制約** | 必須 | 守るべき条件・原則。具体的な行動指針として書く |
-| **禁止事項** | 推奨 | 制約に反する典型的な行動パターンを列挙する |
+| Section | Required | Content |
+|---------|----------|---------|
+| **When to Apply** | Required | In what situations it is always applicable |
+| **Constraints** | Required | Conditions/principles to uphold. Write as concrete behavioral guidelines |
+| **Prohibited** | Recommended | List typical behavior patterns that violate the constraints |
 
-## `paths:` フロントマターによる読み込み制御
+## `paths:` Frontmatter for Load Control
 
-ルールファイルの先頭に YAML フロントマターで `paths:` を指定すると、そのルールは **指定パスに一致するファイルを読み書きするときだけ** コンテキストに読み込まれる。指定しない場合は **常時読み込み** される。
+Adding `paths:` in YAML frontmatter at the top of a rule file causes the rule to be loaded into context **only when reading/writing files matching the specified paths**. Without `paths:`, the rule is **always loaded**.
 
 ```yaml
 ---
@@ -52,16 +52,16 @@ paths:
 ---
 ```
 
-### 判断基準
+### Decision Criteria
 
-| 条件 | `paths:` | 理由 |
-|------|----------|------|
-| 特定ディレクトリ/ファイル種別にのみ適用される | **指定する** | コンテキスト消費を抑え、無関係な作業時にノイズにならない |
-| プロジェクト全体に適用される（コーディング規約、Git ワークフロー、ドキュメント規約等） | **指定しない** | どのファイルを触っても適用されるべき |
-| 判断に迷う場合 | **指定しない** | ルールが適用されないリスクの方が、コンテキスト消費より深刻 |
+| Condition | `paths:` | Reason |
+|-----------|----------|--------|
+| Applies only to specific directories/file types | **Specify** | Reduces context consumption, avoids noise during unrelated work |
+| Applies project-wide (coding conventions, Git workflow, documentation conventions, etc.) | **Omit** | Should apply regardless of which files are touched |
+| Uncertain | **Omit** | Risk of rule not firing is more severe than context consumption |
 
-## 原則
+## Principles
 
-- **LLM は「やるべきこと」だけ書くと都合よく解釈する**。禁止事項を書かないと、ルールの文面に反しない別の方法で意図を逸脱する。「削除する」と書いても「打ち消し線で残す」を許容してしまう。禁止事項でこれを防げ
-- **曖昧な指示は無視される**。「適切に対応する」「注意する」「考慮する」は実質的に何も指示していない。具体的な行動に書き換えよ
-- **1 ルール 1 関心事**。複数の関心事を 1 ファイルに混ぜない。関心事が増えたら分割する
+- **LLMs interpret "what to do" instructions favorably**. Without prohibited sections, they will deviate from intent via methods that don't technically violate the wording. Writing "delete" still permits "strikethrough and keep". Prohibited sections prevent this
+- **Vague instructions are ignored**. "Handle appropriately", "be careful", "consider" effectively instruct nothing. Rewrite as concrete actions
+- **1 rule, 1 concern**. Do not mix multiple concerns in one file. Split when concerns grow

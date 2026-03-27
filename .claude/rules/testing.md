@@ -4,65 +4,65 @@ paths:
   - "src/**/tests.rs"
 ---
 
-# テスト規約
+# Testing Conventions
 
-## トリガー
+## Trigger
 
-テストコードを新規作成または変更するとき。
+When creating or modifying test code.
 
-## アクション
+## Actions
 
-以下の規約に従ってテストを配置・記述する:
+Follow these conventions for test placement and writing:
 
-### 配置
+### Placement
 
-| 種類 | 配置 | 用途 |
-|------|------|------|
-| **ユニットテスト** | `src/**/*.rs` 内の `#[cfg(test)] mod tests` | モジュール内部ロジック |
-| **統合テスト** | `tests/*.rs` | 公開 API の E2E テスト |
-| **スナップショットテスト** | `tests/` (insta 使用) | TS → Rust 変換の出力検証 |
-| **E2E テスト** | `tests/e2e/scripts/*.ts` + `tests/e2e_test.rs` | 変換後 Rust の実行時正確性検証 |
+| Type | Location | Purpose |
+|------|----------|---------|
+| **Unit tests** | `#[cfg(test)] mod tests` in `src/**/*.rs` | Module internal logic |
+| **Integration tests** | `tests/*.rs` | Public API E2E testing |
+| **Snapshot tests** | `tests/` (using insta) | TS → Rust conversion output verification |
+| **E2E tests** | `tests/e2e/scripts/*.ts` + `tests/e2e_test.rs` | Runtime correctness verification of converted Rust |
 
-### スナップショットテスト
+### Snapshot Tests
 
-- fixture ファイル: `tests/fixtures/<name>.input.ts`
-- `insta::assert_snapshot!` で出力を検証
-- スナップショット更新: `cargo insta review`
+- Fixture files: `tests/fixtures/<name>.input.ts`
+- Verify output with `insta::assert_snapshot!`
+- Update snapshots: `cargo insta review`
 
-### E2E テスト
+### E2E Tests
 
-E2E テストは「同じ TS コードを tsx で実行した stdout」と「変換後の Rust を cargo run した stdout」が一致することを検証する。
+E2E tests verify that "stdout from running the same TS code with tsx" matches "stdout from cargo run of the converted Rust".
 
-- スクリプト: `tests/e2e/scripts/<name>.ts`（`function main(): void { ... }` を定義）
-- テスト関数: `tests/e2e_test.rs` に `run_e2e_test("<name>")` を呼ぶ関数を追加
-- Rust ランナー: `tests/e2e/rust-runner/`（変換結果をここに書き出して実行）
-- **変換機能を変更したら、対応する E2E テストの追加・拡充が必須**
+- Scripts: `tests/e2e/scripts/<name>.ts` (define `function main(): void { ... }`)
+- Test functions: Add a function calling `run_e2e_test("<name>")` in `tests/e2e_test.rs`
+- Rust runner: `tests/e2e/rust-runner/` (conversion results are written here and executed)
+- **When modifying conversion features, adding/expanding corresponding E2E tests is mandatory**
 
-#### E2E テスト判断基準
+#### E2E Test Decision Criteria
 
-以下のいずれかに該当する場合、E2E テストの追加・拡充が**必須**:
+E2E test addition/expansion is **mandatory** when any of the following apply:
 
-| 変更の種類 | E2E テストの対応 |
-|-----------|----------------|
-| 新しい TS 構文のハンドラ追加 | 新規スクリプトまたは既存スクリプトにケース追加 |
-| 既存の変換ロジックのバグ修正 | バグを再現する入力を E2E スクリプトに追加 |
-| ビルトイン API の追加・変更 | 該当 API を使用する E2E ケース追加 |
-| 型変換ロジックの変更 | 変換結果が実行時に正しく動作することを E2E で検証 |
+| Change Type | E2E Test Response |
+|-------------|-------------------|
+| Adding a new TS syntax handler | New script or add cases to existing script |
+| Fixing an existing conversion logic bug | Add bug-reproducing input to E2E script |
+| Adding/changing a built-in API | Add E2E case using that API |
+| Changing type conversion logic | Verify converted result works correctly at runtime via E2E |
 
-以下の場合は E2E テスト不要:
+E2E tests are not required when:
 
-- リファクタリング（外部挙動に変化なし）
-- パーサーのみの変更（IR 生成に影響しない）
-- ドキュメント・コメントのみの変更
+- Refactoring (no change in external behavior)
+- Parser-only changes (no impact on IR generation)
+- Documentation/comment-only changes
 
-### コード規約
+### Code Conventions
 
-- `unwrap()` / `expect()` はテストコード内でのみ許可（ライブラリコードでは `Result` で伝播）
-- 各テストは独立して実行可能であること。テスト間で状態を共有しない
+- `unwrap()` / `expect()` are only allowed in test code (use `Result` propagation in library code)
+- Each test must be independently runnable. Do not share state between tests
 
-## 禁止事項
+## Prohibited
 
-- ユニットテストを `tests/` ディレクトリに配置すること（`src/` 内の `#[cfg(test)]` に置く）
-- テスト間で可変な状態（ファイル、グローバル変数等）を共有すること
-- ライブラリコードで `unwrap()` / `expect()` を使用すること
-- 変換機能の変更で E2E テストを書かずに完了とすること
+- Placing unit tests in `tests/` directory (use `#[cfg(test)]` in `src/`)
+- Sharing mutable state (files, global variables, etc.) between tests
+- Using `unwrap()` / `expect()` in library code
+- Completing conversion feature changes without writing E2E tests
