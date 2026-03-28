@@ -1,0 +1,100 @@
+---
+source: tests/integration_test.rs
+expression: output
+---
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DetectorsKey {
+    Querystring,
+    Cookie,
+    Header,
+}
+
+impl DetectorsKey {
+    pub fn as_str(&self) -> &str {
+        match self {
+            DetectorsKey::Querystring => "querystring",
+            DetectorsKey::Cookie => "cookie",
+            DetectorsKey::Header => "header",
+        }
+    }
+}
+
+impl std::fmt::Display for DetectorsKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EncodingTypes {
+    Gzip,
+    Deflate,
+}
+
+impl EncodingTypes {
+    pub fn as_str(&self) -> &str {
+        match self {
+            EncodingTypes::Gzip => "gzip",
+            EncodingTypes::Deflate => "deflate",
+        }
+    }
+}
+
+impl std::fmt::Display for EncodingTypes {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mimes {
+    AudioAac,
+    VideoAvi,
+}
+
+impl Mimes {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Mimes::AudioAac => "audio/aac",
+            Mimes::VideoAvi => "video/avi",
+        }
+    }
+}
+
+impl std::fmt::Display for Mimes {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct _TypeLit0 {
+    pub Stringify: f64,
+    pub BeforeStream: f64,
+    pub Stream: f64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct _TypeLit1 {
+    pub aac: String,
+    pub avi: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct _TypeLit2 {
+    pub querystring: bool,
+    pub cookie: bool,
+    pub header: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct CompressionOptions {
+    encoding: EncodingTypes,
+    threshold: f64,
+}
+
+type PhaseValue = f64;
+
+type MimeType = Mimes;
+
+type DetectorKeys = DetectorsKey;

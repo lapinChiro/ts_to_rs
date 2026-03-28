@@ -191,7 +191,7 @@ pub fn generate_external_struct(name: &str, registry: &TypeRegistry) -> Option<I
                 fields: struct_fields,
             })
         }
-        TypeDef::Enum { .. } | TypeDef::Function { .. } => None,
+        TypeDef::Enum { .. } | TypeDef::Function { .. } | TypeDef::ConstValue { .. } => None,
     }
 }
 

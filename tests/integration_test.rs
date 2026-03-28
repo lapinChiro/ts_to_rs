@@ -556,3 +556,10 @@ fn test_intersection_methods() {
     let output = transpile(&input).unwrap();
     insta::assert_snapshot!(output);
 }
+
+#[test]
+fn test_typeof_const() {
+    let input = fs::read_to_string("tests/fixtures/typeof-const.input.ts").unwrap();
+    let output = transpile(&input).unwrap();
+    insta::assert_snapshot!(output);
+}

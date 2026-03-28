@@ -34,6 +34,26 @@ pub struct MethodSignature {
     pub return_type: Option<RustType>,
 }
 
+/// `ConstValue` のオブジェクトフィールド。
+#[derive(Debug, Clone, PartialEq)]
+pub struct ConstField {
+    /// フィールド名
+    pub name: String,
+    /// フィールド型
+    pub ty: RustType,
+    /// `as const` オブジェクトの文字列リテラル値（`{ key: 'value' } as const` の場合）
+    pub string_literal_value: Option<String>,
+}
+
+/// `ConstValue` の配列要素。
+#[derive(Debug, Clone, PartialEq)]
+pub struct ConstElement {
+    /// 要素の型
+    pub ty: RustType,
+    /// `as const` 配列の文字列リテラル値（`['a', 'b'] as const` の場合に保持）
+    pub string_literal_value: Option<String>,
+}
+
 /// 型定義の種類。
 #[derive(Debug, Clone, PartialEq)]
 pub enum TypeDef {
@@ -73,6 +93,16 @@ pub enum TypeDef {
         return_type: Option<RustType>,
         /// 最後のパラメータが rest パラメータかどうか
         has_rest: bool,
+    },
+    /// const 変数の値型（`as const` 宣言または型注釈付き const 宣言）
+    ConstValue {
+        /// const オブジェクトのフィールド
+        fields: Vec<ConstField>,
+        /// const 配列の要素（`as const` 配列リテラルから抽出）
+        elements: Vec<ConstElement>,
+        /// 型注釈の参照先型名（`const x: Config = ...` → `Some("Config")`）
+        /// TsTypeQuery ハンドラで typeof 解決時にこの型名へリダイレクトする
+        type_ref_name: Option<String>,
     },
 }
 
@@ -116,6 +146,66 @@ impl TypeDef {
             TypeDef::Struct { type_params, .. } | TypeDef::Enum { type_params, .. } => type_params,
             _ => &[],
         }
+    }
+
+    /// `Struct` または `ConstValue` のフィールド名一覧を返す。
+    ///
+    /// フィールドが空の場合は `None`。`Enum`/`Function` に対しても `None`。
+    /// `keyof typeof X` の解決で、const オブジェクトのキー名を取得する際に使用する。
+    pub fn field_names(&self) -> Option<Vec<String>> {
+        match self {
+            TypeDef::Struct { fields, .. } if !fields.is_empty() => {
+                Some(fields.iter().map(|(n, _)| n.clone()).collect())
+            }
+            TypeDef::ConstValue { fields, .. } if !fields.is_empty() => {
+                Some(fields.iter().map(|f| f.name.clone()).collect())
+            }
+            _ => None,
+        }
+    }
+
+    /// `Struct` または `ConstValue` のフィールド値型を重複なしで返す。
+    ///
+    /// フィールドが空の場合は `None`。
+    /// `(typeof X)[keyof typeof X]` の解決で、全値型の union を構築する際に使用する。
+    pub fn unique_field_types(&self) -> Option<Vec<RustType>> {
+        let types_iter: Box<dyn Iterator<Item = &RustType>> = match self {
+            TypeDef::Struct { fields, .. } if !fields.is_empty() => {
+                Box::new(fields.iter().map(|(_, ty)| ty))
+            }
+            TypeDef::ConstValue { fields, .. } if !fields.is_empty() => {
+                Box::new(fields.iter().map(|f| &f.ty))
+            }
+            _ => return None,
+        };
+        let mut unique = Vec::new();
+        for ty in types_iter {
+            if !unique.contains(ty) {
+                unique.push(ty.clone());
+            }
+        }
+        Some(unique)
+    }
+
+    /// `ConstValue` の全フィールドが文字列リテラル値を持つ場合、その値一覧を返す。
+    ///
+    /// 一つでも `string_literal_value` が `None` のフィールドがあれば `None` を返す。
+    /// `ConstValue` 以外の TypeDef に対しても `None`。
+    /// `(typeof X)[keyof typeof X]` で全値が文字列リテラルの場合に string enum を生成する際に使用する。
+    pub fn all_string_literal_field_values(&self) -> Option<Vec<String>> {
+        if let TypeDef::ConstValue { fields, .. } = self {
+            if fields.is_empty() {
+                return None;
+            }
+            let values: Vec<String> = fields
+                .iter()
+                .filter_map(|f| f.string_literal_value.clone())
+                .collect();
+            if values.len() == fields.len() {
+                return Some(values);
+            }
+        }
+        None
     }
 
     /// 型パラメータを具体型で置換した新しい TypeDef を返す。

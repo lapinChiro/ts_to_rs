@@ -386,7 +386,7 @@ pub(super) fn try_convert_single_string_literal(
 ///
 /// Examples: `"up"` → `"Up"`, `"foo-bar"` → `"FooBar"`, `"UPPER_CASE"` → `"UpperCase"`
 pub(crate) fn string_to_pascal_case(s: &str) -> String {
-    s.split(['-', '_', ' '])
+    s.split(|c: char| !c.is_alphanumeric())
         .filter(|part| !part.is_empty())
         .map(|part| {
             let lower = part.to_lowercase();

@@ -299,7 +299,17 @@ pub(super) fn convert_indexed_access_type(
     let obj_name = extract_indexed_access_base_name(&indexed.obj_type, synthetic, reg)
         .ok_or_else(|| anyhow!("unsupported indexed access base type"))?;
 
-    // Extract the string literal key
+    // [number] key: extract element types from const arrays
+    if is_number_keyword_type(&indexed.index_type) {
+        return resolve_number_index(&obj_name, synthetic, reg);
+    }
+
+    // [keyof typeof X] key: extract value type union from const objects
+    if extract_keyof_typeof_name(&indexed.index_type, reg).is_some() {
+        return resolve_keyof_typeof_index(&obj_name, synthetic, reg);
+    }
+
+    // String literal key
     let key = match indexed.index_type.as_ref() {
         TsType::TsLitType(lit) => match &lit.lit {
             swc_ecma_ast::TsLit::Str(s) => s.value.to_string_lossy().into_owned(),
@@ -327,6 +337,118 @@ pub(super) fn convert_indexed_access_type(
     })
 }
 
+/// Checks if a type is the `number` keyword type.
+fn is_number_keyword_type(ts_type: &TsType) -> bool {
+    matches!(
+        ts_type,
+        TsType::TsKeywordType(swc_ecma_ast::TsKeywordType {
+            kind: swc_ecma_ast::TsKeywordTypeKind::TsNumberKeyword,
+            ..
+        })
+    )
+}
+
+/// Extracts the name from a `keyof typeof X` type expression.
+///
+/// Returns `Some(name)` if the type is `TsTypeOperator(KeyOf, TsTypeQuery(Ident(name)))`.
+fn extract_keyof_typeof_name(ts_type: &TsType, reg: &TypeRegistry) -> Option<String> {
+    if let TsType::TsTypeOperator(op) = ts_type {
+        if op.op == swc_ecma_ast::TsTypeOperatorOp::KeyOf {
+            if let TsType::TsTypeQuery(query) = op.type_ann.as_ref() {
+                if let swc_ecma_ast::TsTypeQueryExpr::TsEntityName(
+                    swc_ecma_ast::TsEntityName::Ident(ident),
+                ) = &query.expr_name
+                {
+                    let name = ident.sym.to_string();
+                    // Verify the name exists in registry
+                    if reg.get(&name).is_some() {
+                        return Some(name);
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Resolves `(typeof X)[number]` — extracts element type from const arrays.
+fn resolve_number_index(
+    obj_name: &str,
+    synthetic: &mut SyntheticTypeRegistry,
+    reg: &TypeRegistry,
+) -> Result<RustType> {
+    match reg.get(obj_name) {
+        Some(crate::registry::TypeDef::ConstValue { elements, .. }) if !elements.is_empty() => {
+            // Check if all elements have string values → generate string enum
+            let string_values: Vec<String> = elements
+                .iter()
+                .filter_map(|e| e.string_literal_value.clone())
+                .collect();
+            if string_values.len() == elements.len() {
+                let enum_name = synthetic.register_string_literal_enum(obj_name, &string_values);
+                return Ok(RustType::Named {
+                    name: enum_name,
+                    type_args: vec![],
+                });
+            }
+            // Non-string elements → collect unique element types
+            let mut unique_types: Vec<RustType> = Vec::new();
+            for elem in elements {
+                if !unique_types.contains(&elem.ty) {
+                    unique_types.push(elem.ty.clone());
+                }
+            }
+            if let [single] = unique_types.as_slice() {
+                return Ok(single.clone());
+            }
+            let name = synthetic.register_union(&unique_types);
+            Ok(RustType::Named {
+                name,
+                type_args: vec![],
+            })
+        }
+        _ => Err(anyhow!(
+            "unsupported indexed access: [number] key requires a const array"
+        )),
+    }
+}
+
+/// Resolves `(typeof X)[keyof typeof Y]` — extracts value type union from const objects.
+fn resolve_keyof_typeof_index(
+    obj_name: &str,
+    synthetic: &mut SyntheticTypeRegistry,
+    reg: &TypeRegistry,
+) -> Result<RustType> {
+    let typedef = reg
+        .get(obj_name)
+        .ok_or_else(|| anyhow!("unsupported indexed access: base type '{obj_name}' not found"))?;
+
+    // Check if all fields have string literal values → generate string enum
+    if let Some(string_values) = typedef.all_string_literal_field_values() {
+        let enum_name = synthetic.register_string_literal_enum(obj_name, &string_values);
+        return Ok(RustType::Named {
+            name: enum_name,
+            type_args: vec![],
+        });
+    }
+
+    // Collect unique value types
+    if let Some(value_types) = typedef.unique_field_types() {
+        if let [single] = value_types.as_slice() {
+            return Ok(single.clone());
+        }
+        let name = synthetic.register_union(&value_types);
+        return Ok(RustType::Named {
+            name,
+            type_args: vec![],
+        });
+    }
+
+    Err(anyhow!(
+        "unsupported indexed access: [keyof typeof] requires a const object type"
+    ))
+}
+
 /// Looks up a field type from the registry by struct name and field name.
 fn lookup_field_type(type_name: &str, field_name: &str, reg: &TypeRegistry) -> Option<RustType> {
     match reg.get(type_name)? {
@@ -334,6 +456,10 @@ fn lookup_field_type(type_name: &str, field_name: &str, reg: &TypeRegistry) -> O
             .iter()
             .find(|(n, _)| n == field_name)
             .map(|(_, t)| t.clone()),
+        crate::registry::TypeDef::ConstValue { fields, .. } => fields
+            .iter()
+            .find(|f| f.name == field_name)
+            .map(|f| f.ty.clone()),
         _ => None,
     }
 }

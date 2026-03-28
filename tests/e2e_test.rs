@@ -714,3 +714,8 @@ fn test_e2e_object_spread_ts_rust_stdout_match() {
 fn test_e2e_typeof_function_ts_rust_stdout_match() {
     run_e2e_test("typeof_function");
 }
+
+#[test]
+fn test_e2e_typeof_const_ts_rust_stdout_match() {
+    run_e2e_test("typeof_const");
+}

@@ -179,6 +179,8 @@ pub fn convert_ts_type(
                 // `readonly T[]` → strip readonly, convert inner type
                 // Rust enforces immutability through variable bindings, not types
                 TsTypeOperatorOp::ReadOnly => convert_ts_type(&op.type_ann, synthetic, reg),
+                // `keyof typeof X` → string enum of const object's field names
+                TsTypeOperatorOp::KeyOf => resolve_keyof_type(&op.type_ann, synthetic, reg),
                 _ => Err(anyhow!("unsupported type operator: {:?}", op.op)),
             }
         }
@@ -238,6 +240,14 @@ pub fn convert_ts_type(
                         type_args: vec![],
                     })
                 }
+                Some(crate::registry::TypeDef::ConstValue { type_ref_name, .. }) => {
+                    // typeof ConstVariable → redirect to referenced type if available
+                    let resolved_name = type_ref_name.as_deref().unwrap_or(&name);
+                    Ok(RustType::Named {
+                        name: resolved_name.to_string(),
+                        type_args: vec![],
+                    })
+                }
                 _ => Err(anyhow!(
                     "unsupported type: TsTypeQuery for unknown identifier '{name}'"
                 )),
@@ -245,6 +255,38 @@ pub fn convert_ts_type(
         }
         _ => Err(anyhow!("unsupported type: {:?}", ts_type)),
     }
+}
+
+/// Resolves `keyof T` type operator.
+///
+/// Currently supports `keyof typeof X` where X is a ConstValue with fields.
+/// Returns a synthetic string enum of the field names.
+fn resolve_keyof_type(
+    type_ann: &TsType,
+    synthetic: &mut SyntheticTypeRegistry,
+    reg: &TypeRegistry,
+) -> Result<RustType> {
+    // keyof typeof X → get field names from ConstValue/Struct
+    if let TsType::TsTypeQuery(query) = type_ann {
+        if let swc_ecma_ast::TsTypeQueryExpr::TsEntityName(swc_ecma_ast::TsEntityName::Ident(
+            ident,
+        )) = &query.expr_name
+        {
+            let name = ident.sym.to_string();
+            if let Some(typedef) = reg.get(&name) {
+                if let Some(field_names) = typedef.field_names() {
+                    let enum_name = synthetic
+                        .register_string_literal_enum(&format!("{name}_key"), &field_names);
+                    return Ok(RustType::Named {
+                        name: enum_name,
+                        type_args: vec![],
+                    });
+                }
+            }
+        }
+    }
+
+    Err(anyhow!("unsupported type operator: KeyOf"))
 }
 
 /// Converts a type reference like `Array<T>`.

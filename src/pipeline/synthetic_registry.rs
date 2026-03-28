@@ -177,6 +177,55 @@ impl SyntheticTypeRegistry {
         name
     }
 
+    /// Registers a string literal enum and returns its name.
+    ///
+    /// Creates an enum with variants derived from string literal values.
+    /// Uses deduplication based on the sorted set of string values.
+    pub fn register_string_literal_enum(&mut self, name_hint: &str, values: &[String]) -> String {
+        // Deduplication key
+        let mut sorted = values.to_vec();
+        sorted.sort();
+        let signature = format!("string_enum:{}", sorted.join("|"));
+
+        if let Some(existing_name) = self.union_dedup.get(&signature) {
+            return existing_name.clone();
+        }
+
+        let base = crate::pipeline::type_converter::string_to_pascal_case(name_hint);
+        let name = if self.types.contains_key(&base) {
+            self.generate_name(&base)
+        } else {
+            base
+        };
+        let variants = values
+            .iter()
+            .map(|v| EnumVariant {
+                name: crate::pipeline::type_converter::string_to_pascal_case(v),
+                value: Some(crate::ir::EnumValue::Str(v.clone())),
+                data: None,
+                fields: vec![],
+            })
+            .collect();
+
+        let item = Item::Enum {
+            vis: Visibility::Public,
+            name: name.clone(),
+            serde_tag: None,
+            variants,
+        };
+
+        self.types.insert(
+            name.clone(),
+            SyntheticTypeDef {
+                name: name.clone(),
+                kind: SyntheticTypeKind::UnionEnum,
+                item,
+            },
+        );
+        self.union_dedup.insert(signature, name.clone());
+        name
+    }
+
     /// Generates a unique synthetic name with the given prefix.
     ///
     /// Replaces the global `SYNTHETIC_COUNTER` / `generate_synthetic_name` in
