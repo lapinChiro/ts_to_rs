@@ -2,6 +2,32 @@
 
 use crate::ir::{BinOp, ClosureBody, Expr, Param, RustType};
 
+/// Methods where `map_method_call` transforms to Rust APIs that expect `&str` / `impl Pattern`.
+///
+/// For these methods, TypeResolver's expected type `RustType::String` (from TS `string` param)
+/// would cause `.to_string()` to be added to string literal arguments, producing `String`
+/// instead of `&str`. This conflicts with Rust's `Pattern` trait requirements (stable Rust
+/// does not implement `Pattern` for `String`).
+///
+/// When the method name is in this list, `convert_call_args_with_types` suppresses
+/// the `.to_string()` coercion on string literal arguments.
+/// Methods where `map_method_call` transforms to Rust APIs that expect `&str` / `impl Pattern`,
+/// regardless of the object type. For these, string literal `.to_string()` is always suppressed.
+pub(super) const PATTERN_ARG_METHODS: &[&str] = &[
+    "includes",
+    "startsWith",
+    "endsWith",
+    "split",
+    "replace",
+    "replaceAll",
+    "join",
+];
+
+/// Methods that only need `.to_string()` suppression when called on a Regex object.
+/// (e.g., `regex.test("str")` → `Regex::is_match(&"str")`)
+/// Non-Regex calls to `test`/`exec` should NOT suppress `.to_string()`.
+pub(super) const REGEX_PATTERN_ARG_METHODS: &[&str] = &["test", "exec"];
+
 /// Builds an iterator method chain: `object.iter().cloned().method(args)`.
 ///
 /// Strips closure type annotations from `args` (iterator yields `&T`, so explicit

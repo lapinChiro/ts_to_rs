@@ -132,8 +132,16 @@ snapshot_test!(test_instanceof_builtin, collecting);
 
 snapshot_test!(test_vec_method_expected_type, builtins);
 snapshot_test!(test_external_type_struct, builtins);
-// test_instanceof_builtin_with_builtins: same fixture as test_instanceof_builtin
-// but with builtins loaded. Can't use macro (fixture name ≠ test name).
+// Tests below use same fixture as another test but with builtins loaded.
+// Can't use macro (fixture name ≠ test name).
+
+#[test]
+fn test_string_methods_with_builtins() {
+    let input = fs::read_to_string("tests/fixtures/string-methods.input.ts").unwrap();
+    let (output, _unsupported) = transpile_with_builtins(&input).unwrap();
+    insta::assert_snapshot!(output);
+}
+
 #[test]
 fn test_instanceof_builtin_with_builtins() {
     let input = fs::read_to_string("tests/fixtures/instanceof-builtin.input.ts").unwrap();

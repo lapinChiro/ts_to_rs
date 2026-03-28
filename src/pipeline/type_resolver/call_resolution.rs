@@ -10,6 +10,7 @@ use swc_ecma_ast as ast;
 
 use super::*;
 use crate::pipeline::type_resolution::Span;
+use crate::registry::select_overload;
 
 impl<'a> TypeResolver<'a> {
     pub(super) fn resolve_call_expr(&mut self, call: &ast::CallExpr) -> ResolvedType {
@@ -52,7 +53,6 @@ impl<'a> TypeResolver<'a> {
                 let obj_rust_type = match &obj_type {
                     ResolvedType::Known(ty) => ty,
                     ResolvedType::Unknown => {
-                        // Still resolve arguments even if callee type is unknown
                         for arg in &call.args {
                             self.resolve_expr(&arg.expr);
                         }
@@ -68,7 +68,13 @@ impl<'a> TypeResolver<'a> {
                         return ResolvedType::Unknown;
                     }
                 };
-                // Collect resolved arg types for overload resolution
+                // Resolve arguments BEFORE collecting their types for overload resolution.
+                // set_call_arg_expected_types (called at line 22) has already set expected
+                // types on args, so resolve_expr will use them. Then collect_resolved_arg_types
+                // can provide actual types for select_overload Stage 4.
+                for arg in &call.args {
+                    self.resolve_expr(&arg.expr);
+                }
                 let arg_types = self.collect_resolved_arg_types(&call.args);
                 self.resolve_method_return_type(
                     obj_rust_type,
@@ -89,9 +95,13 @@ impl<'a> TypeResolver<'a> {
             }
         };
 
-        // Resolve all argument expressions to register their types in expr_types.
-        for arg in &call.args {
-            self.resolve_expr(&arg.expr);
+        // Resolve argument expressions (Member callee already resolves above;
+        // resolve_expr is idempotent for non-arrow/fn exprs, but we skip to
+        // avoid re-visiting arrow/fn bodies).
+        if !matches!(callee, ast::Expr::Member(_)) {
+            for arg in &call.args {
+                self.resolve_expr(&arg.expr);
+            }
         }
 
         result
@@ -219,38 +229,13 @@ impl<'a> TypeResolver<'a> {
             .collect()
     }
 
-    /// Looks up method signatures from the object type's definition.
-    ///
-    /// For `Vec<T>`, maps to the `Array<T>` definition in TypeRegistry so that
-    /// TypeScript's Array methods (push, map, filter, etc.) are available.
+    /// Looks up method signatures — delegates to `TypeRegistry::lookup_method_sigs`.
     fn lookup_method_sigs(
         &self,
         obj_type: &RustType,
         method_name: &str,
     ) -> Option<Vec<crate::registry::MethodSignature>> {
-        // Vec<T> → Array<T>: TypeScript Array methods apply to Rust Vec
-        if let RustType::Vec(inner) = obj_type {
-            let type_def = self
-                .registry
-                .instantiate("Array", &[inner.as_ref().clone()]);
-            return match &type_def {
-                Some(TypeDef::Struct { methods, .. }) => methods.get(method_name).cloned(),
-                _ => None,
-            };
-        }
-
-        let (type_name, type_args) = extract_type_name_for_registry(obj_type)?;
-
-        let type_def = if type_args.is_empty() {
-            self.registry.get(type_name).cloned()
-        } else {
-            self.registry.instantiate(type_name, type_args)
-        };
-
-        match &type_def {
-            Some(TypeDef::Struct { methods, .. }) => methods.get(method_name).cloned(),
-            _ => None,
-        }
+        self.registry.lookup_method_sigs(obj_type, method_name)
     }
 
     /// Looks up method parameter types and rest flag from the object type's definition.

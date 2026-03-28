@@ -205,9 +205,6 @@ fn test_all_fixtures_compile_with_builtins() {
         // Struct definitions are generated but method calls (e.g., .toString()) fail.
         "instanceof-builtin",
         "external-type-struct",
-        // string-methods: builtins ありで String の Pattern trait 不一致。
-        // builtins なしでは問題なし。ビルトイン型ロードが変換結果を変える副作用。
-        "string-methods",
     ];
 
     let mut entries: Vec<_> = fs::read_dir(fixture_dir)

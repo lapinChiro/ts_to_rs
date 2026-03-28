@@ -1199,3 +1199,60 @@ fn test_vec_filter_callback_with_real_builtins() {
         "filter callback should have Fn type as expected from real Array.filter signature"
     );
 }
+
+// I-290: Member callee arg resolution order (T5)
+
+#[test]
+fn test_member_callee_args_resolved_before_overload_selection() {
+    // When a method call has overloads differing only by arg type (not count),
+    // the correct overload should be selected based on the resolved arg type.
+    let mut reg = TypeRegistry::new();
+    let mut methods = std::collections::HashMap::new();
+    methods.insert(
+        "process".to_string(),
+        vec![
+            MethodSignature {
+                params: vec![("x".to_string(), RustType::String)],
+                return_type: Some(RustType::String),
+                has_rest: false,
+            },
+            MethodSignature {
+                params: vec![("x".to_string(), RustType::F64)],
+                return_type: Some(RustType::F64),
+                has_rest: false,
+            },
+        ],
+    );
+    reg.register(
+        "Processor".to_string(),
+        TypeDef::Struct {
+            type_params: vec![],
+            fields: vec![],
+            methods,
+            constructor: None,
+            extends: vec![],
+            is_interface: true,
+        },
+    );
+
+    let res = resolve_with_reg(
+        r#"
+        function test(p: Processor) {
+            const result = p.process(42);
+        }
+        "#,
+        &reg,
+    );
+
+    // The call p.process(42) should resolve to the F64 overload (arg type = F64).
+    // Before the fix, collect_resolved_arg_types was called before args were resolved,
+    // so Stage 4 of select_overload was ineffective.
+    let has_f64_expr = res
+        .expr_types
+        .values()
+        .any(|t| matches!(t, ResolvedType::Known(RustType::F64)));
+    assert!(
+        has_f64_expr,
+        "p.process(42) should resolve to F64 overload (Stage 4 arg type matching)"
+    );
+}

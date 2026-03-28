@@ -14,8 +14,13 @@ When starting a new feature or bug fix.
 
 Implement in the following order:
 
-1. **Test design**: Before writing test code, enumerate verification items
-   - List normal cases, error cases, and boundary values (MECE)
+1. **Test design**: Before writing test code, enumerate verification items using systematic techniques
+   - Apply techniques from `.claude/rules/testing.md` "Test Case Design Techniques" section:
+     1. **Equivalence Partitioning**: Identify input partitions (AST variants, type categories, operator groups). One test per partition minimum
+     2. **Boundary Values**: Empty/single/many collections, nesting depth 0/1/2+, numeric extremes
+     3. **Branch Coverage (C1)**: Count decision points in the target function. Ensure every if/else, match arm, and early return has a test
+     4. **Decision Table**: For functions with 2+ independent conditions, enumerate combinations
+   - List normal cases, error cases, and boundary values — verify MECE by checking against the partitions identified above
    - For each item, define input and expected output/behavior
    - Express this in test names: `test_<target>_<condition>_<expected_result>`
    - **Determine E2E test necessity** (see "E2E Test Decision Criteria" below)

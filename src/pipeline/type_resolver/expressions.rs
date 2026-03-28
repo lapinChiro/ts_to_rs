@@ -9,6 +9,7 @@ use swc_ecma_ast as ast;
 use super::*;
 use crate::pipeline::type_converter::convert_ts_type;
 use crate::pipeline::type_resolution::Span;
+use crate::registry::select_overload;
 use crate::transformer::type_position::{wrap_trait_for_position, TypePosition};
 
 impl<'a> TypeResolver<'a> {
@@ -588,46 +589,16 @@ impl<'a> TypeResolver<'a> {
             _ => return ResolvedType::Unknown,
         };
 
-        // Special case: .length on String/Vec
+        // Special case: .length on String/Vec (hardcoded for performance — avoids registry lookup)
         if field_name == "length" && matches!(obj_rust_type, RustType::String | RustType::Vec(_)) {
             return ResolvedType::Known(RustType::F64);
         }
 
-        // Vec<T> → Array<T>: TypeScript Array fields/methods apply to Rust Vec
-        if let RustType::Vec(inner) = obj_rust_type {
-            let type_def = self
-                .registry
-                .instantiate("Array", &[inner.as_ref().clone()]);
-            return match &type_def {
-                Some(TypeDef::Struct { fields, .. }) => fields
-                    .iter()
-                    .find(|(name, _)| name == &field_name)
-                    .map(|(_, ty)| ResolvedType::Known(ty.clone()))
-                    .unwrap_or(ResolvedType::Unknown),
-                _ => ResolvedType::Unknown,
-            };
-        }
-
-        // Lookup in TypeRegistry
-        let (type_name, type_args) = match extract_type_name_for_registry(obj_rust_type) {
-            Some(pair) => pair,
-            None => return ResolvedType::Unknown,
-        };
-
-        let type_def = if type_args.is_empty() {
-            self.registry.get(type_name).cloned()
-        } else {
-            self.registry.instantiate(type_name, type_args)
-        };
-
-        match &type_def {
-            Some(TypeDef::Struct { fields, .. }) => fields
-                .iter()
-                .find(|(name, _)| name == &field_name)
-                .map(|(_, ty)| ResolvedType::Known(ty.clone()))
-                .unwrap_or(ResolvedType::Unknown),
-            _ => ResolvedType::Unknown,
-        }
+        // Delegate to TypeRegistry (handles Vec→Array, String, Named, DynTrait, etc.)
+        self.registry
+            .lookup_field_type(obj_rust_type, &field_name)
+            .map(ResolvedType::Known)
+            .unwrap_or(ResolvedType::Unknown)
     }
 
     fn resolve_new_expr(&mut self, new_expr: &ast::NewExpr) -> ResolvedType {

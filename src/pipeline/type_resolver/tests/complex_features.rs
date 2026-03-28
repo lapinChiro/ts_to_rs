@@ -370,7 +370,7 @@ fn test_resolve_call_signature_type_alias_sets_return_expected_type() {
 #[test]
 fn test_select_overload_single_sig_returns_it() {
     let sigs = vec![make_sig(vec![], Some(RustType::String))];
-    let selected = super::select_overload(&sigs, 0, &[]);
+    let selected = crate::registry::select_overload(&sigs, 0, &[]);
     assert_eq!(selected.return_type, Some(RustType::String));
     assert_eq!(selected.params.len(), 0);
 }
@@ -383,7 +383,7 @@ fn test_select_overload_all_same_return_skips_to_first() {
         make_sig(vec![RustType::F64, RustType::Bool], Some(RustType::String)),
     ];
     // All return types identical → returns first signature
-    let selected = super::select_overload(&sigs, 1, &[Some(RustType::F64)]);
+    let selected = crate::registry::select_overload(&sigs, 1, &[Some(RustType::F64)]);
     assert_eq!(selected.return_type, Some(RustType::String));
     // First signature is selected (0-arg)
     assert_eq!(selected.params.len(), 0);
@@ -396,11 +396,11 @@ fn test_select_overload_arg_count_selects_match() {
         make_sig(vec![RustType::F64], Some(RustType::F64)),
     ];
     // 0 args → sig[0]
-    let selected = super::select_overload(&sigs, 0, &[]);
+    let selected = crate::registry::select_overload(&sigs, 0, &[]);
     assert_eq!(selected.return_type, Some(RustType::String));
     assert_eq!(selected.params.len(), 0);
     // 1 arg → sig[1]
-    let selected = super::select_overload(&sigs, 1, &[None]);
+    let selected = crate::registry::select_overload(&sigs, 1, &[None]);
     assert_eq!(selected.return_type, Some(RustType::F64));
     assert_eq!(selected.params.len(), 1);
 }
@@ -412,7 +412,7 @@ fn test_select_overload_arg_type_selects_compatible() {
         make_sig(vec![RustType::F64], Some(RustType::F64)),
     ];
     // arg_type=F64 → sig[1]
-    let selected = super::select_overload(&sigs, 1, &[Some(RustType::F64)]);
+    let selected = crate::registry::select_overload(&sigs, 1, &[Some(RustType::F64)]);
     assert_eq!(selected.return_type, Some(RustType::F64));
     assert_eq!(selected.params[0].1, RustType::F64);
 }
@@ -424,7 +424,7 @@ fn test_select_overload_no_match_falls_back_to_first() {
         make_sig(vec![RustType::F64], Some(RustType::F64)),
     ];
     // 3 args → no match → fallback to first
-    let selected = super::select_overload(&sigs, 3, &[None, None, None]);
+    let selected = crate::registry::select_overload(&sigs, 3, &[None, None, None]);
     assert_eq!(selected.return_type, Some(RustType::String));
     assert_eq!(selected.params.len(), 0);
 }
@@ -436,7 +436,7 @@ fn test_select_overload_arg_types_empty_uses_arg_count_only() {
         make_sig(vec![RustType::F64], Some(RustType::F64)),
     ];
     // Same arg_count, empty arg_types → Stage 4 skipped → first of count-matched (sig[0])
-    let selected = super::select_overload(&sigs, 1, &[]);
+    let selected = crate::registry::select_overload(&sigs, 1, &[]);
     assert_eq!(selected.params[0].1, RustType::String);
 }
 
@@ -447,7 +447,7 @@ fn test_select_overload_params_and_return_from_same_sig() {
         make_sig(vec![RustType::String], Some(RustType::String)),
         make_sig(vec![RustType::F64], Some(RustType::F64)),
     ];
-    let selected = super::select_overload(&sigs, 1, &[Some(RustType::F64)]);
+    let selected = crate::registry::select_overload(&sigs, 1, &[Some(RustType::F64)]);
     // Both params and return_type should be from sig[1] (F64 variant)
     assert_eq!(selected.params[0].1, RustType::F64);
     assert_eq!(selected.return_type, Some(RustType::F64));

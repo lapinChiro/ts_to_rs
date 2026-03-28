@@ -11,7 +11,7 @@
 | テスト数 | 1429 |
 
 | 1000行超ファイル | 0 |
-| コンパイルテストスキップ | 10 件（builtins なし） / 10 件（builtins あり） |
+| コンパイルテストスキップ | 10 件（builtins なし） / 9 件（builtins あり） |
 
 ### エラーカテゴリ内訳（87 件、2026-03-29 実測）
 
@@ -33,34 +33,25 @@
 - **I-276**: MethodSignature.has_rest 追加 — 全収集パスで rest パラメータ型を保持
 - **I-286 Phase A**: sink-source expected type 伝播 — 4件削減（91→87）。Vec→Array マッピング、代入 LHS→RHS 伝播、`as T` 逆伝播、三項演算子 union 化
 - **B-0a (I-287+I-288+I-289)**: テスト基盤整備。snapshot_test! マクロ全テスト移行 + resolve_with_builtins ヘルパー + ビルトインありコンパイルテスト追加
+- **B-0b (I-290+I-292)**: メソッド呼び出しロジック統一。select_overload/lookup_method_sigs を TypeRegistry に移動。Pattern trait メソッドの .to_string() 抑制。TypeResolver 引数解決順序修正
 
 ## 次の開発
 
-### 設計原理
-
-**割れ窓と基盤欠陥を先に修正する。** 機能開発（Phase B）の前に、放置すると影響範囲が拡大する設計問題とテスト基盤の欠陥を解消する。
-
----
-
-### Phase B-0: 基盤修正（Phase B の前提）
-
-Phase B で型変換を改善しても、テスト基盤が不確実なまま品質確認ができない。また、TypeResolver と Transformer のオーバーロード選択二重実装を放置すると、Phase B 以降の全メソッド関連改善で二重修正が必要になる。
-
-#### B-0b: オーバーロード選択統一（I-290）
+#### B-0c: 低カバレッジ7ファイルのテスト観点補完（81観点）（📋 PRD: `backlog/I-test-coverage-81-perspectives.md`）
 
 | 問題 | 影響 |
 |------|------|
-| Transformer が独自の簡易オーバーロード選択を持つ | TypeResolver の `select_overload` 改善が Transformer に波及しない |
-| Transformer が Vec/String のメソッドシグネチャを取得不能 | 配列・文字列メソッドの変換品質が低いまま |
-| TypeResolver の引数解決順序が不正 | `select_overload` Stage 4 が常に無効 |
+| CI カバレッジ 88.61% < 閾値 89% | CI が落ちている |
+| 低カバレッジ7ファイル全てにユニットテストが完全欠如 | エラーパス・分岐の未検証、リファクタリング耐性低下 |
+| サイレント意味変更リスクのある分岐が未テスト | `extract_narrowing_guard` キーワード除外、DU tag field 除外等 |
 
-放置すると Phase B 以降の全メソッド関連改善（I-261, I-270c, I-286c S3 等）で二重修正が必要。
+テストケース設計技法（同値分割、分岐網羅C1、デシジョンテーブル、ASTバリアント網羅）に基づく体系的レビューで特定した81観点。T1〜T7は並列実行可能。
 
 ---
 
 ### Phase B: 型変換範囲の拡張
 
-Phase B-0 でテスト基盤とオーバーロード統一が完了した状態で実施。
+Phase B-0（テスト基盤 + メソッドロジック統一）が完了した状態で実施。
 
 #### B-1: I-221 — intersection メンバー型の網羅的サポート（📋 PRD作成済み）
 

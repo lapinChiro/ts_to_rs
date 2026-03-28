@@ -36,6 +36,74 @@ pub struct MethodSignature {
     pub has_rest: bool,
 }
 
+/// Selects the best matching overload from a set of method signatures.
+///
+/// Returns the full `MethodSignature` so callers can extract both parameter types
+/// and return type from the **same** signature, avoiding inconsistency.
+///
+/// Resolution strategy (5 stages):
+/// 1. Single signature → use it
+/// 2. All signatures have the same return type → use first (selection is irrelevant for return type)
+/// 3. Filter by argument count → if exactly one matches, use it
+/// 4. Filter by argument type compatibility → if exactly one matches, use it
+/// 5. Fallback: first signature
+pub fn select_overload<'a>(
+    sigs: &'a [MethodSignature],
+    arg_count: usize,
+    arg_types: &[Option<RustType>],
+) -> &'a MethodSignature {
+    debug_assert!(
+        !sigs.is_empty(),
+        "select_overload called with empty signatures"
+    );
+
+    // Stage 1: single signature
+    if sigs.len() == 1 {
+        return &sigs[0];
+    }
+
+    // Stage 2: all return types identical — selection doesn't affect return type
+    let first_ret = &sigs[0].return_type;
+    if sigs.iter().all(|s| &s.return_type == first_ret) {
+        return &sigs[0];
+    }
+
+    // Stage 3: filter by argument count
+    let by_count: Vec<&MethodSignature> = sigs
+        .iter()
+        .filter(|sig| sig.params.len() == arg_count)
+        .collect();
+    if by_count.len() == 1 {
+        return by_count[0];
+    }
+
+    // Stage 4: filter by argument type compatibility
+    let candidates: Vec<&MethodSignature> = if by_count.is_empty() {
+        sigs.iter().collect()
+    } else {
+        by_count
+    };
+    if arg_types.iter().any(|t| t.is_some()) {
+        let compatible: Vec<&&MethodSignature> = candidates
+            .iter()
+            .filter(|sig| {
+                sig.params.iter().zip(arg_types.iter()).all(
+                    |((_, param_ty), arg_ty)| match arg_ty {
+                        Some(at) => at == param_ty,
+                        None => true,
+                    },
+                )
+            })
+            .collect();
+        if compatible.len() == 1 {
+            return compatible[0];
+        }
+    }
+
+    // Stage 5: fallback to first signature
+    &sigs[0]
+}
+
 /// `ConstValue` のオブジェクトフィールド。
 #[derive(Debug, Clone, PartialEq)]
 pub struct ConstField {
@@ -381,6 +449,76 @@ impl TypeRegistry {
         }
         for name in &other.external_types {
             self.external_types.insert(name.clone());
+        }
+    }
+
+    /// Looks up method signatures from the object type's definition.
+    ///
+    /// Handles `Vec<T>` → `Array<T>` mapping so that TypeScript Array methods
+    /// (push, map, filter, etc.) are available on Rust Vec types.
+    /// Also handles `String` → `String` interface and generic instantiation.
+    pub fn lookup_method_sigs(
+        &self,
+        obj_type: &RustType,
+        method_name: &str,
+    ) -> Option<Vec<MethodSignature>> {
+        // Vec<T> → Array<T>
+        if let RustType::Vec(inner) = obj_type {
+            let type_def = self.instantiate("Array", &[inner.as_ref().clone()]);
+            return match &type_def {
+                Some(TypeDef::Struct { methods, .. }) => methods.get(method_name).cloned(),
+                _ => None,
+            };
+        }
+
+        self.resolve_type_def(obj_type).and_then(|def| match &def {
+            TypeDef::Struct { methods, .. } => methods.get(method_name).cloned(),
+            _ => None,
+        })
+    }
+
+    /// Looks up a field type from the object type's definition.
+    ///
+    /// Handles `Vec<T>` → `Array<T>` mapping for field access (e.g., `arr.length`).
+    pub fn lookup_field_type(&self, obj_type: &RustType, field_name: &str) -> Option<RustType> {
+        self.resolve_type_def(obj_type).and_then(|def| match &def {
+            TypeDef::Struct { fields, .. } => fields
+                .iter()
+                .find(|(name, _)| name == field_name)
+                .map(|(_, ty)| ty.clone()),
+            _ => None,
+        })
+    }
+
+    /// Resolves a `RustType` to its `TypeDef`, handling Vec→Array and generic instantiation.
+    fn resolve_type_def(&self, obj_type: &RustType) -> Option<TypeDef> {
+        match obj_type {
+            RustType::Vec(inner) => self.instantiate("Array", &[inner.as_ref().clone()]),
+            RustType::String => self.get("String").cloned(),
+            RustType::Named { name, type_args }
+                if name == "Box"
+                    && type_args.len() == 1
+                    && matches!(&type_args[0], RustType::DynTrait(_)) =>
+            {
+                if let RustType::DynTrait(trait_name) = &type_args[0] {
+                    self.get(trait_name).cloned()
+                } else {
+                    None
+                }
+            }
+            RustType::Named { name, type_args } => {
+                if type_args.is_empty() {
+                    self.get(name).cloned()
+                } else {
+                    self.instantiate(name, type_args)
+                }
+            }
+            RustType::Ref(inner) => match inner.as_ref() {
+                RustType::DynTrait(name) => self.get(name).cloned(),
+                _ => None,
+            },
+            RustType::DynTrait(name) => self.get(name).cloned(),
+            _ => None,
         }
     }
 }

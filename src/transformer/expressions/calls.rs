@@ -107,29 +107,24 @@ impl<'a> Transformer<'a> {
 
                     // Cat A: method receiver — converted before method resolution
                     let object = self.convert_expr(&member.obj)?;
-                    // Look up method parameter types from the object's type,
-                    // selecting the overload that matches the argument count.
+                    // Look up method signature via unified TypeRegistry method
+                    // (handles Vec→Array, String, Named, DynTrait + select_overload)
                     let method_sig = self.get_expr_type(&member.obj).and_then(|ty| {
-                        if let RustType::Named { name, .. } = ty {
-                            if let Some(TypeDef::Struct { methods, .. }) = self.reg().get(name) {
-                                let sigs = methods.get(&method)?;
-                                let arg_count = call.args.len();
-                                let sig = sigs
-                                    .iter()
-                                    .find(|s| s.params.len() == arg_count)
-                                    .or_else(|| sigs.first())?;
-                                return Some(sig.clone());
-                            }
-                        }
-                        None
+                        let sigs = self.reg().lookup_method_sigs(ty, &method)?;
+                        let sig = crate::registry::select_overload(&sigs, call.args.len(), &[]);
+                        Some(sig.clone())
                     });
                     let method_params = method_sig.as_ref().map(|sig| sig.params.as_slice());
-                    let method_has_rest = method_sig.as_ref().is_some_and(|sig| sig.has_rest);
-                    let args = self.convert_call_args_with_types(
-                        &call.args,
-                        method_params,
-                        method_has_rest,
-                    )?;
+                    // For methods that map_method_call transforms to Rust APIs expecting
+                    // &str / impl Pattern, suppress .to_string() on string literal args.
+                    let suppress = super::methods::PATTERN_ARG_METHODS.contains(&method.as_str())
+                        || (super::methods::REGEX_PATTERN_ARG_METHODS.contains(&method.as_str())
+                            && matches!(&object, Expr::Regex { .. }));
+                    let args = if suppress {
+                        self.convert_call_args_suppress_string(&call.args, method_params, false)?
+                    } else {
+                        self.convert_call_args_with_types(&call.args, method_params, false)?
+                    };
                     let method_call = map_method_call(object, &method, args);
                     Ok(method_call)
                 }
@@ -454,11 +449,35 @@ impl<'a> Transformer<'a> {
     ///
     /// When `has_rest` is true, the last parameter is a rest parameter (`Vec<T>`).
     /// Extra arguments beyond the regular parameters are packed into a `vec![...]`.
+    ///
+    /// When `suppress_string_coercion` is true, string literal arguments are NOT wrapped
+    /// with `.to_string()` even if the expected type is `String`. This is needed for methods
+    /// that `map_method_call` transforms to Rust APIs expecting `&str` / `impl Pattern`.
     pub(crate) fn convert_call_args_with_types(
         &mut self,
         args: &[ast::ExprOrSpread],
         param_types: Option<&[(String, RustType)]>,
         has_rest: bool,
+    ) -> Result<Vec<Expr>> {
+        self.convert_call_args_inner(args, param_types, has_rest, false)
+    }
+
+    /// Like `convert_call_args_with_types` but suppresses `.to_string()` on string literals.
+    pub(crate) fn convert_call_args_suppress_string(
+        &mut self,
+        args: &[ast::ExprOrSpread],
+        param_types: Option<&[(String, RustType)]>,
+        has_rest: bool,
+    ) -> Result<Vec<Expr>> {
+        self.convert_call_args_inner(args, param_types, has_rest, true)
+    }
+
+    fn convert_call_args_inner(
+        &mut self,
+        args: &[ast::ExprOrSpread],
+        param_types: Option<&[(String, RustType)]>,
+        has_rest: bool,
+        suppress_string_coercion: bool,
     ) -> Result<Vec<Expr>> {
         let regular_param_count = if has_rest {
             param_types.map(|p| p.len().saturating_sub(1)).unwrap_or(0)
@@ -472,6 +491,23 @@ impl<'a> Transformer<'a> {
         for (i, arg) in args[..regular_args_count].iter().enumerate() {
             let param_ty = param_types.and_then(|params| params.get(i).map(|(_, ty)| ty));
             let mut expr = self.convert_expr(&arg.expr)?;
+            // Strip .to_string() from string literals when suppressed
+            // (TypeResolver sets expected=String from TS signatures, but Rust API needs &str)
+            if suppress_string_coercion {
+                expr = match expr {
+                    Expr::MethodCall {
+                        object,
+                        ref method,
+                        ref args,
+                    } if method == "to_string"
+                        && args.is_empty()
+                        && matches!(object.as_ref(), Expr::StringLit(_)) =>
+                    {
+                        *object
+                    }
+                    other => other,
+                };
+            }
             if matches!(param_ty, Some(RustType::Fn { .. })) && matches!(&expr, Expr::Ident(_)) {
                 expr = Expr::FnCall {
                     name: "Box::new".to_string(),
