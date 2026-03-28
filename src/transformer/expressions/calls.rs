@@ -124,8 +124,12 @@ impl<'a> Transformer<'a> {
                         None
                     });
                     let method_params = method_sig.as_ref().map(|sig| sig.params.as_slice());
-                    let args =
-                        self.convert_call_args_with_types(&call.args, method_params, false)?;
+                    let method_has_rest = method_sig.as_ref().is_some_and(|sig| sig.has_rest);
+                    let args = self.convert_call_args_with_types(
+                        &call.args,
+                        method_params,
+                        method_has_rest,
+                    )?;
                     let method_call = map_method_call(object, &method, args);
                     Ok(method_call)
                 }

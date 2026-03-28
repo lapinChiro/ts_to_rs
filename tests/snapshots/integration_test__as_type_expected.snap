@@ -1,0 +1,17 @@
+---
+source: tests/integration_test.rs
+expression: output
+---
+#[derive(Debug, Clone, PartialEq)]
+struct Point {
+    x: f64,
+    y: f64,
+}
+
+fn createPoint() -> Point {
+    Point { x: 10.0, y: 20.0 }
+}
+
+fn clonePoint(src: Point) -> Point {
+    Point { x: src.x, y: src.y }
+}

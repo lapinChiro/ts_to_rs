@@ -427,9 +427,11 @@ fn convert_external_signature(
         .return_type
         .as_ref()
         .map(|rt| convert_external_type(rt, synthetic));
+    let has_rest = sig.params.iter().any(|p| p.rest);
     MethodSignature {
         params,
         return_type,
+        has_rest,
     }
 }
 

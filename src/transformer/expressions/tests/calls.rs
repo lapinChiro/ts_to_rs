@@ -584,6 +584,7 @@ fn test_convert_method_call_string_arg_gets_to_string_with_registry() {
         vec![MethodSignature {
             params: vec![("name".to_string(), RustType::String)],
             return_type: None,
+            has_rest: false,
         }],
     );
     reg.register(
@@ -679,6 +680,7 @@ fn test_convert_opt_chain_method_call_propagates_param_types() {
         vec![MethodSignature {
             params: vec![("name".to_string(), RustType::String)],
             return_type: None,
+            has_rest: false,
         }],
     );
     reg.register(

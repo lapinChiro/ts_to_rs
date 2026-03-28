@@ -442,6 +442,7 @@ fn test_convert_ts_type_typeof_struct_with_constructor_returns_fn_type() {
                     ),
                 ],
                 return_type: None,
+                has_rest: false,
             }]),
             extends: vec![],
             is_interface: false,

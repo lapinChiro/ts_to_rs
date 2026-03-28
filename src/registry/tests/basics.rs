@@ -132,6 +132,7 @@ fn test_merge_preserves_builtin_constructor_when_source_has_none() {
             ),
         ],
         return_type: None,
+        has_rest: false,
     };
     builtin_reg.register_external(
         "Response".to_string(),
@@ -195,6 +196,7 @@ fn test_merge_source_constructor_overrides_builtin() {
             constructor: Some(vec![MethodSignature {
                 params: vec![("old".to_string(), RustType::String)],
                 return_type: None,
+                has_rest: false,
             }]),
             extends: vec![],
             is_interface: false,
@@ -211,6 +213,7 @@ fn test_merge_source_constructor_overrides_builtin() {
             constructor: Some(vec![MethodSignature {
                 params: vec![("new_param".to_string(), RustType::F64)],
                 return_type: None,
+                has_rest: false,
             }]),
             extends: vec![],
             is_interface: false,
@@ -379,6 +382,7 @@ fn test_is_trait_type_methods_only_returns_true() {
         vec![MethodSignature {
             params: vec![("msg".to_string(), RustType::String)],
             return_type: None,
+            has_rest: false,
         }],
     );
     reg.register(
@@ -412,6 +416,7 @@ fn test_is_trait_type_mixed_returns_true() {
         vec![MethodSignature {
             params: vec![],
             return_type: None,
+            has_rest: false,
         }],
     );
     reg.register(

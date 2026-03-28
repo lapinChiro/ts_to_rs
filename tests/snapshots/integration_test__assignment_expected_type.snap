@@ -1,0 +1,20 @@
+---
+source: tests/integration_test.rs
+expression: output
+---
+#[derive(Debug, Clone, PartialEq)]
+struct Config {
+    host: String,
+    port: f64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct AppState {
+    config: Config,
+    name: String,
+}
+
+fn updateConfig(state: AppState) {
+    let mut mutableState = state;
+    mutableState.config = Config { host: "localhost".to_string(), port: 8080.0 };
+}

@@ -338,9 +338,16 @@ fn collect_class_info(
                         }
                     })
                     .collect();
+                let has_rest = ctor.params.iter().any(|p| {
+                    matches!(
+                        p,
+                        ast::ParamOrTsParamProp::Param(param) if matches!(&param.pat, ast::Pat::Rest(_))
+                    )
+                });
                 constructor_sigs.push(MethodSignature {
                     params,
                     return_type: None,
+                    has_rest,
                 });
             }
             ast::ClassMember::Method(method) => {
@@ -355,15 +362,31 @@ fn collect_class_info(
                     .function
                     .params
                     .iter()
-                    .filter_map(|param| {
-                        let ident = match &param.pat {
-                            ast::Pat::Ident(ident) => ident,
-                            _ => return None,
-                        };
-                        let ty = ident.type_ann.as_ref().and_then(|ann| {
-                            convert_ts_type(&ann.type_ann, synthetic, lookup).ok()
-                        })?;
-                        Some((ident.id.sym.to_string(), ty))
+                    .filter_map(|param| match &param.pat {
+                        ast::Pat::Ident(ident) => {
+                            let ty = ident.type_ann.as_ref().and_then(|ann| {
+                                convert_ts_type(&ann.type_ann, synthetic, lookup).ok()
+                            })?;
+                            Some((ident.id.sym.to_string(), ty))
+                        }
+                        ast::Pat::Rest(rest) => {
+                            let name = match rest.arg.as_ref() {
+                                ast::Pat::Ident(ident) => ident.id.sym.to_string(),
+                                _ => "rest".to_string(),
+                            };
+                            let type_ann = rest.type_ann.as_ref().or_else(|| {
+                                if let ast::Pat::Ident(ident) = rest.arg.as_ref() {
+                                    ident.type_ann.as_ref()
+                                } else {
+                                    None
+                                }
+                            });
+                            let ty = type_ann.and_then(|ann| {
+                                convert_ts_type(&ann.type_ann, synthetic, lookup).ok()
+                            })?;
+                            Some((name, ty))
+                        }
+                        _ => None,
                     })
                     .collect();
                 let return_type = method
@@ -371,9 +394,15 @@ fn collect_class_info(
                     .return_type
                     .as_ref()
                     .and_then(|ann| convert_ts_type(&ann.type_ann, synthetic, lookup).ok());
+                let has_rest = method
+                    .function
+                    .params
+                    .iter()
+                    .any(|param| matches!(&param.pat, ast::Pat::Rest(_)));
                 methods.entry(name).or_default().push(MethodSignature {
                     params,
                     return_type,
+                    has_rest,
                 });
             }
             _ => {}

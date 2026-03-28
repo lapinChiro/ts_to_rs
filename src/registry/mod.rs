@@ -25,13 +25,15 @@ use crate::pipeline::SyntheticTypeRegistry;
 
 pub use collection::collect_type_params;
 
-/// メソッドシグネチャ（パラメータ + 戻り値型）。
+/// メソッドシグネチャ（パラメータ + 戻り値型 + rest パラメータ情報）。
 #[derive(Debug, Clone, PartialEq)]
 pub struct MethodSignature {
     /// パラメータ名と型のペア
     pub params: Vec<(String, RustType)>,
     /// 戻り値型（アノテーションなしの場合は None）
     pub return_type: Option<RustType>,
+    /// 最後のパラメータが rest パラメータか（`...args: T[]` パターン）
+    pub has_rest: bool,
 }
 
 /// `ConstValue` のオブジェクトフィールド。
@@ -231,6 +233,7 @@ impl TypeDef {
                                 .map(|(n, ty)| (n.clone(), ty.substitute(bindings)))
                                 .collect(),
                             return_type: sig.return_type.as_ref().map(|ty| ty.substitute(bindings)),
+                            has_rest: sig.has_rest,
                         })
                         .collect()
                 };

@@ -44,26 +44,70 @@ impl<'a> TypeResolver<'a> {
             ast::Expr::New(new_expr) => self.resolve_new_expr(new_expr),
             ast::Expr::Paren(paren) => self.resolve_expr(&paren.expr),
             ast::Expr::TsAs(ts_as) => {
+                // Propagate `as T` type to the inner expression as expected type.
+                // This allows `{...x} as SomeType` to resolve the object literal
+                // with SomeType as expected, enabling struct name resolution.
+                let as_type = convert_ts_type(&ts_as.type_ann, self.synthetic, self.registry).ok();
+                if let Some(ref ty) = as_type {
+                    let expr_span = Span::from_swc(ts_as.expr.span());
+                    self.result.expected_types.insert(expr_span, ty.clone());
+                    self.propagate_expected(&ts_as.expr, ty);
+                }
                 // Resolve inner expression to register its type and trigger nested
                 // call resolution (e.g., `foo(bar(x) as T)` needs bar's args typed).
                 self.resolve_expr(&ts_as.expr);
-                convert_ts_type(&ts_as.type_ann, self.synthetic, self.registry)
-                    .map(ResolvedType::Known)
+                as_type
+                    .map(|ty| {
+                        let wrapped =
+                            wrap_trait_for_position(ty, TypePosition::Value, self.registry);
+                        ResolvedType::Known(wrapped)
+                    })
                     .unwrap_or(ResolvedType::Unknown)
             }
             ast::Expr::Array(arr) => self.resolve_array_expr(arr),
             ast::Expr::Arrow(arrow) => self.resolve_arrow_expr(arrow),
             ast::Expr::Fn(fn_expr) => self.resolve_fn_expr(fn_expr),
             ast::Expr::Assign(assign) => {
-                // Mark left side as mutable
-                if let Some(ast::SimpleAssignTarget::Ident(ident)) = assign.left.as_simple() {
-                    self.mark_var_mutable(ident.id.sym.as_ref());
-                    // Set LHS type as expected on RHS and propagate
-                    let lhs_type = self.lookup_var(ident.id.sym.as_ref());
-                    if let ResolvedType::Known(ref ty) = lhs_type {
-                        let rhs_span = Span::from_swc(assign.right.span());
-                        self.result.expected_types.insert(rhs_span, ty.clone());
-                        self.propagate_expected(&assign.right, ty);
+                // Propagate LHS type as expected on RHS (only for plain `=`, not `+=`/`-=` etc.)
+                if assign.op == ast::AssignOp::Assign {
+                    if let Some(simple) = assign.left.as_simple() {
+                        let lhs_type = match simple {
+                            ast::SimpleAssignTarget::Ident(ident) => {
+                                self.mark_var_mutable(ident.id.sym.as_ref());
+                                self.lookup_var(ident.id.sym.as_ref())
+                            }
+                            ast::SimpleAssignTarget::Member(member) => {
+                                // Mark the object variable as mutable
+                                if let ast::Expr::Ident(ident) = member.obj.as_ref() {
+                                    self.mark_var_mutable(ident.sym.as_ref());
+                                }
+                                let obj_type = self.resolve_expr(&member.obj);
+                                if let ResolvedType::Known(ref ty) = obj_type {
+                                    self.resolve_member_type(ty, &member.prop)
+                                } else {
+                                    ResolvedType::Unknown
+                                }
+                            }
+                            _ => ResolvedType::Unknown,
+                        };
+                        if let ResolvedType::Known(ref ty) = lhs_type {
+                            let rhs_span = Span::from_swc(assign.right.span());
+                            self.result.expected_types.insert(rhs_span, ty.clone());
+                            self.propagate_expected(&assign.right, ty);
+                        }
+                    }
+                } else {
+                    // Compound assignments (+=, -=, etc.) still need mutability marking
+                    match assign.left.as_simple() {
+                        Some(ast::SimpleAssignTarget::Ident(ident)) => {
+                            self.mark_var_mutable(ident.id.sym.as_ref());
+                        }
+                        Some(ast::SimpleAssignTarget::Member(member)) => {
+                            if let ast::Expr::Ident(ident) = member.obj.as_ref() {
+                                self.mark_var_mutable(ident.sym.as_ref());
+                            }
+                        }
+                        _ => {}
                     }
                 }
                 self.resolve_expr(&assign.right)
@@ -100,11 +144,23 @@ impl<'a> TypeResolver<'a> {
                         }
                     }
                 } else {
-                    // Neither branch is null/Option: prefer non-Unknown
-                    if !matches!(cons, ResolvedType::Unknown) {
-                        cons
-                    } else {
-                        alt
+                    match (&cons, &alt) {
+                        // Both known and same type → return that type
+                        (ResolvedType::Known(c), ResolvedType::Known(a)) if c == a => cons,
+                        // Both known but different types → generate union
+                        (ResolvedType::Known(c), ResolvedType::Known(a)) => {
+                            let union_types = vec![c.clone(), a.clone()];
+                            let enum_name = self.synthetic.register_union(&union_types);
+                            ResolvedType::Known(RustType::Named {
+                                name: enum_name,
+                                type_args: vec![],
+                            })
+                        }
+                        // One unknown → prefer the known one
+                        (ResolvedType::Known(_), ResolvedType::Unknown) => cons,
+                        (ResolvedType::Unknown, ResolvedType::Known(_)) => alt,
+                        // Both unknown
+                        _ => ResolvedType::Unknown,
                     }
                 }
             }
@@ -131,10 +187,21 @@ impl<'a> TypeResolver<'a> {
                 }
             }
             ast::Expr::TsTypeAssertion(assertion) => {
-                // <T>x — same as TsAs
+                // <T>x — same as TsAs: propagate T as expected type to inner expression
+                let as_type =
+                    convert_ts_type(&assertion.type_ann, self.synthetic, self.registry).ok();
+                if let Some(ref ty) = as_type {
+                    let expr_span = Span::from_swc(assertion.expr.span());
+                    self.result.expected_types.insert(expr_span, ty.clone());
+                    self.propagate_expected(&assertion.expr, ty);
+                }
                 self.resolve_expr(&assertion.expr);
-                convert_ts_type(&assertion.type_ann, self.synthetic, self.registry)
-                    .map(ResolvedType::Known)
+                as_type
+                    .map(|ty| {
+                        let wrapped =
+                            wrap_trait_for_position(ty, TypePosition::Value, self.registry);
+                        ResolvedType::Known(wrapped)
+                    })
                     .unwrap_or(ResolvedType::Unknown)
             }
             ast::Expr::TsConstAssertion(const_assertion) => {
@@ -307,16 +374,16 @@ impl<'a> TypeResolver<'a> {
                                 };
                                 let n_args = opt_call.args.len();
                                 // Set expected types for args
-                                if let Some(params) = method_name.as_deref().and_then(|name| {
-                                    self.lookup_method_params(inner_ty, name, n_args, &[])
-                                }) {
-                                    for (arg, param_ty) in opt_call.args.iter().zip(params.iter()) {
-                                        let arg_span = Span::from_swc(arg.expr.span());
-                                        self.result
-                                            .expected_types
-                                            .insert(arg_span, param_ty.clone());
-                                        self.propagate_expected(&arg.expr, param_ty);
-                                    }
+                                if let Some((param_types, has_rest)) =
+                                    method_name.as_deref().and_then(|name| {
+                                        self.lookup_method_params(inner_ty, name, n_args, &[])
+                                    })
+                                {
+                                    self.propagate_call_arg_expected_types(
+                                        &opt_call.args,
+                                        &param_types,
+                                        has_rest,
+                                    );
                                 }
                                 // Collect resolved arg types for overload resolution
                                 let arg_types = self.collect_resolved_arg_types(&opt_call.args);
@@ -524,6 +591,21 @@ impl<'a> TypeResolver<'a> {
         // Special case: .length on String/Vec
         if field_name == "length" && matches!(obj_rust_type, RustType::String | RustType::Vec(_)) {
             return ResolvedType::Known(RustType::F64);
+        }
+
+        // Vec<T> → Array<T>: TypeScript Array fields/methods apply to Rust Vec
+        if let RustType::Vec(inner) = obj_rust_type {
+            let type_def = self
+                .registry
+                .instantiate("Array", &[inner.as_ref().clone()]);
+            return match &type_def {
+                Some(TypeDef::Struct { fields, .. }) => fields
+                    .iter()
+                    .find(|(name, _)| name == &field_name)
+                    .map(|(_, ty)| ResolvedType::Known(ty.clone()))
+                    .unwrap_or(ResolvedType::Unknown),
+                _ => ResolvedType::Unknown,
+            };
         }
 
         // Lookup in TypeRegistry

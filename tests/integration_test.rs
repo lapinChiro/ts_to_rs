@@ -563,3 +563,41 @@ fn test_typeof_const() {
     let output = transpile(&input).unwrap();
     insta::assert_snapshot!(output);
 }
+
+/// Generates a snapshot test that reads a fixture, transpiles, and asserts snapshot.
+///
+/// - `snapshot_test!(test_foo)` uses `transpile()` (no builtins)
+/// - `snapshot_test!(test_foo, builtins)` uses `transpile_with_builtins()`
+macro_rules! snapshot_test {
+    ($name:ident) => {
+        #[test]
+        fn $name() {
+            let fixture = stringify!($name)
+                .strip_prefix("test_")
+                .unwrap_or(stringify!($name))
+                .replace('_', "-");
+            let input = fs::read_to_string(format!("tests/fixtures/{fixture}.input.ts")).unwrap();
+            let output = transpile(&input).unwrap();
+            insta::assert_snapshot!(output);
+        }
+    };
+    ($name:ident, builtins) => {
+        #[test]
+        fn $name() {
+            let fixture = stringify!($name)
+                .strip_prefix("test_")
+                .unwrap_or(stringify!($name))
+                .replace('_', "-");
+            let input = fs::read_to_string(format!("tests/fixtures/{fixture}.input.ts")).unwrap();
+            let (output, _unsupported) = transpile_with_builtins(&input).unwrap();
+            insta::assert_snapshot!(output);
+        }
+    };
+}
+
+// I-286: sink-source expected type propagation tests
+// Vec method tests need builtins (Array methods are in ecmascript.json)
+snapshot_test!(test_vec_method_expected_type, builtins);
+snapshot_test!(test_assignment_expected_type);
+snapshot_test!(test_as_type_expected);
+snapshot_test!(test_ternary_union);

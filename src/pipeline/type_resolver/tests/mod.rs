@@ -89,5 +89,6 @@ pub(super) fn make_sig(param_types: Vec<RustType>, ret: Option<RustType>) -> Met
             .map(|(i, ty)| (format!("p{i}"), ty))
             .collect(),
         return_type: ret,
+        has_rest: false,
     }
 }

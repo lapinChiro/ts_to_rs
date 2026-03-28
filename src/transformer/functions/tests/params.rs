@@ -412,6 +412,7 @@ fn reg_with_trait(name: &str) -> TypeRegistry {
         vec![MethodSignature {
             params: vec![("msg".to_string(), RustType::String)],
             return_type: None,
+            has_rest: false,
         }],
     );
     reg.register(

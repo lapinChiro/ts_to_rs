@@ -38,6 +38,7 @@ fn test_propagate_expected_new_expr_uses_constructor_params() {
                     ),
                 ],
                 return_type: None,
+                has_rest: false,
             }]),
             extends: vec![],
             is_interface: false,
@@ -992,5 +993,142 @@ fn test_propagate_expected_typed_var_arrow_return_object_literal() {
         point_count >= 1,
         "object literal in typed arrow return should have Named(\"Point\") expected type, found {} Point entries",
         point_count
+    );
+}
+
+// I-286: Vec→Array method mapping tests
+
+/// Helper to create a RustType representing a type parameter (e.g., T, U).
+fn type_param(name: &str) -> RustType {
+    RustType::Named {
+        name: name.to_string(),
+        type_args: vec![],
+    }
+}
+
+/// Creates a TypeRegistry with Array<T> definition including push and map methods.
+fn create_registry_with_array_methods() -> TypeRegistry {
+    use crate::ir::TypeParam;
+
+    let mut reg = TypeRegistry::new();
+    let mut methods = std::collections::HashMap::new();
+
+    // push(...items: T[]): number
+    methods.insert(
+        "push".to_string(),
+        vec![MethodSignature {
+            params: vec![(
+                "items".to_string(),
+                RustType::Vec(Box::new(type_param("T"))),
+            )],
+            return_type: Some(RustType::F64),
+            has_rest: true,
+        }],
+    );
+
+    // map(callbackfn: (value: T, index: number, array: T[]) => U): U[]
+    methods.insert(
+        "map".to_string(),
+        vec![MethodSignature {
+            params: vec![(
+                "callbackfn".to_string(),
+                RustType::Fn {
+                    params: vec![
+                        type_param("T"),
+                        RustType::F64,
+                        RustType::Vec(Box::new(type_param("T"))),
+                    ],
+                    return_type: Box::new(type_param("U")),
+                },
+            )],
+            return_type: Some(RustType::Vec(Box::new(type_param("U")))),
+            has_rest: false,
+        }],
+    );
+
+    reg.register(
+        "Array".to_string(),
+        crate::registry::TypeDef::Struct {
+            type_params: vec![TypeParam {
+                name: "T".to_string(),
+                constraint: None,
+            }],
+            fields: vec![("length".to_string(), RustType::F64)],
+            methods,
+            constructor: None,
+            extends: vec![],
+            is_interface: true,
+        },
+    );
+
+    reg
+}
+
+#[test]
+fn test_vec_push_propagates_element_type_to_argument() {
+    // arr.push({...}) should propagate the element type to the push argument
+    let mut reg = create_registry_with_array_methods();
+    reg.register(
+        "Item".to_string(),
+        crate::registry::TypeDef::new_struct(
+            vec![("name".to_string(), RustType::String)],
+            Default::default(),
+            vec![],
+        ),
+    );
+
+    let res = resolve_with_reg(
+        r#"
+        function test(arr: Item[]) {
+            arr.push({ name: "x" });
+        }
+        "#,
+        &reg,
+    );
+
+    // The object literal { name: "x" } should have Item as expected type
+    let has_item_expected = res
+        .expected_types
+        .values()
+        .any(|t| matches!(t, RustType::Named { name, .. } if name == "Item"));
+    assert!(
+        has_item_expected,
+        "push argument object literal should have Named(\"Item\") as expected type. Got: {:?}",
+        res.expected_types.values().collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_vec_map_callback_param_gets_element_type() {
+    // arr.map(item => ...) should set item's type to the element type
+    let mut reg = create_registry_with_array_methods();
+    reg.register(
+        "Item".to_string(),
+        crate::registry::TypeDef::new_struct(
+            vec![("name".to_string(), RustType::String)],
+            Default::default(),
+            vec![],
+        ),
+    );
+
+    let res = resolve_with_reg(
+        r#"
+        function test(arr: Item[]) {
+            arr.map(item => item.name);
+        }
+        "#,
+        &reg,
+    );
+
+    // The arrow function argument should have Fn type as expected
+    // (the callback's param type = Item from Array<Item>.map)
+    let has_fn_expected = res
+        .expected_types
+        .values()
+        .any(|t| matches!(t, RustType::Fn { .. }));
+    assert!(
+        has_fn_expected,
+        "map callback should have Fn type as expected (with Item param). Got: {:?}",
+        res.expected_types.values().collect::<Vec<_>>()
     );
 }

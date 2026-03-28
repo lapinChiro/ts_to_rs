@@ -145,11 +145,9 @@ impl<'a> TypeResolver<'a> {
                         ast::MemberProp::Ident(ident) => Some(ident.sym.to_string()),
                         _ => None,
                     };
-                    method_name
-                        .and_then(|name| {
-                            self.lookup_method_params(inner_ty, &name, args.len(), &[])
-                        })
-                        .map(|params| (params, false))
+                    method_name.and_then(|name| {
+                        self.lookup_method_params(inner_ty, &name, args.len(), &[])
+                    })
                 } else {
                     None
                 }
@@ -158,31 +156,43 @@ impl<'a> TypeResolver<'a> {
         };
 
         if let Some((param_types, has_rest)) = param_info {
-            // Extract rest element type if has_rest and last param is Vec<T>
-            let rest_element_type = if has_rest {
-                match param_types.last() {
-                    Some(RustType::Vec(inner)) => Some(inner.as_ref().clone()),
-                    _ => None,
-                }
-            } else {
-                None
-            };
-            let regular_params = if rest_element_type.is_some() {
-                &param_types[..param_types.len() - 1]
-            } else {
-                &param_types
-            };
+            self.propagate_call_arg_expected_types(args, &param_types, has_rest);
+        }
+    }
 
-            self.propagate_arg_expected_types(args, regular_params);
+    /// Propagates expected types to call arguments, handling rest parameters.
+    ///
+    /// For regular parameters, zips args with param types.
+    /// For rest parameters (`has_rest = true`), the last param must be `Vec<T>`;
+    /// its element type `T` is propagated to all remaining arguments.
+    pub(super) fn propagate_call_arg_expected_types(
+        &mut self,
+        args: &[ast::ExprOrSpread],
+        param_types: &[RustType],
+        has_rest: bool,
+    ) {
+        let rest_element_type = if has_rest {
+            match param_types.last() {
+                Some(RustType::Vec(inner)) => Some(inner.as_ref().clone()),
+                _ => None,
+            }
+        } else {
+            None
+        };
+        let regular_params = if rest_element_type.is_some() {
+            &param_types[..param_types.len() - 1]
+        } else {
+            param_types
+        };
 
-            // Set element type for rest parameter arguments
-            if let Some(ref elem_ty) = rest_element_type {
-                if args.len() > regular_params.len() {
-                    let rest_types: Vec<RustType> =
-                        std::iter::repeat_n(elem_ty.clone(), args.len() - regular_params.len())
-                            .collect();
-                    self.propagate_arg_expected_types(&args[regular_params.len()..], &rest_types);
-                }
+        self.propagate_arg_expected_types(args, regular_params);
+
+        if let Some(ref elem_ty) = rest_element_type {
+            if args.len() > regular_params.len() {
+                let rest_types: Vec<RustType> =
+                    std::iter::repeat_n(elem_ty.clone(), args.len() - regular_params.len())
+                        .collect();
+                self.propagate_arg_expected_types(&args[regular_params.len()..], &rest_types);
             }
         }
     }
@@ -210,11 +220,25 @@ impl<'a> TypeResolver<'a> {
     }
 
     /// Looks up method signatures from the object type's definition.
+    ///
+    /// For `Vec<T>`, maps to the `Array<T>` definition in TypeRegistry so that
+    /// TypeScript's Array methods (push, map, filter, etc.) are available.
     fn lookup_method_sigs(
         &self,
         obj_type: &RustType,
         method_name: &str,
     ) -> Option<Vec<crate::registry::MethodSignature>> {
+        // Vec<T> → Array<T>: TypeScript Array methods apply to Rust Vec
+        if let RustType::Vec(inner) = obj_type {
+            let type_def = self
+                .registry
+                .instantiate("Array", &[inner.as_ref().clone()]);
+            return match &type_def {
+                Some(TypeDef::Struct { methods, .. }) => methods.get(method_name).cloned(),
+                _ => None,
+            };
+        }
+
         let (type_name, type_args) = extract_type_name_for_registry(obj_type)?;
 
         let type_def = if type_args.is_empty() {
@@ -229,20 +253,25 @@ impl<'a> TypeResolver<'a> {
         }
     }
 
-    /// Looks up method parameter types from the object type's definition.
+    /// Looks up method parameter types and rest flag from the object type's definition.
     ///
     /// When multiple overloads exist, selects the best match using `select_overload`.
     /// `arg_types` should be `&[]` when resolved argument types are not yet available.
+    ///
+    /// Returns `(param_types, has_rest)`.
     pub(super) fn lookup_method_params(
         &self,
         obj_type: &RustType,
         method_name: &str,
         arg_count: usize,
         arg_types: &[Option<RustType>],
-    ) -> Option<Vec<RustType>> {
+    ) -> Option<(Vec<RustType>, bool)> {
         let sigs = self.lookup_method_sigs(obj_type, method_name)?;
         let sig = select_overload(&sigs, arg_count, arg_types);
-        Some(sig.params.iter().map(|(_, ty)| ty.clone()).collect())
+        Some((
+            sig.params.iter().map(|(_, ty)| ty.clone()).collect(),
+            sig.has_rest,
+        ))
     }
 
     /// Resolves the return type of a method call, selecting the best overload

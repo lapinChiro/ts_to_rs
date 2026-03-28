@@ -91,13 +91,16 @@ pub(super) fn is_object_type(ty: &ResolvedType) -> bool {
 
 /// RustType から TypeRegistry ルックアップ用の (型名, 型引数) を抽出する。
 ///
-/// `Named`, `String`, `Vec` に加え、trait ラッピング後の `Ref(DynTrait)`,
+/// `Named`, `String` に加え、trait ラッピング後の `Ref(DynTrait)`,
 /// `Box<dyn Trait>` (`Named { name: "Box", type_args: [DynTrait(_)] }`),
 /// `DynTrait` も trait 名に展開する。
+///
+/// Note: `Vec<T>` is NOT handled here. Callers (`lookup_method_sigs`,
+/// `resolve_member_type`) handle Vec→Array mapping directly with
+/// `registry.instantiate("Array", &[T])` to preserve the element type.
 pub(super) fn extract_type_name_for_registry(ty: &RustType) -> Option<(&str, &[RustType])> {
     match ty {
         RustType::String => Some(("String", &[])),
-        RustType::Vec(_) => Some(("Vec", &[])),
         RustType::Named { name, type_args }
             if name == "Box"
                 && type_args.len() == 1

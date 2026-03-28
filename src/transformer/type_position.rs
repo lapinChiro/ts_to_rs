@@ -60,6 +60,7 @@ mod tests {
             vec![MethodSignature {
                 params: vec![],
                 return_type: None,
+                has_rest: false,
             }],
         );
         reg.register(
