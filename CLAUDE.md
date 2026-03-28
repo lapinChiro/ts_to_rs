@@ -40,8 +40,25 @@ Measures Hono framework conversion success rate. Run after conversion feature ch
 - **Analysis**: `scripts/analyze-bench.py` auto-invoked, aggregating error JSON by category
 - **History**: `bench-history.jsonl` (JSONL, one line per run). View with: `python3 -c "import sys,json; [print(f\"{json.loads(l)['timestamp'][:10]} clean={json.loads(l)['clean_pct']}% errors={json.loads(l)['error_instances']}\") for l in open('bench-history.jsonl')]"`
 - **Error JSON**: `/tmp/hono-bench-errors.json`
+- **Error inspection**: `scripts/inspect-errors.py` — エラーの詳細分析ツール（下記参照）
 
 **Note**: "Clean" = zero conversion errors (`--report-unsupported` with 0 errors), separate from whether generated Rust compiles.
+
+### Error Inspection
+
+`/tmp/hono-bench-errors.json` の詳細分析には `scripts/inspect-errors.py` を使用する。アドホックな Python ワンライナーでの解析は禁止。
+
+```bash
+python3 scripts/inspect-errors.py                        # カテゴリ別集計
+python3 scripts/inspect-errors.py --kind TYPEOF          # kind で部分一致フィルタ
+python3 scripts/inspect-errors.py --category TYPEOF_TYPE # カテゴリで完全一致フィルタ
+python3 scripts/inspect-errors.py --file client          # ファイル名で部分一致フィルタ
+python3 scripts/inspect-errors.py --source               # エラー箇所の TS ソースを表示
+python3 scripts/inspect-errors.py --discriminant --source # Discriminant エラーの AST ノード種を推定
+python3 scripts/inspect-errors.py --raw                  # フィルタ後の JSON 出力
+```
+
+フィルタは組み合わせ可能（例: `--category INDEXED_ACCESS --source`）。不足機能があれば同スクリプトに追加する。
 
 ## Architecture
 

@@ -95,6 +95,13 @@ export const SERVER_WEB_API_TYPES = [
   "setInterval",
   "clearInterval",
 
+  // Global functions
+  "fetch",
+
+  // WebSocket
+  "WebSocket",
+  "CloseEvent",
+
   // Console
   "Console",
 ];

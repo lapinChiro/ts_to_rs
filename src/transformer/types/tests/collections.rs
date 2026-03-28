@@ -419,3 +419,302 @@ fn test_convert_ts_type_typeof_unknown_returns_error() {
     );
     assert!(result.is_err(), "typeof unknown should return error");
 }
+
+// --- T2: typeof on Struct (class with constructor) ---
+
+#[test]
+fn test_convert_ts_type_typeof_struct_with_constructor_returns_fn_type() {
+    // typeof MyClass where MyClass is a Struct with constructor → Fn type
+    use crate::registry::{MethodSignature, TypeDef};
+    let mut reg = TypeRegistry::new();
+    reg.register(
+        "MyClass".to_string(),
+        TypeDef::Struct {
+            type_params: vec![],
+            fields: vec![("url".to_string(), RustType::String)],
+            methods: std::collections::HashMap::new(),
+            constructor: Some(vec![MethodSignature {
+                params: vec![
+                    ("url".to_string(), RustType::String),
+                    (
+                        "options".to_string(),
+                        RustType::Option(Box::new(RustType::String)),
+                    ),
+                ],
+                return_type: None,
+            }]),
+            extends: vec![],
+            is_interface: false,
+        },
+    );
+    let decl = parse_interface("interface T { f: typeof MyClass; }");
+    let prop = match &decl.body.body[0] {
+        TsTypeElement::TsPropertySignature(p) => p,
+        _ => panic!("expected property signature"),
+    };
+    let ty = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut SyntheticTypeRegistry::new(),
+        &reg,
+    )
+    .unwrap();
+    // typeof ClassName → constructor function type: fn(params) -> ClassName
+    assert_eq!(
+        ty,
+        RustType::Fn {
+            params: vec![
+                RustType::String,
+                RustType::Option(Box::new(RustType::String))
+            ],
+            return_type: Box::new(RustType::Named {
+                name: "MyClass".to_string(),
+                type_args: vec![],
+            }),
+        }
+    );
+}
+
+#[test]
+fn test_convert_ts_type_typeof_struct_without_constructor_returns_named() {
+    // typeof MyStruct where MyStruct has no constructor → Named type
+    use crate::registry::TypeDef;
+    let mut reg = TypeRegistry::new();
+    reg.register(
+        "MyStruct".to_string(),
+        TypeDef::Struct {
+            type_params: vec![],
+            fields: vec![("x".to_string(), RustType::F64)],
+            methods: std::collections::HashMap::new(),
+            constructor: None,
+            extends: vec![],
+            is_interface: true,
+        },
+    );
+    let decl = parse_interface("interface T { f: typeof MyStruct; }");
+    let prop = match &decl.body.body[0] {
+        TsTypeElement::TsPropertySignature(p) => p,
+        _ => panic!("expected property signature"),
+    };
+    let ty = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut SyntheticTypeRegistry::new(),
+        &reg,
+    )
+    .unwrap();
+    assert_eq!(
+        ty,
+        RustType::Named {
+            name: "MyStruct".to_string(),
+            type_args: vec![],
+        }
+    );
+}
+
+#[test]
+fn test_convert_ts_type_typeof_enum_returns_named() {
+    // typeof MyEnum → Named type
+    use crate::registry::TypeDef;
+    let mut reg = TypeRegistry::new();
+    reg.register(
+        "Direction".to_string(),
+        TypeDef::Enum {
+            type_params: vec![],
+            variants: vec!["Up".to_string(), "Down".to_string()],
+            string_values: std::collections::HashMap::new(),
+            tag_field: None,
+            variant_fields: std::collections::HashMap::new(),
+        },
+    );
+    let decl = parse_interface("interface T { d: typeof Direction; }");
+    let prop = match &decl.body.body[0] {
+        TsTypeElement::TsPropertySignature(p) => p,
+        _ => panic!("expected property signature"),
+    };
+    let ty = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut SyntheticTypeRegistry::new(),
+        &reg,
+    )
+    .unwrap();
+    assert_eq!(
+        ty,
+        RustType::Named {
+            name: "Direction".to_string(),
+            type_args: vec![],
+        }
+    );
+}
+
+#[test]
+fn test_convert_ts_type_typeof_struct_empty_constructors_returns_named() {
+    // typeof MyStruct where constructor is Some(vec![]) → Named type (not Fn)
+    use crate::registry::TypeDef;
+    let mut reg = TypeRegistry::new();
+    reg.register(
+        "EmptyCtor".to_string(),
+        TypeDef::Struct {
+            type_params: vec![],
+            fields: vec![],
+            methods: std::collections::HashMap::new(),
+            constructor: Some(vec![]),
+            extends: vec![],
+            is_interface: false,
+        },
+    );
+    let decl = parse_interface("interface T { f: typeof EmptyCtor; }");
+    let prop = match &decl.body.body[0] {
+        TsTypeElement::TsPropertySignature(p) => p,
+        _ => panic!("expected property signature"),
+    };
+    let ty = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut SyntheticTypeRegistry::new(),
+        &reg,
+    )
+    .unwrap();
+    assert_eq!(
+        ty,
+        RustType::Named {
+            name: "EmptyCtor".to_string(),
+            type_args: vec![],
+        }
+    );
+}
+
+#[test]
+fn test_convert_ts_type_indexed_access_string_key_with_registry_resolves_field_type() {
+    // Config['host'] where Config is registered with field 'host: String' → String
+    use crate::registry::TypeDef;
+    let mut reg = TypeRegistry::new();
+    reg.register(
+        "Config".to_string(),
+        TypeDef::Struct {
+            type_params: vec![],
+            fields: vec![
+                ("host".to_string(), RustType::String),
+                ("port".to_string(), RustType::F64),
+            ],
+            methods: std::collections::HashMap::new(),
+            constructor: None,
+            extends: vec![],
+            is_interface: true,
+        },
+    );
+    let decl = parse_interface("interface T { h: Config['host']; }");
+    let prop = match &decl.body.body[0] {
+        TsTypeElement::TsPropertySignature(p) => p,
+        _ => panic!("expected property signature"),
+    };
+    let ty = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut SyntheticTypeRegistry::new(),
+        &reg,
+    )
+    .unwrap();
+    // Registry-based resolution: Config['host'] → String (actual field type)
+    assert_eq!(ty, RustType::String);
+}
+
+// --- T3: indexed access non-string keys ---
+
+#[test]
+fn test_convert_ts_type_indexed_access_number_keyword_key_returns_error() {
+    // T[number] → error (non-string key not yet supported)
+    let decl = parse_interface("interface T { x: E[number]; }");
+    let prop = match &decl.body.body[0] {
+        TsTypeElement::TsPropertySignature(p) => p,
+        _ => panic!("expected property signature"),
+    };
+    let result = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut SyntheticTypeRegistry::new(),
+        &TypeRegistry::new(),
+    );
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_convert_ts_type_indexed_access_type_param_key_returns_error() {
+    // E[K] where K is a type reference → error (associated type resolution not yet available)
+    let decl = parse_interface("interface T { x: E[K]; }");
+    let prop = match &decl.body.body[0] {
+        TsTypeElement::TsPropertySignature(p) => p,
+        _ => panic!("expected property signature"),
+    };
+    let result = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut SyntheticTypeRegistry::new(),
+        &TypeRegistry::new(),
+    );
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_convert_ts_type_indexed_access_typeof_base_with_registered_struct() {
+    // (typeof X)['host'] where X is registered as Struct with field 'host: String' → String
+    use crate::registry::TypeDef;
+    let mut reg = TypeRegistry::new();
+    reg.register(
+        "Config".to_string(),
+        TypeDef::Struct {
+            type_params: vec![],
+            fields: vec![("host".to_string(), RustType::String)],
+            methods: std::collections::HashMap::new(),
+            constructor: None,
+            extends: vec![],
+            is_interface: true,
+        },
+    );
+    let decl = parse_interface("interface T { x: (typeof Config)['host']; }");
+    let prop = match &decl.body.body[0] {
+        TsTypeElement::TsPropertySignature(p) => p,
+        _ => panic!("expected property signature"),
+    };
+    let ty = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut SyntheticTypeRegistry::new(),
+        &reg,
+    )
+    .unwrap();
+    // Registry-based resolution: typeof Config → Config, Config['host'] → String
+    assert_eq!(ty, RustType::String);
+}
+
+#[test]
+fn test_convert_ts_type_indexed_access_typeof_base_unregistered_returns_error() {
+    // (typeof unknown)['key'] where unknown is NOT registered → error
+    let decl = parse_interface("interface T { x: (typeof unknown)['key']; }");
+    let prop = match &decl.body.body[0] {
+        TsTypeElement::TsPropertySignature(p) => p,
+        _ => panic!("expected property signature"),
+    };
+    let result = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut SyntheticTypeRegistry::new(),
+        &TypeRegistry::new(),
+    );
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_convert_ts_type_indexed_access_parenthesized_base() {
+    // (SomeType)['key'] → SomeType::key (strip parens)
+    let decl = parse_interface("interface T { x: (SomeType)['key']; }");
+    let prop = match &decl.body.body[0] {
+        TsTypeElement::TsPropertySignature(p) => p,
+        _ => panic!("expected property signature"),
+    };
+    let ty = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut SyntheticTypeRegistry::new(),
+        &TypeRegistry::new(),
+    )
+    .unwrap();
+    assert_eq!(
+        ty,
+        RustType::Named {
+            name: "SomeType::key".to_string(),
+            type_args: vec![],
+        }
+    );
+}

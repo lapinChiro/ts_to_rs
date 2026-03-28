@@ -6,7 +6,7 @@ When adding new items to TODO or modifying existing items.
 
 ## Constraints
 
-- **Instance counts must be benchmark-measured values**: Use values aggregated from the `kind` field in `/tmp/hono-bench-errors.json` after running `./scripts/hono-bench.sh`. Do not write from estimates or past memory
+- **Instance counts must be benchmark-measured values**: Use values aggregated from the `kind` field in `/tmp/hono-bench-errors.json` after running `./scripts/hono-bench.sh`. Do not write from estimates or past memory. Error inspection には `scripts/inspect-errors.py` を使用する（`--category`, `--discriminant --source` 等）
 - **Source code references must include `file_path:line_number`**: Specify concrete locations, not just function/variable names (e.g., `src/registry.rs:482`). Readers must be able to immediately navigate to the location
 - **Error messages must quote actual output**: Use the benchmark `kind` field values or compiler output verbatim
 - **Include solution direction**: Beyond describing the problem, document the resolution direction (specific function names, approaches). This provides material for later priority judgments, not to skip Discovery during PRD creation

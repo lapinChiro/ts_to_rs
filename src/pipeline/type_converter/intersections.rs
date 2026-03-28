@@ -284,22 +284,20 @@ pub(super) fn convert_fn_type(
     })
 }
 
-/// Converts a TS indexed access type (`T['Key']`) into `RustType::Named { name: "T::Key" }`.
+/// Converts a TS indexed access type (`T['Key']`) into a Rust type.
 ///
-/// Only string literal keys are supported.
+/// Resolution strategy:
+/// 1. Resolve the base type name (supports TypeRef, parenthesized, typeof)
+/// 2. For string literal keys: look up the actual field type in the registry if available,
+///    otherwise produce `T::Key` (associated type syntax)
+/// 3. For non-string keys or unresolvable base types: return error
 pub(super) fn convert_indexed_access_type(
     indexed: &swc_ecma_ast::TsIndexedAccessType,
-    _synthetic: &mut SyntheticTypeRegistry,
-    _reg: &TypeRegistry,
+    synthetic: &mut SyntheticTypeRegistry,
+    reg: &TypeRegistry,
 ) -> Result<RustType> {
-    // Extract the base type name
-    let obj_name = match indexed.obj_type.as_ref() {
-        TsType::TsTypeRef(type_ref) => match &type_ref.type_name {
-            swc_ecma_ast::TsEntityName::Ident(ident) => ident.sym.to_string(),
-            _ => return Err(anyhow!("unsupported indexed access base type")),
-        },
-        _ => return Err(anyhow!("unsupported indexed access base type")),
-    };
+    let obj_name = extract_indexed_access_base_name(&indexed.obj_type, synthetic, reg)
+        .ok_or_else(|| anyhow!("unsupported indexed access base type"))?;
 
     // Extract the string literal key
     let key = match indexed.index_type.as_ref() {
@@ -318,8 +316,52 @@ pub(super) fn convert_indexed_access_type(
         }
     };
 
+    // Try registry lookup for the exact field type
+    if let Some(field_ty) = lookup_field_type(&obj_name, &key, reg) {
+        return Ok(field_ty);
+    }
+
     Ok(RustType::Named {
         name: format!("{obj_name}::{key}"),
         type_args: vec![],
     })
+}
+
+/// Looks up a field type from the registry by struct name and field name.
+fn lookup_field_type(type_name: &str, field_name: &str, reg: &TypeRegistry) -> Option<RustType> {
+    match reg.get(type_name)? {
+        crate::registry::TypeDef::Struct { fields, .. } => fields
+            .iter()
+            .find(|(n, _)| n == field_name)
+            .map(|(_, t)| t.clone()),
+        _ => None,
+    }
+}
+
+/// Extracts the base type name from an indexed access type's object type.
+///
+/// Handles `TsTypeRef(Ident)`, `TsParenthesizedType`, and `TsTypeQuery` (typeof).
+/// Returns `None` if the base type cannot be resolved to a simple name.
+fn extract_indexed_access_base_name(
+    obj_type: &TsType,
+    synthetic: &mut SyntheticTypeRegistry,
+    reg: &TypeRegistry,
+) -> Option<String> {
+    match obj_type {
+        TsType::TsTypeRef(type_ref) => match &type_ref.type_name {
+            swc_ecma_ast::TsEntityName::Ident(ident) => Some(ident.sym.to_string()),
+            _ => None,
+        },
+        TsType::TsParenthesizedType(paren) => {
+            extract_indexed_access_base_name(&paren.type_ann, synthetic, reg)
+        }
+        TsType::TsTypeQuery(_) => {
+            let resolved = convert_ts_type(obj_type, synthetic, reg).ok()?;
+            match resolved {
+                RustType::Named { name, .. } => Some(name),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
 }

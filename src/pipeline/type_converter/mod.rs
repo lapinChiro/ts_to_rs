@@ -204,6 +204,40 @@ pub fn convert_ts_type(
                         return_type: Box::new(ret),
                     })
                 }
+                Some(crate::registry::TypeDef::Struct {
+                    constructor: Some(ctors),
+                    ..
+                }) if !ctors.is_empty() => {
+                    // typeof ClassName with constructor → constructor function type
+                    // Select the constructor with the most parameters (most specific overload).
+                    // Safety: ctors is non-empty due to the guard above, so max_by_key
+                    // always returns Some. Use if-let to satisfy the no-unwrap rule.
+                    if let Some(ctor) = ctors.iter().max_by_key(|c| c.params.len()) {
+                        let param_types: Vec<RustType> =
+                            ctor.params.iter().map(|(_, t)| t.clone()).collect();
+                        Ok(RustType::Fn {
+                            params: param_types,
+                            return_type: Box::new(RustType::Named {
+                                name: name.clone(),
+                                type_args: vec![],
+                            }),
+                        })
+                    } else {
+                        Ok(RustType::Named {
+                            name,
+                            type_args: vec![],
+                        })
+                    }
+                }
+                Some(
+                    crate::registry::TypeDef::Struct { .. } | crate::registry::TypeDef::Enum { .. },
+                ) => {
+                    // typeof StructName/EnumName → the type itself
+                    Ok(RustType::Named {
+                        name,
+                        type_args: vec![],
+                    })
+                }
                 _ => Err(anyhow!(
                     "unsupported type: TsTypeQuery for unknown identifier '{name}'"
                 )),
