@@ -31,7 +31,7 @@
 - **スコープ外** — 明示的に対象外。需要発生時に再評価
 
 件数は Hono ベンチマーク（`./scripts/hono-bench.sh`）の実測値に基づく（最終実行: 2026-03-28）。
-158 ファイル中 99 ファイルがクリーン（62.7%）、100 エラーインスタンス。コンパイルクリーン: ファイル単位 98（62.0%）、ディレクトリ単位 156（98.7%）。
+158 ファイル中 104 ファイルがクリーン（65.8%）、91 エラーインスタンス。コンパイルクリーン: ファイル単位 98（62.0%）、ディレクトリ単位 156（98.7%）。
 **注意**: ベンチマーク実行前に `cargo build --release` が必要。古いビルドで実行すると数値が不正確になる。
 **補足**: 「クリーン」は変換エラーなし（`--report-unsupported` でエラー 0）を意味する。コンパイルクリーンは2指標: ファイル単位（use 除去後の個別コンパイル）とディレクトリ単位（全ファイルを1クレートとしてコンパイル）。
 
@@ -40,6 +40,7 @@
 詳細は [doc/completed-features.md](doc/completed-features.md) を参照。設計判断の記録は [doc/design-decisions.md](doc/design-decisions.md) を参照。
 
 - **I-281**: typeof ローカル変数の型解決 — 6件削減（106→100）。TypeDef::ConstValue + TypeCollector + indexed access [number]/[keyof typeof X] + keyof typeof X
+- **I-267**: OBJECT_LITERAL_NO_TYPE 削減 — 10件削減（100→91、クリーン99→104）。TypeRegistry merge バグ修正（ビルトイン型保護）+ フォールバック空オブジェクト `||`/`??` の expected type 伝播。詳細: `report/object-literal-no-type-investigation-2026-03-28.md`
 
 ---
 
@@ -47,7 +48,7 @@
 
 | フェーズ | 移行基準 | 対象 |
 |---------|---------|------|
-| **現在: 変換率の大幅改善** | 全エラーインスタンス < 80 件 | 全 100 件。内訳: OBJECT_LITERAL_NO_TYPE 50 件、TYPE_ALIAS_UNSUPPORTED 10 件、INTERSECTION_TYPE 9 件、INDEXED_ACCESS 3 件、残り 28 件（各 1〜3 件の小カテゴリ）。I-281 で 106→100（INDEXED_ACCESS 6→3、TYPE_ALIAS_UNSUPPORTED 13→10）。最大カテゴリの OBJECT_LITERAL_NO_TYPE は I-267（return ~10件）で段階解消 |
+| **現在: 変換率の大幅改善** | 全エラーインスタンス < 80 件 | 全 91 件。内訳: OBJECT_LITERAL_NO_TYPE 40 件、TYPE_ALIAS_UNSUPPORTED 10 件、INTERSECTION_TYPE 9 件、INDEXED_ACCESS 3 件、OTHER 8 件、残り 21 件（各 1〜3 件の小カテゴリ）。I-281 で 106→100、I-267 で 100→91 |
 | **次: コンパイル品質** | ディレクトリコンパイルエラー 0 件 | 残 2 ファイル不合格（5 エラーインスタンス）。I-273（trait/struct 混同）が主因 |
 | **その次: テスト拡充** | E2E テスト網羅性 | E2E テストの拡充（I-20, I-71, I-72, I-74）、HTTP 対応（I-183） |
 
@@ -91,12 +92,6 @@
 
 I-112c Phase 1-3 + I-211 + I-266 + I-268 + I-269 で 70→48 件に削減済み。I-195 修正で 48→51 件に増加（パラメータ変換成功により隠れていた本体エラーが顕在化）。I-194+I-35 後 50 件（2026-03-28 実測）。I-268/I-269 は TypeResolver の機能実装として完了したが、Hono ベンチでは主にクロスモジュール型参照未解決に起因しており、I-268/I-269 の対象パターンではなかった（PRD 見積もり誤り。詳細: I-268/I-269 の PRD で件数見積もりをエラーラベルベースの推定で行い、実際のコードパストレースを怠った）。
 
-- **[I-267]** **return 式のオブジェクトリテラル型推定** — **~10 インスタンス**（OBJECT_LITERAL_NO_TYPE 50 件中の推定サブセット。ベンチマークではサブカテゴリ分類されないため、コード分析による推定値）
-  - `return { field: value }` で関数の戻り値型から expected type を逆引きする
-  - コンストラクタ引数位置（`new Response(body, { status, headers })`）は I-266 で解消済み
-  - 例: `adapter/aws-lambda/handler.ts:268,429,496,578` — EventProcessor サブクラス
-  - 解決策: `return { ... }` は関数の戻り値型から expected type を逆引き（既存の return 文 expected type 基盤を拡張）
-  - 🔗 I-112c の子イシュー。I-266 完了済み、着手可能
 
 - **[I-275]** **multiple spread のフィールド上書き順序が TS と逆転する** — サイレント意味変更
   - `{ ...a, ...b }` で TS のセマンティクスは「b のフィールドが a のフィールドを上書き」だが、生成 Rust コードでは `a` のフィールドが先に展開され `b` が struct update base になるため、`a` の値が残り `b` の値で上書きされない

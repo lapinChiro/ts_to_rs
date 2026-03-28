@@ -115,6 +115,126 @@ fn test_registry_merge() {
     assert!(reg1.get("Color").is_some());
 }
 
+#[test]
+fn test_merge_preserves_builtin_constructor_when_source_has_none() {
+    // Builtin Response with constructor should not be overwritten by source-defined
+    // empty Response interface (e.g., `export interface Response extends ClientResponse {}`)
+    let mut builtin_reg = TypeRegistry::new();
+    let ctor = MethodSignature {
+        params: vec![
+            ("body".to_string(), RustType::String),
+            (
+                "init".to_string(),
+                RustType::Named {
+                    name: "ResponseInit".to_string(),
+                    type_args: vec![],
+                },
+            ),
+        ],
+        return_type: None,
+    };
+    builtin_reg.register_external(
+        "Response".to_string(),
+        TypeDef::Struct {
+            type_params: vec![],
+            fields: vec![],
+            methods: HashMap::new(),
+            constructor: Some(vec![ctor]),
+            extends: vec![],
+            is_interface: true,
+        },
+    );
+
+    // Source-defined Response without constructor (mimics Hono's client/types.ts)
+    let mut source_reg = TypeRegistry::new();
+    source_reg.register(
+        "Response".to_string(),
+        TypeDef::Struct {
+            type_params: vec![],
+            fields: vec![],
+            methods: HashMap::new(),
+            constructor: None,
+            extends: vec!["ClientResponse".to_string()],
+            is_interface: true,
+        },
+    );
+
+    builtin_reg.merge(&source_reg);
+
+    // Constructor should be preserved from builtin
+    match builtin_reg.get("Response").unwrap() {
+        TypeDef::Struct {
+            constructor,
+            extends,
+            ..
+        } => {
+            assert!(
+                constructor.is_some(),
+                "builtin constructor should be preserved after merge"
+            );
+            let ctors = constructor.as_ref().unwrap();
+            assert_eq!(ctors.len(), 1);
+            assert_eq!(ctors[0].params.len(), 2);
+            // Source extends should be adopted
+            assert!(extends.contains(&"ClientResponse".to_string()));
+        }
+        other => panic!("expected Struct, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_merge_source_constructor_overrides_builtin() {
+    // When source defines its OWN constructor, it should take priority
+    let mut builtin_reg = TypeRegistry::new();
+    builtin_reg.register_external(
+        "MyClass".to_string(),
+        TypeDef::Struct {
+            type_params: vec![],
+            fields: vec![],
+            methods: HashMap::new(),
+            constructor: Some(vec![MethodSignature {
+                params: vec![("old".to_string(), RustType::String)],
+                return_type: None,
+            }]),
+            extends: vec![],
+            is_interface: false,
+        },
+    );
+
+    let mut source_reg = TypeRegistry::new();
+    source_reg.register(
+        "MyClass".to_string(),
+        TypeDef::Struct {
+            type_params: vec![],
+            fields: vec![("x".to_string(), RustType::F64)],
+            methods: HashMap::new(),
+            constructor: Some(vec![MethodSignature {
+                params: vec![("new_param".to_string(), RustType::F64)],
+                return_type: None,
+            }]),
+            extends: vec![],
+            is_interface: false,
+        },
+    );
+
+    builtin_reg.merge(&source_reg);
+
+    match builtin_reg.get("MyClass").unwrap() {
+        TypeDef::Struct {
+            constructor,
+            fields,
+            ..
+        } => {
+            // Source constructor should take priority
+            let ctors = constructor.as_ref().unwrap();
+            assert_eq!(ctors[0].params[0].0, "new_param");
+            // Source fields should be adopted
+            assert_eq!(fields.len(), 1);
+        }
+        other => panic!("expected Struct, got {other:?}"),
+    }
+}
+
 // -- build_registry tests --
 
 #[test]

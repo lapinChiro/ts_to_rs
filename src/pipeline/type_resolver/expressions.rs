@@ -422,7 +422,7 @@ impl<'a> TypeResolver<'a> {
                 self.resolve_expr(&bin.right);
                 ResolvedType::Known(RustType::F64)
             }
-            LogicalAnd | LogicalOr => {
+            LogicalAnd => {
                 // Both sides must be resolved to register all sub-expression types
                 // (e.g., `typeof x === "string" && typeof y === "number"` needs both
                 // x and y registered in expr_types for narrowing guard resolution)
@@ -434,15 +434,11 @@ impl<'a> TypeResolver<'a> {
                     left
                 }
             }
-            NullishCoalescing => {
+            LogicalOr => {
                 let left = self.resolve_expr(&bin.left);
-                // If left is Option<T>, set inner T as expected on RHS
-                if let ResolvedType::Known(RustType::Option(ref inner)) = left {
-                    let rhs_span = Span::from_swc(bin.right.span());
-                    self.result
-                        .expected_types
-                        .insert(rhs_span, inner.as_ref().clone());
-                    self.propagate_expected(&bin.right, inner);
+                // `x || {}` — propagate left operand's type to fallback object literal
+                if let ResolvedType::Known(ref left_ty) = left {
+                    self.propagate_fallback_expected(&bin.right, left_ty);
                 }
                 let right = self.resolve_expr(&bin.right);
                 if !matches!(right, ResolvedType::Unknown) {
@@ -451,6 +447,40 @@ impl<'a> TypeResolver<'a> {
                     left
                 }
             }
+            NullishCoalescing => {
+                let left = self.resolve_expr(&bin.left);
+                // `x ?? {}` — propagate left operand's type to fallback object literal
+                // For Option<T>, unwrap the inner type first
+                match &left {
+                    ResolvedType::Known(RustType::Option(ref inner)) => {
+                        let rhs_span = Span::from_swc(bin.right.span());
+                        self.result
+                            .expected_types
+                            .insert(rhs_span, inner.as_ref().clone());
+                        self.propagate_expected(&bin.right, inner);
+                    }
+                    ResolvedType::Known(ref left_ty) => {
+                        self.propagate_fallback_expected(&bin.right, left_ty);
+                    }
+                    _ => {}
+                }
+                let right = self.resolve_expr(&bin.right);
+                if !matches!(right, ResolvedType::Unknown) {
+                    right
+                } else {
+                    left
+                }
+            }
+        }
+    }
+
+    /// `x || {}` / `x ?? {}` パターンで、右辺がオブジェクトリテラルの場合に
+    /// 左辺の解決済み型を expected type として右辺に伝播する。
+    fn propagate_fallback_expected(&mut self, rhs: &ast::Expr, left_ty: &RustType) {
+        if matches!(rhs, ast::Expr::Object(_)) {
+            let rhs_span = Span::from_swc(rhs.span());
+            self.result.expected_types.insert(rhs_span, left_ty.clone());
+            self.propagate_expected(rhs, left_ty);
         }
     }
 

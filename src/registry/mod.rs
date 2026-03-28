@@ -362,14 +362,71 @@ impl TypeRegistry {
 
     /// 別の TypeRegistry の内容をマージする。
     ///
-    /// 同名の型が既に存在する場合は上書きする。
+    /// ビルトイン型（`external_types` に含まれる名前）がソース定義型で上書きされる場合、
+    /// ビルトインの `constructor` と `methods` 情報を保護する。ソース定義型が独自の
+    /// constructor/methods を持つ場合はソース定義を優先する。
     pub fn merge(&mut self, other: &TypeRegistry) {
         for (name, def) in &other.types {
+            if self.external_types.contains(name) {
+                if let Some(existing) = self.types.get(name) {
+                    let merged = merge_with_builtin_preservation(existing, def);
+                    self.types.insert(name.clone(), merged);
+                    continue;
+                }
+            }
             self.types.insert(name.clone(), def.clone());
         }
         for name in &other.external_types {
             self.external_types.insert(name.clone());
         }
+    }
+}
+
+/// ビルトイン型とソース定義型をマージする。
+///
+/// ソース定義型のフィールド・extends を採用しつつ、ビルトインの constructor/methods を
+/// 保護する。ソース定義型が独自の constructor/methods を持つ場合はソース定義を優先する。
+fn merge_with_builtin_preservation(builtin: &TypeDef, source: &TypeDef) -> TypeDef {
+    match (builtin, source) {
+        (
+            TypeDef::Struct {
+                constructor: builtin_ctor,
+                methods: builtin_methods,
+                ..
+            },
+            TypeDef::Struct {
+                type_params,
+                fields,
+                methods: source_methods,
+                constructor: source_ctor,
+                extends,
+                is_interface,
+            },
+        ) => {
+            // Constructor: use source if it has one, otherwise preserve builtin
+            let constructor = if source_ctor.as_ref().is_some_and(|c| !c.is_empty()) {
+                source_ctor.clone()
+            } else {
+                builtin_ctor.clone()
+            };
+
+            // Methods: merge builtin methods with source methods (source takes priority)
+            let mut methods = builtin_methods.clone();
+            for (name, sigs) in source_methods {
+                methods.insert(name.clone(), sigs.clone());
+            }
+
+            TypeDef::Struct {
+                type_params: type_params.clone(),
+                fields: fields.clone(),
+                methods,
+                constructor,
+                extends: extends.clone(),
+                is_interface: *is_interface,
+            }
+        }
+        // For non-Struct types, source takes priority
+        (_, source_def) => source_def.clone(),
     }
 }
 
