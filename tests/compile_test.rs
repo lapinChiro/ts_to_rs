@@ -4,7 +4,7 @@ use std::sync::Mutex;
 
 use ts_to_rs::pipeline::module_resolver::TrivialResolver;
 use ts_to_rs::pipeline::TranspileInput;
-use ts_to_rs::transpile_collecting;
+use ts_to_rs::{transpile_collecting, transpile_with_builtins};
 
 /// Path to the fixed Cargo project used for compile checking.
 const COMPILE_CHECK_DIR: &str = "tests/compile-check";
@@ -168,6 +168,73 @@ fn test_all_fixtures_compile() {
         let ts_source = fs::read_to_string(&path)
             .unwrap_or_else(|_| panic!("failed to read fixture: {}", path.display()));
         let (rs_source, _unsupported) = transpile_collecting(&ts_source)
+            .unwrap_or_else(|_| panic!("failed to transpile fixture: {}", path.display()));
+
+        assert_compiles(&rs_source, fixture_name);
+        fixture_count += 1;
+    }
+
+    assert!(
+        fixture_count > 0,
+        "no fixtures found in {fixture_dir} — test is vacuously passing"
+    );
+}
+
+/// Same as `test_all_fixtures_compile` but with built-in types loaded.
+///
+/// This catches regressions in code that depends on builtin type definitions
+/// (Array methods, Response/Request constructors, etc.) which the builtins-free
+/// test cannot detect.
+#[test]
+fn test_all_fixtures_compile_with_builtins() {
+    let _lock = COMPILE_LOCK.lock().unwrap();
+
+    let fixture_dir = "tests/fixtures";
+    let mut fixture_count = 0;
+
+    // Fixtures that cannot compile even WITH builtins (non-builtin-related issues):
+    let skip_compile_with_builtins = [
+        "indexed-access-type",
+        "trait-coercion",
+        "union-fallback",
+        "any-type-narrowing",
+        "ternary-union",
+        "type-narrowing",
+        "array-builtin-methods",
+        // instanceof-builtin / external-type-struct: method impl blocks not generated (I-270c).
+        // Struct definitions are generated but method calls (e.g., .toString()) fail.
+        "instanceof-builtin",
+        "external-type-struct",
+        // string-methods: builtins ありで String の Pattern trait 不一致。
+        // builtins なしでは問題なし。ビルトイン型ロードが変換結果を変える副作用。
+        "string-methods",
+    ];
+
+    let mut entries: Vec<_> = fs::read_dir(fixture_dir)
+        .expect("failed to read fixtures directory")
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            e.path()
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| {
+                    n.ends_with(".input.ts")
+                        && !skip_compile_with_builtins.iter().any(|s| n.starts_with(s))
+                })
+        })
+        .collect();
+    entries.sort_by_key(|e| e.path());
+
+    for entry in entries {
+        let path = entry.path();
+        let fixture_name = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .expect("invalid fixture filename");
+
+        let ts_source = fs::read_to_string(&path)
+            .unwrap_or_else(|_| panic!("failed to read fixture: {}", path.display()));
+        let (rs_source, _unsupported) = transpile_with_builtins(&ts_source)
             .unwrap_or_else(|_| panic!("failed to transpile fixture: {}", path.display()));
 
         assert_compiles(&rs_source, fixture_name);

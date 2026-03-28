@@ -1132,3 +1132,70 @@ fn test_vec_map_callback_param_gets_element_type() {
         res.expected_types.values().collect::<Vec<_>>()
     );
 }
+
+// I-288: Tests using real builtin types (resolve_with_builtins)
+
+#[test]
+fn test_vec_push_expected_type_with_real_builtins() {
+    // Uses actual ecmascript.json Array.push signature (has_rest=true, params=[Vec<T>])
+    let res = resolve_with_builtins(
+        r#"
+        interface Item { name: string }
+        function test(arr: Item[]) {
+            arr.push({ name: "x" });
+        }
+        "#,
+    );
+
+    let has_item_expected = res
+        .expected_types
+        .values()
+        .any(|t| matches!(t, RustType::Named { name, .. } if name == "Item"));
+    assert!(
+        has_item_expected,
+        "push argument should have Named(\"Item\") as expected type from real Array.push signature"
+    );
+}
+
+#[test]
+fn test_vec_map_callback_with_real_builtins() {
+    // Uses actual ecmascript.json Array.map signature to infer callback param type
+    let res = resolve_with_builtins(
+        r#"
+        interface Item { name: string }
+        function test(arr: Item[]) {
+            arr.map(item => item.name);
+        }
+        "#,
+    );
+
+    let has_fn_expected = res
+        .expected_types
+        .values()
+        .any(|t| matches!(t, RustType::Fn { .. }));
+    assert!(
+        has_fn_expected,
+        "map callback should have Fn type as expected from real Array.map signature"
+    );
+}
+
+#[test]
+fn test_vec_filter_callback_with_real_builtins() {
+    let res = resolve_with_builtins(
+        r#"
+        interface Item { active: boolean }
+        function test(arr: Item[]) {
+            arr.filter(item => item.active);
+        }
+        "#,
+    );
+
+    let has_fn_expected = res
+        .expected_types
+        .values()
+        .any(|t| matches!(t, RustType::Fn { .. }));
+    assert!(
+        has_fn_expected,
+        "filter callback should have Fn type as expected from real Array.filter signature"
+    );
+}

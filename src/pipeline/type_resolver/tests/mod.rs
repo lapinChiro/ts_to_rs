@@ -81,6 +81,22 @@ pub(super) fn build_shape_registry() -> TypeRegistry {
     reg
 }
 
+/// Resolves with built-in type definitions (ECMAScript + Web API) loaded.
+///
+/// This enables testing TypeResolver behavior with real Array/String/Promise methods
+/// from ecmascript.json and web_api.json, rather than manually constructed MethodSignatures.
+pub(super) fn resolve_with_builtins(source: &str) -> FileTypeResolution {
+    let (builtin_reg, _base_synthetic) = crate::external_types::load_builtin_types().unwrap();
+    let files = parse_files(vec![(PathBuf::from("test.ts"), source.to_string())]).unwrap();
+    let file = &files.files[0];
+    let mut reg = build_registry(&file.module);
+    reg.merge(&builtin_reg);
+    let mut synthetic = SyntheticTypeRegistry::new();
+
+    let mut resolver = TypeResolver::new(&reg, &mut synthetic);
+    resolver.resolve_file(file)
+}
+
 pub(super) fn make_sig(param_types: Vec<RustType>, ret: Option<RustType>) -> MethodSignature {
     MethodSignature {
         params: param_types

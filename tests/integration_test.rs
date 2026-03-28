@@ -1,573 +1,14 @@
 use std::fs;
 use ts_to_rs::{transpile, transpile_collecting, transpile_with_builtins};
 
-#[test]
-fn test_import_export() {
-    let input = fs::read_to_string("tests/fixtures/import-export.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_basic_types() {
-    let input = fs::read_to_string("tests/fixtures/basic-types.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_optional_fields() {
-    let input = fs::read_to_string("tests/fixtures/optional-fields.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_functions() {
-    let input = fs::read_to_string("tests/fixtures/functions.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_classes() {
-    let input = fs::read_to_string("tests/fixtures/classes.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_closures() {
-    let input = fs::read_to_string("tests/fixtures/closures.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_generics() {
-    let input = fs::read_to_string("tests/fixtures/generics.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_function_calls() {
-    let input = fs::read_to_string("tests/fixtures/function_calls.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_error_handling() {
-    let input = fs::read_to_string("tests/fixtures/error_handling.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_loops() {
-    let input = fs::read_to_string("tests/fixtures/loops.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_mixed() {
-    let input = fs::read_to_string("tests/fixtures/mixed.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_enum() {
-    let input = fs::read_to_string("tests/fixtures/enum.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_array_literal() {
-    let input = fs::read_to_string("tests/fixtures/array-literal.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_object_literal() {
-    let input = fs::read_to_string("tests/fixtures/object-literal.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_type_registry() {
-    let input = fs::read_to_string("tests/fixtures/type-registry.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_string_to_string() {
-    let input = fs::read_to_string("tests/fixtures/string-to-string.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_ternary() {
-    let input = fs::read_to_string("tests/fixtures/ternary.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_class_inheritance() {
-    let input = fs::read_to_string("tests/fixtures/class-inheritance.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_break_continue() {
-    let input = fs::read_to_string("tests/fixtures/break-continue.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_object_destructuring() {
-    let input = fs::read_to_string("tests/fixtures/object-destructuring.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_console_api() {
-    let input = fs::read_to_string("tests/fixtures/console-api.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_general_for_loop() {
-    let input = fs::read_to_string("tests/fixtures/general-for-loop.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_unsupported_syntax_collecting_output() {
-    let input = fs::read_to_string("tests/fixtures/unsupported-syntax.input.ts").unwrap();
-    let (output, unsupported) = transpile_collecting(&input).unwrap();
-    insta::assert_snapshot!("unsupported_syntax_rust_output", output);
-    let json = serde_json::to_string_pretty(&unsupported).unwrap();
-    insta::assert_snapshot!("unsupported_syntax_json_report", json);
-}
-
-#[test]
-fn test_string_methods() {
-    let input = fs::read_to_string("tests/fixtures/string-methods.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_array_methods() {
-    let input = fs::read_to_string("tests/fixtures/array-methods.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_do_while() {
-    let input = fs::read_to_string("tests/fixtures/do-while.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_array_destructuring() {
-    let input = fs::read_to_string("tests/fixtures/array-destructuring.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_number_parse_api() {
-    let input = fs::read_to_string("tests/fixtures/number-parse-api.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_math_api() {
-    let input = fs::read_to_string("tests/fixtures/math-api.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_async_await() {
-    let input = fs::read_to_string("tests/fixtures/async-await.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_type_infer_unannotated() {
-    let input = fs::read_to_string("tests/fixtures/type-infer-unannotated.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_unary_operators() {
-    let input = fs::read_to_string("tests/fixtures/unary-operators.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_void_type() {
-    let input = fs::read_to_string("tests/fixtures/void-type.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_nullish_coalescing() {
-    let input = fs::read_to_string("tests/fixtures/nullish-coalescing.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_type_assertion() {
-    let input = fs::read_to_string("tests/fixtures/type-assertion.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_optional_chaining() {
-    let input = fs::read_to_string("tests/fixtures/optional-chaining.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_keyword_types() {
-    let input = fs::read_to_string("tests/fixtures/keyword-types.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_array_spread() {
-    let input = fs::read_to_string("tests/fixtures/array-spread.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_object_spread() {
-    let input = fs::read_to_string("tests/fixtures/object-spread.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_string_literal_union() {
-    let input = fs::read_to_string("tests/fixtures/string-literal-union.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_getter_setter() {
-    let input = fs::read_to_string("tests/fixtures/getter-setter.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_default_params() {
-    let input = fs::read_to_string("tests/fixtures/default-params.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_unsupported_syntax_default_errors() {
-    let input = fs::read_to_string("tests/fixtures/unsupported-syntax.input.ts").unwrap();
-    let result = transpile(&input);
-    assert!(
-        result.is_err(),
-        "transpile should error on unsupported syntax by default"
-    );
-}
-
-#[test]
-fn test_union_type() {
-    let input = fs::read_to_string("tests/fixtures/union-type.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_indexed_access_type() {
-    let input = fs::read_to_string("tests/fixtures/indexed-access-type.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_builtin_api_batch() {
-    let input = fs::read_to_string("tests/fixtures/builtin-api-batch.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_inline_type_literal_param() {
-    let input = fs::read_to_string("tests/fixtures/inline-type-literal-param.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_interface_mixed() {
-    let input = fs::read_to_string("tests/fixtures/interface-mixed.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_discriminated_union() {
-    let input = fs::read_to_string("tests/fixtures/discriminated-union.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_intersection_type() {
-    let input = fs::read_to_string("tests/fixtures/intersection-type.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_abstract_class() {
-    let input = fs::read_to_string("tests/fixtures/abstract-class.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_conditional_type() {
-    let input = fs::read_to_string("tests/fixtures/conditional-type.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_switch() {
-    let input = fs::read_to_string("tests/fixtures/switch.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_param_properties() {
-    let input = fs::read_to_string("tests/fixtures/param-properties.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_update_expr() {
-    let input = fs::read_to_string("tests/fixtures/update-expr.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_class_default_params() {
-    let input = fs::read_to_string("tests/fixtures/class-default-params.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_fn_expr() {
-    let input = fs::read_to_string("tests/fixtures/fn-expr.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_var_type_arrow() {
-    let input = fs::read_to_string("tests/fixtures/var-type-arrow.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_var_type_alias_arrow() {
-    let input = fs::read_to_string("tests/fixtures/var-type-alias-arrow.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_regex_literal() {
-    let input = fs::read_to_string("tests/fixtures/regex-literal.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_multi_var_decl() {
-    let input = fs::read_to_string("tests/fixtures/multi-var-decl.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    // Should produce two separate let statements, not error
-    assert!(
-        output.contains("let a") && output.contains("let b"),
-        "multi-var const should expand to separate lets: {output}"
-    );
-    assert!(
-        output.contains("let mut x") && output.contains("let mut y"),
-        "multi-var let should expand to separate let muts: {output}"
-    );
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_nullable_return() {
-    let input = fs::read_to_string("tests/fixtures/nullable-return.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    // Ternary with null should NOT double-wrap in Some()
-    assert!(
-        !output.contains("Some(if"),
-        "ternary return should not be wrapped in Some(): {output}"
-    );
-    // Direct return of literal should be wrapped in Some()
-    assert!(
-        output.contains(r#"Some("found".to_string())"#),
-        "direct return of literal should be wrapped in Some(): {output}"
-    );
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_call_signature_rest() {
-    let input = fs::read_to_string("tests/fixtures/call-signature-rest.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_interface_methods() {
-    let input = fs::read_to_string("tests/fixtures/interface-methods.input.ts").unwrap();
-    let output = transpile_collecting(&input).unwrap().0;
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_narrowing_truthy_instanceof() {
-    let input = fs::read_to_string("tests/fixtures/narrowing-truthy-instanceof.input.ts").unwrap();
-    let output = transpile_collecting(&input).unwrap().0;
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_any_type_narrowing() {
-    let input = fs::read_to_string("tests/fixtures/any-type-narrowing.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_type_narrowing() {
-    let input = fs::read_to_string("tests/fixtures/type-narrowing.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_union_fallback() {
-    let input = fs::read_to_string("tests/fixtures/union-fallback.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_trait_coercion() {
-    let input = fs::read_to_string("tests/fixtures/trait-coercion.input.ts").unwrap();
-    let output = transpile_collecting(&input).unwrap().0;
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_generic_class() {
-    let input = fs::read_to_string("tests/fixtures/generic_class.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_anon_struct_inference() {
-    let input = fs::read_to_string("tests/fixtures/anon-struct-inference.input.ts").unwrap();
-    let (output, _unsupported) = transpile_collecting(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_array_builtin_methods() {
-    let input = fs::read_to_string("tests/fixtures/array-builtin-methods.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_instanceof_builtin() {
-    let input = fs::read_to_string("tests/fixtures/instanceof-builtin.input.ts").unwrap();
-    let (output, _unsupported) = transpile_collecting(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_external_type_struct() {
-    let input = fs::read_to_string("tests/fixtures/external-type-struct.input.ts").unwrap();
-    let (output, _unsupported) = transpile_with_builtins(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_instanceof_builtin_with_builtins() {
-    let input = fs::read_to_string("tests/fixtures/instanceof-builtin.input.ts").unwrap();
-    let (output, _unsupported) = transpile_with_builtins(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_intersection_methods() {
-    let input = fs::read_to_string("tests/fixtures/intersection-methods.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-#[test]
-fn test_typeof_const() {
-    let input = fs::read_to_string("tests/fixtures/typeof-const.input.ts").unwrap();
-    let output = transpile(&input).unwrap();
-    insta::assert_snapshot!(output);
-}
-
-/// Generates a snapshot test that reads a fixture, transpiles, and asserts snapshot.
+/// Generates a snapshot test from a fixture file name.
 ///
-/// - `snapshot_test!(test_foo)` uses `transpile()` (no builtins)
-/// - `snapshot_test!(test_foo, builtins)` uses `transpile_with_builtins()`
+/// Derives the fixture path from the test name: `test_foo_bar` → `tests/fixtures/foo-bar.input.ts`.
+///
+/// Variants:
+/// - `snapshot_test!(test_foo)` — uses `transpile()` (no builtins, errors on unsupported)
+/// - `snapshot_test!(test_foo, collecting)` — uses `transpile_collecting()` (no builtins, collects unsupported)
+/// - `snapshot_test!(test_foo, builtins)` — uses `transpile_with_builtins()` (builtins loaded, collects unsupported)
 macro_rules! snapshot_test {
     ($name:ident) => {
         #[test]
@@ -578,6 +19,18 @@ macro_rules! snapshot_test {
                 .replace('_', "-");
             let input = fs::read_to_string(format!("tests/fixtures/{fixture}.input.ts")).unwrap();
             let output = transpile(&input).unwrap();
+            insta::assert_snapshot!(output);
+        }
+    };
+    ($name:ident, collecting) => {
+        #[test]
+        fn $name() {
+            let fixture = stringify!($name)
+                .strip_prefix("test_")
+                .unwrap_or(stringify!($name))
+                .replace('_', "-");
+            let input = fs::read_to_string(format!("tests/fixtures/{fixture}.input.ts")).unwrap();
+            let (output, _unsupported) = transpile_collecting(&input).unwrap();
             insta::assert_snapshot!(output);
         }
     };
@@ -595,9 +48,146 @@ macro_rules! snapshot_test {
     };
 }
 
-// I-286: sink-source expected type propagation tests
-// Vec method tests need builtins (Array methods are in ecmascript.json)
-snapshot_test!(test_vec_method_expected_type, builtins);
+// ── transpile (no builtins, errors on unsupported) ──────────────────────
+
+snapshot_test!(test_import_export);
+snapshot_test!(test_basic_types);
+snapshot_test!(test_optional_fields);
+snapshot_test!(test_functions);
+snapshot_test!(test_classes);
+snapshot_test!(test_closures);
+snapshot_test!(test_generics);
+snapshot_test!(test_function_calls);
+snapshot_test!(test_error_handling);
+snapshot_test!(test_loops);
+snapshot_test!(test_mixed);
+snapshot_test!(test_enum);
+snapshot_test!(test_array_literal);
+snapshot_test!(test_object_literal);
+snapshot_test!(test_type_registry);
+snapshot_test!(test_string_to_string);
+snapshot_test!(test_ternary);
+snapshot_test!(test_class_inheritance);
+snapshot_test!(test_break_continue);
+snapshot_test!(test_object_destructuring);
+snapshot_test!(test_console_api);
+snapshot_test!(test_general_for_loop);
+snapshot_test!(test_string_methods);
+snapshot_test!(test_array_methods);
+snapshot_test!(test_do_while);
+snapshot_test!(test_array_destructuring);
+snapshot_test!(test_number_parse_api);
+snapshot_test!(test_math_api);
+snapshot_test!(test_async_await);
+snapshot_test!(test_type_infer_unannotated);
+snapshot_test!(test_unary_operators);
+snapshot_test!(test_void_type);
+snapshot_test!(test_nullish_coalescing);
+snapshot_test!(test_type_assertion);
+snapshot_test!(test_optional_chaining);
+snapshot_test!(test_keyword_types);
+snapshot_test!(test_array_spread);
+snapshot_test!(test_object_spread);
+snapshot_test!(test_string_literal_union);
+snapshot_test!(test_getter_setter);
+snapshot_test!(test_default_params);
+snapshot_test!(test_union_type);
+snapshot_test!(test_indexed_access_type);
+snapshot_test!(test_builtin_api_batch);
+snapshot_test!(test_inline_type_literal_param);
+snapshot_test!(test_interface_mixed);
+snapshot_test!(test_discriminated_union);
+snapshot_test!(test_intersection_type);
+snapshot_test!(test_abstract_class);
+snapshot_test!(test_conditional_type);
+snapshot_test!(test_switch);
+snapshot_test!(test_param_properties);
+snapshot_test!(test_update_expr);
+snapshot_test!(test_class_default_params);
+snapshot_test!(test_fn_expr);
+snapshot_test!(test_var_type_arrow);
+snapshot_test!(test_var_type_alias_arrow);
+snapshot_test!(test_regex_literal);
+snapshot_test!(test_call_signature_rest);
+snapshot_test!(test_any_type_narrowing);
+snapshot_test!(test_type_narrowing);
+snapshot_test!(test_union_fallback);
+snapshot_test!(test_generic_class);
+snapshot_test!(test_array_builtin_methods);
+snapshot_test!(test_intersection_methods);
+snapshot_test!(test_typeof_const);
 snapshot_test!(test_assignment_expected_type);
 snapshot_test!(test_as_type_expected);
 snapshot_test!(test_ternary_union);
+
+// ── transpile_collecting (no builtins, collects unsupported) ────────────
+
+snapshot_test!(test_interface_methods, collecting);
+snapshot_test!(test_narrowing_truthy_instanceof, collecting);
+snapshot_test!(test_trait_coercion, collecting);
+snapshot_test!(test_anon_struct_inference, collecting);
+snapshot_test!(test_instanceof_builtin, collecting);
+
+// ── transpile_with_builtins ────────────────────────────────────────────
+
+snapshot_test!(test_vec_method_expected_type, builtins);
+snapshot_test!(test_external_type_struct, builtins);
+// test_instanceof_builtin_with_builtins: same fixture as test_instanceof_builtin
+// but with builtins loaded. Can't use macro (fixture name ≠ test name).
+#[test]
+fn test_instanceof_builtin_with_builtins() {
+    let input = fs::read_to_string("tests/fixtures/instanceof-builtin.input.ts").unwrap();
+    let (output, _unsupported) = transpile_with_builtins(&input).unwrap();
+    insta::assert_snapshot!(output);
+}
+
+// ── Custom tests (non-macro: require specialized assertions) ───────────
+
+#[test]
+fn test_unsupported_syntax_default_errors() {
+    let input = fs::read_to_string("tests/fixtures/unsupported-syntax.input.ts").unwrap();
+    let result = transpile(&input);
+    assert!(
+        result.is_err(),
+        "transpile should error on unsupported syntax by default"
+    );
+}
+
+#[test]
+fn test_unsupported_syntax_collecting_output() {
+    let input = fs::read_to_string("tests/fixtures/unsupported-syntax.input.ts").unwrap();
+    let (output, unsupported) = transpile_collecting(&input).unwrap();
+    insta::assert_snapshot!("unsupported_syntax_rust_output", output);
+    let json = serde_json::to_string_pretty(&unsupported).unwrap();
+    insta::assert_snapshot!("unsupported_syntax_json_report", json);
+}
+
+#[test]
+fn test_multi_var_decl() {
+    let input = fs::read_to_string("tests/fixtures/multi-var-decl.input.ts").unwrap();
+    let output = transpile(&input).unwrap();
+    assert!(
+        output.contains("let a") && output.contains("let b"),
+        "multi-var const should expand to separate lets: {output}"
+    );
+    assert!(
+        output.contains("let mut x") && output.contains("let mut y"),
+        "multi-var let should expand to separate let muts: {output}"
+    );
+    insta::assert_snapshot!(output);
+}
+
+#[test]
+fn test_nullable_return() {
+    let input = fs::read_to_string("tests/fixtures/nullable-return.input.ts").unwrap();
+    let output = transpile(&input).unwrap();
+    assert!(
+        !output.contains("Some(if"),
+        "ternary return should not be wrapped in Some(): {output}"
+    );
+    assert!(
+        output.contains(r#"Some("found".to_string())"#),
+        "direct return of literal should be wrapped in Some(): {output}"
+    );
+    insta::assert_snapshot!(output);
+}
