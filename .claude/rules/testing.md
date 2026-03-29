@@ -57,36 +57,36 @@ E2E tests are not required when:
 
 ### Test Case Design Techniques
 
-When designing test cases, apply the following techniques systematically. Each technique addresses a different class of defects — relying on a single technique leaves blind spots.
+Apply these techniques systematically when designing test cases. Each addresses a different defect class — relying on a single technique leaves blind spots.
 
-#### Equivalence Partitioning (同値分割)
+#### Equivalence Partitioning
 
-Partition inputs into classes that should produce the same kind of output. Write at least one test per partition, including **invalid partitions**.
+Partition inputs into classes producing the same kind of output. Write at least one test per partition, including **invalid partitions**.
 
-For this project's common partitions:
-- **AST node variants**: Each `match` arm on SWC AST enums is a partition. Ensure every handled variant has a test, and unhandled variants have explicit "returns error/None" tests
-- **Type partitions**: `RustType::F64`, `String`, `Bool`, `Option(_)`, `Named{..}`, `Vec(_)`, `Any`, `Fn{..}`, `Tuple(..)` — each is a distinct partition for type-dependent logic
+Project-specific partitions:
+- **AST node variants**: Each `match` arm on SWC AST enums is a partition. Test every handled variant; test unhandled variants for graceful error/None
+- **Type partitions**: `RustType::F64`, `String`, `Bool`, `Option(_)`, `Named{..}`, `Vec(_)`, `Any`, `Fn{..}`, `Tuple(..)` — each distinct for type-dependent logic
 - **Operator partitions**: `==`/`===` vs `!=`/`!==`, arithmetic vs comparison vs logical
 
-#### Boundary Value Analysis (境界値分析)
+#### Boundary Value Analysis
 
-For ordered inputs, test at boundaries. Apply to:
+Test at boundaries of ordered inputs:
 - Empty collections (`[]`, `{}`, empty `Vec`)
 - Single-element vs multi-element collections
 - Numeric extremes (`i32::MAX`, `f64::NAN`, `f64::INFINITY`)
 - Nesting depth: 0 (flat), 1 (nested), 2+ (deeply nested)
 - Parameter counts: 0, 1, many; especially for rest parameters
 
-#### Branch Coverage (分岐網羅 / C1)
+#### Branch Coverage (C1)
 
-Every `if`, `match` arm, `if let Some/None`, and early `return` must have at least one test exercising each branch direction. When writing tests for a function:
-1. Count the decision points (if/else, match arms, `?` operator, `.ok()?`)
+Every `if`, `match` arm, `if let Some/None`, and early `return` must have at least one test exercising each branch direction:
+1. Count decision points (if/else, match arms, `?` operator, `.ok()?`)
 2. Ensure test cases cover both true/false or each arm
-3. Pay special attention to `_ => return None` and `_ => continue` — these are easy to miss
+3. Pay special attention to `_ => return None` and `_ => continue` — easy to miss
 
-#### Decision Table (デシジョンテーブル)
+#### Decision Table
 
-When a function's behavior depends on **2+ independent conditions**, enumerate the condition combinations. Especially relevant for:
+When behavior depends on **2+ independent conditions**, enumerate condition combinations. Especially relevant for:
 - Type conversion rules (optional × type × mutability)
 - Pattern matching with multiple checks (is_eq × has_type × has_variant)
 - Destructuring (has_default × is_nested × is_rest)
@@ -99,6 +99,16 @@ For functions that `match` on SWC AST enums:
 - Write one test for an unhandled variant verifying graceful failure (error or skip)
 - When a new variant is added to handling, add a corresponding test
 
+### Test Coverage Review in PRDs
+
+When creating a PRD, a test coverage review of the impact area is **mandatory** before writing the task list. See `prd-template` skill (step 2: Test Coverage Review) for the procedure. The review uses the techniques above to identify:
+- **Incorrect expectations**: Tests that pass but assert wrong behavior (bug-affirming tests)
+- **Missing branch coverage**: Decision points with no exercising test
+- **Missing partitions**: Input classes with no representative test
+- **Missing error paths**: Error-returning branches with no test
+
+**All** gaps found must be included in the PRD's task list, regardless of severity. No gap is too small to test.
+
 ### Code Conventions
 
 - `unwrap()` / `expect()` are only allowed in test code (use `Result` propagation in library code)
@@ -110,3 +120,4 @@ For functions that `match` on SWC AST enums:
 - Sharing mutable state (files, global variables, etc.) between tests
 - Using `unwrap()` / `expect()` in library code
 - Completing conversion feature changes without writing E2E tests
+- **Creating a PRD without reviewing existing test coverage** in the impact area using the techniques above

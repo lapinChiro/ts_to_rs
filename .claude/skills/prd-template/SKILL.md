@@ -20,11 +20,11 @@ Once the target item is determined, check `TODO` for items that should be batche
 - Items with **explicit overlap/relation** (cross-referenced with 🔗, etc.)
 - Items with the **same abstract pattern** (e.g., multiple `TsTypeOperator` variant support)
 
-If applicable items exist, include them in the PRD scope. However, do not force-combine items on independent code paths.
+If applicable items exist, include them in the PRD scope. Do not force-combine items on independent code paths.
 
 ### 1. Discovery
 
-Before writing the PRD, do the following:
+Before writing the PRD:
 
 1. Ask the user at least 2 clarification questions:
    - Why build this now? (motivation/priority confirmation)
@@ -32,7 +32,27 @@ Before writing the PRD, do the following:
    - Are there constraints? (technical constraints, compatibility with existing features, etc.)
 2. Draft the PRD only after receiving answers
 
-### 2. PRD Drafting
+### 2. Test Coverage Review
+
+**Before writing the Task List**, review existing tests in the impact area using the test techniques from `.claude/rules/testing.md`:
+
+1. **Enumerate decision points** (C1 branch coverage): List every `if`, `match` arm, `if let`, and early `return` in the affected functions. Map each to existing tests
+2. **Identify equivalence partitions**: List input partitions (AST variants, type variants, error/success paths). Check coverage
+3. **Check boundary values**: Empty collections, single vs multi elements, 0/1/N counts
+4. **Build decision table**: When 2+ independent conditions exist, enumerate combinations and check coverage
+5. **Detect incorrect expectations**: Tests that pass but assert wrong behavior (bug-affirming tests)
+
+Produce a gap table:
+
+```
+| Gap | Missing Pattern | Technique | Severity |
+|-----|----------------|-----------|----------|
+| G1  | Option None-fill | C1 (D22) | High     |
+```
+
+Include **all** identified gaps in the PRD's task list, regardless of severity. No gap is too small to test — incomplete coverage is a broken window.
+
+### 3. PRD Drafting
 
 Follow this template:
 
@@ -98,7 +118,10 @@ Analyze implementation in detail. Describe each task in the following format. As
 
 ## Test Plan
 
-Overview of tests to add/modify. Include normal cases, error cases, and boundary values.
+Overview of tests to add/modify. Includes:
+- Tests derived from the feature change itself
+- Tests derived from the test coverage review (gap analysis)
+- Normal cases, error cases, and boundary values
 
 ## Completion Criteria
 
@@ -109,7 +132,7 @@ Conditions for this PRD's work to be considered "complete". Include quality chec
 
 ## Design Decision Principles
 
-- **The only criterion is the ideal implementation**: "Is this the theoretically most ideal implementation?" is the sole design criterion. Development effort, cost, and impact scope are not valid design justifications. "Out of scope because effort is large" or "simplified version because impact scope is wide" are prohibited
+- **The only criterion is the ideal implementation**: "Is this the theoretically most ideal implementation?" is the sole design criterion. Development effort, cost, and impact scope are not valid design justifications
 - **Evaluate current implementation too**: Beyond new design, verify whether existing implementations diverge from ideal. If so, fix in-scope or record in TODO
 - **Consistency**: Choose solutions consistent as a type system and architecture. Avoid ad-hoc hacks that handle only specific cases
 - **Scope judgment**: Include what is logically part of the same problem. Exclude independently separate problems. Cost is not a criterion for scope decisions
@@ -118,6 +141,7 @@ Conditions for this PRD's work to be considered "complete". Include quality chec
 ## Prohibited
 
 - Skipping Discovery (clarification questions) and writing a PRD
+- **Skipping the test coverage review** — every PRD must include a systematic review of existing tests in the impact area using test techniques before writing the task list
 - Writing vague completion criteria ("works properly", "can be used without issues", etc.)
 - Including future-proofing design in the PRD (YAGNI)
 - Cramming multiple independent features into a single PRD
