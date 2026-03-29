@@ -219,3 +219,90 @@ fn collect_du_field_accesses_from_expr_inner(
         _ => {}
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parser::parse_typescript;
+
+    /// Extracts statements from the body of the first function in a TS source.
+    fn parse_function_body_stmts(source: &str) -> Vec<ast::Stmt> {
+        let module = parse_typescript(source).expect("parse should succeed");
+        for item in &module.body {
+            if let ast::ModuleItem::Stmt(ast::Stmt::Decl(ast::Decl::Fn(fn_decl))) = item {
+                if let Some(body) = &fn_decl.function.body {
+                    return body.stmts.clone();
+                }
+            }
+        }
+        panic!("no function found in source");
+    }
+
+    /// Extracts statements from raw TS expression statements (wrapped in a function for parsing).
+    fn parse_stmts(body_source: &str) -> Vec<ast::Stmt> {
+        let source = format!("function __wrapper__() {{ {body_source} }}");
+        parse_function_body_stmts(&source)
+    }
+
+    #[test]
+    fn test_collect_du_field_accesses_member_access_collects_field() {
+        let stmts = parse_stmts("s.radius;");
+        let fields = collect_du_field_accesses_from_stmts(&stmts, "s", "kind");
+        assert_eq!(fields, vec!["radius".to_string()]);
+    }
+
+    #[test]
+    fn test_collect_du_field_accesses_tag_field_excluded() {
+        // CRITICAL: tag field must be excluded to prevent silent semantic changes
+        let stmts = parse_stmts("s.kind;");
+        let fields = collect_du_field_accesses_from_stmts(&stmts, "s", "kind");
+        assert!(
+            fields.is_empty(),
+            "tag field 'kind' should be excluded, got: {fields:?}"
+        );
+    }
+
+    #[test]
+    fn test_collect_du_field_accesses_deduplicates() {
+        let stmts = parse_stmts("s.radius; s.radius; s.radius;");
+        let fields = collect_du_field_accesses_from_stmts(&stmts, "s", "kind");
+        assert_eq!(
+            fields,
+            vec!["radius".to_string()],
+            "duplicate accesses should be deduplicated"
+        );
+    }
+
+    #[test]
+    fn test_collect_du_field_accesses_nested_in_call_args() {
+        let stmts = parse_stmts("console.log(s.radius);");
+        let fields = collect_du_field_accesses_from_stmts(&stmts, "s", "kind");
+        assert_eq!(
+            fields,
+            vec!["radius".to_string()],
+            "field access in call args should be collected"
+        );
+    }
+
+    #[test]
+    fn test_collect_du_field_accesses_in_template_literal() {
+        let stmts = parse_stmts("`${s.name}`;");
+        let fields = collect_du_field_accesses_from_stmts(&stmts, "s", "kind");
+        assert_eq!(
+            fields,
+            vec!["name".to_string()],
+            "field access in template literal should be collected"
+        );
+    }
+
+    #[test]
+    fn test_collect_du_field_accesses_in_conditional_expr() {
+        let stmts = parse_stmts("true ? s.a : s.b;");
+        let fields = collect_du_field_accesses_from_stmts(&stmts, "s", "kind");
+        assert_eq!(
+            fields,
+            vec!["a".to_string(), "b".to_string()],
+            "both branches of conditional should be collected"
+        );
+    }
+}

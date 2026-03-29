@@ -5,6 +5,7 @@ use std::path::PathBuf;
 
 mod basics;
 mod complex_features;
+mod du_analysis;
 mod expected_types;
 
 pub(super) fn resolve(source: &str) -> FileTypeResolution {

@@ -316,3 +316,218 @@ fn test_static_block_generates_init_static_method() {
         "expected '_init_static' method, items: {items:?}"
     );
 }
+
+// --- transform_class_with_inheritance integration tests ---
+
+#[test]
+fn test_transform_class_abstract_generates_trait() {
+    let source = r#"
+abstract class Animal {
+    abstract speak(): string;
+    move(): void { console.log("moving"); }
+}
+"#;
+    let module = parse_typescript(source).expect("parse failed");
+    let items = transform_module(&module, &TypeRegistry::new()).unwrap();
+
+    // Abstract class should produce a Trait, not a Struct
+    let has_trait = items
+        .iter()
+        .any(|i| matches!(i, Item::Trait { name, .. } if name == "Animal"));
+    assert!(
+        has_trait,
+        "abstract class should generate trait, got: {items:?}"
+    );
+
+    let has_struct = items
+        .iter()
+        .any(|i| matches!(i, Item::Struct { name, .. } if name == "Animal"));
+    assert!(
+        !has_struct,
+        "abstract class should NOT generate struct, got: {items:?}"
+    );
+
+    // Trait should contain both abstract and concrete methods
+    if let Some(Item::Trait { methods, .. }) = items
+        .iter()
+        .find(|i| matches!(i, Item::Trait { name, .. } if name == "Animal"))
+    {
+        assert!(
+            methods.iter().any(|m| m.name == "speak"),
+            "trait should contain abstract method 'speak'"
+        );
+        // "move" is a Rust keyword, so the transformer may escape it as "r#move"
+        assert!(
+            methods
+                .iter()
+                .any(|m| m.name == "r#move" || m.name == "move"),
+            "trait should contain concrete method 'move', got: {:?}",
+            methods.iter().map(|m| &m.name).collect::<Vec<_>>()
+        );
+    }
+}
+
+#[test]
+fn test_transform_class_parent_generates_trait_and_struct() {
+    let source = r#"
+class Parent {
+    name: string;
+    getName(): string { return this.name; }
+}
+class Child extends Parent {
+    age: number;
+}
+"#;
+    let module = parse_typescript(source).expect("parse failed");
+    let items = transform_module(&module, &TypeRegistry::new()).unwrap();
+
+    // Parent class (extended by Child) should produce Struct + Trait + Impl
+    let has_parent_struct = items
+        .iter()
+        .any(|i| matches!(i, Item::Struct { name, .. } if name == "Parent"));
+    assert!(
+        has_parent_struct,
+        "parent class should generate struct, got: {items:?}"
+    );
+
+    let has_parent_trait = items
+        .iter()
+        .any(|i| matches!(i, Item::Trait { name, .. } if name == "ParentTrait"));
+    assert!(
+        has_parent_trait,
+        "parent class should generate ParentTrait, got: {items:?}"
+    );
+
+    let has_trait_impl = items.iter().any(|i| {
+        matches!(
+            i,
+            Item::Impl {
+                struct_name,
+                for_trait: Some(trait_ref),
+                ..
+            } if struct_name == "Parent" && trait_ref.name == "ParentTrait"
+        )
+    });
+    assert!(
+        has_trait_impl,
+        "parent should have impl ParentTrait for Parent, got: {items:?}"
+    );
+}
+
+#[test]
+fn test_transform_class_child_of_abstract_generates_impl_trait() {
+    let source = r#"
+abstract class Animal {
+    abstract speak(): string;
+}
+class Dog extends Animal {
+    name: string;
+    speak(): string { return this.name; }
+}
+"#;
+    let module = parse_typescript(source).expect("parse failed");
+    let items = transform_module(&module, &TypeRegistry::new()).unwrap();
+
+    // Dog should have Struct + impl Animal for Dog
+    let has_dog_struct = items
+        .iter()
+        .any(|i| matches!(i, Item::Struct { name, .. } if name == "Dog"));
+    assert!(
+        has_dog_struct,
+        "child of abstract should generate struct, got: {items:?}"
+    );
+
+    let has_trait_impl = items.iter().any(|i| {
+        matches!(
+            i,
+            Item::Impl {
+                struct_name,
+                for_trait: Some(trait_ref),
+                ..
+            } if struct_name == "Dog" && trait_ref.name == "Animal"
+        )
+    });
+    assert!(
+        has_trait_impl,
+        "child of abstract should have impl Animal for Dog, got: {items:?}"
+    );
+}
+
+#[test]
+fn test_transform_class_child_with_implements_generates_all() {
+    let source = r#"
+interface Greeter { greet(): string; }
+class Parent {
+    name: string;
+    getName(): string { return this.name; }
+}
+class Child extends Parent implements Greeter {
+    age: number;
+    greet(): string { return this.name; }
+    helper(): void {}
+}
+"#;
+    let module = parse_typescript(source).expect("parse failed");
+    let items = transform_module(&module, &TypeRegistry::new()).unwrap();
+
+    // Child struct
+    let has_child_struct = items
+        .iter()
+        .any(|i| matches!(i, Item::Struct { name, .. } if name == "Child"));
+    assert!(has_child_struct, "should have Child struct, got: {items:?}");
+
+    // impl ParentTrait for Child
+    let has_parent_trait_impl = items.iter().any(|i| {
+        matches!(
+            i,
+            Item::Impl {
+                struct_name,
+                for_trait: Some(trait_ref),
+                ..
+            } if struct_name == "Child" && trait_ref.name == "ParentTrait"
+        )
+    });
+    assert!(
+        has_parent_trait_impl,
+        "should have impl ParentTrait for Child, got: {items:?}"
+    );
+
+    // impl Greeter for Child
+    let has_greeter_impl = items.iter().any(|i| {
+        matches!(
+            i,
+            Item::Impl {
+                struct_name,
+                for_trait: Some(trait_ref),
+                ..
+            } if struct_name == "Child" && trait_ref.name == "Greeter"
+        )
+    });
+    assert!(
+        has_greeter_impl,
+        "should have impl Greeter for Child, got: {items:?}"
+    );
+
+    // impl Child (own methods)
+    let own_impl = items.iter().find(|i| {
+        matches!(
+            i,
+            Item::Impl {
+                struct_name,
+                for_trait: None,
+                ..
+            } if struct_name == "Child"
+        )
+    });
+    assert!(own_impl.is_some(), "should have impl Child, got: {items:?}");
+    if let Some(Item::Impl { methods, .. }) = own_impl {
+        assert!(
+            methods.iter().any(|m| m.name == "helper"),
+            "own impl should contain helper"
+        );
+        assert!(
+            !methods.iter().any(|m| m.name == "greet"),
+            "own impl should NOT contain greet (belongs to impl Greeter)"
+        );
+    }
+}

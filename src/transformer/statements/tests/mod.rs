@@ -2,6 +2,7 @@ mod control_flow;
 mod destructuring;
 mod error_handling;
 mod expected_types;
+mod helpers;
 mod loops;
 mod switch;
 mod variables;

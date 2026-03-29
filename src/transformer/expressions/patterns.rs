@@ -721,3 +721,102 @@ fn is_null_or_undefined(expr: &ast::Expr) -> bool {
     matches!(expr, ast::Expr::Lit(ast::Lit::Null(..)))
         || matches!(expr, ast::Expr::Ident(ident) if ident.sym.as_ref() == "undefined")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parser::parse_typescript;
+    use swc_ecma_ast::{ModuleItem, Stmt};
+
+    /// Helper: parse a TS expression statement and return the SWC Expr.
+    fn parse_expr(source: &str) -> ast::Expr {
+        let module = parse_typescript(source).expect("parse failed");
+        match &module.body[0] {
+            ModuleItem::Stmt(Stmt::Expr(expr_stmt)) => *expr_stmt.expr.clone(),
+            _ => panic!("expected expression statement"),
+        }
+    }
+
+    #[test]
+    fn test_extract_narrowing_guard_typeof_returns_typeof_guard() {
+        // typeof x === "string" → Typeof guard
+        let expr = parse_expr(r#"typeof x === "string""#);
+        let guard = extract_narrowing_guard(&expr).expect("should extract Typeof guard");
+        assert!(
+            matches!(&guard, NarrowingGuard::Typeof { var_name, type_name, is_eq, .. }
+                if var_name == "x" && type_name == "string" && *is_eq),
+            "expected Typeof guard, got: {guard:?}"
+        );
+    }
+
+    #[test]
+    fn test_extract_narrowing_guard_null_check_returns_non_nullish() {
+        // x !== null → NonNullish(is_neq=true)
+        let expr = parse_expr("x !== null");
+        let guard = extract_narrowing_guard(&expr).expect("should extract NonNullish guard");
+        assert!(
+            matches!(&guard, NarrowingGuard::NonNullish { var_name, is_neq, .. }
+                if var_name == "x" && *is_neq),
+            "expected NonNullish with is_neq=true, got: {guard:?}"
+        );
+    }
+
+    #[test]
+    fn test_extract_narrowing_guard_reversed_null_returns_non_nullish() {
+        // null !== x → NonNullish (reversed order)
+        let expr = parse_expr("null !== x");
+        let guard = extract_narrowing_guard(&expr).expect("should extract NonNullish guard");
+        assert!(
+            matches!(&guard, NarrowingGuard::NonNullish { var_name, is_neq, .. }
+                if var_name == "x" && *is_neq),
+            "expected NonNullish for reversed null !== x, got: {guard:?}"
+        );
+    }
+
+    #[test]
+    fn test_extract_narrowing_guard_instanceof_returns_instanceof_guard() {
+        // x instanceof Foo → InstanceOf guard
+        let expr = parse_expr("x instanceof Foo");
+        let guard = extract_narrowing_guard(&expr).expect("should extract InstanceOf guard");
+        assert!(
+            matches!(&guard, NarrowingGuard::InstanceOf { var_name, class_name, .. }
+                if var_name == "x" && class_name == "Foo"),
+            "expected InstanceOf guard, got: {guard:?}"
+        );
+    }
+
+    #[test]
+    fn test_extract_narrowing_guard_keyword_ident_returns_none() {
+        // CRITICAL: undefined / true / false should NOT produce Truthy guards.
+        // If they did, it would cause a silent semantic change.
+        assert!(
+            extract_narrowing_guard(&parse_expr("undefined")).is_none(),
+            "undefined should not produce a Truthy guard"
+        );
+        assert!(
+            extract_narrowing_guard(&parse_expr("true")).is_none(),
+            "true should not produce a Truthy guard"
+        );
+        assert!(
+            extract_narrowing_guard(&parse_expr("false")).is_none(),
+            "false should not produce a Truthy guard"
+        );
+        assert!(
+            extract_narrowing_guard(&parse_expr("null")).is_none(),
+            "null should not produce a Truthy guard"
+        );
+    }
+
+    #[test]
+    fn test_extract_narrowing_guard_non_bin_non_ident_returns_none() {
+        // Numeric literal, string literal, etc. → None
+        assert!(
+            extract_narrowing_guard(&parse_expr("42")).is_none(),
+            "numeric literal should not produce a guard"
+        );
+        assert!(
+            extract_narrowing_guard(&parse_expr(r#""hello""#)).is_none(),
+            "string literal should not produce a guard"
+        );
+    }
+}
