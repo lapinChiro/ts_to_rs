@@ -251,11 +251,13 @@ impl<'a> Transformer<'a> {
             // Single spread + TypeRegistry unregistered → struct update syntax
             Some(Box::new(spreads.into_iter().next().unwrap()))
         } else {
-            // Multiple spreads: expand all but last via TypeRegistry, last becomes base
-            let (earlier, last) = spreads.split_at(spreads.len() - 1);
+            // Multiple spreads: first becomes base (lowest priority in TS), later spreads
+            // are expanded right-to-left so the rightmost spread has highest priority.
+            // This matches TS semantics: { ...a, ...b, ...c } → c > b > a.
+            let (first, later) = spreads.split_at(1);
             if let Some(all_fields) = &struct_fields {
                 let explicit_keys: Vec<String> = fields.iter().map(|(k, _)| k.clone()).collect();
-                for spread_expr in earlier {
+                for spread_expr in later.iter().rev() {
                     for (field_name, _) in all_fields {
                         if !explicit_keys.iter().any(|k| k == field_name)
                             && !fields.iter().any(|(k, _)| k == field_name)
@@ -276,7 +278,7 @@ impl<'a> Transformer<'a> {
                     struct_name
                 ));
             }
-            Some(Box::new(last[0].clone()))
+            Some(Box::new(first[0].clone()))
         };
 
         // Auto-fill omitted Option<T> fields with None (when no struct update base)

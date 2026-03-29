@@ -248,7 +248,33 @@ pub(super) fn find_discriminant_field(type_lits: &[&swc_ecma_ast::TsTypeLit]) ->
             });
 
             if all_have {
-                return Some(field_name);
+                // Verify discriminant values are unique across all variants
+                let mut seen_values = std::collections::HashSet::new();
+                let all_unique = type_lits.iter().all(|lit| {
+                    lit.members.iter().any(|m| {
+                        if let TsTypeElement::TsPropertySignature(p) = m {
+                            let name = match p.key.as_ref() {
+                                Expr::Ident(id) => id.sym.to_string(),
+                                _ => return false,
+                            };
+                            if name == field_name {
+                                if let Some(ann) = &p.type_ann {
+                                    if let TsType::TsLitType(lit_type) = ann.type_ann.as_ref() {
+                                        if let swc_ecma_ast::TsLit::Str(s) = &lit_type.lit {
+                                            return seen_values
+                                                .insert(s.value.to_string_lossy().into_owned());
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        false
+                    })
+                });
+                if all_unique {
+                    return Some(field_name);
+                }
+                // Duplicate discriminant values → not a valid discriminated union
             }
         }
     }

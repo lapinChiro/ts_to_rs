@@ -952,3 +952,43 @@ fn test_intersection_fallback_mapped_type_produces_embedded_field() {
         other => panic!("expected Struct, got {other:?}"),
     }
 }
+
+#[test]
+fn test_discriminated_union_duplicate_discriminant_falls_back_to_general() {
+    // Duplicate discriminant value "a" → should NOT produce serde-tagged enum
+    let item = convert_type_alias_from_source(
+        r#"type Dup = { kind: "a"; x: number } | { kind: "a"; y: string };"#,
+    );
+    match &item {
+        crate::ir::Item::Enum { serde_tag, .. } => {
+            assert!(
+                serde_tag.is_none(),
+                "duplicate discriminant values should produce non-tagged enum, got tag: {:?}",
+                serde_tag
+            );
+        }
+        _ => {
+            // General union or other representation — acceptable as long as it's not tagged
+        }
+    }
+}
+
+#[test]
+fn test_discriminated_union_unique_discriminant_produces_tagged_enum() {
+    let item = convert_type_alias_from_source(
+        r#"type DU = { kind: "a"; x: number } | { kind: "b"; y: string };"#,
+    );
+    match item {
+        crate::ir::Item::Enum {
+            serde_tag,
+            variants,
+            ..
+        } => {
+            assert_eq!(serde_tag.as_deref(), Some("kind"));
+            assert_eq!(variants.len(), 2);
+            assert_eq!(variants[0].name, "A");
+            assert_eq!(variants[1].name, "B");
+        }
+        other => panic!("expected tagged Enum, got {other:?}"),
+    }
+}

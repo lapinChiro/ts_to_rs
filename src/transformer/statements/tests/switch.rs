@@ -588,3 +588,42 @@ fn test_convert_switch_case_propagates_discriminant_type_for_string_enum() {
         other => panic!("expected Match, got {other:?}"),
     }
 }
+
+#[test]
+fn test_switch_default_before_case_moves_to_last_arm() {
+    // default appears BEFORE case 1 — wildcard should still be the LAST arm
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
+    let stmts = parse_fn_body(
+        "function f(x: number) { switch(x) { default: doA(); break; case 1: doB(); break; } }",
+    );
+    let result = {
+        let mut synthetic = SyntheticTypeRegistry::new();
+        Transformer::for_module(&tctx, &mut synthetic).convert_stmt_list(&stmts, None)
+    }
+    .unwrap();
+    assert_eq!(result.len(), 1);
+    match &result[0] {
+        Stmt::Match { arms, .. } => {
+            assert_eq!(arms.len(), 2, "should have 2 arms: case + default");
+            // First arm should be the literal case
+            assert!(
+                arms[0]
+                    .patterns
+                    .iter()
+                    .all(|p| !matches!(p, crate::ir::MatchPattern::Wildcard)),
+                "first arm should NOT be wildcard"
+            );
+            // Last arm should be wildcard
+            assert!(
+                arms.last()
+                    .unwrap()
+                    .patterns
+                    .iter()
+                    .any(|p| matches!(p, crate::ir::MatchPattern::Wildcard)),
+                "last arm must be wildcard regardless of source position"
+            );
+        }
+        other => panic!("expected Match, got {other:?}"),
+    }
+}

@@ -361,6 +361,11 @@ impl<'a> Transformer<'a> {
             });
         }
 
+        // Move wildcard (default) arm to the end — in Rust match, `_` before other arms
+        // makes subsequent arms unreachable, but in TS switch, default only matches when
+        // no case matched, regardless of source position.
+        move_wildcard_arm_to_end(&mut arms);
+
         Ok(Some(vec![Stmt::Match {
             expr: Expr::Ident(var_name),
             arms,
@@ -491,6 +496,8 @@ impl<'a> Transformer<'a> {
             pending_variant_names.clear();
         }
 
+        move_wildcard_arm_to_end(&mut arms);
+
         Ok(Some(vec![Stmt::Match {
             expr: match_expr,
             arms,
@@ -574,6 +581,8 @@ impl<'a> Transformer<'a> {
             });
         }
 
+        move_wildcard_arm_to_end(&mut arms);
+
         Ok(Some(vec![Stmt::Match {
             expr: discriminant,
             arms,
@@ -640,6 +649,9 @@ impl<'a> Transformer<'a> {
                 body,
             });
         }
+
+        // Move wildcard (default) arm to the end (same rationale as try_convert_typeof_switch)
+        move_wildcard_arm_to_end(&mut arms);
 
         Ok(vec![Stmt::Match {
             expr: discriminant,
@@ -723,5 +735,28 @@ impl<'a> Transformer<'a> {
             label: "switch".to_string(),
             body: block_body,
         }])
+    }
+}
+
+/// Moves the default arm (wildcard without guard) to the end of the arms list.
+///
+/// In TypeScript, `default` matches when no `case` matched, regardless of its source position.
+/// In Rust `match`, `_` matches everything and makes subsequent arms unreachable.
+/// This post-processing ensures the default arm is always last.
+///
+/// Only targets arms with `Wildcard` pattern and NO guard — non-literal case arms
+/// use `Wildcard + guard` to avoid variable binding, and those must remain in place.
+fn move_wildcard_arm_to_end(arms: &mut Vec<MatchArm>) {
+    if let Some(idx) = arms.iter().position(|arm| {
+        arm.guard.is_none()
+            && arm
+                .patterns
+                .iter()
+                .any(|p| matches!(p, MatchPattern::Wildcard))
+    }) {
+        if idx < arms.len() - 1 {
+            let default_arm = arms.remove(idx);
+            arms.push(default_arm);
+        }
     }
 }

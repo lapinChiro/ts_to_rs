@@ -73,10 +73,18 @@ fn assert_compiles(rs_source: &str, fixture_name: &str) {
 
     // Write the generated code to the compile-check project's src/lib.rs
     let lib_path = format!("{COMPILE_CHECK_DIR}/src/lib.rs");
-    // Suppress warnings and import external crate items used by generated code
+    // Suppress warnings and import external crate items used by generated code.
+    // Auto-detect additional imports needed (mirrors output_writer::generate_types_rs_imports).
+    let mut auto_imports = String::from("use serde::{Serialize, Deserialize};\n");
+    if compilable_source.contains("serde_json::") {
+        auto_imports.push_str("use serde_json;\n");
+    }
+    if compilable_source.contains("HashMap<") {
+        auto_imports.push_str("use std::collections::HashMap;\n");
+    }
     let full_source = format!(
         "#![allow(unused, dead_code, unreachable_code)]\n\
-         use serde::{{Serialize, Deserialize}};\n\
+         {auto_imports}\
          {}",
         compilable_source
     );
@@ -142,12 +150,9 @@ fn test_all_fixtures_compile() {
         // external type struct definitions. The compile test uses transpile_collecting (no builtins).
         // Tested separately in test_external_type_struct integration test with builtins.
         "external-type-struct",
-        // intersection-empty-object: NonIdentity<T> generates HashMap<String, String> without
-        // use import. The output_writer handles use generation, but compile tests bypass it.
+        // intersection-empty-object: `type NonIdentity<T> = HashMap<String, String>` has unused
+        // type parameter T (E0091). This is a conversion quality issue, not a use-import issue.
         "intersection-empty-object",
-        // intersection-fallback: mapped/conditional type members generate serde_json::Value
-        // and synthetic types requiring use imports not generated in collecting mode.
-        "intersection-fallback",
     ];
 
     let mut entries: Vec<_> = fs::read_dir(fixture_dir)
@@ -211,10 +216,8 @@ fn test_all_fixtures_compile_with_builtins() {
         // Struct definitions are generated but method calls (e.g., .toString()) fail.
         "instanceof-builtin",
         "external-type-struct",
-        // intersection-*: generates HashMap / serde_json::Value without use imports.
-        // The output_writer handles use generation, but compile tests bypass it.
+        // intersection-empty-object: unused type parameter T (E0091)
         "intersection-empty-object",
-        "intersection-fallback",
     ];
 
     let mut entries: Vec<_> = fs::read_dir(fixture_dir)

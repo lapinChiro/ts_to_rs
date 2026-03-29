@@ -487,3 +487,67 @@ fn test_convert_object_lit_all_computed_keys_generates_hashmap() {
         }
     );
 }
+
+#[test]
+fn test_spread_multiple_overlapping_fields_first_spread_is_base() {
+    // { ...a, ...b } where both have x,y — first spread (a) should be base,
+    // later spread (b) should have its fields explicitly expanded (higher priority)
+    use crate::registry::TypeDef;
+    let mut reg = TypeRegistry::new();
+    reg.register(
+        "Point".to_string(),
+        TypeDef::new_struct(
+            vec![
+                ("x".to_string(), RustType::F64),
+                ("y".to_string(), RustType::F64),
+            ],
+            std::collections::HashMap::new(),
+            vec![],
+        ),
+    );
+    let f = TctxFixture::from_source_with_reg("const p: Point = { ...a, ...b };", reg);
+    let tctx = f.tctx();
+    let swc_expr = extract_var_init(f.module());
+    let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_expr(&swc_expr)
+        .unwrap();
+    match &result {
+        Expr::StructInit { base, fields, .. } => {
+            // Base should be the FIRST spread (a) — lowest priority in TS
+            if let Some(base_expr) = base {
+                match base_expr.as_ref() {
+                    Expr::Ident(name) => {
+                        assert_eq!(
+                            name, "a",
+                            "base should be first spread 'a' (lowest priority), got '{name}'"
+                        );
+                    }
+                    _ => panic!("expected Ident base, got {base_expr:?}"),
+                }
+            } else {
+                panic!("expected base (first spread)");
+            }
+            // Fields should be expanded from b (last among 'later' spreads = highest priority)
+            for (key, val) in fields {
+                if key == "x" || key == "y" {
+                    match val {
+                        Expr::FieldAccess { object, field, .. } => {
+                            match object.as_ref() {
+                                Expr::Ident(source) => {
+                                    assert_eq!(
+                                        source, "b",
+                                        "field '{key}' should come from 'b' (higher priority), got '{source}'"
+                                    );
+                                }
+                                _ => panic!("expected Ident source for field access"),
+                            }
+                            assert_eq!(field, key);
+                        }
+                        _ => panic!("expected FieldAccess for spread field '{key}'"),
+                    }
+                }
+            }
+        }
+        other => panic!("expected StructInit, got {other:?}"),
+    }
+}
