@@ -8,6 +8,9 @@ interface Aged {
 
 type Person = Named & Aged;
 
+// Empty object removal: { x: T } & {} → same as { x: T }
+type WithEmpty = { x: number } & {};
+
 function main(): void {
     const n: Named = { name: "Alice" };
     const a: Aged = { age: 30 };
@@ -17,4 +20,8 @@ function main(): void {
     // intersection type struct init with String field
     const p: Person = { name: "Bob", age: 25 };
     console.log("person:", p.name, p.age);
+
+    // empty object removal
+    const w: WithEmpty = { x: 42 };
+    console.log("with_empty:", w.x);
 }

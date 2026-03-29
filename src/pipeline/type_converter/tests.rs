@@ -788,3 +788,167 @@ fn test_convert_type_alias_unsupported_fn_param_pattern_returns_error() {
         "error should mention unsupported param pattern, got: {err_msg}"
     );
 }
+
+// ─── Intersection preprocessing and distribution tests ───
+
+/// Helper: extract the type alias Item from a type alias declaration.
+fn convert_type_alias_from_source(source: &str) -> crate::ir::Item {
+    let module = parse_type_annotation(source);
+    let reg = build_registry(&module);
+    let mut synthetic = SyntheticTypeRegistry::new();
+
+    for item in &module.body {
+        if let swc_ecma_ast::ModuleItem::Stmt(swc_ecma_ast::Stmt::Decl(
+            swc_ecma_ast::Decl::TsTypeAlias(decl),
+        )) = item
+        {
+            return crate::pipeline::type_converter::convert_type_alias(
+                decl,
+                crate::ir::Visibility::Private,
+                &mut synthetic,
+                &reg,
+            )
+            .unwrap();
+        }
+    }
+    panic!("no type alias found in source");
+}
+
+#[test]
+fn test_intersection_identity_mapped_type_simplification() {
+    let item = convert_type_alias_from_source("type Simplify<T> = { [K in keyof T]: T[K] } & {};");
+    match item {
+        crate::ir::Item::TypeAlias { name, ty, .. } => {
+            assert_eq!(name, "Simplify");
+            assert_eq!(
+                ty,
+                RustType::Named {
+                    name: "T".to_string(),
+                    type_args: vec![]
+                }
+            );
+        }
+        other => panic!("expected TypeAlias, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_intersection_identity_mapped_type_with_modifier_not_simplified() {
+    // readonly modifier prevents identity simplification
+    let item = convert_type_alias_from_source(
+        "type ReadonlyAll<T> = { readonly [K in keyof T]: T[K] } & {};",
+    );
+    // Should NOT be TypeAlias { ty: T } — the readonly modifier makes it non-identity
+    assert!(
+        !matches!(
+            &item,
+            crate::ir::Item::TypeAlias { ty: RustType::Named { name, type_args }, .. }
+            if name == "T" && type_args.is_empty()
+        ),
+        "readonly mapped type should not be simplified to T"
+    );
+}
+
+#[test]
+fn test_intersection_empty_object_removal_produces_struct() {
+    let item = convert_type_alias_from_source("type A = { x: number } & {};");
+    match item {
+        crate::ir::Item::Struct { name, fields, .. } => {
+            assert_eq!(name, "A");
+            assert_eq!(fields.len(), 1);
+            assert_eq!(fields[0].name, "x");
+        }
+        other => panic!("expected Struct, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_intersection_union_distribution_produces_enum() {
+    let item = convert_type_alias_from_source(
+        "type X = { base: string } & ({ a: number } | { b: boolean });",
+    );
+    match item {
+        crate::ir::Item::Enum {
+            name,
+            serde_tag,
+            variants,
+            ..
+        } => {
+            assert_eq!(name, "X");
+            assert!(serde_tag.is_none(), "non-discriminated should have no tag");
+            assert_eq!(variants.len(), 2);
+            // Each variant should have base field
+            for v in &variants {
+                assert!(
+                    v.fields.iter().any(|f| f.name == "base"),
+                    "variant {} missing base field",
+                    v.name
+                );
+            }
+        }
+        other => panic!("expected Enum, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_intersection_union_discriminated_produces_tagged_enum() {
+    let item = convert_type_alias_from_source(
+        r#"type D = { base: string } & ({ kind: "a"; x: number } | { kind: "b"; y: string });"#,
+    );
+    match item {
+        crate::ir::Item::Enum {
+            serde_tag,
+            variants,
+            ..
+        } => {
+            assert_eq!(serde_tag.as_deref(), Some("kind"));
+            assert_eq!(variants.len(), 2);
+            assert_eq!(variants[0].name, "A");
+            assert_eq!(variants[1].name, "B");
+        }
+        other => panic!("expected Enum, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_intersection_union_duplicate_field_variant_overrides_base() {
+    let item = convert_type_alias_from_source(
+        "type D = { name: string; age: number } & ({ name: number; x: boolean } | { y: string });",
+    );
+    match item {
+        crate::ir::Item::Enum { variants, .. } => {
+            // Variant0 has name: number from variant (overrides base name: string)
+            let v0 = &variants[0];
+            let name_field = v0.fields.iter().find(|f| f.name == "name").unwrap();
+            assert_eq!(
+                name_field.ty,
+                RustType::F64,
+                "variant field should override base"
+            );
+            // name should appear only once
+            assert_eq!(
+                v0.fields.iter().filter(|f| f.name == "name").count(),
+                1,
+                "name should not be duplicated"
+            );
+        }
+        other => panic!("expected Enum, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_intersection_fallback_mapped_type_produces_embedded_field() {
+    let item =
+        convert_type_alias_from_source("type M<T> = { x: string } & { [K in keyof T]: T[K] };");
+    match item {
+        crate::ir::Item::Struct { fields, .. } => {
+            // Should have x field + embedded _1 field
+            assert!(fields.iter().any(|f| f.name == "x"));
+            assert!(
+                fields.iter().any(|f| f.name == "_1"),
+                "mapped type member should be embedded as _1"
+            );
+        }
+        other => panic!("expected Struct, got {other:?}"),
+    }
+}

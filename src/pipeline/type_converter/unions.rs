@@ -209,7 +209,7 @@ pub(super) fn try_convert_discriminated_union(
 }
 
 /// Finds a field name that is present in all type literals with a string literal type.
-fn find_discriminant_field(type_lits: &[&swc_ecma_ast::TsTypeLit]) -> Option<String> {
+pub(super) fn find_discriminant_field(type_lits: &[&swc_ecma_ast::TsTypeLit]) -> Option<String> {
     // Collect field names from the first member
     let first = type_lits[0];
     for member in &first.members {
@@ -264,7 +264,7 @@ fn is_string_literal_type(ty: &TsType) -> bool {
 }
 
 /// Extracts the discriminant value and non-discriminant fields from a type literal.
-fn extract_variant_info(
+pub(super) fn extract_variant_info(
     type_lit: &swc_ecma_ast::TsTypeLit,
     discriminant_field: &str,
     synthetic: &mut SyntheticTypeRegistry,

@@ -317,7 +317,9 @@ fn generate_method(method: &Method, in_trait_impl: bool) -> String {
 /// Determines whether all enum variants have numeric values (or no values).
 /// Checks if any variant has data (tuple-like variant).
 fn has_data_variants(variants: &[EnumVariant]) -> bool {
-    variants.iter().any(|v| v.data.is_some())
+    variants
+        .iter()
+        .any(|v| v.data.is_some() || !v.fields.is_empty())
 }
 
 fn is_numeric_enum(variants: &[EnumVariant]) -> bool {
@@ -365,7 +367,18 @@ fn generate_enum(
 
     if data_enum {
         for variant in variants {
-            if let Some(data_ty) = &variant.data {
+            if !variant.fields.is_empty() {
+                // Struct variant (from intersection-with-union distribution)
+                out.push_str(&format!("    {} {{\n", variant.name));
+                for field in &variant.fields {
+                    out.push_str(&format!(
+                        "        {}: {},\n",
+                        field.name,
+                        generate_type(&field.ty)
+                    ));
+                }
+                out.push_str("    },\n");
+            } else if let Some(data_ty) = &variant.data {
                 out.push_str(&format!(
                     "    {}({}),\n",
                     variant.name,

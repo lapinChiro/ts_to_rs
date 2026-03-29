@@ -1,0 +1,23 @@
+---
+source: tests/integration_test.rs
+expression: output
+---
+#[derive(Debug, Clone, PartialEq)]
+pub struct _TypeLit0 {
+    pub y: f64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct WithMapped<T> {
+    x: String,
+    _1: serde_json::Value,
+    _phantom_t: std::marker::PhantomData<T>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct WithConditional<T, U> {
+    x: String,
+    _1: _TypeLit0,
+    _phantom_t: std::marker::PhantomData<T>,
+    _phantom_u: std::marker::PhantomData<U>,
+}

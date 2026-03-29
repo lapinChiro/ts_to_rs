@@ -1,0 +1,145 @@
+---
+source: tests/integration_test.rs
+expression: output
+---
+impl WithMethods {
+    pub fn greet(&self, msg: String) -> String {
+        todo!()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum _Intersection0 {
+    Variant0 {
+        base: String,
+        a: f64,
+    },
+    Variant1 {
+        base: String,
+        b: bool,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum _Intersection1 {
+    Variant0 {
+        base: String,
+        a: f64,
+    },
+    Variant1 {
+        base: String,
+        b: bool,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct _TypeLit0 {
+    pub p: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum _TypeLit0Or_TypeLit1 {
+    _TypeLit0(_TypeLit0),
+    _TypeLit1(_TypeLit1),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct _TypeLit1 {
+    pub q: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum WithUnion {
+    Variant0 {
+        base: String,
+        a: f64,
+    },
+    Variant1 {
+        base: String,
+        b: bool,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum Discriminated {
+    Alpha {
+        base: String,
+        x: f64,
+    },
+    Beta {
+        base: String,
+        y: String,
+    },
+}
+
+impl Discriminated {
+    pub fn kind(&self) -> &str {
+        match self {
+            Discriminated::Alpha { .. } => "alpha",
+            Discriminated::Beta { .. } => "beta",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum WithEmptyVariant {
+    Variant0 {
+        base: String,
+        a: f64,
+    },
+    Variant1 {
+        base: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum MultiUnion {
+    Variant0 {
+        a: String,
+        _1: _TypeLit0Or_TypeLit1,
+        x: f64,
+    },
+    Variant1 {
+        a: String,
+        _1: _TypeLit0Or_TypeLit1,
+        y: f64,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum DuplicateField {
+    Variant0 {
+        age: f64,
+        name: f64,
+        x: bool,
+    },
+    Variant1 {
+        name: String,
+        age: f64,
+        y: String,
+    },
+}
+
+fn takeIntersectionUnion(arg: _Intersection0) {
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum WithMethods {
+    Admin {
+        name: String,
+        level: f64,
+    },
+    User {
+        name: String,
+        email: String,
+    },
+}
+
+impl WithMethods {
+    pub fn role(&self) -> &str {
+        match self {
+            WithMethods::Admin { .. } => "admin",
+            WithMethods::User { .. } => "user",
+        }
+    }
+}

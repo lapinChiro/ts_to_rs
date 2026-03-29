@@ -1,0 +1,27 @@
+---
+source: tests/integration_test.rs
+expression: output
+---
+#[derive(Debug, Clone, PartialEq)]
+struct WithEmpty {
+    x: f64,
+}
+
+type Simplify<T> = T;
+
+type NonIdentity<T> = HashMap<String, String>;
+
+#[derive(Debug, Clone, PartialEq)]
+struct AllEmpty {
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct Parenthesized {
+    x: f64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct Preserved {
+    a: String,
+    b: f64,
+}
