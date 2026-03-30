@@ -589,3 +589,132 @@ fn test_member_access_on_chained_type_param_constraints() {
         "obj.field on chained constraint (T → Base → fields) should resolve to F64"
     );
 }
+
+// ── resolve_type_params_in_type unit tests ──
+
+#[test]
+fn test_resolve_type_params_in_type_bare_param() {
+    // T with constraint Named("Options") → Named("Options")
+    let mut reg = TypeRegistry::new();
+    reg.register(
+        "Options".to_string(),
+        TypeDef::new_struct(vec![], Default::default(), vec![]),
+    );
+    let mut synthetic = SyntheticTypeRegistry::new();
+    let mut resolver = TypeResolver::new(&reg, &mut synthetic);
+    resolver.type_param_constraints.insert(
+        "T".to_string(),
+        RustType::Named {
+            name: "Options".to_string(),
+            type_args: vec![],
+        },
+    );
+
+    let input = RustType::Named {
+        name: "T".to_string(),
+        type_args: vec![],
+    };
+    let result = resolver.resolve_type_params_in_type(&input);
+    assert_eq!(
+        result,
+        RustType::Named {
+            name: "Options".to_string(),
+            type_args: vec![],
+        }
+    );
+}
+
+#[test]
+fn test_resolve_type_params_in_type_in_type_args() {
+    // Container<E> where E → Env → Container<Env>
+    let reg = TypeRegistry::new();
+    let mut synthetic = SyntheticTypeRegistry::new();
+    let mut resolver = TypeResolver::new(&reg, &mut synthetic);
+    resolver.type_param_constraints.insert(
+        "E".to_string(),
+        RustType::Named {
+            name: "Env".to_string(),
+            type_args: vec![],
+        },
+    );
+
+    let input = RustType::Named {
+        name: "Container".to_string(),
+        type_args: vec![RustType::Named {
+            name: "E".to_string(),
+            type_args: vec![],
+        }],
+    };
+    let result = resolver.resolve_type_params_in_type(&input);
+    assert_eq!(
+        result,
+        RustType::Named {
+            name: "Container".to_string(),
+            type_args: vec![RustType::Named {
+                name: "Env".to_string(),
+                type_args: vec![],
+            }],
+        }
+    );
+}
+
+#[test]
+fn test_resolve_type_params_in_type_no_constraint() {
+    // T without constraint → unchanged
+    let reg = TypeRegistry::new();
+    let mut synthetic = SyntheticTypeRegistry::new();
+    let resolver = TypeResolver::new(&reg, &mut synthetic);
+
+    let input = RustType::Named {
+        name: "T".to_string(),
+        type_args: vec![],
+    };
+    let result = resolver.resolve_type_params_in_type(&input);
+    assert_eq!(
+        result, input,
+        "unconstrained type param should remain unchanged"
+    );
+}
+
+#[test]
+fn test_resolve_type_params_in_type_option() {
+    // Option<T> where T → String → Option<String>
+    let reg = TypeRegistry::new();
+    let mut synthetic = SyntheticTypeRegistry::new();
+    let mut resolver = TypeResolver::new(&reg, &mut synthetic);
+    resolver
+        .type_param_constraints
+        .insert("T".to_string(), RustType::String);
+
+    let input = RustType::Option(Box::new(RustType::Named {
+        name: "T".to_string(),
+        type_args: vec![],
+    }));
+    let result = resolver.resolve_type_params_in_type(&input);
+    assert_eq!(result, RustType::Option(Box::new(RustType::String)));
+}
+
+#[test]
+fn test_resolve_type_params_in_type_non_named_unchanged() {
+    // Primitive types like String, F64, Bool should pass through unchanged
+    let reg = TypeRegistry::new();
+    let mut synthetic = SyntheticTypeRegistry::new();
+    let resolver = TypeResolver::new(&reg, &mut synthetic);
+
+    assert_eq!(
+        resolver.resolve_type_params_in_type(&RustType::String),
+        RustType::String
+    );
+    assert_eq!(
+        resolver.resolve_type_params_in_type(&RustType::F64),
+        RustType::F64
+    );
+    assert_eq!(
+        resolver.resolve_type_params_in_type(&RustType::Bool),
+        RustType::Bool
+    );
+    assert_eq!(
+        resolver.resolve_type_params_in_type(&RustType::Any),
+        RustType::Any
+    );
+}

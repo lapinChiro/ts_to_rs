@@ -408,3 +408,22 @@ fn test_convert_hashmap_propagates_value_type() {
         other => panic!("expected FnCall(HashMap::from), got {other:?}"),
     }
 }
+
+#[test]
+fn test_convert_empty_object_with_hashmap_expected_type() {
+    // const m: Record<string, string> = {} → HashMap::new()
+    let f = TctxFixture::from_source(r#"const m: Record<string, string> = {};"#);
+    let tctx = f.tctx();
+    let swc_expr = extract_var_init(f.module());
+    let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_expr(&swc_expr)
+        .unwrap();
+
+    match &result {
+        Expr::FnCall { name, args } => {
+            assert_eq!(name, "HashMap::new");
+            assert!(args.is_empty(), "HashMap::new() should have no arguments");
+        }
+        other => panic!("expected FnCall(HashMap::new), got {other:?}"),
+    }
+}

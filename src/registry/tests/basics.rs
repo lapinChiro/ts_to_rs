@@ -760,3 +760,33 @@ fn test_lookup_field_type_unknown_type_returns_none() {
     let reg = TypeRegistry::new();
     assert!(reg.lookup_field_type(&RustType::F64, "length").is_none());
 }
+
+#[test]
+fn test_class_with_only_constructor_is_registered() {
+    // A class with only a constructor (no fields, no methods) should still
+    // be registered in the TypeRegistry, so its constructor signature is
+    // available for new-expression type resolution.
+    let module = parse_typescript(
+        r#"
+        class Handler {
+            constructor(name: string, count: number) {}
+        }
+        "#,
+    )
+    .unwrap();
+
+    let reg = build_registry(&module);
+    let def = reg.get("Handler");
+    assert!(
+        def.is_some(),
+        "class with only a constructor should be registered in TypeRegistry"
+    );
+    if let Some(TypeDef::Struct { constructor, .. }) = def {
+        assert!(
+            constructor.is_some(),
+            "constructor signature should be present"
+        );
+    } else {
+        panic!("expected TypeDef::Struct");
+    }
+}

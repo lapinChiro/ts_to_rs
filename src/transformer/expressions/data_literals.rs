@@ -151,6 +151,18 @@ impl<'a> Transformer<'a> {
             return Ok(hashmap);
         }
 
+        // Empty object literal with HashMap expected type → HashMap::new()
+        if obj_lit.props.is_empty() {
+            if let Some(RustType::Named { name, .. }) = expected {
+                if name == "HashMap" {
+                    return Ok(Expr::FnCall {
+                        name: "HashMap::new".to_string(),
+                        args: vec![],
+                    });
+                }
+            }
+        }
+
         let struct_name = match expected {
             Some(RustType::Named { name, .. }) => name.as_str(),
             _ => {

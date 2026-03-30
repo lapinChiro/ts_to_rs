@@ -94,12 +94,14 @@ impl<'a> TypeResolver<'a> {
 
         self.enter_scope();
 
-        // Register type parameter constraints after entering scope
-        // (consistent with resolve_arrow_expr / resolve_fn_expr)
+        // Register type parameter constraints after entering scope.
+        // Merge with parent constraints so nested generics can access outer type params.
         let prev_constraints = if let Some(type_params) = &fn_decl.function.type_params {
-            let constraints =
+            let inner_constraints =
                 collect_type_param_constraints(type_params, self.synthetic, self.registry);
-            let prev = std::mem::replace(&mut self.type_param_constraints, constraints);
+            let mut merged = self.type_param_constraints.clone();
+            merged.extend(inner_constraints);
+            let prev = std::mem::replace(&mut self.type_param_constraints, merged);
             Some(prev)
         } else {
             None
@@ -154,10 +156,14 @@ impl<'a> TypeResolver<'a> {
                         .map(|ty| wrap_trait_for_position(ty, TypePosition::Param, self.registry))
                 });
                 // 3. Set expected type on the default value expression and propagate
+                //    Resolve type params so that `T extends Options` becomes `Options`
                 if let Some(ref ty) = ann_ty {
+                    let resolved = self.resolve_type_params_in_type(ty);
                     let rhs_span = Span::from_swc(assign.right.span());
-                    self.result.expected_types.insert(rhs_span, ty.clone());
-                    self.propagate_expected(&assign.right, ty);
+                    self.result
+                        .expected_types
+                        .insert(rhs_span, resolved.clone());
+                    self.propagate_expected(&assign.right, &resolved);
                 }
                 // 4. Resolve the default value expression
                 let rhs_span = Span::from_swc(assign.right.span());
@@ -196,11 +202,15 @@ impl<'a> TypeResolver<'a> {
                 });
 
                 // Set expected type BEFORE resolving the initializer, so that
-                // resolve_arrow_expr / resolve_fn_expr can read it from the map
+                // resolve_arrow_expr / resolve_fn_expr can read it from the map.
+                // Resolve type params so generic types use constraint types.
                 if let (Some(ann_ty), Some(init)) = (&annotation_type, &decl.init) {
+                    let resolved = self.resolve_type_params_in_type(ann_ty);
                     let init_span = Span::from_swc(init.span());
-                    self.result.expected_types.insert(init_span, ann_ty.clone());
-                    self.propagate_expected(init, ann_ty);
+                    self.result
+                        .expected_types
+                        .insert(init_span, resolved.clone());
+                    self.propagate_expected(init, &resolved);
                 }
 
                 // Resolve initializer once (after expected types are set)
@@ -325,71 +335,11 @@ impl<'a> TypeResolver<'a> {
         }
         for member in &class.body {
             match member {
-                ast::ClassMember::Method(method) => {
-                    if let Some(body) = &method.function.body {
-                        self.enter_scope();
-                        // Static methods don't have `this` bound to the instance.
-                        // Shadow `this` with Unknown so it resolves correctly.
-                        if method.is_static {
-                            if let Some(scope) = self.scope_stack.last_mut() {
-                                scope.vars.insert(
-                                    "this".to_string(),
-                                    VarInfo {
-                                        ty: ResolvedType::Unknown,
-                                        var_id: VarId {
-                                            name: "this".to_string(),
-                                            declared_at: class_span,
-                                        },
-                                    },
-                                );
-                            }
-                        }
-                        // Register method type parameter constraints
-                        let prev_method_constraints = if let Some(type_params) =
-                            &method.function.type_params
-                        {
-                            let constraints = collect_type_param_constraints(
-                                type_params,
-                                self.synthetic,
-                                self.registry,
-                            );
-                            let prev =
-                                std::mem::replace(&mut self.type_param_constraints, constraints);
-                            Some(prev)
-                        } else {
-                            None
-                        };
-
-                        // Register parameters
-                        for param in &method.function.params {
-                            self.visit_param_pat(&param.pat);
-                        }
-                        // Set return type (Promise<T> → T, void → None, trait → Box<dyn Trait>)
-                        let prev_return_type = self.current_fn_return_type.take();
-                        if let Some(return_ann) = &method.function.return_type {
-                            if let Ok(ty) =
-                                convert_ts_type(&return_ann.type_ann, self.synthetic, self.registry)
-                            {
-                                self.current_fn_return_type =
-                                    unwrap_promise_and_unit(ty).map(|ty| {
-                                        wrap_trait_for_position(
-                                            ty,
-                                            TypePosition::Value,
-                                            self.registry,
-                                        )
-                                    });
-                            }
-                        }
-                        // Walk body
-                        for stmt in &body.stmts {
-                            self.visit_stmt(stmt);
-                        }
-                        self.current_fn_return_type = prev_return_type;
-                        if let Some(prev) = prev_method_constraints {
-                            self.type_param_constraints = prev;
-                        }
-                        self.leave_scope();
-                    }
+                ast::ClassMember::Method(m) => {
+                    self.visit_method_function(&m.function, m.is_static, class_span);
+                }
+                ast::ClassMember::PrivateMethod(pm) => {
+                    self.visit_method_function(&pm.function, pm.is_static, class_span);
                 }
                 ast::ClassMember::Constructor(ctor) => {
                     if let Some(body) = &ctor.body {
@@ -406,25 +356,10 @@ impl<'a> TypeResolver<'a> {
                     }
                 }
                 ast::ClassMember::ClassProp(prop) => {
-                    if let Some(init) = &prop.value {
-                        let span = Span::from_swc(init.span());
-                        let ty = self.resolve_expr(init);
-                        self.result.expr_types.insert(span, ty);
-                        // Set expected from type annotation and propagate
-                        if let Some(type_ann) = &prop.type_ann {
-                            if let Ok(raw_ty) =
-                                convert_ts_type(&type_ann.type_ann, self.synthetic, self.registry)
-                            {
-                                let ann_ty = wrap_trait_for_position(
-                                    raw_ty,
-                                    TypePosition::Value,
-                                    self.registry,
-                                );
-                                self.result.expected_types.insert(span, ann_ty.clone());
-                                self.propagate_expected(init, &ann_ty);
-                            }
-                        }
-                    }
+                    self.visit_class_prop_init(prop.value.as_deref(), prop.type_ann.as_deref());
+                }
+                ast::ClassMember::PrivateProp(pp) => {
+                    self.visit_class_prop_init(pp.value.as_deref(), pp.type_ann.as_deref());
                 }
                 _ => {}
             }
@@ -433,6 +368,91 @@ impl<'a> TypeResolver<'a> {
             self.type_param_constraints = prev;
         }
         self.leave_scope();
+    }
+
+    /// Visits a class method body (shared by Method and PrivateMethod).
+    fn visit_method_function(
+        &mut self,
+        function: &ast::Function,
+        is_static: bool,
+        class_span: Span,
+    ) {
+        if let Some(body) = &function.body {
+            self.enter_scope();
+            // Static methods don't have `this` bound to the instance.
+            if is_static {
+                if let Some(scope) = self.scope_stack.last_mut() {
+                    scope.vars.insert(
+                        "this".to_string(),
+                        VarInfo {
+                            ty: ResolvedType::Unknown,
+                            var_id: VarId {
+                                name: "this".to_string(),
+                                declared_at: class_span,
+                            },
+                        },
+                    );
+                }
+            }
+            // Merge method type params with class type params (method params shadow class params).
+            // Without merging, `resolve_type_params_in_type` can't resolve class-level
+            // type params (e.g., T in `class Foo<T extends Base>`) inside method bodies.
+            let prev_method_constraints = if let Some(type_params) = &function.type_params {
+                let method_constraints =
+                    collect_type_param_constraints(type_params, self.synthetic, self.registry);
+                let mut merged = self.type_param_constraints.clone();
+                merged.extend(method_constraints);
+                let prev = std::mem::replace(&mut self.type_param_constraints, merged);
+                Some(prev)
+            } else {
+                None
+            };
+            for param in &function.params {
+                self.visit_param_pat(&param.pat);
+            }
+            let prev_return_type = self.current_fn_return_type.take();
+            if let Some(return_ann) = &function.return_type {
+                if let Ok(ty) = convert_ts_type(&return_ann.type_ann, self.synthetic, self.registry)
+                {
+                    self.current_fn_return_type = unwrap_promise_and_unit(ty)
+                        .map(|ty| wrap_trait_for_position(ty, TypePosition::Value, self.registry));
+                }
+            }
+            for stmt in &body.stmts {
+                self.visit_stmt(stmt);
+            }
+            self.current_fn_return_type = prev_return_type;
+            if let Some(prev) = prev_method_constraints {
+                self.type_param_constraints = prev;
+            }
+            self.leave_scope();
+        }
+    }
+
+    /// Visits a class property initializer (shared by ClassProp and PrivateProp).
+    fn visit_class_prop_init(
+        &mut self,
+        init: Option<&ast::Expr>,
+        type_ann: Option<&ast::TsTypeAnn>,
+    ) {
+        if let Some(init) = init {
+            let span = Span::from_swc(init.span());
+            // Set expected type BEFORE resolving the initializer, so that
+            // resolve_expr can use it (same pattern as visit_var_decl).
+            if let Some(type_ann) = type_ann {
+                if let Ok(raw_ty) =
+                    convert_ts_type(&type_ann.type_ann, self.synthetic, self.registry)
+                {
+                    let ann_ty =
+                        wrap_trait_for_position(raw_ty, TypePosition::Value, self.registry);
+                    let resolved = self.resolve_type_params_in_type(&ann_ty);
+                    self.result.expected_types.insert(span, resolved.clone());
+                    self.propagate_expected(init, &resolved);
+                }
+            }
+            let ty = self.resolve_expr(init);
+            self.result.expr_types.insert(span, ty);
+        }
     }
 
     pub(super) fn visit_block_stmt(&mut self, block: &ast::BlockStmt) {
@@ -459,8 +479,9 @@ impl<'a> TypeResolver<'a> {
                     // anonymous struct generation in resolve_expr_inner can see
                     // that an expected type exists and avoid unnecessary generation.
                     if let Some(return_ty) = self.current_fn_return_type.clone() {
-                        self.result.expected_types.insert(span, return_ty.clone());
-                        self.propagate_expected(arg, &return_ty);
+                        let resolved = self.resolve_type_params_in_type(&return_ty);
+                        self.result.expected_types.insert(span, resolved.clone());
+                        self.propagate_expected(arg, &resolved);
                     }
 
                     let ty = self.resolve_expr(arg);

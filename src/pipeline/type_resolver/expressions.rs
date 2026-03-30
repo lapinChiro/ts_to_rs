@@ -547,9 +547,12 @@ impl<'a> TypeResolver<'a> {
     /// 左辺の解決済み型を expected type として右辺に伝播する。
     fn propagate_fallback_expected(&mut self, rhs: &ast::Expr, left_ty: &RustType) {
         if matches!(rhs, ast::Expr::Object(_)) {
+            let resolved = self.resolve_type_params_in_type(left_ty);
             let rhs_span = Span::from_swc(rhs.span());
-            self.result.expected_types.insert(rhs_span, left_ty.clone());
-            self.propagate_expected(rhs, left_ty);
+            self.result
+                .expected_types
+                .insert(rhs_span, resolved.clone());
+            self.propagate_expected(rhs, &resolved);
         }
     }
 
@@ -652,11 +655,14 @@ impl<'a> TypeResolver<'a> {
     fn resolve_arrow_expr(&mut self, arrow: &ast::ArrowExpr) -> ResolvedType {
         self.enter_scope();
 
-        // Register type parameter constraints (e.g., `<E extends Env>` → {"E": Named("Env")})
+        // Register type parameter constraints (e.g., `<E extends Env>` → {"E": Named("Env")}).
+        // Merge with parent constraints so nested generics can access outer type params.
         let prev_constraints = if let Some(type_params) = &arrow.type_params {
-            let constraints =
+            let inner_constraints =
                 collect_type_param_constraints(type_params, self.synthetic, self.registry);
-            let prev = std::mem::replace(&mut self.type_param_constraints, constraints);
+            let mut merged = self.type_param_constraints.clone();
+            merged.extend(inner_constraints);
+            let prev = std::mem::replace(&mut self.type_param_constraints, merged);
             Some(prev)
         } else {
             None
@@ -771,11 +777,14 @@ impl<'a> TypeResolver<'a> {
     fn resolve_fn_expr(&mut self, fn_expr: &ast::FnExpr) -> ResolvedType {
         self.enter_scope();
 
-        // Register type parameter constraints
+        // Register type parameter constraints.
+        // Merge with parent constraints so nested generics can access outer type params.
         let prev_constraints = if let Some(type_params) = &fn_expr.function.type_params {
-            let constraints =
+            let inner_constraints =
                 collect_type_param_constraints(type_params, self.synthetic, self.registry);
-            let prev = std::mem::replace(&mut self.type_param_constraints, constraints);
+            let mut merged = self.type_param_constraints.clone();
+            merged.extend(inner_constraints);
+            let prev = std::mem::replace(&mut self.type_param_constraints, merged);
             Some(prev)
         } else {
             None

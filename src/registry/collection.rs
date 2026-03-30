@@ -276,10 +276,11 @@ pub(super) fn collect_decl(
             if let TypeDef::Struct {
                 ref fields,
                 ref methods,
+                ref constructor,
                 ..
             } = def
             {
-                if !fields.is_empty() || !methods.is_empty() {
+                if !fields.is_empty() || !methods.is_empty() || constructor.is_some() {
                     reg.register(class.ident.sym.to_string(), def);
                 }
             }

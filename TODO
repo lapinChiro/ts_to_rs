@@ -30,7 +30,7 @@
 - **保留** — 正当な保留理由あり（前提タスク未完了、またはユーザーの設計方針決定が必要）
 - **スコープ外** — 明示的に対象外。需要発生時に再評価
 
-件数は Hono ベンチマーク（`./scripts/hono-bench.sh`）の実測値に基づく（最終実行: 2026-03-30 C-1完了後）。
+件数は Hono ベンチマーク（`./scripts/hono-bench.sh`）の実測値に基づく（最終実行: 2026-03-30 C-2完了後）。
 158 ファイル中 110 ファイルがクリーン（69.6%）、62 エラーインスタンス。コンパイルクリーン: ファイル単位 109（69.0%）、ディレクトリ単位 156（98.7%）。
 **注意**: ベンチマーク実行前に `cargo build --release` が必要。古いビルドで実行すると数値が不正確になる。
 **補足**: 「クリーン」は変換エラーなし（`--report-unsupported` でエラー 0）を意味する。コンパイルクリーンは2指標: ファイル単位（use 除去後の個別コンパイル）とディレクトリ単位（全ファイルを1クレートとしてコンパイル）。
@@ -50,6 +50,7 @@
 - **B-2 (I-285+I-200)**: indexed access + mapped type 改善 — 13件削減（79→66）。型パラメータキー対応（generics erasure）+ `[number]` non-const fallback + ネスト indexed access 再帰解決 + identity mapped type 拡張（symbol filter no-op）+ standalone identity 簡約。TYPE_ALIAS_UNSUPPORTED 10→0、INDEXED_ACCESS 3→0
 - **C-0**: resolve_struct_fields_by_name 統合 — 3件削減（66→63）。TypeRegistry/SyntheticTypeRegistry/type_param_constraints の3層フィールド解決を single source of truth に統合。resolve_member_type, resolve_spread_source_fields, resolve_object_lit_fields の3関数を共通メソッドに委譲。OBJECT_LITERAL_NO_TYPE 36→33
 - **C-1**: TypeResolver パラメータ型伝播 + todo!() 解消 — 1件削減（63→62）+ 品質向上。visit_param_pat の Pat::Assign 対応（デフォルト値パラメータのスコープ登録 + expected type 伝播）。visit_fn_decl/resolve_arrow_expr/resolve_fn_expr のパラメータ型収集で Pat::Assign 処理。patterns.rs の todo!() 8箇所を保守的 false フォールバックに置換（Tier 2 パニック解消）
+- **C-2**: expected type 基盤改善 — 0件削減（基盤修正）。7つの修正: (1) ClassProp 初期化子の expected type 順序修正（バグ: resolve_expr が expected 設定より先に実行）、(2) `resolve_type_params_in_type` ヘルパー（型パラメータ制約を再帰的に具象型に解決）、(3) 全 expected type 挿入箇所（visit_var_decl, return文, Pat::Assign, ClassProp, propagate_fallback_expected, propagate_arg_expected_types）で型パラメータ解決適用、(4) `resolve_object_lit_fields` への type_args 伝播（ジェネリック構造体フィールドの具象化）、(5) PrivateMethod/PrivateProp の TypeResolver 処理追加（未訪問バグ）、(6) コンストラクタのみクラスの TypeRegistry 登録条件修正（`constructor.is_some()` 追加）、(7) 空オブジェクト `{}` + HashMap expected → `HashMap::new()` 生成、(8) 型パラメータ制約マージ（メソッド/アロー関数/関数式で親スコープ制約を保持）。ベンチ数値不変の理由: 32件全てで修正パターン以外の未対応パターン（関数呼び出し引数 I-300、型注釈なしオブジェクト I-301）が同一関数内に共存
 
 ---
 
@@ -90,13 +91,31 @@
 
 #### 型変換・型推論
 
-- **[I-286c]** **sink-source 逆伝播: 高度なパターン（S2, S3, S7, S8）** — H: ~8件, D: ~9件 + 品質向上（plan.md Phase C）
-  - **S2: `||`/`??` ジェネリクス制約解決**（H: 8件）: ジェネリクスフィールドアクセス（`options.verification` where `options: T extends { verification: V }`）で制約 T の構造から V を推論。`propagate_fallback_expected` を拡張。対象: `middleware/jwk/jwk.ts:48`, `middleware/jwt/jwt.ts:53`, `utils/jwt/jwt.ts:56,191`, `adapter/aws-lambda/handler.ts:268,496`, `helper/proxy/index.ts:160`, `hono-base.ts:98`
+- **[I-286c]** **sink-source 逆伝播: 高度なパターン（S3）** — D: ~9件 + 品質向上（plan.md Phase C）
+  - ~~**S2: `||`/`??` ジェネリクス制約解決**~~ → C-2 で基盤完了。`resolve_type_params_in_type` により型パラメータ制約が expected type に反映される。`propagate_fallback_expected` にも適用済み。残存エラーは S2 単独ではなく、同一関数内の S3/I-300/I-301 パターンとの共存が原因
   - **S3: 呼び出し側型引数推論**（D: 9件）: `fn<T>(x: T)` の呼び出しで実引数型から T を推論。TypeScript の type argument inference に相当。対象: `adapter/bun/serve-static.ts:8` 等
   - ~~**S7: typeof/instanceof ガード型推論**~~ → C-1 で完了（todo!() 8箇所全て解消。保守的 false フォールバック方式）
   - ~~**S8: プロパティアクセス型推論**~~ → C-0 で完了（resolve_struct_fields_by_name 統合）
-  - 🔗 Phase A 完了済み。Phase B 完了後に実装（ジェネリクス基盤が整った状態）
+  - 🔗 C-2 で expected type 基盤が整った状態。S3 に集中可能
   - 詳細: `report/bottom-up-type-inference-analysis-2026-03-28.md`, `report/fallback-type-inventory-2026-03-28.md`
+- **[I-300]** **関数/コンストラクタ呼び出し引数のオブジェクトリテラルへの expected type 伝播不足** — **OBJECT_LITERAL_NO_TYPE 残存の最大原因**（32件中推定14件）
+  - C-2 の調査で特定。ベンチマーク数値が動かない直接原因。32件全てにおいて、TypeResolver の `set_call_arg_expected_types`（`src/pipeline/type_resolver/call_resolution.rs:111`）が引数の expected type を設定するが、以下の場合に失敗:
+    (1) 呼び出し先が TypeRegistry に未登録（別ファイルの関数/コンストラクタ。単一ファイルモードで顕著）
+    (2) 呼び出し先の引数型がジェネリック型パラメータ（`fn<T>(x: T)` → `param_ty = Named("T")`）。C-2 で `propagate_arg_expected_types` に `resolve_type_params_in_type` を適用済みだが、TypeRegistry のシグネチャに型パラメータが残っている場合は呼び出し側で具体化が必要
+    (3) メンバ式呼び出し（`obj.method({ ... })`）でオブジェクト型が解決不能
+  - **代表的な失敗パターン**: `new Context(request, { path, matchResult, env })` (`hono-base.ts:415`) — `Context` のコンストラクタ引数型が TypeRegistry に不足（C-2 でコンストラクタのみクラスの登録条件を修正済みだが、別ファイルの場合は単一ファイルモードの制約）
+  - **解決策**: I-286c S3（呼び出し側型引数推論）と連携。実引数型から型パラメータを推論し、パラメータ型を具体化してから expected type を設定する
+  - 🔗 I-286c S3 と同根の課題。一体で設計すべき
+- **[I-301]** **型注釈なしオブジェクトリテラルの変換** — OBJECT_LITERAL_NO_TYPE の一因（32件中推定3件）
+  - C-2 の調査で特定。`const marker = {}` / `const context = {}` のように型注釈がない変数にオブジェクトリテラルを代入するパターン。TypeResolver が expected type を設定できず、`convert_object_lit` が struct 名を決定できない
+  - **対象ファイル**: `utils/html.ts:135`（`const context = {}`）、`utils/concurrent.ts:39`（`const marker = {}`）、`middleware/ip-restriction/index.ts:157`（`const remoteData = { addr, type, isIPv4 }`）
+  - **解決策候補**: (1) 匿名構造体の自動生成（フィールド名と型から `_AnonymousN` 構造体を SyntheticTypeRegistry に登録）、(2) 後続の使用箇所から型を逆推論（2パス必要で高コスト）、(3) 空オブジェクトは `HashMap::new()` or `serde_json::Value::Object` にフォールバック
+  - **意味論的安全性**: 匿名構造体は compile error で検出可能（Safe）。フォールバック型は type-fallback-safety.md の分析が必要
+- **[I-302]** **コンストラクタ内 `this.field = {}` パターンの expected type 未設定** — OBJECT_LITERAL_NO_TYPE の一因（推定2件）
+  - C-2 の調査で `request.ts:79`（`this.#validatedData = {}`）で発見。コンストラクタ本体の `this.field = expr` 代入で、TypeResolver が右辺の `expr` にフィールドの型注釈から expected type を伝播するロジックがない
+  - **現状**: `visit_stmt` の `ExprStmt → Assign` パスでは代入右辺の expected type 設定をしていない。左辺が `MemberExpr(this, field)` の場合に TypeRegistry からクラスのフィールド型を取得し、右辺に expected type を設定する必要がある
+  - **解決策**: `visit_stmt` の `Assign` 処理で `this.field` の左辺を検出 → 現在のクラスの TypeDef からフィールド型を取得 → `expected_types.insert(rhs_span, field_ty)` + `propagate_expected(rhs, &field_ty)`
+  - **影響箇所**: `src/pipeline/type_resolver/visitors.rs` の `visit_stmt` / `Stmt::Expr` → `Expr::Assign` パス
 
 #### ビルトイン型
 

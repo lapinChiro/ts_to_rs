@@ -12,6 +12,87 @@ use crate::ir::Item;
 use crate::pipeline::type_resolution::Span;
 
 impl<'a> TypeResolver<'a> {
+    /// Resolves type parameter names to their constraint types recursively.
+    ///
+    /// When a `RustType::Named { name: "T" }` is encountered and `T` is in
+    /// `type_param_constraints`, replaces it with the constraint type.
+    /// Also resolves type parameters within `type_args` of Named types.
+    ///
+    /// This ensures expected types contain concrete type names that the
+    /// Transformer can use for struct initialization, rather than type
+    /// parameter names that don't exist in the TypeRegistry.
+    pub(super) fn resolve_type_params_in_type(&self, ty: &RustType) -> RustType {
+        match ty {
+            RustType::Named { name, type_args } => {
+                // If name itself is a type parameter, resolve to constraint
+                if type_args.is_empty() {
+                    if let Some(constraint) = self.type_param_constraints.get(name) {
+                        return self.resolve_type_params_in_type(constraint);
+                    }
+                }
+                // Resolve type params within type_args
+                let resolved_args: Vec<RustType> = type_args
+                    .iter()
+                    .map(|a| self.resolve_type_params_in_type(a))
+                    .collect();
+                if &resolved_args == type_args {
+                    ty.clone()
+                } else {
+                    RustType::Named {
+                        name: name.clone(),
+                        type_args: resolved_args,
+                    }
+                }
+            }
+            RustType::Option(inner) => {
+                let resolved = self.resolve_type_params_in_type(inner);
+                if &resolved == inner.as_ref() {
+                    ty.clone()
+                } else {
+                    RustType::Option(Box::new(resolved))
+                }
+            }
+            RustType::Vec(inner) => {
+                let resolved = self.resolve_type_params_in_type(inner);
+                if &resolved == inner.as_ref() {
+                    ty.clone()
+                } else {
+                    RustType::Vec(Box::new(resolved))
+                }
+            }
+            RustType::Fn {
+                params,
+                return_type,
+            } => {
+                let resolved_params: Vec<RustType> = params
+                    .iter()
+                    .map(|p| self.resolve_type_params_in_type(p))
+                    .collect();
+                let resolved_ret = self.resolve_type_params_in_type(return_type);
+                if &resolved_params == params && &resolved_ret == return_type.as_ref() {
+                    ty.clone()
+                } else {
+                    RustType::Fn {
+                        params: resolved_params,
+                        return_type: Box::new(resolved_ret),
+                    }
+                }
+            }
+            RustType::Tuple(types) => {
+                let resolved: Vec<RustType> = types
+                    .iter()
+                    .map(|t| self.resolve_type_params_in_type(t))
+                    .collect();
+                if &resolved == types {
+                    ty.clone()
+                } else {
+                    RustType::Tuple(resolved)
+                }
+            }
+            _ => ty.clone(),
+        }
+    }
+
     /// Resolves struct fields by type name from TypeRegistry, SyntheticTypeRegistry,
     /// and type parameter constraints.
     ///
@@ -74,6 +155,7 @@ impl<'a> TypeResolver<'a> {
     pub(super) fn resolve_object_lit_fields(
         &self,
         type_name: &str,
+        type_args: &[RustType],
         obj: &ast::ObjectLit,
     ) -> Option<Vec<(String, RustType)>> {
         // Enum (discriminated union) — TypeRegistry only
@@ -90,7 +172,7 @@ impl<'a> TypeResolver<'a> {
         }
 
         // Struct resolution (TypeRegistry + SyntheticTypeRegistry + constraints)
-        self.resolve_struct_fields_by_name(type_name, &[])
+        self.resolve_struct_fields_by_name(type_name, type_args)
     }
 
     /// Resolves the field list from a spread source type.
@@ -176,9 +258,15 @@ impl<'a> TypeResolver<'a> {
                             }
                         }
                     }
-                    RustType::Named { name, .. } => {
-                        // Struct or DU — set field types from type registry
-                        let fields = self.resolve_object_lit_fields(name, obj);
+                    RustType::Named { name, type_args } => {
+                        // Struct or DU — set field types from type registry.
+                        // Resolve type params in type_args so generic structs
+                        // get properly instantiated fields.
+                        let resolved_args: Vec<RustType> = type_args
+                            .iter()
+                            .map(|a| self.resolve_type_params_in_type(a))
+                            .collect();
+                        let fields = self.resolve_object_lit_fields(name, &resolved_args, obj);
                         if let Some(fields) = fields {
                             for prop in &obj.props {
                                 if let ast::PropOrSpread::Prop(prop) = prop {
@@ -268,11 +356,12 @@ impl<'a> TypeResolver<'a> {
         param_types: &[RustType],
     ) {
         for (arg, param_ty) in args.iter().zip(param_types.iter()) {
+            let resolved = self.resolve_type_params_in_type(param_ty);
             let arg_span = Span::from_swc(arg.expr.span());
             self.result
                 .expected_types
-                .insert(arg_span, param_ty.clone());
-            self.propagate_expected(&arg.expr, param_ty);
+                .insert(arg_span, resolved.clone());
+            self.propagate_expected(&arg.expr, &resolved);
         }
     }
 }
