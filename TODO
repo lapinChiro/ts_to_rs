@@ -30,8 +30,8 @@
 - **保留** — 正当な保留理由あり（前提タスク未完了、またはユーザーの設計方針決定が必要）
 - **スコープ外** — 明示的に対象外。需要発生時に再評価
 
-件数は Hono ベンチマーク（`./scripts/hono-bench.sh`）の実測値に基づく（最終実行: 2026-03-30 B-2完了後）。
-158 ファイル中 108 ファイルがクリーン（68.4%）、66 エラーインスタンス。コンパイルクリーン: ファイル単位 107（67.7%）、ディレクトリ単位 156（98.7%）。
+件数は Hono ベンチマーク（`./scripts/hono-bench.sh`）の実測値に基づく（最終実行: 2026-03-30 C-0完了後）。
+158 ファイル中 110 ファイルがクリーン（69.6%）、63 エラーインスタンス。コンパイルクリーン: ファイル単位 109（69.0%）、ディレクトリ単位 156（98.7%）。
 **注意**: ベンチマーク実行前に `cargo build --release` が必要。古いビルドで実行すると数値が不正確になる。
 **補足**: 「クリーン」は変換エラーなし（`--report-unsupported` でエラー 0）を意味する。コンパイルクリーンは2指標: ファイル単位（use 除去後の個別コンパイル）とディレクトリ単位（全ファイルを1クレートとしてコンパイル）。
 
@@ -48,6 +48,7 @@
 - **B-fix (I-216+I-275+I-295+I-294)**: 正確性・品質基盤修正。switch default アーム末尾移動（サイレント意味変更解消）+ multiple spread フィールド上書き順序修正（first/later 逆転）+ discriminant 一意性検証 + コンパイルテスト use 自動生成（スキップ1件削減）
 - **I-297**: spread/フィールド位置順序のサイレント意味変更修正。`convert_object_lit` を PropEvent イベント列方式に再設計し rightmost-wins セマンティクスを実現
 - **B-2 (I-285+I-200)**: indexed access + mapped type 改善 — 13件削減（79→66）。型パラメータキー対応（generics erasure）+ `[number]` non-const fallback + ネスト indexed access 再帰解決 + identity mapped type 拡張（symbol filter no-op）+ standalone identity 簡約。TYPE_ALIAS_UNSUPPORTED 10→0、INDEXED_ACCESS 3→0
+- **C-0**: resolve_struct_fields_by_name 統合 — 3件削減（66→63）。TypeRegistry/SyntheticTypeRegistry/type_param_constraints の3層フィールド解決を single source of truth に統合。resolve_member_type, resolve_spread_source_fields, resolve_object_lit_fields の3関数を共通メソッドに委譲。OBJECT_LITERAL_NO_TYPE 36→33
 
 ---
 
@@ -55,7 +56,7 @@
 
 | フェーズ | 移行基準 | 対象 |
 |---------|---------|------|
-| **現在: 変換率の大幅改善** | 全エラーインスタンス < 65 件 | 全 66 件。内訳: OBJECT_LITERAL_NO_TYPE 36 件、OTHER 8 件、QUALIFIED_TYPE 3 件、FN_TYPE_PARAM 3 件、MEMBER_PROPERTY 3 件、ASSIGN_TARGET 3 件、その他 10 件。B-2(I-285+I-200) で TYPE_ALIAS_UNSUPPORTED 10→0、INDEXED_ACCESS 3→0、全体 79→66 |
+| **現在: 変換率の大幅改善** | 全エラーインスタンス < 60 件 | 全 63 件。内訳: OBJECT_LITERAL_NO_TYPE 33 件、OTHER 8 件、QUALIFIED_TYPE 3 件、FN_TYPE_PARAM 3 件、MEMBER_PROPERTY 3 件、ASSIGN_TARGET 3 件、その他 10 件。C-0 で OBJECT_LITERAL_NO_TYPE 36→33、全体 66→63 |
 | **次: コンパイル品質** | ディレクトリコンパイルエラー 0 件 | 残 2 ファイル不合格（5 エラーインスタンス）。I-273（trait/struct 混同）が主因 |
 | **その次: テスト拡充** | E2E テスト網羅性 | E2E テストの拡充（I-20, I-71, I-72, I-74）、HTTP 対応（I-183） |
 

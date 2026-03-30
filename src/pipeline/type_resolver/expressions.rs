@@ -594,11 +594,21 @@ impl<'a> TypeResolver<'a> {
             return ResolvedType::Known(RustType::F64);
         }
 
-        // Delegate to TypeRegistry (handles Vec→Array, String, Named, DynTrait, etc.)
-        self.registry
-            .lookup_field_type(obj_rust_type, &field_name)
-            .map(ResolvedType::Known)
-            .unwrap_or(ResolvedType::Unknown)
+        // 1. TypeRegistry (handles Vec→Array, String, Named, DynTrait, etc.)
+        if let Some(ty) = self.registry.lookup_field_type(obj_rust_type, &field_name) {
+            return ResolvedType::Known(ty);
+        }
+
+        // 2. Struct fields fallback (SyntheticTypeRegistry + type parameter constraints)
+        if let RustType::Named { name, type_args } = obj_rust_type {
+            if let Some(fields) = self.resolve_struct_fields_by_name(name, type_args) {
+                if let Some((_, ty)) = fields.iter().find(|(n, _)| n == &field_name) {
+                    return ResolvedType::Known(ty.clone());
+                }
+            }
+        }
+
+        ResolvedType::Unknown
     }
 
     fn resolve_new_expr(&mut self, new_expr: &ast::NewExpr) -> ResolvedType {

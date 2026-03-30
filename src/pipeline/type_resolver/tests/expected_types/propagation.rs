@@ -572,3 +572,38 @@ fn test_resolve_arrow_explicit_annotation_takes_priority_over_expected() {
         "arrow's own return annotation (number) should take priority"
     );
 }
+
+// ── Object literal field propagation with synthetic types ──
+
+#[test]
+fn test_propagate_expected_object_lit_fields_from_synthetic_type() {
+    // const x: { name: string; count: number } = { name: "hello", count: 42 }
+    // The inline type becomes _TypeLitN. propagate_expected with Named("_TypeLitN")
+    // should resolve fields via resolve_object_lit_fields → resolve_struct_fields_by_name,
+    // setting String expected on "hello" and F64 expected on 42.
+    let res = resolve(
+        r#"
+        const x: { name: string; count: number } = { name: "hello", count: 42 };
+        "#,
+    );
+
+    // "hello" should have expected type String
+    let has_string_expected = res
+        .expected_types
+        .values()
+        .any(|t| matches!(t, RustType::String));
+    assert!(
+        has_string_expected,
+        "field 'name' value should have String expected type from synthetic struct"
+    );
+
+    // 42 should have expected type F64
+    let has_f64_expected = res
+        .expected_types
+        .values()
+        .any(|t| matches!(t, RustType::F64));
+    assert!(
+        has_f64_expected,
+        "field 'count' value should have F64 expected type from synthetic struct"
+    );
+}

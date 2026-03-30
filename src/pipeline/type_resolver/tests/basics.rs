@@ -423,3 +423,169 @@ fn test_resolve_throw_stmt() {
         "throw expression should be resolved"
     );
 }
+
+// ── resolve_member_type: synthetic inline struct field access ──
+
+#[test]
+fn test_member_access_on_inline_object_type_parameter() {
+    // { verification?: string } becomes a synthetic struct _TypeLitN.
+    // options.verification should resolve to Option<String> via SyntheticTypeRegistry.
+    let res = resolve(
+        r#"
+        function f(options: { verification?: string; alg?: string }) {
+            const v = options.verification;
+        }
+        "#,
+    );
+    let has_option_string = res
+        .expr_types
+        .values()
+        .any(|t| matches!(t, ResolvedType::Known(RustType::Option(inner)) if matches!(inner.as_ref(), RustType::String)));
+    assert!(
+        has_option_string,
+        "options.verification on inline type should resolve to Option<String>"
+    );
+}
+
+#[test]
+fn test_member_access_on_inline_object_type_required_field() {
+    // Required field (not optional) should resolve to the direct type.
+    let res = resolve(
+        r#"
+        function f(opts: { name: string; count: number }) {
+            const n = opts.name;
+            const c = opts.count;
+        }
+        "#,
+    );
+    let has_string = res
+        .expr_types
+        .values()
+        .any(|t| matches!(t, ResolvedType::Known(RustType::String)));
+    assert!(
+        has_string,
+        "opts.name on inline type should resolve to String"
+    );
+    let has_f64 = res
+        .expr_types
+        .values()
+        .any(|t| matches!(t, ResolvedType::Known(RustType::F64)));
+    assert!(has_f64, "opts.count on inline type should resolve to F64");
+}
+
+// ── resolve_member_type: type parameter constraint field access ──
+
+#[test]
+fn test_member_access_on_type_param_with_constraint() {
+    // E extends Env: env.bindings should resolve through the constraint to Env's fields.
+    let mut reg = TypeRegistry::new();
+    reg.register(
+        "Env".to_string(),
+        TypeDef::new_struct(
+            vec![
+                ("bindings".to_string(), RustType::Any),
+                ("variables".to_string(), RustType::Any),
+            ],
+            Default::default(),
+            vec![],
+        ),
+    );
+
+    let res = resolve_with_reg(
+        r#"
+        function f<E extends Env>(env: E) {
+            const b = env.bindings;
+        }
+        "#,
+        &reg,
+    );
+    let has_any = res
+        .expr_types
+        .values()
+        .any(|t| matches!(t, ResolvedType::Known(RustType::Any)));
+    assert!(
+        has_any,
+        "env.bindings on constrained type param should resolve through constraint"
+    );
+}
+
+#[test]
+fn test_member_access_on_type_param_nonexistent_field_returns_unknown() {
+    let mut reg = TypeRegistry::new();
+    reg.register(
+        "Env".to_string(),
+        TypeDef::new_struct(
+            vec![("bindings".to_string(), RustType::String)],
+            Default::default(),
+            vec![],
+        ),
+    );
+
+    let res = resolve_with_reg(
+        r#"
+        function f<E extends Env>(env: E) {
+            const x = env.nonexistent;
+        }
+        "#,
+        &reg,
+    );
+    // env.nonexistent should resolve to Unknown (field doesn't exist on Env).
+    // Verify by checking that the MemberExpr produces Unknown.
+    let has_unknown = res
+        .expr_types
+        .values()
+        .any(|t| matches!(t, ResolvedType::Unknown));
+    assert!(
+        has_unknown,
+        "nonexistent field on constrained type param should resolve to Unknown"
+    );
+    // Also verify no String leaked from Env.bindings (which was NOT accessed).
+    let has_string = res
+        .expr_types
+        .values()
+        .any(|t| matches!(t, ResolvedType::Known(RustType::String)));
+    assert!(
+        !has_string,
+        "should not have String — env.nonexistent is not env.bindings"
+    );
+}
+
+#[test]
+fn test_member_access_on_chained_type_param_constraints() {
+    // T extends Base, Base extends Root: obj.field should resolve through 2 levels.
+    let mut reg = TypeRegistry::new();
+    reg.register(
+        "Root".to_string(),
+        TypeDef::new_struct(
+            vec![("field".to_string(), RustType::F64)],
+            Default::default(),
+            vec![],
+        ),
+    );
+    // Base extends Root — Base is in TypeRegistry as a struct inheriting Root's fields
+    reg.register(
+        "Base".to_string(),
+        TypeDef::new_struct(
+            vec![("field".to_string(), RustType::F64)],
+            Default::default(),
+            vec![],
+        ),
+    );
+
+    let res = resolve_with_reg(
+        r#"
+        function f<T extends Base>(obj: T) {
+            const v = obj.field;
+        }
+        "#,
+        &reg,
+    );
+    let has_f64 = res
+        .expr_types
+        .values()
+        .any(|t| matches!(t, ResolvedType::Known(RustType::F64)));
+    assert!(
+        has_f64,
+        "obj.field on chained constraint (T → Base → fields) should resolve to F64"
+    );
+}

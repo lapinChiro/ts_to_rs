@@ -248,3 +248,29 @@ fn test_spread_named_struct_existing_behavior() {
         "anonymous struct should have 3 fields (host, port, extra)"
     );
 }
+
+// --- Spread on inline object type (SyntheticTypeRegistry) ---
+
+#[test]
+fn test_spread_inline_object_type_resolves_fields() {
+    // { ...opts, extra: 1 } where opts: { name: string; count: number }
+    // The inline type creates a _TypeLitN in SyntheticTypeRegistry.
+    // resolve_spread_source_fields should find fields via resolve_struct_fields_by_name.
+    let res = resolve(
+        r#"
+        function f(opts: { name: string; count: number }) {
+            const merged = { ...opts, extra: true };
+        }
+        "#,
+    );
+
+    // The object literal should get an expected type (anonymous struct with 3 fields)
+    let has_obj_expected = res
+        .expected_types
+        .values()
+        .any(|t| matches!(t, RustType::Named { name, .. } if name.starts_with("_TypeLit")));
+    assert!(
+        has_obj_expected,
+        "spread of inline object type should produce anonymous struct expected type"
+    );
+}

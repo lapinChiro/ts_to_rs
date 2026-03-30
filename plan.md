@@ -51,11 +51,17 @@
 
 Phase B 完了後。
 
+#### C-0: resolve_struct_fields_by_name 統合 ✅
+
+- `resolve_struct_fields_by_name`: TypeRegistry → SyntheticTypeRegistry → type_param_constraints の3層フィールド解決を single source of truth として抽出
+- `resolve_member_type`, `resolve_spread_source_fields`, `resolve_object_lit_fields` の3関数を共通メソッドに統合
+- **実績: -3 エラー（OBJECT_LITERAL_NO_TYPE 36→33）、クリーン 108→110**
+
 | 順序 | パターン | エラー削減 |
 |------|---------|-----------|
 | C-1 | typeof/instanceof ガード型推論 | 品質 |
 | C-2 | プロパティアクセス型推論 | 品質 |
-| C-3 | `\|\|`/`??` ジェネリクス制約解決 | H: ~8件 |
+| C-3 | `\|\|`/`??` ジェネリクス制約解決 | H: ~5件（残存） |
 | C-4 | 呼び出し側型引数推論 | D: ~9件 |
 
 ---
@@ -70,7 +76,8 @@ Phase B 完了後。
 | Phase B-fix | 0（正確性保証） | ✅ |
 | I-297 | 0（正確性修正） | ✅ サイレント意味変更解消 |
 | Phase B-2 (I-285+I-200) | -13 | ✅ 79→66 |
-| Phase C | ~-17 | ~66→~49 |
+| Phase C-0 (resolve_member_type) | -3 | ✅ 66→63 |
+| Phase C (残) | ~-14 | ~63→~49 |
 
 ---
 

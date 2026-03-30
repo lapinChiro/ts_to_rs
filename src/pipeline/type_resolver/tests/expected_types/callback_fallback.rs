@@ -172,3 +172,116 @@ fn test_propagate_expected_typed_var_arrow_return_object_literal() {
         point_count
     );
 }
+
+// ── Inline object type + fallback chain (resolve_member_type + propagate_fallback_expected) ──
+
+#[test]
+fn test_fallback_on_inline_type_member_access() {
+    // Pattern: `options.verification || {}` where options has an INLINE type
+    // (not a Named type in TypeRegistry, but a synthetic struct from TsTypeLit).
+    // This tests the full chain: resolve_member_type → synthetic field lookup →
+    // propagate_fallback_expected → expected type on {}.
+    let mut reg = TypeRegistry::new();
+    reg.register(
+        "VerifyOpts".to_string(),
+        TypeDef::new_struct(
+            vec![("algo".to_string(), RustType::String)],
+            Default::default(),
+            vec![],
+        ),
+    );
+
+    let res = resolve_with_reg(
+        r#"function test(options: { verification: VerifyOpts }): void {
+            const v = options.verification || {};
+        }"#,
+        &reg,
+    );
+
+    // The `{}` should have expected type VerifyOpts (from inline type's field)
+    let verify_opts_count = res
+        .expected_types
+        .values()
+        .filter(|t| matches!(t, RustType::Named { name, .. } if name == "VerifyOpts"))
+        .count();
+    assert!(
+        verify_opts_count >= 1,
+        "empty object in || fallback should have Named(\"VerifyOpts\") from inline type field, found {} entries",
+        verify_opts_count
+    );
+}
+
+#[test]
+fn test_fallback_on_constrained_type_param_member_access() {
+    // Pattern: `options.verification || {}` where options: T extends { verification: VerifyOpts }
+    // Tests: resolve_member_type → type_param_constraints → field lookup → fallback propagation.
+    let mut reg = TypeRegistry::new();
+    reg.register(
+        "BaseOpts".to_string(),
+        TypeDef::new_struct(
+            vec![(
+                "verification".to_string(),
+                RustType::Named {
+                    name: "VerifyOpts".to_string(),
+                    type_args: vec![],
+                },
+            )],
+            Default::default(),
+            vec![],
+        ),
+    );
+    reg.register(
+        "VerifyOpts".to_string(),
+        TypeDef::new_struct(
+            vec![("algo".to_string(), RustType::String)],
+            Default::default(),
+            vec![],
+        ),
+    );
+
+    let res = resolve_with_reg(
+        r#"function test<T extends BaseOpts>(options: T): void {
+            const v = options.verification || {};
+        }"#,
+        &reg,
+    );
+
+    let verify_opts_count = res
+        .expected_types
+        .values()
+        .filter(|t| matches!(t, RustType::Named { name, .. } if name == "VerifyOpts"))
+        .count();
+    assert!(
+        verify_opts_count >= 1,
+        "empty object in || fallback should have Named(\"VerifyOpts\") from constrained type param, found {} entries",
+        verify_opts_count
+    );
+}
+
+// ── OptChain on synthetic type ──
+
+#[test]
+fn test_opt_chain_on_inline_object_type() {
+    // opts?.name where opts: { name: string } | undefined
+    // OptChain unwraps Option<_TypeLitN> → _TypeLitN, then resolve_member_type
+    // looks up "name" via resolve_struct_fields_by_name → String.
+    // Final result is Option<String>.
+    let res = resolve(
+        r#"
+        function f(opts?: { name: string }) {
+            const n = opts?.name;
+        }
+        "#,
+    );
+
+    let has_option_string = res.expr_types.values().any(|t| {
+        matches!(
+            t,
+            ResolvedType::Known(RustType::Option(inner)) if matches!(inner.as_ref(), RustType::String)
+        )
+    });
+    assert!(
+        has_option_string,
+        "opts?.name on inline type should resolve to Option<String>"
+    );
+}

@@ -8,69 +8,103 @@ use swc_common::Spanned;
 use swc_ecma_ast as ast;
 
 use super::*;
+use crate::ir::Item;
 use crate::pipeline::type_resolution::Span;
 
 impl<'a> TypeResolver<'a> {
+    /// Resolves struct fields by type name from TypeRegistry, SyntheticTypeRegistry,
+    /// and type parameter constraints.
+    ///
+    /// This is the single source of truth for "given a type name, get its struct fields".
+    /// All field resolution in the TypeResolver (member access, spread sources, object
+    /// literal propagation) delegates to this method.
+    ///
+    /// Resolution order:
+    /// 1. TypeRegistry (with type_args instantiation for generics)
+    /// 2. SyntheticTypeRegistry (inline structs like `_TypeLit0`)
+    /// 3. Type parameter constraint fallback (bare type params only, recursive)
+    pub(super) fn resolve_struct_fields_by_name(
+        &self,
+        name: &str,
+        type_args: &[RustType],
+    ) -> Option<Vec<(String, RustType)>> {
+        // 1. TypeRegistry
+        let type_def = if type_args.is_empty() {
+            self.registry.get(name).cloned()
+        } else {
+            self.registry.instantiate(name, type_args)
+        };
+        if let Some(TypeDef::Struct { fields, .. }) = type_def {
+            return Some(fields);
+        }
+
+        // 2. SyntheticTypeRegistry (inline object types → _TypeLitN)
+        if let Some(def) = self.synthetic.get(name) {
+            if let Item::Struct { fields, .. } = &def.item {
+                return Some(
+                    fields
+                        .iter()
+                        .map(|f| (f.name.clone(), f.ty.clone()))
+                        .collect(),
+                );
+            }
+        }
+
+        // 3. Type parameter constraint (bare type params only).
+        // A name with type_args (like `Foo<Bar>`) is a concrete type, not a
+        // type parameter, so constraint lookup would be semantically wrong.
+        if type_args.is_empty() {
+            if let Some(RustType::Named {
+                name: cn,
+                type_args: ca,
+            }) = self.type_param_constraints.get(name)
+            {
+                return self.resolve_struct_fields_by_name(cn, ca);
+            }
+        }
+
+        None
+    }
+
     /// Resolves the field list for an object literal based on the expected type name.
     ///
-    /// For `TypeDef::Struct`, returns its fields directly.
     /// For `TypeDef::Enum` (discriminated union), identifies the variant from the
     /// tag field value in the object literal, then returns the variant's fields.
+    /// For structs, delegates to [`resolve_struct_fields_by_name`].
     pub(super) fn resolve_object_lit_fields(
         &self,
         type_name: &str,
         obj: &ast::ObjectLit,
     ) -> Option<Vec<(String, RustType)>> {
-        match self.registry.get(type_name) {
-            Some(TypeDef::Struct { fields, .. }) => Some(fields.clone()),
-            Some(TypeDef::Enum {
-                tag_field: Some(tag),
-                variant_fields,
-                string_values,
-                ..
-            }) => {
-                let tag_value = find_string_prop_value(obj, tag)?;
-                let variant_name = string_values.get(&tag_value)?;
-                variant_fields.get(variant_name).cloned()
-            }
-            _ => None,
+        // Enum (discriminated union) — TypeRegistry only
+        if let Some(TypeDef::Enum {
+            tag_field: Some(tag),
+            variant_fields,
+            string_values,
+            ..
+        }) = self.registry.get(type_name)
+        {
+            let tag_value = find_string_prop_value(obj, tag)?;
+            let variant_name = string_values.get(&tag_value)?;
+            return variant_fields.get(variant_name).cloned();
         }
+
+        // Struct resolution (TypeRegistry + SyntheticTypeRegistry + constraints)
+        self.resolve_struct_fields_by_name(type_name, &[])
     }
 
     /// Resolves the field list from a spread source type.
     ///
-    /// Handles three resolution strategies in order:
-    /// 1. `Option<T>` → unwrap and resolve inner type's fields
-    /// 2. `Named` type → registry lookup (with type_args instantiation if present)
-    /// 3. `Named` type not in registry → type parameter constraint lookup
+    /// Handles `Option<T>` unwrapping, then delegates to [`resolve_struct_fields_by_name`]
+    /// for the actual field resolution.
     fn resolve_spread_source_fields(
         &self,
         spread_ty: &RustType,
     ) -> Option<Vec<(String, RustType)>> {
         match spread_ty {
-            // 1. Option<T> → unwrap and resolve inner
             RustType::Option(inner) => self.resolve_spread_source_fields(inner),
-            // 2. Named type
             RustType::Named { name, type_args } => {
-                // 2a. Instantiate with type_args if present
-                let type_def = if type_args.is_empty() {
-                    self.registry.get(name).cloned()
-                } else {
-                    self.registry.instantiate(name, type_args)
-                };
-                if let Some(TypeDef::Struct { fields, .. }) = type_def {
-                    return Some(fields);
-                }
-                // 2b. Type parameter → resolve via constraint.
-                // Only applies when type_args is empty (bare type parameter like `E`).
-                // A name with type_args (like `Foo<Bar>`) is a concrete type, not a
-                // type parameter, so constraint lookup would be semantically wrong.
-                if type_args.is_empty() {
-                    if let Some(constraint) = self.type_param_constraints.get(name) {
-                        return self.resolve_spread_source_fields(constraint);
-                    }
-                }
-                None
+                self.resolve_struct_fields_by_name(name, type_args)
             }
             _ => None,
         }
@@ -78,7 +112,8 @@ impl<'a> TypeResolver<'a> {
 
     /// Merges fields from spread sources and explicit properties into a unified field list.
     ///
-    /// Spread source types are resolved through TypeRegistry to extract their fields.
+    /// Spread source types are resolved through [`resolve_struct_fields_by_name`] to extract
+    /// their fields (TypeRegistry, SyntheticTypeRegistry, and type parameter constraints).
     /// Explicit fields override spread fields with the same name (TS semantics).
     ///
     /// Returns `None` if any spread source's fields cannot be resolved (the type is not
