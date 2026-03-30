@@ -158,12 +158,15 @@ impl<'a> Transformer<'a> {
                     args: vec![],
                 }
             }
-            TypeofMatch::Placeholder => Expr::FnCall {
-                name: "todo!".to_string(),
-                args: vec![Expr::StringLit(format!(
-                    "typeof {type_str} — cannot resolve type of operand"
-                ))],
-            },
+            TypeofMatch::Placeholder => {
+                // Unknown operand type: treat as "type does not match" (same as False).
+                // For narrowing: `if (typeof x === T)` → else branch;
+                //                `if (typeof x !== T)` → then branch (both = "not T").
+                // For non-narrowing (e.g. `const isT = typeof x === T`): static value
+                // that may be incorrect, but strictly better than the previous todo!()
+                // which always panicked.
+                Expr::BoolLit(is_neq)
+            }
         };
 
         Some(expr)
@@ -173,18 +176,14 @@ impl<'a> Transformer<'a> {
     ///
     /// - struct with known fields → static `true`/`false`
     /// - HashMap → `obj.contains_key("key")`
-    /// - unknown type → `todo!()` (no silent `true` fallback)
-    pub(crate) fn convert_in_operator(&self, bin: &ast::BinExpr) -> Expr {
+    /// - unknown type → `false` (conservative fallback)
+    pub(crate) fn convert_in_operator(&mut self, bin: &ast::BinExpr) -> Expr {
         // Extract the key string from LHS (must be a string literal)
         let key = match bin.left.as_ref() {
             ast::Expr::Lit(ast::Lit::Str(s)) => s.value.to_string_lossy().into_owned(),
             _ => {
-                return Expr::FnCall {
-                    name: "todo!".to_string(),
-                    args: vec![Expr::StringLit(
-                        "in operator with non-string key".to_string(),
-                    )],
-                };
+                // Non-string key in `in` operator: conservatively return false
+                return Expr::BoolLit(false);
             }
         };
 
@@ -197,12 +196,17 @@ impl<'a> Transformer<'a> {
                 let obj_ir = match bin.right.as_ref() {
                     ast::Expr::Ident(ident) => Expr::Ident(ident.sym.as_ref().to_owned()),
                     _ => {
-                        return Expr::FnCall {
-                            name: "todo!".to_string(),
-                            args: vec![Expr::StringLit(
-                                "in operator with complex RHS expression".to_string(),
-                            )],
-                        };
+                        // Complex RHS expression: convert and use contains_key
+                        match self.convert_expr(bin.right.as_ref()) {
+                            Ok(rhs_ir) => {
+                                return Expr::MethodCall {
+                                    object: Box::new(rhs_ir),
+                                    method: "contains_key".to_string(),
+                                    args: vec![Expr::StringLit(key)],
+                                };
+                            }
+                            Err(_) => return Expr::BoolLit(false),
+                        }
                     }
                 };
                 Expr::MethodCall {
@@ -233,20 +237,16 @@ impl<'a> Transformer<'a> {
                             )
                         }
                     }
-                    _ => Expr::FnCall {
-                        name: "todo!".to_string(),
-                        args: vec![Expr::StringLit(format!(
-                            "in operator — type '{name}' has unknown shape"
-                        ))],
-                    },
+                    _ => {
+                        // Type exists but shape unknown: conservatively return false
+                        Expr::BoolLit(false)
+                    }
                 }
             }
-            _ => Expr::FnCall {
-                name: "todo!".to_string(),
-                args: vec![Expr::StringLit(format!(
-                    "in operator — cannot resolve type of RHS for key '{key}'"
-                ))],
-            },
+            _ => {
+                // Cannot resolve RHS type: conservatively return false
+                Expr::BoolLit(false)
+            }
         }
     }
 
@@ -255,19 +255,14 @@ impl<'a> Transformer<'a> {
     /// - Known matching type → `true`
     /// - Known non-matching type → `false`
     /// - `Option<T>` where T matches → `x.is_some()`
-    /// - Unknown type → `todo!()` placeholder (compile error, not silent `true`)
-    pub(crate) fn convert_instanceof(&self, bin: &ast::BinExpr) -> Expr {
+    /// - Unknown type → `false` (conservative fallback)
+    pub(crate) fn convert_instanceof(&mut self, bin: &ast::BinExpr) -> Expr {
         // Get the class name from the RHS
         let class_name = match bin.right.as_ref() {
             ast::Expr::Ident(ident) => ident.sym.to_string(),
             _ => {
-                // Non-identifier RHS (e.g., `x instanceof expr`) — cannot resolve statically
-                return Expr::FnCall {
-                    name: "todo!".to_string(),
-                    args: vec![Expr::StringLit(
-                        "instanceof with non-identifier RHS".to_string(),
-                    )],
-                };
+                // Non-identifier RHS (e.g., `x instanceof expr`) — conservatively false
+                return Expr::BoolLit(false);
             }
         };
 
@@ -275,12 +270,10 @@ impl<'a> Transformer<'a> {
         let lhs_type = self.get_expr_type(&bin.left).cloned();
 
         match lhs_type {
-            Some(RustType::Any) | None => Expr::FnCall {
-                name: "todo!".to_string(),
-                args: vec![Expr::StringLit(format!(
-                    "instanceof {class_name} — cannot resolve type of operand"
-                ))],
-            },
+            Some(RustType::Any) | None => {
+                // Unknown/Any operand type: conservatively return false
+                Expr::BoolLit(false)
+            }
             Some(RustType::Named { ref name, .. }) => {
                 // Check if this is a union enum with a matching variant
                 if let Some(crate::registry::TypeDef::Enum { variants, .. }) = self.reg().get(name)
@@ -303,12 +296,17 @@ impl<'a> Transformer<'a> {
                     let lhs_ir = match bin.left.as_ref() {
                         ast::Expr::Ident(ident) => Expr::Ident(ident.sym.to_string()),
                         _ => {
-                            return Expr::FnCall {
-                                name: "todo!".to_string(),
-                                args: vec![Expr::StringLit(
-                                    "instanceof with complex LHS".to_string(),
-                                )],
-                            };
+                            // Complex LHS with Option<T> where T matches: convert LHS
+                            match self.convert_expr(bin.left.as_ref()) {
+                                Ok(lhs_ir) => {
+                                    return Expr::MethodCall {
+                                        object: Box::new(lhs_ir),
+                                        method: "is_some".to_string(),
+                                        args: vec![],
+                                    };
+                                }
+                                Err(_) => return Expr::BoolLit(false),
+                            }
                         }
                     };
                     Expr::MethodCall {
@@ -479,7 +477,7 @@ enum TypeofMatch {
     False,
     /// The type is `Option<T>` and typeof is `"undefined"` — convert to `.is_none()`.
     IsNone,
-    /// The operand type is unknown — generate `todo!()` to produce a compile error.
+    /// The operand type is unknown — conservatively treated as "no match".
     Placeholder,
 }
 

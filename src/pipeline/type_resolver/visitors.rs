@@ -11,7 +11,43 @@ use crate::pipeline::type_converter::convert_ts_type;
 use crate::pipeline::type_resolution::Span;
 use crate::transformer::type_position::{wrap_trait_for_position, TypePosition};
 
+/// Extracts the type annotation from any pattern variant.
+///
+/// For `Pat::Assign`, recurses into the left-side pattern (the annotation
+/// is on the inner ident/object/array, not on the AssignPat itself).
+pub(super) fn extract_type_ann_from_pat(pat: &ast::Pat) -> Option<&ast::TsTypeAnn> {
+    match pat {
+        ast::Pat::Ident(ident) => ident.type_ann.as_deref(),
+        ast::Pat::Object(obj) => obj.type_ann.as_deref(),
+        ast::Pat::Array(arr) => arr.type_ann.as_deref(),
+        ast::Pat::Assign(assign) => extract_type_ann_from_pat(&assign.left),
+        _ => None,
+    }
+}
+
 impl<'a> TypeResolver<'a> {
+    /// Extracts parameter name and type from a pattern, handling default values.
+    ///
+    /// Returns `(name, type)` for `Pat::Ident` and `Pat::Assign` wrapping `Pat::Ident`.
+    /// Returns `None` for destructuring patterns (which don't have a single name).
+    fn extract_param_name_and_type(&mut self, pat: &ast::Pat) -> Option<(String, RustType)> {
+        match pat {
+            ast::Pat::Ident(ident) => {
+                let name = ident.id.sym.to_string();
+                let ty = ident
+                    .type_ann
+                    .as_ref()
+                    .and_then(|ann| {
+                        convert_ts_type(&ann.type_ann, self.synthetic, self.registry).ok()
+                    })
+                    .map(|ty| wrap_trait_for_position(ty, TypePosition::Param, self.registry))
+                    .unwrap_or(RustType::Any);
+                Some((name, ty))
+            }
+            ast::Pat::Assign(assign) => self.extract_param_name_and_type(&assign.left),
+            _ => None,
+        }
+    }
     pub(super) fn visit_module_item(&mut self, item: &ast::ModuleItem) {
         match item {
             ast::ModuleItem::Stmt(stmt) => self.visit_stmt(stmt),
@@ -41,22 +77,7 @@ impl<'a> TypeResolver<'a> {
             .function
             .params
             .iter()
-            .filter_map(|p| {
-                if let ast::Pat::Ident(ident) = &p.pat {
-                    let name = ident.id.sym.to_string();
-                    let ty = ident
-                        .type_ann
-                        .as_ref()
-                        .and_then(|ann| {
-                            convert_ts_type(&ann.type_ann, self.synthetic, self.registry).ok()
-                        })
-                        .map(|ty| wrap_trait_for_position(ty, TypePosition::Param, self.registry))
-                        .unwrap_or(RustType::Any);
-                    Some((name, ty))
-                } else {
-                    None
-                }
-            })
+            .filter_map(|p| self.extract_param_name_and_type(&p.pat))
             .collect();
         let return_type = fn_decl
             .function
@@ -107,17 +128,52 @@ impl<'a> TypeResolver<'a> {
     }
 
     pub(super) fn visit_param_pat(&mut self, pat: &ast::Pat) {
-        if let ast::Pat::Ident(ident) = pat {
-            let name = ident.id.sym.to_string();
-            let span = Span::from_swc(ident.id.span);
-            let ty = ident
-                .type_ann
-                .as_ref()
-                .and_then(|ann| convert_ts_type(&ann.type_ann, self.synthetic, self.registry).ok())
-                .map(|ty| wrap_trait_for_position(ty, TypePosition::Param, self.registry))
-                .map(ResolvedType::Known)
-                .unwrap_or(ResolvedType::Unknown);
-            self.declare_var(&name, ty, span, false);
+        match pat {
+            ast::Pat::Ident(ident) => {
+                let name = ident.id.sym.to_string();
+                let span = Span::from_swc(ident.id.span);
+                let ty = ident
+                    .type_ann
+                    .as_ref()
+                    .and_then(|ann| {
+                        convert_ts_type(&ann.type_ann, self.synthetic, self.registry).ok()
+                    })
+                    .map(|ty| wrap_trait_for_position(ty, TypePosition::Param, self.registry))
+                    .map(ResolvedType::Known)
+                    .unwrap_or(ResolvedType::Unknown);
+                self.declare_var(&name, ty, span, false);
+            }
+            ast::Pat::Assign(assign) => {
+                // Default value parameter: `x: Type = defaultExpr`
+                // 1. Register the left-side variable(s) in scope
+                self.visit_param_pat(&assign.left);
+                // 2. Extract type annotation from the left pattern
+                let ann_ty = extract_type_ann_from_pat(&assign.left).and_then(|ann| {
+                    convert_ts_type(&ann.type_ann, self.synthetic, self.registry)
+                        .ok()
+                        .map(|ty| wrap_trait_for_position(ty, TypePosition::Param, self.registry))
+                });
+                // 3. Set expected type on the default value expression and propagate
+                if let Some(ref ty) = ann_ty {
+                    let rhs_span = Span::from_swc(assign.right.span());
+                    self.result.expected_types.insert(rhs_span, ty.clone());
+                    self.propagate_expected(&assign.right, ty);
+                }
+                // 4. Resolve the default value expression
+                let rhs_span = Span::from_swc(assign.right.span());
+                let rhs_ty = self.resolve_expr(&assign.right);
+                self.result.expr_types.insert(rhs_span, rhs_ty);
+            }
+            ast::Pat::Object(_) | ast::Pat::Array(_) => {
+                // Destructuring parameters: register nested variables as Unknown.
+                // TODO: extract field types from type annotation and register with
+                // proper types (e.g., `{ x, y }: Point` → x: f64, y: f64).
+                self.register_pat_vars(pat, false);
+            }
+            ast::Pat::Rest(rest) => {
+                self.visit_param_pat(&rest.arg);
+            }
+            _ => {}
         }
     }
 

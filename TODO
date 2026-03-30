@@ -30,8 +30,8 @@
 - **保留** — 正当な保留理由あり（前提タスク未完了、またはユーザーの設計方針決定が必要）
 - **スコープ外** — 明示的に対象外。需要発生時に再評価
 
-件数は Hono ベンチマーク（`./scripts/hono-bench.sh`）の実測値に基づく（最終実行: 2026-03-30 C-0完了後）。
-158 ファイル中 110 ファイルがクリーン（69.6%）、63 エラーインスタンス。コンパイルクリーン: ファイル単位 109（69.0%）、ディレクトリ単位 156（98.7%）。
+件数は Hono ベンチマーク（`./scripts/hono-bench.sh`）の実測値に基づく（最終実行: 2026-03-30 C-1完了後）。
+158 ファイル中 110 ファイルがクリーン（69.6%）、62 エラーインスタンス。コンパイルクリーン: ファイル単位 109（69.0%）、ディレクトリ単位 156（98.7%）。
 **注意**: ベンチマーク実行前に `cargo build --release` が必要。古いビルドで実行すると数値が不正確になる。
 **補足**: 「クリーン」は変換エラーなし（`--report-unsupported` でエラー 0）を意味する。コンパイルクリーンは2指標: ファイル単位（use 除去後の個別コンパイル）とディレクトリ単位（全ファイルを1クレートとしてコンパイル）。
 
@@ -49,6 +49,7 @@
 - **I-297**: spread/フィールド位置順序のサイレント意味変更修正。`convert_object_lit` を PropEvent イベント列方式に再設計し rightmost-wins セマンティクスを実現
 - **B-2 (I-285+I-200)**: indexed access + mapped type 改善 — 13件削減（79→66）。型パラメータキー対応（generics erasure）+ `[number]` non-const fallback + ネスト indexed access 再帰解決 + identity mapped type 拡張（symbol filter no-op）+ standalone identity 簡約。TYPE_ALIAS_UNSUPPORTED 10→0、INDEXED_ACCESS 3→0
 - **C-0**: resolve_struct_fields_by_name 統合 — 3件削減（66→63）。TypeRegistry/SyntheticTypeRegistry/type_param_constraints の3層フィールド解決を single source of truth に統合。resolve_member_type, resolve_spread_source_fields, resolve_object_lit_fields の3関数を共通メソッドに委譲。OBJECT_LITERAL_NO_TYPE 36→33
+- **C-1**: TypeResolver パラメータ型伝播 + todo!() 解消 — 1件削減（63→62）+ 品質向上。visit_param_pat の Pat::Assign 対応（デフォルト値パラメータのスコープ登録 + expected type 伝播）。visit_fn_decl/resolve_arrow_expr/resolve_fn_expr のパラメータ型収集で Pat::Assign 処理。patterns.rs の todo!() 8箇所を保守的 false フォールバックに置換（Tier 2 パニック解消）
 
 ---
 
@@ -56,7 +57,7 @@
 
 | フェーズ | 移行基準 | 対象 |
 |---------|---------|------|
-| **現在: 変換率の大幅改善** | 全エラーインスタンス < 60 件 | 全 63 件。内訳: OBJECT_LITERAL_NO_TYPE 33 件、OTHER 8 件、QUALIFIED_TYPE 3 件、FN_TYPE_PARAM 3 件、MEMBER_PROPERTY 3 件、ASSIGN_TARGET 3 件、その他 10 件。C-0 で OBJECT_LITERAL_NO_TYPE 36→33、全体 66→63 |
+| **現在: 変換率の大幅改善** | 全エラーインスタンス < 60 件 | 全 62 件。内訳: OBJECT_LITERAL_NO_TYPE 32 件、OTHER 8 件、QUALIFIED_TYPE 3 件、FN_TYPE_PARAM 3 件、MEMBER_PROPERTY 3 件、ASSIGN_TARGET 3 件、その他 10 件。C-1 で OBJECT_LITERAL_NO_TYPE 33→32、全体 63→62 + patterns.rs todo!() 8箇所解消 |
 | **次: コンパイル品質** | ディレクトリコンパイルエラー 0 件 | 残 2 ファイル不合格（5 エラーインスタンス）。I-273（trait/struct 混同）が主因 |
 | **その次: テスト拡充** | E2E テスト網羅性 | E2E テストの拡充（I-20, I-71, I-72, I-74）、HTTP 対応（I-183） |
 
@@ -92,8 +93,8 @@
 - **[I-286c]** **sink-source 逆伝播: 高度なパターン（S2, S3, S7, S8）** — H: ~8件, D: ~9件 + 品質向上（plan.md Phase C）
   - **S2: `||`/`??` ジェネリクス制約解決**（H: 8件）: ジェネリクスフィールドアクセス（`options.verification` where `options: T extends { verification: V }`）で制約 T の構造から V を推論。`propagate_fallback_expected` を拡張。対象: `middleware/jwk/jwk.ts:48`, `middleware/jwt/jwt.ts:53`, `utils/jwt/jwt.ts:56,191`, `adapter/aws-lambda/handler.ts:268,496`, `helper/proxy/index.ts:160`, `hono-base.ts:98`
   - **S3: 呼び出し側型引数推論**（D: 9件）: `fn<T>(x: T)` の呼び出しで実引数型から T を推論。TypeScript の type argument inference に相当。対象: `adapter/bun/serve-static.ts:8` 等
-  - **S7: typeof/instanceof ガード型推論**（品質: todo!() 3箇所解消）: `expressions/patterns.rs:143-146,244-250,277-283` で typeof 文字列/クラス名から被演算子型を推論
-  - **S8: プロパティアクセス型推論**（品質）: Unknown オブジェクトのメンバーアクセスでプロパティ名と TypeRegistry から候補型を推論
+  - ~~**S7: typeof/instanceof ガード型推論**~~ → C-1 で完了（todo!() 8箇所全て解消。保守的 false フォールバック方式）
+  - ~~**S8: プロパティアクセス型推論**~~ → C-0 で完了（resolve_struct_fields_by_name 統合）
   - 🔗 Phase A 完了済み。Phase B 完了後に実装（ジェネリクス基盤が整った状態）
   - 詳細: `report/bottom-up-type-inference-analysis-2026-03-28.md`, `report/fallback-type-inventory-2026-03-28.md`
 

@@ -57,10 +57,17 @@ Phase B 完了後。
 - `resolve_member_type`, `resolve_spread_source_fields`, `resolve_object_lit_fields` の3関数を共通メソッドに統合
 - **実績: -3 エラー（OBJECT_LITERAL_NO_TYPE 36→33）、クリーン 108→110**
 
+#### C-1: TypeResolver パラメータ型伝播 + patterns.rs todo!() 解消 ✅
+
+- `visit_param_pat` が `Pat::Assign` を処理するよう拡張（デフォルト値パラメータの変数登録 + expected type 伝播）
+- `visit_fn_decl`/`resolve_arrow_expr`/`resolve_fn_expr` のパラメータ型収集で `Pat::Assign` を処理
+- `extract_type_ann_from_pat` ヘルパー: 任意の Pat バリアントから型注釈を抽出
+- `patterns.rs` の `todo!()` 8 箇所を保守的フォールバック（`false`）に置換（Tier 2 パニック → Tier 3 保守的誤り）
+- `convert_in_operator`/`convert_instanceof` で複雑式の実際の変換を試行（HashMap の contains_key、Option の is_some）
+- **実績: -1 エラー（OBJECT_LITERAL_NO_TYPE 33→32）、生成コードの todo!() パニック 8 箇所解消**
+
 | 順序 | パターン | エラー削減 |
 |------|---------|-----------|
-| C-1 | typeof/instanceof ガード型推論 | 品質 |
-| C-2 | プロパティアクセス型推論 | 品質 |
 | C-3 | `\|\|`/`??` ジェネリクス制約解決 | H: ~5件（残存） |
 | C-4 | 呼び出し側型引数推論 | D: ~9件 |
 
@@ -77,7 +84,8 @@ Phase B 完了後。
 | I-297 | 0（正確性修正） | ✅ サイレント意味変更解消 |
 | Phase B-2 (I-285+I-200) | -13 | ✅ 79→66 |
 | Phase C-0 (resolve_member_type) | -3 | ✅ 66→63 |
-| Phase C (残) | ~-14 | ~63→~49 |
+| Phase C-1 (Pat::Assign + todo!()) | -1 + 品質 | ✅ 63→62 |
+| Phase C (残: C-3, C-4) | ~-14 | ~62→~48 |
 
 ---
 

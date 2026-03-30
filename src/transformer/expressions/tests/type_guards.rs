@@ -45,20 +45,20 @@ fn test_typeof_not_equals_string_known_type_resolves_false() {
 }
 
 #[test]
-fn test_typeof_equals_string_unknown_type_generates_todo() {
+fn test_typeof_equals_string_unknown_type_returns_false() {
     let f = TctxFixture::new();
     let tctx = f.tctx();
     let swc_expr = parse_expr("typeof x === \"string\";");
     let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
         .convert_expr(&swc_expr)
         .unwrap();
-    // Unknown type → todo!() (compile error, not silent true)
-    assert!(matches!(&result, Expr::FnCall { name, .. } if name == "todo!"));
+    // Unknown type → conservatively false (no match)
+    assert_eq!(result, Expr::BoolLit(false));
 }
 
 #[test]
-fn test_typeof_equals_string_any_type_generates_todo() {
-    // Any type → todo!() (compile error, not silent true).
+fn test_typeof_equals_string_any_type_returns_false() {
+    // Any type → conservatively false.
     // For function params, any_narrowing generates enum and if-let instead.
     let f = TctxFixture::from_source(r#"function f(x: any) { typeof x === "string"; }"#);
     let tctx = f.tctx();
@@ -67,11 +67,11 @@ fn test_typeof_equals_string_any_type_generates_todo() {
     let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
         .convert_expr(&swc_expr)
         .unwrap();
-    assert!(matches!(&result, Expr::FnCall { name, .. } if name == "todo!"));
+    assert_eq!(result, Expr::BoolLit(false));
 }
 
 #[test]
-fn test_typeof_equals_number_any_type_generates_todo() {
+fn test_typeof_equals_number_any_type_returns_false() {
     let f = TctxFixture::from_source(r#"function f(x: any) { typeof x === "number"; }"#);
     let tctx = f.tctx();
     let swc_expr = extract_fn_body_expr_stmt(f.module(), 0, 0);
@@ -79,12 +79,12 @@ fn test_typeof_equals_number_any_type_generates_todo() {
     let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
         .convert_expr(&swc_expr)
         .unwrap();
-    assert!(matches!(&result, Expr::FnCall { name, .. } if name == "todo!"));
+    assert_eq!(result, Expr::BoolLit(false));
 }
 
 #[test]
-fn test_typeof_not_equals_string_any_type_generates_todo() {
-    // !== with Any → todo!() (compile error, not silent true).
+fn test_typeof_not_equals_string_any_type_returns_true() {
+    // !== with Any → conservatively true (not-equal = no match inverted)
     let f = TctxFixture::from_source(r#"function f(x: any) { typeof x !== "string"; }"#);
     let tctx = f.tctx();
     let swc_expr = extract_fn_body_expr_stmt(f.module(), 0, 0);
@@ -92,12 +92,12 @@ fn test_typeof_not_equals_string_any_type_generates_todo() {
     let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
         .convert_expr(&swc_expr)
         .unwrap();
-    assert!(matches!(&result, Expr::FnCall { name, .. } if name == "todo!"));
+    assert_eq!(result, Expr::BoolLit(true));
 }
 
 #[test]
-fn test_instanceof_any_type_generates_todo() {
-    // Any type → todo!() (compile error, not silent true).
+fn test_instanceof_any_type_returns_false() {
+    // Any type → conservatively false.
     // For function params, any_narrowing generates enum and if-let instead.
     let f = TctxFixture::from_source("function f(x: any) { x instanceof Foo; }");
     let tctx = f.tctx();
@@ -106,7 +106,7 @@ fn test_instanceof_any_type_generates_todo() {
     let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
         .convert_expr(&swc_expr)
         .unwrap();
-    assert!(matches!(&result, Expr::FnCall { name, .. } if name == "todo!"));
+    assert_eq!(result, Expr::BoolLit(false));
 }
 
 #[test]
@@ -163,10 +163,10 @@ fn test_instanceof_known_type_mismatch_resolves_false() {
 }
 
 #[test]
-fn test_instanceof_unknown_type_generates_todo() {
+fn test_instanceof_unknown_type_returns_false() {
     let f = TctxFixture::new();
     let tctx = f.tctx();
-    // Unknown type → todo!() (compile error, not silent true).
+    // Unknown type → conservatively false
     let swc_expr = parse_expr("x instanceof Foo;");
 
     let result = Transformer {
@@ -176,7 +176,7 @@ fn test_instanceof_unknown_type_generates_todo() {
     }
     .convert_expr(&swc_expr)
     .unwrap();
-    assert!(matches!(&result, Expr::FnCall { name, .. } if name == "todo!"));
+    assert_eq!(result, Expr::BoolLit(false));
 }
 
 #[test]
@@ -228,10 +228,10 @@ fn test_in_operator_struct_field_missing_generates_false() {
 }
 
 #[test]
-fn test_in_operator_unknown_type_generates_todo() {
+fn test_in_operator_unknown_type_returns_false() {
     let f = TctxFixture::new();
     let tctx = f.tctx();
-    // "x" in unknown → todo!() (not silent true)
+    // "x" in unknown → conservatively false
     let expr = parse_expr(r#""x" in unknown"#);
 
     let result = Transformer {
@@ -241,22 +241,19 @@ fn test_in_operator_unknown_type_generates_todo() {
     }
     .convert_expr(&expr)
     .unwrap();
-    match &result {
-        Expr::FnCall { name, .. } => assert_eq!(name, "todo!"),
-        other => panic!("expected todo!() for unknown in operator, got: {other:?}"),
-    }
+    assert_eq!(result, Expr::BoolLit(false));
 }
 
 #[test]
-fn test_convert_instanceof_unknown_type_generates_todo() {
+fn test_convert_instanceof_unknown_type_returns_false() {
     let f = TctxFixture::new();
     let tctx = f.tctx();
-    // Unknown type → todo!() (compile error, not silent true).
+    // Unknown type → conservatively false
     let expr = parse_expr("x instanceof Foo");
     let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
         .convert_expr(&expr)
         .unwrap();
-    assert!(matches!(&result, Expr::FnCall { name, .. } if name == "todo!"));
+    assert_eq!(result, Expr::BoolLit(false));
 }
 
 #[test]
@@ -550,18 +547,15 @@ fn test_in_operator_enum_tag_field_returns_true() {
 }
 
 #[test]
-fn test_in_operator_non_string_key_returns_todo() {
-    // non-string key → todo!()
+fn test_in_operator_non_string_key_returns_false() {
+    // non-string key → conservatively false
     let f = TctxFixture::from_source("function f(obj: any) { 42 in obj; }");
     let tctx = f.tctx();
     let swc_expr = extract_fn_body_expr_stmt(f.module(), 0, 0);
     let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
         .convert_expr(&swc_expr)
         .unwrap();
-    assert!(
-        matches!(&result, Expr::FnCall { name, .. } if name == "todo!"),
-        "non-string key in operator should produce todo!(), got: {result:?}"
-    );
+    assert_eq!(result, Expr::BoolLit(false));
 }
 
 // === convert_instanceof tests ===
@@ -623,16 +617,13 @@ fn test_instanceof_option_non_matching_returns_false() {
 }
 
 #[test]
-fn test_instanceof_unknown_type_returns_todo() {
-    // unknown type → todo!()
+fn test_instanceof_unknown_type_returns_false_2() {
+    // unknown type → conservatively false
     let f = TctxFixture::new();
     let tctx = f.tctx();
     let expr = parse_expr("x instanceof Foo");
     let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
         .convert_expr(&expr)
         .unwrap();
-    assert!(
-        matches!(&result, Expr::FnCall { name, .. } if name == "todo!"),
-        "unknown type instanceof should produce todo!(), got: {result:?}"
-    );
+    assert_eq!(result, Expr::BoolLit(false));
 }

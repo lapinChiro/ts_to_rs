@@ -6,6 +6,7 @@
 use swc_common::Spanned;
 use swc_ecma_ast as ast;
 
+use super::visitors::extract_type_ann_from_pat;
 use super::*;
 use crate::pipeline::type_converter::convert_ts_type;
 use crate::pipeline::type_resolution::Span;
@@ -714,17 +715,11 @@ impl<'a> TypeResolver<'a> {
                     self.declare_var(&name, resolved, span, false);
                     param_types.push(ty.unwrap_or(RustType::Any));
                 }
-                // Destructuring patterns: extract type from type annotation
+                // Destructuring / default value patterns: extract type from annotation
                 _ => {
-                    let ty: Option<RustType> = match param {
-                        ast::Pat::Array(arr) => arr.type_ann.as_ref().and_then(|ann| {
-                            convert_ts_type(&ann.type_ann, self.synthetic, self.registry).ok()
-                        }),
-                        ast::Pat::Object(obj) => obj.type_ann.as_ref().and_then(|ann| {
-                            convert_ts_type(&ann.type_ann, self.synthetic, self.registry).ok()
-                        }),
-                        _ => None,
-                    };
+                    let ty: Option<RustType> = extract_type_ann_from_pat(param).and_then(|ann| {
+                        convert_ts_type(&ann.type_ann, self.synthetic, self.registry).ok()
+                    });
                     let ty = ty
                         .or_else(|| {
                             expected_param_types
@@ -732,11 +727,10 @@ impl<'a> TypeResolver<'a> {
                                 .and_then(|types| types.get(i).cloned())
                         })
                         .map(|ty| wrap_trait_for_position(ty, TypePosition::Param, self.registry));
-                    // Register sub-pattern variables
+                    // Register sub-pattern variables and resolve default values
                     self.visit_param_pat(param);
                     param_types.push(ty.unwrap_or(RustType::Any));
-                } // Ident is handled above; remaining patterns are covered by the
-                  // destructuring branch. This arm is unreachable but kept for safety.
+                }
             }
         }
 
@@ -809,16 +803,10 @@ impl<'a> TypeResolver<'a> {
         // Register parameters and collect their types
         let mut param_types = Vec::new();
         for param in &fn_expr.function.params {
-            if let ast::Pat::Ident(ident) = &param.pat {
-                let ty = ident
-                    .type_ann
-                    .as_ref()
-                    .and_then(|ann| {
-                        convert_ts_type(&ann.type_ann, self.synthetic, self.registry).ok()
-                    })
-                    .map(|ty| wrap_trait_for_position(ty, TypePosition::Param, self.registry));
-                param_types.push(ty.unwrap_or(RustType::Any));
-            }
+            let ty = extract_type_ann_from_pat(&param.pat)
+                .and_then(|ann| convert_ts_type(&ann.type_ann, self.synthetic, self.registry).ok())
+                .map(|ty| wrap_trait_for_position(ty, TypePosition::Param, self.registry));
+            param_types.push(ty.unwrap_or(RustType::Any));
             self.visit_param_pat(&param.pat);
         }
 
