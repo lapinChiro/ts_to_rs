@@ -315,7 +315,7 @@ src/
 │   ├── statements/      # 文の生成
 │   └── expressions/     # 式の生成
 tests/
-├── fixtures/            # 変換テスト用 .ts 入力ファイル（74 件）
+├── fixtures/            # 変換テスト用 .ts 入力ファイル（84 件）
 ├── snapshots/           # insta スナップショット（自動生成）
 ├── integration_test.rs  # スナップショットテスト
 ├── compile_test.rs      # 生成 Rust のコンパイル検証テスト
@@ -329,6 +329,8 @@ doc/
 scripts/
 ├── hono-bench.sh        # Hono フレームワーク変換率ベンチマーク
 ├── analyze-bench.py     # ベンチマーク結果のエラー分類・集計
+├── bench_categories.py  # ベンチマークエラーカテゴリ定義
+├── inspect-errors.py    # ベンチマークエラー詳細分析ツール
 └── check-file-lines.sh  # .rs ファイル行数チェック（閾値 1000 行）
 ```
 

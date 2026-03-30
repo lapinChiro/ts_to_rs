@@ -13,119 +13,101 @@
 
 ### エラーカテゴリ内訳（61 件）
 
-| カテゴリ | 件数 | 関連イシュー |
+| カテゴリ | 件数 | 主要イシュー |
 |----------|------|-------------|
-| OBJECT_LITERAL_NO_TYPE | 29 | I-300（関数引数 ~16件）、I-301（型注釈なし ~7件）、I-305（callable interface ~2件）、I-306（.map callback ~1件）、その他 ~3件 |
-| OTHER | 10 | parseInt(2), delete(2), class expr(1), update target(1), rest type(1), array destr(1), +2（C-3で変換進行により遷移） |
+| OBJECT_LITERAL_NO_TYPE | 29 | I-301(7), I-305(2), I-306(1), I-300 imported(11), 他(8) |
+| OTHER | 10 | parseInt(2), delete(2), class expr(1), 他 |
 | QUALIFIED_TYPE | 3 | I-36 |
 | FN_TYPE_PARAM | 3 | I-259 |
 | MEMBER_PROPERTY | 3 | |
 | ASSIGN_TARGET | 3 | |
 | その他 | 10 | OBJ_KEY(2), INTERFACE_MEMBER(2), 各1件×6 |
 
-## 次の開発
-
-### Phase B: 型変換範囲の拡張
-
-#### B-2: I-285 + I-200 バッチ — indexed access + mapped type 改善 ✅
-
-- `T[K]` 型パラメータキー対応（generics erasure）
-- `[number]` on non-const の graceful fallback
-- ネスト indexed access の再帰解決
-- identity mapped type 検出拡張（symbol filter no-op 対応）
-- standalone mapped type での identity 簡約
-- **実績: -13 エラー（TYPE_ALIAS_UNSUPPORTED 10→0, INDEXED_ACCESS 3→0）**
-
-#### B-4: I-284 — typeof qualified name（延期）
-
-- 2 インスタンスとも複合パターン（typeof qualified + indexed access + utility type）
-- typeof qualified 解決だけでは 0 エラー削減
-- Phase B の indexed access 改善で graceful fallback 済み（エラーなしの Any 出力）
-- **Phase C 以降で再評価**
-
-#### Phase B 合計: **79 → 66（-13 エラー）** ✅
-
 ---
 
-### Phase C: 高度な型推論（I-286c）
+## ロードマップ
 
-Phase B 完了後。
+### フェーズ移行基準
 
-#### C-0: resolve_struct_fields_by_name 統合 ✅
+| フェーズ | 基準 | 現状 |
+|---------|------|------|
+| **現在: 変換率改善** | エラー < 60 件 | 61 件。C-4+C-5 で達成見込み |
+| **次: コンパイル品質** | ディレクトリコンパイルエラー 0 | 残 2 ファイル（I-273） |
+| **その後: DX + 品質** | コンパイルテストスキップ 0 | 残 11 件 |
 
-- `resolve_struct_fields_by_name`: TypeRegistry → SyntheticTypeRegistry → type_param_constraints の3層フィールド解決を single source of truth として抽出
-- `resolve_member_type`, `resolve_spread_source_fields`, `resolve_object_lit_fields` の3関数を共通メソッドに統合
-- **実績: -3 エラー（OBJECT_LITERAL_NO_TYPE 36→33）、クリーン 108→110**
+### Phase R-1: コンポーネント責務境界の正常化（次の開発）
 
-#### C-1: TypeResolver パラメータ型伝播 + patterns.rs todo!() 解消 ✅
+構造リファクタリング。変換ロジック変更なし。後続の全作業で正しい依存方向を前提にできるようにする。
 
-- `visit_param_pat` が `Pat::Assign` を処理するよう拡張（デフォルト値パラメータの変数登録 + expected type 伝播）
-- `visit_fn_decl`/`resolve_arrow_expr`/`resolve_fn_expr` のパラメータ型収集で `Pat::Assign` を処理
-- `extract_type_ann_from_pat` ヘルパー: 任意の Pat バリアントから型注釈を抽出
-- `patterns.rs` の `todo!()` 8 箇所を保守的フォールバック（`false`）に置換（Tier 2 パニック → Tier 3 保守的誤り）
-- `convert_in_operator`/`convert_instanceof` で複雑式の実際の変換を試行（HashMap の contains_key、Option の is_some）
-- **実績: -1 エラー（OBJECT_LITERAL_NO_TYPE 33→32）、生成コードの todo!() パニック 8 箇所解消**
+| 対象 | 内容 | 効果 |
+|------|------|------|
+| 逆方向依存 | `transformer/any_narrowing.rs` → `pipeline/` に移動 | registry → transformer の逆方向依存解消 |
+| 二重処理 | registry/enums.rs の any-narrowing 登録を pipeline 側に一本化 | 重複排除 |
+| re-export 残骸 | `transformer/types/` 除去、233 テストを `pipeline/type_converter/tests/` に移動 | 技術的負債解消 |
 
-#### C-2: expected type 基盤改善 ✅
+PRD: `backlog/r1-component-boundary-cleanup.md`
 
-- OBJECT_LITERAL_NO_TYPE（32件）の根本原因を体系的に調査し、以下の基盤バグ・欠陥を修正:
-  1. **ClassProp 初期化子の順序バグ修正**: `resolve_expr` が `expected_types.insert` より先に実行されていた問題を修正（`visit_var_decl` と同じ正しい順序に）
-  2. **`resolve_type_params_in_type` ヘルパー**: 型パラメータ名を制約型に再帰的に解決。Named, Option, Vec, Fn, Tuple の全 RustType バリアントに対応
-  3. **全 expected type 挿入箇所への型パラメータ解決適用**: `visit_var_decl`, return 文, `Pat::Assign`, `ClassProp`, `propagate_fallback_expected`, `propagate_arg_expected_types` の 6 箇所
-  4. **`resolve_object_lit_fields` への type_args 伝播**: ジェネリック構造体のフィールドを具象化して解決
-  5. **PrivateMethod/PrivateProp の TypeResolver 処理追加**: TypeResolver が private メンバーの body を未訪問だったバグを修正。`visit_method_function`/`visit_class_prop_init` ヘルパーで Method/PrivateMethod, ClassProp/PrivateProp を DRY 化
-  6. **コンストラクタのみクラスの TypeRegistry 登録条件修正**: `!fields.is_empty() || !methods.is_empty()` → `|| constructor.is_some()` 追加
-  7. **空オブジェクト `{}` + HashMap expected type → `HashMap::new()` 生成**
-  8. **型パラメータ制約マージ**: メソッド/アロー関数/関数式/関数宣言で `std::mem::replace` → マージに変更。ネストしたジェネリック関数で親スコープの制約を保持
-- **実績: 0 エラー削減（数値不変）。理由: 32件全てにおいて、修正したパターン以外に「関数呼び出し引数」(I-300) や「型注釈なしオブジェクト」(I-301) が同一関数内に共存し、それらが残る限り関数単位のエラーカウントは減少しない。個別パターンの正常動作はユニットテスト・個別テストケースで確認済み**
-- **発見された後続課題**: I-300（関数引数 expected type 伝播）、I-301（型注釈なしオブジェクト）、I-302（this.field = {} パターン）を TODO に記録
+### Phase C-4: TypeRegistry 型登録基盤
 
-#### C-3: 型引数推論基盤 + resolve_member_type 改善 ✅
+R-1 で依存方向が正常化された状態で、TypeRegistry の型登録基盤を改善する。
 
-- OBJECT_LITERAL_NO_TYPE 全32件を個別オブジェクトリテラルまで特定・分類（`report/c3-object-literal-no-type-deep-analysis-2026-03-30.md`）
-- 以下の5つの基盤改善を実施:
-  1. **resolve_member_type の PrivateName (#field) 対応**: `MemberProp::PrivateName` を処理するブランチ追加。TypeRegistry の `collect_class_info` にも `PrivateProp` のフィールド収集を追加
-  2. **resolve_member_type の HashMap computed access 対応**: `HashMap<K, V>[key]` → value 型 `V` を返すブランチ追加
-  3. **明示的型引数の活用**: `new Foo<Config>(...)` / `fn<Config>(...)` の明示的型引数で param 型・return 型を具体化。`TypeDef::Function` に `type_params` フィールド追加（本質的な基盤改善）
-  4. **呼び出し側型引数推論（I-286c S3）**: 実引数型から型パラメータを unification で推論。`fn<T>(x: T)` を `fn("hello")` で呼ぶと `T = String` を推論し返り値型を具体化。`new Box("hello")` → `Box<String>`
-  5. **`resolve_type_params_in_type` 循環参照防御**: 深さ制限（depth > 10）と自己参照検出を追加。ディレクトリモードでの無限ループを防止
-- **実績: -1 エラー（62→61）。OBJECT_LITERAL_NO_TYPE 32→29（-3）。OTHER +2（変換進行により別エラーに遷移）**
-- **発見された後続課題**: I-304〜I-311 を TODO に記録。主要なもの: I-305（callable interface return 型解決）、I-306（.map() callback 型伝播）、I-310（HashMap computed assignment の transformer 変換）、I-311（型引数推論結果の引数 expected type フィードバック）
+| 対象 | 内容 | 効果 |
+|------|------|------|
+| I-307 | TypeAlias の TsTypeRef RHS 登録（`type BodyCache = Partial<Body>` 等） | 基盤改善。一部の I-301 ケースが不要になる可能性 |
+| I-305 | callable interface の return 型解決（`GetCookie` 等） | OBJECT_LITERAL_NO_TYPE ~2件 |
+| I-308 | `resolve_type_params_in_type` の indexed access 複合名解決（`E['Bindings']`） | OBJECT_LITERAL_NO_TYPE ~1件 |
 
-| 順序 | パターン | エラー削減 |
-|------|---------|-----------|
-| C-4 | 型注釈なしオブジェクト（I-301）+ callable interface return（I-305）+ .map() callback 伝播（I-306） | ~10件 |
+PRD: `backlog/c4-type-registry-foundation.md`。C-4 完了後にベンチマークを取り直し、残存パターンを再評価してから I-312/C-5 を設計する。
 
----
+### Phase R-2: TypeDef の TS 型メタデータ分離（I-312）
 
-### 全フェーズ合計
+C-4 で `call_signatures` を TypeDef に追加した後、TypeDef 全体の設計を再検討する。TypeDef のフィールド型を TS 型のまま保持する設計に変更し、registry の責務を「純粋な型メタデータ収集」に正す。C-5 の匿名構造体生成のアプローチに影響するため、C-5 設計前に確定させる。
 
-| フェーズ | エラー削減 | 状態 |
-|---------|-----------|------|
-| Phase A | -4 | ✅ 91→87 |
-| Phase B-0 | 0（基盤修正） | ✅ |
-| Phase B-1 (I-221) | -8 | ✅ 87→79 |
-| Phase B-fix | 0（正確性保証） | ✅ |
-| I-297 | 0（正確性修正） | ✅ サイレント意味変更解消 |
-| Phase B-2 (I-285+I-200) | -13 | ✅ 79→66 |
-| Phase C-0 (resolve_member_type) | -3 | ✅ 66→63 |
-| Phase C-1 (Pat::Assign + todo!()) | -1 + 品質 | ✅ 63→62 |
-| Phase C-2 (expected type 基盤) | 0（基盤修正） | ✅ 62→62 バグ8件修正 + テスト16追加 |
-| Phase C-3 (型引数推論 + resolve_member_type) | -1 + 基盤 | ✅ 62→61 OBJECT_LITERAL_NO_TYPE -3 + テスト28追加 |
-| Phase C (残: C-4) | ~-10 | ~61→~51 |
+### Phase C-5: 匿名構造体 + 残存パターン
+
+R-2 完了後の設計に基づき実施。現時点の見込み:
+
+| 対象 | 内容 | 効果 |
+|------|------|------|
+| I-301 | 型注釈なしオブジェクトリテラル → 匿名構造体自動生成 | ~7件（C-4 の結果で変動） |
+| I-306 | `.map()` callback への戻り値型伝播 | ~1件 |
+
+### Phase D: コンパイル品質
+
+| 対象 | 内容 | 効果 |
+|------|------|------|
+| I-273 | trait/struct 混同修正（`extends` の変換精度） | ディレクトリコンパイル 156→157+/158 |
+| I-310 | HashMap computed access の transformer 変換 | コンパイルエラー削減 |
+| I-217+I-265 | filter/find の参照型 + Option 二重ラップ | コンパイルテストスキップ解消 |
+| I-237+I-238 | toFixed 変換 + Display 自動生成 | コンパイルテストスキップ解消 |
+| I-311 | 型引数推論結果の引数 expected type フィードバック | 型推論精度向上 |
+
+### Phase E: DX + 生成コード品質
+
+| 対象 | 内容 | 効果 |
+|------|------|------|
+| I-30 | Cargo.toml 依存追加 | I-183, I-34 のゲート解除 |
+| I-182 | Hono クリーンファイルのコンパイルテスト CI 化 | 回帰検出自動化 |
+| I-282+I-283 | デフォルトパラメータの DRY 化 + unwrap_or_else | 生成コード品質 |
+
+### 長期ビジョン
+
+| マイルストーン | 指標 |
+|---------------|------|
+| 変換率 80% | クリーン 126/158（現在 110） |
+| コンパイル率 80% | ファイルコンパイル 126/158（現在 109） |
+| コンパイルテストスキップ 0 | 全 fixture がコンパイル通過 |
 
 ---
 
 ## 引継ぎ事項
 
-設計判断: [doc/design-decisions.md](doc/design-decisions.md)。調査レポート: `report/` ディレクトリ。
+設計判断: [doc/design-decisions.md](doc/design-decisions.md)。調査レポート: `report/`。
 
-### コンパイルテストのスキップ
+### コンパイルテストのスキップ（11 件）
 
-**builtins なし（11 件）**:
-
-| テスト名 | 原因イシュー | 概要 |
-|----------|-------------|------|
+| テスト名 | 原因 | 概要 |
+|----------|------|------|
 | `indexed-access-type` | — | `Env` 型未定義（マルチファイルテストでカバー） |
 | `trait-coercion` | I-201 | `null as any` → `None` が `Box<dyn Trait>` に代入不可 |
 | `union-fallback` | I-202 | `Box<dyn Fn>` を含む enum に derive 不適合 |
@@ -138,4 +120,4 @@ Phase B 完了後。
 | `vec-method-expected-type` | I-289 | ビルトイン前提 |
 | `intersection-empty-object` | — | 未使用型パラメータ T (E0091) |
 
-**builtins あり（10 件）**: 上記から `vec-method-expected-type` を除いた 10 件。
+builtins あり（10 件）: 上記から `vec-method-expected-type` を除く。

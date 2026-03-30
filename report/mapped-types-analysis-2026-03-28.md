@@ -1,8 +1,10 @@
 # Mapped Types Analysis: Current Handling and Requirements for Full Support
 
-**Date**: 2026-03-28  
-**Status**: Read-only investigation  
+**Date**: 2026-03-28 (updated 2026-03-30: B-2 implementation status)
+**Status**: Partially implemented
 **Scope**: How TypeScript mapped types are currently handled and what's needed for correct conversion
+
+> **2026-03-30 更新**: B-2（`62fa279`）で identity mapped type（`{ [K in keyof T]: T[K] }`）の検出と `T` への簡約を実装済み。`Simplify<T>` / `SimplifyDeep<T>` パターンは解消。残りの高度なパターン（key remapping, conditional value, array indexed access）は未実装。
 
 ---
 

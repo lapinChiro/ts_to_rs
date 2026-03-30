@@ -35,23 +35,7 @@
 **注意**: ベンチマーク実行前に `cargo build --release` が必要。古いビルドで実行すると数値が不正確になる。
 **補足**: 「クリーン」は変換エラーなし（`--report-unsupported` でエラー 0）を意味する。コンパイルクリーンは2指標: ファイル単位（use 除去後の個別コンパイル）とディレクトリ単位（全ファイルを1クレートとしてコンパイル）。
 
-### 完了済み機能（参照用）
-
-詳細は [doc/completed-features.md](doc/completed-features.md) を参照。設計判断の記録は [doc/design-decisions.md](doc/design-decisions.md) を参照。
-
-- **I-281**: typeof ローカル変数の型解決 — 6件削減（106→100）。TypeDef::ConstValue + TypeCollector + indexed access [number]/[keyof typeof X] + keyof typeof X
-- **I-267**: OBJECT_LITERAL_NO_TYPE 削減 — 10件削減（100→91、クリーン99→104）。TypeRegistry merge バグ修正（ビルトイン型保護）+ フォールバック空オブジェクト `||`/`??` の expected type 伝播。詳細: `report/object-literal-no-type-investigation-2026-03-28.md`
-- **I-276**: MethodSignature に has_rest フラグ追加。全収集パスで rest パラメータ型を保持
-- **B-0a (I-287+I-288+I-289)**: テスト基盤整備。snapshot_test! マクロ全テスト移行 + resolve_with_builtins ヘルパー + ビルトインありコンパイルテスト
-- **B-0b (I-290+I-292)**: メソッド呼び出しロジック統一。`select_overload` と `lookup_method_sigs` を TypeRegistry に移動し TypeResolver/Transformer で共有。Pattern trait メソッドの `.to_string()` 抑制（PATTERN_ARG_METHODS + REGEX_PATTERN_ARG_METHODS）。TypeResolver の引数解決順序修正（Stage 4 有効化）。`string-methods` builtins ありコンパイルテスト PASS
-- **B-1 (I-221)**: intersection メンバー型の網羅的サポート — 8件削減（87→79）。空 TsTypeLit 除去 + TsParenthesized アンラップ + identity mapped type 簡約 + convert_ts_type 汎用フォールバック + union 分配法則（`A & (B | C)` → enum）+ generator struct variant 対応
-- **B-fix (I-216+I-275+I-295+I-294)**: 正確性・品質基盤修正。switch default アーム末尾移動（サイレント意味変更解消）+ multiple spread フィールド上書き順序修正（first/later 逆転）+ discriminant 一意性検証 + コンパイルテスト use 自動生成（スキップ1件削減）
-- **I-297**: spread/フィールド位置順序のサイレント意味変更修正。`convert_object_lit` を PropEvent イベント列方式に再設計し rightmost-wins セマンティクスを実現
-- **B-2 (I-285+I-200)**: indexed access + mapped type 改善 — 13件削減（79→66）。型パラメータキー対応（generics erasure）+ `[number]` non-const fallback + ネスト indexed access 再帰解決 + identity mapped type 拡張（symbol filter no-op）+ standalone identity 簡約。TYPE_ALIAS_UNSUPPORTED 10→0、INDEXED_ACCESS 3→0
-- **C-0**: resolve_struct_fields_by_name 統合 — 3件削減（66→63）。TypeRegistry/SyntheticTypeRegistry/type_param_constraints の3層フィールド解決を single source of truth に統合。resolve_member_type, resolve_spread_source_fields, resolve_object_lit_fields の3関数を共通メソッドに委譲。OBJECT_LITERAL_NO_TYPE 36→33
-- **C-1**: TypeResolver パラメータ型伝播 + todo!() 解消 — 1件削減（63→62）+ 品質向上。visit_param_pat の Pat::Assign 対応（デフォルト値パラメータのスコープ登録 + expected type 伝播）。visit_fn_decl/resolve_arrow_expr/resolve_fn_expr のパラメータ型収集で Pat::Assign 処理。patterns.rs の todo!() 8箇所を保守的 false フォールバックに置換（Tier 2 パニック解消）
-- **C-2**: expected type 基盤改善 — 0件削減（基盤修正）。7つの修正: (1) ClassProp 初期化子の expected type 順序修正（バグ: resolve_expr が expected 設定より先に実行）、(2) `resolve_type_params_in_type` ヘルパー（型パラメータ制約を再帰的に具象型に解決）、(3) 全 expected type 挿入箇所（visit_var_decl, return文, Pat::Assign, ClassProp, propagate_fallback_expected, propagate_arg_expected_types）で型パラメータ解決適用、(4) `resolve_object_lit_fields` への type_args 伝播（ジェネリック構造体フィールドの具象化）、(5) PrivateMethod/PrivateProp の TypeResolver 処理追加（未訪問バグ）、(6) コンストラクタのみクラスの TypeRegistry 登録条件修正（`constructor.is_some()` 追加）、(7) 空オブジェクト `{}` + HashMap expected → `HashMap::new()` 生成、(8) 型パラメータ制約マージ（メソッド/アロー関数/関数式で親スコープ制約を保持）。ベンチ数値不変の理由: 32件全てで修正パターン以外の未対応パターン（関数呼び出し引数 I-300、型注釈なしオブジェクト I-301）が同一関数内に共存
-- **C-3**: 型引数推論基盤 + resolve_member_type 改善 — 1件削減（62→61）+ 基盤改善。(1) resolve_member_type に PrivateName + HashMap computed access 対応、(2) TypeDef::Function に type_params フィールド追加、(3) 明示的型引数（new Foo\<Config\>(...)、fn\<Config\>(...)）で param/return 型を具体化、(4) 呼び出し側型引数推論（unification ベース: fn\<T\>(x: T) → fn("hello") で T=String）、(5) resolve_type_params_in_type に循環参照防御。OBJECT_LITERAL_NO_TYPE 32→29、後続課題 I-304〜I-311 を TODO に記録
+完了済み機能の詳細は [doc/completed-features.md](doc/completed-features.md) と git history を参照。設計判断は [doc/design-decisions.md](doc/design-decisions.md)。
 
 ---
 
@@ -78,6 +62,13 @@
 
 今後の全作業の効率に直接影響するインフラ・DX 改善。変換機能の優先度とは独立した軸。
 
+- **[I-312]** **TypeDef の TS 型メタデータ分離** — registry の責務正常化
+  - 現在 TypeDef が RustType で型を保持しているため、registry フェーズで Rust 型表現の決定（Optional フィールドの `Option<T>` ラップ、デフォルト引数の `Option<T>` ラップ等）が行われている
+  - registry は「TS ソースから型メタデータを抽出するパッシブなストア」であるべきだが、型変換の責務が registry に漏れている
+  - **影響箇所**: `src/registry/interfaces.rs`（optional フィールドの `Option` ラップ）、`src/registry/functions.rs`（デフォルト引数の `Option` ラップ）、`src/registry/unions.rs`（`string_to_pascal_case` によるバリアント命名）
+  - **解決策**: TypeDef のフィールド型を TS 型のまま保持する中間表現に変更し、Rust 型への変換を type_converter フェーズに統合する
+  - **前提**: R-1（コンポーネント責務境界の正常化）完了後に実施。🔗 `backlog/r1-component-boundary-cleanup.md`
+  - **伝播リスク**: TypeDef が RustType を保持する限り、registry に型変換ロジックが漏れ続ける。今後の機能追加で同パターンが増殖するリスクあり
 - **[I-30]** **生成コードの Cargo.toml への依存クレート追加** — ゲート解除・レバレッジ高
   - I-183（HTTP E2E テスト基盤 + fetch 変換）と I-34（Math.random → rand）の前提条件
   - これが未解決だと後続 2 機能が全て blocked
@@ -92,40 +83,16 @@
 
 #### 型変換・型推論
 
-- **[I-286c]** **sink-source 逆伝播: 高度なパターン（S3）** — D: ~9件 + 品質向上（plan.md Phase C）
-  - ~~**S2: `||`/`??` ジェネリクス制約解決**~~ → C-2 で基盤完了。`resolve_type_params_in_type` により型パラメータ制約が expected type に反映される。`propagate_fallback_expected` にも適用済み。残存エラーは S2 単独ではなく、同一関数内の S3/I-300/I-301 パターンとの共存が原因
-  - **S3: 呼び出し側型引数推論**（D: 9件）: `fn<T>(x: T)` の呼び出しで実引数型から T を推論。TypeScript の type argument inference に相当。対象: `adapter/bun/serve-static.ts:8` 等
-  - ~~**S7: typeof/instanceof ガード型推論**~~ → C-1 で完了（todo!() 8箇所全て解消。保守的 false フォールバック方式）
-  - ~~**S8: プロパティアクセス型推論**~~ → C-0 で完了（resolve_struct_fields_by_name 統合）
-  - 🔗 C-2 で expected type 基盤が整った状態。S3 に集中可能
-  - 詳細: `report/bottom-up-type-inference-analysis-2026-03-28.md`, `report/fallback-type-inventory-2026-03-28.md`
-- **[I-300]** **関数/コンストラクタ呼び出し引数のオブジェクトリテラルへの expected type 伝播不足** — **OBJECT_LITERAL_NO_TYPE 残存の最大原因**（実測16件/32件）
-  - C-3 調査（`report/c3-object-literal-no-type-deep-analysis-2026-03-30.md`）で個々のオブジェクトリテラルを特定・分類:
-    - **imported 関数/クラス**: 11件（`baseServeStatic`, `app.fetch`, `Context`, `serialize`, `jsx` 等）— 単一ファイルモードでは TypeRegistry に情報なし。directory モードまたはマルチファイルモードでの改善が必要
-    - **外部型 constructor**: 2件（`new Request(url, {...})`, `new Response(body, {...})`）— 外部型 JSON で constructor params は登録済みだが活用されていない
-    - **同一ファイル**: 3件（`ClientRequestImpl` L214, `writeSSE` L58, `createCssContext` L195）— TypeRegistry に情報あり、型引数推論で改善可能
-  - **根本原因（3種）**:
-    (1) 呼び出し先が TypeRegistry に未登録（imported 関数。単一ファイルモードの制約）
-    (2) `resolve_new_expr` が `new_expr.type_args` を完全無視（`src/pipeline/type_resolver/expressions.rs:645` で `type_args: vec![]` ハードコード）
-    (3) 型パラメータの具体化不足: call-site で明示的型引数があっても param 型の型パラメータが未解決（`set_call_arg_expected_types` が `call.type_args` を利用しない）
-  - **解決策**: I-286c S3（型引数推論）と一体で対応。(A) 明示的型引数の活用、(B) 実引数型からの推論、(C) resolve_new_expr の type_args 反映
-  - 🔗 I-286c S3 と同根。一体で設計
+- **[I-300]** **関数/コンストラクタ呼び出し引数の expected type 伝播不足（imported 関数）** — OBJECT_LITERAL_NO_TYPE 残存原因（11件）
+  - C-3 で同一ファイル fn-arg（3件）+ 明示的型引数 + 型引数推論（I-286c S3）は解決済み
+  - **残存**: imported 関数/クラスの 11件（`baseServeStatic`, `app.fetch`, `Context`, `serialize`, `jsx` 等）— 単一ファイルモードでは TypeRegistry に情報なし
+  - **解決策**: directory モードでの TypeRegistry 情報共有改善、またはマルチファイルモードの型情報マージ
+  - 詳細: `report/c3-object-literal-no-type-deep-analysis-2026-03-30.md`
 - **[I-301]** **型注釈なしオブジェクトリテラルの変換** — OBJECT_LITERAL_NO_TYPE の一因（実測7件/32件）
   - C-3 調査で推定3件 → 実測7件に修正。型注釈のないローカル変数へのオブジェクトリテラル代入、および三項演算子内のオブジェクトリテラル
   - **対象ファイル（7件）**: `adapter/aws-lambda/handler.ts:170`（`const httpResponseMetadata = {...}`）、`helper/proxy/index.ts:166`（`{raw: proxyInit}`、三項演算子）、`utils/html.ts:135`（`const context = {}`）、`utils/concurrent.ts:39`（`const marker = {}`）、`validator/validator.ts:90`（`let value = {}`）、`middleware/basic-auth/index.ts:134`（`const headers = {...}`）、`middleware/ip-restriction/index.ts:157`（`const remoteData = {...}`）
   - **解決策候補**: (1) 匿名構造体の自動生成（フィールド名と型から `_AnonymousN` 構造体を SyntheticTypeRegistry に登録）、(2) 空オブジェクト（`{}`）は `HashMap::new()` にフォールバック（C-2 で `expected = HashMap` 時は対応済み、expected なし時が未対応）
   - **意味論的安全性**: 匿名構造体は compile error で検出可能（Safe）
-- **[I-302]** **resolve_member_type の PrivateName (#field) 未対応** — OBJECT_LITERAL_NO_TYPE の一因（2件: クラスフィールドデフォルト値）
-  - C-3 調査で根本原因を特定: `this.field = expr` 代入の expected type 伝播ロジック自体は `expressions.rs:72-99` に**既に実装済み**。問題は `resolve_member_type` (`src/pipeline/type_resolver/expressions.rs:591-593`) が `MemberProp::PrivateName` を処理せず `ResolvedType::Unknown` を返すこと
-  - Transformer 側は `format!("_{}", private.name)` で `PrivateName` を処理済み（`src/transformer/expressions/member_access.rs:214`, `src/transformer/expressions/calls.rs:64`）。TypeResolver 側の整合性が欠けている
-  - **修正**: `resolve_member_type` のフィールド名抽出に `MemberProp::PrivateName(priv) => priv.name.to_string()` を追加
-  - **影響箇所**: `src/pipeline/type_resolver/expressions.rs:591-593`
-  - 🔗 C-3 で対応予定（1行修正）
-- **[I-304]** **resolve_member_type の HashMap computed access 未対応** — `m[key] = {...}` パターン（1件: `router/trie-router/node.ts:38`）
-  - `m: Record<string, HandlerSet<T>>` → `HashMap<String, HandlerSet<T>>` だが、`resolve_member_type` の Computed ブランチ（`src/pipeline/type_resolver/expressions.rs:574-587`）は `Vec`/`Tuple` のみ対応。`HashMap` の `type_args[1]`（value 型）を返すロジックがない
-  - **修正**: Computed ブランチに `RustType::Named { name: "HashMap", type_args }` で `type_args.len() == 2` → `type_args[1].clone()` を返す分岐を追加
-  - **影響箇所**: `src/pipeline/type_resolver/expressions.rs:574-587`
-  - 🔗 C-3 で対応予定
 - **[I-305]** **callable interface の return 型解決** — OBJECT_LITERAL_NO_TYPE の原因（2件: `helper/cookie/index.ts:43,71`）
   - `const getCookie: GetCookie = (c, key?) => { ... return {} }` で、`GetCookie` は callable interface（`{ (c, key): Cookie; (c): Record<string, string> }`）。TypeCollector は `TypeDef::Struct` として登録するが、`resolve_fn_type_info`（`src/pipeline/type_resolver/helpers.rs:152-166`）は `TypeDef::Function` のみ対応 → `current_fn_return_type` が未設定
   - **解決策**: `resolve_fn_type_info` で `TypeDef::Struct` を受けた場合、call signature（`methods` の `"call"` エントリ等）をチェックし、関数型情報を抽出する。または TypeCollector が callable interface を `TypeDef::Function` として登録する
@@ -317,7 +284,7 @@
 - **[I-188]** **`substring`/`slice` のバイト境界安全性** — 文字列変換。TS は UTF-16 コードユニット、Rust はバイト。マルチバイト文字でパニック
 - **[I-93]** **ネストしたフィールド/メソッド経由の変更検出** — ミュータビリティ推論
 - **[I-62]** **`is_string_type` の `Option<String>` ハック除去** — 型推論
-- **[I-256]** **any-narrowing の typeof 検出がトップレベル if/expr のみ** — `src/transformer/any_narrowing.rs:168` で `Switch`/`While`/`For`/`Try` 内の typeof/instanceof チェックが検出されない。any-narrowing enum のバリアント不足の原因
+- **[I-256]** **any-narrowing の typeof 検出がトップレベル if/expr のみ** — `src/pipeline/any_narrowing.rs` の `collect_from_stmt()` で `Switch`/`While`/`For`/`Try` 内の typeof/instanceof チェックが検出されない。any-narrowing enum のバリアント不足の原因。🔗 R-1 でモジュール移動後にパス変更予定
 - **[I-257]** **TypeResolver が rest パターンの変数を未登録** — `src/pipeline/type_resolver/visitors.rs:197` で `Rest` パターンの変数は `register_pat_vars` 経由で登録されるが、型が `ResolvedType::Unknown` のまま。rest 変数に適切な型（残余フィールドの構造体型）が設定されない
 - **[I-259]** **関数型エイリアスの rest パラメータが TypeDef::Function に含まれない** — `src/registry/functions.rs:20-28` の `try_collect_fn_type_alias` と `:68-77` の `try_collect_call_signature_fn` が `TsFnParam::Ident` のみ処理し、`TsFnParam::Rest` を無視する。`type Handler = { (...args: string[]): void }` や `type F = (...args: number[]) => void` で rest パラメータが `TypeDef::Function.params` に含まれず `has_rest` が常に `false` になる。解決策: transformer の `convert_interface_as_fn_type` (`src/pipeline/type_converter/interfaces.rs:167`) が既に `Rest` を処理しているので、同じロジックを registry 側にも適用する
 - **[I-260]** **`undefined` リテラルの型解決が Unknown** — TypeResolver の `resolve_expr_inner`（`src/pipeline/type_resolver/expressions.rs:31`）が `undefined` 識別子に対して `ResolvedType::Unknown` を返す。`const obj = { key: undefined }` のような場合に匿名構造体のフィールド型が不明になり、匿名構造体が生成されない。解決策: `undefined` を `RustType::Option(Box::new(RustType::Any))` として解決するか、コンテキストの expected type から内側の型を推定する
