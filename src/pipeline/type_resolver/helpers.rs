@@ -125,6 +125,40 @@ pub(super) fn unwrap_promise_and_unit(ty: RustType) -> Option<RustType> {
     }
 }
 
+/// Converts explicit type arguments from a `TsTypeParamInstantiation` to `Vec<RustType>`.
+///
+/// Used for `foo<string, number>()` or `new Map<string, number>()` where the
+/// caller provides explicit type arguments that should instantiate the callee's
+/// type parameters.
+pub(super) fn convert_explicit_type_args(
+    type_args: &ast::TsTypeParamInstantiation,
+    synthetic: &mut SyntheticTypeRegistry,
+    registry: &TypeRegistry,
+) -> Vec<RustType> {
+    type_args
+        .params
+        .iter()
+        .filter_map(|ts_type| convert_ts_type(ts_type, synthetic, registry).ok())
+        .collect()
+}
+
+/// Builds a type parameter name → concrete type mapping from type definition
+/// type params and explicit type arguments.
+///
+/// Given `class Foo<T, U>` and `new Foo<string, number>()`, produces
+/// `{"T": String, "U": F64}`. Extra type args without corresponding params
+/// are ignored; missing type args are skipped.
+pub(super) fn build_type_arg_bindings(
+    type_def_params: &[crate::ir::TypeParam],
+    explicit_type_args: &[RustType],
+) -> HashMap<String, RustType> {
+    type_def_params
+        .iter()
+        .zip(explicit_type_args.iter())
+        .map(|(param, arg)| (param.name.clone(), arg.clone()))
+        .collect()
+}
+
 /// Extracts function return type and parameter types from an expected type.
 ///
 /// Handles two cases:

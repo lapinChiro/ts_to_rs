@@ -54,6 +54,7 @@ fn test_registry_register_and_get_function() {
     reg.register(
         "draw".to_string(),
         TypeDef::Function {
+            type_params: vec![],
             params: vec![(
                 "p".to_string(),
                 RustType::Named {

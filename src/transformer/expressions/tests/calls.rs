@@ -399,6 +399,7 @@ fn test_convert_call_expr_rest_param_packs_args_into_vec() {
     reg.register(
         "sum".to_string(),
         TypeDef::Function {
+            type_params: vec![],
             params: vec![("nums".to_string(), RustType::Vec(Box::new(RustType::F64)))],
             return_type: Some(RustType::F64),
             has_rest: true,
@@ -436,6 +437,7 @@ fn test_convert_call_expr_rest_param_mixed_regular_and_rest() {
     reg.register(
         "log".to_string(),
         TypeDef::Function {
+            type_params: vec![],
             params: vec![
                 ("prefix".to_string(), RustType::String),
                 ("nums".to_string(), RustType::Vec(Box::new(RustType::F64))),
@@ -475,6 +477,7 @@ fn test_convert_call_expr_rest_param_no_rest_args() {
     reg.register(
         "sum".to_string(),
         TypeDef::Function {
+            type_params: vec![],
             params: vec![("nums".to_string(), RustType::Vec(Box::new(RustType::F64)))],
             return_type: Some(RustType::F64),
             has_rest: true,
@@ -511,6 +514,7 @@ fn test_convert_call_expr_rest_param_spread_single_array() {
     reg.register(
         "sum".to_string(),
         TypeDef::Function {
+            type_params: vec![],
             params: vec![("nums".to_string(), RustType::Vec(Box::new(RustType::F64)))],
             return_type: Some(RustType::F64),
             has_rest: true,
@@ -547,6 +551,7 @@ fn test_convert_call_expr_rest_param_mixed_literal_and_spread() {
     reg.register(
         "sum".to_string(),
         TypeDef::Function {
+            type_params: vec![],
             params: vec![("nums".to_string(), RustType::Vec(Box::new(RustType::F64)))],
             return_type: Some(RustType::F64),
             has_rest: true,

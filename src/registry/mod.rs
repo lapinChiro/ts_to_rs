@@ -157,6 +157,8 @@ pub enum TypeDef {
     },
     /// 関数
     Function {
+        /// ジェネリック型パラメータ
+        type_params: Vec<TypeParam>,
         /// パラメータ名と型のペア
         params: Vec<(String, RustType)>,
         /// 戻り値型

@@ -570,7 +570,7 @@ impl<'a> TypeResolver<'a> {
         obj_rust_type: &RustType,
         prop: &ast::MemberProp,
     ) -> ResolvedType {
-        // Array/tuple indexing
+        // Array/tuple/HashMap indexing
         if let ast::MemberProp::Computed(computed) = prop {
             match obj_rust_type {
                 RustType::Vec(elem_ty) => return ResolvedType::Known(elem_ty.as_ref().clone()),
@@ -583,13 +583,20 @@ impl<'a> TypeResolver<'a> {
                     }
                     return ResolvedType::Unknown;
                 }
+                // HashMap<K, V>[key] → V
+                RustType::Named { name, type_args }
+                    if name == "HashMap" && type_args.len() == 2 =>
+                {
+                    return ResolvedType::Known(type_args[1].clone());
+                }
                 _ => {}
             }
         }
 
-        // Named field access
+        // Named field access (Ident and PrivateName)
         let field_name = match prop {
             ast::MemberProp::Ident(ident) => ident.sym.to_string(),
+            ast::MemberProp::PrivateName(private) => private.name.to_string(),
             _ => return ResolvedType::Unknown,
         };
 
@@ -621,33 +628,135 @@ impl<'a> TypeResolver<'a> {
             _ => return ResolvedType::Unknown,
         };
 
+        // Convert explicit type arguments: `new Foo<string, number>(...)` → [String, F64]
+        let explicit_type_args: Vec<RustType> = new_expr
+            .type_args
+            .as_ref()
+            .map(|ta| convert_explicit_type_args(ta, self.synthetic, self.registry))
+            .unwrap_or_default();
+
         if let Some(type_def) = self.registry.get(&class_name) {
+            // Build type param bindings from explicit type args
+            let type_param_bindings = match &type_def {
+                TypeDef::Struct { type_params, .. } if !explicit_type_args.is_empty() => {
+                    build_type_arg_bindings(type_params, &explicit_type_args)
+                }
+                _ => HashMap::new(),
+            };
+
+            // Temporarily add type arg bindings to constraints for param resolution
+            let prev_constraints = if !type_param_bindings.is_empty() {
+                let mut merged = self.type_param_constraints.clone();
+                merged.extend(type_param_bindings);
+                Some(std::mem::replace(&mut self.type_param_constraints, merged))
+            } else {
+                None
+            };
+
             if let Some(args) = &new_expr.args {
                 // Resolve parameter types: constructor signature first, then field fallback
-                let param_types: Option<Vec<RustType>> = match type_def {
+                let param_types: Option<(Vec<RustType>, bool)> = match &type_def {
                     TypeDef::Struct {
                         constructor: Some(sigs),
                         ..
                     } if !sigs.is_empty() => {
                         let sig = select_overload(sigs, args.len(), &[]);
-                        Some(sig.params.iter().map(|(_, ty)| ty.clone()).collect())
+                        Some((
+                            sig.params.iter().map(|(_, ty)| ty.clone()).collect(),
+                            sig.has_rest,
+                        ))
                     }
                     TypeDef::Struct { fields, .. } => {
                         // Fallback: no constructor defined, use field types
-                        Some(fields.iter().map(|(_, ty)| ty.clone()).collect())
+                        Some((fields.iter().map(|(_, ty)| ty.clone()).collect(), false))
                     }
                     _ => None,
                 };
-                if let Some(param_types) = param_types {
-                    self.propagate_arg_expected_types(args, &param_types);
+                if let Some((param_types, has_rest)) = param_types {
+                    self.propagate_call_arg_expected_types(args, &param_types, has_rest);
                 }
             }
+
+            // Restore constraints
+            if let Some(prev) = prev_constraints {
+                self.type_param_constraints = prev;
+            }
+
+            // Resolve argument expressions (needed for type arg inference)
+            if let Some(args) = &new_expr.args {
+                for arg in args {
+                    self.resolve_expr(&arg.expr);
+                }
+            }
+
+            // Infer type args from resolved argument types when no explicit type args
+            let inferred_type_args = if explicit_type_args.is_empty() {
+                self.infer_new_expr_type_args(type_def, new_expr)
+            } else {
+                explicit_type_args
+            };
+
             ResolvedType::Known(RustType::Named {
                 name: class_name,
-                type_args: vec![],
+                type_args: inferred_type_args,
             })
         } else {
             ResolvedType::Unknown
+        }
+    }
+
+    /// Infers type arguments for a `new` expression from resolved argument types.
+    fn infer_new_expr_type_args(
+        &self,
+        type_def: &TypeDef,
+        new_expr: &ast::NewExpr,
+    ) -> Vec<RustType> {
+        let TypeDef::Struct {
+            type_params,
+            constructor,
+            ..
+        } = type_def
+        else {
+            return vec![];
+        };
+        if type_params.is_empty() {
+            return vec![];
+        }
+
+        let Some(args) = &new_expr.args else {
+            return vec![];
+        };
+
+        // Get constructor param types
+        let param_types: Vec<RustType> = match constructor {
+            Some(sigs) if !sigs.is_empty() => {
+                let sig = select_overload(sigs, args.len(), &[]);
+                sig.params.iter().map(|(_, ty)| ty.clone()).collect()
+            }
+            _ => return vec![],
+        };
+
+        let arg_types = self.collect_resolved_arg_types(args);
+        let bindings =
+            super::call_resolution::infer_type_args(type_params, &param_types, &arg_types);
+
+        if bindings.is_empty() {
+            return vec![];
+        }
+
+        // Build type args in the order of type_params.
+        // Only return type args if ALL type params were inferred.
+        // Partial inference (some params unresolved) returns empty to avoid
+        // introducing Any as a type argument (type-fallback-safety concern).
+        let inferred: Vec<RustType> = type_params
+            .iter()
+            .filter_map(|tp| bindings.get(&tp.name).cloned())
+            .collect();
+
+        if inferred.len() == type_params.len() {
+            inferred
+        } else {
+            vec![]
         }
     }
 

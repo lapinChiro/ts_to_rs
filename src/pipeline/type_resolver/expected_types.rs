@@ -22,18 +22,31 @@ impl<'a> TypeResolver<'a> {
     /// Transformer can use for struct initialization, rather than type
     /// parameter names that don't exist in the TypeRegistry.
     pub(super) fn resolve_type_params_in_type(&self, ty: &RustType) -> RustType {
+        self.resolve_type_params_impl(ty, 0)
+    }
+
+    fn resolve_type_params_impl(&self, ty: &RustType, depth: usize) -> RustType {
+        // Guard against circular references in type_param_constraints
+        // (e.g., "T" → Named("T") when T has no constraint but appears in the map)
+        if depth > 10 {
+            return ty.clone();
+        }
         match ty {
             RustType::Named { name, type_args } => {
                 // If name itself is a type parameter, resolve to constraint
                 if type_args.is_empty() {
                     if let Some(constraint) = self.type_param_constraints.get(name) {
-                        return self.resolve_type_params_in_type(constraint);
+                        // Skip self-referential constraints to prevent infinite recursion
+                        if constraint == ty {
+                            return ty.clone();
+                        }
+                        return self.resolve_type_params_impl(constraint, depth + 1);
                     }
                 }
                 // Resolve type params within type_args
                 let resolved_args: Vec<RustType> = type_args
                     .iter()
-                    .map(|a| self.resolve_type_params_in_type(a))
+                    .map(|a| self.resolve_type_params_impl(a, depth + 1))
                     .collect();
                 if &resolved_args == type_args {
                     ty.clone()
@@ -45,7 +58,7 @@ impl<'a> TypeResolver<'a> {
                 }
             }
             RustType::Option(inner) => {
-                let resolved = self.resolve_type_params_in_type(inner);
+                let resolved = self.resolve_type_params_impl(inner, depth + 1);
                 if &resolved == inner.as_ref() {
                     ty.clone()
                 } else {
@@ -53,7 +66,7 @@ impl<'a> TypeResolver<'a> {
                 }
             }
             RustType::Vec(inner) => {
-                let resolved = self.resolve_type_params_in_type(inner);
+                let resolved = self.resolve_type_params_impl(inner, depth + 1);
                 if &resolved == inner.as_ref() {
                     ty.clone()
                 } else {
@@ -66,9 +79,9 @@ impl<'a> TypeResolver<'a> {
             } => {
                 let resolved_params: Vec<RustType> = params
                     .iter()
-                    .map(|p| self.resolve_type_params_in_type(p))
+                    .map(|p| self.resolve_type_params_impl(p, depth + 1))
                     .collect();
-                let resolved_ret = self.resolve_type_params_in_type(return_type);
+                let resolved_ret = self.resolve_type_params_impl(return_type, depth + 1);
                 if &resolved_params == params && &resolved_ret == return_type.as_ref() {
                     ty.clone()
                 } else {
@@ -81,7 +94,7 @@ impl<'a> TypeResolver<'a> {
             RustType::Tuple(types) => {
                 let resolved: Vec<RustType> = types
                     .iter()
-                    .map(|t| self.resolve_type_params_in_type(t))
+                    .map(|t| self.resolve_type_params_impl(t, depth + 1))
                     .collect();
                 if &resolved == types {
                     ty.clone()

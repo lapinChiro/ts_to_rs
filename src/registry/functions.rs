@@ -7,6 +7,7 @@ use super::{TypeDef, TypeRegistry};
 use crate::ir::RustType;
 use crate::pipeline::type_converter::convert_ts_type;
 use crate::pipeline::SyntheticTypeRegistry;
+use crate::registry::collect_type_params;
 
 /// 関数型エイリアス (`type F = (x: T) => U`) を `TypeDef::Function` として収集する。
 pub(super) fn try_collect_fn_type_alias(
@@ -28,7 +29,9 @@ pub(super) fn try_collect_fn_type_alias(
                 }
             }
             let return_type = convert_ts_type(&fn_type.type_ann.type_ann, synthetic, lookup).ok();
+            let type_params = collect_type_params(alias.type_params.as_deref(), lookup, synthetic);
             Some(TypeDef::Function {
+                type_params,
                 params,
                 return_type,
                 has_rest: false,
@@ -82,7 +85,10 @@ fn try_collect_call_signature_fn(
         .as_ref()
         .and_then(|ann| convert_ts_type(&ann.type_ann, synthetic, lookup).ok());
 
+    let type_params = collect_type_params(sig.type_params.as_deref(), lookup, synthetic);
+
     Some(TypeDef::Function {
+        type_params,
         params,
         return_type,
         has_rest: false,
@@ -139,7 +145,10 @@ pub(super) fn collect_fn_def_with_extras(
         .as_ref()
         .and_then(|ann| convert_ts_type(&ann.type_ann, synthetic, lookup).ok());
 
+    let type_params = collect_type_params(func.type_params.as_deref(), lookup, synthetic);
+
     Ok(TypeDef::Function {
+        type_params,
         params,
         return_type,
         has_rest,
@@ -169,7 +178,10 @@ pub(super) fn collect_arrow_def_with_extras(
         .as_ref()
         .and_then(|ann| convert_ts_type(&ann.type_ann, synthetic, lookup).ok());
 
+    let type_params = collect_type_params(arrow.type_params.as_deref(), lookup, synthetic);
+
     Ok(TypeDef::Function {
+        type_params,
         params,
         return_type,
         has_rest: false,

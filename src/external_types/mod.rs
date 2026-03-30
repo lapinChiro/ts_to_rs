@@ -301,6 +301,7 @@ fn convert_external_typedef(
                 .map(|rt| convert_external_type(rt, synthetic));
             let has_rest = sig.params.last().is_some_and(|p| p.rest);
             Some(TypeDef::Function {
+                type_params: vec![],
                 params,
                 return_type,
                 has_rest,

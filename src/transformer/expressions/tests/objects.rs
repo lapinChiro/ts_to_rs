@@ -306,6 +306,7 @@ fn test_convert_expr_call_resolves_object_arg_from_registry() {
     reg.register(
         "draw".to_string(),
         TypeDef::Function {
+            type_params: vec![],
             params: vec![(
                 "p".to_string(),
                 RustType::Named {

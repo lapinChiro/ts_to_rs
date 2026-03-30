@@ -228,6 +228,7 @@ fn test_parse_function_returns_function_typedef() {
             params,
             return_type,
             has_rest,
+            ..
         } => {
             assert_eq!(params.len(), 2);
             assert_eq!(params[0].0, "input");

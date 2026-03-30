@@ -381,6 +381,7 @@ fn test_convert_ts_type_typeof_known_fn_returns_fn_type() {
     reg.register(
         "myFunc".to_string(),
         TypeDef::Function {
+            type_params: vec![],
             params: vec![("x".to_string(), RustType::F64)],
             return_type: Some(RustType::String),
             has_rest: false,

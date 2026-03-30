@@ -1,22 +1,22 @@
 # ts_to_rs 開発計画
 
-## 現在のベースライン（2026-03-30 C-2完了後）
+## 現在のベースライン（2026-03-30 C-3完了後）
 
 | 指標 | 値 |
 |------|-----|
 | Hono クリーン | 110/158 (69.6%) |
-| エラーインスタンス | 62 |
+| エラーインスタンス | 61 |
 | コンパイル(file) | 109/158 (69.0%) |
 | コンパイル(dir) | 156/158 (98.7%) |
-| テスト数 | 1588 |
+| テスト数 | 1454 |
 | コンパイルテストスキップ | 11 件（builtins なし） / 10 件（builtins あり） |
 
-### エラーカテゴリ内訳（62 件）
+### エラーカテゴリ内訳（61 件）
 
 | カテゴリ | 件数 | 関連イシュー |
 |----------|------|-------------|
-| OBJECT_LITERAL_NO_TYPE | 32 | I-300（関数引数 ~14件）、I-301（型注釈なし ~3件）、I-302（this.field ~2件）、その他 ~13件 |
-| OTHER | 8 | parseInt(2), delete(2), class expr(1), update target(1), rest type(1), array destr(1) |
+| OBJECT_LITERAL_NO_TYPE | 29 | I-300（関数引数 ~16件）、I-301（型注釈なし ~7件）、I-305（callable interface ~2件）、I-306（.map callback ~1件）、その他 ~3件 |
+| OTHER | 10 | parseInt(2), delete(2), class expr(1), update target(1), rest type(1), array destr(1), +2（C-3で変換進行により遷移） |
 | QUALIFIED_TYPE | 3 | I-36 |
 | FN_TYPE_PARAM | 3 | I-259 |
 | MEMBER_PROPERTY | 3 | |
@@ -80,10 +80,21 @@ Phase B 完了後。
 - **実績: 0 エラー削減（数値不変）。理由: 32件全てにおいて、修正したパターン以外に「関数呼び出し引数」(I-300) や「型注釈なしオブジェクト」(I-301) が同一関数内に共存し、それらが残る限り関数単位のエラーカウントは減少しない。個別パターンの正常動作はユニットテスト・個別テストケースで確認済み**
 - **発見された後続課題**: I-300（関数引数 expected type 伝播）、I-301（型注釈なしオブジェクト）、I-302（this.field = {} パターン）を TODO に記録
 
+#### C-3: 型引数推論基盤 + resolve_member_type 改善 ✅
+
+- OBJECT_LITERAL_NO_TYPE 全32件を個別オブジェクトリテラルまで特定・分類（`report/c3-object-literal-no-type-deep-analysis-2026-03-30.md`）
+- 以下の5つの基盤改善を実施:
+  1. **resolve_member_type の PrivateName (#field) 対応**: `MemberProp::PrivateName` を処理するブランチ追加。TypeRegistry の `collect_class_info` にも `PrivateProp` のフィールド収集を追加
+  2. **resolve_member_type の HashMap computed access 対応**: `HashMap<K, V>[key]` → value 型 `V` を返すブランチ追加
+  3. **明示的型引数の活用**: `new Foo<Config>(...)` / `fn<Config>(...)` の明示的型引数で param 型・return 型を具体化。`TypeDef::Function` に `type_params` フィールド追加（本質的な基盤改善）
+  4. **呼び出し側型引数推論（I-286c S3）**: 実引数型から型パラメータを unification で推論。`fn<T>(x: T)` を `fn("hello")` で呼ぶと `T = String` を推論し返り値型を具体化。`new Box("hello")` → `Box<String>`
+  5. **`resolve_type_params_in_type` 循環参照防御**: 深さ制限（depth > 10）と自己参照検出を追加。ディレクトリモードでの無限ループを防止
+- **実績: -1 エラー（62→61）。OBJECT_LITERAL_NO_TYPE 32→29（-3）。OTHER +2（変換進行により別エラーに遷移）**
+- **発見された後続課題**: I-304〜I-311 を TODO に記録。主要なもの: I-305（callable interface return 型解決）、I-306（.map() callback 型伝播）、I-310（HashMap computed assignment の transformer 変換）、I-311（型引数推論結果の引数 expected type フィードバック）
+
 | 順序 | パターン | エラー削減 |
 |------|---------|-----------|
-| C-3 | 関数引数 expected type + 呼び出し側型引数推論（I-300 + I-286c S3） | ~14件 |
-| C-4 | 型注釈なしオブジェクト + this.field パターン（I-301 + I-302） | ~5件 |
+| C-4 | 型注釈なしオブジェクト（I-301）+ callable interface return（I-305）+ .map() callback 伝播（I-306） | ~10件 |
 
 ---
 
@@ -100,7 +111,8 @@ Phase B 完了後。
 | Phase C-0 (resolve_member_type) | -3 | ✅ 66→63 |
 | Phase C-1 (Pat::Assign + todo!()) | -1 + 品質 | ✅ 63→62 |
 | Phase C-2 (expected type 基盤) | 0（基盤修正） | ✅ 62→62 バグ8件修正 + テスト16追加 |
-| Phase C (残: C-3, C-4) | ~-19 | ~62→~43 |
+| Phase C-3 (型引数推論 + resolve_member_type) | -1 + 基盤 | ✅ 62→61 OBJECT_LITERAL_NO_TYPE -3 + テスト28追加 |
+| Phase C (残: C-4) | ~-10 | ~61→~51 |
 
 ---
 

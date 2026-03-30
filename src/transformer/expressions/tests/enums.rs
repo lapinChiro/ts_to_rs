@@ -135,6 +135,7 @@ fn test_convert_call_args_string_literal_to_enum_variant() {
     reg.register(
         "move_dir".to_string(),
         TypeDef::Function {
+            type_params: vec![],
             params: vec![(
                 "d".to_string(),
                 RustType::Named {

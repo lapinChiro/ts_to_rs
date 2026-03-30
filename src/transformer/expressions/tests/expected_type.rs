@@ -102,6 +102,7 @@ fn test_fn_arg_box_dyn_fn_gets_box_new() {
     reg.register(
         "applyFn".to_string(),
         TypeDef::Function {
+            type_params: vec![],
             params: vec![(
                 "f".to_string(),
                 RustType::Fn {

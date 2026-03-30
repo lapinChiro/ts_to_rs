@@ -45,6 +45,7 @@ pub(super) fn collect_type_name(reg: &mut TypeRegistry, decl: &ast::Decl) {
             reg.register(
                 fn_decl.ident.sym.to_string(),
                 TypeDef::Function {
+                    type_params: vec![],
                     params: vec![],
                     return_type: None,
                     has_rest: false,
@@ -62,6 +63,7 @@ pub(super) fn collect_type_name(reg: &mut TypeRegistry, decl: &ast::Decl) {
                         reg.register(
                             name,
                             TypeDef::Function {
+                                type_params: vec![],
                                 params: vec![],
                                 return_type: None,
                                 has_rest: false,
@@ -306,6 +308,14 @@ fn collect_class_info(
                     ast::PropName::Ident(ident) => ident.sym.to_string(),
                     _ => continue,
                 };
+                if let Some(ann) = &prop.type_ann {
+                    if let Ok(ty) = convert_ts_type(&ann.type_ann, synthetic, lookup) {
+                        fields.push((name, ty));
+                    }
+                }
+            }
+            ast::ClassMember::PrivateProp(prop) => {
+                let name = prop.key.name.to_string();
                 if let Some(ann) = &prop.type_ann {
                     if let Ok(ty) = convert_ts_type(&ann.type_ann, synthetic, lookup) {
                         fields.push((name, ty));

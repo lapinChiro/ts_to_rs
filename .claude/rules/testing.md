@@ -91,6 +91,16 @@ When behavior depends on **2+ independent conditions**, enumerate condition comb
 - Pattern matching with multiple checks (is_eq × has_type × has_variant)
 - Destructuring (has_default × is_nested × is_rest)
 
+#### Transpiler-Specific: Recursive Function Termination
+
+For functions that recurse on type structures (e.g., `resolve_type_params_in_type`, `convert_ts_type`, `unify_type`):
+- **Self-referential input**: Test with input that maps back to itself (e.g., type param constraint `"T" → Named("T")`)
+- **Mutual recursion**: Test with types that reference each other (e.g., `A<B>` where `B` contains `A`)
+- **Deep nesting**: Test with nesting depth exceeding expected limits (e.g., `Option<Option<Option<...>>>`)
+- **HashMap/map-based lookups**: When a function looks up a key and recurses on the result, test that the result doesn't contain the same key (circular reference)
+
+Incidents: `resolve_type_params_in_type` caused an infinite loop in directory mode when `type_param_constraints` contained `"T" → Named("T")` (self-referential). The function recursively resolved `Named("T")` → looked up `"T"` → got `Named("T")` → infinite recursion. Fixed by adding depth limit and self-reference detection.
+
 #### Transpiler-Specific: AST Variant Exhaustiveness
 
 For functions that `match` on SWC AST enums:

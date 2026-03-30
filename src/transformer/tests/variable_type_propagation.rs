@@ -175,6 +175,7 @@ fn test_extract_fn_return_type_from_named_type_in_registry() {
     reg.register(
         "GetInfo".to_string(),
         crate::registry::TypeDef::Function {
+            type_params: vec![],
             params: vec![],
             return_type: Some(RustType::Named {
                 name: "Info".to_string(),
@@ -234,6 +235,7 @@ fn test_extract_fn_param_types_from_named_type_in_registry() {
     reg.register(
         "GetConnInfo".to_string(),
         crate::registry::TypeDef::Function {
+            type_params: vec![],
             params: vec![(
                 "c".to_string(),
                 RustType::Named {

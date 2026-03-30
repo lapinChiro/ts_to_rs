@@ -662,3 +662,117 @@ fn test_this_in_arrow_function_inside_method() {
         "this.delay in arrow function should resolve to F64 via lexical this"
     );
 }
+
+#[test]
+fn test_private_field_access_resolves_type() {
+    // Private fields (#field) should be resolved by resolve_member_type,
+    // just like public fields (ident).
+    let source = r#"
+        class Store {
+            #count: number;
+            getCount(): number {
+                return this.#count;
+            }
+        }
+    "#;
+    let files = parse_files(vec![(PathBuf::from("test.ts"), source.to_string())]).unwrap();
+    let file = &files.files[0];
+    let reg = build_registry(&file.module);
+    let mut synthetic = SyntheticTypeRegistry::new();
+    let mut resolver = TypeResolver::new(&reg, &mut synthetic);
+    let res = resolver.resolve_file(file);
+
+    // Find this.#count in getCount() body → return this.#count
+    let class = match &file.module.body[0] {
+        swc_ecma_ast::ModuleItem::Stmt(swc_ecma_ast::Stmt::Decl(swc_ecma_ast::Decl::Class(c))) => c,
+        _ => panic!("expected class decl"),
+    };
+    // body[0] = #count field, body[1] = getCount method
+    let method = match &class.class.body[1] {
+        swc_ecma_ast::ClassMember::Method(m) => m,
+        _ => panic!("expected method"),
+    };
+    let body = method.function.body.as_ref().unwrap();
+    let ret_stmt = match &body.stmts[0] {
+        swc_ecma_ast::Stmt::Return(r) => r,
+        _ => panic!("expected return"),
+    };
+    // return this.#count → the member expr this.#count
+    let member_expr = ret_stmt.arg.as_ref().unwrap();
+    let member_span = Span::from_swc(member_expr.span());
+    let member_ty = res.expr_types.get(&member_span);
+    assert!(
+        matches!(member_ty, Some(ResolvedType::Known(RustType::F64))),
+        "this.#count should resolve to F64, got {:?}",
+        member_ty
+    );
+}
+
+#[test]
+fn test_private_field_assignment_propagates_expected_type() {
+    // When assigning to this.#field = {}, the RHS should get the field's
+    // type annotation as expected type.
+    let source = r#"
+        interface Config { host: string; port: number; }
+        class Server {
+            #config: Config;
+            constructor() {
+                this.#config = { host: "localhost", port: 8080 };
+            }
+        }
+    "#;
+    let res = resolve(source);
+    // The object literal { host: "localhost", port: 8080 } should have
+    // expected type Config (Named).
+    let has_config_expected = res
+        .expected_types
+        .values()
+        .any(|ty| matches!(ty, RustType::Named { name, .. } if name == "Config"));
+    assert!(
+        has_config_expected,
+        "RHS of this.#config = {{...}} should have expected type Config"
+    );
+}
+
+#[test]
+fn test_hashmap_computed_access_resolves_value_type() {
+    // m[key] where m: Record<string, T> (HashMap<String, T>) should
+    // resolve to T (the value type).
+    let source = r#"
+        function getItem(m: Record<string, number>, key: string): number {
+            return m[key];
+        }
+    "#;
+    let res = resolve(source);
+    // m[key] should resolve to F64 (the value type of Record<string, number>)
+    let has_f64_for_computed = res
+        .expr_types
+        .values()
+        .any(|ty| matches!(ty, ResolvedType::Known(RustType::F64)));
+    assert!(
+        has_f64_for_computed,
+        "m[key] on Record<string, number> should resolve to F64"
+    );
+}
+
+#[test]
+fn test_hashmap_computed_assignment_propagates_expected() {
+    // m[key] = { ... } where m: Record<string, SomeStruct> should
+    // propagate the value type as expected type for the RHS.
+    let source = r#"
+        interface Entry { name: string; value: number; }
+        function setItem(m: Record<string, Entry>, key: string): void {
+            m[key] = { name: "test", value: 42 };
+        }
+    "#;
+    let res = resolve(source);
+    // The RHS object literal should have expected type Entry
+    let has_entry_expected = res
+        .expected_types
+        .values()
+        .any(|ty| matches!(ty, RustType::Named { name, .. } if name == "Entry"));
+    assert!(
+        has_entry_expected,
+        "RHS of m[key] = {{...}} should have expected type Entry"
+    );
+}

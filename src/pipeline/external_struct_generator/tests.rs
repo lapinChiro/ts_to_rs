@@ -573,6 +573,7 @@ fn test_generate_struct_typedef_function_returns_none() {
     registry.register(
         "fetch".to_string(),
         TypeDef::Function {
+            type_params: vec![],
             params: vec![],
             return_type: None,
             has_rest: false,

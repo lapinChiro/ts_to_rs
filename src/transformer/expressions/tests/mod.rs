@@ -119,6 +119,7 @@ fn greet_registry() -> TypeRegistry {
     reg.register(
         "greet".to_string(),
         TypeDef::Function {
+            type_params: vec![],
             params: vec![
                 ("name".to_string(), RustType::String),
                 (

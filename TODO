@@ -30,8 +30,8 @@
 - **保留** — 正当な保留理由あり（前提タスク未完了、またはユーザーの設計方針決定が必要）
 - **スコープ外** — 明示的に対象外。需要発生時に再評価
 
-件数は Hono ベンチマーク（`./scripts/hono-bench.sh`）の実測値に基づく（最終実行: 2026-03-30 C-2完了後）。
-158 ファイル中 110 ファイルがクリーン（69.6%）、62 エラーインスタンス。コンパイルクリーン: ファイル単位 109（69.0%）、ディレクトリ単位 156（98.7%）。
+件数は Hono ベンチマーク（`./scripts/hono-bench.sh`）の実測値に基づく（最終実行: 2026-03-30 C-3完了後）。
+158 ファイル中 110 ファイルがクリーン（69.6%）、61 エラーインスタンス。コンパイルクリーン: ファイル単位 109（69.0%）、ディレクトリ単位 156（98.7%）。
 **注意**: ベンチマーク実行前に `cargo build --release` が必要。古いビルドで実行すると数値が不正確になる。
 **補足**: 「クリーン」は変換エラーなし（`--report-unsupported` でエラー 0）を意味する。コンパイルクリーンは2指標: ファイル単位（use 除去後の個別コンパイル）とディレクトリ単位（全ファイルを1クレートとしてコンパイル）。
 
@@ -51,6 +51,7 @@
 - **C-0**: resolve_struct_fields_by_name 統合 — 3件削減（66→63）。TypeRegistry/SyntheticTypeRegistry/type_param_constraints の3層フィールド解決を single source of truth に統合。resolve_member_type, resolve_spread_source_fields, resolve_object_lit_fields の3関数を共通メソッドに委譲。OBJECT_LITERAL_NO_TYPE 36→33
 - **C-1**: TypeResolver パラメータ型伝播 + todo!() 解消 — 1件削減（63→62）+ 品質向上。visit_param_pat の Pat::Assign 対応（デフォルト値パラメータのスコープ登録 + expected type 伝播）。visit_fn_decl/resolve_arrow_expr/resolve_fn_expr のパラメータ型収集で Pat::Assign 処理。patterns.rs の todo!() 8箇所を保守的 false フォールバックに置換（Tier 2 パニック解消）
 - **C-2**: expected type 基盤改善 — 0件削減（基盤修正）。7つの修正: (1) ClassProp 初期化子の expected type 順序修正（バグ: resolve_expr が expected 設定より先に実行）、(2) `resolve_type_params_in_type` ヘルパー（型パラメータ制約を再帰的に具象型に解決）、(3) 全 expected type 挿入箇所（visit_var_decl, return文, Pat::Assign, ClassProp, propagate_fallback_expected, propagate_arg_expected_types）で型パラメータ解決適用、(4) `resolve_object_lit_fields` への type_args 伝播（ジェネリック構造体フィールドの具象化）、(5) PrivateMethod/PrivateProp の TypeResolver 処理追加（未訪問バグ）、(6) コンストラクタのみクラスの TypeRegistry 登録条件修正（`constructor.is_some()` 追加）、(7) 空オブジェクト `{}` + HashMap expected → `HashMap::new()` 生成、(8) 型パラメータ制約マージ（メソッド/アロー関数/関数式で親スコープ制約を保持）。ベンチ数値不変の理由: 32件全てで修正パターン以外の未対応パターン（関数呼び出し引数 I-300、型注釈なしオブジェクト I-301）が同一関数内に共存
+- **C-3**: 型引数推論基盤 + resolve_member_type 改善 — 1件削減（62→61）+ 基盤改善。(1) resolve_member_type に PrivateName + HashMap computed access 対応、(2) TypeDef::Function に type_params フィールド追加、(3) 明示的型引数（new Foo\<Config\>(...)、fn\<Config\>(...)）で param/return 型を具体化、(4) 呼び出し側型引数推論（unification ベース: fn\<T\>(x: T) → fn("hello") で T=String）、(5) resolve_type_params_in_type に循環参照防御。OBJECT_LITERAL_NO_TYPE 32→29、後続課題 I-304〜I-311 を TODO に記録
 
 ---
 
@@ -58,7 +59,7 @@
 
 | フェーズ | 移行基準 | 対象 |
 |---------|---------|------|
-| **現在: 変換率の大幅改善** | 全エラーインスタンス < 60 件 | 全 62 件。内訳: OBJECT_LITERAL_NO_TYPE 32 件、OTHER 8 件、QUALIFIED_TYPE 3 件、FN_TYPE_PARAM 3 件、MEMBER_PROPERTY 3 件、ASSIGN_TARGET 3 件、その他 10 件。C-1 で OBJECT_LITERAL_NO_TYPE 33→32、全体 63→62 + patterns.rs todo!() 8箇所解消 |
+| **現在: 変換率の大幅改善** | 全エラーインスタンス < 60 件 | 全 61 件。内訳: OBJECT_LITERAL_NO_TYPE 29 件、OTHER 10 件、QUALIFIED_TYPE 3 件、FN_TYPE_PARAM 3 件、MEMBER_PROPERTY 3 件、ASSIGN_TARGET 3 件、その他 10 件。C-3 で OBJECT_LITERAL_NO_TYPE 32→29（-3）、OTHER 8→10（+2）、全体 62→61 |
 | **次: コンパイル品質** | ディレクトリコンパイルエラー 0 件 | 残 2 ファイル不合格（5 エラーインスタンス）。I-273（trait/struct 混同）が主因 |
 | **その次: テスト拡充** | E2E テスト網羅性 | E2E テストの拡充（I-20, I-71, I-72, I-74）、HTTP 対応（I-183） |
 
@@ -98,24 +99,66 @@
   - ~~**S8: プロパティアクセス型推論**~~ → C-0 で完了（resolve_struct_fields_by_name 統合）
   - 🔗 C-2 で expected type 基盤が整った状態。S3 に集中可能
   - 詳細: `report/bottom-up-type-inference-analysis-2026-03-28.md`, `report/fallback-type-inventory-2026-03-28.md`
-- **[I-300]** **関数/コンストラクタ呼び出し引数のオブジェクトリテラルへの expected type 伝播不足** — **OBJECT_LITERAL_NO_TYPE 残存の最大原因**（32件中推定14件）
-  - C-2 の調査で特定。ベンチマーク数値が動かない直接原因。32件全てにおいて、TypeResolver の `set_call_arg_expected_types`（`src/pipeline/type_resolver/call_resolution.rs:111`）が引数の expected type を設定するが、以下の場合に失敗:
-    (1) 呼び出し先が TypeRegistry に未登録（別ファイルの関数/コンストラクタ。単一ファイルモードで顕著）
-    (2) 呼び出し先の引数型がジェネリック型パラメータ（`fn<T>(x: T)` → `param_ty = Named("T")`）。C-2 で `propagate_arg_expected_types` に `resolve_type_params_in_type` を適用済みだが、TypeRegistry のシグネチャに型パラメータが残っている場合は呼び出し側で具体化が必要
-    (3) メンバ式呼び出し（`obj.method({ ... })`）でオブジェクト型が解決不能
-  - **代表的な失敗パターン**: `new Context(request, { path, matchResult, env })` (`hono-base.ts:415`) — `Context` のコンストラクタ引数型が TypeRegistry に不足（C-2 でコンストラクタのみクラスの登録条件を修正済みだが、別ファイルの場合は単一ファイルモードの制約）
-  - **解決策**: I-286c S3（呼び出し側型引数推論）と連携。実引数型から型パラメータを推論し、パラメータ型を具体化してから expected type を設定する
-  - 🔗 I-286c S3 と同根の課題。一体で設計すべき
-- **[I-301]** **型注釈なしオブジェクトリテラルの変換** — OBJECT_LITERAL_NO_TYPE の一因（32件中推定3件）
-  - C-2 の調査で特定。`const marker = {}` / `const context = {}` のように型注釈がない変数にオブジェクトリテラルを代入するパターン。TypeResolver が expected type を設定できず、`convert_object_lit` が struct 名を決定できない
-  - **対象ファイル**: `utils/html.ts:135`（`const context = {}`）、`utils/concurrent.ts:39`（`const marker = {}`）、`middleware/ip-restriction/index.ts:157`（`const remoteData = { addr, type, isIPv4 }`）
-  - **解決策候補**: (1) 匿名構造体の自動生成（フィールド名と型から `_AnonymousN` 構造体を SyntheticTypeRegistry に登録）、(2) 後続の使用箇所から型を逆推論（2パス必要で高コスト）、(3) 空オブジェクトは `HashMap::new()` or `serde_json::Value::Object` にフォールバック
-  - **意味論的安全性**: 匿名構造体は compile error で検出可能（Safe）。フォールバック型は type-fallback-safety.md の分析が必要
-- **[I-302]** **コンストラクタ内 `this.field = {}` パターンの expected type 未設定** — OBJECT_LITERAL_NO_TYPE の一因（推定2件）
-  - C-2 の調査で `request.ts:79`（`this.#validatedData = {}`）で発見。コンストラクタ本体の `this.field = expr` 代入で、TypeResolver が右辺の `expr` にフィールドの型注釈から expected type を伝播するロジックがない
-  - **現状**: `visit_stmt` の `ExprStmt → Assign` パスでは代入右辺の expected type 設定をしていない。左辺が `MemberExpr(this, field)` の場合に TypeRegistry からクラスのフィールド型を取得し、右辺に expected type を設定する必要がある
-  - **解決策**: `visit_stmt` の `Assign` 処理で `this.field` の左辺を検出 → 現在のクラスの TypeDef からフィールド型を取得 → `expected_types.insert(rhs_span, field_ty)` + `propagate_expected(rhs, &field_ty)`
-  - **影響箇所**: `src/pipeline/type_resolver/visitors.rs` の `visit_stmt` / `Stmt::Expr` → `Expr::Assign` パス
+- **[I-300]** **関数/コンストラクタ呼び出し引数のオブジェクトリテラルへの expected type 伝播不足** — **OBJECT_LITERAL_NO_TYPE 残存の最大原因**（実測16件/32件）
+  - C-3 調査（`report/c3-object-literal-no-type-deep-analysis-2026-03-30.md`）で個々のオブジェクトリテラルを特定・分類:
+    - **imported 関数/クラス**: 11件（`baseServeStatic`, `app.fetch`, `Context`, `serialize`, `jsx` 等）— 単一ファイルモードでは TypeRegistry に情報なし。directory モードまたはマルチファイルモードでの改善が必要
+    - **外部型 constructor**: 2件（`new Request(url, {...})`, `new Response(body, {...})`）— 外部型 JSON で constructor params は登録済みだが活用されていない
+    - **同一ファイル**: 3件（`ClientRequestImpl` L214, `writeSSE` L58, `createCssContext` L195）— TypeRegistry に情報あり、型引数推論で改善可能
+  - **根本原因（3種）**:
+    (1) 呼び出し先が TypeRegistry に未登録（imported 関数。単一ファイルモードの制約）
+    (2) `resolve_new_expr` が `new_expr.type_args` を完全無視（`src/pipeline/type_resolver/expressions.rs:645` で `type_args: vec![]` ハードコード）
+    (3) 型パラメータの具体化不足: call-site で明示的型引数があっても param 型の型パラメータが未解決（`set_call_arg_expected_types` が `call.type_args` を利用しない）
+  - **解決策**: I-286c S3（型引数推論）と一体で対応。(A) 明示的型引数の活用、(B) 実引数型からの推論、(C) resolve_new_expr の type_args 反映
+  - 🔗 I-286c S3 と同根。一体で設計
+- **[I-301]** **型注釈なしオブジェクトリテラルの変換** — OBJECT_LITERAL_NO_TYPE の一因（実測7件/32件）
+  - C-3 調査で推定3件 → 実測7件に修正。型注釈のないローカル変数へのオブジェクトリテラル代入、および三項演算子内のオブジェクトリテラル
+  - **対象ファイル（7件）**: `adapter/aws-lambda/handler.ts:170`（`const httpResponseMetadata = {...}`）、`helper/proxy/index.ts:166`（`{raw: proxyInit}`、三項演算子）、`utils/html.ts:135`（`const context = {}`）、`utils/concurrent.ts:39`（`const marker = {}`）、`validator/validator.ts:90`（`let value = {}`）、`middleware/basic-auth/index.ts:134`（`const headers = {...}`）、`middleware/ip-restriction/index.ts:157`（`const remoteData = {...}`）
+  - **解決策候補**: (1) 匿名構造体の自動生成（フィールド名と型から `_AnonymousN` 構造体を SyntheticTypeRegistry に登録）、(2) 空オブジェクト（`{}`）は `HashMap::new()` にフォールバック（C-2 で `expected = HashMap` 時は対応済み、expected なし時が未対応）
+  - **意味論的安全性**: 匿名構造体は compile error で検出可能（Safe）
+- **[I-302]** **resolve_member_type の PrivateName (#field) 未対応** — OBJECT_LITERAL_NO_TYPE の一因（2件: クラスフィールドデフォルト値）
+  - C-3 調査で根本原因を特定: `this.field = expr` 代入の expected type 伝播ロジック自体は `expressions.rs:72-99` に**既に実装済み**。問題は `resolve_member_type` (`src/pipeline/type_resolver/expressions.rs:591-593`) が `MemberProp::PrivateName` を処理せず `ResolvedType::Unknown` を返すこと
+  - Transformer 側は `format!("_{}", private.name)` で `PrivateName` を処理済み（`src/transformer/expressions/member_access.rs:214`, `src/transformer/expressions/calls.rs:64`）。TypeResolver 側の整合性が欠けている
+  - **修正**: `resolve_member_type` のフィールド名抽出に `MemberProp::PrivateName(priv) => priv.name.to_string()` を追加
+  - **影響箇所**: `src/pipeline/type_resolver/expressions.rs:591-593`
+  - 🔗 C-3 で対応予定（1行修正）
+- **[I-304]** **resolve_member_type の HashMap computed access 未対応** — `m[key] = {...}` パターン（1件: `router/trie-router/node.ts:38`）
+  - `m: Record<string, HandlerSet<T>>` → `HashMap<String, HandlerSet<T>>` だが、`resolve_member_type` の Computed ブランチ（`src/pipeline/type_resolver/expressions.rs:574-587`）は `Vec`/`Tuple` のみ対応。`HashMap` の `type_args[1]`（value 型）を返すロジックがない
+  - **修正**: Computed ブランチに `RustType::Named { name: "HashMap", type_args }` で `type_args.len() == 2` → `type_args[1].clone()` を返す分岐を追加
+  - **影響箇所**: `src/pipeline/type_resolver/expressions.rs:574-587`
+  - 🔗 C-3 で対応予定
+- **[I-305]** **callable interface の return 型解決** — OBJECT_LITERAL_NO_TYPE の原因（2件: `helper/cookie/index.ts:43,71`）
+  - `const getCookie: GetCookie = (c, key?) => { ... return {} }` で、`GetCookie` は callable interface（`{ (c, key): Cookie; (c): Record<string, string> }`）。TypeCollector は `TypeDef::Struct` として登録するが、`resolve_fn_type_info`（`src/pipeline/type_resolver/helpers.rs:152-166`）は `TypeDef::Function` のみ対応 → `current_fn_return_type` が未設定
+  - **解決策**: `resolve_fn_type_info` で `TypeDef::Struct` を受けた場合、call signature（`methods` の `"call"` エントリ等）をチェックし、関数型情報を抽出する。または TypeCollector が callable interface を `TypeDef::Function` として登録する
+  - **影響箇所**: `src/pipeline/type_resolver/helpers.rs:152-166`, `src/registry/interfaces.rs`
+- **[I-306]** **`.map()` callback 戻り値型の伝播** — OBJECT_LITERAL_NO_TYPE の原因（1件: `helper/dev/index.ts:30`）
+  - `hono.routes.map(({ path, method }) => { return { path, method, name: ... } })` で、`.map()` の callback 内の return 文に expected type が伝播しない
+  - **原因**: `propagate_expected`（`src/pipeline/type_resolver/expected_types.rs:241-347`）が `Expr::Call` を処理しない。`.map()` の引数であるアロー関数/関数式への型伝播が欠けている
+  - **解決策**: `propagate_expected` に `Expr::Call` ブランチを追加し、`.map()` 等の高階関数の callback 引数に対して期待される関数型のパラメータ/戻り値型を伝播する。ただし汎用的な実装は複雑（任意の高階関数の callback 位置特定が必要）
+  - **影響箇所**: `src/pipeline/type_resolver/expected_types.rs:241-347`
+- **[I-307]** **TypeAlias の TsTypeRef RHS が TypeRegistry に未登録** — OBJECT_LITERAL_NO_TYPE の原因（1件: `request.ts:69`、`bodyCache: BodyCache = {}`）
+  - `type BodyCache = Partial<Body>` のような TypeAlias で、RHS が `TsTypeRef`（`Partial<Body>`）の場合、`collect_type_alias_fields`（`src/registry/collection.rs:456`）が `TsTypeLit`/`TsIntersectionType` のみマッチし、`TsTypeRef` は `None` を返す → TypeRegistry にフィールド情報が登録されない
+  - **解決策**: `collect_type_alias_fields` に `TsTypeRef` ブランチを追加。`Partial<T>` は `T` のフィールドを全て `Option` でラップした構造体として解決。汎用的には TypeAlias の RHS を `convert_ts_type` で `RustType` に変換し、その `Named` から TypeRegistry のフィールド情報を取得
+  - **影響箇所**: `src/registry/collection.rs:456`
+- **[I-308]** **`resolve_type_params_in_type` が indexed access 複合名を未解決** — OBJECT_LITERAL_NO_TYPE の原因（1件: `context.ts:315`、`env: E['Bindings'] = {}`）
+  - `E['Bindings']` → `convert_indexed_access_type` が `Named("E::Bindings")` を生成（`src/pipeline/type_converter/indexed_access.rs:55-58`）。`resolve_type_params_in_type` は名前全体 `"E::Bindings"` で `type_param_constraints` を検索するが、制約マップには `"E"` → `Named("Env")` の形で登録されている。`"E::Bindings"` はマッチしない
+  - **解決策**: `resolve_type_params_in_type` で `"X::Y"` 形式の名前を検出した場合、`"X"` 部分で制約を検索し、解決結果の型から `"Y"` フィールドを取得する。例: `"E::Bindings"` → `E` の制約 `Env` → `Env` の `Bindings` フィールド型を返す
+  - **影響箇所**: `src/pipeline/type_resolver/expected_types.rs:24-93`
+
+- **[I-311]** **型引数推論結果の引数 expected type フィードバック未実装** — 型推論精度
+  - `fn<T>(x: T, y: T)` を `f("hello", { ... })` で呼ぶ場合、1番目の引数から `T = String` を推論した後、2番目の引数の expected type を `String` に更新する仕組みがない
+  - **原因**: `set_call_arg_expected_types` は推論前に実行される。推論結果を expected type にフィードバックするには、(1) expected_types の上書き（現在は `entry().or_insert_with()` で先勝ち）、または (2) 推論結果で `set_call_arg_expected_types` を再実行する2パス設計が必要
+  - **設計方針**: `expected_types.insert` を `or_insert_with` から `insert`（上書き）に変更すると他の箇所に副作用がある。代替案: `try_infer_and_resolve_return_type` 内で推論結果を `type_param_constraints` に追加し、未解決の引数のみ再度 `propagate_arg_expected_types` を呼ぶ限定的2パス
+  - **影響箇所**: `src/pipeline/type_resolver/call_resolution.rs:119-125`
+- **[I-309]** **メソッド呼び出し（`obj.method(args)`）での型引数推論未対応** — 型推論精度
+  - C-3 で `Ident` callee（`fn(args)`, `new Class(args)`）の型引数推論は実装したが、`Member` callee（`obj.method(args)`）は `try_infer_and_resolve_return_type`（`src/pipeline/type_resolver/call_resolution.rs:365`）が `Ident` のみ処理し、`Member` は即座に `current_result` を返す
+  - **影響**: `.map()`, `.filter()`, `.reduce()` 等の高階関数で型引数が推論されない。ただし多くのメソッドはビルトイン型シグネチャで戻り値型が既に具体化されているため、影響は限定的
+  - **解決策**: `try_infer_and_resolve_return_type` に `Expr::Member` ブランチを追加。オブジェクト型から `TypeDef::Struct.methods` のメソッドシグネチャを取得し、`infer_type_args` で推論する
+  - **影響箇所**: `src/pipeline/type_resolver/call_resolution.rs:365`
+- **[I-310]** **HashMap の computed property access 変換が `as usize` でインデックスに誤変換** — コンパイルエラー
+  - `map[key]` で `map: Record<string, T>` (→ `HashMap<String, T>`) の場合、transformer が `map[key as usize]` を生成する。これは `Vec` 用のインデックスアクセス変換が誤って適用されたもの
+  - **正しい変換**: `map[&key]`（`Index` trait）または `map.get(&key).cloned()`（`Option<T>` を返す）
+  - C-3 で TypeResolver 側の型解決は完了（`resolve_member_type` が HashMap の value 型を返す）。残りは transformer 側の変換
+  - **影響箇所**: `src/transformer/expressions/member_access.rs`（computed property access の変換）
 
 #### ビルトイン型
 

@@ -21,6 +21,7 @@ fn test_propagate_expected_callback_arrow_return_object_literal() {
     reg.register(
         "process".to_string(),
         TypeDef::Function {
+            type_params: vec![],
             params: vec![(
                 "cb".to_string(),
                 RustType::Fn {
