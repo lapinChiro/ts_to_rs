@@ -271,7 +271,7 @@ fn test_convert_ts_type_indexed_access_string_key_returns_associated_type() {
 }
 
 #[test]
-fn test_convert_ts_type_indexed_access_non_string_key_returns_error() {
+fn test_convert_ts_type_indexed_access_numeric_literal_key_returns_any() {
     let decl = parse_interface("interface T { x: E[0]; }");
     let prop = match &decl.body.body[0] {
         TsTypeElement::TsPropertySignature(p) => p,
@@ -282,7 +282,9 @@ fn test_convert_ts_type_indexed_access_non_string_key_returns_error() {
         &mut SyntheticTypeRegistry::new(),
         &TypeRegistry::new(),
     );
-    assert!(result.is_err());
+    // Numeric literal key [0] on unknown type → graceful fallback to Any
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap(), RustType::Any);
 }
 
 // -- Record → HashMap --
@@ -619,8 +621,8 @@ fn test_convert_ts_type_indexed_access_string_key_with_registry_resolves_field_t
 // --- T3: indexed access non-string keys ---
 
 #[test]
-fn test_convert_ts_type_indexed_access_number_keyword_key_returns_error() {
-    // T[number] → error (non-string key not yet supported)
+fn test_convert_ts_type_indexed_access_number_keyword_key_fallback_to_any() {
+    // T[number] on unknown type → graceful fallback to Any
     let decl = parse_interface("interface T { x: E[number]; }");
     let prop = match &decl.body.body[0] {
         TsTypeElement::TsPropertySignature(p) => p,
@@ -631,12 +633,13 @@ fn test_convert_ts_type_indexed_access_number_keyword_key_returns_error() {
         &mut SyntheticTypeRegistry::new(),
         &TypeRegistry::new(),
     );
-    assert!(result.is_err());
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap(), RustType::Any);
 }
 
 #[test]
-fn test_convert_ts_type_indexed_access_type_param_key_returns_error() {
-    // E[K] where K is a type reference → error (associated type resolution not yet available)
+fn test_convert_ts_type_indexed_access_type_param_key_returns_any() {
+    // E[K] where both E and K are unknown → graceful fallback to Any
     let decl = parse_interface("interface T { x: E[K]; }");
     let prop = match &decl.body.body[0] {
         TsTypeElement::TsPropertySignature(p) => p,
@@ -647,7 +650,8 @@ fn test_convert_ts_type_indexed_access_type_param_key_returns_error() {
         &mut SyntheticTypeRegistry::new(),
         &TypeRegistry::new(),
     );
-    assert!(result.is_err());
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap(), RustType::Any);
 }
 
 #[test]
@@ -682,8 +686,8 @@ fn test_convert_ts_type_indexed_access_typeof_base_with_registered_struct() {
 }
 
 #[test]
-fn test_convert_ts_type_indexed_access_typeof_base_unregistered_returns_error() {
-    // (typeof unknown)['key'] where unknown is NOT registered → error
+fn test_convert_ts_type_indexed_access_typeof_base_unregistered_returns_any() {
+    // (typeof unknown)['key'] where unknown is NOT registered → graceful fallback to Any
     let decl = parse_interface("interface T { x: (typeof unknown)['key']; }");
     let prop = match &decl.body.body[0] {
         TsTypeElement::TsPropertySignature(p) => p,
@@ -694,7 +698,9 @@ fn test_convert_ts_type_indexed_access_typeof_base_unregistered_returns_error() 
         &mut SyntheticTypeRegistry::new(),
         &TypeRegistry::new(),
     );
-    assert!(result.is_err());
+    // typeof on unregistered name fails → obj_name fallback → Any
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap(), RustType::Any);
 }
 
 #[test]

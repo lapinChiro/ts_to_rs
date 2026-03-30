@@ -13,18 +13,62 @@ fn is_empty_type_lit(ty: &TsType) -> bool {
     matches!(ty, TsType::TsTypeLit(lit) if lit.members.is_empty())
 }
 
+/// Checks if a key remapping clause is a no-op symbol filter.
+///
+/// `K extends symbol ? never : K` removes only symbol keys, which don't exist in Rust.
+/// This is equivalent to identity (no filtering).
+fn is_symbol_filter_noop(name_type: &TsType, param_name: &str) -> bool {
+    if let TsType::TsConditionalType(cond) = name_type {
+        // check_type must be the param name (K)
+        let check_is_param = match cond.check_type.as_ref() {
+            TsType::TsTypeRef(r) => matches!(
+                &r.type_name,
+                swc_ecma_ast::TsEntityName::Ident(i) if i.sym.as_ref() == param_name
+            ),
+            _ => false,
+        };
+        // extends_type must be `symbol`
+        let extends_is_symbol = matches!(
+            cond.extends_type.as_ref(),
+            TsType::TsKeywordType(k) if k.kind == swc_ecma_ast::TsKeywordTypeKind::TsSymbolKeyword
+        );
+        // true_type must be `never`
+        let true_is_never = matches!(
+            cond.true_type.as_ref(),
+            TsType::TsKeywordType(k) if k.kind == swc_ecma_ast::TsKeywordTypeKind::TsNeverKeyword
+        );
+        // false_type must be the param name (K)
+        let false_is_param = match cond.false_type.as_ref() {
+            TsType::TsTypeRef(r) => matches!(
+                &r.type_name,
+                swc_ecma_ast::TsEntityName::Ident(i) if i.sym.as_ref() == param_name
+            ),
+            _ => false,
+        };
+        check_is_param && extends_is_symbol && true_is_never && false_is_param
+    } else {
+        false
+    }
+}
+
 /// Detects identity mapped types: `{ [K in keyof T]: T[K] }`.
 ///
 /// Returns `Some(RustType::Named { name: "T" })` if the mapped type is an identity mapping
 /// (equivalent to `T` itself). An identity mapped type satisfies all of:
-/// 1. No key remapping (`name_type` is None)
+/// 1. No key remapping, or key remapping is a no-op symbol filter
+///    (`K extends symbol ? never : K` — removes only symbol keys, which don't exist in Rust)
 /// 2. Constraint is `keyof T` (`TsTypeOperator(KeyOf, TsTypeRef(T))`)
 /// 3. Value type is `T[K]` (`TsIndexedAccessType` where obj = T, key = K)
 /// 4. No readonly/optional modifiers
-fn try_simplify_identity_mapped_type(mapped: &swc_ecma_ast::TsMappedType) -> Option<RustType> {
-    // 1. No key remapping
-    if mapped.name_type.is_some() {
-        return None;
+pub(super) fn try_simplify_identity_mapped_type(
+    mapped: &swc_ecma_ast::TsMappedType,
+) -> Option<RustType> {
+    // 1. No key remapping, OR key remapping is a no-op symbol filter
+    if let Some(name_type) = &mapped.name_type {
+        let param_name = mapped.type_param.name.sym.as_ref();
+        if !is_symbol_filter_noop(name_type, param_name) {
+            return None;
+        }
     }
 
     // 4. No modifiers
@@ -734,212 +778,4 @@ pub(super) fn convert_fn_type(
         params,
         return_type: Box::new(return_type),
     })
-}
-
-/// Converts a TS indexed access type (`T['Key']`) into a Rust type.
-///
-/// Resolution strategy:
-/// 1. Resolve the base type name (supports TypeRef, parenthesized, typeof)
-/// 2. For string literal keys: look up the actual field type in the registry if available,
-///    otherwise produce `T::Key` (associated type syntax)
-/// 3. For non-string keys or unresolvable base types: return error
-pub(super) fn convert_indexed_access_type(
-    indexed: &swc_ecma_ast::TsIndexedAccessType,
-    synthetic: &mut SyntheticTypeRegistry,
-    reg: &TypeRegistry,
-) -> Result<RustType> {
-    let obj_name = extract_indexed_access_base_name(&indexed.obj_type, synthetic, reg)
-        .ok_or_else(|| anyhow!("unsupported indexed access base type"))?;
-
-    // [number] key: extract element types from const arrays
-    if is_number_keyword_type(&indexed.index_type) {
-        return resolve_number_index(&obj_name, synthetic, reg);
-    }
-
-    // [keyof typeof X] key: extract value type union from const objects
-    if extract_keyof_typeof_name(&indexed.index_type, reg).is_some() {
-        return resolve_keyof_typeof_index(&obj_name, synthetic, reg);
-    }
-
-    // String literal key
-    let key = match indexed.index_type.as_ref() {
-        TsType::TsLitType(lit) => match &lit.lit {
-            swc_ecma_ast::TsLit::Str(s) => s.value.to_string_lossy().into_owned(),
-            _ => {
-                return Err(anyhow!(
-                    "unsupported indexed access key: only string literals are supported"
-                ))
-            }
-        },
-        _ => {
-            return Err(anyhow!(
-                "unsupported indexed access key: only string literals are supported"
-            ))
-        }
-    };
-
-    // Try registry lookup for the exact field type
-    if let Some(field_ty) = lookup_field_type(&obj_name, &key, reg) {
-        return Ok(field_ty);
-    }
-
-    Ok(RustType::Named {
-        name: format!("{obj_name}::{key}"),
-        type_args: vec![],
-    })
-}
-
-/// Checks if a type is the `number` keyword type.
-fn is_number_keyword_type(ts_type: &TsType) -> bool {
-    matches!(
-        ts_type,
-        TsType::TsKeywordType(swc_ecma_ast::TsKeywordType {
-            kind: swc_ecma_ast::TsKeywordTypeKind::TsNumberKeyword,
-            ..
-        })
-    )
-}
-
-/// Extracts the name from a `keyof typeof X` type expression.
-///
-/// Returns `Some(name)` if the type is `TsTypeOperator(KeyOf, TsTypeQuery(Ident(name)))`.
-fn extract_keyof_typeof_name(ts_type: &TsType, reg: &TypeRegistry) -> Option<String> {
-    if let TsType::TsTypeOperator(op) = ts_type {
-        if op.op == swc_ecma_ast::TsTypeOperatorOp::KeyOf {
-            if let TsType::TsTypeQuery(query) = op.type_ann.as_ref() {
-                if let swc_ecma_ast::TsTypeQueryExpr::TsEntityName(
-                    swc_ecma_ast::TsEntityName::Ident(ident),
-                ) = &query.expr_name
-                {
-                    let name = ident.sym.to_string();
-                    // Verify the name exists in registry
-                    if reg.get(&name).is_some() {
-                        return Some(name);
-                    }
-                }
-            }
-        }
-    }
-    None
-}
-
-/// Resolves `(typeof X)[number]` — extracts element type from const arrays.
-fn resolve_number_index(
-    obj_name: &str,
-    synthetic: &mut SyntheticTypeRegistry,
-    reg: &TypeRegistry,
-) -> Result<RustType> {
-    match reg.get(obj_name) {
-        Some(crate::registry::TypeDef::ConstValue { elements, .. }) if !elements.is_empty() => {
-            // Check if all elements have string values → generate string enum
-            let string_values: Vec<String> = elements
-                .iter()
-                .filter_map(|e| e.string_literal_value.clone())
-                .collect();
-            if string_values.len() == elements.len() {
-                let enum_name = synthetic.register_string_literal_enum(obj_name, &string_values);
-                return Ok(RustType::Named {
-                    name: enum_name,
-                    type_args: vec![],
-                });
-            }
-            // Non-string elements → collect unique element types
-            let mut unique_types: Vec<RustType> = Vec::new();
-            for elem in elements {
-                if !unique_types.contains(&elem.ty) {
-                    unique_types.push(elem.ty.clone());
-                }
-            }
-            if let [single] = unique_types.as_slice() {
-                return Ok(single.clone());
-            }
-            let name = synthetic.register_union(&unique_types);
-            Ok(RustType::Named {
-                name,
-                type_args: vec![],
-            })
-        }
-        _ => Err(anyhow!(
-            "unsupported indexed access: [number] key requires a const array"
-        )),
-    }
-}
-
-/// Resolves `(typeof X)[keyof typeof Y]` — extracts value type union from const objects.
-fn resolve_keyof_typeof_index(
-    obj_name: &str,
-    synthetic: &mut SyntheticTypeRegistry,
-    reg: &TypeRegistry,
-) -> Result<RustType> {
-    let typedef = reg
-        .get(obj_name)
-        .ok_or_else(|| anyhow!("unsupported indexed access: base type '{obj_name}' not found"))?;
-
-    // Check if all fields have string literal values → generate string enum
-    if let Some(string_values) = typedef.all_string_literal_field_values() {
-        let enum_name = synthetic.register_string_literal_enum(obj_name, &string_values);
-        return Ok(RustType::Named {
-            name: enum_name,
-            type_args: vec![],
-        });
-    }
-
-    // Collect unique value types
-    if let Some(value_types) = typedef.unique_field_types() {
-        if let [single] = value_types.as_slice() {
-            return Ok(single.clone());
-        }
-        let name = synthetic.register_union(&value_types);
-        return Ok(RustType::Named {
-            name,
-            type_args: vec![],
-        });
-    }
-
-    Err(anyhow!(
-        "unsupported indexed access: [keyof typeof] requires a const object type"
-    ))
-}
-
-/// Looks up a field type from the registry by struct name and field name.
-fn lookup_field_type(type_name: &str, field_name: &str, reg: &TypeRegistry) -> Option<RustType> {
-    match reg.get(type_name)? {
-        crate::registry::TypeDef::Struct { fields, .. } => fields
-            .iter()
-            .find(|(n, _)| n == field_name)
-            .map(|(_, t)| t.clone()),
-        crate::registry::TypeDef::ConstValue { fields, .. } => fields
-            .iter()
-            .find(|f| f.name == field_name)
-            .map(|f| f.ty.clone()),
-        _ => None,
-    }
-}
-
-/// Extracts the base type name from an indexed access type's object type.
-///
-/// Handles `TsTypeRef(Ident)`, `TsParenthesizedType`, and `TsTypeQuery` (typeof).
-/// Returns `None` if the base type cannot be resolved to a simple name.
-fn extract_indexed_access_base_name(
-    obj_type: &TsType,
-    synthetic: &mut SyntheticTypeRegistry,
-    reg: &TypeRegistry,
-) -> Option<String> {
-    match obj_type {
-        TsType::TsTypeRef(type_ref) => match &type_ref.type_name {
-            swc_ecma_ast::TsEntityName::Ident(ident) => Some(ident.sym.to_string()),
-            _ => None,
-        },
-        TsType::TsParenthesizedType(paren) => {
-            extract_indexed_access_base_name(&paren.type_ann, synthetic, reg)
-        }
-        TsType::TsTypeQuery(_) => {
-            let resolved = convert_ts_type(obj_type, synthetic, reg).ok()?;
-            match resolved {
-                RustType::Named { name, .. } => Some(name),
-                _ => None,
-            }
-        }
-        _ => None,
-    }
 }

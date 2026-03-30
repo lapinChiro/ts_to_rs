@@ -1,9 +1,11 @@
+mod indexed_access_mapped;
+
 use super::*;
 use crate::parser::parse_typescript;
 use crate::registry::{build_registry, TypeDef};
 
 /// Helper: parse a type annotation from a variable declaration.
-fn parse_type_annotation(source: &str) -> swc_ecma_ast::Module {
+pub(super) fn parse_type_annotation(source: &str) -> swc_ecma_ast::Module {
     parse_typescript(source).unwrap()
 }
 
@@ -307,7 +309,7 @@ fn test_indexed_access_string_key_const_object() {
 /// Extracts a `TsTypeAliasDecl` from the module body at `index`.
 ///
 /// Panics if the item at `index` is not a type alias declaration.
-fn extract_type_alias(
+pub(super) fn extract_type_alias(
     module: &swc_ecma_ast::Module,
     index: usize,
 ) -> &swc_ecma_ast::TsTypeAliasDecl {

@@ -1,49 +1,49 @@
 # ts_to_rs 開発計画
 
-## 現在のベースライン（2026-03-29 B-fix完了後）
+## 現在のベースライン（2026-03-30 B-2完了後）
 
 | 指標 | 値 |
 |------|-----|
-| Hono クリーン | 106/158 (67.1%) |
-| エラーインスタンス | 79 |
-| コンパイル(file) | 105/158 (66.5%) |
+| Hono クリーン | 108/158 (68.4%) |
+| エラーインスタンス | 66 |
+| コンパイル(file) | 107/158 (67.7%) |
 | コンパイル(dir) | 156/158 (98.7%) |
-| テスト数 | 1378 |
+| テスト数 | 1400 |
 | コンパイルテストスキップ | 11 件（builtins なし） / 10 件（builtins あり） |
 
-### エラーカテゴリ内訳（79 件）
+### エラーカテゴリ内訳（66 件）
 
 | カテゴリ | 件数 | 関連イシュー |
 |----------|------|-------------|
 | OBJECT_LITERAL_NO_TYPE | 36 | 複数（詳細: report/object-literal-no-type-investigation-2026-03-28.md） |
-| TYPE_ALIAS_UNSUPPORTED | 10 | mapped(5)→I-200, indexed(3)→I-284/I-285, conditional(2)→I-200 |
 | OTHER | 8 | parseInt(2), delete(2), class expr(1), update target(1), rest type(1), array destr(1) |
 | QUALIFIED_TYPE | 3 | I-36 |
 | FN_TYPE_PARAM | 3 | I-259 |
-| INDEXED_ACCESS | 3 | I-285 |
-| その他 | 16 | ASSIGN_TARGET(3), MEMBER_PROPERTY(3), OBJ_KEY(2), INTERFACE_MEMBER(2), 各1件×6 |
+| MEMBER_PROPERTY | 3 | |
+| ASSIGN_TARGET | 3 | |
+| その他 | 10 | OBJ_KEY(2), INTERFACE_MEMBER(2), 各1件×6 |
 
 ## 次の開発
 
 ### Phase B: 型変換範囲の拡張
 
-#### B-2: I-285 — 型パラメータキー indexed access（次のタスク — PRD未作成）
+#### B-2: I-285 + I-200 バッチ — indexed access + mapped type 改善 ✅
 
-- `T[K]` where `K extends keyof T` の変換戦略
-- I-200 の前提条件
-- **削減: -3 エラー**
+- `T[K]` 型パラメータキー対応（generics erasure）
+- `[number]` on non-const の graceful fallback
+- ネスト indexed access の再帰解決
+- identity mapped type 検出拡張（symbol filter no-op 対応）
+- standalone mapped type での identity 簡約
+- **実績: -13 エラー（TYPE_ALIAS_UNSUPPORTED 10→0, INDEXED_ACCESS 3→0）**
 
-#### B-4: I-284 — typeof qualified name（B-2 と独立、並行可能）
+#### B-4: I-284 — typeof qualified name（延期）
 
-- `typeof A.B.C` の再帰的解決 + グローバル変数登録
-- **削減: -2 エラー**
+- 2 インスタンスとも複合パターン（typeof qualified + indexed access + utility type）
+- typeof qualified 解決だけでは 0 エラー削減
+- Phase B の indexed access 改善で graceful fallback 済み（エラーなしの Any 出力）
+- **Phase C 以降で再評価**
 
-#### B-3: I-200 — マップ型（B-2 完了後）
-
-- 🔗 I-285 が前提。identity mapped type 簡約は I-221 で完了済み
-- **削減: -8 エラー**
-
-#### Phase B 合計: **79 → ~66（-13 エラー見込み）**
+#### Phase B 合計: **79 → 66（-13 エラー）** ✅
 
 ---
 
@@ -69,7 +69,7 @@ Phase B 完了後。
 | Phase B-1 (I-221) | -8 | ✅ 87→79 |
 | Phase B-fix | 0（正確性保証） | ✅ |
 | I-297 | 0（正確性修正） | ✅ サイレント意味変更解消 |
-| Phase B-2〜B-4 | -13 | 79→~66 |
+| Phase B-2 (I-285+I-200) | -13 | ✅ 79→66 |
 | Phase C | ~-17 | ~66→~49 |
 
 ---

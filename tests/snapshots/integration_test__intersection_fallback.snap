@@ -10,8 +10,7 @@ pub struct _TypeLit0 {
 #[derive(Debug, Clone, PartialEq)]
 struct WithMapped<T> {
     x: String,
-    _1: serde_json::Value,
-    _phantom_t: std::marker::PhantomData<T>,
+    _1: T,
 }
 
 #[derive(Debug, Clone, PartialEq)]

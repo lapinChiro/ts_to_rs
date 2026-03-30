@@ -4,6 +4,7 @@
 //! annotations into the IR representation. Synthetic types (union enums,
 //! inline structs) are registered in [`SyntheticTypeRegistry`].
 
+mod indexed_access;
 mod interfaces;
 mod intersections;
 mod type_aliases;
@@ -19,10 +20,11 @@ pub use utilities::extract_type_params;
 
 // Import all pub(super) items from submodules into this module's namespace.
 // Submodules use `use super::*;` to access these.
+use indexed_access::convert_indexed_access_type;
 use interfaces::convert_method_signature;
 use intersections::{
-    convert_fn_type, convert_indexed_access_type, convert_intersection_in_annotation,
-    convert_type_lit_in_annotation, try_convert_intersection_type,
+    convert_fn_type, convert_intersection_in_annotation, convert_type_lit_in_annotation,
+    try_convert_intersection_type, try_simplify_identity_mapped_type,
 };
 use type_aliases::convert_conditional_type;
 use unions::{
@@ -157,6 +159,10 @@ pub fn convert_ts_type(
         },
         TsType::TsConditionalType(cond) => convert_conditional_type(cond, synthetic, reg),
         TsType::TsMappedType(mapped) => {
+            // Try identity simplification: { [K in keyof T]: T[K] } → T
+            if let Some(simplified) = try_simplify_identity_mapped_type(mapped) {
+                return Ok(simplified);
+            }
             // Fallback: treat mapped types as HashMap<String, V>
             let value_type = mapped
                 .type_ann

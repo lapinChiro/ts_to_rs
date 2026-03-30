@@ -30,8 +30,8 @@
 - **保留** — 正当な保留理由あり（前提タスク未完了、またはユーザーの設計方針決定が必要）
 - **スコープ外** — 明示的に対象外。需要発生時に再評価
 
-件数は Hono ベンチマーク（`./scripts/hono-bench.sh`）の実測値に基づく（最終実行: 2026-03-29 B-1完了後）。
-158 ファイル中 106 ファイルがクリーン（67.1%）、79 エラーインスタンス。コンパイルクリーン: ファイル単位 105（66.5%）、ディレクトリ単位 156（98.7%）。
+件数は Hono ベンチマーク（`./scripts/hono-bench.sh`）の実測値に基づく（最終実行: 2026-03-30 B-2完了後）。
+158 ファイル中 108 ファイルがクリーン（68.4%）、66 エラーインスタンス。コンパイルクリーン: ファイル単位 107（67.7%）、ディレクトリ単位 156（98.7%）。
 **注意**: ベンチマーク実行前に `cargo build --release` が必要。古いビルドで実行すると数値が不正確になる。
 **補足**: 「クリーン」は変換エラーなし（`--report-unsupported` でエラー 0）を意味する。コンパイルクリーンは2指標: ファイル単位（use 除去後の個別コンパイル）とディレクトリ単位（全ファイルを1クレートとしてコンパイル）。
 
@@ -47,6 +47,7 @@
 - **B-1 (I-221)**: intersection メンバー型の網羅的サポート — 8件削減（87→79）。空 TsTypeLit 除去 + TsParenthesized アンラップ + identity mapped type 簡約 + convert_ts_type 汎用フォールバック + union 分配法則（`A & (B | C)` → enum）+ generator struct variant 対応
 - **B-fix (I-216+I-275+I-295+I-294)**: 正確性・品質基盤修正。switch default アーム末尾移動（サイレント意味変更解消）+ multiple spread フィールド上書き順序修正（first/later 逆転）+ discriminant 一意性検証 + コンパイルテスト use 自動生成（スキップ1件削減）
 - **I-297**: spread/フィールド位置順序のサイレント意味変更修正。`convert_object_lit` を PropEvent イベント列方式に再設計し rightmost-wins セマンティクスを実現
+- **B-2 (I-285+I-200)**: indexed access + mapped type 改善 — 13件削減（79→66）。型パラメータキー対応（generics erasure）+ `[number]` non-const fallback + ネスト indexed access 再帰解決 + identity mapped type 拡張（symbol filter no-op）+ standalone identity 簡約。TYPE_ALIAS_UNSUPPORTED 10→0、INDEXED_ACCESS 3→0
 
 ---
 
@@ -54,7 +55,7 @@
 
 | フェーズ | 移行基準 | 対象 |
 |---------|---------|------|
-| **現在: 変換率の大幅改善** | 全エラーインスタンス < 65 件 | 全 79 件。内訳: OBJECT_LITERAL_NO_TYPE 36 件、TYPE_ALIAS_UNSUPPORTED 10 件、OTHER 8 件、QUALIFIED_TYPE 3 件、FN_TYPE_PARAM 3 件、INDEXED_ACCESS 3 件、その他 16 件。B-1(I-221) で INTERSECTION_TYPE 9→0、全体 87→79 |
+| **現在: 変換率の大幅改善** | 全エラーインスタンス < 65 件 | 全 66 件。内訳: OBJECT_LITERAL_NO_TYPE 36 件、OTHER 8 件、QUALIFIED_TYPE 3 件、FN_TYPE_PARAM 3 件、MEMBER_PROPERTY 3 件、ASSIGN_TARGET 3 件、その他 10 件。B-2(I-285+I-200) で TYPE_ALIAS_UNSUPPORTED 10→0、INDEXED_ACCESS 3→0、全体 79→66 |
 | **次: コンパイル品質** | ディレクトリコンパイルエラー 0 件 | 残 2 ファイル不合格（5 エラーインスタンス）。I-273（trait/struct 混同）が主因 |
 | **その次: テスト拡充** | E2E テスト網羅性 | E2E テストの拡充（I-20, I-71, I-72, I-74）、HTTP 対応（I-183） |
 
@@ -135,27 +136,21 @@
 
 #### 型変換・型推論（基盤→依存の順）
 
-- **[I-284]** **typeof qualified name（`typeof A.B.C`）の解決** — **2 インスタンス**（TYPE_ALIAS_UNSUPPORTED Discriminant(15) として報告）: `client/types.ts:28`（`typeof Hono.prototype`→`['request']`）、`utils/jwt/jws.ts:13`（`Parameters<typeof crypto.subtle.importKey>[2]`）
-  - SWC は `typeof A.B` を `TsTypeQuery { expr_name: TsEntityName::Qualified(...) }` として表現する。現在の `TsTypeQuery` ハンドラ（`src/pipeline/type_converter/mod.rs:187-191`）は `TsEntityName::Ident` のみ処理し、`Qualified` は "unsupported typeof expression" エラーを返す
-  - **必要な対応**: qualified name のドットパスを再帰的に解決する。`A.B` → レジストリから `A` を引き、`TypeDef::Struct` のフィールド `B` の型を返す。`Hono.prototype` の場合は `Hono` の（インスタンス）型を返す。`crypto.subtle.importKey` の場合は `crypto` → `SubtleCrypto` → `importKey` メソッドのシグネチャを返す
-  - 外部型レジストリにグローバル変数（`crypto: Crypto`）の登録が必要。現在のビルトイン JSON は型定義のみで、グローバル変数は未登録
-  - **注意**: これらは型エイリアス本体が TsIndexedAccessType であり、typeof qualified の解決 + indexed access の連鎖が必要。I-284 単独では解決しない可能性あり（indexed access のキーが数値リテラル `[2]` や文字列プロパティ `['request']` の場合は解決可能）
-- **[I-285]** **型パラメータキー indexed access（`T[K]`）の正確な型解決** — **3 インスタンス**: `context.ts:95,105`（`E['Variables'][Key]` where `Key extends keyof E['Variables']`）、`types.ts:1457`（`OnHandlerInterface` 内の型パラメータキー）
-  - TypeScript の `T[K]` where `K extends keyof T` は、Rust では associated type `<T as HasKey<K>>::Value` に対応する。しかし Rust のジェネリクスシステムではキー名が型レベルの値でないため、直接的な表現は不可能
-  - **変換戦略の候補**:
-    (a) **ジェネリクス消去**: `T[K]` を `T` のフィールド型の union に展開する（K の制約 `keyof T` から T の全フィールド型を取得）。精度は低いが多くのケースで実用的
-    (b) **associated type + trait**: `trait HasKey<K> { type Value; }` を生成し、`<T as HasKey<K>>::Value` を返す。型レベルの正確性は高いが、Rust 側で trait impl の自動生成が必要
-    (c) **型パラメータ伝播**: `T[K]` が関数の戻り値型の場合、呼び出し側で具体化される。呼び出し側で文字列リテラルが渡されるなら、その時点でフィールド型を解決する（TypeResolver レベルの解決）
-  - 解決策 (a) が最もシンプルだが、(c) が最も正確。PRD 作成時に実パターンを分析して判断する
-- **[I-200]** **マップ型 (`{ [K in keyof T]: V }`)** — **5+1+2 = 8 インスタンス**
-  - **Discriminant(16) = TsMappedType（5件）**: 型エイリアス本体が直接 TsMappedType
-    - `client/types.ts:352,371`（ネスト mapped type + indexed access）, `types.ts:2273`（key remapping `as MergePath<...>`）, `types.ts:2451`（ネスト mapped type）, `utils/types.ts:37`（条件付きキーフィルタ `K extends symbol ? never : K`）
-  - **Discriminant(15) = TsIndexedAccessType（1件）**: mapped type を indexed access で包む複合パターン
-    - `client/types.ts:338`（`type ToEndpoints<Def, R> = { [S in keyof Def & StatusCode]: ... }[keyof Def & StatusCode]`）— 外側が `{mapped}[keyof Def & StatusCode]` で TsIndexedAccessType、内側が TsMappedType。mapped type の解決 + indexed access（keyof 式キー）の両方が必要
-  - **Discriminant(3) 波及（2件）**: mapped type を含む conditional type
-    - `utils/types.ts:100`（Exclude + nested mapped）、`validator/utils.ts:25`（SimplifyDeep + nested conditional）
-  - **必要な対応**: (1) identity mapped type 簡約は I-221 で完了済み（`& {}` パターン + `try_simplify_identity_mapped_type`）、(2) `as` clause のキーフィルタ（`K extends symbol ? never : K` は Rust では no-op）、(3) ネスト mapped type は I-285（`T[K]`）の解決が前提、(4) `client/types.ts:338` は mapped type 解決後に indexed access（keyof 式キー）の追加対応が必要
-  - 🔗 前提: I-281（完了済み）、I-221（identity mapped type 完了済み）、I-285 の解決後に実装
+- **[I-284]** **typeof qualified name（`typeof A.B.C`）の解決** — **0 エラー削減**（延期）
+  - 2 インスタンスとも複合パターン（typeof qualified + indexed access + utility type）で、typeof qualified 解決だけでは 0 エラー削減
+  - B-2 の indexed access 改善で graceful fallback 済み（エラーなしの Any 出力）。TYPE_ALIAS_UNSUPPORTED としては報告されなくなった
+  - `client/types.ts:28`（`typeof Hono.prototype`→`['request']`）、`utils/jwt/jws.ts:13`（`Parameters<typeof crypto.subtle.importKey>[2]`）
+  - グローバル変数登録（`crypto: Crypto`）やメソッドシグネチャ解決が前提。高コスト・低 ROI
+- **[I-299]** **`convert_ts_type` に型パラメータコンテキストを導入** — 型解決精度の基盤改善
+  - **現状**: `convert_ts_type(ts_type, synthetic, reg)` は型パラメータ情報を持たない。`T[K]` where `K extends keyof T` の解決時、K の制約を参照できず generics erasure（全フィールド型の union）で over-approximation する。`src/pipeline/type_converter/indexed_access.rs:94` の `resolve_type_param_indexed_access` が該当
+  - **over-approximation の意味論的安全性**: wider type（union）はコンパイルエラーで検出されるため、サイレント意味変更にはならない（Tier 2）。ただし、不要な enum variant のラッピング/アンラッピングが必要になり、ユーザー修正コストが発生する
+  - **理想的な解決策**: `convert_ts_type` のシグネチャに `type_params: &[TypeParam]` を追加し、型パラメータの制約情報を全ネスト呼び出しに伝播する。これにより `T[K]` の解決時に K の制約 `keyof T` を参照し、呼び出し側で K が具体化された時点で正確なフィールド型を返せる
+  - **影響範囲**: `convert_ts_type` の全呼び出し箇所（`src/pipeline/type_converter/` 内の全サブモジュール + `src/transformer/` 内の全呼び出し元）。シグネチャ変更の blast radius が大きいため、独立したリファクタリング PRD として実施すべき
+  - **具体的な over-approximation パターン**:
+    (1) `User[K]` where User = `{name: string, age: number}` → `StringOrF64`（正確には K の具体値に依存して `String` or `F64`）— `src/pipeline/type_converter/indexed_access.rs:70-73`
+    (2) `E['Variables'][Key]` → nested resolution でフィールド型 union（正確には Key の具体値に依存）— `src/pipeline/type_converter/indexed_access.rs:19-25`
+    (3) `T[number]` where T is generic → `Any`（正確には T の制約から要素型を推論可能）— `src/pipeline/type_converter/indexed_access.rs:30`
+  - 🔗 I-286c（型推論高度化）の前提基盤。I-286c で呼び出し側型引数推論を実装する際、型パラメータコンテキストが不可欠
 - **[I-101]** **ジェネリック型を含む intersection** — 型変換
   - `interface A<T> extends B<T>, C<T>` のようなジェネリック intersection が未対応
   - I-218（ジェネリクス基盤）完了済み。`try_convert_intersection_type` と統合すればよい

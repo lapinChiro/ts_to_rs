@@ -98,6 +98,20 @@ If no issues, explicitly state "Verified, no issues."
 
 List of affected files/modules.
 
+### Semantic Safety Analysis
+
+**Required when the PRD introduces type fallbacks, type approximation, or changes type resolution behavior.** Follow the procedure in `.claude/rules/type-fallback-safety.md`:
+
+1. **List all type fallback patterns** introduced by this PRD (e.g., `T[K]` → union of all field types, unresolvable type → `Any`)
+2. **For each pattern, classify usage sites**:
+   - Function return types: Does the fallback type cause compile errors or silent behavior changes?
+   - Field types: Could `serde_json::Value` satisfy type constraints where a concrete type was expected?
+   - Variable types: Could assignments or comparisons silently succeed with wrong types?
+3. **Verdict per pattern**: Safe (compile error or identical behavior) / UNSAFE (silent semantic change)
+4. **If any UNSAFE pattern exists**: Redesign to eliminate it before proceeding
+
+If the PRD does not change type resolution, state "Not applicable — no type fallback changes."
+
 ## Task List
 
 Analyze implementation in detail. Describe each task in the following format. Assumes TDD: RED → GREEN → REFACTOR order.
@@ -149,6 +163,7 @@ Conditions for this PRD's work to be considered "complete". Include quality chec
 - Using ad-hoc solutions (specific-case if branches, etc.) to avoid ideal design
 - Declaring something out of scope because "Rust has no directly corresponding syntax" or "cannot be expressed in Rust" — this is a design challenge, not proof of conversion impossibility. If no method is found, interview the user
 - Omitting the design integrity review (even if no issues, state "verified")
+- Omitting the semantic safety analysis when the PRD changes type resolution or introduces type fallbacks (see `.claude/rules/type-fallback-safety.md`)
 - Writing vague task work descriptions, completion criteria, or dependencies (specifically name target files, functions, and types)
 - Estimating error count reduction based solely on error category labels without tracing actual code paths for representative instances (at least 3). The estimate must be grounded in confirmed execution path analysis, not hypothetical pattern matching
 - Starting implementation without classifying ALL error instances in the target category by root cause. When fixing N errors in a category, first classify every instance into sub-categories by root cause (e.g., "9 from merge bug, 9 from missing return type, 9 from fallback pattern"), then address root causes in priority order. Lesson: I-267 was initially scoped as "return statement ~10 instances" based on label estimation, but individual source-level tracing revealed the dominant root cause was a TypeRegistry merge bug (9 instances), not return statement propagation
