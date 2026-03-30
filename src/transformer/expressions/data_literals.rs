@@ -134,12 +134,13 @@ impl<'a> Transformer<'a> {
 
     /// Converts an SWC object literal to an IR `Expr::StructInit`.
     ///
+    /// Follows TypeScript's rightmost-wins semantics: in `{ x: 1, ...a, y: 2 }`, the spread
+    /// overrides `x` (because it appears after `x`), but `y: 2` overrides the spread's `y`
+    /// (because the explicit field appears after the spread).
+    ///
     /// Requires an expected type (`RustType::Named`) from the enclosing context (e.g., a variable
     /// declaration's type annotation). Without a named type, returns an error because Rust requires
     /// a named struct.
-    ///
-    /// `{ x: 1, y: 2 }` with expected `RustType::Named { name: "Point" }` →
-    /// `Expr::StructInit { name: "Point", fields: [...] }`
     pub(crate) fn convert_object_lit(
         &mut self,
         obj_lit: &ast::ObjectLit,
@@ -193,9 +194,13 @@ impl<'a> Transformer<'a> {
                 })
             });
 
-        let mut fields = Vec::new();
-        let mut spreads: Vec<Expr> = Vec::new();
+        // Build position-ordered event list preserving AST source order
+        enum PropEvent {
+            Explicit { key: String, value: Expr },
+            Spread { expr: Expr },
+        }
 
+        let mut events = Vec::new();
         for prop in &obj_lit.props {
             match prop {
                 ast::PropOrSpread::Prop(prop) => match prop.as_ref() {
@@ -206,12 +211,12 @@ impl<'a> Transformer<'a> {
                             _ => return Err(anyhow!("unsupported object literal key")),
                         };
                         let value = self.convert_expr(&kv.value)?;
-                        fields.push((key, value));
+                        events.push(PropEvent::Explicit { key, value });
                     }
                     ast::Prop::Shorthand(ident) => {
                         let key = ident.sym.to_string();
                         let value = self.convert_expr(&ast::Expr::Ident(ident.clone()))?;
-                        fields.push((key, value));
+                        events.push(PropEvent::Explicit { key, value });
                     }
                     _ => {
                         return Err(anyhow!(
@@ -220,70 +225,43 @@ impl<'a> Transformer<'a> {
                     }
                 },
                 ast::PropOrSpread::Spread(spread_elem) => {
-                    // Cat A: spread source — type is the struct itself
                     let spread_expr = self.convert_expr(&spread_elem.expr)?;
-                    spreads.push(spread_expr);
+                    events.push(PropEvent::Spread { expr: spread_expr });
                 }
             }
         }
 
-        // Resolve spreads into field expansion + optional struct update base
-        let struct_update_base = if spreads.is_empty() {
-            None
-        } else if spreads.len() == 1 && struct_fields.is_some() {
-            // Single spread + TypeRegistry registered → expand fields (preserves type propagation)
-            let base_expr = &spreads[0];
-            let all_fields = struct_fields.as_ref().unwrap();
-            let explicit_keys: Vec<String> = fields.iter().map(|(k, _)| k.clone()).collect();
+        let has_spread = events.iter().any(|e| matches!(e, PropEvent::Spread { .. }));
+
+        if let Some(all_fields) = &struct_fields {
+            // Registered type: resolve each field using rightmost-wins scan
+            let mut fields = Vec::new();
             for (field_name, _) in all_fields {
-                if !explicit_keys.iter().any(|k| k == field_name) {
-                    fields.push((
-                        field_name.clone(),
-                        Expr::FieldAccess {
-                            object: Box::new(base_expr.clone()),
-                            field: field_name.clone(),
-                        },
-                    ));
-                }
-            }
-            None
-        } else if spreads.len() == 1 {
-            // Single spread + TypeRegistry unregistered → struct update syntax
-            Some(Box::new(spreads.into_iter().next().unwrap()))
-        } else {
-            // Multiple spreads: first becomes base (lowest priority in TS), later spreads
-            // are expanded right-to-left so the rightmost spread has highest priority.
-            // This matches TS semantics: { ...a, ...b, ...c } → c > b > a.
-            let (first, later) = spreads.split_at(1);
-            if let Some(all_fields) = &struct_fields {
-                let explicit_keys: Vec<String> = fields.iter().map(|(k, _)| k.clone()).collect();
-                for spread_expr in later.iter().rev() {
-                    for (field_name, _) in all_fields {
-                        if !explicit_keys.iter().any(|k| k == field_name)
-                            && !fields.iter().any(|(k, _)| k == field_name)
-                        {
-                            fields.push((
-                                field_name.clone(),
-                                Expr::FieldAccess {
-                                    object: Box::new(spread_expr.clone()),
-                                    field: field_name.clone(),
-                                },
-                            ));
+                // Scan events right-to-left; first match wins (rightmost in source)
+                let mut resolved = None;
+                for event in events.iter().rev() {
+                    match event {
+                        PropEvent::Explicit { key, value } if key == field_name => {
+                            resolved = Some(value.clone());
+                            break;
                         }
+                        PropEvent::Spread { expr } => {
+                            resolved = Some(Expr::FieldAccess {
+                                object: Box::new(expr.clone()),
+                                field: field_name.clone(),
+                            });
+                            break;
+                        }
+                        _ => {}
                     }
                 }
-            } else {
-                return Err(anyhow!(
-                    "multiple spreads with unregistered type '{}' — TypeRegistry required for field expansion",
-                    struct_name
-                ));
+                if let Some(value) = resolved {
+                    fields.push((field_name.clone(), value));
+                }
             }
-            Some(Box::new(first[0].clone()))
-        };
 
-        // Auto-fill omitted Option<T> fields with None (when no struct update base)
-        if struct_update_base.is_none() {
-            if let Some(all_fields) = &struct_fields {
+            // Auto-fill omitted Option<T> fields with None (only when no spread present)
+            if !has_spread {
                 let explicit_keys: std::collections::HashSet<String> =
                     fields.iter().map(|(k, _)| k.clone()).collect();
                 for (field_name, field_ty) in all_fields {
@@ -294,13 +272,70 @@ impl<'a> Transformer<'a> {
                     }
                 }
             }
-        }
 
-        Ok(Expr::StructInit {
-            name: struct_name.to_string(),
-            fields,
-            base: struct_update_base,
-        })
+            Ok(Expr::StructInit {
+                name: struct_name.to_string(),
+                fields,
+                base: None,
+            })
+        } else {
+            // Unregistered type: use struct update syntax
+            let spread_count = events
+                .iter()
+                .filter(|e| matches!(e, PropEvent::Spread { .. }))
+                .count();
+
+            if spread_count > 1 {
+                return Err(anyhow!(
+                    "multiple spreads with unregistered type '{}' — TypeRegistry required for field expansion",
+                    struct_name
+                ));
+            }
+
+            if spread_count == 0 {
+                // No spreads — collect all explicit fields
+                let fields: Vec<(String, Expr)> = events
+                    .into_iter()
+                    .filter_map(|e| match e {
+                        PropEvent::Explicit { key, value } => Some((key, value)),
+                        PropEvent::Spread { .. } => None,
+                    })
+                    .collect();
+                return Ok(Expr::StructInit {
+                    name: struct_name.to_string(),
+                    fields,
+                    base: None,
+                });
+            }
+
+            // Single spread: only explicit fields AFTER the spread are kept;
+            // fields before the spread are overridden by it.
+            let spread_idx = events
+                .iter()
+                .position(|e| matches!(e, PropEvent::Spread { .. }))
+                .unwrap();
+
+            let spread_expr = match events.remove(spread_idx) {
+                PropEvent::Spread { expr } => expr,
+                _ => unreachable!(),
+            };
+
+            // Only fields after the spread position (accounting for the removal)
+            let fields: Vec<(String, Expr)> = events
+                .into_iter()
+                .skip(spread_idx)
+                .filter_map(|e| match e {
+                    PropEvent::Explicit { key, value } => Some((key, value)),
+                    PropEvent::Spread { .. } => None,
+                })
+                .collect();
+
+            Ok(Expr::StructInit {
+                name: struct_name.to_string(),
+                fields,
+                base: Some(Box::new(spread_expr)),
+            })
+        }
     }
 
     /// Converts an SWC array literal to an IR `Expr::Vec` or `Expr::VecSpread`.

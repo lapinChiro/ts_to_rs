@@ -24,7 +24,7 @@ fn clonePoint(p: Point) -> Point {
 }
 
 fn spreadAtEnd(p: Point) -> Point {
-    let mut p2: Point = Point { x: 42.0, y: p.y };
+    let mut p2: Point = Point { x: p.x, y: p.y };
     p2
 }
 
@@ -36,6 +36,6 @@ struct Config {
 }
 
 fn spreadInMiddle(cfg: Config) -> Config {
-    let mut c2: Config = Config { a: 1.0, c: 3.0, b: cfg.b };
+    let mut c2: Config = Config { a: cfg.a, b: cfg.b, c: 3.0 };
     c2
 }

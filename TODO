@@ -46,6 +46,7 @@
 - **B-0b (I-290+I-292)**: メソッド呼び出しロジック統一。`select_overload` と `lookup_method_sigs` を TypeRegistry に移動し TypeResolver/Transformer で共有。Pattern trait メソッドの `.to_string()` 抑制（PATTERN_ARG_METHODS + REGEX_PATTERN_ARG_METHODS）。TypeResolver の引数解決順序修正（Stage 4 有効化）。`string-methods` builtins ありコンパイルテスト PASS
 - **B-1 (I-221)**: intersection メンバー型の網羅的サポート — 8件削減（87→79）。空 TsTypeLit 除去 + TsParenthesized アンラップ + identity mapped type 簡約 + convert_ts_type 汎用フォールバック + union 分配法則（`A & (B | C)` → enum）+ generator struct variant 対応
 - **B-fix (I-216+I-275+I-295+I-294)**: 正確性・品質基盤修正。switch default アーム末尾移動（サイレント意味変更解消）+ multiple spread フィールド上書き順序修正（first/later 逆転）+ discriminant 一意性検証 + コンパイルテスト use 自動生成（スキップ1件削減）
+- **I-297**: spread/フィールド位置順序のサイレント意味変更修正。`convert_object_lit` を PropEvent イベント列方式に再設計し rightmost-wins セマンティクスを実現
 
 ---
 
@@ -83,26 +84,6 @@
   - リファクタリング・機能追加時の「この関数は外部から使われているか」調査コストを削減
 
 ### Tier 1: 高優先度 — 正確性・伝播リスク・レバレッジ
-
-#### 変換正確性（サイレント意味変更）
-
-- **[I-297]** **spread とフィールドの位置順序が無視される** — サイレント意味変更
-  - **問題**: `{ x: 1, ...a }` と `{ ...a, x: 1 }` が同じ変換結果になる。TypeScript では前者は `a.x` が `x: 1` を上書きするが、後者は `x: 1` が `a.x` を上書きする。現在の実装は常に明示フィールドが最高優先
-  - **根本原因**: `src/transformer/expressions/data_literals.rs:196-228` のオブジェクトリテラル処理ループで、`Prop`（明示フィールド）と `Spread` を別々のベクタ（`fields` と `spreads`）に分離して収集している。この時点で**ソースコード上の位置順序が失われる**
-    - line 209: `fields.push((key, value));` — 明示フィールドは `fields` に追加
-    - line 225: `spreads.push(spread_expr);` — スプレッドは `spreads` に追加
-    - 分離後の処理（line 231-280）で `explicit_keys`（明示フィールド名）は常にスプレッドからの展開を阻止する（line 239, 262）
-  - **影響パターン**: `{ x: expr, ...spread_source }` — 明示フィールドがスプレッドより**前**にある場合。TypeScript ではスプレッドが後のフィールドを上書きするが、Rust コードでは明示フィールドの値が残る
-    - `{ x: 1, ...a }` → TS: `a.x`、Rust: `1`（**不一致**）
-    - `{ ...a, x: 1 }` → TS: `1`、Rust: `1`（一致 — このパターンは偶然正しい）
-  - **非影響パターン**: `{ ...a, x: 1 }` や `{ ...a, ...b }` は B-fix で修正済み
-  - **発生頻度**: `{ x: expr, ...spread }` パターンは TypeScript で比較的稀。多くの場合はスプレッドが先で明示フィールドが後（`{ ...defaults, x: override }`）。ただし発生時はサイレントに不正な値を持つ
-  - **解決策**: `fields` と `spreads` を分離する設計を廃止し、ソースコード上の順序を保持する統合的なアプローチが必要
-    - (a) **位置順序付きイベント列方式**: `enum PropOrSpread { Prop(key, value), Spread(expr) }` のイベント列を保持し、最後からフィールドを構築（後のイベントが優先）。最後のスプレッドを struct update base に、それ以外はフィールドアクセスに展開
-    - (b) **全フィールド展開方式**: struct update syntax を使わず、全フィールドを明示的に列挙。各フィールドの値を「最後にそのフィールドを提供するソース（明示 or スプレッド）」から決定。TypeRegistry から全フィールド名を取得し、ソースコード順序の逆順で最初に見つかったソースを使用
-  - **推奨**: (a) が最もシンプル。イベント列を構築し、右から左にスキャンして各フィールドの最終ソースを決定。struct update base は最右のスプレッド
-  - **影響範囲**: `src/transformer/expressions/data_literals.rs` の `convert_object_lit` 関数全体（line 140-300 付近）。single spread パス（line 233-249）と multiple spread パス（line 253-280）の両方を統合的に再設計する必要がある
-  - E2E テスト `object_spread.ts` に `{ x: 1, ...a }` パターンのテストケースを追加して不一致を検証可能
 
 #### 型変換・型推論
 
@@ -269,6 +250,11 @@
 
 #### セマンティクス・解析精度
 
+- **[I-298]** **spread に上書きされる副作用式の評価消失** — サイレント意味変更（Tier 1、ただし発生頻度は極めて低い）
+  - `{ x: sideEffectFunc(), ...base }` で rightmost-wins により `base.x` が採用されるが、`sideEffectFunc()` の呼び出し自体が生成コードから消失する。TypeScript では `sideEffectFunc()` は実行される（副作用が発生した後に `base.x` で上書き）
+  - I-297 修正に伴い発見。旧コードは値が間違っていた（`sideEffectFunc()` の戻り値を使用 — Tier 1 バグ）が、副作用は偶然保持されていた
+  - 解決策: イベント列構築後、rightmost-wins で上書きされる Explicit イベントのうち副作用を持つ式（`Expr::FnCall` 等）を `let _ = expr;` として先行出力する。`Expr` に副作用判定メソッド（`has_side_effects`）の追加が必要
+  - 影響: object literal 以外でも式の評価順序保持は未実装の一般的課題（条件式の未使用ブランチ、短絡評価等）。需要発生時に横断的に対応
 - **[I-188]** **`substring`/`slice` のバイト境界安全性** — 文字列変換。TS は UTF-16 コードユニット、Rust はバイト。マルチバイト文字でパニック
 - **[I-93]** **ネストしたフィールド/メソッド経由の変更検出** — ミュータビリティ推論
 - **[I-62]** **`is_string_type` の `Option<String>` ハック除去** — 型推論

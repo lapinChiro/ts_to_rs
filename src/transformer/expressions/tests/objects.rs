@@ -93,7 +93,8 @@ fn test_convert_expr_object_literal_without_type_hint_errors() {
 
 #[test]
 fn test_convert_expr_object_spread_last_position_expands_remaining_fields() {
-    // { x: 10, ...rest } → Point { x: 10.0, y: rest.y }
+    // { x: 10, ...rest } → Point { x: rest.x, y: rest.y }
+    // rightmost-wins: spread is after x, so spread overrides x
     use crate::registry::TypeDef;
     let mut reg = TypeRegistry::new();
     reg.register(
@@ -118,7 +119,13 @@ fn test_convert_expr_object_spread_last_position_expands_remaining_fields() {
         Expr::StructInit {
             name: "Point".to_string(),
             fields: vec![
-                ("x".to_string(), Expr::NumberLit(10.0)),
+                (
+                    "x".to_string(),
+                    Expr::FieldAccess {
+                        object: Box::new(Expr::Ident("rest".to_string())),
+                        field: "x".to_string(),
+                    }
+                ),
                 (
                     "y".to_string(),
                     Expr::FieldAccess {
@@ -134,7 +141,8 @@ fn test_convert_expr_object_spread_last_position_expands_remaining_fields() {
 
 #[test]
 fn test_convert_expr_object_spread_middle_position_expands_remaining_fields() {
-    // { a: 1, ...rest, c: 3 } → S { a: 1.0, c: 3.0, b: rest.b }
+    // { a: 1, ...rest, c: 3 } → S { a: rest.a, b: rest.b, c: 3.0 }
+    // rightmost-wins: spread overrides a (before spread), c overrides spread (after spread)
     use crate::registry::TypeDef;
     let mut reg = TypeRegistry::new();
     reg.register(
@@ -160,8 +168,13 @@ fn test_convert_expr_object_spread_middle_position_expands_remaining_fields() {
         Expr::StructInit {
             name: "S".to_string(),
             fields: vec![
-                ("a".to_string(), Expr::NumberLit(1.0)),
-                ("c".to_string(), Expr::NumberLit(3.0)),
+                (
+                    "a".to_string(),
+                    Expr::FieldAccess {
+                        object: Box::new(Expr::Ident("rest".to_string())),
+                        field: "a".to_string(),
+                    }
+                ),
                 (
                     "b".to_string(),
                     Expr::FieldAccess {
@@ -169,6 +182,7 @@ fn test_convert_expr_object_spread_middle_position_expands_remaining_fields() {
                         field: "b".to_string(),
                     }
                 ),
+                ("c".to_string(), Expr::NumberLit(3.0)),
             ],
             base: None,
         }
@@ -197,6 +211,7 @@ fn test_convert_object_spread_unregistered_type_generates_struct_update() {
 #[test]
 fn test_convert_object_spread_multiple_registered_generates_merged_fields() {
     // {...a, ...b} — 複数スプレッド + TypeRegistry 登録済み
+    // rightmost-wins: b overrides a for all fields
     use crate::registry::TypeDef;
     let mut reg = TypeRegistry::new();
     reg.register(
@@ -216,18 +231,29 @@ fn test_convert_object_spread_multiple_registered_generates_merged_fields() {
     let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
         .convert_expr(&swc_expr)
         .unwrap();
-    // 最初の spread (a) はフィールド展開、最後の spread (b) は base
-    match &result {
-        Expr::StructInit { base, fields, .. } => {
-            assert!(base.is_some(), "expected base for last spread");
-            // a のフィールドが展開されている
-            assert!(
-                fields.iter().any(|(k, _)| k == "x" || k == "y"),
-                "expected expanded fields from first spread, got {fields:?}"
-            );
+    assert_eq!(
+        result,
+        Expr::StructInit {
+            name: "Point".to_string(),
+            fields: vec![
+                (
+                    "x".to_string(),
+                    Expr::FieldAccess {
+                        object: Box::new(Expr::Ident("b".to_string())),
+                        field: "x".to_string(),
+                    }
+                ),
+                (
+                    "y".to_string(),
+                    Expr::FieldAccess {
+                        object: Box::new(Expr::Ident("b".to_string())),
+                        field: "y".to_string(),
+                    }
+                ),
+            ],
+            base: None,
         }
-        other => panic!("expected StructInit, got {other:?}"),
-    }
+    );
 }
 
 #[test]
@@ -489,9 +515,8 @@ fn test_convert_object_lit_all_computed_keys_generates_hashmap() {
 }
 
 #[test]
-fn test_spread_multiple_overlapping_fields_first_spread_is_base() {
-    // { ...a, ...b } where both have x,y — first spread (a) should be base,
-    // later spread (b) should have its fields explicitly expanded (higher priority)
+fn test_spread_multiple_overlapping_fields_rightmost_wins() {
+    // { ...a, ...b } where both have x,y — rightmost spread (b) wins for all fields
     use crate::registry::TypeDef;
     let mut reg = TypeRegistry::new();
     reg.register(
@@ -511,43 +536,419 @@ fn test_spread_multiple_overlapping_fields_first_spread_is_base() {
     let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
         .convert_expr(&swc_expr)
         .unwrap();
-    match &result {
-        Expr::StructInit { base, fields, .. } => {
-            // Base should be the FIRST spread (a) — lowest priority in TS
-            if let Some(base_expr) = base {
-                match base_expr.as_ref() {
-                    Expr::Ident(name) => {
-                        assert_eq!(
-                            name, "a",
-                            "base should be first spread 'a' (lowest priority), got '{name}'"
-                        );
+    assert_eq!(
+        result,
+        Expr::StructInit {
+            name: "Point".to_string(),
+            fields: vec![
+                (
+                    "x".to_string(),
+                    Expr::FieldAccess {
+                        object: Box::new(Expr::Ident("b".to_string())),
+                        field: "x".to_string(),
                     }
-                    _ => panic!("expected Ident base, got {base_expr:?}"),
-                }
-            } else {
-                panic!("expected base (first spread)");
-            }
-            // Fields should be expanded from b (last among 'later' spreads = highest priority)
-            for (key, val) in fields {
-                if key == "x" || key == "y" {
-                    match val {
-                        Expr::FieldAccess { object, field, .. } => {
-                            match object.as_ref() {
-                                Expr::Ident(source) => {
-                                    assert_eq!(
-                                        source, "b",
-                                        "field '{key}' should come from 'b' (higher priority), got '{source}'"
-                                    );
-                                }
-                                _ => panic!("expected Ident source for field access"),
-                            }
-                            assert_eq!(field, key);
-                        }
-                        _ => panic!("expected FieldAccess for spread field '{key}'"),
+                ),
+                (
+                    "y".to_string(),
+                    Expr::FieldAccess {
+                        object: Box::new(Expr::Ident("b".to_string())),
+                        field: "y".to_string(),
                     }
-                }
-            }
+                ),
+            ],
+            base: None,
         }
-        other => panic!("expected StructInit, got {other:?}"),
-    }
+    );
+}
+
+// --- Position ordering tests (rightmost-wins semantics) ---
+
+#[test]
+fn test_spread_after_all_explicits_registered() {
+    // { x: 1, y: 2, ...base } → spread overrides all explicit fields
+    use crate::registry::TypeDef;
+    let mut reg = TypeRegistry::new();
+    reg.register(
+        "Point".to_string(),
+        TypeDef::new_struct(
+            vec![
+                ("x".to_string(), RustType::F64),
+                ("y".to_string(), RustType::F64),
+            ],
+            std::collections::HashMap::new(),
+            vec![],
+        ),
+    );
+    let f = TctxFixture::from_source_with_reg("const p: Point = { x: 1, y: 2, ...base };", reg);
+    let tctx = f.tctx();
+    let swc_expr = extract_var_init(f.module());
+    let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_expr(&swc_expr)
+        .unwrap();
+    assert_eq!(
+        result,
+        Expr::StructInit {
+            name: "Point".to_string(),
+            fields: vec![
+                (
+                    "x".to_string(),
+                    Expr::FieldAccess {
+                        object: Box::new(Expr::Ident("base".to_string())),
+                        field: "x".to_string(),
+                    }
+                ),
+                (
+                    "y".to_string(),
+                    Expr::FieldAccess {
+                        object: Box::new(Expr::Ident("base".to_string())),
+                        field: "y".to_string(),
+                    }
+                ),
+            ],
+            base: None,
+        }
+    );
+}
+
+#[test]
+fn test_spread_between_explicits_registered() {
+    // { x: 1, ...base, z: 3 } → spread overrides x (before), z overrides spread (after)
+    use crate::registry::TypeDef;
+    let mut reg = TypeRegistry::new();
+    reg.register(
+        "S".to_string(),
+        TypeDef::new_struct(
+            vec![
+                ("x".to_string(), RustType::F64),
+                ("y".to_string(), RustType::F64),
+                ("z".to_string(), RustType::F64),
+            ],
+            std::collections::HashMap::new(),
+            vec![],
+        ),
+    );
+    let f = TctxFixture::from_source_with_reg("const s: S = { x: 1, ...base, z: 3 };", reg);
+    let tctx = f.tctx();
+    let swc_expr = extract_var_init(f.module());
+    let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_expr(&swc_expr)
+        .unwrap();
+    assert_eq!(
+        result,
+        Expr::StructInit {
+            name: "S".to_string(),
+            fields: vec![
+                (
+                    "x".to_string(),
+                    Expr::FieldAccess {
+                        object: Box::new(Expr::Ident("base".to_string())),
+                        field: "x".to_string(),
+                    }
+                ),
+                (
+                    "y".to_string(),
+                    Expr::FieldAccess {
+                        object: Box::new(Expr::Ident("base".to_string())),
+                        field: "y".to_string(),
+                    }
+                ),
+                ("z".to_string(), Expr::NumberLit(3.0)),
+            ],
+            base: None,
+        }
+    );
+}
+
+#[test]
+fn test_spread_after_explicit_unregistered() {
+    // { x: 1, ...base } unregistered → S { ..base } (explicit before spread is dropped)
+    let f = TctxFixture::from_source("const p: Point = { x: 1, ...base };");
+    let tctx = f.tctx();
+    let swc_expr = extract_var_init(f.module());
+    let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_expr(&swc_expr)
+        .unwrap();
+    assert_eq!(
+        result,
+        Expr::StructInit {
+            name: "Point".to_string(),
+            fields: vec![],
+            base: Some(Box::new(Expr::Ident("base".to_string()))),
+        }
+    );
+}
+
+#[test]
+fn test_spread_between_explicits_unregistered() {
+    // { x: 1, ...base, y: 2 } unregistered → S { y: 2, ..base }
+    let f = TctxFixture::from_source("const s: S = { x: 1, ...base, y: 2 };");
+    let tctx = f.tctx();
+    let swc_expr = extract_var_init(f.module());
+    let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_expr(&swc_expr)
+        .unwrap();
+    assert_eq!(
+        result,
+        Expr::StructInit {
+            name: "S".to_string(),
+            fields: vec![("y".to_string(), Expr::NumberLit(2.0))],
+            base: Some(Box::new(Expr::Ident("base".to_string()))),
+        }
+    );
+}
+
+#[test]
+fn test_multiple_spreads_with_explicits_between() {
+    // { ...a, x: 1, ...b } registered → b wins all fields (rightmost spread)
+    use crate::registry::TypeDef;
+    let mut reg = TypeRegistry::new();
+    reg.register(
+        "Point".to_string(),
+        TypeDef::new_struct(
+            vec![
+                ("x".to_string(), RustType::F64),
+                ("y".to_string(), RustType::F64),
+            ],
+            std::collections::HashMap::new(),
+            vec![],
+        ),
+    );
+    let f = TctxFixture::from_source_with_reg("const p: Point = { ...a, x: 1, ...b };", reg);
+    let tctx = f.tctx();
+    let swc_expr = extract_var_init(f.module());
+    let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_expr(&swc_expr)
+        .unwrap();
+    assert_eq!(
+        result,
+        Expr::StructInit {
+            name: "Point".to_string(),
+            fields: vec![
+                (
+                    "x".to_string(),
+                    Expr::FieldAccess {
+                        object: Box::new(Expr::Ident("b".to_string())),
+                        field: "x".to_string(),
+                    }
+                ),
+                (
+                    "y".to_string(),
+                    Expr::FieldAccess {
+                        object: Box::new(Expr::Ident("b".to_string())),
+                        field: "y".to_string(),
+                    }
+                ),
+            ],
+            base: None,
+        }
+    );
+}
+
+#[test]
+fn test_multiple_spreads_with_explicit_after_last() {
+    // { ...a, ...b, x: 1 } registered → x: 1 (explicit wins), y: b.y (rightmost spread)
+    use crate::registry::TypeDef;
+    let mut reg = TypeRegistry::new();
+    reg.register(
+        "Point".to_string(),
+        TypeDef::new_struct(
+            vec![
+                ("x".to_string(), RustType::F64),
+                ("y".to_string(), RustType::F64),
+            ],
+            std::collections::HashMap::new(),
+            vec![],
+        ),
+    );
+    let f = TctxFixture::from_source_with_reg("const p: Point = { ...a, ...b, x: 1 };", reg);
+    let tctx = f.tctx();
+    let swc_expr = extract_var_init(f.module());
+    let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_expr(&swc_expr)
+        .unwrap();
+    assert_eq!(
+        result,
+        Expr::StructInit {
+            name: "Point".to_string(),
+            fields: vec![
+                ("x".to_string(), Expr::NumberLit(1.0)),
+                (
+                    "y".to_string(),
+                    Expr::FieldAccess {
+                        object: Box::new(Expr::Ident("b".to_string())),
+                        field: "y".to_string(),
+                    }
+                ),
+            ],
+            base: None,
+        }
+    );
+}
+
+#[test]
+fn test_spread_only_registered() {
+    // { ...base } registered → all fields from spread
+    use crate::registry::TypeDef;
+    let mut reg = TypeRegistry::new();
+    reg.register(
+        "Point".to_string(),
+        TypeDef::new_struct(
+            vec![
+                ("x".to_string(), RustType::F64),
+                ("y".to_string(), RustType::F64),
+            ],
+            std::collections::HashMap::new(),
+            vec![],
+        ),
+    );
+    let f = TctxFixture::from_source_with_reg("const p: Point = { ...base };", reg);
+    let tctx = f.tctx();
+    let swc_expr = extract_var_init(f.module());
+    let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_expr(&swc_expr)
+        .unwrap();
+    assert_eq!(
+        result,
+        Expr::StructInit {
+            name: "Point".to_string(),
+            fields: vec![
+                (
+                    "x".to_string(),
+                    Expr::FieldAccess {
+                        object: Box::new(Expr::Ident("base".to_string())),
+                        field: "x".to_string(),
+                    }
+                ),
+                (
+                    "y".to_string(),
+                    Expr::FieldAccess {
+                        object: Box::new(Expr::Ident("base".to_string())),
+                        field: "y".to_string(),
+                    }
+                ),
+            ],
+            base: None,
+        }
+    );
+}
+
+// --- Test technique review: missing patterns ---
+
+#[test]
+fn test_option_field_none_fill_when_omitted() {
+    // { x: 1 } where y: Option<f64> → y: None auto-filled
+    use crate::registry::TypeDef;
+    let mut reg = TypeRegistry::new();
+    reg.register(
+        "S".to_string(),
+        TypeDef::new_struct(
+            vec![
+                ("x".to_string(), RustType::F64),
+                ("y".to_string(), RustType::Option(Box::new(RustType::F64))),
+            ],
+            std::collections::HashMap::new(),
+            vec![],
+        ),
+    );
+    let f = TctxFixture::from_source_with_reg("const s: S = { x: 1 };", reg);
+    let tctx = f.tctx();
+    let swc_expr = extract_var_init(f.module());
+    let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_expr(&swc_expr)
+        .unwrap();
+    assert_eq!(
+        result,
+        Expr::StructInit {
+            name: "S".to_string(),
+            fields: vec![
+                ("x".to_string(), Expr::NumberLit(1.0)),
+                ("y".to_string(), Expr::Ident("None".to_string())),
+            ],
+            base: None,
+        }
+    );
+}
+
+#[test]
+fn test_multiple_spreads_unregistered_type_errors() {
+    // { ...a, ...b } unregistered → error
+    let f = TctxFixture::from_source("const p: Point = { ...a, ...b };");
+    let tctx = f.tctx();
+    let swc_expr = extract_var_init(f.module());
+    let result =
+        Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new()).convert_expr(&swc_expr);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_string_key_property() {
+    // { "key": value } → string key works like ident key
+    let f = TctxFixture::from_source(r#"const s: S = { "key": 42 };"#);
+    let tctx = f.tctx();
+    let swc_expr = extract_var_init(f.module());
+    let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_expr(&swc_expr)
+        .unwrap();
+    assert_eq!(
+        result,
+        Expr::StructInit {
+            name: "S".to_string(),
+            fields: vec![("key".to_string(), Expr::NumberLit(42.0))],
+            base: None,
+        }
+    );
+}
+
+#[test]
+fn test_spread_only_unregistered() {
+    // { ...base } unregistered → S { ..base }
+    let f = TctxFixture::from_source("const p: Point = { ...base };");
+    let tctx = f.tctx();
+    let swc_expr = extract_var_init(f.module());
+    let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_expr(&swc_expr)
+        .unwrap();
+    assert_eq!(
+        result,
+        Expr::StructInit {
+            name: "Point".to_string(),
+            fields: vec![],
+            base: Some(Box::new(Expr::Ident("base".to_string()))),
+        }
+    );
+}
+
+#[test]
+fn test_unsupported_property_kind_errors() {
+    // { get x() { return 1; } } → unsupported property error
+    let f = TctxFixture::from_source("const s: S = { get x() { return 1; } };");
+    let tctx = f.tctx();
+    let swc_expr = extract_var_init(f.module());
+    let result =
+        Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new()).convert_expr(&swc_expr);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_unsupported_key_kind_errors() {
+    // { 42: value } → unsupported key error (numeric key in struct context)
+    let f = TctxFixture::from_source("const s: S = { 42: true };");
+    let tctx = f.tctx();
+    let swc_expr = extract_var_init(f.module());
+    let result =
+        Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new()).convert_expr(&swc_expr);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_computed_and_normal_keys_mixed_falls_through_to_struct() {
+    // { [key]: "v", x: 1 } — not all computed, so try_convert_as_hashmap returns None,
+    // falls through to struct literal path
+    let f = TctxFixture::from_source(r#"const s: S = { [key]: "v", x: 1 };"#);
+    let tctx = f.tctx();
+    let swc_expr = extract_var_init(f.module());
+    // The computed key [key] will hit the unsupported key error in the struct path
+    let result =
+        Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new()).convert_expr(&swc_expr);
+    assert!(result.is_err());
 }
