@@ -32,15 +32,41 @@ Before writing the PRD:
    - Are there constraints? (technical constraints, compatibility with existing features, etc.)
 2. Draft the PRD only after receiving answers
 
-### 2. Test Coverage Review
+### 2. Impact Area Code Review
 
-**Before writing the Task List**, review existing tests in the impact area using the test techniques from `.claude/rules/testing.md`:
+**Before writing the Task List**, review the production code and test code in the impact area. This catches broken windows and design issues before they propagate into the new implementation.
+
+#### 2a. Production Code Quality Review
+
+Read all files in the impact area and evaluate:
+
+1. **DRY (knowledge duplication)**: Is the same conversion rule, type mapping, or business logic duplicated across multiple locations? If so, would the PRD's changes make the duplication worse, or is this an opportunity to consolidate?
+2. **Orthogonality**: Does each function/module have a single, well-defined responsibility? Are there functions that mix concerns (e.g., type collection + type conversion, or AST analysis + IR generation)?
+3. **Cohesion**: Are related functions grouped together in the same module? Are unrelated functions co-located due to historical accident?
+4. **Coupling**: Are there unnecessary dependencies between modules? Would the PRD's changes increase coupling?
+5. **Doc comments**: Are public functions documented? Are doc comments accurate (not stale from past refactors)?
+
+Produce an issue table:
+
+```
+| Issue | Location | Category | Severity | Action |
+|-------|----------|----------|----------|--------|
+| P1    | foo.rs:42 | DRY | Medium | Fix in PRD |
+| P2    | bar.rs:100 | Stale doc | Low | Fix in PRD |
+```
+
+Issues found must be either fixed in the PRD's task list or recorded in TODO with justification for deferral.
+
+#### 2b. Test Coverage Review
+
+Review existing tests in the impact area using the test techniques from `.claude/rules/testing.md`:
 
 1. **Enumerate decision points** (C1 branch coverage): List every `if`, `match` arm, `if let`, and early `return` in the affected functions. Map each to existing tests
 2. **Identify equivalence partitions**: List input partitions (AST variants, type variants, error/success paths). Check coverage
 3. **Check boundary values**: Empty collections, single vs multi elements, 0/1/N counts
 4. **Build decision table**: When 2+ independent conditions exist, enumerate combinations and check coverage
 5. **Detect incorrect expectations**: Tests that pass but assert wrong behavior (bug-affirming tests)
+6. **Test quality**: Do assertions have descriptive messages? Are test names accurate (`test_<target>_<condition>_<expected>`)?  Are there fragile assertions (substring matching where exact matching is possible)?
 
 Produce a gap table:
 
@@ -50,7 +76,7 @@ Produce a gap table:
 | G1  | Option None-fill | C1 (D22) | High     |
 ```
 
-Include **all** identified gaps in the PRD's task list, regardless of severity. No gap is too small to test — incomplete coverage is a broken window.
+Include **all** identified gaps (both production code issues and test gaps) in the PRD's task list, regardless of severity. No gap is too small to test — incomplete coverage is a broken window.
 
 ### 3. PRD Drafting
 
@@ -155,7 +181,7 @@ Conditions for this PRD's work to be considered "complete". Include quality chec
 ## Prohibited
 
 - Skipping Discovery (clarification questions) and writing a PRD
-- **Skipping the test coverage review** — every PRD must include a systematic review of existing tests in the impact area using test techniques before writing the task list
+- **Skipping the impact area code review** — every PRD must include both a production code quality review (DRY, orthogonality, cohesion, coupling, doc comments) AND a systematic test coverage review using test techniques before writing the task list
 - Writing vague completion criteria ("works properly", "can be used without issues", etc.)
 - Including future-proofing design in the PRD (YAGNI)
 - Cramming multiple independent features into a single PRD
