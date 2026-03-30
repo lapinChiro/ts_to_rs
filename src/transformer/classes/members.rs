@@ -434,7 +434,7 @@ impl<'a> Transformer<'a> {
             .type_ann
             .as_ref()
             .ok_or_else(|| anyhow!("parameter '{}' has no type annotation", name))?;
-        let rust_type = crate::transformer::types::convert_type_for_position(
+        let rust_type = crate::pipeline::type_converter::convert_type_for_position(
             &ty.type_ann,
             crate::transformer::TypePosition::Param,
             self.synthetic,

@@ -25,7 +25,7 @@ pub(crate) use helpers::convert_last_return_to_tail;
 /// Converts a snake_case name to PascalCase.
 ///
 /// Example: `"foo_opts"` → `"FooOpts"`, `"bar_config"` → `"BarConfig"`
-use crate::transformer::any_narrowing::to_pascal_case;
+use crate::pipeline::any_narrowing::to_pascal_case;
 
 use helpers::{
     contains_throw, mark_mut_params_from_body, pascal_to_snake, unwrap_promise_type,

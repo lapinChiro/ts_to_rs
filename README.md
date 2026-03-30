@@ -296,6 +296,7 @@ src/
 │   ├── type_resolution.rs       # FileTypeResolution（型解決結果のデータ構造）
 │   ├── synthetic_registry.rs    # SyntheticTypeRegistry（合成型の重複排除）
 │   ├── external_struct_generator/ # 外部型 struct 定義の自動生成
+│   ├── any_narrowing.rs         # any 型の typeof/instanceof 制約収集ユーティリティ
 │   ├── any_enum_analyzer.rs     # any-narrowing enum の分析
 │   ├── output_writer.rs         # ファイル出力・mod.rs 生成
 │   └── types.rs                 # パイプライン共通の型定義
@@ -303,9 +304,7 @@ src/
 │   ├── mod.rs           # 変換エントリポイント
 │   ├── context.rs       # TransformContext（変換コンテキスト）
 │   ├── type_position.rs # TypePosition（型位置に基づく trait ラップ）
-│   ├── any_narrowing.rs # any 型の typeof/instanceof narrowing
 │   ├── classes/         # クラス変換
-│   ├── types/           # 型変換 (TS 型 → Rust 型)
 │   ├── functions/       # 関数変換
 │   ├── statements/      # 文の変換（mutability 推論含む）
 │   └── expressions/     # 式の変換

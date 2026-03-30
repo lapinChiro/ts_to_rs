@@ -8,7 +8,7 @@
 | エラーインスタンス | 61 |
 | コンパイル(file) | 109/158 (69.0%) |
 | コンパイル(dir) | 156/158 (98.7%) |
-| テスト数 | 1454 |
+| テスト数 | 1494 |
 | コンパイルテストスキップ | 11 件（builtins なし） / 10 件（builtins あり） |
 
 ### エラーカテゴリ内訳（61 件）
@@ -35,19 +35,15 @@
 | **次: コンパイル品質** | ディレクトリコンパイルエラー 0 | 残 2 ファイル（I-273） |
 | **その後: DX + 品質** | コンパイルテストスキップ 0 | 残 11 件 |
 
-### Phase R-1: コンポーネント責務境界の正常化（次の開発）
+### ~~Phase R-1: コンポーネント責務境界の正常化~~ ✅ 完了
 
-構造リファクタリング。変換ロジック変更なし。後続の全作業で正しい依存方向を前提にできるようにする。
+- `any_narrowing.rs` を `transformer/` → `pipeline/` に移動、逆方向依存解消
+- any-narrowing enum 登録を pipeline に一本化（registry 側の重複処理削除）
+- `transformer/types/` re-export 層除去、233 テストを `pipeline/type_converter/tests/` に移動
+- テストギャップ G1-G23 を解消（+40 テスト追加）
+- `register_extra_enums` の DRY 化、doc comment 修正、テストファイル凝集度改善
 
-| 対象 | 内容 | 効果 |
-|------|------|------|
-| 逆方向依存 | `transformer/any_narrowing.rs` → `pipeline/` に移動 | registry → transformer の逆方向依存解消 |
-| 二重処理 | registry/enums.rs の any-narrowing 登録を pipeline 側に一本化 | 重複排除 |
-| re-export 残骸 | `transformer/types/` 除去、233 テストを `pipeline/type_converter/tests/` に移動 | 技術的負債解消 |
-
-PRD: `backlog/r1-component-boundary-cleanup.md`
-
-### Phase C-4: TypeRegistry 型登録基盤
+### Phase C-4: TypeRegistry 型登録基盤（次の開発）
 
 R-1 で依存方向が正常化された状態で、TypeRegistry の型登録基盤を改善する。
 

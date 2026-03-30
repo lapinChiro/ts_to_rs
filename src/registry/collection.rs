@@ -229,10 +229,6 @@ pub(super) fn collect_decl(
                 super::functions::collect_fn_def_with_extras(&fn_decl.function, lookup, synthetic)
             {
                 let fn_name = fn_decl.ident.sym.to_string();
-                // Register any-narrowing enums for `any`-typed parameters with typeof checks
-                if let Some(body) = &fn_decl.function.body {
-                    super::enums::register_any_narrowing_enums(reg, &fn_name, &func_def, body);
-                }
                 reg.register(fn_name, func_def);
             }
         }
@@ -249,18 +245,6 @@ pub(super) fn collect_decl(
                         if let Ok(func_def) = super::functions::collect_arrow_def_with_extras(
                             arrow, lookup, synthetic,
                         ) {
-                            match arrow.body.as_ref() {
-                                ast::BlockStmtOrExpr::BlockStmt(body) => {
-                                    super::enums::register_any_narrowing_enums(
-                                        reg, &name, &func_def, body,
-                                    );
-                                }
-                                ast::BlockStmtOrExpr::Expr(expr) => {
-                                    super::enums::register_any_narrowing_enums_from_expr(
-                                        reg, &name, &func_def, expr,
-                                    );
-                                }
-                            }
                             reg.register(name, func_def);
                         }
                         continue;

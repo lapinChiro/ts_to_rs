@@ -13,6 +13,8 @@ mod functions;
 mod interfaces;
 mod unions;
 
+pub(crate) use enums::register_extra_enums;
+
 #[cfg(test)]
 mod tests;
 

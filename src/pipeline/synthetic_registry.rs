@@ -361,7 +361,7 @@ pub(crate) fn variant_name_for_type(ty: &RustType) -> String {
 }
 
 /// Converts a string to PascalCase.
-use crate::transformer::any_narrowing::to_pascal_case;
+use super::any_narrowing::to_pascal_case;
 
 #[cfg(test)]
 mod tests {

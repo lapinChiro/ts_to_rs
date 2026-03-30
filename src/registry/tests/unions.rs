@@ -148,7 +148,7 @@ fn test_build_registry_union_dedup() {
 
 #[test]
 fn test_analyze_any_params_registers_enum() {
-    use crate::transformer::any_narrowing::{build_any_enum_variants, collect_any_constraints};
+    use crate::pipeline::any_narrowing::{build_any_enum_variants, collect_any_constraints};
     use swc_ecma_ast as ast;
 
     let module = crate::parser::parse_typescript(

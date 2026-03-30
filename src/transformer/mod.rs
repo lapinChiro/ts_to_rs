@@ -3,15 +3,12 @@
 //! This module converts SWC TypeScript AST nodes into the IR representation
 //! defined in [`crate::ir`].
 
-pub(crate) mod any_narrowing;
 pub mod classes;
 pub mod context;
 pub mod expressions;
 pub mod functions;
 pub mod statements;
 pub(crate) mod type_position;
-pub mod types;
-
 pub(crate) use type_position::{wrap_trait_for_position, TypePosition};
 
 use anyhow::Result;
@@ -497,7 +494,7 @@ impl<'a> Transformer<'a> {
     ) -> Result<(Vec<Item>, Vec<String>)> {
         match decl {
             Decl::TsInterface(interface_decl) => {
-                let items = types::convert_interface_items(
+                let items = crate::pipeline::type_converter::convert_interface_items(
                     interface_decl,
                     vis,
                     self.synthetic,
@@ -506,7 +503,7 @@ impl<'a> Transformer<'a> {
                 Ok((items, vec![]))
             }
             Decl::TsTypeAlias(type_alias_decl) => {
-                let items = types::convert_type_alias_items(
+                let items = crate::pipeline::type_converter::convert_type_alias_items(
                     type_alias_decl,
                     vis,
                     self.synthetic,

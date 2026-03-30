@@ -2,15 +2,15 @@
 //!
 //! Walks the AST to detect `any`-typed variables narrowed via `typeof`/`instanceof`,
 //! generates synthetic enum types, and records overrides in [`FileTypeResolution`].
-//! Runs after Type Resolution and before Transformation in the pipeline.
+//! Runs after Type Collection and before Type Resolution in the pipeline.
 
 use swc_common::Spanned;
 use swc_ecma_ast as ast;
 
+use super::any_narrowing;
 use crate::ir::RustType;
 use crate::pipeline::type_resolution::{AnyEnumOverride, FileTypeResolution};
 use crate::pipeline::SyntheticTypeRegistry;
-use crate::transformer::any_narrowing;
 
 /// Analyzes a file's AST for any-typed variable narrowing and records overrides.
 ///
@@ -414,8 +414,8 @@ function process(data: any): string {
         let override_entry = &resolution.any_enum_overrides[0];
         assert_eq!(override_entry.var_name, "data");
         assert!(
-            matches!(&override_entry.enum_type, RustType::Named { name, .. } if name.contains("Data")),
-            "enum type should contain 'Data': {:?}",
+            matches!(&override_entry.enum_type, RustType::Named { name, .. } if name == "ProcessDataType"),
+            "enum type should be 'ProcessDataType', got: {:?}",
             override_entry.enum_type
         );
 
@@ -533,6 +533,117 @@ function process(data: any): string {
                 .any_enum_override("other", o.scope_start + 1)
                 .is_none(),
             "should not find override for wrong name"
+        );
+    }
+
+    #[test]
+    fn test_arrow_expr_body_any_override_detected() {
+        let source = r#"
+const check = (data: any): boolean => typeof data === "string";
+"#;
+        let (resolution, synthetic) = analyze(source);
+
+        assert!(
+            !resolution.any_enum_overrides.is_empty(),
+            "should detect any enum override in expression-body arrow"
+        );
+        assert_eq!(resolution.any_enum_overrides[0].var_name, "data");
+        assert!(
+            !synthetic.all_items().is_empty(),
+            "should register enum in synthetic registry"
+        );
+    }
+
+    #[test]
+    fn test_class_method_any_param_detected() {
+        let source = r#"
+class Processor {
+    handle(data: any): string {
+        if (typeof data === "string") {
+            return data;
+        }
+        return "";
+    }
+}
+"#;
+        let (resolution, _) = analyze(source);
+
+        let data_override = resolution
+            .any_enum_overrides
+            .iter()
+            .find(|o| o.var_name == "data");
+        assert!(
+            data_override.is_some(),
+            "should detect any enum override for class method param"
+        );
+    }
+
+    #[test]
+    fn test_class_constructor_any_param_detected() {
+        let source = r#"
+class Processor {
+    value: string;
+    constructor(data: any) {
+        if (typeof data === "string") {
+            this.value = data;
+        } else {
+            this.value = "";
+        }
+    }
+}
+"#;
+        let (resolution, _) = analyze(source);
+
+        let data_override = resolution
+            .any_enum_overrides
+            .iter()
+            .find(|o| o.var_name == "data");
+        assert!(
+            data_override.is_some(),
+            "should detect any enum override for constructor param"
+        );
+    }
+
+    #[test]
+    fn test_no_any_params_produces_empty_result() {
+        let source = r#"
+function process(data: string): string {
+    return data;
+}
+"#;
+        let (resolution, synthetic) = analyze(source);
+
+        assert!(
+            resolution.any_enum_overrides.is_empty(),
+            "no any params should produce no overrides"
+        );
+        assert!(
+            synthetic.all_items().is_empty(),
+            "no any params should produce no synthetic items"
+        );
+    }
+
+    #[test]
+    fn test_nested_arrow_in_function_detected() {
+        let source = r#"
+function outer() {
+    const inner = (x: any): string => {
+        if (typeof x === "number") {
+            return x.toString();
+        }
+        return "";
+    };
+}
+"#;
+        let (resolution, _) = analyze(source);
+
+        let x_override = resolution
+            .any_enum_overrides
+            .iter()
+            .find(|o| o.var_name == "x");
+        assert!(
+            x_override.is_some(),
+            "should detect any enum override for nested arrow function param"
         );
     }
 }
