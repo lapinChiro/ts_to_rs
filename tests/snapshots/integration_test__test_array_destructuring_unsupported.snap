@@ -1,0 +1,10 @@
+---
+source: tests/integration_test.rs
+expression: json
+---
+[
+  {
+    "kind": "unsupported pattern: expected identifier",
+    "location": "28:1"
+  }
+]

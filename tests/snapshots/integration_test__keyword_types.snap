@@ -10,8 +10,27 @@ fn acceptUnknown(x: serde_json::Value) {
     return;
 }
 
+fn fail(message: String) -> Result<std::convert::Infallible, String> {
+    Err(message.to_string())
+}
+
+fn doNothing() {
+}
+
+fn doNothingExplicit() {
+    return;
+}
+
+fn returnsUndefined() {
+    None
+}
+
 #[derive(Debug, Clone, PartialEq)]
 struct Flexible {
     data: serde_json::Value,
     value: serde_json::Value,
+}
+
+fn assertNever(x: !) -> Result<std::convert::Infallible, String> {
+    Err(("Unexpected value: ".to_string() + &x).to_string())
 }

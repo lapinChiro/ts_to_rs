@@ -9,3 +9,55 @@ fn add(a: f64, b: f64) -> f64 {
 fn isPositive(n: f64) -> bool {
     n > 0.0
 }
+
+fn logValue(value: String) {
+    println!("{}", value);
+}
+
+fn classify(n: f64) -> String {
+    if n > 0.0 {
+        return "positive".to_string();
+    } else {
+        if n < 0.0 {
+            return "negative".to_string();
+        }
+    }
+    "zero".to_string()
+}
+
+fn greetUser(name: String, greeting: String) -> String {
+    if greeting {
+        return format!("{}, {}", greeting, name);
+    }
+    format!("Hello, {}", name)
+}
+
+fn sum(nums: Vec<f64>) -> f64 {
+    let mut total = 0.0;
+    for n in nums {
+        total = total + n;
+    }
+    total
+}
+
+fn multiplier(factor: f64) -> Box<dyn Fn(f64) -> f64> {
+    |x: f64| -> f64 { x * factor }
+}
+
+fn identity<T>(value: T) -> T {
+    value
+}
+
+fn first(items: Vec<String>) -> Option<String> {
+    Some(items[0])
+}
+
+fn findIndex(arr: Vec<f64>, target: f64) -> f64 {
+    for i in 0..arr.len() as f64 as i64 {
+        let i = i as f64;
+        if arr[i as usize] == target {
+            return i;
+        }
+    }
+    -1.0
+}

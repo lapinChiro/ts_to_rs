@@ -25,3 +25,31 @@ fn hasContent(s: String) -> bool {
 fn shout(s: String) -> String {
     s.to_uppercase()
 }
+
+fn getSubstring(s: String, start: f64, end: f64) -> String {
+    s[start as i64..end as i64].to_vec()
+}
+
+fn findPosition(s: String, target: String) -> f64 {
+    s.iter().position(|item| *item == target).map(|i| i as f64).unwrap_or(-1.0)
+}
+
+fn splitWords(s: String) -> Vec<String> {
+    s.split(" ").map(|s| s.to_string()).collect::<Vec<String>>()
+}
+
+fn firstChar(s: String) -> String {
+    s.charAt(0.0)
+}
+
+fn concat(a: String, b: String) -> String {
+    a + &b
+}
+
+fn repeatStr(s: String, count: f64) -> String {
+    s.repeat(count)
+}
+
+fn extractMiddle(s: String) -> String {
+    s[1..3].to_string()
+}

@@ -2,6 +2,12 @@
 source: tests/integration_test.rs
 expression: output
 ---
+#[derive(Debug, Clone, PartialEq)]
+pub enum IsStringXType {
+    String(String),
+    Other(serde_json::Value),
+}
+
 fn negate(x: bool) -> bool {
     !x
 }
@@ -15,4 +21,12 @@ fn abs(x: f64) -> f64 {
 
 fn isInRange(x: f64, min: f64, max: f64) -> bool {
     !(x < min) && !(x > max)
+}
+
+fn isString(x: IsStringXType) -> bool {
+    matches!(x, IsStringXType::String(_))
+}
+
+fn toNumber(s: String) -> f64 {
+    s.parse::<f64>().unwrap()
 }

@@ -37,3 +37,59 @@ impl Status {
         }
     }
 }
+
+fn handleEvent(event: Event) -> String {
+    match &event {
+        Event::Click { x, .. } => {
+            return format!("clicked at {}", event.x);
+        }
+        Event::Hover { y, .. } => {
+            return format!("hovered at {}", event.y);
+        }
+    }
+}
+
+fn describeStatus(status: Status) -> String {
+    match &status {
+        Status::Active { .. } => {
+            return "active".to_string();
+        }
+        Status::Inactive { .. } => {
+            return "inactive".to_string();
+        }
+        Status::Pending { .. } => {
+            return "pending".to_string();
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum Shape {
+    Circle {
+        radius: f64,
+    },
+    Rect {
+        width: f64,
+        height: f64,
+    },
+}
+
+impl Shape {
+    pub fn kind(&self) -> &str {
+        match self {
+            Shape::Circle { .. } => "circle",
+            Shape::Rect { .. } => "rect",
+        }
+    }
+}
+
+fn area(shape: Shape) -> f64 {
+    match &shape {
+        Shape::Circle { radius, .. } => {
+            return std::f64::consts::PI * radius.clone() * radius.clone();
+        }
+        Shape::Rect { height, width, .. } => {
+            return width.clone() * height.clone();
+        }
+    }
+}

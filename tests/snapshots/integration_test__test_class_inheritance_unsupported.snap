@@ -1,0 +1,10 @@
+---
+source: tests/integration_test.rs
+expression: json
+---
+[
+  {
+    "kind": "unsupported call target expression",
+    "location": "43:1"
+  }
+]

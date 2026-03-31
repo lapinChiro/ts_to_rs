@@ -3,6 +3,12 @@ source: tests/integration_test.rs
 expression: output
 ---
 #[derive(Debug, Clone, PartialEq)]
+pub struct _TypeLit0 {
+    pub width: f64,
+    pub height: f64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 struct Point {
     x: f64,
     y: f64,
@@ -24,4 +30,47 @@ fn getMutableCoords(p: Point) -> f64 {
 fn getRenamedCoord(p: Point) -> f64 {
     let posX = p.x;
     posX
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct Options {
+    width: f64,
+    height: f64,
+    color: Option<String>,
+}
+
+fn getColor(opts: Options) -> String {
+    let color = opts.color.unwrap_or_else(|| "black");
+    color
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct Rect {
+    origin: Point,
+    size: _TypeLit0,
+}
+
+fn getOriginX(rect: Rect) -> f64 {
+    let x = rect.origin.x;
+    x
+}
+
+fn distanceFromOrigin(point: Point) -> f64 {
+    let x = point.x;
+    let y = point.y;
+    x + y
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct FullUser {
+    name: String,
+    age: f64,
+    email: String,
+}
+
+fn getName(user: FullUser) -> String {
+    let name = user.name;
+    let age = user.age;
+    let email = user.email;
+    name
 }

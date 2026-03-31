@@ -67,3 +67,40 @@ impl std::fmt::Display for Visibility {
         write!(f, "{}", *self as i64)
     }
 }
+
+fn isActive(s: Status) -> bool {
+    s == Status::Active
+}
+
+fn getDirectionLabel(d: Direction) -> String {
+    format!("Going {}", d)
+}
+
+fn describeColor(c: Color) -> String {
+    if c == Color::Red {
+        return "red".to_string();
+    } else {
+        if c == Color::Green {
+            return "green".to_string();
+        }
+    }
+    "blue".to_string()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(i64)]
+enum Priority {
+    Low = 0,
+    Medium = 1,
+    High = 2,
+}
+
+impl std::fmt::Display for Priority {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", *self as i64)
+    }
+}
+
+fn isHighPriority(p: Priority) -> bool {
+    p == Priority::High
+}

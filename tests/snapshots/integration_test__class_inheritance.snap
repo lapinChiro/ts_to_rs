@@ -43,3 +43,67 @@ impl AnimalTrait for Dog {
         format!("{}", self.name)
     }
 }
+
+#[derive(Debug, Clone, PartialEq)]
+struct Cat {
+    name: String,
+}
+
+impl Cat {
+    fn new(name: String) -> Self {
+        Self { name }
+    }
+
+    fn speak(&self) -> String {
+        format!("{} meows", self.name)
+    }
+}
+
+impl AnimalTrait for Cat {
+    fn speak(&self) -> String {
+        format!("{}", self.name)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct Vehicle {
+    speed: f64,
+}
+
+trait VehicleTrait {
+    fn describe(&self) -> String;
+}
+
+impl Vehicle {
+    fn new(speed: f64) -> Self {
+        Self { speed }
+    }
+}
+
+impl VehicleTrait for Vehicle {
+    fn describe(&self) -> String {
+        format!("speed: {}", self.speed)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct Truck {
+    speed: f64,
+    payload: f64,
+}
+
+impl Truck {
+    fn new(speed: f64, payload: f64) -> Self {
+        Self { speed, payload }
+    }
+
+    fn describe(&self) -> String {
+        format!("truck payload: {}", self.payload)
+    }
+}
+
+impl VehicleTrait for Truck {
+    fn describe(&self) -> String {
+        format!("speed: {}", self.speed)
+    }
+}

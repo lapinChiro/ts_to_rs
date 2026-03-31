@@ -14,7 +14,41 @@ pub fn getFortyTwo() -> f64 {
     42.0
 }
 
+fn useGreeting(greeting: String, name: String) -> String {
+    let greetFn = |n: String| -> String { format!("{}, {}", greeting, n) };
+    greetFn(name)
+}
+
+fn makeCounter() -> Box<dyn Fn() -> f64> {
+    let mut count = 0.0;
+    || -> f64 {
+    count = count + 1.0;
+    count
+}
+}
+
+fn makeLabel(base: f64, label: String, x: f64) -> String {
+    let format = |v: f64| -> String { format!("{}: {}", label, base + v) };
+    format(x)
+}
+
+fn applyTwice(f: Box<dyn Fn(f64) -> f64>, value: f64) -> f64 {
+    f(f(value))
+}
+
 pub struct Processor {
     pub transform: Box<dyn Fn(f64) -> f64>,
     pub callback: Box<dyn Fn(String, f64) -> bool>,
+}
+
+fn makeGreeter(greeting: String) -> Box<dyn Fn(String) -> String> {
+    |name: String| -> String { format!("{}, {}", greeting, name) }
+}
+
+fn processValues(values: Vec<f64>) -> Vec<f64> {
+    values.iter().cloned().map(|x| x * 2.0).collect::<Vec<_>>()
+}
+
+fn filterAbove(values: Vec<f64>, threshold: f64) -> Vec<f64> {
+    values.iter().cloned().filter(|x| x > threshold).collect::<Vec<_>>()
 }

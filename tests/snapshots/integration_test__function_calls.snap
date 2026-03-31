@@ -14,3 +14,22 @@ pub fn main() -> f64 {
     let result = sumOfSquares(3.0, 4.0);
     result
 }
+
+fn processString(s: String) -> String {
+    s.trim().to_string().to_lowercase()
+}
+
+fn factorial(n: f64) -> f64 {
+    if n <= 1.0 {
+        return 1.0;
+    }
+    n * factorial(n - 1.0)
+}
+
+fn compose(x: f64) -> f64 {
+    square(square(x))
+}
+
+fn calculate(a: f64, b: f64) -> f64 {
+    sumOfSquares(a + 1.0, b * 2.0)
+}

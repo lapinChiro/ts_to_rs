@@ -2,6 +2,12 @@
 source: tests/integration_test.rs
 expression: output
 ---
+#[derive(Debug, Clone, PartialEq)]
+pub enum StringOrF64 {
+    String(String),
+    F64(f64),
+}
+
 fn passThrough(x: serde_json::Value) -> serde_json::Value {
     x
 }
@@ -12,4 +18,21 @@ fn assertString(x: String) -> String {
 
 fn assertNumber(x: f64) -> f64 {
     x as f64
+}
+
+fn getLength(x: serde_json::Value) -> f64 {
+    x.len() as f64
+}
+
+fn processValue(input: serde_json::Value) -> serde_json::Value {
+    let str = input;
+    str
+}
+
+fn forceConvert(x: f64) -> String {
+    x
+}
+
+fn narrowToString(x: StringOrF64) -> String {
+    x
 }

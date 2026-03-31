@@ -21,6 +21,7 @@
 - **優先度は Tier 内の記載順序**（上ほど高い）。サブカテゴリは分類ラベル
 - 相互参照は `I-XX` で行い、参照先不在時は背景を自己完結的に記述
 - 件数は Hono ベンチマーク実測値（最終実行: 2026-03-31 S1修正後、110/158 クリーン、58 エラー）
+- I-320〜I-330 は T-3 fixture 拡充（2026-03-31）で発見。ベンチマーク件数ではなくスナップショットテストのコンパイルチェックで検出
 
 完了済み機能: [doc/completed-features.md](doc/completed-features.md)。設計判断: [doc/design-decisions.md](doc/design-decisions.md)。
 
@@ -91,6 +92,55 @@
 - **[I-209]** **any-narrowing enum への値代入時の型強制** — skip 原因
 - **[I-255]** **`x++`/`x--` が mutation 未検出** — `let mut` 欠落。`src/transformer/statements/mutability.rs:110-131`
 - **[I-258]** **クロージャ内制御フロー内代入の mut 未検出** — `src/transformer/statements/mutability.rs:56-64`
+
+#### T-3 fixture 拡充で発見されたコンパイルエラー
+
+- **[I-320]** **optional パラメータが `Option<T>` に変換されない** — `greeting?: string` → `String`（正しくは `Option<String>`）
+  - `src/transformer/functions/mod.rs:66-76` で `param.optional` フィールドを未チェック
+  - **解決策**: optional パラメータの型を `Option<T>` でラップ。truthy check も `if let Some(v)` に変換
+  - fixture: functions, optional-fields で発見
+- **[I-321]** **クロージャ返却時の `Box::new()` ラップ漏れ** — `return |x| x * 2` → コンパイルエラー（`E0308: expected Box<dyn Fn>, found closure`）
+  - `src/transformer/expressions/mod.rs:134-138` の `needs_trait_box_coercion` がクロージャ返却をカバーしていない
+  - **解決策**: 戻り値型が `Box<dyn Fn>` の場合、返却されるクロージャを `Box::new()` でラップ
+  - fixture: closures で発見
+- **[I-322]** **discriminated union switch でデストラクチャ変数の未使用** — match arm で `Event::Click { x, .. }` とデストラクチャするが body で `event.x` を使用（`E0609: no field x on type Event`）
+  - `src/transformer/statements/switch.rs:479-487` で case body 内のフィールドアクセスをバインド変数に書き換えていない
+  - **解決策**: case body 変換時に `collect_du_field_accesses` の結果を使い、`event.x` → `x` に rewrite
+  - fixture: discriminated-union で発見
+- **[I-323]** **`toString()` が Rust の `to_string()` に変換されない** — `n.toString()` → `E0599: no method named toString`
+  - `src/transformer/expressions/methods.rs:455-459` の `map_method_call` に `"toString"` ケースなし
+  - **解決策**: `"toString"` → `"to_string"` のマッピング追加
+  - fixture: general-for-loop, string-methods で発見
+- **[I-324]** **文字列結合の `&str`/`String` 型不一致** — `result + s` → `E0369: cannot add &String to &str`
+  - `src/transformer/expressions/binary.rs:75-143` の文字列結合ハンドリングが `String + String` の全ケースを網羅していない
+  - **解決策**: 文字列結合で両辺の型に応じた `.as_str()`/`.to_string()` 挿入
+  - fixture: do-while, functions で発見
+- **[I-325]** **三項演算子の変数代入で `&str` リテラルが `String` に昇格されない** — `let label = if active { "on" } else { "off" }` → `E0308: expected String, found &str`
+  - **解決策**: 関数戻り値型が `String` の場合、三項演算子の分岐リテラルに `.to_string()` を付与
+  - fixture: ternary で発見
+- **[I-326]** **`??` チェーンの変換バグ** — `a ?? b ?? 0` → `a.unwrap_or_else(|| b.unwrap_or_else(|| 0))` で中間結果の型が `Option<f64>` → `f64` の不一致
+  - `src/transformer/expressions/binary.rs:48-67` でネストされた `??` の右辺型を考慮していない
+  - **解決策**: 右辺が `??` 式の場合、中間結果を unwrap してからネスト
+  - fixture: nullish-coalescing で発見
+- **[I-327]** **`=== null` チェック後の nullable narrowing 不完全** — `if (x === null) { ... } return x;` で `x` が `Option<String>` のまま narrowing されない（`E0308: expected String, found Option<String>`）
+  - **解決策**: `=== null` / `!== null` チェック後の分岐で型を narrowing（`Option<T>` → `T`）
+  - 🔗 I-213（`!==` ガード排除）と関連
+  - fixture: narrowing-truthy-instanceof で発見
+- **[I-328]** **`never` 型が experimental `!` を生成** — stable Rust で `!` 型は使用不可（`E0658: the ! type is experimental`）
+  - `src/generator/types.rs:53` で `RustType::Never` → `!` を出力
+  - **解決策**: `std::convert::Infallible` を使用（戻り値型では既に `Result<Infallible, String>` パターンが使われている）、または `#![feature(never_type)]` を要求
+  - fixture: keyword-types で発見
+- **[I-329]** **string メソッド変換の不足・バグ** — `charAt()`, `indexOf()`, `split()`, `slice()`, `repeat()` の Rust 変換が不完全
+  - `charAt()`: 未変換（`E0599`）。Rust では `chars().nth(n)` に変換
+  - `indexOf()`: `iter()` を呼ぶが String に存在しない（`E0599`）。`find()` + 位置取得に変換
+  - `split()`: 同上
+  - `slice()`: Range index を使用するがバイトインデックス（`E0277`）。🔗 I-188
+  - `repeat()`: count が `f64` のまま `usize` に変換されない（`E0308`）
+  - fixture: string-methods で発見
+- **[I-330]** **try/catch + return で unreachable code** — try block 内に return がある場合、ブロック後の `if let Err(e)` + `unreachable!()` が到達不能
+  - `src/transformer/statements/error_handling.rs:123-129`
+  - **解決策**: try block 内の全パスが return する場合、catch block を直接 else 分岐にする or ブロック構造を見直す
+  - fixture: async-await で発見
 
 #### import/export
 

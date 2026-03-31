@@ -1,0 +1,10 @@
+---
+source: tests/integration_test.rs
+expression: json
+---
+[
+  {
+    "kind": "unsupported type alias body: Discriminant(15)",
+    "location": "45:1"
+  }
+]

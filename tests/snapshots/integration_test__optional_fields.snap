@@ -9,3 +9,32 @@ struct Config {
     debug: Option<bool>,
     label: Option<String>,
 }
+
+#[derive(Debug, Clone, PartialEq)]
+struct UserProfile {
+    name: String,
+    email: Option<String>,
+    age: Option<f64>,
+    bio: Option<String>,
+}
+
+fn getPort(config: Config) -> f64 {
+    config.port
+}
+
+fn isDebug(config: Config) -> bool {
+    config.debug.unwrap_or_else(|| false)
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct Address {
+    street: String,
+    city: String,
+    zip: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct Person {
+    name: String,
+    address: Option<Address>,
+}

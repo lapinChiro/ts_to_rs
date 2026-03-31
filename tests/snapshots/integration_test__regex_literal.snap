@@ -15,3 +15,27 @@ fn makeInsensitivePattern() -> f64 {
     let count: f64 = 2.0;
     count
 }
+
+fn makeGlobalPattern() -> f64 {
+    let pattern = Regex::new(r"hello").unwrap();
+    let count: f64 = 3.0;
+    count
+}
+
+fn makeMultiFlagPattern() -> f64 {
+    let pattern = Regex::new(r"(?i)hello").unwrap();
+    let count: f64 = 4.0;
+    count
+}
+
+fn makeSpecialPattern() -> f64 {
+    let pattern = Regex::new(r"\d+\.\d+").unwrap();
+    let count: f64 = 5.0;
+    count
+}
+
+fn makeDigitPattern() -> f64 {
+    let pattern = Regex::new(r"[0-9]+").unwrap();
+    let count: f64 = 6.0;
+    count
+}

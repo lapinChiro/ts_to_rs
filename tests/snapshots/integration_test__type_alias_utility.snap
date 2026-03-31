@@ -3,10 +3,27 @@ source: tests/integration_test.rs
 expression: output
 ---
 #[derive(Debug, Clone, PartialEq)]
+pub struct OmitConfigDebug {
+    pub host: String,
+    pub port: f64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct PartialConfig {
     pub host: Option<String>,
     pub port: Option<f64>,
     pub debug: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PickConfigHost {
+    pub host: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RequiredPartialUser {
+    pub name: String,
+    pub age: f64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -32,4 +49,28 @@ struct ExtendedConfig {
 struct Combined {
     a: f64,
     b: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct PartialUser {
+    name: Option<String>,
+    age: Option<f64>,
+}
+
+type FullUser = RequiredPartialUser;
+
+type HostOnly = PickConfigHost;
+
+type WithoutDebug = OmitConfigDebug;
+
+type ReadonlyConfig = Config;
+
+type StringMap = HashMap<String, f64>;
+
+fn getHost(config: HostOnly) -> String {
+    config.host
+}
+
+fn createConfig(host: String, port: f64) -> AppConfig {
+    AppConfig { host: host, port: port, debug: false }
 }

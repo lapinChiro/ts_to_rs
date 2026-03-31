@@ -47,3 +47,31 @@ impl std::fmt::Display for Status {
         write!(f, "{}", self.as_str())
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(i64)]
+enum HttpCode {
+    V200 = 200,
+    V404 = 404,
+    V500 = 500,
+}
+
+impl std::fmt::Display for HttpCode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", *self as i64)
+    }
+}
+
+fn r#move(d: Direction) -> String {
+    format!("Moving {}", d)
+}
+
+fn getStatus(active: bool) -> Status {
+    if active { Status::Active } else { Status::Inactive }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct Route {
+    path: String,
+    method: String,
+}

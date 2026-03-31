@@ -1,12 +1,17 @@
 ---
 source: tests/integration_test.rs
-assertion_line: 480
 expression: output
 ---
 #[derive(Debug, Clone, PartialEq)]
 pub enum InstanceofAnyXType {
     MyError(MyError),
     Other(serde_json::Value),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum StringOrF64 {
+    String(String),
+    F64(f64),
 }
 
 fn truthyCheck(x: Option<String>) {
@@ -30,4 +35,34 @@ fn instanceofAny(x: InstanceofAnyXType) {
     if let InstanceofAnyXType::MyError(x) = x {
         println!("{}", x.message);
     }
+}
+
+fn truthyNumber(x: Option<f64>) -> f64 {
+    if let Some(x) = x {
+        return x;
+    }
+    0.0
+}
+
+fn truthyWithElse(x: Option<String>) -> String {
+    if let Some(x) = x {
+        return x;
+    } else {
+        return "default".to_string();
+    }
+}
+
+fn nullCheck(x: Option<String>) -> String {
+    if let Some(x) = x {
+    } else {
+        return "null".to_string();
+    }
+    x
+}
+
+fn typeofNarrowing(x: StringOrF64) -> String {
+    if let StringOrF64::String(x) = x {
+        return x;
+    }
+    x.toString()
 }

@@ -1,3 +1,5 @@
+// Type registry: types referencing other registered types
+
 interface Origin {
   x: number;
   y: number;
@@ -36,4 +38,26 @@ function useEnum(): number {
 function callWithObject(): boolean {
   drawPoint({ x: 5, y: 10 });
   return true;
+}
+
+// Generic type registration
+interface Container<T> {
+  value: T;
+  label: string;
+}
+
+function wrapValue(v: number): Container<number> {
+  return { value: v, label: "num" };
+}
+
+// Cross-referencing types
+interface Line {
+  start: Origin;
+  end: Origin;
+}
+
+function lineLength(l: Line): number {
+  const dx = l.end.x - l.start.x;
+  const dy = l.end.y - l.start.y;
+  return dx + dy;
 }

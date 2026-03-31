@@ -2,6 +2,18 @@
 source: tests/integration_test.rs
 expression: output
 ---
+#[derive(Debug, Clone, PartialEq)]
+pub enum F64OrString {
+    F64(f64),
+    String(String),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum StringOrF64 {
+    String(String),
+    F64(f64),
+}
+
 fn abs(a: f64) -> f64 {
     let result = if a > 0.0 { a } else { 0.0 };
     result
@@ -17,4 +29,25 @@ fn signOrZero(x: f64) -> String {
 
 fn pick(flag: bool, a: f64, b: f64) -> f64 {
     if flag { a } else { b }
+}
+
+fn formatValue(x: f64) -> String {
+    if x > 0.0 { format!("+{}", x) } else { format!("{}", x) }
+}
+
+fn getLabel(active: bool) -> f64 {
+    let label = if active { 1.0 } else { 0.0 };
+    label
+}
+
+fn max(a: f64, b: f64) -> f64 {
+    if a > b { a } else { b }
+}
+
+fn maybeValue(flag: bool) -> Option<String> {
+    if flag { Some("value".to_string()) } else { None }
+}
+
+fn toDisplay(x: f64) -> StringOrF64 {
+    if x > 0.0 { x } else { "negative" }
 }

@@ -8,6 +8,57 @@ struct Point {
     y: f64,
 }
 
+type Label = String;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Color {
+    Red,
+    Green,
+    Blue,
+}
+
+impl Color {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Color::Red => "red",
+            Color::Green => "green",
+            Color::Blue => "blue",
+        }
+    }
+}
+
+impl std::fmt::Display for Color {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct Circle {
+    radius: f64,
+}
+
+impl Circle {
+    fn new(radius: f64) -> Self {
+        Self { radius }
+    }
+
+    fn area(&self) -> f64 {
+        std::f64::consts::PI * self.radius * self.radius
+    }
+}
+
 fn distance(a: Point, b: Point) -> f64 {
-    0.0
+    let dx = a.x - b.x;
+    let dy = a.y - b.y;
+    (dx * dx + dy * dy).sqrt()
+}
+
+fn describePoint(p: Point) -> String {
+    format!("({}, {})", p.x, p.y)
+}
+
+fn createLabeledCircle(label: Label, radius: f64, color: Color) -> String {
+    let circle = Circle::new(radius);
+    format!("{}: {} circle with area {}", label, color, circle.area())
 }

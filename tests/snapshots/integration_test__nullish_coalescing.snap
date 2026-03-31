@@ -5,3 +5,26 @@ expression: output
 fn withDefault(x: Option<f64>) -> f64 {
     x.unwrap_or_else(|| 0.0)
 }
+
+fn withFallback(name: Option<String>) -> String {
+    name.unwrap_or_else(|| "anonymous".to_string())
+}
+
+fn firstAvailable(a: Option<String>, b: Option<String>, c: String) -> String {
+    a.unwrap_or_else(|| b).unwrap_or_else(|| c)
+}
+
+fn processConfig(timeout: Option<f64>) -> f64 {
+    let t = timeout.unwrap_or_else(|| 3000.0);
+    t
+}
+
+fn getOrDefault(items: Vec<String>, index: f64) -> String {
+    items[index as usize]
+}
+
+fn ensureDefault(x: Option<f64>) -> f64 {
+    let val = x;
+    val.get_or_insert_with(|| 0.0);
+    val
+}

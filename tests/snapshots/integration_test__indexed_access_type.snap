@@ -2,6 +2,60 @@
 source: tests/integration_test.rs
 expression: output
 ---
-fn getBindings(b: Env::Bindings) -> Env::Bindings {
+#[derive(Debug, Clone, PartialEq)]
+pub struct _TypeLit0 {
+    pub DB: String,
+    pub CACHE: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct _TypeLit1 {
+    pub host: String,
+    pub port: f64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct _TypeLit2 {
+    pub token: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct _TypeLit3 {
+    pub name: String,
+    pub age: f64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct Env {
+    Bindings: _TypeLit0,
+}
+
+fn getBindings(b: _TypeLit0) -> _TypeLit0 {
     b
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct AppConfig {
+    database: _TypeLit1,
+    auth: _TypeLit2,
+}
+
+fn getDbHost(config: AppConfig) -> _TypeLit1::host {
+    config.database.host
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct UserList {
+    users: Vec<_TypeLit3>,
+}
+
+fn getFirstUser(list: UserList) -> serde_json::Value {
+    list.users[0]
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct Settings {
+    color: String,
+    size: f64,
+    label: String,
 }

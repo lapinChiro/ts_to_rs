@@ -12,3 +12,20 @@ fn swap(arr: Vec<f64>) -> Vec<f64> {
     let b = arr[1];
     vec![b, a]
 }
+
+fn getThird(arr: Vec<f64>) -> f64 {
+    let c = arr[2];
+    c
+}
+
+fn headAndTail(arr: Vec<f64>) -> f64 {
+    let head = arr[0];
+    let rest = arr[1..].to_vec();
+    head
+}
+
+fn incrementFirst(arr: Vec<f64>) -> f64 {
+    let mut x = arr[0];
+    x = x + 1.0;
+    x
+}

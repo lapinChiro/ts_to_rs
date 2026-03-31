@@ -52,3 +52,25 @@ fn callWithObject() -> bool {
     drawPoint(Origin { x: 5.0, y: 10.0 });
     true
 }
+
+#[derive(Debug, Clone, PartialEq)]
+struct Container<T> {
+    value: T,
+    label: String,
+}
+
+fn wrapValue(v: f64) -> Container<f64> {
+    Container { value: v, label: "num".to_string() }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct Line {
+    start: Origin,
+    end: Origin,
+}
+
+fn lineLength(l: Line) -> f64 {
+    let dx = l.end.x - l.start.x;
+    let dy = l.end.y - l.start.y;
+    dx + dy
+}

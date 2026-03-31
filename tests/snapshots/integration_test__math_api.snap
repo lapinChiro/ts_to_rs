@@ -25,3 +25,31 @@ fn power(x: f64, y: f64) -> f64 {
 fn rootOf(x: f64) -> f64 {
     x.sqrt()
 }
+
+fn smaller(a: f64, b: f64) -> f64 {
+    a.min(b)
+}
+
+fn roundNearest(x: f64) -> f64 {
+    x.round()
+}
+
+fn circleArea(radius: f64) -> f64 {
+    std::f64::consts::PI * radius * radius
+}
+
+fn clamp(value: f64, min: f64, max: f64) -> f64 {
+    value.max(min).min(max)
+}
+
+fn getSign(x: f64) -> f64 {
+    x.signum()
+}
+
+fn truncate(x: f64) -> f64 {
+    x.trunc()
+}
+
+fn naturalLog(x: f64) -> f64 {
+    x.ln()
+}

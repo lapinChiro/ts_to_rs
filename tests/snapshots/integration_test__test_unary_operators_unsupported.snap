@@ -1,0 +1,14 @@
+---
+source: tests/integration_test.rs
+expression: json
+---
+[
+  {
+    "kind": "unsupported unary operator: \"~\"",
+    "location": "27:1"
+  },
+  {
+    "kind": "unsupported unary operator: \"void\"",
+    "location": "32:1"
+  }
+]

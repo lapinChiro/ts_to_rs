@@ -16,3 +16,36 @@ fn toggle(flag: Option<bool>) -> bool {
     let flag = flag.unwrap_or(false);
     !flag
 }
+
+fn createLabel(text: Option<String>, size: Option<f64>, bold: Option<bool>) -> String {
+    let text = text.unwrap_or_else(|| "label".to_string());
+    let size = size.unwrap_or(12.0);
+    let bold = bold.unwrap_or(false);
+    format!("{} ({}{})", text, size, if bold { " bold" } else { "" })
+}
+
+fn offset(x: f64, delta: Option<f64>) -> f64 {
+    let delta = delta.unwrap_or(1.0);
+    x + delta
+}
+
+fn formatName(first: String, last: String, prefix: Option<String>) -> String {
+    let prefix = prefix.unwrap_or_else(|| "Mr.".to_string());
+    format!("{} {} {}", prefix, first, last)
+}
+
+fn process(items: Vec<String>, separator: Option<String>) -> String {
+    let separator = separator.unwrap_or_else(|| ",".to_string());
+    items.join(&separator)
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct ServerConfig {
+    host: String,
+    port: f64,
+}
+
+fn startServer(config: Option<ServerConfig>) -> String {
+    let config = config.unwrap_or(ServerConfig { host: "localhost".to_string(), port: 8080.0 });
+    format!("{}:{}", config.host, config.port)
+}

@@ -2,14 +2,20 @@ import { Point } from "./geometry";
 import { Config, Logger } from "./utils/config";
 
 export interface User {
-    name: string;
-    age: number;
+  name: string;
+  age: number;
 }
 
 interface Internal {
-    id: number;
+  id: number;
 }
 
 export function add(a: number, b: number): number {
-    return a + b;
+  return a + b;
 }
+
+// Rename import usage
+import { Foo as Bar } from "./other";
+
+// Re-export
+export { Point };

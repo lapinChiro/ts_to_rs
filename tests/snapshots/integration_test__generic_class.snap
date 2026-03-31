@@ -24,3 +24,45 @@ impl<A, B> Pair<A, B> {
         Self { first: a, second: b }
     }
 }
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Stack<T> {
+    pub items: Vec<T>,
+}
+
+impl<T> Stack<T> {
+    pub fn new() -> Self {
+        Self { items: vec![] }
+    }
+
+    pub fn isEmpty(&self) -> bool {
+        self.items.len() as f64 == 0.0
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct NumberBox<T: f64> {
+    pub value: T,
+}
+
+impl<T: f64> NumberBox<T> {
+    pub fn new(val: T) -> Self {
+        Self { value: val }
+    }
+
+    pub fn double(&self) -> f64 {
+        self.value * 2.0
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct KeyValue<K, V> {
+    pub key: K,
+    pub value: V,
+}
+
+impl<K, V> KeyValue<K, V> {
+    pub fn new(key: K, value: V) -> Self {
+        Self { key, value }
+    }
+}

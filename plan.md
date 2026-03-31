@@ -9,7 +9,7 @@
 | コンパイル(file) | 109/158 (69.0%) |
 | コンパイル(dir) | 156/158 (98.7%) |
 | テスト数 | 1541 |
-| コンパイルテストスキップ | 11 件（builtins なし） / 10 件（builtins あり） |
+| コンパイルテストスキップ | 26 件（builtins なし） / 25 件（builtins あり）※T-3 fixture 拡充で 15 件追加 |
 
 ### エラーカテゴリ内訳（58 件）
 
@@ -44,18 +44,21 @@
 | T-1 | テスト基盤の構造的欠陥修正（unsupported スナップショット化、orphan 解消、RAII 化） | `7b8e754` |
 | T-2 | コンパイルテスト品質改善（#![allow] 分解、ミュータビリティ推論改善、新規バグ追跡） | `773a4c6` |
 | S1 | サイレント意味変更3件修正（f64 guard化、optional chaining safe access、prelude型名衝突防止） | 未push |
+| T-3 | スナップショットテスト内容の体系的拡充（30+ WEAK TEST fixture の入力拡充） | `4e995ca` 後 |
 
 ### Phase T: E2E テスト基盤改修（進行中）
 
-T-1, T-2, S1 完了。残り T-3, T-4。
+T-1, T-2, S1, T-3 完了。残り T-4。
+
+T-3 の fixture 拡充過程で 11 件のコンパイルエラーを新規発見し、TODO に I-320〜I-330 として記録済み。
+collecting モード切替 5 件、compile_test skip 追加 15 件。
 
 | サブフェーズ | PRD | 内容 | 状態 |
 |-------------|-----|------|------|
-| **T-3** | `backlog/t3-snapshot-test-enrichment.md` | 30+ WEAK TEST fixture の内容拡充 | 未着手 |
+| **T-3** | — | 30+ WEAK TEST fixture の内容拡充 | **完了** |
 | **T-4** | `backlog/t4-e2e-coverage-expansion.md` | E2E 未テスト機能への新規スクリプト追加 | 未着手 |
 
 **未達成の完了基準**:
-- WEAK TEST 判定が 0 件（30+ 件 → 全解消）
 - E2E カバレッジ: スナップショット fixture の 50% 以上（現状 ~25%）
 
 ### Phase R-2: TypeDef の TS 型メタデータ分離（I-312）
