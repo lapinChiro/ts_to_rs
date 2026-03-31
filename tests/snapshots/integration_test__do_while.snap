@@ -65,23 +65,25 @@ fn multiplyUntilOverflow(a: f64, b: f64, limit: f64) -> f64 {
 fn sumPositiveOnly(values: Vec<f64>) -> f64 {
     let mut i = 0.0;
     let mut total = 0.0;
-    loop {
-        if values[i as usize] < 0.0 {
+    'do_while_loop: loop {
+        'do_while: {
+            if values[i as usize] < 0.0 {
+                {
+    let _old = i;
+    i = i + 1.0;
+    _old
+};
+                break 'do_while;
+            }
+            total = total + values[i as usize];
             {
     let _old = i;
     i = i + 1.0;
     _old
 };
-            continue;
         }
-        total = total + values[i as usize];
-        {
-    let _old = i;
-    i = i + 1.0;
-    _old
-};
         if !(i < values.len() as f64) {
-            break;
+            break 'do_while_loop;
         }
     }
     total

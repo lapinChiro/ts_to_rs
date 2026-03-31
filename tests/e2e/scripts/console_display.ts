@@ -18,4 +18,17 @@ function main(): void {
     // Mixed: string label + enum
     console.log("status:", s);
     console.log("direction:", d);
+
+    // Optional values (I-339: should print value, not Some(...))
+    const maybeNum: number | undefined = 42;
+    console.log("maybe num:", maybeNum);
+
+    const maybeStr: string | undefined = "hello";
+    console.log("maybe str:", maybeStr);
+
+    const maybeBool: boolean | undefined = true;
+    console.log("maybe bool:", maybeBool);
+
+    const noneVal: number | undefined = undefined;
+    console.log("none val:", noneVal);
 }

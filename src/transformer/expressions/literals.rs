@@ -101,13 +101,13 @@ pub(super) fn is_string_type(ty: &RustType) -> bool {
 
 /// `println!` の引数で `{:?}` (Debug) を使うべき型かどうかを判定する。
 ///
-/// `Vec<T>`, `Option<T>`, `Tuple`, 型不明の場合は Debug フォーマットを使う。
+/// `Vec<T>`, `Tuple` は Debug フォーマットを使う。
 /// プリミティブ型と Named 型（enum/struct）は Display を使う。
+/// `Option<T>` は console.log 変換時に `wrap_option_for_display` で個別処理される。
 pub(super) fn needs_debug_format(ty: Option<&RustType>) -> bool {
     match ty {
         None => false, // 型不明の場合は Display を試みる（コンパイルエラーで発見できる）
         Some(RustType::Vec(_)) => true,
-        Some(RustType::Option(_)) => true,
         Some(RustType::Tuple(_)) => true,
         _ => false,
     }

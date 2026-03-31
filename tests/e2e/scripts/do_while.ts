@@ -45,4 +45,31 @@ function main(): void {
         x = Math.floor(x / 2);
     } while (x > 10);
     console.log("halved:", x);
+
+    // do-while with continue (I-341: continue must check condition, not infinite loop)
+    let total: number = 0;
+    let j: number = 0;
+    do {
+        j = j + 1;
+        if (j % 2 === 0) {
+            continue;
+        }
+        total = total + j;
+    } while (j < 10);
+    console.log("odd sum:", total);
+
+    // do-while with continue and early exit condition
+    let found: number = -1;
+    let k: number = 0;
+    do {
+        k = k + 1;
+        if (k % 3 !== 0) {
+            continue;
+        }
+        if (k > 10) {
+            found = k;
+            break;
+        }
+    } while (k < 20);
+    console.log("first multiple of 3 > 10:", found);
 }

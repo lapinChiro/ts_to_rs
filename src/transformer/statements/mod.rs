@@ -88,9 +88,11 @@ impl<'a> Transformer<'a> {
             ast::Stmt::Labeled(labeled_stmt) => {
                 Ok(vec![self.convert_labeled_stmt(labeled_stmt, return_type)?])
             }
-            ast::Stmt::DoWhile(do_while) => {
-                Ok(vec![self.convert_do_while_stmt(do_while, return_type)?])
-            }
+            ast::Stmt::DoWhile(do_while) => Ok(vec![self.convert_do_while_stmt(
+                do_while,
+                return_type,
+                None,
+            )?]),
             ast::Stmt::Try(try_stmt) => self.convert_try_stmt(try_stmt, return_type),
             ast::Stmt::Decl(ast::Decl::Fn(fn_decl)) => {
                 Ok(vec![self.convert_nested_fn_decl(fn_decl)?])

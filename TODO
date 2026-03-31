@@ -15,8 +15,6 @@ Tier 内の記載順序が優先度。根本原因を共有するイシューは
 
 放置すると E2E テストの信頼性が損なわれ、全開発成果が検証不能になる。
 
-- **[I-341]** **do-while `continue` が条件チェックをスキップ** — `loop { body; if !cond { break; } }` 変換で `continue` が条件をバイパスし無限ループ化。`src/transformer/statements/control_flow.rs:554`
-- **[I-339]** **`Option<T>` の console.log が `Some(v)` 表示** — `needs_debug_format()` が `Option` に `{:?}` を使用。TS: `5` → Rust: `Some(5.0)`。`src/transformer/expressions/literals.rs:110`
 - **[I-319]** **配列インデックスの境界外 panic** — `arr[0]` が空配列で panic（TS は `undefined`）。~97 箇所、拡大中。解決策: `arr.get(idx).cloned()` で `Option<T>` 化
 - **[I-298]** **spread 上書き時の副作用式評価消失** — 発生頻度は極めて低い
 

@@ -3,12 +3,56 @@
 use anyhow::{anyhow, Result};
 use swc_ecma_ast as ast;
 
-use crate::ir::{BinOp, Expr, RustType, Stmt};
+use crate::ir::{BinOp, ClosureBody, Expr, Param, RustType, Stmt};
 use crate::registry::TypeDef;
 
 use super::literals::needs_debug_format;
 use super::methods::map_method_call;
 use crate::transformer::Transformer;
+
+/// Wraps an `Option<T>` expression for TS-compatible display in console.log.
+///
+/// Generates: `expr.as_ref().map_or("undefined".to_string(), |v| v.to_string())`
+/// Uses `as_ref()` to borrow instead of consuming the Option (TS console.log doesn't
+/// consume values). For Debug-only inner types (Vec, Tuple): `format!("{:?}", v)`.
+fn wrap_option_for_display(expr: Expr, inner_ty: &RustType) -> Expr {
+    let closure_body = if needs_debug_format(Some(inner_ty)) {
+        Expr::FormatMacro {
+            template: "{:?}".to_string(),
+            args: vec![Expr::Ident("v".to_string())],
+        }
+    } else {
+        Expr::MethodCall {
+            object: Box::new(Expr::Ident("v".to_string())),
+            method: "to_string".to_string(),
+            args: vec![],
+        }
+    };
+
+    Expr::MethodCall {
+        object: Box::new(Expr::MethodCall {
+            object: Box::new(expr),
+            method: "as_ref".to_string(),
+            args: vec![],
+        }),
+        method: "map_or".to_string(),
+        args: vec![
+            Expr::MethodCall {
+                object: Box::new(Expr::StringLit("undefined".to_string())),
+                method: "to_string".to_string(),
+                args: vec![],
+            },
+            Expr::Closure {
+                params: vec![Param {
+                    name: "v".to_string(),
+                    ty: None,
+                }],
+                return_type: None,
+                body: ClosureBody::Expr(Box::new(closure_body)),
+            },
+        ],
+    }
+}
 
 impl<'a> Transformer<'a> {
     /// Converts a function/method call expression.
@@ -73,15 +117,20 @@ impl<'a> Transformer<'a> {
                                 "error" | "warn" => "eprintln",
                                 _ => return Err(anyhow!("unsupported console method: {}", method)),
                             };
-                            let args = self.convert_call_args(&call.args)?;
-                            let use_debug = call
-                                .args
-                                .iter()
-                                .map(|arg| {
-                                    let ty = self.get_expr_type(&arg.expr);
-                                    needs_debug_format(ty)
-                                })
-                                .collect();
+                            let raw_args = self.convert_call_args(&call.args)?;
+                            let mut args = Vec::with_capacity(raw_args.len());
+                            let mut use_debug = Vec::with_capacity(raw_args.len());
+                            for (raw_arg, call_arg) in raw_args.into_iter().zip(call.args.iter()) {
+                                let ty = self.get_expr_type(&call_arg.expr);
+                                if let Some(RustType::Option(inner)) = ty {
+                                    // Option<T> → unwrap for TS-compatible display
+                                    args.push(wrap_option_for_display(raw_arg, inner));
+                                    use_debug.push(false);
+                                } else {
+                                    use_debug.push(needs_debug_format(ty));
+                                    args.push(raw_arg);
+                                }
+                            }
                             return Ok(Expr::MacroCall {
                                 name: macro_name.to_string(),
                                 args,

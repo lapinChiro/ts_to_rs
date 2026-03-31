@@ -524,6 +524,21 @@ impl<'a> Transformer<'a> {
                 }
                 Ok(stmt)
             }
+            ast::Stmt::DoWhile(do_while) => {
+                let mut stmt =
+                    self.convert_do_while_stmt(do_while, return_type, Some(&label_name))?;
+                if let Stmt::Loop { ref mut label, .. } = stmt {
+                    *label = Some(label_name);
+                }
+                Ok(stmt)
+            }
+            ast::Stmt::ForIn(for_in) => {
+                let mut stmt = self.convert_for_in_stmt(for_in, return_type)?;
+                if let Stmt::ForIn { ref mut label, .. } = stmt {
+                    *label = Some(label_name);
+                }
+                Ok(stmt)
+            }
             _ => Err(anyhow!(
                 "unsupported labeled statement: label on non-loop statement"
             )),
@@ -551,37 +566,80 @@ impl<'a> Transformer<'a> {
     }
 
     /// Converts a `do...while` statement to `loop` with break condition at the end.
+    ///
+    /// When the body contains `continue` targeting this do-while, wraps the body in
+    /// a labeled block (`'do_while: { ... }`) so that `continue` is rewritten to
+    /// `break 'do_while`, correctly falling through to the condition check.
+    /// Unlabeled `break` inside the block is also rewritten to target the outer loop.
     pub(super) fn convert_do_while_stmt(
         &mut self,
         do_while: &ast::DoWhileStmt,
         return_type: Option<&RustType>,
+        loop_label: Option<&str>,
     ) -> Result<Stmt> {
-        let body_stmts = match do_while.body.as_ref() {
+        let mut body_stmts = match do_while.body.as_ref() {
             ast::Stmt::Block(block) => self.convert_stmt_list(&block.stmts, return_type)?,
             single => self.convert_stmt(single, return_type)?,
         };
 
         // Cat A: boolean context (do-while condition)
         let condition = self.convert_expr(&do_while.test)?;
-        let break_check = Stmt::If {
-            condition: Expr::UnaryOp {
-                op: UnOp::Not,
-                operand: Box::new(condition),
-            },
-            then_body: vec![Stmt::Break {
+
+        let needs_labeled_block = has_continue_targeting_do_while(&body_stmts, loop_label, 0);
+
+        if needs_labeled_block {
+            // The outer loop needs a label so that `break` inside the LabeledBlock
+            // can target it (Rust E0695: unlabeled break inside labeled block).
+            let effective_loop_label = loop_label.unwrap_or("do_while_loop");
+
+            rewrite_do_while_body(
+                &mut body_stmts,
+                "do_while",
+                loop_label,
+                effective_loop_label,
+                0,
+            );
+
+            let break_check = Stmt::If {
+                condition: Expr::UnaryOp {
+                    op: UnOp::Not,
+                    operand: Box::new(condition),
+                },
+                then_body: vec![Stmt::Break {
+                    label: Some(effective_loop_label.to_string()),
+                    value: None,
+                }],
+                else_body: None,
+            };
+
+            Ok(Stmt::Loop {
+                label: Some(effective_loop_label.to_string()),
+                body: vec![
+                    Stmt::LabeledBlock {
+                        label: "do_while".to_string(),
+                        body: body_stmts,
+                    },
+                    break_check,
+                ],
+            })
+        } else {
+            let break_check = Stmt::If {
+                condition: Expr::UnaryOp {
+                    op: UnOp::Not,
+                    operand: Box::new(condition),
+                },
+                then_body: vec![Stmt::Break {
+                    label: None,
+                    value: None,
+                }],
+                else_body: None,
+            };
+            body_stmts.push(break_check);
+            Ok(Stmt::Loop {
                 label: None,
-                value: None,
-            }],
-            else_body: None,
-        };
-
-        let mut loop_body = body_stmts;
-        loop_body.push(break_check);
-
-        Ok(Stmt::Loop {
-            label: None,
-            body: loop_body,
-        })
+                body: body_stmts,
+            })
+        }
     }
 
     /// Converts a C-style `for` statement to a `loop` when it doesn't match the simple counter pattern.
@@ -750,5 +808,162 @@ impl<'a> Transformer<'a> {
                 body: ClosureBody::Block(body),
             }),
         })
+    }
+}
+
+/// Returns `true` if the statement list contains a `continue` targeting this do-while.
+fn has_continue_targeting_do_while(stmts: &[Stmt], loop_label: Option<&str>, depth: usize) -> bool {
+    for stmt in stmts {
+        let found = match stmt {
+            Stmt::Continue { label: None } if depth == 0 => true,
+            Stmt::Continue { label: Some(l) } if loop_label.is_some_and(|ll| l == ll) => true,
+            Stmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                has_continue_targeting_do_while(then_body, loop_label, depth)
+                    || else_body
+                        .as_ref()
+                        .is_some_and(|eb| has_continue_targeting_do_while(eb, loop_label, depth))
+            }
+            Stmt::LabeledBlock { body, .. } => {
+                has_continue_targeting_do_while(body, loop_label, depth)
+            }
+            Stmt::IfLet {
+                then_body,
+                else_body,
+                ..
+            } => {
+                has_continue_targeting_do_while(then_body, loop_label, depth)
+                    || else_body
+                        .as_ref()
+                        .is_some_and(|eb| has_continue_targeting_do_while(eb, loop_label, depth))
+            }
+            Stmt::Match { arms, .. } => arms
+                .iter()
+                .any(|arm| has_continue_targeting_do_while(&arm.body, loop_label, depth)),
+            Stmt::Loop { body, .. }
+            | Stmt::While { body, .. }
+            | Stmt::ForIn { body, .. }
+            | Stmt::WhileLet { body, .. } => {
+                has_continue_targeting_do_while(body, loop_label, depth + 1)
+            }
+            _ => false,
+        };
+        if found {
+            return true;
+        }
+    }
+    false
+}
+
+/// Rewrites `continue` and `break` in a do-while body for correct semantics.
+///
+/// `continue` targeting this do-while → `break 'block_label` (falls through to condition).
+/// Unlabeled `break` at depth 0 → `break 'loop_label` (avoids Rust E0695 inside labeled block).
+fn rewrite_do_while_body(
+    stmts: &mut [Stmt],
+    block_label: &str,
+    loop_label: Option<&str>,
+    effective_loop_label: &str,
+    depth: usize,
+) {
+    for stmt in stmts.iter_mut() {
+        match stmt {
+            // continue targeting this do-while → break 'block_label
+            Stmt::Continue { label: None } if depth == 0 => {
+                *stmt = Stmt::Break {
+                    label: Some(block_label.to_string()),
+                    value: None,
+                };
+            }
+            Stmt::Continue { label: Some(l) } if loop_label.is_some_and(|ll| l == ll) => {
+                *stmt = Stmt::Break {
+                    label: Some(block_label.to_string()),
+                    value: None,
+                };
+            }
+            // unlabeled break at depth 0 → break 'loop_label (E0695)
+            Stmt::Break { label: None, value } if depth == 0 => {
+                *stmt = Stmt::Break {
+                    label: Some(effective_loop_label.to_string()),
+                    value: value.take(),
+                };
+            }
+            // Recurse into control flow blocks (same loop depth)
+            Stmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                rewrite_do_while_body(
+                    then_body,
+                    block_label,
+                    loop_label,
+                    effective_loop_label,
+                    depth,
+                );
+                if let Some(else_body) = else_body {
+                    rewrite_do_while_body(
+                        else_body,
+                        block_label,
+                        loop_label,
+                        effective_loop_label,
+                        depth,
+                    );
+                }
+            }
+            Stmt::LabeledBlock { body, .. } => {
+                rewrite_do_while_body(body, block_label, loop_label, effective_loop_label, depth);
+            }
+            Stmt::IfLet {
+                then_body,
+                else_body,
+                ..
+            } => {
+                rewrite_do_while_body(
+                    then_body,
+                    block_label,
+                    loop_label,
+                    effective_loop_label,
+                    depth,
+                );
+                if let Some(else_body) = else_body {
+                    rewrite_do_while_body(
+                        else_body,
+                        block_label,
+                        loop_label,
+                        effective_loop_label,
+                        depth,
+                    );
+                }
+            }
+            Stmt::Match { arms, .. } => {
+                for arm in arms {
+                    rewrite_do_while_body(
+                        &mut arm.body,
+                        block_label,
+                        loop_label,
+                        effective_loop_label,
+                        depth,
+                    );
+                }
+            }
+            // Nested loops increase depth
+            Stmt::Loop { body, .. }
+            | Stmt::While { body, .. }
+            | Stmt::ForIn { body, .. }
+            | Stmt::WhileLet { body, .. } => {
+                rewrite_do_while_body(
+                    body,
+                    block_label,
+                    loop_label,
+                    effective_loop_label,
+                    depth + 1,
+                );
+            }
+            _ => {}
+        }
     }
 }
