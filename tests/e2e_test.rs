@@ -709,3 +709,78 @@ fn test_e2e_typeof_const_ts_rust_stdout_match() {
 fn test_e2e_callback_type_inference_ts_rust_stdout_match() {
     run_e2e_test("callback_type_inference");
 }
+
+#[test]
+fn test_e2e_do_while_ts_rust_stdout_match() {
+    run_e2e_test("do_while");
+}
+
+#[test]
+fn test_e2e_multivar_decl_ts_rust_stdout_match() {
+    run_e2e_test("multivar_decl");
+}
+
+#[test]
+fn test_e2e_unary_ops_ts_rust_stdout_match() {
+    run_e2e_test("unary_ops");
+}
+
+#[test]
+fn test_e2e_for_variations_ts_rust_stdout_match() {
+    run_e2e_test("for_variations");
+}
+
+#[test]
+fn test_e2e_type_alias_ts_rust_stdout_match() {
+    run_e2e_test("type_alias");
+}
+
+#[test]
+fn test_e2e_fn_expr_ts_rust_stdout_match() {
+    run_e2e_test("fn_expr");
+}
+
+#[test]
+fn test_e2e_class_methods_ts_rust_stdout_match() {
+    run_e2e_test("class_methods");
+}
+
+#[test]
+fn test_e2e_class_advanced_ts_rust_stdout_match() {
+    run_e2e_test("class_advanced");
+}
+
+#[test]
+fn test_e2e_interface_structs_ts_rust_stdout_match() {
+    run_e2e_test("interface_structs");
+}
+
+#[test]
+fn test_e2e_nullable_return_ts_rust_stdout_match() {
+    run_e2e_test("nullable_return");
+}
+
+#[test]
+fn test_e2e_explicit_type_args_ts_rust_stdout_match() {
+    run_e2e_test("explicit_type_args");
+}
+
+#[test]
+fn test_e2e_assignment_expected_ts_rust_stdout_match() {
+    run_e2e_test("assignment_expected");
+}
+
+#[test]
+fn test_e2e_interface_composition_ts_rust_stdout_match() {
+    run_e2e_test("interface_composition");
+}
+
+#[test]
+fn test_e2e_keyword_types_ts_rust_stdout_match() {
+    run_e2e_test("keyword_types");
+}
+
+#[test]
+fn test_e2e_mixed_features_ts_rust_stdout_match() {
+    run_e2e_test("mixed_features");
+}

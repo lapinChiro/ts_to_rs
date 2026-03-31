@@ -22,6 +22,7 @@
 - 相互参照は `I-XX` で行い、参照先不在時は背景を自己完結的に記述
 - 件数は Hono ベンチマーク実測値（最終実行: 2026-03-31 T-2完了時点 git_sha=773a4c6、110/158 クリーン、58 エラー。S1/T-3 はベンチマーク数値に影響なし）
 - I-320〜I-330 は T-3 fixture 拡充（2026-03-31）で発見。ベンチマーク件数ではなくスナップショットテストのコンパイルチェックで検出
+- I-334〜I-344 は T-4 E2E テスト拡充（2026-03-31）で発見。E2E スクリプト作成時の transpile + compile で検出
 - コンパイルテストスキップ: 25 件（builtins なし）/ 24 件（builtins あり）。従来 11 件 + T-3 追加 14 件
 
 完了済み機能: [doc/completed-features.md](doc/completed-features.md)。設計判断: [doc/design-decisions.md](doc/design-decisions.md)。
@@ -152,6 +153,90 @@
   - fixture: type-assertion で発見
 - **[I-333]** **`basic-types` の unknown typeof narrowing** — `typeof x` で narrowing されたスコープで `Value` と `String` の型不一致
   - fixture: basic-types で発見
+
+#### T-4 E2E テスト拡充で発見されたバグ
+
+- **[I-334]** **union 型の typeof narrowing が `if false` に変換される** — `typeof x === "string"`（x: `string | number`）が `if false` に変換され、narrowing が機能しない
+  - `src/transformer/expressions/patterns.rs:94-173` の `try_convert_typeof_comparison()` が union enum のバリアントを照合
+  - **問題**: `src/transformer/expressions/patterns.rs:168` で `TypeofMatch::Placeholder` にフォールバックし `Expr::BoolLit(false)` を生成。`resolve_typeof_match()`（同ファイル `:485-534`）が個別の型（String, F64, Bool）のみチェックし、union enum 型を処理しない
+  - **制御フロー**: `src/transformer/statements/control_flow.rs:20-106` の `convert_if_stmt()` が narrowing guard を抽出し `resolve_if_let_pattern()`（`:397-433`）で if-let パターン生成を試みるが、typeof guard のバリアント解決 `resolve_typeof_to_enum_variant()`（`:341-368`）がマッチしないと `None` を返し、通常の式変換にフォールバック → `if false` に帰結
+  - **解決策**: `try_convert_typeof_comparison()` で operand が union enum 型の場合に `matches!(EnumName::Variant(_))` パターンを生成。if-let パスを通す場合は `convert_if_stmt()` で typeof guard → `if let EnumName::Variant(x) = val` に変換
+  - **影響**: typeof narrowing を使う全ての union 型パターンがブロック。E2E テスト `typeof_narrowing.ts` が作成不可
+  - 🔗 I-215（typeof "object"/"function"）、I-213（`!==` ガード排除）と関連するが、本件は `===` での正方向 narrowing が対象
+
+- **[I-335]** **`&mut self` メソッド呼び出しでの `let mut` 推論漏れ** — `counter.increment()` で `increment(&mut self)` を呼ぶが `let counter` に `mut` が付与されない（E0596）
+  - `src/transformer/statements/mutability.rs:163-177` の `collect_mutated_vars_from_expr` が `Expr::MethodCall` を処理する際、`MUTATING_METHODS`（同ファイル `:9-12`）のハードコードリストのみ参照
+  - **ハードコードリスト**: `reverse`, `sort`, `sort_by`, `drain`, `push`, `pop`, `remove`, `insert`, `clear`, `truncate`, `retain` — 標準ライブラリメソッドのみ
+  - `src/transformer/functions/helpers.rs:56-59` にも同じリストが重複（DRY 違反）
+  - **問題**: ユーザー定義クラスのメソッドが `&mut self` を取るかどうかを判定するメタデータがない。`ClassInfo` の `methods` にはメソッドの `has_mut_self` フラグが格納されているが、mutability 検出フェーズで参照されていない
+  - **解決策**: (1) `ClassInfo::methods` の `has_mut_self` 情報を mutability 検出フェーズに伝播。メソッド呼び出し `obj.method()` 時に `obj` の型から `ClassInfo` を引き、呼ばれるメソッドの `has_mut_self` を確認。(2) またはハードコードリストを廃止し、IR 生成時に `&mut self` 情報を `Expr::MethodCall` に付与
+  - **影響**: クラスインスタンスの mutation を伴う全パターン（E2E テスト `getter_setter.ts`, `class_advanced.ts` で検出）
+  - 🔗 I-255（`x++`/`x--` mutation）、I-258（クロージャ内 mut）と同系統だが、メソッド呼び出し経由の mutation という独自パターン
+
+- **[I-336]** **abstract class 派生クラスの `super()` がリテラル出力される** — `super("Circle")` が Rust で `super("Circle");` としてそのまま生成される（構文エラー）
+  - `src/transformer/classes/inheritance.rs:145-180` の `transform_class_with_inheritance()` で、親が abstract class の場合に `generate_child_of_abstract()` を呼ぶ
+  - `src/transformer/classes/generation.rs:106-135` の `generate_child_of_abstract()` は、constructor を **そのまま** `make_impl()` に渡す（`:117-124`）。`rewrite_super_constructor()` を呼ばない
+  - **正常パス**: 非 abstract 親の場合は `generate_child_class()`（`:161-205`）が `rewrite_super_constructor(c, parent)`（`:175-179`）を呼び、`super(args)` を `Self { field: value }` に変換する
+  - `src/transformer/classes/inheritance.rs:22-98` の `rewrite_super_constructor()` は super 呼び出しの引数を親フィールドにマッピングするが、abstract class パスでは呼ばれない
+  - **解決策**: `generate_child_of_abstract()` で constructor を使用する前に `rewrite_super_constructor()` 相当の処理を適用。abstract class のフィールド情報を `ClassInfo` から取得し、`super()` の引数をフィールド初期化に変換
+  - **影響**: フィールドを持つ abstract class の全派生クラス。E2E テスト `abstract_class.ts` が作成不可
+
+- **[I-337]** **trait default method で親 abstract class のフィールドにアクセス不可** — abstract class の non-abstract メソッドが `self.kind` を参照するが、trait 定義内で `self` にフィールドがない
+  - `src/transformer/classes/generation.rs:81-100` の `generate_abstract_class_items()` が全メソッド（abstract/concrete 問わず）を trait メソッドに変換（`:87` で `has_self: true`）
+  - **問題**: concrete メソッドの body 内の `self.field` アクセスは、trait 定義では不正（trait には具象フィールドがない）。Rust では trait の default method から実装者のフィールドに直接アクセスできない
+  - **解決策**: (1) フィールドアクセスを含む concrete メソッドは trait の required method（abstract にする）に変換し、各実装 struct の `impl Trait for Struct` で body を生成。(2) または getter メソッド（`fn kind(&self) -> &str`）を trait に追加し、default method 内で `self.kind()` に変換。(3) フィールドアクセスのない concrete メソッドのみ trait default method として残す
+  - **影響**: I-336 と併せて abstract class の E2E テストが全面ブロック
+
+- **[I-338]** **intersection 型が使用箇所ごとに異なる struct 名を生成** — 同一の `HasName & HasAge` 型が `_Intersection0`, `_Intersection2` 等、異なる名前の struct を生成（E0308 型不一致）
+  - `src/pipeline/type_converter/intersections.rs:614-624` および `:719-721` で `synthetic.generate_name("Intersection")` を呼ぶたびにカウンタがインクリメント
+  - **問題**: 同一のメンバー構成を持つ intersection でも、annotation 内で遭遇するたびに新しい名前が生成される。名前の一意性が「出現順序」で決まり、「構造的同値性」で判定されていない
+  - **解決策**: intersection のメンバー構成（フィールド名+型のソート済みキー）をハッシュし、同一構成なら同一の struct 名を再利用。`synthetic` の `generate_name` に構造的キャッシュを導入
+  - **影響**: 同一 intersection 型を複数変数で使用する全パターン。E2E テスト `intersection_methods.ts` で interface に変更して回避済み
+  - 🔗 I-318（`_TypeLit` 構造体の重複生成）と同系統の問題
+
+- **[I-339]** **`Option<T>` 型の `console.log` 出力が `Some(v)` / `None` になる** — TS の `console.log(nullableValue)` は値を直接表示するが、Rust では `{:?}` フォーマットで `Some(5.0)` と表示される
+  - `src/transformer/expressions/literals.rs:106-114` の `needs_debug_format()` が `Option(_)` に対して `true` を返す（`:110`）
+  - `src/generator/expressions/mod.rs:405-436` の `generate_macro_call()` が `use_debug[i] == true` のとき `{:?}` を使用（`:422-423`）
+  - **問題**: TS では `console.log(null)` → `null`、`console.log(5)` → `5`。Rust では `println!("{:?}", None)` → `None`、`println!("{:?}", Some(5.0))` → `Some(5.0)` となり出力が異なる（S1: サイレント意味変更）
+  - **解決策**: `Option<T>` の場合、`match` で分岐して `Some(v)` → `v` を Display 出力、`None` → `"null"` を出力するヘルパーを生成。または `println!` 内で `.map(|v| v.to_string()).unwrap_or("null".to_string())` パターンを挿入
+  - **影響**: nullable 値を console.log に渡す全パターン。E2E テスト `nullable_return.ts` では null check 後に値を出力する形で回避済み
+
+- **[I-340]** **Generic 型パラメータに `Clone` bound が付与されない** — `fn first<T>(arr: Vec<T>) -> T` で `arr[0]` が `T: Clone` なしで move エラー（E0507）
+  - Generic 関数内で `Vec<T>` からのインデックスアクセス `arr[0]` は `T` が `Clone` を実装していないと move できない
+  - **問題**: TS の generics にはこの制約がないため、transpiler は型パラメータに trait bound を追加する必要がある。現在の実装では `T extends number` → `T: f64`（I-273 で別途追跡）以外の trait bound 生成ロジックがない
+  - **解決策**: Generic 関数の body を解析し、`Vec<T>` のインデックスアクセスや `.clone()` 呼び出しがある場合に `T: Clone` を自動付与。または保守的に全 generic 型パラメータに `Clone` bound を付与
+  - **影響**: Generic 関数内で Vec 操作を行う全パターン。E2E テスト `generics.ts` の強化がブロック
+
+- **[I-342]** **getter/setter の `get`/`set` キーワードがメソッド化されるが呼び出し側が `()` なしのフィールドアクセスになる** — コンパイルエラー（E0609: no field）
+  - **定義側**: `src/transformer/classes/members.rs:225-276` の `build_method()` で `MethodKind::Getter` → `fn name(&self) -> T`、`MethodKind::Setter` → `fn set_name(&mut self, v: T)` に正しく変換
+  - **呼び出し側**: `src/transformer/expressions/member_access.rs:213-245` の `convert_member_expr()` が `obj.field` を常に `Expr::FieldAccess` に変換。getter かどうかの判定ロジックが存在しない
+  - **問題**: TS の `get fahrenheit()` は `temp.fahrenheit`（プロパティアクセス構文）で呼ぶが、Rust では `temp.fahrenheit()`（メソッド呼び出し）が必要。定義側はメソッドとして生成されるが、呼び出し側はフィールドアクセスのまま
+  - **具体例**: `temp.fahrenheit` → 生成 Rust で `temp.fahrenheit`（存在しないフィールドへのアクセス）、正しくは `temp.fahrenheit()`
+  - **解決策**: (1) TypeResolver / ClassInfo に getter メソッドの一覧を保持し、`convert_member_expr()` でフィールド名が getter と一致する場合に `Expr::MethodCall { args: [] }` を生成。(2) setter も同様に `obj.prop = val` → `obj.set_prop(val)` への変換が必要
+  - **影響**: `get`/`set` キーワードを使用する全クラス。fixture `getter-setter` の E2E テストが作成不可
+
+- **[I-341]** **do-while ループ内の `continue` が条件チェックをスキップする** — **S1: サイレント意味変更**
+  - do-while は `loop { body; if !cond { break; } }` に変換される（`src/transformer/statements/loops.rs`）
+  - **問題**: `body` 内の `continue` は `loop` 先頭に戻り、条件チェック `if !cond { break; }` をスキップする。TS の do-while では `continue` は条件チェックに飛ぶため、セマンティクスが異なる
+  - **具体例**: `do { j++; if (j%2===0) continue; collected += j; } while (j<10)` — TS では `j<10` を毎回チェックするが、Rust では偶数時に条件チェックをスキップし `j` が 10 を超えても実行が続く（TS: 25、Rust: 36）
+  - **解決策**: do-while の変換で条件チェックを `continue` の到達先にも配置。`loop { body; 'continue_target: if !cond { break; } }` ではなく、ラベル付き continue で条件チェックに飛ばすか、条件チェックを body の先頭（初回スキップ）にも配置
+  - **影響**: do-while ループ内で `continue` を使用する全パターン。E2E テスト `do_while.ts` の continue ケースを除外して回避済み
+
+- **[I-343]** **`Vec<Struct>` のインデックスアクセスで move エラー** — コンパイルエラー（E0507: cannot move out of index）
+  - `items[0]` で `items: Vec<Labeled>` から要素を取得する際、`Labeled` が `Copy` を実装していないため move エラー
+  - **問題**: TS では `items[0]` は参照を返すが、Rust では `Vec<T>` のインデックスは `T` を返す。`T` が `Copy` でない struct の場合、move が発生してコンパイルエラーになる
+  - **具体例**: `let item = items[0]` → `E0507: cannot move out of index of Vec<Labeled>`。関数引数として `formatLabel(items[0])` も同様
+  - **解決策**: struct 型の Vec インデックスアクセスを `.clone()` 付きに変換（`items[0].clone()`）。または参照渡し可能な文脈では `&items[0]` を生成し、関数パラメータも `&T` に変換
+  - **影響**: 非 Copy な struct の Vec からのインデックスアクセス全般。E2E テスト `interface_structs.ts`（旧 `optional_fields.ts`）で Vec 使用を回避して対処
+  - 🔗 I-319（配列インデックスの境界外 panic）はセマンティクスの問題、本件は所有権の問題で独立。I-104（所有権推論）の具体的な発現パターン
+
+- **[I-344]** **generic 関数への文字列リテラル引数で `&str` / `String` 型不一致** — コンパイルエラー（E0308: expected String, found &str）
+  - `firstOrDefault<T>(arr: T[], defaultVal: T)` を `firstOrDefault(strs, "none")` で呼ぶ場合、`strs: Vec<String>` から `T = String` が推論されるが、`"none"` は `&str` のまま渡される
+  - **問題**: 非 generic 文脈では expected type に基づいて `"literal".to_string()` が付与されるが、generic パラメータ位置では expected type が `T`（未解決）のため `.to_string()` が付与されない
+  - **具体例**: `firstOrDefault(strs, "none")` → 生成 Rust `firstOrDefault(strs, "none")` で `E0308: expected String, found &str`
+  - **解決策**: generic 関数の型引数推論結果を引数の expected type にフィードバックする 2 パス方式。`T = String` が推論された後、`defaultVal: T` → `defaultVal: String` として string literal に `.to_string()` を付与
+  - **影響**: generic 関数に String 型パラメータとして文字列リテラルを渡す全パターン。E2E テスト `generics.ts` の string 引数テストがブロック
+  - 🔗 I-311（型引数推論結果の引数 expected type フィードバック）が根本的な解決策。I-324（文字列結合の &str/String 不一致）は二項演算の問題であり本件は関数引数の問題で独立
 
 #### import/export
 
