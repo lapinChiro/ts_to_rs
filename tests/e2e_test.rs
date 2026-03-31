@@ -5,6 +5,10 @@ use std::time::{Duration, SystemTime};
 
 use ts_to_rs::transpile;
 
+#[path = "test_helpers.rs"]
+mod test_helpers;
+use test_helpers::{strip_internal_use_statements, TempFile};
+
 /// Path to the E2E scripts directory.
 const SCRIPTS_DIR: &str = "tests/e2e/scripts";
 
@@ -41,21 +45,6 @@ fn write_with_advancing_mtime(path: &str, content: &str) {
         .unwrap_or_else(|e| panic!("failed to open {path} for mtime update: {e}"));
     file.set_modified(next)
         .unwrap_or_else(|e| panic!("failed to set mtime on {path}: {e}"));
-}
-
-/// Strips internal module `use` statements while preserving external crate imports.
-fn strip_internal_use_statements(rs_source: &str) -> String {
-    rs_source
-        .lines()
-        .filter(|line| {
-            let trimmed = line.trim_start();
-            if !trimmed.starts_with("use ") && !trimmed.starts_with("pub use ") {
-                return true;
-            }
-            !trimmed.contains("crate::") && !trimmed.contains("super::")
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
 }
 
 /// Result of running a single E2E script on both TS and Rust sides.
@@ -132,13 +121,14 @@ fn execute_e2e_with_options(name: &str, opts: &E2eOptions) -> E2eResult {
     );
 
     // Step 3: Run TS via locally-installed tsx
-    let ts_exec_path = format!("{SCRIPTS_DIR}/{name}_exec.ts");
     let ts_exec_source = format!("{ts_source}\nmain();\n");
-    fs::write(&ts_exec_path, &ts_exec_source)
-        .unwrap_or_else(|e| panic!("failed to write {ts_exec_path}: {e}"));
+    let ts_exec_guard = TempFile::new(
+        format!("{SCRIPTS_DIR}/{name}_exec.ts"),
+        &ts_exec_source,
+    );
 
     let mut ts_cmd = Command::new(TSX_BIN);
-    ts_cmd.arg(&ts_exec_path);
+    ts_cmd.arg(ts_exec_guard.path());
     for (k, v) in &opts.env {
         ts_cmd.env(k, v);
     }
@@ -162,8 +152,6 @@ fn execute_e2e_with_options(name: &str, opts: &E2eOptions) -> E2eResult {
             .output()
             .expect("failed to execute tsx — run `npm install` in tests/e2e/")
     };
-
-    let _ = fs::remove_file(&ts_exec_path);
 
     assert!(
         ts_output.status.success(),
@@ -277,6 +265,7 @@ fn run_e2e_multi_file_test(name: &str) {
     entries.sort_by_key(|e| e.file_name());
 
     let mut mod_names: Vec<String> = Vec::new();
+    let mut mod_guards: Vec<TempFile> = Vec::new();
     let mut main_rs = String::new();
 
     for entry in &entries {
@@ -304,6 +293,7 @@ fn run_e2e_multi_file_test(name: &str) {
         } else {
             let mod_path = format!("{RUST_RUNNER_DIR}/src/{stem}.rs");
             write_with_advancing_mtime(&mod_path, &rs_source);
+            mod_guards.push(TempFile::guard(mod_path));
             mod_names.push(stem);
         }
     }
@@ -322,10 +312,8 @@ fn run_e2e_multi_file_test(name: &str) {
         .output()
         .expect("failed to execute cargo run");
 
-    // Clean up module files
-    for m in &mod_names {
-        let _ = fs::remove_file(format!("{RUST_RUNNER_DIR}/src/{m}.rs"));
-    }
+    // Drop module guards before assert to clean up even on failure
+    drop(mod_guards);
 
     assert!(
         rust_output.status.success(),
@@ -337,16 +325,16 @@ fn run_e2e_multi_file_test(name: &str) {
     let rust_stdout = String::from_utf8_lossy(&rust_output.stdout);
 
     // Run TS (tsx resolves relative imports automatically)
-    let ts_exec_path = format!("{dir}/main_exec.ts");
     let main_ts = fs::read_to_string(format!("{dir}/main.ts")).unwrap();
-    fs::write(&ts_exec_path, format!("{main_ts}\nmain();\n")).unwrap();
+    let ts_exec_guard = TempFile::new(
+        format!("{dir}/main_exec.ts"),
+        &format!("{main_ts}\nmain();\n"),
+    );
 
     let ts_output = Command::new(TSX_BIN)
-        .arg(&ts_exec_path)
+        .arg(ts_exec_guard.path())
         .output()
         .expect("failed to execute tsx");
-
-    let _ = fs::remove_file(&ts_exec_path);
 
     assert!(
         ts_output.status.success(),

@@ -61,10 +61,10 @@
 
 | サブフェーズ | PRD | 内容 | 前提 |
 |-------------|-----|------|------|
-| **T-1** | `backlog/t1-test-infrastructure-foundation.md` | collecting モードの unsupported 検証、orphan 処理、DRY 化、一時ファイル安全化 | なし |
-| **T-2** | `backlog/t2-compile-test-quality.md` | `#![allow]` 範囲縮小、warning 検出、compile skip リストの理由文書化 | T-1 |
-| **T-3** | `backlog/t3-snapshot-test-enrichment.md` | 30+ WEAK TEST fixture の内容拡充、テスト名と内容の乖離修正 | T-1 |
-| **T-4** | `backlog/t4-e2e-coverage-expansion.md` | E2E 未テスト機能への新規スクリプト追加、既存スクリプト強化 | T-1 |
+| ~~**T-1**~~ | — | ~~collecting/builtins unsupported スナップショット化、orphan 2件登録、DRY 化、TempFile RAII 化、Cargo.toml 統一~~ | ✅ 完了 |
+| **T-2** | `backlog/t2-compile-test-quality.md` | `#![allow]` 範囲縮小、warning 検出、compile skip リストの理由文書化 | T-1 ✅ |
+| **T-3** | `backlog/t3-snapshot-test-enrichment.md` | 30+ WEAK TEST fixture の内容拡充、テスト名と内容の乖離修正 | T-1 ✅ |
+| **T-4** | `backlog/t4-e2e-coverage-expansion.md` | E2E 未テスト機能への新規スクリプト追加、既存スクリプト強化 | T-1 ✅ |
 
 **フェーズ T 完了基準**:
 - collecting/builtins モードの全テストで unsupported がスナップショット化されている

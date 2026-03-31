@@ -1,0 +1,24 @@
+---
+source: tests/integration_test.rs
+expression: output
+---
+#[derive(Debug, Clone, PartialEq)]
+struct Config {
+    host: String,
+    port: f64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct Server {
+    name: String,
+}
+
+impl Server {
+    fn new(name: String) -> Self {
+        Self { name }
+    }
+
+    fn getDefaults(&self) -> Config {
+        Config { host: "localhost".to_string(), port: 8080.0 }
+    }
+}

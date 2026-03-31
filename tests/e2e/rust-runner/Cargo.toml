@@ -3,6 +3,7 @@ name = "e2e-rust-runner"
 version = "0.1.0"
 edition = "2021"
 
+# NOTE: Keep dependencies in sync with tests/compile-check/Cargo.toml
 [dependencies]
 regex = "1.12"
 scopeguard = "1.2"

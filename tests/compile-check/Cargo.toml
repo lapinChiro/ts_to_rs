@@ -3,9 +3,10 @@ name = "compile-check"
 version = "0.0.0"
 edition = "2021"
 
+# NOTE: Keep dependencies in sync with tests/e2e/rust-runner/Cargo.toml
 [dependencies]
-scopeguard = "1"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+regex = "1.12"
+scopeguard = "1.2"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 tokio = { version = "1", features = ["full"] }
-regex = "1"

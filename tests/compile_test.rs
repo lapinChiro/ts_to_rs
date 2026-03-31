@@ -6,6 +6,9 @@ use ts_to_rs::pipeline::module_resolver::TrivialResolver;
 use ts_to_rs::pipeline::TranspileInput;
 use ts_to_rs::{transpile_collecting, transpile_with_builtins};
 
+#[path = "test_helpers.rs"]
+mod test_helpers;
+
 /// Path to the fixed Cargo project used for compile checking.
 const COMPILE_CHECK_DIR: &str = "tests/compile-check";
 
@@ -44,25 +47,7 @@ fn simplify_use_statements(rs_source: &str) -> String {
         .join("\n")
 }
 
-/// Strips internal module `use` statements while preserving external crate imports.
-///
-/// Internal references (e.g., `use crate::`, `use super::`) cannot be resolved in
-/// single-file compilation. External crate imports (e.g., `use serde`, `use scopeguard`)
-/// must be kept for the code to compile with dependencies.
-fn strip_internal_use_statements(rs_source: &str) -> String {
-    rs_source
-        .lines()
-        .filter(|line| {
-            let trimmed = line.trim_start();
-            if !trimmed.starts_with("use ") && !trimmed.starts_with("pub use ") {
-                return true;
-            }
-            // Keep external crate imports, filter out internal module references
-            !trimmed.contains("crate::") && !trimmed.contains("super::")
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
+use test_helpers::{strip_internal_use_statements, TempFile};
 
 /// Compiles the given Rust source code via `cargo check` against the fixed
 /// compile-check project (which has external crate dependencies).
@@ -292,6 +277,7 @@ fn assert_compiles_directory(dir: &str, fixture_name: &str) {
         .unwrap_or_else(|e| panic!("transpile_pipeline failed for '{fixture_name}': {e}"));
 
     let mut mod_names: Vec<String> = Vec::new();
+    let mut mod_guards: Vec<TempFile> = Vec::new();
     let mut lib_rs = String::new();
 
     for file_output in &output.files {
@@ -310,8 +296,7 @@ fn assert_compiles_directory(dir: &str, fixture_name: &str) {
             lib_rs = rs_source;
         } else {
             let mod_path = format!("{COMPILE_CHECK_DIR}/src/{stem}.rs");
-            fs::write(&mod_path, &rs_source)
-                .unwrap_or_else(|e| panic!("failed to write {mod_path}: {e}"));
+            mod_guards.push(TempFile::new(mod_path, &rs_source));
             mod_names.push(stem);
         }
     }
@@ -334,10 +319,8 @@ fn assert_compiles_directory(dir: &str, fixture_name: &str) {
         .output()
         .expect("failed to execute cargo check");
 
-    // Clean up module files
-    for m in &mod_names {
-        let _ = fs::remove_file(format!("{COMPILE_CHECK_DIR}/src/{m}.rs"));
-    }
+    // Drop module guards before assert to clean up even on failure
+    drop(mod_guards);
 
     assert!(
         cmd_output.status.success(),

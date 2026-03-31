@@ -1,0 +1,29 @@
+---
+source: tests/integration_test.rs
+expression: output
+---
+#[derive(Debug, Clone, PartialEq)]
+struct Config {
+    host: String,
+    port: f64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct Container<T> {
+    value: T,
+}
+
+impl<T> Container<T> {
+    fn new(value: T) -> Self {
+        Self { value }
+    }
+}
+
+fn identity<T>(x: T) -> T {
+    x
+}
+
+fn createInstances() {
+    let c = Container::new(Config { host: "localhost".to_string(), port: 8080.0 });
+    let config = identity(Config { host: "localhost".to_string(), port: 8080.0 });
+}

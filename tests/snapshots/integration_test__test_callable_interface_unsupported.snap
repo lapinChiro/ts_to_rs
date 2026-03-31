@@ -1,0 +1,10 @@
+---
+source: tests/integration_test.rs
+expression: json
+---
+[
+  {
+    "kind": "unsupported interface member (only property signatures are supported)",
+    "location": "13:1"
+  }
+]

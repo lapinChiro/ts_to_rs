@@ -30,8 +30,12 @@ macro_rules! snapshot_test {
                 .unwrap_or(stringify!($name))
                 .replace('_', "-");
             let input = fs::read_to_string(format!("tests/fixtures/{fixture}.input.ts")).unwrap();
-            let (output, _unsupported) = transpile_collecting(&input).unwrap();
+            let (output, unsupported) = transpile_collecting(&input).unwrap();
             insta::assert_snapshot!(output);
+            if !unsupported.is_empty() {
+                let json = serde_json::to_string_pretty(&unsupported).unwrap();
+                insta::assert_snapshot!(format!("{}_unsupported", stringify!($name)), json);
+            }
         }
     };
     ($name:ident, builtins) => {
@@ -42,8 +46,12 @@ macro_rules! snapshot_test {
                 .unwrap_or(stringify!($name))
                 .replace('_', "-");
             let input = fs::read_to_string(format!("tests/fixtures/{fixture}.input.ts")).unwrap();
-            let (output, _unsupported) = transpile_with_builtins(&input).unwrap();
+            let (output, unsupported) = transpile_with_builtins(&input).unwrap();
             insta::assert_snapshot!(output);
+            if !unsupported.is_empty() {
+                let json = serde_json::to_string_pretty(&unsupported).unwrap();
+                insta::assert_snapshot!(format!("{}_unsupported", stringify!($name)), json);
+            }
         }
     };
 }
@@ -124,6 +132,8 @@ snapshot_test!(test_typeof_const);
 snapshot_test!(test_assignment_expected_type);
 snapshot_test!(test_as_type_expected);
 snapshot_test!(test_ternary_union);
+snapshot_test!(test_explicit_type_args);
+snapshot_test!(test_private_member_expected_type);
 
 // ── transpile_collecting (no builtins, collects unsupported) ────────────
 
@@ -143,15 +153,23 @@ snapshot_test!(test_external_type_struct, builtins);
 #[test]
 fn test_string_methods_with_builtins() {
     let input = fs::read_to_string("tests/fixtures/string-methods.input.ts").unwrap();
-    let (output, _unsupported) = transpile_with_builtins(&input).unwrap();
+    let (output, unsupported) = transpile_with_builtins(&input).unwrap();
     insta::assert_snapshot!(output);
+    if !unsupported.is_empty() {
+        let json = serde_json::to_string_pretty(&unsupported).unwrap();
+        insta::assert_snapshot!("test_string_methods_with_builtins_unsupported", json);
+    }
 }
 
 #[test]
 fn test_instanceof_builtin_with_builtins() {
     let input = fs::read_to_string("tests/fixtures/instanceof-builtin.input.ts").unwrap();
-    let (output, _unsupported) = transpile_with_builtins(&input).unwrap();
+    let (output, unsupported) = transpile_with_builtins(&input).unwrap();
     insta::assert_snapshot!(output);
+    if !unsupported.is_empty() {
+        let json = serde_json::to_string_pretty(&unsupported).unwrap();
+        insta::assert_snapshot!("test_instanceof_builtin_with_builtins_unsupported", json);
+    }
 }
 
 // ── Custom tests (non-macro: require specialized assertions) ───────────
