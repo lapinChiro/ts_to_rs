@@ -67,7 +67,7 @@
   - registry は「TS ソースから型メタデータを抽出するパッシブなストア」であるべきだが、型変換の責務が registry に漏れている
   - **影響箇所**: `src/registry/interfaces.rs`（optional フィールドの `Option` ラップ）、`src/registry/functions.rs`（デフォルト引数の `Option` ラップ）、`src/registry/unions.rs`（`string_to_pascal_case` によるバリアント命名）
   - **解決策**: TypeDef のフィールド型を TS 型のまま保持する中間表現に変更し、Rust 型への変換を type_converter フェーズに統合する
-  - **前提**: R-1（コンポーネント責務境界の正常化）完了後に実施。🔗 `backlog/r1-component-boundary-cleanup.md`
+  - **前提**: R-1（コンポーネント責務境界の正常化）✅ 完了済み（`1329bd7`）。着手可能
   - **伝播リスク**: TypeDef が RustType を保持する限り、registry に型変換ロジックが漏れ続ける。今後の機能追加で同パターンが増殖するリスクあり
 - **[I-30]** **生成コードの Cargo.toml への依存クレート追加** — ゲート解除・レバレッジ高
   - I-183（HTTP E2E テスト基盤 + fetch 変換）と I-34（Math.random → rand）の前提条件
@@ -87,7 +87,7 @@
   - C-3 で同一ファイル fn-arg（3件）+ 明示的型引数 + 型引数推論（I-286c S3）は解決済み
   - **残存**: imported 関数/クラスの 11件（`baseServeStatic`, `app.fetch`, `Context`, `serialize`, `jsx` 等）— 単一ファイルモードでは TypeRegistry に情報なし
   - **解決策**: directory モードでの TypeRegistry 情報共有改善、またはマルチファイルモードの型情報マージ
-  - 詳細: `report/c3-object-literal-no-type-deep-analysis-2026-03-30.md`
+  - 詳細: C-3 調査レポート（削除済み、git history `0f4a3c3` 以前で参照可能）
 - **[I-301]** **型注釈なしオブジェクトリテラルの変換** — OBJECT_LITERAL_NO_TYPE の一因（実測7件/32件）
   - C-3 調査で推定3件 → 実測7件に修正。型注釈のないローカル変数へのオブジェクトリテラル代入、および三項演算子内のオブジェクトリテラル
   - **対象ファイル（7件）**: `adapter/aws-lambda/handler.ts:170`（`const httpResponseMetadata = {...}`）、`helper/proxy/index.ts:166`（`{raw: proxyInit}`、三項演算子）、`utils/html.ts:135`（`const context = {}`）、`utils/concurrent.ts:39`（`const marker = {}`）、`validator/validator.ts:90`（`let value = {}`）、`middleware/basic-auth/index.ts:134`（`const headers = {...}`）、`middleware/ip-restriction/index.ts:157`（`const remoteData = {...}`）
@@ -95,9 +95,9 @@
   - **意味論的安全性**: 匿名構造体は compile error で検出可能（Safe）
 - **[I-306]** **`.map()` callback 戻り値型の伝播** — OBJECT_LITERAL_NO_TYPE の原因（1件: `helper/dev/index.ts:30`）
   - `hono.routes.map(({ path, method }) => { return { path, method, name: ... } })` で、`.map()` の callback 内の return 文に expected type が伝播しない
-  - **原因**: `propagate_expected`（`src/pipeline/type_resolver/expected_types.rs:241-347`）が `Expr::Call` を処理しない。`.map()` の引数であるアロー関数/関数式への型伝播が欠けている
+  - **原因**: `propagate_expected`（`src/pipeline/type_resolver/expected_types.rs:282-388`）が `Expr::Call` を処理しない。`.map()` の引数であるアロー関数/関数式への型伝播が欠けている
   - **解決策**: `propagate_expected` に `Expr::Call` ブランチを追加し、`.map()` 等の高階関数の callback 引数に対して期待される関数型のパラメータ/戻り値型を伝播する。ただし汎用的な実装は複雑（任意の高階関数の callback 位置特定が必要）
-  - **影響箇所**: `src/pipeline/type_resolver/expected_types.rs:241-347`
+  - **影響箇所**: `src/pipeline/type_resolver/expected_types.rs:282-388`
 
 - **[I-311]** **型引数推論結果の引数 expected type フィードバック未実装** — 型推論精度
   - `fn<T>(x: T, y: T)` を `f("hello", { ... })` で呼ぶ場合、1番目の引数から `T = String` を推論した後、2番目の引数の expected type を `String` に更新する仕組みがない
@@ -122,10 +122,10 @@
   - **影響箇所**: `src/transformer/expressions/calls.rs:194`
   - **発見経緯**: C-4 ベンチマーク（2026-03-31）で CALL_TARGET 1→2（+1）として検出。C-4 の変更との直接因果はなく、以前から潜在的に存在。OBJECT_LITERAL_NO_TYPE の減少（29→25）により ip-restriction ファイルの変換がより進み、以前は先にエラーとなっていた箇所が解消されて新たな箇所まで到達したことで表面化
 - **[I-309]** **メソッド呼び出し（`obj.method(args)`）での型引数推論未対応** — 型推論精度
-  - C-3 で `Ident` callee（`fn(args)`, `new Class(args)`）の型引数推論は実装したが、`Member` callee（`obj.method(args)`）は `try_infer_and_resolve_return_type`（`src/pipeline/type_resolver/call_resolution.rs:365`）が `Ident` のみ処理し、`Member` は即座に `current_result` を返す
+  - C-3 で `Ident` callee（`fn(args)`, `new Class(args)`）の型引数推論は実装したが、`Member` callee（`obj.method(args)`）は `try_infer_and_resolve_return_type`（`src/pipeline/type_resolver/call_resolution.rs:358`）が `Ident` のみ処理し、`Member` は即座に `current_result` を返す
   - **影響**: `.map()`, `.filter()`, `.reduce()` 等の高階関数で型引数が推論されない。ただし多くのメソッドはビルトイン型シグネチャで戻り値型が既に具体化されているため、影響は限定的
   - **解決策**: `try_infer_and_resolve_return_type` に `Expr::Member` ブランチを追加。オブジェクト型から `TypeDef::Struct.methods` のメソッドシグネチャを取得し、`infer_type_args` で推論する
-  - **影響箇所**: `src/pipeline/type_resolver/call_resolution.rs:365`
+  - **影響箇所**: `src/pipeline/type_resolver/call_resolution.rs:358`
 - **[I-310]** **HashMap の computed property access 変換が `as usize` でインデックスに誤変換** — コンパイルエラー
   - `map[key]` で `map: Record<string, T>` (→ `HashMap<String, T>`) の場合、transformer が `map[key as usize]` を生成する。これは `Vec` 用のインデックスアクセス変換が誤って適用されたもの
   - **正しい変換**: `map[&key]`（`Index` trait）または `map.get(&key).cloned()`（`Option<T>` を返す）
@@ -281,7 +281,7 @@
 - **[I-188]** **`substring`/`slice` のバイト境界安全性** — 文字列変換。TS は UTF-16 コードユニット、Rust はバイト。マルチバイト文字でパニック
 - **[I-93]** **ネストしたフィールド/メソッド経由の変更検出** — ミュータビリティ推論
 - **[I-62]** **`is_string_type` の `Option<String>` ハック除去** — 型推論
-- **[I-256]** **any-narrowing の typeof 検出がトップレベル if/expr のみ** — `src/pipeline/any_narrowing.rs` の `collect_from_stmt()` で `Switch`/`While`/`For`/`Try` 内の typeof/instanceof チェックが検出されない。any-narrowing enum のバリアント不足の原因。🔗 R-1 でモジュール移動後にパス変更予定
+- **[I-256]** **any-narrowing の typeof 検出がトップレベル if/expr のみ** — `src/pipeline/any_narrowing.rs` の `collect_from_stmt()` で `Switch`/`While`/`For`/`Try` 内の typeof/instanceof チェックが検出されない。any-narrowing enum のバリアント不足の原因
 - **[I-257]** **TypeResolver が rest パターンの変数を未登録** — `src/pipeline/type_resolver/visitors.rs:197` で `Rest` パターンの変数は `register_pat_vars` 経由で登録されるが、型が `ResolvedType::Unknown` のまま。rest 変数に適切な型（残余フィールドの構造体型）が設定されない
 - **[I-260]** **`undefined` リテラルの型解決が Unknown** — TypeResolver の `resolve_expr_inner`（`src/pipeline/type_resolver/expressions.rs:31`）が `undefined` 識別子に対して `ResolvedType::Unknown` を返す。`const obj = { key: undefined }` のような場合に匿名構造体のフィールド型が不明になり、匿名構造体が生成されない。解決策: `undefined` を `RustType::Option(Box::new(RustType::Any))` として解決するか、コンテキストの expected type から内側の型を推定する
 
@@ -323,7 +323,7 @@
   - 解決策: `convert_param_pat` の Assign ブランチを `wrap_param_with_default` に委譲。`convert_ident_to_param` で内部パラメータを取得後、`wrap_param_with_default` に渡す
   - 🔗 I-195 で `wrap_param_with_default` を `pub(crate)` で公開済み。着手可能
 - **[I-282]** **`convert_default_value` の一般式パスが `unwrap_or` で即時評価** — 生成コード品質
-  - `src/transformer/functions/params.rs:264-266` で `convert_expr` した結果が `unwrap_or(expr)` に渡される。関数呼び出し等のアロケーションを含む式でも即時評価される
+  - `src/transformer/functions/params.rs:282-284` の一般式パスで `convert_expr` した結果が `unwrap_or(expr)` に渡される。関数呼び出し等のアロケーションを含む式でも即時評価される
   - 例: `function foo(x: T = createDefault())` → `unwrap_or(create_default())` — `Some` の場合も `create_default()` が実行される
   - 影響箇所: `wrap_param_with_default`（params.rs）、`convert_param_pat`（classes/members.rs）、`convert_object_destructuring_param`（destructuring.rs）の 3 箇所
   - 解決策: `needs_lazy_eval` の判定をホワイトリスト方式に変更 — `NumberLit`/`BoolLit`/`Ident` 以外は全て `unwrap_or_else` に
@@ -408,7 +408,7 @@
 
 ### 前提タスクの完了待ち
 
-- **[I-32]** **コンパイルテストのスキップ解消** — builtins なし 10 件 / builtins あり 9 件（重複 8 件、ユニーク計 11 件）。builtins なし固有: vec-method-expected-type, external-type-struct。builtins あり固有: external-type-struct（I-270c）。共通: indexed-access-type, trait-coercion（I-201）, union-fallback（I-202）, any-type-narrowing（I-209）, type-narrowing（I-237+I-238）, array-builtin-methods（I-217+I-265）, instanceof-builtin（I-270c）, ternary-union（I-11）。B-0b で string-methods を解消（builtins ありスキップ 10→9）。各原因の修正が前提
+- **[I-32]** **コンパイルテストのスキップ解消** — builtins なし 11 件 / builtins あり 10 件。各原因の修正が前提
 - **[I-183]** **HTTP E2E テスト基盤 + fetch 変換** — I-30（Cargo.toml 依存追加）の解消が前提
 
 ---

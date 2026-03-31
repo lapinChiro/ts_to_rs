@@ -1,10 +1,13 @@
 # Mapped Types Analysis: Current Handling and Requirements for Full Support
 
-**Date**: 2026-03-28 (updated 2026-03-30: B-2 implementation status)
+**Date**: 2026-03-28 (updated 2026-03-31)
 **Status**: Partially implemented
 **Scope**: How TypeScript mapped types are currently handled and what's needed for correct conversion
 
-> **2026-03-30 更新**: B-2（`62fa279`）で identity mapped type（`{ [K in keyof T]: T[K] }`）の検出と `T` への簡約を実装済み。`Simplify<T>` / `SimplifyDeep<T>` パターンは解消。残りの高度なパターン（key remapping, conditional value, array indexed access）は未実装。
+> **2026-03-31 更新**:
+> - B-2（`62fa279`）で identity mapped type（`{ [K in keyof T]: T[K] }`）の検出と `T` への簡約を実装済み。Pattern 1（Simplify）は解消
+> - C-0〜C-4 で `resolve_struct_fields`、expected type 基盤、型引数推論、TypeRegistry 改善が完了。高度なパターンの基盤は整備済み
+> - 残りの高度なパターン（P2: key remapping, P3: nested key remap, P4: conditional value, P5: array indexed access）は未実装
 
 ---
 
@@ -23,10 +26,14 @@ This fallback is **semantically incorrect** for most mapped type patterns found 
 
 ### Code Location
 
-**File**: `/home/kyohei/ts_to_rs/src/pipeline/type_converter/mod.rs` (lines 159-170)
+**File**: `/home/kyohei/ts_to_rs/src/pipeline/type_converter/mod.rs` (lines 161-177)
 
 ```rust
 TsType::TsMappedType(mapped) => {
+    // Try identity simplification: { [K in keyof T]: T[K] } → T
+    if let Some(simplified) = try_simplify_identity_mapped_type(mapped) {
+        return Ok(simplified);
+    }
     // Fallback: treat mapped types as HashMap<String, V>
     let value_type = mapped
         .type_ann
@@ -43,8 +50,9 @@ TsType::TsMappedType(mapped) => {
 
 ### What's Extracted
 
+- **Identity detection** (B-2 追加): `try_simplify_identity_mapped_type` が `{ [K in keyof T]: T[K] }` パターンを検出し `T` に簡約
 - **`type_ann`**: The value type of the mapped type (righthand side)
-- **Not examined**: 
+- **Not examined** (non-identity patterns):
   - `type_param` (the `K in keyof T` part)
   - `type_param_in` (optional indexing, `as` clause)
   - `readonly` modifier
@@ -93,7 +101,7 @@ Input:  { a: string; b: number }
 Output: { a: string; b: number }  (same structure, different representation)
 ```
 
-**Current Conversion**: `HashMap<String, T[K]>` ✗ **WRONG** - loses property names and structure
+**Current Conversion**: ✅ **RESOLVED** (B-2) — `try_simplify_identity_mapped_type` が identity パターンを検出し `T` に簡約
 
 ---
 
@@ -486,9 +494,9 @@ pub struct ArrayMapResult {
 
 ## Impact on Hono Error Analysis
 
-### Mapped Type Errors (5 instances, 4.4%)
+### Mapped Type Errors (残存: P2-P5 の 4 パターン)
 
-From `report/hono-error-analysis-2026-03-25.md`:
+> **2026-03-31 更新**: P1（Simplify/identity）は B-2 で解消済み。以下は残存エラー。エラー件数は最新ベンチマークで再計測が必要。
 
 | Location | Pattern | Current Behavior | Correct Behavior |
 |----------|---------|------------------|-----------------|

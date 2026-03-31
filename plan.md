@@ -55,6 +55,26 @@
 - OBJECT_LITERAL_NO_TYPE 29→25（-4件）、エラーインスタンス 61→58（-3件）
 - テスト +21（1494→1515）、snapshot テスト +2（85→87）
 
+### Phase T: E2E テスト基盤改修（最優先）
+
+レビュー報告書（`report/integration-test-review-2026-03-31.md`, `report/e2e-test-infrastructure-review-2026-03-31.md`）で発見された構造的欠陥とカバレッジ不足を体系的に修正する。
+
+| サブフェーズ | PRD | 内容 | 前提 |
+|-------------|-----|------|------|
+| **T-1** | `backlog/t1-test-infrastructure-foundation.md` | collecting モードの unsupported 検証、orphan 処理、DRY 化、一時ファイル安全化 | なし |
+| **T-2** | `backlog/t2-compile-test-quality.md` | `#![allow]` 範囲縮小、warning 検出、compile skip リストの理由文書化 | T-1 |
+| **T-3** | `backlog/t3-snapshot-test-enrichment.md` | 30+ WEAK TEST fixture の内容拡充、テスト名と内容の乖離修正 | T-1 |
+| **T-4** | `backlog/t4-e2e-coverage-expansion.md` | E2E 未テスト機能への新規スクリプト追加、既存スクリプト強化 | T-1 |
+
+**フェーズ T 完了基準**:
+- collecting/builtins モードの全テストで unsupported がスナップショット化されている
+- orphan fixture が 0 件
+- WEAK TEST 判定が 0 件（30+ 件 → 全解消）
+- E2E カバレッジ: スナップショット fixture の 50% 以上に対応する E2E テストが存在（現状 ~25%）
+- コンパイルテスト skip リスト全項目に TODO ID が紐付いている
+- `unused_mut` と `unreachable_code` がコンパイルテストで検出可能
+- レビューで発見された新規バグ（S1: 3件、SD: 1件）が TODO に追記されている
+
 ### Phase R-2: TypeDef の TS 型メタデータ分離（I-312）
 
 C-4 で `call_signatures` を TypeDef に追加した後、TypeDef 全体の設計を再検討する。TypeDef のフィールド型を TS 型のまま保持する設計に変更し、registry の責務を「純粋な型メタデータ収集」に正す。C-5 の匿名構造体生成のアプローチに影響するため、C-5 設計前に確定させる。
