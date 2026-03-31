@@ -27,66 +27,117 @@ pub(super) fn collect_interface_fields(
     Ok(fields)
 }
 
-/// interface のメソッドシグネチャを収集する。
-pub(super) fn collect_interface_methods(
+/// interface から収集されたシグネチャ情報。
+pub(super) struct InterfaceSignatures {
+    /// メソッドシグネチャ（メソッド名 → オーバーロード）
+    pub methods: HashMap<String, Vec<MethodSignature>>,
+    /// Call signatures（`(x: T): U` 形式）
+    pub call_signatures: Vec<MethodSignature>,
+    /// Construct signatures（`new (x: T): U` 形式）
+    pub constructor: Option<Vec<MethodSignature>>,
+}
+
+/// interface body のメンバーが call signature のみかどうかを判定する。
+///
+/// call signature が 1 つ以上あり、メソッド・プロパティ・インデックスシグネチャ等が
+/// 一切ない場合に `true` を返す。
+pub(crate) fn is_callable_only(members: &[ast::TsTypeElement]) -> bool {
+    let mut has_call = false;
+    for member in members {
+        match member {
+            ast::TsTypeElement::TsCallSignatureDecl(_) => has_call = true,
+            _ => return false,
+        }
+    }
+    has_call
+}
+
+/// `TsFnParam` のリストと return type annotation から `MethodSignature` を生成する。
+///
+/// `TsMethodSignature`, `TsCallSignatureDecl`, `TsConstructSignatureDecl` の
+/// 3 種のシグネチャ型で共通する params + return_type + has_rest の収集ロジック。
+fn build_method_signature(
+    ts_params: &[ast::TsFnParam],
+    type_ann: Option<&ast::TsTypeAnn>,
+    lookup: &TypeRegistry,
+    synthetic: &mut SyntheticTypeRegistry,
+) -> MethodSignature {
+    let params: Vec<(String, RustType)> = ts_params
+        .iter()
+        .filter_map(|param| super::functions::extract_ts_fn_param(param, lookup, synthetic))
+        .collect();
+    let return_type =
+        type_ann.and_then(|ann| convert_ts_type(&ann.type_ann, synthetic, lookup).ok());
+    let has_rest = ts_params
+        .iter()
+        .any(|p| matches!(p, ast::TsFnParam::Rest(_)));
+    MethodSignature {
+        params,
+        return_type,
+        has_rest,
+    }
+}
+
+/// interface のメソッド・call signature・construct signature を収集する。
+///
+/// 返り値:
+/// - `methods`: メソッド名 → オーバーロードシグネチャ
+/// - `call_signatures`: call signature（`(x: T): U` 形式）
+/// - `constructor`: construct signature（`new (x: T): U` 形式）
+pub(super) fn collect_interface_signatures(
     iface: &ast::TsInterfaceDecl,
     lookup: &TypeRegistry,
     synthetic: &mut SyntheticTypeRegistry,
-) -> HashMap<String, Vec<MethodSignature>> {
+) -> InterfaceSignatures {
     let mut methods: HashMap<String, Vec<MethodSignature>> = HashMap::new();
+    let mut call_signatures: Vec<MethodSignature> = Vec::new();
+    let mut construct_signatures: Vec<MethodSignature> = Vec::new();
+
     for member in &iface.body.body {
-        if let ast::TsTypeElement::TsMethodSignature(method) = member {
-            let name = match method.key.as_ref() {
-                ast::Expr::Ident(ident) => ident.sym.to_string(),
-                _ => continue,
-            };
-            let params: Vec<(String, RustType)> = method
-                .params
-                .iter()
-                .filter_map(|param| match param {
-                    ast::TsFnParam::Ident(ident) => {
-                        let name = ident.id.sym.to_string();
-                        let ty = ident.type_ann.as_ref().and_then(|ann| {
-                            convert_ts_type(&ann.type_ann, synthetic, lookup).ok()
-                        })?;
-                        Some((name, ty))
-                    }
-                    ast::TsFnParam::Rest(rest) => {
-                        let name = match rest.arg.as_ref() {
-                            ast::Pat::Ident(ident) => ident.id.sym.to_string(),
-                            _ => "rest".to_string(),
-                        };
-                        let type_ann = rest.type_ann.as_ref().or_else(|| {
-                            if let ast::Pat::Ident(ident) = rest.arg.as_ref() {
-                                ident.type_ann.as_ref()
-                            } else {
-                                None
-                            }
-                        });
-                        let ty = type_ann.and_then(|ann| {
-                            convert_ts_type(&ann.type_ann, synthetic, lookup).ok()
-                        })?;
-                        Some((name, ty))
-                    }
-                    _ => None,
-                })
-                .collect();
-            let return_type = method
-                .type_ann
-                .as_ref()
-                .and_then(|ann| convert_ts_type(&ann.type_ann, synthetic, lookup).ok());
-            let has_rest = method
-                .params
-                .iter()
-                .any(|p| matches!(p, ast::TsFnParam::Rest(_)));
-            methods.entry(name).or_default().push(MethodSignature {
-                params,
-                return_type,
-                has_rest,
-            });
+        match member {
+            ast::TsTypeElement::TsMethodSignature(method) => {
+                let name = match method.key.as_ref() {
+                    ast::Expr::Ident(ident) => ident.sym.to_string(),
+                    _ => continue,
+                };
+                let sig = build_method_signature(
+                    &method.params,
+                    method.type_ann.as_deref(),
+                    lookup,
+                    synthetic,
+                );
+                methods.entry(name).or_default().push(sig);
+            }
+            ast::TsTypeElement::TsCallSignatureDecl(decl) => {
+                call_signatures.push(build_method_signature(
+                    &decl.params,
+                    decl.type_ann.as_deref(),
+                    lookup,
+                    synthetic,
+                ));
+            }
+            ast::TsTypeElement::TsConstructSignatureDecl(decl) => {
+                construct_signatures.push(build_method_signature(
+                    &decl.params,
+                    decl.type_ann.as_deref(),
+                    lookup,
+                    synthetic,
+                ));
+            }
+            _ => {}
         }
     }
-    methods
+
+    let constructor = if construct_signatures.is_empty() {
+        None
+    } else {
+        Some(construct_signatures)
+    };
+    InterfaceSignatures {
+        methods,
+        call_signatures,
+        constructor,
+    }
 }
 
 /// TsPropertySignature からフィールド名と型を取得する。

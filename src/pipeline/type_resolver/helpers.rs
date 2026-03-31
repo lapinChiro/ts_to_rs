@@ -183,21 +183,26 @@ pub(super) fn resolve_fn_type_info(
             };
             (ret, Some(params.clone()))
         }
-        RustType::Named { name, .. } => {
-            if let Some(TypeDef::Function {
+        RustType::Named { name, .. } => match registry.get(name) {
+            Some(TypeDef::Function {
                 return_type,
                 params,
                 ..
-            }) = registry.get(name)
-            {
+            }) => (
+                return_type.clone(),
+                Some(params.iter().map(|(_, ty)| ty.clone()).collect()),
+            ),
+            Some(TypeDef::Struct {
+                call_signatures, ..
+            }) if !call_signatures.is_empty() => {
+                let sig = crate::registry::select_overload(call_signatures, 0, &[]);
                 (
-                    return_type.clone(),
-                    Some(params.iter().map(|(_, ty)| ty.clone()).collect()),
+                    sig.return_type.clone(),
+                    Some(sig.params.iter().map(|(_, ty)| ty.clone()).collect()),
                 )
-            } else {
-                (None, None)
             }
-        }
+            _ => (None, None),
+        },
         _ => (None, None),
     }
 }

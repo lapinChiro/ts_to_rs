@@ -1,0 +1,19 @@
+---
+source: tests/integration_test.rs
+expression: output
+---
+type GetValue = Box<dyn Fn(String) -> String>;
+
+type GetCookie = Box<dyn Fn(String, String) -> f64>;
+
+#[derive(Debug, Clone, PartialEq)]
+struct Body {
+    text: String,
+    json: bool,
+}
+
+type BodyCache = Body;
+
+fn getValue(key: String) -> String {
+    key
+}

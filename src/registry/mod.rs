@@ -10,7 +10,7 @@
 mod collection;
 mod enums;
 mod functions;
-mod interfaces;
+pub(crate) mod interfaces;
 mod unions;
 
 pub(crate) use enums::register_extra_enums;
@@ -139,6 +139,9 @@ pub enum TypeDef {
         methods: HashMap<String, Vec<MethodSignature>>,
         /// コンストラクタシグネチャ（オーバーロード対応）
         constructor: Option<Vec<MethodSignature>>,
+        /// Call signatures for callable interfaces.
+        /// e.g., `interface GetCookie { (c: Context): Cookie; (c: Context, key: string): string }`
+        call_signatures: Vec<MethodSignature>,
         /// 親 interface 名のリスト（`interface B extends A` の `A`）
         extends: Vec<String>,
         /// Whether this type comes from a TS interface declaration (true) or class/type alias (false)
@@ -192,6 +195,7 @@ impl TypeDef {
             fields,
             methods,
             constructor: None,
+            call_signatures: vec![],
             extends,
             is_interface: false,
         }
@@ -209,6 +213,7 @@ impl TypeDef {
             fields,
             methods,
             constructor: None,
+            call_signatures: vec![],
             extends,
             is_interface: true,
         }
@@ -293,6 +298,7 @@ impl TypeDef {
                 fields,
                 methods,
                 constructor,
+                call_signatures,
                 extends,
                 is_interface,
             } => {
@@ -320,6 +326,7 @@ impl TypeDef {
                         .map(|(name, sigs)| (name.clone(), substitute_sigs(sigs)))
                         .collect(),
                     constructor: constructor.as_ref().map(|sigs| substitute_sigs(sigs)),
+                    call_signatures: substitute_sigs(call_signatures),
                     extends: extends.clone(),
                     is_interface: *is_interface,
                 }
@@ -529,14 +536,15 @@ impl TypeRegistry {
 
 /// ビルトイン型とソース定義型をマージする。
 ///
-/// ソース定義型のフィールド・extends を採用しつつ、ビルトインの constructor/methods を
-/// 保護する。ソース定義型が独自の constructor/methods を持つ場合はソース定義を優先する。
+/// ソース定義型のフィールド・extends を採用しつつ、ビルトインの constructor/methods/
+/// call_signatures を保護する。ソース定義型が独自のものを持つ場合はソース定義を優先する。
 fn merge_with_builtin_preservation(builtin: &TypeDef, source: &TypeDef) -> TypeDef {
     match (builtin, source) {
         (
             TypeDef::Struct {
                 constructor: builtin_ctor,
                 methods: builtin_methods,
+                call_signatures: builtin_call_sigs,
                 ..
             },
             TypeDef::Struct {
@@ -544,6 +552,7 @@ fn merge_with_builtin_preservation(builtin: &TypeDef, source: &TypeDef) -> TypeD
                 fields,
                 methods: source_methods,
                 constructor: source_ctor,
+                call_signatures: source_call_sigs,
                 extends,
                 is_interface,
             },
@@ -561,11 +570,19 @@ fn merge_with_builtin_preservation(builtin: &TypeDef, source: &TypeDef) -> TypeD
                 methods.insert(name.clone(), sigs.clone());
             }
 
+            // Call signatures: use source if it has any, otherwise preserve builtin
+            let call_signatures = if source_call_sigs.is_empty() {
+                builtin_call_sigs.clone()
+            } else {
+                source_call_sigs.clone()
+            };
+
             TypeDef::Struct {
                 type_params: type_params.clone(),
                 fields: fields.clone(),
                 methods,
                 constructor,
+                call_signatures,
                 extends: extends.clone(),
                 is_interface: *is_interface,
             }

@@ -128,6 +128,7 @@ fn test_spread_generic_type_args_instantiation() {
             )],
             methods: Default::default(),
             constructor: None,
+            call_signatures: vec![],
             extends: vec![],
             is_interface: false,
         },

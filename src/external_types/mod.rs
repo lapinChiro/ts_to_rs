@@ -288,6 +288,7 @@ fn convert_external_typedef(
                 fields: converted_fields,
                 methods: converted_methods,
                 constructor: converted_constructors,
+                call_signatures: vec![],
                 extends: vec![],
                 is_interface: true,
             })

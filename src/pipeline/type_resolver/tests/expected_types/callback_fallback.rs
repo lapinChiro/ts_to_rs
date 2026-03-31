@@ -286,3 +286,63 @@ fn test_opt_chain_on_inline_object_type() {
         "opts?.name on inline type should resolve to Option<String>"
     );
 }
+
+// ── G6: resolve_fn_type_info with callable interface (call_signatures) ──
+
+#[test]
+fn test_callable_interface_return_type_propagated_to_arrow() {
+    // interface GetCookie { (c: string): Cookie }
+    // const getCookie: GetCookie = (c) => { return { name: "test" } }
+    // The arrow body should know the return type is Cookie
+    let mut reg = TypeRegistry::new();
+    reg.register(
+        "Cookie".to_string(),
+        TypeDef::new_struct(
+            vec![("name".to_string(), RustType::String)],
+            Default::default(),
+            vec![],
+        ),
+    );
+    reg.register(
+        "GetCookie".to_string(),
+        TypeDef::Struct {
+            type_params: vec![],
+            fields: vec![],
+            methods: Default::default(),
+            constructor: None,
+            call_signatures: vec![MethodSignature {
+                params: vec![("c".to_string(), RustType::String)],
+                return_type: Some(RustType::Named {
+                    name: "Cookie".to_string(),
+                    type_args: vec![],
+                }),
+                has_rest: false,
+            }],
+            extends: vec![],
+            is_interface: true,
+        },
+    );
+
+    let source = r#"const getCookie: GetCookie = (c) => { return { name: "test" } };"#;
+    let res = resolve_with_reg(source, &reg);
+
+    // The object literal { name: "test" } should have Cookie as expected type.
+    // Verify that exactly the object literal span (not the whole expression) has Cookie.
+    let cookie_entries: Vec<_> = res
+        .expected_types
+        .iter()
+        .filter(|(_, ty)| matches!(ty, RustType::Named { name, .. } if name == "Cookie"))
+        .collect();
+    assert_eq!(
+        cookie_entries.len(),
+        1,
+        "exactly one expected type should be Cookie, got: {cookie_entries:?}"
+    );
+    // The Cookie expected type should be on the object literal, not on the whole arrow
+    let (span, _) = cookie_entries[0];
+    let obj_lit_src = &source[span.lo as usize..span.hi as usize];
+    assert!(
+        obj_lit_src.contains("name"),
+        "Cookie expected type should be on the object literal containing 'name', got: '{obj_lit_src}'"
+    );
+}

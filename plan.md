@@ -1,27 +1,27 @@
 # ts_to_rs 開発計画
 
-## 現在のベースライン（2026-03-30 C-3完了後）
+## 現在のベースライン（2026-03-31 C-4完了後）
 
 | 指標 | 値 |
 |------|-----|
 | Hono クリーン | 110/158 (69.6%) |
-| エラーインスタンス | 61 |
+| エラーインスタンス | 58 |
 | コンパイル(file) | 109/158 (69.0%) |
 | コンパイル(dir) | 156/158 (98.7%) |
-| テスト数 | 1494 |
+| テスト数 | 1515 |
 | コンパイルテストスキップ | 11 件（builtins なし） / 10 件（builtins あり） |
 
-### エラーカテゴリ内訳（61 件）
+### エラーカテゴリ内訳（58 件）
 
 | カテゴリ | 件数 | 主要イシュー |
 |----------|------|-------------|
-| OBJECT_LITERAL_NO_TYPE | 29 | I-301(7), I-305(2), I-306(1), I-300 imported(11), 他(8) |
+| OBJECT_LITERAL_NO_TYPE | 25 | I-301(7), I-306(1), I-300 imported(11), 他(6) |
 | OTHER | 10 | parseInt(2), delete(2), class expr(1), 他 |
 | QUALIFIED_TYPE | 3 | I-36 |
-| FN_TYPE_PARAM | 3 | I-259 |
+| FN_TYPE_PARAM | 3 | |
 | MEMBER_PROPERTY | 3 | |
 | ASSIGN_TARGET | 3 | |
-| その他 | 10 | OBJ_KEY(2), INTERFACE_MEMBER(2), 各1件×6 |
+| その他 | 11 | OBJ_KEY(2), INTERFACE_MEMBER(2), CALL_TARGET(2), 各1件×5 |
 
 ---
 
@@ -31,7 +31,7 @@
 
 | フェーズ | 基準 | 現状 |
 |---------|------|------|
-| **現在: 変換率改善** | エラー < 60 件 | 61 件。C-4+C-5 で達成見込み |
+| **現在: 変換率改善** | エラー < 60 件 | 58 件 ✅ 達成。C-5 でさらに改善 |
 | **次: コンパイル品質** | ディレクトリコンパイルエラー 0 | 残 2 ファイル（I-273） |
 | **その後: DX + 品質** | コンパイルテストスキップ 0 | 残 11 件 |
 
@@ -43,17 +43,17 @@
 - テストギャップ G1-G23 を解消（+40 テスト追加）
 - `register_extra_enums` の DRY 化、doc comment 修正、テストファイル凝集度改善
 
-### Phase C-4: TypeRegistry 型登録基盤（次の開発）
+### ~~Phase C-4: TypeRegistry 型登録基盤~~ ✅ 完了
 
-R-1 で依存方向が正常化された状態で、TypeRegistry の型登録基盤を改善する。
-
-| 対象 | 内容 | 効果 |
-|------|------|------|
-| I-307 | TypeAlias の TsTypeRef RHS 登録（`type BodyCache = Partial<Body>` 等） | 基盤改善。一部の I-301 ケースが不要になる可能性 |
-| I-305 | callable interface の return 型解決（`GetCookie` 等） | OBJECT_LITERAL_NO_TYPE ~2件 |
-| I-308 | `resolve_type_params_in_type` の indexed access 複合名解決（`E['Bindings']`） | OBJECT_LITERAL_NO_TYPE ~1件 |
-
-PRD: `backlog/c4-type-registry-foundation.md`。C-4 完了後にベンチマークを取り直し、残存パターンを再評価してから I-312/C-5 を設計する。
+- `TypeDef::Struct` に `call_signatures` フィールド追加
+- パラメータ抽出ヘルパー共通化（`extract_ts_fn_param`, `extract_pat_param`）— DRY 違反 3 件解消
+- callable interface の call/construct signature 収集 + `is_callable_only` DRY 化
+- `resolve_fn_type_info` が callable interface の return type を返すよう拡張
+- `collect_type_alias_fields` に TsTypeRef ブランチ追加（`type X = Partial<T>` 対応）
+- `resolve_type_params_impl` に `"::"` 複合名解決追加（I-308）
+- rest パラメータ収集修正（I-259）、arrow デフォルトパラメータ対応
+- OBJECT_LITERAL_NO_TYPE 29→25（-4件）、エラーインスタンス 61→58（-3件）
+- テスト +21（1494→1515）、snapshot テスト +2（85→87）
 
 ### Phase R-2: TypeDef の TS 型メタデータ分離（I-312）
 

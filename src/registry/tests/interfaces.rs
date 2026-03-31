@@ -65,17 +65,17 @@ fn test_collect_interface_fields_non_property_members_skipped() {
     assert_eq!(fields[1].0, "y");
 }
 
-// ── collect_interface_methods ──
+// ── collect_interface_signatures ──
 
 #[test]
-fn test_collect_interface_methods_ident_param_with_type_collected() {
+fn test_collect_interface_signatures_ident_param_with_type_collected() {
     let iface = parse_interface("interface I { foo(x: string): number }");
     let reg = TypeRegistry::new();
     let mut synthetic = SyntheticTypeRegistry::new();
 
-    let methods = super::super::interfaces::collect_interface_methods(&iface, &reg, &mut synthetic);
+    let sigs = super::super::interfaces::collect_interface_signatures(&iface, &reg, &mut synthetic);
 
-    let sigs = methods.get("foo").expect("foo method should exist");
+    let sigs = sigs.methods.get("foo").expect("foo method should exist");
     assert_eq!(sigs.len(), 1);
     assert_eq!(sigs[0].params, vec![("x".to_string(), RustType::String)]);
     assert_eq!(sigs[0].return_type, Some(RustType::F64));
@@ -83,14 +83,14 @@ fn test_collect_interface_methods_ident_param_with_type_collected() {
 }
 
 #[test]
-fn test_collect_interface_methods_rest_param_collected() {
+fn test_collect_interface_signatures_rest_param_collected() {
     let iface = parse_interface("interface I { foo(...args: string[]): void }");
     let reg = TypeRegistry::new();
     let mut synthetic = SyntheticTypeRegistry::new();
 
-    let methods = super::super::interfaces::collect_interface_methods(&iface, &reg, &mut synthetic);
+    let sigs = super::super::interfaces::collect_interface_signatures(&iface, &reg, &mut synthetic);
 
-    let sigs = methods.get("foo").expect("foo method should exist");
+    let sigs = sigs.methods.get("foo").expect("foo method should exist");
     assert_eq!(sigs.len(), 1);
     assert!(sigs[0].has_rest, "has_rest should be true for rest param");
     assert_eq!(sigs[0].params.len(), 1);
@@ -102,14 +102,14 @@ fn test_collect_interface_methods_rest_param_collected() {
 }
 
 #[test]
-fn test_collect_interface_methods_overload_accumulates() {
+fn test_collect_interface_signatures_overload_accumulates() {
     let iface = parse_interface("interface I { foo(x: string): number; foo(x: number): string; }");
     let reg = TypeRegistry::new();
     let mut synthetic = SyntheticTypeRegistry::new();
 
-    let methods = super::super::interfaces::collect_interface_methods(&iface, &reg, &mut synthetic);
+    let sigs = super::super::interfaces::collect_interface_signatures(&iface, &reg, &mut synthetic);
 
-    let sigs = methods.get("foo").expect("foo method should exist");
+    let sigs = sigs.methods.get("foo").expect("foo method should exist");
     assert_eq!(sigs.len(), 2, "overloaded methods should accumulate in Vec");
     // First overload: (string) -> number
     assert_eq!(sigs[0].params[0].1, RustType::String);
@@ -149,4 +149,90 @@ fn test_collect_property_signature_non_ident_key_returns_none() {
         result.is_none(),
         "non-ident key should return None, got {result:?}"
     );
+}
+
+// ── is_callable_only ──
+
+#[test]
+fn test_is_callable_only_call_sigs_only_returns_true() {
+    let iface =
+        parse_interface("interface I { (x: string): number; (x: string, y: number): string }");
+    assert!(super::super::interfaces::is_callable_only(&iface.body.body));
+}
+
+#[test]
+fn test_is_callable_only_empty_returns_false() {
+    // G8: 0 call signatures → false
+    let iface = parse_interface("interface I {}");
+    assert!(!super::super::interfaces::is_callable_only(
+        &iface.body.body
+    ));
+}
+
+#[test]
+fn test_is_callable_only_mixed_call_sig_and_property_returns_false() {
+    // G9: call sig + property → false
+    let iface = parse_interface("interface I { (x: string): number; name: string }");
+    assert!(!super::super::interfaces::is_callable_only(
+        &iface.body.body
+    ));
+}
+
+// ── call signature collection (G1) ──
+
+#[test]
+fn test_collect_interface_signatures_call_signature() {
+    let iface = parse_interface("interface I { (x: string): number }");
+    let reg = TypeRegistry::new();
+    let mut synthetic = SyntheticTypeRegistry::new();
+
+    let sigs = super::super::interfaces::collect_interface_signatures(&iface, &reg, &mut synthetic);
+
+    assert!(sigs.methods.is_empty());
+    assert_eq!(sigs.call_signatures.len(), 1);
+    assert_eq!(
+        sigs.call_signatures[0].params,
+        vec![("x".to_string(), RustType::String)]
+    );
+    assert_eq!(sigs.call_signatures[0].return_type, Some(RustType::F64));
+}
+
+#[test]
+fn test_collect_interface_signatures_multiple_call_signatures() {
+    let iface =
+        parse_interface("interface I { (x: string): number; (x: string, y: number): string }");
+    let reg = TypeRegistry::new();
+    let mut synthetic = SyntheticTypeRegistry::new();
+
+    let sigs = super::super::interfaces::collect_interface_signatures(&iface, &reg, &mut synthetic);
+
+    assert_eq!(sigs.call_signatures.len(), 2);
+}
+
+// ── construct signature collection (G2) ──
+
+#[test]
+fn test_collect_interface_signatures_construct_signature() {
+    let iface = parse_interface("interface I { new (x: string): I }");
+    let reg = TypeRegistry::new();
+    let mut synthetic = SyntheticTypeRegistry::new();
+
+    let sigs = super::super::interfaces::collect_interface_signatures(&iface, &reg, &mut synthetic);
+
+    assert!(sigs.methods.is_empty());
+    assert!(sigs.call_signatures.is_empty());
+    let ctor = sigs.constructor.expect("constructor should be Some");
+    assert_eq!(ctor.len(), 1);
+    assert_eq!(ctor[0].params, vec![("x".to_string(), RustType::String)]);
+}
+
+#[test]
+fn test_collect_interface_signatures_no_construct_returns_none() {
+    let iface = parse_interface("interface I { foo(): void }");
+    let reg = TypeRegistry::new();
+    let mut synthetic = SyntheticTypeRegistry::new();
+
+    let sigs = super::super::interfaces::collect_interface_signatures(&iface, &reg, &mut synthetic);
+
+    assert!(sigs.constructor.is_none());
 }

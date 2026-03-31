@@ -239,3 +239,64 @@ fn test_build_registry_call_signature_with_properties_stays_struct() {
         other => panic!("expected Struct (mixed call sig + properties), got {other:?}"),
     }
 }
+
+// --- G3: fn type alias rest parameter ---
+
+#[test]
+fn test_fn_type_alias_rest_param_sets_has_rest() {
+    let module = parse_typescript("type Fn = (...args: string[]) => void;").unwrap();
+    let reg = build_registry(&module);
+    match reg.get("Fn").unwrap() {
+        TypeDef::Function {
+            params, has_rest, ..
+        } => {
+            assert!(has_rest, "has_rest should be true");
+            assert_eq!(params.len(), 1);
+            assert_eq!(params[0].0, "args");
+        }
+        other => panic!("expected Function, got {other:?}"),
+    }
+}
+
+// --- G4: call signature type alias rest parameter ---
+
+#[test]
+fn test_call_signature_type_alias_rest_param_sets_has_rest() {
+    let module = parse_typescript("type Handler = { (...args: string[]): void };").unwrap();
+    let reg = build_registry(&module);
+    match reg.get("Handler").unwrap() {
+        TypeDef::Function {
+            params, has_rest, ..
+        } => {
+            assert!(has_rest, "has_rest should be true");
+            assert_eq!(params.len(), 1);
+            assert_eq!(params[0].0, "args");
+        }
+        other => panic!("expected Function, got {other:?}"),
+    }
+}
+
+// --- G7: arrow default parameter → Option wrap ---
+
+#[test]
+fn test_arrow_default_param_option_wrap() {
+    let module = parse_typescript(
+        "const greet = (name: string, greeting: string = 'hello'): string => name;",
+    )
+    .unwrap();
+    let reg = build_registry(&module);
+    match reg.get("greet").unwrap() {
+        TypeDef::Function { params, .. } => {
+            assert_eq!(params.len(), 2);
+            assert_eq!(params[0], ("name".to_string(), RustType::String));
+            assert_eq!(
+                params[1],
+                (
+                    "greeting".to_string(),
+                    RustType::Option(Box::new(RustType::String))
+                )
+            );
+        }
+        other => panic!("expected Function, got {other:?}"),
+    }
+}

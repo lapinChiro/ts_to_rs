@@ -1,0 +1,35 @@
+---
+source: tests/integration_test.rs
+expression: output
+---
+#[derive(Debug, Clone, PartialEq)]
+pub struct PartialConfig {
+    pub host: Option<String>,
+    pub port: Option<f64>,
+    pub debug: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct Config {
+    host: String,
+    port: f64,
+    debug: bool,
+}
+
+type AppConfig = Config;
+
+type OptionalConfig = PartialConfig;
+
+#[derive(Debug, Clone, PartialEq)]
+struct ExtendedConfig {
+    host: String,
+    port: f64,
+    debug: bool,
+    extra: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct Combined {
+    a: f64,
+    b: String,
+}

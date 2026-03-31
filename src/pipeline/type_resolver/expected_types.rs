@@ -42,6 +42,34 @@ impl<'a> TypeResolver<'a> {
                         }
                         return self.resolve_type_params_impl(constraint, depth + 1);
                     }
+                    // Handle "::" compound names like "E::Bindings" from indexed access types.
+                    // Split into base ("E") and field ("Bindings"), resolve the base via
+                    // type parameter constraints, then look up the field type from the
+                    // resolved struct.
+                    if name.contains("::") {
+                        if let Some((base, field)) = name.split_once("::") {
+                            if let Some(constraint) = self.type_param_constraints.get(base) {
+                                let resolved_base =
+                                    self.resolve_type_params_impl(constraint, depth + 1);
+                                if let RustType::Named {
+                                    name: ref resolved_name,
+                                    ref type_args,
+                                } = resolved_base
+                                {
+                                    if let Some(fields) =
+                                        self.resolve_struct_fields_by_name(resolved_name, type_args)
+                                    {
+                                        if let Some((_, field_ty)) =
+                                            fields.iter().find(|(n, _)| n == field)
+                                        {
+                                            return self
+                                                .resolve_type_params_impl(field_ty, depth + 1);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
                 // Resolve type params within type_args
                 let resolved_args: Vec<RustType> = type_args

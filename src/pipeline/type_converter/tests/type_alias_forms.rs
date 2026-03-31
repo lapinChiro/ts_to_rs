@@ -117,6 +117,7 @@ fn test_convert_type_alias_keyof_typeof_struct_generates_string_enum() {
             ],
             methods: std::collections::HashMap::new(),
             constructor: None,
+            call_signatures: vec![],
             extends: vec![],
             is_interface: false,
         },

@@ -311,3 +311,30 @@ fn test_resolve_type_params_terminates_on_self_referential_constraint() {
     // Must complete without hanging
     let _res = resolve(source);
 }
+
+// ── "::" compound name resolution (I-308) ──
+
+#[test]
+fn test_resolve_type_params_compound_name_indexed_access() {
+    // E['Bindings'] generates Named("E::Bindings") in the IR.
+    // When E extends Env { bindings: Bindings }, resolve_type_params_impl should
+    // resolve "E::Bindings" → look up Env.bindings field type.
+    let res = resolve(
+        r#"
+        interface Bindings {
+            DB: string;
+        }
+        interface Env {
+            bindings: Bindings;
+        }
+        function handler<E extends Env>(env: E) {
+            const b: E['Bindings'] = { DB: "test" };
+        }
+        "#,
+    );
+
+    // The object literal { DB: "test" } should have some expected type
+    // (even if the exact resolution depends on indexed access handling)
+    // This test verifies that resolve_type_params_impl doesn't panic on "::" names
+    let _expected_types = &res.expected_types;
+}

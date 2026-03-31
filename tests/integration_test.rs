@@ -109,6 +109,8 @@ snapshot_test!(test_var_type_arrow);
 snapshot_test!(test_var_type_alias_arrow);
 snapshot_test!(test_regex_literal);
 snapshot_test!(test_call_signature_rest);
+snapshot_test!(test_callable_interface, collecting);
+snapshot_test!(test_type_alias_utility);
 snapshot_test!(test_any_type_narrowing);
 snapshot_test!(test_type_narrowing);
 snapshot_test!(test_union_fallback);

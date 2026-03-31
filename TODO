@@ -30,8 +30,8 @@
 - **保留** — 正当な保留理由あり（前提タスク未完了、またはユーザーの設計方針決定が必要）
 - **スコープ外** — 明示的に対象外。需要発生時に再評価
 
-件数は Hono ベンチマーク（`./scripts/hono-bench.sh`）の実測値に基づく（最終実行: 2026-03-30 C-3完了後）。
-158 ファイル中 110 ファイルがクリーン（69.6%）、61 エラーインスタンス。コンパイルクリーン: ファイル単位 109（69.0%）、ディレクトリ単位 156（98.7%）。
+件数は Hono ベンチマーク（`./scripts/hono-bench.sh`）の実測値に基づく（最終実行: 2026-03-31 C-4完了後）。
+158 ファイル中 110 ファイルがクリーン（69.6%）、58 エラーインスタンス。コンパイルクリーン: ファイル単位 109（69.0%）、ディレクトリ単位 156（98.7%）。
 **注意**: ベンチマーク実行前に `cargo build --release` が必要。古いビルドで実行すると数値が不正確になる。
 **補足**: 「クリーン」は変換エラーなし（`--report-unsupported` でエラー 0）を意味する。コンパイルクリーンは2指標: ファイル単位（use 除去後の個別コンパイル）とディレクトリ単位（全ファイルを1クレートとしてコンパイル）。
 
@@ -43,7 +43,7 @@
 
 | フェーズ | 移行基準 | 対象 |
 |---------|---------|------|
-| **現在: 変換率の大幅改善** | 全エラーインスタンス < 60 件 | 全 61 件。内訳: OBJECT_LITERAL_NO_TYPE 29 件、OTHER 10 件、QUALIFIED_TYPE 3 件、FN_TYPE_PARAM 3 件、MEMBER_PROPERTY 3 件、ASSIGN_TARGET 3 件、その他 10 件。C-3 で OBJECT_LITERAL_NO_TYPE 32→29（-3）、OTHER 8→10（+2）、全体 62→61 |
+| **現在: 変換率の大幅改善** | 全エラーインスタンス < 60 件 | 58 件 ✅ 達成。内訳: OBJECT_LITERAL_NO_TYPE 25 件、OTHER 10 件、QUALIFIED_TYPE 3 件、FN_TYPE_PARAM 3 件、MEMBER_PROPERTY 3 件、ASSIGN_TARGET 3 件、その他 11 件。C-4 で OBJECT_LITERAL_NO_TYPE 29→25（-4）、全体 61→58 |
 | **次: コンパイル品質** | ディレクトリコンパイルエラー 0 件 | 残 2 ファイル不合格（5 エラーインスタンス）。I-273（trait/struct 混同）が主因 |
 | **その次: テスト拡充** | E2E テスト網羅性 | E2E テストの拡充（I-20, I-71, I-72, I-74）、HTTP 対応（I-183） |
 
@@ -93,29 +93,34 @@
   - **対象ファイル（7件）**: `adapter/aws-lambda/handler.ts:170`（`const httpResponseMetadata = {...}`）、`helper/proxy/index.ts:166`（`{raw: proxyInit}`、三項演算子）、`utils/html.ts:135`（`const context = {}`）、`utils/concurrent.ts:39`（`const marker = {}`）、`validator/validator.ts:90`（`let value = {}`）、`middleware/basic-auth/index.ts:134`（`const headers = {...}`）、`middleware/ip-restriction/index.ts:157`（`const remoteData = {...}`）
   - **解決策候補**: (1) 匿名構造体の自動生成（フィールド名と型から `_AnonymousN` 構造体を SyntheticTypeRegistry に登録）、(2) 空オブジェクト（`{}`）は `HashMap::new()` にフォールバック（C-2 で `expected = HashMap` 時は対応済み、expected なし時が未対応）
   - **意味論的安全性**: 匿名構造体は compile error で検出可能（Safe）
-- **[I-305]** **callable interface の return 型解決** — OBJECT_LITERAL_NO_TYPE の原因（2件: `helper/cookie/index.ts:43,71`）
-  - `const getCookie: GetCookie = (c, key?) => { ... return {} }` で、`GetCookie` は callable interface（`{ (c, key): Cookie; (c): Record<string, string> }`）。TypeCollector は `TypeDef::Struct` として登録するが、`resolve_fn_type_info`（`src/pipeline/type_resolver/helpers.rs:152-166`）は `TypeDef::Function` のみ対応 → `current_fn_return_type` が未設定
-  - **解決策**: `resolve_fn_type_info` で `TypeDef::Struct` を受けた場合、call signature（`methods` の `"call"` エントリ等）をチェックし、関数型情報を抽出する。または TypeCollector が callable interface を `TypeDef::Function` として登録する
-  - **影響箇所**: `src/pipeline/type_resolver/helpers.rs:152-166`, `src/registry/interfaces.rs`
 - **[I-306]** **`.map()` callback 戻り値型の伝播** — OBJECT_LITERAL_NO_TYPE の原因（1件: `helper/dev/index.ts:30`）
   - `hono.routes.map(({ path, method }) => { return { path, method, name: ... } })` で、`.map()` の callback 内の return 文に expected type が伝播しない
   - **原因**: `propagate_expected`（`src/pipeline/type_resolver/expected_types.rs:241-347`）が `Expr::Call` を処理しない。`.map()` の引数であるアロー関数/関数式への型伝播が欠けている
   - **解決策**: `propagate_expected` に `Expr::Call` ブランチを追加し、`.map()` 等の高階関数の callback 引数に対して期待される関数型のパラメータ/戻り値型を伝播する。ただし汎用的な実装は複雑（任意の高階関数の callback 位置特定が必要）
   - **影響箇所**: `src/pipeline/type_resolver/expected_types.rs:241-347`
-- **[I-307]** **TypeAlias の TsTypeRef RHS が TypeRegistry に未登録** — OBJECT_LITERAL_NO_TYPE の原因（1件: `request.ts:69`、`bodyCache: BodyCache = {}`）
-  - `type BodyCache = Partial<Body>` のような TypeAlias で、RHS が `TsTypeRef`（`Partial<Body>`）の場合、`collect_type_alias_fields`（`src/registry/collection.rs:456`）が `TsTypeLit`/`TsIntersectionType` のみマッチし、`TsTypeRef` は `None` を返す → TypeRegistry にフィールド情報が登録されない
-  - **解決策**: `collect_type_alias_fields` に `TsTypeRef` ブランチを追加。`Partial<T>` は `T` のフィールドを全て `Option` でラップした構造体として解決。汎用的には TypeAlias の RHS を `convert_ts_type` で `RustType` に変換し、その `Named` から TypeRegistry のフィールド情報を取得
-  - **影響箇所**: `src/registry/collection.rs:456`
-- **[I-308]** **`resolve_type_params_in_type` が indexed access 複合名を未解決** — OBJECT_LITERAL_NO_TYPE の原因（1件: `context.ts:315`、`env: E['Bindings'] = {}`）
-  - `E['Bindings']` → `convert_indexed_access_type` が `Named("E::Bindings")` を生成（`src/pipeline/type_converter/indexed_access.rs:55-58`）。`resolve_type_params_in_type` は名前全体 `"E::Bindings"` で `type_param_constraints` を検索するが、制約マップには `"E"` → `Named("Env")` の形で登録されている。`"E::Bindings"` はマッチしない
-  - **解決策**: `resolve_type_params_in_type` で `"X::Y"` 形式の名前を検出した場合、`"X"` 部分で制約を検索し、解決結果の型から `"Y"` フィールドを取得する。例: `"E::Bindings"` → `E` の制約 `Env` → `Env` の `Bindings` フィールド型を返す
-  - **影響箇所**: `src/pipeline/type_resolver/expected_types.rs:24-93`
 
 - **[I-311]** **型引数推論結果の引数 expected type フィードバック未実装** — 型推論精度
   - `fn<T>(x: T, y: T)` を `f("hello", { ... })` で呼ぶ場合、1番目の引数から `T = String` を推論した後、2番目の引数の expected type を `String` に更新する仕組みがない
   - **原因**: `set_call_arg_expected_types` は推論前に実行される。推論結果を expected type にフィードバックするには、(1) expected_types の上書き（現在は `entry().or_insert_with()` で先勝ち）、または (2) 推論結果で `set_call_arg_expected_types` を再実行する2パス設計が必要
   - **設計方針**: `expected_types.insert` を `or_insert_with` から `insert`（上書き）に変更すると他の箇所に副作用がある。代替案: `try_infer_and_resolve_return_type` 内で推論結果を `type_param_constraints` に追加し、未解決の引数のみ再度 `propagate_arg_expected_types` を呼ぶ限定的2パス
   - **影響箇所**: `src/pipeline/type_resolver/call_resolution.rs:119-125`
+- **[I-313]** **三項演算子を即座に関数呼び出しする callee パターンが未対応** — CALL_TARGET エラー（2件: `helper/proxy/index.ts:160`, `middleware/ip-restriction/index.ts:37`）
+  - `(isIPv4 ? convertIPv4ToBinary : convertIPv6ToBinary)(addrStr)` のように、三項演算子の結果を括弧で囲んで即座に呼び出すパターン。SWC は callee を `Paren(Cond(...))` としてパースし、`convert_call_expr`（`src/transformer/expressions/calls.rs:132-141`）の `Paren` unwrap 処理が `Cond` を再帰的に `convert_call_expr` に渡すが、callee の match（`src/transformer/expressions/calls.rs:20-194`）に `Expr::Cond` ブランチがないため `_ => Err("unsupported call target expression")` に到達する
+  - **再現条件**: 関数スコープ内で発生。トップレベルの `const x = (cond ? a : b)(args)` はトップレベル const のスキップ処理により表面化しない
+  - **原因箇所**: `src/transformer/expressions/calls.rs:194` の `_ =>` フォールバック
+  - **解決策**: callee match に `Expr::Cond` ブランチを追加。三項演算子の結果を一時変数に束縛し、その変数を呼び出す:
+    ```rust
+    ast::Expr::Cond(cond) => {
+        let cond_expr = self.convert_cond_expr(cond)?;
+        let args = self.convert_call_args(&call.args)?;
+        Ok(Expr::Block(vec![
+            Stmt::Let { name: "_cond_fn", init: Some(cond_expr), .. },
+            Stmt::TailExpr(Expr::FnCall { name: "_cond_fn", args }),
+        ]))
+    }
+    ```
+  - **影響箇所**: `src/transformer/expressions/calls.rs:194`
+  - **発見経緯**: C-4 ベンチマーク（2026-03-31）で CALL_TARGET 1→2（+1）として検出。C-4 の変更との直接因果はなく、以前から潜在的に存在。OBJECT_LITERAL_NO_TYPE の減少（29→25）により ip-restriction ファイルの変換がより進み、以前は先にエラーとなっていた箇所が解消されて新たな箇所まで到達したことで表面化
 - **[I-309]** **メソッド呼び出し（`obj.method(args)`）での型引数推論未対応** — 型推論精度
   - C-3 で `Ident` callee（`fn(args)`, `new Class(args)`）の型引数推論は実装したが、`Member` callee（`obj.method(args)`）は `try_infer_and_resolve_return_type`（`src/pipeline/type_resolver/call_resolution.rs:365`）が `Ident` のみ処理し、`Member` は即座に `current_result` を返す
   - **影響**: `.map()`, `.filter()`, `.reduce()` 等の高階関数で型引数が推論されない。ただし多くのメソッドはビルトイン型シグネチャで戻り値型が既に具体化されているため、影響は限定的
@@ -185,14 +190,6 @@
 - **[I-101]** **ジェネリック型を含む intersection** — 型変換
   - `interface A<T> extends B<T>, C<T>` のようなジェネリック intersection が未対応
   - I-218（ジェネリクス基盤）完了済み。`try_convert_intersection_type` と統合すればよい
-- **[I-277]** **ソースコード interface の ConstructSignature 未収集** — 型変換基盤
-  - `interface DateConstructor { new(): Date; new(value: number): Date; }` のような TypeScript interface の construct signature（`TsConstructSignatureDeclaration`）が TypeRegistry に登録されない
-  - ビルトイン型（`web_api.json`/`ecmascript.json`）は JSON ローダー（`src/external_types/mod.rs:274`）で正しくコンストラクタが読み込まれるが、SWC AST から解析するソースコード上の interface では未収集
-  - 原因 (1): `src/registry/interfaces.rs` の `collect_interface_methods` が `TsMethodSignature` のみ処理し、`TsConstructSignatureDeclaration` を無視している
-  - 原因 (2): `src/registry/collection.rs:117` の interface 登録で `constructor: None` がハードコードされている
-  - 原因 (3): `TypeDef::new_interface()` ファクトリメソッド（`src/registry/mod.rs:97`）が `constructor` 引数を受け取らず常に `None` を設定する
-  - 解決策: (1) `collect_interface_methods` に `TsConstructSignatureDeclaration` ハンドラを追加し、`MethodSignature` として収集、(2) `collect_decl` の interface 登録で収集結果を `constructor` フィールドに設定、(3) `new_interface` に `constructor` パラメータを追加するか、直接構築に切り替える
-  - 影響: ユーザー定義の interface に construct signature を持つパターンは Hono ベンチマークでは未検出。TypeScript の `lib.d.ts` の `DateConstructor`/`ErrorConstructor` 等は JSON ローダー経由で対応済みのため、実影響は限定的
 - **[I-278]** **`new obj.Class()` パターンの型解決未対応** — 型変換
   - `new module.ClassName(args)` のようなメンバ式による `new` 呼び出しで、`resolve_new_expr`（`src/pipeline/type_resolver/expressions.rs:502`）が `ast::Expr::Ident` のみ処理し、`ast::Expr::Member` を `ResolvedType::Unknown` として返す
   - 例: `new app.Logger("name")` → callee が `MemberExpr` のため unknown、引数 expected type が未設定
@@ -286,7 +283,6 @@
 - **[I-62]** **`is_string_type` の `Option<String>` ハック除去** — 型推論
 - **[I-256]** **any-narrowing の typeof 検出がトップレベル if/expr のみ** — `src/pipeline/any_narrowing.rs` の `collect_from_stmt()` で `Switch`/`While`/`For`/`Try` 内の typeof/instanceof チェックが検出されない。any-narrowing enum のバリアント不足の原因。🔗 R-1 でモジュール移動後にパス変更予定
 - **[I-257]** **TypeResolver が rest パターンの変数を未登録** — `src/pipeline/type_resolver/visitors.rs:197` で `Rest` パターンの変数は `register_pat_vars` 経由で登録されるが、型が `ResolvedType::Unknown` のまま。rest 変数に適切な型（残余フィールドの構造体型）が設定されない
-- **[I-259]** **関数型エイリアスの rest パラメータが TypeDef::Function に含まれない** — `src/registry/functions.rs:20-28` の `try_collect_fn_type_alias` と `:68-77` の `try_collect_call_signature_fn` が `TsFnParam::Ident` のみ処理し、`TsFnParam::Rest` を無視する。`type Handler = { (...args: string[]): void }` や `type F = (...args: number[]) => void` で rest パラメータが `TypeDef::Function.params` に含まれず `has_rest` が常に `false` になる。解決策: transformer の `convert_interface_as_fn_type` (`src/pipeline/type_converter/interfaces.rs:167`) が既に `Rest` を処理しているので、同じロジックを registry 側にも適用する
 - **[I-260]** **`undefined` リテラルの型解決が Unknown** — TypeResolver の `resolve_expr_inner`（`src/pipeline/type_resolver/expressions.rs:31`）が `undefined` 識別子に対して `ResolvedType::Unknown` を返す。`const obj = { key: undefined }` のような場合に匿名構造体のフィールド型が不明になり、匿名構造体が生成されない。解決策: `undefined` を `RustType::Option(Box::new(RustType::Any))` として解決するか、コンテキストの expected type から内側の型を推定する
 
 #### コンパイルエラー修正（ディレクトリコンパイルで検出）

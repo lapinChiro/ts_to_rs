@@ -131,8 +131,8 @@ pub(super) fn collect_decl(
             if let Ok(fields) =
                 super::interfaces::collect_interface_fields(iface, lookup, synthetic)
             {
-                let methods =
-                    super::interfaces::collect_interface_methods(iface, lookup, synthetic);
+                let sigs =
+                    super::interfaces::collect_interface_signatures(iface, lookup, synthetic);
                 let type_params =
                     collect_type_params(iface.type_params.as_deref(), lookup, synthetic);
                 let extends: Vec<String> = iface
@@ -152,8 +152,9 @@ pub(super) fn collect_decl(
                     TypeDef::Struct {
                         type_params,
                         fields,
-                        methods,
-                        constructor: None,
+                        methods: sigs.methods,
+                        constructor: sigs.constructor,
+                        call_signatures: sigs.call_signatures,
                         extends,
                         is_interface: true,
                     },
@@ -197,6 +198,7 @@ pub(super) fn collect_decl(
                             fields,
                             methods: HashMap::new(),
                             constructor: None,
+                            call_signatures: vec![],
                             extends: vec![],
                             is_interface: false,
                         },
@@ -357,31 +359,8 @@ fn collect_class_info(
                     .function
                     .params
                     .iter()
-                    .filter_map(|param| match &param.pat {
-                        ast::Pat::Ident(ident) => {
-                            let ty = ident.type_ann.as_ref().and_then(|ann| {
-                                convert_ts_type(&ann.type_ann, synthetic, lookup).ok()
-                            })?;
-                            Some((ident.id.sym.to_string(), ty))
-                        }
-                        ast::Pat::Rest(rest) => {
-                            let name = match rest.arg.as_ref() {
-                                ast::Pat::Ident(ident) => ident.id.sym.to_string(),
-                                _ => "rest".to_string(),
-                            };
-                            let type_ann = rest.type_ann.as_ref().or_else(|| {
-                                if let ast::Pat::Ident(ident) = rest.arg.as_ref() {
-                                    ident.type_ann.as_ref()
-                                } else {
-                                    None
-                                }
-                            });
-                            let ty = type_ann.and_then(|ann| {
-                                convert_ts_type(&ann.type_ann, synthetic, lookup).ok()
-                            })?;
-                            Some((name, ty))
-                        }
-                        _ => None,
+                    .filter_map(|param| {
+                        super::functions::extract_pat_param(&param.pat, lookup, synthetic)
                     })
                     .collect();
                 let return_type = method
@@ -415,6 +394,7 @@ fn collect_class_info(
         fields,
         methods,
         constructor,
+        call_signatures: vec![],
         extends: vec![],
         is_interface: false,
     }
@@ -441,26 +421,79 @@ pub fn collect_type_params(
     .unwrap_or_default()
 }
 
-/// type alias (オブジェクト型・intersection 型) のフィールドを収集する。
+/// TsTypeRef からフィールドを解決する。
+///
+/// 型引数付きの参照（`Partial<Body>` 等）の場合は、ジェネリクスを具体型でインスタンス化してから
+/// フィールドを取得する。SyntheticTypeRegistry のインライン構造体も解決対象。
+fn resolve_type_ref_fields(
+    type_ref: &ast::TsTypeRef,
+    reg: &TypeRegistry,
+    synthetic: &mut SyntheticTypeRegistry,
+) -> Option<Vec<(String, RustType)>> {
+    let name = match &type_ref.type_name {
+        ast::TsEntityName::Ident(ident) => ident.sym.to_string(),
+        _ => return None,
+    };
+
+    // Convert type arguments if present
+    let type_args: Vec<RustType> = type_ref
+        .type_params
+        .as_ref()
+        .map(|params| {
+            params
+                .params
+                .iter()
+                .filter_map(|p| {
+                    crate::pipeline::type_converter::convert_ts_type(p, synthetic, reg).ok()
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    // Resolve from registry (with instantiation for generics)
+    if let Some(TypeDef::Struct { fields, .. }) = reg.get(&name) {
+        if !type_args.is_empty() {
+            if let Some(TypeDef::Struct { fields, .. }) = reg.instantiate(&name, &type_args) {
+                return Some(fields);
+            }
+        }
+        return Some(fields.clone());
+    }
+
+    None
+}
+
+/// TsTypeLit のプロパティシグネチャからフィールドを収集する。
+fn collect_type_lit_fields(
+    lit: &ast::TsTypeLit,
+    reg: &TypeRegistry,
+    synthetic: &mut SyntheticTypeRegistry,
+) -> Vec<(String, RustType)> {
+    lit.members
+        .iter()
+        .filter_map(|member| {
+            if let ast::TsTypeElement::TsPropertySignature(prop) = member {
+                super::interfaces::collect_property_signature(prop, reg, synthetic)
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+/// type alias (オブジェクト型・intersection 型・型参照) のフィールドを収集する。
+///
+/// 対応する `TsType` バリアント:
+/// - `TsTypeLit`: `type X = { a: number; b: string }`
+/// - `TsIntersectionType`: `type X = A & B`（各メンバーから TsTypeLit / TsTypeRef のフィールドをマージ）
+/// - `TsTypeRef`: `type X = Partial<Body>`（registry からフィールドを解決）
 fn collect_type_alias_fields(
     alias: &ast::TsTypeAliasDecl,
     reg: &TypeRegistry,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Option<Vec<(String, RustType)>> {
     match alias.type_ann.as_ref() {
-        ast::TsType::TsTypeLit(lit) => {
-            let mut fields = Vec::new();
-            for member in &lit.members {
-                if let ast::TsTypeElement::TsPropertySignature(prop) = member {
-                    if let Some((name, ty)) =
-                        super::interfaces::collect_property_signature(prop, reg, synthetic)
-                    {
-                        fields.push((name, ty));
-                    }
-                }
-            }
-            Some(fields)
-        }
+        ast::TsType::TsTypeLit(lit) => Some(collect_type_lit_fields(lit, reg, synthetic)),
         // Intersection type: `type Person = Named & Aged` → merge fields from all members
         ast::TsType::TsUnionOrIntersectionType(
             swc_ecma_ast::TsUnionOrIntersectionType::TsIntersectionType(intersection),
@@ -469,24 +502,12 @@ fn collect_type_alias_fields(
             for ty in &intersection.types {
                 match ty.as_ref() {
                     ast::TsType::TsTypeLit(lit) => {
-                        for member in &lit.members {
-                            if let ast::TsTypeElement::TsPropertySignature(prop) = member {
-                                if let Some(field) = super::interfaces::collect_property_signature(
-                                    prop, reg, synthetic,
-                                ) {
-                                    fields.push(field);
-                                }
-                            }
-                        }
+                        fields.extend(collect_type_lit_fields(lit, reg, synthetic));
                     }
                     ast::TsType::TsTypeRef(type_ref) => {
-                        if let ast::TsEntityName::Ident(ident) = &type_ref.type_name {
-                            if let Some(TypeDef::Struct {
-                                fields: ref_fields, ..
-                            }) = reg.get(ident.sym.as_ref())
-                            {
-                                fields.extend(ref_fields.iter().cloned());
-                            }
+                        if let Some(ref_fields) = resolve_type_ref_fields(type_ref, reg, synthetic)
+                        {
+                            fields.extend(ref_fields);
                         }
                     }
                     _ => {}
@@ -498,6 +519,8 @@ fn collect_type_alias_fields(
                 Some(fields)
             }
         }
+        // Type reference: `type X = Partial<Body>` → resolve fields from registry
+        ast::TsType::TsTypeRef(type_ref) => resolve_type_ref_fields(type_ref, reg, synthetic),
         _ => None,
     }
 }

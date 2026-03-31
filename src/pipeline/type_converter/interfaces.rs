@@ -25,13 +25,8 @@ pub fn convert_interface_items(
         .body
         .iter()
         .any(|m| matches!(m, TsTypeElement::TsPropertySignature(_)));
-    let has_call_signatures = decl
-        .body
-        .body
-        .iter()
-        .any(|m| matches!(m, TsTypeElement::TsCallSignatureDecl(_)));
 
-    if has_call_signatures && !has_methods && !has_properties {
+    if crate::registry::interfaces::is_callable_only(&decl.body.body) {
         let item = convert_interface_as_fn_type(decl, vis, &name, type_params, synthetic, reg)?;
         return Ok(vec![item]);
     }

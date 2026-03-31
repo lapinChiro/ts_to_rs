@@ -9,6 +9,89 @@ use crate::pipeline::type_converter::convert_ts_type;
 use crate::pipeline::SyntheticTypeRegistry;
 use crate::registry::collect_type_params;
 
+/// Rest パラメータ（`...args: T[]`）から名前と型を抽出する。
+///
+/// `TsFnParam::Rest` と `Pat::Rest` の両方で使われる共通ロジック。
+/// arg から名前を取得し、type_ann（fallback: arg の type_ann）から型を変換する。
+fn extract_rest_param(
+    rest: &ast::RestPat,
+    lookup: &TypeRegistry,
+    synthetic: &mut SyntheticTypeRegistry,
+) -> Option<(String, RustType)> {
+    let name = match rest.arg.as_ref() {
+        ast::Pat::Ident(ident) => ident.id.sym.to_string(),
+        _ => "rest".to_string(),
+    };
+    let type_ann = rest.type_ann.as_ref().or_else(|| {
+        if let ast::Pat::Ident(ident) = rest.arg.as_ref() {
+            ident.type_ann.as_ref()
+        } else {
+            None
+        }
+    });
+    let ty = type_ann.and_then(|ann| convert_ts_type(&ann.type_ann, synthetic, lookup).ok())?;
+    Some((name, ty))
+}
+
+/// `BindingIdent` から名前と型を抽出する。
+///
+/// `TsFnParam::Ident` と `Pat::Ident` の共通ロジック。
+fn extract_ident_param(
+    ident: &ast::BindingIdent,
+    lookup: &TypeRegistry,
+    synthetic: &mut SyntheticTypeRegistry,
+) -> Option<(String, RustType)> {
+    let name = ident.id.sym.to_string();
+    let ty = ident
+        .type_ann
+        .as_ref()
+        .and_then(|ann| convert_ts_type(&ann.type_ann, synthetic, lookup).ok())?;
+    Some((name, ty))
+}
+
+/// `TsFnParam`（interface メソッド・call signature のパラメータ）から名前と型を抽出する。
+///
+/// - `TsFnParam::Ident`: 名前 + 型注釈から変換
+/// - `TsFnParam::Rest`: arg から名前、type_ann から型を取得（fallback: arg の type_ann）
+/// - その他: `None`
+pub(super) fn extract_ts_fn_param(
+    param: &ast::TsFnParam,
+    lookup: &TypeRegistry,
+    synthetic: &mut SyntheticTypeRegistry,
+) -> Option<(String, RustType)> {
+    match param {
+        ast::TsFnParam::Ident(ident) => extract_ident_param(ident, lookup, synthetic),
+        ast::TsFnParam::Rest(rest) => extract_rest_param(rest, lookup, synthetic),
+        _ => None,
+    }
+}
+
+/// `Pat`（関数宣言・アロー関数のパラメータ）から名前と型を抽出する。
+///
+/// - `Pat::Ident`: 名前 + 型注釈から変換
+/// - `Pat::Assign`: デフォルトパラメータ。左辺の Ident から型を取得し `Option<T>` でラップ
+/// - `Pat::Rest`: arg から名前、type_ann から型を取得（fallback: arg の type_ann）
+/// - その他: `None`
+pub(super) fn extract_pat_param(
+    pat: &ast::Pat,
+    lookup: &TypeRegistry,
+    synthetic: &mut SyntheticTypeRegistry,
+) -> Option<(String, RustType)> {
+    match pat {
+        ast::Pat::Ident(ident) => extract_ident_param(ident, lookup, synthetic),
+        ast::Pat::Assign(assign) => {
+            if let ast::Pat::Ident(ident) = assign.left.as_ref() {
+                let (name, ty) = extract_ident_param(ident, lookup, synthetic)?;
+                Some((name, RustType::Option(Box::new(ty))))
+            } else {
+                None
+            }
+        }
+        ast::Pat::Rest(rest) => extract_rest_param(rest, lookup, synthetic),
+        _ => None,
+    }
+}
+
 /// 関数型エイリアス (`type F = (x: T) => U`) を `TypeDef::Function` として収集する。
 pub(super) fn try_collect_fn_type_alias(
     alias: &ast::TsTypeAliasDecl,
@@ -17,24 +100,22 @@ pub(super) fn try_collect_fn_type_alias(
 ) -> Option<TypeDef> {
     match alias.type_ann.as_ref() {
         ast::TsType::TsFnOrConstructorType(ast::TsFnOrConstructorType::TsFnType(fn_type)) => {
-            let mut params = Vec::new();
-            for param in &fn_type.params {
-                if let ast::TsFnParam::Ident(ident) = param {
-                    let name = ident.id.sym.to_string();
-                    if let Some(ann) = &ident.type_ann {
-                        if let Ok(ty) = convert_ts_type(&ann.type_ann, synthetic, lookup) {
-                            params.push((name, ty));
-                        }
-                    }
-                }
-            }
+            let params: Vec<(String, RustType)> = fn_type
+                .params
+                .iter()
+                .filter_map(|p| extract_ts_fn_param(p, lookup, synthetic))
+                .collect();
+            let has_rest = fn_type
+                .params
+                .iter()
+                .any(|p| matches!(p, ast::TsFnParam::Rest(_)));
             let return_type = convert_ts_type(&fn_type.type_ann.type_ann, synthetic, lookup).ok();
             let type_params = collect_type_params(alias.type_params.as_deref(), lookup, synthetic);
             Some(TypeDef::Function {
                 type_params,
                 params,
                 return_type,
-                has_rest: false,
+                has_rest,
             })
         }
         // Object literal type with call signatures only: `type F = { (x: T): U }`
@@ -55,30 +136,31 @@ fn try_collect_call_signature_fn(
     lookup: &TypeRegistry,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Option<TypeDef> {
-    let mut call_sigs = Vec::new();
-    for member in &lit.members {
-        match member {
-            ast::TsTypeElement::TsCallSignatureDecl(sig) => call_sigs.push(sig),
-            // Non-call-signature member → not a pure function type
-            _ => return None,
-        }
+    if !super::interfaces::is_callable_only(&lit.members) {
+        return None;
     }
+
+    let call_sigs: Vec<&ast::TsCallSignatureDecl> = lit
+        .members
+        .iter()
+        .filter_map(|m| match m {
+            ast::TsTypeElement::TsCallSignatureDecl(sig) => Some(sig),
+            _ => None,
+        })
+        .collect();
 
     // Pick the overload with the most parameters
     let sig = call_sigs.iter().max_by_key(|s| s.params.len())?;
 
-    let mut params = Vec::new();
-    for param in &sig.params {
-        if let ast::TsFnParam::Ident(ident) = param {
-            let name = ident.id.sym.to_string();
-            let ty = ident
-                .type_ann
-                .as_ref()
-                .and_then(|ann| convert_ts_type(&ann.type_ann, synthetic, lookup).ok())
-                .unwrap_or(RustType::Any);
-            params.push((name, ty));
-        }
-    }
+    let params: Vec<(String, RustType)> = sig
+        .params
+        .iter()
+        .filter_map(|p| extract_ts_fn_param(p, lookup, synthetic))
+        .collect();
+    let has_rest = sig
+        .params
+        .iter()
+        .any(|p| matches!(p, ast::TsFnParam::Rest(_)));
 
     let return_type = sig
         .type_ann
@@ -91,7 +173,7 @@ fn try_collect_call_signature_fn(
         type_params,
         params,
         return_type,
-        has_rest: false,
+        has_rest,
     })
 }
 
@@ -101,44 +183,15 @@ pub(super) fn collect_fn_def_with_extras(
     lookup: &TypeRegistry,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<TypeDef> {
-    let mut params = Vec::new();
-    let mut has_rest = false;
-    for param in &func.params {
-        match &param.pat {
-            ast::Pat::Ident(ident) => {
-                let name = ident.id.sym.to_string();
-                if let Some(ann) = &ident.type_ann {
-                    if let Ok(ty) = convert_ts_type(&ann.type_ann, synthetic, lookup) {
-                        params.push((name, ty));
-                    }
-                }
-            }
-            ast::Pat::Assign(assign) => {
-                // Default parameter: `name: Type = value` → Option<Type>
-                if let ast::Pat::Ident(ident) = assign.left.as_ref() {
-                    let name = ident.id.sym.to_string();
-                    if let Some(ann) = &ident.type_ann {
-                        if let Ok(ty) = convert_ts_type(&ann.type_ann, synthetic, lookup) {
-                            params.push((name, RustType::Option(Box::new(ty))));
-                        }
-                    }
-                }
-            }
-            ast::Pat::Rest(rest) => {
-                has_rest = true;
-                if let ast::Pat::Ident(ident) = rest.arg.as_ref() {
-                    let name = ident.id.sym.to_string();
-                    let type_ann = rest.type_ann.as_ref().or(ident.type_ann.as_ref());
-                    if let Some(ann) = type_ann {
-                        if let Ok(ty) = convert_ts_type(&ann.type_ann, synthetic, lookup) {
-                            params.push((name, ty));
-                        }
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
+    let params: Vec<(String, RustType)> = func
+        .params
+        .iter()
+        .filter_map(|param| extract_pat_param(&param.pat, lookup, synthetic))
+        .collect();
+    let has_rest = func
+        .params
+        .iter()
+        .any(|param| matches!(&param.pat, ast::Pat::Rest(_)));
 
     let return_type = func
         .return_type
@@ -161,17 +214,15 @@ pub(super) fn collect_arrow_def_with_extras(
     lookup: &TypeRegistry,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<TypeDef> {
-    let mut params = Vec::new();
-    for param in &arrow.params {
-        if let ast::Pat::Ident(ident) = param {
-            let name = ident.id.sym.to_string();
-            if let Some(ann) = &ident.type_ann {
-                if let Ok(ty) = convert_ts_type(&ann.type_ann, synthetic, lookup) {
-                    params.push((name, ty));
-                }
-            }
-        }
-    }
+    let params: Vec<(String, RustType)> = arrow
+        .params
+        .iter()
+        .filter_map(|param| extract_pat_param(param, lookup, synthetic))
+        .collect();
+    let has_rest = arrow
+        .params
+        .iter()
+        .any(|param| matches!(param, ast::Pat::Rest(_)));
 
     let return_type = arrow
         .return_type
@@ -184,6 +235,6 @@ pub(super) fn collect_arrow_def_with_extras(
         type_params,
         params,
         return_type,
-        has_rest: false,
+        has_rest,
     })
 }
