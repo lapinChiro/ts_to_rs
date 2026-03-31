@@ -20,8 +20,9 @@
 - 各項目には **安定 ID**（`I-01` 等）を付与。ID は識別子であり順序を表さない。新規追加時は「最後に使われた ID + 1」を採番
 - **優先度は Tier 内の記載順序**（上ほど高い）。サブカテゴリは分類ラベル
 - 相互参照は `I-XX` で行い、参照先不在時は背景を自己完結的に記述
-- 件数は Hono ベンチマーク実測値（最終実行: 2026-03-31 S1修正後、110/158 クリーン、58 エラー）
+- 件数は Hono ベンチマーク実測値（最終実行: 2026-03-31 T-2完了時点 git_sha=773a4c6、110/158 クリーン、58 エラー。S1/T-3 はベンチマーク数値に影響なし）
 - I-320〜I-330 は T-3 fixture 拡充（2026-03-31）で発見。ベンチマーク件数ではなくスナップショットテストのコンパイルチェックで検出
+- コンパイルテストスキップ: 25 件（builtins なし）/ 24 件（builtins あり）。従来 11 件 + T-3 追加 14 件
 
 完了済み機能: [doc/completed-features.md](doc/completed-features.md)。設計判断: [doc/design-decisions.md](doc/design-decisions.md)。
 
@@ -65,7 +66,7 @@
 #### ビルトイン型
 
 - **[I-261]** **ES2016〜ES2024 の追加メソッド** — `tools/extract-types/src/index.ts` の `libMap` 拡張で解決
-- **[I-263]** **型エイリアス（`kind: "alias"`）の TypeRegistry 登録** — `src/external_types/mod.rs:329` で `Alias` が `None` を返す
+- **[I-263]** **型エイリアス（`kind: "alias"`）の TypeRegistry 登録** — `src/external_types/mod.rs:311-319` で `ExternalTypeDef::Alias` が `None` を返す
 - **[I-262]** **`Intl` 名前空間の型定義** — namespace 抽出未対応。需要発生時に対応
 - **[I-270c]** **ビルトイン型のメソッド impl 生成** — trait 定義 + impl ブロック方式。`TypeRegistry` にメソッドシグネチャ格納済み。`src/pipeline/external_struct_generator.rs` に impl 生成を追加。コンパイルテスト `instanceof-builtin` のスキップ解消。🔗 I-274（フィールド名不一致）の解消が望ましい
 - **[I-264]** **`Proxy`/`Reflect` の型抽出未対応** — 🔗 I-262 と同根。需要発生時に対応
@@ -90,7 +91,7 @@
 - **[I-201]** **`null as any` の非 Option 型への代入** — `todo!()` or `Enum::Other(Value::Null)` が妥当。skip 原因
 - **[I-202]** **`Box<dyn Fn>` を含む enum の derive 不適合** — skip 原因
 - **[I-209]** **any-narrowing enum への値代入時の型強制** — skip 原因
-- **[I-255]** **`x++`/`x--` が mutation 未検出** — `let mut` 欠落。`src/transformer/statements/mutability.rs:110-131`
+- **[I-255]** **`x++`/`x--` が mutation 未検出** — `let mut` 欠落。`src/transformer/statements/mutability.rs:153-272` の `collect_mutated_vars_from_expr` に `Expr::Update` の直接ハンドリングなし。変換後の `Expr::Assign` 経由で間接検出されるケースもあるが、全パスをカバーしていない
 - **[I-258]** **クロージャ内制御フロー内代入の mut 未検出** — `src/transformer/statements/mutability.rs:56-64`
 
 #### T-3 fixture 拡充で発見されたコンパイルエラー
@@ -104,8 +105,9 @@
   - **解決策**: 戻り値型が `Box<dyn Fn>` の場合、返却されるクロージャを `Box::new()` でラップ
   - fixture: closures で発見
 - **[I-322]** **discriminated union switch でデストラクチャ変数の未使用** — match arm で `Event::Click { x, .. }` とデストラクチャするが body で `event.x` を使用（`E0609: no field x on type Event`）
-  - `src/transformer/statements/switch.rs:479-487` で case body 内のフィールドアクセスをバインド変数に書き換えていない
-  - **解決策**: case body 変換時に `collect_du_field_accesses` の結果を使い、`event.x` → `x` に rewrite
+  - TypeResolver 側: `is_du_field_binding()` が存在し、`src/transformer/expressions/member_access.rs:288` でチェック済み
+  - **問題**: `is_du_field_binding` のスコープ検出が不完全で、一部のフィールドアクセスが rewrite されない
+  - `src/transformer/statements/switch.rs:479-487` の case body 変換時に `collect_du_field_accesses` の結果が十分に活用されていない
   - fixture: discriminated-union で発見
 - **[I-323]** **`toString()` が Rust の `to_string()` に変換されない** — `n.toString()` → `E0599: no method named toString`
   - `src/transformer/expressions/methods.rs:455-459` の `map_method_call` に `"toString"` ケースなし
@@ -115,9 +117,10 @@
   - `src/transformer/expressions/binary.rs:75-143` の文字列結合ハンドリングが `String + String` の全ケースを網羅していない
   - **解決策**: 文字列結合で両辺の型に応じた `.as_str()`/`.to_string()` 挿入
   - fixture: do-while, functions で発見
-- **[I-325]** **三項演算子の変数代入で `&str` リテラルが `String` に昇格されない** — `let label = if active { "on" } else { "off" }` → `E0308: expected String, found &str`
-  - **解決策**: 関数戻り値型が `String` の場合、三項演算子の分岐リテラルに `.to_string()` を付与
-  - fixture: ternary で発見
+- **[I-325]** **オブジェクトデストラクチャリングのデフォルト値で `&str` が `String` に昇格されない** — `let { color = "black" } = opts` → `E0308: expected String, found &str`
+  - 三項演算子のリテラル昇格は解決済み（expected type ベースの `.to_string()` 付与が動作）
+  - 残存: デストラクチャリングのデフォルト値リテラルが `.to_string()` 付与されない
+  - fixture: object-destructuring で発見
 - **[I-326]** **`??` チェーンの変換バグ** — `a ?? b ?? 0` → `a.unwrap_or_else(|| b.unwrap_or_else(|| 0))` で中間結果の型が `Option<f64>` → `f64` の不一致
   - `src/transformer/expressions/binary.rs:48-67` でネストされた `??` の右辺型を考慮していない
   - **解決策**: 右辺が `??` 式の場合、中間結果を unwrap してからネスト
@@ -130,17 +133,25 @@
   - `src/generator/types.rs:53` で `RustType::Never` → `!` を出力
   - **解決策**: `std::convert::Infallible` を使用（戻り値型では既に `Result<Infallible, String>` パターンが使われている）、または `#![feature(never_type)]` を要求
   - fixture: keyword-types で発見
-- **[I-329]** **string メソッド変換の不足・バグ** — `charAt()`, `indexOf()`, `split()`, `slice()`, `repeat()` の Rust 変換が不完全
+- **[I-329]** **string メソッド変換の不足・バグ** — `charAt()`, `indexOf()`, `repeat()` の Rust 変換が不完全
   - `charAt()`: 未変換（`E0599`）。Rust では `chars().nth(n)` に変換
-  - `indexOf()`: `iter()` を呼ぶが String に存在しない（`E0599`）。`find()` + 位置取得に変換
-  - `split()`: 同上
-  - `slice()`: Range index を使用するがバイトインデックス（`E0277`）。🔗 I-188
+  - `indexOf()`: `iter().position()` を呼ぶが String に `iter()` は存在しない（`E0599`）。`find()` + 位置取得に変換。`src/transformer/expressions/methods.rs:264-316`
   - `repeat()`: count が `f64` のまま `usize` に変換されない（`E0308`）
+  - `split()`: 実装済み（`src/transformer/expressions/methods.rs:112-135`）
+  - `slice()`: 実装済み（`src/transformer/expressions/methods.rs:164-179`）
   - fixture: string-methods で発見
 - **[I-330]** **try/catch + return で unreachable code** — try block 内に return がある場合、ブロック後の `if let Err(e)` + `unreachable!()` が到達不能
   - `src/transformer/statements/error_handling.rs:123-129`
   - **解決策**: try block 内の全パスが return する場合、catch block を直接 else 分岐にする or ブロック構造を見直す
   - fixture: async-await で発見
+- **[I-331]** **`string | void` 戻り値で if 文の else 分岐欠落** — `fn maybeReturn(flag: bool) -> Option<String>` で if ブランチのみ return し、暗黙の `()` 返却で `E0317`
+  - **解決策**: `Option<T>` 戻り値の関数で if 文の else 分岐がない場合、`None` を暗黙返却
+  - fixture: void-type で発見
+- **[I-332]** **`as unknown as T` 二段キャストの変換不備** — TS の `x as unknown as string` で中間の `unknown` が消失し、型不一致
+  - **解決策**: 二段キャストを検出し、最終ターゲット型への直接変換を生成
+  - fixture: type-assertion で発見
+- **[I-333]** **`basic-types` の unknown typeof narrowing** — `typeof x` で narrowing されたスコープで `Value` と `String` の型不一致
+  - fixture: basic-types で発見
 
 #### import/export
 
@@ -255,7 +266,7 @@
 
 ## 保留
 
-- **[I-32]** コンパイルテストのスキップ解消 — 各原因の修正が前提（11 件）
+- **[I-32]** コンパイルテストのスキップ解消 — 各原因の修正が前提（25 件: 従来 11 + T-3 追加 14）
 - **[I-183]** HTTP E2E テスト基盤 + fetch 変換 — I-30 が前提
 
 ---
