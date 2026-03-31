@@ -1,4 +1,5 @@
 use super::*;
+use crate::ir::Item;
 
 #[test]
 fn test_transform_module_class_implements_single_interface() {
@@ -530,4 +531,60 @@ class Child extends Parent implements Greeter {
             "own impl should NOT contain greet (belongs to impl Greeter)"
         );
     }
+}
+
+/// I-335 integration: pre_scan_classes → build_mut_method_names → mark_mut_params_from_body
+/// Verifies the full pipeline generates `let mut counter = counter;` rebinding
+/// when a function parameter receives a `&mut self` method call.
+#[test]
+fn test_transform_module_mut_self_method_generates_param_rebinding() {
+    let source = r#"
+class Counter {
+    _count: number;
+    increment(): void {
+        this._count += 1;
+    }
+    get_count(): number {
+        return this._count;
+    }
+}
+
+function useCounter(counter: Counter): number {
+    counter.increment();
+    return counter.get_count();
+}
+"#;
+    let module = parse_typescript(source).expect("parse failed");
+    let items = transform_module(&module, &TypeRegistry::new()).unwrap();
+
+    // Find the useCounter function (name is not snake_cased for standalone functions)
+    let use_counter_fn = items
+        .iter()
+        .find(|item| matches!(item, Item::Fn { name, .. } if name == "useCounter"));
+    assert!(
+        use_counter_fn.is_some(),
+        "should have use_counter function, got: {items:#?}"
+    );
+
+    let body = match use_counter_fn.unwrap() {
+        Item::Fn { body, .. } => body,
+        _ => unreachable!(),
+    };
+
+    // First statement should be the `let mut counter = counter;` rebinding
+    let has_rebinding = body.iter().any(|stmt| {
+        matches!(
+            stmt,
+            Stmt::Let {
+                mutable: true,
+                name,
+                init: Some(Expr::Ident(init_name)),
+                ..
+            } if name == "counter" && init_name == "counter"
+        )
+    });
+    assert!(
+        has_rebinding,
+        "useCounter body should contain 'let mut counter = counter;' rebinding, got: {body:#?}"
+    );
 }

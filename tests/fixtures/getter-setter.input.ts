@@ -41,3 +41,21 @@ class Config {
         this._debug = !this._debug;
     }
 }
+
+// I-335: user-defined &mut self method — caller should get let mut
+class ClickCounter {
+    _count: number;
+
+    increment(): void {
+        this._count += 1;
+    }
+
+    get_count(): number {
+        return this._count;
+    }
+}
+
+function useCounter(counter: ClickCounter): number {
+    counter.increment();
+    return counter.get_count();
+}

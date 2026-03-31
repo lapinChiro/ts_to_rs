@@ -52,132 +52,33 @@ pub(crate) fn convert_last_return_to_tail(body: &mut Vec<Stmt>) {
     }
 }
 
-/// Methods that require `&mut self` on the receiver.
-const MUTATING_METHODS: &[&str] = &[
-    "reverse", "sort", "sort_by", "drain", "push", "pop", "remove", "insert", "clear", "truncate",
-    "retain",
-];
-
-/// Scans function body for method calls that require `&mut self` and inserts
-/// `let mut name = name;` rebinding statements at the start of the body.
-pub(super) fn mark_mut_params_from_body(body: &[Stmt], params: &[Param]) -> Vec<Stmt> {
-    let mut needs_mut = std::collections::HashSet::new();
-    collect_mut_receivers(body, &mut needs_mut);
-
-    let mut rebindings = Vec::new();
-    for param in params {
-        if needs_mut.contains(&param.name) {
-            rebindings.push(Stmt::Let {
-                mutable: true,
-                name: param.name.clone(),
-                ty: None,
-                init: Some(Expr::Ident(param.name.clone())),
-            });
-        }
-    }
-    rebindings
-}
-
-/// Recursively collects variable names that are receivers of mutating method calls.
+/// Scans function body for mutations (assignments, mutating method calls, closure captures)
+/// and inserts `let mut name = name;` rebinding statements for affected parameters.
 ///
-/// Uses exhaustive pattern matching to ensure new `Stmt` variants are handled.
-fn collect_mut_receivers(stmts: &[Stmt], receivers: &mut std::collections::HashSet<String>) {
-    for stmt in stmts {
-        match stmt {
-            Stmt::Expr(expr) | Stmt::TailExpr(expr) => {
-                collect_mut_receivers_from_expr(expr, receivers);
-            }
-            Stmt::Let {
-                init: Some(expr), ..
-            } => {
-                collect_mut_receivers_from_expr(expr, receivers);
-            }
-            Stmt::Let { init: None, .. } => {}
-            Stmt::Return(Some(expr)) => {
-                collect_mut_receivers_from_expr(expr, receivers);
-            }
-            Stmt::Return(None) => {}
-            Stmt::If {
-                condition,
-                then_body,
-                else_body,
-            } => {
-                collect_mut_receivers_from_expr(condition, receivers);
-                collect_mut_receivers(then_body, receivers);
-                if let Some(els) = else_body {
-                    collect_mut_receivers(els, receivers);
-                }
-            }
-            Stmt::IfLet {
-                expr,
-                then_body,
-                else_body,
-                ..
-            } => {
-                collect_mut_receivers_from_expr(expr, receivers);
-                collect_mut_receivers(then_body, receivers);
-                if let Some(els) = else_body {
-                    collect_mut_receivers(els, receivers);
-                }
-            }
-            Stmt::Match { expr, arms } => {
-                collect_mut_receivers_from_expr(expr, receivers);
-                for arm in arms {
-                    if let Some(guard) = &arm.guard {
-                        collect_mut_receivers_from_expr(guard, receivers);
-                    }
-                    collect_mut_receivers(&arm.body, receivers);
-                }
-            }
-            Stmt::While {
-                condition, body, ..
-            } => {
-                collect_mut_receivers_from_expr(condition, receivers);
-                collect_mut_receivers(body, receivers);
-            }
-            Stmt::WhileLet { expr, body, .. } => {
-                collect_mut_receivers_from_expr(expr, receivers);
-                collect_mut_receivers(body, receivers);
-            }
-            Stmt::ForIn { iterable, body, .. } => {
-                collect_mut_receivers_from_expr(iterable, receivers);
-                collect_mut_receivers(body, receivers);
-            }
-            Stmt::Loop { body, .. } | Stmt::LabeledBlock { body, .. } => {
-                collect_mut_receivers(body, receivers);
-            }
-            Stmt::Break {
-                value: Some(expr), ..
-            } => {
-                collect_mut_receivers_from_expr(expr, receivers);
-            }
-            Stmt::Break { value: None, .. } | Stmt::Continue { .. } => {}
-        }
-    }
-}
+/// Delegates mutation detection to [`crate::transformer::statements::mutability::collect_mutated_vars`]
+/// to avoid duplicating the traversal logic (DRY).
+pub(super) fn mark_mut_params_from_body(
+    body: &[Stmt],
+    params: &[Param],
+    extra_mut_methods: &std::collections::HashSet<String>,
+) -> Vec<Stmt> {
+    let mut mutated = std::collections::HashSet::new();
+    crate::transformer::statements::mutability::collect_mutated_vars(
+        body,
+        &mut mutated,
+        extra_mut_methods,
+    );
 
-/// Checks if an expression contains a mutating method call and collects the receiver name.
-fn collect_mut_receivers_from_expr(expr: &Expr, receivers: &mut std::collections::HashSet<String>) {
-    if let Expr::MethodCall { object, method, .. } = expr {
-        if MUTATING_METHODS.contains(&method.as_str()) {
-            // Extract root variable from chains like obj.items.push(...)
-            let mut current = object.as_ref();
-            loop {
-                match current {
-                    Expr::Ident(name) => {
-                        receivers.insert(name.clone());
-                        break;
-                    }
-                    Expr::FieldAccess { object: inner, .. } | Expr::Index { object: inner, .. } => {
-                        current = inner;
-                    }
-                    _ => break,
-                }
-            }
-        }
-        // Also recurse into chained calls (e.g., arr.drain(...).collect())
-        collect_mut_receivers_from_expr(object, receivers);
-    }
+    params
+        .iter()
+        .filter(|p| mutated.contains(&p.name))
+        .map(|p| Stmt::Let {
+            mutable: true,
+            name: p.name.clone(),
+            ty: None,
+            init: Some(Expr::Ident(p.name.clone())),
+        })
+        .collect()
 }
 
 /// Checks whether a list of SWC statements contains a `throw` statement.

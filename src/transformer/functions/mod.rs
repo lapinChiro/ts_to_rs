@@ -61,6 +61,7 @@ impl<'a> Transformer<'a> {
             let mut sub = Transformer {
                 tctx: self.tctx,
                 synthetic: &mut local_synthetic,
+                mut_method_names: self.mut_method_names.clone(),
             };
 
             for param in &fn_decl.function.params {
@@ -136,6 +137,7 @@ impl<'a> Transformer<'a> {
             Some(block) => Transformer {
                 tctx: self.tctx,
                 synthetic: &mut local_synthetic,
+                mut_method_names: self.mut_method_names.clone(),
             }
             .convert_stmt_list(&block.stmts, return_type.as_ref())?,
             None => Vec::new(),
@@ -178,7 +180,7 @@ impl<'a> Transformer<'a> {
         };
 
         convert_last_return_to_tail(&mut body);
-        let mut_rebindings = mark_mut_params_from_body(&body, &params);
+        let mut_rebindings = mark_mut_params_from_body(&body, &params, &self.mut_method_names);
         if !mut_rebindings.is_empty() {
             let mut new_body = mut_rebindings;
             new_body.extend(body);

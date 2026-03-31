@@ -37,8 +37,27 @@ When creating, updating, or deleting rules.
 - Is `paths:` frontmatter appropriate? (see /rule-writing "Decision Criteria"). A directory-specific rule without `paths:` wastes context. A global rule with unnecessary `paths:` risks not firing
 - Does it contradict or duplicate other rules?
 - Is it stale relative to current project state?
+- Is the content written in English and well-organized? (see Language & Style below)
+
+### Language & Style
+
+Language requirements differ by directory:
+
+| Directory | Language | Reason |
+|-----------|----------|--------|
+| `.claude/rules/` | **English** | Machine-consumed; consistency with codebase |
+| `.claude/skills/` | **English** | Machine-consumed; consistency with codebase |
+| `.claude/commands/` | **Japanese** | User-authored and user-maintained |
+
+When reviewing or updating rules/skills:
+
+1. **Language**: All prose, section headings, and examples must be in English. Japanese text in existing rules/skills should be translated to English during the next update touching that file
+2. **Organization**: Content should be logically structured with clear headings, concise bullet points, and no redundant prose. Follow /rule-writing structure
+3. **Commands exception**: `.claude/commands/` files are maintained by the user in Japanese — do not translate them to English
 
 ## Prohibited
 
 - Deleting rules without user confirmation
 - Completing rule updates without checking review perspectives
+- Writing new rules or skills in Japanese (translate to English before saving)
+- Leaving Japanese text untranslated when updating a rule/skill file

@@ -58,6 +58,7 @@ impl<'a> Transformer<'a> {
             let closure = crate::transformer::Transformer {
                 tctx: self.tctx,
                 synthetic: self.synthetic,
+                mut_method_names: self.mut_method_names.clone(),
             }
             .convert_arrow_expr_with_return_type(
                 arrow,

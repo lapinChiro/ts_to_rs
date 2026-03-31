@@ -1,4 +1,5 @@
 use super::*;
+use crate::ir::ClosureBody;
 
 // --- contains_throw recursion tests ---
 
@@ -122,4 +123,158 @@ fn test_convert_last_return_to_tail_empty_body_noop() {
     let mut body: Vec<Stmt> = vec![];
     convert_last_return_to_tail(&mut body);
     assert!(body.is_empty());
+}
+
+// --- mark_mut_params_from_body tests ---
+
+/// I-255: `x++` (converted to `x += 1`) should detect parameter mutation
+#[test]
+fn test_param_rebinding_for_assign_op() {
+    // Body: x = x + 1 (IR representation of x++)
+    let body = vec![Stmt::Expr(Expr::Assign {
+        target: Box::new(Expr::Ident("x".to_string())),
+        value: Box::new(Expr::BinaryOp {
+            left: Box::new(Expr::Ident("x".to_string())),
+            op: BinOp::Add,
+            right: Box::new(Expr::NumberLit(1.0)),
+        }),
+    })];
+    let params = vec![Param {
+        name: "x".to_string(),
+        ty: Some(RustType::F64),
+    }];
+    let rebindings = mark_mut_params_from_body(&body, &params, &std::collections::HashSet::new());
+    assert_eq!(
+        rebindings.len(),
+        1,
+        "x++ (Assign) should trigger parameter rebinding"
+    );
+    assert!(matches!(
+        &rebindings[0],
+        Stmt::Let { mutable: true, name, .. } if name == "x"
+    ));
+}
+
+/// I-258: mutation inside a closure should detect parameter mutation
+#[test]
+fn test_param_rebinding_for_closure_mutation() {
+    // Body: let f = || { items.push(1) };
+    let body = vec![Stmt::Let {
+        mutable: false,
+        name: "f".to_string(),
+        ty: None,
+        init: Some(Expr::Closure {
+            params: vec![],
+            return_type: None,
+            body: ClosureBody::Block(vec![Stmt::Expr(Expr::MethodCall {
+                object: Box::new(Expr::Ident("items".to_string())),
+                method: "push".to_string(),
+                args: vec![Expr::NumberLit(1.0)],
+            })]),
+        }),
+    }];
+    let params = vec![Param {
+        name: "items".to_string(),
+        ty: Some(RustType::Vec(Box::new(RustType::F64))),
+    }];
+    let rebindings = mark_mut_params_from_body(&body, &params, &std::collections::HashSet::new());
+    assert_eq!(
+        rebindings.len(),
+        1,
+        "closure mutation (items.push) should trigger parameter rebinding"
+    );
+    assert!(matches!(
+        &rebindings[0],
+        Stmt::Let { mutable: true, name, .. } if name == "items"
+    ));
+}
+
+/// I-335: user-defined `&mut self` method call should detect parameter mutation
+#[test]
+fn test_param_rebinding_for_user_defined_mut_method() {
+    // Body: counter.increment()
+    let body = vec![Stmt::Expr(Expr::MethodCall {
+        object: Box::new(Expr::Ident("counter".to_string())),
+        method: "increment".to_string(),
+        args: vec![],
+    })];
+    let params = vec![Param {
+        name: "counter".to_string(),
+        ty: None,
+    }];
+    // With empty extra_mut_methods, should NOT detect
+    let rebindings = mark_mut_params_from_body(&body, &params, &std::collections::HashSet::new());
+    assert_eq!(
+        rebindings.len(),
+        0,
+        "without extra_mut_methods, increment() should not trigger rebinding"
+    );
+
+    // With "increment" in extra_mut_methods, SHOULD detect
+    let mut extra = std::collections::HashSet::new();
+    extra.insert("increment".to_string());
+    let rebindings = mark_mut_params_from_body(&body, &params, &extra);
+    assert_eq!(
+        rebindings.len(),
+        1,
+        "with extra_mut_methods containing 'increment', should trigger rebinding"
+    );
+    assert!(matches!(
+        &rebindings[0],
+        Stmt::Let { mutable: true, name, .. } if name == "counter"
+    ));
+}
+
+/// I-335: nested field access through `&mut self` method should mark root variable
+#[test]
+fn test_param_rebinding_for_nested_field_mut_method() {
+    // Body: obj.inner.increment() where inner is a field and increment is &mut self
+    let body = vec![Stmt::Expr(Expr::MethodCall {
+        object: Box::new(Expr::FieldAccess {
+            object: Box::new(Expr::Ident("obj".to_string())),
+            field: "inner".to_string(),
+        }),
+        method: "increment".to_string(),
+        args: vec![],
+    })];
+    let params = vec![Param {
+        name: "obj".to_string(),
+        ty: None,
+    }];
+    let mut extra = std::collections::HashSet::new();
+    extra.insert("increment".to_string());
+    let rebindings = mark_mut_params_from_body(&body, &params, &extra);
+    assert_eq!(
+        rebindings.len(),
+        1,
+        "obj.inner.increment() should mark root 'obj' for rebinding"
+    );
+    assert!(matches!(
+        &rebindings[0],
+        Stmt::Let { mutable: true, name, .. } if name == "obj"
+    ));
+}
+
+/// I-258: mutation inside control flow inside body should detect parameter mutation
+#[test]
+fn test_param_rebinding_for_control_flow_mutation() {
+    // Body: if (cond) { count = count + 1; }
+    let body = vec![Stmt::If {
+        condition: Expr::BoolLit(true),
+        then_body: vec![Stmt::Expr(Expr::Assign {
+            target: Box::new(Expr::Ident("count".to_string())),
+            value: Box::new(Expr::NumberLit(1.0)),
+        })],
+        else_body: None,
+    }];
+    let params = vec![Param {
+        name: "count".to_string(),
+        ty: Some(RustType::F64),
+    }];
+    let rebindings = mark_mut_params_from_body(&body, &params, &std::collections::HashSet::new());
+    assert_eq!(
+        rebindings.len(),
+        1,
+        "mutation inside if-body should trigger parameter rebinding"
+    );
 }

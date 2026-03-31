@@ -120,6 +120,7 @@ impl<'a> Transformer<'a> {
                     tctx: self.tctx,
 
                     synthetic: &mut *self.synthetic,
+                    mut_method_names: self.mut_method_names.clone(),
                 };
                 let mut stmts = expansion_stmts;
                 for stmt in &block.stmts {
@@ -247,6 +248,7 @@ impl<'a> Transformer<'a> {
                         tctx: self.tctx,
 
                         synthetic: &mut *self.synthetic,
+                        mut_method_names: self.mut_method_names.clone(),
                     };
                     let mut stmts = Vec::new();
                     for stmt in &block.stmts {
@@ -269,6 +271,7 @@ impl<'a> Transformer<'a> {
                         tctx: self.tctx,
 
                         synthetic: &mut *self.synthetic,
+                        mut_method_names: self.mut_method_names.clone(),
                     };
                     for stmt in &block.stmts {
                         body_stmts.extend(sub_t.convert_stmt(stmt, return_type.as_ref())?);

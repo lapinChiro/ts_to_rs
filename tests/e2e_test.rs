@@ -784,3 +784,8 @@ fn test_e2e_keyword_types_ts_rust_stdout_match() {
 fn test_e2e_mixed_features_ts_rust_stdout_match() {
     run_e2e_test("mixed_features");
 }
+
+#[test]
+fn test_e2e_mutation_detection_ts_rust_stdout_match() {
+    run_e2e_test("mutation_detection");
+}

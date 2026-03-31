@@ -3,6 +3,8 @@
 //! Scans a statement list for field assignments, mutating method calls,
 //! and closure captures to determine which variables need `let mut`.
 
+use std::collections::HashSet;
+
 use crate::ir::{ClosureBody, Expr, Stmt};
 
 /// Mutating methods that require `&mut self` on the receiver.
@@ -14,9 +16,12 @@ const MUTATING_METHODS: &[&str] = &[
 /// Post-processes a statement list to mark immutable variables as `let mut`
 /// when subsequent statements mutate them (field assignment or mutating method call).
 /// Also marks closure bindings as `let mut` when the closure captures mutably (FnMut).
-pub(super) fn mark_mutated_vars(stmts: &mut [Stmt]) {
-    let mut needs_mut = std::collections::HashSet::new();
-    collect_mutated_vars(stmts, &mut needs_mut);
+///
+/// `extra_mut_methods` contains additional method names (from user-defined classes with
+/// `&mut self`) that should be treated as mutating, beyond the hardcoded `MUTATING_METHODS`.
+pub(super) fn mark_mutated_vars(stmts: &mut [Stmt], extra_mut_methods: &HashSet<String>) {
+    let mut needs_mut = HashSet::new();
+    collect_mutated_vars(stmts, &mut needs_mut, extra_mut_methods);
 
     // Detect closures that perform any mutation → closure binding needs `let mut` (FnMut)
     for stmt in stmts.iter() {
@@ -26,13 +31,13 @@ pub(super) fn mark_mutated_vars(stmts: &mut [Stmt]) {
             ..
         } = stmt
         {
-            let mut closure_mutations = std::collections::HashSet::new();
+            let mut closure_mutations = HashSet::new();
             match body {
                 ClosureBody::Block(body_stmts) => {
-                    collect_mutated_vars(body_stmts, &mut closure_mutations);
+                    collect_mutated_vars(body_stmts, &mut closure_mutations, extra_mut_methods);
                 }
                 ClosureBody::Expr(expr) => {
-                    collect_mutated_vars_from_expr(expr, &mut closure_mutations);
+                    collect_mutated_vars_from_expr(expr, &mut closure_mutations, extra_mut_methods);
                 }
             }
             if !closure_mutations.is_empty() {
@@ -53,20 +58,29 @@ pub(super) fn mark_mutated_vars(stmts: &mut [Stmt]) {
 /// Recursively collects variable names that are targets of mutations.
 ///
 /// Uses exhaustive pattern matching to ensure new `Stmt` variants are handled.
-fn collect_mutated_vars(stmts: &[Stmt], names: &mut std::collections::HashSet<String>) {
+/// Used by both `mark_mutated_vars` (local variables) and `mark_mut_params_from_body`
+/// (parameter rebinding) to avoid duplicating the traversal logic.
+///
+/// `extra_mut_methods` contains additional method names (from user-defined classes with
+/// `&mut self`) that should be treated as mutating, beyond the hardcoded `MUTATING_METHODS`.
+pub(crate) fn collect_mutated_vars(
+    stmts: &[Stmt],
+    names: &mut HashSet<String>,
+    extra_mut_methods: &HashSet<String>,
+) {
     for stmt in stmts {
         match stmt {
             Stmt::Expr(expr) | Stmt::TailExpr(expr) => {
-                collect_mutated_vars_from_expr(expr, names);
+                collect_mutated_vars_from_expr(expr, names, extra_mut_methods);
             }
             Stmt::Let {
                 init: Some(expr), ..
             } => {
-                collect_mutated_vars_from_expr(expr, names);
+                collect_mutated_vars_from_expr(expr, names, extra_mut_methods);
             }
             Stmt::Let { init: None, .. } => {}
             Stmt::Return(Some(expr)) => {
-                collect_mutated_vars_from_expr(expr, names);
+                collect_mutated_vars_from_expr(expr, names, extra_mut_methods);
             }
             Stmt::Return(None) => {}
             Stmt::If {
@@ -74,10 +88,10 @@ fn collect_mutated_vars(stmts: &[Stmt], names: &mut std::collections::HashSet<St
                 then_body,
                 else_body,
             } => {
-                collect_mutated_vars_from_expr(condition, names);
-                collect_mutated_vars(then_body, names);
+                collect_mutated_vars_from_expr(condition, names, extra_mut_methods);
+                collect_mutated_vars(then_body, names, extra_mut_methods);
                 if let Some(els) = else_body {
-                    collect_mutated_vars(els, names);
+                    collect_mutated_vars(els, names, extra_mut_methods);
                 }
             }
             Stmt::IfLet {
@@ -86,42 +100,42 @@ fn collect_mutated_vars(stmts: &[Stmt], names: &mut std::collections::HashSet<St
                 else_body,
                 ..
             } => {
-                collect_mutated_vars_from_expr(expr, names);
-                collect_mutated_vars(then_body, names);
+                collect_mutated_vars_from_expr(expr, names, extra_mut_methods);
+                collect_mutated_vars(then_body, names, extra_mut_methods);
                 if let Some(els) = else_body {
-                    collect_mutated_vars(els, names);
+                    collect_mutated_vars(els, names, extra_mut_methods);
                 }
             }
             Stmt::Match { expr, arms } => {
-                collect_mutated_vars_from_expr(expr, names);
+                collect_mutated_vars_from_expr(expr, names, extra_mut_methods);
                 for arm in arms {
                     if let Some(guard) = &arm.guard {
-                        collect_mutated_vars_from_expr(guard, names);
+                        collect_mutated_vars_from_expr(guard, names, extra_mut_methods);
                     }
-                    collect_mutated_vars(&arm.body, names);
+                    collect_mutated_vars(&arm.body, names, extra_mut_methods);
                 }
             }
             Stmt::While {
                 condition, body, ..
             } => {
-                collect_mutated_vars_from_expr(condition, names);
-                collect_mutated_vars(body, names);
+                collect_mutated_vars_from_expr(condition, names, extra_mut_methods);
+                collect_mutated_vars(body, names, extra_mut_methods);
             }
             Stmt::WhileLet { expr, body, .. } => {
-                collect_mutated_vars_from_expr(expr, names);
-                collect_mutated_vars(body, names);
+                collect_mutated_vars_from_expr(expr, names, extra_mut_methods);
+                collect_mutated_vars(body, names, extra_mut_methods);
             }
             Stmt::ForIn { iterable, body, .. } => {
-                collect_mutated_vars_from_expr(iterable, names);
-                collect_mutated_vars(body, names);
+                collect_mutated_vars_from_expr(iterable, names, extra_mut_methods);
+                collect_mutated_vars(body, names, extra_mut_methods);
             }
             Stmt::Loop { body, .. } | Stmt::LabeledBlock { body, .. } => {
-                collect_mutated_vars(body, names);
+                collect_mutated_vars(body, names, extra_mut_methods);
             }
             Stmt::Break {
                 value: Some(expr), ..
             } => {
-                collect_mutated_vars_from_expr(expr, names);
+                collect_mutated_vars_from_expr(expr, names, extra_mut_methods);
             }
             Stmt::Break { value: None, .. } | Stmt::Continue { .. } => {}
         }
@@ -150,14 +164,23 @@ fn extract_root_ident(expr: &Expr) -> Option<&str> {
 /// Recursively walks an expression tree to find mutations (assignment, field assignment,
 /// index assignment, mutating method calls). Recurses into all sub-expressions including
 /// closure bodies and block expressions.
-fn collect_mutated_vars_from_expr(expr: &Expr, names: &mut std::collections::HashSet<String>) {
+fn collect_mutated_vars_from_expr(
+    expr: &Expr,
+    names: &mut HashSet<String>,
+    extra_mut_methods: &HashSet<String>,
+) {
+    // Shorthand for recursive calls
+    let recurse = |e: &Expr, n: &mut HashSet<String>| {
+        collect_mutated_vars_from_expr(e, n, extra_mut_methods);
+    };
+
     match expr {
         // Assignment: x = value, obj.field = value, obj.a.b = value, arr[i] = value
         Expr::Assign { target, value, .. } => {
             if let Some(root) = extract_root_ident(target) {
                 names.insert(root.to_string());
             }
-            collect_mutated_vars_from_expr(value, names);
+            recurse(value, names);
         }
         // Mutating method call: arr.push(...), obj.items.push(...)
         Expr::MethodCall {
@@ -166,51 +189,55 @@ fn collect_mutated_vars_from_expr(expr: &Expr, names: &mut std::collections::Has
             args,
             ..
         } => {
-            if MUTATING_METHODS.contains(&method.as_str()) {
+            if MUTATING_METHODS.contains(&method.as_str())
+                || extra_mut_methods.contains(method.as_str())
+            {
                 if let Some(root) = extract_root_ident(object) {
                     names.insert(root.to_string());
                 }
             }
-            collect_mutated_vars_from_expr(object, names);
+            recurse(object, names);
             for arg in args {
-                collect_mutated_vars_from_expr(arg, names);
+                recurse(arg, names);
             }
         }
         // Block expression → recurse into inner statements
         Expr::Block(block_stmts) => {
-            collect_mutated_vars(block_stmts, names);
+            collect_mutated_vars(block_stmts, names, extra_mut_methods);
         }
         // Closure → recurse into body to detect mutations of captured variables
         Expr::Closure { body, .. } => match body {
-            ClosureBody::Block(stmts) => collect_mutated_vars(stmts, names),
-            ClosureBody::Expr(e) => collect_mutated_vars_from_expr(e, names),
+            ClosureBody::Block(stmts) => {
+                collect_mutated_vars(stmts, names, extra_mut_methods);
+            }
+            ClosureBody::Expr(e) => recurse(e, names),
         },
         // Recurse into sub-expressions
         Expr::FnCall { args, .. }
         | Expr::FormatMacro { args, .. }
         | Expr::MacroCall { args, .. } => {
             for arg in args {
-                collect_mutated_vars_from_expr(arg, names);
+                recurse(arg, names);
             }
         }
-        Expr::FieldAccess { object, .. } => collect_mutated_vars_from_expr(object, names),
+        Expr::FieldAccess { object, .. } => recurse(object, names),
         Expr::Index { object, index } => {
-            collect_mutated_vars_from_expr(object, names);
-            collect_mutated_vars_from_expr(index, names);
+            recurse(object, names);
+            recurse(index, names);
         }
         Expr::BinaryOp { left, right, .. } => {
-            collect_mutated_vars_from_expr(left, names);
-            collect_mutated_vars_from_expr(right, names);
+            recurse(left, names);
+            recurse(right, names);
         }
-        Expr::UnaryOp { operand, .. } => collect_mutated_vars_from_expr(operand, names),
+        Expr::UnaryOp { operand, .. } => recurse(operand, names),
         Expr::If {
             condition,
             then_expr,
             else_expr,
         } => {
-            collect_mutated_vars_from_expr(condition, names);
-            collect_mutated_vars_from_expr(then_expr, names);
-            collect_mutated_vars_from_expr(else_expr, names);
+            recurse(condition, names);
+            recurse(then_expr, names);
+            recurse(else_expr, names);
         }
         Expr::IfLet {
             expr,
@@ -218,30 +245,30 @@ fn collect_mutated_vars_from_expr(expr: &Expr, names: &mut std::collections::Has
             else_expr,
             ..
         } => {
-            collect_mutated_vars_from_expr(expr, names);
-            collect_mutated_vars_from_expr(then_expr, names);
-            collect_mutated_vars_from_expr(else_expr, names);
+            recurse(expr, names);
+            recurse(then_expr, names);
+            recurse(else_expr, names);
         }
         Expr::Match { expr, arms } => {
-            collect_mutated_vars_from_expr(expr, names);
+            recurse(expr, names);
             for arm in arms {
                 if let Some(guard) = &arm.guard {
-                    collect_mutated_vars_from_expr(guard, names);
+                    recurse(guard, names);
                 }
-                collect_mutated_vars(&arm.body, names);
+                collect_mutated_vars(&arm.body, names, extra_mut_methods);
             }
         }
         Expr::StructInit { fields, base, .. } => {
             for (_, val) in fields {
-                collect_mutated_vars_from_expr(val, names);
+                recurse(val, names);
             }
             if let Some(b) = base {
-                collect_mutated_vars_from_expr(b, names);
+                recurse(b, names);
             }
         }
         Expr::Vec { elements } | Expr::Tuple { elements } => {
             for e in elements {
-                collect_mutated_vars_from_expr(e, names);
+                recurse(e, names);
             }
         }
         Expr::Cast { expr, .. }
@@ -250,14 +277,14 @@ fn collect_mutated_vars_from_expr(expr: &Expr, names: &mut std::collections::Has
         | Expr::Ref(expr)
         | Expr::Matches { expr, .. }
         | Expr::RuntimeTypeof { operand: expr } => {
-            collect_mutated_vars_from_expr(expr, names);
+            recurse(expr, names);
         }
         Expr::Range { start, end } => {
             if let Some(s) = start {
-                collect_mutated_vars_from_expr(s, names);
+                recurse(s, names);
             }
             if let Some(e) = end {
-                collect_mutated_vars_from_expr(e, names);
+                recurse(e, names);
             }
         }
         // Leaf nodes: no sub-expressions
@@ -361,7 +388,7 @@ mod tests {
                 value: Box::new(Expr::NumberLit(2.0)),
             }),
         ];
-        mark_mutated_vars(&mut stmts);
+        mark_mutated_vars(&mut stmts, &HashSet::new());
         assert!(matches!(&stmts[0], Stmt::Let { mutable: true, .. }));
     }
 
@@ -376,7 +403,7 @@ mod tests {
             },
             Stmt::Return(Some(Expr::Ident("x".to_string()))),
         ];
-        mark_mutated_vars(&mut stmts);
+        mark_mutated_vars(&mut stmts, &HashSet::new());
         assert!(matches!(&stmts[0], Stmt::Let { mutable: false, .. }));
     }
 
@@ -401,10 +428,58 @@ mod tests {
                 value: Box::new(Expr::NumberLit(1.0)),
             }),
         ];
-        mark_mutated_vars(&mut stmts);
+        mark_mutated_vars(&mut stmts, &HashSet::new());
         assert!(
             matches!(&stmts[0], Stmt::Let { mutable: true, name, .. } if name == "obj"),
             "nested field assignment should mark root variable as mutable"
+        );
+    }
+
+    #[test]
+    fn test_mark_mutated_vars_user_defined_mut_method() {
+        // counter.increment() where increment is in extra_mut_methods
+        let mut stmts = vec![
+            Stmt::Let {
+                mutable: false,
+                name: "counter".to_string(),
+                ty: None,
+                init: Some(Expr::Ident("c".to_string())),
+            },
+            Stmt::Expr(Expr::MethodCall {
+                object: Box::new(Expr::Ident("counter".to_string())),
+                method: "increment".to_string(),
+                args: vec![],
+            }),
+        ];
+        let mut extra = HashSet::new();
+        extra.insert("increment".to_string());
+        mark_mutated_vars(&mut stmts, &extra);
+        assert!(
+            matches!(&stmts[0], Stmt::Let { mutable: true, name, .. } if name == "counter"),
+            "user-defined &mut self method should mark receiver as mutable"
+        );
+    }
+
+    #[test]
+    fn test_mark_mutated_vars_unknown_method_stays_immutable() {
+        // obj.read_only() where read_only is NOT in extra_mut_methods
+        let mut stmts = vec![
+            Stmt::Let {
+                mutable: false,
+                name: "obj".to_string(),
+                ty: None,
+                init: Some(Expr::Ident("o".to_string())),
+            },
+            Stmt::Expr(Expr::MethodCall {
+                object: Box::new(Expr::Ident("obj".to_string())),
+                method: "read_only".to_string(),
+                args: vec![],
+            }),
+        ];
+        mark_mutated_vars(&mut stmts, &HashSet::new());
+        assert!(
+            matches!(&stmts[0], Stmt::Let { mutable: false, .. }),
+            "unknown method should not mark receiver as mutable"
         );
     }
 
@@ -423,7 +498,7 @@ mod tests {
                 value: Box::new(Expr::NumberLit(1.0)),
             })])),
         ];
-        mark_mutated_vars(&mut stmts);
+        mark_mutated_vars(&mut stmts, &HashSet::new());
         assert!(matches!(&stmts[0], Stmt::Let { mutable: true, .. }));
     }
 }

@@ -6,7 +6,7 @@ mod control_flow;
 mod destructuring;
 mod error_handling;
 mod helpers;
-mod mutability;
+pub(crate) mod mutability;
 mod spread;
 mod switch;
 
@@ -170,7 +170,7 @@ impl<'a> Transformer<'a> {
             let converted = self.convert_stmt(stmt, return_type)?;
             result.extend(converted);
         }
-        mark_mutated_vars(&mut result);
+        mark_mutated_vars(&mut result, &self.mut_method_names);
         Ok(result)
     }
 

@@ -98,6 +98,7 @@ Coverage threshold ratchet: when measured coverage exceeds threshold by 2+ point
 
 - **No unilateral conversion feasibility judgments** — "difficult in Rust" is never a valid reason to defer or deprioritize. Applies across all phases: TODO, plan.md, PRD. See `.claude/rules/conversion-feasibility.md`
 - **Strict PRD completion criteria** — see `.claude/rules/prd-completion.md`
+- **PRD design review**: PRD の設計セクション作成後、凝集度・責務分離・DRY の 3 観点で第三者目線のレビューを行う — see `.claude/rules/prd-design-review.md`
 - **Incremental commits**: Commit at each phase completion for multi-phase work — see `.claude/rules/incremental-commit.md`
 - **Pre-commit doc sync**: Update tasks.md / plan.md before commit messages — see `.claude/rules/pre-commit-doc-sync.md`
 - **Bulk edit safety**: Script bulk replacements follow dry run → review → execute — see `.claude/rules/bulk-edit-safety.md`

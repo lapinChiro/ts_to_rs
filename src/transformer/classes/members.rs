@@ -35,6 +35,7 @@ impl<'a> Transformer<'a> {
                 tctx: self.tctx,
 
                 synthetic: self.synthetic,
+                mut_method_names: self.mut_method_names.clone(),
             }
             .convert_expr(init)?,
             None => return Ok(None), // No initializer — skip
@@ -200,6 +201,7 @@ impl<'a> Transformer<'a> {
         let mut sub_t = Transformer {
             tctx: self.tctx,
             synthetic: &mut *self.synthetic,
+            mut_method_names: self.mut_method_names.clone(),
         };
         for stmt in stmts {
             if let Some((field_name, value_expr)) = try_extract_this_assignment(stmt) {
@@ -301,6 +303,7 @@ impl<'a> Transformer<'a> {
                 let mut sub_t = Transformer {
                     tctx: self.tctx,
                     synthetic: &mut *self.synthetic,
+                    mut_method_names: self.mut_method_names.clone(),
                 };
                 let mut stmts = default_expansion_stmts;
                 for stmt in &block.stmts {

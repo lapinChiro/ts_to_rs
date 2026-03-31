@@ -34,6 +34,9 @@ pub(crate) struct Transformer<'a> {
     tctx: &'a TransformContext<'a>,
     /// 合成型レジストリ（可変 — 変換中に型が追加される）
     synthetic: &'a mut SyntheticTypeRegistry,
+    /// ユーザー定義クラスの `&mut self` メソッド名の集合。
+    /// `pre_scan_classes` 後に構築し、mutation 検出で参照する。
+    mut_method_names: std::collections::HashSet<String>,
 }
 
 impl<'a> Transformer<'a> {
@@ -42,7 +45,11 @@ impl<'a> Transformer<'a> {
         tctx: &'a TransformContext<'a>,
         synthetic: &'a mut SyntheticTypeRegistry,
     ) -> Self {
-        Self { tctx, synthetic }
+        Self {
+            tctx,
+            synthetic,
+            mut_method_names: std::collections::HashSet::new(),
+        }
     }
 
     /// `tctx.type_registry` へのショートカット。
@@ -57,6 +64,20 @@ impl<'a> Transformer<'a> {
     ///
     /// `synthetic` はパラメータとして渡す（クロージャ完了後に `into_items()` を
     /// 呼び出す必要があるため、内部作成では呼び出し元に返せない）。
+    /// Builds the set of `&mut self` method names from pre-scanned class info.
+    ///
+    /// Called after `pre_scan_classes` in `transform_module` / `transform_module_collecting`.
+    /// The resulting set is used by `mark_mutated_vars` and `mark_mut_params_from_body` to
+    /// detect mutations via user-defined `&mut self` method calls.
+    fn build_mut_method_names(&mut self, class_map: &HashMap<String, ClassInfo>) {
+        self.mut_method_names = class_map
+            .values()
+            .flat_map(|info| info.methods.iter())
+            .filter(|m| m.has_mut_self)
+            .map(|m| m.name.clone())
+            .collect();
+    }
+
     fn with_single_module<R>(
         reg: &TypeRegistry,
         synthetic: &mut SyntheticTypeRegistry,
@@ -198,6 +219,7 @@ impl<'a> Transformer<'a> {
         // Pre-scan: collect class info for inheritance resolution
         let class_map = self.pre_scan_classes(module);
         let iface_methods = classes::pre_scan_interface_methods(module);
+        self.build_mut_method_names(&class_map);
 
         let mut items = Vec::new();
         let mut init_stmts = Vec::new();
@@ -229,6 +251,7 @@ impl<'a> Transformer<'a> {
     ) -> Result<(Vec<Item>, Vec<UnsupportedSyntaxError>)> {
         let class_map = self.pre_scan_classes(module);
         let iface_methods = classes::pre_scan_interface_methods(module);
+        self.build_mut_method_names(&class_map);
 
         let mut items = Vec::new();
         let mut unsupported = Vec::new();

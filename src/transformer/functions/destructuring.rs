@@ -54,6 +54,7 @@ impl<'a> Transformer<'a> {
                             tctx: self.tctx,
 
                             synthetic: self.synthetic,
+                            mut_method_names: self.mut_method_names.clone(),
                         }
                         .convert_expr(default_expr)?;
                         match &default_ir {
@@ -166,6 +167,7 @@ impl<'a> Transformer<'a> {
                             tctx: self.tctx,
 
                             synthetic: self.synthetic,
+                            mut_method_names: self.mut_method_names.clone(),
                         }
                         .convert_expr(default_expr)?;
                         match &default_ir {

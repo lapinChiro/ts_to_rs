@@ -145,6 +145,7 @@ fn test_convert_opt_chain_unknown_type_returns_map_pattern() {
         tctx: &tctx,
 
         synthetic: &mut SyntheticTypeRegistry::new(),
+        mut_method_names: std::collections::HashSet::new(),
     }
     .convert_expr(&expr)
     .unwrap();
@@ -226,6 +227,7 @@ fn test_convert_nullish_coalescing_unknown_type_returns_unwrap_or_else() {
         tctx: &tctx,
 
         synthetic: &mut SyntheticTypeRegistry::new(),
+        mut_method_names: std::collections::HashSet::new(),
     }
     .convert_expr(&expr)
     .unwrap();

@@ -1,7 +1,8 @@
-Review @plan.md and continue work.
-Never compromise on implementation, regardless of the reason.
-Focus solely on achieving the most ideal and clean implementation.
-Development effort or scope of changes is not a valid criterion. Focus solely on the most ideal and clean implementation.
+@plan.md を確認し、作業を継続してください。
+理由に関わらず、実装および設計に妥協は絶対に許容しません。
+最も理想的でクリーンな実装にすることだけを考えてください。
+開発工数や変更規模は判断基準になりません。最も理想的でクリーンな実装だけが正解です。
+これは、プロダクションコードと自動テストのどちらにも適用される根本的なルールであり、精神です。
 
 設計にコストをかけ、徹底的な調査を行い。緻密な設計を行うことは全体の工数を下げつつ完成形の出来をよりよいものにします。
 そのため、設計と調査は特に全力で臨んでください。

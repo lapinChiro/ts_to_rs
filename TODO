@@ -20,7 +20,7 @@
 - 各項目には **安定 ID**（`I-01` 等）を付与。ID は識別子であり順序を表さない。新規追加時は「最後に使われた ID + 1」を採番
 - **優先度は Tier 内の記載順序**（上ほど高い）。サブカテゴリは分類ラベル
 - 相互参照は `I-XX` で行い、参照先不在時は背景を自己完結的に記述
-- 件数は Hono ベンチマーク実測値（最終実行: 2026-03-31 T-2完了時点 git_sha=773a4c6、110/158 クリーン、58 エラー。S1/T-3 はベンチマーク数値に影響なし）
+- 件数は Hono ベンチマーク実測値（最終実行: 2026-03-31 T-2完了時点 git_sha=773a4c6、110/158 クリーン、58 エラー。S1/T-3/T-4 は変換ロジック未変更のためベンチマーク数値に影響なし）
 - I-320〜I-330 は T-3 fixture 拡充（2026-03-31）で発見。ベンチマーク件数ではなくスナップショットテストのコンパイルチェックで検出
 - I-334〜I-344 は T-4 E2E テスト拡充（2026-03-31）で発見。E2E スクリプト作成時の transpile + compile で検出
 - コンパイルテストスキップ: 25 件（builtins なし）/ 24 件（builtins あり）。従来 11 件 + T-3 追加 14 件
@@ -69,7 +69,7 @@
 - **[I-261]** **ES2016〜ES2024 の追加メソッド** — `tools/extract-types/src/index.ts` の `libMap` 拡張で解決
 - **[I-263]** **型エイリアス（`kind: "alias"`）の TypeRegistry 登録** — `src/external_types/mod.rs:311-319` で `ExternalTypeDef::Alias` が `None` を返す
 - **[I-262]** **`Intl` 名前空間の型定義** — namespace 抽出未対応。需要発生時に対応
-- **[I-270c]** **ビルトイン型のメソッド impl 生成** — trait 定義 + impl ブロック方式。`TypeRegistry` にメソッドシグネチャ格納済み。`src/pipeline/external_struct_generator.rs` に impl 生成を追加。コンパイルテスト `instanceof-builtin` のスキップ解消。🔗 I-274（フィールド名不一致）の解消が望ましい
+- **[I-270c]** **ビルトイン型のメソッド impl 生成** — trait 定義 + impl ブロック方式。`TypeRegistry` にメソッドシグネチャ格納済み。`src/pipeline/external_struct_generator/mod.rs` に impl 生成を追加。コンパイルテスト `instanceof-builtin` のスキップ解消。🔗 I-274（フィールド名不一致）の解消が望ましい
 - **[I-264]** **`Proxy`/`Reflect` の型抽出未対応** — 🔗 I-262 と同根。需要発生時に対応
 
 ### Tier 2: 中優先度 — 変換品質・基盤整備
@@ -92,8 +92,6 @@
 - **[I-201]** **`null as any` の非 Option 型への代入** — `todo!()` or `Enum::Other(Value::Null)` が妥当。skip 原因
 - **[I-202]** **`Box<dyn Fn>` を含む enum の derive 不適合** — skip 原因
 - **[I-209]** **any-narrowing enum への値代入時の型強制** — skip 原因
-- **[I-255]** **`x++`/`x--` が mutation 未検出** — `let mut` 欠落。`src/transformer/statements/mutability.rs:153-272` の `collect_mutated_vars_from_expr` に `Expr::Update` の直接ハンドリングなし。変換後の `Expr::Assign` 経由で間接検出されるケースもあるが、全パスをカバーしていない
-- **[I-258]** **クロージャ内制御フロー内代入の mut 未検出** — `src/transformer/statements/mutability.rs:56-64`
 
 #### T-3 fixture 拡充で発見されたコンパイルエラー
 
@@ -158,20 +156,11 @@
 
 - **[I-334]** **union 型の typeof narrowing が `if false` に変換される** — `typeof x === "string"`（x: `string | number`）が `if false` に変換され、narrowing が機能しない
   - `src/transformer/expressions/patterns.rs:94-173` の `try_convert_typeof_comparison()` が union enum のバリアントを照合
-  - **問題**: `src/transformer/expressions/patterns.rs:168` で `TypeofMatch::Placeholder` にフォールバックし `Expr::BoolLit(false)` を生成。`resolve_typeof_match()`（同ファイル `:485-534`）が個別の型（String, F64, Bool）のみチェックし、union enum 型を処理しない
+  - **問題**: `src/transformer/expressions/patterns.rs:168` で `TypeofMatch::Placeholder` にフォールバックし `Expr::BoolLit(is_neq)` を生成（`===` の場合 `false`）。`resolve_typeof_match()`（同ファイル `:485`）が個別の型（String, F64, Bool）のみチェックし、union enum 型を処理しない
   - **制御フロー**: `src/transformer/statements/control_flow.rs:20-106` の `convert_if_stmt()` が narrowing guard を抽出し `resolve_if_let_pattern()`（`:397-433`）で if-let パターン生成を試みるが、typeof guard のバリアント解決 `resolve_typeof_to_enum_variant()`（`:341-368`）がマッチしないと `None` を返し、通常の式変換にフォールバック → `if false` に帰結
   - **解決策**: `try_convert_typeof_comparison()` で operand が union enum 型の場合に `matches!(EnumName::Variant(_))` パターンを生成。if-let パスを通す場合は `convert_if_stmt()` で typeof guard → `if let EnumName::Variant(x) = val` に変換
   - **影響**: typeof narrowing を使う全ての union 型パターンがブロック。E2E テスト `typeof_narrowing.ts` が作成不可
   - 🔗 I-215（typeof "object"/"function"）、I-213（`!==` ガード排除）と関連するが、本件は `===` での正方向 narrowing が対象
-
-- **[I-335]** **`&mut self` メソッド呼び出しでの `let mut` 推論漏れ** — `counter.increment()` で `increment(&mut self)` を呼ぶが `let counter` に `mut` が付与されない（E0596）
-  - `src/transformer/statements/mutability.rs:163-177` の `collect_mutated_vars_from_expr` が `Expr::MethodCall` を処理する際、`MUTATING_METHODS`（同ファイル `:9-12`）のハードコードリストのみ参照
-  - **ハードコードリスト**: `reverse`, `sort`, `sort_by`, `drain`, `push`, `pop`, `remove`, `insert`, `clear`, `truncate`, `retain` — 標準ライブラリメソッドのみ
-  - `src/transformer/functions/helpers.rs:56-59` にも同じリストが重複（DRY 違反）
-  - **問題**: ユーザー定義クラスのメソッドが `&mut self` を取るかどうかを判定するメタデータがない。`ClassInfo` の `methods` にはメソッドの `has_mut_self` フラグが格納されているが、mutability 検出フェーズで参照されていない
-  - **解決策**: (1) `ClassInfo::methods` の `has_mut_self` 情報を mutability 検出フェーズに伝播。メソッド呼び出し `obj.method()` 時に `obj` の型から `ClassInfo` を引き、呼ばれるメソッドの `has_mut_self` を確認。(2) またはハードコードリストを廃止し、IR 生成時に `&mut self` 情報を `Expr::MethodCall` に付与
-  - **影響**: クラスインスタンスの mutation を伴う全パターン（E2E テスト `getter_setter.ts`, `class_advanced.ts` で検出）
-  - 🔗 I-255（`x++`/`x--` mutation）、I-258（クロージャ内 mut）と同系統だが、メソッド呼び出し経由の mutation という独自パターン
 
 - **[I-336]** **abstract class 派生クラスの `super()` がリテラル出力される** — `super("Circle")` が Rust で `super("Circle");` としてそのまま生成される（構文エラー）
   - `src/transformer/classes/inheritance.rs:145-180` の `transform_class_with_inheritance()` で、親が abstract class の場合に `generate_child_of_abstract()` を呼ぶ
@@ -188,7 +177,7 @@
   - **影響**: I-336 と併せて abstract class の E2E テストが全面ブロック
 
 - **[I-338]** **intersection 型が使用箇所ごとに異なる struct 名を生成** — 同一の `HasName & HasAge` 型が `_Intersection0`, `_Intersection2` 等、異なる名前の struct を生成（E0308 型不一致）
-  - `src/pipeline/type_converter/intersections.rs:614-624` および `:719-721` で `synthetic.generate_name("Intersection")` を呼ぶたびにカウンタがインクリメント
+  - `src/pipeline/type_converter/intersections.rs:624`、`:687`、`:721` で `synthetic.generate_name("Intersection")` を呼ぶたびにカウンタがインクリメント
   - **問題**: 同一のメンバー構成を持つ intersection でも、annotation 内で遭遇するたびに新しい名前が生成される。名前の一意性が「出現順序」で決まり、「構造的同値性」で判定されていない
   - **解決策**: intersection のメンバー構成（フィールド名+型のソート済みキー）をハッシュし、同一構成なら同一の struct 名を再利用。`synthetic` の `generate_name` に構造的キャッシュを導入
   - **影響**: 同一 intersection 型を複数変数で使用する全パターン。E2E テスト `intersection_methods.ts` で interface に変更して回避済み
@@ -208,15 +197,15 @@
   - **影響**: Generic 関数内で Vec 操作を行う全パターン。E2E テスト `generics.ts` の強化がブロック
 
 - **[I-342]** **getter/setter の `get`/`set` キーワードがメソッド化されるが呼び出し側が `()` なしのフィールドアクセスになる** — コンパイルエラー（E0609: no field）
-  - **定義側**: `src/transformer/classes/members.rs:225-276` の `build_method()` で `MethodKind::Getter` → `fn name(&self) -> T`、`MethodKind::Setter` → `fn set_name(&mut self, v: T)` に正しく変換
-  - **呼び出し側**: `src/transformer/expressions/member_access.rs:213-245` の `convert_member_expr()` が `obj.field` を常に `Expr::FieldAccess` に変換。getter かどうかの判定ロジックが存在しない
+  - **定義側**: `src/transformer/classes/members.rs:263` の `build_method()` で `MethodKind::Getter`（`:271`）→ `fn name(&self) -> T`、`MethodKind::Setter` → `fn set_name(&mut self, v: T)` に正しく変換
+  - **呼び出し側**: `src/transformer/expressions/member_access.rs:216` の `convert_member_expr()` が `obj.field` を常に `Expr::FieldAccess` に変換。getter かどうかの判定ロジックが存在しない
   - **問題**: TS の `get fahrenheit()` は `temp.fahrenheit`（プロパティアクセス構文）で呼ぶが、Rust では `temp.fahrenheit()`（メソッド呼び出し）が必要。定義側はメソッドとして生成されるが、呼び出し側はフィールドアクセスのまま
   - **具体例**: `temp.fahrenheit` → 生成 Rust で `temp.fahrenheit`（存在しないフィールドへのアクセス）、正しくは `temp.fahrenheit()`
   - **解決策**: (1) TypeResolver / ClassInfo に getter メソッドの一覧を保持し、`convert_member_expr()` でフィールド名が getter と一致する場合に `Expr::MethodCall { args: [] }` を生成。(2) setter も同様に `obj.prop = val` → `obj.set_prop(val)` への変換が必要
   - **影響**: `get`/`set` キーワードを使用する全クラス。fixture `getter-setter` の E2E テストが作成不可
 
 - **[I-341]** **do-while ループ内の `continue` が条件チェックをスキップする** — **S1: サイレント意味変更**
-  - do-while は `loop { body; if !cond { break; } }` に変換される（`src/transformer/statements/loops.rs`）
+  - do-while は `loop { body; if !cond { break; } }` に変換される（`src/transformer/statements/control_flow.rs:554`）
   - **問題**: `body` 内の `continue` は `loop` 先頭に戻り、条件チェック `if !cond { break; }` をスキップする。TS の do-while では `continue` は条件チェックに飛ぶため、セマンティクスが異なる
   - **具体例**: `do { j++; if (j%2===0) continue; collected += j; } while (j<10)` — TS では `j<10` を毎回チェックするが、Rust では偶数時に条件チェックをスキップし `j` が 10 を超えても実行が続く（TS: 25、Rust: 36）
   - **解決策**: do-while の変換で条件チェックを `continue` の到達先にも配置。`loop { body; 'continue_target: if !cond { break; } }` ではなく、ラベル付き continue で条件チェックに飛ばすか、条件チェックを body の先頭（初回スキップ）にも配置
@@ -271,7 +260,7 @@
 
 #### 構造的重複・コンパイルエラー
 
-- **[I-318]** **`_TypeLit` 構造体が名前付き構造体と重複生成** — type_resolver と transformer で二重登録
+- **[I-318]** **`_TypeLit` 構造体が名前付き構造体と重複生成** — `src/pipeline/synthetic_registry.rs:149` で `generate_name("TypeLit")` により連番生成されるが、同一構造でも異なる名前が割り当てられる場合がある
 - **[I-314]** **intersection 内 mapped type の未使用型パラメータ（E0091）** — skip 原因
 - **[I-273]** **types.rs の trait/struct 混同（E0404/E0405）** — 5 インスタンス。ディレクトリコンパイル 156→157+/158 の阻害要因
 - **[I-274]** **フィールド名の IR サニタイズ不一致** — 現時点では実害なし。I-270c で顕在化する見込み
@@ -279,7 +268,7 @@
 
 #### デフォルトパラメータ品質
 
-- **[I-283]** **`classes/members.rs` が `wrap_param_with_default` を未使用** — DRY 違反。着手可能
+- **[I-283]** **`classes/members.rs` が `wrap_param_with_default`（`src/transformer/functions/params.rs:158`）を未使用** — DRY 違反。着手可能
 - **[I-282]** **一般式パスが `unwrap_or` で即時評価** — `needs_lazy_eval` をホワイトリスト方式に変更
 
 #### 未対応構文（小修正）

@@ -53,3 +53,24 @@ impl Config {
         self._debug = !self._debug;
     }
 }
+
+#[derive(Debug, Clone, PartialEq)]
+struct ClickCounter {
+    _count: f64,
+}
+
+impl ClickCounter {
+    fn increment(&mut self) {
+        self._count = self._count + 1.0;
+    }
+
+    fn get_count(&self) -> f64 {
+        self._count
+    }
+}
+
+fn useCounter(counter: ClickCounter) -> f64 {
+    let mut counter = counter;
+    counter.increment();
+    counter.get_count()
+}

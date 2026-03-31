@@ -173,6 +173,7 @@ fn test_instanceof_unknown_type_returns_false() {
         tctx: &tctx,
 
         synthetic: &mut SyntheticTypeRegistry::new(),
+        mut_method_names: std::collections::HashSet::new(),
     }
     .convert_expr(&swc_expr)
     .unwrap();
@@ -238,6 +239,7 @@ fn test_in_operator_unknown_type_returns_false() {
         tctx: &tctx,
 
         synthetic: &mut SyntheticTypeRegistry::new(),
+        mut_method_names: std::collections::HashSet::new(),
     }
     .convert_expr(&expr)
     .unwrap();

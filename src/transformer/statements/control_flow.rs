@@ -734,6 +734,7 @@ impl<'a> Transformer<'a> {
             Some(block) => Transformer {
                 tctx: self.tctx,
                 synthetic: &mut *self.synthetic,
+                mut_method_names: self.mut_method_names.clone(),
             }
             .convert_stmt_list(&block.stmts, return_type.as_ref())?,
             None => Vec::new(),
