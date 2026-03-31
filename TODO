@@ -1,328 +1,186 @@
 # TODO
 
-未整理のアイデア・やりたいこと。整理できたら backlog/ に PRD として移動する。
+PRD 化前のイシュー一覧。優先度は `todo-prioritization.md` の L1〜L4 レベルで決定し、Tier に反映。
+Tier 内の記載順序が優先度。根本原因を共有するイシューはクラスタとしてバッチ対応する。
 
-## ユーザー記載アイディア
-
-- TypeScript, crateなどのバージョンアップ
-- package.jsonにTypeScriptのバージョン指定を入れる
-- 外部型生成ツールのDocker化
-- node_modulesの依存を解析して木構造を作成し、lockファイルから依存を全て特定して全てトランスパイルする
-- Rules/Skills/CLAUDE.mdの言語を英語に統一する検討
-- 現在の実装の徹底的なレビュー（理想的な実装の観点リスト作成 → レビュー → ルール永続化）
-- cargo nextest導入検討
-- テスト実行環境の改修、高速化
-- コンパイルスキップの状況確認
-- コンパイルテストのビルトインなしの必要性検証
-
-## 運用ルール
-
-- 各項目には **安定 ID**（`I-01` 等）を付与。ID は識別子であり順序を表さない。新規追加時は「最後に使われた ID + 1」を採番
-- **優先度は Tier 内の記載順序**（上ほど高い）。サブカテゴリは分類ラベル
-- 相互参照は `I-XX` で行い、参照先不在時は背景を自己完結的に記述
-- 件数は Hono ベンチマーク実測値（最終実行: 2026-03-31 T-2完了時点 git_sha=773a4c6、110/158 クリーン、58 エラー。S1/T-3/T-4 は変換ロジック未変更のためベンチマーク数値に影響なし）
-- I-320〜I-330 は T-3 fixture 拡充（2026-03-31）で発見。ベンチマーク件数ではなくスナップショットテストのコンパイルチェックで検出
-- I-334〜I-344 は T-4 E2E テスト拡充（2026-03-31）で発見。E2E スクリプト作成時の transpile + compile で検出
-- コンパイルテストスキップ: 25 件（builtins なし）/ 24 件（builtins あり）。従来 11 件 + T-3 追加 14 件
-
-完了済み機能: [doc/completed-features.md](doc/completed-features.md)。設計判断: [doc/design-decisions.md](doc/design-decisions.md)。
+- 各項目には **安定 ID**（`I-01` 等）を付与。新規追加時は最終 ID + 1 を採番
+- 件数は Hono ベンチマーク実測値（最終実行: 2026-03-31 T-2 完了時点 773a4c6、110/158 クリーン、58 エラー）
+- 完了済み: [doc/completed-features.md](doc/completed-features.md)　設計判断: [doc/design-decisions.md](doc/design-decisions.md)
 
 ---
 
-## PRD 化可能（優先度順）
+## Tier 0: L1（信頼性基盤）+ L2（設計基盤）
 
-### Tier 0: 最優先 — 開発生産性・DX
+### S1: サイレント意味変更 [L1]
 
-- **[I-312]** **TypeDef の TS 型メタデータ分離** — registry の責務正常化
-  - TypeDef が RustType で型を保持 → registry に型変換ロジックが漏れている
-  - **影響箇所**: `src/registry/interfaces.rs`（optional の `Option` ラップ）、`src/registry/functions.rs`（デフォルト引数）、`src/registry/unions.rs`（バリアント命名）
-  - **解決策**: TypeDef のフィールド型を TS 型のまま保持し、Rust 型への変換を type_converter に統合
-  - **伝播リスク**: 今後の機能追加で同パターンが増殖する
-- **[I-30]** **生成コードの Cargo.toml への依存クレート追加** — I-183（fetch 変換）と I-34（Math.random）のゲート解除
-- **[I-182]** **Hono クリーンファイルのコンパイルテスト CI 化** — 回帰検出自動化
-- **[I-193]** **API 表面積の最小化** — `pub fn` → `pub(crate) fn` でリファクタリング容易性向上
+放置すると E2E テストの信頼性が損なわれ、全開発成果が検証不能になる。
 
-### Tier 1: 高優先度 — 正確性・伝播リスク・レバレッジ
+- **[I-341]** **do-while `continue` が条件チェックをスキップ** — `loop { body; if !cond { break; } }` 変換で `continue` が条件をバイパスし無限ループ化。`src/transformer/statements/control_flow.rs:554`
+- **[I-339]** **`Option<T>` の console.log が `Some(v)` 表示** — `needs_debug_format()` が `Option` に `{:?}` を使用。TS: `5` → Rust: `Some(5.0)`。`src/transformer/expressions/literals.rs:110`
+- **[I-319]** **配列インデックスの境界外 panic** — `arr[0]` が空配列で panic（TS は `undefined`）。~97 箇所、拡大中。解決策: `arr.get(idx).cloned()` で `Option<T>` 化
+- **[I-298]** **spread 上書き時の副作用式評価消失** — 発生頻度は極めて低い
 
-#### 型変換・型推論
+### RC-4: registry の責務逸脱 [L2]
 
-- **[I-300]** **imported 関数の expected type 伝播不足** — OBJECT_LITERAL_NO_TYPE（11件）
-  - 単一ファイルモードでは TypeRegistry に imported 関数の情報なし
-  - **解決策**: directory モードでの TypeRegistry 情報共有、またはマルチファイル型情報マージ
-- **[I-301]** **型注釈なしオブジェクトリテラル** — OBJECT_LITERAL_NO_TYPE（7件）
-  - **解決策**: (1) 匿名構造体自動生成、(2) 空オブジェクト `{}` は `HashMap::new()` にフォールバック
-- **[I-306]** **`.map()` callback 戻り値型の伝播** — OBJECT_LITERAL_NO_TYPE（1件: `helper/dev/index.ts:30`）
-  - `propagate_expected`（`src/pipeline/type_resolver/expected_types.rs:282-388`）が `Expr::Call` を未処理
-- **[I-311]** **型引数推論結果の引数 expected type フィードバック** — `src/pipeline/type_resolver/call_resolution.rs:119-125`
-  - `fn<T>(x: T, y: T)` を `f("hello", { ... })` で呼ぶ場合、推論結果を未解決引数にフィードバックする2パスが必要
-- **[I-313]** **三項演算子を即座に関数呼び出しする callee パターン** — CALL_TARGET（2件）
-  - `(cond ? a : b)(args)` で callee match に `Expr::Cond` ブランチなし → `src/transformer/expressions/calls.rs:194`
-  - **解決策**: 一時変数束縛 + 呼び出し
-- **[I-309]** **メソッド呼び出しでの型引数推論未対応** — `src/pipeline/type_resolver/call_resolution.rs:358`
-  - `Member` callee を `try_infer_and_resolve_return_type` が未処理。影響は限定的（ビルトイン型で既に具体化されているため）
-- **[I-310]** **HashMap computed access が `as usize` で誤変換** — コンパイルエラー
-  - `map[key]` → `map[key as usize]` は Vec 用。正しくは `map.get(&key).cloned()`
-  - TypeResolver 側は完了済み、transformer 側の変換が残
+TypeDef が RustType を保持 → registry フェーズに型変換ロジックが漏れている。機能追加のたびに同パターンが増殖する構造的問題。
 
-#### ビルトイン型
+- **[I-312]** **TypeDef の TS 型メタデータ分離** — `src/registry/interfaces.rs`（optional の Option ラップ）、`src/registry/functions.rs`（デフォルト引数）、`src/registry/unions.rs`（バリアント命名）で型変換が発生。解決策: TypeDef を TS 型のまま保持し、変換を type_converter に統合
 
-- **[I-261]** **ES2016〜ES2024 の追加メソッド** — `tools/extract-types/src/index.ts` の `libMap` 拡張で解決
-- **[I-263]** **型エイリアス（`kind: "alias"`）の TypeRegistry 登録** — `src/external_types/mod.rs:311-319` で `ExternalTypeDef::Alias` が `None` を返す
-- **[I-262]** **`Intl` 名前空間の型定義** — namespace 抽出未対応。需要発生時に対応
-- **[I-270c]** **ビルトイン型のメソッド impl 生成** — trait 定義 + impl ブロック方式。`TypeRegistry` にメソッドシグネチャ格納済み。`src/pipeline/external_struct_generator/mod.rs` に impl 生成を追加。コンパイルテスト `instanceof-builtin` のスキップ解消。🔗 I-274（フィールド名不一致）の解消が望ましい
-- **[I-264]** **`Proxy`/`Reflect` の型抽出未対応** — 🔗 I-262 と同根。需要発生時に対応
+### RC-1: narrowing 基盤の欠陥 [L2]
 
-### Tier 2: 中優先度 — 変換品質・基盤整備
+typeof/null/truthy の narrowing が union enum 型を処理できない。型安全性の根幹であり、下流 7 イシューをブロック。
 
-#### 型変換・型推論
+- **[I-334]** **union typeof narrowing が `if false` に** — `resolve_typeof_match()`（`src/transformer/expressions/patterns.rs:485`）が union enum 未処理。typeof narrowing を使う全 union パターンがブロック
+- **[I-333]** **unknown typeof narrowing で型不一致** — I-334 と同根
+- **[I-327]** **`=== null` 後の narrowing 不完全** — `Option<T>` → `T` の narrowing 欠如。🔗 I-213
+- **[I-215]** **typeof "object"/"function" の narrowed type 未設定**
+- **[I-213]** **`!==` ガードの排除 narrowing 未実装** — 2 バリアント union で反対バリアントに narrowing
+- **[I-214]** **三項演算子の複合条件 (&&) narrowing** — `convert_cond_expr` が単一ガードのみ
+- **[I-256]** **any-narrowing の typeof 検出がトップレベルのみ** — Switch/While/For/Try 内の typeof 未検出
 
-- **[I-284]** **typeof qualified name（`typeof A.B.C`）** — 0 エラー削減（延期）。高コスト・低 ROI
+### RC-8: synthetic 型の構造的同値性欠如 [L2]
+
+synthetic 型の命名が出現順ベースで、構造的に同一の型に異なる名前が付く。正しさが設計で保証されない。
+
+- **[I-338]** **intersection 型が使用箇所ごとに異なる struct 名** — `generate_name("Intersection")` がカウンタのみ。解決策: メンバー構成のハッシュで同一構成は同一名に
+- **[I-318]** **TypeLit 構造体の重複生成** — I-338 と同系統
+
+### RC-15: 型変換シグネチャの設計問題 [L2]
+
+`convert_ts_type` に型パラメータコンテキストがなく、型パラメータ制約の解決が不完全。
+
 - **[I-299]** **`convert_ts_type` に型パラメータコンテキスト導入** — シグネチャ変更の blast radius 大。独立リファクタリング PRD
-- **[I-101]** **ジェネリック型を含む intersection** — I-218 完了済み、`try_convert_intersection_type` と統合可能
-- **[I-278]** **`new obj.Class()` パターンの型解決** — `resolve_new_expr` が `Expr::Member` 未処理。Hono での直接影響なし
-- **[I-181]** **call signature のジェネリック型パラメータ** — 制約伝搬が未検証
-- **[I-296]** **intersection 内の複数 union 分配** — 意図的制約（組み合わせ爆発回避）。需要発生時に閾値付き完全分配
+- **[I-273]** **trait/struct 混同（E0404/E0405）** — `T extends number` → `T: f64` が trait でない。ディレクトリコンパイル 156→157+/158 の阻害要因
 
-#### コンパイル正確性
+### RC-14: デフォルトパラメータの DRY 違反 [L2]
 
-- **[I-217]** **`filter`/`find` クロージャの参照型ミスマッチ** — `&f64` vs `f64`。E2E テスト `method_chain.ts` で blocked
-- **[I-265]** **`find` の Option 二重ラップ** — `Some(doubled.find(...))` で二重ラップ
-- **[I-237]** **`toFixed()` の Rust 変換** — `format!("{:.2}", v)` に変換。コンパイルテスト skip 原因
-- **[I-238]** **合成 enum の `Display` trait 自動生成** — コンパイルテスト skip 原因
-- **[I-201]** **`null as any` の非 Option 型への代入** — `todo!()` or `Enum::Other(Value::Null)` が妥当。skip 原因
-- **[I-202]** **`Box<dyn Fn>` を含む enum の derive 不適合** — skip 原因
-- **[I-209]** **any-narrowing enum への値代入時の型強制** — skip 原因
-
-#### T-3 fixture 拡充で発見されたコンパイルエラー
-
-- **[I-320]** **optional パラメータが `Option<T>` に変換されない** — `greeting?: string` → `String`（正しくは `Option<String>`）
-  - `src/transformer/functions/mod.rs:66-76` で `param.optional` フィールドを未チェック
-  - **解決策**: optional パラメータの型を `Option<T>` でラップ。truthy check も `if let Some(v)` に変換
-  - fixture: functions, optional-fields で発見
-- **[I-321]** **クロージャ返却時の `Box::new()` ラップ漏れ** — `return |x| x * 2` → コンパイルエラー（`E0308: expected Box<dyn Fn>, found closure`）
-  - `src/transformer/expressions/mod.rs:134-138` の `needs_trait_box_coercion` がクロージャ返却をカバーしていない
-  - **解決策**: 戻り値型が `Box<dyn Fn>` の場合、返却されるクロージャを `Box::new()` でラップ
-  - fixture: closures で発見
-- **[I-322]** **discriminated union switch でデストラクチャ変数の未使用** — match arm で `Event::Click { x, .. }` とデストラクチャするが body で `event.x` を使用（`E0609: no field x on type Event`）
-  - TypeResolver 側: `is_du_field_binding()` が存在し、`src/transformer/expressions/member_access.rs:288` でチェック済み
-  - **問題**: `is_du_field_binding` のスコープ検出が不完全で、一部のフィールドアクセスが rewrite されない
-  - `src/transformer/statements/switch.rs:479-487` の case body 変換時に `collect_du_field_accesses` の結果が十分に活用されていない
-  - fixture: discriminated-union で発見
-- **[I-323]** **`toString()` が Rust の `to_string()` に変換されない** — `n.toString()` → `E0599: no method named toString`
-  - `src/transformer/expressions/methods.rs:455-459` の `map_method_call` に `"toString"` ケースなし
-  - **解決策**: `"toString"` → `"to_string"` のマッピング追加
-  - fixture: general-for-loop, string-methods で発見
-- **[I-324]** **文字列結合の `&str`/`String` 型不一致** — `result + s` → `E0369: cannot add &String to &str`
-  - `src/transformer/expressions/binary.rs:75-143` の文字列結合ハンドリングが `String + String` の全ケースを網羅していない
-  - **解決策**: 文字列結合で両辺の型に応じた `.as_str()`/`.to_string()` 挿入
-  - fixture: do-while, functions で発見
-- **[I-325]** **オブジェクトデストラクチャリングのデフォルト値で `&str` が `String` に昇格されない** — `let { color = "black" } = opts` → `E0308: expected String, found &str`
-  - 三項演算子のリテラル昇格は解決済み（expected type ベースの `.to_string()` 付与が動作）
-  - 残存: デストラクチャリングのデフォルト値リテラルが `.to_string()` 付与されない
-  - fixture: object-destructuring で発見
-- **[I-326]** **`??` チェーンの変換バグ** — `a ?? b ?? 0` → `a.unwrap_or_else(|| b.unwrap_or_else(|| 0))` で中間結果の型が `Option<f64>` → `f64` の不一致
-  - `src/transformer/expressions/binary.rs:48-67` でネストされた `??` の右辺型を考慮していない
-  - **解決策**: 右辺が `??` 式の場合、中間結果を unwrap してからネスト
-  - fixture: nullish-coalescing で発見
-- **[I-327]** **`=== null` チェック後の nullable narrowing 不完全** — `if (x === null) { ... } return x;` で `x` が `Option<String>` のまま narrowing されない（`E0308: expected String, found Option<String>`）
-  - **解決策**: `=== null` / `!== null` チェック後の分岐で型を narrowing（`Option<T>` → `T`）
-  - 🔗 I-213（`!==` ガード排除）と関連
-  - fixture: narrowing-truthy-instanceof で発見
-- **[I-328]** **`never` 型が experimental `!` を生成** — stable Rust で `!` 型は使用不可（`E0658: the ! type is experimental`）
-  - `src/generator/types.rs:53` で `RustType::Never` → `!` を出力
-  - **解決策**: `std::convert::Infallible` を使用（戻り値型では既に `Result<Infallible, String>` パターンが使われている）、または `#![feature(never_type)]` を要求
-  - fixture: keyword-types で発見
-- **[I-329]** **string メソッド変換の不足・バグ** — `charAt()`, `indexOf()`, `repeat()` の Rust 変換が不完全
-  - `charAt()`: 未変換（`E0599`）。Rust では `chars().nth(n)` に変換
-  - `indexOf()`: `iter().position()` を呼ぶが String に `iter()` は存在しない（`E0599`）。`find()` + 位置取得に変換。`src/transformer/expressions/methods.rs:264-316`
-  - `repeat()`: count が `f64` のまま `usize` に変換されない（`E0308`）
-  - `split()`: 実装済み（`src/transformer/expressions/methods.rs:112-135`）
-  - `slice()`: 実装済み（`src/transformer/expressions/methods.rs:164-179`）
-  - fixture: string-methods で発見
-- **[I-330]** **try/catch + return で unreachable code** — try block 内に return がある場合、ブロック後の `if let Err(e)` + `unreachable!()` が到達不能
-  - `src/transformer/statements/error_handling.rs:123-129`
-  - **解決策**: try block 内の全パスが return する場合、catch block を直接 else 分岐にする or ブロック構造を見直す
-  - fixture: async-await で発見
-- **[I-331]** **`string | void` 戻り値で if 文の else 分岐欠落** — `fn maybeReturn(flag: bool) -> Option<String>` で if ブランチのみ return し、暗黙の `()` 返却で `E0317`
-  - **解決策**: `Option<T>` 戻り値の関数で if 文の else 分岐がない場合、`None` を暗黙返却
-  - fixture: void-type で発見
-- **[I-332]** **`as unknown as T` 二段キャストの変換不備** — TS の `x as unknown as string` で中間の `unknown` が消失し、型不一致
-  - **解決策**: 二段キャストを検出し、最終ターゲット型への直接変換を生成
-  - fixture: type-assertion で発見
-- **[I-333]** **`basic-types` の unknown typeof narrowing** — `typeof x` で narrowing されたスコープで `Value` と `String` の型不一致
-  - fixture: basic-types で発見
-
-#### T-4 E2E テスト拡充で発見されたバグ
-
-- **[I-334]** **union 型の typeof narrowing が `if false` に変換される** — `typeof x === "string"`（x: `string | number`）が `if false` に変換され、narrowing が機能しない
-  - `src/transformer/expressions/patterns.rs:94-173` の `try_convert_typeof_comparison()` が union enum のバリアントを照合
-  - **問題**: `src/transformer/expressions/patterns.rs:168` で `TypeofMatch::Placeholder` にフォールバックし `Expr::BoolLit(is_neq)` を生成（`===` の場合 `false`）。`resolve_typeof_match()`（同ファイル `:485`）が個別の型（String, F64, Bool）のみチェックし、union enum 型を処理しない
-  - **制御フロー**: `src/transformer/statements/control_flow.rs:20-106` の `convert_if_stmt()` が narrowing guard を抽出し `resolve_if_let_pattern()`（`:397-433`）で if-let パターン生成を試みるが、typeof guard のバリアント解決 `resolve_typeof_to_enum_variant()`（`:341-368`）がマッチしないと `None` を返し、通常の式変換にフォールバック → `if false` に帰結
-  - **解決策**: `try_convert_typeof_comparison()` で operand が union enum 型の場合に `matches!(EnumName::Variant(_))` パターンを生成。if-let パスを通す場合は `convert_if_stmt()` で typeof guard → `if let EnumName::Variant(x) = val` に変換
-  - **影響**: typeof narrowing を使う全ての union 型パターンがブロック。E2E テスト `typeof_narrowing.ts` が作成不可
-  - 🔗 I-215（typeof "object"/"function"）、I-213（`!==` ガード排除）と関連するが、本件は `===` での正方向 narrowing が対象
-
-- **[I-336]** **abstract class 派生クラスの `super()` がリテラル出力される** — `super("Circle")` が Rust で `super("Circle");` としてそのまま生成される（構文エラー）
-  - `src/transformer/classes/inheritance.rs:145-180` の `transform_class_with_inheritance()` で、親が abstract class の場合に `generate_child_of_abstract()` を呼ぶ
-  - `src/transformer/classes/generation.rs:106-135` の `generate_child_of_abstract()` は、constructor を **そのまま** `make_impl()` に渡す（`:117-124`）。`rewrite_super_constructor()` を呼ばない
-  - **正常パス**: 非 abstract 親の場合は `generate_child_class()`（`:161-205`）が `rewrite_super_constructor(c, parent)`（`:175-179`）を呼び、`super(args)` を `Self { field: value }` に変換する
-  - `src/transformer/classes/inheritance.rs:22-98` の `rewrite_super_constructor()` は super 呼び出しの引数を親フィールドにマッピングするが、abstract class パスでは呼ばれない
-  - **解決策**: `generate_child_of_abstract()` で constructor を使用する前に `rewrite_super_constructor()` 相当の処理を適用。abstract class のフィールド情報を `ClassInfo` から取得し、`super()` の引数をフィールド初期化に変換
-  - **影響**: フィールドを持つ abstract class の全派生クラス。E2E テスト `abstract_class.ts` が作成不可
-
-- **[I-337]** **trait default method で親 abstract class のフィールドにアクセス不可** — abstract class の non-abstract メソッドが `self.kind` を参照するが、trait 定義内で `self` にフィールドがない
-  - `src/transformer/classes/generation.rs:81-100` の `generate_abstract_class_items()` が全メソッド（abstract/concrete 問わず）を trait メソッドに変換（`:87` で `has_self: true`）
-  - **問題**: concrete メソッドの body 内の `self.field` アクセスは、trait 定義では不正（trait には具象フィールドがない）。Rust では trait の default method から実装者のフィールドに直接アクセスできない
-  - **解決策**: (1) フィールドアクセスを含む concrete メソッドは trait の required method（abstract にする）に変換し、各実装 struct の `impl Trait for Struct` で body を生成。(2) または getter メソッド（`fn kind(&self) -> &str`）を trait に追加し、default method 内で `self.kind()` に変換。(3) フィールドアクセスのない concrete メソッドのみ trait default method として残す
-  - **影響**: I-336 と併せて abstract class の E2E テストが全面ブロック
-
-- **[I-338]** **intersection 型が使用箇所ごとに異なる struct 名を生成** — 同一の `HasName & HasAge` 型が `_Intersection0`, `_Intersection2` 等、異なる名前の struct を生成（E0308 型不一致）
-  - `src/pipeline/type_converter/intersections.rs:624`、`:687`、`:721` で `synthetic.generate_name("Intersection")` を呼ぶたびにカウンタがインクリメント
-  - **問題**: 同一のメンバー構成を持つ intersection でも、annotation 内で遭遇するたびに新しい名前が生成される。名前の一意性が「出現順序」で決まり、「構造的同値性」で判定されていない
-  - **解決策**: intersection のメンバー構成（フィールド名+型のソート済みキー）をハッシュし、同一構成なら同一の struct 名を再利用。`synthetic` の `generate_name` に構造的キャッシュを導入
-  - **影響**: 同一 intersection 型を複数変数で使用する全パターン。E2E テスト `intersection_methods.ts` で interface に変更して回避済み
-  - 🔗 I-318（`_TypeLit` 構造体の重複生成）と同系統の問題
-
-- **[I-339]** **`Option<T>` 型の `console.log` 出力が `Some(v)` / `None` になる** — TS の `console.log(nullableValue)` は値を直接表示するが、Rust では `{:?}` フォーマットで `Some(5.0)` と表示される
-  - `src/transformer/expressions/literals.rs:106-114` の `needs_debug_format()` が `Option(_)` に対して `true` を返す（`:110`）
-  - `src/generator/expressions/mod.rs:405-436` の `generate_macro_call()` が `use_debug[i] == true` のとき `{:?}` を使用（`:422-423`）
-  - **問題**: TS では `console.log(null)` → `null`、`console.log(5)` → `5`。Rust では `println!("{:?}", None)` → `None`、`println!("{:?}", Some(5.0))` → `Some(5.0)` となり出力が異なる（S1: サイレント意味変更）
-  - **解決策**: `Option<T>` の場合、`match` で分岐して `Some(v)` → `v` を Display 出力、`None` → `"null"` を出力するヘルパーを生成。または `println!` 内で `.map(|v| v.to_string()).unwrap_or("null".to_string())` パターンを挿入
-  - **影響**: nullable 値を console.log に渡す全パターン。E2E テスト `nullable_return.ts` では null check 後に値を出力する形で回避済み
-
-- **[I-340]** **Generic 型パラメータに `Clone` bound が付与されない** — `fn first<T>(arr: Vec<T>) -> T` で `arr[0]` が `T: Clone` なしで move エラー（E0507）
-  - Generic 関数内で `Vec<T>` からのインデックスアクセス `arr[0]` は `T` が `Clone` を実装していないと move できない
-  - **問題**: TS の generics にはこの制約がないため、transpiler は型パラメータに trait bound を追加する必要がある。現在の実装では `T extends number` → `T: f64`（I-273 で別途追跡）以外の trait bound 生成ロジックがない
-  - **解決策**: Generic 関数の body を解析し、`Vec<T>` のインデックスアクセスや `.clone()` 呼び出しがある場合に `T: Clone` を自動付与。または保守的に全 generic 型パラメータに `Clone` bound を付与
-  - **影響**: Generic 関数内で Vec 操作を行う全パターン。E2E テスト `generics.ts` の強化がブロック
-
-- **[I-342]** **getter/setter の `get`/`set` キーワードがメソッド化されるが呼び出し側が `()` なしのフィールドアクセスになる** — コンパイルエラー（E0609: no field）
-  - **定義側**: `src/transformer/classes/members.rs:263` の `build_method()` で `MethodKind::Getter`（`:271`）→ `fn name(&self) -> T`、`MethodKind::Setter` → `fn set_name(&mut self, v: T)` に正しく変換
-  - **呼び出し側**: `src/transformer/expressions/member_access.rs:216` の `convert_member_expr()` が `obj.field` を常に `Expr::FieldAccess` に変換。getter かどうかの判定ロジックが存在しない
-  - **問題**: TS の `get fahrenheit()` は `temp.fahrenheit`（プロパティアクセス構文）で呼ぶが、Rust では `temp.fahrenheit()`（メソッド呼び出し）が必要。定義側はメソッドとして生成されるが、呼び出し側はフィールドアクセスのまま
-  - **具体例**: `temp.fahrenheit` → 生成 Rust で `temp.fahrenheit`（存在しないフィールドへのアクセス）、正しくは `temp.fahrenheit()`
-  - **解決策**: (1) TypeResolver / ClassInfo に getter メソッドの一覧を保持し、`convert_member_expr()` でフィールド名が getter と一致する場合に `Expr::MethodCall { args: [] }` を生成。(2) setter も同様に `obj.prop = val` → `obj.set_prop(val)` への変換が必要
-  - **影響**: `get`/`set` キーワードを使用する全クラス。fixture `getter-setter` の E2E テストが作成不可
-
-- **[I-341]** **do-while ループ内の `continue` が条件チェックをスキップする** — **S1: サイレント意味変更**
-  - do-while は `loop { body; if !cond { break; } }` に変換される（`src/transformer/statements/control_flow.rs:554`）
-  - **問題**: `body` 内の `continue` は `loop` 先頭に戻り、条件チェック `if !cond { break; }` をスキップする。TS の do-while では `continue` は条件チェックに飛ぶため、セマンティクスが異なる
-  - **具体例**: `do { j++; if (j%2===0) continue; collected += j; } while (j<10)` — TS では `j<10` を毎回チェックするが、Rust では偶数時に条件チェックをスキップし `j` が 10 を超えても実行が続く（TS: 25、Rust: 36）
-  - **解決策**: do-while の変換で条件チェックを `continue` の到達先にも配置。`loop { body; 'continue_target: if !cond { break; } }` ではなく、ラベル付き continue で条件チェックに飛ばすか、条件チェックを body の先頭（初回スキップ）にも配置
-  - **影響**: do-while ループ内で `continue` を使用する全パターン。E2E テスト `do_while.ts` の continue ケースを除外して回避済み
-
-- **[I-343]** **`Vec<Struct>` のインデックスアクセスで move エラー** — コンパイルエラー（E0507: cannot move out of index）
-  - `items[0]` で `items: Vec<Labeled>` から要素を取得する際、`Labeled` が `Copy` を実装していないため move エラー
-  - **問題**: TS では `items[0]` は参照を返すが、Rust では `Vec<T>` のインデックスは `T` を返す。`T` が `Copy` でない struct の場合、move が発生してコンパイルエラーになる
-  - **具体例**: `let item = items[0]` → `E0507: cannot move out of index of Vec<Labeled>`。関数引数として `formatLabel(items[0])` も同様
-  - **解決策**: struct 型の Vec インデックスアクセスを `.clone()` 付きに変換（`items[0].clone()`）。または参照渡し可能な文脈では `&items[0]` を生成し、関数パラメータも `&T` に変換
-  - **影響**: 非 Copy な struct の Vec からのインデックスアクセス全般。E2E テスト `interface_structs.ts`（旧 `optional_fields.ts`）で Vec 使用を回避して対処
-  - 🔗 I-319（配列インデックスの境界外 panic）はセマンティクスの問題、本件は所有権の問題で独立。I-104（所有権推論）の具体的な発現パターン
-
-- **[I-344]** **generic 関数への文字列リテラル引数で `&str` / `String` 型不一致** — コンパイルエラー（E0308: expected String, found &str）
-  - `firstOrDefault<T>(arr: T[], defaultVal: T)` を `firstOrDefault(strs, "none")` で呼ぶ場合、`strs: Vec<String>` から `T = String` が推論されるが、`"none"` は `&str` のまま渡される
-  - **問題**: 非 generic 文脈では expected type に基づいて `"literal".to_string()` が付与されるが、generic パラメータ位置では expected type が `T`（未解決）のため `.to_string()` が付与されない
-  - **具体例**: `firstOrDefault(strs, "none")` → 生成 Rust `firstOrDefault(strs, "none")` で `E0308: expected String, found &str`
-  - **解決策**: generic 関数の型引数推論結果を引数の expected type にフィードバックする 2 パス方式。`T = String` が推論された後、`defaultVal: T` → `defaultVal: String` として string literal に `.to_string()` を付与
-  - **影響**: generic 関数に String 型パラメータとして文字列リテラルを渡す全パターン。E2E テスト `generics.ts` の string 引数テストがブロック
-  - 🔗 I-311（型引数推論結果の引数 expected type フィードバック）が根本的な解決策。I-324（文字列結合の &str/String 不一致）は二項演算の問題であり本件は関数引数の問題で独立
-
-#### import/export
-
-- **[I-18]** **re-export の残課題** — 予約語モジュール名でのコンパイルエラーのみ。EXPORT_ALL 0 件
-
-#### 生成コード品質
-
-- **[I-104]** **所有権推論** — 全 clone → ライフタイム分析に基づく clone/borrow/move 判定。伝播リスク高
-- **[I-103]** **エラー型戦略** — `String` 固定 → thiserror/anyhow
-- **[I-102]** **`any`/`unknown` の残課題** — typeof/instanceof 未使用の `any` は `serde_json::Value` のまま
-
-#### 型 narrowing
-
-- **[I-215]** **typeof "object"/"function" の narrowing 内部型解決** — narrowed type 未設定
-- **[I-213]** **`!==` ガードの排除 narrowing** — 2 バリアント union で反対バリアントに narrowing 未実装
-- **[I-214]** **三項演算子の複合条件 (&&) narrowing** — `convert_cond_expr` が単数ガードのみ
-
-#### セマンティクス・解析精度
-
-- **[I-319]** **配列インデックスアクセスの境界外 panic** — S1、~97 箇所
-  - `arr[0]` / `arr[i as usize]` が空配列で panic（TS は `undefined`）
-  - **解決策**: `arr.get(idx).cloned()` で `Option<T>` 化（S1→S2 昇格）
-  - I-316 の `convert_index_to_usize` を共有。デストラクチャリングも対象
-  - Hono コンパイル数件悪化の可能性があるが、S1 排除のトレードオフとして許容
-  - 🔗 I-316（optional chaining）の非 optional 版拡張。I-310 とは直交
-- **[I-298]** **spread に上書きされる副作用式の評価消失** — S1（発生頻度は極めて低い）
-- **[I-188]** **`substring`/`slice` のバイト境界安全性** — TS は UTF-16、Rust はバイト。マルチバイト文字でパニック
-- **[I-62]** **`is_string_type` の `Option<String>` ハック除去**
-- **[I-256]** **any-narrowing の typeof 検出がトップレベルのみ** — `Switch`/`While`/`For`/`Try` 内の typeof 未検出
-- **[I-257]** **TypeResolver が rest パターンの変数を未登録** — 型が `Unknown` のまま
-- **[I-260]** **`undefined` リテラルの型解決が Unknown**
-
-#### 構造的重複・コンパイルエラー
-
-- **[I-318]** **`_TypeLit` 構造体が名前付き構造体と重複生成** — `src/pipeline/synthetic_registry.rs:149` で `generate_name("TypeLit")` により連番生成されるが、同一構造でも異なる名前が割り当てられる場合がある
-- **[I-314]** **intersection 内 mapped type の未使用型パラメータ（E0091）** — skip 原因
-- **[I-273]** **types.rs の trait/struct 混同（E0404/E0405）** — 5 インスタンス。ディレクトリコンパイル 156→157+/158 の阻害要因
-- **[I-274]** **フィールド名の IR サニタイズ不一致** — 現時点では実害なし。I-270c で顕在化する見込み
-- **[I-279]** **`resolve_synthetic_placement` の O(n²)** — Hono 規模では問題なし。大規模プロジェクトでボトルネック
-
-#### デフォルトパラメータ品質
-
-- **[I-283]** **`classes/members.rs` が `wrap_param_with_default`（`src/transformer/functions/params.rs:158`）を未使用** — DRY 違反。着手可能
+- **[I-283]** **`classes/members.rs` が `wrap_param_with_default` を未使用** — `src/transformer/functions/params.rs:158` と重複
 - **[I-282]** **一般式パスが `unwrap_or` で即時評価** — `needs_lazy_eval` をホワイトリスト方式に変更
 
-#### 未対応構文（小修正）
+---
 
-- **[I-196]** `parseInt` の radix 引数 — 1 件
-- **[I-11]** 三項演算子の分岐値を enum variant ラップ
-- **[I-12]** `Promise<T>` の union 内展開
+## Tier 1: L3（拡大する技術的負債・ブロッカー）
+
+### RC-9: 型引数推論のフィードバック欠如
+
+- **[I-311]** **推論結果の引数 expected type フィードバック** — `fn<T>(x: T, y: T)` で推論結果を未解決引数に反映する 2 パスが必要。`src/pipeline/type_resolver/call_resolution.rs:119-125`。解決で I-344 が自動解消
+
+### RC-3: 文字列型変換モデルの不統一
+
+- **[I-324]** **文字列結合の &str/String 不一致** — `src/transformer/expressions/binary.rs:75-143` が全ケース未網羅
+- **[I-325]** **デストラクチャデフォルト値の &str 未昇格** — expected type ベースの `.to_string()` 付与がデストラクチャ文脈で未適用
+- **[I-344]** **generic 関数への文字列リテラルで型不一致** — 🔗 I-311 解決で自動解消の可能性
+
+### RC-11: expected type 伝播の不完全性
+
+- **[I-300]** **imported 関数の expected type 伝播不足** — OBJECT_LITERAL_NO_TYPE（11件）。directory モードでの TypeRegistry 情報共有が必要
+- **[I-301]** **型注釈なしオブジェクトリテラル** — OBJECT_LITERAL_NO_TYPE（7件）。匿名構造体自動生成
+- **[I-306]** **`.map()` callback 戻り値型の伝播** — OBJECT_LITERAL_NO_TYPE（1件）。`propagate_expected` が `Expr::Call` 未処理
+
+### RC-13: union/enum 型の生成品質
+
+- **[I-238]** **合成 enum の Display trait 未生成** — コンパイルテスト skip 原因
+- **[I-202]** **Box\<dyn Fn\> を含む enum の derive 不適合** — skip 原因
+- **[I-11]** **三項演算子の分岐値を enum variant ラップ** — skip 原因（ternary, ternary-union）
+
+### RC-2 残り: 所有権・借用モデル
+
+- **[I-343]** **Vec\<Struct\> インデックスで move エラー** — 非 Copy struct の所有権移動。`.clone()` or `&` 生成
+- **[I-340]** **Generic に Clone bound 未付与** — body 解析で `T: Clone` 自動付与が必要
+- **[I-217]** **filter/find クロージャの参照型ミスマッチ** — `&f64` vs `f64`
+- **[I-265]** **find の Option 二重ラップ**
+
+### RC-12: string メソッドマッピング
+
+- **[I-329]** **charAt/indexOf/repeat 変換不備** — 個別マッピング追加
+- **[I-323]** **toString 未変換** — `map_method_call` に `"toString"` ケース追加
+- **[I-237]** **toFixed 未変換** — `format!("{:.N}", v)` に変換。skip 原因
+
+### RC-5: abstract class 変換パスの欠陥
+
+- **[I-336]** **super() がリテラル出力** — `generate_child_of_abstract()` で `rewrite_super_constructor()` 未呼出
+- **[I-337]** **trait default method でフィールドアクセス不可** — concrete メソッドの一律 trait 化。I-336 と強依存
+
+### ゲートイシュー・ブロッカー
+
+- **[I-320]** **optional パラメータが Option\<T\> 未変換** — `param.optional` 未チェック。3 fixture ブロック（functions, closures, async-await）
+- **[I-30]** **Cargo.toml 依存クレート追加** — I-183（fetch）と I-34（Math.random）のゲート
+- **[I-182]** **Hono クリーンファイルのコンパイルテスト CI 化** — 回帰検出自動化
+- **[I-313]** **三項演算子 callee パターン** — CALL_TARGET（2件）。一時変数束縛 + 呼び出し
+
+---
+
+## Tier 2: L3 残り + L4（修正コスト小）
+
+### 独立コンパイルエラー
+
+- **[I-321]** **クロージャ返却の Box::new ラップ漏れ** — `needs_trait_box_coercion` のカバー不足
+- **[I-322]** **DU switch のデストラクチャ変数 rewrite 不完全** — `is_du_field_binding` スコープ検出
+- **[I-326]** **`??` チェーンの型不一致** — ネスト `??` の中間結果型
+- **[I-328]** **never 型が experimental `!`** — `Infallible` に変更（1 行修正）
+- **[I-330]** **try/catch + return で unreachable code** — ブロック構造見直し
+- **[I-331]** **Option\<T\> 戻り値の暗黙 None 未返却** — if else 欠落
+- **[I-332]** **as unknown as T 二段キャスト** — 中間 unknown 消失
+- **[I-310]** **HashMap computed access が `as usize`** — Vec 用変換の誤適用。transformer 側修正
+- **[I-314]** **intersection の未使用型パラメータ（E0091）** — skip 原因
+- **[I-201]** **null as any の非 Option 代入** — skip 原因
+- **[I-209]** **any-narrowing enum の値代入型強制** — skip 原因
+
+### 型変換・推論
+
+- **[I-309]** **メソッド呼び出しの型引数推論** — Member callee 未処理。影響限定的
+- **[I-101]** **ジェネリック型を含む intersection** — `try_convert_intersection_type` と統合可能
+- **[I-278]** **new obj.Class() パターン** — `resolve_new_expr` が `Expr::Member` 未処理
+- **[I-181]** **call signature のジェネリック型パラメータ** — 制約伝搬未検証
+- **[I-284]** **typeof qualified name（typeof A.B.C）** — 0 エラー削減。高コスト・低 ROI
+- **[I-296]** **intersection 内の複数 union 分配** — 意図的制約。需要発生時に対応
+
+### 設計・品質
+
+- **[I-193]** **API 表面積の最小化** — `pub fn` → `pub(crate) fn`
+- **[I-104]** **所有権推論（全体設計）** — 全 clone → ライフタイム分析。RC-2 の根本解決
+- **[I-103]** **エラー型戦略** — String 固定 → thiserror/anyhow
+- **[I-102]** **any/unknown の残課題** — typeof/instanceof 未使用の any は Value のまま
+- **[I-274]** **フィールド名の IR サニタイズ不一致** — I-270c で顕在化見込み
+- **[I-279]** **resolve_synthetic_placement の O(n²)** — 大規模プロジェクトでボトルネック
+- **[I-62]** **is_string_type の Option\<String\> ハック除去**
+- **[I-293]** **全ファイルのテストケース体系的レビュー**
+
+### セマンティクス・解析精度
+
+- **[I-342]** **getter/setter 呼び出し側がフィールドアクセスのまま** — ClassInfo に getter 一覧保持 → MethodCall 生成
+- **[I-257]** **TypeResolver が rest パターン変数を未登録**
+- **[I-260]** **undefined リテラルの型解決が Unknown**
+- **[I-188]** **substring/slice のバイト境界安全性** — UTF-16 vs バイト
+
+### ビルトイン型拡張
+
+- **[I-261]** **ES2016〜ES2024 の追加メソッド** — libMap 拡張
+- **[I-263]** **型エイリアス（alias）の TypeRegistry 登録**
+- **[I-270c]** **ビルトイン型のメソッド impl 生成** — 🔗 I-274
+- **[I-262]** **Intl 名前空間** — 需要発生時
+- **[I-264]** **Proxy/Reflect** — 需要発生時
+
+---
+
+## Tier 3: L4（局所的・孤立した問題）
+
+### 未対応構文（小修正）
+
+- **[I-196]** parseInt の radix 引数 — 1 件
+- **[I-12]** Promise\<T\> の union 内展開
 - **[I-13]** super() の位置ベースフィールドマッピング
 - **[I-21]** async void のセマンティクス差異
+- **[I-18]** re-export 残課題 — 予約語モジュール名のみ
 
-#### 未対応構文（ベンチマーク外）
+### 未対応構文（ベンチマーク外）
 
-- **[I-249]** `symbol` キーワード型
-- **[I-250]** `keyof`/`unique` 型演算子
+- **[I-249]** symbol キーワード型
+- **[I-250]** keyof/unique 型演算子
 - **[I-251]** `**` 累乗演算子 → `f64::powf()`
 - **[I-252]** `??=`/`&&=`/`||=` 複合代入
-- **[I-253]** `console.info`/`debug`/`trace`/`table`
-- **[I-254]** 一部の `Math` メソッド
-
-#### E2E テスト拡充
-
-- **[I-20]** discriminated union の拡張パターン
-- **[I-71]** E2E: オブジェクト操作
-- **[I-74]** E2E: 既存スクリプトのエッジケース
-- **[I-72]** E2E: 高度なクラス機能
-
-#### その他
-
-- **[I-184]** fs モジュールの追加メソッド
-- **[I-185]** process の追加プロパティ
-- **[I-293]** 全ファイルのテストケース体系的レビュー
-
-### Tier 3: 低優先度 — 孤立した問題
-
-- **[I-191]** README.md の記述見直し
-- **[I-99]** `collect_du_field_accesses_from_expr` の AST ノード網羅性
-- **[I-39]** Range 生成で `Expr::IntLit` を使用
-- **[I-27]** タプルの optional 要素
-- **[I-29]** ネスト async 関数
-- **[I-33]** 非プリミティブ type assertion のコメント保持
-- **[I-34]** Math.random() → `rand` クレート — 🔗 I-30 が前提
-- **[I-36]** qualified type name (`A.B`) — 3 件
-- **[I-59]** Pick/Omit のネストしたユーティリティ型
-- **[I-105]** デコレータ付き TsParamProp
-- **[I-106]** ラベル付き while での条件内代入
-- **[I-139]** 関数型パラメータパターン — 3 件
-- **[I-148]** for...of デストラクチャリング残存 — 1 件
-- **[I-138]** タグ付きテンプレートリテラル — 1 件
-- **[I-240]** 代入ターゲット（非パターン） — 1 件
-- **[I-151]** 代入ターゲットパターン — 2 件
-- **[I-154]** カンマ式 (`SeqExpr`) — 1 件
-- **[I-155]** `satisfies` 式 — 1 件
-- **[I-156]** オブジェクトリテラルのゲッター/メソッド記法 — 2 件
-- **[I-126]** 計算プロパティアクセス残存 — 3 件
+- **[I-253]** console.info/debug/trace/table
+- **[I-254]** 一部の Math メソッド
 - **[I-197]** template literal type
 - **[I-198]** ビット否定・void・delete 演算子 — delete 2 件
 - **[I-199]** 型の構造的一致による推論
@@ -336,14 +194,44 @@
 - **[I-234]** アロー関数の配列デストラクチャリング引数 — 1 件
 - **[I-235]** 複数スプレッドで未登録型のフィールド展開 — 要再検証
 
+### その他
+
+- **[I-27]** タプルの optional 要素
+- **[I-29]** ネスト async 関数
+- **[I-33]** 非プリミティブ type assertion のコメント保持
+- **[I-34]** Math.random() → rand クレート — 🔗 I-30 が前提
+- **[I-36]** qualified type name (A.B) — 3 件
+- **[I-39]** Range 生成で Expr::IntLit を使用
+- **[I-59]** Pick/Omit のネストしたユーティリティ型
+- **[I-99]** collect_du_field_accesses_from_expr の AST ノード網羅性
+- **[I-105]** デコレータ付き TsParamProp
+- **[I-106]** ラベル付き while での条件内代入
+- **[I-126]** 計算プロパティアクセス残存 — 3 件
+- **[I-138]** タグ付きテンプレートリテラル — 1 件
+- **[I-139]** 関数型パラメータパターン — 3 件
+- **[I-148]** for...of デストラクチャリング残存 — 1 件
+- **[I-151]** 代入ターゲットパターン — 2 件
+- **[I-154]** カンマ式 (SeqExpr) — 1 件
+- **[I-155]** satisfies 式 — 1 件
+- **[I-156]** オブジェクトリテラルのゲッター/メソッド記法 — 2 件
+- **[I-184]** fs モジュールの追加メソッド
+- **[I-185]** process の追加プロパティ
+- **[I-191]** README.md の記述見直し
+- **[I-240]** 代入ターゲット（非パターン）— 1 件
+
+### E2E テスト拡充
+
+- **[I-20]** discriminated union の拡張パターン
+- **[I-71]** E2E: オブジェクト操作
+- **[I-72]** E2E: 高度なクラス機能
+- **[I-74]** E2E: 既存スクリプトのエッジケース
+
 ---
 
 ## 保留
 
-- **[I-32]** コンパイルテストのスキップ解消 — 各原因の修正が前提（25 件: 従来 11 + T-3 追加 14）
+- **[I-32]** コンパイルテストのスキップ解消 — 各原因の修正が前提（25 件）
 - **[I-183]** HTTP E2E テスト基盤 + fetch 変換 — I-30 が前提
-
----
 
 ## スコープ外
 
@@ -353,3 +241,15 @@
 - カスタム変換ルールの注入 — 具体的な需要なし
 - **[I-167]** `==`（抽象等価）— 同一型なら `===` と同じ、異なる型なら Rust が型エラーで検出
 - **[I-219]** conditional type — Hono 0 件。需要発生時に再評価
+
+---
+
+## ユーザー記載アイディア
+
+- TypeScript, crate などのバージョンアップ
+- package.json に TypeScript のバージョン指定を入れる
+- 外部型生成ツールの Docker 化
+- node_modules の依存を解析して全トランスパイル
+- cargo nextest 導入検討
+- テスト実行環境の改修、高速化
+- コンパイルテストのビルトインなしの必要性検証

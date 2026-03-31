@@ -66,17 +66,22 @@ Check TODO items tagged with `[skill-feedback:<skill-name>]`:
 
 ### Step 5: Priority Re-evaluation
 
-Re-evaluate all items using the 3 axes from `.claude/rules/todo-prioritization.md` (direct value, leverage, propagation prevention) and perform inter-Tier moves.
+Re-evaluate all items using `.claude/rules/todo-prioritization.md`:
 
-#### Tier Placement Criteria
+1. **Root cause clustering**: Group issues sharing the same root cause
+2. **Priority level assignment**: Classify each cluster as L1 (reliability) through L4 (localized)
+3. **Tier placement**: Map priority levels to Tiers
 
-| Tier | Criteria |
-|------|----------|
-| **Tier 1** | High propagation risk, or high score on all 3 axes. Deferral increases cost |
-| **Tier 2** | High direct value but medium-low propagation risk. Ordered by value within Tier |
-| **Tier 3** | Low direct value, or isolated problems. Safe to defer |
+#### Tier ↔ Level Mapping
 
-Explicitly state reasoning for judgments (e.g., "Moved I-XX to Tier 3 because: ...").
+| Tier | Corresponding Priority Levels |
+|------|-------------------------------|
+| **Tier 0** | L1 (Reliability Foundation) + L2 (Design Foundation) |
+| **Tier 1** | L3 (Expanding Technical Debt) — blockers and high-leverage items |
+| **Tier 2** | Remaining L3 + L4 items with small fix cost |
+| **Tier 3** | L4 (Localized Problems) |
+
+Explicitly state reasoning for judgments (e.g., "Moved I-XX to Tier 3 because: L4 — isolated to a single syntax pattern, no downstream impact").
 
 ### Output
 
