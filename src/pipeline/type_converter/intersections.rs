@@ -397,7 +397,7 @@ pub(super) fn try_convert_intersection_type(
     if members.is_empty() {
         return Ok(Some(Item::Struct {
             vis,
-            name: decl.id.sym.to_string(),
+            name: sanitize_rust_type_name(&decl.id.sym),
             type_params,
             fields: vec![],
         }));
@@ -409,7 +409,7 @@ pub(super) fn try_convert_intersection_type(
             if let Some(rust_type) = try_simplify_identity_mapped_type(mapped) {
                 return Ok(Some(Item::TypeAlias {
                     vis,
-                    name: decl.id.sym.to_string(),
+                    name: sanitize_rust_type_name(&decl.id.sym),
                     type_params,
                     ty: rust_type,
                 }));
@@ -424,7 +424,7 @@ pub(super) fn try_convert_intersection_type(
             let rust_type = convert_ts_type(single, synthetic, reg).unwrap_or(RustType::Any);
             return Ok(Some(Item::TypeAlias {
                 vis,
-                name: decl.id.sym.to_string(),
+                name: sanitize_rust_type_name(&decl.id.sym),
                 type_params,
                 ty: rust_type,
             }));
@@ -469,7 +469,7 @@ pub(super) fn try_convert_intersection_type(
         let (variants, serde_tag) =
             distribute_intersection_with_union(extra_base, first_union, synthetic, reg)?;
 
-        let enum_name = decl.id.sym.to_string();
+        let enum_name = sanitize_rust_type_name(&decl.id.sym);
 
         // If base members had method signatures, generate an impl block for the enum
         if !methods.is_empty() {
@@ -534,7 +534,7 @@ pub(super) fn try_convert_intersection_type(
         // All members are method-only (trait-like) → supertrait composition
         return Ok(Some(Item::Trait {
             vis,
-            name: decl.id.sym.to_string(),
+            name: sanitize_rust_type_name(&decl.id.sym),
             type_params: vec![],
             supertraits: trait_names,
             methods: vec![],
@@ -542,7 +542,7 @@ pub(super) fn try_convert_intersection_type(
         }));
     }
 
-    let struct_name = decl.id.sym.to_string();
+    let struct_name = sanitize_rust_type_name(&decl.id.sym);
 
     // If intersection contains method signatures, generate an impl block
     if !methods.is_empty() {

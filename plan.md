@@ -74,6 +74,15 @@
 - コンパイルテスト skip リスト全項目に TODO ID が紐付いている ✅ T-2
 - `unused_mut` と `unreachable_code` がコンパイルテストで検出可能 ✅ T-2
 - レビューで発見された新規バグ（S1: 3件、SD: 1件）が TODO に追記されている ✅ T-2（I-315〜I-318 + I-314）
+- T-2 発見の S1 バグ 3 件が修正されている ✅ S1 一括修正（I-315, I-316, I-317）
+
+### ~~Phase S1: サイレント意味変更バグ一括修正~~ ✅ 完了
+
+T-2 で発見された S1（サイレント意味変更）バグ 3 件を修正。
+
+- I-315: f64 パターンマッチ → guard パターン（`_ if x == 1.0`）に変換
+- I-316: optional chaining 配列アクセス → `.get().cloned()` で panic 回避
+- I-317: Rust prelude 型名シャドウイング → `sanitize_rust_type_name` で衝突時に "Ts" プレフィックス
 
 ### Phase R-2: TypeDef の TS 型メタデータ分離（I-312）
 

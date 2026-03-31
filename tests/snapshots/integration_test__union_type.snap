@@ -76,7 +76,7 @@ struct Promise<T> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-enum Result {
+enum TsResult {
     Success(Success),
     Failure(Failure),
 }

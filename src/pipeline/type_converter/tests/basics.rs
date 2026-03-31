@@ -86,3 +86,29 @@ fn test_convert_nullable_type() {
         }
     }
 }
+
+// --- sanitize_rust_type_name ---
+
+#[test]
+fn test_sanitize_rust_type_name_prefixes_prelude_types() {
+    use super::super::sanitize_rust_type_name;
+    assert_eq!(sanitize_rust_type_name("Result"), "TsResult");
+    assert_eq!(sanitize_rust_type_name("Option"), "TsOption");
+    assert_eq!(sanitize_rust_type_name("String"), "TsString");
+    assert_eq!(sanitize_rust_type_name("Vec"), "TsVec");
+    assert_eq!(sanitize_rust_type_name("Box"), "TsBox");
+    assert_eq!(sanitize_rust_type_name("Some"), "TsSome");
+    assert_eq!(sanitize_rust_type_name("None"), "TsNone");
+    assert_eq!(sanitize_rust_type_name("Ok"), "TsOk");
+    assert_eq!(sanitize_rust_type_name("Err"), "TsErr");
+    assert_eq!(sanitize_rust_type_name("Self"), "TsSelf");
+}
+
+#[test]
+fn test_sanitize_rust_type_name_preserves_non_prelude() {
+    use super::super::sanitize_rust_type_name;
+    assert_eq!(sanitize_rust_type_name("MyType"), "MyType");
+    assert_eq!(sanitize_rust_type_name("Context"), "Context");
+    assert_eq!(sanitize_rust_type_name("User"), "User");
+    assert_eq!(sanitize_rust_type_name("ResultType"), "ResultType");
+}

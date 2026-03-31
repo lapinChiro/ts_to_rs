@@ -3,11 +3,11 @@ source: tests/integration_test.rs
 expression: output
 ---
 #[derive(Debug, Clone, PartialEq)]
-pub struct Box<T> {
+pub struct TsBox<T> {
     pub value: T,
 }
 
-impl<T> Box<T> {
+impl<T> TsBox<T> {
     pub fn new(val: T) -> Self {
         Self { value: val }
     }

@@ -27,9 +27,11 @@ fn is_case_terminated(stmts: &[ast::Stmt]) -> bool {
 ///
 /// Non-literal expressions (identifiers, function calls, etc.) would become variable bindings
 /// in a Rust match, silently changing semantics. These must use match guards instead.
+/// `NumberLit` (f64) is excluded because f64 does not implement `Eq`, making it invalid
+/// as a match pattern. Numeric cases use match guards (`_ if x == 1.0`) instead.
 fn is_literal_match_pattern(expr: &Expr) -> bool {
     match expr {
-        Expr::IntLit(_) | Expr::NumberLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) => true,
+        Expr::IntLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) => true,
         // Enum variant paths (e.g., Direction::Up) are valid match patterns
         Expr::Ident(name) => name.contains("::"),
         _ => false,

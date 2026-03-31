@@ -12,7 +12,7 @@ pub fn convert_type_alias_items(
 ) -> Result<Vec<Item>> {
     // Conditional type may produce multiple items (comment + placeholder)
     if let TsType::TsConditionalType(cond) = decl.type_ann.as_ref() {
-        let name = decl.id.sym.to_string();
+        let name = sanitize_rust_type_name(&decl.id.sym);
         let type_params = extract_type_params(decl.type_params.as_deref(), synthetic, reg);
 
         match convert_conditional_type(cond, synthetic, reg) {
@@ -89,7 +89,7 @@ fn try_convert_keyof_typeof_alias(
         Some(crate::registry::TypeDef::Struct { fields, .. }) => fields,
         Some(crate::registry::TypeDef::Enum { string_values, .. }) => {
             // For enums, use variant string values as keys
-            let name = decl.id.sym.to_string();
+            let name = sanitize_rust_type_name(&decl.id.sym);
             let variants = string_values
                 .values()
                 .map(|v| EnumVariant {
@@ -109,7 +109,7 @@ fn try_convert_keyof_typeof_alias(
         _ => return Ok(None),
     };
 
-    let name = decl.id.sym.to_string();
+    let name = sanitize_rust_type_name(&decl.id.sym);
     let variants = fields
         .iter()
         .map(|(field_name, _)| EnumVariant {
@@ -143,7 +143,7 @@ pub fn convert_type_alias(
     synthetic: &mut SyntheticTypeRegistry,
     reg: &TypeRegistry,
 ) -> Result<Item> {
-    let name = decl.id.sym.to_string();
+    let name = sanitize_rust_type_name(&decl.id.sym);
 
     // String literal union: `type X = "a" | "b" | "c"` → enum
     if let Some(item) = try_convert_string_literal_union(decl, vis.clone())? {
@@ -358,7 +358,7 @@ pub(super) fn try_convert_function_type_alias(
 
     let return_type = convert_ts_type(&fn_type.type_ann.type_ann, synthetic, reg)?;
 
-    let name = decl.id.sym.to_string();
+    let name = sanitize_rust_type_name(&decl.id.sym);
     let type_params = extract_type_params(decl.type_params.as_deref(), synthetic, reg);
 
     Ok(Some(Item::TypeAlias {
@@ -392,7 +392,7 @@ pub(super) fn try_convert_tuple_type_alias(
         .map(|elem| convert_ts_type(&elem.ty, synthetic, reg))
         .collect::<Result<Vec<_>>>()?;
 
-    let name = decl.id.sym.to_string();
+    let name = sanitize_rust_type_name(&decl.id.sym);
     let type_params = extract_type_params(decl.type_params.as_deref(), synthetic, reg);
 
     Ok(Some(Item::TypeAlias {

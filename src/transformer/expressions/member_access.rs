@@ -9,6 +9,23 @@ use crate::registry::TypeDef;
 use super::methods::map_method_call;
 use crate::transformer::Transformer;
 
+/// Converts an index expression to a usize-compatible form for `Vec::get()`.
+///
+/// Integer-valued `NumberLit` → `IntLit` (renders as `0`, not `0.0`).
+/// Other expressions → `Cast { target: usize }`.
+fn convert_index_to_usize(index: Expr) -> Expr {
+    match &index {
+        Expr::NumberLit(n) if n.fract() == 0.0 => Expr::IntLit(*n as i128),
+        _ => Expr::Cast {
+            expr: Box::new(index),
+            target: RustType::Named {
+                name: "usize".to_string(),
+                type_args: vec![],
+            },
+        },
+    }
+}
+
 impl<'a> Transformer<'a> {
     /// Resolves a member access expression, applying special conversions for known fields.
     ///
@@ -94,20 +111,32 @@ impl<'a> Transformer<'a> {
                         )?
                     }
                     ast::MemberProp::Computed(computed) => {
-                        // Cat A: computed index
+                        // Use .get() for safe bounds-checked access (I-316).
+                        // Direct indexing (_v[i]) panics on out-of-bounds;
+                        // TS returns undefined, which maps to None.
                         let index = self.convert_expr(&computed.expr)?;
-                        Expr::Index {
-                            object: Box::new(Expr::Ident("_v".to_string())),
-                            index: Box::new(index),
+                        let safe_index = convert_index_to_usize(index);
+                        Expr::MethodCall {
+                            object: Box::new(Expr::MethodCall {
+                                object: Box::new(Expr::Ident("_v".to_string())),
+                                method: "get".to_string(),
+                                args: vec![safe_index],
+                            }),
+                            method: "cloned".to_string(),
+                            args: vec![],
                         }
                     }
                     _ => return Err(anyhow!("unsupported optional chaining property")),
                 };
 
-                // If the field type is Option, use and_then to avoid Option<Option<T>>
+                // Use and_then when the body returns Option (to avoid Option<Option<T>>):
+                // - Computed index: .get() returns Option<&T>
+                // - Option field type: field is already Option<T>
+                let is_computed = matches!(&member.prop, ast::MemberProp::Computed(_));
                 let field_type =
                     self.resolve_field_type(obj_type.unwrap_or(&RustType::Any), &member.prop);
-                let method_name = if field_type.is_some_and(|ty| matches!(ty, RustType::Option(_)))
+                let method_name = if is_computed
+                    || field_type.is_some_and(|ty| matches!(ty, RustType::Option(_)))
                 {
                     "and_then"
                 } else {
@@ -353,5 +382,54 @@ impl<'a> Transformer<'a> {
             _ => return Err(anyhow!("unsupported optional call property")),
         };
         Ok((object, method))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_convert_index_to_usize_integer_number_lit() {
+        let result = convert_index_to_usize(Expr::NumberLit(0.0));
+        assert_eq!(result, Expr::IntLit(0));
+    }
+
+    #[test]
+    fn test_convert_index_to_usize_large_integer() {
+        let result = convert_index_to_usize(Expr::NumberLit(42.0));
+        assert_eq!(result, Expr::IntLit(42));
+    }
+
+    #[test]
+    fn test_convert_index_to_usize_fractional_gets_cast() {
+        let result = convert_index_to_usize(Expr::NumberLit(1.5));
+        assert!(matches!(result, Expr::Cast { .. }));
+    }
+
+    #[test]
+    fn test_convert_index_to_usize_negative_becomes_int_lit() {
+        // -1.0 has fract() == 0.0, so it becomes IntLit(-1)
+        // When used as usize, this wraps to a large number, but .get() safely returns None
+        let result = convert_index_to_usize(Expr::NumberLit(-1.0));
+        assert_eq!(result, Expr::IntLit(-1));
+    }
+
+    #[test]
+    fn test_convert_index_to_usize_variable_gets_cast() {
+        let result = convert_index_to_usize(Expr::Ident("i".to_string()));
+        match result {
+            Expr::Cast { expr, target } => {
+                assert_eq!(*expr, Expr::Ident("i".to_string()));
+                assert_eq!(
+                    target,
+                    RustType::Named {
+                        name: "usize".to_string(),
+                        type_args: vec![]
+                    }
+                );
+            }
+            other => panic!("expected Cast, got: {other:?}"),
+        }
     }
 }

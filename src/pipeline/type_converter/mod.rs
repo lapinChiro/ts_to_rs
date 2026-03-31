@@ -50,6 +50,31 @@ use crate::pipeline::SyntheticTypeRegistry;
 use crate::registry::{TypeDef, TypeRegistry};
 use crate::transformer::type_position::{wrap_trait_for_position, TypePosition};
 
+/// Rust prelude type names that would cause shadowing if used as user-defined type names.
+///
+/// Includes types, enum variants, and common std types that are in the prelude or
+/// automatically imported. Using these as enum/struct names would shadow the standard
+/// library definitions, causing compile errors or silent semantic changes.
+const RUST_PRELUDE_TYPE_NAMES: &[&str] = &[
+    // Core prelude types
+    "Option", "Result", "String", "Vec", "Box",
+    // Core prelude enum variants (used as value constructors)
+    "Some", "None", "Ok", "Err", // Special keyword
+    "Self",
+];
+
+/// Sanitizes a type name to avoid shadowing Rust prelude types.
+///
+/// If `name` matches a Rust prelude type name, prefixes it with "Ts"
+/// (e.g., `Result` → `TsResult`). Otherwise returns the name unchanged.
+pub(crate) fn sanitize_rust_type_name(name: &str) -> String {
+    if RUST_PRELUDE_TYPE_NAMES.contains(&name) {
+        format!("Ts{name}")
+    } else {
+        name.to_string()
+    }
+}
+
 /// Returns true if the keyword type is a nullable sentinel (`null`, `undefined`, `void`).
 ///
 /// These types are filtered from union members and cause the union to be wrapped in `Option`.
@@ -360,7 +385,7 @@ fn convert_type_ref(
                 None => vec![],
             };
             Ok(RustType::Named {
-                name: other.to_string(),
+                name: sanitize_rust_type_name(other),
                 type_args,
             })
         }

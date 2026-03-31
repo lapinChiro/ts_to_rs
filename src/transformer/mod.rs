@@ -566,7 +566,7 @@ impl<'a> Transformer<'a> {
 ///
 /// Handles numeric enums (auto-incrementing and explicit values) and string enums.
 fn convert_ts_enum(ts_enum: &swc_ecma_ast::TsEnumDecl, vis: Visibility) -> Result<Vec<Item>> {
-    let name = ts_enum.id.sym.to_string();
+    let name = crate::pipeline::type_converter::sanitize_rust_type_name(&ts_enum.id.sym);
     let mut variants = Vec::new();
 
     for member in &ts_enum.members {

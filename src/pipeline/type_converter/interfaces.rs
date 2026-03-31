@@ -12,7 +12,7 @@ pub fn convert_interface_items(
     synthetic: &mut SyntheticTypeRegistry,
     reg: &TypeRegistry,
 ) -> Result<Vec<Item>> {
-    let name = decl.id.sym.to_string();
+    let name = sanitize_rust_type_name(&decl.id.sym);
     let type_params = extract_type_params(decl.type_params.as_deref(), synthetic, reg);
 
     let has_methods = decl

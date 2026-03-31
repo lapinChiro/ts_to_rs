@@ -14,11 +14,15 @@ fn test_convert_switch_single_case_break_generates_match() {
     match &result[0] {
         Stmt::Match { arms, .. } => {
             assert_eq!(arms.len(), 1);
-            assert_eq!(arms[0].patterns.len(), 1);
-            assert!(arms[0]
-                .patterns
-                .iter()
-                .all(|p| matches!(p, crate::ir::MatchPattern::Literal(_))));
+            // f64 cases use guard instead of literal pattern (I-315)
+            assert!(
+                arms[0]
+                    .patterns
+                    .iter()
+                    .all(|p| matches!(p, crate::ir::MatchPattern::Wildcard)),
+                "numeric case should use wildcard + guard, not literal pattern"
+            );
+            assert!(arms[0].guard.is_some(), "numeric case should have a guard");
             assert!(!arms[0].body.is_empty());
         }
         other => panic!("expected Match, got {other:?}"),
@@ -40,10 +44,10 @@ fn test_convert_switch_empty_fallthrough_merges_patterns() {
     match &result[0] {
         Stmt::Match { arms, .. } => {
             assert_eq!(arms.len(), 1);
-            assert_eq!(
-                arms[0].patterns.len(),
-                2,
-                "expected 2 patterns for merged cases"
+            // f64 cases are merged via combined guard (x == 1.0 || x == 2.0)
+            assert!(
+                arms[0].guard.is_some(),
+                "merged numeric cases should have a combined guard"
             );
         }
         other => panic!("expected Match, got {other:?}"),
@@ -66,10 +70,8 @@ fn test_convert_switch_default_generates_wildcard() {
     match &result[0] {
         Stmt::Match { arms, .. } => {
             assert_eq!(arms.len(), 2);
-            assert!(arms[0]
-                .patterns
-                .iter()
-                .all(|p| matches!(p, crate::ir::MatchPattern::Literal(_))));
+            // f64 case uses guard (I-315)
+            assert!(arms[0].guard.is_some(), "numeric case should have a guard");
             assert!(
                 arms[1]
                     .patterns
@@ -283,13 +285,13 @@ fn test_switch_mixed_literal_nonliteral_separate_arms() {
     match match_stmt {
         Stmt::Match { arms, .. } => {
             assert_eq!(arms.len(), 2);
-            // First arm (case 1) - literal, no guard
+            // First arm (case 1) - f64 numeric, uses guard (I-315)
             assert!(
-                arms[0].guard.is_none(),
-                "literal case should have no guard, got {:?}",
+                arms[0].guard.is_some(),
+                "numeric case should have a guard, got {:?}",
                 arms[0]
             );
-            // Second arm (case A) - non-literal, has guard
+            // Second arm (case A) - non-literal, also has guard
             assert!(
                 arms[1].guard.is_some(),
                 "non-literal case should have a guard, got {:?}",
@@ -606,13 +608,10 @@ fn test_switch_default_before_case_moves_to_last_arm() {
     match &result[0] {
         Stmt::Match { arms, .. } => {
             assert_eq!(arms.len(), 2, "should have 2 arms: case + default");
-            // First arm should be the literal case
+            // First arm should be the numeric case (wildcard + guard, I-315)
             assert!(
-                arms[0]
-                    .patterns
-                    .iter()
-                    .all(|p| !matches!(p, crate::ir::MatchPattern::Wildcard)),
-                "first arm should NOT be wildcard"
+                arms[0].guard.is_some(),
+                "numeric case arm should have a guard"
             );
             // Last arm should be wildcard
             assert!(

@@ -811,3 +811,48 @@ fn test_convert_ts_type_nullable_three_types_generates_option_enum() {
         other => panic!("expected Enum, got: {other:?}"),
     }
 }
+
+// --- prelude shadowing (I-317) ---
+
+#[test]
+fn test_union_named_result_gets_ts_prefix() {
+    let decl = parse_type_alias("type Result = Success | Failure;");
+    let reg = TypeRegistry::new();
+    let mut synthetic = SyntheticTypeRegistry::new();
+    let item = crate::pipeline::type_converter::convert_type_alias(
+        &decl,
+        Visibility::Public,
+        &mut synthetic,
+        &reg,
+    )
+    .unwrap();
+    match &item {
+        Item::Enum { name, .. } => {
+            assert_eq!(
+                name, "TsResult",
+                "type Result should be renamed to TsResult"
+            );
+        }
+        other => panic!("expected Enum, got: {other:?}"),
+    }
+}
+
+#[test]
+fn test_union_named_custom_not_prefixed() {
+    let decl = parse_type_alias("type Status = Active | Inactive;");
+    let reg = TypeRegistry::new();
+    let mut synthetic = SyntheticTypeRegistry::new();
+    let item = crate::pipeline::type_converter::convert_type_alias(
+        &decl,
+        Visibility::Public,
+        &mut synthetic,
+        &reg,
+    )
+    .unwrap();
+    match &item {
+        Item::Enum { name, .. } => {
+            assert_eq!(name, "Status", "non-prelude type should not be prefixed");
+        }
+        other => panic!("expected Enum, got: {other:?}"),
+    }
+}

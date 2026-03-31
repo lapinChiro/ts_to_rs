@@ -4,10 +4,10 @@ expression: output
 ---
 fn getLabel(x: f64) -> String {
     match x {
-        1.0 => {
+        _ if x == 1.0 => {
             return "one".to_string();
         }
-        2.0 => {
+        _ if x == 2.0 => {
             return "two".to_string();
         }
         _ => {

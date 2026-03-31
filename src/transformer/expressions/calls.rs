@@ -222,8 +222,9 @@ impl<'a> Transformer<'a> {
             Some(args) => self.convert_call_args_with_types(args, param_slice, false)?,
             None => vec![],
         };
+        let rust_name = crate::pipeline::type_converter::sanitize_rust_type_name(&class_name);
         Ok(Expr::FnCall {
-            name: format!("{class_name}::new"),
+            name: format!("{rust_name}::new"),
             args,
         })
     }

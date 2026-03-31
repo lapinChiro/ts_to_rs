@@ -202,7 +202,7 @@ pub(super) fn try_convert_discriminated_union(
 
     Ok(Some(Item::Enum {
         vis,
-        name: decl.id.sym.to_string(),
+        name: sanitize_rust_type_name(&decl.id.sym),
         serde_tag: Some(discriminant_field),
         variants,
     }))
@@ -373,7 +373,7 @@ pub(super) fn try_convert_string_literal_union(
 
     Ok(Some(Item::Enum {
         vis,
-        name: decl.id.sym.to_string(),
+        name: sanitize_rust_type_name(&decl.id.sym),
         serde_tag: None,
         variants,
     }))
@@ -392,7 +392,7 @@ pub(super) fn try_convert_single_string_literal(
                 let value = s.value.to_string_lossy().into_owned();
                 Ok(Some(Item::Enum {
                     vis,
-                    name: decl.id.sym.to_string(),
+                    name: sanitize_rust_type_name(&decl.id.sym),
                     serde_tag: None,
                     variants: vec![EnumVariant {
                         name: string_to_pascal_case(&value),
@@ -462,7 +462,7 @@ pub(super) fn try_convert_general_union(
         let type_params = extract_type_params(decl.type_params.as_deref(), synthetic, reg);
         return Ok(Some(Item::TypeAlias {
             vis,
-            name: decl.id.sym.to_string(),
+            name: sanitize_rust_type_name(&decl.id.sym),
             type_params,
             ty: RustType::Option(Box::new(inner_type)),
         }));
@@ -600,7 +600,7 @@ pub(super) fn try_convert_general_union(
 
     let enum_item = Item::Enum {
         vis: vis.clone(),
-        name: decl.id.sym.to_string(),
+        name: sanitize_rust_type_name(&decl.id.sym),
         serde_tag: None,
         variants,
     };

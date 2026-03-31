@@ -273,18 +273,24 @@
 
 #### セマンティクス・解析精度
 
-- **[I-315]** **f64 パターンマッチ（switch-case の数値リテラル）** — サイレント意味変更（S1）
-  - `switch(x) { case 1: ... }` → `match x { 1.0 => ... }` で f64 をパターンマッチに使用。f64 は `Eq` を実装せず、NaN 比較で予期しない挙動（NaN != NaN）
-  - **原因箇所**: `src/transformer/statements/switch.rs` — switch case の式を `MatchPattern::Literal` として生成し、generator が `generate_expr()` で f64 リテラルをそのまま出力
-  - **解決策**: 数値 case を `if-else if` チェーンに変換する（`x == 1.0`）か、整数の場合のみ match を使用し浮動小数点は `if` に分岐する
-- **[I-316]** **optional chaining 配列アクセスが境界外で panic** — サイレント意味変更（S1）
-  - `x?.[0]` → `x.as_ref().map(|_v| _v[0])` で、配列が空の場合に `_v[0]` が境界外アクセスで panic（TS は undefined を返す）
-  - **原因箇所**: `src/transformer/expressions/member_access.rs:96-102` — computed index の optional chaining で `Expr::Index` を直接使用
-  - **解決策**: `_v.get(0).cloned()` に変換する（Vec の場合）。`get()` は `Option<&T>` を返すため panic しない
-- **[I-317]** **Result prelude シャドウイング** — サイレント意味変更（S1）
-  - `type Result = Success | Failure` → `enum Result` が `std::result::Result` をシャドウイングし、`Result<T, E>` を使う生成コードがコンパイルエラーまたは意味変更を起こす
-  - **原因箇所**: `src/pipeline/type_converter/unions.rs:603` — union 型の enum 名に TS の型名をそのまま使用し、Rust prelude との衝突を検出しない
-  - **解決策**: prelude 型名リスト（`Result`, `Option`, `String`, `Vec`, `Box` 等）との衝突チェックを追加し、衝突する場合はプレフィックスを付与（例: `TsResult`）
+- **[I-319]** **配列インデックスアクセスの境界外 panic** — サイレント意味変更（S1）、Hono 生成コード内 **~97 箇所**
+  - `arr[0]` / `arr[i as usize]` が空配列で panic する。TS は `undefined` を返す（panic しない）
+  - **現状**: `src/transformer/expressions/member_access.rs:233-238` の `convert_member_expr` が全ての computed index を `Expr::Index` として直接生成。generator（`src/generator/expressions/mod.rs:314-324`）が `arr[idx]` を出力
+  - **optional chaining (`arr?.[0]`) は I-316 で `.get(idx).cloned()` に修正済み**。本件は非 optional の通常アクセスが対象
+  - **Hono ベンチマーク実測（2026-03-31）**: 数値リテラルインデックス 48 箇所 + 数値変数インデックス ~49 箇所 = 約 97 箇所が runtime panic リスク。別途 ~81 箇所は String→usize の I-310 コンパイルエラー
+  - **影響例**:
+    - `utils/html.rs`: `buffer[0] = buffer[0] + str`（buffer は常に 1 要素以上の前提）
+    - `utils/jwt/jwt.rs:252`: `let header = decodeJwtPart(parts[0])`（JWT を "." で split した結果）
+    - `utils/url.rs:61`: `if paths[0] == ""`（パス分割結果の先頭要素）
+    - `src/transformer/statements/destructuring.rs:232`: デストラクチャリング `const [first, ...rest] = arr` → `let first = arr[0]`
+  - **解決策**: `arr[idx]` → `arr.get(idx).cloned()` に変換し、戻り値型を `T` → `Option<T>` に変更する（S1 → S2 昇格: コンパイラが型不一致で検出可能になる）
+  - **設計上の考慮事項**:
+    - (1) `convert_member_expr` の computed 分岐で `Expr::Index` → `Expr::MethodCall { "get" }` + `.cloned()` に変換。I-316 の `convert_index_to_usize` を共有可能
+    - (2) 戻り値型が `T` → `Option<T>` に変わるため、呼び出し側で型エラーが発生する。これは意図的な S1→S2 昇格であり、開発者に「この箇所は空配列で意味が変わる」と通知する効果がある
+    - (3) デストラクチャリング（`src/transformer/statements/destructuring.rs`）も同様に `.get(idx).cloned()` に変更が必要
+    - (4) Hono コンパイル（ファイル単位）109/158 から数件〜十数件悪化の可能性があるが、S1 排除のトレードオフとして許容される
+    - (5) TS の `noUncheckedIndexedAccess` オプションと同等の安全性を提供する変換となる
+  - 🔗 I-316（optional chaining の .get() 変換）の非 optional 版拡張。I-310（HashMap computed access）とは直交する問題
 - **[I-298]** **spread に上書きされる副作用式の評価消失** — サイレント意味変更（Tier 1、ただし発生頻度は極めて低い）
   - `{ x: sideEffectFunc(), ...base }` で rightmost-wins により `base.x` が採用されるが、`sideEffectFunc()` の呼び出し自体が生成コードから消失する。TypeScript では `sideEffectFunc()` は実行される（副作用が発生した後に `base.x` で上書き）
   - I-297 修正に伴い発見。旧コードは値が間違っていた（`sideEffectFunc()` の戻り値を使用 — Tier 1 バグ）が、副作用は偶然保持されていた
