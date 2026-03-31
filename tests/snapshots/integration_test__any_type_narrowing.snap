@@ -1,6 +1,5 @@
 ---
 source: tests/integration_test.rs
-assertion_line: 487
 expression: output
 ---
 #[derive(Debug, Clone, PartialEq)]
@@ -44,7 +43,7 @@ fn checkArrow(x: CheckArrowXType) -> () {
 }
 
 fn localAny(input: serde_json::Value) {
-    let mut data: LocalAnyDataType = input;
+    let data: LocalAnyDataType = input;
     if let LocalAnyDataType::String(data) = data {
         println!("{}", data);
     }

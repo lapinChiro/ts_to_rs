@@ -19,10 +19,10 @@ fn createInfo(n: String, v: f64) -> Info {
 }
 
 fn main() {
-    let mut p: Point = makePoint(3.0, 4.0);
+    let p: Point = makePoint(3.0, 4.0);
     println!("{} {}", "point x:", p.x);
     println!("{} {}", "point y:", p.y);
-    let mut info: Info = createInfo("test".to_string(), 42.0);
+    let info: Info = createInfo("test".to_string(), 42.0);
     println!("{} {}", "info name:", info.name);
     println!("{} {}", "info value:", info.value);
 }

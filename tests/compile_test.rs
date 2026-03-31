@@ -15,6 +15,14 @@ const COMPILE_CHECK_DIR: &str = "tests/compile-check";
 /// Mutex to serialize compile tests (they share the same compile-check project).
 static COMPILE_LOCK: Mutex<()> = Mutex::new(());
 
+/// Lint configuration for compile tests.
+///
+/// Allow: lints that are expected in transpiler output (unused definitions, unused variables, etc.).
+/// Deny: lints that indicate genuine conversion quality problems.
+const COMPILE_TEST_LINT_PRELUDE: &str = "\
+    #![allow(dead_code, unused_variables, unused_imports, unused_assignments)]\n\
+    #![deny(unused_mut, unreachable_code)]\n";
+
 /// Simplifies `use crate::...::module::Name` to `use module::Name` for multi-file compilation.
 ///
 /// In multi-file compile tests, sibling modules are available as `mod <name>;`,
@@ -68,7 +76,7 @@ fn assert_compiles(rs_source: &str, fixture_name: &str) {
         auto_imports.push_str("use std::collections::HashMap;\n");
     }
     let full_source = format!(
-        "#![allow(unused, dead_code, unreachable_code)]\n\
+        "{COMPILE_TEST_LINT_PRELUDE}\
          {auto_imports}\
          {}",
         compilable_source
@@ -110,8 +118,7 @@ fn test_all_fixtures_compile() {
         // any-type-narrowing uses `null` assigned to enum type which generates `None`.
         // Same root cause as I-201 (null as any → None).
         "any-type-narrowing",
-        // ternary-union: T4 (union generation for different branch types) 未実装。
-        // I-286 T4 実装後に解消予定。
+        // ternary-union: 三項演算子の分岐値 union variant ラッピング未実装 (I-11)。
         "ternary-union",
         // vec-method-expected-type: ビルトイン型（Array メソッドシグネチャ）が必要。
         // コンパイルテストは transpile_collecting（ビルトインなし）で実行されるため、
@@ -136,7 +143,7 @@ fn test_all_fixtures_compile() {
         // Tested separately in test_external_type_struct integration test with builtins.
         "external-type-struct",
         // intersection-empty-object: `type NonIdentity<T> = HashMap<String, String>` has unused
-        // type parameter T (E0091). This is a conversion quality issue, not a use-import issue.
+        // type parameter T (E0091). Mapped type with non-identity value type loses T usage (I-314).
         "intersection-empty-object",
     ];
 
@@ -201,7 +208,7 @@ fn test_all_fixtures_compile_with_builtins() {
         // Struct definitions are generated but method calls (e.g., .toString()) fail.
         "instanceof-builtin",
         "external-type-struct",
-        // intersection-empty-object: unused type parameter T (E0091)
+        // intersection-empty-object: unused type parameter T (E0091) (I-314)
         "intersection-empty-object",
     ];
 
@@ -304,7 +311,7 @@ fn assert_compiles_directory(dir: &str, fixture_name: &str) {
     // Build lib.rs with mod declarations and prelude
     let mod_decls: String = mod_names.iter().map(|m| format!("mod {m};\n")).collect();
     let full_source = format!(
-        "#![allow(unused, dead_code, unreachable_code)]\n\
+        "{COMPILE_TEST_LINT_PRELUDE}\
          use serde::{{Serialize, Deserialize}};\n\
          {mod_decls}{lib_rs}"
     );

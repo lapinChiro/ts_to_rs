@@ -138,11 +138,10 @@ impl<'a> Transformer<'a> {
                 _ => None,
             };
 
-            let mutable = if matches!(var_decl.kind, ast::VarDeclKind::Const) {
-                ty.as_ref().is_some_and(is_object_type)
-            } else {
-                true
-            };
+            // Start all variables as immutable.
+            // `mark_mutated_vars` will upgrade to `let mut` when actual
+            // mutations (reassignment, field assignment, mutating method call) are detected.
+            let mutable = false;
 
             let init = declarator
                 .init
@@ -186,12 +185,6 @@ impl<'a> Transformer<'a> {
             other => self.convert_stmt(other, return_type),
         }
     }
-}
-
-/// Returns true if the type is an object/struct type that may need mutability
-/// for field assignment in Rust (TS `const` allows field mutation).
-fn is_object_type(ty: &RustType) -> bool {
-    matches!(ty, RustType::Named { .. } | RustType::Vec(_))
 }
 
 #[cfg(test)]

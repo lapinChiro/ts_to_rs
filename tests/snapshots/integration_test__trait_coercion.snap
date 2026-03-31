@@ -15,7 +15,7 @@ fn createGreeter() -> Box<dyn Greeter> {
 }
 
 fn testBoxToRef() {
-    let mut g: Box<dyn Greeter> = createGreeter();
+    let g: Box<dyn Greeter> = createGreeter();
     useGreeter(&*g);
 }
 
@@ -30,11 +30,11 @@ impl Greeter for MyGreeter {
 }
 
 fn testConcreteToBox() {
-    let mut g: Box<dyn Greeter> = Box::new(MyGreeter::new());
+    let g: Box<dyn Greeter> = Box::new(MyGreeter::new());
 }
 
 fn testReturn() -> Box<dyn Greeter> {
-    let mut g: Box<dyn Greeter> = createGreeter();
+    let g: Box<dyn Greeter> = createGreeter();
     g
 }
 

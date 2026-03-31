@@ -15,21 +15,21 @@ struct Config {
 }
 
 fn createPoint() -> Point {
-    let mut p: Point = Point { x: 1.0, y: 2.0 };
+    let p: Point = Point { x: 1.0, y: 2.0 };
     p
 }
 
 fn createConfig() -> Config {
-    let mut c: Config = Config { count: 0.0, active: true };
+    let c: Config = Config { count: 0.0, active: true };
     c
 }
 
 fn createPointShorthand(x: f64, y: f64) -> Point {
-    let mut p: Point = Point { x, y };
+    let p: Point = Point { x, y };
     p
 }
 
 fn createMixed(x: f64) -> Point {
-    let mut p: Point = Point { x: x, y: 10.0 };
+    let p: Point = Point { x: x, y: 10.0 };
     p
 }

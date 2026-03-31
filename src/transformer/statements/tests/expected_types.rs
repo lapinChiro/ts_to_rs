@@ -4,7 +4,7 @@ use super::*;
 
 #[test]
 fn test_convert_stmt_var_decl_object_literal_with_type_annotation() {
-    // const + Named type → let mut (TS const allows field mutation)
+    // const starts immutable; `mark_mutated_vars` adds mut when field mutations are detected.
     let result = convert_single_stmt_resolved(
         "const p: Point = { x: 1, y: 2 };",
         &TypeRegistry::new(),
@@ -13,7 +13,7 @@ fn test_convert_stmt_var_decl_object_literal_with_type_annotation() {
     assert_eq!(
         result,
         Stmt::Let {
-            mutable: true,
+            mutable: false,
             name: "p".to_string(),
             ty: Some(RustType::Named {
                 name: "Point".to_string(),
@@ -52,7 +52,7 @@ fn test_convert_stmt_var_decl_string_type_annotation_adds_to_string() {
 
 #[test]
 fn test_convert_stmt_var_decl_string_array_type_annotation() {
-    // const + Vec type → let mut (TS const allows push/pop)
+    // const starts immutable; `mark_mutated_vars` adds mut when push/pop are detected.
     let result = convert_single_stmt_resolved(
         r#"const a: string[] = ["a", "b"];"#,
         &TypeRegistry::new(),
@@ -61,7 +61,7 @@ fn test_convert_stmt_var_decl_string_array_type_annotation() {
     assert_eq!(
         result,
         Stmt::Let {
-            mutable: true,
+            mutable: false,
             name: "a".to_string(),
             ty: Some(RustType::Vec(Box::new(RustType::String))),
             init: Some(Expr::Vec {

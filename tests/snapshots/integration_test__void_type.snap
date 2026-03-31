@@ -3,7 +3,7 @@ source: tests/integration_test.rs
 expression: output
 ---
 fn doSomething() {
-    let mut x: f64 = 1.0;
+    let x: f64 = 1.0;
 }
 
 fn runCallback(cb: Box<dyn Fn(f64)>) {

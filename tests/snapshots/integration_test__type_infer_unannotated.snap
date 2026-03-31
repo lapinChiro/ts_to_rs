@@ -20,6 +20,6 @@ impl Greeter {
 fn main() {
     let g = Greeter::new("Alice".to_string());
     println!("{}", g.greet("hello".to_string()));
-    let mut h = Greeter::new("Bob".to_string());
+    let h = Greeter::new("Bob".to_string());
     println!("{}", h.greet("world".to_string()));
 }

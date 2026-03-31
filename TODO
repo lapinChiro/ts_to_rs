@@ -273,20 +273,43 @@
 
 #### セマンティクス・解析精度
 
+- **[I-315]** **f64 パターンマッチ（switch-case の数値リテラル）** — サイレント意味変更（S1）
+  - `switch(x) { case 1: ... }` → `match x { 1.0 => ... }` で f64 をパターンマッチに使用。f64 は `Eq` を実装せず、NaN 比較で予期しない挙動（NaN != NaN）
+  - **原因箇所**: `src/transformer/statements/switch.rs` — switch case の式を `MatchPattern::Literal` として生成し、generator が `generate_expr()` で f64 リテラルをそのまま出力
+  - **解決策**: 数値 case を `if-else if` チェーンに変換する（`x == 1.0`）か、整数の場合のみ match を使用し浮動小数点は `if` に分岐する
+- **[I-316]** **optional chaining 配列アクセスが境界外で panic** — サイレント意味変更（S1）
+  - `x?.[0]` → `x.as_ref().map(|_v| _v[0])` で、配列が空の場合に `_v[0]` が境界外アクセスで panic（TS は undefined を返す）
+  - **原因箇所**: `src/transformer/expressions/member_access.rs:96-102` — computed index の optional chaining で `Expr::Index` を直接使用
+  - **解決策**: `_v.get(0).cloned()` に変換する（Vec の場合）。`get()` は `Option<&T>` を返すため panic しない
+- **[I-317]** **Result prelude シャドウイング** — サイレント意味変更（S1）
+  - `type Result = Success | Failure` → `enum Result` が `std::result::Result` をシャドウイングし、`Result<T, E>` を使う生成コードがコンパイルエラーまたは意味変更を起こす
+  - **原因箇所**: `src/pipeline/type_converter/unions.rs:603` — union 型の enum 名に TS の型名をそのまま使用し、Rust prelude との衝突を検出しない
+  - **解決策**: prelude 型名リスト（`Result`, `Option`, `String`, `Vec`, `Box` 等）との衝突チェックを追加し、衝突する場合はプレフィックスを付与（例: `TsResult`）
 - **[I-298]** **spread に上書きされる副作用式の評価消失** — サイレント意味変更（Tier 1、ただし発生頻度は極めて低い）
   - `{ x: sideEffectFunc(), ...base }` で rightmost-wins により `base.x` が採用されるが、`sideEffectFunc()` の呼び出し自体が生成コードから消失する。TypeScript では `sideEffectFunc()` は実行される（副作用が発生した後に `base.x` で上書き）
   - I-297 修正に伴い発見。旧コードは値が間違っていた（`sideEffectFunc()` の戻り値を使用 — Tier 1 バグ）が、副作用は偶然保持されていた
   - 解決策: イベント列構築後、rightmost-wins で上書きされる Explicit イベントのうち副作用を持つ式（`Expr::FnCall` 等）を `let _ = expr;` として先行出力する。`Expr` に副作用判定メソッド（`has_side_effects`）の追加が必要
   - 影響: object literal 以外でも式の評価順序保持は未実装の一般的課題（条件式の未使用ブランチ、短絡評価等）。需要発生時に横断的に対応
 - **[I-188]** **`substring`/`slice` のバイト境界安全性** — 文字列変換。TS は UTF-16 コードユニット、Rust はバイト。マルチバイト文字でパニック
-- **[I-93]** **ネストしたフィールド/メソッド経由の変更検出** — ミュータビリティ推論
 - **[I-62]** **`is_string_type` の `Option<String>` ハック除去** — 型推論
 - **[I-256]** **any-narrowing の typeof 検出がトップレベル if/expr のみ** — `src/pipeline/any_narrowing.rs` の `collect_from_stmt()` で `Switch`/`While`/`For`/`Try` 内の typeof/instanceof チェックが検出されない。any-narrowing enum のバリアント不足の原因
 - **[I-257]** **TypeResolver が rest パターンの変数を未登録** — `src/pipeline/type_resolver/visitors.rs:197` で `Rest` パターンの変数は `register_pat_vars` 経由で登録されるが、型が `ResolvedType::Unknown` のまま。rest 変数に適切な型（残余フィールドの構造体型）が設定されない
 - **[I-260]** **`undefined` リテラルの型解決が Unknown** — TypeResolver の `resolve_expr_inner`（`src/pipeline/type_resolver/expressions.rs:31`）が `undefined` 識別子に対して `ResolvedType::Unknown` を返す。`const obj = { key: undefined }` のような場合に匿名構造体のフィールド型が不明になり、匿名構造体が生成されない。解決策: `undefined` を `RustType::Option(Box::new(RustType::Any))` として解決するか、コンテキストの expected type から内側の型を推定する
 
+#### 構造的重複
+
+- **[I-318]** **`_TypeLit` 構造体が名前付き構造体と重複して生成される** — 生成コード品質（SD）
+  - `inline-type-literal-param` fixture で `_TypeLit0`/`_TypeLit1` が type_resolver フェーズ（`src/pipeline/type_resolver/visitors.rs:41`）で合成登録され、さらに transformer フェーズ（`src/transformer/functions/params.rs:45`）で `CreateUserOpts` 等の名前付き構造体としても生成される
+  - **結果**: 同じ型に対して匿名名（`_TypeLit0`）と命名済み名（`CreateUserOpts`）の両方の struct が出力される
+  - **解決策**: type_resolver の `_TypeLit` 登録と transformer の名前付き struct 登録を統合するか、名前付き struct が生成される場合に `_TypeLit` をスキップする
+
 #### コンパイルエラー修正（ディレクトリコンパイルで検出）
 
+- **[I-314]** **intersection 内 mapped type の未使用型パラメータ（E0091）** — コンパイルテスト skip 原因
+  - `type NonIdentity<T> = { [K in keyof T]: string } & {}` → `type NonIdentity<T> = HashMap<String, String>` で型パラメータ `T` が未使用
+  - **原因箇所**: `src/pipeline/type_converter/mod.rs:161-176` — 非 identity mapped type が `HashMap<String, value_type>` にフォールバックする際、型パラメータ `T` への参照が失われる
+  - **解決策**: mapped type のキー制約（`keyof T`）に含まれる型パラメータを `HashMap` の型引数に反映するか、`PhantomData<T>` を追加する
+  - コンパイルテスト skip: `intersection-empty-object`
 - **[I-273]** **types.rs の trait/struct 混同エラー（E0404/E0405）** — ディレクトリコンパイルエラー **5 インスタンス**（`types.rs`）
   - I-270 で types.rs の struct 定義不在エラーを 36→5 に削減したが、残り 5 件は変換ロジックの問題
   - **根本原因**: 変換器が enum 型や struct 型を trait bound position に出力している。TypeScript の `extends` や `implements` から変換する際、参照先が interface（→ trait）か class（→ struct）かの判別が不正確

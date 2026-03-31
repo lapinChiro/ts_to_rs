@@ -62,7 +62,7 @@
 | サブフェーズ | PRD | 内容 | 前提 |
 |-------------|-----|------|------|
 | ~~**T-1**~~ | — | ~~collecting/builtins unsupported スナップショット化、orphan 2件登録、DRY 化、TempFile RAII 化、Cargo.toml 統一~~ | ✅ 完了 |
-| **T-2** | `backlog/t2-compile-test-quality.md` | `#![allow]` 範囲縮小、warning 検出、compile skip リストの理由文書化 | T-1 ✅ |
+| ~~**T-2**~~ | ~~`backlog/t2-compile-test-quality.md`~~ | ~~`#![allow]` 分解 + `deny(unused_mut, unreachable_code)` + ミュータビリティ推論改善 + skip ID紐付け + 新規バグ5件TODO追記~~ | ✅ 完了 |
 | **T-3** | `backlog/t3-snapshot-test-enrichment.md` | 30+ WEAK TEST fixture の内容拡充、テスト名と内容の乖離修正 | T-1 ✅ |
 | **T-4** | `backlog/t4-e2e-coverage-expansion.md` | E2E 未テスト機能への新規スクリプト追加、既存スクリプト強化 | T-1 ✅ |
 
@@ -71,9 +71,9 @@
 - orphan fixture が 0 件
 - WEAK TEST 判定が 0 件（30+ 件 → 全解消）
 - E2E カバレッジ: スナップショット fixture の 50% 以上に対応する E2E テストが存在（現状 ~25%）
-- コンパイルテスト skip リスト全項目に TODO ID が紐付いている
-- `unused_mut` と `unreachable_code` がコンパイルテストで検出可能
-- レビューで発見された新規バグ（S1: 3件、SD: 1件）が TODO に追記されている
+- コンパイルテスト skip リスト全項目に TODO ID が紐付いている ✅ T-2
+- `unused_mut` と `unreachable_code` がコンパイルテストで検出可能 ✅ T-2
+- レビューで発見された新規バグ（S1: 3件、SD: 1件）が TODO に追記されている ✅ T-2（I-315〜I-318 + I-314）
 
 ### Phase R-2: TypeDef の TS 型メタデータ分離（I-312）
 
@@ -134,6 +134,6 @@ R-2 完了後の設計に基づき実施。現時点の見込み:
 | `external-type-struct` | I-270 | builtins なし環境で外部型 struct 未生成 |
 | `ternary-union` | I-11 | 分岐値の enum variant ラッピング未実装 |
 | `vec-method-expected-type` | I-289 | ビルトイン前提 |
-| `intersection-empty-object` | — | 未使用型パラメータ T (E0091) |
+| `intersection-empty-object` | I-314 | 未使用型パラメータ T (E0091) |
 
 builtins あり（10 件）: 上記から `vec-method-expected-type` を除く。

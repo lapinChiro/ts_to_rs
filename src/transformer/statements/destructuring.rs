@@ -33,7 +33,7 @@ impl<'a> Transformer<'a> {
             .ok_or_else(|| anyhow!("object destructuring requires an initializer"))?;
         let source_expr = self.convert_expr(source)?;
 
-        let mutable = !matches!(var_decl.kind, ast::VarDeclKind::Const);
+        let mutable = false;
         let source_type = self.get_expr_type(source);
         let mut stmts = Vec::new();
 
@@ -193,7 +193,7 @@ impl<'a> Transformer<'a> {
         // Cat A: destructuring source
         let source_expr = self.convert_expr(source)?;
 
-        let mutable = !matches!(var_decl.kind, ast::VarDeclKind::Const);
+        let mutable = false;
         let mut stmts = Vec::new();
 
         for (i, elem) in arr_pat.elems.iter().enumerate() {

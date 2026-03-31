@@ -40,7 +40,8 @@ fn test_convert_stmt_list_object_destructuring_basic() {
 }
 
 #[test]
-fn test_convert_stmt_list_object_destructuring_let_mutable() {
+fn test_convert_stmt_list_object_destructuring_let_initially_immutable() {
+    // `let` destructuring starts immutable; `mark_mutated_vars` adds mut when needed.
     let f = TctxFixture::new();
     let tctx = f.tctx();
     let stmts = parse_fn_body("function f() { let { x, y } = obj; }");
@@ -50,8 +51,8 @@ fn test_convert_stmt_list_object_destructuring_let_mutable() {
     }
     .unwrap();
     assert_eq!(result.len(), 2);
-    assert!(matches!(&result[0], Stmt::Let { mutable: true, name, .. } if name == "x"));
-    assert!(matches!(&result[1], Stmt::Let { mutable: true, name, .. } if name == "y"));
+    assert!(matches!(&result[0], Stmt::Let { mutable: false, name, .. } if name == "x"));
+    assert!(matches!(&result[1], Stmt::Let { mutable: false, name, .. } if name == "y"));
 }
 
 #[test]
@@ -119,7 +120,8 @@ fn test_convert_stmt_list_array_destructuring_basic() {
 }
 
 #[test]
-fn test_convert_stmt_list_array_destructuring_let_mutable() {
+fn test_convert_stmt_list_array_destructuring_let_initially_immutable() {
+    // `let` destructuring starts immutable; `mark_mutated_vars` adds mut when needed.
     let f = TctxFixture::new();
     let tctx = f.tctx();
     let stmts = parse_fn_body("function f(arr: number[]) { let [x, y] = arr; }");
@@ -129,8 +131,8 @@ fn test_convert_stmt_list_array_destructuring_let_mutable() {
     }
     .unwrap();
     assert_eq!(result.len(), 2);
-    assert!(matches!(&result[0], Stmt::Let { mutable: true, name, .. } if name == "x"));
-    assert!(matches!(&result[1], Stmt::Let { mutable: true, name, .. } if name == "y"));
+    assert!(matches!(&result[0], Stmt::Let { mutable: false, name, .. } if name == "x"));
+    assert!(matches!(&result[1], Stmt::Let { mutable: false, name, .. } if name == "y"));
 }
 
 #[test]

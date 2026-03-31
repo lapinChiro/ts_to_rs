@@ -79,6 +79,8 @@ pub(super) fn mark_mut_params_from_body(body: &[Stmt], params: &[Param]) -> Vec<
 }
 
 /// Recursively collects variable names that are receivers of mutating method calls.
+///
+/// Uses exhaustive pattern matching to ensure new `Stmt` variants are handled.
 fn collect_mut_receivers(stmts: &[Stmt], receivers: &mut std::collections::HashSet<String>) {
     for stmt in stmts {
         match stmt {
@@ -90,23 +92,66 @@ fn collect_mut_receivers(stmts: &[Stmt], receivers: &mut std::collections::HashS
             } => {
                 collect_mut_receivers_from_expr(expr, receivers);
             }
+            Stmt::Let { init: None, .. } => {}
             Stmt::Return(Some(expr)) => {
                 collect_mut_receivers_from_expr(expr, receivers);
             }
+            Stmt::Return(None) => {}
             Stmt::If {
+                condition,
                 then_body,
                 else_body,
-                ..
             } => {
+                collect_mut_receivers_from_expr(condition, receivers);
                 collect_mut_receivers(then_body, receivers);
                 if let Some(els) = else_body {
                     collect_mut_receivers(els, receivers);
                 }
             }
-            Stmt::While { body, .. } | Stmt::ForIn { body, .. } | Stmt::Loop { body, .. } => {
+            Stmt::IfLet {
+                expr,
+                then_body,
+                else_body,
+                ..
+            } => {
+                collect_mut_receivers_from_expr(expr, receivers);
+                collect_mut_receivers(then_body, receivers);
+                if let Some(els) = else_body {
+                    collect_mut_receivers(els, receivers);
+                }
+            }
+            Stmt::Match { expr, arms } => {
+                collect_mut_receivers_from_expr(expr, receivers);
+                for arm in arms {
+                    if let Some(guard) = &arm.guard {
+                        collect_mut_receivers_from_expr(guard, receivers);
+                    }
+                    collect_mut_receivers(&arm.body, receivers);
+                }
+            }
+            Stmt::While {
+                condition, body, ..
+            } => {
+                collect_mut_receivers_from_expr(condition, receivers);
                 collect_mut_receivers(body, receivers);
             }
-            _ => {}
+            Stmt::WhileLet { expr, body, .. } => {
+                collect_mut_receivers_from_expr(expr, receivers);
+                collect_mut_receivers(body, receivers);
+            }
+            Stmt::ForIn { iterable, body, .. } => {
+                collect_mut_receivers_from_expr(iterable, receivers);
+                collect_mut_receivers(body, receivers);
+            }
+            Stmt::Loop { body, .. } | Stmt::LabeledBlock { body, .. } => {
+                collect_mut_receivers(body, receivers);
+            }
+            Stmt::Break {
+                value: Some(expr), ..
+            } => {
+                collect_mut_receivers_from_expr(expr, receivers);
+            }
+            Stmt::Break { value: None, .. } | Stmt::Continue { .. } => {}
         }
     }
 }
@@ -115,8 +160,19 @@ fn collect_mut_receivers(stmts: &[Stmt], receivers: &mut std::collections::HashS
 fn collect_mut_receivers_from_expr(expr: &Expr, receivers: &mut std::collections::HashSet<String>) {
     if let Expr::MethodCall { object, method, .. } = expr {
         if MUTATING_METHODS.contains(&method.as_str()) {
-            if let Expr::Ident(name) = object.as_ref() {
-                receivers.insert(name.clone());
+            // Extract root variable from chains like obj.items.push(...)
+            let mut current = object.as_ref();
+            loop {
+                match current {
+                    Expr::Ident(name) => {
+                        receivers.insert(name.clone());
+                        break;
+                    }
+                    Expr::FieldAccess { object: inner, .. } | Expr::Index { object: inner, .. } => {
+                        current = inner;
+                    }
+                    _ => break,
+                }
             }
         }
         // Also recurse into chained calls (e.g., arr.drain(...).collect())

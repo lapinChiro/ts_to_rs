@@ -30,13 +30,14 @@ fn test_convert_stmt_const_decl() {
 }
 
 #[test]
-fn test_convert_stmt_let_decl_mutable() {
+fn test_convert_stmt_let_decl_initially_immutable() {
+    // `let` declarations start immutable; `mark_mutated_vars` adds mut when needed.
     let stmts = parse_fn_body("function f() { let x = 1; }");
     let result = convert_single_stmt(&stmts[0], &TypeRegistry::new(), None);
     assert_eq!(
         result,
         Stmt::Let {
-            mutable: true,
+            mutable: false,
             name: "x".to_string(),
             ty: None,
             init: Some(Expr::NumberLit(1.0)),
@@ -446,4 +447,131 @@ fn test_convert_var_decl_trait_type_generates_box_dyn() {
         }
         other => panic!("expected Let, got {:?}", other),
     }
+}
+
+// --- mark_mutated_vars comprehensive tests ---
+
+#[test]
+fn test_direct_reassignment_becomes_let_mut() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
+    let stmts = parse_fn_body("function f() { let x: number = 1; x = 2; }");
+    let result = {
+        let mut synthetic = SyntheticTypeRegistry::new();
+        Transformer::for_module(&tctx, &mut synthetic).convert_stmt_list(&stmts, None)
+    }
+    .unwrap();
+    assert!(
+        matches!(&result[0], Stmt::Let { mutable: true, name, .. } if name == "x"),
+        "direct reassignment should mark variable as let mut"
+    );
+}
+
+#[test]
+fn test_index_assignment_becomes_let_mut() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
+    let stmts = parse_fn_body("function f() { let arr: number[] = [1, 2]; arr[0] = 99; }");
+    let result = {
+        let mut synthetic = SyntheticTypeRegistry::new();
+        Transformer::for_module(&tctx, &mut synthetic).convert_stmt_list(&stmts, None)
+    }
+    .unwrap();
+    assert!(
+        matches!(&result[0], Stmt::Let { mutable: true, name, .. } if name == "arr"),
+        "index assignment should mark variable as let mut"
+    );
+}
+
+#[test]
+fn test_no_mutation_remains_immutable() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
+    let stmts = parse_fn_body("function f(): number { let x: number = 1; return x; }");
+    let result = {
+        let mut synthetic = SyntheticTypeRegistry::new();
+        Transformer::for_module(&tctx, &mut synthetic).convert_stmt_list(&stmts, None)
+    }
+    .unwrap();
+    assert!(
+        matches!(&result[0], Stmt::Let { mutable: false, name, .. } if name == "x"),
+        "variable without mutation should remain immutable"
+    );
+}
+
+#[test]
+fn test_nested_field_assignment_becomes_let_mut() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
+    // obj.a.b = 1 — nested field assignment should still mark obj as mutable
+    let stmts = parse_fn_body("function f() { let obj: number = 0; obj.a.b = 1; }");
+    let result = {
+        let mut synthetic = SyntheticTypeRegistry::new();
+        Transformer::for_module(&tctx, &mut synthetic).convert_stmt_list(&stmts, None)
+    }
+    .unwrap();
+    assert!(
+        matches!(&result[0], Stmt::Let { mutable: true, name, .. } if name == "obj"),
+        "nested field assignment should mark root variable as let mut: {result:?}"
+    );
+}
+
+#[test]
+fn test_mutation_inside_if_body_detected() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
+    let stmts =
+        parse_fn_body("function f(cond: boolean) { let x: number = 0; if (cond) { x = 1; } }");
+    let result = {
+        let mut synthetic = SyntheticTypeRegistry::new();
+        Transformer::for_module(&tctx, &mut synthetic).convert_stmt_list(&stmts, None)
+    }
+    .unwrap();
+    assert!(
+        matches!(&result[0], Stmt::Let { mutable: true, name, .. } if name == "x"),
+        "mutation inside if body should mark variable as let mut"
+    );
+}
+
+#[test]
+fn test_mutation_inside_while_body_detected() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
+    let stmts = parse_fn_body(
+        "function f() { let count: number = 0; while (count < 10) { count = count + 1; } }",
+    );
+    let result = {
+        let mut synthetic = SyntheticTypeRegistry::new();
+        Transformer::for_module(&tctx, &mut synthetic).convert_stmt_list(&stmts, None)
+    }
+    .unwrap();
+    assert!(
+        matches!(&result[0], Stmt::Let { mutable: true, name, .. } if name == "count"),
+        "mutation inside while body should mark variable as let mut"
+    );
+}
+
+#[test]
+fn test_closure_with_field_mutation_becomes_let_mut() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
+    // Closure that performs field assignment should mark the closure binding as let mut
+    let stmts = parse_fn_body(
+        "function f() { let obj: number = 0; const mutator = (): void => { obj.x = 1; }; }",
+    );
+    let result = {
+        let mut synthetic = SyntheticTypeRegistry::new();
+        Transformer::for_module(&tctx, &mut synthetic).convert_stmt_list(&stmts, None)
+    }
+    .unwrap();
+    // obj should be mutable (captured and mutated)
+    assert!(
+        matches!(&result[0], Stmt::Let { mutable: true, name, .. } if name == "obj"),
+        "variable captured and mutated in closure should be let mut: {result:?}"
+    );
+    // mutator should be mutable (FnMut closure)
+    assert!(
+        matches!(&result[1], Stmt::Let { mutable: true, name, .. } if name == "mutator"),
+        "closure that mutates captured variable should be let mut: {result:?}"
+    );
 }

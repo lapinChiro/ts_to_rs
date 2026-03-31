@@ -122,10 +122,7 @@ fn execute_e2e_with_options(name: &str, opts: &E2eOptions) -> E2eResult {
 
     // Step 3: Run TS via locally-installed tsx
     let ts_exec_source = format!("{ts_source}\nmain();\n");
-    let ts_exec_guard = TempFile::new(
-        format!("{SCRIPTS_DIR}/{name}_exec.ts"),
-        &ts_exec_source,
-    );
+    let ts_exec_guard = TempFile::new(format!("{SCRIPTS_DIR}/{name}_exec.ts"), &ts_exec_source);
 
     let mut ts_cmd = Command::new(TSX_BIN);
     ts_cmd.arg(ts_exec_guard.path());

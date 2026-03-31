@@ -202,8 +202,12 @@ fn test_multi_var_decl() {
         "multi-var const should expand to separate lets: {output}"
     );
     assert!(
-        output.contains("let mut x") && output.contains("let mut y"),
-        "multi-var let should expand to separate let muts: {output}"
+        output.contains("let mut x") && output.contains("let y"),
+        "multi-var let: x is reassigned (let mut), y is not (let): {output}"
+    );
+    assert!(
+        !output.contains("let mut y"),
+        "y is never reassigned, should not be let mut: {output}"
     );
     insta::assert_snapshot!(output);
 }

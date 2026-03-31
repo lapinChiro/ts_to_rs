@@ -16,7 +16,7 @@ fn getCoords(p: Point) -> f64 {
 
 fn getMutableCoords(p: Point) -> f64 {
     let mut x = p.x;
-    let mut y = p.y;
+    let y = p.y;
     x = x + 1.0;
     x + y
 }
