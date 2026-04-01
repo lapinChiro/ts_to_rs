@@ -79,8 +79,8 @@ fn test_convert_expr_member_non_enum_unchanged() {
 }
 
 #[test]
-fn test_convert_member_expr_array_index_literal_generates_safe_get() {
-    // arr[0] → arr.get(0).cloned() (safe bounds-checked access, I-319)
+fn test_convert_member_expr_array_index_literal_generates_safe_get_unwrapped() {
+    // arr[0] → arr.get(0).cloned().unwrap() (I-319 + I-346)
     let f = TctxFixture::new();
     let tctx = f.tctx();
     let swc_expr = parse_expr("arr[0];");
@@ -89,7 +89,7 @@ fn test_convert_member_expr_array_index_literal_generates_safe_get() {
         .unwrap();
     assert_eq!(
         result,
-        build_safe_index_expr(
+        build_safe_index_expr_unwrapped(
             Expr::Ident("arr".to_string()),
             convert_index_to_usize(Expr::NumberLit(0.0)),
         )
@@ -97,8 +97,8 @@ fn test_convert_member_expr_array_index_literal_generates_safe_get() {
 }
 
 #[test]
-fn test_convert_member_expr_array_index_variable_generates_safe_get() {
-    // arr[i] → arr.get(i as usize).cloned() (safe bounds-checked access, I-319)
+fn test_convert_member_expr_array_index_variable_generates_safe_get_unwrapped() {
+    // arr[i] → arr.get(i as usize).cloned().unwrap() (I-319 + I-346)
     let f = TctxFixture::new();
     let tctx = f.tctx();
     let swc_expr = parse_expr("arr[i];");
@@ -107,7 +107,7 @@ fn test_convert_member_expr_array_index_variable_generates_safe_get() {
         .unwrap();
     assert_eq!(
         result,
-        build_safe_index_expr(
+        build_safe_index_expr_unwrapped(
             Expr::Ident("arr".to_string()),
             convert_index_to_usize(Expr::Ident("i".to_string())),
         )
@@ -149,8 +149,8 @@ fn test_convert_member_expr_tuple_second_index_generates_field_access() {
 }
 
 #[test]
-fn test_convert_member_expr_non_tuple_index_generates_safe_get() {
-    // Non-tuple type still gets safe indexing
+fn test_convert_member_expr_non_tuple_index_generates_safe_get_unwrapped() {
+    // Non-tuple type gets safe indexing with unwrap
     let f = TctxFixture::new();
     let tctx = f.tctx();
 
@@ -160,7 +160,7 @@ fn test_convert_member_expr_non_tuple_index_generates_safe_get() {
         .unwrap();
     assert_eq!(
         result,
-        build_safe_index_expr(
+        build_safe_index_expr_unwrapped(
             Expr::Ident("arr".to_string()),
             convert_index_to_usize(Expr::NumberLit(0.0)),
         )
@@ -208,8 +208,8 @@ fn test_convert_member_expr_for_write_keeps_direct_index() {
 }
 
 #[test]
-fn test_convert_member_expr_vec_literal_index_generates_safe_get() {
-    // Vec<T> typed: arr[0] → arr.get(0).cloned()
+fn test_convert_member_expr_vec_literal_index_generates_safe_get_unwrapped() {
+    // Vec<T> typed: arr[0] → arr.get(0).cloned().unwrap()
     let f = TctxFixture::from_source("function f(arr: number[]) { arr[0]; }");
     let tctx = f.tctx();
     let swc_expr = extract_fn_body_expr_stmt(f.module(), 0, 0);
@@ -218,7 +218,7 @@ fn test_convert_member_expr_vec_literal_index_generates_safe_get() {
         .unwrap();
     assert_eq!(
         result,
-        build_safe_index_expr(
+        build_safe_index_expr_unwrapped(
             Expr::Ident("arr".to_string()),
             convert_index_to_usize(Expr::NumberLit(0.0)),
         )
@@ -226,8 +226,8 @@ fn test_convert_member_expr_vec_literal_index_generates_safe_get() {
 }
 
 #[test]
-fn test_convert_member_expr_vec_variable_index_generates_safe_get() {
-    // Vec<T> typed: arr[i] → arr.get(i as usize).cloned()
+fn test_convert_member_expr_vec_variable_index_generates_safe_get_unwrapped() {
+    // Vec<T> typed: arr[i] → arr.get(i as usize).cloned().unwrap()
     let f = TctxFixture::from_source("function f(arr: string[], i: number) { arr[i]; }");
     let tctx = f.tctx();
     let swc_expr = extract_fn_body_expr_stmt(f.module(), 0, 0);
@@ -236,7 +236,7 @@ fn test_convert_member_expr_vec_variable_index_generates_safe_get() {
         .unwrap();
     assert_eq!(
         result,
-        build_safe_index_expr(
+        build_safe_index_expr_unwrapped(
             Expr::Ident("arr".to_string()),
             convert_index_to_usize(Expr::Ident("i".to_string())),
         )

@@ -42,6 +42,21 @@ pub(crate) fn build_safe_index_expr(object: Expr, index: Expr) -> Expr {
     }
 }
 
+/// Builds a safe index expression with unwrap: `object.get(index).cloned().unwrap()`.
+///
+/// Used for read contexts where `T` (not `Option<T>`) is expected.
+/// The `.get().cloned()` documents the potential for out-of-bounds access;
+/// `.unwrap()` bridges the type gap until proper `Option<T>` propagation is implemented.
+///
+/// NOT used in optional chaining contexts — those need `Option<T>` for `.and_then()`.
+pub(crate) fn build_safe_index_expr_unwrapped(object: Expr, index: Expr) -> Expr {
+    Expr::MethodCall {
+        object: Box::new(build_safe_index_expr(object, index)),
+        method: "unwrap".to_string(),
+        args: vec![],
+    }
+}
+
 impl<'a> Transformer<'a> {
     /// Resolves a member access expression, applying special conversions for known fields.
     ///
@@ -273,9 +288,9 @@ impl<'a> Transformer<'a> {
             }
 
             // Read access: safe bounds-checked indexing (I-319)
-            // arr[0] → arr.get(0).cloned()  (returns Option<T> instead of panic)
+            // arr[0] → arr.get(0).cloned().unwrap()
             let safe_index = convert_index_to_usize(index);
-            return Ok(build_safe_index_expr(object, safe_index));
+            return Ok(build_safe_index_expr_unwrapped(object, safe_index));
         }
 
         let field = match &member.prop {
@@ -453,6 +468,29 @@ mod tests {
         // When used as usize, this wraps to a large number, but .get() safely returns None
         let result = convert_index_to_usize(Expr::NumberLit(-1.0));
         assert_eq!(result, Expr::IntLit(-1));
+    }
+
+    #[test]
+    fn test_build_safe_index_expr_unwrapped_wraps_with_unwrap() {
+        let result =
+            build_safe_index_expr_unwrapped(Expr::Ident("arr".to_string()), Expr::IntLit(0));
+        // Should be: arr.get(0).cloned().unwrap()
+        match &result {
+            Expr::MethodCall {
+                object,
+                method,
+                args,
+            } => {
+                assert_eq!(method, "unwrap");
+                assert!(args.is_empty());
+                // Inner should be build_safe_index_expr result: arr.get(0).cloned()
+                assert_eq!(
+                    *object.as_ref(),
+                    build_safe_index_expr(Expr::Ident("arr".to_string()), Expr::IntLit(0))
+                );
+            }
+            other => panic!("expected MethodCall(unwrap), got: {other:?}"),
+        }
     }
 
     #[test]

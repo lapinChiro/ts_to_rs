@@ -24,7 +24,7 @@ use crate::parser::parse_typescript;
 use crate::pipeline::SyntheticTypeRegistry;
 use crate::registry::{MethodSignature, TypeDef, TypeRegistry};
 use crate::transformer::expressions::member_access::{
-    build_safe_index_expr, convert_index_to_usize,
+    build_safe_index_expr_unwrapped, convert_index_to_usize,
 };
 use crate::transformer::test_fixtures::TctxFixture;
 use crate::transformer::Transformer;

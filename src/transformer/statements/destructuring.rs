@@ -8,7 +8,7 @@ use swc_ecma_ast as ast;
 
 use crate::ir::{Expr, RustType, Stmt};
 use crate::transformer::expressions::member_access::{
-    build_safe_index_expr, convert_index_to_usize,
+    build_safe_index_expr_unwrapped, convert_index_to_usize,
 };
 use crate::transformer::{
     extract_pat_ident_name, extract_prop_name, single_declarator, Transformer,
@@ -233,7 +233,10 @@ impl<'a> Transformer<'a> {
                 mutable,
                 name,
                 ty: None,
-                init: Some(build_safe_index_expr(source_expr.clone(), safe_index)),
+                init: Some(build_safe_index_expr_unwrapped(
+                    source_expr.clone(),
+                    safe_index,
+                )),
             });
         }
 

@@ -17,8 +17,8 @@ fn findFirstNegative(values: Vec<f64>) -> f64 {
     let mut i = 0.0;
     let mut result = 0.0;
     loop {
-        if values.get(i as usize).cloned() < 0.0 {
-            result = values.get(i as usize).cloned();
+        if values.get(i as usize).cloned().unwrap() < 0.0 {
+            result = values.get(i as usize).cloned().unwrap();
             break;
         }
         {
@@ -67,7 +67,7 @@ fn sumPositiveOnly(values: Vec<f64>) -> f64 {
     let mut total = 0.0;
     'do_while_loop: loop {
         'do_while: {
-            if values.get(i as usize).cloned() < 0.0 {
+            if values.get(i as usize).cloned().unwrap() < 0.0 {
                 {
     let _old = i;
     i = i + 1.0;
@@ -75,7 +75,7 @@ fn sumPositiveOnly(values: Vec<f64>) -> f64 {
 };
                 break 'do_while;
             }
-            total = total + values.get(i as usize).cloned();
+            total = total + values.get(i as usize).cloned().unwrap();
             {
     let _old = i;
     i = i + 1.0;

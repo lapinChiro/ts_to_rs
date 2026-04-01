@@ -99,7 +99,7 @@ fn test_convert_stmt_list_array_destructuring_basic() {
             mutable: false,
             name: "a".to_string(),
             ty: None,
-            init: Some(build_safe_index_expr(
+            init: Some(build_safe_index_expr_unwrapped(
                 Expr::Ident("arr".to_string()),
                 convert_index_to_usize(Expr::NumberLit(0.0)),
             )),
@@ -111,7 +111,7 @@ fn test_convert_stmt_list_array_destructuring_basic() {
             mutable: false,
             name: "b".to_string(),
             ty: None,
-            init: Some(build_safe_index_expr(
+            init: Some(build_safe_index_expr_unwrapped(
                 Expr::Ident("arr".to_string()),
                 convert_index_to_usize(Expr::NumberLit(1.0)),
             )),
@@ -152,7 +152,7 @@ fn test_convert_stmt_list_array_destructuring_single_element() {
             mutable: false,
             name: "a".to_string(),
             ty: None,
-            init: Some(build_safe_index_expr(
+            init: Some(build_safe_index_expr_unwrapped(
                 Expr::Ident("arr".to_string()),
                 convert_index_to_usize(Expr::NumberLit(0.0)),
             )),
@@ -196,7 +196,7 @@ fn test_convert_stmt_list_array_destructuring_skip_element() {
             mutable: false,
             name: "a".to_string(),
             ty: None,
-            init: Some(build_safe_index_expr(
+            init: Some(build_safe_index_expr_unwrapped(
                 Expr::Ident("arr".to_string()),
                 convert_index_to_usize(Expr::NumberLit(0.0)),
             )),
@@ -208,7 +208,7 @@ fn test_convert_stmt_list_array_destructuring_skip_element() {
             mutable: false,
             name: "b".to_string(),
             ty: None,
-            init: Some(build_safe_index_expr(
+            init: Some(build_safe_index_expr_unwrapped(
                 Expr::Ident("arr".to_string()),
                 convert_index_to_usize(Expr::NumberLit(2.0)),
             )),
@@ -234,7 +234,7 @@ fn test_convert_stmt_list_array_destructuring_rest() {
             mutable: false,
             name: "first".to_string(),
             ty: None,
-            init: Some(build_safe_index_expr(
+            init: Some(build_safe_index_expr_unwrapped(
                 Expr::Ident("arr".to_string()),
                 convert_index_to_usize(Expr::NumberLit(0.0)),
             )),

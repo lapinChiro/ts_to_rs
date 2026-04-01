@@ -50,7 +50,7 @@ struct UserList {
 }
 
 fn getFirstUser(list: UserList) -> serde_json::Value {
-    list.users.get(0).cloned()
+    list.users.get(0).cloned().unwrap()
 }
 
 #[derive(Debug, Clone, PartialEq)]

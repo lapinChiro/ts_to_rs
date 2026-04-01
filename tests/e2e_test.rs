@@ -379,7 +379,6 @@ fn test_e2e_string_ops_ts_rust_stdout_match() {
 }
 
 #[test]
-#[ignore = "I-319: safe indexing returns Option<T>, needs downstream unwrap handling"]
 fn test_e2e_array_ops_ts_rust_stdout_match() {
     run_e2e_test("array_ops");
 }
@@ -445,7 +444,6 @@ fn test_e2e_default_params_ts_rust_stdout_match() {
 }
 
 #[test]
-#[ignore = "I-319: safe indexing returns Option<T>, needs downstream unwrap handling"]
 fn test_e2e_destructuring_ts_rust_stdout_match() {
     run_e2e_test("destructuring");
 }
@@ -626,7 +624,6 @@ fn test_e2e_param_type_infer_ts_rust_stdout_match() {
 }
 
 #[test]
-#[ignore = "I-319: safe indexing returns Option<T>, needs downstream unwrap handling"]
 fn test_e2e_update_expr_semantics_ts_rust_stdout_match() {
     run_e2e_test("update_expr_semantics");
 }
@@ -734,7 +731,6 @@ fn test_e2e_for_variations_ts_rust_stdout_match() {
 }
 
 #[test]
-#[ignore = "I-319: safe indexing returns Option<T>, needs downstream unwrap handling"]
 fn test_e2e_type_alias_ts_rust_stdout_match() {
     run_e2e_test("type_alias");
 }
