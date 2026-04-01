@@ -112,9 +112,9 @@ fn try_convert_keyof_typeof_alias(
     let name = sanitize_rust_type_name(&decl.id.sym);
     let variants = fields
         .iter()
-        .map(|(field_name, _)| EnumVariant {
-            name: field_name.clone(),
-            value: Some(EnumValue::Str(field_name.clone())),
+        .map(|field| EnumVariant {
+            name: field.name.clone(),
+            value: Some(EnumValue::Str(field.name.clone())),
             data: None,
             fields: vec![],
         })

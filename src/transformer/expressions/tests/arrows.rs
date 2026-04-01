@@ -112,8 +112,8 @@ fn test_convert_expr_arrow_object_destructuring_generates_expansion() {
             "Point".to_string(),
             TypeDef::new_struct(
                 vec![
-                    ("x".to_string(), crate::ir::RustType::F64),
-                    ("y".to_string(), crate::ir::RustType::F64),
+                    ("x".to_string(), crate::ir::RustType::F64).into(),
+                    ("y".to_string(), crate::ir::RustType::F64).into(),
                 ],
                 std::collections::HashMap::new(),
                 vec![],

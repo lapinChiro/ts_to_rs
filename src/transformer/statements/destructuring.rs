@@ -153,15 +153,15 @@ impl<'a> Transformer<'a> {
                     if let Some(crate::registry::TypeDef::Struct { fields, .. }) =
                         type_name.and_then(|n| self.reg().get(n))
                     {
-                        for (field_name, _) in fields {
-                            if !explicit_fields.contains(field_name) {
+                        for field in fields {
+                            if !explicit_fields.contains(&field.name) {
                                 stmts.push(Stmt::Let {
                                     mutable,
-                                    name: field_name.clone(),
+                                    name: field.name.clone(),
                                     ty: None,
                                     init: Some(Expr::FieldAccess {
                                         object: Box::new(source_expr.clone()),
-                                        field: field_name.clone(),
+                                        field: field.name.clone(),
                                     }),
                                 });
                             }

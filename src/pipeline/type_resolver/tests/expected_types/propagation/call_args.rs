@@ -8,7 +8,7 @@ fn test_propagate_expected_call_arg_from_registry_fn() {
         "greet".to_string(),
         crate::registry::TypeDef::Function {
             type_params: vec![],
-            params: vec![("name".to_string(), RustType::String)],
+            params: vec![("name".to_string(), RustType::String).into()],
             return_type: None,
             has_rest: false,
         },

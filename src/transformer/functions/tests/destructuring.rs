@@ -168,9 +168,9 @@ fn reg_with_outer_inner() -> TypeRegistry {
         "Inner".to_string(),
         TypeDef::new_struct(
             vec![
-                ("a".to_string(), RustType::String),
-                ("b".to_string(), RustType::F64),
-                ("c".to_string(), RustType::Bool),
+                ("a".to_string(), RustType::String).into(),
+                ("b".to_string(), RustType::F64).into(),
+                ("c".to_string(), RustType::Bool).into(),
             ],
             HashMap::new(),
             vec![],
@@ -185,7 +185,8 @@ fn reg_with_outer_inner() -> TypeRegistry {
                     name: "Inner".to_string(),
                     type_args: vec![],
                 },
-            )],
+            )
+                .into()],
             HashMap::new(),
             vec![],
         ),
@@ -470,7 +471,8 @@ fn test_object_destructuring_param_nested_object_generates_recursive_expansion()
                     name: "Inner".to_string(),
                     type_args: vec![],
                 },
-            )],
+            )
+                .into()],
             HashMap::new(),
             vec![],
         ),
@@ -479,8 +481,8 @@ fn test_object_destructuring_param_nested_object_generates_recursive_expansion()
         "Inner".to_string(),
         TypeDef::new_struct(
             vec![
-                ("b".to_string(), RustType::String),
-                ("c".to_string(), RustType::F64),
+                ("b".to_string(), RustType::String).into(),
+                ("c".to_string(), RustType::F64).into(),
             ],
             HashMap::new(),
             vec![],
@@ -541,9 +543,9 @@ fn test_object_destructuring_param_rest_generates_synthetic_struct() {
         "Point".to_string(),
         TypeDef::new_struct(
             vec![
-                ("x".to_string(), RustType::F64),
-                ("y".to_string(), RustType::F64),
-                ("z".to_string(), RustType::F64),
+                ("x".to_string(), RustType::F64).into(),
+                ("y".to_string(), RustType::F64).into(),
+                ("z".to_string(), RustType::F64).into(),
             ],
             HashMap::new(),
             vec![],
@@ -619,10 +621,10 @@ fn test_object_destructuring_param_rest_excludes_explicit_fields() {
         "Config".to_string(),
         TypeDef::new_struct(
             vec![
-                ("a".to_string(), RustType::String),
-                ("b".to_string(), RustType::F64),
-                ("c".to_string(), RustType::Bool),
-                ("d".to_string(), RustType::String),
+                ("a".to_string(), RustType::String).into(),
+                ("b".to_string(), RustType::F64).into(),
+                ("c".to_string(), RustType::Bool).into(),
+                ("d".to_string(), RustType::String).into(),
             ],
             HashMap::new(),
             vec![],
@@ -704,7 +706,8 @@ fn test_object_destructuring_param_nested_with_known_type_resolves_field_types()
                     name: "Inner".to_string(),
                     type_args: vec![],
                 },
-            )],
+            )
+                .into()],
             HashMap::new(),
             vec![],
         ),
@@ -713,8 +716,8 @@ fn test_object_destructuring_param_nested_with_known_type_resolves_field_types()
         "Inner".to_string(),
         TypeDef::new_struct(
             vec![
-                ("x".to_string(), RustType::F64),
-                ("y".to_string(), RustType::String),
+                ("x".to_string(), RustType::F64).into(),
+                ("y".to_string(), RustType::String).into(),
             ],
             HashMap::new(),
             vec![],
@@ -780,7 +783,8 @@ fn test_object_destructuring_param_nested_option_type_unwraps_inner() {
                     name: "Data".to_string(),
                     type_args: vec![],
                 })),
-            )],
+            )
+                .into()],
             HashMap::new(),
             vec![],
         ),
@@ -789,8 +793,8 @@ fn test_object_destructuring_param_nested_option_type_unwraps_inner() {
         "Data".to_string(),
         TypeDef::new_struct(
             vec![
-                ("a".to_string(), RustType::String),
-                ("b".to_string(), RustType::F64),
+                ("a".to_string(), RustType::String).into(),
+                ("b".to_string(), RustType::F64).into(),
             ],
             HashMap::new(),
             vec![],
@@ -854,7 +858,8 @@ fn test_object_destructuring_param_nested_unknown_type_skips_field_lookup() {
             vec![(
                 "items".to_string(),
                 RustType::Vec(Box::new(RustType::String)), // Vec type — not Named, not Option
-            )],
+            )
+                .into()],
             HashMap::new(),
             vec![],
         ),

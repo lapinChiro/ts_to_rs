@@ -101,8 +101,8 @@ fn test_convert_expr_object_spread_last_position_expands_remaining_fields() {
         "Point".to_string(),
         TypeDef::new_struct(
             vec![
-                ("x".to_string(), RustType::F64),
-                ("y".to_string(), RustType::F64),
+                ("x".to_string(), RustType::F64).into(),
+                ("y".to_string(), RustType::F64).into(),
             ],
             std::collections::HashMap::new(),
             vec![],
@@ -149,9 +149,9 @@ fn test_convert_expr_object_spread_middle_position_expands_remaining_fields() {
         "S".to_string(),
         TypeDef::new_struct(
             vec![
-                ("a".to_string(), RustType::F64),
-                ("b".to_string(), RustType::F64),
-                ("c".to_string(), RustType::F64),
+                ("a".to_string(), RustType::F64).into(),
+                ("b".to_string(), RustType::F64).into(),
+                ("c".to_string(), RustType::F64).into(),
             ],
             std::collections::HashMap::new(),
             vec![],
@@ -218,8 +218,8 @@ fn test_convert_object_spread_multiple_registered_generates_merged_fields() {
         "Point".to_string(),
         TypeDef::new_struct(
             vec![
-                ("x".to_string(), RustType::F64),
-                ("y".to_string(), RustType::F64),
+                ("x".to_string(), RustType::F64).into(),
+                ("y".to_string(), RustType::F64).into(),
             ],
             std::collections::HashMap::new(),
             vec![],
@@ -264,8 +264,8 @@ fn test_convert_expr_object_spread_with_override() {
         "Point".to_string(),
         TypeDef::new_struct(
             vec![
-                ("x".to_string(), RustType::F64),
-                ("y".to_string(), RustType::F64),
+                ("x".to_string(), RustType::F64).into(),
+                ("y".to_string(), RustType::F64).into(),
             ],
             std::collections::HashMap::new(),
             vec![],
@@ -313,7 +313,8 @@ fn test_convert_expr_call_resolves_object_arg_from_registry() {
                     name: "Point".to_string(),
                     type_args: vec![],
                 },
-            )],
+            )
+                .into()],
             return_type: None,
             has_rest: false,
         },
@@ -353,8 +354,8 @@ fn test_convert_expr_object_literal_nested_resolves_field_type_from_registry() {
         "Origin".to_string(),
         TypeDef::new_struct(
             vec![
-                ("x".to_string(), RustType::F64),
-                ("y".to_string(), RustType::F64),
+                ("x".to_string(), RustType::F64).into(),
+                ("y".to_string(), RustType::F64).into(),
             ],
             std::collections::HashMap::new(),
             vec![],
@@ -370,8 +371,9 @@ fn test_convert_expr_object_literal_nested_resolves_field_type_from_registry() {
                         name: "Origin".to_string(),
                         type_args: vec![],
                     },
-                ),
-                ("w".to_string(), RustType::F64),
+                )
+                    .into(),
+                ("w".to_string(), RustType::F64).into(),
             ],
             std::collections::HashMap::new(),
             vec![],
@@ -460,7 +462,7 @@ fn test_convert_expr_object_shorthand_with_registry_field_type() {
     reg.register(
         "User".to_string(),
         TypeDef::new_struct(
-            vec![("name".to_string(), RustType::String)],
+            vec![("name".to_string(), RustType::String).into()],
             std::collections::HashMap::new(),
             vec![],
         ),
@@ -524,8 +526,8 @@ fn test_spread_multiple_overlapping_fields_rightmost_wins() {
         "Point".to_string(),
         TypeDef::new_struct(
             vec![
-                ("x".to_string(), RustType::F64),
-                ("y".to_string(), RustType::F64),
+                ("x".to_string(), RustType::F64).into(),
+                ("y".to_string(), RustType::F64).into(),
             ],
             std::collections::HashMap::new(),
             vec![],
@@ -573,8 +575,8 @@ fn test_spread_after_all_explicits_registered() {
         "Point".to_string(),
         TypeDef::new_struct(
             vec![
-                ("x".to_string(), RustType::F64),
-                ("y".to_string(), RustType::F64),
+                ("x".to_string(), RustType::F64).into(),
+                ("y".to_string(), RustType::F64).into(),
             ],
             std::collections::HashMap::new(),
             vec![],
@@ -620,9 +622,9 @@ fn test_spread_between_explicits_registered() {
         "S".to_string(),
         TypeDef::new_struct(
             vec![
-                ("x".to_string(), RustType::F64),
-                ("y".to_string(), RustType::F64),
-                ("z".to_string(), RustType::F64),
+                ("x".to_string(), RustType::F64).into(),
+                ("y".to_string(), RustType::F64).into(),
+                ("z".to_string(), RustType::F64).into(),
             ],
             std::collections::HashMap::new(),
             vec![],
@@ -707,8 +709,8 @@ fn test_multiple_spreads_with_explicits_between() {
         "Point".to_string(),
         TypeDef::new_struct(
             vec![
-                ("x".to_string(), RustType::F64),
-                ("y".to_string(), RustType::F64),
+                ("x".to_string(), RustType::F64).into(),
+                ("y".to_string(), RustType::F64).into(),
             ],
             std::collections::HashMap::new(),
             vec![],
@@ -754,8 +756,8 @@ fn test_multiple_spreads_with_explicit_after_last() {
         "Point".to_string(),
         TypeDef::new_struct(
             vec![
-                ("x".to_string(), RustType::F64),
-                ("y".to_string(), RustType::F64),
+                ("x".to_string(), RustType::F64).into(),
+                ("y".to_string(), RustType::F64).into(),
             ],
             std::collections::HashMap::new(),
             vec![],
@@ -795,8 +797,8 @@ fn test_spread_only_registered() {
         "Point".to_string(),
         TypeDef::new_struct(
             vec![
-                ("x".to_string(), RustType::F64),
-                ("y".to_string(), RustType::F64),
+                ("x".to_string(), RustType::F64).into(),
+                ("y".to_string(), RustType::F64).into(),
             ],
             std::collections::HashMap::new(),
             vec![],
@@ -844,8 +846,8 @@ fn test_option_field_none_fill_when_omitted() {
         "S".to_string(),
         TypeDef::new_struct(
             vec![
-                ("x".to_string(), RustType::F64),
-                ("y".to_string(), RustType::Option(Box::new(RustType::F64))),
+                ("x".to_string(), RustType::F64).into(),
+                ("y".to_string(), RustType::Option(Box::new(RustType::F64))).into(),
             ],
             std::collections::HashMap::new(),
             vec![],

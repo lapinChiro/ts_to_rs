@@ -11,6 +11,7 @@ pub mod parser;
 pub mod pipeline;
 pub mod registry;
 pub mod transformer;
+pub mod ts_type_info;
 
 use anyhow::Result;
 use serde::Serialize;

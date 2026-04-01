@@ -109,7 +109,8 @@ fn test_fn_arg_box_dyn_fn_gets_box_new() {
                     params: vec![RustType::F64],
                     return_type: Box::new(RustType::F64),
                 },
-            )],
+            )
+                .into()],
             return_type: Some(RustType::F64),
             has_rest: false,
         },
@@ -345,7 +346,7 @@ fn test_convert_assign_expr_propagates_type_from_resolution() {
     reg.register(
         "Config".to_string(),
         TypeDef::new_struct(
-            vec![("name".to_string(), RustType::String)],
+            vec![("name".to_string(), RustType::String).into()],
             std::collections::HashMap::new(),
             vec![],
         ),

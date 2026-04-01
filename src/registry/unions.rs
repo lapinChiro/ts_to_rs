@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use swc_ecma_ast as ast;
 
-use super::{TypeDef, TypeRegistry};
+use super::{FieldDef, TypeDef, TypeRegistry};
 use crate::ir::RustType;
 use crate::pipeline::type_converter::convert_ts_type;
 use crate::pipeline::SyntheticTypeRegistry;
@@ -155,7 +155,7 @@ fn extract_registry_variant_info(
     tag_field: &str,
     lookup: &TypeRegistry,
     synthetic: &mut SyntheticTypeRegistry,
-) -> Option<(String, Vec<(String, RustType)>)> {
+) -> Option<(String, Vec<FieldDef>)> {
     let mut disc_value = None;
     let mut fields = Vec::new();
 
@@ -178,12 +178,13 @@ fn extract_registry_variant_info(
                 // Non-discriminant field: convert type
                 if let Some(ann) = &prop.type_ann {
                     if let Ok(ty) = convert_ts_type(&ann.type_ann, synthetic, lookup) {
-                        let ty = if prop.optional {
+                        let optional = prop.optional;
+                        let ty = if optional {
                             RustType::Option(Box::new(ty))
                         } else {
                             ty
                         };
-                        fields.push((name, ty));
+                        fields.push(FieldDef { name, ty, optional });
                     }
                 }
             }

@@ -89,7 +89,7 @@ impl<'a> TypeResolver<'a> {
                 let field_exists_in_variant = pending_variant_names.iter().any(|vname| {
                     variant_fields
                         .get(vname)
-                        .is_some_and(|fields| fields.iter().any(|(n, _)| n == field))
+                        .is_some_and(|fields| fields.iter().any(|f| f.name == *field))
                 });
                 if field_exists_in_variant {
                     self.result.du_field_bindings.push(DuFieldBinding {

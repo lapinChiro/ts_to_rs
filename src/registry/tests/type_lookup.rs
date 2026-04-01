@@ -9,7 +9,7 @@ fn test_lookup_method_sigs_named_type() {
     methods.insert(
         "greet".to_string(),
         vec![MethodSignature {
-            params: vec![("msg".to_string(), RustType::String)],
+            params: vec![("msg".to_string(), RustType::String).into()],
             return_type: None,
             has_rest: false,
         }],
@@ -37,7 +37,7 @@ fn test_lookup_method_sigs_string_type() {
     methods.insert(
         "charAt".to_string(),
         vec![MethodSignature {
-            params: vec![("pos".to_string(), RustType::F64)],
+            params: vec![("pos".to_string(), RustType::F64).into()],
             return_type: Some(RustType::String),
             has_rest: false,
         }],
@@ -75,7 +75,8 @@ fn test_lookup_method_sigs_vec_type() {
                     name: "T".to_string(),
                     type_args: vec![],
                 })),
-            )],
+            )
+                .into()],
             return_type: Some(RustType::F64),
             has_rest: true,
         }],
@@ -117,8 +118,8 @@ fn test_lookup_field_type_named_struct() {
         "Point".to_string(),
         TypeDef::new_struct(
             vec![
-                ("x".to_string(), RustType::F64),
-                ("y".to_string(), RustType::F64),
+                ("x".to_string(), RustType::F64).into(),
+                ("y".to_string(), RustType::F64).into(),
             ],
             Default::default(),
             vec![],

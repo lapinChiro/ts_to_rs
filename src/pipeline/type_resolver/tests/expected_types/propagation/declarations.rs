@@ -8,8 +8,8 @@ fn test_propagate_expected_var_decl_object_literal_sets_struct_name() {
         "Point".to_string(),
         crate::registry::TypeDef::new_struct(
             vec![
-                ("x".to_string(), RustType::F64),
-                ("y".to_string(), RustType::F64),
+                ("x".to_string(), RustType::F64).into(),
+                ("y".to_string(), RustType::F64).into(),
             ],
             Default::default(),
             vec![],
@@ -83,8 +83,8 @@ fn test_propagate_expected_return_object_sets_field_types() {
         "Point".to_string(),
         crate::registry::TypeDef::new_struct(
             vec![
-                ("x".to_string(), RustType::F64),
-                ("y".to_string(), RustType::F64),
+                ("x".to_string(), RustType::F64).into(),
+                ("y".to_string(), RustType::F64).into(),
             ],
             Default::default(),
             vec![],
@@ -112,8 +112,8 @@ fn test_propagate_expected_assign_rhs_gets_lhs_type() {
         "Point".to_string(),
         crate::registry::TypeDef::new_struct(
             vec![
-                ("x".to_string(), RustType::F64),
-                ("y".to_string(), RustType::F64),
+                ("x".to_string(), RustType::F64).into(),
+                ("y".to_string(), RustType::F64).into(),
             ],
             Default::default(),
             vec![],

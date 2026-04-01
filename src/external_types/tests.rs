@@ -144,10 +144,10 @@ fn test_parse_interface_returns_struct_typedef() {
             fields, methods, ..
         } => {
             assert_eq!(fields.len(), 2);
-            assert_eq!(fields[0].0, "status");
-            assert_eq!(fields[0].1, RustType::F64);
-            assert_eq!(fields[1].0, "ok");
-            assert_eq!(fields[1].1, RustType::Bool);
+            assert_eq!(fields[0].name, "status");
+            assert_eq!(fields[0].ty, RustType::F64);
+            assert_eq!(fields[1].name, "ok");
+            assert_eq!(fields[1].ty, RustType::Bool);
             assert!(methods.contains_key("clone"));
         }
         _ => panic!("expected Struct, got {type_def:?}"),
@@ -199,7 +199,7 @@ fn test_parse_interface_optional_field_becomes_option() {
     let type_def = convert_external_typedef(&def, &mut SyntheticTypeRegistry::new()).unwrap();
     match type_def {
         TypeDef::Struct { fields, .. } => {
-            assert_eq!(fields[0].1, RustType::Option(Box::new(RustType::F64)));
+            assert_eq!(fields[0].ty, RustType::Option(Box::new(RustType::F64)));
         }
         _ => panic!("expected Struct"),
     }
@@ -231,11 +231,11 @@ fn test_parse_function_returns_function_typedef() {
             ..
         } => {
             assert_eq!(params.len(), 2);
-            assert_eq!(params[0].0, "input");
-            assert_eq!(params[0].1, RustType::String);
-            assert_eq!(params[1].0, "init");
+            assert_eq!(params[0].name, "input");
+            assert_eq!(params[0].ty, RustType::String);
+            assert_eq!(params[1].name, "init");
             assert_eq!(
-                params[1].1,
+                params[1].ty,
                 RustType::Option(Box::new(RustType::Named {
                     name: "RequestInit".to_string(),
                     type_args: vec![],
@@ -359,7 +359,7 @@ fn test_merge_external_types_local_takes_precedence() {
         TypeDef::Struct { fields, .. } => {
             // Local definition should be present
             assert!(
-                fields.iter().any(|(name, _)| name == "local_field"),
+                fields.iter().any(|f| f.name == "local_field"),
                 "local definition should take precedence, got: {fields:?}"
             );
         }
@@ -398,7 +398,7 @@ fn test_builtin_response_has_status_field() {
     match response {
         TypeDef::Struct { fields, .. } => {
             assert!(
-                fields.iter().any(|(name, _)| name == "status"),
+                fields.iter().any(|f| f.name == "status"),
                 "Response should have status field, got: {fields:?}"
             );
         }
@@ -765,10 +765,10 @@ fn test_load_interface_with_constructors() {
                 .expect("should have constructor signatures");
             assert_eq!(sigs.len(), 1);
             assert_eq!(sigs[0].params.len(), 2);
-            assert_eq!(sigs[0].params[0].0, "name");
-            assert_eq!(sigs[0].params[0].1, RustType::String);
-            assert_eq!(sigs[0].params[1].0, "port");
-            assert_eq!(sigs[0].params[1].1, RustType::F64);
+            assert_eq!(sigs[0].params[0].name, "name");
+            assert_eq!(sigs[0].params[0].ty, RustType::String);
+            assert_eq!(sigs[0].params[1].name, "port");
+            assert_eq!(sigs[0].params[1].ty, RustType::F64);
         }
         _ => panic!("expected Struct"),
     }
@@ -790,9 +790,9 @@ fn test_builtin_response_has_constructor() {
             // Response constructor: (body?, init?: ResponseInit)
             let sig = &sigs[0];
             assert_eq!(sig.params.len(), 2, "Response constructor has 2 params");
-            assert_eq!(sig.params[1].0, "init");
+            assert_eq!(sig.params[1].name, "init");
             // init param type should be Named("ResponseInit")
-            match &sig.params[1].1 {
+            match &sig.params[1].ty {
                 RustType::Named { name, .. } => assert_eq!(name, "ResponseInit"),
                 other => panic!("expected Named(ResponseInit), got {other:?}"),
             }

@@ -9,8 +9,8 @@ fn test_propagate_expected_new_expr_uses_constructor_params() {
         "Options".to_string(),
         crate::registry::TypeDef::new_struct(
             vec![
-                ("host".to_string(), RustType::String),
-                ("port".to_string(), RustType::F64),
+                ("host".to_string(), RustType::String).into(),
+                ("port".to_string(), RustType::F64).into(),
             ],
             Default::default(),
             vec![],
@@ -21,20 +21,21 @@ fn test_propagate_expected_new_expr_uses_constructor_params() {
         crate::registry::TypeDef::Struct {
             type_params: vec![],
             fields: vec![
-                ("running".to_string(), RustType::Bool),
-                ("host".to_string(), RustType::String),
+                ("running".to_string(), RustType::Bool).into(),
+                ("host".to_string(), RustType::String).into(),
             ],
             methods: Default::default(),
             constructor: Some(vec![MethodSignature {
                 params: vec![
-                    ("name".to_string(), RustType::String),
+                    ("name".to_string(), RustType::String).into(),
                     (
                         "options".to_string(),
                         RustType::Named {
                             name: "Options".to_string(),
                             type_args: vec![],
                         },
-                    ),
+                    )
+                        .into(),
                 ],
                 return_type: None,
                 has_rest: false,
@@ -81,8 +82,8 @@ fn test_propagate_expected_new_expr_falls_back_to_fields_without_constructor() {
         crate::registry::TypeDef::Struct {
             type_params: vec![],
             fields: vec![
-                ("x".to_string(), RustType::F64),
-                ("y".to_string(), RustType::F64),
+                ("x".to_string(), RustType::F64).into(),
+                ("y".to_string(), RustType::F64).into(),
             ],
             methods: Default::default(),
             constructor: None,

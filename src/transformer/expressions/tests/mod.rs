@@ -124,11 +124,12 @@ fn greet_registry() -> TypeRegistry {
         TypeDef::Function {
             type_params: vec![],
             params: vec![
-                ("name".to_string(), RustType::String),
+                ("name".to_string(), RustType::String).into(),
                 (
                     "greeting".to_string(),
                     RustType::Option(Box::new(RustType::String)),
-                ),
+                )
+                    .into(),
             ],
             return_type: Some(RustType::String),
             has_rest: false,

@@ -415,7 +415,7 @@ fn test_convert_var_decl_trait_type_generates_box_dyn() {
     methods.insert(
         "greet".to_string(),
         vec![MethodSignature {
-            params: vec![("msg".to_string(), RustType::String)],
+            params: vec![("msg".to_string(), RustType::String).into()],
             return_type: None,
             has_rest: false,
         }],

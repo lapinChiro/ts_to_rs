@@ -52,9 +52,9 @@ pub(crate) fn reg_with_point() -> TypeRegistry {
         "Point".to_string(),
         TypeDef::new_struct(
             vec![
-                ("x".to_string(), RustType::F64),
-                ("y".to_string(), RustType::F64),
-                ("z".to_string(), RustType::F64),
+                ("x".to_string(), RustType::F64).into(),
+                ("y".to_string(), RustType::F64).into(),
+                ("z".to_string(), RustType::F64).into(),
             ],
             std::collections::HashMap::new(),
             vec![],

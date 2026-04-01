@@ -158,8 +158,8 @@ fn test_utility_required_strips_option_from_all_fields() {
         "OptPoint".to_string(),
         TypeDef::new_struct(
             vec![
-                ("x".to_string(), RustType::Option(Box::new(RustType::F64))),
-                ("y".to_string(), RustType::Option(Box::new(RustType::F64))),
+                ("x".to_string(), RustType::Option(Box::new(RustType::F64))).into(),
+                ("y".to_string(), RustType::Option(Box::new(RustType::F64))).into(),
             ],
             std::collections::HashMap::new(),
             vec![],

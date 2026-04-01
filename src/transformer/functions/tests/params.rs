@@ -410,7 +410,7 @@ fn reg_with_trait(name: &str) -> TypeRegistry {
     methods.insert(
         "greet".to_string(),
         vec![MethodSignature {
-            params: vec![("msg".to_string(), RustType::String)],
+            params: vec![("msg".to_string(), RustType::String).into()],
             return_type: None,
             has_rest: false,
         }],
@@ -479,8 +479,8 @@ fn test_convert_fn_param_struct_type_unchanged() {
         "Point".to_string(),
         TypeDef::new_struct(
             vec![
-                ("x".to_string(), RustType::F64),
-                ("y".to_string(), RustType::F64),
+                ("x".to_string(), RustType::F64).into(),
+                ("y".to_string(), RustType::F64).into(),
             ],
             HashMap::new(),
             vec![],

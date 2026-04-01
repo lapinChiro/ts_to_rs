@@ -60,13 +60,13 @@ pub(super) fn build_shape_registry() -> TypeRegistry {
     let mut variant_fields = std::collections::HashMap::new();
     variant_fields.insert(
         "Circle".to_string(),
-        vec![("radius".to_string(), RustType::F64)],
+        vec![("radius".to_string(), RustType::F64).into()],
     );
     variant_fields.insert(
         "Square".to_string(),
         vec![
-            ("width".to_string(), RustType::F64),
-            ("height".to_string(), RustType::F64),
+            ("width".to_string(), RustType::F64).into(),
+            ("height".to_string(), RustType::F64).into(),
         ],
     );
     reg.register(
@@ -104,6 +104,7 @@ pub(super) fn make_sig(param_types: Vec<RustType>, ret: Option<RustType>) -> Met
             .into_iter()
             .enumerate()
             .map(|(i, ty)| (format!("p{i}"), ty))
+            .map(Into::into)
             .collect(),
         return_type: ret,
         has_rest: false,

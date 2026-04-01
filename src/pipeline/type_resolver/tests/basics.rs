@@ -483,8 +483,8 @@ fn test_member_access_on_type_param_with_constraint() {
         "Env".to_string(),
         TypeDef::new_struct(
             vec![
-                ("bindings".to_string(), RustType::Any),
-                ("variables".to_string(), RustType::Any),
+                ("bindings".to_string(), RustType::Any).into(),
+                ("variables".to_string(), RustType::Any).into(),
             ],
             Default::default(),
             vec![],
@@ -515,7 +515,7 @@ fn test_member_access_on_type_param_nonexistent_field_returns_unknown() {
     reg.register(
         "Env".to_string(),
         TypeDef::new_struct(
-            vec![("bindings".to_string(), RustType::String)],
+            vec![("bindings".to_string(), RustType::String).into()],
             Default::default(),
             vec![],
         ),
@@ -557,7 +557,7 @@ fn test_member_access_on_chained_type_param_constraints() {
     reg.register(
         "Root".to_string(),
         TypeDef::new_struct(
-            vec![("field".to_string(), RustType::F64)],
+            vec![("field".to_string(), RustType::F64).into()],
             Default::default(),
             vec![],
         ),
@@ -566,7 +566,7 @@ fn test_member_access_on_chained_type_param_constraints() {
     reg.register(
         "Base".to_string(),
         TypeDef::new_struct(
-            vec![("field".to_string(), RustType::F64)],
+            vec![("field".to_string(), RustType::F64).into()],
             Default::default(),
             vec![],
         ),

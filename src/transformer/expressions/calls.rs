@@ -4,7 +4,7 @@ use anyhow::{anyhow, Result};
 use swc_ecma_ast as ast;
 
 use crate::ir::{BinOp, ClosureBody, Expr, Param, RustType, Stmt};
-use crate::registry::TypeDef;
+use crate::registry::{ParamDef, TypeDef};
 
 use super::literals::needs_debug_format;
 use super::methods::map_method_call;
@@ -73,28 +73,31 @@ impl<'a> Transformer<'a> {
                     }
 
                     // Look up function parameter types from the registry or FileTypeResolution
-                    let resolved_params: Vec<(String, RustType)>;
+                    let resolved_params: Vec<ParamDef>;
                     let mut has_rest = false;
-                    let param_types: Option<&[(String, RustType)]> =
-                        if let Some(TypeDef::Function {
-                            params,
-                            has_rest: rest,
-                            ..
-                        }) = self.reg().get(&fn_name)
-                        {
-                            has_rest = *rest;
-                            Some(params.as_slice())
-                        } else if let Some(RustType::Fn { params, .. }) = self.get_expr_type(callee)
-                        {
-                            resolved_params = params
-                                .iter()
-                                .enumerate()
-                                .map(|(i, ty)| (format!("_p{i}"), ty.clone()))
-                                .collect();
-                            Some(resolved_params.as_slice())
-                        } else {
-                            None
-                        };
+                    let param_types: Option<&[ParamDef]> = if let Some(TypeDef::Function {
+                        params,
+                        has_rest: rest,
+                        ..
+                    }) = self.reg().get(&fn_name)
+                    {
+                        has_rest = *rest;
+                        Some(params.as_slice())
+                    } else if let Some(RustType::Fn { params, .. }) = self.get_expr_type(callee) {
+                        resolved_params = params
+                            .iter()
+                            .enumerate()
+                            .map(|(i, ty)| ParamDef {
+                                name: format!("_p{i}"),
+                                ty: ty.clone(),
+                                optional: false,
+                                has_default: false,
+                            })
+                            .collect();
+                        Some(resolved_params.as_slice())
+                    } else {
+                        None
+                    };
                     let args =
                         self.convert_call_args_with_types(&call.args, param_types, has_rest)?;
                     Ok(Expr::FnCall {
@@ -262,10 +265,21 @@ impl<'a> Transformer<'a> {
             _ => return Err(anyhow!("unsupported new expression target")),
         };
         // Look up constructor param types from struct fields in TypeRegistry
-        let param_types = self.reg().get(&class_name).and_then(|def| match def {
-            TypeDef::Struct { fields, .. } => Some(fields.clone()),
-            _ => None,
-        });
+        let param_types: Option<Vec<ParamDef>> =
+            self.reg().get(&class_name).and_then(|def| match def {
+                TypeDef::Struct { fields, .. } => Some(
+                    fields
+                        .iter()
+                        .map(|f| ParamDef {
+                            name: f.name.clone(),
+                            ty: f.ty.clone(),
+                            optional: f.optional,
+                            has_default: false,
+                        })
+                        .collect(),
+                ),
+                _ => None,
+            });
         let param_slice = param_types.as_deref();
         let args = match &new_expr.args {
             Some(args) => self.convert_call_args_with_types(args, param_slice, false)?,
@@ -506,7 +520,7 @@ impl<'a> Transformer<'a> {
     pub(crate) fn convert_call_args_with_types(
         &mut self,
         args: &[ast::ExprOrSpread],
-        param_types: Option<&[(String, RustType)]>,
+        param_types: Option<&[ParamDef]>,
         has_rest: bool,
     ) -> Result<Vec<Expr>> {
         self.convert_call_args_inner(args, param_types, has_rest, false)
@@ -516,7 +530,7 @@ impl<'a> Transformer<'a> {
     pub(crate) fn convert_call_args_suppress_string(
         &mut self,
         args: &[ast::ExprOrSpread],
-        param_types: Option<&[(String, RustType)]>,
+        param_types: Option<&[ParamDef]>,
         has_rest: bool,
     ) -> Result<Vec<Expr>> {
         self.convert_call_args_inner(args, param_types, has_rest, true)
@@ -525,7 +539,7 @@ impl<'a> Transformer<'a> {
     fn convert_call_args_inner(
         &mut self,
         args: &[ast::ExprOrSpread],
-        param_types: Option<&[(String, RustType)]>,
+        param_types: Option<&[ParamDef]>,
         has_rest: bool,
         suppress_string_coercion: bool,
     ) -> Result<Vec<Expr>> {
@@ -539,7 +553,7 @@ impl<'a> Transformer<'a> {
         let mut result: Vec<Expr> = Vec::with_capacity(args.len());
 
         for (i, arg) in args[..regular_args_count].iter().enumerate() {
-            let param_ty = param_types.and_then(|params| params.get(i).map(|(_, ty)| ty));
+            let param_ty = param_types.and_then(|params| params.get(i).map(|p| &p.ty));
             let mut expr = self.convert_expr(&arg.expr)?;
             // Strip .to_string() from string literals when suppressed
             // (TypeResolver sets expected=String from TS signatures, but Rust API needs &str)
@@ -622,7 +636,7 @@ impl<'a> Transformer<'a> {
         } else {
             if let Some(params) = param_types {
                 for param in params.iter().skip(result.len()) {
-                    if matches!(param.1, RustType::Option(_)) {
+                    if matches!(param.ty, RustType::Option(_)) {
                         result.push(Expr::Ident("None".to_string()));
                     }
                 }

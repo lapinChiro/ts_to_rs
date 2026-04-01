@@ -83,13 +83,13 @@ fn convert_interface_as_struct(
             ..
         }) = reg.get(&parent_name)
         {
-            for (fname, ftype) in parent_fields {
-                let sanitized = sanitize_field_name(fname);
+            for field in parent_fields {
+                let sanitized = sanitize_field_name(&field.name);
                 if !fields.iter().any(|f: &StructField| f.name == sanitized) {
                     fields.push(StructField {
                         vis: Some(Visibility::Public),
                         name: sanitized,
-                        ty: ftype.clone(),
+                        ty: field.ty.clone(),
                     });
                 }
             }
@@ -219,13 +219,13 @@ fn convert_interface_as_struct_and_trait(
             ..
         }) = reg.get(&parent_name)
         {
-            for (fname, ftype) in parent_fields {
-                let sanitized = sanitize_field_name(fname);
+            for field in parent_fields {
+                let sanitized = sanitize_field_name(&field.name);
                 if !fields.iter().any(|f: &StructField| f.name == sanitized) {
                     fields.push(StructField {
                         vis: Some(Visibility::Public),
                         name: sanitized,
-                        ty: ftype.clone(),
+                        ty: field.ty.clone(),
                     });
                 }
             }

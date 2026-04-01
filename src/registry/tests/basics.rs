@@ -11,8 +11,8 @@ fn test_registry_register_and_get_struct() {
     let mut reg = TypeRegistry::new();
     let point = TypeDef::new_struct(
         vec![
-            ("x".to_string(), RustType::F64),
-            ("y".to_string(), RustType::F64),
+            ("x".to_string(), RustType::F64).into(),
+            ("y".to_string(), RustType::F64).into(),
         ],
         HashMap::new(),
         vec![],
@@ -61,7 +61,8 @@ fn test_registry_register_and_get_function() {
                     name: "Point".to_string(),
                     type_args: vec![],
                 },
-            )],
+            )
+                .into()],
             return_type: None,
             has_rest: false,
         },
@@ -74,7 +75,7 @@ fn test_registry_register_and_get_function() {
             ..
         } => {
             assert_eq!(params.len(), 1);
-            assert_eq!(params[0].0, "p");
+            assert_eq!(params[0].name, "p");
             assert!(return_type.is_none());
         }
         _ => panic!("expected Function"),
@@ -95,7 +96,7 @@ fn test_registry_merge() {
     reg1.register(
         "Point".to_string(),
         TypeDef::new_struct(
-            vec![("x".to_string(), RustType::F64)],
+            vec![("x".to_string(), RustType::F64).into()],
             HashMap::new(),
             vec![],
         ),
@@ -123,14 +124,15 @@ fn test_merge_preserves_builtin_constructor_when_source_has_none() {
     let mut builtin_reg = TypeRegistry::new();
     let ctor = MethodSignature {
         params: vec![
-            ("body".to_string(), RustType::String),
+            ("body".to_string(), RustType::String).into(),
             (
                 "init".to_string(),
                 RustType::Named {
                     name: "ResponseInit".to_string(),
                     type_args: vec![],
                 },
-            ),
+            )
+                .into(),
         ],
         return_type: None,
         has_rest: false,
@@ -193,7 +195,7 @@ fn test_merge_source_constructor_overrides_builtin() {
             fields: vec![],
             methods: HashMap::new(),
             constructor: Some(vec![MethodSignature {
-                params: vec![("old".to_string(), RustType::String)],
+                params: vec![("old".to_string(), RustType::String).into()],
                 return_type: None,
                 has_rest: false,
             }]),
@@ -208,10 +210,10 @@ fn test_merge_source_constructor_overrides_builtin() {
         "MyClass".to_string(),
         TypeDef::Struct {
             type_params: vec![],
-            fields: vec![("x".to_string(), RustType::F64)],
+            fields: vec![("x".to_string(), RustType::F64).into()],
             methods: HashMap::new(),
             constructor: Some(vec![MethodSignature {
-                params: vec![("new_param".to_string(), RustType::F64)],
+                params: vec![("new_param".to_string(), RustType::F64).into()],
                 return_type: None,
                 has_rest: false,
             }]),
@@ -230,7 +232,7 @@ fn test_merge_source_constructor_overrides_builtin() {
             ..
         } => {
             let ctors = constructor.as_ref().unwrap();
-            assert_eq!(ctors[0].params[0].0, "new_param");
+            assert_eq!(ctors[0].params[0].name, "new_param");
             assert_eq!(fields.len(), 1);
         }
         other => panic!("expected Struct, got {other:?}"),
@@ -250,7 +252,7 @@ fn test_merge_preserves_builtin_call_signatures() {
             methods: HashMap::new(),
             constructor: None,
             call_signatures: vec![MethodSignature {
-                params: vec![("x".to_string(), RustType::String)],
+                params: vec![("x".to_string(), RustType::String).into()],
                 return_type: Some(RustType::F64),
                 has_rest: false,
             }],
@@ -264,7 +266,7 @@ fn test_merge_preserves_builtin_call_signatures() {
         "Handler".to_string(),
         TypeDef::Struct {
             type_params: vec![],
-            fields: vec![("name".to_string(), RustType::String)],
+            fields: vec![("name".to_string(), RustType::String).into()],
             methods: HashMap::new(),
             constructor: None,
             call_signatures: vec![],
@@ -323,14 +325,14 @@ fn test_merge_source_call_signatures_take_priority() {
             constructor: None,
             call_signatures: vec![
                 MethodSignature {
-                    params: vec![("a".to_string(), RustType::String)],
+                    params: vec![("a".to_string(), RustType::String).into()],
                     return_type: Some(RustType::F64),
                     has_rest: false,
                 },
                 MethodSignature {
                     params: vec![
-                        ("a".to_string(), RustType::String),
-                        ("b".to_string(), RustType::F64),
+                        ("a".to_string(), RustType::String).into(),
+                        ("b".to_string(), RustType::F64).into(),
                     ],
                     return_type: Some(RustType::String),
                     has_rest: false,

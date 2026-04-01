@@ -17,11 +17,11 @@ fn test_generic_interface_type_params_stored_in_registry() {
             assert_eq!(type_params[0].name, "T");
             assert_eq!(type_params[0].constraint, None);
             assert_eq!(fields.len(), 1);
-            assert_eq!(fields[0].0, "value");
+            assert_eq!(fields[0].name, "value");
             assert!(
-                matches!(&fields[0].1, RustType::Named { name, .. } if name == "T"),
+                matches!(&fields[0].ty, RustType::Named { name, .. } if name == "T"),
                 "expected Named(T), got {:?}",
-                fields[0].1
+                fields[0].ty
             );
         }
         other => panic!("expected Struct, got {other:?}"),
@@ -62,8 +62,8 @@ fn test_instantiate_generic_type_substitutes_fields() {
     match instantiated {
         TypeDef::Struct { fields, .. } => {
             assert_eq!(fields.len(), 1);
-            assert_eq!(fields[0].0, "value");
-            assert_eq!(fields[0].1, RustType::String);
+            assert_eq!(fields[0].name, "value");
+            assert_eq!(fields[0].ty, RustType::String);
         }
         other => panic!("expected Struct, got {other:?}"),
     }
@@ -107,11 +107,11 @@ fn test_collect_class_type_params_single() {
             assert_eq!(type_params[0].name, "T");
             assert_eq!(type_params[0].constraint, None);
             assert_eq!(fields.len(), 1);
-            assert_eq!(fields[0].0, "value");
+            assert_eq!(fields[0].name, "value");
             assert!(
-                matches!(&fields[0].1, RustType::Named { name, .. } if name == "T"),
+                matches!(&fields[0].ty, RustType::Named { name, .. } if name == "T"),
                 "expected Named(T), got {:?}",
-                fields[0].1
+                fields[0].ty
             );
         }
         other => panic!("expected Struct, got {other:?}"),
@@ -184,8 +184,8 @@ fn test_collect_type_alias_du_enum_type_params() {
             assert_eq!(variants.len(), 2);
             let ok_fields = variant_fields.get("Ok").expect("Ok variant should exist");
             assert!(
-                ok_fields.iter().any(|(name, ty)| name == "value"
-                    && matches!(ty, RustType::Named { name, .. } if name == "T")),
+                ok_fields.iter().any(|f| f.name == "value"
+                    && matches!(f.ty, RustType::Named { ref name, .. } if name == "T")),
                 "expected Ok variant to have field 'value: T', got {ok_fields:?}"
             );
         }
@@ -214,11 +214,12 @@ fn test_substitute_types_enum_variant_fields() {
                         name: "T".to_string(),
                         type_args: vec![],
                     },
-                )],
+                )
+                    .into()],
             ),
             (
                 "Error".to_string(),
-                vec![("msg".to_string(), RustType::String)],
+                vec![("msg".to_string(), RustType::String).into()],
             ),
         ]),
     };
@@ -228,13 +229,13 @@ fn test_substitute_types_enum_variant_fields() {
         TypeDef::Enum { variant_fields, .. } => {
             let ok_fields = variant_fields.get("Ok").unwrap();
             assert_eq!(
-                ok_fields[0].1,
+                ok_fields[0].ty,
                 RustType::String,
                 "T should be substituted to String"
             );
             let err_fields = variant_fields.get("Error").unwrap();
             assert_eq!(
-                err_fields[0].1,
+                err_fields[0].ty,
                 RustType::String,
                 "String should remain unchanged"
             );
@@ -268,7 +269,8 @@ fn test_substitute_types_enum_multiple_params() {
                         name: "T".to_string(),
                         type_args: vec![],
                     },
-                )],
+                )
+                    .into()],
             ),
             (
                 "Err".to_string(),
@@ -278,7 +280,8 @@ fn test_substitute_types_enum_multiple_params() {
                         name: "E".to_string(),
                         type_args: vec![],
                     },
-                )],
+                )
+                    .into()],
             ),
         ]),
     };
@@ -290,9 +293,9 @@ fn test_substitute_types_enum_multiple_params() {
     match &result {
         TypeDef::Enum { variant_fields, .. } => {
             let ok_fields = variant_fields.get("Ok").unwrap();
-            assert_eq!(ok_fields[0].1, RustType::String);
+            assert_eq!(ok_fields[0].ty, RustType::String);
             let err_fields = variant_fields.get("Err").unwrap();
-            assert_eq!(err_fields[0].1, RustType::F64);
+            assert_eq!(err_fields[0].ty, RustType::F64);
         }
         other => panic!("expected Enum, got {other:?}"),
     }

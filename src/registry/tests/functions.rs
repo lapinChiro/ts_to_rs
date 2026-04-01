@@ -15,16 +15,16 @@ fn test_build_registry_function() {
             ..
         } => {
             assert_eq!(params.len(), 2);
-            assert_eq!(params[0].0, "p");
+            assert_eq!(params[0].name, "p");
             assert_eq!(
-                params[0].1,
+                params[0].ty,
                 RustType::Named {
                     name: "Point".to_string(),
                     type_args: vec![],
                 }
             );
-            assert_eq!(params[1].0, "color");
-            assert_eq!(params[1].1, RustType::String);
+            assert_eq!(params[1].name, "color");
+            assert_eq!(params[1].ty, RustType::String);
             assert_eq!(*return_type, Some(RustType::Bool));
         }
         _ => panic!("expected Function"),
@@ -42,8 +42,8 @@ fn test_build_registry_arrow_function() {
             ..
         } => {
             assert_eq!(params.len(), 1);
-            assert_eq!(params[0].0, "name");
-            assert_eq!(params[0].1, RustType::String);
+            assert_eq!(params[0].name, "name");
+            assert_eq!(params[0].ty, RustType::String);
             assert_eq!(*return_type, Some(RustType::String));
         }
         _ => panic!("expected Function"),
@@ -60,8 +60,8 @@ fn test_build_registry_fn_rest_param_sets_has_rest_true() {
         } => {
             assert!(has_rest, "has_rest should be true for rest param");
             assert_eq!(params.len(), 1);
-            assert_eq!(params[0].0, "nums");
-            assert_eq!(params[0].1, RustType::Vec(Box::new(RustType::F64)));
+            assert_eq!(params[0].name, "nums");
+            assert_eq!(params[0].ty, RustType::Vec(Box::new(RustType::F64)));
         }
         _ => panic!("expected Function"),
     }
@@ -78,10 +78,10 @@ fn test_build_registry_fn_mixed_and_rest_param() {
         } => {
             assert!(has_rest);
             assert_eq!(params.len(), 2);
-            assert_eq!(params[0].0, "prefix");
-            assert_eq!(params[0].1, RustType::String);
-            assert_eq!(params[1].0, "msgs");
-            assert_eq!(params[1].1, RustType::Vec(Box::new(RustType::String)));
+            assert_eq!(params[0].name, "prefix");
+            assert_eq!(params[0].ty, RustType::String);
+            assert_eq!(params[1].name, "msgs");
+            assert_eq!(params[1].ty, RustType::Vec(Box::new(RustType::String)));
         }
         _ => panic!("expected Function"),
     }
@@ -113,8 +113,8 @@ fn test_build_registry_fn_type_alias_with_params() {
             ..
         } => {
             assert_eq!(params.len(), 1);
-            assert_eq!(params[0].0, "c");
-            assert_eq!(params[0].1, RustType::String);
+            assert_eq!(params[0].name, "c");
+            assert_eq!(params[0].ty, RustType::String);
             assert_eq!(*return_type, Some(RustType::F64));
         }
         other => panic!("expected Function, got {other:?}"),
@@ -153,8 +153,8 @@ fn test_build_registry_call_signature_type_alias_registers_as_function() {
             ..
         } => {
             assert_eq!(params.len(), 1);
-            assert_eq!(params[0].0, "c");
-            assert_eq!(params[0].1, RustType::String);
+            assert_eq!(params[0].name, "c");
+            assert_eq!(params[0].ty, RustType::String);
             assert_eq!(*return_type, Some(RustType::F64));
         }
         other => panic!("expected Function, got {other:?}"),
@@ -173,8 +173,8 @@ fn test_build_registry_call_signature_type_alias_multiple_params() {
             ..
         } => {
             assert_eq!(params.len(), 2);
-            assert_eq!(params[0], ("a".to_string(), RustType::String));
-            assert_eq!(params[1], ("b".to_string(), RustType::F64));
+            assert_eq!(params[0], ("a".to_string(), RustType::String).into());
+            assert_eq!(params[1], ("b".to_string(), RustType::F64).into());
             assert_eq!(*return_type, Some(RustType::Bool));
         }
         other => panic!("expected Function, got {other:?}"),
@@ -216,8 +216,8 @@ fn test_build_registry_call_signature_overload_picks_longest() {
             ..
         } => {
             assert_eq!(params.len(), 2);
-            assert_eq!(params[0].0, "c");
-            assert_eq!(params[1].0, "key");
+            assert_eq!(params[0].name, "c");
+            assert_eq!(params[1].name, "key");
             assert_eq!(*return_type, Some(RustType::F64));
         }
         other => panic!("expected Function, got {other:?}"),
@@ -232,7 +232,7 @@ fn test_build_registry_call_signature_with_properties_stays_struct() {
     match def {
         TypeDef::Struct { fields, .. } => {
             assert!(
-                fields.iter().any(|(n, _)| n == "name"),
+                fields.iter().any(|f| f.name == "name"),
                 "should have 'name' field"
             );
         }
@@ -252,7 +252,7 @@ fn test_fn_type_alias_rest_param_sets_has_rest() {
         } => {
             assert!(has_rest, "has_rest should be true");
             assert_eq!(params.len(), 1);
-            assert_eq!(params[0].0, "args");
+            assert_eq!(params[0].name, "args");
         }
         other => panic!("expected Function, got {other:?}"),
     }
@@ -270,7 +270,7 @@ fn test_call_signature_type_alias_rest_param_sets_has_rest() {
         } => {
             assert!(has_rest, "has_rest should be true");
             assert_eq!(params.len(), 1);
-            assert_eq!(params[0].0, "args");
+            assert_eq!(params[0].name, "args");
         }
         other => panic!("expected Function, got {other:?}"),
     }
@@ -288,13 +288,15 @@ fn test_arrow_default_param_option_wrap() {
     match reg.get("greet").unwrap() {
         TypeDef::Function { params, .. } => {
             assert_eq!(params.len(), 2);
-            assert_eq!(params[0], ("name".to_string(), RustType::String));
+            assert_eq!(params[0], ("name".to_string(), RustType::String).into());
             assert_eq!(
                 params[1],
-                (
-                    "greeting".to_string(),
-                    RustType::Option(Box::new(RustType::String))
-                )
+                ParamDef {
+                    name: "greeting".to_string(),
+                    ty: RustType::Option(Box::new(RustType::String)),
+                    optional: false,
+                    has_default: true,
+                }
             );
         }
         other => panic!("expected Function, got {other:?}"),

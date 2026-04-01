@@ -12,7 +12,7 @@ fn test_convert_static_prop_propagates_type_annotation() {
     reg.register(
         "Config".to_string(),
         crate::registry::TypeDef::new_struct(
-            vec![("name".to_string(), RustType::String)],
+            vec![("name".to_string(), RustType::String).into()],
             std::collections::HashMap::new(),
             vec![],
         ),

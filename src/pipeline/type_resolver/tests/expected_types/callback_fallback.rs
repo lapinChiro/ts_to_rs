@@ -11,8 +11,8 @@ fn test_propagate_expected_callback_arrow_return_object_literal() {
         "Result".to_string(),
         TypeDef::new_struct(
             vec![
-                ("ok".to_string(), RustType::Bool),
-                ("message".to_string(), RustType::String),
+                ("ok".to_string(), RustType::Bool).into(),
+                ("message".to_string(), RustType::String).into(),
             ],
             Default::default(),
             vec![],
@@ -31,7 +31,8 @@ fn test_propagate_expected_callback_arrow_return_object_literal() {
                         type_args: vec![],
                     }),
                 },
-            )],
+            )
+                .into()],
             return_type: Some(RustType::Named {
                 name: "Result".to_string(),
                 type_args: vec![],
@@ -73,7 +74,8 @@ fn test_propagate_expected_logical_or_fallback_empty_object_no_annotation() {
                     name: "VerifyOpts".to_string(),
                     type_args: vec![],
                 },
-            )],
+            )
+                .into()],
             Default::default(),
             vec![],
         ),
@@ -81,7 +83,7 @@ fn test_propagate_expected_logical_or_fallback_empty_object_no_annotation() {
     reg.register(
         "VerifyOpts".to_string(),
         TypeDef::new_struct(
-            vec![("algo".to_string(), RustType::String)],
+            vec![("algo".to_string(), RustType::String).into()],
             Default::default(),
             vec![],
         ),
@@ -114,7 +116,7 @@ fn test_propagate_expected_nullish_coalescing_fallback_empty_object_no_annotatio
     reg.register(
         "Config".to_string(),
         TypeDef::new_struct(
-            vec![("host".to_string(), RustType::String)],
+            vec![("host".to_string(), RustType::String).into()],
             Default::default(),
             vec![],
         ),
@@ -148,8 +150,8 @@ fn test_propagate_expected_typed_var_arrow_return_object_literal() {
         "Point".to_string(),
         TypeDef::new_struct(
             vec![
-                ("x".to_string(), RustType::F64),
-                ("y".to_string(), RustType::F64),
+                ("x".to_string(), RustType::F64).into(),
+                ("y".to_string(), RustType::F64).into(),
             ],
             Default::default(),
             vec![],
@@ -186,7 +188,7 @@ fn test_fallback_on_inline_type_member_access() {
     reg.register(
         "VerifyOpts".to_string(),
         TypeDef::new_struct(
-            vec![("algo".to_string(), RustType::String)],
+            vec![("algo".to_string(), RustType::String).into()],
             Default::default(),
             vec![],
         ),
@@ -226,7 +228,8 @@ fn test_fallback_on_constrained_type_param_member_access() {
                     name: "VerifyOpts".to_string(),
                     type_args: vec![],
                 },
-            )],
+            )
+                .into()],
             Default::default(),
             vec![],
         ),
@@ -234,7 +237,7 @@ fn test_fallback_on_constrained_type_param_member_access() {
     reg.register(
         "VerifyOpts".to_string(),
         TypeDef::new_struct(
-            vec![("algo".to_string(), RustType::String)],
+            vec![("algo".to_string(), RustType::String).into()],
             Default::default(),
             vec![],
         ),
@@ -298,7 +301,7 @@ fn test_callable_interface_return_type_propagated_to_arrow() {
     reg.register(
         "Cookie".to_string(),
         TypeDef::new_struct(
-            vec![("name".to_string(), RustType::String)],
+            vec![("name".to_string(), RustType::String).into()],
             Default::default(),
             vec![],
         ),
@@ -311,7 +314,7 @@ fn test_callable_interface_return_type_propagated_to_arrow() {
             methods: Default::default(),
             constructor: None,
             call_signatures: vec![MethodSignature {
-                params: vec![("c".to_string(), RustType::String)],
+                params: vec![("c".to_string(), RustType::String).into()],
                 return_type: Some(RustType::Named {
                     name: "Cookie".to_string(),
                     type_args: vec![],

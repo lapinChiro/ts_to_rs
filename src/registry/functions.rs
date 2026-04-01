@@ -3,7 +3,7 @@
 use anyhow::Result;
 use swc_ecma_ast as ast;
 
-use super::{TypeDef, TypeRegistry};
+use super::{ParamDef, TypeDef, TypeRegistry};
 use crate::ir::RustType;
 use crate::pipeline::type_converter::convert_ts_type;
 use crate::pipeline::SyntheticTypeRegistry;
@@ -58,10 +58,26 @@ pub(super) fn extract_ts_fn_param(
     param: &ast::TsFnParam,
     lookup: &TypeRegistry,
     synthetic: &mut SyntheticTypeRegistry,
-) -> Option<(String, RustType)> {
+) -> Option<ParamDef> {
     match param {
-        ast::TsFnParam::Ident(ident) => extract_ident_param(ident, lookup, synthetic),
-        ast::TsFnParam::Rest(rest) => extract_rest_param(rest, lookup, synthetic),
+        ast::TsFnParam::Ident(ident) => {
+            let (name, ty) = extract_ident_param(ident, lookup, synthetic)?;
+            Some(ParamDef {
+                name,
+                ty,
+                optional: ident.id.optional,
+                has_default: false,
+            })
+        }
+        ast::TsFnParam::Rest(rest) => {
+            let (name, ty) = extract_rest_param(rest, lookup, synthetic)?;
+            Some(ParamDef {
+                name,
+                ty,
+                optional: false,
+                has_default: false,
+            })
+        }
         _ => None,
     }
 }
@@ -76,18 +92,39 @@ pub(super) fn extract_pat_param(
     pat: &ast::Pat,
     lookup: &TypeRegistry,
     synthetic: &mut SyntheticTypeRegistry,
-) -> Option<(String, RustType)> {
+) -> Option<ParamDef> {
     match pat {
-        ast::Pat::Ident(ident) => extract_ident_param(ident, lookup, synthetic),
+        ast::Pat::Ident(ident) => {
+            let (name, ty) = extract_ident_param(ident, lookup, synthetic)?;
+            Some(ParamDef {
+                name,
+                ty,
+                optional: ident.id.optional,
+                has_default: false,
+            })
+        }
         ast::Pat::Assign(assign) => {
             if let ast::Pat::Ident(ident) = assign.left.as_ref() {
                 let (name, ty) = extract_ident_param(ident, lookup, synthetic)?;
-                Some((name, RustType::Option(Box::new(ty))))
+                Some(ParamDef {
+                    name,
+                    ty: RustType::Option(Box::new(ty)),
+                    optional: false,
+                    has_default: true,
+                })
             } else {
                 None
             }
         }
-        ast::Pat::Rest(rest) => extract_rest_param(rest, lookup, synthetic),
+        ast::Pat::Rest(rest) => {
+            let (name, ty) = extract_rest_param(rest, lookup, synthetic)?;
+            Some(ParamDef {
+                name,
+                ty,
+                optional: false,
+                has_default: false,
+            })
+        }
         _ => None,
     }
 }
@@ -100,7 +137,7 @@ pub(super) fn try_collect_fn_type_alias(
 ) -> Option<TypeDef> {
     match alias.type_ann.as_ref() {
         ast::TsType::TsFnOrConstructorType(ast::TsFnOrConstructorType::TsFnType(fn_type)) => {
-            let params: Vec<(String, RustType)> = fn_type
+            let params: Vec<ParamDef> = fn_type
                 .params
                 .iter()
                 .filter_map(|p| extract_ts_fn_param(p, lookup, synthetic))
@@ -152,7 +189,7 @@ fn try_collect_call_signature_fn(
     // Pick the overload with the most parameters
     let sig = call_sigs.iter().max_by_key(|s| s.params.len())?;
 
-    let params: Vec<(String, RustType)> = sig
+    let params: Vec<ParamDef> = sig
         .params
         .iter()
         .filter_map(|p| extract_ts_fn_param(p, lookup, synthetic))
@@ -183,7 +220,7 @@ pub(super) fn collect_fn_def_with_extras(
     lookup: &TypeRegistry,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<TypeDef> {
-    let params: Vec<(String, RustType)> = func
+    let params: Vec<ParamDef> = func
         .params
         .iter()
         .filter_map(|param| extract_pat_param(&param.pat, lookup, synthetic))
@@ -214,7 +251,7 @@ pub(super) fn collect_arrow_def_with_extras(
     lookup: &TypeRegistry,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Result<TypeDef> {
-    let params: Vec<(String, RustType)> = arrow
+    let params: Vec<ParamDef> = arrow
         .params
         .iter()
         .filter_map(|param| extract_pat_param(param, lookup, synthetic))

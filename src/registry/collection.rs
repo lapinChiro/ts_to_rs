@@ -6,7 +6,7 @@ use std::collections::HashMap;
 
 use swc_ecma_ast as ast;
 
-use super::{ConstElement, ConstField, MethodSignature, TypeDef, TypeRegistry};
+use super::{ConstElement, ConstField, FieldDef, MethodSignature, ParamDef, TypeDef, TypeRegistry};
 use crate::ir::{RustType, TypeParam};
 use crate::pipeline::type_converter::convert_ts_type;
 use crate::pipeline::SyntheticTypeRegistry;
@@ -296,7 +296,11 @@ fn collect_class_info(
                 };
                 if let Some(ann) = &prop.type_ann {
                     if let Ok(ty) = convert_ts_type(&ann.type_ann, synthetic, lookup) {
-                        fields.push((name, ty));
+                        fields.push(FieldDef {
+                            name,
+                            ty,
+                            optional: prop.is_optional,
+                        });
                     }
                 }
             }
@@ -304,12 +308,16 @@ fn collect_class_info(
                 let name = prop.key.name.to_string();
                 if let Some(ann) = &prop.type_ann {
                     if let Ok(ty) = convert_ts_type(&ann.type_ann, synthetic, lookup) {
-                        fields.push((name, ty));
+                        fields.push(FieldDef {
+                            name,
+                            ty,
+                            optional: prop.is_optional,
+                        });
                     }
                 }
             }
             ast::ClassMember::Constructor(ctor) => {
-                let params: Vec<(String, RustType)> = ctor
+                let params: Vec<ParamDef> = ctor
                     .params
                     .iter()
                     .filter_map(|p| match p {
@@ -321,7 +329,12 @@ fn collect_class_info(
                             let ty = ident.type_ann.as_ref().and_then(|ann| {
                                 convert_ts_type(&ann.type_ann, synthetic, lookup).ok()
                             })?;
-                            Some((ident.id.sym.to_string(), ty))
+                            Some(ParamDef {
+                                name: ident.id.sym.to_string(),
+                                ty,
+                                optional: ident.id.optional,
+                                has_default: false,
+                            })
                         }
                         ast::ParamOrTsParamProp::TsParamProp(param_prop) => {
                             let ident = match &param_prop.param {
@@ -331,7 +344,12 @@ fn collect_class_info(
                             let ty = ident.type_ann.as_ref().and_then(|ann| {
                                 convert_ts_type(&ann.type_ann, synthetic, lookup).ok()
                             })?;
-                            Some((ident.id.sym.to_string(), ty))
+                            Some(ParamDef {
+                                name: ident.id.sym.to_string(),
+                                ty,
+                                optional: ident.id.optional,
+                                has_default: false,
+                            })
                         }
                     })
                     .collect();
@@ -355,7 +373,7 @@ fn collect_class_info(
                 if let Some(func) = &method.function.body {
                     let _ = func; // body exists, collect params
                 }
-                let params: Vec<(String, RustType)> = method
+                let params: Vec<ParamDef> = method
                     .function
                     .params
                     .iter()
@@ -429,7 +447,7 @@ fn resolve_type_ref_fields(
     type_ref: &ast::TsTypeRef,
     reg: &TypeRegistry,
     synthetic: &mut SyntheticTypeRegistry,
-) -> Option<Vec<(String, RustType)>> {
+) -> Option<Vec<FieldDef>> {
     let name = match &type_ref.type_name {
         ast::TsEntityName::Ident(ident) => ident.sym.to_string(),
         _ => return None,
@@ -468,7 +486,7 @@ fn collect_type_lit_fields(
     lit: &ast::TsTypeLit,
     reg: &TypeRegistry,
     synthetic: &mut SyntheticTypeRegistry,
-) -> Vec<(String, RustType)> {
+) -> Vec<FieldDef> {
     lit.members
         .iter()
         .filter_map(|member| {
@@ -491,7 +509,7 @@ fn collect_type_alias_fields(
     alias: &ast::TsTypeAliasDecl,
     reg: &TypeRegistry,
     synthetic: &mut SyntheticTypeRegistry,
-) -> Option<Vec<(String, RustType)>> {
+) -> Option<Vec<FieldDef>> {
     match alias.type_ann.as_ref() {
         ast::TsType::TsTypeLit(lit) => Some(collect_type_lit_fields(lit, reg, synthetic)),
         // Intersection type: `type Person = Named & Aged` → merge fields from all members

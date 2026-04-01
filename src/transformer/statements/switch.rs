@@ -466,7 +466,7 @@ impl<'a> Transformer<'a> {
                         if let Some(fields) = variant_fields.get(vname) {
                             *bindings = needed_fields
                                 .iter()
-                                .filter(|f| fields.iter().any(|(n, _)| n == *f))
+                                .filter(|f| fields.iter().any(|fd| &fd.name == *f))
                                 .cloned()
                                 .collect();
                         }

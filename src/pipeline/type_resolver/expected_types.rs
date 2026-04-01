@@ -157,7 +157,12 @@ impl<'a> TypeResolver<'a> {
             self.registry.instantiate(name, type_args)
         };
         if let Some(TypeDef::Struct { fields, .. }) = type_def {
-            return Some(fields);
+            return Some(
+                fields
+                    .iter()
+                    .map(|f| (f.name.clone(), f.ty.clone()))
+                    .collect(),
+            );
         }
 
         // 2. SyntheticTypeRegistry (inline object types → _TypeLitN)
@@ -209,7 +214,13 @@ impl<'a> TypeResolver<'a> {
         {
             let tag_value = find_string_prop_value(obj, tag)?;
             let variant_name = string_values.get(&tag_value)?;
-            return variant_fields.get(variant_name).cloned();
+            let fields = variant_fields.get(variant_name)?;
+            return Some(
+                fields
+                    .iter()
+                    .map(|f| (f.name.clone(), f.ty.clone()))
+                    .collect(),
+            );
         }
 
         // Struct resolution (TypeRegistry + SyntheticTypeRegistry + constraints)

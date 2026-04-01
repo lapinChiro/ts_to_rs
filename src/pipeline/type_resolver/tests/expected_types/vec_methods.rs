@@ -24,7 +24,8 @@ fn create_registry_with_array_methods() -> TypeRegistry {
             params: vec![(
                 "items".to_string(),
                 RustType::Vec(Box::new(type_param("T"))),
-            )],
+            )
+                .into()],
             return_type: Some(RustType::F64),
             has_rest: true,
         }],
@@ -44,7 +45,8 @@ fn create_registry_with_array_methods() -> TypeRegistry {
                     ],
                     return_type: Box::new(type_param("U")),
                 },
-            )],
+            )
+                .into()],
             return_type: Some(RustType::Vec(Box::new(type_param("U")))),
             has_rest: false,
         }],
@@ -57,7 +59,7 @@ fn create_registry_with_array_methods() -> TypeRegistry {
                 name: "T".to_string(),
                 constraint: None,
             }],
-            fields: vec![("length".to_string(), RustType::F64)],
+            fields: vec![("length".to_string(), RustType::F64).into()],
             methods,
             constructor: None,
             call_signatures: vec![],
@@ -76,7 +78,7 @@ fn test_vec_push_propagates_element_type_to_argument() {
     reg.register(
         "Item".to_string(),
         crate::registry::TypeDef::new_struct(
-            vec![("name".to_string(), RustType::String)],
+            vec![("name".to_string(), RustType::String).into()],
             Default::default(),
             vec![],
         ),
@@ -110,7 +112,7 @@ fn test_vec_map_callback_param_gets_element_type() {
     reg.register(
         "Item".to_string(),
         crate::registry::TypeDef::new_struct(
-            vec![("name".to_string(), RustType::String)],
+            vec![("name".to_string(), RustType::String).into()],
             Default::default(),
             vec![],
         ),
@@ -217,12 +219,12 @@ fn test_member_callee_args_resolved_before_overload_selection() {
         "process".to_string(),
         vec![
             MethodSignature {
-                params: vec![("x".to_string(), RustType::String)],
+                params: vec![("x".to_string(), RustType::String).into()],
                 return_type: Some(RustType::String),
                 has_rest: false,
             },
             MethodSignature {
-                params: vec![("x".to_string(), RustType::F64)],
+                params: vec![("x".to_string(), RustType::F64).into()],
                 return_type: Some(RustType::F64),
                 has_rest: false,
             },

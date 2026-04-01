@@ -662,13 +662,13 @@ impl<'a> TypeResolver<'a> {
                     } if !sigs.is_empty() => {
                         let sig = select_overload(sigs, args.len(), &[]);
                         Some((
-                            sig.params.iter().map(|(_, ty)| ty.clone()).collect(),
+                            sig.params.iter().map(|p| p.ty.clone()).collect(),
                             sig.has_rest,
                         ))
                     }
                     TypeDef::Struct { fields, .. } => {
                         // Fallback: no constructor defined, use field types
-                        Some((fields.iter().map(|(_, ty)| ty.clone()).collect(), false))
+                        Some((fields.iter().map(|f| f.ty.clone()).collect(), false))
                     }
                     _ => None,
                 };
@@ -731,7 +731,7 @@ impl<'a> TypeResolver<'a> {
         let param_types: Vec<RustType> = match constructor {
             Some(sigs) if !sigs.is_empty() => {
                 let sig = select_overload(sigs, args.len(), &[]);
-                sig.params.iter().map(|(_, ty)| ty.clone()).collect()
+                sig.params.iter().map(|p| p.ty.clone()).collect()
             }
             _ => return vec![],
         };

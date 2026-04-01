@@ -27,13 +27,78 @@ use crate::pipeline::SyntheticTypeRegistry;
 
 pub use collection::collect_type_params;
 
+/// TypeDef のフィールド定義。optional フラグを TS メタデータとして保持する。
+///
+/// TypeDef::Struct の fields や TypeDef::Enum の variant_fields で使用される。
+/// `optional: true` のフィールドは変換フェーズで `Option<T>` にラップされる。
+#[derive(Debug, Clone, PartialEq)]
+pub struct FieldDef<T = RustType> {
+    /// フィールド名
+    pub name: String,
+    /// フィールド型
+    pub ty: T,
+    /// TS の optional property (`?:`) か
+    pub optional: bool,
+}
+
+impl FieldDef {
+    /// 非 optional なフィールド定義を生成する便利コンストラクタ。
+    pub fn new(name: String, ty: RustType) -> Self {
+        Self {
+            name,
+            ty,
+            optional: false,
+        }
+    }
+}
+
+impl From<(String, RustType)> for FieldDef {
+    fn from((name, ty): (String, RustType)) -> Self {
+        Self::new(name, ty)
+    }
+}
+
+/// TypeDef のパラメータ定義。optional / has_default フラグを TS メタデータとして保持する。
+///
+/// TypeDef::Function の params や MethodSignature の params で使用される。
+/// `has_default: true` のパラメータは変換フェーズで `Option<T>` にラップされる。
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParamDef<T = RustType> {
+    /// パラメータ名
+    pub name: String,
+    /// パラメータ型
+    pub ty: T,
+    /// TS の optional parameter (`?:`) か
+    pub optional: bool,
+    /// TS のデフォルトパラメータ (`= value`) か
+    pub has_default: bool,
+}
+
+impl ParamDef {
+    /// 非 optional・デフォルトなしのパラメータ定義を生成する便利コンストラクタ。
+    pub fn new(name: String, ty: RustType) -> Self {
+        Self {
+            name,
+            ty,
+            optional: false,
+            has_default: false,
+        }
+    }
+}
+
+impl From<(String, RustType)> for ParamDef {
+    fn from((name, ty): (String, RustType)) -> Self {
+        Self::new(name, ty)
+    }
+}
+
 /// メソッドシグネチャ（パラメータ + 戻り値型 + rest パラメータ情報）。
 #[derive(Debug, Clone, PartialEq)]
-pub struct MethodSignature {
-    /// パラメータ名と型のペア
-    pub params: Vec<(String, RustType)>,
+pub struct MethodSignature<T = RustType> {
+    /// パラメータ定義
+    pub params: Vec<ParamDef<T>>,
     /// 戻り値型（アノテーションなしの場合は None）
-    pub return_type: Option<RustType>,
+    pub return_type: Option<T>,
     /// 最後のパラメータが rest パラメータか（`...args: T[]` パターン）
     pub has_rest: bool,
 }
@@ -89,12 +154,13 @@ pub fn select_overload<'a>(
         let compatible: Vec<&&MethodSignature> = candidates
             .iter()
             .filter(|sig| {
-                sig.params.iter().zip(arg_types.iter()).all(
-                    |((_, param_ty), arg_ty)| match arg_ty {
-                        Some(at) => at == param_ty,
+                sig.params
+                    .iter()
+                    .zip(arg_types.iter())
+                    .all(|(param, arg_ty)| match arg_ty {
+                        Some(at) => at == &param.ty,
                         None => true,
-                    },
-                )
+                    })
             })
             .collect();
         if compatible.len() == 1 {
@@ -108,40 +174,44 @@ pub fn select_overload<'a>(
 
 /// `ConstValue` のオブジェクトフィールド。
 #[derive(Debug, Clone, PartialEq)]
-pub struct ConstField {
+pub struct ConstField<T = RustType> {
     /// フィールド名
     pub name: String,
     /// フィールド型
-    pub ty: RustType,
+    pub ty: T,
     /// `as const` オブジェクトの文字列リテラル値（`{ key: 'value' } as const` の場合）
     pub string_literal_value: Option<String>,
 }
 
 /// `ConstValue` の配列要素。
 #[derive(Debug, Clone, PartialEq)]
-pub struct ConstElement {
+pub struct ConstElement<T = RustType> {
     /// 要素の型
-    pub ty: RustType,
+    pub ty: T,
     /// `as const` 配列の文字列リテラル値（`['a', 'b'] as const` の場合に保持）
     pub string_literal_value: Option<String>,
 }
 
 /// 型定義の種類。
+///
+/// 型パラメータ `T` によって保持する型表現を切り替える:
+/// - `TypeDef<RustType>` (= `TypeDef`): Rust 型表現。TypeRegistry に格納され、コンシューマが使用。
+/// - `TypeDef<TsTypeInfo>`: TS 型表現。registry フェーズの内部で使用。
 #[derive(Debug, Clone, PartialEq)]
-pub enum TypeDef {
+pub enum TypeDef<T = RustType> {
     /// struct（interface / type alias から変換）
     Struct {
         /// ジェネリック型パラメータ
         type_params: Vec<TypeParam>,
-        /// フィールド名と型のペア
-        fields: Vec<(String, RustType)>,
+        /// フィールド定義
+        fields: Vec<FieldDef<T>>,
         /// メソッドシグネチャ（メソッド名 → オーバーロードを含む全シグネチャ）
-        methods: HashMap<String, Vec<MethodSignature>>,
+        methods: HashMap<String, Vec<MethodSignature<T>>>,
         /// コンストラクタシグネチャ（オーバーロード対応）
-        constructor: Option<Vec<MethodSignature>>,
+        constructor: Option<Vec<MethodSignature<T>>>,
         /// Call signatures for callable interfaces.
         /// e.g., `interface GetCookie { (c: Context): Cookie; (c: Context, key: string): string }`
-        call_signatures: Vec<MethodSignature>,
+        call_signatures: Vec<MethodSignature<T>>,
         /// 親 interface 名のリスト（`interface B extends A` の `A`）
         extends: Vec<String>,
         /// Whether this type comes from a TS interface declaration (true) or class/type alias (false)
@@ -157,26 +227,26 @@ pub enum TypeDef {
         string_values: HashMap<String, String>,
         /// discriminated union の tag フィールド名（例: "kind"）
         tag_field: Option<String>,
-        /// バリアント名 → フィールド一覧のマッピング（discriminated union のみ）
-        variant_fields: HashMap<String, Vec<(String, RustType)>>,
+        /// バリアント名 → フィールド定義のマッピング（discriminated union のみ）
+        variant_fields: HashMap<String, Vec<FieldDef<T>>>,
     },
     /// 関数
     Function {
         /// ジェネリック型パラメータ
         type_params: Vec<TypeParam>,
-        /// パラメータ名と型のペア
-        params: Vec<(String, RustType)>,
+        /// パラメータ定義
+        params: Vec<ParamDef<T>>,
         /// 戻り値型
-        return_type: Option<RustType>,
+        return_type: Option<T>,
         /// 最後のパラメータが rest パラメータかどうか
         has_rest: bool,
     },
     /// const 変数の値型（`as const` 宣言または型注釈付き const 宣言）
     ConstValue {
         /// const オブジェクトのフィールド
-        fields: Vec<ConstField>,
+        fields: Vec<ConstField<T>>,
         /// const 配列の要素（`as const` 配列リテラルから抽出）
-        elements: Vec<ConstElement>,
+        elements: Vec<ConstElement<T>>,
         /// 型注釈の参照先型名（`const x: Config = ...` → `Some("Config")`）
         /// TsTypeQuery ハンドラで typeof 解決時にこの型名へリダイレクトする
         type_ref_name: Option<String>,
@@ -186,7 +256,7 @@ pub enum TypeDef {
 impl TypeDef {
     /// Creates a new struct TypeDef (from class, type alias, or other non-interface source).
     pub fn new_struct(
-        fields: Vec<(String, RustType)>,
+        fields: Vec<FieldDef>,
         methods: HashMap<String, Vec<MethodSignature>>,
         extends: Vec<String>,
     ) -> Self {
@@ -204,7 +274,7 @@ impl TypeDef {
     /// Creates a new interface TypeDef (from TS interface declaration).
     pub fn new_interface(
         type_params: Vec<TypeParam>,
-        fields: Vec<(String, RustType)>,
+        fields: Vec<FieldDef>,
         methods: HashMap<String, Vec<MethodSignature>>,
         extends: Vec<String>,
     ) -> Self {
@@ -234,7 +304,7 @@ impl TypeDef {
     pub fn field_names(&self) -> Option<Vec<String>> {
         match self {
             TypeDef::Struct { fields, .. } if !fields.is_empty() => {
-                Some(fields.iter().map(|(n, _)| n.clone()).collect())
+                Some(fields.iter().map(|f| f.name.clone()).collect())
             }
             TypeDef::ConstValue { fields, .. } if !fields.is_empty() => {
                 Some(fields.iter().map(|f| f.name.clone()).collect())
@@ -250,7 +320,7 @@ impl TypeDef {
     pub fn unique_field_types(&self) -> Option<Vec<RustType>> {
         let types_iter: Box<dyn Iterator<Item = &RustType>> = match self {
             TypeDef::Struct { fields, .. } if !fields.is_empty() => {
-                Box::new(fields.iter().map(|(_, ty)| ty))
+                Box::new(fields.iter().map(|f| &f.ty))
             }
             TypeDef::ConstValue { fields, .. } if !fields.is_empty() => {
                 Box::new(fields.iter().map(|f| &f.ty))
@@ -308,7 +378,12 @@ impl TypeDef {
                             params: sig
                                 .params
                                 .iter()
-                                .map(|(n, ty)| (n.clone(), ty.substitute(bindings)))
+                                .map(|p| ParamDef {
+                                    name: p.name.clone(),
+                                    ty: p.ty.substitute(bindings),
+                                    optional: p.optional,
+                                    has_default: p.has_default,
+                                })
                                 .collect(),
                             return_type: sig.return_type.as_ref().map(|ty| ty.substitute(bindings)),
                             has_rest: sig.has_rest,
@@ -319,7 +394,11 @@ impl TypeDef {
                     type_params: type_params.clone(),
                     fields: fields
                         .iter()
-                        .map(|(name, ty)| (name.clone(), ty.substitute(bindings)))
+                        .map(|f| FieldDef {
+                            name: f.name.clone(),
+                            ty: f.ty.substitute(bindings),
+                            optional: f.optional,
+                        })
                         .collect(),
                     methods: methods
                         .iter()
@@ -349,7 +428,11 @@ impl TypeDef {
                             variant.clone(),
                             fields
                                 .iter()
-                                .map(|(name, ty)| (name.clone(), ty.substitute(bindings)))
+                                .map(|f| FieldDef {
+                                    name: f.name.clone(),
+                                    ty: f.ty.substitute(bindings),
+                                    optional: f.optional,
+                                })
                                 .collect(),
                         )
                     })
@@ -495,8 +578,8 @@ impl TypeRegistry {
         self.resolve_type_def(obj_type).and_then(|def| match &def {
             TypeDef::Struct { fields, .. } => fields
                 .iter()
-                .find(|(name, _)| name == field_name)
-                .map(|(_, ty)| ty.clone()),
+                .find(|f| f.name == field_name)
+                .map(|f| f.ty.clone()),
             _ => None,
         })
     }

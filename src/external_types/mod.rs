@@ -11,7 +11,7 @@ use serde::Deserialize;
 
 use crate::ir::RustType;
 use crate::pipeline::SyntheticTypeRegistry;
-use crate::registry::{MethodSignature, TypeDef, TypeRegistry};
+use crate::registry::{FieldDef, MethodSignature, ParamDef, TypeDef, TypeRegistry};
 
 /// JSON interchange format version. Must match the tsc extraction script's output.
 const FORMAT_VERSION: u64 = 2;
@@ -242,7 +242,7 @@ fn convert_external_typedef(
                 })
                 .collect();
 
-            let converted_fields: Vec<(String, RustType)> = fields
+            let converted_fields: Vec<FieldDef> = fields
                 .iter()
                 .map(|f| {
                     let ty = convert_external_type(&f.field_type, synthetic);
@@ -251,7 +251,11 @@ fn convert_external_typedef(
                     } else {
                         ty
                     };
-                    (f.name.clone(), ty)
+                    FieldDef {
+                        name: f.name.clone(),
+                        ty,
+                        optional: f.optional,
+                    }
                 })
                 .collect();
 
@@ -398,13 +402,13 @@ fn convert_union_type(members: &[ExternalType], synthetic: &mut SyntheticTypeReg
     }
 }
 
-/// Converts external parameters to `(name, RustType)` pairs.
+/// Converts external parameters to [`ParamDef`] entries.
 ///
 /// Handles optional parameters by wrapping their types in `Option<T>`.
 fn convert_external_params(
     params: &[ExternalParam],
     synthetic: &mut SyntheticTypeRegistry,
-) -> Vec<(String, RustType)> {
+) -> Vec<ParamDef> {
     params
         .iter()
         .map(|p| {
@@ -414,7 +418,12 @@ fn convert_external_params(
             } else {
                 ty
             };
-            (p.name.clone(), ty)
+            ParamDef {
+                name: p.name.clone(),
+                ty,
+                optional: p.optional,
+                has_default: false,
+            }
         })
         .collect()
 }

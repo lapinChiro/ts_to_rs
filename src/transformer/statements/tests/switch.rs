@@ -327,11 +327,11 @@ fn test_convert_switch_discriminated_union_to_enum_match() {
     let mut variant_fields = std::collections::HashMap::new();
     variant_fields.insert(
         "Circle".to_string(),
-        vec![("radius".to_string(), RustType::F64)],
+        vec![("radius".to_string(), RustType::F64).into()],
     );
     variant_fields.insert(
         "Square".to_string(),
-        vec![("side".to_string(), RustType::F64)],
+        vec![("side".to_string(), RustType::F64).into()],
     );
     reg.register(
         "Shape".to_string(),
@@ -390,13 +390,13 @@ fn build_shape_registry() -> TypeRegistry {
     let mut variant_fields = std::collections::HashMap::new();
     variant_fields.insert(
         "Circle".to_string(),
-        vec![("radius".to_string(), RustType::F64)],
+        vec![("radius".to_string(), RustType::F64).into()],
     );
     variant_fields.insert(
         "Square".to_string(),
         vec![
-            ("width".to_string(), RustType::F64),
-            ("height".to_string(), RustType::F64),
+            ("width".to_string(), RustType::F64).into(),
+            ("height".to_string(), RustType::F64).into(),
         ],
     );
     reg.register(

@@ -413,9 +413,9 @@ fn test_object_destructuring_rest_with_type_expands_remaining_fields() {
         "Point".to_string(),
         crate::registry::TypeDef::new_struct(
             vec![
-                ("a".to_string(), RustType::F64),
-                ("b".to_string(), RustType::F64),
-                ("c".to_string(), RustType::F64),
+                ("a".to_string(), RustType::F64).into(),
+                ("b".to_string(), RustType::F64).into(),
+                ("c".to_string(), RustType::F64).into(),
             ],
             std::collections::HashMap::new(),
             vec![],

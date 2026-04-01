@@ -4,7 +4,7 @@ use anyhow::{anyhow, Result};
 use swc_ecma_ast as ast;
 
 use crate::ir::{ClosureBody, Expr, MatchArm, MatchPattern, Param, RustType, Stmt};
-use crate::registry::TypeDef;
+use crate::registry::{FieldDef, TypeDef};
 
 use super::methods::map_method_call;
 use crate::transformer::Transformer;
@@ -372,7 +372,7 @@ impl<'a> Transformer<'a> {
         obj_expr: &ast::Expr,
         enum_name: &str,
         field: &str,
-        variant_fields: &std::collections::HashMap<String, Vec<(String, RustType)>>,
+        variant_fields: &std::collections::HashMap<String, Vec<FieldDef>>,
     ) -> Result<Expr> {
         // Cat A: receiver object
         let object = self.convert_expr(obj_expr)?;
@@ -382,7 +382,7 @@ impl<'a> Transformer<'a> {
 
         // Create arms for variants that have this field
         for (variant_name, fields) in variant_fields {
-            if fields.iter().any(|(n, _)| n == field) {
+            if fields.iter().any(|f| f.name == field) {
                 arms.push(MatchArm {
                     patterns: vec![MatchPattern::EnumVariant {
                         path: format!("{enum_name}::{variant_name}"),

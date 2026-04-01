@@ -163,7 +163,7 @@ impl<'a> Transformer<'a> {
                 if let Some(crate::registry::TypeDef::Function { params, .. }) =
                     self.reg().get(name)
                 {
-                    Some(params.iter().map(|(_, ty)| ty.clone()).collect())
+                    Some(params.iter().map(|p| p.ty.clone()).collect())
                 } else {
                     None
                 }

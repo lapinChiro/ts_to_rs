@@ -198,15 +198,19 @@ fn register_synthetic_structs_in_registry(
         {
             // Only register if not already in the registry (avoid overwriting declared types)
             if registry.get(name).is_none() {
-                let field_tuples: Vec<(String, crate::ir::RustType)> = fields
+                let field_defs: Vec<crate::registry::FieldDef> = fields
                     .iter()
-                    .map(|f| (f.name.clone(), f.ty.clone()))
+                    .map(|f| crate::registry::FieldDef {
+                        name: f.name.clone(),
+                        ty: f.ty.clone(),
+                        optional: false,
+                    })
                     .collect();
                 registry.register(
                     name.clone(),
                     crate::registry::TypeDef::Struct {
                         type_params: type_params.clone(),
-                        fields: field_tuples,
+                        fields: field_defs,
                         methods: std::collections::HashMap::new(),
                         constructor: None,
                         call_signatures: vec![],

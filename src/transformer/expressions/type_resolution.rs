@@ -84,8 +84,8 @@ impl<'a> Transformer<'a> {
         match &type_def {
             TypeDef::Struct { fields, .. } => fields
                 .iter()
-                .find(|(name, _)| name == &field_name)
-                .map(|(_, ty)| ty.clone()),
+                .find(|f| f.name == field_name)
+                .map(|f| f.ty.clone()),
             _ => None,
         }
     }
@@ -94,6 +94,7 @@ impl<'a> Transformer<'a> {
 #[cfg(test)]
 mod tests {
     use crate::ir::{RustType, TypeParam};
+    use crate::registry::FieldDef;
     use crate::registry::{TypeDef, TypeRegistry};
     use std::collections::HashMap;
 
@@ -108,13 +109,14 @@ mod tests {
                     name: "T".to_string(),
                     constraint: None,
                 }],
-                fields: vec![(
-                    "value".to_string(),
-                    RustType::Named {
+                fields: vec![FieldDef {
+                    name: "value".to_string(),
+                    ty: RustType::Named {
                         name: "T".to_string(),
                         type_args: vec![],
                     },
-                )],
+                    optional: false,
+                }],
                 methods: HashMap::new(),
                 constructor: None,
                 call_signatures: vec![],
@@ -130,8 +132,8 @@ mod tests {
         let field_type = match &type_def {
             TypeDef::Struct { fields, .. } => fields
                 .iter()
-                .find(|(name, _)| name == "value")
-                .map(|(_, ty)| ty.clone()),
+                .find(|f| f.name == "value")
+                .map(|f| f.ty.clone()),
             _ => None,
         };
         assert_eq!(field_type, Some(RustType::String));

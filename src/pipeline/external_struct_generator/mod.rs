@@ -166,19 +166,19 @@ pub fn generate_external_struct(name: &str, registry: &TypeRegistry) -> Option<I
         } => {
             let struct_fields: Vec<StructField> = fields
                 .iter()
-                .map(|(field_name, ty)| {
+                .map(|field| {
                     // 自己参照フィールドを Box でラップ（再帰型の infinite size 防止）
-                    let ty = if references_type_name(ty, name) {
+                    let ty = if references_type_name(&field.ty, name) {
                         RustType::Named {
                             name: "Box".to_string(),
-                            type_args: vec![ty.clone()],
+                            type_args: vec![field.ty.clone()],
                         }
                     } else {
-                        ty.clone()
+                        field.ty.clone()
                     };
                     StructField {
                         vis: Some(Visibility::Public),
-                        name: sanitize_field_name(&camel_to_snake(field_name)),
+                        name: sanitize_field_name(&camel_to_snake(&field.name)),
                         ty,
                     }
                 })

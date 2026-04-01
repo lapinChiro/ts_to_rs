@@ -63,9 +63,12 @@ fn test_build_registry_discriminated_union_registers_enum() {
             assert_eq!(string_values.get("circle").unwrap(), "Circle");
             assert_eq!(string_values.get("square").unwrap(), "Square");
             let circle_fields = variant_fields.get("Circle").expect("Circle variant");
-            assert_eq!(circle_fields, &[("radius".to_string(), RustType::F64)]);
+            assert_eq!(
+                circle_fields,
+                &[("radius".to_string(), RustType::F64).into()]
+            );
             let square_fields = variant_fields.get("Square").expect("Square variant");
-            assert_eq!(square_fields, &[("side".to_string(), RustType::F64)]);
+            assert_eq!(square_fields, &[("side".to_string(), RustType::F64).into()]);
         }
         other => panic!("expected Enum, got {other:?}"),
     }
@@ -108,11 +111,12 @@ fn test_build_registry_with_union_field() {
 
     if let Some(TypeDef::Struct { fields, .. }) = foo {
         assert_eq!(fields.len(), 1, "Foo should have 1 field");
-        let (name, ty) = &fields[0];
-        assert_eq!(name, "x");
+        let field = &fields[0];
+        assert_eq!(field.name, "x");
         assert!(
-            matches!(ty, RustType::Named { .. }),
-            "x should be a Named type (synthetic enum), got: {ty:?}"
+            matches!(field.ty, RustType::Named { .. }),
+            "x should be a Named type (synthetic enum), got: {:?}",
+            field.ty
         );
     } else {
         panic!("Foo should be a Struct");
@@ -161,7 +165,7 @@ fn test_analyze_any_params_registers_enum() {
     assert!(foo_def.is_some(), "foo should be in registry");
     if let Some(TypeDef::Function { params, .. }) = foo_def {
         assert!(
-            params.iter().any(|(_, ty)| matches!(ty, RustType::Any)),
+            params.iter().any(|f| matches!(f.ty, RustType::Any)),
             "foo should have an any-typed parameter"
         );
     }

@@ -382,7 +382,7 @@ fn test_convert_ts_type_typeof_known_fn_returns_fn_type() {
         "myFunc".to_string(),
         TypeDef::Function {
             type_params: vec![],
-            params: vec![("x".to_string(), RustType::F64)],
+            params: vec![("x".to_string(), RustType::F64).into()],
             return_type: Some(RustType::String),
             has_rest: false,
         },
@@ -434,15 +434,16 @@ fn test_convert_ts_type_typeof_struct_with_constructor_returns_fn_type() {
         "MyClass".to_string(),
         TypeDef::Struct {
             type_params: vec![],
-            fields: vec![("url".to_string(), RustType::String)],
+            fields: vec![("url".to_string(), RustType::String).into()],
             methods: std::collections::HashMap::new(),
             constructor: Some(vec![MethodSignature {
                 params: vec![
-                    ("url".to_string(), RustType::String),
+                    ("url".to_string(), RustType::String).into(),
                     (
                         "options".to_string(),
                         RustType::Option(Box::new(RustType::String)),
-                    ),
+                    )
+                        .into(),
                 ],
                 return_type: None,
                 has_rest: false,
@@ -488,7 +489,7 @@ fn test_convert_ts_type_typeof_struct_without_constructor_returns_named() {
         "MyStruct".to_string(),
         TypeDef::Struct {
             type_params: vec![],
-            fields: vec![("x".to_string(), RustType::F64)],
+            fields: vec![("x".to_string(), RustType::F64).into()],
             methods: std::collections::HashMap::new(),
             constructor: None,
             call_signatures: vec![],
@@ -598,8 +599,8 @@ fn test_convert_ts_type_indexed_access_string_key_with_registry_resolves_field_t
         TypeDef::Struct {
             type_params: vec![],
             fields: vec![
-                ("host".to_string(), RustType::String),
-                ("port".to_string(), RustType::F64),
+                ("host".to_string(), RustType::String).into(),
+                ("port".to_string(), RustType::F64).into(),
             ],
             methods: std::collections::HashMap::new(),
             constructor: None,
@@ -668,7 +669,7 @@ fn test_convert_ts_type_indexed_access_typeof_base_with_registered_struct() {
         "Config".to_string(),
         TypeDef::Struct {
             type_params: vec![],
-            fields: vec![("host".to_string(), RustType::String)],
+            fields: vec![("host".to_string(), RustType::String).into()],
             methods: std::collections::HashMap::new(),
             constructor: None,
             call_signatures: vec![],

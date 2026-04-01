@@ -46,8 +46,8 @@ fn test_collect_interface_fields_property_signatures_collected() {
         super::super::interfaces::collect_interface_fields(&iface, &reg, &mut synthetic).unwrap();
 
     assert_eq!(fields.len(), 2);
-    assert_eq!(fields[0], ("x".to_string(), RustType::F64));
-    assert_eq!(fields[1], ("y".to_string(), RustType::String));
+    assert_eq!(fields[0], ("x".to_string(), RustType::F64).into());
+    assert_eq!(fields[1], ("y".to_string(), RustType::String).into());
 }
 
 #[test]
@@ -61,8 +61,8 @@ fn test_collect_interface_fields_non_property_members_skipped() {
 
     // method signature should be skipped — only property signatures collected
     assert_eq!(fields.len(), 2);
-    assert_eq!(fields[0].0, "x");
-    assert_eq!(fields[1].0, "y");
+    assert_eq!(fields[0].name, "x");
+    assert_eq!(fields[1].name, "y");
 }
 
 // ── collect_interface_signatures ──
@@ -77,7 +77,10 @@ fn test_collect_interface_signatures_ident_param_with_type_collected() {
 
     let sigs = sigs.methods.get("foo").expect("foo method should exist");
     assert_eq!(sigs.len(), 1);
-    assert_eq!(sigs[0].params, vec![("x".to_string(), RustType::String)]);
+    assert_eq!(
+        sigs[0].params,
+        vec![("x".to_string(), RustType::String).into()]
+    );
     assert_eq!(sigs[0].return_type, Some(RustType::F64));
     assert!(!sigs[0].has_rest);
 }
@@ -94,9 +97,9 @@ fn test_collect_interface_signatures_rest_param_collected() {
     assert_eq!(sigs.len(), 1);
     assert!(sigs[0].has_rest, "has_rest should be true for rest param");
     assert_eq!(sigs[0].params.len(), 1);
-    assert_eq!(sigs[0].params[0].0, "args");
+    assert_eq!(sigs[0].params[0].name, "args");
     assert_eq!(
-        sigs[0].params[0].1,
+        sigs[0].params[0].ty,
         RustType::Vec(Box::new(RustType::String))
     );
 }
@@ -112,10 +115,10 @@ fn test_collect_interface_signatures_overload_accumulates() {
     let sigs = sigs.methods.get("foo").expect("foo method should exist");
     assert_eq!(sigs.len(), 2, "overloaded methods should accumulate in Vec");
     // First overload: (string) -> number
-    assert_eq!(sigs[0].params[0].1, RustType::String);
+    assert_eq!(sigs[0].params[0].ty, RustType::String);
     assert_eq!(sigs[0].return_type, Some(RustType::F64));
     // Second overload: (number) -> string
-    assert_eq!(sigs[1].params[0].1, RustType::F64);
+    assert_eq!(sigs[1].params[0].ty, RustType::F64);
     assert_eq!(sigs[1].return_type, Some(RustType::String));
 }
 
@@ -130,9 +133,9 @@ fn test_collect_property_signature_optional_wraps_in_option() {
 
     let result = super::super::interfaces::collect_property_signature(prop, &reg, &mut synthetic);
 
-    let (name, ty) = result.expect("should return Some for optional property");
-    assert_eq!(name, "x");
-    assert_eq!(ty, RustType::Option(Box::new(RustType::F64)));
+    let field = result.expect("should return Some for optional property");
+    assert_eq!(field.name, "x");
+    assert_eq!(field.ty, RustType::Option(Box::new(RustType::F64)));
 }
 
 #[test]
@@ -192,7 +195,7 @@ fn test_collect_interface_signatures_call_signature() {
     assert_eq!(sigs.call_signatures.len(), 1);
     assert_eq!(
         sigs.call_signatures[0].params,
-        vec![("x".to_string(), RustType::String)]
+        vec![("x".to_string(), RustType::String).into()]
     );
     assert_eq!(sigs.call_signatures[0].return_type, Some(RustType::F64));
 }
@@ -223,7 +226,10 @@ fn test_collect_interface_signatures_construct_signature() {
     assert!(sigs.call_signatures.is_empty());
     let ctor = sigs.constructor.expect("constructor should be Some");
     assert_eq!(ctor.len(), 1);
-    assert_eq!(ctor[0].params, vec![("x".to_string(), RustType::String)]);
+    assert_eq!(
+        ctor[0].params,
+        vec![("x".to_string(), RustType::String).into()]
+    );
 }
 
 #[test]

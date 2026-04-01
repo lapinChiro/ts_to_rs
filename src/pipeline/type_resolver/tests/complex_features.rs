@@ -183,8 +183,8 @@ fn test_resolve_spread_same_type_uses_source_type() {
         "CORSOptions".to_string(),
         TypeDef::new_struct(
             vec![
-                ("origin".to_string(), RustType::String),
-                ("methods".to_string(), RustType::String),
+                ("origin".to_string(), RustType::String).into(),
+                ("methods".to_string(), RustType::String).into(),
             ],
             Default::default(),
             vec![],
@@ -216,8 +216,8 @@ fn test_resolve_spread_with_extra_field_creates_anon_struct() {
         "Point".to_string(),
         TypeDef::new_struct(
             vec![
-                ("x".to_string(), RustType::F64),
-                ("y".to_string(), RustType::F64),
+                ("x".to_string(), RustType::F64).into(),
+                ("y".to_string(), RustType::F64).into(),
             ],
             Default::default(),
             vec![],
@@ -414,7 +414,7 @@ fn test_select_overload_arg_type_selects_compatible() {
     // arg_type=F64 → sig[1]
     let selected = crate::registry::select_overload(&sigs, 1, &[Some(RustType::F64)]);
     assert_eq!(selected.return_type, Some(RustType::F64));
-    assert_eq!(selected.params[0].1, RustType::F64);
+    assert_eq!(selected.params[0].ty, RustType::F64);
 }
 
 #[test]
@@ -437,7 +437,7 @@ fn test_select_overload_arg_types_empty_uses_arg_count_only() {
     ];
     // Same arg_count, empty arg_types → Stage 4 skipped → first of count-matched (sig[0])
     let selected = crate::registry::select_overload(&sigs, 1, &[]);
-    assert_eq!(selected.params[0].1, RustType::String);
+    assert_eq!(selected.params[0].ty, RustType::String);
 }
 
 #[test]
@@ -449,7 +449,7 @@ fn test_select_overload_params_and_return_from_same_sig() {
     ];
     let selected = crate::registry::select_overload(&sigs, 1, &[Some(RustType::F64)]);
     // Both params and return_type should be from sig[1] (F64 variant)
-    assert_eq!(selected.params[0].1, RustType::F64);
+    assert_eq!(selected.params[0].ty, RustType::F64);
     assert_eq!(selected.return_type, Some(RustType::F64));
 }
 

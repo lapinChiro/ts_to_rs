@@ -155,7 +155,7 @@ fn test_new_expr_string_arg_gets_to_string() {
     reg.register(
         "Foo".to_string(),
         TypeDef::new_struct(
-            vec![("name".to_string(), RustType::String)],
+            vec![("name".to_string(), RustType::String).into()],
             std::collections::HashMap::new(),
             vec![],
         ),
@@ -581,7 +581,7 @@ fn test_convert_call_expr_rest_param_packs_args_into_vec() {
         "sum".to_string(),
         TypeDef::Function {
             type_params: vec![],
-            params: vec![("nums".to_string(), RustType::Vec(Box::new(RustType::F64)))],
+            params: vec![("nums".to_string(), RustType::Vec(Box::new(RustType::F64))).into()],
             return_type: Some(RustType::F64),
             has_rest: true,
         },
@@ -620,8 +620,8 @@ fn test_convert_call_expr_rest_param_mixed_regular_and_rest() {
         TypeDef::Function {
             type_params: vec![],
             params: vec![
-                ("prefix".to_string(), RustType::String),
-                ("nums".to_string(), RustType::Vec(Box::new(RustType::F64))),
+                ("prefix".to_string(), RustType::String).into(),
+                ("nums".to_string(), RustType::Vec(Box::new(RustType::F64))).into(),
             ],
             return_type: None,
             has_rest: true,
@@ -659,7 +659,7 @@ fn test_convert_call_expr_rest_param_no_rest_args() {
         "sum".to_string(),
         TypeDef::Function {
             type_params: vec![],
-            params: vec![("nums".to_string(), RustType::Vec(Box::new(RustType::F64)))],
+            params: vec![("nums".to_string(), RustType::Vec(Box::new(RustType::F64))).into()],
             return_type: Some(RustType::F64),
             has_rest: true,
         },
@@ -696,7 +696,7 @@ fn test_convert_call_expr_rest_param_spread_single_array() {
         "sum".to_string(),
         TypeDef::Function {
             type_params: vec![],
-            params: vec![("nums".to_string(), RustType::Vec(Box::new(RustType::F64)))],
+            params: vec![("nums".to_string(), RustType::Vec(Box::new(RustType::F64))).into()],
             return_type: Some(RustType::F64),
             has_rest: true,
         },
@@ -733,7 +733,7 @@ fn test_convert_call_expr_rest_param_mixed_literal_and_spread() {
         "sum".to_string(),
         TypeDef::Function {
             type_params: vec![],
-            params: vec![("nums".to_string(), RustType::Vec(Box::new(RustType::F64)))],
+            params: vec![("nums".to_string(), RustType::Vec(Box::new(RustType::F64))).into()],
             return_type: Some(RustType::F64),
             has_rest: true,
         },
@@ -768,7 +768,7 @@ fn test_convert_method_call_string_arg_gets_to_string_with_registry() {
     methods.insert(
         "greet".to_string(),
         vec![MethodSignature {
-            params: vec![("name".to_string(), RustType::String)],
+            params: vec![("name".to_string(), RustType::String).into()],
             return_type: None,
             has_rest: false,
         }],
@@ -864,7 +864,7 @@ fn test_convert_opt_chain_method_call_propagates_param_types() {
     methods.insert(
         "greet".to_string(),
         vec![MethodSignature {
-            params: vec![("name".to_string(), RustType::String)],
+            params: vec![("name".to_string(), RustType::String).into()],
             return_type: None,
             has_rest: false,
         }],

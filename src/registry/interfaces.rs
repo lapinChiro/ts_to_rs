@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use anyhow::Result;
 use swc_ecma_ast as ast;
 
-use super::{MethodSignature, TypeRegistry};
+use super::{FieldDef, MethodSignature, ParamDef, TypeRegistry};
 use crate::ir::RustType;
 use crate::pipeline::type_converter::convert_ts_type;
 use crate::pipeline::SyntheticTypeRegistry;
@@ -15,12 +15,12 @@ pub(super) fn collect_interface_fields(
     iface: &ast::TsInterfaceDecl,
     lookup: &TypeRegistry,
     synthetic: &mut SyntheticTypeRegistry,
-) -> Result<Vec<(String, RustType)>> {
+) -> Result<Vec<FieldDef>> {
     let mut fields = Vec::new();
     for member in &iface.body.body {
         if let ast::TsTypeElement::TsPropertySignature(prop) = member {
-            if let Some((name, ty)) = collect_property_signature(prop, lookup, synthetic) {
-                fields.push((name, ty));
+            if let Some(field) = collect_property_signature(prop, lookup, synthetic) {
+                fields.push(field);
             }
         }
     }
@@ -62,7 +62,7 @@ fn build_method_signature(
     lookup: &TypeRegistry,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> MethodSignature {
-    let params: Vec<(String, RustType)> = ts_params
+    let params: Vec<ParamDef> = ts_params
         .iter()
         .filter_map(|param| super::functions::extract_ts_fn_param(param, lookup, synthetic))
         .collect();
@@ -145,7 +145,7 @@ pub(super) fn collect_property_signature(
     prop: &ast::TsPropertySignature,
     lookup: &TypeRegistry,
     synthetic: &mut SyntheticTypeRegistry,
-) -> Option<(String, RustType)> {
+) -> Option<FieldDef> {
     let name = match prop.key.as_ref() {
         ast::Expr::Ident(ident) => ident.sym.to_string(),
         _ => return None,
@@ -155,12 +155,13 @@ pub(super) fn collect_property_signature(
         .as_ref()
         .and_then(|ann| convert_ts_type(&ann.type_ann, synthetic, lookup).ok())?;
 
+    let optional = prop.optional;
     // Optional fields are wrapped in Option
-    let ty = if prop.optional {
+    let ty = if optional {
         RustType::Option(Box::new(ty))
     } else {
         ty
     };
 
-    Some((name, ty))
+    Some(FieldDef { name, ty, optional })
 }

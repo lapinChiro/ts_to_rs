@@ -147,7 +147,7 @@ impl<'a> TypeResolver<'a> {
                     params, has_rest, ..
                 }) = self.registry.get(&fn_name)
                 {
-                    Some((params.iter().map(|(_, ty)| ty.clone()).collect(), *has_rest))
+                    Some((params.iter().map(|p| p.ty.clone()).collect(), *has_rest))
                 } else if let ResolvedType::Known(ref var_ty) = self.lookup_var(&fn_name) {
                     match var_ty {
                         RustType::Fn { params, .. } => {
@@ -279,7 +279,7 @@ impl<'a> TypeResolver<'a> {
         let sigs = self.lookup_method_sigs(obj_type, method_name)?;
         let sig = select_overload(&sigs, arg_count, arg_types);
         Some((
-            sig.params.iter().map(|(_, ty)| ty.clone()).collect(),
+            sig.params.iter().map(|p| p.ty.clone()).collect(),
             sig.has_rest,
         ))
     }
@@ -375,7 +375,7 @@ impl<'a> TypeResolver<'a> {
                 ..
             }) if !type_params.is_empty() => (
                 type_params.clone(),
-                params.iter().map(|(_, ty)| ty.clone()).collect::<Vec<_>>(),
+                params.iter().map(|p| p.ty.clone()).collect::<Vec<_>>(),
                 return_type.clone(),
             ),
             _ => return current_result,

@@ -190,7 +190,7 @@ pub(super) fn resolve_fn_type_info(
                 ..
             }) => (
                 return_type.clone(),
-                Some(params.iter().map(|(_, ty)| ty.clone()).collect()),
+                Some(params.iter().map(|p| p.ty.clone()).collect()),
             ),
             Some(TypeDef::Struct {
                 call_signatures, ..
@@ -198,7 +198,7 @@ pub(super) fn resolve_fn_type_info(
                 let sig = crate::registry::select_overload(call_signatures, 0, &[]);
                 (
                     sig.return_type.clone(),
-                    Some(sig.params.iter().map(|(_, ty)| ty.clone()).collect()),
+                    Some(sig.params.iter().map(|p| p.ty.clone()).collect()),
                 )
             }
             _ => (None, None),

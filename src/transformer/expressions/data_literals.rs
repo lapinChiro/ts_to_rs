@@ -201,7 +201,12 @@ impl<'a> Transformer<'a> {
             .cloned()
             .or_else(|| {
                 self.reg().get(struct_name).and_then(|def| match def {
-                    TypeDef::Struct { fields, .. } => Some(fields.clone()),
+                    TypeDef::Struct { fields, .. } => Some(
+                        fields
+                            .iter()
+                            .map(|f| (f.name.clone(), f.ty.clone()))
+                            .collect(),
+                    ),
                     _ => None,
                 })
             });

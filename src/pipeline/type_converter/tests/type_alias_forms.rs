@@ -112,8 +112,8 @@ fn test_convert_type_alias_keyof_typeof_struct_generates_string_enum() {
         TypeDef::Struct {
             type_params: vec![],
             fields: vec![
-                ("alpha".to_string(), RustType::String),
-                ("beta".to_string(), RustType::F64),
+                ("alpha".to_string(), RustType::String).into(),
+                ("beta".to_string(), RustType::F64).into(),
             ],
             methods: std::collections::HashMap::new(),
             constructor: None,

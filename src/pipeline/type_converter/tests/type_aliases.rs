@@ -510,8 +510,8 @@ fn test_convert_type_alias_keyof_typeof_generates_string_union() {
         "AlgorithmTypes".to_string(),
         TypeDef::new_struct(
             vec![
-                ("HS256".to_string(), RustType::String),
-                ("RS256".to_string(), RustType::String),
+                ("HS256".to_string(), RustType::String).into(),
+                ("RS256".to_string(), RustType::String).into(),
             ],
             std::collections::HashMap::new(),
             vec![],

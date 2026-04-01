@@ -99,7 +99,7 @@ fn test_convert_opt_chain_non_option_type_returns_plain_access() {
     reg.register(
         "Foo".to_string(),
         TypeDef::new_struct(
-            vec![("y".to_string(), RustType::String)],
+            vec![("y".to_string(), RustType::String).into()],
             std::collections::HashMap::new(),
             vec![],
         ),
@@ -300,7 +300,8 @@ fn test_convert_opt_chain_nested_option_uses_and_then() {
                     name: "Bar".to_string(),
                     type_args: vec![],
                 })),
-            )],
+            )
+                .into()],
             std::collections::HashMap::new(),
             vec![],
         ),
@@ -308,7 +309,7 @@ fn test_convert_opt_chain_nested_option_uses_and_then() {
     reg.register(
         "Bar".to_string(),
         TypeDef::new_struct(
-            vec![("z".to_string(), RustType::String)],
+            vec![("z".to_string(), RustType::String).into()],
             std::collections::HashMap::new(),
             vec![],
         ),

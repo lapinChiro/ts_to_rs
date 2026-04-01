@@ -93,7 +93,7 @@ fn test_convert_type_alias_intersection_type_ref_resolved_generates_merged_struc
     reg.register(
         "Foo".to_string(),
         crate::registry::TypeDef::new_struct(
-            vec![("a".to_string(), RustType::String)],
+            vec![("a".to_string(), RustType::String).into()],
             std::collections::HashMap::new(),
             vec![],
         ),
@@ -101,7 +101,7 @@ fn test_convert_type_alias_intersection_type_ref_resolved_generates_merged_struc
     reg.register(
         "Bar".to_string(),
         crate::registry::TypeDef::new_struct(
-            vec![("b".to_string(), RustType::F64)],
+            vec![("b".to_string(), RustType::F64).into()],
             std::collections::HashMap::new(),
             vec![],
         ),

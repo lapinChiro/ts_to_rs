@@ -10,11 +10,12 @@ fn test_object_lit_omitted_optional_field_gets_none() {
         "Item".to_string(),
         TypeDef::new_struct(
             vec![
-                ("name".to_string(), RustType::String),
+                ("name".to_string(), RustType::String).into(),
                 (
                     "value".to_string(),
                     RustType::Option(Box::new(RustType::F64)),
-                ),
+                )
+                    .into(),
             ],
             std::collections::HashMap::new(),
             vec![],

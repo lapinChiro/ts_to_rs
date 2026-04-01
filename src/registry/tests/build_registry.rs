@@ -11,8 +11,8 @@ fn test_build_registry_interface() {
         &TypeDef::new_interface(
             vec![],
             vec![
-                ("x".to_string(), RustType::F64),
-                ("y".to_string(), RustType::F64),
+                ("x".to_string(), RustType::F64).into(),
+                ("y".to_string(), RustType::F64).into(),
             ],
             HashMap::new(),
             vec![],
@@ -28,8 +28,8 @@ fn test_build_registry_type_alias_object() {
         reg.get("Config").unwrap(),
         &TypeDef::new_struct(
             vec![
-                ("name".to_string(), RustType::String),
-                ("count".to_string(), RustType::F64),
+                ("name".to_string(), RustType::String).into(),
+                ("count".to_string(), RustType::F64).into(),
             ],
             HashMap::new(),
             vec![],
@@ -70,10 +70,11 @@ fn test_build_registry_optional_field() {
         reg.get("Config").unwrap(),
         &TypeDef::new_interface(
             vec![],
-            vec![(
-                "name".to_string(),
-                RustType::Option(Box::new(RustType::String)),
-            )],
+            vec![FieldDef {
+                name: "name".to_string(),
+                ty: RustType::Option(Box::new(RustType::String)),
+                optional: true,
+            }],
             HashMap::new(),
             vec![],
         )
@@ -95,8 +96,8 @@ fn test_build_registry_forward_reference_resolves_type() {
     match reg.get("A").unwrap() {
         TypeDef::Struct { fields, .. } => {
             assert_eq!(fields.len(), 1);
-            assert_eq!(fields[0].0, "b");
-            assert!(matches!(&fields[0].1, RustType::Named { name, .. } if name == "B"));
+            assert_eq!(fields[0].name, "b");
+            assert!(matches!(&fields[0].ty, RustType::Named { name, .. } if name == "B"));
         }
         other => panic!("expected Struct, got: {:?}", other),
     }
@@ -119,13 +120,13 @@ fn test_build_registry_intersection_type_alias_merges_fields() {
             assert!(
                 fields
                     .iter()
-                    .any(|(n, t)| n == "name" && *t == RustType::String),
+                    .any(|f| f.name == "name" && f.ty == RustType::String),
                 "expected name: String"
             );
             assert!(
                 fields
                     .iter()
-                    .any(|(n, t)| n == "age" && *t == RustType::F64),
+                    .any(|f| f.name == "age" && f.ty == RustType::F64),
                 "expected age: f64"
             );
         }
@@ -142,7 +143,7 @@ fn test_is_trait_type_methods_only_returns_true() {
     methods.insert(
         "greet".to_string(),
         vec![MethodSignature {
-            params: vec![("msg".to_string(), RustType::String)],
+            params: vec![("msg".to_string(), RustType::String).into()],
             return_type: None,
             has_rest: false,
         }],
@@ -161,7 +162,7 @@ fn test_is_trait_type_fields_only_returns_false() {
         "Point".to_string(),
         TypeDef::new_interface(
             vec![],
-            vec![("x".to_string(), RustType::F64)],
+            vec![("x".to_string(), RustType::F64).into()],
             HashMap::new(),
             vec![],
         ),
@@ -185,7 +186,7 @@ fn test_is_trait_type_mixed_returns_true() {
         "Ctx".to_string(),
         TypeDef::new_interface(
             vec![],
-            vec![("name".to_string(), RustType::String)],
+            vec![("name".to_string(), RustType::String).into()],
             methods,
             vec![],
         ),
@@ -210,7 +211,10 @@ fn test_interface_method_return_type_stored_in_registry() {
         TypeDef::Struct { methods, .. } => {
             let sigs = methods.get("format").expect("format method should exist");
             let sig = sigs.first().expect("should have at least one signature");
-            assert_eq!(sig.params, vec![("input".to_string(), RustType::String)]);
+            assert_eq!(
+                sig.params,
+                vec![("input".to_string(), RustType::String).into()]
+            );
             assert_eq!(sig.return_type, Some(RustType::String));
         }
         other => panic!("expected Struct, got {other:?}"),
@@ -416,8 +420,8 @@ fn test_type_alias_type_ref_resolves_fields() {
         .expect("BodyCache should be registered");
     if let TypeDef::Struct { fields, .. } = def {
         assert_eq!(fields.len(), 2);
-        assert!(fields.iter().any(|(n, _)| n == "text"));
-        assert!(fields.iter().any(|(n, _)| n == "json"));
+        assert!(fields.iter().any(|f| f.name == "text"));
+        assert!(fields.iter().any(|f| f.name == "json"));
     } else {
         panic!("expected TypeDef::Struct, got {def:?}");
     }
@@ -436,9 +440,7 @@ fn test_type_alias_type_ref_with_utility_type() {
         .expect("BodyCache should be registered");
     if let TypeDef::Struct { fields, .. } = def {
         assert!(
-            fields
-                .iter()
-                .all(|(_, ty)| matches!(ty, RustType::Option(_))),
+            fields.iter().all(|f| matches!(f.ty, RustType::Option(_))),
             "all fields should be Option after Partial, got: {fields:?}"
         );
     } else {
@@ -457,10 +459,10 @@ fn test_type_alias_intersection_two_type_lits() {
         assert_eq!(fields.len(), 2);
         assert!(fields
             .iter()
-            .any(|(n, ty)| n == "x" && *ty == RustType::F64));
+            .any(|f| f.name == "x" && f.ty == RustType::F64));
         assert!(fields
             .iter()
-            .any(|(n, ty)| n == "y" && *ty == RustType::String));
+            .any(|f| f.name == "y" && f.ty == RustType::String));
     } else {
         panic!("expected TypeDef::Struct, got {def:?}");
     }
@@ -494,7 +496,7 @@ fn test_type_alias_intersection_unregistered_ref_partial_merge() {
         .expect("X should be registered with partial fields");
     if let TypeDef::Struct { fields, .. } = def {
         assert_eq!(fields.len(), 1);
-        assert_eq!(fields[0].0, "y");
+        assert_eq!(fields[0].name, "y");
     } else {
         panic!("expected TypeDef::Struct, got {def:?}");
     }

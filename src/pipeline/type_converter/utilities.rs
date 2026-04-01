@@ -60,7 +60,7 @@ pub(crate) fn convert_property_signature(
 // -- Utility type helpers --
 
 /// Resolved struct info: (type_name, fields).
-type ResolvedFields = (String, Vec<(String, RustType)>);
+type ResolvedFields = (String, Vec<FieldDef>);
 
 /// Extracts the inner type name and resolves its fields from the registry.
 /// Returns `(type_name, fields)` or `None` if unregistered.
@@ -91,7 +91,11 @@ fn resolve_utility_inner_fields(
         match &def.item {
             Item::Struct { fields, .. } => fields
                 .iter()
-                .map(|f| (f.name.clone(), f.ty.clone()))
+                .map(|f| FieldDef {
+                    name: f.name.clone(),
+                    ty: f.ty.clone(),
+                    optional: false,
+                })
                 .collect(),
             _ => return None,
         }
@@ -128,11 +132,15 @@ fn resolve_utility_inner_with_conversion(
     if let RustType::Named { ref name, .. } = converted {
         if let Some(def) = synthetic.get(name) {
             if let Item::Struct { fields, .. } = &def.item {
-                let field_tuples = fields
+                let field_defs = fields
                     .iter()
-                    .map(|f| (f.name.clone(), f.ty.clone()))
+                    .map(|f| FieldDef {
+                        name: f.name.clone(),
+                        ty: f.ty.clone(),
+                        optional: false,
+                    })
                     .collect();
-                return Ok(Some((name.clone(), field_tuples)));
+                return Ok(Some((name.clone(), field_defs)));
             }
         }
     }
@@ -160,13 +168,13 @@ pub(super) fn convert_utility_partial(
     let synth_name = format!("Partial{inner_name}");
     let synth_fields = fields
         .into_iter()
-        .map(|(name, ty)| StructField {
+        .map(|field| StructField {
             vis: None,
-            name: sanitize_field_name(&name),
-            ty: if matches!(ty, RustType::Option(_)) {
-                ty
+            name: sanitize_field_name(&field.name),
+            ty: if matches!(field.ty, RustType::Option(_)) {
+                field.ty
             } else {
-                RustType::Option(Box::new(ty))
+                RustType::Option(Box::new(field.ty))
             },
         })
         .collect();
@@ -207,10 +215,10 @@ pub(super) fn convert_utility_required(
     let synth_name = format!("Required{inner_name}");
     let synth_fields = fields
         .into_iter()
-        .map(|(name, ty)| StructField {
+        .map(|field| StructField {
             vis: None,
-            name: sanitize_field_name(&name),
-            ty: match ty {
+            name: sanitize_field_name(&field.name),
+            ty: match field.ty {
                 RustType::Option(inner) => *inner,
                 other => other,
             },
@@ -273,11 +281,11 @@ pub(super) fn convert_utility_pick(
     let keys = extract_string_keys(&params.params[1]);
     let picked_fields: Vec<StructField> = fields
         .into_iter()
-        .filter(|(name, _)| keys.contains(name))
-        .map(|(name, ty)| StructField {
+        .filter(|field| keys.contains(&field.name))
+        .map(|field| StructField {
             vis: None,
-            name: sanitize_field_name(&name),
-            ty,
+            name: sanitize_field_name(&field.name),
+            ty: field.ty,
         })
         .collect();
 
@@ -322,11 +330,11 @@ pub(super) fn convert_utility_omit(
     let keys = extract_string_keys(&params.params[1]);
     let omitted_fields: Vec<StructField> = fields
         .into_iter()
-        .filter(|(name, _)| !keys.contains(name))
-        .map(|(name, ty)| StructField {
+        .filter(|field| !keys.contains(&field.name))
+        .map(|field| StructField {
             vis: None,
-            name: sanitize_field_name(&name),
-            ty,
+            name: sanitize_field_name(&field.name),
+            ty: field.ty,
         })
         .collect();
 

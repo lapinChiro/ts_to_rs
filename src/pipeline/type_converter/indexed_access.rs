@@ -232,8 +232,8 @@ fn lookup_field_type(type_name: &str, field_name: &str, reg: &TypeRegistry) -> O
     match reg.get(type_name)? {
         crate::registry::TypeDef::Struct { fields, .. } => fields
             .iter()
-            .find(|(n, _)| n == field_name)
-            .map(|(_, t)| t.clone()),
+            .find(|f| f.name == field_name)
+            .map(|f| f.ty.clone()),
         crate::registry::TypeDef::ConstValue { fields, .. } => fields
             .iter()
             .find(|f| f.name == field_name)

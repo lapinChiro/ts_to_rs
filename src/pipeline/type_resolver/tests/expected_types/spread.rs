@@ -11,8 +11,8 @@ fn test_spread_option_unwrap_resolves_fields() {
         "CORSOptions".to_string(),
         crate::registry::TypeDef::new_struct(
             vec![
-                ("origin".to_string(), RustType::String),
-                ("methods".to_string(), RustType::String),
+                ("origin".to_string(), RustType::String).into(),
+                ("methods".to_string(), RustType::String).into(),
             ],
             Default::default(),
             vec![],
@@ -52,8 +52,8 @@ fn test_spread_type_param_constraint_resolves_fields() {
         "Env".to_string(),
         crate::registry::TypeDef::new_struct(
             vec![
-                ("bindings".to_string(), RustType::Any),
-                ("variables".to_string(), RustType::Any),
+                ("bindings".to_string(), RustType::Any).into(),
+                ("variables".to_string(), RustType::Any).into(),
             ],
             Default::default(),
             vec![],
@@ -125,7 +125,8 @@ fn test_spread_generic_type_args_instantiation() {
                     name: "T".to_string(),
                     type_args: vec![],
                 },
-            )],
+            )
+                .into()],
             methods: Default::default(),
             constructor: None,
             call_signatures: vec![],
@@ -175,7 +176,7 @@ fn test_spread_option_type_param_nested() {
     reg.register(
         "Env".to_string(),
         crate::registry::TypeDef::new_struct(
-            vec![("bindings".to_string(), RustType::Any)],
+            vec![("bindings".to_string(), RustType::Any).into()],
             Default::default(),
             vec![],
         ),
@@ -211,8 +212,8 @@ fn test_spread_named_struct_existing_behavior() {
         "Config".to_string(),
         crate::registry::TypeDef::new_struct(
             vec![
-                ("host".to_string(), RustType::String),
-                ("port".to_string(), RustType::F64),
+                ("host".to_string(), RustType::String).into(),
+                ("port".to_string(), RustType::F64).into(),
             ],
             Default::default(),
             vec![],

@@ -16,6 +16,7 @@ fn register_external_struct(
             fields: fields
                 .into_iter()
                 .map(|(n, ty)| (n.to_string(), ty))
+                .map(Into::into)
                 .collect(),
             methods: HashMap::new(),
             constructor: None,
@@ -220,7 +221,7 @@ fn test_collect_refs_user_defined_type_excluded() {
         "Bindings".to_string(),
         TypeDef::Struct {
             type_params: vec![],
-            fields: vec![("db_url".to_string(), RustType::String)],
+            fields: vec![("db_url".to_string(), RustType::String).into()],
             methods: HashMap::new(),
             constructor: None,
             call_signatures: vec![],

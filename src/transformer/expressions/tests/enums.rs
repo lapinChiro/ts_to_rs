@@ -142,7 +142,8 @@ fn test_convert_call_args_string_literal_to_enum_variant() {
                     name: "Direction".to_string(),
                     type_args: vec![],
                 },
-            )],
+            )
+                .into()],
             return_type: None,
             has_rest: false,
         },
@@ -173,11 +174,11 @@ fn test_convert_object_lit_discriminated_union_to_enum_variant() {
     let mut variant_fields = std::collections::HashMap::new();
     variant_fields.insert(
         "Circle".to_string(),
-        vec![("radius".to_string(), RustType::F64)],
+        vec![("radius".to_string(), RustType::F64).into()],
     );
     variant_fields.insert(
         "Square".to_string(),
-        vec![("side".to_string(), RustType::F64)],
+        vec![("side".to_string(), RustType::F64).into()],
     );
     reg.register(
         "Shape".to_string(),
@@ -245,7 +246,7 @@ fn test_convert_member_expr_discriminant_field_to_method_call() {
     let mut variant_fields = std::collections::HashMap::new();
     variant_fields.insert(
         "Circle".to_string(),
-        vec![("radius".to_string(), RustType::F64)],
+        vec![("radius".to_string(), RustType::F64).into()],
     );
     reg.register(
         "Shape".to_string(),
@@ -282,11 +283,11 @@ fn build_shape_registry_for_expr() -> TypeRegistry {
     let mut variant_fields = std::collections::HashMap::new();
     variant_fields.insert(
         "Circle".to_string(),
-        vec![("radius".to_string(), RustType::F64)],
+        vec![("radius".to_string(), RustType::F64).into()],
     );
     variant_fields.insert(
         "Square".to_string(),
-        vec![("side".to_string(), RustType::F64)],
+        vec![("side".to_string(), RustType::F64).into()],
     );
     reg.register(
         "Shape".to_string(),

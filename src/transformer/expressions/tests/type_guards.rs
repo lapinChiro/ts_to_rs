@@ -188,8 +188,8 @@ fn test_in_operator_struct_field_exists_generates_true() {
         "Point".to_string(),
         TypeDef::new_struct(
             vec![
-                ("x".to_string(), RustType::F64),
-                ("y".to_string(), RustType::F64),
+                ("x".to_string(), RustType::F64).into(),
+                ("y".to_string(), RustType::F64).into(),
             ],
             std::collections::HashMap::new(),
             vec![],
@@ -212,8 +212,8 @@ fn test_in_operator_struct_field_missing_generates_false() {
         "Point".to_string(),
         TypeDef::new_struct(
             vec![
-                ("x".to_string(), RustType::F64),
-                ("y".to_string(), RustType::F64),
+                ("x".to_string(), RustType::F64).into(),
+                ("y".to_string(), RustType::F64).into(),
             ],
             std::collections::HashMap::new(),
             vec![],
@@ -484,8 +484,8 @@ fn test_in_operator_struct_known_field_returns_true() {
         "Config".to_string(),
         TypeDef::new_struct(
             vec![
-                ("host".to_string(), RustType::String),
-                ("port".to_string(), RustType::F64),
+                ("host".to_string(), RustType::String).into(),
+                ("port".to_string(), RustType::F64).into(),
             ],
             std::collections::HashMap::new(),
             vec![],
@@ -508,8 +508,8 @@ fn test_in_operator_struct_unknown_field_returns_false() {
         "Config".to_string(),
         TypeDef::new_struct(
             vec![
-                ("host".to_string(), RustType::String),
-                ("port".to_string(), RustType::F64),
+                ("host".to_string(), RustType::String).into(),
+                ("port".to_string(), RustType::F64).into(),
             ],
             std::collections::HashMap::new(),
             vec![],

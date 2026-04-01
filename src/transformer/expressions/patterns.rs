@@ -219,7 +219,7 @@ impl<'a> Transformer<'a> {
                 // Check TypeRegistry for field existence
                 match self.reg().get(name) {
                     Some(TypeDef::Struct { fields, .. }) => {
-                        Expr::BoolLit(fields.iter().any(|(f, _)| f == &key))
+                        Expr::BoolLit(fields.iter().any(|f| f.name == key))
                     }
                     Some(TypeDef::Enum {
                         tag_field,
@@ -233,7 +233,7 @@ impl<'a> Transformer<'a> {
                             Expr::BoolLit(
                                 variant_fields
                                     .values()
-                                    .any(|fields| fields.iter().any(|(f, _)| f == &key)),
+                                    .any(|fields| fields.iter().any(|f| f.name == key)),
                             )
                         }
                     }

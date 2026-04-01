@@ -273,8 +273,8 @@ impl<'a> Transformer<'a> {
         match &type_def {
             crate::registry::TypeDef::Struct { fields, .. } => fields
                 .iter()
-                .find(|(name, _)| name == field_name)
-                .map(|(_, ty)| ty.clone()),
+                .find(|f| f.name == field_name)
+                .map(|f| f.ty.clone()),
             _ => None,
         }
     }
@@ -347,7 +347,8 @@ impl<'a> Transformer<'a> {
         // Remaining fields = struct fields - explicit fields
         let remaining_fields: Vec<(String, RustType)> = struct_fields
             .into_iter()
-            .filter(|(name, _)| !explicit_fields.contains(name))
+            .filter(|f| !explicit_fields.contains(&f.name))
+            .map(|f| (f.name, f.ty))
             .collect();
 
         // Register synthetic rest struct (content-based deduplication)

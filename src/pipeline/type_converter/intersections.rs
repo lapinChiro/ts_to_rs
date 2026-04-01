@@ -190,15 +190,18 @@ fn extract_intersection_members(
                     ..
                 }) = reg.get(&type_name)
                 {
-                    for (name, ty) in resolved_fields {
-                        let sanitized = sanitize_field_name(name);
+                    for field in resolved_fields {
+                        let sanitized = sanitize_field_name(&field.name);
                         if fields.iter().any(|f: &StructField| f.name == sanitized) {
-                            return Err(anyhow!("duplicate field '{}' in intersection type", name));
+                            return Err(anyhow!(
+                                "duplicate field '{}' in intersection type",
+                                field.name
+                            ));
                         }
                         fields.push(StructField {
                             vis: None,
                             name: sanitized,
-                            ty: ty.clone(),
+                            ty: field.ty.clone(),
                         });
                     }
                 } else {
@@ -275,11 +278,11 @@ fn extract_variant_fields(
                     fields: resolved, ..
                 }) = reg.get(name)
                 {
-                    for (fname, fty) in resolved {
+                    for field in resolved {
                         fields.push(StructField {
                             vis: None,
-                            name: sanitize_field_name(fname),
-                            ty: fty.clone(),
+                            name: sanitize_field_name(&field.name),
+                            ty: field.ty.clone(),
                         });
                     }
                     return Ok(fields);

@@ -47,7 +47,7 @@ use crate::ir::{
     TraitRef, TypeParam, Visibility,
 };
 use crate::pipeline::SyntheticTypeRegistry;
-use crate::registry::{TypeDef, TypeRegistry};
+use crate::registry::{FieldDef, TypeDef, TypeRegistry};
 use crate::transformer::type_position::{wrap_trait_for_position, TypePosition};
 
 /// Rust prelude type names that would cause shadowing if used as user-defined type names.
@@ -229,8 +229,7 @@ pub fn convert_ts_type(
                     return_type,
                     ..
                 }) => {
-                    let param_types: Vec<RustType> =
-                        params.iter().map(|(_, t)| t.clone()).collect();
+                    let param_types: Vec<RustType> = params.iter().map(|p| p.ty.clone()).collect();
                     let ret = return_type.clone().unwrap_or(RustType::Unit);
                     Ok(RustType::Fn {
                         params: param_types,
@@ -247,7 +246,7 @@ pub fn convert_ts_type(
                     // always returns Some. Use if-let to satisfy the no-unwrap rule.
                     if let Some(ctor) = ctors.iter().max_by_key(|c| c.params.len()) {
                         let param_types: Vec<RustType> =
-                            ctor.params.iter().map(|(_, t)| t.clone()).collect();
+                            ctor.params.iter().map(|p| p.ty.clone()).collect();
                         Ok(RustType::Fn {
                             params: param_types,
                             return_type: Box::new(RustType::Named {

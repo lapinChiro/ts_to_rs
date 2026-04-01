@@ -242,7 +242,8 @@ fn test_extract_fn_param_types_from_named_type_in_registry() {
                     name: "Context".to_string(),
                     type_args: vec![],
                 },
-            )],
+            )
+                .into()],
             return_type: Some(RustType::Named {
                 name: "ConnInfo".to_string(),
                 type_args: vec![],
