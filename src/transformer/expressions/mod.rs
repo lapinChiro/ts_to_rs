@@ -20,7 +20,7 @@ mod calls;
 mod data_literals;
 mod functions;
 mod literals;
-mod member_access;
+pub(crate) mod member_access;
 mod methods;
 pub(crate) mod patterns;
 mod type_resolution;

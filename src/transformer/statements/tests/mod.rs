@@ -15,6 +15,9 @@ use crate::parser::parse_typescript;
 use crate::pipeline::SyntheticTypeRegistry;
 use crate::registry::{MethodSignature, TypeDef, TypeRegistry};
 use crate::transformer::context::TransformContext;
+use crate::transformer::expressions::member_access::{
+    build_safe_index_expr, convert_index_to_usize,
+};
 use crate::transformer::test_fixtures::TctxFixture;
 use crate::transformer::Transformer;
 use std::path::Path;

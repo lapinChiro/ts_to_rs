@@ -3,29 +3,29 @@ source: tests/integration_test.rs
 expression: output
 ---
 fn getFirst(arr: Vec<f64>) -> f64 {
-    let a = arr[0];
+    let a = arr.get(0).cloned();
     a
 }
 
 fn swap(arr: Vec<f64>) -> Vec<f64> {
-    let a = arr[0];
-    let b = arr[1];
+    let a = arr.get(0).cloned();
+    let b = arr.get(1).cloned();
     vec![b, a]
 }
 
 fn getThird(arr: Vec<f64>) -> f64 {
-    let c = arr[2];
+    let c = arr.get(2).cloned();
     c
 }
 
 fn headAndTail(arr: Vec<f64>) -> f64 {
-    let head = arr[0];
+    let head = arr.get(0).cloned();
     let rest = arr[1..].to_vec();
     head
 }
 
 fn incrementFirst(arr: Vec<f64>) -> f64 {
-    let mut x = arr[0];
+    let mut x = arr.get(0).cloned();
     x = x + 1.0;
     x
 }

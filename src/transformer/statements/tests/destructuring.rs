@@ -99,10 +99,10 @@ fn test_convert_stmt_list_array_destructuring_basic() {
             mutable: false,
             name: "a".to_string(),
             ty: None,
-            init: Some(Expr::Index {
-                object: Box::new(Expr::Ident("arr".to_string())),
-                index: Box::new(Expr::NumberLit(0.0)),
-            }),
+            init: Some(build_safe_index_expr(
+                Expr::Ident("arr".to_string()),
+                convert_index_to_usize(Expr::NumberLit(0.0)),
+            )),
         }
     );
     assert_eq!(
@@ -111,10 +111,10 @@ fn test_convert_stmt_list_array_destructuring_basic() {
             mutable: false,
             name: "b".to_string(),
             ty: None,
-            init: Some(Expr::Index {
-                object: Box::new(Expr::Ident("arr".to_string())),
-                index: Box::new(Expr::NumberLit(1.0)),
-            }),
+            init: Some(build_safe_index_expr(
+                Expr::Ident("arr".to_string()),
+                convert_index_to_usize(Expr::NumberLit(1.0)),
+            )),
         }
     );
 }
@@ -152,10 +152,10 @@ fn test_convert_stmt_list_array_destructuring_single_element() {
             mutable: false,
             name: "a".to_string(),
             ty: None,
-            init: Some(Expr::Index {
-                object: Box::new(Expr::Ident("arr".to_string())),
-                index: Box::new(Expr::NumberLit(0.0)),
-            }),
+            init: Some(build_safe_index_expr(
+                Expr::Ident("arr".to_string()),
+                convert_index_to_usize(Expr::NumberLit(0.0)),
+            )),
         }
     );
 }
@@ -189,16 +189,31 @@ fn test_convert_stmt_list_array_destructuring_skip_element() {
     assert_eq!(result.len(), 2);
     assert!(matches!(&result[0], Stmt::Let { name, .. } if name == "a"));
     assert!(matches!(&result[1], Stmt::Let { name, .. } if name == "b"));
-    // Verify correct indices: a = arr[0], b = arr[2]
-    if let Stmt::Let {
-        init: Some(Expr::Index { index, .. }),
-        ..
-    } = &result[1]
-    {
-        assert_eq!(**index, Expr::NumberLit(2.0));
-    } else {
-        panic!("expected Index expression");
-    }
+    // Verify correct indices: a = arr.get(0).cloned(), b = arr.get(2).cloned()
+    assert_eq!(
+        result[0],
+        Stmt::Let {
+            mutable: false,
+            name: "a".to_string(),
+            ty: None,
+            init: Some(build_safe_index_expr(
+                Expr::Ident("arr".to_string()),
+                convert_index_to_usize(Expr::NumberLit(0.0)),
+            )),
+        }
+    );
+    assert_eq!(
+        result[1],
+        Stmt::Let {
+            mutable: false,
+            name: "b".to_string(),
+            ty: None,
+            init: Some(build_safe_index_expr(
+                Expr::Ident("arr".to_string()),
+                convert_index_to_usize(Expr::NumberLit(2.0)),
+            )),
+        }
+    );
 }
 
 #[test]
@@ -212,8 +227,36 @@ fn test_convert_stmt_list_array_destructuring_rest() {
     }
     .unwrap();
     assert_eq!(result.len(), 2);
-    assert!(matches!(&result[0], Stmt::Let { name, .. } if name == "first"));
+    // first = arr.get(0).cloned() (safe indexing)
+    assert_eq!(
+        result[0],
+        Stmt::Let {
+            mutable: false,
+            name: "first".to_string(),
+            ty: None,
+            init: Some(build_safe_index_expr(
+                Expr::Ident("arr".to_string()),
+                convert_index_to_usize(Expr::NumberLit(0.0)),
+            )),
+        }
+    );
+    // rest = arr[1..].to_vec() (Range index — unchanged)
     assert!(matches!(&result[1], Stmt::Let { name, .. } if name == "rest"));
+    if let Stmt::Let {
+        init: Some(Expr::MethodCall { object, method, .. }),
+        ..
+    } = &result[1]
+    {
+        assert_eq!(method, "to_vec");
+        assert!(
+            matches!(object.as_ref(), Expr::Index { index, .. }
+                if matches!(index.as_ref(), Expr::Range { .. })),
+            "rest element should use Range index, got: {:?}",
+            object
+        );
+    } else {
+        panic!("expected MethodCall with to_vec for rest element");
+    }
 }
 
 // --- Object destructuring extensions ---

@@ -397,9 +397,8 @@ fn test_do_while_labeled_continue_targeting_outer_loop_not_rewritten() {
 fn test_labeled_for_in_stmt() {
     let f = TctxFixture::new();
     let tctx = f.tctx();
-    let stmts = parse_fn_body(
-        "function f() { outer: for (const key in obj) { console.log(key); } }",
-    );
+    let stmts =
+        parse_fn_body("function f() { outer: for (const key in obj) { console.log(key); } }");
     let result = {
         let mut synthetic = SyntheticTypeRegistry::new();
         Transformer::for_module(&tctx, &mut synthetic).convert_stmt(&stmts[0], None)

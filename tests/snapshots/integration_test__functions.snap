@@ -49,13 +49,13 @@ fn identity<T>(value: T) -> T {
 }
 
 fn first(items: Vec<String>) -> Option<String> {
-    Some(items[0])
+    Some(items.get(0).cloned())
 }
 
 fn findIndex(arr: Vec<f64>, target: f64) -> f64 {
     for i in 0..arr.len() as f64 as i64 {
         let i = i as f64;
-        if arr[i as usize] == target {
+        if arr.get(i as usize).cloned() == target {
             return i;
         }
     }

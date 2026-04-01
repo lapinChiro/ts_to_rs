@@ -23,6 +23,9 @@ use crate::ir::{BinOp, MatchPattern, UnOp};
 use crate::parser::parse_typescript;
 use crate::pipeline::SyntheticTypeRegistry;
 use crate::registry::{MethodSignature, TypeDef, TypeRegistry};
+use crate::transformer::expressions::member_access::{
+    build_safe_index_expr, convert_index_to_usize,
+};
 use crate::transformer::test_fixtures::TctxFixture;
 use crate::transformer::Transformer;
 use swc_ecma_ast::{Decl, ModuleItem, Stmt};

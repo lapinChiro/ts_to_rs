@@ -28,7 +28,7 @@ fn findFirst(items: Vec<f64>, target: f64) -> f64 {
     let mut result = -1.0;
     for i in 0..items.len() as f64 as i64 {
         let i = i as f64;
-        if items[i as usize] == target {
+        if items.get(i as usize).cloned() == target {
             result = i;
             break;
         }

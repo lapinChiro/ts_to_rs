@@ -30,6 +30,7 @@
 - **I-241〜I-248 サイレント意味変更の完全解消**: エラー報告統一（UnsupportedSyntaxError::new）、BigInt i128 拡張、RuntimeTypeof ヘルパー、トップレベル init() 関数、ネスト destructuring rest の合成構造体変換、declare module エラー伝播、private class members 変換、intersection メソッドシグネチャの impl 生成、union キーワード型の明示的パターンマッチ化
 - **I-341 do-while continue の条件スキップ修正**: `continue` 存在時に body を `'do_while:` ラベルブロックで包み、`continue` → `break 'do_while`、`break` → `break 'loop_label` にリライト。labeled do-while / labeled for-in のサポートも追加
 - **I-339 Option の console.log 表示修正**: `Option<T>` 引数を `as_ref().map_or("undefined".to_string(), |v| v.to_string())` でラップし、TS 互換の表示に変換
+- **I-319+I-343 配列インデックス安全化**: Vec インデックス読み取りを `.get(idx).cloned()` に変換し S1（panic）を排除。代入ターゲットは直接インデックスを維持。配列デストラクチャリングも安全化。I-343（Vec<Struct> move エラー）も副次解消
 
 ## モジュール・ディレクトリ
 

@@ -238,6 +238,55 @@ fn test_convert_nullish_coalescing_unknown_type_returns_unwrap_or_else() {
 }
 
 #[test]
+fn test_convert_opt_chain_computed_uses_safe_index_helper() {
+    // x?.[0] → x.as_ref().and_then(|_v| _v.get(0).cloned())
+    // Verifies that optional chaining computed access uses build_safe_index_expr
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
+    let expr = parse_expr("x?.[0];");
+    let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_expr(&expr)
+        .unwrap();
+    // Outer: x.as_ref().and_then(closure)
+    if let Expr::MethodCall {
+        method: outer_method,
+        args,
+        ..
+    } = &result
+    {
+        assert_eq!(outer_method, "and_then");
+        if let Some(Expr::Closure {
+            body: ClosureBody::Expr(body_expr),
+            ..
+        }) = args.first()
+        {
+            // Inner: _v.get(0).cloned()
+            if let Expr::MethodCall {
+                object,
+                method: cloned_method,
+                ..
+            } = body_expr.as_ref()
+            {
+                assert_eq!(cloned_method, "cloned");
+                if let Expr::MethodCall {
+                    object: inner_obj,
+                    method: get_method,
+                    args: get_args,
+                } = object.as_ref()
+                {
+                    assert_eq!(get_method, "get");
+                    assert_eq!(*inner_obj, Box::new(Expr::Ident("_v".to_string())));
+                    assert_eq!(get_args.len(), 1);
+                    assert_eq!(get_args[0], Expr::IntLit(0));
+                    return;
+                }
+            }
+        }
+    }
+    panic!("unexpected IR structure for x?.[0]: {result:?}");
+}
+
+#[test]
 fn test_convert_opt_chain_nested_option_uses_and_then() {
     // x?.y?.z where x: Foo | null, Foo.y: Bar | null, Bar.z: String
     // Should use .and_then() for the inner chain to avoid Option<Option<T>>

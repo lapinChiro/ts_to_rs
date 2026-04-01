@@ -7,6 +7,9 @@ use anyhow::{anyhow, Result};
 use swc_ecma_ast as ast;
 
 use crate::ir::{Expr, RustType, Stmt};
+use crate::transformer::expressions::member_access::{
+    build_safe_index_expr, convert_index_to_usize,
+};
 use crate::transformer::{
     extract_pat_ident_name, extract_prop_name, single_declarator, Transformer,
 };
@@ -225,14 +228,12 @@ impl<'a> Transformer<'a> {
             }
 
             let name = extract_pat_ident_name(pat)?;
+            let safe_index = convert_index_to_usize(Expr::NumberLit(i as f64));
             stmts.push(Stmt::Let {
                 mutable,
                 name,
                 ty: None,
-                init: Some(Expr::Index {
-                    object: Box::new(source_expr.clone()),
-                    index: Box::new(Expr::NumberLit(i as f64)),
-                }),
+                init: Some(build_safe_index_expr(source_expr.clone(), safe_index)),
             });
         }
 

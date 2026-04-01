@@ -13,7 +13,7 @@ use crate::transformer::Transformer;
 ///
 /// Integer-valued `NumberLit` → `IntLit` (renders as `0`, not `0.0`).
 /// Other expressions → `Cast { target: usize }`.
-fn convert_index_to_usize(index: Expr) -> Expr {
+pub(crate) fn convert_index_to_usize(index: Expr) -> Expr {
     match &index {
         Expr::NumberLit(n) if n.fract() == 0.0 => Expr::IntLit(*n as i128),
         _ => Expr::Cast {
@@ -23,6 +23,22 @@ fn convert_index_to_usize(index: Expr) -> Expr {
                 type_args: vec![],
             },
         },
+    }
+}
+
+/// Builds a safe index expression: `object.get(index).cloned()`.
+///
+/// The `index` argument must already be converted via [`convert_index_to_usize`].
+/// Returns `Option<T>` instead of panicking on out-of-bounds access.
+pub(crate) fn build_safe_index_expr(object: Expr, index: Expr) -> Expr {
+    Expr::MethodCall {
+        object: Box::new(Expr::MethodCall {
+            object: Box::new(object),
+            method: "get".to_string(),
+            args: vec![index],
+        }),
+        method: "cloned".to_string(),
+        args: vec![],
     }
 }
 
@@ -116,15 +132,7 @@ impl<'a> Transformer<'a> {
                         // TS returns undefined, which maps to None.
                         let index = self.convert_expr(&computed.expr)?;
                         let safe_index = convert_index_to_usize(index);
-                        Expr::MethodCall {
-                            object: Box::new(Expr::MethodCall {
-                                object: Box::new(Expr::Ident("_v".to_string())),
-                                method: "get".to_string(),
-                                args: vec![safe_index],
-                            }),
-                            method: "cloned".to_string(),
-                            args: vec![],
-                        }
+                        build_safe_index_expr(Expr::Ident("_v".to_string()), safe_index)
                     }
                     _ => return Err(anyhow!("unsupported optional chaining property")),
                 };
@@ -210,11 +218,34 @@ impl<'a> Transformer<'a> {
         }
     }
 
-    /// Converts a member expression (`obj.field`) to `Expr::FieldAccess`.
+    /// Converts a member expression (`obj.field`) for read access.
     ///
+    /// Vec index reads use `.get(idx).cloned()` for safe bounds checking (I-319).
     /// `this.x` becomes `self.x`.
     pub(crate) fn convert_member_expr(&mut self, member: &ast::MemberExpr) -> Result<Expr> {
-        // Computed property: arr[0], arr[i] → Expr::Index or tuple.N → Expr::FieldAccess
+        self.convert_member_expr_inner(member, false)
+    }
+
+    /// Converts a member expression for write access (assignment target).
+    ///
+    /// Always uses direct indexing (`arr[idx]`) for assignment LHS.
+    pub(crate) fn convert_member_expr_for_write(
+        &mut self,
+        member: &ast::MemberExpr,
+    ) -> Result<Expr> {
+        self.convert_member_expr_inner(member, true)
+    }
+
+    /// Inner implementation for member expression conversion.
+    ///
+    /// When `for_write` is false (read), Vec index access uses `.get(idx).cloned()`.
+    /// When `for_write` is true (assignment target), direct indexing is used.
+    fn convert_member_expr_inner(
+        &mut self,
+        member: &ast::MemberExpr,
+        for_write: bool,
+    ) -> Result<Expr> {
+        // Computed property: arr[0], arr[i] → safe get or Expr::Index
         if let ast::MemberProp::Computed(computed) = &member.prop {
             // Cat A: receiver object
             let object = self.convert_expr(&member.obj)?;
@@ -232,10 +263,19 @@ impl<'a> Transformer<'a> {
 
             // Cat A: computed index
             let index = self.convert_expr(&computed.expr)?;
-            return Ok(Expr::Index {
-                object: Box::new(object),
-                index: Box::new(index),
-            });
+
+            // Range index (slice): always direct access
+            if matches!(index, Expr::Range { .. }) || for_write {
+                return Ok(Expr::Index {
+                    object: Box::new(object),
+                    index: Box::new(index),
+                });
+            }
+
+            // Read access: safe bounds-checked indexing (I-319)
+            // arr[0] → arr.get(0).cloned()  (returns Option<T> instead of panic)
+            let safe_index = convert_index_to_usize(index);
+            return Ok(build_safe_index_expr(object, safe_index));
         }
 
         let field = match &member.prop {

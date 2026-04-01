@@ -11,7 +11,9 @@ impl<'a> Transformer<'a> {
     pub(crate) fn convert_assign_expr(&mut self, assign: &ast::AssignExpr) -> Result<Expr> {
         let target = match &assign.left {
             ast::AssignTarget::Simple(simple) => match simple {
-                ast::SimpleAssignTarget::Member(member) => self.convert_member_expr(member)?,
+                ast::SimpleAssignTarget::Member(member) => {
+                    self.convert_member_expr_for_write(member)?
+                }
                 ast::SimpleAssignTarget::Ident(ident) => Expr::Ident(ident.id.sym.to_string()),
                 _ => return Err(anyhow!("unsupported assignment target")),
             },
