@@ -2,8 +2,24 @@
 //!
 //! TypeDef<TsTypeInfo> → TypeDef<RustType> の変換を担う。
 //! registry フェーズで収集された TS レベルの型情報を Rust 型に変換する。
+//!
+//! ## モジュール構成
+//!
+//! - `mod.rs`: メインディスパッチャ + TypeDef/FieldDef/ParamDef 変換
+//! - `union.rs`: union 型解決（nullable → Option、multi-type → synthetic enum）
+//! - `intersection.rs`: intersection 型解決（フィールドマージ → synthetic struct）
+//! - `utility.rs`: ユーティリティ型解決（Partial, Required, Pick, Omit, NonNullable）
+//! - `indexed_access.rs`: indexed access 型解決（T[K] → フィールド型参照）
+//! - `conditional.rs`: 条件型解決（infer パターン、型述語、フォールバック）
+
+mod conditional;
+mod indexed_access;
+mod intersection;
+mod union;
+mod utility;
 
 use crate::ir::RustType;
+use crate::pipeline::type_converter::sanitize_rust_type_name;
 use crate::pipeline::SyntheticTypeRegistry;
 use crate::registry::{
     ConstElement, ConstField, FieldDef, MethodSignature, ParamDef, TypeDef, TypeRegistry,
@@ -19,12 +35,6 @@ pub fn resolve_ts_type(
     reg: &TypeRegistry,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> anyhow::Result<RustType> {
-    // TsTypeInfo → TsType 相当の変換を行わず、
-    // 既存の convert_ts_type のロジックをミラーする。
-    //
-    // 現時点では、registry で TsTypeInfo を構築した後、
-    // build_registry_with_synthetic 内で一括変換するために使用する。
-    // convert_ts_type と同等の結果を保証する。
     match info {
         // ── Keyword types ──
         TsTypeInfo::String => Ok(RustType::String),
@@ -42,6 +52,7 @@ pub fn resolve_ts_type(
             name: "i128".to_string(),
             type_args: vec![],
         }),
+        TsTypeInfo::Symbol => Ok(RustType::Any), // symbol は Rust に直接対応なし
 
         // ── Composite types ──
         TsTypeInfo::Array(inner) => {
@@ -57,20 +68,10 @@ pub fn resolve_ts_type(
             Ok(RustType::Tuple(elem_types))
         }
 
-        TsTypeInfo::Union(members) => {
-            // Delegate to the existing convert_union logic via convert_ts_type.
-            // For now, reconstruct the union handling inline.
-            resolve_union(members, reg, synthetic)
-        }
+        TsTypeInfo::Union(members) => union::resolve_union(members, reg, synthetic),
 
         TsTypeInfo::Intersection(members) => {
-            // Intersection fallback: resolve each member, take the first
-            // (real intersection handling is complex and delegated to convert_ts_type)
-            if members.len() == 1 {
-                return resolve_ts_type(&members[0], reg, synthetic);
-            }
-            // Fallback: convert the first type
-            resolve_ts_type(&members[0], reg, synthetic)
+            intersection::resolve_intersection(members, reg, synthetic)
         }
 
         TsTypeInfo::Function {
@@ -108,174 +109,286 @@ pub fn resolve_ts_type(
         }
 
         // ── Structural types ──
-        TsTypeInfo::ObjectLiteral(fields) => {
-            // Inline object types: register as synthetic struct
-            let field_defs: Vec<(String, RustType)> = fields
-                .iter()
-                .filter_map(|f| {
-                    let ty = resolve_ts_type(&f.ty, reg, synthetic).ok()?;
-                    let ty = if f.optional {
-                        RustType::Option(Box::new(ty))
-                    } else {
-                        ty
-                    };
-                    Some((f.name.clone(), ty))
-                })
-                .collect();
-            let struct_name = synthetic.register_inline_struct(&field_defs);
-            Ok(RustType::Named {
-                name: struct_name,
-                type_args: vec![],
-            })
-        }
+        TsTypeInfo::TypeLiteral(lit) => intersection::resolve_type_literal(lit, reg, synthetic),
 
-        TsTypeInfo::Mapped { value, .. } => {
-            // Mapped type fallback: HashMap<String, V>
-            let value_type = value
-                .as_ref()
-                .map(|v| resolve_ts_type(v, reg, synthetic))
-                .transpose()?
-                .unwrap_or(RustType::Any);
-            Ok(RustType::Named {
-                name: "HashMap".to_string(),
-                type_args: vec![RustType::String, value_type],
-            })
-        }
+        TsTypeInfo::Mapped {
+            type_param,
+            constraint,
+            value,
+            has_readonly,
+            has_optional,
+            name_type,
+        } => resolve_mapped(
+            type_param,
+            constraint,
+            value.as_deref(),
+            *has_readonly,
+            *has_optional,
+            name_type.as_deref(),
+            reg,
+            synthetic,
+        ),
 
         // ── Advanced types ──
         TsTypeInfo::Conditional {
+            check,
+            extends,
             true_type,
             false_type,
-            ..
         } => {
-            // Simplified conditional: try true_type, fallback to false_type
-            resolve_ts_type(true_type, reg, synthetic)
-                .or_else(|_| resolve_ts_type(false_type, reg, synthetic))
+            conditional::resolve_conditional(check, extends, true_type, false_type, reg, synthetic)
         }
 
-        TsTypeInfo::IndexedAccess { .. } => {
-            // Complex indexed access resolution: delegate to existing logic if needed
+        TsTypeInfo::IndexedAccess { object, index } => {
+            indexed_access::resolve_indexed_access(object, index, reg, synthetic)
+        }
+
+        TsTypeInfo::KeyOf(inner) => resolve_keyof(inner, reg, synthetic),
+
+        TsTypeInfo::TypeQuery(name) => resolve_type_query(name, reg, synthetic),
+
+        TsTypeInfo::Readonly(inner) => resolve_ts_type(inner, reg, synthetic),
+
+        TsTypeInfo::Infer(_) => {
+            // infer T は conditional type の文脈でのみ有効。
+            // 単独では Any にフォールバック。
             Ok(RustType::Any)
-        }
-
-        TsTypeInfo::KeyOf(inner) => {
-            // keyof T → String (simplified)
-            match inner.as_ref() {
-                TsTypeInfo::TypeRef { name, .. } => {
-                    if let Some(def) = reg.get(name) {
-                        if let Some(field_names) = def.field_names() {
-                            // keyof with known fields → string enum
-                            let _fields = field_names;
-                            return Ok(RustType::String);
-                        }
-                    }
-                    Ok(RustType::String)
-                }
-                _ => Ok(RustType::String),
-            }
-        }
-
-        TsTypeInfo::TypeQuery(name) => {
-            // typeof X → look up in registry
-            match reg.get(name) {
-                Some(TypeDef::Function {
-                    params,
-                    return_type,
-                    ..
-                }) => {
-                    let param_types: Vec<RustType> = params.iter().map(|p| p.ty.clone()).collect();
-                    let ret = return_type.clone().unwrap_or(RustType::Unit);
-                    Ok(RustType::Fn {
-                        params: param_types,
-                        return_type: Box::new(ret),
-                    })
-                }
-                Some(TypeDef::Struct { .. } | TypeDef::Enum { .. }) => Ok(RustType::Named {
-                    name: name.clone(),
-                    type_args: vec![],
-                }),
-                Some(TypeDef::ConstValue { type_ref_name, .. }) => {
-                    let resolved_name = type_ref_name.as_deref().unwrap_or(name);
-                    Ok(RustType::Named {
-                        name: resolved_name.to_string(),
-                        type_args: vec![],
-                    })
-                }
-                _ => Err(anyhow::anyhow!(
-                    "unsupported type: TsTypeQuery for unknown identifier '{name}'"
-                )),
-            }
-        }
-
-        TsTypeInfo::Readonly(inner) => {
-            // readonly は Rust では無視（変数バインディングで制御）
-            resolve_ts_type(inner, reg, synthetic)
         }
 
         TsTypeInfo::TypePredicate => Ok(RustType::Bool),
     }
 }
 
-/// Union 型を解決する。
+/// keyof 型を解決する。
 ///
-/// nullable メンバー（null, undefined, void）を除去し、残りが単一なら Option<T> にラップ。
-fn resolve_union(
-    members: &[TsTypeInfo],
+/// `keyof typeof X` → フィールド名の string enum を生成。
+/// `keyof T` → String にフォールバック。
+fn resolve_keyof(
+    inner: &TsTypeInfo,
     reg: &TypeRegistry,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> anyhow::Result<RustType> {
-    let is_nullable = |m: &TsTypeInfo| {
-        matches!(
-            m,
-            TsTypeInfo::Null | TsTypeInfo::Undefined | TsTypeInfo::Void
-        )
-    };
-
-    let has_nullable = members.iter().any(is_nullable);
-    let non_nullable: Vec<&TsTypeInfo> = members.iter().filter(|m| !is_nullable(m)).collect();
-
-    let inner = match non_nullable.len() {
-        0 => RustType::Unit,
-        1 => resolve_ts_type(non_nullable[0], reg, synthetic)?,
-        _ => {
-            // Multiple non-nullable members: check for string literal union
-            let all_string_lit = non_nullable
-                .iter()
-                .all(|m| matches!(m, TsTypeInfo::Literal(super::TsLiteralKind::String(_))));
-            if all_string_lit {
-                // String literal union → string enum (handled at TypeDef level)
-                RustType::String
-            } else {
-                // General union: resolve each member and create synthetic enum
-                let resolved: Vec<RustType> = non_nullable
-                    .iter()
-                    .map(|m| resolve_ts_type(m, reg, synthetic))
-                    .collect::<anyhow::Result<Vec<_>>>()?;
-                // Simplified: for 2+ non-nullable types, use Any as fallback
-                // (full union → enum conversion is handled by the existing convert_union_type)
-                if resolved.len() == 1 {
-                    resolved.into_iter().next().expect("len == 1")
+    // keyof typeof X → string enum of field names
+    if let TsTypeInfo::TypeQuery(name) = inner {
+        return match reg.get(name) {
+            Some(def) => {
+                if let Some(field_names) = def.field_names() {
+                    let enum_name = synthetic
+                        .register_string_literal_enum(&format!("{name}_key"), &field_names);
+                    Ok(RustType::Named {
+                        name: enum_name,
+                        type_args: vec![],
+                    })
                 } else {
-                    RustType::Any
+                    Err(anyhow::anyhow!(
+                        "unsupported type: keyof typeof {name} (no fields)"
+                    ))
                 }
             }
+            None => Err(anyhow::anyhow!(
+                "unsupported type: keyof typeof {name} (not found in registry)"
+            )),
+        };
+    }
+
+    // keyof TypeRef → フィールド名の string enum
+    if let TsTypeInfo::TypeRef { name, .. } = inner {
+        if let Some(def) = reg.get(name) {
+            if let Some(field_names) = def.field_names() {
+                let enum_name =
+                    synthetic.register_string_literal_enum(&format!("{name}_key"), &field_names);
+                return Ok(RustType::Named {
+                    name: enum_name,
+                    type_args: vec![],
+                });
+            }
         }
+    }
+
+    Ok(RustType::String)
+}
+
+/// typeof クエリを解決する。
+fn resolve_type_query(
+    name: &str,
+    reg: &TypeRegistry,
+    _synthetic: &mut SyntheticTypeRegistry,
+) -> anyhow::Result<RustType> {
+    match reg.get(name) {
+        Some(TypeDef::Function {
+            params,
+            return_type,
+            ..
+        }) => {
+            let param_types: Vec<RustType> = params.iter().map(|p| p.ty.clone()).collect();
+            let ret = return_type.clone().unwrap_or(RustType::Unit);
+            Ok(RustType::Fn {
+                params: param_types,
+                return_type: Box::new(ret),
+            })
+        }
+        Some(TypeDef::Struct {
+            constructor: Some(ctors),
+            ..
+        }) if !ctors.is_empty() => {
+            // コンストラクタオーバーロード: パラメータ数最大のものを選択
+            let best = ctors
+                .iter()
+                .max_by_key(|c| c.params.len())
+                .expect("non-empty");
+            let param_types: Vec<RustType> = best.params.iter().map(|p| p.ty.clone()).collect();
+            let ret = best.return_type.clone().unwrap_or_else(|| RustType::Named {
+                name: name.to_string(),
+                type_args: vec![],
+            });
+            Ok(RustType::Fn {
+                params: param_types,
+                return_type: Box::new(ret),
+            })
+        }
+        Some(TypeDef::Struct { .. } | TypeDef::Enum { .. }) => Ok(RustType::Named {
+            name: name.to_string(),
+            type_args: vec![],
+        }),
+        Some(TypeDef::ConstValue { type_ref_name, .. }) => {
+            let resolved_name = type_ref_name.as_deref().unwrap_or(name);
+            Ok(RustType::Named {
+                name: resolved_name.to_string(),
+                type_args: vec![],
+            })
+        }
+        _ => Err(anyhow::anyhow!(
+            "unsupported type: TsTypeQuery for unknown identifier '{name}'"
+        )),
+    }
+}
+
+/// Mapped 型を解決する。
+///
+/// identity mapped type `{ [K in keyof T]: T[K] }` → `T` に簡約。
+/// それ以外は `HashMap<String, V>` にフォールバック。
+fn resolve_mapped(
+    type_param: &str,
+    constraint: &TsTypeInfo,
+    value: Option<&TsTypeInfo>,
+    has_readonly: bool,
+    has_optional: bool,
+    name_type: Option<&TsTypeInfo>,
+    reg: &TypeRegistry,
+    synthetic: &mut SyntheticTypeRegistry,
+) -> anyhow::Result<RustType> {
+    // readonly/optional 修飾子がある場合は identity 簡約を行わない
+    // name_type (as clause) は noop symbol filter の場合のみ identity 簡約を許可
+    let name_type_is_noop = match name_type {
+        None => true,
+        Some(nt) => is_symbol_filter_noop(nt, type_param),
+    };
+    if !has_readonly && !has_optional && name_type_is_noop {
+        if let Some(ty) = try_simplify_identity_mapped(type_param, constraint, value) {
+            return Ok(ty);
+        }
+    }
+
+    // HashMap フォールバック
+    let value_type = value
+        .map(|v| resolve_ts_type(v, reg, synthetic))
+        .transpose()?
+        .unwrap_or(RustType::Any);
+    Ok(RustType::Named {
+        name: "HashMap".to_string(),
+        type_args: vec![RustType::String, value_type],
+    })
+}
+
+/// name_type が noop symbol filter `K extends symbol ? never : K` かどうかを判定する。
+///
+/// このパターンはキーのリマッピングを行わない（symbol キーを除外するだけ）ため、
+/// identity mapped type の簡約を妨げない。
+fn is_symbol_filter_noop(name_type: &TsTypeInfo, param_name: &str) -> bool {
+    match name_type {
+        TsTypeInfo::Conditional {
+            check,
+            extends,
+            true_type,
+            false_type,
+        } => {
+            // check == param_name (K)
+            let check_ok =
+                matches!(check.as_ref(), TsTypeInfo::TypeRef { name, .. } if name == param_name);
+            // extends == symbol keyword
+            let extends_ok = matches!(extends.as_ref(), TsTypeInfo::Symbol);
+            // true_type == never
+            let true_ok = matches!(true_type.as_ref(), TsTypeInfo::Never);
+            // false_type == param_name (K)
+            let false_ok = matches!(false_type.as_ref(), TsTypeInfo::TypeRef { name, .. } if name == param_name);
+            check_ok && extends_ok && true_ok && false_ok
+        }
+        _ => false,
+    }
+}
+
+/// identity mapped type `{ [K in keyof T]: T[K] }` → `T` の簡約を試みる。
+fn try_simplify_identity_mapped(
+    _type_param: &str,
+    constraint: &TsTypeInfo,
+    value: Option<&TsTypeInfo>,
+) -> Option<RustType> {
+    let base_name = match constraint {
+        TsTypeInfo::KeyOf(inner) => match inner.as_ref() {
+            TsTypeInfo::TypeRef { name, .. } => name.clone(),
+            _ => return None,
+        },
+        _ => return None,
     };
 
-    if has_nullable {
-        Ok(RustType::Option(Box::new(inner)))
-    } else {
-        Ok(inner)
+    let value = value?;
+    match value {
+        TsTypeInfo::IndexedAccess { object, index } => match (object.as_ref(), index.as_ref()) {
+            (TsTypeInfo::TypeRef { name: obj_name, .. }, TsTypeInfo::TypeRef { .. }) => {
+                if obj_name == &base_name {
+                    Some(RustType::Named {
+                        name: base_name,
+                        type_args: vec![],
+                    })
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        },
+        _ => None,
     }
 }
 
 /// 型参照を解決する。
+///
+/// 組み込みジェネリック型（Array, Promise, Record 等）およびユーティリティ型
+/// （Partial, Required, Pick, Omit, NonNullable）を特殊処理し、
+/// ユーザー定義型はそのまま RustType::Named に変換する。
 fn resolve_type_ref(
     name: &str,
     type_args: &[TsTypeInfo],
     reg: &TypeRegistry,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> anyhow::Result<RustType> {
+    // ユーティリティ型: 型引数を事前解決せず TsTypeInfo のまま渡す
+    match name {
+        "Partial" => return utility::resolve_partial(type_args, reg, synthetic),
+        "Required" => return utility::resolve_required(type_args, reg, synthetic),
+        "Pick" => return utility::resolve_pick(type_args, reg, synthetic),
+        "Omit" => return utility::resolve_omit(type_args, reg, synthetic),
+        "NonNullable" => return utility::resolve_non_nullable(type_args, reg, synthetic),
+        "Readonly" => {
+            // Readonly<T> → T（Rust では immutability は変数バインディングで制御）
+            if let Some(arg) = type_args.first() {
+                return resolve_ts_type(arg, reg, synthetic);
+            }
+            return Ok(RustType::Any);
+        }
+        _ => {}
+    }
+
+    // 組み込みジェネリック型: 型引数を事前解決
     let resolved_args = type_args
         .iter()
         .map(|a| resolve_ts_type(a, reg, synthetic))
@@ -286,16 +399,8 @@ fn resolve_type_ref(
             let inner = resolved_args.into_iter().next().unwrap_or(RustType::Any);
             Ok(RustType::Vec(Box::new(inner)))
         }
-        "Promise" => {
-            let ok = resolved_args.into_iter().next().unwrap_or(RustType::Unit);
-            Ok(RustType::Result {
-                ok: Box::new(ok),
-                err: Box::new(RustType::Named {
-                    name: "Box<dyn std::error::Error>".to_string(),
-                    type_args: vec![],
-                }),
-            })
-        }
+        // Promise<T> は Named("Promise", [T]) のまま返す。
+        // async 関数の戻り値型 unwrap は transformer 側の責務。
         "Record" => {
             let value_type = resolved_args.get(1).cloned().unwrap_or(RustType::Any);
             Ok(RustType::Named {
@@ -319,7 +424,7 @@ fn resolve_type_ref(
             })
         }
         _ => Ok(RustType::Named {
-            name: name.to_string(),
+            name: sanitize_rust_type_name(name),
             type_args: resolved_args,
         }),
     }
@@ -612,9 +717,13 @@ mod tests {
             type_args: vec![TsTypeInfo::String],
         };
         let result = resolve_ts_type(&info, &reg, &mut syn).unwrap();
+        // Promise<T> は Named("Promise", [T]) のまま返る（unwrap は transformer の責務）
         match result {
-            RustType::Result { ok, .. } => assert_eq!(*ok, RustType::String),
-            _ => panic!("expected Result"),
+            RustType::Named { name, type_args } => {
+                assert_eq!(name, "Promise");
+                assert_eq!(type_args, vec![RustType::String]);
+            }
+            _ => panic!("expected Named(Promise)"),
         }
     }
 
@@ -804,6 +913,9 @@ mod tests {
             type_param: "K".to_string(),
             constraint: Box::new(TsTypeInfo::String),
             value: Some(Box::new(TsTypeInfo::Number)),
+            has_readonly: false,
+            has_optional: false,
+            name_type: None,
         };
         assert_eq!(
             resolve_ts_type(&info, &reg, &mut syn).unwrap(),

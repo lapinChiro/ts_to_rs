@@ -1,5 +1,10 @@
 # I-312b: convert_ts_type を TsTypeInfo 経由に統一 — registry 責務逸脱の完全解消
 
+## 進捗
+
+- **Phase 1〜3**: 完了（convert_ts_type の 2 ステップ化達成、全 1,809 テスト pass）
+- **Phase 4〜5**: 未着手（Registry の TsTypeInfo 移行 + 検証クリーンアップ）
+
 ## 背景
 
 I-312 の Phase A〜C で以下の基盤を構築済み:
@@ -112,26 +117,25 @@ pub struct TsIndexSigInfo {
 
 ## 実装フェーズ
 
-### Phase 1: TsTypeInfo 拡張
+### Phase 1: TsTypeInfo 拡張 ✅
 
 - `TsTypeLiteralInfo`, `TsMethodInfo`, `TsFnSigInfo`, `TsParamInfo`, `TsIndexSigInfo` 定義
 - `TsTypeInfo::ObjectLiteral` → `TsTypeInfo::TypeLiteral(TsTypeLiteralInfo)` に拡張
 - `convert_to_ts_type_info` を拡張して method/call/construct/index sig を収集
+- `TsTypeInfo::Mapped` に `has_readonly`, `has_optional`, `name_type` 追加
+- `TsTypeInfo::Infer`, `TsTypeInfo::Symbol` variant 追加
 
-### Phase 2: resolve_ts_type の完全化
+### Phase 2: resolve_ts_type の完全化 ✅
 
-convert_ts_type のロジックを resolve_ts_type に移植:
+`resolve/` サブモジュール構造に分割し、convert_ts_type のロジックを移植:
 
-- unions: nullable union → Option、string literal union → enum、discriminated union → enum、general union → synthetic enum
-- intersections: intersection → merged struct/trait、type literal → synthetic struct
-- indexed_access: `T['K']` → フィールド型解決
-- utilities: Partial/Required/Pick/Omit/NonNullable
-- type_aliases: conditional type、infer pattern
-- type_ref: Array/Promise/Record/Map/Set 等の特殊型参照
+- `resolve/union.rs`: nullable → Option、string literal → String、multi-type → synthetic enum（AST 順名前生成）
+- `resolve/intersection.rs`: フィールドマージ + 重複検出 + メソッド impl 生成 + union 分配（discriminated 対応）
+- `resolve/indexed_access.rs`: string key → フィールド型/associated type、number index → const 要素型、keyof typeof → 値型 union、TypeLiteral ベース、ネスト対応、union key
+- `resolve/utility.rs`: Partial/Required/Pick/Omit/NonNullable（nested utility 対応: resolve_inner_fields_with_conversion）
+- `resolve/conditional.rs`: infer パターン + 型述語 + フォールバック
 
-各サブモジュールの移行ごとにコミット。
-
-### Phase 3: convert_ts_type を 2 ステップ合成に書き換え
+### Phase 3: convert_ts_type を 2 ステップ合成に書き換え ✅
 
 ```rust
 pub fn convert_ts_type(ts_type: &TsType, synthetic: &mut SyntheticTypeRegistry, reg: &TypeRegistry) -> Result<RustType> {
@@ -140,16 +144,21 @@ pub fn convert_ts_type(ts_type: &TsType, synthetic: &mut SyntheticTypeRegistry, 
 }
 ```
 
-全既存テストで回帰がないことを確認。
+- 旧ディスパッチコード（convert_ts_type_legacy, resolve_keyof_type）削除
+- 旧サブモジュール（indexed_access, intersections, unions）の未使用関数に `#[allow(dead_code)]`
+- Promise<T> は Named("Promise") のまま返す（unwrap は transformer の責務）
+- identity mapped type の修飾子・name_type チェック（symbol filter noop 判定）
+- 全 1,809 テスト pass（ユニット 1,627 + コンパイル 3 + スナップショット 3 + E2E 84 + integration 89）
 
-### Phase 4: Registry の TsTypeInfo 移行
+### Phase 4: Registry の TsTypeInfo 移行（未着手）
 
 - registry 関数が `convert_to_ts_type_info` のみ呼び出す
 - Option ラップ除去（`resolve_field_def` に委譲）
 - PascalCase 除去（`resolve_ts_type` の union 処理に委譲）
 - `build_registry_with_synthetic` で `TypeDef<TsTypeInfo>` → `TypeDef` 変換
+- 旧サブモジュールの `#[allow(dead_code)]` 関数を完全削除
 
-### Phase 5: 検証 + クリーンアップ
+### Phase 5: 検証 + クリーンアップ（未着手）
 
 - 全テスト pass
 - Hono ベンチマーク回帰チェック
@@ -157,11 +166,11 @@ pub fn convert_ts_type(ts_type: &TsType, synthetic: &mut SyntheticTypeRegistry, 
 
 ## 完了基準
 
-1. **`convert_ts_type` が `convert_to_ts_type_info` + `resolve_ts_type` の合成である**
-2. **registry モジュール内に `convert_ts_type` / `convert_type_for_position` の呼び出しが 0 件**
-3. **registry モジュール内に `RustType::Option(Box::new(...))` のラップコードが 0 件**
-4. **registry モジュール内に `string_to_pascal_case` の呼び出しが 0 件**
-5. **`resolve_ts_type` が `convert_ts_type` の全パターンをカバー**
-6. **全既存テストが pass**
-7. **Hono ベンチマークが回帰していない（clean 数 ≥ 110, error instances ≤ 58）**
-8. **cargo clippy, cargo fmt --check が 0 warnings**
+1. ✅ **`convert_ts_type` が `convert_to_ts_type_info` + `resolve_ts_type` の合成である**
+2. ⬜ **registry モジュール内に `convert_ts_type` / `convert_type_for_position` の呼び出しが 0 件** — Phase 4
+3. ⬜ **registry モジュール内に `RustType::Option(Box::new(...))` のラップコードが 0 件** — Phase 4
+4. ⬜ **registry モジュール内に `string_to_pascal_case` の呼び出しが 0 件** — Phase 4
+5. ✅ **`resolve_ts_type` が `convert_ts_type` の全パターンをカバー**
+6. ✅ **全既存テストが pass**（1,809 件）
+7. ⬜ **Hono ベンチマークが回帰していない（clean 数 ≥ 110, error instances ≤ 58）** — Phase 5
+8. ✅ **cargo clippy, cargo fmt --check が 0 warnings**

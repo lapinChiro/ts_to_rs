@@ -21,7 +21,7 @@ Tier 内の記載順序が優先度。根本原因を共有するイシューは
 
 TypeDef が RustType を保持 → registry フェーズに型変換ロジックが漏れている。機能追加のたびに同パターンが増殖する構造的問題。
 
-- **[I-312]** **TypeDef の TS 型メタデータ分離** — 基盤完了（FieldDef/ParamDef、TsTypeInfo、TypeDef ジェネリック化）。残り: convert_ts_type の TsTypeInfo 経由統一 + registry の完全移行 → `backlog/i-312b-convert-ts-type-via-ts-type-info.md`
+- **[I-312]** **TypeDef の TS 型メタデータ分離** — Phase 1-3 完了（convert_ts_type の 2 ステップ化達成）。残り Phase 4-5: registry の TsTypeInfo 直接移行 + Hono ベンチマーク回帰確認 → `backlog/i-312b-convert-ts-type-via-ts-type-info.md`
 - **[I-347]** **TypeDef::substitute_types が Function/ConstValue 未処理** — `src/registry/mod.rs:441` で `other => other.clone()` にフォールスルー。`type F<T> = (x: T) => T` のインスタンス化で型パラメータが未置換
 - **[I-348]** **TypeDef::type_params() が Function を返さない** — `src/registry/mod.rs:293-298` で Function バリアントが `_ => &[]` にマッチ。ジェネリック関数型の instantiate が機能しない
 

@@ -1,5 +1,6 @@
 ---
 source: tests/integration_test.rs
+assertion_line: 103
 expression: output
 ---
 #[derive(Debug, Clone, PartialEq)]
@@ -59,3 +60,5 @@ struct Settings {
     size: f64,
     label: String,
 }
+
+type StringSettings = String;

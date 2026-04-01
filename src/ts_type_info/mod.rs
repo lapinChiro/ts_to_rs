@@ -41,6 +41,8 @@ pub enum TsTypeInfo {
     Object,
     /// TS `bigint`
     BigInt,
+    /// TS `symbol`
+    Symbol,
 
     // ── Composite types ──
     /// TS `T[]` or `Array<T>`
@@ -76,9 +78,11 @@ pub enum TsTypeInfo {
     Literal(TsLiteralKind),
 
     // ── Structural types ──
-    /// TS `{ key: Type; ... }` object type literal
-    ObjectLiteral(Vec<TsFieldInfo>),
-    /// TS mapped type `{ [K in C]: V }`
+    /// TS type literal（`{ key: Type; method(): U; ... }`）
+    ///
+    /// プロパティ・メソッド・call/construct/index シグネチャを含む完全な型リテラル表現。
+    TypeLiteral(TsTypeLiteralInfo),
+    /// TS mapped type `{ [K in C]: V }` / `{ readonly [K in C]?: V }`
     Mapped {
         /// 型パラメータ名
         type_param: std::string::String,
@@ -86,6 +90,12 @@ pub enum TsTypeInfo {
         constraint: Box<TsTypeInfo>,
         /// 値型
         value: Option<Box<TsTypeInfo>>,
+        /// readonly 修飾子あり（`+readonly` / `readonly`）
+        has_readonly: bool,
+        /// optional 修飾子あり（`+?` / `?`）
+        has_optional: bool,
+        /// name type（`as` clause）: `[K in C as N]: V` の `N`
+        name_type: Option<Box<TsTypeInfo>>,
     },
 
     // ── Advanced types ──
@@ -113,6 +123,8 @@ pub enum TsTypeInfo {
     TypeQuery(std::string::String),
     /// TS `readonly T` (type operator)
     Readonly(Box<TsTypeInfo>),
+    /// TS `infer T` (conditional type の extends 内で使用)
+    Infer(std::string::String),
     /// TS type predicate `x is Type` → boolean at runtime
     TypePredicate,
 }
@@ -145,6 +157,82 @@ pub struct TsFieldInfo {
     pub optional: bool,
 }
 
+/// TS type literal の全メンバー情報。
+///
+/// `{ key: T; method(): U; (x: T): U; new (x: T): U; [k: string]: V }` を表現する。
+/// SWC の `TsTypeLit` から抽出した情報を所有型として保持する。
+#[derive(Debug, Clone, PartialEq)]
+pub struct TsTypeLiteralInfo {
+    /// プロパティシグネチャ（`key: T`, `key?: T`）
+    pub fields: Vec<TsFieldInfo>,
+    /// メソッドシグネチャ（`method(x: T): U`）
+    pub methods: Vec<TsMethodInfo>,
+    /// コールシグネチャ（`(x: T): U`）
+    pub call_signatures: Vec<TsFnSigInfo>,
+    /// コンストラクトシグネチャ（`new (x: T): U`）
+    pub construct_signatures: Vec<TsFnSigInfo>,
+    /// インデックスシグネチャ（`[key: string]: T`）
+    pub index_signatures: Vec<TsIndexSigInfo>,
+}
+
+/// TS メソッドシグネチャ情報。
+///
+/// `method(x: T, y?: U): V` を表現する。
+#[derive(Debug, Clone, PartialEq)]
+pub struct TsMethodInfo {
+    /// メソッド名
+    pub name: std::string::String,
+    /// パラメータ
+    pub params: Vec<TsParamInfo>,
+    /// 戻り値型
+    pub return_type: Option<TsTypeInfo>,
+    /// 型パラメータ名（`method<T, U>()` の `T`, `U`）
+    pub type_params: Vec<std::string::String>,
+    /// optional メソッドか（`method?(): T`）
+    pub optional: bool,
+}
+
+/// TS 関数シグネチャ情報（call/construct シグネチャ共通）。
+///
+/// `(x: T, ...rest: U[]): V` を表現する。
+#[derive(Debug, Clone, PartialEq)]
+pub struct TsFnSigInfo {
+    /// パラメータ
+    pub params: Vec<TsParamInfo>,
+    /// 戻り値型
+    pub return_type: Option<TsTypeInfo>,
+    /// rest パラメータを含むか
+    pub has_rest: bool,
+}
+
+/// TS パラメータ情報。
+///
+/// メソッド/コール/コンストラクトシグネチャのパラメータを表す。
+#[derive(Debug, Clone, PartialEq)]
+pub struct TsParamInfo {
+    /// パラメータ名
+    pub name: std::string::String,
+    /// パラメータ型
+    pub ty: TsTypeInfo,
+    /// optional パラメータか（`x?: T`）
+    pub optional: bool,
+}
+
+/// TS インデックスシグネチャ情報。
+///
+/// `[key: string]: T` や `readonly [key: number]: T` を表現する。
+#[derive(Debug, Clone, PartialEq)]
+pub struct TsIndexSigInfo {
+    /// インデックスパラメータ名（例: `key`）
+    pub param_name: std::string::String,
+    /// インデックスパラメータ型（通常 `string` or `number`）
+    pub param_type: TsTypeInfo,
+    /// 値型
+    pub value_type: TsTypeInfo,
+    /// readonly か
+    pub readonly: bool,
+}
+
 /// SWC の `TsType` AST ノードから `TsTypeInfo` に変換する。
 ///
 /// 純粋に構文的なマッピングのみ行い、TypeRegistry は不要。
@@ -165,6 +253,7 @@ pub fn convert_to_ts_type_info(ts_type: &swc_ecma_ast::TsType) -> anyhow::Result
             TsKeywordTypeKind::TsNullKeyword => Ok(TsTypeInfo::Null),
             TsKeywordTypeKind::TsUndefinedKeyword => Ok(TsTypeInfo::Undefined),
             TsKeywordTypeKind::TsBigIntKeyword => Ok(TsTypeInfo::BigInt),
+            TsKeywordTypeKind::TsSymbolKeyword => Ok(TsTypeInfo::Symbol),
             other => Err(anyhow::anyhow!("unsupported keyword type: {:?}", other)),
         },
 
@@ -250,27 +339,8 @@ pub fn convert_to_ts_type_info(ts_type: &swc_ecma_ast::TsType) -> anyhow::Result
         }
 
         ast::TsType::TsTypeLit(type_lit) => {
-            let mut fields = Vec::new();
-            for member in &type_lit.members {
-                if let ast::TsTypeElement::TsPropertySignature(prop) = member {
-                    let name = match prop.key.as_ref() {
-                        ast::Expr::Ident(ident) => ident.sym.to_string(),
-                        _ => continue,
-                    };
-                    let ty = prop
-                        .type_ann
-                        .as_ref()
-                        .map(|ann| convert_to_ts_type_info(&ann.type_ann))
-                        .transpose()?
-                        .unwrap_or(TsTypeInfo::Any);
-                    fields.push(TsFieldInfo {
-                        name,
-                        ty,
-                        optional: prop.optional,
-                    });
-                }
-            }
-            Ok(TsTypeInfo::ObjectLiteral(fields))
+            let info = convert_type_lit_members(&type_lit.members)?;
+            Ok(TsTypeInfo::TypeLiteral(info))
         }
 
         ast::TsType::TsLitType(lit) => {
@@ -308,14 +378,29 @@ pub fn convert_to_ts_type_info(ts_type: &swc_ecma_ast::TsType) -> anyhow::Result
                 .map(|ann| convert_to_ts_type_info(ann))
                 .transpose()?
                 .map(Box::new);
+            let has_readonly = mapped.readonly.is_some();
+            let has_optional = mapped.optional.is_some();
+            let name_type = mapped
+                .name_type
+                .as_ref()
+                .map(|nt| convert_to_ts_type_info(nt))
+                .transpose()?
+                .map(Box::new);
             Ok(TsTypeInfo::Mapped {
                 type_param,
                 constraint,
                 value,
+                has_readonly,
+                has_optional,
+                name_type,
             })
         }
 
         ast::TsType::TsTypePredicate(_) => Ok(TsTypeInfo::TypePredicate),
+
+        ast::TsType::TsInferType(infer) => {
+            Ok(TsTypeInfo::Infer(infer.type_param.name.sym.to_string()))
+        }
 
         ast::TsType::TsTypeOperator(op) => {
             use ast::TsTypeOperatorOp;
@@ -346,7 +431,182 @@ pub fn convert_to_ts_type_info(ts_type: &swc_ecma_ast::TsType) -> anyhow::Result
     }
 }
 
-/// TsFnParam のリストからパラメータ型を抽出する。
+/// TsTypeLit のメンバーリストから TsTypeLiteralInfo を構築する。
+fn convert_type_lit_members(
+    members: &[swc_ecma_ast::TsTypeElement],
+) -> anyhow::Result<TsTypeLiteralInfo> {
+    use swc_ecma_ast as ast;
+
+    let mut fields = Vec::new();
+    let mut methods = Vec::new();
+    let mut call_signatures = Vec::new();
+    let mut construct_signatures = Vec::new();
+    let mut index_signatures = Vec::new();
+
+    for member in members {
+        match member {
+            ast::TsTypeElement::TsPropertySignature(prop) => {
+                let name = match prop.key.as_ref() {
+                    ast::Expr::Ident(ident) => ident.sym.to_string(),
+                    _ => continue,
+                };
+                let ty = prop
+                    .type_ann
+                    .as_ref()
+                    .map(|ann| convert_to_ts_type_info(&ann.type_ann))
+                    .transpose()?
+                    .unwrap_or(TsTypeInfo::Any);
+                fields.push(TsFieldInfo {
+                    name,
+                    ty,
+                    optional: prop.optional,
+                });
+            }
+            ast::TsTypeElement::TsMethodSignature(sig) => {
+                let name = match sig.key.as_ref() {
+                    ast::Expr::Ident(ident) => ident.sym.to_string(),
+                    _ => continue,
+                };
+                let (params, has_rest) = extract_sig_params(&sig.params);
+                let return_type = sig
+                    .type_ann
+                    .as_ref()
+                    .map(|ann| convert_to_ts_type_info(&ann.type_ann))
+                    .transpose()?;
+                let type_params = sig
+                    .type_params
+                    .as_ref()
+                    .map(|tp| tp.params.iter().map(|p| p.name.sym.to_string()).collect())
+                    .unwrap_or_default();
+                methods.push(TsMethodInfo {
+                    name,
+                    params,
+                    return_type,
+                    type_params,
+                    optional: sig.optional,
+                });
+                // has_rest は TsFnSigInfo で使用するがメソッドでは未使用
+                let _ = has_rest;
+            }
+            ast::TsTypeElement::TsCallSignatureDecl(decl) => {
+                let (params, has_rest) = extract_sig_params(&decl.params);
+                let return_type = decl
+                    .type_ann
+                    .as_ref()
+                    .map(|ann| convert_to_ts_type_info(&ann.type_ann))
+                    .transpose()?;
+                call_signatures.push(TsFnSigInfo {
+                    params,
+                    return_type,
+                    has_rest,
+                });
+            }
+            ast::TsTypeElement::TsConstructSignatureDecl(decl) => {
+                let (params, has_rest) = extract_sig_params(&decl.params);
+                let return_type = decl
+                    .type_ann
+                    .as_ref()
+                    .map(|ann| convert_to_ts_type_info(&ann.type_ann))
+                    .transpose()?;
+                construct_signatures.push(TsFnSigInfo {
+                    params,
+                    return_type,
+                    has_rest,
+                });
+            }
+            ast::TsTypeElement::TsIndexSignature(idx) => {
+                // インデックスパラメータの抽出
+                if let Some(param) = idx.params.first() {
+                    let param_name = match param {
+                        ast::TsFnParam::Ident(ident) => ident.id.sym.to_string(),
+                        _ => "key".to_string(),
+                    };
+                    let param_type = match param {
+                        ast::TsFnParam::Ident(ident) => ident
+                            .type_ann
+                            .as_ref()
+                            .map(|ann| convert_to_ts_type_info(&ann.type_ann))
+                            .transpose()?
+                            .unwrap_or(TsTypeInfo::String),
+                        _ => TsTypeInfo::String,
+                    };
+                    let value_type = idx
+                        .type_ann
+                        .as_ref()
+                        .map(|ann| convert_to_ts_type_info(&ann.type_ann))
+                        .transpose()?
+                        .unwrap_or(TsTypeInfo::Any);
+                    index_signatures.push(TsIndexSigInfo {
+                        param_name,
+                        param_type,
+                        value_type,
+                        readonly: idx.readonly,
+                    });
+                }
+            }
+            // getter/setter は現時点では非対応（変換パイプラインでもスキップされている）
+            _ => continue,
+        }
+    }
+
+    Ok(TsTypeLiteralInfo {
+        fields,
+        methods,
+        call_signatures,
+        construct_signatures,
+        index_signatures,
+    })
+}
+
+/// TsFnParam のリストからシグネチャパラメータ情報を抽出する。
+///
+/// (params, has_rest) のタプルを返す。
+fn extract_sig_params(params: &[swc_ecma_ast::TsFnParam]) -> (Vec<TsParamInfo>, bool) {
+    let mut result = Vec::new();
+    let mut has_rest = false;
+
+    for p in params {
+        match p {
+            swc_ecma_ast::TsFnParam::Ident(ident) => {
+                let ty = ident
+                    .type_ann
+                    .as_ref()
+                    .and_then(|a| convert_to_ts_type_info(&a.type_ann).ok())
+                    .unwrap_or(TsTypeInfo::Any);
+                result.push(TsParamInfo {
+                    name: ident.id.sym.to_string(),
+                    ty,
+                    optional: ident.optional,
+                });
+            }
+            swc_ecma_ast::TsFnParam::Rest(rest) => {
+                has_rest = true;
+                let ty = rest
+                    .type_ann
+                    .as_ref()
+                    .and_then(|a| convert_to_ts_type_info(&a.type_ann).ok())
+                    .unwrap_or(TsTypeInfo::Any);
+                let name = match rest.arg.as_ref() {
+                    swc_ecma_ast::Pat::Ident(ident) => ident.id.sym.to_string(),
+                    _ => "rest".to_string(),
+                };
+                result.push(TsParamInfo {
+                    name,
+                    ty,
+                    optional: false,
+                });
+            }
+            _ => {
+                // Object/Array パターンのパラメータはスキップ
+                continue;
+            }
+        }
+    }
+
+    (result, has_rest)
+}
+
+/// TsFnParam のリストからパラメータ型を抽出する（Function variant 用）。
 fn extract_fn_params(params: &[swc_ecma_ast::TsFnParam]) -> Vec<TsTypeInfo> {
     params
         .iter()
@@ -524,23 +784,71 @@ mod tests {
     }
 
     #[test]
-    fn object_literal_type() {
+    fn type_literal_properties() {
         let info = convert_to_ts_type_info(&parse_type("{ name: string; age?: number }")).unwrap();
-        assert_eq!(
-            info,
-            TsTypeInfo::ObjectLiteral(vec![
-                TsFieldInfo {
-                    name: "name".to_string(),
-                    ty: TsTypeInfo::String,
-                    optional: false,
-                },
-                TsFieldInfo {
-                    name: "age".to_string(),
-                    ty: TsTypeInfo::Number,
-                    optional: true,
-                },
-            ])
-        );
+        match &info {
+            TsTypeInfo::TypeLiteral(lit) => {
+                assert_eq!(lit.fields.len(), 2);
+                assert_eq!(lit.fields[0].name, "name");
+                assert_eq!(lit.fields[0].ty, TsTypeInfo::String);
+                assert!(!lit.fields[0].optional);
+                assert_eq!(lit.fields[1].name, "age");
+                assert_eq!(lit.fields[1].ty, TsTypeInfo::Number);
+                assert!(lit.fields[1].optional);
+                assert!(lit.methods.is_empty());
+                assert!(lit.call_signatures.is_empty());
+                assert!(lit.construct_signatures.is_empty());
+                assert!(lit.index_signatures.is_empty());
+            }
+            _ => panic!("expected TypeLiteral, got {:?}", info),
+        }
+    }
+
+    #[test]
+    fn type_literal_methods() {
+        let info = convert_to_ts_type_info(&parse_type("{ greet(name: string): void }")).unwrap();
+        match &info {
+            TsTypeInfo::TypeLiteral(lit) => {
+                assert!(lit.fields.is_empty());
+                assert_eq!(lit.methods.len(), 1);
+                assert_eq!(lit.methods[0].name, "greet");
+                assert_eq!(lit.methods[0].params.len(), 1);
+                assert_eq!(lit.methods[0].params[0].name, "name");
+                assert_eq!(lit.methods[0].params[0].ty, TsTypeInfo::String);
+                assert_eq!(lit.methods[0].return_type, Some(TsTypeInfo::Void));
+            }
+            _ => panic!("expected TypeLiteral, got {:?}", info),
+        }
+    }
+
+    #[test]
+    fn type_literal_call_signature() {
+        let info = convert_to_ts_type_info(&parse_type("{ (x: number): string }")).unwrap();
+        match &info {
+            TsTypeInfo::TypeLiteral(lit) => {
+                assert_eq!(lit.call_signatures.len(), 1);
+                assert_eq!(lit.call_signatures[0].params.len(), 1);
+                assert_eq!(lit.call_signatures[0].params[0].name, "x");
+                assert_eq!(lit.call_signatures[0].params[0].ty, TsTypeInfo::Number);
+                assert_eq!(lit.call_signatures[0].return_type, Some(TsTypeInfo::String));
+            }
+            _ => panic!("expected TypeLiteral, got {:?}", info),
+        }
+    }
+
+    #[test]
+    fn type_literal_index_signature() {
+        let info = convert_to_ts_type_info(&parse_type("{ [key: string]: number }")).unwrap();
+        match &info {
+            TsTypeInfo::TypeLiteral(lit) => {
+                assert_eq!(lit.index_signatures.len(), 1);
+                assert_eq!(lit.index_signatures[0].param_name, "key");
+                assert_eq!(lit.index_signatures[0].param_type, TsTypeInfo::String);
+                assert_eq!(lit.index_signatures[0].value_type, TsTypeInfo::Number);
+                assert!(!lit.index_signatures[0].readonly);
+            }
+            _ => panic!("expected TypeLiteral, got {:?}", info),
+        }
     }
 
     #[test]
@@ -668,6 +976,7 @@ mod tests {
                 type_param,
                 constraint,
                 value,
+                ..
             } => {
                 assert_eq!(type_param, "K");
                 assert_eq!(

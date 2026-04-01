@@ -4,10 +4,16 @@
 //! annotations into the IR representation. Synthetic types (union enums,
 //! inline structs) are registered in [`SyntheticTypeRegistry`].
 
+// convert_ts_type が TsTypeInfo 経由の 2 ステップに移行したため、
+// 旧ディスパッチから呼ばれていた関数は未使用となった。
+// Phase 4（Registry 移行）完了後にクリーンアップする。
+#[allow(dead_code)]
 mod indexed_access;
 mod interfaces;
+#[allow(dead_code)]
 mod intersections;
 mod type_aliases;
+#[allow(dead_code)]
 mod unions;
 mod utilities;
 
@@ -20,16 +26,11 @@ pub use utilities::extract_type_params;
 
 // Import all pub(super) items from submodules into this module's namespace.
 // Submodules use `use super::*;` to access these.
-use indexed_access::convert_indexed_access_type;
 use interfaces::convert_method_signature;
-use intersections::{
-    convert_fn_type, convert_intersection_in_annotation, convert_type_lit_in_annotation,
-    try_convert_intersection_type, try_simplify_identity_mapped_type,
-};
-use type_aliases::convert_conditional_type;
+use intersections::try_convert_intersection_type;
 use unions::{
-    convert_union_type, try_convert_discriminated_union, try_convert_general_union,
-    try_convert_single_string_literal, try_convert_string_literal_union,
+    try_convert_discriminated_union, try_convert_general_union, try_convert_single_string_literal,
+    try_convert_string_literal_union,
 };
 use utilities::{
     convert_unsupported_union_member, convert_utility_non_nullable, convert_utility_omit,
@@ -123,200 +124,8 @@ pub fn convert_ts_type(
     synthetic: &mut SyntheticTypeRegistry,
     reg: &TypeRegistry,
 ) -> Result<RustType> {
-    match ts_type {
-        TsType::TsKeywordType(kw) => match kw.kind {
-            TsKeywordTypeKind::TsStringKeyword => Ok(RustType::String),
-            TsKeywordTypeKind::TsNumberKeyword => Ok(RustType::F64),
-            TsKeywordTypeKind::TsBooleanKeyword => Ok(RustType::Bool),
-            TsKeywordTypeKind::TsVoidKeyword => Ok(RustType::Unit),
-            TsKeywordTypeKind::TsAnyKeyword | TsKeywordTypeKind::TsUnknownKeyword => {
-                Ok(RustType::Any)
-            }
-            TsKeywordTypeKind::TsNeverKeyword => Ok(RustType::Never),
-            TsKeywordTypeKind::TsObjectKeyword => Ok(RustType::Named {
-                name: "serde_json::Value".to_string(),
-                type_args: vec![],
-            }),
-            TsKeywordTypeKind::TsUndefinedKeyword | TsKeywordTypeKind::TsNullKeyword => {
-                Ok(RustType::Unit)
-            }
-            TsKeywordTypeKind::TsBigIntKeyword => Ok(RustType::Named {
-                name: "i128".to_string(),
-                type_args: vec![],
-            }),
-            other => Err(anyhow!("unsupported keyword type: {:?}", other)),
-        },
-        TsType::TsArrayType(arr) => {
-            let inner = convert_ts_type(&arr.elem_type, synthetic, reg)?;
-            Ok(RustType::Vec(Box::new(inner)))
-        }
-        TsType::TsTypeRef(type_ref) => convert_type_ref(type_ref, synthetic, reg),
-        TsType::TsUnionOrIntersectionType(
-            swc_ecma_ast::TsUnionOrIntersectionType::TsUnionType(union),
-        ) => convert_union_type(union, synthetic, reg),
-        TsType::TsUnionOrIntersectionType(
-            swc_ecma_ast::TsUnionOrIntersectionType::TsIntersectionType(intersection),
-        ) => convert_intersection_in_annotation(intersection, synthetic, reg),
-        TsType::TsParenthesizedType(paren) => convert_ts_type(&paren.type_ann, synthetic, reg),
-        TsType::TsFnOrConstructorType(swc_ecma_ast::TsFnOrConstructorType::TsFnType(fn_type)) => {
-            convert_fn_type(fn_type, synthetic, reg)
-        }
-        TsType::TsTupleType(tuple) => {
-            let elems = tuple
-                .elem_types
-                .iter()
-                .map(|elem| convert_ts_type(&elem.ty, synthetic, reg))
-                .collect::<Result<Vec<_>>>()?;
-            Ok(RustType::Tuple(elems))
-        }
-        TsType::TsIndexedAccessType(indexed) => {
-            convert_indexed_access_type(indexed, synthetic, reg)
-        }
-        TsType::TsTypeLit(type_lit) => convert_type_lit_in_annotation(type_lit, synthetic, reg),
-        TsType::TsLitType(lit) => match &lit.lit {
-            swc_ecma_ast::TsLit::Str(_) | swc_ecma_ast::TsLit::Tpl(_) => Ok(RustType::String),
-            swc_ecma_ast::TsLit::Bool(_) => Ok(RustType::Bool),
-            swc_ecma_ast::TsLit::Number(_) => Ok(RustType::F64),
-            swc_ecma_ast::TsLit::BigInt(_) => Ok(RustType::Named {
-                name: "i128".to_string(),
-                type_args: vec![],
-            }),
-        },
-        TsType::TsConditionalType(cond) => convert_conditional_type(cond, synthetic, reg),
-        TsType::TsMappedType(mapped) => {
-            // Try identity simplification: { [K in keyof T]: T[K] } → T
-            if let Some(simplified) = try_simplify_identity_mapped_type(mapped) {
-                return Ok(simplified);
-            }
-            // Fallback: treat mapped types as HashMap<String, V>
-            let value_type = mapped
-                .type_ann
-                .as_ref()
-                .map(|ann| convert_ts_type(ann, synthetic, reg))
-                .transpose()?
-                .unwrap_or(RustType::Any);
-            Ok(RustType::Named {
-                name: "HashMap".to_string(),
-                type_args: vec![RustType::String, value_type],
-            })
-        }
-        TsType::TsTypePredicate(_) => {
-            // `x is Type` → bool (type guard predicates are booleans at runtime)
-            Ok(RustType::Bool)
-        }
-        TsType::TsTypeOperator(op) => {
-            use swc_ecma_ast::TsTypeOperatorOp;
-            match op.op {
-                // `readonly T[]` → strip readonly, convert inner type
-                // Rust enforces immutability through variable bindings, not types
-                TsTypeOperatorOp::ReadOnly => convert_ts_type(&op.type_ann, synthetic, reg),
-                // `keyof typeof X` → string enum of const object's field names
-                TsTypeOperatorOp::KeyOf => resolve_keyof_type(&op.type_ann, synthetic, reg),
-                _ => Err(anyhow!("unsupported type operator: {:?}", op.op)),
-            }
-        }
-        TsType::TsTypeQuery(query) => {
-            // `typeof X` → look up X in registry; if found, use that type
-            let name = match &query.expr_name {
-                swc_ecma_ast::TsTypeQueryExpr::TsEntityName(swc_ecma_ast::TsEntityName::Ident(
-                    ident,
-                )) => ident.sym.to_string(),
-                _ => return Err(anyhow!("unsupported typeof expression")),
-            };
-            match reg.get(&name) {
-                Some(crate::registry::TypeDef::Function {
-                    params,
-                    return_type,
-                    ..
-                }) => {
-                    let param_types: Vec<RustType> = params.iter().map(|p| p.ty.clone()).collect();
-                    let ret = return_type.clone().unwrap_or(RustType::Unit);
-                    Ok(RustType::Fn {
-                        params: param_types,
-                        return_type: Box::new(ret),
-                    })
-                }
-                Some(crate::registry::TypeDef::Struct {
-                    constructor: Some(ctors),
-                    ..
-                }) if !ctors.is_empty() => {
-                    // typeof ClassName with constructor → constructor function type
-                    // Select the constructor with the most parameters (most specific overload).
-                    // Safety: ctors is non-empty due to the guard above, so max_by_key
-                    // always returns Some. Use if-let to satisfy the no-unwrap rule.
-                    if let Some(ctor) = ctors.iter().max_by_key(|c| c.params.len()) {
-                        let param_types: Vec<RustType> =
-                            ctor.params.iter().map(|p| p.ty.clone()).collect();
-                        Ok(RustType::Fn {
-                            params: param_types,
-                            return_type: Box::new(RustType::Named {
-                                name: name.clone(),
-                                type_args: vec![],
-                            }),
-                        })
-                    } else {
-                        Ok(RustType::Named {
-                            name,
-                            type_args: vec![],
-                        })
-                    }
-                }
-                Some(
-                    crate::registry::TypeDef::Struct { .. } | crate::registry::TypeDef::Enum { .. },
-                ) => {
-                    // typeof StructName/EnumName → the type itself
-                    Ok(RustType::Named {
-                        name,
-                        type_args: vec![],
-                    })
-                }
-                Some(crate::registry::TypeDef::ConstValue { type_ref_name, .. }) => {
-                    // typeof ConstVariable → redirect to referenced type if available
-                    let resolved_name = type_ref_name.as_deref().unwrap_or(&name);
-                    Ok(RustType::Named {
-                        name: resolved_name.to_string(),
-                        type_args: vec![],
-                    })
-                }
-                _ => Err(anyhow!(
-                    "unsupported type: TsTypeQuery for unknown identifier '{name}'"
-                )),
-            }
-        }
-        _ => Err(anyhow!("unsupported type: {:?}", ts_type)),
-    }
-}
-
-/// Resolves `keyof T` type operator.
-///
-/// Currently supports `keyof typeof X` where X is a ConstValue with fields.
-/// Returns a synthetic string enum of the field names.
-fn resolve_keyof_type(
-    type_ann: &TsType,
-    synthetic: &mut SyntheticTypeRegistry,
-    reg: &TypeRegistry,
-) -> Result<RustType> {
-    // keyof typeof X → get field names from ConstValue/Struct
-    if let TsType::TsTypeQuery(query) = type_ann {
-        if let swc_ecma_ast::TsTypeQueryExpr::TsEntityName(swc_ecma_ast::TsEntityName::Ident(
-            ident,
-        )) = &query.expr_name
-        {
-            let name = ident.sym.to_string();
-            if let Some(typedef) = reg.get(&name) {
-                if let Some(field_names) = typedef.field_names() {
-                    let enum_name = synthetic
-                        .register_string_literal_enum(&format!("{name}_key"), &field_names);
-                    return Ok(RustType::Named {
-                        name: enum_name,
-                        type_args: vec![],
-                    });
-                }
-            }
-        }
-    }
-
-    Err(anyhow!("unsupported type operator: KeyOf"))
+    let info = crate::ts_type_info::convert_to_ts_type_info(ts_type)?;
+    crate::ts_type_info::resolve::resolve_ts_type(&info, reg, synthetic)
 }
 
 /// Converts a type reference like `Array<T>`.
