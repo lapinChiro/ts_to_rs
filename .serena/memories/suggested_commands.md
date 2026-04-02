@@ -1,0 +1,17 @@
+# Suggested commands
+- Build: `cargo build`
+- Release build: `cargo build --release`
+- Fast check: `cargo check`
+- Run tests: `cargo test`
+- Lint: `cargo clippy --all-targets --all-features -- -D warnings`
+- Format check: `cargo fmt --all --check`
+- Coverage gate: `cargo llvm-cov --ignore-filename-regex 'main\.rs' --fail-under-lines 89`
+- Auto-fix warnings/imports: `cargo fix --allow-dirty --allow-staged`
+- File length check: `./scripts/check-file-lines.sh`
+- CLI usage: `cargo run -- <input.ts>` or built binary `./target/debug/ts_to_rs <input.ts>`
+- Install local binary: `cargo install --path .`
+- Directory benchmark: `./scripts/hono-bench.sh` or `./scripts/hono-bench.sh --both`
+- Inspect benchmark errors: `python3 scripts/inspect-errors.py` with optional filters
+- Tooling helper build/test: in `tools/extract-types`, use `npm`/`npm test`/`npm run build` as defined by package.json
+- E2E deps install: `cd tests/e2e && npm install`
+- Useful Linux utilities in this repo: `rg`, `find`, `sed`, `git status`, `cargo`, `npm`, `python3`.

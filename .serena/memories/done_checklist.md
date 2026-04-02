@@ -1,0 +1,11 @@
+# Completion checklist
+- Claude workflow expects running a quality-check sequence before declaring work complete:
+  - `cargo fix --allow-dirty --allow-staged`
+  - `cargo fmt --all --check`
+  - `cargo clippy --all-targets --all-features -- -D warnings`
+  - `cargo test`
+  - `./scripts/check-file-lines.sh`
+- CI also enforces coverage via `cargo llvm-cov --ignore-filename-regex 'main\.rs' --fail-under-lines 89`.
+- `command-output-verification.md` requires redirecting full outputs to files for large runs and reviewing the contents, not just checking tail output.
+- `pre-commit-doc-sync.md` expects `plan.md` (and task docs if present) to reflect the new state before proposing commit messages.
+- `incremental-commit.md` expects phase-by-phase `[WIP]` commits in Claude workflow, though actual git commit/push/merge are reserved for the user per `CLAUDE.md`.

@@ -74,6 +74,15 @@ TS source → Parser (SWC AST)
   → OutputWriter (file output, mod.rs generation)
 ```
 
+## Shared Agent Docs
+
+The Claude and Codex environments are intended to coexist.
+
+- Shared guidance for both agents lives under `doc/agent/`
+- Codex entrypoint is `AGENTS.md`
+- Claude-specific rules remain under `.claude/`
+- Codex-specific settings live under `.codex/` and `.agents/skills/`
+
 ## Core Principles
 
 - **Ideal implementation**: Pursue the logically most ideal implementation regardless of cost. No compromises, no ad-hoc solutions. "Too much effort" and "good enough for now" are not valid justifications

@@ -1,0 +1,11 @@
+# Style and conventions
+- Conversational responses and commit messages are expected in Japanese (`CLAUDE.md`). Code/comments/docs may remain English.
+- Project philosophy strongly favors ideal, clean implementations over low-effort shortcuts; KISS/YAGNI/DRY are subordinate to correctness and design integrity.
+- Maintain 0 errors and 0 warnings for changes.
+- `unwrap()` / `expect()` are allowed only in test code.
+- `unsafe` is prohibited without documented reason and user approval.
+- Public types/functions require doc comments.
+- Pipeline integrity rule: keep IR structured, keep transformer/generator dependency direction clean, and add integration tests for new resolution mechanisms.
+- Testing conventions: unit tests inline in `src/**`, integration/snapshot tests in `tests/`, E2E TS scripts in `tests/e2e/scripts` plus Rust harness in `tests/e2e_test.rs`.
+- For conversion feature changes, E2E test additions/expansions are mandatory under the Claude workflow.
+- Planning docs (`TODO`, `plan.md`) are treated as active operating artifacts and should stay synchronized with implementation state.

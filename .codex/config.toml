@@ -1,0 +1,33 @@
+profile = "default"
+model = "gpt-5.4"
+model_reasoning_effort = "medium"
+model_verbosity = "low"
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"
+allow_login_shell = false
+project_doc_fallback_filenames = ["CLAUDE.md"]
+project_doc_max_bytes = 65536
+
+[sandbox_workspace_write]
+network_access = false
+
+[profiles.default]
+model = "gpt-5.4"
+model_reasoning_effort = "medium"
+model_verbosity = "low"
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"
+
+[profiles.deep-review]
+model = "gpt-5.4"
+model_reasoning_effort = "high"
+model_verbosity = "low"
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"
+
+[profiles.lightweight]
+model = "gpt-5.4-mini"
+model_reasoning_effort = "low"
+model_verbosity = "low"
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"

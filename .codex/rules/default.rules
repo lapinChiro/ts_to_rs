@@ -1,0 +1,82 @@
+# Shared safety rules for this repository.
+
+prefix_rule(
+    pattern = ["git", ["add", "commit", "push", "reset", "checkout", "switch", "stash", "merge", "rebase"]],
+    decision = "forbidden",
+    justification = "Git の最終操作はユーザーが行う。このリポジトリではコミットや履歴改変は自動実行しない。",
+    match = [
+        "git commit -m test",
+        "git add src/lib.rs",
+        "git reset --hard HEAD",
+    ],
+    not_match = [
+        "git status",
+        "git diff --stat",
+    ],
+)
+
+prefix_rule(
+    pattern = ["cargo", ["build", "check", "test", "clippy", "fmt", "llvm-cov"]],
+    decision = "allow",
+    justification = "Rust のビルド・検証系コマンドは日常的に実行する。",
+    match = [
+        "cargo check",
+        "cargo test --test integration_test",
+        "cargo clippy --all-targets --all-features -- -D warnings",
+    ],
+    not_match = [
+        "cargo install ripgrep",
+    ],
+)
+
+prefix_rule(
+    pattern = ["cargo", "fix"],
+    decision = "prompt",
+    justification = "cargo fix は自動修正でファイル変更を伴うため、必要時のみ確認して実行する。",
+    match = [
+        "cargo fix --allow-dirty --allow-staged",
+    ],
+)
+
+prefix_rule(
+    pattern = [["rg", "find", "sed", "ls", "cat", "wc"]],
+    decision = "allow",
+    justification = "探索・読取系コマンドは安全で高頻度に使う。",
+    match = [
+        "rg TODO src",
+        "find src -maxdepth 2 -type f",
+        "sed -n 1,40p README.md",
+    ],
+)
+
+prefix_rule(
+    pattern = ["git", ["status", "diff", "log", "show"]],
+    decision = "allow",
+    justification = "読み取り専用の Git コマンドは許可する。",
+    match = [
+        "git status --short",
+        "git diff --stat",
+        "git show HEAD~1",
+    ],
+)
+
+prefix_rule(
+    pattern = [["npm", "pnpm", "yarn"], "install"],
+    decision = "prompt",
+    justification = "依存関係の追加取得はネットワークや lockfile 更新を伴うため確認する。",
+    match = [
+        "npm install",
+        "pnpm install",
+    ],
+)
+
+prefix_rule(
+    pattern = [["curl", "gh", "aws", "docker"]],
+    decision = "prompt",
+    justification = "外部通信または外部システム操作を伴う可能性が高いため、都度確認する。",
+    match = [
+        "curl -I https://example.com",
+        "gh pr view 1",
+        "aws sts get-caller-identity",
+    ],
+)
