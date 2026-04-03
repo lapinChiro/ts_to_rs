@@ -25,7 +25,7 @@ use swc_ecma_ast as ast;
 use crate::ir::{RustType, TypeParam};
 use crate::pipeline::SyntheticTypeRegistry;
 
-pub use collection::collect_type_params;
+pub(crate) use collection::collect_type_params;
 
 /// TypeDef のフィールド定義。optional フラグを TS メタデータとして保持する。
 ///
@@ -202,7 +202,7 @@ pub enum TypeDef<T = RustType> {
     /// struct（interface / type alias から変換）
     Struct {
         /// ジェネリック型パラメータ
-        type_params: Vec<TypeParam>,
+        type_params: Vec<TypeParam<T>>,
         /// フィールド定義
         fields: Vec<FieldDef<T>>,
         /// メソッドシグネチャ（メソッド名 → オーバーロードを含む全シグネチャ）
@@ -220,7 +220,7 @@ pub enum TypeDef<T = RustType> {
     /// enum
     Enum {
         /// ジェネリック型パラメータ
-        type_params: Vec<TypeParam>,
+        type_params: Vec<TypeParam<T>>,
         /// バリアント名の一覧
         variants: Vec<String>,
         /// 文字列リテラル値 → バリアント名のマッピング（string literal union / discriminated union）
@@ -233,7 +233,7 @@ pub enum TypeDef<T = RustType> {
     /// 関数
     Function {
         /// ジェネリック型パラメータ
-        type_params: Vec<TypeParam>,
+        type_params: Vec<TypeParam<T>>,
         /// パラメータ定義
         params: Vec<ParamDef<T>>,
         /// 戻り値型

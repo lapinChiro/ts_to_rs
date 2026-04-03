@@ -430,6 +430,23 @@ fn resolve_type_ref(
     }
 }
 
+/// Vec<TypeParam<TsTypeInfo>> → Vec<TypeParam<RustType>> 変換。
+pub(crate) fn resolve_type_params(
+    params: Vec<crate::ir::TypeParam<TsTypeInfo>>,
+    reg: &TypeRegistry,
+    synthetic: &mut SyntheticTypeRegistry,
+) -> Vec<crate::ir::TypeParam<RustType>> {
+    params
+        .into_iter()
+        .map(|tp| crate::ir::TypeParam {
+            name: tp.name,
+            constraint: tp
+                .constraint
+                .and_then(|c| resolve_ts_type(&c, reg, synthetic).ok()),
+        })
+        .collect()
+}
+
 /// TypeDef<TsTypeInfo> → TypeDef<RustType> 変換。
 ///
 /// registry フェーズで構築された TS 型ベースの TypeDef を、
@@ -476,7 +493,7 @@ pub fn resolve_typedef(
                 .collect();
 
             Ok(TypeDef::Struct {
-                type_params,
+                type_params: resolve_type_params(type_params, reg, synthetic),
                 fields: resolved_fields,
                 methods: resolved_methods,
                 constructor: resolved_ctor,
@@ -493,7 +510,41 @@ pub fn resolve_typedef(
             tag_field,
             variant_fields,
         } => {
-            let resolved_variant_fields = variant_fields
+            // string literal union / DU: raw 文字列を PascalCase に変換
+            let (pascal_variants, pascal_string_values, pascal_variant_fields) =
+                if !string_values.is_empty() {
+                    use crate::pipeline::type_converter::string_to_pascal_case;
+                    let pv: Vec<String> = variants
+                        .iter()
+                        .map(|v| {
+                            if string_values.contains_key(v) {
+                                string_to_pascal_case(v)
+                            } else {
+                                v.clone()
+                            }
+                        })
+                        .collect();
+                    let psv: std::collections::HashMap<String, String> = string_values
+                        .into_keys()
+                        .map(|raw| {
+                            let pascal = string_to_pascal_case(&raw);
+                            (raw, pascal)
+                        })
+                        .collect();
+                    let pvf: std::collections::HashMap<String, Vec<FieldDef<TsTypeInfo>>> =
+                        variant_fields
+                            .into_iter()
+                            .map(|(raw_key, fields)| {
+                                let pascal_key = string_to_pascal_case(&raw_key);
+                                (pascal_key, fields)
+                            })
+                            .collect();
+                    (pv, psv, pvf)
+                } else {
+                    (variants, string_values, variant_fields)
+                };
+
+            let resolved_variant_fields = pascal_variant_fields
                 .into_iter()
                 .map(|(variant, fields)| {
                     let resolved = fields
@@ -505,9 +556,9 @@ pub fn resolve_typedef(
                 .collect();
 
             Ok(TypeDef::Enum {
-                type_params,
-                variants,
-                string_values,
+                type_params: resolve_type_params(type_params, reg, synthetic),
+                variants: pascal_variants,
+                string_values: pascal_string_values,
                 tag_field,
                 variant_fields: resolved_variant_fields,
             })
@@ -528,7 +579,7 @@ pub fn resolve_typedef(
                 .transpose()?;
 
             Ok(TypeDef::Function {
-                type_params,
+                type_params: resolve_type_params(type_params, reg, synthetic),
                 params: resolved_params,
                 return_type: resolved_return,
                 has_rest,
@@ -575,7 +626,7 @@ pub fn resolve_typedef(
 ///
 /// **注意**: この関数は `FieldDef<TsTypeInfo>` 専用。`FieldDef<RustType>` に対して
 /// 呼ぶと Option が二重にラップされる。型パラメータで防止されている。
-fn resolve_field_def(
+pub(crate) fn resolve_field_def(
     field: FieldDef<TsTypeInfo>,
     reg: &TypeRegistry,
     synthetic: &mut SyntheticTypeRegistry,
@@ -596,7 +647,7 @@ fn resolve_field_def(
 /// ParamDef<TsTypeInfo> → ParamDef<RustType> 変換。has_default フラグに基づき Option ラップ。
 ///
 /// **注意**: この関数は `ParamDef<TsTypeInfo>` 専用。型パラメータで防止されている。
-fn resolve_param_def(
+pub(crate) fn resolve_param_def(
     param: ParamDef<TsTypeInfo>,
     reg: &TypeRegistry,
     synthetic: &mut SyntheticTypeRegistry,
@@ -616,7 +667,7 @@ fn resolve_param_def(
 }
 
 /// MethodSignature<TsTypeInfo> → MethodSignature<RustType> 変換。
-fn resolve_method_sig(
+pub(crate) fn resolve_method_sig(
     sig: MethodSignature<TsTypeInfo>,
     reg: &TypeRegistry,
     synthetic: &mut SyntheticTypeRegistry,
@@ -964,5 +1015,154 @@ mod tests {
         let resolved = resolve_param_def(param, &reg, &mut syn).unwrap();
         assert_eq!(resolved.ty, RustType::Option(Box::new(RustType::F64)));
         assert!(resolved.has_default);
+    }
+
+    // ── resolve_type_params ──
+
+    #[test]
+    fn resolve_type_params_empty() {
+        let reg = TypeRegistry::new();
+        let mut syn = SyntheticTypeRegistry::new();
+        let result = resolve_type_params(vec![], &reg, &mut syn);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn resolve_type_params_with_constraint() {
+        let reg = TypeRegistry::new();
+        let mut syn = SyntheticTypeRegistry::new();
+        let params = vec![crate::ir::TypeParam {
+            name: "T".to_string(),
+            constraint: Some(TsTypeInfo::String),
+        }];
+        let resolved = resolve_type_params(params, &reg, &mut syn);
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved[0].name, "T");
+        assert_eq!(resolved[0].constraint, Some(RustType::String));
+    }
+
+    #[test]
+    fn resolve_type_params_without_constraint() {
+        let reg = TypeRegistry::new();
+        let mut syn = SyntheticTypeRegistry::new();
+        let params = vec![crate::ir::TypeParam {
+            name: "T".to_string(),
+            constraint: None,
+        }];
+        let resolved = resolve_type_params(params, &reg, &mut syn);
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved[0].name, "T");
+        assert_eq!(resolved[0].constraint, None);
+    }
+
+    // ── resolve_typedef PascalCase ──
+
+    #[test]
+    fn resolve_typedef_string_literal_union_applies_pascal_case() {
+        let reg = TypeRegistry::new();
+        let mut syn = SyntheticTypeRegistry::new();
+        let def: TypeDef<TsTypeInfo> = TypeDef::Enum {
+            type_params: vec![],
+            variants: vec!["up".to_string(), "down".to_string()],
+            string_values: [
+                ("up".to_string(), "up".to_string()),
+                ("down".to_string(), "down".to_string()),
+            ]
+            .into_iter()
+            .collect(),
+            tag_field: None,
+            variant_fields: std::collections::HashMap::new(),
+        };
+        let resolved = resolve_typedef(def, &reg, &mut syn).unwrap();
+        if let TypeDef::Enum {
+            variants,
+            string_values,
+            ..
+        } = resolved
+        {
+            assert_eq!(variants, vec!["Up".to_string(), "Down".to_string()]);
+            assert_eq!(string_values.get("up"), Some(&"Up".to_string()));
+            assert_eq!(string_values.get("down"), Some(&"Down".to_string()));
+        } else {
+            panic!("expected Enum");
+        }
+    }
+
+    #[test]
+    fn resolve_typedef_regular_enum_no_pascal_case() {
+        let reg = TypeRegistry::new();
+        let mut syn = SyntheticTypeRegistry::new();
+        let def: TypeDef<TsTypeInfo> = TypeDef::Enum {
+            type_params: vec![],
+            variants: vec!["Red".to_string(), "Green".to_string()],
+            string_values: std::collections::HashMap::new(),
+            tag_field: None,
+            variant_fields: std::collections::HashMap::new(),
+        };
+        let resolved = resolve_typedef(def, &reg, &mut syn).unwrap();
+        if let TypeDef::Enum { variants, .. } = resolved {
+            assert_eq!(variants, vec!["Red".to_string(), "Green".to_string()]);
+        } else {
+            panic!("expected Enum");
+        }
+    }
+
+    #[test]
+    fn resolve_typedef_discriminated_union_pascal_case_with_fields() {
+        let reg = TypeRegistry::new();
+        let mut syn = SyntheticTypeRegistry::new();
+        let mut variant_fields = std::collections::HashMap::new();
+        variant_fields.insert(
+            "circle".to_string(),
+            vec![FieldDef {
+                name: "radius".to_string(),
+                ty: TsTypeInfo::Number,
+                optional: false,
+            }],
+        );
+        variant_fields.insert(
+            "square".to_string(),
+            vec![FieldDef {
+                name: "side".to_string(),
+                ty: TsTypeInfo::Number,
+                optional: false,
+            }],
+        );
+        let def: TypeDef<TsTypeInfo> = TypeDef::Enum {
+            type_params: vec![],
+            variants: vec!["circle".to_string(), "square".to_string()],
+            string_values: [
+                ("circle".to_string(), "circle".to_string()),
+                ("square".to_string(), "square".to_string()),
+            ]
+            .into_iter()
+            .collect(),
+            tag_field: Some("kind".to_string()),
+            variant_fields,
+        };
+        let resolved = resolve_typedef(def, &reg, &mut syn).unwrap();
+        if let TypeDef::Enum {
+            variants,
+            string_values,
+            variant_fields,
+            tag_field,
+            ..
+        } = resolved
+        {
+            assert_eq!(variants, vec!["Circle".to_string(), "Square".to_string()]);
+            assert_eq!(string_values.get("circle"), Some(&"Circle".to_string()));
+            assert_eq!(tag_field, Some("kind".to_string()));
+            // variant_fields keys should be PascalCase
+            assert!(variant_fields.contains_key("Circle"));
+            assert!(variant_fields.contains_key("Square"));
+            assert!(!variant_fields.contains_key("circle"));
+            // Field types should be resolved
+            let circle_fields = &variant_fields["Circle"];
+            assert_eq!(circle_fields.len(), 1);
+            assert_eq!(circle_fields[0].name, "radius");
+            assert_eq!(circle_fields[0].ty, RustType::F64);
+        } else {
+            panic!("expected Enum");
+        }
     }
 }

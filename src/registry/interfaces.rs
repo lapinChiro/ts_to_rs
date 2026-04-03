@@ -5,21 +5,17 @@ use std::collections::HashMap;
 use anyhow::Result;
 use swc_ecma_ast as ast;
 
-use super::{FieldDef, MethodSignature, ParamDef, TypeRegistry};
-use crate::ir::RustType;
-use crate::pipeline::type_converter::convert_ts_type;
-use crate::pipeline::SyntheticTypeRegistry;
+use super::{FieldDef, MethodSignature, ParamDef};
+use crate::ts_type_info::{convert_to_ts_type_info, TsTypeInfo};
 
 /// interface のフィールド名・型を収集する。
 pub(super) fn collect_interface_fields(
     iface: &ast::TsInterfaceDecl,
-    lookup: &TypeRegistry,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Result<Vec<FieldDef>> {
+) -> Result<Vec<FieldDef<TsTypeInfo>>> {
     let mut fields = Vec::new();
     for member in &iface.body.body {
         if let ast::TsTypeElement::TsPropertySignature(prop) = member {
-            if let Some(field) = collect_property_signature(prop, lookup, synthetic) {
+            if let Some(field) = collect_property_signature(prop) {
                 fields.push(field);
             }
         }
@@ -30,11 +26,11 @@ pub(super) fn collect_interface_fields(
 /// interface から収集されたシグネチャ情報。
 pub(super) struct InterfaceSignatures {
     /// メソッドシグネチャ（メソッド名 → オーバーロード）
-    pub methods: HashMap<String, Vec<MethodSignature>>,
+    pub methods: HashMap<String, Vec<MethodSignature<TsTypeInfo>>>,
     /// Call signatures（`(x: T): U` 形式）
-    pub call_signatures: Vec<MethodSignature>,
+    pub call_signatures: Vec<MethodSignature<TsTypeInfo>>,
     /// Construct signatures（`new (x: T): U` 形式）
-    pub constructor: Option<Vec<MethodSignature>>,
+    pub constructor: Option<Vec<MethodSignature<TsTypeInfo>>>,
 }
 
 /// interface body のメンバーが call signature のみかどうかを判定する。
@@ -52,22 +48,19 @@ pub(crate) fn is_callable_only(members: &[ast::TsTypeElement]) -> bool {
     has_call
 }
 
-/// `TsFnParam` のリストと return type annotation から `MethodSignature` を生成する。
+/// `TsFnParam` のリストと return type annotation から `MethodSignature<TsTypeInfo>` を生成する。
 ///
 /// `TsMethodSignature`, `TsCallSignatureDecl`, `TsConstructSignatureDecl` の
 /// 3 種のシグネチャ型で共通する params + return_type + has_rest の収集ロジック。
 fn build_method_signature(
     ts_params: &[ast::TsFnParam],
     type_ann: Option<&ast::TsTypeAnn>,
-    lookup: &TypeRegistry,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> MethodSignature {
-    let params: Vec<ParamDef> = ts_params
+) -> MethodSignature<TsTypeInfo> {
+    let params: Vec<ParamDef<TsTypeInfo>> = ts_params
         .iter()
-        .filter_map(|param| super::functions::extract_ts_fn_param(param, lookup, synthetic))
+        .filter_map(super::functions::extract_ts_fn_param)
         .collect();
-    let return_type =
-        type_ann.and_then(|ann| convert_ts_type(&ann.type_ann, synthetic, lookup).ok());
+    let return_type = type_ann.and_then(|ann| convert_to_ts_type_info(&ann.type_ann).ok());
     let has_rest = ts_params
         .iter()
         .any(|p| matches!(p, ast::TsFnParam::Rest(_)));
@@ -84,14 +77,10 @@ fn build_method_signature(
 /// - `methods`: メソッド名 → オーバーロードシグネチャ
 /// - `call_signatures`: call signature（`(x: T): U` 形式）
 /// - `constructor`: construct signature（`new (x: T): U` 形式）
-pub(super) fn collect_interface_signatures(
-    iface: &ast::TsInterfaceDecl,
-    lookup: &TypeRegistry,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> InterfaceSignatures {
-    let mut methods: HashMap<String, Vec<MethodSignature>> = HashMap::new();
-    let mut call_signatures: Vec<MethodSignature> = Vec::new();
-    let mut construct_signatures: Vec<MethodSignature> = Vec::new();
+pub(super) fn collect_interface_signatures(iface: &ast::TsInterfaceDecl) -> InterfaceSignatures {
+    let mut methods: HashMap<String, Vec<MethodSignature<TsTypeInfo>>> = HashMap::new();
+    let mut call_signatures: Vec<MethodSignature<TsTypeInfo>> = Vec::new();
+    let mut construct_signatures: Vec<MethodSignature<TsTypeInfo>> = Vec::new();
 
     for member in &iface.body.body {
         match member {
@@ -100,28 +89,19 @@ pub(super) fn collect_interface_signatures(
                     ast::Expr::Ident(ident) => ident.sym.to_string(),
                     _ => continue,
                 };
-                let sig = build_method_signature(
-                    &method.params,
-                    method.type_ann.as_deref(),
-                    lookup,
-                    synthetic,
-                );
+                let sig = build_method_signature(&method.params, method.type_ann.as_deref());
                 methods.entry(name).or_default().push(sig);
             }
             ast::TsTypeElement::TsCallSignatureDecl(decl) => {
                 call_signatures.push(build_method_signature(
                     &decl.params,
                     decl.type_ann.as_deref(),
-                    lookup,
-                    synthetic,
                 ));
             }
             ast::TsTypeElement::TsConstructSignatureDecl(decl) => {
                 construct_signatures.push(build_method_signature(
                     &decl.params,
                     decl.type_ann.as_deref(),
-                    lookup,
-                    synthetic,
                 ));
             }
             _ => {}
@@ -141,11 +121,12 @@ pub(super) fn collect_interface_signatures(
 }
 
 /// TsPropertySignature からフィールド名と型を取得する。
+///
+/// optional フラグは `FieldDef.optional` に保持し、`Option<T>` ラップは行わない。
+/// Option ラップは resolve フェーズ（`resolve_field_def`）で適用される。
 pub(super) fn collect_property_signature(
     prop: &ast::TsPropertySignature,
-    lookup: &TypeRegistry,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Option<FieldDef> {
+) -> Option<FieldDef<TsTypeInfo>> {
     let name = match prop.key.as_ref() {
         ast::Expr::Ident(ident) => ident.sym.to_string(),
         _ => return None,
@@ -153,15 +134,11 @@ pub(super) fn collect_property_signature(
     let ty = prop
         .type_ann
         .as_ref()
-        .and_then(|ann| convert_ts_type(&ann.type_ann, synthetic, lookup).ok())?;
+        .and_then(|ann| convert_to_ts_type_info(&ann.type_ann).ok())?;
 
-    let optional = prop.optional;
-    // Optional fields are wrapped in Option
-    let ty = if optional {
-        RustType::Option(Box::new(ty))
-    } else {
-        ty
-    };
-
-    Some(FieldDef { name, ty, optional })
+    Some(FieldDef {
+        name,
+        ty,
+        optional: prop.optional,
+    })
 }

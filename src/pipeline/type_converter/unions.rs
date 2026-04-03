@@ -3,6 +3,7 @@ use super::*;
 use super::super::synthetic_registry::variant_name_for_type;
 
 /// Converts a union type. Handles `T | null` and `T | undefined` as `Option<T>`.
+#[allow(dead_code)] // resolve/union.rs に移行済み。transformer 移行後に削除
 pub(super) fn convert_union_type(
     union: &swc_ecma_ast::TsUnionType,
     synthetic: &mut SyntheticTypeRegistry,
@@ -134,6 +135,7 @@ pub(super) fn convert_union_type(
 }
 
 /// Unwraps `Promise<T>` to `T`. Returns the type unchanged for non-Promise types.
+#[allow(dead_code)] // convert_union_type から呼ばれるが、convert_union_type 自体が未使用
 fn unwrap_promise(ty: RustType) -> RustType {
     match &ty {
         RustType::Named { name, type_args } if name == "Promise" && type_args.len() == 1 => {
@@ -408,22 +410,8 @@ pub(super) fn try_convert_single_string_literal(
     }
 }
 
-/// Converts a string value to PascalCase for use as an enum variant name.
-///
-/// Examples: `"up"` → `"Up"`, `"foo-bar"` → `"FooBar"`, `"UPPER_CASE"` → `"UpperCase"`
-pub(crate) fn string_to_pascal_case(s: &str) -> String {
-    s.split(|c: char| !c.is_alphanumeric())
-        .filter(|part| !part.is_empty())
-        .map(|part| {
-            let lower = part.to_lowercase();
-            let mut chars = lower.chars();
-            match chars.next() {
-                Some(c) => c.to_uppercase().to_string() + chars.as_str(),
-                None => String::new(),
-            }
-        })
-        .collect()
-}
+// string_to_pascal_case は super (type_converter/mod.rs) に定義。
+// use super::*; 経由でアクセス可能。
 
 /// Tries to convert a type alias with a union type body into an enum.
 ///

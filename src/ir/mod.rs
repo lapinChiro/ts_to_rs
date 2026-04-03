@@ -5,13 +5,15 @@
 
 /// ジェネリック型パラメータ（名前 + オプショナルな制約）。
 ///
-/// IR と TypeRegistry の両方で使用される。
+/// 型パラメータ `T` によって制約の型表現を切り替える:
+/// - `TypeParam<RustType>` (= `TypeParam`): Rust 型制約。IR・TypeRegistry・Generator で使用。
+/// - `TypeParam<TsTypeInfo>`: TS 型制約。registry の collection フェーズで使用。
 #[derive(Debug, Clone, PartialEq)]
-pub struct TypeParam {
+pub struct TypeParam<T = RustType> {
     /// 型パラメータ名（例: "T"）
     pub name: String,
     /// 制約（例: `T extends Foo` → `Some(Named("Foo"))`）
-    pub constraint: Option<RustType>,
+    pub constraint: Option<T>,
 }
 
 /// trait への参照（名前 + 型引数）。

@@ -4,23 +4,18 @@
 //! annotations into the IR representation. Synthetic types (union enums,
 //! inline structs) are registered in [`SyntheticTypeRegistry`].
 
-// convert_ts_type が TsTypeInfo 経由の 2 ステップに移行したため、
-// 旧ディスパッチから呼ばれていた関数は未使用となった。
-// Phase 4（Registry 移行）完了後にクリーンアップする。
-#[allow(dead_code)]
-mod indexed_access;
+// intersections, unions は transformer フェーズの convert_type_alias 等から使用されている。
+// registry は Phase 4 で TsTypeInfo 経由に移行済み。transformer の移行完了後に削除可能。
+// indexed_access は convert_ts_type の 2 ステップ化で resolve/indexed_access.rs に移行済み。
 mod interfaces;
-#[allow(dead_code)]
 mod intersections;
 mod type_aliases;
-#[allow(dead_code)]
 mod unions;
 mod utilities;
 
 // Re-export public/pub(crate) API for external callers
 pub use interfaces::{convert_interface, convert_interface_items};
 pub use type_aliases::{convert_type_alias, convert_type_alias_items};
-pub(crate) use unions::string_to_pascal_case;
 pub(crate) use utilities::convert_property_signature;
 pub use utilities::extract_type_params;
 
@@ -50,6 +45,23 @@ use crate::ir::{
 use crate::pipeline::SyntheticTypeRegistry;
 use crate::registry::{FieldDef, TypeDef, TypeRegistry};
 use crate::transformer::type_position::{wrap_trait_for_position, TypePosition};
+
+/// Converts a string value to PascalCase for use as an enum variant name.
+///
+/// Examples: `"up"` → `"Up"`, `"foo-bar"` → `"FooBar"`, `"UPPER_CASE"` → `"UpperCase"`
+pub(crate) fn string_to_pascal_case(s: &str) -> String {
+    s.split(|c: char| !c.is_alphanumeric())
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            let lower = part.to_lowercase();
+            let mut chars = lower.chars();
+            match chars.next() {
+                Some(c) => c.to_uppercase().to_string() + chars.as_str(),
+                None => String::new(),
+            }
+        })
+        .collect()
+}
 
 /// Rust prelude type names that would cause shadowing if used as user-defined type names.
 ///

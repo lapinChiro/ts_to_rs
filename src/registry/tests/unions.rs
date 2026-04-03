@@ -186,6 +186,114 @@ fn test_analyze_any_params_registers_enum() {
     }
 }
 
+// --- collection phase unit tests (TsTypeInfo) ---
+
+/// TypeScript の type alias 宣言をパースして `TsTypeAliasDecl` を返す。
+fn parse_type_alias(source: &str) -> swc_ecma_ast::TsTypeAliasDecl {
+    let module = parse_typescript(source).unwrap();
+    for item in &module.body {
+        if let swc_ecma_ast::ModuleItem::Stmt(swc_ecma_ast::Stmt::Decl(
+            swc_ecma_ast::Decl::TsTypeAlias(alias),
+        )) = item
+        {
+            return *alias.clone();
+        }
+    }
+    panic!("no TsTypeAliasDecl found in source: {source}");
+}
+
+#[test]
+fn test_collect_string_literal_union_stores_raw_strings() {
+    let alias = parse_type_alias(r#"type Dir = "up" | "down";"#);
+    let ts_def = super::super::unions::try_collect_string_literal_union(&alias)
+        .expect("should detect string literal union");
+
+    match ts_def {
+        TypeDef::Enum {
+            variants,
+            string_values,
+            ..
+        } => {
+            // Collection phase stores raw strings, NOT PascalCase
+            assert_eq!(variants, vec!["up".to_string(), "down".to_string()]);
+            assert_eq!(string_values.get("up"), Some(&"up".to_string()));
+            assert_eq!(string_values.get("down"), Some(&"down".to_string()));
+        }
+        _ => panic!("expected Enum"),
+    }
+}
+
+#[test]
+fn test_collect_discriminated_union_stores_raw_strings_and_ts_type_info() {
+    use crate::ts_type_info::TsTypeInfo;
+
+    let alias = parse_type_alias(
+        r#"type Shape = { kind: "circle"; r: number } | { kind: "square"; s: string };"#,
+    );
+    let ts_def = super::super::unions::try_collect_discriminated_union(&alias)
+        .expect("should detect discriminated union");
+
+    match ts_def {
+        TypeDef::Enum {
+            variants,
+            string_values,
+            tag_field,
+            variant_fields,
+            ..
+        } => {
+            // Collection phase stores raw strings, NOT PascalCase
+            assert_eq!(variants, vec!["circle".to_string(), "square".to_string()]);
+            assert_eq!(string_values.get("circle"), Some(&"circle".to_string()));
+            assert_eq!(tag_field, Some("kind".to_string()));
+
+            // variant_fields keys are raw strings
+            let circle = variant_fields.get("circle").expect("circle variant");
+            assert_eq!(circle.len(), 1);
+            assert_eq!(circle[0].name, "r");
+            // Field types are TsTypeInfo, NOT RustType
+            assert_eq!(circle[0].ty, TsTypeInfo::Number);
+            assert!(!circle[0].optional);
+
+            let square = variant_fields.get("square").expect("square variant");
+            assert_eq!(square.len(), 1);
+            assert_eq!(square[0].name, "s");
+            assert_eq!(square[0].ty, TsTypeInfo::String);
+        }
+        _ => panic!("expected Enum"),
+    }
+}
+
+#[test]
+fn test_collect_discriminated_union_optional_field_not_option_wrapped() {
+    use crate::ts_type_info::TsTypeInfo;
+
+    let alias =
+        parse_type_alias(r#"type Msg = { type: "a"; x?: number } | { type: "b"; y: string };"#);
+    let ts_def = super::super::unions::try_collect_discriminated_union(&alias)
+        .expect("should detect discriminated union");
+
+    if let TypeDef::Enum { variant_fields, .. } = ts_def {
+        let a_fields = variant_fields.get("a").expect("a variant");
+        assert_eq!(a_fields.len(), 1);
+        assert_eq!(a_fields[0].name, "x");
+        // TsTypeInfo::Number (NOT Option-wrapped) — Option wrapping deferred to resolve
+        assert_eq!(a_fields[0].ty, TsTypeInfo::Number);
+        assert!(a_fields[0].optional, "optional flag should be set");
+    } else {
+        panic!("expected Enum");
+    }
+}
+
+#[test]
+fn test_collect_string_literal_union_non_string_returns_none() {
+    // Numeric literal union should NOT be detected as string literal union
+    let alias = parse_type_alias("type Bits = 0 | 1;");
+    assert!(
+        super::super::unions::try_collect_string_literal_union(&alias).is_none(),
+        "numeric literal union should return None"
+    );
+}
+
 // --- transpile integration ---
 
 #[test]

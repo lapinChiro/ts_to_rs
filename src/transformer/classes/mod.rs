@@ -150,11 +150,11 @@ impl<'a> Transformer<'a> {
             }
         }
 
-        let type_params = crate::registry::collect_type_params(
-            class_decl.class.type_params.as_deref(),
-            self.reg(),
-            self.synthetic,
-        );
+        let type_params = {
+            let ts_params =
+                crate::registry::collect_type_params(class_decl.class.type_params.as_deref());
+            crate::ts_type_info::resolve::resolve_type_params(ts_params, self.reg(), self.synthetic)
+        };
 
         Ok(ClassInfo {
             name,

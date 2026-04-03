@@ -1,6 +1,9 @@
 //! 2-pass 型収集ロジック。
 //!
 //! Pass 1 で型名をプレースホルダー登録し、Pass 2 でフィールド型を完全解決する。
+//!
+//! Collection 関数は SWC AST → TsTypeInfo の純粋な構文マッピングのみ行い、
+//! 意味解決（TsTypeInfo → RustType）は resolve フェーズに委譲する。
 
 use std::collections::HashMap;
 
@@ -8,8 +11,9 @@ use swc_ecma_ast as ast;
 
 use super::{ConstElement, ConstField, FieldDef, MethodSignature, ParamDef, TypeDef, TypeRegistry};
 use crate::ir::{RustType, TypeParam};
-use crate::pipeline::type_converter::convert_ts_type;
 use crate::pipeline::SyntheticTypeRegistry;
+use crate::ts_type_info::resolve::{resolve_field_def, resolve_ts_type, resolve_typedef};
+use crate::ts_type_info::{convert_to_ts_type_info, TsTypeInfo};
 
 /// Pass 1: 宣言から型名だけをプレースホルダーとして登録する。
 ///
@@ -118,8 +122,11 @@ fn is_registrable_const_decl(d: &ast::VarDeclarator) -> bool {
 
 /// Pass 2: 個々の宣言から型情報を完全に収集する。
 ///
+/// Collection 関数が `TypeDef<TsTypeInfo>` を返し、`resolve_typedef` で
+/// `TypeDef<RustType>` に変換してから registry に登録する。
+///
 /// `lookup` には Pass 1 で登録された全型名が含まれており、
-/// `convert_ts_type` での型解決に使用される。
+/// `resolve_typedef` での型解決に使用される。
 pub(super) fn collect_decl(
     reg: &mut TypeRegistry,
     decl: &ast::Decl,
@@ -128,13 +135,9 @@ pub(super) fn collect_decl(
 ) {
     match decl {
         ast::Decl::TsInterface(iface) => {
-            if let Ok(fields) =
-                super::interfaces::collect_interface_fields(iface, lookup, synthetic)
-            {
-                let sigs =
-                    super::interfaces::collect_interface_signatures(iface, lookup, synthetic);
-                let type_params =
-                    collect_type_params(iface.type_params.as_deref(), lookup, synthetic);
+            if let Ok(fields) = super::interfaces::collect_interface_fields(iface) {
+                let sigs = super::interfaces::collect_interface_signatures(iface);
+                let type_params = collect_type_params(iface.type_params.as_deref());
                 let extends: Vec<String> = iface
                     .extends
                     .iter()
@@ -147,30 +150,30 @@ pub(super) fn collect_decl(
                     })
                     .collect();
                 let name = iface.id.sym.to_string();
-                reg.register(
-                    name,
-                    TypeDef::Struct {
-                        type_params,
-                        fields,
-                        methods: sigs.methods,
-                        constructor: sigs.constructor,
-                        call_signatures: sigs.call_signatures,
-                        extends,
-                        is_interface: true,
-                    },
-                );
+                let ts_def: TypeDef<TsTypeInfo> = TypeDef::Struct {
+                    type_params,
+                    fields,
+                    methods: sigs.methods,
+                    constructor: sigs.constructor,
+                    call_signatures: sigs.call_signatures,
+                    extends,
+                    is_interface: true,
+                };
+                if let Ok(resolved) = resolve_typedef(ts_def, lookup, synthetic) {
+                    reg.register(name, resolved);
+                }
             }
         }
         ast::Decl::TsTypeAlias(alias) => {
             if let Some(enum_def) = super::unions::try_collect_string_literal_union(alias) {
-                reg.register(alias.id.sym.to_string(), enum_def);
-            } else if let Some(mut enum_def) =
-                super::unions::try_collect_discriminated_union(alias, lookup, synthetic)
+                // TypeDef<TsTypeInfo>::Enum → resolve で PascalCase 適用
+                if let Ok(resolved) = resolve_typedef(enum_def, lookup, synthetic) {
+                    reg.register(alias.id.sym.to_string(), resolved);
+                }
+            } else if let Some(mut enum_def) = super::unions::try_collect_discriminated_union(alias)
             {
-                // DU enum に型パラメータを設定（try_collect_discriminated_union は
-                // 型パラメータの概念に無関係なため、呼び出し元で上書きする）
-                let type_params =
-                    collect_type_params(alias.type_params.as_deref(), lookup, synthetic);
+                // DU enum に型パラメータを設定
+                let type_params = collect_type_params(alias.type_params.as_deref());
                 if let TypeDef::Enum {
                     type_params: ref mut tp,
                     ..
@@ -178,23 +181,30 @@ pub(super) fn collect_decl(
                 {
                     *tp = type_params;
                 }
-                reg.register(alias.id.sym.to_string(), enum_def);
-            } else if let Some(func_def) =
-                super::functions::try_collect_fn_type_alias(alias, lookup, synthetic)
-            {
-                reg.register(alias.id.sym.to_string(), func_def);
+                if let Ok(resolved) = resolve_typedef(enum_def, lookup, synthetic) {
+                    reg.register(alias.id.sym.to_string(), resolved);
+                }
+            } else if let Some(func_def) = super::functions::try_collect_fn_type_alias(alias) {
+                if let Ok(resolved) = resolve_typedef(func_def, lookup, synthetic) {
+                    reg.register(alias.id.sym.to_string(), resolved);
+                }
             } else {
                 // Intersection types need pass-2 resolved types (e.g., `type Person = Named & Aged`
                 // requires Named and Aged to have their fields already resolved).
                 // Use `reg` which accumulates resolved types during pass 2.
                 let fields = collect_type_alias_fields(alias, reg, synthetic);
                 if let Some(fields) = fields {
-                    let type_params =
-                        collect_type_params(alias.type_params.as_deref(), lookup, synthetic);
+                    let type_params = collect_type_params(alias.type_params.as_deref());
+                    // type_params は TsTypeInfo だが、ここで直接 resolve する
+                    let resolved_type_params = crate::ts_type_info::resolve::resolve_type_params(
+                        type_params,
+                        lookup,
+                        synthetic,
+                    );
                     reg.register(
                         alias.id.sym.to_string(),
                         TypeDef::Struct {
-                            type_params,
+                            type_params: resolved_type_params,
                             fields,
                             methods: HashMap::new(),
                             constructor: None,
@@ -227,11 +237,11 @@ pub(super) fn collect_decl(
             );
         }
         ast::Decl::Fn(fn_decl) => {
-            if let Ok(func_def) =
-                super::functions::collect_fn_def_with_extras(&fn_decl.function, lookup, synthetic)
-            {
-                let fn_name = fn_decl.ident.sym.to_string();
-                reg.register(fn_name, func_def);
+            if let Ok(func_def) = super::functions::collect_fn_def_with_extras(&fn_decl.function) {
+                if let Ok(resolved) = resolve_typedef(func_def, lookup, synthetic) {
+                    let fn_name = fn_decl.ident.sym.to_string();
+                    reg.register(fn_name, resolved);
+                }
             }
         }
         ast::Decl::Var(var_decl) => {
@@ -244,32 +254,37 @@ pub(super) fn collect_decl(
                 // Arrow function: collect as Function
                 if let Some(init) = &d.init {
                     if let ast::Expr::Arrow(arrow) = init.as_ref() {
-                        if let Ok(func_def) = super::functions::collect_arrow_def_with_extras(
-                            arrow, lookup, synthetic,
-                        ) {
-                            reg.register(name, func_def);
+                        if let Ok(func_def) = super::functions::collect_arrow_def_with_extras(arrow)
+                        {
+                            if let Ok(resolved) = resolve_typedef(func_def, lookup, synthetic) {
+                                reg.register(name, resolved);
+                            }
                         }
                         continue;
                     }
                 }
 
                 // `as const` or type-annotated const: collect as ConstValue
-                if let Some(const_value) = collect_const_value_def(d, lookup, synthetic) {
-                    reg.register(name, const_value);
+                if let Some(const_value) = collect_const_value_def(d) {
+                    if let Ok(resolved) = resolve_typedef(const_value, lookup, synthetic) {
+                        reg.register(name, resolved);
+                    }
                 }
             }
         }
         ast::Decl::Class(class) => {
-            let def = collect_class_info(class, lookup, synthetic);
+            let ts_def = collect_class_info(class);
             if let TypeDef::Struct {
                 ref fields,
                 ref methods,
                 ref constructor,
                 ..
-            } = def
+            } = ts_def
             {
                 if !fields.is_empty() || !methods.is_empty() || constructor.is_some() {
-                    reg.register(class.ident.sym.to_string(), def);
+                    if let Ok(resolved) = resolve_typedef(ts_def, lookup, synthetic) {
+                        reg.register(class.ident.sym.to_string(), resolved);
+                    }
                 }
             }
         }
@@ -277,15 +292,11 @@ pub(super) fn collect_decl(
     }
 }
 
-/// クラス宣言からフィールドとメソッドシグネチャを収集し、`TypeDef::Struct` を返す。
-fn collect_class_info(
-    class: &ast::ClassDecl,
-    lookup: &TypeRegistry,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> TypeDef {
+/// クラス宣言からフィールドとメソッドシグネチャを収集し、`TypeDef::Struct<TsTypeInfo>` を返す。
+fn collect_class_info(class: &ast::ClassDecl) -> TypeDef<TsTypeInfo> {
     let mut fields = Vec::new();
-    let mut methods: HashMap<String, Vec<MethodSignature>> = HashMap::new();
-    let mut constructor_sigs: Vec<MethodSignature> = Vec::new();
+    let mut methods: HashMap<String, Vec<MethodSignature<TsTypeInfo>>> = HashMap::new();
+    let mut constructor_sigs: Vec<MethodSignature<TsTypeInfo>> = Vec::new();
 
     for member in &class.class.body {
         match member {
@@ -295,7 +306,7 @@ fn collect_class_info(
                     _ => continue,
                 };
                 if let Some(ann) = &prop.type_ann {
-                    if let Ok(ty) = convert_ts_type(&ann.type_ann, synthetic, lookup) {
+                    if let Ok(ty) = convert_to_ts_type_info(&ann.type_ann) {
                         fields.push(FieldDef {
                             name,
                             ty,
@@ -307,7 +318,7 @@ fn collect_class_info(
             ast::ClassMember::PrivateProp(prop) => {
                 let name = prop.key.name.to_string();
                 if let Some(ann) = &prop.type_ann {
-                    if let Ok(ty) = convert_ts_type(&ann.type_ann, synthetic, lookup) {
+                    if let Ok(ty) = convert_to_ts_type_info(&ann.type_ann) {
                         fields.push(FieldDef {
                             name,
                             ty,
@@ -317,7 +328,7 @@ fn collect_class_info(
                 }
             }
             ast::ClassMember::Constructor(ctor) => {
-                let params: Vec<ParamDef> = ctor
+                let params: Vec<ParamDef<TsTypeInfo>> = ctor
                     .params
                     .iter()
                     .filter_map(|p| match p {
@@ -326,9 +337,10 @@ fn collect_class_info(
                                 ast::Pat::Ident(ident) => ident,
                                 _ => return None,
                             };
-                            let ty = ident.type_ann.as_ref().and_then(|ann| {
-                                convert_ts_type(&ann.type_ann, synthetic, lookup).ok()
-                            })?;
+                            let ty = ident
+                                .type_ann
+                                .as_ref()
+                                .and_then(|ann| convert_to_ts_type_info(&ann.type_ann).ok())?;
                             Some(ParamDef {
                                 name: ident.id.sym.to_string(),
                                 ty,
@@ -341,9 +353,10 @@ fn collect_class_info(
                                 ast::TsParamPropParam::Ident(ident) => ident,
                                 _ => return None,
                             };
-                            let ty = ident.type_ann.as_ref().and_then(|ann| {
-                                convert_ts_type(&ann.type_ann, synthetic, lookup).ok()
-                            })?;
+                            let ty = ident
+                                .type_ann
+                                .as_ref()
+                                .and_then(|ann| convert_to_ts_type_info(&ann.type_ann).ok())?;
                             Some(ParamDef {
                                 name: ident.id.sym.to_string(),
                                 ty,
@@ -373,19 +386,17 @@ fn collect_class_info(
                 if let Some(func) = &method.function.body {
                     let _ = func; // body exists, collect params
                 }
-                let params: Vec<ParamDef> = method
+                let params: Vec<ParamDef<TsTypeInfo>> = method
                     .function
                     .params
                     .iter()
-                    .filter_map(|param| {
-                        super::functions::extract_pat_param(&param.pat, lookup, synthetic)
-                    })
+                    .filter_map(|param| super::functions::extract_pat_param(&param.pat))
                     .collect();
                 let return_type = method
                     .function
                     .return_type
                     .as_ref()
-                    .and_then(|ann| convert_ts_type(&ann.type_ann, synthetic, lookup).ok());
+                    .and_then(|ann| convert_to_ts_type_info(&ann.type_ann).ok());
                 let has_rest = method
                     .function
                     .params
@@ -401,7 +412,7 @@ fn collect_class_info(
         }
     }
 
-    let type_params = collect_type_params(class.class.type_params.as_deref(), lookup, synthetic);
+    let type_params = collect_type_params(class.class.type_params.as_deref());
     let constructor = if constructor_sigs.is_empty() {
         None
     } else {
@@ -418,12 +429,12 @@ fn collect_class_info(
     }
 }
 
-/// TS の型パラメータ宣言から TypeParam を収集する。
-pub fn collect_type_params(
+/// TS の型パラメータ宣言から `TypeParam<TsTypeInfo>` を収集する。
+///
+/// 制約は `convert_to_ts_type_info` で TsTypeInfo に変換する（TypeRegistry 不要）。
+pub(crate) fn collect_type_params(
     decl: Option<&ast::TsTypeParamDecl>,
-    lookup: &TypeRegistry,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Vec<TypeParam> {
+) -> Vec<TypeParam<TsTypeInfo>> {
     decl.map(|d| {
         d.params
             .iter()
@@ -432,7 +443,7 @@ pub fn collect_type_params(
                 constraint: p
                     .constraint
                     .as_ref()
-                    .and_then(|c| convert_ts_type(c, synthetic, lookup).ok()),
+                    .and_then(|c| convert_to_ts_type_info(c).ok()),
             })
             .collect()
     })
@@ -443,6 +454,9 @@ pub fn collect_type_params(
 ///
 /// 型引数付きの参照（`Partial<Body>` 等）の場合は、ジェネリクスを具体型でインスタンス化してから
 /// フィールドを取得する。SyntheticTypeRegistry のインライン構造体も解決対象。
+///
+/// intersection/type-ref type alias 専用。resolve フェーズの関数を使用して
+/// 型引数を変換する（convert_ts_type は使用しない）。
 fn resolve_type_ref_fields(
     type_ref: &ast::TsTypeRef,
     reg: &TypeRegistry,
@@ -453,7 +467,7 @@ fn resolve_type_ref_fields(
         _ => return None,
     };
 
-    // Convert type arguments if present
+    // Convert type arguments using two-step: convert_to_ts_type_info → resolve_ts_type
     let type_args: Vec<RustType> = type_ref
         .type_params
         .as_ref()
@@ -462,7 +476,8 @@ fn resolve_type_ref_fields(
                 .params
                 .iter()
                 .filter_map(|p| {
-                    crate::pipeline::type_converter::convert_ts_type(p, synthetic, reg).ok()
+                    let info = convert_to_ts_type_info(p).ok()?;
+                    resolve_ts_type(&info, reg, synthetic).ok()
                 })
                 .collect()
         })
@@ -482,6 +497,9 @@ fn resolve_type_ref_fields(
 }
 
 /// TsTypeLit のプロパティシグネチャからフィールドを収集する。
+///
+/// `collect_property_signature` で TsTypeInfo を取得し、`resolve_field_def` で
+/// RustType に変換する。Option ラップは `resolve_field_def` で適用される。
 fn collect_type_lit_fields(
     lit: &ast::TsTypeLit,
     reg: &TypeRegistry,
@@ -491,7 +509,8 @@ fn collect_type_lit_fields(
         .iter()
         .filter_map(|member| {
             if let ast::TsTypeElement::TsPropertySignature(prop) = member {
-                super::interfaces::collect_property_signature(prop, reg, synthetic)
+                let field_ts = super::interfaces::collect_property_signature(prop)?;
+                resolve_field_def(field_ts, reg, synthetic).ok()
             } else {
                 None
             }
@@ -505,6 +524,9 @@ fn collect_type_lit_fields(
 /// - `TsTypeLit`: `type X = { a: number; b: string }`
 /// - `TsIntersectionType`: `type X = A & B`（各メンバーから TsTypeLit / TsTypeRef のフィールドをマージ）
 /// - `TsTypeRef`: `type X = Partial<Body>`（registry からフィールドを解決）
+///
+/// intersection/type-ref 型は既に resolve 済みの TypeDef を registry から参照するため、
+/// `TypeDef<RustType>` を直接返す（resolve_typedef を経由しない特殊パス）。
 fn collect_type_alias_fields(
     alias: &ast::TsTypeAliasDecl,
     reg: &TypeRegistry,
@@ -543,21 +565,17 @@ fn collect_type_alias_fields(
     }
 }
 
-/// `as const` 宣言または型注釈付き const 宣言から `TypeDef::ConstValue` を構築する。
+/// `as const` 宣言または型注釈付き const 宣言から `TypeDef::ConstValue<TsTypeInfo>` を構築する。
 ///
 /// 対象パターン:
 /// - `const X = ['a', 'b'] as const` → 文字列リテラル配列
 /// - `const X = { key: 'value' } as const` → オブジェクトリテラル
 /// - `const X: Type = expr` → 型注釈から構築
-fn collect_const_value_def(
-    d: &ast::VarDeclarator,
-    lookup: &TypeRegistry,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Option<TypeDef> {
+fn collect_const_value_def(d: &ast::VarDeclarator) -> Option<TypeDef<TsTypeInfo>> {
     // Case 1: Type annotation — resolve fields from the annotated type
     if let ast::Pat::Ident(ident) = &d.name {
         if let Some(type_ann) = &ident.type_ann {
-            return collect_const_value_from_type_annotation(&type_ann.type_ann, lookup, synthetic);
+            return collect_const_value_from_type_annotation(&type_ann.type_ann);
         }
     }
 
@@ -570,16 +588,12 @@ fn collect_const_value_def(
     None
 }
 
-/// 型注釈から `ConstValue` を構築する。
+/// 型注釈から `ConstValue<TsTypeInfo>` を構築する。
 ///
 /// 型注釈がオブジェクト型リテラルの場合、フィールドを直接変換する。
 /// 型参照（`const x: MyType = ...`）の場合は、参照名を保持した ConstValue を生成し、
 /// 後続の型解決（TsTypeQuery ハンドラ）で参照先から間接的にフィールドを取得する。
-fn collect_const_value_from_type_annotation(
-    type_ann: &ast::TsType,
-    lookup: &TypeRegistry,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Option<TypeDef> {
+fn collect_const_value_from_type_annotation(type_ann: &ast::TsType) -> Option<TypeDef<TsTypeInfo>> {
     // Inline object type → convert fields directly
     if let ast::TsType::TsTypeLit(lit) = type_ann {
         let mut fields = Vec::new();
@@ -592,8 +606,8 @@ fn collect_const_value_from_type_annotation(
                 let field_type = prop
                     .type_ann
                     .as_ref()
-                    .and_then(|ann| convert_ts_type(&ann.type_ann, synthetic, lookup).ok())
-                    .unwrap_or(RustType::Any);
+                    .and_then(|ann| convert_to_ts_type_info(&ann.type_ann).ok())
+                    .unwrap_or(TsTypeInfo::Any);
                 fields.push(ConstField {
                     name: field_name,
                     ty: field_type,
@@ -626,8 +640,8 @@ fn collect_const_value_from_type_annotation(
     None
 }
 
-/// `as const` アサーション内の式から `ConstValue` を構築する。
-fn collect_const_value_from_as_const(expr: &ast::Expr) -> Option<TypeDef> {
+/// `as const` アサーション内の式から `ConstValue<TsTypeInfo>` を構築する。
+fn collect_const_value_from_as_const(expr: &ast::Expr) -> Option<TypeDef<TsTypeInfo>> {
     match expr {
         ast::Expr::Array(array_lit) => {
             let elements = extract_const_array_elements(array_lit);
@@ -655,30 +669,30 @@ fn collect_const_value_from_as_const(expr: &ast::Expr) -> Option<TypeDef> {
     }
 }
 
-/// 配列リテラルからリテラル要素を抽出する。
+/// 配列リテラルからリテラル要素を抽出する（TsTypeInfo 版）。
 ///
 /// 各要素のリテラル型と、文字列リテラルの場合はその値を保持する。
 /// すべての要素がリテラルの場合のみ返す。
-fn extract_const_array_elements(array_lit: &ast::ArrayLit) -> Vec<ConstElement> {
+fn extract_const_array_elements(array_lit: &ast::ArrayLit) -> Vec<ConstElement<TsTypeInfo>> {
     let mut elements = Vec::new();
     for elem in &array_lit.elems {
         match elem {
             Some(ast::ExprOrSpread { expr, .. }) => match expr.as_ref() {
                 ast::Expr::Lit(ast::Lit::Str(s)) => {
                     elements.push(ConstElement {
-                        ty: RustType::String,
+                        ty: TsTypeInfo::String,
                         string_literal_value: Some(s.value.to_string_lossy().into_owned()),
                     });
                 }
                 ast::Expr::Lit(ast::Lit::Num(_)) => {
                     elements.push(ConstElement {
-                        ty: RustType::F64,
+                        ty: TsTypeInfo::Number,
                         string_literal_value: None,
                     });
                 }
                 ast::Expr::Lit(ast::Lit::Bool(_)) => {
                     elements.push(ConstElement {
-                        ty: RustType::Bool,
+                        ty: TsTypeInfo::Boolean,
                         string_literal_value: None,
                     });
                 }
@@ -690,8 +704,8 @@ fn extract_const_array_elements(array_lit: &ast::ArrayLit) -> Vec<ConstElement> 
     elements
 }
 
-/// オブジェクトリテラルからフィールド情報を抽出する。
-fn extract_const_object_fields(obj_lit: &ast::ObjectLit) -> Vec<ConstField> {
+/// オブジェクトリテラルからフィールド情報を抽出する（TsTypeInfo 版）。
+fn extract_const_object_fields(obj_lit: &ast::ObjectLit) -> Vec<ConstField<TsTypeInfo>> {
     let mut fields = Vec::new();
     for prop in &obj_lit.props {
         if let ast::PropOrSpread::Prop(prop) = prop {
@@ -703,12 +717,12 @@ fn extract_const_object_fields(obj_lit: &ast::ObjectLit) -> Vec<ConstField> {
                 };
                 let (field_type, string_value) = match kv.value.as_ref() {
                     ast::Expr::Lit(ast::Lit::Str(s)) => (
-                        RustType::String,
+                        TsTypeInfo::String,
                         Some(s.value.to_string_lossy().into_owned()),
                     ),
-                    ast::Expr::Lit(ast::Lit::Num(_)) => (RustType::F64, None),
-                    ast::Expr::Lit(ast::Lit::Bool(_)) => (RustType::Bool, None),
-                    _ => (RustType::Any, None),
+                    ast::Expr::Lit(ast::Lit::Num(_)) => (TsTypeInfo::Number, None),
+                    ast::Expr::Lit(ast::Lit::Bool(_)) => (TsTypeInfo::Boolean, None),
+                    _ => (TsTypeInfo::Any, None),
                 };
                 fields.push(ConstField {
                     name: field_name,

@@ -302,3 +302,64 @@ fn test_arrow_default_param_option_wrap() {
         other => panic!("expected Function, got {other:?}"),
     }
 }
+
+// --- collection phase unit tests (TsTypeInfo) ---
+
+/// TypeScript の関数型エイリアスをパースして `TsTypeAliasDecl` を返す。
+fn parse_type_alias(source: &str) -> swc_ecma_ast::TsTypeAliasDecl {
+    let module = parse_typescript(source).unwrap();
+    for item in &module.body {
+        if let swc_ecma_ast::ModuleItem::Stmt(swc_ecma_ast::Stmt::Decl(
+            swc_ecma_ast::Decl::TsTypeAlias(alias),
+        )) = item
+        {
+            return *alias.clone();
+        }
+    }
+    panic!("no TsTypeAliasDecl found in source: {source}");
+}
+
+#[test]
+fn test_collect_fn_type_alias_returns_ts_type_info() {
+    use crate::ts_type_info::TsTypeInfo;
+
+    let alias = parse_type_alias("type Handler = (req: string, res: number) => boolean;");
+    let ts_def = super::super::functions::try_collect_fn_type_alias(&alias)
+        .expect("should detect function type alias");
+
+    match ts_def {
+        TypeDef::Function {
+            params,
+            return_type,
+            has_rest,
+            ..
+        } => {
+            assert_eq!(params.len(), 2);
+            assert_eq!(params[0].name, "req");
+            assert_eq!(params[0].ty, TsTypeInfo::String);
+            assert_eq!(params[1].name, "res");
+            assert_eq!(params[1].ty, TsTypeInfo::Number);
+            assert_eq!(return_type, Some(TsTypeInfo::Boolean));
+            assert!(!has_rest);
+        }
+        _ => panic!("expected Function"),
+    }
+}
+
+#[test]
+fn test_collect_type_params_returns_ts_type_info_constraint() {
+    use crate::ts_type_info::TsTypeInfo;
+
+    let alias = parse_type_alias("type Fn<T extends string> = (x: T) => T;");
+    let ts_def = super::super::functions::try_collect_fn_type_alias(&alias)
+        .expect("should detect function type alias");
+
+    if let TypeDef::Function { type_params, .. } = ts_def {
+        assert_eq!(type_params.len(), 1);
+        assert_eq!(type_params[0].name, "T");
+        // constraint は TsTypeInfo（RustType ではない）
+        assert_eq!(type_params[0].constraint, Some(TsTypeInfo::String));
+    } else {
+        panic!("expected Function");
+    }
+}

@@ -4,17 +4,16 @@ use std::collections::HashMap;
 
 use swc_ecma_ast as ast;
 
-use super::{FieldDef, TypeDef, TypeRegistry};
-use crate::ir::RustType;
-use crate::pipeline::type_converter::convert_ts_type;
-use crate::pipeline::SyntheticTypeRegistry;
+use super::{FieldDef, TypeDef};
+use crate::ts_type_info::{convert_to_ts_type_info, TsTypeInfo};
 
-/// string literal union type alias を検出し、`TypeDef::Enum` を返す。
+/// string literal union type alias を検出し、`TypeDef::Enum<TsTypeInfo>` を返す。
 ///
 /// `type Direction = "up" | "down"` のように、全メンバーが文字列リテラルの union type を検出する。
-pub(super) fn try_collect_string_literal_union(alias: &ast::TsTypeAliasDecl) -> Option<TypeDef> {
-    use crate::pipeline::type_converter::string_to_pascal_case;
-
+/// バリアント名は raw 文字列のまま保持し、PascalCase 変換は resolve フェーズで行う。
+pub(super) fn try_collect_string_literal_union(
+    alias: &ast::TsTypeAliasDecl,
+) -> Option<TypeDef<TsTypeInfo>> {
     let union = match alias.type_ann.as_ref() {
         ast::TsType::TsUnionOrIntersectionType(
             swc_ecma_ast::TsUnionOrIntersectionType::TsUnionType(u),
@@ -29,9 +28,9 @@ pub(super) fn try_collect_string_literal_union(alias: &ast::TsTypeAliasDecl) -> 
             ast::TsType::TsLitType(lit) => match &lit.lit {
                 swc_ecma_ast::TsLit::Str(s) => {
                     let value = s.value.to_string_lossy().into_owned();
-                    let variant_name = string_to_pascal_case(&value);
-                    string_values.insert(value, variant_name.clone());
-                    variants.push(variant_name);
+                    // raw 文字列をそのまま保持（PascalCase は resolve_typedef で適用）
+                    string_values.insert(value.clone(), value.clone());
+                    variants.push(value);
                 }
                 _ => return None,
             },
@@ -48,17 +47,14 @@ pub(super) fn try_collect_string_literal_union(alias: &ast::TsTypeAliasDecl) -> 
     })
 }
 
-/// discriminated union type alias を検出し、`TypeDef::Enum` を返す。
+/// discriminated union type alias を検出し、`TypeDef::Enum<TsTypeInfo>` を返す。
 ///
 /// `type Shape = { kind: "circle", r: number } | { kind: "square", s: number }` を検出する。
 /// 全メンバーがオブジェクト型リテラルで、共通の文字列リテラル discriminant フィールドを持つ場合に該当。
+/// バリアント名は raw 文字列のまま保持し、PascalCase 変換は resolve フェーズで行う。
 pub(super) fn try_collect_discriminated_union(
     alias: &ast::TsTypeAliasDecl,
-    lookup: &TypeRegistry,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Option<TypeDef> {
-    use crate::pipeline::type_converter::string_to_pascal_case;
-
+) -> Option<TypeDef<TsTypeInfo>> {
     let union = match alias.type_ann.as_ref() {
         ast::TsType::TsUnionOrIntersectionType(
             swc_ecma_ast::TsUnionOrIntersectionType::TsUnionType(u),
@@ -88,12 +84,11 @@ pub(super) fn try_collect_discriminated_union(
     let mut variant_fields_map = HashMap::new();
 
     for type_lit in &type_lits {
-        let (disc_value, fields) =
-            extract_registry_variant_info(type_lit, &tag, lookup, synthetic)?;
-        let variant_name = string_to_pascal_case(&disc_value);
-        string_values.insert(disc_value, variant_name.clone());
-        variant_fields_map.insert(variant_name.clone(), fields);
-        variants.push(variant_name);
+        let (disc_value, fields) = extract_registry_variant_info(type_lit, &tag)?;
+        // raw 文字列をそのまま保持（PascalCase は resolve_typedef で適用）
+        string_values.insert(disc_value.clone(), disc_value.clone());
+        variant_fields_map.insert(disc_value.clone(), fields);
+        variants.push(disc_value);
     }
 
     Some(TypeDef::Enum {
@@ -150,12 +145,13 @@ fn find_registry_discriminant_field(type_lits: &[&swc_ecma_ast::TsTypeLit]) -> O
 }
 
 /// discriminated union の 1 つのバリアントから discriminant 値と非 discriminant フィールドを抽出する。
+///
+/// optional フラグは `FieldDef.optional` に保持し、`Option<T>` ラップは行わない。
+/// Option ラップは resolve フェーズ（`resolve_field_def`）で適用される。
 fn extract_registry_variant_info(
     type_lit: &swc_ecma_ast::TsTypeLit,
     tag_field: &str,
-    lookup: &TypeRegistry,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Option<(String, Vec<FieldDef>)> {
+) -> Option<(String, Vec<FieldDef<TsTypeInfo>>)> {
     let mut disc_value = None;
     let mut fields = Vec::new();
 
@@ -175,16 +171,14 @@ fn extract_registry_variant_info(
                     }
                 }
             } else {
-                // Non-discriminant field: convert type
+                // Non-discriminant field: convert type to TsTypeInfo
                 if let Some(ann) = &prop.type_ann {
-                    if let Ok(ty) = convert_ts_type(&ann.type_ann, synthetic, lookup) {
-                        let optional = prop.optional;
-                        let ty = if optional {
-                            RustType::Option(Box::new(ty))
-                        } else {
-                            ty
-                        };
-                        fields.push(FieldDef { name, ty, optional });
+                    if let Ok(ty) = convert_to_ts_type_info(&ann.type_ann) {
+                        fields.push(FieldDef {
+                            name,
+                            ty,
+                            optional: prop.optional,
+                        });
                     }
                 }
             }

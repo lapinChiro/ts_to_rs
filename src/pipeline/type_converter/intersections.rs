@@ -349,7 +349,7 @@ fn distribute_intersection_with_union(
                 extract_variant_info(type_lit, discriminant_field, synthetic, reg)?;
             let merged = merge_fields(&base_fields, variant_fields);
             variants.push(EnumVariant {
-                name: super::unions::string_to_pascal_case(&disc_value),
+                name: super::string_to_pascal_case(&disc_value),
                 value: Some(EnumValue::Str(disc_value)),
                 data: None,
                 fields: merged,
@@ -571,6 +571,7 @@ pub(super) fn try_convert_intersection_type(
 }
 
 /// Converts a type literal in annotation position into a synthetic merged struct.
+#[allow(dead_code)] // resolve/intersection.rs に移行済み。transformer 移行後に削除
 pub(super) fn convert_type_lit_in_annotation(
     type_lit: &swc_ecma_ast::TsTypeLit,
     synthetic: &mut SyntheticTypeRegistry,
@@ -614,6 +615,7 @@ pub(super) fn convert_type_lit_in_annotation(
 ///
 /// Reuses the same merging logic as `try_convert_intersection_type` (type alias position),
 /// but generates a synthetic name since no explicit name is available.
+#[allow(dead_code)] // resolve/intersection.rs に移行済み。transformer 移行後に削除
 pub(super) fn convert_intersection_in_annotation(
     intersection: &swc_ecma_ast::TsIntersectionType,
     synthetic: &mut SyntheticTypeRegistry,
@@ -755,6 +757,7 @@ pub(super) fn convert_intersection_in_annotation(
 }
 
 /// Converts a TS function type (`(x: number) => string`) into `RustType::Fn`.
+#[allow(dead_code)] // resolve/mod.rs に移行済み。transformer 移行後に削除
 pub(super) fn convert_fn_type(
     fn_type: &swc_ecma_ast::TsFnType,
     synthetic: &mut SyntheticTypeRegistry,

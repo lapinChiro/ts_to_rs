@@ -41,6 +41,10 @@
 
 - **resolve-types**: `ts_to_rs resolve-types --tsconfig ...` サブコマンド実装済み
 
+## 設計基盤
+
+- **I-312 TypeDef の TS 型メタデータ分離**: FieldDef/ParamDef/TypeParam のジェネリック化（`<T = RustType>`）。registry collection フェーズを `convert_to_ts_type_info`（構文マッピング）に限定し、`resolve_typedef`（意味解決）と分離。Option ラップ・PascalCase 変換を resolve フェーズに集約
+
 ## リファクタリング
 
 - **I-192 大規模ファイル分割 + I-271 ファイル行数制限**: 元 18 個の 1000 行超ファイルを全て分割。`scripts/check-file-lines.sh`（閾値 1000 行）で再発防止
