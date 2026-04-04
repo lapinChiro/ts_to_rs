@@ -457,9 +457,12 @@ impl<'a> TypeResolver<'a> {
 
     pub(super) fn visit_block_stmt(&mut self, block: &ast::BlockStmt) {
         self.enter_scope();
+        let block_end = Span::from_swc(block.span).hi;
+        let prev_block_end = self.current_block_end.replace(block_end);
         for stmt in &block.stmts {
             self.visit_stmt(stmt);
         }
+        self.current_block_end = prev_block_end;
         self.leave_scope();
     }
 
@@ -581,13 +584,24 @@ impl<'a> TypeResolver<'a> {
     }
 
     fn visit_if_stmt(&mut self, if_stmt: &ast::IfStmt) {
+        use super::narrowing::block_always_exits;
+
         // Resolve test expression type
         let test_span = Span::from_swc(if_stmt.test.span());
         let test_type = self.resolve_expr(&if_stmt.test);
         self.result.expr_types.insert(test_span, test_type);
 
-        // Detect narrowing guards
+        // Detect narrowing guards (positive + complement in else)
         self.detect_narrowing_guard(&if_stmt.test, &if_stmt.cons, if_stmt.alt.as_deref());
+
+        // Early return narrowing: if the then-block always exits and there's no else,
+        // the complement type is valid for the rest of the enclosing block.
+        if if_stmt.alt.is_none() && block_always_exits(&if_stmt.cons) {
+            if let Some(block_end) = self.current_block_end {
+                let if_end = if_stmt.cons.span().hi.0;
+                self.detect_early_return_narrowing(&if_stmt.test, if_end, block_end);
+            }
+        }
 
         // Visit then branch
         match if_stmt.cons.as_ref() {

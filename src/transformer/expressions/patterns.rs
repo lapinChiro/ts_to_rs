@@ -390,6 +390,66 @@ impl<'a> Transformer<'a> {
         }
     }
 
+    /// Resolves the complement pattern for a narrowing guard.
+    ///
+    /// The complement pattern matches the variable when the positive guard does NOT match.
+    /// Used to generate `match` arms that extract values for both the positive and complement cases.
+    ///
+    /// Returns `Some(pattern_string)` or `None` if no complement pattern can be determined.
+    /// - Option: complement of `Some(x)` is `None`
+    /// - 2-variant enum: complement of `Enum::A(x)` is `Enum::B(x)`
+    /// - 3+ variant enum: returns `None` (no specific complement variant to extract)
+    pub(crate) fn resolve_complement_pattern(&self, guard: &NarrowingGuard) -> Option<String> {
+        let var_type = self.get_type_for_var(guard.var_name(), guard.var_span())?;
+        match guard {
+            NarrowingGuard::NonNullish { .. } | NarrowingGuard::Truthy { .. } => {
+                if matches!(var_type, RustType::Option(_)) {
+                    Some("None".to_string())
+                } else {
+                    None
+                }
+            }
+            NarrowingGuard::Typeof { type_name, .. } => {
+                let (enum_name, positive_variant) =
+                    self.resolve_typeof_to_enum_variant(var_type, type_name)?;
+                self.resolve_other_variant(&enum_name, &positive_variant, guard.var_name())
+            }
+            NarrowingGuard::InstanceOf { class_name, .. } => {
+                let (enum_name, positive_variant) =
+                    self.resolve_instanceof_to_enum_variant(var_type, class_name)?;
+                self.resolve_other_variant(&enum_name, &positive_variant, guard.var_name())
+            }
+        }
+    }
+
+    /// Resolves the complement variant pattern for a 2-variant enum.
+    ///
+    /// Returns `Some("EnumName::OtherVariant(var_name)")` for 2-variant enums,
+    /// or `None` for 3+ variant enums (caller should use wildcard).
+    fn resolve_other_variant(
+        &self,
+        enum_name: &str,
+        positive_variant: &str,
+        var_name: &str,
+    ) -> Option<String> {
+        let type_def = self.reg().get(enum_name)?;
+        let variants = match type_def {
+            crate::registry::TypeDef::Enum { variants, .. } => variants,
+            _ => return None,
+        };
+        // Filter out the positive variant and "Other" (any-narrowing fallback)
+        let remaining: Vec<_> = variants
+            .iter()
+            .filter(|v| v.as_str() != positive_variant && v.as_str() != "Other")
+            .collect();
+        if remaining.len() == 1 {
+            Some(format!("{enum_name}::{}({var_name})", remaining[0]))
+        } else {
+            // 3+ variant or 0 remaining: no specific complement pattern
+            None
+        }
+    }
+
     /// NarrowingGuard から if-let パターン文字列を解決する。
     ///
     /// Returns `Some((pattern, is_swap))` where `is_swap` is true for `!==`/`!=` guards

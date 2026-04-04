@@ -46,6 +46,12 @@ pub struct TypeResolver<'a> {
     /// `E extends Env` → {"E": Named("Env")}.
     /// Populated when entering generic functions/classes, cleared on scope exit.
     type_param_constraints: HashMap<String, RustType>,
+
+    /// End byte position of the current enclosing block.
+    /// Used for early-return complement narrowing: when an if-statement's then-block
+    /// always exits, the complement type is valid from after the if-statement
+    /// to the end of this enclosing block.
+    current_block_end: Option<u32>,
 }
 
 /// A scope containing variable bindings.
@@ -72,6 +78,7 @@ impl<'a> TypeResolver<'a> {
             result: FileTypeResolution::empty(),
             any_enum_overrides: Vec::new(),
             type_param_constraints: HashMap::new(),
+            current_block_end: None,
         }
     }
 

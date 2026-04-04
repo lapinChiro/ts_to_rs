@@ -166,6 +166,82 @@ fn collect_from_stmt(
         ast::Stmt::Expr(expr_stmt) => {
             collect_from_expr(&expr_stmt.expr, param_names, result);
         }
+        ast::Stmt::Switch(switch) => {
+            // Detect `switch (typeof x) { case "string": ... }` pattern
+            if let ast::Expr::Unary(unary) = switch.discriminant.as_ref() {
+                if unary.op == ast::UnaryOp::TypeOf {
+                    if let ast::Expr::Ident(ident) = unary.arg.as_ref() {
+                        let name = ident.sym.to_string();
+                        if param_names.contains(&name) {
+                            for case in &switch.cases {
+                                if let Some(ast::Expr::Lit(ast::Lit::Str(s))) = case.test.as_deref()
+                                {
+                                    let type_str = s.value.to_string_lossy().into_owned();
+                                    let entry = result.entry(name.clone()).or_default();
+                                    if !entry.typeof_checks.contains(&type_str) {
+                                        entry.typeof_checks.push(type_str);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            collect_from_expr(&switch.discriminant, param_names, result);
+            for case in &switch.cases {
+                if let Some(test) = &case.test {
+                    collect_from_expr(test, param_names, result);
+                }
+                for s in &case.cons {
+                    collect_from_stmt(s, param_names, result);
+                }
+            }
+        }
+        ast::Stmt::While(while_stmt) => {
+            collect_from_expr(&while_stmt.test, param_names, result);
+            collect_from_stmt(&while_stmt.body, param_names, result);
+        }
+        ast::Stmt::DoWhile(do_while) => {
+            collect_from_stmt(&do_while.body, param_names, result);
+            collect_from_expr(&do_while.test, param_names, result);
+        }
+        ast::Stmt::For(for_stmt) => {
+            collect_from_stmt(&for_stmt.body, param_names, result);
+        }
+        ast::Stmt::ForOf(for_of) => {
+            collect_from_stmt(&for_of.body, param_names, result);
+        }
+        ast::Stmt::ForIn(for_in) => {
+            collect_from_stmt(&for_in.body, param_names, result);
+        }
+        ast::Stmt::Try(try_stmt) => {
+            for s in &try_stmt.block.stmts {
+                collect_from_stmt(s, param_names, result);
+            }
+            if let Some(handler) = &try_stmt.handler {
+                for s in &handler.body.stmts {
+                    collect_from_stmt(s, param_names, result);
+                }
+            }
+            if let Some(finalizer) = &try_stmt.finalizer {
+                for s in &finalizer.stmts {
+                    collect_from_stmt(s, param_names, result);
+                }
+            }
+        }
+        ast::Stmt::Labeled(labeled) => {
+            collect_from_stmt(&labeled.body, param_names, result);
+        }
+        ast::Stmt::Throw(throw_stmt) => {
+            collect_from_expr(&throw_stmt.arg, param_names, result);
+        }
+        ast::Stmt::Decl(ast::Decl::Var(var_decl)) => {
+            for decl in &var_decl.decls {
+                if let Some(init) = &decl.init {
+                    collect_from_expr(init, param_names, result);
+                }
+            }
+        }
         _ => {}
     }
 }
@@ -682,6 +758,219 @@ mod tests {
         assert!(
             !c.is_empty(),
             "constraints with instanceof should not be empty"
+        );
+    }
+
+    // --- collect_from_stmt: missing statement types (I-256) ---
+
+    #[test]
+    fn test_collect_constraints_in_switch_detected() {
+        let body = parse_fn_body(
+            r#"function f(x: any) {
+                switch (typeof x) {
+                    case "string": break;
+                }
+            }"#,
+        );
+        let result = collect_any_constraints(&body, &["x".to_string()]);
+        let c = result.get("x").expect("should detect typeof in switch");
+        assert!(
+            c.typeof_checks.contains(&"string".to_string()),
+            "typeof in switch discriminant should be detected"
+        );
+    }
+
+    #[test]
+    fn test_collect_constraints_in_switch_case_body_detected() {
+        let body = parse_fn_body(
+            r#"function f(x: any) {
+                switch (true) {
+                    case true:
+                        if (typeof x === "number") { }
+                        break;
+                }
+            }"#,
+        );
+        let result = collect_any_constraints(&body, &["x".to_string()]);
+        let c = result
+            .get("x")
+            .expect("should detect typeof in switch case body");
+        assert!(
+            c.typeof_checks.contains(&"number".to_string()),
+            "typeof in switch case body should be detected"
+        );
+    }
+
+    #[test]
+    fn test_collect_constraints_in_while_detected() {
+        let body = parse_fn_body(
+            r#"function f(x: any) {
+                while (typeof x === "string") { break; }
+            }"#,
+        );
+        let result = collect_any_constraints(&body, &["x".to_string()]);
+        let c = result.get("x").expect("should detect typeof in while");
+        assert!(
+            c.typeof_checks.contains(&"string".to_string()),
+            "typeof in while condition should be detected"
+        );
+    }
+
+    #[test]
+    fn test_collect_constraints_in_while_body_detected() {
+        let body = parse_fn_body(
+            r#"function f(x: any) {
+                while (true) {
+                    if (typeof x === "boolean") { }
+                    break;
+                }
+            }"#,
+        );
+        let result = collect_any_constraints(&body, &["x".to_string()]);
+        let c = result.get("x").expect("should detect typeof in while body");
+        assert!(
+            c.typeof_checks.contains(&"boolean".to_string()),
+            "typeof in while body should be detected"
+        );
+    }
+
+    #[test]
+    fn test_collect_constraints_in_for_body_detected() {
+        let body = parse_fn_body(
+            r#"function f(x: any) {
+                for (let i = 0; i < 1; i++) {
+                    if (typeof x === "string") { }
+                }
+            }"#,
+        );
+        let result = collect_any_constraints(&body, &["x".to_string()]);
+        let c = result.get("x").expect("should detect typeof in for body");
+        assert!(
+            c.typeof_checks.contains(&"string".to_string()),
+            "typeof in for loop body should be detected"
+        );
+    }
+
+    #[test]
+    fn test_collect_constraints_in_for_of_body_detected() {
+        let body = parse_fn_body(
+            r#"function f(x: any) {
+                for (const item of [1]) {
+                    if (typeof x === "number") { }
+                }
+            }"#,
+        );
+        let result = collect_any_constraints(&body, &["x".to_string()]);
+        let c = result
+            .get("x")
+            .expect("should detect typeof in for-of body");
+        assert!(
+            c.typeof_checks.contains(&"number".to_string()),
+            "typeof in for-of body should be detected"
+        );
+    }
+
+    #[test]
+    fn test_collect_constraints_in_for_in_body_detected() {
+        let body = parse_fn_body(
+            r#"function f(x: any) {
+                for (const key in {}) {
+                    if (typeof x === "boolean") { }
+                }
+            }"#,
+        );
+        let result = collect_any_constraints(&body, &["x".to_string()]);
+        let c = result
+            .get("x")
+            .expect("should detect typeof in for-in body");
+        assert!(
+            c.typeof_checks.contains(&"boolean".to_string()),
+            "typeof in for-in body should be detected"
+        );
+    }
+
+    #[test]
+    fn test_collect_constraints_in_try_catch_detected() {
+        let body = parse_fn_body(
+            r#"function f(x: any) {
+                try {
+                    if (typeof x === "string") { }
+                } catch (e) { }
+            }"#,
+        );
+        let result = collect_any_constraints(&body, &["x".to_string()]);
+        let c = result.get("x").expect("should detect typeof in try block");
+        assert!(
+            c.typeof_checks.contains(&"string".to_string()),
+            "typeof in try block should be detected"
+        );
+    }
+
+    #[test]
+    fn test_collect_constraints_in_do_while_detected() {
+        let body = parse_fn_body(
+            r#"function f(x: any) {
+                do {
+                    if (typeof x === "number") { }
+                } while (false);
+            }"#,
+        );
+        let result = collect_any_constraints(&body, &["x".to_string()]);
+        let c = result
+            .get("x")
+            .expect("should detect typeof in do-while body");
+        assert!(
+            c.typeof_checks.contains(&"number".to_string()),
+            "typeof in do-while body should be detected"
+        );
+    }
+
+    #[test]
+    fn test_collect_constraints_in_labeled_detected() {
+        let body = parse_fn_body(
+            r#"function f(x: any) {
+                label: if (typeof x === "string") { }
+            }"#,
+        );
+        let result = collect_any_constraints(&body, &["x".to_string()]);
+        let c = result
+            .get("x")
+            .expect("should detect typeof in labeled stmt");
+        assert!(
+            c.typeof_checks.contains(&"string".to_string()),
+            "typeof in labeled statement should be detected"
+        );
+    }
+
+    #[test]
+    fn test_collect_constraints_in_throw_detected() {
+        let body = parse_fn_body(
+            r#"function f(x: any) {
+                throw typeof x === "string" ? x : new Error();
+            }"#,
+        );
+        let result = collect_any_constraints(&body, &["x".to_string()]);
+        let c = result.get("x").expect("should detect typeof in throw expr");
+        assert!(
+            c.typeof_checks.contains(&"string".to_string()),
+            "typeof in throw expression should be detected"
+        );
+    }
+
+    #[test]
+    fn test_collect_constraints_in_var_decl_detected() {
+        let body = parse_fn_body(
+            r#"function f(x: any) {
+                const isStr = typeof x === "string";
+            }"#,
+        );
+        let result = collect_any_constraints(&body, &["x".to_string()]);
+        let c = result
+            .get("x")
+            .expect("should detect typeof in var decl init");
+        assert!(
+            c.typeof_checks.contains(&"string".to_string()),
+            "typeof in variable declaration initializer should be detected"
         );
     }
 }

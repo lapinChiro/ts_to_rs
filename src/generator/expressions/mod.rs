@@ -371,6 +371,7 @@ pub(super) fn generate_expr(expr: &Expr) -> String {
                                 format!("{path} {{ {fields}, .. }}")
                             }
                         }
+                        MatchPattern::Verbatim(s) => s.clone(),
                     })
                     .collect::<Vec<_>>()
                     .join(" | ");

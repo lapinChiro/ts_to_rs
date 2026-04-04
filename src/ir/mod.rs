@@ -317,13 +317,18 @@ pub enum MatchPattern {
     Literal(Expr),
     /// A wildcard pattern (`_`)
     Wildcard,
-    /// An enum variant pattern (e.g., `Shape::Circle { radius, .. }`)
+    /// An enum variant pattern with named fields (e.g., `Shape::Circle { radius, .. }`)
     EnumVariant {
         /// Fully qualified variant name (e.g., `"Shape::Circle"`)
         path: String,
         /// Field names to bind in the pattern. Empty means `{ .. }`.
         bindings: Vec<String>,
     },
+    /// A verbatim pattern string (e.g., `"StringOrF64::String(x)"`, `"Some(x)"`, `"None"`)
+    ///
+    /// Used for tuple enum variant patterns where bindings are positional,
+    /// and for patterns that are pre-computed as strings (consistent with `Stmt::IfLet`).
+    Verbatim(String),
 }
 
 /// An arm in a `match` expression.

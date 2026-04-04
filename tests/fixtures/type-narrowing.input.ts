@@ -160,3 +160,33 @@ function unknownTypeof(x: unknown): string {
     }
     return "not a string";
 }
+
+// Case 21: complement narrowing in else (2-variant, I-213)
+function complementElse2(x: string | number): string {
+    if (typeof x === "string") {
+        return x.trim();
+    } else {
+        return x.toFixed(2);
+    }
+}
+
+// Case 22: early return narrowing (I-213)
+function earlyReturnNarrowing(x: string | number): number {
+    if (typeof x === "string") {
+        return x.length;
+    }
+    return x;
+}
+
+// Case 23: early return with null check (I-213)
+function earlyReturnNull(x: string | null): string {
+    if (x === null) {
+        return "null";
+    }
+    return x.trim();
+}
+
+// Case 24: compound ternary (I-214)
+function compoundTernary(x: string | number, y: string | null): number {
+    return typeof x === "string" && y !== null ? x.length : 0;
+}

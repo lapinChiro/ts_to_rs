@@ -2,7 +2,7 @@
 
 ## 次のアクション
 
-**次のアクション**: Batch 5b（narrowing 残課題: I-215 + I-213 + I-214 + I-256）
+**次のアクション**: Batch 6（RC-8: synthetic 型の構造的同値性欠如: I-338 + I-318）
 
 ---
 
@@ -19,12 +19,13 @@
 |-------|---------|---------|-------|------|
 | 4c | I-347+I-348 | TypeDef 型操作メソッド補完（Function/ConstValue） | L2: 設計 | ✅ 完了 |
 | 5 | I-333+I-327+I-334 | narrowing 基盤欠陥 + DRY 修正 | L2: 設計 | ✅ 完了 |
-| 5b | I-215+I-213+I-214+I-256 | narrowing 残課題（Batch 5 基盤の上に構築）。I-213 は complement narrowing 全般: instanceof else / truthy else / early return フロー narrowing を含む | L2: 設計 | |
+| 5b | I-215+I-213+I-214+I-256 | narrowing 残課題（Batch 5 基盤の上に構築）。I-213 は complement narrowing 全般: instanceof else / truthy else / early return フロー narrowing を含む | L2: 設計 | ✅ 完了 |
 | 6 | I-338+I-318 | 構造的同値性欠如（synthetic 型の重複生成） | L2: 設計 | |
 | 7 | I-320+I-328+I-323 | 個別修正（optional param + never + toString） | L3: ブロッカー | |
 | 8 | I-324+I-325+I-344 | 文字列型モデル（&str/String 不一致） | L3: 拡大 | |
 | 9 | I-340 | 所有権: Generic Clone bound | L3: 拡大 | |
 | 10 | I-336+I-337 | abstract class 変換パス欠陥 | L3: 安定 | |
+| 10b | I-349+I-350+I-351 | complement narrowing の Transformer 活用（if-let else / early return 後の値抽出） | L3: 拡大 | ✅ 完了（単一ガード、2-variant / Option） |
 | 11 | I-326+I-330+I-331+I-332+I-322 | 個別コンパイルエラー修正 | L4: 局所 | |
 | 12 | I-329 | 文字列メソッド変換（charAt, repeat）※indexOf 実装済み | L4: 局所 | |
 | 13 | I-342 | getter/setter 呼び出し側変換 | L4: 局所 | |
@@ -56,7 +57,7 @@ Batch 4 系列完了によりブロック解除済み。I-301（~7件）、I-306
 | エラーインスタンス | 54 |
 | コンパイル(file) | 112/158 (70.9%) |
 | コンパイル(dir) | 156/158 (98.7%) |
-| テスト数 | 1961（ユニット 1781 + コンパイル 3 + スナップショット 3 + E2E 85 + integration 89）※Batch 5 完了時点 |
+| テスト数 | 2001（ユニット 1820 + コンパイル 3 + スナップショット 3 + E2E 86 + integration 89）※Batch 5b 完了時点 |
 | コンパイルテストスキップ | 25 件（builtins なし）/ 24 件（builtins あり） |
 
 ### 長期ビジョン

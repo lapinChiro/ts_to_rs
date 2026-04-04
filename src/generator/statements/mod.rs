@@ -197,6 +197,7 @@ pub(super) fn generate_stmt(stmt: &Stmt, indent: usize) -> String {
                                 format!("{path} {{ {fields}, .. }}")
                             }
                         }
+                        MatchPattern::Verbatim(s) => s.clone(),
                     })
                     .collect::<Vec<_>>()
                     .join(" | ");

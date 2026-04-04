@@ -162,21 +162,62 @@ impl<'a> Transformer<'a> {
     }
 
     /// Converts an SWC conditional (ternary) expression to `Expr::If` or `Expr::IfLet`.
+    ///
+    /// Supports compound `&&` guards (e.g., `typeof x === "string" && y !== null`)
+    /// by generating nested `Expr::IfLet`.
     fn convert_cond_expr(&mut self, cond: &ast::CondExpr) -> Result<Expr> {
-        // Try narrowing: extract guard from the ternary condition
-        if let Some(guard) = patterns::extract_narrowing_guard(&cond.test) {
-            if let Some((pattern, is_swap)) = self.resolve_if_let_pattern(&guard) {
+        let compound = patterns::extract_narrowing_guards(&cond.test);
+
+        // Separate if-let guards from non-guard conditions
+        let mut if_let_guards = Vec::new();
+        let mut non_if_let_ast: Vec<&ast::Expr> = Vec::new();
+        for (guard, ast_expr) in &compound.guards {
+            if self.can_generate_if_let(guard) {
+                if_let_guards.push(guard);
+            } else {
+                non_if_let_ast.push(*ast_expr);
+            }
+        }
+
+        if !if_let_guards.is_empty() {
+            let all_remaining: Vec<&ast::Expr> = non_if_let_ast
+                .iter()
+                .copied()
+                .chain(compound.remaining.iter().copied())
+                .collect();
+            let remaining_condition = self.convert_and_combine_conditions(&all_remaining)?;
+
+            let then_expr = self.convert_expr(&cond.cons)?;
+            let else_expr = self.convert_expr(&cond.alt)?;
+
+            // Build innermost expression: if there are remaining conditions,
+            // wrap with a regular Expr::If
+            let inner_expr = if let Some(remaining_cond) = remaining_condition {
+                Expr::If {
+                    condition: Box::new(remaining_cond),
+                    then_expr: Box::new(then_expr),
+                    else_expr: Box::new(else_expr.clone()),
+                }
+            } else {
+                then_expr
+            };
+
+            // Build nested IfLet from inside out
+            let result = self.build_nested_expr_if_let(&if_let_guards, inner_expr, else_expr);
+            return Ok(result);
+        }
+
+        // Single guard without compound
+        if compound.guards.len() == 1 && compound.remaining.is_empty() {
+            let guard = &compound.guards[0].0;
+            if let Some((pattern, is_swap)) = self.resolve_if_let_pattern(guard) {
                 let (matched_ast, unmatched_ast) = if is_swap {
                     (cond.alt.as_ref(), cond.cons.as_ref())
                 } else {
                     (cond.cons.as_ref(), cond.alt.as_ref())
                 };
-
-                // TypeResolver's narrowing_events provide position-based narrowed types,
-                // so no explicit scope manipulation is needed here.
                 let matched_expr = self.convert_expr(matched_ast)?;
                 let unmatched_expr = self.convert_expr(unmatched_ast)?;
-
                 let expr_ir = Expr::Ident(guard.var_name().to_string());
                 return Ok(Expr::IfLet {
                     pattern,
@@ -196,6 +237,36 @@ impl<'a> Transformer<'a> {
             then_expr: Box::new(then_expr),
             else_expr: Box::new(else_expr),
         })
+    }
+
+    /// Builds nested `Expr::IfLet` from a list of guards, innermost first.
+    fn build_nested_expr_if_let(
+        &self,
+        guards: &[&patterns::NarrowingGuard],
+        inner_expr: Expr,
+        else_expr: Expr,
+    ) -> Expr {
+        let mut current = inner_expr;
+        for guard in guards.iter().rev() {
+            let (pattern, is_swap) = self.resolve_if_let_pattern(guard).unwrap();
+            let expr_ir = Expr::Ident(guard.var_name().to_string());
+            if is_swap {
+                current = Expr::IfLet {
+                    pattern,
+                    expr: Box::new(expr_ir),
+                    then_expr: Box::new(else_expr.clone()),
+                    else_expr: Box::new(current),
+                };
+            } else {
+                current = Expr::IfLet {
+                    pattern,
+                    expr: Box::new(expr_ir),
+                    then_expr: Box::new(current),
+                    else_expr: Box::new(else_expr.clone()),
+                };
+            }
+        }
+        current
     }
 
     /// Returns true when the expected type is a trait type (`Box<dyn Trait>`)

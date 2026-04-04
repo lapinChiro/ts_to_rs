@@ -6,6 +6,7 @@ mod control_flow;
 mod destructuring;
 mod error_handling;
 mod helpers;
+mod loops;
 pub(crate) mod mutability;
 mod spread;
 mod switch;

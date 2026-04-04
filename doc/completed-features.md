@@ -22,7 +22,9 @@
 
 ## 型 narrowing
 
-- typeof/instanceof/null-check/truthy → `if let` パターン生成。any 型 → enum 自動生成。typeof "object"/"function" バリアント解決。複合条件 (&&) のネスト if let。三項演算子の `Expr::IfLet`。switch (typeof x) の match 変換。楽観的 `true` フォールバックは `todo!()` に置換済み
+- typeof/instanceof/null-check/truthy → `if let` パターン生成。any 型 → enum 自動生成。typeof "object"/"function" バリアント解決。複合条件 (&&) のネスト if let。三項演算子の `Expr::IfLet`（compound && 対応）。switch (typeof x) の match 変換。楽観的 `true` フォールバックは `todo!()` に置換済み
+- complement narrowing: typeof/instanceof ガードの反対スコープに complement type を NarrowingEvent として記録。2-variant union は他方のバリアント、3+ variant は sub-union 合成 enum。early return パターン（`if (guard) { return; }` 後の narrowing）にも対応
+- any-narrowing の `collect_from_stmt` が全 statement type (Switch/While/For/ForOf/ForIn/DoWhile/Try/Labeled/Throw/Decl) をカバー
 
 ## コンパイルエラー修正
 
@@ -56,3 +58,10 @@
 - **I-333 unknown typeof narrowing**: `any_enum_analyzer.rs` が `TsUnknownKeyword` をスキャン対象に追加。`unknown` パラメータ/ローカル変数に synthetic enum を生成し、`if false` → `if let` に修正
 - **I-327 `=== null` else ブロック narrowing**: `detect_narrowing_guard` に `alternate` パラメータを追加。`=== null` は else ブロック、`typeof !==` は alternate に NarrowingEvent を生成
 - **DRY 修正**: `extract_typeof_and_string` / `is_null_or_undefined` を `src/pipeline/narrowing_patterns.rs` に一元化。TypeResolver と Transformer の重複を除去
+- **I-215 typeof "object"/"function" narrowing**: `extract_typeof_narrowing` が "object"/"function" でも NarrowingEvent を生成。変数の union enum バリアントからデータ型を逆引き
+- **I-213 complement narrowing**: `detect_narrowing_guard` が positive event に加え complement event を opposite scope に記録。2-variant union は他方のバリアント、3+ variant は sub-union 合成。early return パターン（`block_always_exits` + `current_block_end` スコープ計算）に対応
+- **I-214 三項演算子 compound && narrowing**: `convert_cond_expr` が `extract_narrowing_guards`（複数形）を使用し、ネスト `Expr::IfLet` を生成
+- **I-256 any-narrowing statement coverage**: `collect_from_stmt` が全 statement type (Switch/While/For/ForOf/ForIn/DoWhile/Try/Labeled/Throw/Decl) をカバー。`switch (typeof x)` パターンも検出
+- **I-349 if-let else → match 変換**: complement narrowing がある 2-variant union の if-let + else を `match x { Variant(x) => ..., Other(x) => ... }` に変換。`MatchPattern::Verbatim` を IR に追加
+- **I-350 early return + union → let match**: `if (typeof x === "string") { return; } x` パターンを `let x = match x { String(x) => { return; }, F64(x) => x };` に変換。`ir_body_always_exits` で then body の exit を検証
+- **I-351 early return + Option → let match**: `if (x === null) { return "null"; } x.trim()` を `let x = match x { None => { return "null"; }, Some(x) => x };` に変換。`is_swap` 判定で `=== null` のみ対応（truthy は match 不要）

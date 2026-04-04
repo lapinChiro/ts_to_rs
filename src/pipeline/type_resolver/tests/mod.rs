@@ -7,6 +7,7 @@ mod basics;
 mod complex_features;
 mod du_analysis;
 mod expected_types;
+mod narrowing;
 
 pub(super) fn resolve(source: &str) -> FileTypeResolution {
     let files = parse_files(vec![(PathBuf::from("test.ts"), source.to_string())]).unwrap();
@@ -37,6 +38,30 @@ pub(super) fn resolve_with_reg_and_synthetic(
     let mut synthetic = SyntheticTypeRegistry::new();
 
     let mut resolver = TypeResolver::new(reg, &mut synthetic);
+    let result = resolver.resolve_file(file);
+    (result, synthetic)
+}
+
+/// Resolve with the full pipeline including any_enum_analyzer.
+///
+/// Runs `analyze_any_enums` before TypeResolver, matching the production pipeline.
+pub(super) fn resolve_with_any_analysis(
+    source: &str,
+) -> (FileTypeResolution, SyntheticTypeRegistry) {
+    let files = parse_files(vec![(PathBuf::from("test.ts"), source.to_string())]).unwrap();
+    let file = &files.files[0];
+    let reg = build_registry(&file.module);
+    let mut synthetic = SyntheticTypeRegistry::new();
+    let mut resolution = FileTypeResolution::empty();
+
+    crate::pipeline::any_enum_analyzer::analyze_any_enums(
+        &file.module,
+        &mut resolution,
+        &mut synthetic,
+    );
+
+    let mut resolver = TypeResolver::new(&reg, &mut synthetic);
+    resolver.set_any_enum_overrides(resolution.any_enum_overrides);
     let result = resolver.resolve_file(file);
     (result, synthetic)
 }

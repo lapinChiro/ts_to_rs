@@ -1,5 +1,6 @@
 ---
 source: tests/integration_test.rs
+assertion_line: 123
 expression: output
 ---
 #[derive(Debug, Clone, PartialEq)]
@@ -27,9 +28,14 @@ fn processOptional(x: Option<String>) {
 }
 
 fn processUnion(x: StringOrF64) -> String {
-    if let StringOrF64::String(x) = x {
+    let x = match x {
+    StringOrF64::String(x) => {
         return x.trim().to_string();
     }
+    StringOrF64::F64(x) => {
+        x
+    }
+};
     "not a string".to_string()
 }
 
@@ -174,10 +180,13 @@ fn eqUndefinedWithElse(x: Option<String>) -> String {
 }
 
 fn typeofNeqWithElse(x: StringOrF64) -> String {
-    if let StringOrF64::String(x) = x {
-        return x.trim().to_string();
-    } else {
-        return "not string".to_string();
+    match x {
+        StringOrF64::String(x) => {
+            return x.trim().to_string();
+        }
+        StringOrF64::F64(x) => {
+            return "not string".to_string();
+        }
     }
 }
 
@@ -186,4 +195,43 @@ fn unknownTypeof(x: UnknownTypeofXType) -> String {
         return x.to_uppercase();
     }
     "not a string".to_string()
+}
+
+fn complementElse2(x: StringOrF64) -> String {
+    match x {
+        StringOrF64::String(x) => {
+            return x.trim().to_string();
+        }
+        StringOrF64::F64(x) => {
+            return x.toFixed(2.0);
+        }
+    }
+}
+
+fn earlyReturnNarrowing(x: StringOrF64) -> f64 {
+    let x = match x {
+    StringOrF64::String(x) => {
+        return x.len() as f64;
+    }
+    StringOrF64::F64(x) => {
+        x
+    }
+};
+    x
+}
+
+fn earlyReturnNull(x: Option<String>) -> String {
+    let x = match x {
+    None => {
+        return "null".to_string();
+    }
+    Some(x) => {
+        x
+    }
+};
+    x.trim().to_string()
+}
+
+fn compoundTernary(x: StringOrF64, y: Option<String>) -> f64 {
+    if let StringOrF64::String(x) = x { if let Some(y) = y { x.len() as f64 } else { 0.0 } } else { 0.0 }
 }

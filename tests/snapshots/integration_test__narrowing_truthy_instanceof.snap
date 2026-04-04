@@ -1,5 +1,6 @@
 ---
 source: tests/integration_test.rs
+assertion_line: 141
 expression: output
 ---
 #[derive(Debug, Clone, PartialEq)]
@@ -53,16 +54,25 @@ fn truthyWithElse(x: Option<String>) -> String {
 }
 
 fn nullCheck(x: Option<String>) -> String {
-    if let Some(x) = x {
-    } else {
+    let x = match x {
+    None => {
         return "null".to_string();
     }
+    Some(x) => {
+        x
+    }
+};
     x
 }
 
 fn typeofNarrowing(x: StringOrF64) -> String {
-    if let StringOrF64::String(x) = x {
+    let x = match x {
+    StringOrF64::String(x) => {
         return x;
     }
+    StringOrF64::F64(x) => {
+        x
+    }
+};
     x.toString()
 }
