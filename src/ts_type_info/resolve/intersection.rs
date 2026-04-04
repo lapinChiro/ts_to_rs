@@ -29,17 +29,7 @@ pub(crate) fn resolve_intersection(
         .collect();
 
     if members.is_empty() {
-        let name = synthetic.generate_name("Intersection");
-        synthetic.push_item(
-            name.clone(),
-            SyntheticTypeKind::InlineStruct,
-            Item::Struct {
-                vis: Visibility::Public,
-                name: name.clone(),
-                fields: vec![],
-                type_params: vec![],
-            },
-        );
+        let name = synthetic.register_inline_struct(&[]);
         return Ok(RustType::Named {
             name,
             type_args: vec![],
@@ -153,25 +143,17 @@ pub(crate) fn resolve_intersection(
         }
     }
 
-    // synthetic struct 登録
-    let name = synthetic.generate_name("Intersection");
-    synthetic.push_item(
-        name.clone(),
-        SyntheticTypeKind::InlineStruct,
-        Item::Struct {
-            vis: Visibility::Public,
-            name: name.clone(),
-            fields: merged_fields,
-            type_params: vec![],
-        },
-    );
+    // synthetic struct 登録（構造的 dedup 付き）
+    let (name, _is_new) = synthetic.register_intersection_struct(&merged_fields);
 
-    // メソッドがある場合は impl ブロックも登録
+    // メソッドがある場合は impl ブロックも登録。
+    // dedup ヒット時でも、先行登録が TypeLit（メソッドなし）の可能性があるため
+    // 無条件に登録する。push_item は insert（上書き）なので重複は無害。
     if !methods.is_empty() {
         let impl_name = format!("{name}Impl");
         synthetic.push_item(
             impl_name,
-            SyntheticTypeKind::InlineStruct,
+            SyntheticTypeKind::ImplBlock,
             Item::Impl {
                 struct_name: name.clone(),
                 type_params: vec![],
@@ -361,25 +343,17 @@ fn resolve_intersection_with_union(
         });
     }
 
-    let name = synthetic.generate_name("Intersection");
+    // intersection enum 登録（構造的 dedup 付き）
     let serde_tag = discriminant;
-    synthetic.push_item(
-        name.clone(),
-        SyntheticTypeKind::UnionEnum,
-        Item::Enum {
-            vis: Visibility::Public,
-            name: name.clone(),
-            serde_tag,
-            variants,
-        },
-    );
+    let (name, _is_new) = synthetic.register_intersection_enum(serde_tag.as_deref(), variants);
 
-    // メソッドがある場合は impl ブロックも登録
+    // メソッドがある場合は impl ブロックも登録。
+    // dedup ヒット時でも無条件に登録する（理由は struct パスと同じ）。
     if !base_methods.is_empty() {
         let impl_name = format!("{name}Impl");
         synthetic.push_item(
             impl_name,
-            SyntheticTypeKind::InlineStruct,
+            SyntheticTypeKind::ImplBlock,
             Item::Impl {
                 struct_name: name.clone(),
                 type_params: vec![],

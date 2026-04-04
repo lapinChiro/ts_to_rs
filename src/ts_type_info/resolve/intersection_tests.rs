@@ -95,7 +95,10 @@ fn intersection_merges_fields() {
 
     let result = resolve_intersection(&members, &reg, &mut syn).unwrap();
     match result {
-        RustType::Named { name, .. } => assert!(name.contains("Intersection")),
+        RustType::Named { name, .. } => assert!(
+            name.starts_with("_TypeLit"),
+            "intersection struct should use _TypeLit naming via struct_dedup, got {name}"
+        ),
         _ => panic!("expected Named for intersection struct"),
     }
 }
@@ -180,7 +183,10 @@ fn empty_type_literals_filtered_from_intersection() {
     ];
     let result = resolve_intersection(&members, &reg, &mut syn).unwrap();
     match result {
-        RustType::Named { name, .. } => assert!(name.contains("Intersection")),
+        RustType::Named { name, .. } => assert!(
+            name.starts_with("_TypeLit"),
+            "empty intersection should use _TypeLit naming via struct_dedup, got {name}"
+        ),
         other => panic!("expected Named, got {other:?}"),
     }
 }
@@ -632,4 +638,86 @@ fn discriminated_union_intersection_sets_enum_value() {
             }
         }
     }
+}
+
+#[test]
+fn cross_origin_dedup_preserves_methods() {
+    // TypeLit 先行登録 → 同一フィールド intersection（メソッド付き）→ メソッドが消失しないこと
+    let reg = TypeRegistry::new();
+    let mut syn = SyntheticTypeRegistry::new();
+
+    // 1. TypeLit { x: number } を先に登録
+    let lit = TsTypeLiteralInfo {
+        fields: vec![field("x", TsTypeInfo::Number)],
+        methods: vec![],
+        call_signatures: vec![],
+        construct_signatures: vec![],
+        index_signatures: vec![],
+    };
+    let _ = resolve_type_literal(&lit, &reg, &mut syn).unwrap();
+
+    // 2. { x: number, greet(name: string): string } を intersection として登録
+    let method_lit = TsTypeLiteralInfo {
+        fields: vec![field("x", TsTypeInfo::Number)],
+        methods: vec![crate::ts_type_info::TsMethodInfo {
+            name: "greet".to_string(),
+            params: vec![crate::ts_type_info::TsParamInfo {
+                name: "name".to_string(),
+                ty: TsTypeInfo::String,
+                optional: false,
+            }],
+            return_type: Some(TsTypeInfo::String),
+            type_params: vec![],
+            optional: false,
+        }],
+        call_signatures: vec![],
+        construct_signatures: vec![],
+        index_signatures: vec![],
+    };
+    let members = vec![TsTypeInfo::TypeLiteral(method_lit)];
+    let result = resolve_intersection(&members, &reg, &mut syn).unwrap();
+
+    // single member → resolve_ts_type に委譲されるため、直接 TypeLit 解決になる。
+    // 2 メンバーの intersection でテストし直す。
+    assert!(matches!(result, RustType::Named { .. }));
+
+    // 2 メンバー版: { x: number } & { y: string } でメソッドは TsTypeLiteral のメソッドから取得
+    let mut syn2 = SyntheticTypeRegistry::new();
+
+    // TypeLit { x: number, y: string } を先に登録（メソッドなし）
+    let _ = syn2.register_inline_struct(&[
+        ("x".to_string(), RustType::F64),
+        ("y".to_string(), RustType::String),
+    ]);
+
+    // { x: number, greet(): void } & { y: string } を intersection として登録
+    let method_lit2 = TsTypeLiteralInfo {
+        fields: vec![field("x", TsTypeInfo::Number)],
+        methods: vec![crate::ts_type_info::TsMethodInfo {
+            name: "greet".to_string(),
+            params: vec![],
+            return_type: None,
+            type_params: vec![],
+            optional: false,
+        }],
+        call_signatures: vec![],
+        construct_signatures: vec![],
+        index_signatures: vec![],
+    };
+    let members2 = vec![
+        TsTypeInfo::TypeLiteral(method_lit2),
+        TsTypeInfo::TypeLiteral(type_literal(vec![field("y", TsTypeInfo::String)])),
+    ];
+    let result2 = resolve_intersection(&members2, &reg, &mut syn2).unwrap();
+    assert!(matches!(result2, RustType::Named { .. }));
+
+    // impl ブロックが登録されていること（dedup ヒット後でもメソッドが消えない）
+    let has_impl = syn2
+        .all_items()
+        .iter()
+        .any(|item| matches!(item, Item::Impl { .. }));
+    assert!(
+        has_impl,
+        "impl block should be registered even after cross-origin struct dedup"
+    );
 }

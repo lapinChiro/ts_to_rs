@@ -21,18 +21,6 @@ pub enum _Intersection0 {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum _Intersection1 {
-    Variant0 {
-        base: String,
-        a: f64,
-    },
-    Variant1 {
-        base: String,
-        b: bool,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq)]
 pub struct _TypeLit0 {
     pub p: bool,
 }

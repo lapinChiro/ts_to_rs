@@ -185,8 +185,8 @@ fn test_convert_ts_type_intersection_annotation_returns_first_type() {
     match &ty {
         RustType::Named { name, .. } => {
             assert!(
-                name.starts_with("_Intersection"),
-                "expected _IntersectionN, got: {name}"
+                name.starts_with("_TypeLit"),
+                "expected _TypeLitN, got: {name}"
             );
         }
         other => panic!("expected Named, got: {other:?}"),
@@ -222,8 +222,8 @@ fn test_convert_ts_type_intersection_type_lits_generates_merged_struct() {
     match &ty {
         RustType::Named { name, .. } => {
             assert!(
-                name.starts_with("_Intersection"),
-                "expected _IntersectionN, got: {name}"
+                name.starts_with("_TypeLit"),
+                "expected _TypeLitN, got: {name}"
             );
         }
         other => panic!("expected Named, got: {other:?}"),
@@ -258,7 +258,7 @@ fn test_convert_ts_type_intersection_type_ref_and_type_lit_generates_struct() {
 
     match &ty {
         RustType::Named { name, .. } => {
-            assert!(name.starts_with("_Intersection"));
+            assert!(name.starts_with("_TypeLit"));
         }
         other => panic!("expected Named, got: {other:?}"),
     }
