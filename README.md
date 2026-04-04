@@ -322,9 +322,7 @@ tests/
 ├── e2e_test.rs          # E2E テスト（変換→コンパイル→実行→出力検証）
 ├── e2e/                 # E2E テスト用リソース
 └── compile-check/       # コンパイルチェック用 Cargo プロジェクト
-doc/
-├── completed-features.md  # 完了済み機能一覧
-└── design-decisions.md    # 設計判断の記録
+doc/                         # エージェント共有ドキュメント
 scripts/
 ├── hono-bench.sh        # Hono フレームワーク変換率ベンチマーク
 ├── analyze-bench.py     # ベンチマーク結果のエラー分類・集計
