@@ -125,4 +125,55 @@ mod tests {
         .unwrap();
         assert_eq!(result, RustType::F64);
     }
+
+    #[test]
+    fn infer_pattern_false_type_not_never_returns_none() {
+        // false_type が Never でなければ infer パターンとして認識しない
+        let result = try_resolve_infer_pattern(
+            &TsTypeInfo::TypeRef {
+                name: "T".to_string(),
+                type_args: vec![],
+            },
+            &TsTypeInfo::TypeRef {
+                name: "Container".to_string(),
+                type_args: vec![],
+            },
+            &TsTypeInfo::String,
+            &TsTypeInfo::Boolean, // Never ではない
+        )
+        .unwrap();
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn infer_pattern_check_not_type_ref_returns_none() {
+        // check_type が TypeRef でなければ infer パターンとして認識しない
+        let result = try_resolve_infer_pattern(
+            &TsTypeInfo::String, // TypeRef ではない
+            &TsTypeInfo::TypeRef {
+                name: "Container".to_string(),
+                type_args: vec![],
+            },
+            &TsTypeInfo::String,
+            &TsTypeInfo::Never,
+        )
+        .unwrap();
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn infer_pattern_extends_not_type_ref_returns_none() {
+        // extends_type が TypeRef でなければ infer パターンとして認識しない
+        let result = try_resolve_infer_pattern(
+            &TsTypeInfo::TypeRef {
+                name: "T".to_string(),
+                type_args: vec![],
+            },
+            &TsTypeInfo::String, // TypeRef ではない
+            &TsTypeInfo::String,
+            &TsTypeInfo::Never,
+        )
+        .unwrap();
+        assert_eq!(result, None);
+    }
 }

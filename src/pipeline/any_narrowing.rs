@@ -109,7 +109,7 @@ pub(crate) fn build_any_enum_variants(constraints: &AnyTypeConstraints) -> Vec<E
 
     // Add instanceof class variants
     for class_name in &constraints.instanceof_checks {
-        let sanitized = crate::pipeline::type_converter::sanitize_rust_type_name(class_name);
+        let sanitized = crate::ir::sanitize_rust_type_name(class_name);
         if !variants.iter().any(|v: &EnumVariant| v.name == sanitized) {
             variants.push(EnumVariant {
                 name: sanitized.clone(),

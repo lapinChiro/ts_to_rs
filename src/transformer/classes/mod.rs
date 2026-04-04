@@ -55,12 +55,10 @@ impl<'a> Transformer<'a> {
         class_decl: &ast::ClassDecl,
         vis: Visibility,
     ) -> Result<ClassInfo> {
-        let name = crate::pipeline::type_converter::sanitize_rust_type_name(&class_decl.ident.sym);
+        let name = crate::ir::sanitize_rust_type_name(&class_decl.ident.sym);
         let parent = class_decl.class.super_class.as_ref().and_then(|sc| {
             if let ast::Expr::Ident(ident) = sc.as_ref() {
-                Some(crate::pipeline::type_converter::sanitize_rust_type_name(
-                    &ident.sym,
-                ))
+                Some(crate::ir::sanitize_rust_type_name(&ident.sym))
             } else {
                 None
             }
@@ -94,7 +92,7 @@ impl<'a> Transformer<'a> {
                         })
                         .unwrap_or_default();
                     Some(TraitRef {
-                        name: crate::pipeline::type_converter::sanitize_rust_type_name(&ident.sym),
+                        name: crate::ir::sanitize_rust_type_name(&ident.sym),
                         type_args,
                     })
                 } else {

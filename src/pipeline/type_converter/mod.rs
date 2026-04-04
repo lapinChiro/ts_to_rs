@@ -39,54 +39,12 @@ use swc_ecma_ast::{
 };
 
 use crate::ir::{
-    sanitize_field_name, EnumValue, EnumVariant, Item, Method, Param, RustType, StructField,
-    TraitRef, TypeParam, Visibility,
+    sanitize_field_name, sanitize_rust_type_name, string_to_pascal_case, EnumValue, EnumVariant,
+    Item, Method, Param, RustType, StructField, TraitRef, TypeParam, Visibility,
 };
 use crate::pipeline::SyntheticTypeRegistry;
 use crate::registry::{FieldDef, TypeDef, TypeRegistry};
 use crate::transformer::type_position::{wrap_trait_for_position, TypePosition};
-
-/// Converts a string value to PascalCase for use as an enum variant name.
-///
-/// Examples: `"up"` → `"Up"`, `"foo-bar"` → `"FooBar"`, `"UPPER_CASE"` → `"UpperCase"`
-pub(crate) fn string_to_pascal_case(s: &str) -> String {
-    s.split(|c: char| !c.is_alphanumeric())
-        .filter(|part| !part.is_empty())
-        .map(|part| {
-            let lower = part.to_lowercase();
-            let mut chars = lower.chars();
-            match chars.next() {
-                Some(c) => c.to_uppercase().to_string() + chars.as_str(),
-                None => String::new(),
-            }
-        })
-        .collect()
-}
-
-/// Rust prelude type names that would cause shadowing if used as user-defined type names.
-///
-/// Includes types, enum variants, and common std types that are in the prelude or
-/// automatically imported. Using these as enum/struct names would shadow the standard
-/// library definitions, causing compile errors or silent semantic changes.
-const RUST_PRELUDE_TYPE_NAMES: &[&str] = &[
-    // Core prelude types
-    "Option", "Result", "String", "Vec", "Box",
-    // Core prelude enum variants (used as value constructors)
-    "Some", "None", "Ok", "Err", // Special keyword
-    "Self",
-];
-
-/// Sanitizes a type name to avoid shadowing Rust prelude types.
-///
-/// If `name` matches a Rust prelude type name, prefixes it with "Ts"
-/// (e.g., `Result` → `TsResult`). Otherwise returns the name unchanged.
-pub(crate) fn sanitize_rust_type_name(name: &str) -> String {
-    if RUST_PRELUDE_TYPE_NAMES.contains(&name) {
-        format!("Ts{name}")
-    } else {
-        name.to_string()
-    }
-}
 
 /// Returns true if the keyword type is a nullable sentinel (`null`, `undefined`, `void`).
 ///

@@ -405,4 +405,381 @@ mod tests {
             }
         );
     }
+
+    // ---- resolve_indexed_access with TypeLiteral ----
+
+    #[test]
+    fn type_literal_string_index_direct_field_lookup() {
+        let reg = TypeRegistry::new();
+        let mut syn = SyntheticTypeRegistry::new();
+        let lit = crate::ts_type_info::TsTypeLiteralInfo {
+            fields: vec![
+                crate::ts_type_info::TsFieldInfo {
+                    name: "x".to_string(),
+                    ty: TsTypeInfo::Number,
+                    optional: false,
+                },
+                crate::ts_type_info::TsFieldInfo {
+                    name: "y".to_string(),
+                    ty: TsTypeInfo::String,
+                    optional: false,
+                },
+            ],
+            methods: vec![],
+            call_signatures: vec![],
+            construct_signatures: vec![],
+            index_signatures: vec![],
+        };
+        // { x: number; y: string }["x"] → f64
+        let result = resolve_indexed_access(
+            &TsTypeInfo::TypeLiteral(lit),
+            &TsTypeInfo::Literal(TsLiteralKind::String("x".to_string())),
+            &reg,
+            &mut syn,
+        )
+        .unwrap();
+        assert_eq!(result, RustType::F64);
+    }
+
+    #[test]
+    fn type_literal_nonexistent_field_falls_back_to_synthetic() {
+        let reg = TypeRegistry::new();
+        let mut syn = SyntheticTypeRegistry::new();
+        let lit = crate::ts_type_info::TsTypeLiteralInfo {
+            fields: vec![crate::ts_type_info::TsFieldInfo {
+                name: "x".to_string(),
+                ty: TsTypeInfo::Number,
+                optional: false,
+            }],
+            methods: vec![],
+            call_signatures: vec![],
+            construct_signatures: vec![],
+            index_signatures: vec![],
+        };
+        // { x: number }["z"] → synthetic struct name + "::z"
+        let result = resolve_indexed_access(
+            &TsTypeInfo::TypeLiteral(lit),
+            &TsTypeInfo::Literal(TsLiteralKind::String("z".to_string())),
+            &reg,
+            &mut syn,
+        )
+        .unwrap();
+        match result {
+            RustType::Named { name, .. } => assert!(name.ends_with("::z")),
+            _ => panic!("expected Named type with ::z suffix"),
+        }
+    }
+
+    // ---- resolve_number_index ----
+
+    #[test]
+    fn number_index_registry_miss_returns_any() {
+        let reg = TypeRegistry::new();
+        let mut syn = SyntheticTypeRegistry::new();
+        let result = resolve_number_index("NoSuchType", &mut syn, &reg).unwrap();
+        assert_eq!(result, RustType::Any);
+    }
+
+    #[test]
+    fn number_index_mixed_element_types_returns_union() {
+        let mut reg = TypeRegistry::new();
+        let mut syn = SyntheticTypeRegistry::new();
+        reg.register(
+            "MixedArr".to_string(),
+            TypeDef::ConstValue {
+                fields: vec![],
+                elements: vec![
+                    ConstElement {
+                        ty: RustType::String,
+                        string_literal_value: None,
+                    },
+                    ConstElement {
+                        ty: RustType::F64,
+                        string_literal_value: None,
+                    },
+                ],
+                type_ref_name: None,
+            },
+        );
+        let result = resolve_number_index("MixedArr", &mut syn, &reg).unwrap();
+        // Multiple unique types → synthetic union
+        match result {
+            RustType::Named { .. } => {} // union was registered
+            _ => panic!("expected Named (synthetic union) for mixed element types"),
+        }
+    }
+
+    #[test]
+    fn number_index_empty_elements_returns_any() {
+        let mut reg = TypeRegistry::new();
+        let mut syn = SyntheticTypeRegistry::new();
+        reg.register(
+            "EmptyArr".to_string(),
+            TypeDef::ConstValue {
+                fields: vec![],
+                elements: vec![],
+                type_ref_name: None,
+            },
+        );
+        let result = resolve_number_index("EmptyArr", &mut syn, &reg).unwrap();
+        assert_eq!(result, RustType::Any);
+    }
+
+    #[test]
+    fn number_index_single_non_string_type() {
+        let mut reg = TypeRegistry::new();
+        let mut syn = SyntheticTypeRegistry::new();
+        reg.register(
+            "NumArr".to_string(),
+            TypeDef::ConstValue {
+                fields: vec![],
+                elements: vec![
+                    ConstElement {
+                        ty: RustType::F64,
+                        string_literal_value: None,
+                    },
+                    ConstElement {
+                        ty: RustType::F64,
+                        string_literal_value: None,
+                    },
+                ],
+                type_ref_name: None,
+            },
+        );
+        let result = resolve_number_index("NumArr", &mut syn, &reg).unwrap();
+        assert_eq!(result, RustType::F64);
+    }
+
+    // ---- resolve_keyof_typeof_index ----
+
+    #[test]
+    fn keyof_typeof_registry_miss_returns_error() {
+        let reg = TypeRegistry::new();
+        let mut syn = SyntheticTypeRegistry::new();
+        let result = resolve_keyof_typeof_index("NoSuchObj", &mut syn, &reg);
+        assert!(result.is_err());
+    }
+
+    // ---- resolve_type_param_indexed_access ----
+
+    #[test]
+    fn type_param_indexed_access_registry_miss_returns_any() {
+        let reg = TypeRegistry::new();
+        let mut syn = SyntheticTypeRegistry::new();
+        let result = resolve_type_param_indexed_access("Missing", &reg, &mut syn).unwrap();
+        assert_eq!(result, RustType::Any);
+    }
+
+    #[test]
+    fn type_param_indexed_access_zero_unique_types_returns_any() {
+        let mut reg = TypeRegistry::new();
+        let mut syn = SyntheticTypeRegistry::new();
+        // Struct with no fields → unique_field_types returns None → default empty
+        reg.register(
+            "Empty".to_string(),
+            TypeDef::Struct {
+                type_params: vec![],
+                fields: vec![],
+                methods: std::collections::HashMap::new(),
+                constructor: None,
+                call_signatures: vec![],
+                extends: vec![],
+                is_interface: false,
+            },
+        );
+        let result = resolve_type_param_indexed_access("Empty", &reg, &mut syn).unwrap();
+        assert_eq!(result, RustType::Any);
+    }
+
+    #[test]
+    fn type_param_indexed_access_single_unique_type() {
+        let mut reg = TypeRegistry::new();
+        let mut syn = SyntheticTypeRegistry::new();
+        reg.register(
+            "AllString".to_string(),
+            TypeDef::Struct {
+                type_params: vec![],
+                fields: vec![
+                    crate::registry::FieldDef {
+                        name: "a".to_string(),
+                        ty: RustType::String,
+                        optional: false,
+                    },
+                    crate::registry::FieldDef {
+                        name: "b".to_string(),
+                        ty: RustType::String,
+                        optional: false,
+                    },
+                ],
+                methods: std::collections::HashMap::new(),
+                constructor: None,
+                call_signatures: vec![],
+                extends: vec![],
+                is_interface: false,
+            },
+        );
+        let result = resolve_type_param_indexed_access("AllString", &reg, &mut syn).unwrap();
+        assert_eq!(result, RustType::String);
+    }
+
+    #[test]
+    fn type_param_indexed_access_multiple_unique_types() {
+        let mut reg = TypeRegistry::new();
+        let mut syn = SyntheticTypeRegistry::new();
+        reg.register(
+            "Mixed".to_string(),
+            TypeDef::Struct {
+                type_params: vec![],
+                fields: vec![
+                    crate::registry::FieldDef {
+                        name: "a".to_string(),
+                        ty: RustType::String,
+                        optional: false,
+                    },
+                    crate::registry::FieldDef {
+                        name: "b".to_string(),
+                        ty: RustType::F64,
+                        optional: false,
+                    },
+                ],
+                methods: std::collections::HashMap::new(),
+                constructor: None,
+                call_signatures: vec![],
+                extends: vec![],
+                is_interface: false,
+            },
+        );
+        let result = resolve_type_param_indexed_access("Mixed", &reg, &mut syn).unwrap();
+        // Multiple unique types → synthetic union
+        match result {
+            RustType::Named { .. } => {}
+            _ => panic!("expected Named (synthetic union) for multiple unique types"),
+        }
+    }
+
+    // ---- lookup_field_type ----
+
+    #[test]
+    fn lookup_field_type_struct_variant() {
+        let mut reg = TypeRegistry::new();
+        let syn = SyntheticTypeRegistry::new();
+        reg.register(
+            "S".to_string(),
+            TypeDef::Struct {
+                type_params: vec![],
+                fields: vec![crate::registry::FieldDef {
+                    name: "f".to_string(),
+                    ty: RustType::Bool,
+                    optional: false,
+                }],
+                methods: std::collections::HashMap::new(),
+                constructor: None,
+                call_signatures: vec![],
+                extends: vec![],
+                is_interface: false,
+            },
+        );
+        let result = lookup_field_type("S", "f", &reg, &syn);
+        assert_eq!(result, Some(RustType::Bool));
+    }
+
+    #[test]
+    fn lookup_field_type_const_value_variant() {
+        let mut reg = TypeRegistry::new();
+        let syn = SyntheticTypeRegistry::new();
+        reg.register(
+            "C".to_string(),
+            TypeDef::ConstValue {
+                fields: vec![crate::registry::ConstField {
+                    name: "key".to_string(),
+                    ty: RustType::String,
+                    string_literal_value: Some("val".to_string()),
+                }],
+                elements: vec![],
+                type_ref_name: None,
+            },
+        );
+        let result = lookup_field_type("C", "key", &reg, &syn);
+        assert_eq!(result, Some(RustType::String));
+    }
+
+    #[test]
+    fn lookup_field_type_missing_field_returns_none() {
+        let mut reg = TypeRegistry::new();
+        let syn = SyntheticTypeRegistry::new();
+        reg.register(
+            "S".to_string(),
+            TypeDef::Struct {
+                type_params: vec![],
+                fields: vec![crate::registry::FieldDef {
+                    name: "a".to_string(),
+                    ty: RustType::Bool,
+                    optional: false,
+                }],
+                methods: std::collections::HashMap::new(),
+                constructor: None,
+                call_signatures: vec![],
+                extends: vec![],
+                is_interface: false,
+            },
+        );
+        let result = lookup_field_type("S", "nonexistent", &reg, &syn);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn lookup_field_type_unregistered_type_returns_none() {
+        let reg = TypeRegistry::new();
+        let syn = SyntheticTypeRegistry::new();
+        let result = lookup_field_type("NoSuch", "f", &reg, &syn);
+        assert_eq!(result, None);
+    }
+
+    // ---- resolve_indexed_access: non-TypeRef object fallback ----
+
+    #[test]
+    fn non_extractable_object_type_returns_any() {
+        let reg = TypeRegistry::new();
+        let mut syn = SyntheticTypeRegistry::new();
+        // TsTypeInfo::Boolean is not TypeRef, not TypeQuery, not IndexedAccess, not TypeLiteral
+        let result = resolve_indexed_access(
+            &TsTypeInfo::Boolean,
+            &TsTypeInfo::Literal(TsLiteralKind::String("x".to_string())),
+            &reg,
+            &mut syn,
+        )
+        .unwrap();
+        assert_eq!(result, RustType::Any);
+    }
+
+    #[test]
+    fn type_query_unregistered_object_returns_any() {
+        let reg = TypeRegistry::new();
+        let mut syn = SyntheticTypeRegistry::new();
+        let result = resolve_indexed_access(
+            &TsTypeInfo::TypeQuery("unregistered".to_string()),
+            &TsTypeInfo::Literal(TsLiteralKind::String("x".to_string())),
+            &reg,
+            &mut syn,
+        )
+        .unwrap();
+        assert_eq!(result, RustType::Any);
+    }
+
+    #[test]
+    fn number_literal_index_returns_any() {
+        let reg = TypeRegistry::new();
+        let mut syn = SyntheticTypeRegistry::new();
+        let result = resolve_indexed_access(
+            &TsTypeInfo::TypeRef {
+                name: "T".to_string(),
+                type_args: vec![],
+            },
+            &TsTypeInfo::Literal(TsLiteralKind::Number(0.0)),
+            &reg,
+            &mut syn,
+        )
+        .unwrap();
+        assert_eq!(result, RustType::Any);
+    }
 }

@@ -419,3 +419,159 @@ fn test_intersection_in_annotation_with_method_generates_impl() {
         other => panic!("expected Item::Impl, got {other:?}"),
     }
 }
+
+// --- try_simplify_identity_mapped_type (indirect via convert_type_alias) ---
+
+#[test]
+fn test_identity_mapped_type_simplifies_to_type_alias() {
+    // `type X = { [K in keyof T]: T[K] } & {}` → identity mapped type → type alias to T
+    // The `& {}` makes it an intersection; `{}` is filtered by preprocess_intersection_members
+    let decl = parse_type_alias("type X<T> = { [K in keyof T]: T[K] } & {};");
+    let item = convert_type_alias(
+        &decl,
+        Visibility::Public,
+        &mut SyntheticTypeRegistry::new(),
+        &TypeRegistry::new(),
+    )
+    .unwrap();
+    match &item {
+        Item::TypeAlias { name, ty, .. } => {
+            assert_eq!(name, "X");
+            assert_eq!(
+                ty,
+                &RustType::Named {
+                    name: "T".to_string(),
+                    type_args: vec![],
+                }
+            );
+        }
+        other => panic!("expected TypeAlias for identity mapped type, got: {other:?}"),
+    }
+}
+
+#[test]
+fn test_mapped_type_with_readonly_not_simplified() {
+    // readonly modifier prevents identity simplification
+    let decl = parse_type_alias("type X<T> = { readonly [K in keyof T]: T[K] } & {};");
+    let item = convert_type_alias(
+        &decl,
+        Visibility::Public,
+        &mut SyntheticTypeRegistry::new(),
+        &TypeRegistry::new(),
+    )
+    .unwrap();
+    // Should NOT simplify to T — should produce a TypeAlias with non-Named type
+    if let Item::TypeAlias { name, ty, .. } = &item {
+        assert_eq!(name, "X");
+        assert_ne!(
+            ty,
+            &RustType::Named {
+                name: "T".to_string(),
+                type_args: vec![],
+            },
+            "readonly mapped type should not simplify to T"
+        );
+    }
+}
+
+#[test]
+fn test_mapped_type_with_optional_not_simplified() {
+    // optional modifier prevents identity simplification
+    let decl = parse_type_alias("type X<T> = { [K in keyof T]?: T[K] } & {};");
+    let item = convert_type_alias(
+        &decl,
+        Visibility::Public,
+        &mut SyntheticTypeRegistry::new(),
+        &TypeRegistry::new(),
+    )
+    .unwrap();
+    if let Item::TypeAlias { name, ty, .. } = &item {
+        assert_eq!(name, "X");
+        assert_ne!(
+            ty,
+            &RustType::Named {
+                name: "T".to_string(),
+                type_args: vec![],
+            },
+            "optional mapped type should not simplify to T"
+        );
+    }
+}
+
+#[test]
+fn test_mapped_type_value_not_tk_not_simplified() {
+    // Value type is string instead of T[K] → not identity
+    let decl = parse_type_alias("type X<T> = { [K in keyof T]: string } & {};");
+    let item = convert_type_alias(
+        &decl,
+        Visibility::Public,
+        &mut SyntheticTypeRegistry::new(),
+        &TypeRegistry::new(),
+    )
+    .unwrap();
+    if let Item::TypeAlias { name, ty, .. } = &item {
+        assert_eq!(name, "X");
+        assert_ne!(
+            ty,
+            &RustType::Named {
+                name: "T".to_string(),
+                type_args: vec![],
+            },
+            "mapped type with non-T[K] value should not simplify to T"
+        );
+    }
+}
+
+// --- is_symbol_filter_noop (indirect via try_simplify_identity_mapped_type) ---
+
+#[test]
+fn test_identity_mapped_type_with_symbol_filter_simplifies() {
+    // `{ [K in keyof T as K extends symbol ? never : K]: T[K] }` is identity (symbol filter noop)
+    let decl = parse_type_alias(
+        "type X<T> = { [K in keyof T as K extends symbol ? never : K]: T[K] } & {};",
+    );
+    let item = convert_type_alias(
+        &decl,
+        Visibility::Public,
+        &mut SyntheticTypeRegistry::new(),
+        &TypeRegistry::new(),
+    )
+    .unwrap();
+    if let Item::TypeAlias { name, ty, .. } = &item {
+        assert_eq!(name, "X");
+        assert_eq!(
+            ty,
+            &RustType::Named {
+                name: "T".to_string(),
+                type_args: vec![],
+            },
+            "symbol filter noop should still simplify to T"
+        );
+    } else {
+        panic!("expected TypeAlias for symbol-filtered identity, got: {item:?}");
+    }
+}
+
+#[test]
+fn test_mapped_type_with_non_noop_name_remap_not_simplified() {
+    // `{ [K in keyof T as string]: T[K] }` has a non-noop name remap → not identity
+    let decl = parse_type_alias("type X<T> = { [K in keyof T as string]: T[K] } & {};");
+    let item = convert_type_alias(
+        &decl,
+        Visibility::Public,
+        &mut SyntheticTypeRegistry::new(),
+        &TypeRegistry::new(),
+    )
+    .unwrap();
+    if let Item::TypeAlias { name, ty, .. } = &item {
+        assert_eq!(name, "X");
+        assert_ne!(
+            ty,
+            &RustType::Named {
+                name: "T".to_string(),
+                type_args: vec![],
+            },
+            "non-noop name remap should not simplify to T"
+        );
+    }
+}

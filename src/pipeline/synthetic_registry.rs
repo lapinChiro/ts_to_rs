@@ -191,7 +191,7 @@ impl SyntheticTypeRegistry {
             return existing_name.clone();
         }
 
-        let base = crate::pipeline::type_converter::string_to_pascal_case(name_hint);
+        let base = crate::ir::string_to_pascal_case(name_hint);
         let name = if self.types.contains_key(&base) {
             self.generate_name(&base)
         } else {
@@ -200,7 +200,7 @@ impl SyntheticTypeRegistry {
         let variants = values
             .iter()
             .map(|v| EnumVariant {
-                name: crate::pipeline::type_converter::string_to_pascal_case(v),
+                name: crate::ir::string_to_pascal_case(v),
                 value: Some(crate::ir::EnumValue::Str(v.clone())),
                 data: None,
                 fields: vec![],

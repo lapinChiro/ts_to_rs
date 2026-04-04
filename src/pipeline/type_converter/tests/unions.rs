@@ -856,3 +856,225 @@ fn test_union_named_custom_not_prefixed() {
         other => panic!("expected Enum, got: {other:?}"),
     }
 }
+
+// --- find_discriminant_field (indirect via convert_type_alias) ---
+
+#[test]
+fn test_discriminated_union_duplicate_values_falls_through() {
+    // Two variants with the same discriminant value → not a valid discriminated union
+    let decl = parse_type_alias(
+        r#"type Dup = { kind: "same", x: number } | { kind: "same", y: string };"#,
+    );
+    let item = convert_type_alias(
+        &decl,
+        Visibility::Public,
+        &mut SyntheticTypeRegistry::new(),
+        &TypeRegistry::new(),
+    )
+    .unwrap();
+    // Should NOT produce a serde-tagged enum
+    if let Item::Enum { serde_tag, .. } = &item {
+        assert_eq!(
+            serde_tag, &None,
+            "duplicate discriminant values should not produce serde_tag"
+        );
+    }
+}
+
+#[test]
+fn test_discriminated_union_no_common_string_literal_field() {
+    // Members have no common field with string literal types
+    let decl = parse_type_alias(r#"type NoDisc = { x: number } | { y: string };"#);
+    let item = convert_type_alias(
+        &decl,
+        Visibility::Public,
+        &mut SyntheticTypeRegistry::new(),
+        &TypeRegistry::new(),
+    )
+    .unwrap();
+    if let Item::Enum { serde_tag, .. } = &item {
+        assert_eq!(
+            serde_tag, &None,
+            "no common string literal field should not produce serde_tag"
+        );
+    }
+}
+
+#[test]
+fn test_discriminated_union_three_member_valid() {
+    let decl = parse_type_alias(
+        r#"type Tri = { t: "a", x: number } | { t: "b", y: string } | { t: "c", z: boolean };"#,
+    );
+    let item = convert_type_alias(
+        &decl,
+        Visibility::Public,
+        &mut SyntheticTypeRegistry::new(),
+        &TypeRegistry::new(),
+    )
+    .unwrap();
+    match &item {
+        Item::Enum {
+            serde_tag,
+            variants,
+            ..
+        } => {
+            assert_eq!(serde_tag, &Some("t".to_string()));
+            assert_eq!(variants.len(), 3);
+            assert_eq!(variants[0].name, "A");
+            assert_eq!(variants[1].name, "B");
+            assert_eq!(variants[2].name, "C");
+        }
+        other => panic!("expected discriminated Enum, got: {other:?}"),
+    }
+}
+
+// --- convert_unsupported_union_member (indirect via convert_type_alias) ---
+
+#[test]
+fn test_union_with_function_type_produces_fn_variant() {
+    // `type U = string | ((x: number) => string)` → enum with String + Fn variants
+    let decl = parse_type_alias("type U = string | ((x: number) => string);");
+    let item = convert_type_alias(
+        &decl,
+        Visibility::Public,
+        &mut SyntheticTypeRegistry::new(),
+        &TypeRegistry::new(),
+    )
+    .unwrap();
+    match &item {
+        Item::Enum { variants, .. } => {
+            assert_eq!(variants.len(), 2);
+            assert_eq!(variants[0].name, "String");
+            assert_eq!(variants[1].name, "Fn");
+            match &variants[1].data {
+                Some(RustType::Fn {
+                    params,
+                    return_type,
+                }) => {
+                    assert_eq!(params.len(), 1);
+                    assert_eq!(params[0], RustType::F64);
+                    assert_eq!(return_type.as_ref(), &RustType::String);
+                }
+                other => panic!("expected Fn variant data, got: {other:?}"),
+            }
+        }
+        other => panic!("expected Enum, got: {other:?}"),
+    }
+}
+
+#[test]
+fn test_union_with_tuple_type_produces_tuple_variant() {
+    // `type U = string | [number, boolean]` → enum with String + Tuple variants
+    let decl = parse_type_alias("type U = string | [number, boolean];");
+    let item = convert_type_alias(
+        &decl,
+        Visibility::Public,
+        &mut SyntheticTypeRegistry::new(),
+        &TypeRegistry::new(),
+    )
+    .unwrap();
+    match &item {
+        Item::Enum { variants, .. } => {
+            assert_eq!(variants.len(), 2);
+            assert_eq!(variants[0].name, "String");
+            assert_eq!(variants[1].name, "Tuple");
+            assert_eq!(
+                variants[1].data,
+                Some(RustType::Tuple(vec![RustType::F64, RustType::Bool]))
+            );
+        }
+        other => panic!("expected Enum, got: {other:?}"),
+    }
+}
+
+#[test]
+fn test_union_with_object_literal_produces_other_variant() {
+    // Object literal in union falls to unsupported path when not all members are object types
+    // `type U = string | { x: number }` → string variant + struct-like handling
+    let decl = parse_type_alias("type U = string | { x: number };");
+    let item = convert_type_alias(
+        &decl,
+        Visibility::Public,
+        &mut SyntheticTypeRegistry::new(),
+        &TypeRegistry::new(),
+    )
+    .unwrap();
+    match &item {
+        Item::Enum { variants, .. } => {
+            assert_eq!(variants.len(), 2);
+            assert_eq!(variants[0].name, "String");
+            // The second variant gets the object type through the general union handler
+        }
+        other => panic!("expected Enum, got: {other:?}"),
+    }
+}
+
+// --- convert_fn_type_to_rust (indirect: param without type annotation gets skipped) ---
+
+#[test]
+fn test_union_fn_type_param_without_annotation_skipped() {
+    // In TS, a fn type param without annotation → skipped in convert_fn_type_to_rust
+    // `(x, y: string) => void` → only y is collected
+    let decl = parse_type_alias("type U = string | ((x, y: string) => void);");
+    let item = convert_type_alias(
+        &decl,
+        Visibility::Public,
+        &mut SyntheticTypeRegistry::new(),
+        &TypeRegistry::new(),
+    )
+    .unwrap();
+    match &item {
+        Item::Enum { variants, .. } => {
+            let fn_variant = variants.iter().find(|v| v.name == "Fn");
+            assert!(fn_variant.is_some(), "expected Fn variant");
+            match &fn_variant.unwrap().data {
+                Some(RustType::Fn {
+                    params,
+                    return_type,
+                }) => {
+                    // x has no type annotation → skipped; only y: string is collected
+                    assert_eq!(
+                        params.len(),
+                        1,
+                        "param without annotation should be skipped"
+                    );
+                    assert_eq!(params[0], RustType::String);
+                    assert_eq!(return_type.as_ref(), &RustType::Unit);
+                }
+                other => panic!("expected Fn data, got: {other:?}"),
+            }
+        }
+        other => panic!("expected Enum, got: {other:?}"),
+    }
+}
+
+#[test]
+fn test_union_fn_type_all_params_annotated() {
+    let decl = parse_type_alias("type U = string | ((a: number, b: boolean) => string);");
+    let item = convert_type_alias(
+        &decl,
+        Visibility::Public,
+        &mut SyntheticTypeRegistry::new(),
+        &TypeRegistry::new(),
+    )
+    .unwrap();
+    match &item {
+        Item::Enum { variants, .. } => {
+            let fn_variant = variants.iter().find(|v| v.name == "Fn");
+            assert!(fn_variant.is_some(), "expected Fn variant");
+            match &fn_variant.unwrap().data {
+                Some(RustType::Fn {
+                    params,
+                    return_type,
+                }) => {
+                    assert_eq!(params.len(), 2, "all annotated params should be collected");
+                    assert_eq!(params[0], RustType::F64);
+                    assert_eq!(params[1], RustType::Bool);
+                    assert_eq!(return_type.as_ref(), &RustType::String);
+                }
+                other => panic!("expected Fn data, got: {other:?}"),
+            }
+        }
+        other => panic!("expected Enum, got: {other:?}"),
+    }
+}

@@ -420,4 +420,357 @@ mod tests {
         .unwrap();
         assert_eq!(result, RustType::F64);
     }
+
+    // --- resolve_partial: Option double-wrap avoidance ---
+
+    #[test]
+    fn test_resolve_partial_already_option_field_no_double_wrap() {
+        let mut reg = TypeRegistry::new();
+        reg.register(
+            "Bar".to_string(),
+            TypeDef::Struct {
+                type_params: vec![],
+                fields: vec![
+                    FieldDef {
+                        name: "required_field".to_string(),
+                        ty: RustType::String,
+                        optional: false,
+                    },
+                    FieldDef {
+                        name: "optional_field".to_string(),
+                        ty: RustType::Option(Box::new(RustType::F64)),
+                        optional: true,
+                    },
+                ],
+                methods: HashMap::new(),
+                constructor: None,
+                call_signatures: vec![],
+                extends: vec![],
+                is_interface: false,
+            },
+        );
+        let mut syn = SyntheticTypeRegistry::new();
+        let result = resolve_partial(
+            &[TsTypeInfo::TypeRef {
+                name: "Bar".to_string(),
+                type_args: vec![],
+            }],
+            &reg,
+            &mut syn,
+        )
+        .unwrap();
+
+        assert_eq!(
+            result,
+            RustType::Named {
+                name: "PartialBar".to_string(),
+                type_args: vec![],
+            }
+        );
+
+        let syn_def = syn
+            .get("PartialBar")
+            .expect("PartialBar should be registered");
+        if let Item::Struct { fields, .. } = &syn_def.item {
+            // required_field → Option<String>
+            assert_eq!(fields[0].ty, RustType::Option(Box::new(RustType::String)));
+            // optional_field → Option<f64> (NOT Option<Option<f64>>)
+            assert_eq!(fields[1].ty, RustType::Option(Box::new(RustType::F64)));
+        } else {
+            panic!("expected Struct item");
+        }
+    }
+
+    #[test]
+    fn test_resolve_partial_nested_utility_partial_pick() {
+        let reg = make_registry_with_foo();
+        let mut syn = SyntheticTypeRegistry::new();
+        // Partial<Pick<Foo, "name">>
+        let result = resolve_partial(
+            &[TsTypeInfo::TypeRef {
+                name: "Pick".to_string(),
+                type_args: vec![
+                    TsTypeInfo::TypeRef {
+                        name: "Foo".to_string(),
+                        type_args: vec![],
+                    },
+                    TsTypeInfo::Literal(TsLiteralKind::String("name".to_string())),
+                ],
+            }],
+            &reg,
+            &mut syn,
+        )
+        .unwrap();
+
+        // Pick is resolved first, then Partial wraps its fields
+        match &result {
+            RustType::Named { name, .. } => {
+                assert!(
+                    name.contains("Partial"),
+                    "expected name containing 'Partial', got: {name}"
+                );
+            }
+            _ => panic!("expected Named, got: {result:?}"),
+        }
+    }
+
+    // --- resolve_required: Option unwrap ---
+
+    #[test]
+    fn test_resolve_required_unwraps_option_fields() {
+        let mut reg = TypeRegistry::new();
+        reg.register(
+            "Baz".to_string(),
+            TypeDef::Struct {
+                type_params: vec![],
+                fields: vec![
+                    FieldDef {
+                        name: "opt".to_string(),
+                        ty: RustType::Option(Box::new(RustType::String)),
+                        optional: true,
+                    },
+                    FieldDef {
+                        name: "req".to_string(),
+                        ty: RustType::F64,
+                        optional: false,
+                    },
+                ],
+                methods: HashMap::new(),
+                constructor: None,
+                call_signatures: vec![],
+                extends: vec![],
+                is_interface: false,
+            },
+        );
+        let mut syn = SyntheticTypeRegistry::new();
+        let result = resolve_required(
+            &[TsTypeInfo::TypeRef {
+                name: "Baz".to_string(),
+                type_args: vec![],
+            }],
+            &reg,
+            &mut syn,
+        )
+        .unwrap();
+
+        assert_eq!(
+            result,
+            RustType::Named {
+                name: "RequiredBaz".to_string(),
+                type_args: vec![],
+            }
+        );
+
+        let syn_def = syn
+            .get("RequiredBaz")
+            .expect("RequiredBaz should be registered");
+        if let Item::Struct { fields, .. } = &syn_def.item {
+            // opt: Option<String> → String
+            assert_eq!(fields[0].ty, RustType::String);
+            // req: f64 → f64 (unchanged)
+            assert_eq!(fields[1].ty, RustType::F64);
+        } else {
+            panic!("expected Struct item");
+        }
+    }
+
+    // --- resolve_pick / resolve_omit: union key, zero-result filter ---
+
+    #[test]
+    fn test_resolve_pick_union_key() {
+        let reg = make_registry_with_foo();
+        let mut syn = SyntheticTypeRegistry::new();
+        // Pick<Foo, "name" | "age">
+        let result = resolve_pick(
+            &[
+                TsTypeInfo::TypeRef {
+                    name: "Foo".to_string(),
+                    type_args: vec![],
+                },
+                TsTypeInfo::Union(vec![
+                    TsTypeInfo::Literal(TsLiteralKind::String("name".to_string())),
+                    TsTypeInfo::Literal(TsLiteralKind::String("age".to_string())),
+                ]),
+            ],
+            &reg,
+            &mut syn,
+        )
+        .unwrap();
+
+        match &result {
+            RustType::Named { name, .. } => {
+                assert!(name.starts_with("PickFoo"), "got: {name}");
+            }
+            _ => panic!("expected Named"),
+        }
+        // Both fields should be present
+        let syn_def = syn
+            .get(&match &result {
+                RustType::Named { name, .. } => name.clone(),
+                _ => unreachable!(),
+            })
+            .unwrap();
+        if let Item::Struct { fields, .. } = &syn_def.item {
+            assert_eq!(fields.len(), 2);
+            let names: Vec<&str> = fields.iter().map(|f| f.name.as_str()).collect();
+            assert!(names.contains(&"name"));
+            assert!(names.contains(&"age"));
+        } else {
+            panic!("expected Struct");
+        }
+    }
+
+    #[test]
+    fn test_resolve_pick_nonexistent_key_yields_empty_struct() {
+        let reg = make_registry_with_foo();
+        let mut syn = SyntheticTypeRegistry::new();
+        // Pick<Foo, "nonexistent">
+        let result = resolve_pick(
+            &[
+                TsTypeInfo::TypeRef {
+                    name: "Foo".to_string(),
+                    type_args: vec![],
+                },
+                TsTypeInfo::Literal(TsLiteralKind::String("nonexistent".to_string())),
+            ],
+            &reg,
+            &mut syn,
+        )
+        .unwrap();
+
+        match &result {
+            RustType::Named { name, .. } => {
+                let syn_def = syn.get(name).unwrap();
+                if let Item::Struct { fields, .. } = &syn_def.item {
+                    assert_eq!(fields.len(), 0, "no fields should match");
+                } else {
+                    panic!("expected Struct");
+                }
+            }
+            _ => panic!("expected Named"),
+        }
+    }
+
+    #[test]
+    fn test_resolve_omit_nonexistent_key_keeps_all_fields() {
+        let reg = make_registry_with_foo();
+        let mut syn = SyntheticTypeRegistry::new();
+        // Omit<Foo, "nonexistent"> — nothing to omit, all fields remain
+        let result = resolve_omit(
+            &[
+                TsTypeInfo::TypeRef {
+                    name: "Foo".to_string(),
+                    type_args: vec![],
+                },
+                TsTypeInfo::Literal(TsLiteralKind::String("nonexistent".to_string())),
+            ],
+            &reg,
+            &mut syn,
+        )
+        .unwrap();
+
+        match &result {
+            RustType::Named { name, .. } => {
+                let syn_def = syn.get(name).unwrap();
+                if let Item::Struct { fields, .. } = &syn_def.item {
+                    assert_eq!(fields.len(), 2, "all fields should remain");
+                } else {
+                    panic!("expected Struct");
+                }
+            }
+            _ => panic!("expected Named"),
+        }
+    }
+
+    // --- resolve_inner_fields_with_conversion: direct search paths ---
+
+    #[test]
+    fn test_resolve_inner_fields_with_conversion_direct_success() {
+        let reg = make_registry_with_foo();
+        let mut syn = SyntheticTypeRegistry::new();
+        let result = resolve_inner_fields_with_conversion(
+            &[TsTypeInfo::TypeRef {
+                name: "Foo".to_string(),
+                type_args: vec![],
+            }],
+            &reg,
+            &mut syn,
+        )
+        .unwrap();
+
+        let (name, fields) = result.expect("should find Foo directly");
+        assert_eq!(name, "Foo");
+        assert_eq!(fields.len(), 2);
+    }
+
+    #[test]
+    fn test_resolve_inner_fields_with_conversion_not_found() {
+        let reg = TypeRegistry::new();
+        let mut syn = SyntheticTypeRegistry::new();
+        // Unknown type not in any registry
+        let result = resolve_inner_fields_with_conversion(
+            &[TsTypeInfo::TypeRef {
+                name: "Unknown".to_string(),
+                type_args: vec![],
+            }],
+            &reg,
+            &mut syn,
+        )
+        .unwrap();
+
+        assert!(result.is_none(), "unknown type should yield None");
+    }
+
+    #[test]
+    fn test_resolve_inner_fields_with_conversion_empty_args() {
+        let reg = TypeRegistry::new();
+        let mut syn = SyntheticTypeRegistry::new();
+        let result = resolve_inner_fields_with_conversion(&[], &reg, &mut syn).unwrap();
+        assert!(result.is_none(), "empty type_args should yield None");
+    }
+
+    // --- extract_string_keys ---
+
+    #[test]
+    fn test_extract_string_keys_single_literal() {
+        let keys = extract_string_keys(&TsTypeInfo::Literal(TsLiteralKind::String(
+            "hello".to_string(),
+        )));
+        assert_eq!(keys, vec!["hello".to_string()]);
+    }
+
+    #[test]
+    fn test_extract_string_keys_union_recursion() {
+        let keys = extract_string_keys(&TsTypeInfo::Union(vec![
+            TsTypeInfo::Literal(TsLiteralKind::String("a".to_string())),
+            TsTypeInfo::Literal(TsLiteralKind::String("b".to_string())),
+            TsTypeInfo::Literal(TsLiteralKind::String("c".to_string())),
+        ]));
+        assert_eq!(keys, vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn test_extract_string_keys_non_string_returns_empty() {
+        let keys = extract_string_keys(&TsTypeInfo::Number);
+        assert!(keys.is_empty());
+    }
+
+    // --- resolve_non_nullable ---
+
+    #[test]
+    fn test_resolve_non_nullable_non_option_passthrough() {
+        let reg = TypeRegistry::new();
+        let mut syn = SyntheticTypeRegistry::new();
+        // NonNullable<string> → String (no Option to strip)
+        let result = resolve_non_nullable(&[TsTypeInfo::String], &reg, &mut syn).unwrap();
+        assert_eq!(result, RustType::String);
+    }
+
+    #[test]
+    fn test_resolve_non_nullable_error_on_empty_args() {
+        let reg = TypeRegistry::new();
+        let mut syn = SyntheticTypeRegistry::new();
+        let result = resolve_non_nullable(&[], &reg, &mut syn);
+        assert!(result.is_err(), "empty args should error");
+    }
 }

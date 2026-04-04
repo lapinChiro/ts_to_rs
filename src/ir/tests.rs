@@ -530,6 +530,63 @@ fn test_sanitize_field_name_keyword_not_escaped() {
     assert_eq!(sanitize_field_name("type"), "type");
 }
 
+// -- sanitize_rust_type_name tests --
+
+#[test]
+fn test_sanitize_rust_type_name_prefixes_prelude_types() {
+    assert_eq!(sanitize_rust_type_name("Result"), "TsResult");
+    assert_eq!(sanitize_rust_type_name("Option"), "TsOption");
+    assert_eq!(sanitize_rust_type_name("String"), "TsString");
+    assert_eq!(sanitize_rust_type_name("Vec"), "TsVec");
+    assert_eq!(sanitize_rust_type_name("Box"), "TsBox");
+    assert_eq!(sanitize_rust_type_name("Some"), "TsSome");
+    assert_eq!(sanitize_rust_type_name("None"), "TsNone");
+    assert_eq!(sanitize_rust_type_name("Ok"), "TsOk");
+    assert_eq!(sanitize_rust_type_name("Err"), "TsErr");
+    assert_eq!(sanitize_rust_type_name("Self"), "TsSelf");
+}
+
+#[test]
+fn test_sanitize_rust_type_name_preserves_non_prelude() {
+    assert_eq!(sanitize_rust_type_name("MyType"), "MyType");
+    assert_eq!(sanitize_rust_type_name("Context"), "Context");
+    assert_eq!(sanitize_rust_type_name("User"), "User");
+    assert_eq!(sanitize_rust_type_name("ResultType"), "ResultType");
+}
+
+// -- string_to_pascal_case tests --
+
+#[test]
+fn test_string_to_pascal_case_empty_string() {
+    assert_eq!(string_to_pascal_case(""), "");
+}
+
+#[test]
+fn test_string_to_pascal_case_special_chars_only() {
+    assert_eq!(string_to_pascal_case("---"), "");
+}
+
+#[test]
+fn test_string_to_pascal_case_single_char() {
+    assert_eq!(string_to_pascal_case("a"), "A");
+}
+
+#[test]
+fn test_string_to_pascal_case_consecutive_delimiters() {
+    assert_eq!(string_to_pascal_case("foo--bar"), "FooBar");
+}
+
+#[test]
+fn test_string_to_pascal_case_already_pascal_lowercases_segments() {
+    // "FooBar" has no delimiter → treated as single segment → lowercased then capitalized
+    assert_eq!(string_to_pascal_case("FooBar"), "Foobar");
+}
+
+#[test]
+fn test_string_to_pascal_case_all_caps_with_underscore() {
+    assert_eq!(string_to_pascal_case("FOO_BAR"), "FooBar");
+}
+
 // -- camel_to_snake tests --
 
 #[test]

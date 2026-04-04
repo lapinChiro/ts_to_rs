@@ -18,8 +18,8 @@ mod intersection;
 mod union;
 mod utility;
 
+use crate::ir::sanitize_rust_type_name;
 use crate::ir::RustType;
-use crate::pipeline::type_converter::sanitize_rust_type_name;
 use crate::pipeline::SyntheticTypeRegistry;
 use crate::registry::{
     ConstElement, ConstField, FieldDef, MethodSignature, ParamDef, TypeDef, TypeRegistry,
@@ -328,7 +328,7 @@ fn is_symbol_filter_noop(name_type: &TsTypeInfo, param_name: &str) -> bool {
 }
 
 /// identity mapped type `{ [K in keyof T]: T[K] }` → `T` の簡約を試みる。
-fn try_simplify_identity_mapped(
+pub(super) fn try_simplify_identity_mapped(
     _type_param: &str,
     constraint: &TsTypeInfo,
     value: Option<&TsTypeInfo>,
@@ -513,7 +513,7 @@ pub fn resolve_typedef(
             // string literal union / DU: raw 文字列を PascalCase に変換
             let (pascal_variants, pascal_string_values, pascal_variant_fields) =
                 if !string_values.is_empty() {
-                    use crate::pipeline::type_converter::string_to_pascal_case;
+                    use crate::ir::string_to_pascal_case;
                     let pv: Vec<String> = variants
                         .iter()
                         .map(|v| {
@@ -1105,6 +1105,247 @@ mod tests {
         } else {
             panic!("expected Enum");
         }
+    }
+
+    // ── resolve_keyof ──
+
+    #[test]
+    fn resolve_keyof_type_ref_not_in_registry_falls_back_to_string() {
+        let reg = TypeRegistry::new();
+        let mut syn = SyntheticTypeRegistry::new();
+        // keyof UnknownType → String フォールバック
+        let info = TsTypeInfo::KeyOf(Box::new(TsTypeInfo::TypeRef {
+            name: "UnknownType".to_string(),
+            type_args: vec![],
+        }));
+        assert_eq!(
+            resolve_ts_type(&info, &reg, &mut syn).unwrap(),
+            RustType::String
+        );
+    }
+
+    // ── resolve_type_query ──
+
+    #[test]
+    fn resolve_type_query_function_variant() {
+        let mut reg = TypeRegistry::new();
+        let mut syn = SyntheticTypeRegistry::new();
+        reg.register(
+            "myFunc".to_string(),
+            TypeDef::Function {
+                type_params: vec![],
+                params: vec![ParamDef {
+                    name: "x".to_string(),
+                    ty: RustType::String,
+                    optional: false,
+                    has_default: false,
+                }],
+                return_type: Some(RustType::F64),
+                has_rest: false,
+            },
+        );
+        let info = TsTypeInfo::TypeQuery("myFunc".to_string());
+        assert_eq!(
+            resolve_ts_type(&info, &reg, &mut syn).unwrap(),
+            RustType::Fn {
+                params: vec![RustType::String],
+                return_type: Box::new(RustType::F64),
+            }
+        );
+    }
+
+    #[test]
+    fn resolve_type_query_enum_variant() {
+        let mut reg = TypeRegistry::new();
+        let mut syn = SyntheticTypeRegistry::new();
+        reg.register(
+            "Color".to_string(),
+            TypeDef::Enum {
+                type_params: vec![],
+                variants: vec!["Red".to_string()],
+                string_values: std::collections::HashMap::new(),
+                tag_field: None,
+                variant_fields: std::collections::HashMap::new(),
+            },
+        );
+        let info = TsTypeInfo::TypeQuery("Color".to_string());
+        assert_eq!(
+            resolve_ts_type(&info, &reg, &mut syn).unwrap(),
+            RustType::Named {
+                name: "Color".to_string(),
+                type_args: vec![],
+            }
+        );
+    }
+
+    // ── is_symbol_filter_noop (tested indirectly via resolve_ts_type + Mapped) ──
+
+    #[test]
+    fn is_symbol_filter_noop_valid_pattern_allows_identity() {
+        // { [K in keyof T as K extends symbol ? never : K]: T[K] } → T
+        let reg = TypeRegistry::new();
+        let mut syn = SyntheticTypeRegistry::new();
+        let info = TsTypeInfo::Mapped {
+            type_param: "K".to_string(),
+            constraint: Box::new(TsTypeInfo::KeyOf(Box::new(TsTypeInfo::TypeRef {
+                name: "Foo".to_string(),
+                type_args: vec![],
+            }))),
+            value: Some(Box::new(TsTypeInfo::IndexedAccess {
+                object: Box::new(TsTypeInfo::TypeRef {
+                    name: "Foo".to_string(),
+                    type_args: vec![],
+                }),
+                index: Box::new(TsTypeInfo::TypeRef {
+                    name: "K".to_string(),
+                    type_args: vec![],
+                }),
+            })),
+            has_readonly: false,
+            has_optional: false,
+            name_type: Some(Box::new(TsTypeInfo::Conditional {
+                check: Box::new(TsTypeInfo::TypeRef {
+                    name: "K".to_string(),
+                    type_args: vec![],
+                }),
+                extends: Box::new(TsTypeInfo::Symbol),
+                true_type: Box::new(TsTypeInfo::Never),
+                false_type: Box::new(TsTypeInfo::TypeRef {
+                    name: "K".to_string(),
+                    type_args: vec![],
+                }),
+            })),
+        };
+        // noop symbol filter → identity 簡約成功 → Named("Foo")
+        assert_eq!(
+            resolve_ts_type(&info, &reg, &mut syn).unwrap(),
+            RustType::Named {
+                name: "Foo".to_string(),
+                type_args: vec![],
+            }
+        );
+    }
+
+    #[test]
+    fn is_symbol_filter_noop_check_type_mismatch_blocks_identity() {
+        // check が K ではなく X → noop ではない → identity 簡約されず HashMap フォールバック
+        let reg = TypeRegistry::new();
+        let mut syn = SyntheticTypeRegistry::new();
+        let info = TsTypeInfo::Mapped {
+            type_param: "K".to_string(),
+            constraint: Box::new(TsTypeInfo::String),
+            value: Some(Box::new(TsTypeInfo::Number)),
+            has_readonly: false,
+            has_optional: false,
+            name_type: Some(Box::new(TsTypeInfo::Conditional {
+                check: Box::new(TsTypeInfo::TypeRef {
+                    name: "X".to_string(), // K ではない
+                    type_args: vec![],
+                }),
+                extends: Box::new(TsTypeInfo::Symbol),
+                true_type: Box::new(TsTypeInfo::Never),
+                false_type: Box::new(TsTypeInfo::TypeRef {
+                    name: "K".to_string(),
+                    type_args: vec![],
+                }),
+            })),
+        };
+        assert_eq!(
+            resolve_ts_type(&info, &reg, &mut syn).unwrap(),
+            RustType::Named {
+                name: "HashMap".to_string(),
+                type_args: vec![RustType::String, RustType::F64],
+            }
+        );
+    }
+
+    #[test]
+    fn is_symbol_filter_noop_extends_not_symbol_blocks_identity() {
+        // extends が Symbol ではなく String → noop ではない
+        let reg = TypeRegistry::new();
+        let mut syn = SyntheticTypeRegistry::new();
+        let info = TsTypeInfo::Mapped {
+            type_param: "K".to_string(),
+            constraint: Box::new(TsTypeInfo::String),
+            value: Some(Box::new(TsTypeInfo::Number)),
+            has_readonly: false,
+            has_optional: false,
+            name_type: Some(Box::new(TsTypeInfo::Conditional {
+                check: Box::new(TsTypeInfo::TypeRef {
+                    name: "K".to_string(),
+                    type_args: vec![],
+                }),
+                extends: Box::new(TsTypeInfo::String), // Symbol ではない
+                true_type: Box::new(TsTypeInfo::Never),
+                false_type: Box::new(TsTypeInfo::TypeRef {
+                    name: "K".to_string(),
+                    type_args: vec![],
+                }),
+            })),
+        };
+        assert_eq!(
+            resolve_ts_type(&info, &reg, &mut syn).unwrap(),
+            RustType::Named {
+                name: "HashMap".to_string(),
+                type_args: vec![RustType::String, RustType::F64],
+            }
+        );
+    }
+
+    #[test]
+    fn is_symbol_filter_noop_true_type_not_never_blocks_identity() {
+        // true_type が Never ではなく String → noop ではない
+        let reg = TypeRegistry::new();
+        let mut syn = SyntheticTypeRegistry::new();
+        let info = TsTypeInfo::Mapped {
+            type_param: "K".to_string(),
+            constraint: Box::new(TsTypeInfo::String),
+            value: Some(Box::new(TsTypeInfo::Number)),
+            has_readonly: false,
+            has_optional: false,
+            name_type: Some(Box::new(TsTypeInfo::Conditional {
+                check: Box::new(TsTypeInfo::TypeRef {
+                    name: "K".to_string(),
+                    type_args: vec![],
+                }),
+                extends: Box::new(TsTypeInfo::Symbol),
+                true_type: Box::new(TsTypeInfo::String), // Never ではない
+                false_type: Box::new(TsTypeInfo::TypeRef {
+                    name: "K".to_string(),
+                    type_args: vec![],
+                }),
+            })),
+        };
+        assert_eq!(
+            resolve_ts_type(&info, &reg, &mut syn).unwrap(),
+            RustType::Named {
+                name: "HashMap".to_string(),
+                type_args: vec![RustType::String, RustType::F64],
+            }
+        );
+    }
+
+    // ── resolve_mapped with value None ──
+
+    #[test]
+    fn resolve_mapped_value_none_falls_back_to_hashmap_any() {
+        let reg = TypeRegistry::new();
+        let mut syn = SyntheticTypeRegistry::new();
+        let info = TsTypeInfo::Mapped {
+            type_param: "K".to_string(),
+            constraint: Box::new(TsTypeInfo::String),
+            value: None,
+            has_readonly: false,
+            has_optional: false,
+            name_type: None,
+        };
+        assert_eq!(
+            resolve_ts_type(&info, &reg, &mut syn).unwrap(),
+            RustType::Named {
+                name: "HashMap".to_string(),
+                type_args: vec![RustType::String, RustType::Any],
+            }
+        );
     }
 
     #[test]
