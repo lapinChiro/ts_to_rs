@@ -1,18 +1,17 @@
 ---
 source: tests/integration_test.rs
-assertion_line: 141
 expression: output
 ---
+#[derive(Debug, Clone, PartialEq)]
+pub enum F64OrString {
+    String(String),
+    F64(f64),
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum InstanceofAnyXType {
     MyError(MyError),
     Other(serde_json::Value),
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum StringOrF64 {
-    String(String),
-    F64(f64),
 }
 
 fn truthyCheck(x: Option<String>) {
@@ -65,12 +64,12 @@ fn nullCheck(x: Option<String>) -> String {
     x
 }
 
-fn typeofNarrowing(x: StringOrF64) -> String {
+fn typeofNarrowing(x: F64OrString) -> String {
     let x = match x {
-    StringOrF64::String(x) => {
+    F64OrString::String(x) => {
         return x;
     }
-    StringOrF64::F64(x) => {
+    F64OrString::F64(x) => {
         x
     }
 };

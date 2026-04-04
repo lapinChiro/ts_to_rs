@@ -400,7 +400,7 @@ pub(super) fn convert_conditional_type(
         // Generate a stub trait for the container (e.g., `pub trait Promise { type Output; }`)
         synthetic.push_item(
             trait_name.clone(),
-            crate::pipeline::SyntheticTypeKind::UnionEnum, // stub trait
+            crate::pipeline::SyntheticTypeKind::Trait,
             Item::Trait {
                 vis: Visibility::Public,
                 name: trait_name,

@@ -407,7 +407,7 @@ pub(super) fn try_convert_intersection_type(
         // If base members had method signatures, generate an impl block for the enum
         if !methods.is_empty() {
             synthetic.push_item(
-                format!("{enum_name}__impl"),
+                format!("{enum_name}Impl"),
                 crate::pipeline::SyntheticTypeKind::ImplBlock,
                 Item::Impl {
                     struct_name: enum_name.clone(),
@@ -480,7 +480,7 @@ pub(super) fn try_convert_intersection_type(
     // If intersection contains method signatures, generate an impl block
     if !methods.is_empty() {
         synthetic.push_item(
-            format!("{struct_name}__impl"),
+            format!("{struct_name}Impl"),
             crate::pipeline::SyntheticTypeKind::ImplBlock,
             Item::Impl {
                 struct_name: struct_name.clone(),

@@ -4,12 +4,6 @@ expression: output
 ---
 #[derive(Debug, Clone, PartialEq)]
 pub enum F64OrString {
-    F64(f64),
-    String(String),
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum StringOrF64 {
     String(String),
     F64(f64),
 }
@@ -48,6 +42,6 @@ fn maybeValue(flag: bool) -> Option<String> {
     if flag { Some("value".to_string()) } else { None }
 }
 
-fn toDisplay(x: f64) -> StringOrF64 {
+fn toDisplay(x: f64) -> F64OrString {
     if x > 0.0 { x } else { "negative" }
 }

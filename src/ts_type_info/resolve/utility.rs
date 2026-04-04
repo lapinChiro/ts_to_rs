@@ -45,16 +45,18 @@ pub(crate) fn resolve_partial(
         .collect();
 
     let name = format!("Partial{inner_name}");
-    synthetic.push_item(
-        name.clone(),
-        SyntheticTypeKind::InlineStruct,
-        Item::Struct {
-            vis: Visibility::Public,
-            name: name.clone(),
-            fields: partial_fields,
-            type_params: vec![],
-        },
-    );
+    if synthetic.get(&name).is_none() {
+        synthetic.push_item(
+            name.clone(),
+            SyntheticTypeKind::InlineStruct,
+            Item::Struct {
+                vis: Visibility::Public,
+                name: name.clone(),
+                fields: partial_fields,
+                type_params: vec![],
+            },
+        );
+    }
 
     Ok(RustType::Named {
         name,
@@ -95,16 +97,18 @@ pub(crate) fn resolve_required(
         .collect();
 
     let name = format!("Required{inner_name}");
-    synthetic.push_item(
-        name.clone(),
-        SyntheticTypeKind::InlineStruct,
-        Item::Struct {
-            vis: Visibility::Public,
-            name: name.clone(),
-            fields: required_fields,
-            type_params: vec![],
-        },
-    );
+    if synthetic.get(&name).is_none() {
+        synthetic.push_item(
+            name.clone(),
+            SyntheticTypeKind::InlineStruct,
+            Item::Struct {
+                vis: Visibility::Public,
+                name: name.clone(),
+                fields: required_fields,
+                type_params: vec![],
+            },
+        );
+    }
 
     Ok(RustType::Named {
         name,
@@ -138,22 +142,22 @@ pub(crate) fn resolve_pick(
         })
         .collect();
 
-    let keys_suffix: String = keys
-        .iter()
-        .map(|k| capitalize_first(k))
-        .collect::<Vec<_>>()
-        .join("");
+    let mut sorted_keys: Vec<String> = keys.iter().map(|k| capitalize_first(k)).collect();
+    sorted_keys.sort();
+    let keys_suffix: String = sorted_keys.join("");
     let name = format!("Pick{inner_name}{keys_suffix}");
-    synthetic.push_item(
-        name.clone(),
-        SyntheticTypeKind::InlineStruct,
-        Item::Struct {
-            vis: Visibility::Public,
-            name: name.clone(),
-            fields: picked_fields,
-            type_params: vec![],
-        },
-    );
+    if synthetic.get(&name).is_none() {
+        synthetic.push_item(
+            name.clone(),
+            SyntheticTypeKind::InlineStruct,
+            Item::Struct {
+                vis: Visibility::Public,
+                name: name.clone(),
+                fields: picked_fields,
+                type_params: vec![],
+            },
+        );
+    }
 
     Ok(RustType::Named {
         name,
@@ -187,22 +191,22 @@ pub(crate) fn resolve_omit(
         })
         .collect();
 
-    let keys_suffix: String = keys
-        .iter()
-        .map(|k| capitalize_first(k))
-        .collect::<Vec<_>>()
-        .join("");
+    let mut sorted_keys: Vec<String> = keys.iter().map(|k| capitalize_first(k)).collect();
+    sorted_keys.sort();
+    let keys_suffix: String = sorted_keys.join("");
     let name = format!("Omit{inner_name}{keys_suffix}");
-    synthetic.push_item(
-        name.clone(),
-        SyntheticTypeKind::InlineStruct,
-        Item::Struct {
-            vis: Visibility::Public,
-            name: name.clone(),
-            fields: omitted_fields,
-            type_params: vec![],
-        },
-    );
+    if synthetic.get(&name).is_none() {
+        synthetic.push_item(
+            name.clone(),
+            SyntheticTypeKind::InlineStruct,
+            Item::Struct {
+                vis: Visibility::Public,
+                name: name.clone(),
+                fields: omitted_fields,
+                type_params: vec![],
+            },
+        );
+    }
 
     Ok(RustType::Named {
         name,
@@ -772,5 +776,69 @@ mod tests {
         let mut syn = SyntheticTypeRegistry::new();
         let result = resolve_non_nullable(&[], &reg, &mut syn);
         assert!(result.is_err(), "empty args should error");
+    }
+
+    #[test]
+    fn pick_keys_suffix_is_sorted() {
+        let reg = make_registry_with_foo();
+        let mut syn = SyntheticTypeRegistry::new();
+        // Pick<Foo, "name" | "age"> — keys in source order: name, age
+        let result = resolve_pick(
+            &[
+                TsTypeInfo::TypeRef {
+                    name: "Foo".to_string(),
+                    type_args: vec![],
+                },
+                TsTypeInfo::Union(vec![
+                    TsTypeInfo::Literal(TsLiteralKind::String("name".to_string())),
+                    TsTypeInfo::Literal(TsLiteralKind::String("age".to_string())),
+                ]),
+            ],
+            &reg,
+            &mut syn,
+        )
+        .unwrap();
+        // Keys should be sorted: Age before Name
+        match result {
+            RustType::Named { name, .. } => {
+                assert_eq!(
+                    name, "PickFooAgeName",
+                    "keys_suffix should be sorted alphabetically"
+                );
+            }
+            _ => panic!("expected Named"),
+        }
+    }
+
+    #[test]
+    fn omit_keys_suffix_is_sorted() {
+        let reg = make_registry_with_foo();
+        let mut syn = SyntheticTypeRegistry::new();
+        // Omit<Foo, "name" | "age"> — keys in source order: name, age
+        let result = resolve_omit(
+            &[
+                TsTypeInfo::TypeRef {
+                    name: "Foo".to_string(),
+                    type_args: vec![],
+                },
+                TsTypeInfo::Union(vec![
+                    TsTypeInfo::Literal(TsLiteralKind::String("name".to_string())),
+                    TsTypeInfo::Literal(TsLiteralKind::String("age".to_string())),
+                ]),
+            ],
+            &reg,
+            &mut syn,
+        )
+        .unwrap();
+        // Keys should be sorted: Age before Name
+        match result {
+            RustType::Named { name, .. } => {
+                assert_eq!(
+                    name, "OmitFooAgeName",
+                    "keys_suffix should be sorted alphabetically"
+                );
+            }
+            _ => panic!("expected Named"),
+        }
     }
 }

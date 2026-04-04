@@ -286,11 +286,11 @@ function bar() { const x = tag`hello`; }
             "function should be converted, got: {output}"
         );
         assert!(
-            output.contains("x: StringOrF64"),
+            output.contains("x: F64OrString"),
             "non-nullable union param should reference generated enum, got: {output}"
         );
         assert!(
-            output.contains("enum StringOrF64"),
+            output.contains("enum F64OrString"),
             "generated enum should be in output, got: {output}"
         );
     }
@@ -308,7 +308,7 @@ function bar() { const x = tag`hello`; }
             "supported param should have normal type, got: {output}"
         );
         assert!(
-            output.contains("b: StringOrF64"),
+            output.contains("b: F64OrString"),
             "non-nullable union param should reference generated enum, got: {output}"
         );
     }
@@ -322,7 +322,7 @@ function bar() { const x = tag`hello`; }
             "function should be converted, got: {output}"
         );
         assert!(
-            output.contains("-> StringOrF64"),
+            output.contains("-> F64OrString"),
             "non-nullable union return type should reference generated enum, got: {output}"
         );
     }

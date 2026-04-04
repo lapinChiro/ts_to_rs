@@ -4,8 +4,8 @@
 //! nullable union → Option<T>、string literal union → String、
 //! 複数型 union → synthetic enum 登録。
 
-use crate::ir::{EnumVariant, Item, RustType, Visibility};
-use crate::pipeline::synthetic_registry::{variant_name_for_type, SyntheticTypeKind};
+use crate::ir::RustType;
+use crate::pipeline::synthetic_registry::variant_name_for_type;
 use crate::pipeline::SyntheticTypeRegistry;
 use crate::registry::TypeRegistry;
 use crate::ts_type_info::{TsLiteralKind, TsTypeInfo};
@@ -46,6 +46,9 @@ pub(crate) fn resolve_union(
 }
 
 /// 複数メンバーの union を解決する。
+///
+/// 前処理（resolve + Promise アンラップ + 重複バリアント名除去）を行った後、
+/// `register_union` に委譲してソート済み命名 + dedup を適用する。
 fn resolve_multi_member_union(
     members: &[&TsTypeInfo],
     reg: &TypeRegistry,
@@ -59,20 +62,19 @@ fn resolve_multi_member_union(
         return Ok(RustType::String);
     }
 
-    // 各メンバーを解決して synthetic union enum を登録
+    // 前処理: 解決 + Promise アンラップ + 重複バリアント名除去
     let mut resolved = Vec::new();
-    let mut name_parts = Vec::new();
+    let mut seen_variant_names = Vec::new();
 
     for member in members {
         let ty = resolve_ts_type(member, reg, synthetic)?;
         let ty = unwrap_promise_result(ty);
 
         let variant_name = variant_name_for_type(&ty);
-        // 重複バリアント名をスキップ
-        if name_parts.contains(&variant_name) {
+        if seen_variant_names.contains(&variant_name) {
             continue;
         }
-        name_parts.push(variant_name);
+        seen_variant_names.push(variant_name);
         resolved.push(ty);
     }
 
@@ -80,31 +82,11 @@ fn resolve_multi_member_union(
         return Ok(resolved.into_iter().next().expect("len == 1"));
     }
 
-    // AST 順でバリアント名を結合した enum 名を生成
-    let enum_name = name_parts.join("Or");
-
-    // バリアントを構築
-    let variants = resolved
-        .iter()
-        .map(|ty| EnumVariant {
-            name: variant_name_for_type(ty),
-            value: None,
-            data: Some(ty.clone()),
-            fields: vec![],
-        })
-        .collect();
-
-    let item = Item::Enum {
-        vis: Visibility::Public,
-        name: enum_name.clone(),
-        serde_tag: None,
-        variants,
-    };
-
-    synthetic.push_item(enum_name.clone(), SyntheticTypeKind::UnionEnum, item);
+    // register_union に委譲（ソート済み命名 + dedup）
+    let name = synthetic.register_union(&resolved);
 
     Ok(RustType::Named {
-        name: enum_name,
+        name,
         type_args: vec![],
     })
 }
@@ -216,5 +198,54 @@ mod tests {
             resolve_union(&members, &reg, &mut syn).unwrap(),
             RustType::String
         );
+    }
+
+    #[test]
+    fn union_name_order_independent() {
+        let reg = TypeRegistry::new();
+        let mut syn = SyntheticTypeRegistry::new();
+        // string | number と number | string は同一名を返す
+        let members1 = vec![TsTypeInfo::String, TsTypeInfo::Number];
+        let members2 = vec![TsTypeInfo::Number, TsTypeInfo::String];
+        let result1 = resolve_union(&members1, &reg, &mut syn).unwrap();
+        let result2 = resolve_union(&members2, &reg, &mut syn).unwrap();
+        assert_eq!(
+            result1, result2,
+            "same union in different order should produce same name"
+        );
+    }
+
+    #[test]
+    fn union_dedup_via_register_union() {
+        let reg = TypeRegistry::new();
+        let mut syn = SyntheticTypeRegistry::new();
+        // 同一 union を 2 回登録しても synthetic type は 1 つだけ
+        let members = vec![TsTypeInfo::String, TsTypeInfo::Number];
+        let _result1 = resolve_union(&members, &reg, &mut syn).unwrap();
+        let _result2 = resolve_union(&members, &reg, &mut syn).unwrap();
+        let enum_count = syn
+            .all_items()
+            .iter()
+            .filter(|item| matches!(item, crate::ir::Item::Enum { .. }))
+            .count();
+        assert_eq!(
+            enum_count, 1,
+            "duplicate union should be deduped to single enum"
+        );
+    }
+
+    #[test]
+    fn union_name_is_sorted() {
+        let reg = TypeRegistry::new();
+        let mut syn = SyntheticTypeRegistry::new();
+        // string | number → F64OrString (F64 < String alphabetically)
+        let members = vec![TsTypeInfo::String, TsTypeInfo::Number];
+        let result = resolve_union(&members, &reg, &mut syn).unwrap();
+        match result {
+            RustType::Named { name, .. } => {
+                assert_eq!(name, "F64OrString");
+            }
+            _ => panic!("expected Named type"),
+        }
     }
 }

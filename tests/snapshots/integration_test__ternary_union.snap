@@ -8,13 +8,7 @@ pub enum F64OrString {
     F64(f64),
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum StringOrF64 {
-    String(String),
-    F64(f64),
-}
-
-fn getStringOrNumber(flag: bool) -> StringOrF64 {
+fn getStringOrNumber(flag: bool) -> F64OrString {
     if flag { "hello" } else { 42.0 }
 }
 

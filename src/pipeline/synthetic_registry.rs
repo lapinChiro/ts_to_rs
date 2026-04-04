@@ -45,7 +45,7 @@ pub struct SyntheticTypeDef {
 /// Classification of synthetic types.
 #[derive(Debug)]
 pub enum SyntheticTypeKind {
-    /// A union type enum (e.g., `string | number` → `StringOrF64`).
+    /// A union type enum (e.g., `string | number` → `F64OrString`).
     UnionEnum,
     /// An any-type materialization enum (e.g., `ProcessDataInputType`).
     AnyEnum,
@@ -53,6 +53,8 @@ pub enum SyntheticTypeKind {
     InlineStruct,
     /// An impl block for a synthetic or named struct.
     ImplBlock,
+    /// A stub trait (e.g., conditional type infer pattern → `Promise` trait).
+    Trait,
 }
 
 impl SyntheticTypeRegistry {
@@ -72,6 +74,10 @@ impl SyntheticTypeRegistry {
     ///
     /// If the same combination of member types has been registered before,
     /// returns the existing name (idempotent deduplication).
+    ///
+    /// Automatically deduplicates member types that produce the same variant name
+    /// (e.g., `Named("Foo", [String])` and `Named("ns::Foo", [])` both produce `"Foo"`
+    /// after path extraction). The first occurrence wins.
     pub fn register_union(&mut self, member_types: &[RustType]) -> String {
         let signature = union_signature(member_types);
 
@@ -79,8 +85,20 @@ impl SyntheticTypeRegistry {
             return existing_name.clone();
         }
 
-        let name = generate_union_name(member_types);
-        let variants = member_types
+        // Deduplicate by variant name to prevent invalid Rust enums with
+        // duplicate variant identifiers. First occurrence wins.
+        let mut deduped: Vec<RustType> = Vec::new();
+        let mut seen_names: Vec<String> = Vec::new();
+        for ty in member_types {
+            let vname = variant_name_for_type(ty);
+            if !seen_names.contains(&vname) {
+                seen_names.push(vname);
+                deduped.push(ty.clone());
+            }
+        }
+
+        let name = generate_union_name(&deduped);
+        let variants = deduped
             .iter()
             .map(|ty| EnumVariant {
                 name: variant_name_for_type(ty),
@@ -121,6 +139,10 @@ impl SyntheticTypeRegistry {
             to_pascal_case(function_name),
             to_pascal_case(param_name)
         );
+
+        if let Some(existing) = self.types.get(&name) {
+            return existing.name.clone();
+        }
 
         let item = Item::Enum {
             vis: Visibility::Public,
@@ -450,6 +472,10 @@ fn generate_union_name(member_types: &[RustType]) -> String {
 
 /// Returns a variant name for a RustType (e.g., `String` → `String`, `f64` → `F64`).
 ///
+/// For compound types, recursively includes inner type information to avoid
+/// name collisions (e.g., `Named("Foo", [String])` → `"FooString"`,
+/// `Tuple([String, F64])` → `"TupleStringF64"`).
+///
 /// For path-qualified types (e.g., `serde_json::Value`), extracts the last segment
 /// to produce a valid Rust identifier (e.g., `Value`).
 pub(crate) fn variant_name_for_type(ty: &RustType) -> String {
@@ -462,18 +488,41 @@ pub(crate) fn variant_name_for_type(ty: &RustType) -> String {
         RustType::Never => "Never".to_string(),
         RustType::Vec(inner) => format!("Vec{}", variant_name_for_type(inner)),
         RustType::Option(inner) => format!("Option{}", variant_name_for_type(inner)),
-        RustType::Named { name, .. } => match name.rsplit_once("::") {
-            Some((_, last)) => last.to_string(),
-            None => name.clone(),
-        },
+        RustType::Named { name, type_args } => {
+            let base = match name.rsplit_once("::") {
+                Some((_, last)) => last,
+                None => name.as_str(),
+            };
+            if type_args.is_empty() {
+                base.to_string()
+            } else {
+                let args: Vec<String> = type_args.iter().map(variant_name_for_type).collect();
+                format!("{base}{}", args.join(""))
+            }
+        }
         RustType::Ref(inner) => variant_name_for_type(inner),
         RustType::DynTrait(name) => match name.rsplit_once("::") {
             Some((_, last)) => last.to_string(),
             None => name.clone(),
         },
-        RustType::Fn { .. } => "Fn".to_string(),
-        RustType::Result { .. } => "Result".to_string(),
-        RustType::Tuple(_) => "Tuple".to_string(),
+        RustType::Fn { return_type, .. } => {
+            format!("Fn{}", variant_name_for_type(return_type))
+        }
+        RustType::Result { ok, err } => {
+            format!(
+                "Result{}{}",
+                variant_name_for_type(ok),
+                variant_name_for_type(err)
+            )
+        }
+        RustType::Tuple(elems) => {
+            if elems.is_empty() {
+                "Tuple".to_string()
+            } else {
+                let parts: Vec<String> = elems.iter().map(variant_name_for_type).collect();
+                format!("Tuple{}", parts.join(""))
+            }
+        }
     }
 }
 
@@ -1040,5 +1089,195 @@ mod tests {
             enum_count, 1,
             "merged registry should have 1 enum (deduped)"
         );
+    }
+
+    // --- Phase 1: variant_name_for_type type_args tests ---
+
+    #[test]
+    fn test_variant_name_named_with_type_args() {
+        let ty = RustType::Named {
+            name: "Foo".to_string(),
+            type_args: vec![RustType::String],
+        };
+        assert_eq!(variant_name_for_type(&ty), "FooString");
+    }
+
+    #[test]
+    fn test_variant_name_named_with_multiple_type_args() {
+        let ty = RustType::Named {
+            name: "Map".to_string(),
+            type_args: vec![RustType::String, RustType::F64],
+        };
+        assert_eq!(variant_name_for_type(&ty), "MapStringF64");
+    }
+
+    #[test]
+    fn test_variant_name_named_different_type_args_differ() {
+        let ty1 = RustType::Named {
+            name: "Foo".to_string(),
+            type_args: vec![RustType::String],
+        };
+        let ty2 = RustType::Named {
+            name: "Foo".to_string(),
+            type_args: vec![RustType::F64],
+        };
+        assert_ne!(
+            variant_name_for_type(&ty1),
+            variant_name_for_type(&ty2),
+            "different type_args should produce different variant names"
+        );
+    }
+
+    #[test]
+    fn test_variant_name_tuple_with_elements() {
+        let ty = RustType::Tuple(vec![RustType::String, RustType::F64]);
+        assert_eq!(variant_name_for_type(&ty), "TupleStringF64");
+    }
+
+    #[test]
+    fn test_variant_name_tuple_empty() {
+        let ty = RustType::Tuple(vec![]);
+        assert_eq!(variant_name_for_type(&ty), "Tuple");
+    }
+
+    #[test]
+    fn test_variant_name_tuple_different_elements_differ() {
+        let ty1 = RustType::Tuple(vec![RustType::String, RustType::F64]);
+        let ty2 = RustType::Tuple(vec![RustType::Bool]);
+        assert_ne!(variant_name_for_type(&ty1), variant_name_for_type(&ty2));
+    }
+
+    #[test]
+    fn test_variant_name_result() {
+        let ty = RustType::Result {
+            ok: Box::new(RustType::String),
+            err: Box::new(RustType::Any),
+        };
+        assert_eq!(variant_name_for_type(&ty), "ResultStringAny");
+    }
+
+    #[test]
+    fn test_variant_name_result_different_types_differ() {
+        let ty1 = RustType::Result {
+            ok: Box::new(RustType::String),
+            err: Box::new(RustType::Any),
+        };
+        let ty2 = RustType::Result {
+            ok: Box::new(RustType::F64),
+            err: Box::new(RustType::Any),
+        };
+        assert_ne!(variant_name_for_type(&ty1), variant_name_for_type(&ty2));
+    }
+
+    #[test]
+    fn test_variant_name_fn_includes_return_type() {
+        let ty = RustType::Fn {
+            params: vec![RustType::String],
+            return_type: Box::new(RustType::Bool),
+        };
+        assert_eq!(variant_name_for_type(&ty), "FnBool");
+    }
+
+    #[test]
+    fn test_variant_name_fn_different_return_types_differ() {
+        let ty1 = RustType::Fn {
+            params: vec![],
+            return_type: Box::new(RustType::Bool),
+        };
+        let ty2 = RustType::Fn {
+            params: vec![],
+            return_type: Box::new(RustType::String),
+        };
+        assert_ne!(variant_name_for_type(&ty1), variant_name_for_type(&ty2));
+    }
+
+    #[test]
+    fn test_union_name_no_collision_with_type_args() {
+        let mut reg = SyntheticTypeRegistry::new();
+        let name1 = reg.register_union(&[
+            RustType::Named {
+                name: "Foo".to_string(),
+                type_args: vec![RustType::String],
+            },
+            RustType::F64,
+        ]);
+        let name2 = reg.register_union(&[
+            RustType::Named {
+                name: "Foo".to_string(),
+                type_args: vec![RustType::F64],
+            },
+            RustType::F64,
+        ]);
+        assert_ne!(
+            name1, name2,
+            "unions with different type_args should have different names"
+        );
+    }
+
+    #[test]
+    fn test_register_union_deduplicates_variant_names() {
+        // Two different types that produce the same variant name after path extraction:
+        // "ns::Foo" and "Foo" both produce "Foo" via rsplit_once("::")
+        let mut reg = SyntheticTypeRegistry::new();
+        let name = reg.register_union(&[
+            RustType::Named {
+                name: "ns::Foo".to_string(),
+                type_args: vec![],
+            },
+            RustType::Named {
+                name: "Foo".to_string(),
+                type_args: vec![],
+            },
+            RustType::F64,
+        ]);
+        let def = reg.get(&name).unwrap();
+        match &def.item {
+            Item::Enum { variants, .. } => {
+                let names: Vec<&str> = variants.iter().map(|v| v.name.as_str()).collect();
+                // Should not have duplicate "Foo" variants
+                let unique_count = {
+                    let mut seen = vec![];
+                    for n in &names {
+                        if !seen.contains(n) {
+                            seen.push(n);
+                        }
+                    }
+                    seen.len()
+                };
+                assert_eq!(
+                    names.len(),
+                    unique_count,
+                    "register_union should deduplicate variant names, got: {names:?}"
+                );
+            }
+            _ => panic!("expected Item::Enum"),
+        }
+    }
+
+    #[test]
+    fn test_register_union_fn_same_return_type_deduped() {
+        // Two Fn types with same return type produce same variant name "FnBool"
+        let mut reg = SyntheticTypeRegistry::new();
+        let name = reg.register_union(&[
+            RustType::Fn {
+                params: vec![RustType::String],
+                return_type: Box::new(RustType::Bool),
+            },
+            RustType::Fn {
+                params: vec![RustType::F64],
+                return_type: Box::new(RustType::Bool),
+            },
+        ]);
+        let def = reg.get(&name).unwrap();
+        match &def.item {
+            Item::Enum { variants, .. } => {
+                assert_eq!(
+                    variants.len(),
+                    1,
+                    "Fn types with same return type should be deduped to single variant"
+                );
+            }
+            _ => panic!("expected Item::Enum"),
+        }
     }
 }

@@ -15,12 +15,6 @@ Tier 内の記載順序が優先度。根本原因を共有するイシューは
 
 - **[I-298]** **spread 上書き時の副作用式評価消失** — 発生頻度は極めて低い
 
-### RC-8 残存: union 型の構造的同値性欠如 [L2]
-
-Batch 6 で intersection 型の dedup は解決済み。union 型に同一根本原因が残存。
-
-- **[I-353]** **`resolve_multi_member_union` が `register_union` をバイパス** — `src/ts_type_info/resolve/union.rs:84-104`。AST 順で `name_parts.join("Or")` + `push_item` を直接使用。`register_union()` のソート済み命名 + `union_dedup` を完全にバイパス。同一 union が異なるファイルで出現すると異なる名前の重複 enum が生成される。解決策: `register_union(&resolved)` への置換。ただし重複バリアントスキップ + Promise アンラップの独自ロジックとの統合設計が必要
-
 ### RC-15: 型変換シグネチャの設計問題 [L2]
 
 `convert_ts_type` に型パラメータコンテキストがなく、型パラメータ制約の解決が不完全。
@@ -115,8 +109,8 @@ OBJECT_LITERAL_NO_TYPE 全体で 25件。I-300/I-301/I-306 のサブ分類件数
 
 ### 設計・品質
 
-- **[I-354]** **utility.rs の push_item dedup バイパス** — `src/ts_type_info/resolve/utility.rs:48,98,147,196`。Partial/Required/Pick/Omit の struct 登録が `push_item` 直接使用。命名がソース型名ベースのため insert 上書きで実害低いが、dedup 設計の一貫性に反する
-- **[I-355]** **impl ブロック命名不一致** — `resolve/intersection.rs` は `{name}Impl`、`type_converter/intersections.rs` は `{name}__impl`。通常パス交差しないが設計一貫性に反する
+- **[I-359]** **`register_union` の単一メンバー dedup 時に 1-variant enum が生成される** — `src/pipeline/synthetic_registry.rs:90-98`。variant 名 dedup で 2→1 になった場合、1-variant enum が登録される。呼び出し元が `RustType::Named` でラップするため冗長な enum になる。修正には `register_union` の返り値型変更（`String` → `enum { Single(RustType), Union(String) }`）が必要で全 7 呼び出し元に影響。実発生確率は極めて低い（`Fn` 型で params が異なり return_type が同一のケースのみ）
+- **[I-358]** **カウンタベース命名の順序依存性** — `src/pipeline/synthetic_registry.rs:27-30`。`struct_counter` / `synthetic_counter` の値はファイル処理順に依存。dedup ヒット時は同一名を返すため構造的同値性は保たれるが、初回登録の名前（`_TypeLit{N}`, `_Intersection{N}`）がビルドごとに異なりうる。現時点で実害なし。incremental compilation やキャッシュ導入時に問題化する可能性
 - **[I-193]** **API 表面積の最小化** — `pub fn` → `pub(crate) fn`
 - **[I-104]** **所有権推論（全体設計）** — 全 clone → ライフタイム分析。RC-2 の根本解決
 - **[I-103]** **エラー型戦略** — String 固定 → thiserror/anyhow

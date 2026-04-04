@@ -3,7 +3,7 @@ source: tests/integration_test.rs
 expression: output
 ---
 #[derive(Debug, Clone, PartialEq)]
-pub enum StringOrF64 {
+pub enum F64OrString {
     String(String),
     F64(f64),
 }
@@ -33,6 +33,6 @@ fn forceConvert(x: f64) -> String {
     x
 }
 
-fn narrowToString(x: StringOrF64) -> String {
+fn narrowToString(x: F64OrString) -> String {
     x
 }

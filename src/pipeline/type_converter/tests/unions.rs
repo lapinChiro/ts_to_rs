@@ -598,7 +598,7 @@ fn test_convert_ts_type_nullable_multi_type_generates_option_enum() {
     match &ty {
         RustType::Option(inner) => match inner.as_ref() {
             RustType::Named { name, .. } => {
-                assert_eq!(name, "StringOrF64");
+                assert_eq!(name, "F64OrString");
             }
             other => panic!("expected Named inside Option, got: {other:?}"),
         },
@@ -612,7 +612,7 @@ fn test_convert_ts_type_nullable_multi_type_generates_option_enum() {
     );
     match extra.all_items()[0] {
         Item::Enum { name, variants, .. } => {
-            assert_eq!(name, "StringOrF64");
+            assert_eq!(name, "F64OrString");
             assert_eq!(variants.len(), 2);
         }
         other => panic!("expected Enum, got: {other:?}"),
@@ -659,7 +659,7 @@ fn test_convert_ts_type_nullable_three_types_generates_option_enum() {
     match &ty {
         RustType::Option(inner) => match inner.as_ref() {
             RustType::Named { name, .. } => {
-                assert_eq!(name, "BoolOrStringOrF64");
+                assert_eq!(name, "BoolOrF64OrString");
             }
             other => panic!("expected Named inside Option, got: {other:?}"),
         },

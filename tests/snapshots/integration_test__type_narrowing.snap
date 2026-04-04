@@ -1,18 +1,17 @@
 ---
 source: tests/integration_test.rs
-assertion_line: 123
 expression: output
 ---
+#[derive(Debug, Clone, PartialEq)]
+pub enum F64OrString {
+    String(String),
+    F64(f64),
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum ProcessObjectXType {
     Object(serde_json::Value),
     Other(serde_json::Value),
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum StringOrF64 {
-    String(String),
-    F64(f64),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -27,12 +26,12 @@ fn processOptional(x: Option<String>) {
     }
 }
 
-fn processUnion(x: StringOrF64) -> String {
+fn processUnion(x: F64OrString) -> String {
     let x = match x {
-    StringOrF64::String(x) => {
+    F64OrString::String(x) => {
         return x.trim().to_string();
     }
-    StringOrF64::F64(x) => {
+    F64OrString::F64(x) => {
         x
     }
 };
@@ -45,17 +44,17 @@ fn processObject(x: ProcessObjectXType) {
     }
 }
 
-fn processCompound(x: StringOrF64, y: StringOrF64) {
-    if let StringOrF64::String(x) = x {
-        if let StringOrF64::F64(y) = y {
+fn processCompound(x: F64OrString, y: F64OrString) {
+    if let F64OrString::String(x) = x {
+        if let F64OrString::F64(y) = y {
             println!("{}", x.len() as f64);
             println!("{}", y.toFixed(2.0));
         }
     }
 }
 
-fn processMixed(x: StringOrF64, y: Option<String>) {
-    if let StringOrF64::String(x) = x {
+fn processMixed(x: F64OrString, y: Option<String>) {
+    if let F64OrString::String(x) = x {
         if let Some(y) = y {
             println!("{}", x.len() as f64);
             println!("{}", y);
@@ -63,17 +62,17 @@ fn processMixed(x: StringOrF64, y: Option<String>) {
     }
 }
 
-fn processGuardAndCondition(x: StringOrF64) {
-    if let StringOrF64::String(x) = x {
+fn processGuardAndCondition(x: F64OrString) {
+    if let F64OrString::String(x) = x {
         if x.len() as f64 > 0.0 {
             println!("{}", x);
         }
     }
 }
 
-fn processCompoundWithElse(x: StringOrF64, y: StringOrF64) -> String {
-    if let StringOrF64::String(x) = x {
-        if let StringOrF64::F64(y) = y {
+fn processCompoundWithElse(x: F64OrString, y: F64OrString) -> String {
+    if let F64OrString::String(x) = x {
+        if let F64OrString::F64(y) = y {
             return x.trim().to_string();
         } else {
             return "fallback".to_string();
@@ -83,8 +82,8 @@ fn processCompoundWithElse(x: StringOrF64, y: StringOrF64) -> String {
     }
 }
 
-fn processGuardConditionElse(x: StringOrF64) -> String {
-    if let StringOrF64::String(x) = x {
+fn processGuardConditionElse(x: F64OrString) -> String {
+    if let F64OrString::String(x) = x {
         if x.len() as f64 > 0.0 {
             return x;
         } else {
@@ -95,8 +94,8 @@ fn processGuardConditionElse(x: StringOrF64) -> String {
     }
 }
 
-fn processNeqCompound(x: StringOrF64, y: Option<String>) {
-    if let StringOrF64::F64(x) = x {
+fn processNeqCompound(x: F64OrString, y: Option<String>) {
+    if let F64OrString::F64(x) = x {
         println!("fallback");
     } else {
         if let Some(y) = y {
@@ -108,8 +107,8 @@ fn processNeqCompound(x: StringOrF64, y: Option<String>) {
     }
 }
 
-fn ternaryTypeof(x: StringOrF64) -> f64 {
-    if let StringOrF64::String(x) = x { x.len() as f64 } else { 0.0 }
+fn ternaryTypeof(x: F64OrString) -> f64 {
+    if let F64OrString::String(x) = x { x.len() as f64 } else { 0.0 }
 }
 
 fn ternaryNullCheck(x: Option<String>) -> String {
@@ -120,16 +119,16 @@ fn ternaryNoGuard(a: f64) -> String {
     if a > 0.0 { "positive".to_string() } else { "non-positive".to_string() }
 }
 
-fn ternaryNeqTypeof(x: StringOrF64) -> f64 {
-    if let StringOrF64::String(x) = x { x.len() as f64 } else { 0.0 }
+fn ternaryNeqTypeof(x: F64OrString) -> f64 {
+    if let F64OrString::String(x) = x { x.len() as f64 } else { 0.0 }
 }
 
-fn switchTypeof(x: StringOrF64) -> String {
+fn switchTypeof(x: F64OrString) -> String {
     match x {
-        StringOrF64::String(x) => {
+        F64OrString::String(x) => {
             return x.trim().to_string();
         }
-        StringOrF64::F64(x) => {
+        F64OrString::F64(x) => {
             return x.toFixed(2.0);
         }
         _ => {
@@ -138,9 +137,9 @@ fn switchTypeof(x: StringOrF64) -> String {
     }
 }
 
-fn switchTypeofNarrow(x: StringOrF64) -> f64 {
+fn switchTypeofNarrow(x: F64OrString) -> f64 {
     match x {
-        StringOrF64::String(x) => {
+        F64OrString::String(x) => {
             return x.len() as f64;
         }
         _ => {
@@ -149,12 +148,12 @@ fn switchTypeofNarrow(x: StringOrF64) -> f64 {
     }
 }
 
-fn switchTypeofFallthrough(x: StringOrF64) -> String {
+fn switchTypeofFallthrough(x: F64OrString) -> String {
     match x {
-        StringOrF64::String(x) => {
+        F64OrString::String(x) => {
             return "primitive".to_string();
         }
-        StringOrF64::F64(x) => {
+        F64OrString::F64(x) => {
             return "primitive".to_string();
         }
         _ => {
@@ -179,12 +178,12 @@ fn eqUndefinedWithElse(x: Option<String>) -> String {
     }
 }
 
-fn typeofNeqWithElse(x: StringOrF64) -> String {
+fn typeofNeqWithElse(x: F64OrString) -> String {
     match x {
-        StringOrF64::String(x) => {
+        F64OrString::String(x) => {
             return x.trim().to_string();
         }
-        StringOrF64::F64(x) => {
+        F64OrString::F64(x) => {
             return "not string".to_string();
         }
     }
@@ -197,23 +196,23 @@ fn unknownTypeof(x: UnknownTypeofXType) -> String {
     "not a string".to_string()
 }
 
-fn complementElse2(x: StringOrF64) -> String {
+fn complementElse2(x: F64OrString) -> String {
     match x {
-        StringOrF64::String(x) => {
+        F64OrString::String(x) => {
             return x.trim().to_string();
         }
-        StringOrF64::F64(x) => {
+        F64OrString::F64(x) => {
             return x.toFixed(2.0);
         }
     }
 }
 
-fn earlyReturnNarrowing(x: StringOrF64) -> f64 {
+fn earlyReturnNarrowing(x: F64OrString) -> f64 {
     let x = match x {
-    StringOrF64::String(x) => {
+    F64OrString::String(x) => {
         return x.len() as f64;
     }
-    StringOrF64::F64(x) => {
+    F64OrString::F64(x) => {
         x
     }
 };
@@ -232,6 +231,6 @@ fn earlyReturnNull(x: Option<String>) -> String {
     x.trim().to_string()
 }
 
-fn compoundTernary(x: StringOrF64, y: Option<String>) -> f64 {
-    if let StringOrF64::String(x) = x { if let Some(y) = y { x.len() as f64 } else { 0.0 } } else { 0.0 }
+fn compoundTernary(x: F64OrString, y: Option<String>) -> f64 {
+    if let F64OrString::String(x) = x { if let Some(y) = y { x.len() as f64 } else { 0.0 } } else { 0.0 }
 }
