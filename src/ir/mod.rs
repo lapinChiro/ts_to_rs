@@ -16,6 +16,19 @@ pub struct TypeParam<T = RustType> {
     pub constraint: Option<T>,
 }
 
+impl TypeParam {
+    /// 型パラメータの制約内の型パラメータ参照を具体型で置換した新しい TypeParam を返す。
+    ///
+    /// `name` は型パラメータの識別子であり置換対象ではない。
+    /// `constraint` 内の `RustType` のみ置換する。
+    pub fn substitute(&self, bindings: &std::collections::HashMap<String, RustType>) -> TypeParam {
+        TypeParam {
+            name: self.name.clone(),
+            constraint: self.constraint.as_ref().map(|c| c.substitute(bindings)),
+        }
+    }
+}
+
 /// trait への参照（名前 + 型引数）。
 ///
 /// `impl TraitName<T>` の `TraitName<T>` や `trait Foo: Bar<T>` の `Bar<T>` を表す。

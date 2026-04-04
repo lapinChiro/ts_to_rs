@@ -50,6 +50,15 @@ impl FieldDef {
             optional: false,
         }
     }
+
+    /// 型パラメータを具体型で置換した新しい FieldDef を返す。
+    pub fn substitute(&self, bindings: &std::collections::HashMap<String, RustType>) -> FieldDef {
+        FieldDef {
+            name: self.name.clone(),
+            ty: self.ty.substitute(bindings),
+            optional: self.optional,
+        }
+    }
 }
 
 impl From<(String, RustType)> for FieldDef {
@@ -84,6 +93,16 @@ impl ParamDef {
             has_default: false,
         }
     }
+
+    /// 型パラメータを具体型で置換した新しい ParamDef を返す。
+    pub fn substitute(&self, bindings: &std::collections::HashMap<String, RustType>) -> ParamDef {
+        ParamDef {
+            name: self.name.clone(),
+            ty: self.ty.substitute(bindings),
+            optional: self.optional,
+            has_default: self.has_default,
+        }
+    }
 }
 
 impl From<(String, RustType)> for ParamDef {
@@ -101,6 +120,20 @@ pub struct MethodSignature<T = RustType> {
     pub return_type: Option<T>,
     /// 最後のパラメータが rest パラメータか（`...args: T[]` パターン）
     pub has_rest: bool,
+}
+
+impl MethodSignature {
+    /// 型パラメータを具体型で置換した新しい MethodSignature を返す。
+    pub fn substitute(
+        &self,
+        bindings: &std::collections::HashMap<String, RustType>,
+    ) -> MethodSignature {
+        MethodSignature {
+            params: self.params.iter().map(|p| p.substitute(bindings)).collect(),
+            return_type: self.return_type.as_ref().map(|ty| ty.substitute(bindings)),
+            has_rest: self.has_rest,
+        }
+    }
 }
 
 /// Selects the best matching overload from a set of method signatures.
@@ -183,6 +216,17 @@ pub struct ConstField<T = RustType> {
     pub string_literal_value: Option<String>,
 }
 
+impl ConstField {
+    /// 型パラメータを具体型で置換した新しい ConstField を返す。
+    pub fn substitute(&self, bindings: &std::collections::HashMap<String, RustType>) -> ConstField {
+        ConstField {
+            name: self.name.clone(),
+            ty: self.ty.substitute(bindings),
+            string_literal_value: self.string_literal_value.clone(),
+        }
+    }
+}
+
 /// `ConstValue` の配列要素。
 #[derive(Debug, Clone, PartialEq)]
 pub struct ConstElement<T = RustType> {
@@ -190,6 +234,19 @@ pub struct ConstElement<T = RustType> {
     pub ty: T,
     /// `as const` 配列の文字列リテラル値（`['a', 'b'] as const` の場合に保持）
     pub string_literal_value: Option<String>,
+}
+
+impl ConstElement {
+    /// 型パラメータを具体型で置換した新しい ConstElement を返す。
+    pub fn substitute(
+        &self,
+        bindings: &std::collections::HashMap<String, RustType>,
+    ) -> ConstElement {
+        ConstElement {
+            ty: self.ty.substitute(bindings),
+            string_literal_value: self.string_literal_value.clone(),
+        }
+    }
 }
 
 /// 型定義の種類。
@@ -292,8 +349,10 @@ impl TypeDef {
     /// Returns the type parameters of this TypeDef, if any.
     pub fn type_params(&self) -> &[TypeParam] {
         match self {
-            TypeDef::Struct { type_params, .. } | TypeDef::Enum { type_params, .. } => type_params,
-            _ => &[],
+            TypeDef::Struct { type_params, .. }
+            | TypeDef::Enum { type_params, .. }
+            | TypeDef::Function { type_params, .. } => type_params,
+            TypeDef::ConstValue { .. } => &[],
         }
     }
 
@@ -309,7 +368,10 @@ impl TypeDef {
             TypeDef::ConstValue { fields, .. } if !fields.is_empty() => {
                 Some(fields.iter().map(|f| f.name.clone()).collect())
             }
-            _ => None,
+            TypeDef::Struct { .. }
+            | TypeDef::ConstValue { .. }
+            | TypeDef::Enum { .. }
+            | TypeDef::Function { .. } => None,
         }
     }
 
@@ -325,7 +387,10 @@ impl TypeDef {
             TypeDef::ConstValue { fields, .. } if !fields.is_empty() => {
                 Box::new(fields.iter().map(|f| &f.ty))
             }
-            _ => return None,
+            TypeDef::Struct { .. }
+            | TypeDef::ConstValue { .. }
+            | TypeDef::Enum { .. }
+            | TypeDef::Function { .. } => return None,
         };
         let mut unique = Vec::new();
         for ty in types_iter {
@@ -373,33 +438,14 @@ impl TypeDef {
                 is_interface,
             } => {
                 let substitute_sigs = |sigs: &[MethodSignature]| -> Vec<MethodSignature> {
-                    sigs.iter()
-                        .map(|sig| MethodSignature {
-                            params: sig
-                                .params
-                                .iter()
-                                .map(|p| ParamDef {
-                                    name: p.name.clone(),
-                                    ty: p.ty.substitute(bindings),
-                                    optional: p.optional,
-                                    has_default: p.has_default,
-                                })
-                                .collect(),
-                            return_type: sig.return_type.as_ref().map(|ty| ty.substitute(bindings)),
-                            has_rest: sig.has_rest,
-                        })
-                        .collect()
+                    sigs.iter().map(|s| s.substitute(bindings)).collect()
                 };
                 TypeDef::Struct {
-                    type_params: type_params.clone(),
-                    fields: fields
+                    type_params: type_params
                         .iter()
-                        .map(|f| FieldDef {
-                            name: f.name.clone(),
-                            ty: f.ty.substitute(bindings),
-                            optional: f.optional,
-                        })
+                        .map(|tp| tp.substitute(bindings))
                         .collect(),
+                    fields: fields.iter().map(|f| f.substitute(bindings)).collect(),
                     methods: methods
                         .iter()
                         .map(|(name, sigs)| (name.clone(), substitute_sigs(sigs)))
@@ -417,28 +463,46 @@ impl TypeDef {
                 tag_field,
                 variant_fields,
             } => TypeDef::Enum {
-                type_params: type_params.clone(),
+                type_params: type_params
+                    .iter()
+                    .map(|tp| tp.substitute(bindings))
+                    .collect(),
                 variants: variants.clone(),
                 string_values: string_values.clone(),
                 tag_field: tag_field.clone(),
                 variant_fields: variant_fields
                     .iter()
-                    .map(|(variant, fields)| {
+                    .map(|(v, fields)| {
                         (
-                            variant.clone(),
-                            fields
-                                .iter()
-                                .map(|f| FieldDef {
-                                    name: f.name.clone(),
-                                    ty: f.ty.substitute(bindings),
-                                    optional: f.optional,
-                                })
-                                .collect(),
+                            v.clone(),
+                            fields.iter().map(|f| f.substitute(bindings)).collect(),
                         )
                     })
                     .collect(),
             },
-            other => other.clone(),
+            TypeDef::Function {
+                type_params,
+                params,
+                return_type,
+                has_rest,
+            } => TypeDef::Function {
+                type_params: type_params
+                    .iter()
+                    .map(|tp| tp.substitute(bindings))
+                    .collect(),
+                params: params.iter().map(|p| p.substitute(bindings)).collect(),
+                return_type: return_type.as_ref().map(|ty| ty.substitute(bindings)),
+                has_rest: *has_rest,
+            },
+            TypeDef::ConstValue {
+                fields,
+                elements,
+                type_ref_name,
+            } => TypeDef::ConstValue {
+                fields: fields.iter().map(|f| f.substitute(bindings)).collect(),
+                elements: elements.iter().map(|e| e.substitute(bindings)).collect(),
+                type_ref_name: type_ref_name.clone(),
+            },
         }
     }
 }

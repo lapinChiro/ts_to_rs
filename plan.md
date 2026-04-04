@@ -2,9 +2,18 @@
 
 ## 次のアクション
 
-**次のアクション**: `transformer/functions/params.rs` の `convert_property_signature` 移行（I-349、小規模タスク）。
+**次のアクション**: I-349（`params.rs` の `convert_property_signature` TsTypeInfo 移行、PRD 不要の小規模タスク）
 
-その後: Batch 4c（TypeDef 型操作メソッド補完）→ Batch 5（narrowing 基盤）の順で進行。
+その後: Batch 5（narrowing 基盤）の順で進行。
+
+### I-349 後続タスク詳細
+
+`src/transformer/functions/params.rs:44-62` の SWC 直接操作を TsTypeInfo 経由に移行する小規模リファクタリング。
+
+- **現状**: `TsType::TsTypeLit` のメンバーを直接走査し `convert_property_signature`（SWC 版、`type_converter/utilities.rs:28`）を呼び出してフィールド抽出
+- **移行先**: `convert_to_ts_type_info`（`ts_type_info/mod.rs:240`）で SWC → `TsTypeInfo` 変換後、`TsTypeInfo::TypeLiteral` にマッチしたら `resolve_type_literal_fields`（`ts_type_info/resolve/intersection.rs:231`）でフィールド抽出
+- **注意点**: struct 命名は `to_pascal_case(&format!("{fn_name}_{param_name}"))` を維持（synthetic registry のカウンタベース命名ではなく、関数名ベース）。`vis` は `None` → `Some(Visibility::Public)` に変更（インライン struct のフィールドは public が正しい）
+- **DRY 効果**: `convert_property_signature` の使用箇所が `type_converter/interfaces.rs` のみに限定される（type_converter パイプライン内での正当な使用）
 
 ---
 
@@ -19,7 +28,7 @@
 
 | Batch | イシュー | 根本原因 | Level | 状態 |
 |-------|---------|---------|-------|------|
-| 4c | I-347+I-348 | TypeDef 型操作メソッド補完（Function/ConstValue） | L2: 設計 | |
+| 4c | I-347+I-348 | TypeDef 型操作メソッド補完（Function/ConstValue） | L2: 設計 | ✅ 完了 |
 | 5 | I-334+I-333+I-327 | narrowing 基盤欠陥（RC-1 内 7 件中コア 3 件） | L2: 設計 | |
 | 5b | I-215+I-213+I-214+I-256 | narrowing 残課題（Batch 5 基盤の上に構築） | L2: 設計 | |
 | 6 | I-338+I-318 | 構造的同値性欠如（synthetic 型の重複生成） | L2: 設計 | |
