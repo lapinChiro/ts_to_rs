@@ -311,6 +311,28 @@ fn test_convert_ts_type_record_string_number_returns_hashmap() {
     );
 }
 
+#[test]
+fn test_convert_ts_type_record_number_value_uses_resolved_key_type() {
+    let decl = parse_interface("interface T { x: Record<number, string>; }");
+    let prop = match &decl.body.body[0] {
+        TsTypeElement::TsPropertySignature(p) => p,
+        _ => panic!("expected property signature"),
+    };
+    let ty = convert_ts_type(
+        &prop.type_ann.as_ref().unwrap().type_ann,
+        &mut SyntheticTypeRegistry::new(),
+        &TypeRegistry::new(),
+    )
+    .unwrap();
+    assert_eq!(
+        ty,
+        RustType::Named {
+            name: "HashMap".to_string(),
+            type_args: vec![RustType::F64, RustType::String],
+        }
+    );
+}
+
 // -- Readonly → inner type --
 
 #[test]

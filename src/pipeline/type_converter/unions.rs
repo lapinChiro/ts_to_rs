@@ -385,7 +385,7 @@ pub(super) fn try_convert_general_union(
                 });
             }
             TsType::TsTypeRef(type_ref) => {
-                let rust_type = convert_type_ref(type_ref, synthetic, reg)?;
+                let rust_type = convert_ts_type(ty, synthetic, reg)?;
                 let variant_name = match &type_ref.type_name {
                     swc_ecma_ast::TsEntityName::Ident(ident) => ident.sym.to_string(),
                     _ => return Err(anyhow!("unsupported qualified type name in union")),

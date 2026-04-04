@@ -118,6 +118,14 @@ pub(crate) fn convert_field_info(
 
 型解決パスが SWC AST 直接 → TsTypeInfo 経由に変わるが、`convert_ts_type()` は内部で `convert_to_ts_type_info → resolve_ts_type` を呼んでおり、結果は同一。ベンチマーク前後比較で確認する。
 
+#### Batch 4d-B で発見された resolve パスとの挙動差異
+
+Batch 4d-B（`convert_type_ref` 削除）で、旧 SWC AST 直接パスと resolve パスの間に以下の差異が確認された。4d-C で SWC AST 走査を TsTypeInfo ベースに移行する際、同様の差異が発生しうる。各タスクの検証で以下を確認すること:
+
+1. **Record<K,V> の key 型**: ~~resolve パスは key を `RustType::String` にハードコードしていた~~ → **Batch 4d-B で修正済み**（`resolved_args.first().cloned().unwrap_or(RustType::String)` に変更、I-349 解消）。旧パスと resolve パスの挙動は統一された
+2. **Qualified type name (`Namespace.Type`)**: 旧パスはエラー、resolve パスは `"Namespace.Type"` として受理。TODO I-36 として既存追跡中。受理する方が寛容であり、4d-C で SWC AST 走査を削減すると自然に resolve パスの挙動になる。**後退ではなく前進**
+3. **Missing type parameters (e.g., `Array` without args)**: 旧パスはエラー、resolve パスは `Vec<Any>` にフォールバック。TypeScript 構文上このケースは発生しない。**実質的影響なし**
+
 ## Task List
 
 ### T1: find_discriminant_field の統一
@@ -189,3 +197,4 @@ pub(crate) fn convert_field_info(
 6. `convert_field_info` が `utilities.rs` に存在し、テスト3件がパス
 7. Hono ベンチマーク: 110/158 クリーン維持（±0）
 8. type_converter 内の SWC AST 走査が「型分類」目的のみに限定されている
+9. **Semantic Safety Analysis に記載の3つの挙動差異（Record key 型、qualified name、missing type params）について、移行後のテストで挙動が想定通りであることを確認済み**（具体的には: intersection/union 内で `Record<string, V>` が `HashMap<String, V>` になること、unresolved type ref が `RustType::Named` としてパススルーされることをテストで検証）

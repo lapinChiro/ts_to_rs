@@ -206,7 +206,7 @@ fn extract_intersection_members(
                     }
                 } else {
                     // Unresolved type reference — embed as a named field
-                    let rust_type = convert_type_ref(type_ref, synthetic, reg)?;
+                    let rust_type = convert_ts_type(ty, synthetic, reg)?;
                     fields.push(StructField {
                         vis: None,
                         name: format!("_{i}"),
@@ -289,7 +289,7 @@ fn extract_variant_fields(
                 }
             }
             // Unresolved type ref — embed as _data field
-            let rust_type = convert_type_ref(type_ref, synthetic, reg)?;
+            let rust_type = convert_ts_type(ty, synthetic, reg)?;
             fields.push(StructField {
                 vis: None,
                 name: "_data".to_string(),

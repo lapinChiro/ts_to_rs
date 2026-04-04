@@ -5,8 +5,8 @@
 //! inline structs) are registered in [`SyntheticTypeRegistry`].
 
 // intersections, unions は transformer フェーズの convert_type_alias 等から使用されている。
-// registry は Phase 4 で TsTypeInfo 経由に移行済み。transformer の移行完了後に削除可能。
-// indexed_access は convert_ts_type の 2 ステップ化で resolve/indexed_access.rs に移行済み。
+// 型解決は convert_ts_type → TsTypeInfo → resolve 経由に統一済み（Batch 4d-B）。
+// declaration 変換の TsTypeInfo 移行は PRD-C で実施予定。
 mod interfaces;
 mod intersections;
 mod type_aliases;
@@ -27,10 +27,7 @@ use unions::{
     try_convert_discriminated_union, try_convert_general_union, try_convert_single_string_literal,
     try_convert_string_literal_union,
 };
-use utilities::{
-    convert_unsupported_union_member, convert_utility_non_nullable, convert_utility_omit,
-    convert_utility_partial, convert_utility_pick, convert_utility_required,
-};
+use utilities::convert_unsupported_union_member;
 
 use anyhow::{anyhow, Result};
 use swc_ecma_ast::{
@@ -43,7 +40,7 @@ use crate::ir::{
     Item, Method, Param, RustType, StructField, TraitRef, TypeParam, Visibility,
 };
 use crate::pipeline::SyntheticTypeRegistry;
-use crate::registry::{FieldDef, TypeDef, TypeRegistry};
+use crate::registry::{TypeDef, TypeRegistry};
 use crate::transformer::type_position::{wrap_trait_for_position, TypePosition};
 
 /// Returns true if the keyword type is a nullable sentinel (`null`, `undefined`, `void`).
@@ -96,78 +93,6 @@ pub fn convert_ts_type(
 ) -> Result<RustType> {
     let info = crate::ts_type_info::convert_to_ts_type_info(ts_type)?;
     crate::ts_type_info::resolve::resolve_ts_type(&info, reg, synthetic)
-}
-
-/// Converts a type reference like `Array<T>`.
-fn convert_type_ref(
-    type_ref: &swc_ecma_ast::TsTypeRef,
-    synthetic: &mut SyntheticTypeRegistry,
-    reg: &TypeRegistry,
-) -> Result<RustType> {
-    let name = match &type_ref.type_name {
-        swc_ecma_ast::TsEntityName::Ident(ident) => ident.sym.to_string(),
-        _ => return Err(anyhow!("unsupported qualified type name")),
-    };
-
-    match name.as_str() {
-        "Array" => {
-            let params = type_ref
-                .type_params
-                .as_ref()
-                .ok_or_else(|| anyhow!("Array requires a type parameter"))?;
-            if params.params.len() != 1 {
-                return Err(anyhow!("Array expects exactly one type parameter"));
-            }
-            let inner = convert_ts_type(&params.params[0], synthetic, reg)?;
-            Ok(RustType::Vec(Box::new(inner)))
-        }
-        "Record" => {
-            let params = type_ref
-                .type_params
-                .as_ref()
-                .ok_or_else(|| anyhow!("Record requires type parameters"))?;
-            if params.params.len() != 2 {
-                return Err(anyhow!("Record expects exactly two type parameters"));
-            }
-            let key = convert_ts_type(&params.params[0], synthetic, reg)?;
-            let val = convert_ts_type(&params.params[1], synthetic, reg)?;
-            Ok(RustType::Named {
-                name: "HashMap".to_string(),
-                type_args: vec![key, val],
-            })
-        }
-        "Readonly" => {
-            // Rust is immutable by default — Readonly<T> is just T
-            let params = type_ref
-                .type_params
-                .as_ref()
-                .ok_or_else(|| anyhow!("Readonly requires a type parameter"))?;
-            if params.params.len() != 1 {
-                return Err(anyhow!("Readonly expects exactly one type parameter"));
-            }
-            convert_ts_type(&params.params[0], synthetic, reg)
-        }
-        "Partial" => convert_utility_partial(type_ref, synthetic, reg),
-        "Required" => convert_utility_required(type_ref, synthetic, reg),
-        "Pick" => convert_utility_pick(type_ref, synthetic, reg),
-        "Omit" => convert_utility_omit(type_ref, synthetic, reg),
-        "NonNullable" => convert_utility_non_nullable(type_ref, synthetic, reg),
-        // User-defined types: pass through as Named, with any generic type arguments
-        other => {
-            let type_args = match &type_ref.type_params {
-                Some(params) => params
-                    .params
-                    .iter()
-                    .map(|p| convert_ts_type(p, synthetic, reg))
-                    .collect::<Result<Vec<_>>>()?,
-                None => vec![],
-            };
-            Ok(RustType::Named {
-                name: sanitize_rust_type_name(other),
-                type_args,
-            })
-        }
-    }
 }
 
 #[cfg(test)]

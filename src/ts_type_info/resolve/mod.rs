@@ -402,10 +402,11 @@ fn resolve_type_ref(
         // Promise<T> は Named("Promise", [T]) のまま返す。
         // async 関数の戻り値型 unwrap は transformer 側の責務。
         "Record" => {
+            let key_type = resolved_args.first().cloned().unwrap_or(RustType::String);
             let value_type = resolved_args.get(1).cloned().unwrap_or(RustType::Any);
             Ok(RustType::Named {
                 name: "HashMap".to_string(),
-                type_args: vec![RustType::String, value_type],
+                type_args: vec![key_type, value_type],
             })
         }
         "Map" => {
