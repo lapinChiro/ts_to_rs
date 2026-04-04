@@ -11,9 +11,7 @@ use anyhow::{anyhow, Result};
 use swc_ecma_ast as ast;
 
 use crate::ir::{Expr, Item, MatchArm, Param, RustType, Stmt, Visibility};
-use crate::pipeline::type_converter::{
-    convert_property_signature, convert_ts_type, extract_type_params,
-};
+use crate::pipeline::type_converter::{convert_ts_type, extract_type_params};
 use crate::pipeline::SyntheticTypeRegistry;
 use crate::transformer::{
     extract_pat_ident_name, extract_prop_name, wrap_trait_for_position, Transformer, TypePosition,

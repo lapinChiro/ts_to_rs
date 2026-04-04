@@ -205,20 +205,16 @@ pub(crate) fn resolve_type_literal(
         });
     }
 
-    // フィールドとメソッドを変換
+    // フィールドとメソッドを変換（resolve_type_literal_fields に委譲）
+    // register_inline_struct は raw name を受け取り内部で sanitize するため、
+    // StructField.name（sanitize 済み）ではなく TsFieldInfo.name（raw）を使用
+    let fields = resolve_type_literal_fields(lit, reg, synthetic)?;
     let field_defs: Vec<(String, RustType)> = lit
         .fields
         .iter()
-        .map(|f| {
-            let ty = resolve_ts_type(&f.ty, reg, synthetic)?;
-            let ty = if f.optional {
-                RustType::Option(Box::new(ty))
-            } else {
-                ty
-            };
-            Ok((f.name.clone(), ty))
-        })
-        .collect::<anyhow::Result<Vec<_>>>()?;
+        .zip(fields.iter())
+        .map(|(raw, resolved)| (raw.name.clone(), resolved.ty.clone()))
+        .collect();
 
     let struct_name = synthetic.register_inline_struct(&field_defs);
     Ok(RustType::Named {
@@ -237,7 +233,9 @@ pub(crate) fn resolve_type_literal_fields(
         .iter()
         .map(|f| {
             let ty = resolve_ts_type(&f.ty, reg, synthetic)?;
-            let ty = if f.optional {
+            // Optional fields become Option<T>, but avoid double-wrapping
+            // when the resolved type is already Option (e.g., `name?: string | null`)
+            let ty = if f.optional && !matches!(ty, RustType::Option(_)) {
                 RustType::Option(Box::new(ty))
             } else {
                 ty

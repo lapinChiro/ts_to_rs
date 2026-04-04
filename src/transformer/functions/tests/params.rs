@@ -286,7 +286,7 @@ fn test_convert_fn_decl_inline_type_literal_single_field_generates_struct() {
             name: "FooOpts".to_string(),
             type_params: vec![],
             fields: vec![StructField {
-                vis: None,
+                vis: Some(Visibility::Public),
                 name: "x".to_string(),
                 ty: RustType::F64,
             }],
@@ -323,12 +323,12 @@ fn test_convert_fn_decl_inline_type_literal_multiple_fields_generates_struct() {
             type_params: vec![],
             fields: vec![
                 StructField {
-                    vis: None,
+                    vis: Some(Visibility::Public),
                     name: "x".to_string(),
                     ty: RustType::F64,
                 },
                 StructField {
-                    vis: None,
+                    vis: Some(Visibility::Public),
                     name: "y".to_string(),
                     ty: RustType::String,
                 },
@@ -401,6 +401,49 @@ fn test_convert_fn_decl_default_param_inline_type_generates_struct() {
         has_struct,
         "inline type literal in default param should generate struct, got: {items:?}"
     );
+}
+
+#[test]
+fn test_convert_fn_decl_inline_type_literal_optional_field_wraps_option() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
+    let fn_decl = parse_fn_decl("function foo(opts: { name?: string }): void {}");
+    let (items, _) = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_fn_decl(&fn_decl, Visibility::Public, false)
+        .unwrap();
+    match &items[0] {
+        Item::Struct { fields, .. } => {
+            assert_eq!(fields[0].name, "name");
+            assert_eq!(
+                fields[0].ty,
+                RustType::Option(Box::new(RustType::String)),
+                "optional field should be Option<String>"
+            );
+        }
+        other => panic!("expected Item::Struct, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_convert_fn_decl_inline_type_literal_optional_nullable_no_double_wrap() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
+    // name?: string | null → should be Option<String>, NOT Option<Option<String>>
+    let fn_decl = parse_fn_decl("function foo(opts: { name?: string | null }): void {}");
+    let (items, _) = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_fn_decl(&fn_decl, Visibility::Public, false)
+        .unwrap();
+    match &items[0] {
+        Item::Struct { fields, .. } => {
+            assert_eq!(fields[0].name, "name");
+            assert_eq!(
+                fields[0].ty,
+                RustType::Option(Box::new(RustType::String)),
+                "optional nullable field should be Option<String>, not Option<Option<String>>"
+            );
+        }
+        other => panic!("expected Item::Struct, got {other:?}"),
+    }
 }
 
 /// Helper: create a TypeRegistry with a trait type (methods-only interface).

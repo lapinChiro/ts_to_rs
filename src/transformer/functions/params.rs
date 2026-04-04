@@ -41,25 +41,16 @@ impl<'a> Transformer<'a> {
                 };
 
                 // Check if the type annotation is an inline type literal
-                if let ast::TsType::TsTypeLit(type_lit) = ty.type_ann.as_ref() {
+                if let Ok(crate::ts_type_info::TsTypeInfo::TypeLiteral(lit)) =
+                    crate::ts_type_info::convert_to_ts_type_info(&ty.type_ann)
+                {
                     let struct_name = to_pascal_case(&format!("{fn_name}_{param_name}"));
-                    let mut fields = Vec::new();
-                    for member in &type_lit.members {
-                        match member {
-                            ast::TsTypeElement::TsPropertySignature(prop) => {
-                                fields.push(convert_property_signature(
-                                    prop,
-                                    self.synthetic,
-                                    self.reg(),
-                                )?);
-                            }
-                            _ => {
-                                return Err(anyhow!(
-                                "unsupported inline type literal member (only property signatures)"
-                            ))
-                            }
-                        }
-                    }
+                    let fields =
+                        crate::ts_type_info::resolve::intersection::resolve_type_literal_fields(
+                            &lit,
+                            self.reg(),
+                            self.synthetic,
+                        )?;
                     let struct_item = Item::Struct {
                         vis,
                         name: struct_name.clone(),
