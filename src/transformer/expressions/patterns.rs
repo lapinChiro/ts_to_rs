@@ -6,6 +6,7 @@
 use swc_ecma_ast as ast;
 
 use crate::ir::{BinOp, Expr, RustType};
+use crate::pipeline::narrowing_patterns;
 use crate::registry::TypeDef;
 
 use super::literals::lookup_string_enum_variant;
@@ -101,7 +102,7 @@ impl<'a> Transformer<'a> {
         }
 
         // Extract (typeof operand, type string) from either order
-        let (typeof_operand, type_str) = extract_typeof_and_string(bin)?;
+        let (typeof_operand, type_str) = narrowing_patterns::extract_typeof_and_string(bin)?;
 
         // Resolve the operand's type from FileTypeResolution
         let operand_type = self.get_expr_type(typeof_operand);
@@ -447,28 +448,6 @@ fn is_undefined_ident(expr: &ast::Expr) -> bool {
     matches!(expr, ast::Expr::Ident(ident) if ident.sym.as_ref() == "undefined")
 }
 
-/// Extracts the typeof operand and the comparison string from a binary expression.
-/// Handles both `typeof x === "string"` and `"string" === typeof x`.
-fn extract_typeof_and_string(bin: &ast::BinExpr) -> Option<(&ast::Expr, String)> {
-    // Left is typeof, right is string
-    if let ast::Expr::Unary(unary) = bin.left.as_ref() {
-        if unary.op == ast::UnaryOp::TypeOf {
-            if let ast::Expr::Lit(ast::Lit::Str(s)) = bin.right.as_ref() {
-                return Some((&unary.arg, s.value.to_string_lossy().into_owned()));
-            }
-        }
-    }
-    // Right is typeof, left is string
-    if let ast::Expr::Unary(unary) = bin.right.as_ref() {
-        if unary.op == ast::UnaryOp::TypeOf {
-            if let ast::Expr::Lit(ast::Lit::Str(s)) = bin.left.as_ref() {
-                return Some((&unary.arg, s.value.to_string_lossy().into_owned()));
-            }
-        }
-    }
-    None
-}
-
 /// Result of matching a `RustType` against a typeof string.
 enum TypeofMatch {
     /// The type definitely matches the typeof string.
@@ -669,7 +648,9 @@ pub(crate) fn extract_narrowing_guard(condition: &ast::Expr) -> Option<Narrowing
             }
 
             // typeof x === "type"
-            if let Some((ast::Expr::Ident(ident), type_str)) = extract_typeof_and_string(bin) {
+            if let Some((ast::Expr::Ident(ident), type_str)) =
+                narrowing_patterns::extract_typeof_and_string(bin)
+            {
                 return Some(NarrowingGuard::Typeof {
                     var_name: ident.sym.to_string(),
                     var_span: ident.span,
@@ -679,9 +660,9 @@ pub(crate) fn extract_narrowing_guard(condition: &ast::Expr) -> Option<Narrowing
             }
 
             // x !== null / x !== undefined
-            let (var_expr, is_nullish) = if is_null_or_undefined(&bin.right) {
+            let (var_expr, is_nullish) = if narrowing_patterns::is_null_or_undefined(&bin.right) {
                 (Some(&*bin.left), true)
-            } else if is_null_or_undefined(&bin.left) {
+            } else if narrowing_patterns::is_null_or_undefined(&bin.left) {
                 (Some(&*bin.right), true)
             } else {
                 (None, false)
@@ -712,12 +693,6 @@ pub(crate) fn extract_narrowing_guard(condition: &ast::Expr) -> Option<Narrowing
         }
         _ => None,
     }
-}
-
-/// Returns true if the expression is `null` or `undefined`.
-fn is_null_or_undefined(expr: &ast::Expr) -> bool {
-    matches!(expr, ast::Expr::Lit(ast::Lit::Null(..)))
-        || matches!(expr, ast::Expr::Ident(ident) if ident.sym.as_ref() == "undefined")
 }
 
 #[cfg(test)]

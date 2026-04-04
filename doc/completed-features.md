@@ -49,3 +49,10 @@
 
 - **I-192 大規模ファイル分割 + I-271 ファイル行数制限**: 元 18 個の 1000 行超ファイルを全て分割。`scripts/check-file-lines.sh`（閾値 1000 行）で再発防止
 - **I-225 compile_test 失敗時のフィクスチャ名表示**: `tests/compile_test.rs:94` でフィクスチャ名が表示されるよう改善済み
+
+## Narrowing 基盤（Batch 5）
+
+- **I-334 union typeof narrowing**: Stage 1（`try_convert_typeof_comparison` の union enum チェック）により動作確認済み。`if let Enum::Variant(x) = x` パターンを正しく生成
+- **I-333 unknown typeof narrowing**: `any_enum_analyzer.rs` が `TsUnknownKeyword` をスキャン対象に追加。`unknown` パラメータ/ローカル変数に synthetic enum を生成し、`if false` → `if let` に修正
+- **I-327 `=== null` else ブロック narrowing**: `detect_narrowing_guard` に `alternate` パラメータを追加。`=== null` は else ブロック、`typeof !==` は alternate に NarrowingEvent を生成
+- **DRY 修正**: `extract_typeof_and_string` / `is_null_or_undefined` を `src/pipeline/narrowing_patterns.rs` に一元化。TypeResolver と Transformer の重複を除去

@@ -587,7 +587,7 @@ impl<'a> TypeResolver<'a> {
         self.result.expr_types.insert(test_span, test_type);
 
         // Detect narrowing guards
-        self.detect_narrowing_guard(&if_stmt.test, &if_stmt.cons);
+        self.detect_narrowing_guard(&if_stmt.test, &if_stmt.cons, if_stmt.alt.as_deref());
 
         // Visit then branch
         match if_stmt.cons.as_ref() {

@@ -180,14 +180,17 @@ fn analyze_fn_body(
         .iter()
         .filter_map(|p| {
             if let ast::Pat::Ident(ident) = &p.pat {
-                let is_any = ident.type_ann.as_ref().is_some_and(|ann| {
+                let is_any_or_unknown = ident.type_ann.as_ref().is_some_and(|ann| {
                     matches!(
                         ann.type_ann.as_ref(),
                         ast::TsType::TsKeywordType(kw)
-                            if kw.kind == ast::TsKeywordTypeKind::TsAnyKeyword
+                            if matches!(kw.kind,
+                                ast::TsKeywordTypeKind::TsAnyKeyword
+                                | ast::TsKeywordTypeKind::TsUnknownKeyword
+                            )
                     )
                 });
-                if is_any {
+                if is_any_or_unknown {
                     Some(ident.id.sym.to_string())
                 } else {
                     None
@@ -246,7 +249,10 @@ fn analyze_arrow(
                     matches!(
                         ann.type_ann.as_ref(),
                         ast::TsType::TsKeywordType(kw)
-                            if kw.kind == ast::TsKeywordTypeKind::TsAnyKeyword
+                            if matches!(kw.kind,
+                                ast::TsKeywordTypeKind::TsAnyKeyword
+                                | ast::TsKeywordTypeKind::TsUnknownKeyword
+                            )
                     )
                 });
                 if has_any_type {

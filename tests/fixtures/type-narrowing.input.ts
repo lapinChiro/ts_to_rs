@@ -125,3 +125,38 @@ function switchTypeofFallthrough(x: string | number): string {
             return "other";
     }
 }
+
+// Case 17: === null with explicit else → if let swap (I-327)
+function eqNullWithElse(x: string | null): string {
+    if (x === null) {
+        return "null";
+    } else {
+        return x.trim();
+    }
+}
+
+// Case 18: === undefined with explicit else → if let swap
+function eqUndefinedWithElse(x: string | undefined): string {
+    if (x === undefined) {
+        return "undefined";
+    } else {
+        return x.trim();
+    }
+}
+
+// Case 19: typeof !== with else → narrowing in else branch
+function typeofNeqWithElse(x: string | number): string {
+    if (typeof x !== "string") {
+        return "not string";
+    } else {
+        return x.trim();
+    }
+}
+
+// Case 20: unknown typeof narrowing (I-333)
+function unknownTypeof(x: unknown): string {
+    if (typeof x === "string") {
+        return x.toUpperCase();
+    }
+    return "not a string";
+}

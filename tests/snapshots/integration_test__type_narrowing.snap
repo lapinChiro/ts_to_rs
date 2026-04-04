@@ -1,6 +1,5 @@
 ---
 source: tests/integration_test.rs
-assertion_line: 494
 expression: output
 ---
 #[derive(Debug, Clone, PartialEq)]
@@ -13,6 +12,12 @@ pub enum ProcessObjectXType {
 pub enum StringOrF64 {
     String(String),
     F64(f64),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum UnknownTypeofXType {
+    String(String),
+    Other(serde_json::Value),
 }
 
 fn processOptional(x: Option<String>) {
@@ -150,4 +155,35 @@ fn switchTypeofFallthrough(x: StringOrF64) -> String {
             return "other".to_string();
         }
     }
+}
+
+fn eqNullWithElse(x: Option<String>) -> String {
+    if let Some(x) = x {
+        return x.trim().to_string();
+    } else {
+        return "null".to_string();
+    }
+}
+
+fn eqUndefinedWithElse(x: Option<String>) -> String {
+    if let Some(x) = x {
+        return x.trim().to_string();
+    } else {
+        return "undefined".to_string();
+    }
+}
+
+fn typeofNeqWithElse(x: StringOrF64) -> String {
+    if let StringOrF64::String(x) = x {
+        return x.trim().to_string();
+    } else {
+        return "not string".to_string();
+    }
+}
+
+fn unknownTypeof(x: UnknownTypeofXType) -> String {
+    if let UnknownTypeofXType::String(x) = x {
+        return x.to_uppercase();
+    }
+    "not a string".to_string()
 }

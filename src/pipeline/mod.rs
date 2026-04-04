@@ -8,6 +8,7 @@ pub(crate) mod any_narrowing;
 pub mod external_struct_generator;
 pub mod module_graph;
 pub mod module_resolver;
+pub(crate) mod narrowing_patterns;
 pub mod output_writer;
 pub mod synthetic_registry;
 pub mod type_converter;
@@ -654,6 +655,41 @@ function process(data: any): string {
         assert!(
             output.files[0].rust_source.contains("ProcessDataType"),
             "output should contain any-narrowing enum: {}",
+            output.files[0].rust_source
+        );
+    }
+
+    #[test]
+    fn test_pipeline_unknown_param_typeof_generates_enum() {
+        // I-333: unknown-typed parameters should get synthetic enum like any-typed ones
+        let input = TranspileInput {
+            files: vec![(
+                PathBuf::from("test.ts"),
+                r#"
+function process(data: unknown): string {
+    if (typeof data === "string") {
+        return data.toUpperCase();
+    }
+    return "";
+}
+"#
+                .to_string(),
+            )],
+            builtin_types: None,
+            base_synthetic: None,
+            module_resolver: Box::new(crate::pipeline::module_resolver::TrivialResolver),
+        };
+        let output = transpile_pipeline(input).unwrap();
+        // Should NOT contain "if false" — should have proper enum narrowing
+        assert!(
+            !output.files[0].rust_source.contains("if false"),
+            "unknown typeof should not produce 'if false': {}",
+            output.files[0].rust_source
+        );
+        // Should contain a synthetic enum (ProcessDataType or similar)
+        assert!(
+            output.files[0].rust_source.contains("if let"),
+            "unknown typeof should produce if-let pattern: {}",
             output.files[0].rust_source
         );
     }

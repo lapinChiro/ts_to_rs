@@ -13,12 +13,6 @@ use crate::pipeline::ResolvedType;
 use crate::pipeline::SyntheticTypeRegistry;
 use crate::registry::{TypeDef, TypeRegistry};
 
-/// Returns true if the expression is a `null` literal or `undefined` identifier.
-pub(super) fn is_null_or_undefined(expr: &ast::Expr) -> bool {
-    matches!(expr, ast::Expr::Lit(ast::Lit::Null(..)))
-        || matches!(expr, ast::Expr::Ident(id) if id.sym.as_ref() == "undefined")
-}
-
 /// Extracts the property name from an object literal key.
 pub(super) fn extract_prop_name(key: &ast::PropName) -> Option<String> {
     match key {
@@ -71,10 +65,6 @@ pub(super) fn common_named_type(types: &[RustType]) -> Option<RustType> {
         }
     }
     None
-}
-
-pub(super) fn is_null_literal(expr: &ast::Expr) -> bool {
-    matches!(expr, ast::Expr::Lit(ast::Lit::Null(_)))
 }
 
 /// Returns true if the resolved type is an object type (struct, named, vec, etc.).

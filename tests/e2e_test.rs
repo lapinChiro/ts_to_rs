@@ -789,3 +789,8 @@ fn test_e2e_mixed_features_ts_rust_stdout_match() {
 fn test_e2e_mutation_detection_ts_rust_stdout_match() {
     run_e2e_test("mutation_detection");
 }
+
+#[test]
+fn test_e2e_narrowing_null_eq_ts_rust_stdout_match() {
+    run_e2e_test("narrowing_null_eq");
+}

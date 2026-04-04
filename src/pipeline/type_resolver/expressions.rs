@@ -124,8 +124,10 @@ impl<'a> TypeResolver<'a> {
                 let cons = self.resolve_expr(&cond.cons);
                 let alt = self.resolve_expr(&cond.alt);
 
-                let cons_is_null = is_null_or_undefined(&cond.cons);
-                let alt_is_null = is_null_or_undefined(&cond.alt);
+                let cons_is_null =
+                    crate::pipeline::narrowing_patterns::is_null_or_undefined(&cond.cons);
+                let alt_is_null =
+                    crate::pipeline::narrowing_patterns::is_null_or_undefined(&cond.alt);
                 let cons_is_option = matches!(&cons, ResolvedType::Known(RustType::Option(_)));
                 let alt_is_option = matches!(&alt, ResolvedType::Known(RustType::Option(_)));
 

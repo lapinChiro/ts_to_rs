@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use swc_ecma_ast as ast;
 
 use crate::ir::{EnumVariant, RustType};
+use crate::pipeline::narrowing_patterns;
 
 /// Constraints collected from typeof/instanceof usage on an `any`-typed variable.
 #[derive(Debug, Default)]
@@ -61,14 +62,17 @@ pub(crate) fn collect_any_local_var_names(body: &ast::BlockStmt) -> Vec<String> 
         if let ast::Stmt::Decl(ast::Decl::Var(var_decl)) = stmt {
             for decl in &var_decl.decls {
                 if let ast::Pat::Ident(ident) = &decl.name {
-                    let is_any = ident.type_ann.as_ref().is_some_and(|ann| {
+                    let is_any_or_unknown = ident.type_ann.as_ref().is_some_and(|ann| {
                         matches!(
                             ann.type_ann.as_ref(),
                             ast::TsType::TsKeywordType(kw)
-                                if kw.kind == ast::TsKeywordTypeKind::TsAnyKeyword
+                                if matches!(kw.kind,
+                                    ast::TsKeywordTypeKind::TsAnyKeyword
+                                    | ast::TsKeywordTypeKind::TsUnknownKeyword
+                                )
                         )
                     });
-                    if is_any {
+                    if is_any_or_unknown {
                         names.push(ident.id.sym.to_string());
                     }
                 }
@@ -174,7 +178,9 @@ fn collect_from_expr(
     match expr {
         ast::Expr::Bin(bin) => {
             // typeof x === "string" pattern
-            if let Some((ast::Expr::Ident(ident), type_str)) = extract_typeof_and_string(bin) {
+            if let Some((ast::Expr::Ident(ident), type_str)) =
+                narrowing_patterns::extract_typeof_and_string(bin)
+            {
                 let name = ident.sym.to_string();
                 if param_names.contains(&name) {
                     let entry = result.entry(name).or_default();
@@ -210,36 +216,6 @@ fn collect_from_expr(
         }
         _ => {}
     }
-}
-
-/// Extracts (typeof operand, type string) from a binary comparison.
-/// Handles both `typeof x === "string"` and `"string" === typeof x`.
-fn extract_typeof_and_string(bin: &ast::BinExpr) -> Option<(&ast::Expr, String)> {
-    let is_eq = matches!(
-        bin.op,
-        ast::BinaryOp::EqEq | ast::BinaryOp::EqEqEq | ast::BinaryOp::NotEq | ast::BinaryOp::NotEqEq
-    );
-    if !is_eq {
-        return None;
-    }
-
-    // Left is typeof, right is string
-    if let ast::Expr::Unary(unary) = bin.left.as_ref() {
-        if unary.op == ast::UnaryOp::TypeOf {
-            if let ast::Expr::Lit(ast::Lit::Str(s)) = bin.right.as_ref() {
-                return Some((&unary.arg, s.value.to_string_lossy().into_owned()));
-            }
-        }
-    }
-    // Right is typeof, left is string
-    if let ast::Expr::Unary(unary) = bin.right.as_ref() {
-        if unary.op == ast::UnaryOp::TypeOf {
-            if let ast::Expr::Lit(ast::Lit::Str(s)) = bin.left.as_ref() {
-                return Some((&unary.arg, s.value.to_string_lossy().into_owned()));
-            }
-        }
-    }
-    None
 }
 
 /// Converts a snake_case or kebab-case string to PascalCase.
@@ -504,6 +480,14 @@ mod tests {
         );
         let names = collect_any_local_var_names(&body);
         assert_eq!(names, vec!["a".to_string(), "c".to_string()]);
+    }
+
+    #[test]
+    fn test_local_var_unknown_type_detected() {
+        // I-333: unknown-typed local variables should be collected like any-typed ones
+        let body = parse_fn_body(r#"function f() { let x: unknown = 1; }"#);
+        let names = collect_any_local_var_names(&body);
+        assert_eq!(names, vec!["x".to_string()]);
     }
 
     // --- build_any_enum_variants tests ---

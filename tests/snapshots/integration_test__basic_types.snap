@@ -3,8 +3,14 @@ source: tests/integration_test.rs
 expression: output
 ---
 #[derive(Debug, Clone, PartialEq)]
-pub enum AnyOrString {
-    Any(serde_json::Value),
+pub enum ProcessUnknownXType {
+    String(String),
+    Other(serde_json::Value),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ProcessUnknownXTypeOrString {
+    ProcessUnknownXType(ProcessUnknownXType),
     String(String),
 }
 
@@ -78,8 +84,8 @@ fn processNames(names: Vec<String>) -> f64 {
     names.len() as f64
 }
 
-fn processUnknown(x: serde_json::Value) -> String {
-    if false { x } else { "unknown".to_string() }
+fn processUnknown(x: ProcessUnknownXType) -> String {
+    if let ProcessUnknownXType::String(x) = x { x } else { "unknown".to_string() }
 }
 
 #[derive(Debug, Clone, PartialEq)]

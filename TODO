@@ -17,15 +17,12 @@ Tier 内の記載順序が優先度。根本原因を共有するイシューは
 
 - **[I-298]** **spread 上書き時の副作用式評価消失** — 発生頻度は極めて低い
 
-### RC-1: narrowing 基盤の欠陥 [L2]
+### RC-1: narrowing 残課題 [L2]
 
-typeof/null/truthy の narrowing が union enum 型を処理できない。型安全性の根幹であり、下流 7 イシューをブロック。
+Batch 5 で基盤欠陥（I-334/I-333/I-327）を解消済み。`typeof !==` の alternate narrowing も対応済み。残りは下流 4 件。
 
-- **[I-334]** **union typeof narrowing が `if false` に** — `resolve_typeof_match()`（`src/transformer/expressions/patterns.rs:485`）が union enum 未処理。typeof narrowing を使う全 union パターンがブロック
-- **[I-333]** **unknown typeof narrowing で型不一致** — I-334 と同根
-- **[I-327]** **`=== null` 後の narrowing 不完全** — `!== null` の then ブロック narrowing は実装済み（`src/pipeline/type_resolver/narrowing.rs:35`）。`=== null` の else ブロックで `Option<T>` → `T` に narrowing する逆方向が未実装。🔗 I-213
 - **[I-215]** **typeof "object"/"function" の narrowed type 未設定**
-- **[I-213]** **`!==` ガードの排除 narrowing 未実装** — 2 バリアント union で反対バリアントに narrowing
+- **[I-213]** **complement narrowing 未実装** — ガード条件の逆側（else ブロック）で union から特定バリアントを除外する narrowing 全般。具体的には: (1) `!==` ガードの排除 narrowing（2 バリアント union で反対バリアントに narrowing）、(2) `instanceof` の else narrowing（`if (x instanceof Dog) {} else { /* x は Dog 以外 */ }`）、(3) truthy の else narrowing（`if (x) {} else { /* x は null/falsy */ }`）、(4) early return 後のフロー narrowing（`if (x === null) { return } x.trim()`）。現在 `detect_narrowing_guard` は positive type を positive scope にのみ記録する設計（`src/pipeline/type_resolver/narrowing.rs:14-22`）
 - **[I-214]** **三項演算子の複合条件 (&&) narrowing** — `convert_cond_expr` が単一ガードのみ
 - **[I-256]** **any-narrowing の typeof 検出がトップレベルのみ** — Switch/While/For/Try 内の typeof 未検出
 

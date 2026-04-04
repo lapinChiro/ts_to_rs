@@ -139,6 +139,157 @@ fn test_narrowing_null_check() {
 }
 
 #[test]
+fn test_narrowing_eq_null_generates_event_in_alternate() {
+    // I-327: `x === null` should narrow x to T in the ELSE block
+    let res = resolve(
+        r#"
+        function foo(x: string | null): string {
+            if (x === null) {
+                return "null";
+            } else {
+                return x.trim();
+            }
+        }
+        "#,
+    );
+    // Should have a narrowing event for x → String in the else block
+    let has_else_narrowing = res
+        .narrowing_events
+        .iter()
+        .any(|e| e.var_name == "x" && matches!(e.narrowed_type, RustType::String));
+    assert!(
+        has_else_narrowing,
+        "=== null should create String narrowing event in else block, events: {:?}",
+        res.narrowing_events
+    );
+}
+
+#[test]
+fn test_narrowing_eq_null_without_alternate_generates_no_event() {
+    // `x === null` without else block → no narrowing event
+    let res = resolve(
+        r#"
+        function foo(x: string | null): void {
+            if (x === null) {
+                console.log("null");
+            }
+        }
+        "#,
+    );
+    // Should NOT have any narrowing event (no else block to narrow into)
+    let has_narrowing = res
+        .narrowing_events
+        .iter()
+        .any(|e| e.var_name == "x" && matches!(e.narrowed_type, RustType::String));
+    assert!(
+        !has_narrowing,
+        "=== null without else should not create narrowing event"
+    );
+}
+
+#[test]
+fn test_narrowing_typeof_neq_generates_event_in_alternate() {
+    // `typeof x !== "string"` should narrow x to String in the ELSE block
+    let res = resolve(
+        r#"
+        function foo(x: any) {
+            if (typeof x !== "string") {
+                console.log("not string");
+            } else {
+                console.log(x);
+            }
+        }
+        "#,
+    );
+    let has_else_narrowing = res
+        .narrowing_events
+        .iter()
+        .any(|e| e.var_name == "x" && matches!(e.narrowed_type, RustType::String));
+    assert!(
+        has_else_narrowing,
+        "typeof !== should create String narrowing event in else block, events: {:?}",
+        res.narrowing_events
+    );
+}
+
+#[test]
+fn test_narrowing_compound_eq_null_and_typeof_generates_both_events() {
+    // Compound: x !== null && typeof y === "string"
+    // x narrowing → consequent (is_neq=true), y narrowing → consequent (is_eq=true)
+    let res = resolve(
+        r#"
+        function foo(x: string | null, y: any) {
+            if (x !== null && typeof y === "string") {
+                console.log(x);
+                console.log(y);
+            }
+        }
+        "#,
+    );
+    let has_x_narrowing = res
+        .narrowing_events
+        .iter()
+        .any(|e| e.var_name == "x" && matches!(e.narrowed_type, RustType::String));
+    let has_y_narrowing = res
+        .narrowing_events
+        .iter()
+        .any(|e| e.var_name == "y" && matches!(e.narrowed_type, RustType::String));
+    assert!(
+        has_x_narrowing,
+        "compound guard should narrow x in consequent, events: {:?}",
+        res.narrowing_events
+    );
+    assert!(
+        has_y_narrowing,
+        "compound guard should narrow y in consequent, events: {:?}",
+        res.narrowing_events
+    );
+}
+
+#[test]
+fn test_narrowing_compound_no_alternate_narrowing_for_individual_guards() {
+    // Compound with inverted null check: x === null && typeof y === "string"
+    // In the else block, we know !(x===null && typeof y==="string") = (x!==null || typeof y!=="string")
+    // This means we can NOT narrow x individually in the else block.
+    // Alternate narrowing is only valid for simple (non-compound) conditions.
+    let res = resolve(
+        r#"
+        function foo(x: string | null, y: any) {
+            if (x === null && typeof y === "string") {
+                console.log(y);
+            } else {
+                console.log(x);
+            }
+        }
+        "#,
+    );
+    // x === null inside && → NO alternate narrowing (would be semantically incorrect)
+    let x_events: Vec<_> = res
+        .narrowing_events
+        .iter()
+        .filter(|e| e.var_name == "x" && matches!(e.narrowed_type, RustType::String))
+        .collect();
+    // y typeof === "string" inside && → consequent narrowing only
+    let y_events: Vec<_> = res
+        .narrowing_events
+        .iter()
+        .filter(|e| e.var_name == "y" && matches!(e.narrowed_type, RustType::String))
+        .collect();
+    assert_eq!(
+        x_events.len(),
+        0,
+        "x should have NO narrowing events (compound && prevents alternate narrowing), events: {:?}",
+        res.narrowing_events
+    );
+    assert_eq!(
+        y_events.len(),
+        1,
+        "y should have 1 narrowing event (in consequent), events: {:?}",
+        res.narrowing_events
+    );
+}
+
+#[test]
 fn test_unknown_expr() {
     let res = resolve("const x = unknownFunc();");
     let has_unknown = res

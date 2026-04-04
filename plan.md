@@ -2,7 +2,7 @@
 
 ## 次のアクション
 
-**次のアクション**: Batch 5（narrowing 基盤: I-334 + I-333 + I-327）
+**次のアクション**: Batch 5b（narrowing 残課題: I-215 + I-213 + I-214 + I-256）
 
 ---
 
@@ -18,8 +18,8 @@
 | Batch | イシュー | 根本原因 | Level | 状態 |
 |-------|---------|---------|-------|------|
 | 4c | I-347+I-348 | TypeDef 型操作メソッド補完（Function/ConstValue） | L2: 設計 | ✅ 完了 |
-| 5 | I-334+I-333+I-327 | narrowing 基盤欠陥（RC-1 内 7 件中コア 3 件） | L2: 設計 | |
-| 5b | I-215+I-213+I-214+I-256 | narrowing 残課題（Batch 5 基盤の上に構築） | L2: 設計 | |
+| 5 | I-333+I-327+I-334 | narrowing 基盤欠陥 + DRY 修正 | L2: 設計 | ✅ 完了 |
+| 5b | I-215+I-213+I-214+I-256 | narrowing 残課題（Batch 5 基盤の上に構築）。I-213 は complement narrowing 全般: instanceof else / truthy else / early return フロー narrowing を含む | L2: 設計 | |
 | 6 | I-338+I-318 | 構造的同値性欠如（synthetic 型の重複生成） | L2: 設計 | |
 | 7 | I-320+I-328+I-323 | 個別修正（optional param + never + toString） | L3: ブロッカー | |
 | 8 | I-324+I-325+I-344 | 文字列型モデル（&str/String 不一致） | L3: 拡大 | |
@@ -56,7 +56,7 @@ Batch 4 系列完了によりブロック解除済み。I-301（~7件）、I-306
 | エラーインスタンス | 54 |
 | コンパイル(file) | 112/158 (70.9%) |
 | コンパイル(dir) | 156/158 (98.7%) |
-| テスト数 | 1942（ユニット 1763 + コンパイル 3 + スナップショット 3 + E2E 84 + integration 89）※I-349 完了時点 |
+| テスト数 | 1961（ユニット 1781 + コンパイル 3 + スナップショット 3 + E2E 85 + integration 89）※Batch 5 完了時点 |
 | コンパイルテストスキップ | 25 件（builtins なし）/ 24 件（builtins あり） |
 
 ### 長期ビジョン
@@ -73,4 +73,4 @@ Batch 4 系列完了によりブロック解除済み。I-301（~7件）、I-306
 
 - 設計判断: [doc/design-decisions.md](doc/design-decisions.md)
 - 調査レポート: `report/`
-- 完了済みバッチ: `git log`（Batch 1〜3b, R-1, C-4, T-1〜T-4, S1, D-1, 4a〜4e, 4c）
+- 完了済みバッチ: `git log`（Batch 1〜3b, R-1, C-4, T-1〜T-4, S1, D-1, 4a〜4e, 4c, 5）
