@@ -36,7 +36,7 @@ fn passthrough(x: serde_json::Value) {
     println!("{}", x);
 }
 
-fn checkArrow(x: CheckArrowXType) -> () {
+fn checkArrow(x: CheckArrowXType) {
     if let CheckArrowXType::String(x) = x {
         println!("{}", x);
     }

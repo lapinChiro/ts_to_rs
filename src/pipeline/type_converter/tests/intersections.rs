@@ -337,7 +337,7 @@ fn test_intersection_with_method_generates_impl_in_synthetic() {
             assert_eq!(methods.len(), 1);
             assert_eq!(methods[0].name, "foo");
             assert!(methods[0].has_self);
-            assert!(methods[0].return_type.is_none()); // void → None
+            assert_eq!(methods[0].return_type, Some(RustType::Unit)); // void → Unit
         }
         other => panic!("expected Item::Impl, got {other:?}"),
     }

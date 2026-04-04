@@ -83,7 +83,7 @@ fn test_collect_interface_signatures_ident_param_with_type_collected() {
     assert_eq!(ts_method_sigs.len(), 1);
 
     // Resolve to RustType for assertion
-    let resolved = crate::ts_type_info::resolve::resolve_method_sig(
+    let resolved = crate::ts_type_info::resolve::typedef::resolve_method_sig(
         ts_method_sigs[0].clone(),
         &reg,
         &mut synthetic,
@@ -108,7 +108,7 @@ fn test_collect_interface_signatures_rest_param_collected() {
     let ts_method_sigs = ts_sigs.methods.get("foo").expect("foo method should exist");
     assert_eq!(ts_method_sigs.len(), 1);
 
-    let resolved = crate::ts_type_info::resolve::resolve_method_sig(
+    let resolved = crate::ts_type_info::resolve::typedef::resolve_method_sig(
         ts_method_sigs[0].clone(),
         &reg,
         &mut synthetic,
@@ -138,13 +138,13 @@ fn test_collect_interface_signatures_overload_accumulates() {
         "overloaded methods should accumulate in Vec"
     );
 
-    let resolved0 = crate::ts_type_info::resolve::resolve_method_sig(
+    let resolved0 = crate::ts_type_info::resolve::typedef::resolve_method_sig(
         ts_method_sigs[0].clone(),
         &reg,
         &mut synthetic,
     )
     .unwrap();
-    let resolved1 = crate::ts_type_info::resolve::resolve_method_sig(
+    let resolved1 = crate::ts_type_info::resolve::typedef::resolve_method_sig(
         ts_method_sigs[1].clone(),
         &reg,
         &mut synthetic,
@@ -240,7 +240,7 @@ fn test_collect_interface_signatures_call_signature() {
     assert!(ts_sigs.methods.is_empty());
     assert_eq!(ts_sigs.call_signatures.len(), 1);
 
-    let resolved = crate::ts_type_info::resolve::resolve_method_sig(
+    let resolved = crate::ts_type_info::resolve::typedef::resolve_method_sig(
         ts_sigs.call_signatures.into_iter().next().unwrap(),
         &reg,
         &mut synthetic,
@@ -278,7 +278,7 @@ fn test_collect_interface_signatures_construct_signature() {
     let ctor = ts_sigs.constructor.expect("constructor should be Some");
     assert_eq!(ctor.len(), 1);
 
-    let resolved = crate::ts_type_info::resolve::resolve_method_sig(
+    let resolved = crate::ts_type_info::resolve::typedef::resolve_method_sig(
         ctor.into_iter().next().unwrap(),
         &reg,
         &mut synthetic,

@@ -195,7 +195,7 @@ fn test_convert_interface_method_no_args_void_return() {
             assert_eq!(methods[0].name, "run");
             assert!(methods[0].has_self);
             assert!(methods[0].params.is_empty());
-            assert_eq!(methods[0].return_type, None);
+            assert_eq!(methods[0].return_type, Some(RustType::Unit));
         }
         _ => panic!("expected Item::Trait"),
     }

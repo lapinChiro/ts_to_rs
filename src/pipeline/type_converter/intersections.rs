@@ -146,49 +146,43 @@ fn preprocess_intersection_members(
 
 /// Extracts fields and methods from an intersection type's member types.
 ///
-/// Shared logic for both type alias intersections and annotation-position intersections.
-/// Handles `TsTypeLit` (property sigs → fields, method sigs → methods),
-/// `TsTypeRef` (resolved from registry or embedded), and `TsKeywordType` (skipped).
-/// Falls back to `convert_ts_type` for other member types.
+/// Each SWC member is converted to TsTypeInfo, then resolved via resolve functions.
+/// Handles TypeLiteral (fields + methods), TypeRef (registry lookup), keyword (skip),
+/// and fallback (resolve_ts_type).
 fn extract_intersection_members(
     members: &[&TsType],
     synthetic: &mut SyntheticTypeRegistry,
     reg: &TypeRegistry,
 ) -> Result<(Vec<StructField>, Vec<Method>)> {
+    use crate::ts_type_info::resolve::intersection::{
+        resolve_method_info, resolve_type_literal_fields,
+    };
+
     let mut fields = Vec::new();
     let mut methods = Vec::new();
     for (i, ty) in members.iter().enumerate() {
-        match *ty {
-            TsType::TsTypeLit(lit) => {
-                for member in &lit.members {
-                    match member {
-                        TsTypeElement::TsPropertySignature(prop) => {
-                            let field = convert_property_signature(prop, synthetic, reg)?;
-                            if fields.iter().any(|f: &StructField| f.name == field.name) {
-                                return Err(anyhow!(
-                                    "duplicate field '{}' in intersection type",
-                                    field.name
-                                ));
-                            }
-                            fields.push(field);
-                        }
-                        TsTypeElement::TsMethodSignature(sig) => {
-                            methods.push(convert_method_signature(sig, synthetic, reg)?);
-                        }
-                        _ => continue,
+        let info = crate::ts_type_info::convert_to_ts_type_info(ty)?;
+        match &info {
+            crate::ts_type_info::TsTypeInfo::TypeLiteral(lit) => {
+                let lit_fields = resolve_type_literal_fields(lit, reg, synthetic)?;
+                for field in lit_fields {
+                    if fields.iter().any(|f: &StructField| f.name == field.name) {
+                        return Err(anyhow!(
+                            "duplicate field '{}' in intersection type",
+                            field.name
+                        ));
                     }
+                    fields.push(field);
+                }
+                for method_info in &lit.methods {
+                    methods.push(resolve_method_info(method_info, reg, synthetic)?);
                 }
             }
-            TsType::TsTypeRef(type_ref) => {
-                let type_name = match &type_ref.type_name {
-                    swc_ecma_ast::TsEntityName::Ident(ident) => ident.sym.to_string(),
-                    _ => return Err(anyhow!("unsupported qualified type name in intersection")),
-                };
-                // Try to resolve and merge fields from TypeRegistry
+            crate::ts_type_info::TsTypeInfo::TypeRef { name, .. } => {
                 if let Some(crate::registry::TypeDef::Struct {
                     fields: resolved_fields,
                     ..
-                }) = reg.get(&type_name)
+                }) = reg.get(name)
                 {
                     for field in resolved_fields {
                         let sanitized = sanitize_field_name(&field.name);
@@ -205,8 +199,8 @@ fn extract_intersection_members(
                         });
                     }
                 } else {
-                    // Unresolved type reference — embed as a named field
-                    let rust_type = convert_ts_type(ty, synthetic, reg)?;
+                    let rust_type =
+                        crate::ts_type_info::resolve::resolve_ts_type(&info, reg, synthetic)?;
                     fields.push(StructField {
                         vis: None,
                         name: format!("_{i}"),
@@ -215,11 +209,22 @@ fn extract_intersection_members(
                 }
             }
             // Skip keyword types in intersections (e.g., `string & {}` → use object fields only).
-            // This is safe for TypeScript branding patterns where the keyword is nominal.
-            TsType::TsKeywordType(_) => continue,
-            // Fallback: try convert_ts_type for any other member type (mapped, conditional, etc.)
-            other => {
-                let rust_type = convert_ts_type(other, synthetic, reg).unwrap_or(RustType::Any);
+            crate::ts_type_info::TsTypeInfo::String
+            | crate::ts_type_info::TsTypeInfo::Number
+            | crate::ts_type_info::TsTypeInfo::Boolean
+            | crate::ts_type_info::TsTypeInfo::Any
+            | crate::ts_type_info::TsTypeInfo::Unknown
+            | crate::ts_type_info::TsTypeInfo::Object
+            | crate::ts_type_info::TsTypeInfo::Void
+            | crate::ts_type_info::TsTypeInfo::Null
+            | crate::ts_type_info::TsTypeInfo::Undefined
+            | crate::ts_type_info::TsTypeInfo::Never
+            | crate::ts_type_info::TsTypeInfo::BigInt
+            | crate::ts_type_info::TsTypeInfo::Symbol => continue,
+            _ => {
+                let rust_type =
+                    crate::ts_type_info::resolve::resolve_ts_type(&info, reg, synthetic)
+                        .unwrap_or(RustType::Any);
                 fields.push(StructField {
                     vis: None,
                     name: format!("_{i}"),
@@ -250,116 +255,42 @@ fn merge_fields(base: &[StructField], variant: Vec<StructField>) -> Vec<StructFi
     merged
 }
 
-/// Extracts fields from a single union variant type for use in intersection distribution.
-///
-/// Handles TsTypeLit (extract property signatures), TsTypeRef (resolve from registry or embed),
-/// and other types (convert_ts_type fallback as embedded `_data` field).
-fn extract_variant_fields(
-    ty: &TsType,
-    synthetic: &mut SyntheticTypeRegistry,
-    reg: &TypeRegistry,
-) -> Result<Vec<StructField>> {
-    let mut fields = Vec::new();
-    match ty {
-        TsType::TsTypeLit(lit) => {
-            for member in &lit.members {
-                if let TsTypeElement::TsPropertySignature(prop) = member {
-                    fields.push(convert_property_signature(prop, synthetic, reg)?);
-                }
-            }
-        }
-        TsType::TsTypeRef(type_ref) => {
-            let type_name = match &type_ref.type_name {
-                swc_ecma_ast::TsEntityName::Ident(ident) => Some(ident.sym.to_string()),
-                _ => None,
-            };
-            if let Some(ref name) = type_name {
-                if let Some(crate::registry::TypeDef::Struct {
-                    fields: resolved, ..
-                }) = reg.get(name)
-                {
-                    for field in resolved {
-                        fields.push(StructField {
-                            vis: None,
-                            name: sanitize_field_name(&field.name),
-                            ty: field.ty.clone(),
-                        });
-                    }
-                    return Ok(fields);
-                }
-            }
-            // Unresolved type ref — embed as _data field
-            let rust_type = convert_ts_type(ty, synthetic, reg)?;
-            fields.push(StructField {
-                vis: None,
-                name: "_data".to_string(),
-                ty: rust_type,
-            });
-        }
-        _ => {
-            // Other type — convert and embed as _data field
-            let rust_type = convert_ts_type(ty, synthetic, reg).unwrap_or(RustType::Any);
-            fields.push(StructField {
-                vis: None,
-                name: "_data".to_string(),
-                ty: rust_type,
-            });
-        }
-    }
-    Ok(fields)
-}
-
 /// Distributes an intersection with a union member: `A & (B | C)` → enum with A's fields in each variant.
 ///
 /// Returns `(variants, serde_tag)` where `serde_tag` is set if a discriminant field is detected.
 fn distribute_intersection_with_union(
     base_fields: Vec<StructField>,
-    union: &swc_ecma_ast::TsUnionType,
+    union_info: &[crate::ts_type_info::TsTypeInfo],
     synthetic: &mut SyntheticTypeRegistry,
     reg: &TypeRegistry,
 ) -> Result<(Vec<EnumVariant>, Option<String>)> {
-    use super::unions::{extract_variant_info, find_discriminant_field};
-
-    // Collect type literals for discriminant detection
-    let type_lits: Vec<&swc_ecma_ast::TsTypeLit> = union
-        .types
-        .iter()
-        .filter_map(|ty| {
-            let inner = unwrap_parenthesized(ty.as_ref());
-            match inner {
-                TsType::TsTypeLit(lit) => Some(lit),
-                _ => None,
-            }
-        })
-        .collect();
-
-    // Try discriminant detection (only if all variants are TsTypeLit)
-    let serde_tag = if type_lits.len() == union.types.len() && type_lits.len() >= 2 {
-        find_discriminant_field(&type_lits)
-    } else {
-        None
-    };
+    let serde_tag = crate::ts_type_info::resolve::intersection::find_discriminant_field(union_info);
 
     let mut variants = Vec::new();
 
     if let Some(ref discriminant_field) = serde_tag {
-        // Discriminated union: extract variant info using the discriminant
-        for type_lit in &type_lits {
-            let (disc_value, variant_fields) =
-                extract_variant_info(type_lit, discriminant_field, synthetic, reg)?;
+        for variant in union_info {
+            let (raw_value, pascal_name, variant_fields) =
+                crate::ts_type_info::resolve::intersection::extract_discriminated_variant(
+                    variant,
+                    discriminant_field,
+                    reg,
+                    synthetic,
+                )?;
             let merged = merge_fields(&base_fields, variant_fields);
             variants.push(EnumVariant {
-                name: super::string_to_pascal_case(&disc_value),
-                value: Some(EnumValue::Str(disc_value)),
+                name: pascal_name,
+                value: Some(EnumValue::Str(raw_value)),
                 data: None,
                 fields: merged,
             });
         }
     } else {
-        // Non-discriminated: generate numbered variants
-        for (idx, ty) in union.types.iter().enumerate() {
-            let inner = unwrap_parenthesized(ty.as_ref());
-            let variant_fields = extract_variant_fields(inner, synthetic, reg)?;
+        for (idx, variant) in union_info.iter().enumerate() {
+            let variant_fields =
+                crate::ts_type_info::resolve::intersection::extract_variant_fields(
+                    variant, reg, synthetic,
+                )?;
             let merged = merge_fields(&base_fields, variant_fields);
             variants.push(EnumVariant {
                 name: format!("Variant{idx}"),
@@ -450,11 +381,10 @@ pub(super) fn try_convert_intersection_type(
         let (base_fields, methods) =
             extract_intersection_members(&non_union_members, synthetic, reg)?;
 
-        // Distribute with the first union
-        let first_union = match union_members[0] {
-            TsType::TsUnionOrIntersectionType(
-                swc_ecma_ast::TsUnionOrIntersectionType::TsUnionType(u),
-            ) => u,
+        // Distribute with the first union — convert SWC union to TsTypeInfo
+        let first_union_info = match crate::ts_type_info::convert_to_ts_type_info(union_members[0])?
+        {
+            crate::ts_type_info::TsTypeInfo::Union(members) => members,
             _ => unreachable!(),
         };
 
@@ -470,7 +400,7 @@ pub(super) fn try_convert_intersection_type(
         }
 
         let (variants, serde_tag) =
-            distribute_intersection_with_union(extra_base, first_union, synthetic, reg)?;
+            distribute_intersection_with_union(extra_base, &first_union_info, synthetic, reg)?;
 
         let enum_name = sanitize_rust_type_name(&decl.id.sym);
 

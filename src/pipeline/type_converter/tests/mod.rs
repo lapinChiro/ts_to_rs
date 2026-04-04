@@ -9,6 +9,7 @@ mod structural_transforms;
 mod type_alias_forms;
 mod type_aliases;
 mod unions;
+mod unions_discriminated;
 
 use super::*;
 use crate::ir::{StructField, TypeParam};

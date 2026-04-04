@@ -4,9 +4,9 @@
 //! annotations into the IR representation. Synthetic types (union enums,
 //! inline structs) are registered in [`SyntheticTypeRegistry`].
 
-// intersections, unions は transformer フェーズの convert_type_alias 等から使用されている。
-// 型解決は convert_ts_type → TsTypeInfo → resolve 経由に統一済み（Batch 4d-B）。
-// declaration 変換の TsTypeInfo 移行は PRD-C で実施予定。
+// 型解決は convert_ts_type → TsTypeInfo → resolve 経由に統一済み（Batch 4d-B, 4d-C）。
+// declaration 変換（unions, intersections）の型解決も TsTypeInfo 経由に移行完了。
+// interface 変換（interfaces）は SWC AST 依存が残存（別 PRD で対応予定）。
 mod interfaces;
 mod intersections;
 mod type_aliases;

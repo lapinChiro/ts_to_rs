@@ -15,7 +15,7 @@ async fn noReturnType() {
 }
 
 #[tokio::main]
-async fn main() -> () {
+async fn main() {
     let num = fetchNumber().await;
     println!("{}", num);
 }

@@ -413,8 +413,7 @@ pub(super) fn convert_method_signature(
         .type_ann
         .as_ref()
         .map(|ann| convert_ts_type(&ann.type_ann, synthetic, reg))
-        .transpose()?
-        .and_then(|ty| if ty == RustType::Unit { None } else { Some(ty) });
+        .transpose()?;
 
     Ok(Method {
         vis: Visibility::Public,

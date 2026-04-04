@@ -458,13 +458,15 @@ fn generate_closure(
         .map(generate_param)
         .collect::<Vec<_>>()
         .join(", ");
-    let ret_str = match return_type {
-        Some(ty) => format!(" -> {}", generate_type(ty)),
-        None => String::new(),
+    let has_return_type = matches!(return_type, Some(ty) if *ty != RustType::Unit);
+    let ret_str = if has_return_type {
+        format!(" -> {}", generate_type(return_type.unwrap()))
+    } else {
+        String::new()
     };
     match body {
         ClosureBody::Expr(expr) => {
-            if return_type.is_some() {
+            if has_return_type {
                 format!("|{params_str}|{ret_str} {{ {} }}", generate_expr(expr))
             } else {
                 format!("|{params_str}|{ret_str} {}", generate_expr(expr))

@@ -21,6 +21,23 @@ pub(super) fn generate_param(p: &Param) -> String {
     }
 }
 
+/// Formats the return type annotation for a function/method signature.
+///
+/// - `None` → empty (implicit `()`)
+/// - `Some(Unit)` → empty (Rust convention: omit `-> ()`)
+/// - `Some(ty)` → `" -> {ty}"`
+fn format_return_type(return_type: &Option<RustType>) -> String {
+    match return_type {
+        Some(ty) if *ty != RustType::Unit => format!(" -> {}", generate_type(ty)),
+        _ => String::new(),
+    }
+}
+
+/// Returns true if the return type requires a value (not void/unit/absent).
+fn has_non_unit_return_type(return_type: &Option<RustType>) -> bool {
+    matches!(return_type, Some(ty) if *ty != RustType::Unit)
+}
+
 /// Generates Rust source code from a list of IR items.
 ///
 /// The Generator is a pure IR → text conversion. It does not perform semantic
@@ -200,10 +217,7 @@ fn generate_item(item: &Item) -> String {
                 .map(generate_param)
                 .collect::<Vec<_>>()
                 .join(", ");
-            let ret_str = match return_type {
-                Some(ty) => format!(" -> {}", generate_type(ty)),
-                None => String::new(),
-            };
+            let ret_str = format_return_type(return_type);
             let name = escape_ident(name);
             let mut out = format!(
                 "{attr_str}{vis_str}{async_str}fn {name}{generics}({params_str}){ret_str} {{\n"
@@ -245,10 +259,7 @@ fn generate_trait_method_sig(method: &Method) -> String {
     } else {
         other_params
     };
-    let ret_str = match &method.return_type {
-        Some(ty) => format!(" -> {}", generate_type(ty)),
-        None => String::new(),
-    };
+    let ret_str = format_return_type(&method.return_type);
 
     match &method.body {
         None => {
@@ -294,14 +305,11 @@ fn generate_method(method: &Method, in_trait_impl: bool) -> String {
     } else {
         other_params
     };
-    let ret_str = match &method.return_type {
-        Some(ty) => format!(" -> {}", generate_type(ty)),
-        None => String::new(),
-    };
+    let ret_str = format_return_type(&method.return_type);
     let name = &method.name;
     let mut out = format!("    {vis_str}fn {name}({params_str}){ret_str} {{\n");
     let body = method.body.as_deref().unwrap_or(&[]);
-    if body.is_empty() && method.return_type.is_some() {
+    if body.is_empty() && has_non_unit_return_type(&method.return_type) {
         // Non-unit return type with empty body: insert todo!() to avoid type mismatch
         out.push_str("        todo!()\n");
     } else {

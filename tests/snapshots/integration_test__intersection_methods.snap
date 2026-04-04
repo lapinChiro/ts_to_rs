@@ -1,6 +1,5 @@
 ---
 source: tests/integration_test.rs
-assertion_line: 543
 expression: output
 ---
 impl Named {
@@ -11,11 +10,11 @@ impl Named {
 
 #[derive(Debug, Clone, PartialEq)]
 struct Named {
-    name: String,
+    pub name: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 struct PropsOnly {
-    a: String,
-    b: f64,
+    pub a: String,
+    pub b: f64,
 }

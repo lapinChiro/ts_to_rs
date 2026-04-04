@@ -18,7 +18,7 @@ fn maybeReturn(flag: bool) -> Option<String> {
     }
 }
 
-async fn runAsync() -> () {
+async fn runAsync() {
     println!("done");
 }
 

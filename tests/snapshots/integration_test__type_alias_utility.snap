@@ -42,13 +42,13 @@ struct ExtendedConfig {
     host: String,
     port: f64,
     debug: bool,
-    extra: String,
+    pub extra: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 struct Combined {
-    a: f64,
-    b: String,
+    pub a: f64,
+    pub b: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]

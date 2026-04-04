@@ -4,19 +4,19 @@ expression: output
 ---
 #[derive(Debug, Clone, PartialEq)]
 struct Combined {
-    name: String,
-    age: f64,
+    pub name: String,
+    pub age: f64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 struct Triple {
-    a: String,
-    b: f64,
-    c: bool,
+    pub a: String,
+    pub b: f64,
+    pub c: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 struct WithOptional {
-    name: String,
-    nick: Option<String>,
+    pub name: String,
+    pub nick: Option<String>,
 }

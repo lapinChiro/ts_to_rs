@@ -9,13 +9,13 @@ pub struct _TypeLit0 {
 
 #[derive(Debug, Clone, PartialEq)]
 struct WithMapped<T> {
-    x: String,
+    pub x: String,
     _1: T,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 struct WithConditional<T, U> {
-    x: String,
+    pub x: String,
     _1: _TypeLit0,
     _phantom_t: std::marker::PhantomData<T>,
     _phantom_u: std::marker::PhantomData<U>,

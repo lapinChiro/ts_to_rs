@@ -16,29 +16,25 @@ pub(super) fn try_convert_discriminated_union(
     synthetic: &mut SyntheticTypeRegistry,
     reg: &TypeRegistry,
 ) -> Result<Option<Item>> {
-    let union = match decl.type_ann.as_ref() {
-        TsType::TsUnionOrIntersectionType(
-            swc_ecma_ast::TsUnionOrIntersectionType::TsUnionType(u),
-        ) => u,
+    // Convert union to TsTypeInfo
+    let union_members = match crate::ts_type_info::convert_to_ts_type_info(decl.type_ann.as_ref())?
+    {
+        crate::ts_type_info::TsTypeInfo::Union(members) => members,
         _ => return Ok(None),
     };
 
-    // All members must be object type literals
-    let type_lits: Vec<&swc_ecma_ast::TsTypeLit> = union
-        .types
-        .iter()
-        .filter_map(|ty| match ty.as_ref() {
-            TsType::TsTypeLit(lit) => Some(lit),
-            _ => None,
-        })
-        .collect();
-
-    if type_lits.len() != union.types.len() || type_lits.len() < 2 {
+    // All members must be TypeLiteral (2+ members)
+    if union_members.len() < 2
+        || !union_members
+            .iter()
+            .all(|m| matches!(m, crate::ts_type_info::TsTypeInfo::TypeLiteral(_)))
+    {
         return Ok(None);
     }
 
     // Find a common field that has string literal types in all members
-    let discriminant_field = find_discriminant_field(&type_lits);
+    let discriminant_field =
+        crate::ts_type_info::resolve::intersection::find_discriminant_field(&union_members);
     let discriminant_field = match discriminant_field {
         Some(f) => f,
         None => return Ok(None),
@@ -46,12 +42,17 @@ pub(super) fn try_convert_discriminated_union(
 
     // Build enum variants
     let mut variants = Vec::new();
-    for type_lit in &type_lits {
-        let (discriminant_value, other_fields) =
-            extract_variant_info(type_lit, &discriminant_field, synthetic, reg)?;
+    for member in &union_members {
+        let (raw_value, pascal_name, other_fields) =
+            crate::ts_type_info::resolve::intersection::extract_discriminated_variant(
+                member,
+                &discriminant_field,
+                reg,
+                synthetic,
+            )?;
         variants.push(EnumVariant {
-            name: string_to_pascal_case(&discriminant_value),
-            value: Some(EnumValue::Str(discriminant_value)),
+            name: pascal_name,
+            value: Some(EnumValue::Str(raw_value)),
             data: None,
             fields: other_fields,
         });
@@ -63,134 +64,6 @@ pub(super) fn try_convert_discriminated_union(
         serde_tag: Some(discriminant_field),
         variants,
     }))
-}
-
-/// Finds a field name that is present in all type literals with a string literal type.
-pub(super) fn find_discriminant_field(type_lits: &[&swc_ecma_ast::TsTypeLit]) -> Option<String> {
-    // Collect field names from the first member
-    let first = type_lits[0];
-    for member in &first.members {
-        if let TsTypeElement::TsPropertySignature(prop) = member {
-            let field_name = match prop.key.as_ref() {
-                Expr::Ident(ident) => ident.sym.to_string(),
-                _ => continue,
-            };
-
-            // Check if this field has a string literal type
-            let has_str_lit = prop
-                .type_ann
-                .as_ref()
-                .is_some_and(|ann| is_string_literal_type(&ann.type_ann));
-
-            if !has_str_lit {
-                continue;
-            }
-
-            // Check if all other members have this field with a string literal type
-            let all_have = type_lits[1..].iter().all(|lit| {
-                lit.members.iter().any(|m| {
-                    if let TsTypeElement::TsPropertySignature(p) = m {
-                        let name = match p.key.as_ref() {
-                            Expr::Ident(id) => id.sym.to_string(),
-                            _ => return false,
-                        };
-                        name == field_name
-                            && p.type_ann
-                                .as_ref()
-                                .is_some_and(|ann| is_string_literal_type(&ann.type_ann))
-                    } else {
-                        false
-                    }
-                })
-            });
-
-            if all_have {
-                // Verify discriminant values are unique across all variants
-                let mut seen_values = std::collections::HashSet::new();
-                let all_unique = type_lits.iter().all(|lit| {
-                    lit.members.iter().any(|m| {
-                        if let TsTypeElement::TsPropertySignature(p) = m {
-                            let name = match p.key.as_ref() {
-                                Expr::Ident(id) => id.sym.to_string(),
-                                _ => return false,
-                            };
-                            if name == field_name {
-                                if let Some(ann) = &p.type_ann {
-                                    if let TsType::TsLitType(lit_type) = ann.type_ann.as_ref() {
-                                        if let swc_ecma_ast::TsLit::Str(s) = &lit_type.lit {
-                                            return seen_values
-                                                .insert(s.value.to_string_lossy().into_owned());
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        false
-                    })
-                });
-                if all_unique {
-                    return Some(field_name);
-                }
-                // Duplicate discriminant values → not a valid discriminated union
-            }
-        }
-    }
-    None
-}
-
-/// Checks if a type is a string literal type (e.g., `"click"`).
-fn is_string_literal_type(ty: &TsType) -> bool {
-    matches!(
-        ty,
-        TsType::TsLitType(lit) if matches!(&lit.lit, swc_ecma_ast::TsLit::Str(_))
-    )
-}
-
-/// Extracts the discriminant value and non-discriminant fields from a type literal.
-pub(super) fn extract_variant_info(
-    type_lit: &swc_ecma_ast::TsTypeLit,
-    discriminant_field: &str,
-    synthetic: &mut SyntheticTypeRegistry,
-    reg: &TypeRegistry,
-) -> Result<(String, Vec<StructField>)> {
-    let mut discriminant_value = None;
-    let mut fields = Vec::new();
-
-    for member in &type_lit.members {
-        match member {
-            TsTypeElement::TsPropertySignature(prop) => {
-                let field_name = match prop.key.as_ref() {
-                    Expr::Ident(ident) => ident.sym.to_string(),
-                    _ => return Err(anyhow!("unsupported property key in discriminated union")),
-                };
-
-                if field_name == discriminant_field {
-                    // Extract discriminant value
-                    let ann = prop
-                        .type_ann
-                        .as_ref()
-                        .ok_or_else(|| anyhow!("discriminant field has no type annotation"))?;
-                    match ann.type_ann.as_ref() {
-                        TsType::TsLitType(lit) => match &lit.lit {
-                            swc_ecma_ast::TsLit::Str(s) => {
-                                discriminant_value = Some(s.value.to_string_lossy().into_owned());
-                            }
-                            _ => return Err(anyhow!("discriminant must be a string literal")),
-                        },
-                        _ => return Err(anyhow!("discriminant must be a string literal type")),
-                    }
-                } else {
-                    // Regular field
-                    let field = convert_property_signature(prop, synthetic, reg)?;
-                    fields.push(field);
-                }
-            }
-            _ => return Err(anyhow!("unsupported member in discriminated union variant")),
-        }
-    }
-
-    let value = discriminant_value.ok_or_else(|| anyhow!("discriminant value not found"))?;
-    Ok((value, fields))
 }
 
 /// Tries to convert a type alias with a union body where all members are string literals.
@@ -397,39 +270,40 @@ pub(super) fn try_convert_general_union(
                     fields: vec![],
                 });
             }
-            TsType::TsTypeLit(lit) => {
-                let mut fields = Vec::new();
-                for member in &lit.members {
-                    if let TsTypeElement::TsPropertySignature(prop) = member {
-                        fields.push(convert_property_signature(prop, synthetic, reg)?);
-                    }
+            TsType::TsTypeLit(_) => {
+                let info = crate::ts_type_info::convert_to_ts_type_info(ty)?;
+                if let crate::ts_type_info::TsTypeInfo::TypeLiteral(lit) = &info {
+                    let fields =
+                        crate::ts_type_info::resolve::intersection::resolve_type_literal_fields(
+                            lit, reg, synthetic,
+                        )?;
+                    variants.push(EnumVariant {
+                        name: format!("Variant{}", variants.len()),
+                        value: None,
+                        data: None,
+                        fields,
+                    });
                 }
-                variants.push(EnumVariant {
-                    name: format!("Variant{}", variants.len()),
-                    value: None,
-                    data: None,
-                    fields,
-                });
             }
             TsType::TsUnionOrIntersectionType(
-                swc_ecma_ast::TsUnionOrIntersectionType::TsIntersectionType(intersection),
+                swc_ecma_ast::TsUnionOrIntersectionType::TsIntersectionType(_),
             ) => {
-                let mut fields = Vec::new();
-                for member_ty in &intersection.types {
-                    if let TsType::TsTypeLit(lit) = member_ty.as_ref() {
-                        for member in &lit.members {
-                            if let TsTypeElement::TsPropertySignature(prop) = member {
-                                fields.push(convert_property_signature(prop, synthetic, reg)?);
-                            }
+                let info = crate::ts_type_info::convert_to_ts_type_info(ty)?;
+                if let crate::ts_type_info::TsTypeInfo::Intersection(members) = &info {
+                    let mut fields = Vec::new();
+                    for member in members {
+                        if let crate::ts_type_info::TsTypeInfo::TypeLiteral(lit) = member {
+                            let lit_fields = crate::ts_type_info::resolve::intersection::resolve_type_literal_fields(lit, reg, synthetic)?;
+                            fields.extend(lit_fields);
                         }
                     }
+                    variants.push(EnumVariant {
+                        name: format!("Variant{}", variants.len()),
+                        value: None,
+                        data: None,
+                        fields,
+                    });
                 }
-                variants.push(EnumVariant {
-                    name: format!("Variant{}", variants.len()),
-                    value: None,
-                    data: None,
-                    fields,
-                });
             }
             _ => {
                 convert_unsupported_union_member(ty, &mut variants, synthetic, reg);
