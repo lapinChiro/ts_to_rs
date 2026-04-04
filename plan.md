@@ -4,7 +4,9 @@
 
 **Batch 4d-C: declaration 変換の責務分離**
 
-Batch 4d-B 完了。次は 4d-C で declaration 変換関数（union/intersection）の型解決を resolve に統一し、find_discriminant_field の二重実装を解消する。
+PRD 設計完了（`backlog/4d-c-declaration-responsibility-separation.md`）。調査レポート: `report/batch-4d-c-investigation.md`。
+
+タスク順序: T1（resolve 関数公開 + extract_discriminated_variant 拡張）→ T2（discriminated union 移行）→ T3（intersection with union 移行）→ T4（extract_intersection_members 移行）→ T5（general union 移行）→ T6（品質確認）。T2-T5 は T1 完了後に着手可能。
 
 ---
 
