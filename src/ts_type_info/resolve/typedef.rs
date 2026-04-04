@@ -13,18 +13,24 @@ use crate::ts_type_info::TsTypeInfo;
 use super::resolve_ts_type;
 
 /// Vec<TypeParam<TsTypeInfo>> → Vec<TypeParam<RustType>> 変換。
+///
+/// 制約の型解決に失敗した場合はエラーを伝播する。
 pub(crate) fn resolve_type_params(
     params: Vec<crate::ir::TypeParam<TsTypeInfo>>,
     reg: &TypeRegistry,
     synthetic: &mut SyntheticTypeRegistry,
-) -> Vec<crate::ir::TypeParam<RustType>> {
+) -> anyhow::Result<Vec<crate::ir::TypeParam<RustType>>> {
     params
         .into_iter()
-        .map(|tp| crate::ir::TypeParam {
-            name: tp.name,
-            constraint: tp
+        .map(|tp| {
+            let constraint = tp
                 .constraint
-                .and_then(|c| resolve_ts_type(&c, reg, synthetic).ok()),
+                .map(|c| resolve_ts_type(&c, reg, synthetic))
+                .transpose()?;
+            Ok(crate::ir::TypeParam {
+                name: tp.name,
+                constraint,
+            })
         })
         .collect()
 }
@@ -33,6 +39,13 @@ pub(crate) fn resolve_type_params(
 ///
 /// registry フェーズで構築された TS 型ベースの TypeDef を、
 /// Rust 型ベースに変換する。Optional ラップ、PascalCase 命名もここで行う。
+///
+/// # エラーハンドリング
+///
+/// 各要素（フィールド、パラメータ、メソッドシグネチャ等）の型解決失敗は
+/// TypeDef 全体のエラーとして伝播する。部分的に成功した TypeDef は生成しない。
+/// 呼び出し元（`collection.rs`）は `if let Ok(resolved)` でハンドリングし、
+/// TypeDef 全体の失敗は「未解決の型」として安全に処理される。
 pub fn resolve_typedef(
     def: TypeDef<TsTypeInfo>,
     reg: &TypeRegistry,
@@ -50,32 +63,35 @@ pub fn resolve_typedef(
         } => {
             let resolved_fields = fields
                 .into_iter()
-                .filter_map(|f| resolve_field_def(f, reg, synthetic).ok())
-                .collect();
+                .map(|f| resolve_field_def(f, reg, synthetic))
+                .collect::<anyhow::Result<Vec<_>>>()?;
             let resolved_methods = methods
                 .into_iter()
                 .map(|(name, sigs)| {
                     let resolved_sigs = sigs
                         .into_iter()
                         .map(|sig| resolve_method_sig(sig, reg, synthetic))
-                        .collect::<anyhow::Result<Vec<_>>>()
-                        .unwrap_or_default();
-                    (name, resolved_sigs)
+                        .collect::<anyhow::Result<Vec<_>>>()?;
+                    Ok((name, resolved_sigs))
                 })
+                .collect::<anyhow::Result<Vec<_>>>()?
+                .into_iter()
                 .collect();
-            let resolved_ctor = constructor.map(|ctors| {
-                ctors
-                    .into_iter()
-                    .filter_map(|sig| resolve_method_sig(sig, reg, synthetic).ok())
-                    .collect()
-            });
+            let resolved_ctor = constructor
+                .map(|ctors| {
+                    ctors
+                        .into_iter()
+                        .map(|sig| resolve_method_sig(sig, reg, synthetic))
+                        .collect::<anyhow::Result<Vec<_>>>()
+                })
+                .transpose()?;
             let resolved_call_sigs = call_signatures
                 .into_iter()
-                .filter_map(|sig| resolve_method_sig(sig, reg, synthetic).ok())
-                .collect();
+                .map(|sig| resolve_method_sig(sig, reg, synthetic))
+                .collect::<anyhow::Result<Vec<_>>>()?;
 
             Ok(TypeDef::Struct {
-                type_params: resolve_type_params(type_params, reg, synthetic),
+                type_params: resolve_type_params(type_params, reg, synthetic)?,
                 fields: resolved_fields,
                 methods: resolved_methods,
                 constructor: resolved_ctor,
@@ -131,14 +147,16 @@ pub fn resolve_typedef(
                 .map(|(variant, fields)| {
                     let resolved = fields
                         .into_iter()
-                        .filter_map(|f| resolve_field_def(f, reg, synthetic).ok())
-                        .collect();
-                    (variant, resolved)
+                        .map(|f| resolve_field_def(f, reg, synthetic))
+                        .collect::<anyhow::Result<Vec<_>>>()?;
+                    Ok((variant, resolved))
                 })
+                .collect::<anyhow::Result<Vec<_>>>()?
+                .into_iter()
                 .collect();
 
             Ok(TypeDef::Enum {
-                type_params: resolve_type_params(type_params, reg, synthetic),
+                type_params: resolve_type_params(type_params, reg, synthetic)?,
                 variants: pascal_variants,
                 string_values: pascal_string_values,
                 tag_field,
@@ -154,14 +172,14 @@ pub fn resolve_typedef(
         } => {
             let resolved_params = params
                 .into_iter()
-                .filter_map(|p| resolve_param_def(p, reg, synthetic).ok())
-                .collect();
+                .map(|p| resolve_param_def(p, reg, synthetic))
+                .collect::<anyhow::Result<Vec<_>>>()?;
             let resolved_return = return_type
                 .map(|rt| resolve_ts_type(&rt, reg, synthetic))
                 .transpose()?;
 
             Ok(TypeDef::Function {
-                type_params: resolve_type_params(type_params, reg, synthetic),
+                type_params: resolve_type_params(type_params, reg, synthetic)?,
                 params: resolved_params,
                 return_type: resolved_return,
                 has_rest,
@@ -175,25 +193,25 @@ pub fn resolve_typedef(
         } => {
             let resolved_fields = fields
                 .into_iter()
-                .filter_map(|f| {
-                    let ty = resolve_ts_type(&f.ty, reg, synthetic).ok()?;
-                    Some(ConstField {
+                .map(|f| {
+                    let ty = resolve_ts_type(&f.ty, reg, synthetic)?;
+                    Ok(ConstField {
                         name: f.name,
                         ty,
                         string_literal_value: f.string_literal_value,
                     })
                 })
-                .collect();
+                .collect::<anyhow::Result<Vec<_>>>()?;
             let resolved_elements = elements
                 .into_iter()
-                .filter_map(|e| {
-                    let ty = resolve_ts_type(&e.ty, reg, synthetic).ok()?;
-                    Some(ConstElement {
+                .map(|e| {
+                    let ty = resolve_ts_type(&e.ty, reg, synthetic)?;
+                    Ok(ConstElement {
                         ty,
                         string_literal_value: e.string_literal_value,
                     })
                 })
-                .collect();
+                .collect::<anyhow::Result<Vec<_>>>()?;
 
             Ok(TypeDef::ConstValue {
                 fields: resolved_fields,
@@ -257,8 +275,8 @@ pub(crate) fn resolve_method_sig(
     let params = sig
         .params
         .into_iter()
-        .filter_map(|p| resolve_param_def(p, reg, synthetic).ok())
-        .collect();
+        .map(|p| resolve_param_def(p, reg, synthetic))
+        .collect::<anyhow::Result<Vec<_>>>()?;
     let return_type = sig
         .return_type
         .map(|rt| resolve_ts_type(&rt, reg, synthetic))

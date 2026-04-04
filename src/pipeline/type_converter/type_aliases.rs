@@ -181,54 +181,48 @@ pub fn convert_type_alias(
     }
 
     match decl.type_ann.as_ref() {
-        TsType::TsTypeLit(lit) => {
-            let has_methods = lit
-                .members
-                .iter()
-                .any(|m| matches!(m, TsTypeElement::TsMethodSignature(_)));
-            let has_properties = lit
-                .members
-                .iter()
-                .any(|m| matches!(m, TsTypeElement::TsPropertySignature(_)));
-            let has_call_signatures = lit
-                .members
-                .iter()
-                .any(|m| matches!(m, TsTypeElement::TsCallSignatureDecl(_)));
+        TsType::TsTypeLit(_) => {
+            use crate::ts_type_info::resolve::intersection::{
+                resolve_method_info, resolve_type_literal_fields,
+            };
+            use crate::ts_type_info::resolve::resolve_ts_type;
+
+            // SWC TsTypeLit → TsTypeInfo::TypeLiteral(TsTypeLiteralInfo) に変換
+            let lit_info =
+                match crate::ts_type_info::convert_to_ts_type_info(decl.type_ann.as_ref())? {
+                    crate::ts_type_info::TsTypeInfo::TypeLiteral(info) => info,
+                    _ => unreachable!("TsTypeLit should convert to TsTypeInfo::TypeLiteral"),
+                };
+
+            let has_methods = !lit_info.methods.is_empty();
+            let has_properties = !lit_info.fields.is_empty();
+            let has_call_signatures = !lit_info.call_signatures.is_empty();
+            let has_construct_signatures = !lit_info.construct_signatures.is_empty();
+
+            // Construct signatures → unsupported
+            if has_construct_signatures {
+                return Err(anyhow!(
+                    "unsupported type literal member: construct signature"
+                ));
+            }
 
             // Call signatures only → function type alias
             if has_call_signatures && !has_methods && !has_properties {
-                let call_sigs: Vec<&swc_ecma_ast::TsCallSignatureDecl> = lit
-                    .members
-                    .iter()
-                    .filter_map(|m| match m {
-                        TsTypeElement::TsCallSignatureDecl(sig) => Some(sig),
-                        _ => None,
-                    })
-                    .collect();
                 // Pick the signature with the most parameters (overload resolution)
-                let sig = call_sigs
+                let sig = lit_info
+                    .call_signatures
                     .iter()
                     .max_by_key(|s| s.params.len())
                     .ok_or_else(|| anyhow!("no call signatures found"))?;
-                let mut param_types = Vec::new();
-                for param in &sig.params {
-                    match param {
-                        swc_ecma_ast::TsFnParam::Ident(ident) => {
-                            let ty = ident
-                                .type_ann
-                                .as_ref()
-                                .map(|ann| convert_ts_type(&ann.type_ann, synthetic, reg))
-                                .transpose()?
-                                .unwrap_or(RustType::Any);
-                            param_types.push(ty);
-                        }
-                        _ => param_types.push(RustType::Any),
-                    }
-                }
+                let param_types = sig
+                    .params
+                    .iter()
+                    .map(|p| resolve_ts_type(&p.ty, reg, synthetic))
+                    .collect::<Result<Vec<_>>>()?;
                 let return_type = sig
-                    .type_ann
+                    .return_type
                     .as_ref()
-                    .map(|ann| convert_ts_type(&ann.type_ann, synthetic, reg))
+                    .map(|rt| resolve_ts_type(rt, reg, synthetic))
                     .transpose()?
                     .unwrap_or(RustType::Unit);
                 let type_params = extract_type_params(decl.type_params.as_deref(), synthetic, reg);
@@ -245,12 +239,11 @@ pub fn convert_type_alias(
 
             // Methods only → trait (same logic as interface 3-way classification)
             if has_methods && !has_properties {
-                let mut methods = Vec::new();
-                for member in &lit.members {
-                    if let TsTypeElement::TsMethodSignature(method_sig) = member {
-                        methods.push(convert_method_signature(method_sig, synthetic, reg)?);
-                    }
-                }
+                let methods = lit_info
+                    .methods
+                    .iter()
+                    .map(|m| resolve_method_info(m, reg, synthetic))
+                    .collect::<Result<Vec<_>>>()?;
                 return Ok(Item::Trait {
                     vis,
                     name: name.to_string(),
@@ -261,43 +254,31 @@ pub fn convert_type_alias(
                 });
             }
 
-            let mut fields = Vec::new();
-            for member in &lit.members {
-                match member {
-                    TsTypeElement::TsPropertySignature(prop) => {
-                        let field = convert_property_signature(prop, synthetic, reg)?;
-                        fields.push(field);
-                    }
-                    TsTypeElement::TsIndexSignature(idx) => {
-                        // { [key: string]: T } → HashMap<String, T>
-                        if let Some(type_ann) = &idx.type_ann {
-                            let value_type = convert_ts_type(&type_ann.type_ann, synthetic, reg)?;
-                            let type_params =
-                                extract_type_params(decl.type_params.as_deref(), synthetic, reg);
-                            return Ok(Item::TypeAlias {
-                                vis,
-                                name,
-                                ty: RustType::Named {
-                                    name: "HashMap".to_string(),
-                                    type_args: vec![RustType::String, value_type],
-                                },
-                                type_params,
-                            });
-                        }
-                        return Err(anyhow!(
-                            "unsupported index signature without type annotation"
-                        ));
-                    }
-                    TsTypeElement::TsMethodSignature(_) => {
-                        // Methods mixed with properties: skip methods (Rust structs can't have methods inline)
-                    }
-                    _ => {
-                        return Err(anyhow!(
-                            "unsupported type literal member (only property signatures are supported)"
-                        ));
-                    }
-                }
+            // Index signature → HashMap (delegate to resolve_type_literal)
+            if let Some(idx) = lit_info.index_signatures.first() {
+                let value_type = resolve_ts_type(&idx.value_type, reg, synthetic)?;
+                let type_params = extract_type_params(decl.type_params.as_deref(), synthetic, reg);
+                return Ok(Item::TypeAlias {
+                    vis,
+                    name,
+                    ty: RustType::Named {
+                        name: "HashMap".to_string(),
+                        type_args: vec![RustType::String, value_type],
+                    },
+                    type_params,
+                });
             }
+
+            // Call signatures mixed with properties → unsupported
+            // (Rust structs cannot be both callable and have fields)
+            if has_call_signatures {
+                return Err(anyhow!(
+                    "unsupported type literal member: call signature mixed with properties"
+                ));
+            }
+
+            // Properties (with possible mixed methods — methods are skipped in structs)
+            let fields = resolve_type_literal_fields(&lit_info, reg, synthetic)?;
             let type_params = extract_type_params(decl.type_params.as_deref(), synthetic, reg);
 
             Ok(Item::Struct {

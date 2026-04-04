@@ -308,25 +308,33 @@ fn test_convert_type_alias_index_signature_generates_hashmap() {
 }
 
 #[test]
-fn test_convert_type_alias_index_signature_no_type_returns_error() {
-    // Index signature without type annotation → Error
-    // `type T = { [key: string] }` — SWC parses this but the index sig has no type_ann
+fn test_convert_type_alias_index_signature_no_type_generates_hashmap_any() {
+    // Index signature without type annotation → HashMap<String, Any>
+    // `type T = { [key: string] }` — TsTypeInfo 経由では value_type が Any にフォールバック。
+    // TypeScript 自体ではこのパターンは構文エラーだが、SWC はパースする。
     let module = parse_type_annotation("type T = { [key: string] };");
     let reg = build_registry(&module);
     let mut synthetic = SyntheticTypeRegistry::new();
     let alias = extract_type_alias(&module, 0);
 
-    let result = super::convert_type_alias(alias, Visibility::Public, &mut synthetic, &reg);
+    let item = super::convert_type_alias(alias, Visibility::Public, &mut synthetic, &reg)
+        .expect("should succeed with Any fallback");
 
-    assert!(
-        result.is_err(),
-        "index signature without type annotation should fail"
-    );
-    let err_msg = result.unwrap_err().to_string();
-    assert!(
-        err_msg.contains("index signature") || err_msg.contains("unsupported"),
-        "error should mention index signature, got: {err_msg}"
-    );
+    match &item {
+        Item::TypeAlias { name, ty, .. } => {
+            assert_eq!(name, "T");
+            match ty {
+                RustType::Named { name, type_args } => {
+                    assert_eq!(name, "HashMap");
+                    assert_eq!(type_args.len(), 2);
+                    assert_eq!(type_args[0], RustType::String);
+                    assert_eq!(type_args[1], RustType::Any);
+                }
+                other => panic!("expected Named(HashMap) type, got: {other:?}"),
+            }
+        }
+        other => panic!("expected TypeAlias item, got: {other:?}"),
+    }
 }
 
 // ===========================================================================
@@ -635,4 +643,164 @@ fn test_discriminated_union_unique_discriminant_produces_tagged_enum() {
         }
         other => panic!("expected tagged Enum, got {other:?}"),
     }
+}
+
+// ===========================================================================
+// TG-6: call signature overload (tests 21–22)
+// ===========================================================================
+
+#[test]
+fn test_convert_type_alias_call_signature_overload_picks_most_params() {
+    // type F = { (x: string): number; (x: string, y: number): boolean }
+    // → should pick the overload with 2 params
+    let module =
+        parse_type_annotation("type F = { (x: string): number; (x: string, y: number): boolean };");
+    let reg = build_registry(&module);
+    let mut synthetic = SyntheticTypeRegistry::new();
+    let alias = extract_type_alias(&module, 0);
+
+    let item = super::convert_type_alias(alias, Visibility::Public, &mut synthetic, &reg)
+        .expect("should succeed");
+
+    match &item {
+        Item::TypeAlias { name, ty, .. } => {
+            assert_eq!(name, "F");
+            match ty {
+                RustType::Fn {
+                    params,
+                    return_type,
+                } => {
+                    assert_eq!(params.len(), 2, "should pick 2-param overload");
+                    assert_eq!(params[0], RustType::String);
+                    assert_eq!(params[1], RustType::F64);
+                    assert_eq!(**return_type, RustType::Bool);
+                }
+                other => panic!("expected Fn type, got: {other:?}"),
+            }
+        }
+        other => panic!("expected TypeAlias item, got: {other:?}"),
+    }
+}
+
+// ===========================================================================
+// TG-7: mixed methods + properties (tests 23)
+// ===========================================================================
+
+#[test]
+fn test_convert_type_alias_mixed_methods_and_properties_generates_struct() {
+    // type T = { x: number; foo(): string }
+    // → Struct with properties only (methods skipped)
+    let module = parse_type_annotation("type T = { x: number; foo(): string };");
+    let reg = build_registry(&module);
+    let mut synthetic = SyntheticTypeRegistry::new();
+    let alias = extract_type_alias(&module, 0);
+
+    let item = super::convert_type_alias(alias, Visibility::Public, &mut synthetic, &reg)
+        .expect("should succeed");
+
+    match &item {
+        Item::Struct { name, fields, .. } => {
+            assert_eq!(name, "T");
+            assert_eq!(fields.len(), 1, "should only have property fields");
+            assert_eq!(fields[0].name, "x");
+            assert_eq!(fields[0].ty, RustType::F64);
+        }
+        other => panic!("expected Struct item, got: {other:?}"),
+    }
+}
+
+// ===========================================================================
+// TG-8: properties with optional fields (test 24)
+// ===========================================================================
+
+#[test]
+fn test_convert_type_alias_optional_property_generates_option_field() {
+    // type T = { x: string; y?: number }
+    // → Struct with y: Option<f64>
+    let module = parse_type_annotation("type T = { x: string; y?: number };");
+    let reg = build_registry(&module);
+    let mut synthetic = SyntheticTypeRegistry::new();
+    let alias = extract_type_alias(&module, 0);
+
+    let item = super::convert_type_alias(alias, Visibility::Public, &mut synthetic, &reg)
+        .expect("should succeed");
+
+    match &item {
+        Item::Struct { name, fields, .. } => {
+            assert_eq!(name, "T");
+            assert_eq!(fields.len(), 2);
+            assert_eq!(fields[0].name, "x");
+            assert_eq!(fields[0].ty, RustType::String);
+            assert_eq!(fields[1].name, "y");
+            assert_eq!(fields[1].ty, RustType::Option(Box::new(RustType::F64)));
+        }
+        other => panic!("expected Struct item, got: {other:?}"),
+    }
+}
+
+// ===========================================================================
+// Edge cases: index + properties mixed, construct signatures (tests 25–26)
+// ===========================================================================
+
+#[test]
+fn test_convert_type_alias_index_with_properties_generates_hashmap() {
+    // type T = { x: number; [key: string]: number }
+    // → Index signature takes priority → HashMap
+    let module = parse_type_annotation("type T = { x: number; [key: string]: number };");
+    let reg = build_registry(&module);
+    let mut synthetic = SyntheticTypeRegistry::new();
+    let alias = extract_type_alias(&module, 0);
+
+    let item = super::convert_type_alias(alias, Visibility::Public, &mut synthetic, &reg)
+        .expect("should succeed");
+
+    match &item {
+        Item::TypeAlias { name, ty, .. } => {
+            assert_eq!(name, "T");
+            match ty {
+                RustType::Named { name, type_args } => {
+                    assert_eq!(name, "HashMap");
+                    assert_eq!(type_args[1], RustType::F64);
+                }
+                other => panic!("expected Named(HashMap) type, got: {other:?}"),
+            }
+        }
+        other => panic!("expected TypeAlias item, got: {other:?}"),
+    }
+}
+
+#[test]
+fn test_convert_type_alias_construct_signature_returns_error() {
+    // type T = { new(x: string): Foo }
+    // → Unsupported: construct signature
+    let module = parse_type_annotation("type T = { new(x: string): Foo };");
+    let reg = build_registry(&module);
+    let mut synthetic = SyntheticTypeRegistry::new();
+    let alias = extract_type_alias(&module, 0);
+
+    let result = super::convert_type_alias(alias, Visibility::Public, &mut synthetic, &reg);
+
+    assert!(result.is_err(), "construct signature should return error");
+    let err_msg = result.unwrap_err().to_string();
+    assert!(
+        err_msg.contains("construct signature"),
+        "error should mention construct signature, got: {err_msg}"
+    );
+}
+
+#[test]
+fn test_convert_type_alias_call_signature_with_properties_returns_error() {
+    // type T = { (x: string): number; y: number }
+    // → Unsupported: call signature mixed with properties
+    let module = parse_type_annotation("type T = { (x: string): number; y: number };");
+    let reg = build_registry(&module);
+    let mut synthetic = SyntheticTypeRegistry::new();
+    let alias = extract_type_alias(&module, 0);
+
+    let result = super::convert_type_alias(alias, Visibility::Public, &mut synthetic, &reg);
+
+    assert!(
+        result.is_err(),
+        "call signature mixed with properties should return error"
+    );
 }

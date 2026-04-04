@@ -195,12 +195,14 @@ pub(super) fn collect_decl(
                 let fields = collect_type_alias_fields(alias, reg, synthetic);
                 if let Some(fields) = fields {
                     let type_params = collect_type_params(alias.type_params.as_deref());
-                    // type_params は TsTypeInfo だが、ここで直接 resolve する
+                    // 型パラメータ制約の解決失敗は struct 登録には影響させない
+                    // （制約なしとして登録。型パラメータ自体は保持される）
                     let resolved_type_params = crate::ts_type_info::resolve::resolve_type_params(
                         type_params,
                         lookup,
                         synthetic,
-                    );
+                    )
+                    .unwrap_or_default();
                     reg.register(
                         alias.id.sym.to_string(),
                         TypeDef::Struct {

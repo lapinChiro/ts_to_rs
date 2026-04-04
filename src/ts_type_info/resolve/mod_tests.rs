@@ -1,6 +1,6 @@
 use super::*;
-use crate::registry::{FieldDef, ParamDef};
-use crate::ts_type_info::resolve::typedef::resolve_param_def;
+use crate::registry::{ConstElement, ConstField, FieldDef, MethodSignature, ParamDef};
+use crate::ts_type_info::resolve::typedef::{resolve_method_sig, resolve_param_def};
 
 #[test]
 fn resolve_keyword_types() {
@@ -333,7 +333,7 @@ fn resolve_param_with_default() {
 fn resolve_type_params_empty() {
     let reg = TypeRegistry::new();
     let mut syn = SyntheticTypeRegistry::new();
-    let result = resolve_type_params(vec![], &reg, &mut syn);
+    let result = resolve_type_params(vec![], &reg, &mut syn).unwrap();
     assert!(result.is_empty());
 }
 
@@ -345,7 +345,7 @@ fn resolve_type_params_with_constraint() {
         name: "T".to_string(),
         constraint: Some(TsTypeInfo::String),
     }];
-    let resolved = resolve_type_params(params, &reg, &mut syn);
+    let resolved = resolve_type_params(params, &reg, &mut syn).unwrap();
     assert_eq!(resolved.len(), 1);
     assert_eq!(resolved[0].name, "T");
     assert_eq!(resolved[0].constraint, Some(RustType::String));
@@ -359,7 +359,7 @@ fn resolve_type_params_without_constraint() {
         name: "T".to_string(),
         constraint: None,
     }];
-    let resolved = resolve_type_params(params, &reg, &mut syn);
+    let resolved = resolve_type_params(params, &reg, &mut syn).unwrap();
     assert_eq!(resolved.len(), 1);
     assert_eq!(resolved[0].name, "T");
     assert_eq!(resolved[0].constraint, None);
@@ -715,4 +715,226 @@ fn resolve_typedef_discriminated_union_pascal_case_with_fields() {
     } else {
         panic!("expected Enum");
     }
+}
+
+// ── resolve_typedef エラー伝播 ──
+
+/// resolve_ts_type が必ず Err を返す TsTypeInfo を生成するヘルパー。
+/// `keyof typeof NonExistent` は registry に存在しないため Err になる。
+fn unresolvable_type() -> TsTypeInfo {
+    TsTypeInfo::KeyOf(Box::new(TsTypeInfo::TypeQuery("NonExistent".to_string())))
+}
+
+#[test]
+fn resolve_typedef_struct_field_error_propagates() {
+    let reg = TypeRegistry::new();
+    let mut syn = SyntheticTypeRegistry::new();
+    let def: TypeDef<TsTypeInfo> = TypeDef::Struct {
+        type_params: vec![],
+        fields: vec![
+            FieldDef {
+                name: "ok".to_string(),
+                ty: TsTypeInfo::String,
+                optional: false,
+            },
+            FieldDef {
+                name: "bad".to_string(),
+                ty: unresolvable_type(),
+                optional: false,
+            },
+        ],
+        methods: std::collections::HashMap::new(),
+        constructor: None,
+        call_signatures: vec![],
+        extends: vec![],
+        is_interface: false,
+    };
+    assert!(resolve_typedef(def, &reg, &mut syn).is_err());
+}
+
+#[test]
+fn resolve_typedef_struct_method_error_propagates() {
+    let reg = TypeRegistry::new();
+    let mut syn = SyntheticTypeRegistry::new();
+    let def: TypeDef<TsTypeInfo> = TypeDef::Struct {
+        type_params: vec![],
+        fields: vec![],
+        methods: [(
+            "bad_method".to_string(),
+            vec![MethodSignature {
+                params: vec![ParamDef {
+                    name: "x".to_string(),
+                    ty: unresolvable_type(),
+                    optional: false,
+                    has_default: false,
+                }],
+                return_type: None,
+                has_rest: false,
+            }],
+        )]
+        .into_iter()
+        .collect(),
+        constructor: None,
+        call_signatures: vec![],
+        extends: vec![],
+        is_interface: false,
+    };
+    assert!(resolve_typedef(def, &reg, &mut syn).is_err());
+}
+
+#[test]
+fn resolve_typedef_struct_constructor_error_propagates() {
+    let reg = TypeRegistry::new();
+    let mut syn = SyntheticTypeRegistry::new();
+    let def: TypeDef<TsTypeInfo> = TypeDef::Struct {
+        type_params: vec![],
+        fields: vec![],
+        methods: std::collections::HashMap::new(),
+        constructor: Some(vec![MethodSignature {
+            params: vec![ParamDef {
+                name: "x".to_string(),
+                ty: unresolvable_type(),
+                optional: false,
+                has_default: false,
+            }],
+            return_type: None,
+            has_rest: false,
+        }]),
+        call_signatures: vec![],
+        extends: vec![],
+        is_interface: false,
+    };
+    assert!(resolve_typedef(def, &reg, &mut syn).is_err());
+}
+
+#[test]
+fn resolve_typedef_struct_call_signature_error_propagates() {
+    let reg = TypeRegistry::new();
+    let mut syn = SyntheticTypeRegistry::new();
+    let def: TypeDef<TsTypeInfo> = TypeDef::Struct {
+        type_params: vec![],
+        fields: vec![],
+        methods: std::collections::HashMap::new(),
+        constructor: None,
+        call_signatures: vec![MethodSignature {
+            params: vec![],
+            return_type: Some(unresolvable_type()),
+            has_rest: false,
+        }],
+        extends: vec![],
+        is_interface: false,
+    };
+    assert!(resolve_typedef(def, &reg, &mut syn).is_err());
+}
+
+#[test]
+fn resolve_typedef_function_param_error_propagates() {
+    let reg = TypeRegistry::new();
+    let mut syn = SyntheticTypeRegistry::new();
+    let def: TypeDef<TsTypeInfo> = TypeDef::Function {
+        type_params: vec![],
+        params: vec![ParamDef {
+            name: "x".to_string(),
+            ty: unresolvable_type(),
+            optional: false,
+            has_default: false,
+        }],
+        return_type: None,
+        has_rest: false,
+    };
+    assert!(resolve_typedef(def, &reg, &mut syn).is_err());
+}
+
+#[test]
+fn resolve_typedef_enum_variant_field_error_propagates() {
+    let reg = TypeRegistry::new();
+    let mut syn = SyntheticTypeRegistry::new();
+    let def: TypeDef<TsTypeInfo> = TypeDef::Enum {
+        type_params: vec![],
+        variants: vec!["A".to_string()],
+        string_values: std::collections::HashMap::new(),
+        tag_field: None,
+        variant_fields: [(
+            "A".to_string(),
+            vec![FieldDef {
+                name: "bad".to_string(),
+                ty: unresolvable_type(),
+                optional: false,
+            }],
+        )]
+        .into_iter()
+        .collect(),
+    };
+    assert!(resolve_typedef(def, &reg, &mut syn).is_err());
+}
+
+#[test]
+fn resolve_typedef_const_value_field_error_propagates() {
+    let reg = TypeRegistry::new();
+    let mut syn = SyntheticTypeRegistry::new();
+    let def: TypeDef<TsTypeInfo> = TypeDef::ConstValue {
+        fields: vec![ConstField {
+            name: "bad".to_string(),
+            ty: unresolvable_type(),
+            string_literal_value: None,
+        }],
+        elements: vec![],
+        type_ref_name: None,
+    };
+    assert!(resolve_typedef(def, &reg, &mut syn).is_err());
+}
+
+#[test]
+fn resolve_typedef_const_value_element_error_propagates() {
+    let reg = TypeRegistry::new();
+    let mut syn = SyntheticTypeRegistry::new();
+    let def: TypeDef<TsTypeInfo> = TypeDef::ConstValue {
+        fields: vec![],
+        elements: vec![ConstElement {
+            ty: unresolvable_type(),
+            string_literal_value: None,
+        }],
+        type_ref_name: None,
+    };
+    assert!(resolve_typedef(def, &reg, &mut syn).is_err());
+}
+
+#[test]
+fn resolve_method_sig_param_error_propagates() {
+    let reg = TypeRegistry::new();
+    let mut syn = SyntheticTypeRegistry::new();
+    let sig = MethodSignature {
+        params: vec![ParamDef {
+            name: "x".to_string(),
+            ty: unresolvable_type(),
+            optional: false,
+            has_default: false,
+        }],
+        return_type: Some(TsTypeInfo::String),
+        has_rest: false,
+    };
+    assert!(resolve_method_sig(sig, &reg, &mut syn).is_err());
+}
+
+#[test]
+fn resolve_method_sig_return_type_error_propagates() {
+    let reg = TypeRegistry::new();
+    let mut syn = SyntheticTypeRegistry::new();
+    let sig = MethodSignature {
+        params: vec![],
+        return_type: Some(unresolvable_type()),
+        has_rest: false,
+    };
+    assert!(resolve_method_sig(sig, &reg, &mut syn).is_err());
+}
+
+#[test]
+fn resolve_type_params_constraint_error_propagates() {
+    let reg = TypeRegistry::new();
+    let mut syn = SyntheticTypeRegistry::new();
+    let params = vec![crate::ir::TypeParam {
+        name: "T".to_string(),
+        constraint: Some(unresolvable_type()),
+    }];
+    assert!(resolve_type_params(params, &reg, &mut syn).is_err());
 }

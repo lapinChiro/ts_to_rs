@@ -21,7 +21,6 @@ pub use utilities::extract_type_params;
 
 // Import all pub(super) items from submodules into this module's namespace.
 // Submodules use `use super::*;` to access these.
-use interfaces::convert_method_signature;
 use intersections::try_convert_intersection_type;
 use unions::{
     try_convert_discriminated_union, try_convert_general_union, try_convert_single_string_literal,
