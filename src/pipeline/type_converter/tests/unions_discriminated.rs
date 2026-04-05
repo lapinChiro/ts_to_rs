@@ -19,6 +19,7 @@ fn test_convert_type_alias_discriminated_union_two_variants_generates_serde_tagg
         Item::Enum {
             vis: Visibility::Public,
             name: "Event".to_string(),
+            type_params: vec![],
             serde_tag: Some("kind".to_string()),
             variants: vec![
                 EnumVariant {

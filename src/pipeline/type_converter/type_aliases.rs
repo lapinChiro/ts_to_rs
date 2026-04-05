@@ -13,33 +13,40 @@ pub fn convert_type_alias_items(
     // Conditional type may produce multiple items (comment + placeholder)
     if let TsType::TsConditionalType(cond) = decl.type_ann.as_ref() {
         let name = sanitize_rust_type_name(&decl.id.sym);
-        let type_params = extract_type_params(decl.type_params.as_deref(), synthetic, reg);
+        let tp_names: Vec<String> = decl
+            .type_params
+            .as_ref()
+            .map(|tp| tp.params.iter().map(|p| p.name.sym.to_string()).collect())
+            .unwrap_or_default();
+        let prev_scope = synthetic.push_type_param_scope(tp_names);
+        let (type_params, mono_subs) =
+            extract_type_params(decl.type_params.as_deref(), synthetic, reg);
 
-        match convert_conditional_type(cond, synthetic, reg) {
+        let result = match convert_conditional_type(cond, synthetic, reg) {
             Ok(ty) => {
-                // Remove type params not used in the resolved type
+                let ty = ty.substitute(&mono_subs);
                 let used_params = type_params
                     .into_iter()
                     .filter(|p| ty.uses_param(&p.name))
                     .collect();
-                return Ok(vec![Item::TypeAlias {
+                Ok(vec![Item::TypeAlias {
                     vis,
                     name,
                     type_params: used_params,
                     ty,
-                }]);
+                }])
             }
             Err(_) => {
-                // Fallback: use the true branch type, or serde_json::Value if that also fails
                 let fallback_ty =
                     convert_ts_type(&cond.true_type, synthetic, reg).unwrap_or(RustType::Any);
+                let fallback_ty = fallback_ty.substitute(&mono_subs);
                 let used_params = type_params
                     .into_iter()
                     .filter(|p| fallback_ty.uses_param(&p.name))
                     .collect();
                 let comment =
                     format!("TODO: Conditional type not auto-converted\nOriginal TS: type {name}",);
-                return Ok(vec![
+                Ok(vec![
                     Item::Comment(comment),
                     Item::TypeAlias {
                         vis,
@@ -47,13 +54,16 @@ pub fn convert_type_alias_items(
                         type_params: used_params,
                         ty: fallback_ty,
                     },
-                ]);
+                ])
             }
-        }
+        };
+
+        synthetic.restore_type_param_scope(prev_scope);
+        return result;
     }
 
     // keyof typeof X → string literal union enum from struct fields
-    if let Some(items) = try_convert_keyof_typeof_alias(decl, vis.clone(), reg)? {
+    if let Some(items) = try_convert_keyof_typeof_alias(decl, vis, reg)? {
         return Ok(items);
     }
 
@@ -102,6 +112,7 @@ fn try_convert_keyof_typeof_alias(
             return Ok(Some(vec![Item::Enum {
                 vis,
                 name,
+                type_params: vec![],
                 serde_tag: None,
                 variants,
             }]));
@@ -123,6 +134,7 @@ fn try_convert_keyof_typeof_alias(
     Ok(Some(vec![Item::Enum {
         vis,
         name,
+        type_params: vec![],
         serde_tag: None,
         variants,
     }]))
@@ -146,40 +158,79 @@ pub fn convert_type_alias(
     let name = sanitize_rust_type_name(&decl.id.sym);
 
     // String literal union: `type X = "a" | "b" | "c"` → enum
-    if let Some(item) = try_convert_string_literal_union(decl, vis.clone())? {
+    // スコープ設定不要: string literal は型パラメータを参照しない
+    if let Some(item) = try_convert_string_literal_union(decl, vis)? {
         return Ok(item);
     }
 
     // Single string literal: `type X = "only"` → enum with one variant
-    if let Some(item) = try_convert_single_string_literal(decl, vis.clone())? {
+    if let Some(item) = try_convert_single_string_literal(decl, vis)? {
         return Ok(item);
     }
 
+    // 以降のパスは convert_ts_type → register_union を呼ぶ可能性があるため
+    // 型パラメータスコープを設定してから実行する
+    let tp_names: Vec<String> = decl
+        .type_params
+        .as_ref()
+        .map(|tp| tp.params.iter().map(|p| p.name.sym.to_string()).collect())
+        .unwrap_or_default();
+    let prev_scope = synthetic.push_type_param_scope(tp_names);
+
+    let result = convert_type_alias_with_scope(decl, vis, &name, synthetic, reg);
+
+    synthetic.restore_type_param_scope(prev_scope);
+
+    result
+}
+
+/// Inner implementation for type alias conversion (with type_param_scope already set).
+///
+/// Covers discriminated union, general union, intersection, function, tuple, and
+/// fallback type alias paths. String literal paths are handled before scope setup.
+fn convert_type_alias_with_scope(
+    decl: &TsTypeAliasDecl,
+    vis: Visibility,
+    name: &str,
+    synthetic: &mut SyntheticTypeRegistry,
+    reg: &TypeRegistry,
+) -> Result<Item> {
     // Discriminated union: `type X = { kind: "a", ... } | { kind: "b", ... }` → serde-tagged enum
-    if let Some(item) = try_convert_discriminated_union(decl, vis.clone(), synthetic, reg)? {
+    if let Some(item) = try_convert_discriminated_union(decl, vis, synthetic, reg)? {
         return Ok(item);
     }
 
     // General union type: `type X = 200 | 404` or `type X = string | number` → enum
-    if let Some(item) = try_convert_general_union(decl, vis.clone(), synthetic, reg)? {
+    if let Some(item) = try_convert_general_union(decl, vis, synthetic, reg)? {
         return Ok(item);
     }
 
     // Intersection type: `type X = { a: T } & { b: U }` → struct with merged fields
-    if let Some(item) = try_convert_intersection_type(decl, vis.clone(), reg, synthetic)? {
+    if let Some(item) = try_convert_intersection_type(decl, vis, reg, synthetic)? {
         return Ok(item);
     }
 
     // Function type: `type Fn = (x: T) => U` → type alias
-    if let Some(item) = try_convert_function_type_alias(decl, vis.clone(), synthetic, reg)? {
+    if let Some(item) = try_convert_function_type_alias(decl, vis, synthetic, reg)? {
         return Ok(item);
     }
 
     // Tuple type: `type Pair = [string, number]` → type alias
-    if let Some(item) = try_convert_tuple_type_alias(decl, vis.clone(), synthetic, reg)? {
+    if let Some(item) = try_convert_tuple_type_alias(decl, vis, synthetic, reg)? {
         return Ok(item);
     }
 
+    convert_type_alias_fallback(decl, vis, name, synthetic, reg)
+}
+
+/// Fallback type alias body conversion (type literal or generic type).
+fn convert_type_alias_fallback(
+    decl: &TsTypeAliasDecl,
+    vis: Visibility,
+    name: &str,
+    synthetic: &mut SyntheticTypeRegistry,
+    reg: &TypeRegistry,
+) -> Result<Item> {
     match decl.type_ann.as_ref() {
         TsType::TsTypeLit(_) => {
             use crate::ts_type_info::resolve::intersection::{
@@ -225,15 +276,17 @@ pub fn convert_type_alias(
                     .map(|rt| resolve_ts_type(rt, reg, synthetic))
                     .transpose()?
                     .unwrap_or(RustType::Unit);
-                let type_params = extract_type_params(decl.type_params.as_deref(), synthetic, reg);
+                let (type_params, mono_subs) =
+                    extract_type_params(decl.type_params.as_deref(), synthetic, reg);
+                let fn_ty = RustType::Fn {
+                    params: param_types,
+                    return_type: Box::new(return_type),
+                };
                 return Ok(Item::TypeAlias {
                     vis,
-                    name,
+                    name: name.to_string(),
                     type_params,
-                    ty: RustType::Fn {
-                        params: param_types,
-                        return_type: Box::new(return_type),
-                    },
+                    ty: fn_ty.substitute(&mono_subs),
                 });
             }
 
@@ -257,13 +310,14 @@ pub fn convert_type_alias(
             // Index signature → HashMap (delegate to resolve_type_literal)
             if let Some(idx) = lit_info.index_signatures.first() {
                 let value_type = resolve_ts_type(&idx.value_type, reg, synthetic)?;
-                let type_params = extract_type_params(decl.type_params.as_deref(), synthetic, reg);
+                let (type_params, mono_subs) =
+                    extract_type_params(decl.type_params.as_deref(), synthetic, reg);
                 return Ok(Item::TypeAlias {
                     vis,
-                    name,
+                    name: name.to_string(),
                     ty: RustType::Named {
                         name: "HashMap".to_string(),
-                        type_args: vec![RustType::String, value_type],
+                        type_args: vec![RustType::String, value_type.substitute(&mono_subs)],
                     },
                     type_params,
                 });
@@ -279,13 +333,14 @@ pub fn convert_type_alias(
 
             // Properties (with possible mixed methods — methods are skipped in structs)
             let fields = resolve_type_literal_fields(&lit_info, reg, synthetic)?;
-            let type_params = extract_type_params(decl.type_params.as_deref(), synthetic, reg);
+            let (type_params, mono_subs) =
+                extract_type_params(decl.type_params.as_deref(), synthetic, reg);
 
             Ok(Item::Struct {
                 vis,
-                name,
+                name: name.to_string(),
                 type_params,
-                fields,
+                fields: fields.iter().map(|f| f.substitute(&mono_subs)).collect(),
             })
         }
         // Fallback: any type that convert_ts_type can handle → type alias
@@ -296,11 +351,12 @@ pub fn convert_type_alias(
                     std::mem::discriminant(other)
                 )
             })?;
-            let type_params = extract_type_params(decl.type_params.as_deref(), synthetic, reg);
+            let (type_params, mono_subs) =
+                extract_type_params(decl.type_params.as_deref(), synthetic, reg);
             Ok(Item::TypeAlias {
                 vis,
-                name,
-                ty,
+                name: name.to_string(),
+                ty: ty.substitute(&mono_subs),
                 type_params,
             })
         }
@@ -340,16 +396,17 @@ pub(super) fn try_convert_function_type_alias(
     let return_type = convert_ts_type(&fn_type.type_ann.type_ann, synthetic, reg)?;
 
     let name = sanitize_rust_type_name(&decl.id.sym);
-    let type_params = extract_type_params(decl.type_params.as_deref(), synthetic, reg);
+    let (type_params, mono_subs) = extract_type_params(decl.type_params.as_deref(), synthetic, reg);
 
+    let fn_ty = RustType::Fn {
+        params: param_types,
+        return_type: Box::new(return_type),
+    };
     Ok(Some(Item::TypeAlias {
         vis,
         name,
         type_params,
-        ty: RustType::Fn {
-            params: param_types,
-            return_type: Box::new(return_type),
-        },
+        ty: fn_ty.substitute(&mono_subs),
     }))
 }
 
@@ -374,13 +431,13 @@ pub(super) fn try_convert_tuple_type_alias(
         .collect::<Result<Vec<_>>>()?;
 
     let name = sanitize_rust_type_name(&decl.id.sym);
-    let type_params = extract_type_params(decl.type_params.as_deref(), synthetic, reg);
+    let (type_params, mono_subs) = extract_type_params(decl.type_params.as_deref(), synthetic, reg);
 
     Ok(Some(Item::TypeAlias {
         vis,
         name,
         type_params,
-        ty: RustType::Tuple(elems),
+        ty: RustType::Tuple(elems).substitute(&mono_subs),
     }))
 }
 

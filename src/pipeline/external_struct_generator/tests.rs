@@ -39,6 +39,7 @@ fn test_collect_refs_enum_variant_named_type_detected() {
     let items = vec![Item::Enum {
         vis: Visibility::Public,
         name: "MyEnum".to_string(),
+        type_params: vec![],
         serde_tag: None,
         variants: vec![EnumVariant {
             name: "Date".to_string(),
@@ -62,6 +63,7 @@ fn test_collect_refs_rust_stdlib_types_excluded() {
     let items = vec![Item::Enum {
         vis: Visibility::Public,
         name: "MyEnum".to_string(),
+        type_params: vec![],
         serde_tag: None,
         variants: vec![
             EnumVariant {
@@ -96,6 +98,7 @@ fn test_collect_refs_serde_json_value_excluded() {
     let items = vec![Item::Enum {
         vis: Visibility::Public,
         name: "MyEnum".to_string(),
+        type_params: vec![],
         serde_tag: None,
         variants: vec![EnumVariant {
             name: "Other".to_string(),
@@ -127,6 +130,7 @@ fn test_collect_refs_defined_struct_excluded() {
         Item::Enum {
             vis: Visibility::Public,
             name: "MyEnum".to_string(),
+            type_params: vec![],
             serde_tag: None,
             variants: vec![EnumVariant {
                 name: "Foo".to_string(),
@@ -197,6 +201,7 @@ fn test_collect_refs_not_in_registry_excluded() {
     let items = vec![Item::Enum {
         vis: Visibility::Public,
         name: "MyEnum".to_string(),
+        type_params: vec![],
         serde_tag: None,
         variants: vec![EnumVariant {
             name: "Unknown".to_string(),
@@ -233,6 +238,7 @@ fn test_collect_refs_user_defined_type_excluded() {
     let items = vec![Item::Enum {
         vis: Visibility::Public,
         name: "MyEnum".to_string(),
+        type_params: vec![],
         serde_tag: None,
         variants: vec![EnumVariant {
             name: "Bindings".to_string(),
@@ -259,6 +265,7 @@ fn test_collect_refs_multiple_types_collected() {
     let items = vec![Item::Enum {
         vis: Visibility::Public,
         name: "MyEnum".to_string(),
+        type_params: vec![],
         serde_tag: None,
         variants: vec![
             EnumVariant {
@@ -430,6 +437,7 @@ fn test_collect_refs_enum_variant_struct_fields_detected() {
     let items = vec![Item::Enum {
         vis: Visibility::Public,
         name: "MyEnum".to_string(),
+        type_params: vec![],
         serde_tag: None,
         variants: vec![EnumVariant {
             name: "Upload".to_string(),
@@ -777,6 +785,7 @@ fn test_collect_all_undefined_refs_includes_non_external() {
     let items = vec![Item::Enum {
         vis: Visibility::Public,
         name: "MyEnum".to_string(),
+        type_params: vec![],
         serde_tag: None,
         variants: vec![EnumVariant {
             name: "A".to_string(),
@@ -804,6 +813,7 @@ fn test_collect_all_undefined_refs_excludes_defined() {
         Item::Enum {
             vis: Visibility::Public,
             name: "MyEnum".to_string(),
+            type_params: vec![],
             serde_tag: None,
             variants: vec![EnumVariant {
                 name: "A".to_string(),
@@ -826,6 +836,7 @@ fn test_generate_stub_structs_creates_empty_stubs() {
     let mut items = vec![Item::Enum {
         vis: Visibility::Public,
         name: "MyEnum".to_string(),
+        type_params: vec![],
         serde_tag: None,
         variants: vec![EnumVariant {
             name: "A".to_string(),

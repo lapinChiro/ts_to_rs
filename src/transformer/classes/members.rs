@@ -42,7 +42,7 @@ impl<'a> Transformer<'a> {
         };
 
         Ok(Some(AssocConst {
-            vis: vis.clone(),
+            vis: *vis,
             name,
             ty,
             value,
@@ -137,7 +137,7 @@ impl<'a> Transformer<'a> {
         };
 
         let method = Method {
-            vis: vis.clone(),
+            vis: *vis,
             name: "new".to_string(),
             has_self: false,
             has_mut_self: false,

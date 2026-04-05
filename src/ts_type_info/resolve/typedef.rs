@@ -3,7 +3,9 @@
 //! registry フェーズで構築された TS 型ベースの TypeDef を、
 //! Rust 型ベースに変換する。Optional ラップ、PascalCase 命名もここで行う。
 
-use crate::ir::RustType;
+use std::collections::HashMap;
+
+use crate::ir::{RustType, TypeParam};
 use crate::pipeline::SyntheticTypeRegistry;
 use crate::registry::{
     ConstElement, ConstField, FieldDef, MethodSignature, ParamDef, TypeDef, TypeRegistry,
@@ -51,6 +53,39 @@ pub fn resolve_typedef(
     reg: &TypeRegistry,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> anyhow::Result<TypeDef<RustType>> {
+    // 型パラメータスコープを設定（合成 union enum に型パラメータを伝播するため）。
+    // push/restore で early return 時にもスコープが確実に復元される。
+    let tp_names: Vec<String> = match &def {
+        TypeDef::Struct { type_params, .. }
+        | TypeDef::Enum { type_params, .. }
+        | TypeDef::Function { type_params, .. } => {
+            type_params.iter().map(|tp| tp.name.clone()).collect()
+        }
+        TypeDef::ConstValue { .. } => vec![],
+    };
+    let prev_scope = synthetic.push_type_param_scope(tp_names);
+
+    let result = resolve_typedef_inner(def, reg, synthetic);
+
+    // Apply monomorphization substitutions to synthetic items created during resolution
+    if let Ok((_, ref mono_subs)) = result {
+        synthetic.apply_substitutions_to_items(mono_subs);
+    }
+
+    synthetic.restore_type_param_scope(prev_scope);
+
+    result.map(|(td, _)| td)
+}
+
+/// `resolve_typedef` の内部実装。型パラメータスコープの管理は呼び出し元が行う。
+///
+/// Returns `(resolved_typedef, mono_subs)` where `mono_subs` is the monomorphization
+/// substitution map. The caller applies `mono_subs` to synthetic items.
+fn resolve_typedef_inner(
+    def: TypeDef<TsTypeInfo>,
+    reg: &TypeRegistry,
+    synthetic: &mut SyntheticTypeRegistry,
+) -> anyhow::Result<(TypeDef<RustType>, HashMap<String, RustType>)> {
     match def {
         TypeDef::Struct {
             type_params,
@@ -90,15 +125,23 @@ pub fn resolve_typedef(
                 .map(|sig| resolve_method_sig(sig, reg, synthetic))
                 .collect::<anyhow::Result<Vec<_>>>()?;
 
-            Ok(TypeDef::Struct {
-                type_params: resolve_type_params(type_params, reg, synthetic)?,
+            let resolved_params = resolve_type_params(type_params, reg, synthetic)?;
+            let (remaining_params, mono_subs) =
+                monomorphize_type_params(resolved_params, reg, synthetic);
+
+            let result = TypeDef::Struct {
+                type_params: remaining_params,
                 fields: resolved_fields,
                 methods: resolved_methods,
                 constructor: resolved_ctor,
                 call_signatures: resolved_call_sigs,
                 extends,
                 is_interface,
-            })
+            };
+            Ok((
+                apply_substitutions_to_typedef(result, &mono_subs),
+                mono_subs,
+            ))
         }
 
         TypeDef::Enum {
@@ -155,13 +198,21 @@ pub fn resolve_typedef(
                 .into_iter()
                 .collect();
 
-            Ok(TypeDef::Enum {
-                type_params: resolve_type_params(type_params, reg, synthetic)?,
+            let resolved_params = resolve_type_params(type_params, reg, synthetic)?;
+            let (remaining_params, mono_subs) =
+                monomorphize_type_params(resolved_params, reg, synthetic);
+
+            let result = TypeDef::Enum {
+                type_params: remaining_params,
                 variants: pascal_variants,
                 string_values: pascal_string_values,
                 tag_field,
                 variant_fields: resolved_variant_fields,
-            })
+            };
+            Ok((
+                apply_substitutions_to_typedef(result, &mono_subs),
+                mono_subs,
+            ))
         }
 
         TypeDef::Function {
@@ -178,12 +229,19 @@ pub fn resolve_typedef(
                 .map(|rt| resolve_ts_type(&rt, reg, synthetic))
                 .transpose()?;
 
-            Ok(TypeDef::Function {
-                type_params: resolve_type_params(type_params, reg, synthetic)?,
+            let resolved_tp = resolve_type_params(type_params, reg, synthetic)?;
+            let (remaining_tp, mono_subs) = monomorphize_type_params(resolved_tp, reg, synthetic);
+
+            let result = TypeDef::Function {
+                type_params: remaining_tp,
                 params: resolved_params,
                 return_type: resolved_return,
                 has_rest,
-            })
+            };
+            Ok((
+                apply_substitutions_to_typedef(result, &mono_subs),
+                mono_subs,
+            ))
         }
 
         TypeDef::ConstValue {
@@ -213,12 +271,178 @@ pub fn resolve_typedef(
                 })
                 .collect::<anyhow::Result<Vec<_>>>()?;
 
-            Ok(TypeDef::ConstValue {
-                fields: resolved_fields,
-                elements: resolved_elements,
-                type_ref_name,
-            })
+            Ok((
+                TypeDef::ConstValue {
+                    fields: resolved_fields,
+                    elements: resolved_elements,
+                    type_ref_name,
+                },
+                HashMap::new(),
+            ))
         }
+    }
+}
+
+/// RustType が Rust の trait bound として有効かを判定する。
+///
+/// Rust では trait のみが `T: Bound` 構文で使用できる。
+/// プリミティブ型、struct、enum は trait bound として無効。
+///
+/// TypeRegistry と SyntheticTypeRegistry の両方をチェックし、
+/// どちらにも登録されていない Named 型は外部 trait の可能性があるため
+/// 保守的に `true` を返す。
+pub(crate) fn is_valid_trait_bound(
+    ty: &RustType,
+    reg: &TypeRegistry,
+    synthetic: &SyntheticTypeRegistry,
+) -> bool {
+    match ty {
+        // プリミティブ型は trait ではない
+        RustType::F64
+        | RustType::String
+        | RustType::Bool
+        | RustType::Unit
+        | RustType::Any
+        | RustType::Never => false,
+        // 複合型は trait ではない
+        RustType::Vec(_)
+        | RustType::Option(_)
+        | RustType::Tuple(_)
+        | RustType::Fn { .. }
+        | RustType::Result { .. }
+        | RustType::Ref(_) => false,
+        // Named 型: TypeRegistry + SyntheticTypeRegistry で判定
+        RustType::Named { name, .. } => {
+            if let Some(td) = reg.get(name) {
+                return matches!(
+                    td,
+                    TypeDef::Struct {
+                        is_interface: true,
+                        ..
+                    }
+                );
+            }
+            // 合成型（union enum, inline struct 等）は trait ではない
+            if synthetic.get(name).is_some() {
+                return false;
+            }
+            // どちらにも未登録 → 外部 trait の可能性
+            true
+        }
+        // DynTrait は常に有効
+        RustType::DynTrait(_) => true,
+    }
+}
+
+/// 非 trait 制約を持つ型パラメータをモノモーフィゼーションする。
+///
+/// 制約が valid trait bound でない型パラメータを substitution map に移し、
+/// 型パラメータリストから除去する。残りのパラメータの制約内の参照も置換する。
+///
+/// # Returns
+///
+/// `(remaining_params, substitution_map)` — 残りの型パラメータと、モノモーフィゼーションの置換マップ。
+pub(crate) fn monomorphize_type_params(
+    type_params: Vec<TypeParam>,
+    reg: &TypeRegistry,
+    synthetic: &SyntheticTypeRegistry,
+) -> (Vec<TypeParam>, HashMap<String, RustType>) {
+    let mut remaining = type_params;
+    let mut all_substitutions: HashMap<String, RustType> = HashMap::new();
+
+    // イテレーティブに処理: チェーン制約（U extends T where T extends number）に対応。
+    // T がモノモーフィゼーションされると U の制約が f64 に置換され、
+    // 次のイテレーションで U もモノモーフィゼーション対象になる。
+    loop {
+        let mut new_remaining = Vec::new();
+        let mut new_subs: HashMap<String, RustType> = HashMap::new();
+
+        for tp in remaining {
+            match &tp.constraint {
+                Some(ty) if !is_valid_trait_bound(ty, reg, synthetic) => {
+                    new_subs.insert(tp.name.clone(), ty.clone());
+                }
+                _ => {
+                    new_remaining.push(tp);
+                }
+            }
+        }
+
+        if new_subs.is_empty() {
+            remaining = new_remaining;
+            break;
+        }
+
+        // 新しい置換を残りのパラメータの制約に適用
+        remaining = new_remaining
+            .into_iter()
+            .map(|tp| tp.substitute(&new_subs))
+            .collect();
+
+        all_substitutions.extend(new_subs);
+    }
+
+    (remaining, all_substitutions)
+}
+
+/// TypeDef 内の全型にモノモーフィゼーション置換を適用する。
+fn apply_substitutions_to_typedef(def: TypeDef, subs: &HashMap<String, RustType>) -> TypeDef {
+    if subs.is_empty() {
+        return def;
+    }
+    match def {
+        TypeDef::Struct {
+            type_params,
+            fields,
+            methods,
+            constructor,
+            call_signatures,
+            extends,
+            is_interface,
+        } => TypeDef::Struct {
+            type_params,
+            fields: fields.into_iter().map(|f| f.substitute(subs)).collect(),
+            methods: methods
+                .into_iter()
+                .map(|(name, sigs)| (name, sigs.into_iter().map(|s| s.substitute(subs)).collect()))
+                .collect(),
+            constructor: constructor
+                .map(|ctors| ctors.into_iter().map(|s| s.substitute(subs)).collect()),
+            call_signatures: call_signatures
+                .into_iter()
+                .map(|s| s.substitute(subs))
+                .collect(),
+            extends,
+            is_interface,
+        },
+        TypeDef::Enum {
+            type_params,
+            variants,
+            string_values,
+            tag_field,
+            variant_fields,
+        } => TypeDef::Enum {
+            type_params,
+            variants,
+            string_values,
+            tag_field,
+            variant_fields: variant_fields
+                .into_iter()
+                .map(|(v, fields)| (v, fields.into_iter().map(|f| f.substitute(subs)).collect()))
+                .collect(),
+        },
+        TypeDef::Function {
+            type_params,
+            params,
+            return_type,
+            has_rest,
+        } => TypeDef::Function {
+            type_params,
+            params: params.into_iter().map(|p| p.substitute(subs)).collect(),
+            return_type: return_type.map(|ty| ty.substitute(subs)),
+            has_rest,
+        },
+        TypeDef::ConstValue { .. } => def,
     }
 }
 
@@ -286,4 +510,383 @@ pub(crate) fn resolve_method_sig(
         return_type,
         has_rest: sig.has_rest,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap as StdHashMap;
+
+    fn empty_reg() -> TypeRegistry {
+        TypeRegistry::new()
+    }
+
+    fn empty_syn() -> SyntheticTypeRegistry {
+        SyntheticTypeRegistry::new()
+    }
+
+    fn reg_with_interface(name: &str) -> TypeRegistry {
+        let mut reg = TypeRegistry::new();
+        reg.register(
+            name.to_string(),
+            TypeDef::Struct {
+                type_params: vec![],
+                fields: vec![],
+                methods: StdHashMap::new(),
+                constructor: None,
+                call_signatures: vec![],
+                extends: vec![],
+                is_interface: true,
+            },
+        );
+        reg
+    }
+
+    fn reg_with_struct(name: &str) -> TypeRegistry {
+        let mut reg = TypeRegistry::new();
+        reg.register(
+            name.to_string(),
+            TypeDef::Struct {
+                type_params: vec![],
+                fields: vec![],
+                methods: StdHashMap::new(),
+                constructor: None,
+                call_signatures: vec![],
+                extends: vec![],
+                is_interface: false,
+            },
+        );
+        reg
+    }
+
+    // ── is_valid_trait_bound ──
+
+    #[test]
+    fn primitive_types_are_not_valid_trait_bounds() {
+        let reg = empty_reg();
+        assert!(!is_valid_trait_bound(&RustType::F64, &reg, &empty_syn()));
+        assert!(!is_valid_trait_bound(&RustType::String, &reg, &empty_syn()));
+        assert!(!is_valid_trait_bound(&RustType::Bool, &reg, &empty_syn()));
+        assert!(!is_valid_trait_bound(&RustType::Unit, &reg, &empty_syn()));
+        assert!(!is_valid_trait_bound(&RustType::Any, &reg, &empty_syn()));
+        assert!(!is_valid_trait_bound(&RustType::Never, &reg, &empty_syn()));
+    }
+
+    #[test]
+    fn compound_types_are_not_valid_trait_bounds() {
+        let reg = empty_reg();
+        let syn = empty_syn();
+        assert!(!is_valid_trait_bound(
+            &RustType::Vec(Box::new(RustType::F64)),
+            &reg,
+            &syn,
+        ));
+        assert!(!is_valid_trait_bound(
+            &RustType::Option(Box::new(RustType::String)),
+            &reg,
+            &syn,
+        ));
+        assert!(!is_valid_trait_bound(
+            &RustType::Tuple(vec![RustType::F64]),
+            &reg,
+            &syn,
+        ));
+        assert!(!is_valid_trait_bound(
+            &RustType::Fn {
+                params: vec![],
+                return_type: Box::new(RustType::Unit)
+            },
+            &reg,
+            &syn,
+        ));
+    }
+
+    #[test]
+    fn interface_named_type_is_valid_trait_bound() {
+        let reg = reg_with_interface("Serializable");
+        let ty = RustType::Named {
+            name: "Serializable".to_string(),
+            type_args: vec![],
+        };
+        assert!(is_valid_trait_bound(&ty, &reg, &empty_syn()));
+    }
+
+    #[test]
+    fn struct_named_type_is_not_valid_trait_bound() {
+        let reg = reg_with_struct("MyClass");
+        let ty = RustType::Named {
+            name: "MyClass".to_string(),
+            type_args: vec![],
+        };
+        assert!(!is_valid_trait_bound(&ty, &reg, &empty_syn()));
+    }
+
+    #[test]
+    fn unregistered_named_type_assumed_trait() {
+        let reg = empty_reg();
+        let ty = RustType::Named {
+            name: "ExternalTrait".to_string(),
+            type_args: vec![],
+        };
+        assert!(is_valid_trait_bound(&ty, &reg, &empty_syn()));
+    }
+
+    #[test]
+    fn dyn_trait_is_valid_trait_bound() {
+        let reg = empty_reg();
+        assert!(is_valid_trait_bound(
+            &RustType::DynTrait("Foo".to_string()),
+            &reg,
+            &empty_syn(),
+        ));
+    }
+
+    // ── monomorphize_type_params ──
+
+    #[test]
+    fn primitive_constraint_is_monomorphized() {
+        let reg = empty_reg();
+        let params = vec![TypeParam {
+            name: "T".to_string(),
+            constraint: Some(RustType::F64),
+        }];
+        let (remaining, subs) = monomorphize_type_params(params, &reg, &empty_syn());
+        assert!(remaining.is_empty());
+        assert_eq!(subs.get("T"), Some(&RustType::F64));
+    }
+
+    #[test]
+    fn interface_constraint_is_kept() {
+        let reg = reg_with_interface("Serializable");
+        let constraint = RustType::Named {
+            name: "Serializable".to_string(),
+            type_args: vec![],
+        };
+        let params = vec![TypeParam {
+            name: "T".to_string(),
+            constraint: Some(constraint.clone()),
+        }];
+        let (remaining, subs) = monomorphize_type_params(params, &reg, &empty_syn());
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].name, "T");
+        assert_eq!(remaining[0].constraint, Some(constraint));
+        assert!(subs.is_empty());
+    }
+
+    #[test]
+    fn struct_constraint_is_monomorphized() {
+        let reg = reg_with_struct("MyClass");
+        let constraint = RustType::Named {
+            name: "MyClass".to_string(),
+            type_args: vec![],
+        };
+        let params = vec![TypeParam {
+            name: "T".to_string(),
+            constraint: Some(constraint.clone()),
+        }];
+        let (remaining, subs) = monomorphize_type_params(params, &reg, &empty_syn());
+        assert!(remaining.is_empty());
+        assert_eq!(subs.get("T"), Some(&constraint));
+    }
+
+    #[test]
+    fn unconstrained_param_is_kept() {
+        let reg = empty_reg();
+        let params = vec![TypeParam {
+            name: "T".to_string(),
+            constraint: None,
+        }];
+        let (remaining, subs) = monomorphize_type_params(params, &reg, &empty_syn());
+        assert_eq!(remaining.len(), 1);
+        assert!(subs.is_empty());
+    }
+
+    #[test]
+    fn mixed_params_partial_monomorphization() {
+        let reg = reg_with_interface("Trait1");
+        let params = vec![
+            TypeParam {
+                name: "T".to_string(),
+                constraint: Some(RustType::F64),
+            },
+            TypeParam {
+                name: "U".to_string(),
+                constraint: Some(RustType::Named {
+                    name: "Trait1".to_string(),
+                    type_args: vec![],
+                }),
+            },
+            TypeParam {
+                name: "V".to_string(),
+                constraint: None,
+            },
+        ];
+        let (remaining, subs) = monomorphize_type_params(params, &reg, &empty_syn());
+        assert_eq!(remaining.len(), 2);
+        assert_eq!(remaining[0].name, "U");
+        assert_eq!(remaining[1].name, "V");
+        assert_eq!(subs.len(), 1);
+        assert_eq!(subs.get("T"), Some(&RustType::F64));
+    }
+
+    // ── apply_substitutions_to_typedef ──
+
+    #[test]
+    fn apply_substitutions_struct_fields_replaced() {
+        let def: TypeDef = TypeDef::Struct {
+            type_params: vec![],
+            fields: vec![FieldDef {
+                name: "x".to_string(),
+                ty: RustType::Named {
+                    name: "T".to_string(),
+                    type_args: vec![],
+                },
+                optional: false,
+            }],
+            methods: StdHashMap::new(),
+            constructor: None,
+            call_signatures: vec![],
+            extends: vec![],
+            is_interface: false,
+        };
+        let subs = StdHashMap::from([("T".to_string(), RustType::F64)]);
+        let result = apply_substitutions_to_typedef(def, &subs);
+        if let TypeDef::Struct { fields, .. } = result {
+            assert_eq!(fields[0].ty, RustType::F64);
+        } else {
+            panic!("expected Struct");
+        }
+    }
+
+    #[test]
+    fn apply_substitutions_enum_variant_fields_replaced() {
+        let def: TypeDef = TypeDef::Enum {
+            type_params: vec![],
+            variants: vec!["A".to_string()],
+            string_values: StdHashMap::new(),
+            tag_field: None,
+            variant_fields: [(
+                "A".to_string(),
+                vec![FieldDef {
+                    name: "val".to_string(),
+                    ty: RustType::Named {
+                        name: "T".to_string(),
+                        type_args: vec![],
+                    },
+                    optional: false,
+                }],
+            )]
+            .into_iter()
+            .collect(),
+        };
+        let subs = StdHashMap::from([("T".to_string(), RustType::F64)]);
+        let result = apply_substitutions_to_typedef(def, &subs);
+        if let TypeDef::Enum { variant_fields, .. } = result {
+            assert_eq!(variant_fields["A"][0].ty, RustType::F64);
+        } else {
+            panic!("expected Enum");
+        }
+    }
+
+    #[test]
+    fn apply_substitutions_function_params_and_return_replaced() {
+        let def: TypeDef = TypeDef::Function {
+            type_params: vec![],
+            params: vec![ParamDef {
+                name: "x".to_string(),
+                ty: RustType::Named {
+                    name: "T".to_string(),
+                    type_args: vec![],
+                },
+                optional: false,
+                has_default: false,
+            }],
+            return_type: Some(RustType::Named {
+                name: "T".to_string(),
+                type_args: vec![],
+            }),
+            has_rest: false,
+        };
+        let subs = StdHashMap::from([("T".to_string(), RustType::F64)]);
+        let result = apply_substitutions_to_typedef(def, &subs);
+        if let TypeDef::Function {
+            params,
+            return_type,
+            ..
+        } = result
+        {
+            assert_eq!(params[0].ty, RustType::F64);
+            assert_eq!(return_type, Some(RustType::F64));
+        } else {
+            panic!("expected Function");
+        }
+    }
+
+    #[test]
+    fn apply_substitutions_empty_subs_returns_unchanged() {
+        let def: TypeDef = TypeDef::Struct {
+            type_params: vec![],
+            fields: vec![FieldDef {
+                name: "x".to_string(),
+                ty: RustType::String,
+                optional: false,
+            }],
+            methods: StdHashMap::new(),
+            constructor: None,
+            call_signatures: vec![],
+            extends: vec![],
+            is_interface: false,
+        };
+        let subs = StdHashMap::new();
+        let result = apply_substitutions_to_typedef(def, &subs);
+        if let TypeDef::Struct { fields, .. } = result {
+            assert_eq!(fields[0].ty, RustType::String);
+        } else {
+            panic!("expected Struct");
+        }
+    }
+
+    // ── is_valid_trait_bound: synthetic union enum ──
+
+    #[test]
+    fn synthetic_union_enum_is_not_valid_trait_bound() {
+        let reg = empty_reg();
+        let mut syn = empty_syn();
+        let name = syn.register_union(&[RustType::String, RustType::F64]);
+        let ty = RustType::Named {
+            name,
+            type_args: vec![],
+        };
+        assert!(
+            !is_valid_trait_bound(&ty, &reg, &syn),
+            "synthetic union enum should not be a valid trait bound"
+        );
+    }
+
+    #[test]
+    fn chained_constraint_substitution() {
+        // T extends number, U extends T → both monomorphized
+        let reg = empty_reg();
+        let params = vec![
+            TypeParam {
+                name: "T".to_string(),
+                constraint: Some(RustType::F64),
+            },
+            TypeParam {
+                name: "U".to_string(),
+                constraint: Some(RustType::Named {
+                    name: "T".to_string(),
+                    type_args: vec![],
+                }),
+            },
+        ];
+        let (remaining, subs) = monomorphize_type_params(params, &reg, &empty_syn());
+        // イテレーティブ処理:
+        // Pass 1: T → F64 (monomorphized), U の制約 Named("T") → Named("T") は未登録で trait 仮定
+        //   → U は remaining に残り、substitute で Named("T") → F64 に
+        // Pass 2: U の制約 F64 は not valid trait bound → U も monomorphized
+        assert!(remaining.is_empty());
+        assert_eq!(subs.get("T"), Some(&RustType::F64));
+        assert_eq!(subs.get("U"), Some(&RustType::F64));
+    }
 }

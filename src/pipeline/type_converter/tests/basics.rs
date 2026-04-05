@@ -1,4 +1,36 @@
 use super::*;
+use crate::pipeline::SyntheticTypeRegistry;
+
+// ── extract_type_params monomorphization ──
+
+#[test]
+fn test_extract_type_params_monomorphizes_number_constraint() {
+    // `T extends number` → T is monomorphized (removed from params, placed in subs)
+    let source = "interface Foo<T extends number> { x: T; }";
+    let decl = parse_interface(source);
+    let reg = TypeRegistry::new();
+    let mut synthetic = SyntheticTypeRegistry::new();
+    let (params, subs) = extract_type_params(decl.type_params.as_deref(), &mut synthetic, &reg);
+    // T should be monomorphized away (f64 is not a valid trait bound)
+    assert!(
+        params.is_empty(),
+        "T extends number should be monomorphized"
+    );
+    assert_eq!(subs.get("T"), Some(&RustType::F64));
+}
+
+#[test]
+fn test_extract_type_params_keeps_unconstrained() {
+    // `T` with no constraint → stays as a type param
+    let source = "interface Foo<T> { x: T; }";
+    let decl = parse_interface(source);
+    let reg = TypeRegistry::new();
+    let mut synthetic = SyntheticTypeRegistry::new();
+    let (params, subs) = extract_type_params(decl.type_params.as_deref(), &mut synthetic, &reg);
+    assert_eq!(params.len(), 1);
+    assert_eq!(params[0].name, "T");
+    assert!(subs.is_empty());
+}
 
 #[test]
 fn test_convert_string_type() {

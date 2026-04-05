@@ -16,7 +16,7 @@ pub(super) fn make_struct(
     fields: Vec<StructField>,
 ) -> Item {
     Item::Struct {
-        vis: vis.clone(),
+        vis: *vis,
         name: name.to_string(),
         type_params,
         fields,
@@ -91,7 +91,7 @@ pub(super) fn resolve_member_visibility(
     match accessibility {
         Some(ast::Accessibility::Protected) => Visibility::PubCrate,
         Some(ast::Accessibility::Private) => Visibility::Private,
-        _ => class_vis.clone(),
+        _ => *class_vis,
     }
 }
 

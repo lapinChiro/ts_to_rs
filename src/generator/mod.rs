@@ -109,9 +109,10 @@ fn generate_item(item: &Item) -> String {
         Item::Enum {
             vis,
             name,
+            type_params,
             serde_tag,
             variants,
-        } => generate_enum(vis, name, serde_tag, variants),
+        } => generate_enum(vis, name, type_params, serde_tag, variants),
         Item::TypeAlias {
             vis,
             name,
@@ -349,15 +350,17 @@ fn is_numeric_enum(variants: &[EnumVariant]) -> bool {
 fn generate_enum(
     vis: &Visibility,
     name: &str,
+    type_params: &[TypeParam],
     serde_tag: &Option<String>,
     variants: &[EnumVariant],
 ) -> String {
     // Discriminated union with serde tag
     if let Some(tag) = serde_tag {
-        return generate_serde_tagged_enum(vis, name, tag, variants);
+        return generate_serde_tagged_enum(vis, name, type_params, tag, variants);
     }
 
     let vis_str = generate_vis(vis);
+    let tp_str = generate_type_params(type_params);
     let data_enum = has_data_variants(variants);
     let numeric = is_numeric_enum(variants);
 
@@ -371,7 +374,7 @@ fn generate_enum(
     if numeric {
         out.push_str("#[repr(i64)]\n");
     }
-    out.push_str(&format!("{vis_str}enum {name} {{\n"));
+    out.push_str(&format!("{vis_str}enum {name}{tp_str} {{\n"));
 
     if data_enum {
         for variant in variants {
@@ -470,14 +473,16 @@ fn generate_enum(
 fn generate_serde_tagged_enum(
     vis: &Visibility,
     name: &str,
+    type_params: &[TypeParam],
     tag: &str,
     variants: &[EnumVariant],
 ) -> String {
     let vis_str = generate_vis(vis);
+    let tp_str = generate_type_params(type_params);
     let mut out = String::new();
 
     out.push_str("#[derive(Debug, Clone, PartialEq)]\n");
-    out.push_str(&format!("{vis_str}enum {name} {{\n"));
+    out.push_str(&format!("{vis_str}enum {name}{tp_str} {{\n"));
 
     for variant in variants {
         if variant.fields.is_empty() {
@@ -499,7 +504,13 @@ fn generate_serde_tagged_enum(
 
     // Generate tag accessor method: fn kind(&self) -> &str { match self { ... } }
     let tag_method = escape_rust_keyword(tag);
-    out.push_str(&format!("\n\nimpl {name} {{\n"));
+    let impl_tp = if type_params.is_empty() {
+        String::new()
+    } else {
+        let param_names: Vec<String> = type_params.iter().map(|p| p.name.clone()).collect();
+        format!("<{}>", param_names.join(", "))
+    };
+    out.push_str(&format!("\n\nimpl{impl_tp} {name}{tp_str} {{\n"));
     out.push_str(&format!("    pub fn {tag_method}(&self) -> &str {{\n"));
     out.push_str("        match self {\n");
     for variant in variants {

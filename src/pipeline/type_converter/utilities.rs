@@ -1,14 +1,18 @@
+use std::collections::HashMap;
+
 use super::*;
 
-/// Extracts type parameters (name + optional constraint) from an optional [`TsTypeParamDecl`].
+/// Extracts type parameters (name + optional constraint) from an optional [`TsTypeParamDecl`],
+/// then applies monomorphization to remove non-trait-bound constraints.
 ///
-/// Returns an empty vec if there are no type parameters.
+/// Returns `(type_params, mono_subs)` where `mono_subs` maps monomorphized type param names
+/// to their concrete types. Callers must apply `mono_subs` to field/method types via `substitute`.
 pub fn extract_type_params(
     type_params: Option<&swc_ecma_ast::TsTypeParamDecl>,
     synthetic: &mut SyntheticTypeRegistry,
     reg: &TypeRegistry,
-) -> Vec<TypeParam> {
-    match type_params {
+) -> (Vec<TypeParam>, HashMap<String, RustType>) {
+    let raw_params: Vec<TypeParam> = match type_params {
         Some(params) => params
             .params
             .iter()
@@ -20,8 +24,9 @@ pub fn extract_type_params(
                     .and_then(|c| convert_ts_type(c, synthetic, reg).ok()),
             })
             .collect(),
-        None => vec![],
-    }
+        None => return (vec![], HashMap::new()),
+    };
+    crate::ts_type_info::resolve::typedef::monomorphize_type_params(raw_params, reg, synthetic)
 }
 
 /// Converts a property signature into an IR [`StructField`].

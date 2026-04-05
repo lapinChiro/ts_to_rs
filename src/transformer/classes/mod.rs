@@ -158,6 +158,29 @@ impl<'a> Transformer<'a> {
             )?
         };
 
+        // 非 trait 制約の型パラメータをモノモーフィゼーション
+        let (type_params, mono_subs) =
+            crate::ts_type_info::resolve::typedef::monomorphize_type_params(
+                type_params,
+                self.reg(),
+                self.synthetic,
+            );
+        let (fields, constructor, methods) = if mono_subs.is_empty() {
+            (fields, constructor, methods)
+        } else {
+            (
+                fields
+                    .into_iter()
+                    .map(|f| f.substitute(&mono_subs))
+                    .collect(),
+                constructor.map(|m| m.substitute(&mono_subs)),
+                methods
+                    .into_iter()
+                    .map(|m| m.substitute(&mono_subs))
+                    .collect(),
+            )
+        };
+
         Ok(ClassInfo {
             name,
             type_params,

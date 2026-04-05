@@ -6,7 +6,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use crate::ir::{
-    sanitize_field_name, EnumValue, EnumVariant, Item, RustType, StructField, Visibility,
+    sanitize_field_name, EnumValue, EnumVariant, Item, RustType, StructField, TypeParam, Visibility,
 };
 
 /// A registry of synthetic types with automatic deduplication.
@@ -29,6 +29,11 @@ pub struct SyntheticTypeRegistry {
     /// Counter for generating unique synthetic type names (e.g., _TypeLit0, _Intersection1).
     /// Replaces the global `SYNTHETIC_COUNTER` in transformer/types/mod.rs.
     synthetic_counter: u32,
+    /// 現在のスコープで有効な型パラメータ名。
+    ///
+    /// TypeDef 解決中に設定し、解決完了後にクリアする。
+    /// `register_union` が合成 enum に型パラメータを伝播するために使用。
+    type_param_scope: Vec<String>,
 }
 
 /// A synthetic type definition.
@@ -67,7 +72,21 @@ impl SyntheticTypeRegistry {
             intersection_enum_dedup: HashMap::new(),
             struct_counter: 0,
             synthetic_counter: 0,
+            type_param_scope: Vec::new(),
         }
+    }
+
+    /// 型パラメータスコープを設定し、以前のスコープを返す。
+    ///
+    /// 呼び出し元は処理完了後（正常・エラー問わず）に `restore_type_param_scope` で復元する。
+    /// これにより `?` による early return でもスコープが正しく復元される。
+    pub fn push_type_param_scope(&mut self, names: Vec<String>) -> Vec<String> {
+        std::mem::replace(&mut self.type_param_scope, names)
+    }
+
+    /// 型パラメータスコープを復元する。
+    pub fn restore_type_param_scope(&mut self, prev: Vec<String>) {
+        self.type_param_scope = prev;
     }
 
     /// Registers a union type enum and returns its name.
@@ -108,9 +127,21 @@ impl SyntheticTypeRegistry {
             })
             .collect();
 
+        // 型パラメータスコープから、メンバー型で使用されている型パラメータを検出
+        let type_params: Vec<TypeParam> = self
+            .type_param_scope
+            .iter()
+            .filter(|tp_name| member_types.iter().any(|ty| ty.uses_param(tp_name)))
+            .map(|tp_name| TypeParam {
+                name: tp_name.clone(),
+                constraint: None,
+            })
+            .collect();
+
         let item = Item::Enum {
             vis: Visibility::Public,
             name: name.clone(),
+            type_params,
             serde_tag: None,
             variants,
         };
@@ -147,6 +178,7 @@ impl SyntheticTypeRegistry {
         let item = Item::Enum {
             vis: Visibility::Public,
             name: name.clone(),
+            type_params: vec![],
             serde_tag: None,
             variants,
         };
@@ -252,6 +284,7 @@ impl SyntheticTypeRegistry {
         let item = Item::Enum {
             vis: Visibility::Public,
             name: name.clone(),
+            type_params: vec![],
             serde_tag: serde_tag.map(|s| s.to_string()),
             variants,
         };
@@ -301,6 +334,7 @@ impl SyntheticTypeRegistry {
         let item = Item::Enum {
             vis: Visibility::Public,
             name: name.clone(),
+            type_params: vec![],
             serde_tag: None,
             variants,
         };
@@ -385,6 +419,23 @@ impl SyntheticTypeRegistry {
             intersection_enum_dedup: self.intersection_enum_dedup.clone(),
             struct_counter: self.struct_counter,
             synthetic_counter: self.synthetic_counter,
+            type_param_scope: Vec::new(),
+        }
+    }
+
+    /// Applies monomorphization substitutions to all registered synthetic items.
+    ///
+    /// Iterates all items and substitutes type parameter references in fields,
+    /// variant data, etc. with their concrete types from the substitution map.
+    pub fn apply_substitutions_to_items(
+        &mut self,
+        subs: &std::collections::HashMap<String, RustType>,
+    ) {
+        if subs.is_empty() {
+            return;
+        }
+        for def in self.types.values_mut() {
+            def.item = def.item.substitute(subs);
         }
     }
 

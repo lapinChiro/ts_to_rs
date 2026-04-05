@@ -747,3 +747,52 @@ fn test_register_union_fn_same_return_type_deduped() {
         _ => panic!("expected Item::Enum"),
     }
 }
+
+// ── register_union: type param scope detection ──
+
+#[test]
+fn test_register_union_detects_type_params_from_scope() {
+    let mut reg = SyntheticTypeRegistry::new();
+    reg.push_type_param_scope(vec!["T".to_string()]);
+    let name = reg.register_union(&[
+        RustType::Named {
+            name: "T".to_string(),
+            type_args: vec![],
+        },
+        RustType::Vec(Box::new(RustType::Named {
+            name: "T".to_string(),
+            type_args: vec![],
+        })),
+    ]);
+    let def = reg.get(&name).unwrap();
+    match &def.item {
+        Item::Enum { type_params, .. } => {
+            assert_eq!(type_params.len(), 1, "should detect T from scope");
+            assert_eq!(type_params[0].name, "T");
+        }
+        _ => panic!("expected Item::Enum for type param scope test"),
+    }
+}
+
+#[test]
+fn test_register_union_no_type_params_when_scope_empty() {
+    let mut reg = SyntheticTypeRegistry::new();
+    // No type param scope set
+    let name = reg.register_union(&[
+        RustType::Named {
+            name: "T".to_string(),
+            type_args: vec![],
+        },
+        RustType::F64,
+    ]);
+    let def = reg.get(&name).unwrap();
+    match &def.item {
+        Item::Enum { type_params, .. } => {
+            assert!(
+                type_params.is_empty(),
+                "without scope, no type params should be detected"
+            );
+        }
+        _ => panic!("expected Item::Enum for empty scope test"),
+    }
+}

@@ -16,19 +16,6 @@ pub struct TypeParam<T = RustType> {
     pub constraint: Option<T>,
 }
 
-impl TypeParam {
-    /// 型パラメータの制約内の型パラメータ参照を具体型で置換した新しい TypeParam を返す。
-    ///
-    /// `name` は型パラメータの識別子であり置換対象ではない。
-    /// `constraint` 内の `RustType` のみ置換する。
-    pub fn substitute(&self, bindings: &std::collections::HashMap<String, RustType>) -> TypeParam {
-        TypeParam {
-            name: self.name.clone(),
-            constraint: self.constraint.as_ref().map(|c| c.substitute(bindings)),
-        }
-    }
-}
-
 /// trait への参照（名前 + 型引数）。
 ///
 /// `impl TraitName<T>` の `TraitName<T>` や `trait Foo: Bar<T>` の `Bar<T>` を表す。
@@ -129,49 +116,10 @@ impl RustType {
             _ => RustType::Option(Box::new(self)),
         }
     }
-
-    /// 型パラメータ名を具体型に置換する。
-    ///
-    /// `bindings` は型パラメータ名 → 具体型のマッピング。
-    /// `Named { name: "T" }` が `bindings` に存在すれば具体型に置換し、
-    /// それ以外のバリアントは再帰的に処理する。
-    pub fn substitute(&self, bindings: &std::collections::HashMap<String, RustType>) -> RustType {
-        match self {
-            RustType::Named { name, type_args } => {
-                if type_args.is_empty() {
-                    if let Some(concrete) = bindings.get(name.as_str()) {
-                        return concrete.clone();
-                    }
-                }
-                RustType::Named {
-                    name: name.clone(),
-                    type_args: type_args.iter().map(|a| a.substitute(bindings)).collect(),
-                }
-            }
-            RustType::Vec(inner) => RustType::Vec(Box::new(inner.substitute(bindings))),
-            RustType::Option(inner) => RustType::Option(Box::new(inner.substitute(bindings))),
-            RustType::Ref(inner) => RustType::Ref(Box::new(inner.substitute(bindings))),
-            RustType::Result { ok, err } => RustType::Result {
-                ok: Box::new(ok.substitute(bindings)),
-                err: Box::new(err.substitute(bindings)),
-            },
-            RustType::Tuple(elems) => {
-                RustType::Tuple(elems.iter().map(|e| e.substitute(bindings)).collect())
-            }
-            RustType::Fn {
-                params,
-                return_type,
-            } => RustType::Fn {
-                params: params.iter().map(|p| p.substitute(bindings)).collect(),
-                return_type: Box::new(return_type.substitute(bindings)),
-            },
-            other => other.clone(),
-        }
-    }
 }
 
 /// Visibility modifier for items.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Visibility {
     /// `pub`
     Public,
@@ -424,6 +372,8 @@ pub enum Item {
         vis: Visibility,
         /// Enum name
         name: String,
+        /// Generic type parameters
+        type_params: Vec<TypeParam>,
         /// Optional serde tag field name for discriminated unions (e.g., `"kind"`)
         serde_tag: Option<String>,
         /// Enum variants
@@ -968,6 +918,8 @@ pub enum ClosureBody {
     /// A block body: `|x| { let y = x + 1; y }`
     Block(Vec<Stmt>),
 }
+
+mod substitute;
 
 #[cfg(test)]
 mod tests;

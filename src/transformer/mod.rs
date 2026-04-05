@@ -561,7 +561,7 @@ impl<'a> Transformer<'a> {
                         if let ModuleItem::Stmt(ast::Stmt::Decl(inner_decl)) = item {
                             match self.transform_decl(
                                 inner_decl,
-                                vis.clone(),
+                                vis,
                                 class_map,
                                 iface_methods,
                                 resilient,
@@ -627,6 +627,7 @@ fn convert_ts_enum(ts_enum: &swc_ecma_ast::TsEnumDecl, vis: Visibility) -> Resul
     Ok(vec![Item::Enum {
         vis,
         name,
+        type_params: vec![],
         serde_tag: None,
         variants,
     }])

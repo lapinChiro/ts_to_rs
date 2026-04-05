@@ -63,13 +63,8 @@ impl<'a> Transformer<'a> {
             };
 
             for param in &fn_decl.function.params {
-                let (p, stmts, extra) = sub.convert_param(
-                    &param.pat,
-                    &name,
-                    vis.clone(),
-                    resilient,
-                    &mut fallback_warnings,
-                )?;
+                let (p, stmts, extra) =
+                    sub.convert_param(&param.pat, &name, vis, resilient, &mut fallback_warnings)?;
                 params.push(p);
                 destructuring_stmts.extend(stmts);
                 items.extend(extra);
@@ -149,11 +144,12 @@ impl<'a> Transformer<'a> {
             combined
         };
 
-        let type_params = extract_type_params(
+        let (type_params, mono_subs) = extract_type_params(
             fn_decl.function.type_params.as_deref(),
             &mut local_synthetic,
             self.reg(),
         );
+        // mono_subs は最終的に Item::substitute で一括適用する（params, return_type, body 全体）
 
         // If the function body contains `throw`, wrap return type in Result and returns in Ok()
         let has_throw = fn_decl
@@ -194,7 +190,7 @@ impl<'a> Transformer<'a> {
         // Merge local synthetic types into the outer registry (only on success)
         self.synthetic.merge(local_synthetic);
 
-        items.push(Item::Fn {
+        let item = Item::Fn {
             vis,
             attributes,
             is_async,
@@ -203,6 +199,11 @@ impl<'a> Transformer<'a> {
             params,
             return_type,
             body,
+        };
+        items.push(if mono_subs.is_empty() {
+            item
+        } else {
+            item.substitute(&mono_subs)
         });
 
         Ok((items, fallback_warnings))

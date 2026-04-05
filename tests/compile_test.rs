@@ -154,8 +154,7 @@ fn test_all_fixtures_compile() {
         "closures",
         // discriminated-union: match body uses `event.x` instead of destructured binding `x` (I-322).
         "discriminated-union",
-        // generic-class: `T extends number` → `T: f64` which is not a trait (I-273).
-        "generic-class",
+        // (I-273 fixed: generic-class removed from skip list)
         // (I-325 fixed: object-destructuring removed from skip list)
         // ternary: union branch types not wrapped in enum variants (I-11).
         "ternary",
@@ -240,7 +239,7 @@ fn test_all_fixtures_compile_with_builtins() {
         "intersection-empty-object",
         // T-3 fixture enrichment: same issues as skip_compile above.
         "basic-types",
-        "generic-class",
+        // (I-273 fixed: generic-class removed from skip list)
         // (I-325 fixed: object-destructuring removed from skip list)
         "ternary",
         "async-await",

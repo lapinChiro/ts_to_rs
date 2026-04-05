@@ -9,12 +9,12 @@ Tier 内の記載順序が優先度。根本原因を共有するイシューは
 
 ## Tier 0: L1（信頼性基盤）+ L2（設計基盤）
 
-### RC-15: 型変換シグネチャの設計問題 [L2]
+### ~~RC-15: 型変換シグネチャの設計問題 [L2]~~ **Batch 10 で完了**
 
-`convert_ts_type` に型パラメータコンテキストがなく、型パラメータ制約の解決が不完全。
+~~`convert_ts_type` に型パラメータコンテキストがなく、型パラメータ制約の解決が不完全。~~
 
-- **[I-299]** **`convert_ts_type` に型パラメータコンテキスト導入** — シグネチャ変更の blast radius 大。独立リファクタリング PRD
-- **[I-273]** **trait/struct 混同（E0404/E0405）** — `T extends number` → `T: f64` が trait でない。ディレクトリコンパイル 156→157+/158 の阻害要因
+- ~~**[I-299]** `convert_ts_type` に型パラメータコンテキスト導入~~ — SyntheticTypeRegistry.type_param_scope で合成型に伝播
+- ~~**[I-273]** trait/struct 混同（E0404）~~ — モノモーフィゼーションで解決。非 trait 制約を具象型で置換。ただし前方参照時は is_valid_trait_bound が正しく判定できず残存（I-367）
 
 ---
 
@@ -55,6 +55,10 @@ OBJECT_LITERAL_NO_TYPE 全体で 25件。I-300/I-301/I-306 のサブ分類件数
 
 - **[I-336]** **super() がリテラル出力** — `generate_child_of_abstract()` で `rewrite_super_constructor()` 未呼出
 - **[I-337]** **trait default method でフィールドアクセス不可** — concrete メソッドの一律 trait 化。I-336 と強依存
+
+### RC-16: type_converter パスの前方参照問題
+
+- **[I-367]** **type_converter パスの前方参照で is_valid_trait_bound / lookup_field_type が失敗** — TypeDef パス（resolve_typedef）は 2-pass collection で前方参照を解決できるが、Item パス（type_converter）は宣言順に逐次処理するため、後方定義の型が `is_valid_trait_bound` や `lookup_field_type` で未登録と判定される。Hono types.rs で E0404 × 4（`ArrayBufferOrSharedArrayBuffer`, `StatusCode`, `ResponseFormat`）、E0405 × 1（`Input::out` indexed access）、E0107 × 2（`ArrayBufferView`, `WSContextInit` ジェネリクス不一致）が残存。dir compile 156→157+ のゲート。解決策候補: (1) type_converter にも 2-pass 処理を導入、(2) TypeDef パスから直接 Item を生成するアーキテクチャ変更、(3) Item 生成を全型の TypeDef 登録完了後に実行する順序保証
 
 ### ゲートイシュー・ブロッカー
 

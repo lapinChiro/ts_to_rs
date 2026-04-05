@@ -100,13 +100,13 @@ impl<'a> Transformer<'a> {
                         }
                     }
 
-                    let type_params = extract_type_params(
+                    let (type_params, mono_subs) = extract_type_params(
                         arrow.type_params.as_deref(),
                         self.synthetic,
                         self.reg(),
                     );
-                    items.push(Item::Fn {
-                        vis: vis.clone(),
+                    let item = Item::Fn {
+                        vis,
                         attributes: vec![],
                         is_async: arrow.is_async,
                         name,
@@ -114,6 +114,12 @@ impl<'a> Transformer<'a> {
                         params,
                         return_type: ret,
                         body: fn_body,
+                    };
+                    // Item::substitute で params, return_type, body 全体に一括適用
+                    items.push(if mono_subs.is_empty() {
+                        item
+                    } else {
+                        item.substitute(&mono_subs)
                     });
                     all_warnings.extend(fallback_warnings);
                 }

@@ -41,12 +41,12 @@ impl<T> Stack<T> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct NumberBox<T: f64> {
-    pub value: T,
+pub struct NumberBox {
+    pub value: f64,
 }
 
-impl<T: f64> NumberBox<T> {
-    pub fn new(val: T) -> Self {
+impl NumberBox {
+    pub fn new(val: f64) -> Self {
         Self { value: val }
     }
 

@@ -42,6 +42,17 @@ use crate::pipeline::SyntheticTypeRegistry;
 use crate::registry::{TypeDef, TypeRegistry};
 use crate::transformer::type_position::{wrap_trait_for_position, TypePosition};
 
+/// Applies monomorphization substitutions to IR items using `Item::substitute`.
+pub(super) fn apply_mono_subs_to_items(
+    items: Vec<Item>,
+    subs: &std::collections::HashMap<String, RustType>,
+) -> Vec<Item> {
+    if subs.is_empty() {
+        return items;
+    }
+    items.iter().map(|item| item.substitute(subs)).collect()
+}
+
 /// Returns true if the keyword type is a nullable sentinel (`null`, `undefined`, `void`).
 ///
 /// These types are filtered from union members and cause the union to be wrapped in `Option`.

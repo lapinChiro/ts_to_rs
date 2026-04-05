@@ -13,7 +13,13 @@ pub fn convert_interface_items(
     reg: &TypeRegistry,
 ) -> Result<Vec<Item>> {
     let name = sanitize_rust_type_name(&decl.id.sym);
-    let type_params = extract_type_params(decl.type_params.as_deref(), synthetic, reg);
+    let tp_names: Vec<String> = decl
+        .type_params
+        .as_ref()
+        .map(|tp| tp.params.iter().map(|p| p.name.sym.to_string()).collect())
+        .unwrap_or_default();
+    let prev_scope = synthetic.push_type_param_scope(tp_names);
+    let (type_params, mono_subs) = extract_type_params(decl.type_params.as_deref(), synthetic, reg);
 
     let has_methods = decl
         .body
@@ -26,29 +32,36 @@ pub fn convert_interface_items(
         .iter()
         .any(|m| matches!(m, TsTypeElement::TsPropertySignature(_)));
 
-    if crate::registry::interfaces::is_callable_only(&decl.body.body) {
-        let item = convert_interface_as_fn_type(decl, vis, &name, type_params, synthetic, reg)?;
-        return Ok(vec![item]);
-    }
+    let result = (|| -> Result<Vec<Item>> {
+        if crate::registry::interfaces::is_callable_only(&decl.body.body) {
+            let item = convert_interface_as_fn_type(decl, vis, &name, type_params, synthetic, reg)?;
+            return Ok(vec![item]);
+        }
 
-    if has_methods && has_properties {
-        return convert_interface_as_struct_and_trait(
-            decl,
-            vis,
-            &name,
-            type_params,
-            synthetic,
-            reg,
-        );
-    }
+        if has_methods && has_properties {
+            return convert_interface_as_struct_and_trait(
+                decl,
+                vis,
+                &name,
+                type_params,
+                synthetic,
+                reg,
+            );
+        }
 
-    if has_methods {
-        let item = convert_interface_as_trait(decl, vis, &name, type_params, synthetic, reg)?;
-        return Ok(vec![item]);
-    }
+        if has_methods {
+            let item = convert_interface_as_trait(decl, vis, &name, type_params, synthetic, reg)?;
+            return Ok(vec![item]);
+        }
 
-    let item = convert_interface_as_struct(decl, vis, &name, type_params, synthetic, reg)?;
-    Ok(vec![item])
+        let item = convert_interface_as_struct(decl, vis, &name, type_params, synthetic, reg)?;
+        Ok(vec![item])
+    })();
+
+    synthetic.restore_type_param_scope(prev_scope);
+
+    let items = result?;
+    Ok(apply_mono_subs_to_items(items, &mono_subs))
 }
 
 /// Converts an interface into a single IR item (legacy API, delegates to `convert_interface_items`).
@@ -260,14 +273,14 @@ fn convert_interface_as_struct_and_trait(
         .collect();
 
     let struct_item = Item::Struct {
-        vis: vis.clone(),
+        vis,
         name: struct_name.clone(),
         type_params: type_params.clone(),
         fields,
     };
 
     let trait_item = Item::Trait {
-        vis: vis.clone(),
+        vis,
         name: name.to_string(),
         type_params: type_params.clone(),
         supertraits,

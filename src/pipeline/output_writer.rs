@@ -409,6 +409,7 @@ mod tests {
         Item::Enum {
             vis: Visibility::Public,
             name: name.to_string(),
+            type_params: vec![],
             serde_tag: None,
             variants: vec![],
         }

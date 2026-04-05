@@ -417,6 +417,44 @@ fn resolve_typedef_regular_enum_no_pascal_case() {
     }
 }
 
+// ── resolve_type_ref: type arg truncation ──
+
+#[test]
+fn resolve_type_ref_truncates_extra_type_args() {
+    // Register a type with 0 type_params
+    let mut reg = TypeRegistry::new();
+    let mut syn = SyntheticTypeRegistry::new();
+    reg.register(
+        "Foo".to_string(),
+        TypeDef::Struct {
+            type_params: vec![], // 0 type params
+            fields: vec![],
+            methods: std::collections::HashMap::new(),
+            constructor: None,
+            call_signatures: vec![],
+            extends: vec![],
+            is_interface: false,
+        },
+    );
+    // Resolve a type ref with extra type args
+    let info = TsTypeInfo::TypeRef {
+        name: "Foo".to_string(),
+        type_args: vec![TsTypeInfo::String, TsTypeInfo::Number],
+    };
+    let result = resolve_ts_type(&info, &reg, &mut syn).unwrap();
+    // Extra args should be truncated to 0
+    match result {
+        RustType::Named { name, type_args } => {
+            assert_eq!(name, "Foo");
+            assert!(
+                type_args.is_empty(),
+                "type args should be truncated to match type_params count (0)"
+            );
+        }
+        _ => panic!("expected Named"),
+    }
+}
+
 // ── resolve_keyof ──
 
 #[test]

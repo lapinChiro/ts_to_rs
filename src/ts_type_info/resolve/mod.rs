@@ -426,10 +426,20 @@ fn resolve_type_ref(
                 type_args: vec![inner],
             })
         }
-        _ => Ok(RustType::Named {
-            name: sanitize_rust_type_name(name),
-            type_args: resolved_args,
-        }),
+        _ => {
+            let mut args = resolved_args;
+            // モノモーフィゼーション済み型への参照で余剰型引数をトランケート
+            let expected_count = reg.get(name).map(|td| td.type_params().len());
+            if let Some(expected) = expected_count {
+                if args.len() > expected {
+                    args.truncate(expected);
+                }
+            }
+            Ok(RustType::Named {
+                name: sanitize_rust_type_name(name),
+                type_args: args,
+            })
+        }
     }
 }
 

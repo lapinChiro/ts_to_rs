@@ -61,6 +61,7 @@ pub(super) fn try_convert_discriminated_union(
     Ok(Some(Item::Enum {
         vis,
         name: sanitize_rust_type_name(&decl.id.sym),
+        type_params: vec![],
         serde_tag: Some(discriminant_field),
         variants,
     }))
@@ -104,6 +105,7 @@ pub(super) fn try_convert_string_literal_union(
     Ok(Some(Item::Enum {
         vis,
         name: sanitize_rust_type_name(&decl.id.sym),
+        type_params: vec![],
         serde_tag: None,
         variants,
     }))
@@ -123,6 +125,7 @@ pub(super) fn try_convert_single_string_literal(
                 Ok(Some(Item::Enum {
                     vis,
                     name: sanitize_rust_type_name(&decl.id.sym),
+                    type_params: vec![],
                     serde_tag: None,
                     variants: vec![EnumVariant {
                         name: string_to_pascal_case(&value),
@@ -175,12 +178,13 @@ pub(super) fn try_convert_general_union(
     // Nullable union with single non-null type: `type X = T | null` → `type X = Option<T>`
     if has_null_or_undefined && non_null_types.len() == 1 {
         let inner_type = convert_ts_type(non_null_types[0], synthetic, reg)?;
-        let type_params = extract_type_params(decl.type_params.as_deref(), synthetic, reg);
+        let (type_params, mono_subs) =
+            extract_type_params(decl.type_params.as_deref(), synthetic, reg);
         return Ok(Some(Item::TypeAlias {
             vis,
             name: sanitize_rust_type_name(&decl.id.sym),
             type_params,
-            ty: RustType::Option(Box::new(inner_type)),
+            ty: RustType::Option(Box::new(inner_type)).substitute(&mono_subs),
         }));
     }
 
@@ -316,8 +320,9 @@ pub(super) fn try_convert_general_union(
     }
 
     let enum_item = Item::Enum {
-        vis: vis.clone(),
+        vis,
         name: sanitize_rust_type_name(&decl.id.sym),
+        type_params: vec![],
         serde_tag: None,
         variants,
     };

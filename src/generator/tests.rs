@@ -129,6 +129,7 @@ fn test_generate_enum_numeric_auto() {
     let item = Item::Enum {
         vis: Visibility::Public,
         name: "Color".to_string(),
+        type_params: vec![],
         serde_tag: None,
         variants: vec![
             EnumVariant {
@@ -173,6 +174,7 @@ fn test_generate_enum_numeric_explicit() {
     let item = Item::Enum {
         vis: Visibility::Public,
         name: "Status".to_string(),
+        type_params: vec![],
         serde_tag: None,
         variants: vec![
             EnumVariant {
@@ -210,6 +212,7 @@ fn test_generate_enum_string() {
     let item = Item::Enum {
         vis: Visibility::Public,
         name: "Direction".to_string(),
+        type_params: vec![],
         serde_tag: None,
         variants: vec![
             EnumVariant {
@@ -255,6 +258,7 @@ fn test_generate_enum_private() {
     let item = Item::Enum {
         vis: Visibility::Private,
         name: "Color".to_string(),
+        type_params: vec![],
         serde_tag: None,
         variants: vec![EnumVariant {
             name: "Red".to_string(),
@@ -273,6 +277,7 @@ fn test_generate_enum_data_variants() {
     let item = Item::Enum {
         vis: Visibility::Public,
         name: "Value".to_string(),
+        type_params: vec![],
         serde_tag: None,
         variants: vec![
             EnumVariant {

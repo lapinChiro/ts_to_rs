@@ -58,6 +58,7 @@ fn test_item_enum_no_values() {
     let item = Item::Enum {
         vis: Visibility::Public,
         name: "Color".to_string(),
+        type_params: vec![],
         serde_tag: None,
         variants: vec![
             EnumVariant {
@@ -89,6 +90,7 @@ fn test_item_enum_numeric_values() {
     let item = Item::Enum {
         vis: Visibility::Public,
         name: "Status".to_string(),
+        type_params: vec![],
         serde_tag: None,
         variants: vec![
             EnumVariant {
@@ -119,6 +121,7 @@ fn test_item_enum_string_values() {
     let item = Item::Enum {
         vis: Visibility::Public,
         name: "Direction".to_string(),
+        type_params: vec![],
         serde_tag: None,
         variants: vec![
             EnumVariant {
@@ -418,78 +421,7 @@ fn test_binop_bitwise_precedence_order() {
     assert!(BinOp::BitXor.precedence() > BinOp::BitOr.precedence());
 }
 
-// --- I-100: RustType::substitute ---
-
-#[test]
-fn test_substitute_type_param_to_concrete() {
-    // Named("T") に T→String → RustType::String
-    use std::collections::HashMap;
-    let ty = RustType::Named {
-        name: "T".to_string(),
-        type_args: vec![],
-    };
-    let bindings = HashMap::from([("T".to_string(), RustType::String)]);
-    assert_eq!(ty.substitute(&bindings), RustType::String);
-}
-
-#[test]
-fn test_substitute_vec_recursive() {
-    // Vec<T> に T→F64 → Vec<F64>
-    use std::collections::HashMap;
-    let ty = RustType::Vec(Box::new(RustType::Named {
-        name: "T".to_string(),
-        type_args: vec![],
-    }));
-    let bindings = HashMap::from([("T".to_string(), RustType::F64)]);
-    assert_eq!(
-        ty.substitute(&bindings),
-        RustType::Vec(Box::new(RustType::F64))
-    );
-}
-
-#[test]
-fn test_substitute_option_recursive() {
-    // Option<Vec<T>> に T→String → Option<Vec<String>>
-    use std::collections::HashMap;
-    let ty = RustType::Option(Box::new(RustType::Vec(Box::new(RustType::Named {
-        name: "T".to_string(),
-        type_args: vec![],
-    }))));
-    let bindings = HashMap::from([("T".to_string(), RustType::String)]);
-    assert_eq!(
-        ty.substitute(&bindings),
-        RustType::Option(Box::new(RustType::Vec(Box::new(RustType::String))))
-    );
-}
-
-#[test]
-fn test_substitute_unrelated_type_unchanged() {
-    // RustType::Bool に T→String → Bool（変化なし）
-    use std::collections::HashMap;
-    let bindings = HashMap::from([("T".to_string(), RustType::String)]);
-    assert_eq!(RustType::Bool.substitute(&bindings), RustType::Bool);
-}
-
-#[test]
-fn test_substitute_named_type_args() {
-    // Container<T> に T→String → Container<String>
-    use std::collections::HashMap;
-    let ty = RustType::Named {
-        name: "Container".to_string(),
-        type_args: vec![RustType::Named {
-            name: "T".to_string(),
-            type_args: vec![],
-        }],
-    };
-    let bindings = HashMap::from([("T".to_string(), RustType::String)]);
-    assert_eq!(
-        ty.substitute(&bindings),
-        RustType::Named {
-            name: "Container".to_string(),
-            type_args: vec![RustType::String],
-        }
-    );
-}
+mod substitute_tests;
 
 // -- sanitize_field_name tests --
 

@@ -322,8 +322,39 @@ pub(super) fn try_convert_intersection_type(
         _ => return Ok(None),
     };
 
-    let type_params = extract_type_params(decl.type_params.as_deref(), synthetic, reg);
+    let tp_names: Vec<String> = decl
+        .type_params
+        .as_ref()
+        .map(|tp| tp.params.iter().map(|p| p.name.sym.to_string()).collect())
+        .unwrap_or_default();
+    let prev_scope = synthetic.push_type_param_scope(tp_names);
+    let (type_params, mono_subs) = extract_type_params(decl.type_params.as_deref(), synthetic, reg);
 
+    let result = try_convert_intersection_type_inner(
+        decl,
+        vis,
+        reg,
+        synthetic,
+        intersection,
+        type_params,
+        &mono_subs,
+    );
+
+    synthetic.restore_type_param_scope(prev_scope);
+
+    result
+}
+
+/// Inner implementation of intersection type conversion (after scope setup).
+fn try_convert_intersection_type_inner(
+    decl: &TsTypeAliasDecl,
+    vis: Visibility,
+    reg: &TypeRegistry,
+    synthetic: &mut SyntheticTypeRegistry,
+    intersection: &swc_ecma_ast::TsIntersectionType,
+    type_params: Vec<TypeParam>,
+    mono_subs: &std::collections::HashMap<String, RustType>,
+) -> Result<Option<Item>> {
     // Pre-process: unwrap parenthesized, remove empty type literals
     let members = preprocess_intersection_members(intersection);
 
@@ -345,7 +376,7 @@ pub(super) fn try_convert_intersection_type(
                     vis,
                     name: sanitize_rust_type_name(&decl.id.sym),
                     type_params,
-                    ty: rust_type,
+                    ty: rust_type.substitute(mono_subs),
                 }));
             }
         }
@@ -360,7 +391,7 @@ pub(super) fn try_convert_intersection_type(
                 vis,
                 name: sanitize_rust_type_name(&decl.id.sym),
                 type_params,
-                ty: rust_type,
+                ty: rust_type.substitute(mono_subs),
             }));
         }
     }
@@ -415,16 +446,19 @@ pub(super) fn try_convert_intersection_type(
                     for_trait: None,
                     consts: vec![],
                     methods,
-                },
+                }
+                .substitute(mono_subs),
             );
         }
 
-        return Ok(Some(Item::Enum {
+        let item = Item::Enum {
             vis,
             name: enum_name,
+            type_params: vec![],
             serde_tag,
             variants,
-        }));
+        };
+        return Ok(Some(item.substitute(mono_subs)));
     }
 
     let (fields, methods) = extract_intersection_members(&members, synthetic, reg)?;
@@ -488,7 +522,8 @@ pub(super) fn try_convert_intersection_type(
                 for_trait: None,
                 consts: vec![],
                 methods,
-            },
+            }
+            .substitute(mono_subs),
         );
     }
 
@@ -496,6 +531,6 @@ pub(super) fn try_convert_intersection_type(
         vis,
         name: struct_name,
         type_params,
-        fields,
+        fields: fields.iter().map(|f| f.substitute(mono_subs)).collect(),
     }))
 }
