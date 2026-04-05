@@ -841,19 +841,25 @@ fn expr_contains_regex(expr: &crate::ir::Expr) -> bool {
 
 /// Builds an `unwrap_or` or `unwrap_or_else` expression for an Option field with a default value.
 ///
-/// Uses `unwrap_or_else` (lazy evaluation) when the default expression involves
-/// allocation (e.g., `"hello".to_string()`), and `unwrap_or` (eager) otherwise.
-/// This is the single source of truth for destructuring default value unwrap generation,
-/// used by both statement-level and function-parameter-level destructuring.
+/// Uses `unwrap_or` (eager) only for cheap Copy literals (numbers, bools, unit).
+/// Everything else uses `unwrap_or_else` (lazy) to avoid:
+/// - Eager evaluation of side-effecting expressions (correctness)
+/// - Unnecessary String/struct allocation when Option is Some (performance)
+/// - Unconditional move of non-Copy values (ownership safety)
+///
+/// This is the single source of truth for Option unwrap-with-default generation,
+/// used by destructuring defaults, function parameter defaults, and `??` operator.
 pub(crate) fn build_option_unwrap_with_default(
     field_access: crate::ir::Expr,
     default_ir: crate::ir::Expr,
 ) -> crate::ir::Expr {
-    let needs_lazy = matches!(
-        &default_ir,
-        crate::ir::Expr::MethodCall { method, .. } if method == "to_string"
-    ) || matches!(&default_ir, crate::ir::Expr::StringLit(_));
-    if needs_lazy {
+    if default_ir.is_copy_literal() {
+        crate::ir::Expr::MethodCall {
+            object: Box::new(field_access),
+            method: "unwrap_or".to_string(),
+            args: vec![default_ir],
+        }
+    } else {
         crate::ir::Expr::MethodCall {
             object: Box::new(field_access),
             method: "unwrap_or_else".to_string(),
@@ -862,12 +868,6 @@ pub(crate) fn build_option_unwrap_with_default(
                 return_type: None,
                 body: crate::ir::ClosureBody::Expr(Box::new(default_ir)),
             }],
-        }
-    } else {
-        crate::ir::Expr::MethodCall {
-            object: Box::new(field_access),
-            method: "unwrap_or".to_string(),
-            args: vec![default_ir],
         }
     }
 }

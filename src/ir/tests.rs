@@ -803,3 +803,75 @@ fn test_is_trivially_pure_binary_op_returns_false() {
     }
     .is_trivially_pure());
 }
+
+// -- Expr::is_copy_literal tests --
+
+#[test]
+fn test_is_copy_literal_number_lit_returns_true() {
+    assert!(Expr::NumberLit(0.0).is_copy_literal());
+}
+
+#[test]
+fn test_is_copy_literal_int_lit_returns_true() {
+    assert!(Expr::IntLit(42).is_copy_literal());
+}
+
+#[test]
+fn test_is_copy_literal_bool_lit_returns_true() {
+    assert!(Expr::BoolLit(false).is_copy_literal());
+}
+
+#[test]
+fn test_is_copy_literal_unit_returns_true() {
+    assert!(Expr::Unit.is_copy_literal());
+}
+
+#[test]
+fn test_is_copy_literal_string_lit_returns_false() {
+    // StringLit generates String allocation (.to_string()), not Copy
+    assert!(!Expr::StringLit("hello".to_string()).is_copy_literal());
+}
+
+#[test]
+fn test_is_copy_literal_ident_returns_false() {
+    // Ident may be non-Copy type, cannot determine at IR level
+    assert!(!Expr::Ident("x".to_string()).is_copy_literal());
+}
+
+#[test]
+fn test_is_copy_literal_fn_call_returns_false() {
+    assert!(!Expr::FnCall {
+        name: "compute".to_string(),
+        args: vec![],
+    }
+    .is_copy_literal());
+}
+
+#[test]
+fn test_is_copy_literal_method_call_returns_false() {
+    assert!(!Expr::MethodCall {
+        object: Box::new(Expr::Ident("obj".to_string())),
+        method: "get_value".to_string(),
+        args: vec![],
+    }
+    .is_copy_literal());
+}
+
+#[test]
+fn test_is_copy_literal_struct_init_returns_false() {
+    assert!(!Expr::StructInit {
+        name: "Config".to_string(),
+        fields: vec![],
+        base: None,
+    }
+    .is_copy_literal());
+}
+
+#[test]
+fn test_is_copy_literal_field_access_returns_false() {
+    assert!(!Expr::FieldAccess {
+        object: Box::new(Expr::Ident("self".to_string())),
+        field: "x".to_string(),
+    }
+    .is_copy_literal());
+}

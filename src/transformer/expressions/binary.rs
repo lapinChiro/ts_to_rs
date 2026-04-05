@@ -7,8 +7,6 @@ use crate::ir::{BinOp, Expr, RustType, UnOp};
 
 use super::literals::{is_string_like, is_string_type};
 use super::patterns::typeof_to_string;
-use crate::ir::ClosureBody;
-
 use crate::transformer::Transformer;
 
 impl<'a> Transformer<'a> {
@@ -44,7 +42,7 @@ impl<'a> Transformer<'a> {
             return Ok(self.convert_in_operator(bin));
         }
 
-        // `x ?? y` → `x.unwrap_or_else(|| y)` (Option) or `x` (non-Option)
+        // `x ?? y` → `x.unwrap_or(y)` / `x.unwrap_or_else(|| y)` (Option) or `x` (non-Option)
         if bin.op == ast::BinaryOp::NullishCoalescing {
             let left_type = self.get_expr_type(&bin.left);
             let is_option = left_type.is_some_and(|ty| matches!(ty, RustType::Option(_)));
@@ -56,15 +54,9 @@ impl<'a> Transformer<'a> {
                 return Ok(left);
             }
             let right = self.convert_expr(&bin.right)?;
-            return Ok(Expr::MethodCall {
-                object: Box::new(left),
-                method: "unwrap_or_else".to_string(),
-                args: vec![Expr::Closure {
-                    params: vec![],
-                    return_type: None,
-                    body: ClosureBody::Expr(Box::new(right)),
-                }],
-            });
+            return Ok(crate::transformer::build_option_unwrap_with_default(
+                left, right,
+            ));
         }
 
         // Cat A: binary operands — result type depends on operator, not context

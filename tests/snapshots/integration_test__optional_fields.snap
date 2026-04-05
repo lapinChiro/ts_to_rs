@@ -23,7 +23,7 @@ fn getPort(config: Config) -> f64 {
 }
 
 fn isDebug(config: Config) -> bool {
-    config.debug.unwrap_or_else(|| false)
+    config.debug.unwrap_or(false)
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -16,10 +16,6 @@ Tier 内の記載順序が優先度。根本原因を共有するイシューは
 - **[I-299]** **`convert_ts_type` に型パラメータコンテキスト導入** — シグネチャ変更の blast radius 大。独立リファクタリング PRD
 - **[I-273]** **trait/struct 混同（E0404/E0405）** — `T extends number` → `T: f64` が trait でない。ディレクトリコンパイル 156→157+/158 の阻害要因
 
-### RC-14: デフォルトパラメータの lazy eval 不足 [L2]
-
-- **[I-282]** **一般式パスが `unwrap_or` で即時評価** — `build_option_unwrap_with_default`（`src/transformer/mod.rs:848`）の `needs_lazy` 判定がホワイトリスト方式で `to_string()` と `StringLit` のみ。関数呼び出し・プロパティアクセス等の副作用式が未カバー。I-325 の DRY 統合により修正箇所は 1 箇所に集約済み
-
 ---
 
 ## Tier 1: L3（拡大する技術的負債・ブロッカー）

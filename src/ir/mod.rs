@@ -830,6 +830,18 @@ impl Expr {
             _ => false,
         }
     }
+
+    /// Returns true if the expression is a cheap Copy literal safe for eager evaluation.
+    ///
+    /// Used to decide `unwrap_or` (eager) vs `unwrap_or_else` (lazy):
+    /// - Copy literals are cheap and have no ownership/allocation concerns → `unwrap_or`
+    /// - Everything else (String allocation, side effects, non-Copy move) → `unwrap_or_else`
+    pub fn is_copy_literal(&self) -> bool {
+        matches!(
+            self,
+            Expr::NumberLit(_) | Expr::IntLit(_) | Expr::BoolLit(_) | Expr::Unit
+        )
+    }
 }
 
 /// Binary operators supported in the IR.

@@ -3,7 +3,7 @@ source: tests/integration_test.rs
 expression: output
 ---
 fn withDefault(x: Option<f64>) -> f64 {
-    x.unwrap_or_else(|| 0.0)
+    x.unwrap_or(0.0)
 }
 
 fn withFallback(name: Option<String>) -> String {
@@ -15,7 +15,7 @@ fn firstAvailable(a: Option<String>, b: Option<String>, c: String) -> String {
 }
 
 fn processConfig(timeout: Option<f64>) -> f64 {
-    let t = timeout.unwrap_or_else(|| 3000.0);
+    let t = timeout.unwrap_or(3000.0);
     t
 }
 
