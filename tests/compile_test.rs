@@ -156,8 +156,7 @@ fn test_all_fixtures_compile() {
         "discriminated-union",
         // generic-class: `T extends number` → `T: f64` which is not a trait (I-273).
         "generic-class",
-        // object-destructuring: default value `"black"` is &str but field type is String (I-325).
-        "object-destructuring",
+        // (I-325 fixed: object-destructuring removed from skip list)
         // ternary: union branch types not wrapped in enum variants (I-11).
         "ternary",
         // functions: returned closure missing Box::new() (I-321),
@@ -242,7 +241,7 @@ fn test_all_fixtures_compile_with_builtins() {
         // T-3 fixture enrichment: same issues as skip_compile above.
         "basic-types",
         "generic-class",
-        "object-destructuring",
+        // (I-325 fixed: object-destructuring removed from skip list)
         "ternary",
         "async-await",
         "closures",

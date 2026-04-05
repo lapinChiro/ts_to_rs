@@ -398,6 +398,57 @@ impl<'a> TypeResolver<'a> {
         }
     }
 
+    /// Propagates expected types to default expressions within destructuring patterns.
+    ///
+    /// For `const { color = "black" } = opts` where `opts: Options` and
+    /// `color?: string` (i.e., `Option<String>` in Rust), sets `String` as the
+    /// expected type for `"black"`. For `Option<T>` fields, unwraps to `T`.
+    pub(super) fn propagate_destructuring_defaults(
+        &mut self,
+        pat: &ast::Pat,
+        source_type: &ResolvedType,
+    ) {
+        let ast::Pat::Object(obj_pat) = pat else {
+            return;
+        };
+        let source_rust_type = match source_type {
+            ResolvedType::Known(ty) => ty,
+            _ => return,
+        };
+        for prop in &obj_pat.props {
+            if let ast::ObjectPatProp::Assign(assign) = prop {
+                if let Some(default_expr) = &assign.value {
+                    let field_name = assign.key.sym.to_string();
+                    if let Some(field_type) =
+                        self.lookup_struct_field(source_rust_type, &field_name)
+                    {
+                        // Unwrap Option<T> → T for the default expression,
+                        // since the default replaces the None case.
+                        let expected = match &field_type {
+                            RustType::Option(inner) => inner.as_ref().clone(),
+                            other => other.clone(),
+                        };
+                        let span = Span::from_swc(default_expr.span());
+                        self.result.expected_types.insert(span, expected.clone());
+                        self.propagate_expected(default_expr, &expected);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Looks up a field type from a struct definition in the registry.
+    ///
+    /// Handles `Option<Named>` unwrapping before delegating to `TypeRegistry::lookup_field_type`.
+    fn lookup_struct_field(&self, source_type: &RustType, field_name: &str) -> Option<RustType> {
+        // Unwrap Option<T> to get the inner Named type for lookup
+        let inner_type = match source_type {
+            RustType::Option(inner) => inner.as_ref(),
+            other => other,
+        };
+        self.registry.lookup_field_type(inner_type, field_name)
+    }
+
     /// Sets expected types for function/constructor arguments from resolved parameter types.
     ///
     /// Zips arguments with parameter types and propagates each expected type

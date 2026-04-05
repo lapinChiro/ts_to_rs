@@ -70,33 +70,10 @@ impl<'a> Transformer<'a> {
                     };
                     let init_expr = if let Some(default_expr) = &assign.value {
                         let default_ir = self.convert_expr(default_expr)?;
-                        match &default_ir {
-                            Expr::MethodCall { method, .. } if method == "to_string" => {
-                                Expr::MethodCall {
-                                    object: Box::new(field_access),
-                                    method: "unwrap_or_else".to_string(),
-                                    args: vec![Expr::Closure {
-                                        params: vec![],
-                                        return_type: None,
-                                        body: crate::ir::ClosureBody::Expr(Box::new(default_ir)),
-                                    }],
-                                }
-                            }
-                            Expr::StringLit(_) => Expr::MethodCall {
-                                object: Box::new(field_access),
-                                method: "unwrap_or_else".to_string(),
-                                args: vec![Expr::Closure {
-                                    params: vec![],
-                                    return_type: None,
-                                    body: crate::ir::ClosureBody::Expr(Box::new(default_ir)),
-                                }],
-                            },
-                            _ => Expr::MethodCall {
-                                object: Box::new(field_access),
-                                method: "unwrap_or".to_string(),
-                                args: vec![default_ir],
-                            },
-                        }
+                        crate::transformer::build_option_unwrap_with_default(
+                            field_access,
+                            default_ir,
+                        )
                     } else {
                         field_access
                     };

@@ -398,11 +398,10 @@ impl<'a> Transformer<'a> {
                                 args: vec![],
                             }
                         } else {
-                            Expr::MethodCall {
-                                object: Box::new(Expr::Ident(param_name.clone())),
-                                method: "unwrap_or".to_string(),
-                                args: vec![default_expr.unwrap()],
-                            }
+                            crate::transformer::build_option_unwrap_with_default(
+                                Expr::Ident(param_name.clone()),
+                                default_expr.unwrap(),
+                            )
                         };
 
                         let expansion_stmt = Stmt::Let {

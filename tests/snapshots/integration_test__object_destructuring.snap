@@ -40,7 +40,7 @@ struct Options {
 }
 
 fn getColor(opts: Options) -> String {
-    let color = opts.color.unwrap_or_else(|| "black");
+    let color = opts.color.unwrap_or_else(|| "black".to_string());
     color
 }
 

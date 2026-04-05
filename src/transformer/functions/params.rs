@@ -196,27 +196,10 @@ impl<'a> Transformer<'a> {
             }
         } else {
             let default_ir = default_ir.unwrap();
-            let needs_lazy_eval = matches!(
-                &default_ir,
-                Expr::MethodCall { method, .. } if method == "to_string"
-            ) || matches!(&default_ir, Expr::StringLit(_));
-            if needs_lazy_eval {
-                Expr::MethodCall {
-                    object: Box::new(Expr::Ident(param_name.clone())),
-                    method: "unwrap_or_else".to_string(),
-                    args: vec![Expr::Closure {
-                        params: vec![],
-                        return_type: None,
-                        body: crate::ir::ClosureBody::Expr(Box::new(default_ir)),
-                    }],
-                }
-            } else {
-                Expr::MethodCall {
-                    object: Box::new(Expr::Ident(param_name.clone())),
-                    method: "unwrap_or".to_string(),
-                    args: vec![default_ir],
-                }
-            }
+            crate::transformer::build_option_unwrap_with_default(
+                Expr::Ident(param_name.clone()),
+                default_ir,
+            )
         };
 
         inner_stmts.insert(

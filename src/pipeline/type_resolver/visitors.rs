@@ -170,10 +170,24 @@ impl<'a> TypeResolver<'a> {
                 let rhs_ty = self.resolve_expr(&assign.right);
                 self.result.expr_types.insert(rhs_span, rhs_ty);
             }
-            ast::Pat::Object(_) | ast::Pat::Array(_) => {
+            ast::Pat::Object(obj_pat) => {
                 // Destructuring parameters: register nested variables as Unknown.
                 // TODO: extract field types from type annotation and register with
                 // proper types (e.g., `{ x, y }: Point` → x: f64, y: f64).
+                self.register_pat_vars(pat, false);
+                // Propagate expected types to default expressions within the pattern
+                // using the type annotation (e.g., `{ color = "black" }: Options`).
+                let source_type = obj_pat
+                    .type_ann
+                    .as_ref()
+                    .and_then(|ann| {
+                        convert_ts_type(&ann.type_ann, self.synthetic, self.registry).ok()
+                    })
+                    .map(ResolvedType::Known)
+                    .unwrap_or(ResolvedType::Unknown);
+                self.propagate_destructuring_defaults(pat, &source_type);
+            }
+            ast::Pat::Array(_) => {
                 self.register_pat_vars(pat, false);
             }
             ast::Pat::Rest(rest) => {
@@ -239,12 +253,17 @@ impl<'a> TypeResolver<'a> {
                 }
                 self.declare_var(&name, var_type, span, mutable);
             } else {
-                // Non-ident patterns (destructuring): resolve init without expected type
-                if let Some(init) = &decl.init {
+                // Non-ident patterns (destructuring): resolve init and propagate
+                // expected types to default expressions within the pattern.
+                let init_type = if let Some(init) = &decl.init {
                     let init_span = Span::from_swc(init.span());
                     let init_type = self.resolve_expr(init);
-                    self.result.expr_types.insert(init_span, init_type);
-                }
+                    self.result.expr_types.insert(init_span, init_type.clone());
+                    init_type
+                } else {
+                    ResolvedType::Unknown
+                };
+                self.propagate_destructuring_defaults(&decl.name, &init_type);
             }
         }
     }
