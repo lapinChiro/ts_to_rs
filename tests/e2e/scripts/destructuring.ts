@@ -47,8 +47,41 @@ function main(): void {
     console.log("param color:", getColor(opts3));
     const opts4: Options = { width: 50, color: "blue" };
     console.log("param color:", getColor(opts4));
+
+    // I-361: optional field without default
+    const cfg1: Config = { name: "app" };
+    showConfig(cfg1);
+    const cfg2: Config = { name: "app", debug: true };
+    showConfig(cfg2);
+
+    // I-361: renamed destructuring
+    showRenamed({ x: 100, y: 200 });
 }
 
 function getColor({ color = "white" }: Options): string {
     return color;
+}
+
+// I-361: destructured optional field without default (stays Option<T>)
+interface Config {
+    name: string;
+    debug?: boolean;
+}
+
+function showConfig(cfg: Config): void {
+    const { name, debug } = cfg;
+    console.log("name:", name);
+    // debug is Option<bool> — should display "undefined" when None
+    if (debug !== undefined) {
+        console.log("debug:", debug);
+    } else {
+        console.log("debug: undefined");
+    }
+}
+
+// I-361: renamed destructuring
+function showRenamed(p: Point): void {
+    const { x: posX, y: posY } = p;
+    console.log("posX:", posX);
+    console.log("posY:", posY);
 }

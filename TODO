@@ -37,7 +37,7 @@ Tier 内の記載順序が優先度。根本原因を共有するイシューは
 
 ### RC-11: expected type 伝播の不完全性
 
-- **[I-361]** **デストラクチャ変数の型が TypeResolver で Unknown 登録** — `register_pat_vars`（`src/pipeline/type_resolver/visitors.rs:283`）が `ObjectPatProp::Assign` を `ResolvedType::Unknown` で登録。source 型から各フィールドの型を引いて登録すべき。影響: (1) `console.log` の `wrap_option_for_display`（`src/transformer/expressions/calls.rs:128`）が `Option<T>` を検知できず TS と表示が異なる（`Some("red")` vs `"red"`）、(2) デストラクチャ変数を使った後続の型推論が全て Unknown になる。`propagate_destructuring_defaults` で source type の lookup は実装済み（I-325）のため、同じロジックを `register_pat_vars` に適用すれば解決。`KeyValue` パターン（リネーム）も同様に Unknown 登録であり同時修正が必要
+- **[I-362]** **`propagate_destructuring_defaults` が KeyValue/ネストパターン未対応** — Object の `ObjectPatProp::Assign` と Array の `Pat::Assign` は対応済（I-361 で追加）。未対応: (1) KeyValue のデフォルト値（`{ color: c = "black" }`）— `ObjectPatProp::KeyValue` の `kv.value` が `Pat::Assign` の場合を処理していない。(2) ネストパターン（`{ a: { b = 5 } }`）— `ObjectPatProp::KeyValue` の `kv.value` が `Pat::Object` の場合に再帰しない。🔗 I-361 の変数型登録とは独立した責務（expected type 伝播）
 - **[I-300]** **imported 関数の expected type 伝播不足** — OBJECT_LITERAL_NO_TYPE の一部。directory モードでの TypeRegistry 情報共有が必要
 - **[I-301]** **型注釈なしオブジェクトリテラル** — OBJECT_LITERAL_NO_TYPE の一部。匿名構造体自動生成
 - **[I-306]** **`.map()` callback 戻り値型の伝播** — OBJECT_LITERAL_NO_TYPE の一部。`propagate_expected` が `Expr::Call` 未処理
@@ -117,7 +117,8 @@ OBJECT_LITERAL_NO_TYPE 全体で 25件。I-300/I-301/I-306 のサブ分類件数
 ### セマンティクス・解析精度
 
 - **[I-342]** **getter/setter 呼び出し側がフィールドアクセスのまま** — ClassInfo に getter 一覧保持 → MethodCall 生成
-- **[I-257]** **TypeResolver が rest パターン変数を未登録**
+- **[I-364]** **rest デストラクチャ変数の型が Unknown** — I-361 で rest 変数のスコープ登録は修正済み（以前は未登録）。残課題: `register_pat_vars` の `ObjectPatProp::Rest` 分岐（`src/pipeline/type_resolver/visitors.rs:347-351`）が source_type に `None` を渡すため `Unknown` で登録される。正確な型は source type から明示フィールドを除いた残余構造体型であるべき。解決策: source type の `TypeDef::Struct` からフィールド一覧を取得し、同じ Object パターン内の明示フィールド名を除外した残余フィールドで新しい構造体型を構築する。`expand_rest_as_synthetic_struct`（`src/transformer/functions/destructuring.rs:232`）に類似ロジックがある
+- **[I-363]** **const デストラクチャの mutable 判定に is_object_type チェックがない** — `visit_var_decl` の Ident パス（`src/pipeline/type_resolver/visitors.rs:246`）では `is_const && is_object_type(&var_type)` で const オブジェクト型変数を mutable にする処理があるが、デストラクチャリングパスの `register_pat_vars` → `declare_var` では `!is_const` を固定で渡すだけ。`const { inner }: Outer = obj;` で `inner` が Named 型の場合、TS では const でもフィールド変更可能だが、生成 Rust で `let inner` になり `inner.field = x` がコンパイルエラーになる。解決策: `register_pat_vars` の `declare_var` 呼び出しで `is_const && is_object_type` を評価する。ただし `register_pat_vars` に `source_type` が渡るようになった（I-361）ため、型情報は利用可能
 - **[I-260]** **undefined リテラルの型解決が Unknown**
 - **[I-188]** **substring/slice のバイト境界安全性** — UTF-16 vs バイト
 

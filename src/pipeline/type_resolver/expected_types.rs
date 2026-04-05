@@ -408,39 +408,56 @@ impl<'a> TypeResolver<'a> {
         pat: &ast::Pat,
         source_type: &ResolvedType,
     ) {
-        let ast::Pat::Object(obj_pat) = pat else {
-            return;
-        };
         let source_rust_type = match source_type {
             ResolvedType::Known(ty) => ty,
             _ => return,
         };
-        for prop in &obj_pat.props {
-            if let ast::ObjectPatProp::Assign(assign) = prop {
-                if let Some(default_expr) = &assign.value {
-                    let field_name = assign.key.sym.to_string();
-                    if let Some(field_type) =
-                        self.lookup_struct_field(source_rust_type, &field_name)
-                    {
-                        // Unwrap Option<T> → T for the default expression,
-                        // since the default replaces the None case.
-                        let expected = match &field_type {
-                            RustType::Option(inner) => inner.as_ref().clone(),
-                            other => other.clone(),
-                        };
-                        let span = Span::from_swc(default_expr.span());
-                        self.result.expected_types.insert(span, expected.clone());
-                        self.propagate_expected(default_expr, &expected);
+        match pat {
+            ast::Pat::Object(obj_pat) => {
+                for prop in &obj_pat.props {
+                    if let ast::ObjectPatProp::Assign(assign) = prop {
+                        if let Some(default_expr) = &assign.value {
+                            let field_name = assign.key.sym.to_string();
+                            if let Some(field_type) =
+                                self.lookup_struct_field(source_rust_type, &field_name)
+                            {
+                                let expected =
+                                    super::helpers::unwrap_option_for_default(field_type);
+                                let span = Span::from_swc(default_expr.span());
+                                self.result.expected_types.insert(span, expected.clone());
+                                self.propagate_expected(default_expr, &expected);
+                            }
+                        }
                     }
                 }
             }
+            ast::Pat::Array(arr_pat) => {
+                for (i, elem) in arr_pat.elems.iter().enumerate() {
+                    if let Some(ast::Pat::Assign(assign)) = elem {
+                        let elem_type =
+                            super::helpers::lookup_array_element_type(source_rust_type, i);
+                        if let Some(ty) = elem_type {
+                            // Unwrap Option<T> → T for the default expression
+                            let expected = super::helpers::unwrap_option_for_default(ty);
+                            let span = Span::from_swc(assign.right.span());
+                            self.result.expected_types.insert(span, expected.clone());
+                            self.propagate_expected(&assign.right, &expected);
+                        }
+                    }
+                }
+            }
+            _ => {}
         }
     }
 
     /// Looks up a field type from a struct definition in the registry.
     ///
     /// Handles `Option<Named>` unwrapping before delegating to `TypeRegistry::lookup_field_type`.
-    fn lookup_struct_field(&self, source_type: &RustType, field_name: &str) -> Option<RustType> {
+    pub(super) fn lookup_struct_field(
+        &self,
+        source_type: &RustType,
+        field_name: &str,
+    ) -> Option<RustType> {
         // Unwrap Option<T> to get the inner Named type for lookup
         let inner_type = match source_type {
             RustType::Option(inner) => inner.as_ref(),

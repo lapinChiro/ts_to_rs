@@ -37,7 +37,7 @@
 | 11 | I-300+I-301+I-306 | OBJECT_LITERAL_NO_TYPE（25件） | 最大エラーカテゴリ削減 |
 | 12 | I-311+I-344 | 型引数推論フィードバック欠如 | I-344 自動解消 + generic 精度 |
 | 13 | I-11+I-238+I-202 | union/enum 生成品質 | skip: ternary, ternary-union 他 |
-| 14 | I-361 | デストラクチャ変数型 Unknown 登録 | 後続型推論全滅の防止 |
+| ~~14~~ | ~~I-361+I-257~~ | ~~デストラクチャ変数型付き登録~~ | **完了** |
 | 15 | I-340 | Generic Clone bound 未付与 | generic コード増に比例 |
 | 16 | I-360+I-331 | Option\<T\> narrowing + 暗黙 None | skip: functions 部分 |
 | 17 | I-321 | クロージャ Box::new ラップ漏れ | skip: closures, functions 部分 |

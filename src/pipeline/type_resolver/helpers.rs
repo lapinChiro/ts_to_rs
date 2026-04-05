@@ -67,6 +67,32 @@ pub(super) fn common_named_type(types: &[RustType]) -> Option<RustType> {
     None
 }
 
+/// Extracts the element type from an array/tuple source type at a given index.
+///
+/// - `Vec<T>` → `T` for any index
+/// - `Tuple([A, B, ...])` → positional type
+/// - `Option<inner>` → unwraps and recurses
+pub(super) fn lookup_array_element_type(source_type: &RustType, index: usize) -> Option<RustType> {
+    match source_type {
+        RustType::Vec(inner) => Some(inner.as_ref().clone()),
+        RustType::Tuple(types) => types.get(index).cloned(),
+        RustType::Option(inner) => lookup_array_element_type(inner, index),
+        _ => None,
+    }
+}
+
+/// Unwraps `Option<T>` → `T` for a destructuring default value context.
+///
+/// When a destructuring pattern has a default value (e.g., `{ x = 0 }`),
+/// the default replaces `None`, so the variable's type is `T`, not `Option<T>`.
+/// Non-Option types pass through unchanged.
+pub(super) fn unwrap_option_for_default(ty: RustType) -> RustType {
+    match ty {
+        RustType::Option(inner) => *inner,
+        other => other,
+    }
+}
+
 /// Returns true if the resolved type is an object type (struct, named, vec, etc.).
 /// Used for const-mut detection: TypeScript's `const` allows field mutation on objects.
 pub(super) fn is_object_type(ty: &ResolvedType) -> bool {

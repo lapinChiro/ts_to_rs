@@ -11,6 +11,8 @@ use crate::pipeline::type_converter::convert_ts_type;
 use crate::pipeline::type_resolution::Span;
 use crate::transformer::type_position::{wrap_trait_for_position, TypePosition};
 
+use super::helpers::{lookup_array_element_type, unwrap_option_for_default};
+
 /// Extracts the type annotation from any pattern variant.
 ///
 /// For `Pat::Assign`, recurses into the left-side pattern (the annotation
@@ -171,24 +173,28 @@ impl<'a> TypeResolver<'a> {
                 self.result.expr_types.insert(rhs_span, rhs_ty);
             }
             ast::Pat::Object(obj_pat) => {
-                // Destructuring parameters: register nested variables as Unknown.
-                // TODO: extract field types from type annotation and register with
-                // proper types (e.g., `{ x, y }: Point` → x: f64, y: f64).
-                self.register_pat_vars(pat, false);
+                let source_rust_type = obj_pat.type_ann.as_ref().and_then(|ann| {
+                    convert_ts_type(&ann.type_ann, self.synthetic, self.registry).ok()
+                });
+                self.register_pat_vars(pat, false, source_rust_type.as_ref());
                 // Propagate expected types to default expressions within the pattern
                 // using the type annotation (e.g., `{ color = "black" }: Options`).
-                let source_type = obj_pat
-                    .type_ann
-                    .as_ref()
-                    .and_then(|ann| {
-                        convert_ts_type(&ann.type_ann, self.synthetic, self.registry).ok()
-                    })
+                let source_type = source_rust_type
                     .map(ResolvedType::Known)
                     .unwrap_or(ResolvedType::Unknown);
                 self.propagate_destructuring_defaults(pat, &source_type);
             }
-            ast::Pat::Array(_) => {
-                self.register_pat_vars(pat, false);
+            ast::Pat::Array(arr_pat) => {
+                let source_rust_type = arr_pat.type_ann.as_ref().and_then(|ann| {
+                    convert_ts_type(&ann.type_ann, self.synthetic, self.registry).ok()
+                });
+                self.register_pat_vars(pat, false, source_rust_type.as_ref());
+                // Propagate expected types to default expressions within the pattern,
+                // symmetric with the Object case above.
+                let source_type = source_rust_type
+                    .map(ResolvedType::Known)
+                    .unwrap_or(ResolvedType::Unknown);
+                self.propagate_destructuring_defaults(pat, &source_type);
             }
             ast::Pat::Rest(rest) => {
                 self.visit_param_pat(&rest.arg);
@@ -201,10 +207,8 @@ impl<'a> TypeResolver<'a> {
         let is_const = matches!(var_decl.kind, ast::VarDeclKind::Const);
 
         for decl in &var_decl.decls {
-            // Register variables from the pattern
-            self.register_pat_vars(&decl.name, is_const);
-
             if let ast::Pat::Ident(ident) = &decl.name {
+                // Simple variable declaration: full type resolution
                 let name = ident.id.sym.to_string();
                 let span = Span::from_swc(ident.id.span);
 
@@ -253,53 +257,118 @@ impl<'a> TypeResolver<'a> {
                 }
                 self.declare_var(&name, var_type, span, mutable);
             } else {
-                // Non-ident patterns (destructuring): resolve init and propagate
-                // expected types to default expressions within the pattern.
-                let init_type = if let Some(init) = &decl.init {
+                // Destructuring patterns: resolve source type, then register
+                // variables with derived types and propagate defaults.
+                let (init_type, source_rust_type) = if let Some(init) = &decl.init {
                     let init_span = Span::from_swc(init.span());
                     let init_type = self.resolve_expr(init);
                     self.result.expr_types.insert(init_span, init_type.clone());
-                    init_type
+                    let rust_type = match &init_type {
+                        ResolvedType::Known(ty) => Some(ty.clone()),
+                        ResolvedType::Unknown => None,
+                    };
+                    (init_type, rust_type)
                 } else {
-                    ResolvedType::Unknown
+                    (ResolvedType::Unknown, None)
                 };
-                self.propagate_destructuring_defaults(&decl.name, &init_type);
+
+                // Try type annotation on the pattern first, fall back to init type
+                let ann_type = extract_type_ann_from_pat(&decl.name).and_then(|ann| {
+                    convert_ts_type(&ann.type_ann, self.synthetic, self.registry).ok()
+                });
+                let effective_source = ann_type.as_ref().or(source_rust_type.as_ref());
+
+                self.register_pat_vars(&decl.name, is_const, effective_source);
+                // Use the same effective source for default propagation.
+                // Type annotation takes precedence over init expression type.
+                let effective_resolved = effective_source
+                    .map(|t| ResolvedType::Known(t.clone()))
+                    .unwrap_or(init_type);
+                self.propagate_destructuring_defaults(&decl.name, &effective_resolved);
             }
         }
     }
 
     /// Registers variables from a destructuring pattern into the current scope.
-    fn register_pat_vars(&mut self, pat: &ast::Pat, is_const: bool) {
+    ///
+    /// When `source_type` is provided, derives field/element types from it
+    /// so that destructured variables are registered with correct types
+    /// instead of `Unknown`.
+    fn register_pat_vars(
+        &mut self,
+        pat: &ast::Pat,
+        is_const: bool,
+        source_type: Option<&RustType>,
+    ) {
         match pat {
-            ast::Pat::Ident(_) => {} // Handled by the main var_decl path
+            ast::Pat::Ident(ident) => {
+                // In nested contexts (KeyValue value, array element, rest arg),
+                // the Ident is not handled by the main var_decl/param path.
+                // register_pat_vars is never called for top-level Idents
+                // (visit_var_decl and visit_param_pat handle them directly),
+                // so any Pat::Ident reaching here is always a nested binding.
+                let name = ident.id.sym.to_string();
+                let span = Span::from_swc(ident.id.span);
+                let ty = source_type
+                    .map(|t| ResolvedType::Known(t.clone()))
+                    .unwrap_or(ResolvedType::Unknown);
+                self.declare_var(&name, ty, span, !is_const);
+            }
             ast::Pat::Object(obj_pat) => {
                 for prop in &obj_pat.props {
                     match prop {
                         ast::ObjectPatProp::KeyValue(kv) => {
-                            self.register_pat_vars(&kv.value, is_const);
+                            let field_name = match &kv.key {
+                                ast::PropName::Ident(id) => Some(id.sym.to_string()),
+                                ast::PropName::Str(s) => {
+                                    Some(s.value.to_string_lossy().into_owned())
+                                }
+                                _ => None,
+                            };
+                            let field_type = field_name.as_deref().and_then(|name| {
+                                source_type.and_then(|st| self.lookup_struct_field(st, name))
+                            });
+                            self.register_pat_vars(&kv.value, is_const, field_type.as_ref());
                         }
                         ast::ObjectPatProp::Assign(assign) => {
                             let name = assign.key.sym.to_string();
                             let span = Span::from_swc(assign.key.span);
-                            self.declare_var(&name, ResolvedType::Unknown, span, !is_const);
+                            let field_type =
+                                source_type.and_then(|st| self.lookup_struct_field(st, &name));
+                            let var_type = match field_type {
+                                Some(ty) if assign.value.is_some() => {
+                                    ResolvedType::Known(unwrap_option_for_default(ty))
+                                }
+                                Some(ty) => ResolvedType::Known(ty),
+                                None => ResolvedType::Unknown,
+                            };
+                            self.declare_var(&name, var_type, span, !is_const);
                         }
                         ast::ObjectPatProp::Rest(rest) => {
-                            self.register_pat_vars(&rest.arg, is_const);
+                            // Rest type computation (remaining fields) is complex;
+                            // register with Unknown for now.
+                            self.register_pat_vars(&rest.arg, is_const, None);
                         }
                     }
                 }
             }
             ast::Pat::Array(arr_pat) => {
-                for elem in arr_pat.elems.iter().flatten() {
-                    self.register_pat_vars(elem, is_const);
+                for (i, elem) in arr_pat.elems.iter().enumerate() {
+                    if let Some(elem_pat) = elem {
+                        let elem_type = source_type.and_then(|st| lookup_array_element_type(st, i));
+                        self.register_pat_vars(elem_pat, is_const, elem_type.as_ref());
+                    }
                 }
             }
             ast::Pat::Rest(rest) => {
-                self.register_pat_vars(&rest.arg, is_const);
+                // Rest in array context: register with Unknown
+                self.register_pat_vars(&rest.arg, is_const, None);
             }
             ast::Pat::Assign(assign) => {
-                // Default value pattern: { x = 0 } — register the left side
-                self.register_pat_vars(&assign.left, is_const);
+                // Default value pattern (e.g., `{ x: y = 0 }` via KeyValue → Pat::Assign).
+                // Unwrap Option<T> → T because the default replaces None.
+                let unwrapped = source_type.map(|t| unwrap_option_for_default(t.clone()));
+                self.register_pat_vars(&assign.left, is_const, unwrapped.as_ref());
             }
             _ => {}
         }

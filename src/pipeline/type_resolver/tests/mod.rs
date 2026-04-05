@@ -5,6 +5,7 @@ use std::path::PathBuf;
 
 mod basics;
 mod complex_features;
+mod destructuring_types;
 mod du_analysis;
 mod expected_types;
 mod narrowing;
