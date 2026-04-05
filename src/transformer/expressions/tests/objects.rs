@@ -95,19 +95,8 @@ fn test_convert_expr_object_literal_without_type_hint_errors() {
 fn test_convert_expr_object_spread_last_position_expands_remaining_fields() {
     // { x: 10, ...rest } → Point { x: rest.x, y: rest.y }
     // rightmost-wins: spread is after x, so spread overrides x
-    use crate::registry::TypeDef;
     let mut reg = TypeRegistry::new();
-    reg.register(
-        "Point".to_string(),
-        TypeDef::new_struct(
-            vec![
-                ("x".to_string(), RustType::F64).into(),
-                ("y".to_string(), RustType::F64).into(),
-            ],
-            std::collections::HashMap::new(),
-            vec![],
-        ),
-    );
+    register_f64_struct(&mut reg, "Point", &["x", "y"]);
     let f = TctxFixture::from_source_with_reg("const p: Point = { x: 10, ...rest };", reg);
     let tctx = f.tctx();
     let swc_expr = extract_var_init(f.module());
@@ -143,20 +132,8 @@ fn test_convert_expr_object_spread_last_position_expands_remaining_fields() {
 fn test_convert_expr_object_spread_middle_position_expands_remaining_fields() {
     // { a: 1, ...rest, c: 3 } → S { a: rest.a, b: rest.b, c: 3.0 }
     // rightmost-wins: spread overrides a (before spread), c overrides spread (after spread)
-    use crate::registry::TypeDef;
     let mut reg = TypeRegistry::new();
-    reg.register(
-        "S".to_string(),
-        TypeDef::new_struct(
-            vec![
-                ("a".to_string(), RustType::F64).into(),
-                ("b".to_string(), RustType::F64).into(),
-                ("c".to_string(), RustType::F64).into(),
-            ],
-            std::collections::HashMap::new(),
-            vec![],
-        ),
-    );
+    register_f64_struct(&mut reg, "S", &["a", "b", "c"]);
     let f = TctxFixture::from_source_with_reg("const s: S = { a: 1, ...rest, c: 3 };", reg);
     let tctx = f.tctx();
     let swc_expr = extract_var_init(f.module());
@@ -212,19 +189,8 @@ fn test_convert_object_spread_unregistered_type_generates_struct_update() {
 fn test_convert_object_spread_multiple_registered_generates_merged_fields() {
     // {...a, ...b} — 複数スプレッド + TypeRegistry 登録済み
     // rightmost-wins: b overrides a for all fields
-    use crate::registry::TypeDef;
     let mut reg = TypeRegistry::new();
-    reg.register(
-        "Point".to_string(),
-        TypeDef::new_struct(
-            vec![
-                ("x".to_string(), RustType::F64).into(),
-                ("y".to_string(), RustType::F64).into(),
-            ],
-            std::collections::HashMap::new(),
-            vec![],
-        ),
-    );
+    register_f64_struct(&mut reg, "Point", &["x", "y"]);
     let f = TctxFixture::from_source_with_reg("const p: Point = { ...a, ...b };", reg);
     let tctx = f.tctx();
     let swc_expr = extract_var_init(f.module());
@@ -258,19 +224,8 @@ fn test_convert_object_spread_multiple_registered_generates_merged_fields() {
 
 #[test]
 fn test_convert_expr_object_spread_with_override() {
-    use crate::registry::TypeDef;
     let mut reg = TypeRegistry::new();
-    reg.register(
-        "Point".to_string(),
-        TypeDef::new_struct(
-            vec![
-                ("x".to_string(), RustType::F64).into(),
-                ("y".to_string(), RustType::F64).into(),
-            ],
-            std::collections::HashMap::new(),
-            vec![],
-        ),
-    );
+    register_f64_struct(&mut reg, "Point", &["x", "y"]);
     let f = TctxFixture::from_source_with_reg("const p: Point = { ...other, x: 10 };", reg);
     let tctx = f.tctx();
     let swc_expr = extract_var_init(f.module());
@@ -302,7 +257,6 @@ fn test_convert_expr_call_resolves_object_arg_from_registry() {
     // function draw(p: Point): void {}
     // draw({ x: 0, y: 0 })  →  draw(Point { x: 0.0, y: 0.0 })
     let mut reg = TypeRegistry::new();
-    use crate::registry::TypeDef;
     reg.register(
         "draw".to_string(),
         TypeDef::Function {
@@ -349,18 +303,7 @@ fn test_convert_expr_object_literal_nested_resolves_field_type_from_registry() {
     // interface Rect { origin: Origin; w: number; }
     // const r: Rect = { origin: { x: 0, y: 0 }, w: 10 }
     let mut reg = TypeRegistry::new();
-    use crate::registry::TypeDef;
-    reg.register(
-        "Origin".to_string(),
-        TypeDef::new_struct(
-            vec![
-                ("x".to_string(), RustType::F64).into(),
-                ("y".to_string(), RustType::F64).into(),
-            ],
-            std::collections::HashMap::new(),
-            vec![],
-        ),
-    );
+    register_f64_struct(&mut reg, "Origin", &["x", "y"]);
     reg.register(
         "Rect".to_string(),
         TypeDef::new_struct(
@@ -457,7 +400,6 @@ fn test_convert_expr_object_shorthand_mixed_with_key_value() {
 fn test_convert_expr_object_shorthand_with_registry_field_type() {
     // const u: User = { name }  where name: String → User { name: name }
     // (Ident values don't get .to_string() — only string literals do)
-    use crate::registry::TypeDef;
     let mut reg = TypeRegistry::new();
     reg.register(
         "User".to_string(),
@@ -520,19 +462,8 @@ fn test_convert_object_lit_all_computed_keys_generates_hashmap() {
 #[test]
 fn test_spread_multiple_overlapping_fields_rightmost_wins() {
     // { ...a, ...b } where both have x,y — rightmost spread (b) wins for all fields
-    use crate::registry::TypeDef;
     let mut reg = TypeRegistry::new();
-    reg.register(
-        "Point".to_string(),
-        TypeDef::new_struct(
-            vec![
-                ("x".to_string(), RustType::F64).into(),
-                ("y".to_string(), RustType::F64).into(),
-            ],
-            std::collections::HashMap::new(),
-            vec![],
-        ),
-    );
+    register_f64_struct(&mut reg, "Point", &["x", "y"]);
     let f = TctxFixture::from_source_with_reg("const p: Point = { ...a, ...b };", reg);
     let tctx = f.tctx();
     let swc_expr = extract_var_init(f.module());
@@ -569,19 +500,8 @@ fn test_spread_multiple_overlapping_fields_rightmost_wins() {
 #[test]
 fn test_spread_after_all_explicits_registered() {
     // { x: 1, y: 2, ...base } → spread overrides all explicit fields
-    use crate::registry::TypeDef;
     let mut reg = TypeRegistry::new();
-    reg.register(
-        "Point".to_string(),
-        TypeDef::new_struct(
-            vec![
-                ("x".to_string(), RustType::F64).into(),
-                ("y".to_string(), RustType::F64).into(),
-            ],
-            std::collections::HashMap::new(),
-            vec![],
-        ),
-    );
+    register_f64_struct(&mut reg, "Point", &["x", "y"]);
     let f = TctxFixture::from_source_with_reg("const p: Point = { x: 1, y: 2, ...base };", reg);
     let tctx = f.tctx();
     let swc_expr = extract_var_init(f.module());
@@ -616,20 +536,8 @@ fn test_spread_after_all_explicits_registered() {
 #[test]
 fn test_spread_between_explicits_registered() {
     // { x: 1, ...base, z: 3 } → spread overrides x (before), z overrides spread (after)
-    use crate::registry::TypeDef;
     let mut reg = TypeRegistry::new();
-    reg.register(
-        "S".to_string(),
-        TypeDef::new_struct(
-            vec![
-                ("x".to_string(), RustType::F64).into(),
-                ("y".to_string(), RustType::F64).into(),
-                ("z".to_string(), RustType::F64).into(),
-            ],
-            std::collections::HashMap::new(),
-            vec![],
-        ),
-    );
+    register_f64_struct(&mut reg, "S", &["x", "y", "z"]);
     let f = TctxFixture::from_source_with_reg("const s: S = { x: 1, ...base, z: 3 };", reg);
     let tctx = f.tctx();
     let swc_expr = extract_var_init(f.module());
@@ -703,19 +611,8 @@ fn test_spread_between_explicits_unregistered() {
 #[test]
 fn test_multiple_spreads_with_explicits_between() {
     // { ...a, x: 1, ...b } registered → b wins all fields (rightmost spread)
-    use crate::registry::TypeDef;
     let mut reg = TypeRegistry::new();
-    reg.register(
-        "Point".to_string(),
-        TypeDef::new_struct(
-            vec![
-                ("x".to_string(), RustType::F64).into(),
-                ("y".to_string(), RustType::F64).into(),
-            ],
-            std::collections::HashMap::new(),
-            vec![],
-        ),
-    );
+    register_f64_struct(&mut reg, "Point", &["x", "y"]);
     let f = TctxFixture::from_source_with_reg("const p: Point = { ...a, x: 1, ...b };", reg);
     let tctx = f.tctx();
     let swc_expr = extract_var_init(f.module());
@@ -750,19 +647,8 @@ fn test_multiple_spreads_with_explicits_between() {
 #[test]
 fn test_multiple_spreads_with_explicit_after_last() {
     // { ...a, ...b, x: 1 } registered → x: 1 (explicit wins), y: b.y (rightmost spread)
-    use crate::registry::TypeDef;
     let mut reg = TypeRegistry::new();
-    reg.register(
-        "Point".to_string(),
-        TypeDef::new_struct(
-            vec![
-                ("x".to_string(), RustType::F64).into(),
-                ("y".to_string(), RustType::F64).into(),
-            ],
-            std::collections::HashMap::new(),
-            vec![],
-        ),
-    );
+    register_f64_struct(&mut reg, "Point", &["x", "y"]);
     let f = TctxFixture::from_source_with_reg("const p: Point = { ...a, ...b, x: 1 };", reg);
     let tctx = f.tctx();
     let swc_expr = extract_var_init(f.module());
@@ -791,19 +677,8 @@ fn test_multiple_spreads_with_explicit_after_last() {
 #[test]
 fn test_spread_only_registered() {
     // { ...base } registered → all fields from spread
-    use crate::registry::TypeDef;
     let mut reg = TypeRegistry::new();
-    reg.register(
-        "Point".to_string(),
-        TypeDef::new_struct(
-            vec![
-                ("x".to_string(), RustType::F64).into(),
-                ("y".to_string(), RustType::F64).into(),
-            ],
-            std::collections::HashMap::new(),
-            vec![],
-        ),
-    );
+    register_f64_struct(&mut reg, "Point", &["x", "y"]);
     let f = TctxFixture::from_source_with_reg("const p: Point = { ...base };", reg);
     let tctx = f.tctx();
     let swc_expr = extract_var_init(f.module());
@@ -840,7 +715,6 @@ fn test_spread_only_registered() {
 #[test]
 fn test_option_field_none_fill_when_omitted() {
     // { x: 1 } where y: Option<f64> → y: None auto-filled
-    use crate::registry::TypeDef;
     let mut reg = TypeRegistry::new();
     reg.register(
         "S".to_string(),

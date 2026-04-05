@@ -627,3 +627,179 @@ fn test_wrap_optional_already_option_no_double_wrap() {
     let ty = RustType::Option(Box::new(RustType::String));
     assert_eq!(ty.clone().wrap_optional(), ty);
 }
+
+// -- Expr::is_trivially_pure tests --
+
+#[test]
+fn test_is_trivially_pure_number_lit_returns_true() {
+    assert!(Expr::NumberLit(42.0).is_trivially_pure());
+}
+
+#[test]
+fn test_is_trivially_pure_int_lit_returns_true() {
+    assert!(Expr::IntLit(42).is_trivially_pure());
+}
+
+#[test]
+fn test_is_trivially_pure_string_lit_returns_true() {
+    assert!(Expr::StringLit("hello".to_string()).is_trivially_pure());
+}
+
+#[test]
+fn test_is_trivially_pure_bool_lit_returns_true() {
+    assert!(Expr::BoolLit(true).is_trivially_pure());
+}
+
+#[test]
+fn test_is_trivially_pure_ident_returns_true() {
+    assert!(Expr::Ident("x".to_string()).is_trivially_pure());
+}
+
+#[test]
+fn test_is_trivially_pure_unit_returns_true() {
+    assert!(Expr::Unit.is_trivially_pure());
+}
+
+#[test]
+fn test_is_trivially_pure_ref_of_pure_returns_true() {
+    assert!(Expr::Ref(Box::new(Expr::Ident("x".to_string()))).is_trivially_pure());
+}
+
+#[test]
+fn test_is_trivially_pure_deref_of_pure_returns_true() {
+    assert!(Expr::Deref(Box::new(Expr::Ident("x".to_string()))).is_trivially_pure());
+}
+
+#[test]
+fn test_is_trivially_pure_await_returns_false() {
+    assert!(!Expr::Await(Box::new(Expr::Ident("x".to_string()))).is_trivially_pure());
+}
+
+#[test]
+fn test_is_trivially_pure_field_access_of_pure_returns_true() {
+    assert!(Expr::FieldAccess {
+        object: Box::new(Expr::Ident("p".to_string())),
+        field: "x".to_string(),
+    }
+    .is_trivially_pure());
+}
+
+#[test]
+fn test_is_trivially_pure_nested_field_access_of_pure_returns_true() {
+    assert!(Expr::FieldAccess {
+        object: Box::new(Expr::FieldAccess {
+            object: Box::new(Expr::Ident("a".to_string())),
+            field: "b".to_string(),
+        }),
+        field: "c".to_string(),
+    }
+    .is_trivially_pure());
+}
+
+#[test]
+fn test_is_trivially_pure_ref_of_fn_call_returns_false() {
+    assert!(!Expr::Ref(Box::new(Expr::FnCall {
+        name: "f".to_string(),
+        args: vec![],
+    }))
+    .is_trivially_pure());
+}
+
+#[test]
+fn test_is_trivially_pure_field_access_of_fn_call_returns_false() {
+    assert!(!Expr::FieldAccess {
+        object: Box::new(Expr::FnCall {
+            name: "get_obj".to_string(),
+            args: vec![],
+        }),
+        field: "x".to_string(),
+    }
+    .is_trivially_pure());
+}
+
+#[test]
+fn test_is_trivially_pure_fn_call_returns_false() {
+    assert!(!Expr::FnCall {
+        name: "side_effect".to_string(),
+        args: vec![],
+    }
+    .is_trivially_pure());
+}
+
+#[test]
+fn test_is_trivially_pure_method_call_push_returns_false() {
+    assert!(!Expr::MethodCall {
+        object: Box::new(Expr::Ident("x".to_string())),
+        method: "push".to_string(),
+        args: vec![],
+    }
+    .is_trivially_pure());
+}
+
+#[test]
+fn test_is_trivially_pure_method_call_to_string_of_pure_returns_true() {
+    assert!(Expr::MethodCall {
+        object: Box::new(Expr::StringLit("hello".to_string())),
+        method: "to_string".to_string(),
+        args: vec![],
+    }
+    .is_trivially_pure());
+}
+
+#[test]
+fn test_is_trivially_pure_method_call_clone_of_pure_returns_true() {
+    assert!(Expr::MethodCall {
+        object: Box::new(Expr::Ident("x".to_string())),
+        method: "clone".to_string(),
+        args: vec![],
+    }
+    .is_trivially_pure());
+}
+
+#[test]
+fn test_is_trivially_pure_method_call_to_string_of_fn_call_returns_false() {
+    assert!(!Expr::MethodCall {
+        object: Box::new(Expr::FnCall {
+            name: "get".to_string(),
+            args: vec![],
+        }),
+        method: "to_string".to_string(),
+        args: vec![],
+    }
+    .is_trivially_pure());
+}
+
+#[test]
+fn test_is_trivially_pure_assign_returns_false() {
+    assert!(!Expr::Assign {
+        target: Box::new(Expr::Ident("x".to_string())),
+        value: Box::new(Expr::NumberLit(1.0)),
+    }
+    .is_trivially_pure());
+}
+
+#[test]
+fn test_is_trivially_pure_macro_call_returns_false() {
+    assert!(!Expr::MacroCall {
+        name: "println".to_string(),
+        args: vec![],
+        use_debug: vec![],
+    }
+    .is_trivially_pure());
+}
+
+#[test]
+fn test_is_trivially_pure_block_returns_false() {
+    assert!(!Expr::Block(vec![]).is_trivially_pure());
+}
+
+#[test]
+fn test_is_trivially_pure_binary_op_returns_false() {
+    // Conservative: binary ops could theoretically involve operator overloading
+    assert!(!Expr::BinaryOp {
+        left: Box::new(Expr::NumberLit(1.0)),
+        op: BinOp::Add,
+        right: Box::new(Expr::NumberLit(2.0)),
+    }
+    .is_trivially_pure());
+}

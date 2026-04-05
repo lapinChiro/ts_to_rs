@@ -31,6 +31,26 @@ function spreadMiddleOverride(base: Config): Config {
     return { host: "will-be-overridden", ...base, port: 9999 };
 }
 
+// Side-effect preservation: overridden expressions must still be evaluated
+function logAndGetPort(label: string): number {
+    console.log("side-effect:", label);
+    return 9999;
+}
+
+function spreadOverridesSideEffect(base: Config): Config {
+    return { port: logAndGetPort("overridden"), ...base };
+}
+
+// Spread source single-evaluation: fn call as spread source must be called exactly once
+function makeConfig(label: string): Config {
+    console.log("makeConfig:", label);
+    return { host: "from-make", port: 7777 };
+}
+
+function spreadFromFnCall(): Config {
+    return { ...makeConfig("once") };
+}
+
 function main(): void {
     const base: Config = { host: "example.com", port: 443 };
 
@@ -56,4 +76,14 @@ function main(): void {
     const override2 = spreadMiddleOverride({ host: "base.com", port: 3000 });
     console.log("override2 host:", override2.host);
     console.log("override2 port:", override2.port);
+
+    // Side-effect preservation: fn call is overridden by spread but must still execute
+    const sideEffectResult = spreadOverridesSideEffect({ host: "final.com", port: 443 });
+    console.log("sideEffect host:", sideEffectResult.host);
+    console.log("sideEffect port:", sideEffectResult.port);
+
+    // Spread source single-evaluation: makeConfig must print exactly once (not per-field)
+    const fromFn = spreadFromFnCall();
+    console.log("fromFn host:", fromFn.host);
+    console.log("fromFn port:", fromFn.port);  // 7777 from makeConfig, not overridden
 }

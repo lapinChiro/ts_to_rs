@@ -251,15 +251,44 @@ impl<'a> Transformer<'a> {
         let has_spread = events.iter().any(|e| matches!(e, PropEvent::Spread { .. }));
 
         if let Some(all_fields) = &struct_fields {
-            // Registered type: resolve each field using rightmost-wins scan
+            // Pre-bind non-pure spread sources to temp variables.
+            // TypeScript evaluates spread sources exactly once; without this, the spread
+            // expression would be cloned into each field's FieldAccess, causing multi-evaluation.
+            let mut spread_bindings: std::collections::HashMap<usize, Stmt> =
+                std::collections::HashMap::new();
+            let mut spread_counter = 0usize;
+            for (idx, event) in events.iter_mut().enumerate() {
+                if let PropEvent::Spread { expr } = event {
+                    if !expr.is_trivially_pure() {
+                        let var_name = format!("__spread_obj_{spread_counter}");
+                        spread_counter += 1;
+                        let original = std::mem::replace(expr, Expr::Ident(var_name.clone()));
+                        spread_bindings.insert(
+                            idx,
+                            Stmt::Let {
+                                mutable: false,
+                                name: var_name,
+                                ty: None,
+                                init: Some(original),
+                            },
+                        );
+                    }
+                }
+            }
+
+            // Registered type: resolve each field using rightmost-wins scan.
+            // After pre-binding, spread expressions are Ident (trivially pure),
+            // so cloning into each FieldAccess is safe.
             let mut fields = Vec::new();
+            let mut used_indices = std::collections::HashSet::new();
             for (field_name, _) in all_fields {
                 // Scan events right-to-left; first match wins (rightmost in source)
                 let mut resolved = None;
-                for event in events.iter().rev() {
+                for (idx, event) in events.iter().enumerate().rev() {
                     match event {
                         PropEvent::Explicit { key, value } if key == field_name => {
                             resolved = Some(value.clone());
+                            used_indices.insert(idx);
                             break;
                         }
                         PropEvent::Spread { expr } => {
@@ -290,11 +319,37 @@ impl<'a> Transformer<'a> {
                 }
             }
 
-            Ok(Expr::StructInit {
+            // Collect all source-ordered pre-evaluations:
+            // - Overridden non-pure explicits → let _ = expr;
+            // - Pre-bound spread sources → let __spread_obj = expr;
+            // TypeScript evaluates all expressions left-to-right.
+            let mut side_effects: Vec<Stmt> = Vec::new();
+            for (idx, event) in events.iter().enumerate() {
+                if let Some(binding) = spread_bindings.remove(&idx) {
+                    side_effects.push(binding);
+                } else if let PropEvent::Explicit { value, .. } = event {
+                    if !used_indices.contains(&idx) && !value.is_trivially_pure() {
+                        side_effects.push(Stmt::Let {
+                            mutable: false,
+                            name: "_".to_string(),
+                            ty: None,
+                            init: Some(value.clone()),
+                        });
+                    }
+                }
+            }
+
+            let struct_init = Expr::StructInit {
                 name: struct_name.to_string(),
                 fields,
                 base: None,
-            })
+            };
+            if side_effects.is_empty() {
+                Ok(struct_init)
+            } else {
+                side_effects.push(Stmt::TailExpr(struct_init));
+                Ok(Expr::Block(side_effects))
+            }
         } else {
             // Unregistered type: use struct update syntax
             let spread_count = events
@@ -332,6 +387,26 @@ impl<'a> Transformer<'a> {
                 .position(|e| matches!(e, PropEvent::Spread { .. }))
                 .unwrap();
 
+            // Collect side effects from dropped explicits BEFORE the spread.
+            // Uses `let _ = expr;` to suppress unused-value warnings.
+            let side_effects: Vec<Stmt> = events
+                .iter()
+                .take(spread_idx)
+                .filter_map(|event| {
+                    if let PropEvent::Explicit { value, .. } = event {
+                        if !value.is_trivially_pure() {
+                            return Some(Stmt::Let {
+                                mutable: false,
+                                name: "_".to_string(),
+                                ty: None,
+                                init: Some(value.clone()),
+                            });
+                        }
+                    }
+                    None
+                })
+                .collect();
+
             let spread_expr = match events.remove(spread_idx) {
                 PropEvent::Spread { expr } => expr,
                 _ => unreachable!(),
@@ -347,11 +422,18 @@ impl<'a> Transformer<'a> {
                 })
                 .collect();
 
-            Ok(Expr::StructInit {
+            let struct_init = Expr::StructInit {
                 name: struct_name.to_string(),
                 fields,
                 base: Some(Box::new(spread_expr)),
-            })
+            };
+            if side_effects.is_empty() {
+                Ok(struct_init)
+            } else {
+                let mut stmts = side_effects;
+                stmts.push(Stmt::TailExpr(struct_init));
+                Ok(Expr::Block(stmts))
+            }
         }
     }
 

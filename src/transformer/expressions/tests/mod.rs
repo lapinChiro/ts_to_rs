@@ -9,6 +9,7 @@ mod fn_exprs;
 mod literals;
 mod math_number;
 mod member_access;
+mod object_spread_side_effects;
 mod objects;
 mod optional_chaining;
 mod optional_semantics;
@@ -114,6 +115,34 @@ fn extract_fn_body_var_init(module: &ast::Module, fn_index: usize, stmt_index: u
         }
         _ => panic!("expected variable declaration at stmt index {stmt_index}"),
     }
+}
+
+/// Register a struct with the given name and `f64` fields.
+fn register_f64_struct(reg: &mut TypeRegistry, name: &str, fields: &[&str]) {
+    reg.register(
+        name.to_string(),
+        TypeDef::new_struct(
+            fields
+                .iter()
+                .map(|f| (f.to_string(), RustType::F64).into())
+                .collect(),
+            std::collections::HashMap::new(),
+            vec![],
+        ),
+    );
+}
+
+/// Register a function with the given name, no params, and the given return type.
+fn register_fn(reg: &mut TypeRegistry, name: &str, return_type: RustType) {
+    reg.register(
+        name.to_string(),
+        TypeDef::Function {
+            type_params: vec![],
+            params: vec![],
+            return_type: Some(return_type),
+            has_rest: false,
+        },
+    );
 }
 
 /// Build a TypeRegistry with a `greet(name: String, greeting: Option<String>) -> String` function.

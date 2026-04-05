@@ -9,12 +9,6 @@ Tier 内の記載順序が優先度。根本原因を共有するイシューは
 
 ## Tier 0: L1（信頼性基盤）+ L2（設計基盤）
 
-### S1: サイレント意味変更 [L1]
-
-放置すると E2E テストの信頼性が損なわれ、全開発成果が検証不能になる。
-
-- **[I-298]** **spread 上書き時の副作用式評価消失** — 発生頻度は極めて低い
-
 ### RC-15: 型変換シグネチャの設計問題 [L2]
 
 `convert_ts_type` に型パラメータコンテキストがなく、型パラメータ制約の解決が不完全。
@@ -162,6 +156,7 @@ OBJECT_LITERAL_NO_TYPE 全体で 25件。I-300/I-301/I-306 のサブ分類件数
 - **[I-233]** 複雑な update 式ターゲット — 2 件
 - **[I-234]** アロー関数の配列デストラクチャリング引数 — 1 件
 - **[I-235]** 複数スプレッドで未登録型のフィールド展開 — 要再検証
+- **[I-366]** **unregistered type path で同名 explicit キーの重複初期化** — `{ ...base, x: f(), x: g() }` のように spread 後に同じキーの explicit が複数ある場合、`convert_object_lit` の unregistered path（`src/transformer/expressions/data_literals.rs:390-398`）は spread 後の全 explicit を fields に含めるため、`StructInit { fields: [("x", f()), ("x", g())], base: Some(base) }` が生成される。Rust では同名フィールドの重複初期化はコンパイルエラー（`E0062: field 'x' specified more than once`）。TypeScript では後のキーが前のキーを上書きし、前のキーの式も評価される（副作用保持）。解決策: unregistered path でも rightmost-wins をキー単位で適用し、上書きされた式は `let _ = expr;` で副作用保持する。registered type path の rightmost-wins + `used_indices` パターンと同じアプローチ。ESLint `no-dupe-keys` 違反のため実コードでの発生確率は極めて低い
 
 ### その他
 

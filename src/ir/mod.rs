@@ -800,6 +800,38 @@ pub enum Expr {
     },
 }
 
+impl Expr {
+    /// Returns true if the expression has no observable side effects and can be safely dropped.
+    ///
+    /// Conservative: returns false for anything that might have side effects (function calls,
+    /// method calls, assignments, macros, etc.). Only returns true for expressions that are
+    /// provably pure:
+    /// - Literals (`NumberLit`, `IntLit`, `StringLit`, `BoolLit`, `Unit`)
+    /// - Identifiers (`Ident`)
+    /// - Field access on pure objects (`FieldAccess`)
+    /// - Transparent wrappers around pure expressions (`Ref`, `Deref`)
+    /// - Known-pure method calls (`to_string`, `clone`, `to_owned`) on pure receivers
+    pub fn is_trivially_pure(&self) -> bool {
+        match self {
+            Expr::NumberLit(_)
+            | Expr::IntLit(_)
+            | Expr::StringLit(_)
+            | Expr::BoolLit(_)
+            | Expr::Ident(_)
+            | Expr::Unit => true,
+            Expr::Ref(inner) | Expr::Deref(inner) => inner.is_trivially_pure(),
+            Expr::FieldAccess { object, .. } => object.is_trivially_pure(),
+            // Transpiler-generated conversion methods with no side effects
+            Expr::MethodCall { object, method, .. }
+                if matches!(method.as_str(), "to_string" | "clone" | "to_owned") =>
+            {
+                object.is_trivially_pure()
+            }
+            _ => false,
+        }
+    }
+}
+
 /// Binary operators supported in the IR.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinOp {
