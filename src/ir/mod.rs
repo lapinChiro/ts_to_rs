@@ -78,7 +78,7 @@ pub enum RustType {
     /// replaces this with `RustType::Named`. This fallback is used only when no
     /// typeof/instanceof usage is detected.
     Any,
-    /// `!` (never type, corresponds to TypeScript `never`)
+    /// `std::convert::Infallible` (corresponds to TypeScript `never`)
     Never,
     /// A user-defined named type, optionally with generic type arguments (e.g., `Point`, `Box<T>`)
     Named {
@@ -117,6 +117,16 @@ impl RustType {
             } => params.iter().any(|p| p.uses_param(param)) || return_type.uses_param(param),
             RustType::DynTrait(name) => name == param,
             _ => false,
+        }
+    }
+
+    /// Wraps `self` in `Option<T>`, preventing double-wrapping.
+    ///
+    /// If `self` is already `Option<_>`, returns it unchanged.
+    pub fn wrap_optional(self) -> RustType {
+        match self {
+            RustType::Option(_) => self,
+            _ => RustType::Option(Box::new(self)),
         }
     }
 

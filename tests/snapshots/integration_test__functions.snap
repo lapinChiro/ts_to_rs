@@ -25,7 +25,7 @@ fn classify(n: f64) -> String {
     "zero".to_string()
 }
 
-fn greetUser(name: String, greeting: String) -> String {
+fn greetUser(name: String, greeting: Option<String>) -> String {
     if greeting {
         return format!("{}, {}", greeting, name);
     }

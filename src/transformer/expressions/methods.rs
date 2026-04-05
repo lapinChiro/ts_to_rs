@@ -97,6 +97,11 @@ pub(super) fn map_method_call(object: Expr, method: &str, args: Vec<Expr>) -> Ex
             method: "to_uppercase".to_string(),
             args,
         },
+        "toString" => Expr::MethodCall {
+            object: Box::new(object),
+            method: "to_string".to_string(),
+            args,
+        },
         // trim() returns &str, wrap with .to_string()
         "trim" => Expr::MethodCall {
             object: Box::new(Expr::MethodCall {
@@ -529,5 +534,40 @@ fn wrap_sort_comparator_body(expr: Expr) -> Expr {
             }
         }
         other => other,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_map_method_call_to_string() {
+        let object = Expr::Ident("x".to_string());
+        let result = map_method_call(object, "toString", vec![]);
+        assert_eq!(
+            result,
+            Expr::MethodCall {
+                object: Box::new(Expr::Ident("x".to_string())),
+                method: "to_string".to_string(),
+                args: vec![],
+            }
+        );
+    }
+
+    #[test]
+    fn test_map_method_call_to_string_preserves_args() {
+        // toString(radix) — args must be preserved so Rust compiler catches the error
+        let object = Expr::Ident("x".to_string());
+        let args = vec![Expr::NumberLit(16.0)];
+        let result = map_method_call(object, "toString", args);
+        assert_eq!(
+            result,
+            Expr::MethodCall {
+                object: Box::new(Expr::Ident("x".to_string())),
+                method: "to_string".to_string(),
+                args: vec![Expr::NumberLit(16.0)],
+            }
+        );
     }
 }

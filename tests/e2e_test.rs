@@ -799,3 +799,8 @@ fn test_e2e_narrowing_null_eq_ts_rust_stdout_match() {
 fn test_e2e_narrowing_compound_ternary_ts_rust_stdout_match() {
     run_e2e_test("narrowing_compound_ternary");
 }
+
+#[test]
+fn test_e2e_to_string_method_ts_rust_stdout_match() {
+    run_e2e_test("to_string_method");
+}

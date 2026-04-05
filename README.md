@@ -68,7 +68,7 @@ ts-to-rs resolve-types --tsconfig tsconfig.json
 | `A & B` (intersection type) | フィールド統合 `struct` |
 | ジェネリクス (`<T>`, `<T extends U>`) | ジェネリクス (`<T>`, `<T: U>`) |
 | `any` / `unknown` | `Box<dyn std::any::Any>` |
-| `never` | `!` |
+| `never` | `std::convert::Infallible` |
 | `void` | `()` |
 | `enum` (数値) | `enum` + `#[repr(i64)]` |
 | `enum` (文字列) | `enum` + `as_str()` メソッド |

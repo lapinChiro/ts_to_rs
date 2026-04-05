@@ -15,7 +15,7 @@ pub enum DateOrError {
 }
 
 pub fn processValue(input: ArrayBufferOrString) -> String {
-    input.toString()
+    input.to_string()
 }
 
 #[derive(Debug, Clone, PartialEq)]

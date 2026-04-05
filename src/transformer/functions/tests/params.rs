@@ -608,3 +608,99 @@ fn test_convert_fn_default_param_bool_no_annotation_infers_bool() {
         _ => panic!("expected Item::Fn"),
     }
 }
+
+#[test]
+fn test_convert_fn_optional_param_wraps_option() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
+    let fn_decl = parse_fn_decl("function foo(x: number, y?: string): void {}");
+    let (items, _) = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_fn_decl(&fn_decl, Visibility::Public, false)
+        .unwrap();
+    match items.last().unwrap() {
+        Item::Fn { params, body, .. } => {
+            // First param: number → f64 (not optional)
+            assert_eq!(params[0].ty, Some(RustType::F64));
+            // Second param: string? → Option<String>
+            assert_eq!(
+                params[1].ty,
+                Some(RustType::Option(Box::new(RustType::String)))
+            );
+            // Optional params without default should NOT generate expansion stmts
+            assert!(
+                body.is_empty(),
+                "optional param without default should not generate expansion statements"
+            );
+        }
+        _ => panic!("expected Item::Fn"),
+    }
+}
+
+#[test]
+fn test_convert_fn_optional_param_already_option_no_double_wrap() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
+    // y?: string | null → should be Option<String>, NOT Option<Option<String>>
+    let fn_decl = parse_fn_decl("function foo(y?: string | null): void {}");
+    let (items, _) = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_fn_decl(&fn_decl, Visibility::Public, false)
+        .unwrap();
+    match items.last().unwrap() {
+        Item::Fn { params, .. } => {
+            assert_eq!(
+                params[0].ty,
+                Some(RustType::Option(Box::new(RustType::String))),
+                "optional nullable param should be Option<String>, not Option<Option<String>>"
+            );
+        }
+        _ => panic!("expected Item::Fn"),
+    }
+}
+
+#[test]
+fn test_convert_fn_optional_param_no_type_annotation_wraps_option_any() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
+    // x? (no type annotation) → Option<Any>
+    let fn_decl = parse_fn_decl("function foo(x?): void {}");
+    let (items, _) = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_fn_decl(&fn_decl, Visibility::Public, false)
+        .unwrap();
+    match items.last().unwrap() {
+        Item::Fn { params, .. } => {
+            assert_eq!(
+                params[0].ty,
+                Some(RustType::Option(Box::new(RustType::Any))),
+                "optional param without type annotation should be Option<Any>"
+            );
+        }
+        _ => panic!("expected Item::Fn"),
+    }
+}
+
+#[test]
+fn test_convert_fn_optional_param_inline_type_literal_wraps_option() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
+    // opts?: { name: string } → Option<Named>
+    let fn_decl = parse_fn_decl("function foo(opts?: { name: string }): void {}");
+    let (items, _) = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_fn_decl(&fn_decl, Visibility::Public, false)
+        .unwrap();
+    match items.last().unwrap() {
+        Item::Fn { params, .. } => match &params[0].ty {
+            Some(RustType::Option(inner)) => {
+                assert!(
+                    matches!(inner.as_ref(), RustType::Named { .. }),
+                    "expected Option<Named>, got Option<{:?}>",
+                    inner
+                );
+            }
+            other => panic!(
+                "expected Option<Named> for optional inline type literal, got {:?}",
+                other
+            ),
+        },
+        _ => panic!("expected Item::Fn"),
+    }
+}

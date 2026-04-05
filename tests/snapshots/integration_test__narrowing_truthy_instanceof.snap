@@ -73,5 +73,5 @@ fn typeofNarrowing(x: F64OrString) -> String {
         x
     }
 };
-    x.toString()
+    x.to_string()
 }

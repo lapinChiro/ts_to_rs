@@ -64,7 +64,6 @@ OBJECT_LITERAL_NO_TYPE 全体で 25件。I-300/I-301/I-306 のサブ分類件数
 ### RC-12: string メソッドマッピング
 
 - **[I-329]** **charAt/repeat 変換未実装** — indexOf は実装済み。charAt・repeat の個別マッピング追加が残存
-- **[I-323]** **toString 未変換** — `map_method_call` に `"toString"` ケース追加
 - **[I-237]** **toFixed 未変換** — `format!("{:.N}", v)` に変換。skip 原因
 
 ### RC-5: abstract class 変換パスの欠陥
@@ -74,7 +73,6 @@ OBJECT_LITERAL_NO_TYPE 全体で 25件。I-300/I-301/I-306 のサブ分類件数
 
 ### ゲートイシュー・ブロッカー
 
-- **[I-320]** **optional パラメータが Option\<T\> 未変換** — `param.optional` 未チェック。3 fixture ブロック（functions, closures, async-await）
 - **[I-30]** **Cargo.toml 依存クレート追加** — I-183（fetch）と I-34（Math.random）のゲート
 - **[I-182]** **Hono クリーンファイルのコンパイルテスト CI 化** — 回帰検出自動化
 - **[I-313]** **三項演算子 callee パターン** — CALL_TARGET（2件）。一時変数束縛 + 呼び出し
@@ -88,8 +86,8 @@ OBJECT_LITERAL_NO_TYPE 全体で 25件。I-300/I-301/I-306 のサブ分類件数
 - **[I-321]** **クロージャ返却の Box::new ラップ漏れ** — `needs_trait_box_coercion` のカバー不足
 - **[I-322]** **DU switch のデストラクチャ変数 rewrite 不完全** — `is_du_field_binding` スコープ検出
 - **[I-326]** **`??` チェーンの型不一致** — ネスト `??` の中間結果型
-- **[I-328]** **never 型が experimental `!`** — `Infallible` に変更（1 行修正）
 - **[I-330]** **try/catch + return で unreachable code** — ブロック構造見直し
+- **[I-360]** **Option\<T\> 変数の truthy narrowing 未対応** — `if (x)` where `x: Option<T>` が `if x {` のまま生成される。`if let Some(x) = x` に変換すべき。`try_generate_narrowing_match`（`src/transformer/statements/control_flow.rs:299`）が `complement_pattern == "None" && is_swap` のみ処理し、truthy（`is_swap=false`）パスが未処理。fixture `functions` のコンパイルを阻害
 - **[I-331]** **Option\<T\> 戻り値の暗黙 None 未返却** — if else 欠落
 - **[I-332]** **as unknown as T 二段キャスト** — 中間 unknown 消失
 - **[I-310]** **HashMap computed access が `as usize`** — Vec 用変換の誤適用。transformer 側修正

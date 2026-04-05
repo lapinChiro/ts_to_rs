@@ -483,6 +483,29 @@ fn test_narrowing_guard_instanceof_captures_var_span() {
 }
 
 #[test]
+fn test_convert_arrow_optional_param_wraps_option() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
+    let swc_expr = parse_var_init("const f = (x: number, y?: string) => x;");
+    let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_expr(&swc_expr)
+        .unwrap();
+    match result {
+        Expr::Closure { params, .. } => {
+            assert_eq!(params.len(), 2);
+            assert_eq!(params[0].ty, Some(crate::ir::RustType::F64));
+            assert_eq!(
+                params[1].ty,
+                Some(crate::ir::RustType::Option(Box::new(
+                    crate::ir::RustType::String
+                )))
+            );
+        }
+        _ => panic!("expected Expr::Closure, got {:?}", result),
+    }
+}
+
+#[test]
 fn test_narrowing_guard_truthy_captures_var_span() {
     let module = parse_typescript("x;").unwrap();
     let expr = match &module.body[0] {

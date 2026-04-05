@@ -12,12 +12,7 @@ pub fn generate_type(ty: &RustType) -> String {
         RustType::Option(inner) => format!("Option<{}>", generate_type(inner)),
         RustType::Vec(inner) => format!("Vec<{}>", generate_type(inner)),
         RustType::Result { ok, err } => {
-            let ok_str = if matches!(ok.as_ref(), RustType::Never) {
-                "std::convert::Infallible".to_string()
-            } else {
-                generate_type(ok)
-            };
-            format!("Result<{ok_str}, {}>", generate_type(err))
+            format!("Result<{}, {}>", generate_type(ok), generate_type(err))
         }
         RustType::Fn {
             params,
@@ -50,7 +45,7 @@ pub fn generate_type(ty: &RustType) -> String {
             }
         }
         RustType::Any => "serde_json::Value".to_string(),
-        RustType::Never => "!".to_string(),
+        RustType::Never => "std::convert::Infallible".to_string(),
         RustType::Named { name, type_args } => {
             if type_args.is_empty() {
                 name.clone()
@@ -205,7 +200,7 @@ mod tests {
 
     #[test]
     fn test_generate_type_never() {
-        assert_eq!(generate_type(&RustType::Never), "!");
+        assert_eq!(generate_type(&RustType::Never), "std::convert::Infallible");
     }
 
     #[test]

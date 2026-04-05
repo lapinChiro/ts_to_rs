@@ -217,11 +217,7 @@ pub(crate) fn resolve_type_literal_fields(
             let ty = resolve_ts_type(&f.ty, reg, synthetic)?;
             // Optional fields become Option<T>, but avoid double-wrapping
             // when the resolved type is already Option (e.g., `name?: string | null`)
-            let ty = if f.optional && !matches!(ty, RustType::Option(_)) {
-                RustType::Option(Box::new(ty))
-            } else {
-                ty
-            };
+            let ty = if f.optional { ty.wrap_optional() } else { ty };
             Ok(StructField {
                 name: crate::ir::sanitize_field_name(&f.name),
                 ty,

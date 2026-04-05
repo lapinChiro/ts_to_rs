@@ -25,14 +25,20 @@ impl<'a> Transformer<'a> {
         match pat {
             ast::Pat::Ident(ident) => {
                 let param_name = ident.id.sym.to_string();
+                let optional = ident.id.optional;
                 let ty = match ident.type_ann.as_ref() {
                     Some(ann) => ann,
                     None => {
                         // No type annotation — fallback to Any
+                        let rust_type = if optional {
+                            RustType::Any.wrap_optional()
+                        } else {
+                            RustType::Any
+                        };
                         return Ok((
                             Param {
                                 name: param_name,
-                                ty: Some(RustType::Any),
+                                ty: Some(rust_type),
                             },
                             vec![],
                             vec![],
@@ -61,6 +67,11 @@ impl<'a> Transformer<'a> {
                         name: struct_name,
                         type_args: vec![],
                     };
+                    let rust_type = if optional {
+                        rust_type.wrap_optional()
+                    } else {
+                        rust_type
+                    };
                     return Ok((
                         Param {
                             name: param_name,
@@ -75,6 +86,12 @@ impl<'a> Transformer<'a> {
                     self.convert_ts_type_with_fallback(&ty.type_ann, resilient, fallback_warnings)?;
                 // Trait types in parameter position → &dyn Trait
                 let rust_type = wrap_trait_for_position(rust_type, TypePosition::Param, self.reg());
+                // Optional parameter → wrap in Option<T> (avoid double-wrapping)
+                let rust_type = if optional {
+                    rust_type.wrap_optional()
+                } else {
+                    rust_type
+                };
                 Ok((
                     Param {
                         name: param_name,

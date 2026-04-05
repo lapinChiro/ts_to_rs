@@ -31,6 +31,6 @@ struct Flexible {
     value: serde_json::Value,
 }
 
-fn assertNever(x: !) -> Result<std::convert::Infallible, String> {
+fn assertNever(x: std::convert::Infallible) -> Result<std::convert::Infallible, String> {
     Err(("Unexpected value: ".to_string() + &x).to_string())
 }

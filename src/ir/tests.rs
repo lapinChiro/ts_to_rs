@@ -613,3 +613,17 @@ fn test_camel_to_snake_already_snake() {
 fn test_camel_to_snake_single_word() {
     assert_eq!(camel_to_snake("name"), "name");
 }
+
+#[test]
+fn test_wrap_optional_non_option() {
+    assert_eq!(
+        RustType::F64.wrap_optional(),
+        RustType::Option(Box::new(RustType::F64))
+    );
+}
+
+#[test]
+fn test_wrap_optional_already_option_no_double_wrap() {
+    let ty = RustType::Option(Box::new(RustType::String));
+    assert_eq!(ty.clone().wrap_optional(), ty);
+}

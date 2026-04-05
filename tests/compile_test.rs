@@ -160,16 +160,11 @@ fn test_all_fixtures_compile() {
         "object-destructuring",
         // ternary: union branch types not wrapped in enum variants (I-11).
         "ternary",
-        // functions: optional param not converted to Option<T> (I-320),
-        // returned closure missing Box::new() (I-321),
+        // functions: returned closure missing Box::new() (I-321),
         // Vec<String> index move (I-319).
         "functions",
-        // keyword-types: `!` (never) type is experimental on stable Rust (I-328),
-        // `undefined` return type generates `None` for `()` return (I-260).
+        // keyword-types: `undefined` return type generates `None` for `()` return (I-260).
         "keyword-types",
-        // narrowing-truthy-instanceof: `=== null` narrowing incomplete (I-327),
-        // `x.toString()` not converted to `x.to_string()` (I-323).
-        "narrowing-truthy-instanceof",
         // nullish-coalescing: `??` chain generates type mismatch (I-326),
         // Vec index move for string (I-319).
         "nullish-coalescing",
@@ -254,7 +249,6 @@ fn test_all_fixtures_compile_with_builtins() {
         "discriminated-union",
         "functions",
         "keyword-types",
-        "narrowing-truthy-instanceof",
         "nullish-coalescing",
         "string-methods",
         "type-assertion",

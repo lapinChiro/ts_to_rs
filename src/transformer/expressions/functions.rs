@@ -30,6 +30,12 @@ impl<'a> Transformer<'a> {
                     .as_ref()
                     .map(|ann| convert_ts_type(&ann.type_ann, self.synthetic, self.reg()))
                     .transpose()?;
+                // Optional parameter → wrap in Option<T> (avoid double-wrapping)
+                let rust_type = if ident.id.optional {
+                    rust_type.map(|ty| ty.wrap_optional())
+                } else {
+                    rust_type
+                };
                 params.push(Param {
                     name,
                     ty: rust_type,
@@ -186,6 +192,12 @@ impl<'a> Transformer<'a> {
                         let rust_type = rust_type.or_else(|| {
                             override_param_types.and_then(|types| types.get(i).cloned())
                         });
+                        // Optional parameter → wrap in Option<T> (avoid double-wrapping)
+                        let rust_type = if ident.id.optional {
+                            rust_type.map(|ty| ty.wrap_optional())
+                        } else {
+                            rust_type
+                        };
                         params.push(Param {
                             name,
                             ty: rust_type,
