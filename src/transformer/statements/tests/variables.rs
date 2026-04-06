@@ -198,8 +198,8 @@ fn test_convert_stmt_spread_let_mixed_segments_expands_to_stmts() {
     // First: let mut x = Vec::new();
     assert!(matches!(
         &result[0],
-        Stmt::Let { mutable: true, name, init: Some(Expr::FnCall { name: fn_name, .. }), .. }
-        if name == "x" && fn_name == "Vec::new"
+        Stmt::Let { mutable: true, name, init: Some(Expr::FnCall { target, .. }), .. }
+        if name == "x" && target.is_path(&["Vec", "new"])
     ));
     // Second: x.extend(...)
     assert!(matches!(

@@ -142,17 +142,17 @@ fn wrap_stmt_return(stmt: Stmt) -> Stmt {
     match stmt {
         Stmt::Return(Some(expr)) => {
             // Don't wrap if already an Err(...) call
-            if matches!(&expr, Expr::FnCall { name, .. } if name == "Err") {
+            if matches!(&expr, Expr::FnCall { target, .. } if target.as_simple() == Some("Err")) {
                 Stmt::Return(Some(expr))
             } else {
                 Stmt::Return(Some(Expr::FnCall {
-                    name: "Ok".to_string(),
+                    target: crate::ir::CallTarget::simple("Ok"),
                     args: vec![expr],
                 }))
             }
         }
         Stmt::Return(None) => Stmt::Return(Some(Expr::FnCall {
-            name: "Ok".to_string(),
+            target: crate::ir::CallTarget::simple("Ok"),
             args: vec![Expr::Unit],
         })),
         Stmt::If {

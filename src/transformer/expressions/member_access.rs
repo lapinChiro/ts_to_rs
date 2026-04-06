@@ -307,7 +307,7 @@ impl<'a> Transformer<'a> {
                 if obj.sym.as_ref() == "process" && prop.sym.as_ref() == "env" {
                     return Ok(Expr::MethodCall {
                         object: Box::new(Expr::FnCall {
-                            name: "std::env::var".to_string(),
+                            target: crate::ir::CallTarget::path(&["std", "env", "var"]),
                             args: vec![Expr::StringLit(field)],
                         }),
                         method: "unwrap".to_string(),

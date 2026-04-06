@@ -36,7 +36,7 @@ fn test_spread_override_fn_call_emits_side_effect_registered() {
             assert_eq!(stmts.len(), 2);
             // First: side-effect evaluation
             assert!(
-                matches!(&stmts[0], IrStmt::Let { init: Some(Expr::FnCall { name, .. }), .. } if name == "getX"),
+                matches!(&stmts[0], IrStmt::Let { init: Some(Expr::FnCall { target, .. }), .. } if target.as_simple() == Some("getX")),
                 "expected Let {{ init: FnCall getX }}, got {:?}",
                 stmts[0]
             );
@@ -69,12 +69,12 @@ fn test_spread_override_multiple_side_effects_preserves_source_order_registered(
             assert_eq!(stmts.len(), 3, "2 side effects + 1 tail expr");
             // Source order: f() first, g() second
             assert!(
-                matches!(&stmts[0], IrStmt::Let { init: Some(Expr::FnCall { name, .. }), .. } if name == "f"),
+                matches!(&stmts[0], IrStmt::Let { init: Some(Expr::FnCall { target, .. }), .. } if target.as_simple() == Some("f")),
                 "first side effect should be f(), got {:?}",
                 stmts[0]
             );
             assert!(
-                matches!(&stmts[1], IrStmt::Let { init: Some(Expr::FnCall { name, .. }), .. } if name == "g"),
+                matches!(&stmts[1], IrStmt::Let { init: Some(Expr::FnCall { target, .. }), .. } if target.as_simple() == Some("g")),
                 "second side effect should be g(), got {:?}",
                 stmts[1]
             );
@@ -104,7 +104,7 @@ fn test_spread_override_fn_call_between_multiple_spreads_registered() {
             assert_eq!(stmts.len(), 2, "1 side effect + 1 tail expr");
             // f() is overridden by spread b, should be preserved as side effect
             assert!(
-                matches!(&stmts[0], IrStmt::Let { init: Some(Expr::FnCall { name, .. }), .. } if name == "f"),
+                matches!(&stmts[0], IrStmt::Let { init: Some(Expr::FnCall { target, .. }), .. } if target.as_simple() == Some("f")),
                 "expected let _ = f(), got {:?}",
                 stmts[0]
             );
@@ -134,13 +134,13 @@ fn test_spread_middle_side_effect_before_only_registered() {
         Expr::Block(stmts) => {
             assert_eq!(stmts.len(), 2, "1 side effect + 1 tail expr");
             assert!(
-                matches!(&stmts[0], IrStmt::Let { init: Some(Expr::FnCall { name, .. }), .. } if name == "f"),
+                matches!(&stmts[0], IrStmt::Let { init: Some(Expr::FnCall { target, .. }), .. } if target.as_simple() == Some("f")),
             );
             // g() should be in the struct init fields (it's used, not overridden)
             if let IrStmt::TailExpr(Expr::StructInit { fields, .. }) = &stmts[1] {
                 let y_field = fields.iter().find(|(k, _)| k == "y").expect("y field");
                 assert!(
-                    matches!(&y_field.1, Expr::FnCall { name, .. } if name == "g"),
+                    matches!(&y_field.1, Expr::FnCall { target, .. } if target.as_simple() == Some("g")),
                     "y should use g() as value, got {:?}",
                     y_field.1
                 );
@@ -167,7 +167,7 @@ fn test_spread_override_fn_call_emits_side_effect_unregistered() {
         Expr::Block(stmts) => {
             assert_eq!(stmts.len(), 2);
             assert!(
-                matches!(&stmts[0], IrStmt::Let { init: Some(Expr::FnCall { name, .. }), .. } if name == "f"),
+                matches!(&stmts[0], IrStmt::Let { init: Some(Expr::FnCall { target, .. }), .. } if target.as_simple() == Some("f")),
             );
             assert!(matches!(
                 &stmts[1],
@@ -222,11 +222,11 @@ fn test_spread_source_fn_call_bound_to_temp_var_registered() {
             match &stmts[0] {
                 IrStmt::Let {
                     name,
-                    init: Some(Expr::FnCall { name: fn_name, .. }),
+                    init: Some(Expr::FnCall { target, .. }),
                     ..
                 } => {
                     assert_eq!(name, "__spread_obj_0");
-                    assert_eq!(fn_name, "getBase");
+                    assert_eq!(target.as_simple(), Some("getBase"));
                 }
                 other => panic!(
                     "expected Let {{ __spread_obj_0 = getBase() }}, got {:?}",
@@ -308,15 +308,15 @@ fn test_spread_source_fn_call_with_overridden_explicit_source_order() {
             );
             // idx 0: overridden explicit f()
             assert!(
-                matches!(&stmts[0], IrStmt::Let { name, init: Some(Expr::FnCall { name: fn_name, .. }), .. }
-                    if name == "_" && fn_name == "f"),
+                matches!(&stmts[0], IrStmt::Let { name, init: Some(Expr::FnCall { target, .. }), .. }
+                    if name == "_" && target.as_simple() == Some("f")),
                 "stmts[0] should be let _ = f(), got {:?}",
                 stmts[0]
             );
             // idx 1: spread binding getBase()
             assert!(
-                matches!(&stmts[1], IrStmt::Let { name, init: Some(Expr::FnCall { name: fn_name, .. }), .. }
-                    if name == "__spread_obj_0" && fn_name == "getBase"),
+                matches!(&stmts[1], IrStmt::Let { name, init: Some(Expr::FnCall { target, .. }), .. }
+                    if name == "__spread_obj_0" && target.as_simple() == Some("getBase")),
                 "stmts[1] should be let __spread_obj_0 = getBase(), got {:?}",
                 stmts[1]
             );
@@ -358,14 +358,14 @@ fn test_spread_source_multiple_fn_calls_get_separate_temp_vars() {
             );
             // Source order: getA at idx 0, getB at idx 2
             assert!(
-                matches!(&stmts[0], IrStmt::Let { name, init: Some(Expr::FnCall { name: fn_name, .. }), .. }
-                    if name == "__spread_obj_0" && fn_name == "getA"),
+                matches!(&stmts[0], IrStmt::Let { name, init: Some(Expr::FnCall { target, .. }), .. }
+                    if name == "__spread_obj_0" && target.as_simple() == Some("getA")),
                 "stmts[0] should be __spread_obj_0 = getA(), got {:?}",
                 stmts[0]
             );
             assert!(
-                matches!(&stmts[1], IrStmt::Let { name, init: Some(Expr::FnCall { name: fn_name, .. }), .. }
-                    if name == "__spread_obj_1" && fn_name == "getB"),
+                matches!(&stmts[1], IrStmt::Let { name, init: Some(Expr::FnCall { target, .. }), .. }
+                    if name == "__spread_obj_1" && target.as_simple() == Some("getB")),
                 "stmts[1] should be __spread_obj_1 = getB(), got {:?}",
                 stmts[1]
             );

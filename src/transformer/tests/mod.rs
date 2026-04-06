@@ -6,6 +6,7 @@ mod module_items;
 mod variable_type_propagation;
 
 use super::*;
+use crate::ir::CallTarget;
 use crate::ir::Stmt;
 use crate::ir::{BinOp, Expr, Param, RustType, StructField, Visibility};
 use crate::parser::parse_typescript;
@@ -82,7 +83,7 @@ fn test_build_option_unwrap_fn_call_uses_unwrap_or_else() {
     let result = build_option_unwrap_with_default(
         Expr::Ident("x".to_string()),
         Expr::FnCall {
-            name: "compute_default".to_string(),
+            target: CallTarget::simple("compute_default"),
             args: vec![],
         },
     );

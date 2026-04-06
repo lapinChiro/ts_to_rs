@@ -6,19 +6,32 @@
 use std::collections::HashSet;
 
 use crate::ir::{
-    camel_to_snake, sanitize_field_name, ClosureBody, Expr, Item, MatchArm, MatchPattern, Method,
-    RustType, Stmt, StructField, TypeParam, Visibility,
+    camel_to_snake, sanitize_field_name, CallTarget, ClosureBody, Expr, Item, MatchArm,
+    MatchPattern, Method, RustType, Stmt, StructField, TypeParam, Visibility,
 };
 use crate::pipeline::SyntheticTypeRegistry;
 use crate::registry::{TypeDef, TypeRegistry};
 use crate::ts_type_info::resolve::typedef::monomorphize_type_params;
 
 /// Rust の標準ライブラリ型・serde 型など、struct 生成が不要な型名のセット。
+///
+/// I-375 で `Expr::FnCall` が `CallTarget` で構造化されたことにより、FnCall 経由で
+/// `Some` / `None` / `Ok` / `Err` が walker に登録されることはなくなった
+/// （`type_ref: None` として構造的に判定される）。
+///
+/// しかし `MatchPattern::EnumVariant::path: String` と `Stmt::IfLet::pattern: String`
+/// の pattern 文字列 walker（`collect_type_refs_from_match_arm`,
+/// `collect_type_refs_from_verbatim_pattern`）は **同根の uppercase-head
+/// ヒューリスティックを使用しており、これは I-377 のスコープ**。I-377 で
+/// MatchPattern が構造化されるまでは、pattern 経由で `Some(x)` / `None` /
+/// `Ok(x)` / `Err(e)` が refs に登録されうる。そのため、このフィルタで builtin
+/// variant 名を除外する必要がある。
+///
+/// I-377 完了後にこれらのエントリは削除する。
 const RUST_BUILTIN_TYPES: &[&str] = &[
     "String", "Vec", "HashMap", "HashSet", "Option", "Box", "Result", "Rc", "Arc", "Mutex", "bool",
     "f64", "i64", "i128", "u8", "u32", "usize",
-    // Variant constructors that look like type names when extracted from `Expr::FnCall::name`.
-    // 標準型 `Option` / `Result` のバリアント名は型ではないため stub 対象から除外する。
+    // I-377 まで必要な一時的なフィルタ（pattern 文字列 walker からの流入を防ぐ）
     "Some", "None", "Ok", "Err",
 ];
 
@@ -610,23 +623,30 @@ fn collect_type_refs_from_expr(expr: &Expr, refs: &mut HashSet<String>) {
                 collect_type_refs_from_expr(e, refs);
             }
         }
-        Expr::FnCall { name, args } => {
-            // `Expr::FnCall::name` は意味論的に多義: ユーザ関数 (`foo`), モジュール
-            // 修飾呼び出し (`scopeguard::guard`), enum variant 構築 (`Color::Red`),
-            // タプル struct 構築 (`Wrapper(x)`), Option/Result 構築 (`Some`, `Ok`)。
+        Expr::FnCall { target, args } => {
+            // I-375: structural call-target classification.
             //
-            // 型参照として収集すべきは「型名（PascalCase 規約）の identifier」のみ:
-            //   - `Color::Red(x)` → `Color` を refs に登録（合成 enum コンストラクタ）
-            //   - `Wrapper(x)` → `Wrapper` を refs に登録（タプル struct コンストラクタ）
-            //   - `scopeguard::guard(x)` → 先頭が小文字なので登録しない
-            //   - `js_typeof(x)` → 同様に登録しない
+            // The Transformer records every `Expr::FnCall` with a structured
+            // `CallTarget`:
+            //   - `CallTarget::Path { type_ref: Some(t), .. }` — the call references
+            //     the user-defined type `t` (e.g. `Color::Red(x)`, `MyClass::new(x)`).
+            //     Register `t` in the reference graph.
+            //   - `CallTarget::Path { type_ref: None, .. }` — free function, module
+            //     path call, `Option`/`Result` builtin variant, or local variable
+            //     invocation. No type reference to record.
+            //   - `CallTarget::Super` — parent constructor call in class inheritance
+            //     context. No type reference.
             //
-            // 判定は「先頭セグメント (`::` 前) の最初の char が ASCII 大文字か」で行う。
-            // Rust の型命名規約に従えば `RustType::Named` で参照される全ての型がこの
-            // 条件を満たす。
-            let head = name.split("::").next().unwrap_or(name);
-            if head.chars().next().is_some_and(|c| c.is_ascii_uppercase()) {
-                refs.insert(head.to_string());
+            // The previous implementation used an uppercase-head heuristic on the
+            // joined path string, which produced false negatives for lowercase
+            // class names (`class myClass {}`) and relied on hardcoding
+            // `Some/None/Ok/Err` into `RUST_BUILTIN_TYPES`. Both band-aids are
+            // removed now that the classification is structural.
+            if let CallTarget::Path {
+                type_ref: Some(t), ..
+            } = target
+            {
+                refs.insert(t.clone());
             }
             for a in args {
                 collect_type_refs_from_expr(a, refs);

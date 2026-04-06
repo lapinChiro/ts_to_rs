@@ -2,7 +2,62 @@
 
 ## 次のアクション
 
-**次のアクション**: Batch 11c-fix-2（**最優先**） — 本来 Batch 11c-fix で構造解消すべき残課題 I-375 / I-376 / I-377 を次セッションで完全に解消する。詳細は `TODO` 参照。これらは Batch 11c-fix の self-review で発見したが、本セッションでは scope 拡大による回帰リスク累積を避けるため別バッチに分離した
+**次のアクション**: Batch 11c-fix-2 の **I-377**（3 本のうち 2 本目）— Batch 11c-fix-2 は I-375 完了済、残 I-377 → I-376。I-377 では `IrVisitor` trait 導入 + `MatchPattern` / verbatim pattern 文字列の構造化 IR 化 + `RUST_BUILTIN_TYPES` から `Some / None / Ok / Err` 除去（I-375 申し送り事項）を実施する。
+
+**実行順序**: **I-375 → I-377 → I-376**（3 本の独立 PRD として実施）
+
+根拠:
+1. **I-375 先行（L2 優先 + IR 形状固定）**: IR 破壊的変更を最初に打って `Expr::FnCall` の最終形状（`CallTarget` enum）を確定させることで、後続の I-377 visitor 実装が最終形状に対して 1 回で済む（rework ゼロ）。また priority L2（correctness）を L3 より先行させる `todo-prioritization.md` 原則を遵守
+2. **I-377 中間（IR 層の大手術集約 + MatchPattern 構造化）**: 安定した IR 形状に対して `IrVisitor` trait を 1 回で導入。`external_struct_generator` の `collect_type_refs_*` と `ir/substitute.rs` を visitor ベースに書き換え。
+
+   **I-377 スコープ拡張（I-375 Discovery で確定）**: I-377 は IrVisitor 導入に加え、以下を **同一 PRD 内で完了** させる必要がある:
+   - `MatchPattern::EnumVariant { path: String }` を構造化 variant（例: `{ enum_name: String, variant: String, fields: Vec<MatchPattern> }`）に分解
+   - `MatchPattern::Verbatim(String)` / `Stmt::IfLet::pattern: String` / `Stmt::WhileLet::pattern: String` / `Expr::IfLet::pattern: String` / `Expr::Matches::pattern: String` の pattern 文字列を構造化 IR に置き換え（Rust pattern grammar の IR 化）
+
+   **理由**: I-377 の目的は「walker / substitute が IR を **構造的** に走査できる基盤の確立」である。`MatchPattern::EnumVariant::path: String` と `Verbatim(String)` が残存すると、IrVisitor の `visit_match_pattern` は内部で文字列 parser を呼ぶか、uppercase head ヒューリスティックを維持するしかなく、**「構造化 walker 基盤」という I-377 の目的が達成されない**（broken window 残存）。従って pattern 文字列の完全構造化は I-377 の **前提条件** として同一 PRD に含める。
+
+   **I-375 に含めない理由**: I-375 の責務は `Expr::FnCall` の call semantics（何を呼ぶか）の構造化であり、IR Expr サブシステムに閉じる。MatchPattern の構造化は IR pattern grammar サブシステムの課題であり、凝集度・責務分離の観点から別 PRD に帰属させる方が合理的。同時改修は構築サイト変更のリスクが累積する。
+
+   **影響範囲追加**:
+   - `src/ir/mod.rs`: `MatchPattern`, `Stmt::IfLet`, `Stmt::WhileLet`, `Expr::IfLet`, `Expr::Matches` の pattern field 型変更
+   - MatchPattern 構築サイト: transformer 配下（要 grep 実測）
+   - Generator: pattern rendering ロジック
+   - I-375 で構造化しなかった `collect_type_refs_from_verbatim_pattern` / `collect_type_refs_from_match_arm` の uppercase 判定コードを削除し、IrVisitor ベースに統合
+
+   **I-375 からの申し送り事項（I-377 で必ず解消すべき 3 項目）**:
+
+   **A. `RUST_BUILTIN_TYPES` からの `Some / None / Ok / Err` 削除**
+
+   I-375 実装中に当該 4 エントリを削除したところ、`tests/integration_test.rs` の `test_type_narrowing` / `test_async_await` / `test_error_handling` / `test_narrowing_truthy_instanceof` の 4 件が回帰した。原因: `if let Some(y) = y { ... }` のような pattern が `Stmt::IfLet::pattern: String = "Some(y)"` として IR に保存されており、`collect_type_refs_from_verbatim_pattern` の uppercase-head ヒューリスティックが `"Some"` を refs に登録し、それが builtin フィルタで除外されなくなったため `pub struct Some { }` が stub 生成された。
+
+   **分析結果**: この問題は **I-375 単独では解決不能**。理由:
+   - pattern 文字列が String である限り、walker は文字列解析に頼らざるを得ない
+   - 文字列解析は必ず uppercase-head ヒューリスティックか、Some/None/Ok/Err のハードコード除外の**どちらか**を必要とする
+   - 両方を排除するには pattern を構造化 IR に置き換える必要があり、これが I-377 のスコープそのもの
+
+   I-375 の PRD Completion Criterion #4 は「MatchPattern 構造化と同時に達成する前提」で書かれていたが、スコープ分離の都合上 I-377 に実際の削除作業を委譲する。暫定対応として `RUST_BUILTIN_TYPES` に `Some / None / Ok / Err` を**明示コメント付きで復元済**（`src/pipeline/external_struct_generator/mod.rs:15-36`）。
+
+   **I-377 での必須アクション**:
+   1. `MatchPattern::EnumVariant { path: String }` を `{ enum_name: String, variant: String, fields: Vec<MatchPattern> }` 等の構造化 variant に置換
+   2. `Stmt::IfLet::pattern: String` / `Stmt::WhileLet::pattern: String` / `Expr::IfLet::pattern: String` / `Expr::Matches::pattern: String` の pattern 文字列を構造化 IR (例: `Pattern` enum) に置換
+   3. `collect_type_refs_from_verbatim_pattern` と `collect_type_refs_from_match_arm` の uppercase-head 判定コードを完全削除
+   4. **上記 3 が完了してから** `RUST_BUILTIN_TYPES` から `"Some", "None", "Ok", "Err"` の 4 エントリを削除
+   5. `integration_test.rs` の 4 件が削除後も pass することを確認
+
+   **A を忘れると**「IR に display-formatted 文字列を保存禁止」「ビルトイン variant のハードコード除外禁止」という I-375/I-377 の根本目的が未達成のまま残る。I-377 の Completion Criteria に明示的に組み込むこと。
+
+   **B. `convert_call_expr` Ident callee の `type_ref` と `sanitize_rust_type_name` の不整合**
+
+   `src/transformer/expressions/calls.rs:106-113` で、Ident callee が `TypeDef::Struct / TypeDef::Enum` として reg 登録されている場合に `type_ref: Some(fn_name.clone())` を設定するが、この `fn_name` は **sanitize 前の TS 識別子**。TS `interface Self { (x: number): string }` のような callable interface の場合、生成 Rust 構造体は `Self_` (I-374 で sanitize) だが `type_ref` には `"Self"` が記録される。walker は `"Self"` を refs に登録し、生成 Rust 側の `Self_` 構造体とミスマッチになる latent バグ。
+
+   現状の Hono ベンチでは顕在化しないが、クリーンな実装の観点では修正必須。I-374（Rust 予約語 sanitize）と併せて解消すべき。I-377 スコープには直接含めないが、I-374 実施時に `convert_call_expr` の `fn_name` も `sanitize_rust_type_name` を通す修正を忘れないこと。
+
+   **C. I-375 統合テストが walker 直接検証になっていない**
+
+   `tests/lowercase_class_reference_test.rs` は「class myClass + new myClass(1) を transpile して出力に `struct myClass` と `myClass::new(` が含まれる」を検証するが、これは Transformer が class declaration を直接 struct に emit するため walker の参照捕捉ロジックを直接検証していない。I-377 で walker を visitor pattern 化する際、walker の `type_ref: Some("myClass")` 走査が正しく動作することを **walker 単体テストで直接検証** すること（`test_walker_lowercase_class_name_registered_via_type_ref` 等）。I-375 実装では Priority B テストとして追加済。
+3. **I-376 最後（独立 pipeline 層）**: IR/walker 層と完全に直交（`pipeline/mod.rs` Pass 4/5 plumbing のみ）。最後に配置することで層ごとに review を分離可能
+
+6 順列分析の結論: #1 `I-375 → I-377 → I-376` が rework ゼロで総コスト最小。逆順（I-377 先行）は visitor の `walk_expr::FnCall` 分岐を I-375 で再編集する rework +1 が発生
 
 ### 次バッチの根拠
 
@@ -47,7 +102,9 @@ S1 バグ 0 件達成。
 | ~~11a~~ | ~~I-368+I-369~~ | ~~OutputWriter types.rs 衝突 + ビルトイン型モノモーフィゼーション~~ | **完了** dir 156→157 |
 | ~~11c~~ | ~~I-371~~ | ~~合成型の単一正準配置（同一ファイル重複 + クロスファイル冗長性）~~ | **完了** E0428+E0119 17→0、shared_imports 生成 |
 | ~~11c-fix~~ | ~~I-371 self-review 修正~~ | ~~substring scan / 重複ロジック / API 非対称 / テスト不足 等 12 問題~~ | **完了** IR ベース placement、`RustType::QSelf` 構造化、fn body IR walker、`UndefinedRefScope` 共通骨格、type_params constraint walking、verbatim pattern walking、自動テスト +104 件 |
-| **11c-fix-2** | **I-375 + I-376 + I-377** | **Batch 11c-fix で導入した uppercase ヒューリスティック / 出力時 dedup patch / 手書き walker の構造解消（本来 11c-fix で行うべきだった残課題）** | **最優先** Batch 11c-fix の継続。次セッションで完了させる |
+| ~~11c-fix-2-a~~ | ~~I-375~~ | ~~`Expr::FnCall::name` の意味論的多義性（CallTarget で構造化）~~ | **完了** `CallTarget { Path { segments, type_ref } \| Super }` 2 variant 構造化、walker の uppercase-head ヒューリスティック廃止、lowercase class 統合テスト追加、Hono 後退ゼロ |
+| **11c-fix-2-b** | **I-377** | **walker / substitute の IrVisitor 化 + `MatchPattern` / verbatim pattern 文字列の構造化（I-375 申し送り: `RUST_BUILTIN_TYPES` からの Some/None/Ok/Err 除去含む）** | **次** Batch 11c-fix-2 の継続 |
+| 11c-fix-2-c | I-376 | per-file 外部型 stub の構造的重複（pipeline 段階 dedup） | 11c-fix-2-b の後 |
 | 11b | I-300+I-301+I-306 | OBJECT_LITERAL_NO_TYPE（25件） | 最大エラーカテゴリ削減 |
 | 12 | I-311+I-344 | 型引数推論フィードバック欠如 | I-344 自動解消 + generic 精度 |
 | 13 | I-11+I-238+I-202 | union/enum 生成品質 | skip: ternary, ternary-union 他 |

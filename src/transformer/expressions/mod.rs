@@ -6,7 +6,7 @@ use anyhow::{anyhow, Result};
 use swc_common::Spanned;
 use swc_ecma_ast as ast;
 
-use crate::ir::{Expr, RustType};
+use crate::ir::{CallTarget, Expr, RustType};
 use crate::pipeline::type_converter::convert_ts_type;
 use crate::pipeline::type_resolution::Span;
 // Re-export for tests that use `super::*`
@@ -61,7 +61,7 @@ impl<'a> Transformer<'a> {
             if matches!(expr, ast::Expr::Lit(_)) {
                 let inner_result = self.convert_expr_with_expected(expr, Some(inner))?;
                 return Ok(Expr::FnCall {
-                    name: "Some".to_string(),
+                    target: CallTarget::simple("Some"),
                     args: vec![inner_result],
                 });
             }
@@ -71,12 +71,12 @@ impl<'a> Transformer<'a> {
             } else {
                 let inner_result = self.convert_expr_with_expected(expr, Some(inner))?;
                 if matches!(&inner_result, Expr::Ident(name) if name == "None")
-                    || matches!(&inner_result, Expr::FnCall { name, .. } if name == "Some")
+                    || matches!(&inner_result, Expr::FnCall { target, .. } if target.as_simple() == Some("Some"))
                 {
                     return Ok(inner_result);
                 }
                 return Ok(Expr::FnCall {
-                    name: "Some".to_string(),
+                    target: CallTarget::simple("Some"),
                     args: vec![inner_result],
                 });
             }
@@ -133,7 +133,8 @@ impl<'a> Transformer<'a> {
         if let Some(expected) = expected {
             if self.needs_trait_box_coercion(expected, expr) {
                 return Ok(Expr::FnCall {
-                    name: "Box::new".to_string(),
+                    // `Box::new(...)` is a std call, not a user type reference.
+                    target: CallTarget::path(&["Box", "new"]),
                     args: vec![result],
                 });
             }

@@ -124,7 +124,7 @@ fn test_fn_arg_box_dyn_fn_gets_box_new() {
     match &result {
         Expr::FnCall { args, .. } => {
             assert!(
-                matches!(&args[0], Expr::FnCall { name, .. } if name == "Box::new"),
+                matches!(&args[0], Expr::FnCall { target, .. } if target.is_path(&["Box", "new"])),
                 "expected Box::new wrapping, got {:?}",
                 args[0]
             );
@@ -392,8 +392,8 @@ fn test_convert_hashmap_propagates_value_type() {
 
     // Expected: HashMap::from(vec![(key, "val".to_string())])
     match &result {
-        Expr::FnCall { name, args } => {
-            assert_eq!(name, "HashMap::from");
+        Expr::FnCall { target, args } => {
+            assert!(target.is_path(&["HashMap", "from"]));
             match &args[0] {
                 Expr::Vec { elements } => match &elements[0] {
                     Expr::Tuple { elements } => {
@@ -423,8 +423,8 @@ fn test_convert_empty_object_with_hashmap_expected_type() {
         .unwrap();
 
     match &result {
-        Expr::FnCall { name, args } => {
-            assert_eq!(name, "HashMap::new");
+        Expr::FnCall { target, args } => {
+            assert!(target.is_path(&["HashMap", "new"]));
             assert!(args.is_empty(), "HashMap::new() should have no arguments");
         }
         other => panic!("expected FnCall(HashMap::new), got {other:?}"),

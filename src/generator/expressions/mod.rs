@@ -1,6 +1,6 @@
 //! Expression generation: converts IR expressions into Rust source strings.
 
-use crate::ir::{BinOp, ClosureBody, Expr, Param, RustType};
+use crate::ir::{BinOp, CallTarget, ClosureBody, Expr, Param, RustType};
 
 use super::generate_param;
 use super::statements::generate_stmt;
@@ -201,13 +201,17 @@ pub(super) fn generate_expr(expr: &Expr) -> String {
             (None, Some(e)) => format!("..{}", generate_range_bound(e)),
             (None, None) => "..".to_string(),
         },
-        Expr::FnCall { name, args } => {
+        Expr::FnCall { target, args } => {
             let args_str = args
                 .iter()
                 .map(generate_expr)
                 .collect::<Vec<_>>()
                 .join(", ");
-            format!("{name}({args_str})")
+            let callee = match target {
+                CallTarget::Path { segments, .. } => segments.join("::"),
+                CallTarget::Super => "super".to_string(),
+            };
+            format!("{callee}({args_str})")
         }
         Expr::Closure {
             params,

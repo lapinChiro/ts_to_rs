@@ -3,7 +3,7 @@
 use anyhow::{anyhow, Result};
 use swc_ecma_ast as ast;
 
-use crate::ir::{Expr, RustType, Stmt};
+use crate::ir::{CallTarget, Expr, RustType, Stmt};
 use crate::registry::TypeDef;
 
 use crate::transformer::Transformer;
@@ -127,7 +127,8 @@ impl<'a> Transformer<'a> {
         }
 
         Ok(Some(Expr::FnCall {
-            name: "HashMap::from".to_string(),
+            // `HashMap` is a Rust std type, not a user type.
+            target: CallTarget::path(&["HashMap", "from"]),
             args: vec![Expr::Vec { elements: entries }],
         }))
     }
@@ -156,7 +157,7 @@ impl<'a> Transformer<'a> {
             if let Some(RustType::Named { name, .. }) = expected {
                 if name == "HashMap" {
                     return Ok(Expr::FnCall {
-                        name: "HashMap::new".to_string(),
+                        target: CallTarget::path(&["HashMap", "new"]),
                         args: vec![],
                     });
                 }

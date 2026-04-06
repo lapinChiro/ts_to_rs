@@ -1,4 +1,5 @@
 use super::*;
+use crate::ir::CallTarget;
 
 #[test]
 fn test_convert_lit_string_to_enum_variant_when_expected_is_string_literal_union() {
@@ -159,7 +160,7 @@ fn test_convert_call_args_string_literal_to_enum_variant() {
     assert_eq!(
         result,
         Expr::FnCall {
-            name: "move_dir".to_string(),
+            target: CallTarget::simple("move_dir"),
             args: vec![Expr::Ident("Direction::Up".to_string())],
         }
     );

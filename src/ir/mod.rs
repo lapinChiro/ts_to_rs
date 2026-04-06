@@ -593,6 +593,140 @@ pub enum Stmt {
     },
 }
 
+/// The target of an [`Expr::FnCall`].
+///
+/// `Expr::FnCall` previously used a single `name: String` field to represent six
+/// semantically distinct kinds of call targets (free function, module-qualified
+/// call, `Option`/`Result` variant constructor, tuple struct constructor, synthetic
+/// enum variant constructor, and `super(args)`). The walker in
+/// `external_struct_generator` had to disambiguate these with a Rust-naming-convention
+/// heuristic ("uppercase head → type reference"), which produces both false
+/// negatives (lowercase class names) and false positives (uppercase free functions).
+///
+/// `CallTarget` replaces that string with a structured representation:
+///
+/// - [`CallTarget::Path`] covers every call whose callee is a path of identifiers.
+///   The walker consults the explicit [`type_ref`] field instead of parsing segments.
+/// - [`CallTarget::Super`] is the `super(args)` call in class inheritance context.
+///
+/// The `segments` field holds a language-agnostic list of identifiers, following the
+/// [`pipeline-integrity`] rule that IR types must not store display-formatted strings
+/// (the `::` separator is Rust-specific and is the generator's responsibility).
+///
+/// [`type_ref`]: CallTarget::Path::type_ref
+/// [`pipeline-integrity`]: https://example.invalid (see `.claude/rules/pipeline-integrity.md`)
+#[derive(Debug, Clone, PartialEq)]
+pub enum CallTarget {
+    /// A path call: `foo(x)`, `Color::Red(x)`, `MyClass::new(x)`, `Some(x)`, etc.
+    ///
+    /// `segments` holds the callee path as a list of identifiers. The generator joins
+    /// them with `::` when emitting Rust source.
+    ///
+    /// `type_ref` records the user-defined type that this call references, if any.
+    /// The walker uses it as-is for the reference graph, without parsing `segments`:
+    ///
+    /// | call form                 | segments                     | type_ref        |
+    /// |---------------------------|------------------------------|-----------------|
+    /// | `foo(x)`                  | `["foo"]`                    | `None`          |
+    /// | `std::mem::take(x)`       | `["std","mem","take"]`       | `None`          |
+    /// | `Some(x)` / `Ok(x)`       | `["Some"]` / `["Ok"]`        | `None` (builtin)|
+    /// | `_f(x)` / `__iife(x)`     | `["_f"]` / `["__iife"]`      | `None`          |
+    /// | `Wrapper(x)`              | `["Wrapper"]`                | `Some("Wrapper")`|
+    /// | `Color::Red(x)`           | `["Color","Red"]`            | `Some("Color")` |
+    /// | `MyClass::new(x)`         | `["MyClass","new"]`          | `Some("MyClass")`|
+    Path {
+        /// Identifier segments of the callee path.
+        segments: Vec<String>,
+        /// User-defined type referenced by this call, used by the reference walker.
+        type_ref: Option<String>,
+    },
+    /// `super(args)` — the parent constructor call in a class inheritance context.
+    Super,
+}
+
+impl CallTarget {
+    /// Returns the single identifier if this target is a single-segment [`Path`].
+    ///
+    /// Used as a pattern-match helper to replace former string-literal comparisons
+    /// such as `name == "Err"` with structural checks like
+    /// `target.as_simple() == Some("Err")`.
+    ///
+    /// [`Path`]: CallTarget::Path
+    pub fn as_simple(&self) -> Option<&str> {
+        if let CallTarget::Path { segments, .. } = self {
+            if segments.len() == 1 {
+                return Some(segments[0].as_str());
+            }
+        }
+        None
+    }
+
+    /// Constructs a single-segment [`Path`] with no type reference.
+    ///
+    /// Used for free functions, Option/Result builtin variant constructors,
+    /// and local-variable callees (e.g. `_f(x)`, `__iife(x)`).
+    ///
+    /// [`Path`]: CallTarget::Path
+    pub fn simple(name: impl Into<String>) -> Self {
+        CallTarget::Path {
+            segments: vec![name.into()],
+            type_ref: None,
+        }
+    }
+
+    /// Returns true if this target is a [`Path`] whose segments exactly match the
+    /// given slice, used as a structural replacement for former string-literal
+    /// comparisons like `name == "scopeguard::guard"`.
+    ///
+    /// [`Path`]: CallTarget::Path
+    pub fn is_path(&self, expected: &[&str]) -> bool {
+        match self {
+            CallTarget::Path { segments, .. } => {
+                segments.len() == expected.len()
+                    && segments.iter().zip(expected).all(|(a, b)| a == b)
+            }
+            CallTarget::Super => false,
+        }
+    }
+
+    /// Constructs a two-segment associated-path [`Path`] that references the type
+    /// named by the first segment.
+    ///
+    /// Used for associated function calls (`MyClass::new(x)`) and synthetic enum
+    /// variant constructors (`Color::Red(x)`). `type_ref` is set to `type_name`,
+    /// so the reference walker will register the type in the graph.
+    ///
+    /// [`Path`]: CallTarget::Path
+    pub fn assoc(type_name: impl Into<String>, member: impl Into<String>) -> Self {
+        let type_name = type_name.into();
+        CallTarget::Path {
+            segments: vec![type_name.clone(), member.into()],
+            type_ref: Some(type_name),
+        }
+    }
+
+    /// Constructs a multi-segment [`Path`] with no type reference from a slice of
+    /// identifier segments.
+    ///
+    /// Used for calls to std library or external crate paths such as
+    /// `std::mem::take(x)`, `std::fs::write(...)`, `HashMap::from(v)` — these are
+    /// not user-defined types and must not be registered in the reference graph.
+    ///
+    /// This is the multi-segment counterpart to [`simple`] (single segment, no
+    /// type reference) and the complement to [`assoc`] (which sets `type_ref`
+    /// for associated function calls on user types).
+    ///
+    /// [`Path`]: CallTarget::Path
+    /// [`simple`]: CallTarget::simple
+    /// [`assoc`]: CallTarget::assoc
+    pub fn path(segments: &[&str]) -> Self {
+        CallTarget::Path {
+            segments: segments.iter().map(|s| (*s).to_string()).collect(),
+            type_ref: None,
+        }
+    }
+}
+
 /// An expression.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
@@ -667,10 +801,14 @@ pub enum Expr {
         /// End of range (exclusive, `None` for open-ended `start..`)
         end: Option<Box<Expr>>,
     },
-    /// A function call: `name(args)` (e.g., `Ok(x)`, `Err("msg".to_string())`)
+    /// A function call: `target(args)` (e.g., `Ok(x)`, `Err("msg".to_string())`,
+    /// `Color::Red(x)`, `super(a, b)`).
+    ///
+    /// See [`CallTarget`] for the structured representation of the callee and the
+    /// rationale for replacing the former `name: String` field.
     FnCall {
-        /// Function name
-        name: String,
+        /// Structured callee: a path of identifiers or `super`.
+        target: CallTarget,
         /// Arguments
         args: Vec<Expr>,
     },

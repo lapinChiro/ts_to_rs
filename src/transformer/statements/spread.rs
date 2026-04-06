@@ -117,7 +117,8 @@ impl<'a> Transformer<'a> {
             name: name.clone(),
             ty,
             init: Some(Expr::FnCall {
-                name: "Vec::new".to_string(),
+                // `Vec::new()` is a std call, not a user type reference.
+                target: crate::ir::CallTarget::path(&["Vec", "new"]),
                 args: vec![],
             }),
         });
@@ -156,7 +157,8 @@ impl<'a> Transformer<'a> {
             name: var_name.clone(),
             ty: None,
             init: Some(Expr::FnCall {
-                name: "Vec::new".to_string(),
+                // `Vec::new()` is a std call, not a user type reference.
+                target: crate::ir::CallTarget::path(&["Vec", "new"]),
                 args: vec![],
             }),
         });
@@ -192,7 +194,8 @@ impl<'a> Transformer<'a> {
             name: var_name.clone(),
             ty: None,
             init: Some(Expr::FnCall {
-                name: "Vec::new".to_string(),
+                // `Vec::new()` is a std call, not a user type reference.
+                target: crate::ir::CallTarget::path(&["Vec", "new"]),
                 args: vec![],
             }),
         });

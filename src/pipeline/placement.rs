@@ -735,7 +735,8 @@ mod tests {
             params: vec![],
             return_type: None,
             body: vec![Stmt::Expr(Expr::FnCall {
-                name: "Color::Red".to_string(),
+                // Synthetic enum variant constructor — references `Color`.
+                target: crate::ir::CallTarget::assoc("Color", "Red"),
                 args: vec![],
             })],
         }];

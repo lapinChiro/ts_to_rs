@@ -1,5 +1,5 @@
 use super::*;
-use crate::ir::{BinOp, ClosureBody, Expr, Param, RustType, Stmt, UnOp};
+use crate::ir::{BinOp, CallTarget, ClosureBody, Expr, Param, RustType, Stmt, UnOp};
 
 #[test]
 fn test_generate_expr_number_whole() {
@@ -186,7 +186,7 @@ fn test_generate_expr_format_macro_with_args() {
 #[test]
 fn test_generate_expr_fn_call_err() {
     let expr = Expr::FnCall {
-        name: "Err".to_string(),
+        target: CallTarget::simple("Err"),
         args: vec![Expr::StringLit("error".to_string())],
     };
     assert_eq!(generate_expr(&expr), "Err(\"error\")");
@@ -195,7 +195,7 @@ fn test_generate_expr_fn_call_err() {
 #[test]
 fn test_generate_expr_fn_call_ok() {
     let expr = Expr::FnCall {
-        name: "Ok".to_string(),
+        target: CallTarget::simple("Ok"),
         args: vec![Expr::NumberLit(42.0)],
     };
     assert_eq!(generate_expr(&expr), "Ok(42.0)");
@@ -523,7 +523,7 @@ fn test_generate_method_call_chain_no_parens() {
 fn test_generate_method_call_fn_call_receiver_no_parens() {
     let expr = Expr::MethodCall {
         object: Box::new(Expr::FnCall {
-            name: "foo".to_string(),
+            target: CallTarget::simple("foo"),
             args: vec![],
         }),
         method: "bar".to_string(),
@@ -768,4 +768,86 @@ fn test_escape_rust_string_null_and_control_chars() {
 fn test_generate_string_lit_with_special_chars() {
     let expr = Expr::StringLit(r#"a"b\c"#.to_string());
     assert_eq!(generate_expr(&expr), r#""a\"b\\c""#);
+}
+
+// ---------------------------------------------------------------------------
+// I-375: `Expr::FnCall` generator tests for each `CallTarget` variant
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_generate_fn_call_single_segment_path() {
+    let expr = Expr::FnCall {
+        target: CallTarget::simple("foo"),
+        args: vec![Expr::NumberLit(1.0), Expr::NumberLit(2.0)],
+    };
+    assert_eq!(generate_expr(&expr), "foo(1.0, 2.0)");
+}
+
+#[test]
+fn test_generate_fn_call_two_segment_assoc_path() {
+    // `Color::Red(x)` — synthetic enum variant constructor output.
+    // The generator joins segments with `::` and emits the args verbatim;
+    // any `.to_string()` wrapping is the Transformer's responsibility.
+    let expr = Expr::FnCall {
+        target: CallTarget::assoc("Color", "Red"),
+        args: vec![Expr::StringLit("red".to_string())],
+    };
+    assert_eq!(generate_expr(&expr), "Color::Red(\"red\")");
+}
+
+#[test]
+fn test_generate_fn_call_multi_segment_path() {
+    // `std::fs::write(path, data)` — a multi-segment std call
+    let expr = Expr::FnCall {
+        target: CallTarget::path(&["std", "fs", "write"]),
+        args: vec![
+            Expr::Ident("path".to_string()),
+            Expr::Ident("data".to_string()),
+        ],
+    };
+    assert_eq!(generate_expr(&expr), "std::fs::write(path, data)");
+}
+
+#[test]
+fn test_generate_fn_call_super() {
+    let expr = Expr::FnCall {
+        target: CallTarget::Super,
+        args: vec![Expr::Ident("x".to_string())],
+    };
+    assert_eq!(generate_expr(&expr), "super(x)");
+}
+
+#[test]
+fn test_generate_fn_call_super_no_args() {
+    let expr = Expr::FnCall {
+        target: CallTarget::Super,
+        args: vec![],
+    };
+    assert_eq!(generate_expr(&expr), "super()");
+}
+
+#[test]
+fn test_generate_fn_call_type_ref_is_purely_metadata_not_rendered() {
+    // `type_ref` is reference-graph metadata and must never leak into the
+    // generated source. Two calls that differ only in `type_ref` must produce
+    // identical Rust output.
+    let with_type_ref = Expr::FnCall {
+        target: CallTarget::Path {
+            segments: vec!["myClass".to_string(), "new".to_string()],
+            type_ref: Some("myClass".to_string()),
+        },
+        args: vec![],
+    };
+    let without_type_ref = Expr::FnCall {
+        target: CallTarget::Path {
+            segments: vec!["myClass".to_string(), "new".to_string()],
+            type_ref: None,
+        },
+        args: vec![],
+    };
+    assert_eq!(
+        generate_expr(&with_type_ref),
+        generate_expr(&without_type_ref)
+    );
+    assert_eq!(generate_expr(&with_type_ref), "myClass::new()");
 }

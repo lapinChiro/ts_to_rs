@@ -2,25 +2,30 @@
 #![deny(unused_mut, unreachable_code)]
 use serde::{Serialize, Deserialize};
 #[derive(Debug, Clone, PartialEq)]
-struct Point {
-    x: f64,
-    y: f64,
+struct TodoItem {
+    title: String,
+    done: bool,
 }
 
-fn makePoint(x: f64) -> Point {
-    Point { x: x, y: 0.0 }
+fn addTodo(items: Vec<TodoItem>) {
+    let mut items = items;
+    items.push(TodoItem { title: "Learn Rust".to_string(), done: false });
 }
 
-#[derive(Debug, Clone, PartialEq)]
-struct ConnInfo {
-    remote: RemoteInfo,
+fn getTitles(items: Vec<TodoItem>) -> Vec<String> {
+    items.iter().cloned().map(|item| item.title).collect::<Vec<_>>()
 }
 
-#[derive(Debug, Clone, PartialEq)]
-struct RemoteInfo {
-    address: String,
+fn getActiveTodos(items: Vec<TodoItem>) -> Vec<TodoItem> {
+    items.iter().cloned().filter(|item| !item.done).collect::<Vec<_>>()
 }
 
-fn getConnInfo(host: String) -> ConnInfo {
-    ConnInfo { remote: RemoteInfo { address: host } }
+fn printTodos(items: Vec<TodoItem>) {
+    items.iter().cloned().for_each(|item| {
+    println!("{}", item.title);
+});
+}
+
+fn getTodoCount(items: Vec<TodoItem>) -> f64 {
+    items.len() as f64
 }

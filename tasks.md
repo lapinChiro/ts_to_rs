@@ -1022,17 +1022,15 @@ C-2-1〜2-3 は Phase B に前倒し済（Phase B の依存解消のため）。
 | `collect_undefined_type_references` / `collect_all_undefined_references` API 非対称 | `UndefinedRefScope` 構造体に共通骨格を抽出 |
 | 新規ロジックに対する自動テスト不在 | 単体テスト +72 件 + 統合テスト +8 件 = +80 件追加 |
 
-### 残課題（次セッションへ申し送り）
+### 残課題（Batch 11c-fix-2 への継続）
 
-本セッションで scope 拡大による回帰リスク累積を避けるため、以下 3 件は別バッチ（Batch 11c-fix-2）として分離した。**本来は本セッションで構造解消するべきだった課題**であり、`TODO` に詳細記載済。次セッションで最優先対応する。
+本セッション（Batch 11c-fix）で scope 拡大による回帰リスク累積を避けるため、以下 3 件は別バッチ（Batch 11c-fix-2）として分離した。このうち **I-375 は Batch 11c-fix-2-a として別セッションで完了済**。残 2 件（I-377, I-376）が Batch 11c-fix-2 の継続タスク。
 
-| ID | 概要 | 詳細 |
+| ID | 概要 | 状態 |
 |----|------|------|
-| **I-375** | `Expr::FnCall::name` の意味論的多義性（IR 構造化負債） | uppercase head ヒューリスティック / `RUST_BUILTIN_TYPES` への variant constructor ハードコードの workaround を、`enum CallTarget` 構造化で完全解消する |
-| **I-376** | クロスファイル外部型 stub の構造的重複 | per-file 生成と post-loop の二重生成を、pipeline 段階で構造的 dedup する |
-| **I-377** | walker / substitute / generator の手書き再帰の visitor pattern 化 | `IrVisitor` trait を導入して全再帰を統一 |
-
-これら 3 件の修正方針・影響範囲・テスト戦略は `TODO` に詳細記載済。次セッション開始時に Batch 11c-fix-2 として PRD 化または直接着手する。
+| ~~**I-375**~~ | ~~`Expr::FnCall::name` の意味論的多義性（IR 構造化負債）~~ | **完了** Batch 11c-fix-2-a で `CallTarget { Path { segments, type_ref } \| Super }` 2 variant 構造化、walker の uppercase-head 撤廃、+35 件の単体/統合テスト追加、Hono 後退ゼロ |
+| **I-377** | walker / substitute / generator の手書き再帰の visitor pattern 化 + `MatchPattern` / verbatim pattern 文字列の構造化 | Batch 11c-fix-2-b として次実施。I-375 からの申し送り事項（`RUST_BUILTIN_TYPES` からの `Some/None/Ok/Err` 削除、`convert_call_expr` の sanitize 不整合）は plan.md に詳細記載済 |
+| **I-376** | クロスファイル外部型 stub の構造的重複 | Batch 11c-fix-2-c として I-377 の後に実施 |
 
 ---
 

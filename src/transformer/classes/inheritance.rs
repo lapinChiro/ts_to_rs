@@ -12,7 +12,7 @@ use super::generation::{
 };
 use super::helpers::find_parent_class_names;
 use super::ClassInfo;
-use crate::ir::{Expr, Item, Method, Stmt, Visibility};
+use crate::ir::{CallTarget, Expr, Item, Method, Stmt, Visibility};
 use crate::transformer::Transformer;
 
 /// Rewrites a child constructor to handle `super()` calls.
@@ -100,7 +100,10 @@ pub(super) fn rewrite_super_constructor(ctor: &Method, parent: &ClassInfo) -> Re
 /// Tries to extract arguments from a `super(args)` call statement.
 fn try_extract_super_call(stmt: &Stmt) -> Option<Vec<Expr>> {
     match stmt {
-        Stmt::Expr(Expr::FnCall { name, args }) if name == "super" => Some(args.clone()),
+        Stmt::Expr(Expr::FnCall {
+            target: CallTarget::Super,
+            args,
+        }) => Some(args.clone()),
         _ => None,
     }
 }

@@ -1,4 +1,5 @@
 use super::*;
+use crate::ir::CallTarget;
 use crate::ir::{ClosureBody, Param};
 
 #[test]
@@ -12,7 +13,7 @@ fn test_convert_expr_call_simple() {
     assert_eq!(
         result,
         Expr::FnCall {
-            name: "foo".to_string(),
+            target: CallTarget::simple("foo"),
             args: vec![Expr::Ident("x".to_string()), Expr::Ident("y".to_string()),],
         }
     );
@@ -29,7 +30,7 @@ fn test_convert_expr_call_no_args() {
     assert_eq!(
         result,
         Expr::FnCall {
-            name: "foo".to_string(),
+            target: CallTarget::simple("foo"),
             args: vec![],
         }
     );
@@ -46,9 +47,9 @@ fn test_convert_expr_call_nested() {
     assert_eq!(
         result,
         Expr::FnCall {
-            name: "foo".to_string(),
+            target: CallTarget::simple("foo"),
             args: vec![Expr::FnCall {
-                name: "bar".to_string(),
+                target: CallTarget::simple("bar"),
                 args: vec![Expr::Ident("x".to_string())],
             }],
         }
@@ -124,7 +125,7 @@ fn test_convert_expr_new() {
     assert_eq!(
         result,
         Expr::FnCall {
-            name: "Foo::new".to_string(),
+            target: CallTarget::assoc("Foo", "new"),
             args: vec![Expr::Ident("x".to_string()), Expr::Ident("y".to_string()),],
         }
     );
@@ -141,7 +142,7 @@ fn test_convert_expr_new_no_args() {
     assert_eq!(
         result,
         Expr::FnCall {
-            name: "Foo::new".to_string(),
+            target: CallTarget::assoc("Foo", "new"),
             args: vec![],
         }
     );
@@ -168,8 +169,8 @@ fn test_new_expr_string_arg_gets_to_string() {
         .convert_expr(&swc_expr)
         .unwrap();
     match &result {
-        Expr::FnCall { name, args } => {
-            assert_eq!(name, "Foo::new");
+        Expr::FnCall { target, args } => {
+            assert!(target.is_path(&["Foo", "new"]));
             assert!(
                 matches!(&args[0], Expr::MethodCall { method, .. } if method == "to_string"),
                 "expected .to_string() on string arg, got {:?}",
@@ -461,8 +462,8 @@ fn test_call_with_missing_default_arg_appends_none() {
         .unwrap();
 
     match result {
-        Expr::FnCall { name, args } => {
-            assert_eq!(name, "greet");
+        Expr::FnCall { target, args } => {
+            assert_eq!(target.as_simple(), Some("greet"));
             assert_eq!(
                 args.len(),
                 2,
@@ -488,12 +489,12 @@ fn test_call_with_option_arg_wraps_some() {
         .unwrap();
 
     match result {
-        Expr::FnCall { name, args } => {
-            assert_eq!(name, "greet");
+        Expr::FnCall { target, args } => {
+            assert_eq!(target.as_simple(), Some("greet"));
             assert_eq!(args.len(), 2);
             // Second arg should be Some(...)
             assert!(
-                matches!(&args[1], Expr::FnCall { name, args: inner } if name == "Some" && inner.len() == 1),
+                matches!(&args[1], Expr::FnCall { target, args: inner } if target.as_simple() == Some("Some") && inner.len() == 1),
                 "expected Some(...), got: {:?}",
                 args[1]
             );
@@ -524,8 +525,8 @@ fn test_convert_call_expr_typeenv_fn_provides_param_expected() {
     .unwrap();
 
     match &result {
-        Expr::FnCall { name, args } => {
-            assert_eq!(name, "f");
+        Expr::FnCall { target, args } => {
+            assert_eq!(target.as_simple(), Some("f"));
             assert_eq!(args.len(), 1);
             // The string literal should have .to_string() because param type is String
             assert!(
@@ -558,8 +559,8 @@ fn test_convert_call_expr_no_typeenv_fn_no_expected() {
     .unwrap();
 
     match &result {
-        Expr::FnCall { name, args } => {
-            assert_eq!(name, "f");
+        Expr::FnCall { target, args } => {
+            assert_eq!(target.as_simple(), Some("f"));
             assert_eq!(args.len(), 1);
             assert!(
                 matches!(&args[0], Expr::StringLit(s) if s == "hello"),
@@ -594,8 +595,8 @@ fn test_convert_call_expr_rest_param_packs_args_into_vec() {
         .unwrap();
 
     match &result {
-        Expr::FnCall { name, args } => {
-            assert_eq!(name, "sum");
+        Expr::FnCall { target, args } => {
+            assert_eq!(target.as_simple(), Some("sum"));
             assert_eq!(args.len(), 1, "all args should be packed into one vec");
             match &args[0] {
                 Expr::Vec { elements } => {
@@ -635,8 +636,8 @@ fn test_convert_call_expr_rest_param_mixed_regular_and_rest() {
         .unwrap();
 
     match &result {
-        Expr::FnCall { name, args } => {
-            assert_eq!(name, "log");
+        Expr::FnCall { target, args } => {
+            assert_eq!(target.as_simple(), Some("log"));
             assert_eq!(args.len(), 2, "prefix + packed rest");
             match &args[1] {
                 Expr::Vec { elements } => {
@@ -672,8 +673,8 @@ fn test_convert_call_expr_rest_param_no_rest_args() {
         .unwrap();
 
     match &result {
-        Expr::FnCall { name, args } => {
-            assert_eq!(name, "sum");
+        Expr::FnCall { target, args } => {
+            assert_eq!(target.as_simple(), Some("sum"));
             assert_eq!(args.len(), 1);
             match &args[0] {
                 Expr::Vec { elements } => {
@@ -709,8 +710,8 @@ fn test_convert_call_expr_rest_param_spread_single_array() {
         .unwrap();
 
     match &result {
-        Expr::FnCall { name, args } => {
-            assert_eq!(name, "sum");
+        Expr::FnCall { target, args } => {
+            assert_eq!(target.as_simple(), Some("sum"));
             assert_eq!(args.len(), 1);
             // Should pass arr directly, not wrap in vec!
             assert!(
@@ -746,8 +747,8 @@ fn test_convert_call_expr_rest_param_mixed_literal_and_spread() {
         .unwrap();
 
     match &result {
-        Expr::FnCall { name, args } => {
-            assert_eq!(name, "sum");
+        Expr::FnCall { target, args } => {
+            assert_eq!(target.as_simple(), Some("sum"));
             assert_eq!(args.len(), 1);
             // Should be [vec![1.0], arr].concat()
             match &args[0] {
@@ -815,8 +816,8 @@ fn test_convert_call_expr_paren_ident_unwraps_to_fn_call() {
         .convert_expr(&expr)
         .unwrap();
     match &result {
-        Expr::FnCall { name, args } => {
-            assert_eq!(name, "foo");
+        Expr::FnCall { target, args } => {
+            assert_eq!(target.as_simple(), Some("foo"));
             assert_eq!(args.len(), 1);
         }
         other => panic!("expected FnCall, got: {other:?}"),
@@ -911,4 +912,200 @@ fn test_convert_opt_chain_method_call_propagates_param_types() {
         }
         other => panic!("expected MethodCall(map), got {other:?}"),
     }
+}
+
+// ---------------------------------------------------------------------------
+// I-375: `convert_call_expr` / `convert_new_expr` `type_ref` classification
+// ---------------------------------------------------------------------------
+
+/// `foo(x)` where `foo` is a plain function registered in `TypeRegistry`
+/// must classify as `CallTarget::Path { type_ref: None }`. The walker will
+/// then skip it — free functions are not type references.
+#[test]
+fn test_convert_expr_call_ident_function_in_registry_gets_type_ref_none() {
+    use crate::registry::{ParamDef, TypeDef};
+    let mut reg = TypeRegistry::new();
+    reg.register(
+        "foo".to_string(),
+        TypeDef::Function {
+            type_params: vec![],
+            params: vec![ParamDef {
+                name: "x".to_string(),
+                ty: RustType::F64,
+                optional: false,
+                has_default: false,
+            }],
+            return_type: Some(RustType::F64),
+            has_rest: false,
+        },
+    );
+    let f = TctxFixture::from_source_with_reg("foo(1);", reg);
+    let tctx = f.tctx();
+    let swc_expr = extract_expr_stmt(f.module(), 0);
+    let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_expr(&swc_expr)
+        .unwrap();
+    match &result {
+        Expr::FnCall { target, .. } => {
+            assert_eq!(target.as_simple(), Some("foo"));
+            assert!(
+                matches!(target, CallTarget::Path { type_ref: None, .. }),
+                "function call target must have type_ref: None, got {target:?}"
+            );
+        }
+        other => panic!("expected FnCall, got {other:?}"),
+    }
+}
+
+/// When an Ident callee name happens to be registered as a struct/class (a
+/// degenerate TS situation — e.g. a callable interface), the Transformer must
+/// still classify it as a type reference so the walker can wire the graph.
+#[test]
+fn test_convert_expr_call_ident_struct_in_registry_gets_type_ref_some() {
+    use crate::registry::TypeDef;
+    let mut reg = TypeRegistry::new();
+    reg.register(
+        "Callable".to_string(),
+        TypeDef::new_struct(vec![], std::collections::HashMap::new(), vec![]),
+    );
+    let f = TctxFixture::from_source_with_reg("Callable(1);", reg);
+    let tctx = f.tctx();
+    let swc_expr = extract_expr_stmt(f.module(), 0);
+    let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_expr(&swc_expr)
+        .unwrap();
+    match &result {
+        Expr::FnCall { target, .. } => {
+            assert!(
+                matches!(
+                    target,
+                    CallTarget::Path { type_ref: Some(t), .. } if t == "Callable"
+                ),
+                "struct-typed Ident callee must record type_ref: Some(name), got {target:?}"
+            );
+        }
+        other => panic!("expected FnCall, got {other:?}"),
+    }
+}
+
+/// An unknown identifier (not registered anywhere) must default to
+/// `type_ref: None`. This is the common case for imported functions or
+/// identifiers whose types the resolver couldn't determine.
+#[test]
+fn test_convert_expr_call_ident_unknown_name_gets_type_ref_none() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
+    let swc_expr = parse_expr("unknownFn(x);");
+    let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_expr(&swc_expr)
+        .unwrap();
+    match &result {
+        Expr::FnCall { target, .. } => {
+            assert!(matches!(target, CallTarget::Path { type_ref: None, .. }));
+            assert_eq!(target.as_simple(), Some("unknownFn"));
+        }
+        other => panic!("expected FnCall, got {other:?}"),
+    }
+}
+
+/// `new Foo(x)` must become `CallTarget::Path { segments: ["Foo", "new"],
+/// type_ref: Some("Foo") }`. The `type_ref` is critical for the walker to
+/// register `Foo` as a referenced type, and is what enables lowercase class
+/// names to survive (I-375 correctness fix).
+#[test]
+fn test_convert_new_expr_sets_type_ref_to_class_name() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
+    let swc_expr = parse_expr("new Foo(1);");
+    let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_expr(&swc_expr)
+        .unwrap();
+    match &result {
+        Expr::FnCall { target, .. } => {
+            assert_eq!(
+                target,
+                &CallTarget::assoc("Foo", "new"),
+                "new Foo(...) must produce assoc(\"Foo\", \"new\") with type_ref Some(\"Foo\")"
+            );
+        }
+        other => panic!("expected FnCall, got {other:?}"),
+    }
+}
+
+/// The lowercase-class correctness scenario, verified directly at the
+/// Transformer layer: `new myClass(...)` must still record
+/// `type_ref: Some("myClass")` even though `myClass` does not follow Rust
+/// PascalCase convention. This proves the structural fix is independent of
+/// naming conventions.
+#[test]
+fn test_convert_new_expr_lowercase_class_records_type_ref() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
+    let swc_expr = parse_expr("new myClass(1);");
+    let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_expr(&swc_expr)
+        .unwrap();
+    match &result {
+        Expr::FnCall { target, .. } => match target {
+            CallTarget::Path {
+                segments,
+                type_ref: Some(t),
+            } => {
+                assert_eq!(segments, &vec!["myClass".to_string(), "new".to_string()]);
+                assert_eq!(t, "myClass");
+            }
+            _ => panic!("expected Path with type_ref Some, got {target:?}"),
+        },
+        other => panic!("expected FnCall, got {other:?}"),
+    }
+}
+
+/// `super(args)` in a class constructor context must produce
+/// `CallTarget::Super`, never a `Path { segments: ["super"] }`.
+#[test]
+fn test_convert_callee_super_produces_super_variant() {
+    // We parse a class constructor body so that the swc parser accepts super().
+    let source = r#"class Child extends Parent { constructor(x: number) { super(x); } }"#;
+    let fx = TctxFixture::from_source_with_reg(source, TypeRegistry::new());
+    let tctx = fx.tctx();
+    // Walk the module to find the super call inside the constructor body.
+    let module = fx.module();
+    let mut found = false;
+    for item in &module.body {
+        if let swc_ecma_ast::ModuleItem::Stmt(swc_ecma_ast::Stmt::Decl(
+            swc_ecma_ast::Decl::Class(class_decl),
+        )) = item
+        {
+            for member in &class_decl.class.body {
+                if let swc_ecma_ast::ClassMember::Constructor(ctor) = member {
+                    if let Some(body) = &ctor.body {
+                        for stmt in &body.stmts {
+                            if let swc_ecma_ast::Stmt::Expr(expr_stmt) = stmt {
+                                if let swc_ecma_ast::Expr::Call(call) = expr_stmt.expr.as_ref() {
+                                    let result = Transformer::for_module(
+                                        &tctx,
+                                        &mut SyntheticTypeRegistry::new(),
+                                    )
+                                    .convert_call_expr(call)
+                                    .unwrap();
+                                    assert!(
+                                        matches!(
+                                            result,
+                                            Expr::FnCall {
+                                                target: CallTarget::Super,
+                                                ..
+                                            }
+                                        ),
+                                        "expected CallTarget::Super, got {result:?}"
+                                    );
+                                    found = true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(found, "super() call not found in the parsed module");
 }

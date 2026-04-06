@@ -397,8 +397,10 @@ impl Expr {
                 start: start.as_ref().map(|e| Box::new(e.substitute(bindings))),
                 end: end.as_ref().map(|e| Box::new(e.substitute(bindings))),
             },
-            Expr::FnCall { name, args } => Expr::FnCall {
-                name: name.clone(),
+            Expr::FnCall { target, args } => Expr::FnCall {
+                // `CallTarget` holds plain identifiers (segments and `type_ref`), not
+                // `RustType`, so there is nothing to substitute on the target itself.
+                target: target.clone(),
                 args: args.iter().map(|a| a.substitute(bindings)).collect(),
             },
             Expr::Vec { elements } => Expr::Vec {
@@ -471,5 +473,123 @@ impl Expr {
             | Expr::RawCode(_)
             | Expr::Regex { .. } => self.clone(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ir::CallTarget;
+
+    /// `Expr::substitute` must preserve the structured `CallTarget` untouched:
+    /// the `segments` and `type_ref` fields are plain identifiers and are not
+    /// type-parameter substitution targets. Only the arguments should be walked.
+    #[test]
+    fn test_substitute_fn_call_preserves_call_target_and_substitutes_args() {
+        let bindings: HashMap<String, RustType> = [(
+            "T".to_string(),
+            RustType::Named {
+                name: "Concrete".to_string(),
+                type_args: vec![],
+            },
+        )]
+        .into_iter()
+        .collect();
+
+        // FnCall with a 2-segment assoc path and an arg that references `T`
+        // inside a `Cast { target: T }`. The cast's type should be substituted
+        // but the call target must remain intact.
+        let expr = Expr::FnCall {
+            target: CallTarget::assoc("Wrapper", "new"),
+            args: vec![Expr::Cast {
+                expr: Box::new(Expr::Ident("x".to_string())),
+                target: RustType::Named {
+                    name: "T".to_string(),
+                    type_args: vec![],
+                },
+            }],
+        };
+
+        let substituted = expr.substitute(&bindings);
+        match substituted {
+            Expr::FnCall { target, args } => {
+                // target must be exactly the same — identifiers are not types
+                assert_eq!(target, CallTarget::assoc("Wrapper", "new"));
+                // args[0] should have its `T` replaced with `Concrete`
+                match &args[0] {
+                    Expr::Cast { target: ty, .. } => {
+                        assert_eq!(
+                            ty,
+                            &RustType::Named {
+                                name: "Concrete".to_string(),
+                                type_args: vec![],
+                            }
+                        );
+                    }
+                    other => panic!("expected Cast, got {other:?}"),
+                }
+            }
+            other => panic!("expected FnCall, got {other:?}"),
+        }
+    }
+
+    /// Even if a `type_ref` happens to coincide with a type-parameter name, it
+    /// must NOT be substituted — `type_ref` is a user-defined type identifier
+    /// for the reference walker, not a generic type variable.
+    #[test]
+    fn test_substitute_does_not_rewrite_type_ref_even_if_matches_type_param() {
+        let bindings: HashMap<String, RustType> = [(
+            "T".to_string(),
+            RustType::Named {
+                name: "Concrete".to_string(),
+                type_args: vec![],
+            },
+        )]
+        .into_iter()
+        .collect();
+
+        let expr = Expr::FnCall {
+            target: CallTarget::Path {
+                segments: vec!["T".to_string(), "new".to_string()],
+                type_ref: Some("T".to_string()),
+            },
+            args: vec![],
+        };
+
+        let substituted = expr.substitute(&bindings);
+        match substituted {
+            Expr::FnCall { target, .. } => {
+                // `T` stays as the identifier — it's not a RustType in this context.
+                assert_eq!(
+                    target,
+                    CallTarget::Path {
+                        segments: vec!["T".to_string(), "new".to_string()],
+                        type_ref: Some("T".to_string()),
+                    }
+                );
+            }
+            _ => panic!("expected FnCall"),
+        }
+    }
+
+    /// `CallTarget::Super` must round-trip through `substitute` unchanged.
+    #[test]
+    fn test_substitute_preserves_super_call_target() {
+        let bindings: HashMap<String, RustType> = HashMap::new();
+        let expr = Expr::FnCall {
+            target: CallTarget::Super,
+            args: vec![Expr::Ident("x".to_string())],
+        };
+        let substituted = expr.substitute(&bindings);
+        assert!(
+            matches!(
+                &substituted,
+                Expr::FnCall {
+                    target: CallTarget::Super,
+                    ..
+                }
+            ),
+            "expected Super target preserved, got {substituted:?}"
+        );
     }
 }

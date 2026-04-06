@@ -1,4 +1,5 @@
 use super::*;
+use crate::ir::CallTarget;
 
 use super::super::inheritance::rewrite_super_constructor;
 
@@ -106,7 +107,7 @@ fn test_rewrite_super_constructor_arg_count_mismatch_returns_error() {
             type_args: vec![],
         }),
         body: Some(vec![Stmt::Expr(Expr::FnCall {
-            name: "super".to_string(),
+            target: CallTarget::Super,
             args: vec![Expr::Ident("x".to_string())], // only 1 arg, parent has 2 fields
         })]),
     };
@@ -155,7 +156,7 @@ fn test_rewrite_super_constructor_merges_into_tail_struct_init() {
         body: Some(vec![
             // super(x)
             Stmt::Expr(Expr::FnCall {
-                name: "super".to_string(),
+                target: CallTarget::Super,
                 args: vec![Expr::Ident("x".to_string())],
             }),
             // Self { age: 10 } as tail expression
@@ -217,7 +218,7 @@ fn test_rewrite_super_constructor_merges_into_return_struct_init() {
         }),
         body: Some(vec![
             Stmt::Expr(Expr::FnCall {
-                name: "super".to_string(),
+                target: CallTarget::Super,
                 args: vec![Expr::Ident("name".to_string())],
             }),
             Stmt::Return(Some(Expr::StructInit {
@@ -277,11 +278,11 @@ fn test_rewrite_super_constructor_no_struct_init_creates_new() {
         }),
         body: Some(vec![
             Stmt::Expr(Expr::FnCall {
-                name: "super".to_string(),
+                target: CallTarget::Super,
                 args: vec![Expr::Ident("x".to_string())],
             }),
             Stmt::Expr(Expr::FnCall {
-                name: "println".to_string(),
+                target: CallTarget::simple("println"),
                 args: vec![],
             }),
         ]),
@@ -292,7 +293,9 @@ fn test_rewrite_super_constructor_no_struct_init_creates_new() {
     // super() removed, println kept, and new StructInit appended
     assert_eq!(body.len(), 2, "expected 2 statements, got: {body:?}");
     match &body[0] {
-        Stmt::Expr(Expr::FnCall { name, .. }) => assert_eq!(name, "println"),
+        Stmt::Expr(Expr::FnCall { target, .. }) => {
+            assert_eq!(target.as_simple(), Some("println"))
+        }
         other => panic!("expected println call, got: {other:?}"),
     }
     match &body[1] {

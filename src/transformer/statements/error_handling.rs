@@ -6,7 +6,7 @@
 use anyhow::Result;
 use swc_ecma_ast as ast;
 
-use crate::ir::{Expr, RustType, Stmt};
+use crate::ir::{CallTarget, Expr, RustType, Stmt};
 use crate::transformer::Transformer;
 
 impl<'a> Transformer<'a> {
@@ -25,7 +25,9 @@ impl<'a> Transformer<'a> {
                 name: "_finally_guard".to_string(),
                 ty: None,
                 init: Some(Expr::FnCall {
-                    name: "scopeguard::guard".to_string(),
+                    // `scopeguard::guard` is a module-qualified free function call,
+                    // not a type reference.
+                    target: CallTarget::path(&["scopeguard", "guard"]),
                     args: vec![
                         Expr::Unit,
                         Expr::Closure {
@@ -62,7 +64,8 @@ impl<'a> Transformer<'a> {
                     err: Box::new(RustType::String),
                 }),
                 init: Some(Expr::FnCall {
-                    name: "Ok".to_string(),
+                    // `Ok(())` — `Result` variant constructor; builtin, no type ref.
+                    target: CallTarget::simple("Ok"),
                     args: vec![Expr::Unit],
                 }),
             });
@@ -143,7 +146,7 @@ impl<'a> Transformer<'a> {
             args: vec![],
         };
         Ok(Stmt::Return(Some(Expr::FnCall {
-            name: "Err".to_string(),
+            target: CallTarget::simple("Err"),
             args: vec![err_expr],
         })))
     }
@@ -290,5 +293,5 @@ impl TryBodyRewrite {
 
 /// Checks if an expression is an `Err(...)` call.
 fn is_err_call(expr: &Expr) -> bool {
-    matches!(expr, Expr::FnCall { name, .. } if name == "Err")
+    matches!(expr, Expr::FnCall { target, .. } if target.as_simple() == Some("Err"))
 }

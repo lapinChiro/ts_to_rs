@@ -1,4 +1,5 @@
 use super::*;
+use crate::ir::CallTarget;
 
 #[test]
 fn test_convert_fn_decl_add() {
@@ -211,7 +212,7 @@ fn test_convert_fn_decl_throw_wraps_return_in_ok() {
             assert_eq!(
                 *last,
                 Stmt::TailExpr(Expr::FnCall {
-                    name: "Ok".to_string(),
+                    target: CallTarget::simple("Ok"),
                     args: vec![Expr::MethodCall {
                         object: Box::new(Expr::StringLit("ok".to_string())),
                         method: "to_string".to_string(),

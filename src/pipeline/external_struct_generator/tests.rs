@@ -1,7 +1,7 @@
 use super::*;
 use crate::ir::{
-    AssocConst, BinOp, ClosureBody, EnumVariant, Expr, MatchArm, Method, Param, Stmt, TraitRef,
-    TypeParam,
+    AssocConst, BinOp, CallTarget, ClosureBody, EnumVariant, Expr, MatchArm, Method, Param, Stmt,
+    TraitRef, TypeParam,
 };
 use crate::pipeline::SyntheticTypeRegistry;
 use std::collections::HashMap;
@@ -1577,11 +1577,13 @@ fn test_collect_type_refs_fn_body_cast_target() {
 
 #[test]
 fn test_collect_type_refs_fn_body_fncall_uppercase_extracted() {
-    // fn f() { Color::Red(x) } → 先頭が大文字なので Color が refs に入る
+    // fn f() { Color::Red(x) } — a synthetic enum variant constructor.
+    // The Transformer constructs this as `CallTarget::assoc("Color", "Red")`
+    // with `type_ref = Some("Color")`, so the walker registers `Color` in refs.
     let item = fn_with_body(
         "f",
         vec![Stmt::Expr(Expr::FnCall {
-            name: "Color::Red".to_string(),
+            target: CallTarget::assoc("Color", "Red"),
             args: vec![],
         })],
     );
@@ -1591,12 +1593,16 @@ fn test_collect_type_refs_fn_body_fncall_uppercase_extracted() {
 }
 
 #[test]
-fn test_collect_type_refs_fn_body_fncall_lowercase_skipped() {
-    // fn f() { scopeguard::guard(x) } → 先頭が小文字なので登録しない
+fn test_collect_type_refs_fn_body_fncall_module_qualified_not_registered() {
+    // fn f() { scopeguard::guard(x) } — a module-qualified free function call.
+    // `type_ref = None`, so nothing is registered.
     let item = fn_with_body(
         "f",
         vec![Stmt::Expr(Expr::FnCall {
-            name: "scopeguard::guard".to_string(),
+            target: CallTarget::Path {
+                segments: vec!["scopeguard".to_string(), "guard".to_string()],
+                type_ref: None,
+            },
             args: vec![],
         })],
     );
@@ -1612,7 +1618,7 @@ fn test_collect_type_refs_fn_body_fncall_walks_args() {
     let item = fn_with_body(
         "f",
         vec![Stmt::Expr(Expr::FnCall {
-            name: "foo".to_string(),
+            target: CallTarget::simple("foo"),
             args: vec![Expr::StructInit {
                 name: "Bar".to_string(),
                 fields: vec![],
@@ -1698,7 +1704,11 @@ fn test_collect_type_refs_impl_method_body_walked() {
 
 #[test]
 fn test_collect_type_refs_impl_assoc_const_value_walked() {
-    // impl Foo { const X: f64 = SomeFn(); } → SomeFn の返値式から refs を拾う
+    // impl Foo { const X: Bar = SomeFn(Baz { }); } — the walker must recurse
+    // through the const initializer expression. The call target here is a
+    // plain free function (`type_ref: None`, so not registered), but its
+    // argument is a `StructInit { name: "Baz" }` which *must* be walked and
+    // registered. This asserts the walker traverses `AssocConst::value`.
     let item = Item::Impl {
         struct_name: "Foo".to_string(),
         type_params: vec![],
@@ -1706,17 +1716,32 @@ fn test_collect_type_refs_impl_assoc_const_value_walked() {
         consts: vec![AssocConst {
             vis: Visibility::Public,
             name: "X".to_string(),
-            ty: RustType::F64,
+            ty: RustType::Named {
+                name: "Bar".to_string(),
+                type_args: vec![],
+            },
             value: Expr::FnCall {
-                name: "SomeFn".to_string(),
-                args: vec![],
+                target: CallTarget::simple("some_fn"),
+                args: vec![Expr::StructInit {
+                    name: "Baz".to_string(),
+                    fields: vec![],
+                    base: None,
+                }],
             },
         }],
         methods: vec![],
     };
     let mut refs = HashSet::new();
     collect_type_refs_from_item(&item, &mut refs);
-    assert!(refs.contains("SomeFn"));
+    assert!(refs.contains("Bar"), "type annotation should register Bar");
+    assert!(
+        refs.contains("Baz"),
+        "walker must recurse into FnCall args → StructInit and register Baz"
+    );
+    assert!(
+        !refs.contains("some_fn"),
+        "free function call without `type_ref` must not register the call name"
+    );
 }
 
 #[test]
@@ -2184,48 +2209,217 @@ fn test_undefined_refs_collect_undefined_applies_external_filter() {
 }
 
 #[test]
-fn test_undefined_refs_some_none_ok_err_excluded_via_builtin_set() {
-    // FnCall の Some/None/Ok/Err はそれぞれ Option / Result の variant constructor。
-    // walker は uppercase prefix で型名候補として ref に登録するが、最終フィルタの
-    // RUST_BUILTIN_TYPES に含まれているため stub 生成対象から除外される。
+fn test_undefined_refs_some_none_ok_err_not_registered_structurally() {
+    // I-375: `Some` / `None` / `Ok` / `Err` are builtin `Option` / `Result`
+    // variant constructors. The Transformer constructs them as
+    // `CallTarget::simple(...)` with `type_ref: None`, so the reference walker
+    // does not register them in the reference graph at all. The previous
+    // implementation had to hard-code these names into `RUST_BUILTIN_TYPES`
+    // to filter them out after the uppercase-head heuristic matched; the new
+    // structural classification removes that band-aid entirely.
     //
-    // この dual-layer 防御の両方の動作をテストする:
-    //  1. walker が `Some` を refs に登録する（lowercase スキップでないこと）
-    //  2. UndefinedRefScope が `Some` を builtin として除外する
+    // This test asserts both layers of the new behavior:
+    //  1. The walker does NOT put `Some` / `None` / `Ok` / `Err` into refs.
+    //  2. `collect_all_undefined_references` (which runs the walker then
+    //     filters) is consistent with layer 1.
     let items = vec![fn_with_body(
         "f",
         vec![
             Stmt::Expr(Expr::FnCall {
-                name: "Some".to_string(),
+                target: CallTarget::simple("Some"),
                 args: vec![],
             }),
             Stmt::Expr(Expr::FnCall {
-                name: "None".to_string(),
+                target: CallTarget::simple("None"),
                 args: vec![],
             }),
             Stmt::Expr(Expr::FnCall {
-                name: "Ok".to_string(),
+                target: CallTarget::simple("Ok"),
                 args: vec![],
             }),
             Stmt::Expr(Expr::FnCall {
-                name: "Err".to_string(),
+                target: CallTarget::simple("Err"),
                 args: vec![],
             }),
         ],
     )];
 
-    // Layer 1: walker は uppercase なので refs に登録する
+    // Layer 1: walker sees `type_ref: None`, nothing is registered.
     let mut walker_refs = HashSet::new();
     collect_type_refs_from_item(&items[0], &mut walker_refs);
-    assert!(walker_refs.contains("Some"));
-    assert!(walker_refs.contains("None"));
-    assert!(walker_refs.contains("Ok"));
-    assert!(walker_refs.contains("Err"));
+    assert!(!walker_refs.contains("Some"));
+    assert!(!walker_refs.contains("None"));
+    assert!(!walker_refs.contains("Ok"));
+    assert!(!walker_refs.contains("Err"));
 
-    // Layer 2: UndefinedRefScope が builtin として除外する
+    // Layer 2: UndefinedRefScope propagates the same result.
     let refs = collect_all_undefined_references(&items, &[], &[]);
     assert!(!refs.contains("Some"));
     assert!(!refs.contains("None"));
     assert!(!refs.contains("Ok"));
     assert!(!refs.contains("Err"));
+}
+
+// ---------------------------------------------------------------------------
+// I-375: Walker structural classification tests for `Expr::FnCall` targets
+// ---------------------------------------------------------------------------
+
+/// `CallTarget::Path { type_ref: Some(_) }` → walker must register the
+/// referenced user type. This is the new, structural replacement for the
+/// uppercase-head heuristic.
+#[test]
+fn test_walker_fn_call_type_ref_some_registers_user_type() {
+    let item = fn_with_body(
+        "f",
+        vec![Stmt::Expr(Expr::FnCall {
+            target: CallTarget::assoc("Color", "Red"),
+            args: vec![],
+        })],
+    );
+    let mut refs = HashSet::new();
+    collect_type_refs_from_item(&item, &mut refs);
+    assert!(
+        refs.contains("Color"),
+        "type_ref: Some(\"Color\") must be registered, got refs={refs:?}"
+    );
+}
+
+/// `CallTarget::Path { type_ref: None }` → walker must NOT register anything
+/// even if a segment looks like a type name (Rust convention uppercase head).
+/// This is the critical false-positive elimination.
+#[test]
+fn test_walker_fn_call_type_ref_none_skips_module_path_with_uppercase_segment() {
+    // `HashMap::from(v)` — a std path with an uppercase head segment. The old
+    // heuristic would have registered `HashMap`; the new structural walker
+    // consults `type_ref` only and skips because it is `None`.
+    let item = fn_with_body(
+        "f",
+        vec![Stmt::Expr(Expr::FnCall {
+            target: CallTarget::Path {
+                segments: vec!["HashMap".to_string(), "from".to_string()],
+                type_ref: None,
+            },
+            args: vec![],
+        })],
+    );
+    let mut refs = HashSet::new();
+    collect_type_refs_from_item(&item, &mut refs);
+    assert!(
+        !refs.contains("HashMap"),
+        "type_ref: None must skip registration, got refs={refs:?}"
+    );
+}
+
+/// `CallTarget::Path { type_ref: None }` for a lowercase module-qualified call
+/// (e.g. `scopeguard::guard(x)`) — should also skip. This is symmetric to the
+/// previous test but with a lowercase head, to guarantee that the walker does
+/// not secretly apply any case-based logic.
+#[test]
+fn test_walker_fn_call_type_ref_none_skips_lowercase_module_path() {
+    let item = fn_with_body(
+        "f",
+        vec![Stmt::Expr(Expr::FnCall {
+            target: CallTarget::path(&["scopeguard", "guard"]),
+            args: vec![],
+        })],
+    );
+    let mut refs = HashSet::new();
+    collect_type_refs_from_item(&item, &mut refs);
+    assert!(
+        !refs.contains("scopeguard"),
+        "lowercase module path must be skipped"
+    );
+    assert!(
+        !refs.contains("guard"),
+        "last segment must not be registered either"
+    );
+}
+
+/// `CallTarget::Super` → walker must always skip, and must not confuse it with
+/// a path whose first segment is `"super"`.
+#[test]
+fn test_walker_fn_call_super_is_skipped() {
+    let item = fn_with_body(
+        "f",
+        vec![Stmt::Expr(Expr::FnCall {
+            target: CallTarget::Super,
+            args: vec![Expr::Ident("x".to_string())],
+        })],
+    );
+    let mut refs = HashSet::new();
+    collect_type_refs_from_item(&item, &mut refs);
+    assert!(refs.is_empty(), "Super must not register any refs");
+}
+
+/// **I-375 core correctness test**: a lowercase class name (`class myClass {}`)
+/// must be captured by the walker because the Transformer records
+/// `type_ref: Some("myClass")` structurally, independent of Rust naming
+/// conventions. Before I-375, the walker's uppercase-head heuristic dropped
+/// this reference silently.
+#[test]
+fn test_walker_lowercase_class_name_registered_via_type_ref() {
+    // Construct a call that the Transformer would emit for `new myClass(1)`:
+    //   CallTarget::assoc("myClass", "new") — sets type_ref = Some("myClass")
+    let item = fn_with_body(
+        "f",
+        vec![Stmt::Expr(Expr::FnCall {
+            target: CallTarget::assoc("myClass", "new"),
+            args: vec![Expr::NumberLit(1.0)],
+        })],
+    );
+    let mut refs = HashSet::new();
+    collect_type_refs_from_item(&item, &mut refs);
+    assert!(
+        refs.contains("myClass"),
+        "walker must register lowercase class names via type_ref, got refs={refs:?}"
+    );
+}
+
+/// Symmetric to the lowercase-class case: an uppercase **free function** must
+/// NOT be registered, even though its single segment starts with an uppercase
+/// letter. The Transformer sets `type_ref: None` based on TypeRegistry lookup,
+/// so the walker does not confuse conventions with semantics.
+#[test]
+fn test_walker_uppercase_free_function_not_registered_when_type_ref_is_none() {
+    let item = fn_with_body(
+        "f",
+        vec![Stmt::Expr(Expr::FnCall {
+            target: CallTarget::simple("Foo"), // simple() → type_ref: None
+            args: vec![],
+        })],
+    );
+    let mut refs = HashSet::new();
+    collect_type_refs_from_item(&item, &mut refs);
+    assert!(
+        !refs.contains("Foo"),
+        "uppercase free function must not be registered, got refs={refs:?}"
+    );
+}
+
+/// The walker still recurses into `args` of a `Path` call so that nested user
+/// type references (e.g. `foo(Wrapper { })`) are captured even when the
+/// callee itself has no `type_ref`.
+#[test]
+fn test_walker_fn_call_recurses_into_args_even_when_target_has_no_type_ref() {
+    let item = fn_with_body(
+        "f",
+        vec![Stmt::Expr(Expr::FnCall {
+            target: CallTarget::simple("foo"),
+            args: vec![Expr::StructInit {
+                name: "Wrapper".to_string(),
+                fields: vec![],
+                base: None,
+            }],
+        })],
+    );
+    let mut refs = HashSet::new();
+    collect_type_refs_from_item(&item, &mut refs);
+    assert!(
+        refs.contains("Wrapper"),
+        "walker must recurse into args and register nested types"
+    );
+    assert!(
+        !refs.contains("foo"),
+        "call target `foo` must not be registered"
+    );
 }

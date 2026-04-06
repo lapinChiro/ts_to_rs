@@ -324,7 +324,7 @@ fn test_convert_member_expr_process_env_var() {
         result,
         Expr::MethodCall {
             object: Box::new(Expr::FnCall {
-                name: "std::env::var".to_string(),
+                target: crate::ir::CallTarget::path(&["std", "env", "var"]),
                 args: vec![Expr::StringLit("HOME".to_string())],
             }),
             method: "unwrap".to_string(),

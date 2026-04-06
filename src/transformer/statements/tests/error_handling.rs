@@ -1,4 +1,5 @@
 use super::*;
+use crate::ir::CallTarget;
 
 #[test]
 fn test_convert_stmt_list_try_catch_expands_to_let_block_if() {
@@ -139,7 +140,7 @@ fn test_convert_stmt_throw_new_error_string() {
     assert_eq!(
         result,
         Stmt::Return(Some(Expr::FnCall {
-            name: "Err".to_string(),
+            target: CallTarget::simple("Err"),
             args: vec![Expr::MethodCall {
                 object: Box::new(Expr::StringLit("something went wrong".to_string())),
                 method: "to_string".to_string(),
@@ -157,7 +158,7 @@ fn test_convert_stmt_throw_string_literal() {
     assert_eq!(
         result,
         Stmt::Return(Some(Expr::FnCall {
-            name: "Err".to_string(),
+            target: CallTarget::simple("Err"),
             args: vec![Expr::MethodCall {
                 object: Box::new(Expr::StringLit("error msg".to_string())),
                 method: "to_string".to_string(),
@@ -201,7 +202,7 @@ fn test_convert_try_catch_basic_expands_to_let_labeledblock_if() {
                 })
             );
             assert!(
-                matches!(init, Some(Expr::FnCall { name, .. }) if name == "Ok"),
+                matches!(init, Some(Expr::FnCall { target, .. }) if target.as_simple() == Some("Ok")),
                 "expected Ok(...) init, got {init:?}"
             );
         }
@@ -214,7 +215,7 @@ fn test_convert_try_catch_basic_expands_to_let_labeledblock_if() {
             assert_eq!(label, "try_block");
             assert_eq!(body.len(), 1, "expected 1 stmt in try body");
             assert!(
-                matches!(&body[0], Stmt::Expr(Expr::FnCall { name, .. }) if name == "risky"),
+                matches!(&body[0], Stmt::Expr(Expr::FnCall { target, .. }) if target.as_simple() == Some("risky")),
                 "expected risky() call, got {:?}",
                 body[0]
             );
@@ -272,7 +273,7 @@ fn test_convert_try_catch_throw_in_body_expands_to_assign_break() {
                         "expected _try_result target"
                     );
                     assert!(
-                        matches!(value.as_ref(), Expr::FnCall { name, .. } if name == "Err"),
+                        matches!(value.as_ref(), Expr::FnCall { target, .. } if target.as_simple() == Some("Err")),
                         "expected Err(...) value"
                     );
                 }
@@ -311,7 +312,7 @@ fn test_convert_try_finally_expands_to_scopeguard_and_body() {
         Stmt::Let { name, init, .. } => {
             assert_eq!(name, "_finally_guard");
             assert!(
-                matches!(init, Some(Expr::FnCall { name, .. }) if name == "scopeguard::guard"),
+                matches!(init, Some(Expr::FnCall { target, .. }) if target.is_path(&["scopeguard", "guard"])),
                 "expected scopeguard::guard call, got {init:?}"
             );
         }
@@ -320,7 +321,7 @@ fn test_convert_try_finally_expands_to_scopeguard_and_body() {
 
     // 2. try body inline: risky();
     assert!(
-        matches!(&result[1], Stmt::Expr(Expr::FnCall { name, .. }) if name == "risky"),
+        matches!(&result[1], Stmt::Expr(Expr::FnCall { target, .. }) if target.as_simple() == Some("risky")),
         "expected risky() call, got {:?}",
         result[1]
     );

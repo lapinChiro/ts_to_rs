@@ -1,4 +1,5 @@
 use super::*;
+use crate::ir::CallTarget;
 
 #[test]
 fn test_convert_expr_object_literal_with_type_hint_basic() {
@@ -284,7 +285,7 @@ fn test_convert_expr_call_resolves_object_arg_from_registry() {
     assert_eq!(
         result,
         Expr::FnCall {
-            name: "draw".to_string(),
+            target: CallTarget::simple("draw"),
             args: vec![Expr::StructInit {
                 name: "Point".to_string(),
                 fields: vec![
@@ -446,7 +447,7 @@ fn test_convert_object_lit_all_computed_keys_generates_hashmap() {
     assert_eq!(
         result,
         Expr::FnCall {
-            name: "HashMap::from".to_string(),
+            target: CallTarget::path(&["HashMap", "from"]),
             args: vec![Expr::Vec {
                 elements: vec![Expr::Tuple {
                     elements: vec![
