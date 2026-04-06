@@ -10,7 +10,7 @@ use ts_to_rs::directory;
 use ts_to_rs::pipeline::module_resolver::NodeModuleResolver;
 use ts_to_rs::pipeline::module_resolver::TrivialResolver;
 use ts_to_rs::pipeline::output_writer::OutputWriter;
-use ts_to_rs::pipeline::TranspileInput;
+use ts_to_rs::pipeline::{OutputFile, TranspileInput};
 use ts_to_rs::registry::TypeRegistry;
 use ts_to_rs::UnsupportedSyntax;
 
@@ -213,7 +213,8 @@ fn transpile_directory(
     }
 
     // Compute output paths: .ts → .rs, preserving directory structure
-    let file_outputs: Vec<(PathBuf, String)> = pipeline_output
+    // I-371: OutputFile に items を渡し、OutputWriter が IR ベースで配置を決定する
+    let outputs: Vec<OutputFile<'_>> = pipeline_output
         .files
         .iter()
         .zip(ts_files.iter())
@@ -225,7 +226,11 @@ fn transpile_directory(
                 .strip_prefix(&output_dir)
                 .unwrap_or(&rs_path)
                 .to_path_buf();
-            (rel_path, fo.rust_source.clone())
+            OutputFile {
+                rel_path,
+                source: &fo.rust_source,
+                items: &fo.items,
+            }
         })
         .collect();
 
@@ -233,7 +238,7 @@ fn transpile_directory(
     let writer = OutputWriter::new(&pipeline_output.module_graph);
     writer.write_to_directory(
         &output_dir,
-        &file_outputs,
+        &outputs,
         &pipeline_output.synthetic_items,
         true, // run rustfmt
     )?;

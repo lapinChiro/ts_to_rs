@@ -103,4 +103,22 @@ pub struct FileOutput {
     /// 先頭に結合して旧来の出力互換を保つ。Directory mode では `synthetic_items`
     /// （TranspileOutput 側）が OutputWriter で配置されるためこのフィールドは使用されない。
     pub file_synthetic_items: Vec<crate::ir::Item>,
+    /// `rust_source` を生成した IR 全体（user code + per-file 外部型 struct を含む、
+    /// per-file 合成型は除く）。
+    /// I-371: OutputWriter が IR ベース placement を行うために必要。directory mode で
+    /// `OutputWriter::write_to_directory` の `OutputFile.items` として渡される。
+    pub items: Vec<crate::ir::Item>,
+}
+
+/// `OutputWriter` に渡すファイル情報のビュー。
+///
+/// IR ベース placement のために `items` を保持する。`rel_path` は出力ディレクトリからの
+/// 相対パス、`source` は生成済み Rust source、`items` は source を生成した IR。
+pub struct OutputFile<'a> {
+    /// 出力ディレクトリからの相対パス
+    pub rel_path: PathBuf,
+    /// 生成済み Rust source code
+    pub source: &'a str,
+    /// `source` を生成した IR
+    pub items: &'a [crate::ir::Item],
 }

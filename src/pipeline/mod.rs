@@ -20,8 +20,8 @@ mod types;
 pub use module_graph::{ExportOrigin, ModuleGraph, ModuleGraphBuilder, ResolvedImport};
 pub use synthetic_registry::{SyntheticTypeDef, SyntheticTypeKind, SyntheticTypeRegistry};
 pub use types::{
-    FileOutput, ModuleResolver, NullModuleResolver, ParsedFile, ParsedFiles, ResolvedType,
-    TranspileInput, TranspileOutput,
+    FileOutput, ModuleResolver, NullModuleResolver, OutputFile, ParsedFile, ParsedFiles,
+    ResolvedType, TranspileInput, TranspileOutput,
 };
 
 use anyhow::{Context, Result};
@@ -211,6 +211,7 @@ pub fn transpile_pipeline(input: TranspileInput) -> Result<TranspileOutput> {
             rust_source,
             unsupported: tf.unsupported,
             file_synthetic_items: tf.file_synthetic_items,
+            items: all_items,
         });
     }
 

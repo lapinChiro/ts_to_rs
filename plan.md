@@ -2,7 +2,7 @@
 
 ## 次のアクション
 
-**次のアクション**: Batch 11b（I-300+I-301+I-306: OBJECT_LITERAL_NO_TYPE 25件解消）
+**次のアクション**: Batch 11c-fix（I-371 self-review 修正）— Phase B 完了済、Phase C 以降を継続。詳細は `tasks.md`
 
 ---
 
@@ -34,6 +34,7 @@ S1 バグ 0 件達成。
 |-------|---------|---------|-----------|
 | ~~11a~~ | ~~I-368+I-369~~ | ~~OutputWriter types.rs 衝突 + ビルトイン型モノモーフィゼーション~~ | **完了** dir 156→157 |
 | ~~11c~~ | ~~I-371~~ | ~~合成型の単一正準配置（同一ファイル重複 + クロスファイル冗長性）~~ | **完了** E0428+E0119 17→0、shared_imports 生成 |
+| 11c-fix | I-371 self-review 修正 | substring scan / 重複ロジック / API 非対称 / テスト不足 等 12 問題 | IR ベース placement で構造解消、Phase A/B 完了、C 以降進行中（`tasks.md`） |
 | 11b | I-300+I-301+I-306 | OBJECT_LITERAL_NO_TYPE（25件） | 最大エラーカテゴリ削減 |
 | 12 | I-311+I-344 | 型引数推論フィードバック欠如 | I-344 自動解消 + generic 精度 |
 | 13 | I-11+I-238+I-202 | union/enum 生成品質 | skip: ternary, ternary-union 他 |

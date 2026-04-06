@@ -828,35 +828,37 @@ fn test_inline_self_reference_does_not_loop() {
 
 ### Phase B: OutputWriter リファクタ
 
-- [ ] **B-1-1**: `src/pipeline/output_writer.rs` に `pub struct OutputFile<'a>` を追加
+実行順序メモ: B-1-5 で main.rs から `&fo.items` を渡す必要があるため、依存上 C-2-1
+（FileOutput.items 追加）と C-2-2（pipeline での構築）を Phase B に **前倒し** した。
+
+- [x] **B-1-1**: `src/pipeline/types.rs` に `pub struct OutputFile<'a>` を追加、`pipeline/mod.rs` から re-export
   - 完了基準: `cargo check` パス
-- [ ] **B-1-2**: `SyntheticPlacement.inline` の型を `HashMap<PathBuf, Vec<(String, String)>>` に変更（name, code）
-  - 完了基準: `cargo check` パス（呼び出し元はまだ古い API なので一時的に compile error 許容、本 task 内で同一ファイル内のみ修正）
-- [ ] **B-1-3**: `OutputWriter::resolve_synthetic_placement` のシグネチャを `(file_outputs: &[OutputFile<'_>], ...)` に変更。本 task では中身は substring scan のまま
-  - 完了基準: `cargo check` パス（同一ファイル内 test も同時更新）
-- [ ] **B-1-4**: `OutputWriter::write_to_directory` のシグネチャを同様に変更。inline 挿入処理も `Vec<(String, String)>` の `code` を取り出すよう修正
-  - 完了基準: `cargo check` パス（同一ファイル内 test も同時更新）
-- [ ] **B-1-5**: `src/main.rs:234` の呼び出しを `OutputFile` ベースに更新
-  - 完了基準: `cargo check` パス。**この時点で全 test がコンパイル通過**
-- [ ] **B-2-1**: `src/pipeline/output_writer.rs` 内 `resolve_synthetic_placement` の本体を IR ベース（`SyntheticReferenceGraph`）に置換。`source.contains(name)` と `other_code.contains(name)` を削除
-  - 完了基準: `cargo test output_writer` 全 21 件パス
-- [ ] **B-3-1**: `src/pipeline/output_writer.rs` 内 `resolve_synthetic_placement` 末尾に推移インポート処理を追加。`SyntheticReferenceGraph::transitive_shared_refs_for_file` を呼び、shared_imports に推移参照を merge
-  - 完了基準: `cargo test output_writer` 全 21 件パス
-- [ ] **B-COMMIT**: `[WIP] Batch 11c-fix Phase B: OutputWriter を IR ベース placement と推移インポートに移行`
+- [x] **C-2-1 (前倒し)**: `FileOutput` に `pub items: Vec<Item>` を追加（`file_synthetic_items` は Phase D まで残置）
+- [x] **C-2-2 (前倒し)**: `src/pipeline/mod.rs::transpile_pipeline` で `FileOutput.items: all_items` を構築
+- [x] **B-1-2**: `SyntheticPlacement.inline` の型を `HashMap<PathBuf, Vec<(String, String)>>` に変更（name, code）
+- [x] **B-1-3 + B-1-4**: `OutputWriter::resolve_synthetic_placement` と `write_to_directory` のシグネチャを `OutputFile<'_>` ベースに変更
+- [x] **B-1-5 + C-2-3**: `src/main.rs` の呼び出しを `OutputFile` ベースに更新（`&fo.items` を渡す）
+- [x] **B-2-1**: `resolve_synthetic_placement` の本体を IR ベース（`SyntheticReferenceGraph::build`）に置換。`source.contains(name)` と `other_code.contains(name)` を削除
+- [x] **B-3-1**: `resolve_synthetic_placement` 末尾に推移インポート処理を追加。`SyntheticReferenceGraph::transitive_shared_refs` を呼び、shared_imports に推移参照を merge
+- [x] **B-test-rewrite**: `output_writer.rs` の test 22 件を `OutputFile` API に追従。`TestFile` / `outputs_from` / `fn_returning` / `fn_with_param_type` ヘルパを導入
+  - 完了基準: `cargo test output_writer` 全 22 件パス
+- [x] **B-quality**: cargo test 全体（lib 2012 + 統合 + snapshot）/ cargo clippy / cargo fmt クリーン
+- [ ] **B-COMMIT**: `[WIP] Batch 11c-fix Phase B: OutputWriter を IR ベース placement と推移インポートに移行 (+ 依存により C-2-1/2 前倒し)`
 
 ### Phase C: pipeline 変更
+
+C-2-1〜2-3 は Phase B に前倒し済（Phase B の依存解消のため）。Phase C では C-1（PerFileTransformed
+外出し）と、`FileOutput::file_synthetic_items` の最終削除のみ実行。
 
 - [ ] **C-1-1**: `src/pipeline/types.rs` に `pub(crate) struct PerFileTransformed` を追加
   - 完了基準: `cargo check` パス
 - [ ] **C-1-2**: `src/pipeline/mod.rs` から関数内ローカルの `struct PerFileTransformed` 定義を削除し、import に書き換え
   - 完了基準: `cargo check` パス
-- [ ] **C-2-1**: `src/pipeline/types.rs` の `FileOutput` に `pub items: Vec<Item>` を追加し、`pub file_synthetic_items: Vec<Item>` を削除
-  - 完了基準: `cargo check`（呼び出し元 `pipeline::mod`、`lib.rs`、`pipeline::transpile_single` は次タスクで修正）
-- [ ] **C-2-2**: `src/pipeline/mod.rs` の `transpile_pipeline` で `FileOutput { items: all_items.clone(), ... }` を構築（`file_synthetic_items` の代入を削除）
-  - 完了基準: `cargo check` パス
-- [ ] **C-2-3**: `src/main.rs:228` 付近の `OutputFile` 構築で `items: &fo.items` を渡す
-  - 完了基準: `cargo check` パス
-- [ ] **C-COMMIT**: `[WIP] Batch 11c-fix Phase C: PerFileTransformed 外出し + FileOutput.items 化`
+- [x] **~~C-2-1~~**: Phase B-1-1 で前倒し完了
+- [x] **~~C-2-2~~**: Phase B-1-1 で前倒し完了
+- [x] **~~C-2-3~~**: Phase B-1-5 で前倒し完了
+- [ ] **C-2-final**: Phase D-1 完了後、`FileOutput::file_synthetic_items` を削除（D-1 で extract_single_output が `file.items` 経由に切り替わったあと）
+- [ ] **C-COMMIT**: `[WIP] Batch 11c-fix Phase C: PerFileTransformed 外出し + FileOutput.file_synthetic_items 削除`
 
 ### Phase D: 単一ファイル API 整理
 
@@ -991,7 +993,29 @@ fn test_inline_self_reference_does_not_loop() {
 着手時に各タスクのチェックボックスを更新する。
 完了 → `- [x]`、進行中 → そのまま、ブロック → コメント追記。
 
-進捗状況: **未着手**（Step 4 完了、user 承認待ち）。
+進捗状況: **Phase A 完了（コミット済）、Phase B 完了（コミット待ち）**。
+
+### Phase 完了サマリ
+
+| Phase | 状態 | テスト数 | クリーン |
+|-------|------|---------|---------|
+| A | 完了・コミット済 | lib 2012, placement 16, canonical_name 9, type_refs 8, output_writer skip 1 | clippy/fmt OK |
+| B | 完了・コミット待ち | output_writer 22 件全 pass、全 cargo test pass | clippy/fmt OK |
+| C | 部分進行（C-2 系は B に前倒し済、C-1 と最終削除のみ残） | — | — |
+| D | 未着手 | — | — |
+| E | 未着手 | — | — |
+| F | 未着手 | — | — |
+| G | 未着手 | — | — |
+
+### 次回再開時の状態
+
+- **作業ツリー**: Phase B の変更が staged 未 commit で残る想定（user による commit 後）
+- **次のタスク**: Phase C-1（PerFileTransformed 外出し）→ Phase D-1（extract_single_output IR 統合）
+- **特記事項**:
+  - `FileOutput::file_synthetic_items` は Phase B 時点では残置（Phase D で extract_single_output が `file.items` 経由に切り替わってから C-2-final で削除）
+  - `fn_with_param_type` は output_writer.rs に `#[allow(dead_code)]` で残置（Phase F の追加テストで使用予定）
+  - Phase B では C-2-1〜2-3 を前倒しで実施したため、Phase C は C-1 と C-2-final のみ
+  - Phase A レビュー時の TODO 追加: I-374（Rust 予約語の型名サニタイズ）
 
 ---
 

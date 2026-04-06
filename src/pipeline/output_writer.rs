@@ -3,12 +3,14 @@
 //! `OutputWriter` はファイル書き出し・mod.rs 生成・合成型配置・rustfmt を統一的に処理する。
 //! mod.rs は `ModuleGraph` の query API（`children_of`, `reexports_of`）から生成する。
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
 use super::module_graph::ModuleGraph;
+use super::placement::SyntheticReferenceGraph;
+use super::types::OutputFile;
 use crate::ir::Item;
 
 /// 変換結果の出力を担当する。
@@ -22,13 +24,16 @@ pub struct OutputWriter<'a> {
 /// 合成型の配置結果。
 #[derive(Debug)]
 pub struct SyntheticPlacement {
-    /// ファイルにインラインで追加する合成型: (ファイルパス, 合成型コード)
-    pub inline: HashMap<PathBuf, Vec<String>>,
+    /// ファイルにインラインで追加する合成型。値は `(name, generated_code)` の組。
+    /// I-371: 名前を保持することで推移インポート計算（inline 経由で参照される shared
+    /// 型を逆引きする）が可能になる。
+    pub inline: HashMap<PathBuf, Vec<(String, String)>>,
     /// 専用モジュールに配置する合成型: (モジュールパス, 合成型コード)
     pub shared_module: Option<(PathBuf, String)>,
     /// 共有モジュールに配置された型を参照するファイルへのインポート文。
     /// I-371: 各合成型は単一正準配置（shared_module）を持ち、参照側ファイルは
-    /// `use crate::shared_types::Type;` でインポートする。
+    /// `use crate::shared_types::Type;` でインポートする。直接参照だけでなく、
+    /// inline 配置された合成型 → shared 配置型への推移参照も含む。
     pub shared_imports: HashMap<PathBuf, Vec<String>>,
 }
 
@@ -80,51 +85,46 @@ impl<'a> OutputWriter<'a> {
 
     /// 合成型の配置先を決定する。
     ///
-    /// 各合成型の名前で全ファイルの生成コードを検索し、参照ファイル数で配置先を決定する:
+    /// IR ベースの参照グラフ ([`SyntheticReferenceGraph`]) を構築し、各合成型の参照
+    /// ファイル数で配置先を決定する:
     /// - 1 ファイルのみで参照 → `inline`（そのファイルの先頭に追加）
     /// - 2+ ファイルで参照 → `shared_module`（専用 `.rs` ファイルに配置）
+    /// - 0 ファイル + 他 synthetic から参照 → `shared_module`（相互依存解決）
     /// - 0 ファイル → 未使用（どちらにも含まない）
+    ///
+    /// 配置決定後、inline 配置された合成型が（field 等を介して）shared 配置型を
+    /// 参照する場合、参照側ファイルに推移インポートを追加する（I-371 criterion 4）。
     pub fn resolve_synthetic_placement(
         &self,
-        file_outputs: &[(PathBuf, String)],
+        file_outputs: &[OutputFile<'_>],
         synthetic_items: &[Item],
     ) -> SyntheticPlacement {
-        let mut inline: HashMap<PathBuf, Vec<String>> = HashMap::new();
-        let mut shared_items: Vec<String> = Vec::new();
-        // 共有モジュールに配置された型ごとに、その参照ファイル一覧を記録する。
-        // 後続で shared_imports を構築する。
-        let mut shared_type_refs: Vec<(String, Vec<PathBuf>)> = Vec::new();
-
-        // 全 synthetic item のコード生成と名前の収集。
-        // canonical_name() == None の Item（Use/Comment/RawCode）は配置対象外。
-        // 空文字列で contains() を呼ぶと全ファイルにマッチして誤配置するため必ず skip する。
-        let generated: Vec<(String, String)> = synthetic_items
+        // 1. IR ベース参照グラフを構築
+        let per_file_items: Vec<(PathBuf, &[Item])> = file_outputs
             .iter()
-            .filter_map(|item| {
-                let name = item.canonical_name()?.to_string();
-                let code = crate::generator::generate(std::slice::from_ref(item));
-                Some((name, code))
-            })
+            .map(|f| (f.rel_path.clone(), f.items))
             .collect();
+        let graph = SyntheticReferenceGraph::build(&per_file_items, synthetic_items);
 
-        for (name, code) in &generated {
-            // 合成型名を参照しているファイルを検索
-            let referencing_files: Vec<&PathBuf> = file_outputs
-                .iter()
-                .filter(|(_, source)| source.contains(name))
-                .map(|(path, _)| path)
-                .collect();
+        // 2. 各合成型を inline / shared / unused に振り分け
+        let mut inline: HashMap<PathBuf, Vec<(String, String)>> = HashMap::new();
+        let mut shared_items: Vec<String> = Vec::new();
+        // 共有モジュールに配置された型ごとに、その「直接」参照ファイル一覧を記録する。
+        // 後続で推移インポート計算と shared_imports 構築に使用する。
+        let mut shared_type_refs: Vec<(String, Vec<PathBuf>)> = Vec::new();
+        // 各ファイルに inline 配置された合成型の集合（推移インポート計算用）。
+        let mut inline_by_file: HashMap<PathBuf, BTreeSet<String>> = HashMap::new();
 
-            // 他の synthetic item から参照されているかチェック
-            let referenced_by_synthetic = generated
-                .iter()
-                .any(|(other_name, other_code)| other_name != name && other_code.contains(name));
+        for name in graph.names() {
+            let referencing_files = graph.direct_referencers(name);
+            let referenced_by_synthetic = graph.is_referenced_by_synthetic(name);
+            let code = graph.code_of(name).to_string();
 
             match referencing_files.len() {
                 0 if referenced_by_synthetic => {
                     // file_outputs からは未参照だが、他の synthetic item から参照される
                     // → shared module に配置（相互依存を解決）
-                    shared_items.push(code.clone());
+                    shared_items.push(code);
                     shared_type_refs.push((name.clone(), Vec::new()));
                 }
                 0 => {
@@ -132,22 +132,22 @@ impl<'a> OutputWriter<'a> {
                 }
                 1 if !referenced_by_synthetic => {
                     // 1 ファイルのみ → inline
+                    let file = referencing_files.iter().next().unwrap().clone();
                     inline
-                        .entry(referencing_files[0].clone())
+                        .entry(file.clone())
                         .or_default()
-                        .push(code.clone());
+                        .push((name.clone(), code));
+                    inline_by_file.entry(file).or_default().insert(name.clone());
                 }
                 _ => {
                     // 2+ ファイル、または 1 ファイル + synthetic 参照 → shared module
-                    shared_items.push(code.clone());
-                    shared_type_refs.push((
-                        name.clone(),
-                        referencing_files.iter().map(|p| (*p).clone()).collect(),
-                    ));
+                    shared_items.push(code);
+                    shared_type_refs.push((name.clone(), referencing_files.into_iter().collect()));
                 }
             }
         }
 
+        // 3. shared module の合成
         let shared_module = if shared_items.is_empty() {
             None
         } else {
@@ -162,9 +162,24 @@ impl<'a> OutputWriter<'a> {
             Some((module_path, content))
         };
 
-        // shared_imports: 各参照ファイルに対して `use crate::<stem>::{Type, ...};` を構築。
-        // 同名の型が user 定義型と衝突するのを防ぐため、参照先ファイル自身が
-        // shared module の場合（衝突回避サフィックス付与時など）は除外する。
+        // 4. 推移インポート計算: inline 配置された合成型 → shared 配置型への参照を辿り、
+        //    参照側ファイルに shared 型を追加する（I-371 criterion 4）。
+        let shared_names: BTreeSet<String> =
+            shared_type_refs.iter().map(|(n, _)| n.clone()).collect();
+        for (file, inline_names) in &inline_by_file {
+            let transitive = graph.transitive_shared_refs(inline_names, &shared_names);
+            for shared_name in transitive {
+                if let Some((_, files)) =
+                    shared_type_refs.iter_mut().find(|(n, _)| n == &shared_name)
+                {
+                    if !files.contains(file) {
+                        files.push(file.clone());
+                    }
+                }
+            }
+        }
+
+        // 5. shared_imports: 各参照ファイルに対して `use crate::<stem>::{Type, ...};` を構築。
         let shared_imports: HashMap<PathBuf, Vec<String>> =
             if let Some((ref module_path, _)) = shared_module {
                 build_shared_imports(module_path, &shared_type_refs)
@@ -185,7 +200,7 @@ impl<'a> OutputWriter<'a> {
     pub fn write_to_directory(
         &self,
         output_dir: &Path,
-        file_outputs: &[(PathBuf, String)],
+        file_outputs: &[OutputFile<'_>],
         synthetic_items: &[Item],
         run_rustfmt: bool,
     ) -> Result<()> {
@@ -193,7 +208,8 @@ impl<'a> OutputWriter<'a> {
 
         // 1. ファイル書き出し（合成型のインライン挿入を含む）
         let mut all_paths = Vec::new();
-        for (rel_path, source) in file_outputs {
+        for output in file_outputs {
+            let rel_path = &output.rel_path;
             let out_path = output_dir.join(rel_path);
             if let Some(parent) = out_path.parent() {
                 std::fs::create_dir_all(parent)?;
@@ -212,12 +228,12 @@ impl<'a> OutputWriter<'a> {
             }
             // インライン合成型を追加
             if let Some(inline_items) = placement.inline.get(rel_path) {
-                for item_code in inline_items {
+                for (_name, item_code) in inline_items {
                     content.push_str(item_code);
                     content.push_str("\n\n");
                 }
             }
-            content.push_str(source);
+            content.push_str(output.source);
 
             std::fs::write(&out_path, &content)?;
             all_paths.push(out_path);
@@ -317,9 +333,9 @@ fn build_shared_imports(
 ///
 /// ユーザーの出力ファイルと衝突しない名前を選択する。
 /// デフォルトは `shared_types.rs`。衝突する場合はサフィックスを付与する。
-fn choose_shared_module_path(file_outputs: &[(PathBuf, String)]) -> PathBuf {
+fn choose_shared_module_path(file_outputs: &[OutputFile<'_>]) -> PathBuf {
     let existing: std::collections::HashSet<&Path> =
-        file_outputs.iter().map(|(p, _)| p.as_path()).collect();
+        file_outputs.iter().map(|f| f.rel_path.as_path()).collect();
 
     let base = PathBuf::from("shared_types.rs");
     if !existing.contains(base.as_path()) {
@@ -355,11 +371,11 @@ fn generate_shared_module_imports(code: &str) -> String {
 }
 
 /// file_outputs のパスからディレクトリ一覧を取得する（深い方から順）。
-fn collect_dirs(output_dir: &Path, file_outputs: &[(PathBuf, String)]) -> Vec<PathBuf> {
+fn collect_dirs(output_dir: &Path, file_outputs: &[OutputFile<'_>]) -> Vec<PathBuf> {
     let mut dirs = std::collections::BTreeSet::new();
     dirs.insert(output_dir.to_path_buf());
-    for (rel_path, _) in file_outputs {
-        let full = output_dir.join(rel_path);
+    for output in file_outputs {
+        let full = output_dir.join(&output.rel_path);
         if let Some(parent) = full.parent() {
             let mut p = parent.to_path_buf();
             while p != *output_dir && p.starts_with(output_dir) {
@@ -378,11 +394,79 @@ fn collect_dirs(output_dir: &Path, file_outputs: &[(PathBuf, String)]) -> Vec<Pa
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ir::Visibility;
+    use crate::ir::{Item, Param, RustType, Visibility};
     use crate::parser::parse_typescript;
     use crate::pipeline::module_graph::ModuleGraphBuilder;
     use crate::pipeline::{NullModuleResolver, ParsedFiles};
     use std::path::PathBuf;
+
+    /// テスト用ファイル仕様。所有データを保持し、`OutputFile<'_>` の借用元として使う。
+    struct TestFile {
+        rel_path: PathBuf,
+        source: String,
+        items: Vec<Item>,
+    }
+
+    impl TestFile {
+        fn new(path: &str, source: &str, items: Vec<Item>) -> Self {
+            Self {
+                rel_path: PathBuf::from(path),
+                source: source.to_string(),
+                items,
+            }
+        }
+    }
+
+    /// `TestFile` のスライスから `OutputFile<'_>` のベクタを構築する。
+    fn outputs_from(files: &[TestFile]) -> Vec<OutputFile<'_>> {
+        files
+            .iter()
+            .map(|f| OutputFile {
+                rel_path: f.rel_path.clone(),
+                source: &f.source,
+                items: &f.items,
+            })
+            .collect()
+    }
+
+    /// 指定型を return type に持つ関数 Item を作る（user file 内で synthetic を参照する用）。
+    fn fn_returning(fn_name: &str, ref_type: &str) -> Item {
+        Item::Fn {
+            vis: Visibility::Public,
+            attributes: vec![],
+            is_async: false,
+            name: fn_name.to_string(),
+            type_params: vec![],
+            params: vec![],
+            return_type: Some(RustType::Named {
+                name: ref_type.to_string(),
+                type_args: vec![],
+            }),
+            body: vec![],
+        }
+    }
+
+    /// 単一引数の型に指定した型を持つ関数 Item を作る。
+    /// （Phase F の追加テストで利用予定。現時点では未使用だが API 完備性のため残す。）
+    #[allow(dead_code)]
+    fn fn_with_param_type(fn_name: &str, param_type: &str) -> Item {
+        Item::Fn {
+            vis: Visibility::Public,
+            attributes: vec![],
+            is_async: false,
+            name: fn_name.to_string(),
+            type_params: vec![],
+            params: vec![Param {
+                name: "x".to_string(),
+                ty: Some(RustType::Named {
+                    name: param_type.to_string(),
+                    type_args: vec![],
+                }),
+            }],
+            return_type: None,
+            body: vec![],
+        }
+    }
 
     /// テスト用 ModuleGraph を構築する（NodeModuleResolver 使用、re-export 解決付き）。
     fn build_module_graph_with_resolver(root: &Path, filenames: &[&str]) -> ModuleGraph {
@@ -515,12 +599,14 @@ mod tests {
     fn test_resolve_synthetic_placement_single_file() {
         let mg = ModuleGraph::empty();
         let writer = OutputWriter::new(&mg);
-        let files = vec![(
-            PathBuf::from("a.rs"),
-            "fn foo() -> StringOrF64 { todo!() }".to_string(),
+        let files = vec![TestFile::new(
+            "a.rs",
+            "fn foo() -> StringOrF64 { todo!() }",
+            vec![fn_returning("foo", "StringOrF64")],
         )];
+        let outputs = outputs_from(&files);
         let items = vec![make_synthetic_enum("StringOrF64")];
-        let placement = writer.resolve_synthetic_placement(&files, &items);
+        let placement = writer.resolve_synthetic_placement(&outputs, &items);
         assert!(
             placement.inline.contains_key(Path::new("a.rs")),
             "should be inline in a.rs"
@@ -536,17 +622,20 @@ mod tests {
         let mg = ModuleGraph::empty();
         let writer = OutputWriter::new(&mg);
         let files = vec![
-            (
-                PathBuf::from("a.rs"),
-                "fn foo() -> StringOrF64 { todo!() }".to_string(),
+            TestFile::new(
+                "a.rs",
+                "fn foo() -> StringOrF64 { todo!() }",
+                vec![fn_returning("foo", "StringOrF64")],
             ),
-            (
-                PathBuf::from("b.rs"),
-                "fn bar() -> StringOrF64 { todo!() }".to_string(),
+            TestFile::new(
+                "b.rs",
+                "fn bar() -> StringOrF64 { todo!() }",
+                vec![fn_returning("bar", "StringOrF64")],
             ),
         ];
+        let outputs = outputs_from(&files);
         let items = vec![make_synthetic_enum("StringOrF64")];
-        let placement = writer.resolve_synthetic_placement(&files, &items);
+        let placement = writer.resolve_synthetic_placement(&outputs, &items);
         assert!(placement.inline.is_empty(), "should not be inline");
         assert!(
             placement.shared_module.is_some(),
@@ -558,9 +647,11 @@ mod tests {
     fn test_resolve_synthetic_placement_unused() {
         let mg = ModuleGraph::empty();
         let writer = OutputWriter::new(&mg);
-        let files = vec![(PathBuf::from("a.rs"), "fn foo() {}".to_string())];
+        // user file は何も synthetic を参照しない（items 空）
+        let files = vec![TestFile::new("a.rs", "fn foo() {}", vec![])];
+        let outputs = outputs_from(&files);
         let items = vec![make_synthetic_enum("UnusedEnum")];
-        let placement = writer.resolve_synthetic_placement(&files, &items);
+        let placement = writer.resolve_synthetic_placement(&outputs, &items);
         assert!(placement.inline.is_empty(), "should not be inline");
         assert!(
             placement.shared_module.is_none(),
@@ -576,10 +667,12 @@ mod tests {
         // shared_module に誤配置されていた。本テストは regression 防止用。
         let mg = ModuleGraph::empty();
         let writer = OutputWriter::new(&mg);
-        let files = vec![(
-            PathBuf::from("a.rs"),
-            "fn foo() -> Real { todo!() }".to_string(),
+        let files = vec![TestFile::new(
+            "a.rs",
+            "fn foo() -> Real { todo!() }",
+            vec![fn_returning("foo", "Real")],
         )];
+        let outputs = outputs_from(&files);
         let items = vec![
             Item::Comment("a comment".to_string()),
             Item::Use {
@@ -590,7 +683,7 @@ mod tests {
             Item::RawCode("fn raw() {}".to_string()),
             make_synthetic_enum("Real"),
         ];
-        let placement = writer.resolve_synthetic_placement(&files, &items);
+        let placement = writer.resolve_synthetic_placement(&outputs, &items);
         // Real は inline 配置される
         assert!(
             placement.inline.contains_key(Path::new("a.rs")),
@@ -616,11 +709,14 @@ mod tests {
         let out = temp.path();
 
         let files = vec![
-            (PathBuf::from("a.rs"), "fn a() {}".to_string()),
-            (PathBuf::from("sub/b.rs"), "fn b() {}".to_string()),
+            TestFile::new("a.rs", "fn a() {}", vec![]),
+            TestFile::new("sub/b.rs", "fn b() {}", vec![]),
         ];
+        let outputs = outputs_from(&files);
 
-        writer.write_to_directory(out, &files, &[], false).unwrap();
+        writer
+            .write_to_directory(out, &outputs, &[], false)
+            .unwrap();
 
         assert!(out.join("a.rs").exists(), "a.rs should exist");
         assert!(out.join("sub/b.rs").exists(), "sub/b.rs should exist");
@@ -633,14 +729,16 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let out = temp.path();
 
-        let files = vec![(
-            PathBuf::from("a.rs"),
-            "fn foo() -> MyEnum { todo!() }".to_string(),
+        let files = vec![TestFile::new(
+            "a.rs",
+            "fn foo() -> MyEnum { todo!() }",
+            vec![fn_returning("foo", "MyEnum")],
         )];
+        let outputs = outputs_from(&files);
         let items = vec![make_synthetic_enum("MyEnum")];
 
         writer
-            .write_to_directory(out, &files, &items, false)
+            .write_to_directory(out, &outputs, &items, false)
             .unwrap();
 
         let content = std::fs::read_to_string(out.join("a.rs")).unwrap();
@@ -662,19 +760,22 @@ mod tests {
         let out = temp.path();
 
         let files = vec![
-            (
-                PathBuf::from("a.rs"),
-                "fn foo() -> SharedEnum { todo!() }".to_string(),
+            TestFile::new(
+                "a.rs",
+                "fn foo() -> SharedEnum { todo!() }",
+                vec![fn_returning("foo", "SharedEnum")],
             ),
-            (
-                PathBuf::from("b.rs"),
-                "fn bar() -> SharedEnum { todo!() }".to_string(),
+            TestFile::new(
+                "b.rs",
+                "fn bar() -> SharedEnum { todo!() }",
+                vec![fn_returning("bar", "SharedEnum")],
             ),
         ];
+        let outputs = outputs_from(&files);
         let items = vec![make_synthetic_enum("SharedEnum")];
 
         writer
-            .write_to_directory(out, &files, &items, false)
+            .write_to_directory(out, &outputs, &items, false)
             .unwrap();
 
         assert!(
@@ -698,19 +799,22 @@ mod tests {
 
         // ユーザーファイルに shared_types.rs が含まれる場合、衝突回避名を使用する
         let files = vec![
-            (
-                PathBuf::from("shared_types.rs"),
-                "fn foo() -> SharedEnum { todo!() }".to_string(),
+            TestFile::new(
+                "shared_types.rs",
+                "fn foo() -> SharedEnum { todo!() }",
+                vec![fn_returning("foo", "SharedEnum")],
             ),
-            (
-                PathBuf::from("b.rs"),
-                "fn bar() -> SharedEnum { todo!() }".to_string(),
+            TestFile::new(
+                "b.rs",
+                "fn bar() -> SharedEnum { todo!() }",
+                vec![fn_returning("bar", "SharedEnum")],
             ),
         ];
+        let outputs = outputs_from(&files);
         let items = vec![make_synthetic_enum("SharedEnum")];
 
         writer
-            .write_to_directory(out, &files, &items, false)
+            .write_to_directory(out, &outputs, &items, false)
             .unwrap();
 
         // shared_types.rs は衝突するので shared_types_0.rs に配置
@@ -734,6 +838,7 @@ mod tests {
 
     #[test]
     fn test_write_to_directory_types_rs_not_overwritten() {
+        use crate::ir::StructField;
         let mg = ModuleGraph::empty();
         let writer = OutputWriter::new(&mg);
         let temp = tempfile::tempdir().unwrap();
@@ -741,20 +846,37 @@ mod tests {
 
         // ユーザーファイルに types.rs が含まれる場合（Hono のケース）
         // SharedEnum が 2 ファイルから参照されるため shared module に配置される
+        // types.rs の user item: pub struct TypedResponse { data: SharedEnum }
+        let typed_response = Item::Struct {
+            vis: Visibility::Public,
+            name: "TypedResponse".to_string(),
+            type_params: vec![],
+            fields: vec![StructField {
+                vis: Some(Visibility::Public),
+                name: "data".to_string(),
+                ty: RustType::Named {
+                    name: "SharedEnum".to_string(),
+                    type_args: vec![],
+                },
+            }],
+        };
         let files = vec![
-            (
-                PathBuf::from("types.rs"),
-                "pub struct TypedResponse { data: SharedEnum }".to_string(),
+            TestFile::new(
+                "types.rs",
+                "pub struct TypedResponse { data: SharedEnum }",
+                vec![typed_response],
             ),
-            (
-                PathBuf::from("b.rs"),
-                "fn bar() -> SharedEnum { todo!() }".to_string(),
+            TestFile::new(
+                "b.rs",
+                "fn bar() -> SharedEnum { todo!() }",
+                vec![fn_returning("bar", "SharedEnum")],
             ),
         ];
+        let outputs = outputs_from(&files);
         let items = vec![make_synthetic_enum("SharedEnum")];
 
         writer
-            .write_to_directory(out, &files, &items, false)
+            .write_to_directory(out, &outputs, &items, false)
             .unwrap();
 
         // types.rs はユーザーコードを含む
@@ -784,17 +906,20 @@ mod tests {
         let mg = ModuleGraph::empty();
         let writer = OutputWriter::new(&mg);
         let files = vec![
-            (
-                PathBuf::from("a.rs"),
-                "fn foo() -> StringOrF64 { todo!() }".to_string(),
+            TestFile::new(
+                "a.rs",
+                "fn foo() -> StringOrF64 { todo!() }",
+                vec![fn_returning("foo", "StringOrF64")],
             ),
-            (
-                PathBuf::from("b.rs"),
-                "fn bar() -> StringOrF64 { todo!() }".to_string(),
+            TestFile::new(
+                "b.rs",
+                "fn bar() -> StringOrF64 { todo!() }",
+                vec![fn_returning("bar", "StringOrF64")],
             ),
         ];
+        let outputs = outputs_from(&files);
         let items = vec![make_synthetic_enum("StringOrF64")];
-        let placement = writer.resolve_synthetic_placement(&files, &items);
+        let placement = writer.resolve_synthetic_placement(&outputs, &items);
 
         assert!(placement.shared_module.is_some());
         let imports_a = placement
@@ -815,12 +940,14 @@ mod tests {
         // 1 ファイルからのみ参照される型は inline 配置で、shared_imports は空。
         let mg = ModuleGraph::empty();
         let writer = OutputWriter::new(&mg);
-        let files = vec![(
-            PathBuf::from("a.rs"),
-            "fn foo() -> LocalEnum { todo!() }".to_string(),
+        let files = vec![TestFile::new(
+            "a.rs",
+            "fn foo() -> LocalEnum { todo!() }",
+            vec![fn_returning("foo", "LocalEnum")],
         )];
+        let outputs = outputs_from(&files);
         let items = vec![make_synthetic_enum("LocalEnum")];
-        let placement = writer.resolve_synthetic_placement(&files, &items);
+        let placement = writer.resolve_synthetic_placement(&outputs, &items);
 
         assert!(placement.shared_imports.is_empty());
         assert!(placement.inline.contains_key(Path::new("a.rs")));
@@ -832,20 +959,29 @@ mod tests {
         let mg = ModuleGraph::empty();
         let writer = OutputWriter::new(&mg);
         let files = vec![
-            (
-                PathBuf::from("a.rs"),
-                "fn foo() -> AlphaEnum { todo!() } fn baz() -> BetaEnum { todo!() }".to_string(),
+            TestFile::new(
+                "a.rs",
+                "fn foo() -> AlphaEnum { todo!() } fn baz() -> BetaEnum { todo!() }",
+                vec![
+                    fn_returning("foo", "AlphaEnum"),
+                    fn_returning("baz", "BetaEnum"),
+                ],
             ),
-            (
-                PathBuf::from("b.rs"),
-                "fn bar() -> AlphaEnum { todo!() } fn qux() -> BetaEnum { todo!() }".to_string(),
+            TestFile::new(
+                "b.rs",
+                "fn bar() -> AlphaEnum { todo!() } fn qux() -> BetaEnum { todo!() }",
+                vec![
+                    fn_returning("bar", "AlphaEnum"),
+                    fn_returning("qux", "BetaEnum"),
+                ],
             ),
         ];
+        let outputs = outputs_from(&files);
         let items = vec![
             make_synthetic_enum("AlphaEnum"),
             make_synthetic_enum("BetaEnum"),
         ];
-        let placement = writer.resolve_synthetic_placement(&files, &items);
+        let placement = writer.resolve_synthetic_placement(&outputs, &items);
 
         let imports_a = placement.shared_imports.get(Path::new("a.rs")).unwrap();
         assert_eq!(imports_a.len(), 1);
@@ -865,19 +1001,22 @@ mod tests {
         let out = temp.path();
 
         let files = vec![
-            (
-                PathBuf::from("a.rs"),
-                "fn foo() -> SharedEnum { todo!() }".to_string(),
+            TestFile::new(
+                "a.rs",
+                "fn foo() -> SharedEnum { todo!() }",
+                vec![fn_returning("foo", "SharedEnum")],
             ),
-            (
-                PathBuf::from("b.rs"),
-                "fn bar() -> SharedEnum { todo!() }".to_string(),
+            TestFile::new(
+                "b.rs",
+                "fn bar() -> SharedEnum { todo!() }",
+                vec![fn_returning("bar", "SharedEnum")],
             ),
         ];
+        let outputs = outputs_from(&files);
         let items = vec![make_synthetic_enum("SharedEnum")];
 
         writer
-            .write_to_directory(out, &files, &items, false)
+            .write_to_directory(out, &outputs, &items, false)
             .unwrap();
 
         let a_content = std::fs::read_to_string(out.join("a.rs")).unwrap();
@@ -902,14 +1041,16 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let out = temp.path();
 
-        let files = vec![(
-            PathBuf::from("a.rs"),
-            "fn foo() -> OnlyOne { todo!() }".to_string(),
+        let files = vec![TestFile::new(
+            "a.rs",
+            "fn foo() -> OnlyOne { todo!() }",
+            vec![fn_returning("foo", "OnlyOne")],
         )];
+        let outputs = outputs_from(&files);
         let items = vec![make_synthetic_enum("OnlyOne")];
 
         writer
-            .write_to_directory(out, &files, &items, false)
+            .write_to_directory(out, &outputs, &items, false)
             .unwrap();
 
         let a_content = std::fs::read_to_string(out.join("a.rs")).unwrap();
@@ -933,23 +1074,23 @@ mod tests {
         let out = temp.path();
 
         let files = vec![
-            (
-                PathBuf::from("shared_types.rs"),
-                "pub struct UserDefined;".to_string(),
+            TestFile::new("shared_types.rs", "pub struct UserDefined;", vec![]),
+            TestFile::new(
+                "a.rs",
+                "fn foo() -> ConflictEnum { todo!() }",
+                vec![fn_returning("foo", "ConflictEnum")],
             ),
-            (
-                PathBuf::from("a.rs"),
-                "fn foo() -> ConflictEnum { todo!() }".to_string(),
-            ),
-            (
-                PathBuf::from("b.rs"),
-                "fn bar() -> ConflictEnum { todo!() }".to_string(),
+            TestFile::new(
+                "b.rs",
+                "fn bar() -> ConflictEnum { todo!() }",
+                vec![fn_returning("bar", "ConflictEnum")],
             ),
         ];
+        let outputs = outputs_from(&files);
         let items = vec![make_synthetic_enum("ConflictEnum")];
 
         writer
-            .write_to_directory(out, &files, &items, false)
+            .write_to_directory(out, &outputs, &items, false)
             .unwrap();
 
         let a_content = std::fs::read_to_string(out.join("a.rs")).unwrap();
@@ -961,31 +1102,34 @@ mod tests {
 
     #[test]
     fn test_choose_shared_module_path_no_collision() {
-        let files: Vec<(PathBuf, String)> = vec![
-            (PathBuf::from("a.rs"), String::new()),
-            (PathBuf::from("b.rs"), String::new()),
+        let files = vec![
+            TestFile::new("a.rs", "", vec![]),
+            TestFile::new("b.rs", "", vec![]),
         ];
-        let result = choose_shared_module_path(&files);
+        let outputs = outputs_from(&files);
+        let result = choose_shared_module_path(&outputs);
         assert_eq!(result, PathBuf::from("shared_types.rs"));
     }
 
     #[test]
     fn test_choose_shared_module_path_collision() {
-        let files: Vec<(PathBuf, String)> = vec![
-            (PathBuf::from("shared_types.rs"), String::new()),
-            (PathBuf::from("b.rs"), String::new()),
+        let files = vec![
+            TestFile::new("shared_types.rs", "", vec![]),
+            TestFile::new("b.rs", "", vec![]),
         ];
-        let result = choose_shared_module_path(&files);
+        let outputs = outputs_from(&files);
+        let result = choose_shared_module_path(&outputs);
         assert_eq!(result, PathBuf::from("shared_types_0.rs"));
     }
 
     #[test]
     fn test_choose_shared_module_path_double_collision() {
-        let files: Vec<(PathBuf, String)> = vec![
-            (PathBuf::from("shared_types.rs"), String::new()),
-            (PathBuf::from("shared_types_0.rs"), String::new()),
+        let files = vec![
+            TestFile::new("shared_types.rs", "", vec![]),
+            TestFile::new("shared_types_0.rs", "", vec![]),
         ];
-        let result = choose_shared_module_path(&files);
+        let outputs = outputs_from(&files);
+        let result = choose_shared_module_path(&outputs);
         assert_eq!(result, PathBuf::from("shared_types_1.rs"));
     }
 }
