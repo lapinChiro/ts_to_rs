@@ -150,10 +150,15 @@ pub fn transpile_pipeline(input: TranspileInput) -> Result<TranspileOutput> {
 
         // 外部型 struct 生成: 参照されているが定義がないビルトイン型の struct を追加
         // 推移的依存を解決するため固定点に達するまでループ
-        generate_external_structs_to_fixpoint(&mut all_items, &shared_registry);
+        // synthetic は base + 全処理済みファイルの合成型を含む（ビルトイン合成型の参照に必要）
+        generate_external_structs_to_fixpoint(&mut all_items, &shared_registry, &synthetic);
 
         // 非外部型のスタブ生成（enum バリアント内の Hono 固有型等）
-        external_struct_generator::generate_stub_structs(&mut all_items, &shared_registry);
+        external_struct_generator::generate_stub_structs(
+            &mut all_items,
+            &shared_registry,
+            &synthetic,
+        );
 
         let rust_source = crate::generator::generate(&all_items);
 
@@ -165,13 +170,19 @@ pub fn transpile_pipeline(input: TranspileInput) -> Result<TranspileOutput> {
         });
     }
 
-    let mut synthetic_items = synthetic.into_items();
+    // all_items() + clone で synthetic を借用可能に保つ（generate 関数が &synthetic を参照するため）
+    let mut synthetic_items: Vec<crate::ir::Item> =
+        synthetic.all_items().into_iter().cloned().collect();
 
     // 共有 synthetic items 内で参照されている外部型の struct も生成（推移的依存を含む）
-    generate_external_structs_to_fixpoint(&mut synthetic_items, &shared_registry);
+    generate_external_structs_to_fixpoint(&mut synthetic_items, &shared_registry, &synthetic);
 
-    // types.rs 用: 外部型でない未定義型にもスタブ struct を生成（コンパイル可能にする）
-    external_struct_generator::generate_stub_structs(&mut synthetic_items, &shared_registry);
+    // shared_types.rs 用: 外部型でない未定義型にもスタブ struct を生成（コンパイル可能にする）
+    external_struct_generator::generate_stub_structs(
+        &mut synthetic_items,
+        &shared_registry,
+        &synthetic,
+    );
 
     Ok(TranspileOutput {
         files: file_outputs,
@@ -231,6 +242,7 @@ fn register_synthetic_structs_in_registry(
 fn generate_external_structs_to_fixpoint(
     items: &mut Vec<crate::ir::Item>,
     registry: &crate::registry::TypeRegistry,
+    synthetic: &SyntheticTypeRegistry,
 ) {
     const MAX_ITERATIONS: usize = 10;
     for _ in 0..MAX_ITERATIONS {
@@ -243,7 +255,7 @@ fn generate_external_structs_to_fixpoint(
         names.sort();
         for type_name in &names {
             if let Some(struct_item) =
-                external_struct_generator::generate_external_struct(type_name, registry)
+                external_struct_generator::generate_external_struct(type_name, registry, synthetic)
             {
                 items.push(struct_item);
             }

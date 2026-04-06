@@ -78,7 +78,7 @@ impl<'a> OutputWriter<'a> {
     ///
     /// 各合成型の名前で全ファイルの生成コードを検索し、参照ファイル数で配置先を決定する:
     /// - 1 ファイルのみで参照 → `inline`（そのファイルの先頭に追加）
-    /// - 2+ ファイルで参照 → `shared_module`（`types.rs` に配置）
+    /// - 2+ ファイルで参照 → `shared_module`（専用 `.rs` ファイルに配置）
     /// - 0 ファイル → 未使用（どちらにも含まない）
     pub fn resolve_synthetic_placement(
         &self,
@@ -114,7 +114,7 @@ impl<'a> OutputWriter<'a> {
             match referencing_files.len() {
                 0 if referenced_by_synthetic => {
                     // file_outputs からは未参照だが、他の synthetic item から参照される
-                    // → shared module に配置（types.rs 内の相互依存を解決）
+                    // → shared module に配置（相互依存を解決）
                     shared_items.push(code.clone());
                 }
                 0 => {
@@ -138,13 +138,14 @@ impl<'a> OutputWriter<'a> {
             None
         } else {
             let body = shared_items.join("\n\n");
-            let imports = generate_types_rs_imports(&body);
+            let imports = generate_shared_module_imports(&body);
             let content = if imports.is_empty() {
                 body
             } else {
                 format!("{imports}\n\n{body}")
             };
-            Some((PathBuf::from("types.rs"), content))
+            let module_path = choose_shared_module_path(file_outputs);
+            Some((module_path, content))
         };
 
         SyntheticPlacement {
@@ -201,12 +202,21 @@ impl<'a> OutputWriter<'a> {
         let dirs = collect_dirs(output_dir, file_outputs);
         for dir in &dirs {
             let mod_content = self.generate_mod_rs(dir);
-            // 共有合成型モジュールがある場合、ルート mod.rs に pub mod types; を追加
-            let mod_content = if placement.shared_module.is_some() && dir == output_dir {
-                if mod_content.is_empty() {
-                    "pub mod types;".to_string()
+            // 共有合成型モジュールがある場合、ルート mod.rs に pub mod を追加
+            let mod_content = if let Some((ref types_rel_path, _)) = placement.shared_module {
+                if dir == output_dir {
+                    let stem = types_rel_path
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("shared_types");
+                    let mod_decl = format!("pub mod {stem};");
+                    if mod_content.is_empty() {
+                        mod_decl
+                    } else {
+                        format!("{mod_content}\n{mod_decl}")
+                    }
                 } else {
-                    format!("{mod_content}\npub mod types;")
+                    mod_content
                 }
             } else {
                 mod_content
@@ -227,6 +237,30 @@ impl<'a> OutputWriter<'a> {
     }
 }
 
+/// 共有合成型モジュールのファイルパスを決定する。
+///
+/// ユーザーの出力ファイルと衝突しない名前を選択する。
+/// デフォルトは `shared_types.rs`。衝突する場合はサフィックスを付与する。
+fn choose_shared_module_path(file_outputs: &[(PathBuf, String)]) -> PathBuf {
+    let existing: std::collections::HashSet<&Path> =
+        file_outputs.iter().map(|(p, _)| p.as_path()).collect();
+
+    let base = PathBuf::from("shared_types.rs");
+    if !existing.contains(base.as_path()) {
+        return base;
+    }
+
+    // 衝突回避: サフィックスを付与
+    for i in 0u32.. {
+        let candidate = PathBuf::from(format!("shared_types_{i}.rs"));
+        if !existing.contains(candidate.as_path()) {
+            return candidate;
+        }
+    }
+
+    unreachable!("infinite counter guarantees a unique name")
+}
+
 /// 合成型の識別名を取得する（ファイル内の参照検索に使用）。
 fn synthetic_type_name(item: &Item) -> String {
     match item {
@@ -241,11 +275,11 @@ fn synthetic_type_name(item: &Item) -> String {
     }
 }
 
-/// types.rs に必要なインポート文を生成する。
+/// 共有合成型モジュールに必要なインポート文を生成する。
 ///
-/// 生成されたコード内で使用されているが、types.rs 自身ではインポートされていない
+/// 生成されたコード内で使用されているが、モジュール自身ではインポートされていない
 /// クレートや標準ライブラリ型のインポートを検出して生成する。
-fn generate_types_rs_imports(code: &str) -> String {
+fn generate_shared_module_imports(code: &str) -> String {
     let mut imports = Vec::new();
 
     if code.contains("serde_json::") {
@@ -544,8 +578,130 @@ mod tests {
             .unwrap();
 
         assert!(
-            out.join("types.rs").exists(),
-            "types.rs should be created for shared synthetics"
+            out.join("shared_types.rs").exists(),
+            "shared_types.rs should be created for shared synthetics"
         );
+        // mod.rs に pub mod shared_types; が含まれる
+        let mod_content = std::fs::read_to_string(out.join("mod.rs")).unwrap();
+        assert!(
+            mod_content.contains("pub mod shared_types;"),
+            "mod.rs should contain pub mod shared_types: {mod_content}"
+        );
+    }
+
+    #[test]
+    fn test_write_to_directory_shared_synthetic_avoids_collision() {
+        let mg = ModuleGraph::empty();
+        let writer = OutputWriter::new(&mg);
+        let temp = tempfile::tempdir().unwrap();
+        let out = temp.path();
+
+        // ユーザーファイルに shared_types.rs が含まれる場合、衝突回避名を使用する
+        let files = vec![
+            (
+                PathBuf::from("shared_types.rs"),
+                "fn foo() -> SharedEnum { todo!() }".to_string(),
+            ),
+            (
+                PathBuf::from("b.rs"),
+                "fn bar() -> SharedEnum { todo!() }".to_string(),
+            ),
+        ];
+        let items = vec![make_synthetic_enum("SharedEnum")];
+
+        writer
+            .write_to_directory(out, &files, &items, false)
+            .unwrap();
+
+        // shared_types.rs は衝突するので shared_types_0.rs に配置
+        assert!(
+            out.join("shared_types_0.rs").exists(),
+            "shared_types_0.rs should be created when shared_types.rs collides"
+        );
+        // ユーザーの shared_types.rs は上書きされない
+        let user_content = std::fs::read_to_string(out.join("shared_types.rs")).unwrap();
+        assert!(
+            user_content.contains("fn foo()"),
+            "user file should not be overwritten: {user_content}"
+        );
+        // mod.rs に衝突回避後のモジュール名が含まれる
+        let mod_content = std::fs::read_to_string(out.join("mod.rs")).unwrap();
+        assert!(
+            mod_content.contains("pub mod shared_types_0;"),
+            "mod.rs should contain pub mod shared_types_0: {mod_content}"
+        );
+    }
+
+    #[test]
+    fn test_write_to_directory_types_rs_not_overwritten() {
+        let mg = ModuleGraph::empty();
+        let writer = OutputWriter::new(&mg);
+        let temp = tempfile::tempdir().unwrap();
+        let out = temp.path();
+
+        // ユーザーファイルに types.rs が含まれる場合（Hono のケース）
+        // SharedEnum が 2 ファイルから参照されるため shared module に配置される
+        let files = vec![
+            (
+                PathBuf::from("types.rs"),
+                "pub struct TypedResponse { data: SharedEnum }".to_string(),
+            ),
+            (
+                PathBuf::from("b.rs"),
+                "fn bar() -> SharedEnum { todo!() }".to_string(),
+            ),
+        ];
+        let items = vec![make_synthetic_enum("SharedEnum")];
+
+        writer
+            .write_to_directory(out, &files, &items, false)
+            .unwrap();
+
+        // types.rs はユーザーコードを含む
+        let types_content = std::fs::read_to_string(out.join("types.rs")).unwrap();
+        assert!(
+            types_content.contains("TypedResponse"),
+            "types.rs should contain user code: {types_content}"
+        );
+        // 共有合成型は shared_types.rs に配置（types.rs と衝突しない）
+        assert!(
+            out.join("shared_types.rs").exists(),
+            "shared_types.rs should be created"
+        );
+        let shared_content = std::fs::read_to_string(out.join("shared_types.rs")).unwrap();
+        assert!(
+            shared_content.contains("SharedEnum"),
+            "shared_types.rs should contain SharedEnum: {shared_content}"
+        );
+    }
+
+    #[test]
+    fn test_choose_shared_module_path_no_collision() {
+        let files: Vec<(PathBuf, String)> = vec![
+            (PathBuf::from("a.rs"), String::new()),
+            (PathBuf::from("b.rs"), String::new()),
+        ];
+        let result = choose_shared_module_path(&files);
+        assert_eq!(result, PathBuf::from("shared_types.rs"));
+    }
+
+    #[test]
+    fn test_choose_shared_module_path_collision() {
+        let files: Vec<(PathBuf, String)> = vec![
+            (PathBuf::from("shared_types.rs"), String::new()),
+            (PathBuf::from("b.rs"), String::new()),
+        ];
+        let result = choose_shared_module_path(&files);
+        assert_eq!(result, PathBuf::from("shared_types_0.rs"));
+    }
+
+    #[test]
+    fn test_choose_shared_module_path_double_collision() {
+        let files: Vec<(PathBuf, String)> = vec![
+            (PathBuf::from("shared_types.rs"), String::new()),
+            (PathBuf::from("shared_types_0.rs"), String::new()),
+        ];
+        let result = choose_shared_module_path(&files);
+        assert_eq!(result, PathBuf::from("shared_types_1.rs"));
     }
 }

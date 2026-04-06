@@ -14,7 +14,7 @@ Tier 内の記載順序が優先度。根本原因を共有するイシューは
 ~~`convert_ts_type` に型パラメータコンテキストがなく、型パラメータ制約の解決が不完全。~~
 
 - ~~**[I-299]** `convert_ts_type` に型パラメータコンテキスト導入~~ — SyntheticTypeRegistry.type_param_scope で合成型に伝播
-- ~~**[I-273]** trait/struct 混同（E0404）~~ — モノモーフィゼーションで解決。非 trait 制約を具象型で置換。ただし前方参照時は is_valid_trait_bound が正しく判定できず残存（I-367）
+- ~~**[I-273]** trait/struct 混同（E0404）~~ — モノモーフィゼーションで解決。非 trait 制約を具象型で置換。ビルトイン外部型の残存は I-369 で修正済み
 
 ---
 
@@ -56,10 +56,10 @@ OBJECT_LITERAL_NO_TYPE 全体で 25件。I-300/I-301/I-306 のサブ分類件数
 - **[I-336]** **super() がリテラル出力** — `generate_child_of_abstract()` で `rewrite_super_constructor()` 未呼出
 - **[I-337]** **trait default method でフィールドアクセス不可** — concrete メソッドの一律 trait 化。I-336 と強依存
 
-### RC-16: Hono types.rs の dir compile 阻害
+### ~~RC-16: Hono types.rs の dir compile 阻害~~ **Batch 11a で I-368+I-369 完了**
 
-- **[I-368]** **OutputWriter の `types.rs` パス衝突** — 共有合成型モジュールのパスが `types.rs` にハードコード（`output_writer.rs:147`）されており、ユーザーの `types.ts` → `types.rs` を上書きする。Hono types.rs のユーザー定義型が全て消失する主因。PRD → `backlog/i368-output-writer-types-rs-collision.md`
-- **[I-369]** **ビルトイン外部型のモノモーフィゼーション未適用** — `generate_external_struct`（`external_struct_generator/mod.rs:190`）が `type_params.clone()` でモノモーフィゼーションを適用せず、かつ `base_synthetic` が transformer の `file_synthetic` に伝播しないため `is_valid_trait_bound` がビルトイン合成型を発見不可。`ArrayBufferView`, `Uint8Array` で E0404、E0107 が発生。🔗 I-368 が前提（types.rs 上書きが未修正だとエラー確認不可）。PRD → `backlog/i369-builtin-type-monomorphization.md`
+- ~~**[I-368]** OutputWriter の `types.rs` パス衝突~~ — 共有合成型モジュールを `shared_types.rs` に衝突回避。dir compile 156→157
+- ~~**[I-369]** ビルトイン外部型のモノモーフィゼーション未適用~~ — `generate_external_struct` にモノモーフィゼーション適用 + `base_synthetic` 伝播
 - **[I-370]** **`Input['out']` の indexed access 解決失敗（E0405）** — `lookup_field_type`（`indexed_access.rs:271`）で `Input` の `out` フィールドが解決できず `Input::out` という修飾パスがそのまま出力される。モノモーフィゼーションとは別系統。Hono types.rs で 1 件
 
 ### ゲートイシュー・ブロッカー
@@ -107,6 +107,7 @@ OBJECT_LITERAL_NO_TYPE 全体で 25件。I-300/I-301/I-306 のサブ分類件数
 - **[I-102]** **any/unknown の残課題** — typeof/instanceof 未使用の any は Value のまま
 - **[I-274]** **フィールド名の IR サニタイズ不一致** — I-270c で顕在化見込み
 - **[I-279]** **resolve_synthetic_placement の O(n²)** — 大規模プロジェクトでボトルネック
+- **[I-371]** **合成型の単一正準配置欠如** — 合成型が複数の Rust モジュールに独立して定義される設計欠陥。同一ファイル内重複（E0428）+ クロスファイル冗長性 + shared_types.rs インポート欠如の 3 症状。Hono types.rs で E0428×5 + E0119×12 = 17 エラー。設計レベルの修正が必要（パイプラインの per-file loop + OutputWriter + 単一ファイル API の連動変更）。PRD → `backlog/i371-synthetic-type-canonical-placement.md`
 - **[I-62]** **is_string_type の Option\<String\> ハック除去**
 - **[I-293]** **全ファイルのテストケース体系的レビュー**
 

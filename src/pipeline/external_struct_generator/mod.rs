@@ -6,7 +6,9 @@
 use std::collections::HashSet;
 
 use crate::ir::{camel_to_snake, sanitize_field_name, Item, RustType, StructField, Visibility};
+use crate::pipeline::SyntheticTypeRegistry;
 use crate::registry::{TypeDef, TypeRegistry};
+use crate::ts_type_info::resolve::typedef::monomorphize_type_params;
 
 /// Rust の標準ライブラリ型・serde 型など、struct 生成が不要な型名のセット。
 const RUST_BUILTIN_TYPES: &[&str] = &[
@@ -129,7 +131,11 @@ pub fn collect_all_undefined_references(items: &[Item]) -> HashSet<String> {
 /// TypeRegistry に struct 情報がある型はフル生成（[`generate_external_struct`] 経由）、
 /// それ以外は空のユニット struct `pub struct TypeName;` を生成する。
 /// フル生成した struct が新たな未定義参照を生む場合に備え、固定点に達するまで反復する。
-pub fn generate_stub_structs(items: &mut Vec<Item>, registry: &TypeRegistry) {
+pub fn generate_stub_structs(
+    items: &mut Vec<Item>,
+    registry: &TypeRegistry,
+    synthetic: &SyntheticTypeRegistry,
+) {
     for _ in 0..10 {
         let undefined = collect_all_undefined_references(items);
         if undefined.is_empty() {
@@ -139,7 +145,7 @@ pub fn generate_stub_structs(items: &mut Vec<Item>, registry: &TypeRegistry) {
         let mut sorted: Vec<String> = undefined.into_iter().collect();
         sorted.sort();
         for name in sorted {
-            if let Some(full) = generate_external_struct(&name, registry) {
+            if let Some(full) = generate_external_struct(&name, registry, synthetic) {
                 items.push(full);
             } else {
                 items.push(Item::Struct {
@@ -155,8 +161,15 @@ pub fn generate_stub_structs(items: &mut Vec<Item>, registry: &TypeRegistry) {
 
 /// `TypeRegistry` のフィールド情報から外部型の `Item::Struct` を生成する。
 ///
+/// 非 trait 制約を持つ型パラメータはモノモーフィゼーションで除去し、
+/// フィールド型に制約型を置換する。
+///
 /// `TypeDef::Struct` 以外（`TypeDef::Enum`, `TypeDef::Function`）の場合は `None` を返す。
-pub fn generate_external_struct(name: &str, registry: &TypeRegistry) -> Option<Item> {
+pub fn generate_external_struct(
+    name: &str,
+    registry: &TypeRegistry,
+    synthetic: &SyntheticTypeRegistry,
+) -> Option<Item> {
     let typedef = registry.get(name)?;
     match typedef {
         TypeDef::Struct {
@@ -164,17 +177,22 @@ pub fn generate_external_struct(name: &str, registry: &TypeRegistry) -> Option<I
             fields,
             ..
         } => {
+            // モノモーフィゼーション: 非 trait 制約の型パラメータを具象型に置換
+            let (mono_params, mono_subs) =
+                monomorphize_type_params(type_params.clone(), registry, synthetic);
+
             let struct_fields: Vec<StructField> = fields
                 .iter()
                 .map(|field| {
+                    let ty = field.ty.substitute(&mono_subs);
                     // 自己参照フィールドを Box でラップ（再帰型の infinite size 防止）
-                    let ty = if references_type_name(&field.ty, name) {
+                    let ty = if references_type_name(&ty, name) {
                         RustType::Named {
                             name: "Box".to_string(),
-                            type_args: vec![field.ty.clone()],
+                            type_args: vec![ty],
                         }
                     } else {
-                        field.ty.clone()
+                        ty
                     };
                     StructField {
                         vis: Some(Visibility::Public),
@@ -187,7 +205,7 @@ pub fn generate_external_struct(name: &str, registry: &TypeRegistry) -> Option<I
             Some(Item::Struct {
                 vis: Visibility::Public,
                 name: name.to_string(),
-                type_params: type_params.clone(),
+                type_params: mono_params,
                 fields: struct_fields,
             })
         }
