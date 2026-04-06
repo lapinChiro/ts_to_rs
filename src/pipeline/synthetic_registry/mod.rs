@@ -574,6 +574,20 @@ pub(crate) fn variant_name_for_type(ty: &RustType) -> String {
                 format!("Tuple{}", parts.join(""))
             }
         }
+        RustType::QSelf {
+            qself,
+            trait_ref,
+            item,
+        } => {
+            // QSelf は union variant 名としては trait::item の連結を採用する。
+            // 例: `<T as Promise>::Output` → `PromiseOutput`
+            let trait_short = trait_ref
+                .name
+                .rsplit("::")
+                .next()
+                .unwrap_or(&trait_ref.name);
+            format!("{}{trait_short}{item}", variant_name_for_type(qself))
+        }
     }
 }
 

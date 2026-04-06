@@ -372,9 +372,16 @@ fn test_convert_type_alias_conditional_infer_returns_associated_type() {
                 name: "T".to_string(),
                 constraint: None
             }],
-            ty: RustType::Named {
-                name: "<T as Promise>::Output".to_string(),
-                type_args: vec![],
+            ty: RustType::QSelf {
+                qself: Box::new(RustType::Named {
+                    name: "T".to_string(),
+                    type_args: vec![],
+                }),
+                trait_ref: crate::ir::TraitRef {
+                    name: "Promise".to_string(),
+                    type_args: vec![],
+                },
+                item: "Output".to_string(),
             },
         }
     );

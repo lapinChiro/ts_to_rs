@@ -51,6 +51,113 @@ fn test_substitute_unrelated_type_unchanged() {
 }
 
 #[test]
+fn test_substitute_qself_substitutes_qself_inner() {
+    // <T as Promise>::Output に T→String → <String as Promise>::Output
+    let ty = RustType::QSelf {
+        qself: Box::new(RustType::Named {
+            name: "T".to_string(),
+            type_args: vec![],
+        }),
+        trait_ref: TraitRef {
+            name: "Promise".to_string(),
+            type_args: vec![],
+        },
+        item: "Output".to_string(),
+    };
+    let bindings = HashMap::from([("T".to_string(), RustType::String)]);
+    let expected = RustType::QSelf {
+        qself: Box::new(RustType::String),
+        trait_ref: TraitRef {
+            name: "Promise".to_string(),
+            type_args: vec![],
+        },
+        item: "Output".to_string(),
+    };
+    assert_eq!(ty.substitute(&bindings), expected);
+}
+
+#[test]
+fn test_substitute_qself_substitutes_trait_args() {
+    // <Self as Container<T>>::Item に T→F64 → <Self as Container<F64>>::Item
+    let ty = RustType::QSelf {
+        qself: Box::new(RustType::Named {
+            name: "Self".to_string(),
+            type_args: vec![],
+        }),
+        trait_ref: TraitRef {
+            name: "Container".to_string(),
+            type_args: vec![RustType::Named {
+                name: "T".to_string(),
+                type_args: vec![],
+            }],
+        },
+        item: "Item".to_string(),
+    };
+    let bindings = HashMap::from([("T".to_string(), RustType::F64)]);
+    let result = ty.substitute(&bindings);
+    if let RustType::QSelf { trait_ref, .. } = &result {
+        assert_eq!(trait_ref.type_args, vec![RustType::F64]);
+    } else {
+        panic!("expected QSelf, got {result:?}");
+    }
+}
+
+#[test]
+fn test_uses_param_qself_detects_param_in_qself_inner() {
+    // <T as Promise>::Output が T を使用していることを検出
+    let ty = RustType::QSelf {
+        qself: Box::new(RustType::Named {
+            name: "T".to_string(),
+            type_args: vec![],
+        }),
+        trait_ref: TraitRef {
+            name: "Promise".to_string(),
+            type_args: vec![],
+        },
+        item: "Output".to_string(),
+    };
+    assert!(ty.uses_param("T"));
+    assert!(!ty.uses_param("U"));
+}
+
+#[test]
+fn test_uses_param_qself_detects_param_in_trait_args() {
+    // <X as Container<T>>::Item が T を使用していることを検出
+    let ty = RustType::QSelf {
+        qself: Box::new(RustType::Named {
+            name: "X".to_string(),
+            type_args: vec![],
+        }),
+        trait_ref: TraitRef {
+            name: "Container".to_string(),
+            type_args: vec![RustType::Named {
+                name: "T".to_string(),
+                type_args: vec![],
+            }],
+        },
+        item: "Item".to_string(),
+    };
+    assert!(ty.uses_param("T"));
+}
+
+#[test]
+fn test_uses_param_qself_detects_param_as_trait_name() {
+    // <X as T>::Item — trait 名そのものが型パラメータ（理論上の境界ケース）
+    let ty = RustType::QSelf {
+        qself: Box::new(RustType::Named {
+            name: "X".to_string(),
+            type_args: vec![],
+        }),
+        trait_ref: TraitRef {
+            name: "T".to_string(),
+            type_args: vec![],
+        },
+        item: "Item".to_string(),
+    };
+    assert!(ty.uses_param("T"));
+}
+
+#[test]
 fn test_substitute_named_type_args() {
     // Container<T> に T→String → Container<String>
     let ty = RustType::Named {

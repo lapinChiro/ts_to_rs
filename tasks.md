@@ -993,39 +993,59 @@ C-2-1〜2-3 は Phase B に前倒し済（Phase B の依存解消のため）。
 着手時に各タスクのチェックボックスを更新する。
 完了 → `- [x]`、進行中 → そのまま、ブロック → コメント追記。
 
-進捗状況: **Phase A 完了（コミット済）、Phase B 完了（コミット待ち）**。
+進捗状況: **全 Phase 完了**（A〜G、+ self-review で発見した追加問題の構造解消）。
 
 ### Phase 完了サマリ
 
 | Phase | 状態 | テスト数 | クリーン |
 |-------|------|---------|---------|
-| A | 完了・コミット済 | lib 2012, placement 16, canonical_name 9, type_refs 8, output_writer skip 1 | clippy/fmt OK |
-| B | 完了・コミット待ち | output_writer 22 件全 pass、全 cargo test pass | clippy/fmt OK |
-| C | 部分進行（C-2 系は B に前倒し済、C-1 と最終削除のみ残） | — | — |
-| D | 未着手 | — | — |
-| E | 未着手 | — | — |
-| F | 未着手 | — | — |
-| G | 未着手 | — | — |
+| A | 完了・コミット済 (6564e02) | lib 2012, placement 16, canonical_name 9, type_refs 8 | clippy/fmt OK |
+| B | 完了・コミット済 (140285e) | output_writer 22 件全 pass | clippy/fmt OK |
+| C | 完了 | PerFileTransformed 外出し + FileOutput.file_synthetic_items 削除 | clippy/fmt OK |
+| D | 完了 | extract_single_output / transpile_single を `pipeline::placement::render_referenced_synthetics_for_file` 経由に統一 | clippy/fmt OK |
+| E | 完了 | `UndefinedRefScope` 共通骨格抽出、`collect_undefined_type_references` に `defined_only` 追加 | clippy/fmt OK |
+| F | 完了 | `tests/pipeline_placement_test.rs` 8 件 + 単体テスト多数 | clippy/fmt OK |
+| G | 完了 | quality-check / Hono ベンチ後退ゼロ確認 / TODO 更新 / plan.md 更新 | — |
 
-### 次回再開時の状態
+### Self-review で追加解消した問題（本セッション）
 
-- **作業ツリー**: Phase B の変更が staged 未 commit で残る想定（user による commit 後）
-- **次のタスク**: Phase C-1（PerFileTransformed 外出し）→ Phase D-1（extract_single_output IR 統合）
-- **特記事項**:
-  - `FileOutput::file_synthetic_items` は Phase B 時点では残置（Phase D で extract_single_output が `file.items` 経由に切り替わってから C-2-final で削除）
-  - `fn_with_param_type` は output_writer.rs に `#[allow(dead_code)]` で残置（Phase F の追加テストで使用予定）
-  - Phase B では C-2-1〜2-3 を前倒しで実施したため、Phase C は C-1 と C-2-final のみ
-  - Phase A レビュー時の TODO 追加: I-374（Rust 予約語の型名サニタイズ）
+| 課題 | 解消方法 |
+|------|---------|
+| `pipeline-integrity.md` ルール違反: `RustType::Named { name: "<T as Promise>::Output" }` の文字列詰め込み | `RustType::QSelf { qself, trait_ref, item }` 構造化変数を新設。construction site 2 箇所、generator/substitute/uses_param/walker/synthetic_registry の全 match site を更新 |
+| substring scan の単一ファイル API 残存 | `collect_type_refs_from_item` を fn body / impl body / closure / Cast / StructInit / FnCall まで再帰させる完全な IR walker を実装 |
+| `TypeParam::constraint` walker 漏れ（correctness バグ） | `collect_type_refs_from_type_params` を新設し、Struct/Enum/Trait/Fn/Impl/TypeAlias 全種別で walking |
+| `MatchArm::patterns` walker 漏れ（correctness バグ） | `collect_type_refs_from_match_arm` を新設、`MatchPattern::EnumVariant.path` の uppercase head を抽出 |
+| `Stmt::IfLet/WhileLet` `Expr::IfLet/Matches` の verbatim pattern 走査漏れ | `collect_type_refs_from_verbatim_pattern` を新設、パターン文字列先頭の identifier を抽出 |
+| impl-block 配置ロジックの単一/マルチファイル間非対称 | `SyntheticReferenceGraph::build` で「synthetic impl の対象 struct を file が定義していれば file を referencer として登録」semantics を組み込み、両 API で共通化 |
+| `Item::Fn` が `is_definition_item` から漏れ | 追加（同名 Fn 衝突防止） |
+| テスト品質: `test_unreferenced_synthetic_not_emitted` の弱い検証、`test_synthetic_chain` の連鎖でない検証 | 8 件の統合テストに分割・厳密化 |
+| `collect_undefined_type_references` / `collect_all_undefined_references` API 非対称 | `UndefinedRefScope` 構造体に共通骨格を抽出 |
+| 新規ロジックに対する自動テスト不在 | 単体テスト +72 件 + 統合テスト +8 件 = +80 件追加 |
+
+### 残課題（次セッションへ申し送り）
+
+本セッションで scope 拡大による回帰リスク累積を避けるため、以下 3 件は別バッチ（Batch 11c-fix-2）として分離した。**本来は本セッションで構造解消するべきだった課題**であり、`TODO` に詳細記載済。次セッションで最優先対応する。
+
+| ID | 概要 | 詳細 |
+|----|------|------|
+| **I-375** | `Expr::FnCall::name` の意味論的多義性（IR 構造化負債） | uppercase head ヒューリスティック / `RUST_BUILTIN_TYPES` への variant constructor ハードコードの workaround を、`enum CallTarget` 構造化で完全解消する |
+| **I-376** | クロスファイル外部型 stub の構造的重複 | per-file 生成と post-loop の二重生成を、pipeline 段階で構造的 dedup する |
+| **I-377** | walker / substitute / generator の手書き再帰の visitor pattern 化 | `IrVisitor` trait を導入して全再帰を統一 |
+
+これら 3 件の修正方針・影響範囲・テスト戦略は `TODO` に詳細記載済。次セッション開始時に Batch 11c-fix-2 として PRD 化または直接着手する。
 
 ---
 
-## 付録: snapshot 個別検証結果（F-2 完了時に記入）
+## 付録: snapshot 個別検証結果
+
+リファクタの結果、全 89 件の integration_test snapshot は **差分なしで pass**。Batch 11c-fix の構造解消は意味論的に snapshot 出力を変えなかった。
 
 | snapshot | 差分の種類 | 妥当性判定 |
 |----------|----------|----------|
-| basic_types | （F-2 で記入） | |
-| inline_type_literal_param | （F-2 で記入） | |
-| typeof_const | （F-2 で記入） | |
-| instanceof_builtin | （F-2 で記入） | |
-| external_type_struct | （F-2 で記入） | |
-| instanceof_builtin_with_builtins | （F-2 で記入） | |
+| basic_types | 差分なし | OK |
+| inline_type_literal_param | 差分なし | OK |
+| typeof_const | 差分なし | OK |
+| instanceof_builtin | 差分なし | OK |
+| external_type_struct | 差分なし | OK |
+| instanceof_builtin_with_builtins | 差分なし | OK |
+| その他 83 件 | 差分なし | OK |

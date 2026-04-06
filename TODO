@@ -110,6 +110,135 @@ OBJECT_LITERAL_NO_TYPE 全体で 25件。I-300/I-301/I-306 のサブ分類件数
 - **[I-103]** **エラー型戦略** — String 固定 → thiserror/anyhow
 - **[I-102]** **any/unknown の残課題** — typeof/instanceof 未使用の any は Value のまま
 - **[I-274]** **フィールド名の IR サニタイズ不一致** — I-270c で顕在化見込み
+- **[I-375]** **`Expr::FnCall::name` の意味論的多義性（IR 構造化負債）** [L2]
+
+  **問題**: `Expr::FnCall { name: String, args: Vec<Expr> }` は意味論的に多義であり、以下を全て同じ型で表現している:
+  - 自由関数呼び出し: `foo()`, `js_typeof(x)`
+  - モジュール修飾呼び出し: `scopeguard::guard(x)`, `std::mem::take(x)`
+  - Option/Result コンストラクタ: `Some(x)`, `None`, `Ok(x)`, `Err(x)`
+  - タプル struct コンストラクタ: `Wrapper(x)`
+  - 合成 enum variant コンストラクタ: `Color::Red(x)`, `LocalAnyDataType::String(s)`
+  - super 呼び出し（class inheritance 文脈）: `super(args)`
+
+  この多義性により、参照グラフを構築する walker (`src/pipeline/external_struct_generator/mod.rs:516 collect_type_refs_from_expr` の `Expr::FnCall` 分岐) は call kind を構造的に判別できず、「先頭セグメントが ASCII 大文字なら型参照と見なす」という Rust 命名規約依存のヒューリスティックを使う。同根の workaround として `RUST_BUILTIN_TYPES`（`src/pipeline/external_struct_generator/mod.rs:17`）に variant constructor 名 `Some / None / Ok / Err` をハードコードしている。
+
+  **顕在化シナリオ**:
+  1. **lowercase クラス名の TypeScript ソース**: TS の `class myClass {}` は `sanitize_rust_type_name`（`src/ir/mod.rs:257`）で大文字化されないため Rust 側でも `pub struct myClass`。`myClass::new()` 呼び出しは `Expr::FnCall { name: "myClass::new" }` となり、walker は uppercase head 判定で **スキップ** → `myClass` への参照が捕捉されない → 単一ファイル API で synthetic 配置されない場合に参照漏れが発生する可能性がある。
+  2. **uppercase free function**: 慣例上稀だが、TS で関数名 `Foo()` を使っている場合、walker は `Foo` を型参照と誤認し `pub struct Foo {}` を生成する可能性がある。`is_external` フィルタが効く範囲では問題にならないが、`collect_all_undefined_references` 経路では stub 生成に至る。
+
+  **修正方針** (理想形):
+  ```rust
+  pub enum Expr {
+      FnCall {
+          target: CallTarget,
+          args: Vec<Expr>,
+      },
+      // ...
+  }
+
+  pub enum CallTarget {
+      /// 自由関数 / モジュール修飾呼び出し（型参照ではない）
+      Function { path: String },
+      /// Option / Result の variant コンストラクタ（builtin、stub 不要）
+      BuiltinVariant(BuiltinCtor),
+      /// タプル struct / unit struct コンストラクタ（型名 = name）
+      TupleStruct { type_name: String },
+      /// 合成 enum variant コンストラクタ（型名 = enum_name）
+      EnumVariant { enum_name: String, variant: String },
+      /// super(args) 形式（class inheritance 専用）
+      Super,
+  }
+
+  pub enum BuiltinCtor { Some, None, Ok, Err }
+  ```
+
+  Walker は CallTarget を構造的に分岐し、`TupleStruct.type_name` と `EnumVariant.enum_name` のみを型参照として登録する。`BuiltinVariant` は無視。`Function` は無視。`Super` は無視。`RUST_BUILTIN_TYPES` から `Some/None/Ok/Err` を削除。
+
+  **影響範囲**:
+  - `Expr::FnCall` 構築サイト: 37+ 箇所（src/transformer 配下、`grep -rn "Expr::FnCall {" src/transformer/ | grep -v test` で確認）
+  - generator: `src/generator/expressions/mod.rs:204` 1 箇所（CallTarget の各 variant 別に format ロジック）
+  - `ir/substitute.rs`: `Expr::FnCall` 分岐 1 箇所
+  - 参照グラフ walker: `src/pipeline/external_struct_generator/mod.rs:516`
+  - tests: production 構築 + walker 単体テスト + snapshot 更新可能性
+  - 連動 task: 同根の workaround `RUST_BUILTIN_TYPES` に追加した `"Some", "None", "Ok", "Err"` の削除（`src/pipeline/external_struct_generator/mod.rs:21`）
+
+  **テスト戦略**:
+  - 単体: 各 CallTarget variant の構築・走査・generate を個別テスト
+  - 統合: lowercase クラス名 TS を入力として参照漏れがないことを confirm
+  - 回帰: 既存 snapshot 全件 pass を確認、Hono ベンチで dir compile/error instances の後退ゼロを確認
+
+- **[I-376]** **クロスファイル外部型 stub の構造的重複** [L3]
+
+  **問題**: `transpile_pipeline` (`src/pipeline/mod.rs`) は同一の外部型（例: builtin `ArrayBuffer`）を 2 重に生成する:
+  1. **per-file** loop (`src/pipeline/mod.rs:177-184`): 各ファイルの `all_items` に対し `generate_external_structs_to_fixpoint` を呼び、参照される外部型を `pub struct ArrayBuffer { ... }` として **`file_outputs[i].items` に追加**
+  2. **post-loop** (`src/pipeline/mod.rs:215-221`): 同関数を `synthetic_items` に対しても呼び、同じ `pub struct ArrayBuffer` を **`synthetic_items` に追加**
+
+  この結果、`Date` / `Error` / `ArrayBuffer` 等の外部型 struct が file.items と synthetic_items の両方に存在する。出力時の重複は `pipeline::placement::render_referenced_synthetics_for_file` の `is_definition_item` dedup（`src/pipeline/placement.rs:225`）で防いでいるが、これは「出力時 patch」であり、生成段階で構造的に dedup していない。
+
+  **顕在化シナリオ**:
+  - 単一ファイル API では出力時 dedup で問題にならない。
+  - マルチファイル API では `OutputWriter::resolve_synthetic_placement` が同名 struct を share に置く際に conflict 回避ロジックが動くが、内部実装が異なる場合（per-file 生成時のフィールドと post-loop 生成時のフィールドが TypeRegistry の状態差で異なる場合）silent semantic divergence の可能性がある。
+  - メモリ・処理時間の二重コスト。
+
+  **修正方針**:
+  1. per-file 段階で生成された外部型 struct を file.items に **入れない**。代わりに「このファイルが参照する外部型名集合」を `transformed[i].external_refs: HashSet<String>` として記録。
+  2. post-loop で全ファイル分の external_refs を union し、その全てを synthetic_items に **一度だけ** 生成。
+  3. 結果として `synthetic_items` が外部型 struct の唯一の真実の源になり、`OutputWriter` の placement で適切に shared/inline 配置される。
+  4. `render_referenced_synthetics_for_file` の `is_definition_item` dedup は不要になる（synthetic と file の重複が構造的に発生しなくなる）。
+
+  **影響範囲**:
+  - `src/pipeline/mod.rs:120-225` (Pass 4 / Pass 5)
+  - `src/pipeline/types.rs::PerFileTransformed` の構造拡張
+  - `src/pipeline/placement.rs::render_referenced_synthetics_for_file` の dedup 削除
+  - `src/pipeline/output_writer.rs::resolve_synthetic_placement` のテスト確認
+  - tests: snapshot 全件 + 統合テスト `tests/pipeline_placement_test.rs`
+
+  **テスト戦略**:
+  - 統合: 既存の `test_cross_file_synthetic_dedup_via_shared_types` が引き続き pass
+  - 新規: per-file の `file.items` に外部型 struct が含まれないことを直接 assert
+  - Hono: dir compile / error instances 後退ゼロ
+
+- **[I-377]** **walker / substitute / generator の手書き再帰の visitor pattern 化** [L3]
+
+  **問題**: 現在 `Stmt` / `Expr` / `RustType` / `Item` を再帰的に走査するロジックが複数箇所に手書きで存在する:
+  - `src/pipeline/external_struct_generator/mod.rs::collect_type_refs_from_item / _stmt / _expr / _rust_type` (本セッションで追加)
+  - `src/ir/substitute.rs::Stmt::substitute / Expr::substitute / Item::substitute` (既存)
+  - 将来追加される類似処理
+
+  これらは全て同じ「IR 全要素への再帰」パターンを実装しており、新しい variant が追加された場合に **全箇所を更新する必要がある**。Rust の `match` 網羅性チェックで漏れは compile-time に検出されるため immediate な correctness は保証されるが、変更コストが線形に増えていく。本セッションでは `collect_type_refs_from_item` に type_params constraint walking と verbatim pattern walking を追加したが、`substitute.rs` には同様の追加は反映されていない。
+
+  **修正方針**:
+  ```rust
+  pub trait IrVisitor {
+      fn visit_item(&mut self, item: &Item) { walk_item(self, item); }
+      fn visit_stmt(&mut self, stmt: &Stmt) { walk_stmt(self, stmt); }
+      fn visit_expr(&mut self, expr: &Expr) { walk_expr(self, expr); }
+      fn visit_rust_type(&mut self, ty: &RustType) { walk_rust_type(self, ty); }
+      fn visit_match_pattern(&mut self, pat: &MatchPattern) { walk_match_pattern(self, pat); }
+      // ...
+  }
+
+  pub fn walk_item<V: IrVisitor + ?Sized>(v: &mut V, item: &Item) {
+      match item {
+          Item::Struct { type_params, fields, .. } => {
+              for tp in type_params { if let Some(c) = &tp.constraint { v.visit_rust_type(c); } }
+              for f in fields { v.visit_rust_type(&f.ty); }
+          }
+          // ... 全 variant
+      }
+  }
+  ```
+
+  Visitor は SWC AST の visitor pattern (`swc_ecma_visit::Visit`) と同型。各 walker は `IrVisitor` を実装し、必要なノードだけ override する。`collect_type_refs_from_item` は `TypeRefCollector` 構造体として再実装され、`visit_rust_type` で refs に登録する。
+
+  **影響範囲**:
+  - `src/ir/visit.rs` 新規（trait + walk 関数）
+  - `src/pipeline/external_struct_generator/mod.rs::collect_type_refs_*` を `TypeRefCollector` に書き換え
+  - `src/ir/substitute.rs` を visitor ベースの `Substitute` に書き換え
+  - `src/transformer/expressions/mod.rs::expr_contains_runtime_typeof` 等の散発的な再帰も visitor 化候補
+  - tests: 新規 visitor の単体テスト + 既存テスト全 pass
+
+  **修正コスト**: 中〜大。AST node 数（Stmt/Expr/Item/RustType/MatchPattern）× 既存 walker 数の積で工数が決まる。
 - **[I-374]** **Rust 予約語と衝突する型名のサニタイズ** — TypeScript で `interface Self {}` のように Rust の予約語を識別子として使った場合、生成 Rust で `pub struct Self {}` となり Rust 予約語衝突でコンパイル不可。現在 `src/pipeline/external_struct_generator/mod.rs` の `collect_type_refs_from_rust_type` で `Self` のみを band-aid 除外しているが、根本治療は IR レベルで型名をサニタイズすること（例: `Self` → `Self_` または `_Self`）。対象は Rust の type-position 予約語: `Self`, `crate`, `super`, `extern`, `dyn`, `impl` 等。修正方針: (1) `src/registry/mod.rs` または `src/transformer/types/converter.rs` で TS 識別子 → Rust 型名変換時に予約語チェック → サニタイズ。(2) ユーザーコード側の参照（`new Self(...)` 等）も同期してリネーム。(3) `collect_type_refs_from_rust_type` の Self band-aid を削除。修正コスト: 中。テスト: TS `interface Self { x: number; }` を入力にして Rust `struct Self_` が生成されることを確認
 - **[I-279]** **resolve_synthetic_placement の O(n²)** — 大規模プロジェクトでボトルネック
 - **[I-62]** **is_string_type の Option\<String\> ハック除去**

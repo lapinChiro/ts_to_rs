@@ -98,16 +98,30 @@ pub struct FileOutput {
     pub rust_source: String,
     /// Unsupported syntax entries encountered during transformation.
     pub unsupported: Vec<UnsupportedSyntaxError>,
-    /// このファイルの transformer が新たに生成した合成型のスナップショット。
-    /// I-371: 単一ファイル API は OutputWriter を経由しないため、これを `rust_source`
-    /// 先頭に結合して旧来の出力互換を保つ。Directory mode では `synthetic_items`
-    /// （TranspileOutput 側）が OutputWriter で配置されるためこのフィールドは使用されない。
-    pub file_synthetic_items: Vec<crate::ir::Item>,
     /// `rust_source` を生成した IR 全体（user code + per-file 外部型 struct を含む、
     /// per-file 合成型は除く）。
     /// I-371: OutputWriter が IR ベース placement を行うために必要。directory mode で
     /// `OutputWriter::write_to_directory` の `OutputFile.items` として渡される。
+    /// 単一ファイル API（`extract_single_output` / `transpile_single`）では、これを
+    /// `pipeline::placement::SyntheticReferenceGraph` の入力にして、参照される合成型のみを
+    /// `rust_source` 先頭に結合する。
     pub items: Vec<crate::ir::Item>,
+}
+
+/// Pass 4 (transform) と Pass 5 (code generation) の間で各ファイルの transform 結果を
+/// 保持する内部構造体。
+///
+/// I-371: クロスファイル冗長定義を解消するため、Pass 4 を全ファイル分完了させて synthetic
+/// registry を確定してから Pass 5 を回す。その間の per-file 状態をここで保持する。
+pub(crate) struct PerFileTransformed {
+    pub path: PathBuf,
+    pub source: String,
+    pub items: Vec<crate::ir::Item>,
+    pub unsupported: Vec<UnsupportedSyntaxError>,
+    /// このファイルの transformer が新たに生成した合成型のスナップショット。
+    /// per-file の外部型 struct 生成時、参照スキャンの対象とする
+    /// （クロスファイル合成型は global_synthetic_items 経由で「定義済み」扱いだけする）。
+    pub file_synthetic_items: Vec<crate::ir::Item>,
 }
 
 /// `OutputWriter` に渡すファイル情報のビュー。

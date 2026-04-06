@@ -525,9 +525,16 @@ fn try_convert_infer_pattern(
 
     // Generate `<T as Foo>::Output`
     Ok(Some((
-        RustType::Named {
-            name: format!("<{check_name} as {container_name}>::Output"),
-            type_args: vec![],
+        RustType::QSelf {
+            qself: Box::new(RustType::Named {
+                name: check_name,
+                type_args: vec![],
+            }),
+            trait_ref: crate::ir::TraitRef {
+                name: container_name.clone(),
+                type_args: vec![],
+            },
+            item: "Output".to_string(),
         },
         container_name,
     )))

@@ -19,6 +19,7 @@ mod types;
 
 pub use module_graph::{ExportOrigin, ModuleGraph, ModuleGraphBuilder, ResolvedImport};
 pub use synthetic_registry::{SyntheticTypeDef, SyntheticTypeKind, SyntheticTypeRegistry};
+pub(crate) use types::PerFileTransformed;
 pub use types::{
     FileOutput, ModuleResolver, NullModuleResolver, OutputFile, ParsedFile, ParsedFiles,
     ResolvedType, TranspileInput, TranspileOutput,
@@ -125,16 +126,6 @@ pub fn transpile_pipeline(input: TranspileInput) -> Result<TranspileOutput> {
     // という合成型を生成し、file B がそれを参照する場合、file B 単体では未定義に見えるが、
     // 実際にはグローバルに存在する。Pass 4 を完了してから Pass 5 を回すことで、stub 生成
     // が「真に未定義の型」だけを対象にできる。
-    struct PerFileTransformed {
-        path: std::path::PathBuf,
-        source: String,
-        items: Vec<crate::ir::Item>,
-        unsupported: Vec<crate::transformer::UnsupportedSyntaxError>,
-        /// このファイルの transformer が新たに生成した合成型のスナップショット。
-        /// per-file の外部型 struct 生成時、参照スキャンの対象とする
-        /// （クロスファイル合成型は global_synthetic_items 経由で「定義済み」扱いだけする）。
-        file_synthetic_items: Vec<crate::ir::Item>,
-    }
     let mut transformed: Vec<PerFileTransformed> = Vec::with_capacity(parsed.files.len());
     for (((file, type_resolution), any_synthetic), resolver_synthetic) in parsed
         .files
@@ -186,6 +177,7 @@ pub fn transpile_pipeline(input: TranspileInput) -> Result<TranspileOutput> {
         generate_external_structs_to_fixpoint(
             &mut all_items,
             &tf.file_synthetic_items,
+            &global_synthetic_items,
             &shared_registry,
             &synthetic,
         );
@@ -210,7 +202,6 @@ pub fn transpile_pipeline(input: TranspileInput) -> Result<TranspileOutput> {
             source: tf.source,
             rust_source,
             unsupported: tf.unsupported,
-            file_synthetic_items: tf.file_synthetic_items,
             items: all_items,
         });
     }
@@ -223,7 +214,13 @@ pub fn transpile_pipeline(input: TranspileInput) -> Result<TranspileOutput> {
     let mut synthetic_items = global_synthetic_items;
 
     // 共有 synthetic items 内で参照されている外部型の struct も生成（推移的依存を含む）
-    generate_external_structs_to_fixpoint(&mut synthetic_items, &[], &shared_registry, &synthetic);
+    generate_external_structs_to_fixpoint(
+        &mut synthetic_items,
+        &[],
+        &[],
+        &shared_registry,
+        &synthetic,
+    );
 
     // shared_types.rs 用: 外部型でない未定義型にもスタブ struct を生成（コンパイル可能にする）
     external_struct_generator::generate_stub_structs(
@@ -292,6 +289,7 @@ fn register_synthetic_structs_in_registry(
 fn generate_external_structs_to_fixpoint(
     items: &mut Vec<crate::ir::Item>,
     scan_context: &[crate::ir::Item],
+    defined_only: &[crate::ir::Item],
     registry: &crate::registry::TypeRegistry,
     synthetic: &SyntheticTypeRegistry,
 ) {
@@ -300,6 +298,7 @@ fn generate_external_structs_to_fixpoint(
         let undefined_refs = external_struct_generator::collect_undefined_type_references(
             items,
             scan_context,
+            defined_only,
             registry,
         );
         if undefined_refs.is_empty() {
@@ -332,19 +331,22 @@ pub fn transpile_single(source: &str) -> Result<String> {
         module_resolver: Box::new(crate::pipeline::module_resolver::TrivialResolver),
     };
     let output = transpile_pipeline(input)?;
-    let file = output.files.into_iter().next();
-    let Some(file) = file else {
+    let TranspileOutput {
+        files,
+        synthetic_items,
+        ..
+    } = output;
+    let Some(file) = files.into_iter().next() else {
         return Ok(String::new());
     };
-    // file.file_synthetic_items はこのファイル自身が生成した合成型のみ。
-    // post-loop で追加された stub などを混入させない。
-    let synthetic_code = crate::generator::generate(&file.file_synthetic_items);
-    if synthetic_code.is_empty() {
+    let prepended =
+        placement::render_referenced_synthetics_for_file(&file.path, &file.items, &synthetic_items);
+    if prepended.is_empty() {
         Ok(file.rust_source)
     } else if file.rust_source.is_empty() {
-        Ok(synthetic_code)
+        Ok(prepended)
     } else {
-        Ok(format!("{synthetic_code}\n\n{}", file.rust_source))
+        Ok(format!("{prepended}\n\n{}", file.rust_source))
     }
 }
 

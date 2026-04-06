@@ -21,15 +21,24 @@ fn test_convert_type_alias_conditional_type_infer_pattern_generates_associated_t
     match &items[0] {
         Item::TypeAlias { name, ty, .. } => {
             assert_eq!(name, "X");
-            // The type should reference an associated type like <T as Promise>::Output
+            // The type should be a structured QSelf reference: <T as Promise>::Output
             match ty {
-                RustType::Named { name, .. } => {
-                    assert!(
-                        name.contains("Promise") && name.contains("Output"),
-                        "expected associated type path, got: {name}"
+                RustType::QSelf {
+                    qself,
+                    trait_ref,
+                    item,
+                } => {
+                    assert_eq!(
+                        **qself,
+                        RustType::Named {
+                            name: "T".to_string(),
+                            type_args: vec![],
+                        }
                     );
+                    assert_eq!(trait_ref.name, "Promise");
+                    assert_eq!(item, "Output");
                 }
-                other => panic!("expected Named type, got: {other:?}"),
+                other => panic!("expected QSelf type, got: {other:?}"),
             }
         }
         other => panic!("expected TypeAlias item, got: {other:?}"),

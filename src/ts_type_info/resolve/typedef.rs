@@ -331,6 +331,9 @@ pub(crate) fn is_valid_trait_bound(
         }
         // DynTrait は常に有効
         RustType::DynTrait(_) => true,
+        // QSelf (`<T as Trait>::Item`) 自体は associated type の参照であり trait bound
+        // としては valid ではない（trait bound の対象は trait 名）
+        RustType::QSelf { .. } => false,
     }
 }
 

@@ -55,6 +55,22 @@ impl RustType {
                 params: params.iter().map(|p| p.substitute(bindings)).collect(),
                 return_type: Box::new(return_type.substitute(bindings)),
             },
+            RustType::QSelf {
+                qself,
+                trait_ref,
+                item,
+            } => RustType::QSelf {
+                qself: Box::new(qself.substitute(bindings)),
+                trait_ref: TraitRef {
+                    name: trait_ref.name.clone(),
+                    type_args: trait_ref
+                        .type_args
+                        .iter()
+                        .map(|a| a.substitute(bindings))
+                        .collect(),
+                },
+                item: item.clone(),
+            },
             other => other.clone(),
         }
     }

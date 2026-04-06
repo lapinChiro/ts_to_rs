@@ -80,6 +80,22 @@ pub enum RustType {
     ///
     /// Used with `Ref` for `&dyn Trait` parameters and with `Named { name: "Box" }` for `Box<dyn Trait>`.
     DynTrait(String),
+    /// 限定パス型: `<Self as Trait<Args>>::Item`（associated type 参照）
+    ///
+    /// 用途: TypeScript の conditional type の `infer` 抽出。
+    /// 例えば `T extends Promise<infer U> ? U : never` は、ヘルパ trait `Promise<Output>`
+    /// を導入したうえで `<T as Promise>::Output` という qualified path として表現する。
+    ///
+    /// `pipeline-integrity.md` に従い、display-formatted 文字列を `Named.name` に
+    /// 詰め込むのではなく構造化して保持する。
+    QSelf {
+        /// `<` の中の self 型（例: `T`）
+        qself: Box<RustType>,
+        /// 限定の対象 trait（例: `Promise<U>`）
+        trait_ref: TraitRef,
+        /// `::` の後ろの associated item 名（例: `Output`）
+        item: String,
+    },
 }
 
 impl RustType {
@@ -87,11 +103,7 @@ impl RustType {
     pub fn uses_param(&self, param: &str) -> bool {
         match self {
             RustType::Named { name, type_args } => {
-                name == param
-                    // Handle qualified paths like `<T as Promise>::Output`
-                    || name.contains(&format!("<{param} "))
-                    || name.contains(&format!("<{param}>"))
-                    || type_args.iter().any(|a| a.uses_param(param))
+                name == param || type_args.iter().any(|a| a.uses_param(param))
             }
             RustType::Option(inner) | RustType::Vec(inner) | RustType::Ref(inner) => {
                 inner.uses_param(param)
@@ -103,6 +115,13 @@ impl RustType {
                 return_type,
             } => params.iter().any(|p| p.uses_param(param)) || return_type.uses_param(param),
             RustType::DynTrait(name) => name == param,
+            RustType::QSelf {
+                qself, trait_ref, ..
+            } => {
+                qself.uses_param(param)
+                    || trait_ref.name == param
+                    || trait_ref.type_args.iter().any(|a| a.uses_param(param))
+            }
             _ => false,
         }
     }

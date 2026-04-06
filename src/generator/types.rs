@@ -60,6 +60,24 @@ pub fn generate_type(ty: &RustType) -> String {
         }
         RustType::Ref(inner) => format!("&{}", generate_type(inner)),
         RustType::DynTrait(name) => format!("dyn {name}"),
+        RustType::QSelf {
+            qself,
+            trait_ref,
+            item,
+        } => {
+            let trait_str = if trait_ref.type_args.is_empty() {
+                trait_ref.name.clone()
+            } else {
+                let args = trait_ref
+                    .type_args
+                    .iter()
+                    .map(generate_type)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{}<{args}>", trait_ref.name)
+            };
+            format!("<{} as {trait_str}>::{item}", generate_type(qself))
+        }
     }
 }
 
@@ -219,5 +237,54 @@ mod tests {
             return_type: Box::new(RustType::Unit),
         };
         assert_eq!(generate_type(&ty), "Box<dyn Fn()>");
+    }
+
+    #[test]
+    fn test_generate_type_qself_simple() {
+        let ty = RustType::QSelf {
+            qself: Box::new(RustType::Named {
+                name: "T".to_string(),
+                type_args: vec![],
+            }),
+            trait_ref: crate::ir::TraitRef {
+                name: "Promise".to_string(),
+                type_args: vec![],
+            },
+            item: "Output".to_string(),
+        };
+        assert_eq!(generate_type(&ty), "<T as Promise>::Output");
+    }
+
+    #[test]
+    fn test_generate_type_qself_with_trait_args() {
+        let ty = RustType::QSelf {
+            qself: Box::new(RustType::Named {
+                name: "T".to_string(),
+                type_args: vec![],
+            }),
+            trait_ref: crate::ir::TraitRef {
+                name: "Container".to_string(),
+                type_args: vec![RustType::String],
+            },
+            item: "Item".to_string(),
+        };
+        assert_eq!(generate_type(&ty), "<T as Container<String>>::Item");
+    }
+
+    #[test]
+    fn test_generate_type_qself_with_complex_qself() {
+        // <Vec<Foo> as Promise>::Output
+        let ty = RustType::QSelf {
+            qself: Box::new(RustType::Vec(Box::new(RustType::Named {
+                name: "Foo".to_string(),
+                type_args: vec![],
+            }))),
+            trait_ref: crate::ir::TraitRef {
+                name: "Promise".to_string(),
+                type_args: vec![],
+            },
+            item: "Output".to_string(),
+        };
+        assert_eq!(generate_type(&ty), "<Vec<Foo> as Promise>::Output");
     }
 }

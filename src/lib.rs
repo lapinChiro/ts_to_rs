@@ -168,73 +168,31 @@ fn run_single_file_pipeline(
 ///
 /// I-371: 合成型は per-file rust_source に埋め込まれず synthetic プールに集約される。
 /// `base_synthetic`（builtin など）には未参照の型が大量に含まれうるため、
-/// 参照スキャンでフィルタしてから結合する（OutputWriter と同じ方針）。
+/// IR ベースで参照グラフを構築してから結合する（OutputWriter と同じ方針）。
 fn extract_single_output(output: pipeline::TranspileOutput) -> Result<pipeline::FileOutput> {
-    let _ = output.synthetic_items; // 単一ファイルでは file 側の synthetic を使用
-    let mut file = output
-        .files
+    let pipeline::TranspileOutput {
+        files,
+        synthetic_items,
+        ..
+    } = output;
+    let mut file = files
         .into_iter()
         .next()
         .ok_or_else(|| anyhow::anyhow!("pipeline returned no output files"))?;
 
-    // 参照スキャン: rust_source 内に名前が出現する合成型のみを採用。
-    // file.file_synthetic_items はこのファイル自身が生成した合成型のみを含むため、
-    // 他ファイル/post-loop 由来の不要な synthetic stub が混入しない（criterion 1/3 と整合）。
-    let synthetic_items = std::mem::take(&mut file.file_synthetic_items);
-    let referenced_code = collect_referenced_synthetic_code(&file.rust_source, &synthetic_items);
-    if !referenced_code.is_empty() {
+    let prepended = pipeline::placement::render_referenced_synthetics_for_file(
+        &file.path,
+        &file.items,
+        &synthetic_items,
+    );
+    if !prepended.is_empty() {
         file.rust_source = if file.rust_source.is_empty() {
-            referenced_code
+            prepended
         } else {
-            format!("{referenced_code}\n\n{}", file.rust_source)
+            format!("{prepended}\n\n{}", file.rust_source)
         };
     }
     Ok(file)
-}
-
-/// `rust_source` から参照されている合成型のコードを推移的に収集する。
-fn collect_referenced_synthetic_code(rust_source: &str, synthetic_items: &[ir::Item]) -> String {
-    if synthetic_items.is_empty() {
-        return String::new();
-    }
-    let generated: Vec<(String, String)> = synthetic_items
-        .iter()
-        .filter_map(|item| {
-            // canonical_name() == None の Item（Use/Comment/RawCode）は配置対象外。
-            // 空文字列で contains() を呼ぶと全ファイルにマッチしてしまうため必ず skip する。
-            let name = item.canonical_name()?.to_string();
-            let code = crate::generator::generate(std::slice::from_ref(item));
-            Some((name, code))
-        })
-        .collect();
-
-    let mut included = vec![false; generated.len()];
-    let mut accumulated = rust_source.to_string();
-    loop {
-        let mut added_any = false;
-        for (idx, (name, code)) in generated.iter().enumerate() {
-            if included[idx] || name.is_empty() {
-                continue;
-            }
-            if accumulated.contains(name) {
-                included[idx] = true;
-                accumulated.push_str("\n\n");
-                accumulated.push_str(code);
-                added_any = true;
-            }
-        }
-        if !added_any {
-            break;
-        }
-    }
-
-    let parts: Vec<&str> = generated
-        .iter()
-        .enumerate()
-        .filter(|(i, _)| included[*i])
-        .map(|(_, (_, code))| code.as_str())
-        .collect();
-    parts.join("\n\n")
 }
 
 #[cfg(test)]

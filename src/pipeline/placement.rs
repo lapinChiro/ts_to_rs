@@ -61,12 +61,37 @@ impl SyntheticReferenceGraph {
             names_in_order.push(name.to_string());
         }
 
-        // 2. user file ごとに、その items を walk して合成型名への参照を収集
+        // 2. 合成型の中で「定義系」(`Item::Impl`) は、文法上 struct/enum と密結合
+        //    である。`impl Foo` を生成し、`struct Foo` が user file F で定義されて
+        //    いるなら、その impl は文法上 F に属さなければ Rust 上意味を成さない。
+        //    したがって impl item の `canonical_name`（= `struct_name`）を file F が
+        //    定義していれば、F を impl の "referencer" として扱う。
+        //
+        //    これを per_file 走査前に計算し、後段の `direct_referencers` に集約する
+        //    ことで、`render_referenced_synthetics_for_file`（単一ファイル API）と
+        //    `OutputWriter::resolve_synthetic_placement`（マルチファイル API）が同じ
+        //    semantics を共有する。
+        let synthetic_impl_targets: HashSet<&str> = synthetic_items
+            .iter()
+            .filter_map(|i| match i {
+                Item::Impl { struct_name, .. } => Some(struct_name.as_str()),
+                _ => None,
+            })
+            .collect();
+
+        // 3. user file ごとに、その items を walk して合成型名への参照を収集
         let mut direct_referencers: HashMap<String, BTreeSet<PathBuf>> = HashMap::new();
         for (path, items) in per_file_items {
             let mut refs: HashSet<String> = HashSet::new();
             for item in *items {
                 collect_type_refs_from_item(item, &mut refs);
+                // file が定義する型が synthetic impl の対象なら、その型名を参照と
+                // して扱う（impl 配置を struct 定義に追従させるため）。
+                if let Some(name) = item.canonical_name() {
+                    if synthetic_impl_targets.contains(name) {
+                        refs.insert(name.to_string());
+                    }
+                }
             }
             for r in refs {
                 if code.contains_key(&r) {
@@ -168,10 +193,87 @@ impl SyntheticReferenceGraph {
     }
 }
 
+/// 単一ファイル API 向けに、`file_items` から（推移的に）参照される合成型のコードを
+/// 生成して返す。
+///
+/// アルゴリズム:
+/// 1. IR ベース参照グラフで `file_items` から直接参照される合成型を起点に、合成型間の
+///    依存関係の推移閉包を取り「必要な合成型名集合」を求める。`collect_type_refs_from_item`
+///    は fn body / impl method body / struct literal を含む全 IR を歩くため、ここで
+///    substring scan は不要。
+/// 2. struct/enum/trait/type alias の合成 Item は `file_items` に同名定義が存在する場合
+///    は出力しない（per-file 外部型 struct 生成と post-loop の重複対策）。impl ブロック
+///    のような非定義 Item は同名 struct があっても必ず emit する。
+/// 3. emit 順は `synthetic_items` の元順序を保持する。
+pub fn render_referenced_synthetics_for_file(
+    file_path: &std::path::Path,
+    file_items: &[Item],
+    synthetic_items: &[Item],
+) -> String {
+    if synthetic_items.is_empty() {
+        return String::new();
+    }
+    let graph =
+        SyntheticReferenceGraph::build(&[(file_path.to_path_buf(), file_items)], synthetic_items);
+    let direct: BTreeSet<String> = graph
+        .names()
+        .iter()
+        .filter(|n| !graph.direct_referencers(n).is_empty())
+        .cloned()
+        .collect();
+    let needed = graph.reachable_synthetics(&direct);
+
+    let already_defined: HashSet<String> = file_items
+        .iter()
+        .filter(|i| is_definition_item(i))
+        .filter_map(|i| i.canonical_name().map(str::to_string))
+        .collect();
+
+    let mut emit: Vec<Item> = Vec::new();
+    for item in synthetic_items {
+        let Some(name) = item.canonical_name() else {
+            continue;
+        };
+        // graph::build が impl 対象 struct を直接参照として登録するため、impl ブロックは
+        // needed に含まれる（その struct を file が定義していれば、direct_referencers が
+        // file を返す）。よってここでは「needed に含まれているか」のみで判定すれば良く、
+        // impl の特別扱いは不要。
+        if !needed.contains(name) {
+            continue;
+        }
+        if is_definition_item(item) && already_defined.contains(name) {
+            continue;
+        }
+        emit.push(item.clone());
+    }
+    if emit.is_empty() {
+        String::new()
+    } else {
+        crate::generator::generate(&emit)
+    }
+}
+
+/// 「named な定義系」Item を判定する。
+///
+/// これらは同名でファイル内と synthetic 双方に存在すると Rust コンパイル時に
+/// 衝突するため、`render_referenced_synthetics_for_file` で dedup の対象になる。
+/// `Item::Impl` は文法上 struct と独立に複数併存できるため対象外（impl block は
+/// `is_definition_item == false` で同名 struct があっても emit される）。
+fn is_definition_item(item: &Item) -> bool {
+    matches!(
+        item,
+        Item::Struct { .. }
+            | Item::Enum { .. }
+            | Item::Trait { .. }
+            | Item::TypeAlias { .. }
+            | Item::Fn { .. }
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ir::{EnumVariant, RustType, StructField, Visibility};
+    use crate::ir::{EnumVariant, Expr, Method, RustType, Stmt, StructField, Visibility};
     use std::path::Path;
 
     fn make_enum(name: &str, variant_types: &[(&str, &str)]) -> Item {
@@ -470,5 +572,234 @@ mod tests {
         let reachable = graph.reachable_synthetics(&start);
         assert_eq!(reachable.len(), 1);
         assert!(reachable.contains("A"));
+    }
+
+    // ===== render_referenced_synthetics_for_file =====
+
+    fn fn_returning(name: &str, ret_ty: &str) -> Item {
+        Item::Fn {
+            vis: Visibility::Public,
+            attributes: vec![],
+            is_async: false,
+            name: name.to_string(),
+            type_params: vec![],
+            params: vec![],
+            return_type: Some(RustType::Named {
+                name: ret_ty.to_string(),
+                type_args: vec![],
+            }),
+            body: vec![],
+        }
+    }
+
+    #[test]
+    fn test_render_empty_synthetic_returns_empty() {
+        let file_items = vec![fn_returning("foo", "Bar")];
+        let result = render_referenced_synthetics_for_file(Path::new("a.rs"), &file_items, &[]);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_render_unreferenced_synthetic_omitted() {
+        // ファイルが何も参照しない → unused synthetic は emit しない
+        let file_items = vec![fn_returning("foo", "String")];
+        let synthetic = vec![make_enum("Unused", &[("X", "String")])];
+        let result =
+            render_referenced_synthetics_for_file(Path::new("a.rs"), &file_items, &synthetic);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_render_direct_referenced_synthetic_emitted() {
+        // ファイルが Foo を参照 → synthetic の Foo enum が emit される
+        let file_items = vec![fn_returning("foo", "Bar")];
+        let synthetic = vec![make_enum("Bar", &[("X", "String")])];
+        let result =
+            render_referenced_synthetics_for_file(Path::new("a.rs"), &file_items, &synthetic);
+        assert!(result.contains("enum Bar"));
+    }
+
+    #[test]
+    fn test_render_transitive_synthetic_emitted() {
+        // file → A → B → C 推移閉包で全部 emit
+        let file_items = vec![fn_returning("foo", "A")];
+        let synthetic = vec![
+            make_struct("A", &[("b", "B")]),
+            make_struct("B", &[("c", "C")]),
+            make_struct("C", &[]),
+        ];
+        let result =
+            render_referenced_synthetics_for_file(Path::new("a.rs"), &file_items, &synthetic);
+        assert!(result.contains("struct A"));
+        assert!(result.contains("struct B"));
+        assert!(result.contains("struct C"));
+    }
+
+    #[test]
+    fn test_render_definition_dedup_when_already_in_file() {
+        // file.items に既に struct Foo がある場合、synthetic の struct Foo は emit しない
+        let file_items = vec![make_struct("Foo", &[]), fn_returning("g", "Foo")];
+        let synthetic = vec![make_struct("Foo", &[])];
+        let result =
+            render_referenced_synthetics_for_file(Path::new("a.rs"), &file_items, &synthetic);
+        assert!(result.is_empty(), "should dedup struct Foo");
+    }
+
+    #[test]
+    fn test_render_impl_for_defined_struct_emitted() {
+        // file.items に struct Foo、synthetic に impl Foo がある → impl は emit される
+        let file_items = vec![make_struct("Foo", &[])];
+        let synthetic = vec![Item::Impl {
+            struct_name: "Foo".to_string(),
+            type_params: vec![],
+            for_trait: None,
+            consts: vec![],
+            methods: vec![Method {
+                vis: Visibility::Public,
+                name: "greet".to_string(),
+                has_self: true,
+                has_mut_self: false,
+                params: vec![],
+                return_type: None,
+                body: Some(vec![]),
+            }],
+        }];
+        let result =
+            render_referenced_synthetics_for_file(Path::new("a.rs"), &file_items, &synthetic);
+        assert!(
+            result.contains("impl Foo"),
+            "impl block must be emitted even if struct is already_defined"
+        );
+    }
+
+    #[test]
+    fn test_render_emit_order_preserves_synthetic_order() {
+        // synthetic_items の元順序が emit 順に保持される
+        let file_items = vec![fn_returning("foo", "A"), fn_returning("bar", "B")];
+        let synthetic = vec![make_struct("B", &[]), make_struct("A", &[])];
+        let result =
+            render_referenced_synthetics_for_file(Path::new("a.rs"), &file_items, &synthetic);
+        let pos_b = result.find("struct B").expect("B emitted");
+        let pos_a = result.find("struct A").expect("A emitted");
+        assert!(
+            pos_b < pos_a,
+            "B should come before A (synthetic_items order)"
+        );
+    }
+
+    #[test]
+    fn test_render_self_referential_synthetic_does_not_loop() {
+        // 自己参照型: file → A、A の field は A 自身を参照
+        let file_items = vec![fn_returning("foo", "A")];
+        let synthetic = vec![make_struct("A", &[("self_ref", "A")])];
+        let result =
+            render_referenced_synthetics_for_file(Path::new("a.rs"), &file_items, &synthetic);
+        assert!(result.contains("struct A"));
+    }
+
+    #[test]
+    fn test_render_referenced_via_fn_body_struct_init() {
+        // fn body の StructInit から参照される合成型も emit される（fn body walker の効果）
+        let file_items = vec![Item::Fn {
+            vis: Visibility::Public,
+            attributes: vec![],
+            is_async: false,
+            name: "foo".to_string(),
+            type_params: vec![],
+            params: vec![],
+            return_type: None,
+            body: vec![Stmt::TailExpr(Expr::StructInit {
+                name: "_TypeLit0".to_string(),
+                fields: vec![],
+                base: None,
+            })],
+        }];
+        let synthetic = vec![make_struct("_TypeLit0", &[])];
+        let result =
+            render_referenced_synthetics_for_file(Path::new("a.rs"), &file_items, &synthetic);
+        assert!(
+            result.contains("_TypeLit0"),
+            "synthetic referenced via StructInit in fn body should be emitted"
+        );
+    }
+
+    #[test]
+    fn test_render_referenced_via_fn_body_qualified_call() {
+        // fn body の `Color::Red(x)` 呼び出しから Color を参照と判定して emit
+        let file_items = vec![Item::Fn {
+            vis: Visibility::Public,
+            attributes: vec![],
+            is_async: false,
+            name: "foo".to_string(),
+            type_params: vec![],
+            params: vec![],
+            return_type: None,
+            body: vec![Stmt::Expr(Expr::FnCall {
+                name: "Color::Red".to_string(),
+                args: vec![],
+            })],
+        }];
+        let synthetic = vec![make_enum("Color", &[("Red", "String")])];
+        let result =
+            render_referenced_synthetics_for_file(Path::new("a.rs"), &file_items, &synthetic);
+        assert!(
+            result.contains("enum Color"),
+            "synthetic enum referenced via variant constructor should be emitted"
+        );
+    }
+
+    #[test]
+    fn test_is_definition_item_true_for_definitions() {
+        assert!(is_definition_item(&make_struct("X", &[])));
+        assert!(is_definition_item(&make_enum("Y", &[])));
+        assert!(is_definition_item(&Item::Trait {
+            vis: Visibility::Public,
+            name: "T".to_string(),
+            type_params: vec![],
+            supertraits: vec![],
+            methods: vec![],
+            associated_types: vec![],
+        }));
+        assert!(is_definition_item(&Item::TypeAlias {
+            vis: Visibility::Public,
+            name: "A".to_string(),
+            type_params: vec![],
+            ty: RustType::String,
+        }));
+    }
+
+    #[test]
+    fn test_is_definition_item_true_for_fn() {
+        // Item::Fn も同名衝突対象（同名関数が file と synthetic に併存すると Rust の
+        // duplicate definition 違反になる）
+        assert!(is_definition_item(&Item::Fn {
+            vis: Visibility::Public,
+            attributes: vec![],
+            is_async: false,
+            name: "f".to_string(),
+            type_params: vec![],
+            params: vec![],
+            return_type: None,
+            body: vec![],
+        }));
+    }
+
+    #[test]
+    fn test_is_definition_item_false_for_impl_and_others() {
+        // Impl は定義系ではない（impl は struct/enum と独立に emit される）
+        assert!(!is_definition_item(&Item::Impl {
+            struct_name: "Foo".to_string(),
+            type_params: vec![],
+            for_trait: None,
+            consts: vec![],
+            methods: vec![],
+        }));
+        assert!(!is_definition_item(&Item::Comment("c".to_string())));
+        assert!(!is_definition_item(&Item::RawCode("r".to_string())));
+        assert!(!is_definition_item(&Item::Use {
+            vis: Visibility::Private,
+            path: "p".to_string(),
+            names: vec![],
+        }));
     }
 }

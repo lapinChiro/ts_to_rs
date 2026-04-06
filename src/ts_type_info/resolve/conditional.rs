@@ -67,9 +67,16 @@ fn try_resolve_infer_pattern(
     };
 
     // `<CheckType as Container>::Output` 形式を生成
-    Ok(Some(RustType::Named {
-        name: format!("<{check_name} as {container_name}>::Output"),
-        type_args: vec![],
+    Ok(Some(RustType::QSelf {
+        qself: Box::new(RustType::Named {
+            name: check_name.clone(),
+            type_args: vec![],
+        }),
+        trait_ref: crate::ir::TraitRef {
+            name: container_name.clone(),
+            type_args: vec![],
+        },
+        item: "Output".to_string(),
     }))
 }
 

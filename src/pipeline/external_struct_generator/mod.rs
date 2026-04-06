@@ -5,7 +5,10 @@
 
 use std::collections::HashSet;
 
-use crate::ir::{camel_to_snake, sanitize_field_name, Item, RustType, StructField, Visibility};
+use crate::ir::{
+    camel_to_snake, sanitize_field_name, ClosureBody, Expr, Item, MatchArm, MatchPattern, Method,
+    RustType, Stmt, StructField, TypeParam, Visibility,
+};
 use crate::pipeline::SyntheticTypeRegistry;
 use crate::registry::{TypeDef, TypeRegistry};
 use crate::ts_type_info::resolve::typedef::monomorphize_type_params;
@@ -14,6 +17,9 @@ use crate::ts_type_info::resolve::typedef::monomorphize_type_params;
 const RUST_BUILTIN_TYPES: &[&str] = &[
     "String", "Vec", "HashMap", "HashSet", "Option", "Box", "Result", "Rc", "Arc", "Mutex", "bool",
     "f64", "i64", "i128", "u8", "u32", "usize",
+    // Variant constructors that look like type names when extracted from `Expr::FnCall::name`.
+    // 標準型 `Option` / `Result` のバリアント名は型ではないため stub 対象から除外する。
+    "Some", "None", "Ok", "Err",
 ];
 
 /// `serde_json::Value` のフルパス。
@@ -33,42 +39,25 @@ const SERDE_JSON_VALUE: &str = "serde_json::Value";
 /// 合成型のフィールドが参照する外部型を漏れなく検出する目的で scan_context をスキャンする。
 ///
 /// 以下を除外する:
-/// - `items` または `scan_context` 内に既に定義が存在する型（struct/enum/trait/type alias）
+/// - `items`、`scan_context`、`defined_only` 内に既に定義が存在する型
+///   （struct/enum/trait/type alias）
 /// - Rust 標準ライブラリ型（`String`, `Vec`, `HashMap` 等）
 /// - `serde_json::Value`
 /// - 外部型でない型（ユーザー定義型）
+///
+/// `scan_context` は **定義+走査** の追加 items（per-file 合成型など）。
+/// `defined_only` は **定義済み判定のみ** に使う items（他ファイルの合成型など）。
+/// 走査対象から外すことで、無関係な型まで外部型生成の起点になる雪だるま現象を防ぐ。
 pub fn collect_undefined_type_references(
     items: &[Item],
     scan_context: &[Item],
+    defined_only: &[Item],
     registry: &TypeRegistry,
 ) -> HashSet<String> {
-    // 1. items + scan_context 内で定義されている型名を収集
-    let defined_types: HashSet<String> = items
-        .iter()
-        .chain(scan_context.iter())
-        .filter_map(|item| match item {
-            Item::Struct { name, .. }
-            | Item::Enum { name, .. }
-            | Item::Trait { name, .. }
-            | Item::TypeAlias { name, .. } => Some(name.clone()),
-            _ => None,
-        })
-        .collect();
-
-    // 2. items + scan_context 内で参照されている型名を収集
-    let mut referenced_types = HashSet::new();
-    for item in items.iter().chain(scan_context.iter()) {
-        collect_type_refs_from_item(item, &mut referenced_types);
-    }
-
-    // 3. フィルタリング: 定義済み・標準型・serde_json::Value・外部型以外を除外
-    let builtin_set: HashSet<&str> = RUST_BUILTIN_TYPES.iter().copied().collect();
-
-    referenced_types
+    let scope = UndefinedRefScope::new(items, scan_context, defined_only);
+    scope
+        .collect()
         .into_iter()
-        .filter(|name| !defined_types.contains(name))
-        .filter(|name| !builtin_set.contains(name.as_str()))
-        .filter(|name| name != SERDE_JSON_VALUE)
         .filter(|name| registry.is_external(name))
         .collect()
 }
@@ -86,67 +75,99 @@ pub fn collect_all_undefined_references(
     scan_context: &[Item],
     defined_only: &[Item],
 ) -> HashSet<String> {
-    // 定義済み型名（struct, enum, trait, type alias）— items + scan_context + defined_only
-    let defined_types: HashSet<String> = items
-        .iter()
-        .chain(scan_context.iter())
-        .chain(defined_only.iter())
-        .filter_map(|item| match item {
-            Item::Struct { name, .. }
-            | Item::Enum { name, .. }
-            | Item::Trait { name, .. }
-            | Item::TypeAlias { name, .. } => Some(name.clone()),
-            _ => None,
-        })
-        .collect();
+    UndefinedRefScope::new(items, scan_context, defined_only).collect()
+}
 
-    // インポート済み型名（`use path::{Name};` の names）— items + scan_context + defined_only
-    let imported_types: HashSet<String> = items
-        .iter()
-        .chain(scan_context.iter())
-        .chain(defined_only.iter())
-        .filter_map(|item| match item {
-            Item::Use { names, .. } => Some(names.clone()),
-            _ => None,
-        })
-        .flatten()
-        .collect();
+/// 未定義型参照の収集ロジック共通骨格。
+///
+/// `collect_undefined_type_references` と `collect_all_undefined_references` は
+/// 「`is_external` フィルタを最後に追加で掛けるかどうか」のみ異なる。骨格は同一:
+/// 1. 定義済み・インポート済み・型パラメータ名・標準型・`serde_json::Value`・パス形式
+///    (`A::B`) の型名を除外集合に集める
+/// 2. `items + scan_context` を walker で歩いて参照名を収集
+/// 3. 除外集合を引いた残りを返す
+struct UndefinedRefScope<'a> {
+    items: &'a [Item],
+    scan_context: &'a [Item],
+    defined_only: &'a [Item],
+}
 
-    // 型パラメータ名（struct/trait/fn/impl の type_params）— items + scan_context
-    let type_param_names: HashSet<String> = items
-        .iter()
-        .chain(scan_context.iter())
-        .flat_map(|item| match item {
-            Item::Struct { type_params, .. }
-            | Item::Trait { type_params, .. }
-            | Item::Fn { type_params, .. }
-            | Item::Impl { type_params, .. }
-            | Item::TypeAlias { type_params, .. } => type_params
-                .iter()
-                .map(|tp| tp.name.clone())
-                .collect::<Vec<_>>(),
-            _ => vec![],
-        })
-        .collect();
-
-    // 参照名は items + scan_context から収集（defined_only は走査しない）
-    let mut referenced_types = HashSet::new();
-    for item in items.iter().chain(scan_context.iter()) {
-        collect_type_refs_from_item(item, &mut referenced_types);
+impl<'a> UndefinedRefScope<'a> {
+    fn new(items: &'a [Item], scan_context: &'a [Item], defined_only: &'a [Item]) -> Self {
+        Self {
+            items,
+            scan_context,
+            defined_only,
+        }
     }
 
-    let builtin_set: HashSet<&str> = RUST_BUILTIN_TYPES.iter().copied().collect();
+    /// 定義+判定+定義のみ をまとめた iterator。
+    fn definition_pool(&self) -> impl Iterator<Item = &Item> {
+        self.items
+            .iter()
+            .chain(self.scan_context.iter())
+            .chain(self.defined_only.iter())
+    }
 
-    referenced_types
-        .into_iter()
-        .filter(|name| !defined_types.contains(name))
-        .filter(|name| !imported_types.contains(name))
-        .filter(|name| !type_param_names.contains(name))
-        .filter(|name| !builtin_set.contains(name.as_str()))
-        .filter(|name| name != SERDE_JSON_VALUE)
-        // パス形式の型名（例: E::Bindings, serde_json::Value）は struct 名にならない
-        .filter(|name| !name.contains("::"))
-        .collect()
+    /// `items + scan_context` を返す（参照走査と型パラメータ収集の共通入力）。
+    fn scan_pool(&self) -> impl Iterator<Item = &Item> {
+        self.items.iter().chain(self.scan_context.iter())
+    }
+
+    fn collect(&self) -> HashSet<String> {
+        let defined_types: HashSet<String> = self
+            .definition_pool()
+            .filter_map(|item| match item {
+                Item::Struct { name, .. }
+                | Item::Enum { name, .. }
+                | Item::Trait { name, .. }
+                | Item::TypeAlias { name, .. } => Some(name.clone()),
+                _ => None,
+            })
+            .collect();
+
+        let imported_types: HashSet<String> = self
+            .definition_pool()
+            .filter_map(|item| match item {
+                Item::Use { names, .. } => Some(names.clone()),
+                _ => None,
+            })
+            .flatten()
+            .collect();
+
+        let type_param_names: HashSet<String> = self
+            .scan_pool()
+            .flat_map(|item| match item {
+                Item::Struct { type_params, .. }
+                | Item::Trait { type_params, .. }
+                | Item::Fn { type_params, .. }
+                | Item::Impl { type_params, .. }
+                | Item::TypeAlias { type_params, .. } => type_params
+                    .iter()
+                    .map(|tp| tp.name.clone())
+                    .collect::<Vec<_>>(),
+                _ => vec![],
+            })
+            .collect();
+
+        let mut referenced_types = HashSet::new();
+        for item in self.scan_pool() {
+            collect_type_refs_from_item(item, &mut referenced_types);
+        }
+
+        let builtin_set: HashSet<&str> = RUST_BUILTIN_TYPES.iter().copied().collect();
+
+        referenced_types
+            .into_iter()
+            .filter(|name| !defined_types.contains(name))
+            .filter(|name| !imported_types.contains(name))
+            .filter(|name| !type_param_names.contains(name))
+            .filter(|name| !builtin_set.contains(name.as_str()))
+            .filter(|name| name != SERDE_JSON_VALUE)
+            // パス形式の型名（例: E::Bindings, serde_json::Value）は struct 名にならない
+            .filter(|name| !name.contains("::"))
+            .collect()
+    }
 }
 
 /// 未定義型に対する空スタブ struct を生成し、items に追加する。
@@ -256,20 +277,26 @@ fn references_type_name(ty: &RustType, target: &str) -> bool {
     }
 }
 
-/// `Item` 内で参照されている `RustType::Named` の型名を再帰的に収集する。
+/// `Item` 内で参照されている `RustType::Named` 等の型名を再帰的に収集する。
 ///
 /// 走査対象:
 /// - `Enum`: variant の data 型と fields
 /// - `Struct`: fields
-/// - `Fn`: return_type と params (signature のみ、body は非対応 — TODO I-373)
+/// - `Fn`: signature (return_type, params) **および body** (Stmt/Expr 内の型参照および
+///   `StructInit` の struct 名)
 /// - `TypeAlias`: aliased type
-/// - `Impl`: for_trait と各 method の signature
-/// - `Trait`: supertraits と各 method の signature
+/// - `Impl`: for_trait, consts, 各 method の signature と body
+/// - `Trait`: supertraits と各 method の signature（trait method 本体は通常 None）
 ///
 /// `Comment` / `RawCode` / `Use` は走査しない。
 pub(crate) fn collect_type_refs_from_item(item: &Item, refs: &mut HashSet<String>) {
     match item {
-        Item::Enum { variants, .. } => {
+        Item::Enum {
+            type_params,
+            variants,
+            ..
+        } => {
+            collect_type_refs_from_type_params(type_params, refs);
             for variant in variants {
                 if let Some(data) = &variant.data {
                     collect_type_refs_from_rust_type(data, refs);
@@ -279,16 +306,24 @@ pub(crate) fn collect_type_refs_from_item(item: &Item, refs: &mut HashSet<String
                 }
             }
         }
-        Item::Struct { fields, .. } => {
+        Item::Struct {
+            type_params,
+            fields,
+            ..
+        } => {
+            collect_type_refs_from_type_params(type_params, refs);
             for field in fields {
                 collect_type_refs_from_rust_type(&field.ty, refs);
             }
         }
         Item::Fn {
+            type_params,
             return_type,
             params,
+            body,
             ..
         } => {
+            collect_type_refs_from_type_params(type_params, refs);
             if let Some(rt) = return_type {
                 collect_type_refs_from_rust_type(rt, refs);
             }
@@ -297,16 +332,22 @@ pub(crate) fn collect_type_refs_from_item(item: &Item, refs: &mut HashSet<String
                     collect_type_refs_from_rust_type(ty, refs);
                 }
             }
+            collect_type_refs_from_stmts(body, refs);
         }
-        Item::TypeAlias { ty, .. } => {
+        Item::TypeAlias {
+            type_params, ty, ..
+        } => {
+            collect_type_refs_from_type_params(type_params, refs);
             collect_type_refs_from_rust_type(ty, refs);
         }
         Item::Impl {
+            type_params,
             for_trait,
             consts,
             methods,
             ..
         } => {
+            collect_type_refs_from_type_params(type_params, refs);
             if let Some(tref) = for_trait {
                 refs.insert(tref.name.clone());
                 for arg in &tref.type_args {
@@ -315,23 +356,19 @@ pub(crate) fn collect_type_refs_from_item(item: &Item, refs: &mut HashSet<String
             }
             for c in consts {
                 collect_type_refs_from_rust_type(&c.ty, refs);
+                collect_type_refs_from_expr(&c.value, refs);
             }
             for method in methods {
-                if let Some(rt) = &method.return_type {
-                    collect_type_refs_from_rust_type(rt, refs);
-                }
-                for param in &method.params {
-                    if let Some(ty) = &param.ty {
-                        collect_type_refs_from_rust_type(ty, refs);
-                    }
-                }
+                collect_type_refs_from_method(method, refs);
             }
         }
         Item::Trait {
+            type_params,
             methods,
             supertraits,
             ..
         } => {
+            collect_type_refs_from_type_params(type_params, refs);
             for sup in supertraits {
                 refs.insert(sup.name.clone());
                 for arg in &sup.type_args {
@@ -339,17 +376,318 @@ pub(crate) fn collect_type_refs_from_item(item: &Item, refs: &mut HashSet<String
                 }
             }
             for method in methods {
-                if let Some(rt) = &method.return_type {
-                    collect_type_refs_from_rust_type(rt, refs);
-                }
-                for param in &method.params {
-                    if let Some(ty) = &param.ty {
-                        collect_type_refs_from_rust_type(ty, refs);
-                    }
-                }
+                collect_type_refs_from_method(method, refs);
             }
         }
         Item::Use { .. } | Item::Comment(_) | Item::RawCode(_) => {}
+    }
+}
+
+/// 型パラメータ列の constraint（trait bound）から型参照を収集する。
+///
+/// 例: `<T: SomeTrait>` の `SomeTrait`、`<T: Container<Inner>>` の `Container` と `Inner`
+/// を refs に登録する。型パラメータ名 (`T`) 自体は `UndefinedRefScope` の
+/// `type_param_names` で後段除外されるため、ここでは登録しない。
+fn collect_type_refs_from_type_params(type_params: &[TypeParam], refs: &mut HashSet<String>) {
+    for tp in type_params {
+        if let Some(constraint) = &tp.constraint {
+            collect_type_refs_from_rust_type(constraint, refs);
+        }
+    }
+}
+
+fn collect_type_refs_from_method(method: &Method, refs: &mut HashSet<String>) {
+    if let Some(rt) = &method.return_type {
+        collect_type_refs_from_rust_type(rt, refs);
+    }
+    for param in &method.params {
+        if let Some(ty) = &param.ty {
+            collect_type_refs_from_rust_type(ty, refs);
+        }
+    }
+    if let Some(body) = &method.body {
+        collect_type_refs_from_stmts(body, refs);
+    }
+}
+
+/// `Vec<Stmt>` を走査して全ての型参照を収集する。
+pub(crate) fn collect_type_refs_from_stmts(stmts: &[Stmt], refs: &mut HashSet<String>) {
+    for stmt in stmts {
+        collect_type_refs_from_stmt(stmt, refs);
+    }
+}
+
+fn collect_type_refs_from_stmt(stmt: &Stmt, refs: &mut HashSet<String>) {
+    match stmt {
+        Stmt::Let { ty, init, .. } => {
+            if let Some(t) = ty {
+                collect_type_refs_from_rust_type(t, refs);
+            }
+            if let Some(e) = init {
+                collect_type_refs_from_expr(e, refs);
+            }
+        }
+        Stmt::If {
+            condition,
+            then_body,
+            else_body,
+        } => {
+            collect_type_refs_from_expr(condition, refs);
+            collect_type_refs_from_stmts(then_body, refs);
+            if let Some(eb) = else_body {
+                collect_type_refs_from_stmts(eb, refs);
+            }
+        }
+        Stmt::While {
+            condition, body, ..
+        } => {
+            collect_type_refs_from_expr(condition, refs);
+            collect_type_refs_from_stmts(body, refs);
+        }
+        Stmt::WhileLet {
+            pattern,
+            expr,
+            body,
+            ..
+        } => {
+            collect_type_refs_from_verbatim_pattern(pattern, refs);
+            collect_type_refs_from_expr(expr, refs);
+            collect_type_refs_from_stmts(body, refs);
+        }
+        Stmt::ForIn { iterable, body, .. } => {
+            collect_type_refs_from_expr(iterable, refs);
+            collect_type_refs_from_stmts(body, refs);
+        }
+        Stmt::Loop { body, .. } | Stmt::LabeledBlock { body, .. } => {
+            collect_type_refs_from_stmts(body, refs);
+        }
+        Stmt::Break { value, .. } => {
+            if let Some(v) = value {
+                collect_type_refs_from_expr(v, refs);
+            }
+        }
+        Stmt::Continue { .. } => {}
+        Stmt::Return(opt) => {
+            if let Some(e) = opt {
+                collect_type_refs_from_expr(e, refs);
+            }
+        }
+        Stmt::Expr(e) | Stmt::TailExpr(e) => collect_type_refs_from_expr(e, refs),
+        Stmt::IfLet {
+            pattern,
+            expr,
+            then_body,
+            else_body,
+        } => {
+            collect_type_refs_from_verbatim_pattern(pattern, refs);
+            collect_type_refs_from_expr(expr, refs);
+            collect_type_refs_from_stmts(then_body, refs);
+            if let Some(eb) = else_body {
+                collect_type_refs_from_stmts(eb, refs);
+            }
+        }
+        Stmt::Match { expr, arms } => {
+            collect_type_refs_from_expr(expr, refs);
+            for arm in arms {
+                collect_type_refs_from_match_arm(arm, refs);
+            }
+        }
+    }
+}
+
+/// `Stmt::IfLet` / `Stmt::WhileLet` / `Expr::IfLet` / `Expr::Matches` の `pattern: String`
+/// から型参照を収集する。
+///
+/// 文法上 `pattern` は Rust pattern 文字列の prebuilt 表現（例: `"Some(x)"`,
+/// `"Color::Red(_)"`, `"None"`, `"Foo { bar }"`）。`MatchPattern::EnumVariant.path`
+/// と同じ uppercase head 抽出ロジックを適用する。
+///
+/// より厳密には Rust pattern parser を IR に統合すべきだが、現状は文字列ベース
+/// 設計負債（I-377 visitor pattern 化と合わせて再検討する）。
+fn collect_type_refs_from_verbatim_pattern(pattern: &str, refs: &mut HashSet<String>) {
+    // パターン先頭の identifier を取り出す:
+    //   "Some(x)" → "Some"
+    //   "Color::Red(_)" → "Color"
+    //   "Foo { bar }" → "Foo"
+    //   "_ if cond" → "_" (skip)
+    let trimmed = pattern.trim_start();
+    let head: String = trimmed
+        .chars()
+        .take_while(|c| c.is_alphanumeric() || *c == '_')
+        .collect();
+    if head.is_empty() {
+        return;
+    }
+    if head.chars().next().is_some_and(|c| c.is_ascii_uppercase()) {
+        refs.insert(head);
+    }
+}
+
+/// `MatchArm` を走査して型参照を収集する。
+///
+/// パターンには enum variant の path（例: `Color::Red`）が含まれることがある。
+/// `EnumVariant::path` の先頭セグメント（`Color`）は型名として登録する。
+/// `Verbatim` は free-form 文字列で構造化されておらず安全に解釈できないため
+/// 走査しない（変更時は I-377 visitor pattern 化と合わせて再検討する）。
+fn collect_type_refs_from_match_arm(arm: &MatchArm, refs: &mut HashSet<String>) {
+    for pattern in &arm.patterns {
+        match pattern {
+            MatchPattern::Literal(expr) => collect_type_refs_from_expr(expr, refs),
+            MatchPattern::EnumVariant { path, .. } => {
+                let head = path.split("::").next().unwrap_or(path);
+                if head.chars().next().is_some_and(|c| c.is_ascii_uppercase()) {
+                    refs.insert(head.to_string());
+                }
+            }
+            MatchPattern::Wildcard | MatchPattern::Verbatim(_) => {}
+        }
+    }
+    if let Some(g) = &arm.guard {
+        collect_type_refs_from_expr(g, refs);
+    }
+    collect_type_refs_from_stmts(&arm.body, refs);
+}
+
+fn collect_type_refs_from_expr(expr: &Expr, refs: &mut HashSet<String>) {
+    match expr {
+        // 型情報を含むリーフ
+        Expr::Cast { expr, target } => {
+            collect_type_refs_from_expr(expr, refs);
+            collect_type_refs_from_rust_type(target, refs);
+        }
+        Expr::StructInit { name, fields, base } => {
+            // `Self` は impl 文脈の implicit type. RustType walker と同じ方針で除外する。
+            if name != "Self" {
+                refs.insert(name.clone());
+            }
+            for (_, e) in fields {
+                collect_type_refs_from_expr(e, refs);
+            }
+            if let Some(b) = base {
+                collect_type_refs_from_expr(b, refs);
+            }
+        }
+        Expr::Closure {
+            params,
+            return_type,
+            body,
+        } => {
+            for p in params {
+                if let Some(t) = &p.ty {
+                    collect_type_refs_from_rust_type(t, refs);
+                }
+            }
+            if let Some(rt) = return_type {
+                collect_type_refs_from_rust_type(rt, refs);
+            }
+            match body {
+                ClosureBody::Expr(e) => collect_type_refs_from_expr(e, refs),
+                ClosureBody::Block(stmts) => collect_type_refs_from_stmts(stmts, refs),
+            }
+        }
+        // 再帰サブ式
+        Expr::FieldAccess { object, .. } => collect_type_refs_from_expr(object, refs),
+        Expr::MethodCall { object, args, .. } => {
+            collect_type_refs_from_expr(object, refs);
+            for a in args {
+                collect_type_refs_from_expr(a, refs);
+            }
+        }
+        Expr::Assign { target, value } => {
+            collect_type_refs_from_expr(target, refs);
+            collect_type_refs_from_expr(value, refs);
+        }
+        Expr::UnaryOp { operand, .. } => collect_type_refs_from_expr(operand, refs),
+        Expr::BinaryOp { left, right, .. } => {
+            collect_type_refs_from_expr(left, refs);
+            collect_type_refs_from_expr(right, refs);
+        }
+        Expr::Range { start, end } => {
+            if let Some(s) = start {
+                collect_type_refs_from_expr(s, refs);
+            }
+            if let Some(e) = end {
+                collect_type_refs_from_expr(e, refs);
+            }
+        }
+        Expr::FnCall { name, args } => {
+            // `Expr::FnCall::name` は意味論的に多義: ユーザ関数 (`foo`), モジュール
+            // 修飾呼び出し (`scopeguard::guard`), enum variant 構築 (`Color::Red`),
+            // タプル struct 構築 (`Wrapper(x)`), Option/Result 構築 (`Some`, `Ok`)。
+            //
+            // 型参照として収集すべきは「型名（PascalCase 規約）の identifier」のみ:
+            //   - `Color::Red(x)` → `Color` を refs に登録（合成 enum コンストラクタ）
+            //   - `Wrapper(x)` → `Wrapper` を refs に登録（タプル struct コンストラクタ）
+            //   - `scopeguard::guard(x)` → 先頭が小文字なので登録しない
+            //   - `js_typeof(x)` → 同様に登録しない
+            //
+            // 判定は「先頭セグメント (`::` 前) の最初の char が ASCII 大文字か」で行う。
+            // Rust の型命名規約に従えば `RustType::Named` で参照される全ての型がこの
+            // 条件を満たす。
+            let head = name.split("::").next().unwrap_or(name);
+            if head.chars().next().is_some_and(|c| c.is_ascii_uppercase()) {
+                refs.insert(head.to_string());
+            }
+            for a in args {
+                collect_type_refs_from_expr(a, refs);
+            }
+        }
+        Expr::Vec { elements } | Expr::Tuple { elements } => {
+            for e in elements {
+                collect_type_refs_from_expr(e, refs);
+            }
+        }
+        Expr::If {
+            condition,
+            then_expr,
+            else_expr,
+        } => {
+            collect_type_refs_from_expr(condition, refs);
+            collect_type_refs_from_expr(then_expr, refs);
+            collect_type_refs_from_expr(else_expr, refs);
+        }
+        Expr::IfLet {
+            pattern,
+            expr,
+            then_expr,
+            else_expr,
+        } => {
+            collect_type_refs_from_verbatim_pattern(pattern, refs);
+            collect_type_refs_from_expr(expr, refs);
+            collect_type_refs_from_expr(then_expr, refs);
+            collect_type_refs_from_expr(else_expr, refs);
+        }
+        Expr::FormatMacro { args, .. } | Expr::MacroCall { args, .. } => {
+            for a in args {
+                collect_type_refs_from_expr(a, refs);
+            }
+        }
+        Expr::Await(e) | Expr::Deref(e) | Expr::Ref(e) => collect_type_refs_from_expr(e, refs),
+        Expr::Index { object, index } => {
+            collect_type_refs_from_expr(object, refs);
+            collect_type_refs_from_expr(index, refs);
+        }
+        Expr::RuntimeTypeof { operand } => collect_type_refs_from_expr(operand, refs),
+        Expr::Matches { expr, pattern } => {
+            collect_type_refs_from_expr(expr, refs);
+            collect_type_refs_from_verbatim_pattern(pattern, refs);
+        }
+        Expr::Block(stmts) => collect_type_refs_from_stmts(stmts, refs),
+        Expr::Match { expr, arms } => {
+            collect_type_refs_from_expr(expr, refs);
+            for arm in arms {
+                collect_type_refs_from_match_arm(arm, refs);
+            }
+        }
+        // 型参照を持たないリーフ
+        Expr::NumberLit(_)
+        | Expr::IntLit(_)
+        | Expr::BoolLit(_)
+        | Expr::StringLit(_)
+        | Expr::Ident(_)
+        | Expr::Unit
+        | Expr::RawCode(_)
+        | Expr::Regex { .. } => {}
     }
 }
 
@@ -365,6 +703,20 @@ pub(crate) fn collect_type_refs_from_rust_type(ty: &RustType, refs: &mut HashSet
                 refs.insert(name.clone());
             }
             for arg in type_args {
+                collect_type_refs_from_rust_type(arg, refs);
+            }
+        }
+        RustType::QSelf {
+            qself,
+            trait_ref,
+            item: _,
+        } => {
+            // 限定パス `<qself as Trait<args>>::Item` は、Trait 名と qself / 引数を
+            // それぞれ参照として収集する。Item 名は trait 内 associated type であり
+            // 独立した型ではないため refs には追加しない。
+            collect_type_refs_from_rust_type(qself, refs);
+            refs.insert(trait_ref.name.clone());
+            for arg in &trait_ref.type_args {
                 collect_type_refs_from_rust_type(arg, refs);
             }
         }
@@ -389,8 +741,10 @@ pub(crate) fn collect_type_refs_from_rust_type(ty: &RustType, refs: &mut HashSet
             }
             collect_type_refs_from_rust_type(return_type, refs);
         }
-        RustType::DynTrait(_)
-        | RustType::Unit
+        RustType::DynTrait(name) => {
+            refs.insert(name.clone());
+        }
+        RustType::Unit
         | RustType::String
         | RustType::F64
         | RustType::Bool
