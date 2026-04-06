@@ -98,4 +98,9 @@ pub struct FileOutput {
     pub rust_source: String,
     /// Unsupported syntax entries encountered during transformation.
     pub unsupported: Vec<UnsupportedSyntaxError>,
+    /// このファイルの transformer が新たに生成した合成型のスナップショット。
+    /// I-371: 単一ファイル API は OutputWriter を経由しないため、これを `rust_source`
+    /// 先頭に結合して旧来の出力互換を保つ。Directory mode では `synthetic_items`
+    /// （TranspileOutput 側）が OutputWriter で配置されるためこのフィールドは使用されない。
+    pub file_synthetic_items: Vec<crate::ir::Item>,
 }

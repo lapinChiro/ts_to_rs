@@ -26,6 +26,10 @@ pub struct SyntheticPlacement {
     pub inline: HashMap<PathBuf, Vec<String>>,
     /// 専用モジュールに配置する合成型: (モジュールパス, 合成型コード)
     pub shared_module: Option<(PathBuf, String)>,
+    /// 共有モジュールに配置された型を参照するファイルへのインポート文。
+    /// I-371: 各合成型は単一正準配置（shared_module）を持ち、参照側ファイルは
+    /// `use crate::shared_types::Type;` でインポートする。
+    pub shared_imports: HashMap<PathBuf, Vec<String>>,
 }
 
 impl<'a> OutputWriter<'a> {
@@ -87,14 +91,19 @@ impl<'a> OutputWriter<'a> {
     ) -> SyntheticPlacement {
         let mut inline: HashMap<PathBuf, Vec<String>> = HashMap::new();
         let mut shared_items: Vec<String> = Vec::new();
+        // 共有モジュールに配置された型ごとに、その参照ファイル一覧を記録する。
+        // 後続で shared_imports を構築する。
+        let mut shared_type_refs: Vec<(String, Vec<PathBuf>)> = Vec::new();
 
-        // 全 synthetic item のコード生成と名前の収集
+        // 全 synthetic item のコード生成と名前の収集。
+        // canonical_name() == None の Item（Use/Comment/RawCode）は配置対象外。
+        // 空文字列で contains() を呼ぶと全ファイルにマッチして誤配置するため必ず skip する。
         let generated: Vec<(String, String)> = synthetic_items
             .iter()
-            .map(|item| {
-                let name = synthetic_type_name(item);
+            .filter_map(|item| {
+                let name = item.canonical_name()?.to_string();
                 let code = crate::generator::generate(std::slice::from_ref(item));
-                (name, code)
+                Some((name, code))
             })
             .collect();
 
@@ -116,6 +125,7 @@ impl<'a> OutputWriter<'a> {
                     // file_outputs からは未参照だが、他の synthetic item から参照される
                     // → shared module に配置（相互依存を解決）
                     shared_items.push(code.clone());
+                    shared_type_refs.push((name.clone(), Vec::new()));
                 }
                 0 => {
                     // 完全に未使用 — 配置しない
@@ -130,6 +140,10 @@ impl<'a> OutputWriter<'a> {
                 _ => {
                     // 2+ ファイル、または 1 ファイル + synthetic 参照 → shared module
                     shared_items.push(code.clone());
+                    shared_type_refs.push((
+                        name.clone(),
+                        referencing_files.iter().map(|p| (*p).clone()).collect(),
+                    ));
                 }
             }
         }
@@ -148,9 +162,20 @@ impl<'a> OutputWriter<'a> {
             Some((module_path, content))
         };
 
+        // shared_imports: 各参照ファイルに対して `use crate::<stem>::{Type, ...};` を構築。
+        // 同名の型が user 定義型と衝突するのを防ぐため、参照先ファイル自身が
+        // shared module の場合（衝突回避サフィックス付与時など）は除外する。
+        let shared_imports: HashMap<PathBuf, Vec<String>> =
+            if let Some((ref module_path, _)) = shared_module {
+                build_shared_imports(module_path, &shared_type_refs)
+            } else {
+                HashMap::new()
+            };
+
         SyntheticPlacement {
             inline,
             shared_module,
+            shared_imports,
         }
     }
 
@@ -175,7 +200,17 @@ impl<'a> OutputWriter<'a> {
             }
 
             let mut content = String::new();
-            // インライン合成型をファイル先頭に追加
+            // I-371: shared_types からのインポートをファイル先頭に追加
+            if let Some(imports) = placement.shared_imports.get(rel_path) {
+                for import in imports {
+                    content.push_str(import);
+                    content.push('\n');
+                }
+                if !imports.is_empty() {
+                    content.push('\n');
+                }
+            }
+            // インライン合成型を追加
             if let Some(inline_items) = placement.inline.get(rel_path) {
                 for item_code in inline_items {
                     content.push_str(item_code);
@@ -237,6 +272,47 @@ impl<'a> OutputWriter<'a> {
     }
 }
 
+/// 共有モジュールに配置された型の参照ファイル群から、ファイル別の `use` 文を構築する。
+///
+/// 各ファイルが参照する型を `use crate::<stem>::{T1, T2, ...};` の単一文に集約する。
+/// 参照ファイルが共有モジュール自身の場合は除外する（自己インポートを防ぐ）。
+fn build_shared_imports(
+    module_path: &Path,
+    shared_type_refs: &[(String, Vec<PathBuf>)],
+) -> HashMap<PathBuf, Vec<String>> {
+    let stem = module_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("shared_types");
+
+    // file → 参照する型名の集合
+    let mut by_file: HashMap<PathBuf, std::collections::BTreeSet<String>> = HashMap::new();
+    for (type_name, files) in shared_type_refs {
+        for file in files {
+            if file == module_path {
+                continue;
+            }
+            by_file
+                .entry(file.clone())
+                .or_default()
+                .insert(type_name.clone());
+        }
+    }
+
+    by_file
+        .into_iter()
+        .map(|(file, types)| {
+            let names: Vec<String> = types.into_iter().collect();
+            let import = if names.len() == 1 {
+                format!("use crate::{stem}::{};", names[0])
+            } else {
+                format!("use crate::{stem}::{{{}}};", names.join(", "))
+            };
+            (file, vec![import])
+        })
+        .collect()
+}
+
 /// 共有合成型モジュールのファイルパスを決定する。
 ///
 /// ユーザーの出力ファイルと衝突しない名前を選択する。
@@ -259,20 +335,6 @@ fn choose_shared_module_path(file_outputs: &[(PathBuf, String)]) -> PathBuf {
     }
 
     unreachable!("infinite counter guarantees a unique name")
-}
-
-/// 合成型の識別名を取得する（ファイル内の参照検索に使用）。
-fn synthetic_type_name(item: &Item) -> String {
-    match item {
-        Item::Struct { name, .. }
-        | Item::Fn { name, .. }
-        | Item::Enum { name, .. }
-        | Item::TypeAlias { name, .. }
-        | Item::Trait { name, .. } => name.clone(),
-        Item::Impl { struct_name, .. } => struct_name.clone(),
-        Item::Use { path, .. } => path.clone(),
-        Item::Comment(text) | Item::RawCode(text) => text.clone(),
-    }
 }
 
 /// 共有合成型モジュールに必要なインポート文を生成する。
@@ -506,6 +568,44 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_resolve_synthetic_placement_skips_unnamed_items() {
+        // canonical_name() == None の Item（Use/Comment/RawCode）が synthetic_items に
+        // 混入した場合、それらは配置対象外として skip される。
+        // 旧実装の `unwrap_or("").to_string()` では空文字列で contains() が全マッチし
+        // shared_module に誤配置されていた。本テストは regression 防止用。
+        let mg = ModuleGraph::empty();
+        let writer = OutputWriter::new(&mg);
+        let files = vec![(
+            PathBuf::from("a.rs"),
+            "fn foo() -> Real { todo!() }".to_string(),
+        )];
+        let items = vec![
+            Item::Comment("a comment".to_string()),
+            Item::Use {
+                vis: crate::ir::Visibility::Private,
+                path: "crate::bar".to_string(),
+                names: vec!["Bar".to_string()],
+            },
+            Item::RawCode("fn raw() {}".to_string()),
+            make_synthetic_enum("Real"),
+        ];
+        let placement = writer.resolve_synthetic_placement(&files, &items);
+        // Real は inline 配置される
+        assert!(
+            placement.inline.contains_key(Path::new("a.rs")),
+            "Real は inline 配置される"
+        );
+        // shared_module は生成されない（unnamed items が誤って入らない）
+        assert!(
+            placement.shared_module.is_none(),
+            "unnamed items が誤って shared_module に配置されないこと: {:?}",
+            placement.shared_module
+        );
+        // shared_imports も空
+        assert!(placement.shared_imports.is_empty());
+    }
+
     // ===== write_to_directory tests =====
 
     #[test]
@@ -672,6 +772,190 @@ mod tests {
         assert!(
             shared_content.contains("SharedEnum"),
             "shared_types.rs should contain SharedEnum: {shared_content}"
+        );
+    }
+
+    // ===== I-371: shared_imports / 単一正準配置のテスト =====
+
+    #[test]
+    fn test_resolve_synthetic_placement_shared_imports_multi_file() {
+        // 2 ファイルから参照される合成型は shared_types に配置され、
+        // 両ファイルに `use crate::shared_types::Type;` のインポートが付与される。
+        let mg = ModuleGraph::empty();
+        let writer = OutputWriter::new(&mg);
+        let files = vec![
+            (
+                PathBuf::from("a.rs"),
+                "fn foo() -> StringOrF64 { todo!() }".to_string(),
+            ),
+            (
+                PathBuf::from("b.rs"),
+                "fn bar() -> StringOrF64 { todo!() }".to_string(),
+            ),
+        ];
+        let items = vec![make_synthetic_enum("StringOrF64")];
+        let placement = writer.resolve_synthetic_placement(&files, &items);
+
+        assert!(placement.shared_module.is_some());
+        let imports_a = placement
+            .shared_imports
+            .get(Path::new("a.rs"))
+            .expect("a.rs should have shared imports");
+        assert_eq!(imports_a.len(), 1);
+        assert_eq!(imports_a[0], "use crate::shared_types::StringOrF64;");
+        let imports_b = placement
+            .shared_imports
+            .get(Path::new("b.rs"))
+            .expect("b.rs should have shared imports");
+        assert_eq!(imports_b[0], "use crate::shared_types::StringOrF64;");
+    }
+
+    #[test]
+    fn test_resolve_synthetic_placement_no_imports_for_inline() {
+        // 1 ファイルからのみ参照される型は inline 配置で、shared_imports は空。
+        let mg = ModuleGraph::empty();
+        let writer = OutputWriter::new(&mg);
+        let files = vec![(
+            PathBuf::from("a.rs"),
+            "fn foo() -> LocalEnum { todo!() }".to_string(),
+        )];
+        let items = vec![make_synthetic_enum("LocalEnum")];
+        let placement = writer.resolve_synthetic_placement(&files, &items);
+
+        assert!(placement.shared_imports.is_empty());
+        assert!(placement.inline.contains_key(Path::new("a.rs")));
+    }
+
+    #[test]
+    fn test_resolve_synthetic_placement_imports_grouped() {
+        // 同じファイルが複数の shared 型を参照する場合、単一の `use` 文に集約される。
+        let mg = ModuleGraph::empty();
+        let writer = OutputWriter::new(&mg);
+        let files = vec![
+            (
+                PathBuf::from("a.rs"),
+                "fn foo() -> AlphaEnum { todo!() } fn baz() -> BetaEnum { todo!() }".to_string(),
+            ),
+            (
+                PathBuf::from("b.rs"),
+                "fn bar() -> AlphaEnum { todo!() } fn qux() -> BetaEnum { todo!() }".to_string(),
+            ),
+        ];
+        let items = vec![
+            make_synthetic_enum("AlphaEnum"),
+            make_synthetic_enum("BetaEnum"),
+        ];
+        let placement = writer.resolve_synthetic_placement(&files, &items);
+
+        let imports_a = placement.shared_imports.get(Path::new("a.rs")).unwrap();
+        assert_eq!(imports_a.len(), 1);
+        assert_eq!(
+            imports_a[0],
+            "use crate::shared_types::{AlphaEnum, BetaEnum};"
+        );
+    }
+
+    #[test]
+    fn test_write_to_directory_emits_shared_imports() {
+        // shared_types.rs に配置された型を参照するファイルの先頭に
+        // `use crate::shared_types::T;` が出力されること。
+        let mg = ModuleGraph::empty();
+        let writer = OutputWriter::new(&mg);
+        let temp = tempfile::tempdir().unwrap();
+        let out = temp.path();
+
+        let files = vec![
+            (
+                PathBuf::from("a.rs"),
+                "fn foo() -> SharedEnum { todo!() }".to_string(),
+            ),
+            (
+                PathBuf::from("b.rs"),
+                "fn bar() -> SharedEnum { todo!() }".to_string(),
+            ),
+        ];
+        let items = vec![make_synthetic_enum("SharedEnum")];
+
+        writer
+            .write_to_directory(out, &files, &items, false)
+            .unwrap();
+
+        let a_content = std::fs::read_to_string(out.join("a.rs")).unwrap();
+        assert!(
+            a_content.contains("use crate::shared_types::SharedEnum;"),
+            "a.rs should import SharedEnum: {a_content}"
+        );
+        let b_content = std::fs::read_to_string(out.join("b.rs")).unwrap();
+        assert!(
+            b_content.contains("use crate::shared_types::SharedEnum;"),
+            "b.rs should import SharedEnum: {b_content}"
+        );
+    }
+
+    #[test]
+    fn test_write_to_directory_no_duplicate_synthetic_definition() {
+        // I-371 問題 1 の回帰テスト: 合成型が shared と inline の両方に
+        // 重複定義されないことを検証する。
+        // 単一ファイルから参照される合成型は inline 配置のみで shared_types.rs に出ない。
+        let mg = ModuleGraph::empty();
+        let writer = OutputWriter::new(&mg);
+        let temp = tempfile::tempdir().unwrap();
+        let out = temp.path();
+
+        let files = vec![(
+            PathBuf::from("a.rs"),
+            "fn foo() -> OnlyOne { todo!() }".to_string(),
+        )];
+        let items = vec![make_synthetic_enum("OnlyOne")];
+
+        writer
+            .write_to_directory(out, &files, &items, false)
+            .unwrap();
+
+        let a_content = std::fs::read_to_string(out.join("a.rs")).unwrap();
+        // a.rs に 1 回だけ enum 定義が出現
+        assert_eq!(
+            a_content.matches("pub enum OnlyOne").count(),
+            1,
+            "OnlyOne should be defined exactly once: {a_content}"
+        );
+        // shared_types.rs は作られない
+        assert!(!out.join("shared_types.rs").exists());
+    }
+
+    #[test]
+    fn test_write_to_directory_shared_collision_uses_subscripted_import() {
+        // shared_types.rs と衝突する場合、サフィックス付きモジュール名が
+        // インポート文にも反映される。
+        let mg = ModuleGraph::empty();
+        let writer = OutputWriter::new(&mg);
+        let temp = tempfile::tempdir().unwrap();
+        let out = temp.path();
+
+        let files = vec![
+            (
+                PathBuf::from("shared_types.rs"),
+                "pub struct UserDefined;".to_string(),
+            ),
+            (
+                PathBuf::from("a.rs"),
+                "fn foo() -> ConflictEnum { todo!() }".to_string(),
+            ),
+            (
+                PathBuf::from("b.rs"),
+                "fn bar() -> ConflictEnum { todo!() }".to_string(),
+            ),
+        ];
+        let items = vec![make_synthetic_enum("ConflictEnum")];
+
+        writer
+            .write_to_directory(out, &files, &items, false)
+            .unwrap();
+
+        let a_content = std::fs::read_to_string(out.join("a.rs")).unwrap();
+        assert!(
+            a_content.contains("use crate::shared_types_0::ConflictEnum;"),
+            "a.rs should import from shared_types_0: {a_content}"
         );
     }
 

@@ -807,3 +807,107 @@ fn test_is_copy_literal_field_access_returns_false() {
     }
     .is_copy_literal());
 }
+
+// =========================================================================
+// Item::canonical_name() — A-1-1 で追加
+// =========================================================================
+
+fn empty_struct(name: &str) -> Item {
+    Item::Struct {
+        vis: Visibility::Public,
+        name: name.to_string(),
+        type_params: vec![],
+        fields: vec![],
+    }
+}
+
+#[test]
+fn test_canonical_name_struct() {
+    assert_eq!(empty_struct("Foo").canonical_name(), Some("Foo"));
+}
+
+#[test]
+fn test_canonical_name_enum() {
+    let item = Item::Enum {
+        vis: Visibility::Public,
+        name: "MyEnum".to_string(),
+        type_params: vec![],
+        serde_tag: None,
+        variants: vec![],
+    };
+    assert_eq!(item.canonical_name(), Some("MyEnum"));
+}
+
+#[test]
+fn test_canonical_name_trait() {
+    let item = Item::Trait {
+        vis: Visibility::Public,
+        name: "MyTrait".to_string(),
+        type_params: vec![],
+        supertraits: vec![],
+        methods: vec![],
+        associated_types: vec![],
+    };
+    assert_eq!(item.canonical_name(), Some("MyTrait"));
+}
+
+#[test]
+fn test_canonical_name_type_alias() {
+    let item = Item::TypeAlias {
+        vis: Visibility::Public,
+        name: "MyAlias".to_string(),
+        type_params: vec![],
+        ty: RustType::String,
+    };
+    assert_eq!(item.canonical_name(), Some("MyAlias"));
+}
+
+#[test]
+fn test_canonical_name_fn() {
+    let item = Item::Fn {
+        vis: Visibility::Public,
+        attributes: vec![],
+        is_async: false,
+        name: "my_fn".to_string(),
+        type_params: vec![],
+        params: vec![],
+        return_type: None,
+        body: vec![],
+    };
+    assert_eq!(item.canonical_name(), Some("my_fn"));
+}
+
+#[test]
+fn test_canonical_name_impl_returns_struct_name() {
+    // impl は struct_name を識別名とする（trait impl の場合も同じ struct_name）
+    let item = Item::Impl {
+        struct_name: "Foo".to_string(),
+        type_params: vec![],
+        for_trait: None,
+        consts: vec![],
+        methods: vec![],
+    };
+    assert_eq!(item.canonical_name(), Some("Foo"));
+}
+
+#[test]
+fn test_canonical_name_use_returns_none() {
+    let item = Item::Use {
+        vis: Visibility::Private,
+        path: "crate::foo".to_string(),
+        names: vec!["Bar".to_string()],
+    };
+    assert_eq!(item.canonical_name(), None);
+}
+
+#[test]
+fn test_canonical_name_comment_returns_none() {
+    let item = Item::Comment("a comment".to_string());
+    assert_eq!(item.canonical_name(), None);
+}
+
+#[test]
+fn test_canonical_name_raw_code_returns_none() {
+    let item = Item::RawCode("fn raw() {}".to_string());
+    assert_eq!(item.canonical_name(), None);
+}

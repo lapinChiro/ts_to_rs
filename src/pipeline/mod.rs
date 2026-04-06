@@ -10,6 +10,7 @@ pub mod module_graph;
 pub mod module_resolver;
 pub(crate) mod narrowing_patterns;
 pub mod output_writer;
+pub mod placement;
 pub mod synthetic_registry;
 pub mod type_converter;
 pub mod type_resolution;
@@ -116,8 +117,25 @@ pub fn transpile_pipeline(input: TranspileInput) -> Result<TranspileOutput> {
         register_synthetic_structs_in_registry(resolver_synthetic, &mut shared_registry);
     }
 
-    // Pass 4-5: Transformation + Code Generation (per file)
-    let mut file_outputs = Vec::new();
+    // Pass 4: Transformation (per file) — 全ファイルを transform して synthetic を完全に
+    // 蓄積してから Pass 5 (code generation) に進む。
+    //
+    // I-371: クロスファイル冗長定義（criterion 3）を解消するため、stub 生成は全ファイル
+    // 横断の synthetic registry を見て行う必要がある。例えば file A が `AlgorithmOrString`
+    // という合成型を生成し、file B がそれを参照する場合、file B 単体では未定義に見えるが、
+    // 実際にはグローバルに存在する。Pass 4 を完了してから Pass 5 を回すことで、stub 生成
+    // が「真に未定義の型」だけを対象にできる。
+    struct PerFileTransformed {
+        path: std::path::PathBuf,
+        source: String,
+        items: Vec<crate::ir::Item>,
+        unsupported: Vec<crate::transformer::UnsupportedSyntaxError>,
+        /// このファイルの transformer が新たに生成した合成型のスナップショット。
+        /// per-file の外部型 struct 生成時、参照スキャンの対象とする
+        /// （クロスファイル合成型は global_synthetic_items 経由で「定義済み」扱いだけする）。
+        file_synthetic_items: Vec<crate::ir::Item>,
+    }
+    let mut transformed: Vec<PerFileTransformed> = Vec::with_capacity(parsed.files.len());
     for (((file, type_resolution), any_synthetic), resolver_synthetic) in parsed
         .files
         .iter()
@@ -139,23 +157,48 @@ pub fn transpile_pipeline(input: TranspileInput) -> Result<TranspileOutput> {
             crate::transformer::Transformer::for_module(&tctx, &mut file_synthetic)
                 .transform_module_collecting(&file.module)?;
 
-        // per-file synthetic types をファイル出力に含める（旧 API 互換）
-        // 同時に共有 synthetic にも蓄積する（OutputWriter 用）
+        // 合成型は OutputWriter が単一正準配置（I-371）を決定する。
+        // 共有 synthetic にのみ蓄積する。Pass 5 で全ファイルが完了した synthetic を参照する。
         let file_synthetic_items: Vec<crate::ir::Item> =
             file_synthetic.all_items().into_iter().cloned().collect();
         synthetic.merge(file_synthetic);
 
-        let mut all_items = file_synthetic_items;
-        all_items.extend(items);
+        transformed.push(PerFileTransformed {
+            path: file.path.clone(),
+            source: file.source.clone(),
+            items,
+            unsupported,
+            file_synthetic_items,
+        });
+    }
 
-        // 外部型 struct 生成: 参照されているが定義がないビルトイン型の struct を追加
-        // 推移的依存を解決するため固定点に達するまでループ
-        // synthetic は base + 全処理済みファイルの合成型を含む（ビルトイン合成型の参照に必要）
-        generate_external_structs_to_fixpoint(&mut all_items, &shared_registry, &synthetic);
+    // Pass 5: 全ファイルの transform 完了後、global synthetic を scan_context として
+    // per-file の external/stub 生成を行う。これによりクロスファイル合成型の重複 stub を防ぐ。
+    let global_synthetic_items: Vec<crate::ir::Item> =
+        synthetic.all_items().into_iter().cloned().collect();
+    let mut file_outputs = Vec::new();
+    for tf in transformed {
+        let mut all_items = tf.items;
 
-        // 非外部型のスタブ生成（enum バリアント内の Hono 固有型等）
+        // 外部型 struct 生成: scan_context は **このファイルの** 合成型のみ。
+        // global synthetic を渡すと、他ファイルの合成型から参照される外部型まで本ファイルに
+        // 生成され、モノモーフィゼーションの差で型不整合が発生するため per-file に限定する。
+        generate_external_structs_to_fixpoint(
+            &mut all_items,
+            &tf.file_synthetic_items,
+            &shared_registry,
+            &synthetic,
+        );
+
+        // スタブ生成:
+        // - scan_context = file_synthetic_items: 本ファイルが生成した合成型は走査対象。
+        //   その field 型として参照される未定義型はスタブ化される（snapshot 互換）。
+        // - defined_only = global_synthetic_items: 他ファイルの合成型は「定義済み扱い」のみ。
+        //   走査しないため雪だるま現象を防ぎつつ、本ファイルでの重複スタブ生成も防ぐ。
         external_struct_generator::generate_stub_structs(
             &mut all_items,
+            &tf.file_synthetic_items,
+            &global_synthetic_items,
             &shared_registry,
             &synthetic,
         );
@@ -163,23 +206,29 @@ pub fn transpile_pipeline(input: TranspileInput) -> Result<TranspileOutput> {
         let rust_source = crate::generator::generate(&all_items);
 
         file_outputs.push(FileOutput {
-            path: file.path.with_extension("rs"),
-            source: file.source.clone(),
+            path: tf.path.with_extension("rs"),
+            source: tf.source,
             rust_source,
-            unsupported,
+            unsupported: tf.unsupported,
+            file_synthetic_items: tf.file_synthetic_items,
         });
     }
 
-    // all_items() + clone で synthetic を借用可能に保つ（generate 関数が &synthetic を参照するため）
-    let mut synthetic_items: Vec<crate::ir::Item> =
-        synthetic.all_items().into_iter().cloned().collect();
+    // post-loop: shared_types.rs 用に synthetic_items 自身に外部型/スタブを補完。
+    // I-371: scan_context は使わない（`&[]`）。shared_types.rs は独立した Rust モジュールであり、
+    // 他モジュールで定義された user 型は import しない限り参照不可。よって、shared_types.rs から
+    // 参照される未定義型は **shared_types.rs 内に** stub を生成する必要がある（クロスモジュール
+    // 整合性は I-371 のスコープ外）。
+    let mut synthetic_items = global_synthetic_items;
 
     // 共有 synthetic items 内で参照されている外部型の struct も生成（推移的依存を含む）
-    generate_external_structs_to_fixpoint(&mut synthetic_items, &shared_registry, &synthetic);
+    generate_external_structs_to_fixpoint(&mut synthetic_items, &[], &shared_registry, &synthetic);
 
     // shared_types.rs 用: 外部型でない未定義型にもスタブ struct を生成（コンパイル可能にする）
     external_struct_generator::generate_stub_structs(
         &mut synthetic_items,
+        &[],
+        &[],
         &shared_registry,
         &synthetic,
     );
@@ -241,13 +290,17 @@ fn register_synthetic_structs_in_registry(
 /// 可能性がある（推移的依存）。新しい型が検出されなくなるまでループする。
 fn generate_external_structs_to_fixpoint(
     items: &mut Vec<crate::ir::Item>,
+    scan_context: &[crate::ir::Item],
     registry: &crate::registry::TypeRegistry,
     synthetic: &SyntheticTypeRegistry,
 ) {
     const MAX_ITERATIONS: usize = 10;
     for _ in 0..MAX_ITERATIONS {
-        let undefined_refs =
-            external_struct_generator::collect_undefined_type_references(items, registry);
+        let undefined_refs = external_struct_generator::collect_undefined_type_references(
+            items,
+            scan_context,
+            registry,
+        );
         if undefined_refs.is_empty() {
             break;
         }
@@ -278,12 +331,20 @@ pub fn transpile_single(source: &str) -> Result<String> {
         module_resolver: Box::new(crate::pipeline::module_resolver::TrivialResolver),
     };
     let output = transpile_pipeline(input)?;
-    Ok(output
-        .files
-        .into_iter()
-        .next()
-        .map(|f| f.rust_source)
-        .unwrap_or_default())
+    let file = output.files.into_iter().next();
+    let Some(file) = file else {
+        return Ok(String::new());
+    };
+    // file.file_synthetic_items はこのファイル自身が生成した合成型のみ。
+    // post-loop で追加された stub などを混入させない。
+    let synthetic_code = crate::generator::generate(&file.file_synthetic_items);
+    if synthetic_code.is_empty() {
+        Ok(file.rust_source)
+    } else if file.rust_source.is_empty() {
+        Ok(synthetic_code)
+    } else {
+        Ok(format!("{synthetic_code}\n\n{}", file.rust_source))
+    }
 }
 
 /// ファイルリストの共通ルートディレクトリを求める。

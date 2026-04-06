@@ -7,6 +7,10 @@ Tier 内の記載順序が優先度。根本原因を共有するイシューは
 - 件数は Hono ベンチマーク実測値（最終実行: 2026-04-05、112/158 クリーン、56 エラー、hono_sha: f82aba8）
 ---
 
+## ユーザー記載メモ
+
+- SelfのようなRustの予約語だが、TypeScriptの予約語ではない単語が使われた場合の仕様を検討する → I-374 として PRD 化候補に追加済
+
 ## Tier 0: L1（信頼性基盤）+ L2（設計基盤）
 
 ### ~~RC-15: 型変換シグネチャの設計問題 [L2]~~ **Batch 10 で完了**
@@ -106,8 +110,8 @@ OBJECT_LITERAL_NO_TYPE 全体で 25件。I-300/I-301/I-306 のサブ分類件数
 - **[I-103]** **エラー型戦略** — String 固定 → thiserror/anyhow
 - **[I-102]** **any/unknown の残課題** — typeof/instanceof 未使用の any は Value のまま
 - **[I-274]** **フィールド名の IR サニタイズ不一致** — I-270c で顕在化見込み
+- **[I-374]** **Rust 予約語と衝突する型名のサニタイズ** — TypeScript で `interface Self {}` のように Rust の予約語を識別子として使った場合、生成 Rust で `pub struct Self {}` となり Rust 予約語衝突でコンパイル不可。現在 `src/pipeline/external_struct_generator/mod.rs` の `collect_type_refs_from_rust_type` で `Self` のみを band-aid 除外しているが、根本治療は IR レベルで型名をサニタイズすること（例: `Self` → `Self_` または `_Self`）。対象は Rust の type-position 予約語: `Self`, `crate`, `super`, `extern`, `dyn`, `impl` 等。修正方針: (1) `src/registry/mod.rs` または `src/transformer/types/converter.rs` で TS 識別子 → Rust 型名変換時に予約語チェック → サニタイズ。(2) ユーザーコード側の参照（`new Self(...)` 等）も同期してリネーム。(3) `collect_type_refs_from_rust_type` の Self band-aid を削除。修正コスト: 中。テスト: TS `interface Self { x: number; }` を入力にして Rust `struct Self_` が生成されることを確認
 - **[I-279]** **resolve_synthetic_placement の O(n²)** — 大規模プロジェクトでボトルネック
-- **[I-371]** **合成型の単一正準配置欠如** — 合成型が複数の Rust モジュールに独立して定義される設計欠陥。同一ファイル内重複（E0428）+ クロスファイル冗長性 + shared_types.rs インポート欠如の 3 症状。Hono types.rs で E0428×5 + E0119×12 = 17 エラー。設計レベルの修正が必要（パイプラインの per-file loop + OutputWriter + 単一ファイル API の連動変更）。PRD → `backlog/i371-synthetic-type-canonical-placement.md`
 - **[I-62]** **is_string_type の Option\<String\> ハック除去**
 - **[I-293]** **全ファイルのテストケース体系的レビュー**
 

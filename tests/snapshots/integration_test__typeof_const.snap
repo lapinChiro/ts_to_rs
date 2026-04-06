@@ -68,26 +68,6 @@ impl std::fmt::Display for Mimes {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct _TypeLit0 {
-    pub Stringify: f64,
-    pub BeforeStream: f64,
-    pub Stream: f64,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct _TypeLit1 {
-    pub aac: String,
-    pub avi: String,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct _TypeLit2 {
-    pub querystring: bool,
-    pub cookie: bool,
-    pub header: bool,
-}
-
-#[derive(Debug, Clone, PartialEq)]
 struct CompressionOptions {
     encoding: EncodingTypes,
     threshold: f64,

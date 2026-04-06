@@ -24,18 +24,28 @@ const SERDE_JSON_VALUE: &str = "serde_json::Value";
 /// 外部型（JSON ビルトイン定義）のみを対象とし、ユーザー定義型（TS ソースから登録された型）は除外する。
 /// `TypeRegistry::is_external` で外部型かどうかを判定する。
 ///
+/// `scan_context` の役割:
+/// - **定義済み判定**: scan_context 内の型は「定義済み」として扱われる。
+/// - **参照走査**: scan_context 内の参照も undefined 候補に加える。
+///
+/// この関数は外部型 struct 生成 ([`generate_external_struct`]) のための候補名を返す。
+/// `is_external` フィルタが効くため、ユーザー定義型が誤って取り込まれる心配はない。
+/// 合成型のフィールドが参照する外部型を漏れなく検出する目的で scan_context をスキャンする。
+///
 /// 以下を除外する:
-/// - `items` 内に既に定義が存在する型（struct/enum/trait/type alias）
+/// - `items` または `scan_context` 内に既に定義が存在する型（struct/enum/trait/type alias）
 /// - Rust 標準ライブラリ型（`String`, `Vec`, `HashMap` 等）
 /// - `serde_json::Value`
 /// - 外部型でない型（ユーザー定義型）
 pub fn collect_undefined_type_references(
     items: &[Item],
+    scan_context: &[Item],
     registry: &TypeRegistry,
 ) -> HashSet<String> {
-    // 1. items 内で定義されている型名を収集
+    // 1. items + scan_context 内で定義されている型名を収集
     let defined_types: HashSet<String> = items
         .iter()
+        .chain(scan_context.iter())
         .filter_map(|item| match item {
             Item::Struct { name, .. }
             | Item::Enum { name, .. }
@@ -45,9 +55,9 @@ pub fn collect_undefined_type_references(
         })
         .collect();
 
-    // 2. items 内で参照されている型名を収集
+    // 2. items + scan_context 内で参照されている型名を収集
     let mut referenced_types = HashSet::new();
-    for item in items {
+    for item in items.iter().chain(scan_context.iter()) {
         collect_type_refs_from_item(item, &mut referenced_types);
     }
 
@@ -66,11 +76,21 @@ pub fn collect_undefined_type_references(
 /// IR items を走査し、参照されているが定義がない型名を **全て** 収集する。
 ///
 /// [`collect_undefined_type_references`] と異なり、`is_external` フィルタを適用しない。
-/// types.rs のスタブ生成で使用する — types.rs 内の全未定義参照を解決するため。
-pub fn collect_all_undefined_references(items: &[Item]) -> HashSet<String> {
-    // 定義済み型名（struct, enum, trait, type alias）
+/// shared_types.rs のスタブ生成で使用する — モジュール内の全未定義参照を解決するため。
+///
+/// `scan_context` は **定義+走査** の追加 items（per-file 合成型など）。
+/// `defined_only` は **定義済み判定のみ** に使う items（他ファイルの合成型など）。
+/// 走査対象から外すことで、無関係な型までスタブ化される雪だるま現象を防ぐ。
+pub fn collect_all_undefined_references(
+    items: &[Item],
+    scan_context: &[Item],
+    defined_only: &[Item],
+) -> HashSet<String> {
+    // 定義済み型名（struct, enum, trait, type alias）— items + scan_context + defined_only
     let defined_types: HashSet<String> = items
         .iter()
+        .chain(scan_context.iter())
+        .chain(defined_only.iter())
         .filter_map(|item| match item {
             Item::Struct { name, .. }
             | Item::Enum { name, .. }
@@ -80,9 +100,11 @@ pub fn collect_all_undefined_references(items: &[Item]) -> HashSet<String> {
         })
         .collect();
 
-    // インポート済み型名（`use path::{Name};` の names）
+    // インポート済み型名（`use path::{Name};` の names）— items + scan_context + defined_only
     let imported_types: HashSet<String> = items
         .iter()
+        .chain(scan_context.iter())
+        .chain(defined_only.iter())
         .filter_map(|item| match item {
             Item::Use { names, .. } => Some(names.clone()),
             _ => None,
@@ -90,9 +112,10 @@ pub fn collect_all_undefined_references(items: &[Item]) -> HashSet<String> {
         .flatten()
         .collect();
 
-    // 型パラメータ名（struct/trait/fn/impl の type_params）
+    // 型パラメータ名（struct/trait/fn/impl の type_params）— items + scan_context
     let type_param_names: HashSet<String> = items
         .iter()
+        .chain(scan_context.iter())
         .flat_map(|item| match item {
             Item::Struct { type_params, .. }
             | Item::Trait { type_params, .. }
@@ -106,8 +129,9 @@ pub fn collect_all_undefined_references(items: &[Item]) -> HashSet<String> {
         })
         .collect();
 
+    // 参照名は items + scan_context から収集（defined_only は走査しない）
     let mut referenced_types = HashSet::new();
-    for item in items {
+    for item in items.iter().chain(scan_context.iter()) {
         collect_type_refs_from_item(item, &mut referenced_types);
     }
 
@@ -133,11 +157,13 @@ pub fn collect_all_undefined_references(items: &[Item]) -> HashSet<String> {
 /// フル生成した struct が新たな未定義参照を生む場合に備え、固定点に達するまで反復する。
 pub fn generate_stub_structs(
     items: &mut Vec<Item>,
+    scan_context: &[Item],
+    defined_only: &[Item],
     registry: &TypeRegistry,
     synthetic: &SyntheticTypeRegistry,
 ) {
     for _ in 0..10 {
-        let undefined = collect_all_undefined_references(items);
+        let undefined = collect_all_undefined_references(items, scan_context, defined_only);
         if undefined.is_empty() {
             break;
         }
@@ -231,7 +257,17 @@ fn references_type_name(ty: &RustType, target: &str) -> bool {
 }
 
 /// `Item` 内で参照されている `RustType::Named` の型名を再帰的に収集する。
-fn collect_type_refs_from_item(item: &Item, refs: &mut HashSet<String>) {
+///
+/// 走査対象:
+/// - `Enum`: variant の data 型と fields
+/// - `Struct`: fields
+/// - `Fn`: return_type と params (signature のみ、body は非対応 — TODO I-373)
+/// - `TypeAlias`: aliased type
+/// - `Impl`: for_trait と各 method の signature
+/// - `Trait`: supertraits と各 method の signature
+///
+/// `Comment` / `RawCode` / `Use` は走査しない。
+pub(crate) fn collect_type_refs_from_item(item: &Item, refs: &mut HashSet<String>) {
     match item {
         Item::Enum { variants, .. } => {
             for variant in variants {
@@ -262,15 +298,72 @@ fn collect_type_refs_from_item(item: &Item, refs: &mut HashSet<String>) {
                 }
             }
         }
-        _ => {}
+        Item::TypeAlias { ty, .. } => {
+            collect_type_refs_from_rust_type(ty, refs);
+        }
+        Item::Impl {
+            for_trait,
+            consts,
+            methods,
+            ..
+        } => {
+            if let Some(tref) = for_trait {
+                refs.insert(tref.name.clone());
+                for arg in &tref.type_args {
+                    collect_type_refs_from_rust_type(arg, refs);
+                }
+            }
+            for c in consts {
+                collect_type_refs_from_rust_type(&c.ty, refs);
+            }
+            for method in methods {
+                if let Some(rt) = &method.return_type {
+                    collect_type_refs_from_rust_type(rt, refs);
+                }
+                for param in &method.params {
+                    if let Some(ty) = &param.ty {
+                        collect_type_refs_from_rust_type(ty, refs);
+                    }
+                }
+            }
+        }
+        Item::Trait {
+            methods,
+            supertraits,
+            ..
+        } => {
+            for sup in supertraits {
+                refs.insert(sup.name.clone());
+                for arg in &sup.type_args {
+                    collect_type_refs_from_rust_type(arg, refs);
+                }
+            }
+            for method in methods {
+                if let Some(rt) = &method.return_type {
+                    collect_type_refs_from_rust_type(rt, refs);
+                }
+                for param in &method.params {
+                    if let Some(ty) = &param.ty {
+                        collect_type_refs_from_rust_type(ty, refs);
+                    }
+                }
+            }
+        }
+        Item::Use { .. } | Item::Comment(_) | Item::RawCode(_) => {}
     }
 }
 
 /// `RustType` を再帰的に走査し、`Named` の型名を収集する。
-fn collect_type_refs_from_rust_type(ty: &RustType, refs: &mut HashSet<String>) {
+///
+/// `Self` は impl block 文脈の implicit type であり、struct 名として stub 生成しても
+/// 意味がない（`pub struct Self {}` は Rust の予約語衝突でコンパイル不可）。よって
+/// 走査結果から除外する。
+pub(crate) fn collect_type_refs_from_rust_type(ty: &RustType, refs: &mut HashSet<String>) {
     match ty {
         RustType::Named { name, type_args } => {
-            refs.insert(name.clone());
+            if name != "Self" {
+                refs.insert(name.clone());
+            }
             for arg in type_args {
                 collect_type_refs_from_rust_type(arg, refs);
             }

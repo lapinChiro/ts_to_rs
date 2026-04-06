@@ -444,6 +444,28 @@ pub enum Item {
     RawCode(String),
 }
 
+impl Item {
+    /// Item の識別名を返す。
+    ///
+    /// 命名対象の Item（`Struct`, `Enum`, `Trait`, `TypeAlias`, `Fn`, `Impl`）は
+    /// `Some(name)` を返す。`Comment` / `RawCode` / `Use` のように単一の識別名を
+    /// 持たない Item は `None` を返す。
+    ///
+    /// 合成型の参照グラフ構築や placement 判定など、Item を名前で索引する用途で
+    /// 使用する。
+    pub fn canonical_name(&self) -> Option<&str> {
+        match self {
+            Item::Struct { name, .. }
+            | Item::Enum { name, .. }
+            | Item::Trait { name, .. }
+            | Item::TypeAlias { name, .. }
+            | Item::Fn { name, .. } => Some(name),
+            Item::Impl { struct_name, .. } => Some(struct_name),
+            Item::Comment(_) | Item::RawCode(_) | Item::Use { .. } => None,
+        }
+    }
+}
+
 /// A statement inside a function body.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Stmt {

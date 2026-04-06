@@ -3,17 +3,6 @@ source: tests/integration_test.rs
 expression: output
 ---
 #[derive(Debug, Clone, PartialEq)]
-pub struct _TypeLit0 {
-    pub name: String,
-    pub age: f64,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct _TypeLit1 {
-    pub loud: bool,
-}
-
-#[derive(Debug, Clone, PartialEq)]
 pub struct CreateUserOpts {
     pub name: String,
     pub age: f64,

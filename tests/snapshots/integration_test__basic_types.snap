@@ -9,12 +9,6 @@ pub enum ProcessUnknownXType {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum ProcessUnknownXTypeOrString {
-    ProcessUnknownXType(ProcessUnknownXType),
-    String(String),
-}
-
-#[derive(Debug, Clone, PartialEq)]
 struct User {
     name: String,
     age: f64,
