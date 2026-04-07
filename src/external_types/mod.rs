@@ -443,6 +443,10 @@ fn convert_external_signature(
         params,
         return_type,
         has_rest,
+        // I-383 T8': 外部型 (web API, browser builtin) の signature は generic を持たない
+        // ものが大半で、現状は空 vec で運用。将来必要なら external type metadata から
+        // 抽出するロジックを追加する。
+        type_params: vec![],
     }
 }
 

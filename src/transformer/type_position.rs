@@ -61,6 +61,7 @@ mod tests {
                 params: vec![],
                 return_type: None,
                 has_rest: false,
+                type_params: vec![],
             }],
         );
         reg.register(

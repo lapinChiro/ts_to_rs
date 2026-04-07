@@ -1,0 +1,90 @@
+  [WIP] I-383 T7-T8': 型パラメータ scope 補完と MethodSignature.type_params 追加 (Cluster 1a 4/11 解消)
+
+  I-382 完全解消プロジェクト Phase 2 T2.A の中間コミット。PRD-A (I-383) の
+  T1-T5 + T7-T9 + T8' を実装し、Hono 158 fixture で Cluster 1a (型パラメータ leak)
+  11 件のうち 4 件 (M, Status, OutputType, U) を解消した。
+
+  ## 主な変更
+
+  ### 共通ヘルパー抽出 + type_param 伝播統一 (T1-T5)
+  - synthetic_registry: `extract_used_type_params` ヘルパーを抽出し、`register_union`
+    / `register_struct_dedup` / `register_intersection_enum` の 3 関数で同じロジックを
+    共有。`_TypeLit*` と intersection enum も generic 化されるようになった
+  - synthetic_registry: `push_type_param_scope` を replace → append-merge 意味論に変更。
+    `class C<S> { foo<T>(x: S | T) }` のようなネスト generic で外部と内部の両方の scope
+    が同時にアクティブになる
+  - synthetic_registry: `is_in_type_param_scope` 公開 API 追加
+  - external_struct_generator: `collect_undefined_refs_inner` の type_param 除外フィルタ
+    に `Item::Enum` を追加 (漏れ修正)
+
+  ### 関数 / arrow / class / interface converter の scope push 補完 (T7-T9)
+  - transformer/functions/mod.rs: `convert_fn_decl` で関数 generic を scope に push
+  - transformer/expressions/functions.rs: `convert_arrow_expr_with_return_type` で arrow
+    generic を push (inner 分離で restore 保証)
+  - transformer/classes/mod.rs: `extract_class_info` で class generic を push
+  - transformer/classes/members.rs: `build_method` で method generic を append push
+  - type_converter/interfaces.rs: `convert_method_signature` で interface method generic
+    を push
+
+  ### MethodSignature.type_params 追加 (T8')
+  当初想定外の根本原因として、`MethodSignature` 構造体に type_params フィールドが存在せず、
+  registry collection 段階でメソッド固有の generic が失われていたことが判明。Transformer
+  経路の scope push (T7-T9) だけでは不十分で、`resolve_typedef` → `resolve_method_sig`
+  経路でも補完が必要だった。
+
+  - registry/mod.rs: `MethodSignature<T>` に `type_params: Vec<TypeParam<T>>` フィールド
+    追加 + 手動 `Default` 実装 (T に Default 制約を課さずに Vec/Option/bool フィールドを
+    default 化)
+  - registry/collection.rs: `extract_class` で `method.function.type_params` から抽出
+  - registry/interfaces.rs: `build_method_signature` に `type_params_decl` 引数追加。
+    `TsMethodSignature` / `TsCallSignatureDecl` / `TsConstructSignatureDecl` の 3 caller
+    を更新
+  - ts_type_info/resolve/typedef.rs: `resolve_method_sig` で type_params を scope に
+    push/restore + constraint を RustType に解決
+  - type_converter/interfaces.rs: `convert_interface_as_fn_type` で call signature 自身
+    の generic を `Item::TypeAlias.type_params` に merge (interface 自身の type_params
+    との union)
+  - test fixture 36 箇所を Python スクリプトで一括更新 (`type_params: vec![],` 挿入)
+  - production 3 箇所を手動更新 (collection.rs constructor, interfaces.rs
+    build_method_signature デフォルト, external_types/mod.rs)
+
+  ### 計画文書更新
+  - plan.md: T2.A の中間進捗を明記
+  - report/i382/master-plan.md: Phase 1a-2 (PRD-A-2 起票) を done、T2.A 実装状況と次
+    セッションの開始手順 (Step 1-5) を詳細記載
+  - backlog/I-383-*.md: T6 (Step 3 error 化) が PRD-A-2 に分離された旨を header に注記
+  - backlog/I-386-*.md: PRD-A-2 (I-386) 新規起票。検証エビデンス E1-E6 で「発見の真偽」
+    を証明 (2223 baseline / 73 failing / bug-affirming test の動かぬ証拠)
+
+  ## 計測結果
+
+  - `cargo test --lib`: 2225 passed, 0 failed (T7/T8 検証 integration test 2 件追加)
+  - `cargo clippy --all-targets --all-features -- -D warnings`: 0 warnings
+  - `cargo fmt --all --check`: 0 diff
+  - Hono 158 fixture probe: dangling refs 34 → **30 件** (4 件削減)
+
+  ## Cluster 1a 解消状況 (当初 11 件)
+
+  | 識別子 | 状態 |
+  |---|---|
+  | M, Status, OutputType, U | ✅ 解消 |
+  | E, P, S, TNext, TResult, TResult1, TResult2 | ❌ 残存 (次セッションで追跡) |
+
+  ## 次セッションの開始ポイント
+
+  `report/i382/master-plan.md` の「次セッションの開始手順」(Step 1-5) から再開する。
+  probe + tracer を再投入して残 7 件の referencer を特定し、経路別に個別修正する。
+  残 7 件解消後に T2.A が完了となり、T2.A2 (PRD-A-2 = I-386 実装) に進む。
+
+  ---
+  コミット自体の実行は git rule によりユーザーのみが行います。このメッセージをそのまま git commit の -m に使用してください。
+
+  まとめ
+
+  - plan.md: T2.A 中間進捗と「次セッションは master-plan.md の開始手順から再開」を明記
+  - report/i382/master-plan.md: Phase 2 進捗更新 + 「現在のセッション状態」セクションに完了タスク・残タスク・各識別子の経路・次セッション開始手順 (Step 1-5) を詳細記載
+  - quality check: cargo test 2225 全 pass / clippy 0 warning / fmt 済み
+  - コミットメッセージ: 上記 [WIP] I-383 T7-T8': ... を提案
+
+  次セッションは report/i382/master-plan.md の「次セッションの開始手順」Step 1 (probe + tracer 再投入) から開始し、残 7 件 (E, P, S, TNext, TResult, TResult1, TResult2)
+  の発生経路を特定して個別修正します。

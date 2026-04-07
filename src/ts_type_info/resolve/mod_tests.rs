@@ -808,6 +808,7 @@ fn resolve_typedef_struct_method_error_propagates() {
                 }],
                 return_type: None,
                 has_rest: false,
+                type_params: vec![],
             }],
         )]
         .into_iter()
@@ -837,6 +838,7 @@ fn resolve_typedef_struct_constructor_error_propagates() {
             }],
             return_type: None,
             has_rest: false,
+            type_params: vec![],
         }]),
         call_signatures: vec![],
         extends: vec![],
@@ -858,6 +860,7 @@ fn resolve_typedef_struct_call_signature_error_propagates() {
             params: vec![],
             return_type: Some(unresolvable_type()),
             has_rest: false,
+            type_params: vec![],
         }],
         extends: vec![],
         is_interface: false,
@@ -950,6 +953,7 @@ fn resolve_method_sig_param_error_propagates() {
         }],
         return_type: Some(TsTypeInfo::String),
         has_rest: false,
+        type_params: vec![],
     };
     assert!(resolve_method_sig(sig, &reg, &mut syn).is_err());
 }
@@ -962,6 +966,7 @@ fn resolve_method_sig_return_type_error_propagates() {
         params: vec![],
         return_type: Some(unresolvable_type()),
         has_rest: false,
+        type_params: vec![],
     };
     assert!(resolve_method_sig(sig, &reg, &mut syn).is_err());
 }

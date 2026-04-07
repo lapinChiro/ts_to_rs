@@ -39,6 +39,7 @@ fn test_propagate_expected_new_expr_uses_constructor_params() {
                 ],
                 return_type: None,
                 has_rest: false,
+                type_params: vec![],
             }]),
             call_signatures: vec![],
             extends: vec![],

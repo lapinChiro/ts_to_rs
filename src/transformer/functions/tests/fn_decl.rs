@@ -112,6 +112,88 @@ fn test_convert_fn_decl_with_local_vars() {
     }
 }
 
+// I-383 T8: クラスメソッドの class generic + method generic が scope に append-merge され、
+// メソッド本体で両方の型パラメータを参照する anonymous union が generic 化されることを検証。
+#[test]
+fn test_convert_class_method_with_generic_propagates_class_and_method_scope() {
+    use crate::transformer::Transformer;
+    let f = TctxFixture::from_source("class C<S> { foo<T>(x: S | T): void { return; } }");
+    let tctx = f.tctx();
+    let mut synthetic = SyntheticTypeRegistry::new();
+    let mut transformer = Transformer::for_module(&tctx, &mut synthetic);
+    // Find class decl in the module and call extract_class_info
+    let module = f.module();
+    let class_decl = module
+        .body
+        .iter()
+        .find_map(|item| match item {
+            swc_ecma_ast::ModuleItem::Stmt(swc_ecma_ast::Stmt::Decl(
+                swc_ecma_ast::Decl::Class(cd),
+            )) => Some(cd),
+            _ => None,
+        })
+        .expect("expected class decl");
+    transformer
+        .extract_class_info(class_decl, Visibility::Public)
+        .unwrap();
+    // anonymous union for `S | T` should be generic over both S and T (alphabetical order: S, T).
+    let union_enum = synthetic
+        .all_items()
+        .into_iter()
+        .find(|item| matches!(item, Item::Enum { name, .. } if name == "SOrT" || name == "TOrS"))
+        .expect("expected synthetic union enum for `S | T`");
+    match union_enum {
+        Item::Enum {
+            type_params, name, ..
+        } => {
+            let names: Vec<&str> = type_params.iter().map(|tp| tp.name.as_str()).collect();
+            assert!(
+                names.contains(&"S") && names.contains(&"T"),
+                "anonymous union {name} should be generic over both S and T, got {names:?}"
+            );
+        }
+        _ => panic!("unreachable"),
+    }
+}
+
+// I-383 T7: generic 関数の type_params が SyntheticTypeRegistry の scope に push され、
+// 関数本体内の anonymous union が generic 化されることを検証する。
+//
+// 期待: `function f<M>(x: M | M[]): M[]` を変換すると、`M | M[]` の anonymous union
+// が `Item::Enum { name: "MOrVecM", type_params: [M], .. }` として synthetic に登録される。
+// PRD-A T7 適用前は scope が push されないため type_params が空の anonymous enum が
+// 生成され、後続の Step 3 (PRD-A-2) で `unknown type ref: M` を引き起こす。
+#[test]
+fn test_convert_fn_decl_generic_propagates_scope_to_anonymous_union() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
+    let fn_decl = parse_fn_decl("function f<M>(x: M | M[]): void { return; }");
+    let mut synthetic = SyntheticTypeRegistry::new();
+    Transformer::for_module(&tctx, &mut synthetic)
+        .convert_fn_decl(&fn_decl, Visibility::Public, false)
+        .unwrap();
+    // 生成された synthetic enum を探す。命名規則: "MOrVecM" (M < Vec<M> アルファベット順)。
+    // 以前は type_params が空 vec で生成されていた (silent fallback で動いていた)。
+    let union_enum = synthetic
+        .all_items()
+        .into_iter()
+        .find(|item| {
+            matches!(item, Item::Enum { name, .. } if name.contains("M") && name.contains("Or"))
+        })
+        .expect("expected synthetic union enum for `M | M[]`");
+    match union_enum {
+        Item::Enum {
+            type_params, name, ..
+        } => {
+            assert!(
+                type_params.iter().any(|tp| tp.name == "M"),
+                "anonymous union {name} should be generic over M, got type_params={type_params:?}"
+            );
+        }
+        _ => panic!("unreachable"),
+    }
+}
+
 #[test]
 fn test_convert_fn_decl_generic_single_param() {
     let f = TctxFixture::new();

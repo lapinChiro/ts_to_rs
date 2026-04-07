@@ -112,6 +112,7 @@ fn collect_undefined_refs_inner(items: &[&Item]) -> HashSet<String> {
         .iter()
         .flat_map(|item| match item {
             Item::Struct { type_params, .. }
+            | Item::Enum { type_params, .. }
             | Item::Trait { type_params, .. }
             | Item::Fn { type_params, .. }
             | Item::Impl { type_params, .. }

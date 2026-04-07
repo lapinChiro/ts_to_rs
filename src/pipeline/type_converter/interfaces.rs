@@ -160,53 +160,84 @@ fn convert_interface_as_fn_type(
         .max_by_key(|s| s.params.len())
         .ok_or_else(|| anyhow!("no call signatures found"))?;
 
-    let mut param_types = Vec::new();
-    for param in &sig.params {
-        match param {
-            swc_ecma_ast::TsFnParam::Ident(ident) => {
-                let ty = ident
-                    .type_ann
-                    .as_ref()
-                    .map(|ann| convert_ts_type(&ann.type_ann, synthetic, reg))
-                    .transpose()?
-                    .unwrap_or(RustType::Any);
-                param_types.push(ty);
-            }
-            swc_ecma_ast::TsFnParam::Rest(rest) => {
-                // Rest parameter: ...args: T[] → Vec<T>
-                let type_ann = rest.type_ann.as_ref().or_else(|| {
-                    if let swc_ecma_ast::Pat::Ident(ident) = rest.arg.as_ref() {
-                        ident.type_ann.as_ref()
-                    } else {
-                        None
-                    }
-                });
-                let ty = type_ann
-                    .map(|ann| convert_ts_type(&ann.type_ann, synthetic, reg))
-                    .transpose()?
-                    .unwrap_or(RustType::Vec(Box::new(RustType::Any)));
-                param_types.push(ty);
-            }
-            _ => return Err(anyhow!("unsupported call signature parameter pattern")),
-        }
-    }
-
-    let return_type = sig
-        .type_ann
+    // I-383 T8': call signature 自身の generic 型パラメータを scope に append し、
+    // 同じく resolve した型パラメータを Item::TypeAlias の type_params にマージする。
+    // これにより `interface I<E> { <M, P>(method: M, path: P): void }` のような構造で
+    // call signature 内部の `M`, `P` が generic として保持される。
+    let sig_tp_names: Vec<String> = sig
+        .type_params
         .as_ref()
-        .map(|ann| convert_ts_type(&ann.type_ann, synthetic, reg))
-        .transpose()?
-        .unwrap_or(RustType::Unit);
+        .map(|tpd| tpd.params.iter().map(|p| p.name.sym.to_string()).collect())
+        .unwrap_or_default();
+    let prev_scope = synthetic.push_type_param_scope(sig_tp_names);
 
-    Ok(Item::TypeAlias {
-        vis,
-        name: name.to_string(),
-        type_params,
-        ty: RustType::Fn {
-            params: param_types,
-            return_type: Box::new(return_type),
-        },
-    })
+    let result = (|| -> Result<Item> {
+        let mut param_types = Vec::new();
+        for param in &sig.params {
+            match param {
+                swc_ecma_ast::TsFnParam::Ident(ident) => {
+                    let ty = ident
+                        .type_ann
+                        .as_ref()
+                        .map(|ann| convert_ts_type(&ann.type_ann, synthetic, reg))
+                        .transpose()?
+                        .unwrap_or(RustType::Any);
+                    param_types.push(ty);
+                }
+                swc_ecma_ast::TsFnParam::Rest(rest) => {
+                    // Rest parameter: ...args: T[] → Vec<T>
+                    let type_ann = rest.type_ann.as_ref().or_else(|| {
+                        if let swc_ecma_ast::Pat::Ident(ident) = rest.arg.as_ref() {
+                            ident.type_ann.as_ref()
+                        } else {
+                            None
+                        }
+                    });
+                    let ty = type_ann
+                        .map(|ann| convert_ts_type(&ann.type_ann, synthetic, reg))
+                        .transpose()?
+                        .unwrap_or(RustType::Vec(Box::new(RustType::Any)));
+                    param_types.push(ty);
+                }
+                _ => return Err(anyhow!("unsupported call signature parameter pattern")),
+            }
+        }
+
+        let return_type = sig
+            .type_ann
+            .as_ref()
+            .map(|ann| convert_ts_type(&ann.type_ann, synthetic, reg))
+            .transpose()?
+            .unwrap_or(RustType::Unit);
+
+        // Merge interface type_params + call signature type_params
+        let mut merged_tp = type_params.clone();
+        if let Some(tpd) = sig.type_params.as_ref() {
+            for p in &tpd.params {
+                let name = p.name.sym.to_string();
+                if !merged_tp.iter().any(|tp| tp.name == name) {
+                    let constraint = p
+                        .constraint
+                        .as_ref()
+                        .and_then(|c| convert_ts_type(c, synthetic, reg).ok());
+                    merged_tp.push(TypeParam { name, constraint });
+                }
+            }
+        }
+
+        Ok(Item::TypeAlias {
+            vis,
+            name: name.to_string(),
+            type_params: merged_tp,
+            ty: RustType::Fn {
+                params: param_types,
+                return_type: Box::new(return_type),
+            },
+        })
+    })();
+
+    synthetic.restore_type_param_scope(prev_scope);
+    result
 }
 
 /// Converts a mixed interface (properties + methods) into struct + trait + impl.
@@ -403,38 +434,54 @@ pub(super) fn convert_method_signature(
         }
     };
 
-    let mut params = Vec::new();
-    for param in &sig.params {
-        match param {
-            swc_ecma_ast::TsFnParam::Ident(ident) => {
-                let param_name = ident.id.sym.to_string();
-                let ty = ident
-                    .type_ann
-                    .as_ref()
-                    .map(|ann| convert_ts_type(&ann.type_ann, synthetic, reg))
-                    .transpose()?;
-                params.push(Param {
-                    name: param_name,
-                    ty,
-                });
-            }
-            _ => return Err(anyhow!("unsupported method parameter pattern")),
-        }
-    }
-
-    let return_type = sig
-        .type_ann
+    // I-383 T9: interface method 自身の generic 型パラメータを scope に append する。
+    // 外部 (interface 自身) の type_params は `convert_interface_items` で既に push 済。
+    // append-merge 意味論で両方アクティブになる。restore 漏れを防ぐため inner closure で
+    // 本体処理を囲み、戻り値取得後に必ず restore する。
+    let method_tp_names: Vec<String> = sig
+        .type_params
         .as_ref()
-        .map(|ann| convert_ts_type(&ann.type_ann, synthetic, reg))
-        .transpose()?;
+        .map(|tpd| tpd.params.iter().map(|p| p.name.sym.to_string()).collect())
+        .unwrap_or_default();
+    let prev_scope = synthetic.push_type_param_scope(method_tp_names);
 
-    Ok(Method {
-        vis: Visibility::Public,
-        name,
-        has_self: true,
-        has_mut_self: false,
-        params,
-        return_type,
-        body: None,
-    })
+    let result = (|| -> Result<Method> {
+        let mut params = Vec::new();
+        for param in &sig.params {
+            match param {
+                swc_ecma_ast::TsFnParam::Ident(ident) => {
+                    let param_name = ident.id.sym.to_string();
+                    let ty = ident
+                        .type_ann
+                        .as_ref()
+                        .map(|ann| convert_ts_type(&ann.type_ann, synthetic, reg))
+                        .transpose()?;
+                    params.push(Param {
+                        name: param_name,
+                        ty,
+                    });
+                }
+                _ => return Err(anyhow!("unsupported method parameter pattern")),
+            }
+        }
+
+        let return_type = sig
+            .type_ann
+            .as_ref()
+            .map(|ann| convert_ts_type(&ann.type_ann, synthetic, reg))
+            .transpose()?;
+
+        Ok(Method {
+            vis: Visibility::Public,
+            name,
+            has_self: true,
+            has_mut_self: false,
+            params,
+            return_type,
+            body: None,
+        })
+    })();
+
+    synthetic.restore_type_param_scope(prev_scope);
+    result
 }

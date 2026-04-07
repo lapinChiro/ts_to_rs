@@ -136,6 +136,7 @@ fn test_merge_preserves_builtin_constructor_when_source_has_none() {
         ],
         return_type: None,
         has_rest: false,
+        type_params: vec![],
     };
     builtin_reg.register_external(
         "Response".to_string(),
@@ -198,6 +199,7 @@ fn test_merge_source_constructor_overrides_builtin() {
                 params: vec![("old".to_string(), RustType::String).into()],
                 return_type: None,
                 has_rest: false,
+                type_params: vec![],
             }]),
             call_signatures: vec![],
             extends: vec![],
@@ -216,6 +218,7 @@ fn test_merge_source_constructor_overrides_builtin() {
                 params: vec![("new_param".to_string(), RustType::F64).into()],
                 return_type: None,
                 has_rest: false,
+                type_params: vec![],
             }]),
             call_signatures: vec![],
             extends: vec![],
@@ -255,6 +258,7 @@ fn test_merge_preserves_builtin_call_signatures() {
                 params: vec![("x".to_string(), RustType::String).into()],
                 return_type: Some(RustType::F64),
                 has_rest: false,
+                type_params: vec![],
             }],
             extends: vec![],
             is_interface: true,
@@ -309,6 +313,7 @@ fn test_merge_source_call_signatures_take_priority() {
                 params: vec![],
                 return_type: Some(RustType::Bool),
                 has_rest: false,
+                type_params: vec![],
             }],
             extends: vec![],
             is_interface: true,
@@ -328,6 +333,7 @@ fn test_merge_source_call_signatures_take_priority() {
                     params: vec![("a".to_string(), RustType::String).into()],
                     return_type: Some(RustType::F64),
                     has_rest: false,
+                    type_params: vec![],
                 },
                 MethodSignature {
                     params: vec![
@@ -336,6 +342,7 @@ fn test_merge_source_call_signatures_take_priority() {
                     ],
                     return_type: Some(RustType::String),
                     has_rest: false,
+                    type_params: vec![],
                 },
             ],
             extends: vec![],

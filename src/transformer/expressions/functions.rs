@@ -175,6 +175,37 @@ impl<'a> Transformer<'a> {
         override_return_type: Option<&RustType>,
         override_param_types: Option<&[RustType]>,
     ) -> Result<Expr> {
+        // I-383 T7: arrow 関数の generic 型パラメータを scope に push する。
+        // arrow_expr は self.synthetic を直接使用するため (fn_decl のような per-function
+        // local_synthetic を持たない)、明示的な restore が必須。`?` 経路があっても restore
+        // 漏れが起きないよう、本体処理を inner closure で囲み、戻り値取得後に必ず restore する。
+        let arrow_tp_names: Vec<String> = arrow
+            .type_params
+            .as_ref()
+            .map(|tpd| tpd.params.iter().map(|p| p.name.sym.to_string()).collect())
+            .unwrap_or_default();
+        let prev_scope = self.synthetic.push_type_param_scope(arrow_tp_names);
+        let result = self.convert_arrow_expr_inner(
+            arrow,
+            resilient,
+            fallback_warnings,
+            override_return_type,
+            override_param_types,
+        );
+        self.synthetic.restore_type_param_scope(prev_scope);
+        result
+    }
+
+    /// Inner implementation. Caller (`convert_arrow_expr_with_return_type`) is responsible
+    /// for `push_type_param_scope` / `restore_type_param_scope` lifecycle.
+    fn convert_arrow_expr_inner(
+        &mut self,
+        arrow: &ast::ArrowExpr,
+        resilient: bool,
+        fallback_warnings: &mut Vec<String>,
+        override_return_type: Option<&RustType>,
+        override_param_types: Option<&[RustType]>,
+    ) -> Result<Expr> {
         let mut params = Vec::new();
         let mut expansion_stmts = Vec::new();
         {

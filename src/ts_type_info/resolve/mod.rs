@@ -401,8 +401,14 @@ fn resolve_type_ref(
             let inner = resolved_args.into_iter().next().unwrap_or(RustType::Any);
             Ok(RustType::Vec(Box::new(inner)))
         }
-        // Promise<T> は Named("Promise", [T]) のまま返す。
+        // Promise<T> / PromiseLike<T> は Named("Promise", [T]) のまま返す。
         // async 関数の戻り値型 unwrap は transformer 側の責務。
+        // I-383 T6: 以前は default branch で silent fall-through していた。3 階層化で
+        // unknown error 化されるため、Promise 系を組み込み扱いとして明示する。
+        "Promise" | "PromiseLike" => Ok(RustType::Named {
+            name: "Promise".to_string(),
+            type_args: resolved_args,
+        }),
         "Record" => {
             let key_type = resolved_args.first().cloned().unwrap_or(RustType::String);
             let value_type = resolved_args.get(1).cloned().unwrap_or(RustType::Any);

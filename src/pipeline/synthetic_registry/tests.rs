@@ -774,6 +774,166 @@ fn test_register_union_detects_type_params_from_scope() {
     }
 }
 
+// I-383 T3: push_type_param_scope の append-merge 意味論
+#[test]
+fn test_push_type_param_scope_appends_to_existing() {
+    let mut reg = SyntheticTypeRegistry::new();
+    let prev1 = reg.push_type_param_scope(vec!["S".to_string()]);
+    assert!(prev1.is_empty());
+    assert!(reg.is_in_type_param_scope("S"));
+
+    // 内側の scope: T を追加すると、S と T の両方が見えるべき
+    let prev2 = reg.push_type_param_scope(vec!["T".to_string()]);
+    assert_eq!(prev2, vec!["S".to_string()]);
+    assert!(reg.is_in_type_param_scope("S"), "outer S still visible");
+    assert!(reg.is_in_type_param_scope("T"), "inner T visible");
+
+    // restore で内側 scope を抜けると T は消える
+    reg.restore_type_param_scope(prev2);
+    assert!(reg.is_in_type_param_scope("S"));
+    assert!(!reg.is_in_type_param_scope("T"));
+
+    // restore で外側 scope を抜けると空
+    reg.restore_type_param_scope(prev1);
+    assert!(!reg.is_in_type_param_scope("S"));
+}
+
+#[test]
+fn test_push_type_param_scope_idempotent_on_duplicate() {
+    let mut reg = SyntheticTypeRegistry::new();
+    reg.push_type_param_scope(vec!["T".to_string()]);
+    let prev = reg.push_type_param_scope(vec!["T".to_string()]);
+    assert_eq!(prev, vec!["T".to_string()]);
+    // 重複する push でも scope に T が 1 つだけ存在する
+    assert!(reg.is_in_type_param_scope("T"));
+    reg.restore_type_param_scope(prev);
+    assert!(reg.is_in_type_param_scope("T"));
+}
+
+// I-383 T4: is_in_type_param_scope 公開 API
+#[test]
+fn test_is_in_type_param_scope_empty() {
+    let reg = SyntheticTypeRegistry::new();
+    assert!(!reg.is_in_type_param_scope("T"));
+}
+
+#[test]
+fn test_is_in_type_param_scope_multiple() {
+    let mut reg = SyntheticTypeRegistry::new();
+    reg.push_type_param_scope(vec!["T".to_string(), "U".to_string(), "V".to_string()]);
+    assert!(reg.is_in_type_param_scope("T"));
+    assert!(reg.is_in_type_param_scope("U"));
+    assert!(reg.is_in_type_param_scope("V"));
+    assert!(!reg.is_in_type_param_scope("W"));
+}
+
+// I-383 T1: register_struct_dedup / register_intersection_enum の type_param 伝播 RED テスト
+#[test]
+fn test_register_inline_struct_detects_type_params_from_scope() {
+    let mut reg = SyntheticTypeRegistry::new();
+    reg.push_type_param_scope(vec!["T".to_string()]);
+    let name = reg.register_inline_struct(&[
+        (
+            "x".to_string(),
+            RustType::Named {
+                name: "T".to_string(),
+                type_args: vec![],
+            },
+        ),
+        ("y".to_string(), RustType::F64),
+    ]);
+    let def = reg.get(&name).unwrap();
+    match &def.item {
+        Item::Struct { type_params, .. } => {
+            assert_eq!(
+                type_params.len(),
+                1,
+                "inline struct should detect T from scope"
+            );
+            assert_eq!(type_params[0].name, "T");
+        }
+        _ => panic!("expected Item::Struct"),
+    }
+}
+
+#[test]
+fn test_register_intersection_struct_detects_type_params_from_scope() {
+    let mut reg = SyntheticTypeRegistry::new();
+    reg.push_type_param_scope(vec!["U".to_string()]);
+    let fields = vec![
+        StructField {
+            vis: Some(Visibility::Public),
+            name: "a".to_string(),
+            ty: RustType::Named {
+                name: "U".to_string(),
+                type_args: vec![],
+            },
+        },
+        StructField {
+            vis: Some(Visibility::Public),
+            name: "b".to_string(),
+            ty: RustType::String,
+        },
+    ];
+    let (name, _is_new) = reg.register_intersection_struct(&fields);
+    let def = reg.get(&name).unwrap();
+    match &def.item {
+        Item::Struct { type_params, .. } => {
+            assert_eq!(
+                type_params.len(),
+                1,
+                "intersection struct should detect U from scope"
+            );
+            assert_eq!(type_params[0].name, "U");
+        }
+        _ => panic!("expected Item::Struct"),
+    }
+}
+
+#[test]
+fn test_register_intersection_enum_detects_type_params_from_scope() {
+    let mut reg = SyntheticTypeRegistry::new();
+    reg.push_type_param_scope(vec!["S".to_string()]);
+    let variants = vec![
+        EnumVariant {
+            name: "Variant0".to_string(),
+            value: None,
+            data: None,
+            fields: vec![StructField {
+                vis: Some(Visibility::Public),
+                name: "x".to_string(),
+                ty: RustType::Named {
+                    name: "S".to_string(),
+                    type_args: vec![],
+                },
+            }],
+        },
+        EnumVariant {
+            name: "Variant1".to_string(),
+            value: None,
+            data: None,
+            fields: vec![StructField {
+                vis: Some(Visibility::Public),
+                name: "y".to_string(),
+                ty: RustType::F64,
+            }],
+        },
+    ];
+    let (name, _is_new) = reg.register_intersection_enum(None, variants);
+    let def = reg.get(&name).unwrap();
+    match &def.item {
+        Item::Enum { type_params, .. } => {
+            assert_eq!(
+                type_params.len(),
+                1,
+                "intersection enum should detect S from scope"
+            );
+            assert_eq!(type_params[0].name, "S");
+        }
+        _ => panic!("expected Item::Enum"),
+    }
+}
+
 #[test]
 fn test_register_union_no_type_params_when_scope_empty() {
     let mut reg = SyntheticTypeRegistry::new();

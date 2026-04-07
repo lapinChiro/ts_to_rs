@@ -146,6 +146,7 @@ fn test_is_trait_type_methods_only_returns_true() {
             params: vec![("msg".to_string(), RustType::String).into()],
             return_type: None,
             has_rest: false,
+            type_params: vec![],
         }],
     );
     reg.register(
@@ -180,6 +181,7 @@ fn test_is_trait_type_mixed_returns_true() {
             params: vec![],
             return_type: None,
             has_rest: false,
+            type_params: vec![],
         }],
     );
     reg.register(

@@ -63,6 +63,7 @@ fn test_convert_opt_chain_method_call_propagates_param_types() {
             params: vec![("name".to_string(), RustType::String).into()],
             return_type: None,
             has_rest: false,
+            type_params: vec![],
         }],
     );
     reg.register(

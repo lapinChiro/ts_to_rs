@@ -53,6 +53,22 @@ impl<'a> Transformer<'a> {
         // Only merged into self.synthetic on success (end of function).
         let mut local_synthetic = SyntheticTypeRegistry::new();
 
+        // I-383 T7: 関数の generic 型パラメータを SyntheticTypeRegistry の scope に push する。
+        // これにより convert_param / return_type / body の型解決中に anonymous union/struct/
+        // intersection enum が type_param を保持した generic 形で生成される。
+        //
+        // local_synthetic は per-function ローカル変数で、関数終了時に drop されるため、
+        // restore 呼び出しは不要 (scope の lifetime は関数 body と一致)。outer scope への
+        // 漏れは構造的に発生しない (outer の self.synthetic は local とは別 instance)。
+        // merge() は scope を引き継がない (`other` は drop される) ことも確認済み。
+        let fn_tp_names: Vec<String> = fn_decl
+            .function
+            .type_params
+            .as_ref()
+            .map(|tpd| tpd.params.iter().map(|p| p.name.sym.to_string()).collect())
+            .unwrap_or_default();
+        let _prev_scope = local_synthetic.push_type_param_scope(fn_tp_names);
+
         let mut params = Vec::new();
         let mut destructuring_stmts = Vec::new();
         let return_type = {

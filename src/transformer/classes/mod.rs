@@ -56,6 +56,30 @@ impl<'a> Transformer<'a> {
         vis: Visibility,
     ) -> Result<ClassInfo> {
         let name = crate::ir::sanitize_rust_type_name(&class_decl.ident.sym);
+
+        // I-383 T8: クラスの generic 型パラメータを scope に push する。
+        // これによりクラスメソッドのパラメータ型 / 戻り値型 / 本体内の型解決が、
+        // クラス自身の generic を type_param として認識できる。
+        // members 変換の前に push し、`extract_class_info` 終端で restore する。
+        let class_tp_names: Vec<String> = class_decl
+            .class
+            .type_params
+            .as_ref()
+            .map(|tpd| tpd.params.iter().map(|p| p.name.sym.to_string()).collect())
+            .unwrap_or_default();
+        let prev_class_scope = self.synthetic.push_type_param_scope(class_tp_names);
+
+        let result = self.extract_class_info_inner(class_decl, vis, name);
+        self.synthetic.restore_type_param_scope(prev_class_scope);
+        result
+    }
+
+    fn extract_class_info_inner(
+        &mut self,
+        class_decl: &ast::ClassDecl,
+        vis: Visibility,
+        name: String,
+    ) -> Result<ClassInfo> {
         let parent = class_decl.class.super_class.as_ref().and_then(|sc| {
             if let ast::Expr::Ident(ident) = sc.as_ref() {
                 Some(crate::ir::sanitize_rust_type_name(&ident.sym))

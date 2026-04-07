@@ -494,25 +494,59 @@ pub(crate) fn resolve_param_def(
 }
 
 /// MethodSignature<TsTypeInfo> → MethodSignature<RustType> 変換。
+///
+/// I-383 T8': メソッド自身の generic 型パラメータ (`sig.type_params`) を
+/// `SyntheticTypeRegistry` の scope に append-merge で push する。これにより
+/// `resolve_param_def` / `resolve_ts_type` が `register_union` 等を呼んだ際、
+/// メソッド固有の generic を保持した anonymous union/struct が生成される。
+/// 例: `class C<S> { foo<M>(x: M | M[]) }` → `enum MOrVecM<M>`。
+///
+/// scope は外部 (class type_params) に append される (`push_type_param_scope`
+/// の append-merge 意味論)。restore は本関数終端で必ず呼ばれる (inner closure で
+/// `?` 早期 return を吸収)。
 pub(crate) fn resolve_method_sig(
     sig: MethodSignature<TsTypeInfo>,
     reg: &TypeRegistry,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> anyhow::Result<MethodSignature<RustType>> {
-    let params = sig
-        .params
-        .into_iter()
-        .map(|p| resolve_param_def(p, reg, synthetic))
-        .collect::<anyhow::Result<Vec<_>>>()?;
-    let return_type = sig
-        .return_type
-        .map(|rt| resolve_ts_type(&rt, reg, synthetic))
-        .transpose()?;
-    Ok(MethodSignature {
-        params,
-        return_type,
-        has_rest: sig.has_rest,
-    })
+    let method_tp_names: Vec<String> = sig.type_params.iter().map(|tp| tp.name.clone()).collect();
+    let prev_scope = synthetic.push_type_param_scope(method_tp_names);
+
+    let result = (|| -> anyhow::Result<MethodSignature<RustType>> {
+        let params = sig
+            .params
+            .into_iter()
+            .map(|p| resolve_param_def(p, reg, synthetic))
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        let return_type = sig
+            .return_type
+            .map(|rt| resolve_ts_type(&rt, reg, synthetic))
+            .transpose()?;
+        // メソッド自身の type_params も RustType 制約に解決する
+        let resolved_type_params = sig
+            .type_params
+            .into_iter()
+            .map(|tp| {
+                let constraint = tp
+                    .constraint
+                    .map(|c| resolve_ts_type(&c, reg, synthetic))
+                    .transpose()?;
+                Ok(crate::ir::TypeParam {
+                    name: tp.name,
+                    constraint,
+                })
+            })
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        Ok(MethodSignature {
+            params,
+            return_type,
+            has_rest: sig.has_rest,
+            type_params: resolved_type_params,
+        })
+    })();
+
+    synthetic.restore_type_param_scope(prev_scope);
+    result
 }
 
 #[cfg(test)]

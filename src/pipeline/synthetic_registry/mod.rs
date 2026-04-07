@@ -85,17 +85,38 @@ impl SyntheticTypeRegistry {
         }
     }
 
-    /// 型パラメータスコープを設定し、以前のスコープを返す。
+    /// 型パラメータスコープに `names` を追加し、追加前のスコープを返す。
     ///
-    /// 呼び出し元は処理完了後（正常・エラー問わず）に `restore_type_param_scope` で復元する。
-    /// これにより `?` による early return でもスコープが正しく復元される。
+    /// I-383 T3: 意味論を `replace` から `append-merge` に変更。ネストされた generic
+    /// (例: `class C<S> { foo<T>(x: S | T) }`) で外部 scope (`S`) と内部 scope (`T`)
+    /// の両方が同時にアクティブになる必要がある。append-merge により外部の型パラメータ
+    /// を失わない。
+    ///
+    /// 呼び出し元は処理完了後（正常・エラー問わず）に `restore_type_param_scope` で
+    /// 復元する。これにより `?` による early return でもスコープが正しく復元される。
+    /// 重複する名前は追加しない (内部 scope が外部 scope を shadow するケースは
+    /// TypeScript の semantics 上稀で、本実装では idempotent merge とする)。
     pub fn push_type_param_scope(&mut self, names: Vec<String>) -> Vec<String> {
-        std::mem::replace(&mut self.type_param_scope, names)
+        let prev = self.type_param_scope.clone();
+        for name in names {
+            if !self.type_param_scope.contains(&name) {
+                self.type_param_scope.push(name);
+            }
+        }
+        prev
     }
 
     /// 型パラメータスコープを復元する。
     pub fn restore_type_param_scope(&mut self, prev: Vec<String>) {
         self.type_param_scope = prev;
+    }
+
+    /// 現在の型パラメータスコープに指定の名前が含まれるか判定する。
+    ///
+    /// I-383 T4: `resolve_type_ref` が型パラメータ参照と user 定義型参照を
+    /// 区別するために使用する公開メソッド。
+    pub fn is_in_type_param_scope(&self, name: &str) -> bool {
+        self.type_param_scope.iter().any(|tp| tp == name)
     }
 
     /// Registers a union type enum and returns its name.
@@ -137,15 +158,7 @@ impl SyntheticTypeRegistry {
             .collect();
 
         // 型パラメータスコープから、メンバー型で使用されている型パラメータを検出
-        let type_params: Vec<TypeParam> = self
-            .type_param_scope
-            .iter()
-            .filter(|tp_name| member_types.iter().any(|ty| ty.uses_param(tp_name)))
-            .map(|tp_name| TypeParam {
-                name: tp_name.clone(),
-                constraint: None,
-            })
-            .collect();
+        let type_params = extract_used_type_params(member_types, &self.type_param_scope);
 
         let item = Item::Enum {
             vis: Visibility::Public,
@@ -251,10 +264,14 @@ impl SyntheticTypeRegistry {
         let name = format!("_TypeLit{}", self.struct_counter);
         self.struct_counter += 1;
 
+        // I-383 T2: 型パラメータスコープから、フィールド型で使用されている型パラメータを検出
+        let member_types: Vec<RustType> = fields.iter().map(|f| f.ty.clone()).collect();
+        let type_params = extract_used_type_params(&member_types, &self.type_param_scope);
+
         let item = Item::Struct {
             vis: Visibility::Public,
             name: name.clone(),
-            type_params: vec![],
+            type_params,
             fields: fields.to_vec(),
         };
 
@@ -290,10 +307,24 @@ impl SyntheticTypeRegistry {
 
         let name = self.generate_name("Intersection");
 
+        // I-383 T2: 型パラメータスコープから、variant の data + fields 型で使用されている
+        // 型パラメータを検出。intersection enum の variant は data (tuple variant) と
+        // fields (struct variant) のどちらの形式もありうる。
+        let member_types: Vec<RustType> = variants
+            .iter()
+            .flat_map(|v| {
+                v.data
+                    .iter()
+                    .cloned()
+                    .chain(v.fields.iter().map(|f| f.ty.clone()))
+            })
+            .collect();
+        let type_params = extract_used_type_params(&member_types, &self.type_param_scope);
+
         let item = Item::Enum {
             vis: Visibility::Public,
             name: name.clone(),
-            type_params: vec![],
+            type_params,
             serde_tag: serde_tag.map(|s| s.to_string()),
             variants,
         };
@@ -467,6 +498,27 @@ impl Default for SyntheticTypeRegistry {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// 現在の `type_param_scope` から、`member_types` で実際に使われている型パラメータ
+/// のみを `Vec<TypeParam>` として抽出する。
+///
+/// I-383 T1: `register_union` / `register_struct_dedup` / `register_intersection_enum`
+/// の 3 箇所で同じロジックを共有するため抽出した共通ヘルパー。各 register 関数は
+/// 自身が扱う member 型集合 (union member / struct fields / enum variant data+fields)
+/// を構築して本関数に渡す。
+///
+/// constraint は現状 `None` 固定。`<T extends number>` のような constraint 付き
+/// 型パラメータは scope 上に名前のみ保持され、constraint 復元は本関数のスコープ外。
+fn extract_used_type_params(member_types: &[RustType], scope: &[String]) -> Vec<TypeParam> {
+    scope
+        .iter()
+        .filter(|tp_name| member_types.iter().any(|ty| ty.uses_param(tp_name)))
+        .map(|tp_name| TypeParam {
+            name: tp_name.clone(),
+            constraint: None,
+        })
+        .collect()
 }
 
 /// Computes a canonical signature for a union type (sorted member types).

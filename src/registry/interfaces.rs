@@ -48,13 +48,19 @@ pub(crate) fn is_callable_only(members: &[ast::TsTypeElement]) -> bool {
     has_call
 }
 
-/// `TsFnParam` のリストと return type annotation から `MethodSignature<TsTypeInfo>` を生成する。
+/// `TsFnParam` のリストと return type annotation、generic 型パラメータ宣言から
+/// `MethodSignature<TsTypeInfo>` を生成する。
 ///
 /// `TsMethodSignature`, `TsCallSignatureDecl`, `TsConstructSignatureDecl` の
-/// 3 種のシグネチャ型で共通する params + return_type + has_rest の収集ロジック。
+/// 3 種のシグネチャ型で共通する params + return_type + has_rest + type_params の収集ロジック。
+///
+/// I-383 T8': `type_params` 引数を追加。call signature や method signature が固有の
+/// generic (例: `interface I { <T>(x: T): T }`) を持つ場合、その情報を MethodSignature
+/// に保持し、後続の `resolve_method_sig` が scope に push する。
 fn build_method_signature(
     ts_params: &[ast::TsFnParam],
     type_ann: Option<&ast::TsTypeAnn>,
+    type_params_decl: Option<&ast::TsTypeParamDecl>,
 ) -> MethodSignature<TsTypeInfo> {
     let params: Vec<ParamDef<TsTypeInfo>> = ts_params
         .iter()
@@ -64,10 +70,12 @@ fn build_method_signature(
     let has_rest = ts_params
         .iter()
         .any(|p| matches!(p, ast::TsFnParam::Rest(_)));
+    let type_params = super::collection::collect_type_params(type_params_decl);
     MethodSignature {
         params,
         return_type,
         has_rest,
+        type_params,
     }
 }
 
@@ -89,19 +97,25 @@ pub(super) fn collect_interface_signatures(iface: &ast::TsInterfaceDecl) -> Inte
                     ast::Expr::Ident(ident) => ident.sym.to_string(),
                     _ => continue,
                 };
-                let sig = build_method_signature(&method.params, method.type_ann.as_deref());
+                let sig = build_method_signature(
+                    &method.params,
+                    method.type_ann.as_deref(),
+                    method.type_params.as_deref(),
+                );
                 methods.entry(name).or_default().push(sig);
             }
             ast::TsTypeElement::TsCallSignatureDecl(decl) => {
                 call_signatures.push(build_method_signature(
                     &decl.params,
                     decl.type_ann.as_deref(),
+                    decl.type_params.as_deref(),
                 ));
             }
             ast::TsTypeElement::TsConstructSignatureDecl(decl) => {
                 construct_signatures.push(build_method_signature(
                     &decl.params,
                     decl.type_ann.as_deref(),
+                    decl.type_params.as_deref(),
                 ));
             }
             _ => {}

@@ -2,11 +2,28 @@
 
 ## 次のアクション
 
-**I-382** (I-376 直後): Phase 5c shared_types.rs の stub 生成を import ベースに再設計。
-`generate_stub_structs` の `defined_elsewhere_names` band-aid を撤廃し、user 定義型への
-参照は `use crate::<path>::<type>;` を生成する方式に切り替える。詳細は TODO の I-382。
+**I-382 完全解消プロジェクト進行中** — 詳細計画と進捗は [`report/i382/master-plan.md`](report/i382/master-plan.md) で管理。
 
-その後: **Batch 11b** (I-300 + I-301 + I-306) `OBJECT_LITERAL_NO_TYPE` (23 件、最大カテゴリ) 削減。
+事前検証 (Phase 0) で当初想定「Hono で 0 件」が誤りと判明し、34 件の dangling ref + 73 件の
+excluded user 定義型 = 107 件が band-aid 依存と確定。全発生源が TypeResolver の anonymous
+synthetic 化に集約される構造的発見に基づき、4 サブ PRD (PRD-α/β/γ/δ) に分解して順次解消する。
+
+- **現在のフェーズ**: Phase 2 T2.A (PRD-A 実装中、paused: 2026-04-07)
+- **PRD 構成**: PRD-A (`backlog/I-383`, 起票完了) + PRD-A-2 (`backlog/I-386`, 起票完了) + PRD-B (= I-382 本体, 未起票)
+- **進行順序 (Option Y)**: T2.A (PRD-A 実装) → T2.A2 (PRD-A-2 実装) → T1.B (実測ベースで PRD-B 起票) → T2.B (PRD-B 実装)
+- **Option Y 採用理由**: PRD-A 実装で Cluster 2 件数 / synthetic 名 / scope API が変化するため、PRD-B は実測後に起票する方が spec 正確性が最大化される
+- **完了基準**: `generate_stub_structs` 関数完全削除 + probe で dangling 0 件
+
+### T2.A 中間進捗 (2026-04-07 時点)
+
+- **実装完了**: T1-T5 (common helper + 3 registers の type_param 伝播統一 + Item::Enum 漏れ修正) + T7-T9 (関数/arrow/class/interface method converter の scope push 補完) + T8' (MethodSignature.type_params 追加による registry resolve_typedef 経路の補完)
+- **計測結果**: Cluster 1a 11 件のうち **4 件解消** (M, Status, OutputType, U)、残 **7 件** (E, P, S, TNext, TResult, TResult1, TResult2)
+- **残タスク**: 残 7 件の発生経路特定と個別修正 (詳細手順は `report/i382/master-plan.md` の「次セッションの開始手順」参照)
+- **cargo test 状態**: 2225 passed, 0 failed (T7/T8 検証テスト 2 件を追加済み)
+
+**次セッションは `report/i382/master-plan.md` の「次セッションの開始手順」(Step 1-5) から再開すること。** probe + tracer の再投入で残 7 件の referencer を特定した後、経路別に個別修正する。
+
+I-382 解消後: **Batch 11b** (I-300 + I-301 + I-306) `OBJECT_LITERAL_NO_TYPE` (23 件、最大カテゴリ) 削減。
 
 ---
 

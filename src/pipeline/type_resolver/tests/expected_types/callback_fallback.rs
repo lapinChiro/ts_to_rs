@@ -320,6 +320,7 @@ fn test_callable_interface_return_type_propagated_to_arrow() {
                     type_args: vec![],
                 }),
                 has_rest: false,
+                type_params: vec![],
             }],
             extends: vec![],
             is_interface: true,

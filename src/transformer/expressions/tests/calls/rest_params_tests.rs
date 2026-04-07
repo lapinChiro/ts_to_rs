@@ -326,6 +326,7 @@ fn test_convert_method_call_string_arg_gets_to_string_with_registry() {
             params: vec![("name".to_string(), RustType::String).into()],
             return_type: None,
             has_rest: false,
+            type_params: vec![],
         }],
     );
     reg.register(

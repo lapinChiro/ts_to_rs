@@ -111,7 +111,7 @@ impl From<(String, RustType)> for ParamDef {
     }
 }
 
-/// メソッドシグネチャ（パラメータ + 戻り値型 + rest パラメータ情報）。
+/// メソッドシグネチャ（パラメータ + 戻り値型 + rest パラメータ情報 + メソッド固有の generic 型パラメータ）。
 #[derive(Debug, Clone, PartialEq)]
 pub struct MethodSignature<T = RustType> {
     /// パラメータ定義
@@ -120,6 +120,29 @@ pub struct MethodSignature<T = RustType> {
     pub return_type: Option<T>,
     /// 最後のパラメータが rest パラメータか（`...args: T[]` パターン）
     pub has_rest: bool,
+    /// メソッド自身の generic 型パラメータ。
+    ///
+    /// I-383 T8': `class C<S> { foo<M extends string>(x: M | M[]): void }` のような
+    /// generic メソッドで `<M>` を保持する。`resolve_method_sig` が scope に push し、
+    /// メソッド本体の `M | M[]` 等の anonymous union が generic 化される。
+    pub type_params: Vec<TypeParam<T>>,
+}
+
+/// `MethodSignature<T>` の Default 実装。
+///
+/// I-383 T8': `type_params` フィールド追加に伴い、test fixture や builder pattern で
+/// `..Default::default()` を使って type_params のみ補完できるようにする。手動実装の理由:
+/// `T` に Default 制約を課さずに `Vec<T>` 系フィールドのみ default 化するため (`Option<T>::None`、
+/// `Vec<X>::new()` は T が Default でなくても動く)。
+impl<T> Default for MethodSignature<T> {
+    fn default() -> Self {
+        Self {
+            params: Vec::new(),
+            return_type: None,
+            has_rest: false,
+            type_params: Vec::new(),
+        }
+    }
 }
 
 impl MethodSignature {
@@ -132,6 +155,9 @@ impl MethodSignature {
             params: self.params.iter().map(|p| p.substitute(bindings)).collect(),
             return_type: self.return_type.as_ref().map(|ty| ty.substitute(bindings)),
             has_rest: self.has_rest,
+            // メソッド自身の type_params は substitute 対象外 (上位 scope の binding と
+            // 衝突する場合は scope shadowing で別変数として扱う設計)
+            type_params: self.type_params.clone(),
         }
     }
 }

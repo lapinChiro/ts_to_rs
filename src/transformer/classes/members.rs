@@ -270,6 +270,29 @@ impl<'a> Transformer<'a> {
         function: &ast::Function,
         is_static: bool,
     ) -> Result<Method> {
+        // I-383 T8: メソッドの generic 型パラメータを scope に append する。
+        // append-merge 意味論なので、外部の class type_params (`extract_class_info` で push 済)
+        // と method 自身の type_params が両方アクティブになる。class 内のメソッド呼び出し終端で
+        // 内部 method type_params だけが restore される。
+        let method_tp_names: Vec<String> = function
+            .type_params
+            .as_ref()
+            .map(|tpd| tpd.params.iter().map(|p| p.name.sym.to_string()).collect())
+            .unwrap_or_default();
+        let prev_method_scope = self.synthetic.push_type_param_scope(method_tp_names);
+        let result = self.build_method_inner(raw_name, vis, kind, function, is_static);
+        self.synthetic.restore_type_param_scope(prev_method_scope);
+        result
+    }
+
+    fn build_method_inner(
+        &mut self,
+        raw_name: String,
+        vis: Visibility,
+        kind: ast::MethodKind,
+        function: &ast::Function,
+        is_static: bool,
+    ) -> Result<Method> {
         let is_setter = kind == ast::MethodKind::Setter;
         let name = if is_setter {
             format!("set_{raw_name}")

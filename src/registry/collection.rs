@@ -378,6 +378,11 @@ fn collect_class_info(class: &ast::ClassDecl) -> TypeDef<TsTypeInfo> {
                     params,
                     return_type: None,
                     has_rest,
+                    // I-383 T8': constructor は通常 generic を持たないが、TS の `class C<T> {
+                    // constructor<U>(...) }` のような構文があれば ctor.function.type_params から
+                    // 抽出する。現状の SWC AST の Constructor では type_params は直接持てないため
+                    // 空 vec で OK。
+                    type_params: vec![],
                 });
             }
             ast::ClassMember::Method(method) => {
@@ -404,10 +409,17 @@ fn collect_class_info(class: &ast::ClassDecl) -> TypeDef<TsTypeInfo> {
                     .params
                     .iter()
                     .any(|param| matches!(&param.pat, ast::Pat::Rest(_)));
+                // I-383 T8': メソッド自身の generic 型パラメータを抽出する。
+                // 例: `class C<S> { foo<M extends string>(x: M | M[]) }` の `<M>`。
+                // 抽出した type_params は `resolve_method_sig` で scope に push され、
+                // 戻り値型・パラメータ型解決中の anonymous union の generic 化に使われる。
+                let method_type_params =
+                    collect_type_params(method.function.type_params.as_deref());
                 methods.entry(name).or_default().push(MethodSignature {
                     params,
                     return_type,
                     has_rest,
+                    type_params: method_type_params,
                 });
             }
             _ => {}

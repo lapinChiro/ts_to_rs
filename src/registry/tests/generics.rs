@@ -368,6 +368,7 @@ fn test_method_signature_substitute_replaces_params_and_return() {
             type_args: vec![],
         }),
         has_rest: false,
+        type_params: vec![],
     };
     let bindings = HashMap::from([("T".to_string(), RustType::String)]);
     let result = sig.substitute(&bindings);
@@ -388,6 +389,7 @@ fn test_method_signature_substitute_none_return_type_preserved() {
         )],
         return_type: None,
         has_rest: true,
+        type_params: vec![],
     };
     let bindings = HashMap::from([("T".to_string(), RustType::F64)]);
     let result = sig.substitute(&bindings);
@@ -486,6 +488,7 @@ fn test_substitute_types_struct_methods() {
                     type_args: vec![],
                 }),
                 has_rest: false,
+                type_params: vec![],
             }],
         )]),
         constructor: None,
@@ -527,6 +530,7 @@ fn test_substitute_types_struct_constructor() {
             )],
             return_type: None,
             has_rest: false,
+            type_params: vec![],
         }]),
         call_signatures: vec![],
         extends: vec![],
@@ -570,6 +574,7 @@ fn test_substitute_types_struct_call_signatures() {
                 type_args: vec![],
             }),
             has_rest: false,
+            type_params: vec![],
         }],
         extends: vec![],
         is_interface: true,

@@ -1,6 +1,35 @@
 use super::*;
 use std::collections::HashSet;
 
+// I-383 T5: Item::Enum の type_params が type_param 除外フィルタに含まれること
+#[test]
+fn test_collect_all_undefined_refs_excludes_enum_type_params() {
+    use crate::ir::TypeParam;
+    let items = [Item::Enum {
+        vis: Visibility::Public,
+        name: "MOrVecM".to_string(),
+        type_params: vec![TypeParam {
+            name: "M".to_string(),
+            constraint: None,
+        }],
+        serde_tag: None,
+        variants: vec![EnumVariant {
+            name: "M".to_string(),
+            data: Some(RustType::Named {
+                name: "M".to_string(),
+                type_args: vec![],
+            }),
+            fields: vec![],
+            value: None,
+        }],
+    }];
+    let refs = collect_all_undefined_references(&items.iter().collect::<Vec<_>>());
+    assert!(
+        !refs.contains("M"),
+        "type parameter `M` of Item::Enum should be excluded from undefined refs, got {refs:?}"
+    );
+}
+
 #[test]
 fn test_collect_all_undefined_refs_includes_non_external() {
     // registry に登録されていない型も検出する（is_external フィルタなし）

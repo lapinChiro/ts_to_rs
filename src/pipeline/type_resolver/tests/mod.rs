@@ -134,5 +134,6 @@ pub(super) fn make_sig(param_types: Vec<RustType>, ret: Option<RustType>) -> Met
             .collect(),
         return_type: ret,
         has_rest: false,
+        type_params: vec![],
     }
 }

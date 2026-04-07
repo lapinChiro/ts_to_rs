@@ -12,6 +12,7 @@ fn test_lookup_method_sigs_named_type() {
             params: vec![("msg".to_string(), RustType::String).into()],
             return_type: None,
             has_rest: false,
+            type_params: vec![],
         }],
     );
     reg.register(
@@ -40,6 +41,7 @@ fn test_lookup_method_sigs_string_type() {
             params: vec![("pos".to_string(), RustType::F64).into()],
             return_type: Some(RustType::String),
             has_rest: false,
+            type_params: vec![],
         }],
     );
     reg.register(
@@ -79,6 +81,7 @@ fn test_lookup_method_sigs_vec_type() {
                 .into()],
             return_type: Some(RustType::F64),
             has_rest: true,
+            type_params: vec![],
         }],
     );
     reg.register(

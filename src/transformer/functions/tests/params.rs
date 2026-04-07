@@ -456,6 +456,7 @@ fn reg_with_trait(name: &str) -> TypeRegistry {
             params: vec![("msg".to_string(), RustType::String).into()],
             return_type: None,
             has_rest: false,
+            type_params: vec![],
         }],
     );
     reg.register(
