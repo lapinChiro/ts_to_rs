@@ -434,6 +434,12 @@ fn test_e2e_nullish_coalescing_ts_rust_stdout_match() {
 }
 
 #[test]
+fn test_e2e_null_undefined_value_ts_rust_stdout_match() {
+    // I-379: `Expr::BuiltinVariantValue(None)` 構造化の runtime semantics 等価性検証。
+    run_e2e_test("null_undefined_value");
+}
+
+#[test]
 fn test_e2e_closures_ts_rust_stdout_match() {
     run_e2e_test("closures");
 }

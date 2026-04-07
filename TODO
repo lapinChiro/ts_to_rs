@@ -270,7 +270,6 @@ OBJECT_LITERAL_NO_TYPE 全体で 25件。I-300/I-301/I-306 のサブ分類件数
 
 ### 残存 broken window（pipeline-integrity）
 
-- **[broken-window:Lit::Null]** → **PRD 化済 (I-379)** `backlog/I-379-builtin-variant-value-position-structuring.md`。`Expr::Ident("None")` 5 production サイトの構造化。`Expr::BuiltinVariantValue(BuiltinVariant)` variant 追加で対応。
 - **[broken-window:PATTERN_LANG_BUILTINS]** + **[follow-up:walker-irvisitor]** → **PRD 化済 (I-380)** `backlog/I-380-pattern-structuring-and-walker-irvisitor.md`。`Pattern::TupleStruct { path: Vec<String> }` を `PatternCtor` enum で構造化し、`PATTERN_LANG_BUILTINS` 削除と walker の完全 IrVisitor 化を同時実施。
 - **[broken-window:StructInit::name]** `Item::StructInit::name: String` に display-formatted `"Enum::Variant"` 形式が格納される — `transformer/expressions/data_literals.rs:90` で discriminated union の struct variant 変換時に `format!("{enum_name}::{variant_name}")` で生成。Rust の enum struct-variant 構文として偶然動作するが pipeline-integrity 違反。`StructInit` IR に `enum_ty: Option<UserTypeRef>` を追加して構造化すべき。**PRD 化候補** (I-381 以降)。
 

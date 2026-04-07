@@ -212,6 +212,7 @@ pub(crate) fn all_exprs() -> Vec<Expr> {
             name: "NAN".to_string(),
         },
         Expr::StdConst(super::StdConst::F64Pi),
+        Expr::BuiltinVariantValue(super::BuiltinVariant::None),
     ]
 }
 

@@ -327,7 +327,10 @@ impl<'a> Transformer<'a> {
                     if !explicit_keys.contains(field_name)
                         && matches!(field_ty, RustType::Option(_))
                     {
-                        fields.push((field_name.clone(), Expr::Ident("None".to_string())));
+                        fields.push((
+                            field_name.clone(),
+                            Expr::BuiltinVariantValue(crate::ir::BuiltinVariant::None),
+                        ));
                     }
                 }
             }

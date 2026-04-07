@@ -228,6 +228,7 @@ impl IrVisitor for TagRecorder {
             Expr::EnumVariant { .. } => "expr:enumvariant",
             Expr::PrimitiveAssocConst { .. } => "expr:primitiveassocconst",
             Expr::StdConst(_) => "expr:stdconst",
+            Expr::BuiltinVariantValue(_) => "expr:builtinvariantvalue",
         });
         walk_expr(self, expr);
     }
@@ -376,6 +377,7 @@ fn walker_visits_every_expr_variant() {
         "expr:enumvariant",
         "expr:primitiveassocconst",
         "expr:stdconst",
+        "expr:builtinvariantvalue",
     ]
     .into_iter()
     .collect();

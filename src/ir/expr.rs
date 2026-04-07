@@ -482,6 +482,20 @@ pub enum Expr {
     /// `Math.PI` 等の TS 由来から構築される。`Expr::Ident("std::f64::consts::PI")`
     /// 形式の display-formatted 文字列を撲滅する。walker は何もしない。
     StdConst(StdConst),
+    /// payload なしの builtin variant 値式参照。例: `None`。
+    ///
+    /// payload 付きの builtin variant 構築 (`Some(x)` / `Ok(v)` / `Err(e)`) は
+    /// `Expr::FnCall { target: CallTarget::BuiltinVariant(_), args }` を使う。
+    /// 本 variant は **値リテラルとしての** builtin variant 参照を構造化し、
+    /// `Expr::Ident("None")` 形式の display-formatted 文字列 encoding を撲滅する
+    /// (pipeline-integrity ルール準拠)。
+    ///
+    /// 現状の構築サイト: TS `null` / `undefined` / Option auto-fill / rest param
+    /// 不足分の埋めはすべて `BuiltinVariant::None` を生成する。`Some` / `Ok` / `Err`
+    /// の値式参照 (関数値として渡す等) は TS で実例がないため未対応だが、`BuiltinVariant`
+    /// 型を再利用することで将来拡張に備える (network-of-truth: builtin variant 集合は
+    /// 1 箇所に集約)。
+    BuiltinVariantValue(BuiltinVariant),
     /// A compiled regex literal: `Regex::new("pattern").unwrap()`
     ///
     /// Preserves the `g` (global) and `y` (sticky) flags from the original TypeScript regex.
@@ -522,7 +536,8 @@ impl Expr {
             // (silent semantic change 防止)。
             | Expr::EnumVariant { .. }
             | Expr::PrimitiveAssocConst { .. }
-            | Expr::StdConst(_) => true,
+            | Expr::StdConst(_)
+            | Expr::BuiltinVariantValue(_) => true,
             Expr::Ref(inner) | Expr::Deref(inner) => inner.is_trivially_pure(),
             Expr::FieldAccess { object, .. } => object.is_trivially_pure(),
             // Transpiler-generated conversion methods with no side effects
@@ -552,6 +567,7 @@ impl Expr {
                 | Expr::Unit
                 | Expr::PrimitiveAssocConst { .. }
                 | Expr::StdConst(_)
+                | Expr::BuiltinVariantValue(_)
         )
     }
 }
@@ -778,6 +794,30 @@ mod tests {
         assert!(sc.is_trivially_pure());
         // std::f64::consts::PI も f64 で Copy。
         assert!(sc.is_copy_literal());
+
+        // I-379: payload なしの builtin variant 値式参照 (`None`) は副作用ゼロかつ
+        // Copy 値で eager 評価安全。旧 IR `Expr::Ident("None")` は `Expr::Ident(_) => true`
+        // 経由で trivially_pure: true / `Expr::Ident(_)` は copy_literal: false だった。
+        // I-379 で is_copy_literal: false → true に意図的反転 (Hono の `unwrap_or_else(|| None)`
+        // → `unwrap_or(None)` idiomatic 改善の根拠)。
+        // 4 builtin variant 全てで構築可能なことも併せて検証 (将来 `let f = Some;` 等の
+        // 関数値拡張に備えた網羅性ガード)。
+        for bv in [
+            BuiltinVariant::Some,
+            BuiltinVariant::None,
+            BuiltinVariant::Ok,
+            BuiltinVariant::Err,
+        ] {
+            let expr = Expr::BuiltinVariantValue(bv);
+            assert!(
+                expr.is_trivially_pure(),
+                "BuiltinVariantValue({bv:?}) must be trivially pure"
+            );
+            assert!(
+                expr.is_copy_literal(),
+                "BuiltinVariantValue({bv:?}) must be copy literal (eager-eval safe)"
+            );
+        }
     }
 
     #[test]

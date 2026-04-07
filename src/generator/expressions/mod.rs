@@ -366,6 +366,7 @@ pub(super) fn generate_expr(expr: &Expr) -> String {
             format!("{}::{}", ty.as_rust_str(), name)
         }
         Expr::StdConst(c) => c.rust_path().to_string(),
+        Expr::BuiltinVariantValue(v) => v.as_rust_str().to_string(),
         Expr::Match { expr, arms } => {
             let match_target = generate_expr(expr);
             let mut out = format!("match {match_target} {{\n");

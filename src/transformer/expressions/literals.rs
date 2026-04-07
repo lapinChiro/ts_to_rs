@@ -45,7 +45,7 @@ impl<'a> Transformer<'a> {
                 }
             }
             ast::Lit::Bool(b) => Ok(Expr::BoolLit(b.value)),
-            ast::Lit::Null(_) => Ok(Expr::Ident("None".to_string())),
+            ast::Lit::Null(_) => Ok(Expr::BuiltinVariantValue(crate::ir::BuiltinVariant::None)),
             ast::Lit::Regex(regex) => {
                 let pattern = regex.exp.to_string();
                 let flags = regex.flags.to_string();

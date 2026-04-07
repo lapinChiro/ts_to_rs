@@ -2,14 +2,20 @@
 
 ## 次のアクション
 
-**次のアクション**: **I-376** (Batch 11c-fix-2-c)。I-378 は完了。
+**次のアクション**: **I-380** (Batch 11c-fix-2-f)。I-379 は完了。
+
+**順序変更 (2026-04-07)**: plan.md 当初は I-376 → I-379 → I-380 だったが、以下の理由で **I-379 → I-380 → I-376** に変更:
+1. I-379 / I-380 は PRD 作成済 (`backlog/I-379-*.md`, `backlog/I-380-*.md`)、I-376 は PRD 未作成
+2. 引継ぎ事項 D で「I-379 → I-380 推奨」を明示 (I-379 小規模で baseline 安定化 → I-380 大規模変更)
+3. I-376 は pipeline 層 (`pipeline/mod.rs` Pass 4/5 plumbing) で IR 層と完全直交、I-379/I-380 後に着手しても rework ゼロ
+4. I-379 は I-378 直接継続 (broken window 撲滅シリーズ)、IR 層整理を集約させた方が review 品質が上がる
 
 I-377（Batch 11c-fix-2-b）完了時の self-review で、I-375 が解消した `Expr::FnCall::name: String`
 と同型の broken window が 5 サイトに残存していることを発見した（`Expr::Ident` に
 display-formatted path 文字列 `"Direction::Up"` 等を encode する pipeline-integrity 違反）。
 これを **I-378** として独立 PRD 化し、I-376 の前に挟む。
 
-**実行順序**: ~~I-375~~ → ~~I-377~~ → ~~行数超過ファイルのケア~~ → **I-378** → **I-376**
+**実行順序**: ~~I-375~~ → ~~I-377~~ → ~~行数超過ファイルのケア~~ → ~~I-378~~ → ~~I-379~~ → **I-380** → **I-376**
 
 行数超過を I-378 より前に行う理由:
 - 現状 5 ファイルが 1000 行超過（`./scripts/check-file-lines.sh` で検知済み）
@@ -132,9 +138,9 @@ S1 バグ 0 件達成。
 | ~~11c-fix-2-b~~ | ~~I-377~~ | ~~walker / substitute の IrVisitor 化 + `MatchPattern` / verbatim pattern 文字列の構造化~~ | **完了** `Pattern` enum + `IrVisitor` / `IrFolder` trait 導入、`MatchPattern` 削除、5 stmt/expr の `pattern: String` を構造化、walker `TypeRefCollector` 化、`RUST_BUILTIN_TYPES` からの Some/None/Ok/Err 除去（I-375 申し送り完遂）、substitute.rs の IrFolder 化、散発再帰 detector の IrVisitor 化、Hono 後退ゼロ、テスト 2124→2175（+51） |
 | ~~11c-fix-2-line~~ | ~~行数超過ファイルのケア~~ | ~~5 ファイル（external_struct_generator/tests.rs 2489、output_writer.rs 1135、calls.rs 1111、ir/mod.rs 1105、ir/tests/mod.rs 1031）の責務分割~~ | **完了** D1: `camel_to_snake` test 重複解消。S1: `ir/mod.rs` を `types/naming/item/stmt/expr` に分割。S2: `ir/tests/mod.rs` を 5 カテゴリ分割。S3: `external_struct_generator/tests.rs` を 7 カテゴリ分割 + `tests/` ディレクトリ化。S4: `calls.rs` を `basic/console_log/rest_params/type_ref` に分割 + `calls/` ディレクトリ化。S5: `output_writer.rs` を `mod.rs` (entry) / `placement.rs` / `mod_rs_emit.rs` に責務分離。Hono 後退ゼロ、テスト 2171 維持 |
 | ~~11c-fix-2-d~~ | ~~I-378~~ | ~~`Expr::Path` 構造化 + `CallTarget` 7-variant 再設計~~ | **完了** display-formatted 文字列 8 サイト撲滅、`is_type_ident` 削除、Hono 後退ゼロ、テスト 2178→2184+7 (新規 integration) |
-| 11c-fix-2-c | I-376 | per-file 外部型 stub の構造的重複（pipeline 段階 dedup） | **次** |
-| 11c-fix-2-e | I-379 | builtin variant value-position 参照 (`Expr::Ident("None")`) の構造化 | I-376 後 (5 サイト + テスト追従) |
-| 11c-fix-2-f | I-380 | Pattern 構造化 (`PatternCtor`) + walker 完全 IrVisitor 化 + `PATTERN_LANG_BUILTINS` 撲滅 | I-379 後 (~50 ファイル、I-377 同等規模) |
+| ~~11c-fix-2-e~~ | ~~I-379~~ | ~~builtin variant value-position 参照 (`Expr::Ident("None")`) の構造化~~ | **完了** `Expr::BuiltinVariantValue(BuiltinVariant)` 追加、5 production サイト + 6 テスト追従、Hono 後退ゼロ、expected diff 2 サイト (`unwrap_or_else(\|\| None)` → `unwrap_or(None)`) 確認、テスト 2184→2201 (+17) |
+| 11c-fix-2-f | I-380 | Pattern 構造化 (`PatternCtor`) + walker 完全 IrVisitor 化 + `PATTERN_LANG_BUILTINS` 撲滅 | I-379 後 (~50 ファイル、I-377 同等規模、PRD 済) |
+| 11c-fix-2-c | I-376 | per-file 外部型 stub の構造的重複（pipeline 段階 dedup） | I-380 後 (PRD 未作成、Discovery 必要) |
 | 11b | I-300+I-301+I-306 | OBJECT_LITERAL_NO_TYPE（25件） | 最大エラーカテゴリ削減 |
 | 12 | I-311+I-344 | 型引数推論フィードバック欠如 | I-344 自動解消 + generic 精度 |
 | 13 | I-11+I-238+I-202 | union/enum 生成品質 | skip: ternary, ternary-union 他 |

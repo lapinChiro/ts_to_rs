@@ -176,7 +176,10 @@ fn test_convert_expr_null_literal_generates_none() {
     let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
         .convert_expr(&expr)
         .unwrap();
-    assert_eq!(result, Expr::Ident("None".to_string()));
+    assert_eq!(
+        result,
+        Expr::BuiltinVariantValue(crate::ir::BuiltinVariant::None)
+    );
 }
 
 #[test]
@@ -190,7 +193,7 @@ fn test_convert_expr_null_with_option_expected_returns_none_not_some_none() {
         .unwrap();
     assert_eq!(
         result,
-        Expr::Ident("None".to_string()),
+        Expr::BuiltinVariantValue(crate::ir::BuiltinVariant::None),
         "null with Option expected should be None, got: {:?}",
         result
     );

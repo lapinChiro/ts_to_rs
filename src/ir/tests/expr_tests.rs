@@ -304,6 +304,16 @@ fn test_is_trivially_pure_binary_op_returns_false() {
     .is_trivially_pure());
 }
 
+#[test]
+fn test_is_trivially_pure_builtin_variant_value_returns_true() {
+    // I-379: 定数参照、副作用ゼロ。旧 IR `Expr::Ident("None")` 経由で trivially_pure
+    // と判定されていたため、構造化置換時に false への silent 反転を防ぐ回帰ガード。
+    assert!(Expr::BuiltinVariantValue(crate::ir::BuiltinVariant::None).is_trivially_pure());
+    assert!(Expr::BuiltinVariantValue(crate::ir::BuiltinVariant::Some).is_trivially_pure());
+    assert!(Expr::BuiltinVariantValue(crate::ir::BuiltinVariant::Ok).is_trivially_pure());
+    assert!(Expr::BuiltinVariantValue(crate::ir::BuiltinVariant::Err).is_trivially_pure());
+}
+
 // -- Expr::is_copy_literal tests --
 
 #[test]
@@ -374,6 +384,17 @@ fn test_is_copy_literal_field_access_returns_false() {
         field: "x".to_string(),
     }
     .is_copy_literal());
+}
+
+#[test]
+fn test_is_copy_literal_builtin_variant_value_returns_true() {
+    // I-379: payload なしの builtin variant 値式参照は Copy 値で eager 評価安全。
+    // `build_option_unwrap_with_default` がこのフラグを見て `unwrap_or` (eager) を
+    // 選択する根拠 (Hono の `?? null` パターンの idiomatic 改善)。
+    assert!(Expr::BuiltinVariantValue(crate::ir::BuiltinVariant::None).is_copy_literal());
+    assert!(Expr::BuiltinVariantValue(crate::ir::BuiltinVariant::Some).is_copy_literal());
+    assert!(Expr::BuiltinVariantValue(crate::ir::BuiltinVariant::Ok).is_copy_literal());
+    assert!(Expr::BuiltinVariantValue(crate::ir::BuiltinVariant::Err).is_copy_literal());
 }
 
 // ---------------------------------------------------------------------------

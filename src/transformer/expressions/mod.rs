@@ -55,7 +55,7 @@ impl<'a> Transformer<'a> {
             if matches!(expr, ast::Expr::Ident(ident) if ident.sym.as_ref() == "undefined")
                 || matches!(expr, ast::Expr::Lit(ast::Lit::Null(..)))
             {
-                return Ok(Expr::Ident("None".to_string()));
+                return Ok(Expr::BuiltinVariantValue(crate::ir::BuiltinVariant::None));
             }
             // Literals → Some(convert(expr, inner_T))
             if matches!(expr, ast::Expr::Lit(_)) {
@@ -70,15 +70,16 @@ impl<'a> Transformer<'a> {
                 // Already produces Option — skip wrapping, fall through
             } else {
                 let inner_result = self.convert_expr_with_expected(expr, Some(inner))?;
-                if matches!(&inner_result, Expr::Ident(name) if name == "None")
-                    || matches!(
-                        &inner_result,
-                        Expr::FnCall {
-                            target: CallTarget::BuiltinVariant(crate::ir::BuiltinVariant::Some),
-                            ..
-                        }
-                    )
-                {
+                if matches!(
+                    &inner_result,
+                    Expr::BuiltinVariantValue(crate::ir::BuiltinVariant::None)
+                ) || matches!(
+                    &inner_result,
+                    Expr::FnCall {
+                        target: CallTarget::BuiltinVariant(crate::ir::BuiltinVariant::Some),
+                        ..
+                    }
+                ) {
                     return Ok(inner_result);
                 }
                 return Ok(Expr::FnCall {
@@ -92,7 +93,7 @@ impl<'a> Transformer<'a> {
             ast::Expr::Ident(ident) => {
                 let name = ident.sym.to_string();
                 match name.as_str() {
-                    "undefined" => Ok(Expr::Ident("None".to_string())),
+                    "undefined" => Ok(Expr::BuiltinVariantValue(crate::ir::BuiltinVariant::None)),
                     "NaN" => Ok(Expr::PrimitiveAssocConst {
                         ty: crate::ir::PrimitiveType::F64,
                         name: "NAN".to_string(),

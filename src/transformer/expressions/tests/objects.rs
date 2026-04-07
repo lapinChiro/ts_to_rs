@@ -740,7 +740,10 @@ fn test_option_field_none_fill_when_omitted() {
             name: "S".to_string(),
             fields: vec![
                 ("x".to_string(), Expr::NumberLit(1.0)),
-                ("y".to_string(), Expr::Ident("None".to_string())),
+                (
+                    "y".to_string(),
+                    Expr::BuiltinVariantValue(crate::ir::BuiltinVariant::None),
+                ),
             ],
             base: None,
         }

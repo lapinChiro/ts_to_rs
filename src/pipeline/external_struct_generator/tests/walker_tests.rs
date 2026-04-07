@@ -1,5 +1,27 @@
 use super::*;
 
+/// I-379: `Expr::BuiltinVariantValue(_)` (payload なしの builtin variant 値式参照、
+/// 例: `None`) は walker から見て user type 参照を一切持たない構造化リーフであり、
+/// `refs` に何も登録してはならない。旧 IR `Expr::Ident("None")` 時代は `is_external`
+/// 事後フィルタに依存していた除外が、I-379 後は型レベルで保証される。
+#[test]
+fn test_walker_builtin_variant_value_does_not_register_any_refs() {
+    for bv in [
+        crate::ir::BuiltinVariant::Some,
+        crate::ir::BuiltinVariant::None,
+        crate::ir::BuiltinVariant::Ok,
+        crate::ir::BuiltinVariant::Err,
+    ] {
+        let item = fn_with_body("f", vec![Stmt::Expr(Expr::BuiltinVariantValue(bv))]);
+        let mut refs = HashSet::new();
+        collect_type_refs_from_item(&item, &mut refs);
+        assert!(
+            refs.is_empty(),
+            "BuiltinVariantValue({bv:?}) must not register any refs, got refs={refs:?}"
+        );
+    }
+}
+
 #[test]
 fn test_walker_fn_call_type_ref_some_registers_user_type() {
     let item = fn_with_body(

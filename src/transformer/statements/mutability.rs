@@ -298,7 +298,8 @@ fn collect_mutated_vars_from_expr(
         | Expr::Regex { .. }
         | Expr::EnumVariant { .. }
         | Expr::PrimitiveAssocConst { .. }
-        | Expr::StdConst(_) => {}
+        | Expr::StdConst(_)
+        | Expr::BuiltinVariantValue(_) => {}
     }
 }
 

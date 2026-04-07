@@ -606,7 +606,8 @@ pub fn walk_expr<F: IrFolder + ?Sized>(f: &mut F, expr: Expr) -> Expr {
         | Expr::RawCode(_)
         | Expr::Regex { .. }
         | Expr::PrimitiveAssocConst { .. }
-        | Expr::StdConst(_)) => e,
+        | Expr::StdConst(_)
+        | Expr::BuiltinVariantValue(_)) => e,
     }
 }
 

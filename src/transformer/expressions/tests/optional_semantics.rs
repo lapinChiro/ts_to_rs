@@ -32,9 +32,11 @@ fn test_object_lit_omitted_optional_field_gets_none() {
         Expr::StructInit { fields, .. } => {
             assert_eq!(fields.len(), 2, "expected 2 fields (name + value: None)");
             assert!(
-                fields
-                    .iter()
-                    .any(|(k, v)| k == "value" && matches!(v, Expr::Ident(s) if s == "None")),
+                fields.iter().any(|(k, v)| k == "value"
+                    && matches!(
+                        v,
+                        Expr::BuiltinVariantValue(crate::ir::BuiltinVariant::None)
+                    )),
                 "expected value: None, got {:?}",
                 fields
             );
@@ -82,7 +84,10 @@ fn test_undefined_literal_converts_to_none() {
     let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
         .convert_expr(&swc_expr)
         .unwrap();
-    assert_eq!(result, Expr::Ident("None".to_string()));
+    assert_eq!(
+        result,
+        Expr::BuiltinVariantValue(crate::ir::BuiltinVariant::None)
+    );
 }
 
 #[test]
@@ -144,7 +149,10 @@ fn test_option_expected_undefined_stays_none() {
         .convert_expr(&swc_expr)
         .unwrap();
     // Should be None, not Some(None)
-    assert_eq!(result, Expr::Ident("None".to_string()));
+    assert_eq!(
+        result,
+        Expr::BuiltinVariantValue(crate::ir::BuiltinVariant::None)
+    );
 }
 
 #[test]
@@ -186,5 +194,8 @@ fn test_convert_expr_undefined_with_option_expected_returns_none() {
     let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
         .convert_expr(&swc_expr)
         .unwrap();
-    assert_eq!(result, Expr::Ident("None".to_string()));
+    assert_eq!(
+        result,
+        Expr::BuiltinVariantValue(crate::ir::BuiltinVariant::None)
+    );
 }

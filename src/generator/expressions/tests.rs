@@ -878,9 +878,17 @@ fn test_generate_fn_call_builtin_variant_some_and_none() {
         args: vec![],
     };
     assert_eq!(generate_expr(&none_expr), "None()");
-    // Note: `None` as a value reference (not a call) is `Expr::Ident("None")`
-    // currently — see TODO `[broken-window:Lit::Null]` for the planned
-    // structuring as a value-position BuiltinVariant.
+
+    // I-379: `None` as a value reference (not a call) is structured as
+    // `Expr::BuiltinVariantValue(BuiltinVariant::None)`.
+    let none_value = Expr::BuiltinVariantValue(crate::ir::BuiltinVariant::None);
+    assert_eq!(generate_expr(&none_value), "None");
+    let some_value = Expr::BuiltinVariantValue(crate::ir::BuiltinVariant::Some);
+    assert_eq!(generate_expr(&some_value), "Some");
+    let ok_value = Expr::BuiltinVariantValue(crate::ir::BuiltinVariant::Ok);
+    assert_eq!(generate_expr(&ok_value), "Ok");
+    let err_value = Expr::BuiltinVariantValue(crate::ir::BuiltinVariant::Err);
+    assert_eq!(generate_expr(&err_value), "Err");
 }
 
 #[test]

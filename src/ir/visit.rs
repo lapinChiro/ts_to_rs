@@ -439,7 +439,8 @@ pub fn walk_expr<V: IrVisitor + ?Sized>(v: &mut V, expr: &Expr) {
         | Expr::RawCode(_)
         | Expr::Regex { .. }
         | Expr::PrimitiveAssocConst { .. }
-        | Expr::StdConst(_) => {}
+        | Expr::StdConst(_)
+        | Expr::BuiltinVariantValue(_) => {}
     }
 }
 

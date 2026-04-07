@@ -712,7 +712,7 @@ impl<'a> Transformer<'a> {
             if let Some(params) = param_types {
                 for param in params.iter().skip(result.len()) {
                     if matches!(param.ty, RustType::Option(_)) {
-                        result.push(Expr::Ident("None".to_string()));
+                        result.push(Expr::BuiltinVariantValue(crate::ir::BuiltinVariant::None));
                     }
                 }
             }

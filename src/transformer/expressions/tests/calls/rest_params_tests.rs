@@ -20,8 +20,11 @@ fn test_call_with_missing_default_arg_appends_none() {
                 2,
                 "expected 2 args (with None appended), got {args:?}"
             );
-            // Second arg should be None (Ident("None"))
-            assert_eq!(args[1], Expr::Ident("None".to_string()));
+            // Second arg should be None (BuiltinVariantValue(None))
+            assert_eq!(
+                args[1],
+                Expr::BuiltinVariantValue(crate::ir::BuiltinVariant::None)
+            );
         }
         other => panic!("expected FnCall, got: {other:?}"),
     }
