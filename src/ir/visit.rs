@@ -31,6 +31,7 @@
 
 use super::{
     AssocConst, ClosureBody, Expr, Item, MatchArm, Method, Pattern, RustType, Stmt, TypeParam,
+    UserTypeRef,
 };
 
 /// IR の read-only 走査用 visitor trait。
@@ -63,6 +64,17 @@ pub trait IrVisitor {
     fn visit_method(&mut self, m: &Method) {
         walk_method(self, m);
     }
+    /// User-defined type 参照を通知する。
+    ///
+    /// `walk_expr` の `Expr::EnumVariant` や `walk_call_target` の各 user variant 等、
+    /// `UserTypeRef` フィールドを持つ箇所から呼ばれる。walker の実装は本フックを
+    /// override するだけで refs グラフを一様に構築できる。
+    ///
+    /// **I-378 Phase 1 段階**: 現状 Phase 1 では `Expr::EnumVariant::enum_ty`
+    /// のみが本フックを発火する。Phase 2 (T3 + T4) で `CallTarget::UserAssocFn`
+    /// / `UserTupleCtor` / `UserEnumVariantCtor` から `walk_call_target` 経由で
+    /// 配線され、user type ref の通知を一元化する。
+    fn visit_user_type_ref(&mut self, _r: &UserTypeRef) {}
 }
 
 /// `Item` の全 variant を再帰的に走査する。
@@ -415,6 +427,7 @@ pub fn walk_expr<V: IrVisitor + ?Sized>(v: &mut V, expr: &Expr) {
                 v.visit_match_arm(arm);
             }
         }
+        Expr::EnumVariant { enum_ty, .. } => v.visit_user_type_ref(enum_ty),
         // 型参照やサブ式を持たないリーフ
         Expr::NumberLit(_)
         | Expr::IntLit(_)
@@ -423,7 +436,9 @@ pub fn walk_expr<V: IrVisitor + ?Sized>(v: &mut V, expr: &Expr) {
         | Expr::Ident(_)
         | Expr::Unit
         | Expr::RawCode(_)
-        | Expr::Regex { .. } => {}
+        | Expr::Regex { .. }
+        | Expr::PrimitiveAssocConst { .. }
+        | Expr::StdConst(_) => {}
     }
 }
 
@@ -531,448 +546,5 @@ pub fn walk_match_arm<V: IrVisitor + ?Sized>(v: &mut V, arm: &MatchArm) {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::ir::test_fixtures::{all_exprs, all_items, all_patterns, all_rust_types, all_stmts};
-    use crate::ir::{BinOp, CallTarget, Visibility};
-
-    #[derive(Default)]
-    struct NodeCounter {
-        items: usize,
-        stmts: usize,
-        exprs: usize,
-        types: usize,
-        patterns: usize,
-        arms: usize,
-    }
-
-    impl IrVisitor for NodeCounter {
-        fn visit_item(&mut self, item: &Item) {
-            self.items += 1;
-            walk_item(self, item);
-        }
-        fn visit_stmt(&mut self, stmt: &Stmt) {
-            self.stmts += 1;
-            walk_stmt(self, stmt);
-        }
-        fn visit_expr(&mut self, expr: &Expr) {
-            self.exprs += 1;
-            walk_expr(self, expr);
-        }
-        fn visit_rust_type(&mut self, ty: &RustType) {
-            self.types += 1;
-            walk_rust_type(self, ty);
-        }
-        fn visit_pattern(&mut self, pat: &Pattern) {
-            self.patterns += 1;
-            walk_pattern(self, pat);
-        }
-        fn visit_match_arm(&mut self, arm: &MatchArm) {
-            self.arms += 1;
-            walk_match_arm(self, arm);
-        }
-    }
-
-    #[test]
-    fn counter_visitor_traverses_nested_fn_body() {
-        // fn f(x: f64) -> f64 { let y: f64 = x + 1.0; y }
-        let item = Item::Fn {
-            vis: Visibility::Public,
-            attributes: vec![],
-            is_async: false,
-            name: "f".to_string(),
-            type_params: vec![],
-            params: vec![crate::ir::Param {
-                name: "x".to_string(),
-                ty: Some(RustType::F64),
-            }],
-            return_type: Some(RustType::F64),
-            body: vec![
-                Stmt::Let {
-                    mutable: false,
-                    name: "y".to_string(),
-                    ty: Some(RustType::F64),
-                    init: Some(Expr::BinaryOp {
-                        left: Box::new(Expr::Ident("x".to_string())),
-                        op: BinOp::Add,
-                        right: Box::new(Expr::NumberLit(1.0)),
-                    }),
-                },
-                Stmt::TailExpr(Expr::Ident("y".to_string())),
-            ],
-        };
-
-        let mut counter = NodeCounter::default();
-        counter.visit_item(&item);
-
-        assert_eq!(counter.items, 1);
-        assert_eq!(counter.stmts, 2);
-        // exprs: Let init = BinaryOp (1) + BinaryOp.left Ident x (1) + BinaryOp.right NumberLit (1)
-        //        + TailExpr Ident y (1) = 4
-        assert_eq!(counter.exprs, 4);
-        // param x: F64, let y: F64, return type F64 → 3 visits
-        assert_eq!(counter.types, 3);
-    }
-
-    #[test]
-    fn pattern_walker_visits_nested_tuple_struct() {
-        // Some(Color::Red(x))
-        let pat = Pattern::TupleStruct {
-            path: vec!["Some".to_string()],
-            fields: vec![Pattern::TupleStruct {
-                path: vec!["Color".to_string(), "Red".to_string()],
-                fields: vec![Pattern::binding("x")],
-            }],
-        };
-
-        let mut counter = NodeCounter::default();
-        counter.visit_pattern(&pat);
-
-        // Outer Some(_), inner Color::Red(_), inner binding x → 3 pattern visits
-        assert_eq!(counter.patterns, 3);
-    }
-
-    #[test]
-    fn match_arm_walker_visits_patterns_and_guard() {
-        // `match x { 1 | 2 if flag => {} }`
-        let arm = MatchArm {
-            patterns: vec![
-                Pattern::Literal(Expr::IntLit(1)),
-                Pattern::Literal(Expr::IntLit(2)),
-            ],
-            guard: Some(Expr::Ident("flag".to_string())),
-            body: vec![],
-        };
-
-        let mut counter = NodeCounter::default();
-        counter.visit_match_arm(&arm);
-
-        assert_eq!(counter.arms, 1);
-        // 2 `Pattern::Literal` → walker routes through `visit_pattern` for each
-        // (2 patterns) and then `walk_pattern` descends into the inner literal expr.
-        assert_eq!(counter.patterns, 2);
-        // 2 literal inner exprs + 1 guard = 3
-        assert_eq!(counter.exprs, 3);
-    }
-
-    #[test]
-    fn fn_call_walker_descends_into_args_only() {
-        // foo(x, y)
-        let expr = Expr::FnCall {
-            target: CallTarget::simple("foo"),
-            args: vec![Expr::Ident("x".to_string()), Expr::Ident("y".to_string())],
-        };
-        let mut counter = NodeCounter::default();
-        counter.visit_expr(&expr);
-        // outer FnCall(1) + 2 args (2) = 3
-        assert_eq!(counter.exprs, 3);
-    }
-
-    // ------------------------------------------------------------------
-    // 全 variant 網羅カバレッジテスト
-    //
-    // IR の全 variant を 1 度ずつ含むサンプルを構築し、対応する walker が
-    // その variant を**実際に訪問したか**をタグ式に記録する visitor で検証
-    // する。variant 追加時に walk_* の更新漏れを検出するセーフティネット。
-    // ------------------------------------------------------------------
-
-    use std::collections::HashSet;
-
-    #[derive(Default)]
-    struct TagRecorder {
-        tags: HashSet<&'static str>,
-    }
-
-    impl TagRecorder {
-        fn mark(&mut self, tag: &'static str) {
-            self.tags.insert(tag);
-        }
-    }
-
-    impl IrVisitor for TagRecorder {
-        fn visit_item(&mut self, item: &Item) {
-            self.mark(match item {
-                Item::Struct { .. } => "item:struct",
-                Item::Enum { .. } => "item:enum",
-                Item::Trait { .. } => "item:trait",
-                Item::Impl { .. } => "item:impl",
-                Item::TypeAlias { .. } => "item:typealias",
-                Item::Fn { .. } => "item:fn",
-                Item::Comment(_) => "item:comment",
-                Item::Use { .. } => "item:use",
-                Item::RawCode(_) => "item:rawcode",
-            });
-            walk_item(self, item);
-        }
-
-        fn visit_stmt(&mut self, stmt: &Stmt) {
-            self.mark(match stmt {
-                Stmt::Let { .. } => "stmt:let",
-                Stmt::If { .. } => "stmt:if",
-                Stmt::While { .. } => "stmt:while",
-                Stmt::WhileLet { .. } => "stmt:whilelet",
-                Stmt::ForIn { .. } => "stmt:forin",
-                Stmt::Loop { .. } => "stmt:loop",
-                Stmt::Break { .. } => "stmt:break",
-                Stmt::Continue { .. } => "stmt:continue",
-                Stmt::Return(_) => "stmt:return",
-                Stmt::Expr(_) => "stmt:expr",
-                Stmt::TailExpr(_) => "stmt:tailexpr",
-                Stmt::IfLet { .. } => "stmt:iflet",
-                Stmt::Match { .. } => "stmt:match",
-                Stmt::LabeledBlock { .. } => "stmt:labeledblock",
-            });
-            walk_stmt(self, stmt);
-        }
-
-        fn visit_expr(&mut self, expr: &Expr) {
-            self.mark(match expr {
-                Expr::NumberLit(_) => "expr:numberlit",
-                Expr::BoolLit(_) => "expr:boollit",
-                Expr::StringLit(_) => "expr:stringlit",
-                Expr::Ident(_) => "expr:ident",
-                Expr::FormatMacro { .. } => "expr:formatmacro",
-                Expr::FieldAccess { .. } => "expr:fieldaccess",
-                Expr::MethodCall { .. } => "expr:methodcall",
-                Expr::StructInit { .. } => "expr:structinit",
-                Expr::Assign { .. } => "expr:assign",
-                Expr::UnaryOp { .. } => "expr:unaryop",
-                Expr::BinaryOp { .. } => "expr:binaryop",
-                Expr::Range { .. } => "expr:range",
-                Expr::FnCall { .. } => "expr:fncall",
-                Expr::Closure { .. } => "expr:closure",
-                Expr::Vec { .. } => "expr:vec",
-                Expr::Tuple { .. } => "expr:tuple",
-                Expr::If { .. } => "expr:if",
-                Expr::IfLet { .. } => "expr:iflet",
-                Expr::MacroCall { .. } => "expr:macrocall",
-                Expr::Await(_) => "expr:await",
-                Expr::Deref(_) => "expr:deref",
-                Expr::Ref(_) => "expr:ref",
-                Expr::Unit => "expr:unit",
-                Expr::IntLit(_) => "expr:intlit",
-                Expr::RawCode(_) => "expr:rawcode",
-                Expr::RuntimeTypeof { .. } => "expr:runtimetypeof",
-                Expr::Index { .. } => "expr:index",
-                Expr::Cast { .. } => "expr:cast",
-                Expr::Matches { .. } => "expr:matches",
-                Expr::Block(_) => "expr:block",
-                Expr::Match { .. } => "expr:match",
-                Expr::Regex { .. } => "expr:regex",
-            });
-            walk_expr(self, expr);
-        }
-
-        fn visit_rust_type(&mut self, ty: &RustType) {
-            self.mark(match ty {
-                RustType::Unit => "ty:unit",
-                RustType::String => "ty:string",
-                RustType::F64 => "ty:f64",
-                RustType::Bool => "ty:bool",
-                RustType::Option(_) => "ty:option",
-                RustType::Vec(_) => "ty:vec",
-                RustType::Fn { .. } => "ty:fn",
-                RustType::Result { .. } => "ty:result",
-                RustType::Tuple(_) => "ty:tuple",
-                RustType::Any => "ty:any",
-                RustType::Never => "ty:never",
-                RustType::Named { .. } => "ty:named",
-                RustType::Ref(_) => "ty:ref",
-                RustType::DynTrait(_) => "ty:dyntrait",
-                RustType::QSelf { .. } => "ty:qself",
-            });
-            walk_rust_type(self, ty);
-        }
-
-        fn visit_pattern(&mut self, pat: &Pattern) {
-            self.mark(match pat {
-                Pattern::Wildcard => "pat:wildcard",
-                Pattern::Literal(_) => "pat:literal",
-                Pattern::Binding { .. } => "pat:binding",
-                Pattern::TupleStruct { .. } => "pat:tuplestruct",
-                Pattern::Struct { .. } => "pat:struct",
-                Pattern::UnitStruct { .. } => "pat:unitstruct",
-                Pattern::Or(_) => "pat:or",
-                Pattern::Range { .. } => "pat:range",
-                Pattern::Ref { .. } => "pat:ref",
-                Pattern::Tuple(_) => "pat:tuple",
-            });
-            walk_pattern(self, pat);
-        }
-    }
-
-    /// 全 `RustType` variant が walker で訪問されることを検証する。
-    #[test]
-    fn walker_visits_every_rust_type_variant() {
-        let mut rec = TagRecorder::default();
-        for ty in all_rust_types() {
-            rec.visit_rust_type(&ty);
-        }
-        let expected: HashSet<&'static str> = [
-            "ty:unit",
-            "ty:string",
-            "ty:f64",
-            "ty:bool",
-            "ty:any",
-            "ty:never",
-            "ty:option",
-            "ty:vec",
-            "ty:ref",
-            "ty:result",
-            "ty:tuple",
-            "ty:fn",
-            "ty:named",
-            "ty:dyntrait",
-            "ty:qself",
-        ]
-        .into_iter()
-        .collect();
-        let missing: Vec<&&str> = expected.difference(&rec.tags).collect();
-        assert!(
-            missing.is_empty(),
-            "walker failed to visit variants: {:?}",
-            missing
-        );
-    }
-
-    /// 全 `Pattern` variant が walker で訪問されることを検証する。
-    #[test]
-    fn walker_visits_every_pattern_variant() {
-        let mut rec = TagRecorder::default();
-        for p in all_patterns() {
-            rec.visit_pattern(&p);
-        }
-        let expected: HashSet<&'static str> = [
-            "pat:wildcard",
-            "pat:literal",
-            "pat:binding",
-            "pat:tuplestruct",
-            "pat:struct",
-            "pat:unitstruct",
-            "pat:or",
-            "pat:range",
-            "pat:ref",
-            "pat:tuple",
-        ]
-        .into_iter()
-        .collect();
-        let missing: Vec<&&str> = expected.difference(&rec.tags).collect();
-        assert!(
-            missing.is_empty(),
-            "walker failed to visit variants: {:?}",
-            missing
-        );
-    }
-
-    /// 全 `Expr` variant が walker で訪問されることを検証する。
-    #[test]
-    fn walker_visits_every_expr_variant() {
-        let mut rec = TagRecorder::default();
-        for e in all_exprs() {
-            rec.visit_expr(&e);
-        }
-        let expected: HashSet<&'static str> = [
-            "expr:numberlit",
-            "expr:intlit",
-            "expr:boollit",
-            "expr:stringlit",
-            "expr:ident",
-            "expr:unit",
-            "expr:rawcode",
-            "expr:regex",
-            "expr:formatmacro",
-            "expr:fieldaccess",
-            "expr:methodcall",
-            "expr:structinit",
-            "expr:assign",
-            "expr:unaryop",
-            "expr:binaryop",
-            "expr:range",
-            "expr:fncall",
-            "expr:closure",
-            "expr:vec",
-            "expr:tuple",
-            "expr:if",
-            "expr:iflet",
-            "expr:macrocall",
-            "expr:await",
-            "expr:deref",
-            "expr:ref",
-            "expr:runtimetypeof",
-            "expr:index",
-            "expr:cast",
-            "expr:matches",
-            "expr:block",
-            "expr:match",
-        ]
-        .into_iter()
-        .collect();
-        let missing: Vec<&&str> = expected.difference(&rec.tags).collect();
-        assert!(
-            missing.is_empty(),
-            "walker failed to visit variants: {:?}",
-            missing
-        );
-    }
-
-    /// 全 `Stmt` variant が walker で訪問されることを検証する。
-    #[test]
-    fn walker_visits_every_stmt_variant() {
-        let mut rec = TagRecorder::default();
-        for s in all_stmts() {
-            rec.visit_stmt(&s);
-        }
-        let expected: HashSet<&'static str> = [
-            "stmt:let",
-            "stmt:if",
-            "stmt:while",
-            "stmt:whilelet",
-            "stmt:forin",
-            "stmt:loop",
-            "stmt:break",
-            "stmt:continue",
-            "stmt:return",
-            "stmt:expr",
-            "stmt:tailexpr",
-            "stmt:iflet",
-            "stmt:match",
-            "stmt:labeledblock",
-        ]
-        .into_iter()
-        .collect();
-        let missing: Vec<&&str> = expected.difference(&rec.tags).collect();
-        assert!(
-            missing.is_empty(),
-            "walker failed to visit variants: {:?}",
-            missing
-        );
-    }
-
-    /// 全 `Item` variant が walker で訪問されることを検証する。
-    #[test]
-    fn walker_visits_every_item_variant() {
-        let mut rec = TagRecorder::default();
-        for item in all_items() {
-            rec.visit_item(&item);
-        }
-        let expected: HashSet<&'static str> = [
-            "item:comment",
-            "item:use",
-            "item:struct",
-            "item:enum",
-            "item:trait",
-            "item:impl",
-            "item:typealias",
-            "item:fn",
-            "item:rawcode",
-        ]
-        .into_iter()
-        .collect();
-        let missing: Vec<&&str> = expected.difference(&rec.tags).collect();
-        assert!(
-            missing.is_empty(),
-            "walker failed to visit variants: {:?}",
-            missing
-        );
-    }
-}
+#[path = "visit_tests.rs"]
+mod tests;

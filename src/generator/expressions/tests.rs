@@ -852,3 +852,45 @@ fn test_generate_fn_call_type_ref_is_purely_metadata_not_rendered() {
     );
     assert_eq!(generate_expr(&with_type_ref), "myClass::new()");
 }
+
+// I-378 Phase 1: rendering tests for the 3 new structured Expr variants.
+
+#[test]
+fn renders_enum_variant_as_qualified_path() {
+    let expr = Expr::EnumVariant {
+        enum_ty: crate::ir::UserTypeRef::new("Color"),
+        variant: "Red".to_string(),
+    };
+    assert_eq!(generate_expr(&expr), "Color::Red");
+}
+
+#[test]
+fn renders_primitive_assoc_const_as_qualified_path() {
+    let nan = Expr::PrimitiveAssocConst {
+        ty: crate::ir::PrimitiveType::F64,
+        name: "NAN".to_string(),
+    };
+    assert_eq!(generate_expr(&nan), "f64::NAN");
+
+    let i32_max = Expr::PrimitiveAssocConst {
+        ty: crate::ir::PrimitiveType::I32,
+        name: "MAX".to_string(),
+    };
+    assert_eq!(generate_expr(&i32_max), "i32::MAX");
+}
+
+#[test]
+fn renders_std_const_via_rust_path() {
+    assert_eq!(
+        generate_expr(&Expr::StdConst(crate::ir::StdConst::F64Pi)),
+        "std::f64::consts::PI"
+    );
+    assert_eq!(
+        generate_expr(&Expr::StdConst(crate::ir::StdConst::F64Ln2)),
+        "std::f64::consts::LN_2"
+    );
+    assert_eq!(
+        generate_expr(&Expr::StdConst(crate::ir::StdConst::F64Sqrt2)),
+        "std::f64::consts::SQRT_2"
+    );
+}

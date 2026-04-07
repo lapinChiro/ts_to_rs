@@ -156,3 +156,65 @@ fn test_walker_fn_call_recurses_into_args_even_when_target_has_no_type_ref() {
         "call target `foo` must not be registered"
     );
 }
+
+// I-378 Phase 1: walker must recognise the structured value-position variants.
+
+/// `Expr::EnumVariant { enum_ty: UserTypeRef("Color"), .. }` → walker must
+/// register `Color` in refs. This is the structural replacement for the previous
+/// `Expr::Ident("Color::Red")` form which the walker could not parse.
+#[test]
+fn test_walker_enum_variant_value_registers_parent_user_type() {
+    let item = fn_with_body(
+        "f",
+        vec![Stmt::Expr(Expr::EnumVariant {
+            enum_ty: crate::ir::UserTypeRef::new("Color"),
+            variant: "Red".to_string(),
+        })],
+    );
+    let mut refs = HashSet::new();
+    collect_type_refs_from_item(&item, &mut refs);
+    assert!(
+        refs.contains("Color"),
+        "Expr::EnumVariant must register the parent enum type, got refs={refs:?}"
+    );
+}
+
+/// `Expr::PrimitiveAssocConst { f64::NAN }` → walker must NOT register `f64`
+/// (primitive types are not user-defined). This is the structural replacement
+/// for the broken-window `Expr::Ident("f64::NAN")` form.
+#[test]
+fn test_walker_primitive_assoc_const_does_not_register_primitive_type() {
+    let item = fn_with_body(
+        "f",
+        vec![Stmt::Expr(Expr::PrimitiveAssocConst {
+            ty: crate::ir::PrimitiveType::F64,
+            name: "NAN".to_string(),
+        })],
+    );
+    let mut refs = HashSet::new();
+    collect_type_refs_from_item(&item, &mut refs);
+    assert!(
+        !refs.contains("f64"),
+        "primitive types must not be registered, got refs={refs:?}"
+    );
+}
+
+/// `Expr::StdConst(F64Pi)` → walker must NOT register anything (std module
+/// paths are not user types).
+#[test]
+fn test_walker_std_const_does_not_register() {
+    let item = fn_with_body(
+        "f",
+        vec![Stmt::Expr(Expr::StdConst(crate::ir::StdConst::F64Pi))],
+    );
+    let mut refs = HashSet::new();
+    collect_type_refs_from_item(&item, &mut refs);
+    assert!(
+        refs.is_empty()
+            || (!refs.contains("std")
+                && !refs.contains("f64")
+                && !refs.contains("consts")
+                && !refs.contains("PI")),
+        "StdConst must not register any segment as a user type, got refs={refs:?}"
+    );
+}

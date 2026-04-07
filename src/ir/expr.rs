@@ -2,6 +2,176 @@
 
 use super::{MatchArm, Param, Pattern, RustType, Stmt};
 
+/// User-defined type への参照を表す newtype。
+///
+/// この型のインスタンスは「TypeRegistry に登録されたユーザー型を参照する」
+/// という不変条件を構築サイトで保証する。`IrVisitor::visit_user_type_ref` は
+/// この型のすべての出現を walker に通知し、walker は無条件に refs に登録する。
+///
+/// プリミティブ型 (`f64`, `i32`)、std module path (`std::f64::consts`)、
+/// builtin enum variant (`Some`, `None`, `Ok`, `Err`)、外部 crate path
+/// (`scopeguard::guard`) は **この型に格納してはならない**。これらは
+/// [`PrimitiveType`] / [`StdConst`] / [`BuiltinVariant`] / `CallTarget::ExternalPath`
+/// で構造的に区別される。
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct UserTypeRef(String);
+
+impl UserTypeRef {
+    /// 新しい [`UserTypeRef`] を構築する。
+    ///
+    /// 単一識別子のみを受け付ける。`::` を含む path 文字列、空文字、
+    /// プリミティブ型名 (`f64`/`i32`/...) の混入は debug ビルドで panic
+    /// する (構築サイトでの誤用を即時検出)。これらは
+    /// [`PrimitiveType`] / [`StdConst`] / [`BuiltinVariant`] / `CallTarget::ExternalPath`
+    /// で構造的に区別すべきもの。
+    pub fn new(name: impl Into<String>) -> Self {
+        let s = name.into();
+        debug_assert!(!s.is_empty(), "UserTypeRef must be a non-empty identifier");
+        debug_assert!(
+            !s.contains("::"),
+            "UserTypeRef must hold a single identifier, got `{s}` \
+             (use PrimitiveType / StdConst / BuiltinVariant / CallTarget::ExternalPath for paths)"
+        );
+        Self(s)
+    }
+
+    /// ユーザー型名を `&str` で取得する。
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// ユーザー型名を所有権付きで取り出す。
+    pub fn into_string(self) -> String {
+        self.0
+    }
+}
+
+/// プリミティブ型の集合。`f64::NAN` のような associated constant の所在型として使う。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PrimitiveType {
+    /// `f64`
+    F64,
+    /// `i32`
+    I32,
+    /// `i64`
+    I64,
+    /// `u32`
+    U32,
+    /// `u64`
+    U64,
+    /// `usize`
+    Usize,
+    /// `isize`
+    Isize,
+    /// `bool`
+    Bool,
+    /// `char`
+    Char,
+}
+
+impl PrimitiveType {
+    /// Rust ソース上の名前を返す。
+    pub fn as_rust_str(self) -> &'static str {
+        match self {
+            PrimitiveType::F64 => "f64",
+            PrimitiveType::I32 => "i32",
+            PrimitiveType::I64 => "i64",
+            PrimitiveType::U32 => "u32",
+            PrimitiveType::U64 => "u64",
+            PrimitiveType::Usize => "usize",
+            PrimitiveType::Isize => "isize",
+            PrimitiveType::Bool => "bool",
+            PrimitiveType::Char => "char",
+        }
+    }
+}
+
+/// std ライブラリ既知の定数 path。`Math.*` 由来のみが現状の構築サイト。
+///
+/// `Math.*` から本 enum へのマッピングは [`StdConst::from_math_member`] に
+/// 集約されている（DRY: マッピング表は単一箇所に存在）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum StdConst {
+    /// `std::f64::consts::PI`
+    F64Pi,
+    /// `std::f64::consts::E`
+    F64E,
+    /// `std::f64::consts::LN_2`
+    F64Ln2,
+    /// `std::f64::consts::LN_10`
+    F64Ln10,
+    /// `std::f64::consts::LOG2_E`
+    F64Log2E,
+    /// `std::f64::consts::LOG10_E`
+    F64Log10E,
+    /// `std::f64::consts::SQRT_2`
+    F64Sqrt2,
+}
+
+impl StdConst {
+    /// `Math.*` の TS フィールド名から対応する [`StdConst`] を引く。
+    /// 未知のフィールドには `None` を返す（呼び出し側は通常の member access に
+    /// fall back する）。
+    pub fn from_math_member(field: &str) -> Option<Self> {
+        match field {
+            "PI" => Some(StdConst::F64Pi),
+            "E" => Some(StdConst::F64E),
+            "LN2" => Some(StdConst::F64Ln2),
+            "LN10" => Some(StdConst::F64Ln10),
+            "LOG2E" => Some(StdConst::F64Log2E),
+            "LOG10E" => Some(StdConst::F64Log10E),
+            "SQRT2" => Some(StdConst::F64Sqrt2),
+            _ => None,
+        }
+    }
+
+    /// generator が rendering で使う Rust path。
+    pub fn rust_path(self) -> &'static str {
+        match self {
+            StdConst::F64Pi => "std::f64::consts::PI",
+            StdConst::F64E => "std::f64::consts::E",
+            StdConst::F64Ln2 => "std::f64::consts::LN_2",
+            StdConst::F64Ln10 => "std::f64::consts::LN_10",
+            StdConst::F64Log2E => "std::f64::consts::LOG2_E",
+            StdConst::F64Log10E => "std::f64::consts::LOG10_E",
+            StdConst::F64Sqrt2 => "std::f64::consts::SQRT_2",
+        }
+    }
+}
+
+/// `Option` / `Result` の builtin variant constructor を表す。
+///
+/// walker は本 enum に対しては何もせず、`RUST_BUILTIN_TYPES` のハードコード
+/// 除外に頼らなくても builtin variant を user type として誤登録しないことが
+/// 構造的に保証される（T7 で I-377 申し送りの 4 エントリ削除が可能になる）。
+///
+/// **I-378 Phase 1 過渡状態**: Phase 1 では本型を構造定義のみ追加し、production
+/// 構築サイトは存在しない（Phase 2 の T3 で `CallTarget::BuiltinVariant` variant
+/// として消費される）。Phase 1 段階では `expr.rs` の単体テストでのみ参照される。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BuiltinVariant {
+    /// `Some(_)`
+    Some,
+    /// `None`
+    None,
+    /// `Ok(_)`
+    Ok,
+    /// `Err(_)`
+    Err,
+}
+
+impl BuiltinVariant {
+    /// Rust ソース上の名前を返す。
+    pub fn as_rust_str(self) -> &'static str {
+        match self {
+            BuiltinVariant::Some => "Some",
+            BuiltinVariant::None => "None",
+            BuiltinVariant::Ok => "Ok",
+            BuiltinVariant::Err => "Err",
+        }
+    }
+}
+
 /// The target of an [`Expr::FnCall`].
 ///
 /// `Expr::FnCall` previously used a single `name: String` field to represent six
@@ -328,6 +498,33 @@ pub enum Expr {
         /// Match arms
         arms: Vec<MatchArm>,
     },
+    /// 値式における enum unit variant 参照（payload なし）。例: `Color::Red`, `Direction::Up`。
+    ///
+    /// payload 付き variant 構築（`Color::Red(x)`）は `Expr::FnCall { target: CallTarget::* }`
+    /// 側で表現する。本 variant は **値リテラルとしての** variant 参照を構造化することで、
+    /// `Expr::Ident("Color::Red")` 形式の display-formatted 文字列 encoding を撲滅する
+    /// （pipeline-integrity ルール準拠）。
+    EnumVariant {
+        /// 親 enum 型への参照。walker はこのフィールドを通じて user type ref を一様に拾う。
+        enum_ty: UserTypeRef,
+        /// variant 名（修飾なし）。
+        variant: String,
+    },
+    /// プリミティブ型の associated constant。例: `f64::NAN`, `f64::INFINITY`, `i32::MAX`。
+    ///
+    /// `Expr::Ident("f64::NAN")` 形式の display-formatted 文字列を撲滅する。
+    /// プリミティブ型なので walker は何もしない。
+    PrimitiveAssocConst {
+        /// 所在型。
+        ty: PrimitiveType,
+        /// constant 名（例: `"NAN"`, `"INFINITY"`, `"MAX"`）。
+        name: String,
+    },
+    /// std ライブラリ既知の定数 path。例: `std::f64::consts::PI`。
+    ///
+    /// `Math.PI` 等の TS 由来から構築される。`Expr::Ident("std::f64::consts::PI")`
+    /// 形式の display-formatted 文字列を撲滅する。walker は何もしない。
+    StdConst(StdConst),
     /// A compiled regex literal: `Regex::new("pattern").unwrap()`
     ///
     /// Preserves the `g` (global) and `y` (sticky) flags from the original TypeScript regex.
@@ -361,7 +558,14 @@ impl Expr {
             | Expr::StringLit(_)
             | Expr::BoolLit(_)
             | Expr::Ident(_)
-            | Expr::Unit => true,
+            | Expr::Unit
+            // 定数参照は副作用ゼロ。`Expr::Ident("f64::NAN")` 形式が
+            // `Expr::PrimitiveAssocConst` に置換されたとき is_trivially_pure の
+            // 戻り値が true → false に静かに反転しないよう明示的に true を返す
+            // (silent semantic change 防止)。
+            | Expr::EnumVariant { .. }
+            | Expr::PrimitiveAssocConst { .. }
+            | Expr::StdConst(_) => true,
             Expr::Ref(inner) | Expr::Deref(inner) => inner.is_trivially_pure(),
             Expr::FieldAccess { object, .. } => object.is_trivially_pure(),
             // Transpiler-generated conversion methods with no side effects
@@ -380,9 +584,17 @@ impl Expr {
     /// - Copy literals are cheap and have no ownership/allocation concerns → `unwrap_or`
     /// - Everything else (String allocation, side effects, non-Copy move) → `unwrap_or_else`
     pub fn is_copy_literal(&self) -> bool {
+        // `PrimitiveAssocConst` (`f64::NAN` 等) と `StdConst` (`std::f64::consts::PI` 等)
+        // はプリミティブ Copy 値で副作用ゼロのため eager 評価安全。
+        // `EnumVariant` は親 enum の Copy 性が unknown なため保守的に除外する。
         matches!(
             self,
-            Expr::NumberLit(_) | Expr::IntLit(_) | Expr::BoolLit(_) | Expr::Unit
+            Expr::NumberLit(_)
+                | Expr::IntLit(_)
+                | Expr::BoolLit(_)
+                | Expr::Unit
+                | Expr::PrimitiveAssocConst { .. }
+                | Expr::StdConst(_)
         )
     }
 }
@@ -510,4 +722,116 @@ pub enum ClosureBody {
     Expr(Box<Expr>),
     /// A block body: `|x| { let y = x + 1; y }`
     Block(Vec<Stmt>),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn user_type_ref_round_trips() {
+        let r = UserTypeRef::new("Foo");
+        assert_eq!(r.as_str(), "Foo");
+        assert_eq!(r.clone().into_string(), "Foo");
+    }
+
+    #[test]
+    fn primitive_type_as_rust_str_covers_all_variants() {
+        assert_eq!(PrimitiveType::F64.as_rust_str(), "f64");
+        assert_eq!(PrimitiveType::I32.as_rust_str(), "i32");
+        assert_eq!(PrimitiveType::I64.as_rust_str(), "i64");
+        assert_eq!(PrimitiveType::U32.as_rust_str(), "u32");
+        assert_eq!(PrimitiveType::U64.as_rust_str(), "u64");
+        assert_eq!(PrimitiveType::Usize.as_rust_str(), "usize");
+        assert_eq!(PrimitiveType::Isize.as_rust_str(), "isize");
+        assert_eq!(PrimitiveType::Bool.as_rust_str(), "bool");
+        assert_eq!(PrimitiveType::Char.as_rust_str(), "char");
+    }
+
+    #[test]
+    fn std_const_from_math_member_covers_all_known_fields() {
+        assert_eq!(StdConst::from_math_member("PI"), Some(StdConst::F64Pi));
+        assert_eq!(StdConst::from_math_member("E"), Some(StdConst::F64E));
+        assert_eq!(StdConst::from_math_member("LN2"), Some(StdConst::F64Ln2));
+        assert_eq!(StdConst::from_math_member("LN10"), Some(StdConst::F64Ln10));
+        assert_eq!(
+            StdConst::from_math_member("LOG2E"),
+            Some(StdConst::F64Log2E)
+        );
+        assert_eq!(
+            StdConst::from_math_member("LOG10E"),
+            Some(StdConst::F64Log10E)
+        );
+        assert_eq!(
+            StdConst::from_math_member("SQRT2"),
+            Some(StdConst::F64Sqrt2)
+        );
+    }
+
+    #[test]
+    fn std_const_from_math_member_returns_none_for_unknown() {
+        assert_eq!(StdConst::from_math_member("UNKNOWN"), None);
+        assert_eq!(StdConst::from_math_member(""), None);
+    }
+
+    #[test]
+    fn std_const_rust_path_covers_all_variants() {
+        assert_eq!(StdConst::F64Pi.rust_path(), "std::f64::consts::PI");
+        assert_eq!(StdConst::F64E.rust_path(), "std::f64::consts::E");
+        assert_eq!(StdConst::F64Ln2.rust_path(), "std::f64::consts::LN_2");
+        assert_eq!(StdConst::F64Ln10.rust_path(), "std::f64::consts::LN_10");
+        assert_eq!(StdConst::F64Log2E.rust_path(), "std::f64::consts::LOG2_E");
+        assert_eq!(StdConst::F64Log10E.rust_path(), "std::f64::consts::LOG10_E");
+        assert_eq!(StdConst::F64Sqrt2.rust_path(), "std::f64::consts::SQRT_2");
+    }
+
+    #[test]
+    fn builtin_variant_as_rust_str_covers_all_variants() {
+        assert_eq!(BuiltinVariant::Some.as_rust_str(), "Some");
+        assert_eq!(BuiltinVariant::None.as_rust_str(), "None");
+        assert_eq!(BuiltinVariant::Ok.as_rust_str(), "Ok");
+        assert_eq!(BuiltinVariant::Err.as_rust_str(), "Err");
+    }
+
+    #[test]
+    fn new_expr_variants_have_correct_purity_semantics() {
+        // 全て定数参照で副作用ゼロ → trivially_pure: true.
+        // この値が false になると、Phase 2 で `Expr::Ident("f64::NAN")` (現状 true)
+        // から本 variant への置換が is_trivially_pure を true → false に静かに反転
+        // させ、generator の dead-code elimination 判定を変える silent semantic
+        // change を引き起こす。本テストは回帰防止ガードである。
+        let ev = Expr::EnumVariant {
+            enum_ty: UserTypeRef::new("Color"),
+            variant: "Red".to_string(),
+        };
+        assert!(ev.is_trivially_pure());
+        // EnumVariant の Copy 性は親 enum derive 依存。保守的に false。
+        assert!(!ev.is_copy_literal());
+
+        let pa = Expr::PrimitiveAssocConst {
+            ty: PrimitiveType::F64,
+            name: "NAN".to_string(),
+        };
+        assert!(pa.is_trivially_pure());
+        // f64 は Copy。eager 評価安全。
+        assert!(pa.is_copy_literal());
+
+        let sc = Expr::StdConst(StdConst::F64Pi);
+        assert!(sc.is_trivially_pure());
+        // std::f64::consts::PI も f64 で Copy。
+        assert!(sc.is_copy_literal());
+    }
+
+    #[test]
+    #[should_panic(expected = "single identifier")]
+    fn user_type_ref_rejects_qualified_path() {
+        // `::` を含む文字列は debug ビルドで panic. PrimitiveType/StdConst を使うべき。
+        let _ = UserTypeRef::new("std::f64");
+    }
+
+    #[test]
+    #[should_panic(expected = "non-empty")]
+    fn user_type_ref_rejects_empty_string() {
+        let _ = UserTypeRef::new("");
+    }
 }

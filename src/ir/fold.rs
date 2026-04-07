@@ -31,7 +31,7 @@
 
 use super::{
     AssocConst, CallTarget, ClosureBody, EnumVariant, Expr, Item, MatchArm, Method, Param, Pattern,
-    RustType, Stmt, StructField, TraitRef, TypeParam,
+    RustType, Stmt, StructField, TraitRef, TypeParam, UserTypeRef,
 };
 
 /// IR を owned 値ベースで変換する folder trait。
@@ -63,6 +63,19 @@ pub trait IrFolder {
     }
     fn fold_method(&mut self, m: Method) -> Method {
         walk_method(self, m)
+    }
+    /// User-defined type 参照を fold する。デフォルトは恒等変換。
+    ///
+    /// 型パラメータ置換 (`Substitute`) は user type ref を変換しない（`UserTypeRef`
+    /// は識別子文字列であり `RustType` ではない）。将来的に user type 名そのものを
+    /// 書き換えるような fold 実装が必要になった場合の拡張ポイントとして残す。
+    ///
+    /// **I-378 Phase 1 段階**: 現状 Phase 1 では `Expr::EnumVariant::enum_ty`
+    /// のみが本フックを経由する。Phase 2 (T3 + T5) で `CallTarget::UserAssocFn`
+    /// / `UserTupleCtor` / `UserEnumVariantCtor` 等が `walk_call_target` 経由で
+    /// 本フックを呼び、user type ref 変換の通知点を一元化する。
+    fn fold_user_type_ref(&mut self, r: UserTypeRef) -> UserTypeRef {
+        r
     }
     fn fold_param(&mut self, p: Param) -> Param {
         walk_param(self, p)
@@ -581,6 +594,10 @@ pub fn walk_expr<F: IrFolder + ?Sized>(f: &mut F, expr: Expr) -> Expr {
             expr: Box::new(f.fold_expr(*expr)),
             arms: arms.into_iter().map(|a| f.fold_match_arm(a)).collect(),
         },
+        Expr::EnumVariant { enum_ty, variant } => Expr::EnumVariant {
+            enum_ty: f.fold_user_type_ref(enum_ty),
+            variant,
+        },
         // leaf expressions without sub-expressions or types
         e @ (Expr::NumberLit(_)
         | Expr::IntLit(_)
@@ -589,7 +606,9 @@ pub fn walk_expr<F: IrFolder + ?Sized>(f: &mut F, expr: Expr) -> Expr {
         | Expr::Ident(_)
         | Expr::Unit
         | Expr::RawCode(_)
-        | Expr::Regex { .. }) => e,
+        | Expr::Regex { .. }
+        | Expr::PrimitiveAssocConst { .. }
+        | Expr::StdConst(_)) => e,
     }
 }
 
@@ -714,6 +733,55 @@ mod tests {
             let result = IdentityFolder.fold_item(item.clone());
             assert_eq!(result, item, "identity fold changed Item variant");
         }
+    }
+
+    /// `walk_expr` の `Expr::EnumVariant` 分岐が `fold_user_type_ref` フックを
+    /// 経由して enum_ty を折りたたむことを検証する。識別 fold (`r → r`) でも
+    /// 経路上にフックが配置されていることが Phase 2 の前提条件。
+    #[test]
+    fn walk_expr_enum_variant_routes_through_fold_user_type_ref() {
+        struct PrefixFolder;
+        impl IrFolder for PrefixFolder {
+            fn fold_user_type_ref(&mut self, r: super::UserTypeRef) -> super::UserTypeRef {
+                super::UserTypeRef::new(format!("Prefixed_{}", r.as_str()))
+            }
+        }
+
+        let expr = Expr::EnumVariant {
+            enum_ty: super::UserTypeRef::new("Color"),
+            variant: "Red".to_string(),
+        };
+
+        let folded = PrefixFolder.fold_expr(expr);
+        match folded {
+            Expr::EnumVariant { enum_ty, variant } => {
+                assert_eq!(enum_ty.as_str(), "Prefixed_Color");
+                assert_eq!(variant, "Red");
+            }
+            other => panic!("expected EnumVariant, got {other:?}"),
+        }
+    }
+
+    /// PrimitiveAssocConst / StdConst は user type ref を持たないため
+    /// `fold_user_type_ref` フックを経由せず識別変換されることを検証する。
+    #[test]
+    fn walk_expr_primitive_and_std_const_bypass_fold_user_type_ref() {
+        struct PanicOnUserTypeRef;
+        impl IrFolder for PanicOnUserTypeRef {
+            fn fold_user_type_ref(&mut self, _r: super::UserTypeRef) -> super::UserTypeRef {
+                panic!("fold_user_type_ref must NOT be called for PrimitiveAssocConst/StdConst");
+            }
+        }
+
+        let p = Expr::PrimitiveAssocConst {
+            ty: crate::ir::PrimitiveType::F64,
+            name: "NAN".to_string(),
+        };
+        let s = Expr::StdConst(crate::ir::StdConst::F64Pi);
+
+        // Both should fold to themselves without invoking fold_user_type_ref
+        assert_eq!(PanicOnUserTypeRef.fold_expr(p.clone()), p);
+        assert_eq!(PanicOnUserTypeRef.fold_expr(s.clone()), s);
     }
 
     #[test]

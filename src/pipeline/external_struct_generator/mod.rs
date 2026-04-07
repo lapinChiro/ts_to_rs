@@ -720,6 +720,16 @@ fn collect_type_refs_from_expr(expr: &Expr, refs: &mut HashSet<String>) {
                 collect_type_refs_from_match_arm(arm, refs);
             }
         }
+        // 値式における enum unit variant 参照: walker は親 enum 型を user type として登録する
+        // (`UserTypeRef` 型のフィールドは I-378 の構造化により walker のヒューリスティック
+        // を不要にする)
+        //
+        // I-378 Phase 1 過渡状態: 本分岐は Phase 2 (T7 walker simplification) で
+        // `IrVisitor` ベースの `TypeRefCollector` 実装内 `visit_user_type_ref` override
+        // に集約される予定。それまでは手書き再帰版に明示的にロジックを置く。
+        Expr::EnumVariant { enum_ty, .. } => {
+            refs.insert(enum_ty.as_str().to_string());
+        }
         // 型参照を持たないリーフ
         Expr::NumberLit(_)
         | Expr::IntLit(_)
@@ -728,7 +738,9 @@ fn collect_type_refs_from_expr(expr: &Expr, refs: &mut HashSet<String>) {
         | Expr::Ident(_)
         | Expr::Unit
         | Expr::RawCode(_)
-        | Expr::Regex { .. } => {}
+        | Expr::Regex { .. }
+        | Expr::PrimitiveAssocConst { .. }
+        | Expr::StdConst(_) => {}
     }
 }
 

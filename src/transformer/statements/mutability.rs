@@ -295,7 +295,10 @@ fn collect_mutated_vars_from_expr(
         | Expr::Unit
         | Expr::IntLit(_)
         | Expr::RawCode(_)
-        | Expr::Regex { .. } => {}
+        | Expr::Regex { .. }
+        | Expr::EnumVariant { .. }
+        | Expr::PrimitiveAssocConst { .. }
+        | Expr::StdConst(_) => {}
     }
 }
 

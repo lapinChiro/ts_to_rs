@@ -28,7 +28,10 @@ pub mod fold;
 pub mod pattern;
 pub mod visit;
 
-pub use expr::{BinOp, CallTarget, ClosureBody, Expr, UnOp};
+pub use expr::{
+    BinOp, BuiltinVariant, CallTarget, ClosureBody, Expr, PrimitiveType, StdConst, UnOp,
+    UserTypeRef,
+};
 pub use item::{AssocConst, EnumValue, EnumVariant, Item, Method, Param, StructField};
 pub use naming::{
     camel_to_snake, sanitize_field_name, sanitize_rust_type_name, string_to_pascal_case,

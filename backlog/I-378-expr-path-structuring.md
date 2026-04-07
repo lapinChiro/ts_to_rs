@@ -300,6 +300,50 @@ impl IrVisitor for TypeRefCollector<'_> {
 
 **Verdict**: 上記すべて Safe（出力 Rust ソースは byte-for-byte 同一、または T0 検証で同一性を担保）。silent semantic change なし。
 
+## Implementation Progress
+
+### Phase 構成（Phase 1 開始時に確定）
+
+PRD 全 13 タスク (T0〜T12) を **3 フェーズに分割** して進める。各フェーズ末でユーザーがレビュー＋コミット。理由: `CallTarget::simple/assoc/path` ヘルパ削除の瞬間からビルド全断 → T4〜T10 完了まで cargo check 不能の長い壊れた中間状態が発生するため、安全状態 (build/test pass) で区切る。
+
+| Phase | 含むタスク | 状態 | 説明 |
+|---|---|---|---|
+| **Phase 1** | T1, T2 (+ self-review) | ✅ 完了 | additive のみ。新型 4 + Expr 3 variant 追加。既存サイト未変更のためビルド・テスト pass 状態 |
+| **Phase 2** | T0, T3, T4, T5, T6, T7, T8, T9, T10 | ⏸ 未着手 | 破壊的フェーズ。`CallTarget` 全面再設計、Transformer 構築サイト書き換え、walker simplification、`is_type_ident` 削除、テスト追従 |
+| **Phase 3** | T11, T12 | ⏸ 未着手 | Hono ベンチ、quality-check、TODO/plan.md 更新 |
+
+### Phase 1 完了内容（self-review 後の最終状態）
+
+**実装**:
+- T1: `UserTypeRef` (debug_assert で不変条件構造的保証) / `PrimitiveType` (9 variant) / `StdConst` (7 variant + `from_math_member` / `rust_path`) / `BuiltinVariant` (4 variant) 追加
+- T2: `Expr::EnumVariant` / `Expr::PrimitiveAssocConst` / `Expr::StdConst` 追加。`is_trivially_pure` / `is_copy_literal` を実意味論で拡張（PRD-DEVIATION D-1 参照、PRD T2 spec 修正済）
+- 連動更新: `IrVisitor::visit_user_type_ref` フック / `IrFolder::fold_user_type_ref` フック / `walk_expr` 両方の variant 分岐 / generator 3 variant rendering / walker (`collect_type_refs_from_expr`) `EnumVariant` 登録 / mutability tracker leaf 処理 / `test_fixtures::all_exprs` 3 fixture 追加
+- ファイル分割: `src/ir/visit.rs` 1052 行→ 546 行に。test mod を `src/ir/visit_tests.rs` に extract（`#[path]` 属性で参照）
+
+**Phase 1 self-review で検出した defect 8 件をすべて修正**:
+- D-A (silent semantic change): `is_trivially_pure` / `is_copy_literal` を実意味論に修正 → PRD T2 spec 修正
+- D-B: catch-all アンチパターン → 新 variant 明示追加で防御
+- D-C: `UserTypeRef::new` 不変条件 type-level 保証 → `debug_assert!` 追加
+- D-D: `visit_user_type_ref` 発火テスト追加
+- D-E: `fold_user_type_ref` 発火テスト追加
+- D-F: generator rendering 単体テスト 3 ケース追加
+- D-G: walker registration / 非登録テスト 3 ケース追加
+- D-H: ファイル行数閾値違反 → visit_tests.rs 分離
+
+**Phase 1 品質ゲート**:
+- `cargo test --lib`: 2190 passed (Phase 1 開始時 2171 → +19; +12 が Phase 1 追加, +7 が self-review 追加)
+- `cargo clippy --all-targets --all-features -- -D warnings`: 警告 0
+- `cargo fmt --all --check`: pass
+- `./scripts/check-file-lines.sh`: 全ファイル 1000 行以内
+
+### Phase 2 着手前の必須事項
+
+1. **PRD-DEVIATION D-1 を事前確認**: Phase 2 の T11 baseline 比較で expected diff (`unwrap_or_else(|| f64::NAN)` → `unwrap_or(f64::NAN)` 系) を grep で先に列挙する
+2. **Phase 1 で残存する Phase 2 解消対象**:
+   - `BuiltinVariant` 型は Phase 1 では production 構築サイトなし → Phase 2 の T3 で `CallTarget::BuiltinVariant` が消費する。Phase 1 段階では tests のみで使用される過渡状態
+   - `external_struct_generator/mod.rs::collect_type_refs_from_expr` の `EnumVariant::enum_ty` 登録ロジックは Phase 2 の T7 で `IrVisitor` ベース `TypeRefCollector` に統合される（`visit_user_type_ref` override に集約）
+   - `IrVisitor::visit_user_type_ref` フック自体の真価は Phase 2 で `CallTarget::UserAssocFn` / `UserTupleCtor` / `UserEnumVariantCtor` などの user variant でも発火するように `walk_call_target` 経由で配線された時点で発揮される（Phase 1 では `Expr::EnumVariant` のみが発火源）
+
 ## Task List
 
 ### T0: `is_type_ident` 削除可能性の事前検証
@@ -311,15 +355,20 @@ impl IrVisitor for TypeRefCollector<'_> {
 
 ### T1: `UserTypeRef` / `PrimitiveType` / `StdConst` / `BuiltinVariant` 追加
 
-- **Work**: `src/ir/expr.rs` に 4 型を追加。`StdConst::from_math_member` / `rust_path`、`PrimitiveType::as_rust_str`、`BuiltinVariant::as_rust_str` を実装。`UserTypeRef::new` / `as_str` / `into_string` を実装
-- **Completion criteria**: 4 型の単体テスト追加（各メソッドの正常系・境界値）。`cargo test` pass
+- **Work**: `src/ir/expr.rs` に 4 型を追加。`StdConst::from_math_member` / `rust_path`、`PrimitiveType::as_rust_str`、`BuiltinVariant::as_rust_str` を実装。`UserTypeRef::new` / `as_str` / `into_string` を実装。`UserTypeRef::new` は `debug_assert!` で `::` を含む文字列・空文字を拒否し、不変条件を構築サイトで構造的に保証する（**Phase 1 self-review で追加**）
+- **Completion criteria**: 4 型の単体テスト追加（各メソッドの正常系・境界値・不変条件 panic）。`cargo test` pass
 - **Depends on**: なし
+- **Status**: ✅ 完了 (Phase 1)
 
 ### T2: `Expr` への 3 新 variant 追加
 
-- **Work**: `src/ir/expr.rs` `enum Expr` に `EnumVariant` / `PrimitiveAssocConst` / `StdConst` を追加。`is_trivially_pure` / `is_copy_literal` の網羅性を維持（3 variant とも `false`）
-- **Completion criteria**: `cargo check` pass。`is_trivially_pure` のテストに 3 ケース追加
+- **Work**: `src/ir/expr.rs` `enum Expr` に `EnumVariant` / `PrimitiveAssocConst` / `StdConst` を追加。
+  `is_trivially_pure` / `is_copy_literal` を実意味論に合わせて拡張（**PRD-DEVIATION D-1 参照** — 当初 spec の「3 variant とも false」は既存 `Expr::Ident("f64::NAN") → is_trivially_pure() == true` の見落としによる defect であり、Phase 2 で `data_literals.rs` の spread/dead-code 経路に regression を誘発するため修正）:
+  - `is_trivially_pure`: 3 variant とも `true`（定数参照、副作用ゼロ。`Expr::Ident("f64::NAN")` の既存挙動を維持し silent semantic change を防ぐ）
+  - `is_copy_literal`: `PrimitiveAssocConst` / `StdConst` は `true`（プリミティブ Copy 値で eager 評価安全。Phase 2 で Option default が `unwrap_or_else(|| f64::NAN)` → `unwrap_or(f64::NAN)` に改善され byte-diff 発生 → T11 で承認）、`EnumVariant` は親 enum の Copy 性 unknown のため保守的に `false`
+- **Completion criteria**: `cargo check` pass。`is_trivially_pure` / `is_copy_literal` の 3 variant 単体テストが上記表通りに pass
 - **Depends on**: T1
+- **Status**: ✅ 完了 (Phase 1)
 
 ### T3: `CallTarget` 再設計
 

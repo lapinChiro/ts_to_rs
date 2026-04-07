@@ -203,6 +203,15 @@ pub(crate) fn all_exprs() -> Vec<Expr> {
                 body: vec![],
             }],
         },
+        Expr::EnumVariant {
+            enum_ty: super::UserTypeRef::new("Color"),
+            variant: "Red".to_string(),
+        },
+        Expr::PrimitiveAssocConst {
+            ty: super::PrimitiveType::F64,
+            name: "NAN".to_string(),
+        },
+        Expr::StdConst(super::StdConst::F64Pi),
     ]
 }
 

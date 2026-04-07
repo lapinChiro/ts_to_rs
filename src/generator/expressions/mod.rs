@@ -358,6 +358,13 @@ pub(super) fn generate_expr(expr: &Expr) -> String {
                 format!("Regex::new(r\"{pattern}\").unwrap()")
             }
         }
+        Expr::EnumVariant { enum_ty, variant } => {
+            format!("{}::{}", enum_ty.as_str(), variant)
+        }
+        Expr::PrimitiveAssocConst { ty, name } => {
+            format!("{}::{}", ty.as_rust_str(), name)
+        }
+        Expr::StdConst(c) => c.rust_path().to_string(),
         Expr::Match { expr, arms } => {
             let match_target = generate_expr(expr);
             let mut out = format!("match {match_target} {{\n");
