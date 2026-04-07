@@ -60,6 +60,15 @@ pub enum SyntheticTypeKind {
     ImplBlock,
     /// A stub trait (e.g., conditional type infer pattern → `Promise` trait).
     Trait,
+    /// An auto-generated struct for an external builtin type
+    /// (e.g., `ArrayBuffer`, `Date`, `Error`), materialized from `TypeRegistry`
+    /// metadata by `external_struct_generator::generate_external_struct`.
+    ///
+    /// I-376: External types are conceptually synthetic — they are auto-generated,
+    /// globally unique, and subject to the same canonical placement as other
+    /// synthetic types. Previously they lived in per-file `Vec<Item>` which caused
+    /// structural duplication between `file.items` and `synthetic_items`.
+    External,
 }
 
 impl SyntheticTypeRegistry {
@@ -370,7 +379,14 @@ impl SyntheticTypeRegistry {
     /// Registers an arbitrary synthetic item by name.
     ///
     /// Used for synthetic types that don't fit the union/struct/any-enum categories
-    /// (e.g., stub traits, utility type structs). No deduplication is performed.
+    /// (e.g., stub traits, utility type structs, external type structs).
+    ///
+    /// # Deduplication semantics
+    ///
+    /// No structural signature-based dedup is performed. If an entry with the same
+    /// `name` already exists, it is **overwritten** (last-write-wins). Callers are
+    /// responsible for guarding against unintended overwrites when the same `name`
+    /// could originate from multiple pipeline phases.
     pub fn push_item(&mut self, name: String, kind: SyntheticTypeKind, item: Item) {
         self.types
             .insert(name.clone(), SyntheticTypeDef { name, kind, item });

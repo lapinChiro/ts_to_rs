@@ -35,38 +35,37 @@ const RUST_BUILTIN_TYPES: &[&str] = &[
 /// `serde_json::Value` のフルパス。
 const SERDE_JSON_VALUE: &str = "serde_json::Value";
 
+/// 未定義参照 fixpoint の最大反復回数 (安全網)。
+///
+/// [`generate_stub_structs`] および `pipeline::resolve_external_types_globally` の両方で
+/// 使用される。各 iteration は検出された全 undefined 名を必ず push するため (None 返却
+/// 時は空 stub フォールバック)、iteration 数は未定義型の総数で有界。64 は Hono 実データ
+/// (外部型総数 ~20) に対して十分な余裕を持ち、超過時は構造的バグとして panic する。
+pub(crate) const UNDEFINED_REFS_FIXPOINT_MAX_ITERATIONS: usize = 64;
+
 /// IR items を走査し、参照されているが定義がない外部型名を収集する。
 ///
 /// 外部型（JSON ビルトイン定義）のみを対象とし、ユーザー定義型（TS ソースから登録された型）は除外する。
 /// `TypeRegistry::is_external` で外部型かどうかを判定する。
 ///
-/// `scan_context` の役割:
-/// - **定義済み判定**: scan_context 内の型は「定義済み」として扱われる。
-/// - **参照走査**: scan_context 内の参照も undefined 候補に加える。
-///
-/// この関数は外部型 struct 生成 ([`generate_external_struct`]) のための候補名を返す。
-/// `is_external` フィルタが効くため、ユーザー定義型が誤って取り込まれる心配はない。
-/// 合成型のフィールドが参照する外部型を漏れなく検出する目的で scan_context をスキャンする。
+/// I-376: 単一 items プールに統合。呼び出し側は user file items と synthetic items を
+/// 一つの `Vec<&Item>` に集約して渡す。従来の `scan_context` / `defined_only` 非対称
+/// 引数は、外部型生成を pipeline の per-file loop から global phase に移動したことで
+/// 不要になった。
 ///
 /// 以下を除外する:
-/// - `items`、`scan_context`、`defined_only` 内に既に定義が存在する型
-///   （struct/enum/trait/type alias）
+/// - `items` 内に既に定義が存在する型（struct/enum/trait/type alias）
+/// - `items` 内の `use` 文でインポート済みの型
+/// - `items` 内の型パラメータ名
 /// - Rust 標準ライブラリ型（`String`, `Vec`, `HashMap` 等）
 /// - `serde_json::Value`
+/// - パス形式の型名（例: `E::Bindings`, `serde_json::Value`）
 /// - 外部型でない型（ユーザー定義型）
-///
-/// `scan_context` は **定義+走査** の追加 items（per-file 合成型など）。
-/// `defined_only` は **定義済み判定のみ** に使う items（他ファイルの合成型など）。
-/// 走査対象から外すことで、無関係な型まで外部型生成の起点になる雪だるま現象を防ぐ。
 pub fn collect_undefined_type_references(
-    items: &[Item],
-    scan_context: &[Item],
-    defined_only: &[Item],
+    items: &[&Item],
     registry: &TypeRegistry,
 ) -> HashSet<String> {
-    let scope = UndefinedRefScope::new(items, scan_context, defined_only);
-    scope
-        .collect()
+    collect_undefined_refs_inner(items)
         .into_iter()
         .filter(|name| registry.is_external(name))
         .collect()
@@ -76,142 +75,135 @@ pub fn collect_undefined_type_references(
 ///
 /// [`collect_undefined_type_references`] と異なり、`is_external` フィルタを適用しない。
 /// shared_types.rs のスタブ生成で使用する — モジュール内の全未定義参照を解決するため。
-///
-/// `scan_context` は **定義+走査** の追加 items（per-file 合成型など）。
-/// `defined_only` は **定義済み判定のみ** に使う items（他ファイルの合成型など）。
-/// 走査対象から外すことで、無関係な型までスタブ化される雪だるま現象を防ぐ。
-pub fn collect_all_undefined_references(
-    items: &[Item],
-    scan_context: &[Item],
-    defined_only: &[Item],
-) -> HashSet<String> {
-    UndefinedRefScope::new(items, scan_context, defined_only).collect()
+pub fn collect_all_undefined_references(items: &[&Item]) -> HashSet<String> {
+    collect_undefined_refs_inner(items)
 }
 
 /// 未定義型参照の収集ロジック共通骨格。
 ///
 /// `collect_undefined_type_references` と `collect_all_undefined_references` は
-/// 「`is_external` フィルタを最後に追加で掛けるかどうか」のみ異なる。骨格は同一:
+/// 「`is_external` フィルタを最後に追加で掛けるかどうか」のみ異なる。
 /// 1. 定義済み・インポート済み・型パラメータ名・標準型・`serde_json::Value`・パス形式
 ///    (`A::B`) の型名を除外集合に集める
-/// 2. `items + scan_context` を walker で歩いて参照名を収集
+/// 2. `items` を walker で歩いて参照名を収集
 /// 3. 除外集合を引いた残りを返す
-struct UndefinedRefScope<'a> {
-    items: &'a [Item],
-    scan_context: &'a [Item],
-    defined_only: &'a [Item],
+fn collect_undefined_refs_inner(items: &[&Item]) -> HashSet<String> {
+    let defined_types: HashSet<String> = items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Struct { name, .. }
+            | Item::Enum { name, .. }
+            | Item::Trait { name, .. }
+            | Item::TypeAlias { name, .. } => Some(name.clone()),
+            _ => None,
+        })
+        .collect();
+
+    let imported_types: HashSet<String> = items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Use { names, .. } => Some(names.clone()),
+            _ => None,
+        })
+        .flatten()
+        .collect();
+
+    let type_param_names: HashSet<String> = items
+        .iter()
+        .flat_map(|item| match item {
+            Item::Struct { type_params, .. }
+            | Item::Trait { type_params, .. }
+            | Item::Fn { type_params, .. }
+            | Item::Impl { type_params, .. }
+            | Item::TypeAlias { type_params, .. } => type_params
+                .iter()
+                .map(|tp| tp.name.clone())
+                .collect::<Vec<_>>(),
+            _ => vec![],
+        })
+        .collect();
+
+    let mut referenced_types = HashSet::new();
+    for item in items {
+        collect_type_refs_from_item(item, &mut referenced_types);
+    }
+
+    let builtin_set: HashSet<&str> = RUST_BUILTIN_TYPES.iter().copied().collect();
+
+    referenced_types
+        .into_iter()
+        .filter(|name| !defined_types.contains(name))
+        .filter(|name| !imported_types.contains(name))
+        .filter(|name| !type_param_names.contains(name))
+        .filter(|name| !builtin_set.contains(name.as_str()))
+        .filter(|name| name != SERDE_JSON_VALUE)
+        // パス形式の型名（例: E::Bindings, serde_json::Value）は struct 名にならない
+        .filter(|name| !name.contains("::"))
+        .collect()
 }
 
-impl<'a> UndefinedRefScope<'a> {
-    fn new(items: &'a [Item], scan_context: &'a [Item], defined_only: &'a [Item]) -> Self {
-        Self {
-            items,
-            scan_context,
-            defined_only,
-        }
-    }
-
-    /// 定義+判定+定義のみ をまとめた iterator。
-    fn definition_pool(&self) -> impl Iterator<Item = &Item> {
-        self.items
-            .iter()
-            .chain(self.scan_context.iter())
-            .chain(self.defined_only.iter())
-    }
-
-    /// `items + scan_context` を返す（参照走査と型パラメータ収集の共通入力）。
-    fn scan_pool(&self) -> impl Iterator<Item = &Item> {
-        self.items.iter().chain(self.scan_context.iter())
-    }
-
-    fn collect(&self) -> HashSet<String> {
-        let defined_types: HashSet<String> = self
-            .definition_pool()
-            .filter_map(|item| match item {
-                Item::Struct { name, .. }
-                | Item::Enum { name, .. }
-                | Item::Trait { name, .. }
-                | Item::TypeAlias { name, .. } => Some(name.clone()),
-                _ => None,
-            })
-            .collect();
-
-        let imported_types: HashSet<String> = self
-            .definition_pool()
-            .filter_map(|item| match item {
-                Item::Use { names, .. } => Some(names.clone()),
-                _ => None,
-            })
-            .flatten()
-            .collect();
-
-        let type_param_names: HashSet<String> = self
-            .scan_pool()
-            .flat_map(|item| match item {
-                Item::Struct { type_params, .. }
-                | Item::Trait { type_params, .. }
-                | Item::Fn { type_params, .. }
-                | Item::Impl { type_params, .. }
-                | Item::TypeAlias { type_params, .. } => type_params
-                    .iter()
-                    .map(|tp| tp.name.clone())
-                    .collect::<Vec<_>>(),
-                _ => vec![],
-            })
-            .collect();
-
-        let mut referenced_types = HashSet::new();
-        for item in self.scan_pool() {
-            collect_type_refs_from_item(item, &mut referenced_types);
-        }
-
-        let builtin_set: HashSet<&str> = RUST_BUILTIN_TYPES.iter().copied().collect();
-
-        referenced_types
-            .into_iter()
-            .filter(|name| !defined_types.contains(name))
-            .filter(|name| !imported_types.contains(name))
-            .filter(|name| !type_param_names.contains(name))
-            .filter(|name| !builtin_set.contains(name.as_str()))
-            .filter(|name| name != SERDE_JSON_VALUE)
-            // パス形式の型名（例: E::Bindings, serde_json::Value）は struct 名にならない
-            .filter(|name| !name.contains("::"))
-            .collect()
-    }
-}
-
-/// 未定義型に対する空スタブ struct を生成し、items に追加する。
+/// 未定義型に対する空スタブ struct を生成し、`items` に追加する。
 ///
-/// types.rs のコンパイルを通すため、参照されているが定義がない型にスタブを追加する。
-/// TypeRegistry に struct 情報がある型はフル生成（[`generate_external_struct`] 経由）、
-/// それ以外は空のユニット struct `pub struct TypeName;` を生成する。
-/// フル生成した struct が新たな未定義参照を生む場合に備え、固定点に達するまで反復する。
+/// 参照されているが定義がない型に対し、`TypeRegistry` に struct 情報があればフル生成
+/// ([`generate_external_struct`] 経由)、それ以外は空のユニット struct `pub struct TypeName;`
+/// を生成する。フル生成した struct が新たな未定義参照を生む場合に備え、固定点に達するまで
+/// 反復する。
+///
+/// # Parameters
+///
+/// - `defined_elsewhere_names`: `items` に含まれないが Rust モジュール階層の別の場所で
+///   定義済みの型名集合。これらは「参照されているが未定義」の結果から除外され、stub
+///   struct を生成しない。用途: shared_types.rs (= `items`) が user file 側の型を import
+///   経由で参照する場合、その型を stub 化すると user 定義と重複するため除外が必要。
+///   **注**: 現状の実装は exclusion による band-aid で、本来は参照型を import として
+///   生成すべき (I-382 で再設計予定)。
+///
+/// # 収束保証
+///
+/// 各 iteration は検出された全 undefined 名を必ず push するため
+/// ([`generate_external_struct`] が `None` を返しても空 stub を push)、iteration 数は
+/// 未定義型の総数で有界。安全網として [`UNDEFINED_REFS_FIXPOINT_MAX_ITERATIONS`] を設定し、
+/// 超過時は構造的バグとして **panic** する。
+///
+/// # Panics
+///
+/// 固定点が [`UNDEFINED_REFS_FIXPOINT_MAX_ITERATIONS`] 以内で収束しない場合。
 pub fn generate_stub_structs(
     items: &mut Vec<Item>,
-    scan_context: &[Item],
-    defined_only: &[Item],
+    defined_elsewhere_names: &HashSet<String>,
     registry: &TypeRegistry,
     synthetic: &SyntheticTypeRegistry,
 ) {
-    for _ in 0..10 {
-        let undefined = collect_all_undefined_references(items, scan_context, defined_only);
-        if undefined.is_empty() {
-            break;
+    for iter in 0..=UNDEFINED_REFS_FIXPOINT_MAX_ITERATIONS {
+        // Undefined ref の収集は items の不変借用のみで完結させ、ブロックスコープで
+        // 借用を閉じてから `items` への可変操作に移る。
+        let sorted: Vec<String> = {
+            let borrowed: Vec<&Item> = items.iter().collect();
+            let mut undefined = collect_all_undefined_references(&borrowed);
+            undefined.retain(|name| !defined_elsewhere_names.contains(name));
+            let mut names: Vec<String> = undefined.into_iter().collect();
+            names.sort();
+            names
+        };
+        if sorted.is_empty() {
+            return;
         }
-        // 出力順序を決定的にするためソート
-        let mut sorted: Vec<String> = undefined.into_iter().collect();
-        sorted.sort();
+        assert!(
+            iter < UNDEFINED_REFS_FIXPOINT_MAX_ITERATIONS,
+            "generate_stub_structs: fixpoint did not converge in \
+             {UNDEFINED_REFS_FIXPOINT_MAX_ITERATIONS} iterations (unresolved: {sorted:?}). \
+             Indicates a bug in collect_all_undefined_references."
+        );
         for name in sorted {
-            if let Some(full) = generate_external_struct(&name, registry, synthetic) {
-                items.push(full);
-            } else {
-                items.push(Item::Struct {
+            let item = generate_external_struct(&name, registry, synthetic).unwrap_or_else(|| {
+                Item::Struct {
                     vis: Visibility::Public,
                     name,
                     type_params: vec![],
                     fields: vec![],
-                });
-            }
+                }
+            });
+            items.push(item);
         }
     }
 }
@@ -221,7 +213,9 @@ pub fn generate_stub_structs(
 /// 非 trait 制約を持つ型パラメータはモノモーフィゼーションで除去し、
 /// フィールド型に制約型を置換する。
 ///
-/// `TypeDef::Struct` 以外（`TypeDef::Enum`, `TypeDef::Function`）の場合は `None` を返す。
+/// `TypeDef::Struct` 以外 (`Enum` / `Function` / `ConstValue`) の場合は `None` を返す。
+/// 呼び出し側は `None` に対して空 stub struct フォールバックを生成することが想定されている
+/// ([`generate_stub_structs`] / `pipeline::resolve_external_types_globally` 参照)。
 pub fn generate_external_struct(
     name: &str,
     registry: &TypeRegistry,

@@ -118,10 +118,6 @@ pub(crate) struct PerFileTransformed {
     pub source: String,
     pub items: Vec<crate::ir::Item>,
     pub unsupported: Vec<UnsupportedSyntaxError>,
-    /// このファイルの transformer が新たに生成した合成型のスナップショット。
-    /// per-file の外部型 struct 生成時、参照スキャンの対象とする
-    /// （クロスファイル合成型は global_synthetic_items 経由で「定義済み」扱いだけする）。
-    pub file_synthetic_items: Vec<crate::ir::Item>,
 }
 
 /// `OutputWriter` に渡すファイル情報のビュー。

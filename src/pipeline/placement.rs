@@ -201,10 +201,13 @@ impl SyntheticReferenceGraph {
 ///    依存関係の推移閉包を取り「必要な合成型名集合」を求める。`collect_type_refs_from_item`
 ///    は fn body / impl method body / struct literal を含む全 IR を歩くため、ここで
 ///    substring scan は不要。
-/// 2. struct/enum/trait/type alias の合成 Item は `file_items` に同名定義が存在する場合
-///    は出力しない（per-file 外部型 struct 生成と post-loop の重複対策）。impl ブロック
-///    のような非定義 Item は同名 struct があっても必ず emit する。
-/// 3. emit 順は `synthetic_items` の元順序を保持する。
+/// 2. emit 順は `synthetic_items` の元順序を保持する。
+///
+/// I-376: 以前は `file_items` に同名の定義系 Item（外部型 struct 等）が焼き込まれて
+/// いたため `is_definition_item && already_defined` dedup が必要だったが、pipeline Pass
+/// 5a の global external resolution により外部型 struct は `synthetic_items` にのみ存在
+/// するようになった。結果として `file_items` と `synthetic_items` の同名衝突は構造的に
+/// 不可能になり、出力時 dedup は不要。
 pub fn render_referenced_synthetics_for_file(
     file_path: &std::path::Path,
     file_items: &[Item],
@@ -223,25 +226,12 @@ pub fn render_referenced_synthetics_for_file(
         .collect();
     let needed = graph.reachable_synthetics(&direct);
 
-    let already_defined: HashSet<String> = file_items
-        .iter()
-        .filter(|i| is_definition_item(i))
-        .filter_map(|i| i.canonical_name().map(str::to_string))
-        .collect();
-
     let mut emit: Vec<Item> = Vec::new();
     for item in synthetic_items {
         let Some(name) = item.canonical_name() else {
             continue;
         };
-        // graph::build が impl 対象 struct を直接参照として登録するため、impl ブロックは
-        // needed に含まれる（その struct を file が定義していれば、direct_referencers が
-        // file を返す）。よってここでは「needed に含まれているか」のみで判定すれば良く、
-        // impl の特別扱いは不要。
         if !needed.contains(name) {
-            continue;
-        }
-        if is_definition_item(item) && already_defined.contains(name) {
             continue;
         }
         emit.push(item.clone());
@@ -251,23 +241,6 @@ pub fn render_referenced_synthetics_for_file(
     } else {
         crate::generator::generate(&emit)
     }
-}
-
-/// 「named な定義系」Item を判定する。
-///
-/// これらは同名でファイル内と synthetic 双方に存在すると Rust コンパイル時に
-/// 衝突するため、`render_referenced_synthetics_for_file` で dedup の対象になる。
-/// `Item::Impl` は文法上 struct と独立に複数併存できるため対象外（impl block は
-/// `is_definition_item == false` で同名 struct があっても emit される）。
-fn is_definition_item(item: &Item) -> bool {
-    matches!(
-        item,
-        Item::Struct { .. }
-            | Item::Enum { .. }
-            | Item::Trait { .. }
-            | Item::TypeAlias { .. }
-            | Item::Fn { .. }
-    )
 }
 
 #[cfg(test)]
@@ -636,16 +609,6 @@ mod tests {
     }
 
     #[test]
-    fn test_render_definition_dedup_when_already_in_file() {
-        // file.items に既に struct Foo がある場合、synthetic の struct Foo は emit しない
-        let file_items = vec![make_struct("Foo", &[]), fn_returning("g", "Foo")];
-        let synthetic = vec![make_struct("Foo", &[])];
-        let result =
-            render_referenced_synthetics_for_file(Path::new("a.rs"), &file_items, &synthetic);
-        assert!(result.is_empty(), "should dedup struct Foo");
-    }
-
-    #[test]
     fn test_render_impl_for_defined_struct_emitted() {
         // file.items に struct Foo、synthetic に impl Foo がある → impl は emit される
         let file_items = vec![make_struct("Foo", &[])];
@@ -750,60 +713,5 @@ mod tests {
             result.contains("enum Color"),
             "synthetic enum referenced via variant constructor should be emitted"
         );
-    }
-
-    #[test]
-    fn test_is_definition_item_true_for_definitions() {
-        assert!(is_definition_item(&make_struct("X", &[])));
-        assert!(is_definition_item(&make_enum("Y", &[])));
-        assert!(is_definition_item(&Item::Trait {
-            vis: Visibility::Public,
-            name: "T".to_string(),
-            type_params: vec![],
-            supertraits: vec![],
-            methods: vec![],
-            associated_types: vec![],
-        }));
-        assert!(is_definition_item(&Item::TypeAlias {
-            vis: Visibility::Public,
-            name: "A".to_string(),
-            type_params: vec![],
-            ty: RustType::String,
-        }));
-    }
-
-    #[test]
-    fn test_is_definition_item_true_for_fn() {
-        // Item::Fn も同名衝突対象（同名関数が file と synthetic に併存すると Rust の
-        // duplicate definition 違反になる）
-        assert!(is_definition_item(&Item::Fn {
-            vis: Visibility::Public,
-            attributes: vec![],
-            is_async: false,
-            name: "f".to_string(),
-            type_params: vec![],
-            params: vec![],
-            return_type: None,
-            body: vec![],
-        }));
-    }
-
-    #[test]
-    fn test_is_definition_item_false_for_impl_and_others() {
-        // Impl は定義系ではない（impl は struct/enum と独立に emit される）
-        assert!(!is_definition_item(&Item::Impl {
-            struct_name: "Foo".to_string(),
-            type_params: vec![],
-            for_trait: None,
-            consts: vec![],
-            methods: vec![],
-        }));
-        assert!(!is_definition_item(&Item::Comment("c".to_string())));
-        assert!(!is_definition_item(&Item::RawCode("r".to_string())));
-        assert!(!is_definition_item(&Item::Use {
-            vis: Visibility::Private,
-            path: "p".to_string(),
-            names: vec![],
-        }));
     }
 }

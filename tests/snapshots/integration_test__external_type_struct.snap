@@ -3,24 +3,14 @@ source: tests/integration_test.rs
 expression: output
 ---
 #[derive(Debug, Clone, PartialEq)]
+pub struct ArrayBuffer {
+    pub byte_length: f64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum ArrayBufferOrString {
     ArrayBuffer(ArrayBuffer),
     String(String),
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum DateOrError {
-    Date(Date),
-    Error(Error),
-}
-
-pub fn processValue(input: ArrayBufferOrString) -> String {
-    input.to_string()
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct ArrayBuffer {
-    pub byte_length: f64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -32,4 +22,14 @@ pub struct Error {
     pub name: String,
     pub message: String,
     pub stack: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum DateOrError {
+    Date(Date),
+    Error(Error),
+}
+
+pub fn processValue(input: ArrayBufferOrString) -> String {
+    input.to_string()
 }

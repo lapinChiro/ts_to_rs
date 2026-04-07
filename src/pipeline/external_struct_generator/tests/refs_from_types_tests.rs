@@ -5,7 +5,7 @@ fn test_collect_refs_enum_variant_named_type_detected() {
     let mut registry = TypeRegistry::new();
     register_external_struct(&mut registry, "Date", vec![], vec![]);
 
-    let items = vec![Item::Enum {
+    let items = [Item::Enum {
         vis: Visibility::Public,
         name: "MyEnum".to_string(),
         type_params: vec![],
@@ -21,7 +21,7 @@ fn test_collect_refs_enum_variant_named_type_detected() {
         }],
     }];
 
-    let refs = collect_undefined_type_references(&items, &[], &[], &registry);
+    let refs = collect_undefined_type_references(&items.iter().collect::<Vec<_>>(), &registry);
     assert_eq!(refs, HashSet::from(["Date".to_string()]));
 }
 
@@ -29,7 +29,7 @@ fn test_collect_refs_enum_variant_named_type_detected() {
 fn test_collect_refs_rust_stdlib_types_excluded() {
     let registry = TypeRegistry::new();
 
-    let items = vec![Item::Enum {
+    let items = [Item::Enum {
         vis: Visibility::Public,
         name: "MyEnum".to_string(),
         type_params: vec![],
@@ -56,7 +56,7 @@ fn test_collect_refs_rust_stdlib_types_excluded() {
         ],
     }];
 
-    let refs = collect_undefined_type_references(&items, &[], &[], &registry);
+    let refs = collect_undefined_type_references(&items.iter().collect::<Vec<_>>(), &registry);
     assert!(refs.is_empty());
 }
 
@@ -64,7 +64,7 @@ fn test_collect_refs_rust_stdlib_types_excluded() {
 fn test_collect_refs_serde_json_value_excluded() {
     let registry = TypeRegistry::new();
 
-    let items = vec![Item::Enum {
+    let items = [Item::Enum {
         vis: Visibility::Public,
         name: "MyEnum".to_string(),
         type_params: vec![],
@@ -80,7 +80,7 @@ fn test_collect_refs_serde_json_value_excluded() {
         }],
     }];
 
-    let refs = collect_undefined_type_references(&items, &[], &[], &registry);
+    let refs = collect_undefined_type_references(&items.iter().collect::<Vec<_>>(), &registry);
     assert!(refs.is_empty());
 }
 
@@ -89,7 +89,7 @@ fn test_collect_refs_defined_struct_excluded() {
     let mut registry = TypeRegistry::new();
     register_external_struct(&mut registry, "Foo", vec![], vec![]);
 
-    let items = vec![
+    let items = [
         Item::Struct {
             vis: Visibility::Public,
             name: "Foo".to_string(),
@@ -113,7 +113,7 @@ fn test_collect_refs_defined_struct_excluded() {
         },
     ];
 
-    let refs = collect_undefined_type_references(&items, &[], &[], &registry);
+    let refs = collect_undefined_type_references(&items.iter().collect::<Vec<_>>(), &registry);
     assert!(refs.is_empty());
 }
 
@@ -122,7 +122,7 @@ fn test_collect_refs_nested_type_args_detected() {
     let mut registry = TypeRegistry::new();
     register_external_struct(&mut registry, "ArrayBuffer", vec![], vec![]);
 
-    let items = vec![Item::Struct {
+    let items = [Item::Struct {
         vis: Visibility::Public,
         name: "MyStruct".to_string(),
         type_params: vec![],
@@ -136,7 +136,7 @@ fn test_collect_refs_nested_type_args_detected() {
         }],
     }];
 
-    let refs = collect_undefined_type_references(&items, &[], &[], &registry);
+    let refs = collect_undefined_type_references(&items.iter().collect::<Vec<_>>(), &registry);
     assert_eq!(refs, HashSet::from(["ArrayBuffer".to_string()]));
 }
 
@@ -145,7 +145,7 @@ fn test_collect_refs_struct_field_named_type_detected() {
     let mut registry = TypeRegistry::new();
     register_external_struct(&mut registry, "Headers", vec![], vec![]);
 
-    let items = vec![Item::Struct {
+    let items = [Item::Struct {
         vis: Visibility::Public,
         name: "MyStruct".to_string(),
         type_params: vec![],
@@ -159,7 +159,7 @@ fn test_collect_refs_struct_field_named_type_detected() {
         }],
     }];
 
-    let refs = collect_undefined_type_references(&items, &[], &[], &registry);
+    let refs = collect_undefined_type_references(&items.iter().collect::<Vec<_>>(), &registry);
     assert_eq!(refs, HashSet::from(["Headers".to_string()]));
 }
 
@@ -167,7 +167,7 @@ fn test_collect_refs_struct_field_named_type_detected() {
 fn test_collect_refs_not_in_registry_excluded() {
     let registry = TypeRegistry::new();
 
-    let items = vec![Item::Enum {
+    let items = [Item::Enum {
         vis: Visibility::Public,
         name: "MyEnum".to_string(),
         type_params: vec![],
@@ -183,7 +183,7 @@ fn test_collect_refs_not_in_registry_excluded() {
         }],
     }];
 
-    let refs = collect_undefined_type_references(&items, &[], &[], &registry);
+    let refs = collect_undefined_type_references(&items.iter().collect::<Vec<_>>(), &registry);
     assert!(refs.is_empty());
 }
 
@@ -204,7 +204,7 @@ fn test_collect_refs_user_defined_type_excluded() {
         },
     );
 
-    let items = vec![Item::Enum {
+    let items = [Item::Enum {
         vis: Visibility::Public,
         name: "MyEnum".to_string(),
         type_params: vec![],
@@ -220,7 +220,7 @@ fn test_collect_refs_user_defined_type_excluded() {
         }],
     }];
 
-    let refs = collect_undefined_type_references(&items, &[], &[], &registry);
+    let refs = collect_undefined_type_references(&items.iter().collect::<Vec<_>>(), &registry);
     assert!(refs.is_empty(), "user-defined types should not be included");
 }
 
@@ -231,7 +231,7 @@ fn test_collect_refs_multiple_types_collected() {
     register_external_struct(&mut registry, "Error", vec![], vec![]);
     register_external_struct(&mut registry, "RegExp", vec![], vec![]);
 
-    let items = vec![Item::Enum {
+    let items = [Item::Enum {
         vis: Visibility::Public,
         name: "MyEnum".to_string(),
         type_params: vec![],
@@ -267,7 +267,7 @@ fn test_collect_refs_multiple_types_collected() {
         ],
     }];
 
-    let refs = collect_undefined_type_references(&items, &[], &[], &registry);
+    let refs = collect_undefined_type_references(&items.iter().collect::<Vec<_>>(), &registry);
     assert_eq!(
         refs,
         HashSet::from([
@@ -283,7 +283,7 @@ fn test_collect_refs_option_nested_type_detected() {
     let mut registry = TypeRegistry::new();
     register_external_struct(&mut registry, "Blob", vec![], vec![]);
 
-    let items = vec![Item::Struct {
+    let items = [Item::Struct {
         vis: Visibility::Public,
         name: "MyStruct".to_string(),
         type_params: vec![],
@@ -297,7 +297,7 @@ fn test_collect_refs_option_nested_type_detected() {
         }],
     }];
 
-    let refs = collect_undefined_type_references(&items, &[], &[], &registry);
+    let refs = collect_undefined_type_references(&items.iter().collect::<Vec<_>>(), &registry);
     assert_eq!(refs, HashSet::from(["Blob".to_string()]));
 }
 
@@ -307,7 +307,7 @@ fn test_collect_refs_fn_item_params_and_return_detected() {
     register_external_struct(&mut registry, "Request", vec![], vec![]);
     register_external_struct(&mut registry, "Response", vec![], vec![]);
 
-    let items = vec![Item::Fn {
+    let items = [Item::Fn {
         vis: Visibility::Public,
         attributes: vec![],
         is_async: false,
@@ -327,7 +327,7 @@ fn test_collect_refs_fn_item_params_and_return_detected() {
         body: vec![],
     }];
 
-    let refs = collect_undefined_type_references(&items, &[], &[], &registry);
+    let refs = collect_undefined_type_references(&items.iter().collect::<Vec<_>>(), &registry);
     assert_eq!(
         refs,
         HashSet::from(["Request".to_string(), "Response".to_string()])
@@ -339,7 +339,7 @@ fn test_collect_refs_defined_trait_excluded() {
     let mut registry = TypeRegistry::new();
     register_external_struct(&mut registry, "MyTrait", vec![], vec![]);
 
-    let items = vec![
+    let items = [
         Item::Trait {
             vis: Visibility::Public,
             name: "MyTrait".to_string(),
@@ -363,7 +363,7 @@ fn test_collect_refs_defined_trait_excluded() {
         },
     ];
 
-    let refs = collect_undefined_type_references(&items, &[], &[], &registry);
+    let refs = collect_undefined_type_references(&items.iter().collect::<Vec<_>>(), &registry);
     assert!(refs.is_empty());
 }
 
@@ -372,7 +372,7 @@ fn test_collect_refs_defined_type_alias_excluded() {
     let mut registry = TypeRegistry::new();
     register_external_struct(&mut registry, "MyAlias", vec![], vec![]);
 
-    let items = vec![
+    let items = [
         Item::TypeAlias {
             vis: Visibility::Public,
             name: "MyAlias".to_string(),
@@ -394,7 +394,7 @@ fn test_collect_refs_defined_type_alias_excluded() {
         },
     ];
 
-    let refs = collect_undefined_type_references(&items, &[], &[], &registry);
+    let refs = collect_undefined_type_references(&items.iter().collect::<Vec<_>>(), &registry);
     assert!(refs.is_empty());
 }
 
@@ -403,7 +403,7 @@ fn test_collect_refs_enum_variant_struct_fields_detected() {
     let mut registry = TypeRegistry::new();
     register_external_struct(&mut registry, "FormData", vec![], vec![]);
 
-    let items = vec![Item::Enum {
+    let items = [Item::Enum {
         vis: Visibility::Public,
         name: "MyEnum".to_string(),
         type_params: vec![],
@@ -423,7 +423,7 @@ fn test_collect_refs_enum_variant_struct_fields_detected() {
         }],
     }];
 
-    let refs = collect_undefined_type_references(&items, &[], &[], &registry);
+    let refs = collect_undefined_type_references(&items.iter().collect::<Vec<_>>(), &registry);
     assert_eq!(refs, HashSet::from(["FormData".to_string()]));
 }
 
@@ -433,7 +433,7 @@ fn test_collect_refs_result_type_both_ok_and_err_detected() {
     register_external_struct(&mut registry, "Response", vec![], vec![]);
     register_external_struct(&mut registry, "HttpError", vec![], vec![]);
 
-    let items = vec![Item::Struct {
+    let items = [Item::Struct {
         vis: Visibility::Public,
         name: "MyStruct".to_string(),
         type_params: vec![],
@@ -453,7 +453,7 @@ fn test_collect_refs_result_type_both_ok_and_err_detected() {
         }],
     }];
 
-    let refs = collect_undefined_type_references(&items, &[], &[], &registry);
+    let refs = collect_undefined_type_references(&items.iter().collect::<Vec<_>>(), &registry);
     assert_eq!(
         refs,
         HashSet::from(["Response".to_string(), "HttpError".to_string()])
@@ -465,7 +465,7 @@ fn test_collect_refs_tuple_type_detected() {
     let mut registry = TypeRegistry::new();
     register_external_struct(&mut registry, "Headers", vec![], vec![]);
 
-    let items = vec![Item::Struct {
+    let items = [Item::Struct {
         vis: Visibility::Public,
         name: "MyStruct".to_string(),
         type_params: vec![],
@@ -482,6 +482,6 @@ fn test_collect_refs_tuple_type_detected() {
         }],
     }];
 
-    let refs = collect_undefined_type_references(&items, &[], &[], &registry);
+    let refs = collect_undefined_type_references(&items.iter().collect::<Vec<_>>(), &registry);
     assert_eq!(refs, HashSet::from(["Headers".to_string()]));
 }

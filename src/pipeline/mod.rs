@@ -149,9 +149,7 @@ pub fn transpile_pipeline(input: TranspileInput) -> Result<TranspileOutput> {
                 .transform_module_collecting(&file.module)?;
 
         // 合成型は OutputWriter が単一正準配置（I-371）を決定する。
-        // 共有 synthetic にのみ蓄積する。Pass 5 で全ファイルが完了した synthetic を参照する。
-        let file_synthetic_items: Vec<crate::ir::Item> =
-            file_synthetic.all_items().into_iter().cloned().collect();
+        // 共有 synthetic にのみ蓄積する。Pass 5a で全ファイル横断の外部型解決を行う。
         synthetic.merge(file_synthetic);
 
         transformed.push(PerFileTransformed {
@@ -159,74 +157,54 @@ pub fn transpile_pipeline(input: TranspileInput) -> Result<TranspileOutput> {
             source: file.source.clone(),
             items,
             unsupported,
-            file_synthetic_items,
         });
     }
 
-    // Pass 5: 全ファイルの transform 完了後、global synthetic を scan_context として
-    // per-file の external/stub 生成を行う。これによりクロスファイル合成型の重複 stub を防ぐ。
-    let global_synthetic_items: Vec<crate::ir::Item> =
-        synthetic.all_items().into_iter().cloned().collect();
+    // Pass 5a: Global External Type Resolution (I-376).
+    //
+    // 全ファイルの transform が完了した時点で、user file items と synthetic registry の
+    // 両方を横断 scan し、未定義外部型の推移閉包を計算して 1 度だけ生成する。生成された
+    // struct は `synthetic` registry に `SyntheticTypeKind::External` として登録される。
+    //
+    // これにより:
+    //  1. 外部型 struct は `synthetic` ただ 1 か所にのみ存在し、`file_outputs[i].items`
+    //     には構造的に入らない。`file.items` と `synthetic_items` 間の重複が構造的に
+    //     不可能になる。
+    //  2. モノモーフィゼーションは global で 1 回しか走らないため、per-file 間の state
+    //     差異による silent divergence が原理的に消滅する。
+    //  3. downstream の `OutputWriter::resolve_synthetic_placement` が外部型を他の合成型
+    //     と完全に同じルール (inline/shared) で uniform に扱える。
+    resolve_external_types_globally(&transformed, &mut synthetic, &shared_registry);
+
+    // Pass 5b: Per-file codegen.
+    // `tf.items` は user IR のみを含む。外部型 struct は一切焼き込まれない。
     let mut file_outputs = Vec::new();
     for tf in transformed {
-        let mut all_items = tf.items;
-
-        // 外部型 struct 生成: scan_context は **このファイルの** 合成型のみ。
-        // global synthetic を渡すと、他ファイルの合成型から参照される外部型まで本ファイルに
-        // 生成され、モノモーフィゼーションの差で型不整合が発生するため per-file に限定する。
-        generate_external_structs_to_fixpoint(
-            &mut all_items,
-            &tf.file_synthetic_items,
-            &global_synthetic_items,
-            &shared_registry,
-            &synthetic,
-        );
-
-        // スタブ生成:
-        // - scan_context = file_synthetic_items: 本ファイルが生成した合成型は走査対象。
-        //   その field 型として参照される未定義型はスタブ化される（snapshot 互換）。
-        // - defined_only = global_synthetic_items: 他ファイルの合成型は「定義済み扱い」のみ。
-        //   走査しないため雪だるま現象を防ぎつつ、本ファイルでの重複スタブ生成も防ぐ。
-        external_struct_generator::generate_stub_structs(
-            &mut all_items,
-            &tf.file_synthetic_items,
-            &global_synthetic_items,
-            &shared_registry,
-            &synthetic,
-        );
-
-        let rust_source = crate::generator::generate(&all_items);
-
+        let rust_source = crate::generator::generate(&tf.items);
         file_outputs.push(FileOutput {
             path: tf.path.with_extension("rs"),
             source: tf.source,
             rust_source,
             unsupported: tf.unsupported,
-            items: all_items,
+            items: tf.items,
         });
     }
 
-    // post-loop: shared_types.rs 用に synthetic_items 自身に外部型/スタブを補完。
-    // I-371: scan_context は使わない（`&[]`）。shared_types.rs は独立した Rust モジュールであり、
-    // 他モジュールで定義された user 型は import しない限り参照不可。よって、shared_types.rs から
-    // 参照される未定義型は **shared_types.rs 内に** stub を生成する必要がある（クロスモジュール
-    // 整合性は I-371 のスコープ外）。
-    let mut synthetic_items = global_synthetic_items;
-
-    // 共有 synthetic items 内で参照されている外部型の struct も生成（推移的依存を含む）
-    generate_external_structs_to_fixpoint(
-        &mut synthetic_items,
-        &[],
-        &[],
-        &shared_registry,
-        &synthetic,
-    );
-
-    // shared_types.rs 用: 外部型でない未定義型にもスタブ struct を生成（コンパイル可能にする）
+    // Pass 5c: shared_types.rs 用 stub 補完。
+    // `synthetic_items` 自身の field 等が参照する未定義「非外部」型 (ユーザー由来で未解決の型) に
+    // 空 stub struct を生成する。外部型は Phase 5a で既に解決済み。
+    //
+    // ただし user file 側で既に定義されている型名は `defined_elsewhere_names` として渡し、
+    // stub 生成対象から除外する (生成すると user file の定義と重複する)。
+    // **note**: 本質的には user 定義型への参照は `use` import を生成すべきで、現状の stub
+    // 生成は I-382 で設計を再考する予定。本 PRD の範囲では exclusion による band-aid に
+    // とどめる。
+    let user_defined_names = collect_user_defined_type_names(&file_outputs);
+    let mut synthetic_items: Vec<crate::ir::Item> =
+        synthetic.all_items().into_iter().cloned().collect();
     external_struct_generator::generate_stub_structs(
         &mut synthetic_items,
-        &[],
-        &[],
+        &user_defined_names,
         &shared_registry,
         &synthetic,
     );
@@ -282,36 +260,100 @@ fn register_synthetic_structs_in_registry(
     }
 }
 
-/// 外部型 struct を固定点に達するまで反復生成する。
+/// I-376 Phase 5c helper: 全 user file の IR から、定義されている型名 (struct/enum/trait/
+/// type_alias) を `HashSet<String>` で抽出する。
 ///
-/// 1 回の走査で検出した外部型 struct を追加した結果、そのフィールドが新たな外部型を参照する
-/// 可能性がある（推移的依存）。新しい型が検出されなくなるまでループする。
-fn generate_external_structs_to_fixpoint(
-    items: &mut Vec<crate::ir::Item>,
-    scan_context: &[crate::ir::Item],
-    defined_only: &[crate::ir::Item],
+/// shared_types.rs 用 stub 生成 (`generate_stub_structs`) の `defined_elsewhere_names`
+/// 引数として渡され、user 定義型が synthetic_items の stub 生成対象から除外される。
+fn collect_user_defined_type_names(
+    file_outputs: &[FileOutput],
+) -> std::collections::HashSet<String> {
+    file_outputs
+        .iter()
+        .flat_map(|f| f.items.iter())
+        .filter_map(|item| match item {
+            crate::ir::Item::Struct { name, .. }
+            | crate::ir::Item::Enum { name, .. }
+            | crate::ir::Item::Trait { name, .. }
+            | crate::ir::Item::TypeAlias { name, .. } => Some(name.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// I-376: 全ファイルの user IR と synthetic registry を横断 scan し、未定義外部型の
+/// 推移閉包を固定点まで反復生成して `synthetic` registry に登録する。
+///
+/// 生成される struct は `SyntheticTypeKind::External` として登録される。downstream の
+/// `OutputWriter::resolve_synthetic_placement` はこの variant を特別扱いせず、他の合成型
+/// と同じ inline/shared 配置ルールで扱う。
+///
+/// # 推移依存の収束保証
+///
+/// 生成された外部型 struct のフィールドが新たな外部型を参照する場合、次の iteration で
+/// 検出される。**各 iteration は検出された全 undefined 名について必ず 1 件以上 synthetic
+/// に登録する** ため (`generate_external_struct` が `None` を返した場合も空 stub を push
+/// して name を claim する)、収束は monotone increase で保証される。`generate_stub_structs`
+/// と共有する [`external_struct_generator::UNDEFINED_REFS_FIXPOINT_MAX_ITERATIONS`] を
+/// 安全網とし、超過は構造的バグとして **panic** する。
+///
+/// # Panics
+///
+/// 固定点が [`external_struct_generator::UNDEFINED_REFS_FIXPOINT_MAX_ITERATIONS`] 以内で
+/// 収束しない場合。実データでは深さ 2〜3 で収束する想定。
+fn resolve_external_types_globally(
+    transformed: &[PerFileTransformed],
+    synthetic: &mut SyntheticTypeRegistry,
     registry: &crate::registry::TypeRegistry,
-    synthetic: &SyntheticTypeRegistry,
 ) {
-    const MAX_ITERATIONS: usize = 10;
-    for _ in 0..MAX_ITERATIONS {
-        let undefined_refs = external_struct_generator::collect_undefined_type_references(
-            items,
-            scan_context,
-            defined_only,
-            registry,
-        );
-        if undefined_refs.is_empty() {
-            break;
+    use external_struct_generator::UNDEFINED_REFS_FIXPOINT_MAX_ITERATIONS as MAX_ITERATIONS;
+    for iter in 0..=MAX_ITERATIONS {
+        // Scan pool は 1 iteration 内でのみ生存する。ブロックスコープで借用を閉じて
+        // から `synthetic` への可変借用に移る。
+        let undefined: Vec<String> = {
+            let synth_items = synthetic.all_items();
+            let pool: Vec<&crate::ir::Item> = transformed
+                .iter()
+                .flat_map(|tf| tf.items.iter())
+                .chain(synth_items)
+                .collect();
+            let mut names: Vec<String> =
+                external_struct_generator::collect_undefined_type_references(&pool, registry)
+                    .into_iter()
+                    .collect();
+            names.sort();
+            names
+        };
+
+        if undefined.is_empty() {
+            return;
         }
-        let mut names: Vec<String> = undefined_refs.into_iter().collect();
-        names.sort();
-        for type_name in &names {
-            if let Some(struct_item) =
-                external_struct_generator::generate_external_struct(type_name, registry, synthetic)
-            {
-                items.push(struct_item);
-            }
+        assert!(
+            iter < MAX_ITERATIONS,
+            "resolve_external_types_globally: fixpoint did not converge in {MAX_ITERATIONS} \
+             iterations (unresolved external types: {undefined:?}). This indicates a bug in \
+             collect_undefined_type_references or SyntheticTypeRegistry::push_item idempotency."
+        );
+
+        for name in &undefined {
+            // `generate_external_struct` は `TypeDef::Struct` のみフル生成し、`Function` /
+            // `ConstValue` では `None` を返す。None の場合は空 stub を push して **必ず**
+            // name を claim する。次 iteration の `defined_types` 集合に含まれることで
+            // 無限ループを防ぎ、同時に生成コードが参照した時点で Rust コンパイラが
+            // 型不整合を検出できる。
+            let item =
+                external_struct_generator::generate_external_struct(name, registry, synthetic)
+                    .unwrap_or_else(|| crate::ir::Item::Struct {
+                        vis: crate::ir::Visibility::Public,
+                        name: name.clone(),
+                        type_params: vec![],
+                        fields: vec![],
+                    });
+            synthetic.push_item(
+                name.clone(),
+                crate::pipeline::SyntheticTypeKind::External,
+                item,
+            );
         }
     }
 }
@@ -416,6 +458,256 @@ mod tests {
         ];
         let parsed = parse_files(files).unwrap();
         assert_eq!(parsed.files.len(), 3);
+    }
+
+    // ===== I-376 Phase 5a / 5c helpers =====
+
+    #[test]
+    fn test_collect_user_defined_type_names_covers_all_definition_kinds() {
+        // Struct / Enum / Trait / TypeAlias の 4 variant 全てが抽出される。
+        // Fn / Impl / Use / Comment 等の非定義系 Item は含まれない。
+        use crate::ir::{Item, RustType, Visibility};
+        let file = FileOutput {
+            path: PathBuf::from("a.rs"),
+            source: String::new(),
+            rust_source: String::new(),
+            unsupported: vec![],
+            items: vec![
+                Item::Struct {
+                    vis: Visibility::Public,
+                    name: "MyStruct".to_string(),
+                    type_params: vec![],
+                    fields: vec![],
+                },
+                Item::Enum {
+                    vis: Visibility::Public,
+                    name: "MyEnum".to_string(),
+                    type_params: vec![],
+                    serde_tag: None,
+                    variants: vec![],
+                },
+                Item::Trait {
+                    vis: Visibility::Public,
+                    name: "MyTrait".to_string(),
+                    type_params: vec![],
+                    supertraits: vec![],
+                    methods: vec![],
+                    associated_types: vec![],
+                },
+                Item::TypeAlias {
+                    vis: Visibility::Public,
+                    name: "MyAlias".to_string(),
+                    type_params: vec![],
+                    ty: RustType::String,
+                },
+                Item::Fn {
+                    vis: Visibility::Public,
+                    attributes: vec![],
+                    is_async: false,
+                    name: "my_fn".to_string(),
+                    type_params: vec![],
+                    params: vec![],
+                    return_type: None,
+                    body: vec![],
+                },
+                Item::Use {
+                    vis: Visibility::Private,
+                    path: "std".to_string(),
+                    names: vec!["Foo".to_string()],
+                },
+                Item::Comment("hello".to_string()),
+            ],
+        };
+        let names = collect_user_defined_type_names(std::slice::from_ref(&file));
+        assert_eq!(names.len(), 4);
+        assert!(names.contains("MyStruct"));
+        assert!(names.contains("MyEnum"));
+        assert!(names.contains("MyTrait"));
+        assert!(names.contains("MyAlias"));
+        // 非定義系は含まれない
+        assert!(!names.contains("my_fn"));
+        assert!(!names.contains("Foo"));
+    }
+
+    #[test]
+    fn test_collect_user_defined_type_names_unions_across_files() {
+        // 複数ファイルに跨って定義された型名が全て収集される。
+        use crate::ir::{Item, Visibility};
+        let mk_file = |path: &str, name: &str| FileOutput {
+            path: PathBuf::from(path),
+            source: String::new(),
+            rust_source: String::new(),
+            unsupported: vec![],
+            items: vec![Item::Struct {
+                vis: Visibility::Public,
+                name: name.to_string(),
+                type_params: vec![],
+                fields: vec![],
+            }],
+        };
+        let files = vec![
+            mk_file("a.rs", "TypeA"),
+            mk_file("b.rs", "TypeB"),
+            mk_file("c.rs", "TypeC"),
+        ];
+        let names = collect_user_defined_type_names(&files);
+        assert_eq!(names.len(), 3);
+        assert!(names.contains("TypeA"));
+        assert!(names.contains("TypeB"));
+        assert!(names.contains("TypeC"));
+    }
+
+    #[test]
+    fn test_resolve_external_types_globally_handles_non_struct_external_typedef() {
+        // `generate_external_struct` が `None` を返すケース (Function TypeDef 等) の
+        // 空 stub フォールバック。Phase 5a が 1 iteration 内で必ず name を claim し、
+        // 無限ループ → panic を防ぐ regression guard。
+        use crate::ir::{Item, RustType, StructField, Visibility};
+        use crate::pipeline::SyntheticTypeKind;
+        use crate::registry::TypeDef;
+        let mut registry = crate::registry::TypeRegistry::new();
+        // Function TypeDef を外部型として登録。
+        registry.register_external(
+            "ExternalCallback".to_string(),
+            TypeDef::Function {
+                type_params: vec![],
+                params: vec![],
+                return_type: Some(RustType::Unit),
+                has_rest: false,
+            },
+        );
+        // ExternalCallback を field で参照する user struct を持つ transformed を構築。
+        let transformed = vec![PerFileTransformed {
+            path: PathBuf::from("a.ts"),
+            source: String::new(),
+            items: vec![Item::Struct {
+                vis: Visibility::Public,
+                name: "Holder".to_string(),
+                type_params: vec![],
+                fields: vec![StructField {
+                    vis: Some(Visibility::Public),
+                    name: "cb".to_string(),
+                    ty: RustType::Named {
+                        name: "ExternalCallback".to_string(),
+                        type_args: vec![],
+                    },
+                }],
+            }],
+            unsupported: vec![],
+        }];
+        let mut synthetic = SyntheticTypeRegistry::new();
+        // 本関数は panic せずに完了するはず。
+        resolve_external_types_globally(&transformed, &mut synthetic, &registry);
+        // ExternalCallback が空 stub として登録されていることを確認。
+        let entry = synthetic
+            .get("ExternalCallback")
+            .expect("ExternalCallback should be claimed as a fallback stub");
+        assert!(matches!(entry.kind, SyntheticTypeKind::External));
+        assert!(
+            matches!(&entry.item, Item::Struct { fields, .. } if fields.is_empty()),
+            "fallback stub should be an empty struct"
+        );
+    }
+
+    #[test]
+    fn test_resolve_external_types_globally_transitive_closure() {
+        // External A -> External B の推移依存が 2 iteration 以内で収束し、両方が
+        // synthetic に登録されることを unit level で検証。
+        use crate::ir::{Item, RustType, StructField, Visibility};
+        use crate::registry::{FieldDef, TypeDef};
+        let mut registry = crate::registry::TypeRegistry::new();
+        registry.register_external(
+            "Outer".to_string(),
+            TypeDef::Struct {
+                type_params: vec![],
+                fields: vec![FieldDef {
+                    name: "inner".to_string(),
+                    ty: RustType::Named {
+                        name: "Inner".to_string(),
+                        type_args: vec![],
+                    },
+                    optional: false,
+                }],
+                methods: std::collections::HashMap::new(),
+                constructor: None,
+                call_signatures: vec![],
+                extends: vec![],
+                is_interface: false,
+            },
+        );
+        registry.register_external(
+            "Inner".to_string(),
+            TypeDef::Struct {
+                type_params: vec![],
+                fields: vec![FieldDef {
+                    name: "value".to_string(),
+                    ty: RustType::F64,
+                    optional: false,
+                }],
+                methods: std::collections::HashMap::new(),
+                constructor: None,
+                call_signatures: vec![],
+                extends: vec![],
+                is_interface: false,
+            },
+        );
+        let transformed = vec![PerFileTransformed {
+            path: PathBuf::from("a.ts"),
+            source: String::new(),
+            items: vec![Item::Struct {
+                vis: Visibility::Public,
+                name: "User".to_string(),
+                type_params: vec![],
+                fields: vec![StructField {
+                    vis: Some(Visibility::Public),
+                    name: "o".to_string(),
+                    ty: RustType::Named {
+                        name: "Outer".to_string(),
+                        type_args: vec![],
+                    },
+                }],
+            }],
+            unsupported: vec![],
+        }];
+        let mut synthetic = SyntheticTypeRegistry::new();
+        resolve_external_types_globally(&transformed, &mut synthetic, &registry);
+        assert!(
+            synthetic.get("Outer").is_some(),
+            "Outer should be resolved on iteration 1"
+        );
+        assert!(
+            synthetic.get("Inner").is_some(),
+            "Inner should be resolved transitively on iteration 2"
+        );
+    }
+
+    #[test]
+    fn test_resolve_external_types_globally_noop_when_no_externals_referenced() {
+        // 外部型参照なし → synthetic に 1 件も追加されず、即座に return。
+        use crate::ir::{Item, RustType, StructField, Visibility};
+        let registry = crate::registry::TypeRegistry::new();
+        let transformed = vec![PerFileTransformed {
+            path: PathBuf::from("a.ts"),
+            source: String::new(),
+            items: vec![Item::Struct {
+                vis: Visibility::Public,
+                name: "PureUser".to_string(),
+                type_params: vec![],
+                fields: vec![StructField {
+                    vis: Some(Visibility::Public),
+                    name: "n".to_string(),
+                    ty: RustType::F64,
+                }],
+            }],
+            unsupported: vec![],
+        }];
+        let mut synthetic = SyntheticTypeRegistry::new();
+        resolve_external_types_globally(&transformed, &mut synthetic, &registry);
+        assert_eq!(
+            synthetic.all_items().len(),
+            0,
+            "no externals referenced → synthetic stays empty"
+        );
     }
 
     #[test]

@@ -95,36 +95,7 @@ OBJECT_LITERAL_NO_TYPE 全体で 25件。I-300/I-301/I-306 のサブ分類件数
 - **[I-102]** **any/unknown の残課題** — typeof/instanceof 未使用の any は Value のまま
 - **[I-274]** **フィールド名の IR サニタイズ不一致** — I-270c で顕在化見込み
 
-- **[I-376]** **クロスファイル外部型 stub の構造的重複** [L3]
-
-  **問題**: `transpile_pipeline` (`src/pipeline/mod.rs`) は同一の外部型（例: builtin `ArrayBuffer`）を 2 重に生成する:
-  1. **per-file** loop (`src/pipeline/mod.rs:177-184`): 各ファイルの `all_items` に対し `generate_external_structs_to_fixpoint` を呼び、参照される外部型を `pub struct ArrayBuffer { ... }` として **`file_outputs[i].items` に追加**
-  2. **post-loop** (`src/pipeline/mod.rs:215-221`): 同関数を `synthetic_items` に対しても呼び、同じ `pub struct ArrayBuffer` を **`synthetic_items` に追加**
-
-  この結果、`Date` / `Error` / `ArrayBuffer` 等の外部型 struct が file.items と synthetic_items の両方に存在する。出力時の重複は `pipeline::placement::render_referenced_synthetics_for_file` の `is_definition_item` dedup（`src/pipeline/placement.rs:225`）で防いでいるが、これは「出力時 patch」であり、生成段階で構造的に dedup していない。
-
-  **顕在化シナリオ**:
-  - 単一ファイル API では出力時 dedup で問題にならない。
-  - マルチファイル API では `OutputWriter::resolve_synthetic_placement` が同名 struct を share に置く際に conflict 回避ロジックが動くが、内部実装が異なる場合（per-file 生成時のフィールドと post-loop 生成時のフィールドが TypeRegistry の状態差で異なる場合）silent semantic divergence の可能性がある。
-  - メモリ・処理時間の二重コスト。
-
-  **修正方針**:
-  1. per-file 段階で生成された外部型 struct を file.items に **入れない**。代わりに「このファイルが参照する外部型名集合」を `transformed[i].external_refs: HashSet<String>` として記録。
-  2. post-loop で全ファイル分の external_refs を union し、その全てを synthetic_items に **一度だけ** 生成。
-  3. 結果として `synthetic_items` が外部型 struct の唯一の真実の源になり、`OutputWriter` の placement で適切に shared/inline 配置される。
-  4. `render_referenced_synthetics_for_file` の `is_definition_item` dedup は不要になる（synthetic と file の重複が構造的に発生しなくなる）。
-
-  **影響範囲**:
-  - `src/pipeline/mod.rs:120-225` (Pass 4 / Pass 5)
-  - `src/pipeline/types.rs::PerFileTransformed` の構造拡張
-  - `src/pipeline/placement.rs::render_referenced_synthetics_for_file` の dedup 削除
-  - `src/pipeline/output_writer.rs::resolve_synthetic_placement` のテスト確認
-  - tests: snapshot 全件 + 統合テスト `tests/pipeline_placement_test.rs`
-
-  **テスト戦略**:
-  - 統合: 既存の `test_cross_file_synthetic_dedup_via_shared_types` が引き続き pass
-  - 新規: per-file の `file.items` に外部型 struct が含まれないことを直接 assert
-  - Hono: dir compile / error instances 後退ゼロ
+- **[I-382]** **Phase 5c shared_types.rs の stub 生成は import であるべき** [L3 broken window] — I-376 レビューで発見。`src/pipeline/external_struct_generator/mod.rs::generate_stub_structs` は synthetic_items 内の未定義参照に対し空 `pub struct Foo;` を生成するが、参照対象が user 定義型の場合、本来は `use crate::<user_module>::Foo;` を生成すべき。現状は `defined_elsewhere_names: &HashSet<String>` (I-376 で追加) で user 定義型の stub 生成を除外するだけで、shared_types.rs 内で user 定義型を参照する enum/struct はコンパイルエラー or 型不一致になる (例: synthetic any-enum `HandleValueXType::MyError(MyError)` が shared_types.rs に配置されたとき)。修正方針: (1) `OutputWriter::resolve_synthetic_placement` 相当の場所で shared_types.rs が参照する user 定義型を検出、(2) ModuleGraph 経由で各 user 定義型の所属 crate パスを解決、(3) `use crate::<path>::<type>;` を shared_types.rs 先頭に生成。影響: `src/pipeline/output_writer/placement.rs::build_shared_imports` の拡張、`generate_stub_structs` の段階的廃止。現時点で Hono fixture では顕在化していない (該当 synthetic が inline 配置に落ちているため) が、将来的に shared 配置される構造で silent 型不一致を起こす。
 
 - **[I-374]** **Rust 予約語と衝突する型名のサニタイズ** — TypeScript で `interface Self {}` のように Rust の予約語を識別子として使った場合、生成 Rust で `pub struct Self {}` となり Rust 予約語衝突でコンパイル不可。現在 `src/pipeline/external_struct_generator/mod.rs::TypeRefCollector::visit_rust_type` で `Self` のみを band-aid 除外しているが、根本治療は IR レベルで型名をサニタイズすること（例: `Self` → `Self_` または `_Self`）。対象は Rust の type-position 予約語: `Self`, `crate`, `super`, `extern`, `dyn`, `impl` 等。修正方針: (1) `src/registry/mod.rs` または `src/transformer/types/converter.rs` で TS 識別子 → Rust 型名変換時に予約語チェック → サニタイズ。(2) ユーザーコード側の参照（`new Self(...)` 等）も同期してリネーム。(3) `TypeRefCollector::visit_rust_type` の Self band-aid を削除。修正コスト: 中。テスト: TS `interface Self { x: number; }` を入力にして Rust `struct Self_` が生成されることを確認
 - **[I-279]** **resolve_synthetic_placement の O(n²)** — 大規模プロジェクトでボトルネック
