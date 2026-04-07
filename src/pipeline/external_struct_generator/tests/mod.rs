@@ -10,8 +10,8 @@
 
 use super::*;
 use crate::ir::{
-    AssocConst, BinOp, CallTarget, ClosureBody, EnumVariant, Expr, MatchArm, Method, Param, Stmt,
-    TraitRef, TypeParam,
+    AssocConst, BinOp, CallTarget, ClosureBody, EnumVariant, Expr, MatchArm, Method, Param,
+    Pattern, Stmt, TraitRef, TypeParam,
 };
 use crate::pipeline::SyntheticTypeRegistry;
 use std::collections::HashMap;

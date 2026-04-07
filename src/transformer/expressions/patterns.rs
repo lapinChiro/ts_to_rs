@@ -133,7 +133,10 @@ impl<'a> Transformer<'a> {
                     let matches_expr = Expr::Matches {
                         expr: Box::new(operand_ir),
                         pattern: Box::new(Pattern::TupleStruct {
-                            path: vec![enum_name.clone(), expected_variant.to_string()],
+                            ctor: crate::ir::PatternCtor::UserEnumVariant {
+                                enum_ty: crate::ir::UserTypeRef::new(enum_name.clone()),
+                                variant: expected_variant.to_string(),
+                            },
                             fields: vec![Pattern::Wildcard],
                         }),
                     };
@@ -295,7 +298,10 @@ impl<'a> Transformer<'a> {
                         return Expr::Matches {
                             expr: Box::new(lhs_ir),
                             pattern: Box::new(Pattern::TupleStruct {
-                                path: vec![name.clone(), class_name.clone()],
+                                ctor: crate::ir::PatternCtor::UserEnumVariant {
+                                    enum_ty: crate::ir::UserTypeRef::new(name.clone()),
+                                    variant: class_name.clone(),
+                                },
                                 fields: vec![Pattern::Wildcard],
                             }),
                         };
@@ -435,7 +441,7 @@ impl<'a> Transformer<'a> {
 
     /// Resolves the complement variant pattern for a 2-variant enum.
     ///
-    /// Returns `Some(Pattern::TupleStruct { path: [EnumName, OtherVariant], ... })`
+    /// Returns `Some(Pattern::TupleStruct { ctor: UserEnumVariant { EnumName, OtherVariant }, ... })`
     /// for 2-variant enums, or `None` for 3+ variant enums (caller should use
     /// wildcard).
     fn resolve_other_variant(
@@ -456,7 +462,10 @@ impl<'a> Transformer<'a> {
             .collect();
         if remaining.len() == 1 {
             Some(Pattern::TupleStruct {
-                path: vec![enum_name.to_string(), remaining[0].clone()],
+                ctor: crate::ir::PatternCtor::UserEnumVariant {
+                    enum_ty: crate::ir::UserTypeRef::new(enum_name.to_string()),
+                    variant: remaining[0].clone(),
+                },
                 fields: vec![Pattern::binding(var_name)],
             })
         } else {
@@ -494,7 +503,10 @@ impl<'a> Transformer<'a> {
                     self.resolve_typeof_to_enum_variant(var_type, type_name)?;
                 Some((
                     Pattern::TupleStruct {
-                        path: vec![enum_name, variant],
+                        ctor: crate::ir::PatternCtor::UserEnumVariant {
+                            enum_ty: crate::ir::UserTypeRef::new(enum_name),
+                            variant,
+                        },
                         fields: vec![Pattern::binding(guard.var_name())],
                     },
                     !is_eq,
@@ -505,7 +517,10 @@ impl<'a> Transformer<'a> {
                     self.resolve_instanceof_to_enum_variant(var_type, class_name)?;
                 Some((
                     Pattern::TupleStruct {
-                        path: vec![enum_name, variant],
+                        ctor: crate::ir::PatternCtor::UserEnumVariant {
+                            enum_ty: crate::ir::UserTypeRef::new(enum_name),
+                            variant,
+                        },
                         fields: vec![Pattern::binding(guard.var_name())],
                     },
                     false,

@@ -6,7 +6,18 @@
 //! 禁止）に従い構造化 `Pattern` へ移行。文字列化責務はこのモジュールに集約する。
 
 use crate::generator::expressions::generate_expr;
-use crate::ir::Pattern;
+use crate::ir::{Pattern, PatternCtor};
+
+/// `PatternCtor` を Rust ソースの path 文字列にレンダリングする。
+fn render_pattern_ctor(ctor: &PatternCtor) -> String {
+    match ctor {
+        PatternCtor::Builtin(b) => b.as_rust_str().to_string(),
+        PatternCtor::UserEnumVariant { enum_ty, variant } => {
+            format!("{}::{}", enum_ty.as_str(), variant)
+        }
+        PatternCtor::UserStruct(ty) => ty.as_str().to_string(),
+    }
+}
 
 /// `Pattern` IR を Rust ソースの pattern 文字列にレンダリングする。
 pub(crate) fn render_pattern(pat: &Pattern) -> String {
@@ -24,13 +35,13 @@ pub(crate) fn render_pattern(pat: &Pattern) -> String {
                 None => format!("{prefix}{name}"),
             }
         }
-        Pattern::TupleStruct { path, fields } => {
-            let path_str = path.join("::");
+        Pattern::TupleStruct { ctor, fields } => {
+            let path_str = render_pattern_ctor(ctor);
             let field_strs: Vec<String> = fields.iter().map(render_pattern).collect();
             format!("{path_str}({})", field_strs.join(", "))
         }
-        Pattern::Struct { path, fields, rest } => {
-            let path_str = path.join("::");
+        Pattern::Struct { ctor, fields, rest } => {
+            let path_str = render_pattern_ctor(ctor);
             // Named field short-hand: if the bound pattern is just `Pattern::Binding { name: n, .. }`
             // and matches the field name, emit `n` instead of `n: n`.
             let mut parts: Vec<String> = fields
@@ -53,7 +64,7 @@ pub(crate) fn render_pattern(pat: &Pattern) -> String {
                 format!("{path_str} {{ {} }}", parts.join(", "))
             }
         }
-        Pattern::UnitStruct { path } => path.join("::"),
+        Pattern::UnitStruct { ctor } => render_pattern_ctor(ctor),
         Pattern::Or(pats) => pats
             .iter()
             .map(render_pattern)
@@ -83,7 +94,17 @@ pub(crate) fn render_pattern(pat: &Pattern) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ir::Expr;
+    use crate::ir::{BuiltinVariant, Expr, UserTypeRef};
+
+    fn user_enum_ctor(enum_name: &str, variant: &str) -> PatternCtor {
+        PatternCtor::UserEnumVariant {
+            enum_ty: UserTypeRef::new(enum_name),
+            variant: variant.to_string(),
+        }
+    }
+    fn user_struct_ctor(name: &str) -> PatternCtor {
+        PatternCtor::UserStruct(UserTypeRef::new(name))
+    }
 
     #[test]
     fn render_wildcard() {
@@ -132,7 +153,7 @@ mod tests {
     #[test]
     fn render_tuple_struct_multi_segment() {
         let pat = Pattern::TupleStruct {
-            path: vec!["Color".to_string(), "Red".to_string()],
+            ctor: user_enum_ctor("Color", "Red"),
             fields: vec![Pattern::binding("r")],
         };
         assert_eq!(render_pattern(&pat), "Color::Red(r)");
@@ -141,7 +162,7 @@ mod tests {
     #[test]
     fn render_tuple_struct_zero_fields() {
         let pat = Pattern::TupleStruct {
-            path: vec!["E".to_string(), "Empty".to_string()],
+            ctor: user_enum_ctor("E", "Empty"),
             fields: vec![],
         };
         assert_eq!(render_pattern(&pat), "E::Empty()");
@@ -150,7 +171,7 @@ mod tests {
     #[test]
     fn render_struct_pattern_with_shorthand() {
         let pat = Pattern::Struct {
-            path: vec!["Shape".to_string(), "Circle".to_string()],
+            ctor: user_enum_ctor("Shape", "Circle"),
             fields: vec![("radius".to_string(), Pattern::binding("radius"))],
             rest: true,
         };
@@ -160,7 +181,7 @@ mod tests {
     #[test]
     fn render_struct_pattern_rename() {
         let pat = Pattern::Struct {
-            path: vec!["Foo".to_string()],
+            ctor: user_struct_ctor("Foo"),
             fields: vec![("x".to_string(), Pattern::binding("y"))],
             rest: false,
         };
@@ -170,7 +191,7 @@ mod tests {
     #[test]
     fn render_struct_empty_with_rest() {
         let pat = Pattern::Struct {
-            path: vec!["Foo".to_string()],
+            ctor: user_struct_ctor("Foo"),
             fields: vec![],
             rest: true,
         };
@@ -185,9 +206,26 @@ mod tests {
     #[test]
     fn render_unit_struct_multi() {
         let pat = Pattern::UnitStruct {
-            path: vec!["Color".to_string(), "Green".to_string()],
+            ctor: user_enum_ctor("Color", "Green"),
         };
         assert_eq!(render_pattern(&pat), "Color::Green");
+    }
+
+    #[test]
+    fn render_pattern_ctor_builtin_variants() {
+        for (b, expected) in [
+            (BuiltinVariant::Some, "Some"),
+            (BuiltinVariant::None, "None"),
+            (BuiltinVariant::Ok, "Ok"),
+            (BuiltinVariant::Err, "Err"),
+        ] {
+            assert_eq!(render_pattern_ctor(&PatternCtor::Builtin(b)), expected);
+        }
+    }
+
+    #[test]
+    fn render_pattern_ctor_user_struct_emits_bare_name() {
+        assert_eq!(render_pattern_ctor(&user_struct_ctor("Foo")), "Foo");
     }
 
     #[test]
@@ -242,9 +280,9 @@ mod tests {
     fn render_nested_some_of_color_red() {
         // Some(Color::Red(x))
         let pat = Pattern::TupleStruct {
-            path: vec!["Some".to_string()],
+            ctor: PatternCtor::Builtin(BuiltinVariant::Some),
             fields: vec![Pattern::TupleStruct {
-                path: vec!["Color".to_string(), "Red".to_string()],
+                ctor: user_enum_ctor("Color", "Red"),
                 fields: vec![Pattern::binding("x")],
             }],
         };
@@ -257,7 +295,7 @@ mod tests {
     fn render_struct_empty_no_rest() {
         // `Foo {}` — both `fields` and `rest` empty.
         let pat = Pattern::Struct {
-            path: vec!["Foo".to_string()],
+            ctor: user_struct_ctor("Foo"),
             fields: vec![],
             rest: false,
         };
@@ -268,7 +306,7 @@ mod tests {
     fn render_struct_no_shorthand_when_field_renames_binding() {
         // `Foo { name: alias }` — binding name differs from field name, so no shorthand.
         let pat = Pattern::Struct {
-            path: vec!["Foo".to_string()],
+            ctor: user_struct_ctor("Foo"),
             fields: vec![("name".to_string(), Pattern::binding("alias"))],
             rest: false,
         };
@@ -279,7 +317,7 @@ mod tests {
     fn render_struct_no_shorthand_when_binding_is_mut() {
         // `mut x` is not eligible for shorthand even if name matches.
         let pat = Pattern::Struct {
-            path: vec!["Foo".to_string()],
+            ctor: user_struct_ctor("Foo"),
             fields: vec![(
                 "x".to_string(),
                 Pattern::Binding {
@@ -297,7 +335,7 @@ mod tests {
     fn render_struct_no_shorthand_when_subpat_present() {
         // `x @ _` is not eligible for shorthand.
         let pat = Pattern::Struct {
-            path: vec!["Foo".to_string()],
+            ctor: user_struct_ctor("Foo"),
             fields: vec![(
                 "x".to_string(),
                 Pattern::Binding {
@@ -356,15 +394,11 @@ mod tests {
     }
 
     #[test]
-    fn render_unit_struct_three_segments() {
-        // Multi-segment path: `module::Enum::Variant`
+    fn render_unit_struct_user_struct() {
+        // `UserStruct` constructor: bare name.
         let pat = Pattern::UnitStruct {
-            path: vec![
-                "module".to_string(),
-                "Enum".to_string(),
-                "Variant".to_string(),
-            ],
+            ctor: user_struct_ctor("Empty"),
         };
-        assert_eq!(render_pattern(&pat), "module::Enum::Variant");
+        assert_eq!(render_pattern(&pat), "Empty");
     }
 }

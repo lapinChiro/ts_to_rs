@@ -30,8 +30,8 @@
 //! ノードだけ override する。`walk_*` は `?Sized` 境界で dyn 互換性を保つ。
 
 use super::{
-    AssocConst, CallTarget, ClosureBody, Expr, Item, MatchArm, Method, Pattern, RustType, Stmt,
-    TypeParam, UserTypeRef,
+    AssocConst, CallTarget, ClosureBody, Expr, Item, MatchArm, Method, Pattern, PatternCtor,
+    RustType, Stmt, TraitRef, TypeParam, UserTypeRef,
 };
 
 /// IR の read-only 走査用 visitor trait。
@@ -77,6 +77,22 @@ pub trait IrVisitor {
     /// builtin variant / プリミティブ / std module path / 自由関数は型レベルで
     /// `UserTypeRef` フィールドを持たないため、本フックは構造的に発火しない。
     fn visit_user_type_ref(&mut self, _r: &UserTypeRef) {}
+    /// Trait 参照 (`impl Trait<T>` / `trait Foo: Bar<T>`) を通知する。
+    ///
+    /// `TraitRef::name` は `String` (`UserTypeRef` ではない) であり、
+    /// `visit_user_type_ref` フックでは拾えない。`walk_trait_ref` は本フックを
+    /// 発火しつつ `type_args` を再帰走査する。walker 実装は `name` を refs に
+    /// 登録するために本フックを override する。
+    fn visit_trait_ref(&mut self, tref: &TraitRef) {
+        walk_trait_ref(self, tref);
+    }
+}
+
+/// `TraitRef` を走査する: `type_args` のみ再帰し、`name` は visitor に委ねる。
+pub fn walk_trait_ref<V: IrVisitor + ?Sized>(v: &mut V, tref: &TraitRef) {
+    for arg in &tref.type_args {
+        v.visit_rust_type(arg);
+    }
 }
 
 /// `Item` の全 variant を再帰的に走査する。
@@ -121,9 +137,7 @@ pub fn walk_item<V: IrVisitor + ?Sized>(v: &mut V, item: &Item) {
                 v.visit_type_param(tp);
             }
             for supertrait in supertraits {
-                for arg in &supertrait.type_args {
-                    v.visit_rust_type(arg);
-                }
+                v.visit_trait_ref(supertrait);
             }
             for method in methods {
                 v.visit_method(method);
@@ -140,9 +154,7 @@ pub fn walk_item<V: IrVisitor + ?Sized>(v: &mut V, item: &Item) {
                 v.visit_type_param(tp);
             }
             if let Some(tref) = for_trait {
-                for arg in &tref.type_args {
-                    v.visit_rust_type(arg);
-                }
+                v.visit_trait_ref(tref);
             }
             for c in consts {
                 walk_assoc_const(v, c);
@@ -185,8 +197,9 @@ pub fn walk_item<V: IrVisitor + ?Sized>(v: &mut V, item: &Item) {
     }
 }
 
-/// `AssocConst` を走査する（trait method ではないヘルパー）。
-fn walk_assoc_const<V: IrVisitor + ?Sized>(v: &mut V, c: &AssocConst) {
+/// `AssocConst` (impl block 内の `const NAME: Type = expr;`) の `ty` と `value`
+/// を走査する。他の `walk_*` 関数と同じく `pub` で公開する (一貫性)。
+pub fn walk_assoc_const<V: IrVisitor + ?Sized>(v: &mut V, c: &AssocConst) {
     v.visit_rust_type(&c.ty);
     v.visit_expr(&c.value);
 }
@@ -464,6 +477,21 @@ pub fn walk_call_target<V: IrVisitor + ?Sized>(v: &mut V, target: &CallTarget) {
     }
 }
 
+/// `PatternCtor` の variant を走査し、内部に [`UserTypeRef`] を持つ variant
+/// については `visit_user_type_ref` フックを発火する。
+///
+/// I-380 で導入された走査ポイント。これにより walker は `Pattern::TupleStruct` /
+/// `Pattern::Struct` / `Pattern::UnitStruct` の constructor 内 user type 参照
+/// (`UserEnumVariant::enum_ty` / `UserStruct::0`) を構造的に拾えるようになり、
+/// 文字列ベースの `PATTERN_LANG_BUILTINS` 除外リストが不要になった。
+pub fn walk_pattern_ctor<V: IrVisitor + ?Sized>(v: &mut V, ctor: &PatternCtor) {
+    match ctor {
+        PatternCtor::UserEnumVariant { enum_ty, .. } => v.visit_user_type_ref(enum_ty),
+        PatternCtor::UserStruct(ty) => v.visit_user_type_ref(ty),
+        PatternCtor::Builtin(_) => {}
+    }
+}
+
 /// `RustType` の全 variant を再帰的に走査する。
 pub fn walk_rust_type<V: IrVisitor + ?Sized>(v: &mut V, ty: &RustType) {
     match ty {
@@ -476,9 +504,7 @@ pub fn walk_rust_type<V: IrVisitor + ?Sized>(v: &mut V, ty: &RustType) {
             qself, trait_ref, ..
         } => {
             v.visit_rust_type(qself);
-            for arg in &trait_ref.type_args {
-                v.visit_rust_type(arg);
-            }
+            v.visit_trait_ref(trait_ref);
         }
         RustType::Option(inner) | RustType::Vec(inner) | RustType::Ref(inner) => {
             v.visit_rust_type(inner);
@@ -521,17 +547,21 @@ pub fn walk_pattern<V: IrVisitor + ?Sized>(v: &mut V, pat: &Pattern) {
                 v.visit_pattern(sub);
             }
         }
-        Pattern::TupleStruct { fields, .. } => {
+        Pattern::TupleStruct { ctor, fields } => {
+            walk_pattern_ctor(v, ctor);
             for f in fields {
                 v.visit_pattern(f);
             }
         }
-        Pattern::Struct { fields, .. } => {
+        Pattern::Struct { ctor, fields, .. } => {
+            walk_pattern_ctor(v, ctor);
             for (_, p) in fields {
                 v.visit_pattern(p);
             }
         }
-        Pattern::UnitStruct { .. } => {}
+        Pattern::UnitStruct { ctor } => {
+            walk_pattern_ctor(v, ctor);
+        }
         Pattern::Or(pats) => {
             for p in pats {
                 v.visit_pattern(p);

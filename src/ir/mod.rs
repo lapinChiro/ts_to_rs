@@ -36,7 +36,7 @@ pub use item::{AssocConst, EnumValue, EnumVariant, Item, Method, Param, StructFi
 pub use naming::{
     camel_to_snake, sanitize_field_name, sanitize_rust_type_name, string_to_pascal_case,
 };
-pub use pattern::Pattern;
+pub use pattern::{Pattern, PatternCtor};
 pub use stmt::{MatchArm, Stmt};
 pub use types::{RustType, TraitRef, TypeParam, Visibility};
 

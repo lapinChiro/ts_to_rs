@@ -382,7 +382,10 @@ impl<'a> Transformer<'a> {
             if fields.iter().any(|f| f.name == field) {
                 arms.push(MatchArm {
                     patterns: vec![Pattern::Struct {
-                        path: vec![enum_name.to_string(), variant_name.clone()],
+                        ctor: crate::ir::PatternCtor::UserEnumVariant {
+                            enum_ty: crate::ir::UserTypeRef::new(enum_name.to_string()),
+                            variant: variant_name.clone(),
+                        },
                         fields: vec![(field.to_string(), Pattern::binding(field))],
                         rest: true,
                     }],

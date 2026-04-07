@@ -711,7 +711,10 @@ fn test_generate_expr_match_with_enum_variant_bindings() {
         arms: vec![
             MatchArm {
                 patterns: vec![crate::ir::Pattern::Struct {
-                    path: vec!["Shape".to_string(), "Circle".to_string()],
+                    ctor: crate::ir::PatternCtor::UserEnumVariant {
+                        enum_ty: crate::ir::UserTypeRef::new("Shape"),
+                        variant: "Circle".to_string(),
+                    },
                     fields: vec![("radius".to_string(), crate::ir::Pattern::binding("radius"))],
                     rest: true,
                 }],

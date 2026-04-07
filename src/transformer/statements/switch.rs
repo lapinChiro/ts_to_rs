@@ -291,7 +291,10 @@ impl<'a> Transformer<'a> {
                 // a pipeline-integrity violation (display-formatted string in IR).
                 let pattern = match variant {
                     Some((ename, vname)) => Pattern::TupleStruct {
-                        path: vec![ename, vname],
+                        ctor: crate::ir::PatternCtor::UserEnumVariant {
+                            enum_ty: crate::ir::UserTypeRef::new(ename),
+                            variant: vname,
+                        },
                         fields: vec![Pattern::binding(var_name.as_str())],
                     },
                     None => {
@@ -444,7 +447,10 @@ impl<'a> Transformer<'a> {
                     // Struct-variant pattern with no initial bindings. Bindings are
                     // filled in below based on field accesses scanned in the body.
                     pending_patterns.push(Pattern::Struct {
-                        path: vec![enum_name.clone(), variant_name.clone()],
+                        ctor: crate::ir::PatternCtor::UserEnumVariant {
+                            enum_ty: crate::ir::UserTypeRef::new(enum_name.clone()),
+                            variant: variant_name.clone(),
+                        },
                         fields: vec![],
                         rest: true,
                     });
@@ -469,10 +475,15 @@ impl<'a> Transformer<'a> {
             // Update bindings on pending patterns with needed field names
             if !needed_fields.is_empty() {
                 for pattern in &mut pending_patterns {
-                    if let Pattern::Struct { path, fields, .. } = pattern {
-                        // Structured variant name access: the last segment is the
-                        // variant name (e.g., `Shape::Circle` → `Circle`).
-                        let vname = path.last().cloned().unwrap_or_default();
+                    if let Pattern::Struct { ctor, fields, .. } = pattern {
+                        // Structured variant name access: extract the variant from
+                        // the structured ctor (UserEnumVariant constructed above).
+                        let vname = match ctor {
+                            crate::ir::PatternCtor::UserEnumVariant { variant, .. } => {
+                                variant.clone()
+                            }
+                            _ => String::new(),
+                        };
                         if let Some(type_fields) = variant_fields.get(&vname) {
                             *fields = needed_fields
                                 .iter()
@@ -559,7 +570,10 @@ impl<'a> Transformer<'a> {
 
                 if let Some(variant_name) = string_values.get(&str_value) {
                     pending_patterns.push(Pattern::UnitStruct {
-                        path: vec![enum_name.clone(), variant_name.clone()],
+                        ctor: crate::ir::PatternCtor::UserEnumVariant {
+                            enum_ty: crate::ir::UserTypeRef::new(enum_name.clone()),
+                            variant: variant_name.clone(),
+                        },
                     });
                 } else {
                     return Ok(None); // Unknown variant → fallback

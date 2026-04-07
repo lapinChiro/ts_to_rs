@@ -67,16 +67,19 @@ pub(crate) fn all_patterns() -> Vec<Pattern> {
             subpat: Some(Box::new(Pattern::Wildcard)),
         },
         Pattern::TupleStruct {
-            path: vec!["Some".to_string()],
+            ctor: super::PatternCtor::UserEnumVariant {
+                enum_ty: super::UserTypeRef::new("Color"),
+                variant: "Red".to_string(),
+            },
             fields: vec![Pattern::Wildcard],
         },
         Pattern::Struct {
-            path: vec!["Foo".to_string()],
+            ctor: super::PatternCtor::UserStruct(super::UserTypeRef::new("Foo")),
             fields: vec![("x".to_string(), Pattern::Wildcard)],
             rest: true,
         },
         Pattern::UnitStruct {
-            path: vec!["None".to_string()],
+            ctor: super::PatternCtor::Builtin(super::BuiltinVariant::None),
         },
         Pattern::Or(vec![Pattern::Wildcard]),
         Pattern::Range {
@@ -190,7 +193,7 @@ pub(crate) fn all_exprs() -> Vec<Expr> {
         Expr::Matches {
             expr: Box::new(Expr::Unit),
             pattern: Box::new(Pattern::TupleStruct {
-                path: vec!["Some".to_string()],
+                ctor: super::PatternCtor::Builtin(super::BuiltinVariant::Some),
                 fields: vec![Pattern::Wildcard],
             }),
         },

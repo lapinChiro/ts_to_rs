@@ -224,7 +224,7 @@ fn test_collect_type_refs_from_trait_supertraits() {
 }
 
 // =========================================================================
-// T7: collect_type_refs_from_rust_type — RustType::QSelf 強化
+// T7: RustType::QSelf 強化 — TypeRefCollector::visit_rust_type 経由
 // =========================================================================
 
 #[test]
@@ -239,7 +239,7 @@ fn test_collect_type_refs_qself_extracts_qself_and_trait_name() {
         item: "Output".to_string(),
     };
     let mut refs = HashSet::new();
-    collect_type_refs_from_rust_type(&ty, &mut refs);
+    collect_refs_from_ty_for_test(&ty, &mut refs);
     assert!(refs.contains("T"));
     assert!(refs.contains("Promise"));
     assert!(!refs.contains("Output"));
@@ -257,7 +257,7 @@ fn test_collect_type_refs_qself_walks_trait_type_args() {
         item: "Item".to_string(),
     };
     let mut refs = HashSet::new();
-    collect_type_refs_from_rust_type(&ty, &mut refs);
+    collect_refs_from_ty_for_test(&ty, &mut refs);
     assert!(refs.contains("T"));
     assert!(refs.contains("Container"));
     assert!(refs.contains("Inner"));
@@ -276,7 +276,7 @@ fn test_collect_type_refs_qself_walks_qself_inner() {
         item: "Output".to_string(),
     };
     let mut refs = HashSet::new();
-    collect_type_refs_from_rust_type(&ty, &mut refs);
+    collect_refs_from_ty_for_test(&ty, &mut refs);
     assert!(refs.contains("Foo"));
     assert!(refs.contains("Promise"));
 }
@@ -286,6 +286,6 @@ fn test_collect_type_refs_dyn_trait_records_trait_name() {
     // dyn Greeter → refs に Greeter が入る
     let ty = RustType::DynTrait("Greeter".to_string());
     let mut refs = HashSet::new();
-    collect_type_refs_from_rust_type(&ty, &mut refs);
+    collect_refs_from_ty_for_test(&ty, &mut refs);
     assert!(refs.contains("Greeter"));
 }

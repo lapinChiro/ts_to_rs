@@ -403,10 +403,13 @@ fn test_convert_du_standalone_field_access_generates_match_expr() {
         // First arm should bind radius in a structured `Pattern::Struct`
         assert!(
             arms[0].patterns.iter().any(|p| {
-                matches!(p, Pattern::Struct { path, fields, .. }
-                    if path == &["Shape".to_string(), "Circle".to_string()]
-                        && fields.len() == 1
-                        && fields[0].0 == "radius")
+                matches!(p, Pattern::Struct { ctor, fields, .. }
+                    if matches!(
+                        ctor,
+                        crate::ir::PatternCtor::UserEnumVariant { enum_ty, variant }
+                            if enum_ty.as_str() == "Shape" && variant == "Circle"
+                    ) && fields.len() == 1
+                    && fields[0].0 == "radius")
             }),
             "expected Circle arm with radius binding, got: {:?}",
             arms[0].patterns

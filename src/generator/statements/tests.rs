@@ -463,7 +463,7 @@ fn test_generate_stmt_if_let_without_else_renders_if_let() {
         return_type: None,
         body: vec![Stmt::IfLet {
             pattern: crate::ir::Pattern::TupleStruct {
-                path: vec!["Err".to_string()],
+                ctor: crate::ir::PatternCtor::Builtin(crate::ir::BuiltinVariant::Err),
                 fields: vec![crate::ir::Pattern::binding("e")],
             },
             expr: Expr::Ident("result".to_string()),
@@ -733,7 +733,10 @@ fn test_generate_match_enum_variant_with_bindings_renders_field_names() {
             arms: vec![
                 crate::ir::MatchArm {
                     patterns: vec![MP::Struct {
-                        path: vec!["Shape".to_string(), "Circle".to_string()],
+                        ctor: crate::ir::PatternCtor::UserEnumVariant {
+                            enum_ty: crate::ir::UserTypeRef::new("Shape"),
+                            variant: "Circle".to_string(),
+                        },
                         fields: vec![("radius".to_string(), MP::binding("radius"))],
                         rest: true,
                     }],
@@ -742,7 +745,10 @@ fn test_generate_match_enum_variant_with_bindings_renders_field_names() {
                 },
                 crate::ir::MatchArm {
                     patterns: vec![MP::Struct {
-                        path: vec!["Shape".to_string(), "Rect".to_string()],
+                        ctor: crate::ir::PatternCtor::UserEnumVariant {
+                            enum_ty: crate::ir::UserTypeRef::new("Shape"),
+                            variant: "Rect".to_string(),
+                        },
                         fields: vec![
                             ("width".to_string(), MP::binding("width")),
                             ("height".to_string(), MP::binding("height")),

@@ -314,7 +314,7 @@ mod tests {
 
         let stmt = Stmt::IfLet {
             pattern: Pattern::TupleStruct {
-                path: vec!["Some".to_string()],
+                ctor: crate::ir::PatternCtor::Builtin(crate::ir::BuiltinVariant::Some),
                 fields: vec![Pattern::Literal(Expr::Cast {
                     expr: Box::new(Expr::IntLit(1)),
                     target: RustType::Named {

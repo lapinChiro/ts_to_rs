@@ -370,8 +370,12 @@ fn test_convert_switch_discriminated_union_to_enum_match() {
         assert!(
             arms[0].patterns.iter().any(|p| matches!(
                 p,
-                Pattern::Struct { path, .. }
-                    if path == &["Shape".to_string(), "Circle".to_string()]
+                Pattern::Struct { ctor, .. }
+                    if matches!(
+                        ctor,
+                        crate::ir::PatternCtor::UserEnumVariant { enum_ty, variant }
+                            if enum_ty.as_str() == "Shape" && variant == "Circle"
+                    )
             )),
             "expected Pattern::Struct for Shape::Circle, got: {:?}",
             arms[0].patterns
@@ -578,8 +582,12 @@ fn test_convert_switch_case_propagates_discriminant_type_for_string_enum() {
             assert!(
                 arms[0].patterns.iter().any(|p| matches!(
                     p,
-                    Pattern::UnitStruct { path }
-                        if path == &["Direction".to_string(), "Up".to_string()]
+                    Pattern::UnitStruct { ctor }
+                        if matches!(
+                            ctor,
+                            crate::ir::PatternCtor::UserEnumVariant { enum_ty, variant }
+                                if enum_ty.as_str() == "Direction" && variant == "Up"
+                        )
                 )),
                 "expected Direction::Up pattern, got {:?}",
                 arms[0].patterns
@@ -588,8 +596,12 @@ fn test_convert_switch_case_propagates_discriminant_type_for_string_enum() {
             assert!(
                 arms[1].patterns.iter().any(|p| matches!(
                     p,
-                    Pattern::UnitStruct { path }
-                        if path == &["Direction".to_string(), "Down".to_string()]
+                    Pattern::UnitStruct { ctor }
+                        if matches!(
+                            ctor,
+                            crate::ir::PatternCtor::UserEnumVariant { enum_ty, variant }
+                                if enum_ty.as_str() == "Direction" && variant == "Down"
+                        )
                 )),
                 "expected Direction::Down pattern, got {:?}",
                 arms[1].patterns

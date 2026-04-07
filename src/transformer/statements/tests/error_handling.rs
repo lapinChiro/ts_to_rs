@@ -26,11 +26,11 @@ fn test_convert_stmt_list_try_catch_expands_to_let_block_if() {
         Stmt::IfLet {
             pattern, then_body, ..
         } => {
-            // Structured `Err(e)` pattern: TupleStruct with path ["Err"] and a single Binding "e".
+            // Structured `Err(e)` pattern: TupleStruct ctor=Builtin(Err) with single Binding "e".
             let is_err_e = matches!(
                 pattern,
-                crate::ir::Pattern::TupleStruct { path, fields }
-                    if path == &["Err".to_string()]
+                crate::ir::Pattern::TupleStruct { ctor, fields }
+                    if matches!(ctor, crate::ir::PatternCtor::Builtin(crate::ir::BuiltinVariant::Err))
                         && fields.len() == 1
                         && matches!(&fields[0], crate::ir::Pattern::Binding { name, .. } if name == "e")
             );
@@ -131,8 +131,8 @@ fn test_convert_stmt_nested_try_catch_expands_inner_in_outer_body() {
             // Structured `Err(outer)` pattern
             let binds_outer = matches!(
                 pattern,
-                crate::ir::Pattern::TupleStruct { path, fields }
-                    if path == &["Err".to_string()]
+                crate::ir::Pattern::TupleStruct { ctor, fields }
+                    if matches!(ctor, crate::ir::PatternCtor::Builtin(crate::ir::BuiltinVariant::Err))
                         && fields.len() == 1
                         && matches!(&fields[0], crate::ir::Pattern::Binding { name, .. } if name == "outer")
             );
@@ -243,7 +243,8 @@ fn test_convert_try_catch_basic_expands_to_let_labeledblock_if() {
         } => {
             let is_err = matches!(
                 pattern,
-                crate::ir::Pattern::TupleStruct { path, .. } if path == &["Err".to_string()]
+                crate::ir::Pattern::TupleStruct { ctor, .. }
+                    if matches!(ctor, crate::ir::PatternCtor::Builtin(crate::ir::BuiltinVariant::Err))
             );
             assert!(is_err, "expected Err pattern, got {pattern:?}");
             assert!(

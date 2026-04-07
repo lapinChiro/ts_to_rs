@@ -81,12 +81,59 @@ fn counter_visitor_traverses_nested_fn_body() {
 }
 
 #[test]
+fn walk_pattern_ctor_fires_visit_user_type_ref_for_user_variants() {
+    // I-380: PatternCtor 経由で user type 参照を構造的に通知
+    use crate::ir::{BuiltinVariant, PatternCtor, UserTypeRef};
+
+    #[derive(Default)]
+    struct UserRefRecorder(Vec<String>);
+    impl IrVisitor for UserRefRecorder {
+        fn visit_user_type_ref(&mut self, r: &UserTypeRef) {
+            self.0.push(r.as_str().to_string());
+        }
+    }
+
+    // UserEnumVariant: enum_ty を発火
+    let pat_ev = Pattern::TupleStruct {
+        ctor: PatternCtor::UserEnumVariant {
+            enum_ty: UserTypeRef::new("Color"),
+            variant: "Red".to_string(),
+        },
+        fields: vec![Pattern::Wildcard],
+    };
+    let mut r1 = UserRefRecorder::default();
+    r1.visit_pattern(&pat_ev);
+    assert_eq!(r1.0, vec!["Color".to_string()]);
+
+    // UserStruct: 内部の UserTypeRef を発火
+    let pat_us = Pattern::Struct {
+        ctor: PatternCtor::UserStruct(UserTypeRef::new("Foo")),
+        fields: vec![],
+        rest: true,
+    };
+    let mut r2 = UserRefRecorder::default();
+    r2.visit_pattern(&pat_us);
+    assert_eq!(r2.0, vec!["Foo".to_string()]);
+
+    // Builtin: 発火しない
+    let pat_b = Pattern::UnitStruct {
+        ctor: PatternCtor::Builtin(BuiltinVariant::None),
+    };
+    let mut r3 = UserRefRecorder::default();
+    r3.visit_pattern(&pat_b);
+    assert!(r3.0.is_empty());
+}
+
+#[test]
 fn pattern_walker_visits_nested_tuple_struct() {
     // Some(Color::Red(x))
     let pat = Pattern::TupleStruct {
-        path: vec!["Some".to_string()],
+        ctor: crate::ir::PatternCtor::Builtin(crate::ir::BuiltinVariant::Some),
         fields: vec![Pattern::TupleStruct {
-            path: vec!["Color".to_string(), "Red".to_string()],
+            ctor: crate::ir::PatternCtor::UserEnumVariant {
+                enum_ty: crate::ir::UserTypeRef::new("Color"),
+                variant: "Red".to_string(),
+            },
             fields: vec![Pattern::binding("x")],
         }],
     };
@@ -587,6 +634,77 @@ fn walk_expr_primitive_and_std_const_do_not_fire_user_type_ref_hook() {
         "PrimitiveAssocConst / StdConst must NOT register user type refs, got {:?}",
         rec.seen
     );
+}
+
+/// I-380: `IrVisitor::visit_trait_ref` が QSelf / Impl::for_trait /
+/// Trait::supertraits の各構築サイトから発火することを検証する。
+/// `external_struct_generator::TypeRefCollector` が `TraitRef::name` (`String` 型)
+/// を構造的に拾うための単一フックが、3 つの構築サイトすべてから発火する保証。
+#[test]
+fn visit_trait_ref_fires_from_qself_impl_and_trait_supertraits() {
+    use crate::ir::{Method, TraitRef, Visibility};
+
+    #[derive(Default)]
+    struct TraitNameRecorder(Vec<String>);
+    impl IrVisitor for TraitNameRecorder {
+        fn visit_trait_ref(&mut self, tref: &TraitRef) {
+            self.0.push(tref.name.clone());
+            walk_trait_ref(self, tref);
+        }
+    }
+
+    // 1. QSelf::trait_ref
+    let ty = RustType::QSelf {
+        qself: Box::new(RustType::Named {
+            name: "T".to_string(),
+            type_args: vec![],
+        }),
+        trait_ref: TraitRef {
+            name: "Promise".to_string(),
+            type_args: vec![],
+        },
+        item: "Output".to_string(),
+    };
+    let mut rec = TraitNameRecorder::default();
+    rec.visit_rust_type(&ty);
+    assert_eq!(rec.0, vec!["Promise".to_string()]);
+
+    // 2. Item::Impl::for_trait
+    let item = Item::Impl {
+        struct_name: "Foo".to_string(),
+        type_params: vec![],
+        for_trait: Some(TraitRef {
+            name: "Display".to_string(),
+            type_args: vec![],
+        }),
+        consts: vec![],
+        methods: vec![],
+    };
+    let mut rec = TraitNameRecorder::default();
+    rec.visit_item(&item);
+    assert_eq!(rec.0, vec!["Display".to_string()]);
+
+    // 3. Item::Trait::supertraits
+    let item = Item::Trait {
+        vis: Visibility::Public,
+        name: "Greeter".to_string(),
+        type_params: vec![],
+        supertraits: vec![
+            TraitRef {
+                name: "Debug".to_string(),
+                type_args: vec![],
+            },
+            TraitRef {
+                name: "Clone".to_string(),
+                type_args: vec![],
+            },
+        ],
+        methods: Vec::<Method>::new(),
+        associated_types: vec![],
+    };
+    let mut rec = TraitNameRecorder::default();
+    rec.visit_item(&item);
+    assert_eq!(rec.0, vec!["Debug".to_string(), "Clone".to_string()]);
 }
 
 /// 全 `Item` variant が walker で訪問されることを検証する。

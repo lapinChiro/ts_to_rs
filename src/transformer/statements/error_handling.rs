@@ -121,7 +121,7 @@ impl<'a> Transformer<'a> {
 
             result.push(Stmt::IfLet {
                 pattern: Pattern::TupleStruct {
-                    path: vec!["Err".to_string()],
+                    ctor: crate::ir::PatternCtor::Builtin(crate::ir::BuiltinVariant::Err),
                     fields: vec![Pattern::binding(catch_param.as_str())],
                 },
                 expr: Expr::Ident("_try_result".to_string()),

@@ -1,18 +1,30 @@
 use super::*;
+use crate::ir::{BuiltinVariant, PatternCtor, UserTypeRef};
 
-// T8c: MatchArm pattern walking — EnumVariant.path uppercase extraction
+fn user_enum(enum_name: &str, variant: &str) -> PatternCtor {
+    PatternCtor::UserEnumVariant {
+        enum_ty: UserTypeRef::new(enum_name),
+        variant: variant.to_string(),
+    }
+}
+
+fn user_struct(name: &str) -> PatternCtor {
+    PatternCtor::UserStruct(UserTypeRef::new(name))
+}
+
+// Pattern walking — UserEnumVariant / UserStruct ctor → user type ref が refs に登録される
 // =========================================================================
 
 #[test]
 fn test_collect_type_refs_match_arm_enum_variant_pattern() {
-    // match x { Color::Red { .. } => ... } → Color が refs
+    // match x { Color::Red => ... } → Color が refs
     let item = fn_with_body(
         "f",
         vec![Stmt::Match {
             expr: Expr::Ident("x".to_string()),
             arms: vec![MatchArm {
                 patterns: vec![Pattern::UnitStruct {
-                    path: vec!["Color".to_string(), "Red".to_string()],
+                    ctor: user_enum("Color", "Red"),
                 }],
                 guard: None,
                 body: vec![],
@@ -25,17 +37,16 @@ fn test_collect_type_refs_match_arm_enum_variant_pattern() {
 }
 
 #[test]
-fn test_collect_type_refs_match_arm_lowercase_path_captured() {
-    // I-377 以降、lowercase class 名も構造的に捕捉される（uppercase-head
-    // ヒューリスティック廃止）。
-    // match x { myenum::bar => ... } → `myenum` が refs に登録されることを確認。
+fn test_collect_type_refs_match_arm_lowercase_enum_captured() {
+    // I-380: lowercase 始まりの enum 名 (`myenum::bar`) も `UserEnumVariant`
+    // として構造的に refs に登録される。
     let item = fn_with_body(
         "f",
         vec![Stmt::Match {
             expr: Expr::Ident("x".to_string()),
             arms: vec![MatchArm {
                 patterns: vec![Pattern::UnitStruct {
-                    path: vec!["myenum".to_string(), "bar".to_string()],
+                    ctor: user_enum("myenum", "bar"),
                 }],
                 guard: None,
                 body: vec![],
@@ -49,7 +60,7 @@ fn test_collect_type_refs_match_arm_lowercase_path_captured() {
 
 #[test]
 fn test_collect_type_refs_match_arm_literal_walks_expr() {
-    // match x { 1 => Wrapper { } => ... } の本体に StructInit が含まれる場合、Wrapper を拾う
+    // match x { 1 => Wrapper { } } の本体 StructInit を拾う
     let item = fn_with_body(
         "f",
         vec![Stmt::Match {
@@ -94,23 +105,16 @@ fn test_collect_type_refs_match_arm_guard_walked() {
 }
 
 // =========================================================================
-// T8d: 構造化 Pattern walking — Stmt::IfLet / Stmt::WhileLet / Expr::Matches
+// 構造化 Pattern walking — Stmt::IfLet / Stmt::WhileLet / Expr::Matches
 // =========================================================================
-//
-// I-377 以降、pattern は `String` ではなく構造化 `Pattern` enum。walker は
-// `path: Vec<String>` の先頭セグメントを直接取り出すため、lowercase 先頭の
-// 型名も正しく捕捉される（uppercase-head ヒューリスティック廃止）。`Some` /
-// `None` / `Ok` / `Err` は言語組み込みの variant として `PATTERN_LANG_BUILTINS`
-// で明示除外される。
 
 #[test]
 fn test_collect_type_refs_stmt_iflet_pattern() {
-    // if let Color::Red = x { ... } → Color が refs
     let item = fn_with_body(
         "f",
         vec![Stmt::IfLet {
             pattern: Pattern::UnitStruct {
-                path: vec!["Color".to_string(), "Red".to_string()],
+                ctor: user_enum("Color", "Red"),
             },
             expr: Expr::Ident("x".to_string()),
             then_body: vec![],
@@ -124,13 +128,12 @@ fn test_collect_type_refs_stmt_iflet_pattern() {
 
 #[test]
 fn test_collect_type_refs_stmt_whilelet_pattern() {
-    // while let Color::Red(x) = it { ... } → Color が refs
     let item = fn_with_body(
         "f",
         vec![Stmt::WhileLet {
             label: None,
             pattern: Pattern::TupleStruct {
-                path: vec!["Color".to_string(), "Red".to_string()],
+                ctor: user_enum("Color", "Red"),
                 fields: vec![Pattern::binding("x")],
             },
             expr: Expr::Ident("it".to_string()),
@@ -144,13 +147,12 @@ fn test_collect_type_refs_stmt_whilelet_pattern() {
 
 #[test]
 fn test_collect_type_refs_expr_matches_pattern() {
-    // matches!(x, Color::Red(_)) → Color が refs
     let item = fn_with_body(
         "f",
         vec![Stmt::TailExpr(Expr::Matches {
             expr: Box::new(Expr::Ident("x".to_string())),
             pattern: Box::new(Pattern::TupleStruct {
-                path: vec!["Color".to_string(), "Red".to_string()],
+                ctor: user_enum("Color", "Red"),
                 fields: vec![Pattern::Wildcard],
             }),
         })],
@@ -161,33 +163,13 @@ fn test_collect_type_refs_expr_matches_pattern() {
 }
 
 #[test]
-fn test_collect_type_refs_pattern_lowercase_captured() {
-    // I-377: uppercase-head ヒューリスティック廃止により、lowercase class
-    // 名も構造的に捕捉される（false negative 解消）。
-    let item = fn_with_body(
-        "f",
-        vec![Stmt::IfLet {
-            pattern: Pattern::UnitStruct {
-                path: vec!["myenum".to_string(), "bar".to_string()],
-            },
-            expr: Expr::Ident("x".to_string()),
-            then_body: vec![],
-            else_body: None,
-        }],
-    );
-    let mut refs = HashSet::new();
-    collect_type_refs_from_item(&item, &mut refs);
-    assert!(refs.contains("myenum"));
-}
-
-#[test]
 fn test_collect_type_refs_pattern_struct_form() {
-    // if let Foo { x, .. } = ... → Foo が refs
+    // if let Foo { x, .. } = ... → Foo が refs (UserStruct ctor)
     let item = fn_with_body(
         "f",
         vec![Stmt::IfLet {
             pattern: Pattern::Struct {
-                path: vec!["Foo".to_string()],
+                ctor: user_struct("Foo"),
                 fields: vec![("x".to_string(), Pattern::binding("x"))],
                 rest: true,
             },
@@ -203,7 +185,6 @@ fn test_collect_type_refs_pattern_struct_form() {
 
 #[test]
 fn test_collect_type_refs_pattern_wildcard_no_extraction() {
-    // if let _ = x { ... } → wildcard、何も抽出しない
     let item = fn_with_body(
         "f",
         vec![Stmt::IfLet {
@@ -219,13 +200,14 @@ fn test_collect_type_refs_pattern_wildcard_no_extraction() {
 }
 
 #[test]
-fn test_collect_type_refs_pattern_some_none_ok_err_excluded() {
-    // I-377: `Some`/`None`/`Ok`/`Err` は Option/Result の variant コンストラクタで
-    // あり外部型 stub 生成の対象外（`PATTERN_LANG_BUILTINS` で除外）。
+fn test_collect_type_refs_pattern_builtin_variants_excluded_structurally() {
+    // I-380: `Some`/`None`/`Ok`/`Err` は `PatternCtor::Builtin` で構造的に
+    // 区別され、`visit_user_type_ref` フックを発火しないため refs に登録されない。
+    // (PATTERN_LANG_BUILTINS 文字列除外リストは構造的に不要になった)
     for (pat, name) in [
         (
             Pattern::TupleStruct {
-                path: vec!["Some".to_string()],
+                ctor: PatternCtor::Builtin(BuiltinVariant::Some),
                 fields: vec![Pattern::binding("x")],
             },
             "Some",
@@ -233,14 +215,14 @@ fn test_collect_type_refs_pattern_some_none_ok_err_excluded() {
         (Pattern::none(), "None"),
         (
             Pattern::TupleStruct {
-                path: vec!["Ok".to_string()],
+                ctor: PatternCtor::Builtin(BuiltinVariant::Ok),
                 fields: vec![Pattern::binding("v")],
             },
             "Ok",
         ),
         (
             Pattern::TupleStruct {
-                path: vec!["Err".to_string()],
+                ctor: PatternCtor::Builtin(BuiltinVariant::Err),
                 fields: vec![Pattern::binding("e")],
             },
             "Err",
