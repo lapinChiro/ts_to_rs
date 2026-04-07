@@ -6,6 +6,8 @@
 
 **実行順序**: **I-375 → I-377 → I-376**（3 本の独立 PRD として実施）
 
+**行数超過ファイルのケア**: **I-375 → I-377 → I-376**の処理直後に行う
+
 根拠:
 1. **I-375 先行（L2 優先 + IR 形状固定）**: IR 破壊的変更を最初に打って `Expr::FnCall` の最終形状（`CallTarget` enum）を確定させることで、後続の I-377 visitor 実装が最終形状に対して 1 回で済む（rework ゼロ）。また priority L2（correctness）を L3 より先行させる `todo-prioritization.md` 原則を遵守
 2. **I-377 中間（IR 層の大手術集約 + MatchPattern 構造化）**: 安定した IR 形状に対して `IrVisitor` trait を 1 回で導入。`external_struct_generator` の `collect_type_refs_*` と `ir/substitute.rs` を visitor ベースに書き換え。

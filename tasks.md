@@ -1,1049 +1,580 @@
-# Batch 11c (I-371) レビュー後修正タスク
+# Batch 11c-fix-2-b (I-377): IrVisitor/IrFolder 導入 + Pattern 構造化
 
-スコープ: コミット前 self-review で発見された 12 個の問題（問題 1〜10 + 追加発見 11, 12）を、原理的な理想状態へ構造解消する。
+スコープ: PRD `backlog/I-377-ir-visitor-and-pattern-structuring.md` の実装。IR pattern 文字列の完全構造化、IrVisitor/IrFolder trait 導入、walker / substitute / 散発再帰の visitor 統合、`RUST_BUILTIN_TYPES` からの `Some/None/Ok/Err` 除去。
 
-判断基準: 「実害の有無」ではなく「原理的な理想状態との乖離」。規模を度外視。既存課題かつ修正コスト大は TODO に詳細記載。
+判断基準: 原理的な理想状態。文字列ベース pattern の完全撲滅、手書き IR 再帰の完全統合。コスト度外視。
 
-進め方: `/large-scale-refactor` skill 規定に従い、Step 1 (Analysis) → Step 2 (Design) → Step 3 (Task Breakdown) → Step 4 (Review) → Step 5 (Implementation)。
+進め方: `/large-scale-refactor` の Step 1〜5。Phase 単位で `cargo check` が通る状態を維持し、各 phase 完了時に `[WIP]` commit を提案する。
 
 ---
 
 ## Step 1: Analysis
 
-### 1.1 問題と修正対象の対応表
+### 1.1 IR pattern field 一覧（置換対象）
 
-| # | 問題 | 修正対象（file:line） | 種別 |
-|---|------|----------------------|------|
-| 1 | inline → shared 推移インポート未生成 | `src/pipeline/output_writer.rs:87 resolve_synthetic_placement` | 振る舞い |
-| 2 | `let _ = output.synthetic_items;` 不明瞭 | `src/lib.rs:173` | 可読性 |
-| 3 | `synthetic_item_name` / `synthetic_type_name` 重複 | `src/lib.rs:239`, `src/pipeline/output_writer.rs:339` | DRY |
-| 4 | `collect_undefined_type_references` / `collect_all_undefined_references` API 非対称 | `src/pipeline/external_struct_generator/mod.rs:40, 84` | 設計 |
-| 5 | substring scan の脆弱性 | `src/pipeline/output_writer.rs:112, 119` , `src/lib.rs:217` | 設計 |
-| 6 | `PerFileTransformed` 関数内ローカル定義 | `src/pipeline/mod.rs:127` | 構造 |
-| 7 | `extract_single_output` の推移閉包スキャン重複 | `src/lib.rs:196 collect_referenced_synthetic_code` | DRY |
-| 8 | `FileOutput::file_synthetic_items` 死蔵 | `src/pipeline/types.rs:105` | 設計 |
-| 9 | パイプライン統合テスト欠落 | `tests/` 直下に新規 | テスト |
-| 10 | snapshot 6 件を一括 accept | `tests/snapshots/integration_test__{basic_types,inline_type_literal_param,typeof_const,instanceof_builtin,external_type_struct,instanceof_builtin_with_builtins}.snap` | 検証 |
-| 11 | `collect_type_refs_from_item` が Impl/Trait/TypeAlias 未対応 | `src/pipeline/external_struct_generator/mod.rs:260` | 振る舞い |
-| 12 | `OutputWriter::write_to_directory` API が IR を渡せない | `src/pipeline/output_writer.rs:183` | 設計 |
+| # | 対象 | File:line | 現状型 | 新型 |
+|---|------|-----------|--------|------|
+| A1 | `MatchPattern` enum | `src/ir/mod.rs:292-309` | 独立 enum (`Literal`/`Wildcard`/`EnumVariant{path,bindings}`/`Verbatim`) | 削除。`Pattern` に統合 |
+| A2 | `MatchArm::patterns` | `src/ir/mod.rs:315` | `Vec<MatchPattern>` | `Vec<Pattern>` |
+| A3 | `Stmt::WhileLet::pattern` | `src/ir/mod.rs:525` | `String` | `Pattern` |
+| A4 | `Stmt::IfLet::pattern` | `src/ir/mod.rs:570` | `String` | `Pattern` |
+| A5 | `Expr::IfLet::pattern` | `src/ir/mod.rs:846` | `String` | `Pattern` |
+| A6 | `Expr::Matches::pattern` | `src/ir/mod.rs:906` | `String` | `Pattern` |
 
-### 1.2 関数シグネチャ現状（grep 結果）
+→ `src/ir/mod.rs:924` の `pattern: String` は `Expr::Regex::pattern`（正規表現文字列）であり match pattern ではない。変更対象外。
 
-```
-src/pipeline/output_writer.rs:87
-  pub fn resolve_synthetic_placement(
-      &self,
-      file_outputs: &[(PathBuf, String)],
-      synthetic_items: &[Item],
-  ) -> SyntheticPlacement
+### 1.2 Pattern 構築サイト（transformer）
 
-src/pipeline/output_writer.rs:183
-  pub fn write_to_directory(
-      &self,
-      output_dir: &Path,
-      file_outputs: &[(PathBuf, String)],
-      synthetic_items: &[Item],
-      run_rustfmt: bool,
-  ) -> Result<()>
+| # | File:line | 現行コード | 新形 |
+|---|-----------|-----------|------|
+| B1 | `src/transformer/statements/control_flow.rs:279` | `MatchPattern::Verbatim(positive_pattern.clone())` | `Pattern`（`resolve_if_let_pattern` が返す構造化値） |
+| B2 | `src/transformer/statements/control_flow.rs:284` | `MatchPattern::Verbatim(complement_pattern.clone())` | `Pattern`（`resolve_complement_pattern` から） |
+| B3 | `src/transformer/statements/control_flow.rs:304` | `MatchPattern::Verbatim("None".to_string())` | `Pattern::UnitStruct { path: vec!["None".into()] }` |
+| B4 | `src/transformer/statements/control_flow.rs:309` | `MatchPattern::Verbatim(format!("Some({})", var_name))` | `Pattern::TupleStruct { path: vec!["Some".into()], fields: vec![Pattern::Binding{name: var_name,..}] }` |
+| B5 | `src/transformer/statements/control_flow.rs:327,332` | 同 B1/B2 | 同 |
+| B6 | `src/transformer/statements/control_flow.rs:160-164` | `Stmt::IfLet { pattern: format!("Some({})", ca.var_name), ... }` | `Pattern::TupleStruct{Some, Binding}` |
+| B7 | `src/transformer/statements/loops.rs:26-28` | `Stmt::WhileLet { pattern: format!("Some({})", ca.var_name), ... }` | 同 |
+| B8 | `src/transformer/statements/error_handling.rs:119-120` | `Stmt::IfLet { pattern: format!("Err({catch_param})"), ... }` | `Pattern::TupleStruct{Err, Binding}` |
+| B9 | `src/transformer/statements/control_flow.rs:358-374` (`generate_if_let`) | `(pattern: String, is_swap)` タプル使用 | `(Pattern, bool)` |
+| B10 | `src/transformer/expressions/mod.rs:214-267` | `resolve_if_let_pattern` の戻り値を `Expr::IfLet { pattern: ..., ... }` に渡す | Pattern 経由 |
+| B11 | `src/transformer/expressions/patterns.rs:127-131` | `Expr::Matches { pattern: format!("{enum_name}::{expected_variant}(_)"), ... }` | `Pattern::TupleStruct{vec![enum_name, expected_variant], vec![Wildcard]}` |
+| B12 | `src/transformer/expressions/patterns.rs:287-290` | `Expr::Matches { pattern: format!("{name}::{class_name}(_)"), ... }` | 同 |
+| B13 | `src/transformer/expressions/patterns.rs:402-494` `resolve_if_let_pattern` / `resolve_complement_pattern` / `resolve_other_variant` | 戻り値 `Option<(String, bool)>` / `Option<String>` | `Option<(Pattern, bool)>` / `Option<Pattern>` |
+| B14 | `src/transformer/statements/switch.rs:273,285-296` | `MatchPattern::Literal(Expr::Ident("{ename}::{vname}({var_name})"))` — **既存 broken window**: Pattern を Expr::Ident に encode している | `Pattern::TupleStruct{vec![ename,vname], vec![Binding{var_name}]}` |
+| B15 | `src/transformer/statements/switch.rs:437-440` | `MatchPattern::EnumVariant { path: format!("{enum_name}::{variant_name}"), bindings: vec![] }` | `Pattern::Struct{path: vec![enum_name, variant_name], fields: [], rest: true}` または `Pattern::UnitStruct` |
+| B16 | `src/transformer/statements/switch.rs:461-474` | `if let MatchPattern::EnumVariant { bindings, path, .. } = pattern` — path から variant name を `rsplit("::")` で抽出 | `Pattern::Struct` の `path: Vec<String>` を直接使用 |
+| B17 | `src/transformer/statements/switch.rs:553` | `MatchPattern::Literal(Expr::Ident(path))` path = `"EnumName::Variant"` — **既存 broken window** | `Pattern::UnitStruct{vec![enum_name, variant_name]}` |
+| B18 | `src/transformer/statements/switch.rs:612,632,642,349,490,566` | `MatchPattern::Literal(expr)` / `MatchPattern::Wildcard` | そのまま `Pattern::Literal(expr)` / `Pattern::Wildcard` |
+| B19 | `src/transformer/expressions/member_access.rs:387-403` | `MatchPattern::EnumVariant { path, bindings }` | `Pattern::Struct` |
+| B20 | `src/transformer/context.rs:277-282` (test) | `MatchPattern::Literal(...)` / `MatchPattern::Wildcard` | `Pattern::Literal(...)` / `Pattern::Wildcard` |
 
-src/pipeline/output_writer.rs:339
-  fn synthetic_type_name(item: &Item) -> String
+### 1.3 Pattern 参照サイト（mutability.rs 等）
 
-src/lib.rs:172
-  fn extract_single_output(output: pipeline::TranspileOutput) -> Result<pipeline::FileOutput>
+| # | File:line | 内容 |
+|---|-----------|------|
+| C1 | `src/transformer/statements/mutability.rs:97-131` | `Stmt::IfLet { ... }` / `Stmt::WhileLet { ... }` を pattern match（フィールド参照のみ） |
+| C2 | `src/transformer/statements/mutability.rs:242-278` | `Expr::IfLet`, `Expr::Matches` を pattern match |
+| C3 | `src/transformer/functions/helpers.rs:176-217` | `Stmt::WhileLet` / `Stmt::IfLet` の clone (`pattern: pattern.clone()`) |
+| C4 | `src/transformer/statements/loops.rs:585-709` | `Stmt::IfLet` / `Stmt::WhileLet` の body walking |
 
-src/lib.rs:196
-  fn collect_referenced_synthetic_code(rust_source: &str, synthetic_items: &[ir::Item]) -> String
+→ これらは struct field 型が変わるだけで、field 名参照は変更不要。`pattern.clone()` は Pattern 型でも同様に動作。
 
-src/lib.rs:239
-  fn synthetic_item_name(item: &ir::Item) -> String
+### 1.4 Generator 側 rendering
 
-src/pipeline/external_struct_generator/mod.rs:40
-  pub fn collect_undefined_type_references(
-      items: &[Item],
-      scan_context: &[Item],
-      registry: &TypeRegistry,
-  ) -> HashSet<String>
+| # | File:line | 現状 | 新 |
+|---|-----------|------|----|
+| D1 | `src/generator/statements/mod.rs:75-200` | `Stmt::WhileLet { pattern, .. }` `Stmt::IfLet { pattern, .. }` で `pattern` を `String` として扱い直接 emit。`MatchPattern::Verbatim(s) => s.clone()` | `render_pattern(&Pattern) -> String` を呼び出し |
+| D2 | `src/generator/expressions/mod.rs:299-378` | `Expr::IfLet` / `Expr::Matches` / match arms 同様 | 同 |
+| D3 | `src/generator/statements/mod.rs:177-200` | `MatchPattern::{Literal, Wildcard, EnumVariant{path,bindings}, Verbatim}` 各 arm 処理 | `Pattern` の全 variant 処理へ統合 |
+| D4 | `src/generator/expressions/mod.rs:360-378` | 同 D3 | 同 |
 
-src/pipeline/external_struct_generator/mod.rs:84
-  pub fn collect_all_undefined_references(
-      items: &[Item],
-      scan_context: &[Item],
-      defined_only: &[Item],
-  ) -> HashSet<String>
+### 1.5 Walker / Substitute / 散発再帰
 
-src/pipeline/external_struct_generator/mod.rs:158
-  pub fn generate_stub_structs(
-      items: &mut Vec<Item>,
-      scan_context: &[Item],
-      defined_only: &[Item],
-      registry: &TypeRegistry,
-      synthetic: &SyntheticTypeRegistry,
-  )
+| # | File:line | 現状 | 新 |
+|---|-----------|------|----|
+| E1 | `src/pipeline/external_struct_generator/mod.rs:305-712` `collect_type_refs_from_item/_stmt/_expr/_rust_type/_type_params/_method/_match_arm/_verbatim_pattern` 約 400 行 | 手書き再帰 + uppercase-head ヒューリスティック | `TypeRefCollector: IrVisitor` に統合 |
+| E2 | `src/ir/substitute.rs` 全体 (595 行) `impl X { fn substitute }` | 手書き再帰で新 IR 生成 | `Substitute: IrFolder` に統合 |
+| E3 | `src/transformer/mod.rs:756 expr_contains_runtime_typeof` + `stmts_contain_runtime_typeof` + `items_contain_runtime_typeof` | 手書き再帰 | `RuntimeTypeofDetector: IrVisitor` |
+| E4 | `src/transformer/mod.rs:796 items_contain_regex` + `stmts_contain_regex` + body walking | 手書き再帰 | `RegexDetector: IrVisitor` |
 
-src/pipeline/external_struct_generator/mod.rs:260
-  fn collect_type_refs_from_item(item: &Item, refs: &mut HashSet<String>)
-  // 現状: Enum, Struct, Fn のみ walk。Impl/Trait/TypeAlias 未対応
+### 1.6 uppercase-head ヒューリスティック / ハードコード除外
 
-src/pipeline/mod.rs:127 (関数内ローカル定義)
-  struct PerFileTransformed {
-      path: PathBuf,
-      source: String,
-      items: Vec<Item>,
-      unsupported: Vec<UnsupportedSyntaxError>,
-      file_synthetic_items: Vec<Item>,
-  }
+| # | File:line | 削除対象 |
+|---|-----------|---------|
+| F1 | `src/pipeline/external_struct_generator/mod.rs:31-36` | `RUST_BUILTIN_TYPES` から `"Some", "None", "Ok", "Err"` を削除 |
+| F2 | `src/pipeline/external_struct_generator/mod.rs:15-36` | 定数上部の暫定コメント（I-377 まで必要な一時フィルタ）を正規コメントに置換 |
+| F3 | `src/pipeline/external_struct_generator/mod.rs:511-537 collect_type_refs_from_verbatim_pattern` | 関数ごと削除 |
+| F4 | `src/pipeline/external_struct_generator/mod.rs:539-562 collect_type_refs_from_match_arm` の uppercase-head ロジック | `TypeRefCollector` 再実装で消滅 |
 
-src/pipeline/mod.rs:290
-  fn generate_external_structs_to_fixpoint(
-      items: &mut Vec<Item>,
-      scan_context: &[Item],
-      registry: &TypeRegistry,
-      synthetic: &SyntheticTypeRegistry,
-  )
+### 1.7 テストファイルへの影響
 
-src/pipeline/types.rs:92
-  pub struct FileOutput {
-      pub path: PathBuf,
-      pub source: String,
-      pub rust_source: String,
-      pub unsupported: Vec<UnsupportedSyntaxError>,
-      pub file_synthetic_items: Vec<Item>,  // ← 削除対象 (#8)
-  }
-```
+| # | File | 影響 |
+|---|------|------|
+| T1 | `src/pipeline/external_struct_generator/tests.rs:1910-2084` | `MatchPattern` / `Stmt::IfLet{pattern:"..."}` / `Stmt::WhileLet{pattern:"..."}` / `Expr::Matches{pattern:"..."}` 構築 |
+| T2 | `src/transformer/statements/tests/switch.rs` 多数 | `MatchPattern::` での pattern matching |
+| T3 | `src/transformer/statements/tests/control_flow.rs:452,532` | `pattern == "Some(x)"` 文字列比較 |
+| T4 | `src/transformer/statements/tests/error_handling.rs:125` | `Stmt::IfLet { pattern, .. }` |
+| T5 | `src/transformer/expressions/tests/type_guards.rs:352-380` | `resolve_if_let_pattern` の結果型変更 |
+| T6 | `src/transformer/expressions/tests/enums.rs:331` | `MatchPattern::EnumVariant` |
+| T7 | `src/generator/statements/tests.rs:165,464,494` | `Stmt::IfLet/WhileLet { pattern: "..." }` |
+| T8 | `src/generator/expressions/tests.rs:706-718` | `MatchPattern::EnumVariant` / `Wildcard` |
+| T9 | `src/transformer/context.rs:277-282` (inline test) | `MatchPattern::Literal` / `Wildcard` |
+| T10 | `src/transformer/statements/tests/mod.rs:13` / `expressions/tests/mod.rs:23` | `use crate::ir::MatchPattern` |
+| T11 | `tests/lowercase_class_reference_test.rs` | 回帰確認 |
+| T12 | `tests/integration_test.rs::test_type_narrowing/test_async_await/test_error_handling/test_narrowing_truthy_instanceof` | I-375 申し送り 4 件の回帰確認（Some/None/Ok/Err 除去後も pass） |
 
-### 1.3 呼び出し元一覧
+### 1.8 変更ファイル総数
 
-**`resolve_synthetic_placement` の呼び出し元（4 箇所）**:
-- `src/pipeline/output_writer.rs:190` (`write_to_directory` 内)
-- `src/pipeline/output_writer.rs:535, 561, 575, 771, 797, 822` (test, 計 6 箇所)
+新規作成 4 + 変更 ~30 + テスト ~10 = **合計 ~45 ファイル**。
 
-**`write_to_directory` の呼び出し元（11 箇所）**:
-- `src/main.rs:234` (production)
-- `src/pipeline/output_writer.rs:597, 617, 651, 687, 731, 854, 886, 926` (test 8 箇所)
-
-**`extract_single_output` の呼び出し元（3 箇所、すべて lib.rs 内）**:
-- `src/lib.rs:41` (`transpile_collecting`)
-- `src/lib.rs:61` (`transpile_collecting` の別経路)
-- `src/lib.rs:87` (`transpile_with_builtins`)
-
-**`collect_undefined_type_references` の呼び出し元**:
-- `src/pipeline/mod.rs:298` (`generate_external_structs_to_fixpoint` 内)
-- `src/pipeline/external_struct_generator/tests.rs` 16 箇所（line: 56, 91, 115, 148, 171, 194, 218, 255, 302, 332, 362, 398, 429, 458, 488, 517）
-
-**`collect_all_undefined_references` の呼び出し元**:
-- `src/pipeline/external_struct_generator/mod.rs:166` (`generate_stub_structs` 内)
-- `src/pipeline/external_struct_generator/tests.rs:1129, 1158`
-
-**`generate_stub_structs` の呼び出し元**:
-- `src/pipeline/mod.rs:197` (per-file)
-- `src/pipeline/mod.rs:227` (post-loop)
-- `src/pipeline/external_struct_generator/tests.rs:1180`
-
-**`generate_external_structs_to_fixpoint` の呼び出し元**:
-- `src/pipeline/mod.rs:185` (per-file)
-- `src/pipeline/mod.rs:224` (post-loop)
-
-**`FileOutput::file_synthetic_items` の使用箇所**:
-- `src/pipeline/types.rs:105` (定義)
-- `src/pipeline/mod.rs:212` (構築)
-- `src/lib.rs:183` (`extract_single_output` 内で消費)
-- `src/pipeline/mod.rs:339` (`transpile_single` 内で消費)
-
-**`collect_type_refs_from_item` の呼び出し元**:
-- `src/pipeline/external_struct_generator/mod.rs:61, 135` (private)
-- 修正後: `src/pipeline/placement.rs` から呼び出すため `pub(crate)` 化
-
-### 1.4 依存グラフ
-
-```
-A-1 (canonical_name)        ─┐
-A-2 (collect_type_refs 強化) ─┼─→ A-3 (placement モジュール)
-                              │
-A-3 (placement)              ─┼─→ B-2 (resolve_placement IR 化)
-                              │     ↓
-                              │   B-3 (推移インポート)
-                              │
-B-1 (OutputFile API 変更)    ─┴─→ C-2 (FileOutput.items 化)
-                                    ↓
-                                  C-1 (PerFileTransformed 外出し)
-                                    ↓
-                                  D-1 (extract_single_output IR 統合)
-                                    ↓
-                                  D-2 (let _ 削除)
-                                    ↓
-                                  E (API 対称化, 独立)
-                                    ↓
-                                  F-1 (統合テスト)
-                                    ↓
-                                  F-2 (snapshot 個別検証)
-                                    ↓
-                                  G (検証)
-```
-
-依存上、A → B → C → D → E → F → G の順序を厳守。
-
-### 1.5 既知の TODO 化対象（本スコープ外）
-
-| ID | 問題 | 修正コスト | 残留理由 |
-|----|------|-----------|---------|
-| T1 | クロスファイル外部型重複（jws.rs に `pub struct Algorithm {}` stub） | 大 | user 型 + builtin 外部型のクロスモジュール解決機構が必要。`pipeline::placement` を user 型まで拡張 + `ModuleGraph` との連携 |
-| T2 | `Item::Fn::body` 内型参照を IR walk しない | 中 | 現状の signature-level walk で実用上問題なし。Stmt の網羅 walk が必要 |
-
-→ G-4 で TODO ファイルに追記する。
+- 新規: `src/ir/pattern.rs`, `src/ir/visit.rs`, `src/ir/fold.rs`, `src/pipeline/external_struct_generator/type_ref_collector.rs`
+- 変更（非テスト）: `src/ir/mod.rs`, `src/ir/substitute.rs`, `src/transformer/statements/{control_flow.rs, loops.rs, error_handling.rs, switch.rs, mutability.rs}`, `src/transformer/expressions/{mod.rs, patterns.rs, member_access.rs, literals.rs (確認のみ)}`, `src/transformer/functions/helpers.rs`, `src/transformer/context.rs`, `src/transformer/mod.rs`, `src/generator/statements/mod.rs`, `src/generator/expressions/mod.rs`, `src/pipeline/external_struct_generator/mod.rs`, `src/pipeline/placement.rs`（使用箇所があれば）, 他の呼び出し側
 
 ---
 
 ## Step 2: Design
 
-### 2.1 `Item::canonical_name()` (#3)
+### 2.1 `Pattern` enum 定義
 
-**場所**: `src/ir/mod.rs` の `impl Item` ブロック
-
-```rust
-impl Item {
-    /// Item の識別名を返す。命名対象の Item は `Some(name)` を、Comment / RawCode /
-    /// Use のように単一の識別名を持たない Item は `None` を返す。
-    ///
-    /// 合成型の参照グラフ構築や placement 判定など、Item を名前で索引する用途で使用する。
-    pub fn canonical_name(&self) -> Option<&str> {
-        match self {
-            Item::Struct { name, .. }
-            | Item::Enum { name, .. }
-            | Item::Trait { name, .. }
-            | Item::TypeAlias { name, .. }
-            | Item::Fn { name, .. } => Some(name),
-            Item::Impl { struct_name, .. } => Some(struct_name),
-            Item::Comment(_) | Item::RawCode(_) | Item::Use { .. } => None,
-        }
-    }
-}
-```
-
-**置換対象**:
-- `src/lib.rs:239 synthetic_item_name` → 削除、`item.canonical_name().unwrap_or("")` で代替（呼び出し元で `is_empty()` チェック済）
-- `src/pipeline/output_writer.rs:339 synthetic_type_name` → 削除、同様に置換
-
-**注**: `synthetic_type_name` は `Use { path }` に対し `path.clone()`、`Comment(text)` / `RawCode(text)` に対し `text.clone()` を返していたが、これらは合成型では発生しないため `None` 扱いで safe（呼び出し側で名前空文字 → スキップ）。
-
-### 2.2 `collect_type_refs_from_item` 強化 (#11)
-
-**場所**: `src/pipeline/external_struct_generator/mod.rs:260`
-
-**追加対応**:
+`src/ir/pattern.rs` 新規:
 
 ```rust
-pub(crate) fn collect_type_refs_from_item(item: &Item, refs: &mut HashSet<String>) {
-    match item {
-        Item::Enum { variants, .. } => { /* 既存 */ }
-        Item::Struct { fields, .. } => { /* 既存 */ }
-        Item::Fn { return_type, params, .. } => { /* 既存 */ }
-        // ↓ 追加
-        Item::TypeAlias { ty, .. } => {
-            collect_type_refs_from_rust_type(ty, refs);
-        }
-        Item::Impl { for_trait, methods, .. } => {
-            if let Some(tref) = for_trait {
-                refs.insert(tref.name.clone());
-                for arg in &tref.type_args {
-                    collect_type_refs_from_rust_type(arg, refs);
-                }
-            }
-            for method in methods {
-                if let Some(rt) = &method.return_type {
-                    collect_type_refs_from_rust_type(rt, refs);
-                }
-                for param in &method.params {
-                    if let Some(ty) = &param.ty {
-                        collect_type_refs_from_rust_type(ty, refs);
-                    }
-                }
-            }
-        }
-        Item::Trait { methods, supertraits, .. } => {
-            for sup in supertraits {
-                refs.insert(sup.name.clone());
-                for arg in &sup.type_args {
-                    collect_type_refs_from_rust_type(arg, refs);
-                }
-            }
-            for method in methods {
-                if let Some(rt) = &method.return_type {
-                    collect_type_refs_from_rust_type(rt, refs);
-                }
-                for param in &method.params {
-                    if let Some(ty) = &param.ty {
-                        collect_type_refs_from_rust_type(ty, refs);
-                    }
-                }
-            }
-        }
-        Item::Use { .. } | Item::Comment(_) | Item::RawCode(_) => {}
-    }
-}
-```
+use super::Expr;
 
-**TraitRef / Method の構造確認**: A-2 着手前に `src/ir/mod.rs` で `TraitRef`, `Method` フィールドを再確認すること。
-
-`pub(crate)` に変更（`pipeline::placement` から呼び出すため）。
-
-### 2.3 `pipeline::placement` モジュール (#5, #7)
-
-**新規ファイル**: `src/pipeline/placement.rs`
-
-```rust
-//! IR ベースで合成型の参照グラフを構築・参照するヘルパ。
-//!
-//! OutputWriter の合成型配置決定および単一ファイル API の合成型選択に使用する。
-//! substring scan を排除し、IR レベルで参照関係を一貫して扱う。
-
-use std::collections::{BTreeSet, HashMap};
-use std::path::{Path, PathBuf};
-
-use crate::ir::Item;
-use crate::pipeline::external_struct_generator::collect_type_refs_from_item;
-
-/// 合成型の参照グラフ。
+/// Rust pattern grammar を構造化表現した IR ノード。
 ///
-/// - 各合成型がどの user file から直接参照されているか
-/// - 各合成型が他のどの合成型から参照されているか
-/// - 各合成型の生成済みコード文字列
-pub struct SyntheticReferenceGraph {
-    /// 合成型名 → 直接参照している user file の集合
-    direct_referencers: HashMap<String, BTreeSet<PathBuf>>,
-    /// 合成型 A → A から参照される他の合成型の集合
-    synthetic_dependencies: HashMap<String, BTreeSet<String>>,
-    /// 合成型名 → 生成済みコード文字列
-    code: HashMap<String, String>,
-    /// 合成型名のみの順序保持リスト（決定的出力のため）
-    names_in_order: Vec<String>,
-}
-
-impl SyntheticReferenceGraph {
-    /// 全 user file の items と全 synthetic items から参照グラフを構築する。
+/// `MatchArm::patterns` および `Stmt::IfLet` / `Stmt::WhileLet` /
+/// `Expr::IfLet` / `Expr::Matches` の `pattern` フィールドで使用される。
+/// 文字列化は generator の `render_pattern` が担当し、IR 層は
+/// 常に構造化データを保持する。
+#[derive(Debug, Clone, PartialEq)]
+pub enum Pattern {
+    /// `_`
+    Wildcard,
+    /// リテラル値（`1`, `"hello"`, `true`, `Direction::Up` 相当の path expression）。
+    /// match arm で discriminant と比較される値そのもの。
+    Literal(Expr),
+    /// 変数束縛（`x`, `mut x`, `x @ 1..=5`）
+    Binding {
+        name: String,
+        is_mut: bool,
+        subpat: Option<Box<Pattern>>,
+    },
+    /// タプル構造体 variant（`Some(x)`, `Color::Red(x, y)`, `Ok(v)`, `Err(e)`）
     ///
-    /// `per_file_items` は (rel_path, items) のタプル。`items` は user file の
-    /// rust_source を生成した IR 全体（user code + per-file 外部型 struct を含む）。
-    pub fn build(
-        per_file_items: &[(PathBuf, &[Item])],
-        synthetic_items: &[Item],
-    ) -> Self {
-        // 1. 合成型ごとの code とエントリ初期化
-        let mut code = HashMap::new();
-        let mut names_in_order = Vec::new();
-        for item in synthetic_items {
-            if let Some(name) = item.canonical_name() {
-                let generated = crate::generator::generate(std::slice::from_ref(item));
-                code.insert(name.to_string(), generated);
-                names_in_order.push(name.to_string());
-            }
-        }
-
-        // 2. user file ごとに、その items を walk して合成型名への参照を収集
-        let mut direct_referencers: HashMap<String, BTreeSet<PathBuf>> = HashMap::new();
-        for (path, items) in per_file_items {
-            let mut refs = std::collections::HashSet::new();
-            for item in *items {
-                collect_type_refs_from_item(item, &mut refs);
-            }
-            for r in refs {
-                if code.contains_key(&r) {
-                    direct_referencers
-                        .entry(r)
-                        .or_default()
-                        .insert(path.clone());
-                }
-            }
-        }
-
-        // 3. 合成型同士の依存関係（A の field 等から B を参照）
-        let mut synthetic_dependencies: HashMap<String, BTreeSet<String>> = HashMap::new();
-        for item in synthetic_items {
-            let Some(name) = item.canonical_name() else { continue; };
-            let mut refs = std::collections::HashSet::new();
-            collect_type_refs_from_item(item, &mut refs);
-            for r in refs {
-                if r != name && code.contains_key(&r) {
-                    synthetic_dependencies
-                        .entry(name.to_string())
-                        .or_default()
-                        .insert(r);
-                }
-            }
-        }
-
-        Self {
-            direct_referencers,
-            synthetic_dependencies,
-            code,
-            names_in_order,
-        }
-    }
-
-    /// 合成型 `name` を直接参照しているファイルの集合（空集合あり）。
-    pub fn direct_referencers(&self, name: &str) -> BTreeSet<PathBuf> {
-        self.direct_referencers.get(name).cloned().unwrap_or_default()
-    }
-
-    /// 合成型 `name` が他のいずれかの合成型から参照されているか。
-    pub fn is_referenced_by_synthetic(&self, name: &str) -> bool {
-        self.synthetic_dependencies
-            .values()
-            .any(|deps| deps.contains(name))
-    }
-
-    /// 順序保持された合成型名一覧。
-    pub fn names(&self) -> &[String] {
-        &self.names_in_order
-    }
-
-    /// 合成型 `name` の生成済みコード。存在しない場合は空文字列。
-    pub fn code_of(&self, name: &str) -> &str {
-        self.code.get(name).map(String::as_str).unwrap_or("")
-    }
-
-    /// inline 配置情報を受け取り、ファイル `file` が（推移的に）参照する shared
-    /// 配置合成型の集合を返す。
-    ///
-    /// アルゴリズム:
-    ///   visited = file の inline 合成型の集合
-    ///   queue = visited のコピー
-    ///   while queue not empty:
-    ///     n = queue.pop()
-    ///     for d in synthetic_dependencies[n]:
-    ///       if d not in visited:
-    ///         visited.insert(d)
-    ///         queue.push(d)
-    ///   return { d in visited if d in shared_names }
-    pub fn transitive_shared_refs_for_file(
-        &self,
-        inline_for_file: &BTreeSet<String>,
-        shared_names: &BTreeSet<String>,
-    ) -> BTreeSet<String> {
-        let mut visited: BTreeSet<String> = inline_for_file.clone();
-        let mut queue: Vec<String> = inline_for_file.iter().cloned().collect();
-        while let Some(n) = queue.pop() {
-            if let Some(deps) = self.synthetic_dependencies.get(&n) {
-                for d in deps {
-                    if visited.insert(d.clone()) {
-                        queue.push(d.clone());
-                    }
-                }
-            }
-        }
-        visited.intersection(shared_names).cloned().collect()
-    }
+    /// `path` は `::` 結合前のセグメント列。`fields` はタプル要素のサブパターン。
+    TupleStruct {
+        path: Vec<String>,
+        fields: Vec<Pattern>,
+    },
+    /// 構造体 variant（`Shape::Circle { radius, .. }`, `Foo { x, y }`）
+    Struct {
+        path: Vec<String>,
+        fields: Vec<(String, Pattern)>,
+        /// 末尾の `..` の有無
+        rest: bool,
+    },
+    /// Unit variant / unit struct（`None`, `Color::Green`）
+    UnitStruct {
+        path: Vec<String>,
+    },
+    /// Or パターン（`a | b | c`）
+    Or(Vec<Pattern>),
+    /// Range パターン（`1..=5`, `..10`）
+    Range {
+        start: Option<Box<Expr>>,
+        end: Option<Box<Expr>>,
+        inclusive: bool,
+    },
+    /// 参照パターン（`&x`, `&mut x`）
+    Ref {
+        mutable: bool,
+        inner: Box<Pattern>,
+    },
+    /// タプルパターン（`(a, b, c)`）
+    Tuple(Vec<Pattern>),
 }
 ```
 
-**unit test 設計**:
+**設計判断**:
+- `path: Vec<String>` によりセグメント単位でアクセス可能。walker は `path[0]` を直接見る
+- `UnitStruct` と `TupleStruct { fields: vec![] }` を分離: 前者 → `None`、後者 → `None()` とレンダリング差が明確
+- `Binding::subpat` は `x @ 1..=5` パターン用。現状 transformer では生成しないが enum variant は用意（Q2 B 範囲）
+- `Literal` の `Expr` には `Expr::StringLit` / `Expr::IntLit` / `Expr::Ident("Direction::Up")` 等が入る。`Ident` に path string を入れるのは既存 switch.rs のパターンだが、新コードでは `UnitStruct` に置き換える（B17）
+
+### 2.2 `IrVisitor` trait
+
+`src/ir/visit.rs` 新規:
 
 ```rust
-// src/pipeline/placement.rs 内 mod tests
-test_build_direct_referencers_simple        // 1 ファイル → 1 合成型の参照
-test_build_direct_referencers_multi_file    // 2 ファイル → 同じ合成型の参照
-test_is_referenced_by_synthetic_yes         // A の field が B を参照
-test_is_referenced_by_synthetic_no          // 独立した合成型
-test_synthetic_dependencies_chain           // A → B → C の連鎖
-test_transitive_shared_refs_direct          // inline → shared 直接参照
-test_transitive_shared_refs_chain           // inline → shared → shared 連鎖
-test_transitive_shared_refs_no_inline       // inline 空の場合は空集合
-```
+use super::*;
 
-### 2.4 `OutputFile<'a>` 構造体と OutputWriter API 変更 (#12)
-
-**場所**: `src/pipeline/output_writer.rs`
-
-```rust
-/// OutputWriter に渡すファイル情報のビュー。
-///
-/// IR ベース placement のために `items` を保持する。
-pub struct OutputFile<'a> {
-    pub rel_path: PathBuf,
-    pub source: &'a str,
-    pub items: &'a [Item],
+/// Read-only IR visitor trait. Each `visit_*` method default-delegates to
+/// the corresponding `walk_*` function, which recursively visits children.
+/// Implementors override `visit_*` methods they need and optionally call
+/// `walk_*` to continue recursion.
+pub trait IrVisitor {
+    fn visit_item(&mut self, item: &Item) { walk_item(self, item); }
+    fn visit_stmt(&mut self, stmt: &Stmt) { walk_stmt(self, stmt); }
+    fn visit_expr(&mut self, expr: &Expr) { walk_expr(self, expr); }
+    fn visit_rust_type(&mut self, ty: &RustType) { walk_rust_type(self, ty); }
+    fn visit_pattern(&mut self, pat: &Pattern) { walk_pattern(self, pat); }
+    fn visit_match_arm(&mut self, arm: &MatchArm) { walk_match_arm(self, arm); }
+    fn visit_type_param(&mut self, tp: &TypeParam) { walk_type_param(self, tp); }
+    fn visit_method(&mut self, m: &Method) { walk_method(self, m); }
 }
 
-impl OutputWriter<'_> {
-    pub fn resolve_synthetic_placement(
-        &self,
-        file_outputs: &[OutputFile<'_>],
-        synthetic_items: &[Item],
-    ) -> SyntheticPlacement { /* ... */ }
-
-    pub fn write_to_directory(
-        &self,
-        output_dir: &Path,
-        file_outputs: &[OutputFile<'_>],
-        synthetic_items: &[Item],
-        run_rustfmt: bool,
-    ) -> Result<()> { /* ... */ }
-}
+pub fn walk_item<V: IrVisitor + ?Sized>(v: &mut V, item: &Item) { /* 全 variant 再帰 */ }
+// ... walk_stmt, walk_expr, walk_rust_type, walk_pattern, walk_match_arm, walk_type_param, walk_method
 ```
 
-**main.rs (`src/main.rs:234`) の更新**:
+**設計判断**:
+- `?Sized` bound により trait object での使用も可能
+- default delegation により実装者は必要な visit_* のみ override
+- `walk_pattern` 内で `Pattern::Literal(expr)` は `v.visit_expr(expr)` を呼ぶ（expr 側の Ident/StructInit 経由で型参照を収集可能にする）
+
+### 2.3 `IrFolder` trait
+
+`src/ir/fold.rs` 新規:
 
 ```rust
-let outputs: Vec<OutputFile<'_>> = pipeline_output
-    .files
-    .iter()
-    .zip(ts_files.iter())
-    .map(|(fo, ts_path)| {
-        let rs_path = directory::compute_output_path(ts_path, input_dir, &output_dir)
-            .unwrap_or_else(|_| ts_path.with_extension("rs"));
-        let rel_path = rs_path.strip_prefix(&output_dir).unwrap_or(&rs_path).to_path_buf();
-        OutputFile {
-            rel_path,
-            source: &fo.rust_source,
-            items: &fo.items,
-        }
-    })
-    .collect();
-writer.write_to_directory(&output_dir, &outputs, &pipeline_output.synthetic_items, true)?;
-```
-
-**output_writer.rs 内 test の更新**: 8 箇所すべての `&[(PathBuf, String)]` を `&[OutputFile<'_>]` に書き換え。空の `items` を渡せるようヘルパを用意:
-
-```rust
-fn make_outputs<'a>(items_storage: &'a Vec<Vec<Item>>, files: &'a [(&str, &str)]) -> Vec<OutputFile<'a>> {
-    files.iter().enumerate().map(|(i, (path, src))| OutputFile {
-        rel_path: PathBuf::from(path),
-        source: src,
-        items: &items_storage[i],
-    }).collect()
+pub trait IrFolder {
+    fn fold_item(&mut self, item: Item) -> Item { walk_item(self, item) }
+    fn fold_stmt(&mut self, stmt: Stmt) -> Stmt { walk_stmt(self, stmt) }
+    fn fold_expr(&mut self, expr: Expr) -> Expr { walk_expr(self, expr) }
+    fn fold_rust_type(&mut self, ty: RustType) -> RustType { walk_rust_type(self, ty) }
+    fn fold_pattern(&mut self, pat: Pattern) -> Pattern { walk_pattern(self, pat) }
+    fn fold_match_arm(&mut self, arm: MatchArm) -> MatchArm { walk_match_arm(self, arm) }
+    fn fold_type_param(&mut self, tp: TypeParam) -> TypeParam { walk_type_param(self, tp) }
+    fn fold_method(&mut self, m: Method) -> Method { walk_method(self, m) }
 }
 ```
 
-### 2.5 `resolve_synthetic_placement` IR 化 (#5, #7) と推移インポート追加 (#1)
+所有権ベースの変換 visitor（SWC の `Fold` と同型）。各 `walk_*` 関数は `by move` で新 IR を構築。
 
-**現状（substring scan）**:
+### 2.4 `TypeRefCollector` 設計
+
 ```rust
-let referencing_files: Vec<&PathBuf> = file_outputs
-    .iter()
-    .filter(|(_, source)| source.contains(name))
-    .map(|(path, _)| path)
-    .collect();
-let referenced_by_synthetic = generated.iter()
-    .any(|(other_name, other_code)| other_name != name && other_code.contains(name));
-```
+pub(crate) struct TypeRefCollector<'a> {
+    pub refs: &'a mut HashSet<String>,
+}
 
-**変更後（IR ベース）**:
-```rust
-let graph = SyntheticReferenceGraph::build(
-    &file_outputs.iter().map(|f| (f.rel_path.clone(), f.items)).collect::<Vec<_>>(),
-    synthetic_items,
-);
+/// Option / Result のコンストラクタは言語レベル組み込みで type_ref 登録対象外。
+/// uppercase-head ヒューリスティックではなく構造化 path[0] 比較で除外する。
+const PATTERN_LANG_BUILTINS: &[&str] = &["Some", "None", "Ok", "Err"];
 
-for name in graph.names() {
-    let referencing_files = graph.direct_referencers(name);
-    let referenced_by_synthetic = graph.is_referenced_by_synthetic(name);
-
-    match referencing_files.len() {
-        0 if referenced_by_synthetic => {
-            shared_items.push(graph.code_of(name).to_string());
-            shared_type_refs.push((name.clone(), Vec::new()));
+impl<'a> IrVisitor for TypeRefCollector<'a> {
+    fn visit_rust_type(&mut self, ty: &RustType) {
+        if let RustType::Named { name, .. } = ty {
+            if name != "Self" { self.refs.insert(name.clone()); }
         }
-        0 => { /* 未使用 */ }
-        1 if !referenced_by_synthetic => {
-            inline.entry(referencing_files.iter().next().unwrap().clone())
-                .or_default()
-                .push(graph.code_of(name).to_string());
+        if let RustType::QSelf { trait_ref, .. } = ty {
+            self.refs.insert(trait_ref.name.clone());
         }
-        _ => {
-            shared_items.push(graph.code_of(name).to_string());
-            shared_type_refs.push((name.clone(), referencing_files.into_iter().collect()));
-        }
+        walk_rust_type(self, ty);
     }
-}
-```
 
-**推移インポート処理（B-3）**:
-
-```rust
-// inline 配置決定後、各ファイルの inline 合成型集合を構築
-let mut inline_assignments: HashMap<PathBuf, BTreeSet<String>> = HashMap::new();
-for (file, codes) in &inline {
-    // codes は code 文字列なので、name を逆引きする必要あり
-    // → inline を Vec<String> ではなく Vec<(name, code)> に変更
-}
-
-// shared に配置された型の名前集合
-let shared_names: BTreeSet<String> = shared_type_refs.iter().map(|(n, _)| n.clone()).collect();
-
-// 各ファイルについて推移参照を計算し、shared_imports に追加
-for (file, inline_names) in &inline_assignments {
-    let transitive = graph.transitive_shared_refs_for_file(inline_names, &shared_names);
-    for shared_name in transitive {
-        // shared_type_refs[shared_name] のファイル一覧に file を追加
-        if let Some(refs) = shared_type_refs.iter_mut().find(|(n, _)| n == &shared_name) {
-            if !refs.1.contains(file) {
-                refs.1.push(file.clone());
+    fn visit_expr(&mut self, expr: &Expr) {
+        match expr {
+            Expr::StructInit { name, .. } if name != "Self" => {
+                self.refs.insert(name.clone());
             }
-        }
-    }
-}
-```
-
-**inline placement の構造変更**: `inline: HashMap<PathBuf, Vec<(String, String)>>` (name, code) に変更し、name から逆引きできるようにする。public field なので **API 破壊変更**。これも本スコープで対応。
-
-### 2.6 `extract_single_output` の placement 統合 (#7)
-
-**場所**: `src/lib.rs`
-
-```rust
-fn extract_single_output(output: pipeline::TranspileOutput) -> Result<pipeline::FileOutput> {
-    let pipeline::TranspileOutput { files, synthetic_items, .. } = output;
-    let mut file = files.into_iter().next()
-        .ok_or_else(|| anyhow::anyhow!("pipeline returned no output files"))?;
-
-    if synthetic_items.is_empty() {
-        return Ok(file);
-    }
-
-    // IR ベースで「このファイルが参照する合成型」と「その推移閉包」を計算
-    let graph = pipeline::placement::SyntheticReferenceGraph::build(
-        &[(file.path.clone(), &file.items)],
-        &synthetic_items,
-    );
-    let mut included = std::collections::BTreeSet::new();
-    // 直接参照
-    for name in graph.names() {
-        if !graph.direct_referencers(name).is_empty() {
-            included.insert(name.clone());
-        }
-    }
-    // 推移閉包: 合成型の依存も追加
-    let mut queue: Vec<String> = included.iter().cloned().collect();
-    while let Some(n) = queue.pop() {
-        // synthetic_dependencies は private なので getter 経由
-        for dep in graph.transitive_shared_refs_for_file(
-            &std::iter::once(n.clone()).collect(),
-            &graph.names().iter().cloned().collect(),
-        ) {
-            if included.insert(dep.clone()) {
-                queue.push(dep);
+            Expr::FnCall { target: CallTarget::Path { type_ref: Some(t), .. }, .. } => {
+                self.refs.insert(t.clone());
             }
+            _ => {}
         }
+        walk_expr(self, expr);
     }
 
-    // 順序保持された names から included を抽出してコード結合
-    let parts: Vec<&str> = graph.names().iter()
-        .filter(|n| included.contains(n.as_str()))
-        .map(|n| graph.code_of(n))
-        .collect();
-    let prepended = parts.join("\n\n");
-    if !prepended.is_empty() {
-        file.rust_source = if file.rust_source.is_empty() {
-            prepended
-        } else {
-            format!("{prepended}\n\n{}", file.rust_source)
+    fn visit_pattern(&mut self, pat: &Pattern) {
+        let head = match pat {
+            Pattern::TupleStruct { path, .. }
+            | Pattern::Struct { path, .. }
+            | Pattern::UnitStruct { path } => path.first(),
+            _ => None,
         };
+        if let Some(first) = head {
+            if !PATTERN_LANG_BUILTINS.contains(&first.as_str()) {
+                self.refs.insert(first.clone());
+            }
+        }
+        walk_pattern(self, pat);
     }
-    Ok(file)
 }
 ```
 
-`collect_referenced_synthetic_code` と `synthetic_item_name` を削除。
+`RUST_BUILTIN_TYPES` から `Some/None/Ok/Err` を削除。Type 名 filter と pattern constructor filter は抽象レベルが異なるため分離維持（DRY 分析済）。
 
-### 2.7 `PerFileTransformed` 外出し (#6)
-
-**場所**: `src/pipeline/types.rs` に追加、`src/pipeline/mod.rs` から削除
+### 2.5 `Substitute` 設計
 
 ```rust
-// src/pipeline/types.rs
-pub(crate) struct PerFileTransformed {
-    pub path: PathBuf,
-    pub source: String,
-    pub items: Vec<crate::ir::Item>,
-    pub unsupported: Vec<UnsupportedSyntaxError>,
-    pub file_synthetic_items: Vec<crate::ir::Item>,
+pub struct Substitute<'a> {
+    pub bindings: &'a HashMap<String, RustType>,
+}
+
+impl<'a> IrFolder for Substitute<'a> {
+    fn fold_rust_type(&mut self, ty: RustType) -> RustType {
+        if let RustType::Named { ref name, ref type_args } = ty {
+            if type_args.is_empty() {
+                if let Some(concrete) = self.bindings.get(name.as_str()) {
+                    return concrete.clone();
+                }
+            }
+        }
+        walk_rust_type(self, ty) // 子を再帰 fold
+    }
 }
 ```
 
-C-2 完了後、`file_synthetic_items` フィールドは `FileOutput` から削除されるが `PerFileTransformed` には残すか検討。実装内部で per-file pass の scan_context として必要なので残す。
+その他 `fold_item/_stmt/_expr/_pattern` は全て default（`walk_*` 委譲）。既存の `*.substitute(&bindings)` 呼び出しは薄いラッパーで互換維持するか、全サイトを書き換える。
 
-### 2.8 `FileOutput` の `items` 化 (#8)
+**判断**: **全サイト書き換え**（ラッパー残存は新旧併存で DRY 違反）。既存の `X.substitute(&bindings)` → `Substitute { bindings: &bindings }.fold_x(X)`。
 
-**変更**:
-```rust
-// src/pipeline/types.rs
-pub struct FileOutput {
-    pub path: PathBuf,
-    pub source: String,
-    pub rust_source: String,
-    pub unsupported: Vec<UnsupportedSyntaxError>,
-    pub items: Vec<crate::ir::Item>,  // 新規
-    // file_synthetic_items: Vec<Item>  ← 削除
-}
-```
-
-`pipeline::transpile_pipeline` 内で `all_items` を `FileOutput.items` として保存。
-
-`extract_single_output` と `transpile_single` は `file.items` + `output.synthetic_items` から IR ベース計算（D-1 で実装）。
-
-### 2.9 `let _ = output.synthetic_items` 削除 (#2)
-
-D-1 で `extract_single_output` を書き換える際、分解パターン:
-```rust
-let pipeline::TranspileOutput { files, synthetic_items, .. } = output;
-```
-で `let _` を不要にする。
-
-### 2.10 API 対称化 (#4)
-
-**変更**:
-```rust
-// src/pipeline/external_struct_generator/mod.rs
-pub fn collect_undefined_type_references(
-    items: &[Item],
-    scan_context: &[Item],
-    defined_only: &[Item],  // 新規
-    registry: &TypeRegistry,
-) -> HashSet<String>
-```
-
-`defined_only` セマンティクス: 「定義済み判定のみ、参照走査しない」。`collect_all_undefined_references` と同じ。
-
-`generate_external_structs_to_fixpoint` (`src/pipeline/mod.rs:290`) も同様にシグネチャ拡張:
-```rust
-fn generate_external_structs_to_fixpoint(
-    items: &mut Vec<Item>,
-    scan_context: &[Item],
-    defined_only: &[Item],
-    registry: &TypeRegistry,
-    synthetic: &SyntheticTypeRegistry,
-)
-```
-
-呼び出し元:
-- per-file: `defined_only=&[]`
-- post-loop: `defined_only=&[]`
-- test 16 箇所: `defined_only=&[]`
-
-### 2.11 統合テスト設計 (#9)
-
-`tests/pipeline_placement_test.rs` を新規作成。
+### 2.6 `RuntimeTypeofDetector` / `RegexDetector`
 
 ```rust
-// 1. transitive 推移インポート
-#[test]
-fn test_transitive_inline_to_shared_imports() {
-    // 入力: 1 ファイルが Y を inline 配置、Y が X を参照、X は別ファイルからも参照されて shared 配置
-    // 期待: そのファイルの出力に X の use 文が含まれる
+#[derive(Default)]
+struct RuntimeTypeofDetector { found: bool }
+
+impl IrVisitor for RuntimeTypeofDetector {
+    fn visit_expr(&mut self, expr: &Expr) {
+        if matches!(expr, Expr::RuntimeTypeof { .. }) {
+            self.found = true;
+            return; // 早期リターンで残りの走査回避
+        }
+        walk_expr(self, expr);
+    }
 }
 
-// 2. クロスファイル合成型 dedup
-#[test]
-fn test_cross_file_synthetic_no_duplicate_stub() {
-    // 入力: 2 ファイル、両方が同じ union (string|number) を含む
-    // 期待: shared_types.rs に 1 個だけ enum、各ファイルに use crate::shared_types::... が生成
-    //       各ファイルに pub struct/enum のスタブが生成されない
-}
-
-// 3. 未参照合成型は出力されない
-#[test]
-fn test_unreferenced_synthetic_not_emitted() {
-    // 入力: 単一ファイルで union を作るが結果的にどこからも参照しない
-    // 期待: その合成型が出力に含まれない
-}
-
-// 4. 連鎖合成型 A→B→C
-#[test]
-fn test_synthetic_chain_a_to_b_to_c() {
-    // 入力: A union が B union を含み、B が C を含む。user は A のみ参照
-    // 期待: A, B, C が全て出力 / 配置されており、参照側に適切な use 文
-}
-
-// 5. サブディレクトリからの crate::shared_types 参照
-#[test]
-fn test_shared_types_imports_from_subdirectory() {
-    // 入力: utils/x.ts と root/y.ts で同じ union を共有
-    // 期待: utils/x.rs に use crate::shared_types::T; が生成
-}
-
-// 6. 自己参照 inline （安全性チェック）
-#[test]
-fn test_inline_self_reference_does_not_loop() {
-    // 入力: union が自分自身を間接参照する（再帰型）
-    // 期待: 無限ループせず、適切に配置
+fn items_contain_runtime_typeof(items: &[Item]) -> bool {
+    let mut d = RuntimeTypeofDetector::default();
+    for item in items {
+        d.visit_item(item);
+        if d.found { return true; }
+    }
+    false
 }
 ```
 
-### 2.12 snapshot 6 件の個別検証 (#10)
+`RegexDetector` は `Expr::Regex { .. }` / `MethodCall::method == "regex" new` 検出ロジックを移植（現状コードを Read して確認のうえ実装）。
 
-**手順**:
-1. 各 `.snap` の最新版を `cat`
-2. **本タスク開始前の状態**（Phase 1〜5 を経て accept 済み版）と比較
-3. 差分を以下のいずれかに分類:
-   - **dead code 削除**: 元々参照されていない synthetic が IR ベース化により正しく除去
-   - **並べ替え**: 内容同一、生成順だけ変化
-   - **機能後退**: NG → 即修正
-4. 全件の判定を最終コミットメッセージに記載
+### 2.7 Generator pattern rendering 設計
 
-検証対象:
-- `tests/snapshots/integration_test__basic_types.snap`
-- `tests/snapshots/integration_test__inline_type_literal_param.snap`
-- `tests/snapshots/integration_test__typeof_const.snap`
-- `tests/snapshots/integration_test__instanceof_builtin.snap`
-- `tests/snapshots/integration_test__external_type_struct.snap`
-- `tests/snapshots/integration_test__instanceof_builtin_with_builtins.snap`
+`src/generator/mod.rs` または新規 `src/generator/patterns.rs`:
 
-`typeof_const` の差分は本 self-review 段階では未確認のため、F-2 で改めて確認する。
+```rust
+pub(crate) fn render_pattern(pat: &Pattern) -> String {
+    match pat {
+        Pattern::Wildcard => "_".to_string(),
+        Pattern::Literal(e) => generate_expr(e),
+        Pattern::Binding { name, is_mut, subpat } => {
+            let prefix = if *is_mut { "mut " } else { "" };
+            match subpat {
+                Some(sub) => format!("{prefix}{name} @ {}", render_pattern(sub)),
+                None => format!("{prefix}{name}"),
+            }
+        }
+        Pattern::TupleStruct { path, fields } => {
+            let path_str = path.join("::");
+            let field_strs: Vec<String> = fields.iter().map(render_pattern).collect();
+            format!("{path_str}({})", field_strs.join(", "))
+        }
+        Pattern::Struct { path, fields, rest } => {
+            let path_str = path.join("::");
+            let mut parts: Vec<String> = fields
+                .iter()
+                .map(|(n, p)| match p {
+                    Pattern::Binding { name, is_mut: false, subpat: None } if name == n => n.clone(),
+                    _ => format!("{n}: {}", render_pattern(p)),
+                })
+                .collect();
+            if *rest { parts.push("..".to_string()); }
+            if parts.is_empty() {
+                format!("{path_str} {{}}")
+            } else {
+                format!("{path_str} {{ {} }}", parts.join(", "))
+            }
+        }
+        Pattern::UnitStruct { path } => path.join("::"),
+        Pattern::Or(pats) => pats.iter().map(render_pattern).collect::<Vec<_>>().join(" | "),
+        Pattern::Range { start, end, inclusive } => {
+            let s = start.as_deref().map(generate_expr).unwrap_or_default();
+            let e = end.as_deref().map(generate_expr).unwrap_or_default();
+            let op = if *inclusive { "..=" } else { ".." };
+            format!("{s}{op}{e}")
+        }
+        Pattern::Ref { mutable, inner } => {
+            let prefix = if *mutable { "&mut " } else { "&" };
+            format!("{prefix}{}", render_pattern(inner))
+        }
+        Pattern::Tuple(pats) => {
+            let strs: Vec<String> = pats.iter().map(render_pattern).collect();
+            format!("({})", strs.join(", "))
+        }
+    }
+}
+```
+
+配置先: `src/generator/patterns.rs` 新規（凝集度重視）。
+
+### 2.8 `resolve_if_let_pattern` / `resolve_complement_pattern` 戻り値変更
+
+```rust
+// Before:
+pub(crate) fn resolve_if_let_pattern(&self, guard: &NarrowingGuard) -> Option<(String, bool)>
+pub(crate) fn resolve_complement_pattern(&self, guard: &NarrowingGuard) -> Option<String>
+fn resolve_other_variant(...) -> Option<String>
+
+// After:
+pub(crate) fn resolve_if_let_pattern(&self, guard: &NarrowingGuard) -> Option<(Pattern, bool)>
+pub(crate) fn resolve_complement_pattern(&self, guard: &NarrowingGuard) -> Option<Pattern>
+fn resolve_other_variant(...) -> Option<Pattern>
+```
+
+変換ロジック内の `format!("Some({})", guard.var_name())` → `Pattern::TupleStruct { path: vec!["Some".into()], fields: vec![Pattern::Binding { name: guard.var_name().into(), is_mut: false, subpat: None }] }`。
+
+特殊: `complement_pattern == "None"` / `complement_pattern != "None"` のような文字列比較が `control_flow.rs:276, 299, 324` にある。これらは `matches!(complement_pattern, Pattern::UnitStruct { path } if path == &["None"])` に置換。ヘルパー関数 `is_none_pattern(&Pattern) -> bool` を `src/transformer/expressions/patterns.rs` に追加。
+
+### 2.9 Design Integrity Review
+
+- **凝集度**: `Pattern` / `IrVisitor` / `IrFolder` / `TypeRefCollector` / `Substitute` / `render_pattern` は各々単一責務。OK
+- **責務分離**: walker 走査と判定を trait の walk_* / visit_* で分離。Pattern の文字列化は generator が担う。builtin 判定は `TypeRefCollector::visit_pattern` 内部にクローズ。OK
+- **DRY**: walker/substitute/detector の 4+ 系統の手書き再帰を 1 セットの `walk_*` に集約。`PATTERN_LANG_BUILTINS` と `RUST_BUILTIN_TYPES` は抽象レベル分離のため意図的重複
+- **Broken windows 検出**:
+  - **BW1**: `switch.rs:287` `MatchPattern::Literal(Expr::Ident("Shape::Circle(x)"))` — Pattern を Expr::Ident に encode する重大な抽象レベル破壊。本 PRD で `Pattern::TupleStruct` に修正
+  - **BW2**: `switch.rs:553` `MatchPattern::Literal(Expr::Ident("Direction::Up"))` — 同じパターン、`Pattern::UnitStruct` に修正
+  - **BW3**: `switch.rs:465` `path.rsplit("::").next()` — `path: String` から variant 名を抽出する文字列操作。`path: Vec<String>` 化で `.last()` に置換
+  - **BW4**: `MatchPattern::EnumVariant { path: "Shape::Circle", bindings: ["radius"] }` は Struct vs Tuple の区別を持たない。`Pattern::Struct { path, fields, rest }` に構造化することで named-field vs positional が明示される
+  - **BW5**: `generator/statements/mod.rs:192` と `generator/expressions/mod.rs:370` の `MatchPattern::EnumVariant` rendering が 2 箇所にコピー。`render_pattern` 統合で DRY 解消
+
+### 2.10 Semantic Safety Analysis
+
+本 PRD は型解決を変更しない。Pattern の構築サイトでは既存の文字列フォーマットと **等価** の Pattern を生成し、generator でまた同じ文字列にレンダリングする。
+
+**検証**: Hono ベンチ出力 diff が空であること（T-final）。
 
 ---
 
 ## Step 3: Implementation Tasks
 
-各タスクは原則 1 ファイル変更。Phase 末に `[WIP]` コミットを user に提案。
+各タスクは phase 単位で `cargo check` が通る状態を維持する。**phase 完了時に `[WIP]` commit を提案する**。
 
-### Phase A: 共通基盤の整備
+### Phase 1: IR 基盤（Pattern / IrVisitor / IrFolder 骨格）
 
-- [x] **A-1-1**: `src/ir/mod.rs` に `impl Item { pub fn canonical_name(&self) -> Option<&str> }` を追加
-  - 完了基準: `cargo check` パス
-- [x] **A-1-2**: `src/lib.rs:239` の `synthetic_item_name` を削除し、`src/lib.rs:203` で `item.canonical_name()` を使用
-  - 完了基準: `cargo check --tests` パス（本 Phase 中は OutputWriter は未変更で残る）
-- [x] **A-1-3**: `src/pipeline/output_writer.rs:339` の `synthetic_type_name` を削除し、`src/pipeline/output_writer.rs:102` で `item.canonical_name()` を使用
-  - 完了基準: `cargo check --tests` パス
-- [x] **A-2-1**: `src/pipeline/external_struct_generator/mod.rs:260` の `collect_type_refs_from_item` に `Item::Impl`, `Item::Trait`, `Item::TypeAlias` 分岐を追加し、`pub(crate)` 化。`collect_type_refs_from_rust_type` も `pub(crate)` 化
-  - 完了基準: `cargo test pipeline::external_struct_generator` パス
-- [x] **A-3-1**: `src/pipeline/placement.rs` を新規作成。`SyntheticReferenceGraph` 実装 + 8 件の unit test
-  - 完了基準: `cargo test pipeline::placement` パス
-- [x] **A-3-2**: `src/pipeline/mod.rs` の `pub mod placement;` 宣言を追加
-  - 完了基準: `cargo check` パス
-- [x] **A-fix-1**: `src/lib.rs::collect_referenced_synthetic_code` で canonical_name None を skip（filter_map 化）
-- [x] **A-fix-2**: `src/pipeline/output_writer.rs::resolve_synthetic_placement` で同様に skip
-- [x] **A-fix-3**: `placement.rs::transitive_shared_refs_for_file` の未使用 `_file` パラメータを削除し `transitive_shared_refs` にリネーム
-- [x] **A-fix-4**: `external_struct_generator/tests.rs` に Impl/Trait/TypeAlias walking テスト 6 件追加
-- [x] **A-fix-5**: `src/ir/tests/mod.rs` に `Item::canonical_name()` テスト 9 件追加
-- [x] **A-fix-6**: `placement.rs` に edge case テスト 7 件追加（dedup priority, unnamed skip, names 順序, 直接 vs 推移依存判定）
-- [x] **A-fix-self-keyword**: `collect_type_refs_from_rust_type` で `Self` を ref 収集対象から除外（impl method の `-> Self` で `pub struct Self {}` が生成される regression を防ぐ）
-- [x] **A-fix-7**: `cargo test` 全体実行 → 2009 + 派生テスト全 pass、`cargo clippy --all-targets -- -D warnings` パス、`cargo fmt --all` パス
-- [x] **A-fix-8**: `Item::Impl` 分岐に `consts[i].ty` walking を追加（A-2-1 取りこぼし）
-- [x] **A-fix-9**: `test_collect_type_refs_from_impl_consts` テスト追加
-- [x] **A-fix-10**: `test_collect_type_refs_excludes_self` テスト追加（A-fix-self-keyword の regression 防止）
-- [x] **A-fix-11**: `test_resolve_synthetic_placement_skips_unnamed_items` テスト追加（A-fix-2 の regression 防止）
-- [x] **A-fix-12**: `TODO` に I-374（Rust 予約語と衝突する型名のサニタイズ）を追加。user メモに完了マーク
-- [x] **A-fix-13**: 全テスト 2012 件 + clippy/fmt クリーン再確認
-- [ ] **A-COMMIT**: `[WIP] Batch 11c-fix Phase A: 共通基盤（canonical_name, type_refs 強化, placement モジュール）`
+- [x] **P1-T1**: `src/ir/pattern.rs` 新規作成。`Pattern` enum 定義（§2.1）
+- [x] **P1-T2**: `src/ir/visit.rs` 新規作成。`IrVisitor` trait + `walk_item/_stmt/_expr/_rust_type/_pattern/_match_arm/_type_param/_method` 関数（§2.2）。**この段階では `walk_pattern` は `Pattern` enum に対して全 variant を処理**。`walk_stmt`/`walk_expr` 内の `IfLet/WhileLet/Matches` は **まだ `pattern: String` を参照**（次 phase で構造化するまで）→ `visit_pattern` は呼ばない
+- [x] **P1-T3**: `src/ir/fold.rs` 新規作成。`IrFolder` trait + `walk_*` 関数（§2.3）。同じく `IfLet/WhileLet/Matches` の pattern は文字列のまま pass-through
+- [x] **P1-T4**: `src/ir/mod.rs` に `pub mod pattern; pub mod visit; pub mod fold;` 追加 + `pub use pattern::Pattern;` 再エクスポート
+- [x] **P1-T5**: `src/ir/visit.rs` / `src/ir/fold.rs` 内に `#[cfg(test)]` でカウンタ visitor/folder の単体テスト
+- [x] **P1-T6**: `cargo check`, `cargo test --lib ir::` で `Pattern` enum と trait 骨格が通ることを確認
+- [x] **P1-Commit**: `[WIP] Batch 11c-fix-2-b Phase 1: Pattern enum + IrVisitor/IrFolder 骨格`（ユーザーによるコミット待ち）
 
-### Phase B: OutputWriter リファクタ
+### Phase 2: IR 型変更と構築サイト一括書き換え
 
-実行順序メモ: B-1-5 で main.rs から `&fo.items` を渡す必要があるため、依存上 C-2-1
-（FileOutput.items 追加）と C-2-2（pipeline での構築）を Phase B に **前倒し** した。
+大規模型変更。cargo check がエラーだらけになる大手術。**1 phase で一気に通す**。
 
-- [x] **B-1-1**: `src/pipeline/types.rs` に `pub struct OutputFile<'a>` を追加、`pipeline/mod.rs` から re-export
-  - 完了基準: `cargo check` パス
-- [x] **C-2-1 (前倒し)**: `FileOutput` に `pub items: Vec<Item>` を追加（`file_synthetic_items` は Phase D まで残置）
-- [x] **C-2-2 (前倒し)**: `src/pipeline/mod.rs::transpile_pipeline` で `FileOutput.items: all_items` を構築
-- [x] **B-1-2**: `SyntheticPlacement.inline` の型を `HashMap<PathBuf, Vec<(String, String)>>` に変更（name, code）
-- [x] **B-1-3 + B-1-4**: `OutputWriter::resolve_synthetic_placement` と `write_to_directory` のシグネチャを `OutputFile<'_>` ベースに変更
-- [x] **B-1-5 + C-2-3**: `src/main.rs` の呼び出しを `OutputFile` ベースに更新（`&fo.items` を渡す）
-- [x] **B-2-1**: `resolve_synthetic_placement` の本体を IR ベース（`SyntheticReferenceGraph::build`）に置換。`source.contains(name)` と `other_code.contains(name)` を削除
-- [x] **B-3-1**: `resolve_synthetic_placement` 末尾に推移インポート処理を追加。`SyntheticReferenceGraph::transitive_shared_refs` を呼び、shared_imports に推移参照を merge
-- [x] **B-test-rewrite**: `output_writer.rs` の test 22 件を `OutputFile` API に追従。`TestFile` / `outputs_from` / `fn_returning` / `fn_with_param_type` ヘルパを導入
-  - 完了基準: `cargo test output_writer` 全 22 件パス
-- [x] **B-quality**: cargo test 全体（lib 2012 + 統合 + snapshot）/ cargo clippy / cargo fmt クリーン
-- [ ] **B-COMMIT**: `[WIP] Batch 11c-fix Phase B: OutputWriter を IR ベース placement と推移インポートに移行 (+ 依存により C-2-1/2 前倒し)`
+- [ ] **P2-T1**: `src/ir/mod.rs` から `MatchPattern` enum を削除。`MatchArm::patterns: Vec<Pattern>` に変更
+- [ ] **P2-T2**: `src/ir/mod.rs` の `Stmt::WhileLet::pattern` / `Stmt::IfLet::pattern` / `Expr::IfLet::pattern` / `Expr::Matches::pattern` を全て `Pattern` に変更
+- [ ] **P2-T3**: `src/ir/visit.rs` / `src/ir/fold.rs` の `walk_stmt` / `walk_expr` 内で `IfLet/WhileLet/Matches` の pattern を `visit_pattern` / `fold_pattern` で処理するよう追記
+- [ ] **P2-T4**: `src/ir/substitute.rs` を `Substitute: IrFolder` に全面書き換え（§2.5）。既存の `impl X { fn substitute }` は削除
+- [ ] **P2-T5**: substitute 呼び出し側（`grep -rn '\.substitute(' src/`）を `Substitute { bindings: &b }.fold_*(node)` に書き換え
+- [ ] **P2-T6**: `src/transformer/expressions/patterns.rs` の `resolve_if_let_pattern` / `resolve_complement_pattern` / `resolve_other_variant` の戻り値を `Pattern` ベースに変更（§2.8）
+- [ ] **P2-T7**: `src/transformer/statements/control_flow.rs` の `try_generate_narrowing_match` / `generate_if_let`: Pattern 取得ロジックと `is_none_pattern` 利用。`MatchPattern::Verbatim(...)` を `Pattern::TupleStruct/UnitStruct` に置換
+- [ ] **P2-T8**: `src/transformer/statements/loops.rs:26-28` の `Stmt::WhileLet { pattern: format!(...) }` を `Pattern::TupleStruct{Some, Binding}` に
+- [ ] **P2-T9**: `src/transformer/statements/control_flow.rs:160-164` の `Stmt::IfLet { pattern: format!(...) }` を同上
+- [ ] **P2-T10**: `src/transformer/statements/error_handling.rs:119-120` の `Stmt::IfLet { pattern: format!("Err({catch_param})"), .. }` を `Pattern::TupleStruct{Err, Binding}` に
+- [ ] **P2-T11**: `src/transformer/expressions/patterns.rs:128,289` の `Expr::Matches { pattern: format!(...) }` を `Pattern::TupleStruct{ [enum_name, variant], [Wildcard] }` に
+- [ ] **P2-T12**: `src/transformer/expressions/mod.rs:214-267` の `Expr::IfLet` 構築サイト（`resolve_if_let_pattern` 呼び出し結果の展開）を Pattern ベースに
+- [ ] **P2-T13**: `src/transformer/statements/switch.rs` の全 pattern 構築サイト書き換え:
+  - `MatchPattern::Literal` → `Pattern::Literal`
+  - `MatchPattern::Wildcard` → `Pattern::Wildcard`
+  - `MatchPattern::EnumVariant { path, bindings }` → `Pattern::Struct { path: path.split("::"), fields: bindings.map(|n| (n, Pattern::Binding{name:n, ..})), rest: true }`
+  - **BW1 修正**: `switch.rs:287` `MatchPattern::Literal(Expr::Ident(format!("{ename}::{vname}({var_name})")))` → `Pattern::TupleStruct { path: vec![ename, vname], fields: vec![Pattern::Binding{name: var_name, ..}] }`
+  - **BW2 修正**: `switch.rs:553` `MatchPattern::Literal(Expr::Ident(path))` → `Pattern::UnitStruct { path: vec![enum_name, variant_name] }`
+  - `switch.rs:465` `path.rsplit("::").next()` → `path.last()`
+- [ ] **P2-T14**: `src/transformer/expressions/member_access.rs:387-403` の `MatchPattern::EnumVariant` → `Pattern::Struct` または `TupleStruct`
+- [ ] **P2-T15**: `src/transformer/context.rs:277-282` inline test の `MatchPattern` → `Pattern`
+- [ ] **P2-T16**: `src/generator/statements/mod.rs` / `src/generator/expressions/mod.rs` の pattern rendering を新規 `src/generator/patterns.rs::render_pattern` に差し替え（§2.7）。`MatchPattern::*` の全 arm 処理を削除し `render_pattern(&Pattern)` 1 呼び出しに統合
+- [ ] **P2-T17**: `cargo check` が全ファイルで pass することを確認。エラーがあれば順次修正
+- [ ] **P2-T18**: `cargo test` — pattern 文字列比較している既存テスト（`tests/control_flow.rs:452,532`, `tests/error_handling.rs:125` 等）を Pattern 構造比較に更新
+- [ ] **P2-Commit**: `[WIP] Batch 11c-fix-2-b Phase 2: IR pattern 構造化と全構築サイト書き換え`
 
-### Phase C: pipeline 変更
+### Phase 3: Walker 統合（TypeRefCollector）
 
-C-2-1〜2-3 は Phase B に前倒し済（Phase B の依存解消のため）。Phase C では C-1（PerFileTransformed
-外出し）と、`FileOutput::file_synthetic_items` の最終削除のみ実行。
+- [ ] **P3-T1**: `src/pipeline/external_struct_generator/type_ref_collector.rs` 新規作成。`TypeRefCollector: IrVisitor` 実装（§2.4）
+- [ ] **P3-T2**: `src/pipeline/external_struct_generator/mod.rs` から `collect_type_refs_from_item/_stmt/_expr/_rust_type/_type_params/_method/_match_arm/_verbatim_pattern` を **全て削除**
+- [ ] **P3-T3**: `src/pipeline/external_struct_generator/mod.rs` の `RUST_BUILTIN_TYPES` から `"Some", "None", "Ok", "Err"` を削除。定数上部コメントを「構造化 Pattern 移行済み」に更新
+- [ ] **P3-T4**: `collect_type_refs_from_*` の呼び出し側を `TypeRefCollector::new(&mut refs).visit_*(...)` に書き換え（grep で全箇所特定）
+- [ ] **P3-T5**: `src/pipeline/external_struct_generator/tests.rs` の既存 walker テストを `TypeRefCollector` API で書き直し
+- [ ] **P3-T6**: 新規テスト追加:
+  - lowercase class (`myClass`) の Pattern から refs 登録されることを確認
+  - `Pattern::TupleStruct { path: vec!["Some"] }` は refs 未登録
+  - `Pattern::UnitStruct { path: vec!["None"] }` は refs 未登録
+  - `Pattern::TupleStruct { path: vec!["Ok"/"Err"] }` も未登録
+  - `Pattern::Struct { path: vec!["Color", "Red"] }` から `Color` 登録
+- [ ] **P3-T7**: `cargo test` 全 pass 確認。Hono ベンチ実行（`./scripts/hono-bench.sh`）で clean 率 / dir compile / error instances の後退ゼロ確認
+- [ ] **P3-T8**: `tests/integration_test.rs::{test_type_narrowing, test_async_await, test_error_handling, test_narrowing_truthy_instanceof}` が pass することを個別実行で確認（I-375 申し送り）
+- [ ] **P3-Commit**: `[WIP] Batch 11c-fix-2-b Phase 3: TypeRefCollector 統合 + Some/None/Ok/Err 除去`
 
-- [ ] **C-1-1**: `src/pipeline/types.rs` に `pub(crate) struct PerFileTransformed` を追加
-  - 完了基準: `cargo check` パス
-- [ ] **C-1-2**: `src/pipeline/mod.rs` から関数内ローカルの `struct PerFileTransformed` 定義を削除し、import に書き換え
-  - 完了基準: `cargo check` パス
-- [x] **~~C-2-1~~**: Phase B-1-1 で前倒し完了
-- [x] **~~C-2-2~~**: Phase B-1-1 で前倒し完了
-- [x] **~~C-2-3~~**: Phase B-1-5 で前倒し完了
-- [ ] **C-2-final**: Phase D-1 完了後、`FileOutput::file_synthetic_items` を削除（D-1 で extract_single_output が `file.items` 経由に切り替わったあと）
-- [ ] **C-COMMIT**: `[WIP] Batch 11c-fix Phase C: PerFileTransformed 外出し + FileOutput.file_synthetic_items 削除`
+### Phase 4: 散発再帰の visitor 化
 
-### Phase D: 単一ファイル API 整理
+- [ ] **P4-T1**: `src/transformer/mod.rs::expr_contains_runtime_typeof` / `stmts_contain_runtime_typeof` / `items_contain_runtime_typeof` を `RuntimeTypeofDetector: IrVisitor` に統合
+- [ ] **P4-T2**: `src/transformer/mod.rs::items_contain_regex` / `stmts_contain_regex` / `expr_contains_regex` を `RegexDetector: IrVisitor` に統合
+- [ ] **P4-T3**: 呼び出し側の置換
+- [ ] **P4-T4**: `cargo test` pass 確認
+- [ ] **P4-Commit**: `[WIP] Batch 11c-fix-2-b Phase 4: 散発再帰の IrVisitor 化`
 
-- [ ] **D-1-1**: `src/lib.rs` の `extract_single_output` を `pipeline::placement::SyntheticReferenceGraph` を使う実装に置換。`collect_referenced_synthetic_code` 削除、`synthetic_item_name` 削除
-  - 完了基準: `cargo test --test integration_test` パス（snapshot 差異は F-2 で扱う）
-- [ ] **D-1-2**: `src/pipeline/mod.rs::transpile_single` を同じ手法（IR ベース）で書き換え。`file.file_synthetic_items` 参照を削除し、`output.synthetic_items` + `file.items` から IR で計算
-  - 完了基準: `cargo test pipeline::tests::test_pipeline_single_interface_produces_struct` 等 既存 test pass
-- [ ] **D-2-1**: `extract_single_output` の `let _ = output.synthetic_items;` を分解パターンに置換（D-1-1 の実装内で対応済の場合はスキップ）
-  - 完了基準: `cargo check` パス
-- [ ] **D-COMMIT**: `[WIP] Batch 11c-fix Phase D: 単一ファイル API を pipeline::placement に統合`
+### Phase 5: 最終検証 + クリーンアップ
 
-### Phase E: external_struct_generator API 対称化
-
-- [ ] **E-1-1**: `src/pipeline/external_struct_generator/mod.rs:40` の `collect_undefined_type_references` シグネチャに `defined_only: &[Item]` を追加。実装の defined_types セットに defined_only を chain
-  - 完了基準: `cargo check` パス
-- [ ] **E-1-2**: `src/pipeline/mod.rs:290 generate_external_structs_to_fixpoint` のシグネチャに `defined_only: &[Item]` を追加し、内部呼び出しに渡す
-  - 完了基準: `cargo check` パス
-- [ ] **E-1-3**: `src/pipeline/mod.rs:185` (per-file) と `src/pipeline/mod.rs:224` (post-loop) の呼び出しに `&[]` を追加
-  - 完了基準: `cargo check` パス
-- [ ] **E-1-4**: `src/pipeline/external_struct_generator/tests.rs` の 16 箇所に `&[]` を追加（`replace_all` で一括）
-  - 完了基準: `cargo test pipeline::external_struct_generator` パス
-- [ ] **E-COMMIT**: `[WIP] Batch 11c-fix Phase E: collect_undefined_type_references API 対称化`
-
-### Phase F: テスト追加と snapshot 検証
-
-- [ ] **F-1-1**: `tests/pipeline_placement_test.rs` を新規作成し、テスト 1 (transitive 推移) を実装
-  - 完了基準: 該当テストがパス
-- [ ] **F-1-2**: テスト 2 (cross-file dedup) を追加
-- [ ] **F-1-3**: テスト 3 (未参照 synthetic 除外) を追加
-- [ ] **F-1-4**: テスト 4 (連鎖 A→B→C) を追加
-- [ ] **F-1-5**: テスト 5 (サブディレクトリ参照) を追加
-- [ ] **F-1-6**: テスト 6 (自己参照非ループ) を追加
-  - 各完了基準: 対応テストがパス
-- [ ] **F-2-1**: 6 件の snapshot を `cargo test --test integration_test` で再生成し、差分を1件ずつ確認
-  - 完了基準: 差分が「dead code 削除」「並べ替え」のみで、機能後退がないことを確認
-- [ ] **F-2-2**: 6 件の snapshot 判定結果をコミットメッセージ草案に記録（`tasks.md` 末尾に記録）
-- [ ] **F-COMMIT**: `[WIP] Batch 11c-fix Phase F: パイプライン統合テスト 6 件追加 + snapshot 個別検証`
-
-### Phase G: 検証とドキュメント更新
-
-- [ ] **G-1**: quality-check
-  - `cargo fix --allow-dirty --allow-staged --tests`
-  - `cargo fmt --all`
-  - `cargo clippy --all-targets --all-features -- -D warnings`
-  - `cargo test`
-  - 完了基準: 全て 0 error / 0 warning
-- [ ] **G-2**: Hono ベンチ
-  - `cargo build --release && ./scripts/hono-bench.sh`
-  - 完了基準: dir compile ≥ 157/158、E0428+E0119 = 0
-- [ ] **G-3-1**: Hono 出力スキャン用の Python script を `/tmp/scan_transitive_refs.py` に作成
-- [ ] **G-3-2**: Phase 1.1 の手法で 38 件の transitive ref が 0 件になったことを検証
-  - 完了基準: 「実害のある問題 1 ケース: 0」
-- [ ] **G-4-1**: `TODO` に I-372 (クロスファイル外部型重複) と I-373 (Fn body IR walk) を追加
-- [ ] **G-5-1**: `plan.md` の Batch 11c 行を「I-371 + 12 問題の構造解消」に書き換え。ベースライン表に IR ベース placement 注記
-- [ ] **G-6-1**: コミットメッセージ草案を作成し user に提示
-- [ ] **G-FINAL**: `tasks.md` を削除（git history 参照）
-  - 注: 削除は user による最終 commit 後に実施
+- [ ] **P5-T1**: `grep -rn 'pattern: String' src/ir/` が 0 件
+- [ ] **P5-T2**: `grep -rn 'MatchPattern' src/` が 0 件
+- [ ] **P5-T3**: `grep -rn 'collect_type_refs_from_verbatim_pattern\|collect_type_refs_from_match_arm' src/` が 0 件
+- [ ] **P5-T4**: `grep -n '"Some", "None", "Ok", "Err"' src/pipeline/external_struct_generator/mod.rs` が 0 件
+- [ ] **P5-T5**: `grep -n 'fn collect_type_refs_from_\|fn expr_contains_runtime_typeof\|fn stmts_contain_runtime_typeof\|fn items_contain_regex\|fn stmts_contain_regex' src/` が 0 件
+- [ ] **P5-T6**: `cargo fix --allow-dirty --allow-staged`
+- [ ] **P5-T7**: `cargo fmt --all`
+- [ ] **P5-T8**: `cargo clippy --all-targets --all-features -- -D warnings` 通過
+- [ ] **P5-T9**: `cargo test` 全 pass
+- [ ] **P5-T10**: `./scripts/check-file-lines.sh` 通過
+- [ ] **P5-T11**: `./scripts/hono-bench.sh` 実行: clean 114/158 以上、dir compile 157/158 以上、error instances 54 以下
+- [ ] **P5-T12**: `plan.md` の Batch 11c-fix-2-b を完了に更新、TODO から I-377 削除
+- [ ] **P5-T13**: `backlog/I-377-ir-visitor-and-pattern-structuring.md` 削除
+- [ ] **P5-Commit**: `Batch 11c-fix-2-b: I-377 完了 — IrVisitor 化 + Pattern 構造化 + Some/None/Ok/Err 除去`
 
 ---
 
 ## Step 4: Review Results
 
-このセクションは Step 1〜3 の自己レビュー結果を記載する。Step 5 着手前に必須。
+### 完全性
 
-### 4.1 完備性チェック
+- §1.1–1.8 の全対象が §3 タスクに落とし込まれている
+  - A1–A7: P2-T1, P2-T2
+  - B1–B20: P2-T6 〜 P2-T15
+  - C1–C4: 型変更により自動追随（field 参照のみのため）
+  - D1–D4: P2-T16
+  - E1: P3-T1, P3-T2
+  - E2: P2-T4, P2-T5
+  - E3: P4-T1
+  - E4: P4-T2
+  - F1–F4: P3-T3
+  - T1–T12: P2-T18, P3-T5, P3-T6, P3-T8, P5-T11
 
-| 問題 | tasks.md 内の対応 | 確認 |
-|------|------------------|------|
-| 1 | B-3-1 | ✓ |
-| 2 | D-2-1 | ✓ |
-| 3 | A-1-1, A-1-2, A-1-3 | ✓ |
-| 4 | E-1-1〜4 | ✓ |
-| 5 | B-2-1（OutputWriter）, D-1-1（lib.rs） | ✓ |
-| 6 | C-1-1, C-1-2 | ✓ |
-| 7 | D-1-1（共通モジュール経由で重複解消） | ✓ |
-| 8 | C-2-1, C-2-2, C-2-3 | ✓ |
-| 9 | F-1-1〜6 | ✓ |
-| 10 | F-2-1, F-2-2 | ✓ |
-| 11 | A-2-1 | ✓ |
-| 12 | B-1-1〜5 | ✓ |
+### 依存関係整合性
 
-### 4.2 依存順序チェック
+1. Phase 1（IR 基盤）→ Phase 2（構築サイト）: `Pattern` 型と `IrFolder` が必要
+2. Phase 2 → Phase 3（TypeRefCollector）: `Pattern` が構造化済みである必要
+3. Phase 3 → Phase 4（散発再帰）: `IrVisitor` 基盤が動作確認済みであることを示す
+4. Phase 4 → Phase 5（最終検証）
 
-- A-3 (placement) → B-2 (resolve を IR 化): A 完了後に B 着手 ✓
-- B-1 (FileOutput API) → C-2-3 (main.rs 更新): C-2-3 で `&fo.items` を参照するため、C-2-1 (FileOutput.items 追加) が先行 ✓
-- C-2-1 (FileOutput.items 追加) → D-1-1 (extract_single_output 改修): D は file.items を読むため C-2-1 後 ✓
-- E (API 対称化) は A〜D と独立だが、`generate_external_structs_to_fixpoint` の caller を変えるため C 完了後が安全 ✓
+### コンパイル可能性
 
-### 4.3 コンパイル可能性チェック
+- Phase 1 完了時: `Pattern` は独立定義。`MatchPattern` / `pattern: String` と併存するため `cargo check` pass
+- Phase 2 完了時: 型変更は全サイト同時書き換えのため 1 phase 内で一括解消
+- Phase 3 以降: 追加変更のみで維持
 
-各 Phase 末で `cargo check` が通過するか:
+### エッジケース対応
 
-- **Phase A 末**: 新しいモジュール追加と既存関数の中身変更のみ。シグネチャ変更なし。`cargo check` 通過想定 ✓
-- **Phase B 末**: OutputWriter API が変わるが、main.rs と test を本 Phase 内で同時修正するため Phase 末では通過 ✓
-- **Phase C 末**: FileOutput / PerFileTransformed の構造変更。`pipeline::mod` と `main.rs` で同時修正 ✓
-- **Phase D 末**: lib.rs の単一ファイル API 内のみ。シグネチャ変更なし ✓
-- **Phase E 末**: 関数シグネチャ追加 + caller 全箇所更新を本 Phase 内で完結 ✓
+- **BW1/BW2**: `switch.rs` の `Expr::Ident` に pattern を encode している既存 broken window を P2-T13 で構造化
+- **BW3**: `path.rsplit("::").next()` → `path.last()` を P2-T13 で
+- **`is_none_pattern` ヘルパー**: §2.8 で明示。`complement_pattern == "None"` の文字列比較（control_flow.rs:276, 299）を構造比較に置換
+- **`Expr::IfLet` の重複**: ir/mod.rs:846 と 924 の 2 箇所要確認 → Phase 2 で現物確認のうえ対応
+- **`collect_type_refs_from_stmts` 呼び出し側**: `external_struct_generator/mod.rs` 外にも `placement.rs` や他で呼ばれている可能性 → P3-T4 で grep 実測
+- **`Substitute` の所有権**: `walk_*` が `by-move` 取るため、呼び出し側で `.clone()` が必要な場合あり → P2-T5 で個別確認
 
-### 4.4 Edge case カバレッジ
+### テスト影響分離
 
-- 自己参照 union（再帰型）: F-1-6 でテスト
-- inline 配置 0 個のファイル: B-3-1 で `inline_for_file` が空集合 → transitive_shared_refs も空 → 動作問題なし
-- shared モジュール衝突 (`shared_types_0.rs`): 既存テスト `test_write_to_directory_shared_synthetic_avoids_collision` で検証済、影響なし
-- 単一ファイルに 1 個の合成型のみ: D-1-1 / F-1-3 で検証
+- P2-T18: 既存テストの pattern 文字列比較を Pattern 構造比較に更新（transformer 側テスト）
+- P3-T5: external_struct_generator/tests.rs のセットアップを Pattern ベースに
+- P3-T6: TypeRefCollector 新規単体テスト
+- P5-T11: Hono ベンチで回帰検出
 
-### 4.5 テスト影響
+### 問題ゼロ確認
 
-- 既存 OutputWriter test 21 件: B-1-3〜5 で API 変更に追従、B-2 / B-3 で内容を IR ベース化に追従。すべて Phase B 内で更新
-- 既存 external_struct_generator test 多数: E-1-4 で `&[]` 引数追加、replace_all で一括対応
-- snapshot test 6 件: F-2 で個別検証
-
-### 4.6 リスク
-
-| リスク | 対策 |
-|--------|------|
-| `Item::Trait` の `Method` フィールド構造が想定と異なる | A-2-1 着手時に `src/ir/mod.rs` の `Method` / `TraitRef` 定義を再確認 |
-| `SyntheticPlacement.inline` の型変更による外部依存破壊 | grep で外部参照を確認（OutputWriter 内 + main.rs のみのはず） |
-| Hono ベンチで dir compile 数値が悪化 | G-2 で必ず確認、悪化したら原因を分析し本スコープで修正 |
-
-### 4.7 結論
-
-レビュー結果: **修正なし。Step 5 (Implementation) に着手可能**。
-
-ただし以下は Step 5 着手時に再確認:
-- A-2-1 着手前に `Method` / `TraitRef` のフィールド名を確認
-- B-1-2 (`SyntheticPlacement.inline` の型変更) の外部依存を最終確認
+上記レビューで**修正不要**。本タスク分解で Step 5 に進む。
 
 ---
 
 ## Step 5: Implementation
 
-着手時に各タスクのチェックボックスを更新する。
-完了 → `- [x]`、進行中 → そのまま、ブロック → コメント追記。
-
-進捗状況: **全 Phase 完了**（A〜G、+ self-review で発見した追加問題の構造解消）。
-
-### Phase 完了サマリ
-
-| Phase | 状態 | テスト数 | クリーン |
-|-------|------|---------|---------|
-| A | 完了・コミット済 (6564e02) | lib 2012, placement 16, canonical_name 9, type_refs 8 | clippy/fmt OK |
-| B | 完了・コミット済 (140285e) | output_writer 22 件全 pass | clippy/fmt OK |
-| C | 完了 | PerFileTransformed 外出し + FileOutput.file_synthetic_items 削除 | clippy/fmt OK |
-| D | 完了 | extract_single_output / transpile_single を `pipeline::placement::render_referenced_synthetics_for_file` 経由に統一 | clippy/fmt OK |
-| E | 完了 | `UndefinedRefScope` 共通骨格抽出、`collect_undefined_type_references` に `defined_only` 追加 | clippy/fmt OK |
-| F | 完了 | `tests/pipeline_placement_test.rs` 8 件 + 単体テスト多数 | clippy/fmt OK |
-| G | 完了 | quality-check / Hono ベンチ後退ゼロ確認 / TODO 更新 / plan.md 更新 | — |
-
-### Self-review で追加解消した問題（本セッション）
-
-| 課題 | 解消方法 |
-|------|---------|
-| `pipeline-integrity.md` ルール違反: `RustType::Named { name: "<T as Promise>::Output" }` の文字列詰め込み | `RustType::QSelf { qself, trait_ref, item }` 構造化変数を新設。construction site 2 箇所、generator/substitute/uses_param/walker/synthetic_registry の全 match site を更新 |
-| substring scan の単一ファイル API 残存 | `collect_type_refs_from_item` を fn body / impl body / closure / Cast / StructInit / FnCall まで再帰させる完全な IR walker を実装 |
-| `TypeParam::constraint` walker 漏れ（correctness バグ） | `collect_type_refs_from_type_params` を新設し、Struct/Enum/Trait/Fn/Impl/TypeAlias 全種別で walking |
-| `MatchArm::patterns` walker 漏れ（correctness バグ） | `collect_type_refs_from_match_arm` を新設、`MatchPattern::EnumVariant.path` の uppercase head を抽出 |
-| `Stmt::IfLet/WhileLet` `Expr::IfLet/Matches` の verbatim pattern 走査漏れ | `collect_type_refs_from_verbatim_pattern` を新設、パターン文字列先頭の identifier を抽出 |
-| impl-block 配置ロジックの単一/マルチファイル間非対称 | `SyntheticReferenceGraph::build` で「synthetic impl の対象 struct を file が定義していれば file を referencer として登録」semantics を組み込み、両 API で共通化 |
-| `Item::Fn` が `is_definition_item` から漏れ | 追加（同名 Fn 衝突防止） |
-| テスト品質: `test_unreferenced_synthetic_not_emitted` の弱い検証、`test_synthetic_chain` の連鎖でない検証 | 8 件の統合テストに分割・厳密化 |
-| `collect_undefined_type_references` / `collect_all_undefined_references` API 非対称 | `UndefinedRefScope` 構造体に共通骨格を抽出 |
-| 新規ロジックに対する自動テスト不在 | 単体テスト +72 件 + 統合テスト +8 件 = +80 件追加 |
-
-### 残課題（Batch 11c-fix-2 への継続）
-
-本セッション（Batch 11c-fix）で scope 拡大による回帰リスク累積を避けるため、以下 3 件は別バッチ（Batch 11c-fix-2）として分離した。このうち **I-375 は Batch 11c-fix-2-a として別セッションで完了済**。残 2 件（I-377, I-376）が Batch 11c-fix-2 の継続タスク。
-
-| ID | 概要 | 状態 |
-|----|------|------|
-| ~~**I-375**~~ | ~~`Expr::FnCall::name` の意味論的多義性（IR 構造化負債）~~ | **完了** Batch 11c-fix-2-a で `CallTarget { Path { segments, type_ref } \| Super }` 2 variant 構造化、walker の uppercase-head 撤廃、+35 件の単体/統合テスト追加、Hono 後退ゼロ |
-| **I-377** | walker / substitute / generator の手書き再帰の visitor pattern 化 + `MatchPattern` / verbatim pattern 文字列の構造化 | Batch 11c-fix-2-b として次実施。I-375 からの申し送り事項（`RUST_BUILTIN_TYPES` からの `Some/None/Ok/Err` 削除、`convert_call_expr` の sanitize 不整合）は plan.md に詳細記載済 |
-| **I-376** | クロスファイル外部型 stub の構造的重複 | Batch 11c-fix-2-c として I-377 の後に実施 |
-
----
-
-## 付録: snapshot 個別検証結果
-
-リファクタの結果、全 89 件の integration_test snapshot は **差分なしで pass**。Batch 11c-fix の構造解消は意味論的に snapshot 出力を変えなかった。
-
-| snapshot | 差分の種類 | 妥当性判定 |
-|----------|----------|----------|
-| basic_types | 差分なし | OK |
-| inline_type_literal_param | 差分なし | OK |
-| typeof_const | 差分なし | OK |
-| instanceof_builtin | 差分なし | OK |
-| external_type_struct | 差分なし | OK |
-| instanceof_builtin_with_builtins | 差分なし | OK |
-| その他 83 件 | 差分なし | OK |
+Phase 1 から順次実施する。各 phase 完了時に本 tasks.md の checkbox を `[x]` に更新する。

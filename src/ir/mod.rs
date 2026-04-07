@@ -1100,5 +1100,14 @@ pub enum ClosureBody {
 
 mod substitute;
 
+pub mod fold;
+pub mod pattern;
+pub mod visit;
+
+pub use pattern::Pattern;
+
+#[cfg(test)]
+mod test_fixtures;
+
 #[cfg(test)]
 mod tests;
