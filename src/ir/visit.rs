@@ -236,14 +236,12 @@ pub fn walk_stmt<V: IrVisitor + ?Sized>(v: &mut V, stmt: &Stmt) {
             }
         }
         Stmt::WhileLet {
-            pattern: _,
+            pattern,
             expr,
             body,
             ..
         } => {
-            // NOTE (Phase 1): `pattern` is still `String` during Phase 1. It will be
-            // replaced by `Pattern` in Phase 2 and `v.visit_pattern(pattern)` will be
-            // wired in at that time.
+            v.visit_pattern(pattern);
             v.visit_expr(expr);
             for s in body {
                 v.visit_stmt(s);
@@ -273,12 +271,12 @@ pub fn walk_stmt<V: IrVisitor + ?Sized>(v: &mut V, stmt: &Stmt) {
         }
         Stmt::Expr(e) | Stmt::TailExpr(e) => v.visit_expr(e),
         Stmt::IfLet {
-            pattern: _,
+            pattern,
             expr,
             then_body,
             else_body,
         } => {
-            // NOTE (Phase 1): `pattern` is still `String` during Phase 1.
+            v.visit_pattern(pattern);
             v.visit_expr(expr);
             for s in then_body {
                 v.visit_stmt(s);
@@ -381,12 +379,12 @@ pub fn walk_expr<V: IrVisitor + ?Sized>(v: &mut V, expr: &Expr) {
             v.visit_expr(else_expr);
         }
         Expr::IfLet {
-            pattern: _,
+            pattern,
             expr,
             then_expr,
             else_expr,
         } => {
-            // NOTE (Phase 1): `pattern` is still `String` during Phase 1.
+            v.visit_pattern(pattern);
             v.visit_expr(expr);
             v.visit_expr(then_expr);
             v.visit_expr(else_expr);
@@ -402,9 +400,9 @@ pub fn walk_expr<V: IrVisitor + ?Sized>(v: &mut V, expr: &Expr) {
             v.visit_expr(index);
         }
         Expr::RuntimeTypeof { operand } => v.visit_expr(operand),
-        Expr::Matches { expr, pattern: _ } => {
-            // NOTE (Phase 1): `pattern` is still `String` during Phase 1.
+        Expr::Matches { expr, pattern } => {
             v.visit_expr(expr);
+            v.visit_pattern(pattern);
         }
         Expr::Block(stmts) => {
             for s in stmts {
@@ -520,16 +518,9 @@ pub fn walk_pattern<V: IrVisitor + ?Sized>(v: &mut V, pat: &Pattern) {
 }
 
 /// `MatchArm` を走査する（patterns + guard + body）。
-///
-/// NOTE (Phase 1): `arm.patterns` は `Vec<MatchPattern>` のまま。Phase 2 で
-/// `Vec<Pattern>` に置換後、`v.visit_pattern(pat)` を呼ぶ。現状は
-/// `MatchPattern::Literal(Expr)` 内の Expr のみ visitor 経由で走査する。
 pub fn walk_match_arm<V: IrVisitor + ?Sized>(v: &mut V, arm: &MatchArm) {
-    use crate::ir::MatchPattern;
     for pat in &arm.patterns {
-        if let MatchPattern::Literal(expr) = pat {
-            v.visit_expr(expr);
-        }
+        v.visit_pattern(pat);
     }
     if let Some(g) = &arm.guard {
         v.visit_expr(g);
@@ -642,16 +633,12 @@ mod tests {
     }
 
     #[test]
-    fn match_arm_walker_visits_literals_and_guard() {
-        // NOTE (Phase 1): `MatchArm.patterns` is still `Vec<MatchPattern>`.
-        // Phase 2 will replace with `Vec<Pattern>` and the walker will route
-        // through `visit_pattern`. For now we only verify that Literal expressions
-        // and guards are visited.
-        use crate::ir::MatchPattern;
+    fn match_arm_walker_visits_patterns_and_guard() {
+        // `match x { 1 | 2 if flag => {} }`
         let arm = MatchArm {
             patterns: vec![
-                MatchPattern::Literal(Expr::IntLit(1)),
-                MatchPattern::Literal(Expr::IntLit(2)),
+                Pattern::Literal(Expr::IntLit(1)),
+                Pattern::Literal(Expr::IntLit(2)),
             ],
             guard: Some(Expr::Ident("flag".to_string())),
             body: vec![],
@@ -661,9 +648,9 @@ mod tests {
         counter.visit_match_arm(&arm);
 
         assert_eq!(counter.arms, 1);
-        // During Phase 1 the walker visits Literal inner exprs directly (not through
-        // visit_pattern), so pattern count stays 0.
-        assert_eq!(counter.patterns, 0);
+        // 2 `Pattern::Literal` → walker routes through `visit_pattern` for each
+        // (2 patterns) and then `walk_pattern` descends into the inner literal expr.
+        assert_eq!(counter.patterns, 2);
         // 2 literal inner exprs + 1 guard = 3
         assert_eq!(counter.exprs, 3);
     }

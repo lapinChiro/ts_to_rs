@@ -142,47 +142,107 @@ OBJECT_LITERAL_NO_TYPE 全体で 25件。I-300/I-301/I-306 のサブ分類件数
   - 新規: per-file の `file.items` に外部型 struct が含まれないことを直接 assert
   - Hono: dir compile / error instances 後退ゼロ
 
-- **[I-377]** **walker / substitute / generator の手書き再帰の visitor pattern 化** [L3]
+- **[I-378]** **`Expr::Path` 構造化による path-in-Ident broken window 撲滅** [L3]
 
-  **問題**: 現在 `Stmt` / `Expr` / `RustType` / `Item` を再帰的に走査するロジックが複数箇所に手書きで存在する:
-  - `src/pipeline/external_struct_generator/mod.rs::collect_type_refs_from_item / _stmt / _expr / _rust_type` (本セッションで追加)
-  - `src/ir/substitute.rs::Stmt::substitute / Expr::substitute / Item::substitute` (既存)
-  - 将来追加される類似処理
+  **問題**: I-377 で `MatchPattern::Verbatim` / `Stmt::IfLet::pattern: String` 等を構造化して
+  pattern サブシステムから display-formatted 文字列を撲滅したが、I-377 self-review で **同じ
+  クラスの broken window が `Expr::Ident` 経由で 5 サイトに残存** していることが発覚した。
+  これは I-375 が `Expr::FnCall::name: String` を `CallTarget` enum に構造化したのと完全に
+  同型の問題で、`pipeline-integrity.md` ルール「IR に display-formatted 文字列を保存禁止」
+  への直接違反。
 
-  これらは全て同じ「IR 全要素への再帰」パターンを実装しており、新しい variant が追加された場合に **全箇所を更新する必要がある**。Rust の `match` 網羅性チェックで漏れは compile-time に検出されるため immediate な correctness は保証されるが、変更コストが線形に増えていく。本セッションでは `collect_type_refs_from_item` に type_params constraint walking と verbatim pattern walking を追加したが、`substitute.rs` には同様の追加は反映されていない。
+  **5 つの構築サイト** (いずれも `Expr::Ident(format!("X::Y"))` で path 文字列を encode):
+  - `src/transformer/expressions/member_access.rs:76` — enum field access。
+    TS `Direction.Up` → `Expr::Ident("Direction::Up")`
+  - `src/transformer/expressions/member_access.rs:94` — `Math.PI` →
+    `Expr::Ident("std::f64::consts::PI")` 等
+  - `src/transformer/expressions/literals.rs:30` — string literal narrowing。
+    `"up"` (Direction 文脈) → `Expr::Ident("Direction::Up")`
+  - `src/transformer/expressions/patterns.rs:69` / `:84` — equality check rewriting。
+    `x === "up"` → `x == Expr::Ident("Direction::Up")` (left/right 両方)
 
-  **修正方針**:
+  **連動する文字列ベース判定** (`src/transformer/statements/switch.rs:36`):
   ```rust
-  pub trait IrVisitor {
-      fn visit_item(&mut self, item: &Item) { walk_item(self, item); }
-      fn visit_stmt(&mut self, stmt: &Stmt) { walk_stmt(self, stmt); }
-      fn visit_expr(&mut self, expr: &Expr) { walk_expr(self, expr); }
-      fn visit_rust_type(&mut self, ty: &RustType) { walk_rust_type(self, ty); }
-      fn visit_match_pattern(&mut self, pat: &MatchPattern) { walk_match_pattern(self, pat); }
-      // ...
-  }
-
-  pub fn walk_item<V: IrVisitor + ?Sized>(v: &mut V, item: &Item) {
-      match item {
-          Item::Struct { type_params, fields, .. } => {
-              for tp in type_params { if let Some(c) = &tp.constraint { v.visit_rust_type(c); } }
-              for f in fields { v.visit_rust_type(&f.ty); }
-          }
-          // ... 全 variant
+  fn is_literal_match_pattern(expr: &Expr) -> bool {
+      match expr {
+          Expr::IntLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) => true,
+          Expr::Ident(name) => name.contains("::"),  // ← 生きた uppercase-head ヒューリスティックの兄弟
+          _ => false,
       }
   }
   ```
+  この判定が switch.rs:622 の `pending_patterns.push(Pattern::Literal(pattern))` を経由して
+  `Pattern::Literal(Expr::Ident("Direction::Up"))` という構造を生成する。I-377 で書いた
+  `Pattern::Literal` の不変条件「**値リテラルのみ**、修飾パスは `UnitStruct` を使うこと」
+  (`src/ir/pattern.rs:30-44`) が現実のコードと矛盾している。
 
-  Visitor は SWC AST の visitor pattern (`swc_ecma_visit::Visit`) と同型。各 walker は `IrVisitor` を実装し、必要なノードだけ override する。`collect_type_refs_from_item` は `TypeRefCollector` 構造体として再実装され、`visit_rust_type` で refs に登録する。
+  **修正方針**: I-375 と同じパターンを適用する。
+  1. `Expr::Path { segments: Vec<String>, type_ref: Option<String> }` 新 variant を IR に
+     導入 (`Expr::Ident(String)` は単一識別子のみ保持するように責務を限定)
+  2. 上記 5 サイトを `Expr::Path { segments: vec![enum_name, variant], type_ref: Some(enum_name) }`
+     等の構造的構築に置き換え
+  3. `is_literal_match_pattern` の `Expr::Ident(name).contains("::")` を構造判定に置換。
+     `Expr::Path { .. }` が値パターンとして valid となる
+  4. `convert_switch_clean_match` で `Pattern::Literal(Expr::Path { .. })` → `Pattern::UnitStruct`
+     への変換を追加（または `Pattern::Literal` を値リテラル以外受け付けないように
+     `LiteralValue` 子 enum を導入）。これにより `Pattern::Literal` の不変条件が構造的に
+     強制される
+  5. generator の `Expr::Path` rendering（`segments.join("::")`）
+  6. walker (`collect_type_refs_from_expr`) で `Expr::Path::type_ref` を refs に登録
+     (lowercase 型名も正しく捕捉される)
+  7. `src/ir/visit.rs` / `src/ir/fold.rs` の `walk_expr` に `Expr::Path` を追加
 
   **影響範囲**:
-  - `src/ir/visit.rs` 新規（trait + walk 関数）
-  - `src/pipeline/external_struct_generator/mod.rs::collect_type_refs_*` を `TypeRefCollector` に書き換え
-  - `src/ir/substitute.rs` を visitor ベースの `Substitute` に書き換え
-  - `src/transformer/expressions/mod.rs::expr_contains_runtime_typeof` 等の散発的な再帰も visitor 化候補
-  - tests: 新規 visitor の単体テスト + 既存テスト全 pass
+  - `src/ir/mod.rs`: `Expr::Path` 新 variant
+  - `src/ir/visit.rs` / `src/ir/fold.rs`: `walk_expr` の `Expr::Path` 分岐追加
+  - `src/transformer/expressions/{member_access.rs, literals.rs, patterns.rs}` の 5 サイト
+  - `src/transformer/statements/switch.rs::is_literal_match_pattern` /
+    `convert_switch_clean_match`
+  - `src/generator/expressions/mod.rs` の Path rendering
+  - `src/pipeline/external_struct_generator/mod.rs::collect_type_refs_from_expr` の
+    `TypeRefCollector::visit_expr`(`Expr::Path::type_ref` 登録)
+  - 全関連テスト: snapshot 更新、pattern 構築サイト test 更新
+  - I-377 で書いた `src/ir/pattern.rs::Pattern::Literal` の doc コメント不変条件が現実と
+    一致するようになる
 
-  **修正コスト**: 中〜大。AST node 数（Stmt/Expr/Item/RustType/MatchPattern）× 既存 walker 数の積で工数が決まる。
+  **完了基準**:
+  - `grep -rn 'Expr::Ident(format!.*"::"' src/` が 0 件
+  - `grep -rn 'name\.contains("::")' src/` が 0 件
+  - `Pattern::Literal(Expr::Ident("X::Y"))` 構造が IR 上に存在しない
+  - lowercase 型名 (`myEnum::Up`) を含む TS から正しく型参照される回帰テスト追加
+  - Hono ベンチ後退ゼロ
+  - I-377 で書いた `Pattern::Literal` 不変条件 doc が現実と整合する
+
+  **修正コスト**: 中。I-375 と同等規模（5 サイト書き換え + downstream walker / generator /
+  pattern 不変条件強制）。
+
+- **[I-line]** **行数超過ファイルの責務分割** [L3]
+
+  **問題**: `./scripts/check-file-lines.sh` が **5 ファイル** で 1000 行超過を検知:
+  - `src/pipeline/external_struct_generator/tests.rs` 2489 行
+  - `src/pipeline/output_writer.rs` 1135 行
+  - `src/transformer/expressions/tests/calls.rs` 1111 行
+  - `src/ir/mod.rs` 1105 行
+  - `src/ir/tests/mod.rs` 1031 行
+
+  **修正方針**:
+  1. **テストファイル群** (`tests/calls.rs`, `tests/mod.rs`, `external_struct_generator/tests.rs`):
+     論理セクション（fixture / 各機能テスト群）でサブモジュール分割
+  2. **`src/ir/mod.rs`**: `Expr` enum / `Stmt` enum / `Item` enum / `RustType` enum を
+     それぞれ独立モジュール (`src/ir/expr.rs` / `src/ir/stmt.rs` / `src/ir/item.rs` /
+     `src/ir/rust_type.rs`) に分割。`pub use` で再エクスポートして API 互換維持
+  3. **`src/pipeline/output_writer.rs`**: `resolve_synthetic_placement` / `write_to_*` /
+     合成型処理 など責務の異なるブロックをサブモジュールに分割
+
+  **配置順序**: I-378 の前に実施する。理由は I-378 が `Expr::Path` 新 variant 追加で
+  `src/ir/mod.rs` を更に拡大させるため、先に分割しておくことで I-378 の影響範囲を
+  清潔に保ち、レビュー品質を向上させるため。
+
+  **完了基準**:
+  - `./scripts/check-file-lines.sh` がエラー 0 件
+  - 全テスト pass
+  - cargo clippy / fmt 通過
+  - 既存 `pub` API 互換維持（`crate::ir::Expr` 等の import 経路は変更しない）
 - **[I-374]** **Rust 予約語と衝突する型名のサニタイズ** — TypeScript で `interface Self {}` のように Rust の予約語を識別子として使った場合、生成 Rust で `pub struct Self {}` となり Rust 予約語衝突でコンパイル不可。現在 `src/pipeline/external_struct_generator/mod.rs` の `collect_type_refs_from_rust_type` で `Self` のみを band-aid 除外しているが、根本治療は IR レベルで型名をサニタイズすること（例: `Self` → `Self_` または `_Self`）。対象は Rust の type-position 予約語: `Self`, `crate`, `super`, `extern`, `dyn`, `impl` 等。修正方針: (1) `src/registry/mod.rs` または `src/transformer/types/converter.rs` で TS 識別子 → Rust 型名変換時に予約語チェック → サニタイズ。(2) ユーザーコード側の参照（`new Self(...)` 等）も同期してリネーム。(3) `collect_type_refs_from_rust_type` の Self band-aid を削除。修正コスト: 中。テスト: TS `interface Self { x: number; }` を入力にして Rust `struct Self_` が生成されることを確認
 - **[I-279]** **resolve_synthetic_placement の O(n²)** — 大規模プロジェクトでボトルネック
 - **[I-62]** **is_string_type の Option\<String\> ハック除去**

@@ -20,7 +20,7 @@ mod type_guards;
 mod update_exprs;
 
 use super::*;
-use crate::ir::{BinOp, MatchPattern, UnOp};
+use crate::ir::{BinOp, Pattern, UnOp};
 use crate::parser::parse_typescript;
 use crate::pipeline::SyntheticTypeRegistry;
 use crate::registry::{MethodSignature, TypeDef, TypeRegistry};

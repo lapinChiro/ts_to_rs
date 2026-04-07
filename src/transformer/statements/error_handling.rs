@@ -6,7 +6,7 @@
 use anyhow::Result;
 use swc_ecma_ast as ast;
 
-use crate::ir::{CallTarget, Expr, RustType, Stmt};
+use crate::ir::{CallTarget, Expr, Pattern, RustType, Stmt};
 use crate::transformer::Transformer;
 
 impl<'a> Transformer<'a> {
@@ -117,7 +117,10 @@ impl<'a> Transformer<'a> {
             }
 
             result.push(Stmt::IfLet {
-                pattern: format!("Err({catch_param})"),
+                pattern: Pattern::TupleStruct {
+                    path: vec!["Err".to_string()],
+                    fields: vec![Pattern::binding(catch_param.as_str())],
+                },
                 expr: Expr::Ident("_try_result".to_string()),
                 then_body: catch_body,
                 else_body: None,

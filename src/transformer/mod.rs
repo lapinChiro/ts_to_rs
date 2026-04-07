@@ -711,73 +711,42 @@ fn inject_js_typeof_if_needed(items: &mut Vec<Item>) {
     ));
 }
 
-fn items_contain_runtime_typeof(items: &[Item]) -> bool {
-    use crate::ir::Method;
-    items.iter().any(|item| match item {
-        Item::Fn { body, .. } => stmts_contain_runtime_typeof(body),
-        Item::Impl { methods, .. } => methods.iter().any(|m: &Method| {
-            m.body
-                .as_ref()
-                .is_some_and(|b| stmts_contain_runtime_typeof(b))
-        }),
-        _ => false,
-    })
+/// `Expr::RuntimeTypeof` が任意の項目内に存在するかを構造的に検出する visitor。
+///
+/// I-377 以前は `expr_contains_runtime_typeof` / `stmts_contain_runtime_typeof` /
+/// `items_contain_runtime_typeof` の 3 つの手書き再帰関数で実装されており、
+/// `Expr::Closure` / `Expr::StructInit` / `Expr::Match` などの variant を
+/// `_ => false` で黙殺していた（latent バグ: closure 内の RuntimeTypeof が
+/// 未検出になり `js_typeof` helper が注入されない）。`IrVisitor` 化により全
+/// variant が `walk_*` で走査されるため、この抜けが構造的に解消される。
+#[derive(Default)]
+struct RuntimeTypeofDetector {
+    found: bool,
 }
 
-fn stmts_contain_runtime_typeof(stmts: &[crate::ir::Stmt]) -> bool {
-    stmts.iter().any(|stmt| match stmt {
-        crate::ir::Stmt::Expr(e)
-        | crate::ir::Stmt::Return(Some(e))
-        | crate::ir::Stmt::TailExpr(e) => expr_contains_runtime_typeof(e),
-        crate::ir::Stmt::Let { init, .. } => {
-            init.as_ref().is_some_and(expr_contains_runtime_typeof)
+impl crate::ir::visit::IrVisitor for RuntimeTypeofDetector {
+    fn visit_expr(&mut self, expr: &crate::ir::Expr) {
+        if self.found {
+            return;
         }
-        crate::ir::Stmt::If {
-            then_body,
-            else_body,
-            ..
-        } => {
-            stmts_contain_runtime_typeof(then_body)
-                || else_body
-                    .as_ref()
-                    .is_some_and(|b| stmts_contain_runtime_typeof(b.as_slice()))
+        if matches!(expr, crate::ir::Expr::RuntimeTypeof { .. }) {
+            self.found = true;
+            return;
         }
-        crate::ir::Stmt::Match { arms, .. } => arms
-            .iter()
-            .any(|arm| stmts_contain_runtime_typeof(&arm.body)),
-        crate::ir::Stmt::While { body, .. } | crate::ir::Stmt::ForIn { body, .. } => {
-            stmts_contain_runtime_typeof(body)
-        }
-        crate::ir::Stmt::LabeledBlock { body, .. } => stmts_contain_runtime_typeof(body),
-        _ => false,
-    })
-}
-
-fn expr_contains_runtime_typeof(expr: &crate::ir::Expr) -> bool {
-    use crate::ir::Expr;
-    match expr {
-        Expr::RuntimeTypeof { .. } => true,
-        Expr::MethodCall { object, args, .. } => {
-            expr_contains_runtime_typeof(object) || args.iter().any(expr_contains_runtime_typeof)
-        }
-        Expr::FnCall { args, .. } => args.iter().any(expr_contains_runtime_typeof),
-        Expr::Ref(inner) | Expr::Await(inner) | Expr::Deref(inner) => {
-            expr_contains_runtime_typeof(inner)
-        }
-        Expr::BinaryOp { left, right, .. } => {
-            expr_contains_runtime_typeof(left) || expr_contains_runtime_typeof(right)
-        }
-        Expr::If {
-            condition,
-            then_expr,
-            else_expr,
-        } => {
-            expr_contains_runtime_typeof(condition)
-                || expr_contains_runtime_typeof(then_expr)
-                || expr_contains_runtime_typeof(else_expr)
-        }
-        _ => false,
+        crate::ir::visit::walk_expr(self, expr);
     }
+}
+
+fn items_contain_runtime_typeof(items: &[Item]) -> bool {
+    use crate::ir::visit::IrVisitor;
+    let mut detector = RuntimeTypeofDetector::default();
+    for item in items {
+        detector.visit_item(item);
+        if detector.found {
+            return true;
+        }
+    }
+    false
 }
 
 fn inject_regex_import_if_needed(items: &mut Vec<Item>) {
@@ -793,51 +762,39 @@ fn inject_regex_import_if_needed(items: &mut Vec<Item>) {
     }
 }
 
-fn items_contain_regex(items: &[Item]) -> bool {
-    use crate::ir::Method;
-    items.iter().any(|item| match item {
-        Item::Fn { body, .. } => stmts_contain_regex(body),
-        Item::Impl { methods, .. } => methods
-            .iter()
-            .any(|m: &Method| m.body.as_ref().is_some_and(|b| stmts_contain_regex(b))),
-        _ => false,
-    })
+/// `Expr::Regex` が任意の項目内に存在するかを構造的に検出する visitor。
+///
+/// `RuntimeTypeofDetector` と同じ理由で `IrVisitor` 化されている：以前の手書き
+/// `expr_contains_regex` / `stmts_contain_regex` は `Expr::Closure` や
+/// `Expr::IfLet` 内の Regex を検出できなかった（`_ => false` で黙殺）。
+#[derive(Default)]
+struct RegexDetector {
+    found: bool,
 }
 
-fn stmts_contain_regex(stmts: &[crate::ir::Stmt]) -> bool {
-    use crate::ir::Stmt;
-    stmts.iter().any(|stmt| match stmt {
-        Stmt::Let { init, .. } => init.as_ref().is_some_and(expr_contains_regex),
-        Stmt::Expr(e) | Stmt::Return(Some(e)) | Stmt::TailExpr(e) => expr_contains_regex(e),
-        Stmt::If {
-            then_body,
-            else_body,
-            ..
-        } => {
-            stmts_contain_regex(then_body)
-                || else_body
-                    .as_ref()
-                    .is_some_and(|b| stmts_contain_regex(b.as_slice()))
+impl crate::ir::visit::IrVisitor for RegexDetector {
+    fn visit_expr(&mut self, expr: &crate::ir::Expr) {
+        if self.found {
+            return;
         }
-        Stmt::Match { arms, .. } => arms.iter().any(|arm| stmts_contain_regex(&arm.body)),
-        Stmt::While { body, .. } | Stmt::ForIn { body, .. } => stmts_contain_regex(body),
-        Stmt::LabeledBlock { body, .. } => stmts_contain_regex(body),
-        _ => false,
-    })
-}
-
-fn expr_contains_regex(expr: &crate::ir::Expr) -> bool {
-    use crate::ir::Expr;
-    match expr {
-        Expr::Regex { .. } => true,
-        Expr::MethodCall { object, args, .. } => {
-            expr_contains_regex(object) || args.iter().any(expr_contains_regex)
+        if matches!(expr, crate::ir::Expr::Regex { .. }) {
+            self.found = true;
+            return;
         }
-        Expr::FnCall { args, .. } => args.iter().any(expr_contains_regex),
-        Expr::Ref(inner) | Expr::Await(inner) | Expr::Deref(inner) => expr_contains_regex(inner),
-        Expr::Block(stmts) => stmts_contain_regex(stmts),
-        _ => false,
+        crate::ir::visit::walk_expr(self, expr);
     }
+}
+
+fn items_contain_regex(items: &[Item]) -> bool {
+    use crate::ir::visit::IrVisitor;
+    let mut detector = RegexDetector::default();
+    for item in items {
+        detector.visit_item(item);
+        if detector.found {
+            return true;
+        }
+    }
+    false
 }
 
 /// Builds an `unwrap_or` or `unwrap_or_else` expression for an Option field with a default value.
@@ -895,3 +852,121 @@ fn build_init_fn(stmts: Vec<crate::ir::Stmt>) -> Item {
 pub(crate) mod test_fixtures;
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod detector_tests {
+    use super::*;
+    use crate::ir::{BinOp, CallTarget, ClosureBody, Expr, Param, RustType, Stmt, Visibility};
+
+    fn fn_item(body: Vec<Stmt>) -> Item {
+        Item::Fn {
+            vis: Visibility::Private,
+            attributes: vec![],
+            is_async: false,
+            name: "f".to_string(),
+            type_params: vec![],
+            params: vec![],
+            return_type: None,
+            body,
+        }
+    }
+
+    /// `RuntimeTypeof` nested inside a closure body must be detected.
+    ///
+    /// 以前の手書き `expr_contains_runtime_typeof` は `Expr::Closure` arm を
+    /// `_ => false` で黙殺しており、この入力では false を返していた（latent bug）。
+    /// `RuntimeTypeofDetector: IrVisitor` 化により `walk_expr` 経由で
+    /// Closure 内部が走査され、正しく true を返す。
+    #[test]
+    fn runtime_typeof_detected_inside_closure_body() {
+        let closure_expr = Expr::Closure {
+            params: vec![Param {
+                name: "x".to_string(),
+                ty: Some(RustType::Any),
+            }],
+            return_type: None,
+            body: ClosureBody::Expr(Box::new(Expr::RuntimeTypeof {
+                operand: Box::new(Expr::Ident("x".to_string())),
+            })),
+        };
+        let item = fn_item(vec![Stmt::TailExpr(closure_expr)]);
+        assert!(
+            items_contain_runtime_typeof(&[item]),
+            "RuntimeTypeof inside a closure body must be detected"
+        );
+    }
+
+    /// `RuntimeTypeof` nested inside a `Match` arm body must be detected.
+    #[test]
+    fn runtime_typeof_detected_inside_match_arm() {
+        let item = fn_item(vec![Stmt::Match {
+            expr: Expr::Ident("x".to_string()),
+            arms: vec![crate::ir::MatchArm {
+                patterns: vec![crate::ir::Pattern::Wildcard],
+                guard: None,
+                body: vec![Stmt::TailExpr(Expr::RuntimeTypeof {
+                    operand: Box::new(Expr::Ident("x".to_string())),
+                })],
+            }],
+        }]);
+        assert!(
+            items_contain_runtime_typeof(&[item]),
+            "RuntimeTypeof inside a match arm must be detected"
+        );
+    }
+
+    /// Items without `RuntimeTypeof` must return false.
+    #[test]
+    fn runtime_typeof_absent_returns_false() {
+        let item = fn_item(vec![Stmt::TailExpr(Expr::BinaryOp {
+            left: Box::new(Expr::Ident("x".to_string())),
+            op: BinOp::Add,
+            right: Box::new(Expr::IntLit(1)),
+        })]);
+        assert!(!items_contain_runtime_typeof(&[item]));
+    }
+
+    /// `Regex` nested inside a closure body must be detected.
+    ///
+    /// 以前の手書き `expr_contains_regex` は Closure arm を `_ => false` で
+    /// 黙殺していた（latent bug）。
+    #[test]
+    fn regex_detected_inside_closure_body() {
+        let closure_expr = Expr::Closure {
+            params: vec![],
+            return_type: None,
+            body: ClosureBody::Expr(Box::new(Expr::Regex {
+                pattern: "abc".to_string(),
+                global: false,
+                sticky: false,
+            })),
+        };
+        let item = fn_item(vec![Stmt::TailExpr(closure_expr)]);
+        assert!(
+            items_contain_regex(&[item]),
+            "Regex inside a closure body must be detected"
+        );
+    }
+
+    /// Items without `Regex` must return false.
+    #[test]
+    fn regex_absent_returns_false() {
+        let item = fn_item(vec![Stmt::Expr(Expr::FnCall {
+            target: CallTarget::simple("f"),
+            args: vec![],
+        })]);
+        assert!(!items_contain_regex(&[item]));
+    }
+
+    /// FnCall args are walked.
+    #[test]
+    fn runtime_typeof_detected_inside_fncall_args() {
+        let item = fn_item(vec![Stmt::Expr(Expr::FnCall {
+            target: CallTarget::simple("wrap"),
+            args: vec![Expr::RuntimeTypeof {
+                operand: Box::new(Expr::Ident("x".to_string())),
+            }],
+        })]);
+        assert!(items_contain_runtime_typeof(&[item]));
+    }
+}

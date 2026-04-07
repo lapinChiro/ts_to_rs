@@ -325,11 +325,13 @@ fn test_convert_du_standalone_field_access_generates_match_expr() {
             "expected at least 2 arms, got: {}",
             arms.len()
         );
-        // First arm should bind radius
+        // First arm should bind radius in a structured `Pattern::Struct`
         assert!(
             arms[0].patterns.iter().any(|p| {
-                matches!(p, MatchPattern::EnumVariant { path, bindings }
-                    if path == "Shape::Circle" && bindings == &["radius"])
+                matches!(p, Pattern::Struct { path, fields, .. }
+                    if path == &["Shape".to_string(), "Circle".to_string()]
+                        && fields.len() == 1
+                        && fields[0].0 == "radius")
             }),
             "expected Circle arm with radius binding, got: {:?}",
             arms[0].patterns

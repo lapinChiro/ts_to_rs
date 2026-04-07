@@ -6,8 +6,8 @@
 use std::collections::HashSet;
 
 use crate::ir::{
-    camel_to_snake, sanitize_field_name, CallTarget, ClosureBody, Expr, Item, MatchArm,
-    MatchPattern, Method, RustType, Stmt, StructField, TypeParam, Visibility,
+    camel_to_snake, sanitize_field_name, CallTarget, ClosureBody, Expr, Item, MatchArm, Method,
+    Pattern, RustType, Stmt, StructField, TypeParam, Visibility,
 };
 use crate::pipeline::SyntheticTypeRegistry;
 use crate::registry::{TypeDef, TypeRegistry};
@@ -15,24 +15,23 @@ use crate::ts_type_info::resolve::typedef::monomorphize_type_params;
 
 /// Rust の標準ライブラリ型・serde 型など、struct 生成が不要な型名のセット。
 ///
-/// I-375 で `Expr::FnCall` が `CallTarget` で構造化されたことにより、FnCall 経由で
-/// `Some` / `None` / `Ok` / `Err` が walker に登録されることはなくなった
-/// （`type_ref: None` として構造的に判定される）。
+/// 型（type name）レベルのフィルタ。
 ///
-/// しかし `MatchPattern::EnumVariant::path: String` と `Stmt::IfLet::pattern: String`
-/// の pattern 文字列 walker（`collect_type_refs_from_match_arm`,
-/// `collect_type_refs_from_verbatim_pattern`）は **同根の uppercase-head
-/// ヒューリスティックを使用しており、これは I-377 のスコープ**。I-377 で
-/// MatchPattern が構造化されるまでは、pattern 経由で `Some(x)` / `None` /
-/// `Ok(x)` / `Err(e)` が refs に登録されうる。そのため、このフィルタで builtin
-/// variant 名を除外する必要がある。
+/// # 歴史と責務分離
 ///
-/// I-377 完了後にこれらのエントリは削除する。
+/// I-375 で `Expr::FnCall` が `CallTarget` で構造化され、FnCall 経由で `Some` /
+/// `None` / `Ok` / `Err` が walker に登録されることはなくなった。I-377 で
+/// `MatchPattern::Verbatim` と `Stmt::IfLet::pattern: String` を構造化 `Pattern`
+/// に置換し、uppercase-head ヒューリスティックを廃止したことで、pattern 経由の
+/// 流入も構造的に遮断された。`Some` / `None` / `Ok` / `Err` は型名ではなく
+/// `Option` / `Result` の **variant コンストラクタ** であるため、型名フィルタ
+/// である本定数からは除外する。
+///
+/// Pattern constructor の除外は `collect_type_refs_from_pattern` 内部の
+/// `PATTERN_LANG_BUILTINS` 定数に閉じている（抽象レベル分離）。
 const RUST_BUILTIN_TYPES: &[&str] = &[
     "String", "Vec", "HashMap", "HashSet", "Option", "Box", "Result", "Rc", "Arc", "Mutex", "bool",
     "f64", "i64", "i128", "u8", "u32", "usize",
-    // I-377 まで必要な一時的なフィルタ（pattern 文字列 walker からの流入を防ぐ）
-    "Some", "None", "Ok", "Err",
 ];
 
 /// `serde_json::Value` のフルパス。
@@ -463,7 +462,7 @@ fn collect_type_refs_from_stmt(stmt: &Stmt, refs: &mut HashSet<String>) {
             body,
             ..
         } => {
-            collect_type_refs_from_verbatim_pattern(pattern, refs);
+            collect_type_refs_from_pattern(pattern, refs);
             collect_type_refs_from_expr(expr, refs);
             collect_type_refs_from_stmts(body, refs);
         }
@@ -492,7 +491,7 @@ fn collect_type_refs_from_stmt(stmt: &Stmt, refs: &mut HashSet<String>) {
             then_body,
             else_body,
         } => {
-            collect_type_refs_from_verbatim_pattern(pattern, refs);
+            collect_type_refs_from_pattern(pattern, refs);
             collect_type_refs_from_expr(expr, refs);
             collect_type_refs_from_stmts(then_body, refs);
             if let Some(eb) = else_body {
@@ -508,52 +507,74 @@ fn collect_type_refs_from_stmt(stmt: &Stmt, refs: &mut HashSet<String>) {
     }
 }
 
-/// `Stmt::IfLet` / `Stmt::WhileLet` / `Expr::IfLet` / `Expr::Matches` の `pattern: String`
-/// から型参照を収集する。
+/// 構造化 `Pattern` から型参照を収集する。
 ///
-/// 文法上 `pattern` は Rust pattern 文字列の prebuilt 表現（例: `"Some(x)"`,
-/// `"Color::Red(_)"`, `"None"`, `"Foo { bar }"`）。`MatchPattern::EnumVariant.path`
-/// と同じ uppercase head 抽出ロジックを適用する。
+/// `TupleStruct` / `Struct` / `UnitStruct` の `path` 先頭セグメントが型名であり、
+/// refs に登録する。ただし `Some` / `None` / `Ok` / `Err` は Rust 言語レベル
+/// 組み込み（`Option` / `Result` のコンストラクタ）であり、外部型 struct 生成の
+/// 対象ではないため除外する。
 ///
-/// より厳密には Rust pattern parser を IR に統合すべきだが、現状は文字列ベース
-/// 設計負債（I-377 visitor pattern 化と合わせて再検討する）。
-fn collect_type_refs_from_verbatim_pattern(pattern: &str, refs: &mut HashSet<String>) {
-    // パターン先頭の identifier を取り出す:
-    //   "Some(x)" → "Some"
-    //   "Color::Red(_)" → "Color"
-    //   "Foo { bar }" → "Foo"
-    //   "_ if cond" → "_" (skip)
-    let trimmed = pattern.trim_start();
-    let head: String = trimmed
-        .chars()
-        .take_while(|c| c.is_alphanumeric() || *c == '_')
-        .collect();
-    if head.is_empty() {
-        return;
+/// I-377 以前は `pattern: String` の uppercase-head ヒューリスティックに依存
+/// していたが、構造化 `Pattern::TupleStruct { path: Vec<String>, .. }` への
+/// 移行により `path.first()` の直接比較になり、lowercase クラス名でも正しく
+/// 捕捉できるようになった（false negative 消滅）。
+fn collect_type_refs_from_pattern(pattern: &Pattern, refs: &mut HashSet<String>) {
+    /// `Option` / `Result` の variant コンストラクタ。これらは Rust 組み込みで
+    /// あり外部型として stub 生成する対象ではない。`RUST_BUILTIN_TYPES`（型名
+    /// フィルタ）とは抽象レベルが異なるため別定数として管理する。
+    const PATTERN_LANG_BUILTINS: &[&str] = &["Some", "None", "Ok", "Err"];
+
+    let head = match pattern {
+        Pattern::TupleStruct { path, .. }
+        | Pattern::Struct { path, .. }
+        | Pattern::UnitStruct { path } => path.first(),
+        _ => None,
+    };
+    if let Some(first) = head {
+        if !PATTERN_LANG_BUILTINS.contains(&first.as_str()) {
+            refs.insert(first.clone());
+        }
     }
-    if head.chars().next().is_some_and(|c| c.is_ascii_uppercase()) {
-        refs.insert(head);
+    // 子ノードを再帰走査
+    match pattern {
+        Pattern::Literal(e) => collect_type_refs_from_expr(e, refs),
+        Pattern::Binding { subpat, .. } => {
+            if let Some(sub) = subpat {
+                collect_type_refs_from_pattern(sub, refs);
+            }
+        }
+        Pattern::TupleStruct { fields, .. } => {
+            for f in fields {
+                collect_type_refs_from_pattern(f, refs);
+            }
+        }
+        Pattern::Struct { fields, .. } => {
+            for (_, p) in fields {
+                collect_type_refs_from_pattern(p, refs);
+            }
+        }
+        Pattern::Or(pats) | Pattern::Tuple(pats) => {
+            for p in pats {
+                collect_type_refs_from_pattern(p, refs);
+            }
+        }
+        Pattern::Range { start, end, .. } => {
+            if let Some(s) = start {
+                collect_type_refs_from_expr(s, refs);
+            }
+            if let Some(e) = end {
+                collect_type_refs_from_expr(e, refs);
+            }
+        }
+        Pattern::Ref { inner, .. } => collect_type_refs_from_pattern(inner, refs),
+        Pattern::Wildcard | Pattern::UnitStruct { .. } => {}
     }
 }
 
 /// `MatchArm` を走査して型参照を収集する。
-///
-/// パターンには enum variant の path（例: `Color::Red`）が含まれることがある。
-/// `EnumVariant::path` の先頭セグメント（`Color`）は型名として登録する。
-/// `Verbatim` は free-form 文字列で構造化されておらず安全に解釈できないため
-/// 走査しない（変更時は I-377 visitor pattern 化と合わせて再検討する）。
 fn collect_type_refs_from_match_arm(arm: &MatchArm, refs: &mut HashSet<String>) {
     for pattern in &arm.patterns {
-        match pattern {
-            MatchPattern::Literal(expr) => collect_type_refs_from_expr(expr, refs),
-            MatchPattern::EnumVariant { path, .. } => {
-                let head = path.split("::").next().unwrap_or(path);
-                if head.chars().next().is_some_and(|c| c.is_ascii_uppercase()) {
-                    refs.insert(head.to_string());
-                }
-            }
-            MatchPattern::Wildcard | MatchPattern::Verbatim(_) => {}
-        }
+        collect_type_refs_from_pattern(pattern, refs);
     }
     if let Some(g) = &arm.guard {
         collect_type_refs_from_expr(g, refs);
@@ -672,7 +693,7 @@ fn collect_type_refs_from_expr(expr: &Expr, refs: &mut HashSet<String>) {
             then_expr,
             else_expr,
         } => {
-            collect_type_refs_from_verbatim_pattern(pattern, refs);
+            collect_type_refs_from_pattern(pattern, refs);
             collect_type_refs_from_expr(expr, refs);
             collect_type_refs_from_expr(then_expr, refs);
             collect_type_refs_from_expr(else_expr, refs);
@@ -690,7 +711,7 @@ fn collect_type_refs_from_expr(expr: &Expr, refs: &mut HashSet<String>) {
         Expr::RuntimeTypeof { operand } => collect_type_refs_from_expr(operand, refs),
         Expr::Matches { expr, pattern } => {
             collect_type_refs_from_expr(expr, refs);
-            collect_type_refs_from_verbatim_pattern(pattern, refs);
+            collect_type_refs_from_pattern(pattern, refs);
         }
         Expr::Block(stmts) => collect_type_refs_from_stmts(stmts, refs),
         Expr::Match { expr, arms } => {

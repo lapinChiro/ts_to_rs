@@ -446,10 +446,11 @@ fn test_cond_assign_if_option_type_generates_if_let_some() {
     .unwrap();
 
     // Should produce IfLet with Some(x) pattern
+    let expected_pat = crate::ir::Pattern::some_binding("x");
     assert!(
         result
             .iter()
-            .any(|s| matches!(s, Stmt::IfLet { pattern, .. } if pattern == "Some(x)")),
+            .any(|s| matches!(s, Stmt::IfLet { pattern, .. } if *pattern == expected_pat)),
         "expected IfLet with Some(x), got: {:?}",
         result
     );
@@ -526,10 +527,11 @@ fn test_cond_assign_while_option_type_generates_while_let_some() {
     }
     .unwrap();
 
+    let expected_pat = crate::ir::Pattern::some_binding("x");
     assert!(
         result
             .iter()
-            .any(|s| matches!(s, Stmt::WhileLet { pattern, .. } if pattern == "Some(x)")),
+            .any(|s| matches!(s, Stmt::WhileLet { pattern, .. } if *pattern == expected_pat)),
         "expected WhileLet with Some(x), got: {:?}",
         result
     );

@@ -139,3 +139,122 @@ impl Pattern {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- is_none_unit ---
+
+    #[test]
+    fn is_none_unit_true_for_none_pattern() {
+        assert!(Pattern::none().is_none_unit());
+    }
+
+    #[test]
+    fn is_none_unit_true_for_manually_constructed_none() {
+        let pat = Pattern::UnitStruct {
+            path: vec!["None".to_string()],
+        };
+        assert!(pat.is_none_unit());
+    }
+
+    #[test]
+    fn is_none_unit_false_for_multi_segment_none_path() {
+        // `Option::None` is not a bare `None` — the discriminator is the full path,
+        // so a 2-segment path must not be treated as the `None` unit pattern.
+        let pat = Pattern::UnitStruct {
+            path: vec!["Option".to_string(), "None".to_string()],
+        };
+        assert!(!pat.is_none_unit());
+    }
+
+    #[test]
+    fn is_none_unit_false_for_different_unit_struct() {
+        let pat = Pattern::UnitStruct {
+            path: vec!["Empty".to_string()],
+        };
+        assert!(!pat.is_none_unit());
+    }
+
+    #[test]
+    fn is_none_unit_false_for_tuple_struct_none_shaped() {
+        // `None()` (tuple-struct) is not the bare `None` unit pattern.
+        let pat = Pattern::TupleStruct {
+            path: vec!["None".to_string()],
+            fields: vec![],
+        };
+        assert!(!pat.is_none_unit());
+    }
+
+    #[test]
+    fn is_none_unit_false_for_wildcard() {
+        assert!(!Pattern::Wildcard.is_none_unit());
+    }
+
+    #[test]
+    fn is_none_unit_false_for_binding() {
+        assert!(!Pattern::binding("x").is_none_unit());
+    }
+
+    // --- binding ---
+
+    #[test]
+    fn binding_creates_plain_name_binding() {
+        assert_eq!(
+            Pattern::binding("foo"),
+            Pattern::Binding {
+                name: "foo".to_string(),
+                is_mut: false,
+                subpat: None,
+            }
+        );
+    }
+
+    #[test]
+    fn binding_accepts_impl_into_string() {
+        // Both `&str` and `String` must work.
+        let a = Pattern::binding("x");
+        let b = Pattern::binding(String::from("x"));
+        assert_eq!(a, b);
+    }
+
+    // --- some_binding ---
+
+    #[test]
+    fn some_binding_wraps_in_some_tuple_struct() {
+        assert_eq!(
+            Pattern::some_binding("v"),
+            Pattern::TupleStruct {
+                path: vec!["Some".to_string()],
+                fields: vec![Pattern::Binding {
+                    name: "v".to_string(),
+                    is_mut: false,
+                    subpat: None,
+                }],
+            }
+        );
+    }
+
+    #[test]
+    fn some_binding_is_not_none_unit() {
+        assert!(!Pattern::some_binding("x").is_none_unit());
+    }
+
+    // --- none ---
+
+    #[test]
+    fn none_creates_single_segment_unit_struct() {
+        assert_eq!(
+            Pattern::none(),
+            Pattern::UnitStruct {
+                path: vec!["None".to_string()],
+            }
+        );
+    }
+
+    #[test]
+    fn none_round_trips_through_is_none_unit() {
+        assert!(Pattern::none().is_none_unit());
+    }
+}

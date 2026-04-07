@@ -64,6 +64,29 @@ pub trait IrFolder {
     fn fold_method(&mut self, m: Method) -> Method {
         walk_method(self, m)
     }
+    fn fold_param(&mut self, p: Param) -> Param {
+        walk_param(self, p)
+    }
+    fn fold_struct_field(&mut self, f: StructField) -> StructField {
+        walk_struct_field(self, f)
+    }
+}
+
+/// `Param` の型を fold する。
+pub fn walk_param<F: IrFolder + ?Sized>(f: &mut F, p: Param) -> Param {
+    Param {
+        name: p.name,
+        ty: p.ty.map(|t| f.fold_rust_type(t)),
+    }
+}
+
+/// `StructField` の型を fold する。visibility と name は不変。
+pub fn walk_struct_field<F: IrFolder + ?Sized>(f: &mut F, field: StructField) -> StructField {
+    StructField {
+        vis: field.vis,
+        name: field.name,
+        ty: f.fold_rust_type(field.ty),
+    }
 }
 
 /// `RustType` の全 variant を再帰的に fold する。
@@ -175,22 +198,13 @@ pub fn walk_pattern<F: IrFolder + ?Sized>(f: &mut F, pat: Pattern) -> Pattern {
 }
 
 /// `MatchArm` の全子要素を fold する。
-///
-/// NOTE (Phase 1): `arm.patterns` は `Vec<MatchPattern>` のまま。Phase 2 で
-/// `Vec<Pattern>` に置換後、`f.fold_pattern(pat)` を呼ぶ。現状では
-/// `MatchPattern::Literal(Expr)` 内の Expr のみ fold 対象とする。
 pub fn walk_match_arm<F: IrFolder + ?Sized>(f: &mut F, arm: MatchArm) -> MatchArm {
-    use crate::ir::MatchPattern;
-    let patterns = arm
-        .patterns
-        .into_iter()
-        .map(|p| match p {
-            MatchPattern::Literal(e) => MatchPattern::Literal(f.fold_expr(e)),
-            other => other,
-        })
-        .collect();
     MatchArm {
-        patterns,
+        patterns: arm
+            .patterns
+            .into_iter()
+            .map(|p| f.fold_pattern(p))
+            .collect(),
         guard: arm.guard.map(|g| f.fold_expr(g)),
         body: arm.body.into_iter().map(|s| f.fold_stmt(s)).collect(),
     }
@@ -203,14 +217,7 @@ pub fn walk_method<F: IrFolder + ?Sized>(f: &mut F, m: Method) -> Method {
         name: m.name,
         has_self: m.has_self,
         has_mut_self: m.has_mut_self,
-        params: m
-            .params
-            .into_iter()
-            .map(|p| Param {
-                name: p.name,
-                ty: p.ty.map(|t| f.fold_rust_type(t)),
-            })
-            .collect(),
+        params: m.params.into_iter().map(|p| f.fold_param(p)).collect(),
         return_type: m.return_type.map(|t| f.fold_rust_type(t)),
         body: m
             .body
@@ -235,11 +242,7 @@ pub fn walk_item<F: IrFolder + ?Sized>(f: &mut F, item: Item) -> Item {
                 .collect(),
             fields: fields
                 .into_iter()
-                .map(|fld| StructField {
-                    vis: fld.vis,
-                    name: fld.name,
-                    ty: f.fold_rust_type(fld.ty),
-                })
+                .map(|fld| f.fold_struct_field(fld))
                 .collect(),
         },
         Item::Enum {
@@ -265,11 +268,7 @@ pub fn walk_item<F: IrFolder + ?Sized>(f: &mut F, item: Item) -> Item {
                     fields: v
                         .fields
                         .into_iter()
-                        .map(|fld| StructField {
-                            vis: fld.vis,
-                            name: fld.name,
-                            ty: f.fold_rust_type(fld.ty),
-                        })
+                        .map(|fld| f.fold_struct_field(fld))
                         .collect(),
                 })
                 .collect(),
@@ -365,13 +364,7 @@ pub fn walk_item<F: IrFolder + ?Sized>(f: &mut F, item: Item) -> Item {
                 .into_iter()
                 .map(|tp| f.fold_type_param(tp))
                 .collect(),
-            params: params
-                .into_iter()
-                .map(|p| Param {
-                    name: p.name,
-                    ty: p.ty.map(|t| f.fold_rust_type(t)),
-                })
-                .collect(),
+            params: params.into_iter().map(|p| f.fold_param(p)).collect(),
             return_type: return_type.map(|t| f.fold_rust_type(t)),
             body: body.into_iter().map(|s| f.fold_stmt(s)).collect(),
         },
@@ -418,9 +411,7 @@ pub fn walk_stmt<F: IrFolder + ?Sized>(f: &mut F, stmt: Stmt) -> Stmt {
             body,
         } => Stmt::WhileLet {
             label,
-            // NOTE (Phase 1): `pattern` is still `String`. Phase 2 will call
-            // `f.fold_pattern(pattern)`.
-            pattern,
+            pattern: f.fold_pattern(pattern),
             expr: f.fold_expr(expr),
             body: body.into_iter().map(|s| f.fold_stmt(s)).collect(),
         },
@@ -453,8 +444,7 @@ pub fn walk_stmt<F: IrFolder + ?Sized>(f: &mut F, stmt: Stmt) -> Stmt {
             then_body,
             else_body,
         } => Stmt::IfLet {
-            // NOTE (Phase 1): still `String`.
-            pattern,
+            pattern: f.fold_pattern(pattern),
             expr: f.fold_expr(expr),
             then_body: then_body.into_iter().map(|s| f.fold_stmt(s)).collect(),
             else_body: else_body.map(|eb| eb.into_iter().map(|s| f.fold_stmt(s)).collect()),
@@ -490,13 +480,7 @@ pub fn walk_expr<F: IrFolder + ?Sized>(f: &mut F, expr: Expr) -> Expr {
             return_type,
             body,
         } => Expr::Closure {
-            params: params
-                .into_iter()
-                .map(|p| Param {
-                    name: p.name,
-                    ty: p.ty.map(|t| f.fold_rust_type(t)),
-                })
-                .collect(),
+            params: params.into_iter().map(|p| f.fold_param(p)).collect(),
             return_type: return_type.map(|t| f.fold_rust_type(t)),
             body: match body {
                 ClosureBody::Expr(e) => ClosureBody::Expr(Box::new(f.fold_expr(*e))),
@@ -560,8 +544,7 @@ pub fn walk_expr<F: IrFolder + ?Sized>(f: &mut F, expr: Expr) -> Expr {
             then_expr,
             else_expr,
         } => Expr::IfLet {
-            // NOTE (Phase 1): still `String`.
-            pattern,
+            pattern: Box::new(f.fold_pattern(*pattern)),
             expr: Box::new(f.fold_expr(*expr)),
             then_expr: Box::new(f.fold_expr(*then_expr)),
             else_expr: Box::new(f.fold_expr(*else_expr)),
@@ -591,8 +574,7 @@ pub fn walk_expr<F: IrFolder + ?Sized>(f: &mut F, expr: Expr) -> Expr {
         },
         Expr::Matches { expr, pattern } => Expr::Matches {
             expr: Box::new(f.fold_expr(*expr)),
-            // NOTE (Phase 1): still `String`.
-            pattern,
+            pattern: Box::new(f.fold_pattern(*pattern)),
         },
         Expr::Block(stmts) => Expr::Block(stmts.into_iter().map(|s| f.fold_stmt(s)).collect()),
         Expr::Match { expr, arms } => Expr::Match {

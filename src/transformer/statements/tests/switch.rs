@@ -19,7 +19,7 @@ fn test_convert_switch_single_case_break_generates_match() {
                 arms[0]
                     .patterns
                     .iter()
-                    .all(|p| matches!(p, crate::ir::MatchPattern::Wildcard)),
+                    .all(|p| matches!(p, crate::ir::Pattern::Wildcard)),
                 "numeric case should use wildcard + guard, not literal pattern"
             );
             assert!(arms[0].guard.is_some(), "numeric case should have a guard");
@@ -76,7 +76,7 @@ fn test_convert_switch_default_generates_wildcard() {
                 arms[1]
                     .patterns
                     .iter()
-                    .any(|p| matches!(p, crate::ir::MatchPattern::Wildcard)),
+                    .any(|p| matches!(p, crate::ir::Pattern::Wildcard)),
                 "last arm should be wildcard"
             );
         }
@@ -178,7 +178,7 @@ fn test_convert_switch_string_discriminant_generates_string_patterns() {
             assert!(
                 arms[0].patterns.iter().any(|p| matches!(
                     p,
-                    crate::ir::MatchPattern::Literal(Expr::StringLit(s)) if s == "hello"
+                    crate::ir::Pattern::Literal(Expr::StringLit(s)) if s == "hello"
                 )),
                 "expected string pattern 'hello', got {:?}",
                 arms[0].patterns
@@ -220,7 +220,7 @@ fn test_switch_nonliteral_case_generates_guard() {
                 arms[0]
                     .patterns
                     .iter()
-                    .any(|p| matches!(p, crate::ir::MatchPattern::Wildcard)),
+                    .any(|p| matches!(p, crate::ir::Pattern::Wildcard)),
                 "non-literal case should use wildcard pattern"
             );
         }
@@ -366,12 +366,14 @@ fn test_convert_switch_discriminated_union_to_enum_match() {
     if let Stmt::Match { expr, arms } = match_stmt {
         // Match on `s` (the enum variable), not `s.kind`
         assert_eq!(*expr, Expr::Ref(Box::new(Expr::Ident("s".to_string()))));
-        // First arm should be EnumVariant pattern
+        // First arm should be Pattern::Struct with path ["Shape", "Circle"]
         assert!(
-            arms[0].patterns.iter().any(
-                |p| matches!(p, MatchPattern::EnumVariant { path, .. } if path == "Shape::Circle")
-            ),
-            "expected EnumVariant pattern for circle, got: {:?}",
+            arms[0].patterns.iter().any(|p| matches!(
+                p,
+                Pattern::Struct { path, .. }
+                    if path == &["Shape".to_string(), "Circle".to_string()]
+            )),
+            "expected Pattern::Struct for Shape::Circle, got: {:?}",
             arms[0].patterns
         );
     } else {
@@ -445,12 +447,14 @@ fn test_convert_du_switch_field_access_single_field_becomes_binding() {
         .expect("expected a Match statement");
 
     if let Stmt::Match { arms, .. } = match_stmt {
-        // Circle arm should have "radius" in bindings
+        // Circle arm should have "radius" binding in struct fields
         let circle_arm = &arms[0];
         assert!(
-            circle_arm.patterns.iter().any(
-                |p| matches!(p, MatchPattern::EnumVariant { bindings, .. } if bindings == &["radius"])
-            ),
+            circle_arm.patterns.iter().any(|p| matches!(
+                p,
+                Pattern::Struct { fields, .. }
+                    if fields.len() == 1 && fields[0].0 == "radius"
+            )),
             "expected radius binding in Circle arm, got: {:?}",
             circle_arm.patterns
         );
@@ -467,9 +471,10 @@ fn test_convert_du_switch_field_access_single_field_becomes_binding() {
         // Square arm should have no bindings (no field access)
         let square_arm = &arms[1];
         assert!(
-            square_arm.patterns.iter().any(
-                |p| matches!(p, MatchPattern::EnumVariant { bindings, .. } if bindings.is_empty())
-            ),
+            square_arm.patterns.iter().any(|p| matches!(
+                p,
+                Pattern::Struct { fields, .. } if fields.is_empty()
+            )),
             "expected no bindings in Square arm, got: {:?}",
             square_arm.patterns
         );
@@ -514,8 +519,9 @@ fn test_convert_du_switch_field_access_multiple_fields_become_bindings() {
         // Square arm should have width and height in bindings
         let square_arm = &arms[1];
         let has_bindings = square_arm.patterns.iter().any(|p| {
-            if let MatchPattern::EnumVariant { bindings, .. } = p {
-                bindings.contains(&"width".to_string()) && bindings.contains(&"height".to_string())
+            if let Pattern::Struct { fields, .. } = p {
+                fields.iter().any(|(n, _)| n == "width")
+                    && fields.iter().any(|(n, _)| n == "height")
             } else {
                 false
             }
@@ -568,11 +574,12 @@ fn test_convert_switch_case_propagates_discriminant_type_for_string_enum() {
     match &result[0] {
         Stmt::Match { arms, .. } => {
             assert_eq!(arms.len(), 2);
-            // Case "up" should become Direction::Up
+            // Case "up" should become Direction::Up (UnitStruct with path segments)
             assert!(
                 arms[0].patterns.iter().any(|p| matches!(
                     p,
-                    MatchPattern::Literal(Expr::Ident(s)) if s == "Direction::Up"
+                    Pattern::UnitStruct { path }
+                        if path == &["Direction".to_string(), "Up".to_string()]
                 )),
                 "expected Direction::Up pattern, got {:?}",
                 arms[0].patterns
@@ -581,7 +588,8 @@ fn test_convert_switch_case_propagates_discriminant_type_for_string_enum() {
             assert!(
                 arms[1].patterns.iter().any(|p| matches!(
                     p,
-                    MatchPattern::Literal(Expr::Ident(s)) if s == "Direction::Down"
+                    Pattern::UnitStruct { path }
+                        if path == &["Direction".to_string(), "Down".to_string()]
                 )),
                 "expected Direction::Down pattern, got {:?}",
                 arms[1].patterns
@@ -619,7 +627,7 @@ fn test_switch_default_before_case_moves_to_last_arm() {
                     .unwrap()
                     .patterns
                     .iter()
-                    .any(|p| matches!(p, crate::ir::MatchPattern::Wildcard)),
+                    .any(|p| matches!(p, crate::ir::Pattern::Wildcard)),
                 "last arm must be wildcard regardless of source position"
             );
         }

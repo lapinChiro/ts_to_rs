@@ -703,9 +703,10 @@ fn test_generate_expr_match_with_enum_variant_bindings() {
         expr: Box::new(Expr::Ref(Box::new(Expr::Ident("s".to_string())))),
         arms: vec![
             MatchArm {
-                patterns: vec![crate::ir::MatchPattern::EnumVariant {
-                    path: "Shape::Circle".to_string(),
-                    bindings: vec!["radius".to_string()],
+                patterns: vec![crate::ir::Pattern::Struct {
+                    path: vec!["Shape".to_string(), "Circle".to_string()],
+                    fields: vec![("radius".to_string(), crate::ir::Pattern::binding("radius"))],
+                    rest: true,
                 }],
                 guard: None,
                 body: vec![Stmt::TailExpr(Expr::MethodCall {
@@ -715,7 +716,7 @@ fn test_generate_expr_match_with_enum_variant_bindings() {
                 })],
             },
             MatchArm {
-                patterns: vec![crate::ir::MatchPattern::Wildcard],
+                patterns: vec![crate::ir::Pattern::Wildcard],
                 guard: None,
                 body: vec![Stmt::TailExpr(Expr::MacroCall {
                     name: "panic".to_string(),

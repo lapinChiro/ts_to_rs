@@ -10,7 +10,7 @@ mod variables;
 use std::collections::HashMap;
 
 use super::*;
-use crate::ir::{BinOp, Expr, MatchPattern, RustType, Stmt, UnOp};
+use crate::ir::{BinOp, Expr, Pattern, RustType, Stmt, UnOp};
 use crate::parser::parse_typescript;
 use crate::pipeline::SyntheticTypeRegistry;
 use crate::registry::{MethodSignature, TypeDef, TypeRegistry};

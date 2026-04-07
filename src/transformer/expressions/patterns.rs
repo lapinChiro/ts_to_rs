@@ -5,7 +5,7 @@
 
 use swc_ecma_ast as ast;
 
-use crate::ir::{BinOp, Expr, RustType};
+use crate::ir::{BinOp, Expr, Pattern, RustType};
 use crate::pipeline::narrowing_patterns;
 use crate::registry::TypeDef;
 
@@ -124,10 +124,12 @@ impl<'a> Transformer<'a> {
                 };
                 if variants.iter().any(|v| v == expected_variant) {
                     let operand_ir = self.convert_expr(typeof_operand).ok()?;
-                    let pattern = format!("{enum_name}::{expected_variant}(_)");
                     let matches_expr = Expr::Matches {
                         expr: Box::new(operand_ir),
-                        pattern,
+                        pattern: Box::new(Pattern::TupleStruct {
+                            path: vec![enum_name.clone(), expected_variant.to_string()],
+                            fields: vec![Pattern::Wildcard],
+                        }),
                     };
                     return Some(if is_neq {
                         Expr::UnaryOp {
@@ -286,7 +288,10 @@ impl<'a> Transformer<'a> {
                         };
                         return Expr::Matches {
                             expr: Box::new(lhs_ir),
-                            pattern: format!("{name}::{class_name}(_)"),
+                            pattern: Box::new(Pattern::TupleStruct {
+                                path: vec![name.clone(), class_name.clone()],
+                                fields: vec![Pattern::Wildcard],
+                            }),
                         };
                     }
                 }
@@ -399,12 +404,12 @@ impl<'a> Transformer<'a> {
     /// - Option: complement of `Some(x)` is `None`
     /// - 2-variant enum: complement of `Enum::A(x)` is `Enum::B(x)`
     /// - 3+ variant enum: returns `None` (no specific complement variant to extract)
-    pub(crate) fn resolve_complement_pattern(&self, guard: &NarrowingGuard) -> Option<String> {
+    pub(crate) fn resolve_complement_pattern(&self, guard: &NarrowingGuard) -> Option<Pattern> {
         let var_type = self.get_type_for_var(guard.var_name(), guard.var_span())?;
         match guard {
             NarrowingGuard::NonNullish { .. } | NarrowingGuard::Truthy { .. } => {
                 if matches!(var_type, RustType::Option(_)) {
-                    Some("None".to_string())
+                    Some(Pattern::none())
                 } else {
                     None
                 }
@@ -424,14 +429,15 @@ impl<'a> Transformer<'a> {
 
     /// Resolves the complement variant pattern for a 2-variant enum.
     ///
-    /// Returns `Some("EnumName::OtherVariant(var_name)")` for 2-variant enums,
-    /// or `None` for 3+ variant enums (caller should use wildcard).
+    /// Returns `Some(Pattern::TupleStruct { path: [EnumName, OtherVariant], ... })`
+    /// for 2-variant enums, or `None` for 3+ variant enums (caller should use
+    /// wildcard).
     fn resolve_other_variant(
         &self,
         enum_name: &str,
         positive_variant: &str,
         var_name: &str,
-    ) -> Option<String> {
+    ) -> Option<Pattern> {
         let type_def = self.reg().get(enum_name)?;
         let variants = match type_def {
             crate::registry::TypeDef::Enum { variants, .. } => variants,
@@ -443,31 +449,34 @@ impl<'a> Transformer<'a> {
             .filter(|v| v.as_str() != positive_variant && v.as_str() != "Other")
             .collect();
         if remaining.len() == 1 {
-            Some(format!("{enum_name}::{}({var_name})", remaining[0]))
+            Some(Pattern::TupleStruct {
+                path: vec![enum_name.to_string(), remaining[0].clone()],
+                fields: vec![Pattern::binding(var_name)],
+            })
         } else {
             // 3+ variant or 0 remaining: no specific complement pattern
             None
         }
     }
 
-    /// NarrowingGuard から if-let パターン文字列を解決する。
+    /// NarrowingGuard から if-let `Pattern` を解決する。
     ///
     /// Returns `Some((pattern, is_swap))` where `is_swap` is true for `!==`/`!=` guards
     /// (meaning then/else branches should be swapped).
     /// Returns `None` if the guard cannot generate an if-let pattern.
-    pub(crate) fn resolve_if_let_pattern(&self, guard: &NarrowingGuard) -> Option<(String, bool)> {
+    pub(crate) fn resolve_if_let_pattern(&self, guard: &NarrowingGuard) -> Option<(Pattern, bool)> {
         let var_type = self.get_type_for_var(guard.var_name(), guard.var_span())?;
         match guard {
             NarrowingGuard::NonNullish { is_neq, .. } => {
                 if matches!(var_type, RustType::Option(_)) {
-                    Some((format!("Some({})", guard.var_name()), !is_neq))
+                    Some((Pattern::some_binding(guard.var_name()), !is_neq))
                 } else {
                     None
                 }
             }
             NarrowingGuard::Truthy { .. } => {
                 if matches!(var_type, RustType::Option(_)) {
-                    Some((format!("Some({})", guard.var_name()), false))
+                    Some((Pattern::some_binding(guard.var_name()), false))
                 } else {
                     None
                 }
@@ -478,7 +487,10 @@ impl<'a> Transformer<'a> {
                 let (enum_name, variant) =
                     self.resolve_typeof_to_enum_variant(var_type, type_name)?;
                 Some((
-                    format!("{enum_name}::{variant}({})", guard.var_name()),
+                    Pattern::TupleStruct {
+                        path: vec![enum_name, variant],
+                        fields: vec![Pattern::binding(guard.var_name())],
+                    },
                     !is_eq,
                 ))
             }
@@ -486,7 +498,10 @@ impl<'a> Transformer<'a> {
                 let (enum_name, variant) =
                     self.resolve_instanceof_to_enum_variant(var_type, class_name)?;
                 Some((
-                    format!("{enum_name}::{variant}({})", guard.var_name()),
+                    Pattern::TupleStruct {
+                        path: vec![enum_name, variant],
+                        fields: vec![Pattern::binding(guard.var_name())],
+                    },
                     false,
                 ))
             }

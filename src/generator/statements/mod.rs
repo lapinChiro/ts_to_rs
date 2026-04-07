@@ -82,8 +82,9 @@ pub(super) fn generate_stmt(stmt: &Stmt, indent: usize) -> String {
                 .as_ref()
                 .map(|l| format!("'{l}: "))
                 .unwrap_or_default();
+            let pat_str = crate::generator::patterns::render_pattern(pattern);
             let mut out = format!(
-                "{pad}{label_prefix}while let {pattern} = {} {{\n",
+                "{pad}{label_prefix}while let {pat_str} = {} {{\n",
                 generate_expr(expr)
             );
             for s in body {
@@ -153,7 +154,8 @@ pub(super) fn generate_stmt(stmt: &Stmt, indent: usize) -> String {
             then_body,
             else_body,
         } => {
-            let mut out = format!("{pad}if let {pattern} = {} {{\n", generate_expr(expr));
+            let pat_str = crate::generator::patterns::render_pattern(pattern);
+            let mut out = format!("{pad}if let {pat_str} = {} {{\n", generate_expr(expr));
             for s in then_body {
                 out.push_str(&generate_stmt(s, indent + 1));
                 out.push('\n');
@@ -174,8 +176,6 @@ pub(super) fn generate_stmt(stmt: &Stmt, indent: usize) -> String {
             out
         }
         Stmt::Match { expr, arms } => {
-            use crate::ir::MatchPattern;
-
             // The discriminant is rendered as-is. If `.as_str()` is needed (e.g., for
             // string pattern matching), the Transformer must have already wrapped the
             // expression in `Expr::MethodCall { method: "as_str", .. }`.
@@ -186,19 +186,7 @@ pub(super) fn generate_stmt(stmt: &Stmt, indent: usize) -> String {
                 let patterns_str = arm
                     .patterns
                     .iter()
-                    .map(|p| match p {
-                        MatchPattern::Literal(e) => generate_expr(e),
-                        MatchPattern::Wildcard => "_".to_string(),
-                        MatchPattern::EnumVariant { path, bindings } => {
-                            if bindings.is_empty() {
-                                format!("{path} {{ .. }}")
-                            } else {
-                                let fields = bindings.join(", ");
-                                format!("{path} {{ {fields}, .. }}")
-                            }
-                        }
-                        MatchPattern::Verbatim(s) => s.clone(),
-                    })
+                    .map(crate::generator::patterns::render_pattern)
                     .collect::<Vec<_>>()
                     .join(" | ");
                 let guard_str = arm

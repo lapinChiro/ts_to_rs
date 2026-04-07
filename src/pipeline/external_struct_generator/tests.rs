@@ -1907,9 +1907,8 @@ fn test_collect_type_refs_match_arm_enum_variant_pattern() {
         vec![Stmt::Match {
             expr: Expr::Ident("x".to_string()),
             arms: vec![MatchArm {
-                patterns: vec![MatchPattern::EnumVariant {
-                    path: "Color::Red".to_string(),
-                    bindings: vec![],
+                patterns: vec![Pattern::UnitStruct {
+                    path: vec!["Color".to_string(), "Red".to_string()],
                 }],
                 guard: None,
                 body: vec![],
@@ -1922,16 +1921,17 @@ fn test_collect_type_refs_match_arm_enum_variant_pattern() {
 }
 
 #[test]
-fn test_collect_type_refs_match_arm_lowercase_path_skipped() {
-    // match x { foo::bar => ... } → 先頭が小文字なのでスキップ
+fn test_collect_type_refs_match_arm_lowercase_path_captured() {
+    // I-377 以降、lowercase class 名も構造的に捕捉される（uppercase-head
+    // ヒューリスティック廃止）。
+    // match x { myenum::bar => ... } → `myenum` が refs に登録されることを確認。
     let item = fn_with_body(
         "f",
         vec![Stmt::Match {
             expr: Expr::Ident("x".to_string()),
             arms: vec![MatchArm {
-                patterns: vec![MatchPattern::EnumVariant {
-                    path: "foo::bar".to_string(),
-                    bindings: vec![],
+                patterns: vec![Pattern::UnitStruct {
+                    path: vec!["myenum".to_string(), "bar".to_string()],
                 }],
                 guard: None,
                 body: vec![],
@@ -1940,7 +1940,7 @@ fn test_collect_type_refs_match_arm_lowercase_path_skipped() {
     );
     let mut refs = HashSet::new();
     collect_type_refs_from_item(&item, &mut refs);
-    assert!(!refs.contains("foo"));
+    assert!(refs.contains("myenum"));
 }
 
 #[test]
@@ -1951,7 +1951,7 @@ fn test_collect_type_refs_match_arm_literal_walks_expr() {
         vec![Stmt::Match {
             expr: Expr::Ident("x".to_string()),
             arms: vec![MatchArm {
-                patterns: vec![MatchPattern::Literal(Expr::IntLit(1))],
+                patterns: vec![Pattern::Literal(Expr::IntLit(1))],
                 guard: None,
                 body: vec![Stmt::TailExpr(Expr::StructInit {
                     name: "Wrapper".to_string(),
@@ -1974,7 +1974,7 @@ fn test_collect_type_refs_match_arm_guard_walked() {
         vec![Stmt::Match {
             expr: Expr::Ident("x".to_string()),
             arms: vec![MatchArm {
-                patterns: vec![MatchPattern::Wildcard],
+                patterns: vec![Pattern::Wildcard],
                 guard: Some(Expr::StructInit {
                     name: "Wrapper".to_string(),
                     fields: vec![],
@@ -1990,8 +1990,14 @@ fn test_collect_type_refs_match_arm_guard_walked() {
 }
 
 // =========================================================================
-// T8d: Verbatim pattern walking — Stmt::IfLet / Expr::Matches
+// T8d: 構造化 Pattern walking — Stmt::IfLet / Stmt::WhileLet / Expr::Matches
 // =========================================================================
+//
+// I-377 以降、pattern は `String` ではなく構造化 `Pattern` enum。walker は
+// `path: Vec<String>` の先頭セグメントを直接取り出すため、lowercase 先頭の
+// 型名も正しく捕捉される（uppercase-head ヒューリスティック廃止）。`Some` /
+// `None` / `Ok` / `Err` は言語組み込みの variant として `PATTERN_LANG_BUILTINS`
+// で明示除外される。
 
 #[test]
 fn test_collect_type_refs_stmt_iflet_pattern() {
@@ -1999,7 +2005,9 @@ fn test_collect_type_refs_stmt_iflet_pattern() {
     let item = fn_with_body(
         "f",
         vec![Stmt::IfLet {
-            pattern: "Color::Red".to_string(),
+            pattern: Pattern::UnitStruct {
+                path: vec!["Color".to_string(), "Red".to_string()],
+            },
             expr: Expr::Ident("x".to_string()),
             then_body: vec![],
             else_body: None,
@@ -2017,7 +2025,10 @@ fn test_collect_type_refs_stmt_whilelet_pattern() {
         "f",
         vec![Stmt::WhileLet {
             label: None,
-            pattern: "Color::Red(x)".to_string(),
+            pattern: Pattern::TupleStruct {
+                path: vec!["Color".to_string(), "Red".to_string()],
+                fields: vec![Pattern::binding("x")],
+            },
             expr: Expr::Ident("it".to_string()),
             body: vec![],
         }],
@@ -2034,7 +2045,10 @@ fn test_collect_type_refs_expr_matches_pattern() {
         "f",
         vec![Stmt::TailExpr(Expr::Matches {
             expr: Box::new(Expr::Ident("x".to_string())),
-            pattern: "Color::Red(_)".to_string(),
+            pattern: Box::new(Pattern::TupleStruct {
+                path: vec!["Color".to_string(), "Red".to_string()],
+                fields: vec![Pattern::Wildcard],
+            }),
         })],
     );
     let mut refs = HashSet::new();
@@ -2043,12 +2057,15 @@ fn test_collect_type_refs_expr_matches_pattern() {
 }
 
 #[test]
-fn test_collect_type_refs_pattern_lowercase_skipped() {
-    // if let foo::bar = x { ... } → 先頭が小文字なのでスキップ
+fn test_collect_type_refs_pattern_lowercase_captured() {
+    // I-377: uppercase-head ヒューリスティック廃止により、lowercase class
+    // 名も構造的に捕捉される（false negative 解消）。
     let item = fn_with_body(
         "f",
         vec![Stmt::IfLet {
-            pattern: "foo::bar".to_string(),
+            pattern: Pattern::UnitStruct {
+                path: vec!["myenum".to_string(), "bar".to_string()],
+            },
             expr: Expr::Ident("x".to_string()),
             then_body: vec![],
             else_body: None,
@@ -2056,16 +2073,20 @@ fn test_collect_type_refs_pattern_lowercase_skipped() {
     );
     let mut refs = HashSet::new();
     collect_type_refs_from_item(&item, &mut refs);
-    assert!(!refs.contains("foo"));
+    assert!(refs.contains("myenum"));
 }
 
 #[test]
 fn test_collect_type_refs_pattern_struct_form() {
-    // if let Foo { x } = ... → Foo が refs
+    // if let Foo { x, .. } = ... → Foo が refs
     let item = fn_with_body(
         "f",
         vec![Stmt::IfLet {
-            pattern: "Foo { x }".to_string(),
+            pattern: Pattern::Struct {
+                path: vec!["Foo".to_string()],
+                fields: vec![("x".to_string(), Pattern::binding("x"))],
+                rest: true,
+            },
             expr: Expr::Ident("y".to_string()),
             then_body: vec![],
             else_body: None,
@@ -2082,7 +2103,7 @@ fn test_collect_type_refs_pattern_wildcard_no_extraction() {
     let item = fn_with_body(
         "f",
         vec![Stmt::IfLet {
-            pattern: "_".to_string(),
+            pattern: Pattern::Wildcard,
             expr: Expr::Ident("x".to_string()),
             then_body: vec![],
             else_body: None,
@@ -2091,6 +2112,49 @@ fn test_collect_type_refs_pattern_wildcard_no_extraction() {
     let mut refs = HashSet::new();
     collect_type_refs_from_item(&item, &mut refs);
     assert!(refs.is_empty());
+}
+
+#[test]
+fn test_collect_type_refs_pattern_some_none_ok_err_excluded() {
+    // I-377: `Some`/`None`/`Ok`/`Err` は Option/Result の variant コンストラクタで
+    // あり外部型 stub 生成の対象外（`PATTERN_LANG_BUILTINS` で除外）。
+    for (pat, name) in [
+        (
+            Pattern::TupleStruct {
+                path: vec!["Some".to_string()],
+                fields: vec![Pattern::binding("x")],
+            },
+            "Some",
+        ),
+        (Pattern::none(), "None"),
+        (
+            Pattern::TupleStruct {
+                path: vec!["Ok".to_string()],
+                fields: vec![Pattern::binding("v")],
+            },
+            "Ok",
+        ),
+        (
+            Pattern::TupleStruct {
+                path: vec!["Err".to_string()],
+                fields: vec![Pattern::binding("e")],
+            },
+            "Err",
+        ),
+    ] {
+        let item = fn_with_body(
+            "f",
+            vec![Stmt::IfLet {
+                pattern: pat,
+                expr: Expr::Ident("x".to_string()),
+                then_body: vec![],
+                else_body: None,
+            }],
+        );
+        let mut refs = HashSet::new();
+        collect_type_refs_from_item(&item, &mut refs);
+        assert!(!refs.contains(name), "{name} should be excluded from refs");
+    }
 }
 
 // =========================================================================

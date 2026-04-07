@@ -287,32 +287,19 @@ pub fn camel_to_snake(name: &str) -> String {
     result
 }
 
-/// A pattern in a match arm.
-#[derive(Debug, Clone, PartialEq)]
-pub enum MatchPattern {
-    /// A literal value pattern (e.g., `1`, `"hello"`)
-    Literal(Expr),
-    /// A wildcard pattern (`_`)
-    Wildcard,
-    /// An enum variant pattern with named fields (e.g., `Shape::Circle { radius, .. }`)
-    EnumVariant {
-        /// Fully qualified variant name (e.g., `"Shape::Circle"`)
-        path: String,
-        /// Field names to bind in the pattern. Empty means `{ .. }`.
-        bindings: Vec<String>,
-    },
-    /// A verbatim pattern string (e.g., `"StringOrF64::String(x)"`, `"Some(x)"`, `"None"`)
-    ///
-    /// Used for tuple enum variant patterns where bindings are positional,
-    /// and for patterns that are pre-computed as strings (consistent with `Stmt::IfLet`).
-    Verbatim(String),
-}
-
 /// An arm in a `match` expression.
+///
+/// `patterns` uses the structured [`Pattern`] enum (see `pattern.rs`). Before
+/// I-377 this was `Vec<MatchPattern>` with a `Verbatim(String)` variant that
+/// forced the walker to parse pattern strings with an uppercase-head
+/// heuristic. The heuristic produced false negatives for lowercase class
+/// names and required hardcoding `Some`/`None`/`Ok`/`Err` into
+/// `RUST_BUILTIN_TYPES`. Both band-aids are removed now that patterns are
+/// structured.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MatchArm {
     /// Patterns for this arm. Multiple patterns represent `a | b | _`.
-    pub patterns: Vec<MatchPattern>,
+    pub patterns: Vec<Pattern>,
     /// Optional match guard: `_ if guard_expr => { ... }`.
     pub guard: Option<Expr>,
     /// Arm body.
@@ -521,8 +508,8 @@ pub enum Stmt {
     WhileLet {
         /// Optional loop label (e.g., `'outer`)
         label: Option<String>,
-        /// Pattern to match (e.g., `"Some(x)"`)
-        pattern: String,
+        /// Pattern to match (e.g., `Some(x)`)
+        pattern: Pattern,
         /// Expression to match against
         expr: Expr,
         /// Loop body
@@ -566,8 +553,8 @@ pub enum Stmt {
     TailExpr(Expr),
     /// `if let <pattern> = <expr> { ... } [else { ... }]`
     IfLet {
-        /// Pattern to match (e.g., `"Err(e)"`)
-        pattern: String,
+        /// Pattern to match (e.g., `Err(e)`)
+        pattern: Pattern,
         /// Expression to match against
         expr: Expr,
         /// Then branch body
@@ -842,8 +829,11 @@ pub enum Expr {
     },
     /// An `if let` expression: `if let pattern = expr { then } else { else }`
     IfLet {
-        /// Pattern to match (e.g., `"Some(x)"`, `"Enum::Variant(x)"`)
-        pattern: String,
+        /// Pattern to match (e.g., `Some(x)`, `Enum::Variant(x)`).
+        ///
+        /// `Box`ed because `Pattern::Literal(Expr)` forms a cycle with `Expr::IfLet`;
+        /// boxing here breaks the cycle so the enum has finite size.
+        pattern: Box<Pattern>,
         /// Expression to match against
         expr: Box<Expr>,
         /// Then branch expression (pattern matched)
@@ -902,8 +892,10 @@ pub enum Expr {
     Matches {
         /// Expression to test
         expr: Box<Expr>,
-        /// Pattern to match against (raw Rust pattern string)
-        pattern: String,
+        /// Pattern to match against.
+        ///
+        /// `Box`ed for the same recursive-type reason as [`Expr::IfLet::pattern`].
+        pattern: Box<Pattern>,
     },
     /// A block expression: `{ stmt1; stmt2; tail_expr }`
     Block(Vec<Stmt>),

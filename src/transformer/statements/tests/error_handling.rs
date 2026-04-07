@@ -26,10 +26,15 @@ fn test_convert_stmt_list_try_catch_expands_to_let_block_if() {
         Stmt::IfLet {
             pattern, then_body, ..
         } => {
-            assert!(
-                pattern.contains("Err(e)"),
-                "expected Err(e) pattern, got {pattern}"
+            // Structured `Err(e)` pattern: TupleStruct with path ["Err"] and a single Binding "e".
+            let is_err_e = matches!(
+                pattern,
+                crate::ir::Pattern::TupleStruct { path, fields }
+                    if path == &["Err".to_string()]
+                        && fields.len() == 1
+                        && matches!(&fields[0], crate::ir::Pattern::Binding { name, .. } if name == "e")
             );
+            assert!(is_err_e, "expected Err(e) pattern, got {pattern:?}");
             assert_eq!(then_body.len(), 1);
         }
         _ => panic!("expected IfLet, got {:?}", result[2]),
@@ -123,10 +128,15 @@ fn test_convert_stmt_nested_try_catch_expands_inner_in_outer_body() {
     // Outer if let should use "outer" param
     match &result[2] {
         Stmt::IfLet { pattern, .. } => {
-            assert!(
-                pattern.contains("outer"),
-                "expected outer in pattern, got {pattern}"
+            // Structured `Err(outer)` pattern
+            let binds_outer = matches!(
+                pattern,
+                crate::ir::Pattern::TupleStruct { path, fields }
+                    if path == &["Err".to_string()]
+                        && fields.len() == 1
+                        && matches!(&fields[0], crate::ir::Pattern::Binding { name, .. } if name == "outer")
             );
+            assert!(binds_outer, "expected Err(outer) pattern, got {pattern:?}");
         }
         _ => panic!("expected IfLet, got {:?}", result[2]),
     }
@@ -231,10 +241,11 @@ fn test_convert_try_catch_basic_expands_to_let_labeledblock_if() {
             then_body,
             else_body,
         } => {
-            assert!(
-                pattern.contains("Err"),
-                "expected Err pattern, got {pattern:?}"
+            let is_err = matches!(
+                pattern,
+                crate::ir::Pattern::TupleStruct { path, .. } if path == &["Err".to_string()]
             );
+            assert!(is_err, "expected Err pattern, got {pattern:?}");
             assert!(
                 matches!(expr, Expr::Ident(s) if s == "_try_result"),
                 "expected _try_result expr, got {expr:?}"

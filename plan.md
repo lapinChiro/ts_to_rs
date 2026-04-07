@@ -2,11 +2,28 @@
 
 ## 次のアクション
 
-**次のアクション**: Batch 11c-fix-2 の **I-377**（3 本のうち 2 本目）— Batch 11c-fix-2 は I-375 完了済、残 I-377 → I-376。I-377 では `IrVisitor` trait 導入 + `MatchPattern` / verbatim pattern 文字列の構造化 IR 化 + `RUST_BUILTIN_TYPES` から `Some / None / Ok / Err` 除去（I-375 申し送り事項）を実施する。
+**次のアクション**: **行数超過ファイルのケア** → **I-378** → **I-376** の順。
 
-**実行順序**: **I-375 → I-377 → I-376**（3 本の独立 PRD として実施）
+I-377（Batch 11c-fix-2-b）完了時の self-review で、I-375 が解消した `Expr::FnCall::name: String`
+と同型の broken window が 5 サイトに残存していることを発見した（`Expr::Ident` に
+display-formatted path 文字列 `"Direction::Up"` 等を encode する pipeline-integrity 違反）。
+これを **I-378** として独立 PRD 化し、I-376 の前に挟む。
 
-**行数超過ファイルのケア**: **I-375 → I-377 → I-376**の処理直後に行う
+**実行順序**: ~~I-375~~ → ~~I-377~~ → **行数超過ファイルのケア** → **I-378** → **I-376**
+
+行数超過を I-378 より前に行う理由:
+- 現状 5 ファイルが 1000 行超過（`./scripts/check-file-lines.sh` で検知済み）
+- I-378 は `Expr::Path` 新 variant 導入と downstream 書き換えで `src/ir/mod.rs`（現 1105 行）
+  を更に拡大させるため、先に分割しておくことで I-378 の影響範囲がクリーンに保たれる
+- 行数超過ファイル群の責務分割は **凝集度向上の機会**（テスト fixture / 巨大ファイルの
+  論理セクション分離）であり、後続 PRD のレビュー品質を底上げする
+
+I-378 を I-376 より前に行う理由:
+- I-378 は I-377 の直接の継続（同一クラスの broken window 撲滅）であり、原理的な
+  pipeline-integrity 違反を残したまま L4/L3 の他作業に進むのは妥協
+- I-378 完了により Pattern::Literal の不変条件「値リテラルのみ」が構造的に強制可能になる
+- I-376 は pipeline 層（`pipeline/mod.rs` Pass 4/5 plumbing）と直交しており、IR 層の
+  整理が完了してから着手する方が rework ゼロ
 
 根拠:
 1. **I-375 先行（L2 優先 + IR 形状固定）**: IR 破壊的変更を最初に打って `Expr::FnCall` の最終形状（`CallTarget` enum）を確定させることで、後続の I-377 visitor 実装が最終形状に対して 1 回で済む（rework ゼロ）。また priority L2（correctness）を L3 より先行させる `todo-prioritization.md` 原則を遵守
@@ -65,11 +82,19 @@
 
 Batch 11c-fix-2 は Batch 11c-fix の **直接の継続** であり、以下を理由に最優先で実施する:
 
-1. **I-375 (FnCall 構造化)** は Batch 11c-fix で導入した uppercase head ヒューリスティック（`src/pipeline/external_struct_generator/mod.rs:516`）と同根の workaround `RUST_BUILTIN_TYPES` への `Some/None/Ok/Err` ハードコード（同 `:21`）を構造的に解消するもの。これらは「Rust 命名規約をコントラクトとして受け入れれば correct」だが、TS で lowercase クラス名を使った場合 false negative の可能性がある。pipeline-integrity ルール「IR に display-formatted 文字列を保存禁止」を完全遵守するための残課題。
-2. **I-376 (per-file 外部型 stub の構造的重複)** は Batch 11c-fix の `is_definition_item` dedup（`src/pipeline/placement.rs:225`）が「出力時 patch」として残っている根本原因。pipeline 段階で構造的に dedup すれば patch 不要になる。
-3. **I-377 (visitor pattern 化)** は Batch 11c-fix で大量に追加した手書き walker（`collect_type_refs_from_item / _stmt / _expr / _rust_type / _verbatim_pattern / _match_arm / _type_params / _method`）の長期保守性問題。新 IR variant 追加時の更新漏れリスクを compile-time 検出だけに頼る現状を改める。
+1. ~~**I-375 (FnCall 構造化)**~~ **完了**（Batch 11c-fix-2-a）
+2. ~~**I-377 (visitor pattern 化)**~~ **完了**（Batch 11c-fix-2-b、self-review で I-378 を派生）
+3. **行数超過ファイルのケア (11c-fix-2-line)**: I-378 が `Expr::Path` 新 variant 導入で
+   `src/ir/mod.rs`（現 1105 行）を更に拡大させるため、先に分割して影響範囲を清潔に保つ
+4. **I-378 (Expr::Path 構造化)**: I-377 self-review で発見した path-in-Expr::Ident broken
+   window（5 サイト）。I-375 が FnCall::name で解消したのと同型。pipeline-integrity ルール
+   「IR に display-formatted 文字列を保存禁止」の完全遵守のための残課題
+5. **I-376 (per-file 外部型 stub の構造的重複)** は Batch 11c-fix の `is_definition_item`
+   dedup（`src/pipeline/placement.rs:225`）が「出力時 patch」として残っている根本原因。
+   pipeline 段階で構造的に dedup すれば patch 不要になる
 
-これら 3 件を Batch 11c-fix-2 として **直近 1 セッション内に完了** させること。後続の L3 バッチ（11b 以降）はそれまで保留する。
+残 3 件（行数超過ケア → I-378 → I-376）を Batch 11c-fix-2 の継続として実施する。
+後続の L3 バッチ（11b 以降）はそれまで保留する。
 
 その後の次バッチ未定（L3 残: 11b, 12, 13, 15-23）
 
@@ -105,8 +130,10 @@ S1 バグ 0 件達成。
 | ~~11c~~ | ~~I-371~~ | ~~合成型の単一正準配置（同一ファイル重複 + クロスファイル冗長性）~~ | **完了** E0428+E0119 17→0、shared_imports 生成 |
 | ~~11c-fix~~ | ~~I-371 self-review 修正~~ | ~~substring scan / 重複ロジック / API 非対称 / テスト不足 等 12 問題~~ | **完了** IR ベース placement、`RustType::QSelf` 構造化、fn body IR walker、`UndefinedRefScope` 共通骨格、type_params constraint walking、verbatim pattern walking、自動テスト +104 件 |
 | ~~11c-fix-2-a~~ | ~~I-375~~ | ~~`Expr::FnCall::name` の意味論的多義性（CallTarget で構造化）~~ | **完了** `CallTarget { Path { segments, type_ref } \| Super }` 2 variant 構造化、walker の uppercase-head ヒューリスティック廃止、lowercase class 統合テスト追加、Hono 後退ゼロ |
-| **11c-fix-2-b** | **I-377** | **walker / substitute の IrVisitor 化 + `MatchPattern` / verbatim pattern 文字列の構造化（I-375 申し送り: `RUST_BUILTIN_TYPES` からの Some/None/Ok/Err 除去含む）** | **次** Batch 11c-fix-2 の継続 |
-| 11c-fix-2-c | I-376 | per-file 外部型 stub の構造的重複（pipeline 段階 dedup） | 11c-fix-2-b の後 |
+| ~~11c-fix-2-b~~ | ~~I-377~~ | ~~walker / substitute の IrVisitor 化 + `MatchPattern` / verbatim pattern 文字列の構造化~~ | **完了** `Pattern` enum + `IrVisitor` / `IrFolder` trait 導入、`MatchPattern` 削除、5 stmt/expr の `pattern: String` を構造化、walker `TypeRefCollector` 化、`RUST_BUILTIN_TYPES` からの Some/None/Ok/Err 除去（I-375 申し送り完遂）、substitute.rs の IrFolder 化、散発再帰 detector の IrVisitor 化、Hono 後退ゼロ、テスト 2124→2175（+51） |
+| **11c-fix-2-line** | **行数超過ファイルのケア** | **5 ファイル（external_struct_generator/tests.rs 2489、output_writer.rs 1135、calls.rs 1111、ir/mod.rs 1105、ir/tests/mod.rs 1031）の責務分割** | **次** I-378 の影響範囲を清潔に保つための先行作業 |
+| 11c-fix-2-d | I-378 | `Expr::Path` 構造化による path-in-Ident broken window 撲滅（I-377 self-review で発見） | 行数超過ケアの後 |
+| 11c-fix-2-c | I-376 | per-file 外部型 stub の構造的重複（pipeline 段階 dedup） | I-378 の後 |
 | 11b | I-300+I-301+I-306 | OBJECT_LITERAL_NO_TYPE（25件） | 最大エラーカテゴリ削減 |
 | 12 | I-311+I-344 | 型引数推論フィードバック欠如 | I-344 自動解消 + generic 精度 |
 | 13 | I-11+I-238+I-202 | union/enum 生成品質 | skip: ternary, ternary-union 他 |
@@ -128,7 +155,7 @@ S1 バグ 0 件達成。
 
 ### 完了済みバッチ
 
-`git log` で詳細参照: Batch 1〜3b, R-1, C-4, T-1〜T-4, S1, D-1, 4a〜5b, 10b, 6, 6b, 7, 8, 14, 8b, 9, 10, 11a, 11c, 11c-fix
+`git log` で詳細参照: Batch 1〜3b, R-1, C-4, T-1〜T-4, S1, D-1, 4a〜5b, 10b, 6, 6b, 7, 8, 14, 8b, 9, 10, 11a, 11c, 11c-fix, 11c-fix-2-a (I-375), 11c-fix-2-b (I-377)
 
 ---
 

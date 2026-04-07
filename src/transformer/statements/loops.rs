@@ -9,7 +9,7 @@ use swc_ecma_ast as ast;
 use super::helpers::{
     extract_conditional_assignment, generate_falsy_condition, ConditionalAssignment,
 };
-use crate::ir::{BinOp, ClosureBody, Expr, Param, RustType, Stmt, UnOp};
+use crate::ir::{BinOp, ClosureBody, Expr, Param, Pattern, RustType, Stmt, UnOp};
 use crate::pipeline::type_converter::convert_ts_type;
 use crate::transformer::{extract_pat_ident_name, single_declarator, Transformer};
 
@@ -25,7 +25,7 @@ impl<'a> Transformer<'a> {
         match rhs_type {
             Some(RustType::Option(_)) => Ok(vec![Stmt::WhileLet {
                 label: None,
-                pattern: format!("Some({})", ca.var_name),
+                pattern: Pattern::some_binding(&ca.var_name),
                 expr: rhs_ir,
                 body,
             }]),

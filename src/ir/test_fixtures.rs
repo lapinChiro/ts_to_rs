@@ -12,8 +12,8 @@
 #![cfg(test)]
 
 use super::{
-    BinOp, CallTarget, ClosureBody, EnumVariant, Expr, Item, MatchArm, MatchPattern, Method, Param,
-    Pattern, RustType, Stmt, StructField, TraitRef, Visibility,
+    BinOp, CallTarget, ClosureBody, EnumVariant, Expr, Item, MatchArm, Method, Param, Pattern,
+    RustType, Stmt, StructField, TraitRef, Visibility,
 };
 
 /// 全 `RustType` variant を含む type の束。
@@ -163,8 +163,7 @@ pub(crate) fn all_exprs() -> Vec<Expr> {
             else_expr: Box::new(Expr::Unit),
         },
         Expr::IfLet {
-            // Phase 1: still `String`.
-            pattern: "Some(x)".to_string(),
+            pattern: Box::new(Pattern::some_binding("x")),
             expr: Box::new(Expr::Unit),
             then_expr: Box::new(Expr::Unit),
             else_expr: Box::new(Expr::Unit),
@@ -190,14 +189,16 @@ pub(crate) fn all_exprs() -> Vec<Expr> {
         },
         Expr::Matches {
             expr: Box::new(Expr::Unit),
-            // Phase 1: still `String`.
-            pattern: "Some(_)".to_string(),
+            pattern: Box::new(Pattern::TupleStruct {
+                path: vec!["Some".to_string()],
+                fields: vec![Pattern::Wildcard],
+            }),
         },
         Expr::Block(vec![Stmt::Expr(Expr::Unit)]),
         Expr::Match {
             expr: Box::new(Expr::Unit),
             arms: vec![MatchArm {
-                patterns: vec![MatchPattern::Wildcard],
+                patterns: vec![Pattern::Wildcard],
                 guard: None,
                 body: vec![],
             }],
@@ -226,7 +227,7 @@ pub(crate) fn all_stmts() -> Vec<Stmt> {
         },
         Stmt::WhileLet {
             label: None,
-            pattern: "Some(x)".to_string(),
+            pattern: Pattern::some_binding("x"),
             expr: Expr::Unit,
             body: vec![],
         },
@@ -249,7 +250,7 @@ pub(crate) fn all_stmts() -> Vec<Stmt> {
         Stmt::Expr(Expr::Unit),
         Stmt::TailExpr(Expr::Unit),
         Stmt::IfLet {
-            pattern: "Some(x)".to_string(),
+            pattern: Pattern::some_binding("x"),
             expr: Expr::Unit,
             then_body: vec![],
             else_body: Some(vec![]),

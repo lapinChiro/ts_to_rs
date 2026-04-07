@@ -382,7 +382,7 @@ fn test_resolve_if_let_pattern_option_via_type_resolution() {
     // then-branch is the "matched" branch, else-branch is the fallback)
     assert_eq!(
         result,
-        Some(("Some(x)".to_string(), false)),
+        Some((crate::ir::Pattern::some_binding("x"), false)),
         "should resolve NonNullish guard on Option<String> to Some(x) pattern"
     );
 }

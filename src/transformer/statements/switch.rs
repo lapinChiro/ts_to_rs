@@ -7,7 +7,7 @@
 use anyhow::Result;
 use swc_ecma_ast as ast;
 
-use crate::ir::{BinOp, Expr, MatchArm, MatchPattern, RustType, Stmt};
+use crate::ir::{BinOp, Expr, MatchArm, Pattern, RustType, Stmt};
 use crate::transformer::Transformer;
 
 /// Checks whether a case body is terminated (break, return, throw, or continue).
@@ -270,7 +270,7 @@ impl<'a> Transformer<'a> {
         // and are flushed when a non-empty body is encountered — each pending entry generates
         // a separate arm with the same body, because Rust `|` patterns cannot bind different types.
         let mut arms: Vec<MatchArm> = Vec::new();
-        let mut pending: Vec<MatchPattern> = Vec::new();
+        let mut pending: Vec<Pattern> = Vec::new();
 
         for case in &switch.cases {
             if let Some(test) = &case.test {
@@ -282,10 +282,15 @@ impl<'a> Transformer<'a> {
 
                 // Resolve to enum variant
                 let variant = self.resolve_typeof_to_enum_variant(&var_type, &typeof_str);
+                // Structured `Enum::Variant(var_name)` tuple struct pattern.
+                // I-377 pre-refactor encoded this as
+                // `MatchPattern::Literal(Expr::Ident("Enum::Variant(var_name)"))`, which was
+                // a pipeline-integrity violation (display-formatted string in IR).
                 let pattern = match variant {
-                    Some((ref ename, ref vname)) => {
-                        MatchPattern::Literal(Expr::Ident(format!("{ename}::{vname}({var_name})")))
-                    }
+                    Some((ename, vname)) => Pattern::TupleStruct {
+                        path: vec![ename, vname],
+                        fields: vec![Pattern::binding(var_name.as_str())],
+                    },
                     None => {
                         // typeof string doesn't match any variant — skip this conversion
                         return Ok(None);
@@ -346,7 +351,7 @@ impl<'a> Transformer<'a> {
                     .collect();
 
                 arms.push(MatchArm {
-                    patterns: vec![MatchPattern::Wildcard],
+                    patterns: vec![Pattern::Wildcard],
                     guard: None,
                     body,
                 });
@@ -422,8 +427,7 @@ impl<'a> Transformer<'a> {
         let match_expr = Expr::Ref(Box::new(object));
 
         let mut arms: Vec<MatchArm> = Vec::new();
-        let mut pending_patterns: Vec<MatchPattern> = Vec::new();
-        let mut pending_variant_names: Vec<String> = Vec::new();
+        let mut pending_patterns: Vec<Pattern> = Vec::new();
 
         for case in &switch.cases {
             if let Some(test) = &case.test {
@@ -434,11 +438,13 @@ impl<'a> Transformer<'a> {
                 };
 
                 if let Some(variant_name) = string_values.get(&str_value) {
-                    pending_patterns.push(MatchPattern::EnumVariant {
-                        path: format!("{enum_name}::{variant_name}"),
-                        bindings: vec![],
+                    // Struct-variant pattern with no initial bindings. Bindings are
+                    // filled in below based on field accesses scanned in the body.
+                    pending_patterns.push(Pattern::Struct {
+                        path: vec![enum_name.clone(), variant_name.clone()],
+                        fields: vec![],
+                        rest: true,
                     });
-                    pending_variant_names.push(variant_name.clone());
                 } else {
                     return Ok(None); // Unknown variant → fallback
                 }
@@ -460,14 +466,15 @@ impl<'a> Transformer<'a> {
             // Update bindings on pending patterns with needed field names
             if !needed_fields.is_empty() {
                 for pattern in &mut pending_patterns {
-                    if let MatchPattern::EnumVariant { bindings, path, .. } = pattern {
-                        // Extract variant name from path (e.g., "Shape::Circle" → "Circle")
-                        let vname = path.rsplit("::").next().unwrap_or("");
-                        if let Some(fields) = variant_fields.get(vname) {
-                            *bindings = needed_fields
+                    if let Pattern::Struct { path, fields, .. } = pattern {
+                        // Structured variant name access: the last segment is the
+                        // variant name (e.g., `Shape::Circle` → `Circle`).
+                        let vname = path.last().cloned().unwrap_or_default();
+                        if let Some(type_fields) = variant_fields.get(&vname) {
+                            *fields = needed_fields
                                 .iter()
-                                .filter(|f| fields.iter().any(|fd| &fd.name == *f))
-                                .cloned()
+                                .filter(|f| type_fields.iter().any(|fd| &fd.name == *f))
+                                .map(|f| (f.clone(), Pattern::binding(f.as_str())))
                                 .collect();
                         }
                     }
@@ -487,7 +494,7 @@ impl<'a> Transformer<'a> {
                 .collect();
 
             if case.test.is_none() {
-                pending_patterns.push(MatchPattern::Wildcard);
+                pending_patterns.push(Pattern::Wildcard);
             }
 
             arms.push(MatchArm {
@@ -495,7 +502,6 @@ impl<'a> Transformer<'a> {
                 guard: None,
                 body,
             });
-            pending_variant_names.clear();
         }
 
         move_wildcard_arm_to_end(&mut arms);
@@ -538,7 +544,7 @@ impl<'a> Transformer<'a> {
         let discriminant = self.convert_expr(&switch.discriminant)?;
 
         let mut arms: Vec<MatchArm> = Vec::new();
-        let mut pending_patterns: Vec<MatchPattern> = Vec::new();
+        let mut pending_patterns: Vec<Pattern> = Vec::new();
 
         for case in &switch.cases {
             if let Some(test) = &case.test {
@@ -549,8 +555,9 @@ impl<'a> Transformer<'a> {
                 };
 
                 if let Some(variant_name) = string_values.get(&str_value) {
-                    let path = format!("{enum_name}::{variant_name}");
-                    pending_patterns.push(MatchPattern::Literal(Expr::Ident(path)));
+                    pending_patterns.push(Pattern::UnitStruct {
+                        path: vec![enum_name.clone(), variant_name.clone()],
+                    });
                 } else {
                     return Ok(None); // Unknown variant → fallback
                 }
@@ -563,7 +570,7 @@ impl<'a> Transformer<'a> {
 
             // Default case
             if case.test.is_none() {
-                pending_patterns.push(MatchPattern::Wildcard);
+                pending_patterns.push(Pattern::Wildcard);
             }
 
             let body = case
@@ -599,7 +606,7 @@ impl<'a> Transformer<'a> {
         return_type: Option<&RustType>,
     ) -> Result<Vec<Stmt>> {
         let mut arms: Vec<MatchArm> = Vec::new();
-        let mut pending_patterns: Vec<MatchPattern> = Vec::new();
+        let mut pending_patterns: Vec<Pattern> = Vec::new();
         let mut pending_exprs: Vec<Expr> = Vec::new();
 
         // Build expected type from discriminant type for case value conversion.
@@ -609,7 +616,7 @@ impl<'a> Transformer<'a> {
             if let Some(test) = &case.test {
                 let pattern = self.convert_expr(test)?;
                 pending_exprs.push(pattern.clone());
-                pending_patterns.push(MatchPattern::Literal(pattern));
+                pending_patterns.push(Pattern::Literal(pattern));
             }
 
             // Empty body = fall-through to next case, accumulate patterns
@@ -629,7 +636,7 @@ impl<'a> Transformer<'a> {
                 .collect();
 
             if case.test.is_none() {
-                pending_patterns.push(MatchPattern::Wildcard);
+                pending_patterns.push(Pattern::Wildcard);
             }
 
             // Check if any pending pattern is non-literal
@@ -639,7 +646,7 @@ impl<'a> Transformer<'a> {
                 // Convert to wildcard + guard to avoid variable binding in match
                 let guard = build_combined_guard(&discriminant, std::mem::take(&mut pending_exprs));
                 std::mem::take(&mut pending_patterns);
-                (vec![MatchPattern::Wildcard], Some(guard))
+                (vec![Pattern::Wildcard], Some(guard))
             } else {
                 pending_exprs.clear();
                 (std::mem::take(&mut pending_patterns), None)
@@ -750,11 +757,7 @@ impl<'a> Transformer<'a> {
 /// use `Wildcard + guard` to avoid variable binding, and those must remain in place.
 fn move_wildcard_arm_to_end(arms: &mut Vec<MatchArm>) {
     if let Some(idx) = arms.iter().position(|arm| {
-        arm.guard.is_none()
-            && arm
-                .patterns
-                .iter()
-                .any(|p| matches!(p, MatchPattern::Wildcard))
+        arm.guard.is_none() && arm.patterns.iter().any(|p| matches!(p, Pattern::Wildcard))
     }) {
         if idx < arms.len() - 1 {
             let default_arm = arms.remove(idx);

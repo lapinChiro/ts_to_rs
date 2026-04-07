@@ -1,5 +1,5 @@
 use crate::generator::generate;
-use crate::ir::{BinOp, CallTarget, Expr, Item, MatchPattern as MP, RustType, Stmt, Visibility};
+use crate::ir::{BinOp, CallTarget, Expr, Item, Pattern as MP, RustType, Stmt, Visibility};
 
 // Statement tests need to be wrapped in Item::Fn to test generate()
 
@@ -164,7 +164,7 @@ fn test_generate_while_let_generates_pattern_match_loop() {
         return_type: None,
         body: vec![Stmt::WhileLet {
             label: None,
-            pattern: "Some(x)".to_string(),
+            pattern: crate::ir::Pattern::some_binding("x"),
             expr: Expr::FnCall {
                 target: CallTarget::simple("get_value"),
                 args: vec![],
@@ -462,7 +462,10 @@ fn test_generate_stmt_if_let_without_else_renders_if_let() {
         params: vec![],
         return_type: None,
         body: vec![Stmt::IfLet {
-            pattern: "Err(e)".to_string(),
+            pattern: crate::ir::Pattern::TupleStruct {
+                path: vec!["Err".to_string()],
+                fields: vec![crate::ir::Pattern::binding("e")],
+            },
             expr: Expr::Ident("result".to_string()),
             then_body: vec![Stmt::Expr(Expr::MethodCall {
                 object: Box::new(Expr::Ident("e".to_string())),
@@ -492,7 +495,7 @@ fn test_generate_stmt_if_let_with_else_renders_else_branch() {
         params: vec![],
         return_type: None,
         body: vec![Stmt::IfLet {
-            pattern: "Some(x)".to_string(),
+            pattern: crate::ir::Pattern::some_binding("x"),
             expr: Expr::Ident("opt".to_string()),
             then_body: vec![Stmt::Expr(Expr::Ident("x".to_string()))],
             else_body: Some(vec![Stmt::Return(None)]),
@@ -729,17 +732,22 @@ fn test_generate_match_enum_variant_with_bindings_renders_field_names() {
             expr: Expr::Ref(Box::new(Expr::Ident("s".to_string()))),
             arms: vec![
                 crate::ir::MatchArm {
-                    patterns: vec![MP::EnumVariant {
-                        path: "Shape::Circle".to_string(),
-                        bindings: vec!["radius".to_string()],
+                    patterns: vec![MP::Struct {
+                        path: vec!["Shape".to_string(), "Circle".to_string()],
+                        fields: vec![("radius".to_string(), MP::binding("radius"))],
+                        rest: true,
                     }],
                     guard: None,
                     body: vec![Stmt::Expr(Expr::Ident("radius".to_string()))],
                 },
                 crate::ir::MatchArm {
-                    patterns: vec![MP::EnumVariant {
-                        path: "Shape::Rect".to_string(),
-                        bindings: vec!["width".to_string(), "height".to_string()],
+                    patterns: vec![MP::Struct {
+                        path: vec!["Shape".to_string(), "Rect".to_string()],
+                        fields: vec![
+                            ("width".to_string(), MP::binding("width")),
+                            ("height".to_string(), MP::binding("height")),
+                        ],
+                        rest: true,
                     }],
                     guard: None,
                     body: vec![Stmt::Expr(Expr::BinaryOp {

@@ -3,6 +3,7 @@
 pub mod types;
 
 mod expressions;
+mod patterns;
 mod statements;
 
 use crate::ir::{

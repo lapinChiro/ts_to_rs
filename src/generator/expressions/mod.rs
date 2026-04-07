@@ -302,8 +302,9 @@ pub(super) fn generate_expr(expr: &Expr) -> String {
             then_expr,
             else_expr,
         } => {
+            let pat_str = crate::generator::patterns::render_pattern(pattern);
             format!(
-                "if let {pattern} = {} {{ {} }} else {{ {} }}",
+                "if let {pat_str} = {} {{ {} }} else {{ {} }}",
                 generate_expr(expr),
                 generate_expr(then_expr),
                 generate_expr(else_expr)
@@ -333,7 +334,8 @@ pub(super) fn generate_expr(expr: &Expr) -> String {
         Expr::Deref(inner) => format!("*{}", generate_expr(inner)),
         Expr::Ref(inner) => format!("&{}", generate_expr(inner)),
         Expr::Matches { expr, pattern } => {
-            format!("matches!({}, {pattern})", generate_expr(expr))
+            let pat_str = crate::generator::patterns::render_pattern(pattern);
+            format!("matches!({}, {pat_str})", generate_expr(expr))
         }
         Expr::Unit => "()".to_string(),
         Expr::IntLit(n) => format!("{n}"),
@@ -357,26 +359,13 @@ pub(super) fn generate_expr(expr: &Expr) -> String {
             }
         }
         Expr::Match { expr, arms } => {
-            use crate::ir::MatchPattern;
             let match_target = generate_expr(expr);
             let mut out = format!("match {match_target} {{\n");
             for arm in arms {
                 let patterns_str = arm
                     .patterns
                     .iter()
-                    .map(|p| match p {
-                        MatchPattern::Literal(e) => generate_expr(e),
-                        MatchPattern::Wildcard => "_".to_string(),
-                        MatchPattern::EnumVariant { path, bindings } => {
-                            if bindings.is_empty() {
-                                format!("{path} {{ .. }}")
-                            } else {
-                                let fields = bindings.join(", ");
-                                format!("{path} {{ {fields}, .. }}")
-                            }
-                        }
-                        MatchPattern::Verbatim(s) => s.clone(),
-                    })
+                    .map(crate::generator::patterns::render_pattern)
                     .collect::<Vec<_>>()
                     .join(" | ");
                 let guard_str = arm

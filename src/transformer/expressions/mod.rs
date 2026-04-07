@@ -221,7 +221,7 @@ impl<'a> Transformer<'a> {
                 let unmatched_expr = self.convert_expr(unmatched_ast)?;
                 let expr_ir = Expr::Ident(guard.var_name().to_string());
                 return Ok(Expr::IfLet {
-                    pattern,
+                    pattern: Box::new(pattern),
                     expr: Box::new(expr_ir),
                     then_expr: Box::new(matched_expr),
                     else_expr: Box::new(unmatched_expr),
@@ -253,14 +253,14 @@ impl<'a> Transformer<'a> {
             let expr_ir = Expr::Ident(guard.var_name().to_string());
             if is_swap {
                 current = Expr::IfLet {
-                    pattern,
+                    pattern: Box::new(pattern),
                     expr: Box::new(expr_ir),
                     then_expr: Box::new(else_expr.clone()),
                     else_expr: Box::new(current),
                 };
             } else {
                 current = Expr::IfLet {
-                    pattern,
+                    pattern: Box::new(pattern),
                     expr: Box::new(expr_ir),
                     then_expr: Box::new(current),
                     else_expr: Box::new(else_expr.clone()),

@@ -3,7 +3,7 @@
 use anyhow::{anyhow, Result};
 use swc_ecma_ast as ast;
 
-use crate::ir::{ClosureBody, Expr, MatchArm, MatchPattern, Param, RustType, Stmt};
+use crate::ir::{ClosureBody, Expr, MatchArm, Param, Pattern, RustType, Stmt};
 use crate::registry::{FieldDef, TypeDef};
 
 use super::methods::map_method_call;
@@ -384,9 +384,10 @@ impl<'a> Transformer<'a> {
         for (variant_name, fields) in variant_fields {
             if fields.iter().any(|f| f.name == field) {
                 arms.push(MatchArm {
-                    patterns: vec![MatchPattern::EnumVariant {
-                        path: format!("{enum_name}::{variant_name}"),
-                        bindings: vec![field.to_string()],
+                    patterns: vec![Pattern::Struct {
+                        path: vec![enum_name.to_string(), variant_name.clone()],
+                        fields: vec![(field.to_string(), Pattern::binding(field))],
+                        rest: true,
                     }],
                     guard: None,
                     body: vec![Stmt::TailExpr(Expr::MethodCall {
@@ -400,7 +401,7 @@ impl<'a> Transformer<'a> {
 
         // Add wildcard arm with panic
         arms.push(MatchArm {
-            patterns: vec![MatchPattern::Wildcard],
+            patterns: vec![Pattern::Wildcard],
             guard: None,
             body: vec![Stmt::TailExpr(Expr::MacroCall {
                 name: "panic".to_string(),

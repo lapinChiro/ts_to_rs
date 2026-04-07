@@ -47,7 +47,7 @@ mod tests {
     use std::path::Path;
 
     use super::*;
-    use crate::ir::{Expr, Item, MatchArm, MatchPattern, Stmt, Visibility};
+    use crate::ir::{Expr, Item, MatchArm, Pattern, Stmt, Visibility};
     use crate::parser::parse_typescript;
     use crate::pipeline::type_resolution::FileTypeResolution;
     use crate::pipeline::ModuleGraph;
@@ -274,12 +274,12 @@ function describe(s: string): string {
                 expr: Expr::Ident("s".to_string()),
                 arms: vec![
                     MatchArm {
-                        patterns: vec![MatchPattern::Literal(Expr::StringLit("a".to_string()))],
+                        patterns: vec![Pattern::Literal(Expr::StringLit("a".to_string()))],
                         guard: None,
                         body: vec![Stmt::Return(Some(Expr::StringLit("alpha".to_string())))],
                     },
                     MatchArm {
-                        patterns: vec![MatchPattern::Wildcard],
+                        patterns: vec![Pattern::Wildcard],
                         guard: None,
                         body: vec![Stmt::Return(Some(Expr::StringLit("other".to_string())))],
                     },

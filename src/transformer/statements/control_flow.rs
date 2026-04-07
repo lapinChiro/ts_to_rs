@@ -9,7 +9,7 @@ use swc_ecma_ast as ast;
 use super::helpers::{
     extract_conditional_assignment, generate_truthiness_condition, ConditionalAssignment,
 };
-use crate::ir::{BinOp, Expr, MatchArm, MatchPattern, RustType, Stmt};
+use crate::ir::{BinOp, Expr, MatchArm, Pattern, RustType, Stmt};
 use crate::transformer::expressions::patterns::extract_narrowing_guards;
 use crate::transformer::Transformer;
 
@@ -158,7 +158,7 @@ impl<'a> Transformer<'a> {
 
         match rhs_type {
             Some(RustType::Option(_)) => Ok(vec![Stmt::IfLet {
-                pattern: format!("Some({})", ca.var_name),
+                pattern: Pattern::some_binding(&ca.var_name),
                 expr: rhs_ir,
                 then_body,
                 else_body,
@@ -273,15 +273,17 @@ impl<'a> Transformer<'a> {
         let is_early_return =
             else_body.is_none() && !then_body.is_empty() && ir_body_always_exits(then_body);
 
-        if is_early_return && complement_pattern != "None" {
+        let complement_is_none = complement_pattern.is_none_unit();
+
+        if is_early_return && !complement_is_none {
             // Early return: `let var = match var { Pos(v) => { exit }, Comp(v) => v };`
             let positive_arm = MatchArm {
-                patterns: vec![MatchPattern::Verbatim(positive_pattern.clone())],
+                patterns: vec![positive_pattern.clone()],
                 guard: None,
                 body: positive_body,
             };
             let complement_arm = MatchArm {
-                patterns: vec![MatchPattern::Verbatim(complement_pattern.clone())],
+                patterns: vec![complement_pattern.clone()],
                 guard: None,
                 body: vec![Stmt::TailExpr(Expr::Ident(var_name.clone()))],
             };
@@ -296,17 +298,17 @@ impl<'a> Transformer<'a> {
             }]));
         }
 
-        if complement_pattern == "None" && is_early_return && is_swap {
+        if complement_is_none && is_early_return && is_swap {
             // Option early return with === null: `let var = match var { None => { exit }, Some(v) => v };`
             // Only when is_swap (=== null): the null handler exits, and Some(v) extracts the value.
             // Truthy `if (x) { return; }` has is_swap=false: the Some arm exits, None has no value.
             let none_arm = MatchArm {
-                patterns: vec![MatchPattern::Verbatim("None".to_string())],
+                patterns: vec![Pattern::none()],
                 guard: None,
                 body: complement_body,
             };
             let some_arm = MatchArm {
-                patterns: vec![MatchPattern::Verbatim(format!("Some({})", var_name))],
+                patterns: vec![Pattern::some_binding(&var_name)],
                 guard: None,
                 body: vec![Stmt::TailExpr(Expr::Ident(var_name.clone()))],
             };
@@ -321,15 +323,15 @@ impl<'a> Transformer<'a> {
             }]));
         }
 
-        if else_body.is_some() && complement_pattern != "None" {
+        if else_body.is_some() && !complement_is_none {
             // Else block pattern: `match var { Pos(v) => { then }, Comp(v) => { else } }`
             let positive_arm = MatchArm {
-                patterns: vec![MatchPattern::Verbatim(positive_pattern.clone())],
+                patterns: vec![positive_pattern],
                 guard: None,
                 body: positive_body,
             };
             let complement_arm = MatchArm {
-                patterns: vec![MatchPattern::Verbatim(complement_pattern.clone())],
+                patterns: vec![complement_pattern],
                 guard: None,
                 body: complement_body,
             };
