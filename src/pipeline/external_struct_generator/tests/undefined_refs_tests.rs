@@ -211,19 +211,19 @@ fn test_undefined_refs_some_none_ok_err_not_registered_structurally() {
         "f",
         vec![
             Stmt::Expr(Expr::FnCall {
-                target: CallTarget::simple("Some"),
+                target: CallTarget::BuiltinVariant(crate::ir::BuiltinVariant::Some),
                 args: vec![],
             }),
             Stmt::Expr(Expr::FnCall {
-                target: CallTarget::simple("None"),
+                target: CallTarget::BuiltinVariant(crate::ir::BuiltinVariant::None),
                 args: vec![],
             }),
             Stmt::Expr(Expr::FnCall {
-                target: CallTarget::simple("Ok"),
+                target: CallTarget::BuiltinVariant(crate::ir::BuiltinVariant::Ok),
                 args: vec![],
             }),
             Stmt::Expr(Expr::FnCall {
-                target: CallTarget::simple("Err"),
+                target: CallTarget::BuiltinVariant(crate::ir::BuiltinVariant::Err),
                 args: vec![],
             }),
         ],

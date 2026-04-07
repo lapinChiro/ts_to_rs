@@ -207,7 +207,10 @@ fn test_convert_expr_parse_int() {
                 args: vec![],
             }),
             method: "unwrap_or".to_string(),
-            args: vec![Expr::Ident("f64::NAN".to_string())],
+            args: vec![Expr::PrimitiveAssocConst {
+                ty: crate::ir::PrimitiveType::F64,
+                name: "NAN".to_string()
+            }],
         }
     );
 }
@@ -230,7 +233,10 @@ fn test_convert_expr_parse_float() {
                 args: vec![],
             }),
             method: "unwrap_or".to_string(),
-            args: vec![Expr::Ident("f64::NAN".to_string())],
+            args: vec![Expr::PrimitiveAssocConst {
+                ty: crate::ir::PrimitiveType::F64,
+                name: "NAN".to_string()
+            }],
         }
     );
 }
@@ -381,7 +387,7 @@ fn test_convert_expr_math_pi_to_consts() {
     let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
         .convert_expr(&expr)
         .unwrap();
-    assert_eq!(result, Expr::Ident("std::f64::consts::PI".to_string()));
+    assert_eq!(result, Expr::StdConst(crate::ir::StdConst::F64Pi));
 }
 
 #[test]
@@ -393,5 +399,5 @@ fn test_convert_expr_math_e_to_consts() {
     let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
         .convert_expr(&expr)
         .unwrap();
-    assert_eq!(result, Expr::Ident("std::f64::consts::E".to_string()));
+    assert_eq!(result, Expr::StdConst(crate::ir::StdConst::F64E));
 }

@@ -5,9 +5,10 @@
 
 use std::collections::HashSet;
 
+use crate::ir::visit::IrVisitor;
 use crate::ir::{
-    camel_to_snake, sanitize_field_name, CallTarget, ClosureBody, Expr, Item, MatchArm, Method,
-    Pattern, RustType, Stmt, StructField, TypeParam, Visibility,
+    camel_to_snake, sanitize_field_name, Expr, Item, MatchArm, Method, Pattern, RustType, Stmt,
+    StructField, TypeParam, Visibility,
 };
 use crate::pipeline::SyntheticTypeRegistry;
 use crate::registry::{TypeDef, TypeRegistry};
@@ -582,165 +583,70 @@ fn collect_type_refs_from_match_arm(arm: &MatchArm, refs: &mut HashSet<String>) 
     collect_type_refs_from_stmts(&arm.body, refs);
 }
 
+/// I-378 T7: `Expr` を `IrVisitor` 経由で構造的に走査して型参照を収集する。
+///
+/// 旧手書き再帰版 (`collect_type_refs_from_expr` の 100+ 行 match) を撤廃し、
+/// `TypeRefCollector` (`IrVisitor` 実装) に置換した。本関数は薄いラッパーで、
+/// IR 走査骨格 (`walk_expr` / `walk_call_target`) が新 variant 追加時に
+/// **自動的に** 通知点を配線する。これにより:
+///
+/// - `Expr::FnCall::target` 内の `UserAssocFn` / `UserTupleCtor` /
+///   `UserEnumVariantCtor` の `UserTypeRef` フィールドは `walk_call_target`
+///   経由で `visit_user_type_ref` に通知される
+/// - `Expr::EnumVariant::enum_ty` も `walk_expr` 経由で同フックに通知される
+/// - 新 variant を追加しても `walk_*` の更新だけで walker が追従する
+///   (手書き分岐の追加忘れリスクが構造的に消滅)
 fn collect_type_refs_from_expr(expr: &Expr, refs: &mut HashSet<String>) {
-    match expr {
-        // 型情報を含むリーフ
-        Expr::Cast { expr, target } => {
-            collect_type_refs_from_expr(expr, refs);
-            collect_type_refs_from_rust_type(target, refs);
-        }
-        Expr::StructInit { name, fields, base } => {
-            // `Self` は impl 文脈の implicit type. RustType walker と同じ方針で除外する。
+    let mut collector = TypeRefCollector { refs };
+    collector.visit_expr(expr);
+}
+
+/// IR 走査用の `IrVisitor` 実装で、ユーザー定義型参照を `refs` に収集する。
+///
+/// I-378 で導入された `visit_user_type_ref` フックを override するだけで、
+/// `Expr::FnCall::target` 内の user variant および `Expr::EnumVariant::enum_ty`
+/// の user type 参照を一様に拾う。`Expr::StructInit::name` のような
+/// `UserTypeRef` フィールドではない type 参照は `visit_expr` を override して
+/// 個別処理する。
+struct TypeRefCollector<'a> {
+    refs: &'a mut HashSet<String>,
+}
+
+impl<'a> IrVisitor for TypeRefCollector<'a> {
+    fn visit_user_type_ref(&mut self, r: &crate::ir::UserTypeRef) {
+        // 構造的に user type 参照と保証されているため無条件登録。
+        // builtin variant / プリミティブ / std module path は型レベルで除外
+        // されている (`UserTypeRef` には格納できない)。
+        self.refs.insert(r.as_str().to_string());
+    }
+
+    fn visit_expr(&mut self, expr: &Expr) {
+        // `Expr::StructInit::name: String` は `UserTypeRef` 型ではないため
+        // visit_user_type_ref フックでは拾えない。`Self` は impl 文脈の
+        // implicit type なので登録しない (`pub struct Self {}` は予約語衝突)。
+        if let Expr::StructInit { name, .. } = expr {
             if name != "Self" {
-                refs.insert(name.clone());
-            }
-            for (_, e) in fields {
-                collect_type_refs_from_expr(e, refs);
-            }
-            if let Some(b) = base {
-                collect_type_refs_from_expr(b, refs);
+                self.refs.insert(name.clone());
             }
         }
-        Expr::Closure {
-            params,
-            return_type,
-            body,
-        } => {
-            for p in params {
-                if let Some(t) = &p.ty {
-                    collect_type_refs_from_rust_type(t, refs);
-                }
-            }
-            if let Some(rt) = return_type {
-                collect_type_refs_from_rust_type(rt, refs);
-            }
-            match body {
-                ClosureBody::Expr(e) => collect_type_refs_from_expr(e, refs),
-                ClosureBody::Block(stmts) => collect_type_refs_from_stmts(stmts, refs),
-            }
-        }
-        // 再帰サブ式
-        Expr::FieldAccess { object, .. } => collect_type_refs_from_expr(object, refs),
-        Expr::MethodCall { object, args, .. } => {
-            collect_type_refs_from_expr(object, refs);
-            for a in args {
-                collect_type_refs_from_expr(a, refs);
-            }
-        }
-        Expr::Assign { target, value } => {
-            collect_type_refs_from_expr(target, refs);
-            collect_type_refs_from_expr(value, refs);
-        }
-        Expr::UnaryOp { operand, .. } => collect_type_refs_from_expr(operand, refs),
-        Expr::BinaryOp { left, right, .. } => {
-            collect_type_refs_from_expr(left, refs);
-            collect_type_refs_from_expr(right, refs);
-        }
-        Expr::Range { start, end } => {
-            if let Some(s) = start {
-                collect_type_refs_from_expr(s, refs);
-            }
-            if let Some(e) = end {
-                collect_type_refs_from_expr(e, refs);
-            }
-        }
-        Expr::FnCall { target, args } => {
-            // I-375: structural call-target classification.
-            //
-            // The Transformer records every `Expr::FnCall` with a structured
-            // `CallTarget`:
-            //   - `CallTarget::Path { type_ref: Some(t), .. }` — the call references
-            //     the user-defined type `t` (e.g. `Color::Red(x)`, `MyClass::new(x)`).
-            //     Register `t` in the reference graph.
-            //   - `CallTarget::Path { type_ref: None, .. }` — free function, module
-            //     path call, `Option`/`Result` builtin variant, or local variable
-            //     invocation. No type reference to record.
-            //   - `CallTarget::Super` — parent constructor call in class inheritance
-            //     context. No type reference.
-            //
-            // The previous implementation used an uppercase-head heuristic on the
-            // joined path string, which produced false negatives for lowercase
-            // class names (`class myClass {}`) and relied on hardcoding
-            // `Some/None/Ok/Err` into `RUST_BUILTIN_TYPES`. Both band-aids are
-            // removed now that the classification is structural.
-            if let CallTarget::Path {
-                type_ref: Some(t), ..
-            } = target
-            {
-                refs.insert(t.clone());
-            }
-            for a in args {
-                collect_type_refs_from_expr(a, refs);
-            }
-        }
-        Expr::Vec { elements } | Expr::Tuple { elements } => {
-            for e in elements {
-                collect_type_refs_from_expr(e, refs);
-            }
-        }
-        Expr::If {
-            condition,
-            then_expr,
-            else_expr,
-        } => {
-            collect_type_refs_from_expr(condition, refs);
-            collect_type_refs_from_expr(then_expr, refs);
-            collect_type_refs_from_expr(else_expr, refs);
-        }
-        Expr::IfLet {
-            pattern,
-            expr,
-            then_expr,
-            else_expr,
-        } => {
-            collect_type_refs_from_pattern(pattern, refs);
-            collect_type_refs_from_expr(expr, refs);
-            collect_type_refs_from_expr(then_expr, refs);
-            collect_type_refs_from_expr(else_expr, refs);
-        }
-        Expr::FormatMacro { args, .. } | Expr::MacroCall { args, .. } => {
-            for a in args {
-                collect_type_refs_from_expr(a, refs);
-            }
-        }
-        Expr::Await(e) | Expr::Deref(e) | Expr::Ref(e) => collect_type_refs_from_expr(e, refs),
-        Expr::Index { object, index } => {
-            collect_type_refs_from_expr(object, refs);
-            collect_type_refs_from_expr(index, refs);
-        }
-        Expr::RuntimeTypeof { operand } => collect_type_refs_from_expr(operand, refs),
-        Expr::Matches { expr, pattern } => {
-            collect_type_refs_from_expr(expr, refs);
-            collect_type_refs_from_pattern(pattern, refs);
-        }
-        Expr::Block(stmts) => collect_type_refs_from_stmts(stmts, refs),
-        Expr::Match { expr, arms } => {
-            collect_type_refs_from_expr(expr, refs);
-            for arm in arms {
-                collect_type_refs_from_match_arm(arm, refs);
-            }
-        }
-        // 値式における enum unit variant 参照: walker は親 enum 型を user type として登録する
-        // (`UserTypeRef` 型のフィールドは I-378 の構造化により walker のヒューリスティック
-        // を不要にする)
-        //
-        // I-378 Phase 1 過渡状態: 本分岐は Phase 2 (T7 walker simplification) で
-        // `IrVisitor` ベースの `TypeRefCollector` 実装内 `visit_user_type_ref` override
-        // に集約される予定。それまでは手書き再帰版に明示的にロジックを置く。
-        Expr::EnumVariant { enum_ty, .. } => {
-            refs.insert(enum_ty.as_str().to_string());
-        }
-        // 型参照を持たないリーフ
-        Expr::NumberLit(_)
-        | Expr::IntLit(_)
-        | Expr::BoolLit(_)
-        | Expr::StringLit(_)
-        | Expr::Ident(_)
-        | Expr::Unit
-        | Expr::RawCode(_)
-        | Expr::Regex { .. }
-        | Expr::PrimitiveAssocConst { .. }
-        | Expr::StdConst(_) => {}
+        // 子ノードへの再帰は walk_expr に委譲。`walk_expr` 内部で
+        // `walk_call_target` 経由 `visit_user_type_ref` が発火する。
+        crate::ir::visit::walk_expr(self, expr);
+    }
+
+    fn visit_rust_type(&mut self, ty: &RustType) {
+        // RustType の Named 型名収集は既存のスタンドアロン関数に委譲。
+        // (この処理は IR の `Vec`/`Option`/`Fn` 等を再帰展開する責務を
+        // 含むが、`UserTypeRef` ではないため walk_rust_type の汎用 hook
+        // では捕捉できない。専用関数を保持する。)
+        collect_type_refs_from_rust_type(ty, self.refs);
+    }
+
+    fn visit_pattern(&mut self, pat: &Pattern) {
+        // Pattern の収集は既存スタンドアロン関数に委譲。
+        // `PATTERN_LANG_BUILTINS` の Some/None/Ok/Err 除外も同関数内に閉じる
+        // (Pattern::TupleStruct::path: Vec<String> 構造は I-378 の Out of Scope)。
+        collect_type_refs_from_pattern(pat, self.refs);
     }
 }
 

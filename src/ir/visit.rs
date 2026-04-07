@@ -30,8 +30,8 @@
 //! ノードだけ override する。`walk_*` は `?Sized` 境界で dyn 互換性を保つ。
 
 use super::{
-    AssocConst, ClosureBody, Expr, Item, MatchArm, Method, Pattern, RustType, Stmt, TypeParam,
-    UserTypeRef,
+    AssocConst, CallTarget, ClosureBody, Expr, Item, MatchArm, Method, Pattern, RustType, Stmt,
+    TypeParam, UserTypeRef,
 };
 
 /// IR の read-only 走査用 visitor trait。
@@ -66,14 +66,16 @@ pub trait IrVisitor {
     }
     /// User-defined type 参照を通知する。
     ///
-    /// `walk_expr` の `Expr::EnumVariant` や `walk_call_target` の各 user variant 等、
-    /// `UserTypeRef` フィールドを持つ箇所から呼ばれる。walker の実装は本フックを
-    /// override するだけで refs グラフを一様に構築できる。
+    /// 以下の経路から発火する:
+    /// - `walk_expr` の `Expr::EnumVariant::enum_ty`
+    /// - `walk_call_target` の `CallTarget::UserAssocFn::ty`
+    /// - `walk_call_target` の `CallTarget::UserTupleCtor::0`
+    /// - `walk_call_target` の `CallTarget::UserEnumVariantCtor::enum_ty`
     ///
-    /// **I-378 Phase 1 段階**: 現状 Phase 1 では `Expr::EnumVariant::enum_ty`
-    /// のみが本フックを発火する。Phase 2 (T3 + T4) で `CallTarget::UserAssocFn`
-    /// / `UserTupleCtor` / `UserEnumVariantCtor` から `walk_call_target` 経由で
-    /// 配線され、user type ref の通知を一元化する。
+    /// walker の実装は本フックを override するだけで refs グラフを一様に
+    /// 構築できる (`external_struct_generator::TypeRefCollector` がその例)。
+    /// builtin variant / プリミティブ / std module path / 自由関数は型レベルで
+    /// `UserTypeRef` フィールドを持たないため、本フックは構造的に発火しない。
     fn visit_user_type_ref(&mut self, _r: &UserTypeRef) {}
 }
 
@@ -369,9 +371,8 @@ pub fn walk_expr<V: IrVisitor + ?Sized>(v: &mut V, expr: &Expr) {
                 v.visit_expr(e);
             }
         }
-        Expr::FnCall { target: _, args } => {
-            // `CallTarget::Path::type_ref` は `visit_expr` を override した
-            // 実装側で検査する（walk は子の再帰だけを担当する）。
+        Expr::FnCall { target, args } => {
+            walk_call_target(v, target);
             for a in args {
                 v.visit_expr(a);
             }
@@ -439,6 +440,26 @@ pub fn walk_expr<V: IrVisitor + ?Sized>(v: &mut V, expr: &Expr) {
         | Expr::Regex { .. }
         | Expr::PrimitiveAssocConst { .. }
         | Expr::StdConst(_) => {}
+    }
+}
+
+/// `CallTarget` の全 variant を走査し、内部に [`UserTypeRef`] を持つ variant
+/// については `visit_user_type_ref` フックを発火する。
+///
+/// I-378 で導入された走査ポイント。これにより walker は `Expr::FnCall::target`
+/// 内の user type 参照（`UserAssocFn::ty` / `UserTupleCtor::0` /
+/// `UserEnumVariantCtor::enum_ty`）を構造的に拾えるようになり、文字列 path 解析
+/// や uppercase ヒューリスティックが不要になる。
+pub fn walk_call_target<V: IrVisitor + ?Sized>(v: &mut V, target: &CallTarget) {
+    match target {
+        CallTarget::UserAssocFn { ty, .. } => v.visit_user_type_ref(ty),
+        CallTarget::UserTupleCtor(ty) => v.visit_user_type_ref(ty),
+        CallTarget::UserEnumVariantCtor { enum_ty, .. } => v.visit_user_type_ref(enum_ty),
+        // user type 参照を持たない variant
+        CallTarget::Free(_)
+        | CallTarget::BuiltinVariant(_)
+        | CallTarget::ExternalPath(_)
+        | CallTarget::Super => {}
     }
 }
 

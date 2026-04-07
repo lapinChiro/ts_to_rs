@@ -14,7 +14,7 @@ fn test_call_with_missing_default_arg_appends_none() {
 
     match result {
         Expr::FnCall { target, args } => {
-            assert_eq!(target.as_simple(), Some("greet"));
+            assert!(matches!(target, CallTarget::Free(ref __n) if __n == "greet"));
             assert_eq!(
                 args.len(),
                 2,
@@ -41,11 +41,11 @@ fn test_call_with_option_arg_wraps_some() {
 
     match result {
         Expr::FnCall { target, args } => {
-            assert_eq!(target.as_simple(), Some("greet"));
+            assert!(matches!(target, CallTarget::Free(ref __n) if __n == "greet"));
             assert_eq!(args.len(), 2);
             // Second arg should be Some(...)
             assert!(
-                matches!(&args[1], Expr::FnCall { target, args: inner } if target.as_simple() == Some("Some") && inner.len() == 1),
+                matches!(&args[1], Expr::FnCall { target, args: inner } if matches!(target, CallTarget::BuiltinVariant(crate::ir::BuiltinVariant::Some)) && inner.len() == 1),
                 "expected Some(...), got: {:?}",
                 args[1]
             );
@@ -77,7 +77,7 @@ fn test_convert_call_expr_typeenv_fn_provides_param_expected() {
 
     match &result {
         Expr::FnCall { target, args } => {
-            assert_eq!(target.as_simple(), Some("f"));
+            assert!(matches!(target, CallTarget::Free(ref __n) if __n == "f"));
             assert_eq!(args.len(), 1);
             // The string literal should have .to_string() because param type is String
             assert!(
@@ -111,7 +111,7 @@ fn test_convert_call_expr_no_typeenv_fn_no_expected() {
 
     match &result {
         Expr::FnCall { target, args } => {
-            assert_eq!(target.as_simple(), Some("f"));
+            assert!(matches!(target, CallTarget::Free(ref __n) if __n == "f"));
             assert_eq!(args.len(), 1);
             assert!(
                 matches!(&args[0], Expr::StringLit(s) if s == "hello"),
@@ -147,7 +147,7 @@ fn test_convert_call_expr_rest_param_packs_args_into_vec() {
 
     match &result {
         Expr::FnCall { target, args } => {
-            assert_eq!(target.as_simple(), Some("sum"));
+            assert!(matches!(target, CallTarget::Free(ref __n) if __n == "sum"));
             assert_eq!(args.len(), 1, "all args should be packed into one vec");
             match &args[0] {
                 Expr::Vec { elements } => {
@@ -188,7 +188,7 @@ fn test_convert_call_expr_rest_param_mixed_regular_and_rest() {
 
     match &result {
         Expr::FnCall { target, args } => {
-            assert_eq!(target.as_simple(), Some("log"));
+            assert!(matches!(target, CallTarget::Free(ref __n) if __n == "log"));
             assert_eq!(args.len(), 2, "prefix + packed rest");
             match &args[1] {
                 Expr::Vec { elements } => {
@@ -225,7 +225,7 @@ fn test_convert_call_expr_rest_param_no_rest_args() {
 
     match &result {
         Expr::FnCall { target, args } => {
-            assert_eq!(target.as_simple(), Some("sum"));
+            assert!(matches!(target, CallTarget::Free(ref __n) if __n == "sum"));
             assert_eq!(args.len(), 1);
             match &args[0] {
                 Expr::Vec { elements } => {
@@ -262,7 +262,7 @@ fn test_convert_call_expr_rest_param_spread_single_array() {
 
     match &result {
         Expr::FnCall { target, args } => {
-            assert_eq!(target.as_simple(), Some("sum"));
+            assert!(matches!(target, CallTarget::Free(ref __n) if __n == "sum"));
             assert_eq!(args.len(), 1);
             // Should pass arr directly, not wrap in vec!
             assert!(
@@ -299,7 +299,7 @@ fn test_convert_call_expr_rest_param_mixed_literal_and_spread() {
 
     match &result {
         Expr::FnCall { target, args } => {
-            assert_eq!(target.as_simple(), Some("sum"));
+            assert!(matches!(target, CallTarget::Free(ref __n) if __n == "sum"));
             assert_eq!(args.len(), 1);
             // Should be [vec![1.0], arr].concat()
             match &args[0] {

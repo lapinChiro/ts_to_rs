@@ -211,7 +211,10 @@ function check(x: string | number): string {
                 // `Regex::new(...)` is a call on an external crate type, not a
                 // user-defined type — `type_ref: None` so the walker does not
                 // try to synthesize a stub for `Regex`.
-                target: crate::ir::CallTarget::path(&["Regex", "new"]),
+                target: crate::ir::CallTarget::ExternalPath(vec![
+                    "Regex".to_string(),
+                    "new".to_string(),
+                ]),
                 args: vec![Expr::StringLit("hello".to_string())],
             })],
         }];

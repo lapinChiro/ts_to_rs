@@ -143,7 +143,7 @@ pub(crate) fn all_exprs() -> Vec<Expr> {
             end: Some(Box::new(Expr::Unit)),
         },
         Expr::FnCall {
-            target: CallTarget::simple("f"),
+            target: CallTarget::Free("f".to_string()),
             args: vec![Expr::Unit],
         },
         Expr::Closure {

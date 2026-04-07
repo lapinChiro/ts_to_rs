@@ -212,7 +212,7 @@ fn test_convert_fn_decl_throw_wraps_return_in_ok() {
             assert_eq!(
                 *last,
                 Stmt::TailExpr(Expr::FnCall {
-                    target: CallTarget::simple("Ok"),
+                    target: CallTarget::BuiltinVariant(crate::ir::BuiltinVariant::Ok),
                     args: vec![Expr::MethodCall {
                         object: Box::new(Expr::StringLit("ok".to_string())),
                         method: "to_string".to_string(),

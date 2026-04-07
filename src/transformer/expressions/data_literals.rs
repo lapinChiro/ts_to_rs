@@ -77,15 +77,24 @@ impl<'a> Transformer<'a> {
             }
         }
 
-        let full_name = format!("{enum_name}::{variant_name}");
-
-        // Unit variant (no fields) → Ident
+        // Unit variant (no fields) → structural EnumVariant reference
+        // (I-378 PRD-DEVIATION D-2: this site was missed in the original PRD's
+        // 7-site enumeration; discovered during Phase 2 T10 test fixup as a
+        // surviving `Expr::Ident("Status::Active")` form. Fixed for completeness.)
         if fields.is_empty() {
-            return Ok(Expr::Ident(full_name));
+            return Ok(Expr::EnumVariant {
+                enum_ty: crate::ir::UserTypeRef::new(enum_name.to_string()),
+                variant: variant_name.to_string(),
+            });
         }
 
+        // Struct variant: `name` is `"Enum::Variant"` for the generator's
+        // StructInit rendering (Rust enum struct-variant syntax). The display-
+        // formatted `::` here is part of `Item::StructInit::name: String` which
+        // is out of I-378 scope (separate broken window for `StructInit` IR
+        // restructuring; tracked in TODO).
         Ok(Expr::StructInit {
-            name: full_name,
+            name: format!("{enum_name}::{variant_name}"),
             fields,
             base: None,
         })
@@ -128,7 +137,7 @@ impl<'a> Transformer<'a> {
 
         Ok(Some(Expr::FnCall {
             // `HashMap` is a Rust std type, not a user type.
-            target: CallTarget::path(&["HashMap", "from"]),
+            target: CallTarget::ExternalPath(vec!["HashMap".to_string(), "from".to_string()]),
             args: vec![Expr::Vec { elements: entries }],
         }))
     }
@@ -157,7 +166,10 @@ impl<'a> Transformer<'a> {
             if let Some(RustType::Named { name, .. }) = expected {
                 if name == "HashMap" {
                     return Ok(Expr::FnCall {
-                        target: CallTarget::path(&["HashMap", "new"]),
+                        target: CallTarget::ExternalPath(vec![
+                            "HashMap".to_string(),
+                            "new".to_string(),
+                        ]),
                         args: vec![],
                     });
                 }

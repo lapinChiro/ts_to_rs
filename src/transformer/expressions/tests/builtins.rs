@@ -14,7 +14,11 @@ fn test_process_env_access_converts_to_env_var() {
         result,
         Expr::MethodCall {
             object: Box::new(Expr::FnCall {
-                target: CallTarget::path(&["std", "env", "var"]),
+                target: CallTarget::ExternalPath(vec![
+                    "std".to_string(),
+                    "env".to_string(),
+                    "var".to_string()
+                ]),
                 args: vec![Expr::StringLit("HOME".to_string())],
             }),
             method: "unwrap".to_string(),
@@ -36,7 +40,11 @@ fn test_fs_read_file_sync_converts_to_read_to_string() {
         result,
         Expr::MethodCall {
             object: Box::new(Expr::FnCall {
-                target: CallTarget::path(&["std", "fs", "read_to_string"]),
+                target: CallTarget::ExternalPath(vec![
+                    "std".to_string(),
+                    "fs".to_string(),
+                    "read_to_string".to_string()
+                ]),
                 args: vec![Expr::Ref(Box::new(Expr::StringLit("a.txt".to_string())))],
             }),
             method: "unwrap".to_string(),
@@ -58,7 +66,11 @@ fn test_fs_write_file_sync_converts_to_fs_write() {
         result,
         Expr::MethodCall {
             object: Box::new(Expr::FnCall {
-                target: CallTarget::path(&["std", "fs", "write"]),
+                target: CallTarget::ExternalPath(vec![
+                    "std".to_string(),
+                    "fs".to_string(),
+                    "write".to_string()
+                ]),
                 args: vec![
                     Expr::Ref(Box::new(Expr::StringLit("a.txt".to_string()))),
                     Expr::Ref(Box::new(Expr::Ident("data".to_string()))),
@@ -83,7 +95,12 @@ fn test_fs_exists_sync_converts_to_path_exists() {
         result,
         Expr::MethodCall {
             object: Box::new(Expr::FnCall {
-                target: CallTarget::path(&["std", "path", "Path", "new"]),
+                target: CallTarget::ExternalPath(vec![
+                    "std".to_string(),
+                    "path".to_string(),
+                    "Path".to_string(),
+                    "new".to_string()
+                ]),
                 args: vec![Expr::Ref(Box::new(Expr::StringLit("a.txt".to_string())))],
             }),
             method: "exists".to_string(),
@@ -105,9 +122,17 @@ fn test_fs_read_file_sync_stdin_converts_to_stdin_read() {
         result,
         Expr::MethodCall {
             object: Box::new(Expr::FnCall {
-                target: CallTarget::path(&["std", "io", "read_to_string"]),
+                target: CallTarget::ExternalPath(vec![
+                    "std".to_string(),
+                    "io".to_string(),
+                    "read_to_string".to_string()
+                ]),
                 args: vec![Expr::FnCall {
-                    target: CallTarget::path(&["std", "io", "stdin"]),
+                    target: CallTarget::ExternalPath(vec![
+                        "std".to_string(),
+                        "io".to_string(),
+                        "stdin".to_string()
+                    ]),
                     args: vec![],
                 }],
             }),
@@ -130,9 +155,17 @@ fn test_fs_read_file_sync_fd0_converts_to_stdin_read() {
         result,
         Expr::MethodCall {
             object: Box::new(Expr::FnCall {
-                target: CallTarget::path(&["std", "io", "read_to_string"]),
+                target: CallTarget::ExternalPath(vec![
+                    "std".to_string(),
+                    "io".to_string(),
+                    "read_to_string".to_string()
+                ]),
                 args: vec![Expr::FnCall {
-                    target: CallTarget::path(&["std", "io", "stdin"]),
+                    target: CallTarget::ExternalPath(vec![
+                        "std".to_string(),
+                        "io".to_string(),
+                        "stdin".to_string()
+                    ]),
                     args: vec![],
                 }],
             }),

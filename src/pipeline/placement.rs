@@ -736,7 +736,10 @@ mod tests {
             return_type: None,
             body: vec![Stmt::Expr(Expr::FnCall {
                 // Synthetic enum variant constructor — references `Color`.
-                target: crate::ir::CallTarget::assoc("Color", "Red"),
+                target: crate::ir::CallTarget::UserAssocFn {
+                    ty: crate::ir::UserTypeRef::new("Color"),
+                    method: "Red".to_string(),
+                },
                 args: vec![],
             })],
         }];

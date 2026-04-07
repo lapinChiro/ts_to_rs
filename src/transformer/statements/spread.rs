@@ -118,7 +118,10 @@ impl<'a> Transformer<'a> {
             ty,
             init: Some(Expr::FnCall {
                 // `Vec::new()` is a std call, not a user type reference.
-                target: crate::ir::CallTarget::path(&["Vec", "new"]),
+                target: crate::ir::CallTarget::ExternalPath(vec![
+                    "Vec".to_string(),
+                    "new".to_string(),
+                ]),
                 args: vec![],
             }),
         });
@@ -158,7 +161,10 @@ impl<'a> Transformer<'a> {
             ty: None,
             init: Some(Expr::FnCall {
                 // `Vec::new()` is a std call, not a user type reference.
-                target: crate::ir::CallTarget::path(&["Vec", "new"]),
+                target: crate::ir::CallTarget::ExternalPath(vec![
+                    "Vec".to_string(),
+                    "new".to_string(),
+                ]),
                 args: vec![],
             }),
         });
@@ -195,7 +201,10 @@ impl<'a> Transformer<'a> {
             ty: None,
             init: Some(Expr::FnCall {
                 // `Vec::new()` is a std call, not a user type reference.
-                target: crate::ir::CallTarget::path(&["Vec", "new"]),
+                target: crate::ir::CallTarget::ExternalPath(vec![
+                    "Vec".to_string(),
+                    "new".to_string(),
+                ]),
                 args: vec![],
             }),
         });

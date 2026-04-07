@@ -32,8 +32,11 @@ fn is_case_terminated(stmts: &[ast::Stmt]) -> bool {
 fn is_literal_match_pattern(expr: &Expr) -> bool {
     match expr {
         Expr::IntLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) => true,
-        // Enum variant paths (e.g., Direction::Up) are valid match patterns
-        Expr::Ident(name) => name.contains("::"),
+        // I-378: enum unit variants are structured `Expr::EnumVariant`. They
+        // render as `Enum::Variant` paths which are valid Rust path patterns.
+        // (Previously relied on `Expr::Ident("Enum::Variant")` substring detection,
+        // a broken-window pattern eliminated by I-378.)
+        Expr::EnumVariant { .. } => true,
         _ => false,
     }
 }

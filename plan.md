@@ -2,7 +2,7 @@
 
 ## 次のアクション
 
-**次のアクション**: **I-378** → **I-376** の順。
+**次のアクション**: **I-376** (Batch 11c-fix-2-c)。I-378 は完了。
 
 I-377（Batch 11c-fix-2-b）完了時の self-review で、I-375 が解消した `Expr::FnCall::name: String`
 と同型の broken window が 5 サイトに残存していることを発見した（`Expr::Ident` に
@@ -131,8 +131,10 @@ S1 バグ 0 件達成。
 | ~~11c-fix-2-a~~ | ~~I-375~~ | ~~`Expr::FnCall::name` の意味論的多義性（CallTarget で構造化）~~ | **完了** `CallTarget { Path { segments, type_ref } \| Super }` 2 variant 構造化、walker の uppercase-head ヒューリスティック廃止、lowercase class 統合テスト追加、Hono 後退ゼロ |
 | ~~11c-fix-2-b~~ | ~~I-377~~ | ~~walker / substitute の IrVisitor 化 + `MatchPattern` / verbatim pattern 文字列の構造化~~ | **完了** `Pattern` enum + `IrVisitor` / `IrFolder` trait 導入、`MatchPattern` 削除、5 stmt/expr の `pattern: String` を構造化、walker `TypeRefCollector` 化、`RUST_BUILTIN_TYPES` からの Some/None/Ok/Err 除去（I-375 申し送り完遂）、substitute.rs の IrFolder 化、散発再帰 detector の IrVisitor 化、Hono 後退ゼロ、テスト 2124→2175（+51） |
 | ~~11c-fix-2-line~~ | ~~行数超過ファイルのケア~~ | ~~5 ファイル（external_struct_generator/tests.rs 2489、output_writer.rs 1135、calls.rs 1111、ir/mod.rs 1105、ir/tests/mod.rs 1031）の責務分割~~ | **完了** D1: `camel_to_snake` test 重複解消。S1: `ir/mod.rs` を `types/naming/item/stmt/expr` に分割。S2: `ir/tests/mod.rs` を 5 カテゴリ分割。S3: `external_struct_generator/tests.rs` を 7 カテゴリ分割 + `tests/` ディレクトリ化。S4: `calls.rs` を `basic/console_log/rest_params/type_ref` に分割 + `calls/` ディレクトリ化。S5: `output_writer.rs` を `mod.rs` (entry) / `placement.rs` / `mod_rs_emit.rs` に責務分離。Hono 後退ゼロ、テスト 2171 維持 |
-| 11c-fix-2-d | I-378 | `Expr::Path` 構造化による path-in-Ident broken window 撲滅（I-377 self-review で発見） | **次** |
-| 11c-fix-2-c | I-376 | per-file 外部型 stub の構造的重複（pipeline 段階 dedup） | I-378 の後 |
+| ~~11c-fix-2-d~~ | ~~I-378~~ | ~~`Expr::Path` 構造化 + `CallTarget` 7-variant 再設計~~ | **完了** display-formatted 文字列 8 サイト撲滅、`is_type_ident` 削除、Hono 後退ゼロ、テスト 2178→2184+7 (新規 integration) |
+| 11c-fix-2-c | I-376 | per-file 外部型 stub の構造的重複（pipeline 段階 dedup） | **次** |
+| 11c-fix-2-e | I-379 | builtin variant value-position 参照 (`Expr::Ident("None")`) の構造化 | I-376 後 (5 サイト + テスト追従) |
+| 11c-fix-2-f | I-380 | Pattern 構造化 (`PatternCtor`) + walker 完全 IrVisitor 化 + `PATTERN_LANG_BUILTINS` 撲滅 | I-379 後 (~50 ファイル、I-377 同等規模) |
 | 11b | I-300+I-301+I-306 | OBJECT_LITERAL_NO_TYPE（25件） | 最大エラーカテゴリ削減 |
 | 12 | I-311+I-344 | 型引数推論フィードバック欠如 | I-344 自動解消 + generic 精度 |
 | 13 | I-11+I-238+I-202 | union/enum 生成品質 | skip: ternary, ternary-union 他 |
@@ -154,7 +156,76 @@ S1 バグ 0 件達成。
 
 ### 完了済みバッチ
 
-`git log` で詳細参照: Batch 1〜3b, R-1, C-4, T-1〜T-4, S1, D-1, 4a〜5b, 10b, 6, 6b, 7, 8, 14, 8b, 9, 10, 11a, 11c, 11c-fix, 11c-fix-2-a (I-375), 11c-fix-2-b (I-377), 11c-fix-2-line
+`git log` で詳細参照: Batch 1〜3b, R-1, C-4, T-1〜T-4, S1, D-1, 4a〜5b, 10b, 6, 6b, 7, 8, 14, 8b, 9, 10, 11a, 11c, 11c-fix, 11c-fix-2-a (I-375), 11c-fix-2-b (I-377), 11c-fix-2-line, 11c-fix-2-d (I-378)
+
+### I-378 完了時の引継ぎ事項
+
+後続セッション (I-376 / I-379 / I-380 / その他) で考慮すべき設計判断・既知挙動・歴史的経緯。PRD・TODO・コードコメントに分散して残らない事項をここに集約する。
+
+#### A. `PrimitiveType` 9 variant の YAGNI 例外 (設計判断)
+
+`src/ir/expr.rs::PrimitiveType` は `F64` / `I32` / `I64` / `U32` / `U64` / `Usize` / `Isize` / `Bool` / `Char` の 9 variant を定義しているが、**production で使われているのは `F64` のみ** (`f64::NAN` / `f64::INFINITY`)。残り 8 variant は `primitive_type_as_rust_str_covers_all_variants` テスト経由でのみ参照される。
+
+**設計判断**: I-378 self-review (deep deep) で `PrimitiveType` を F64 のみに削減する案 (YAGNI 厳守) と、9 variant 維持する案 (PRD T1 spec 通り、概念的完全性) で議論し、**9 variant 維持を採用**。理由:
+
+1. PRD は I-378 を「Expr 値式パスを構造化する基盤を作る」のが目的とし、`PrimitiveType` は基盤型としての完全性が責務に含まれる
+2. 8 variant 削除 → 将来 `i32::MAX` 等を扱う PRD で再追加する総コストが現状維持より高い
+3. test 経由で variant の正しさを保証しているため dead_code lint は発火しない
+
+**引継ぎ**: 後続 PRD で primitive associated const を使う際、`PrimitiveType` 既存 variant をそのまま利用すべき。dead code に見えても削除しないこと。
+
+#### B. `switch.rs::is_literal_match_pattern` の意味論微変化
+
+I-378 で `is_literal_match_pattern` の判定基準を変更:
+
+```rust
+// 旧 (I-378 前)
+Expr::Ident(name) => name.contains("::"),  // "f64::NAN" / "Color::Red" / "std::f64::consts::PI" 全て true
+
+// 新 (I-378 後)
+Expr::EnumVariant { .. } => true,  // EnumVariant のみ
+```
+
+**結果**: `case Color.Red:` (最頻出ケース) は `Expr::EnumVariant` に置換されるため挙動維持。しかし `case Math.PI:` / `case f64::NAN:` のような (TS では極めて稀な) ケースは:
+- 旧: `name.contains("::")` で true → 直接 pattern として展開
+- 新: `Expr::StdConst` / `PrimitiveAssocConst` は `false` → guarded match に展開
+
+Hono ベンチ・E2E テストで該当ケースなく回帰検出されず。意味論的等価だが byte-for-byte 一致しない可能性あり。
+
+**引継ぎ**: 将来 `case` で primitive const / std const を使う TS fixture が追加された場合、`is_literal_match_pattern` に `Expr::PrimitiveAssocConst { .. } | Expr::StdConst(_) => true` を追加することを検討。ただし `f64` 値の pattern matching は Rust で unstable / 非推奨であり、guarded match の方が安全。
+
+#### C. PRD spec defect の発見パターン (PRD writer 向け)
+
+I-378 で 2 件の PRD spec defect を発見し PRD-DEVIATION D-1/D-2 として記録した:
+
+- **D-1**: PRD T2 spec が `is_trivially_pure` / `is_copy_literal` の戻り値を「3 variant とも `false`」と指定したが、既存 `Expr::Ident("f64::NAN") => true` を見落とした defect。実意味論で修正。
+- **D-2**: PRD Background "実測した現存サイト" 7 件列挙が `data_literals.rs:84` の discriminated union unit variant 経路を見落としていた。Phase 2 T10 のテスト追従中に発見、PRD と同方針で構造化。
+
+**引継ぎ**: 後続 PRD writer は **(1) 既存の `is_trivially_pure` / `is_copy_literal` / 各種 helpers の戻り値を全 variant について実測してから spec を書く**、**(2) "実測したサイト" 列挙は grep だけでなく該当意味論の全構築経路 (`format!("{ty}::{var}")` 等の動的生成も含む) を tracer する** ことを推奨。
+
+#### D. I-379 と I-380 の依存関係と推奨実行順
+
+I-379 (`Expr::Ident("None")` 構造化) と I-380 (Pattern 構造化 + walker IrVisitor 化) は **依存関係なし** で並行実施可能。ただし以下の理由で **I-379 → I-380 の順を推奨**:
+
+1. I-379 は ~5 production サイト + ~10 行 IR 追加で**小規模**。I-380 は ~50 ファイル + Pattern 構造変更で**大規模**
+2. I-379 を先に完了させて品質ゲート (Hono / E2E) を確認することで、I-380 着手時の baseline がクリーンになる
+3. I-380 は walker の挙動変更を含み回帰リスク高め。I-379 の小規模変更で I-378 後の状態を一度安定化させた上で着手する方が切り分け容易
+4. 共通利用される `BuiltinVariant` 型は I-378 で既に追加済のため、両 PRD で順序入れ替えても型レベルの衝突なし
+
+#### E. Hono baseline byte-diff (I-378 後の新規生成)
+
+I-378 で walker が `IrVisitor` ベース `TypeRefCollector` に置換されたことで、外部型 stub 生成が拡張された。**41 fixture で baseline byte-diff** が発生したが、内容は全て:
+
+- 新たに登録される外部型 stub (例: `Array<T>` / `Function` / `Object`) の追加
+- `shared_types.rs` の use 文に新 stub 名が追加
+
+関数本体・semantics は無変更。Hono ベンチ全項目後退ゼロ確認済 (114/158 / 157/158 / err 54)。
+
+**引継ぎ**: 後続 PRD で baseline 比較する際、I-378 後の `/tmp/hono-dir-compile-check` を新 baseline として使うこと (I-378 前の baseline と diff すると上記 41 ファイルが false positive として検出される)。
+
+#### F. 新規 integration test 3 ファイル (I-378 で追加、削除禁止)
+
+`tests/enum_value_path_test.rs` / `tests/math_const_test.rs` / `tests/nan_infinity_test.rs` は I-378 構造化の lock-in テスト。これらが pass している限り、後続 PRD で `Expr::EnumVariant` / `PrimitiveAssocConst` / `StdConst` の構造化が破壊されないことが保証される。**削除・スキップ禁止**。
 
 ---
 

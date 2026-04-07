@@ -19,18 +19,32 @@ pub struct UserTypeRef(String);
 impl UserTypeRef {
     /// 新しい [`UserTypeRef`] を構築する。
     ///
-    /// 単一識別子のみを受け付ける。`::` を含む path 文字列、空文字、
-    /// プリミティブ型名 (`f64`/`i32`/...) の混入は debug ビルドで panic
-    /// する (構築サイトでの誤用を即時検出)。これらは
-    /// [`PrimitiveType`] / [`StdConst`] / [`BuiltinVariant`] / `CallTarget::ExternalPath`
-    /// で構造的に区別すべきもの。
+    /// 単一識別子のみを受け付ける。以下は debug ビルドで panic する
+    /// (構築サイトでの誤用を即時検出する best-effort ガード):
+    ///
+    /// - 空文字
+    /// - `::` を含む path 文字列
+    /// - プリミティブ型名 (`f64`/`i32`/`i64`/`u32`/`u64`/`usize`/`isize`/`bool`/`char`)
+    ///   → [`PrimitiveType`] を使うべき
+    /// - builtin variant 名 (`Some`/`None`/`Ok`/`Err`)
+    ///   → [`BuiltinVariant`] を使うべき
+    /// - `Self` (impl 文脈の implicit type、struct stub 生成不可)
+    ///
+    /// これらのチェックは「型レベル分類が誤って混入した場合の検出」が目的で
+    /// あり、registry 未登録のユーザー型名 (例: `Foo` が registry になくても)
+    /// は通過する (call site の責務)。
     pub fn new(name: impl Into<String>) -> Self {
         let s = name.into();
         debug_assert!(!s.is_empty(), "UserTypeRef must be a non-empty identifier");
         debug_assert!(
             !s.contains("::"),
             "UserTypeRef must hold a single identifier, got `{s}` \
-             (use PrimitiveType / StdConst / BuiltinVariant / CallTarget::ExternalPath for paths)"
+             (use CallTarget::ExternalPath / PrimitiveType / StdConst for paths)"
+        );
+        debug_assert!(
+            !is_known_non_user_type_name(&s),
+            "UserTypeRef must not hold a builtin/primitive/Self name, got `{s}` \
+             (use PrimitiveType / BuiltinVariant for builtins; Self is implicit)"
         );
         Self(s)
     }
@@ -44,6 +58,24 @@ impl UserTypeRef {
     pub fn into_string(self) -> String {
         self.0
     }
+}
+
+/// `UserTypeRef::new` の不変条件チェック用ヘルパー: builtin/primitive/Self を判定する。
+///
+/// このリストは [`PrimitiveType`] / [`BuiltinVariant`] / `Self` (implicit) と
+/// **構造的に同期していなければならない**。同期は `tests` モジュール内の
+/// `user_type_ref_known_non_user_names_stay_in_sync_with_enums` テストが
+/// PrimitiveType / BuiltinVariant の全 variant を網羅して検証する。
+fn is_known_non_user_type_name(s: &str) -> bool {
+    matches!(
+        s,
+        // Primitive types (must match `PrimitiveType::as_rust_str` 全 variant)
+        "f64" | "i32" | "i64" | "u32" | "u64" | "usize" | "isize" | "bool" | "char"
+        // Builtin variants (must match `BuiltinVariant::as_rust_str` 全 variant)
+        | "Some" | "None" | "Ok" | "Err"
+        // impl 文脈の implicit type
+        | "Self"
+    )
 }
 
 /// プリミティブ型の集合。`f64::NAN` のような associated constant の所在型として使う。
@@ -143,11 +175,12 @@ impl StdConst {
 ///
 /// walker は本 enum に対しては何もせず、`RUST_BUILTIN_TYPES` のハードコード
 /// 除外に頼らなくても builtin variant を user type として誤登録しないことが
-/// 構造的に保証される（T7 で I-377 申し送りの 4 エントリ削除が可能になる）。
+/// 構造的に保証される (`UserTypeRef` を一切持たないため `visit_user_type_ref`
+/// フックも発火しない)。
 ///
-/// **I-378 Phase 1 過渡状態**: Phase 1 では本型を構造定義のみ追加し、production
-/// 構築サイトは存在しない（Phase 2 の T3 で `CallTarget::BuiltinVariant` variant
-/// として消費される）。Phase 1 段階では `expr.rs` の単体テストでのみ参照される。
+/// 構築サイト: Transformer の `Some(x)` / `None` / `Ok(v)` / `Err(e)` 変換
+/// (`transformer/expressions/mod.rs`, `statements/error_handling.rs`,
+/// `functions/helpers.rs`)。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BuiltinVariant {
     /// `Some(_)`
@@ -174,136 +207,60 @@ impl BuiltinVariant {
 
 /// The target of an [`Expr::FnCall`].
 ///
-/// `Expr::FnCall` previously used a single `name: String` field to represent six
-/// semantically distinct kinds of call targets (free function, module-qualified
-/// call, `Option`/`Result` variant constructor, tuple struct constructor, synthetic
-/// enum variant constructor, and `super(args)`). The walker in
-/// `external_struct_generator` had to disambiguate these with a Rust-naming-convention
-/// heuristic ("uppercase head → type reference"), which produces both false
-/// negatives (lowercase class names) and false positives (uppercase free functions).
+/// I-378 で I-375 の暫定形 `CallTarget::Path { segments, type_ref }` を 7 variant に
+/// 分解した。各 variant は単一の意味論を担い、walker は variant 形状から user type
+/// 参照を構造的に判定できる（uppercase ヒューリスティックも `RUST_BUILTIN_TYPES`
+/// ハードコード除外も不要）。
 ///
-/// `CallTarget` replaces that string with a structured representation:
-///
-/// - [`CallTarget::Path`] covers every call whose callee is a path of identifiers.
-///   The walker consults the explicit [`type_ref`] field instead of parsing segments.
-/// - [`CallTarget::Super`] is the `super(args)` call in class inheritance context.
-///
-/// The `segments` field holds a language-agnostic list of identifiers, following the
-/// `pipeline-integrity` rule (`.claude/rules/pipeline-integrity.md`) that IR types must
-/// not store display-formatted strings (the `::` separator is Rust-specific and is the
-/// generator's responsibility).
-///
-/// [`type_ref`]: CallTarget::Path::type_ref
+/// pipeline-integrity ルール「IR に display-formatted 文字列を保存禁止」に従い、
+/// 各 variant の文字列フィールドはすべて単一識別子（`::` を含まない）。`::` の
+/// 連結は generator の責務。
 #[derive(Debug, Clone, PartialEq)]
 pub enum CallTarget {
-    /// A path call: `foo(x)`, `Color::Red(x)`, `MyClass::new(x)`, `Some(x)`, etc.
-    ///
-    /// `segments` holds the callee path as a list of identifiers. The generator joins
-    /// them with `::` when emitting Rust source.
-    ///
-    /// `type_ref` records the user-defined type that this call references, if any.
-    /// The walker uses it as-is for the reference graph, without parsing `segments`:
-    ///
-    /// | call form                 | segments                     | type_ref        |
-    /// |---------------------------|------------------------------|-----------------|
-    /// | `foo(x)`                  | `["foo"]`                    | `None`          |
-    /// | `std::mem::take(x)`       | `["std","mem","take"]`       | `None`          |
-    /// | `Some(x)` / `Ok(x)`       | `["Some"]` / `["Ok"]`        | `None` (builtin)|
-    /// | `_f(x)` / `__iife(x)`     | `["_f"]` / `["__iife"]`      | `None`          |
-    /// | `Wrapper(x)`              | `["Wrapper"]`                | `Some("Wrapper")`|
-    /// | `Color::Red(x)`           | `["Color","Red"]`            | `Some("Color")` |
-    /// | `MyClass::new(x)`         | `["MyClass","new"]`          | `Some("MyClass")`|
-    Path {
-        /// Identifier segments of the callee path.
-        segments: Vec<String>,
-        /// User-defined type referenced by this call, used by the reference walker.
-        type_ref: Option<String>,
+    /// 自由関数呼び出し / 局所変数を関数として呼ぶ。例: `foo(x)`, `_f(x)`, `__iife()`。
+    /// walker: 何もしない（user type 参照ではない）。
+    Free(String),
+
+    /// `Option`/`Result` の builtin variant constructor。例: `Some(x)`, `None`, `Ok(v)`, `Err(e)`。
+    /// walker: 何もしない（builtin であることが型で保証される）。
+    /// generator: `BuiltinVariant::as_rust_str()` で bare 形式 emit。
+    BuiltinVariant(BuiltinVariant),
+
+    /// std / 外部 crate の module 修飾呼び出し。例: `std::mem::take(x)`, `std::env::var("X")`,
+    /// `scopeguard::guard(...)`, `HashMap::from(v)`, `Box::new(x)`。
+    /// walker: いずれの segment も user type ではない（構造的に保証）。
+    /// generator: segments を `::` で join。
+    ExternalPath(Vec<String>),
+
+    /// ユーザー定義型の関連関数呼び出し。例: `MyClass::new(x)`, `Color::default()`。
+    /// walker: `ty` を user type ref として登録。
+    /// generator: `{ty}::{method}(args)` を emit。
+    UserAssocFn {
+        /// 親型への参照。
+        ty: UserTypeRef,
+        /// メソッド名（修飾なし）。
+        method: String,
     },
-    /// `super(args)` — the parent constructor call in a class inheritance context.
+
+    /// ユーザー定義 tuple struct の constructor。例: `Wrapper(x)` where
+    /// `interface Wrapper { (x: T): U }`（callable interface から I-374 で生成された tuple struct）。
+    /// walker: 内部 `UserTypeRef` を user type ref として登録。
+    /// generator: type 名で bare 呼び出し。
+    UserTupleCtor(UserTypeRef),
+
+    /// ユーザー定義 enum variant の constructor（payload あり）。例: `Color::Red(x)`,
+    /// `Direction::Up(meta)`。payload なしの値式参照は [`Expr::EnumVariant`] を使う。
+    /// walker: `enum_ty` を user type ref として登録。
+    /// generator: `{enum_ty}::{variant}(args)` を emit。
+    UserEnumVariantCtor {
+        /// 親 enum 型への参照。
+        enum_ty: UserTypeRef,
+        /// variant 名（修飾なし）。
+        variant: String,
+    },
+
+    /// `super(args)` — 親クラス constructor 呼び出し。
     Super,
-}
-
-impl CallTarget {
-    /// Returns the single identifier if this target is a single-segment [`Path`].
-    ///
-    /// Used as a pattern-match helper to replace former string-literal comparisons
-    /// such as `name == "Err"` with structural checks like
-    /// `target.as_simple() == Some("Err")`.
-    ///
-    /// [`Path`]: CallTarget::Path
-    pub fn as_simple(&self) -> Option<&str> {
-        if let CallTarget::Path { segments, .. } = self {
-            if segments.len() == 1 {
-                return Some(segments[0].as_str());
-            }
-        }
-        None
-    }
-
-    /// Constructs a single-segment [`Path`] with no type reference.
-    ///
-    /// Used for free functions, Option/Result builtin variant constructors,
-    /// and local-variable callees (e.g. `_f(x)`, `__iife(x)`).
-    ///
-    /// [`Path`]: CallTarget::Path
-    pub fn simple(name: impl Into<String>) -> Self {
-        CallTarget::Path {
-            segments: vec![name.into()],
-            type_ref: None,
-        }
-    }
-
-    /// Returns true if this target is a [`Path`] whose segments exactly match the
-    /// given slice, used as a structural replacement for former string-literal
-    /// comparisons like `name == "scopeguard::guard"`.
-    ///
-    /// [`Path`]: CallTarget::Path
-    pub fn is_path(&self, expected: &[&str]) -> bool {
-        match self {
-            CallTarget::Path { segments, .. } => {
-                segments.len() == expected.len()
-                    && segments.iter().zip(expected).all(|(a, b)| a == b)
-            }
-            CallTarget::Super => false,
-        }
-    }
-
-    /// Constructs a two-segment associated-path [`Path`] that references the type
-    /// named by the first segment.
-    ///
-    /// Used for associated function calls (`MyClass::new(x)`) and synthetic enum
-    /// variant constructors (`Color::Red(x)`). `type_ref` is set to `type_name`,
-    /// so the reference walker will register the type in the graph.
-    ///
-    /// [`Path`]: CallTarget::Path
-    pub fn assoc(type_name: impl Into<String>, member: impl Into<String>) -> Self {
-        let type_name = type_name.into();
-        CallTarget::Path {
-            segments: vec![type_name.clone(), member.into()],
-            type_ref: Some(type_name),
-        }
-    }
-
-    /// Constructs a multi-segment [`Path`] with no type reference from a slice of
-    /// identifier segments.
-    ///
-    /// Used for calls to std library or external crate paths such as
-    /// `std::mem::take(x)`, `std::fs::write(...)`, `HashMap::from(v)` — these are
-    /// not user-defined types and must not be registered in the reference graph.
-    ///
-    /// This is the multi-segment counterpart to [`simple`] (single segment, no
-    /// type reference) and the complement to [`assoc`] (which sets `type_ref`
-    /// for associated function calls on user types).
-    ///
-    /// [`Path`]: CallTarget::Path
-    /// [`simple`]: CallTarget::simple
-    /// [`assoc`]: CallTarget::assoc
-    pub fn path(segments: &[&str]) -> Self {
-        CallTarget::Path {
-            segments: segments.iter().map(|s| (*s).to_string()).collect(),
-            type_ref: None,
-        }
-    }
 }
 
 /// An expression.
@@ -796,10 +753,11 @@ mod tests {
     #[test]
     fn new_expr_variants_have_correct_purity_semantics() {
         // 全て定数参照で副作用ゼロ → trivially_pure: true.
-        // この値が false になると、Phase 2 で `Expr::Ident("f64::NAN")` (現状 true)
-        // から本 variant への置換が is_trivially_pure を true → false に静かに反転
-        // させ、generator の dead-code elimination 判定を変える silent semantic
-        // change を引き起こす。本テストは回帰防止ガードである。
+        // 旧 IR 表現 `Expr::Ident("f64::NAN")` は `Expr::Ident(_) => true` 経由で
+        // pure と判定されていた。I-378 の構造化置換 (`Expr::PrimitiveAssocConst`
+        // 等) で本値が false に反転すると、generator の dead-code elimination
+        // / `unwrap_or` vs `unwrap_or_else` 判定を変える silent semantic change
+        // (Tier 1) が発生する。PRD-DEVIATION D-1 参照。本テストは回帰防止ガード。
         let ev = Expr::EnumVariant {
             enum_ty: UserTypeRef::new("Color"),
             variant: "Red".to_string(),
@@ -833,5 +791,75 @@ mod tests {
     #[should_panic(expected = "non-empty")]
     fn user_type_ref_rejects_empty_string() {
         let _ = UserTypeRef::new("");
+    }
+
+    #[test]
+    #[should_panic(expected = "builtin/primitive/Self")]
+    fn user_type_ref_rejects_primitive_type_name() {
+        // PrimitiveType を使うべきケース。型レベル混入を防ぐ best-effort ガード。
+        let _ = UserTypeRef::new("f64");
+    }
+
+    #[test]
+    #[should_panic(expected = "builtin/primitive/Self")]
+    fn user_type_ref_rejects_builtin_variant_name() {
+        // BuiltinVariant を使うべきケース。
+        let _ = UserTypeRef::new("Some");
+    }
+
+    #[test]
+    #[should_panic(expected = "builtin/primitive/Self")]
+    fn user_type_ref_rejects_self_keyword() {
+        // `Self` は impl 文脈の implicit type。`pub struct Self {}` は予約語衝突
+        // でコンパイル不可なため walker も refs から除外する。UserTypeRef にも
+        // 格納禁止。
+        let _ = UserTypeRef::new("Self");
+    }
+
+    /// `is_known_non_user_type_name` が `PrimitiveType` / `BuiltinVariant` の
+    /// 全 variant と構造的に同期していることを保証する。新 variant 追加時に
+    /// `is_known_non_user_type_name` の更新を忘れたら本テストで検出される。
+    #[test]
+    fn user_type_ref_known_non_user_names_stay_in_sync_with_enums() {
+        // PrimitiveType の全 variant の `as_rust_str` は known non-user でなければならない
+        for ty in [
+            PrimitiveType::F64,
+            PrimitiveType::I32,
+            PrimitiveType::I64,
+            PrimitiveType::U32,
+            PrimitiveType::U64,
+            PrimitiveType::Usize,
+            PrimitiveType::Isize,
+            PrimitiveType::Bool,
+            PrimitiveType::Char,
+        ] {
+            assert!(
+                is_known_non_user_type_name(ty.as_rust_str()),
+                "PrimitiveType::{:?} ({}) must be in is_known_non_user_type_name",
+                ty,
+                ty.as_rust_str()
+            );
+        }
+        // BuiltinVariant の全 variant の `as_rust_str` も同様
+        for v in [
+            BuiltinVariant::Some,
+            BuiltinVariant::None,
+            BuiltinVariant::Ok,
+            BuiltinVariant::Err,
+        ] {
+            assert!(
+                is_known_non_user_type_name(v.as_rust_str()),
+                "BuiltinVariant::{:?} ({}) must be in is_known_non_user_type_name",
+                v,
+                v.as_rust_str()
+            );
+        }
+        // Self
+        assert!(is_known_non_user_type_name("Self"));
+        // Negative: 通常のユーザー型名は通過する
+        assert!(!is_known_non_user_type_name("Foo"));
+        assert!(!is_known_non_user_type_name("MyClass"));
+        assert!(!is_known_non_user_type_name("myClass"));
+        assert!(!is_known_non_user_type_name("Color"));
     }
 }

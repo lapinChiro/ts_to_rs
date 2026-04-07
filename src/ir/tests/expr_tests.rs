@@ -49,12 +49,15 @@ fn test_expr_range() {
 #[test]
 fn test_expr_fn_call_err() {
     let expr = Expr::FnCall {
-        target: CallTarget::simple("Err"),
+        target: CallTarget::BuiltinVariant(crate::ir::BuiltinVariant::Err),
         args: vec![Expr::StringLit("something went wrong".to_string())],
     };
     match expr {
         Expr::FnCall { target, args } => {
-            assert_eq!(target.as_simple(), Some("Err"));
+            assert!(matches!(
+                target,
+                CallTarget::BuiltinVariant(crate::ir::BuiltinVariant::Err)
+            ));
             assert_eq!(args.len(), 1);
         }
         _ => panic!("expected FnCall"),
@@ -64,12 +67,15 @@ fn test_expr_fn_call_err() {
 #[test]
 fn test_expr_fn_call_ok() {
     let expr = Expr::FnCall {
-        target: CallTarget::simple("Ok"),
+        target: CallTarget::BuiltinVariant(crate::ir::BuiltinVariant::Ok),
         args: vec![Expr::NumberLit(42.0)],
     };
     match expr {
         Expr::FnCall { target, args } => {
-            assert_eq!(target.as_simple(), Some("Ok"));
+            assert!(matches!(
+                target,
+                CallTarget::BuiltinVariant(crate::ir::BuiltinVariant::Ok)
+            ));
             assert_eq!(args.len(), 1);
         }
         _ => panic!("expected FnCall"),
@@ -193,7 +199,7 @@ fn test_is_trivially_pure_nested_field_access_of_pure_returns_true() {
 #[test]
 fn test_is_trivially_pure_ref_of_fn_call_returns_false() {
     assert!(!Expr::Ref(Box::new(Expr::FnCall {
-        target: CallTarget::simple("f"),
+        target: CallTarget::Free("f".to_string()),
         args: vec![],
     }))
     .is_trivially_pure());
@@ -203,7 +209,7 @@ fn test_is_trivially_pure_ref_of_fn_call_returns_false() {
 fn test_is_trivially_pure_field_access_of_fn_call_returns_false() {
     assert!(!Expr::FieldAccess {
         object: Box::new(Expr::FnCall {
-            target: CallTarget::simple("get_obj"),
+            target: CallTarget::Free("get_obj".to_string()),
             args: vec![],
         }),
         field: "x".to_string(),
@@ -214,7 +220,7 @@ fn test_is_trivially_pure_field_access_of_fn_call_returns_false() {
 #[test]
 fn test_is_trivially_pure_fn_call_returns_false() {
     assert!(!Expr::FnCall {
-        target: CallTarget::simple("side_effect"),
+        target: CallTarget::Free("side_effect".to_string()),
         args: vec![],
     }
     .is_trivially_pure());
@@ -254,7 +260,7 @@ fn test_is_trivially_pure_method_call_clone_of_pure_returns_true() {
 fn test_is_trivially_pure_method_call_to_string_of_fn_call_returns_false() {
     assert!(!Expr::MethodCall {
         object: Box::new(Expr::FnCall {
-            target: CallTarget::simple("get"),
+            target: CallTarget::Free("get".to_string()),
             args: vec![],
         }),
         method: "to_string".to_string(),
@@ -335,7 +341,7 @@ fn test_is_copy_literal_ident_returns_false() {
 #[test]
 fn test_is_copy_literal_fn_call_returns_false() {
     assert!(!Expr::FnCall {
-        target: CallTarget::simple("compute"),
+        target: CallTarget::Free("compute".to_string()),
         args: vec![],
     }
     .is_copy_literal());
@@ -371,119 +377,86 @@ fn test_is_copy_literal_field_access_returns_false() {
 }
 
 // ---------------------------------------------------------------------------
-// I-375: `CallTarget` enum — helper constructors and pattern-match utilities
+// I-378: `CallTarget` 7-variant structural tests
 // ---------------------------------------------------------------------------
 
 #[test]
-fn test_call_target_simple_constructs_single_segment_path_without_type_ref() {
-    let target = CallTarget::simple("foo");
-    match target {
-        CallTarget::Path { segments, type_ref } => {
-            assert_eq!(segments, vec!["foo".to_string()]);
-            assert_eq!(type_ref, None);
-        }
-        _ => panic!("expected CallTarget::Path"),
+fn test_call_target_free_variant_holds_identifier() {
+    let target = CallTarget::Free("foo".to_string());
+    assert!(matches!(&target, CallTarget::Free(name) if name == "foo"));
+}
+
+#[test]
+fn test_call_target_builtin_variant_each_constructor() {
+    use crate::ir::BuiltinVariant;
+    for v in [
+        BuiltinVariant::Some,
+        BuiltinVariant::None,
+        BuiltinVariant::Ok,
+        BuiltinVariant::Err,
+    ] {
+        let target = CallTarget::BuiltinVariant(v);
+        assert!(matches!(target, CallTarget::BuiltinVariant(_)));
     }
 }
 
 #[test]
-fn test_call_target_assoc_constructs_two_segment_path_with_type_ref() {
-    let target = CallTarget::assoc("MyClass", "new");
-    match target {
-        CallTarget::Path { segments, type_ref } => {
-            assert_eq!(segments, vec!["MyClass".to_string(), "new".to_string()]);
-            assert_eq!(type_ref, Some("MyClass".to_string()));
-        }
-        _ => panic!("expected CallTarget::Path"),
+fn test_call_target_external_path_holds_segments() {
+    let target = CallTarget::ExternalPath(vec![
+        "std".to_string(),
+        "fs".to_string(),
+        "write".to_string(),
+    ]);
+    if let CallTarget::ExternalPath(segs) = &target {
+        assert_eq!(segs, &["std", "fs", "write"]);
+    } else {
+        panic!("expected ExternalPath");
     }
 }
 
 #[test]
-fn test_call_target_path_constructs_multi_segment_without_type_ref() {
-    let target = CallTarget::path(&["std", "fs", "write"]);
-    match target {
-        CallTarget::Path { segments, type_ref } => {
-            assert_eq!(
-                segments,
-                vec!["std".to_string(), "fs".to_string(), "write".to_string()]
-            );
-            assert_eq!(type_ref, None);
-        }
-        _ => panic!("expected CallTarget::Path"),
+fn test_call_target_user_assoc_fn_holds_user_type_ref() {
+    use crate::ir::UserTypeRef;
+    let target = CallTarget::UserAssocFn {
+        ty: UserTypeRef::new("MyClass"),
+        method: "new".to_string(),
+    };
+    if let CallTarget::UserAssocFn { ty, method } = &target {
+        assert_eq!(ty.as_str(), "MyClass");
+        assert_eq!(method, "new");
+    } else {
+        panic!("expected UserAssocFn");
     }
 }
 
 #[test]
-fn test_call_target_super_variant_constructs() {
-    // `Super` is a unit variant; simply verify it round-trips through match.
+fn test_call_target_user_tuple_ctor_holds_user_type_ref() {
+    use crate::ir::UserTypeRef;
+    let target = CallTarget::UserTupleCtor(UserTypeRef::new("Wrapper"));
+    if let CallTarget::UserTupleCtor(ty) = &target {
+        assert_eq!(ty.as_str(), "Wrapper");
+    } else {
+        panic!("expected UserTupleCtor");
+    }
+}
+
+#[test]
+fn test_call_target_user_enum_variant_ctor_holds_enum_type_and_variant() {
+    use crate::ir::UserTypeRef;
+    let target = CallTarget::UserEnumVariantCtor {
+        enum_ty: UserTypeRef::new("Color"),
+        variant: "Red".to_string(),
+    };
+    if let CallTarget::UserEnumVariantCtor { enum_ty, variant } = &target {
+        assert_eq!(enum_ty.as_str(), "Color");
+        assert_eq!(variant, "Red");
+    } else {
+        panic!("expected UserEnumVariantCtor");
+    }
+}
+
+#[test]
+fn test_call_target_super_unit_variant() {
     let target = CallTarget::Super;
     assert!(matches!(target, CallTarget::Super));
-}
-
-#[test]
-fn test_call_target_as_simple_returns_single_segment_name() {
-    let target = CallTarget::simple("Err");
-    assert_eq!(target.as_simple(), Some("Err"));
-}
-
-#[test]
-fn test_call_target_as_simple_returns_none_for_multi_segment_path() {
-    // Multi-segment paths must NOT look like a single identifier.
-    let target = CallTarget::assoc("Color", "Red");
-    assert_eq!(target.as_simple(), None);
-    let target = CallTarget::path(&["std", "mem", "take"]);
-    assert_eq!(target.as_simple(), None);
-}
-
-#[test]
-fn test_call_target_as_simple_returns_none_for_super() {
-    let target = CallTarget::Super;
-    assert_eq!(target.as_simple(), None);
-}
-
-#[test]
-fn test_call_target_is_path_matches_exact_segments() {
-    let target = CallTarget::path(&["scopeguard", "guard"]);
-    assert!(target.is_path(&["scopeguard", "guard"]));
-}
-
-#[test]
-fn test_call_target_is_path_rejects_length_mismatch() {
-    let target = CallTarget::path(&["std", "mem", "take"]);
-    assert!(!target.is_path(&["std", "mem"]));
-    assert!(!target.is_path(&["std", "mem", "take", "extra"]));
-}
-
-#[test]
-fn test_call_target_is_path_rejects_segment_mismatch() {
-    let target = CallTarget::path(&["std", "fs", "read"]);
-    assert!(!target.is_path(&["std", "fs", "write"]));
-}
-
-#[test]
-fn test_call_target_is_path_rejects_super_variant() {
-    // `Super` must never compare equal to any identifier path.
-    assert!(!CallTarget::Super.is_path(&["super"]));
-    assert!(!CallTarget::Super.is_path(&[]));
-}
-
-#[test]
-fn test_call_target_is_path_matches_single_segment() {
-    let target = CallTarget::simple("foo");
-    assert!(target.is_path(&["foo"]));
-    assert!(!target.is_path(&["bar"]));
-}
-
-#[test]
-fn test_call_target_assoc_type_ref_preserves_first_segment() {
-    // The `type_ref` must literally match the first segment so the reference
-    // walker registers the same identifier that generator emits.
-    let target = CallTarget::assoc("lowerCaseClass", "new");
-    match target {
-        CallTarget::Path { segments, type_ref } => {
-            assert_eq!(segments[0], "lowerCaseClass");
-            assert_eq!(type_ref.as_deref(), Some("lowerCaseClass"));
-        }
-        _ => panic!("expected Path"),
-    }
 }

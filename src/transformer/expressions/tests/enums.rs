@@ -24,7 +24,13 @@ fn test_convert_lit_string_to_enum_variant_when_expected_is_string_literal_union
     let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
         .convert_expr(&swc_expr)
         .unwrap();
-    assert_eq!(result, Expr::Ident("Direction::Up".to_string()));
+    assert_eq!(
+        result,
+        Expr::EnumVariant {
+            enum_ty: crate::ir::UserTypeRef::new("Direction"),
+            variant: "Up".to_string()
+        }
+    );
 }
 
 #[test]
@@ -80,7 +86,10 @@ fn test_convert_bin_expr_enum_var_eq_string_literal_converts_rhs() {
         Expr::BinaryOp {
             left: Box::new(Expr::Ident("d".to_string())),
             op: BinOp::Eq,
-            right: Box::new(Expr::Ident("Direction::Up".to_string())),
+            right: Box::new(Expr::EnumVariant {
+                enum_ty: crate::ir::UserTypeRef::new("Direction"),
+                variant: "Up".to_string()
+            }),
         }
     );
 }
@@ -110,7 +119,10 @@ fn test_convert_bin_expr_string_literal_ne_enum_var_converts_lhs() {
     assert_eq!(
         result,
         Expr::BinaryOp {
-            left: Box::new(Expr::Ident("Direction::Up".to_string())),
+            left: Box::new(Expr::EnumVariant {
+                enum_ty: crate::ir::UserTypeRef::new("Direction"),
+                variant: "Up".to_string()
+            }),
             op: BinOp::NotEq,
             right: Box::new(Expr::Ident("d".to_string())),
         }
@@ -160,8 +172,11 @@ fn test_convert_call_args_string_literal_to_enum_variant() {
     assert_eq!(
         result,
         Expr::FnCall {
-            target: CallTarget::simple("move_dir"),
-            args: vec![Expr::Ident("Direction::Up".to_string())],
+            target: CallTarget::Free("move_dir".to_string()),
+            args: vec![Expr::EnumVariant {
+                enum_ty: crate::ir::UserTypeRef::new("Direction"),
+                variant: "Up".to_string()
+            }],
         }
     );
 }
@@ -211,6 +226,60 @@ fn test_convert_object_lit_discriminated_union_to_enum_variant() {
     );
 }
 
+/// I-378 PRD-DEVIATION D-2 regression guard.
+///
+/// `data_literals.rs:84` (discriminated union object literal → unit variant
+/// path) was a missed broken-window site in the original I-378 PRD's 7-site
+/// enumeration: it was constructing `Expr::Ident("Status::Active")`, a
+/// display-formatted path that bypassed the structural classification.
+///
+/// This test locks in the structural form (`Expr::EnumVariant { enum_ty,
+/// variant }`) so any future regression to the `Expr::Ident("Enum::Variant")`
+/// form is caught immediately. The dedicated test (separate from the standard
+/// behavioral test below) is intentional: it documents the historical defect
+/// and is paired with the entry in `backlog/I-378-PRD-DEVIATION.md` D-2.
+#[test]
+fn d2_regression_du_unit_variant_must_be_structural_enum_variant_not_ident() {
+    use crate::ir::{Expr, UserTypeRef};
+
+    let mut reg = TypeRegistry::new();
+    let mut string_values = std::collections::HashMap::new();
+    string_values.insert("active".to_string(), "Active".to_string());
+    let mut variant_fields = std::collections::HashMap::new();
+    variant_fields.insert("Active".to_string(), vec![]);
+    reg.register(
+        "Status".to_string(),
+        TypeDef::Enum {
+            type_params: vec![],
+            variants: vec!["Active".to_string()],
+            string_values,
+            tag_field: Some("type".to_string()),
+            variant_fields,
+        },
+    );
+
+    let f = TctxFixture::from_source_with_reg(r#"const s: Status = { type: "active" };"#, reg);
+    let tctx = f.tctx();
+    let swc_expr = extract_var_init(f.module());
+    let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_expr(&swc_expr)
+        .unwrap();
+
+    // Must be structural EnumVariant, NOT display-formatted Ident.
+    match result {
+        Expr::EnumVariant { enum_ty, variant } => {
+            assert_eq!(enum_ty, UserTypeRef::new("Status"));
+            assert_eq!(variant, "Active");
+        }
+        Expr::Ident(name) => panic!(
+            "REGRESSION: D-2 broken window restored. Got display-formatted \
+             Expr::Ident({name:?}) instead of structural Expr::EnumVariant. \
+             See backlog/I-378-PRD-DEVIATION.md D-2."
+        ),
+        other => panic!("expected Expr::EnumVariant {{ Status, Active }}, got {other:?}"),
+    }
+}
+
 #[test]
 fn test_convert_object_lit_discriminated_union_unit_variant() {
     let mut reg = TypeRegistry::new();
@@ -236,7 +305,13 @@ fn test_convert_object_lit_discriminated_union_unit_variant() {
         .convert_expr(&swc_expr)
         .unwrap();
     // Unit variant: no fields → Ident
-    assert_eq!(result, Expr::Ident("Status::Active".to_string()));
+    assert_eq!(
+        result,
+        Expr::EnumVariant {
+            enum_ty: crate::ir::UserTypeRef::new("Status"),
+            variant: "Active".to_string()
+        }
+    );
 }
 
 #[test]

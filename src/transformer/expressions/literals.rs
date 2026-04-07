@@ -27,7 +27,10 @@ impl<'a> Transformer<'a> {
                 // Check if the expected type is a string literal union enum
                 if let Some(RustType::Named { name, .. }) = expected {
                     if let Some(variant) = lookup_string_enum_variant(self.reg(), name, &value) {
-                        return Ok(Expr::Ident(format!("{name}::{variant}")));
+                        return Ok(Expr::EnumVariant {
+                            enum_ty: crate::ir::UserTypeRef::new(name),
+                            variant: variant.to_string(),
+                        });
                     }
                 }
                 let expr = Expr::StringLit(value);

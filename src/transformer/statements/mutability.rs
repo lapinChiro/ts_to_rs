@@ -369,7 +369,7 @@ mod tests {
         // (fn_call()).field — no root ident
         let expr = Expr::FieldAccess {
             object: Box::new(Expr::FnCall {
-                target: crate::ir::CallTarget::simple("get_obj"),
+                target: crate::ir::CallTarget::Free("get_obj".to_string()),
                 args: vec![],
             }),
             field: "field".to_string(),

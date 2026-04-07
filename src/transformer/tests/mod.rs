@@ -83,7 +83,7 @@ fn test_build_option_unwrap_fn_call_uses_unwrap_or_else() {
     let result = build_option_unwrap_with_default(
         Expr::Ident("x".to_string()),
         Expr::FnCall {
-            target: CallTarget::simple("compute_default"),
+            target: CallTarget::Free("compute_default".to_string()),
             args: vec![],
         },
     );

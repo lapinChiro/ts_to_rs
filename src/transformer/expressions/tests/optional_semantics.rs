@@ -54,7 +54,7 @@ fn test_convert_expr_await_simple() {
     assert_eq!(
         result,
         Expr::Await(Box::new(Expr::FnCall {
-            target: CallTarget::simple("fetch"),
+            target: CallTarget::Free("fetch".to_string()),
             args: vec![],
         }))
     );
@@ -129,7 +129,7 @@ fn test_option_expected_wraps_literal_in_some() {
     assert_eq!(
         result,
         Expr::FnCall {
-            target: CallTarget::simple("Some"),
+            target: CallTarget::BuiltinVariant(crate::ir::BuiltinVariant::Some),
             args: vec![Expr::NumberLit(42.0)],
         }
     );
@@ -171,7 +171,7 @@ fn test_convert_expr_ident_with_option_expected_passes_through() {
     assert_eq!(
         result,
         Expr::FnCall {
-            target: CallTarget::simple("Some"),
+            target: CallTarget::BuiltinVariant(crate::ir::BuiltinVariant::Some),
             args: vec![Expr::Ident("x".to_string())],
         }
     );

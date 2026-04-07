@@ -27,7 +27,10 @@ impl<'a> Transformer<'a> {
                 init: Some(Expr::FnCall {
                     // `scopeguard::guard` is a module-qualified free function call,
                     // not a type reference.
-                    target: CallTarget::path(&["scopeguard", "guard"]),
+                    target: CallTarget::ExternalPath(vec![
+                        "scopeguard".to_string(),
+                        "guard".to_string(),
+                    ]),
                     args: vec![
                         Expr::Unit,
                         Expr::Closure {
@@ -65,7 +68,7 @@ impl<'a> Transformer<'a> {
                 }),
                 init: Some(Expr::FnCall {
                     // `Ok(())` — `Result` variant constructor; builtin, no type ref.
-                    target: CallTarget::simple("Ok"),
+                    target: CallTarget::BuiltinVariant(crate::ir::BuiltinVariant::Ok),
                     args: vec![Expr::Unit],
                 }),
             });
@@ -149,7 +152,7 @@ impl<'a> Transformer<'a> {
             args: vec![],
         };
         Ok(Stmt::Return(Some(Expr::FnCall {
-            target: CallTarget::simple("Err"),
+            target: CallTarget::BuiltinVariant(crate::ir::BuiltinVariant::Err),
             args: vec![err_expr],
         })))
     }
@@ -296,5 +299,11 @@ impl TryBodyRewrite {
 
 /// Checks if an expression is an `Err(...)` call.
 fn is_err_call(expr: &Expr) -> bool {
-    matches!(expr, Expr::FnCall { target, .. } if target.as_simple() == Some("Err"))
+    matches!(
+        expr,
+        Expr::FnCall {
+            target: CallTarget::BuiltinVariant(crate::ir::BuiltinVariant::Err),
+            ..
+        }
+    )
 }

@@ -1,4 +1,5 @@
 use super::*;
+use crate::ir::CallTarget;
 
 #[test]
 fn test_convert_stmt_return_expr() {
@@ -199,7 +200,7 @@ fn test_convert_stmt_spread_let_mixed_segments_expands_to_stmts() {
     assert!(matches!(
         &result[0],
         Stmt::Let { mutable: true, name, init: Some(Expr::FnCall { target, .. }), .. }
-        if name == "x" && target.is_path(&["Vec", "new"])
+        if name == "x" && matches!(target, CallTarget::ExternalPath(ref __s) if __s.iter().map(String::as_str).eq(["Vec", "new"].iter().copied()))
     ));
     // Second: x.extend(...)
     assert!(matches!(

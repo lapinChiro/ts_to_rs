@@ -285,7 +285,7 @@ fn test_convert_expr_call_resolves_object_arg_from_registry() {
     assert_eq!(
         result,
         Expr::FnCall {
-            target: CallTarget::simple("draw"),
+            target: CallTarget::Free("draw".to_string()),
             args: vec![Expr::StructInit {
                 name: "Point".to_string(),
                 fields: vec![
@@ -447,7 +447,7 @@ fn test_convert_object_lit_all_computed_keys_generates_hashmap() {
     assert_eq!(
         result,
         Expr::FnCall {
-            target: CallTarget::path(&["HashMap", "from"]),
+            target: CallTarget::ExternalPath(vec!["HashMap".to_string(), "from".to_string()]),
             args: vec![Expr::Vec {
                 elements: vec![Expr::Tuple {
                     elements: vec![

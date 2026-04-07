@@ -5,7 +5,10 @@ fn test_walker_fn_call_type_ref_some_registers_user_type() {
     let item = fn_with_body(
         "f",
         vec![Stmt::Expr(Expr::FnCall {
-            target: CallTarget::assoc("Color", "Red"),
+            target: CallTarget::UserAssocFn {
+                ty: crate::ir::UserTypeRef::new("Color"),
+                method: "Red".to_string(),
+            },
             args: vec![],
         })],
     );
@@ -28,10 +31,7 @@ fn test_walker_fn_call_type_ref_none_skips_module_path_with_uppercase_segment() 
     let item = fn_with_body(
         "f",
         vec![Stmt::Expr(Expr::FnCall {
-            target: CallTarget::Path {
-                segments: vec!["HashMap".to_string(), "from".to_string()],
-                type_ref: None,
-            },
+            target: CallTarget::ExternalPath(vec!["HashMap".to_string(), "from".to_string()]),
             args: vec![],
         })],
     );
@@ -52,7 +52,7 @@ fn test_walker_fn_call_type_ref_none_skips_lowercase_module_path() {
     let item = fn_with_body(
         "f",
         vec![Stmt::Expr(Expr::FnCall {
-            target: CallTarget::path(&["scopeguard", "guard"]),
+            target: CallTarget::ExternalPath(vec!["scopeguard".to_string(), "guard".to_string()]),
             args: vec![],
         })],
     );
@@ -92,11 +92,14 @@ fn test_walker_fn_call_super_is_skipped() {
 #[test]
 fn test_walker_lowercase_class_name_registered_via_type_ref() {
     // Construct a call that the Transformer would emit for `new myClass(1)`:
-    //   CallTarget::assoc("myClass", "new") — sets type_ref = Some("myClass")
+    //   CallTarget::UserAssocFn { ty: crate::ir::UserTypeRef::new("myClass"), method: "new".to_string() } — sets type_ref = Some("myClass")
     let item = fn_with_body(
         "f",
         vec![Stmt::Expr(Expr::FnCall {
-            target: CallTarget::assoc("myClass", "new"),
+            target: CallTarget::UserAssocFn {
+                ty: crate::ir::UserTypeRef::new("myClass"),
+                method: "new".to_string(),
+            },
             args: vec![Expr::NumberLit(1.0)],
         })],
     );
@@ -117,7 +120,7 @@ fn test_walker_uppercase_free_function_not_registered_when_type_ref_is_none() {
     let item = fn_with_body(
         "f",
         vec![Stmt::Expr(Expr::FnCall {
-            target: CallTarget::simple("Foo"), // simple() → type_ref: None
+            target: CallTarget::Free("Foo".to_string()), // simple() → type_ref: None
             args: vec![],
         })],
     );
@@ -137,7 +140,7 @@ fn test_walker_fn_call_recurses_into_args_even_when_target_has_no_type_ref() {
     let item = fn_with_body(
         "f",
         vec![Stmt::Expr(Expr::FnCall {
-            target: CallTarget::simple("foo"),
+            target: CallTarget::Free("foo".to_string()),
             args: vec![Expr::StructInit {
                 name: "Wrapper".to_string(),
                 fields: vec![],
@@ -217,4 +220,81 @@ fn test_walker_std_const_does_not_register() {
                 && !refs.contains("PI")),
         "StdConst must not register any segment as a user type, got refs={refs:?}"
     );
+}
+
+// I-378 完全カバレッジ: 7 CallTarget variant 全てに対する walker integration test。
+// PRD T7 で IrVisitor 化された TypeRefCollector が各 variant を構造的に正しく
+// 処理することを保証する。前 review で hook firing test (visit_tests.rs) は
+// 追加されたが、TypeRefCollector → 実 walker 経路の integration は未検証だった。
+
+#[test]
+fn test_walker_user_tuple_ctor_registers_user_type() {
+    // `Wrapper(x)` for `interface Wrapper { (x: T): U }` (callable interface).
+    let item = fn_with_body(
+        "f",
+        vec![Stmt::Expr(Expr::FnCall {
+            target: CallTarget::UserTupleCtor(crate::ir::UserTypeRef::new("Wrapper")),
+            args: vec![],
+        })],
+    );
+    let mut refs = HashSet::new();
+    collect_type_refs_from_item(&item, &mut refs);
+    assert!(
+        refs.contains("Wrapper"),
+        "UserTupleCtor must register the inner UserTypeRef, got refs={refs:?}"
+    );
+}
+
+#[test]
+fn test_walker_user_enum_variant_ctor_registers_parent_enum_type() {
+    // `Color::Red(x)` — payload-bearing enum variant constructor.
+    let item = fn_with_body(
+        "f",
+        vec![Stmt::Expr(Expr::FnCall {
+            target: CallTarget::UserEnumVariantCtor {
+                enum_ty: crate::ir::UserTypeRef::new("Color"),
+                variant: "Red".to_string(),
+            },
+            args: vec![],
+        })],
+    );
+    let mut refs = HashSet::new();
+    collect_type_refs_from_item(&item, &mut refs);
+    assert!(
+        refs.contains("Color"),
+        "UserEnumVariantCtor must register the enum_ty, got refs={refs:?}"
+    );
+}
+
+#[test]
+fn test_walker_builtin_variant_does_not_register_anything() {
+    // `Some(x)` / `None` / `Ok(x)` / `Err(x)` — Option/Result builtin constructors.
+    // 型レベルで `UserTypeRef` を持たないため walker は何も登録しない。
+    // これにより `RUST_BUILTIN_TYPES` から Some/None/Ok/Err のハードコード除外が
+    // 構造的に不要になる (I-377 + I-378 で達成済み)。
+    use crate::ir::BuiltinVariant;
+    for v in [
+        BuiltinVariant::Some,
+        BuiltinVariant::None,
+        BuiltinVariant::Ok,
+        BuiltinVariant::Err,
+    ] {
+        let item = fn_with_body(
+            "f",
+            vec![Stmt::Expr(Expr::FnCall {
+                target: CallTarget::BuiltinVariant(v),
+                args: vec![],
+            })],
+        );
+        let mut refs = HashSet::new();
+        collect_type_refs_from_item(&item, &mut refs);
+        assert!(
+            refs.is_empty()
+                || (!refs.contains("Some")
+                    && !refs.contains("None")
+                    && !refs.contains("Ok")
+                    && !refs.contains("Err")),
+            "BuiltinVariant::{v:?} must not register any builtin name, got refs={refs:?}"
+        );
+    }
 }

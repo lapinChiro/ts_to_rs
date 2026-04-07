@@ -142,7 +142,13 @@ fn test_convert_expr_nan_to_f64_nan() {
     let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
         .convert_expr(&expr)
         .unwrap();
-    assert_eq!(result, Expr::Ident("f64::NAN".to_string()));
+    assert_eq!(
+        result,
+        Expr::PrimitiveAssocConst {
+            ty: crate::ir::PrimitiveType::F64,
+            name: "NAN".to_string()
+        }
+    );
 }
 
 #[test]
@@ -153,7 +159,13 @@ fn test_convert_expr_infinity_to_f64_infinity() {
     let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
         .convert_expr(&expr)
         .unwrap();
-    assert_eq!(result, Expr::Ident("f64::INFINITY".to_string()));
+    assert_eq!(
+        result,
+        Expr::PrimitiveAssocConst {
+            ty: crate::ir::PrimitiveType::F64,
+            name: "INFINITY".to_string()
+        }
+    );
 }
 
 #[test]

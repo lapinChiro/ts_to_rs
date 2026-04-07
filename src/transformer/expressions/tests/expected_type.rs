@@ -124,7 +124,7 @@ fn test_fn_arg_box_dyn_fn_gets_box_new() {
     match &result {
         Expr::FnCall { args, .. } => {
             assert!(
-                matches!(&args[0], Expr::FnCall { target, .. } if target.is_path(&["Box", "new"])),
+                matches!(&args[0], Expr::FnCall { target, .. } if matches!(target, CallTarget::ExternalPath(ref __s) if __s.iter().map(String::as_str).eq(["Box", "new"].iter().copied()))),
                 "expected Box::new wrapping, got {:?}",
                 args[0]
             );
@@ -393,7 +393,9 @@ fn test_convert_hashmap_propagates_value_type() {
     // Expected: HashMap::from(vec![(key, "val".to_string())])
     match &result {
         Expr::FnCall { target, args } => {
-            assert!(target.is_path(&["HashMap", "from"]));
+            assert!(
+                matches!(target, CallTarget::ExternalPath(ref __s) if __s.iter().map(String::as_str).eq(["HashMap", "from"].iter().copied()))
+            );
             match &args[0] {
                 Expr::Vec { elements } => match &elements[0] {
                     Expr::Tuple { elements } => {
@@ -424,7 +426,9 @@ fn test_convert_empty_object_with_hashmap_expected_type() {
 
     match &result {
         Expr::FnCall { target, args } => {
-            assert!(target.is_path(&["HashMap", "new"]));
+            assert!(
+                matches!(target, CallTarget::ExternalPath(ref __s) if __s.iter().map(String::as_str).eq(["HashMap", "new"].iter().copied()))
+            );
             assert!(args.is_empty(), "HashMap::new() should have no arguments");
         }
         other => panic!("expected FnCall(HashMap::new), got {other:?}"),

@@ -125,7 +125,7 @@ fn match_arm_walker_visits_patterns_and_guard() {
 fn fn_call_walker_descends_into_args_only() {
     // foo(x, y)
     let expr = Expr::FnCall {
-        target: CallTarget::simple("foo"),
+        target: CallTarget::Free("foo".to_string()),
         args: vec![Expr::Ident("x".to_string()), Expr::Ident("y".to_string())],
     };
     let mut counter = NodeCounter::default();
@@ -421,8 +421,9 @@ fn walker_visits_every_stmt_variant() {
 }
 
 /// `walk_expr` の `Expr::EnumVariant` 分岐が `visit_user_type_ref` フックを
-/// 発火することを検証する。本テストは Phase 2 で walker simplification を
-/// 行う際の前提条件を構造的に保証するセーフティネット。
+/// 発火することを検証する。`external_struct_generator::TypeRefCollector` の
+/// `IrVisitor` 実装が本フックの override だけで EnumVariant の親 enum 型を
+/// refs に登録できる構造を保証するセーフティネット。
 #[test]
 fn walk_expr_enum_variant_fires_visit_user_type_ref_hook() {
     #[derive(Default)]
@@ -448,6 +449,114 @@ fn walk_expr_enum_variant_fires_visit_user_type_ref_hook() {
         vec!["Color".to_string()],
         "walk_expr must invoke visit_user_type_ref for Expr::EnumVariant::enum_ty"
     );
+}
+
+/// `walk_call_target` 経由で `CallTarget::UserAssocFn` / `UserTupleCtor` /
+/// `UserEnumVariantCtor` のいずれもが `visit_user_type_ref` フックを発火する
+/// ことを構造的に検証する。`walker_tests.rs` の挙動テストとは独立に、フック
+/// 配線が機能していることを確認するセーフティネット。
+#[test]
+fn walk_call_target_user_variants_all_fire_visit_user_type_ref_hook() {
+    use crate::ir::UserTypeRef;
+
+    #[derive(Default)]
+    struct UserTypeRefRecorder {
+        seen: Vec<String>,
+    }
+    impl IrVisitor for UserTypeRefRecorder {
+        fn visit_user_type_ref(&mut self, r: &UserTypeRef) {
+            self.seen.push(r.as_str().to_string());
+        }
+    }
+
+    // UserAssocFn
+    let mut rec = UserTypeRefRecorder::default();
+    rec.visit_expr(&Expr::FnCall {
+        target: CallTarget::UserAssocFn {
+            ty: UserTypeRef::new("MyClass"),
+            method: "new".to_string(),
+        },
+        args: vec![],
+    });
+    assert_eq!(rec.seen, vec!["MyClass".to_string()]);
+
+    // UserTupleCtor
+    let mut rec = UserTypeRefRecorder::default();
+    rec.visit_expr(&Expr::FnCall {
+        target: CallTarget::UserTupleCtor(UserTypeRef::new("Wrapper")),
+        args: vec![],
+    });
+    assert_eq!(rec.seen, vec!["Wrapper".to_string()]);
+
+    // UserEnumVariantCtor
+    let mut rec = UserTypeRefRecorder::default();
+    rec.visit_expr(&Expr::FnCall {
+        target: CallTarget::UserEnumVariantCtor {
+            enum_ty: UserTypeRef::new("Color"),
+            variant: "Red".to_string(),
+        },
+        args: vec![],
+    });
+    assert_eq!(rec.seen, vec!["Color".to_string()]);
+}
+
+/// `walk_call_target` の non-user variant (`Free` / `BuiltinVariant` /
+/// `ExternalPath` / `Super`) は `visit_user_type_ref` フックを発火しない
+/// ことを検証する。これにより walker は builtin / 外部 path を user type
+/// として誤登録しない構造的保証を持つ。
+#[test]
+fn walk_call_target_non_user_variants_never_fire_visit_user_type_ref_hook() {
+    use crate::ir::{BuiltinVariant, UserTypeRef};
+
+    struct PanicOnUserTypeRef;
+    impl IrVisitor for PanicOnUserTypeRef {
+        fn visit_user_type_ref(&mut self, r: &UserTypeRef) {
+            panic!(
+                "non-user CallTarget variant must NOT fire visit_user_type_ref, \
+                 got {:?}",
+                r.as_str()
+            );
+        }
+    }
+
+    let cases = vec![
+        Expr::FnCall {
+            target: CallTarget::Free("foo".to_string()),
+            args: vec![],
+        },
+        Expr::FnCall {
+            target: CallTarget::BuiltinVariant(BuiltinVariant::Some),
+            args: vec![],
+        },
+        Expr::FnCall {
+            target: CallTarget::BuiltinVariant(BuiltinVariant::None),
+            args: vec![],
+        },
+        Expr::FnCall {
+            target: CallTarget::BuiltinVariant(BuiltinVariant::Ok),
+            args: vec![],
+        },
+        Expr::FnCall {
+            target: CallTarget::BuiltinVariant(BuiltinVariant::Err),
+            args: vec![],
+        },
+        Expr::FnCall {
+            target: CallTarget::ExternalPath(vec![
+                "std".to_string(),
+                "fs".to_string(),
+                "write".to_string(),
+            ]),
+            args: vec![],
+        },
+        Expr::FnCall {
+            target: CallTarget::Super,
+            args: vec![],
+        },
+    ];
+
+    for expr in cases {
+        PanicOnUserTypeRef.visit_expr(&expr);
+    }
 }
 
 /// プリミティブ assoc const と std const は user type ref を持たないため

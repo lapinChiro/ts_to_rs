@@ -186,7 +186,7 @@ fn test_generate_expr_format_macro_with_args() {
 #[test]
 fn test_generate_expr_fn_call_err() {
     let expr = Expr::FnCall {
-        target: CallTarget::simple("Err"),
+        target: CallTarget::BuiltinVariant(crate::ir::BuiltinVariant::Err),
         args: vec![Expr::StringLit("error".to_string())],
     };
     assert_eq!(generate_expr(&expr), "Err(\"error\")");
@@ -195,7 +195,7 @@ fn test_generate_expr_fn_call_err() {
 #[test]
 fn test_generate_expr_fn_call_ok() {
     let expr = Expr::FnCall {
-        target: CallTarget::simple("Ok"),
+        target: CallTarget::BuiltinVariant(crate::ir::BuiltinVariant::Ok),
         args: vec![Expr::NumberLit(42.0)],
     };
     assert_eq!(generate_expr(&expr), "Ok(42.0)");
@@ -523,7 +523,7 @@ fn test_generate_method_call_chain_no_parens() {
 fn test_generate_method_call_fn_call_receiver_no_parens() {
     let expr = Expr::MethodCall {
         object: Box::new(Expr::FnCall {
-            target: CallTarget::simple("foo"),
+            target: CallTarget::Free("foo".to_string()),
             args: vec![],
         }),
         method: "bar".to_string(),
@@ -532,13 +532,20 @@ fn test_generate_method_call_fn_call_receiver_no_parens() {
     assert_eq!(generate_expr(&expr), "foo().bar()");
 }
 
-// --- static method :: separator ---
+// --- I-378: static method calls are now CallTarget::UserAssocFn (FnCall) ---
+// MethodCall is strictly for instance method calls (`.method()` separator).
 
 #[test]
-fn test_generate_static_method_call_uses_double_colon() {
-    let expr = Expr::MethodCall {
-        object: Box::new(Expr::Ident("Foo".to_string())),
-        method: "create".to_string(),
+fn test_generate_static_method_call_via_user_assoc_fn() {
+    // I-378: `Foo::create(1)` is now `FnCall { UserAssocFn { ty: "Foo", method: "create" } }`,
+    // not `MethodCall { Ident("Foo"), "create" }`. The generator's `is_type_ident`
+    // uppercase heuristic was removed; classification is now structural at the
+    // Transformer layer.
+    let expr = Expr::FnCall {
+        target: CallTarget::UserAssocFn {
+            ty: crate::ir::UserTypeRef::new("Foo"),
+            method: "create".to_string(),
+        },
         args: vec![Expr::IntLit(1)],
     };
     assert_eq!(generate_expr(&expr), "Foo::create(1)");
@@ -778,7 +785,7 @@ fn test_generate_string_lit_with_special_chars() {
 #[test]
 fn test_generate_fn_call_single_segment_path() {
     let expr = Expr::FnCall {
-        target: CallTarget::simple("foo"),
+        target: CallTarget::Free("foo".to_string()),
         args: vec![Expr::NumberLit(1.0), Expr::NumberLit(2.0)],
     };
     assert_eq!(generate_expr(&expr), "foo(1.0, 2.0)");
@@ -790,7 +797,10 @@ fn test_generate_fn_call_two_segment_assoc_path() {
     // The generator joins segments with `::` and emits the args verbatim;
     // any `.to_string()` wrapping is the Transformer's responsibility.
     let expr = Expr::FnCall {
-        target: CallTarget::assoc("Color", "Red"),
+        target: CallTarget::UserAssocFn {
+            ty: crate::ir::UserTypeRef::new("Color"),
+            method: "Red".to_string(),
+        },
         args: vec![Expr::StringLit("red".to_string())],
     };
     assert_eq!(generate_expr(&expr), "Color::Red(\"red\")");
@@ -800,7 +810,11 @@ fn test_generate_fn_call_two_segment_assoc_path() {
 fn test_generate_fn_call_multi_segment_path() {
     // `std::fs::write(path, data)` — a multi-segment std call
     let expr = Expr::FnCall {
-        target: CallTarget::path(&["std", "fs", "write"]),
+        target: CallTarget::ExternalPath(vec![
+            "std".to_string(),
+            "fs".to_string(),
+            "write".to_string(),
+        ]),
         args: vec![
             Expr::Ident("path".to_string()),
             Expr::Ident("data".to_string()),
@@ -828,29 +842,60 @@ fn test_generate_fn_call_super_no_args() {
 }
 
 #[test]
-fn test_generate_fn_call_type_ref_is_purely_metadata_not_rendered() {
-    // `type_ref` is reference-graph metadata and must never leak into the
-    // generated source. Two calls that differ only in `type_ref` must produce
-    // identical Rust output.
-    let with_type_ref = Expr::FnCall {
-        target: CallTarget::Path {
-            segments: vec!["myClass".to_string(), "new".to_string()],
-            type_ref: Some("myClass".to_string()),
+fn test_generate_fn_call_user_tuple_ctor_emits_bare_type_name() {
+    // `Wrapper(x)` for callable interface tuple struct constructor.
+    let expr = Expr::FnCall {
+        target: CallTarget::UserTupleCtor(crate::ir::UserTypeRef::new("Wrapper")),
+        args: vec![Expr::IntLit(42)],
+    };
+    assert_eq!(generate_expr(&expr), "Wrapper(42)");
+}
+
+#[test]
+fn test_generate_fn_call_user_enum_variant_ctor_emits_enum_path() {
+    // `Color::Red(x)` — payload enum variant constructor.
+    let expr = Expr::FnCall {
+        target: CallTarget::UserEnumVariantCtor {
+            enum_ty: crate::ir::UserTypeRef::new("Color"),
+            variant: "Red".to_string(),
+        },
+        args: vec![Expr::StringLit("red".to_string())],
+    };
+    assert_eq!(generate_expr(&expr), "Color::Red(\"red\")");
+}
+
+#[test]
+fn test_generate_fn_call_builtin_variant_some_and_none() {
+    // `Some(x)` / `None` — Option constructors.
+    let some_expr = Expr::FnCall {
+        target: CallTarget::BuiltinVariant(crate::ir::BuiltinVariant::Some),
+        args: vec![Expr::IntLit(1)],
+    };
+    assert_eq!(generate_expr(&some_expr), "Some(1)");
+
+    let none_expr = Expr::FnCall {
+        target: CallTarget::BuiltinVariant(crate::ir::BuiltinVariant::None),
+        args: vec![],
+    };
+    assert_eq!(generate_expr(&none_expr), "None()");
+    // Note: `None` as a value reference (not a call) is `Expr::Ident("None")`
+    // currently — see TODO `[broken-window:Lit::Null]` for the planned
+    // structuring as a value-position BuiltinVariant.
+}
+
+#[test]
+fn test_generate_fn_call_user_assoc_fn_emits_qualified_path() {
+    // I-378: `CallTarget::UserAssocFn` は `UserTypeRef` を保持し、generator は
+    // 単純に `{ty}::{method}(args)` を emit する。I-375 の `Path { type_ref }` は
+    // metadata 形式だったが、I-378 で構造的に区別されるようになった。
+    let target = Expr::FnCall {
+        target: CallTarget::UserAssocFn {
+            ty: crate::ir::UserTypeRef::new("myClass"),
+            method: "new".to_string(),
         },
         args: vec![],
     };
-    let without_type_ref = Expr::FnCall {
-        target: CallTarget::Path {
-            segments: vec!["myClass".to_string(), "new".to_string()],
-            type_ref: None,
-        },
-        args: vec![],
-    };
-    assert_eq!(
-        generate_expr(&with_type_ref),
-        generate_expr(&without_type_ref)
-    );
-    assert_eq!(generate_expr(&with_type_ref), "myClass::new()");
+    assert_eq!(generate_expr(&target), "myClass::new()");
 }
 
 // I-378 Phase 1: rendering tests for the 3 new structured Expr variants.

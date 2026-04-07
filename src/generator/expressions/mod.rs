@@ -60,17 +60,6 @@ fn float_literal_for_method(expr: &Expr) -> Option<String> {
     }
 }
 
-/// Returns `true` if the expression is an uppercase identifier (heuristic for type/class name).
-///
-/// Used to detect static method calls: `Foo.method()` → `Foo::method()`.
-fn is_type_ident(expr: &Expr) -> bool {
-    if let Expr::Ident(name) = expr {
-        name.chars().next().is_some_and(|c| c.is_ascii_uppercase())
-    } else {
-        false
-    }
-}
-
 /// Returns `true` if the expression needs parentheses when used as the receiver
 /// of a method call or field access (i.e., before `.method()` or `.field`).
 fn needs_parens_as_receiver(expr: &Expr) -> bool {
@@ -167,12 +156,15 @@ pub(super) fn generate_expr(expr: &Expr) -> String {
                 return format!("{lit}.{method}({args_str})");
             }
             let obj_str = generate_expr(object);
-            // Uppercase identifier receiver → static method call (Type::method)
-            let sep = if is_type_ident(object) { "::" } else { "." };
+            // I-378: static method calls (`Type.method()` → `Type::method()`) are
+            // structurally classified by the Transformer as `Expr::FnCall { target:
+            // CallTarget::UserAssocFn { .. } }`. The generator no longer needs to
+            // detect uppercase receivers; all `Expr::MethodCall` here are guaranteed
+            // to be value-receiver method calls.
             if needs_parens_as_receiver(object) {
-                format!("({obj_str}){sep}{method}({args_str})")
+                format!("({obj_str}).{method}({args_str})")
             } else {
-                format!("{obj_str}{sep}{method}({args_str})")
+                format!("{obj_str}.{method}({args_str})")
             }
         }
         Expr::StructInit { name, fields, base } => {
@@ -208,7 +200,16 @@ pub(super) fn generate_expr(expr: &Expr) -> String {
                 .collect::<Vec<_>>()
                 .join(", ");
             let callee = match target {
-                CallTarget::Path { segments, .. } => segments.join("::"),
+                CallTarget::Free(name) => name.clone(),
+                CallTarget::BuiltinVariant(v) => v.as_rust_str().to_string(),
+                CallTarget::ExternalPath(segments) => segments.join("::"),
+                CallTarget::UserAssocFn { ty, method } => {
+                    format!("{}::{}", ty.as_str(), method)
+                }
+                CallTarget::UserTupleCtor(ty) => ty.as_str().to_string(),
+                CallTarget::UserEnumVariantCtor { enum_ty, variant } => {
+                    format!("{}::{}", enum_ty.as_str(), variant)
+                }
                 CallTarget::Super => "super".to_string(),
             };
             format!("{callee}({args_str})")

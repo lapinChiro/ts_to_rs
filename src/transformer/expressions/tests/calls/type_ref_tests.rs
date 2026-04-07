@@ -12,7 +12,7 @@ fn test_convert_call_expr_paren_ident_unwraps_to_fn_call() {
         .unwrap();
     match &result {
         Expr::FnCall { target, args } => {
-            assert_eq!(target.as_simple(), Some("foo"));
+            assert!(matches!(target, CallTarget::Free(ref __n) if __n == "foo"));
             assert_eq!(args.len(), 1);
         }
         other => panic!("expected FnCall, got: {other:?}"),
@@ -142,10 +142,9 @@ fn test_convert_expr_call_ident_function_in_registry_gets_type_ref_none() {
         .unwrap();
     match &result {
         Expr::FnCall { target, .. } => {
-            assert_eq!(target.as_simple(), Some("foo"));
             assert!(
-                matches!(target, CallTarget::Path { type_ref: None, .. }),
-                "function call target must have type_ref: None, got {target:?}"
+                matches!(target, CallTarget::Free(name) if name == "foo"),
+                "function call must classify as Free, got {target:?}"
             );
         }
         other => panic!("expected FnCall, got {other:?}"),
@@ -174,9 +173,9 @@ fn test_convert_expr_call_ident_struct_in_registry_gets_type_ref_some() {
             assert!(
                 matches!(
                     target,
-                    CallTarget::Path { type_ref: Some(t), .. } if t == "Callable"
+                    CallTarget::UserTupleCtor(ty) if ty.as_str() == "Callable"
                 ),
-                "struct-typed Ident callee must record type_ref: Some(name), got {target:?}"
+                "struct-typed Ident callee must classify as UserTupleCtor, got {target:?}"
             );
         }
         other => panic!("expected FnCall, got {other:?}"),
@@ -196,8 +195,10 @@ fn test_convert_expr_call_ident_unknown_name_gets_type_ref_none() {
         .unwrap();
     match &result {
         Expr::FnCall { target, .. } => {
-            assert!(matches!(target, CallTarget::Path { type_ref: None, .. }));
-            assert_eq!(target.as_simple(), Some("unknownFn"));
+            assert!(
+                matches!(target, CallTarget::Free(name) if name == "unknownFn"),
+                "unknown ident must classify as Free, got {target:?}"
+            );
         }
         other => panic!("expected FnCall, got {other:?}"),
     }
@@ -219,7 +220,10 @@ fn test_convert_new_expr_sets_type_ref_to_class_name() {
         Expr::FnCall { target, .. } => {
             assert_eq!(
                 target,
-                &CallTarget::assoc("Foo", "new"),
+                &CallTarget::UserAssocFn {
+                    ty: crate::ir::UserTypeRef::new("Foo"),
+                    method: "new".to_string()
+                },
                 "new Foo(...) must produce assoc(\"Foo\", \"new\") with type_ref Some(\"Foo\")"
             );
         }
@@ -242,14 +246,11 @@ fn test_convert_new_expr_lowercase_class_records_type_ref() {
         .unwrap();
     match &result {
         Expr::FnCall { target, .. } => match target {
-            CallTarget::Path {
-                segments,
-                type_ref: Some(t),
-            } => {
-                assert_eq!(segments, &vec!["myClass".to_string(), "new".to_string()]);
-                assert_eq!(t, "myClass");
+            CallTarget::UserAssocFn { ty, method } => {
+                assert_eq!(ty.as_str(), "myClass");
+                assert_eq!(method, "new");
             }
-            _ => panic!("expected Path with type_ref Some, got {target:?}"),
+            _ => panic!("expected UserAssocFn, got {target:?}"),
         },
         other => panic!("expected FnCall, got {other:?}"),
     }

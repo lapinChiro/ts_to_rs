@@ -20,12 +20,15 @@
 //! those layers would manifest here as a missing struct, a duplicated stub,
 //! or a compile error in the generated Rust.
 //!
-//! Before I-375, the walker used an "uppercase-head" heuristic on the joined
-//! path string of `Expr::FnCall::name`, so `myClass::new(1)` was silently
-//! dropped from the reference graph because its head segment was lowercase.
-//! With the `CallTarget::Path { type_ref }` structural classification, the
-//! Transformer records the reference at construction time based on a
-//! `TypeRegistry` lookup, independent of naming conventions.
+//! Historical note: Before I-375 the walker used an "uppercase-head" heuristic
+//! on the joined path string of `Expr::FnCall::name`, so `myClass::new(1)` was
+//! silently dropped from the reference graph because its head segment was
+//! lowercase. I-375 replaced this with `CallTarget::Path { type_ref }`, and
+//! I-378 further refined it to `CallTarget::UserAssocFn { ty: UserTypeRef, .. }`
+//! where the `UserTypeRef` newtype carries the user-defined type identifier
+//! structurally and the walker registers it via `IrVisitor::visit_user_type_ref`
+//! (`external_struct_generator::TypeRefCollector`). The classification is now
+//! independent of naming conventions at the type level, not just by convention.
 
 use ts_to_rs::pipeline::transpile_single;
 

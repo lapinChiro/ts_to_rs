@@ -3,7 +3,7 @@
 use anyhow::{anyhow, Result};
 use swc_ecma_ast as ast;
 
-use crate::ir::{BinOp, CallTarget, ClosureBody, Expr, Param, RustType, Stmt};
+use crate::ir::{BinOp, CallTarget, ClosureBody, Expr, Param, RustType, Stmt, UserTypeRef};
 use crate::registry::{ParamDef, TypeDef};
 
 use super::literals::needs_debug_format;
@@ -57,7 +57,7 @@ fn wrap_option_for_display(expr: Expr, inner_ty: &RustType) -> Expr {
 impl<'a> Transformer<'a> {
     /// Converts a function/method call expression.
     ///
-    /// - `foo(x, y)` → `Expr::FnCall { target: CallTarget::simple("foo"), args }`
+    /// - `foo(x, y)` → `Expr::FnCall { target: CallTarget::Free("foo".to_string()), args }`
     /// - `obj.method(x)` → `Expr::MethodCall { object, method, args }`
     /// - `super(x)` → `Expr::FnCall { target: CallTarget::Super, args }`
     pub(crate) fn convert_call_expr(&mut self, call: &ast::CallExpr) -> Result<Expr> {
@@ -102,17 +102,17 @@ impl<'a> Transformer<'a> {
                     let args =
                         self.convert_call_args_with_types(&call.args, param_types, has_rest)?;
                     // Ident callee: classify by `TypeRegistry` lookup.
-                    // An Ident callee whose name resolves to a nominal type
-                    // (a struct / class / interface / enum in the registry)
-                    // is recorded with `type_ref: Some(name)` so the reference
-                    // walker registers it. Plain functions, unknown names, and
-                    // imported values default to `type_ref: None`.
+                    // - Callable interface (`call_signatures` non-empty) → `UserTupleCtor`
+                    //   (e.g. `interface Wrapper { (x: T): U }` → `Wrapper(x)`)
+                    // - その他の Struct / Enum → defensive UserTupleCtor で walker 登録を維持
+                    //   (TS で class や enum を直接呼び出すコードは strict mode で type error
+                    //   になるが、過去 IR が type_ref として記録していた挙動を保つ)
+                    // - Plain functions / unknown / imported → `Free`
                     let target = match self.reg().get(&fn_name) {
-                        Some(TypeDef::Struct { .. } | TypeDef::Enum { .. }) => CallTarget::Path {
-                            segments: vec![fn_name.clone()],
-                            type_ref: Some(fn_name),
-                        },
-                        _ => CallTarget::simple(fn_name),
+                        Some(TypeDef::Struct { .. } | TypeDef::Enum { .. }) => {
+                            CallTarget::UserTupleCtor(UserTypeRef::new(fn_name))
+                        }
+                        _ => CallTarget::Free(fn_name),
                     };
                     Ok(Expr::FnCall { target, args })
                 }
@@ -166,6 +166,36 @@ impl<'a> Transformer<'a> {
                         if obj_ident.sym.as_ref() == "fs" {
                             return self.convert_fs_call(&method, &call.args);
                         }
+
+                        // I-378 T9: Static method call on a user-registered type:
+                        //   `MyClass.foo(args)` → `Expr::FnCall { CallTarget::UserAssocFn { .. } }`
+                        //
+                        // Without this, `convert_expr(&member.obj)` would produce
+                        // `Expr::Ident("MyClass")` and the fallthrough below would
+                        // build `Expr::MethodCall { object: Ident("MyClass"), .. }`,
+                        // which the generator previously coerced via the `is_type_ident`
+                        // uppercase heuristic. I-378 removes that heuristic, so the
+                        // structural classification must happen here.
+                        //
+                        // Important: this MUST run AFTER the `console`/`Math`/`Number`/`fs`
+                        // special handlers above. Otherwise builtin types registered as
+                        // synthetic Struct (e.g. `Math`, `Number`) would be intercepted
+                        // and emit `Math::sign(x)` instead of `x.signum()`.
+                        let obj_name = obj_ident.sym.as_ref();
+                        if matches!(
+                            self.reg().get(obj_name),
+                            Some(TypeDef::Struct { .. } | TypeDef::Enum { .. })
+                        ) {
+                            let args = self.convert_call_args(&call.args)?;
+                            let rust_name = crate::ir::sanitize_rust_type_name(obj_name);
+                            return Ok(Expr::FnCall {
+                                target: CallTarget::UserAssocFn {
+                                    ty: UserTypeRef::new(rust_name),
+                                    method,
+                                },
+                                args,
+                            });
+                        }
                     }
 
                     // Cat A: method receiver — converted before method resolution
@@ -214,7 +244,7 @@ impl<'a> Transformer<'a> {
                             init: Some(inner_result),
                         },
                         Stmt::TailExpr(Expr::FnCall {
-                            target: CallTarget::simple("_f"),
+                            target: CallTarget::Free("_f".to_string()),
                             args,
                         }),
                     ]))
@@ -233,7 +263,7 @@ impl<'a> Transformer<'a> {
                             init: Some(closure),
                         },
                         Stmt::TailExpr(Expr::FnCall {
-                            target: CallTarget::simple("__iife"),
+                            target: CallTarget::Free("__iife".to_string()),
                             args,
                         }),
                     ]))
@@ -249,7 +279,7 @@ impl<'a> Transformer<'a> {
                             init: Some(closure),
                         },
                         Stmt::TailExpr(Expr::FnCall {
-                            target: CallTarget::simple("__iife"),
+                            target: CallTarget::Free("__iife".to_string()),
                             args,
                         }),
                     ]))
@@ -269,7 +299,7 @@ impl<'a> Transformer<'a> {
 
     /// Converts a `new` expression to a `ClassName::new(args)` call.
     ///
-    /// `new Foo(x, y)` → `Expr::FnCall { target: CallTarget::assoc("Foo", "new"), args }`
+    /// `new Foo(x, y)` → `Expr::FnCall { target: CallTarget::UserAssocFn { ty: crate::ir::UserTypeRef::new("Foo"), method: "new".to_string() }, args }`
     /// (the `type_ref` is set so the reference walker registers `Foo` in the graph)
     pub(crate) fn convert_new_expr(&mut self, new_expr: &ast::NewExpr) -> Result<Expr> {
         let class_name = match new_expr.callee.as_ref() {
@@ -299,7 +329,10 @@ impl<'a> Transformer<'a> {
         };
         let rust_name = crate::ir::sanitize_rust_type_name(&class_name);
         Ok(Expr::FnCall {
-            target: CallTarget::assoc(rust_name, "new"),
+            target: CallTarget::UserAssocFn {
+                ty: UserTypeRef::new(rust_name),
+                method: "new".to_string(),
+            },
             args,
         })
     }
@@ -328,7 +361,10 @@ impl<'a> Transformer<'a> {
                         args: vec![],
                     }),
                     method: "unwrap_or".to_string(),
-                    args: vec![Expr::Ident("f64::NAN".to_string())],
+                    args: vec![Expr::PrimitiveAssocConst {
+                        ty: crate::ir::PrimitiveType::F64,
+                        name: "NAN".to_string(),
+                    }],
                 }))
             }
             "isNaN" => {
@@ -398,9 +434,17 @@ impl<'a> Transformer<'a> {
                 if is_stdin {
                     return Ok(Expr::MethodCall {
                         object: Box::new(Expr::FnCall {
-                            target: CallTarget::path(&["std", "io", "read_to_string"]),
+                            target: CallTarget::ExternalPath(vec![
+                                "std".to_string(),
+                                "io".to_string(),
+                                "read_to_string".to_string(),
+                            ]),
                             args: vec![Expr::FnCall {
-                                target: CallTarget::path(&["std", "io", "stdin"]),
+                                target: CallTarget::ExternalPath(vec![
+                                    "std".to_string(),
+                                    "io".to_string(),
+                                    "stdin".to_string(),
+                                ]),
                                 args: vec![],
                             }],
                         }),
@@ -410,7 +454,11 @@ impl<'a> Transformer<'a> {
                 }
                 Ok(Expr::MethodCall {
                     object: Box::new(Expr::FnCall {
-                        target: CallTarget::path(&["std", "fs", "read_to_string"]),
+                        target: CallTarget::ExternalPath(vec![
+                            "std".to_string(),
+                            "fs".to_string(),
+                            "read_to_string".to_string(),
+                        ]),
                         args: vec![Expr::Ref(Box::new(path_arg))],
                     }),
                     method: "unwrap".to_string(),
@@ -425,7 +473,11 @@ impl<'a> Transformer<'a> {
                 let data_arg = self.convert_expr(&args[1].expr)?;
                 Ok(Expr::MethodCall {
                     object: Box::new(Expr::FnCall {
-                        target: CallTarget::path(&["std", "fs", "write"]),
+                        target: CallTarget::ExternalPath(vec![
+                            "std".to_string(),
+                            "fs".to_string(),
+                            "write".to_string(),
+                        ]),
                         args: vec![Expr::Ref(Box::new(path_arg)), Expr::Ref(Box::new(data_arg))],
                     }),
                     method: "unwrap".to_string(),
@@ -441,7 +493,12 @@ impl<'a> Transformer<'a> {
                     object: Box::new(Expr::FnCall {
                         // `std::path::Path::new(path)` — `Path` is a std type,
                         // not user-defined, so `type_ref` stays `None`.
-                        target: CallTarget::path(&["std", "path", "Path", "new"]),
+                        target: CallTarget::ExternalPath(vec![
+                            "std".to_string(),
+                            "path".to_string(),
+                            "Path".to_string(),
+                            "new".to_string(),
+                        ]),
                         args: vec![Expr::Ref(Box::new(path_arg))],
                     }),
                     method: "exists".to_string(),
@@ -592,7 +649,7 @@ impl<'a> Transformer<'a> {
                 // so `type_ref` is `None` — the reference walker must not try to
                 // generate a stub for it.
                 expr = Expr::FnCall {
-                    target: CallTarget::path(&["Box", "new"]),
+                    target: CallTarget::ExternalPath(vec!["Box".to_string(), "new".to_string()]),
                     args: vec![expr],
                 };
             }

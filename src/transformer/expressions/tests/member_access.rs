@@ -57,7 +57,13 @@ fn test_convert_expr_member_enum_access_from_registry() {
     let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
         .convert_expr(&swc_expr)
         .unwrap();
-    assert_eq!(result, Expr::Ident("Color::Red".to_string()));
+    assert_eq!(
+        result,
+        Expr::EnumVariant {
+            enum_ty: crate::ir::UserTypeRef::new("Color"),
+            variant: "Red".to_string()
+        }
+    );
 }
 
 #[test]
@@ -324,7 +330,11 @@ fn test_convert_member_expr_process_env_var() {
         result,
         Expr::MethodCall {
             object: Box::new(Expr::FnCall {
-                target: crate::ir::CallTarget::path(&["std", "env", "var"]),
+                target: crate::ir::CallTarget::ExternalPath(vec![
+                    "std".to_string(),
+                    "env".to_string(),
+                    "var".to_string()
+                ]),
                 args: vec![Expr::StringLit("HOME".to_string())],
             }),
             method: "unwrap".to_string(),

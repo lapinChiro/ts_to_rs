@@ -154,7 +154,10 @@ mod tests {
         // inside a `Cast { target: T }`. The cast's type should be substituted
         // but the call target must remain intact.
         let expr = Expr::FnCall {
-            target: CallTarget::assoc("Wrapper", "new"),
+            target: CallTarget::UserAssocFn {
+                ty: crate::ir::UserTypeRef::new("Wrapper"),
+                method: "new".to_string(),
+            },
             args: vec![Expr::Cast {
                 expr: Box::new(Expr::Ident("x".to_string())),
                 target: RustType::Named {
@@ -168,7 +171,13 @@ mod tests {
         match substituted {
             Expr::FnCall { target, args } => {
                 // target must be exactly the same — identifiers are not types
-                assert_eq!(target, CallTarget::assoc("Wrapper", "new"));
+                assert_eq!(
+                    target,
+                    CallTarget::UserAssocFn {
+                        ty: crate::ir::UserTypeRef::new("Wrapper"),
+                        method: "new".to_string()
+                    }
+                );
                 // args[0] should have its `T` replaced with `Concrete`
                 match &args[0] {
                     Expr::Cast { target: ty, .. } => {
@@ -187,11 +196,13 @@ mod tests {
         }
     }
 
-    /// `CallTarget::Path { type_ref: Some("T"), .. }` is an identifier string,
-    /// not a `RustType`, so it MUST remain as `"T"` even when `bindings` maps
-    /// `T` to a concrete type. The substitution only applies to `RustType::Named`.
+    /// I-378: `CallTarget::UserAssocFn { ty: UserTypeRef("T"), .. }` の `UserTypeRef`
+    /// は識別子であって `RustType` ではないため、`bindings` で `T → Concrete` が
+    /// 定義されていても置換されず元の `"T"` が保持される（`Substitute::fold_user_type_ref`
+    /// はデフォルトの恒等変換）。RustType レベルの置換は `Cast::target` 等に対してのみ
+    /// 適用される。
     #[test]
-    fn test_substitute_preserves_call_target_type_ref_string() {
+    fn test_substitute_preserves_user_type_ref_in_call_target() {
         let bindings: HashMap<String, RustType> = [(
             "T".to_string(),
             RustType::Named {
@@ -203,26 +214,23 @@ mod tests {
         .collect();
 
         let expr = Expr::FnCall {
-            target: CallTarget::Path {
-                segments: vec!["T".to_string(), "new".to_string()],
-                type_ref: Some("T".to_string()),
+            target: CallTarget::UserAssocFn {
+                ty: crate::ir::UserTypeRef::new("T"),
+                method: "new".to_string(),
             },
             args: vec![],
         };
 
         let substituted = expr.substitute(&bindings);
         match substituted {
-            Expr::FnCall { target, .. } => {
-                // `T` stays as the identifier — it's not a RustType in this context.
-                assert_eq!(
-                    target,
-                    CallTarget::Path {
-                        segments: vec!["T".to_string(), "new".to_string()],
-                        type_ref: Some("T".to_string()),
-                    }
-                );
+            Expr::FnCall {
+                target: CallTarget::UserAssocFn { ref ty, ref method },
+                ..
+            } => {
+                assert_eq!(ty.as_str(), "T");
+                assert_eq!(method, "new");
             }
-            _ => panic!("expected FnCall"),
+            other => panic!("expected UserAssocFn, got {other:?}"),
         }
     }
 

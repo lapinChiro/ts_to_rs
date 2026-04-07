@@ -73,25 +73,18 @@ impl<'a> Transformer<'a> {
         if let ast::Expr::Ident(ident) = ts_obj {
             let name = ident.sym.as_ref();
             if let Some(TypeDef::Enum { .. }) = self.reg().get(name) {
-                return Ok(Expr::Ident(format!("{name}::{field}")));
+                return Ok(Expr::EnumVariant {
+                    enum_ty: crate::ir::UserTypeRef::new(name),
+                    variant: field.to_string(),
+                });
             }
         }
 
         // Math.PI, Math.E etc. → std::f64::consts::PI, std::f64::consts::E
         if let ast::Expr::Ident(ident) = ts_obj {
             if ident.sym.as_ref() == "Math" {
-                let const_name = match field {
-                    "PI" => Some("PI"),
-                    "E" => Some("E"),
-                    "LN2" => Some("LN_2"),
-                    "LN10" => Some("LN_10"),
-                    "LOG2E" => Some("LOG2_E"),
-                    "LOG10E" => Some("LOG10_E"),
-                    "SQRT2" => Some("SQRT_2"),
-                    _ => None,
-                };
-                if let Some(name) = const_name {
-                    return Ok(Expr::Ident(format!("std::f64::consts::{name}")));
+                if let Some(c) = crate::ir::StdConst::from_math_member(field) {
+                    return Ok(Expr::StdConst(c));
                 }
             }
         }
@@ -307,7 +300,11 @@ impl<'a> Transformer<'a> {
                 if obj.sym.as_ref() == "process" && prop.sym.as_ref() == "env" {
                     return Ok(Expr::MethodCall {
                         object: Box::new(Expr::FnCall {
-                            target: crate::ir::CallTarget::path(&["std", "env", "var"]),
+                            target: crate::ir::CallTarget::ExternalPath(vec![
+                                "std".to_string(),
+                                "env".to_string(),
+                                "var".to_string(),
+                            ]),
                             args: vec![Expr::StringLit(field)],
                         }),
                         method: "unwrap".to_string(),

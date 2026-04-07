@@ -66,14 +66,12 @@ pub trait IrFolder {
     }
     /// User-defined type 参照を fold する。デフォルトは恒等変換。
     ///
-    /// 型パラメータ置換 (`Substitute`) は user type ref を変換しない（`UserTypeRef`
-    /// は識別子文字列であり `RustType` ではない）。将来的に user type 名そのものを
-    /// 書き換えるような fold 実装が必要になった場合の拡張ポイントとして残す。
-    ///
-    /// **I-378 Phase 1 段階**: 現状 Phase 1 では `Expr::EnumVariant::enum_ty`
-    /// のみが本フックを経由する。Phase 2 (T3 + T5) で `CallTarget::UserAssocFn`
-    /// / `UserTupleCtor` / `UserEnumVariantCtor` 等が `walk_call_target` 経由で
-    /// 本フックを呼び、user type ref 変換の通知点を一元化する。
+    /// `walk_expr` の `Expr::EnumVariant::enum_ty` および `walk_call_target` の
+    /// `CallTarget::UserAssocFn` / `UserTupleCtor` / `UserEnumVariantCtor` 各
+    /// variant から発火する。型パラメータ置換 (`Substitute`) は user type ref を
+    /// 変換しない (`UserTypeRef` は識別子であり `RustType` ではない) ため
+    /// デフォルトの恒等変換を使う。将来的に user type 名そのものを書き換える
+    /// fold 実装が必要になった場合の拡張ポイントとして残す。
     fn fold_user_type_ref(&mut self, r: UserTypeRef) -> UserTypeRef {
         r
     }
@@ -533,7 +531,7 @@ pub fn walk_expr<F: IrFolder + ?Sized>(f: &mut F, expr: Expr) -> Expr {
             end: end.map(|e| Box::new(f.fold_expr(*e))),
         },
         Expr::FnCall { target, args } => Expr::FnCall {
-            target: fold_call_target(f, target),
+            target: walk_call_target(f, target),
             args: args.into_iter().map(|a| f.fold_expr(a)).collect(),
         },
         Expr::Vec { elements } => Expr::Vec {
@@ -612,19 +610,31 @@ pub fn walk_expr<F: IrFolder + ?Sized>(f: &mut F, expr: Expr) -> Expr {
     }
 }
 
-/// `CallTarget` は折り畳み対象外。
+/// `CallTarget` の全 variant を fold する。
 ///
-/// `CallTarget::Path` の `segments` / `type_ref` はプレーンな識別子文字列
-/// （`RustType` ではない）であり、型パラメータ置換の対象にはならない。
-/// 既存の `src/ir/substitute.rs::Expr::substitute` も同じ方針で `CallTarget`
-/// を `.clone()` でそのまま引き継いでおり（同ファイル 400-403 行のコメント
-/// と単体テスト `test_substitute_fn_call_preserves_call_target_and_substitutes_args`
-/// を参照）、`IrFolder` もその不変条件を踏襲する。
+/// I-378 で 7 variant に分解されたあと、内部の [`UserTypeRef`] は
+/// `fold_user_type_ref` フック経由で変換される。`Substitute` folder は user type
+/// ref を識別変換するため実質 no-op だが、将来 user type 名そのものを書き換える
+/// fold 実装が必要になった場合の拡張ポイントとして配線済み。
 ///
-/// 結果として本関数は恒等変換だが、意図を明示するため独立関数として分離し、
-/// 将来 `CallTarget` に型情報が追加された場合の拡張ポイントとして残す。
-fn fold_call_target<F: IrFolder + ?Sized>(_f: &mut F, target: CallTarget) -> CallTarget {
-    target
+/// `Free` / `BuiltinVariant` / `ExternalPath` / `Super` は `UserTypeRef` を持た
+/// ないため恒等変換する。
+pub fn walk_call_target<F: IrFolder + ?Sized>(f: &mut F, target: CallTarget) -> CallTarget {
+    match target {
+        CallTarget::UserAssocFn { ty, method } => CallTarget::UserAssocFn {
+            ty: f.fold_user_type_ref(ty),
+            method,
+        },
+        CallTarget::UserTupleCtor(ty) => CallTarget::UserTupleCtor(f.fold_user_type_ref(ty)),
+        CallTarget::UserEnumVariantCtor { enum_ty, variant } => CallTarget::UserEnumVariantCtor {
+            enum_ty: f.fold_user_type_ref(enum_ty),
+            variant,
+        },
+        t @ (CallTarget::Free(_)
+        | CallTarget::BuiltinVariant(_)
+        | CallTarget::ExternalPath(_)
+        | CallTarget::Super) => t,
+    }
 }
 
 #[cfg(test)]
@@ -759,6 +769,99 @@ mod tests {
                 assert_eq!(variant, "Red");
             }
             other => panic!("expected EnumVariant, got {other:?}"),
+        }
+    }
+
+    /// `walk_call_target` 経由で `CallTarget::UserAssocFn` / `UserTupleCtor` /
+    /// `UserEnumVariantCtor` のいずれもが `fold_user_type_ref` フックを経由する
+    /// ことを検証する (Phase 2 で追加された walk_call_target フック配線の保証)。
+    #[test]
+    fn walk_call_target_user_variants_all_route_through_fold_user_type_ref() {
+        struct PrefixFolder;
+        impl IrFolder for PrefixFolder {
+            fn fold_user_type_ref(&mut self, r: crate::ir::UserTypeRef) -> crate::ir::UserTypeRef {
+                crate::ir::UserTypeRef::new(format!("Prefixed_{}", r.as_str()))
+            }
+        }
+
+        // UserAssocFn
+        let folded = PrefixFolder.fold_expr(Expr::FnCall {
+            target: CallTarget::UserAssocFn {
+                ty: crate::ir::UserTypeRef::new("MyClass"),
+                method: "new".to_string(),
+            },
+            args: vec![],
+        });
+        match folded {
+            Expr::FnCall {
+                target: CallTarget::UserAssocFn { ty, .. },
+                ..
+            } => assert_eq!(ty.as_str(), "Prefixed_MyClass"),
+            _ => panic!("expected UserAssocFn"),
+        }
+
+        // UserTupleCtor
+        let folded = PrefixFolder.fold_expr(Expr::FnCall {
+            target: CallTarget::UserTupleCtor(crate::ir::UserTypeRef::new("Wrapper")),
+            args: vec![],
+        });
+        match folded {
+            Expr::FnCall {
+                target: CallTarget::UserTupleCtor(ty),
+                ..
+            } => assert_eq!(ty.as_str(), "Prefixed_Wrapper"),
+            _ => panic!("expected UserTupleCtor"),
+        }
+
+        // UserEnumVariantCtor
+        let folded = PrefixFolder.fold_expr(Expr::FnCall {
+            target: CallTarget::UserEnumVariantCtor {
+                enum_ty: crate::ir::UserTypeRef::new("Color"),
+                variant: "Red".to_string(),
+            },
+            args: vec![],
+        });
+        match folded {
+            Expr::FnCall {
+                target: CallTarget::UserEnumVariantCtor { enum_ty, .. },
+                ..
+            } => assert_eq!(enum_ty.as_str(), "Prefixed_Color"),
+            _ => panic!("expected UserEnumVariantCtor"),
+        }
+    }
+
+    /// `walk_call_target` の non-user variant (`Free` / `BuiltinVariant` /
+    /// `ExternalPath` / `Super`) は `fold_user_type_ref` フックを発火しない
+    /// ことを検証する。
+    #[test]
+    fn walk_call_target_non_user_variants_bypass_fold_user_type_ref() {
+        struct PanicOnUserTypeRef;
+        impl IrFolder for PanicOnUserTypeRef {
+            fn fold_user_type_ref(&mut self, _r: crate::ir::UserTypeRef) -> crate::ir::UserTypeRef {
+                panic!("non-user CallTarget variant must NOT route through fold_user_type_ref");
+            }
+        }
+
+        let cases = vec![
+            CallTarget::Free("foo".to_string()),
+            CallTarget::BuiltinVariant(crate::ir::BuiltinVariant::Some),
+            CallTarget::BuiltinVariant(crate::ir::BuiltinVariant::None),
+            CallTarget::BuiltinVariant(crate::ir::BuiltinVariant::Ok),
+            CallTarget::BuiltinVariant(crate::ir::BuiltinVariant::Err),
+            CallTarget::ExternalPath(vec!["std".to_string(), "fs".to_string()]),
+            CallTarget::Super,
+        ];
+
+        for target in cases {
+            let original = Expr::FnCall {
+                target: target.clone(),
+                args: vec![],
+            };
+            let folded = PanicOnUserTypeRef.fold_expr(original.clone());
+            assert_eq!(
+                folded, original,
+                "non-user variant must round-trip identity"
+            );
         }
     }
 

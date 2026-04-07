@@ -282,7 +282,7 @@ fn test_rewrite_super_constructor_no_struct_init_creates_new() {
                 args: vec![Expr::Ident("x".to_string())],
             }),
             Stmt::Expr(Expr::FnCall {
-                target: CallTarget::simple("println"),
+                target: CallTarget::Free("println".to_string()),
                 args: vec![],
             }),
         ]),
@@ -294,7 +294,7 @@ fn test_rewrite_super_constructor_no_struct_init_creates_new() {
     assert_eq!(body.len(), 2, "expected 2 statements, got: {body:?}");
     match &body[0] {
         Stmt::Expr(Expr::FnCall { target, .. }) => {
-            assert_eq!(target.as_simple(), Some("println"))
+            assert!(matches!(target, CallTarget::Free(ref __n) if __n == "println"))
         }
         other => panic!("expected println call, got: {other:?}"),
     }

@@ -12,7 +12,7 @@ fn test_convert_expr_call_simple() {
     assert_eq!(
         result,
         Expr::FnCall {
-            target: CallTarget::simple("foo"),
+            target: CallTarget::Free("foo".to_string()),
             args: vec![Expr::Ident("x".to_string()), Expr::Ident("y".to_string()),],
         }
     );
@@ -29,7 +29,7 @@ fn test_convert_expr_call_no_args() {
     assert_eq!(
         result,
         Expr::FnCall {
-            target: CallTarget::simple("foo"),
+            target: CallTarget::Free("foo".to_string()),
             args: vec![],
         }
     );
@@ -46,9 +46,9 @@ fn test_convert_expr_call_nested() {
     assert_eq!(
         result,
         Expr::FnCall {
-            target: CallTarget::simple("foo"),
+            target: CallTarget::Free("foo".to_string()),
             args: vec![Expr::FnCall {
-                target: CallTarget::simple("bar"),
+                target: CallTarget::Free("bar".to_string()),
                 args: vec![Expr::Ident("x".to_string())],
             }],
         }
@@ -124,7 +124,10 @@ fn test_convert_expr_new() {
     assert_eq!(
         result,
         Expr::FnCall {
-            target: CallTarget::assoc("Foo", "new"),
+            target: CallTarget::UserAssocFn {
+                ty: crate::ir::UserTypeRef::new("Foo"),
+                method: "new".to_string()
+            },
             args: vec![Expr::Ident("x".to_string()), Expr::Ident("y".to_string()),],
         }
     );
@@ -141,7 +144,10 @@ fn test_convert_expr_new_no_args() {
     assert_eq!(
         result,
         Expr::FnCall {
-            target: CallTarget::assoc("Foo", "new"),
+            target: CallTarget::UserAssocFn {
+                ty: crate::ir::UserTypeRef::new("Foo"),
+                method: "new".to_string()
+            },
             args: vec![],
         }
     );
@@ -169,7 +175,11 @@ fn test_new_expr_string_arg_gets_to_string() {
         .unwrap();
     match &result {
         Expr::FnCall { target, args } => {
-            assert!(target.is_path(&["Foo", "new"]));
+            assert!(matches!(
+                target,
+                CallTarget::UserAssocFn { ty, method }
+                    if ty.as_str() == "Foo" && method == "new"
+            ));
             assert!(
                 matches!(&args[0], Expr::MethodCall { method, .. } if method == "to_string"),
                 "expected .to_string() on string arg, got {:?}",
@@ -268,4 +278,60 @@ fn test_convert_expr_console_log_multiple_args() {
             use_debug: vec![false, false],
         }
     );
+}
+
+// I-378 T9 回帰テスト群: `Type.method()` static call の構造化分類は、
+// console / Math / Number / fs の特殊ハンドラの**後**に実行されなければ
+// ならない。それらビルトインは synthetic registry 内で TypeDef::Struct
+// として登録されているため、順序を間違えると `Math.sign(x)` が
+// `Math::sign(x)` に誤分類され、`x.signum()` への変換が失われる。
+// E2E テストでも検出されるが、回帰の根本原因を局所化するため
+// 単体テストレベルでもガードする。
+
+#[test]
+fn t9_regression_math_call_must_lower_to_method_call_not_user_assoc_fn() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
+    let swc_expr = parse_expr("Math.sign(2);");
+    let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_expr(&swc_expr)
+        .unwrap();
+    // Math.sign(x) → x.signum() (MethodCall on receiver)
+    match &result {
+        Expr::MethodCall { method, .. } => {
+            assert_eq!(method, "signum");
+        }
+        Expr::FnCall {
+            target: CallTarget::UserAssocFn { ty, method },
+            ..
+        } => panic!(
+            "REGRESSION: T9 ordering broken. Math.sign was misclassified as \
+             UserAssocFn {{ ty: {:?}, method: {} }}. The static-method-call \
+             classification must run AFTER the Math/Number/fs/console handlers.",
+            ty.as_str(),
+            method
+        ),
+        other => panic!("expected x.signum() MethodCall, got {other:?}"),
+    }
+}
+
+#[test]
+fn t9_regression_number_isnan_must_lower_to_method_call_not_user_assoc_fn() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
+    let swc_expr = parse_expr("Number.isNaN(0);");
+    let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_expr(&swc_expr)
+        .unwrap();
+    match &result {
+        Expr::MethodCall { method, .. } => assert_eq!(method, "is_nan"),
+        Expr::FnCall {
+            target: CallTarget::UserAssocFn { .. },
+            ..
+        } => panic!(
+            "REGRESSION: T9 ordering broken. Number.isNaN was misclassified \
+             as UserAssocFn instead of producing x.is_nan()."
+        ),
+        other => panic!("expected x.is_nan() MethodCall, got {other:?}"),
+    }
 }

@@ -61,7 +61,7 @@ impl<'a> Transformer<'a> {
             if matches!(expr, ast::Expr::Lit(_)) {
                 let inner_result = self.convert_expr_with_expected(expr, Some(inner))?;
                 return Ok(Expr::FnCall {
-                    target: CallTarget::simple("Some"),
+                    target: CallTarget::BuiltinVariant(crate::ir::BuiltinVariant::Some),
                     args: vec![inner_result],
                 });
             }
@@ -71,12 +71,18 @@ impl<'a> Transformer<'a> {
             } else {
                 let inner_result = self.convert_expr_with_expected(expr, Some(inner))?;
                 if matches!(&inner_result, Expr::Ident(name) if name == "None")
-                    || matches!(&inner_result, Expr::FnCall { target, .. } if target.as_simple() == Some("Some"))
+                    || matches!(
+                        &inner_result,
+                        Expr::FnCall {
+                            target: CallTarget::BuiltinVariant(crate::ir::BuiltinVariant::Some),
+                            ..
+                        }
+                    )
                 {
                     return Ok(inner_result);
                 }
                 return Ok(Expr::FnCall {
-                    target: CallTarget::simple("Some"),
+                    target: CallTarget::BuiltinVariant(crate::ir::BuiltinVariant::Some),
                     args: vec![inner_result],
                 });
             }
@@ -87,8 +93,14 @@ impl<'a> Transformer<'a> {
                 let name = ident.sym.to_string();
                 match name.as_str() {
                     "undefined" => Ok(Expr::Ident("None".to_string())),
-                    "NaN" => Ok(Expr::Ident("f64::NAN".to_string())),
-                    "Infinity" => Ok(Expr::Ident("f64::INFINITY".to_string())),
+                    "NaN" => Ok(Expr::PrimitiveAssocConst {
+                        ty: crate::ir::PrimitiveType::F64,
+                        name: "NAN".to_string(),
+                    }),
+                    "Infinity" => Ok(Expr::PrimitiveAssocConst {
+                        ty: crate::ir::PrimitiveType::F64,
+                        name: "INFINITY".to_string(),
+                    }),
                     _ => Ok(Expr::Ident(name)),
                 }
             }
@@ -134,7 +146,7 @@ impl<'a> Transformer<'a> {
             if self.needs_trait_box_coercion(expected, expr) {
                 return Ok(Expr::FnCall {
                     // `Box::new(...)` is a std call, not a user type reference.
-                    target: CallTarget::path(&["Box", "new"]),
+                    target: CallTarget::ExternalPath(vec!["Box".to_string(), "new".to_string()]),
                     args: vec![result],
                 });
             }

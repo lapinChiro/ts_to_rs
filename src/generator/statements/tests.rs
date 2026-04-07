@@ -166,7 +166,7 @@ fn test_generate_while_let_generates_pattern_match_loop() {
             label: None,
             pattern: crate::ir::Pattern::some_binding("x"),
             expr: Expr::FnCall {
-                target: CallTarget::simple("get_value"),
+                target: CallTarget::Free("get_value".to_string()),
                 args: vec![],
             },
             body: vec![Stmt::Expr(Expr::Ident("x".to_string()))],
@@ -341,7 +341,7 @@ fn test_generate_labeled_block_simple_body_outputs_labeled_block() {
         body: vec![Stmt::LabeledBlock {
             label: "try_block".to_string(),
             body: vec![Stmt::Expr(Expr::FnCall {
-                target: CallTarget::simple("do_something"),
+                target: CallTarget::Free("do_something".to_string()),
                 args: vec![],
             })],
         }],
@@ -368,7 +368,7 @@ fn test_generate_break_with_label_and_value_outputs_break_label_value() {
         body: vec![Stmt::Break {
             label: Some("try_block".to_string()),
             value: Some(Expr::FnCall {
-                target: CallTarget::simple("Err"),
+                target: CallTarget::BuiltinVariant(crate::ir::BuiltinVariant::Err),
                 args: vec![Expr::MethodCall {
                     object: Box::new(Expr::StringLit("error".to_string())),
                     method: "to_string".to_string(),
@@ -528,7 +528,7 @@ fn test_generate_match_single_arm_renders_match() {
                 patterns: vec![MP::Literal(Expr::IntLit(1))],
                 guard: None,
                 body: vec![Stmt::Expr(Expr::FnCall {
-                    target: CallTarget::simple("do_a"),
+                    target: CallTarget::Free("do_a".to_string()),
                     args: vec![],
                 })],
             }],
@@ -561,7 +561,7 @@ fn test_generate_match_multiple_patterns_renders_or() {
                 patterns: vec![MP::Literal(Expr::IntLit(1)), MP::Literal(Expr::IntLit(2))],
                 guard: None,
                 body: vec![Stmt::Expr(Expr::FnCall {
-                    target: CallTarget::simple("do_ab"),
+                    target: CallTarget::Free("do_ab".to_string()),
                     args: vec![],
                 })],
             }],
@@ -594,7 +594,7 @@ fn test_generate_match_wildcard_renders_underscore() {
                 patterns: vec![MP::Wildcard],
                 guard: None,
                 body: vec![Stmt::Expr(Expr::FnCall {
-                    target: CallTarget::simple("do_default"),
+                    target: CallTarget::Free("do_default".to_string()),
                     args: vec![],
                 })],
             }],
@@ -628,7 +628,7 @@ fn test_generate_match_multiple_arms_renders_all() {
                     patterns: vec![MP::Literal(Expr::IntLit(1))],
                     guard: None,
                     body: vec![Stmt::Expr(Expr::FnCall {
-                        target: CallTarget::simple("do_a"),
+                        target: CallTarget::Free("do_a".to_string()),
                         args: vec![],
                     })],
                 },
@@ -636,7 +636,7 @@ fn test_generate_match_multiple_arms_renders_all() {
                     patterns: vec![MP::Literal(Expr::IntLit(2)), MP::Literal(Expr::IntLit(3))],
                     guard: None,
                     body: vec![Stmt::Expr(Expr::FnCall {
-                        target: CallTarget::simple("do_bc"),
+                        target: CallTarget::Free("do_bc".to_string()),
                         args: vec![],
                     })],
                 },
@@ -644,7 +644,7 @@ fn test_generate_match_multiple_arms_renders_all() {
                     patterns: vec![MP::Wildcard],
                     guard: None,
                     body: vec![Stmt::Expr(Expr::FnCall {
-                        target: CallTarget::simple("do_default"),
+                        target: CallTarget::Free("do_default".to_string()),
                         args: vec![],
                     })],
                 },
@@ -689,7 +689,7 @@ fn test_generate_match_string_patterns_renders_as_str_from_ir() {
                     patterns: vec![MP::Literal(Expr::StringLit("hello".to_string()))],
                     guard: None,
                     body: vec![Stmt::Expr(Expr::FnCall {
-                        target: CallTarget::simple("do_hello"),
+                        target: CallTarget::Free("do_hello".to_string()),
                         args: vec![],
                     })],
                 },
@@ -697,7 +697,7 @@ fn test_generate_match_string_patterns_renders_as_str_from_ir() {
                     patterns: vec![MP::Wildcard],
                     guard: None,
                     body: vec![Stmt::Expr(Expr::FnCall {
-                        target: CallTarget::simple("do_default"),
+                        target: CallTarget::Free("do_default".to_string()),
                         args: vec![],
                     })],
                 },

@@ -67,12 +67,15 @@ fn test_collect_type_refs_fn_body_cast_target() {
 #[test]
 fn test_collect_type_refs_fn_body_fncall_uppercase_extracted() {
     // fn f() { Color::Red(x) } — a synthetic enum variant constructor.
-    // The Transformer constructs this as `CallTarget::assoc("Color", "Red")`
+    // The Transformer constructs this as `CallTarget::UserAssocFn { ty: crate::ir::UserTypeRef::new("Color"), method: "Red".to_string() }`
     // with `type_ref = Some("Color")`, so the walker registers `Color` in refs.
     let item = fn_with_body(
         "f",
         vec![Stmt::Expr(Expr::FnCall {
-            target: CallTarget::assoc("Color", "Red"),
+            target: CallTarget::UserAssocFn {
+                ty: crate::ir::UserTypeRef::new("Color"),
+                method: "Red".to_string(),
+            },
             args: vec![],
         })],
     );
@@ -88,10 +91,7 @@ fn test_collect_type_refs_fn_body_fncall_module_qualified_not_registered() {
     let item = fn_with_body(
         "f",
         vec![Stmt::Expr(Expr::FnCall {
-            target: CallTarget::Path {
-                segments: vec!["scopeguard".to_string(), "guard".to_string()],
-                type_ref: None,
-            },
+            target: CallTarget::ExternalPath(vec!["scopeguard".to_string(), "guard".to_string()]),
             args: vec![],
         })],
     );
@@ -107,7 +107,7 @@ fn test_collect_type_refs_fn_body_fncall_walks_args() {
     let item = fn_with_body(
         "f",
         vec![Stmt::Expr(Expr::FnCall {
-            target: CallTarget::simple("foo"),
+            target: CallTarget::Free("foo".to_string()),
             args: vec![Expr::StructInit {
                 name: "Bar".to_string(),
                 fields: vec![],
@@ -210,7 +210,7 @@ fn test_collect_type_refs_impl_assoc_const_value_walked() {
                 type_args: vec![],
             },
             value: Expr::FnCall {
-                target: CallTarget::simple("some_fn"),
+                target: CallTarget::Free("some_fn".to_string()),
                 args: vec![Expr::StructInit {
                     name: "Baz".to_string(),
                     fields: vec![],

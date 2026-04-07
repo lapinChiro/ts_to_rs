@@ -66,7 +66,10 @@ impl<'a> Transformer<'a> {
                     return Some(Expr::BinaryOp {
                         left: Box::new(left),
                         op,
-                        right: Box::new(Expr::Ident(format!("{enum_name}::{variant}"))),
+                        right: Box::new(Expr::EnumVariant {
+                            enum_ty: crate::ir::UserTypeRef::new(&enum_name),
+                            variant: variant.to_string(),
+                        }),
                     });
                 }
             }
@@ -81,7 +84,10 @@ impl<'a> Transformer<'a> {
                     // Cat A: comparison operand
                     let right = self.convert_expr(&bin.right).ok()?;
                     return Some(Expr::BinaryOp {
-                        left: Box::new(Expr::Ident(format!("{enum_name}::{variant}"))),
+                        left: Box::new(Expr::EnumVariant {
+                            enum_ty: crate::ir::UserTypeRef::new(&enum_name),
+                            variant: variant.to_string(),
+                        }),
                         op,
                         right: Box::new(right),
                     });

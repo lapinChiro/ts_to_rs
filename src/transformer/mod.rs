@@ -952,7 +952,7 @@ mod detector_tests {
     #[test]
     fn regex_absent_returns_false() {
         let item = fn_item(vec![Stmt::Expr(Expr::FnCall {
-            target: CallTarget::simple("f"),
+            target: CallTarget::Free("f".to_string()),
             args: vec![],
         })]);
         assert!(!items_contain_regex(&[item]));
@@ -962,7 +962,7 @@ mod detector_tests {
     #[test]
     fn runtime_typeof_detected_inside_fncall_args() {
         let item = fn_item(vec![Stmt::Expr(Expr::FnCall {
-            target: CallTarget::simple("wrap"),
+            target: CallTarget::Free("wrap".to_string()),
             args: vec![Expr::RuntimeTypeof {
                 operand: Box::new(Expr::Ident("x".to_string())),
             }],
