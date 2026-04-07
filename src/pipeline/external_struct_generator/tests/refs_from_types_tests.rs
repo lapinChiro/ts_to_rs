@@ -1,0 +1,487 @@
+use super::*;
+
+#[test]
+fn test_collect_refs_enum_variant_named_type_detected() {
+    let mut registry = TypeRegistry::new();
+    register_external_struct(&mut registry, "Date", vec![], vec![]);
+
+    let items = vec![Item::Enum {
+        vis: Visibility::Public,
+        name: "MyEnum".to_string(),
+        type_params: vec![],
+        serde_tag: None,
+        variants: vec![EnumVariant {
+            name: "Date".to_string(),
+            value: None,
+            data: Some(RustType::Named {
+                name: "Date".to_string(),
+                type_args: vec![],
+            }),
+            fields: vec![],
+        }],
+    }];
+
+    let refs = collect_undefined_type_references(&items, &[], &[], &registry);
+    assert_eq!(refs, HashSet::from(["Date".to_string()]));
+}
+
+#[test]
+fn test_collect_refs_rust_stdlib_types_excluded() {
+    let registry = TypeRegistry::new();
+
+    let items = vec![Item::Enum {
+        vis: Visibility::Public,
+        name: "MyEnum".to_string(),
+        type_params: vec![],
+        serde_tag: None,
+        variants: vec![
+            EnumVariant {
+                name: "S".to_string(),
+                value: None,
+                data: Some(RustType::String),
+                fields: vec![],
+            },
+            EnumVariant {
+                name: "N".to_string(),
+                value: None,
+                data: Some(RustType::F64),
+                fields: vec![],
+            },
+            EnumVariant {
+                name: "B".to_string(),
+                value: None,
+                data: Some(RustType::Bool),
+                fields: vec![],
+            },
+        ],
+    }];
+
+    let refs = collect_undefined_type_references(&items, &[], &[], &registry);
+    assert!(refs.is_empty());
+}
+
+#[test]
+fn test_collect_refs_serde_json_value_excluded() {
+    let registry = TypeRegistry::new();
+
+    let items = vec![Item::Enum {
+        vis: Visibility::Public,
+        name: "MyEnum".to_string(),
+        type_params: vec![],
+        serde_tag: None,
+        variants: vec![EnumVariant {
+            name: "Other".to_string(),
+            value: None,
+            data: Some(RustType::Named {
+                name: "serde_json::Value".to_string(),
+                type_args: vec![],
+            }),
+            fields: vec![],
+        }],
+    }];
+
+    let refs = collect_undefined_type_references(&items, &[], &[], &registry);
+    assert!(refs.is_empty());
+}
+
+#[test]
+fn test_collect_refs_defined_struct_excluded() {
+    let mut registry = TypeRegistry::new();
+    register_external_struct(&mut registry, "Foo", vec![], vec![]);
+
+    let items = vec![
+        Item::Struct {
+            vis: Visibility::Public,
+            name: "Foo".to_string(),
+            type_params: vec![],
+            fields: vec![],
+        },
+        Item::Enum {
+            vis: Visibility::Public,
+            name: "MyEnum".to_string(),
+            type_params: vec![],
+            serde_tag: None,
+            variants: vec![EnumVariant {
+                name: "Foo".to_string(),
+                value: None,
+                data: Some(RustType::Named {
+                    name: "Foo".to_string(),
+                    type_args: vec![],
+                }),
+                fields: vec![],
+            }],
+        },
+    ];
+
+    let refs = collect_undefined_type_references(&items, &[], &[], &registry);
+    assert!(refs.is_empty());
+}
+
+#[test]
+fn test_collect_refs_nested_type_args_detected() {
+    let mut registry = TypeRegistry::new();
+    register_external_struct(&mut registry, "ArrayBuffer", vec![], vec![]);
+
+    let items = vec![Item::Struct {
+        vis: Visibility::Public,
+        name: "MyStruct".to_string(),
+        type_params: vec![],
+        fields: vec![StructField {
+            vis: Some(Visibility::Public),
+            name: "data".to_string(),
+            ty: RustType::Vec(Box::new(RustType::Named {
+                name: "ArrayBuffer".to_string(),
+                type_args: vec![],
+            })),
+        }],
+    }];
+
+    let refs = collect_undefined_type_references(&items, &[], &[], &registry);
+    assert_eq!(refs, HashSet::from(["ArrayBuffer".to_string()]));
+}
+
+#[test]
+fn test_collect_refs_struct_field_named_type_detected() {
+    let mut registry = TypeRegistry::new();
+    register_external_struct(&mut registry, "Headers", vec![], vec![]);
+
+    let items = vec![Item::Struct {
+        vis: Visibility::Public,
+        name: "MyStruct".to_string(),
+        type_params: vec![],
+        fields: vec![StructField {
+            vis: Some(Visibility::Public),
+            name: "headers".to_string(),
+            ty: RustType::Named {
+                name: "Headers".to_string(),
+                type_args: vec![],
+            },
+        }],
+    }];
+
+    let refs = collect_undefined_type_references(&items, &[], &[], &registry);
+    assert_eq!(refs, HashSet::from(["Headers".to_string()]));
+}
+
+#[test]
+fn test_collect_refs_not_in_registry_excluded() {
+    let registry = TypeRegistry::new();
+
+    let items = vec![Item::Enum {
+        vis: Visibility::Public,
+        name: "MyEnum".to_string(),
+        type_params: vec![],
+        serde_tag: None,
+        variants: vec![EnumVariant {
+            name: "Unknown".to_string(),
+            value: None,
+            data: Some(RustType::Named {
+                name: "Unknown".to_string(),
+                type_args: vec![],
+            }),
+            fields: vec![],
+        }],
+    }];
+
+    let refs = collect_undefined_type_references(&items, &[], &[], &registry);
+    assert!(refs.is_empty());
+}
+
+#[test]
+fn test_collect_refs_user_defined_type_excluded() {
+    let mut registry = TypeRegistry::new();
+    // register（not register_external）で登録 → ユーザー定義型
+    registry.register(
+        "Bindings".to_string(),
+        TypeDef::Struct {
+            type_params: vec![],
+            fields: vec![("db_url".to_string(), RustType::String).into()],
+            methods: HashMap::new(),
+            constructor: None,
+            call_signatures: vec![],
+            extends: vec![],
+            is_interface: true,
+        },
+    );
+
+    let items = vec![Item::Enum {
+        vis: Visibility::Public,
+        name: "MyEnum".to_string(),
+        type_params: vec![],
+        serde_tag: None,
+        variants: vec![EnumVariant {
+            name: "Bindings".to_string(),
+            value: None,
+            data: Some(RustType::Named {
+                name: "Bindings".to_string(),
+                type_args: vec![],
+            }),
+            fields: vec![],
+        }],
+    }];
+
+    let refs = collect_undefined_type_references(&items, &[], &[], &registry);
+    assert!(refs.is_empty(), "user-defined types should not be included");
+}
+
+#[test]
+fn test_collect_refs_multiple_types_collected() {
+    let mut registry = TypeRegistry::new();
+    register_external_struct(&mut registry, "Date", vec![], vec![]);
+    register_external_struct(&mut registry, "Error", vec![], vec![]);
+    register_external_struct(&mut registry, "RegExp", vec![], vec![]);
+
+    let items = vec![Item::Enum {
+        vis: Visibility::Public,
+        name: "MyEnum".to_string(),
+        type_params: vec![],
+        serde_tag: None,
+        variants: vec![
+            EnumVariant {
+                name: "Date".to_string(),
+                value: None,
+                data: Some(RustType::Named {
+                    name: "Date".to_string(),
+                    type_args: vec![],
+                }),
+                fields: vec![],
+            },
+            EnumVariant {
+                name: "Error".to_string(),
+                value: None,
+                data: Some(RustType::Named {
+                    name: "Error".to_string(),
+                    type_args: vec![],
+                }),
+                fields: vec![],
+            },
+            EnumVariant {
+                name: "RegExp".to_string(),
+                value: None,
+                data: Some(RustType::Named {
+                    name: "RegExp".to_string(),
+                    type_args: vec![],
+                }),
+                fields: vec![],
+            },
+        ],
+    }];
+
+    let refs = collect_undefined_type_references(&items, &[], &[], &registry);
+    assert_eq!(
+        refs,
+        HashSet::from([
+            "Date".to_string(),
+            "Error".to_string(),
+            "RegExp".to_string()
+        ])
+    );
+}
+
+#[test]
+fn test_collect_refs_option_nested_type_detected() {
+    let mut registry = TypeRegistry::new();
+    register_external_struct(&mut registry, "Blob", vec![], vec![]);
+
+    let items = vec![Item::Struct {
+        vis: Visibility::Public,
+        name: "MyStruct".to_string(),
+        type_params: vec![],
+        fields: vec![StructField {
+            vis: Some(Visibility::Public),
+            name: "data".to_string(),
+            ty: RustType::Option(Box::new(RustType::Named {
+                name: "Blob".to_string(),
+                type_args: vec![],
+            })),
+        }],
+    }];
+
+    let refs = collect_undefined_type_references(&items, &[], &[], &registry);
+    assert_eq!(refs, HashSet::from(["Blob".to_string()]));
+}
+
+#[test]
+fn test_collect_refs_fn_item_params_and_return_detected() {
+    let mut registry = TypeRegistry::new();
+    register_external_struct(&mut registry, "Request", vec![], vec![]);
+    register_external_struct(&mut registry, "Response", vec![], vec![]);
+
+    let items = vec![Item::Fn {
+        vis: Visibility::Public,
+        attributes: vec![],
+        is_async: false,
+        name: "handle".to_string(),
+        type_params: vec![],
+        params: vec![crate::ir::Param {
+            name: "req".to_string(),
+            ty: Some(RustType::Named {
+                name: "Request".to_string(),
+                type_args: vec![],
+            }),
+        }],
+        return_type: Some(RustType::Named {
+            name: "Response".to_string(),
+            type_args: vec![],
+        }),
+        body: vec![],
+    }];
+
+    let refs = collect_undefined_type_references(&items, &[], &[], &registry);
+    assert_eq!(
+        refs,
+        HashSet::from(["Request".to_string(), "Response".to_string()])
+    );
+}
+
+#[test]
+fn test_collect_refs_defined_trait_excluded() {
+    let mut registry = TypeRegistry::new();
+    register_external_struct(&mut registry, "MyTrait", vec![], vec![]);
+
+    let items = vec![
+        Item::Trait {
+            vis: Visibility::Public,
+            name: "MyTrait".to_string(),
+            type_params: vec![],
+            supertraits: vec![],
+            methods: vec![],
+            associated_types: vec![],
+        },
+        Item::Struct {
+            vis: Visibility::Public,
+            name: "MyStruct".to_string(),
+            type_params: vec![],
+            fields: vec![StructField {
+                vis: Some(Visibility::Public),
+                name: "t".to_string(),
+                ty: RustType::Named {
+                    name: "MyTrait".to_string(),
+                    type_args: vec![],
+                },
+            }],
+        },
+    ];
+
+    let refs = collect_undefined_type_references(&items, &[], &[], &registry);
+    assert!(refs.is_empty());
+}
+
+#[test]
+fn test_collect_refs_defined_type_alias_excluded() {
+    let mut registry = TypeRegistry::new();
+    register_external_struct(&mut registry, "MyAlias", vec![], vec![]);
+
+    let items = vec![
+        Item::TypeAlias {
+            vis: Visibility::Public,
+            name: "MyAlias".to_string(),
+            type_params: vec![],
+            ty: RustType::String,
+        },
+        Item::Struct {
+            vis: Visibility::Public,
+            name: "MyStruct".to_string(),
+            type_params: vec![],
+            fields: vec![StructField {
+                vis: Some(Visibility::Public),
+                name: "a".to_string(),
+                ty: RustType::Named {
+                    name: "MyAlias".to_string(),
+                    type_args: vec![],
+                },
+            }],
+        },
+    ];
+
+    let refs = collect_undefined_type_references(&items, &[], &[], &registry);
+    assert!(refs.is_empty());
+}
+
+#[test]
+fn test_collect_refs_enum_variant_struct_fields_detected() {
+    let mut registry = TypeRegistry::new();
+    register_external_struct(&mut registry, "FormData", vec![], vec![]);
+
+    let items = vec![Item::Enum {
+        vis: Visibility::Public,
+        name: "MyEnum".to_string(),
+        type_params: vec![],
+        serde_tag: None,
+        variants: vec![EnumVariant {
+            name: "Upload".to_string(),
+            value: None,
+            data: None,
+            fields: vec![StructField {
+                vis: Some(Visibility::Public),
+                name: "form".to_string(),
+                ty: RustType::Named {
+                    name: "FormData".to_string(),
+                    type_args: vec![],
+                },
+            }],
+        }],
+    }];
+
+    let refs = collect_undefined_type_references(&items, &[], &[], &registry);
+    assert_eq!(refs, HashSet::from(["FormData".to_string()]));
+}
+
+#[test]
+fn test_collect_refs_result_type_both_ok_and_err_detected() {
+    let mut registry = TypeRegistry::new();
+    register_external_struct(&mut registry, "Response", vec![], vec![]);
+    register_external_struct(&mut registry, "HttpError", vec![], vec![]);
+
+    let items = vec![Item::Struct {
+        vis: Visibility::Public,
+        name: "MyStruct".to_string(),
+        type_params: vec![],
+        fields: vec![StructField {
+            vis: Some(Visibility::Public),
+            name: "result".to_string(),
+            ty: RustType::Result {
+                ok: Box::new(RustType::Named {
+                    name: "Response".to_string(),
+                    type_args: vec![],
+                }),
+                err: Box::new(RustType::Named {
+                    name: "HttpError".to_string(),
+                    type_args: vec![],
+                }),
+            },
+        }],
+    }];
+
+    let refs = collect_undefined_type_references(&items, &[], &[], &registry);
+    assert_eq!(
+        refs,
+        HashSet::from(["Response".to_string(), "HttpError".to_string()])
+    );
+}
+
+#[test]
+fn test_collect_refs_tuple_type_detected() {
+    let mut registry = TypeRegistry::new();
+    register_external_struct(&mut registry, "Headers", vec![], vec![]);
+
+    let items = vec![Item::Struct {
+        vis: Visibility::Public,
+        name: "MyStruct".to_string(),
+        type_params: vec![],
+        fields: vec![StructField {
+            vis: Some(Visibility::Public),
+            name: "pair".to_string(),
+            ty: RustType::Tuple(vec![
+                RustType::String,
+                RustType::Named {
+                    name: "Headers".to_string(),
+                    type_args: vec![],
+                },
+            ]),
+        }],
+    }];
+
+    let refs = collect_undefined_type_references(&items, &[], &[], &registry);
+    assert_eq!(refs, HashSet::from(["Headers".to_string()]));
+}
