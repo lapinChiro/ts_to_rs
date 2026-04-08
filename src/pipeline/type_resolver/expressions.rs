@@ -819,9 +819,14 @@ impl<'a> TypeResolver<'a> {
         let expected_param_types = if self.current_fn_return_type.is_none() {
             let arrow_span = Span::from_swc(arrow.span);
             if let Some(expected) = self.result.expected_types.get(&arrow_span).cloned() {
-                let known: Vec<String> = self.type_param_constraints.keys().cloned().collect();
+                // I-387: TypeVar walker で free type var を構造的に収集。
+                // 旧 `collect_free_type_vars` heuristic (registry / scope /
+                // RUST_BUILTIN_TYPES フィルタ) は不要。
                 let mut free_vars = Vec::new();
-                collect_free_type_vars(&expected, self.registry, &known, &mut free_vars);
+                collect_type_vars(&expected, &mut free_vars);
+                // 既に type_param_constraints に存在する type var は除外
+                // (outer scope の再 push を避ける)
+                free_vars.retain(|name| !self.type_param_constraints.contains_key(name));
                 if !free_vars.is_empty() {
                     expected_free_var_scope = Some(self.synthetic.push_type_param_scope(free_vars));
                 }
@@ -954,9 +959,10 @@ impl<'a> TypeResolver<'a> {
         if self.current_fn_return_type.is_none() {
             let fn_span = Span::from_swc(fn_expr.function.span);
             if let Some(expected) = self.result.expected_types.get(&fn_span).cloned() {
-                let known: Vec<String> = self.type_param_constraints.keys().cloned().collect();
+                // I-387: TypeVar walker で free type var を構造的に収集
                 let mut free_vars = Vec::new();
-                collect_free_type_vars(&expected, self.registry, &known, &mut free_vars);
+                collect_type_vars(&expected, &mut free_vars);
+                free_vars.retain(|name| !self.type_param_constraints.contains_key(name));
                 if !free_vars.is_empty() {
                     expected_free_var_scope = Some(self.synthetic.push_type_param_scope(free_vars));
                 }

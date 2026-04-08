@@ -158,7 +158,7 @@ impl SyntheticTypeRegistry {
             .collect();
 
         // 型パラメータスコープから、メンバー型で使用されている型パラメータを検出
-        let type_params = extract_used_type_params(member_types, &self.type_param_scope);
+        let type_params = extract_used_type_params(member_types);
 
         let item = Item::Enum {
             vis: Visibility::Public,
@@ -266,7 +266,7 @@ impl SyntheticTypeRegistry {
 
         // I-383 T2: 型パラメータスコープから、フィールド型で使用されている型パラメータを検出
         let member_types: Vec<RustType> = fields.iter().map(|f| f.ty.clone()).collect();
-        let type_params = extract_used_type_params(&member_types, &self.type_param_scope);
+        let type_params = extract_used_type_params(&member_types);
 
         let item = Item::Struct {
             vis: Visibility::Public,
@@ -319,7 +319,7 @@ impl SyntheticTypeRegistry {
                     .chain(v.fields.iter().map(|f| f.ty.clone()))
             })
             .collect();
-        let type_params = extract_used_type_params(&member_types, &self.type_param_scope);
+        let type_params = extract_used_type_params(&member_types);
 
         let item = Item::Enum {
             vis: Visibility::Public,
@@ -503,22 +503,84 @@ impl Default for SyntheticTypeRegistry {
 /// 現在の `type_param_scope` から、`member_types` で実際に使われている型パラメータ
 /// のみを `Vec<TypeParam>` として抽出する。
 ///
-/// I-383 T1: `register_union` / `register_struct_dedup` / `register_intersection_enum`
-/// の 3 箇所で同じロジックを共有するため抽出した共通ヘルパー。各 register 関数は
-/// 自身が扱う member 型集合 (union member / struct fields / enum variant data+fields)
-/// を構築して本関数に渡す。
+/// I-383 T1 で導入された共通ヘルパー。I-387 で walker-only 実装に置換済。
+///
+/// `member_types` を再帰的に走査し、出現する `RustType::TypeVar { name }` を
+/// `TypeParam` として返す。`TypeVar` は `convert_ts_type` / `convert_external_type`
+/// が `type_param_scope` に基づいて構築するため、本関数は scope を受け取らない。
 ///
 /// constraint は現状 `None` 固定。`<T extends number>` のような constraint 付き
-/// 型パラメータは scope 上に名前のみ保持され、constraint 復元は本関数のスコープ外。
-fn extract_used_type_params(member_types: &[RustType], scope: &[String]) -> Vec<TypeParam> {
-    scope
-        .iter()
-        .filter(|tp_name| member_types.iter().any(|ty| ty.uses_param(tp_name)))
-        .map(|tp_name| TypeParam {
-            name: tp_name.clone(),
+/// 型パラメータは、呼び出し側が別途復元する (本関数のスコープ外)。
+fn extract_used_type_params(member_types: &[RustType]) -> Vec<TypeParam> {
+    let mut names: Vec<String> = Vec::new();
+    for ty in member_types {
+        collect_type_vars_in(ty, &mut names);
+    }
+    names
+        .into_iter()
+        .map(|name| TypeParam {
+            name,
             constraint: None,
         })
         .collect()
+}
+
+/// TypeVar 走査 helper (I-387)。重複なしで出現順に `out` へ追加する。
+fn collect_type_vars_in(ty: &RustType, out: &mut Vec<String>) {
+    match ty {
+        RustType::TypeVar { name } => {
+            if !out.contains(name) {
+                out.push(name.clone());
+            }
+        }
+        RustType::Named { type_args, .. } => {
+            for arg in type_args {
+                collect_type_vars_in(arg, out);
+            }
+        }
+        RustType::StdCollection { args, .. } => {
+            for arg in args {
+                collect_type_vars_in(arg, out);
+            }
+        }
+        RustType::Option(inner) | RustType::Vec(inner) | RustType::Ref(inner) => {
+            collect_type_vars_in(inner, out);
+        }
+        RustType::Result { ok, err } => {
+            collect_type_vars_in(ok, out);
+            collect_type_vars_in(err, out);
+        }
+        RustType::Tuple(elems) => {
+            for elem in elems {
+                collect_type_vars_in(elem, out);
+            }
+        }
+        RustType::Fn {
+            params,
+            return_type,
+        } => {
+            for p in params {
+                collect_type_vars_in(p, out);
+            }
+            collect_type_vars_in(return_type, out);
+        }
+        RustType::QSelf {
+            qself, trait_ref, ..
+        } => {
+            collect_type_vars_in(qself, out);
+            for arg in &trait_ref.type_args {
+                collect_type_vars_in(arg, out);
+            }
+        }
+        RustType::Primitive(_)
+        | RustType::String
+        | RustType::F64
+        | RustType::Bool
+        | RustType::Unit
+        | RustType::Any
+        | RustType::Never
+        | RustType::DynTrait(_) => {}
+    }
 }
 
 /// Computes a canonical signature for a union type (sorted member types).

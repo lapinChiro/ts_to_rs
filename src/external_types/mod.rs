@@ -85,11 +85,11 @@ pub struct ExternalMethod {
 pub struct ExternalSignature {
     /// Signature-level type parameters (e.g., `then<TResult1, TResult2>(...)`).
     ///
-    /// I-383 T2.A-i: 抽出器 (`tools/extract-types`) が `sig.getDeclaration()
-    /// .typeParameters` から抽出した method-level generic を保持する。Rust ローダ側
-    /// では `convert_external_signature` がこれを `synthetic.push_type_param_scope`
-    /// に push してから param / return_type を walk することで、union/struct
-    /// 構築時に method-level generic が `Item::Enum.type_params` 等に正しく伝播する。
+    /// 抽出器 (`tools/extract-types`) が `sig.getDeclaration().typeParameters`
+    /// から抽出した method-level generic を保持する。Rust ローダ側では
+    /// `convert_external_signature` がこれを `synthetic.push_type_param_scope`
+    /// に push してから param / return_type を walk することで、`convert_external_type`
+    /// が scope 内の名前を `RustType::TypeVar` に routing できる (I-387)。
     #[serde(default)]
     pub type_params: Vec<ExternalTypeParam>,
     #[serde(default)]
@@ -240,12 +240,12 @@ fn convert_external_typedef(
             methods,
             constructors,
         } => {
-            // I-383 T2.A-i: interface 単位で型パラメータを scope に push してから
-            // fields / methods / constructors を walk する。これにより interface 内部の
-            // union 型が `Promise<TResult> | TResult` のような型パラメータ参照を含む場合、
-            // 生成される synthetic union enum の `Item::Enum.type_params` に該当パラメータ
-            // が伝播する (空 stub fallback の根絶)。constraint は scope push 前に解決する
-            // (constraint 内で同じ scope の他 param を参照する稀ケースにも備える)。
+            // I-387: interface 単位で型パラメータを `synthetic.type_param_scope` に
+            // push してから fields / methods / constructors を walk する。これにより
+            // `convert_external_type` が interface 内部の `Named { name }` を scope 照合
+            // して `RustType::TypeVar` に routing でき、生成される synthetic union/struct の
+            // `type_params` に該当パラメータが伝播する。constraint は scope push 前に
+            // 解決する (constraint 内で同じ scope の他 param を参照する稀ケースに備え)。
             let converted_type_params: Vec<crate::ir::TypeParam> = type_params
                 .iter()
                 .map(|tp| crate::ir::TypeParam {
@@ -357,13 +357,44 @@ fn convert_external_type(ty: &ExternalType, synthetic: &mut SyntheticTypeRegistr
         ExternalType::Any | ExternalType::Unknown => RustType::Any,
         ExternalType::Never => RustType::Never,
         ExternalType::Null | ExternalType::Undefined => RustType::Option(Box::new(RustType::Any)),
-        ExternalType::Named { name, type_args } => RustType::Named {
-            name: name.clone(),
-            type_args: type_args
+        // I-387: 型変数 scope にある名前は TypeVar に routing。
+        // 整数 primitive / std コレクション名も構造化 variant に振り分け。
+        ExternalType::Named { name, type_args } if type_args.is_empty() => {
+            if synthetic.is_in_type_param_scope(name) {
+                return RustType::TypeVar { name: name.clone() };
+            }
+            if let Some(kind) = crate::ts_type_info::resolve::primitive_int_kind_from_name(name) {
+                return RustType::Primitive(kind);
+            }
+            // String/Bool/F64 等の既存 variant 名は外部 JSON で珍しいが念のため
+            match name.as_str() {
+                "String" | "string" => return RustType::String,
+                "bool" | "boolean" => return RustType::Bool,
+                "f64" | "number" => return RustType::F64,
+                _ => {}
+            }
+            RustType::Named {
+                name: name.clone(),
+                type_args: vec![],
+            }
+        }
+        ExternalType::Named { name, type_args } => {
+            let resolved_args: Vec<RustType> = type_args
                 .iter()
                 .map(|t| convert_external_type(t, synthetic))
-                .collect(),
-        },
+                .collect();
+            // I-387: std コレクションは StdCollection variant
+            if let Some(kind) = crate::ts_type_info::resolve::std_collection_kind_from_name(name) {
+                return RustType::StdCollection {
+                    kind,
+                    args: resolved_args,
+                };
+            }
+            RustType::Named {
+                name: name.clone(),
+                type_args: resolved_args,
+            }
+        }
         ExternalType::Array { element } => {
             RustType::Vec(Box::new(convert_external_type(element, synthetic)))
         }
@@ -453,12 +484,12 @@ fn convert_external_params(
 
 /// Converts an [`ExternalSignature`] to a [`MethodSignature`].
 ///
-/// I-383 T2.A-i: signature-level type_params (`then<TResult1, TResult2>(...)`) を
+/// I-387: signature-level type_params (`then<TResult1, TResult2>(...)`) を
 /// `synthetic.push_type_param_scope` に append-merge してから param / return_type を
-/// walk する。これにより内部の union 型が型パラメータを参照する場合 (例:
-/// `TResult1 | PromiseLike<TResult1>`)、生成される synthetic enum の `Item::Enum
-/// .type_params` に当該パラメータが正しく伝播する。interface 単位の scope は
-/// `convert_external_typedef` で先に push されているため、ここでは append される。
+/// walk する。これにより `convert_external_type` が signature 内部の名前を scope 照合
+/// して `RustType::TypeVar` に routing でき、生成される synthetic enum の `type_params`
+/// に当該パラメータが正しく伝播する。interface 単位の scope は `convert_external_typedef`
+/// で先に push されているため、ここでは append される。
 fn convert_external_signature(
     sig: &ExternalSignature,
     synthetic: &mut SyntheticTypeRegistry,

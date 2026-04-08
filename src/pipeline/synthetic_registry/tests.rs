@@ -751,23 +751,22 @@ fn test_register_union_fn_same_return_type_deduped() {
 // ── register_union: type param scope detection ──
 
 #[test]
-fn test_register_union_detects_type_params_from_scope() {
+fn test_register_union_detects_type_vars_from_member_types() {
+    // I-387: extract_used_type_params は scope ではなく member 型の TypeVar variant
+    // を walk して型パラメータを収集する。
     let mut reg = SyntheticTypeRegistry::new();
-    reg.push_type_param_scope(vec!["T".to_string()]);
     let name = reg.register_union(&[
-        RustType::Named {
+        RustType::TypeVar {
             name: "T".to_string(),
-            type_args: vec![],
         },
-        RustType::Vec(Box::new(RustType::Named {
+        RustType::Vec(Box::new(RustType::TypeVar {
             name: "T".to_string(),
-            type_args: vec![],
         })),
     ]);
     let def = reg.get(&name).unwrap();
     match &def.item {
         Item::Enum { type_params, .. } => {
-            assert_eq!(type_params.len(), 1, "should detect T from scope");
+            assert_eq!(type_params.len(), 1, "should detect T from TypeVar walk");
             assert_eq!(type_params[0].name, "T");
         }
         _ => panic!("expected Item::Enum for type param scope test"),
@@ -829,15 +828,14 @@ fn test_is_in_type_param_scope_multiple() {
 
 // I-383 T1: register_struct_dedup / register_intersection_enum の type_param 伝播 RED テスト
 #[test]
-fn test_register_inline_struct_detects_type_params_from_scope() {
+fn test_register_inline_struct_detects_type_vars_from_field_types() {
+    // I-387: walker-only。field の TypeVar variant が type_params に伝播。
     let mut reg = SyntheticTypeRegistry::new();
-    reg.push_type_param_scope(vec!["T".to_string()]);
     let name = reg.register_inline_struct(&[
         (
             "x".to_string(),
-            RustType::Named {
+            RustType::TypeVar {
                 name: "T".to_string(),
-                type_args: vec![],
             },
         ),
         ("y".to_string(), RustType::F64),
@@ -848,7 +846,7 @@ fn test_register_inline_struct_detects_type_params_from_scope() {
             assert_eq!(
                 type_params.len(),
                 1,
-                "inline struct should detect T from scope"
+                "inline struct should detect T from TypeVar walk"
             );
             assert_eq!(type_params[0].name, "T");
         }
@@ -857,16 +855,15 @@ fn test_register_inline_struct_detects_type_params_from_scope() {
 }
 
 #[test]
-fn test_register_intersection_struct_detects_type_params_from_scope() {
+fn test_register_intersection_struct_detects_type_vars_from_field_types() {
+    // I-387: walker-only。
     let mut reg = SyntheticTypeRegistry::new();
-    reg.push_type_param_scope(vec!["U".to_string()]);
     let fields = vec![
         StructField {
             vis: Some(Visibility::Public),
             name: "a".to_string(),
-            ty: RustType::Named {
+            ty: RustType::TypeVar {
                 name: "U".to_string(),
-                type_args: vec![],
             },
         },
         StructField {
@@ -882,7 +879,7 @@ fn test_register_intersection_struct_detects_type_params_from_scope() {
             assert_eq!(
                 type_params.len(),
                 1,
-                "intersection struct should detect U from scope"
+                "intersection struct should detect U from TypeVar walk"
             );
             assert_eq!(type_params[0].name, "U");
         }
@@ -891,9 +888,9 @@ fn test_register_intersection_struct_detects_type_params_from_scope() {
 }
 
 #[test]
-fn test_register_intersection_enum_detects_type_params_from_scope() {
+fn test_register_intersection_enum_detects_type_vars_from_variant_fields() {
+    // I-387: walker-only。
     let mut reg = SyntheticTypeRegistry::new();
-    reg.push_type_param_scope(vec!["S".to_string()]);
     let variants = vec![
         EnumVariant {
             name: "Variant0".to_string(),
@@ -902,9 +899,8 @@ fn test_register_intersection_enum_detects_type_params_from_scope() {
             fields: vec![StructField {
                 vis: Some(Visibility::Public),
                 name: "x".to_string(),
-                ty: RustType::Named {
+                ty: RustType::TypeVar {
                     name: "S".to_string(),
-                    type_args: vec![],
                 },
             }],
         },
@@ -926,7 +922,7 @@ fn test_register_intersection_enum_detects_type_params_from_scope() {
             assert_eq!(
                 type_params.len(),
                 1,
-                "intersection enum should detect S from scope"
+                "intersection enum should detect S from TypeVar walk"
             );
             assert_eq!(type_params[0].name, "S");
         }

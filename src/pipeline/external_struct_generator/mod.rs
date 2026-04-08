@@ -13,25 +13,6 @@ use crate::pipeline::SyntheticTypeRegistry;
 use crate::registry::{TypeDef, TypeRegistry};
 use crate::ts_type_info::resolve::typedef::monomorphize_type_params;
 
-/// Rust の標準ライブラリ型・serde 型など、struct 生成が不要な型名のセット。
-///
-/// 型 (type name) レベルのフィルタ。
-///
-/// # 歴史と責務分離
-///
-/// I-375 で `Expr::FnCall` が `CallTarget` で構造化され、FnCall 経由で `Some` /
-/// `None` / `Ok` / `Err` が walker に登録されることはなくなった。I-377 → I-380 で
-/// `Pattern::TupleStruct` / `Struct` / `UnitStruct` の `path: Vec<String>` を
-/// 構造化 `PatternCtor` に置換し、`PatternCtor::Builtin(_)` は walker の
-/// `visit_user_type_ref` フックを発火しないようにしたことで、pattern 経由の
-/// builtin 流入も構造的に遮断された。`Some` / `None` / `Ok` / `Err` は型名ではなく
-/// `Option` / `Result` の **variant コンストラクタ** であるため、型名フィルタ
-/// である本定数からは除外する。
-pub(crate) const RUST_BUILTIN_TYPES: &[&str] = &[
-    "String", "Vec", "HashMap", "HashSet", "Option", "Box", "Result", "Rc", "Arc", "Mutex", "bool",
-    "f64", "i64", "i128", "u8", "u32", "usize",
-];
-
 /// `serde_json::Value` のフルパス。
 const SERDE_JSON_VALUE: &str = "serde_json::Value";
 
@@ -129,14 +110,16 @@ fn collect_undefined_refs_inner(items: &[&Item]) -> HashSet<String> {
         collect_type_refs_from_item(item, &mut referenced_types);
     }
 
-    let builtin_set: HashSet<&str> = RUST_BUILTIN_TYPES.iter().copied().collect();
-
+    // I-387: `RUST_BUILTIN_TYPES` 文字列フィルタは廃止。`Named` は user 定義型
+    // のみを表すよう構造化されたため、Rust 標準型 (String/Vec/Box/HashMap/usize/...)
+    // はそもそも `Named.name` には現れず、`TypeRefCollector` が `referenced_types` に
+    // 登録することがない。`Primitive` / `StdCollection` / `TypeVar` は visit_rust_type
+    // で type_args の再帰のみ行い、自身を ref として登録しない。
     referenced_types
         .into_iter()
         .filter(|name| !defined_types.contains(name))
         .filter(|name| !imported_types.contains(name))
         .filter(|name| !type_param_names.contains(name))
-        .filter(|name| !builtin_set.contains(name.as_str()))
         .filter(|name| name != SERDE_JSON_VALUE)
         // パス形式の型名（例: E::Bindings, serde_json::Value）は struct 名にならない
         .filter(|name| !name.contains("::"))

@@ -27,76 +27,40 @@ use crate::registry::{TypeDef, TypeRegistry};
 ///
 /// Pushing the extracted free variables into `synthetic.type_param_scope` for
 /// the duration of the init expression's resolution causes the synthetic types
-/// to declare them in their `Item::Enum.type_params` (rather than treating them
-/// as external builtin types), eliminating the leak.
+/// I-387: 型変数 (`RustType::TypeVar { name }`) を IR walk で収集する。
 ///
-/// # Structural rule (not heuristic)
+/// `TypeVar` variant は構造的に型変数を表すため、旧 `collect_free_type_vars`
+/// が必要としていた heuristic (registry 未登録 / scope 外 / builtin 名リスト
+/// 除外 / path 形式除外) は一切不要になった。本関数は単純な再帰 walker。
 ///
-/// A `Named { name }` is classified as free iff:
-/// - `registry.get(name).is_none()` (not a user-defined or external type), AND
-/// - `name` is not present in `known_scope` (not a class/method generic from an
-///   outer lexical scope already pushed), AND
-/// - `name` is not a Rust standard library builtin type
-///   (`String`/`Vec`/`HashMap`/`Box`/...) — `convert_ts_type` constructs these as
-///   `RustType::Named` with the Rust name (rather than dedicated enum variants),
-///   so they appear here despite never being type variables, AND
-/// - `name` is not a path-qualified type (contains `::`), e.g.,
-///   `serde_json::Value`. Path-qualified names are external module paths, never
-///   type variables.
-///
-/// This is a structural rule because every legitimate type name must originate
-/// from one of the excluded categories above. Anything else is by definition a
-/// leaked generic binding.
-pub(super) fn collect_free_type_vars(
-    ty: &RustType,
-    registry: &TypeRegistry,
-    known_scope: &[String],
-    out: &mut Vec<String>,
-) {
-    fn is_free(name: &str, registry: &TypeRegistry, known_scope: &[String]) -> bool {
-        registry.get(name).is_none()
-            && !known_scope.iter().any(|s| s == name)
-            && !crate::pipeline::external_struct_generator::RUST_BUILTIN_TYPES.contains(&name)
-            && !name.contains("::")
-    }
+/// 重複は出力に含めない。`out` は挿入順 (深さ優先順) を保持する。
+pub(super) fn collect_type_vars(ty: &RustType, out: &mut Vec<String>) {
     match ty {
-        // I-387: TypeVar は常に free type var。heuristic を介さず直接収集する。
-        RustType::TypeVar { name } if !out.contains(name) => {
-            out.push(name.clone());
-        }
-        RustType::TypeVar { .. } => {}
-        RustType::Named { name, type_args }
-            if is_free(name, registry, known_scope) && !out.contains(name) =>
-        {
-            out.push(name.clone());
-            for arg in type_args {
-                collect_free_type_vars(arg, registry, known_scope, out);
+        RustType::TypeVar { name } => {
+            if !out.contains(name) {
+                out.push(name.clone());
             }
         }
         RustType::Named { type_args, .. } => {
             for arg in type_args {
-                collect_free_type_vars(arg, registry, known_scope, out);
+                collect_type_vars(arg, out);
             }
         }
         RustType::StdCollection { args, .. } => {
             for arg in args {
-                collect_free_type_vars(arg, registry, known_scope, out);
+                collect_type_vars(arg, out);
             }
         }
-        RustType::DynTrait(name) if is_free(name, registry, known_scope) && !out.contains(name) => {
-            out.push(name.clone());
-        }
-        RustType::DynTrait(_) => {}
         RustType::Option(inner) | RustType::Vec(inner) | RustType::Ref(inner) => {
-            collect_free_type_vars(inner, registry, known_scope, out);
+            collect_type_vars(inner, out);
         }
         RustType::Result { ok, err } => {
-            collect_free_type_vars(ok, registry, known_scope, out);
-            collect_free_type_vars(err, registry, known_scope, out);
+            collect_type_vars(ok, out);
+            collect_type_vars(err, out);
         }
         RustType::Tuple(elems) => {
             for elem in elems {
-                collect_free_type_vars(elem, registry, known_scope, out);
+                collect_type_vars(elem, out);
             }
         }
         RustType::Fn {
@@ -104,19 +68,26 @@ pub(super) fn collect_free_type_vars(
             return_type,
         } => {
             for p in params {
-                collect_free_type_vars(p, registry, known_scope, out);
+                collect_type_vars(p, out);
             }
-            collect_free_type_vars(return_type, registry, known_scope, out);
+            collect_type_vars(return_type, out);
         }
         RustType::QSelf {
             qself, trait_ref, ..
         } => {
-            collect_free_type_vars(qself, registry, known_scope, out);
+            collect_type_vars(qself, out);
             for arg in &trait_ref.type_args {
-                collect_free_type_vars(arg, registry, known_scope, out);
+                collect_type_vars(arg, out);
             }
         }
-        _ => {}
+        RustType::Primitive(_)
+        | RustType::String
+        | RustType::F64
+        | RustType::Bool
+        | RustType::Unit
+        | RustType::Any
+        | RustType::Never
+        | RustType::DynTrait(_) => {}
     }
 }
 
@@ -220,30 +191,20 @@ pub(super) fn is_object_type(ty: &ResolvedType) -> bool {
 /// the caller via `synthetic.restore_type_param_scope` when leaving the scope
 /// (typically alongside the `type_param_constraints` restore).
 ///
-/// # Why both at once
+/// # Lexical scope semantics (I-387)
 ///
-/// I-383 T2.A-ii: TypeResolver passes (`visit_fn_decl`, `visit_class_body`,
-/// `visit_method_function`, `resolve_arrow_expr`, `resolve_fn_expr`) walk
-/// expressions/types that may register synthetic union/struct types via
-/// `register_union` / `register_inline_struct`. Without pushing the active
-/// type param names into `synthetic.type_param_scope`, those synthetic types
-/// are generated with empty `type_params: vec![]` and any inner reference to
-/// a class/method generic (e.g., `MergeSchemaPath<...> | S`) leaks as a
-/// dangling external ref. Furthermore, since `synthetic_registry` deduplicates
-/// by structural signature, the FIRST registration of a given union determines
-/// the final `Item::Enum.type_params` — so even if the Transformer side later
-/// re-registers with the correct scope, dedup hits the bad first entry.
-///
-/// Pushing scope here (before walking the method body) ensures TypeResolver's
-/// `register_union` invocations all see the correct scope.
+/// `convert_ts_type` references `synthetic.type_param_scope` to route TS type
+/// references to either `RustType::TypeVar { name }` (when in scope) or
+/// `RustType::Named` (user types). Pushing the scope here makes the names
+/// visible during method body / arrow expression resolution, so synthetic
+/// union/struct registrations see TypeVar variants and `extract_used_type_params`
+/// (TypeVar walker) correctly identifies them as type parameters.
 ///
 /// # Constraint resolution ordering
 ///
 /// Names are pushed to scope **before** constraint conversion so that
 /// constraints referencing sibling type params (e.g., `<K, V extends Record<K, string>>`)
-/// resolve `K` against the active scope rather than emitting it as a dangling
-/// external ref. Same-declaration self-reference is benign (`uses_param` check
-/// in `extract_used_type_params` handles it).
+/// resolve `K` against the active scope.
 pub(super) fn enter_type_param_scope(
     type_params: &ast::TsTypeParamDecl,
     synthetic: &mut SyntheticTypeRegistry,
