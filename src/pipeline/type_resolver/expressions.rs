@@ -768,13 +768,16 @@ impl<'a> TypeResolver<'a> {
 
         // Register type parameter constraints (e.g., `<E extends Env>` → {"E": Named("Env")}).
         // Merge with parent constraints so nested generics can access outer type params.
-        let prev_constraints = if let Some(type_params) = &arrow.type_params {
-            let inner_constraints =
-                collect_type_param_constraints(type_params, self.synthetic, self.registry);
+        // I-383 T2.A-ii: enter_type_param_scope also pushes the param names into
+        // `synthetic.type_param_scope` so that synthetic union/struct types registered
+        // while walking the arrow body inherit the correct scope.
+        let prev_state = if let Some(type_params) = &arrow.type_params {
+            let (inner_constraints, prev_scope) =
+                enter_type_param_scope(type_params, self.synthetic, self.registry);
             let mut merged = self.type_param_constraints.clone();
             merged.extend(inner_constraints);
-            let prev = std::mem::replace(&mut self.type_param_constraints, merged);
-            Some(prev)
+            let prev_constraints = std::mem::replace(&mut self.type_param_constraints, merged);
+            Some((prev_constraints, prev_scope))
         } else {
             None
         };
@@ -873,8 +876,9 @@ impl<'a> TypeResolver<'a> {
 
         let return_type = self.current_fn_return_type.take().unwrap_or(RustType::Unit);
         self.current_fn_return_type = prev_return_type;
-        if let Some(prev) = prev_constraints {
-            self.type_param_constraints = prev;
+        if let Some((prev_constraints, prev_scope)) = prev_state {
+            self.type_param_constraints = prev_constraints;
+            self.synthetic.restore_type_param_scope(prev_scope);
         }
         self.leave_scope();
 
@@ -890,13 +894,14 @@ impl<'a> TypeResolver<'a> {
 
         // Register type parameter constraints.
         // Merge with parent constraints so nested generics can access outer type params.
-        let prev_constraints = if let Some(type_params) = &fn_expr.function.type_params {
-            let inner_constraints =
-                collect_type_param_constraints(type_params, self.synthetic, self.registry);
+        // I-383 T2.A-ii: also pushes the param names into `synthetic.type_param_scope`.
+        let prev_state = if let Some(type_params) = &fn_expr.function.type_params {
+            let (inner_constraints, prev_scope) =
+                enter_type_param_scope(type_params, self.synthetic, self.registry);
             let mut merged = self.type_param_constraints.clone();
             merged.extend(inner_constraints);
-            let prev = std::mem::replace(&mut self.type_param_constraints, merged);
-            Some(prev)
+            let prev_constraints = std::mem::replace(&mut self.type_param_constraints, merged);
+            Some((prev_constraints, prev_scope))
         } else {
             None
         };
@@ -938,8 +943,9 @@ impl<'a> TypeResolver<'a> {
 
         let return_type = self.current_fn_return_type.take().unwrap_or(RustType::Unit);
         self.current_fn_return_type = prev_return_type;
-        if let Some(prev) = prev_constraints {
-            self.type_param_constraints = prev;
+        if let Some((prev_constraints, prev_scope)) = prev_state {
+            self.type_param_constraints = prev_constraints;
+            self.synthetic.restore_type_param_scope(prev_scope);
         }
         self.leave_scope();
 

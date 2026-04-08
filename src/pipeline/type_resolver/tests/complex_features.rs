@@ -776,3 +776,49 @@ fn test_hashmap_computed_assignment_propagates_expected() {
         "RHS of m[key] = {{...}} should have expected type Entry"
     );
 }
+
+// ── I-383 T2.A-ii: TypeResolver pushes type param scope into synthetic registry ──
+
+/// Class methods that return synthetic union types containing class-level
+/// generics must produce a synthetic enum carrying that generic in its
+/// `type_params`. Without scope push in `visit_class_body` /
+/// `visit_method_function`, the synthetic enum is generated with `type_params:
+/// vec![]` and the generic name (`S`) leaks as a dangling external type ref.
+#[test]
+fn test_class_method_generic_propagates_to_synthetic_union_via_type_resolver() {
+    let source = r#"
+        type Wrap<T> = { wrapped: T };
+        class Holder<S> {
+            transform(x: S | Wrap<S>): S {
+                return (x as Wrap<S>).wrapped ?? (x as S);
+            }
+        }
+    "#;
+    let (_, synthetic) = resolve_with_synthetic(source);
+
+    // Find the synthetic union enum for `S | Wrap<S>` (or `Wrap<S> | S`).
+    // After T2.A-ii it must declare `S` in its type_params.
+    let union_with_s = synthetic.all_items().into_iter().find(|item| {
+        matches!(
+            item,
+            crate::ir::Item::Enum { name, type_params, .. }
+                if name.contains("Wrap") && type_params.iter().any(|tp| tp.name == "S")
+        )
+    });
+    assert!(
+        union_with_s.is_some(),
+        "expected synthetic union enum for `S | Wrap<S>` to declare S in type_params \
+         (without TypeResolver scope push, S would leak as a dangling external ref). \
+         all_items: {:?}",
+        synthetic
+            .all_items()
+            .iter()
+            .filter_map(|i| match i {
+                crate::ir::Item::Enum {
+                    name, type_params, ..
+                } => Some((name.clone(), type_params.clone())),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    );
+}

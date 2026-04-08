@@ -105,15 +105,50 @@ pub(super) fn is_object_type(ty: &ResolvedType) -> bool {
     }
 }
 
-/// Extracts type parameter constraints from a `TsTypeParamDecl`.
+/// Enters a type parameter scope: pushes the declared parameter names into
+/// `synthetic.type_param_scope` AND extracts each `extends` constraint into a
+/// HashMap.
 ///
-/// For each type parameter with an `extends` constraint, converts the constraint
-/// type and adds it to the map. Unconstrained type parameters are skipped.
-pub(super) fn collect_type_param_constraints(
+/// Returns `(constraints, prev_scope)` where `prev_scope` must be restored by
+/// the caller via `synthetic.restore_type_param_scope` when leaving the scope
+/// (typically alongside the `type_param_constraints` restore).
+///
+/// # Why both at once
+///
+/// I-383 T2.A-ii: TypeResolver passes (`visit_fn_decl`, `visit_class_body`,
+/// `visit_method_function`, `resolve_arrow_expr`, `resolve_fn_expr`) walk
+/// expressions/types that may register synthetic union/struct types via
+/// `register_union` / `register_inline_struct`. Without pushing the active
+/// type param names into `synthetic.type_param_scope`, those synthetic types
+/// are generated with empty `type_params: vec![]` and any inner reference to
+/// a class/method generic (e.g., `MergeSchemaPath<...> | S`) leaks as a
+/// dangling external ref. Furthermore, since `synthetic_registry` deduplicates
+/// by structural signature, the FIRST registration of a given union determines
+/// the final `Item::Enum.type_params` — so even if the Transformer side later
+/// re-registers with the correct scope, dedup hits the bad first entry.
+///
+/// Pushing scope here (before walking the method body) ensures TypeResolver's
+/// `register_union` invocations all see the correct scope.
+///
+/// # Constraint resolution ordering
+///
+/// Names are pushed to scope **before** constraint conversion so that
+/// constraints referencing sibling type params (e.g., `<K, V extends Record<K, string>>`)
+/// resolve `K` against the active scope rather than emitting it as a dangling
+/// external ref. Same-declaration self-reference is benign (`uses_param` check
+/// in `extract_used_type_params` handles it).
+pub(super) fn enter_type_param_scope(
     type_params: &ast::TsTypeParamDecl,
     synthetic: &mut SyntheticTypeRegistry,
     registry: &TypeRegistry,
-) -> HashMap<String, RustType> {
+) -> (HashMap<String, RustType>, Vec<String>) {
+    let names: Vec<String> = type_params
+        .params
+        .iter()
+        .map(|p| p.name.sym.to_string())
+        .collect();
+    let prev_scope = synthetic.push_type_param_scope(names);
+
     let mut constraints = HashMap::new();
     for param in &type_params.params {
         if let Some(constraint) = &param.constraint {
@@ -122,7 +157,7 @@ pub(super) fn collect_type_param_constraints(
             }
         }
     }
-    constraints
+    (constraints, prev_scope)
 }
 
 /// Promise<T> → T に展開し、Unit（void）は None にする。
