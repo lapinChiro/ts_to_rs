@@ -44,7 +44,16 @@ T2.A-i / T2.A-ii / T2.A-iv の修正はすべて「scope push の補完」とい
 旧 Option Y 計画 (T2.A → T2.A2 → T1.B → T2.B) は、TypeVar refactoring の発見により
 再構成する。新計画は **調査 → 設計 → 理想実装 → I-382 本体** の 4 フェーズ。
 
-### Phase A: 調査 (Investigation Debt 解消) ← **現在地**
+### Phase A: 調査 (Investigation Debt 解消) ✅ **完了 (2026-04-08)**
+
+**成果**: 9 件全 INV を fact ベースで解消。詳細は
+[`phase-a-findings.md`](./phase-a-findings.md)。主要結論:
+
+- TypeVar 導入の primary 変更点は `type_converter/mod.rs::convert_ts_type` 1 箇所
+- `RustType::Named` 構築 251 件中、書換対象は ~30 件 (type_params.iter() 由来)
+- 独立 PRD 候補: **PRD-β** (`TypeDef::ExternalUnsupported` variant、17 件解消)、
+  **PRD-γ** (`__type` marker 是正、1 件)、**PRD-δ** (Pass 5c 再設計 = Phase D 本体)
+- Phase C 並行可能な独立タスクは PRD-β/γ のみ
 
 **目的**: 理想実装の影響範囲を絞り込めるレベルまで不確定要素を潰す。
 `todo-prioritization.md` Step 0 の調査債務解消に相当。

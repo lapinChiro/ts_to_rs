@@ -9,7 +9,7 @@
 
 ---
 
-## 現在のフェーズ: I-382 解消プロジェクト Phase A (調査)
+## 現在のフェーズ: I-382 解消プロジェクト Phase B (PRD 起票)
 
 **目的**: `generate_stub_structs` を構造的に不要にする理想実装 (`RustType::TypeVar` 変種導入) を
 設計するための**不確定性解消 (Investigation Debt)** フェーズ。
@@ -35,8 +35,13 @@ Phase D             I-382 本体 (generate_stub_structs 削除)
 
 ### 直近アクション
 
-Phase A の調査債務 9 件を並列実施 (`Explore` / `Plan` subagent 推奨)。
-完了条件は「Phase B の PRD spec が assumption なしで書ける状態」。
+Phase A (調査債務 9 件) は **2026-04-08 完了**。結果は
+[`report/i382/phase-a-findings.md`](report/i382/phase-a-findings.md)。
+
+次アクションは Phase B:
+1. PRD-TypeVar 起票 (primary 変更点: `type_converter/mod.rs::convert_ts_type`)
+2. 並行で PRD-β (`TypeDef::ExternalUnsupported`) / PRD-γ (`__type` 是正) 起票
+3. Design Integrity / Semantic Safety / 凝集度レビューを経て確定
 
 ---
 
