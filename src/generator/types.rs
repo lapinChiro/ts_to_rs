@@ -242,20 +242,23 @@ mod tests {
 
     #[test]
     fn test_generate_type_named_with_single_type_arg() {
+        // I-387: `Named` は user-defined generic type を表す。std 型 `Box<T>` は
+        // `StdCollection` で表現されるため、ここではユーザー定義 `Container<T>` を使う。
         let ty = RustType::Named {
-            name: "Box".to_string(),
+            name: "Container".to_string(),
             type_args: vec![RustType::String],
         };
-        assert_eq!(generate_type(&ty), "Box<String>");
+        assert_eq!(generate_type(&ty), "Container<String>");
     }
 
     #[test]
     fn test_generate_type_named_with_multiple_type_args() {
+        // I-387: 同上。`HashMap<K,V>` は `StdCollection` 側のテストが担当。
         let ty = RustType::Named {
-            name: "HashMap".to_string(),
+            name: "Pair".to_string(),
             type_args: vec![RustType::String, RustType::F64],
         };
-        assert_eq!(generate_type(&ty), "HashMap<String, f64>");
+        assert_eq!(generate_type(&ty), "Pair<String, f64>");
     }
 
     #[test]

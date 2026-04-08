@@ -358,9 +358,8 @@ pub(super) fn try_simplify_identity_mapped(
 
 /// I-387: Rust 整数型名 → `PrimitiveIntKind`。
 ///
-/// 後続タスク (T5-T7 + T12 併合) で `resolve_type_ref` および構築サイトから
-/// 呼び出され、`RustType::Named { name: "usize" }` 等のリテラル Named 誤用を
-/// `RustType::Primitive` に置換する。
+/// `resolve_type_ref` から呼び出され、TS の `usize` / `i32` 等のリテラル名を
+/// 構造化 `RustType::Primitive` variant に解決する。
 pub(crate) fn primitive_int_kind_from_name(name: &str) -> Option<PrimitiveIntKind> {
     use PrimitiveIntKind::*;
     Some(match name {

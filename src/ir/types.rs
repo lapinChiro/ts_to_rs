@@ -167,7 +167,7 @@ pub enum RustType {
     Ref(Box<RustType>),
     /// A trait object type: `dyn T` (e.g., `dyn Greeter`)
     ///
-    /// Used with `Ref` for `&dyn Trait` parameters and with `Named { name: "Box" }` for `Box<dyn Trait>`.
+    /// Used with `Ref` for `&dyn Trait` parameters and with `StdCollection { kind: Box, .. }` for `Box<dyn Trait>` (I-387).
     DynTrait(String),
     /// 限定パス型: `<Self as Trait<Args>>::Item`（associated type 参照）
     ///

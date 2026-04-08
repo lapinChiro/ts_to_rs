@@ -238,10 +238,11 @@ pub fn generate_external_struct(
                 .map(|field| {
                     let ty = field.ty.substitute(&mono_subs);
                     // 自己参照フィールドを Box でラップ（再帰型の infinite size 防止）
+                    // I-387: `Box` は `StdCollection` variant で構造化
                     let ty = if references_type_name(&ty, name) {
-                        RustType::Named {
-                            name: "Box".to_string(),
-                            type_args: vec![ty],
+                        RustType::StdCollection {
+                            kind: crate::ir::StdCollectionKind::Box,
+                            args: vec![ty],
                         }
                     } else {
                         ty

@@ -18,10 +18,8 @@ pub(crate) fn convert_index_to_usize(index: Expr) -> Expr {
         Expr::NumberLit(n) if n.fract() == 0.0 => Expr::IntLit(*n as i128),
         _ => Expr::Cast {
             expr: Box::new(index),
-            target: RustType::Named {
-                name: "usize".to_string(),
-                type_args: vec![],
-            },
+            // I-387: `usize` は `Primitive` variant で構造化
+            target: RustType::Primitive(crate::ir::PrimitiveIntKind::Usize),
         },
     }
 }
@@ -500,12 +498,10 @@ mod tests {
         match result {
             Expr::Cast { expr, target } => {
                 assert_eq!(*expr, Expr::Ident("i".to_string()));
+                // I-387: `usize` は `Primitive` variant で構造化
                 assert_eq!(
                     target,
-                    RustType::Named {
-                        name: "usize".to_string(),
-                        type_args: vec![]
-                    }
+                    RustType::Primitive(crate::ir::PrimitiveIntKind::Usize)
                 );
             }
             other => panic!("expected Cast, got: {other:?}"),
