@@ -53,6 +53,7 @@ export interface ExternalMethod {
 }
 
 export interface ExternalSignature {
+  type_params?: ExternalTypeParam[];
   params: ExternalParam[];
   return_type?: ExternalType;
 }

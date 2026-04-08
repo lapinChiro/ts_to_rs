@@ -800,3 +800,53 @@ fn test_builtin_response_has_constructor() {
         _ => panic!("expected Struct"),
     }
 }
+
+// ── I-383 T2.A-i: signature-level type_params scope push ─────────────
+
+/// `Promise.then` is declared as `then<TResult1, TResult2>(...)` in lib.es5.d.ts.
+/// After T2.A-i, the loader must:
+/// 1. Extract `TResult1` / `TResult2` into `MethodSignature.type_params`
+/// 2. Push them to `synthetic.type_param_scope` while walking the signature so
+///    that the synthetic union enum generated for the `TResult1 | PromiseLike<TResult1>`
+///    return-type member captures `TResult1` in its `Item::Enum.type_params`
+///    (preventing dangling external type stub fallback).
+#[test]
+fn test_promise_then_signature_type_params_propagated_to_synthetic_union() {
+    let (registry, synthetic) = load_builtin_types().expect("builtin types load");
+
+    // 1. MethodSignature.type_params has TResult1 / TResult2
+    let promise = registry.get("Promise").expect("Promise registered");
+    let TypeDef::Struct { methods, .. } = promise else {
+        panic!("Promise should be a struct typedef");
+    };
+    let then_sigs = methods.get("then").expect("Promise has then method");
+    let then_sig = then_sigs
+        .iter()
+        .find(|s| s.type_params.len() == 2)
+        .expect("at least one then signature has 2 type params");
+    let tp_names: Vec<&str> = then_sig
+        .type_params
+        .iter()
+        .map(|tp| tp.name.as_str())
+        .collect();
+    assert!(
+        tp_names.contains(&"TResult1") && tp_names.contains(&"TResult2"),
+        "then sig.type_params should contain TResult1, TResult2; got {tp_names:?}"
+    );
+
+    // 2. The synthetic union for `TResult1 | PromiseLike<TResult1>` must declare
+    //    TResult1 in its type_params (no dangling external ref).
+    let union_with_tresult1 = synthetic.all_items().into_iter().find(|item| {
+        matches!(
+            item,
+            crate::ir::Item::Enum { name, type_params, .. }
+                if name.contains("TResult1") && type_params.iter().any(|tp| tp.name == "TResult1")
+        )
+    });
+    assert!(
+        union_with_tresult1.is_some(),
+        "expected a synthetic union enum referencing TResult1 to declare TResult1 \
+         in its type_params; without scope push it would be empty and TResult1 \
+         would leak as a dangling external ref"
+    );
+}

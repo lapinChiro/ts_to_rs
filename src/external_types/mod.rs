@@ -83,6 +83,15 @@ pub struct ExternalMethod {
 /// A function/method/constructor signature.
 #[derive(Debug, Deserialize)]
 pub struct ExternalSignature {
+    /// Signature-level type parameters (e.g., `then<TResult1, TResult2>(...)`).
+    ///
+    /// I-383 T2.A-i: 抽出器 (`tools/extract-types`) が `sig.getDeclaration()
+    /// .typeParameters` から抽出した method-level generic を保持する。Rust ローダ側
+    /// では `convert_external_signature` がこれを `synthetic.push_type_param_scope`
+    /// に push してから param / return_type を walk することで、union/struct
+    /// 構築時に method-level generic が `Item::Enum.type_params` 等に正しく伝播する。
+    #[serde(default)]
+    pub type_params: Vec<ExternalTypeParam>,
     #[serde(default)]
     pub params: Vec<ExternalParam>,
     #[serde(default)]
@@ -231,6 +240,12 @@ fn convert_external_typedef(
             methods,
             constructors,
         } => {
+            // I-383 T2.A-i: interface 単位で型パラメータを scope に push してから
+            // fields / methods / constructors を walk する。これにより interface 内部の
+            // union 型が `Promise<TResult> | TResult` のような型パラメータ参照を含む場合、
+            // 生成される synthetic union enum の `Item::Enum.type_params` に該当パラメータ
+            // が伝播する (空 stub fallback の根絶)。constraint は scope push 前に解決する
+            // (constraint 内で同じ scope の他 param を参照する稀ケースにも備える)。
             let converted_type_params: Vec<crate::ir::TypeParam> = type_params
                 .iter()
                 .map(|tp| crate::ir::TypeParam {
@@ -241,6 +256,12 @@ fn convert_external_typedef(
                         .map(|c| convert_external_type(c, synthetic)),
                 })
                 .collect();
+
+            let interface_tp_names: Vec<String> = converted_type_params
+                .iter()
+                .map(|tp| tp.name.clone())
+                .collect();
+            let prev_interface_scope = synthetic.push_type_param_scope(interface_tp_names);
 
             let converted_fields: Vec<FieldDef> = fields
                 .iter()
@@ -286,6 +307,8 @@ fn convert_external_typedef(
                     Some(sigs)
                 }
             };
+
+            synthetic.restore_type_param_scope(prev_interface_scope);
 
             Some(TypeDef::Struct {
                 type_params: converted_type_params,
@@ -429,24 +452,49 @@ fn convert_external_params(
 }
 
 /// Converts an [`ExternalSignature`] to a [`MethodSignature`].
+///
+/// I-383 T2.A-i: signature-level type_params (`then<TResult1, TResult2>(...)`) を
+/// `synthetic.push_type_param_scope` に append-merge してから param / return_type を
+/// walk する。これにより内部の union 型が型パラメータを参照する場合 (例:
+/// `TResult1 | PromiseLike<TResult1>`)、生成される synthetic enum の `Item::Enum
+/// .type_params` に当該パラメータが正しく伝播する。interface 単位の scope は
+/// `convert_external_typedef` で先に push されているため、ここでは append される。
 fn convert_external_signature(
     sig: &ExternalSignature,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> MethodSignature {
+    let converted_type_params: Vec<crate::ir::TypeParam> = sig
+        .type_params
+        .iter()
+        .map(|tp| crate::ir::TypeParam {
+            name: tp.name.clone(),
+            constraint: tp
+                .constraint
+                .as_ref()
+                .map(|c| convert_external_type(c, synthetic)),
+        })
+        .collect();
+
+    let sig_tp_names: Vec<String> = converted_type_params
+        .iter()
+        .map(|tp| tp.name.clone())
+        .collect();
+    let prev_scope = synthetic.push_type_param_scope(sig_tp_names);
+
     let params = convert_external_params(&sig.params, synthetic);
     let return_type = sig
         .return_type
         .as_ref()
         .map(|rt| convert_external_type(rt, synthetic));
     let has_rest = sig.params.iter().any(|p| p.rest);
+
+    synthetic.restore_type_param_scope(prev_scope);
+
     MethodSignature {
         params,
         return_type,
         has_rest,
-        // I-383 T8': 外部型 (web API, browser builtin) の signature は generic を持たない
-        // ものが大半で、現状は空 vec で運用。将来必要なら external type metadata から
-        // 抽出するロジックを追加する。
-        type_params: vec![],
+        type_params: converted_type_params,
     }
 }
 

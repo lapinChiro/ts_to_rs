@@ -272,7 +272,20 @@ function extractSignature(
   });
 
   const returnType = sig.getReturnType();
+
+  // Extract signature-level type parameters from the AST declaration.
+  // Used for method-level generics like `then<TResult1, TResult2>(...)` so that
+  // the Rust loader can push them into the synthetic registry's type_param scope
+  // when walking parameter / return types (I-383 T2.A-i).
+  const sigDecl = sig.getDeclaration() as
+    | (ts.SignatureDeclaration & {
+        typeParameters?: ts.NodeArray<ts.TypeParameterDeclaration>;
+      })
+    | undefined;
+  const typeParams = extractTypeParams(sigDecl?.typeParameters, checker);
+
   return {
+    ...(typeParams.length > 0 ? { type_params: typeParams } : {}),
     params,
     return_type: convertType(returnType, checker),
   };
@@ -351,9 +364,16 @@ function convertType(
   }
 
   // Intersection type
+  //
+  // I-383 T2.A-i: 旧実装は `{ kind: "named", name: typeStr }` で raw 文字列を返していたが、
+  // これは Rust loader 側で `ArrayBuffer & { BYTES_PER_ELEMENT?: never; }` のような
+  // 不正な named 型として外部参照に leak する silent semantic defect。intersection を
+  // ExternalType に構造化するのは ExternalType schema 拡張 + Rust loader での struct
+  // merge 実装が必要で T2.A-i のスコープ外なので、ここでは安全な `any` fallback に
+  // 退避する (型推論の constraint 弱化に留まり、後段の構造を破壊しない)。
+  // 構造化対応は別 PRD で行う (TODO 起票候補)。
   if (type.isIntersection()) {
-    // For intersections, just return the string representation as a named type
-    return { kind: "named", name: typeStr };
+    return { kind: "any" };
   }
 
   // Tuple type

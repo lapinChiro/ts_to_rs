@@ -1190,6 +1190,11 @@
               }
             },
             {
+              "type_params": [
+                {
+                  "name": "U"
+                }
+              ],
               "params": [
                 {
                   "name": "callbackfn",
@@ -1321,6 +1326,11 @@
               }
             },
             {
+              "type_params": [
+                {
+                  "name": "U"
+                }
+              ],
               "params": [
                 {
                   "name": "callbackfn",
@@ -1750,6 +1760,24 @@
           }
         },
         {
+          "type_params": [
+            {
+              "name": "TArrayBuffer",
+              "constraint": {
+                "kind": "union",
+                "members": [
+                  {
+                    "kind": "named",
+                    "name": "ArrayBuffer"
+                  },
+                  {
+                    "kind": "named",
+                    "name": "SharedArrayBuffer"
+                  }
+                ]
+              }
+            }
+          ],
           "params": [
             {
               "name": "buffer",
@@ -2816,6 +2844,11 @@
               }
             },
             {
+              "type_params": [
+                {
+                  "name": "U"
+                }
+              ],
               "params": [
                 {
                   "name": "callbackfn",
@@ -2947,6 +2980,11 @@
               }
             },
             {
+              "type_params": [
+                {
+                  "name": "U"
+                }
+              ],
               "params": [
                 {
                   "name": "callbackfn",
@@ -3376,6 +3414,24 @@
           }
         },
         {
+          "type_params": [
+            {
+              "name": "TArrayBuffer",
+              "constraint": {
+                "kind": "union",
+                "members": [
+                  {
+                    "kind": "named",
+                    "name": "ArrayBuffer"
+                  },
+                  {
+                    "kind": "named",
+                    "name": "SharedArrayBuffer"
+                  }
+                ]
+              }
+            }
+          ],
           "params": [
             {
               "name": "buffer",
@@ -4078,6 +4134,11 @@
               }
             },
             {
+              "type_params": [
+                {
+                  "name": "U"
+                }
+              ],
               "params": [
                 {
                   "name": "callbackfn",
@@ -4209,6 +4270,11 @@
               }
             },
             {
+              "type_params": [
+                {
+                  "name": "U"
+                }
+              ],
               "params": [
                 {
                   "name": "callbackfn",
@@ -4638,6 +4704,24 @@
           }
         },
         {
+          "type_params": [
+            {
+              "name": "TArrayBuffer",
+              "constraint": {
+                "kind": "union",
+                "members": [
+                  {
+                    "kind": "named",
+                    "name": "ArrayBuffer"
+                  },
+                  {
+                    "kind": "named",
+                    "name": "SharedArrayBuffer"
+                  }
+                ]
+              }
+            }
+          ],
           "params": [
             {
               "name": "buffer",
@@ -5340,6 +5424,11 @@
               }
             },
             {
+              "type_params": [
+                {
+                  "name": "U"
+                }
+              ],
               "params": [
                 {
                   "name": "callbackfn",
@@ -5471,6 +5560,11 @@
               }
             },
             {
+              "type_params": [
+                {
+                  "name": "U"
+                }
+              ],
               "params": [
                 {
                   "name": "callbackfn",
@@ -5900,6 +5994,24 @@
           }
         },
         {
+          "type_params": [
+            {
+              "name": "TArrayBuffer",
+              "constraint": {
+                "kind": "union",
+                "members": [
+                  {
+                    "kind": "named",
+                    "name": "ArrayBuffer"
+                  },
+                  {
+                    "kind": "named",
+                    "name": "SharedArrayBuffer"
+                  }
+                ]
+              }
+            }
+          ],
           "params": [
             {
               "name": "buffer",
@@ -6602,6 +6714,11 @@
               }
             },
             {
+              "type_params": [
+                {
+                  "name": "U"
+                }
+              ],
               "params": [
                 {
                   "name": "callbackfn",
@@ -6733,6 +6850,11 @@
               }
             },
             {
+              "type_params": [
+                {
+                  "name": "U"
+                }
+              ],
               "params": [
                 {
                   "name": "callbackfn",
@@ -7162,6 +7284,24 @@
           }
         },
         {
+          "type_params": [
+            {
+              "name": "TArrayBuffer",
+              "constraint": {
+                "kind": "union",
+                "members": [
+                  {
+                    "kind": "named",
+                    "name": "ArrayBuffer"
+                  },
+                  {
+                    "kind": "named",
+                    "name": "SharedArrayBuffer"
+                  }
+                ]
+              }
+            }
+          ],
           "params": [
             {
               "name": "buffer",
@@ -7864,6 +8004,11 @@
               }
             },
             {
+              "type_params": [
+                {
+                  "name": "U"
+                }
+              ],
               "params": [
                 {
                   "name": "callbackfn",
@@ -7995,6 +8140,11 @@
               }
             },
             {
+              "type_params": [
+                {
+                  "name": "U"
+                }
+              ],
               "params": [
                 {
                   "name": "callbackfn",
@@ -8424,6 +8574,24 @@
           }
         },
         {
+          "type_params": [
+            {
+              "name": "TArrayBuffer",
+              "constraint": {
+                "kind": "union",
+                "members": [
+                  {
+                    "kind": "named",
+                    "name": "ArrayBuffer"
+                  },
+                  {
+                    "kind": "named",
+                    "name": "SharedArrayBuffer"
+                  }
+                ]
+              }
+            }
+          ],
           "params": [
             {
               "name": "buffer",
@@ -9126,6 +9294,11 @@
               }
             },
             {
+              "type_params": [
+                {
+                  "name": "U"
+                }
+              ],
               "params": [
                 {
                   "name": "callbackfn",
@@ -9257,6 +9430,11 @@
               }
             },
             {
+              "type_params": [
+                {
+                  "name": "U"
+                }
+              ],
               "params": [
                 {
                   "name": "callbackfn",
@@ -9686,6 +9864,24 @@
           }
         },
         {
+          "type_params": [
+            {
+              "name": "TArrayBuffer",
+              "constraint": {
+                "kind": "union",
+                "members": [
+                  {
+                    "kind": "named",
+                    "name": "ArrayBuffer"
+                  },
+                  {
+                    "kind": "named",
+                    "name": "SharedArrayBuffer"
+                  }
+                ]
+              }
+            }
+          ],
           "params": [
             {
               "name": "buffer",
@@ -10388,6 +10584,11 @@
               }
             },
             {
+              "type_params": [
+                {
+                  "name": "U"
+                }
+              ],
               "params": [
                 {
                   "name": "callbackfn",
@@ -10519,6 +10720,11 @@
               }
             },
             {
+              "type_params": [
+                {
+                  "name": "U"
+                }
+              ],
               "params": [
                 {
                   "name": "callbackfn",
@@ -10948,6 +11154,24 @@
           }
         },
         {
+          "type_params": [
+            {
+              "name": "TArrayBuffer",
+              "constraint": {
+                "kind": "union",
+                "members": [
+                  {
+                    "kind": "named",
+                    "name": "ArrayBuffer"
+                  },
+                  {
+                    "kind": "named",
+                    "name": "SharedArrayBuffer"
+                  }
+                ]
+              }
+            }
+          ],
           "params": [
             {
               "name": "buffer",
@@ -11650,6 +11874,11 @@
               }
             },
             {
+              "type_params": [
+                {
+                  "name": "U"
+                }
+              ],
               "params": [
                 {
                   "name": "callbackfn",
@@ -11781,6 +12010,11 @@
               }
             },
             {
+              "type_params": [
+                {
+                  "name": "U"
+                }
+              ],
               "params": [
                 {
                   "name": "callbackfn",
@@ -12210,6 +12444,24 @@
           }
         },
         {
+          "type_params": [
+            {
+              "name": "TArrayBuffer",
+              "constraint": {
+                "kind": "union",
+                "members": [
+                  {
+                    "kind": "named",
+                    "name": "ArrayBuffer"
+                  },
+                  {
+                    "kind": "named",
+                    "name": "SharedArrayBuffer"
+                  }
+                ]
+              }
+            }
+          ],
           "params": [
             {
               "name": "buffer",
@@ -12957,6 +13209,14 @@
       },
       "constructors": [
         {
+          "type_params": [
+            {
+              "name": "TArrayBuffer",
+              "constraint": {
+                "kind": "any"
+              }
+            }
+          ],
           "params": [
             {
               "name": "buffer",
@@ -13003,6 +13263,14 @@
         "then": {
           "signatures": [
             {
+              "type_params": [
+                {
+                  "name": "TResult1"
+                },
+                {
+                  "name": "TResult2"
+                }
+              ],
               "params": [
                 {
                   "name": "onfulfilled",
@@ -13091,6 +13359,11 @@
         "catch": {
           "signatures": [
             {
+              "type_params": [
+                {
+                  "name": "TResult"
+                }
+              ],
               "params": [
                 {
                   "name": "onrejected",
@@ -13176,6 +13449,11 @@
       },
       "constructors": [
         {
+          "type_params": [
+            {
+              "name": "T"
+            }
+          ],
           "params": [
             {
               "name": "executor",
@@ -13252,6 +13530,14 @@
         "then": {
           "signatures": [
             {
+              "type_params": [
+                {
+                  "name": "TResult1"
+                },
+                {
+                  "name": "TResult2"
+                }
+              ],
               "params": [
                 {
                   "name": "onfulfilled",
@@ -13453,6 +13739,15 @@
       },
       "constructors": [
         {
+          "type_params": [
+            {
+              "name": "T",
+              "constraint": {
+                "kind": "named",
+                "name": "object"
+              }
+            }
+          ],
           "params": [
             {
               "name": "values",
@@ -13477,6 +13772,15 @@
           }
         },
         {
+          "type_params": [
+            {
+              "name": "T",
+              "constraint": {
+                "kind": "named",
+                "name": "object"
+              }
+            }
+          ],
           "params": [
             {
               "name": "iterable",
@@ -13621,6 +13925,18 @@
       },
       "constructors": [
         {
+          "type_params": [
+            {
+              "name": "K",
+              "constraint": {
+                "kind": "named",
+                "name": "object"
+              }
+            },
+            {
+              "name": "V"
+            }
+          ],
           "params": [
             {
               "name": "entries",
@@ -13658,6 +13974,18 @@
           }
         },
         {
+          "type_params": [
+            {
+              "name": "K",
+              "constraint": {
+                "kind": "named",
+                "name": "object"
+              }
+            },
+            {
+              "name": "V"
+            }
+          ],
           "params": [
             {
               "name": "iterable",
@@ -13902,6 +14230,11 @@
       },
       "constructors": [
         {
+          "type_params": [
+            {
+              "name": "T"
+            }
+          ],
           "params": [
             {
               "name": "values",
@@ -13926,6 +14259,11 @@
           }
         },
         {
+          "type_params": [
+            {
+              "name": "T"
+            }
+          ],
           "params": [
             {
               "name": "iterable",
@@ -14350,6 +14688,14 @@
           }
         },
         {
+          "type_params": [
+            {
+              "name": "K"
+            },
+            {
+              "name": "V"
+            }
+          ],
           "params": [
             {
               "name": "entries",
@@ -14402,6 +14748,14 @@
           }
         },
         {
+          "type_params": [
+            {
+              "name": "K"
+            },
+            {
+              "name": "V"
+            }
+          ],
           "params": [
             {
               "name": "iterable",
@@ -16079,8 +16433,7 @@
                 {
                   "name": "options",
                   "type": {
-                    "kind": "named",
-                    "name": "NumberFormatOptions & DateTimeFormatOptions"
+                    "kind": "any"
                   }
                 }
               ],
@@ -16409,6 +16762,15 @@
         "every": {
           "signatures": [
             {
+              "type_params": [
+                {
+                  "name": "S",
+                  "constraint": {
+                    "kind": "named",
+                    "name": "T"
+                  }
+                }
+              ],
               "params": [
                 {
                   "name": "predicate",
@@ -16565,6 +16927,11 @@
         "map": {
           "signatures": [
             {
+              "type_params": [
+                {
+                  "name": "U"
+                }
+              ],
               "params": [
                 {
                   "name": "callbackfn",
@@ -16610,6 +16977,15 @@
         "filter": {
           "signatures": [
             {
+              "type_params": [
+                {
+                  "name": "S",
+                  "constraint": {
+                    "kind": "named",
+                    "name": "T"
+                  }
+                }
+              ],
               "params": [
                 {
                   "name": "predicate",
@@ -16765,6 +17141,11 @@
               }
             },
             {
+              "type_params": [
+                {
+                  "name": "U"
+                }
+              ],
               "params": [
                 {
                   "name": "callbackfn",
@@ -16884,6 +17265,11 @@
               }
             },
             {
+              "type_params": [
+                {
+                  "name": "U"
+                }
+              ],
               "params": [
                 {
                   "name": "callbackfn",
@@ -16931,6 +17317,15 @@
         "find": {
           "signatures": [
             {
+              "type_params": [
+                {
+                  "name": "S",
+                  "constraint": {
+                    "kind": "named",
+                    "name": "T"
+                  }
+                }
+              ],
               "params": [
                 {
                   "name": "predicate",
@@ -17189,6 +17584,14 @@
         "flatMap": {
           "signatures": [
             {
+              "type_params": [
+                {
+                  "name": "U"
+                },
+                {
+                  "name": "This"
+                }
+              ],
               "params": [
                 {
                   "name": "callback",
@@ -17247,6 +17650,17 @@
         "flat": {
           "signatures": [
             {
+              "type_params": [
+                {
+                  "name": "A"
+                },
+                {
+                  "name": "D",
+                  "constraint": {
+                    "kind": "number"
+                  }
+                }
+              ],
               "params": [
                 {
                   "name": "depth",
@@ -18740,8 +19154,7 @@
                 {
                   "name": "options",
                   "type": {
-                    "kind": "named",
-                    "name": "NumberFormatOptions & DateTimeFormatOptions"
+                    "kind": "any"
                   }
                 }
               ],
@@ -19090,6 +19503,15 @@
         "every": {
           "signatures": [
             {
+              "type_params": [
+                {
+                  "name": "S",
+                  "constraint": {
+                    "kind": "named",
+                    "name": "T"
+                  }
+                }
+              ],
               "params": [
                 {
                   "name": "predicate",
@@ -19254,6 +19676,11 @@
         "map": {
           "signatures": [
             {
+              "type_params": [
+                {
+                  "name": "U"
+                }
+              ],
               "params": [
                 {
                   "name": "callbackfn",
@@ -19301,6 +19728,15 @@
         "filter": {
           "signatures": [
             {
+              "type_params": [
+                {
+                  "name": "S",
+                  "constraint": {
+                    "kind": "named",
+                    "name": "T"
+                  }
+                }
+              ],
               "params": [
                 {
                   "name": "predicate",
@@ -19472,6 +19908,11 @@
               }
             },
             {
+              "type_params": [
+                {
+                  "name": "U"
+                }
+              ],
               "params": [
                 {
                   "name": "callbackfn",
@@ -19604,6 +20045,11 @@
               }
             },
             {
+              "type_params": [
+                {
+                  "name": "U"
+                }
+              ],
               "params": [
                 {
                   "name": "callbackfn",
@@ -19653,6 +20099,15 @@
         "find": {
           "signatures": [
             {
+              "type_params": [
+                {
+                  "name": "S",
+                  "constraint": {
+                    "kind": "named",
+                    "name": "T"
+                  }
+                }
+              ],
               "params": [
                 {
                   "name": "predicate",
@@ -19926,6 +20381,14 @@
         "flatMap": {
           "signatures": [
             {
+              "type_params": [
+                {
+                  "name": "U"
+                },
+                {
+                  "name": "This"
+                }
+              ],
               "params": [
                 {
                   "name": "callback",
@@ -19986,6 +20449,17 @@
         "flat": {
           "signatures": [
             {
+              "type_params": [
+                {
+                  "name": "A"
+                },
+                {
+                  "name": "D",
+                  "constraint": {
+                    "kind": "number"
+                  }
+                }
+              ],
               "params": [
                 {
                   "name": "depth",
@@ -20024,6 +20498,11 @@
           }
         },
         {
+          "type_params": [
+            {
+              "name": "T"
+            }
+          ],
           "params": [
             {
               "name": "arrayLength",
@@ -20041,6 +20520,11 @@
           }
         },
         {
+          "type_params": [
+            {
+              "name": "T"
+            }
+          ],
           "params": [
             {
               "name": "items",
@@ -21955,8 +22439,7 @@
                 {
                   "name": "options",
                   "type": {
-                    "kind": "named",
-                    "name": "NumberFormatOptions & DateTimeFormatOptions"
+                    "kind": "any"
                   }
                 }
               ],
@@ -22285,6 +22768,15 @@
         "every": {
           "signatures": [
             {
+              "type_params": [
+                {
+                  "name": "S",
+                  "constraint": {
+                    "kind": "named",
+                    "name": "T"
+                  }
+                }
+              ],
               "params": [
                 {
                   "name": "predicate",
@@ -22441,6 +22933,11 @@
         "map": {
           "signatures": [
             {
+              "type_params": [
+                {
+                  "name": "U"
+                }
+              ],
               "params": [
                 {
                   "name": "callbackfn",
@@ -22486,6 +22983,15 @@
         "filter": {
           "signatures": [
             {
+              "type_params": [
+                {
+                  "name": "S",
+                  "constraint": {
+                    "kind": "named",
+                    "name": "T"
+                  }
+                }
+              ],
               "params": [
                 {
                   "name": "predicate",
@@ -22641,6 +23147,11 @@
               }
             },
             {
+              "type_params": [
+                {
+                  "name": "U"
+                }
+              ],
               "params": [
                 {
                   "name": "callbackfn",
@@ -22760,6 +23271,11 @@
               }
             },
             {
+              "type_params": [
+                {
+                  "name": "U"
+                }
+              ],
               "params": [
                 {
                   "name": "callbackfn",
@@ -22807,6 +23323,15 @@
         "find": {
           "signatures": [
             {
+              "type_params": [
+                {
+                  "name": "S",
+                  "constraint": {
+                    "kind": "named",
+                    "name": "T"
+                  }
+                }
+              ],
               "params": [
                 {
                   "name": "predicate",
@@ -23065,6 +23590,14 @@
         "flatMap": {
           "signatures": [
             {
+              "type_params": [
+                {
+                  "name": "U"
+                },
+                {
+                  "name": "This"
+                }
+              ],
               "params": [
                 {
                   "name": "callback",
@@ -23123,6 +23656,17 @@
         "flat": {
           "signatures": [
             {
+              "type_params": [
+                {
+                  "name": "A"
+                },
+                {
+                  "name": "D",
+                  "constraint": {
+                    "kind": "number"
+                  }
+                }
+              ],
               "params": [
                 {
                   "name": "depth",
