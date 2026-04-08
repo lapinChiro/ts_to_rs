@@ -202,8 +202,20 @@ impl<'a> Transformer<'a> {
         // Resolve the RHS object type
         let obj_type = self.get_expr_type(&bin.right);
 
+        // I-387: StdCollection { HashMap/BTreeMap } も含めて判定
+        let is_map = matches!(
+            &obj_type,
+            Some(RustType::Named { name, .. }) if name == "HashMap" || name == "BTreeMap",
+        ) || matches!(
+            &obj_type,
+            Some(RustType::StdCollection { kind, .. })
+                if matches!(
+                    kind,
+                    crate::ir::StdCollectionKind::HashMap | crate::ir::StdCollectionKind::BTreeMap
+                ),
+        );
         match obj_type {
-            Some(RustType::Named { name, .. }) if name == "HashMap" || name == "BTreeMap" => {
+            _ if is_map => {
                 // HashMap/BTreeMap → obj.contains_key("key")
                 let obj_ir = match bin.right.as_ref() {
                     ast::Expr::Ident(ident) => Expr::Ident(ident.sym.as_ref().to_owned()),

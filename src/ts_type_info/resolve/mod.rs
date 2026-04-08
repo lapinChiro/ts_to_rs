@@ -485,12 +485,20 @@ fn resolve_type_ref(
         }
         _ => {
             // I-387 T4b: 型変数 scope にある名前は TypeVar variant で返す。
-            // 下流 (type_resolver / registry / transformer) は TypeVar 両対応済。
-            // Primitive / StdCollection / 既存 variant (String/Bool/F64) の routing
-            // および Record/Map/Set の StdCollection 化は T4c/T4d で有効化予定。
             if type_args.is_empty() && synthetic.is_in_type_param_scope(name) {
                 return Ok(RustType::TypeVar {
                     name: name.to_string(),
+                });
+            }
+            // I-387 T4c: Rust std 整数型 / std コレクション名は構造化 variant で返す。
+            // 下流 transformer は TypeVar / Primitive / StdCollection 両対応済。
+            if let Some(kind) = primitive_int_kind_from_name(name) {
+                return Ok(RustType::Primitive(kind));
+            }
+            if let Some(kind) = std_collection_kind_from_name(name) {
+                return Ok(RustType::StdCollection {
+                    kind,
+                    args: resolved_args,
                 });
             }
             let mut args = resolved_args;

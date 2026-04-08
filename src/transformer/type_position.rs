@@ -1,6 +1,6 @@
 //! Type position utilities for trait type wrapping.
 
-use crate::ir::RustType;
+use crate::ir::{RustType, StdCollectionKind};
 use crate::registry::TypeRegistry;
 
 /// Position where a type annotation appears. Determines trait type wrapping.
@@ -21,6 +21,9 @@ pub enum TypePosition {
 /// - `General` → unchanged
 ///
 /// Non-trait types are returned unchanged regardless of position.
+///
+/// **I-387**: `RustType::Named` のみが trait 判定対象。`TypeVar` / `Primitive` /
+/// `StdCollection` は構造上 user 定義 trait ではないため wrap 対象外。
 pub(crate) fn wrap_trait_for_position(
     ty: RustType,
     position: TypePosition,
@@ -34,9 +37,10 @@ pub(crate) fn wrap_trait_for_position(
         if type_args.is_empty() && reg.is_trait_type(name) {
             return match position {
                 TypePosition::Param => RustType::Ref(Box::new(RustType::DynTrait(name.clone()))),
-                TypePosition::Value => RustType::Named {
-                    name: "Box".to_string(),
-                    type_args: vec![RustType::DynTrait(name.clone())],
+                // I-387: Box wrapper を StdCollection で構造化。
+                TypePosition::Value => RustType::StdCollection {
+                    kind: StdCollectionKind::Box,
+                    args: vec![RustType::DynTrait(name.clone())],
                 },
                 TypePosition::General => ty,
             };
@@ -93,11 +97,12 @@ mod tests {
             type_args: vec![],
         };
         let result = wrap_trait_for_position(ty, TypePosition::Value, &reg);
+        // I-387: Box wrapper を StdCollection で構造化。
         assert_eq!(
             result,
-            RustType::Named {
-                name: "Box".to_string(),
-                type_args: vec![RustType::DynTrait("Greeter".to_string())],
+            RustType::StdCollection {
+                kind: StdCollectionKind::Box,
+                args: vec![RustType::DynTrait("Greeter".to_string())],
             }
         );
     }
@@ -123,6 +128,52 @@ mod tests {
         ] {
             let result = wrap_trait_for_position(RustType::String, position, &reg);
             assert_eq!(result, RustType::String);
+        }
+    }
+
+    // --- I-387 T4c: TypeVar / Primitive / StdCollection は trait wrap 対象外 ---
+
+    #[test]
+    fn test_wrap_trait_for_position_type_var_unchanged() {
+        let reg = make_trait_registry();
+        let ty = RustType::TypeVar {
+            name: "T".to_string(),
+        };
+        for position in [
+            TypePosition::Param,
+            TypePosition::Value,
+            TypePosition::General,
+        ] {
+            assert_eq!(wrap_trait_for_position(ty.clone(), position, &reg), ty);
+        }
+    }
+
+    #[test]
+    fn test_wrap_trait_for_position_primitive_unchanged() {
+        let reg = make_trait_registry();
+        let ty = RustType::Primitive(crate::ir::PrimitiveIntKind::Usize);
+        for position in [
+            TypePosition::Param,
+            TypePosition::Value,
+            TypePosition::General,
+        ] {
+            assert_eq!(wrap_trait_for_position(ty.clone(), position, &reg), ty);
+        }
+    }
+
+    #[test]
+    fn test_wrap_trait_for_position_std_collection_unchanged() {
+        let reg = make_trait_registry();
+        let ty = RustType::StdCollection {
+            kind: StdCollectionKind::HashMap,
+            args: vec![RustType::String, RustType::F64],
+        };
+        for position in [
+            TypePosition::Param,
+            TypePosition::Value,
+            TypePosition::General,
+        ] {
+            assert_eq!(wrap_trait_for_position(ty.clone(), position, &reg), ty);
         }
     }
 }

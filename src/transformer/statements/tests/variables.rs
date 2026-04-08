@@ -439,11 +439,12 @@ fn test_convert_var_decl_trait_type_generates_box_dyn() {
     match &result[0] {
         Stmt::Let { name, ty, .. } => {
             assert_eq!(name, "g");
+            // I-387: Box は StdCollection variant で構造化される。
             assert_eq!(
                 *ty,
-                Some(RustType::Named {
-                    name: "Box".to_string(),
-                    type_args: vec![RustType::DynTrait("Greeter".to_string())],
+                Some(RustType::StdCollection {
+                    kind: crate::ir::StdCollectionKind::Box,
+                    args: vec![RustType::DynTrait("Greeter".to_string())],
                 })
             );
         }
