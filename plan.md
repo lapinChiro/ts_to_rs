@@ -9,14 +9,13 @@
 
 ---
 
-## 現在のフェーズ: I-382 解消プロジェクト Phase C (I-387 実装)
+## 現在のフェーズ: I-382 解消プロジェクト Phase D (I-382 本体実装)
 
-**目的**: `generate_stub_structs` を構造的に不要にする理想実装。核心的 IR 設計欠陥
-(`RustType::Named` が type variable / user type / std type を区別しない) を
-`TypeVar` / `Primitive` / `StdCollection` variant 導入で構造的に解決する。
+**目的**: Phase C で整備された IR 構造化基盤の上で、`generate_stub_structs` を削除し
+Pass 5c を「synthetic_items が参照する user 定義型に対する `use crate::<path>::Type;`
+生成」のみに再設計する (I-382 本体)。
 
-**詳細計画**: [`report/i382/master-plan.md`](report/i382/master-plan.md) /
-PRD: [`backlog/I-387-rust-type-structural-refinement.md`](backlog/I-387-rust-type-structural-refinement.md)
+**詳細計画**: [`report/i382/master-plan.md`](report/i382/master-plan.md)
 
 ### フェーズ構成 (概観)
 
@@ -25,59 +24,45 @@ Phase A  ✅  調査 (INV-1〜9 解消、2026-04-08 完了)
        ↓
 Phase B  ✅  PRD 起票 (I-387, 2026-04-08 完了)
        ↓
-Phase C  🔄  理想実装 (I-387, T1〜T14) ← 現在地
+Phase C  ✅  理想実装 (I-387 T1〜T14 全件完了、2026-04-08)
        ↓
-Phase D      I-382 本体 (generate_stub_structs 削除)
+Phase D  🔄  I-382 本体 (generate_stub_structs 削除) ← 現在地
 ```
 
-### Phase C 進捗 (2026-04-08 時点)
+### Phase C 完了サマリ (I-387, 2026-04-08)
+
+- `RustType` に `TypeVar { name }` / `Primitive(PrimitiveIntKind)` /
+  `StdCollection { kind, args }` variant を追加し、`Named` は user 定義型のみを表す
+  正規形に昇格。
+- `substitute` の legacy `Named{"T"}` 後方互換ブランチを削除し、`TypeVar { name }` を
+  型変数 substitution の唯一の正規形に確定。
+- `collect_free_type_vars` heuristic と `RUST_BUILTIN_TYPES` 文字列フィルタを構造的に
+  削除 (walker ベース `collect_type_vars` で置換)。
+- `monomorphize_type_params` に `Some(RustType::TypeVar{..}) => defer` 分岐を追加し、
+  チェーン制約 (`U extends T, T extends number`) の段階的解決 semantics を明示化。
+- `cargo test --lib` 2259 pass / `cargo clippy` 0 warning / Hono bench regression 0。
+- PRD Goal #1〜#9 全達成、I-387 archive 済。
+
+### Phase D タスク概観
 
 | タスク | 内容 | 状態 |
 |---|---|---|
-| T1 | `RustType::TypeVar / Primitive / StdCollection` variant 追加 | ✅ |
-| T2 | substitute に TypeVar branch 追加 (legacy Named{"T"} 後方互換は残置) | ✅ |
-| T3 | generator に新 variant 生成 + Semantic Safety 等価性テスト | ✅ |
-| T4a | `primitive_int_kind_from_name` / `std_collection_kind_from_name` ヘルパー | ✅ |
-| T4b | TypeVar routing 有効化 + 下流両対応化 (type_resolver) | ✅ |
-| T4c | Primitive/StdCollection routing + 下流両対応化 (transformer) | ✅ |
-| T4d | BigInt / Record / Map / Set の構造化 routing | ✅ |
-| T5 | c1 (既存 variant 巻戻し) 構築サイト置換 | ✅ |
-| T6 | c2 (Primitive/StdCollection) 構築サイト置換 | ✅ |
-| T7 | (b) TypeVar 構築サイト置換 (production + test fixtures + backward-compat ブランチ削除) | ✅ |
-| T8 | interim patch T2.A-i 処理 (scope push は lexical scope として残置、heuristic は walker に置換) | ✅ |
-| T9 | interim patch T2.A-ii 処理 (enter_type_param_scope を lexical scope semantics に relabel) | ✅ |
-| T10 | `collect_free_type_vars` heuristic 削除 + `collect_type_vars` walker | ✅ |
-| T11 | `extract_used_type_params` を walker-only 実装に置換 | ✅ |
-| T12 | 下流 pattern match 更新 | ✅ (T4b/T4c に統合) |
-| T13 | plan.md / master-plan.md / history.md 更新 + レビュー指摘 2 件対応 (下記) | 🔄 本回更新中 |
-| T14 | /quality-check + Hono bench 最終確認 | ✅ (2259 pass / 0 clippy / bench 変動なし) |
+| D-0a | PRD-β 起票: `TypeDef::ExternalUnsupported` variant (DOM 型 16 件 + symbol 1 件) | ⏳ |
+| D-0b | PRD-γ 起票: `__type` marker → function type 是正 (1 件) | ⏳ |
+| D-0c | PRD-δ 起票: Pass 5c 再設計 = `generate_stub_structs` 削除 + user 型 import 生成 | ⏳ |
+| D-1 | PRD-A-2 (= I-386) 実装: resolve_type_ref Step 3 + 73 件 bug-affirming test 根絶 | ⏳ |
+| D-2 | PRD-β / PRD-γ / PRD-δ 実装 | ⏳ |
+| D-3 | `generate_stub_structs` 完全削除 + regression test 追加 | ⏳ |
+| D-4 | 最終 quality check + ドキュメント整理 | ⏳ |
 
 ### 直近アクション (次セッション開始時)
 
-**残作業を優先順に実施**:
-
-1. **T13 仕上げ**: master-plan.md / history.md を Phase C 完了状態に更新、session-todos.md
-   の T-2/T-5/T-6/T-7/T-8 対応項目を削除。併せて以下のレビュー指摘 2 件を修正する:
-   - **レビュー指摘 A**: `src/ir/fold_tests.rs:164-189` の `ReplaceTWithF64` test fixture が
-     legacy `Named{"T"}` pattern をマッチしている。production が型変数を Named で構築する
-     ことは post-I-387 では起こらない dead pattern のため、TypeVar 基準に書き換える
-     (もしくは legacy pattern 保持を明記するコメントを付与)。
-   - **レビュー指摘 B**: 本 plan.md 「Semantic Safety 等価テスト 2 件」記述が stale。
-     実装は 3 件 (`test_generate_type_var_matches_legacy_named_literal` /
-     `test_generate_type_primitive_matches_legacy_named_literal` /
-     `test_generate_type_std_collection_matches_legacy_named_literal` @
-     `src/generator/types.rs`)。「3 件」に是正、file:line ペアを明記する。
-2. **PRD I-387 完了処理**: backlog/I-387 を archive、plan.md の「現在地」を Phase D に更新
-3. **Phase D 着手**: PRD-β (`TypeDef::ExternalUnsupported`) / PRD-γ (`__type` 是正) /
-   PRD-δ (Pass 5c 再設計 = I-382 本体) の起票
-
-### セッション中断ポイント (中断直前の状態)
-
-- **`cargo test --lib`**: 2259 passed / 0 failed
-- **`cargo clippy --all-targets`**: 0 warning
-- **Hono bench**: clean 114/158, errors 54, compile (dir) 99.4% — **ベースライン維持**
-- PRD Goal #4/#7 達成 (interim heuristic 削除、`RUST_BUILTIN_TYPES` 定数削除)
-- Goal #9 は production では達成済、意図的に残す Semantic Safety 等価テスト 2 件のみ例外
+1. **PRD-β / PRD-γ / PRD-δ 起票** (Phase D 準備): Phase C で確定した IR 構造化基盤上で
+   各 PRD の Discovery → 設計 → 起票を順次実施。
+2. **PRD-A-2 (I-386) 実装**: backlog/I-386 として既に起票済の resolve_type_ref Step 3 +
+   73 件 fixture 整理を実装着手。I-382 本体の前提条件として必要。
+3. **Phase D 実装**: 上記 PRD の TDD 実装。各 PRD 完了ごとに probe 再投入で dangling refs
+   件数を計測、最終的に 0 化を目指す。
 
 ---
 
@@ -140,16 +125,17 @@ Hono 後退ゼロ確認済。
 
 ---
 
-## ベースライン (2026-04-08, I-387 Phase C 実装中)
+## ベースライン (2026-04-08, I-387 Phase C 完了時点)
 
-| 指標 | セッション開始時 | 現在 |
+| 指標 | Phase C 開始時 | Phase C 完了時 |
 |---|---|---|
 | Hono クリーン | 114/158 (72.2%) | 114/158 (72.2%) |
 | エラーインスタンス | 54 | 54 |
 | コンパイル (file) | 113/158 (71.5%) | 113/158 (71.5%) |
 | コンパイル (dir) | 157/158 (99.4%) | 157/158 (99.4%) |
 | テスト数 | 2228 (lib) | 2259 (lib) |
-| dangling refs (probe) | 23 | 未再計測 (T14 で再計測予定) |
+| clippy warning | 0 | 0 |
+| dangling refs (probe) | 23 | Phase D 着手時に再計測 |
 
 **注**: 上記は現状把握用の指標。最適化目標ではない
 (`.claude/rules/ideal-implementation-primacy.md` 参照)。

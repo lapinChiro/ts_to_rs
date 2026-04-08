@@ -99,9 +99,8 @@ fn fold_trait_ref_fires_from_qself_impl_and_trait_supertraits() {
 
     // 1. QSelf の trait_ref
     let ty = RustType::QSelf {
-        qself: Box::new(RustType::Named {
+        qself: Box::new(RustType::TypeVar {
             name: "T".to_string(),
-            type_args: vec![],
         }),
         trait_ref: TraitRef {
             name: "Promise".to_string(),
@@ -161,16 +160,18 @@ fn fold_trait_ref_fires_from_qself_impl_and_trait_supertraits() {
     }
 }
 
-/// Replaces `RustType::Named { name: "T", type_args: [] }` with `RustType::F64`.
+/// Replaces `RustType::TypeVar { name: "T" }` with `RustType::F64`.
+///
+/// Post-I-387: 型変数の正規形は `TypeVar { name }` であり、production の型変数
+/// 構築サイトは全てこの variant を使用する。本 folder は fold 走査インフラ
+/// (`walk_rust_type` による再帰) が TypeVar を内包する Option/Vec/Fn 等の
+/// 構造を正しく辿れることを確認するためのものであり、substitute と同等の
+/// セマンティクスを持つ。
 struct ReplaceTWithF64;
 impl IrFolder for ReplaceTWithF64 {
     fn fold_rust_type(&mut self, ty: RustType) -> RustType {
-        if let RustType::Named {
-            ref name,
-            ref type_args,
-        } = ty
-        {
-            if name == "T" && type_args.is_empty() {
+        if let RustType::TypeVar { ref name } = ty {
+            if name == "T" {
                 return RustType::F64;
             }
         }
@@ -179,10 +180,9 @@ impl IrFolder for ReplaceTWithF64 {
 }
 
 #[test]
-fn type_substitute_folder_replaces_named_t() {
-    let ty = RustType::Option(Box::new(RustType::Named {
+fn type_substitute_folder_replaces_type_var_t() {
+    let ty = RustType::Option(Box::new(RustType::TypeVar {
         name: "T".to_string(),
-        type_args: vec![],
     }));
     let result = ReplaceTWithF64.fold_rust_type(ty);
     assert_eq!(result, RustType::Option(Box::new(RustType::F64)));
@@ -382,13 +382,11 @@ fn walk_expr_primitive_and_std_const_bypass_fold_user_type_ref() {
 #[test]
 fn type_substitute_folder_descends_into_fn_type() {
     let ty = RustType::Fn {
-        params: vec![RustType::Named {
+        params: vec![RustType::TypeVar {
             name: "T".to_string(),
-            type_args: vec![],
         }],
-        return_type: Box::new(RustType::Named {
+        return_type: Box::new(RustType::TypeVar {
             name: "T".to_string(),
-            type_args: vec![],
         }),
     };
     let result = ReplaceTWithF64.fold_rust_type(ty);

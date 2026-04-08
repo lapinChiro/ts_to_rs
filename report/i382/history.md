@@ -622,6 +622,54 @@ grep "I-383-TRACE" /tmp/i383-next-session.log | head -20
 
 ---
 
+## Phase C (I-387) 完了記録 (2026-04-08)
+
+### サマリ
+
+`RustType::Named` に混在していた「type variable / user type / primitive / std collection」を
+`TypeVar { name }` / `Primitive(PrimitiveIntKind)` / `StdCollection { kind, args }` variant
+分離により構造的に解消。I-382 Phase A の interim heuristic 3 件 (T2.A-i/ii/iv) は以下に処理:
+
+- **T2.A-iv (`collect_free_type_vars` heuristic)**: 完全削除 → `collect_type_vars` walker に置換
+- **T2.A-i / T2.A-ii (scope push)**: correct lexical scope management として残置 (doc relabel)、
+  heuristic 部分のみ walker で置換
+- **`RUST_BUILTIN_TYPES` 文字列フィルタ**: 完全削除 (IR 構造化で不要化)
+
+### 本セッションで完了した T7 残 + T14
+
+- `src/ir/substitute.rs::fold_rust_type` から legacy `Named{"T", type_args:[]}` → binding
+  参照の後方互換ブランチを削除、`TypeVar { name }` を型変数 substitution の唯一の正規形に
+- test fixture 6 ファイル 55 箇所を Python dry-run → レビュー → 実行で `TypeVar` 化
+  (ir/tests/substitute_tests.rs / registry/tests/generics.rs / ts_type_info/resolve/typedef.rs /
+  external_struct_generator/tests/generate_struct_tests.rs /
+  type_resolver/tests/expected_types/spread.rs / type_resolver/tests/expected_types/vec_methods.rs)
+- `vec_methods.rs::type_param` helper を `TypeVar` 返却に更新
+- **チェーン制約構造欠陥修正**: Named 後方互換を外したことで `monomorphize_type_params` が
+  `U extends T, T extends number` を 1 パスで T→F64 / U→TypeVar{T} と同時解決して U に未解決
+  TypeVar が残るバグが顕在化。旧実装は `is_valid_trait_bound(Named{"T"}) = true` (未登録
+  Named は外部 trait と仮定) の heuristic に依存していた signal が TypeVar 化で消失した
+  ため、`Some(RustType::TypeVar{..}) => defer` 分岐を追加し「型変数参照制約は先行 param
+  の monomorphization 結果を待つ」semantics を明示化。
+- T13 レビュー指摘 2 件対応:
+  - `src/ir/fold_tests.rs` の `ReplaceTWithF64` / QSelf test fixture を `TypeVar` 基準に更新
+  - plan.md「Semantic Safety 等価テスト 2 件」→ 3 件に是正 + file 名明記
+
+### 検証結果
+
+- `cargo test --lib`: **2259 passed / 0 failed**
+- `cargo clippy --all-targets --all-features -- -D warnings`: **0 warning**
+- `cargo fmt --all --check`: clean
+- `./scripts/hono-bench.sh`: clean 114/158 (72.2%), errors 54, compile (dir) 99.4% —
+  前回 (70fb38c) と diff 全項目 0、ベースライン完全維持
+- PRD Goal #1〜#9 全達成
+
+### Phase D 着手条件
+
+- backlog/I-387 archive 処理待ち
+- PRD-β / PRD-γ / PRD-δ 起票待ち
+
+---
+
 ## 計画見直しチェックポイント
 
 各 Phase / Task 完了時に以下を確認:

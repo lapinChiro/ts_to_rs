@@ -11,16 +11,22 @@
 
 ---
 
-## 現状 (2026-04-08, I-387 Phase C 実装中)
+## 現状 (2026-04-08, I-387 Phase C 完了)
 
 ### 達成済の土台
 
 - Phase A (INV-1〜9 調査債務) ✅ 完了
 - Phase B (PRD I-387 起票 + Design Integrity Review) ✅ 完了
-- Phase C (I-387 実装) 🔄 T1〜T6 + T8〜T12 完了、T7/T13/T14 残
+- Phase C (I-387 実装) ✅ **完了** (T1〜T14 全件)
 - **IR 設計欠陥の構造的解消**: `RustType::Named` から `TypeVar` / `Primitive` /
   `StdCollection` を分離し、production の Named は user 定義型のみを表す状態を達成
+- **substitute 後方互換削除**: `fold_rust_type` の legacy `Named{"T"}` ブランチを
+  撤去し、`TypeVar { name }` を型変数 substitution の唯一の正規形に昇格
+- **monomorphize_type_params チェーン制約 defer ロジック追加**: Named 後方互換で
+  暗黙に担われていた「型変数参照制約は次パスまで待つ」semantics を
+  `Some(RustType::TypeVar{..}) => defer` 分岐で明示化
 - `cargo test --lib`: **2259 passed, 0 failed** (+31 新規)
+- `cargo clippy --all-targets --all-features -- -D warnings`: **0 warning**
 - Hono ベンチ regression 0 維持 (clean 114/158, errors 54, compile dir 99.4%)
 - Phase A の Cluster 1a 11 件解消は維持
 
@@ -111,7 +117,7 @@ assumption なしで書ける状態。
   T-7 (builtin 型表現不統一), T-8 (free var 判定 heuristic)
 - `session-todos.md` の 6 件中 5 件
 
-### Phase C: I-387 実装 (TDD) 🔄 **実装中 (2026-04-08)**
+### Phase C: I-387 実装 (TDD) ✅ **完了 (2026-04-08)**
 
 **目的**: PRD I-387 を TDD で実装し、`RustType` を構造化して interim heuristic を削除。
 
@@ -128,23 +134,23 @@ assumption なしで書ける状態。
 | T4d | BigInt / Record / Map / Set の構造化 routing | ✅ |
 | T5 | (c1) 既存 variant 巻戻し — 3 production sites | ✅ |
 | T6 | (c2) Primitive/StdCollection 構築サイト置換 | ✅ |
-| T7 | (b) TypeVar 構築サイト置換 | 🔄 production 完了、**test fixtures 残** |
+| T7 | (b) TypeVar 構築サイト置換 (production + test fixture 55 箇所 + 後方互換削除) | ✅ |
 | T8 | T2.A-i 処理 — scope push は lexical scope として残置、heuristic は walker で置換 | ✅ |
 | T9 | T2.A-ii 処理 — enter_type_param_scope を relabel | ✅ |
 | T10 | `collect_free_type_vars` 削除 + `collect_type_vars` walker 導入 | ✅ |
 | T11 | `extract_used_type_params` を walker-only 実装に | ✅ |
 | T12 | 下流 pattern match 更新 (T4b/T4c に統合済) | ✅ |
-| T13 | plan.md / master-plan.md / history.md 更新 | 🔄 本回実施中 |
-| T14 | /quality-check + Hono bench 最終確認 | ⏳ 未実施 |
+| T13 | plan.md / master-plan.md / history.md 更新 + レビュー指摘 2 件対応 | ✅ |
+| T14 | /quality-check + Hono bench 最終確認 | ✅ |
 
 **完了条件**:
 - ✅ `cargo test --lib` 全 pass (2259 件)
 - ✅ Hono ベンチ regression 0
 - ✅ `collect_free_type_vars` / `RUST_BUILTIN_TYPES` の heuristic 削除 (PRD Goal #7)
-- 🔄 substitute の legacy Named{"T"} 後方互換ブランチ削除 (T7 残)
-- 🔄 test fixtures の `Named{"T"}` → `TypeVar{"T"}` 一括置換 (T7 残)
-- ⏳ `/quality-check` 通過確認 (T14)
-- ⏳ session-todos.md の該当 TODO 削除 (T-2, T-5, T-6, T-7, T-8)
+- ✅ substitute の legacy Named{"T"} 後方互換ブランチ削除 (T7)
+- ✅ test fixtures の `Named{"T"}` → `TypeVar{"T"}` 一括置換 55 箇所 (T7)
+- ✅ `/quality-check` 通過 (cargo fix / fmt / clippy 0w / test 2259 pass, T14)
+- ⏳ session-todos.md の該当 TODO 削除 (T-2, T-5, T-6, T-7, T-8) — 本 T13 で処理
 
 ### T8 設計判断の変更 (重要)
 
@@ -182,55 +188,33 @@ Hono ベンチ regression 0。
 
 ## 直近アクション (次セッション開始時)
 
-**Phase C 残作業を優先順に実施**:
+Phase C は完了。次は Phase D 準備として以下を実施:
 
-### 1. T7 残り: substitute 後方互換削除 + test fixtures 一括更新
+### 1. PRD I-387 完了処理
 
-**着手手順**:
-1. `src/ir/substitute.rs::fold_rust_type` の 2 本目 `if let RustType::Named { name, type_args } = &ty` ブランチ (L43-52 付近、後方互換用) を削除
-2. `cargo test --lib` 実行 → 壊れる test fixtures をリストアップ
-3. `bulk-edit-safety.md` 準拠で grep ベースのドライラン → 置換対象確認:
-   - `src/registry/tests/generics.rs` 内の `RustType::Named { name: "T"/"E"/... }` 等
-   - `src/generator/tests.rs:111, 401-407, 781-782, 820-821` 等
-   - `src/ir/fold_tests.rs:102-103, 183-184, 385-386, 389-390`
-   - `src/ts_type_info/resolve/typedef.rs` の `apply_substitutions_*` テスト (L781-921)
-4. `Named{"T", type_args: vec![]}` → `TypeVar{"T"}` へ一括置換 (型引数なしの単一名のみ)
-5. `cargo test --lib` 全 pass、`cargo clippy` 0 warning 確認
+1. `backlog/I-387-rust-type-structural-refinement.md` を archive
+2. `plan.md` の「現在地」を Phase D に更新
 
-**注意**: substitute の後方互換ブランチは現在 2 セクション (L34-49) に残存:
-```rust
-if let RustType::TypeVar { name } = &ty { ... }  // 本体
-if let RustType::Named { name, type_args } = &ty { ... }  // ← これを削除
-```
-
-### 2. T14: 最終 quality check
-
-1. `/quality-check` (cargo fix → fmt → clippy → test)
-2. `./scripts/hono-bench.sh` 再実行 (clean files / error instances / compile rates)
-3. Phase A の probe 再投入で dangling refs 件数再計測 (Cluster 1a 継続 0 / 全体 23 維持を確認)
-
-### 3. T13 仕上げ: ドキュメント最終化
-
-1. `report/i382/history.md` に Phase C 完了エントリ追加
-2. `report/i382/session-todos.md` から I-387 で解消された項目 (T-2, T-5, T-6, T-7, T-8) を削除
-3. `backlog/I-387-rust-type-structural-refinement.md` を archive (完了処理)
-
-### 4. PRD-β / PRD-γ / PRD-δ 起票 (Phase D 準備)
+### 2. PRD-β / PRD-γ / PRD-δ 起票 (Phase D)
 
 1. **PRD-β**: `TypeDef::ExternalUnsupported` variant 導入 (DOM 型 16 件 + symbol 1 件解消)
 2. **PRD-γ**: `__type` marker → function type 是正 (1 件解消)
 3. **PRD-δ**: Pass 5c 再設計 = `generate_stub_structs` 削除 + user 型 import 生成 (I-382 本体)
 
+### 3. Phase D 実装着手 (PRD-β / PRD-γ / PRD-δ の優先順)
+
 ---
 
-## セッション中断時点のスナップショット (2026-04-08)
+## Phase C 完了時点のスナップショット (2026-04-08)
 
 ### 検証結果
 
 - `cargo test --lib`: **2259 passed / 0 failed**
-- `cargo clippy --all-targets --all-features`: **0 warning**
+- `cargo clippy --all-targets --all-features -- -D warnings`: **0 warning**
+- `cargo fmt --all --check`: clean
 - Hono bench: **clean 114/158, errors 54, compile (dir) 99.4% — regression 0**
-- PRD Goal #4 / #7 達成 (interim heuristic 削除、`RUST_BUILTIN_TYPES` 削除)
+- PRD Goal #1〜#9 全達成 (IR 構造化 / interim heuristic 削除 / RUST_BUILTIN_TYPES 削除 /
+  後方互換 legacy ブランチ削除 / Semantic Safety 等価テスト 3 件 / quality-check 通過)
 
 ### Interim patch 最終状態
 
