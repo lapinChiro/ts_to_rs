@@ -448,7 +448,13 @@ fn unify_type(
         return;
     }
     match param_ty {
-        // Bare type parameter: T → bind directly
+        // I-387: TypeVar (第一級の型パラメータ参照)
+        RustType::TypeVar { name } if param_names.contains(name.as_str()) => {
+            bindings
+                .entry(name.clone())
+                .or_insert_with(|| arg_ty.clone());
+        }
+        // Bare type parameter: T → bind directly (legacy Named form)
         RustType::Named { name, type_args }
             if type_args.is_empty() && param_names.contains(name.as_str()) =>
         {

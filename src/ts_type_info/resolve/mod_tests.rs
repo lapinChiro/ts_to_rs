@@ -1063,6 +1063,43 @@ fn test_std_collection_kind_from_name_rejects_existing_variants() {
 }
 
 #[test]
+fn test_resolve_type_ref_returns_type_var_when_in_scope() {
+    // I-387 T4b: `is_in_type_param_scope` で見つかった名前は TypeVar に routing される。
+    let reg = TypeRegistry::new();
+    let mut syn = SyntheticTypeRegistry::new();
+    syn.push_type_param_scope(vec!["T".to_string()]);
+
+    let info = TsTypeInfo::TypeRef {
+        name: "T".to_string(),
+        type_args: vec![],
+    };
+    assert_eq!(
+        resolve_ts_type(&info, &reg, &mut syn).unwrap(),
+        RustType::TypeVar {
+            name: "T".to_string()
+        }
+    );
+}
+
+#[test]
+fn test_resolve_type_ref_returns_named_when_not_in_scope() {
+    let reg = TypeRegistry::new();
+    let mut syn = SyntheticTypeRegistry::new();
+    // scope に何も push せず、user 型として Named に fallback することを確認
+    let info = TsTypeInfo::TypeRef {
+        name: "T".to_string(),
+        type_args: vec![],
+    };
+    assert_eq!(
+        resolve_ts_type(&info, &reg, &mut syn).unwrap(),
+        RustType::Named {
+            name: "T".to_string(),
+            type_args: vec![],
+        }
+    );
+}
+
+#[test]
 fn test_primitive_and_std_collection_kind_from_name_are_disjoint() {
     // 整数名と std コレクション名は重複しない (命名の直交性検証)
     use super::{primitive_int_kind_from_name, std_collection_kind_from_name};

@@ -18,9 +18,10 @@ fn test_generic_interface_type_params_stored_in_registry() {
             assert_eq!(type_params[0].constraint, None);
             assert_eq!(fields.len(), 1);
             assert_eq!(fields[0].name, "value");
+            // I-387: `T` in field type is now represented as TypeVar (not Named).
             assert!(
-                matches!(&fields[0].ty, RustType::Named { name, .. } if name == "T"),
-                "expected Named(T), got {:?}",
+                matches!(&fields[0].ty, RustType::TypeVar { name } if name == "T"),
+                "expected TypeVar(T), got {:?}",
                 fields[0].ty
             );
         }
@@ -108,9 +109,10 @@ fn test_collect_class_type_params_single() {
             assert_eq!(type_params[0].constraint, None);
             assert_eq!(fields.len(), 1);
             assert_eq!(fields[0].name, "value");
+            // I-387: `T` in field type is now represented as TypeVar (not Named).
             assert!(
-                matches!(&fields[0].ty, RustType::Named { name, .. } if name == "T"),
-                "expected Named(T), got {:?}",
+                matches!(&fields[0].ty, RustType::TypeVar { name } if name == "T"),
+                "expected TypeVar(T), got {:?}",
                 fields[0].ty
             );
         }
@@ -183,10 +185,11 @@ fn test_collect_type_alias_du_enum_type_params() {
             assert_eq!(tag_field.as_deref(), Some("kind"));
             assert_eq!(variants.len(), 2);
             let ok_fields = variant_fields.get("Ok").expect("Ok variant should exist");
+            // I-387: `T` inside enum variant field is TypeVar.
             assert!(
                 ok_fields.iter().any(|f| f.name == "value"
-                    && matches!(f.ty, RustType::Named { ref name, .. } if name == "T")),
-                "expected Ok variant to have field 'value: T', got {ok_fields:?}"
+                    && matches!(f.ty, RustType::TypeVar { ref name } if name == "T")),
+                "expected Ok variant to have field 'value: T' (TypeVar), got {ok_fields:?}"
             );
         }
         other => panic!("expected Enum, got {other:?}"),

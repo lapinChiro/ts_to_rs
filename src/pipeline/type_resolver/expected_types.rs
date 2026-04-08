@@ -14,8 +14,9 @@ use crate::pipeline::type_resolution::Span;
 impl<'a> TypeResolver<'a> {
     /// Resolves type parameter names to their constraint types recursively.
     ///
-    /// When a `RustType::Named { name: "T" }` is encountered and `T` is in
-    /// `type_param_constraints`, replaces it with the constraint type.
+    /// When a `RustType::TypeVar { name: "T" }` (I-387) or legacy
+    /// `RustType::Named { name: "T", type_args: [] }` is encountered and `T`
+    /// is in `type_param_constraints`, replaces it with the constraint type.
     /// Also resolves type parameters within `type_args` of Named types.
     ///
     /// This ensures expected types contain concrete type names that the
@@ -32,6 +33,16 @@ impl<'a> TypeResolver<'a> {
             return ty.clone();
         }
         match ty {
+            // I-387: TypeVar は型パラメータ参照の一級表現。constraint lookup で解決。
+            RustType::TypeVar { name } => {
+                if let Some(constraint) = self.type_param_constraints.get(name) {
+                    if constraint == ty {
+                        return ty.clone();
+                    }
+                    return self.resolve_type_params_impl(constraint, depth + 1);
+                }
+                ty.clone()
+            }
             RustType::Named { name, type_args } => {
                 // If name itself is a type parameter, resolve to constraint
                 if type_args.is_empty() {
@@ -240,6 +251,9 @@ impl<'a> TypeResolver<'a> {
             RustType::Named { name, type_args } => {
                 self.resolve_struct_fields_by_name(name, type_args)
             }
+            // I-387: TypeVar は型パラメータ参照。type_param_constraints 経由で
+            // 元の Named 名に解決してから struct field を lookup する。
+            RustType::TypeVar { name } => self.resolve_struct_fields_by_name(name, &[]),
             _ => None,
         }
     }
@@ -291,6 +305,14 @@ impl<'a> TypeResolver<'a> {
     /// return type, function parameter), this method sets expected types on child
     /// expressions (object literal fields, array elements, ternary branches, etc.).
     pub(super) fn propagate_expected(&mut self, expr: &ast::Expr, expected: &RustType) {
+        // I-387: TypeVar を上流で Named に解決してから propagate する。
+        // これにより下流の Named リテラルチェックが型変数ケースもカバーする。
+        if let RustType::TypeVar { .. } = expected {
+            let resolved = self.resolve_type_params_in_type(expected);
+            if &resolved != expected {
+                return self.propagate_expected(expr, &resolved);
+            }
+        }
         match expr {
             // Object literal: propagate field types from struct/enum or HashMap value type
             ast::Expr::Object(obj) => {

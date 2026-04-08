@@ -620,6 +620,14 @@ impl<'a> TypeResolver<'a> {
                 }
             }
         }
+        // I-387: TypeVar の member access は constraint lookup で解決。
+        if let RustType::TypeVar { name } = obj_rust_type {
+            if let Some(fields) = self.resolve_struct_fields_by_name(name, &[]) {
+                if let Some((_, ty)) = fields.iter().find(|(n, _)| n == &field_name) {
+                    return ResolvedType::Known(ty.clone());
+                }
+            }
+        }
 
         ResolvedType::Unknown
     }

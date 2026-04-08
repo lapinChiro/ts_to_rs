@@ -60,6 +60,11 @@ pub(super) fn collect_free_type_vars(
             && !name.contains("::")
     }
     match ty {
+        // I-387: TypeVar は常に free type var。heuristic を介さず直接収集する。
+        RustType::TypeVar { name } if !out.contains(name) => {
+            out.push(name.clone());
+        }
+        RustType::TypeVar { .. } => {}
         RustType::Named { name, type_args }
             if is_free(name, registry, known_scope) && !out.contains(name) =>
         {
@@ -70,6 +75,11 @@ pub(super) fn collect_free_type_vars(
         }
         RustType::Named { type_args, .. } => {
             for arg in type_args {
+                collect_free_type_vars(arg, registry, known_scope, out);
+            }
+        }
+        RustType::StdCollection { args, .. } => {
+            for arg in args {
                 collect_free_type_vars(arg, registry, known_scope, out);
             }
         }

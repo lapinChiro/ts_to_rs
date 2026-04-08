@@ -298,9 +298,9 @@ fn test_convert_type_alias_conditional_filter_returns_type_alias_with_true_branc
                 name: "T".to_string(),
                 constraint: None
             }],
-            ty: RustType::Named {
+            // I-387: `T` is represented as TypeVar (not Named).
+            ty: RustType::TypeVar {
                 name: "T".to_string(),
-                type_args: vec![],
             },
         }
     );
