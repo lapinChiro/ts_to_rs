@@ -1,6 +1,6 @@
 //! Type generation: converts IR types into Rust type syntax.
 
-use crate::ir::RustType;
+use crate::ir::{PrimitiveIntKind, RustType, StdCollectionKind};
 
 /// Generates the Rust type syntax for a [`RustType`].
 pub fn generate_type(ty: &RustType) -> String {
@@ -58,6 +58,21 @@ pub fn generate_type(ty: &RustType) -> String {
                 format!("{name}<{args}>")
             }
         }
+        RustType::TypeVar { name } => name.clone(),
+        RustType::Primitive(kind) => generate_primitive_int(*kind).to_string(),
+        RustType::StdCollection { kind, args } => {
+            let name = std_collection_name(*kind);
+            if args.is_empty() {
+                name.to_string()
+            } else {
+                let args_str = args
+                    .iter()
+                    .map(generate_type)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{name}<{args_str}>")
+            }
+        }
         RustType::Ref(inner) => format!("&{}", generate_type(inner)),
         RustType::DynTrait(name) => format!("dyn {name}"),
         RustType::QSelf {
@@ -78,6 +93,43 @@ pub fn generate_type(ty: &RustType) -> String {
             };
             format!("<{} as {trait_str}>::{item}", generate_type(qself))
         }
+    }
+}
+
+/// `PrimitiveIntKind` を Rust ソース表現に変換 (I-387)。
+fn generate_primitive_int(kind: PrimitiveIntKind) -> &'static str {
+    match kind {
+        PrimitiveIntKind::Usize => "usize",
+        PrimitiveIntKind::Isize => "isize",
+        PrimitiveIntKind::I8 => "i8",
+        PrimitiveIntKind::I16 => "i16",
+        PrimitiveIntKind::I32 => "i32",
+        PrimitiveIntKind::I64 => "i64",
+        PrimitiveIntKind::I128 => "i128",
+        PrimitiveIntKind::U8 => "u8",
+        PrimitiveIntKind::U16 => "u16",
+        PrimitiveIntKind::U32 => "u32",
+        PrimitiveIntKind::U64 => "u64",
+        PrimitiveIntKind::U128 => "u128",
+        PrimitiveIntKind::F32 => "f32",
+    }
+}
+
+/// `StdCollectionKind` を Rust ソース表現の型名に変換 (I-387)。
+fn std_collection_name(kind: StdCollectionKind) -> &'static str {
+    match kind {
+        StdCollectionKind::Box => "Box",
+        StdCollectionKind::HashMap => "HashMap",
+        StdCollectionKind::BTreeMap => "BTreeMap",
+        StdCollectionKind::HashSet => "HashSet",
+        StdCollectionKind::BTreeSet => "BTreeSet",
+        StdCollectionKind::VecDeque => "VecDeque",
+        StdCollectionKind::Rc => "Rc",
+        StdCollectionKind::Arc => "Arc",
+        StdCollectionKind::Mutex => "Mutex",
+        StdCollectionKind::RwLock => "RwLock",
+        StdCollectionKind::RefCell => "RefCell",
+        StdCollectionKind::Cell => "Cell",
     }
 }
 

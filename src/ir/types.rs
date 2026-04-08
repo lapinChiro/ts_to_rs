@@ -24,6 +24,75 @@ pub struct TraitRef {
     pub type_args: Vec<RustType>,
 }
 
+/// Rust 整数型および `f32` を表す (I-387)。
+///
+/// `f64` / `bool` / `String` / `()` は `RustType` 本体に専用 variant があるため
+/// ここには含めない。`usize`/`isize` 含む整数型と `f32` のみ。
+///
+/// 設計メモ: `src/ir/expr.rs::PrimitiveType` は「式定数 (`f64::NAN` 等) の所属型」を
+/// 表す別概念なので命名衝突を避けるため当 enum は `PrimitiveIntKind` とする。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PrimitiveIntKind {
+    /// `usize`
+    Usize,
+    /// `isize`
+    Isize,
+    /// `i8`
+    I8,
+    /// `i16`
+    I16,
+    /// `i32`
+    I32,
+    /// `i64`
+    I64,
+    /// `i128`
+    I128,
+    /// `u8`
+    U8,
+    /// `u16`
+    U16,
+    /// `u32`
+    U32,
+    /// `u64`
+    U64,
+    /// `u128`
+    U128,
+    /// `f32`
+    F32,
+}
+
+/// 既存専用 variant を持たない Rust std コレクション・スマートポインタ種別 (I-387)。
+///
+/// `Vec` / `Option` / `Result` / `Tuple` は `RustType` 本体の専用 variant を使用するため
+/// ここには含めない。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum StdCollectionKind {
+    /// `Box<T>`
+    Box,
+    /// `HashMap<K, V>`
+    HashMap,
+    /// `BTreeMap<K, V>`
+    BTreeMap,
+    /// `HashSet<T>`
+    HashSet,
+    /// `BTreeSet<T>`
+    BTreeSet,
+    /// `VecDeque<T>`
+    VecDeque,
+    /// `Rc<T>`
+    Rc,
+    /// `Arc<T>`
+    Arc,
+    /// `Mutex<T>`
+    Mutex,
+    /// `RwLock<T>`
+    RwLock,
+    /// `RefCell<T>`
+    RefCell,
+    /// `Cell<T>`
+    Cell,
+}
+
 /// Represents a Rust type.
 #[derive(Debug, Clone, PartialEq)]
 pub enum RustType {
@@ -64,12 +133,35 @@ pub enum RustType {
     Any,
     /// `std::convert::Infallible` (corresponds to TypeScript `never`)
     Never,
-    /// A user-defined named type, optionally with generic type arguments (e.g., `Point`, `Box<T>`)
+    /// A user-defined named type, optionally with generic type arguments (e.g., `Point`, `HTTPException`).
+    ///
+    /// **I-387 以降、本 variant は user 定義型のみに限定される**。型変数は `TypeVar`、
+    /// Rust std 整数型は `Primitive`、std コレクションは `StdCollection` を使用する。
     Named {
         /// Type name
         name: String,
         /// Generic type arguments (empty if not generic)
         type_args: Vec<RustType>,
+    },
+    /// 型パラメータ参照 (I-387)。`convert_ts_type` が
+    /// `SyntheticTypeRegistry::is_in_type_param_scope(name)` の判定で構築する。
+    ///
+    /// 下流コード (`substitute` / `collect_type_vars` / `generate_stub_structs`) は
+    /// `Named` との区別を構造的に行えるようになり、名前文字列マッチに依存しない。
+    TypeVar {
+        /// 型変数名 (例: "T", "U", "E")
+        name: String,
+    },
+    /// Rust 整数型および `f32` (I-387)。`f64`/`bool`/`String`/`()` は専用 variant を使う。
+    Primitive(PrimitiveIntKind),
+    /// Rust std コレクション / スマートポインタ (I-387)。
+    ///
+    /// `Vec`/`Option`/`Result`/`Tuple` 以外の std 汎用コンテナを構造化する。
+    StdCollection {
+        /// コレクション種別
+        kind: StdCollectionKind,
+        /// 型引数 (例: `HashMap<K, V>` → `[K, V]`、`Box<T>` → `[T]`)
+        args: Vec<RustType>,
     },
     /// A reference type: `&T` (e.g., `&dyn Greeter`)
     Ref(Box<RustType>),
@@ -102,6 +194,8 @@ impl RustType {
             RustType::Named { name, type_args } => {
                 name == param || type_args.iter().any(|a| a.uses_param(param))
             }
+            RustType::TypeVar { name } => name == param,
+            RustType::StdCollection { args, .. } => args.iter().any(|a| a.uses_param(param)),
             RustType::Option(inner) | RustType::Vec(inner) | RustType::Ref(inner) => {
                 inner.uses_param(param)
             }

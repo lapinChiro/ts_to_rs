@@ -656,6 +656,52 @@ pub(crate) fn variant_name_for_type(ty: &RustType) -> String {
                 .unwrap_or(&trait_ref.name);
             format!("{}{trait_short}{item}", variant_name_for_type(qself))
         }
+        // I-387: 型変数は名前そのもの (例: `T` → `"T"`)
+        RustType::TypeVar { name } => name.clone(),
+        // I-387: 整数 primitive は型名 (例: `usize` → `"Usize"`)
+        RustType::Primitive(kind) => {
+            use crate::ir::PrimitiveIntKind::*;
+            match kind {
+                Usize => "Usize",
+                Isize => "Isize",
+                I8 => "I8",
+                I16 => "I16",
+                I32 => "I32",
+                I64 => "I64",
+                I128 => "I128",
+                U8 => "U8",
+                U16 => "U16",
+                U32 => "U32",
+                U64 => "U64",
+                U128 => "U128",
+                F32 => "F32",
+            }
+            .to_string()
+        }
+        // I-387: std コレクション (例: `HashMap<K, V>` → `HashMapKV`)
+        RustType::StdCollection { kind, args } => {
+            use crate::ir::StdCollectionKind::*;
+            let base = match kind {
+                Box => "Box",
+                HashMap => "HashMap",
+                BTreeMap => "BTreeMap",
+                HashSet => "HashSet",
+                BTreeSet => "BTreeSet",
+                VecDeque => "VecDeque",
+                Rc => "Rc",
+                Arc => "Arc",
+                Mutex => "Mutex",
+                RwLock => "RwLock",
+                RefCell => "RefCell",
+                Cell => "Cell",
+            };
+            if args.is_empty() {
+                base.to_string()
+            } else {
+                let parts: Vec<String> = args.iter().map(variant_name_for_type).collect();
+                format!("{base}{}", parts.join(""))
+            }
+        }
     }
 }
 

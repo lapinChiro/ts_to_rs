@@ -297,6 +297,9 @@ impl IrVisitor for TagRecorder {
             RustType::Ref(_) => "ty:ref",
             RustType::DynTrait(_) => "ty:dyntrait",
             RustType::QSelf { .. } => "ty:qself",
+            RustType::TypeVar { .. } => "ty:typevar",
+            RustType::Primitive(_) => "ty:primitive",
+            RustType::StdCollection { .. } => "ty:stdcollection",
         });
         walk_rust_type(self, ty);
     }

@@ -38,7 +38,7 @@ pub use naming::{
 };
 pub use pattern::{Pattern, PatternCtor};
 pub use stmt::{MatchArm, Stmt};
-pub use types::{RustType, TraitRef, TypeParam, Visibility};
+pub use types::{PrimitiveIntKind, RustType, StdCollectionKind, TraitRef, TypeParam, Visibility};
 
 #[cfg(test)]
 mod test_fixtures;

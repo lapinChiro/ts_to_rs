@@ -311,6 +311,10 @@ pub(crate) fn is_valid_trait_bound(
         | RustType::Fn { .. }
         | RustType::Result { .. }
         | RustType::Ref(_) => false,
+        // I-387: 型変数 / 整数 primitive / std コレクションは trait ではない
+        RustType::TypeVar { .. }
+        | RustType::Primitive(_)
+        | RustType::StdCollection { .. } => false,
         // Named 型: TypeRegistry + SyntheticTypeRegistry で判定
         RustType::Named { name, .. } => {
             if let Some(td) = reg.get(name) {

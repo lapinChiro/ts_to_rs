@@ -527,13 +527,20 @@ pub fn walk_rust_type<V: IrVisitor + ?Sized>(v: &mut V, ty: &RustType) {
             }
             v.visit_rust_type(return_type);
         }
+        RustType::StdCollection { args, .. } => {
+            for a in args {
+                v.visit_rust_type(a);
+            }
+        }
         RustType::Unit
         | RustType::String
         | RustType::F64
         | RustType::Bool
         | RustType::Any
         | RustType::Never
-        | RustType::DynTrait(_) => {}
+        | RustType::DynTrait(_)
+        | RustType::TypeVar { .. }
+        | RustType::Primitive(_) => {}
     }
 }
 

@@ -161,13 +161,19 @@ pub fn walk_rust_type<F: IrFolder + ?Sized>(f: &mut F, ty: RustType) -> RustType
             params: params.into_iter().map(|p| f.fold_rust_type(p)).collect(),
             return_type: Box::new(f.fold_rust_type(*return_type)),
         },
+        RustType::StdCollection { kind, args } => RustType::StdCollection {
+            kind,
+            args: args.into_iter().map(|a| f.fold_rust_type(a)).collect(),
+        },
         ty @ (RustType::Unit
         | RustType::String
         | RustType::F64
         | RustType::Bool
         | RustType::Any
         | RustType::Never
-        | RustType::DynTrait(_)) => ty,
+        | RustType::DynTrait(_)
+        | RustType::TypeVar { .. }
+        | RustType::Primitive(_)) => ty,
     }
 }
 
