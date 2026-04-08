@@ -237,6 +237,93 @@ T2.A-ii (`E` の dangling) の root cause 候補の 1 つ。Rust に「同名複
 
 ---
 
+### T-7: `RustType` の Rust builtin 型の表現が不統一
+
+**発見**: 2026-04-08 (T2.A-iv 実装中、`collect_free_type_vars` の false positive 解析時)
+
+**箇所**: `src/ir/types.rs::RustType` 列挙体 と `convert_ts_type` (Rust 側)
+
+**現状**: `RustType` 列挙体には `Vec(Box<RustType>)` / `Option(Box<RustType>)` /
+`Result { ok, err }` / `Tuple(Vec<...>)` 等の dedicated variant が存在するが、
+`HashMap` / `HashSet` / `Box` / `Rc` / `Arc` / `Mutex` / `String` は **dedicated
+variant が無く**、`RustType::Named { name: "HashMap", type_args: [...] }` として
+構築される。
+
+**インパクト**:
+- IR を walk するすべての解析コードが「`RustType::Named { name }` が来たら、それが
+  Rust builtin かどうか知らないといけない」という**暗黙の不変条件**を背負う
+- T2.A-iv の `collect_free_type_vars` では
+  `RUST_BUILTIN_TYPES` 配列 (`src/pipeline/external_struct_generator/mod.rs:30-33`)
+  を import して filter しているが、将来 builtin 型が追加されたり、別の解析でも
+  同じ filter を再実装することになる
+- 同じリストが 2 箇所以上に分散すると DRY 違反が発生し、リスト漏れによる silent
+  regression のリスク
+
+**発見経緯**: T2.A-iv 実装時に debug ログで `var=headers ann=Named { name:
+"HashMap", type_args: [...] } free_vars=["HashMap"]` のように Rust builtin が
+free type variable として誤検出されていたため、`RUST_BUILTIN_TYPES` filter を追加
+した。現状で動いているが根本解決は IR 統一。
+
+**推奨対応**:
+1. `RustType` に `HashMap { key, value }` / `Box(Box<RustType>)` / `Rc(Box<RustType>)` /
+   `Arc(Box<RustType>)` / `Mutex(Box<RustType>)` / `String` 等の dedicated variant を
+   追加し、`convert_ts_type` / 関連コンストラクタを更新
+2. または現状維持で `RUST_BUILTIN_TYPES` を単一 source に確定し、関連解析コードの
+   filter 責務を共通 helper に集約
+3. 選択は「IR の原理的正しさ」vs「変更影響範囲 (grep で数百箇所)」のトレードオフ
+   検討が必要
+
+**優先度判定**: L2 (設計基盤) — IR 定義の不統一は長期的に拡大する技術的負債。
+I-382 本体完了後の refactoring PRD 候補。
+
+---
+
+### T-8: `collect_free_type_vars` が「free type variable」と「未知の外部型」を区別できない
+
+**発見**: 2026-04-08 (T2.A-iv 実装中、debug ログで false positive を確認)
+
+**箇所**: `src/pipeline/type_resolver/helpers.rs::collect_free_type_vars`
+
+**現状**: 構造的ルール (registry 未登録 + 既知 scope 無し + builtin でない + path 無し)
+で「free type variable」を抽出しているが、実際には以下の 2 クラスを区別していない:
+
+1. **真の free type variable**: 生成元 generic binding が失われた generic param
+   (例: `SSGParamsMiddleware<E>` 由来の `E`) — scope に push して型変数扱いするのが正しい
+2. **未知の外部型 / utility type 展開漏れ / module path**: `OmitWSEventsOnOpen`,
+   `Deno.UpgradeWebSocketOptions` 等 — これらは型変数ではなく、本来は registry に
+   登録されるべき (あるいは utility type として展開されるべき) external/user 型
+
+**インパクト**:
+- (2) のケースを scope に push してしまうと、下流の synthetic enum の `type_params`
+  に `OmitWSEventsOnOpen` のような名前が登場する可能性があり、Rust コードとしては
+  `enum _Foo<OmitWSEventsOnOpen>` (構文上は valid な generic parameter 名) として
+  emit される。これは **silent semantic loss** 候補: 呼び出し側で
+  `_Foo<SomeConcreteType>` を期待する文脈と一致せず、意図しない型として扱われる
+- 現状 Hono ベンチでは observable な regression は無い (bench clean 114/158 維持)
+  が、これは (2) のクラスが偶然 synthetic enum の type_params に昇格しなかった (=
+  `extract_used_type_params` の `uses_param` チェックで該当しなかった) から
+
+**発見経緯**: T2.A-iv debug ログで `free_vars=["OmitWSEventsOnOpen"]`,
+`free_vars=["Deno.UpgradeWebSocketOptions"]` のような出力が観測された。これらは
+明らかに TypeScript の型変数ではないが、現行 filter では排除できない。
+
+**推奨対応**:
+1. (2) は本来 **別経路で解消すべき問題**: `OmitWSEventsOnOpen` のような utility
+   type 展開漏れは `type_aliases.rs` / `mapped_type.rs` 側で resolve すべきで、
+   `collect_free_type_vars` の役割ではない
+2. 当面の暫定対応: `collect_free_type_vars` に「名前が短い (1-2 文字) または T/K/V/E/S
+   プレフィックスで始まる」等の heuristic を追加する案もあるが、**heuristic は
+   CLAUDE.md の「最も理想的でクリーンな実装」に反する** ため不採用
+3. 構造的対応: 先に (2) のクラスを別 PRD で解消 (registry 登録漏れ / utility type
+   展開の完全化) してから、`collect_free_type_vars` を「registry 未登録 + scope 無し +
+   builtin でない + path 無し」ルールのままにする
+
+**優先度判定**: L2 候補 — 現状 silent で Hono regression 無しだが、将来の generic
+関連タスクで synthetic enum の type_params に昇格した場合に silent semantic loss
+化するリスクがある。T-5 (dedup 脆弱性) と並び、T2.A 完了後の早期対応候補。
+
+---
+
 ## 完了済み (参照用、定期削除)
 
 なし

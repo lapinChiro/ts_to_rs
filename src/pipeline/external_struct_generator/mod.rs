@@ -27,7 +27,7 @@ use crate::ts_type_info::resolve::typedef::monomorphize_type_params;
 /// builtin 流入も構造的に遮断された。`Some` / `None` / `Ok` / `Err` は型名ではなく
 /// `Option` / `Result` の **variant コンストラクタ** であるため、型名フィルタ
 /// である本定数からは除外する。
-const RUST_BUILTIN_TYPES: &[&str] = &[
+pub(crate) const RUST_BUILTIN_TYPES: &[&str] = &[
     "String", "Vec", "HashMap", "HashSet", "Option", "Box", "Result", "Rc", "Arc", "Mutex", "bool",
     "f64", "i64", "i128", "u8", "u32", "usize",
 ];

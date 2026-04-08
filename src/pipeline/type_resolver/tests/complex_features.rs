@@ -822,3 +822,49 @@ fn test_class_method_generic_propagates_to_synthetic_union_via_type_resolver() {
             .collect::<Vec<_>>()
     );
 }
+
+/// I-383 T2.A-iv: When a const variable is annotated with a generic interface
+/// call signature (e.g., `SSGParamsMiddleware: <E extends Env>(...)`),
+/// `convert_ts_type` flattens it into `RustType::Fn { ...with E... }` and the
+/// `<E>` binding is lost. Without expected-type free-var extraction in
+/// `resolve_arrow_expr`, the inner arrow body would register synthetic union
+/// types containing free `E` references and leak them as dangling external refs.
+///
+/// This test verifies that no synthetic enum is generated with `E` referenced
+/// from a member type but absent from `type_params`.
+#[test]
+fn test_arrow_inheriting_generic_interface_does_not_leak_free_type_var() {
+    let source = r#"
+        type Ctx<E> = { env: E };
+        interface GenericMiddleware {
+            <E extends string = string>(handler: (c: Ctx<E>) => string): (c: Ctx<E>) => string;
+        }
+        const wrap: GenericMiddleware = (handler) => (c) => handler(c);
+    "#;
+    let (_, synthetic) = resolve_with_synthetic(source);
+
+    // No synthetic enum should reference `E` in its members without also
+    // declaring `E` in `type_params`. (E leaking would mean an Item::Enum exists
+    // whose variant data uses E but type_params doesn't list E.)
+    let leaked = synthetic.all_items().into_iter().find(|item| {
+        if let crate::ir::Item::Enum {
+            type_params,
+            variants,
+            ..
+        } = item
+        {
+            let declares_e = type_params.iter().any(|tp| tp.name == "E");
+            let uses_e_in_variant = variants.iter().any(|v| {
+                v.data.as_ref().is_some_and(|d| d.uses_param("E"))
+                    || v.fields.iter().any(|f| f.ty.uses_param("E"))
+            });
+            uses_e_in_variant && !declares_e
+        } else {
+            false
+        }
+    });
+    assert!(
+        leaked.is_none(),
+        "synthetic enum leaked free type var E (uses E in variant but absent in type_params): {leaked:?}"
+    );
+}

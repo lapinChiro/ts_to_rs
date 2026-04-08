@@ -793,9 +793,24 @@ impl<'a> TypeResolver<'a> {
 
         // If no explicit return annotation, check expected type from parent context
         // (e.g., variable type annotation: `const f: FnType = () => ...`)
+        // I-383 T2.A-iv: also extract free type variables from the expected type
+        // and push them into `synthetic.type_param_scope` for the body resolution.
+        // When the expected type is a `RustType::Fn` flattened from a generic
+        // interface call signature (e.g., `SSGParamsMiddleware: <E extends Env>(...)`),
+        // the `<E>` binding has been lost and `E` appears as a free `Named` ref in
+        // the Fn. Without this push, synthetic union/struct registrations during
+        // body resolution would leak `E` as a dangling external ref.
+        let mut expected_free_var_scope: Option<Vec<String>> = None;
         let expected_param_types = if self.current_fn_return_type.is_none() {
             let arrow_span = Span::from_swc(arrow.span);
             if let Some(expected) = self.result.expected_types.get(&arrow_span).cloned() {
+                let known: Vec<String> = self.type_param_constraints.keys().cloned().collect();
+                let mut free_vars = Vec::new();
+                collect_free_type_vars(&expected, self.registry, &known, &mut free_vars);
+                if !free_vars.is_empty() {
+                    expected_free_var_scope = Some(self.synthetic.push_type_param_scope(free_vars));
+                }
+
                 let (ret, params) = resolve_fn_type_info(&expected, self.registry);
                 if let Some(ret_ty) = ret {
                     self.current_fn_return_type = unwrap_promise_and_unit(ret_ty);
@@ -876,6 +891,9 @@ impl<'a> TypeResolver<'a> {
 
         let return_type = self.current_fn_return_type.take().unwrap_or(RustType::Unit);
         self.current_fn_return_type = prev_return_type;
+        if let Some(prev) = expected_free_var_scope {
+            self.synthetic.restore_type_param_scope(prev);
+        }
         if let Some((prev_constraints, prev_scope)) = prev_state {
             self.type_param_constraints = prev_constraints;
             self.synthetic.restore_type_param_scope(prev_scope);
@@ -915,9 +933,19 @@ impl<'a> TypeResolver<'a> {
         }
 
         // If no explicit return annotation, check expected type from parent context
+        // I-383 T2.A-iv: extract free type variables from expected type and push them
+        // (same rationale as resolve_arrow_expr).
+        let mut expected_free_var_scope: Option<Vec<String>> = None;
         if self.current_fn_return_type.is_none() {
             let fn_span = Span::from_swc(fn_expr.function.span);
             if let Some(expected) = self.result.expected_types.get(&fn_span).cloned() {
+                let known: Vec<String> = self.type_param_constraints.keys().cloned().collect();
+                let mut free_vars = Vec::new();
+                collect_free_type_vars(&expected, self.registry, &known, &mut free_vars);
+                if !free_vars.is_empty() {
+                    expected_free_var_scope = Some(self.synthetic.push_type_param_scope(free_vars));
+                }
+
                 let (ret, _params) = resolve_fn_type_info(&expected, self.registry);
                 if let Some(ret_ty) = ret {
                     self.current_fn_return_type = unwrap_promise_and_unit(ret_ty);
@@ -943,6 +971,9 @@ impl<'a> TypeResolver<'a> {
 
         let return_type = self.current_fn_return_type.take().unwrap_or(RustType::Unit);
         self.current_fn_return_type = prev_return_type;
+        if let Some(prev) = expected_free_var_scope {
+            self.synthetic.restore_type_param_scope(prev);
+        }
         if let Some((prev_constraints, prev_scope)) = prev_state {
             self.type_param_constraints = prev_constraints;
             self.synthetic.restore_type_param_scope(prev_scope);

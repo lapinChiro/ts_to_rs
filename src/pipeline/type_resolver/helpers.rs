@@ -13,6 +13,103 @@ use crate::pipeline::ResolvedType;
 use crate::pipeline::SyntheticTypeRegistry;
 use crate::registry::{TypeDef, TypeRegistry};
 
+/// Walks a `RustType` and collects all `Named { name }` / `DynTrait(name)`
+/// references where `name` is **not** a known type in `registry` and **not**
+/// already in the current `known_scope`.
+///
+/// I-383 T2.A-iv: such names are **free type variables** — generic parameters
+/// inherited from a generic interface call signature (e.g., `SSGParamsMiddleware`'s
+/// `<E extends Env>(...)`) that have been flattened into a `RustType::Fn` by
+/// `convert_ts_type` but lost their declaring generic context. When such a Fn
+/// becomes the expected type of an arrow expression, the arrow's body resolves
+/// nested expressions whose synthetic union/struct registrations would otherwise
+/// leak these free variables as dangling external refs.
+///
+/// Pushing the extracted free variables into `synthetic.type_param_scope` for
+/// the duration of the init expression's resolution causes the synthetic types
+/// to declare them in their `Item::Enum.type_params` (rather than treating them
+/// as external builtin types), eliminating the leak.
+///
+/// # Structural rule (not heuristic)
+///
+/// A `Named { name }` is classified as free iff:
+/// - `registry.get(name).is_none()` (not a user-defined or external type), AND
+/// - `name` is not present in `known_scope` (not a class/method generic from an
+///   outer lexical scope already pushed), AND
+/// - `name` is not a Rust standard library builtin type
+///   (`String`/`Vec`/`HashMap`/`Box`/...) — `convert_ts_type` constructs these as
+///   `RustType::Named` with the Rust name (rather than dedicated enum variants),
+///   so they appear here despite never being type variables, AND
+/// - `name` is not a path-qualified type (contains `::`), e.g.,
+///   `serde_json::Value`. Path-qualified names are external module paths, never
+///   type variables.
+///
+/// This is a structural rule because every legitimate type name must originate
+/// from one of the excluded categories above. Anything else is by definition a
+/// leaked generic binding.
+pub(super) fn collect_free_type_vars(
+    ty: &RustType,
+    registry: &TypeRegistry,
+    known_scope: &[String],
+    out: &mut Vec<String>,
+) {
+    fn is_free(name: &str, registry: &TypeRegistry, known_scope: &[String]) -> bool {
+        registry.get(name).is_none()
+            && !known_scope.iter().any(|s| s == name)
+            && !crate::pipeline::external_struct_generator::RUST_BUILTIN_TYPES.contains(&name)
+            && !name.contains("::")
+    }
+    match ty {
+        RustType::Named { name, type_args }
+            if is_free(name, registry, known_scope) && !out.contains(name) =>
+        {
+            out.push(name.clone());
+            for arg in type_args {
+                collect_free_type_vars(arg, registry, known_scope, out);
+            }
+        }
+        RustType::Named { type_args, .. } => {
+            for arg in type_args {
+                collect_free_type_vars(arg, registry, known_scope, out);
+            }
+        }
+        RustType::DynTrait(name) if is_free(name, registry, known_scope) && !out.contains(name) => {
+            out.push(name.clone());
+        }
+        RustType::DynTrait(_) => {}
+        RustType::Option(inner) | RustType::Vec(inner) | RustType::Ref(inner) => {
+            collect_free_type_vars(inner, registry, known_scope, out);
+        }
+        RustType::Result { ok, err } => {
+            collect_free_type_vars(ok, registry, known_scope, out);
+            collect_free_type_vars(err, registry, known_scope, out);
+        }
+        RustType::Tuple(elems) => {
+            for elem in elems {
+                collect_free_type_vars(elem, registry, known_scope, out);
+            }
+        }
+        RustType::Fn {
+            params,
+            return_type,
+        } => {
+            for p in params {
+                collect_free_type_vars(p, registry, known_scope, out);
+            }
+            collect_free_type_vars(return_type, registry, known_scope, out);
+        }
+        RustType::QSelf {
+            qself, trait_ref, ..
+        } => {
+            collect_free_type_vars(qself, registry, known_scope, out);
+            for arg in &trait_ref.type_args {
+                collect_free_type_vars(arg, registry, known_scope, out);
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Extracts the property name from an object literal key.
 pub(super) fn extract_prop_name(key: &ast::PropName) -> Option<String> {
     match key {
