@@ -335,10 +335,15 @@ fn test_resolve_named_fn_variable_propagates_arg_expected_type() {
         "#,
     );
     // The object literal argument should have expected type from Encoder's first param
-    let has_expected = res
-        .expected_types
-        .values()
-        .any(|t| matches!(t, RustType::StdCollection { kind: crate::ir::StdCollectionKind::HashMap, .. }));
+    let has_expected = res.expected_types.values().any(|t| {
+        matches!(
+            t,
+            RustType::StdCollection {
+                kind: crate::ir::StdCollectionKind::HashMap,
+                ..
+            }
+        )
+    });
     assert!(
         has_expected,
         "object literal argument should have expected type from Named fn variable's param type"

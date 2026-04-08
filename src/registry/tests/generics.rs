@@ -213,9 +213,8 @@ fn test_substitute_types_enum_variant_fields() {
                 "Ok".to_string(),
                 vec![(
                     "value".to_string(),
-                    RustType::Named {
+                    RustType::TypeVar {
                         name: "T".to_string(),
-                        type_args: vec![],
                     },
                 )
                     .into()],
@@ -268,9 +267,8 @@ fn test_substitute_types_enum_multiple_params() {
                 "Ok".to_string(),
                 vec![(
                     "value".to_string(),
-                    RustType::Named {
+                    RustType::TypeVar {
                         name: "T".to_string(),
-                        type_args: vec![],
                     },
                 )
                     .into()],
@@ -279,9 +277,8 @@ fn test_substitute_types_enum_multiple_params() {
                 "Err".to_string(),
                 vec![(
                     "error".to_string(),
-                    RustType::Named {
+                    RustType::TypeVar {
                         name: "E".to_string(),
-                        type_args: vec![],
                     },
                 )
                     .into()],
@@ -310,9 +307,8 @@ fn test_substitute_types_enum_multiple_params() {
 fn test_field_def_substitute_replaces_type_param() {
     let field = FieldDef {
         name: "value".to_string(),
-        ty: RustType::Named {
+        ty: RustType::TypeVar {
             name: "T".to_string(),
-            type_args: vec![],
         },
         optional: true,
     };
@@ -339,9 +335,8 @@ fn test_field_def_substitute_empty_bindings_unchanged() {
 fn test_param_def_substitute_replaces_type_param() {
     let param = ParamDef {
         name: "input".to_string(),
-        ty: RustType::Named {
+        ty: RustType::TypeVar {
             name: "T".to_string(),
-            type_args: vec![],
         },
         optional: true,
         has_default: true,
@@ -359,16 +354,14 @@ fn test_method_signature_substitute_replaces_params_and_return() {
     let sig = MethodSignature {
         params: vec![ParamDef {
             name: "x".to_string(),
-            ty: RustType::Named {
+            ty: RustType::TypeVar {
                 name: "T".to_string(),
-                type_args: vec![],
             },
             optional: false,
             has_default: false,
         }],
-        return_type: Some(RustType::Named {
+        return_type: Some(RustType::TypeVar {
             name: "T".to_string(),
-            type_args: vec![],
         }),
         has_rest: false,
         type_params: vec![],
@@ -385,9 +378,8 @@ fn test_method_signature_substitute_none_return_type_preserved() {
     let sig = MethodSignature {
         params: vec![ParamDef::new(
             "x".to_string(),
-            RustType::Named {
+            RustType::TypeVar {
                 name: "T".to_string(),
-                type_args: vec![],
             },
         )],
         return_type: None,
@@ -408,9 +400,8 @@ fn test_method_signature_substitute_none_return_type_preserved() {
 fn test_const_field_substitute_replaces_type_param() {
     let field = ConstField {
         name: "key".to_string(),
-        ty: RustType::Named {
+        ty: RustType::TypeVar {
             name: "T".to_string(),
-            type_args: vec![],
         },
         string_literal_value: Some("hello".to_string()),
     };
@@ -424,9 +415,8 @@ fn test_const_field_substitute_replaces_type_param() {
 #[test]
 fn test_const_element_substitute_replaces_type_param() {
     let elem = ConstElement {
-        ty: RustType::Named {
+        ty: RustType::TypeVar {
             name: "T".to_string(),
-            type_args: vec![],
         },
         string_literal_value: Some("world".to_string()),
     };
@@ -486,9 +476,8 @@ fn test_substitute_types_struct_methods() {
             "get".to_string(),
             vec![MethodSignature {
                 params: vec![ParamDef::new("key".to_string(), RustType::String)],
-                return_type: Some(RustType::Named {
+                return_type: Some(RustType::TypeVar {
                     name: "T".to_string(),
-                    type_args: vec![],
                 }),
                 has_rest: false,
                 type_params: vec![],
@@ -526,9 +515,8 @@ fn test_substitute_types_struct_constructor() {
         constructor: Some(vec![MethodSignature {
             params: vec![ParamDef::new(
                 "value".to_string(),
-                RustType::Named {
+                RustType::TypeVar {
                     name: "T".to_string(),
-                    type_args: vec![],
                 },
             )],
             return_type: None,
@@ -567,14 +555,12 @@ fn test_substitute_types_struct_call_signatures() {
         call_signatures: vec![MethodSignature {
             params: vec![ParamDef::new(
                 "input".to_string(),
-                RustType::Named {
+                RustType::TypeVar {
                     name: "T".to_string(),
-                    type_args: vec![],
                 },
             )],
-            return_type: Some(RustType::Named {
+            return_type: Some(RustType::TypeVar {
                 name: "T".to_string(),
-                type_args: vec![],
             }),
             has_rest: false,
             type_params: vec![],
@@ -605,16 +591,14 @@ fn test_substitute_types_function() {
         params: vec![
             ParamDef::new(
                 "input".to_string(),
-                RustType::Named {
+                RustType::TypeVar {
                     name: "T".to_string(),
-                    type_args: vec![],
                 },
             ),
             ParamDef::new("flag".to_string(), RustType::Bool),
         ],
-        return_type: Some(RustType::Vec(Box::new(RustType::Named {
+        return_type: Some(RustType::Vec(Box::new(RustType::TypeVar {
             name: "T".to_string(),
-            type_args: vec![],
         }))),
         has_rest: false,
     };
@@ -653,16 +637,14 @@ fn test_substitute_types_const_value() {
     let cv = TypeDef::ConstValue {
         fields: vec![ConstField {
             name: "key".to_string(),
-            ty: RustType::Named {
+            ty: RustType::TypeVar {
                 name: "T".to_string(),
-                type_args: vec![],
             },
             string_literal_value: Some("hello".to_string()),
         }],
         elements: vec![ConstElement {
-            ty: RustType::Named {
+            ty: RustType::TypeVar {
                 name: "T".to_string(),
-                type_args: vec![],
             },
             string_literal_value: None,
         }],
@@ -745,9 +727,8 @@ fn test_type_param_substitute_replaces_constraint() {
         name: "U".to_string(),
         constraint: Some(RustType::Named {
             name: "Container".to_string(),
-            type_args: vec![RustType::Named {
+            type_args: vec![RustType::TypeVar {
                 name: "T".to_string(),
-                type_args: vec![],
             }],
         }),
     };
@@ -791,23 +772,20 @@ fn test_substitute_types_function_substitutes_type_param_constraints() {
                 name: "U".to_string(),
                 constraint: Some(RustType::Named {
                     name: "Container".to_string(),
-                    type_args: vec![RustType::Named {
+                    type_args: vec![RustType::TypeVar {
                         name: "T".to_string(),
-                        type_args: vec![],
                     }],
                 }),
             },
         ],
         params: vec![ParamDef::new(
             "x".to_string(),
-            RustType::Named {
+            RustType::TypeVar {
                 name: "U".to_string(),
-                type_args: vec![],
             },
         )],
-        return_type: Some(RustType::Named {
+        return_type: Some(RustType::TypeVar {
             name: "T".to_string(),
-            type_args: vec![],
         }),
         has_rest: false,
     };

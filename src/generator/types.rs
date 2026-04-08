@@ -452,7 +452,11 @@ mod tests {
                 kind,
                 args: vec![RustType::String],
             };
-            assert_eq!(generate_type(&ty), format!("{base}<String>"), "kind={kind:?}");
+            assert_eq!(
+                generate_type(&ty),
+                format!("{base}<String>"),
+                "kind={kind:?}"
+            );
         }
     }
 

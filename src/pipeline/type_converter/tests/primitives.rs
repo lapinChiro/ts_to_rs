@@ -303,8 +303,5 @@ fn test_convert_ts_type_bigint_keyword_returns_i128() {
         &TypeRegistry::new(),
     )
     .unwrap();
-    assert_eq!(
-        ty,
-        RustType::Primitive(crate::ir::PrimitiveIntKind::I128)
-    );
+    assert_eq!(ty, RustType::Primitive(crate::ir::PrimitiveIntKind::I128));
 }

@@ -240,9 +240,8 @@ fn test_generate_struct_monomorphizes_non_trait_constraint() {
         vec![
             (
                 "buffer",
-                RustType::Named {
+                RustType::TypeVar {
                     name: "TArrayBuffer".to_string(),
-                    type_args: vec![],
                 },
             ),
             ("byteLength", RustType::F64),
@@ -299,9 +298,8 @@ fn test_generate_struct_preserves_trait_constraint() {
         "GenericStruct",
         vec![(
             "value",
-            RustType::Named {
+            RustType::TypeVar {
                 name: "T".to_string(),
-                type_args: vec![],
             },
         )],
         vec![TypeParam {
@@ -326,9 +324,8 @@ fn test_generate_struct_preserves_trait_constraint() {
             // フィールド型は置換されない
             assert_eq!(
                 fields[0].ty,
-                RustType::Named {
-                    name: "T".to_string(),
-                    type_args: vec![],
+                RustType::TypeVar {
+                    name: "T".to_string()
                 }
             );
         }
@@ -347,9 +344,8 @@ fn test_generate_struct_monomorphizes_primitive_constraint() {
         "NumberBox",
         vec![(
             "value",
-            RustType::Named {
+            RustType::TypeVar {
                 name: "T".to_string(),
-                type_args: vec![],
             },
         )],
         vec![TypeParam {
@@ -387,16 +383,14 @@ fn test_generate_struct_monomorphizes_chained_constraints() {
         vec![
             (
                 "first",
-                RustType::Named {
+                RustType::TypeVar {
                     name: "T".to_string(),
-                    type_args: vec![],
                 },
             ),
             (
                 "second",
-                RustType::Named {
+                RustType::TypeVar {
                     name: "U".to_string(),
-                    type_args: vec![],
                 },
             ),
         ],
@@ -407,9 +401,8 @@ fn test_generate_struct_monomorphizes_chained_constraints() {
             },
             TypeParam {
                 name: "U".to_string(),
-                constraint: Some(RustType::Named {
+                constraint: Some(RustType::TypeVar {
                     name: "T".to_string(),
-                    type_args: vec![],
                 }),
             },
         ],
@@ -445,16 +438,14 @@ fn test_generate_struct_mixed_constrained_and_unconstrained_params() {
         vec![
             (
                 "data",
-                RustType::Named {
+                RustType::TypeVar {
                     name: "T".to_string(),
-                    type_args: vec![],
                 },
             ),
             (
                 "count",
-                RustType::Named {
+                RustType::TypeVar {
                     name: "U".to_string(),
-                    type_args: vec![],
                 },
             ),
         ],
@@ -483,9 +474,8 @@ fn test_generate_struct_mixed_constrained_and_unconstrained_params() {
             // data: T（置換なし）
             assert_eq!(
                 fields[0].ty,
-                RustType::Named {
-                    name: "T".to_string(),
-                    type_args: vec![],
+                RustType::TypeVar {
+                    name: "T".to_string()
                 }
             );
             // count: f64（U → f64 に置換）
@@ -507,9 +497,8 @@ fn test_generate_struct_monomorphizes_nested_type_param_reference() {
         "OptionalNumber",
         vec![(
             "value",
-            RustType::Option(Box::new(RustType::Named {
+            RustType::Option(Box::new(RustType::TypeVar {
                 name: "T".to_string(),
-                type_args: vec![],
             })),
         )],
         vec![TypeParam {

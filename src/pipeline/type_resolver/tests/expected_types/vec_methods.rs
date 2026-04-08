@@ -4,9 +4,8 @@ use super::*;
 
 /// Helper to create a RustType representing a type parameter (e.g., T, U).
 fn type_param(name: &str) -> RustType {
-    RustType::Named {
+    RustType::TypeVar {
         name: name.to_string(),
-        type_args: vec![],
     }
 }
 

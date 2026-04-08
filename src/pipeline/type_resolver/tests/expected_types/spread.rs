@@ -121,9 +121,8 @@ fn test_spread_generic_type_args_instantiation() {
             }],
             fields: vec![(
                 "value".to_string(),
-                RustType::Named {
+                RustType::TypeVar {
                     name: "T".to_string(),
-                    type_args: vec![],
                 },
             )
                 .into()],

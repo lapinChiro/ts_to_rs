@@ -312,9 +312,7 @@ pub(crate) fn is_valid_trait_bound(
         | RustType::Result { .. }
         | RustType::Ref(_) => false,
         // I-387: 型変数 / 整数 primitive / std コレクションは trait ではない
-        RustType::TypeVar { .. }
-        | RustType::Primitive(_)
-        | RustType::StdCollection { .. } => false,
+        RustType::TypeVar { .. } | RustType::Primitive(_) | RustType::StdCollection { .. } => false,
         // Named 型: TypeRegistry + SyntheticTypeRegistry で判定
         RustType::Named { name, .. } => {
             if let Some(td) = reg.get(name) {
@@ -366,6 +364,11 @@ pub(crate) fn monomorphize_type_params(
 
         for tp in remaining {
             match &tp.constraint {
+                // 制約が他の型パラメータ参照 (TypeVar) → 先行 param の monomorphization
+                // 結果を待つ。次パスで substitute 経由で concrete 型に解決される。
+                Some(RustType::TypeVar { .. }) => {
+                    new_remaining.push(tp);
+                }
                 Some(ty) if !is_valid_trait_bound(ty, reg, synthetic) => {
                     new_subs.insert(tp.name.clone(), ty.clone());
                 }
@@ -778,9 +781,8 @@ mod tests {
             type_params: vec![],
             fields: vec![FieldDef {
                 name: "x".to_string(),
-                ty: RustType::Named {
+                ty: RustType::TypeVar {
                     name: "T".to_string(),
-                    type_args: vec![],
                 },
                 optional: false,
             }],
@@ -810,9 +812,8 @@ mod tests {
                 "A".to_string(),
                 vec![FieldDef {
                     name: "val".to_string(),
-                    ty: RustType::Named {
+                    ty: RustType::TypeVar {
                         name: "T".to_string(),
-                        type_args: vec![],
                     },
                     optional: false,
                 }],
@@ -835,16 +836,14 @@ mod tests {
             type_params: vec![],
             params: vec![ParamDef {
                 name: "x".to_string(),
-                ty: RustType::Named {
+                ty: RustType::TypeVar {
                     name: "T".to_string(),
-                    type_args: vec![],
                 },
                 optional: false,
                 has_default: false,
             }],
-            return_type: Some(RustType::Named {
+            return_type: Some(RustType::TypeVar {
                 name: "T".to_string(),
-                type_args: vec![],
             }),
             has_rest: false,
         };
@@ -915,16 +914,15 @@ mod tests {
             },
             TypeParam {
                 name: "U".to_string(),
-                constraint: Some(RustType::Named {
+                constraint: Some(RustType::TypeVar {
                     name: "T".to_string(),
-                    type_args: vec![],
                 }),
             },
         ];
         let (remaining, subs) = monomorphize_type_params(params, &reg, &empty_syn());
         // イテレーティブ処理:
-        // Pass 1: T → F64 (monomorphized), U の制約 Named("T") → Named("T") は未登録で trait 仮定
-        //   → U は remaining に残り、substitute で Named("T") → F64 に
+        // Pass 1: T → F64 (monomorphized)、U の制約は TypeVar("T") → 型変数参照のため
+        //   deferred、remaining に残される。その後 substitute で制約が F64 に解決される。
         // Pass 2: U の制約 F64 は not valid trait bound → U も monomorphized
         assert!(remaining.is_empty());
         assert_eq!(subs.get("T"), Some(&RustType::F64));

@@ -43,31 +43,32 @@ Phase D      I-382 本体 (generate_stub_structs 削除)
 | T4d | BigInt / Record / Map / Set の構造化 routing | ✅ |
 | T5 | c1 (既存 variant 巻戻し) 構築サイト置換 | ✅ |
 | T6 | c2 (Primitive/StdCollection) 構築サイト置換 | ✅ |
-| T7 | (b) TypeVar 構築サイト置換 (production 完了、test fixture 残) | 🔄 部分完了 |
+| T7 | (b) TypeVar 構築サイト置換 (production + test fixtures + backward-compat ブランチ削除) | ✅ |
 | T8 | interim patch T2.A-i 処理 (scope push は lexical scope として残置、heuristic は walker に置換) | ✅ |
 | T9 | interim patch T2.A-ii 処理 (enter_type_param_scope を lexical scope semantics に relabel) | ✅ |
 | T10 | `collect_free_type_vars` heuristic 削除 + `collect_type_vars` walker | ✅ |
 | T11 | `extract_used_type_params` を walker-only 実装に置換 | ✅ |
 | T12 | 下流 pattern match 更新 | ✅ (T4b/T4c に統合) |
-| T13 | plan.md / master-plan.md / history.md 更新 | 🔄 本回更新中 |
-| T14 | /quality-check + Hono bench 最終確認 | ⏳ 未実施 |
+| T13 | plan.md / master-plan.md / history.md 更新 + レビュー指摘 2 件対応 (下記) | 🔄 本回更新中 |
+| T14 | /quality-check + Hono bench 最終確認 | ✅ (2259 pass / 0 clippy / bench 変動なし) |
 
 ### 直近アクション (次セッション開始時)
 
 **残作業を優先順に実施**:
 
-1. **T7 残り**: substitute.rs の **Named{"T"} 後方互換ブランチ削除** → 直後に壊れる
-   test fixtures (registry/tests/generics.rs 等の `Named{"T"}` 用途) を全て `TypeVar{"T"}` に
-   一括置換。
-   - 該当箇所: `src/ir/substitute.rs:34-49 fold_rust_type` の 2 本目 `if let Named` ブランチ
-   - 壊れるテスト: `src/registry/tests/generics.rs` 等の `ty: RustType::Named{name:"T"}` 系
-   - 置換方法: `bulk-edit-safety.md` 準拠でドライラン → レビュー → 実行
-2. **T14**: `/quality-check` (cargo fix / fmt / clippy / test) + 最終 `./scripts/hono-bench.sh`
-   再実行 (既に regression 0 確認済だが PRD completion criteria 的に必須)
-3. **T13 仕上げ**: master-plan.md / history.md を Phase C 完了状態に更新、session-todos.md
-   の T-2/T-5/T-6/T-7/T-8 対応項目を削除
-4. **PRD I-387 完了処理**: backlog/I-387 を archive、plan.md の「現在地」を Phase D に更新
-5. **Phase D 着手**: PRD-β (`TypeDef::ExternalUnsupported`) / PRD-γ (`__type` 是正) /
+1. **T13 仕上げ**: master-plan.md / history.md を Phase C 完了状態に更新、session-todos.md
+   の T-2/T-5/T-6/T-7/T-8 対応項目を削除。併せて以下のレビュー指摘 2 件を修正する:
+   - **レビュー指摘 A**: `src/ir/fold_tests.rs:164-189` の `ReplaceTWithF64` test fixture が
+     legacy `Named{"T"}` pattern をマッチしている。production が型変数を Named で構築する
+     ことは post-I-387 では起こらない dead pattern のため、TypeVar 基準に書き換える
+     (もしくは legacy pattern 保持を明記するコメントを付与)。
+   - **レビュー指摘 B**: 本 plan.md 「Semantic Safety 等価テスト 2 件」記述が stale。
+     実装は 3 件 (`test_generate_type_var_matches_legacy_named_literal` /
+     `test_generate_type_primitive_matches_legacy_named_literal` /
+     `test_generate_type_std_collection_matches_legacy_named_literal` @
+     `src/generator/types.rs`)。「3 件」に是正、file:line ペアを明記する。
+2. **PRD I-387 完了処理**: backlog/I-387 を archive、plan.md の「現在地」を Phase D に更新
+3. **Phase D 着手**: PRD-β (`TypeDef::ExternalUnsupported`) / PRD-γ (`__type` 是正) /
    PRD-δ (Pass 5c 再設計 = I-382 本体) の起票
 
 ### セッション中断ポイント (中断直前の状態)

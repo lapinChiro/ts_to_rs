@@ -7,9 +7,8 @@ use super::super::*;
 #[test]
 fn test_substitute_type_param_to_concrete() {
     // Named("T") に T→String → RustType::String
-    let ty = RustType::Named {
+    let ty = RustType::TypeVar {
         name: "T".to_string(),
-        type_args: vec![],
     };
     let bindings = HashMap::from([("T".to_string(), RustType::String)]);
     assert_eq!(ty.substitute(&bindings), RustType::String);
@@ -18,9 +17,8 @@ fn test_substitute_type_param_to_concrete() {
 #[test]
 fn test_substitute_vec_recursive() {
     // Vec<T> に T→F64 → Vec<F64>
-    let ty = RustType::Vec(Box::new(RustType::Named {
+    let ty = RustType::Vec(Box::new(RustType::TypeVar {
         name: "T".to_string(),
-        type_args: vec![],
     }));
     let bindings = HashMap::from([("T".to_string(), RustType::F64)]);
     assert_eq!(
@@ -32,9 +30,8 @@ fn test_substitute_vec_recursive() {
 #[test]
 fn test_substitute_option_recursive() {
     // Option<Vec<T>> に T→String → Option<Vec<String>>
-    let ty = RustType::Option(Box::new(RustType::Vec(Box::new(RustType::Named {
+    let ty = RustType::Option(Box::new(RustType::Vec(Box::new(RustType::TypeVar {
         name: "T".to_string(),
-        type_args: vec![],
     }))));
     let bindings = HashMap::from([("T".to_string(), RustType::String)]);
     assert_eq!(
@@ -54,9 +51,8 @@ fn test_substitute_unrelated_type_unchanged() {
 fn test_substitute_qself_substitutes_qself_inner() {
     // <T as Promise>::Output に T→String → <String as Promise>::Output
     let ty = RustType::QSelf {
-        qself: Box::new(RustType::Named {
+        qself: Box::new(RustType::TypeVar {
             name: "T".to_string(),
-            type_args: vec![],
         }),
         trait_ref: TraitRef {
             name: "Promise".to_string(),
@@ -86,9 +82,8 @@ fn test_substitute_qself_substitutes_trait_args() {
         }),
         trait_ref: TraitRef {
             name: "Container".to_string(),
-            type_args: vec![RustType::Named {
+            type_args: vec![RustType::TypeVar {
                 name: "T".to_string(),
-                type_args: vec![],
             }],
         },
         item: "Item".to_string(),
@@ -106,9 +101,8 @@ fn test_substitute_qself_substitutes_trait_args() {
 fn test_uses_param_qself_detects_param_in_qself_inner() {
     // <T as Promise>::Output が T を使用していることを検出
     let ty = RustType::QSelf {
-        qself: Box::new(RustType::Named {
+        qself: Box::new(RustType::TypeVar {
             name: "T".to_string(),
-            type_args: vec![],
         }),
         trait_ref: TraitRef {
             name: "Promise".to_string(),
@@ -124,15 +118,13 @@ fn test_uses_param_qself_detects_param_in_qself_inner() {
 fn test_uses_param_qself_detects_param_in_trait_args() {
     // <X as Container<T>>::Item が T を使用していることを検出
     let ty = RustType::QSelf {
-        qself: Box::new(RustType::Named {
+        qself: Box::new(RustType::TypeVar {
             name: "X".to_string(),
-            type_args: vec![],
         }),
         trait_ref: TraitRef {
             name: "Container".to_string(),
-            type_args: vec![RustType::Named {
+            type_args: vec![RustType::TypeVar {
                 name: "T".to_string(),
-                type_args: vec![],
             }],
         },
         item: "Item".to_string(),
@@ -144,9 +136,8 @@ fn test_uses_param_qself_detects_param_in_trait_args() {
 fn test_uses_param_qself_detects_param_as_trait_name() {
     // <X as T>::Item — trait 名そのものが型パラメータ（理論上の境界ケース）
     let ty = RustType::QSelf {
-        qself: Box::new(RustType::Named {
+        qself: Box::new(RustType::TypeVar {
             name: "X".to_string(),
-            type_args: vec![],
         }),
         trait_ref: TraitRef {
             name: "T".to_string(),
@@ -162,9 +153,8 @@ fn test_substitute_named_type_args() {
     // Container<T> に T→String → Container<String>
     let ty = RustType::Named {
         name: "Container".to_string(),
-        type_args: vec![RustType::Named {
+        type_args: vec![RustType::TypeVar {
             name: "T".to_string(),
-            type_args: vec![],
         }],
     };
     let bindings = HashMap::from([("T".to_string(), RustType::String)]);
@@ -184,9 +174,8 @@ fn test_struct_field_substitute_named_to_concrete() {
     let field = StructField {
         vis: Some(Visibility::Public),
         name: "value".to_string(),
-        ty: RustType::Named {
+        ty: RustType::TypeVar {
             name: "T".to_string(),
-            type_args: vec![],
         },
     };
     let bindings = HashMap::from([("T".to_string(), RustType::F64)]);
@@ -202,9 +191,8 @@ fn test_struct_field_substitute_named_to_concrete() {
 fn test_param_substitute_named_to_concrete() {
     let param = Param {
         name: "x".to_string(),
-        ty: Some(RustType::Named {
+        ty: Some(RustType::TypeVar {
             name: "T".to_string(),
-            type_args: vec![],
         }),
     };
     let bindings = HashMap::from([("T".to_string(), RustType::F64)]);
@@ -235,14 +223,12 @@ fn test_method_substitute_params_and_return_type() {
         has_mut_self: false,
         params: vec![Param {
             name: "input".to_string(),
-            ty: Some(RustType::Named {
+            ty: Some(RustType::TypeVar {
                 name: "T".to_string(),
-                type_args: vec![],
             }),
         }],
-        return_type: Some(RustType::Vec(Box::new(RustType::Named {
+        return_type: Some(RustType::Vec(Box::new(RustType::TypeVar {
             name: "T".to_string(),
-            type_args: vec![],
         }))),
         body: None,
     };
@@ -267,9 +253,8 @@ fn test_method_substitute_body_stmts() {
         body: Some(vec![Stmt::Let {
             mutable: false,
             name: "x".to_string(),
-            ty: Some(RustType::Named {
+            ty: Some(RustType::TypeVar {
                 name: "T".to_string(),
-                type_args: vec![],
             }),
             init: None,
         }]),
@@ -291,9 +276,8 @@ fn test_stmt_let_substitute_ty() {
     let stmt = Stmt::Let {
         mutable: false,
         name: "x".to_string(),
-        ty: Some(RustType::Named {
+        ty: Some(RustType::TypeVar {
             name: "T".to_string(),
-            type_args: vec![],
         }),
         init: None,
     };
@@ -313,9 +297,8 @@ fn test_stmt_let_substitute_ty() {
 fn test_expr_cast_substitute_target() {
     let expr = Expr::Cast {
         expr: Box::new(Expr::Ident("x".to_string())),
-        target: RustType::Named {
+        target: RustType::TypeVar {
             name: "T".to_string(),
-            type_args: vec![],
         },
     };
     let bindings = HashMap::from([("T".to_string(), RustType::F64)]);

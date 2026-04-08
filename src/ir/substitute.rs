@@ -1,6 +1,6 @@
 //! Type-parameter substitution on IR nodes via [`IrFolder`].
 //!
-//! `substitute` replaces type-parameter references (`RustType::Named { name: "T", .. }`)
+//! `substitute` replaces type-parameter references (`RustType::TypeVar { name: "T" }`)
 //! with concrete types from a binding map, used during monomorphization. I-377 以前は
 //! 各 IR 型ごとに手書きの `substitute` メソッドが実装されており、新しい variant が
 //! 追加されるたびに更新漏れが発生するリスクがあった。現在の実装は `IrFolder` 骨格
@@ -18,7 +18,7 @@ use std::collections::HashMap;
 
 /// 型パラメータ置換用の [`IrFolder`] 実装。
 ///
-/// `RustType::Named { name: "T", type_args: [] }` が `bindings` に存在する場合、
+/// `RustType::TypeVar { name: "T" }` が `bindings` に存在する場合、
 /// 対応する具体型で置換する。その他の variant は `walk_rust_type` に委譲し、
 /// 子ノード（`Option<T>` / `Vec<T>` / `Result<T, E>` / `Fn(T) -> U` / `QSelf` 等）
 /// を再帰的に fold する。
@@ -36,16 +36,6 @@ impl<'a> IrFolder for Substitute<'a> {
         if let RustType::TypeVar { name } = &ty {
             if let Some(concrete) = self.bindings.get(name.as_str()) {
                 return concrete.clone();
-            }
-        }
-        // I-387 移行中: 既存サイトが `Named { name: "T", type_args: [] }` で型変数を
-        // 表しているケースを後方互換として残す。T7 で構築サイトを TypeVar に置換し
-        // 終えた後、下記ブランチは削除する。
-        if let RustType::Named { name, type_args } = &ty {
-            if type_args.is_empty() {
-                if let Some(concrete) = self.bindings.get(name.as_str()) {
-                    return concrete.clone();
-                }
             }
         }
         walk_rust_type(self, ty)
@@ -75,7 +65,7 @@ impl RustType {
     /// 型パラメータ名を具体型に置換する。
     ///
     /// `bindings` は型パラメータ名 → 具体型のマッピング。
-    /// `Named { name: "T" }` が `bindings` に存在すれば具体型に置換し、
+    /// `TypeVar { name: "T" }` が `bindings` に存在すれば具体型に置換し、
     /// それ以外のバリアントは再帰的に処理する。
     pub fn substitute(&self, bindings: &HashMap<String, RustType>) -> RustType {
         fold_with(bindings, |f| f.fold_rust_type(self.clone()))
@@ -169,9 +159,8 @@ mod tests {
             },
             args: vec![Expr::Cast {
                 expr: Box::new(Expr::Ident("x".to_string())),
-                target: RustType::Named {
+                target: RustType::TypeVar {
                     name: "T".to_string(),
-                    type_args: vec![],
                 },
             }],
         };
@@ -283,9 +272,8 @@ mod tests {
         let arm = MatchArm {
             patterns: vec![Pattern::Literal(Expr::Cast {
                 expr: Box::new(Expr::IntLit(1)),
-                target: RustType::Named {
+                target: RustType::TypeVar {
                     name: "T".to_string(),
-                    type_args: vec![],
                 },
             })],
             guard: None,
@@ -326,9 +314,8 @@ mod tests {
                 ctor: crate::ir::PatternCtor::Builtin(crate::ir::BuiltinVariant::Some),
                 fields: vec![Pattern::Literal(Expr::Cast {
                     expr: Box::new(Expr::IntLit(1)),
-                    target: RustType::Named {
+                    target: RustType::TypeVar {
                         name: "T".to_string(),
-                        type_args: vec![],
                     },
                 })],
             },
