@@ -319,13 +319,11 @@ fn test_convert_fn_decl_throw_no_return_type_becomes_result_unit() {
     let item = items.last().unwrap().clone();
     match item {
         Item::Fn { return_type, .. } => {
+            // I-387: `()` は `RustType::Unit`
             assert_eq!(
                 return_type,
                 Some(RustType::Result {
-                    ok: Box::new(RustType::Named {
-                        name: "()".to_string(),
-                        type_args: vec![],
-                    }),
+                    ok: Box::new(RustType::Unit),
                     err: Box::new(RustType::String),
                 })
             );

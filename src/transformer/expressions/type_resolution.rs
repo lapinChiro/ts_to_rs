@@ -111,9 +111,9 @@ mod tests {
                 }],
                 fields: vec![FieldDef {
                     name: "value".to_string(),
-                    ty: RustType::Named {
+                    // I-387: 型変数は `TypeVar` で表現
+                    ty: RustType::TypeVar {
                         name: "T".to_string(),
-                        type_args: vec![],
                     },
                     optional: false,
                 }],

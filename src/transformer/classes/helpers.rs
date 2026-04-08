@@ -25,15 +25,15 @@ pub(super) fn make_struct(
 
 /// 型パラメータのリストから trait 参照を生成する。
 ///
-/// 例: `type_params: [T, U]` → `TraitRef { name: "FooTrait", type_args: [Named("T"), Named("U")] }`
+/// 例: `type_params: [T, U]` → `TraitRef { name: "FooTrait", type_args: [TypeVar("T"), TypeVar("U")] }`
+/// (I-387: 型パラメータ参照は構造化 `TypeVar` variant で表現)
 pub(super) fn make_trait_ref(name: &str, type_params: &[TypeParam]) -> TraitRef {
     TraitRef {
         name: name.to_string(),
         type_args: type_params
             .iter()
-            .map(|p| RustType::Named {
+            .map(|p| RustType::TypeVar {
                 name: p.name.clone(),
-                type_args: vec![],
             })
             .collect(),
     }

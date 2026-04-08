@@ -286,13 +286,13 @@ impl<'a> Transformer<'a> {
     /// Returns true when the expected type is a trait type (`Box<dyn Trait>`)
     /// and the source expression produces a concrete (non-Box) value that needs wrapping.
     fn needs_trait_box_coercion(&self, expected: &RustType, src_expr: &ast::Expr) -> bool {
+        // I-387: `Box<dyn Trait>` は `StdCollection { Box, [DynTrait] }` で表現
         let trait_name = match expected {
-            RustType::Named { name, type_args }
-                if name == "Box"
-                    && type_args.len() == 1
-                    && matches!(&type_args[0], RustType::DynTrait(_)) =>
-            {
-                if let RustType::DynTrait(t) = &type_args[0] {
+            RustType::StdCollection {
+                kind: crate::ir::StdCollectionKind::Box,
+                args,
+            } if args.len() == 1 && matches!(&args[0], RustType::DynTrait(_)) => {
+                if let RustType::DynTrait(t) = &args[0] {
                     t.as_str()
                 } else {
                     return false;
@@ -309,10 +309,13 @@ impl<'a> Transformer<'a> {
             return false;
         }
 
+        // I-387: 既に `Box<dyn Trait>` にラップ済の式は再 wrap しない
         if matches!(
-            expr_type,
-            RustType::Named { name, type_args }
-                if name == "Box" && type_args.first().is_some_and(|a| matches!(a, RustType::DynTrait(t) if t == trait_name))
+            &expr_type,
+            RustType::StdCollection {
+                kind: crate::ir::StdCollectionKind::Box,
+                args,
+            } if args.first().is_some_and(|a| matches!(a, RustType::DynTrait(t) if t == trait_name))
         ) {
             return false;
         }

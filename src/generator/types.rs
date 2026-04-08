@@ -209,11 +209,9 @@ mod tests {
 
     #[test]
     fn test_generate_type_result_unit_ok() {
+        // I-387: `()` は `RustType::Unit` で表現 (Named リテラルではない)
         let ty = RustType::Result {
-            ok: Box::new(RustType::Named {
-                name: "()".to_string(),
-                type_args: vec![],
-            }),
+            ok: Box::new(RustType::Unit),
             err: Box::new(RustType::String),
         };
         assert_eq!(generate_type(&ty), "Result<(), String>");

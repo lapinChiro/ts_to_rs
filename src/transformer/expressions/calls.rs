@@ -726,7 +726,9 @@ impl<'a> Transformer<'a> {
 fn is_box_dyn_trait(ty: Option<&RustType>) -> bool {
     matches!(
         ty,
-        Some(RustType::Named { name, type_args })
-            if name == "Box" && type_args.len() == 1 && matches!(&type_args[0], RustType::DynTrait(_))
+        Some(RustType::StdCollection {
+            kind: crate::ir::StdCollectionKind::Box,
+            args,
+        }) if args.len() == 1 && matches!(&args[0], RustType::DynTrait(_))
     )
 }

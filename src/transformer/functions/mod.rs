@@ -175,10 +175,8 @@ impl<'a> Transformer<'a> {
             .is_some_and(|block| contains_throw(&block.stmts));
 
         let (return_type, mut body) = if has_throw {
-            let ok_type = return_type.unwrap_or_else(|| RustType::Named {
-                name: "()".to_string(),
-                type_args: vec![],
-            });
+            // I-387: `()` は `RustType::Unit`
+            let ok_type = return_type.unwrap_or(RustType::Unit);
             let result_type = RustType::Result {
                 ok: Box::new(ok_type),
                 err: Box::new(RustType::String),
