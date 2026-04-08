@@ -38,10 +38,11 @@ Phase D             I-382 本体 (generate_stub_structs 削除)
 Phase A (調査債務 9 件) は **2026-04-08 完了**。結果は
 [`report/i382/phase-a-findings.md`](report/i382/phase-a-findings.md)。
 
-次アクションは Phase B:
-1. PRD-TypeVar 起票 (primary 変更点: `type_converter/mod.rs::convert_ts_type`)
-2. 並行で PRD-β (`TypeDef::ExternalUnsupported`) / PRD-γ (`__type` 是正) 起票
-3. Design Integrity / Semantic Safety / 凝集度レビューを経て確定
+次アクションは Phase B→C:
+1. **PRD I-387** (`RustType` 構造的精緻化) 起票済 2026-04-08
+   — `backlog/I-387-rust-type-structural-refinement.md`
+2. PRD-β (`TypeDef::ExternalUnsupported`) / PRD-γ (`__type` 是正) は I-387 完了後に起票
+3. I-387 の TDD 実装 (T1〜T14) 着手
 
 ---
 
