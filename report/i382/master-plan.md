@@ -11,31 +11,45 @@
 
 ---
 
-## 現状 (2026-04-08)
+## 現状 (2026-04-08, I-387 Phase C 実装中)
 
 ### 達成済の土台
 
-- **Cluster 1a (型パラメータ leak) 11/11 解消** — T2.A 完了
-- Hono 158 fixture での dangling refs: **23 件** に減少 (当初 34 → 23)
-- `cargo test --lib`: 2228 passed, 0 failed
-- Hono ベンチ regression 0 維持
+- Phase A (INV-1〜9 調査債務) ✅ 完了
+- Phase B (PRD I-387 起票 + Design Integrity Review) ✅ 完了
+- Phase C (I-387 実装) 🔄 T1〜T6 + T8〜T12 完了、T7/T13/T14 残
+- **IR 設計欠陥の構造的解消**: `RustType::Named` から `TypeVar` / `Primitive` /
+  `StdCollection` を分離し、production の Named は user 定義型のみを表す状態を達成
+- `cargo test --lib`: **2259 passed, 0 failed** (+31 新規)
+- Hono ベンチ regression 0 維持 (clean 114/158, errors 54, compile dir 99.4%)
+- Phase A の Cluster 1a 11 件解消は維持
 
-### 残存 dangling refs (23 件)
+### 残存 dangling refs (Phase D スコープ)
 
-| Cluster | 件数 | 識別子例 | 想定 root cause |
+Phase A 調査時点の 23 件内訳 (Phase C 内では再計測未実施、T14 で検証予定):
+
+| Cluster | 件数 | 識別子例 | Phase D スコープ |
 |---|---|---|---|
-| Cluster 1b (DOM) | 16 | HTMLCanvasElement, Window, ImageBitmap, ... | **未検証** → INV-1 |
-| Cluster 1c (unknown) | 2 | `__type`, `symbol` | **未検証** → INV-2 |
-| Cluster 2 (user-defined) | 1+ | HTTPException, ... | **73 件まで拡大見込** (T0.4 時点計測) → INV-3 |
+| Cluster 1b (DOM) | 16 | HTMLCanvasElement, Window, ImageBitmap, ... | **PRD-β** (`TypeDef::ExternalUnsupported` variant) |
+| Cluster 1c (unknown) | 2 | `__type`, `symbol` | **PRD-γ** (`__type` 是正) |
+| Cluster 2 (user-defined) | 73 (filter なし計測) | HTTPException, Context, ... | **PRD-δ** (Pass 5c 再設計 = I-382 本体) |
 
-### 重大な認識: 今セッションの修正は patch である
+### IR 設計欠陥 → 構造的解決
 
-T2.A-i / T2.A-ii / T2.A-iv の修正はすべて「scope push の補完」という症状対処で、
-**単一の IR 設計欠陥** に対する patch である:
+> **旧**: `RustType::Named { name }` が「type variable」「user type」「std type name」を区別しない
+>
+> **新 (I-387)**: `TypeVar { name }` + `Primitive(PrimitiveIntKind)` +
+> `StdCollection { kind, args }` + `Named` (user 専用) に構造化分離
 
-> **`RustType::Named { name }` が「type variable」と「named type」を区別しない**
+これにより Phase A 調査時点の「interim patch 3 件 (T2.A-i/ii/iv)」は以下のように処理された:
 
-詳細な因果関係と理想的な解決策 (`RustType::TypeVar` 変種導入) は後述。
+- **T2.A-iv の heuristic 部分** (`collect_free_type_vars`): 完全削除 → `collect_type_vars`
+  TypeVar walker で置換 (PRD Goal #7 達成)
+- **T2.A-i / T2.A-ii の scope push**: **correct lexical scope management として残置** と
+  判定。post-I-387 でも `convert_ts_type` / `convert_external_type` が scope を参照して
+  TypeVar routing するため、scope 自体は削除不可。コメントから "INTERIM" 注釈を撤去し
+  「I-387 lexical scope semantics」に relabel
+- `RUST_BUILTIN_TYPES` 定数: 完全削除 (Named が user type のみになり文字列フィルタ不要)
 
 ---
 
@@ -97,15 +111,57 @@ assumption なしで書ける状態。
   T-7 (builtin 型表現不統一), T-8 (free var 判定 heuristic)
 - `session-todos.md` の 6 件中 5 件
 
-### Phase C: TypeVar refactoring 実装 (TDD)
+### Phase C: I-387 実装 (TDD) 🔄 **実装中 (2026-04-08)**
 
-**目的**: PRD-TypeVar を TDD で実装し、T2.A-i/ii/iv の interim patch を構造的に置換。
+**目的**: PRD I-387 を TDD で実装し、`RustType` を構造化して interim heuristic を削除。
+
+**進捗**:
+
+| タスク | 内容 | 状態 |
+|---|---|---|
+| T1 | `TypeVar` / `Primitive` / `StdCollection` variant 追加 + 6 テスト | ✅ |
+| T2 | substitute に TypeVar branch 追加 + 5 テスト (legacy Named{"T"} 後方互換は残置) | ✅ |
+| T3 | generator に新 variant 生成 + 10 テスト (Semantic Safety 等価性 3 件含む) | ✅ |
+| T4a | `primitive_int_kind_from_name` / `std_collection_kind_from_name` ヘルパー + 5 テスト | ✅ |
+| T4b | TypeVar routing + 下流両対応化 (type_resolver) + 2 テスト | ✅ |
+| T4c | Primitive/StdCollection routing + 下流両対応化 (transformer) + 3 テスト | ✅ |
+| T4d | BigInt / Record / Map / Set の構造化 routing | ✅ |
+| T5 | (c1) 既存 variant 巻戻し — 3 production sites | ✅ |
+| T6 | (c2) Primitive/StdCollection 構築サイト置換 | ✅ |
+| T7 | (b) TypeVar 構築サイト置換 | 🔄 production 完了、**test fixtures 残** |
+| T8 | T2.A-i 処理 — scope push は lexical scope として残置、heuristic は walker で置換 | ✅ |
+| T9 | T2.A-ii 処理 — enter_type_param_scope を relabel | ✅ |
+| T10 | `collect_free_type_vars` 削除 + `collect_type_vars` walker 導入 | ✅ |
+| T11 | `extract_used_type_params` を walker-only 実装に | ✅ |
+| T12 | 下流 pattern match 更新 (T4b/T4c に統合済) | ✅ |
+| T13 | plan.md / master-plan.md / history.md 更新 | 🔄 本回実施中 |
+| T14 | /quality-check + Hono bench 最終確認 | ⏳ 未実施 |
 
 **完了条件**:
-- `cargo test --lib` 全 pass
-- Hono ベンチ regression 0 (**指標であり目標ではない**)
-- T2.A-i/ii/iv の interim patch コード削除 + コメント `// INTERIM:` 撤去
-- session-todos.md の該当 TODO (T-2, T-5, T-6, T-7, T-8) 削除
+- ✅ `cargo test --lib` 全 pass (2259 件)
+- ✅ Hono ベンチ regression 0
+- ✅ `collect_free_type_vars` / `RUST_BUILTIN_TYPES` の heuristic 削除 (PRD Goal #7)
+- 🔄 substitute の legacy Named{"T"} 後方互換ブランチ削除 (T7 残)
+- 🔄 test fixtures の `Named{"T"}` → `TypeVar{"T"}` 一括置換 (T7 残)
+- ⏳ `/quality-check` 通過確認 (T14)
+- ⏳ session-todos.md の該当 TODO 削除 (T-2, T-5, T-6, T-7, T-8)
+
+### T8 設計判断の変更 (重要)
+
+PRD 起票時点では「T2.A-i / T2.A-ii の `push_type_param_scope` 呼び出しを**完全削除**」と
+想定していたが、実装調査の結果、以下の architectural insight を得て方針変更した:
+
+- `convert_external_type` (外部 JSON ローダ) と `convert_ts_type` (SWC AST コンバータ) は
+  互いに独立した 2 つの変換経路で、`convert_ts_type` の TypeVar routing を後者が直接
+  流用することはできない
+- `convert_external_type::Named` も scope を参照して TypeVar routing する必要があり、
+  scope 自体は「lexical scope management」として残すのが構造的に正しい
+- 「interim」だったのは scope を介してフィルタ判定していた
+  `extract_used_type_params` の heuristic 部分であり、それは walker-only 実装で完全置換
+
+この判断は「scope push を残すと interim の条件を満たさないのでは」という懸念に対する
+回答として master-plan に明記する。walker 化で heuristic が構造的に除去された時点で、
+scope push は **correct design** となり interim ではなくなる。
 
 ### Phase D: I-382 本体実装
 
@@ -124,42 +180,75 @@ Hono ベンチ regression 0。
 
 ---
 
-## 直近アクション
+## 直近アクション (次セッション開始時)
 
-**今着手すべきは Phase A** (Investigation Debt 解消)。
+**Phase C 残作業を優先順に実施**:
 
-### 着手順序
+### 1. T7 残り: substitute 後方互換削除 + test fixtures 一括更新
 
-1. **INV-5 / INV-6** を並列で grep 実施 (ファイル行数のみの軽い調査、所要時間小)
-2. **INV-1 / INV-2 / INV-3** を probe 再投入で一括取得
-3. **INV-4** を trace で実施 (T2.A-iv の interim patch 削除前提)
-4. **INV-7 / INV-8 / INV-9** を read 中心で実施
+**着手手順**:
+1. `src/ir/substitute.rs::fold_rust_type` の 2 本目 `if let RustType::Named { name, type_args } = &ty` ブランチ (L43-52 付近、後方互換用) を削除
+2. `cargo test --lib` 実行 → 壊れる test fixtures をリストアップ
+3. `bulk-edit-safety.md` 準拠で grep ベースのドライラン → 置換対象確認:
+   - `src/registry/tests/generics.rs` 内の `RustType::Named { name: "T"/"E"/... }` 等
+   - `src/generator/tests.rs:111, 401-407, 781-782, 820-821` 等
+   - `src/ir/fold_tests.rs:102-103, 183-184, 385-386, 389-390`
+   - `src/ts_type_info/resolve/typedef.rs` の `apply_substitutions_*` テスト (L781-921)
+4. `Named{"T", type_args: vec![]}` → `TypeVar{"T"}` へ一括置換 (型引数なしの単一名のみ)
+5. `cargo test --lib` 全 pass、`cargo clippy` 0 warning 確認
 
-### 推奨実行モード
+**注意**: substitute の後方互換ブランチは現在 2 セクション (L34-49) に残存:
+```rust
+if let RustType::TypeVar { name } = &ty { ... }  // 本体
+if let RustType::Named { name, type_args } = &ty { ... }  // ← これを削除
+```
 
-Phase A は 9 件の INV 項目があり、並列化可能な項目が多いため、**`Explore` または
-`Plan` subagent を使った並列調査** を推奨する。1 項目ずつ手動 read すると context
-消費が大きく、Phase B で assumption ベースに戻るリスクがある。
+### 2. T14: 最終 quality check
 
-subagent 利用のフォーマット候補:
-- INV-1/2/3: probe 実行 + 結果分析を 1 subagent
-- INV-4: trace 追跡を 1 subagent
-- INV-5/6: grep 集計を 1 subagent
-- INV-7/8/9: コード read を 1-2 subagent
+1. `/quality-check` (cargo fix → fmt → clippy → test)
+2. `./scripts/hono-bench.sh` 再実行 (clean files / error instances / compile rates)
+3. Phase A の probe 再投入で dangling refs 件数再計測 (Cluster 1a 継続 0 / 全体 23 維持を確認)
+
+### 3. T13 仕上げ: ドキュメント最終化
+
+1. `report/i382/history.md` に Phase C 完了エントリ追加
+2. `report/i382/session-todos.md` から I-387 で解消された項目 (T-2, T-5, T-6, T-7, T-8) を削除
+3. `backlog/I-387-rust-type-structural-refinement.md` を archive (完了処理)
+
+### 4. PRD-β / PRD-γ / PRD-δ 起票 (Phase D 準備)
+
+1. **PRD-β**: `TypeDef::ExternalUnsupported` variant 導入 (DOM 型 16 件 + symbol 1 件解消)
+2. **PRD-γ**: `__type` marker → function type 是正 (1 件解消)
+3. **PRD-δ**: Pass 5c 再設計 = `generate_stub_structs` 削除 + user 型 import 生成 (I-382 本体)
 
 ---
 
-## Interim Patch 管理
+## セッション中断時点のスナップショット (2026-04-08)
 
-`ideal-implementation-primacy.md` に基づき、本プロジェクト中で適用中の interim patch
-を明示管理する。各 patch は Phase C で削除される。
+### 検証結果
 
-| Patch 箇所 | 削除条件 | 削除担当 Phase |
+- `cargo test --lib`: **2259 passed / 0 failed**
+- `cargo clippy --all-targets --all-features`: **0 warning**
+- Hono bench: **clean 114/158, errors 54, compile (dir) 99.4% — regression 0**
+- PRD Goal #4 / #7 達成 (interim heuristic 削除、`RUST_BUILTIN_TYPES` 削除)
+
+### Interim patch 最終状態
+
+旧 "interim" 管理表は I-387 完了により責務転換:
+
+| 元項目 | 現在の状態 |
+|---|---|
+| `convert_external_typedef` の `push_type_param_scope` (T2.A-i) | **残置** (correct lexical scope management に re-label)、heuristic 部分は walker で置換済 |
+| `enter_type_param_scope` (T2.A-ii) | **残置** (同上)、doc comment を I-387 semantics に更新済 |
+| `collect_free_type_vars` (T2.A-iv) | **削除済** → `collect_type_vars` TypeVar walker |
+| `RUST_BUILTIN_TYPES` 文字列フィルタ | **削除済** (IR 構造化で不要) |
+| `tools/extract-types/src/extractor.ts::convertType` intersection → `any` (T-1) | 残存、Phase D 以降の別 PRD で対応 |
+
+### 残 interim (Phase D 以降)
+
+| Patch 箇所 | 削除条件 | 対応 PRD |
 |---|---|---|
-| `src/external_types/mod.rs::convert_external_typedef` の `push_type_param_scope` (T2.A-i) | `RustType::TypeVar` 導入後、convert_ts_type で自動解決 | Phase C |
-| `src/pipeline/type_resolver/helpers.rs::enter_type_param_scope` (T2.A-ii) | 同上 | Phase C |
-| `src/pipeline/type_resolver/helpers.rs::collect_free_type_vars` (T2.A-iv) | 同上 | Phase C |
-| `tools/extract-types/src/extractor.ts::convertType` intersection → `any` (T-1) | `ExternalType::intersection` variant 導入後 | Phase D 以降の別 PRD |
+| `tools/extract-types/src/extractor.ts::convertType` intersection → `any` (T-1) | `ExternalType::Intersection` variant 導入後 | Phase D 以降の別 PRD |
 
 ---
 
