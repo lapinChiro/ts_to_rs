@@ -32,6 +32,15 @@ pub(crate) struct Substitute<'a> {
 
 impl<'a> IrFolder for Substitute<'a> {
     fn fold_rust_type(&mut self, ty: RustType) -> RustType {
+        // I-387: `TypeVar { name }` が第一級 substitution target。
+        if let RustType::TypeVar { name } = &ty {
+            if let Some(concrete) = self.bindings.get(name.as_str()) {
+                return concrete.clone();
+            }
+        }
+        // I-387 移行中: 既存サイトが `Named { name: "T", type_args: [] }` で型変数を
+        // 表しているケースを後方互換として残す。T7 で構築サイトを TypeVar に置換し
+        // 終えた後、下記ブランチは削除する。
         if let RustType::Named { name, type_args } = &ty {
             if type_args.is_empty() {
                 if let Some(concrete) = self.bindings.get(name.as_str()) {

@@ -339,4 +339,157 @@ mod tests {
         };
         assert_eq!(generate_type(&ty), "<Vec<Foo> as Promise>::Output");
     }
+
+    // --- I-387: TypeVar / Primitive / StdCollection 生成 ---
+
+    #[test]
+    fn test_generate_type_var() {
+        let ty = RustType::TypeVar {
+            name: "T".to_string(),
+        };
+        assert_eq!(generate_type(&ty), "T");
+    }
+
+    #[test]
+    fn test_generate_type_var_matches_legacy_named_literal() {
+        // I-387 Semantic Safety: TypeVar { name: "T" } の生成出力は
+        // 従来の Named { name: "T", type_args: [] } と完全一致すること。
+        let new_ty = RustType::TypeVar {
+            name: "T".to_string(),
+        };
+        let legacy = RustType::Named {
+            name: "T".to_string(),
+            type_args: vec![],
+        };
+        assert_eq!(generate_type(&new_ty), generate_type(&legacy));
+    }
+
+    #[test]
+    fn test_generate_type_primitive_usize() {
+        assert_eq!(
+            generate_type(&RustType::Primitive(PrimitiveIntKind::Usize)),
+            "usize"
+        );
+    }
+
+    #[test]
+    fn test_generate_type_primitive_all_kinds() {
+        use PrimitiveIntKind::*;
+        let cases = [
+            (Usize, "usize"),
+            (Isize, "isize"),
+            (I8, "i8"),
+            (I16, "i16"),
+            (I32, "i32"),
+            (I64, "i64"),
+            (I128, "i128"),
+            (U8, "u8"),
+            (U16, "u16"),
+            (U32, "u32"),
+            (U64, "u64"),
+            (U128, "u128"),
+            (F32, "f32"),
+        ];
+        for (kind, expected) in cases {
+            assert_eq!(
+                generate_type(&RustType::Primitive(kind)),
+                expected,
+                "kind={kind:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_generate_type_primitive_matches_legacy_named_literal() {
+        // Semantic Safety: Primitive(Usize) の出力 "usize" は
+        // Named { name: "usize" } と同一。
+        let new_ty = RustType::Primitive(PrimitiveIntKind::Usize);
+        let legacy = RustType::Named {
+            name: "usize".to_string(),
+            type_args: vec![],
+        };
+        assert_eq!(generate_type(&new_ty), generate_type(&legacy));
+    }
+
+    #[test]
+    fn test_generate_type_std_collection_box() {
+        let ty = RustType::StdCollection {
+            kind: StdCollectionKind::Box,
+            args: vec![RustType::F64],
+        };
+        assert_eq!(generate_type(&ty), "Box<f64>");
+    }
+
+    #[test]
+    fn test_generate_type_std_collection_hashmap() {
+        let ty = RustType::StdCollection {
+            kind: StdCollectionKind::HashMap,
+            args: vec![RustType::String, RustType::F64],
+        };
+        assert_eq!(generate_type(&ty), "HashMap<String, f64>");
+    }
+
+    #[test]
+    fn test_generate_type_std_collection_all_kinds() {
+        use StdCollectionKind::*;
+        let cases = [
+            (Box, "Box"),
+            (HashMap, "HashMap"),
+            (BTreeMap, "BTreeMap"),
+            (HashSet, "HashSet"),
+            (BTreeSet, "BTreeSet"),
+            (VecDeque, "VecDeque"),
+            (Rc, "Rc"),
+            (Arc, "Arc"),
+            (Mutex, "Mutex"),
+            (RwLock, "RwLock"),
+            (RefCell, "RefCell"),
+            (Cell, "Cell"),
+        ];
+        for (kind, base) in cases {
+            let ty = RustType::StdCollection {
+                kind,
+                args: vec![RustType::String],
+            };
+            assert_eq!(generate_type(&ty), format!("{base}<String>"), "kind={kind:?}");
+        }
+    }
+
+    #[test]
+    fn test_generate_type_std_collection_matches_legacy_named_literal() {
+        // Semantic Safety: StdCollection { Box, [T] } の出力 "Box<T>" は
+        // 従来の Named { name: "Box", type_args: [Named("T")] } と同一。
+        let new_ty = RustType::StdCollection {
+            kind: StdCollectionKind::Box,
+            args: vec![RustType::TypeVar {
+                name: "T".to_string(),
+            }],
+        };
+        let legacy = RustType::Named {
+            name: "Box".to_string(),
+            type_args: vec![RustType::Named {
+                name: "T".to_string(),
+                type_args: vec![],
+            }],
+        };
+        assert_eq!(generate_type(&new_ty), generate_type(&legacy));
+    }
+
+    #[test]
+    fn test_generate_type_std_collection_nested_with_type_var() {
+        // HashMap<String, Box<T>>
+        let ty = RustType::StdCollection {
+            kind: StdCollectionKind::HashMap,
+            args: vec![
+                RustType::String,
+                RustType::StdCollection {
+                    kind: StdCollectionKind::Box,
+                    args: vec![RustType::TypeVar {
+                        name: "T".to_string(),
+                    }],
+                },
+            ],
+        };
+        assert_eq!(generate_type(&ty), "HashMap<String, Box<T>>");
+    }
 }

@@ -327,3 +327,87 @@ fn test_expr_cast_substitute_target() {
         _ => panic!("expected Cast"),
     }
 }
+
+// --- I-387: TypeVar / StdCollection / Primitive substitute ---
+
+#[test]
+fn test_substitute_replaces_type_var() {
+    let ty = RustType::TypeVar {
+        name: "T".to_string(),
+    };
+    let bindings = HashMap::from([("T".to_string(), RustType::String)]);
+    assert_eq!(ty.substitute(&bindings), RustType::String);
+}
+
+#[test]
+fn test_substitute_leaves_type_var_unbound() {
+    let ty = RustType::TypeVar {
+        name: "T".to_string(),
+    };
+    let bindings: HashMap<String, RustType> = HashMap::new();
+    assert_eq!(
+        ty.substitute(&bindings),
+        RustType::TypeVar {
+            name: "T".to_string(),
+        }
+    );
+}
+
+#[test]
+fn test_substitute_recurses_into_std_collection_args() {
+    let ty = RustType::StdCollection {
+        kind: StdCollectionKind::Box,
+        args: vec![RustType::TypeVar {
+            name: "T".to_string(),
+        }],
+    };
+    let bindings = HashMap::from([("T".to_string(), RustType::F64)]);
+    assert_eq!(
+        ty.substitute(&bindings),
+        RustType::StdCollection {
+            kind: StdCollectionKind::Box,
+            args: vec![RustType::F64],
+        }
+    );
+}
+
+#[test]
+fn test_substitute_leaves_primitive_unchanged() {
+    let ty = RustType::Primitive(PrimitiveIntKind::Usize);
+    let bindings = HashMap::from([("usize".to_string(), RustType::String)]);
+    // `Primitive` は `Named` とは構造的に区別されるため、"usize" binding にも
+    // 影響を受けない。
+    assert_eq!(
+        ty.substitute(&bindings),
+        RustType::Primitive(PrimitiveIntKind::Usize)
+    );
+}
+
+#[test]
+fn test_substitute_recurses_into_nested_std_collection() {
+    // HashMap<String, Box<T>>
+    let ty = RustType::StdCollection {
+        kind: StdCollectionKind::HashMap,
+        args: vec![
+            RustType::String,
+            RustType::StdCollection {
+                kind: StdCollectionKind::Box,
+                args: vec![RustType::TypeVar {
+                    name: "T".to_string(),
+                }],
+            },
+        ],
+    };
+    let bindings = HashMap::from([("T".to_string(), RustType::F64)]);
+    let expected = RustType::StdCollection {
+        kind: StdCollectionKind::HashMap,
+        args: vec![
+            RustType::String,
+            RustType::StdCollection {
+                kind: StdCollectionKind::Box,
+                args: vec![RustType::F64],
+            },
+        ],
+    };
+    assert_eq!(ty.substitute(&bindings), expected);
+}
