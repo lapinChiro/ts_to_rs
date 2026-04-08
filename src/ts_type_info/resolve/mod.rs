@@ -23,7 +23,7 @@ pub use typedef::resolve_typedef;
 pub(crate) use typedef::{resolve_field_def, resolve_type_params};
 
 use crate::ir::sanitize_rust_type_name;
-use crate::ir::RustType;
+use crate::ir::{PrimitiveIntKind, RustType, StdCollectionKind};
 use crate::pipeline::SyntheticTypeRegistry;
 use crate::registry::{TypeDef, TypeRegistry};
 use crate::ts_type_info::TsTypeInfo;
@@ -362,11 +362,62 @@ pub(super) fn try_simplify_identity_mapped(
     }
 }
 
+/// I-387: Rust 整数型名 → `PrimitiveIntKind`。
+///
+/// 後続タスク (T5-T7 + T12 併合) で `resolve_type_ref` および構築サイトから
+/// 呼び出され、`RustType::Named { name: "usize" }` 等のリテラル Named 誤用を
+/// `RustType::Primitive` に置換する。
+pub(crate) fn primitive_int_kind_from_name(name: &str) -> Option<PrimitiveIntKind> {
+    use PrimitiveIntKind::*;
+    Some(match name {
+        "usize" => Usize,
+        "isize" => Isize,
+        "i8" => I8,
+        "i16" => I16,
+        "i32" => I32,
+        "i64" => I64,
+        "i128" => I128,
+        "u8" => U8,
+        "u16" => U16,
+        "u32" => U32,
+        "u64" => U64,
+        "u128" => U128,
+        "f32" => F32,
+        _ => return None,
+    })
+}
+
+/// I-387: Rust std コレクション / スマートポインタ名 → `StdCollectionKind`。
+pub(crate) fn std_collection_kind_from_name(name: &str) -> Option<StdCollectionKind> {
+    use StdCollectionKind::*;
+    Some(match name {
+        "Box" => Box,
+        "HashMap" => HashMap,
+        "BTreeMap" => BTreeMap,
+        "HashSet" => HashSet,
+        "BTreeSet" => BTreeSet,
+        "VecDeque" => VecDeque,
+        "Rc" => Rc,
+        "Arc" => Arc,
+        "Mutex" => Mutex,
+        "RwLock" => RwLock,
+        "RefCell" => RefCell,
+        "Cell" => Cell,
+        _ => return None,
+    })
+}
+
 /// 型参照を解決する。
 ///
 /// 組み込みジェネリック型（Array, Promise, Record 等）およびユーティリティ型
 /// （Partial, Required, Pick, Omit, NonNullable）を特殊処理し、
 /// ユーザー定義型はそのまま RustType::Named に変換する。
+///
+/// **I-387 移行注記**: 本関数は TypeVar / Primitive / StdCollection への routing を
+/// まだ行わない。下流 pattern match (type_resolver / transformer / registry) が
+/// Named{"HashMap"} / Named{"T"} 等のリテラル形式に依存しているため、単独の routing
+/// 変更は 30+ テスト破壊を招く。routing の有効化は T5-T7 (構築サイト置換) と T12
+/// (下流 pattern match 更新) の**併合タスク** で行う。
 fn resolve_type_ref(
     name: &str,
     type_args: &[TsTypeInfo],

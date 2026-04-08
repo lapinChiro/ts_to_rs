@@ -38,11 +38,16 @@ Phase D             I-382 本体 (generate_stub_structs 削除)
 Phase A (調査債務 9 件) は **2026-04-08 完了**。結果は
 [`report/i382/phase-a-findings.md`](report/i382/phase-a-findings.md)。
 
-次アクションは Phase B→C:
-1. **PRD I-387** (`RustType` 構造的精緻化) 起票済 2026-04-08
+次アクションは Phase C (I-387 実装):
+1. **PRD I-387** 起票済 (2026-04-08)
    — `backlog/I-387-rust-type-structural-refinement.md`
-2. PRD-β (`TypeDef::ExternalUnsupported`) / PRD-γ (`__type` 是正) は I-387 完了後に起票
-3. I-387 の TDD 実装 (T1〜T14) 着手
+2. T1 ✅ RustType variant 拡張 / T2 ✅ substitute / T3 ✅ generator 完了
+3. T4a ✅ ヘルパー追加完了 (2254 passed)
+4. **進行中**: T4 phase 化 (下流両対応化が前提と判明)
+   - T4b: type_resolver の TypeVar 両対応
+   - T4c: transformer の StdCollection/Primitive 両対応 + is_trait_type Named 限定化
+   - T4d: resolve_type_ref routing 有効化 → T5/T6/T7 へ
+5. PRD-β/γ は I-387 完了後に起票
 
 ---
 

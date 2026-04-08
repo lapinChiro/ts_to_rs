@@ -329,24 +329,83 @@ per `.claude/rules/type-fallback-safety.md`:
 - **完了条件**: テスト pass、生成 Rust ソース形式が既存 Named 経由と同一
 - **Depends on**: T1
 
-### T4: convert_ts_type 分岐再設計
+### T4: convert_ts_type 分岐再設計 — Phase 化 (**2026-04-08 修正**)
+
+> **計画修正の背景**: 元 T4 (routing 一括有効化) を試行した結果、下流 pattern match
+> (`src/pipeline/type_resolver/`、`src/transformer/`、`src/registry/` の 15+ file) が
+> `Named { name: "HashMap"/"HashSet"/"T" }` のリテラル形式に依存しており、単独実施で
+> 33 テスト破壊することが判明。元 T12 (下流 pattern match 更新) と併合して phase 化する。
+>
+> また元 T5/T6/T7 (構築サイト置換) も下流両対応化が完了するまで実施すると同様の破壊を
+> 招くため、順序を修正する。
+
+#### T4a: resolve_type_ref 用ヘルパー追加 ✅ **完了 (2026-04-08)**
 
 - **Work**:
-  - `src/pipeline/type_converter/mod.rs` (および `ts_type_info/resolve/mod.rs::resolve_type_ref`)
-    に PRIMITIVE_INT_MAP / STD_COLLECTION_MAP 定義
-  - `is_in_type_param_scope` を最優先に判定 → TypeVar 構築
-  - リテラル名マッチで既存 variant / Primitive / StdCollection に振り分け
-  - 最後に registry lookup → Named 構築
-  - `SyntheticTypeRegistry::is_in_type_param_scope` の read 公開 API を確認
-    (未公開なら追加)
-  - 新規テスト 5 件 (C1 branch coverage):
-    - `test_convert_ts_type_returns_type_var_in_scope`
-    - `test_convert_ts_type_returns_string_for_string_literal`
-    - `test_convert_ts_type_returns_std_collection_for_hashmap`
-    - `test_convert_ts_type_returns_primitive_for_usize`
-    - `test_convert_ts_type_returns_named_for_user_type`
-- **完了条件**: 5 テスト pass、既存 type_converter テスト全 pass
-- **Depends on**: T1, T3
+  - `src/ts_type_info/resolve/mod.rs` に `primitive_int_kind_from_name` /
+    `std_collection_kind_from_name` 追加 (pub(crate))
+  - C1 網羅テスト 5 件 (`mod_tests.rs`): 全 14 整数型 / 12 std コレクション / 拒否 / 直交性
+  - behavioral 変更なし (routing はまだ全て `Named` のまま)
+- **完了条件**: テスト 5 件 pass、既存テスト全 pass (2254 件維持)
+- **Depends on**: T1
+- **状態**: 完了。cargo test --lib 2254 passed
+
+#### T4b: type_resolver を TypeVar 対応 (下流両対応化 Phase 1)
+
+- **Work**:
+  - `src/pipeline/type_resolver/` 配下で `Named { name, .. }` をリテラル走査する
+    pattern match site を grep で全件列挙 (type_param_constraints lookup、expected
+    type propagation、method resolution 等)
+  - 各 site に `TypeVar { name }` 対応 branch を追加 (Named と同一挙動で **両対応**)
+  - 下流から見て TypeVar と Named{"T"} が区別なく扱える状態にする
+  - 既存 30+ テストが Named のみで引き続き pass することを確認
+- **完了条件**:
+  - 対象 pattern site の branch coverage 100%
+  - `cargo test --lib` 全 pass
+- **Depends on**: T4a
+- **失敗時の指標**: 元 T4 試行で失敗した `test_member_access_on_type_param_with_constraint` /
+  `test_resolve_named_fn_variable_propagates_arg_expected_type` / type_params propagation
+  の 20+ テストが両対応化後も pass すること
+
+#### T4c: transformer を StdCollection / Primitive 対応 (下流両対応化 Phase 2)
+
+- **Work**:
+  - `src/transformer/` 配下で `Named { name: "HashMap"/"HashSet"/"Box"/"usize"/... }`
+    リテラル pattern match を grep で全件列挙 (`type_position.rs`,
+    `expressions/patterns.rs:206`, `data_literals.rs`, `member_access.rs`,
+    `literals.rs`, `calls.rs` 等)
+  - 各 site に `StdCollection { kind, .. }` / `Primitive(kind)` 対応 branch を追加
+    (Named と同一挙動で **両対応**)
+  - `wrap_trait_for_position` の `is_trait_type(name)` を Named 限定に変更
+    (TypeVar / Primitive / StdCollection は非 trait 扱い、BW-2 解消)
+  - 各 branch に unit test 追加 (C1 coverage)
+- **完了条件**:
+  - 対象 pattern site の branch coverage 100%
+  - `cargo test --lib` 全 pass
+- **Depends on**: T4b
+- **失敗時の指標**: 元 T4 試行で失敗した `test_in_operator_hashmap_generates_contains_key`
+  / `test_convert_empty_object_with_hashmap_expected_type` / HashMap 関連 13 テストが
+  両対応化後も pass すること
+
+#### T4d: resolve_type_ref routing 有効化
+
+- **Work**:
+  - `src/ts_type_info/resolve/mod.rs::resolve_type_ref` で routing を有効化:
+    1. `synthetic.is_in_type_param_scope(name)` → `TypeVar`
+    2. `primitive_int_kind_from_name` → `Primitive`
+    3. `std_collection_kind_from_name` → `StdCollection`
+    4. 既存 variant リテラル (`String`/`bool`/`number`) → 既存 variant
+    5. Registry lookup → `Named`
+  - `TsTypeInfo::BigInt` → `Primitive(I128)` に変更
+  - `Record` / `Map` → `StdCollection { HashMap, .. }` に変更
+  - `Set` → `StdCollection { HashSet, .. }` に変更
+  - 元 T4 で revert した 9 件テスト (`test_resolve_type_ref_returns_type_var_when_in_scope` 等)
+    を復活
+- **完了条件**:
+  - 9 件テスト pass
+  - `cargo test --lib` 全 pass (下流両対応済のため 0 regression 想定)
+  - Hono ベンチ regression 0
+- **Depends on**: T4a, T4b, T4c
 
 ### T5: 構築サイト一括置換 — (c1) 既存 variant 巻戻し
 
@@ -359,7 +418,7 @@ per `.claude/rules/type-fallback-safety.md`:
   - grep `RustType::Named \{ name: "(String|Box|Vec|Option|Result|bool|Bool|f64|F64)"`
     が 0 件 (テストコード除外)
   - `cargo test --lib` 全 pass
-- **Depends on**: T1
+- **Depends on**: T4d (下流両対応が完了していないと T5 も破壊する)
 
 ### T6: 構築サイト一括置換 — (c2) Primitive / StdCollection
 
@@ -371,7 +430,7 @@ per `.claude/rules/type-fallback-safety.md`:
   - grep `RustType::Named \{ name: "(usize|i32|i64|HashMap|BTreeMap|HashSet|Rc|Arc|Mutex)"`
     が 0 件 (テストコード除外)
   - `cargo test --lib` 全 pass
-- **Depends on**: T1, T5
+- **Depends on**: T4d, T5
 
 ### T7: 構築サイト一括置換 — (b) TypeVar
 
@@ -383,7 +442,7 @@ per `.claude/rules/type-fallback-safety.md`:
   - 対象 grep pattern が 0 件
   - `cargo test --lib` 全 pass
   - Hono ベンチ regression 0
-- **Depends on**: T1, T4, T5, T6
+- **Depends on**: T4d, T5, T6
 
 ### T8: interim patch 削除 — T2.A-i (convert_external_typedef)
 
@@ -393,7 +452,7 @@ per `.claude/rules/type-fallback-safety.md`:
   - 関連テスト: `src/external_types/tests/` で type_param 含む external typedef 変換が
     正しく TypeVar を生成することを確認する新規テスト 1 件
 - **完了条件**: 対象 patch 削除、新規テスト pass、Hono ベンチ regression 0
-- **Depends on**: T4, T7
+- **Depends on**: T4d, T7
 
 ### T9: interim patch 削除 — T2.A-ii (enter_type_param_scope)
 
@@ -403,7 +462,7 @@ per `.claude/rules/type-fallback-safety.md`:
   - 5 callers (`visitors.rs:101,405,498` / `expressions.rs:771,918`) を更新
   - scope 管理が `convert_ts_type` 内で一元化されることを確認
 - **完了条件**: 対象 patch 削除、既存 5 テスト + 新規 2 件 pass
-- **Depends on**: T4, T7
+- **Depends on**: T4d, T7
 
 ### T10: interim patch 削除 — T2.A-iv (collect_free_type_vars)
 
@@ -414,7 +473,7 @@ per `.claude/rules/type-fallback-safety.md`:
     `collect_type_vars(ty: &RustType) -> HashSet<String>`) に置換
   - TypeVar walker の unit test 3 件追加 (空 / 単一 / 入れ子)
 - **完了条件**: 対象 patch 削除、grep `RUST_BUILTIN_TYPES` が 0 件、新規 3 テスト pass
-- **Depends on**: T4, T7, T9
+- **Depends on**: T4d, T7, T9
 
 ### T11: synthetic_registry / external_struct_generator 整合
 
@@ -429,19 +488,12 @@ per `.claude/rules/type-fallback-safety.md`:
   Hono ベンチ regression 0
 - **Depends on**: T10
 
-### T12: 下流 pattern match 更新 — trait 判定 / リテラル判定
+### T12: (廃止) 下流 pattern match 更新
 
-- **Work**:
-  - `src/transformer/type_position.rs::wrap_trait_for_position` を `is_trait_type` 判定
-    から Named 限定に変更
-  - `src/transformer/expressions/patterns.rs:206` の HashMap/BTreeMap リテラルマッチを
-    StdCollection 判定に置換
-  - 他 file:line の pattern match (member_access.rs / literals.rs / data_literals.rs /
-    calls.rs) を順次更新
-  - 各箇所に unit test を追加 (C1 coverage)
-- **完了条件**: 対象箇所の pattern match が TypeVar / Primitive / StdCollection を正しく
-  扱う、テスト pass
-- **Depends on**: T1, T5, T6
+> **2026-04-08 計画修正**: 元 T12 の作業内容は T4b / T4c に統合・前倒しされた。
+> 理由: 下流両対応化は `resolve_type_ref` routing 有効化 (T4d) の **前提** であり、
+> 後置タスクとして扱うことができない。本エントリはタスク番号維持のため残し、作業自体は
+> T4b/T4c で実施する。
 
 ### T13: ドキュメント同期
 

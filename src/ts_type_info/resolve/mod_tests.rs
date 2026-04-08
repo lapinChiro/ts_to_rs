@@ -981,3 +981,109 @@ fn resolve_type_params_constraint_error_propagates() {
     }];
     assert!(resolve_type_params(params, &reg, &mut syn).is_err());
 }
+
+// --- I-387 T4: primitive_int_kind_from_name / std_collection_kind_from_name ヘルパー ---
+
+#[test]
+fn test_primitive_int_kind_from_name_covers_all_rust_int_types() {
+    use super::{primitive_int_kind_from_name, PrimitiveIntKind::*};
+    let cases = [
+        ("usize", Usize),
+        ("isize", Isize),
+        ("i8", I8),
+        ("i16", I16),
+        ("i32", I32),
+        ("i64", I64),
+        ("i128", I128),
+        ("u8", U8),
+        ("u16", U16),
+        ("u32", U32),
+        ("u64", U64),
+        ("u128", U128),
+        ("f32", F32),
+    ];
+    for (name, expected) in cases {
+        assert_eq!(
+            primitive_int_kind_from_name(name),
+            Some(expected),
+            "name={name}"
+        );
+    }
+}
+
+#[test]
+fn test_primitive_int_kind_from_name_rejects_non_int_types() {
+    use super::primitive_int_kind_from_name;
+    // f64 / bool / String は `RustType` 本体の専用 variant を使うため
+    // `PrimitiveIntKind` には含まれない。
+    assert_eq!(primitive_int_kind_from_name("f64"), None);
+    assert_eq!(primitive_int_kind_from_name("bool"), None);
+    assert_eq!(primitive_int_kind_from_name("String"), None);
+    assert_eq!(primitive_int_kind_from_name("HTTPException"), None);
+    assert_eq!(primitive_int_kind_from_name(""), None);
+}
+
+#[test]
+fn test_std_collection_kind_from_name_covers_all_supported_types() {
+    use super::{std_collection_kind_from_name, StdCollectionKind::*};
+    let cases = [
+        ("Box", Box),
+        ("HashMap", HashMap),
+        ("BTreeMap", BTreeMap),
+        ("HashSet", HashSet),
+        ("BTreeSet", BTreeSet),
+        ("VecDeque", VecDeque),
+        ("Rc", Rc),
+        ("Arc", Arc),
+        ("Mutex", Mutex),
+        ("RwLock", RwLock),
+        ("RefCell", RefCell),
+        ("Cell", Cell),
+    ];
+    for (name, expected) in cases {
+        assert_eq!(
+            std_collection_kind_from_name(name),
+            Some(expected),
+            "name={name}"
+        );
+    }
+}
+
+#[test]
+fn test_std_collection_kind_from_name_rejects_existing_variants() {
+    use super::std_collection_kind_from_name;
+    // `Vec` / `Option` / `Result` / `Tuple` は `RustType` 本体の専用 variant を
+    // 使用するため `StdCollectionKind` には含まれない。
+    assert_eq!(std_collection_kind_from_name("Vec"), None);
+    assert_eq!(std_collection_kind_from_name("Option"), None);
+    assert_eq!(std_collection_kind_from_name("Result"), None);
+    assert_eq!(std_collection_kind_from_name("Tuple"), None);
+    assert_eq!(std_collection_kind_from_name("HTTPException"), None);
+    assert_eq!(std_collection_kind_from_name(""), None);
+}
+
+#[test]
+fn test_primitive_and_std_collection_kind_from_name_are_disjoint() {
+    // 整数名と std コレクション名は重複しない (命名の直交性検証)
+    use super::{primitive_int_kind_from_name, std_collection_kind_from_name};
+    let int_names = [
+        "usize", "isize", "i8", "i16", "i32", "i64", "i128", "u8", "u16", "u32", "u64", "u128",
+        "f32",
+    ];
+    for name in int_names {
+        assert!(
+            std_collection_kind_from_name(name).is_none(),
+            "int name {name} leaked into std collection"
+        );
+    }
+    let coll_names = [
+        "Box", "HashMap", "BTreeMap", "HashSet", "BTreeSet", "VecDeque", "Rc", "Arc", "Mutex",
+        "RwLock", "RefCell", "Cell",
+    ];
+    for name in coll_names {
+        assert!(
+            primitive_int_kind_from_name(name).is_none(),
+            "collection name {name} leaked into primitive int"
+        );
+    }
+}
