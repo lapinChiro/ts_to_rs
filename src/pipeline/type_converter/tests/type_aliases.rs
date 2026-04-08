@@ -447,9 +447,9 @@ fn test_convert_type_alias_index_signature_to_hashmap() {
             assert_eq!(name, "Foo");
             assert_eq!(
                 ty,
-                RustType::Named {
-                    name: "HashMap".to_string(),
-                    type_args: vec![RustType::String, RustType::F64],
+                RustType::StdCollection {
+                    kind: crate::ir::StdCollectionKind::HashMap,
+                    args: vec![RustType::String, RustType::F64],
                 }
             );
         }
@@ -477,9 +477,9 @@ fn test_convert_type_alias_type_ref_generates_type_alias() {
             vis: Visibility::Public,
             name: "Params".to_string(),
             type_params: vec![],
-            ty: RustType::Named {
-                name: "HashMap".to_string(),
-                type_args: vec![RustType::String, RustType::String],
+            ty: RustType::StdCollection {
+                kind: crate::ir::StdCollectionKind::HashMap,
+                args: vec![RustType::String, RustType::String],
             },
         }
     );

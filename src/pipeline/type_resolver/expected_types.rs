@@ -317,6 +317,22 @@ impl<'a> TypeResolver<'a> {
             // Object literal: propagate field types from struct/enum or HashMap value type
             ast::Expr::Object(obj) => {
                 match expected {
+                    // I-387: HashMap は StdCollection または legacy Named の両対応
+                    RustType::StdCollection {
+                        kind: crate::ir::StdCollectionKind::HashMap,
+                        args,
+                    } if args.len() == 2 => {
+                        let value_type = &args[1];
+                        for prop in &obj.props {
+                            if let ast::PropOrSpread::Prop(prop) = prop {
+                                if let ast::Prop::KeyValue(kv) = prop.as_ref() {
+                                    let span = Span::from_swc(kv.value.span());
+                                    self.result.expected_types.insert(span, value_type.clone());
+                                    self.propagate_expected(&kv.value, value_type);
+                                }
+                            }
+                        }
+                    }
                     RustType::Named { name, type_args }
                         if name == "HashMap" && type_args.len() == 2 =>
                     {

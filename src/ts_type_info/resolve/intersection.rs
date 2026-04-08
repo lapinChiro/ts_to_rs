@@ -125,9 +125,10 @@ pub(crate) fn resolve_intersection(
                     .map(|v| resolve_ts_type(v, reg, synthetic))
                     .transpose()?
                     .unwrap_or(RustType::Any);
-                return Ok(RustType::Named {
-                    name: "HashMap".to_string(),
-                    type_args: vec![RustType::String, value_type],
+                // I-387: StdCollection 構造化
+                return Ok(RustType::StdCollection {
+                    kind: crate::ir::StdCollectionKind::HashMap,
+                    args: vec![RustType::String, value_type],
                 });
             }
             _ => {
@@ -178,12 +179,12 @@ pub(crate) fn resolve_type_literal(
     reg: &TypeRegistry,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> anyhow::Result<RustType> {
-    // index signature → HashMap
+    // index signature → HashMap (I-387: StdCollection 構造化)
     if let Some(idx) = lit.index_signatures.first() {
         let value_type = resolve_ts_type(&idx.value_type, reg, synthetic)?;
-        return Ok(RustType::Named {
-            name: "HashMap".to_string(),
-            type_args: vec![RustType::String, value_type],
+        return Ok(RustType::StdCollection {
+            kind: crate::ir::StdCollectionKind::HashMap,
+            args: vec![RustType::String, value_type],
         });
     }
 

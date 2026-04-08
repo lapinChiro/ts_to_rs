@@ -50,10 +50,7 @@ pub fn resolve_ts_type(
             type_args: vec![],
         }),
         TsTypeInfo::Null | TsTypeInfo::Undefined => Ok(RustType::Unit),
-        TsTypeInfo::BigInt => Ok(RustType::Named {
-            name: "i128".to_string(),
-            type_args: vec![],
-        }),
+        TsTypeInfo::BigInt => Ok(RustType::Primitive(PrimitiveIntKind::I128)),
         TsTypeInfo::Symbol => Ok(RustType::Any), // symbol は Rust に直接対応なし
 
         // ── Composite types ──
@@ -103,10 +100,7 @@ pub fn resolve_ts_type(
                 TsLiteralKind::String(_) | TsLiteralKind::Template => Ok(RustType::String),
                 TsLiteralKind::Boolean(_) => Ok(RustType::Bool),
                 TsLiteralKind::Number(_) => Ok(RustType::F64),
-                TsLiteralKind::BigInt(_) => Ok(RustType::Named {
-                    name: "i128".to_string(),
-                    type_args: vec![],
-                }),
+                TsLiteralKind::BigInt(_) => Ok(RustType::Primitive(PrimitiveIntKind::I128)),
             }
         }
 
@@ -291,14 +285,14 @@ fn resolve_mapped(
         }
     }
 
-    // HashMap フォールバック
+    // HashMap フォールバック (I-387: StdCollection 構造化)
     let value_type = value
         .map(|v| resolve_ts_type(v, reg, synthetic))
         .transpose()?
         .unwrap_or(RustType::Any);
-    Ok(RustType::Named {
-        name: "HashMap".to_string(),
-        type_args: vec![RustType::String, value_type],
+    Ok(RustType::StdCollection {
+        kind: StdCollectionKind::HashMap,
+        args: vec![RustType::String, value_type],
     })
 }
 
@@ -460,27 +454,21 @@ fn resolve_type_ref(
             name: "Promise".to_string(),
             type_args: resolved_args,
         }),
-        "Record" => {
+        // I-387 T4d: TS の `Record<K,V>` / `Map<K,V>` は Rust の `HashMap<K,V>` に
+        // 構造化マッピング。`Set<T>` は `HashSet<T>`。
+        "Record" | "Map" => {
             let key_type = resolved_args.first().cloned().unwrap_or(RustType::String);
             let value_type = resolved_args.get(1).cloned().unwrap_or(RustType::Any);
-            Ok(RustType::Named {
-                name: "HashMap".to_string(),
-                type_args: vec![key_type, value_type],
-            })
-        }
-        "Map" => {
-            let key = resolved_args.first().cloned().unwrap_or(RustType::String);
-            let val = resolved_args.get(1).cloned().unwrap_or(RustType::Any);
-            Ok(RustType::Named {
-                name: "HashMap".to_string(),
-                type_args: vec![key, val],
+            Ok(RustType::StdCollection {
+                kind: StdCollectionKind::HashMap,
+                args: vec![key_type, value_type],
             })
         }
         "Set" => {
             let inner = resolved_args.into_iter().next().unwrap_or(RustType::Any);
-            Ok(RustType::Named {
-                name: "HashSet".to_string(),
-                type_args: vec![inner],
+            Ok(RustType::StdCollection {
+                kind: StdCollectionKind::HashSet,
+                args: vec![inner],
             })
         }
         _ => {

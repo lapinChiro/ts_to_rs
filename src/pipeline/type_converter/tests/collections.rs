@@ -304,9 +304,9 @@ fn test_convert_ts_type_record_string_number_returns_hashmap() {
     .unwrap();
     assert_eq!(
         ty,
-        RustType::Named {
-            name: "HashMap".to_string(),
-            type_args: vec![RustType::String, RustType::F64],
+        RustType::StdCollection {
+            kind: crate::ir::StdCollectionKind::HashMap,
+            args: vec![RustType::String, RustType::F64],
         }
     );
 }
@@ -326,9 +326,9 @@ fn test_convert_ts_type_record_number_value_uses_resolved_key_type() {
     .unwrap();
     assert_eq!(
         ty,
-        RustType::Named {
-            name: "HashMap".to_string(),
-            type_args: vec![RustType::F64, RustType::String],
+        RustType::StdCollection {
+            kind: crate::ir::StdCollectionKind::HashMap,
+            args: vec![RustType::F64, RustType::String],
         }
     );
 }

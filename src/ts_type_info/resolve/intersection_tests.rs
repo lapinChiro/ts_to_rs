@@ -46,9 +46,9 @@ fn index_signature_to_hashmap() {
     let result = resolve_type_literal(&lit, &reg, &mut syn).unwrap();
     assert_eq!(
         result,
-        RustType::Named {
-            name: "HashMap".to_string(),
-            type_args: vec![RustType::String, RustType::F64],
+        RustType::StdCollection {
+            kind: crate::ir::StdCollectionKind::HashMap,
+            args: vec![RustType::String, RustType::F64],
         }
     );
 }
@@ -279,8 +279,11 @@ fn identity_mapped_value_mismatch_not_simplified() {
     let result = resolve_intersection(&members, &reg, &mut syn).unwrap();
     // HashMap フォールバック
     match result {
-        RustType::Named { name, .. } => assert_eq!(name, "HashMap"),
-        other => panic!("expected HashMap, got {other:?}"),
+        RustType::StdCollection {
+            kind: crate::ir::StdCollectionKind::HashMap,
+            ..
+        } => {}
+        other => panic!("expected HashMap StdCollection, got {other:?}"),
     }
 }
 
@@ -299,8 +302,11 @@ fn identity_mapped_constraint_not_keyof_not_simplified() {
     }];
     let result = resolve_intersection(&members, &reg, &mut syn).unwrap();
     match result {
-        RustType::Named { name, .. } => assert_eq!(name, "HashMap"),
-        other => panic!("expected HashMap, got {other:?}"),
+        RustType::StdCollection {
+            kind: crate::ir::StdCollectionKind::HashMap,
+            ..
+        } => {}
+        other => panic!("expected HashMap StdCollection, got {other:?}"),
     }
 }
 

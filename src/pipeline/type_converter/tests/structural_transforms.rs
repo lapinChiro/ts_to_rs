@@ -330,9 +330,9 @@ fn test_convert_ts_type_index_signature_in_annotation_to_hashmap() {
     .unwrap();
     assert_eq!(
         ty,
-        RustType::Named {
-            name: "HashMap".to_string(),
-            type_args: vec![RustType::String, RustType::String],
+        RustType::StdCollection {
+            kind: crate::ir::StdCollectionKind::HashMap,
+            args: vec![RustType::String, RustType::String],
         }
     );
 }

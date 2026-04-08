@@ -115,10 +115,7 @@ fn resolve_all_keyword_types() {
     );
     assert_eq!(
         resolve_ts_type(&TsTypeInfo::BigInt, &reg, &mut syn).unwrap(),
-        RustType::Named {
-            name: "i128".to_string(),
-            type_args: vec![]
-        }
+        RustType::Primitive(PrimitiveIntKind::I128)
     );
 }
 
@@ -225,9 +222,9 @@ fn resolve_record_type() {
     };
     assert_eq!(
         resolve_ts_type(&info, &reg, &mut syn).unwrap(),
-        RustType::Named {
-            name: "HashMap".to_string(),
-            type_args: vec![RustType::String, RustType::F64],
+        RustType::StdCollection {
+            kind: StdCollectionKind::HashMap,
+            args: vec![RustType::String, RustType::F64],
         }
     );
 }
@@ -242,9 +239,9 @@ fn resolve_set_type() {
     };
     assert_eq!(
         resolve_ts_type(&info, &reg, &mut syn).unwrap(),
-        RustType::Named {
-            name: "HashSet".to_string(),
-            type_args: vec![RustType::String],
+        RustType::StdCollection {
+            kind: StdCollectionKind::HashSet,
+            args: vec![RustType::String],
         }
     );
 }
@@ -280,9 +277,9 @@ fn resolve_mapped_type_fallback() {
     };
     assert_eq!(
         resolve_ts_type(&info, &reg, &mut syn).unwrap(),
-        RustType::Named {
-            name: "HashMap".to_string(),
-            type_args: vec![RustType::String, RustType::F64],
+        RustType::StdCollection {
+            kind: StdCollectionKind::HashMap,
+            args: vec![RustType::String, RustType::F64],
         }
     );
 }
@@ -600,9 +597,9 @@ fn is_symbol_filter_noop_check_type_mismatch_blocks_identity() {
     };
     assert_eq!(
         resolve_ts_type(&info, &reg, &mut syn).unwrap(),
-        RustType::Named {
-            name: "HashMap".to_string(),
-            type_args: vec![RustType::String, RustType::F64],
+        RustType::StdCollection {
+            kind: crate::ir::StdCollectionKind::HashMap,
+            args: vec![RustType::String, RustType::F64],
         }
     );
 }
@@ -633,9 +630,9 @@ fn is_symbol_filter_noop_extends_not_symbol_blocks_identity() {
     };
     assert_eq!(
         resolve_ts_type(&info, &reg, &mut syn).unwrap(),
-        RustType::Named {
-            name: "HashMap".to_string(),
-            type_args: vec![RustType::String, RustType::F64],
+        RustType::StdCollection {
+            kind: crate::ir::StdCollectionKind::HashMap,
+            args: vec![RustType::String, RustType::F64],
         }
     );
 }
@@ -666,9 +663,9 @@ fn is_symbol_filter_noop_true_type_not_never_blocks_identity() {
     };
     assert_eq!(
         resolve_ts_type(&info, &reg, &mut syn).unwrap(),
-        RustType::Named {
-            name: "HashMap".to_string(),
-            type_args: vec![RustType::String, RustType::F64],
+        RustType::StdCollection {
+            kind: crate::ir::StdCollectionKind::HashMap,
+            args: vec![RustType::String, RustType::F64],
         }
     );
 }
@@ -689,9 +686,9 @@ fn resolve_mapped_value_none_falls_back_to_hashmap_any() {
     };
     assert_eq!(
         resolve_ts_type(&info, &reg, &mut syn).unwrap(),
-        RustType::Named {
-            name: "HashMap".to_string(),
-            type_args: vec![RustType::String, RustType::Any],
+        RustType::StdCollection {
+            kind: crate::ir::StdCollectionKind::HashMap,
+            args: vec![RustType::String, RustType::Any],
         }
     );
 }

@@ -151,7 +151,7 @@ fn test_private_prop_expected_type_propagation() {
     let has_hashmap = res
         .expected_types
         .values()
-        .any(|t| matches!(t, RustType::Named { name, .. } if name == "HashMap"));
+        .any(|t| matches!(t, RustType::StdCollection { kind: crate::ir::StdCollectionKind::HashMap, .. }));
     assert!(
         has_hashmap,
         "private prop initializer should have HashMap expected type from Record<string, string>"

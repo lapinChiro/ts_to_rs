@@ -27,13 +27,11 @@ fn test_indexed_access_keyof_on_known_struct_returns_field_type() {
     // Both fields are HashMap<String, Any> → single type (deduplicated)
     let ty = result.unwrap();
     match &ty {
-        RustType::Named { name, .. } => {
-            assert_eq!(
-                name, "HashMap",
-                "both fields have same type, should return single HashMap"
-            );
-        }
-        _ => panic!("expected Named type, got: {ty:?}"),
+        RustType::StdCollection {
+            kind: crate::ir::StdCollectionKind::HashMap,
+            ..
+        } => {}
+        _ => panic!("expected HashMap StdCollection, got: {ty:?}"),
     }
 }
 
@@ -208,13 +206,11 @@ fn test_mapped_type_non_symbol_filter_is_not_identity() {
         Item::TypeAlias { ty, .. } => {
             // Should NOT be T — should be HashMap (non-identity mapped type fallback)
             match ty {
-                RustType::Named { name, .. } => {
-                    assert_eq!(
-                        name, "HashMap",
-                        "non-symbol filter should NOT be simplified to identity"
-                    );
-                }
-                other => panic!("expected Named(HashMap), got: {other:?}"),
+                RustType::StdCollection {
+                    kind: crate::ir::StdCollectionKind::HashMap,
+                    ..
+                } => {}
+                other => panic!("expected HashMap StdCollection, got: {other:?}"),
             }
         }
         other => panic!("expected TypeAlias, got: {other:?}"),

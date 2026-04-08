@@ -591,6 +591,13 @@ impl<'a> TypeResolver<'a> {
                 {
                     return ResolvedType::Known(type_args[1].clone());
                 }
+                // I-387: StdCollection 版 HashMap
+                RustType::StdCollection {
+                    kind: crate::ir::StdCollectionKind::HashMap,
+                    args,
+                } if args.len() == 2 => {
+                    return ResolvedType::Known(args[1].clone());
+                }
                 _ => {}
             }
         }

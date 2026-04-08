@@ -236,10 +236,7 @@ pub(super) fn try_convert_general_union(
                     TsKeywordTypeKind::TsBooleanKeyword => ("Bool".to_string(), RustType::Bool),
                     TsKeywordTypeKind::TsBigIntKeyword => (
                         "I128".to_string(),
-                        RustType::Named {
-                            name: "i128".to_string(),
-                            type_args: vec![],
-                        },
+                        RustType::Primitive(crate::ir::PrimitiveIntKind::I128),
                     ),
                     TsKeywordTypeKind::TsSymbolKeyword
                     | TsKeywordTypeKind::TsAnyKeyword

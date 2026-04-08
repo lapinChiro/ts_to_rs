@@ -305,9 +305,6 @@ fn test_convert_ts_type_bigint_keyword_returns_i128() {
     .unwrap();
     assert_eq!(
         ty,
-        RustType::Named {
-            name: "i128".to_string(),
-            type_args: vec![],
-        }
+        RustType::Primitive(crate::ir::PrimitiveIntKind::I128)
     );
 }

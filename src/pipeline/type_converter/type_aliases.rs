@@ -315,9 +315,9 @@ fn convert_type_alias_fallback(
                 return Ok(Item::TypeAlias {
                     vis,
                     name: name.to_string(),
-                    ty: RustType::Named {
-                        name: "HashMap".to_string(),
-                        type_args: vec![RustType::String, value_type.substitute(&mono_subs)],
+                    ty: RustType::StdCollection {
+                        kind: crate::ir::StdCollectionKind::HashMap,
+                        args: vec![RustType::String, value_type.substitute(&mono_subs)],
                     },
                     type_params,
                 });

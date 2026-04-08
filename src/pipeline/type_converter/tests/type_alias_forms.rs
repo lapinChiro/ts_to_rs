@@ -303,13 +303,15 @@ fn test_convert_type_alias_index_signature_generates_hashmap() {
         Item::TypeAlias { name, ty, .. } => {
             assert_eq!(name, "T");
             match ty {
-                RustType::Named { name, type_args } => {
-                    assert_eq!(name, "HashMap");
-                    assert_eq!(type_args.len(), 2);
-                    assert_eq!(type_args[0], RustType::String);
-                    assert_eq!(type_args[1], RustType::F64);
+                RustType::StdCollection {
+                    kind: crate::ir::StdCollectionKind::HashMap,
+                    args,
+                } => {
+                    assert_eq!(args.len(), 2);
+                    assert_eq!(args[0], RustType::String);
+                    assert_eq!(args[1], RustType::F64);
                 }
-                other => panic!("expected Named(HashMap) type, got: {other:?}"),
+                other => panic!("expected HashMap StdCollection, got: {other:?}"),
             }
         }
         other => panic!("expected TypeAlias item, got: {other:?}"),
@@ -333,13 +335,15 @@ fn test_convert_type_alias_index_signature_no_type_generates_hashmap_any() {
         Item::TypeAlias { name, ty, .. } => {
             assert_eq!(name, "T");
             match ty {
-                RustType::Named { name, type_args } => {
-                    assert_eq!(name, "HashMap");
-                    assert_eq!(type_args.len(), 2);
-                    assert_eq!(type_args[0], RustType::String);
-                    assert_eq!(type_args[1], RustType::Any);
+                RustType::StdCollection {
+                    kind: crate::ir::StdCollectionKind::HashMap,
+                    args,
+                } => {
+                    assert_eq!(args.len(), 2);
+                    assert_eq!(args[0], RustType::String);
+                    assert_eq!(args[1], RustType::Any);
                 }
-                other => panic!("expected Named(HashMap) type, got: {other:?}"),
+                other => panic!("expected HashMap StdCollection, got: {other:?}"),
             }
         }
         other => panic!("expected TypeAlias item, got: {other:?}"),
@@ -767,11 +771,13 @@ fn test_convert_type_alias_index_with_properties_generates_hashmap() {
         Item::TypeAlias { name, ty, .. } => {
             assert_eq!(name, "T");
             match ty {
-                RustType::Named { name, type_args } => {
-                    assert_eq!(name, "HashMap");
-                    assert_eq!(type_args[1], RustType::F64);
+                RustType::StdCollection {
+                    kind: crate::ir::StdCollectionKind::HashMap,
+                    args,
+                } => {
+                    assert_eq!(args[1], RustType::F64);
                 }
-                other => panic!("expected Named(HashMap) type, got: {other:?}"),
+                other => panic!("expected HashMap StdCollection, got: {other:?}"),
             }
         }
         other => panic!("expected TypeAlias item, got: {other:?}"),
