@@ -190,24 +190,11 @@ pub fn transpile_pipeline(input: TranspileInput) -> Result<TranspileOutput> {
         });
     }
 
-    // Pass 5c: shared_types.rs 用 stub 補完。
-    // `synthetic_items` 自身の field 等が参照する未定義「非外部」型 (ユーザー由来で未解決の型) に
-    // 空 stub struct を生成する。外部型は Phase 5a で既に解決済み。
-    //
-    // ただし user file 側で既に定義されている型名は `defined_elsewhere_names` として渡し、
-    // stub 生成対象から除外する (生成すると user file の定義と重複する)。
-    // **note**: 本質的には user 定義型への参照は `use` import を生成すべきで、現状の stub
-    // 生成は I-382 で設計を再考する予定。本 PRD の範囲では exclusion による band-aid に
-    // とどめる。
-    let user_defined_names = collect_user_defined_type_names(&file_outputs);
-    let mut synthetic_items: Vec<crate::ir::Item> =
+    // Pass 5c: synthetic items 抽出 (I-382)。
+    // 外部型は Phase 5a で解決済み。user 定義型への参照は OutputWriter が配置決定時に
+    // `use crate::<module>::Type;` import を生成する。
+    let synthetic_items: Vec<crate::ir::Item> =
         synthetic.all_items().into_iter().cloned().collect();
-    external_struct_generator::generate_stub_structs(
-        &mut synthetic_items,
-        &user_defined_names,
-        &shared_registry,
-        &synthetic,
-    );
 
     Ok(TranspileOutput {
         files: file_outputs,
@@ -260,27 +247,6 @@ fn register_synthetic_structs_in_registry(
     }
 }
 
-/// I-376 Phase 5c helper: 全 user file の IR から、定義されている型名 (struct/enum/trait/
-/// type_alias) を `HashSet<String>` で抽出する。
-///
-/// shared_types.rs 用 stub 生成 (`generate_stub_structs`) の `defined_elsewhere_names`
-/// 引数として渡され、user 定義型が synthetic_items の stub 生成対象から除外される。
-fn collect_user_defined_type_names(
-    file_outputs: &[FileOutput],
-) -> std::collections::HashSet<String> {
-    file_outputs
-        .iter()
-        .flat_map(|f| f.items.iter())
-        .filter_map(|item| match item {
-            crate::ir::Item::Struct { name, .. }
-            | crate::ir::Item::Enum { name, .. }
-            | crate::ir::Item::Trait { name, .. }
-            | crate::ir::Item::TypeAlias { name, .. } => Some(name.clone()),
-            _ => None,
-        })
-        .collect()
-}
-
 /// I-376: 全ファイルの user IR と synthetic registry を横断 scan し、未定義外部型の
 /// 推移閉包を固定点まで反復生成して `synthetic` registry に登録する。
 ///
@@ -293,9 +259,9 @@ fn collect_user_defined_type_names(
 /// 生成された外部型 struct のフィールドが新たな外部型を参照する場合、次の iteration で
 /// 検出される。**各 iteration は検出された全 undefined 名について必ず 1 件以上 synthetic
 /// に登録する** ため (`generate_external_struct` が `None` を返した場合も空 stub を push
-/// して name を claim する)、収束は monotone increase で保証される。`generate_stub_structs`
-/// と共有する [`external_struct_generator::UNDEFINED_REFS_FIXPOINT_MAX_ITERATIONS`] を
-/// 安全網とし、超過は構造的バグとして **panic** する。
+/// して name を claim する)、収束は monotone increase で保証される。
+/// [`external_struct_generator::UNDEFINED_REFS_FIXPOINT_MAX_ITERATIONS`] を安全網とし、
+/// 超過は構造的バグとして **panic** する。
 ///
 /// # Panics
 ///
@@ -460,102 +426,7 @@ mod tests {
         assert_eq!(parsed.files.len(), 3);
     }
 
-    // ===== I-376 Phase 5a / 5c helpers =====
-
-    #[test]
-    fn test_collect_user_defined_type_names_covers_all_definition_kinds() {
-        // Struct / Enum / Trait / TypeAlias の 4 variant 全てが抽出される。
-        // Fn / Impl / Use / Comment 等の非定義系 Item は含まれない。
-        use crate::ir::{Item, RustType, Visibility};
-        let file = FileOutput {
-            path: PathBuf::from("a.rs"),
-            source: String::new(),
-            rust_source: String::new(),
-            unsupported: vec![],
-            items: vec![
-                Item::Struct {
-                    vis: Visibility::Public,
-                    name: "MyStruct".to_string(),
-                    type_params: vec![],
-                    fields: vec![],
-                },
-                Item::Enum {
-                    vis: Visibility::Public,
-                    name: "MyEnum".to_string(),
-                    type_params: vec![],
-                    serde_tag: None,
-                    variants: vec![],
-                },
-                Item::Trait {
-                    vis: Visibility::Public,
-                    name: "MyTrait".to_string(),
-                    type_params: vec![],
-                    supertraits: vec![],
-                    methods: vec![],
-                    associated_types: vec![],
-                },
-                Item::TypeAlias {
-                    vis: Visibility::Public,
-                    name: "MyAlias".to_string(),
-                    type_params: vec![],
-                    ty: RustType::String,
-                },
-                Item::Fn {
-                    vis: Visibility::Public,
-                    attributes: vec![],
-                    is_async: false,
-                    name: "my_fn".to_string(),
-                    type_params: vec![],
-                    params: vec![],
-                    return_type: None,
-                    body: vec![],
-                },
-                Item::Use {
-                    vis: Visibility::Private,
-                    path: "std".to_string(),
-                    names: vec!["Foo".to_string()],
-                },
-                Item::Comment("hello".to_string()),
-            ],
-        };
-        let names = collect_user_defined_type_names(std::slice::from_ref(&file));
-        assert_eq!(names.len(), 4);
-        assert!(names.contains("MyStruct"));
-        assert!(names.contains("MyEnum"));
-        assert!(names.contains("MyTrait"));
-        assert!(names.contains("MyAlias"));
-        // 非定義系は含まれない
-        assert!(!names.contains("my_fn"));
-        assert!(!names.contains("Foo"));
-    }
-
-    #[test]
-    fn test_collect_user_defined_type_names_unions_across_files() {
-        // 複数ファイルに跨って定義された型名が全て収集される。
-        use crate::ir::{Item, Visibility};
-        let mk_file = |path: &str, name: &str| FileOutput {
-            path: PathBuf::from(path),
-            source: String::new(),
-            rust_source: String::new(),
-            unsupported: vec![],
-            items: vec![Item::Struct {
-                vis: Visibility::Public,
-                name: name.to_string(),
-                type_params: vec![],
-                fields: vec![],
-            }],
-        };
-        let files = vec![
-            mk_file("a.rs", "TypeA"),
-            mk_file("b.rs", "TypeB"),
-            mk_file("c.rs", "TypeC"),
-        ];
-        let names = collect_user_defined_type_names(&files);
-        assert_eq!(names.len(), 3);
-        assert!(names.contains("TypeA"));
-        assert!(names.contains("TypeB"));
-        assert!(names.contains("TypeC"));
-    }
+    // ===== I-376 Phase 5a helpers =====
 
     #[test]
     fn test_resolve_external_types_globally_handles_non_struct_external_typedef() {

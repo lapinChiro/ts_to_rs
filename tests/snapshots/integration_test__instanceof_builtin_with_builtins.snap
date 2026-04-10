@@ -1,5 +1,6 @@
 ---
 source: tests/integration_test.rs
+assertion_line: 168
 expression: output
 ---
 #[derive(Debug, Clone, PartialEq)]
@@ -32,6 +33,11 @@ pub struct RegExp {
     pub sticky: bool,
     pub unicode: bool,
     pub dot_all: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct String {
+    pub length: f64,
 }
 
 fn handleValue(x: HandleValueXType) -> String {

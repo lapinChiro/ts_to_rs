@@ -30,6 +30,8 @@ pub struct SyntheticReferenceGraph {
     direct_referencers: HashMap<String, BTreeSet<PathBuf>>,
     /// 合成型 A → A から参照される他の合成型の集合
     synthetic_dependencies: HashMap<String, BTreeSet<String>>,
+    /// 合成型 A → A が参照する user 定義型名の集合 (I-382)
+    user_type_deps: HashMap<String, BTreeSet<String>>,
     /// 合成型名 → 生成済みコード文字列
     code: HashMap<String, String>,
     /// 合成型名の順序保持リスト（決定的出力のため）
@@ -103,8 +105,24 @@ impl SyntheticReferenceGraph {
             }
         }
 
-        // 3. 合成型同士の依存関係（A の field 等から B を参照）
+        // 3b. 合成型同士の依存関係 + 合成型→user 定義型の参照 (I-382)
+        //
+        // user 定義型名を per_file_items から抽出し、synthetic walk で参照先を
+        // synthetic / user のいずれかに分類する（1 回の walk で dual-classify）。
+        let user_type_names: HashSet<String> = per_file_items
+            .iter()
+            .flat_map(|(_, items)| items.iter())
+            .filter_map(|item| match item {
+                Item::Struct { name, .. }
+                | Item::Enum { name, .. }
+                | Item::Trait { name, .. }
+                | Item::TypeAlias { name, .. } => Some(name.clone()),
+                _ => None,
+            })
+            .collect();
+
         let mut synthetic_dependencies: HashMap<String, BTreeSet<String>> = HashMap::new();
+        let mut user_type_deps: HashMap<String, BTreeSet<String>> = HashMap::new();
         for item in synthetic_items {
             let Some(name) = item.canonical_name() else {
                 continue;
@@ -112,8 +130,16 @@ impl SyntheticReferenceGraph {
             let mut refs: HashSet<String> = HashSet::new();
             collect_type_refs_from_item(item, &mut refs);
             for r in refs {
-                if r != name && code.contains_key(&r) {
+                if r == name {
+                    continue;
+                }
+                if code.contains_key(&r) {
                     synthetic_dependencies
+                        .entry(name.to_string())
+                        .or_default()
+                        .insert(r);
+                } else if user_type_names.contains(&r) {
+                    user_type_deps
                         .entry(name.to_string())
                         .or_default()
                         .insert(r);
@@ -124,6 +150,7 @@ impl SyntheticReferenceGraph {
         Self {
             direct_referencers,
             synthetic_dependencies,
+            user_type_deps,
             code,
             names_in_order,
         }
@@ -190,6 +217,50 @@ impl SyntheticReferenceGraph {
             .filter(|n| shared_names.contains(n.as_str()))
             .cloned()
             .collect()
+    }
+
+    /// 合成型 `name` が直接参照する user 定義型の集合。
+    pub fn user_type_deps(&self, name: &str) -> BTreeSet<String> {
+        self.user_type_deps.get(name).cloned().unwrap_or_default()
+    }
+
+    /// `scope` 内の合成型のみを辿って、推移的に参照される user 定義型を収集する。
+    ///
+    /// shared/inline 各配置スコープに対して適切な user 型 import を計算するために使用。
+    /// synthetic→synthetic deps は `scope` 内のもののみ follow し、scope 外への推移は
+    /// 追わない（shared 配置側で個別に解決されるため）。
+    pub fn user_types_in_scope(
+        &self,
+        start: &BTreeSet<String>,
+        scope: &BTreeSet<String>,
+    ) -> BTreeSet<String> {
+        // scope 内の synthetic のみを辿って推移閉包を計算
+        let mut visited: BTreeSet<String> = BTreeSet::new();
+        let mut queue: Vec<String> = start
+            .iter()
+            .filter(|n| scope.contains(*n))
+            .cloned()
+            .collect();
+        while let Some(n) = queue.pop() {
+            if !visited.insert(n.clone()) {
+                continue;
+            }
+            if let Some(deps) = self.synthetic_dependencies.get(&n) {
+                for d in deps {
+                    if scope.contains(d) && !visited.contains(d) {
+                        queue.push(d.clone());
+                    }
+                }
+            }
+        }
+        // 訪問した全 synthetic の user_type_deps を union
+        let mut user_types = BTreeSet::new();
+        for name in &visited {
+            if let Some(deps) = self.user_type_deps.get(name) {
+                user_types.extend(deps.iter().cloned());
+            }
+        }
+        user_types
     }
 }
 
@@ -683,6 +754,147 @@ mod tests {
         assert!(
             result.contains("_TypeLit0"),
             "synthetic referenced via StructInit in fn body should be emitted"
+        );
+    }
+
+    // ===== I-382: user_type_deps テスト =====
+
+    #[test]
+    fn test_user_type_deps_basic() {
+        // synthetic enum が user 定義型を variant データに持つ → user_type_deps に記録
+        let user_items = vec![make_struct("MyType", &[])];
+        let synthetic = vec![make_enum("UnionA", &[("My", "MyType"), ("S", "String")])];
+        let per_file = vec![(PathBuf::from("a.rs"), user_items.as_slice())];
+        let graph = SyntheticReferenceGraph::build(&per_file, &synthetic);
+
+        let deps = graph.user_type_deps("UnionA");
+        assert!(
+            deps.contains("MyType"),
+            "MyType should be in user_type_deps"
+        );
+        assert!(!deps.contains("String"), "String is not a user type");
+    }
+
+    #[test]
+    fn test_user_type_deps_empty_when_no_user_refs() {
+        // synthetic が user 型を参照しない → 空
+        let user_items = vec![make_struct("MyType", &[])];
+        let synthetic = vec![
+            make_struct("SynthA", &[("x", "SynthB")]),
+            make_struct("SynthB", &[]),
+        ];
+        let per_file = vec![(PathBuf::from("a.rs"), user_items.as_slice())];
+        let graph = SyntheticReferenceGraph::build(&per_file, &synthetic);
+
+        assert!(graph.user_type_deps("SynthA").is_empty());
+        assert!(graph.user_type_deps("SynthB").is_empty());
+    }
+
+    #[test]
+    fn test_user_type_deps_multiple_user_types() {
+        // 1 つの synthetic が複数の user 型を参照
+        let user_items = vec![make_struct("TypeA", &[]), make_struct("TypeB", &[])];
+        let synthetic = vec![make_enum("UnionAB", &[("A", "TypeA"), ("B", "TypeB")])];
+        let per_file = vec![(PathBuf::from("a.rs"), user_items.as_slice())];
+        let graph = SyntheticReferenceGraph::build(&per_file, &synthetic);
+
+        let deps = graph.user_type_deps("UnionAB");
+        assert_eq!(deps.len(), 2);
+        assert!(deps.contains("TypeA"));
+        assert!(deps.contains("TypeB"));
+    }
+
+    #[test]
+    fn test_user_types_in_scope_shared() {
+        // shared A → shared B → user MyType
+        // scope = {A, B} → MyType が結果に含まれる
+        let user_items = vec![make_struct("MyType", &[])];
+        let synthetic = vec![
+            make_struct("A", &[("b", "B")]),
+            make_enum("B", &[("My", "MyType")]),
+        ];
+        let per_file = vec![(PathBuf::from("a.rs"), user_items.as_slice())];
+        let graph = SyntheticReferenceGraph::build(&per_file, &synthetic);
+
+        let scope: BTreeSet<String> = ["A", "B"].iter().map(|s| s.to_string()).collect();
+        let user_types = graph.user_types_in_scope(&scope, &scope);
+        assert!(
+            user_types.contains("MyType"),
+            "transitive user type dep should be found"
+        );
+    }
+
+    #[test]
+    fn test_user_types_in_scope_excludes_out_of_scope() {
+        // inline A → shared B → user MyType
+        // scope = {A} のみ → B は scope 外なので follow しない → MyType は含まれない
+        let user_items = vec![make_struct("MyType", &[])];
+        let synthetic = vec![
+            make_struct("A", &[("b", "B")]),
+            make_enum("B", &[("My", "MyType")]),
+        ];
+        let per_file = vec![(PathBuf::from("a.rs"), user_items.as_slice())];
+        let graph = SyntheticReferenceGraph::build(&per_file, &synthetic);
+
+        let start: BTreeSet<String> = std::iter::once("A".to_string()).collect();
+        let scope: BTreeSet<String> = std::iter::once("A".to_string()).collect();
+        let user_types = graph.user_types_in_scope(&start, &scope);
+        assert!(
+            user_types.is_empty(),
+            "B is out of scope, so MyType should not be reached"
+        );
+    }
+
+    #[test]
+    fn test_user_types_in_scope_direct_dep() {
+        // inline A が直接 user 型を参照 → 結果に含まれる
+        let user_items = vec![make_struct("MyType", &[])];
+        let synthetic = vec![make_enum("A", &[("My", "MyType")])];
+        let per_file = vec![(PathBuf::from("a.rs"), user_items.as_slice())];
+        let graph = SyntheticReferenceGraph::build(&per_file, &synthetic);
+
+        let start: BTreeSet<String> = std::iter::once("A".to_string()).collect();
+        let user_types = graph.user_types_in_scope(&start, &start);
+        assert!(user_types.contains("MyType"));
+    }
+
+    #[test]
+    fn test_user_type_deps_mixed_synthetic_and_user_refs() {
+        // synthetic が synthetic dep (SynthB) と user dep (MyType) を同時に持つ場合、
+        // dual-classify が正しく分離されること
+        let user_items = vec![make_struct("MyType", &[])];
+        let synthetic = vec![
+            make_struct("SynthA", &[("b", "SynthB"), ("u", "MyType")]),
+            make_struct("SynthB", &[]),
+        ];
+        let per_file = vec![(PathBuf::from("a.rs"), user_items.as_slice())];
+        let graph = SyntheticReferenceGraph::build(&per_file, &synthetic);
+
+        // SynthB は synthetic_dependencies に入る (user_type_deps には入らない)
+        assert!(graph.is_referenced_by_synthetic("SynthB"));
+        // MyType は user_type_deps に入る (synthetic_dependencies には入らない)
+        let deps = graph.user_type_deps("SynthA");
+        assert!(deps.contains("MyType"));
+        assert!(
+            !deps.contains("SynthB"),
+            "SynthB should be in synthetic deps, not user deps"
+        );
+    }
+
+    #[test]
+    fn test_user_types_in_scope_no_synthetic_deps() {
+        // synthetic に synthetic deps がなく user deps のみの場合でも正しく動作する
+        // (synthetic_dependencies.get() → None のブランチ)
+        let user_items = vec![make_struct("MyType", &[])];
+        let synthetic = vec![make_enum("Standalone", &[("My", "MyType")])];
+        let per_file = vec![(PathBuf::from("a.rs"), user_items.as_slice())];
+        let graph = SyntheticReferenceGraph::build(&per_file, &synthetic);
+
+        let start: BTreeSet<String> = std::iter::once("Standalone".to_string()).collect();
+        let user_types = graph.user_types_in_scope(&start, &start);
+        assert!(
+            user_types.contains("MyType"),
+            "should find user type even without synthetic deps"
         );
     }
 

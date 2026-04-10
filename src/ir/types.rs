@@ -146,7 +146,7 @@ pub enum RustType {
     /// 型パラメータ参照 (I-387)。`convert_ts_type` が
     /// `SyntheticTypeRegistry::is_in_type_param_scope(name)` の判定で構築する。
     ///
-    /// 下流コード (`substitute` / `collect_type_vars` / `generate_stub_structs`) は
+    /// 下流コード (`substitute` / `collect_type_vars` / `TypeRefCollector`) は
     /// `Named` との区別を構造的に行えるようになり、名前文字列マッチに依存しない。
     TypeVar {
         /// 型変数名 (例: "T", "U", "E")

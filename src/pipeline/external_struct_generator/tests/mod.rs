@@ -5,7 +5,7 @@
 //! - [`refs_from_bodies_tests`]: `collect_type_refs` — fn body / impl method body / type_params constraint
 //! - [`refs_from_patterns_tests`]: `collect_type_refs` — 構造化 `Pattern`（MatchArm / IfLet / Matches）
 //! - [`generate_struct_tests`]: `generate_external_struct` とモノモーフィゼーション
-//! - [`undefined_refs_tests`]: `collect_all_undefined_references` / `generate_stub_structs` / `UndefinedRefScope`
+//! - [`undefined_refs_tests`]: `collect_undefined_refs_inner` / `collect_undefined_type_references`
 //! - [`walker_tests`]: `Expr::FnCall` walker（CallTarget 経由の型参照捕捉）
 
 use super::*;

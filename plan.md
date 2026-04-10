@@ -85,7 +85,7 @@ Step 4    最終 quality check + ドキュメント整理
 | D-0.5 | 0.5 | `P` 残存調査・解消 (Cluster 1a regression) | ✅ |
 | D-1 | 1 | PRD-γ 調査→起票→実装: `__type` marker 是正 (I-389) | ✅ |
 | D-2 | 2 | PRD-β 調査→起票→実装: フィルタ参照整合性 + 外部型完全化 (I-391) | ✅ |
-| D-3 | 3 | PRD-δ 調査→起票→実装: Pass 5c 再設計 + `generate_stub_structs` 削除 | ⏳ |
+| D-3 | 3 | PRD-δ 調査→起票→実装: Pass 5c 再設計 + `generate_stub_structs` 削除 (I-382) | ✅ |
 | D-4 | 4 | 最終 quality check + ドキュメント整理 | ⏳ |
 
 ### 直近アクション
@@ -97,8 +97,12 @@ Step 4    最終 quality check + ドキュメント整理
    - `filter.ts` 参照整合性チェック + root types 追加 (BufferSource, TemplateStringsArray 等)
    - `extractor.ts` ESSymbol primitive 認識、`external_types/mod.rs` alias → 空 Struct
    - dangling 22→**1** (残 HTTPException = PRD-δ scope)、excluded_user 72→71
-3. **D-3: PRD-δ 調査 (Discovery)** ← 次のアクション
-   - I-382 本体: `generate_stub_structs` 削除 + user 型 import 生成
+3. ~~D-3: PRD-δ~~ ✅ 完了 (I-382, 2026-04-10)
+   - `generate_stub_structs` 完全削除 (grep ヒット 0)
+   - `SyntheticReferenceGraph` に `user_type_deps` 追加 (synthetic→user 型参照追跡)
+   - `resolve_synthetic_placement` で user 型 import 自動生成 (shared/inline 両対応)
+   - Hono bench regression 0 (全指標完全一致)
+4. **D-4: 最終 quality check + ドキュメント整理** ← 次のアクション
 
 ---
 
@@ -183,10 +187,10 @@ Hono 後退ゼロ確認済。
 
 詳細: [`report/i382/phase-d-probe.md`](report/i382/phase-d-probe.md)
 
-| Category | Phase A | D-0 初回 | D-0.5 (P修正) | D-1 (__type修正) | D-2 (フィルタ+alias+symbol) |
-|---|---|---|---|---|---|
-| dangling | 34 | 24 | 23 | 22 | **1** |
-| excluded_user | 73 | 72 | 72 | 72 | **71** |
+| Category | Phase A | D-0 初回 | D-0.5 (P修正) | D-1 (__type修正) | D-2 (フィルタ+alias+symbol) | D-3 (I-382 完了) |
+|---|---|---|---|---|---|---|
+| dangling | 34 | 24 | 23 | 22 | **1** | **N/A** (stub 機構削除) |
+| excluded_user | 73 | 72 | 72 | 72 | **71** | **N/A** (import 生成に置換) |
 
 - D-0.5: `P` type param leak 解消 (`collection.rs` scope 欠落修正)
 - D-1: `__type` compiler marker 解消 (`extractor.ts` anonymous type literal 展開)

@@ -10,9 +10,10 @@
 //! 配置決定後、inline 配置された合成型が shared 配置型を（field 等を介して）参照する場合、
 //! 参照側ファイルに推移インポートを追加する（I-371 criterion 4）。
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
+use super::super::module_graph::file_path_to_module_path;
 use super::super::placement::SyntheticReferenceGraph;
 use super::super::types::OutputFile;
 use super::{OutputWriter, SyntheticPlacement};
@@ -83,25 +84,47 @@ impl<'a> OutputWriter<'a> {
             }
         }
 
-        // 3. shared module の合成
+        // 3. user 定義型名 → 定義ファイル rel_path のマッピング構築 (I-382)
+        let user_type_def_map: HashMap<String, PathBuf> = file_outputs
+            .iter()
+            .flat_map(|f| {
+                f.items.iter().filter_map(move |item| match item {
+                    Item::Struct { name, .. }
+                    | Item::Enum { name, .. }
+                    | Item::Trait { name, .. }
+                    | Item::TypeAlias { name, .. } => Some((name.clone(), f.rel_path.clone())),
+                    _ => None,
+                })
+            })
+            .collect();
+
+        // shared 配置された型名の集合（推移計算・user 型 import 共通で使用）
+        let shared_names: BTreeSet<String> =
+            shared_type_refs.iter().map(|(n, _)| n.clone()).collect();
+
+        // 4. shared module の合成
         let shared_module = if shared_items.is_empty() {
             None
         } else {
             let body = shared_items.join("\n\n");
-            let imports = generate_shared_module_imports(&body);
-            let content = if imports.is_empty() {
+            let stdlib_imports = generate_shared_module_imports(&body);
+
+            // I-382: shared module が参照する user 定義型の import を生成
+            let shared_user_types = graph.user_types_in_scope(&shared_names, &shared_names);
+            let user_imports = build_user_type_imports(&shared_user_types, &user_type_def_map);
+
+            let all_imports = combine_import_sections(&stdlib_imports, &user_imports);
+            let content = if all_imports.is_empty() {
                 body
             } else {
-                format!("{imports}\n\n{body}")
+                format!("{all_imports}\n\n{body}")
             };
             let module_path = choose_shared_module_path(file_outputs);
             Some((module_path, content))
         };
 
-        // 4. 推移インポート計算: inline 配置された合成型 → shared 配置型への参照を辿り、
+        // 5. 推移インポート計算: inline 配置された合成型 → shared 配置型への参照を辿り、
         //    参照側ファイルに shared 型を追加する（I-371 criterion 4）。
-        let shared_names: BTreeSet<String> =
-            shared_type_refs.iter().map(|(n, _)| n.clone()).collect();
         for (file, inline_names) in &inline_by_file {
             let transitive = graph.transitive_shared_refs(inline_names, &shared_names);
             for shared_name in transitive {
@@ -115,13 +138,35 @@ impl<'a> OutputWriter<'a> {
             }
         }
 
-        // 5. shared_imports: 各参照ファイルに対して `use crate::<stem>::{Type, ...};` を構築。
-        let shared_imports: HashMap<PathBuf, Vec<String>> =
+        // 6. shared_imports: 各参照ファイルに対して `use crate::<stem>::{Type, ...};` を構築。
+        let mut shared_imports: HashMap<PathBuf, Vec<String>> =
             if let Some((ref module_path, _)) = shared_module {
                 build_shared_imports(module_path, &shared_type_refs)
             } else {
                 HashMap::new()
             };
+
+        // 7. I-382: inline 配置された合成型が参照する user 定義型の import を追加。
+        //    同一ファイルの型は import 不要（同一モジュール scope）。
+        for (file, inline_names) in &inline_by_file {
+            let inline_user_types = graph.user_types_in_scope(inline_names, inline_names);
+            let mut needed: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+            for user_type in inline_user_types {
+                if let Some(def_file) = user_type_def_map.get(&user_type) {
+                    if def_file != file {
+                        let module = file_path_to_module_path(def_file);
+                        needed.entry(module).or_default().insert(user_type);
+                    }
+                }
+            }
+            if !needed.is_empty() {
+                let imports = shared_imports.entry(file.clone()).or_default();
+                for (module, types) in &needed {
+                    let names: Vec<&str> = types.iter().map(String::as_str).collect();
+                    imports.push(format_use_statement(module, &names));
+                }
+            }
+        }
 
         SyntheticPlacement {
             inline,
@@ -158,15 +203,12 @@ fn build_shared_imports(
         }
     }
 
+    let module = format!("crate::{stem}");
     by_file
         .into_iter()
         .map(|(file, types)| {
-            let names: Vec<String> = types.into_iter().collect();
-            let import = if names.len() == 1 {
-                format!("use crate::{stem}::{};", names[0])
-            } else {
-                format!("use crate::{stem}::{{{}}};", names.join(", "))
-            };
+            let names: Vec<&str> = types.iter().map(String::as_str).collect();
+            let import = format_use_statement(&module, &names);
             (file, vec![import])
         })
         .collect()
@@ -194,6 +236,65 @@ pub(super) fn choose_shared_module_path(file_outputs: &[OutputFile<'_>]) -> Path
     }
 
     unreachable!("infinite counter guarantees a unique name")
+}
+
+/// user 定義型名の集合と定義ファイルマッピングから `use` import 文を生成する。
+///
+/// module path ごとに型名をグループ化し `use <module>::{T1, T2, ...};` にまとめる。
+/// module path 辞書順でソート（決定的出力）。
+fn build_user_type_imports(
+    user_types: &BTreeSet<String>,
+    user_type_def_map: &HashMap<String, PathBuf>,
+) -> Vec<String> {
+    // module_path → 型名のグループ化
+    let mut by_module: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for user_type in user_types {
+        if let Some(def_file) = user_type_def_map.get(user_type) {
+            let module = file_path_to_module_path(def_file);
+            by_module
+                .entry(module)
+                .or_default()
+                .insert(user_type.clone());
+        }
+    }
+
+    by_module
+        .iter()
+        .map(|(module, types)| {
+            let names: Vec<&str> = types.iter().map(String::as_str).collect();
+            format_use_statement(module, &names)
+        })
+        .collect()
+}
+
+/// stdlib import 文字列と user 型 import リストを結合する。
+fn combine_import_sections(stdlib_imports: &str, user_imports: &[String]) -> String {
+    let mut parts = Vec::new();
+    if !stdlib_imports.is_empty() {
+        parts.push(stdlib_imports.to_string());
+    }
+    if !user_imports.is_empty() {
+        parts.push(user_imports.join("\n"));
+    }
+    parts.join("\n")
+}
+
+/// module path と型名リストから `use <module>::{T1, T2};` 形式のインポート文を生成する。
+///
+/// # Panics
+///
+/// `names` が空の場合。呼び出し側は BTreeMap/BTreeSet の走査結果から型名を渡すため、
+/// 空になることは構造的にないが、万一の場合は無効な Rust コード生成を防ぐ。
+fn format_use_statement(module: &str, names: &[&str]) -> String {
+    assert!(
+        !names.is_empty(),
+        "format_use_statement: names must not be empty"
+    );
+    if names.len() == 1 {
+        format!("use {module}::{};", names[0])
+    } else {
+        format!("use {module}::{{{}}};", names.join(", "))
+    }
 }
 
 /// 共有合成型モジュールに必要なインポート文を生成する。

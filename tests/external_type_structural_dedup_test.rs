@@ -165,11 +165,11 @@ function handle(req: Request): Response {
 
 #[test]
 fn user_defined_type_not_stubbed_in_synthetic_items() {
-    // I-376 C3: Phase 5c stub pass は user 定義型を stub 化してはならない。
+    // I-376 C3 / I-382: user 定義型が synthetic_items に混入しないことを検証。
     // 以前は synthetic any-enum が user 定義型 (MyError 等) を variant で参照するとき、
     // shared_types.rs stub 生成が空の `pub struct MyError;` を synthetic_items に
-    // 混入させていた。これは user 定義の MyError と型が別物になるため silent
-    // semantic bug。`defined_elsewhere_names` の exclusion が正しく機能することを検証。
+    // 混入させていた。I-382 で stub 生成機構 (generate_stub_structs) 自体を削除し、
+    // user 定義型への参照は import 生成で解決する設計に置換した。
     let ts = r#"
 class MyError {
     message: string;

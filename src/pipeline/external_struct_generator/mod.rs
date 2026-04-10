@@ -18,10 +18,10 @@ const SERDE_JSON_VALUE: &str = "serde_json::Value";
 
 /// 未定義参照 fixpoint の最大反復回数 (安全網)。
 ///
-/// [`generate_stub_structs`] および `pipeline::resolve_external_types_globally` の両方で
-/// 使用される。各 iteration は検出された全 undefined 名を必ず push するため (None 返却
-/// 時は空 stub フォールバック)、iteration 数は未定義型の総数で有界。64 は Hono 実データ
-/// (外部型総数 ~20) に対して十分な余裕を持ち、超過時は構造的バグとして panic する。
+/// `pipeline::resolve_external_types_globally` で使用される。各 iteration は検出された
+/// 全 undefined 名を必ず push するため (None 返却時は空 stub フォールバック)、
+/// iteration 数は未定義型の総数で有界。64 は Hono 実データ (外部型総数 ~20) に対して
+/// 十分な余裕を持ち、超過時は構造的バグとして panic する。
 pub(crate) const UNDEFINED_REFS_FIXPOINT_MAX_ITERATIONS: usize = 64;
 
 /// IR items を走査し、参照されているが定義がない外部型名を収集する。
@@ -52,23 +52,12 @@ pub fn collect_undefined_type_references(
         .collect()
 }
 
-/// IR items を走査し、参照されているが定義がない型名を **全て** 収集する。
-///
-/// [`collect_undefined_type_references`] と異なり、`is_external` フィルタを適用しない。
-/// shared_types.rs のスタブ生成で使用する — モジュール内の全未定義参照を解決するため。
-pub fn collect_all_undefined_references(items: &[&Item]) -> HashSet<String> {
-    collect_undefined_refs_inner(items)
-}
-
-/// 未定義型参照の収集ロジック共通骨格。
-///
-/// `collect_undefined_type_references` と `collect_all_undefined_references` は
-/// 「`is_external` フィルタを最後に追加で掛けるかどうか」のみ異なる。
+/// 未定義型参照の収集ロジック。
 /// 1. 定義済み・インポート済み・型パラメータ名・標準型・`serde_json::Value`・パス形式
 ///    (`A::B`) の型名を除外集合に集める
 /// 2. `items` を walker で歩いて参照名を収集
 /// 3. 除外集合を引いた残りを返す
-fn collect_undefined_refs_inner(items: &[&Item]) -> HashSet<String> {
+pub(crate) fn collect_undefined_refs_inner(items: &[&Item]) -> HashSet<String> {
     let defined_types: HashSet<String> = items
         .iter()
         .filter_map(|item| match item {
@@ -126,72 +115,6 @@ fn collect_undefined_refs_inner(items: &[&Item]) -> HashSet<String> {
         .collect()
 }
 
-/// 未定義型に対する空スタブ struct を生成し、`items` に追加する。
-///
-/// 参照されているが定義がない型に対し、`TypeRegistry` に struct 情報があればフル生成
-/// ([`generate_external_struct`] 経由)、それ以外は空のユニット struct `pub struct TypeName;`
-/// を生成する。フル生成した struct が新たな未定義参照を生む場合に備え、固定点に達するまで
-/// 反復する。
-///
-/// # Parameters
-///
-/// - `defined_elsewhere_names`: `items` に含まれないが Rust モジュール階層の別の場所で
-///   定義済みの型名集合。これらは「参照されているが未定義」の結果から除外され、stub
-///   struct を生成しない。用途: shared_types.rs (= `items`) が user file 側の型を import
-///   経由で参照する場合、その型を stub 化すると user 定義と重複するため除外が必要。
-///   **注**: 現状の実装は exclusion による band-aid で、本来は参照型を import として
-///   生成すべき (I-382 で再設計予定)。
-///
-/// # 収束保証
-///
-/// 各 iteration は検出された全 undefined 名を必ず push するため
-/// ([`generate_external_struct`] が `None` を返しても空 stub を push)、iteration 数は
-/// 未定義型の総数で有界。安全網として [`UNDEFINED_REFS_FIXPOINT_MAX_ITERATIONS`] を設定し、
-/// 超過時は構造的バグとして **panic** する。
-///
-/// # Panics
-///
-/// 固定点が [`UNDEFINED_REFS_FIXPOINT_MAX_ITERATIONS`] 以内で収束しない場合。
-pub fn generate_stub_structs(
-    items: &mut Vec<Item>,
-    defined_elsewhere_names: &HashSet<String>,
-    registry: &TypeRegistry,
-    synthetic: &SyntheticTypeRegistry,
-) {
-    for iter in 0..=UNDEFINED_REFS_FIXPOINT_MAX_ITERATIONS {
-        // Undefined ref の収集は items の不変借用のみで完結させ、ブロックスコープで
-        // 借用を閉じてから `items` への可変操作に移る。
-        let sorted: Vec<String> = {
-            let borrowed: Vec<&Item> = items.iter().collect();
-            let mut undefined = collect_all_undefined_references(&borrowed);
-            undefined.retain(|name| !defined_elsewhere_names.contains(name));
-            let mut names: Vec<String> = undefined.into_iter().collect();
-            names.sort();
-            names
-        };
-        if sorted.is_empty() {
-            return;
-        }
-        assert!(
-            iter < UNDEFINED_REFS_FIXPOINT_MAX_ITERATIONS,
-            "generate_stub_structs: fixpoint did not converge in \
-             {UNDEFINED_REFS_FIXPOINT_MAX_ITERATIONS} iterations (unresolved: {sorted:?}). \
-             Indicates a bug in collect_all_undefined_references."
-        );
-        for name in sorted {
-            let item = generate_external_struct(&name, registry, synthetic).unwrap_or_else(|| {
-                Item::Struct {
-                    vis: Visibility::Public,
-                    name,
-                    type_params: vec![],
-                    fields: vec![],
-                }
-            });
-            items.push(item);
-        }
-    }
-}
-
 /// `TypeRegistry` のフィールド情報から外部型の `Item::Struct` を生成する。
 ///
 /// 非 trait 制約を持つ型パラメータはモノモーフィゼーションで除去し、
@@ -199,7 +122,7 @@ pub fn generate_stub_structs(
 ///
 /// `TypeDef::Struct` 以外 (`Enum` / `Function` / `ConstValue`) の場合は `None` を返す。
 /// 呼び出し側は `None` に対して空 stub struct フォールバックを生成することが想定されている
-/// ([`generate_stub_structs`] / `pipeline::resolve_external_types_globally` 参照)。
+/// (`pipeline::resolve_external_types_globally` 参照)。
 pub fn generate_external_struct(
     name: &str,
     registry: &TypeRegistry,

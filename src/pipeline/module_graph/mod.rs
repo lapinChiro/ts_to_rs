@@ -422,13 +422,17 @@ fn strip_root(path: &Path, root: &Path) -> PathBuf {
 /// Converts a relative file path to a Rust module path.
 ///
 /// Rules:
-/// - Strips `.ts` extension
+/// Converts a relative file path to a Rust module path.
+///
+/// Extension-agnostic: works for both `.ts` and `.rs` paths.
+///
+/// - Strips file extension
 /// - Replaces hyphens with underscores
 /// - Replaces path separators with `::`
 /// - Prepends `crate::`
-/// - `index.ts` maps to parent module
+/// - `index.*` maps to parent module
 /// - Rust keywords get `r#` prefix
-fn file_path_to_module_path(rel_path: &Path) -> String {
+pub(crate) fn file_path_to_module_path(rel_path: &Path) -> String {
     let without_ext = rel_path.with_extension("");
     let components: Vec<String> = without_ext
         .components()
