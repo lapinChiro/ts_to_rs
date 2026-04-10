@@ -34,25 +34,25 @@
 
 詳細レポート: [`phase-d-probe.md`](./phase-d-probe.md)
 
-| Category | Phase A | D-0 初回 | D-0.5 (P修正) | D-1 (__type修正) |
-|---|---|---|---|---|
-| dangling (shared_types stubs) | 34 | 24 | 23 | **22** |
-| excluded_user (defined_elsewhere) | 73 | 72 | 72 | **72** |
-| external_dangling (外部型 stubs) | N/A | 79 | 79 | **79** |
+| Category | Phase A | D-0 | D-0.5 | D-1 | D-2 |
+|---|---|---|---|---|---|
+| dangling | 34 | 24 | 23 | 22 | **1** |
+| excluded_user | 73 | 72 | 72 | 72 | **71** |
 
-#### Dangling 22 件の Cluster 別内訳 (D-1 完了後)
+#### Dangling 1 件の残存 (D-2 完了後)
 
-| Cluster | 件数 | 識別子 | Phase D スコープ |
-|---|---|---|---|
-| ~~1a (type param leak)~~ | ~~1~~ | ~~`P`~~ | ✅ D-0.5 で解消 |
-| 1b (DOM/Web API) | 20 | HTMLCanvasElement 他 19 件 | **PRD-β** |
-| ~~1c (compiler marker)~~ | ~~1~~ | ~~`__type`~~ | ✅ D-1 (I-389) で解消 |
-| 1c (primitive) | 1 | `symbol` | **PRD-β** に統合 |
-| User-defined (Struct) | 1 | `HTTPException` | **PRD-δ** |
+| Cluster | 件数 | 状態 |
+|---|---|---|
+| ~~1a (type param leak, `P`)~~ | ~~1~~ | ✅ D-0.5 で解消 |
+| ~~1b (DOM/Web API, 20 件)~~ | ~~20~~ | ✅ D-2 (I-391) で解消 |
+| ~~1c (compiler marker, `__type`)~~ | ~~1~~ | ✅ D-1 (I-389) で解消 |
+| ~~1c (primitive, `symbol`)~~ | ~~1~~ | ✅ D-2 (I-391) で解消 |
+| User-defined (`HTTPException`) | **1** | **PRD-δ** scope |
 
-#### Excluded User 72 件
+#### Excluded User 71 件
 
-Phase A の 73 件から 1 件減少。全件は PRD-δ (I-382 本体) のスコープ。
+Phase A の 73 件から 2 件減少 (72→71 は D-2 で `PermissionsPolicyValue` が
+JSON 変更による型解決改善の副次効果で消滅)。全件は PRD-δ (I-382 本体) のスコープ。
 
 ### IR 設計欠陥 → 構造的解決
 
@@ -201,9 +201,9 @@ Step 0.5  `P` 残存調査・解消                                   ✅ 完了
   ↓
 Step 1    PRD-γ 調査→起票→実装 (__type, 1 件, 小 scope)        ✅ 完了
   ↓         γ で external 型処理フローを把握 → β の Discovery に有益
-Step 2    PRD-β 調査→起票→実装 (DOM 型等, 21 件, 中 scope)     ← 現在地
-  ↓         β で TypeDef 構造を変更 → δ の設計に直結
-Step 3    PRD-δ 調査→起票→実装 (I-382 本体, 72+1 件, 大 scope)
+Step 2    PRD-β 調査→起票→実装 (DOM 型等, 21 件, 中 scope)     ✅ 完了
+  ↓         β で外部型 JSON の参照整合性を確保 → δ の設計に直結
+Step 3    PRD-δ 調査→起票→実装 (I-382 本体, 71+1 件, 大 scope)  ← 現在地
   ↓         β/γ で dangling 解消済の状態で generate_stub_structs 削除
 Step 4    最終 quality check + ドキュメント整理
 ```
@@ -249,7 +249,7 @@ PRD-β (unsupported external types) の責務として委譲する。
 | D-0 | 0 | Probe 再計測: Phase C 後の dangling refs 実測 | ✅ |
 | D-0.5 | 0.5 | `P` 残存調査・解消 (Cluster 1a regression) | ✅ |
 | D-1 | 1 | PRD-γ 調査→起票→実装: `__type` marker 是正 (I-389) | ✅ |
-| D-2 | 2 | PRD-β 調査→起票→実装: `TypeDef::ExternalUnsupported` (21 件) | ⏳ |
+| D-2 | 2 | PRD-β 調査→起票→実装: フィルタ参照整合性 + 外部型完全化 (I-391) | ✅ |
 | D-3 | 3 | PRD-δ 調査→起票→実装: Pass 5c 再設計 + `generate_stub_structs` 削除 | ⏳ |
 | D-4 | 4 | 最終 quality check + ドキュメント整理 | ⏳ |
 
@@ -260,9 +260,22 @@ Hono ベンチ regression 0。
 
 ## 直近アクション
 
-**D-2: PRD-β 調査 (Discovery)** ← 次のアクション
+**D-3: PRD-δ 調査 (Discovery)** ← 次のアクション (2026-04-10)
 
-`symbol` (PRD-γ から委譲) + DOM 型 20 件の扱いを設計する。
+I-382 本体: `generate_stub_structs` 削除 + user 型 import 生成の設計。
+β/γ で外部型 dangling は全て解消済。残存 dangling は HTTPException 1 件 (user-defined) + excluded_user 71 件。
+
+### D-2 完了サマリ (PRD-β = I-391, 2026-04-10)
+
+- **root cause 訂正**: Phase A INV-1 は「external 認識は成功するが TypeDef variant が
+  Struct でない」としていたが、実測では 22 件中 20 件は JSON にトップレベル定義がなく
+  registry 未登録 (`is_external` = false) が正確な root cause。2 件は alias 変換未実装。
+- **修正 3 件**: (1) `filter.ts` に参照整合性チェック + root types 追加 (BufferSource,
+  TemplateStringsArray, MessageEvent, MessagePort)。(2) `extractor.ts` に ESSymbol/
+  UniqueESSymbol primitive 認識。(3) `external_types/mod.rs` で alias → 空 Struct 登録。
+- **検証**: dangling 22→**1** (残 HTTPException = PRD-δ scope)、excluded_user 72→71
+  (PermissionsPolicyValue が JSON 変更による型解決改善で消滅)
+- テスト: extractor 5 件 + Rust 1 件追加、Hono regression 0
 
 ### D-0.5 完了サマリ (2026-04-10)
 

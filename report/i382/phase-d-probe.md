@@ -103,10 +103,10 @@ Phase C (I-387) で Cluster 1a 11 件中 10 件は解消されたが、`P` が 1
 
 ---
 
-## Phase D 計画への含意 (D-1 完了後に更新)
+## Phase D 計画への含意 (D-2 完了後に更新)
 
 1. ~~`P` 残存の調査~~ ✅ D-0.5 で解消
 2. ~~PRD-γ scope: `__type` 1 件~~ ✅ D-1 (I-389) で解消
-3. **PRD-β scope**: Cluster 1b 20 件 + symbol 1 件 = 21 件 (残存)
-4. **PRD-δ scope**: excluded_user 72 件 + HTTPException 1 件の対応が必要 (残存)
-5. **現在の dangling**: **22 件** (D-0 初回 24 → D-0.5 で 23 → D-1 で 22)
+3. ~~PRD-β scope: 21 件~~ ✅ D-2 (I-391) で解消
+4. **PRD-δ scope**: excluded_user **71** 件 + HTTPException 1 件の対応が必要 (残存)
+5. **現在の dangling**: **1 件** (D-0: 24 → D-0.5: 23 → D-1: 22 → D-2: **1**)

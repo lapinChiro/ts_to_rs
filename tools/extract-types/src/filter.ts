@@ -101,9 +101,15 @@ export const SERVER_WEB_API_TYPES = [
   // WebSocket
   "WebSocket",
   "CloseEvent",
+  "MessageEvent",
+  "MessagePort",
 
   // Console
   "Console",
+
+  // Commonly used type aliases in server-side code
+  "BufferSource",
+  "TemplateStringsArray",
 ];
 
 /** Type names to exclude from transitive dependency tracking. */
@@ -208,6 +214,34 @@ export function filterTypes(
   for (const name of needed) {
     if (json.types[name]) {
       filtered[name] = json.types[name];
+    }
+  }
+
+  // Referential integrity: ensure all types referenced by included definitions
+  // (and their transitive dependencies in the raw source) have a corresponding
+  // definition in the output. Types that were excluded by EXCLUDE_PATTERNS but
+  // still exist in the raw source get an empty interface stub.
+  //
+  // This must iterate to a fixpoint because included types may reference
+  // excluded types whose raw definitions reference further excluded types.
+  // Since we add empty stubs (no fields/methods), the fixpoint converges in
+  // one pass for excluded types. However, for non-excluded types that were
+  // filtered out because they weren't reachable from roots, we need to check
+  // the raw source recursively.
+  let changed = true;
+  while (changed) {
+    changed = false;
+    const allRefs = new Set<string>();
+    for (const def of Object.values(filtered)) {
+      for (const ref of collectReferences(def)) {
+        allRefs.add(ref);
+      }
+    }
+    for (const ref of allRefs) {
+      if (!filtered[ref] && json.types[ref]) {
+        filtered[ref] = { kind: "interface", fields: [], methods: {}, constructors: [] };
+        changed = true;
+      }
     }
   }
 

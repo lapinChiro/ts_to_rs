@@ -342,6 +342,10 @@ function convertType(
   if (type.flags & ts.TypeFlags.Never) return { kind: "never" };
   if (type.flags & ts.TypeFlags.Any) return { kind: "any" };
   if (type.flags & ts.TypeFlags.Unknown) return { kind: "unknown" };
+  // ESSymbol: TS `symbol` primitive has no Rust equivalent.
+  // Output as `any` rather than leaking the internal name "symbol".
+  if (type.flags & ts.TypeFlags.ESSymbol) return { kind: "any" };
+  if (type.flags & ts.TypeFlags.UniqueESSymbol) return { kind: "any" };
 
   // String/number literal types → treat as their base type
   if (type.flags & ts.TypeFlags.StringLiteral) return { kind: "string" };

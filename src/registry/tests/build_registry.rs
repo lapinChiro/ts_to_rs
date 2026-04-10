@@ -56,7 +56,10 @@ fn test_build_registry_generic_type_alias_fields_use_type_var() {
     match typedef {
         TypeDef::Struct { fields, .. } => {
             let key_field = fields.iter().find(|f| f.name == "key").expect("key field");
-            let value_field = fields.iter().find(|f| f.name == "value").expect("value field");
+            let value_field = fields
+                .iter()
+                .find(|f| f.name == "value")
+                .expect("value field");
             // Registry は generic 定義を格納。K, V ともに TypeVar として残る。
             // Named ではなく TypeVar であることが重要 (Named だと dangling ref になる)。
             assert!(
@@ -93,14 +96,19 @@ fn test_build_registry_generic_type_alias_record_field_has_type_var() {
     let typedef = reg.get("Targets").unwrap();
     match typedef {
         TypeDef::Struct { fields, .. } => {
-            let param_field = fields.iter().find(|f| f.name == "param").expect("param field");
+            let param_field = fields
+                .iter()
+                .find(|f| f.name == "param")
+                .expect("param field");
             // Registry は generic 定義を格納: Record<P, string> → HashMap<TypeVar("P"), String>
             assert_eq!(
                 param_field.ty,
                 RustType::StdCollection {
                     kind: crate::ir::StdCollectionKind::HashMap,
                     args: vec![
-                        RustType::TypeVar { name: "P".to_string() },
+                        RustType::TypeVar {
+                            name: "P".to_string()
+                        },
                         RustType::String,
                     ],
                 },

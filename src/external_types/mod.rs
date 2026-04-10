@@ -335,14 +335,20 @@ fn convert_external_typedef(
                 has_rest,
             })
         }
-        ExternalTypeDef::Alias { resolved_type } => {
-            // Type aliases are resolved by tsc; store the resolved form.
-            // If it resolves to a named type, we don't need a registry entry
-            // (it will be referenced by name). Return None for now.
-            match resolved_type {
-                ExternalType::Named { .. } => None,
-                _ => None, // TODO: handle more alias patterns as needed
-            }
+        ExternalTypeDef::Alias { .. } => {
+            // Type alias: register as empty struct so downstream can resolve the name.
+            // The alias's resolved type (union, named, etc.) is not propagated into
+            // TypeDef fields — a full TypeDef::TypeAlias variant would be needed for that
+            // (tracked as I-390). For now, an empty struct prevents dangling references.
+            Some(TypeDef::Struct {
+                type_params: vec![],
+                fields: vec![],
+                methods: HashMap::new(),
+                constructor: None,
+                call_signatures: vec![],
+                extends: vec![],
+                is_interface: false,
+            })
         }
     }
 }

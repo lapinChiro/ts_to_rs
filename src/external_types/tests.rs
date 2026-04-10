@@ -248,6 +248,34 @@ fn test_parse_function_returns_function_typedef() {
     }
 }
 
+/// Alias kind の ExternalTypeDef が空 TypeDef::Struct として変換されることを検証。
+///
+/// 以前は alias で None を返していたため registry 未登録 → dangling ref が発生。
+/// I-391 で空 Struct を返すように変更。完全な TypeAlias variant は I-390 で対応。
+#[test]
+fn test_convert_external_typedef_alias_returns_empty_struct() {
+    let json = r#"{
+        "kind": "alias",
+        "type": {"kind": "union", "members": [
+            {"kind": "string"},
+            {"kind": "named", "name": "Request"}
+        ]}
+    }"#;
+    let def: ExternalTypeDef = serde_json::from_str(json).unwrap();
+    let type_def = convert_external_typedef(&def, &mut SyntheticTypeRegistry::new());
+    // Previously returned None → now returns Some(empty Struct)
+    assert!(type_def.is_some(), "Alias should return Some, not None");
+    match type_def.unwrap() {
+        TypeDef::Struct {
+            fields, methods, ..
+        } => {
+            assert!(fields.is_empty(), "Alias stub should have empty fields");
+            assert!(methods.is_empty(), "Alias stub should have empty methods");
+        }
+        other => panic!("expected Struct, got: {other:?}"),
+    }
+}
+
 // ── load_types_json ────────────────────────────────────────────
 
 #[test]

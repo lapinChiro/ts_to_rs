@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import ts from "typescript";
 import { extractTypes } from "./extractor.js";
-import { filterTypes, ECMASCRIPT_TYPES } from "./filter.js";
+import { filterTypes, ECMASCRIPT_TYPES, SERVER_WEB_API_TYPES } from "./filter.js";
 import type { ExternalInterfaceDef, ExternalTypesJson } from "./types.js";
 
 /** Helper: create a program from inline TypeScript source. */
@@ -563,5 +563,50 @@ describe("anonymous type literal (__type handling)", () => {
     const result = extractTypes(program);
     const jsonStr = JSON.stringify(result);
     expect(jsonStr).not.toContain('"__type"');
+  });
+});
+
+describe("symbol primitive handling", () => {
+  it("converts ESSymbol type to any instead of named symbol", () => {
+    const result = extract(`
+      interface Foo {
+        bar(x: symbol): void;
+      }
+    `);
+    const foo = getInterface(result, "Foo");
+    const barSig = foo.methods["bar"].signatures[0];
+    // symbol should be { kind: "any" }, NOT { kind: "named", name: "symbol" }
+    expect(barSig.params[0].type).toEqual({ kind: "any" });
+  });
+});
+
+describe("filter referential integrity", () => {
+  it("adds empty definitions for excluded-but-referenced types", { timeout: 30_000 }, () => {
+    const program = createProgramFromSource("export {};", [
+      "lib.dom.d.ts",
+      "lib.es2024.d.ts",
+    ]);
+    const raw = extractTypes(program);
+    const filtered = filterTypes(raw, SERVER_WEB_API_TYPES);
+
+    // WebSocket is a root type → should be included
+    expect(filtered.types["WebSocket"]).toBeDefined();
+
+    // Specific excluded types that are referenced by included types
+    // should have empty stub definitions
+    const excludedButReferenced = [
+      "Window",           // Referenced by MessageEvent.source union
+      "ServiceWorker",    // Referenced by MessageEvent.source union
+    ];
+
+    for (const name of excludedButReferenced) {
+      expect(filtered.types[name]).toBeDefined();
+      // Should be an empty interface stub
+      const def = filtered.types[name];
+      expect(def.kind).toBe("interface");
+      if (def.kind === "interface") {
+        expect(def.fields).toHaveLength(0);
+      }
+    }
   });
 });

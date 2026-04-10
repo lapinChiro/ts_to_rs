@@ -13653,8 +13653,7 @@
             {
               "params": [],
               "return_type": {
-                "kind": "named",
-                "name": "symbol"
+                "kind": "any"
               }
             }
           ]
@@ -20768,8 +20767,7 @@
                         "kind": "number"
                       },
                       {
-                        "kind": "named",
-                        "name": "symbol"
+                        "kind": "any"
                       }
                     ]
                   }
@@ -20815,8 +20813,7 @@
                         "kind": "number"
                       },
                       {
-                        "kind": "named",
-                        "name": "symbol"
+                        "kind": "any"
                       }
                     ]
                   }
