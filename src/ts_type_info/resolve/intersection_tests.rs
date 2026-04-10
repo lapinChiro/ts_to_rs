@@ -567,6 +567,7 @@ fn resolve_method_info_basic() {
         return_type: Some(TsTypeInfo::String),
         type_params: vec![],
         optional: false,
+        has_rest: false,
     };
     let result = resolve_method_info(&method, &reg, &mut syn).unwrap();
     assert_eq!(result.name, "greet");
@@ -588,6 +589,7 @@ fn resolve_method_info_no_return_type() {
         return_type: None,
         type_params: vec![],
         optional: false,
+        has_rest: false,
     };
     let result = resolve_method_info(&method, &reg, &mut syn).unwrap();
     assert_eq!(result.name, "doSomething");
@@ -675,6 +677,7 @@ fn cross_origin_dedup_preserves_methods() {
             return_type: Some(TsTypeInfo::String),
             type_params: vec![],
             optional: false,
+            has_rest: false,
         }],
         call_signatures: vec![],
         construct_signatures: vec![],
@@ -705,6 +708,7 @@ fn cross_origin_dedup_preserves_methods() {
             return_type: None,
             type_params: vec![],
             optional: false,
+            has_rest: false,
         }],
         call_signatures: vec![],
         construct_signatures: vec![],

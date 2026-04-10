@@ -77,6 +77,69 @@ pub fn resolve_typedef(
     result.map(|(td, _)| td)
 }
 
+/// TypeDef::Struct の全メンバーを TsTypeInfo → RustType に解決する共有関数。
+///
+/// fields / methods / constructor / call_signatures / type_params を一括解決する。
+/// monomorphization は行わない — 呼び出し元の責務。
+///
+/// registry 登録用 (`resolve_struct_for_registry`) と IR 生成用 (`resolve_typedef`) の
+/// 両方がこの関数を共有することで DRY を維持する。
+pub(crate) fn resolve_struct_members(
+    type_params: Vec<TypeParam<TsTypeInfo>>,
+    fields: Vec<FieldDef<TsTypeInfo>>,
+    methods: HashMap<String, Vec<MethodSignature<TsTypeInfo>>>,
+    constructor: Option<Vec<MethodSignature<TsTypeInfo>>>,
+    call_signatures: Vec<MethodSignature<TsTypeInfo>>,
+    reg: &TypeRegistry,
+    synthetic: &mut SyntheticTypeRegistry,
+) -> anyhow::Result<ResolvedStructMembers> {
+    let resolved_fields = fields
+        .into_iter()
+        .map(|f| resolve_field_def(f, reg, synthetic))
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    let resolved_methods = methods
+        .into_iter()
+        .map(|(name, sigs)| {
+            let resolved_sigs = sigs
+                .into_iter()
+                .map(|sig| resolve_method_sig(sig, reg, synthetic))
+                .collect::<anyhow::Result<Vec<_>>>()?;
+            Ok((name, resolved_sigs))
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?
+        .into_iter()
+        .collect();
+    let resolved_ctor = constructor
+        .map(|ctors| {
+            ctors
+                .into_iter()
+                .map(|sig| resolve_method_sig(sig, reg, synthetic))
+                .collect::<anyhow::Result<Vec<_>>>()
+        })
+        .transpose()?;
+    let resolved_call_sigs = call_signatures
+        .into_iter()
+        .map(|sig| resolve_method_sig(sig, reg, synthetic))
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    let resolved_params = resolve_type_params(type_params, reg, synthetic)?;
+    Ok(ResolvedStructMembers {
+        type_params: resolved_params,
+        fields: resolved_fields,
+        methods: resolved_methods,
+        constructor: resolved_ctor,
+        call_signatures: resolved_call_sigs,
+    })
+}
+
+/// `resolve_struct_members` の結果。
+pub(crate) struct ResolvedStructMembers {
+    pub type_params: Vec<TypeParam<RustType>>,
+    pub fields: Vec<FieldDef<RustType>>,
+    pub methods: HashMap<String, Vec<MethodSignature<RustType>>>,
+    pub constructor: Option<Vec<MethodSignature<RustType>>>,
+    pub call_signatures: Vec<MethodSignature<RustType>>,
+}
+
 /// `resolve_typedef` の内部実装。型パラメータスコープの管理は呼び出し元が行う。
 ///
 /// Returns `(resolved_typedef, mono_subs)` where `mono_subs` is the monomorphization
@@ -96,45 +159,24 @@ fn resolve_typedef_inner(
             extends,
             is_interface,
         } => {
-            let resolved_fields = fields
-                .into_iter()
-                .map(|f| resolve_field_def(f, reg, synthetic))
-                .collect::<anyhow::Result<Vec<_>>>()?;
-            let resolved_methods = methods
-                .into_iter()
-                .map(|(name, sigs)| {
-                    let resolved_sigs = sigs
-                        .into_iter()
-                        .map(|sig| resolve_method_sig(sig, reg, synthetic))
-                        .collect::<anyhow::Result<Vec<_>>>()?;
-                    Ok((name, resolved_sigs))
-                })
-                .collect::<anyhow::Result<Vec<_>>>()?
-                .into_iter()
-                .collect();
-            let resolved_ctor = constructor
-                .map(|ctors| {
-                    ctors
-                        .into_iter()
-                        .map(|sig| resolve_method_sig(sig, reg, synthetic))
-                        .collect::<anyhow::Result<Vec<_>>>()
-                })
-                .transpose()?;
-            let resolved_call_sigs = call_signatures
-                .into_iter()
-                .map(|sig| resolve_method_sig(sig, reg, synthetic))
-                .collect::<anyhow::Result<Vec<_>>>()?;
-
-            let resolved_params = resolve_type_params(type_params, reg, synthetic)?;
+            let members = resolve_struct_members(
+                type_params,
+                fields,
+                methods,
+                constructor,
+                call_signatures,
+                reg,
+                synthetic,
+            )?;
             let (remaining_params, mono_subs) =
-                monomorphize_type_params(resolved_params, reg, synthetic);
+                monomorphize_type_params(members.type_params, reg, synthetic);
 
             let result = TypeDef::Struct {
                 type_params: remaining_params,
-                fields: resolved_fields,
-                methods: resolved_methods,
-                constructor: resolved_ctor,
-                call_signatures: resolved_call_sigs,
+                fields: members.fields,
+                methods: members.methods,
+                constructor: members.constructor,
+                call_signatures: members.call_signatures,
                 extends,
                 is_interface,
             };

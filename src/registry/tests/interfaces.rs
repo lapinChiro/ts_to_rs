@@ -48,7 +48,7 @@ fn test_collect_interface_fields_property_signatures_collected() {
     let fields: Vec<FieldDef> = ts_fields
         .into_iter()
         .filter_map(|f| {
-            crate::ts_type_info::resolve::resolve_field_def(f, &reg, &mut synthetic).ok()
+            crate::ts_type_info::resolve::typedef::resolve_field_def(f, &reg, &mut synthetic).ok()
         })
         .collect();
 
@@ -182,7 +182,8 @@ fn test_collect_property_signature_optional_resolves_to_option() {
 
     let ts_field = super::super::interfaces::collect_property_signature(prop).unwrap();
     let resolved =
-        crate::ts_type_info::resolve::resolve_field_def(ts_field, &reg, &mut synthetic).unwrap();
+        crate::ts_type_info::resolve::typedef::resolve_field_def(ts_field, &reg, &mut synthetic)
+            .unwrap();
 
     assert_eq!(resolved.name, "x");
     assert_eq!(resolved.ty, RustType::Option(Box::new(RustType::F64)));

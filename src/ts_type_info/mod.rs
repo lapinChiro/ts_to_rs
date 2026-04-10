@@ -190,6 +190,8 @@ pub struct TsMethodInfo {
     pub type_params: Vec<std::string::String>,
     /// optional メソッドか（`method?(): T`）
     pub optional: bool,
+    /// rest パラメータを含むか（`...args: T[]` パターン）
+    pub has_rest: bool,
 }
 
 /// TS 関数シグネチャ情報（call/construct シグネチャ共通）。
@@ -484,9 +486,8 @@ fn convert_type_lit_members(
                     return_type,
                     type_params,
                     optional: sig.optional,
+                    has_rest,
                 });
-                // has_rest は TsFnSigInfo で使用するがメソッドでは未使用
-                let _ = has_rest;
             }
             ast::TsTypeElement::TsCallSignatureDecl(decl) => {
                 let (params, has_rest) = extract_sig_params(&decl.params);

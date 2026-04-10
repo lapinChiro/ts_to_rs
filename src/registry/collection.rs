@@ -2,8 +2,11 @@
 //!
 //! Pass 1 で型名をプレースホルダー登録し、Pass 2 でフィールド型を完全解決する。
 //!
-//! Collection 関数は SWC AST → TsTypeInfo の純粋な構文マッピングのみ行い、
-//! 意味解決（TsTypeInfo → RustType）は resolve フェーズに委譲する。
+//! Collection 関数は SWC AST → TsTypeInfo の変換を先行し、TsTypeInfo を起点として
+//! resolve 関数を使用する。SWC AST を直接解析するアドホックなロジックは持たない。
+//! TypeDef<TsTypeInfo> として自然に表現できる型は `resolve_struct_for_registry` に委譲し、
+//! できない型（intersection, utility type ref 等）は resolve 関数を直接使用して
+//! TypeDef<RustType> を構築する。
 
 use std::collections::HashMap;
 
@@ -12,8 +15,10 @@ use swc_ecma_ast as ast;
 use super::{ConstElement, ConstField, FieldDef, MethodSignature, ParamDef, TypeDef, TypeRegistry};
 use crate::ir::{RustType, TypeParam};
 use crate::pipeline::SyntheticTypeRegistry;
-use crate::ts_type_info::resolve::{resolve_field_def, resolve_ts_type, resolve_typedef};
-use crate::ts_type_info::{convert_to_ts_type_info, TsTypeInfo};
+use crate::ts_type_info::resolve::{resolve_ts_type, resolve_type_params, resolve_typedef};
+use crate::ts_type_info::{
+    convert_to_ts_type_info, TsFnSigInfo, TsMethodInfo, TsTypeInfo, TsTypeLiteralInfo,
+};
 
 /// Pass 1: 宣言から型名だけをプレースホルダーとして登録する。
 ///
@@ -122,11 +127,17 @@ fn is_registrable_const_decl(d: &ast::VarDeclarator) -> bool {
 
 /// Pass 2: 個々の宣言から型情報を完全に収集する。
 ///
-/// Collection 関数が `TypeDef<TsTypeInfo>` を返し、`resolve_typedef` で
-/// `TypeDef<RustType>` に変換してから registry に登録する。
+/// 大部分のブランチ（interface, DU, function 等）は `TypeDef<TsTypeInfo>` を構築し、
+/// `resolve_typedef` で `TypeDef<RustType>` に変換してから registry に登録する。
 ///
-/// `lookup` には Pass 1 で登録された全型名が含まれており、
-/// `resolve_typedef` での型解決に使用される。
+/// type alias の else ブランチは `convert_to_ts_type_info` で TsTypeInfo に変換後、
+/// 型の形態に応じた 3 パスで処理する:
+/// - パス A (TypeLiteral): `build_struct_from_type_literal` → `resolve_struct_for_registry`
+/// - パス B (Intersection): `resolve_intersection_for_registry`
+/// - パス C (TypeRef / その他): `resolve_type_ref_for_registry`
+///
+/// `lookup` には Pass 1 で登録された全型名が含まれており、型解決に使用される。
+/// `reg` は Pass 2 で蓄積中の registry で、intersection/typeref パスが参照する。
 pub(super) fn collect_decl(
     reg: &mut TypeRegistry,
     decl: &ast::Decl,
@@ -189,32 +200,40 @@ pub(super) fn collect_decl(
                     reg.register(alias.id.sym.to_string(), resolved);
                 }
             } else {
-                // Intersection types need pass-2 resolved types (e.g., `type Person = Named & Aged`
-                // requires Named and Aged to have their fields already resolved).
-                // Use `reg` which accumulates resolved types during pass 2.
-                let fields = collect_type_alias_fields(alias, reg, synthetic);
-                if let Some(fields) = fields {
-                    let type_params = collect_type_params(alias.type_params.as_deref());
-                    // 型パラメータ制約の解決失敗は struct 登録には影響させない
-                    // （制約なしとして登録。型パラメータ自体は保持される）
-                    let resolved_type_params = crate::ts_type_info::resolve::resolve_type_params(
-                        type_params,
-                        lookup,
-                        synthetic,
-                    )
-                    .unwrap_or_default();
-                    reg.register(
-                        alias.id.sym.to_string(),
-                        TypeDef::Struct {
-                            type_params: resolved_type_params,
-                            fields,
-                            methods: HashMap::new(),
-                            constructor: None,
-                            call_signatures: vec![],
-                            extends: vec![],
-                            is_interface: false,
-                        },
-                    );
+                // TsTypeInfo を中間表現として統一し、型形態に応じた resolve パスを選択。
+                // SWC AST のアドホック解析は行わない。
+                let name = alias.id.sym.to_string();
+                let type_params = collect_type_params(alias.type_params.as_deref());
+
+                match convert_to_ts_type_info(alias.type_ann.as_ref()) {
+                    // パス A: TypeLiteral → TsTypeInfo 変換 → 個別 resolve
+                    // resolve_typedef は monomorphization を行うため使用しない。
+                    // registry は generic 定義を TypeVar のまま保持する。
+                    Ok(TsTypeInfo::TypeLiteral(ref lit)) => {
+                        let ts_def = build_struct_from_type_literal(lit, type_params);
+                        if let Ok(resolved) = resolve_struct_for_registry(ts_def, lookup, synthetic)
+                        {
+                            reg.register(name, resolved);
+                        }
+                    }
+                    // パス B: Intersection → resolve 関数で全 variant を処理
+                    Ok(TsTypeInfo::Intersection(ref members)) => {
+                        if let Some(resolved) =
+                            resolve_intersection_for_registry(members, &type_params, reg, synthetic)
+                        {
+                            reg.register(name, resolved);
+                        }
+                    }
+                    // パス C: TypeRef / その他 → resolve_ts_type で解決
+                    Ok(ref info) => {
+                        if let Some(resolved) =
+                            resolve_type_ref_for_registry(info, &type_params, reg, synthetic)
+                        {
+                            reg.register(name, resolved);
+                        }
+                    }
+                    // convert_to_ts_type_info 失敗 → 未対応型。登録スキップ
+                    Err(_) => {}
                 }
             }
         }
@@ -464,134 +483,405 @@ pub(crate) fn collect_type_params(
     .unwrap_or_default()
 }
 
-/// TsTypeRef からフィールドを解決する。
+/// `TypeDef<TsTypeInfo>::Struct` を `TypeDef<RustType>::Struct` に解決する（registry 用）。
 ///
-/// 型引数付きの参照（`Partial<Body>` 等）の場合は、ジェネリクスを具体型でインスタンス化してから
-/// フィールドを取得する。SyntheticTypeRegistry のインライン構造体も解決対象。
-///
-/// intersection/type-ref type alias 専用。resolve フェーズの関数を使用して
-/// 型引数を変換する（convert_ts_type は使用しない）。
-fn resolve_type_ref_fields(
-    type_ref: &ast::TsTypeRef,
+/// `resolve_struct_members` で全メンバーを解決し、monomorphization はスキップする。
+/// registry は generic 定義を TypeVar のまま保持するため。
+/// monomorphization は TypeConverter (IR 生成) 側の責務。
+fn resolve_struct_for_registry(
+    def: TypeDef<TsTypeInfo>,
     reg: &TypeRegistry,
     synthetic: &mut SyntheticTypeRegistry,
-) -> Option<Vec<FieldDef>> {
-    let name = match &type_ref.type_name {
-        ast::TsEntityName::Ident(ident) => ident.sym.to_string(),
-        _ => return None,
-    };
+) -> anyhow::Result<TypeDef<RustType>> {
+    use crate::ts_type_info::resolve::typedef::resolve_struct_members;
 
-    // Convert type arguments using two-step: convert_to_ts_type_info → resolve_ts_type
-    let type_args: Vec<RustType> = type_ref
-        .type_params
-        .as_ref()
-        .map(|params| {
-            params
-                .params
-                .iter()
-                .filter_map(|p| {
-                    let info = convert_to_ts_type_info(p).ok()?;
-                    resolve_ts_type(&info, reg, synthetic).ok()
-                })
-                .collect()
-        })
-        .unwrap_or_default();
+    if let TypeDef::Struct {
+        type_params,
+        fields,
+        methods,
+        constructor,
+        call_signatures,
+        extends,
+        is_interface,
+    } = def
+    {
+        // 型パラメータスコープを push（TypeVar 認識用）
+        let tp_names: Vec<String> = type_params.iter().map(|tp| tp.name.clone()).collect();
+        let prev_scope = synthetic.push_type_param_scope(tp_names);
 
-    // Resolve from registry (with instantiation for generics)
-    if let Some(TypeDef::Struct { fields, .. }) = reg.get(&name) {
-        if !type_args.is_empty() {
-            if let Some(TypeDef::Struct { fields, .. }) = reg.instantiate(&name, &type_args) {
-                return Some(fields);
-            }
-        }
-        return Some(fields.clone());
+        let result = resolve_struct_members(
+            type_params,
+            fields,
+            methods,
+            constructor,
+            call_signatures,
+            reg,
+            synthetic,
+        )
+        .map(|members| TypeDef::Struct {
+            type_params: members.type_params,
+            fields: members.fields,
+            methods: members.methods,
+            constructor: members.constructor,
+            call_signatures: members.call_signatures,
+            extends,
+            is_interface,
+        });
+
+        synthetic.restore_type_param_scope(prev_scope);
+        result
+    } else {
+        anyhow::bail!("expected TypeDef::Struct")
     }
-
-    None
 }
 
-/// TsTypeLit のプロパティシグネチャからフィールドを収集する。
+/// TypeRef / その他の型を registry 用に解決する。
 ///
-/// `collect_property_signature` で TsTypeInfo を取得し、`resolve_field_def` で
-/// RustType に変換する。Option ラップは `resolve_field_def` で適用される。
-fn collect_type_lit_fields(
-    lit: &ast::TsTypeLit,
+/// `resolve_ts_type` で RustType に変換し、Named 型の場合は registry または
+/// SyntheticTypeRegistry からフィールドを取得して TypeDef::Struct を構築する。
+/// utility type (Partial, Pick 等) も正しく解決される。
+fn resolve_type_ref_for_registry(
+    info: &TsTypeInfo,
+    type_params: &[TypeParam<TsTypeInfo>],
     reg: &TypeRegistry,
     synthetic: &mut SyntheticTypeRegistry,
-) -> Vec<FieldDef> {
-    lit.members
-        .iter()
-        .filter_map(|member| {
-            if let ast::TsTypeElement::TsPropertySignature(prop) = member {
-                let field_ts = super::interfaces::collect_property_signature(prop)?;
-                resolve_field_def(field_ts, reg, synthetic).ok()
-            } else {
-                None
-            }
-        })
-        .collect()
-}
-
-/// type alias (オブジェクト型・intersection 型・型参照) のフィールドを収集する。
-///
-/// 対応する `TsType` バリアント:
-/// - `TsTypeLit`: `type X = { a: number; b: string }`
-/// - `TsIntersectionType`: `type X = A & B`（各メンバーから TsTypeLit / TsTypeRef のフィールドをマージ）
-/// - `TsTypeRef`: `type X = Partial<Body>`（registry からフィールドを解決）
-///
-/// intersection/type-ref 型は既に resolve 済みの TypeDef を registry から参照するため、
-/// `TypeDef<RustType>` を直接返す（resolve_typedef を経由しない特殊パス）。
-fn collect_type_alias_fields(
-    alias: &ast::TsTypeAliasDecl,
-    reg: &TypeRegistry,
-    synthetic: &mut SyntheticTypeRegistry,
-) -> Option<Vec<FieldDef>> {
-    // 型パラメータ scope を設定する。generic type alias (e.g., `type X<T, P> = { ... }`)
-    // のフィールド型解決時に型パラメータが `TypeVar` として認識されるよう、
-    // `resolve_field_def` → `resolve_type_ref` の呼び出し前に scope を push する。
-    // scope がないと型パラメータ名が `Named` として焼き込まれ、
-    // downstream の `unique_field_types()` → synthetic union で dangling ref になる。
-    let tp_names: Vec<String> = alias
-        .type_params
-        .as_ref()
-        .map(|tp| tp.params.iter().map(|p| p.name.sym.to_string()).collect())
-        .unwrap_or_default();
+) -> Option<TypeDef<RustType>> {
+    // 型パラメータ scope を push
+    let tp_names: Vec<String> = type_params.iter().map(|tp| tp.name.clone()).collect();
     let prev_scope = synthetic.push_type_param_scope(tp_names);
 
-    let result = match alias.type_ann.as_ref() {
-        ast::TsType::TsTypeLit(lit) => Some(collect_type_lit_fields(lit, reg, synthetic)),
-        // Intersection type: `type Person = Named & Aged` → merge fields from all members
-        ast::TsType::TsUnionOrIntersectionType(
-            swc_ecma_ast::TsUnionOrIntersectionType::TsIntersectionType(intersection),
-        ) => {
-            let mut fields = Vec::new();
-            for ty in &intersection.types {
-                match ty.as_ref() {
-                    ast::TsType::TsTypeLit(lit) => {
-                        fields.extend(collect_type_lit_fields(lit, reg, synthetic));
+    let result = (|| -> Option<TypeDef<RustType>> {
+        let rt = resolve_ts_type(info, reg, synthetic).ok()?;
+
+        let source_def = match &rt {
+            RustType::Named { name, type_args } => {
+                // registry から取得（generic type ref のインスタンス化含む）
+                if let Some(def @ TypeDef::Struct { .. }) = reg.get(name) {
+                    if !type_args.is_empty() {
+                        reg.instantiate(name, type_args)
+                            .or_else(|| Some(def.clone()))
+                    } else {
+                        Some(def.clone())
                     }
-                    ast::TsType::TsTypeRef(type_ref) => {
-                        if let Some(ref_fields) = resolve_type_ref_fields(type_ref, reg, synthetic)
-                        {
-                            fields.extend(ref_fields);
-                        }
+                }
+                // SyntheticTypeRegistry から取得（Partial, Pick 等の utility type）
+                else if let Some(syn_def) = synthetic.get(name) {
+                    if let crate::ir::Item::Struct { fields, .. } = &syn_def.item {
+                        Some(TypeDef::Struct {
+                            type_params: vec![],
+                            fields: fields
+                                .iter()
+                                .map(|sf| FieldDef {
+                                    name: sf.name.clone(),
+                                    ty: sf.ty.clone(),
+                                    optional: matches!(sf.ty, RustType::Option(_)),
+                                })
+                                .collect(),
+                            methods: HashMap::new(),
+                            constructor: None,
+                            call_signatures: vec![],
+                            extends: vec![],
+                            is_interface: false,
+                        })
+                    } else {
+                        None
                     }
-                    _ => {}
+                } else {
+                    None
                 }
             }
-            if fields.is_empty() {
-                None
-            } else {
-                Some(fields)
-            }
+            _ => None,
+        };
+
+        let source = source_def?;
+        if let TypeDef::Struct {
+            fields,
+            methods,
+            constructor,
+            call_signatures,
+            extends,
+            ..
+        } = source
+        {
+            let resolved_params =
+                resolve_type_params(type_params.to_vec(), reg, synthetic).unwrap_or_default();
+            Some(TypeDef::Struct {
+                type_params: resolved_params,
+                fields,
+                methods,
+                constructor,
+                call_signatures,
+                extends,
+                // type alias は TS でも interface ではない。`type X = SomeInterface` は
+                // struct として扱い、trait 生成には interface 宣言自体が使われる。
+                is_interface: false,
+            })
+        } else {
+            None
         }
-        // Type reference: `type X = Partial<Body>` → resolve fields from registry
-        ast::TsType::TsTypeRef(type_ref) => resolve_type_ref_fields(type_ref, reg, synthetic),
-        _ => None,
-    };
+    })();
 
     synthetic.restore_type_param_scope(prev_scope);
     result
+}
+
+/// Intersection 型を registry 用に解決する。
+///
+/// 各 member を TsTypeInfo variant に応じて resolve 関数で処理し、
+/// フィールドとメソッドをマージして TypeDef<RustType>::Struct を構築する。
+/// registry 用のため monomorphization は行わない。
+fn resolve_intersection_for_registry(
+    members: &[TsTypeInfo],
+    type_params: &[TypeParam<TsTypeInfo>],
+    reg: &TypeRegistry,
+    synthetic: &mut SyntheticTypeRegistry,
+) -> Option<TypeDef<RustType>> {
+    use crate::ir::sanitize_field_name;
+    use crate::ts_type_info::resolve::intersection::resolve_type_literal_fields;
+
+    // 型パラメータ scope を push
+    let tp_names: Vec<String> = type_params.iter().map(|tp| tp.name.clone()).collect();
+    let prev_scope = synthetic.push_type_param_scope(tp_names);
+
+    let result = (|| -> Option<TypeDef<RustType>> {
+        // Union member 検出 → resolve_intersection に委譲
+        let has_union = members.iter().any(|m| matches!(m, TsTypeInfo::Union(_)));
+        if has_union {
+            if let Ok(rt) = crate::ts_type_info::resolve::intersection::resolve_intersection(
+                members, reg, synthetic,
+            ) {
+                // synthetic enum/struct が作られる。TypeDef::Alias がないため
+                // _0 field として埋め込む。
+                let resolved_params =
+                    resolve_type_params(type_params.to_vec(), reg, synthetic).unwrap_or_default();
+                return Some(TypeDef::Struct {
+                    type_params: resolved_params,
+                    fields: vec![FieldDef {
+                        name: "_0".to_string(),
+                        ty: rt,
+                        optional: false,
+                    }],
+                    methods: HashMap::new(),
+                    constructor: None,
+                    call_signatures: vec![],
+                    extends: vec![],
+                    is_interface: false,
+                });
+            }
+            return None;
+        }
+
+        let mut merged_fields: Vec<FieldDef<RustType>> = Vec::new();
+        let mut merged_methods: HashMap<String, Vec<MethodSignature<RustType>>> = HashMap::new();
+
+        for member in members {
+            match member {
+                TsTypeInfo::TypeLiteral(lit) => {
+                    // フィールドを resolve
+                    if let Ok(fields) = resolve_type_literal_fields(lit, reg, synthetic) {
+                        for sf in fields {
+                            merged_fields.push(FieldDef {
+                                name: sf.name,
+                                optional: matches!(sf.ty, RustType::Option(_)),
+                                ty: sf.ty,
+                            });
+                        }
+                    }
+                    // メソッドを resolve（TsMethodInfo → MethodSignature<TsTypeInfo> → resolve_method_sig）
+                    // resolve_method_info → ir::Method の lossy 変換を回避し、
+                    // optional/has_rest を保持する。
+                    for method_info in &lit.methods {
+                        let ts_sig = convert_method_info_to_sig(method_info);
+                        if let Ok(resolved_sig) =
+                            crate::ts_type_info::resolve::typedef::resolve_method_sig(
+                                ts_sig, reg, synthetic,
+                            )
+                        {
+                            merged_methods
+                                .entry(method_info.name.clone())
+                                .or_default()
+                                .push(resolved_sig);
+                        }
+                    }
+                }
+                TsTypeInfo::TypeRef {
+                    name, type_args, ..
+                } => {
+                    // Registry から解決済みフィールドを取得（型引数付きは instantiate）
+                    if let Some(TypeDef::Struct { fields, .. }) = reg.get(name) {
+                        let source_fields = if !type_args.is_empty() {
+                            let resolved_args: Vec<RustType> = type_args
+                                .iter()
+                                .filter_map(|a| resolve_ts_type(a, reg, synthetic).ok())
+                                .collect();
+                            if let Some(TypeDef::Struct { fields, .. }) =
+                                reg.instantiate(name, &resolved_args)
+                            {
+                                fields
+                            } else {
+                                fields.clone()
+                            }
+                        } else {
+                            fields.clone()
+                        };
+                        for f in &source_fields {
+                            merged_fields.push(FieldDef {
+                                name: sanitize_field_name(&f.name),
+                                ty: f.ty.clone(),
+                                optional: f.optional,
+                            });
+                        }
+                    } else {
+                        // Struct 以外（Enum, Function 等）→ resolve_ts_type で _N field 埋め込み
+                        // resolve_intersection (intersection.rs) と同じ振る舞い
+                        if let Ok(rt) = resolve_ts_type(member, reg, synthetic) {
+                            let field_name = format!("_{}", merged_fields.len());
+                            merged_fields.push(FieldDef {
+                                name: field_name,
+                                ty: rt,
+                                optional: false,
+                            });
+                        }
+                    }
+                }
+                _ => {
+                    // Mapped / その他 → resolve_ts_type で解決し _N field 埋め込み
+                    if let Ok(rt) = resolve_ts_type(member, reg, synthetic) {
+                        let field_name = format!("_{}", merged_fields.len());
+                        merged_fields.push(FieldDef {
+                            name: field_name,
+                            ty: rt,
+                            optional: false,
+                        });
+                    }
+                }
+            }
+        }
+
+        if merged_fields.is_empty() && merged_methods.is_empty() {
+            return None;
+        }
+
+        let resolved_params =
+            resolve_type_params(type_params.to_vec(), reg, synthetic).unwrap_or_default();
+        Some(TypeDef::Struct {
+            type_params: resolved_params,
+            fields: merged_fields,
+            methods: merged_methods,
+            constructor: None,
+            call_signatures: vec![],
+            extends: vec![],
+            is_interface: false,
+        })
+    })();
+
+    synthetic.restore_type_param_scope(prev_scope);
+    result
+}
+
+/// `TsTypeLiteralInfo` から `TypeDef<TsTypeInfo>::Struct` を構築する。
+///
+/// TsTypeInfo の各メンバーを `FieldDef<TsTypeInfo>` / `MethodSignature<TsTypeInfo>` に変換し、
+/// `resolve_typedef` に渡せる形式を返す。index signature は TypeDef では表現できないため、
+/// 呼び出し元で別途処理する。
+fn build_struct_from_type_literal(
+    lit: &TsTypeLiteralInfo,
+    type_params: Vec<TypeParam<TsTypeInfo>>,
+) -> TypeDef<TsTypeInfo> {
+    // TsFieldInfo → FieldDef<TsTypeInfo>
+    let fields: Vec<FieldDef<TsTypeInfo>> = lit
+        .fields
+        .iter()
+        .map(|f| FieldDef {
+            name: f.name.clone(),
+            ty: f.ty.clone(),
+            optional: f.optional,
+        })
+        .collect();
+
+    // TsMethodInfo → MethodSignature<TsTypeInfo> (grouped by name)
+    let mut methods: HashMap<String, Vec<MethodSignature<TsTypeInfo>>> = HashMap::new();
+    for m in &lit.methods {
+        let sig = convert_method_info_to_sig(m);
+        methods.entry(m.name.clone()).or_default().push(sig);
+    }
+
+    // TsFnSigInfo (call) → call_signatures
+    let call_signatures: Vec<MethodSignature<TsTypeInfo>> = lit
+        .call_signatures
+        .iter()
+        .map(convert_fn_sig_to_method_sig)
+        .collect();
+
+    // TsFnSigInfo (construct) → constructor
+    let constructor = if lit.construct_signatures.is_empty() {
+        None
+    } else {
+        Some(
+            lit.construct_signatures
+                .iter()
+                .map(convert_fn_sig_to_method_sig)
+                .collect(),
+        )
+    };
+
+    TypeDef::Struct {
+        type_params,
+        fields,
+        methods,
+        constructor,
+        call_signatures,
+        extends: vec![],
+        is_interface: false,
+    }
+}
+
+/// `TsMethodInfo` → `MethodSignature<TsTypeInfo>` 変換。
+fn convert_method_info_to_sig(m: &TsMethodInfo) -> MethodSignature<TsTypeInfo> {
+    let params = m
+        .params
+        .iter()
+        .map(|p| ParamDef {
+            name: p.name.clone(),
+            ty: p.ty.clone(),
+            optional: p.optional,
+            has_default: false,
+        })
+        .collect();
+    let type_params = m
+        .type_params
+        .iter()
+        .map(|name| TypeParam {
+            name: name.clone(),
+            constraint: None,
+        })
+        .collect();
+    MethodSignature {
+        params,
+        return_type: m.return_type.clone(),
+        has_rest: m.has_rest,
+        type_params,
+    }
+}
+
+/// `TsFnSigInfo` → `MethodSignature<TsTypeInfo>` 変換。
+fn convert_fn_sig_to_method_sig(sig: &TsFnSigInfo) -> MethodSignature<TsTypeInfo> {
+    let params = sig
+        .params
+        .iter()
+        .map(|p| ParamDef {
+            name: p.name.clone(),
+            ty: p.ty.clone(),
+            optional: p.optional,
+            has_default: false,
+        })
+        .collect();
+    MethodSignature {
+        params,
+        return_type: sig.return_type.clone(),
+        has_rest: sig.has_rest,
+        type_params: vec![],
+    }
 }
 
 /// `as const` 宣言または型注釈付き const 宣言から `TypeDef::ConstValue<TsTypeInfo>` を構築する。
@@ -762,4 +1052,188 @@ fn extract_const_object_fields(obj_lit: &ast::ObjectLit) -> Vec<ConstField<TsTyp
         }
     }
     fields
+}
+
+#[cfg(test)]
+mod build_struct_from_type_literal_tests {
+    use super::*;
+    use crate::ts_type_info::*;
+
+    fn empty_lit() -> TsTypeLiteralInfo {
+        TsTypeLiteralInfo {
+            fields: vec![],
+            methods: vec![],
+            call_signatures: vec![],
+            construct_signatures: vec![],
+            index_signatures: vec![],
+        }
+    }
+
+    #[test]
+    fn test_build_struct_from_type_literal_empty_returns_empty_struct() {
+        let lit = empty_lit();
+        let result = build_struct_from_type_literal(&lit, vec![]);
+        match result {
+            TypeDef::Struct {
+                fields,
+                methods,
+                call_signatures,
+                constructor,
+                ..
+            } => {
+                assert!(fields.is_empty());
+                assert!(methods.is_empty());
+                assert!(call_signatures.is_empty());
+                assert!(constructor.is_none());
+            }
+            other => panic!("expected Struct, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_build_struct_from_type_literal_property_only() {
+        let lit = TsTypeLiteralInfo {
+            fields: vec![
+                TsFieldInfo {
+                    name: "x".to_string(),
+                    ty: TsTypeInfo::Number,
+                    optional: false,
+                },
+                TsFieldInfo {
+                    name: "name".to_string(),
+                    ty: TsTypeInfo::String,
+                    optional: true,
+                },
+            ],
+            ..empty_lit()
+        };
+        let result = build_struct_from_type_literal(&lit, vec![]);
+        if let TypeDef::Struct { fields, .. } = result {
+            assert_eq!(fields.len(), 2);
+            assert_eq!(fields[0].name, "x");
+            assert_eq!(fields[0].ty, TsTypeInfo::Number);
+            assert!(!fields[0].optional);
+            assert_eq!(fields[1].name, "name");
+            assert_eq!(fields[1].ty, TsTypeInfo::String);
+            assert!(fields[1].optional);
+        } else {
+            panic!("expected Struct");
+        }
+    }
+
+    #[test]
+    fn test_build_struct_from_type_literal_method_only() {
+        let lit = TsTypeLiteralInfo {
+            methods: vec![TsMethodInfo {
+                name: "handle".to_string(),
+                params: vec![TsParamInfo {
+                    name: "x".to_string(),
+                    ty: TsTypeInfo::String,
+                    optional: false,
+                }],
+                return_type: Some(TsTypeInfo::Void),
+                type_params: vec![],
+                optional: false,
+                has_rest: false,
+            }],
+            ..empty_lit()
+        };
+        let result = build_struct_from_type_literal(&lit, vec![]);
+        if let TypeDef::Struct { methods, .. } = result {
+            let sigs = methods.get("handle").expect("handle method");
+            assert_eq!(sigs.len(), 1);
+            assert_eq!(sigs[0].params.len(), 1);
+            assert_eq!(sigs[0].params[0].name, "x");
+            assert_eq!(sigs[0].params[0].ty, TsTypeInfo::String);
+            assert_eq!(sigs[0].return_type, Some(TsTypeInfo::Void));
+        } else {
+            panic!("expected Struct");
+        }
+    }
+
+    #[test]
+    fn test_build_struct_from_type_literal_call_signature() {
+        let lit = TsTypeLiteralInfo {
+            call_signatures: vec![TsFnSigInfo {
+                params: vec![TsParamInfo {
+                    name: "input".to_string(),
+                    ty: TsTypeInfo::String,
+                    optional: false,
+                }],
+                return_type: Some(TsTypeInfo::Number),
+                has_rest: false,
+            }],
+            ..empty_lit()
+        };
+        let result = build_struct_from_type_literal(&lit, vec![]);
+        if let TypeDef::Struct {
+            call_signatures, ..
+        } = result
+        {
+            assert_eq!(call_signatures.len(), 1);
+            assert_eq!(call_signatures[0].params.len(), 1);
+            assert_eq!(call_signatures[0].params[0].name, "input");
+            assert_eq!(call_signatures[0].return_type, Some(TsTypeInfo::Number));
+        } else {
+            panic!("expected Struct");
+        }
+    }
+
+    #[test]
+    fn test_build_struct_from_type_literal_construct_signature() {
+        let lit = TsTypeLiteralInfo {
+            construct_signatures: vec![TsFnSigInfo {
+                params: vec![TsParamInfo {
+                    name: "config".to_string(),
+                    ty: TsTypeInfo::String,
+                    optional: false,
+                }],
+                return_type: Some(TsTypeInfo::TypeRef {
+                    name: "Foo".to_string(),
+                    type_args: vec![],
+                }),
+                has_rest: false,
+            }],
+            ..empty_lit()
+        };
+        let result = build_struct_from_type_literal(&lit, vec![]);
+        if let TypeDef::Struct { constructor, .. } = result {
+            let ctors = constructor.expect("constructor should be Some");
+            assert_eq!(ctors.len(), 1);
+            assert_eq!(ctors[0].params[0].name, "config");
+        } else {
+            panic!("expected Struct");
+        }
+    }
+
+    #[test]
+    fn test_build_struct_from_type_literal_mixed_fields_and_methods() {
+        let lit = TsTypeLiteralInfo {
+            fields: vec![TsFieldInfo {
+                name: "count".to_string(),
+                ty: TsTypeInfo::Number,
+                optional: false,
+            }],
+            methods: vec![TsMethodInfo {
+                name: "increment".to_string(),
+                params: vec![],
+                return_type: Some(TsTypeInfo::Void),
+                type_params: vec![],
+                optional: false,
+                has_rest: false,
+            }],
+            ..empty_lit()
+        };
+        let result = build_struct_from_type_literal(&lit, vec![]);
+        if let TypeDef::Struct {
+            fields, methods, ..
+        } = result
+        {
+            assert_eq!(fields.len(), 1);
+            assert_eq!(fields[0].name, "count");
+            assert!(methods.contains_key("increment"));
+        } else {
+            panic!("expected Struct");
+        }
+    }
 }

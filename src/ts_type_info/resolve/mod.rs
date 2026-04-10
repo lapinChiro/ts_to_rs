@@ -19,8 +19,8 @@ pub(crate) mod typedef;
 mod union;
 mod utility;
 
+pub(crate) use typedef::resolve_type_params;
 pub use typedef::resolve_typedef;
-pub(crate) use typedef::{resolve_field_def, resolve_type_params};
 
 use crate::ir::sanitize_rust_type_name;
 use crate::ir::{PrimitiveIntKind, RustType, StdCollectionKind};

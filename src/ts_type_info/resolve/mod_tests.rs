@@ -1,6 +1,6 @@
 use super::*;
 use crate::registry::{FieldDef, ParamDef};
-use crate::ts_type_info::resolve::typedef::resolve_param_def;
+use crate::ts_type_info::resolve::typedef::{resolve_field_def, resolve_param_def};
 
 #[test]
 fn resolve_keyword_types() {
