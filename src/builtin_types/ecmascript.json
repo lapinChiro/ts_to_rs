@@ -16381,7 +16381,15 @@
           "name": "groups",
           "type": {
             "kind": "named",
-            "name": "__type"
+            "name": "Record",
+            "type_args": [
+              {
+                "kind": "string"
+              },
+              {
+                "kind": "string"
+              }
+            ]
           },
           "optional": true
         },
@@ -17753,6 +17761,12 @@
         }
       },
       "constructors": []
+    },
+    "Record": {
+      "kind": "alias",
+      "type": {
+        "kind": "any"
+      }
     },
     "Date": {
       "kind": "interface",
@@ -21302,8 +21316,17 @@
                 {
                   "name": "matcher",
                   "type": {
-                    "kind": "named",
-                    "name": "__type"
+                    "kind": "function",
+                    "params": [
+                      {
+                        "kind": "string"
+                      }
+                    ],
+                    "return_type": {
+                      "kind": "named",
+                      "name": "RegExpMatchArray",
+                      "type_args": []
+                    }
                   }
                 }
               ],
@@ -21394,8 +21417,18 @@
                 {
                   "name": "searchValue",
                   "type": {
-                    "kind": "named",
-                    "name": "__type"
+                    "kind": "function",
+                    "params": [
+                      {
+                        "kind": "string"
+                      },
+                      {
+                        "kind": "string"
+                      }
+                    ],
+                    "return_type": {
+                      "kind": "string"
+                    }
                   }
                 },
                 {
@@ -21414,8 +21447,32 @@
                 {
                   "name": "searchValue",
                   "type": {
-                    "kind": "named",
-                    "name": "__type"
+                    "kind": "function",
+                    "params": [
+                      {
+                        "kind": "string"
+                      },
+                      {
+                        "kind": "function",
+                        "params": [
+                          {
+                            "kind": "string"
+                          },
+                          {
+                            "kind": "array",
+                            "element": {
+                              "kind": "any"
+                            }
+                          }
+                        ],
+                        "return_type": {
+                          "kind": "string"
+                        }
+                      }
+                    ],
+                    "return_type": {
+                      "kind": "string"
+                    }
                   }
                 },
                 {
@@ -21475,8 +21532,15 @@
                 {
                   "name": "searcher",
                   "type": {
-                    "kind": "named",
-                    "name": "__type"
+                    "kind": "function",
+                    "params": [
+                      {
+                        "kind": "string"
+                      }
+                    ],
+                    "return_type": {
+                      "kind": "number"
+                    }
                   }
                 }
               ],
@@ -21548,8 +21612,21 @@
                 {
                   "name": "splitter",
                   "type": {
-                    "kind": "named",
-                    "name": "__type"
+                    "kind": "function",
+                    "params": [
+                      {
+                        "kind": "string"
+                      },
+                      {
+                        "kind": "number"
+                      }
+                    ],
+                    "return_type": {
+                      "kind": "array",
+                      "element": {
+                        "kind": "string"
+                      }
+                    }
                   }
                 },
                 {
@@ -22387,7 +22464,15 @@
           "name": "groups",
           "type": {
             "kind": "named",
-            "name": "__type"
+            "name": "Record",
+            "type_args": [
+              {
+                "kind": "string"
+              },
+              {
+                "kind": "string"
+              }
+            ]
           },
           "optional": true
         },

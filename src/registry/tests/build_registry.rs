@@ -37,6 +37,80 @@ fn test_build_registry_type_alias_object() {
     );
 }
 
+/// Generic type alias のフィールド型で型パラメータが `TypeVar` として解決されることを検証。
+///
+/// regression guard: `collect_type_alias_fields` に `push_type_param_scope` が欠落すると、
+/// 型パラメータ `K` が `Named { name: "K" }` として registry に格納され、
+/// downstream の `unique_field_types()` → synthetic union で dangling ref になる。
+/// (Phase D probe で `P` leak として発見、D-0.5 で修正)
+///
+/// TypeCollector (registry 登録) は generic 定義をそのまま格納する。monomorphize は
+/// TypeConverter (IR 生成) 側の責務であり、registry には TypeVar が残る。
+#[test]
+fn test_build_registry_generic_type_alias_fields_use_type_var() {
+    let module =
+        parse_typescript("type Dict<K extends string, V> = { key: K; value: V; };").unwrap();
+    let mut synthetic = crate::pipeline::SyntheticTypeRegistry::new();
+    let reg = build_registry_with_synthetic(&module, &mut synthetic);
+    let typedef = reg.get("Dict").unwrap();
+    match typedef {
+        TypeDef::Struct { fields, .. } => {
+            let key_field = fields.iter().find(|f| f.name == "key").expect("key field");
+            let value_field = fields.iter().find(|f| f.name == "value").expect("value field");
+            // Registry は generic 定義を格納。K, V ともに TypeVar として残る。
+            // Named ではなく TypeVar であることが重要 (Named だと dangling ref になる)。
+            assert!(
+                matches!(&key_field.ty, RustType::TypeVar { name } if name == "K"),
+                "K should be TypeVar in registry (not Named), got: {:?}",
+                key_field.ty
+            );
+            assert!(
+                matches!(&value_field.ty, RustType::TypeVar { name } if name == "V"),
+                "V should be TypeVar in registry, got: {:?}",
+                value_field.ty
+            );
+        }
+        other => panic!("expected Struct, got: {other:?}"),
+    }
+}
+
+/// Generic type alias + Record のフィールドで型パラメータが TypeVar として格納されることを検証。
+///
+/// `type X<P extends string> = { param: Record<P, string> }` の場合、registry は
+/// generic 定義を格納するため `HashMap<TypeVar("P"), String>` になる。
+/// monomorphize (P → String) は TypeConverter 側で適用される。
+///
+/// regression guard: scope 欠落時は `P` が `Named { "P" }` → `TypeRefCollector` が拾い
+/// → synthetic union → dangling ref という連鎖が発生する。
+#[test]
+fn test_build_registry_generic_type_alias_record_field_has_type_var() {
+    let module = parse_typescript(
+        "type Targets<P extends string = string> = { param: Record<P, string>; };",
+    )
+    .unwrap();
+    let mut synthetic = crate::pipeline::SyntheticTypeRegistry::new();
+    let reg = build_registry_with_synthetic(&module, &mut synthetic);
+    let typedef = reg.get("Targets").unwrap();
+    match typedef {
+        TypeDef::Struct { fields, .. } => {
+            let param_field = fields.iter().find(|f| f.name == "param").expect("param field");
+            // Registry は generic 定義を格納: Record<P, string> → HashMap<TypeVar("P"), String>
+            assert_eq!(
+                param_field.ty,
+                RustType::StdCollection {
+                    kind: crate::ir::StdCollectionKind::HashMap,
+                    args: vec![
+                        RustType::TypeVar { name: "P".to_string() },
+                        RustType::String,
+                    ],
+                },
+                "Record<P, string> should be HashMap<TypeVar(P), String> in registry"
+            );
+        }
+        other => panic!("expected Struct, got: {other:?}"),
+    }
+}
+
 #[test]
 fn test_build_registry_enum() {
     let module = parse_typescript("enum Color { Red, Green, Blue }").unwrap();

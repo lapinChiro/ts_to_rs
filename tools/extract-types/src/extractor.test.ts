@@ -496,3 +496,72 @@ describe("ECMAScript filter", { timeout: 30_000 }, () => {
     expect(ECMASCRIPT_TYPES).toContain("Math");
   });
 });
+
+describe("anonymous type literal (__type handling)", () => {
+  it("converts anonymous call signature type to function type instead of __type", () => {
+    // TypeScript creates an internal __type symbol for anonymous type literals
+    // used as method parameter types. The extractor should expand these to
+    // their actual structure (function type) instead of emitting { kind: "named", name: "__type" }.
+    //
+    // This mimics the real pattern: String.match(matcher: { [Symbol.match](s: string): T })
+    // where the parameter type is an anonymous type literal with a call signature.
+    const result = extract(`
+      interface Foo {
+        bar(matcher: { (s: string): boolean }): boolean;
+      }
+    `);
+    const foo = getInterface(result, "Foo");
+    const barSig = foo.methods["bar"].signatures[0];
+    const matcherParam = barSig.params[0];
+    // Should be expanded to function type, NOT { kind: "named", name: "__type" }
+    expect(matcherParam.type).not.toEqual(
+      expect.objectContaining({ kind: "named", name: "__type" }),
+    );
+    expect(matcherParam.type.kind).toBe("function");
+  });
+
+  it("converts anonymous index signature type to Record instead of __type", () => {
+    // { [key: string]: string } should become Record<string, string>,
+    // not { kind: "named", name: "__type" }.
+    const result = extract(`
+      interface RegExpExecArray {
+        groups?: { [key: string]: string };
+      }
+    `);
+    const arr = getInterface(result, "RegExpExecArray");
+    const groupsField = arr.fields.find((f) => f.name === "groups");
+    expect(groupsField).toBeDefined();
+    expect(groupsField!.type).toEqual({
+      kind: "named",
+      name: "Record",
+      type_args: [{ kind: "string" }, { kind: "string" }],
+    });
+  });
+
+  it("converts anonymous Symbol-keyed property type to function instead of __type", () => {
+    // { [Symbol.match](s: string): boolean } has a Symbol-keyed property
+    // with a call signature. Should be extracted as function type.
+    const result = extract(`
+      interface Foo {
+        match(matcher: { [Symbol.match](s: string): boolean }): boolean;
+      }
+    `);
+    const foo = getInterface(result, "Foo");
+    const matchSig = foo.methods["match"].signatures[0];
+    const matcherParam = matchSig.params[0];
+    expect(matcherParam.type).not.toEqual(
+      expect.objectContaining({ kind: "named", name: "__type" }),
+    );
+    expect(matcherParam.type.kind).toBe("function");
+  });
+
+  it("never produces __type in any output for lib.es5 types", { timeout: 30_000 }, () => {
+    // Regression guard: ensure no __type leaks in real lib.es5 extraction
+    const program = createProgramFromSource("export {};", [
+      "lib.es5.d.ts",
+    ]);
+    const result = extractTypes(program);
+    const jsonStr = JSON.stringify(result);
+    expect(jsonStr).not.toContain('"__type"');
+  });
+});

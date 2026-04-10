@@ -417,6 +417,72 @@ function convertType(
     return { kind: "function", params, return_type: returnType };
   }
 
+  // Anonymous type literal (tsc internal symbol "__type").
+  //
+  // TypeScript assigns the internal symbol name "__type" to anonymous object type
+  // literals that appear inline as field types or parameter types, e.g.:
+  //   interface Foo { handler: { (s: string): boolean } }
+  //   interface Bar { groups?: { [key: string]: string } }
+  //   interface Baz { match(m: { [Symbol.match](s: string): T }): T }
+  //
+  // The symbol "__type" is a compiler internal and must not leak into the JSON output.
+  // Instead, expand the anonymous type based on its actual structure:
+  //   1. Has call signatures → function type
+  //   2. Has index signatures → Record<K, V>
+  //   3. Has Symbol-keyed properties with call signatures → function type (from property)
+  //   4. Otherwise → any (truly opaque anonymous type)
+  {
+    const sym = type.symbol ?? type.aliasSymbol;
+    if (sym && sym.name === "__type") {
+      // 1. Direct call signatures → function type
+      if (callSignatures.length > 0) {
+        const sig = callSignatures[0];
+        const params = sig.parameters.map((p) =>
+          convertType(checker.getTypeOfSymbol(p), checker, depth + 1),
+        );
+        const returnType = convertType(
+          sig.getReturnType(),
+          checker,
+          depth + 1,
+        );
+        return { kind: "function", params, return_type: returnType };
+      }
+
+      // 2. Index signatures → Record<K, V>
+      const indexInfos = checker.getIndexInfosOfType(type);
+      if (indexInfos.length > 0) {
+        const idx = indexInfos[0];
+        const keyType = convertType(idx.keyType, checker, depth + 1);
+        const valueType = convertType(idx.type, checker, depth + 1);
+        return { kind: "named", name: "Record", type_args: [keyType, valueType] };
+      }
+
+      // 3. Symbol-keyed properties with call signatures → function type
+      //    e.g., { [Symbol.match](s: string): RegExpMatchArray | null }
+      const props = type.getProperties();
+      if (props.length > 0 && props.every((p) => isSymbolProperty(p.getName()))) {
+        const firstProp = props[0];
+        const propType = checker.getTypeOfSymbol(firstProp);
+        const propCallSigs = propType.getCallSignatures();
+        if (propCallSigs.length > 0) {
+          const sig = propCallSigs[0];
+          const params = sig.parameters.map((p) =>
+            convertType(checker.getTypeOfSymbol(p), checker, depth + 1),
+          );
+          const returnType = convertType(
+            sig.getReturnType(),
+            checker,
+            depth + 1,
+          );
+          return { kind: "function", params, return_type: returnType };
+        }
+      }
+
+      // 4. Truly opaque anonymous type
+      return { kind: "any" };
+    }
+  }
+
   // Named type with type arguments (e.g., Promise<Response>)
   if ((type as ts.TypeReference).typeArguments) {
     const typeRef = type as ts.TypeReference;

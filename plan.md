@@ -45,29 +45,37 @@ Phase D  🔄  I-382 本体 (generate_stub_structs 削除) ← 現在地
 
 ### Phase D 実行順序 (確定, 2026-04-10 更新)
 
-依存関係に基づく直列化:
+各 PRD は **調査→起票→実装→次の調査** のサイクルで直列実行する。
+前の PRD の実装結果が次の PRD の前提を変える可能性があるため、
+起票を一括で行わず実測ベースで逐次進める。
+
+PRD 実施順序: **γ → β → δ** (依存関係 + 影響範囲の段階的拡大)
 
 ```
-Step 0    Probe 再計測 (Phase C 後の実測値取得)               ✅ 完了
+Step 0    Probe 再計測                                        ✅ 完了
+Step 0.5  `P` 残存調査・解消                                   ✅ 完了
   ↓
-Step 0.5  `P` 残存調査・解消 (Cluster 1a regression)         ✅ 完了
-  ↓
-Step 1    PRD-β / PRD-γ / PRD-δ 起票 (実測値ベースで spec 確定)  ← 現在地
-  ↓
-Step 2    I-386 + PRD-β + PRD-γ 実装 (互いに独立、並列可能)
-  ├── I-386: resolve_type_ref Step 3 + 73 件 fixture 整理
-  ├── PRD-β: ExternalUnsupported (DOM 型等)
-  └── PRD-γ: __type marker 是正
-  ↓
-Step 3    PRD-δ 実装 (= I-382 本体: generate_stub_structs 削除 + user 型 import 生成)
-  ↓
+Step 1    PRD-γ 調査→起票→実装 (__type, 1 件, 小 scope)        ✅ 完了
+  ↓         γ で external 型処理フローを把握 → β の Discovery に有益
+Step 2    PRD-β 調査→起票→実装 (DOM 型等, 21 件, 中 scope)     ← 現在地
+  ↓         β で TypeDef 構造を変更 → δ の設計に直結
+Step 3    PRD-δ 調査→起票→実装 (I-382 本体, 72+1 件, 大 scope)
+  ↓         β/γ で dangling 解消済の状態で generate_stub_structs 削除
 Step 4    最終 quality check + ドキュメント整理
 ```
 
-**根拠**: Step 2 の 3 タスクは全て PRD-δ の前提条件 (dangling refs 0 化に必要)。
-Step 0 の probe なしでは PRD spec が assumption ベースになる
-(`todo-prioritization.md` Step 0 違反)。Step 0.5 は probe で発見された
-investigation debt (`P` 残存) の解消であり、同 Step 0 原則に従い PRD 起票前に実施。
+**γ→β→δ の根拠**:
+- δ は β/γ 両方の完了が前提 (dangling refs 0 化に必要) → δ は必ず最後
+- γ (小 scope) で「調査→PRD→実装」サイクルを低リスクで検証し、
+  `convert_external_type` の仕組みを把握 → β の Discovery 精度向上
+- β (中 scope) で `TypeDef` / `external_struct_generator` を変更 → δ の設計に直結
+
+### PRD 間のスコープ決定 (2026-04-10)
+
+| 決定 | 理由 | 影響先 |
+|---|---|---|
+| **PRD-γ**: `__type` を抽出ツール側 (`extractor.ts`) で構造的に修正 + JSON 再生成 | `__type` は抽出ツールのバグ (anonymous type literal の symbol 名をそのまま出力)。Rust loader 側の `Any` fallback はアドホックな patch であり禁止。root cause は `extractor.ts:434-436` | Rust loader 側の変更不要 |
+| **`symbol`**: PRD-γ から除外し **PRD-β** に委譲 | `symbol` は TS primitive (`TypeFlags.ESSymbol`) の抽出漏れであり、compiler internal marker (`__type`) とは異なるカテゴリ。「TS primitive の Rust 表現」は PRD-β (unsupported external types) の責務 | **PRD-β は `symbol` の扱いを含めて設計すること** |
 
 ### Phase D タスク一覧
 
@@ -75,23 +83,19 @@ investigation debt (`P` 残存) の解消であり、同 Step 0 原則に従い 
 |---|---|---|---|
 | D-0 | 0 | Probe 再計測: Phase C 後の dangling refs 実測 | ✅ |
 | D-0.5 | 0.5 | `P` 残存調査・解消 (Cluster 1a regression) | ✅ |
-| D-0a | 1 | PRD-β 起票: `TypeDef::ExternalUnsupported` variant (DOM 型等) | ⏳ |
-| D-0b | 1 | PRD-γ 起票: `__type` marker → function type 是正 | ⏳ |
-| D-0c | 1 | PRD-δ 起票: Pass 5c 再設計 = `generate_stub_structs` 削除 + user 型 import 生成 | ⏳ |
-| D-1 | 2 | PRD-A-2 (= I-386) 実装: resolve_type_ref Step 3 + 73 件 fixture 整理 | ⏳ |
-| D-2a | 2 | PRD-β 実装 | ⏳ |
-| D-2b | 2 | PRD-γ 実装 | ⏳ |
-| D-3 | 3 | PRD-δ 実装: `generate_stub_structs` 削除 + user 型 import 生成 | ⏳ |
+| D-1 | 1 | PRD-γ 調査→起票→実装: `__type` marker 是正 (1 件) | ✅ |
+| D-2 | 2 | PRD-β 調査→起票→実装: `TypeDef::ExternalUnsupported` (21 件) | ⏳ |
+| D-3 | 3 | PRD-δ 調査→起票→実装: Pass 5c 再設計 + `generate_stub_structs` 削除 | ⏳ |
 | D-4 | 4 | 最終 quality check + ドキュメント整理 | ⏳ |
 
 ### 直近アクション
 
-1. ~~D-0.5: `P` 残存調査・解消~~ ✅ 完了 (2026-04-10)
-   - Root cause: `registry/collection.rs::collect_type_alias_fields` に `push_type_param_scope` 欠落
-   - 修正: scope push/restore を追加。dangling 24→23、`P` 解消確認済
-   - 副次発見: TypeCollector/TypeConverter 二重変換経路の乖離 → I-388 として Phase D 後に対応
-2. **D-0a〜D-0c: PRD 起票** ← 次のアクション
-   - probe 実測値 (dangling 23 / excluded_user 72) に基づき spec 確定
+1. ~~D-1: PRD-γ~~ ✅ 完了 (I-389, 2026-04-10)
+   - `extractor.ts::convertType` に `__type` symbol 検出 + 展開ロジック追加
+   - `ecmascript.json` / `web_api.json` 再生成 (`__type` 0 件)
+   - dangling 23→22 確認、Hono regression 0
+2. **D-2: PRD-β 調査 (Discovery)** ← 次のアクション
+   - `symbol` (PRD-γ から委譲) + DOM 型 20 件の扱いを設計
 
 ---
 
@@ -165,22 +169,24 @@ Hono 後退ゼロ確認済。
 | コンパイル (dir) | 157/158 (99.4%) | 157/158 (99.4%) |
 | テスト数 | 2228 (lib) | 2259 (lib) |
 | clippy warning | 0 | 0 |
-| dangling refs (probe) | 23 | **23** (2026-04-10 再計測、P 修正後) |
+| dangling refs (probe) | 23 | **22** (2026-04-10、D-0.5 + D-1 修正後) |
+| テスト数 (extractor) | — | 65 (+7 新規) |
 
 **注**: 上記は現状把握用の指標。最適化目標ではない
 (`.claude/rules/ideal-implementation-primacy.md` 参照)。
 
-### Phase D Probe 再計測結果 (2026-04-10)
+### Phase D Probe 計測推移 (2026-04-10)
 
 詳細: [`report/i382/phase-d-probe.md`](report/i382/phase-d-probe.md)
 
-| Category | Phase A | Phase D (初回) | D-0.5 修正後 |
-|---|---|---|---|
-| dangling (shared_types stubs) | 34 | 24 | **23** |
-| excluded_user (defined_elsewhere) | 73 | 72 | **72** |
-| external_dangling (外部型 stubs) | N/A | 79 | **79** |
+| Category | Phase A | D-0 初回 | D-0.5 (P修正) | D-1 (__type修正) |
+|---|---|---|---|---|
+| dangling (shared_types stubs) | 34 | 24 | 23 | **22** |
+| excluded_user (defined_elsewhere) | 73 | 72 | 72 | **72** |
+| external_dangling (外部型 stubs) | N/A | 79 | 79 | **79** |
 
-`P` type param leak は D-0.5 で解消済 (root cause: `collection.rs` scope 欠落)。
+- D-0.5: `P` type param leak 解消 (`collection.rs` scope 欠落修正)
+- D-1: `__type` compiler marker 解消 (`extractor.ts` anonymous type literal 展開)
 
 ---
 
