@@ -546,7 +546,19 @@ fn collect_type_alias_fields(
     reg: &TypeRegistry,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> Option<Vec<FieldDef>> {
-    match alias.type_ann.as_ref() {
+    // 型パラメータ scope を設定する。generic type alias (e.g., `type X<T, P> = { ... }`)
+    // のフィールド型解決時に型パラメータが `TypeVar` として認識されるよう、
+    // `resolve_field_def` → `resolve_type_ref` の呼び出し前に scope を push する。
+    // scope がないと型パラメータ名が `Named` として焼き込まれ、
+    // downstream の `unique_field_types()` → synthetic union で dangling ref になる。
+    let tp_names: Vec<String> = alias
+        .type_params
+        .as_ref()
+        .map(|tp| tp.params.iter().map(|p| p.name.sym.to_string()).collect())
+        .unwrap_or_default();
+    let prev_scope = synthetic.push_type_param_scope(tp_names);
+
+    let result = match alias.type_ann.as_ref() {
         ast::TsType::TsTypeLit(lit) => Some(collect_type_lit_fields(lit, reg, synthetic)),
         // Intersection type: `type Person = Named & Aged` → merge fields from all members
         ast::TsType::TsUnionOrIntersectionType(
@@ -576,7 +588,10 @@ fn collect_type_alias_fields(
         // Type reference: `type X = Partial<Body>` → resolve fields from registry
         ast::TsType::TsTypeRef(type_ref) => resolve_type_ref_fields(type_ref, reg, synthetic),
         _ => None,
-    }
+    };
+
+    synthetic.restore_type_param_scope(prev_scope);
+    result
 }
 
 /// `as const` 宣言または型注釈付き const 宣言から `TypeDef::ConstValue<TsTypeInfo>` を構築する。

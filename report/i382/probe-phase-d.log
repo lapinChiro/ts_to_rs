@@ -1,0 +1,831 @@
+[I-382-PROBE] external_dangling iter=0 name=AbortSignal
+[I-382-PROBE] external_dangling iter=0 name=AddEventListenerOptions
+[I-382-PROBE] external_dangling iter=0 name=AesCbcParams
+[I-382-PROBE] external_dangling iter=0 name=AesCtrParams
+[I-382-PROBE] external_dangling iter=0 name=AesDerivedKeyParams
+[I-382-PROBE] external_dangling iter=0 name=AesGcmParams
+[I-382-PROBE] external_dangling iter=0 name=AesKeyAlgorithm
+[I-382-PROBE] external_dangling iter=0 name=AesKeyGenParams
+[I-382-PROBE] external_dangling iter=0 name=Array
+[I-382-PROBE] external_dangling iter=0 name=ArrayBuffer
+[I-382-PROBE] external_dangling iter=0 name=ArrayBufferView
+[I-382-PROBE] external_dangling iter=0 name=ArrayLike
+[I-382-PROBE] external_dangling iter=0 name=Blob
+[I-382-PROBE] external_dangling iter=0 name=CloseEvent
+[I-382-PROBE] external_dangling iter=0 name=ConcatArray
+[I-382-PROBE] external_dangling iter=0 name=CryptoKey
+[I-382-PROBE] external_dangling iter=0 name=CryptoKeyPair
+[I-382-PROBE] external_dangling iter=0 name=DOMPointInit
+[I-382-PROBE] external_dangling iter=0 name=DataView
+[I-382-PROBE] external_dangling iter=0 name=Date
+[I-382-PROBE] external_dangling iter=0 name=EcKeyGenParams
+[I-382-PROBE] external_dangling iter=0 name=EcKeyImportParams
+[I-382-PROBE] external_dangling iter=0 name=EcdhKeyDeriveParams
+[I-382-PROBE] external_dangling iter=0 name=EcdsaParams
+[I-382-PROBE] external_dangling iter=0 name=Error
+[I-382-PROBE] external_dangling iter=0 name=Event
+[I-382-PROBE] external_dangling iter=0 name=EventListenerObject
+[I-382-PROBE] external_dangling iter=0 name=EventListenerOptions
+[I-382-PROBE] external_dangling iter=0 name=File
+[I-382-PROBE] external_dangling iter=0 name=FormData
+[I-382-PROBE] external_dangling iter=0 name=Headers
+[I-382-PROBE] external_dangling iter=0 name=HkdfParams
+[I-382-PROBE] external_dangling iter=0 name=HmacImportParams
+[I-382-PROBE] external_dangling iter=0 name=HmacKeyGenParams
+[I-382-PROBE] external_dangling iter=0 name=IteratorReturnResult
+[I-382-PROBE] external_dangling iter=0 name=IteratorYieldResult
+[I-382-PROBE] external_dangling iter=0 name=JSON
+[I-382-PROBE] external_dangling iter=0 name=JsonWebKey
+[I-382-PROBE] external_dangling iter=0 name=Locale
+[I-382-PROBE] external_dangling iter=0 name=Map
+[I-382-PROBE] external_dangling iter=0 name=MessageEvent
+[I-382-PROBE] external_dangling iter=0 name=MessageEventInit
+[I-382-PROBE] external_dangling iter=0 name=MessagePort
+[I-382-PROBE] external_dangling iter=0 name=Number
+[I-382-PROBE] external_dangling iter=0 name=Object
+[I-382-PROBE] external_dangling iter=0 name=OffscreenCanvas
+[I-382-PROBE] external_dangling iter=0 name=OffscreenCanvasRenderingContext2D
+[I-382-PROBE] external_dangling iter=0 name=Path2D
+[I-382-PROBE] external_dangling iter=0 name=Pbkdf2Params
+[I-382-PROBE] external_dangling iter=0 name=Promise
+[I-382-PROBE] external_dangling iter=0 name=PromiseLike
+[I-382-PROBE] external_dangling iter=0 name=ReadableByteStreamController
+[I-382-PROBE] external_dangling iter=0 name=ReadableStream
+[I-382-PROBE] external_dangling iter=0 name=ReadableStreamBYOBReader
+[I-382-PROBE] external_dangling iter=0 name=ReadableStreamDefaultController
+[I-382-PROBE] external_dangling iter=0 name=ReadableStreamDefaultReader
+[I-382-PROBE] external_dangling iter=0 name=ReadableStreamReadDoneResult
+[I-382-PROBE] external_dangling iter=0 name=ReadableStreamReadValueResult
+[I-382-PROBE] external_dangling iter=0 name=RegExp
+[I-382-PROBE] external_dangling iter=0 name=RegExpMatchArray
+[I-382-PROBE] external_dangling iter=0 name=Request
+[I-382-PROBE] external_dangling iter=0 name=RequestInit
+[I-382-PROBE] external_dangling iter=0 name=RsaHashedImportParams
+[I-382-PROBE] external_dangling iter=0 name=RsaHashedKeyGenParams
+[I-382-PROBE] external_dangling iter=0 name=RsaOaepParams
+[I-382-PROBE] external_dangling iter=0 name=RsaOtherPrimesInfo
+[I-382-PROBE] external_dangling iter=0 name=RsaPssParams
+[I-382-PROBE] external_dangling iter=0 name=SharedArrayBuffer
+[I-382-PROBE] external_dangling iter=0 name=String
+[I-382-PROBE] external_dangling iter=0 name=TextDecoder
+[I-382-PROBE] external_dangling iter=0 name=TextEncoder
+[I-382-PROBE] external_dangling iter=0 name=TransformStream
+[I-382-PROBE] external_dangling iter=0 name=URL
+[I-382-PROBE] external_dangling iter=0 name=URLSearchParams
+[I-382-PROBE] external_dangling iter=0 name=Uint8Array
+[I-382-PROBE] external_dangling iter=0 name=WebSocket
+[I-382-PROBE] external_dangling iter=0 name=WritableStream
+[I-382-PROBE] external_dangling iter=1 name=EventTarget
+[I-382-PROBE] external_dangling iter=1 name=ReadableStreamBYOBRequest
+[I-382-PROBE] excluded_user iter=0 name=ALBRequestContext
+[I-382-PROBE] excluded_user iter=0 name=AfterGenerateHook
+[I-382-PROBE] excluded_user iter=0 name=AfterResponseHook
+[I-382-PROBE] excluded_user iter=0 name=Algorithm
+[I-382-PROBE] excluded_user iter=0 name=ApiGatewayRequestContext
+[I-382-PROBE] excluded_user iter=0 name=ApiGatewayRequestContextV2
+[I-382-PROBE] excluded_user iter=0 name=BeforeRequestHook
+[I-382-PROBE] excluded_user iter=0 name=Bindings
+[I-382-PROBE] excluded_user iter=0 name=BodyDataValueComponent
+[I-382-PROBE] excluded_user iter=0 name=BodyDataValueDot
+[I-382-PROBE] excluded_user iter=0 name=BodyDataValueDotAll
+[I-382-PROBE] excluded_user iter=0 name=BodyDataValueObject
+[I-382-PROBE] excluded_user iter=0 name=BuildSearchParamsFn
+[I-382-PROBE] excluded_user iter=0 name=CacheType
+[I-382-PROBE] excluded_user iter=0 name=CloudFrontRequest
+[I-382-PROBE] excluded_user iter=0 name=CloudFrontResult
+[I-382-PROBE] excluded_user iter=0 name=Condition
+[I-382-PROBE] excluded_user iter=0 name=ContentSecurityPolicyOptionHandler
+[I-382-PROBE] excluded_user iter=0 name=ContentfulStatusCode
+[I-382-PROBE] excluded_user iter=0 name=Context
+[I-382-PROBE] excluded_user iter=0 name=CssClassName
+[I-382-PROBE] excluded_user iter=0 name=CssVariableAsyncType
+[I-382-PROBE] excluded_user iter=0 name=CssVariableBasicType
+[I-382-PROBE] excluded_user iter=0 name=CustomHeader
+[I-382-PROBE] excluded_user iter=0 name=Data
+[I-382-PROBE] excluded_user iter=0 name=DetectorType
+[I-382-PROBE] excluded_user iter=0 name=ExecutionContext
+[I-382-PROBE] excluded_user iter=0 name=ExtractValidatorOutput
+[I-382-PROBE] excluded_user iter=0 name=FetchEventLike
+[I-382-PROBE] excluded_user iter=0 name=H
+[I-382-PROBE] excluded_user iter=0 name=HTTPExceptionFunction
+[I-382-PROBE] excluded_user iter=0 name=HTTPResponseError
+[I-382-PROBE] excluded_user iter=0 name=HonoJsonWebKey
+[I-382-PROBE] excluded_user iter=0 name=HonoRequest
+[I-382-PROBE] excluded_user iter=0 name=HtmlEscapedString
+[I-382-PROBE] excluded_user iter=0 name=Input
+[I-382-PROBE] excluded_user iter=0 name=InvalidJSONValue
+[I-382-PROBE] excluded_user iter=0 name=IsAllowedOriginHandler
+[I-382-PROBE] excluded_user iter=0 name=IsAllowedSecFetchSiteHandler
+[I-382-PROBE] excluded_user iter=0 name=JSONArray
+[I-382-PROBE] excluded_user iter=0 name=JSONObject
+[I-382-PROBE] excluded_user iter=0 name=JSONPrimitive
+[I-382-PROBE] excluded_user iter=0 name=JSONValue
+[I-382-PROBE] excluded_user iter=0 name=JWTPayload
+[I-382-PROBE] excluded_user iter=0 name=KeyAlgorithm
+[I-382-PROBE] excluded_user iter=0 name=LatticeRequestContextV2
+[I-382-PROBE] excluded_user iter=0 name=MergeSchemaPath
+[I-382-PROBE] excluded_user iter=0 name=MessageFunction
+[I-382-PROBE] excluded_user iter=0 name=MiddlewareHandler
+[I-382-PROBE] excluded_user iter=0 name=MountReplaceRequest
+[I-382-PROBE] excluded_user iter=0 name=ParamIndexMap
+[I-382-PROBE] excluded_user iter=0 name=ParamKey
+[I-382-PROBE] excluded_user iter=0 name=ParamKeys
+[I-382-PROBE] excluded_user iter=0 name=PermissionsPolicyValue
+[I-382-PROBE] excluded_user iter=0 name=ProxyRequestInit
+[I-382-PROBE] excluded_user iter=0 name=RendererOptions
+[I-382-PROBE] excluded_user iter=0 name=RequestHeader
+[I-382-PROBE] excluded_user iter=0 name=Response
+[I-382-PROBE] excluded_user iter=0 name=ResponseOrInit
+[I-382-PROBE] excluded_user iter=0 name=SSGParams
+[I-382-PROBE] excluded_user iter=0 name=SecFetchSite
+[I-382-PROBE] excluded_user iter=0 name=SecureHeadersCallback
+[I-382-PROBE] excluded_user iter=0 name=SignatureAlgorithm
+[I-382-PROBE] excluded_user iter=0 name=StatusCode
+[I-382-PROBE] excluded_user iter=0 name=ToEndpoints
+[I-382-PROBE] excluded_user iter=0 name=TokenHeader
+[I-382-PROBE] excluded_user iter=0 name=TypedResponse
+[I-382-PROBE] excluded_user iter=0 name=Variables
+[I-382-PROBE] excluded_user iter=0 name=VerifyOptionsWithAlg
+[I-382-PROBE] excluded_user iter=0 name=WSContext
+[I-382-PROBE] excluded_user iter=0 name=WSEvents
+[I-382-PROBE] excluded_user iter=0 name=WSMessageReceive
+[I-382-PROBE] dangling iter=0 name=AudioData typedef=NotInRegistry is_external=false
+[I-382-PROBE] dangling iter=0 name=BufferSource typedef=NotInRegistry is_external=false
+[I-382-PROBE] dangling iter=0 name=CanvasGradient typedef=NotInRegistry is_external=false
+[I-382-PROBE] dangling iter=0 name=CanvasPattern typedef=NotInRegistry is_external=false
+[I-382-PROBE] dangling iter=0 name=HTMLCanvasElement typedef=NotInRegistry is_external=false
+[I-382-PROBE] dangling iter=0 name=HTMLImageElement typedef=NotInRegistry is_external=false
+[I-382-PROBE] dangling iter=0 name=HTMLVideoElement typedef=NotInRegistry is_external=false
+[I-382-PROBE] dangling iter=0 name=HTTPException typedef=Struct is_external=false
+[I-382-PROBE] dangling iter=0 name=HeadersInit typedef=NotInRegistry is_external=false
+[I-382-PROBE] dangling iter=0 name=ImageBitmap typedef=NotInRegistry is_external=false
+[I-382-PROBE] dangling iter=0 name=ImageBitmapRenderingContext typedef=NotInRegistry is_external=false
+[I-382-PROBE] dangling iter=0 name=MediaSourceHandle typedef=NotInRegistry is_external=false
+[I-382-PROBE] dangling iter=0 name=P typedef=NotInRegistry is_external=false
+[I-382-PROBE] dangling iter=0 name=RTCDataChannel typedef=NotInRegistry is_external=false
+[I-382-PROBE] dangling iter=0 name=RequestInfo typedef=NotInRegistry is_external=false
+[I-382-PROBE] dangling iter=0 name=SVGImageElement typedef=NotInRegistry is_external=false
+[I-382-PROBE] dangling iter=0 name=ServiceWorker typedef=NotInRegistry is_external=false
+[I-382-PROBE] dangling iter=0 name=TemplateStringsArray typedef=NotInRegistry is_external=false
+[I-382-PROBE] dangling iter=0 name=VideoFrame typedef=NotInRegistry is_external=false
+[I-382-PROBE] dangling iter=0 name=WebGL2RenderingContext typedef=NotInRegistry is_external=false
+[I-382-PROBE] dangling iter=0 name=WebGLRenderingContext typedef=NotInRegistry is_external=false
+[I-382-PROBE] dangling iter=0 name=Window typedef=NotInRegistry is_external=false
+[I-382-PROBE] dangling iter=0 name=__type typedef=NotInRegistry is_external=false
+[I-382-PROBE] dangling iter=0 name=symbol typedef=NotInRegistry is_external=false
+error[E0670]: `async fn` is not permitted in Rust 2015
+   --> /tmp/hono-probe-output/adapter/aws_lambda/handler.rs:138:1
+    |
+138 | async fn streamToNodeStream(reader: ReadableStreamDefaultReader<Uint8Array>, writer: NodeJS.WritableStream) -> Promise<()> {
+    | ^^^^^ to use `async fn`, switch to Rust 2018 or later
+    |
+    = help: pass `--edition 2024` to `rustc`
+    = note: for more on editions, read https://doc.rust-lang.org/edition-guide
+
+error: expected one of `:`, `@`, or `|`, found `)`
+   --> /tmp/hono-probe-output/adapter/aws_lambda/handler.rs:138:107
+    |
+138 | async fn streamToNodeStream(reader: ReadableStreamDefaultReader<Uint8Array>, writer: NodeJS.WritableStream) -> Promise<()> {
+    |                                                                                                           ^ expected one of `:`, `@`, or `|`
+    |
+help: if this is a parameter name, give it a type
+    |
+138 | async fn streamToNodeStream(reader: ReadableStreamDefaultReader<Uint8Array>, writer: NodeJS.WritableStream: TypeName) -> Promise<()> {
+    |                                                                                                           ++++++++++
+help: if this is a type, explicitly ignore the parameter name
+    |
+138 | async fn streamToNodeStream(reader: ReadableStreamDefaultReader<Uint8Array>, writer: NodeJS._: WritableStream) -> Promise<()> {
+    |                                                                                             ++
+
+error: expected one of `!`, `(`, `)`, `+`, `,`, `::`, or `<`, found `.`
+   --> /tmp/hono-probe-output/adapter/aws_lambda/handler.rs:138:92
+    |
+138 | async fn streamToNodeStream(reader: ReadableStreamDefaultReader<Uint8Array>, writer: NodeJS.WritableStream) -> Promise<()> {
+    |                                                                                            ^
+    |                                                                                            |
+    |                                                                                            expected one of 7 possible tokens
+    |                                                                                            help: missing `,`
+
+error[E0670]: `async fn` is not permitted in Rust 2015
+ --> /tmp/hono-probe-output/adapter/bun/ssg.rs:5:5
+  |
+5 | pub async fn toSSG(app: serde_json::Value, options: serde_json::Value) {
+  |     ^^^^^ to use `async fn`, switch to Rust 2018 or later
+  |
+  = help: pass `--edition 2024` to `rustc`
+  = note: for more on editions, read https://doc.rust-lang.org/edition-guide
+
+error[E0670]: `async fn` is not permitted in Rust 2015
+ --> /tmp/hono-probe-output/adapter/cloudflare_workers/utils.rs:9:5
+  |
+9 | pub async fn getContentFromKVAsset(path: String, options: Option<KVAssetOptions>) -> Promise<Option<ReadableStream>> {
+  |     ^^^^^ to use `async fn`, switch to Rust 2018 or later
+  |
+  = help: pass `--edition 2024` to `rustc`
+  = note: for more on editions, read https://doc.rust-lang.org/edition-guide
+
+error[E0670]: `async fn` is not permitted in Rust 2015
+ --> /tmp/hono-probe-output/adapter/deno/ssg.rs:5:5
+  |
+5 | pub async fn toSSG(app: serde_json::Value, options: serde_json::Value) {
+  |     ^^^^^ to use `async fn`, switch to Rust 2018 or later
+  |
+  = help: pass `--edition 2024` to `rustc`
+  = note: for more on editions, read https://doc.rust-lang.org/edition-guide
+
+error[E0670]: `async fn` is not permitted in Rust 2015
+   --> /tmp/hono-probe-output/adapter/lambda_edge/handler.rs:127:1
+    |
+127 | async fn createResult(res: Response) -> Promise<CloudFrontResult> {
+    | ^^^^^ to use `async fn`, switch to Rust 2018 or later
+    |
+    = help: pass `--edition 2024` to `rustc`
+    = note: for more on editions, read https://doc.rust-lang.org/edition-guide
+
+error: expected identifier, found `$`
+  --> /tmp/hono-probe-output/client/types.rs:62:9
+   |
+60 | pub struct ClientRequest {
+   |            ------------- while parsing this struct
+61 |     pub _0: HashMap<String, Box<dyn Fn(R, ClientRequestOptions) -> Promise<ClientResponseOfEndpoint>>>,
+62 |     pub $url: Box<dyn Fn(Arg) -> HonoURL>,
+   |         ^ expected identifier
+
+error[E0670]: `async fn` is not permitted in Rust 2015
+  --> /tmp/hono-probe-output/client/utils.rs:87:5
+   |
+87 | pub async fn parseResponse<T: ClientResponse<serde_json::Value>>(fetchRes: T) {
+   |     ^^^^^ to use `async fn`, switch to Rust 2018 or later
+   |
+   = help: pass `--edition 2024` to `rustc`
+   = note: for more on editions, read https://doc.rust-lang.org/edition-guide
+
+error: expected identifier, found `)`
+  --> /tmp/hono-probe-output/context.rs:88:22
+   |
+88 | type BodyRespond<T: (), U: StatusCode> = Box<dyn Fn(T, U, HeaderRecord) -> _TypeLit4>;
+   |                      ^ expected identifier
+
+error: expected one of `.`, `?`, `{`, or an operator, found `}`
+  --> /tmp/hono-probe-output/helper/accepts/accepts.rs:43:1
+   |
+42 |     match(accepts, options)
+   |     -----                  - expected one of `.`, `?`, `{`, or an operator
+   |     |
+   |     while parsing this `match` expression
+43 | }
+   | ^ unexpected token
+
+error[E0670]: `async fn` is not permitted in Rust 2015
+  --> /tmp/hono-probe-output/helper/cookie/index.rs:19:5
+   |
+19 | pub async fn getSignedCookie(c: serde_json::Value, secret: serde_json::Value, key: GetSignedCookieKeyType, prefix: Option<CookiePref...
+   |     ^^^^^ to use `async fn`, switch to Rust 2018 or later
+   |
+   = help: pass `--edition 2024` to `rustc`
+   = note: for more on editions, read https://doc.rust-lang.org/edition-guide
+
+error[E0670]: `async fn` is not permitted in Rust 2015
+  --> /tmp/hono-probe-output/helper/cookie/index.rs:62:5
+   |
+62 | pub async fn generateSignedCookie(name: String, value: String, secret: BufferSourceOrString, opt: Option<CookieOptions>) -> Promise<...
+   |     ^^^^^ to use `async fn`, switch to Rust 2018 or later
+   |
+   = help: pass `--edition 2024` to `rustc`
+   = note: for more on editions, read https://doc.rust-lang.org/edition-guide
+
+error[E0670]: `async fn` is not permitted in Rust 2015
+  --> /tmp/hono-probe-output/helper/cookie/index.rs:76:5
+   |
+76 | pub async fn setSignedCookie(c: Context, name: String, value: String, secret: BufferSourceOrString, opt: Option<CookieOptions>) -> P...
+   |     ^^^^^ to use `async fn`, switch to Rust 2018 or later
+   |
+   = help: pass `--edition 2024` to `rustc`
+   = note: for more on editions, read https://doc.rust-lang.org/edition-guide
+
+error: expected parameter name, found `$`
+  --> /tmp/hono-probe-output/helper/css/common.rs:59:35
+   |
+59 |     css.replacen(minifyCssRe, |_, $1, $2, $3, $4| $1 || $2 || $3 || $4 || "", 1)
+   |                                   ^ expected parameter name
+
+error[E0670]: `async fn` is not permitted in Rust 2015
+  --> /tmp/hono-probe-output/helper/ssg/ssg.rs:97:1
+   |
+97 | async fn parseResponseContent(response: Response) -> Promise<ArrayBufferOrString> {
+   | ^^^^^ to use `async fn`, switch to Rust 2018 or later
+   |
+   = help: pass `--edition 2024` to `rustc`
+   = note: for more on editions, read https://doc.rust-lang.org/edition-guide
+
+error[E0670]: `async fn` is not permitted in Rust 2015
+   --> /tmp/hono-probe-output/helper/ssg/ssg.rs:194:5
+    |
+194 | pub async fn saveContentToFile(data: Promise<Option<_TypeLit0>>, fsModule: FileSystemModule, outDir: String, extensionMap: Option<H...
+    |     ^^^^^ to use `async fn`, switch to Rust 2018 or later
+    |
+    = help: pass `--edition 2024` to `rustc`
+    = note: for more on editions, read https://doc.rust-lang.org/edition-guide
+
+error[E0670]: `async fn` is not permitted in Rust 2015
+   --> /tmp/hono-probe-output/helper/ssg/ssg.rs:222:5
+    |
+222 | pub async fn toSSG(app: serde_json::Value, fs: serde_json::Value, options: serde_json::Value) {
+    |     ^^^^^ to use `async fn`, switch to Rust 2018 or later
+    |
+    = help: pass `--edition 2024` to `rustc`
+    = note: for more on editions, read https://doc.rust-lang.org/edition-guide
+
+error: expected expression, found `+`
+  --> /tmp/hono-probe-output/helper/ssg/utils.rs:54:91
+   |
+54 |     if paths.get(0).cloned().unwrap().get(0).cloned().unwrap() == "/" { "/" } else { "" } + &resultPaths.join("/")
+   |                                                                                           ^ expected expression
+   |
+help: parentheses are required to parse this as an expression
+   |
+54 |     (if paths.get(0).cloned().unwrap().get(0).cloned().unwrap() == "/" { "/" } else { "" }) + &resultPaths.join("/")
+   |     +                                                                                     +
+
+error: unknown start of token: \
+  --> /tmp/hono-probe-output/helper/streaming/sse.rs:37:58
+   |
+37 |                 return Err(format!("{} must not contain "\\r" or "\\n"", key).to_string());
+   |                                                          ^^
+   |
+   = note: character appears once more
+
+error: unknown start of token: \
+  --> /tmp/hono-probe-output/helper/streaming/sse.rs:37:67
+   |
+37 |                 return Err(format!("{} must not contain "\\r" or "\\n"", key).to_string());
+   |                                                                   ^^
+   |
+   = note: character appears once more
+
+error[E0670]: `async fn` is not permitted in Rust 2015
+  --> /tmp/hono-probe-output/helper/streaming/sse.rs:45:1
+   |
+45 | async fn run(stream: SSEStreamingApi, cb: Box<dyn Fn(SSEStreamingApi) -> Promise<()>>, onError: Option<Box<dyn Fn(Error, SSEStreamin...
+   | ^^^^^ to use `async fn`, switch to Rust 2018 or later
+   |
+   = help: pass `--edition 2024` to `rustc`
+   = note: for more on editions, read https://doc.rust-lang.org/edition-guide
+
+error: expected one of `,`, `:`, or `}`, found `-`
+  --> /tmp/hono-probe-output/middleware/bearer_auth/index.rs:74:369
+   |
+74 | ...ders: Some(ResponseHeadersInit { WWW_Authenticate: headers.WWW_Authenticate, content-type: "application/json" }), status: Some(st...
+   |               -------------------                                               -------^ expected one of `,`, `:`, or `}`
+   |               |                                                                 |
+   |               while parsing this struct                                         while parsing this struct field
+   |
+help: try naming a field
+   |
+74 |     let res = if let MessageFunctionOrStringOrValue::String(responseMessage) = responseMessage { Response::new(responseMessage, ResponseInit { headers: Some(headers), status: Some(status), statusText: None }) } else { Response::new(JSON::stringify(responseMessage), ResponseInit { headers: Some(ResponseHeadersInit { WWW_Authenticate: headers.WWW_Authenticate, content: content-type: "application/json" }), status: Some(status), statusText: None }) };
+   |                                                                                                                                                                                                                                                                                                                                                                          ++++++++
+
+error[E0670]: `async fn` is not permitted in Rust 2015
+  --> /tmp/hono-probe-output/middleware/etag/digest.rs:13:5
+   |
+13 | pub async fn generateDigest(stream: Option<ReadableStream<Uint8Array<ArrayBuffer>>>, generator: Box<dyn Fn(Uint8Array<ArrayBuffer>) ...
+   |     ^^^^^ to use `async fn`, switch to Rust 2018 or later
+   |
+   = help: pass `--edition 2024` to `rustc`
+   = note: for more on editions, read https://doc.rust-lang.org/edition-guide
+
+error[E0670]: `async fn` is not permitted in Rust 2015
+  --> /tmp/hono-probe-output/middleware/logger/index.rs:44:1
+   |
+44 | async fn colorStatus(status: f64) {
+   | ^^^^^ to use `async fn`, switch to Rust 2018 or later
+   |
+   = help: pass `--edition 2024` to `rustc`
+   = note: for more on editions, read https://doc.rust-lang.org/edition-guide
+
+error[E0670]: `async fn` is not permitted in Rust 2015
+  --> /tmp/hono-probe-output/middleware/logger/index.rs:65:1
+   |
+65 | async fn log(fn: PrintFunc, prefix: String, method: String, path: String, status: Option<f64>, elapsed: Option<String>) {
+   | ^^^^^ to use `async fn`, switch to Rust 2018 or later
+   |
+   = help: pass `--edition 2024` to `rustc`
+   = note: for more on editions, read https://doc.rust-lang.org/edition-guide
+
+error: expected identifier, found keyword `fn`
+  --> /tmp/hono-probe-output/middleware/logger/index.rs:65:14
+   |
+65 | async fn log(fn: PrintFunc, prefix: String, method: String, path: String, status: Option<f64>, elapsed: Option<String>) {
+   |              ^^ expected identifier, found keyword
+   |
+help: escape `fn` to use it as an identifier
+   |
+65 | async fn log(r#fn: PrintFunc, prefix: String, method: String, path: String, status: Option<f64>, elapsed: Option<String>) {
+   |              ++
+
+error: expected identifier, found `(`
+  --> /tmp/hono-probe-output/middleware/logger/index.rs:68:7
+   |
+68 |     fn(out);
+   |       ^ expected identifier
+
+error: expected identifier, found keyword `fn`
+  --> /tmp/hono-probe-output/middleware/logger/index.rs:71:15
+   |
+71 | pub fn logger(fn: Option<PrintFunc>) -> MiddlewareHandler {
+   |               ^^ expected identifier, found keyword
+   |
+help: escape `fn` to use it as an identifier
+   |
+71 | pub fn logger(r#fn: Option<PrintFunc>) -> MiddlewareHandler {
+   |               ++
+
+error: expected identifier, found `,`
+  --> /tmp/hono-probe-output/middleware/secure_headers/secure_headers.rs:83:5
+   |
+83 |     , // = "*"
+   |     ^ expected identifier
+   |
+help: remove this comma
+   |
+83 -     , // = "*"
+83 +      // = "*"
+   |
+
+error: expected identifier, found keyword `Self`
+  --> /tmp/hono-probe-output/middleware/secure_headers/secure_headers.rs:84:5
+   |
+82 | enum PermissionsPolicyValue {
+   |      ---------------------- while parsing this enum
+83 |     , // = "*"
+84 |     Self, // = "self"
+   |     ^^^^ expected identifier, found keyword
+   |
+   = help: enum variants can be `Variant`, `Variant = <integer>`, `Variant(Type, ..., TypeN)` or `Variant { fields: Types }`
+
+error[E0670]: `async fn` is not permitted in Rust 2015
+   --> /tmp/hono-probe-output/middleware/timing/timing.rs:142:5
+    |
+142 | pub async fn wrapTime<T>(c: Context, name: String, callable: Promise<T>, description: Option<String>, precision: Option<f64>) -> T {
+    |     ^^^^^ to use `async fn`, switch to Rust 2018 or later
+    |
+    = help: pass `--edition 2024` to `rustc`
+    = note: for more on editions, read https://doc.rust-lang.org/edition-guide
+
+error: expected identifier, found keyword `match`
+  --> /tmp/hono-probe-output/router/pattern_router/router.rs:41:12
+   |
+41 |     pub fn match(&self, method: String, path: String) -> TsResult {
+   |            ^^^^^ expected identifier, found keyword
+   |
+help: escape `match` to use it as an identifier
+   |
+41 |     pub fn r#match(&self, method: String, path: String) -> TsResult {
+   |            ++
+
+error: expected one of `.`, `?`, `{`, or an operator, found `}`
+  --> /tmp/hono-probe-output/router/reg_exp_router/matcher.rs:32:1
+   |
+31 |     match(Box::new(method), path)
+   |     -----                        - expected one of `.`, `?`, `{`, or an operator
+   |     |
+   |     while parsing this `match` expression
+32 | }
+   | ^ unexpected token
+
+error: expected identifier, found keyword `match`
+  --> /tmp/hono-probe-output/router/reg_exp_router/prepared_router.rs:17:46
+   |
+17 | use crate::router::reg_exp_router::matcher::{match, emptyParam};
+   |                                              ^^^^^ expected identifier, found keyword
+   |
+help: escape `match` to use it as an identifier
+   |
+17 | use crate::router::reg_exp_router::matcher::{r#match, emptyParam};
+   |                                              ++
+
+error: expected expression, found `.`
+  --> /tmp/hono-probe-output/router/reg_exp_router/prepared_router.rs:24:41
+   |
+24 |     let matchersStr = Regex::new(r#""##(.+?)##""#).unwrap().replace_all(&JSON::stringify(matchers, |_, value| if false { format!("##...
+   |                                         ^ expected expression
+
+error: too many `#` when terminating raw string
+  --> /tmp/hono-probe-output/router/reg_exp_router/prepared_router.rs:24:39
+   |
+24 |     let matchersStr = Regex::new(r#""##(.+?)##""#).unwrap().replace_all(&JSON::stringify(matchers, |_, value| if false { format!("##...
+   |                                  -----^
+   |                                  |
+   |                                  this raw string started with 1 `#`
+   |
+help: remove the extra `#`
+   |
+24 -     let matchersStr = Regex::new(r#""##(.+?)##""#).unwrap().replace_all(&JSON::stringify(matchers, |_, value| if false { format!("##{}##", value.to_string()) } else { value }), |_, str| Regex::new(r"\\\\").unwrap().replace_all(&str, "\\").to_string()).to_string();
+24 +     let matchersStr = Regex::new(r#""#(.+?)##""#).unwrap().replace_all(&JSON::stringify(matchers, |_, value| if false { format!("##{}##", value.to_string()) } else { value }), |_, str| Regex::new(r"\\\\").unwrap().replace_all(&str, "\\").to_string()).to_string();
+   |
+help: missing `,`
+   |
+24 |     let matchersStr = Regex::new(r#""##,(.+?)##""#).unwrap().replace_all(&JSON::stringify(matchers, |_, value| if false { format!("##{}##", value.to_string()) } else { value }), |_, str| Regex::new(r"\\\\").unwrap().replace_all(&str, "\\").to_string()).to_string();
+   |                                        +
+
+error: expected one of `)`, `,`, `.`, `?`, or an operator, found `#`
+  --> /tmp/hono-probe-output/router/reg_exp_router/prepared_router.rs:24:45
+   |
+24 |     let matchersStr = Regex::new(r#""##(.+?)##""#).unwrap().replace_all(&JSON::stringify(matchers, |_, value| if false { format!("##...
+   |                                             ^ expected one of `)`, `,`, `.`, `?`, or an operator
+
+error: expected identifier, found keyword `match`
+  --> /tmp/hono-probe-output/router/reg_exp_router/router.rs:13:46
+   |
+13 | use crate::router::reg_exp_router::matcher::{match, emptyParam};
+   |                                              ^^^^^ expected identifier, found keyword
+   |
+help: escape `match` to use it as an identifier
+   |
+13 | use crate::router::reg_exp_router::matcher::{r#match, emptyParam};
+   |                                              ++
+
+error: expected identifier, found keyword `match`
+  --> /tmp/hono-probe-output/router/smart_router/router.rs:26:12
+   |
+26 |     pub fn match(&mut self, method: String, path: String) -> TsResult {
+   |            ^^^^^ expected identifier, found keyword
+   |
+help: escape `match` to use it as an identifier
+   |
+26 |     pub fn r#match(&mut self, method: String, path: String) -> TsResult {
+   |            ++
+
+error: expected identifier, found keyword `match`
+  --> /tmp/hono-probe-output/router/trie_router/router.rs:35:12
+   |
+35 |     pub fn match(&self, method: String, path: String) -> TsResult {
+   |            ^^^^^ expected identifier, found keyword
+   |
+help: escape `match` to use it as an identifier
+   |
+35 |     pub fn r#match(&self, method: String, path: String) -> TsResult {
+   |            ++
+
+error: expected identifier, found keyword `match`
+ --> /tmp/hono-probe-output/router.rs:9:8
+  |
+9 |     fn match(&self, method: String, path: String) -> TsResult;
+  |        ^^^^^ expected identifier, found keyword
+  |
+help: escape `match` to use it as an identifier
+  |
+9 |     fn r#match(&self, method: String, path: String) -> TsResult;
+  |        ++
+
+error: expected identifier, found keyword `match`
+  --> /tmp/hono-probe-output/router.rs:16:8
+   |
+16 |     fn match(&self, method: String, path: String) -> TsResult {
+   |        ^^^^^ expected identifier, found keyword
+   |
+help: escape `match` to use it as an identifier
+   |
+16 |     fn r#match(&self, method: String, path: String) -> TsResult {
+   |        ++
+
+error[E0670]: `async fn` is not permitted in Rust 2015
+  --> /tmp/hono-probe-output/utils/buffer.rs:64:1
+   |
+64 | async fn timingSafeEqualString(a: String, b: String, hashFunction: Option<StringHashFunction>) -> Promise<bool> {
+   | ^^^^^ to use `async fn`, switch to Rust 2018 or later
+   |
+   = help: pass `--edition 2024` to `rustc`
+   = note: for more on editions, read https://doc.rust-lang.org/edition-guide
+
+error[E0670]: `async fn` is not permitted in Rust 2015
+  --> /tmp/hono-probe-output/utils/buffer.rs:80:5
+   |
+80 | pub async fn timingSafeEqual(a: BoolOrStringOrValue, b: BoolOrStringOrValue, hashFunction: Option<Function>) -> Promise<bool> {
+   |     ^^^^^ to use `async fn`, switch to Rust 2018 or later
+   |
+   = help: pass `--edition 2024` to `rustc`
+   = note: for more on editions, read https://doc.rust-lang.org/edition-guide
+
+error[E0670]: `async fn` is not permitted in Rust 2015
+ --> /tmp/hono-probe-output/utils/color.rs:8:5
+  |
+8 | pub async fn getColorEnabledAsync() -> bool {
+  |     ^^^^^ to use `async fn`, switch to Rust 2018 or later
+  |
+  = help: pass `--edition 2024` to `rustc`
+  = note: for more on editions, read https://doc.rust-lang.org/edition-guide
+
+error: expected identifier, found keyword `fn`
+ --> /tmp/hono-probe-output/utils/concurrent.rs:4:19
+  |
+4 |     fn run(&self, fn: Box<dyn Fn() -> T>) -> Promise<T>;
+  |                   ^^ expected identifier, found keyword
+  |
+help: escape `fn` to use it as an identifier
+  |
+4 |     fn run(&self, r#fn: Box<dyn Fn() -> T>) -> Promise<T>;
+  |                   ++
+
+error: unknown start of token: \
+   --> /tmp/hono-probe-output/utils/cookie.rs:206:59
+    |
+206 |             return Err(format!("{} must not contain ";", "\\r", or "\\n"", key).to_string());
+    |                                                           ^^
+    |
+    = note: character appears once more
+
+error: unknown start of token: \
+   --> /tmp/hono-probe-output/utils/cookie.rs:206:69
+    |
+206 |             return Err(format!("{} must not contain ";", "\\r", or "\\n"", key).to_string());
+    |                                                                     ^^
+    |
+    = note: character appears once more
+
+error[E0670]: `async fn` is not permitted in Rust 2015
+  --> /tmp/hono-probe-output/utils/cookie.rs:75:1
+   |
+75 | async fn getCryptoKey(secret: BufferSourceOrString) -> Promise<CryptoKey> {
+   | ^^^^^ to use `async fn`, switch to Rust 2018 or later
+   |
+   = help: pass `--edition 2024` to `rustc`
+   = note: for more on editions, read https://doc.rust-lang.org/edition-guide
+
+error[E0670]: `async fn` is not permitted in Rust 2015
+  --> /tmp/hono-probe-output/utils/cookie.rs:80:1
+   |
+80 | async fn makeSignature(value: String, secret: BufferSourceOrString) -> Promise<String> {
+   | ^^^^^ to use `async fn`, switch to Rust 2018 or later
+   |
+   = help: pass `--edition 2024` to `rustc`
+   = note: for more on editions, read https://doc.rust-lang.org/edition-guide
+
+error[E0670]: `async fn` is not permitted in Rust 2015
+  --> /tmp/hono-probe-output/utils/cookie.rs:86:1
+   |
+86 | async fn verifySignature(base64Signature: String, value: String, secret: CryptoKey) -> Promise<bool> {
+   | ^^^^^ to use `async fn`, switch to Rust 2018 or later
+   |
+   = help: pass `--edition 2024` to `rustc`
+   = note: for more on editions, read https://doc.rust-lang.org/edition-guide
+
+error[E0670]: `async fn` is not permitted in Rust 2015
+   --> /tmp/hono-probe-output/utils/cookie.rs:165:5
+    |
+165 | pub async fn parseSigned(cookie: String, secret: BufferSourceOrString, name: Option<String>) -> Promise<SignedCookie> {
+    |     ^^^^^ to use `async fn`, switch to Rust 2018 or later
+    |
+    = help: pass `--edition 2024` to `rustc`
+    = note: for more on editions, read https://doc.rust-lang.org/edition-guide
+
+error[E0670]: `async fn` is not permitted in Rust 2015
+   --> /tmp/hono-probe-output/utils/cookie.rs:253:5
+    |
+253 | pub async fn serializeSigned(name: String, value: String, secret: BufferSourceOrString, opt: Option<CookieOptions>) -> Promise<Stri...
+    |     ^^^^^ to use `async fn`, switch to Rust 2018 or later
+    |
+    = help: pass `--edition 2024` to `rustc`
+    = note: for more on editions, read https://doc.rust-lang.org/edition-guide
+
+error[E0670]: `async fn` is not permitted in Rust 2015
+  --> /tmp/hono-probe-output/utils/crypto.rs:27:5
+   |
+27 | pub async fn sha256(data: Data) -> Promise<Option<String>> {
+   |     ^^^^^ to use `async fn`, switch to Rust 2018 or later
+   |
+   = help: pass `--edition 2024` to `rustc`
+   = note: for more on editions, read https://doc.rust-lang.org/edition-guide
+
+error[E0670]: `async fn` is not permitted in Rust 2015
+  --> /tmp/hono-probe-output/utils/crypto.rs:33:5
+   |
+33 | pub async fn sha1(data: Data) -> Promise<Option<String>> {
+   |     ^^^^^ to use `async fn`, switch to Rust 2018 or later
+   |
+   = help: pass `--edition 2024` to `rustc`
+   = note: for more on editions, read https://doc.rust-lang.org/edition-guide
+
+error[E0670]: `async fn` is not permitted in Rust 2015
+  --> /tmp/hono-probe-output/utils/crypto.rs:39:5
+   |
+39 | pub async fn md5(data: Data) -> Promise<Option<String>> {
+   |     ^^^^^ to use `async fn`, switch to Rust 2018 or later
+   |
+   = help: pass `--edition 2024` to `rustc`
+   = note: for more on editions, read https://doc.rust-lang.org/edition-guide
+
+error[E0670]: `async fn` is not permitted in Rust 2015
+  --> /tmp/hono-probe-output/utils/crypto.rs:45:5
+   |
+45 | pub async fn createHash(data: Data, algorithm: Algorithm) -> Promise<Option<String>> {
+   |     ^^^^^ to use `async fn`, switch to Rust 2018 or later
+   |
+   = help: pass `--edition 2024` to `rustc`
+   = note: for more on editions, read https://doc.rust-lang.org/edition-guide
+
+error[E0670]: `async fn` is not permitted in Rust 2015
+  --> /tmp/hono-probe-output/utils/html.rs:44:5
+   |
+44 | pub async fn stringBufferToString(buffer: StringBuffer, callbacks: Option<Vec<HtmlEscapedCallback>>) -> Promise<HtmlEscapedString> {
+   |     ^^^^^ to use `async fn`, switch to Rust 2018 or later
+   |
+   = help: pass `--edition 2024` to `rustc`
+   = note: for more on editions, read https://doc.rust-lang.org/edition-guide
+
+error[E0670]: `async fn` is not permitted in Rust 2015
+   --> /tmp/hono-probe-output/utils/html.rs:120:5
+    |
+120 | pub async fn resolveCallback(str: HtmlEscapedStringOrString, phase: f64, preserveCallbacks: bool, context: serde_json::Value, buffe...
+    |     ^^^^^ to use `async fn`, switch to Rust 2018 or later
+    |
+    = help: pass `--edition 2024` to `rustc`
+    = note: for more on editions, read https://doc.rust-lang.org/edition-guide
+
+error[E0670]: `async fn` is not permitted in Rust 2015
+  --> /tmp/hono-probe-output/utils/jwt/jws.rs:56:5
+   |
+56 | pub async fn signing(privateKey: SignatureKey, alg: SignatureAlgorithm, data: BufferSource) -> Box<dyn ArrayBuffer> {
+   |     ^^^^^ to use `async fn`, switch to Rust 2018 or later
+   |
+   = help: pass `--edition 2024` to `rustc`
+   = note: for more on editions, read https://doc.rust-lang.org/edition-guide
+
+error[E0670]: `async fn` is not permitted in Rust 2015
+  --> /tmp/hono-probe-output/utils/jwt/jws.rs:62:5
+   |
+62 | pub async fn verifying(publicKey: SignatureKey, alg: SignatureAlgorithm, signature: BufferSource, data: BufferSource) -> bool {
+   |     ^^^^^ to use `async fn`, switch to Rust 2018 or later
+   |
+   = help: pass `--edition 2024` to `rustc`
+   = note: for more on editions, read https://doc.rust-lang.org/edition-guide
+
+error[E0670]: `async fn` is not permitted in Rust 2015
+  --> /tmp/hono-probe-output/utils/jwt/jws.rs:72:1
+   |
+72 | async fn importPrivateKey(key: SignatureKey, alg: KeyImporterAlgorithm) -> Result<CryptoKey, String> {
+   | ^^^^^ to use `async fn`, switch to Rust 2018 or later
+   |
+   = help: pass `--edition 2024` to `rustc`
+   = note: for more on editions, read https://doc.rust-lang.org/edition-guide
+
+error[E0670]: `async fn` is not permitted in Rust 2015
+  --> /tmp/hono-probe-output/utils/jwt/jws.rs:92:1
+   |
+92 | async fn importPublicKey(key: SignatureKey, alg: KeyImporterAlgorithm) -> Result<CryptoKey, String> {
+   | ^^^^^ to use `async fn`, switch to Rust 2018 or later
+   |
+   = help: pass `--edition 2024` to `rustc`
+   = note: for more on editions, read https://doc.rust-lang.org/edition-guide
+
+error[E0670]: `async fn` is not permitted in Rust 2015
+   --> /tmp/hono-probe-output/utils/jwt/jws.rs:117:1
+    |
+117 | async fn exportPublicJwkFrom(privateKey: CryptoKey) -> Result<JsonWebKey, String> {
+    | ^^^^^ to use `async fn`, switch to Rust 2018 or later
+    |
+    = help: pass `--edition 2024` to `rustc`
+    = note: for more on editions, read https://doc.rust-lang.org/edition-guide
+
+error: expected identifier, found keyword `use`
+   --> /tmp/hono-probe-output/utils/jwt/jws.rs:132:250
+    |
+132 | ...None, oth: None, p: None, q: None, qi: None, use: None })
+    |                                                 ^^^ expected identifier, found keyword
+    |
+help: escape `use` to use it as an identifier
+    |
+132 |     Ok(JsonWebKey { alg: Some(alg), crv: Some(crv), e: Some(e), key_ops: Some(vec![CryptoKeyUsage::Verify]), kty: Some(kty), n: Some(n), x: Some(x), y: Some(y), d: None, dp: None, dq: None, ext: None, k: None, oth: None, p: None, q: None, qi: None, r#use: None })
+    |                                                                                                                                                                                                                                                          ++
+
+error[E0670]: `async fn` is not permitted in Rust 2015
+  --> /tmp/hono-probe-output/utils/jwt/jwt.rs:81:5
+   |
+81 | pub async fn verify(token: String, publicKey: SignatureKey, algOrOptions: SignatureAlgorithmOrVerifyOptionsWithAlg) -> Promise<JWTPa...
+   |     ^^^^^ to use `async fn`, switch to Rust 2018 or later
+   |
+   = help: pass `--edition 2024` to `rustc`
+   = note: for more on editions, read https://doc.rust-lang.org/edition-guide
+
+error[E0670]: `async fn` is not permitted in Rust 2015
+   --> /tmp/hono-probe-output/utils/jwt/jwt.rs:145:5
+    |
+145 | pub async fn verifyWithJwks(token: String, options: _TypeLit1, init: Option<RequestInit>) -> Promise<JWTPayload> {
+    |     ^^^^^ to use `async fn`, switch to Rust 2018 or later
+    |
+    = help: pass `--edition 2024` to `rustc`
+    = note: for more on editions, read https://doc.rust-lang.org/edition-guide
+
+error: expected identifier, found `,`
+  --> /tmp/hono-probe-output/utils/url.rs:28:5
+   |
+26 | pub enum Pattern {
+   |          ------- while parsing this enum
+27 |     Other0(serde_json::Value),
+28 |     , // = "*"
+   |     ^ expected identifier
+   |
+   = help: enum variants can be `Variant`, `Variant = <integer>`, `Variant(Type, ..., TypeN)` or `Variant { fields: Types }`
+
+Warning: rustfmt exited with status exit status: 1; output may not be formatted
+Converted 158 file(s)

@@ -30,15 +30,29 @@
 - Hono ベンチ regression 0 維持 (clean 114/158, errors 54, compile dir 99.4%)
 - Phase A の Cluster 1a 11 件解消は維持
 
-### 残存 dangling refs (Phase D スコープ)
+### 残存 dangling refs (Phase D Probe 再計測, 2026-04-10)
 
-Phase A 調査時点の 23 件内訳 (Phase C 内では再計測未実施、T14 で検証予定):
+詳細レポート: [`phase-d-probe.md`](./phase-d-probe.md)
 
-| Cluster | 件数 | 識別子例 | Phase D スコープ |
+| Category | Phase A | Phase D (初回) | D-0.5 修正後 |
 |---|---|---|---|
-| Cluster 1b (DOM) | 16 | HTMLCanvasElement, Window, ImageBitmap, ... | **PRD-β** (`TypeDef::ExternalUnsupported` variant) |
-| Cluster 1c (unknown) | 2 | `__type`, `symbol` | **PRD-γ** (`__type` 是正) |
-| Cluster 2 (user-defined) | 73 (filter なし計測) | HTTPException, Context, ... | **PRD-δ** (Pass 5c 再設計 = I-382 本体) |
+| dangling (shared_types stubs) | 34 | 24 | **23** |
+| excluded_user (defined_elsewhere) | 73 | 72 | **72** |
+| external_dangling (外部型 stubs) | N/A | 79 | **79** |
+
+#### Dangling 23 件の Cluster 別内訳 (D-0.5 修正後)
+
+| Cluster | 件数 | 識別子 | Phase D スコープ |
+|---|---|---|---|
+| ~~1a (type param leak)~~ | ~~1~~ | ~~`P`~~ | ✅ D-0.5 で解消 |
+| 1b (DOM/Web API) | 20 | HTMLCanvasElement 他 19 件 | **PRD-β** |
+| 1c (compiler marker) | 1 | `__type` | **PRD-γ** |
+| 1c (primitive) | 1 | `symbol` | **PRD-β** に統合 |
+| User-defined (Struct) | 1 | `HTTPException` | **PRD-δ** |
+
+#### Excluded User 72 件
+
+Phase A の 73 件から 1 件減少。全件は PRD-δ (I-382 本体) のスコープ。
 
 ### IR 設計欠陥 → 構造的解決
 
@@ -173,35 +187,70 @@ scope push は **correct design** となり interim ではなくなる。
 
 **目的**: Phase C で整備された foundation 上で、元の I-382 目標を達成する。
 
-| タスク | 内容 |
-|---|---|
-| D-1 | PRD-A-2 (= I-386, 73 件 fixture 整理) 実装 |
-| D-2 | PRD-B 起票 — synthetic_items → user 型 import 生成設計 |
-| D-3 | PRD-B 実装 — Pass 5c の import 生成ロジック |
-| D-4 | `generate_stub_structs` 完全削除 + regression test 追加 |
-| D-5 | ドキュメント整理、最終 quality check |
+#### 実行順序 (2026-04-10 更新)
+
+依存関係分析に基づき以下の順序で実行する。
+
+```
+Step 0    Probe 再計測 (Phase C 後の実測値取得)               ✅ 完了
+  ↓
+Step 0.5  `P` 残存調査・解消 (Cluster 1a regression)         ✅ 完了
+  ↓
+Step 1    PRD-β / PRD-γ / PRD-δ 起票 (実測値ベースで spec 確定)  ← 現在地
+  ↓
+Step 2    I-386 + PRD-β + PRD-γ 実装 (互いに独立、並列可能)
+  ├── I-386: resolve_type_ref Step 3 + 73 件 fixture 整理 (Cluster 2)
+  ├── PRD-β: ExternalUnsupported variant (Cluster 1b, DOM 型等)
+  └── PRD-γ: __type marker 是正 (Cluster 1c)
+  ↓       ↑ 全て PRD-δ の前提条件 (dangling refs 0 化に必要)
+Step 3    PRD-δ 実装 (= I-382 本体: generate_stub_structs 削除 + user 型 import 生成)
+  ↓
+Step 4    最終 quality check + ドキュメント整理
+```
+
+#### タスク一覧
+
+| タスク | Step | 内容 | 状態 |
+|---|---|---|---|
+| D-0 | 0 | Probe 再計測: Phase C 後の dangling refs 実測 | ✅ |
+| D-0.5 | 0.5 | `P` 残存調査・解消 (Cluster 1a regression) | ✅ |
+| D-0a | 1 | PRD-β 起票: `TypeDef::ExternalUnsupported` variant (DOM 型等) | ⏳ |
+| D-0b | 1 | PRD-γ 起票: `__type` marker → function type 是正 | ⏳ |
+| D-0c | 1 | PRD-δ 起票: Pass 5c 再設計 = `generate_stub_structs` 削除 + user 型 import 生成 | ⏳ |
+| D-1 | 2 | PRD-A-2 (= I-386) 実装: resolve_type_ref Step 3 + 73 件 fixture 整理 | ⏳ |
+| D-2a | 2 | PRD-β 実装 | ⏳ |
+| D-2b | 2 | PRD-γ 実装 | ⏳ |
+| D-3 | 3 | PRD-δ 実装: `generate_stub_structs` 削除 + user 型 import 生成 | ⏳ |
+| D-4 | 4 | 最終 quality check + ドキュメント整理 | ⏳ |
 
 **最終完了条件**: probe で dangling refs = 0、`generate_stub_structs` grep ヒット = 0、
 Hono ベンチ regression 0。
 
 ---
 
-## 直近アクション (次セッション開始時)
+## 直近アクション
 
-Phase C は完了。次は Phase D 準備として以下を実施:
+**D-0a〜D-0c: PRD 起票** ← 次のアクション (2026-04-10)
 
-### 1. PRD I-387 完了処理
+probe 実測値 (dangling 23 / excluded_user 72) に基づき PRD-β / PRD-γ / PRD-δ の spec を確定する。
 
-1. `backlog/I-387-rust-type-structural-refinement.md` を archive
-2. `plan.md` の「現在地」を Phase D に更新
+### D-0.5 完了サマリ (2026-04-10)
 
-### 2. PRD-β / PRD-γ / PRD-δ 起票 (Phase D)
+- **Root cause**: `registry/collection.rs::collect_type_alias_fields` に `push_type_param_scope`
+  が欠落。generic type alias (`ValidationTargets<T, P>`) のフィールド型解決時に `P` が
+  `TypeVar` ではなく `Named` として registry に格納 → `unique_field_types()` 経由で
+  synthetic union に伝播 → dangling ref
+- **修正**: `collect_type_alias_fields` に scope push/restore を追加
+- **検証**: dangling 24→23 (`P` 解消)、cargo test 2259 pass、clippy 0w、Hono regression 0
+- **副次発見**: TypeCollector (Path 1) と TypeConverter (Path 2) の wrapper 層に乖離 3 件。
+  Phase D の直接スコープ外かつ Phase D 完了後に影響面が縮小するため、I-388 として
+  Phase D 後に対応。詳細は `TODO` の I-388 項目参照
 
-1. **PRD-β**: `TypeDef::ExternalUnsupported` variant 導入 (DOM 型 16 件 + symbol 1 件解消)
-2. **PRD-γ**: `__type` marker → function type 是正 (1 件解消)
-3. **PRD-δ**: Pass 5c 再設計 = `generate_stub_structs` 削除 + user 型 import 生成 (I-382 本体)
+### Phase D 後の follow-up
 
-### 3. Phase D 実装着手 (PRD-β / PRD-γ / PRD-δ の優先順)
+| ID | 内容 | 優先度 |
+|---|---|---|
+| I-388 | TypeCollector / TypeConverter 二重変換経路の乖離解消 | L2 |
 
 ---
 
