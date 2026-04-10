@@ -9,10 +9,10 @@
 
 ---
 
-## 現在のフェーズ: 次タスク選定待ち
+## 現在のフェーズ: Batch 25 (I-392) PRD 作成完了、実装待ち
 
-backlog/ は空。
-次の作業は TODO の優先度に基づき PRD 化して着手する。
+Multi-overload callable interface を struct + impl (per-overload method) 表現に変換。
+TypeResolver の overload resolution、Transformer の method call 生成を含む 3 層修正。
 
 ---
 
