@@ -96,21 +96,10 @@ impl<'a> TypeResolver<'a> {
 
         self.enter_scope();
 
-        // Register type parameter constraints after entering scope.
-        // Merge with parent constraints so nested generics can access outer type params.
         // I-383 T2.A-ii: enter_type_param_scope also pushes the param names into
         // `synthetic.type_param_scope` so that synthetic types registered while walking
         // the body inherit the correct scope (avoiding dangling external ref leaks).
-        let prev_state = if let Some(type_params) = &fn_decl.function.type_params {
-            let (inner_constraints, prev_scope) =
-                enter_type_param_scope(type_params, self.synthetic, self.registry);
-            let mut merged = self.type_param_constraints.clone();
-            merged.extend(inner_constraints);
-            let prev_constraints = std::mem::replace(&mut self.type_param_constraints, merged);
-            Some((prev_constraints, prev_scope))
-        } else {
-            None
-        };
+        let prev_state = self.push_type_param_constraints(fn_decl.function.type_params.as_deref());
 
         // Record return type for expected_types on return statements
         // Promise<T> → T, void → None (Rust omits `-> ()`)
@@ -128,10 +117,7 @@ impl<'a> TypeResolver<'a> {
         }
 
         self.current_fn_return_type = prev_return_type;
-        if let Some((prev_constraints, prev_scope)) = prev_state {
-            self.type_param_constraints = prev_constraints;
-            self.synthetic.restore_type_param_scope(prev_scope);
-        }
+        self.restore_type_param_constraints(prev_state);
         self.leave_scope();
     }
 
@@ -457,10 +443,7 @@ impl<'a> TypeResolver<'a> {
                 _ => {}
             }
         }
-        if let Some((prev_constraints, prev_scope)) = prev_state {
-            self.type_param_constraints = prev_constraints;
-            self.synthetic.restore_type_param_scope(prev_scope);
-        }
+        self.restore_type_param_constraints(prev_state);
         self.leave_scope();
     }
 
@@ -493,35 +476,17 @@ impl<'a> TypeResolver<'a> {
             // type params (e.g., T in `class Foo<T extends Base>`) inside method bodies.
             // I-383 T2.A-ii: also pushes method-level names into `synthetic.type_param_scope`
             // (append-merge with class scope active from `visit_class_body`).
-            let prev_method_state = if let Some(type_params) = &function.type_params {
-                let (method_constraints, prev_scope) =
-                    enter_type_param_scope(type_params, self.synthetic, self.registry);
-                let mut merged = self.type_param_constraints.clone();
-                merged.extend(method_constraints);
-                let prev_constraints = std::mem::replace(&mut self.type_param_constraints, merged);
-                Some((prev_constraints, prev_scope))
-            } else {
-                None
-            };
+            let prev_method_state =
+                self.push_type_param_constraints(function.type_params.as_deref());
             for param in &function.params {
                 self.visit_param_pat(&param.pat);
             }
-            let prev_return_type = self.current_fn_return_type.take();
-            if let Some(return_ann) = &function.return_type {
-                if let Ok(ty) = convert_ts_type(&return_ann.type_ann, self.synthetic, self.registry)
-                {
-                    self.current_fn_return_type = unwrap_promise_and_unit(ty)
-                        .map(|ty| wrap_trait_for_position(ty, TypePosition::Value, self.registry));
-                }
-            }
+            let prev_return_type = self.setup_fn_return_type(function.return_type.as_deref());
             for stmt in &body.stmts {
                 self.visit_stmt(stmt);
             }
             self.current_fn_return_type = prev_return_type;
-            if let Some((prev_constraints, prev_scope)) = prev_method_state {
-                self.type_param_constraints = prev_constraints;
-                self.synthetic.restore_type_param_scope(prev_scope);
-            }
+            self.restore_type_param_constraints(prev_method_state);
             self.leave_scope();
         }
     }

@@ -8,6 +8,7 @@ mod call_resolution;
 mod du_analysis;
 mod expected_types;
 mod expressions;
+mod fn_exprs;
 mod helpers;
 mod narrowing;
 mod visitors;
