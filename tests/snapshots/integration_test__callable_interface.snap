@@ -1,5 +1,6 @@
 ---
 source: tests/integration_test.rs
+assertion_line: 124
 expression: output
 ---
 trait GetValue {
@@ -25,5 +26,11 @@ struct GetValueGetValueImpl;
 impl GetValueGetValueImpl {
     fn inner(&self, key: String) -> String {
         key
+    }
+}
+
+impl GetValue for GetValueGetValueImpl {
+    fn call_0(&self, key: String) -> String {
+        self.inner(key)
     }
 }

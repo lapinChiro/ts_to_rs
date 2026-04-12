@@ -66,7 +66,7 @@ impl ReturnWrapContext {
     /// Finds the variant name for the given return type.
     ///
     /// Tries exact match first, then Option<T> narrowing (T matches Option<T> variant).
-    fn variant_for(&self, ty: &RustType) -> Option<&str> {
+    pub(crate) fn variant_for(&self, ty: &RustType) -> Option<&str> {
         // Exact match
         if let Some((_, name)) = self.variant_by_type.iter().find(|(t, _)| t == ty) {
             return Some(name);
@@ -128,7 +128,10 @@ pub(crate) fn wrap_leaf(
     if is_none_expr(&ir_expr) {
         return match ctx.unique_option_variant() {
             Some(variant) => Ok(Expr::FnCall {
-                target: crate::ir::CallTarget::Free(format!("{}::{}", ctx.enum_name, variant)),
+                target: crate::ir::CallTarget::UserEnumVariantCtor {
+                    enum_ty: crate::ir::UserTypeRef::new(&ctx.enum_name),
+                    variant: variant.to_string(),
+                },
                 args: vec![Expr::BuiltinVariantValue(crate::ir::BuiltinVariant::None)],
             }),
             None => Err(anyhow!(
@@ -176,7 +179,10 @@ pub(crate) fn wrap_leaf(
 /// Wraps an expression in a union variant constructor.
 fn wrap_in_variant(expr: &Expr, enum_name: &str, variant: &str) -> Expr {
     Expr::FnCall {
-        target: crate::ir::CallTarget::Free(format!("{enum_name}::{variant}")),
+        target: crate::ir::CallTarget::UserEnumVariantCtor {
+            enum_ty: crate::ir::UserTypeRef::new(enum_name),
+            variant: variant.to_string(),
+        },
         args: vec![expr.clone()],
     }
 }
@@ -200,9 +206,9 @@ fn infer_variant_from_expr<'a>(expr: &Expr, ctx: &'a ReturnWrapContext) -> Optio
         Expr::BoolLit(_) => ctx.variant_for(&RustType::Bool),
         // Some(...) → find Option variant
         Expr::FnCall {
-            target: crate::ir::CallTarget::Free(name),
+            target: crate::ir::CallTarget::BuiltinVariant(crate::ir::BuiltinVariant::Some),
             ..
-        } if name == "Some" => ctx.unique_option_variant(),
+        } => ctx.unique_option_variant(),
         _ => None,
     }
 }
@@ -536,6 +542,87 @@ mod tests {
         assert_eq!(ctx.unique_option_variant(), None);
     }
 
+    // --- infer_variant_from_expr (branch coverage) ---
+
+    #[test]
+    fn infer_variant_string_literal() {
+        let ctx = ReturnWrapContext {
+            enum_name: "Test".to_string(),
+            variant_by_type: vec![
+                (RustType::String, "String".to_string()),
+                (RustType::F64, "F64".to_string()),
+            ],
+        };
+        assert_eq!(
+            infer_variant_from_expr(&Expr::StringLit("hello".to_string()), &ctx),
+            Some("String")
+        );
+    }
+
+    #[test]
+    fn infer_variant_number_literal() {
+        let ctx = ReturnWrapContext {
+            enum_name: "Test".to_string(),
+            variant_by_type: vec![
+                (RustType::String, "String".to_string()),
+                (RustType::F64, "F64".to_string()),
+            ],
+        };
+        assert_eq!(
+            infer_variant_from_expr(&Expr::NumberLit(42.0), &ctx),
+            Some("F64")
+        );
+    }
+
+    #[test]
+    fn infer_variant_bool_literal() {
+        let ctx = ReturnWrapContext {
+            enum_name: "Test".to_string(),
+            variant_by_type: vec![
+                (RustType::Bool, "Bool".to_string()),
+                (RustType::String, "String".to_string()),
+            ],
+        };
+        assert_eq!(
+            infer_variant_from_expr(&Expr::BoolLit(true), &ctx),
+            Some("Bool")
+        );
+    }
+
+    #[test]
+    fn infer_variant_some_call() {
+        let ctx = ReturnWrapContext {
+            enum_name: "Test".to_string(),
+            variant_by_type: vec![
+                (RustType::String, "String".to_string()),
+                (
+                    RustType::Option(Box::new(RustType::F64)),
+                    "OptionF64".to_string(),
+                ),
+            ],
+        };
+        let some_expr = Expr::FnCall {
+            target: crate::ir::CallTarget::BuiltinVariant(crate::ir::BuiltinVariant::Some),
+            args: vec![Expr::NumberLit(1.0)],
+        };
+        assert_eq!(infer_variant_from_expr(&some_expr, &ctx), Some("OptionF64"));
+    }
+
+    #[test]
+    fn infer_variant_unknown_returns_none() {
+        let ctx = ReturnWrapContext {
+            enum_name: "Test".to_string(),
+            variant_by_type: vec![
+                (RustType::String, "String".to_string()),
+                (RustType::F64, "F64".to_string()),
+            ],
+        };
+        assert_eq!(
+            infer_variant_from_expr(&Expr::Ident("x".to_string()), &ctx),
+            None
+        );
+    }
+
     // --- wrap_leaf ---
 
     #[test]
@@ -552,7 +639,7 @@ mod tests {
         match result {
             Expr::FnCall { target, args } => {
                 assert!(
-                    matches!(&target, crate::ir::CallTarget::Free(name) if name == "F64OrString::F64")
+                    matches!(&target, crate::ir::CallTarget::UserEnumVariantCtor { variant, .. } if variant == "F64")
                 );
                 assert_eq!(args.len(), 1);
             }
@@ -580,7 +667,7 @@ mod tests {
         match result {
             Expr::FnCall { target, args } => {
                 assert!(
-                    matches!(&target, crate::ir::CallTarget::Free(name) if name == "F64OrString::String")
+                    matches!(&target, crate::ir::CallTarget::UserEnumVariantCtor { variant, .. } if variant == "String")
                 );
                 assert_eq!(args.len(), 1);
                 assert_eq!(args[0], Expr::Ident("c".to_string()));
@@ -617,7 +704,7 @@ mod tests {
         match result {
             Expr::FnCall { target, .. } => {
                 assert!(
-                    matches!(&target, crate::ir::CallTarget::Free(name) if name == "CookieOrOptionString::OptionString")
+                    matches!(&target, crate::ir::CallTarget::UserEnumVariantCtor { variant, .. } if variant == "OptionString")
                 );
             }
             _ => panic!("expected FnCall, got {result:?}"),

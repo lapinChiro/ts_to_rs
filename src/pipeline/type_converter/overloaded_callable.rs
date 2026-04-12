@@ -121,10 +121,17 @@ fn compute_union_return(
     overloads: &[MethodSignature],
     synthetic: &mut SyntheticTypeRegistry,
 ) -> (Option<RustType>, bool) {
-    // Collect return types, treating None (void) as RustType::Unit for uniformity
+    // Collect return types, treating None (void) as RustType::Unit for uniformity.
+    // Promise<T> is unwrapped to T because trait methods already unwrap Promise
+    // (async fn -> T), and the union must match the unwrapped return types.
     let return_types: Vec<RustType> = overloads
         .iter()
-        .map(|s| s.return_type.clone().unwrap_or(RustType::Unit))
+        .map(|s| {
+            s.return_type
+                .clone()
+                .unwrap_or(RustType::Unit)
+                .unwrap_promise()
+        })
         .collect();
 
     // Dedup: if all return types are identical, no divergence

@@ -328,6 +328,11 @@ impl<'a> Transformer<'a> {
             });
         }
 
+        // Inner fn return type: compute_union_return already unwraps Promise<T> → T
+        // (because trait methods unwrap Promise to async fn → T). No additional
+        // unwrap needed here.
+        let inner_return_type = widest.return_type.clone();
+
         let inner_method = Method {
             vis: Visibility::Private,
             name: "inner".to_string(),
@@ -335,7 +340,7 @@ impl<'a> Transformer<'a> {
             has_self: true,
             has_mut_self: false,
             params: inner_params,
-            return_type: widest.return_type.clone(),
+            return_type: inner_return_type,
             body: Some(fn_body),
         };
 
@@ -348,10 +353,19 @@ impl<'a> Transformer<'a> {
             methods: vec![inner_method],
         };
 
-        // Phase 7: delegate impl (TODO)
+        // --- Delegate impl: trait impl with call_N methods (P7.1) ---
+        let delegate_impl = build_delegate_impl(
+            &marker_name,
+            trait_name,
+            &call_sigs,
+            &widest,
+            wrap_ctx.as_ref(),
+            arrow.is_async,
+        )?;
+
         // Phase 8: const instance (TODO)
 
-        Ok(vec![marker_struct, marker_impl])
+        Ok(vec![marker_struct, marker_impl, delegate_impl])
     }
 
     /// Generates the marker struct name for a callable interface const.
@@ -437,6 +451,226 @@ impl<'a> Transformer<'a> {
             _ => None,
         }
     }
+}
+
+/// Wraps a delegate method argument to match the widest param type (P7.2).
+///
+/// - Types match → bare `Ident(name)`
+/// - Widest is `Option<T>`, overload is `T` → `Some(name)`
+/// - Widest is a synthetic union enum, overload is one variant → `Enum::Variant(name)`
+///
+/// NOTE: `RustType::Named` is treated as a synthetic union enum. This is safe because
+/// `wrap_delegate_arg` is only called from `build_delegate_method` with widest params
+/// from `compute_widest_signature`. Identical types are caught by the equality check
+/// above, so `Named` is reached only when `unify_types` produced a synthetic union.
+/// - Widest is `Option<union>`, overload is variant → `Some(Enum::Variant(name))`
+fn wrap_delegate_arg(param_name: &str, overload_ty: &RustType, widest_ty: &RustType) -> Expr {
+    let arg_expr = Expr::Ident(param_name.to_string());
+
+    if overload_ty == widest_ty {
+        // Types match exactly → bare arg
+        return arg_expr;
+    }
+
+    // Widest is Option<inner>
+    if let RustType::Option(inner) = widest_ty {
+        if inner.as_ref() == overload_ty {
+            // Option<T> vs T → Some(arg)
+            return Expr::FnCall {
+                target: crate::ir::CallTarget::BuiltinVariant(crate::ir::BuiltinVariant::Some),
+                args: vec![arg_expr],
+            };
+        }
+        // Option<union_enum> vs variant_type → Some(Enum::Variant(arg))
+        if let RustType::Named { name, .. } = inner.as_ref() {
+            let variant = crate::pipeline::synthetic_registry::variant_name_for_type(overload_ty);
+            return Expr::FnCall {
+                target: crate::ir::CallTarget::BuiltinVariant(crate::ir::BuiltinVariant::Some),
+                args: vec![Expr::FnCall {
+                    target: crate::ir::CallTarget::UserEnumVariantCtor {
+                        enum_ty: crate::ir::UserTypeRef::new(name),
+                        variant,
+                    },
+                    args: vec![arg_expr],
+                }],
+            };
+        }
+    }
+
+    // Widest is a union enum, overload is one variant → Enum::Variant(arg)
+    if let RustType::Named { name, .. } = widest_ty {
+        let variant = crate::pipeline::synthetic_registry::variant_name_for_type(overload_ty);
+        return Expr::FnCall {
+            target: crate::ir::CallTarget::UserEnumVariantCtor {
+                enum_ty: crate::ir::UserTypeRef::new(name),
+                variant,
+            },
+            args: vec![arg_expr],
+        };
+    }
+
+    // Fallback: bare arg (types should match but don't — best effort)
+    arg_expr
+}
+
+/// Builds the delegate `impl TraitName for MarkerStruct` block.
+///
+/// Each overload's `call_N` method calls `self.inner(...)` with arg wrapping,
+/// and for divergent returns, matches the result to extract the correct variant.
+fn build_delegate_impl(
+    marker_name: &str,
+    trait_name: &str,
+    call_sigs: &[crate::registry::MethodSignature],
+    widest: &crate::pipeline::type_converter::overloaded_callable::WidestSignature,
+    wrap_ctx: Option<&crate::transformer::return_wrap::ReturnWrapContext>,
+    is_async: bool,
+) -> anyhow::Result<Item> {
+    let methods: Vec<Method> = call_sigs
+        .iter()
+        .enumerate()
+        .map(|(i, sig)| build_delegate_method(i, sig, widest, wrap_ctx, is_async))
+        .collect::<anyhow::Result<Vec<_>>>()?;
+
+    Ok(Item::Impl {
+        struct_name: marker_name.to_string(),
+        type_params: vec![],
+        for_trait: Some(crate::ir::TraitRef {
+            name: trait_name.to_string(),
+            type_args: vec![],
+        }),
+        consts: vec![],
+        methods,
+    })
+}
+
+/// Builds a single delegate method `call_N` for one overload.
+///
+/// - Params: the overload's own params (not widest)
+/// - Body: `self.inner(args...)` with arg wrapping for widest compatibility
+/// - Return: for divergent returns, `match` unwrap; for non-divergent, direct return
+fn build_delegate_method(
+    index: usize,
+    sig: &crate::registry::MethodSignature,
+    widest: &crate::pipeline::type_converter::overloaded_callable::WidestSignature,
+    wrap_ctx: Option<&crate::transformer::return_wrap::ReturnWrapContext>,
+    is_async: bool,
+) -> anyhow::Result<Method> {
+    let method_name = format!("call_{index}");
+
+    // Build params matching the overload signature
+    let params: Vec<crate::ir::Param> = sig
+        .params
+        .iter()
+        .map(|p| crate::ir::Param {
+            name: p.name.clone(),
+            ty: Some(p.ty.clone()),
+        })
+        .collect();
+
+    // Build inner call args (P7.2):
+    // For each widest param position:
+    //   - Overload has this param, types match → bare arg
+    //   - Overload has this param, widest is Option<T>, overload is T → Some(arg)
+    //   - Overload has this param, widest is union enum → EnumName::Variant(arg)
+    //   - Overload has this param, widest is Option<union>, overload is variant → Some(Variant(arg))
+    //   - Beyond overload arity → None
+    let inner_args: Vec<Expr> = widest
+        .params
+        .iter()
+        .enumerate()
+        .map(|(j, wp)| {
+            if let Some(op) = sig.params.get(j) {
+                wrap_delegate_arg(&op.name, &op.ty, &wp.ty)
+            } else {
+                // Beyond overload arity → None
+                Expr::BuiltinVariantValue(crate::ir::BuiltinVariant::None)
+            }
+        })
+        .collect();
+
+    // Build inner call: self.inner(args...) [.await if async] (P7.3)
+    let raw_inner_call = Expr::MethodCall {
+        object: Box::new(Expr::Ident("self".to_string())),
+        method: "inner".to_string(),
+        args: inner_args,
+    };
+    let inner_call = if is_async {
+        Expr::Await(Box::new(raw_inner_call))
+    } else {
+        raw_inner_call
+    };
+
+    // Build body: match unwrap for divergent, direct return for non-divergent
+    let return_type = sig
+        .return_type
+        .clone()
+        .map(|ty| ty.unwrap_promise())
+        .and_then(|ty| {
+            if matches!(ty, RustType::Unit) {
+                None
+            } else {
+                Some(ty)
+            }
+        });
+
+    let body_expr = if let (Some(ctx), Some(ret_ty)) = (wrap_ctx, &return_type) {
+        // Divergent: match self.inner(...) { Variant(v) => v, _ => unreachable!() }
+        let variant_name = ctx
+            .variant_for(ret_ty)
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "no variant found for return type {ret_ty:?} in union {}",
+                    ctx.enum_name,
+                )
+            })?
+            .to_string();
+        Expr::Match {
+            expr: Box::new(inner_call),
+            arms: vec![
+                crate::ir::MatchArm {
+                    patterns: vec![crate::ir::Pattern::TupleStruct {
+                        ctor: crate::ir::PatternCtor::UserEnumVariant {
+                            enum_ty: crate::ir::UserTypeRef::new(&ctx.enum_name),
+                            variant: variant_name,
+                        },
+                        fields: vec![crate::ir::Pattern::Binding {
+                            name: "v".to_string(),
+                            is_mut: false,
+                            subpat: None,
+                        }],
+                    }],
+                    guard: None,
+                    body: vec![Stmt::TailExpr(Expr::Ident("v".to_string()))],
+                },
+                crate::ir::MatchArm {
+                    patterns: vec![crate::ir::Pattern::Wildcard],
+                    guard: None,
+                    body: vec![Stmt::TailExpr(Expr::MacroCall {
+                        name: "unreachable".to_string(),
+                        args: vec![],
+                        use_debug: vec![],
+                    })],
+                },
+            ],
+        }
+    } else {
+        // Non-divergent: self.inner(args...) directly
+        inner_call
+    };
+
+    // Detect async from overload signature
+    let sig_is_async = sig.return_type.as_ref().is_some_and(|ty| ty.is_promise());
+
+    Ok(Method {
+        vis: Visibility::Public,
+        name: method_name,
+        is_async: is_async && sig_is_async,
+        has_self: true,
+        has_mut_self: false,
+        params,
+        return_type,
+        body: Some(vec![Stmt::TailExpr(body_expr)]),
+    })
 }
 
 /// Wraps return expressions in the inner fn body with union variant constructors.
@@ -555,6 +789,88 @@ fn wrap_expr_tail(
                 Some(leaf_type.span),
                 ctx,
             )
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- wrap_delegate_arg (P7.2) ---
+
+    #[test]
+    fn wrap_delegate_arg_bare_when_types_match() {
+        let result = wrap_delegate_arg("c", &RustType::String, &RustType::String);
+        assert_eq!(result, Expr::Ident("c".to_string()));
+    }
+
+    #[test]
+    fn wrap_delegate_arg_some_when_widest_is_option() {
+        let result = wrap_delegate_arg(
+            "key",
+            &RustType::String,
+            &RustType::Option(Box::new(RustType::String)),
+        );
+        match &result {
+            Expr::FnCall { target, args } => {
+                assert!(matches!(
+                    target,
+                    crate::ir::CallTarget::BuiltinVariant(crate::ir::BuiltinVariant::Some)
+                ));
+                assert_eq!(args.len(), 1);
+                assert_eq!(args[0], Expr::Ident("key".to_string()));
+            }
+            _ => panic!("expected Some(key), got {result:?}"),
+        }
+    }
+
+    #[test]
+    fn wrap_delegate_arg_variant_when_widest_is_union() {
+        let widest_ty = RustType::Named {
+            name: "F64OrString".to_string(),
+            type_args: vec![],
+        };
+        let result = wrap_delegate_arg("c", &RustType::String, &widest_ty);
+        match &result {
+            Expr::FnCall { target, args } => {
+                assert!(
+                    matches!(target, crate::ir::CallTarget::UserEnumVariantCtor { variant, .. } if variant == "String")
+                );
+                assert_eq!(args.len(), 1);
+                assert_eq!(args[0], Expr::Ident("c".to_string()));
+            }
+            _ => panic!("expected F64OrString::String(c), got {result:?}"),
+        }
+    }
+
+    #[test]
+    fn wrap_delegate_arg_some_variant_when_widest_is_option_union() {
+        let widest_ty = RustType::Option(Box::new(RustType::Named {
+            name: "F64OrString".to_string(),
+            type_args: vec![],
+        }));
+        let result = wrap_delegate_arg("c", &RustType::String, &widest_ty);
+        // Should be Some(F64OrString::String(c))
+        match &result {
+            Expr::FnCall { target, args } => {
+                assert!(matches!(
+                    target,
+                    crate::ir::CallTarget::BuiltinVariant(crate::ir::BuiltinVariant::Some)
+                ));
+                assert_eq!(args.len(), 1);
+                match &args[0] {
+                    Expr::FnCall { target, args } => {
+                        assert!(
+                            matches!(target, crate::ir::CallTarget::UserEnumVariantCtor { variant, .. } if variant == "String")
+                        );
+                        assert_eq!(args.len(), 1);
+                        assert_eq!(args[0], Expr::Ident("c".to_string()));
+                    }
+                    _ => panic!("expected F64OrString::String(c), got {:?}", args[0]),
+                }
+            }
+            _ => panic!("expected Some(F64OrString::String(c)), got {result:?}"),
         }
     }
 }

@@ -1,5 +1,6 @@
 ---
 source: tests/integration_test.rs
+assertion_line: 92
 expression: output
 ---
 trait StringMapper {
@@ -12,5 +13,11 @@ struct StringMapperMapStringImpl;
 impl StringMapperMapStringImpl {
     fn inner(&self, data: String) -> String {
         data
+    }
+}
+
+impl StringMapper for StringMapperMapStringImpl {
+    fn call_0(&self, input: String) -> String {
+        self.inner(input)
     }
 }

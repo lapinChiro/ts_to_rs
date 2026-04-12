@@ -1316,28 +1316,74 @@ fn call_1(&self, c: String, key: String) -> f64 {
   に fall through する。根本修正は TypeResolver の for-of 要素型推論 (別イシュー)。
   現時点では fallback で正しい variant が選ばれるケースが大半
 
-#### P7.1: per-overload delegate method + inner 呼び出し
+#### P7.1: per-overload delegate method + inner 呼び出し — 完了 (2026-04-13)
 
 - **Entry**: P7.0 完了 (inner fn body が enum variant を返す状態)
-- **Work**: `build_trait_delegate_methods` — 各 overload の `call_N` を生成、
-  `self.inner(wrapped_args)` 呼び出しと `match` による return variant unwrap
-- **Exit**: fixture `callable-interface-divergent.input.ts` で rustc compile pass
+- **Work**:
+  - `build_delegate_impl` + `build_delegate_method` を arrow_fns.rs に新規作成 (Result 型)
+  - `Item::Impl { for_trait: Some(TraitRef) }` で trait impl を生成
+  - Non-divergent (同一 return type): `self.inner(args...)` 直接返却
+  - Divergent (異なる return type): `match self.inner(args...) { Variant(v) => v, _ => unreachable!() }`
+  - Overload arity 超のパラメータは `None` を渡す
+  - Optional 化されたパラメータは `Some(arg)` で wrap
+  - `ReturnWrapContext::variant_for` を `pub(crate)` に変更
+  - `variant_for` 失敗時は explicit error (`unwrap_or("Unknown")` を排除)
+- **Exit**: 全 4 callable-interface fixture で delegate impl が正しく生成
 - **Rollback**: なし
 
-#### P7.2: inner arg wrapping (Some / variant ctor)
+#### P7.2: inner arg wrapping (Some / variant ctor) — 完了 (2026-04-13)
 
 - **Entry**: P7.1 完了
-- **Work**: widest.params[i] と overload.params[i] の差分に応じて
-  `Some(arg)` / `EnumName::Variant(arg)` / bare `arg` を選択
-- **Exit**: unit test 3 件
+- **Work**:
+  - `wrap_delegate_arg` 関数を新規作成: overload 型と widest 型の差分に応じて
+    bare arg / `Some(arg)` / `EnumName::Variant(arg)` / `Some(Variant(arg))` を選択
+  - `build_delegate_method` の arg 構築を `wrap_delegate_arg` に委譲
+- **Exit**: unit test 4 件 (bare / Some / variant / Some+Variant)
 - **Rollback**: なし
 
-#### P7.3: async 伝搬 for delegate method
+#### P7.3: async 伝搬 for delegate method — 完了 (2026-04-13)
 
 - **Entry**: P4.2 (trait async) + P7.2 完了
-- **Work**: async overload の delegate を async、return type を unwrap
-- **Exit**: `callable-interface-async.input.ts` で rustc compile pass
+- **Work**:
+  - async inner fn の delegate 呼び出しに `.await` を追加 (`Expr::Await`)
+  - `compute_union_return` で Promise unwrap してから union 作成 (async divergent return の
+    enum 名が `PromiseF64OrPromiseString` → `F64OrString` に修正)
+  - inner fn return type の冗長な `if arrow.is_async` 条件を簡潔化
+    (`compute_union_return` が先に unwrap するため不要になった)
+  - `callable-interface-async.input.ts` 新規 fixture (single + multi-overload async)
+- **Exit**: callable-interface-async fixture で async trait + async delegate が正しく生成
 - **Rollback**: なし
+
+##### P7.1-P7.3 レビュー対応 (2026-04-13)
+
+- **Pipeline Integrity 違反修正**: `CallTarget::Free("Some")` → `BuiltinVariant::Some`、
+  `CallTarget::Free("Enum::Variant")` → `UserEnumVariantCtor { enum_ty, variant }`。
+  `wrap_in_variant`, `wrap_leaf` (polymorphic None), `wrap_delegate_arg`, `infer_variant_from_expr`
+  の全箇所を修正。walker が user type ref を正しく追跡し import 生成に必要な型参照が
+  登録されるようになった
+- **`infer_variant_from_expr` パターンマッチ修正**: 構築側を `BuiltinVariant::Some` に
+  変更した際、マッチ側が `Free("Some")` のまま残っていたバグを修正。
+  **全 5 分岐** (StringLit, NumberLit, BoolLit, Some, Unknown) の unit test を追加し、
+  同種のバグが今後検出されるようにした
+- **`compute_union_return` Promise unwrap**: async overload の union enum 名が
+  Promise-wrapped 型名になるバグを修正
+
+##### Phase 7 スコープ外事項
+
+- **`return_wrap_ctx` field / `spawn_nested_scope_with_wrap` method の削除**
+  (`src/transformer/mod.rs:44-49`, `mod.rs:100-116`):
+  前回 (P7.0) のスコープ外と同じ。Phase 9 で再評価
+- **Promise unwrap + Unit 除去パターンの DRY 化**: `.map(|ty| ty.unwrap_promise()).and_then(|ty| if Unit then None else Some)` パターンが 3 箇所に存在
+  (`convert_callable_trait_const` inner return type、`build_delegate_method` delegate return type、
+  `convert_callable_interface_as_trait` trait method return type)。各箇所でコンテキストが
+  微妙に異なり、共有すると結合度が上がるため現時点では許容。Phase 9 以降の refactoring で
+  `RustType::unwrap_promise_to_return_type()` convenience method として統合を検討
+- **生成コードの match arm インデント**: snapshot 上 match arm が column 0 に配置される
+  (generator の formatting 問題)。機能的影響なし、Phase 12 (L2/L3/L4 fix) で対応検討
+- **non-async arrow with `Promise<T>` return type**: TypeScript では `async` キーワードなしで
+  `Promise<T>` を返す関数が書ける。現在の trait 生成は `Promise<T>` → `async fn -> T` と
+  一律変換するため、non-async arrow の場合に trait impl が `async fn` を要求する不整合が
+  生じる。これは callable interface 固有ではなく、trait 生成の一般的な設計課題 (別イシュー)
 
 ### Phase 8: Const instance emission
 
@@ -1360,9 +1406,12 @@ Phase 9 (Generic) 以降で発見される問題が「generic 固有」か「基
 - **Work**:
   1. 既存 `callable-interface.input.ts` を変換し、生成 Rust が rustc compile pass
      であることを確認
-  2. `callable-interface-divergent.input.ts` を変換し、rustc compile pass 確認
+  2. `callable-interface-inner.input.ts` (divergent return) を変換し、
+     rustc compile pass 確認
   3. P4.1 で一時除外した `tests/compile_test.rs` の callable-interface エントリを
-     **復帰** (既存 + P4.1〜P8.1 で追加した新規 fixture 全件)
+     **復帰** (既存 + P4.1〜P8.1 で追加した全 fixture):
+     callable-interface, callable-interface-param-rename, callable-interface-inner,
+     callable-interface-async, call-signature-rest, interface-mixed
   4. `cargo test --lib` 全件 pass
   5. 生成 Rust 内に `Box<dyn Fn(` パターンの callable interface 型が残っていない
      ことを grep 確認
@@ -1407,8 +1456,8 @@ Phase 9 (Generic) 以降で発見される問題が「generic 固有」か「基
   5. **INV-2 lint 解消 (残り)**: `helpers.rs` の `!call_signatures.is_empty()` 判定が
      `compute_widest_signature` 呼び出しに置換されることで自動解消。P4.1 の
      `type_aliases.rs` 修正と合わせて lint violation が 0 になることを確認
-  6. **`overloaded_callable.rs` の `#![allow(dead_code)]` 削除**: P9.2 で
-     `compute_widest_signature` が production code から呼ばれるようになるため不要になる
+  6. ~~`overloaded_callable.rs` の `#![allow(dead_code)]` 削除~~: **P7.0 で削除済**。
+     skip
   7. **INV-6 完全達成: 既存 Promise unwrap 関数を `RustType::unwrap_promise()` に置換**:
      - `unwrap_promise_and_unit()` (`src/pipeline/type_resolver/helpers.rs:233`) →
        `RustType::unwrap_promise()` + Unit filter に分解。呼び出し元
@@ -1423,7 +1472,7 @@ Phase 9 (Generic) 以降で発見される問題が「generic 固有」か「基
     resolve される (single overload でも同じ path)
   - `scripts/check-classify-callable-usage.sh` が exit 0 で violation 0 件
     (warning ではなく clean pass)。lint script の `exit 0` を `exit 1` に変更
-  - `overloaded_callable.rs` に `#![allow(dead_code)]` がないこと
+  - ~~`overloaded_callable.rs` に `#![allow(dead_code)]` がないこと~~ — P7.0 で削除済
   - `grep -rn 'unwrap_promise_type\|unwrap_promise_and_unit' src/` ヒット 0 件 (INV-6)
 - **Rollback**: なし
 
@@ -1433,8 +1482,10 @@ Phase 9 (Generic) 以降で発見される問題が「generic 固有」か「基
 - **Work**:
   1. `apply_type_substitution(sig: &MethodSignature, params: &[TypeParam], args: &[RustType])
      -> MethodSignature` helper を単一定義
-  2. 以下 3 箇所から呼び出し:
-     - `arrow_fns.rs::convert_callable_trait_const` (trait + inner + delegate 生成時)
+  2. 以下の箇所から呼び出し:
+     - `arrow_fns.rs::convert_callable_trait_const` (widest signature に substitution)
+     - `arrow_fns.rs::build_delegate_impl` / `build_delegate_method`
+       (P7.1 で追加。generic 引数を delegate method の params/return に反映)
      - `calls.rs::try_convert_callable_trait_call` (call 時の overload 選択前)
      - `helpers.rs::resolve_fn_type_info` (arrow body expected type 計算時 —
        P9.2 で widest を返した結果にさらに substitution を積む)
@@ -1543,8 +1594,10 @@ Phase 9 (Generic) 以降で発見される問題が「generic 固有」か「基
   7. `scripts/check-transformer-construction.sh` pass (INV-8 lint)
   8. `scripts/check-promise-unwrap.sh` pass (INV-6 lint)
   9. Production 内 `Transformer\s*\{` 0 ヒット確認 (invariant 最終確認)
-  10. `#![allow(dead_code)]` が production code に残っていないこと確認
-      (`grep -rn 'allow(dead_code)' src/ --include='*.rs' | grep -v tests`)
+  10. `#[allow(dead_code)]` が production code に残っていないこと確認
+      (`grep -rn 'allow(dead_code)' src/ --include='*.rs' | grep -v tests`)。
+      残存候補: `return_wrap_ctx` field + `spawn_nested_scope_with_wrap` method
+      (P7.0 で不要と判断、Phase 9 で削除予定)
   11. `async-class-method` が `compile_test.rs` の skip リストから除外されていること確認
       (P4.2 で復帰済のはず)
   12. INV-6 完全達成確認: `grep -rn 'unwrap_promise_type\|unwrap_promise_and_unit' src/`
