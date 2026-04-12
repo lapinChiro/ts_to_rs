@@ -2,6 +2,14 @@
 
 ## 改訂履歴
 
+- **2026-04-12 #6 (Phase 0 完了)**: Phase 0 全 sub-phase 完了。
+  - P0.0: Baseline (2297 test, cov 91.63%, Hono 71.5%/58err)
+  - P0.1: IfLet 発生確認 (ternary narrowing)、Match 不発生
+  - P0.2: `RustType::unwrap_promise()` 未存在確認
+  - P0.3: L2/L3/L4 verification (real 1 件: L2-4 indent)
+  - P0.4: factory method refactor 完了 (12 サイト移行 + lint)
+  - PRD 整合性修正: A'-4 Phase 9.2→9.3、dependency notes 矛盾解消、
+    lint scope src/ 全体化
 - **2026-04-12 #5 (Revision 3.3)**: 第三者視点でのフェーズ構成・チェックポイント
   レビューを反映。手戻りリスク最小化のための修正:
   - C1: P4.1〜P8.1 間の compile_test 破損ウィンドウ対策 (一時除外 + P8.2 統合
@@ -403,10 +411,11 @@ Phase 13 (Final Quality gate) ─ 全 phase 完了後の最終確認
 主な dependency note:
 - **P0.4 系** (factory refactor) は他 phase に依存しない独立 refactoring で、
   P0.0 直後に実施可能
-- **Phase 1 と Phase 2 は並列化可能** (Revision 3.3 H2): P2.1 (`classify_callable_interface`)
-  は IR 変更 (Item::Const, Method::is_async) に依存せず、P0.x 完了のみが前提。
-  ただし直列実行を推奨 — 問題発生時の原因切り分けが容易になるため。P4.3 が P1.5
-  + P2.1 の両方に依存するため、どちらを先に実行しても P4.3 の開始時期は変わらない
+- **Phase 1 と Phase 2 は理論的に並列化可能** (Revision 3.3 H2): P2.1
+  (`classify_callable_interface`) は IR 変更 (Item::Const, Method::is_async) に技術的に
+  依存しない。ただし P2.1 Entry は「Phase 1 完了」を維持する (直列実行推奨 — 問題発生時の
+  原因切り分けが容易になるため)。P4.3 が P1.5 + P2.1 の両方に依存するため、
+  どちらを先に実行しても P4.3 の開始時期は変わらない
 - **P1.5** (arrow_fns non-arrow fix) は P1.1 (Item::Const variant) + P1.4 完了後
 - **P4.2** は P0.2 (Promise 調査) + P1.4 (is_async propagation) 必須
 - **P6** 全体は P5 + P0.1 の結果に依存
@@ -1305,7 +1314,7 @@ Revision 3 では同じ問題を再導入しないよう、各 fix を **preserv
 |---|---|---|
 | `tests/fixtures/callable-interface-divergent.input.ts` | Test Plan 表に記載済 | Phase 7.1 |
 | `tests/fixtures/callable-interface-expr-body.input.ts` | Test Plan 表に記載済 | Phase 6.3 |
-| `tests/fixtures/callable-interface-generic.input.ts` | Test Plan 表に記載済 | Phase 9.2 |
+| `tests/fixtures/callable-interface-generic.input.ts` | Test Plan 表に記載済 | Phase 9.3 |
 | `tests/fixtures/callable-interface-polymorphic-none-ambiguous.input.ts` | Test Plan 表に記載済 | Phase 6.2 |
 | `tests/e2e/scripts/callable_interface.ts` + `test_e2e_callable_interface_ts_rust_stdout_match` | **追加必須**: E2E test で TS 実行 stdout と変換 Rust 実行 stdout の match 確認。R4-L3-5 の E2E coverage gap も併せて解消 | Phase 11.1 |
 | `marker_struct_name` unit test (pascal case 変換 + collision suffix loop) | **追加必須** | Phase 5.1 Exit |

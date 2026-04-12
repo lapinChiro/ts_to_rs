@@ -72,11 +72,7 @@ impl<'a> Transformer<'a> {
         let mut params = Vec::new();
         let mut destructuring_stmts = Vec::new();
         let return_type = {
-            let mut sub = Transformer {
-                tctx: self.tctx,
-                synthetic: &mut local_synthetic,
-                mut_method_names: self.mut_method_names.clone(),
-            };
+            let mut sub = self.spawn_nested_scope_with_local_synthetic(&mut local_synthetic);
 
             for param in &fn_decl.function.params {
                 let (p, stmts, extra) =
@@ -143,12 +139,9 @@ impl<'a> Transformer<'a> {
         // Sub-Transformer for function body: uses local SyntheticTypeRegistry.
         // TypeResolver + FileTypeResolution handle all type tracking.
         let body_stmts = match &fn_decl.function.body {
-            Some(block) => Transformer {
-                tctx: self.tctx,
-                synthetic: &mut local_synthetic,
-                mut_method_names: self.mut_method_names.clone(),
-            }
-            .convert_stmt_list(&block.stmts, return_type.as_ref())?,
+            Some(block) => self
+                .spawn_nested_scope_with_local_synthetic(&mut local_synthetic)
+                .convert_stmt_list(&block.stmts, return_type.as_ref())?,
             None => Vec::new(),
         };
         // Prepend destructuring expansion statements

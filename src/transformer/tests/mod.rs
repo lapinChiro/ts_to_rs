@@ -15,6 +15,46 @@ use crate::registry::TypeRegistry;
 use crate::transformer::test_fixtures::TctxFixture;
 use crate::transformer::Transformer;
 
+// -- spawn_nested_scope factory method tests --
+
+#[test]
+fn spawn_nested_scope_can_convert_expr() {
+    let f = TctxFixture::from_source("const x = 42;");
+    let tctx = f.tctx();
+    let mut synthetic = SyntheticTypeRegistry::new();
+    let mut t = Transformer::for_module(&tctx, &mut synthetic);
+
+    let mut sub = t.spawn_nested_scope();
+    let lit = swc_ecma_ast::Number {
+        span: swc_common::DUMMY_SP,
+        value: 42.0,
+        raw: None,
+    };
+    let result = sub.convert_expr(&swc_ecma_ast::Expr::Lit(swc_ecma_ast::Lit::Num(lit)));
+    assert!(result.is_ok());
+    assert!(matches!(result.unwrap(), Expr::NumberLit(v) if v == 42.0));
+}
+
+#[test]
+fn spawn_nested_scope_with_local_synthetic_uses_local() {
+    let f = TctxFixture::from_source("const x = 1;");
+    let tctx = f.tctx();
+    let mut parent_synthetic = SyntheticTypeRegistry::new();
+    let t = Transformer::for_module(&tctx, &mut parent_synthetic);
+
+    let mut local_synthetic = SyntheticTypeRegistry::new();
+    let mut sub = t.spawn_nested_scope_with_local_synthetic(&mut local_synthetic);
+
+    // sub-Transformer が convert_expr を呼べることを確認
+    let lit = swc_ecma_ast::Number {
+        span: swc_common::DUMMY_SP,
+        value: 1.0,
+        raw: None,
+    };
+    let result = sub.convert_expr(&swc_ecma_ast::Expr::Lit(swc_ecma_ast::Lit::Num(lit)));
+    assert!(result.is_ok());
+}
+
 // -- build_option_unwrap_with_default tests --
 
 /// Asserts the result is `unwrap_or` with the default as a direct argument (no closure).

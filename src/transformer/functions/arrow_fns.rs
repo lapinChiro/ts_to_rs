@@ -55,18 +55,15 @@ impl<'a> Transformer<'a> {
             // Use arrow.span (includes params) for override lookup
             let arrow_scope_start = arrow.span.lo.0;
 
-            let closure = crate::transformer::Transformer {
-                tctx: self.tctx,
-                synthetic: self.synthetic,
-                mut_method_names: self.mut_method_names.clone(),
-            }
-            .convert_arrow_expr_with_return_type(
-                arrow,
-                resilient,
-                &mut fallback_warnings,
-                var_return_type.as_ref(),
-                var_param_types.as_deref(),
-            )?;
+            let closure = self
+                .spawn_nested_scope()
+                .convert_arrow_expr_with_return_type(
+                    arrow,
+                    resilient,
+                    &mut fallback_warnings,
+                    var_return_type.as_ref(),
+                    var_param_types.as_deref(),
+                )?;
             match closure {
                 Expr::Closure {
                     mut params,

@@ -9,10 +9,26 @@
 
 ---
 
-## 現在のフェーズ: Batch 25 (I-392) PRD 作成完了、実装待ち
+## 現在のフェーズ: Batch 25 (I-392) Phase 0 完了、Phase 1 待ち
 
-Multi-overload callable interface を struct + impl (per-overload method) 表現に変換。
-TypeResolver の overload resolution、Transformer の method call 生成を含む 3 層修正。
+Multi-overload callable interface を trait + marker + impl 表現に変換。
+PRD Revision 3.3 (フェーズ構成・チェックポイント最適化レビュー反映済)。
+
+### Phase 0 完了内容 (2026-04-12)
+
+- **P0.0**: Baseline 計測 (2297 test, cov 91.63%, Hono 71.5%/58err)
+- **P0.1**: IfLet/Match 調査 — IfLet は ternary narrowing で arrow return 位置に発生。
+  Match は不発生 (YAGNI)。Phase 6 設計確定
+- **P0.2**: Promise 調査 — `RustType::unwrap_promise()` 未存在。Phase 4.2 で新規追加
+- **P0.3**: L2/L3/L4 verification — real bug 1 件 (L2-4 indent cosmetic)。Phase 12 で fix
+- **P0.4**: Transformer factory method refactor — `spawn_nested_scope` +
+  `spawn_nested_scope_with_local_synthetic` 新規作成、12 production サイト移行、
+  INV-8 lint script (`scripts/check-transformer-construction.sh`) 作成
+
+### 次: Phase 1 (IR foundations)
+
+P1.1 `Item::Const` variant → P1.2 `Method::is_async` → P1.3 generator async →
+P1.4 propagation → P1.5 arrow_fns Lit init 対応
 
 ---
 

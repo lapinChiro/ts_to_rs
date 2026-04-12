@@ -52,6 +52,35 @@ impl<'a> Transformer<'a> {
         }
     }
 
+    /// 親 Transformer の synthetic を共有するネスト scope を生成する。
+    ///
+    /// arrow body, class member, expression function, loop 内 fn 等、
+    /// 親と同じ合成型レジストリを共有する sub-Transformer に使用する。
+    pub(crate) fn spawn_nested_scope(&mut self) -> Transformer<'_> {
+        Transformer {
+            tctx: self.tctx,
+            synthetic: &mut *self.synthetic,
+            mut_method_names: self.mut_method_names.clone(),
+        }
+    }
+
+    /// ローカルの synthetic レジストリを持つネスト scope を生成する。
+    ///
+    /// fn body のように独自の合成型空間を持つ sub-Transformer に使用する。
+    pub(crate) fn spawn_nested_scope_with_local_synthetic<'b>(
+        &'b self,
+        local: &'b mut SyntheticTypeRegistry,
+    ) -> Transformer<'b>
+    where
+        'a: 'b,
+    {
+        Transformer {
+            tctx: self.tctx,
+            synthetic: local,
+            mut_method_names: self.mut_method_names.clone(),
+        }
+    }
+
     /// `tctx.type_registry` へのショートカット。
     pub(crate) fn reg(&self) -> &'a TypeRegistry {
         self.tctx.type_registry

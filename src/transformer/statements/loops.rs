@@ -542,12 +542,9 @@ impl<'a> Transformer<'a> {
         // Sub-Transformer for nested function body.
         // TypeResolver handles parameter types via scope_stack.
         let body = match &fn_decl.function.body {
-            Some(block) => Transformer {
-                tctx: self.tctx,
-                synthetic: &mut *self.synthetic,
-                mut_method_names: self.mut_method_names.clone(),
-            }
-            .convert_stmt_list(&block.stmts, return_type.as_ref())?,
+            Some(block) => self
+                .spawn_nested_scope()
+                .convert_stmt_list(&block.stmts, return_type.as_ref())?,
             None => Vec::new(),
         };
 

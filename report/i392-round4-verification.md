@@ -277,10 +277,40 @@ struct literal で直接構築している。factory method (`spawn_nested_scope
 
 ---
 
-## L2-1, L2-3, L2-4, L3 (5 items), L4 (3 items): Verification 未完
+## L2/L3/L4 Verification (P0.3 完了)
 
-時間制約により fact gathering 未完。本 session では conversation summary の記述
-のみ残っている。次 session では個別 verification を実施すること。
+### L2
+
+| ID | Claim | Classification | Evidence |
+|---|---|---|---|
+| L2-1 | `wrap_expr_tail` IfLet/Match | **real → Phase 6 で対応済** | P0.1 調査で IfLet は ternary narrowing で arrow return 位置に発生確認。Match は不発生 (YAGNI)。Phase 6.3 (IfLet wrap) + 6.4 (Match は unreachable) で対処 |
+| L2-3 | string matching error discrimination | **auto-solved** | INV-2/3 で fallthrough 全面禁止。`msg.contains("I-392:")` は不要。hard error に統一 |
+| L2-4 | generator match indent propagation | **real bug (cosmetic)** | `src/generator/expressions/mod.rs:385` で match arm indent が 4 spaces に固定。`Stmt::Let { init: Expr::Match }` 等で nesting depth が深い場合に indent がずれる。compile には影響なし。**Phase 12 で fix** |
+
+### L3
+
+| ID | Claim | Classification | Evidence |
+|---|---|---|---|
+| L3-1 | arrow type_params handling | **false alarm** | `arrow_fns.rs:103-107` で `extract_type_params(arrow.type_params)` → `Item::Fn { type_params }` に正しく渡されている。callable interface 文脈でも同一コードパス |
+| L3-2 | error message context | **auto-solved** | Phase 6.1 で `anyhow!("...at byte {span_lo}..{span_hi}")` を設計済 (R3-L1-5 preserve) |
+| L3-3 | marker suffix loop | **auto-solved** | Phase 5.1 `allocate_marker_name` で collision suffix loop 実装予定 |
+| L3-4 | compile_test coverage | **auto-solved** | Phase 8.2 (compile_test 復帰) + Phase 11.1 (全 fixture 登録) |
+| L3-5 | E2E test coverage | **auto-solved** | Phase 11.1 で E2E test 追加 |
+
+### L4
+
+| ID | Claim | Classification | Evidence |
+|---|---|---|---|
+| L4-1 | nested wrap string coerce depth | **false alarm** | `wrap_leaf` の設計が 1:1 AST-IR mapping。各 leaf に 1 回だけ coercion 適用。double coercion パスなし |
+| L4-2 | delegate unreachable pattern | **false alarm** | `_ => unreachable!()` は Rust の正しい idiom。enum variant 明示よりも future-proof |
+| L4-3 | variant enum name fallback | **auto-solved** | `SyntheticTypeRegistry::generate_union_name` が type-based semantic naming を使用。deterministic かつ scalable |
+
+### Summary
+
+- **Real bug**: 1 件 (L2-4, cosmetic indent)
+- **Auto-solved by PRD**: 6 件
+- **False alarm**: 4 件
+- **Phase 12 scope**: L2-4 のみ (1 件 ≤ 5 件 threshold)
 
 ---
 

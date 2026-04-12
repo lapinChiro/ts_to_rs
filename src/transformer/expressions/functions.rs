@@ -122,12 +122,7 @@ impl<'a> Transformer<'a> {
 
         let body = match &func.body {
             Some(block) => {
-                let mut sub_t = Transformer {
-                    tctx: self.tctx,
-
-                    synthetic: &mut *self.synthetic,
-                    mut_method_names: self.mut_method_names.clone(),
-                };
+                let mut sub_t = self.spawn_nested_scope();
                 let mut stmts = expansion_stmts;
                 for stmt in &block.stmts {
                     stmts.extend(sub_t.convert_stmt(stmt, return_type.as_ref())?);
@@ -287,12 +282,7 @@ impl<'a> Transformer<'a> {
                     ClosureBody::Expr(Box::new(ir_expr))
                 }
                 ast::BlockStmtOrExpr::BlockStmt(block) => {
-                    let mut sub_t = Transformer {
-                        tctx: self.tctx,
-
-                        synthetic: &mut *self.synthetic,
-                        mut_method_names: self.mut_method_names.clone(),
-                    };
+                    let mut sub_t = self.spawn_nested_scope();
                     let mut stmts = Vec::new();
                     for stmt in &block.stmts {
                         stmts.extend(sub_t.convert_stmt(stmt, return_type.as_ref())?);
@@ -310,12 +300,7 @@ impl<'a> Transformer<'a> {
                     body_stmts.push(Stmt::Return(Some(ir_expr)));
                 }
                 ast::BlockStmtOrExpr::BlockStmt(block) => {
-                    let mut sub_t = Transformer {
-                        tctx: self.tctx,
-
-                        synthetic: &mut *self.synthetic,
-                        mut_method_names: self.mut_method_names.clone(),
-                    };
+                    let mut sub_t = self.spawn_nested_scope();
                     for stmt in &block.stmts {
                         body_stmts.extend(sub_t.convert_stmt(stmt, return_type.as_ref())?);
                     }

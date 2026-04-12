@@ -49,12 +49,7 @@ impl<'a> Transformer<'a> {
                         field: field_name.clone(),
                     };
                     let init_expr = if let Some(default_expr) = &assign.value {
-                        let default_ir = crate::transformer::Transformer {
-                            tctx: self.tctx,
-                            synthetic: self.synthetic,
-                            mut_method_names: self.mut_method_names.clone(),
-                        }
-                        .convert_expr(default_expr)?;
+                        let default_ir = self.spawn_nested_scope().convert_expr(default_expr)?;
                         crate::transformer::build_option_unwrap_with_default(
                             field_access,
                             default_ir,
@@ -137,12 +132,7 @@ impl<'a> Transformer<'a> {
                         field: field_name.clone(),
                     };
                     let init_expr = if let Some(default_expr) = &assign.value {
-                        let default_ir = crate::transformer::Transformer {
-                            tctx: self.tctx,
-                            synthetic: self.synthetic,
-                            mut_method_names: self.mut_method_names.clone(),
-                        }
-                        .convert_expr(default_expr)?;
+                        let default_ir = self.spawn_nested_scope().convert_expr(default_expr)?;
                         crate::transformer::build_option_unwrap_with_default(
                             field_access,
                             default_ir,

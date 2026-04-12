@@ -31,13 +31,7 @@ impl<'a> Transformer<'a> {
         let ty = convert_ts_type(&type_ann.type_ann, self.synthetic, self.reg())?;
 
         let value = match &prop.value {
-            Some(init) => Transformer {
-                tctx: self.tctx,
-
-                synthetic: self.synthetic,
-                mut_method_names: self.mut_method_names.clone(),
-            }
-            .convert_expr(init)?,
+            Some(init) => self.spawn_nested_scope().convert_expr(init)?,
             None => return Ok(None), // No initializer — skip
         };
 
@@ -198,11 +192,7 @@ impl<'a> Transformer<'a> {
 
         // Sub-Transformer for constructor body.
         // TypeResolver handles parameter types via scope_stack.
-        let mut sub_t = Transformer {
-            tctx: self.tctx,
-            synthetic: &mut *self.synthetic,
-            mut_method_names: self.mut_method_names.clone(),
-        };
+        let mut sub_t = self.spawn_nested_scope();
         for stmt in stmts {
             if let Some((field_name, value_expr)) = try_extract_this_assignment(stmt) {
                 let value = sub_t.convert_expr(value_expr)?;
@@ -323,11 +313,7 @@ impl<'a> Transformer<'a> {
 
         let body = match &function.body {
             Some(block) => {
-                let mut sub_t = Transformer {
-                    tctx: self.tctx,
-                    synthetic: &mut *self.synthetic,
-                    mut_method_names: self.mut_method_names.clone(),
-                };
+                let mut sub_t = self.spawn_nested_scope();
                 let mut stmts = default_expansion_stmts;
                 for stmt in &block.stmts {
                     stmts.extend(sub_t.convert_stmt(stmt, return_type.as_ref())?);
