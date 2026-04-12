@@ -204,7 +204,8 @@ impl<'a> Transformer<'a> {
         };
         let def = self.reg().get(name)?;
         use crate::registry::collection::{classify_callable_interface, CallableInterfaceKind};
-        match classify_callable_interface(def) {
+        let kind = classify_callable_interface(def);
+        match kind {
             CallableInterfaceKind::NonCallable => None,
             _ => Some((name.to_string(), type_args)),
         }
@@ -284,6 +285,14 @@ impl<'a> Transformer<'a> {
             (vec![], vec![])
         };
         convert_last_return_to_tail(&mut fn_body);
+
+        // --- Return wrap for divergent returns (P6) ---
+        // Inner fn body does NOT apply return wrap here. The body returns raw values.
+        // Type coercion between the raw return value and the widest union enum type
+        // will be handled by Phase 7 (delegate impl) and Phase 9 (TypeResolver update).
+        //
+        // The ReturnWrapContext infrastructure (P6.0-P6.1) is prepared for future use
+        // when the delegate methods need to wrap/unwrap values.
 
         // Inner method params: use closure params (arrow names + widest types) for positions
         // within arrow arity, then append widest params for positions beyond arrow arity.
@@ -415,5 +424,83 @@ impl<'a> Transformer<'a> {
             }
             _ => None,
         }
+    }
+}
+
+/// Wraps return expressions in the inner fn body with union variant constructors.
+///
+/// Walks `Stmt::Return(Some(expr))` and `Stmt::TailExpr(expr)` and applies `wrap_leaf`.
+/// For `Expr::If` (ternary), recursively wraps then/else branches (P6.3).
+/// `Expr::Match` at return position does not occur (P0.1: YAGNI).
+///
+/// Currently unused: inner fn body returns raw values without variant wrapping.
+/// Phase 7 delegate impl unwraps via `match self.inner(...) { Variant(v) => v }`.
+/// Will be needed if/when inner fn body return wrap is required (Phase 9.2+ で再評価).
+#[allow(dead_code)]
+fn wrap_body_returns(
+    stmts: &mut [Stmt],
+    arrow: &ast::ArrowExpr,
+    ctx: &crate::transformer::return_wrap::ReturnWrapContext,
+) -> anyhow::Result<()> {
+    // Create a dummy AST expression for span reporting
+    let dummy_span_expr = ast::Expr::Lit(ast::Lit::Null(ast::Null { span: arrow.span }));
+
+    for stmt in stmts.iter_mut() {
+        match stmt {
+            Stmt::Return(Some(ref mut expr)) => {
+                *expr = wrap_expr_tail(expr.clone(), &dummy_span_expr, ctx)?;
+            }
+            Stmt::TailExpr(ref mut expr) => {
+                *expr = wrap_expr_tail(expr.clone(), &dummy_span_expr, ctx)?;
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+/// Recursively wraps an expression for return position.
+///
+/// For `Expr::If` (ternary from cond), wraps then/else branches individually (P6.3).
+/// For leaf expressions, delegates to `wrap_leaf`.
+#[allow(dead_code)]
+fn wrap_expr_tail(
+    expr: Expr,
+    ast_arg: &ast::Expr,
+    ctx: &crate::transformer::return_wrap::ReturnWrapContext,
+) -> anyhow::Result<Expr> {
+    match expr {
+        // P6.3: ternary → wrap each branch
+        Expr::If {
+            condition,
+            then_expr,
+            else_expr,
+        } => {
+            let wrapped_then = wrap_expr_tail(*then_expr, ast_arg, ctx)?;
+            let wrapped_else = wrap_expr_tail(*else_expr, ast_arg, ctx)?;
+            Ok(Expr::If {
+                condition,
+                then_expr: Box::new(wrapped_then),
+                else_expr: Box::new(wrapped_else),
+            })
+        }
+        // P6.4: IfLet at return position (P0.1: occurs in ternary narrowing)
+        Expr::IfLet {
+            pattern,
+            expr: scrutinee,
+            then_expr,
+            else_expr,
+        } => {
+            let wrapped_then = wrap_expr_tail(*then_expr, ast_arg, ctx)?;
+            let wrapped_else = wrap_expr_tail(*else_expr, ast_arg, ctx)?;
+            Ok(Expr::IfLet {
+                pattern,
+                expr: scrutinee,
+                then_expr: Box::new(wrapped_then),
+                else_expr: Box::new(wrapped_else),
+            })
+        }
+        // Leaf expression → wrap in variant
+        leaf => crate::transformer::return_wrap::wrap_leaf(leaf, ast_arg, ctx),
     }
 }

@@ -7,6 +7,7 @@ pub mod classes;
 pub mod context;
 pub mod expressions;
 pub mod functions;
+pub(crate) mod return_wrap;
 pub mod statements;
 pub(crate) mod type_position;
 pub(crate) use type_position::{wrap_trait_for_position, TypePosition};
@@ -40,6 +41,12 @@ pub(crate) struct Transformer<'a> {
     /// Callable interface marker struct 名の使用済み集合 (INV-1)。
     /// PascalCase collision を検出し、suffix 付与で unique 化する。
     used_marker_names: std::collections::HashSet<String>,
+    /// Return wrap context for callable interface arrow bodies (INV-8).
+    /// `Some` only inside callable interface arrow body conversion.
+    /// Factory methods force this to `None` to prevent leak to nested scopes.
+    /// Phase 7 で delegate impl から使用予定。
+    #[allow(dead_code)]
+    return_wrap_ctx: Option<return_wrap::ReturnWrapContext>,
 }
 
 impl<'a> Transformer<'a> {
@@ -53,6 +60,7 @@ impl<'a> Transformer<'a> {
             synthetic,
             mut_method_names: std::collections::HashSet::new(),
             used_marker_names: std::collections::HashSet::new(),
+            return_wrap_ctx: None,
         }
     }
 
@@ -66,6 +74,7 @@ impl<'a> Transformer<'a> {
             synthetic: &mut *self.synthetic,
             mut_method_names: self.mut_method_names.clone(),
             used_marker_names: std::collections::HashSet::new(),
+            return_wrap_ctx: None, // INV-8: leak 防止
         }
     }
 
@@ -84,6 +93,25 @@ impl<'a> Transformer<'a> {
             synthetic: local,
             mut_method_names: self.mut_method_names.clone(),
             used_marker_names: std::collections::HashSet::new(),
+            return_wrap_ctx: None, // INV-8: leak 防止
+        }
+    }
+
+    /// Callable interface arrow body 用のネスト scope を生成する。
+    ///
+    /// return_wrap_ctx を設定し、arrow body 内の return 式を union variant で wrap する。
+    /// Phase 7 で delegate impl から使用予定。
+    #[allow(dead_code)]
+    pub(crate) fn spawn_nested_scope_with_wrap(
+        &mut self,
+        ctx: return_wrap::ReturnWrapContext,
+    ) -> Transformer<'_> {
+        Transformer {
+            tctx: self.tctx,
+            synthetic: &mut *self.synthetic,
+            mut_method_names: self.mut_method_names.clone(),
+            used_marker_names: std::collections::HashSet::new(),
+            return_wrap_ctx: Some(ctx),
         }
     }
 

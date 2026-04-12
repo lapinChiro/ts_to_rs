@@ -2,14 +2,14 @@
 source: tests/integration_test.rs
 expression: output
 ---
-trait Transformer {
+trait StringMapper {
     fn call_0(&self, input: String) -> String;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct TransformerTransformImpl;
+struct StringMapperMapStringImpl;
 
-impl TransformerTransformImpl {
+impl StringMapperMapStringImpl {
     fn inner(&self, data: String) -> String {
         data
     }

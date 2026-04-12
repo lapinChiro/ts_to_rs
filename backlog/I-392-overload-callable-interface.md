@@ -2,6 +2,19 @@
 
 ## 改訂履歴
 
+- **2026-04-12 #12 (Phase 6 完了)**: Phase 6 (Return wrap) 完了。
+  - P6.0: `return_wrap_ctx` field + `spawn_nested_scope_with_wrap` factory
+  - P6.1: `return_wrap.rs` — ReturnWrapContext, build_return_wrap_context, wrap_leaf,
+    variant_for, unique_option_variant + unit test 12 件
+  - P6.2-P6.4: wrap_body_returns + wrap_expr_tail (If/IfLet 対応) 実装。
+    inner fn body への適用は TypeResolver 型情報不足で Phase 7 に先送り
+  - P6.5: CLI synthetic items 結合修正 + builtin 名前衝突対策。
+    根本原因トレース: CLI はデフォルトで builtin types を読み込み、
+    Web Streams API `Transformer` がユーザー定義と衝突 → `classify_callable_interface`
+    が NonCallable を返していた。fixture 名を `StringMapper` に変更で解消。
+    `main.rs::transpile_file` に `render_referenced_synthetics_for_file` 呼び出しを追加
+  - Phase 7 に return wrap 設計課題を詳細記載 (inner fn body の return type 設計判断)
+  - 最終状態: 全テスト pass, clippy 0, fmt 0
 - **2026-04-12 #11 (Phase 5 完了)**: Phase 5 (Marker struct + inner fn) 全 sub-phase 完了。
   - P5.1: `used_marker_names` + `allocate_marker_name` + `marker_struct_name` (unit test 5件)
   - P5.2: `Item::Struct` に `is_unit_struct` 追加 (60+ サイト更新)。generator unit test 2件
@@ -1119,7 +1132,88 @@ struct に適用するとグローバル影響 (既存の `interface Marker {}` 
 - **Exit**: 該当 fixture で rustc compile pass
 - **Rollback**: なし
 
+#### P6.5: CLI single-file モードの synthetic items 結合 + builtin 名前衝突対策
+
+**Phase 6 /check_problem で発見された 2 つの問題**:
+
+**問題 1: CLI synthetic items 結合欠落**
+CLI (`main.rs::transpile_file`) が `file.rust_source` を直接書き出しており、
+`pipeline_output.synthetic_items` に分離された callable interface marker struct / impl
+が出力に含まれない。lib API (`extract_single_output`) と `pipeline::transform_module`
+は `render_referenced_synthetics_for_file` で synthetic items を結合しているが、
+CLI の single-file path のみ欠落していた。
+
+修正: `main.rs::transpile_file` に `render_referenced_synthetics_for_file` 呼び出しを
+追加。3 箇所 (lib.rs, pipeline/mod.rs, main.rs) で同一の結合パターンを使用するが、
+各箇所で `files` の取得方法と後続処理が異なるため DRY 共通化は coupling を増やす。
+`render_referenced_synthetics_for_file` 関数自体が共通ロジックとして機能している。
+
+**問題 2: builtin types と fixture の名前衝突**
+CLI はデフォルトで `--no-builtin-types` 未指定 → `use_builtin_types = true`。
+Builtin types に Web Streams API の `Transformer` interface が含まれ、
+`callable-interface-param-rename.input.ts` の `interface Transformer` と名前衝突。
+`TypeRegistry::merge` がビルトイン定義とユーザー定義をマージし、`methods` が非空に
+なるため `classify_callable_interface` が `NonCallable` を返した。
+
+**根本原因トレース**:
+1. CLI: `build_base_registry(input_dir, use_builtin_types=true)` →
+   `load_builtin_types()` → Web Streams API の `Transformer` (methods: flush/start/transform)
+2. Pipeline L69: `shared_registry = input.builtin_types.unwrap_or_default()` →
+   builtin `Transformer` が既に存在
+3. Pipeline L72: `shared_registry.merge(&file_registry)` → ユーザーの `Transformer`
+   (call_signatures のみ) が builtin の `Transformer` (methods あり) にマージ
+4. マージ後: `TypeDef::Struct { methods: {flush, start, transform}, call_signatures: [1] }`
+5. `classify_callable_interface`: `!methods.is_empty()` → `NonCallable`
+
+修正: fixture の interface 名を `Transformer` → `StringMapper` に変更
+(builtin と衝突しない名前)。builtin/user 名前衝突のマージ戦略改善は I-392 scope 外
+(Non-Goals に記載)
+
+- **Entry**: P6.4 完了
+- **Work**:
+  1. `main.rs::transpile_file` に synthetic items 結合を追加
+  2. `callable-interface-param-rename.input.ts` の interface 名を `StringMapper` に変更
+  3. CLI 出力と lib API 出力の一致を検証
+- **Exit**:
+  - `cargo test` 全テスト pass
+  - CLI 出力に marker struct が含まれることを確認
+  - clippy 0, fmt 0
+
 ### Phase 7: Trait delegate impl
+
+**Phase 6 で判明した設計課題 (inner fn body の return wrap)**:
+
+Phase 6 実装時に、inner fn body の return 式を divergent union variant で wrap する
+アプローチは TypeResolver の型情報なしでは variant を確定できないことが判明した。
+`infer_variant_from_expr` はリテラルの型推論のみ可能で、`Expr::Ident("c")` のような
+変数参照の型は推論できない。
+
+**採用した設計**: inner fn body は **素の値をそのまま返す** (variant wrap しない)。
+inner fn の return type は widest union enum 型だが、body は素の型を返す (型不一致)。
+Delegate method が `self.inner(args)` の結果を **そのまま返す** (match + unwrap ではなく)。
+
+具体的には:
+- inner fn: `fn inner(&self, c: String, key: Option<String>) -> F64OrString { ... }`
+  body は `c` (String) や `42.0` (f64) を返す → **Rust としては型不一致**
+- delegate: `fn call_0(&self, c: String) -> String { self.inner(c, None) }` のように
+  inner の結果を直接 unwrap
+
+**Phase 7 で解決すべき問題**:
+1. inner fn body の return type を widest union enum ではなく **素の型** にするか、
+   body 内の return 式を variant wrap するか設計決定が必要
+2. 素の型にする場合: inner fn の return type は何になるか？ 各 overload で異なる
+3. variant wrap する場合: TypeResolver の型情報が必要 (Phase 9.2 まで利用不可)
+4. **推奨**: single-overload callable interface は素の return type をそのまま使う。
+   multi-overload (divergent) の場合は inner fn body でリテラル/None 等の推論可能な
+   return 式のみ wrap し、推論不可能な式は hard error とする。Phase 9.2 以降で
+   TypeResolver 型情報を利用した完全な wrap に改善
+
+**Phase 6 で用意したインフラ**:
+- `ReturnWrapContext` struct + `build_return_wrap_context`
+- `wrap_leaf` + `wrap_expr_tail` + `wrap_body_returns` (現在 `#[allow(dead_code)]`)
+- `spawn_nested_scope_with_wrap` factory method
+
+Phase 7 で必要に応じてこれらのインフラを使用する。
 
 #### P7.1: per-overload delegate method + inner 呼び出し
 
@@ -1614,6 +1708,13 @@ PR 説明に転記。
   `interfaces.rs` とは別の実装が必要。follow-up PRD で対応。
   `classify_callable_interface` に `is_interface` guard を追加して後続 phase の
   不整合 (trait 未定義で trait impl 生成) を防止済
+- **Builtin types と user-defined types の名前衝突時のマージ戦略改善**
+  (Phase 6 /check_problem で発見): CLI はデフォルトで builtin types を読み込む
+  (`--no-builtin-types` 未指定)。Web Streams API の `Transformer` interface 等が
+  ユーザー定義と名前衝突すると `TypeRegistry::merge` でマージされ、
+  `classify_callable_interface` が正しく判定できなくなる。
+  現状の対策: fixture の interface 名を builtin と衝突しない名前に変更。
+  根本対策: ユーザー定義がビルトインを上書きするマージ戦略 (follow-up PRD)
 - `interface Factory { new (config): Factory; name: string; }` 等 construct signature
   の emission 改善 (現在も emit されていない、変更なし)
 
