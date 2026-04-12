@@ -58,6 +58,7 @@ fn test_transform_module_single_interface() {
                     ty: RustType::F64,
                 },
             ],
+            is_unit_struct: false,
         }
     );
 }

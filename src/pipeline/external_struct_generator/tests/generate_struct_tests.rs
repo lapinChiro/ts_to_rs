@@ -21,6 +21,7 @@ fn test_generate_struct_error_with_fields() {
             name,
             fields,
             type_params,
+            is_unit_struct: false,
         } => {
             assert_eq!(vis, Visibility::Public);
             assert_eq!(name, "Error");

@@ -166,6 +166,7 @@ pub fn generate_external_struct(
                 name: name.to_string(),
                 type_params: mono_params,
                 fields: struct_fields,
+                is_unit_struct: false,
             })
         }
         TypeDef::Enum { .. } | TypeDef::Function { .. } | TypeDef::ConstValue { .. } => None,

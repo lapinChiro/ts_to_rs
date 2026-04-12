@@ -168,6 +168,10 @@ pub(super) fn generate_expr(expr: &Expr) -> String {
             }
         }
         Expr::StructInit { name, fields, base } => {
+            // Unit struct: empty fields + no base → `Name` (unit syntax)
+            if fields.is_empty() && base.is_none() {
+                return name.clone();
+            }
             let mut parts: Vec<String> = if fields
                 .iter()
                 .all(|(f, v)| matches!(v, Expr::Ident(i) if i == f))

@@ -284,6 +284,7 @@ pub fn walk_item<F: IrFolder + ?Sized>(f: &mut F, item: Item) -> Item {
             name,
             type_params,
             fields,
+            is_unit_struct,
         } => Item::Struct {
             vis,
             name,
@@ -295,6 +296,7 @@ pub fn walk_item<F: IrFolder + ?Sized>(f: &mut F, item: Item) -> Item {
                 .into_iter()
                 .map(|fld| f.fold_struct_field(fld))
                 .collect(),
+            is_unit_struct,
         },
         Item::Enum {
             vis,

@@ -62,6 +62,7 @@ impl<'a> Transformer<'a> {
                         name: struct_name.clone(),
                         type_params: vec![],
                         fields,
+                        is_unit_struct: false,
                     };
                     let rust_type = RustType::Named {
                         name: struct_name,

@@ -19,6 +19,7 @@ fn test_convert_interface_basic() {
             name,
             type_params,
             fields,
+            ..
         } => {
             assert_eq!(vis, Visibility::Public);
             assert_eq!(name, "Foo");

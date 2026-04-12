@@ -33,6 +33,7 @@ fn test_convert_class_properties_only() {
                     ty: RustType::String,
                 },
             ],
+            is_unit_struct: false,
         }
     );
 }

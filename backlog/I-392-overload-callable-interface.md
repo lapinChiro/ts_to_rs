@@ -2,6 +2,17 @@
 
 ## 改訂履歴
 
+- **2026-04-12 #11 (Phase 5 完了)**: Phase 5 (Marker struct + inner fn) 全 sub-phase 完了。
+  - P5.1: `used_marker_names` + `allocate_marker_name` + `marker_struct_name` (unit test 5件)
+  - P5.2: `Item::Struct` に `is_unit_struct` 追加 (60+ サイト更新)。generator unit test 2件
+  - P5.3: `Expr::StructInit { fields: [] }` → unit struct syntax
+  - P5.4: `convert_callable_trait_const` に widest 計算 + marker struct + inner fn 生成
+  - deep deep review で Critical 修正: inner params を closure params (arrow 名) に変更。
+    widest (interface) 名を使うと body の変数参照が不一致になる latent bug を防止。
+    `callable-interface-param-rename` fixture で検証
+  - /check_problem で追加: closure params の ty=None fallback + `callable-interface-inner`
+    fixture (multi-overload widest inner fn 検証)
+  - 最終状態: 全テスト pass, clippy 0, fmt 0
 - **2026-04-12 #10 (Phase 4 完了)**: Phase 4 (Trait emission) 全 sub-phase 完了。
   - P4.1: `convert_callable_interface_as_trait` — callable interface → `Item::Trait`
     (call_0, call_1 method)。snapshot 3件更新、compile_test 3件一時除外

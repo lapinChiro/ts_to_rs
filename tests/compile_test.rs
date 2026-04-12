@@ -180,6 +180,9 @@ fn test_all_fixtures_compile() {
         "call-signature-rest",
         // interface-mixed: 同上 (callable interface の trait 化)
         "interface-mixed",
+        // callable-interface-*: P5.4 inner fn のみ。trait impl + const 未完。P8.2 で復帰。
+        "callable-interface-param-rename",
+        "callable-interface-inner",
     ];
 
     let mut entries: Vec<_> = fs::read_dir(fixture_dir)
@@ -266,6 +269,7 @@ fn test_all_fixtures_compile_with_builtins() {
         "callable-interface",
         "call-signature-rest",
         "interface-mixed",
+        "callable-interface-param-rename",
     ];
 
     let mut entries: Vec<_> = fs::read_dir(fixture_dir)

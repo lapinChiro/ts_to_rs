@@ -60,6 +60,7 @@ fn test_collect_all_undefined_refs_excludes_defined() {
             name: "Foo".to_string(),
             type_params: vec![],
             fields: vec![],
+            is_unit_struct: false,
         },
         Item::Enum {
             vis: Visibility::Public,
@@ -99,6 +100,7 @@ fn test_undefined_refs_imported_types_excluded() {
                 name: "f".to_string(),
                 ty: named("Imported"),
             }],
+            is_unit_struct: false,
         },
     ];
     let refs = collect_undefined_refs_inner(&items.iter().collect::<Vec<_>>());
@@ -120,6 +122,7 @@ fn test_undefined_refs_type_params_excluded() {
             name: "f".to_string(),
             ty: named("T"),
         }],
+        is_unit_struct: false,
     }];
     let refs = collect_undefined_refs_inner(&items.iter().collect::<Vec<_>>());
     assert!(!refs.contains("T"));
@@ -135,6 +138,7 @@ fn test_undefined_refs_other_defined_item_excluded() {
         name: "Foo".to_string(),
         type_params: vec![],
         fields: vec![],
+        is_unit_struct: false,
     };
     let bar = Item::Struct {
         vis: Visibility::Public,
@@ -145,6 +149,7 @@ fn test_undefined_refs_other_defined_item_excluded() {
             name: "f".to_string(),
             ty: named("Foo"),
         }],
+        is_unit_struct: false,
     };
     let pool: Vec<&Item> = vec![&bar, &foo];
     let refs = collect_undefined_refs_inner(&pool);
@@ -163,6 +168,7 @@ fn test_undefined_refs_path_qualified_excluded() {
             name: "f".to_string(),
             ty: named("foo::Bar"),
         }],
+        is_unit_struct: false,
     }];
     let refs = collect_undefined_refs_inner(&items.iter().collect::<Vec<_>>());
     assert!(!refs.contains("foo::Bar"));
@@ -189,6 +195,7 @@ fn test_undefined_refs_collect_undefined_applies_external_filter() {
                 ty: named("NotExternal"),
             },
         ],
+        is_unit_struct: false,
     }];
     let refs = collect_undefined_type_references(&items.iter().collect::<Vec<_>>(), &registry);
     assert!(refs.contains("External"));

@@ -105,6 +105,10 @@ pub enum Item {
         type_params: Vec<TypeParam>,
         /// Named fields
         fields: Vec<StructField>,
+        /// Whether this is a unit struct (callable interface marker).
+        /// `true` → `#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)] struct Name;`
+        /// `false` → standard `#[derive(Debug, Clone, PartialEq)] struct Name { fields }`
+        is_unit_struct: bool,
     },
     /// An `enum` with variants that may have numeric or string values.
     Enum {

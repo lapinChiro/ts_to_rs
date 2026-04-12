@@ -20,6 +20,7 @@ pub(super) fn make_struct(
         name: name.to_string(),
         type_params,
         fields,
+        is_unit_struct: false,
     }
 }
 

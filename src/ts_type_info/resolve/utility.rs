@@ -54,6 +54,7 @@ pub(crate) fn resolve_partial(
                 name: name.clone(),
                 fields: partial_fields,
                 type_params: vec![],
+                is_unit_struct: false,
             },
         );
     }
@@ -106,6 +107,7 @@ pub(crate) fn resolve_required(
                 name: name.clone(),
                 fields: required_fields,
                 type_params: vec![],
+                is_unit_struct: false,
             },
         );
     }
@@ -155,6 +157,7 @@ pub(crate) fn resolve_pick(
                 name: name.clone(),
                 fields: picked_fields,
                 type_params: vec![],
+                is_unit_struct: false,
             },
         );
     }
@@ -204,6 +207,7 @@ pub(crate) fn resolve_omit(
                 name: name.clone(),
                 fields: omitted_fields,
                 type_params: vec![],
+                is_unit_struct: false,
             },
         );
     }

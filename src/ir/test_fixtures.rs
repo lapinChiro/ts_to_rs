@@ -297,6 +297,7 @@ pub(crate) fn all_items() -> Vec<Item> {
                 name: "x".to_string(),
                 ty: RustType::F64,
             }],
+            is_unit_struct: false,
         },
         Item::Enum {
             vis: Visibility::Public,

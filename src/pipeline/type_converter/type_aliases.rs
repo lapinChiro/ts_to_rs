@@ -341,6 +341,7 @@ fn convert_type_alias_fallback(
                 name: name.to_string(),
                 type_params,
                 fields: fields.iter().map(|f| f.substitute(&mono_subs)).collect(),
+                is_unit_struct: false,
             })
         }
         // Fallback: any type that convert_ts_type can handle → type alias

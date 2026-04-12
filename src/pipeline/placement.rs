@@ -357,6 +357,7 @@ mod tests {
                     },
                 })
                 .collect(),
+            is_unit_struct: false,
         }
     }
 
@@ -549,6 +550,7 @@ mod tests {
                 name: "first_field".to_string(),
                 ty: RustType::String,
             }],
+            is_unit_struct: false,
         };
         let second = Item::Struct {
             vis: Visibility::Public,
@@ -559,6 +561,7 @@ mod tests {
                 name: "second_field".to_string(),
                 ty: RustType::String,
             }],
+            is_unit_struct: false,
         };
         let graph = SyntheticReferenceGraph::build(&[], &[first, second]);
         assert_eq!(graph.names().len(), 1, "重複は dedup される");

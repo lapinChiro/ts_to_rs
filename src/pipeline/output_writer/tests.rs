@@ -425,6 +425,7 @@ fn test_write_to_directory_types_rs_not_overwritten() {
                 type_args: vec![],
             },
         }],
+        is_unit_struct: false,
     };
     let files = vec![
         TestFile::new(

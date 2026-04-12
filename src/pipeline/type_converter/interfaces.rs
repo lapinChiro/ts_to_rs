@@ -129,6 +129,7 @@ fn convert_interface_as_struct(
         name: name.to_string(),
         type_params,
         fields,
+        is_unit_struct: false,
     })
 }
 
@@ -344,6 +345,7 @@ fn convert_interface_as_struct_and_trait(
         name: struct_name.clone(),
         type_params: type_params.clone(),
         fields,
+        is_unit_struct: false,
     };
 
     let trait_item = Item::Trait {

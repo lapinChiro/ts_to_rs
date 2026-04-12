@@ -75,7 +75,15 @@ fn generate_item(item: &Item) -> String {
             name,
             type_params,
             fields,
+            is_unit_struct,
         } => {
+            // Unit struct: no fields, no generics — emit `struct Name;`
+            if *is_unit_struct && fields.is_empty() && type_params.is_empty() {
+                let vis_str = generate_vis(vis);
+                return format!(
+                    "#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]\n{vis_str}struct {name};"
+                );
+            }
             let vis_str = generate_vis(vis);
             let generics = generate_type_params(type_params);
             let derivable = fields.iter().all(|f| is_derivable_type(&f.ty));

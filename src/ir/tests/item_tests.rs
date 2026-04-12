@@ -18,6 +18,7 @@ fn test_item_struct() {
                 ty: RustType::Option(Box::new(RustType::F64)),
             },
         ],
+        is_unit_struct: false,
     };
     match item {
         Item::Struct { name, fields, .. } => {
@@ -161,6 +162,7 @@ fn empty_struct(name: &str) -> Item {
         name: name.to_string(),
         type_params: vec![],
         fields: vec![],
+        is_unit_struct: false,
     }
 }
 

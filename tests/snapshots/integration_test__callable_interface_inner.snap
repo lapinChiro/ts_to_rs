@@ -1,0 +1,26 @@
+---
+source: tests/integration_test.rs
+expression: output
+---
+#[derive(Debug, Clone, PartialEq)]
+pub enum F64OrString {
+    String(String),
+    F64(f64),
+}
+
+trait GetCookie {
+    fn call_0(&self, c: String) -> String;
+    fn call_1(&self, c: String, key: String) -> f64;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct GetCookieGetCookieImpl;
+
+impl GetCookieGetCookieImpl {
+    fn inner(&self, c: String, key: Option<String>) -> F64OrString {
+        if key {
+            return 42.0;
+        }
+        c
+    }
+}

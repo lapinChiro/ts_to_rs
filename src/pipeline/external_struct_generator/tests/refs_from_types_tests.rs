@@ -95,6 +95,7 @@ fn test_collect_refs_defined_struct_excluded() {
             name: "Foo".to_string(),
             type_params: vec![],
             fields: vec![],
+            is_unit_struct: false,
         },
         Item::Enum {
             vis: Visibility::Public,
@@ -134,6 +135,7 @@ fn test_collect_refs_nested_type_args_detected() {
                 type_args: vec![],
             })),
         }],
+        is_unit_struct: false,
     }];
 
     let refs = collect_undefined_type_references(&items.iter().collect::<Vec<_>>(), &registry);
@@ -157,6 +159,7 @@ fn test_collect_refs_struct_field_named_type_detected() {
                 type_args: vec![],
             },
         }],
+        is_unit_struct: false,
     }];
 
     let refs = collect_undefined_type_references(&items.iter().collect::<Vec<_>>(), &registry);
@@ -295,6 +298,7 @@ fn test_collect_refs_option_nested_type_detected() {
                 type_args: vec![],
             })),
         }],
+        is_unit_struct: false,
     }];
 
     let refs = collect_undefined_type_references(&items.iter().collect::<Vec<_>>(), &registry);
@@ -360,6 +364,7 @@ fn test_collect_refs_defined_trait_excluded() {
                     type_args: vec![],
                 },
             }],
+            is_unit_struct: false,
         },
     ];
 
@@ -391,6 +396,7 @@ fn test_collect_refs_defined_type_alias_excluded() {
                     type_args: vec![],
                 },
             }],
+            is_unit_struct: false,
         },
     ];
 
@@ -451,6 +457,7 @@ fn test_collect_refs_result_type_both_ok_and_err_detected() {
                 }),
             },
         }],
+        is_unit_struct: false,
     }];
 
     let refs = collect_undefined_type_references(&items.iter().collect::<Vec<_>>(), &registry);
@@ -480,6 +487,7 @@ fn test_collect_refs_tuple_type_detected() {
                 },
             ]),
         }],
+        is_unit_struct: false,
     }];
 
     let refs = collect_undefined_type_references(&items.iter().collect::<Vec<_>>(), &registry);

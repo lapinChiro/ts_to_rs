@@ -37,6 +37,9 @@ pub(crate) struct Transformer<'a> {
     /// ユーザー定義クラスの `&mut self` メソッド名の集合。
     /// `pre_scan_classes` 後に構築し、mutation 検出で参照する。
     mut_method_names: std::collections::HashSet<String>,
+    /// Callable interface marker struct 名の使用済み集合 (INV-1)。
+    /// PascalCase collision を検出し、suffix 付与で unique 化する。
+    used_marker_names: std::collections::HashSet<String>,
 }
 
 impl<'a> Transformer<'a> {
@@ -49,6 +52,7 @@ impl<'a> Transformer<'a> {
             tctx,
             synthetic,
             mut_method_names: std::collections::HashSet::new(),
+            used_marker_names: std::collections::HashSet::new(),
         }
     }
 
@@ -61,6 +65,7 @@ impl<'a> Transformer<'a> {
             tctx: self.tctx,
             synthetic: &mut *self.synthetic,
             mut_method_names: self.mut_method_names.clone(),
+            used_marker_names: std::collections::HashSet::new(),
         }
     }
 
@@ -78,6 +83,24 @@ impl<'a> Transformer<'a> {
             tctx: self.tctx,
             synthetic: local,
             mut_method_names: self.mut_method_names.clone(),
+            used_marker_names: std::collections::HashSet::new(),
+        }
+    }
+
+    /// Marker struct 名を allocate し、衝突時に suffix で unique 化する (INV-1)。
+    ///
+    /// `base` → `base` (未使用) or `base1` → `base2` ... で unique 化。
+    pub(crate) fn allocate_marker_name(&mut self, base: &str) -> String {
+        if self.used_marker_names.insert(base.to_string()) {
+            return base.to_string();
+        }
+        let mut i = 1;
+        loop {
+            let candidate = format!("{base}{i}");
+            if self.used_marker_names.insert(candidate.clone()) {
+                return candidate;
+            }
+            i += 1;
         }
     }
 

@@ -1,0 +1,16 @@
+---
+source: tests/integration_test.rs
+expression: output
+---
+trait Transformer {
+    fn call_0(&self, input: String) -> String;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct TransformerTransformImpl;
+
+impl TransformerTransformImpl {
+    fn inner(&self, data: String) -> String {
+        data
+    }
+}

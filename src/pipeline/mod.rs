@@ -314,6 +314,7 @@ fn resolve_external_types_globally(
                         name: name.clone(),
                         type_params: vec![],
                         fields: vec![],
+                        is_unit_struct: false,
                     });
             synthetic.push_item(
                 name.clone(),
@@ -463,6 +464,7 @@ mod tests {
                         type_args: vec![],
                     },
                 }],
+                is_unit_struct: false,
             }],
             unsupported: vec![],
         }];
@@ -537,6 +539,7 @@ mod tests {
                         type_args: vec![],
                     },
                 }],
+                is_unit_struct: false,
             }],
             unsupported: vec![],
         }];
@@ -569,6 +572,7 @@ mod tests {
                     name: "n".to_string(),
                     ty: RustType::F64,
                 }],
+                is_unit_struct: false,
             }],
             unsupported: vec![],
         }];

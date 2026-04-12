@@ -210,22 +210,150 @@ impl<'a> Transformer<'a> {
         }
     }
 
-    /// Converts a callable interface const declaration to trait-related items.
+    /// Converts a callable interface const declaration to marker struct + inner fn.
     ///
-    /// Currently emits only the trait definition (skeleton). Phase 5-8 will add
-    /// marker struct, inner fn, delegate impl, and const instance.
+    /// Phase 5: marker struct (ZST) + inner fn (widest signature)
+    /// Phase 6-7: return wrap + delegate impl (TODO)
+    /// Phase 8: const instance (TODO)
     fn convert_callable_trait_const(
         &mut self,
-        _value_name: &str,
-        _trait_name: &str,
+        value_name: &str,
+        trait_name: &str,
         _trait_type_args: &[RustType],
-        _arrow: &ast::ArrowExpr,
-        _vis: Visibility,
-        _resilient: bool,
+        arrow: &ast::ArrowExpr,
+        _vis: Visibility, // Phase 8 で const instance 生成時に使用
+        resilient: bool,
     ) -> Result<Vec<Item>> {
-        // Phase 5-8 で充実させる。現時点では空の Vec を返す
-        // (trait 定義は P4.1 の convert_callable_interface_as_trait で既に生成済み)
-        Ok(vec![])
+        // --- Compute widest signature from registry ---
+        let call_sigs = match self.reg().get(trait_name) {
+            Some(crate::registry::TypeDef::Struct {
+                call_signatures, ..
+            }) => call_signatures.clone(),
+            _ => {
+                return Err(anyhow::anyhow!(
+                    "callable interface '{trait_name}' not found"
+                ))
+            }
+        };
+        let widest = crate::pipeline::type_converter::overloaded_callable::compute_widest_signature(
+            &call_sigs,
+            self.synthetic,
+        );
+
+        // --- Marker struct name (INV-1) ---
+        let base_marker = Self::marker_struct_name(trait_name, value_name);
+        let marker_name = self.allocate_marker_name(&base_marker);
+
+        // --- ZST marker struct (P5.2) ---
+        let marker_struct = Item::Struct {
+            vis: Visibility::Private,
+            name: marker_name.clone(),
+            type_params: vec![],
+            fields: vec![],
+            is_unit_struct: true,
+        };
+
+        // --- Inner fn body from arrow (P5.4) ---
+        // fallback_warnings は callable interface path では使用しない
+        // (型注釈付きのため fallback が少なく、呼び出し元で空 vec を返す)
+        let mut fallback_warnings = Vec::new();
+        let widest_return = widest.return_type.clone();
+        let widest_param_types: Vec<RustType> =
+            widest.params.iter().map(|p| p.ty.clone()).collect();
+
+        let closure = self
+            .spawn_nested_scope()
+            .convert_arrow_expr_with_return_type(
+                arrow,
+                resilient,
+                &mut fallback_warnings,
+                widest_return.as_ref(),
+                Some(&widest_param_types),
+            )?;
+
+        // Extract body and params from closure.
+        // Closure params use arrow's names + widest types (applied by convert_arrow_expr_with_return_type).
+        // We must use arrow param names for inner fn because the body references them.
+        let (mut fn_body, closure_params) = if let Expr::Closure { body, params, .. } = closure {
+            let stmts = match body {
+                crate::ir::ClosureBody::Expr(expr) => vec![Stmt::Return(Some(*expr))],
+                crate::ir::ClosureBody::Block(stmts) => stmts,
+            };
+            (stmts, params)
+        } else {
+            (vec![], vec![])
+        };
+        convert_last_return_to_tail(&mut fn_body);
+
+        // Inner method params: use closure params (arrow names + widest types) for positions
+        // within arrow arity, then append widest params for positions beyond arrow arity.
+        // This ensures body variable references match param names.
+        let mut inner_params = closure_params;
+        // Ensure all params have types (fallback to widest type if closure left ty as None)
+        for (i, p) in inner_params.iter_mut().enumerate() {
+            if p.ty.is_none() {
+                if let Some(wp) = widest.params.get(i) {
+                    p.ty = Some(wp.ty.clone());
+                } else {
+                    p.ty = Some(RustType::Any);
+                }
+            }
+        }
+        // Append widest params beyond arrow arity
+        for i in inner_params.len()..widest.params.len() {
+            inner_params.push(crate::ir::Param {
+                name: widest.params[i].name.clone(),
+                ty: Some(widest.params[i].ty.clone()),
+            });
+        }
+
+        let inner_method = Method {
+            vis: Visibility::Private,
+            name: "inner".to_string(),
+            is_async: arrow.is_async,
+            has_self: true,
+            has_mut_self: false,
+            params: inner_params,
+            return_type: widest.return_type.clone(),
+            body: Some(fn_body),
+        };
+
+        // Marker impl with inner method
+        let marker_impl = Item::Impl {
+            struct_name: marker_name.clone(),
+            type_params: vec![],
+            for_trait: None,
+            consts: vec![],
+            methods: vec![inner_method],
+        };
+
+        // Phase 7: delegate impl (TODO)
+        // Phase 8: const instance (TODO)
+
+        Ok(vec![marker_struct, marker_impl])
+    }
+
+    /// Generates the marker struct name for a callable interface const.
+    ///
+    /// `marker_struct_name("GetCookie", "getCookie")` → `"GetCookieGetCookieImpl"`
+    /// `marker_struct_name("Handler", "request_handler")` → `"HandlerRequestHandlerImpl"`
+    ///
+    /// value_name の先頭を大文字化して trait_name と結合する。
+    /// snake_case は `string_to_pascal_case` で PascalCase 化し、
+    /// camelCase はそのまま先頭大文字化する。
+    pub(crate) fn marker_struct_name(trait_name: &str, value_name: &str) -> String {
+        let capitalized = if value_name.contains('_') {
+            // snake_case → PascalCase
+            crate::ir::string_to_pascal_case(value_name)
+        } else {
+            // camelCase / single word → 先頭大文字化
+            let mut chars = value_name.chars();
+            match chars.next() {
+                Some(c) => c.to_uppercase().to_string() + chars.as_str(),
+                None => String::new(),
+            }
+        };
+        format!("{trait_name}{capitalized}Impl")
     }
 
     /// Infers the Rust type for a const-safe literal without type annotation.

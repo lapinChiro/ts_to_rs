@@ -274,6 +274,7 @@ fn test_collect_type_refs_struct_type_param_constraint() {
             constraint: Some(named("SomeTrait")),
         }],
         fields: vec![],
+        is_unit_struct: false,
     };
     let mut refs = HashSet::new();
     collect_type_refs_from_item(&item, &mut refs);

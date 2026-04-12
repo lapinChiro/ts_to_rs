@@ -273,6 +273,7 @@ impl SyntheticTypeRegistry {
             name: name.clone(),
             type_params,
             fields: fields.to_vec(),
+            is_unit_struct: false,
         };
 
         self.types.insert(

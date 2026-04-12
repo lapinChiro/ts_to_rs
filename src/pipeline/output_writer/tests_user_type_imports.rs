@@ -9,6 +9,7 @@ fn make_user_struct(name: &str) -> Item {
         name: name.to_string(),
         type_params: vec![],
         fields: vec![],
+        is_unit_struct: false,
     }
 }
 
@@ -198,6 +199,7 @@ fn test_transitive_shared_user_type_import() {
                 type_args: vec![],
             },
         }],
+        is_unit_struct: false,
     };
 
     let files = vec![
@@ -406,6 +408,7 @@ fn test_inline_synthetic_transitive_to_shared_no_scope_leak() {
                 type_args: vec![],
             },
         }],
+        is_unit_struct: false,
     };
 
     let files = vec![

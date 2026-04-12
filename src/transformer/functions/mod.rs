@@ -10,7 +10,7 @@ mod params;
 use anyhow::{anyhow, Result};
 use swc_ecma_ast as ast;
 
-use crate::ir::{Expr, Item, MatchArm, Param, RustType, Stmt, Visibility};
+use crate::ir::{Expr, Item, MatchArm, Method, Param, RustType, Stmt, Visibility};
 use crate::pipeline::type_converter::{convert_ts_type, extract_type_params};
 use crate::pipeline::SyntheticTypeRegistry;
 use crate::transformer::{

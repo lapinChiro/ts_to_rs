@@ -836,6 +836,7 @@ fn test_convert_array_lit_empty_with_expected_vec_string() {
 
         synthetic: &mut SyntheticTypeRegistry::new(),
         mut_method_names: std::collections::HashSet::new(),
+        used_marker_names: std::collections::HashSet::new(),
     }
     .convert_expr(&swc_expr)
     .unwrap();
@@ -855,6 +856,7 @@ fn test_convert_array_lit_elements_get_expected_element_type() {
 
         synthetic: &mut SyntheticTypeRegistry::new(),
         mut_method_names: std::collections::HashSet::new(),
+        used_marker_names: std::collections::HashSet::new(),
     }
     .convert_expr(&swc_expr)
     .unwrap();

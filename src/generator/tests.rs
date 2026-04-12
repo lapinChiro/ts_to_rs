@@ -66,6 +66,7 @@ fn test_generate_struct_public() {
                 ty: RustType::F64,
             },
         ],
+        is_unit_struct: false,
     };
     let expected = "\
 #[derive(Debug, Clone, PartialEq)]
@@ -87,6 +88,7 @@ fn test_generate_struct_private() {
             name: "x".to_string(),
             ty: RustType::Bool,
         }],
+        is_unit_struct: false,
     };
     let expected = "\
 #[derive(Debug, Clone, PartialEq)]
@@ -113,6 +115,7 @@ fn test_generate_struct_with_type_params() {
                 type_args: vec![],
             },
         }],
+        is_unit_struct: false,
     };
     let expected = "\
 #[derive(Debug, Clone, PartialEq)]
@@ -120,6 +123,39 @@ pub struct Container<T> {
     pub value: T,
 }";
     assert_eq!(generate(&[item]), expected);
+}
+
+// --- Item::Struct unit struct (is_unit_struct) tests ---
+
+#[test]
+fn test_generate_unit_struct_marker() {
+    let item = Item::Struct {
+        vis: Visibility::Private,
+        name: "GetCookieImpl".to_string(),
+        type_params: vec![],
+        fields: vec![],
+        is_unit_struct: true,
+    };
+    assert_eq!(
+        generate(&[item]),
+        "#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]\nstruct GetCookieImpl;"
+    );
+}
+
+#[test]
+fn test_generate_non_unit_empty_struct_keeps_braces() {
+    let item = Item::Struct {
+        vis: Visibility::Public,
+        name: "Empty".to_string(),
+        type_params: vec![],
+        fields: vec![],
+        is_unit_struct: false,
+    };
+    let output = generate(&[item]);
+    assert!(
+        output.contains("struct Empty {"),
+        "non-unit empty struct should use braces: {output}"
+    );
 }
 
 // --- Item::Enum tests ---
@@ -351,7 +387,7 @@ fn test_generate_const_unit_struct_init() {
     };
     assert_eq!(
         generate(&[item]),
-        "const getCookie: GetCookieImpl = GetCookieImpl {  };"
+        "const getCookie: GetCookieImpl = GetCookieImpl;"
     );
 }
 
@@ -592,12 +628,14 @@ fn test_generate_multiple_items_separated_by_blank_line() {
             name: "A".to_string(),
             type_params: vec![],
             fields: vec![],
+            is_unit_struct: false,
         },
         Item::Struct {
             vis: Visibility::Public,
             name: "B".to_string(),
             type_params: vec![],
             fields: vec![],
+            is_unit_struct: false,
         },
     ];
     let expected = "\
@@ -775,6 +813,7 @@ fn test_escape_ident_struct_field_reserved_word_adds_r_hash() {
             name: "type".to_string(),
             ty: RustType::String,
         }],
+        is_unit_struct: false,
     };
     let output = generate(&[item]);
     assert!(

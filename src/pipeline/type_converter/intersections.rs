@@ -365,6 +365,7 @@ fn try_convert_intersection_type_inner(
             name: sanitize_rust_type_name(&decl.id.sym),
             type_params,
             fields: vec![],
+            is_unit_struct: false,
         }));
     }
     if members.len() == 1 {
@@ -532,5 +533,6 @@ fn try_convert_intersection_type_inner(
         name: struct_name,
         type_params,
         fields: fields.iter().map(|f| f.substitute(mono_subs)).collect(),
+        is_unit_struct: false,
     }))
 }

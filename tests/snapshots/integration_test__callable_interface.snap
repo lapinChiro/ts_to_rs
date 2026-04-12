@@ -18,3 +18,12 @@ struct Body {
 }
 
 type BodyCache = Body;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct GetValueGetValueImpl;
+
+impl GetValueGetValueImpl {
+    fn inner(&self, key: String) -> String {
+        key
+    }
+}

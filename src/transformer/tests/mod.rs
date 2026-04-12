@@ -15,6 +15,58 @@ use crate::registry::TypeRegistry;
 use crate::transformer::test_fixtures::TctxFixture;
 use crate::transformer::Transformer;
 
+// -- marker_struct_name tests --
+
+#[test]
+fn marker_name_pascalcase_lowercase_value() {
+    assert_eq!(
+        Transformer::marker_struct_name("GetCookie", "getCookie"),
+        "GetCookieGetCookieImpl"
+    );
+}
+
+#[test]
+fn marker_name_short_value() {
+    // single word → 先頭大文字化
+    assert_eq!(
+        Transformer::marker_struct_name("GetCookie", "g1"),
+        "GetCookieG1Impl"
+    );
+}
+
+#[test]
+fn marker_name_pascalcase_snake_value() {
+    assert_eq!(
+        Transformer::marker_struct_name("Handler", "request_handler"),
+        "HandlerRequestHandlerImpl"
+    );
+}
+
+#[test]
+fn marker_name_distinct_for_distinct_values() {
+    let name1 = Transformer::marker_struct_name("I", "foo");
+    let name2 = Transformer::marker_struct_name("I", "bar");
+    assert_ne!(name1, name2);
+}
+
+#[test]
+fn marker_name_collision_suffix_loop() {
+    let f = TctxFixture::from_source("const x = 1;");
+    let tctx = f.tctx();
+    let mut synthetic = SyntheticTypeRegistry::new();
+    let mut t = Transformer::for_module(&tctx, &mut synthetic);
+
+    // "a" and "A" both become PascalCase "A" → same base "IAImpl"
+    let base1 = Transformer::marker_struct_name("I", "a");
+    let base2 = Transformer::marker_struct_name("I", "A");
+    assert_eq!(base1, base2); // both "IAImpl"
+
+    let alloc1 = t.allocate_marker_name(&base1);
+    let alloc2 = t.allocate_marker_name(&base2);
+    assert_eq!(alloc1, "IAImpl");
+    assert_eq!(alloc2, "IAImpl1"); // collision → suffix
+}
+
 // -- spawn_nested_scope factory method tests --
 
 #[test]

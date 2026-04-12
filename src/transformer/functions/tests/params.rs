@@ -290,6 +290,7 @@ fn test_convert_fn_decl_inline_type_literal_single_field_generates_struct() {
                 name: "x".to_string(),
                 ty: RustType::F64,
             }],
+            is_unit_struct: false,
         }
     );
     match &items[1] {
@@ -333,6 +334,7 @@ fn test_convert_fn_decl_inline_type_literal_multiple_fields_generates_struct() {
                     ty: RustType::String,
                 },
             ],
+            is_unit_struct: false,
         }
     );
 }
@@ -381,6 +383,7 @@ fn test_convert_fn_decl_inline_type_literal_empty_generates_empty_struct() {
             name: "QuxOpts".to_string(),
             type_params: vec![],
             fields: vec![],
+            is_unit_struct: false,
         }
     );
 }
