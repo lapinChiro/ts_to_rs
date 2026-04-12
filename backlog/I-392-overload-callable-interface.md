@@ -1198,20 +1198,34 @@ Delegate method が `self.inner(args)` の結果を **そのまま返す** (matc
 - delegate: `fn call_0(&self, c: String) -> String { self.inner(c, None) }` のように
   inner の結果を直接 unwrap
 
-**Phase 7 で解決すべき問題**:
-1. inner fn body の return type を widest union enum ではなく **素の型** にするか、
-   body 内の return 式を variant wrap するか設計決定が必要
-2. 素の型にする場合: inner fn の return type は何になるか？ 各 overload で異なる
-3. variant wrap する場合: TypeResolver の型情報が必要 (Phase 9.2 まで利用不可)
-4. **推奨**: single-overload callable interface は素の return type をそのまま使う。
-   multi-overload (divergent) の場合は inner fn body でリテラル/None 等の推論可能な
-   return 式のみ wrap し、推論不可能な式は hard error とする。Phase 9.2 以降で
-   TypeResolver 型情報を利用した完全な wrap に改善
+**Phase 7 開始前に解決すべき設計判断** (次 session の最初のタスク):
+
+inner fn の return type と delegate の関係について、以下 2 つのアプローチを検討し、
+empirical に検証してから方針を決定する。
+
+**Option A: inner fn return type を non-divergent に変更**
+- single-overload: inner fn の return type = overload の return type (現状通り)
+- multi-overload (divergent): inner fn の return type を widest union enum **から変更**。
+  body は arrow body そのまま (素の型を返す)
+- delegate method: `self.inner(args)` をそのまま返す (型変換なし)
+- 問題: inner fn の return type が不定 (各 overload で異なる)。Rust の型システムで
+  表現不可能 (1 つの fn に複数の return type は持てない)
+- **結論: 不可能**
+
+**Option B: inner fn body の return 式を variant wrap する (Phase 6 インフラ活用)**
+- inner fn の return type = widest union enum (現状維持)
+- body 内の return 式を `wrap_body_returns` + `wrap_expr_tail` で variant wrap
+- 問題: `infer_variant_from_expr` が `Expr::Ident` の型を推論できない
+- 対策: **TypeResolver の `get_expr_type` を使って変数の型を取得**し、variant を決定。
+  `get_expr_type` は `tctx.type_resolution.expr_types` から span ベースで型を取得。
+  callable interface arrow body 内の式にも TypeResolver が型を設定済みのはず
+- **この方法が viable かどうかを empirical に検証** (次 session の最初のタスク)
 
 **Phase 6 で用意したインフラ**:
 - `ReturnWrapContext` struct + `build_return_wrap_context`
 - `wrap_leaf` + `wrap_expr_tail` + `wrap_body_returns` (現在 `#[allow(dead_code)]`)
 - `spawn_nested_scope_with_wrap` factory method
+- `infer_variant_from_expr` (リテラル推論のみ。Ident の型推論は未実装)
 
 Phase 7 で必要に応じてこれらのインフラを使用する。
 
