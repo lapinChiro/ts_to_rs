@@ -226,6 +226,96 @@ impl RustType {
             _ => RustType::Option(Box::new(self)),
         }
     }
+
+    /// Unwraps `Promise<T>` to `T`. Non-Promise types are returned unchanged.
+    ///
+    /// INV-6: Single source of truth for Promise unwrapping across the codebase.
+    pub fn unwrap_promise(self) -> RustType {
+        match self {
+            RustType::Named {
+                ref name,
+                ref type_args,
+            } if name == "Promise" && type_args.len() == 1 => type_args[0].clone(),
+            other => other,
+        }
+    }
+
+    /// Returns true if this type is `Promise<T>`.
+    pub fn is_promise(&self) -> bool {
+        matches!(self, RustType::Named { name, type_args } if name == "Promise" && type_args.len() == 1)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unwrap_promise_extracts_inner() {
+        let promise = RustType::Named {
+            name: "Promise".to_string(),
+            type_args: vec![RustType::String],
+        };
+        assert_eq!(promise.unwrap_promise(), RustType::String);
+    }
+
+    #[test]
+    fn unwrap_promise_passthrough_non_promise() {
+        assert_eq!(RustType::F64.unwrap_promise(), RustType::F64);
+        assert_eq!(RustType::String.unwrap_promise(), RustType::String);
+    }
+
+    #[test]
+    fn unwrap_promise_passthrough_named_non_promise() {
+        let named = RustType::Named {
+            name: "MyType".to_string(),
+            type_args: vec![RustType::String],
+        };
+        assert_eq!(named.clone().unwrap_promise(), named);
+    }
+
+    #[test]
+    fn unwrap_promise_no_type_args() {
+        // Promise without type args → passthrough (not a valid Promise<T>)
+        let bare = RustType::Named {
+            name: "Promise".to_string(),
+            type_args: vec![],
+        };
+        assert_eq!(bare.clone().unwrap_promise(), bare);
+    }
+
+    #[test]
+    fn is_promise_true_for_promise_t() {
+        let promise = RustType::Named {
+            name: "Promise".to_string(),
+            type_args: vec![RustType::String],
+        };
+        assert!(promise.is_promise());
+    }
+
+    #[test]
+    fn is_promise_false_for_non_promise() {
+        assert!(!RustType::F64.is_promise());
+        assert!(!RustType::Named {
+            name: "MyType".to_string(),
+            type_args: vec![RustType::String],
+        }
+        .is_promise());
+    }
+
+    #[test]
+    fn wrap_optional_avoids_double_wrap() {
+        let opt = RustType::Option(Box::new(RustType::String));
+        assert_eq!(opt.clone().wrap_optional(), opt);
+    }
+
+    #[test]
+    fn wrap_optional_wraps_non_option() {
+        assert_eq!(
+            RustType::String.wrap_optional(),
+            RustType::Option(Box::new(RustType::String))
+        );
+    }
 }
 
 /// Visibility modifier for items.

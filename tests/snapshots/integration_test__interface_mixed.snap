@@ -2,7 +2,9 @@
 source: tests/integration_test.rs
 expression: output
 ---
-pub type Handler = Box<dyn Fn(String) -> f64>;
+pub trait Handler {
+    fn call_0(&self, req: String) -> f64;
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ServiceData {

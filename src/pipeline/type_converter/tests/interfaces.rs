@@ -262,7 +262,7 @@ fn test_convert_interface_method_with_type_params() {
 // -- call signatures --
 
 #[test]
-fn test_convert_interface_call_signature_single_generates_fn_type_alias() {
+fn test_convert_interface_call_signature_single_generates_trait() {
     let decl = parse_interface("interface Callback { (x: number): string }");
     let items = convert_interface_items(
         &decl,
@@ -274,20 +274,31 @@ fn test_convert_interface_call_signature_single_generates_fn_type_alias() {
     assert_eq!(items.len(), 1);
     assert_eq!(
         items[0],
-        Item::TypeAlias {
+        Item::Trait {
             vis: Visibility::Public,
             name: "Callback".to_string(),
             type_params: vec![],
-            ty: RustType::Fn {
-                params: vec![RustType::F64],
-                return_type: Box::new(RustType::String),
-            },
+            supertraits: vec![],
+            methods: vec![Method {
+                vis: Visibility::Public,
+                name: "call_0".to_string(),
+                is_async: false,
+                has_self: true,
+                has_mut_self: false,
+                params: vec![Param {
+                    name: "x".to_string(),
+                    ty: Some(RustType::F64),
+                }],
+                return_type: Some(RustType::String),
+                body: None,
+            }],
+            associated_types: vec![],
         }
     );
 }
 
 #[test]
-fn test_convert_interface_call_signature_overload_uses_longest() {
+fn test_convert_interface_call_signature_overload_generates_trait_methods() {
     let decl = parse_interface(
         "interface Overloaded { (x: number): string; (x: number, y: string): boolean }",
     );
@@ -300,18 +311,19 @@ fn test_convert_interface_call_signature_overload_uses_longest() {
     .unwrap();
     assert_eq!(items.len(), 1);
     match &items[0] {
-        Item::TypeAlias { ty, .. } => match ty {
-            RustType::Fn { params, .. } => {
-                assert_eq!(params.len(), 2);
-            }
-            _ => panic!("expected RustType::Fn"),
-        },
-        _ => panic!("expected Item::TypeAlias"),
+        Item::Trait { methods, .. } => {
+            assert_eq!(methods.len(), 2);
+            assert_eq!(methods[0].name, "call_0");
+            assert_eq!(methods[0].params.len(), 1);
+            assert_eq!(methods[1].name, "call_1");
+            assert_eq!(methods[1].params.len(), 2);
+        }
+        _ => panic!("expected Item::Trait"),
     }
 }
 
 #[test]
-fn test_convert_interface_call_signature_no_params_generates_fn_type() {
+fn test_convert_interface_call_signature_no_params_generates_trait() {
     let decl = parse_interface("interface Factory { (): void }");
     let items = convert_interface_items(
         &decl,
@@ -323,14 +335,22 @@ fn test_convert_interface_call_signature_no_params_generates_fn_type() {
     assert_eq!(items.len(), 1);
     assert_eq!(
         items[0],
-        Item::TypeAlias {
+        Item::Trait {
             vis: Visibility::Public,
             name: "Factory".to_string(),
             type_params: vec![],
-            ty: RustType::Fn {
+            supertraits: vec![],
+            methods: vec![Method {
+                vis: Visibility::Public,
+                name: "call_0".to_string(),
+                is_async: false,
+                has_self: true,
+                has_mut_self: false,
                 params: vec![],
-                return_type: Box::new(RustType::Unit),
-            },
+                return_type: None,
+                body: None,
+            }],
+            associated_types: vec![],
         }
     );
 }
@@ -338,7 +358,7 @@ fn test_convert_interface_call_signature_no_params_generates_fn_type() {
 // --- call signature rest parameters ---
 
 #[test]
-fn test_convert_interface_call_signature_rest_param_generates_fn_type() {
+fn test_convert_interface_call_signature_rest_param_generates_trait() {
     let decl = parse_interface("interface Handler { (...args: number[]): void }");
     let items = convert_interface_items(
         &decl,
@@ -350,20 +370,31 @@ fn test_convert_interface_call_signature_rest_param_generates_fn_type() {
     assert_eq!(items.len(), 1);
     assert_eq!(
         items[0],
-        Item::TypeAlias {
+        Item::Trait {
             vis: Visibility::Public,
             name: "Handler".to_string(),
             type_params: vec![],
-            ty: RustType::Fn {
-                params: vec![RustType::Vec(Box::new(RustType::F64))],
-                return_type: Box::new(RustType::Unit),
-            },
+            supertraits: vec![],
+            methods: vec![Method {
+                vis: Visibility::Public,
+                name: "call_0".to_string(),
+                is_async: false,
+                has_self: true,
+                has_mut_self: false,
+                params: vec![Param {
+                    name: "args".to_string(),
+                    ty: Some(RustType::Vec(Box::new(RustType::F64))),
+                }],
+                return_type: None,
+                body: None,
+            }],
+            associated_types: vec![],
         }
     );
 }
 
 #[test]
-fn test_convert_interface_call_signature_mixed_and_rest_generates_fn_type() {
+fn test_convert_interface_call_signature_mixed_and_rest_generates_trait() {
     let decl =
         parse_interface("interface Formatter { (template: string, ...values: number[]): string }");
     let items = convert_interface_items(
@@ -375,19 +406,18 @@ fn test_convert_interface_call_signature_mixed_and_rest_generates_fn_type() {
     .unwrap();
     assert_eq!(items.len(), 1);
     match &items[0] {
-        Item::TypeAlias {
-            ty: RustType::Fn {
-                params,
-                return_type,
-            },
-            ..
-        } => {
-            assert_eq!(params.len(), 2);
-            assert_eq!(params[0], RustType::String);
-            assert_eq!(params[1], RustType::Vec(Box::new(RustType::F64)));
-            assert_eq!(return_type.as_ref(), &RustType::String);
+        Item::Trait { methods, .. } => {
+            assert_eq!(methods.len(), 1);
+            let m = &methods[0];
+            assert_eq!(m.name, "call_0");
+            assert_eq!(m.params.len(), 2);
+            assert_eq!(m.params[0].name, "template");
+            assert_eq!(m.params[0].ty, Some(RustType::String));
+            assert_eq!(m.params[1].name, "values");
+            assert_eq!(m.params[1].ty, Some(RustType::Vec(Box::new(RustType::F64))));
+            assert_eq!(m.return_type, Some(RustType::String));
         }
-        _ => panic!("expected TypeAlias with Fn type"),
+        _ => panic!("expected Item::Trait"),
     }
 }
 

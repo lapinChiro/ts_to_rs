@@ -2,6 +2,18 @@
 
 ## 改訂履歴
 
+- **2026-04-12 #10 (Phase 4 完了)**: Phase 4 (Trait emission) 全 sub-phase 完了。
+  - P4.1: `convert_callable_interface_as_trait` — callable interface → `Item::Trait`
+    (call_0, call_1 method)。snapshot 3件更新、compile_test 3件一時除外
+  - P4.2: `RustType::unwrap_promise()` + `is_promise()` 追加。trait method + class method
+    の Promise<T> → T unwrap。async-class-method compile_test 復帰。INV-6 lint script
+  - P4.3: `callable_trait_name_and_args` + `convert_callable_trait_const` skeleton
+  - /check_job で発見・修正: `RustType::unwrap_promise()` / `is_promise()` unit test 8件追加、
+    INV-6 既存関数置換を P9.2 に義務付け + Phase 13 に確認追加
+  - /check_problem で発見・修正: `classify_callable_interface` に `is_interface` guard 追加
+    (type alias 由来 callable type を NonCallable に判定、後続 phase の trait 未定義不整合を防止)。
+    PRD P4.1 Exit の INV-2 lint 記述を修正 (TsTypeLiteralInfo と TypeDef の層の違い)
+  - 最終状態: 2331 tests (全テスト pass), clippy 0, fmt 0
 - **2026-04-12 #9 (Phase 3 完了 + 教訓反映)**: Phase 3 (Widest signature) 完了。
   - `overloaded_callable.rs` 新規作成 (compute_widest_params, compute_union_return,
     WidestSignature)
@@ -846,8 +858,10 @@ follow-up PRD に移す。本 phase は `Expr::Lit` のみ対応。
     trait 化後〜P8.2 の間 compile 不可になるため、`tests/compile_test.rs` から
     一時的にエントリを除外する。P8.2 で復帰
   - 完全な marker 構造 (struct + impls + const) は Phase 5-8 で完成
-  - **INV-2 lint 解消 (部分)**: `type_aliases.rs` の `call_signatures.is_empty()` 判定を
-    `classify_callable_interface` に移行 (Phase 2 の lint で warning 検出されていた violation)
+  - **INV-2 lint 注記**: `type_aliases.rs` の `call_signatures` 参照は
+    `TsTypeLiteralInfo` (SWC AST 中間表現) のフィールドであり、`TypeDef::Struct` の
+    `call_signatures` とは別の型。`classify_callable_interface` は `TypeDef` 用のため
+    `type_aliases.rs` には適用不可。INV-2 lint は `TypeDef` レベルの直接検査のみ対象
 - **Rollback**: interfaces.rs diff を discard (user 実施)
 
 **Note (構築 signature)**: `interface Factory { new (config): Factory; name: string; }`
@@ -1189,6 +1203,14 @@ Phase 9 (Generic) 以降で発見される問題が「generic 固有」か「基
      `type_aliases.rs` 修正と合わせて lint violation が 0 になることを確認
   6. **`overloaded_callable.rs` の `#![allow(dead_code)]` 削除**: P9.2 で
      `compute_widest_signature` が production code から呼ばれるようになるため不要になる
+  7. **INV-6 完全達成: 既存 Promise unwrap 関数を `RustType::unwrap_promise()` に置換**:
+     - `unwrap_promise_and_unit()` (`src/pipeline/type_resolver/helpers.rs:233`) →
+       `RustType::unwrap_promise()` + Unit filter に分解。呼び出し元
+       (`fn_exprs.rs:61,95`, `visitors.rs:89`) を更新
+     - `unwrap_promise_type()` (`src/transformer/functions/helpers.rs:33`) →
+       `RustType::unwrap_promise()` に置換。呼び出し元 (`functions/mod.rs:113`) を更新
+     - 置換後、既存 standalone 関数 2 つを削除
+     - **Exit 追加**: `grep -rn 'unwrap_promise_type\|unwrap_promise_and_unit' src/` ヒット 0 件
 - **Exit**:
   - 既存 test pass
   - 新 unit test: multi overload callable interface の arrow body が widest 型で
@@ -1196,6 +1218,7 @@ Phase 9 (Generic) 以降で発見される問題が「generic 固有」か「基
   - `scripts/check-classify-callable-usage.sh` が exit 0 で violation 0 件
     (warning ではなく clean pass)。lint script の `exit 0` を `exit 1` に変更
   - `overloaded_callable.rs` に `#![allow(dead_code)]` がないこと
+  - `grep -rn 'unwrap_promise_type\|unwrap_promise_and_unit' src/` ヒット 0 件 (INV-6)
 - **Rollback**: なし
 
 #### P9.3: type substitution の単一 helper 化 (旧 P9.2 を後置)
@@ -1318,6 +1341,8 @@ Phase 9 (Generic) 以降で発見される問題が「generic 固有」か「基
       (`grep -rn 'allow(dead_code)' src/ --include='*.rs' | grep -v tests`)
   11. `async-class-method` が `compile_test.rs` の skip リストから除外されていること確認
       (P4.2 で復帰済のはず)
+  12. INV-6 完全達成確認: `grep -rn 'unwrap_promise_type\|unwrap_promise_and_unit' src/`
+      ヒット 0 件 (P9.2 で置換済のはず)
 - **Exit**: 全 quality gate clean
 - **Rollback**: なし
 
@@ -1569,6 +1594,15 @@ PR 説明に転記。
   変換されるが、`42.0` は `f64` であり `const anyVal: serde_json::Value = 42.0;` は
   型不一致で compile 不可。現状 `convert_lit_var_decl` で `RustType::Any` の場合 skip。
   正しくは `serde_json::json!(42.0)` 等に変換すべきだが、設計判断が必要
+- **Type alias 由来の callable type の trait 化**
+  (Phase 4 /check_problem で発見): `type Handler = { (x: string): string }` のような
+  type alias 由来の callable type は `is_interface: false` のため `classify_callable_interface`
+  で `NonCallable` と判定され、`type_aliases.rs` の `Box<dyn Fn>` path が適用される。
+  trait 化は `interface` 宣言のみが対象。type alias callable type の trait 化は
+  `type_aliases.rs` の `TsTypeLiteralInfo` → `Item::Trait` 変換パスが必要で、
+  `interfaces.rs` とは別の実装が必要。follow-up PRD で対応。
+  `classify_callable_interface` に `is_interface` guard を追加して後続 phase の
+  不整合 (trait 未定義で trait impl 生成) を防止済
 - `interface Factory { new (config): Factory; name: string; }` 等 construct signature
   の emission 改善 (現在も emit されていない、変更なし)
 

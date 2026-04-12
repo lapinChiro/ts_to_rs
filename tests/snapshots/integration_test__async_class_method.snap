@@ -7,7 +7,7 @@ struct DataService {
 }
 
 impl DataService {
-    async fn fetchData(&self, url: String) -> Promise<String> {
+    async fn fetchData(&self, url: String) -> String {
         url
     }
 

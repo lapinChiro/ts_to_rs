@@ -2,8 +2,14 @@
 source: tests/integration_test.rs
 expression: output
 ---
-type VarargHandler = Box<dyn Fn(Vec<f64>)>;
+trait VarargHandler {
+    fn call_0(&self, args: Vec<f64>);
+}
 
-type Formatter = Box<dyn Fn(String, Vec<f64>) -> String>;
+trait Formatter {
+    fn call_0(&self, template: String, values: Vec<f64>) -> String;
+}
 
-type Callback = Box<dyn Fn(f64, f64) -> f64>;
+trait Callback {
+    fn call_0(&self, x: f64, y: f64) -> f64;
+}

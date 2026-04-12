@@ -1111,8 +1111,9 @@ pub enum CallableInterfaceKind {
 
 /// TypeDef を callable interface として分類する。
 ///
-/// Callable interface = call signature のみを持つ interface。
-/// fields, methods, constructor がある場合は `NonCallable` を返す。
+/// Callable interface = `interface` 宣言由来で、call signature のみを持つ型。
+/// `type T = { (x): string }` (type alias 由来、`is_interface: false`) は NonCallable。
+/// fields, methods, constructor がある場合も `NonCallable` を返す。
 /// `TypeDef::Struct` 以外も `NonCallable`。
 pub fn classify_callable_interface(def: &TypeDef) -> CallableInterfaceKind {
     let TypeDef::Struct {
@@ -1120,11 +1121,19 @@ pub fn classify_callable_interface(def: &TypeDef) -> CallableInterfaceKind {
         fields,
         methods,
         constructor,
+        is_interface,
         ..
     } = def
     else {
         return CallableInterfaceKind::NonCallable;
     };
+
+    // type alias 由来 (is_interface: false) は callable interface として扱わない。
+    // type alias の callable type は type_aliases.rs で Box<dyn Fn> として処理される。
+    // trait 化は interfaces.rs の interface 宣言のみが対象。
+    if !is_interface {
+        return CallableInterfaceKind::NonCallable;
+    }
 
     // call signature がなければ非 callable
     if call_signatures.is_empty() {
@@ -1298,6 +1307,25 @@ mod classify_callable_interface_tests {
             params: vec![],
             return_type: None,
             has_rest: false,
+        };
+        assert_eq!(
+            classify_callable_interface(&def),
+            CallableInterfaceKind::NonCallable
+        );
+    }
+
+    #[test]
+    fn non_callable_type_alias_with_call_sig() {
+        // type T = { (x: string): string } — is_interface: false
+        // type alias 由来の callable type は NonCallable (Box<dyn Fn> path を維持)
+        let def = TypeDef::Struct {
+            type_params: vec![],
+            fields: vec![],
+            methods: HashMap::new(),
+            constructor: None,
+            call_signatures: vec![make_call_sig(1)],
+            extends: vec![],
+            is_interface: false,
         };
         assert_eq!(
             classify_callable_interface(&def),

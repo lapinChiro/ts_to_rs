@@ -304,6 +304,14 @@ impl<'a> Transformer<'a> {
             .as_ref()
             .map(|ann| convert_ts_type(&ann.type_ann, self.synthetic, self.reg()))
             .transpose()?
+            .map(|ty| {
+                // Unwrap Promise<T> → T for async methods
+                if function.is_async {
+                    ty.unwrap_promise()
+                } else {
+                    ty
+                }
+            })
             .and_then(|ty| {
                 if matches!(ty, RustType::Unit) {
                     None

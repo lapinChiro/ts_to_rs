@@ -2,9 +2,14 @@
 source: tests/integration_test.rs
 expression: output
 ---
-type GetValue = Box<dyn Fn(String) -> String>;
+trait GetValue {
+    fn call_0(&self, key: String) -> String;
+}
 
-type GetCookie = Box<dyn Fn(String, String) -> f64>;
+trait GetCookie {
+    fn call_0(&self, c: String) -> String;
+    fn call_1(&self, c: String, key: String) -> f64;
+}
 
 #[derive(Debug, Clone, PartialEq)]
 struct Body {
@@ -13,7 +18,3 @@ struct Body {
 }
 
 type BodyCache = Body;
-
-fn getValue(key: String) -> String {
-    key
-}

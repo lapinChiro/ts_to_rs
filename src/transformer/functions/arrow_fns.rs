@@ -86,7 +86,7 @@ impl<'a> Transformer<'a> {
         }))
     }
 
-    /// Converts an arrow function `const` declaration to `Item::Fn`.
+    /// Converts an arrow function `const` declaration to `Item::Fn` or callable trait items.
     fn convert_arrow_var_decl(
         &mut self,
         decl: &ast::VarDeclarator,
@@ -94,22 +94,37 @@ impl<'a> Transformer<'a> {
         vis: Visibility,
         resilient: bool,
     ) -> Result<(Vec<Item>, Vec<String>)> {
-        let (name, var_return_type, var_param_types) = match &decl.name {
-            ast::Pat::Ident(ident) => {
-                let n = ident.id.sym.to_string();
-                let var_rust_type = ident.type_ann.as_ref().and_then(|ann| {
-                    convert_ts_type(&ann.type_ann, self.synthetic, self.reg()).ok()
-                });
-                let ret = var_rust_type
-                    .as_ref()
-                    .and_then(|ty| self.extract_fn_return_type(ty));
-                let param_types = var_rust_type
-                    .as_ref()
-                    .and_then(|ty| self.extract_fn_param_types(ty));
-                (n, ret, param_types)
-            }
+        let ident = match &decl.name {
+            ast::Pat::Ident(ident) => ident,
             _ => return Ok((vec![], vec![])),
         };
+        let name = ident.id.sym.to_string();
+        let var_rust_type = ident
+            .type_ann
+            .as_ref()
+            .and_then(|ann| convert_ts_type(&ann.type_ann, self.synthetic, self.reg()).ok());
+
+        // Check if type annotation refers to a callable interface → route to trait const
+        if let Some((trait_name, trait_type_args)) =
+            self.callable_trait_name_and_args(var_rust_type.as_ref())
+        {
+            let items = self.convert_callable_trait_const(
+                &name,
+                &trait_name,
+                &trait_type_args,
+                arrow,
+                vis,
+                resilient,
+            )?;
+            return Ok((items, vec![]));
+        }
+
+        let var_return_type = var_rust_type
+            .as_ref()
+            .and_then(|ty| self.extract_fn_return_type(ty));
+        let var_param_types = var_rust_type
+            .as_ref()
+            .and_then(|ty| self.extract_fn_param_types(ty));
 
         let mut fallback_warnings = Vec::new();
         let arrow_scope_start = arrow.span.lo.0;
@@ -173,6 +188,44 @@ impl<'a> Transformer<'a> {
             });
         }
         Ok((items, fallback_warnings))
+    }
+
+    /// Returns (trait_name, type_args) if `var_rust_type` refers to a callable interface.
+    ///
+    /// Looks up the type name in the registry and classifies it. Returns `None` if
+    /// the type is not a callable interface.
+    fn callable_trait_name_and_args(
+        &self,
+        var_rust_type: Option<&RustType>,
+    ) -> Option<(String, Vec<RustType>)> {
+        let (name, type_args) = match var_rust_type? {
+            RustType::Named { name, type_args } => (name.as_str(), type_args.clone()),
+            _ => return None,
+        };
+        let def = self.reg().get(name)?;
+        use crate::registry::collection::{classify_callable_interface, CallableInterfaceKind};
+        match classify_callable_interface(def) {
+            CallableInterfaceKind::NonCallable => None,
+            _ => Some((name.to_string(), type_args)),
+        }
+    }
+
+    /// Converts a callable interface const declaration to trait-related items.
+    ///
+    /// Currently emits only the trait definition (skeleton). Phase 5-8 will add
+    /// marker struct, inner fn, delegate impl, and const instance.
+    fn convert_callable_trait_const(
+        &mut self,
+        _value_name: &str,
+        _trait_name: &str,
+        _trait_type_args: &[RustType],
+        _arrow: &ast::ArrowExpr,
+        _vis: Visibility,
+        _resilient: bool,
+    ) -> Result<Vec<Item>> {
+        // Phase 5-8 で充実させる。現時点では空の Vec を返す
+        // (trait 定義は P4.1 の convert_callable_interface_as_trait で既に生成済み)
+        Ok(vec![])
     }
 
     /// Infers the Rust type for a const-safe literal without type annotation.
