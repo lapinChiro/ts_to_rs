@@ -286,13 +286,25 @@ impl<'a> Transformer<'a> {
         };
         convert_last_return_to_tail(&mut fn_body);
 
-        // --- Return wrap for divergent returns (P6) ---
-        // Inner fn body does NOT apply return wrap here. The body returns raw values.
-        // Type coercion between the raw return value and the widest union enum type
-        // will be handled by Phase 7 (delegate impl) and Phase 9 (TypeResolver update).
-        //
-        // The ReturnWrapContext infrastructure (P6.0-P6.1) is prepared for future use
-        // when the delegate methods need to wrap/unwrap values.
+        // --- Return wrap for divergent returns (P7.0) ---
+        // When overloads have different return types, the inner fn returns a synthetic
+        // union enum. Each return expression must be wrapped in the appropriate variant.
+        // Types are pre-collected from the SWC AST before conversion, then applied
+        // positionally to the IR return expressions.
+        let wrap_ctx = widest_return.as_ref().and_then(|ret_ty| {
+            if let RustType::Named { name, .. } = ret_ty {
+                crate::transformer::return_wrap::build_return_wrap_context(&call_sigs, name)
+            } else {
+                None
+            }
+        });
+        if let Some(ref ctx) = wrap_ctx {
+            let leaf_types = crate::transformer::return_wrap::collect_return_leaf_types(
+                arrow,
+                self.tctx.type_resolution,
+            );
+            wrap_body_returns(&mut fn_body, &mut leaf_types.into_iter(), ctx)?;
+        }
 
         // Inner method params: use closure params (arrow names + widest types) for positions
         // within arrow arity, then append widest params for positions beyond arrow arity.
@@ -429,29 +441,57 @@ impl<'a> Transformer<'a> {
 
 /// Wraps return expressions in the inner fn body with union variant constructors.
 ///
-/// Walks `Stmt::Return(Some(expr))` and `Stmt::TailExpr(expr)` and applies `wrap_leaf`.
-/// For `Expr::If` (ternary), recursively wraps then/else branches (P6.3).
-/// `Expr::Match` at return position does not occur (P0.1: YAGNI).
+/// Walks `Stmt::Return(Some(expr))` and `Stmt::TailExpr(expr)` and applies
+/// `wrap_expr_tail`. Recursively descends into all block-containing statement
+/// structures (If, IfLet, While, ForIn, Loop, Match, LabeledBlock) to find
+/// nested return statements.
 ///
-/// Currently unused: inner fn body returns raw values without variant wrapping.
-/// Phase 7 delegate impl unwraps via `match self.inner(...) { Variant(v) => v }`.
-/// Will be needed if/when inner fn body return wrap is required (Phase 9.2+ で再評価).
-#[allow(dead_code)]
-fn wrap_body_returns(
+/// Must mirror the SWC-side walk in `collect_stmt_return_leaf_types` to
+/// maintain the positional invariant.
+///
+/// `types` is an iterator of pre-collected `ReturnLeafType` from
+/// `collect_return_leaf_types`. Each leaf expression consumes one entry.
+pub(super) fn wrap_body_returns(
     stmts: &mut [Stmt],
-    arrow: &ast::ArrowExpr,
+    types: &mut impl Iterator<Item = crate::transformer::return_wrap::ReturnLeafType>,
     ctx: &crate::transformer::return_wrap::ReturnWrapContext,
 ) -> anyhow::Result<()> {
-    // Create a dummy AST expression for span reporting
-    let dummy_span_expr = ast::Expr::Lit(ast::Lit::Null(ast::Null { span: arrow.span }));
-
     for stmt in stmts.iter_mut() {
         match stmt {
             Stmt::Return(Some(ref mut expr)) => {
-                *expr = wrap_expr_tail(expr.clone(), &dummy_span_expr, ctx)?;
+                *expr = wrap_expr_tail(expr.clone(), types, ctx)?;
             }
             Stmt::TailExpr(ref mut expr) => {
-                *expr = wrap_expr_tail(expr.clone(), &dummy_span_expr, ctx)?;
+                *expr = wrap_expr_tail(expr.clone(), types, ctx)?;
+            }
+            Stmt::If {
+                then_body,
+                else_body,
+                ..
+            }
+            | Stmt::IfLet {
+                then_body,
+                else_body,
+                ..
+            } => {
+                wrap_body_returns(then_body, types, ctx)?;
+                if let Some(else_stmts) = else_body {
+                    wrap_body_returns(else_stmts, types, ctx)?;
+                }
+            }
+            Stmt::While { body, .. }
+            | Stmt::WhileLet { body, .. }
+            | Stmt::ForIn { body, .. }
+            | Stmt::Loop { body, .. } => {
+                wrap_body_returns(body, types, ctx)?;
+            }
+            Stmt::Match { arms, .. } => {
+                for arm in arms {
+                    wrap_body_returns(&mut arm.body, types, ctx)?;
+                }
+            }
+            Stmt::LabeledBlock { body, .. } => {
+                wrap_body_returns(body, types, ctx)?;
             }
             _ => {}
         }
@@ -461,12 +501,12 @@ fn wrap_body_returns(
 
 /// Recursively wraps an expression for return position.
 ///
-/// For `Expr::If` (ternary from cond), wraps then/else branches individually (P6.3).
-/// For leaf expressions, delegates to `wrap_leaf`.
-#[allow(dead_code)]
+/// For `Expr::If`/`Expr::IfLet` (ternary/narrowing), wraps each branch
+/// individually (P6.3/P6.4). For leaf expressions, consumes one type from
+/// the iterator and delegates to `wrap_leaf`.
 fn wrap_expr_tail(
     expr: Expr,
-    ast_arg: &ast::Expr,
+    types: &mut impl Iterator<Item = crate::transformer::return_wrap::ReturnLeafType>,
     ctx: &crate::transformer::return_wrap::ReturnWrapContext,
 ) -> anyhow::Result<Expr> {
     match expr {
@@ -476,8 +516,8 @@ fn wrap_expr_tail(
             then_expr,
             else_expr,
         } => {
-            let wrapped_then = wrap_expr_tail(*then_expr, ast_arg, ctx)?;
-            let wrapped_else = wrap_expr_tail(*else_expr, ast_arg, ctx)?;
+            let wrapped_then = wrap_expr_tail(*then_expr, types, ctx)?;
+            let wrapped_else = wrap_expr_tail(*else_expr, types, ctx)?;
             Ok(Expr::If {
                 condition,
                 then_expr: Box::new(wrapped_then),
@@ -491,8 +531,8 @@ fn wrap_expr_tail(
             then_expr,
             else_expr,
         } => {
-            let wrapped_then = wrap_expr_tail(*then_expr, ast_arg, ctx)?;
-            let wrapped_else = wrap_expr_tail(*else_expr, ast_arg, ctx)?;
+            let wrapped_then = wrap_expr_tail(*then_expr, types, ctx)?;
+            let wrapped_else = wrap_expr_tail(*else_expr, types, ctx)?;
             Ok(Expr::IfLet {
                 pattern,
                 expr: scrutinee,
@@ -500,7 +540,21 @@ fn wrap_expr_tail(
                 else_expr: Box::new(wrapped_else),
             })
         }
-        // Leaf expression → wrap in variant
-        leaf => crate::transformer::return_wrap::wrap_leaf(leaf, ast_arg, ctx),
+        // Leaf expression → consume type and wrap in variant
+        leaf => {
+            let leaf_type = types.next().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "return leaf type iterator exhausted: SWC/IR positional invariant violated \
+                     (more IR return leaves than SWC return leaves in {})",
+                    ctx.enum_name,
+                )
+            })?;
+            crate::transformer::return_wrap::wrap_leaf(
+                leaf,
+                leaf_type.ty.as_ref(),
+                Some(leaf_type.span),
+                ctx,
+            )
+        }
     }
 }

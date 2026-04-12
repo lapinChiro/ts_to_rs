@@ -42,9 +42,9 @@ pub(crate) struct Transformer<'a> {
     /// PascalCase collision を検出し、suffix 付与で unique 化する。
     used_marker_names: std::collections::HashSet<String>,
     /// Return wrap context for callable interface arrow bodies (INV-8).
-    /// `Some` only inside callable interface arrow body conversion.
-    /// Factory methods force this to `None` to prevent leak to nested scopes.
-    /// Phase 7 で delegate impl から使用予定。
+    ///
+    /// P7.0 で二相分離アプローチ (pre-collect types + post-process IR) を採用したため、
+    /// scope-based wrapping は不要。フィールドは Phase 9 で再評価予定。
     #[allow(dead_code)]
     return_wrap_ctx: Option<return_wrap::ReturnWrapContext>,
 }
@@ -99,8 +99,7 @@ impl<'a> Transformer<'a> {
 
     /// Callable interface arrow body 用のネスト scope を生成する。
     ///
-    /// return_wrap_ctx を設定し、arrow body 内の return 式を union variant で wrap する。
-    /// Phase 7 で delegate impl から使用予定。
+    /// P7.0 で二相分離アプローチを採用したため現在は未使用。Phase 9 で再評価予定。
     #[allow(dead_code)]
     pub(crate) fn spawn_nested_scope_with_wrap(
         &mut self,

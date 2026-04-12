@@ -1181,59 +1181,146 @@ Builtin types に Web Streams API の `Transformer` interface が含まれ、
 
 ### Phase 7: Trait delegate impl
 
-**Phase 6 で判明した設計課題 (inner fn body の return wrap)**:
+#### 設計判断: Inner fn return wrap (Option B 採用 — empirical 検証完了)
 
-Phase 6 実装時に、inner fn body の return 式を divergent union variant で wrap する
-アプローチは TypeResolver の型情報なしでは variant を確定できないことが判明した。
-`infer_variant_from_expr` はリテラルの型推論のみ可能で、`Expr::Ident("c")` のような
-変数参照の型は推論できない。
+**Empirical 検証結果** (2026-04-13):
 
-**採用した設計**: inner fn body は **素の値をそのまま返す** (variant wrap しない)。
-inner fn の return type は widest union enum 型だが、body は素の型を返す (型不一致)。
-Delegate method が `self.inner(args)` の結果を **そのまま返す** (match + unwrap ではなく)。
+TypeResolver が callable interface arrow body 内の return 式に対して `expr_types` に
+型情報を設定しているかを検証した。
 
-具体的には:
-- inner fn: `fn inner(&self, c: String, key: Option<String>) -> F64OrString { ... }`
-  body は `c` (String) や `42.0` (f64) を返す → **Rust としては型不一致**
-- delegate: `fn call_0(&self, c: String) -> String { self.inner(c, None) }` のように
-  inner の結果を直接 unwrap
+**結論: Option B (variant wrap + TypeResolver 型情報) は viable。**
 
-**Phase 7 開始前に解決すべき設計判断** (次 session の最初のタスク):
+根拠:
+1. `visit_stmt` の `Stmt::Return` ハンドラ (`visitors.rs:539-553`):
+   `resolve_expr(arg)` → `expr_types[span] = Known(ty)` で確実に格納
+2. `resolve_arrow_expr` (`fn_exprs.rs:114-211`): arrow パラメータを
+   `declare_var(name, type, span)` でスコープに登録し、body を `visit_stmt` で walk
+3. `resolve_expected_fn_info` (`fn_exprs.rs:72-98`): callable interface の
+   `call_signatures` からパラメータ型を抽出し、arrow params に伝搬
+4. `Expr::Ident("c")` の場合: `resolve_expr_inner` → `lookup_var("c")` →
+   スコープスタックからパラメータ型 (`String`) を返却 → `expr_types[span_of_c] = String`
+5. 既存テスト `test_callable_interface_return_type_propagated_to_arrow` が
+   arrow body 内の式の型解決を証明
 
-inner fn の return type と delegate の関係について、以下 2 つのアプローチを検討し、
-empirical に検証してから方針を決定する。
+**Option A は不可能** (Rust の型システムで 1 fn に複数 return type を持てない)。
 
-**Option A: inner fn return type を non-divergent に変更**
-- single-overload: inner fn の return type = overload の return type (現状通り)
-- multi-overload (divergent): inner fn の return type を widest union enum **から変更**。
-  body は arrow body そのまま (素の型を返す)
-- delegate method: `self.inner(args)` をそのまま返す (型変換なし)
-- 問題: inner fn の return type が不定 (各 overload で異なる)。Rust の型システムで
-  表現不可能 (1 つの fn に複数の return type は持てない)
-- **結論: 不可能**
+#### 採用アーキテクチャ: 二相分離アプローチ
 
-**Option B: inner fn body の return 式を variant wrap する (Phase 6 インフラ活用)**
-- inner fn の return type = widest union enum (現状維持)
-- body 内の return 式を `wrap_body_returns` + `wrap_expr_tail` で variant wrap
-- 問題: `infer_variant_from_expr` が `Expr::Ident` の型を推論できない
-- 対策: **TypeResolver の `get_expr_type` を使って変数の型を取得**し、variant を決定。
-  `get_expr_type` は `tctx.type_resolution.expr_types` から span ベースで型を取得。
-  callable interface arrow body 内の式にも TypeResolver が型を設定済みのはず
-- **この方法が viable かどうかを empirical に検証** (次 session の最初のタスク)
+変換パイプライン (`convert_stmt`, `convert_expr`, `spawn_nested_scope`) を変更せず、
+return wrapping を独立した pre/post processing として実装する。
 
-**Phase 6 で用意したインフラ**:
-- `ReturnWrapContext` struct + `build_return_wrap_context`
-- `wrap_leaf` + `wrap_expr_tail` + `wrap_body_returns` (現在 `#[allow(dead_code)]`)
-- `spawn_nested_scope_with_wrap` factory method
-- `infer_variant_from_expr` (リテラル推論のみ。Ident の型推論は未実装)
+**Phase A (型収集)**: 変換前に SWC arrow body を walk し、全 return leaf 式の型を
+`FileTypeResolution::expr_types` から span ベースで収集。
+`Vec<(Option<RustType>, (u32, u32))>` (型 + span for error reporting) として保持。
 
-Phase 7 で必要に応じてこれらのインフラを使用する。
+**Phase B (IR wrapping)**: 変換後の IR body を walk し、return/tail leaf 式を
+Phase A で収集した型で positionally マッチして variant wrap。
+
+**Positional invariant**: SWC と IR の return leaf 式は depth-first order で同一順序。
+Transformer は文の構造と return の順序を保存するため、この不変条件は成立。
+
+##### wrap_leaf の variant 決定優先順位
+
+```
+1. Polymorphic None (is_none_expr → unique_option_variant)
+2. Literal inference (infer_variant_from_expr — 既存ロジック)
+3. TypeResolver 型 (expr_type → variant_for) ← NEW
+4. Single non-Option variant fallback
+5. Hard error (variant 決定不能)
+```
+
+##### Phase 6 インフラの変更
+
+| 対象 | 変更 |
+|------|------|
+| `wrap_leaf` (return_wrap.rs:108) | `ast_arg: &ast::Expr` → `expr_type: Option<&RustType>`, `span: Option<(u32, u32)>` |
+| `wrap_body_returns` (arrow_fns.rs:440) | `arrow: &ArrowExpr` → `types: Iterator<Item = ReturnLeafType>`、再帰的 Stmt::If/IfLet walk 追加 |
+| `wrap_expr_tail` (arrow_fns.rs:467) | `ast_arg: &ast::Expr` → `types: Iterator<Item = ReturnLeafType>` |
+| 新規: `collect_return_leaf_types` | SWC arrow body を walk し return leaf 式の型を収集 |
+
+##### このアプローチの利点
+
+- **変換パイプライン無変更**: `convert_stmt`, `convert_expr`, `spawn_nested_scope` を変更しない → INV-8 と矛盾しない
+- **IR 無変更**: Pipeline Integrity 原則準拠 (IR に ephemeral な型注釈を追加しない)
+- **テスト容易**: 型収集と wrapping が独立した pure function でそれぞれ unit test 可能
+
+##### delegate method のフロー
+
+inner fn が enum を返すため、delegate は match で unwrap:
+```rust
+fn call_0(&self, c: String) -> String {
+    match self.inner(c, None) {
+        F64OrString::String(v) => v,
+        _ => unreachable!(),
+    }
+}
+fn call_1(&self, c: String, key: String) -> f64 {
+    match self.inner(c, Some(key)) {
+        F64OrString::F64(v) => v,
+        _ => unreachable!(),
+    }
+}
+```
+
+#### P7.0: Inner fn return wrap infrastructure — 完了 (2026-04-13)
+
+- **Entry**: Phase 6 完了 + 設計判断完了
+- **Work**:
+  1. `collect_return_leaf_types(arrow, type_resolution)` 新規作成 (return_wrap.rs):
+     SWC arrow body を depth-first walk し、全ブロック構造 (If/Switch/For/ForIn/ForOf/
+     While/DoWhile/Try/Labeled) を再帰的に走査。return leaf 式の型を
+     `FileTypeResolution::expr_types` から収集。ternary branches も再帰的に展開
+  2. `wrap_leaf` signature 変更: `(ir_expr, ast_arg, ctx)` →
+     `(ir_expr, expr_type: Option<&RustType>, span: Option<(u32, u32)>, ctx)`。
+     variant 決定に TypeResolver 型を追加 (priority 3)
+  3. `wrap_expr_tail` 変更: `(expr, ast_arg, ctx)` →
+     `(expr, types: &mut Iterator, ctx)`。types から型を消費して wrap_leaf に渡す。
+     iterator 枯渇時は即 Err (positional invariant 違反検知)
+  4. `wrap_body_returns` 変更: `(stmts, arrow, ctx)` →
+     `(stmts, types: &mut Iterator, ctx)`。再帰的に全ブロック構造
+     (If/IfLet/While/WhileLet/ForIn/Loop/Match/LabeledBlock) を walk
+  5. `convert_callable_trait_const` に統合: ReturnWrapContext 構築 →
+     collect_return_leaf_types → arrow 変換 → wrap_body_returns 適用
+  6. `#[allow(dead_code)]` 削除: return_wrap.rs の `#![allow(dead_code)]`、
+     overloaded_callable.rs の `#![allow(dead_code)]` を削除
+- **Exit**: unit test 7 件 (collect 5 件 + wrap_leaf 2 件) +
+  `callable-interface-inner` fixture で divergent return が variant wrap される
+- **Rollback**: なし
+
+##### P7.0 レビュー対応 (2026-04-13)
+
+- **C-1**: SWC/IR 両側の return 走査に全ブロック構造 (for/while/try/match/labeled 等)
+  を追加。初期実装は If/Block/Switch のみで、for/while/try 内の return で
+  positional invariant が破れるリスクがあった
+- **I-1**: types iterator 枯渇時のサイレント fallback を即 Err に変更。
+  positional invariant 破壊時に silent wrong wrapping ではなく明示的エラーで検出
+- **finally 内 return**: SWC 側で `try_stmt.finalizer` の collect を除外。
+  IR 側では finally body が `scopeguard::guard` クロージャ内に封入されるため
+  `wrap_body_returns` が walk せず位置不一致になるため
+- **SeqExpr**: SWC 側の `ast::Expr::Seq` collect を除外。IR に Seq variant がなく
+  Transformer で変換エラーになるため collect が無意味
+
+##### P7.0 スコープ外事項
+
+- **`return_wrap_ctx` field / `spawn_nested_scope_with_wrap` method の削除**
+  (`src/transformer/mod.rs:44-49`, `mod.rs:100-116`):
+  P7.0 で二相分離アプローチを採用したため scope-based wrapping は不要になった。
+  `#[allow(dead_code)]` + コメントで管理中。Phase 9 で generic callable interface の
+  設計を行う際、scope-based アプローチへの回帰が必要かどうかを評価してから削除を決定する。
+  Phase 9 不要と判明した時点で即削除すべき (全 Transformer 構築サイトの `return_wrap_ctx: None`
+  も同時に除去)
+- **for-of ループ変数の TypeResolver 型解決不足**: `for (const item of items)` の
+  `item` の型が TypeResolver で `Unknown` になるケースがある (配列要素型の推論が未対応)。
+  callable interface arrow body で for-of ループ変数を return する場合、wrap_leaf の
+  priority 3 (TypeResolver 型) がスキップされ priority 4 (single non-Option fallback)
+  に fall through する。根本修正は TypeResolver の for-of 要素型推論 (別イシュー)。
+  現時点では fallback で正しい variant が選ばれるケースが大半
 
 #### P7.1: per-overload delegate method + inner 呼び出し
 
-- **Entry**: Phase 6 完了
+- **Entry**: P7.0 完了 (inner fn body が enum variant を返す状態)
 - **Work**: `build_trait_delegate_methods` — 各 overload の `call_N` を生成、
-  `self.inner(wrapped_args)` 呼び出しと `narrow_return` match を含む
+  `self.inner(wrapped_args)` 呼び出しと `match` による return variant unwrap
 - **Exit**: fixture `callable-interface-divergent.input.ts` で rustc compile pass
 - **Rollback**: なし
 

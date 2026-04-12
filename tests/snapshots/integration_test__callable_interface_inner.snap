@@ -1,5 +1,6 @@
 ---
 source: tests/integration_test.rs
+assertion_line: 93
 expression: output
 ---
 #[derive(Debug, Clone, PartialEq)]
@@ -19,8 +20,8 @@ struct GetCookieGetCookieImpl;
 impl GetCookieGetCookieImpl {
     fn inner(&self, c: String, key: Option<String>) -> F64OrString {
         if key {
-            return 42.0;
+            return F64OrString::F64(42.0);
         }
-        c
+        F64OrString::String(c)
     }
 }

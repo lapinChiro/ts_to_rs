@@ -5,10 +5,8 @@
 //! `Option` wrapping for absent parameters and union types for divergent
 //! parameter types at the same position).
 //!
-//! Used by Phase 4 (trait emission) and Phase 5 (inner fn emission).
-
-// Phase 4 で使用予定。現時点では test からのみ呼ばれるため dead_code を許容。
-#![allow(dead_code)]
+//! Used by Phase 4 (trait emission), Phase 5 (inner fn emission),
+//! and Phase 7 (return wrap context).
 
 use crate::ir::RustType;
 use crate::pipeline::SyntheticTypeRegistry;
