@@ -9,6 +9,7 @@
 // interface 変換（interfaces）は SWC AST 依存が残存（別 PRD で対応予定）。
 mod interfaces;
 mod intersections;
+pub(crate) mod overloaded_callable;
 mod type_aliases;
 mod unions;
 mod utilities;

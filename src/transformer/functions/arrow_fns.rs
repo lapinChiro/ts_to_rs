@@ -73,6 +73,10 @@ impl<'a> Transformer<'a> {
             Some(ann) => convert_ts_type(&ann.type_ann, self.synthetic, self.reg())?,
             None => Self::infer_const_type(lit),
         };
+        // Skip if type resolves to Any (serde_json::Value) — not const-constructible from literal
+        if matches!(ty, RustType::Any) {
+            return Ok(None);
+        }
         let value = self.convert_expr(&ast::Expr::Lit(lit.clone()))?;
         Ok(Some(Item::Const {
             vis,

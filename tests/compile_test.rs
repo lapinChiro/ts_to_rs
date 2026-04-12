@@ -172,6 +172,9 @@ fn test_all_fixtures_compile() {
         "type-assertion",
         // void-type: `string | void` → `Option<String>` if without else branch (E0317).
         "void-type",
+        // async-class-method: async fn returns Promise<String> instead of String.
+        // Promise<T> unwrap is Phase 4.2 scope (I-392). Currently generates `-> Promise<String>`.
+        "async-class-method",
     ];
 
     let mut entries: Vec<_> = fs::read_dir(fixture_dir)
@@ -251,6 +254,8 @@ fn test_all_fixtures_compile_with_builtins() {
         "string-methods",
         "type-assertion",
         "void-type",
+        // async-class-method: Promise<T> unwrap is Phase 4.2 scope (I-392).
+        "async-class-method",
     ];
 
     let mut entries: Vec<_> = fs::read_dir(fixture_dir)
