@@ -88,7 +88,7 @@ fn test_transform_module_type_alias_object() {
 }
 
 #[test]
-fn test_transform_module_skips_unsupported() {
+fn test_transform_module_const_literal_and_interface() {
     let source = r#"
             const x = 42;
             interface Foo { name: string; }
@@ -96,8 +96,26 @@ fn test_transform_module_skips_unsupported() {
     let module = parse_typescript(source).expect("parse failed");
     let items = transform_module(&module, &TypeRegistry::new()).unwrap();
 
-    // const x = 42 is skipped, only Foo is converted
+    // const x = 42 → Item::Const (P1.5, type inferred as f64), Foo → Item::Struct
+    assert_eq!(items.len(), 2);
+    assert!(
+        matches!(&items[0], Item::Const { name, ty, .. } if name == "x" && *ty == RustType::F64)
+    );
+    assert!(matches!(&items[1], Item::Struct { name, .. } if name == "Foo"));
+}
+
+#[test]
+fn test_transform_module_skips_string_const() {
+    let source = r#"
+            const msg: string = "hello";
+            interface Bar { id: number; }
+        "#;
+    let module = parse_typescript(source).expect("parse failed");
+    let items = transform_module(&module, &TypeRegistry::new()).unwrap();
+
+    // const msg: string = "hello" → skipped (String const not const-safe), Bar → Item::Struct
     assert_eq!(items.len(), 1);
+    assert!(matches!(&items[0], Item::Struct { name, .. } if name == "Bar"));
 }
 
 #[test]

@@ -527,6 +527,7 @@ pub(crate) fn resolve_method_info(
     Ok(Method {
         vis: Visibility::Public,
         name: method.name.clone(),
+        is_async: false,
         params,
         return_type,
         body: None,

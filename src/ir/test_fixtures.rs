@@ -326,6 +326,7 @@ pub(crate) fn all_items() -> Vec<Item> {
             methods: vec![Method {
                 vis: Visibility::Public,
                 name: "m".to_string(),
+                is_async: false,
                 has_self: true,
                 has_mut_self: false,
                 params: vec![Param {
@@ -351,6 +352,12 @@ pub(crate) fn all_items() -> Vec<Item> {
             params: vec![],
             return_type: None,
             body: vec![],
+        },
+        Item::Const {
+            vis: Visibility::Private,
+            name: "MY_CONST".to_string(),
+            ty: RustType::F64,
+            value: Expr::NumberLit(42.0),
         },
         Item::RawCode("rc".to_string()),
     ]

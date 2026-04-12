@@ -310,6 +310,51 @@ pub enum Value {
     assert_eq!(generate(&[item]), expected);
 }
 
+// --- Item::Const tests ---
+
+#[test]
+fn test_generate_const_private_number() {
+    let item = Item::Const {
+        vis: Visibility::Private,
+        name: "MY_VAL".to_string(),
+        ty: RustType::F64,
+        value: Expr::NumberLit(42.0),
+    };
+    assert_eq!(generate(&[item]), "const MY_VAL: f64 = 42.0;");
+}
+
+#[test]
+fn test_generate_const_public_string() {
+    let item = Item::Const {
+        vis: Visibility::Public,
+        name: "GREETING".to_string(),
+        ty: RustType::String,
+        value: Expr::StringLit("hello".to_string()),
+    };
+    assert_eq!(generate(&[item]), "pub const GREETING: String = \"hello\";");
+}
+
+#[test]
+fn test_generate_const_unit_struct_init() {
+    let item = Item::Const {
+        vis: Visibility::Private,
+        name: "getCookie".to_string(),
+        ty: RustType::Named {
+            name: "GetCookieImpl".to_string(),
+            type_args: vec![],
+        },
+        value: Expr::StructInit {
+            name: "GetCookieImpl".to_string(),
+            fields: vec![],
+            base: None,
+        },
+    };
+    assert_eq!(
+        generate(&[item]),
+        "const getCookie: GetCookieImpl = GetCookieImpl {  };"
+    );
+}
+
 // --- Item::Fn tests ---
 
 #[test]
@@ -428,6 +473,7 @@ fn test_generate_impl_new() {
         methods: vec![Method {
             vis: Visibility::Public,
             name: "new".to_string(),
+            is_async: false,
             has_self: false,
             has_mut_self: false,
             params: vec![Param {
@@ -460,6 +506,7 @@ fn test_generate_impl_self_method() {
         methods: vec![Method {
             vis: Visibility::Public,
             name: "get_name".to_string(),
+            is_async: false,
             has_self: true,
             has_mut_self: false,
             params: vec![],
@@ -477,6 +524,62 @@ impl Foo {
     }
 }";
     assert_eq!(generate(&[item]), expected);
+}
+
+// --- Method::is_async tests ---
+
+#[test]
+fn test_generate_async_trait_method_sig() {
+    let item = Item::Trait {
+        vis: Visibility::Public,
+        name: "Handler".to_string(),
+        type_params: vec![],
+        supertraits: vec![],
+        methods: vec![Method {
+            vis: Visibility::Private,
+            name: "handle".to_string(),
+            is_async: true,
+            has_self: true,
+            has_mut_self: false,
+            params: vec![Param {
+                name: "req".to_string(),
+                ty: Some(RustType::String),
+            }],
+            return_type: Some(RustType::String),
+            body: None,
+        }],
+        associated_types: vec![],
+    };
+    let output = generate(&[item]);
+    assert!(
+        output.contains("async fn handle"),
+        "trait method should have async keyword: {output}"
+    );
+}
+
+#[test]
+fn test_generate_async_impl_method() {
+    let item = Item::Impl {
+        struct_name: "MyHandler".to_string(),
+        type_params: vec![],
+        for_trait: None,
+        consts: vec![],
+        methods: vec![Method {
+            vis: Visibility::Public,
+            name: "process".to_string(),
+            is_async: true,
+            has_self: true,
+            has_mut_self: false,
+            params: vec![],
+            return_type: Some(RustType::String),
+            body: Some(vec![Stmt::TailExpr(Expr::StringLit("done".to_string()))]),
+        }],
+    };
+    let output = generate(&[item]);
+    assert!(
+        output.contains("pub async fn process"),
+        "impl method should have async keyword: {output}"
+    );
 }
 
 // --- Multiple items ---
@@ -519,6 +622,7 @@ fn test_generate_trait() {
         methods: vec![Method {
             vis: Visibility::Private,
             name: "speak".to_string(),
+            is_async: false,
             has_self: true,
             has_mut_self: false,
             params: vec![],
@@ -554,6 +658,7 @@ fn test_generate_trait_with_supertraits_outputs_bounds() {
         methods: vec![Method {
             vis: Visibility::Private,
             name: "bark".to_string(),
+            is_async: false,
             has_self: true,
             has_mut_self: false,
             params: vec![],
@@ -582,6 +687,7 @@ fn test_generate_impl_for_trait() {
         methods: vec![Method {
             vis: Visibility::Private,
             name: "speak".to_string(),
+            is_async: false,
             has_self: true,
             has_mut_self: false,
             params: vec![],

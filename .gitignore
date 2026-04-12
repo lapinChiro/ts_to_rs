@@ -11,3 +11,4 @@ tools/extract-types/dist/
 tests/fixtures/*.input.rs
 tests/e2e/scripts/*.rs
 scripts/__pycache__/
+*.rlib

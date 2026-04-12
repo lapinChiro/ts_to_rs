@@ -193,6 +193,10 @@ pub fn walk_item<V: IrVisitor + ?Sized>(v: &mut V, item: &Item) {
                 v.visit_stmt(stmt);
             }
         }
+        Item::Const { ty, value, .. } => {
+            v.visit_rust_type(ty);
+            v.visit_expr(value);
+        }
         Item::Comment(_) | Item::Use { .. } | Item::RawCode(_) => {}
     }
 }

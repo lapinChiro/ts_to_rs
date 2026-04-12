@@ -2,6 +2,16 @@
 
 ## 改訂履歴
 
+- **2026-04-12 #7 (Phase 1 完了)**: Phase 1 (IR foundations) 全 sub-phase 完了。
+  - P1.1: `Item::Const` variant 追加 (fold/visit/generator/test_fixtures 対応)
+  - P1.2: `Method::is_async` field 追加 (全 17 構築サイト更新)
+  - P1.3: generator async keyword 出力 (trait sig + impl method)
+  - P1.4: `function.is_async` → `Method::is_async` propagation + fixture
+  - P1.5: `convert_var_decl_module_level` rename + const-safe Lit init。
+    deep deep review で発見・修正: (1) Str/Regex/BigInt の const-safe フィルタ追加
+    (2) 型注釈なしリテラルの型推論 `infer_const_type` 追加
+    (3) `libconst_primitive_out.rlib` 混入防止 (`.gitignore` に `*.rlib` 追加)
+  - 最終状態: 2303 tests, clippy 0, fmt 0
 - **2026-04-12 #6 (Phase 0 完了)**: Phase 0 全 sub-phase 完了。
   - P0.0: Baseline (2297 test, cov 91.63%, Hono 71.5%/58err)
   - P0.1: IfLet 発生確認 (ternary narrowing)、Match 不発生
@@ -654,7 +664,10 @@ follow-up PRD に移す。本 phase は `Expr::Lit` のみ対応。
   3. 現 L28-32 の `_ => continue` (arrow 以外を skip) を撤去
   4. Init pattern ごとに分岐:
      - `ast::Expr::Arrow(arrow)` → 現行ロジック (Item::Fn 生成) 継続
-     - `ast::Expr::Lit(_)` → `Item::Const { vis, name, ty, value: Expr::Literal(...) }` emit
+     - `ast::Expr::Lit(lit)` → const-safe リテラル (`Num`/`Bool`/`Null`) のみ
+       `Item::Const` emit。`Str`/`Regex`/`BigInt` は Rust の `const` で非 const fn
+       呼び出しが必要なため skip (Non-Goals に詳細記載)。
+       型注釈なしの場合は `infer_const_type` で推論 (`Num→F64`, `Bool→Bool`)
      - その他 (`Call`, `Ident`, `Object`, `Array` 等) → 本 PRD scope 外。
        現行通り `continue` で skip (follow-up PRD で解決)
   5. `src/transformer/mod.rs:622` の dispatch を新関数名に更新:
@@ -1481,6 +1494,16 @@ PR 説明に転記。
   (I-392 で必要にならないため follow-up PRD)
 - **`Expr::Call` / `Expr::Ident` の non-arrow init の module-level const 変換**
   (Revision 3.3 C2 — `const` vs `static` vs `lazy_static` の設計判断が必要。follow-up PRD)
+- **`Expr::Lit::Str` / `Expr::Lit::Regex` / `Expr::Lit::BigInt` の module-level const 変換**
+  (Phase 1 deep review で発見): Rust の `const` 宣言では `to_string()` や `Regex::new()`
+  が呼べない (const fn ではない)。現状 `convert_lit_var_decl` は `Num`/`Bool`/`Null` のみ
+  const-safe として `Item::Const` に変換し、他のリテラル型は skip する。String const は
+  以下の設計判断が必要で follow-up PRD に委ねる:
+  - `const MSG: &str = "hello";` (const-safe だが `String` ではなく `&str` が必要)
+  - `static MSG: String = String::from("hello");` (static なら non-const fn 呼び出し可能だが
+    interior mutability の問題)
+  - `lazy_static! { static ref MSG: String = "hello".to_string(); }` (外部依存追加)
+  - Regex も同様: `lazy_static! { static ref RE: Regex = Regex::new("pattern").unwrap(); }`
 - `interface Factory { new (config): Factory; name: string; }` 等 construct signature
   の emission 改善 (現在も emit されていない、変更なし)
 

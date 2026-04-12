@@ -1,0 +1,17 @@
+---
+source: tests/integration_test.rs
+expression: output
+---
+#[derive(Debug, Clone, PartialEq)]
+struct DataService {
+}
+
+impl DataService {
+    async fn fetchData(&self, url: String) -> Promise<String> {
+        url
+    }
+
+    fn processSync(&self, data: String) -> String {
+        data
+    }
+}

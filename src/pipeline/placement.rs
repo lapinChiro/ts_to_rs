@@ -691,6 +691,7 @@ mod tests {
             methods: vec![Method {
                 vis: Visibility::Public,
                 name: "greet".to_string(),
+                is_async: false,
                 has_self: true,
                 has_mut_self: false,
                 params: vec![],

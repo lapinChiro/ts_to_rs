@@ -197,6 +197,18 @@ fn generate_item(item: &Item) -> String {
             out.push('}');
             out
         }
+        Item::Const {
+            vis,
+            name,
+            ty,
+            value,
+        } => {
+            let vis_str = generate_vis(vis);
+            let ty_str = generate_type(ty);
+            let value_str = generate_expr(value);
+            let name = escape_ident(name);
+            format!("{vis_str}const {name}: {ty_str} = {value_str};")
+        }
         Item::Fn {
             vis,
             attributes,
@@ -263,14 +275,22 @@ fn generate_trait_method_sig(method: &Method) -> String {
     };
     let ret_str = format_return_type(&method.return_type);
 
+    let async_str = if method.is_async { "async " } else { "" };
+
     match &method.body {
         None => {
             // Abstract method — signature only
-            format!("    fn {}({params_str}){ret_str};\n", method.name)
+            format!(
+                "    {async_str}fn {}({params_str}){ret_str};\n",
+                method.name
+            )
         }
         Some(body) => {
             // Default implementation
-            let mut out = format!("    fn {}({params_str}){ret_str} {{\n", method.name);
+            let mut out = format!(
+                "    {async_str}fn {}({params_str}){ret_str} {{\n",
+                method.name
+            );
             for stmt in body {
                 out.push_str(&generate_stmt(stmt, 2));
                 out.push('\n');
@@ -308,8 +328,9 @@ fn generate_method(method: &Method, in_trait_impl: bool) -> String {
         other_params
     };
     let ret_str = format_return_type(&method.return_type);
+    let async_str = if method.is_async { "async " } else { "" };
     let name = &method.name;
-    let mut out = format!("    {vis_str}fn {name}({params_str}){ret_str} {{\n");
+    let mut out = format!("    {vis_str}{async_str}fn {name}({params_str}){ret_str} {{\n");
     let body = method.body.as_deref().unwrap_or(&[]);
     if body.is_empty() && has_non_unit_return_type(&method.return_type) {
         // Non-unit return type with empty body: insert todo!() to avoid type mismatch

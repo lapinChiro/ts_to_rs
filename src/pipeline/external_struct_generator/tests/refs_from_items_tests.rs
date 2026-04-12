@@ -67,6 +67,7 @@ fn test_collect_type_refs_from_impl_method_signature() {
         methods: vec![Method {
             vis: Visibility::Public,
             name: "bar".to_string(),
+            is_async: false,
             has_self: true,
             has_mut_self: false,
             params: vec![Param {
@@ -106,6 +107,7 @@ fn test_collect_type_refs_from_trait_method_signature() {
         methods: vec![Method {
             vis: Visibility::Public,
             name: "bar".to_string(),
+            is_async: false,
             has_self: true,
             has_mut_self: false,
             params: vec![Param {
@@ -175,6 +177,7 @@ fn test_collect_type_refs_excludes_self() {
         methods: vec![Method {
             vis: Visibility::Public,
             name: "new".to_string(),
+            is_async: false,
             has_self: false,
             has_mut_self: false,
             params: vec![],

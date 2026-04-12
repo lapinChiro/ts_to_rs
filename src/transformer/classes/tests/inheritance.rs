@@ -96,6 +96,7 @@ fn test_rewrite_super_constructor_arg_count_mismatch_returns_error() {
     let child_ctor = Method {
         vis: Visibility::Public,
         name: "new".to_string(),
+        is_async: false,
         has_self: false,
         has_mut_self: false,
         params: vec![Param {
@@ -143,6 +144,7 @@ fn test_rewrite_super_constructor_merges_into_tail_struct_init() {
     let child_ctor = Method {
         vis: Visibility::Public,
         name: "new".to_string(),
+        is_async: false,
         has_self: false,
         has_mut_self: false,
         params: vec![Param {
@@ -206,6 +208,7 @@ fn test_rewrite_super_constructor_merges_into_return_struct_init() {
     let child_ctor = Method {
         vis: Visibility::Public,
         name: "new".to_string(),
+        is_async: false,
         has_self: false,
         has_mut_self: false,
         params: vec![Param {
@@ -266,6 +269,7 @@ fn test_rewrite_super_constructor_no_struct_init_creates_new() {
     let child_ctor = Method {
         vis: Visibility::Public,
         name: "new".to_string(),
+        is_async: false,
         has_self: false,
         has_mut_self: false,
         params: vec![Param {
@@ -332,6 +336,7 @@ fn test_rewrite_super_constructor_no_super_call_preserves_body() {
     let child_ctor = Method {
         vis: Visibility::Public,
         name: "new".to_string(),
+        is_async: false,
         has_self: false,
         has_mut_self: false,
         params: vec![],

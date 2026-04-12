@@ -213,6 +213,7 @@ impl IrVisitor for TagRecorder {
             Item::Fn { .. } => "item:fn",
             Item::Comment(_) => "item:comment",
             Item::Use { .. } => "item:use",
+            Item::Const { .. } => "item:const",
             Item::RawCode(_) => "item:rawcode",
         });
         walk_item(self, item);

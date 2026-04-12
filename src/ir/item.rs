@@ -67,6 +67,8 @@ pub struct Method {
     pub vis: Visibility,
     /// Method name
     pub name: String,
+    /// Whether this is an `async fn` method
+    pub is_async: bool,
     /// Whether this method takes `&self` or `&mut self` (false for associated functions like `new`)
     pub has_self: bool,
     /// Whether this method takes `&mut self` instead of `&self` (e.g., setters)
@@ -175,6 +177,20 @@ pub enum Item {
         /// Function body
         body: Vec<Stmt>,
     },
+    /// A module-level `const` declaration: `const NAME: Ty = value;`
+    ///
+    /// Used for callable interface marker struct instances
+    /// (e.g., `const getCookie: GetCookieImpl = GetCookieImpl;`).
+    Const {
+        /// Visibility
+        vis: Visibility,
+        /// Constant name
+        name: String,
+        /// Type
+        ty: RustType,
+        /// Value expression
+        value: Expr,
+    },
     /// Raw Rust code emitted verbatim by the generator.
     ///
     /// Used for helper functions whose structure is not worth modelling in IR
@@ -197,7 +213,8 @@ impl Item {
             | Item::Enum { name, .. }
             | Item::Trait { name, .. }
             | Item::TypeAlias { name, .. }
-            | Item::Fn { name, .. } => Some(name),
+            | Item::Fn { name, .. }
+            | Item::Const { name, .. } => Some(name),
             Item::Impl { struct_name, .. } => Some(struct_name),
             Item::Comment(_) | Item::RawCode(_) | Item::Use { .. } => None,
         }

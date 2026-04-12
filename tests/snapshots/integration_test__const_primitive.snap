@@ -1,0 +1,11 @@
+---
+source: tests/integration_test.rs
+expression: output
+---
+const N: f64 = 42.0;
+
+const FLAG: bool = true;
+
+fn useN() -> f64 {
+    N
+}

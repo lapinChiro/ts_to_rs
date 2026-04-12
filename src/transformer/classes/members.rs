@@ -133,6 +133,7 @@ impl<'a> Transformer<'a> {
         let method = Method {
             vis: *vis,
             name: "new".to_string(),
+            is_async: false,
             has_self: false,
             has_mut_self: false,
             params,
@@ -330,6 +331,7 @@ impl<'a> Transformer<'a> {
         Ok(Method {
             vis,
             name,
+            is_async: function.is_async,
             has_self: !is_static,
             has_mut_self: !is_static && needs_mut,
             params,
@@ -366,6 +368,7 @@ impl<'a> Transformer<'a> {
         Ok(Method {
             vis: Visibility::Private,
             name: "_init_static".to_string(),
+            is_async: false,
             has_self: false,
             has_mut_self: false,
             params: vec![],

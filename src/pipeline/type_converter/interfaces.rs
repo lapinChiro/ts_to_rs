@@ -474,6 +474,7 @@ pub(super) fn convert_method_signature(
         Ok(Method {
             vis: Visibility::Public,
             name,
+            is_async: false,
             has_self: true,
             has_mut_self: false,
             params,

@@ -175,6 +175,7 @@ fn test_collect_type_refs_impl_method_body_walked() {
         methods: vec![Method {
             vis: Visibility::Public,
             name: "m".to_string(),
+            is_async: false,
             has_self: true,
             has_mut_self: false,
             params: vec![],

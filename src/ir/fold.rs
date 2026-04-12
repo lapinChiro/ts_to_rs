@@ -265,6 +265,7 @@ pub fn walk_method<F: IrFolder + ?Sized>(f: &mut F, m: Method) -> Method {
     Method {
         vis: m.vis,
         name: m.name,
+        is_async: m.is_async,
         has_self: m.has_self,
         has_mut_self: m.has_mut_self,
         params: m.params.into_iter().map(|p| f.fold_param(p)).collect(),
@@ -403,6 +404,17 @@ pub fn walk_item<F: IrFolder + ?Sized>(f: &mut F, item: Item) -> Item {
             params: params.into_iter().map(|p| f.fold_param(p)).collect(),
             return_type: return_type.map(|t| f.fold_rust_type(t)),
             body: body.into_iter().map(|s| f.fold_stmt(s)).collect(),
+        },
+        Item::Const {
+            vis,
+            name,
+            ty,
+            value,
+        } => Item::Const {
+            vis,
+            name,
+            ty: f.fold_rust_type(ty),
+            value: f.fold_expr(value),
         },
         item @ (Item::Comment(_) | Item::Use { .. } | Item::RawCode(_)) => item,
     }

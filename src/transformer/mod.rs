@@ -576,7 +576,7 @@ impl<'a> Transformer<'a> {
                 )?;
                 Ok((items, vec![]))
             }
-            Decl::Var(var_decl) => self.convert_var_decl_arrow_fns(var_decl, vis, resilient),
+            Decl::Var(var_decl) => self.convert_var_decl_module_level(var_decl, vis, resilient),
             Decl::TsEnum(ts_enum) => {
                 let items = convert_ts_enum(ts_enum, vis)?;
                 Ok((items, vec![]))

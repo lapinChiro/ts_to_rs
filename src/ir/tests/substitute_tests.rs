@@ -219,6 +219,7 @@ fn test_method_substitute_params_and_return_type() {
     let method = Method {
         vis: Visibility::Public,
         name: "process".to_string(),
+        is_async: false,
         has_self: true,
         has_mut_self: false,
         params: vec![Param {
@@ -246,6 +247,7 @@ fn test_method_substitute_body_stmts() {
     let method = Method {
         vis: Visibility::Public,
         name: "make".to_string(),
+        is_async: false,
         has_self: false,
         has_mut_self: false,
         params: vec![],

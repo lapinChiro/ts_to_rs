@@ -87,6 +87,8 @@ snapshot_test!(test_array_destructuring, collecting);
 snapshot_test!(test_number_parse_api);
 snapshot_test!(test_math_api, collecting);
 snapshot_test!(test_async_await);
+snapshot_test!(test_async_class_method);
+snapshot_test!(test_const_primitive);
 snapshot_test!(test_type_infer_unannotated);
 snapshot_test!(test_unary_operators, collecting);
 snapshot_test!(test_void_type);
