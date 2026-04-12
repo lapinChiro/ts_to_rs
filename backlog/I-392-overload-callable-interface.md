@@ -2,6 +2,15 @@
 
 ## 改訂履歴
 
+- **2026-04-12 #8 (Phase 2 完了)**: Phase 2 (Registry + classification) 全 sub-phase 完了。
+  - P2.1: `CallableInterfaceKind` enum + `classify_callable_interface` (unit test 8 件)
+  - P2.2: INV-2 lint script (既存 violation を warning 検出)
+  - P2.3: Pass 2a (non-Var) / 2b (Var) 分割 + forward-declared callable test
+  - P2.4: callable interface arrow → `ConstValue { type_ref_name }` 登録
+  - deep deep review で発見・修正: (1) `collect_decl` の `d.name` 二重 match 解消
+    (2) `call_sig + methods` / `call_sig + constructor` テスト追加
+    (3) `collection` module を `pub(crate)` に変更 (Phase 4.3 アクセス用)
+  - 最終状態: 2313 tests, clippy 0, fmt 0
 - **2026-04-12 #7 (Phase 1 完了)**: Phase 1 (IR foundations) 全 sub-phase 完了。
   - P1.1: `Item::Const` variant 追加 (fold/visit/generator/test_fixtures 対応)
   - P1.2: `Method::is_async` field 追加 (全 17 構築サイト更新)

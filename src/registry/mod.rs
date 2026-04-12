@@ -7,7 +7,7 @@
 //! これにより前方参照（`interface A { b: B }` が `interface B` より前に宣言される場合）
 //! でも正しく型を解決できる。
 
-mod collection;
+pub(crate) mod collection;
 mod enums;
 mod functions;
 pub(crate) mod interfaces;
@@ -814,17 +814,32 @@ pub fn build_registry_with_synthetic(
         }
     }
 
-    // Pass 2: Pass 1 の型名一覧を参照しながらフィールド型を完全に解決する
-    let lookup = reg.clone();
+    // Pass 2a: non-Var 宣言を先に resolve する。
+    // interface/type alias/class/enum を先に完全解決することで、
+    // Pass 2b の Var 宣言が型注釈で callable interface を参照できる。
+    let lookup_1 = reg.clone();
     for item in &module.body {
-        match item {
-            ast::ModuleItem::Stmt(ast::Stmt::Decl(decl)) => {
-                collection::collect_decl(&mut reg, decl, &lookup, synthetic);
-            }
-            ast::ModuleItem::ModuleDecl(ast::ModuleDecl::ExportDecl(export)) => {
-                collection::collect_decl(&mut reg, &export.decl, &lookup, synthetic);
-            }
-            _ => {}
+        let decl = match item {
+            ast::ModuleItem::Stmt(ast::Stmt::Decl(decl)) => decl,
+            ast::ModuleItem::ModuleDecl(ast::ModuleDecl::ExportDecl(export)) => &export.decl,
+            _ => continue,
+        };
+        if !matches!(decl, ast::Decl::Var(_)) {
+            collection::collect_decl(&mut reg, decl, &lookup_1, synthetic);
+        }
+    }
+
+    // Pass 2b: Var 宣言を resolve する。
+    // Pass 2a 完了後の snapshot を lookup に使用する (Pass 1 snapshot は使わない)。
+    let lookup_2 = reg.clone();
+    for item in &module.body {
+        let decl = match item {
+            ast::ModuleItem::Stmt(ast::Stmt::Decl(decl)) => decl,
+            ast::ModuleItem::ModuleDecl(ast::ModuleDecl::ExportDecl(export)) => &export.decl,
+            _ => continue,
+        };
+        if matches!(decl, ast::Decl::Var(_)) {
+            collection::collect_decl(&mut reg, decl, &lookup_2, synthetic);
         }
     }
 
