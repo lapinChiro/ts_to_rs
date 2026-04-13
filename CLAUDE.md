@@ -25,7 +25,7 @@ cargo test                 # run all tests
 cargo fix --allow-dirty --allow-staged  # auto-fix unused imports etc.
 cargo clippy --all-targets --all-features -- -D warnings  # lint
 cargo fmt --all --check    # format check
-cargo llvm-cov --ignore-filename-regex 'main\.rs' --fail-under-lines 89  # coverage (threshold 89%, excluding main.rs)
+cargo llvm-cov --ignore-filename-regex 'main\.rs' --fail-under-lines 90  # coverage (threshold 90%, excluding main.rs)
 cargo llvm-cov --html                  # generate HTML report (target/llvm-cov/html/)
 ./scripts/check-file-lines.sh        # .rs file line count check (threshold: 1000 lines)
 ./scripts/hono-bench.sh              # Hono conversion rate benchmark (directory mode)

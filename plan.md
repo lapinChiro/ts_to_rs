@@ -9,113 +9,43 @@
 
 ---
 
-## 現在のフェーズ: Batch 25 (I-392) Phase 0-12 完了、Phase 13 待ち
+## 現在の状態 (2026-04-13)
 
-Multi-overload callable interface を trait + marker + impl 表現に変換。
-PRD: `backlog/I-392-overload-callable-interface.md`
-
-### 次の作業: Phase 13 (Final Quality gate)
-
-verification のみ。code change なし。
-
-### 残りの Phase
-
-| Phase | 内容 | 状態 |
-|-------|------|------|
-| **13** | Final Quality gate | **次** |
-
-### 現在の状態 (2026-04-13 Phase 12 完了時)
-
-- **Test count**: 全テスト pass (lib 2383, integration 99, compile 3, E2E 89)
-- **Quality**: clippy 0, fmt 0
-- **#[allow(dead_code)]**: production code に 0 件
-- **INV-6**: Promise unwrap は `RustType::unwrap_promise()` に統一済
-- **Compile test skip**: callable-interface 系は全て復帰済。
-  error-case fixture `callable-interface-generic-arity-mismatch` のみ skip
-- **Call site dispatch**: callable interface const 呼び出しが `fn_name.call_N(args)` に変換される
-- **TypeResolver 修正**: callable interface の引数 expected type と返り値型の両方で overload 選択結果を使用 (widest signature の不正な Some ラップ / 不正確な union 返り値型を修正)
-- **select_overload**: `(usize, &MethodSignature)` を返却するよう変更。インデックスが構造的に正しく取得可能
-- **select_callable_overload**: TypeResolver 内の callable interface overload 選択ロジックを共通ヘルパーに抽出 (DRY)
-
-### Phase 0-9 完了サマリ
-
-| Phase | 内容 | 完了日 |
-|-------|------|--------|
-| 0 | Baseline + Investigation + Prerequisites (factory method refactor 含む) | 2026-04-12 |
-| 1 | IR foundations (Item::Const, Method::is_async, generator async, non-arrow Lit init) | 2026-04-12 |
-| 2 | Registry + classification (classify_callable_interface, Pass 2a/2b, ConstValue 登録) | 2026-04-12 |
-| 3 | Widest signature computation (compute_widest_params, compute_union_return) | 2026-04-12 |
-| 4 | Trait emission (trait 化, async/Promise unwrap, skeleton routing) | 2026-04-12 |
-| 5 | Marker struct + inner fn (marker name, ZST, unit struct, inner fn) | 2026-04-12 |
-| 6 | Return wrap (ReturnWrapContext, wrap_leaf, wrap_body_returns, CLI synthetic 結合) | 2026-04-12 |
-| 7 | Trait delegate impl (二相分離, delegate method, arg wrapping, async, Pipeline Integrity) | 2026-04-13 |
-| 8 | Const instance + 統合チェックポイント (Item::Const emission, compile_test 復帰) | 2026-04-13 |
-| 9A | dead code 削除 (return_wrap_ctx) + arity validation (INV-4) | 2026-04-13 |
-| 9B | resolve_fn_type_info widest 書き換え + INV-6 (Promise unwrap 統一) | 2026-04-13 |
-| 9C | type substitution (apply_type_substitution) + select_overload Stage 2 修正 | 2026-04-13 |
-| 10 | Call site dispatch: try_convert_callable_trait_call + TypeResolver overload selection fix + symmetry tests | 2026-04-13 |
-| 11 | Integration: compile_test 3/3 pass, E2E callable_interface pass, Hono bench regression 0 (Phase 10 起因) | 2026-04-13 |
-| 12 | L2/L3/L4 fix: TypeParam default 対応 (Hono ToSSGAdaptorInterface 解消) + generator match indent cosmetic + DRY 統一 | 2026-04-13 |
+| 指標 | 値 |
+|------|-----|
+| Hono bench clean | 114/158 (72.2%) |
+| Hono bench errors | 57 |
+| cargo test (lib) | 2383 pass |
+| cargo test (integration) | 99 pass |
+| cargo test (compile) | 3 pass |
+| cargo test (E2E) | 89 pass |
+| coverage | 91.68% (threshold 90%) |
+| clippy | 0 warnings |
+| fmt | 0 diffs |
 
 ---
 
 ## 次のタスク候補
 
-TODO の L2/L3 バッチ。優先度は `.claude/rules/todo-prioritization.md` に従い、
-実測値で再評価する。
+TODO の Tier 1 (L3) クラスタを優先度順にバッチ化。
+優先度は `.claude/rules/todo-prioritization.md` に従い、実測値で再評価する。
 
-| Batch | イシュー | 根本原因 |
-|---|---|---|
-| **25** | **I-392** | **overload 最大 params のみ採用 (L1 edge + L2)** |
-| 11b | I-300 + I-301 + I-306 | OBJECT_LITERAL_NO_TYPE |
-| 12 | I-311 + I-344 | 型引数推論フィードバック欠如 |
-| 13 | I-11 + I-238 + I-202 | union/enum 生成品質 |
-| 15 | I-340 | Generic Clone bound 未付与 |
-| 16 | I-360 + I-331 | Option narrowing + 暗黙 None |
-| 17 | I-321 | クロージャ Box::new ラップ漏れ |
-| 18 | I-217 + I-265 | iterator クロージャ所有権 |
-| 19 | I-336 + I-337 | abstract class 変換パス欠陥 |
-| 20 | I-329 + I-237 | string メソッド変換 |
-| 21 | I-313 | 三項演算子 callee パターン |
-| 22 | I-30 | Cargo.toml 依存追加 (I-183, I-34 のゲート) |
-| 23 | I-182 | コンパイルテスト CI 化 |
+| 優先度 | クラスタ | イシュー | 根本原因 | Hono 影響 |
+|--------|----------|----------|----------|-----------|
+| 1 | RC-11 | I-300 + I-301 + I-306 | OBJECT_LITERAL_NO_TYPE | 25 件 |
+| 2 | RC-9 | I-311 + I-344 | 型引数推論フィードバック欠如 | — |
+| 3 | RC-13 | I-11 + I-238 + I-202 | union/enum 生成品質 | skip 原因 |
+| 4 | RC-2 | I-340 + I-217 + I-265 | Generic Clone bound / iterator 所有権 | — |
+| 5 | — | I-360 + I-331 | Option narrowing + 暗黙 None | skip 原因 |
+| 6 | RC-14 | I-397 | module-level const 変換拡張 | — |
+| 7 | — | I-321 | クロージャ Box::new ラップ漏れ | — |
+| 8 | RC-5 | I-336 + I-337 | abstract class 変換パス欠陥 | — |
+| 9 | RC-12 | I-329 + I-237 | string メソッド変換 | — |
+| 10 | — | I-313 | 三項演算子 callee パターン | CALL_TARGET 4 件 |
+| 11 | — | I-30 | Cargo.toml 依存追加 (I-183, I-34 のゲート) | — |
+| 12 | — | I-182 | コンパイルテスト CI 化 | — |
 
-L4 候補と詳細は [`TODO`](TODO) 参照。
-
----
-
-## 完了済プロジェクト
-
-### I-388: TypeCollector resolve 関数統一 (2026-04-10)
-
-`collect_type_alias_fields` / `collect_type_lit_fields` / `resolve_type_ref_fields` の 3 関数を
-廃止し、`convert_to_ts_type_info` 起点の 3 パス（TypeLiteral / Intersection / TypeRef）に再構成。
-
-- SWC AST のアドホック解析を排除し、TsTypeInfo を唯一の中間表現に統一
-- `resolve_struct_members` を typedef.rs に抽出し DRY 維持（resolve_typedef と collection.rs で共有）
-- Utility type alias (`Partial<T>`, `Pick<T, K>` 等) の TypeDef 登録を修正
-- Bug-affirming test (`test_type_alias_type_ref_with_utility_type`) を修正
-- `TsMethodInfo` に `has_rest` フィールド追加（既存の破棄を修正）
-- Intersection method の lossy 変換を排除（`convert_method_info_to_sig` → `resolve_method_sig`）
-
-**指標**: Hono bench regression 0、cargo test 2295 pass、clippy 0 warning
-**後続課題**: I-394 (TypeDef::Alias variant 追加)、I-395 (TsMethodInfo type_params 制約情報)
-
-### I-382 解消プロジェクト (2026-04-08 〜 2026-04-10)
-
-`generate_stub_structs` を完全削除し、Pass 5c を user 定義型 import 自動生成に再設計。
-
-- **Phase A**: 調査債務 INV-1〜9 解消
-- **Phase B**: PRD I-387 起票
-- **Phase C**: IR 構造化 (`RustType::TypeVar` / `Primitive` / `StdCollection` 導入、
-  heuristic 削除、interim patch 除去)
-- **Phase D**: I-382 本体 (PRD-γ `__type` 是正 → PRD-β 外部型完全化 → PRD-δ stub 削除 + import 生成)
-
-**最終指標** (Phase D 完了時):
-- Hono bench regression 0 (clean 114/158, errors 54)
-- `generate_stub_structs` grep ヒット 0
-- `cargo test --lib` 2275 pass / clippy 0 warning
-- dangling refs: stub 機構削除により計測方式自体を廃止
+Tier 2 (L3 残り + L4) 以降は [`TODO`](TODO) 参照。
 
 ---
 
