@@ -375,7 +375,8 @@ fn test_resolve_call_signature_type_alias_sets_return_expected_type() {
 #[test]
 fn test_select_overload_single_sig_returns_it() {
     let sigs = vec![make_sig(vec![], Some(RustType::String))];
-    let selected = crate::registry::select_overload(&sigs, 0, &[]);
+    let (idx, selected) = crate::registry::select_overload(&sigs, 0, &[]);
+    assert_eq!(idx, 0);
     assert_eq!(selected.return_type, Some(RustType::String));
     assert_eq!(selected.params.len(), 0);
 }
@@ -389,7 +390,8 @@ fn test_select_overload_same_return_uses_arity_not_first() {
     ];
     // All return types identical, but arity filter still selects the right overload.
     // 1-arg call → sig[1] (1-param), NOT sig[0] (old Stage 2 bug: returned first)
-    let selected = crate::registry::select_overload(&sigs, 1, &[Some(RustType::F64)]);
+    let (idx, selected) = crate::registry::select_overload(&sigs, 1, &[Some(RustType::F64)]);
+    assert_eq!(idx, 1);
     assert_eq!(selected.return_type, Some(RustType::String));
     assert_eq!(selected.params.len(), 1);
     assert_eq!(selected.params[0].ty, RustType::F64);
@@ -402,11 +404,13 @@ fn test_select_overload_arg_count_selects_match() {
         make_sig(vec![RustType::F64], Some(RustType::F64)),
     ];
     // 0 args → sig[0]
-    let selected = crate::registry::select_overload(&sigs, 0, &[]);
+    let (idx, selected) = crate::registry::select_overload(&sigs, 0, &[]);
+    assert_eq!(idx, 0);
     assert_eq!(selected.return_type, Some(RustType::String));
     assert_eq!(selected.params.len(), 0);
     // 1 arg → sig[1]
-    let selected = crate::registry::select_overload(&sigs, 1, &[None]);
+    let (idx, selected) = crate::registry::select_overload(&sigs, 1, &[None]);
+    assert_eq!(idx, 1);
     assert_eq!(selected.return_type, Some(RustType::F64));
     assert_eq!(selected.params.len(), 1);
 }
@@ -418,7 +422,8 @@ fn test_select_overload_arg_type_selects_compatible() {
         make_sig(vec![RustType::F64], Some(RustType::F64)),
     ];
     // arg_type=F64 → sig[1]
-    let selected = crate::registry::select_overload(&sigs, 1, &[Some(RustType::F64)]);
+    let (idx, selected) = crate::registry::select_overload(&sigs, 1, &[Some(RustType::F64)]);
+    assert_eq!(idx, 1);
     assert_eq!(selected.return_type, Some(RustType::F64));
     assert_eq!(selected.params[0].ty, RustType::F64);
 }
@@ -430,7 +435,8 @@ fn test_select_overload_no_match_falls_back_to_first() {
         make_sig(vec![RustType::F64], Some(RustType::F64)),
     ];
     // 3 args → no match → fallback to first
-    let selected = crate::registry::select_overload(&sigs, 3, &[None, None, None]);
+    let (idx, selected) = crate::registry::select_overload(&sigs, 3, &[None, None, None]);
+    assert_eq!(idx, 0);
     assert_eq!(selected.return_type, Some(RustType::String));
     assert_eq!(selected.params.len(), 0);
 }
@@ -442,7 +448,8 @@ fn test_select_overload_arg_types_empty_uses_arg_count_only() {
         make_sig(vec![RustType::F64], Some(RustType::F64)),
     ];
     // Same arg_count, empty arg_types → Stage 3 skipped → first of count-matched (sig[0])
-    let selected = crate::registry::select_overload(&sigs, 1, &[]);
+    let (idx, selected) = crate::registry::select_overload(&sigs, 1, &[]);
+    assert_eq!(idx, 0);
     assert_eq!(selected.params[0].ty, RustType::String);
 }
 
@@ -453,7 +460,8 @@ fn test_select_overload_params_and_return_from_same_sig() {
         make_sig(vec![RustType::String], Some(RustType::String)),
         make_sig(vec![RustType::F64], Some(RustType::F64)),
     ];
-    let selected = crate::registry::select_overload(&sigs, 1, &[Some(RustType::F64)]);
+    let (idx, selected) = crate::registry::select_overload(&sigs, 1, &[Some(RustType::F64)]);
+    assert_eq!(idx, 1);
     // Both params and return_type should be from sig[1] (F64 variant)
     assert_eq!(selected.params[0].ty, RustType::F64);
     assert_eq!(selected.return_type, Some(RustType::F64));
@@ -472,11 +480,49 @@ fn test_select_overload_void_only_multi_overload_by_arity() {
         ),
     ];
     // 1-arg call → sig[0]
-    let selected = crate::registry::select_overload(&sigs, 1, &[]);
+    let (idx, selected) = crate::registry::select_overload(&sigs, 1, &[]);
+    assert_eq!(idx, 0);
     assert_eq!(selected.params.len(), 1);
     // 2-arg call → sig[1]
-    let selected = crate::registry::select_overload(&sigs, 2, &[]);
+    let (idx, selected) = crate::registry::select_overload(&sigs, 2, &[]);
+    assert_eq!(idx, 1);
     assert_eq!(selected.params.len(), 2);
+}
+
+#[test]
+fn test_select_overload_stage4_fallback_respects_arity_filter() {
+    // Bug scenario: sigs[0] has 2 params, sigs[1] and sigs[2] have 1 param.
+    // 1-arg call with no type info → Stage 2 filters to [sig1, sig2],
+    // Stage 3 skipped (no arg_types), Stage 4 should return first CANDIDATE (sig1),
+    // not first OVERALL (sig0 which has 2 params).
+    let sigs = vec![
+        make_sig(vec![RustType::F64, RustType::F64], Some(RustType::F64)), // sig0: 2 params
+        make_sig(vec![RustType::String], Some(RustType::String)),          // sig1: 1 param
+        make_sig(vec![RustType::F64], Some(RustType::F64)),                // sig2: 1 param
+    ];
+    let (idx, selected) = crate::registry::select_overload(&sigs, 1, &[]);
+    // Must NOT return sig0 (index 0, 2 params) — that doesn't match the arity
+    assert_eq!(
+        selected.params.len(),
+        1,
+        "Stage 4 fallback must respect arity filter"
+    );
+    assert_eq!(idx, 1, "should return first arity-matched candidate (sig1)");
+    assert_eq!(selected.return_type, Some(RustType::String));
+}
+
+#[test]
+fn test_select_overload_no_arity_match_falls_back_to_first_overall() {
+    // When NO sig matches the arg count, candidates = all sigs.
+    // Stage 4 should return the first overall sig.
+    let sigs = vec![
+        make_sig(vec![RustType::String], Some(RustType::String)), // 1 param
+        make_sig(vec![RustType::F64, RustType::F64], Some(RustType::F64)), // 2 params
+    ];
+    // 5-arg call → no arity match → candidates = all sigs → first is sig0
+    let (idx, selected) = crate::registry::select_overload(&sigs, 5, &[]);
+    assert_eq!(idx, 0);
+    assert_eq!(selected.params.len(), 1);
 }
 
 #[test]

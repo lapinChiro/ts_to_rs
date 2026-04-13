@@ -6,6 +6,7 @@
 //! - [`type_ref_tests`]: paren/chained/opt-chain + I-375 `CallTarget.type_ref` 分類
 
 mod basic_tests;
+mod callable_interface_tests;
 mod console_log_tests;
 mod rest_params_tests;
 mod type_ref_tests;

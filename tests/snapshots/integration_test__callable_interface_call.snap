@@ -1,0 +1,79 @@
+---
+source: tests/integration_test.rs
+expression: output
+---
+#[derive(Debug, Clone, PartialEq)]
+pub enum F64OrString {
+    String(String),
+    F64(f64),
+}
+
+trait GetValue {
+    fn call_0(&self, key: String) -> String;
+}
+
+trait GetCookie {
+    fn call_0(&self, c: String) -> String;
+    fn call_1(&self, c: String, key: String) -> f64;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct GetValueGetValueImpl;
+
+impl GetValueGetValueImpl {
+    fn inner(&self, key: String) -> String {
+        key
+    }
+}
+
+impl GetValue for GetValueGetValueImpl {
+    fn call_0(&self, key: String) -> String {
+        self.inner(key)
+    }
+}
+
+const getValue: GetValueGetValueImpl = GetValueGetValueImpl;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct GetCookieGetCookieImpl;
+
+impl GetCookieGetCookieImpl {
+    fn inner(&self, c: String, key: Option<String>) -> F64OrString {
+        F64OrString::String(c)
+    }
+}
+
+impl GetCookie for GetCookieGetCookieImpl {
+    fn call_0(&self, c: String) -> String {
+        match self.inner(c, None) {
+    F64OrString::String(v) => {
+        v
+    }
+    _ => {
+        unreachable!()
+    }
+}
+    }
+
+    fn call_1(&self, c: String, key: String) -> f64 {
+        match self.inner(c, Some(key)) {
+    F64OrString::F64(v) => {
+        v
+    }
+    _ => {
+        unreachable!()
+    }
+}
+    }
+}
+
+const getCookie: GetCookieGetCookieImpl = GetCookieGetCookieImpl;
+
+fn useSingle() -> String {
+    getValue.call_0("myKey".to_string())
+}
+
+fn useMulti() {
+    let result1 = getCookie.call_0("ctx".to_string());
+    let result2 = getCookie.call_1("ctx".to_string(), "name".to_string());
+}

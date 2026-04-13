@@ -9,40 +9,40 @@
 
 ---
 
-## 現在のフェーズ: Batch 25 (I-392) Phase 0-9 完了、Phase 10 待ち
+## 現在のフェーズ: Batch 25 (I-392) Phase 0-10 完了、Phase 11 待ち
 
 Multi-overload callable interface を trait + marker + impl 表現に変換。
 PRD: `backlog/I-392-overload-callable-interface.md`
 
-### 次の作業: Phase 10 (Call site dispatch)
+### 次の作業: Phase 11 (Integration + coverage)
 
-**P10.1**: callable interface call dispatch + overload 選択 (旧 P10.1 + P10.2 統合)
-- `getCookie(ctx, "k")` → `getCookie.call_1(ctx, "k".to_string())` への変換
-- 2 段 ConstValue lookup: `reg.get("getCookie")` → `ConstValue { type_ref_name: "GetCookie" }`
-  → `reg.get("GetCookie")` → `Struct { call_signatures }` → `classify_callable_interface`
-- Generic support: `get_expr_type(callee)` → type_args → `apply_type_substitution`
-- Overload 選択: `select_overload` で call_N の N を決定
-- Fixture: `callable-interface-call.input.ts` + `callable-interface-call-generic.input.ts`
+**P11.1**: compile_test 確認 (INV-9) + E2E test
+- `cargo test --test compile_test` 全件 pass 確認
+- E2E test 追加: `tests/e2e/scripts/callable_interface.ts`
 
-**P10.2**: Fallthrough symmetry 確認
+**P11.2**: Hono 4 callable interface の動作確認
+- `./scripts/hono-bench.sh` 実行、regression 0 確認
 
-### 残りの Phase (10-13)
+### 残りの Phase (11-13)
 
 | Phase | 内容 | 状態 |
 |-------|------|------|
-| **10** | Call site dispatch (P10.1 + P10.2) | **次** |
-| **11** | Integration + coverage (compile_test 確認 + E2E test + Hono bench) | 待ち |
+| **11** | Integration + coverage (compile_test 確認 + E2E test + Hono bench) | **次** |
 | **12** | L2/L3/L4 fix (real 1 件: L2-4 indent cosmetic) | 待ち |
 | **13** | Final Quality gate | 待ち |
 
-### 現在の状態 (2026-04-13 Phase 9 完了時)
+### 現在の状態 (2026-04-13 Phase 10 完了時)
 
-- **Test count**: 全テスト pass (lib 2368, integration 96, compile 4, E2E 88)
+- **Test count**: 全テスト pass (lib 2377, integration 98, compile 3, E2E 88)
 - **Quality**: clippy 0, fmt 0
 - **#[allow(dead_code)]**: production code に 0 件
 - **INV-6**: Promise unwrap は `RustType::unwrap_promise()` に統一済
 - **Compile test skip**: callable-interface 系は全て復帰済。
   error-case fixture `callable-interface-generic-arity-mismatch` のみ skip
+- **Call site dispatch**: callable interface const 呼び出しが `fn_name.call_N(args)` に変換される
+- **TypeResolver 修正**: callable interface の引数 expected type と返り値型の両方で overload 選択結果を使用 (widest signature の不正な Some ラップ / 不正確な union 返り値型を修正)
+- **select_overload**: `(usize, &MethodSignature)` を返却するよう変更。インデックスが構造的に正しく取得可能
+- **select_callable_overload**: TypeResolver 内の callable interface overload 選択ロジックを共通ヘルパーに抽出 (DRY)
 
 ### Phase 0-9 完了サマリ
 
@@ -60,6 +60,7 @@ PRD: `backlog/I-392-overload-callable-interface.md`
 | 9A | dead code 削除 (return_wrap_ctx) + arity validation (INV-4) | 2026-04-13 |
 | 9B | resolve_fn_type_info widest 書き換え + INV-6 (Promise unwrap 統一) | 2026-04-13 |
 | 9C | type substitution (apply_type_substitution) + select_overload Stage 2 修正 | 2026-04-13 |
+| 10 | Call site dispatch: try_convert_callable_trait_call + TypeResolver overload selection fix + symmetry tests | 2026-04-13 |
 
 ---
 

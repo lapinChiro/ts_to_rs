@@ -164,8 +164,9 @@ impl MethodSignature {
 
 /// Selects the best matching overload from a set of method signatures.
 ///
-/// Returns the full `MethodSignature` so callers can extract both parameter types
-/// and return type from the **same** signature, avoiding inconsistency.
+/// Returns the index and the full `MethodSignature` so callers can extract both
+/// parameter types and return type from the **same** signature, avoiding inconsistency.
+/// The index corresponds to the position in the input `sigs` slice (0-based).
 ///
 /// Resolution strategy (4 stages):
 /// 1. Single signature → use it
@@ -176,7 +177,7 @@ pub fn select_overload<'a>(
     sigs: &'a [MethodSignature],
     arg_count: usize,
     arg_types: &[Option<RustType>],
-) -> &'a MethodSignature {
+) -> (usize, &'a MethodSignature) {
     debug_assert!(
         !sigs.is_empty(),
         "select_overload called with empty signatures"
@@ -184,28 +185,29 @@ pub fn select_overload<'a>(
 
     // Stage 1: single signature
     if sigs.len() == 1 {
-        return &sigs[0];
+        return (0, &sigs[0]);
     }
 
     // Stage 2: filter by argument count
-    let by_count: Vec<&MethodSignature> = sigs
+    let by_count: Vec<(usize, &MethodSignature)> = sigs
         .iter()
-        .filter(|sig| sig.params.len() == arg_count)
+        .enumerate()
+        .filter(|(_, sig)| sig.params.len() == arg_count)
         .collect();
     if by_count.len() == 1 {
         return by_count[0];
     }
 
     // Stage 3: filter by argument type compatibility
-    let candidates: Vec<&MethodSignature> = if by_count.is_empty() {
-        sigs.iter().collect()
+    let candidates: Vec<(usize, &MethodSignature)> = if by_count.is_empty() {
+        sigs.iter().enumerate().collect()
     } else {
         by_count
     };
     if arg_types.iter().any(|t| t.is_some()) {
-        let compatible: Vec<&&MethodSignature> = candidates
+        let compatible: Vec<&(usize, &MethodSignature)> = candidates
             .iter()
-            .filter(|sig| {
+            .filter(|(_, sig)| {
                 sig.params
                     .iter()
                     .zip(arg_types.iter())
@@ -216,12 +218,12 @@ pub fn select_overload<'a>(
             })
             .collect();
         if compatible.len() == 1 {
-            return compatible[0];
+            return *compatible[0];
         }
     }
 
-    // Stage 4: fallback to first signature
-    &sigs[0]
+    // Stage 4: fallback to first candidate (respects arity filter from Stage 2)
+    candidates[0]
 }
 
 /// `ConstValue` のオブジェクトフィールド。

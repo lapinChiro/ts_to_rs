@@ -4,6 +4,7 @@ use anyhow::{anyhow, Result};
 use swc_ecma_ast as ast;
 
 use crate::ir::{BinOp, CallTarget, ClosureBody, Expr, Param, RustType, Stmt, UserTypeRef};
+use crate::registry::collection::{classify_callable_interface, CallableInterfaceKind};
 use crate::registry::{ParamDef, TypeDef};
 
 use super::literals::needs_debug_format;
@@ -73,6 +74,13 @@ impl<'a> Transformer<'a> {
                         return Ok(result);
                     }
 
+                    // Callable interface call dispatch: getCookie(ctx, "k") → getCookie.call_1(ctx, "k".to_string())
+                    if let Some(result) =
+                        self.try_convert_callable_trait_call(&fn_name, callee, call)
+                    {
+                        return result;
+                    }
+
                     // Look up function parameter types from the registry or FileTypeResolution
                     let resolved_params: Vec<ParamDef>;
                     let mut has_rest = false;
@@ -102,11 +110,9 @@ impl<'a> Transformer<'a> {
                     let args =
                         self.convert_call_args_with_types(&call.args, param_types, has_rest)?;
                     // Ident callee: classify by `TypeRegistry` lookup.
-                    // - Callable interface (`call_signatures` non-empty) → `UserTupleCtor`
-                    //   (e.g. `interface Wrapper { (x: T): U }` → `Wrapper(x)`)
-                    // - その他の Struct / Enum → defensive UserTupleCtor で walker 登録を維持
-                    //   (TS で class や enum を直接呼び出すコードは strict mode で type error
-                    //   になるが、過去 IR が type_ref として記録していた挙動を保つ)
+                    // NOTE: Callable interfaces are intercepted above by
+                    // `try_convert_callable_trait_call` and never reach here.
+                    // - Struct / Enum → `UserTupleCtor` で walker 登録を維持
                     // - Plain functions / unknown / imported → `Free`
                     let target = match self.reg().get(&fn_name) {
                         Some(TypeDef::Struct { .. } | TypeDef::Enum { .. }) => {
@@ -204,7 +210,8 @@ impl<'a> Transformer<'a> {
                     // (handles Vec→Array, String, Named, DynTrait + select_overload)
                     let method_sig = self.get_expr_type(&member.obj).and_then(|ty| {
                         let sigs = self.reg().lookup_method_sigs(ty, &method)?;
-                        let sig = crate::registry::select_overload(&sigs, call.args.len(), &[]);
+                        let (_, sig) =
+                            crate::registry::select_overload(&sigs, call.args.len(), &[]);
                         Some(sig.clone())
                     });
                     let method_params = method_sig.as_ref().map(|sig| sig.params.as_slice());
@@ -339,6 +346,78 @@ impl<'a> Transformer<'a> {
 }
 
 impl<'a> Transformer<'a> {
+    /// Attempts to convert a callable interface call to a trait method call.
+    ///
+    /// Performs a 2-stage registry lookup:
+    /// 1. `reg.get(fn_name)` → `ConstValue { type_ref_name }` (const → interface name)
+    /// 2. `reg.get(interface_name)` → `Struct { call_signatures }` (interface definition)
+    ///
+    /// If the target is a callable interface, selects the best-matching overload via
+    /// `select_overload` and generates `Expr::MethodCall { object: Ident(fn_name), method: "call_N", args }`.
+    ///
+    /// Returns `None` if the target is not a callable interface (fallthrough to normal call path).
+    fn try_convert_callable_trait_call(
+        &mut self,
+        fn_name: &str,
+        callee: &ast::Expr,
+        call: &ast::CallExpr,
+    ) -> Option<Result<Expr>> {
+        // Stage 1: ConstValue → type_ref_name (interface name)
+        let type_ref_name = match self.reg().get(fn_name)? {
+            TypeDef::ConstValue { type_ref_name, .. } => type_ref_name.clone()?,
+            _ => return None,
+        };
+
+        // Stage 2: interface definition → call_signatures + type_params
+        let (call_sigs, type_params) = {
+            let def = self.reg().get(&type_ref_name)?;
+            let sigs = match classify_callable_interface(def) {
+                CallableInterfaceKind::NonCallable => return None,
+                CallableInterfaceKind::SingleOverload(sig) => vec![sig],
+                CallableInterfaceKind::MultiOverload(sigs) => sigs,
+            };
+            let tp = match def {
+                TypeDef::Struct { type_params, .. } => type_params.clone(),
+                _ => vec![],
+            };
+            (sigs, tp)
+        };
+
+        // Generic support: extract concrete type args from callee expression type
+        let type_args = match self.get_expr_type(callee) {
+            Some(RustType::Named { type_args, .. }) => type_args.clone(),
+            _ => vec![],
+        };
+
+        // Apply type substitution (no-op for non-generic interfaces)
+        let apply_sub =
+            crate::pipeline::type_converter::overloaded_callable::apply_type_substitution;
+        let substituted_sigs: Vec<_> = call_sigs
+            .iter()
+            .map(|sig| apply_sub(sig, &type_params, &type_args))
+            .collect();
+
+        // Select overload and determine call_N index
+        let (index, selected) =
+            crate::registry::select_overload(&substituted_sigs, call.args.len(), &[]);
+
+        // Convert args with selected overload's parameter types
+        let param_defs: Vec<ParamDef> = selected.params.clone();
+        let has_rest = selected.has_rest;
+
+        let args = match self.convert_call_args_with_types(&call.args, Some(&param_defs), has_rest)
+        {
+            Ok(a) => a,
+            Err(e) => return Some(Err(e)),
+        };
+
+        Some(Ok(Expr::MethodCall {
+            object: Box::new(Expr::Ident(fn_name.to_string())),
+            method: format!("call_{index}"),
+            args,
+        }))
+    }
+
     /// Converts global built-in functions (`parseInt`, `parseFloat`, `isNaN`) to Rust equivalents.
     ///
     /// Returns `Ok(Some(expr))` if the function is a known built-in, `Ok(None)` otherwise.

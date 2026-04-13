@@ -676,7 +676,7 @@ impl<'a> TypeResolver<'a> {
                         constructor: Some(sigs),
                         ..
                     } if !sigs.is_empty() => {
-                        let sig = select_overload(sigs, args.len(), &[]);
+                        let (_, sig) = select_overload(sigs, args.len(), &[]);
                         Some((
                             sig.params.iter().map(|p| p.ty.clone()).collect(),
                             sig.has_rest,
@@ -746,7 +746,7 @@ impl<'a> TypeResolver<'a> {
         // Get constructor param types
         let param_types: Vec<RustType> = match constructor {
             Some(sigs) if !sigs.is_empty() => {
-                let sig = select_overload(sigs, args.len(), &[]);
+                let (_, sig) = select_overload(sigs, args.len(), &[]);
                 sig.params.iter().map(|p| p.ty.clone()).collect()
             }
             _ => return vec![],

@@ -42,10 +42,32 @@ impl<'a> TypeResolver<'a> {
                         let resolved = self.resolve_type_params_in_type(&return_type);
                         ResolvedType::Known(resolved)
                     }
-                    ResolvedType::Known(ref var_ty @ RustType::Named { .. }) => {
-                        let (ret, _) = resolve_fn_type_info(var_ty, self.registry, self.synthetic);
-                        ret.map(|ty| ResolvedType::Known(self.resolve_type_params_in_type(&ty)))
-                            .unwrap_or(ResolvedType::Unknown)
+                    ResolvedType::Known(
+                        ref var_ty @ RustType::Named {
+                            ref name,
+                            ref type_args,
+                        },
+                    ) => {
+                        // Callable interface: select the matching overload for
+                        // accurate return type (widest would return a synthetic union).
+                        if let Some(sig) = select_callable_overload(
+                            self.registry,
+                            name,
+                            type_args,
+                            call.args.len(),
+                        ) {
+                            sig.return_type
+                                .map(|ty| {
+                                    ResolvedType::Known(self.resolve_type_params_in_type(&ty))
+                                })
+                                .unwrap_or(ResolvedType::Unknown)
+                        } else {
+                            // Fallback for non-callable Named types (function type alias, etc.)
+                            let (ret, _) =
+                                resolve_fn_type_info(var_ty, self.registry, self.synthetic);
+                            ret.map(|ty| ResolvedType::Known(self.resolve_type_params_in_type(&ty)))
+                                .unwrap_or(ResolvedType::Unknown)
+                        }
                     }
                     _ => {
                         // Fall back to TypeRegistry
@@ -154,13 +176,26 @@ impl<'a> TypeResolver<'a> {
                             // Scope lookup for Fn type variables (no rest info available)
                             Some((params.clone(), false))
                         }
-                        RustType::Named { .. } => {
-                            // Named type variable (e.g., `encode: Encoder` where Encoder
-                            // is a function type alias) — resolve via registry
-                            let (ret, params) =
-                                resolve_fn_type_info(var_ty, self.registry, self.synthetic);
-                            let _ = ret; // return type not needed here
-                            params.map(|p| (p, false))
+                        RustType::Named {
+                            name, type_args, ..
+                        } => {
+                            // Callable interface: select the matching overload for
+                            // accurate expected types (widest signature has Option-wrapped
+                            // optional params which would cause incorrect Some() wrapping).
+                            if let Some(sig) =
+                                select_callable_overload(self.registry, name, type_args, args.len())
+                            {
+                                Some((
+                                    sig.params.iter().map(|p| p.ty.clone()).collect(),
+                                    sig.has_rest,
+                                ))
+                            } else {
+                                // Fallback for non-callable Named types (function type alias, etc.)
+                                let (ret, params) =
+                                    resolve_fn_type_info(var_ty, self.registry, self.synthetic);
+                                let _ = ret;
+                                params.map(|p| (p, false))
+                            }
                         }
                         _ => None,
                     }
@@ -278,7 +313,7 @@ impl<'a> TypeResolver<'a> {
         arg_types: &[Option<RustType>],
     ) -> Option<(Vec<RustType>, bool)> {
         let sigs = self.lookup_method_sigs(obj_type, method_name)?;
-        let sig = select_overload(&sigs, arg_count, arg_types);
+        let (_, sig) = select_overload(&sigs, arg_count, arg_types);
         Some((
             sig.params.iter().map(|p| p.ty.clone()).collect(),
             sig.has_rest,
@@ -296,7 +331,7 @@ impl<'a> TypeResolver<'a> {
     ) -> ResolvedType {
         match self.lookup_method_sigs(obj_type, method_name) {
             Some(sigs) => {
-                let sig = select_overload(&sigs, arg_count, arg_types);
+                let (_, sig) = select_overload(&sigs, arg_count, arg_types);
                 sig.return_type
                     .clone()
                     .map(ResolvedType::Known)
@@ -403,6 +438,36 @@ impl<'a> TypeResolver<'a> {
             current_result
         }
     }
+}
+
+/// Selects the best-matching callable interface overload for a Named type.
+///
+/// Performs classify → type substitution → select_overload in one step.
+/// Returns `None` if the type is not a callable interface.
+fn select_callable_overload(
+    registry: &crate::registry::TypeRegistry,
+    name: &str,
+    type_args: &[RustType],
+    arg_count: usize,
+) -> Option<crate::registry::MethodSignature> {
+    let def = registry.get(name)?;
+    use crate::registry::collection::{classify_callable_interface, CallableInterfaceKind};
+    let call_sigs = match classify_callable_interface(def) {
+        CallableInterfaceKind::SingleOverload(sig) => vec![sig],
+        CallableInterfaceKind::MultiOverload(sigs) => sigs,
+        CallableInterfaceKind::NonCallable => return None,
+    };
+    let type_params = match def {
+        TypeDef::Struct { type_params, .. } => type_params.as_slice(),
+        _ => return None,
+    };
+    let apply_sub = crate::pipeline::type_converter::overloaded_callable::apply_type_substitution;
+    let substituted: Vec<_> = call_sigs
+        .iter()
+        .map(|sig| apply_sub(sig, type_params, type_args))
+        .collect();
+    let (_, selected) = select_overload(&substituted, arg_count, &[]);
+    Some(selected.clone())
 }
 
 /// Infers type parameter bindings by unifying parameter types with argument types.

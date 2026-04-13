@@ -1849,6 +1849,64 @@ Revision 3 では同じ問題を再導入しないよう、各 fix を **preserv
 - **Transformer 直接構築サイト 12 production + 10+ test** (F4 修正済 — 10 → 12):
   pre-existing。I-392 で新 field 追加時に invariant leak の risk があるため
   Phase 0.4 (旧 P5.4/P5.5 から移動) で対応
+- **`select_overload` Stage 4 fallback が arity filter を無視**: pre-existing bug。
+  Stage 2 で arity filter した candidates を Stage 4 が無視し `sigs[0]` を返していた。
+  複数 overload が同一 arity かつ arg_types なしのケースで、arity 不一致の sig が選択される。
+  本 PRD Phase 10 で修正: `candidates[0]` に変更 + テスト 2 件追加
+
+### D. Phase 10 scope-external discoveries (Phase 10 作業中に発見、本 PRD scope 外)
+
+以下は Phase 10 の call site dispatch 実装中に発見された課題。Phase 10 の completion
+criteria には含まれず、Phase 10 のコード変更とロジック上の被りはない（純粋な追加機能）。
+**follow-up PRD が必要**。
+
+#### D-1. callable interface const の再代入経由呼び出し (L4)
+
+**現象**: callable interface const を別変数に代入して呼び出すと、dispatch が効かない。
+```typescript
+interface GetCookie { (c: string): string; (c: string, key: string): number; }
+const getCookie: GetCookie = (c, key?) => c;
+const f = getCookie;  // 再代入
+f("ctx");             // ← dispatch されない
+```
+
+**原因**: `try_convert_callable_trait_call` は `reg.get(fn_name)` → `ConstValue { type_ref_name }`
+のみを検出パスとしている。ローカル変数 `f` はレジストリに ConstValue として登録されないため
+検出されず、`CallTarget::Free("f")` になる。生成 Rust では `f` は ZST 型 (`GetCookieGetCookieImpl`)
+であり `f("ctx")` は Rust **コンパイルエラー** (E0618: expected function, found struct)。
+
+**影響**: Tier 2 (compile error)。サイレント意味変更ではない。L4 (局所的問題)。
+
+**修正方法**: `try_convert_callable_trait_call` に代替 Stage 1 パスを追加:
+1. 現行の `reg.get(fn_name)` → `ConstValue { type_ref_name }` パスが失敗した場合
+2. `get_expr_type(callee)` → `RustType::Named { name, type_args }` を取得
+3. `classify_callable_interface(reg.get(name))` で callable 判定
+4. callable なら Stage 2 以降を共有（既存ロジックをそのまま使用）
+
+**TypeResolver 側は対応済み**: `set_call_arg_expected_types` / `resolve_call_expr` は
+`lookup_var(fn_name)` → `Named` → `select_callable_overload` のパスで既に正しく動作。
+Transformer 側のみが未対応。
+
+**改修範囲**: `src/transformer/expressions/calls.rs` の `try_convert_callable_trait_call` に
+フォールバック分岐を追加。Phase 10 の既存コード変更なし（純粋な追加）。
+
+#### D-2. callable interface を関数パラメータとして受け取った場合 (L4)
+
+**現象**: callable interface 型のパラメータ経由で呼び出すと、dispatch が効かない。
+```typescript
+function use(fn: GetCookie): void {
+    fn("ctx");  // ← dispatch されない
+}
+```
+
+**原因**: D-1 と同一 root cause。`fn` はレジストリに ConstValue として登録されない。
+
+**影響**: Tier 2 (compile error)。L4 (局所的問題)。
+
+**修正方法**: D-1 と完全に同一。`get_expr_type(callee)` パスが両方のケースをカバーする。
+TypeResolver 側は D-1 と同様に対応済み。
+
+**D-1 と D-2 は同一 root cause・同一修正のため、同一 follow-up PRD でバッチ対応すべき。**
 
 ## Test Plan
 
