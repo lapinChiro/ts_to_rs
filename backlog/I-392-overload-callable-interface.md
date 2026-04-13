@@ -1455,8 +1455,14 @@ P7.0 で二相分離アプローチを採用したため、scope-based wrapping 
 #### P9.1: arity validation (INV-4)
 
 - **Entry**: P8.2 (統合チェックポイント) 完了
-- **Work**: `trait_type_args.len() != trait_type_params.len()` の場合は hard error
-- **Exit**: fixture `callable-interface-generic-arity-mismatch.input.ts` で変換 error
+- **Work**:
+  1. `trait_type_args.len() != trait_type_params.len()` の場合は hard error
+  2. **error-case fixture の compile_test 対応**: `callable-interface-generic-arity-mismatch.input.ts`
+     は意図的に変換 error を発生させる。`tests/compile_test.rs` は `transpile_collecting`
+     の Err で panic するため、`skip_compile` / `skip_compile_with_builtins` 両方に
+     `"callable-interface-generic-arity-mismatch"` を追加する。
+     (P8.2 で `"callable-interface"` prefix を除去済のため、prefix match では skip されない)
+- **Exit**: fixture で変換 error (unit test で `expect_err`)、compile_test pass
 - **Rollback**: なし
 
 #### P9.2: `resolve_fn_type_info` を widest ベースに書き換え (C2 先行)
@@ -1466,23 +1472,34 @@ P7.0 で二相分離アプローチを採用したため、scope-based wrapping 
 
 - **Entry**: P9.1 完了
 - **Work**:
-  0. **Caller 全列挙** (Revision 3.3 M3): `grep -rn 'resolve_fn_type_info' src/` で
-     全 caller を列挙し記録。PRD 記載の `resolve_arrow_expr`, `resolve_fn_expr` 以外の
-     caller が存在する場合、全て更新対象に含める
+  0. **Caller 全列挙** (Revision 3.3 M3、P8.2 時点で empirical 確認済):
+     `resolve_fn_type_info` の caller は production 3 箇所 + test 1 箇所:
+     - `fn_exprs.rs:93` (arrow expected type)
+     - `call_resolution.rs:46` (Named type → return type lookup)
+     - `call_resolution.rs:160` (call site parameter type resolution)
+     - `tests/expected_types/callback_fallback.rs:293` (test)
   1. 現 `helpers.rs:289-327` の `resolve_fn_type_info` は
      `select_overload(call_signatures, 0, &[])` と arg_count=0 hardcoded (L317)。
      これは callable interface の arrow body に対する expected type 計算としては
      根本的に誤り (arrow body は特定 overload 向けではなく widest 向けのため)
   2. `resolve_fn_type_info` の signature に `synthetic: &mut SyntheticTypeRegistry`
      引数を追加 (F3 対応 — `compute_widest_signature` が synthetic を要求するため)。
-     Step 0 で列挙した全呼び出し元を更新
+     **設計注記**: TypeResolver context (`TypeResolverVisitor`) は
+     `self.synthetic: &mut SyntheticTypeRegistry` を保持している (visitors.rs)。
+     `fn_exprs.rs:93` と `call_resolution.rs` の caller から `synthetic` を伝搬する
+     経路を確立する必要がある。`resolve_fn_type_info` が `pub(super)` のため
+     TypeResolver module 内でのみ呼ばれ、全 caller が synthetic を保持するため
+     伝搬は straightforward
   3. `TypeDef::Struct { call_signatures, .. }` の case で
      `compute_widest_signature(call_signatures, synthetic)` を呼び、widest の
      params / return_type を返す (INV-7 の widest 一貫性)
   4. `select_overload(..., 0, &[])` 呼び出しを **完全撤去**
-  5. **INV-2 lint 解消 (残り)**: `helpers.rs` の `!call_signatures.is_empty()` 判定が
-     `compute_widest_signature` 呼び出しに置換されることで自動解消。P4.1 の
-     `type_aliases.rs` 修正と合わせて lint violation が 0 になることを確認
+  5. **INV-2 lint 部分解消**: `helpers.rs:316` の `!call_signatures.is_empty()` 判定が
+     `compute_widest_signature` 呼び出しに置換されることで 1 件解消。
+     他の violation (ts_type_info 3 件、intersection 1 件、type_aliases 1 件、
+     registry/mod.rs 1 件) は `TsTypeLiteralInfo` / `TypeDef` merge ロジック等の
+     別 context のため P9.2 scope 外。lint script の `exit 0` → `exit 1` 変更は
+     全 violation 解消後 (Phase 13 または follow-up) に実施
   6. ~~`overloaded_callable.rs` の `#![allow(dead_code)]` 削除~~: **P7.0 で削除済**。
      skip
   7. **INV-6 完全達成: 既存 Promise unwrap 関数を `RustType::unwrap_promise()` に置換**:
@@ -1490,15 +1507,15 @@ P7.0 で二相分離アプローチを採用したため、scope-based wrapping 
        `RustType::unwrap_promise()` + Unit filter に分解。呼び出し元
        (`fn_exprs.rs:61,95`, `visitors.rs:89`) を更新
      - `unwrap_promise_type()` (`src/transformer/functions/helpers.rs:33`) →
-       `RustType::unwrap_promise()` に置換。呼び出し元 (`functions/mod.rs:113`) を更新
+       `RustType::unwrap_promise()` に置換。呼び出し元 (`functions/mod.rs:29,113`) を更新
      - 置換後、既存 standalone 関数 2 つを削除
      - **Exit 追加**: `grep -rn 'unwrap_promise_type\|unwrap_promise_and_unit' src/` ヒット 0 件
 - **Exit**:
   - 既存 test pass
   - 新 unit test: multi overload callable interface の arrow body が widest 型で
     resolve される (single overload でも同じ path)
-  - `scripts/check-classify-callable-usage.sh` が exit 0 で violation 0 件
-    (warning ではなく clean pass)。lint script の `exit 0` を `exit 1` に変更
+  - `scripts/check-classify-callable-usage.sh` で `helpers.rs` の violation が消滅
+    していることを確認 (他 module の violation は P9.2 scope 外のため残存許容)
   - ~~`overloaded_callable.rs` に `#![allow(dead_code)]` がないこと~~ — P7.0 で削除済
   - `grep -rn 'unwrap_promise_type\|unwrap_promise_and_unit' src/` ヒット 0 件 (INV-6)
 - **Rollback**: なし
@@ -1564,16 +1581,23 @@ P7.0 で二相分離アプローチを採用したため、scope-based wrapping 
 
 ### Phase 11: Integration + coverage
 
-#### P11.1: 全 fixture を compile_test.rs に登録 (INV-9) + E2E test
+#### P11.1: compile_test 確認 (INV-9) + E2E test
 
 - **Entry**: Phase 10 完了
 - **Work**:
-  1. 本 PRD で作成した全 callable-interface-*.input.ts fixture を
-     `tests/compile_test.rs` に登録
+  1. **compile_test 自動包含の確認**: P8.2 で `"callable-interface"` prefix を
+     `skip_compile` / `skip_compile_with_builtins` 両リストから除去済のため、
+     Phase 9-10 で追加した全 callable-interface-*.input.ts fixture は自動的にテスト対象。
+     ただし以下の error-case fixture は P9.1 で個別 skip 追加済:
+     - `callable-interface-generic-arity-mismatch` (変換 error を意図)
+     `cargo test --test compile_test` 全件 pass を確認
   2. **E2E test 追加** (R3 test addition + R4-L3-5 gap 解消):
      - `tests/e2e/scripts/callable_interface.ts` を作成。`function main(): void` で
        divergent return, generic, async 等の callable interface 使用例を全て含み
-       `console.log` で observable output を生成
+       `console.log` で observable output を生成。
+       **Phase 5-8 で単純化した fixture body** (callable-interface-inner,
+       callable-interface-async) の divergent return multi-path テストを
+       E2E test でカバーする
      - `tests/e2e_test.rs` に `test_e2e_callable_interface_ts_rust_stdout_match`
        関数を追加、`run_e2e_test("callable_interface")` を呼ぶ
      - TS 実行 (`tsx`) と変換 Rust 実行 (`cargo run`) の stdout が完全一致することを
@@ -1600,9 +1624,9 @@ P7.0 で二相分離アプローチを採用したため、scope-based wrapping 
 **C13 対応**: 旧 Phase 13 (L2/L3/L4 fix) を先行させ、旧 Phase 12 (quality gate) を
 後置する。Code 変更が quality gate 後に入るのを防ぐ。
 
-- **Entry**: Phase 11 完了 + P0.3 の verification 結果 + scope cap 判定 (Revision 3.3 H4)
-- **Work**: P0.3 の結果によって phase 数が決まる (現時点では 12 項目のうち
-  いくつが real か不明)。各 real 項目を個別 sub-phase で fix:
+- **Entry**: Phase 11 完了 + P0.3 の verification 結果 (確定済)
+- **Work**: P0.3 の結果: real bug **1 件のみ** (L2-4: generator match indent cosmetic)。
+  5 件以下のため scope cap なし (Revision 3.3 H4)。各 real 項目を個別 sub-phase で fix:
   - 各 sub-phase は「fact → fix → exit test」の 1 task 1 check 単位
   - real 6 件以上の場合は P0.3 Exit で scope 決定済
 - **Exit**: scope 内の全 real 項目が fix 済、`cargo test --lib` pass
@@ -1831,10 +1855,11 @@ PR 説明に転記。
    - arg_count=0 bug (resolve_fn_type_info): Phase 9.2 で解消
    - Stage 2 bug (select_overload): Phase 9.4 で解消
    - factory method 不在: Phase 0.4 で解消
-5. Phase 0.3 で Round 4 L2/L3/L4 12 項目の verification 完了、real 項目は Phase 12 で
-   fix 済 (real 6 件以上の場合は scope cap 適用 — Revision 3.3 H4)
-6. **P8.2 統合チェックポイント** (Revision 3.3 H1): 既存 callable-interface fixture の
-   変換結果が rustc compile pass、compile_test.rs 復帰完了
+5. Phase 0.3 で Round 4 L2/L3/L4 12 項目の verification 完了 (real 1 件: L2-4 cosmetic、
+   auto-solved 6 件、false alarm 4 件)、real 項目は Phase 12 で fix
+6. **P8.2 統合チェックポイント** (Revision 3.3 H1): **完了**。既存 callable-interface fixture の
+   変換結果が rustc compile pass、compile_test.rs から callable-interface 系 6 fixture 復帰、
+   `async-class-method` stale skip も解消
 7. `cargo test` 全件 pass (Phase 13)
 8. `cargo clippy --all-targets --all-features -- -D warnings` 0 warning (Phase 13)
 9. `cargo fmt --all --check` 0 diff (Phase 13)
@@ -1842,7 +1867,10 @@ PR 説明に転記。
    (threshold が 2+ 超過なら +1 ratchet — CLAUDE.md ルール) (Phase 13)
 11. Hono bench regression 0 (P0.0 baseline との比較, Phase 11.2)
 12. 全 callable-interface fixture が `tests/compile_test.rs` に登録されている (INV-9, P8.2 + Phase 11.1)
-13. `scripts/check-classify-callable-usage.sh` pass (INV-2 lint, Phase 13)
+13. `scripts/check-classify-callable-usage.sh` — `helpers.rs` の violation が P9.2 で
+    解消されていること確認。他 module の violation (ts_type_info, intersection,
+    type_aliases, registry/mod.rs) は本 PRD scope 外 (Phase 13 では lint script の
+    `exit 0` を維持、全 violation 解消は follow-up PRD)
 14. `scripts/check-transformer-construction.sh` pass (INV-8 lint, Phase 13)
 15. `scripts/check-promise-unwrap.sh` pass (INV-6 lint, Phase 13)
 16. Invariant INV-1〜9 が型 or CI lint で enforce されている (上記 12-15 で確認)

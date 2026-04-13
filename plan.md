@@ -130,12 +130,15 @@ union 作成。callable-interface-async fixture (single + multi-overload)
 **Pipeline Integrity 修正**: CallTarget::Free → BuiltinVariant::Some / UserEnumVariantCtor。
 infer_variant_from_expr のマッチ側も修正 + 全 5 分岐の branch coverage test
 
-### 現在の状態 (2026-04-13)
+### 現在の状態 (2026-04-13 Phase 8 完了時)
 
 - **Test count**: 全テスト pass (lib 2365, integration 94, compile 4, E2E 88)
 - **Quality**: clippy 0, fmt 0
-- **Compile test skip**: callable-interface 系は全て復帰済
-- **#[allow(dead_code)]**: mod.rs (return_wrap_ctx/spawn_nested_scope_with_wrap — P9 で再評価)
+- **Compile test skip**: callable-interface 系は全て復帰済。async-class-method も復帰済
+- **#[allow(dead_code)]**: mod.rs (return_wrap_ctx/spawn_nested_scope_with_wrap — P9 で削除判断)
+- **Phase 9 設計注記**: P9.1 error-case fixture に compile_test skip 追加が必要。
+  P9.2 synthetic 引数の TypeResolver からの伝搬経路を確立する必要あり。
+  INV-2 lint script の exit code 変更は全 violation 解消まで保留
 
 ---
 
