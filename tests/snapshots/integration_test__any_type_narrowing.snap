@@ -8,10 +8,28 @@ pub enum CheckArrowXType {
     Other(serde_json::Value),
 }
 
+impl std::fmt::Display for CheckArrowXType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CheckArrowXType::String(v) => write!(f, "{}", v),
+            CheckArrowXType::Other(v) => write!(f, "{}", v),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExprArrowXType {
     String(String),
     Other(serde_json::Value),
+}
+
+impl std::fmt::Display for ExprArrowXType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ExprArrowXType::String(v) => write!(f, "{}", v),
+            ExprArrowXType::Other(v) => write!(f, "{}", v),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -20,10 +38,28 @@ pub enum LocalAnyDataType {
     Other(serde_json::Value),
 }
 
+impl std::fmt::Display for LocalAnyDataType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LocalAnyDataType::String(v) => write!(f, "{}", v),
+            LocalAnyDataType::Other(v) => write!(f, "{}", v),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum ProcessAnyXType {
     String(String),
     Other(serde_json::Value),
+}
+
+impl std::fmt::Display for ProcessAnyXType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ProcessAnyXType::String(v) => write!(f, "{}", v),
+            ProcessAnyXType::Other(v) => write!(f, "{}", v),
+        }
+    }
 }
 
 fn processAny(x: ProcessAnyXType) {

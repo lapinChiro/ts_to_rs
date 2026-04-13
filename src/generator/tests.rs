@@ -337,14 +337,97 @@ fn test_generate_enum_data_variants() {
             },
         ],
     };
-    let expected = "\
-#[derive(Debug, Clone, PartialEq)]
-pub enum Value {
-    String(String),
-    F64(f64),
-    Bool(bool),
-}";
-    assert_eq!(generate(&[item]), expected);
+    let result = generate(&[item]);
+    // derive 行は存在する（全 variant が derivable）
+    assert!(result.contains("#[derive(Debug, Clone, PartialEq)]"));
+    // I-007: data enum に Display impl が生成される
+    assert!(
+        result.contains("impl std::fmt::Display for Value"),
+        "data enum should have Display impl, got:\n{result}"
+    );
+    // 各 variant 型に応じた Display フォーマット
+    assert!(result.contains("Value::String(v) => write!(f, \"{}\", v)"));
+    assert!(result.contains("Value::F64(v) => write!(f, \"{}\", v)"));
+    assert!(result.contains("Value::Bool(v) => write!(f, \"{}\", v)"));
+}
+
+#[test]
+fn test_generate_enum_data_non_derivable_omits_derive() {
+    // I-008: Box<dyn Fn> を含む enum は Debug/Clone/PartialEq を derive できない
+    let item = Item::Enum {
+        vis: Visibility::Public,
+        name: "StringOrFn".to_string(),
+        type_params: vec![],
+        serde_tag: None,
+        variants: vec![
+            EnumVariant {
+                name: "String".to_string(),
+                value: None,
+                data: Some(RustType::String),
+                fields: vec![],
+            },
+            EnumVariant {
+                name: "Fn".to_string(),
+                value: None,
+                data: Some(RustType::Fn {
+                    params: vec![RustType::F64],
+                    return_type: Box::new(RustType::String),
+                }),
+                fields: vec![],
+            },
+        ],
+    };
+    let result = generate(&[item]);
+    // derive 行が存在しないことを検証
+    assert!(
+        !result.contains("#[derive("),
+        "enum with Box<dyn Fn> variant should not have derive attributes, got:\n{result}"
+    );
+    // enum 定義自体は存在する
+    assert!(result.contains("pub enum StringOrFn"));
+    assert!(result.contains("Fn(Box<dyn Fn(f64) -> String>)"));
+    // Display impl も生成されないこと（Debug がないため {:?} が使えない）
+    assert!(
+        !result.contains("impl std::fmt::Display"),
+        "non-derivable enum should not have Display impl, got:\n{result}"
+    );
+}
+
+#[test]
+fn test_generate_enum_data_display_with_named_type() {
+    // I-007: Named 型を含む data enum の Display は {:?} フォーマットを使用
+    let item = Item::Enum {
+        vis: Visibility::Public,
+        name: "ArrayBufferOrString".to_string(),
+        type_params: vec![],
+        serde_tag: None,
+        variants: vec![
+            EnumVariant {
+                name: "ArrayBuffer".to_string(),
+                value: None,
+                data: Some(RustType::Named {
+                    name: "ArrayBuffer".to_string(),
+                    type_args: vec![],
+                }),
+                fields: vec![],
+            },
+            EnumVariant {
+                name: "String".to_string(),
+                value: None,
+                data: Some(RustType::String),
+                fields: vec![],
+            },
+        ],
+    };
+    let result = generate(&[item]);
+    // derive は存在する（Named 型は derivable）
+    assert!(result.contains("#[derive(Debug, Clone, PartialEq)]"));
+    // Display impl が存在する
+    assert!(result.contains("impl std::fmt::Display for ArrayBufferOrString"));
+    // Named 型は {:?} (Debug format)
+    assert!(result.contains("ArrayBufferOrString::ArrayBuffer(v) => write!(f, \"{:?}\", v)"));
+    // String 型は {} (Display format)
+    assert!(result.contains("ArrayBufferOrString::String(v) => write!(f, \"{}\", v)"));
 }
 
 // --- Item::Const tests ---

@@ -62,6 +62,25 @@ pub(crate) fn build_return_wrap_context(
     })
 }
 
+/// Builds a `ReturnWrapContext` from a synthetic union enum's variants.
+///
+/// Used for general functions (not callable interfaces) whose return type
+/// is a synthetic union enum. The variant mapping is derived from the
+/// enum's `EnumVariant` definitions.
+pub(crate) fn build_return_wrap_context_from_enum(
+    enum_name: &str,
+    variants: &[crate::ir::EnumVariant],
+) -> ReturnWrapContext {
+    let variant_by_type: Vec<(RustType, String)> = variants
+        .iter()
+        .filter_map(|v| v.data.as_ref().map(|ty| (ty.clone(), v.name.clone())))
+        .collect();
+    ReturnWrapContext {
+        enum_name: enum_name.to_string(),
+        variant_by_type,
+    }
+}
+
 impl ReturnWrapContext {
     /// Finds the variant name for the given return type.
     ///
@@ -143,13 +162,13 @@ pub(crate) fn wrap_leaf(
 
     // 2. Literal inference (string/number/bool/Some)
     if let Some(variant) = infer_variant_from_expr(&ir_expr, ctx) {
-        return Ok(wrap_in_variant(&ir_expr, &ctx.enum_name, variant));
+        return Ok(wrap_in_variant(&ir_expr, ctx, variant));
     }
 
     // 3. TypeResolver resolved type
     if let Some(ty) = expr_type {
         if let Some(variant) = ctx.variant_for(ty) {
-            return Ok(wrap_in_variant(&ir_expr, &ctx.enum_name, variant));
+            return Ok(wrap_in_variant(&ir_expr, ctx, variant));
         }
     }
 
@@ -162,11 +181,7 @@ pub(crate) fn wrap_leaf(
         .collect();
 
     if non_option_variants.len() == 1 {
-        return Ok(wrap_in_variant(
-            &ir_expr,
-            &ctx.enum_name,
-            non_option_variants[0],
-        ));
+        return Ok(wrap_in_variant(&ir_expr, ctx, non_option_variants[0]));
     }
 
     // 5. Cannot determine variant — hard error (INV-3)
@@ -177,14 +192,39 @@ pub(crate) fn wrap_leaf(
 }
 
 /// Wraps an expression in a union variant constructor.
-fn wrap_in_variant(expr: &Expr, enum_name: &str, variant: &str) -> Expr {
+///
+/// When the variant expects `String` but the expression is a string literal (`&str`),
+/// automatically applies `.to_string()` conversion via [`coerce_string_literal`].
+fn wrap_in_variant(expr: &Expr, ctx: &ReturnWrapContext, variant: &str) -> Expr {
+    let variant_type = ctx
+        .variant_by_type
+        .iter()
+        .find(|(_, name)| name == variant)
+        .map(|(ty, _)| ty);
+    let arg = coerce_string_literal(expr, variant_type);
     Expr::FnCall {
         target: crate::ir::CallTarget::UserEnumVariantCtor {
-            enum_ty: crate::ir::UserTypeRef::new(enum_name),
+            enum_ty: crate::ir::UserTypeRef::new(&ctx.enum_name),
             variant: variant.to_string(),
         },
-        args: vec![expr.clone()],
+        args: vec![arg],
     }
+}
+
+/// Converts a string literal to `String` when the expected type is `RustType::String`.
+///
+/// In Rust, string literals are `&str` but `enum Variant(String)` requires `String`.
+fn coerce_string_literal(expr: &Expr, expected_type: Option<&RustType>) -> Expr {
+    if matches!(expected_type, Some(RustType::String)) {
+        if let Expr::StringLit(_) = expr {
+            return Expr::MethodCall {
+                object: Box::new(expr.clone()),
+                method: "to_string".to_string(),
+                args: vec![],
+            };
+        }
+    }
+    expr.clone()
 }
 
 /// Returns true if the expression represents None/null/undefined.
@@ -251,7 +291,7 @@ pub(crate) fn collect_return_leaf_types(
 }
 
 /// Collects return leaf types from a sequence of SWC statements.
-fn collect_stmts_return_leaf_types(
+pub(crate) fn collect_stmts_return_leaf_types(
     stmts: &[ast::Stmt],
     type_resolution: &FileTypeResolution,
     out: &mut Vec<ReturnLeafType>,

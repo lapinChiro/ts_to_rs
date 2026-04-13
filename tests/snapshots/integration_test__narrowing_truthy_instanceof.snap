@@ -8,10 +8,28 @@ pub enum F64OrString {
     F64(f64),
 }
 
+impl std::fmt::Display for F64OrString {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            F64OrString::String(v) => write!(f, "{}", v),
+            F64OrString::F64(v) => write!(f, "{}", v),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum InstanceofAnyXType {
     MyError(MyError),
     Other(serde_json::Value),
+}
+
+impl std::fmt::Display for InstanceofAnyXType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            InstanceofAnyXType::MyError(v) => write!(f, "{:?}", v),
+            InstanceofAnyXType::Other(v) => write!(f, "{}", v),
+        }
+    }
 }
 
 fn truthyCheck(x: Option<String>) {

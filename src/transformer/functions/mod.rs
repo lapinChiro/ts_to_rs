@@ -142,7 +142,7 @@ impl<'a> Transformer<'a> {
             None => Vec::new(),
         };
         // Prepend destructuring expansion statements
-        let body = if destructuring_stmts.is_empty() {
+        let mut body = if destructuring_stmts.is_empty() {
             body_stmts
         } else {
             let mut combined = destructuring_stmts;
@@ -156,6 +156,28 @@ impl<'a> Transformer<'a> {
             self.reg(),
         );
         // mono_subs は最終的に Item::substitute で一括適用する（params, return_type, body 全体）
+
+        // Union return wrapping: must happen BEFORE has_throw wrapping.
+        // has_throw changes return_type to Result<T, String>, hiding the union type T.
+        // wrap_returns_in_ok only handles Stmt::Return (not TailExpr), so union wrap
+        // must also happen before convert_last_return_to_tail.
+        if let Some(RustType::Named { ref name, .. }) = return_type {
+            if let Some(wrap_ctx) = try_build_union_return_wrap_context(name, &local_synthetic) {
+                if let Some(block) = &fn_decl.function.body {
+                    let mut leaf_types = Vec::new();
+                    crate::transformer::return_wrap::collect_stmts_return_leaf_types(
+                        &block.stmts,
+                        self.tctx.type_resolution,
+                        &mut leaf_types,
+                    );
+                    arrow_fns::wrap_body_returns(
+                        &mut body,
+                        &mut leaf_types.into_iter(),
+                        &wrap_ctx,
+                    )?;
+                }
+            }
+        }
 
         // If the function body contains `throw`, wrap return type in Result and returns in Ok()
         let has_throw = fn_decl
@@ -178,6 +200,7 @@ impl<'a> Transformer<'a> {
         };
 
         convert_last_return_to_tail(&mut body);
+
         let mut_rebindings = mark_mut_params_from_body(&body, &params, &self.mut_method_names);
         if !mut_rebindings.is_empty() {
             let mut new_body = mut_rebindings;
@@ -234,6 +257,26 @@ impl<'a> Transformer<'a> {
                 }
             }
         }
+    }
+}
+
+/// Tries to build a `ReturnWrapContext` for a synthetic union enum.
+///
+/// Returns `Some(ctx)` if `name` is a union enum registered in `synthetic`,
+/// `None` otherwise.
+fn try_build_union_return_wrap_context(
+    name: &str,
+    synthetic: &SyntheticTypeRegistry,
+) -> Option<crate::transformer::return_wrap::ReturnWrapContext> {
+    use crate::pipeline::synthetic_registry::SyntheticTypeKind;
+    let def = synthetic.get(name)?;
+    if def.kind != SyntheticTypeKind::UnionEnum {
+        return None;
+    }
+    if let Item::Enum { variants, .. } = &def.item {
+        Some(crate::transformer::return_wrap::build_return_wrap_context_from_enum(name, variants))
+    } else {
+        None
     }
 }
 

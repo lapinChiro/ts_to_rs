@@ -2,7 +2,6 @@
 source: tests/integration_test.rs
 expression: output
 ---
-#[derive(Debug, Clone, PartialEq)]
 enum StringOrFn {
     String(String),
     Fn(Box<dyn Fn(f64) -> String>),
@@ -14,7 +13,15 @@ enum StringOrTuple {
     Tuple((f64, String)),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+impl std::fmt::Display for StringOrTuple {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StringOrTuple::String(v) => write!(f, "{}", v),
+            StringOrTuple::Tuple(v) => write!(f, "{:?}", v),
+        }
+    }
+}
+
 enum Mixed {
     String(String),
     Fn(Box<dyn Fn(f64)>),
@@ -25,4 +32,13 @@ enum Mixed {
 enum StringOrNumber {
     String(String),
     F64(f64),
+}
+
+impl std::fmt::Display for StringOrNumber {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StringOrNumber::String(v) => write!(f, "{}", v),
+            StringOrNumber::F64(v) => write!(f, "{}", v),
+        }
+    }
 }

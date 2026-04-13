@@ -154,6 +154,21 @@ impl<'a> Transformer<'a> {
                 crate::ir::ClosureBody::Block(stmts) => stmts,
             };
             convert_last_return_to_tail(&mut fn_body);
+
+            // Union return wrapping: if the return type is a synthetic union enum,
+            // wrap return/tail expressions in the appropriate variant constructor.
+            if let Some(RustType::Named { ref name, .. }) = ret {
+                if let Some(wrap_ctx) =
+                    super::try_build_union_return_wrap_context(name, self.synthetic)
+                {
+                    let leaf_types = crate::transformer::return_wrap::collect_return_leaf_types(
+                        arrow,
+                        self.tctx.type_resolution,
+                    );
+                    wrap_body_returns(&mut fn_body, &mut leaf_types.into_iter(), &wrap_ctx)?;
+                }
+            }
+
             for p in &mut params {
                 if p.ty.is_none() {
                     p.ty = Some(RustType::Any);
@@ -750,6 +765,19 @@ pub(super) fn wrap_body_returns(
     for stmt in stmts.iter_mut() {
         match stmt {
             Stmt::Return(Some(ref mut expr)) => {
+                // Skip Err(...) returns from throw conversion — they are not
+                // source-level returns and have no corresponding SWC leaf type.
+                if matches!(
+                    expr,
+                    Expr::FnCall {
+                        target: crate::ir::CallTarget::BuiltinVariant(
+                            crate::ir::BuiltinVariant::Err
+                        ),
+                        ..
+                    }
+                ) {
+                    continue;
+                }
                 *expr = wrap_expr_tail(expr.clone(), types, ctx)?;
             }
             Stmt::TailExpr(ref mut expr) => {

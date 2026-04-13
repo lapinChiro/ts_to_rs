@@ -8,6 +8,15 @@ pub enum F64OrString {
     F64(f64),
 }
 
+impl std::fmt::Display for F64OrString {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            F64OrString::String(v) => write!(f, "{}", v),
+            F64OrString::F64(v) => write!(f, "{}", v),
+        }
+    }
+}
+
 fn abs(a: f64) -> f64 {
     let result = if a > 0.0 { a } else { 0.0 };
     result
@@ -43,5 +52,5 @@ fn maybeValue(flag: bool) -> Option<String> {
 }
 
 fn toDisplay(x: f64) -> F64OrString {
-    if x > 0.0 { x } else { "negative" }
+    if x > 0.0 { F64OrString::F64(x) } else { F64OrString::String("negative".to_string()) }
 }

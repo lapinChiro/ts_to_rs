@@ -48,7 +48,7 @@ pub struct SyntheticTypeDef {
 }
 
 /// Classification of synthetic types.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum SyntheticTypeKind {
     /// A union type enum (e.g., `string | number` → `F64OrString`).
     UnionEnum,

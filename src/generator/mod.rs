@@ -396,8 +396,15 @@ fn generate_enum(
 
     let mut out = String::new();
 
+    let all_derivable = data_enum
+        && variants.iter().all(|v| {
+            v.data.as_ref().is_none_or(is_derivable_type)
+                && v.fields.iter().all(|f| is_derivable_type(&f.ty))
+        });
     if data_enum {
-        out.push_str("#[derive(Debug, Clone, PartialEq)]\n");
+        if all_derivable {
+            out.push_str("#[derive(Debug, Clone, PartialEq)]\n");
+        }
     } else {
         out.push_str("#[derive(Debug, Clone, Copy, PartialEq, Eq)]\n");
     }
@@ -485,6 +492,42 @@ fn generate_enum(
         out.push('}');
     }
 
+    // Generate Display impl for data enums.
+    // Display は Debug derive を持つ enum にのみ生成可能（non-derivable variant
+    // を含む enum は Debug も持たないため、{:?} フォールバックが使えない）。
+    // Struct variant は match パターンが複雑になるため除外。
+    let has_struct_variants = variants.iter().any(|v| !v.fields.is_empty());
+    if data_enum && all_derivable && !has_struct_variants {
+        out.push_str(&format!("\n\nimpl std::fmt::Display for {name} {{\n"));
+        out.push_str("    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {\n");
+        out.push_str("        match self {\n");
+        for variant in variants {
+            if let Some(ty) = &variant.data {
+                if is_display_formattable(ty) {
+                    out.push_str(&format!(
+                        "            {name}::{}(v) => write!(f, \"{{}}\", v),\n",
+                        variant.name,
+                    ));
+                } else {
+                    // Named / complex types: use Debug format
+                    out.push_str(&format!(
+                        "            {name}::{}(v) => write!(f, \"{{:?}}\", v),\n",
+                        variant.name,
+                    ));
+                }
+            } else {
+                // Unit variant (e.g., numeric literal in mixed union)
+                out.push_str(&format!(
+                    "            {name}::{} => write!(f, \"{}\"),\n",
+                    variant.name, variant.name,
+                ));
+            }
+        }
+        out.push_str("        }\n");
+        out.push_str("    }\n");
+        out.push('}');
+    }
+
     // Generate Display impl for numeric enums
     if numeric {
         out.push_str(&format!("\n\nimpl std::fmt::Display for {name} {{\n"));
@@ -511,7 +554,12 @@ fn generate_serde_tagged_enum(
     let tp_str = generate_type_params(type_params);
     let mut out = String::new();
 
-    out.push_str("#[derive(Debug, Clone, PartialEq)]\n");
+    let all_derivable = variants
+        .iter()
+        .all(|v| v.fields.iter().all(|f| is_derivable_type(&f.ty)));
+    if all_derivable {
+        out.push_str("#[derive(Debug, Clone, PartialEq)]\n");
+    }
     out.push_str(&format!("{vis_str}enum {name}{tp_str} {{\n"));
 
     for variant in variants {
@@ -561,6 +609,19 @@ fn generate_serde_tagged_enum(
     out.push('}');
 
     out
+}
+
+/// Returns true if a type implements `std::fmt::Display`.
+///
+/// `String`, `f64`, `bool` are Display-formattable via `{}`.
+/// `serde_json::Value` (Any) also implements Display.
+/// All other types (Named, Tuple, Vec, Fn, etc.) return false and
+/// should use `{:?}` (Debug) format if Debug is available.
+fn is_display_formattable(ty: &RustType) -> bool {
+    matches!(
+        ty,
+        RustType::String | RustType::F64 | RustType::Bool | RustType::Any
+    )
 }
 
 /// Returns true if a type can appear in a struct with `#[derive(Debug, Clone, PartialEq)]`.

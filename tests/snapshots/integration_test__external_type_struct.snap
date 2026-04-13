@@ -1,6 +1,5 @@
 ---
 source: tests/integration_test.rs
-assertion_line: 149
 expression: output
 ---
 #[derive(Debug, Clone, PartialEq)]
@@ -15,6 +14,15 @@ pub struct ArrayBuffer {
 pub enum ArrayBufferOrString {
     ArrayBuffer(ArrayBuffer),
     String(String),
+}
+
+impl std::fmt::Display for ArrayBufferOrString {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ArrayBufferOrString::ArrayBuffer(v) => write!(f, "{:?}", v),
+            ArrayBufferOrString::String(v) => write!(f, "{}", v),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -32,6 +40,15 @@ pub struct Error {
 pub enum DateOrError {
     Date(Date),
     Error(Error),
+}
+
+impl std::fmt::Display for DateOrError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DateOrError::Date(v) => write!(f, "{:?}", v),
+            DateOrError::Error(v) => write!(f, "{:?}", v),
+        }
+    }
 }
 
 pub fn processValue(input: ArrayBufferOrString) -> String {

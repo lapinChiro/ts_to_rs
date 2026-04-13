@@ -8,16 +8,43 @@ pub enum F64OrString {
     F64(f64),
 }
 
+impl std::fmt::Display for F64OrString {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            F64OrString::String(v) => write!(f, "{}", v),
+            F64OrString::F64(v) => write!(f, "{}", v),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum ProcessObjectXType {
     Object(serde_json::Value),
     Other(serde_json::Value),
 }
 
+impl std::fmt::Display for ProcessObjectXType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ProcessObjectXType::Object(v) => write!(f, "{}", v),
+            ProcessObjectXType::Other(v) => write!(f, "{}", v),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum UnknownTypeofXType {
     String(String),
     Other(serde_json::Value),
+}
+
+impl std::fmt::Display for UnknownTypeofXType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            UnknownTypeofXType::String(v) => write!(f, "{}", v),
+            UnknownTypeofXType::Other(v) => write!(f, "{}", v),
+        }
+    }
 }
 
 fn processOptional(x: Option<String>) {

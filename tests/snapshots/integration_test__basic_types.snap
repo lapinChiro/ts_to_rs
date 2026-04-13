@@ -8,6 +8,15 @@ pub enum ProcessUnknownXType {
     Other(serde_json::Value),
 }
 
+impl std::fmt::Display for ProcessUnknownXType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ProcessUnknownXType::String(v) => write!(f, "{}", v),
+            ProcessUnknownXType::Other(v) => write!(f, "{}", v),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 struct User {
     name: String,
@@ -86,4 +95,13 @@ fn processUnknown(x: ProcessUnknownXType) -> String {
 enum ID {
     String(String),
     F64(f64),
+}
+
+impl std::fmt::Display for ID {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ID::String(v) => write!(f, "{}", v),
+            ID::F64(v) => write!(f, "{}", v),
+        }
+    }
 }

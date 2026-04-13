@@ -112,14 +112,11 @@ fn test_all_fixtures_compile() {
         // trait-coercion uses `null as any` which generates `None` (not a valid Box<dyn Trait>).
         // The trait coercion (&*g) is correct; the issue is unrelated `null as any` conversion.
         "trait-coercion",
-        // union-fallback generates enum with Box<dyn Fn> which can't derive Clone/PartialEq.
-        // The union conversion itself is correct; derive limitations are a separate issue.
-        "union-fallback",
+        // (union-fallback: I-008 derive 条件付き化で解消。skip 解除)
         // any-type-narrowing uses `null` assigned to enum type which generates `None`.
         // Same root cause as I-201 (null as any → None).
         "any-type-narrowing",
-        // ternary-union: 三項演算子の分岐値 union variant ラッピング未実装 (I-11)。
-        "ternary-union",
+        // (ternary-union: I-009 union return wrap で解消。skip 解除)
         // vec-method-expected-type: ビルトイン型（Array メソッドシグネチャ）が必要。
         // コンパイルテストは transpile_collecting（ビルトインなし）で実行されるため、
         // push の引数に expected type が伝播せず _TypeLit0 が生成される。
@@ -145,8 +142,7 @@ fn test_all_fixtures_compile() {
         // intersection-empty-object: `type NonIdentity<T> = HashMap<String, String>` has unused
         // type parameter T (E0091). Mapped type with non-identity value type loses T usage (I-314).
         "intersection-empty-object",
-        // basic-types: unknown type typeof narrowing generates Value where String expected.
-        "basic-types",
+        // (basic-types: コンパイル通過確認済み。skip 解除)
         // async-await: try/catch + return generates unreachable code after labeled block (I-330).
         "async-await",
         // closures: returned closure missing Box::new() wrap (I-321),
@@ -156,8 +152,7 @@ fn test_all_fixtures_compile() {
         "discriminated-union",
         // (I-273 fixed: generic-class removed from skip list)
         // (I-325 fixed: object-destructuring removed from skip list)
-        // ternary: union branch types not wrapped in enum variants (I-11).
-        "ternary",
+        // (ternary: I-009 union return wrap で解消。skip 解除)
         // functions: returned closure missing Box::new() (I-321),
         // Vec<String> index move (I-319).
         "functions",
@@ -233,22 +228,20 @@ fn test_all_fixtures_compile_with_builtins() {
     let skip_compile_with_builtins = [
         "indexed-access-type",
         "trait-coercion",
-        "union-fallback",
+        // (union-fallback: I-008 derive 条件付き化で解消。skip 解除)
         "any-type-narrowing",
-        "ternary-union",
+        // (ternary-union: I-009 union return wrap で解消。skip 解除)
         "type-narrowing",
         "array-builtin-methods",
-        // instanceof-builtin / external-type-struct: method impl blocks not generated (I-270c).
-        // Struct definitions are generated but method calls (e.g., .toString()) fail.
+        // instanceof-builtin: method impl blocks not generated (I-270c).
         "instanceof-builtin",
-        "external-type-struct",
+        // (external-type-struct: I-007 Display 生成で解消。skip 解除)
         // intersection-empty-object: unused type parameter T (E0091) (I-314)
         "intersection-empty-object",
-        // T-3 fixture enrichment: same issues as skip_compile above.
-        "basic-types",
+        // (basic-types: コンパイル通過確認済み。skip 解除)
         // (I-273 fixed: generic-class removed from skip list)
         // (I-325 fixed: object-destructuring removed from skip list)
-        "ternary",
+        // (ternary: I-009 union return wrap で解消。skip 解除)
         "async-await",
         "closures",
         "discriminated-union",

@@ -48,10 +48,29 @@ enum Value {
     Bool(bool),
 }
 
+impl std::fmt::Display for Value {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Value::String(v) => write!(f, "{}", v),
+            Value::F64(v) => write!(f, "{}", v),
+            Value::Bool(v) => write!(f, "{}", v),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 enum StringOrNumber {
     String(String),
     F64(f64),
+}
+
+impl std::fmt::Display for StringOrNumber {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StringOrNumber::String(v) => write!(f, "{}", v),
+            StringOrNumber::F64(v) => write!(f, "{}", v),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -81,14 +100,41 @@ enum TsResult {
     Failure(Failure),
 }
 
+impl std::fmt::Display for TsResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TsResult::Success(v) => write!(f, "{:?}", v),
+            TsResult::Failure(v) => write!(f, "{:?}", v),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 enum Mixed {
     String(String),
     MyType(MyType),
 }
 
+impl std::fmt::Display for Mixed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Mixed::String(v) => write!(f, "{}", v),
+            Mixed::MyType(v) => write!(f, "{:?}", v),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 enum AsyncResult {
     Response(Response),
     Promise(Promise<Response>),
+}
+
+impl std::fmt::Display for AsyncResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AsyncResult::Response(v) => write!(f, "{:?}", v),
+            AsyncResult::Promise(v) => write!(f, "{:?}", v),
+        }
+    }
 }

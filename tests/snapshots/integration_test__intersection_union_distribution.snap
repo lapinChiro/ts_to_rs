@@ -31,6 +31,15 @@ pub enum _TypeLit0Or_TypeLit1 {
     _TypeLit1(_TypeLit1),
 }
 
+impl std::fmt::Display for _TypeLit0Or_TypeLit1 {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            _TypeLit0Or_TypeLit1::_TypeLit0(v) => write!(f, "{:?}", v),
+            _TypeLit0Or_TypeLit1::_TypeLit1(v) => write!(f, "{:?}", v),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct _TypeLit1 {
     pub q: bool,
