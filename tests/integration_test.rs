@@ -180,6 +180,29 @@ fn test_instanceof_builtin_with_builtins() {
 // ── Custom tests (non-macro: require specialized assertions) ───────────
 
 #[test]
+fn test_callable_interface_generic_arity_mismatch_errors() {
+    let input =
+        fs::read_to_string("tests/fixtures/callable-interface-generic-arity-mismatch.input.ts")
+            .unwrap();
+    // transpile_collecting is resilient: errors become unsupported entries, not Err
+    let (output, unsupported) = transpile_collecting(&input).unwrap();
+    // The arity mismatch error should be in unsupported, not in the output
+    let has_arity_error = unsupported
+        .iter()
+        .any(|u| u.kind.contains("type parameters") || u.kind.contains("type arguments"));
+    assert!(
+        has_arity_error,
+        "callable interface with generic arity mismatch should produce unsupported error (INV-4), \
+         got unsupported: {unsupported:?}, output: {output}"
+    );
+    // The const declaration should NOT appear in output (conversion was aborted for this item)
+    assert!(
+        !output.contains("mapStr"),
+        "mapStr should not appear in output when arity mismatch, got: {output}"
+    );
+}
+
+#[test]
 fn test_unsupported_syntax_default_errors() {
     let input = fs::read_to_string("tests/fixtures/unsupported-syntax.input.ts").unwrap();
     let result = transpile(&input);

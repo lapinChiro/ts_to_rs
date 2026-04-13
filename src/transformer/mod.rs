@@ -41,12 +41,6 @@ pub(crate) struct Transformer<'a> {
     /// Callable interface marker struct 名の使用済み集合 (INV-1)。
     /// PascalCase collision を検出し、suffix 付与で unique 化する。
     used_marker_names: std::collections::HashSet<String>,
-    /// Return wrap context for callable interface arrow bodies (INV-8).
-    ///
-    /// P7.0 で二相分離アプローチ (pre-collect types + post-process IR) を採用したため、
-    /// scope-based wrapping は不要。フィールドは Phase 9 で再評価予定。
-    #[allow(dead_code)]
-    return_wrap_ctx: Option<return_wrap::ReturnWrapContext>,
 }
 
 impl<'a> Transformer<'a> {
@@ -60,7 +54,6 @@ impl<'a> Transformer<'a> {
             synthetic,
             mut_method_names: std::collections::HashSet::new(),
             used_marker_names: std::collections::HashSet::new(),
-            return_wrap_ctx: None,
         }
     }
 
@@ -74,7 +67,6 @@ impl<'a> Transformer<'a> {
             synthetic: &mut *self.synthetic,
             mut_method_names: self.mut_method_names.clone(),
             used_marker_names: std::collections::HashSet::new(),
-            return_wrap_ctx: None, // INV-8: leak 防止
         }
     }
 
@@ -93,24 +85,6 @@ impl<'a> Transformer<'a> {
             synthetic: local,
             mut_method_names: self.mut_method_names.clone(),
             used_marker_names: std::collections::HashSet::new(),
-            return_wrap_ctx: None, // INV-8: leak 防止
-        }
-    }
-
-    /// Callable interface arrow body 用のネスト scope を生成する。
-    ///
-    /// P7.0 で二相分離アプローチを採用したため現在は未使用。Phase 9 で再評価予定。
-    #[allow(dead_code)]
-    pub(crate) fn spawn_nested_scope_with_wrap(
-        &mut self,
-        ctx: return_wrap::ReturnWrapContext,
-    ) -> Transformer<'_> {
-        Transformer {
-            tctx: self.tctx,
-            synthetic: &mut *self.synthetic,
-            mut_method_names: self.mut_method_names.clone(),
-            used_marker_names: std::collections::HashSet::new(),
-            return_wrap_ctx: Some(ctx),
         }
     }
 

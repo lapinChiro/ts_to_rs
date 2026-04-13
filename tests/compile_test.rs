@@ -176,6 +176,9 @@ fn test_all_fixtures_compile() {
         // (callable-interface, call-signature-rest, interface-mixed,
         // callable-interface-param-rename, callable-interface-inner:
         // P8.2 統合チェックポイントで復帰完了)
+        // callable-interface-generic-arity-mismatch: 意図的に変換 error を発生させる
+        // error-case fixture (INV-4)。transpile_collecting が Err を返すため skip 必須。
+        "callable-interface-generic-arity-mismatch",
     ];
 
     let mut entries: Vec<_> = fs::read_dir(fixture_dir)
@@ -258,6 +261,8 @@ fn test_all_fixtures_compile_with_builtins() {
         // (async-class-method: P4.2 で Promise unwrap 実装完了。skip 解除)
         // (callable-interface, call-signature-rest, interface-mixed,
         // callable-interface-param-rename: P8.2 統合チェックポイントで復帰完了)
+        // callable-interface-generic-arity-mismatch: error-case fixture (INV-4)
+        "callable-interface-generic-arity-mismatch",
     ];
 
     let mut entries: Vec<_> = fs::read_dir(fixture_dir)

@@ -350,7 +350,7 @@ const getCookie: GetCookieGetCookieImpl = GetCookieGetCookieImpl;
 | INV-5 | `Method::is_async` は arrow/fn の is_async と一致 | `Method` struct に `is_async: bool` field 追加。全 `Method { ... }` 構築サイトで明示的に set |
 | INV-6 | Promise<T> は trait sig / delegate / inner 全てで consistent | Promise unwrap を単一関数 `RustType::unwrap_promise()` に集約。trait method / Item::Fn / Method の全 3 経路で同関数を呼ぶ |
 | INV-7 | `any_enum_override` は callable interface arrow body では適用しない | widest signature を source of truth。`convert_callable_trait_const` は `any_enum_override` を呼ばない |
-| INV-8 | Return wrap context は lexical scope 内でのみ有効 | `Transformer::return_wrap_ctx` を private field 化。`scripts/check-transformer-construction.sh` lint で sub-module の struct literal 構築を禁止 (factory method 経由のみ許可) |
+| INV-8 | Transformer 構築は factory method 経由のみ (field 追加時の leak 防止) | `scripts/check-transformer-construction.sh` lint で sub-module の struct literal 構築を禁止 (factory method 経由のみ許可)。元は `return_wrap_ctx` leak 防止目的で導入、Phase 9A で `return_wrap_ctx` 削除後も factory method 強制は新 field 追加時の安全策として維持 |
 | INV-9 | 全 callable interface fixture は rustc で compile が通る | `tests/compile_test.rs` に全 fixture を登録 |
 
 ### Cascade rollback strategy (Revision 3.3 L1)
@@ -1317,13 +1317,8 @@ fn call_1(&self, c: String, key: String) -> f64 {
 
 ##### P7.0 スコープ外事項
 
-- **`return_wrap_ctx` field / `spawn_nested_scope_with_wrap` method の削除**
-  (`src/transformer/mod.rs:44-49`, `mod.rs:100-116`):
-  P7.0 で二相分離アプローチを採用したため scope-based wrapping は不要になった。
-  `#[allow(dead_code)]` + コメントで管理中。Phase 9 で generic callable interface の
-  設計を行う際、scope-based アプローチへの回帰が必要かどうかを評価してから削除を決定する。
-  Phase 9 不要と判明した時点で即削除すべき (全 Transformer 構築サイトの `return_wrap_ctx: None`
-  も同時に除去)
+- ~~**`return_wrap_ctx` field / `spawn_nested_scope_with_wrap` method の削除**~~:
+  **Phase 9A で解決済**。不要と判断し削除完了
 - **for-of ループ変数の TypeResolver 型解決不足**: `for (const item of items)` の
   `item` の型が TypeResolver で `Unknown` になるケースがある (配列要素型の推論が未対応)。
   callable interface arrow body で for-of ループ変数を return する場合、wrap_leaf の
@@ -1387,7 +1382,7 @@ fn call_1(&self, c: String, key: String) -> f64 {
 
 - **`return_wrap_ctx` field / `spawn_nested_scope_with_wrap` method の削除**
   (`src/transformer/mod.rs:44-49`, `mod.rs:100-116`):
-  前回 (P7.0) のスコープ外と同じ。Phase 9 で再評価
+  **Phase 9A で解決済**。不要と判断し削除完了
 - **Promise unwrap + Unit 除去パターンの DRY 化**: `.map(|ty| ty.unwrap_promise()).and_then(|ty| if Unit then None else Some)` パターンが 3 箇所に存在
   (`convert_callable_trait_const` inner return type、`build_delegate_method` delegate return type、
   `convert_callable_interface_as_trait` trait method return type)。各箇所でコンテキストが
@@ -1440,17 +1435,12 @@ Phase 9 (Generic) 以降で発見される問題が「generic 固有」か「基
 
 ### Phase 9: Generic callable interface
 
-#### Phase 9 前提: `return_wrap_ctx` / `spawn_nested_scope_with_wrap` 削除判断 (P7.0/P8.2 からの引継ぎ)
+#### Phase 9 前提: `return_wrap_ctx` / `spawn_nested_scope_with_wrap` 削除 — **完了**
 
-P7.0 で二相分離アプローチを採用したため、scope-based wrapping の `return_wrap_ctx` field
-と `spawn_nested_scope_with_wrap` method は `#[allow(dead_code)]` で保持されている
-(`src/transformer/mod.rs:44-49`, `mod.rs:100-116`)。Phase 9 で generic callable interface
-の設計を行う際、scope-based アプローチへの回帰が必要かどうかを評価し:
-- **不要と判明**: 即座に削除 (`#[allow(dead_code)]` + 全 Transformer 構築サイトの
-  `return_wrap_ctx: None` も同時に除去)
-- **必要と判明**: `#[allow(dead_code)]` を除去し、実コードとして活用
-
-**Phase 13 Exit criteria #10 で残存 `#[allow(dead_code)]` がゼロであることを確認する。**
+P7.0 で二相分離アプローチを採用し、scope-based wrapping は不要と確定。
+`return_wrap_ctx` field と `spawn_nested_scope_with_wrap` method を削除済。
+全 Transformer 構築サイト (production + test 13 箇所) から `return_wrap_ctx: None` を除去。
+production code の `#[allow(dead_code)]` は 0 件。
 
 #### P9.1: arity validation (INV-4)
 
@@ -1647,12 +1637,15 @@ P7.0 で二相分離アプローチを採用したため、scope-based wrapping 
   9. Production 内 `Transformer\s*\{` 0 ヒット確認 (invariant 最終確認)
   10. `#[allow(dead_code)]` が production code に残っていないこと確認
       (`grep -rn 'allow(dead_code)' src/ --include='*.rs' | grep -v tests`)。
-      残存候補: `return_wrap_ctx` field + `spawn_nested_scope_with_wrap` method
-      (P7.0 で不要と判断、Phase 9 で削除予定)
+      Phase 9A で `return_wrap_ctx` / `spawn_nested_scope_with_wrap` を削除済のため
+      残存 0 件のはず
   11. `async-class-method` が `compile_test.rs` の skip リストから完全除外されていること確認
       (P4.2 で `skip_compile` から復帰済、P8.2 で `skip_compile_with_builtins` からも復帰済)
   12. INV-6 完全達成確認: `grep -rn 'unwrap_promise_type\|unwrap_promise_and_unit' src/`
       ヒット 0 件 (P9.2 で置換済のはず)
+  13. INV-8 lint が引き続き pass していること確認 (`scripts/check-transformer-construction.sh`)。
+      Phase 9A で `return_wrap_ctx` 削除済のため、INV-8 の目的は「新 field 追加時の factory
+      method 強制」に変化。lint script 自体は不変
 - **Exit**: 全 quality gate clean
 - **Rollback**: なし
 
@@ -1926,6 +1919,22 @@ PR 説明に転記。
   根本対策: ユーザー定義がビルトインを上書きするマージ戦略 (follow-up PRD)
 - `interface Factory { new (config): Factory; name: string; }` 等 construct signature
   の emission 改善 (現在も emit されていない、変更なし)
+- **for-of ループ変数の TypeResolver 型解決不足**
+  (Phase 7 スコープ外で発見): `for (const item of items)` の `item` の型が
+  TypeResolver で `Unknown` になるケースがある (配列要素型の推論が未対応)。
+  callable interface arrow body で for-of ループ変数を return する場合、wrap_leaf の
+  priority 3 (TypeResolver 型) がスキップされ priority 4 (single non-Option fallback)
+  に fall through する。根本修正は TypeResolver の for-of 要素型推論 (別イシュー)
+- **Promise unwrap + Unit 除去パターンの DRY 化**
+  (Phase 7 スコープ外で発見): `.map(|ty| ty.unwrap_promise()).and_then(...)` パターンが
+  3 箇所に存在。各箇所でコンテキストが微妙に異なり、共有すると結合度が上がるため
+  現時点では許容。`RustType::unwrap_promise_to_return_type()` convenience method として
+  統合を検討 (follow-up refactoring)
+- **non-async arrow with `Promise<T>` return type**
+  (Phase 7 スコープ外で発見): TypeScript では `async` キーワードなしで `Promise<T>` を
+  返す関数が書ける。現在の trait 生成は `Promise<T>` → `async fn -> T` と一律変換するため、
+  non-async arrow の場合に trait impl が `async fn` を要求する不整合が生じる。
+  callable interface 固有ではなく trait 生成の一般的な設計課題 (別イシュー)
 - **callable-interface fixture body での Option narrowing テスト**
   (Phase 8 /check_problem で確認): `callable-interface-inner` / `callable-interface-async`
   の fixture body に `if (key)` / `if (flag)` パターンがあり、`key: Option<String>` /

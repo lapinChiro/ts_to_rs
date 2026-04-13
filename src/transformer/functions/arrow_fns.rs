@@ -219,22 +219,33 @@ impl<'a> Transformer<'a> {
         &mut self,
         value_name: &str,
         trait_name: &str,
-        _trait_type_args: &[RustType],
+        trait_type_args: &[RustType],
         arrow: &ast::ArrowExpr,
         vis: Visibility,
         resilient: bool,
     ) -> Result<Vec<Item>> {
         // --- Compute widest signature from registry ---
-        let call_sigs = match self.reg().get(trait_name) {
+        let (call_sigs, trait_type_params) = match self.reg().get(trait_name) {
             Some(crate::registry::TypeDef::Struct {
-                call_signatures, ..
-            }) => call_signatures.clone(),
+                call_signatures,
+                type_params,
+                ..
+            }) => (call_signatures.clone(), type_params.clone()),
             _ => {
                 return Err(anyhow::anyhow!(
                     "callable interface '{trait_name}' not found"
                 ))
             }
         };
+
+        // --- Arity validation (INV-4, P9.1) ---
+        if trait_type_args.len() != trait_type_params.len() {
+            return Err(anyhow::anyhow!(
+                "callable interface '{trait_name}' expects {} type parameters but got {} type arguments",
+                trait_type_params.len(),
+                trait_type_args.len(),
+            ));
+        }
         let widest = crate::pipeline::type_converter::overloaded_callable::compute_widest_signature(
             &call_sigs,
             self.synthetic,
