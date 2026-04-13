@@ -9,31 +9,32 @@
 
 ---
 
-## 現在のフェーズ: Batch 25 (I-392) Phase 0-10 完了、Phase 11 待ち
+## 現在のフェーズ: Batch 25 (I-392) Phase 0-11 完了、Phase 12 待ち
 
 Multi-overload callable interface を trait + marker + impl 表現に変換。
 PRD: `backlog/I-392-overload-callable-interface.md`
 
-### 次の作業: Phase 11 (Integration + coverage)
+### 次の作業: Phase 12 (L2/L3/L4 fix)
 
-**P11.1**: compile_test 確認 (INV-9) + E2E test
-- `cargo test --test compile_test` 全件 pass 確認
-- E2E test 追加: `tests/e2e/scripts/callable_interface.ts`
+**P12.1**: TypeParam default 対応 (L2: IR 基盤改善)
+- `TypeParam` に `default: Option<T>` フィールド追加
+- `collect_type_params` / `extract_type_params` でデフォルト値収集
+- INV-4 arity 検証を required params のみチェックに緩和
+- `apply_type_substitution` で省略 type args にデフォルト値充填
+- Hono bench の `ToSSGAdaptorInterface` エラー 2 件を解消
 
-**P11.2**: Hono 4 callable interface の動作確認
-- `./scripts/hono-bench.sh` 実行、regression 0 確認
+**P12.2**: generator match indent cosmetic (L2-4)
 
-### 残りの Phase (11-13)
+### 残りの Phase (12-13)
 
 | Phase | 内容 | 状態 |
 |-------|------|------|
-| **11** | Integration + coverage (compile_test 確認 + E2E test + Hono bench) | **次** |
-| **12** | L2/L3/L4 fix (real 1 件: L2-4 indent cosmetic) | 待ち |
+| **12** | L2/L3/L4 fix (P12.1 TypeParam default + P12.2 indent cosmetic) | **次** |
 | **13** | Final Quality gate | 待ち |
 
-### 現在の状態 (2026-04-13 Phase 10 完了時)
+### 現在の状態 (2026-04-13 Phase 11 完了時)
 
-- **Test count**: 全テスト pass (lib 2377, integration 98, compile 3, E2E 88)
+- **Test count**: 全テスト pass (lib 2377, integration 98, compile 3, E2E 89)
 - **Quality**: clippy 0, fmt 0
 - **#[allow(dead_code)]**: production code に 0 件
 - **INV-6**: Promise unwrap は `RustType::unwrap_promise()` に統一済
@@ -61,6 +62,7 @@ PRD: `backlog/I-392-overload-callable-interface.md`
 | 9B | resolve_fn_type_info widest 書き換え + INV-6 (Promise unwrap 統一) | 2026-04-13 |
 | 9C | type substitution (apply_type_substitution) + select_overload Stage 2 修正 | 2026-04-13 |
 | 10 | Call site dispatch: try_convert_callable_trait_call + TypeResolver overload selection fix + symmetry tests | 2026-04-13 |
+| 11 | Integration: compile_test 3/3 pass, E2E callable_interface pass, Hono bench regression 0 (Phase 10 起因) | 2026-04-13 |
 
 ---
 

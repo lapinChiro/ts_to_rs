@@ -810,3 +810,8 @@ fn test_e2e_narrowing_compound_ternary_ts_rust_stdout_match() {
 fn test_e2e_to_string_method_ts_rust_stdout_match() {
     run_e2e_test("to_string_method");
 }
+
+#[test]
+fn test_e2e_callable_interface_ts_rust_stdout_match() {
+    run_e2e_test("callable_interface");
+}

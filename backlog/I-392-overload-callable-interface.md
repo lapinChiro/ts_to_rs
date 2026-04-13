@@ -1704,12 +1704,93 @@ P10.1/P10.2 の 2 sub-phase に再構成:
 後置する。Code 変更が quality gate 後に入るのを防ぐ。
 
 - **Entry**: Phase 11 完了 + P0.3 の verification 結果 (確定済)
-- **Work**: P0.3 の結果: real bug **1 件のみ** (L2-4: generator match indent cosmetic)。
-  5 件以下のため scope cap なし (Revision 3.3 H4)。各 real 項目を個別 sub-phase で fix:
-  - 各 sub-phase は「fact → fix → exit test」の 1 task 1 check 単位
-  - real 6 件以上の場合は P0.3 Exit で scope 決定済
-- **Exit**: scope 内の全 real 項目が fix 済、`cargo test --lib` pass
-- **Rollback**: 各 sub-phase 単位で diff discard
+- **Work**: 2 件 (P0.3 由来 1 件 + Phase 11 Hono bench 発見 1 件)
+
+#### P12.1: TypeParam default 対応 (L2: IR 基盤改善, Phase 11 Hono bench 発見)
+
+**問題**: INV-4 (Phase 9) の arity 検証が TypeScript のデフォルト型パラメータを考慮しない。
+Hono の `ToSSGAdaptorInterface<E = Env, S = {}, BasePath = '/'>` を type args なしで使用する
+`const toSSG: ToSSGAdaptorInterface = ...` が arity mismatch エラーになる。
+TypeScript では全 type param にデフォルトがあるため省略可能。
+
+**root cause**: `TypeParam` 構造体 (`src/ir/types.rs:9`) に `default` フィールドがない。
+SWC AST の `TsTypeParam.default: Option<Box<TsType>>` を収集していない。
+
+**修正箇所**:
+
+1. **`src/ir/types.rs` TypeParam に default フィールド追加**:
+   ```rust
+   pub struct TypeParam<T = RustType> {
+       pub name: String,
+       pub constraint: Option<T>,
+       pub default: Option<T>,  // NEW: TypeScript default type parameter
+   }
+   ```
+   全既存コードで `TypeParam { name, constraint }` 構築箇所に `default: None` を追加。
+
+2. **`src/registry/collection.rs:509` `collect_type_params` でデフォルト値を抽出**:
+   ```rust
+   TypeParam {
+       name: p.name.sym.to_string(),
+       constraint: p.constraint.as_ref().and_then(|c| convert_to_ts_type_info(c).ok()),
+       default: p.default.as_ref().and_then(|d| convert_to_ts_type_info(d).ok()),
+   }
+   ```
+
+3. **`src/pipeline/type_converter/utilities.rs:10` `extract_type_params` でデフォルト値を抽出**:
+   ```rust
+   TypeParam {
+       name: p.name.sym.to_string(),
+       constraint: p.constraint.as_ref().and_then(|c| convert_ts_type(c, synthetic, reg).ok()),
+       default: p.default.as_ref().and_then(|d| convert_ts_type(d, synthetic, reg).ok()),
+   }
+   ```
+
+4. **`src/transformer/functions/arrow_fns.rs:242` INV-4 arity 検証の緩和**:
+   ```rust
+   // Required = params without defaults
+   let required_count = trait_type_params.iter()
+       .filter(|p| p.default.is_none())
+       .count();
+   if trait_type_args.len() < required_count
+       || trait_type_args.len() > trait_type_params.len()
+   {
+       return Err(...)
+   }
+   ```
+
+5. **`src/pipeline/type_converter/overloaded_callable.rs` `apply_type_substitution` でデフォルト適用**:
+   省略された type args にデフォルト値を充填してから substitution を実行:
+   ```rust
+   pub fn apply_type_substitution(sig, type_params, type_args) -> MethodSignature {
+       if type_params.is_empty() { return sig.clone(); }
+       let effective_args: Vec<RustType> = type_params.iter().enumerate().map(|(i, param)| {
+           type_args.get(i).cloned()
+               .or_else(|| param.default.clone())
+               .unwrap_or(RustType::Any)  // safety fallback
+       }).collect();
+       let bindings = type_params.iter().zip(effective_args.iter())
+           .map(|(param, arg)| (param.name.clone(), arg.clone()))
+           .collect();
+       sig.substitute(&bindings)
+   }
+   ```
+
+6. **`src/pipeline/type_converter/interfaces.rs` callable interface trait 生成での call sig type param デフォルト**:
+   `convert_callable_interface_as_trait` 内の call signature ごとの type param merge でも
+   `default` を伝搬する必要あり (line 238-252)。
+
+**Exit**:
+- Hono bench: `ToSSGAdaptorInterface` エラー 2 件が解消
+- unit test: `test_arity_validation_allows_defaulted_type_params` pass
+- 既存 test 全件 pass
+
+#### P12.2: generator match indent cosmetic (L2-4, P0.3 由来)
+
+P0.3 の結果: real bug 1 件 (generator match indent cosmetic)。
+
+- **Exit**: indent 修正、既存 test 全件 pass
+- **Rollback**: diff discard
 
 ### Phase 13: Final Quality gate
 
