@@ -58,8 +58,16 @@ impl<'a> TypeResolver<'a> {
         let prev = self.current_fn_return_type.take();
         if let Some(ann) = return_ann {
             if let Ok(ty) = convert_ts_type(&ann.type_ann, self.synthetic, self.registry) {
-                self.current_fn_return_type = unwrap_promise_and_unit(ty)
-                    .map(|ty| wrap_trait_for_position(ty, TypePosition::Value, self.registry));
+                let unwrapped = ty.unwrap_promise();
+                self.current_fn_return_type = if matches!(unwrapped, RustType::Unit) {
+                    None
+                } else {
+                    Some(wrap_trait_for_position(
+                        unwrapped,
+                        TypePosition::Value,
+                        self.registry,
+                    ))
+                };
             }
         }
         prev
@@ -90,9 +98,14 @@ impl<'a> TypeResolver<'a> {
             None
         };
 
-        let (ret, params) = resolve_fn_type_info(&expected, self.registry);
+        let (ret, params) = resolve_fn_type_info(&expected, self.registry, self.synthetic);
         if let Some(ret_ty) = ret {
-            self.current_fn_return_type = unwrap_promise_and_unit(ret_ty);
+            let unwrapped = ret_ty.unwrap_promise();
+            self.current_fn_return_type = if matches!(unwrapped, RustType::Unit) {
+                None
+            } else {
+                Some(unwrapped)
+            };
         }
         (free_var_scope, params)
     }

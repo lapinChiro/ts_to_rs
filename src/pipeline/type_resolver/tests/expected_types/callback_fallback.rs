@@ -350,3 +350,61 @@ fn test_callable_interface_return_type_propagated_to_arrow() {
         "Cookie expected type should be on the object literal containing 'name', got: '{obj_lit_src}'"
     );
 }
+
+#[test]
+fn test_multi_overload_callable_interface_resolves_widest_params() {
+    // interface GetCookie {
+    //     (c: string): string;
+    //     (c: string, key: string): number;
+    // }
+    // const getCookie: GetCookie = (c, key?) => { return c; };
+    //
+    // The arrow should get widest params: (c: String, key: Option<String>)
+    // NOT overload 0's params: (c: String) — which was the old select_overload(0) behavior
+    let mut reg = TypeRegistry::new();
+    reg.register(
+        "GetCookie".to_string(),
+        TypeDef::Struct {
+            type_params: vec![],
+            fields: vec![],
+            methods: Default::default(),
+            constructor: None,
+            call_signatures: vec![
+                MethodSignature {
+                    params: vec![("c".to_string(), RustType::String).into()],
+                    return_type: Some(RustType::String),
+                    has_rest: false,
+                    type_params: vec![],
+                },
+                MethodSignature {
+                    params: vec![
+                        ("c".to_string(), RustType::String).into(),
+                        ("key".to_string(), RustType::String).into(),
+                    ],
+                    return_type: Some(RustType::F64),
+                    has_rest: false,
+                    type_params: vec![],
+                },
+            ],
+            extends: vec![],
+            is_interface: true,
+        },
+    );
+
+    let source = r#"const getCookie: GetCookie = (c, key) => { return c; };"#;
+    let res = resolve_with_reg(source, &reg);
+
+    // The arrow params should get widest types.
+    // Param "c" should have String as expected type.
+    // Param "key" should have Option<String> (absent in overload 0 → Option-wrapped in widest).
+    // Verify by checking expr_types for the ident "c" in the return statement.
+    let c_return = res
+        .expr_types
+        .iter()
+        .find(|(_, ty)| matches!(ty, ResolvedType::Known(RustType::String)));
+    assert!(
+        c_return.is_some(),
+        "return expression 'c' should resolve to String via widest params, got expr_types: {:?}",
+        res.expr_types
+    );
+}

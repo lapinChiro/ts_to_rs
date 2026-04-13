@@ -228,22 +228,6 @@ pub(super) fn enter_type_param_scope(
     (constraints, prev_scope)
 }
 
-/// Promise<T> → T に展開し、Unit（void）は None にする。
-/// TypeResolver が expected_type / return_type として登録する前に適用する。
-pub(super) fn unwrap_promise_and_unit(ty: RustType) -> Option<RustType> {
-    let unwrapped = match &ty {
-        RustType::Named { name, type_args } if name == "Promise" && type_args.len() == 1 => {
-            type_args[0].clone()
-        }
-        _ => ty,
-    };
-    if matches!(unwrapped, RustType::Unit) {
-        None
-    } else {
-        Some(unwrapped)
-    }
-}
-
 /// Converts explicit type arguments from a `TsTypeParamInstantiation` to `Vec<RustType>`.
 ///
 /// Used for `foo<string, number>()` or `new Map<string, number>()` where the
@@ -280,15 +264,18 @@ pub(super) fn build_type_arg_bindings(
 
 /// Extracts function return type and parameter types from an expected type.
 ///
-/// Handles two cases:
+/// Handles three cases:
 /// - `RustType::Fn { return_type, params }` — uses the types directly
-/// - `RustType::Named { name }` — looks up TypeRegistry for `TypeDef::Function`
+/// - `RustType::Named { name }` → `TypeDef::Function` — uses the function def
+/// - `RustType::Named { name }` → `TypeDef::Struct { call_signatures }` — callable interface:
+///   computes the **widest signature** (INV-7) instead of selecting a single overload
 ///
 /// Used by `resolve_arrow_expr` and `resolve_fn_expr` to infer return type
 /// from parent context (e.g., variable type annotation).
 pub(super) fn resolve_fn_type_info(
     expected: &RustType,
     registry: &TypeRegistry,
+    synthetic: &mut SyntheticTypeRegistry,
 ) -> (Option<RustType>, Option<Vec<RustType>>) {
     match expected {
         RustType::Fn {
@@ -314,10 +301,14 @@ pub(super) fn resolve_fn_type_info(
             Some(TypeDef::Struct {
                 call_signatures, ..
             }) if !call_signatures.is_empty() => {
-                let sig = crate::registry::select_overload(call_signatures, 0, &[]);
+                let widest =
+                    crate::pipeline::type_converter::overloaded_callable::compute_widest_signature(
+                        call_signatures,
+                        synthetic,
+                    );
                 (
-                    sig.return_type.clone(),
-                    Some(sig.params.iter().map(|p| p.ty.clone()).collect()),
+                    widest.return_type,
+                    Some(widest.params.iter().map(|p| p.ty.clone()).collect()),
                 )
             }
             _ => (None, None),

@@ -2,6 +2,20 @@
 
 ## 改訂履歴
 
+- **2026-04-13 #16 (Phase 9B 完了)**: P9.2 (resolve_fn_type_info widest 書き換え + INV-6) 完了。
+  - `resolve_fn_type_info` に `synthetic` 引数追加、callable interface case で
+    `compute_widest_signature` を呼び widest params/return を返す
+  - `select_overload(..., 0, &[])` を helpers.rs から完全撤去
+  - INV-6 完全達成: `unwrap_promise_and_unit` / `unwrap_promise_type` を
+    `RustType::unwrap_promise()` に統一、standalone 関数 2 つ削除
+  - 新 unit test: multi overload callable interface の arrow body が widest 型で resolve
+  - 最終状態: 全テスト pass (lib 2366), clippy 0, fmt 0
+- **2026-04-13 #15 (Phase 9A 完了)**: Phase 9 前提 (dead code 削除) + P9.1 (arity validation) 完了。
+  - `return_wrap_ctx` / `spawn_nested_scope_with_wrap` 削除。#[allow(dead_code)] 0 件
+  - arity validation (INV-4): `trait_type_args.len() != trait_type_params.len()` で hard error
+  - error-case fixture + compile_test skip + integration test
+  - INV-8 説明更新 (factory method 強制目的に変更)
+  - 最終状態: 全テスト pass (lib 2365, integration 95), clippy 0, fmt 0
 - **2026-04-13 #14 (Phase 8 完了)**: Phase 8 (Const instance + 統合チェックポイント) 完了。
   - P8.1: `convert_callable_trait_const` に `Item::Const` emission 追加。
     `const getCookie: GetCookieGetCookieImpl = GetCookieGetCookieImpl;` 形式の

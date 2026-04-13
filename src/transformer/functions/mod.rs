@@ -25,10 +25,7 @@ pub(crate) use helpers::convert_last_return_to_tail;
 /// Example: `"foo_opts"` → `"FooOpts"`, `"bar_config"` → `"BarConfig"`
 use crate::pipeline::any_narrowing::to_pascal_case;
 
-use helpers::{
-    contains_throw, mark_mut_params_from_body, pascal_to_snake, unwrap_promise_type,
-    wrap_returns_in_ok,
-};
+use helpers::{contains_throw, mark_mut_params_from_body, pascal_to_snake, wrap_returns_in_ok};
 
 impl<'a> Transformer<'a> {
     /// Converts an SWC [`ast::FnDecl`] into an IR [`Item::Fn`].
@@ -110,7 +107,7 @@ impl<'a> Transformer<'a> {
         // Unwrap Promise<T> → T for async functions (before body conversion
         // so that return type context propagates correctly)
         let return_type = if is_async {
-            return_type.and_then(unwrap_promise_type)
+            return_type.map(|ty| ty.unwrap_promise())
         } else {
             return_type
         };

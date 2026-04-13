@@ -26,20 +26,6 @@ pub(super) fn pascal_to_snake(name: &str) -> String {
     result
 }
 
-/// Unwraps `Promise<T>` to `T` for async function return types.
-///
-/// If the type is `Named { name: "Promise", type_args: [T] }`, returns `Some(T)`.
-/// Otherwise returns the type unchanged.
-pub(super) fn unwrap_promise_type(ty: RustType) -> Option<RustType> {
-    match ty {
-        RustType::Named {
-            ref name,
-            ref type_args,
-        } if name == "Promise" && type_args.len() == 1 => Some(type_args[0].clone()),
-        other => Some(other),
-    }
-}
-
 /// Converts the last `Stmt::Return(Some(expr))` in a function body to `Stmt::TailExpr(expr)`.
 ///
 /// This enables idiomatic Rust tail expressions (implicit return without `return` keyword).

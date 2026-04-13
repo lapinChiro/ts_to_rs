@@ -43,7 +43,7 @@ impl<'a> TypeResolver<'a> {
                         ResolvedType::Known(resolved)
                     }
                     ResolvedType::Known(ref var_ty @ RustType::Named { .. }) => {
-                        let (ret, _) = resolve_fn_type_info(var_ty, self.registry);
+                        let (ret, _) = resolve_fn_type_info(var_ty, self.registry, self.synthetic);
                         ret.map(|ty| ResolvedType::Known(self.resolve_type_params_in_type(&ty)))
                             .unwrap_or(ResolvedType::Unknown)
                     }
@@ -157,7 +157,8 @@ impl<'a> TypeResolver<'a> {
                         RustType::Named { .. } => {
                             // Named type variable (e.g., `encode: Encoder` where Encoder
                             // is a function type alias) — resolve via registry
-                            let (ret, params) = resolve_fn_type_info(var_ty, self.registry);
+                            let (ret, params) =
+                                resolve_fn_type_info(var_ty, self.registry, self.synthetic);
                             let _ = ret; // return type not needed here
                             params.map(|p| (p, false))
                         }
