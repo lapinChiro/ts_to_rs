@@ -381,17 +381,18 @@ fn test_select_overload_single_sig_returns_it() {
 }
 
 #[test]
-fn test_select_overload_all_same_return_skips_to_first() {
+fn test_select_overload_same_return_uses_arity_not_first() {
     let sigs = vec![
         make_sig(vec![], Some(RustType::String)),
         make_sig(vec![RustType::F64], Some(RustType::String)),
         make_sig(vec![RustType::F64, RustType::Bool], Some(RustType::String)),
     ];
-    // All return types identical → returns first signature
+    // All return types identical, but arity filter still selects the right overload.
+    // 1-arg call → sig[1] (1-param), NOT sig[0] (old Stage 2 bug: returned first)
     let selected = crate::registry::select_overload(&sigs, 1, &[Some(RustType::F64)]);
     assert_eq!(selected.return_type, Some(RustType::String));
-    // First signature is selected (0-arg)
-    assert_eq!(selected.params.len(), 0);
+    assert_eq!(selected.params.len(), 1);
+    assert_eq!(selected.params[0].ty, RustType::F64);
 }
 
 #[test]
@@ -440,7 +441,7 @@ fn test_select_overload_arg_types_empty_uses_arg_count_only() {
         make_sig(vec![RustType::String], Some(RustType::String)),
         make_sig(vec![RustType::F64], Some(RustType::F64)),
     ];
-    // Same arg_count, empty arg_types → Stage 4 skipped → first of count-matched (sig[0])
+    // Same arg_count, empty arg_types → Stage 3 skipped → first of count-matched (sig[0])
     let selected = crate::registry::select_overload(&sigs, 1, &[]);
     assert_eq!(selected.params[0].ty, RustType::String);
 }
@@ -456,6 +457,26 @@ fn test_select_overload_params_and_return_from_same_sig() {
     // Both params and return_type should be from sig[1] (F64 variant)
     assert_eq!(selected.params[0].ty, RustType::F64);
     assert_eq!(selected.return_type, Some(RustType::F64));
+}
+
+#[test]
+fn test_select_overload_void_only_multi_overload_by_arity() {
+    // Logger { (msg: string): void; (msg: string, meta: object): void }
+    // All return types void (identical). Old Stage 2 would always return first.
+    // Fixed: arity filter selects the correct overload.
+    let sigs = vec![
+        make_sig(vec![RustType::String], None), // (msg) → void
+        make_sig(
+            vec![RustType::String, RustType::Any],
+            None, // (msg, meta) → void
+        ),
+    ];
+    // 1-arg call → sig[0]
+    let selected = crate::registry::select_overload(&sigs, 1, &[]);
+    assert_eq!(selected.params.len(), 1);
+    // 2-arg call → sig[1]
+    let selected = crate::registry::select_overload(&sigs, 2, &[]);
+    assert_eq!(selected.params.len(), 2);
 }
 
 #[test]

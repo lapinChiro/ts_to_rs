@@ -246,6 +246,15 @@ impl<'a> Transformer<'a> {
                 trait_type_args.len(),
             ));
         }
+        // --- Type substitution for generic callable interfaces (P9.3) ---
+        // Apply substitution first, then compute widest from concrete types.
+        // For non-generic interfaces, apply_type_substitution is a no-op (empty type_params).
+        let apply_sub =
+            crate::pipeline::type_converter::overloaded_callable::apply_type_substitution;
+        let call_sigs: Vec<_> = call_sigs
+            .iter()
+            .map(|sig| apply_sub(sig, &trait_type_params, trait_type_args))
+            .collect();
         let widest = crate::pipeline::type_converter::overloaded_callable::compute_widest_signature(
             &call_sigs,
             self.synthetic,
@@ -367,6 +376,7 @@ impl<'a> Transformer<'a> {
         let delegate_impl = build_delegate_impl(
             &marker_name,
             trait_name,
+            trait_type_args,
             &call_sigs,
             &widest,
             wrap_ctx.as_ref(),
@@ -548,6 +558,7 @@ fn wrap_delegate_arg(param_name: &str, overload_ty: &RustType, widest_ty: &RustT
 fn build_delegate_impl(
     marker_name: &str,
     trait_name: &str,
+    trait_type_args: &[RustType],
     call_sigs: &[crate::registry::MethodSignature],
     widest: &crate::pipeline::type_converter::overloaded_callable::WidestSignature,
     wrap_ctx: Option<&crate::transformer::return_wrap::ReturnWrapContext>,
@@ -564,7 +575,7 @@ fn build_delegate_impl(
         type_params: vec![],
         for_trait: Some(crate::ir::TraitRef {
             name: trait_name.to_string(),
-            type_args: vec![],
+            type_args: trait_type_args.to_vec(),
         }),
         consts: vec![],
         methods,

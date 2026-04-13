@@ -1,0 +1,24 @@
+---
+source: tests/integration_test.rs
+expression: output
+---
+trait Mapper<T, U> {
+    fn call_0(&self, input: T) -> U;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct MapperStrToNumImpl;
+
+impl MapperStrToNumImpl {
+    fn inner(&self, input: String) -> f64 {
+        42.0
+    }
+}
+
+impl Mapper<String, f64> for MapperStrToNumImpl {
+    fn call_0(&self, input: String) -> f64 {
+        self.inner(input)
+    }
+}
+
+const strToNum: MapperStrToNumImpl = MapperStrToNumImpl;

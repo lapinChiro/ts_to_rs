@@ -83,7 +83,7 @@ impl<'a> TypeResolver<'a> {
                 // Resolve arguments BEFORE collecting their types for overload resolution.
                 // set_call_arg_expected_types (called at line 22) has already set expected
                 // types on args, so resolve_expr will use them. Then collect_resolved_arg_types
-                // can provide actual types for select_overload Stage 4.
+                // can provide actual types for select_overload Stage 3.
                 for arg in &call.args {
                     self.resolve_expr(&arg.expr);
                 }

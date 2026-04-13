@@ -8,7 +8,9 @@
 //! Used by Phase 4 (trait emission), Phase 5 (inner fn emission),
 //! and Phase 7 (return wrap context).
 
-use crate::ir::RustType;
+use std::collections::HashMap;
+
+use crate::ir::{RustType, TypeParam};
 use crate::pipeline::SyntheticTypeRegistry;
 use crate::registry::{MethodSignature, ParamDef};
 
@@ -214,6 +216,28 @@ fn unify_types(types: &[&RustType], synthetic: &mut SyntheticTypeRegistry) -> Ru
             type_args: vec![],
         }
     }
+}
+
+/// Applies type parameter → concrete type substitution to a method signature.
+///
+/// Builds a `{ T → String, U → f64 }` binding map from `type_params` and `type_args`,
+/// then substitutes all type variables in the signature's params and return type.
+///
+/// Returns the original signature unchanged when `type_params` is empty.
+pub fn apply_type_substitution(
+    sig: &MethodSignature,
+    type_params: &[TypeParam],
+    type_args: &[RustType],
+) -> MethodSignature {
+    if type_params.is_empty() {
+        return sig.clone();
+    }
+    let bindings: HashMap<String, RustType> = type_params
+        .iter()
+        .zip(type_args.iter())
+        .map(|(param, arg)| (param.name.clone(), arg.clone()))
+        .collect();
+    sig.substitute(&bindings)
 }
 
 #[cfg(test)]

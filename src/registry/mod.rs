@@ -167,12 +167,11 @@ impl MethodSignature {
 /// Returns the full `MethodSignature` so callers can extract both parameter types
 /// and return type from the **same** signature, avoiding inconsistency.
 ///
-/// Resolution strategy (5 stages):
+/// Resolution strategy (4 stages):
 /// 1. Single signature → use it
-/// 2. All signatures have the same return type → use first (selection is irrelevant for return type)
-/// 3. Filter by argument count → if exactly one matches, use it
-/// 4. Filter by argument type compatibility → if exactly one matches, use it
-/// 5. Fallback: first signature
+/// 2. Filter by argument count → if exactly one matches, use it
+/// 3. Filter by argument type compatibility → if exactly one matches, use it
+/// 4. Fallback: first signature
 pub fn select_overload<'a>(
     sigs: &'a [MethodSignature],
     arg_count: usize,
@@ -188,13 +187,7 @@ pub fn select_overload<'a>(
         return &sigs[0];
     }
 
-    // Stage 2: all return types identical — selection doesn't affect return type
-    let first_ret = &sigs[0].return_type;
-    if sigs.iter().all(|s| &s.return_type == first_ret) {
-        return &sigs[0];
-    }
-
-    // Stage 3: filter by argument count
+    // Stage 2: filter by argument count
     let by_count: Vec<&MethodSignature> = sigs
         .iter()
         .filter(|sig| sig.params.len() == arg_count)
@@ -203,7 +196,7 @@ pub fn select_overload<'a>(
         return by_count[0];
     }
 
-    // Stage 4: filter by argument type compatibility
+    // Stage 3: filter by argument type compatibility
     let candidates: Vec<&MethodSignature> = if by_count.is_empty() {
         sigs.iter().collect()
     } else {
@@ -227,7 +220,7 @@ pub fn select_overload<'a>(
         }
     }
 
-    // Stage 5: fallback to first signature
+    // Stage 4: fallback to first signature
     &sigs[0]
 }
 

@@ -2,6 +2,11 @@
 
 ## 改訂履歴
 
+- **2026-04-13 #17 (Phase 9C 完了)**: P9.3 (type substitution) + P9.4 (select_overload Stage 2 修正) 完了。
+  - P9.3: `apply_type_substitution` helper 追加。convert_callable_trait_const / resolve_fn_type_info /
+    build_delegate_impl に substitution 統合。`callable-interface-generic` fixture 追加
+  - P9.4: select_overload Stage 2 削除 (5→4 stage)。void-only multi-overload の arity 選択修正
+  - 最終状態: 全テスト pass (lib 2368, integration 96), clippy 0, fmt 0
 - **2026-04-13 #16 (Phase 9B 完了)**: P9.2 (resolve_fn_type_info widest 書き換え + INV-6) 完了。
   - `resolve_fn_type_info` に `synthetic` 引数追加、callable interface case で
     `compute_widest_signature` を呼び widest params/return を返す

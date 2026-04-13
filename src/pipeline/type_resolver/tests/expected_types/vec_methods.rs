@@ -257,13 +257,13 @@ fn test_member_callee_args_resolved_before_overload_selection() {
 
     // The call p.process(42) should resolve to the F64 overload (arg type = F64).
     // Before the fix, collect_resolved_arg_types was called before args were resolved,
-    // so Stage 4 of select_overload was ineffective.
+    // so Stage 3 of select_overload was ineffective.
     let has_f64_expr = res
         .expr_types
         .values()
         .any(|t| matches!(t, ResolvedType::Known(RustType::F64)));
     assert!(
         has_f64_expr,
-        "p.process(42) should resolve to F64 overload (Stage 4 arg type matching)"
+        "p.process(42) should resolve to F64 overload (Stage 3 arg type matching)"
     );
 }

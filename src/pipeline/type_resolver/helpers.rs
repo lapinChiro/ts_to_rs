@@ -289,7 +289,9 @@ pub(super) fn resolve_fn_type_info(
             };
             (ret, Some(params.clone()))
         }
-        RustType::Named { name, .. } => match registry.get(name) {
+        RustType::Named {
+            name, type_args, ..
+        } => match registry.get(name) {
             Some(TypeDef::Function {
                 return_type,
                 params,
@@ -299,11 +301,20 @@ pub(super) fn resolve_fn_type_info(
                 Some(params.iter().map(|p| p.ty.clone()).collect()),
             ),
             Some(TypeDef::Struct {
-                call_signatures, ..
+                call_signatures,
+                type_params,
+                ..
             }) if !call_signatures.is_empty() => {
+                // Apply type substitution for generic callable interfaces (P9.3)
+                let apply_sub =
+                    crate::pipeline::type_converter::overloaded_callable::apply_type_substitution;
+                let substituted: Vec<_> = call_signatures
+                    .iter()
+                    .map(|sig| apply_sub(sig, type_params, type_args))
+                    .collect();
                 let widest =
                     crate::pipeline::type_converter::overloaded_callable::compute_widest_signature(
-                        call_signatures,
+                        &substituted,
                         synthetic,
                     );
                 (
