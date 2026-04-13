@@ -12,166 +12,54 @@
 ## 現在のフェーズ: Batch 25 (I-392) Phase 0-9 完了、Phase 10 待ち
 
 Multi-overload callable interface を trait + marker + impl 表現に変換。
-PRD Revision 3.3 (フェーズ構成・チェックポイント最適化レビュー反映済)。
+PRD: `backlog/I-392-overload-callable-interface.md`
 
-### Phase 0 完了内容 (2026-04-12)
+### 次の作業: Phase 10 (Call site dispatch)
 
-- **P0.0**: Baseline 計測 (2297 test, cov 91.63%, Hono 71.5%/58err)
-- **P0.1**: IfLet/Match 調査 — IfLet は ternary narrowing で arrow return 位置に発生。
-  Match は不発生 (YAGNI)。Phase 6 設計確定
-- **P0.2**: Promise 調査 — `RustType::unwrap_promise()` 未存在。Phase 4.2 で新規追加
-- **P0.3**: L2/L3/L4 verification — real bug 1 件 (L2-4 indent cosmetic)。Phase 12 で fix
-- **P0.4**: Transformer factory method refactor — `spawn_nested_scope` +
-  `spawn_nested_scope_with_local_synthetic` 新規作成、12 production サイト移行、
-  INV-8 lint script (`scripts/check-transformer-construction.sh`) 作成
+**P10.1**: callable interface call dispatch + overload 選択 (旧 P10.1 + P10.2 統合)
+- `getCookie(ctx, "k")` → `getCookie.call_1(ctx, "k".to_string())` への変換
+- 2 段 ConstValue lookup: `reg.get("getCookie")` → `ConstValue { type_ref_name: "GetCookie" }`
+  → `reg.get("GetCookie")` → `Struct { call_signatures }` → `classify_callable_interface`
+- Generic support: `get_expr_type(callee)` → type_args → `apply_type_substitution`
+- Overload 選択: `select_overload` で call_N の N を決定
+- Fixture: `callable-interface-call.input.ts` + `callable-interface-call-generic.input.ts`
 
-### Phase 1 完了内容 (2026-04-12)
+**P10.2**: Fallthrough symmetry 確認
 
-- **P1.1**: `Item::Const { vis, name, ty, value }` variant 追加 (fold/visit/generator 対応)
-- **P1.2**: `Method::is_async: bool` field 追加 (全 17 構築サイト更新)
-- **P1.3**: generator で trait/impl method の `async fn` keyword 出力
-- **P1.4**: `function.is_async` → `Method::is_async` propagation + async-class-method fixture
-- **P1.5**: `convert_var_decl_module_level` rename + const-safe Lit init (`Num`/`Bool`/`Null`)
-  → `Item::Const` 生成。型注釈なしリテラルは `infer_const_type` で型推論。
-  String/Regex/BigInt は const-safe でないため skip (follow-up PRD)
+### 残りの Phase (10-13)
 
-### Phase 2 完了内容 (2026-04-12)
-
-- **P2.1**: `CallableInterfaceKind` enum + `classify_callable_interface` 関数
-  (unit test 8 件: NonCallable×5 + SingleOverload + MultiOverload + ConstValue)
-- **P2.2**: INV-2 lint script (`scripts/check-classify-callable-usage.sh`)
-  既存 violation を warning 検出 (Phase 4/9 で修正予定)
-- **P2.3**: Pass 2 を non-Var (2a) / Var (2b) に分割。
-  Pass 2b は Pass 2a 完了後の snapshot を lookup に使用
-- **P2.4**: `collect_decl` Var branch で callable interface arrow →
-  `ConstValue { type_ref_name }` 登録。non-callable は従来通り `Function`
-- `collection` module を `pub(crate)` に変更 (Phase 4.3 で transformer がアクセス)
-
-### Phase 3 完了内容 (2026-04-12)
-
-- **P3.1-3.3**: `overloaded_callable.rs` 新規作成
-  - `compute_widest_params`: 各 position で型 unify + 不在は Option wrap
-  - `compute_union_return`: divergent → synthetic union enum、mixed void/non-void → Option
-  - `WidestSignature` struct (params, return_type, return_diverges)
-  - unit test 9 件
-
-### Phase 4 完了内容 (2026-04-12)
-
-- **P4.1**: `convert_callable_interface_as_trait` — callable interface → `Item::Trait`。
-  各 call signature を `call_N` method に展開。snapshot 3件更新、compile_test 3件一時除外
-- **P4.2**: `RustType::unwrap_promise()` + `is_promise()` 追加。trait method + class method
-  の Promise<T> → T unwrap。async-class-method compile_test 復帰。INV-6 lint script 作成
-- **P4.3**: `callable_trait_name_and_args` + `convert_callable_trait_const` skeleton。
-  callable interface const を既存 Fn path からバイパスし trait const path にルーティング
-
-### Phase 5 完了内容 (2026-04-12)
-
-- **P5.1**: `used_marker_names` field + `allocate_marker_name` (collision suffix loop) +
-  `marker_struct_name` (camelCase/snake_case 対応)。unit test 5 件
-- **P5.2**: `Item::Struct` に `is_unit_struct: bool` 追加 (60+ 構築サイト更新)。
-  generator で `struct Name;` + `#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]`。
-  unit test 2 件
-- **P5.3**: `Expr::StructInit { fields: [] }` → `Name` (unit struct syntax)
-- **P5.4**: `convert_callable_trait_const` に widest signature 計算 + marker struct +
-  inner fn 生成。deep deep review で critical 修正: inner params を arrow param 名に修正
-  (widest 名だと body の変数参照が不一致)。fixture 3 件 (callable-interface 更新 +
-  param-rename 新規 + inner 新規)
-
-### Phase 6 完了内容 (2026-04-12)
-
-- **P6.0**: `return_wrap_ctx: Option<ReturnWrapContext>` field + `spawn_nested_scope_with_wrap`
-  factory。全 factory method で None 伝搬 (INV-8 leak 防止)
-- **P6.1**: `return_wrap.rs` 新規作成 — `ReturnWrapContext`, `build_return_wrap_context`,
-  `wrap_leaf`, `variant_for`, `unique_option_variant` + unit test 12 件
-- **P6.2-P6.4**: `wrap_body_returns`, `wrap_expr_tail` (If/IfLet 対応) を実装。
-  ただし inner fn body への return wrap 適用は TypeResolver 型情報不足のため Phase 7 に先送り。
-  インフラは `#[allow(dead_code)]` で保持
-- **P6.5**: CLI synthetic items 結合修正 (`main.rs::transpile_file` に
-  `render_referenced_synthetics_for_file` 追加) + builtin 名前衝突対策
-  (fixture `Transformer` → `StringMapper` に変更)
-
-### Phase 9C (P9.3 + P9.4) 完了、Phase 10 待ち
-
-**次: Phase 10 (Call site dispatch)**
-
-### Phase 9C 完了内容 (2026-04-13)
-
-**P9.3**: `apply_type_substitution` helper を overloaded_callable.rs に追加。
-- `convert_callable_trait_const`: call_sigs に substitution を適用してから widest 再計算。
-  冗長な二重 widest 計算を回避するクリーンな設計
-- `resolve_fn_type_info`: callable interface case で type_args から substitution 適用
-- `build_delegate_impl`: trait_type_args を TraitRef::type_args に伝搬
-  (`impl Mapper<String, f64> for ...` 形式の正しい生成)
-- `callable-interface-generic` fixture 追加 + rustc compile pass
-
-**P9.4**: `select_overload` Stage 2 (all return types identical → return first) を削除。
-- void-only multi-overload で arg 数に応じた正しい overload が選択されるように修正
-- 5-stage → 4-stage pipeline に簡略化
-- 全 Stage 番号参照コメントを更新
-- unit test 2 件 (既存修正 1 + 新規 1)
-
-### Phase 9B 完了内容 (2026-04-13)
-
-**P9.2**: `resolve_fn_type_info` を widest ベースに書き換え。
-- signature に `synthetic: &mut SyntheticTypeRegistry` 引数を追加
-- callable interface case で `compute_widest_signature` を呼び、widest params/return を返す
-- `select_overload(..., 0, &[])` を helpers.rs から完全撤去
-- production caller 3 箇所 (fn_exprs.rs, call_resolution.rs ×2) を更新
-- INV-6 完全達成: `unwrap_promise_and_unit` / `unwrap_promise_type` を
-  `RustType::unwrap_promise()` に置換し、standalone 関数 2 つを削除
-
-### Phase 9A 完了内容 (2026-04-13)
-
-**Phase 9 前提**: `return_wrap_ctx` field + `spawn_nested_scope_with_wrap` method を削除。
-二相分離アプローチ (P7.0) で scope-based wrapping は不要と確定。
-全 Transformer 構築サイト (production + test 13 箇所) から `return_wrap_ctx: None` を除去
-
-**P9.1**: arity validation (INV-4)。`trait_type_args.len() != trait_type_params.len()` で
-hard error。`callable-interface-generic-arity-mismatch` error-case fixture + compile_test
-skip 追加 + integration test (`expect unsupported`)
-
-### Phase 8 完了内容 (2026-04-13)
-
-**P8.1**: `convert_callable_trait_const` 末尾に `Item::Const` emission 追加。
-`const getCookie: GetCookieGetCookieImpl = GetCookieGetCookieImpl;` 形式の
-module-level const instance を生成。4 fixture の snapshot 更新
-
-**P8.2**: 変換側統合チェックポイント。
-- callable-interface-inner / callable-interface-async の fixture body を単純化
-  (Option narrowing I-360 の pre-existing bug 回避、PRD H3 fixture body 制限に準拠)
-- compile_test.rs の skip リストから callable-interface 系 6 fixture を全て復帰
-  (callable-interface, call-signature-rest, interface-mixed, callable-interface-param-rename,
-  callable-interface-inner, callable-interface-async)
-- `async-class-method` の `skip_compile_with_builtins` stale entry も修正
-  (P4.2 exit criteria の incomplete 分)
-- `Box<dyn Fn(` パターンが callable-interface snapshot に残っていないことを確認
-- doc comment stale 修正 (`convert_callable_trait_const`)
-- 全テスト pass、clippy 0、fmt 0
-
-### Phase 7 完了内容 (2026-04-13)
-
-**P7.0**: 二相分離アプローチ (SWC 型収集 + IR wrapping)。collect_return_leaf_types 新規、
-wrap_leaf / wrap_body_returns / wrap_expr_tail を Iterator ベースに変更。
-unit test 12 件 (collect 5 + wrap_leaf 2 + infer_variant 5)
-
-**P7.1**: build_delegate_impl / build_delegate_method (Result 型)。
-non-divergent → direct return、divergent → match unwrap。variant_for 失敗時 explicit error
-
-**P7.2**: wrap_delegate_arg — bare / Some / Variant / Some+Variant の 4 パターン。
-unit test 4 件
-
-**P7.3**: async delegate に .await。compute_union_return で Promise unwrap してから
-union 作成。callable-interface-async fixture (single + multi-overload)
-
-**Pipeline Integrity 修正**: CallTarget::Free → BuiltinVariant::Some / UserEnumVariantCtor。
-infer_variant_from_expr のマッチ側も修正 + 全 5 分岐の branch coverage test
+| Phase | 内容 | 状態 |
+|-------|------|------|
+| **10** | Call site dispatch (P10.1 + P10.2) | **次** |
+| **11** | Integration + coverage (compile_test 確認 + E2E test + Hono bench) | 待ち |
+| **12** | L2/L3/L4 fix (real 1 件: L2-4 indent cosmetic) | 待ち |
+| **13** | Final Quality gate | 待ち |
 
 ### 現在の状態 (2026-04-13 Phase 9 完了時)
 
 - **Test count**: 全テスト pass (lib 2368, integration 96, compile 4, E2E 88)
 - **Quality**: clippy 0, fmt 0
-- **Phase 9 完了**: Generic callable interface (arity validation, widest rewrite, INV-6,
-  type substitution, select_overload Stage 2 修正) 全て完了
+- **#[allow(dead_code)]**: production code に 0 件
+- **INV-6**: Promise unwrap は `RustType::unwrap_promise()` に統一済
+- **Compile test skip**: callable-interface 系は全て復帰済。
+  error-case fixture `callable-interface-generic-arity-mismatch` のみ skip
+
+### Phase 0-9 完了サマリ
+
+| Phase | 内容 | 完了日 |
+|-------|------|--------|
+| 0 | Baseline + Investigation + Prerequisites (factory method refactor 含む) | 2026-04-12 |
+| 1 | IR foundations (Item::Const, Method::is_async, generator async, non-arrow Lit init) | 2026-04-12 |
+| 2 | Registry + classification (classify_callable_interface, Pass 2a/2b, ConstValue 登録) | 2026-04-12 |
+| 3 | Widest signature computation (compute_widest_params, compute_union_return) | 2026-04-12 |
+| 4 | Trait emission (trait 化, async/Promise unwrap, skeleton routing) | 2026-04-12 |
+| 5 | Marker struct + inner fn (marker name, ZST, unit struct, inner fn) | 2026-04-12 |
+| 6 | Return wrap (ReturnWrapContext, wrap_leaf, wrap_body_returns, CLI synthetic 結合) | 2026-04-12 |
+| 7 | Trait delegate impl (二相分離, delegate method, arg wrapping, async, Pipeline Integrity) | 2026-04-13 |
+| 8 | Const instance + 統合チェックポイント (Item::Const emission, compile_test 復帰) | 2026-04-13 |
+| 9A | dead code 削除 (return_wrap_ctx) + arity validation (INV-4) | 2026-04-13 |
+| 9B | resolve_fn_type_info widest 書き換え + INV-6 (Promise unwrap 統一) | 2026-04-13 |
+| 9C | type substitution (apply_type_substitution) + select_overload Stage 2 修正 | 2026-04-13 |
 
 ---
 
@@ -219,12 +107,12 @@ L4 候補と詳細は [`TODO`](TODO) 参照。
 
 ### I-382 解消プロジェクト (2026-04-08 〜 2026-04-10)
 
-`generate_stub_structs` を完全削除し、Pass 5c を user 定義�� import 自動生成に再設計。
+`generate_stub_structs` を完全削除し、Pass 5c を user 定義型 import 自動生成に再設計。
 
 - **Phase A**: 調査債務 INV-1〜9 解消
 - **Phase B**: PRD I-387 起票
 - **Phase C**: IR 構造化 (`RustType::TypeVar` / `Primitive` / `StdCollection` 導入、
-  heuristic 削除、interim patch ��去)
+  heuristic 削除、interim patch 除去)
 - **Phase D**: I-382 本体 (PRD-γ `__type` 是正 → PRD-β 外部型完全化 → PRD-δ stub 削除 + import 生成)
 
 **最終指標** (Phase D 完了時):

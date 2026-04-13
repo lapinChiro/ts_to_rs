@@ -2,6 +2,12 @@
 
 ## 改訂履歴
 
+- **2026-04-13 #18 (Phase 10 設計見直し)**: Phase 9 完了後の empirical 確認に基づき Phase 10 を再構成。
+  - 旧 P10.1 + P10.2 を統合 (overload 選択なしに call_N 決定不能)、旧 P10.3 → P10.2 に
+  - 2 段 ConstValue lookup 設計を明記 (TypeResolver が Named 型を返す事実に基づく)
+  - Generic support: get_expr_type → type_args → apply_type_substitution を設計に追加
+  - Param types resolution: selected overload の params で args を型付き変換
+  - Fixture 一覧更新: callable-interface-call + callable-interface-call-generic
 - **2026-04-13 #17 (Phase 9C 完了)**: P9.3 (type substitution) + P9.4 (select_overload Stage 2 修正) 完了。
   - P9.3: `apply_type_substitution` helper 追加。convert_callable_trait_const / resolve_fn_type_info /
     build_delegate_impl に substitution 統合。`callable-interface-generic` fixture 追加
@@ -166,8 +172,26 @@
 
 ## Session 引継ぎ事実 (必ず最初に読む)
 
-本 PRD は 2 回の失敗 (Revision 1 実装 + Revision 2 PRD 作成) を経ており、
-次 session (Revision 3 実装) は以下の事実を前提とする:
+### 現在の進捗 (2026-04-13 Phase 9 完了時)
+
+Phase 0-9 完了。**次は Phase 10 (Call site dispatch)**。
+
+**完了した変換構造** (non-generic + generic):
+- trait 定義 (call_N method, type params)
+- ZST marker struct
+- inner fn (widest signature, return wrap)
+- delegate impl (per-overload method, arg wrap, match unwrap)
+- const instance
+
+**未実装**: call site dispatch (getCookie(ctx, "k") → getCookie.call_1(ctx, "k"))。
+現在は `CallTarget::Free("getCookie")` として生成されるため、Rust 側で関数として
+呼び出そうとして compile error になる。Phase 10 でこれを修正する。
+
+**テスト状態**: lib 2368, integration 96, compile 4, E2E 88, 全 pass, clippy 0, fmt 0
+
+### Process 教訓 (全 session で繰り返してはならない)
+
+本 PRD は 2 回の失敗 (Revision 1 実装 + Revision 2 PRD 作成) を経ている:
 
 ### 前回 session の process 問題 (次 session で繰り返してはならない)
 
@@ -510,10 +534,9 @@ Phase 9 (Generic)
 │       └─→ P9.3: type substitution 単一 helper
 │           └─→ P9.4: select_overload Stage 2 修正
 
-Phase 10 (Call site dispatch)
-├── P10.1: try_convert_callable_trait_call (← Phase 9 完了)
-│   └─→ P10.2: select_overload integration
-│       └─→ P10.3: Fallthrough symmetry
+Phase 10 (Call site dispatch) — Phase 9 設計見直しで P10.1+P10.2 統合
+├── P10.1: callable interface call dispatch + overload 選択 (← Phase 9 完了)
+│   └─→ P10.2: Fallthrough symmetry 確認
 
 Phase 11 (Integration + coverage)
 ├── P11.1: compile_test.rs + E2E (← Phase 10 完了)
@@ -1562,30 +1585,77 @@ production code の `#[allow(dead_code)]` は 0 件。
 
 ### Phase 10: Call site dispatch
 
-#### P10.1: `try_convert_callable_trait_call` 新規
+#### Phase 10 設計見直し (Phase 9 完了時)
+
+Phase 9 完了後の empirical 確認で以下の事実が判明し、旧 P10.1/P10.2/P10.3 を
+P10.1/P10.2 の 2 sub-phase に再構成:
+
+**事実 1**: TypeResolver は callable interface const (`getCookie`) を
+`RustType::Named { name: "GetCookie", type_args: [] }` として variable scope に登録する。
+`RustType::Fn` にはならない。そのため `calls.rs:87` の `RustType::Fn` branch には
+マッチせず、param_types は None のまま args が変換される。
+
+**事実 2**: `reg.get("getCookie")` は `TypeDef::ConstValue { type_ref_name: Some("GetCookie") }`
+を返す。`TypeDef::Struct` ではないため `calls.rs:111-112` の `Struct | Enum` branch にも
+マッチせず、`CallTarget::Free("getCookie")` になる。
+
+**設計**: callable interface call dispatch は以下の 2 段 lookup で行う:
+1. `reg.get(fn_name)` → `ConstValue { type_ref_name }` (const → interface 名)
+2. `reg.get(type_ref_name)` → `Struct { call_signatures, type_params }` (interface 定義)
+3. `classify_callable_interface` → Single/Multi 判定
+4. generic の場合: `get_expr_type(callee)` → `Named { type_args }` で concrete 型取得、
+   `apply_type_substitution` で call_signatures を具体化
+5. `select_overload(sigs, arg_count, arg_types)` → overload 選択 (index N)
+6. 選択された overload の params で args を型付き変換
+7. `Expr::MethodCall { object: Ident(fn_name), method: "call_N", args }`
+
+**旧 P10.1 + P10.2 を統合**: overload 選択 (`select_overload`) がなければ
+`call_N` の N を決定できないため、dispatch と overload 選択は不可分。
+
+#### P10.1: callable interface call dispatch + overload 選択 (旧 P10.1 + P10.2 統合)
 
 - **Entry**: Phase 9 完了
-- **Work**: `src/transformer/expressions/calls.rs` に `try_convert_callable_trait_call`
-  を追加。Ident call の callee を `classify_callable_interface` で判定、
-  callable なら `Expr::MethodCall { object: Ident, method: call_N, args }`
-- **Exit**: fixture で `getCookie(ctx, "k")` が `getCookie.call_1(...)` になる
-- **Rollback**: なし
+- **Work**:
+  1. `src/transformer/expressions/calls.rs` に `try_convert_callable_trait_call` を追加。
+     `convert_call_expr` 内の builtin check 後、param_types lookup (L79) 前に配置。
+     検出した場合は args 変換 + MethodCall 生成まで一貫して行い早期 return。
+     fallthrough (CallTarget::Free) は発生しない
+  2. 2 段 lookup 実装:
+     - `reg.get(fn_name)` → `ConstValue { type_ref_name }` → interface 名を取得
+     - `reg.get(interface_name)` → `Struct { call_signatures, type_params }` を取得
+     - `classify_callable_interface(def)` → NonCallable なら `None` return (fallthrough)
+  3. Generic support: `get_expr_type(callee)` → `Named { type_args }` から concrete 型を
+     取得し、`apply_type_substitution` で call_signatures を具体化。
+     non-generic の場合は no-op (empty type_params)
+  4. Overload 選択: `select_overload(substituted_sigs, arg_count, &arg_types)` で
+     best-match overload を選択。sig のインデックスから `call_N` method 名を決定
+  5. Args 変換: 選択された overload の params を `convert_call_args_with_types` に渡し、
+     型付き引数変換を実行 (struct literal の expected type 伝搬等)
+  6. `Expr::MethodCall { object: Ident(fn_name), method: "call_N", args }` を生成
+- **Exit**:
+  - fixture `callable-interface-call.input.ts` で `getCookie(ctx, "k")` が
+    `getCookie.call_1(ctx, "k".to_string())` に変換される
+  - fixture `callable-interface-call-generic.input.ts` で generic callable interface
+    の call site dispatch が正しく動作
+  - single overload: `getValue("key")` → `getValue.call_0("key".to_string())`
+  - multi overload arity 選択: 1-arg call → call_0、2-arg call → call_1
+  - compile_test pass (fixture が rustc compile pass)
+  - 既存 test 全件 pass
+- **Rollback**: diff discard
 
-#### P10.2: `select_overload` integration at call site
+#### P10.2: Fallthrough symmetry 確認 (旧 P10.3)
 
 - **Entry**: P10.1 完了
-- **Work**: call site で arg count + type から overload を select (P9.4 の
-  修正版 `select_overload` を呼ぶ)
-- **Exit**: fixture `callable-interface-overload-select-*.input.ts` 3 ケース
-- **Rollback**: なし
-
-#### P10.3: Fallthrough symmetry 確認
-
-- **Entry**: P10.2 完了
-- **Work**: `classify_callable_interface` が conversion 側と call 側で同じ判定を
-  返すことを unit test で確認。`convert_callable_trait_const` の error は hard
-  error (fallthrough 禁止)
-- **Exit**: fixture で error path の `expect_err` test
+- **Work**:
+  1. `classify_callable_interface` が conversion 側 (`arrow_fns.rs:207`) と
+     call 側 (`calls.rs::try_convert_callable_trait_call`) で同じ判定を返す unit test
+  2. conversion 側で callable → call 側で Non-callable (またはその逆) のケースが
+     発生しないことを検証。両者が同じ `ConstValue → type_ref_name → classify` の
+     lookup chain を使用していることをコードレベルで確認
+  3. `convert_callable_trait_const` の error は hard error (INV-3)。
+     call 側で callable interface を検出しても method が存在しないケースは
+     compilation error で検出されるため、追加の runtime check は不要
+- **Exit**: symmetry 検証 unit test pass
 - **Rollback**: なし
 
 ### Phase 11: Integration + coverage
@@ -1798,7 +1868,8 @@ Revision 3 では同じ問題を再導入しないよう、各 fix を **preserv
 | `callable-interface-generic.input.ts` | P9.3 | `interface I<T, U>` + concrete args | 新規 |
 | `callable-interface-generic-arity-mismatch.input.ts` | P9.1 | 意図的 arity mismatch (変換 error test) | 新規 |
 | `callable-interface-polymorphic-none-ambiguous.input.ts` | P6.2 | ambiguous return null (hard error test) | 新規 |
-| `callable-interface-overload-select-*.input.ts` | P10.2 | select by arity + type 3 ケース | 新規 |
+| `callable-interface-call.input.ts` | P10.1 | call site dispatch: single + multi overload call → method call 変換 | 新規 |
+| `callable-interface-call-generic.input.ts` | P10.1 | generic callable interface の call site dispatch (type substitution at call site) | 新規 |
 | `callable-interface-pascal-collision.input.ts` | P5.1 | 同名 pascal case 2 const | 新規 |
 | `callable-interface-any-narrowing.input.ts` | P5.4 | widest Any + body narrowing (R4-C6) | 新規 |
 | `callable-interface-void-multi.input.ts` | P9.4 | void-only multi overload (Stage 2 bug 再現) | 新規 |
@@ -1847,7 +1918,7 @@ PR 説明に転記。
    - R3-C1 (factory method): Phase 0.4 で preserve (INV-8)
    - R3-C2 (Polymorphic None hard error): Phase 6.2 で preserve (INV-3)
    - R1-L1-1 (generic type substitution): Phase 9.3 で type substitution helper 化
-   - R2-L1-2 (TypeResolver fallthrough recovery): Phase 10.3 で **REVERSE** (fallthrough 全面禁止)
+   - R2-L1-2 (TypeResolver fallthrough recovery): Phase 10.2 で **REVERSE** (fallthrough 全面禁止)
    - R2-L1-3 (wrap_expr_tail Match/IfLet): Phase 6.3 で Expr::If (ternary) preserve。
      Match/IfLet は P0.1 で empirical 確認後に P6.4 で決定
    - R3-L1-4 (L1-5 Pass clone 最適化): Phase 2.3 で **REVERSE** (Pass 2a → Pass 2b の 2 step 化)
