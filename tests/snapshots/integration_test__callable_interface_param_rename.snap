@@ -1,6 +1,5 @@
 ---
 source: tests/integration_test.rs
-assertion_line: 92
 expression: output
 ---
 trait StringMapper {
@@ -21,3 +20,5 @@ impl StringMapper for StringMapperMapStringImpl {
         self.inner(input)
     }
 }
+
+const mapString: StringMapperMapStringImpl = StringMapperMapStringImpl;

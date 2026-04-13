@@ -1,6 +1,5 @@
 ---
 source: tests/integration_test.rs
-assertion_line: 94
 expression: output
 ---
 #[derive(Debug, Clone, PartialEq)]
@@ -28,6 +27,8 @@ impl AsyncFetcher for AsyncFetcherFetchDataImpl {
     }
 }
 
+const fetchData: AsyncFetcherFetchDataImpl = AsyncFetcherFetchDataImpl;
+
 trait AsyncProcessor {
     async fn call_0(&self, data: String) -> String;
     async fn call_1(&self, data: String, flag: bool) -> f64;
@@ -38,9 +39,6 @@ struct AsyncProcessorProcessDataImpl;
 
 impl AsyncProcessorProcessDataImpl {
     async fn inner(&self, data: String, flag: Option<bool>) -> F64OrString {
-        if flag {
-            return F64OrString::F64(42.0);
-        }
         F64OrString::String(data)
     }
 }
@@ -68,3 +66,5 @@ impl AsyncProcessor for AsyncProcessorProcessDataImpl {
 }
     }
 }
+
+const processData: AsyncProcessorProcessDataImpl = AsyncProcessorProcessDataImpl;

@@ -173,16 +173,9 @@ fn test_all_fixtures_compile() {
         // void-type: `string | void` → `Option<String>` if without else branch (E0317).
         "void-type",
         // (async-class-method: P4.2 で Promise unwrap 実装完了。skip 解除)
-        // callable-interface: P4.1 で trait 化済み。marker struct + impl + const が未完のため
-        // compile 不可。P8.2 (統合チェックポイント) で復帰予定。
-        "callable-interface",
-        // call-signature-rest: 同上 (callable interface の trait 化)
-        "call-signature-rest",
-        // interface-mixed: 同上 (callable interface の trait 化)
-        "interface-mixed",
-        // callable-interface-*: P5.4 inner fn のみ。trait impl + const 未完。P8.2 で復帰。
-        "callable-interface-param-rename",
-        "callable-interface-inner",
+        // (callable-interface, call-signature-rest, interface-mixed,
+        // callable-interface-param-rename, callable-interface-inner:
+        // P8.2 統合チェックポイントで復帰完了)
     ];
 
     let mut entries: Vec<_> = fs::read_dir(fixture_dir)
@@ -262,14 +255,9 @@ fn test_all_fixtures_compile_with_builtins() {
         "string-methods",
         "type-assertion",
         "void-type",
-        // async-class-method: Promise<T> unwrap is Phase 4.2 scope (I-392).
-        "async-class-method",
-        // callable-interface, call-signature-rest, interface-mixed:
-        // P4.1 trait 化。P8.2 で復帰予定。
-        "callable-interface",
-        "call-signature-rest",
-        "interface-mixed",
-        "callable-interface-param-rename",
+        // (async-class-method: P4.2 で Promise unwrap 実装完了。skip 解除)
+        // (callable-interface, call-signature-rest, interface-mixed,
+        // callable-interface-param-rename: P8.2 統合チェックポイントで復帰完了)
     ];
 
     let mut entries: Vec<_> = fs::read_dir(fixture_dir)

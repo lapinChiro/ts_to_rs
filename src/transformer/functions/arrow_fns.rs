@@ -211,18 +211,17 @@ impl<'a> Transformer<'a> {
         }
     }
 
-    /// Converts a callable interface const declaration to marker struct + inner fn.
+    /// Converts a callable interface const declaration to the full trait-based structure.
     ///
-    /// Phase 5: marker struct (ZST) + inner fn (widest signature)
-    /// Phase 6-7: return wrap + delegate impl (TODO)
-    /// Phase 8: const instance (TODO)
+    /// Generates: ZST marker struct, inner fn (widest signature), return wrap (divergent returns),
+    /// delegate impl (per-overload trait methods), and const instance.
     fn convert_callable_trait_const(
         &mut self,
         value_name: &str,
         trait_name: &str,
         _trait_type_args: &[RustType],
         arrow: &ast::ArrowExpr,
-        _vis: Visibility, // Phase 8 で const instance 生成時に使用
+        vis: Visibility,
         resilient: bool,
     ) -> Result<Vec<Item>> {
         // --- Compute widest signature from registry ---
@@ -363,9 +362,27 @@ impl<'a> Transformer<'a> {
             arrow.is_async,
         )?;
 
-        // Phase 8: const instance (TODO)
+        // --- Const instance (P8.1) ---
+        let const_instance = Item::Const {
+            vis,
+            name: value_name.to_string(),
+            ty: RustType::Named {
+                name: marker_name.clone(),
+                type_args: vec![],
+            },
+            value: Expr::StructInit {
+                name: marker_name.clone(),
+                fields: vec![],
+                base: None,
+            },
+        };
 
-        Ok(vec![marker_struct, marker_impl, delegate_impl])
+        Ok(vec![
+            marker_struct,
+            marker_impl,
+            delegate_impl,
+            const_instance,
+        ])
     }
 
     /// Generates the marker struct name for a callable interface const.

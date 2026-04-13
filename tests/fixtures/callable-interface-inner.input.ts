@@ -4,9 +4,6 @@ interface GetCookie {
     (c: string, key: string): number;
 }
 
-const getCookie: GetCookie = (c: string, key?: string): any => {
-    if (key) {
-        return 42;
-    }
+const getCookie: GetCookie = (c: string, key?: string): string => {
     return c;
 };

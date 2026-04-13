@@ -2,6 +2,21 @@
 
 ## 改訂履歴
 
+- **2026-04-13 #14 (Phase 8 完了)**: Phase 8 (Const instance + 統合チェックポイント) 完了。
+  - P8.1: `convert_callable_trait_const` に `Item::Const` emission 追加。
+    `const getCookie: GetCookieGetCookieImpl = GetCookieGetCookieImpl;` 形式の
+    module-level const instance 生成。4 fixture の snapshot 更新
+  - P8.2: 変換側統合チェックポイント。
+    callable-interface-inner / callable-interface-async の fixture body 単純化
+    (Option narrowing I-360 回避、PRD H3 fixture body 制限に準拠)。
+    compile_test.rs の skip リストから callable-interface 系 6 fixture を全て復帰。
+    `async-class-method` の `skip_compile_with_builtins` stale entry も同時修正
+    (P4.2 exit criteria の incomplete 分)。
+    `Box<dyn Fn(` が callable-interface snapshot に残っていないことを確認。
+    doc comment stale 修正 (convert_callable_trait_const)。
+    全テスト pass、clippy 0、fmt 0
+  - Phase 9 前提として `return_wrap_ctx` / `spawn_nested_scope_with_wrap` 削除判断を明記
+  - 最終状態: 全テスト pass (lib 2365, integration 94, compile 4, E2E 88), clippy 0, fmt 0
 - **2026-04-12 #12 (Phase 6 完了)**: Phase 6 (Return wrap) 完了。
   - P6.0: `return_wrap_ctx` field + `spawn_nested_scope_with_wrap` factory
   - P6.1: `return_wrap.rs` — ReturnWrapContext, build_return_wrap_context, wrap_leaf,
@@ -1425,6 +1440,18 @@ Phase 9 (Generic) 以降で発見される問題が「generic 固有」か「基
 
 ### Phase 9: Generic callable interface
 
+#### Phase 9 前提: `return_wrap_ctx` / `spawn_nested_scope_with_wrap` 削除判断 (P7.0/P8.2 からの引継ぎ)
+
+P7.0 で二相分離アプローチを採用したため、scope-based wrapping の `return_wrap_ctx` field
+と `spawn_nested_scope_with_wrap` method は `#[allow(dead_code)]` で保持されている
+(`src/transformer/mod.rs:44-49`, `mod.rs:100-116`)。Phase 9 で generic callable interface
+の設計を行う際、scope-based アプローチへの回帰が必要かどうかを評価し:
+- **不要と判明**: 即座に削除 (`#[allow(dead_code)]` + 全 Transformer 構築サイトの
+  `return_wrap_ctx: None` も同時に除去)
+- **必要と判明**: `#[allow(dead_code)]` を除去し、実コードとして活用
+
+**Phase 13 Exit criteria #10 で残存 `#[allow(dead_code)]` がゼロであることを確認する。**
+
 #### P9.1: arity validation (INV-4)
 
 - **Entry**: P8.2 (統合チェックポイント) 完了
@@ -1598,8 +1625,8 @@ Phase 9 (Generic) 以降で発見される問題が「generic 固有」か「基
       (`grep -rn 'allow(dead_code)' src/ --include='*.rs' | grep -v tests`)。
       残存候補: `return_wrap_ctx` field + `spawn_nested_scope_with_wrap` method
       (P7.0 で不要と判断、Phase 9 で削除予定)
-  11. `async-class-method` が `compile_test.rs` の skip リストから除外されていること確認
-      (P4.2 で復帰済のはず)
+  11. `async-class-method` が `compile_test.rs` の skip リストから完全除外されていること確認
+      (P4.2 で `skip_compile` から復帰済、P8.2 で `skip_compile_with_builtins` からも復帰済)
   12. INV-6 完全達成確認: `grep -rn 'unwrap_promise_type\|unwrap_promise_and_unit' src/`
       ヒット 0 件 (P9.2 で置換済のはず)
 - **Exit**: 全 quality gate clean
@@ -1871,6 +1898,13 @@ PR 説明に転記。
   根本対策: ユーザー定義がビルトインを上書きするマージ戦略 (follow-up PRD)
 - `interface Factory { new (config): Factory; name: string; }` 等 construct signature
   の emission 改善 (現在も emit されていない、変更なし)
+- **callable-interface fixture body での Option narrowing テスト**
+  (Phase 8 /check_problem で確認): `callable-interface-inner` / `callable-interface-async`
+  の fixture body に `if (key)` / `if (flag)` パターンがあり、`key: Option<String>` /
+  `flag: Option<bool>` の truthiness check が Rust で compile 不可 (I-360: Option narrowing
+  + 暗黙 None)。PRD H3 (Phase 5-8 fixture body 制限) に従い body を単純化して compile_test
+  を復帰。divergent return の multi-path body テストは Phase 11 E2E で実施予定。
+  Option narrowing の根本修正は I-360 (別 PRD) の scope
 
 ## References
 

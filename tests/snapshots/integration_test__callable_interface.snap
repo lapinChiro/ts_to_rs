@@ -1,6 +1,5 @@
 ---
 source: tests/integration_test.rs
-assertion_line: 124
 expression: output
 ---
 trait GetValue {
@@ -34,3 +33,5 @@ impl GetValue for GetValueGetValueImpl {
         self.inner(key)
     }
 }
+
+const getValue: GetValueGetValueImpl = GetValueGetValueImpl;

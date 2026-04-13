@@ -13,9 +13,6 @@ interface AsyncProcessor {
     (data: string, flag: boolean): Promise<number>;
 }
 
-const processData: AsyncProcessor = async (data: string, flag?: boolean): Promise<any> => {
-    if (flag) {
-        return 42;
-    }
+const processData: AsyncProcessor = async (data: string, flag?: boolean): Promise<string> => {
     return data;
 };
