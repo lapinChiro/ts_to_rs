@@ -13,13 +13,13 @@
 
 | 指標 | 値 |
 |------|-----|
-| Hono bench clean | 114/158 (72.2%) |
-| Hono bench errors | 57 |
-| cargo test (lib) | 2383 pass |
+| Hono bench clean | 113/158 (71.5%) |
+| Hono bench errors | 58 |
+| cargo test (lib) | 2391 pass |
 | cargo test (integration) | 99 pass |
 | cargo test (compile) | 3 pass |
 | cargo test (E2E) | 89 pass |
-| coverage | 91.68% (threshold 90%) |
+| coverage | 91.69% (threshold 90%) |
 | clippy | 0 warnings |
 | fmt | 0 diffs |
 

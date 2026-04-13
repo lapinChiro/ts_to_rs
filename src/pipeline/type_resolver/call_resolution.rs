@@ -103,7 +103,7 @@ impl<'a> TypeResolver<'a> {
                     }
                 };
                 // Resolve arguments BEFORE collecting their types for overload resolution.
-                // set_call_arg_expected_types (called at line 22) has already set expected
+                // set_call_arg_expected_types (called above) has already set expected
                 // types on args, so resolve_expr will use them. Then collect_resolved_arg_types
                 // can provide actual types for select_overload Stage 3.
                 for arg in &call.args {
@@ -138,10 +138,10 @@ impl<'a> TypeResolver<'a> {
             }
         }
 
-        // Infer type arguments from resolved argument types when no explicit
-        // type args were provided.
+        // Infer type arguments from resolved argument types and feed back
+        // inferred bindings as expected types to arguments (2nd pass).
         let result = if explicit_type_args.is_empty() {
-            self.try_infer_and_resolve_return_type(callee, &call.args, result)
+            self.infer_type_args_and_feedback(callee, &call.args, result)
         } else {
             result
         };
@@ -385,13 +385,20 @@ impl<'a> TypeResolver<'a> {
         Some(std::mem::replace(&mut self.type_param_constraints, merged))
     }
 
-    /// Attempts to infer type arguments from resolved argument types and
-    /// re-resolve the return type with inferred bindings.
+    /// Infers type arguments from resolved argument types, re-propagates
+    /// expected types to arguments (2nd pass), and re-resolves the return type.
     ///
     /// Called after argument expressions have been resolved, when no explicit
     /// type arguments were provided. If the callee has type parameters and
-    /// arguments provide enough information, the return type is updated.
-    fn try_infer_and_resolve_return_type(
+    /// arguments provide enough information:
+    /// 1. Inferred bindings are merged into `type_param_constraints`
+    /// 2. Expected types are re-propagated to arguments (TypeVars now resolve
+    ///    to concrete types, enabling struct name resolution for object literals)
+    /// 3. The return type is re-resolved with inferred bindings
+    ///
+    /// The re-propagation (step 2) is independent of whether a return type
+    /// exists — even `fn<T>(x: T, y: T): void` benefits from feedback.
+    fn infer_type_args_and_feedback(
         &mut self,
         callee: &ast::Expr,
         args: &[ast::ExprOrSpread],
@@ -402,17 +409,19 @@ impl<'a> TypeResolver<'a> {
         };
         let fn_name = ident.sym.to_string();
 
-        // Get function type params and param types from registry
-        let (type_params, param_types, return_type) = match self.registry.get(&fn_name) {
+        // Get function type params, param types, return type, and has_rest from registry
+        let (type_params, param_types, return_type, has_rest) = match self.registry.get(&fn_name) {
             Some(TypeDef::Function {
                 type_params,
                 params,
                 return_type,
+                has_rest,
                 ..
             }) if !type_params.is_empty() => (
                 type_params.clone(),
                 params.iter().map(|p| p.ty.clone()).collect::<Vec<_>>(),
                 return_type.clone(),
+                *has_rest,
             ),
             _ => return current_result,
         };
@@ -426,17 +435,25 @@ impl<'a> TypeResolver<'a> {
             return current_result;
         }
 
-        // Resolve return type with inferred bindings
-        if let Some(ret_ty) = &return_type {
-            let mut merged = self.type_param_constraints.clone();
-            merged.extend(bindings);
-            let prev = std::mem::replace(&mut self.type_param_constraints, merged);
-            let resolved = self.resolve_type_params_in_type(ret_ty);
-            self.type_param_constraints = prev;
-            ResolvedType::Known(resolved)
-        } else {
-            current_result
-        }
+        // Merge inferred bindings into constraints
+        let mut merged = self.type_param_constraints.clone();
+        merged.extend(bindings);
+        let prev = std::mem::replace(&mut self.type_param_constraints, merged);
+
+        // 2nd pass: re-propagate expected types with resolved type params.
+        // TypeVars in param_types now resolve to concrete types via the merged
+        // bindings, so object literals and other args get correct expected types.
+        self.propagate_call_arg_expected_types(args, &param_types, has_rest);
+
+        // Re-resolve return type if available
+        let result = match &return_type {
+            Some(ret_ty) => ResolvedType::Known(self.resolve_type_params_in_type(ret_ty)),
+            None => current_result,
+        };
+
+        // Restore constraints
+        self.type_param_constraints = prev;
+        result
     }
 }
 
