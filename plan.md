@@ -118,12 +118,12 @@ Step 7 (builtin impl)
 
 **Step 2: RC-2 iterator メソッドの所有権** — Tier 1、methods.rs
 
-`src/transformer/expressions/methods.rs:35-63` に集中。I-011 と I-012 は同一関数。
+PRD: `backlog/step2-iter-closure-ref-semantics.md`
 
 | イシュー | 修正箇所 | 内容 |
 |----------|---------|------|
-| I-011 | `build_iter_method_call()` (`methods.rs:35`) | `.iter().cloned()` 後のクロージャ引数型を `&T` → `T` に整合 |
-| I-012 | 同上 + `return_wrap.rs` | `find()` が `Option<T>` を返す文脈での `Some()` 二重ラップ防止 |
+| I-011 | `methods.rs` — `deref_closure_params` 新設 | `IrFolder` で closure body 内の param ident を `Deref` ラップ。`filter`/`find` のみ適用（Rust API が `&Self::Item` を渡すため） |
+| I-012 | `extractor.ts:274` + `call_resolution.rs` | (1) extract tool の `sig.getReturnType()` を AST node 経由に修正し JSON 再生成 (2) TypeResolver に `Vec` method の intrinsic return type fallback 追加 |
 
 - unskip: `array-builtin-methods`
 - 部分解消: `closures`（I-020 残）
