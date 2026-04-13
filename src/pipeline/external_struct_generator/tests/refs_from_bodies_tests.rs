@@ -272,6 +272,7 @@ fn test_collect_type_refs_struct_type_param_constraint() {
         type_params: vec![TypeParam {
             name: "T".to_string(),
             constraint: Some(named("SomeTrait")),
+            default: None,
         }],
         fields: vec![],
         is_unit_struct: false,
@@ -292,6 +293,7 @@ fn test_collect_type_refs_fn_type_param_constraint_with_generics() {
                 name: "Container".to_string(),
                 type_args: vec![named("Inner")],
             }),
+            default: None,
         }],
         vec![],
     );
@@ -309,6 +311,7 @@ fn test_collect_type_refs_impl_type_param_constraint() {
         type_params: vec![TypeParam {
             name: "T".to_string(),
             constraint: Some(named("Bar")),
+            default: None,
         }],
         for_trait: None,
         consts: vec![],
@@ -328,6 +331,7 @@ fn test_collect_type_refs_trait_type_param_constraint() {
         type_params: vec![TypeParam {
             name: "T".to_string(),
             constraint: Some(named("Bar")),
+            default: None,
         }],
         supertraits: vec![],
         methods: vec![],
@@ -347,6 +351,7 @@ fn test_collect_type_refs_type_alias_type_param_constraint() {
         type_params: vec![TypeParam {
             name: "T".to_string(),
             constraint: Some(named("Bar")),
+            default: None,
         }],
         ty: named("T"),
     };
@@ -364,6 +369,7 @@ fn test_collect_type_refs_enum_type_param_constraint() {
         type_params: vec![TypeParam {
             name: "T".to_string(),
             constraint: Some(named("Bar")),
+            default: None,
         }],
         serde_tag: None,
         variants: vec![],

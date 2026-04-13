@@ -363,3 +363,30 @@ fn test_collect_type_params_returns_ts_type_info_constraint() {
         panic!("expected Function");
     }
 }
+
+#[test]
+fn test_collect_type_params_extracts_default() {
+    use crate::ts_type_info::TsTypeInfo;
+
+    let alias = parse_type_alias("type Fn<T, U = number> = (x: T) => U;");
+    let ts_def = super::super::functions::try_collect_fn_type_alias(&alias)
+        .expect("should detect function type alias");
+
+    if let TypeDef::Function { type_params, .. } = ts_def {
+        assert_eq!(type_params.len(), 2);
+        // T: no constraint, no default
+        assert_eq!(type_params[0].name, "T");
+        assert_eq!(type_params[0].constraint, None);
+        assert_eq!(type_params[0].default, None);
+        // U: no constraint, default = number
+        assert_eq!(type_params[1].name, "U");
+        assert_eq!(type_params[1].constraint, None);
+        assert_eq!(
+            type_params[1].default,
+            Some(TsTypeInfo::Number),
+            "collect_type_params must extract default from SWC AST"
+        );
+    } else {
+        panic!("expected Function");
+    }
+}

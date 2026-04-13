@@ -238,14 +238,32 @@ impl<'a> Transformer<'a> {
             }
         };
 
-        // --- Arity validation (INV-4, P9.1) ---
-        if trait_type_args.len() != trait_type_params.len() {
+        // --- Arity validation (INV-4, P9.1 + P12.1 default type param support) ---
+        // TypeScript allows omitting type args when all remaining params have defaults.
+        let required_type_params = trait_type_params
+            .iter()
+            .filter(|p| p.default.is_none())
+            .count();
+        if trait_type_args.len() < required_type_params
+            || trait_type_args.len() > trait_type_params.len()
+        {
             return Err(anyhow::anyhow!(
-                "callable interface '{trait_name}' expects {} type parameters but got {} type arguments",
+                "callable interface '{trait_name}' expects {}-{} type arguments but got {}",
+                required_type_params,
                 trait_type_params.len(),
                 trait_type_args.len(),
             ));
         }
+        // --- Fill defaults for missing type args (P12.1) ---
+        // When type_args is shorter than type_params (e.g., Transform<string> for
+        // Transform<T, U = string, V = number>), fill with defaults.
+        // Used for both: (a) call signature substitution, (b) impl Trait<args> generation.
+        let effective_type_args =
+            crate::pipeline::type_converter::overloaded_callable::fill_type_arg_defaults(
+                &trait_type_params,
+                trait_type_args,
+            );
+
         // --- Type substitution for generic callable interfaces (P9.3) ---
         // Apply substitution first, then compute widest from concrete types.
         // For non-generic interfaces, apply_type_substitution is a no-op (empty type_params).
@@ -253,7 +271,7 @@ impl<'a> Transformer<'a> {
             crate::pipeline::type_converter::overloaded_callable::apply_type_substitution;
         let call_sigs: Vec<_> = call_sigs
             .iter()
-            .map(|sig| apply_sub(sig, &trait_type_params, trait_type_args))
+            .map(|sig| apply_sub(sig, &trait_type_params, &effective_type_args))
             .collect();
         let widest = crate::pipeline::type_converter::overloaded_callable::compute_widest_signature(
             &call_sigs,
@@ -376,7 +394,7 @@ impl<'a> Transformer<'a> {
         let delegate_impl = build_delegate_impl(
             &marker_name,
             trait_name,
-            trait_type_args,
+            &effective_type_args,
             &call_sigs,
             &widest,
             wrap_ctx.as_ref(),

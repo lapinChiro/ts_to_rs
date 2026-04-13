@@ -522,6 +522,7 @@ fn extract_used_type_params(member_types: &[RustType]) -> Vec<TypeParam> {
         .map(|name| TypeParam {
             name,
             constraint: None,
+            default: None,
         })
         .collect()
 }

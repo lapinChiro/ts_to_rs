@@ -1,0 +1,24 @@
+---
+source: tests/integration_test.rs
+expression: output
+---
+trait Transform<T, U, V> {
+    fn call_0(&self, input: T) -> U;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct TransformTransformImpl;
+
+impl TransformTransformImpl {
+    fn inner(&self, input: String) -> String {
+        input
+    }
+}
+
+impl Transform<String, String, f64> for TransformTransformImpl {
+    fn call_0(&self, input: String) -> String {
+        self.inner(input)
+    }
+}
+
+const transform: TransformTransformImpl = TransformTransformImpl;

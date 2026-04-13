@@ -254,6 +254,7 @@ fn convert_external_typedef(
                         .constraint
                         .as_ref()
                         .map(|c| convert_external_type(c, synthetic)),
+                    default: None,
                 })
                 .collect();
 
@@ -509,6 +510,7 @@ fn convert_external_signature(
                 .constraint
                 .as_ref()
                 .map(|c| convert_external_type(c, synthetic)),
+            default: None,
         })
         .collect();
 

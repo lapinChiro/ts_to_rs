@@ -518,6 +518,10 @@ pub(crate) fn collect_type_params(
                     .constraint
                     .as_ref()
                     .and_then(|c| convert_to_ts_type_info(c).ok()),
+                default: p
+                    .default
+                    .as_ref()
+                    .and_then(|d| convert_to_ts_type_info(d).ok()),
             })
             .collect()
     })
@@ -895,6 +899,7 @@ fn convert_method_info_to_sig(m: &TsMethodInfo) -> MethodSignature<TsTypeInfo> {
         .map(|name| TypeParam {
             name: name.clone(),
             constraint: None,
+            default: None,
         })
         .collect();
     MethodSignature {

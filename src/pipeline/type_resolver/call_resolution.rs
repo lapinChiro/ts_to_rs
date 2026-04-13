@@ -597,6 +597,7 @@ mod tests {
         TypeParam {
             name: name.to_string(),
             constraint: None,
+            default: None,
         }
     }
 

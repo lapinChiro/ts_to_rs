@@ -1,8 +1,8 @@
 //! 型の形を表す IR プリミティブ: `TypeParam`, `TraitRef`, `RustType`, `Visibility`。
 
-/// ジェネリック型パラメータ（名前 + オプショナルな制約）。
+/// ジェネリック型パラメータ（名前 + オプショナルな制約 + デフォルト値）。
 ///
-/// 型パラメータ `T` によって制約の型表現を切り替える:
+/// 型パラメータ `T` によって制約/デフォルトの型表現を切り替える:
 /// - `TypeParam<RustType>` (= `TypeParam`): Rust 型制約。IR・TypeRegistry・Generator で使用。
 /// - `TypeParam<TsTypeInfo>`: TS 型制約。registry の collection フェーズで使用。
 #[derive(Debug, Clone, PartialEq)]
@@ -11,6 +11,9 @@ pub struct TypeParam<T = RustType> {
     pub name: String,
     /// 制約（例: `T extends Foo` → `Some(Named("Foo"))`）
     pub constraint: Option<T>,
+    /// デフォルト値（例: `T = string` → `Some(String)`）。
+    /// TypeScript ではデフォルト付き型パラメータは省略可能。
+    pub default: Option<T>,
 }
 
 /// trait への参照（名前 + 型引数）。

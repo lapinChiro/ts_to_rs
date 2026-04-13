@@ -1,6 +1,6 @@
 //! Statement generation: converts IR statements into Rust source strings.
 
-use crate::ir::Stmt;
+use crate::ir::{Expr, Stmt};
 
 use super::expressions::{escape_ident, generate_expr};
 use super::types::generate_type;
@@ -24,7 +24,15 @@ pub(super) fn generate_stmt(stmt: &Stmt, indent: usize) -> String {
                 out.push_str(&format!(": {}", generate_type(ty)));
             }
             if let Some(init) = init {
-                out.push_str(&format!(" = {}", generate_expr(init)));
+                match init {
+                    Expr::Match { expr, arms } => {
+                        out.push_str(&format!(
+                            " = {}",
+                            super::expressions::generate_match_expr(expr, arms, indent)
+                        ));
+                    }
+                    _ => out.push_str(&format!(" = {}", generate_expr(init))),
+                }
             }
             out.push(';');
             out
@@ -139,15 +147,25 @@ pub(super) fn generate_stmt(stmt: &Stmt, indent: usize) -> String {
             None => format!("{pad}continue;"),
         },
         Stmt::Return(expr) => match expr {
+            Some(Expr::Match { expr: target, arms }) => format!(
+                "{pad}return {};",
+                super::expressions::generate_match_expr(target, arms, indent)
+            ),
             Some(e) => format!("{pad}return {};", generate_expr(e)),
             None => format!("{pad}return;"),
         },
         Stmt::Expr(expr) => {
             format!("{pad}{};", generate_expr(expr))
         }
-        Stmt::TailExpr(expr) => {
-            format!("{pad}{}", generate_expr(expr))
-        }
+        Stmt::TailExpr(expr) => match expr {
+            Expr::Match { expr: target, arms } => {
+                format!(
+                    "{pad}{}",
+                    super::expressions::generate_match_expr(target, arms, indent)
+                )
+            }
+            _ => format!("{pad}{}", generate_expr(expr)),
+        },
         Stmt::IfLet {
             pattern,
             expr,
@@ -176,38 +194,14 @@ pub(super) fn generate_stmt(stmt: &Stmt, indent: usize) -> String {
             out
         }
         Stmt::Match { expr, arms } => {
+            // Delegates to the shared match expression generator with correct indent.
             // The discriminant is rendered as-is. If `.as_str()` is needed (e.g., for
             // string pattern matching), the Transformer must have already wrapped the
             // expression in `Expr::MethodCall { method: "as_str", .. }`.
-            let discriminant_str = generate_expr(expr);
-
-            let mut out = format!("{pad}match {discriminant_str} {{\n");
-            for arm in arms {
-                let patterns_str = arm
-                    .patterns
-                    .iter()
-                    .map(crate::generator::patterns::render_pattern)
-                    .collect::<Vec<_>>()
-                    .join(" | ");
-                let guard_str = arm
-                    .guard
-                    .as_ref()
-                    .map(|g| format!(" if {}", generate_expr(g)))
-                    .unwrap_or_default();
-                out.push_str(&format!(
-                    "{}{}{} => {{\n",
-                    indent_str(indent + 1),
-                    patterns_str,
-                    guard_str
-                ));
-                for s in &arm.body {
-                    out.push_str(&generate_stmt(s, indent + 2));
-                    out.push('\n');
-                }
-                out.push_str(&format!("{}}}\n", indent_str(indent + 1)));
-            }
-            out.push_str(&format!("{pad}}}"));
-            out
+            format!(
+                "{pad}{}",
+                super::expressions::generate_match_expr(expr, arms, indent)
+            )
         }
         Stmt::LabeledBlock { label, body } => {
             let mut out = format!("{pad}'{label}: {{\n");

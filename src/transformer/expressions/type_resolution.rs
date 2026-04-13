@@ -108,6 +108,7 @@ mod tests {
                 type_params: vec![TypeParam {
                     name: "T".to_string(),
                     constraint: None,
+                    default: None,
                 }],
                 fields: vec![FieldDef {
                     name: "value".to_string(),

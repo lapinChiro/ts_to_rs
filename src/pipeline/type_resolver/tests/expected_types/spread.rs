@@ -118,6 +118,7 @@ fn test_spread_generic_type_args_instantiation() {
             type_params: vec![TypeParam {
                 name: "T".to_string(),
                 constraint: None,
+                default: None,
             }],
             fields: vec![(
                 "value".to_string(),

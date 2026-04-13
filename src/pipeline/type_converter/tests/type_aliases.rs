@@ -44,11 +44,13 @@ fn test_convert_type_alias_with_type_params() {
                 vec![
                     TypeParam {
                         name: "A".to_string(),
-                        constraint: None
+                        constraint: None,
+                        default: None,
                     },
                     TypeParam {
                         name: "B".to_string(),
-                        constraint: None
+                        constraint: None,
+                        default: None,
                     },
                 ]
             );
@@ -263,11 +265,13 @@ fn test_convert_type_alias_function_type_with_generics() {
                 vec![
                     TypeParam {
                         name: "T".to_string(),
-                        constraint: None
+                        constraint: None,
+                        default: None,
                     },
                     TypeParam {
                         name: "U".to_string(),
-                        constraint: None
+                        constraint: None,
+                        default: None,
                     },
                 ]
             );
@@ -296,7 +300,8 @@ fn test_convert_type_alias_conditional_filter_returns_type_alias_with_true_branc
             name: "Filter".to_string(),
             type_params: vec![TypeParam {
                 name: "T".to_string(),
-                constraint: None
+                constraint: None,
+                default: None,
             }],
             // I-387: `T` is represented as TypeVar (not Named).
             ty: RustType::TypeVar {
@@ -370,7 +375,8 @@ fn test_convert_type_alias_conditional_infer_returns_associated_type() {
             name: "Unwrap".to_string(),
             type_params: vec![TypeParam {
                 name: "T".to_string(),
-                constraint: None
+                constraint: None,
+                default: None,
             }],
             ty: RustType::QSelf {
                 qself: Box::new(RustType::Named {

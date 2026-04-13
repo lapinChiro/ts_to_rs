@@ -46,24 +46,24 @@ impl AsyncProcessorProcessDataImpl {
 impl AsyncProcessor for AsyncProcessorProcessDataImpl {
     async fn call_0(&self, data: String) -> String {
         match self.inner(data, None).await {
-    F64OrString::String(v) => {
-        v
-    }
-    _ => {
-        unreachable!()
-    }
-}
+            F64OrString::String(v) => {
+                v
+            }
+            _ => {
+                unreachable!()
+            }
+        }
     }
 
     async fn call_1(&self, data: String, flag: bool) -> f64 {
         match self.inner(data, Some(flag)).await {
-    F64OrString::F64(v) => {
-        v
-    }
-    _ => {
-        unreachable!()
-    }
-}
+            F64OrString::F64(v) => {
+                v
+            }
+            _ => {
+                unreachable!()
+            }
+        }
     }
 }
 

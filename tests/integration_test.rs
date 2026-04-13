@@ -95,6 +95,7 @@ snapshot_test!(test_callable_interface_async);
 snapshot_test!(test_callable_interface_generic);
 snapshot_test!(test_callable_interface_call);
 snapshot_test!(test_callable_interface_call_generic);
+snapshot_test!(test_callable_interface_generic_default);
 snapshot_test!(test_type_infer_unannotated);
 snapshot_test!(test_unary_operators, collecting);
 snapshot_test!(test_void_type);

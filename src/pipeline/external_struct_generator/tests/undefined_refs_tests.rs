@@ -11,6 +11,7 @@ fn test_collect_all_undefined_refs_excludes_enum_type_params() {
         type_params: vec![TypeParam {
             name: "M".to_string(),
             constraint: None,
+            default: None,
         }],
         serde_tag: None,
         variants: vec![EnumVariant {
@@ -116,6 +117,7 @@ fn test_undefined_refs_type_params_excluded() {
         type_params: vec![TypeParam {
             name: "T".to_string(),
             constraint: None,
+            default: None,
         }],
         fields: vec![StructField {
             vis: Some(Visibility::Public),

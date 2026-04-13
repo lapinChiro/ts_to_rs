@@ -371,33 +371,46 @@ pub(super) fn generate_expr(expr: &Expr) -> String {
         }
         Expr::StdConst(c) => c.rust_path().to_string(),
         Expr::BuiltinVariantValue(v) => v.as_rust_str().to_string(),
-        Expr::Match { expr, arms } => {
-            let match_target = generate_expr(expr);
-            let mut out = format!("match {match_target} {{\n");
-            for arm in arms {
-                let patterns_str = arm
-                    .patterns
-                    .iter()
-                    .map(crate::generator::patterns::render_pattern)
-                    .collect::<Vec<_>>()
-                    .join(" | ");
-                let guard_str = arm
-                    .guard
-                    .as_ref()
-                    .map(|g| format!(" if {}", generate_expr(g)))
-                    .unwrap_or_default();
-                out.push_str(&format!("    {patterns_str}{guard_str} => {{\n"));
-                for s in &arm.body {
-                    use super::statements::generate_stmt;
-                    out.push_str(&generate_stmt(s, 2));
-                    out.push('\n');
-                }
-                out.push_str("    }\n");
-            }
-            out.push('}');
-            out
-        }
+        Expr::Match { expr, arms } => generate_match_expr(expr, arms, 0),
     }
+}
+
+/// Generates a match expression with correct indentation at the given depth.
+///
+/// `base_indent` is the depth of the `match` keyword itself. Arms are indented
+/// at `base_indent + 1`, arm body statements at `base_indent + 2`, and the
+/// closing `}` at `base_indent`.
+pub(super) fn generate_match_expr(
+    expr: &Expr,
+    arms: &[crate::ir::MatchArm],
+    base_indent: usize,
+) -> String {
+    let arm_pad = "    ".repeat(base_indent + 1);
+    let close_pad = "    ".repeat(base_indent);
+    let match_target = generate_expr(expr);
+    let mut out = format!("match {match_target} {{\n");
+    for arm in arms {
+        let patterns_str = arm
+            .patterns
+            .iter()
+            .map(crate::generator::patterns::render_pattern)
+            .collect::<Vec<_>>()
+            .join(" | ");
+        let guard_str = arm
+            .guard
+            .as_ref()
+            .map(|g| format!(" if {}", generate_expr(g)))
+            .unwrap_or_default();
+        out.push_str(&format!("{arm_pad}{patterns_str}{guard_str} => {{\n"));
+        for s in &arm.body {
+            out.push_str(&generate_stmt(s, base_indent + 2));
+            out.push('\n');
+        }
+        out.push_str(&format!("{arm_pad}}}\n"));
+    }
+    out.push_str(&close_pad);
+    out.push('}');
+    out
 }
 
 /// Generates a macro call expression (e.g., `println!("{}", x)`).

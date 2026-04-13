@@ -230,6 +230,7 @@ fn resolve_type_params_constraint_error_propagates() {
     let params = vec![crate::ir::TypeParam {
         name: "T".to_string(),
         constraint: Some(unresolvable_type()),
+        default: None,
     }];
     assert!(resolve_type_params(params, &reg, &mut syn).is_err());
 }

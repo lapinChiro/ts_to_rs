@@ -243,9 +243,14 @@ fn convert_callable_interface_as_trait(
                             .constraint
                             .as_ref()
                             .and_then(|c| convert_ts_type(c, synthetic, reg).ok());
+                        let default = p
+                            .default
+                            .as_ref()
+                            .and_then(|d| convert_ts_type(d, synthetic, reg).ok());
                         merged_tp.push(TypeParam {
                             name: tp_name,
                             constraint,
+                            default,
                         });
                     }
                 }

@@ -210,7 +210,8 @@ fn test_convert_fn_decl_generic_single_param() {
                 type_params,
                 vec![TypeParam {
                     name: "T".to_string(),
-                    constraint: None
+                    constraint: None,
+                    default: None,
                 }]
             );
         }
@@ -235,11 +236,13 @@ fn test_convert_fn_decl_generic_multiple_params() {
                 vec![
                     TypeParam {
                         name: "A".to_string(),
-                        constraint: None
+                        constraint: None,
+                        default: None,
                     },
                     TypeParam {
                         name: "B".to_string(),
-                        constraint: None
+                        constraint: None,
+                        default: None,
                     },
                 ]
             );

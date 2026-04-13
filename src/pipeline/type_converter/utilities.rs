@@ -22,6 +22,10 @@ pub fn extract_type_params(
                     .constraint
                     .as_ref()
                     .and_then(|c| convert_ts_type(c, synthetic, reg).ok()),
+                default: p
+                    .default
+                    .as_ref()
+                    .and_then(|d| convert_ts_type(d, synthetic, reg).ok()),
             })
             .collect(),
         None => return (vec![], HashMap::new()),

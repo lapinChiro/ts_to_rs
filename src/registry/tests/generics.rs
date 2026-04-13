@@ -204,6 +204,7 @@ fn test_substitute_types_enum_variant_fields() {
         type_params: vec![TypeParam {
             name: "T".to_string(),
             constraint: None,
+            default: None,
         }],
         variants: vec!["Ok".to_string(), "Error".to_string()],
         string_values: HashMap::new(),
@@ -253,10 +254,12 @@ fn test_substitute_types_enum_multiple_params() {
             TypeParam {
                 name: "T".to_string(),
                 constraint: None,
+                default: None,
             },
             TypeParam {
                 name: "E".to_string(),
                 constraint: None,
+                default: None,
             },
         ],
         variants: vec!["Ok".to_string(), "Err".to_string()],
@@ -435,10 +438,12 @@ fn test_type_params_function_returns_params() {
             TypeParam {
                 name: "T".to_string(),
                 constraint: None,
+                default: None,
             },
             TypeParam {
                 name: "U".to_string(),
                 constraint: Some(RustType::String),
+                default: None,
             },
         ],
         params: vec![],
@@ -470,6 +475,7 @@ fn test_substitute_types_struct_methods() {
         type_params: vec![TypeParam {
             name: "T".to_string(),
             constraint: None,
+            default: None,
         }],
         fields: vec![],
         methods: HashMap::from([(
@@ -509,6 +515,7 @@ fn test_substitute_types_struct_constructor() {
         type_params: vec![TypeParam {
             name: "T".to_string(),
             constraint: None,
+            default: None,
         }],
         fields: vec![],
         methods: HashMap::new(),
@@ -548,6 +555,7 @@ fn test_substitute_types_struct_call_signatures() {
         type_params: vec![TypeParam {
             name: "T".to_string(),
             constraint: None,
+            default: None,
         }],
         fields: vec![],
         methods: HashMap::new(),
@@ -587,6 +595,7 @@ fn test_substitute_types_function() {
         type_params: vec![TypeParam {
             name: "T".to_string(),
             constraint: None,
+            default: None,
         }],
         params: vec![
             ParamDef::new(
@@ -731,6 +740,7 @@ fn test_type_param_substitute_replaces_constraint() {
                 name: "T".to_string(),
             }],
         }),
+        default: None,
     };
     let bindings = HashMap::from([("T".to_string(), RustType::String)]);
     let result = tp.substitute(&bindings);
@@ -750,6 +760,7 @@ fn test_type_param_substitute_none_constraint_unchanged() {
     let tp = TypeParam {
         name: "T".to_string(),
         constraint: None,
+        default: None,
     };
     let bindings = HashMap::from([("T".to_string(), RustType::String)]);
     let result = tp.substitute(&bindings);
@@ -767,6 +778,7 @@ fn test_substitute_types_function_substitutes_type_param_constraints() {
             TypeParam {
                 name: "T".to_string(),
                 constraint: None,
+                default: None,
             },
             TypeParam {
                 name: "U".to_string(),
@@ -776,6 +788,7 @@ fn test_substitute_types_function_substitutes_type_param_constraints() {
                         name: "T".to_string(),
                     }],
                 }),
+                default: None,
             },
         ],
         params: vec![ParamDef::new(

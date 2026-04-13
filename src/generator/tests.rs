@@ -106,6 +106,7 @@ fn test_generate_struct_with_type_params() {
         type_params: vec![TypeParam {
             name: "T".to_string(),
             constraint: None,
+            default: None,
         }],
         fields: vec![StructField {
             vis: None,
@@ -476,6 +477,7 @@ fn test_generate_fn_with_type_params() {
         type_params: vec![TypeParam {
             name: "T".to_string(),
             constraint: None,
+            default: None,
         }],
         params: vec![Param {
             name: "x".to_string(),
@@ -866,6 +868,7 @@ fn test_generate_impl_with_type_params() {
         type_params: vec![TypeParam {
             name: "T".to_string(),
             constraint: None,
+            default: None,
         }],
         for_trait: None,
         consts: vec![],
@@ -885,6 +888,7 @@ fn test_generate_impl_with_constraint() {
                 name: "Clone".to_string(),
                 type_args: vec![],
             }),
+            default: None,
         }],
         for_trait: None,
         consts: vec![],
@@ -901,6 +905,7 @@ fn test_generate_impl_for_trait_with_type_params() {
         type_params: vec![TypeParam {
             name: "T".to_string(),
             constraint: None,
+            default: None,
         }],
         for_trait: Some(TraitRef {
             name: "Display".to_string(),
@@ -920,6 +925,7 @@ fn test_generate_impl_for_trait_with_trait_type_args() {
         type_params: vec![TypeParam {
             name: "T".to_string(),
             constraint: None,
+            default: None,
         }],
         for_trait: Some(TraitRef {
             name: "Container".to_string(),
@@ -959,6 +965,7 @@ fn test_generate_trait_with_supertrait_type_args() {
         type_params: vec![TypeParam {
             name: "T".to_string(),
             constraint: None,
+            default: None,
         }],
         supertraits: vec![TraitRef {
             name: "Bar".to_string(),

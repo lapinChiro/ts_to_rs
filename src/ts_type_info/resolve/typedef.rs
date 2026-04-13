@@ -29,9 +29,14 @@ pub(crate) fn resolve_type_params(
                 .constraint
                 .map(|c| resolve_ts_type(&c, reg, synthetic))
                 .transpose()?;
+            let default = tp
+                .default
+                .map(|d| resolve_ts_type(&d, reg, synthetic))
+                .transpose()?;
             Ok(crate::ir::TypeParam {
                 name: tp.name,
                 constraint,
+                default,
             })
         })
         .collect()
@@ -580,9 +585,14 @@ pub(crate) fn resolve_method_sig(
                     .constraint
                     .map(|c| resolve_ts_type(&c, reg, synthetic))
                     .transpose()?;
+                let default = tp
+                    .default
+                    .map(|d| resolve_ts_type(&d, reg, synthetic))
+                    .transpose()?;
                 Ok(crate::ir::TypeParam {
                     name: tp.name,
                     constraint,
+                    default,
                 })
             })
             .collect::<anyhow::Result<Vec<_>>>()?;
@@ -735,6 +745,7 @@ mod tests {
         let params = vec![TypeParam {
             name: "T".to_string(),
             constraint: Some(RustType::F64),
+            default: None,
         }];
         let (remaining, subs) = monomorphize_type_params(params, &reg, &empty_syn());
         assert!(remaining.is_empty());
@@ -751,6 +762,7 @@ mod tests {
         let params = vec![TypeParam {
             name: "T".to_string(),
             constraint: Some(constraint.clone()),
+            default: None,
         }];
         let (remaining, subs) = monomorphize_type_params(params, &reg, &empty_syn());
         assert_eq!(remaining.len(), 1);
@@ -769,6 +781,7 @@ mod tests {
         let params = vec![TypeParam {
             name: "T".to_string(),
             constraint: Some(constraint.clone()),
+            default: None,
         }];
         let (remaining, subs) = monomorphize_type_params(params, &reg, &empty_syn());
         assert!(remaining.is_empty());
@@ -781,6 +794,7 @@ mod tests {
         let params = vec![TypeParam {
             name: "T".to_string(),
             constraint: None,
+            default: None,
         }];
         let (remaining, subs) = monomorphize_type_params(params, &reg, &empty_syn());
         assert_eq!(remaining.len(), 1);
@@ -794,6 +808,7 @@ mod tests {
             TypeParam {
                 name: "T".to_string(),
                 constraint: Some(RustType::F64),
+                default: None,
             },
             TypeParam {
                 name: "U".to_string(),
@@ -801,10 +816,12 @@ mod tests {
                     name: "Trait1".to_string(),
                     type_args: vec![],
                 }),
+                default: None,
             },
             TypeParam {
                 name: "V".to_string(),
                 constraint: None,
+                default: None,
             },
         ];
         let (remaining, subs) = monomorphize_type_params(params, &reg, &empty_syn());
@@ -953,12 +970,14 @@ mod tests {
             TypeParam {
                 name: "T".to_string(),
                 constraint: Some(RustType::F64),
+                default: None,
             },
             TypeParam {
                 name: "U".to_string(),
                 constraint: Some(RustType::TypeVar {
                     name: "T".to_string(),
                 }),
+                default: None,
             },
         ];
         let (remaining, subs) = monomorphize_type_params(params, &reg, &empty_syn());

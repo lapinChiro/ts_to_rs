@@ -218,10 +218,30 @@ fn unify_types(types: &[&RustType], synthetic: &mut SyntheticTypeRegistry) -> Ru
     }
 }
 
+/// Fills missing type args with defaults from type params.
+///
+/// When `type_args` is shorter than `type_params`, fills in default values from
+/// `TypeParam::default`. Falls back to `Any` if no default is available.
+/// Returns `type_args` unchanged when it already covers all params.
+pub fn fill_type_arg_defaults(type_params: &[TypeParam], type_args: &[RustType]) -> Vec<RustType> {
+    type_params
+        .iter()
+        .enumerate()
+        .map(|(i, param)| {
+            type_args
+                .get(i)
+                .cloned()
+                .or_else(|| param.default.clone())
+                .unwrap_or(RustType::Any)
+        })
+        .collect()
+}
+
 /// Applies type parameter → concrete type substitution to a method signature.
 ///
 /// Builds a `{ T → String, U → f64 }` binding map from `type_params` and `type_args`,
 /// then substitutes all type variables in the signature's params and return type.
+/// Missing type args are filled with defaults via [`fill_type_arg_defaults`].
 ///
 /// Returns the original signature unchanged when `type_params` is empty.
 pub fn apply_type_substitution(
@@ -232,9 +252,10 @@ pub fn apply_type_substitution(
     if type_params.is_empty() {
         return sig.clone();
     }
+    let effective_args = fill_type_arg_defaults(type_params, type_args);
     let bindings: HashMap<String, RustType> = type_params
         .iter()
-        .zip(type_args.iter())
+        .zip(effective_args.iter())
         .map(|(param, arg)| (param.name.clone(), arg.clone()))
         .collect();
     sig.substitute(&bindings)
@@ -499,5 +520,157 @@ mod tests {
         assert_eq!(widest.params[0].ty, RustType::String);
         assert_eq!(widest.return_type, Some(RustType::F64));
         assert!(!widest.return_diverges);
+    }
+
+    #[test]
+    fn test_apply_type_substitution_fills_defaults_for_missing_args() {
+        // interface Foo<T, U = string> { (x: T): U }
+        // const f: Foo<number> = ... → type_args = [F64], U defaults to String
+        let sig = make_sig(
+            vec![(
+                "x",
+                RustType::TypeVar {
+                    name: "T".to_string(),
+                },
+            )],
+            Some(RustType::TypeVar {
+                name: "U".to_string(),
+            }),
+        );
+        let type_params = vec![
+            TypeParam {
+                name: "T".to_string(),
+                constraint: None,
+                default: None,
+            },
+            TypeParam {
+                name: "U".to_string(),
+                constraint: None,
+                default: Some(RustType::String), // default = string
+            },
+        ];
+        let type_args = vec![RustType::F64]; // only T provided, U omitted
+
+        let result = apply_type_substitution(&sig, &type_params, &type_args);
+
+        // T → F64 (from explicit arg), U → String (from default)
+        assert_eq!(result.params[0].ty, RustType::F64);
+        assert_eq!(result.return_type, Some(RustType::String));
+    }
+
+    #[test]
+    fn test_apply_type_substitution_explicit_args_override_defaults() {
+        // interface Foo<T = string> { (x: T): T }
+        // const f: Foo<number> = ... → explicit F64 overrides default String
+        let sig = make_sig(
+            vec![(
+                "x",
+                RustType::TypeVar {
+                    name: "T".to_string(),
+                },
+            )],
+            Some(RustType::TypeVar {
+                name: "T".to_string(),
+            }),
+        );
+        let type_params = vec![TypeParam {
+            name: "T".to_string(),
+            constraint: None,
+            default: Some(RustType::String),
+        }];
+        let type_args = vec![RustType::F64]; // explicit arg overrides default
+
+        let result = apply_type_substitution(&sig, &type_params, &type_args);
+
+        assert_eq!(result.params[0].ty, RustType::F64);
+        assert_eq!(result.return_type, Some(RustType::F64));
+    }
+
+    #[test]
+    fn test_apply_type_substitution_all_defaulted_no_args() {
+        // interface Foo<T = number, U = string> { (x: T): U }
+        // const f: Foo = ... → all defaults applied
+        let sig = make_sig(
+            vec![(
+                "x",
+                RustType::TypeVar {
+                    name: "T".to_string(),
+                },
+            )],
+            Some(RustType::TypeVar {
+                name: "U".to_string(),
+            }),
+        );
+        let type_params = vec![
+            TypeParam {
+                name: "T".to_string(),
+                constraint: None,
+                default: Some(RustType::F64),
+            },
+            TypeParam {
+                name: "U".to_string(),
+                constraint: None,
+                default: Some(RustType::String),
+            },
+        ];
+        let type_args: Vec<RustType> = vec![]; // no args, all defaults
+
+        let result = apply_type_substitution(&sig, &type_params, &type_args);
+
+        assert_eq!(result.params[0].ty, RustType::F64);
+        assert_eq!(result.return_type, Some(RustType::String));
+    }
+
+    #[test]
+    fn test_apply_type_substitution_mixed_required_and_defaulted() {
+        // interface Foo<T, U = string, V = number> { (x: T, y: U): V }
+        // const f: Foo<boolean> = ... → T=Bool (explicit), U=String (default), V=F64 (default)
+        let sig = make_sig(
+            vec![
+                (
+                    "x",
+                    RustType::TypeVar {
+                        name: "T".to_string(),
+                    },
+                ),
+                (
+                    "y",
+                    RustType::TypeVar {
+                        name: "U".to_string(),
+                    },
+                ),
+            ],
+            Some(RustType::TypeVar {
+                name: "V".to_string(),
+            }),
+        );
+        let type_params = vec![
+            TypeParam {
+                name: "T".to_string(),
+                constraint: None,
+                default: None, // required
+            },
+            TypeParam {
+                name: "U".to_string(),
+                constraint: None,
+                default: Some(RustType::String), // defaulted
+            },
+            TypeParam {
+                name: "V".to_string(),
+                constraint: None,
+                default: Some(RustType::F64), // defaulted
+            },
+        ];
+        let type_args = vec![RustType::Bool]; // only T provided
+
+        let result = apply_type_substitution(&sig, &type_params, &type_args);
+
+        assert_eq!(result.params[0].ty, RustType::Bool, "T → Bool (explicit)");
+        assert_eq!(
+            result.params[1].ty,
+            RustType::String,
+            "U → String (default)"
+        );
+        assert_eq!(result.return_type, Some(RustType::F64), "V → F64 (default)");
     }
 }

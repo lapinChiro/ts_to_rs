@@ -341,6 +341,7 @@ fn resolve_type_params_with_constraint() {
     let params = vec![crate::ir::TypeParam {
         name: "T".to_string(),
         constraint: Some(TsTypeInfo::String),
+        default: None,
     }];
     let resolved = resolve_type_params(params, &reg, &mut syn).unwrap();
     assert_eq!(resolved.len(), 1);
@@ -355,6 +356,7 @@ fn resolve_type_params_without_constraint() {
     let params = vec![crate::ir::TypeParam {
         name: "T".to_string(),
         constraint: None,
+        default: None,
     }];
     let resolved = resolve_type_params(params, &reg, &mut syn).unwrap();
     assert_eq!(resolved.len(), 1);

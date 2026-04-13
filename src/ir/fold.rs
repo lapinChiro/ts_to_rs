@@ -182,6 +182,7 @@ pub fn walk_type_param<F: IrFolder + ?Sized>(f: &mut F, tp: TypeParam) -> TypePa
     TypeParam {
         name: tp.name,
         constraint: tp.constraint.map(|c| f.fold_rust_type(c)),
+        default: tp.default.map(|d| f.fold_rust_type(d)),
     }
 }
 

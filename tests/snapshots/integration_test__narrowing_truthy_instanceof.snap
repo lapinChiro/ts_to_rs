@@ -54,24 +54,24 @@ fn truthyWithElse(x: Option<String>) -> String {
 
 fn nullCheck(x: Option<String>) -> String {
     let x = match x {
-    None => {
-        return "null".to_string();
-    }
-    Some(x) => {
-        x
-    }
-};
+        None => {
+            return "null".to_string();
+        }
+        Some(x) => {
+            x
+        }
+    };
     x
 }
 
 fn typeofNarrowing(x: F64OrString) -> String {
     let x = match x {
-    F64OrString::String(x) => {
-        return x;
-    }
-    F64OrString::F64(x) => {
-        x
-    }
-};
+        F64OrString::String(x) => {
+            return x;
+        }
+        F64OrString::F64(x) => {
+            x
+        }
+    };
     x.to_string()
 }

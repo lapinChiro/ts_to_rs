@@ -85,6 +85,7 @@ fn test_generate_struct_generic_type_params_preserved() {
         vec![TypeParam {
             name: "R".to_string(),
             constraint: None,
+            default: None,
         }],
     );
 
@@ -253,6 +254,7 @@ fn test_generate_struct_monomorphizes_non_trait_constraint() {
                 name: enum_name.clone(),
                 type_args: vec![],
             }),
+            default: None,
         }],
     );
 
@@ -309,6 +311,7 @@ fn test_generate_struct_preserves_trait_constraint() {
                 name: "SomeTrait".to_string(),
                 type_args: vec![],
             }),
+            default: None,
         }],
     );
 
@@ -352,6 +355,7 @@ fn test_generate_struct_monomorphizes_primitive_constraint() {
         vec![TypeParam {
             name: "T".to_string(),
             constraint: Some(RustType::F64),
+            default: None,
         }],
     );
 
@@ -399,12 +403,14 @@ fn test_generate_struct_monomorphizes_chained_constraints() {
             TypeParam {
                 name: "T".to_string(),
                 constraint: Some(RustType::F64),
+                default: None,
             },
             TypeParam {
                 name: "U".to_string(),
                 constraint: Some(RustType::TypeVar {
                     name: "T".to_string(),
                 }),
+                default: None,
             },
         ],
     );
@@ -454,10 +460,12 @@ fn test_generate_struct_mixed_constrained_and_unconstrained_params() {
             TypeParam {
                 name: "T".to_string(),
                 constraint: None,
+                default: None,
             },
             TypeParam {
                 name: "U".to_string(),
                 constraint: Some(RustType::F64),
+                default: None,
             },
         ],
     );
@@ -505,6 +513,7 @@ fn test_generate_struct_monomorphizes_nested_type_param_reference() {
         vec![TypeParam {
             name: "T".to_string(),
             constraint: Some(RustType::F64),
+            default: None,
         }],
     );
 

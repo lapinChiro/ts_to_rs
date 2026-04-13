@@ -90,6 +90,7 @@ fn test_lookup_method_sigs_vec_type() {
             type_params: vec![crate::ir::TypeParam {
                 name: "T".to_string(),
                 constraint: None,
+                default: None,
             }],
             fields: vec![],
             methods,

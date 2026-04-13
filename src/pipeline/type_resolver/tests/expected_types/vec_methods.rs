@@ -59,6 +59,7 @@ fn create_registry_with_array_methods() -> TypeRegistry {
             type_params: vec![TypeParam {
                 name: "T".to_string(),
                 constraint: None,
+                default: None,
             }],
             fields: vec![("length".to_string(), RustType::F64).into()],
             methods,

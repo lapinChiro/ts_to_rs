@@ -28,13 +28,13 @@ fn processOptional(x: Option<String>) {
 
 fn processUnion(x: F64OrString) -> String {
     let x = match x {
-    F64OrString::String(x) => {
-        return x.trim().to_string();
-    }
-    F64OrString::F64(x) => {
-        x
-    }
-};
+        F64OrString::String(x) => {
+            return x.trim().to_string();
+        }
+        F64OrString::F64(x) => {
+            x
+        }
+    };
     "not a string".to_string()
 }
 
@@ -209,25 +209,25 @@ fn complementElse2(x: F64OrString) -> String {
 
 fn earlyReturnNarrowing(x: F64OrString) -> f64 {
     let x = match x {
-    F64OrString::String(x) => {
-        return x.len() as f64;
-    }
-    F64OrString::F64(x) => {
-        x
-    }
-};
+        F64OrString::String(x) => {
+            return x.len() as f64;
+        }
+        F64OrString::F64(x) => {
+            x
+        }
+    };
     x
 }
 
 fn earlyReturnNull(x: Option<String>) -> String {
     let x = match x {
-    None => {
-        return "null".to_string();
-    }
-    Some(x) => {
-        x
-    }
-};
+        None => {
+            return "null".to_string();
+        }
+        Some(x) => {
+            x
+        }
+    };
     x.trim().to_string()
 }
 

@@ -9,32 +9,24 @@
 
 ---
 
-## 現在のフェーズ: Batch 25 (I-392) Phase 0-11 完了、Phase 12 待ち
+## 現在のフェーズ: Batch 25 (I-392) Phase 0-12 完了、Phase 13 待ち
 
 Multi-overload callable interface を trait + marker + impl 表現に変換。
 PRD: `backlog/I-392-overload-callable-interface.md`
 
-### 次の作業: Phase 12 (L2/L3/L4 fix)
+### 次の作業: Phase 13 (Final Quality gate)
 
-**P12.1**: TypeParam default 対応 (L2: IR 基盤改善)
-- `TypeParam` に `default: Option<T>` フィールド追加
-- `collect_type_params` / `extract_type_params` でデフォルト値収集
-- INV-4 arity 検証を required params のみチェックに緩和
-- `apply_type_substitution` で省略 type args にデフォルト値充填
-- Hono bench の `ToSSGAdaptorInterface` エラー 2 件を解消
+verification のみ。code change なし。
 
-**P12.2**: generator match indent cosmetic (L2-4)
-
-### 残りの Phase (12-13)
+### 残りの Phase
 
 | Phase | 内容 | 状態 |
 |-------|------|------|
-| **12** | L2/L3/L4 fix (P12.1 TypeParam default + P12.2 indent cosmetic) | **次** |
-| **13** | Final Quality gate | 待ち |
+| **13** | Final Quality gate | **次** |
 
-### 現在の状態 (2026-04-13 Phase 11 完了時)
+### 現在の状態 (2026-04-13 Phase 12 完了時)
 
-- **Test count**: 全テスト pass (lib 2377, integration 98, compile 3, E2E 89)
+- **Test count**: 全テスト pass (lib 2383, integration 99, compile 3, E2E 89)
 - **Quality**: clippy 0, fmt 0
 - **#[allow(dead_code)]**: production code に 0 件
 - **INV-6**: Promise unwrap は `RustType::unwrap_promise()` に統一済
@@ -63,6 +55,7 @@ PRD: `backlog/I-392-overload-callable-interface.md`
 | 9C | type substitution (apply_type_substitution) + select_overload Stage 2 修正 | 2026-04-13 |
 | 10 | Call site dispatch: try_convert_callable_trait_call + TypeResolver overload selection fix + symmetry tests | 2026-04-13 |
 | 11 | Integration: compile_test 3/3 pass, E2E callable_interface pass, Hono bench regression 0 (Phase 10 起因) | 2026-04-13 |
+| 12 | L2/L3/L4 fix: TypeParam default 対応 (Hono ToSSGAdaptorInterface 解消) + generator match indent cosmetic + DRY 統一 | 2026-04-13 |
 
 ---
 

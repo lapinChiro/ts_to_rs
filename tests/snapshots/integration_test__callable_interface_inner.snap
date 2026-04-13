@@ -25,24 +25,24 @@ impl GetCookieGetCookieImpl {
 impl GetCookie for GetCookieGetCookieImpl {
     fn call_0(&self, c: String) -> String {
         match self.inner(c, None) {
-    F64OrString::String(v) => {
-        v
-    }
-    _ => {
-        unreachable!()
-    }
-}
+            F64OrString::String(v) => {
+                v
+            }
+            _ => {
+                unreachable!()
+            }
+        }
     }
 
     fn call_1(&self, c: String, key: String) -> f64 {
         match self.inner(c, Some(key)) {
-    F64OrString::F64(v) => {
-        v
-    }
-    _ => {
-        unreachable!()
-    }
-}
+            F64OrString::F64(v) => {
+                v
+            }
+            _ => {
+                unreachable!()
+            }
+        }
     }
 }
 

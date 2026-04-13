@@ -110,7 +110,8 @@ fn test_convert_interface_with_type_params() {
                 type_params,
                 vec![TypeParam {
                     name: "T".to_string(),
-                    constraint: None
+                    constraint: None,
+                    default: None,
                 }]
             );
         }
@@ -136,11 +137,13 @@ fn test_convert_interface_with_multiple_type_params() {
                 vec![
                     TypeParam {
                         name: "A".to_string(),
-                        constraint: None
+                        constraint: None,
+                        default: None,
                     },
                     TypeParam {
                         name: "B".to_string(),
-                        constraint: None
+                        constraint: None,
+                        default: None,
                     },
                 ]
             );
@@ -464,5 +467,43 @@ fn test_convert_interface_mixed_props_and_methods_generates_struct_and_trait() {
             assert_eq!(for_trait.as_ref().map(|t| t.name.as_str()), Some("Ctx"));
         }
         _ => panic!("expected Item::Impl, got {:?}", items[2]),
+    }
+}
+
+/// P12.1: Call-signature-level type param with default is propagated to trait.
+///
+/// This test covers the partition missed by interface-level tests: type params
+/// defined ON the call signature (not the interface) with defaults.
+/// Without this test, `interfaces.rs:249` `default: None` hardcoding went undetected.
+#[test]
+fn test_convert_interface_call_sig_type_param_default_propagated() {
+    let decl = parse_interface("interface WithDefault { <T = string>(x: T): T }");
+    let items = convert_interface_items(
+        &decl,
+        Visibility::Public,
+        &mut SyntheticTypeRegistry::new(),
+        &TypeRegistry::new(),
+    )
+    .unwrap();
+    assert_eq!(items.len(), 1);
+    match &items[0] {
+        Item::Trait {
+            type_params,
+            methods,
+            ..
+        } => {
+            // Call-sig type param T with default=string must be merged into trait
+            assert_eq!(type_params.len(), 1);
+            assert_eq!(type_params[0].name, "T");
+            assert_eq!(
+                type_params[0].default,
+                Some(RustType::String),
+                "call-sig type param default must be propagated, not None"
+            );
+            // Method should use T
+            assert_eq!(methods.len(), 1);
+            assert_eq!(methods[0].name, "call_0");
+        }
+        _ => panic!("expected Item::Trait"),
     }
 }
