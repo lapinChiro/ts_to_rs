@@ -579,6 +579,41 @@ fn resolve_method_info_basic() {
     assert!(!result.has_mut_self);
 }
 
+/// I-040 S7: `TsParamInfo.optional == true` のメソッドパラメータが `Option<T>` に
+/// ラップされる。`resolve_method_info` が `wrap_if_optional` 経由で収束していることの確認。
+#[test]
+fn resolve_method_info_optional_param_wraps_in_option() {
+    use crate::ts_type_info::TsParamInfo;
+    let reg = TypeRegistry::new();
+    let mut syn = SyntheticTypeRegistry::new();
+    let method = crate::ts_type_info::TsMethodInfo {
+        name: "m".to_string(),
+        params: vec![
+            TsParamInfo {
+                name: "x".to_string(),
+                ty: TsTypeInfo::Number,
+                optional: false,
+            },
+            TsParamInfo {
+                name: "y".to_string(),
+                ty: TsTypeInfo::Boolean,
+                optional: true,
+            },
+        ],
+        return_type: None,
+        type_params: vec![],
+        optional: false,
+        has_rest: false,
+    };
+    let result = resolve_method_info(&method, &reg, &mut syn).unwrap();
+    assert_eq!(result.params.len(), 2);
+    assert_eq!(result.params[0].ty, Some(RustType::F64));
+    assert_eq!(
+        result.params[1].ty,
+        Some(RustType::Option(Box::new(RustType::Bool)))
+    );
+}
+
 #[test]
 fn resolve_method_info_no_return_type() {
     let reg = TypeRegistry::new();

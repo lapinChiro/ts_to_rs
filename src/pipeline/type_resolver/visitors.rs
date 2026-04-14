@@ -32,6 +32,10 @@ impl<'a> TypeResolver<'a> {
     ///
     /// Returns `(name, type)` for `Pat::Ident` and `Pat::Assign` wrapping `Pat::Ident`.
     /// Returns `None` for destructuring patterns (which don't have a single name).
+    ///
+    /// I-040: TS の `?:` optional パラメータと `= value` デフォルト付きパラメータは
+    /// IR で `Option<T>` にラップされる。TypeResolver の registered Fn 型が IR と
+    /// 整合するよう、ここでも同じラップを適用する。
     fn extract_param_name_and_type(&mut self, pat: &ast::Pat) -> Option<(String, RustType)> {
         match pat {
             ast::Pat::Ident(ident) => {
@@ -43,10 +47,15 @@ impl<'a> TypeResolver<'a> {
                         convert_ts_type(&ann.type_ann, self.synthetic, self.registry).ok()
                     })
                     .map(|ty| wrap_trait_for_position(ty, TypePosition::Param, self.registry))
-                    .unwrap_or(RustType::Any);
+                    .unwrap_or(RustType::Any)
+                    .wrap_if_optional(ident.id.optional);
                 Some((name, ty))
             }
-            ast::Pat::Assign(assign) => self.extract_param_name_and_type(&assign.left),
+            ast::Pat::Assign(assign) => {
+                // デフォルト値付きは IR で Option<T> ラップ。recursive call で得た型を再ラップする。
+                let (name, ty) = self.extract_param_name_and_type(&assign.left)?;
+                Some((name, ty.wrap_optional()))
+            }
             _ => None,
         }
     }
@@ -127,6 +136,9 @@ impl<'a> TypeResolver<'a> {
             ast::Pat::Ident(ident) => {
                 let name = ident.id.sym.to_string();
                 let span = Span::from_swc(ident.id.span);
+                // I-040: optional (`x?: T`) は IR で `Option<T>` にラップされる。
+                // TypeResolver の scope にも同じ Option<T> を登録し、関数本体内で
+                // `x` を参照したときに IR と整合した型が返るようにする。
                 let ty = ident
                     .type_ann
                     .as_ref()
@@ -134,14 +146,38 @@ impl<'a> TypeResolver<'a> {
                         convert_ts_type(&ann.type_ann, self.synthetic, self.registry).ok()
                     })
                     .map(|ty| wrap_trait_for_position(ty, TypePosition::Param, self.registry))
+                    .map(|ty| ty.wrap_if_optional(ident.id.optional))
                     .map(ResolvedType::Known)
                     .unwrap_or(ResolvedType::Unknown);
                 self.declare_var(&name, ty, span, false);
             }
             ast::Pat::Assign(assign) => {
                 // Default value parameter: `x: Type = defaultExpr`
-                // 1. Register the left-side variable(s) in scope
-                self.visit_param_pat(&assign.left);
+                // 1. Register the left-side variable(s) in scope.
+                //
+                // I-040: 関数本体内では default expansion stmt
+                // (`let x = x.unwrap_or(default);`) によって `x` は `T` に
+                // unwrap される。したがって TypeResolver の scope には
+                // `Option<T>` ではなく `T` を登録する必要がある。`Pat::Ident`
+                // 経由の `visit_param_pat` は `optional` フラグで Option ラップ
+                // するため、ここでは inline 登録で wrap を回避する。
+                if let ast::Pat::Ident(ident) = assign.left.as_ref() {
+                    let name = ident.id.sym.to_string();
+                    let span = Span::from_swc(ident.id.span);
+                    let ty = ident
+                        .type_ann
+                        .as_ref()
+                        .and_then(|ann| {
+                            convert_ts_type(&ann.type_ann, self.synthetic, self.registry).ok()
+                        })
+                        .map(|ty| wrap_trait_for_position(ty, TypePosition::Param, self.registry))
+                        .map(ResolvedType::Known)
+                        .unwrap_or(ResolvedType::Unknown);
+                    self.declare_var(&name, ty, span, false);
+                } else {
+                    // Object/Array pattern with default — delegate (no optional flag)
+                    self.visit_param_pat(&assign.left);
+                }
                 // 2. Extract type annotation from the left pattern
                 let ann_ty = extract_type_ann_from_pat(&assign.left).and_then(|ann| {
                     convert_ts_type(&ann.type_ann, self.synthetic, self.registry)

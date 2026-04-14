@@ -227,6 +227,83 @@ fn test_convert_interface_method_multiple_params() {
     }
 }
 
+/// I-040 T2: interface method の optional パラメータ (`y?: number`) が
+/// `Option<f64>` にラップされた `Method.params` で IR に格納されることを保証する。
+#[test]
+fn test_convert_method_signature_optional_param_wraps_in_option() {
+    let decl = parse_interface("interface Foo { bar(x: number, y?: number): number; }");
+    let item = convert_interface(
+        &decl,
+        Visibility::Public,
+        &mut SyntheticTypeRegistry::new(),
+        &TypeRegistry::new(),
+    )
+    .unwrap();
+
+    match item {
+        Item::Trait { methods, .. } => {
+            assert_eq!(methods[0].params.len(), 2);
+            assert_eq!(methods[0].params[0].name, "x");
+            assert_eq!(methods[0].params[0].ty, Some(RustType::F64));
+            assert_eq!(methods[0].params[1].name, "y");
+            assert_eq!(
+                methods[0].params[1].ty,
+                Some(RustType::Option(Box::new(RustType::F64)))
+            );
+        }
+        _ => panic!("expected Item::Trait, got {:?}", item),
+    }
+}
+
+/// I-040 T2 negative: required interface method param は Option ラップされない。
+#[test]
+fn test_convert_method_signature_required_param_not_wrapped() {
+    let decl = parse_interface("interface Foo { bar(x: number, y: number): number; }");
+    let item = convert_interface(
+        &decl,
+        Visibility::Public,
+        &mut SyntheticTypeRegistry::new(),
+        &TypeRegistry::new(),
+    )
+    .unwrap();
+
+    match item {
+        Item::Trait { methods, .. } => {
+            assert_eq!(methods[0].params[0].ty, Some(RustType::F64));
+            assert_eq!(methods[0].params[1].ty, Some(RustType::F64));
+        }
+        _ => panic!("expected Item::Trait"),
+    }
+}
+
+/// I-040 T3: callable interface (`(y?: number): void`) の optional パラメータが
+/// `Option<f64>` にラップされた `call_N` メソッドの params で IR に格納される。
+#[test]
+fn test_convert_callable_interface_optional_param_wraps() {
+    let decl = parse_interface("interface Handler { (x: number, y?: number): void; }");
+    let item = convert_interface(
+        &decl,
+        Visibility::Public,
+        &mut SyntheticTypeRegistry::new(),
+        &TypeRegistry::new(),
+    )
+    .unwrap();
+
+    match item {
+        Item::Trait { methods, .. } => {
+            assert_eq!(methods.len(), 1);
+            assert_eq!(methods[0].name, "call_0");
+            assert_eq!(methods[0].params.len(), 2);
+            assert_eq!(methods[0].params[0].ty, Some(RustType::F64));
+            assert_eq!(
+                methods[0].params[1].ty,
+                Some(RustType::Option(Box::new(RustType::F64)))
+            );
+        }
+        _ => panic!("expected Item::Trait"),
+    }
+}
+
 #[test]
 fn test_convert_interface_properties_only_still_struct() {
     let decl = parse_interface("interface Point { x: number; y: number; }");

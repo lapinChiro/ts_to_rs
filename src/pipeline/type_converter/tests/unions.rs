@@ -840,6 +840,42 @@ fn test_union_fn_type_param_without_annotation_skipped() {
     }
 }
 
+/// I-040 T5: `convert_fn_type_to_rust` (utilities.rs) が embedded fn type の
+/// optional パラメータ (`y?: number`) を `Option<f64>` で `RustType::Fn { params }`
+/// に格納することを保証する。union member 経由で間接的に到達するパス。
+#[test]
+fn test_convert_fn_type_optional_param_wraps() {
+    let decl = parse_type_alias("type U = string | ((x: number, y?: number) => void);");
+    let item = convert_type_alias(
+        &decl,
+        Visibility::Public,
+        &mut SyntheticTypeRegistry::new(),
+        &TypeRegistry::new(),
+    )
+    .unwrap();
+    match &item {
+        Item::Enum { variants, .. } => {
+            let fn_variant = variants
+                .iter()
+                .find(|v| v.name == "Fn")
+                .expect("expected Fn variant");
+            match &fn_variant.data {
+                Some(RustType::Fn {
+                    params,
+                    return_type,
+                }) => {
+                    assert_eq!(params.len(), 2);
+                    assert_eq!(params[0], RustType::F64);
+                    assert_eq!(params[1], RustType::Option(Box::new(RustType::F64)));
+                    assert_eq!(return_type.as_ref(), &RustType::Unit);
+                }
+                other => panic!("expected Fn data, got: {other:?}"),
+            }
+        }
+        other => panic!("expected Enum, got: {other:?}"),
+    }
+}
+
 #[test]
 fn test_union_fn_type_all_params_annotated() {
     let decl = parse_type_alias("type U = string | ((a: number, b: boolean) => string);");

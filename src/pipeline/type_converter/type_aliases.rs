@@ -387,7 +387,8 @@ pub(super) fn try_convert_function_type_alias(
                     .as_ref()
                     .map(|ann| convert_ts_type(&ann.type_ann, synthetic, reg))
                     .transpose()?
-                    .unwrap_or(RustType::Any);
+                    .unwrap_or(RustType::Any)
+                    .wrap_if_optional(ident.id.optional);
                 param_types.push(ty);
             }
             _ => return Err(anyhow!("unsupported function type parameter pattern")),

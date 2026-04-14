@@ -384,6 +384,38 @@ fn test_convert_type_alias_function_type_generates_fn_alias() {
     }
 }
 
+/// I-040 T6: `try_convert_function_type_alias` が optional パラメータ (`y?: number`)
+/// を `Option<f64>` で `RustType::Fn { params }` に格納することを保証する。
+#[test]
+fn test_fn_type_alias_optional_param_wraps() {
+    let module = parse_type_annotation("type F = (x: number, y?: number) => number;");
+    let reg = build_registry(&module);
+    let mut synthetic = SyntheticTypeRegistry::new();
+    let alias = extract_type_alias(&module, 0);
+
+    let item = super::convert_type_alias(alias, Visibility::Public, &mut synthetic, &reg)
+        .expect("should succeed");
+
+    match &item {
+        Item::TypeAlias { name, ty, .. } => {
+            assert_eq!(name, "F");
+            match ty {
+                RustType::Fn {
+                    params,
+                    return_type,
+                } => {
+                    assert_eq!(params.len(), 2);
+                    assert_eq!(params[0], RustType::F64);
+                    assert_eq!(params[1], RustType::Option(Box::new(RustType::F64)));
+                    assert_eq!(**return_type, RustType::F64);
+                }
+                other => panic!("expected Fn type, got: {other:?}"),
+            }
+        }
+        other => panic!("expected TypeAlias item, got: {other:?}"),
+    }
+}
+
 #[test]
 fn test_convert_type_alias_tuple_type_generates_tuple() {
     // type T = [string, number] → TypeAlias(Tuple)

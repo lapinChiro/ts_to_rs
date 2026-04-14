@@ -267,12 +267,8 @@ fn convert_external_typedef(
             let converted_fields: Vec<FieldDef> = fields
                 .iter()
                 .map(|f| {
-                    let ty = convert_external_type(&f.field_type, synthetic);
-                    let ty = if f.optional {
-                        RustType::Option(Box::new(ty))
-                    } else {
-                        ty
-                    };
+                    let ty = convert_external_type(&f.field_type, synthetic)
+                        .wrap_if_optional(f.optional);
                     FieldDef {
                         name: f.name.clone(),
                         ty,
@@ -456,16 +452,14 @@ fn convert_union_type(members: &[ExternalType], synthetic: &mut SyntheticTypeReg
         }
     };
 
-    if has_null {
-        RustType::Option(Box::new(inner))
-    } else {
-        inner
-    }
+    // Idempotent: nested nullable members never produce Option<Option<T>>.
+    inner.wrap_if_optional(has_null)
 }
 
 /// Converts external parameters to [`ParamDef`] entries.
 ///
-/// Handles optional parameters by wrapping their types in `Option<T>`.
+/// Handles optional parameters by wrapping their types in `Option<T>` via
+/// [`RustType::wrap_if_optional`].
 fn convert_external_params(
     params: &[ExternalParam],
     synthetic: &mut SyntheticTypeRegistry,
@@ -473,12 +467,7 @@ fn convert_external_params(
     params
         .iter()
         .map(|p| {
-            let ty = convert_external_type(&p.param_type, synthetic);
-            let ty = if p.optional {
-                RustType::Option(Box::new(ty))
-            } else {
-                ty
-            };
+            let ty = convert_external_type(&p.param_type, synthetic).wrap_if_optional(p.optional);
             ParamDef {
                 name: p.name.clone(),
                 ty,

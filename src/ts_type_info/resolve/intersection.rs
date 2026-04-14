@@ -431,12 +431,7 @@ pub(crate) fn extract_discriminated_variant(
                 }
                 continue; // discriminant フィールド自体は含めない
             }
-            let ty = resolve_ts_type(&field.ty, reg, synthetic)?;
-            let ty = if field.optional {
-                RustType::Option(Box::new(ty))
-            } else {
-                ty
-            };
+            let ty = resolve_ts_type(&field.ty, reg, synthetic)?.wrap_if_optional(field.optional);
             fields.push(StructField {
                 name: crate::ir::sanitize_field_name(&field.name),
                 ty,
@@ -512,7 +507,7 @@ pub(crate) fn resolve_method_info(
         .params
         .iter()
         .map(|p| {
-            let ty = resolve_ts_type(&p.ty, reg, synthetic)?;
+            let ty = resolve_ts_type(&p.ty, reg, synthetic)?.wrap_if_optional(p.optional);
             Ok(Param {
                 name: p.name.clone(),
                 ty: Some(ty),

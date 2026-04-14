@@ -29,6 +29,23 @@ impl<'a> TypeResolver<'a> {
         // Temporarily bind explicit type args to callee's type parameters
         let prev_constraints = self.push_call_type_arg_bindings(callee, &explicit_type_args);
 
+        // Pre-populate `expr_types[callee_span]` so that the transformer's
+        // `convert_call_expr` can look up the callee variable's type via
+        // `get_expr_type(callee)`. Required for trailing-None fill on Ident
+        // callees that point to fn-typed variables (`f(1)` where
+        // `f: (x: number, y?: number) => number` must compile to
+        // `f(1.0, None)`). Without this, `expr_types[f]` is never populated
+        // because `resolve_call_expr`'s callee match below uses `lookup_var`
+        // directly and does not visit the callee as an expression.
+        //
+        // Resolving for non-Ident callees (Member/Call/Paren/etc.) is harmless
+        // (`expr_types` uses `entry().or_insert_with`, so re-resolving is a
+        // no-op) and aligns with the broader invariant that every visited
+        // expression should appear in `expr_types`. The Member branch below
+        // also calls `resolve_expr(&member.obj)`; that becomes a cached lookup
+        // after this line — no semantic change.
+        let _ = self.resolve_expr(callee);
+
         // Set expected types for arguments based on callee's parameter types
         self.set_call_arg_expected_types(callee, &call.args);
 

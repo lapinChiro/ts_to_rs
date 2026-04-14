@@ -132,10 +132,15 @@ fn resolve_tuple() {
 
 #[test]
 fn resolve_function() {
+    use crate::ts_type_info::TsParamInfo;
     let reg = TypeRegistry::new();
     let mut syn = SyntheticTypeRegistry::new();
     let info = TsTypeInfo::Function {
-        params: vec![TsTypeInfo::String],
+        params: vec![TsParamInfo {
+            name: "x".to_string(),
+            ty: TsTypeInfo::String,
+            optional: false,
+        }],
         return_type: Box::new(TsTypeInfo::Number),
     };
     assert_eq!(
@@ -143,6 +148,35 @@ fn resolve_function() {
         RustType::Fn {
             params: vec![RustType::String],
             return_type: Box::new(RustType::F64),
+        }
+    );
+}
+
+#[test]
+fn resolve_function_with_optional_param_wraps_in_option() {
+    use crate::ts_type_info::TsParamInfo;
+    let reg = TypeRegistry::new();
+    let mut syn = SyntheticTypeRegistry::new();
+    let info = TsTypeInfo::Function {
+        params: vec![
+            TsParamInfo {
+                name: "x".to_string(),
+                ty: TsTypeInfo::Number,
+                optional: false,
+            },
+            TsParamInfo {
+                name: "y".to_string(),
+                ty: TsTypeInfo::Number,
+                optional: true,
+            },
+        ],
+        return_type: Box::new(TsTypeInfo::Void),
+    };
+    assert_eq!(
+        resolve_ts_type(&info, &reg, &mut syn).unwrap(),
+        RustType::Fn {
+            params: vec![RustType::F64, RustType::Option(Box::new(RustType::F64))],
+            return_type: Box::new(RustType::Unit),
         }
     );
 }
@@ -322,6 +356,58 @@ fn resolve_param_with_default() {
     let resolved = resolve_param_def(param, &reg, &mut syn).unwrap();
     assert_eq!(resolved.ty, RustType::Option(Box::new(RustType::F64)));
     assert!(resolved.has_default);
+}
+
+/// I-040 S6: `optional=true` も `has_default` と同じく `Option<T>` にラップする
+/// (TS `?:` semantics)。`wrap_if_optional` が単一の収束点であることの確認も兼ねる。
+#[test]
+fn resolve_param_optional_wraps_in_option() {
+    let reg = TypeRegistry::new();
+    let mut syn = SyntheticTypeRegistry::new();
+    let param = ParamDef {
+        name: "y".to_string(),
+        ty: TsTypeInfo::String,
+        optional: true,
+        has_default: false,
+    };
+    let resolved = resolve_param_def(param, &reg, &mut syn).unwrap();
+    assert_eq!(resolved.ty, RustType::Option(Box::new(RustType::String)));
+    assert!(resolved.optional);
+    assert!(!resolved.has_default);
+}
+
+/// I-040: `optional=true` かつ `has_default=true` の併用で `Option<Option<T>>` に
+/// ならないこと。`wrap_if_optional` の idempotency 担保。
+#[test]
+fn resolve_param_optional_plus_default_no_double_wrap() {
+    let reg = TypeRegistry::new();
+    let mut syn = SyntheticTypeRegistry::new();
+    let param = ParamDef {
+        name: "z".to_string(),
+        ty: TsTypeInfo::Boolean,
+        optional: true,
+        has_default: true,
+    };
+    let resolved = resolve_param_def(param, &reg, &mut syn).unwrap();
+    assert_eq!(resolved.ty, RustType::Option(Box::new(RustType::Bool)));
+    assert!(resolved.optional);
+    assert!(resolved.has_default);
+}
+
+/// I-040: 既に `Option<T>` を持つ field は `optional=true` でも二重ラップしない
+/// (`name?: string | null` ケース)。
+#[test]
+fn resolve_field_already_option_optional_no_double_wrap() {
+    let reg = TypeRegistry::new();
+    let mut syn = SyntheticTypeRegistry::new();
+    let field = crate::registry::FieldDef {
+        name: "n".to_string(),
+        ty: TsTypeInfo::Union(vec![TsTypeInfo::String, TsTypeInfo::Null]),
+        optional: true,
+    };
+    let resolved = resolve_field_def(field, &reg, &mut syn).unwrap();
+    assert_eq!(resolved.ty, RustType::Option(Box::new(RustType::String)));
+    assert!(resolved.optional);
 }
 
 // ── resolve_type_params ──

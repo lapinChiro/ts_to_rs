@@ -81,7 +81,272 @@ OBJECT_LITERAL_NO_TYPE 全体で 27件（最終実行: 2026-04-13）。I-004/I-0
 - **[I-037]** **ジェネリック型を含む intersection** — `try_convert_intersection_type` と統合可能
 - **[I-038]** **new obj.Class() パターン** — `resolve_new_expr` が `Expr::Member` 未処理
 - **[I-039]** **call signature のジェネリック型パラメータ** — 制約伝搬未検証。I-392 完了後に再評価
-- **[I-040]** **rest param を含む overloaded callable interface の widest 計算が不正確** — `compute_widest_params`（`src/pipeline/type_converter/overloaded_callable.rs:63-114`）が位置ベースで比較するため、rest param が異なる位置にある overload の組み合わせで不正確。Hono の callable interface には rest param overload がなく未顕在化
+- **[I-133]** **rest param を含む overloaded callable interface の widest 計算が不正確** — `compute_widest_params`（`src/pipeline/type_converter/overloaded_callable.rs:63-114`）が位置ベースで比較するため、rest param が異なる位置にある overload の組み合わせで不正確。Hono の callable interface には rest param overload がなく未顕在化（旧 ID `I-040` は optional param wrap PRD に再割当済）
+- **[I-134]** **type alias chain (`type B = A`) で fn 型 alias が `TypeDef::Function` として再登録されない**
+
+  **症状 (再現 TS)**:
+  ```ts
+  type A = (x: number, y?: number) => number;
+  type B = A;
+  function runit(f: B): number { return f(1); }
+  ```
+
+  **現在の Rust 出力**:
+  ```rust
+  type A = Box<dyn Fn(f64, Option<f64>) -> f64>;
+  type B = A;
+  fn runit(f: B) -> f64 {
+      f(1.0)  // ← E0061: missing argument, fill-None 未動作
+  }
+  ```
+
+  **期待出力**: `f(1.0, None)` (fill-None で補完)
+
+  **根本原因**:
+  1. `try_collect_fn_type_alias` (`src/registry/functions.rs:115-143`) は `alias.type_ann` が `TsFnType` または `TsTypeLit` の場合のみ `TypeDef::Function` を返す。`TsTypeRef("A")` (alias chain の右辺) は `None` を返す
+  2. 代わりに `resolve_type_ref_for_registry` (`src/registry/collection.rs:588-671`) が呼ばれるが、`source_def` の `match` (line 601-639) は `TypeDef::Struct` のみ受け付け、`TypeDef::Function` は見落とす (`_ => None`)
+  3. 結果 B は registry に登録されない → `reg.get("B")` → None
+  4. transformer `convert_call_expr` (`src/transformer/expressions/calls.rs:87-120`) の 3 段階 fallback:
+     - `reg().get("f")` → None (f is param)
+     - `get_expr_type(f)` → `Named("B")` (not Fn)
+     - Named alias 経由 `reg().get("B")` → None ← ここで詰まる
+     - param_types = None → fill-None ロジック動作せず
+
+  **修正方針 (A 案, 推奨)**: `resolve_type_ref_for_registry` を拡張し、`RustType::Named` 解決先が `TypeDef::Function` の場合も転写する
+  ```rust
+  // 追加パス
+  Some(def @ TypeDef::Function { .. }) => Some(def.clone()),
+  ```
+  影響範囲: registry collection path C のみ。他の Function consumer には波及しない。
+
+  **修正方針 (B 案)**: `try_collect_fn_type_alias` を再帰的に `TsTypeRef` 解決するよう拡張。ただし collection ordering (A が B より先) が必要 → 2-pass collection が必要。修正規模大。
+
+  **修正方針 (C 案, 将来)**: `TypeDef::Alias(RustType)` variant を新設 (I-056 参照)。全 TypeDef consumer (20+ 箇所) 更新。最も構造的に正しいが規模最大。
+
+  **テスト戦略**:
+  1. integration test (existing, deleted during I-040): `test_fn_type_alias_chain_optional_param_compiles` で `type B = A` chain 経由の fill-None を検証
+  2. unit test: `resolve_type_ref_for_registry` で `TypeRef("A")` → `TypeDef::Function` 転写を検証
+  3. 2 段以上 (`type C = B; type B = A;`) の chain 耐性も検証
+
+  **依存関係**: 🔗 I-056 (TypeDef::Alias) 実施時は C 案で一体解決可能。独立修正なら A 案。
+
+  **優先度**: L4 (現時点 Hono に該当パターンなし、TS 側で alias chain は typically 避けられる)
+
+  **発見経緯**: I-040 PRD 実装中の `/check_job` (Deep Review) で追加 integration test 作成時に判明。PRD scope (直接 fn type alias のみ) 外として deferred
+
+- **[I-135]** **callable interface を function param 型として使うと dispatch されず compile error**
+
+  **症状 (再現 TS)**:
+  ```ts
+  interface Handler { (x: number, y?: number): number }
+  function runit(h: Handler): number { return h(1); }
+  ```
+
+  **現在の Rust 出力**:
+  ```rust
+  trait Handler {
+      fn call_0(&self, x: f64, y: Option<f64>) -> f64;
+  }
+  fn runit(h: Handler) -> f64 {  // ← Handler (trait) を値型として使用: E0782
+      h(1.0)                      // ← h は trait object なので呼べない + 引数不足
+  }
+  ```
+
+  **期待出力**:
+  ```rust
+  fn runit(h: &dyn Handler) -> f64 {
+      h.call_0(1.0, None)
+  }
+  ```
+
+  **根本原因**:
+  1. `wrap_trait_for_position` (`src/transformer/type_position/mod.rs`) は `TypePosition::Param` で Named trait を `&dyn Trait` にラップするはずだが、callable interface (`Handler` = `TypeDef::Struct` with `call_signatures`) を trait と認識していない (classify_callable_interface の用途分離)
+  2. `try_convert_callable_trait_call` (`src/transformer/expressions/calls.rs:391`) は Stage 1 で `reg().get(fn_name)` → `TypeDef::ConstValue { type_ref_name }` のみ受け付け (line 398-401)。function param の `h: Handler` は ConstValue ではなく scoped var → 検出失敗
+  3. 検出失敗後 `convert_call_expr` の Ident path に fallthrough → `reg().get("h")` None → `get_expr_type(h)` `Named("Handler")` → my Named branch で `reg().get("Handler")` は `TypeDef::Struct` (not Function) → None
+  4. param_types = None → call_0 dispatch なし、fill-None もなし
+
+  **修正方針 (A 案, 推奨)**:
+  1. `try_convert_callable_trait_call` に Stage 1b を追加: `get_expr_type(callee)` が `Named { name }` かつ `classify_callable_interface(reg.get(name))` が `SingleOverload` / `MultiOverload` なら dispatch 処理へ
+  2. `wrap_trait_for_position` で callable interface も `&dyn Trait` にラップ (classify_callable_interface を判定に追加)
+  3. 既存の `test_callable_interface_optional_param_compiles` (const callable) に加え、function param 版のテストを追加
+
+  **修正方針 (B 案)**: I-041 (`type Handler = { (x): string }` の trait 化) と統合して callable alias 全般を trait 対応させる
+
+  **テスト戦略**:
+  1. integration test: interface callable を (a) const, (b) function param, (c) class field 3 context で caller dispatch + fill-None 検証
+  2. E2E test: runtime stdout 一致
+  3. `test_convert_interface_param_type_is_wrapped_in_dyn_trait` unit test
+
+  **依存関係**: 🔗 I-041 (type alias callable)、🔗 I-032 (callable の再代入・param 経由 dispatch) — I-032 はこの問題のサブセット。統合検討
+
+  **優先度**: L3 (Hono で顕在化する可能性あり、要再調査)
+
+  **発見経緯**: I-040 PRD 実装中の `/check_problem` Deep Review で integration test 追加時に判明。既存 I-032 (line 70) が同系統の問題を部分記述。I-135 で拡張記述
+
+- **[I-136]** **`TsMethodInfo.optional` (メソッド自身が optional `m?(): T`) が IR に伝播しない**
+
+  **症状 (再現 TS)**:
+  ```ts
+  type F = { m?(): string }
+  function runit(f: F): string {
+      if (f.m) { return f.m(); }
+      return "default";
+  }
+  ```
+
+  **期待セマンティクス**: `m` 自体の存在が optional (property-level optional method)。TS では `f.m?.()` optional chaining で呼ばれる。
+
+  **現在の変換結果**: `m.optional` が無視されて通常の method として trait に登録される。`f.m()` は unconditional method call に変換され、None check がない。
+
+  **根本原因**:
+  - `resolve_method_info` (`src/ts_type_info/resolve/intersection.rs:506-537`) は params と return_type のみ処理。`method.optional` フィールド (`src/ts_type_info/mod.rs:192`) を読まない
+  - `TsMethodInfo.optional` は registry 収集時に保持されるが、IR の `Method` 構造体には対応フィールドがない → silent loss
+
+  **修正方針 (A 案)**: trait method を default impl 付きで生成 (デフォルトは `unimplemented!()` または `Option::None` 返し)
+  ```rust
+  trait F {
+      fn m(&self) -> Option<String> {
+          None  // default: method missing
+      }
+  }
+  ```
+  Caller は `f.m()` で呼び、`Some(v)` なら値あり。
+
+  **修正方針 (B 案)**: 戻り値を `Option<T>` でラップ
+  ```rust
+  trait F {
+      fn m(&self) -> Option<String>;  // method の存否 × 戻り値 の合成
+  }
+  ```
+  意味論的に混乱 (method なし vs `m()` が None 返し)。
+
+  **修正方針 (C 案)**: IR `Method` に `optional: bool` フィールド追加 + generator で default impl emission。A 案の構造化版。
+
+  **設計判断必要**: A 案・B 案・C 案のどれを採るか、Rust 側の使用感を優先するか TS 意味論忠実度を優先するか。
+
+  **テスト戦略**:
+  1. 修正方針確定後に採択戦略に沿った integration test を追加
+  2. 既存 `resolve_method_info_basic` unit test に optional=true case を追加
+
+  **依存関係**: 🔗 I-137 (`as` による undefined 排除) と意味論的に近接
+
+  **優先度**: L4 (Hono では未顕在化、TS でも稀)
+
+  **発見経緯**: I-040 PRD 実装中、`resolve_method_info` のコード精読で判明。method-level optional は PRD の 10 経路には含まれていなかった (param-level optional のみ) が、TS の `?:` optional は method 自身にも適用される点で I-040 と同系統
+
+- **[I-137]** **`Option<T> as T` (TS type assertion で undefined 排除) が `.unwrap()` に変換されない**
+
+  **症状 (再現 TS)**:
+  ```ts
+  function consumer(s: string): void {}
+  function producer(x?: string): void {
+      consumer(x as string);  // user は "x は undefined ではない" と assert
+  }
+  ```
+
+  **現在の Rust 出力**:
+  ```rust
+  fn consumer(s: String) {}
+  fn producer(x: Option<String>) {
+      consumer(x);  // ← E0308: expected `String`, found `Option<String>`
+  }
+  ```
+
+  **期待出力**:
+  ```rust
+  fn producer(x: Option<String>) {
+      consumer(x.unwrap());  // user assert → .unwrap()
+  }
+  ```
+
+  **根本原因**:
+  - `convert_ts_as_expr` (位置: `src/transformer/expressions/` 内の TsAs 処理、要 grep) は source と target の型を見比べて cast 変換を決定するが、`Option<T> → T` の場合の `.unwrap()` 挿入ロジックがない
+  - I-040 fix 前は TypeResolver が optional を失っていたため、source 型が Option と認識されず問題が顕在化しなかった
+  - I-040 fix 後 TypeResolver は optional を正しく追跡するが、`as` の downstream 側で Option → T の mismatch が compile error として露出
+
+  **修正方針**:
+  1. `convert_ts_as_expr` で source 型が `Option<T>` かつ target 型が `T` (unwrapped inner 一致) なら `.unwrap()` でラップ
+  2. target 型が panic message 付きなら `.expect("...")` 推奨
+  3. 数値 cast (`as usize`, `as f64`) 等の既存 cast と衝突しないよう、判定順序に注意
+
+  **セマンティクス考慮**:
+  - TS の `as T` は runtime check なし (純粋 type assertion)。`.unwrap()` は runtime panic 可能
+  - 厳密には `x!` (non-null assertion) が `.unwrap()` に近い。`as T` は「型変換宣言」でより緩い
+  - ただし TS 側でも `x as T` が undefined 除外を意図するのは一般的 pattern
+  - Conservative 戦略: `.unwrap_or_default()` (panic なし) も候補
+
+  **テスト戦略**:
+  1. integration test: `consumer(x as string)` where x is `Option<string>` → `consumer(x.unwrap())` を assert
+  2. negative test: `x as unknown as T` (I-026) 2 段 cast が `.unwrap()` を誤挿入しないこと
+  3. target が異なる型 (`x as number` where x is `Option<string>`) は unchanged (別の型変換)
+
+  **依存関係**: 🔗 I-026 (as unknown as T) と cast ロジック共有、🔗 I-029 (null as any) と Option ラップ戦略を統合して設計
+
+  **優先度**: L3 (I-040 fix で顕在化した pre-existing 制約。TS でよく使われる pattern)
+
+  **発見経緯**: I-040 PRD の `/check_problem` Deep Review で TypeResolver fix 後に consumer(x) の compile error が露出。I-040 fix 前は silent semantic loss (x が非 Option 扱いで通過) だった。I-040 fix により silent → compile-error 表面化、次は transformer 側の `.unwrap()` 挿入が必要
+
+- **[I-138]** **Vec index の `return items[0]` が `Some(items.get(0).cloned().unwrap())` に二重化される**
+
+  **症状 (再現 TS)**:
+  ```ts
+  function first(items: string[]): string | undefined {
+      return items[0];
+  }
+  ```
+
+  **現在の Rust 出力**:
+  ```rust
+  fn first(items: Vec<String>) -> Option<String> {
+      Some(items.get(0).cloned().unwrap())
+  }
+  ```
+
+  **問題**:
+  1. `items.get(0).cloned()` 自体が `Option<String>` を返すので、この式は TS の
+     `string | undefined` → Rust `Option<String>` と完璧に一致している
+  2. しかし `.unwrap()` で強制 unwrap し、再度 `Some(...)` でラップするため、
+     empty vec の場合に runtime panic する
+  3. TS 側は「空なら undefined 返し」の意味論だったため、変換後の panic は
+     silent semantic change (Rust が compile するが runtime 挙動が異なる)
+
+  **期待出力**:
+  ```rust
+  fn first(items: Vec<String>) -> Option<String> {
+      items.get(0).cloned()  // 直接 Option<String> を返す
+  }
+  ```
+
+  **根本原因**:
+  1. `convert_member_expr` (Vec index access) が `items.get(0).cloned().unwrap()` を無条件生成
+     (Vec 要素型で安全側の unwrap)
+  2. return context では expected return_type `Option<String>` だが、`items[0]` の
+     Rust 型が `String` (unwrap 後) なので、`wrap_in_some` が適用されて `Some(String)` に
+  3. 結果 `Some(items.get(0).cloned().unwrap())` — 二重 Option 化される意味論損失
+
+  **修正方針 (A 案, 推奨)**: expected type が Option<T> で、Vec index access が
+  generated された場合、`.unwrap()` + `Some(...)` を skip して `.get(i).cloned()` の
+  Option<T> を直接使う。構造的には Vec index の変換ロジックが expected context を
+  見て unwrap するか Option で返すかを選択する。
+
+  **修正方針 (B 案)**: Vec index access を常に `.get(i).cloned()` (Option 返し) に
+  し、context に応じて caller 側で unwrap/Some ラップを決定。影響範囲大 (全 Vec
+  index access site)
+
+  **テスト戦略**:
+  1. integration test: `function first(items: T[]): T | undefined { return items[0]; }` が
+     `items.get(0).cloned()` を生成し、`Some(...unwrap())` にならないこと
+  2. integration test (boundary): 空 Vec 時の runtime 動作 (panic せず None 返し) E2E 検証
+
+  **依存関係**: 🔗 I-024 (Option narrowing) と同系統の "expected context が Option
+  の場合、中間 unwrap を skip" パターン。🔗 I-012 (find の二重 Option ラップ) とも近接
+
+  **優先度**: L2 (silent semantic change: Rust compile 成功、runtime 挙動変化 = Tier 1 準拠)
+
+  **発見経緯**: I-040 PRD `/check_problem` Deep Review で `functions` fixture の
+  compile 状態を確認中に判明。I-024 解消で一部 narrowing が動作するようになったが、
+  この defect は independent で remaining
+
 - **[I-041]** **type alias 由来の callable type が trait 化されない** — `type Handler = { (x: string): string }` は `is_interface: false` のため `classify_callable_interface` で `NonCallable`。現在は `type_aliases.rs` の `Box<dyn Fn>` path が適用される。trait 化には `type_aliases.rs` の `TsTypeLiteralInfo` → `Item::Trait` 変換パスが必要
 - **[I-042]** **typeof qualified name（typeof A.B.C）** — 0 エラー削減。高コスト・低 ROI
 - **[I-043]** **intersection 内の複数 union 分配** — 意図的制約。需要発生時に対応

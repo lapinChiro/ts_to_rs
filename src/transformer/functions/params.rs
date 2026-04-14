@@ -30,11 +30,7 @@ impl<'a> Transformer<'a> {
                     Some(ann) => ann,
                     None => {
                         // No type annotation — fallback to Any
-                        let rust_type = if optional {
-                            RustType::Any.wrap_optional()
-                        } else {
-                            RustType::Any
-                        };
+                        let rust_type = RustType::Any.wrap_if_optional(optional);
                         return Ok((
                             Param {
                                 name: param_name,
@@ -67,12 +63,8 @@ impl<'a> Transformer<'a> {
                     let rust_type = RustType::Named {
                         name: struct_name,
                         type_args: vec![],
-                    };
-                    let rust_type = if optional {
-                        rust_type.wrap_optional()
-                    } else {
-                        rust_type
-                    };
+                    }
+                    .wrap_if_optional(optional);
                     return Ok((
                         Param {
                             name: param_name,
@@ -86,13 +78,8 @@ impl<'a> Transformer<'a> {
                 let rust_type =
                     self.convert_ts_type_with_fallback(&ty.type_ann, resilient, fallback_warnings)?;
                 // Trait types in parameter position → &dyn Trait
-                let rust_type = wrap_trait_for_position(rust_type, TypePosition::Param, self.reg());
-                // Optional parameter → wrap in Option<T> (avoid double-wrapping)
-                let rust_type = if optional {
-                    rust_type.wrap_optional()
-                } else {
-                    rust_type
-                };
+                let rust_type = wrap_trait_for_position(rust_type, TypePosition::Param, self.reg())
+                    .wrap_if_optional(optional);
                 Ok((
                     Param {
                         name: param_name,
@@ -180,7 +167,11 @@ impl<'a> Transformer<'a> {
             }
             Some(ty) => ty,
         };
-        let option_type = RustType::Option(Box::new(inner_type));
+        // `wrap_optional` is idempotent, so `x?: T = value` (rare but valid TS)
+        // stays `Option<T>` instead of becoming `Option<Option<T>>` — the inner
+        // `convert_param` call already applied the optional wrap via
+        // `wrap_if_optional(ident.id.optional)`.
+        let option_type = inner_type.wrap_optional();
 
         // Convert default value to IR expression
         let (default_ir, use_unwrap_or_default) = self.convert_default_value(default_expr)?;

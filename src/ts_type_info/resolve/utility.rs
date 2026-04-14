@@ -30,17 +30,10 @@ pub(crate) fn resolve_partial(
 
     let partial_fields: Vec<StructField> = fields
         .into_iter()
-        .map(|f| {
-            let ty = if matches!(f.ty, RustType::Option(_)) {
-                f.ty
-            } else {
-                RustType::Option(Box::new(f.ty))
-            };
-            StructField {
-                name: f.name,
-                ty,
-                vis: Some(Visibility::Public),
-            }
+        .map(|f| StructField {
+            name: f.name,
+            ty: f.ty.wrap_optional(),
+            vis: Some(Visibility::Public),
         })
         .collect();
 

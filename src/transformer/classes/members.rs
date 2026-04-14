@@ -406,7 +406,10 @@ impl<'a> Transformer<'a> {
                         let inner_type = inner_param.ty.ok_or_else(|| {
                             anyhow!("default parameter requires a type annotation")
                         })?;
-                        let option_type = RustType::Option(Box::new(inner_type));
+                        // `wrap_optional` guarantees idempotency so that `x?: T = value`
+                        // (rare but valid TS) doesn't become `Option<Option<T>>` —
+                        // `convert_ident_to_param` already applied the optional wrap.
+                        let option_type = inner_type.wrap_optional();
 
                         let (default_expr, use_unwrap_or_default) =
                             self.convert_default_value(&assign.right)?;
@@ -450,6 +453,7 @@ impl<'a> Transformer<'a> {
     ///
     /// Extracts name and type annotation from a `BindingIdent`, converts the type,
     /// and returns a `Param`. Used by both function and class method parameter conversion.
+    /// `?:` optional parameters are wrapped in `Option<T>` via [`RustType::wrap_if_optional`].
     fn convert_ident_to_param(&mut self, ident: &ast::BindingIdent) -> Result<Param> {
         let name = ident.id.sym.to_string();
         let ty = ident
@@ -461,7 +465,8 @@ impl<'a> Transformer<'a> {
             crate::transformer::TypePosition::Param,
             self.synthetic,
             self.reg(),
-        )?;
+        )?
+        .wrap_if_optional(ident.id.optional);
         Ok(Param {
             name,
             ty: Some(rust_type),

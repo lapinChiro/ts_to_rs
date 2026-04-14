@@ -82,6 +82,75 @@ fn test_convert_class_constructor() {
     }
 }
 
+/// I-040 T4: class method の optional パラメータ (`y?: number`) が `Option<f64>` で
+/// `Method.params` に格納されることを確認する。
+#[test]
+fn test_convert_class_method_optional_param_wraps() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
+    let decl = parse_class_decl("class Foo { bar(x: number, y?: number): number { return x; } }");
+    let items = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .transform_class_with_inheritance(
+            &decl,
+            Visibility::Private,
+            &HashMap::new(),
+            &HashMap::new(),
+        )
+        .unwrap();
+
+    let impl_item = items
+        .iter()
+        .find(|i| matches!(i, Item::Impl { .. }))
+        .expect("expected Item::Impl");
+    if let Item::Impl { methods, .. } = impl_item {
+        let bar = methods
+            .iter()
+            .find(|m| m.name == "bar")
+            .expect("bar method");
+        assert_eq!(bar.params.len(), 2);
+        assert_eq!(bar.params[0].name, "x");
+        assert_eq!(bar.params[0].ty, Some(RustType::F64));
+        assert_eq!(bar.params[1].name, "y");
+        assert_eq!(
+            bar.params[1].ty,
+            Some(RustType::Option(Box::new(RustType::F64)))
+        );
+    }
+}
+
+/// I-040 T4: class constructor の optional パラメータ (`y?: number`) が `Option<f64>` で
+/// `new` メソッドの params に格納されることを確認する。
+#[test]
+fn test_convert_class_constructor_optional_param_wraps() {
+    let f = TctxFixture::new();
+    let tctx = f.tctx();
+    let decl = parse_class_decl(
+        "class Foo { x: number; constructor(x: number, y?: number) { this.x = x; } }",
+    );
+    let items = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .transform_class_with_inheritance(
+            &decl,
+            Visibility::Private,
+            &HashMap::new(),
+            &HashMap::new(),
+        )
+        .unwrap();
+
+    let impl_item = items
+        .iter()
+        .find(|i| matches!(i, Item::Impl { .. }))
+        .expect("expected Item::Impl");
+    if let Item::Impl { methods, .. } = impl_item {
+        let ctor = methods.iter().find(|m| m.name == "new").expect("ctor");
+        assert_eq!(ctor.params.len(), 2);
+        assert_eq!(ctor.params[0].ty, Some(RustType::F64));
+        assert_eq!(
+            ctor.params[1].ty,
+            Some(RustType::Option(Box::new(RustType::F64)))
+        );
+    }
+}
+
 #[test]
 fn test_convert_class_method_with_self() {
     let f = TctxFixture::new();

@@ -15,12 +15,16 @@
 |------|-----|
 | Hono bench clean | 113/158 (71.5%) |
 | Hono bench errors | 59 |
-| cargo test (lib) | 2430 pass |
-| cargo test (integration) | 101 pass |
+| cargo test (lib) | 2447 pass |
+| cargo test (integration) | 112 pass |
 | cargo test (compile) | 3 pass |
-| cargo test (E2E) | 89 pass |
+| cargo test (E2E) | 90 pass |
 | clippy | 0 warnings |
 | fmt | 0 diffs |
+
+**I-040 完了による bench 変動**: 変動なし (clean 71.5% / errors 59 維持)。本 PRD は pre-existing
+defect 修正で、Hono には該当 optional param パターンが実際には少なく bench に現出していなかった。
+変換器内部では 10 経路の Option ラップが統一され、DRY 違反と silent loss の両方を構造的に解消。
 
 **Step 2 完了による bench 変動**: clean 72.2% → 71.5% (-0.7pp)、error 58 → 59 (+1) は
 OBJECT_LITERAL_NO_TYPE。strictNullChecks 有効化で `T | undefined` / optional param が正しく
@@ -132,6 +136,72 @@ signature parameter で false を返すため）。
 **引継ぎ**: IR で `FieldAccess { object: <prefix op> }` を構築する際は、generator が
 括弧を補うことを前提にしてよい（transformer で手動ラップ不要）。
 
+### I-040 で確立した optional param 収束設計
+
+#### 0. Option wrap の原則 (全コードベースで遵守)
+
+`RustType::Option<T>` を新規に生成する際、raw な
+`RustType::Option(Box::new(...))` を避け、必ず以下いずれかのヘルパーを使う:
+
+- 条件分岐あり: `.wrap_if_optional(optional)` (optional=false なら passthrough、optional=true なら idempotent wrap)
+- 無条件で wrap: `.wrap_optional()` (idempotent — 既に Option なら変更なし)
+
+これによりネスト nullable / 複合 optional セマンティクス (`x?: T | null`, `Partial<T>` 適用済
+Option field) における `Option<Option<T>>` silent double-wrap を構造的に防ぐ。
+
+#### 0.5. TypeResolver scope は IR と整合しなければならない (incident-driven)
+
+`extract_param_name_and_type` (関数/arrow の Fn 型登録) と `visit_param_pat`
+(本体 scope 登録) は IR 側 (`convert_param` / `wrap_param_with_default`) と同じ
+optional ラップ規則を適用する必要がある:
+
+- `x?: T` (optional, no default) → IR: `Option<T>`、TypeResolver: `Option<T>` (両者一致)
+- `x: T = value` (default-only) → IR: `Option<T>` (caller 視点)、TypeResolver の
+  scope: `T` (本体は `let x = x.unwrap_or(...)` 後に T として参照される)
+- `x?: T = value` (両方) → IR: `Option<T>`、TypeResolver の Fn 型: `Option<T>`、
+  scope: `T` (default が unwrap)
+
+過去 TypeResolver は optional フラグを完全に無視していたため、本体の `if (x)`
+が `if let Some(x) = x` に narrowing されず Rust compile error を生んでいた
+(`functions` fixture)。I-040 fix で解消。
+
+#### 1. `RustType::wrap_if_optional` 単一ヘルパー
+
+`src/ir/types.rs` の `RustType::wrap_if_optional(self, optional: bool)` が「TS `?:` optional
+→ Rust `Option<T>`」の**唯一の収束点**。新しい param-emission site を追加する際は必ず
+本ヘルパー経由で optional を適用すること。直接 `RustType::Option(Box::new(ty))` を書くと
+二重ラップ抑止 (`wrap_optional` の idempotency) が働かず、silent semantic bug の risk。
+
+全 10 経路:
+1. `convert_method_signature` (interface method) — `interfaces.rs:466`
+2. `convert_callable_interface_as_trait` (callable interface) — `interfaces.rs:141`
+3. `convert_ident_to_param` (class method / ctor) — `classes/members.rs:453`
+4. `convert_fn_type_to_rust` (embedded fn type) — `utilities.rs:127`
+5. `try_convert_function_type_alias` (fn type alias) — `type_aliases.rs:370`
+6. `resolve_param_def` (registry MethodSignature params) — `typedef.rs:531`
+7. `resolve_method_info` (anonymous type literal method) — `intersection.rs:506`
+8. `convert_param` (free fn / arrow / fn expr) — `functions/params.rs:28`
+9. `convert_external_params` (builtin JSON loader) — `external_types/mod.rs:469`
+10. `resolve_ts_type TsTypeInfo::Function` (fn type reachable via TsTypeInfo) — `resolve/mod.rs:76`
+
+#### 2. TsTypeInfo::Function は `Vec<TsParamInfo>` で optional を保持する
+
+`extract_fn_params` は `Vec<TsParamInfo>` 返し。optional flag を下流の `resolve_ts_type` まで
+伝播する。過去は `Vec<TsTypeInfo>` で optional が落ちていた (I-040 で修正)。新しく
+`TsTypeInfo::Function` を構築するコードは必ず `TsParamInfo { optional }` を含めること。
+
+#### 3. callee の param_types 解決は Ident / Named alias 両対応
+
+`convert_call_expr` の Ident callee path は以下 3 経路で param_types を解決する:
+
+1. `reg().get(&fn_name)` が `TypeDef::Function` → 直接 params 取得 (global fn)
+2. `get_expr_type(callee)` が `RustType::Fn { params }` → params を ParamDef に wrap (inline fn type param)
+3. `get_expr_type(callee)` が `RustType::Named { name }` で registry の `TypeDef::Function` → params 取得 (fn type alias 経由)
+
+新しい fn 型 variant を追加する際は本 3 経路を参照し、`convert_call_args_inner` の fill-None が働くことを
+integration test で確認する。`resolve_call_expr` は callee を `resolve_expr` で visit して
+expr_types[callee_span] を populate するため、Ident callee でも `get_expr_type` が機能する。
+
 ### union return wrapping の実行順序 (RC-13 PRD で確立)
 
 `convert_fn_decl` 内の処理順序は以下でなければならない:
@@ -149,17 +219,7 @@ SWC leaf collection に対応がないため `wrap_body_returns` でスキップ
 
 ## 次のタスク
 
-### [I-040] TS optional parameter の Rust `Option<T>` 統一ラップ
-
-PRD: [`backlog/optional-param-option-wrap.md`](backlog/optional-param-option-wrap.md)
-
-**背景**: Step 2 レビュー中に発見した pre-existing defect。TS `?:` optional parameter が IR Method / RustType::Fn / Registry MethodSignature の **7 経路** で `Option<T>` にラップされず、ユーザー定義 interface / class / callable / fn 型エイリアスで生成される Rust が compile error になる（例: `interface F { bar(y?: number) }` → `fn bar(&self, y: f64)`、caller `f.bar(1)` が E0061）。
-
-**修正方針**: `RustType::wrap_if_optional` を単一の収束点として導入し、全 9 経路 (正常 2 + 異常 7) をそのヘルパー経由に統一。DRY 違反も同時解消。
-
-**完了条件**: 全 8 種の入力 (interface method / class method / ctor / callable / embedded fn / fn type alias / type literal / private method) で optional param が `Option<T>` にラップされ、Rust 出力が compile success。
-
-Phase A / Phase B に先立って完了させる。
+Phase A (compile_test skip 解消) の Step 3 に着手する。
 
 ---
 

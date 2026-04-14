@@ -230,6 +230,25 @@ impl RustType {
         }
     }
 
+    /// Wraps the type in `Option<T>` when `optional` is `true`, returns unchanged otherwise.
+    ///
+    /// Canonical encoding site for TS's `x?: T` optional parameter (and
+    /// optional field) semantics. Delegates to [`Self::wrap_optional`] for
+    /// idempotency (double-wrap prevention).
+    ///
+    /// Call this at every site that converts a TS callable-like parameter to
+    /// IR, so that `Option<T>` consistently represents "caller may omit"
+    /// across interface methods, class methods, constructors, callable
+    /// interfaces, embedded fn types, fn type aliases, and registry method
+    /// signatures. See I-040.
+    pub fn wrap_if_optional(self, optional: bool) -> RustType {
+        if optional {
+            self.wrap_optional()
+        } else {
+            self
+        }
+    }
+
     /// Unwraps `Promise<T>` to `T`. Non-Promise types are returned unchanged.
     ///
     /// INV-6: Single source of truth for Promise unwrapping across the codebase.
@@ -317,6 +336,36 @@ mod tests {
         assert_eq!(
             RustType::String.wrap_optional(),
             RustType::Option(Box::new(RustType::String))
+        );
+    }
+
+    #[test]
+    fn wrap_if_optional_true_wraps() {
+        assert_eq!(
+            RustType::F64.wrap_if_optional(true),
+            RustType::Option(Box::new(RustType::F64))
+        );
+    }
+
+    #[test]
+    fn wrap_if_optional_false_passthrough() {
+        assert_eq!(RustType::F64.wrap_if_optional(false), RustType::F64);
+    }
+
+    #[test]
+    fn wrap_if_optional_true_idempotent() {
+        let already_opt = RustType::Option(Box::new(RustType::String));
+        assert_eq!(already_opt.clone().wrap_if_optional(true), already_opt);
+    }
+
+    #[test]
+    fn wrap_if_optional_preserves_inner_type_var() {
+        let tv = RustType::TypeVar {
+            name: "T".to_string(),
+        };
+        assert_eq!(
+            tv.clone().wrap_if_optional(true),
+            RustType::Option(Box::new(tv))
         );
     }
 }

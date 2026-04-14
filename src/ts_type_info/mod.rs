@@ -53,10 +53,14 @@ pub enum TsTypeInfo {
     Union(Vec<TsTypeInfo>),
     /// TS `T & U & ...`
     Intersection(Vec<TsTypeInfo>),
-    /// TS `(x: T, ...) => U`
+    /// TS `(x: T, y?: U, ...) => V`
+    ///
+    /// `TsParamInfo` でパラメータを保持することで `optional` フラグを
+    /// 伝播する (I-040)。下流の `resolve_ts_type` が `RustType::Fn` に
+    /// 変換する際、`optional == true` のパラメータは `Option<T>` にラップされる。
     Function {
-        /// パラメータ型（名前情報は不要、型のみ）
-        params: Vec<TsTypeInfo>,
+        /// パラメータ情報（型 + optional）
+        params: Vec<TsParamInfo>,
         /// 戻り値型
         return_type: Box<TsTypeInfo>,
     },
@@ -607,17 +611,32 @@ fn extract_sig_params(params: &[swc_ecma_ast::TsFnParam]) -> (Vec<TsParamInfo>, 
     (result, has_rest)
 }
 
-/// TsFnParam のリストからパラメータ型を抽出する（Function variant 用）。
-fn extract_fn_params(params: &[swc_ecma_ast::TsFnParam]) -> Vec<TsTypeInfo> {
+/// TsFnParam のリストからパラメータ情報を抽出する（Function variant 用）。
+///
+/// I-040: `Ident` パラメータの `optional` フラグを `TsParamInfo.optional` として
+/// 保持する。`Rest` パラメータは optional ではない (rest と optional は TS 文法上
+/// 排他)。
+fn extract_fn_params(params: &[swc_ecma_ast::TsFnParam]) -> Vec<TsParamInfo> {
     params
         .iter()
         .filter_map(|p| {
-            let ann = match p {
-                swc_ecma_ast::TsFnParam::Ident(ident) => ident.type_ann.as_ref(),
-                swc_ecma_ast::TsFnParam::Rest(rest) => rest.type_ann.as_ref(),
-                _ => None,
+            let (ann, optional, name) = match p {
+                swc_ecma_ast::TsFnParam::Ident(ident) => (
+                    ident.type_ann.as_ref(),
+                    ident.id.optional,
+                    ident.id.sym.to_string(),
+                ),
+                swc_ecma_ast::TsFnParam::Rest(rest) => {
+                    let name = match rest.arg.as_ref() {
+                        swc_ecma_ast::Pat::Ident(i) => i.id.sym.to_string(),
+                        _ => "rest".to_string(),
+                    };
+                    (rest.type_ann.as_ref(), false, name)
+                }
+                _ => return None,
             };
-            ann.and_then(|a| convert_to_ts_type_info(&a.type_ann).ok())
+            let ty = convert_to_ts_type_info(&ann?.type_ann).ok()?;
+            Some(TsParamInfo { name, ty, optional })
         })
         .collect()
 }
@@ -762,8 +781,35 @@ mod tests {
         assert_eq!(
             info,
             TsTypeInfo::Function {
-                params: vec![TsTypeInfo::String],
+                params: vec![TsParamInfo {
+                    name: "x".to_string(),
+                    ty: TsTypeInfo::String,
+                    optional: false,
+                }],
                 return_type: Box::new(TsTypeInfo::Number),
+            }
+        );
+    }
+
+    #[test]
+    fn function_type_with_optional_param() {
+        let info = convert_to_ts_type_info(&parse_type("(x: string, y?: number) => void")).unwrap();
+        assert_eq!(
+            info,
+            TsTypeInfo::Function {
+                params: vec![
+                    TsParamInfo {
+                        name: "x".to_string(),
+                        ty: TsTypeInfo::String,
+                        optional: false,
+                    },
+                    TsParamInfo {
+                        name: "y".to_string(),
+                        ty: TsTypeInfo::Number,
+                        optional: true,
+                    }
+                ],
+                return_type: Box::new(TsTypeInfo::Void),
             }
         );
     }
@@ -960,7 +1006,11 @@ mod tests {
         assert_eq!(
             info,
             TsTypeInfo::Function {
-                params: vec![TsTypeInfo::String],
+                params: vec![TsParamInfo {
+                    name: "config".to_string(),
+                    ty: TsTypeInfo::String,
+                    optional: false,
+                }],
                 return_type: Box::new(TsTypeInfo::TypeRef {
                     name: "Service".to_string(),
                     type_args: vec![],

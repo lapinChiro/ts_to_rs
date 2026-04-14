@@ -79,7 +79,10 @@ pub fn resolve_ts_type(
         } => {
             let param_types = params
                 .iter()
-                .map(|p| resolve_ts_type(p, reg, synthetic))
+                .map(|p| {
+                    let ty = resolve_ts_type(&p.ty, reg, synthetic)?;
+                    Ok(ty.wrap_if_optional(p.optional))
+                })
                 .collect::<anyhow::Result<Vec<_>>>()?;
             let ret = resolve_ts_type(return_type, reg, synthetic)?;
             Ok(RustType::Fn {

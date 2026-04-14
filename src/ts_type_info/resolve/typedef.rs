@@ -512,12 +512,7 @@ pub(crate) fn resolve_field_def(
     reg: &TypeRegistry,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> anyhow::Result<FieldDef<RustType>> {
-    let ty = resolve_ts_type(&field.ty, reg, synthetic)?;
-    let ty = if field.optional {
-        RustType::Option(Box::new(ty))
-    } else {
-        ty
-    };
+    let ty = resolve_ts_type(&field.ty, reg, synthetic)?.wrap_if_optional(field.optional);
     Ok(FieldDef {
         name: field.name,
         ty,
@@ -525,7 +520,11 @@ pub(crate) fn resolve_field_def(
     })
 }
 
-/// ParamDef<TsTypeInfo> → ParamDef<RustType> 変換。has_default フラグに基づき Option ラップ。
+/// ParamDef<TsTypeInfo> → ParamDef<RustType> 変換。
+///
+/// TS の `?:` optional フラグとデフォルト値付き (`has_default`) の両方を、
+/// 単一の `Option<T>` エンコーディングに収束させる (I-040)。`wrap_if_optional`
+/// を介するため二重ラップは自動抑止される。
 ///
 /// **注意**: この関数は `ParamDef<TsTypeInfo>` 専用。型パラメータで防止されている。
 pub(crate) fn resolve_param_def(
@@ -533,12 +532,8 @@ pub(crate) fn resolve_param_def(
     reg: &TypeRegistry,
     synthetic: &mut SyntheticTypeRegistry,
 ) -> anyhow::Result<ParamDef<RustType>> {
-    let ty = resolve_ts_type(&param.ty, reg, synthetic)?;
-    let ty = if param.has_default {
-        RustType::Option(Box::new(ty))
-    } else {
-        ty
-    };
+    let ty = resolve_ts_type(&param.ty, reg, synthetic)?
+        .wrap_if_optional(param.optional || param.has_default);
     Ok(ParamDef {
         name: param.name,
         ty,

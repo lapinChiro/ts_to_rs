@@ -175,7 +175,9 @@ pub(super) fn try_convert_general_union(
         }
     }
 
-    // Nullable union with single non-null type: `type X = T | null` → `type X = Option<T>`
+    // Nullable union with single non-null type: `type X = T | null` → `type X = Option<T>`.
+    // `wrap_optional` prevents `Option<Option<T>>` when the inner is already Option
+    // (e.g., a nested nullable alias).
     if has_null_or_undefined && non_null_types.len() == 1 {
         let inner_type = convert_ts_type(non_null_types[0], synthetic, reg)?;
         let (type_params, mono_subs) =
@@ -184,7 +186,7 @@ pub(super) fn try_convert_general_union(
             vis,
             name: sanitize_rust_type_name(&decl.id.sym),
             type_params,
-            ty: RustType::Option(Box::new(inner_type)).substitute(&mono_subs),
+            ty: inner_type.wrap_optional().substitute(&mono_subs),
         }));
     }
 

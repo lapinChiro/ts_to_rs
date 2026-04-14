@@ -183,7 +183,8 @@ fn convert_callable_interface_as_trait(
                             .as_ref()
                             .map(|ann| convert_ts_type(&ann.type_ann, synthetic, reg))
                             .transpose()?
-                            .unwrap_or(RustType::Any);
+                            .unwrap_or(RustType::Any)
+                            .wrap_if_optional(ident.id.optional);
                         params.push(Param {
                             name: param_name,
                             ty: Some(ty),
@@ -498,7 +499,8 @@ pub(super) fn convert_method_signature(
                         .type_ann
                         .as_ref()
                         .map(|ann| convert_ts_type(&ann.type_ann, synthetic, reg))
-                        .transpose()?;
+                        .transpose()?
+                        .map(|t| t.wrap_if_optional(ident.id.optional));
                     params.push(Param {
                         name: param_name,
                         ty,

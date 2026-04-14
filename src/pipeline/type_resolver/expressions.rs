@@ -134,17 +134,12 @@ impl<'a> TypeResolver<'a> {
                     cons_is_null || alt_is_null || cons_is_option || alt_is_option;
 
                 if produces_option {
-                    // Pick the non-null branch's type as the value type
+                    // Pick the non-null branch's type as the value type. `wrap_optional`
+                    // is idempotent so an already-Option branch stays single-wrapped.
                     let value_type = if cons_is_null { &alt } else { &cons };
                     match value_type {
-                        ResolvedType::Known(RustType::Option(_)) => value_type.clone(),
-                        ResolvedType::Known(ty) => {
-                            ResolvedType::Known(RustType::Option(Box::new(ty.clone())))
-                        }
-                        ResolvedType::Unknown => {
-                            // Value type unknown but result is optional
-                            ResolvedType::Known(RustType::Option(Box::new(RustType::Any)))
-                        }
+                        ResolvedType::Known(ty) => ResolvedType::Known(ty.clone().wrap_optional()),
+                        ResolvedType::Unknown => ResolvedType::Known(RustType::Any.wrap_optional()),
                     }
                 } else {
                     match (&cons, &alt) {
@@ -417,14 +412,11 @@ impl<'a> TypeResolver<'a> {
                         call_return_type
                     }
                 };
-                // Wrap in Option<T>. OptChain always produces an optional result,
-                // even if the inner type is unknown.
+                // Wrap in Option<T>. OptChain always produces an optional result.
+                // `wrap_optional` is idempotent: an already-Option inner stays single-wrapped.
                 match inner_result {
-                    ResolvedType::Known(RustType::Option(_)) => inner_result,
-                    ResolvedType::Known(ty) => ResolvedType::Known(RustType::Option(Box::new(ty))),
-                    ResolvedType::Unknown => {
-                        ResolvedType::Known(RustType::Option(Box::new(RustType::Any)))
-                    }
+                    ResolvedType::Known(ty) => ResolvedType::Known(ty.wrap_optional()),
+                    ResolvedType::Unknown => ResolvedType::Known(RustType::Any.wrap_optional()),
                 }
             }
             ast::Expr::Update(_) => {

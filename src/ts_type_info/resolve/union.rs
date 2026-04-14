@@ -38,11 +38,9 @@ pub(crate) fn resolve_union(
         _ => resolve_multi_member_union(&non_nullable, reg, synthetic)?,
     };
 
-    if has_nullable {
-        Ok(RustType::Option(Box::new(inner)))
-    } else {
-        Ok(inner)
-    }
+    // Idempotent wrap: if `inner` is already Option (e.g., a nested nullable alias),
+    // `wrap_if_optional` leaves it unchanged instead of producing `Option<Option<T>>`.
+    Ok(inner.wrap_if_optional(has_nullable))
 }
 
 /// 複数メンバーの union を解決する。

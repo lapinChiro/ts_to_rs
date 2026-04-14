@@ -49,15 +49,9 @@ pub(crate) fn convert_property_signature(
         .as_ref()
         .ok_or_else(|| anyhow!("property '{}' has no type annotation", field_name))?;
 
-    let mut ty = convert_ts_type(&type_ann.type_ann, synthetic, reg)?;
-
-    // Optional properties (`?`) become Option<T>
-    if prop.optional {
-        // Avoid double-wrapping if the type is already Option (e.g., `name?: string | null`)
-        if !matches!(ty, RustType::Option(_)) {
-            ty = RustType::Option(Box::new(ty));
-        }
-    }
+    // Optional properties (`?`) become `Option<T>` via the idempotent wrapper,
+    // so `name?: string | null` (already Option) doesn't become `Option<Option<T>>`.
+    let ty = convert_ts_type(&type_ann.type_ann, synthetic, reg)?.wrap_if_optional(prop.optional);
 
     Ok(StructField {
         vis: None,
@@ -124,6 +118,9 @@ pub(super) fn convert_unsupported_union_member(
 }
 
 /// Converts a TS function type to a `RustType::Fn`.
+///
+/// `?:` optional parameters become `Option<T>` via [`RustType::wrap_if_optional`],
+/// so callers can pass `None` for omitted arguments.
 fn convert_fn_type_to_rust(
     fn_type: &swc_ecma_ast::TsFnType,
     synthetic: &mut SyntheticTypeRegistry,
@@ -138,6 +135,7 @@ fn convert_fn_type_to_rust(
                     .type_ann
                     .as_ref()
                     .and_then(|ann| convert_ts_type(&ann.type_ann, synthetic, reg).ok())
+                    .map(|t| t.wrap_if_optional(ident.id.optional))
             } else {
                 None
             }

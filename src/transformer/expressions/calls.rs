@@ -81,7 +81,18 @@ impl<'a> Transformer<'a> {
                         return result;
                     }
 
-                    // Look up function parameter types from the registry or FileTypeResolution
+                    // Look up function parameter types from the registry or FileTypeResolution.
+                    //
+                    // Resolution priority:
+                    // 1. Global function in the registry: `foo(...)` where `foo` is declared.
+                    // 2. Local variable whose type is `RustType::Fn` (inline fn-typed param).
+                    // 3. Local variable whose type is `RustType::Named { name }` that aliases
+                    //    a `TypeDef::Function` (fn type alias, e.g. `type F = (...) => T`).
+                    //
+                    // Case 3 is required so that callers of fn-type-aliased parameters still
+                    // get Option<T> param types propagated into `convert_call_args_inner` for
+                    // trailing-None fill (I-040). Without it, `f: Callback` where
+                    // `Callback = (x, y?) => R` would lose the `Option<T>` knowledge.
                     let resolved_params: Vec<ParamDef>;
                     let mut has_rest = false;
                     let param_types: Option<&[ParamDef]> = if let Some(TypeDef::Function {
@@ -99,11 +110,23 @@ impl<'a> Transformer<'a> {
                             .map(|(i, ty)| ParamDef {
                                 name: format!("_p{i}"),
                                 ty: ty.clone(),
-                                optional: false,
+                                optional: matches!(ty, RustType::Option(_)),
                                 has_default: false,
                             })
                             .collect();
                         Some(resolved_params.as_slice())
+                    } else if let Some(RustType::Named { name, .. }) = self.get_expr_type(callee) {
+                        if let Some(TypeDef::Function {
+                            params,
+                            has_rest: rest,
+                            ..
+                        }) = self.reg().get(name)
+                        {
+                            has_rest = *rest;
+                            Some(params.as_slice())
+                        } else {
+                            None
+                        }
                     } else {
                         None
                     };

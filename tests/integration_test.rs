@@ -313,3 +313,268 @@ fn test_nullable_return() {
     );
     insta::assert_snapshot!(output);
 }
+
+/// I-040: TS interface method の optional param (`y?: number`) は Rust trait method で
+/// `Option<f64>` にラップされ、caller からの引数不足は `None` で自動補完される。
+#[test]
+fn test_interface_method_optional_param_compiles() {
+    let input = r#"
+interface Foo {
+    bar(x: number, y?: number): number;
+}
+function runit(f: Foo): number {
+    return f.bar(1);
+}
+"#;
+    let output = transpile(input).unwrap();
+    assert!(
+        output.contains("fn bar(&self, x: f64, y: Option<f64>)"),
+        "optional interface param must be Option<f64>, got:\n{output}"
+    );
+    assert!(
+        output.contains("f.bar(1.0, None)") || output.contains("f.bar(1_f64, None)"),
+        "caller must fill omitted optional with None, got:\n{output}"
+    );
+}
+
+/// I-040: TS class method の optional param も Rust で `Option<T>` に統一される。
+#[test]
+fn test_class_method_optional_param_compiles() {
+    let input = r#"
+class Foo {
+    bar(x: number, y?: number): number {
+        return x;
+    }
+}
+function runit(f: Foo): number {
+    return f.bar(1);
+}
+"#;
+    let output = transpile(input).unwrap();
+    assert!(
+        output.contains("fn bar(&self, x: f64, y: Option<f64>)"),
+        "optional class method param must be Option<f64>, got:\n{output}"
+    );
+    assert!(
+        output.contains(".bar(1.0, None)") || output.contains(".bar(1_f64, None)"),
+        "caller must fill omitted optional with None, got:\n{output}"
+    );
+}
+
+/// I-040: TS fn type alias の optional param も `Option<T>` に統一される。
+#[test]
+fn test_fn_type_alias_optional_param_compiles() {
+    let input = r#"
+type Callback = (x: number, y?: number) => number;
+function runit(f: Callback): number {
+    return f(1);
+}
+"#;
+    let output = transpile(input).unwrap();
+    assert!(
+        output.contains("Fn(f64, Option<f64>) -> f64"),
+        "fn type alias optional param must be Option<f64>, got:\n{output}"
+    );
+    assert!(
+        output.contains("f(1.0, None)") || output.contains("f(1_f64, None)"),
+        "caller must fill omitted optional with None, got:\n{output}"
+    );
+}
+
+/// I-040: インライン fn 型 param の optional も `Option<T>` + fill-None。
+#[test]
+fn test_inline_fn_type_optional_param_compiles() {
+    let input = r#"
+function runit(f: (x: number, y?: number) => number): number {
+    return f(1);
+}
+"#;
+    let output = transpile(input).unwrap();
+    assert!(
+        output.contains("Fn(f64, Option<f64>) -> f64"),
+        "inline fn type optional param must be Option<f64>, got:\n{output}"
+    );
+    assert!(
+        output.contains("f(1.0, None)") || output.contains("f(1_f64, None)"),
+        "caller must fill omitted optional with None, got:\n{output}"
+    );
+}
+
+/// I-040: `x?: T = value` (optional + default 併用) で `Option<Option<T>>` に
+/// ならず、単一の `Option<T>` にラップされることを保証する。
+/// class method / ctor / free fn の 3 系統すべてで検証する。
+#[test]
+fn test_optional_plus_default_no_double_wrap() {
+    // (1) free fn: `x?: T = value`
+    let input_free = r#"
+function fff(x?: number = 5): number {
+    return x;
+}
+"#;
+    let output_free = transpile(input_free).unwrap();
+    assert!(
+        !output_free.contains("Option<Option<"),
+        "free fn `x?: T = value` must not produce Option<Option<_>>, got:\n{output_free}"
+    );
+    assert!(
+        output_free.contains("x: Option<f64>"),
+        "free fn `x?: T = value` must produce a single Option<f64>, got:\n{output_free}"
+    );
+
+    // (2) class method: `m(x?: T = value)`
+    let input_method = r#"
+class C {
+    m(x?: number = 5): number {
+        return x;
+    }
+}
+"#;
+    let output_method = transpile(input_method).unwrap();
+    assert!(
+        !output_method.contains("Option<Option<"),
+        "class method `x?: T = value` must not produce Option<Option<_>>, got:\n{output_method}"
+    );
+    assert!(
+        output_method.contains("x: Option<f64>"),
+        "class method `x?: T = value` must produce a single Option<f64>, got:\n{output_method}"
+    );
+
+    // (3) class constructor: `constructor(x?: T = value)`
+    let input_ctor = r#"
+class C {
+    constructor(x?: number = 5) {
+    }
+}
+"#;
+    let output_ctor = transpile(input_ctor).unwrap();
+    assert!(
+        !output_ctor.contains("Option<Option<"),
+        "ctor `x?: T = value` must not produce Option<Option<_>>, got:\n{output_ctor}"
+    );
+    assert!(
+        output_ctor.contains("x: Option<f64>"),
+        "ctor `x?: T = value` must produce a single Option<f64>, got:\n{output_ctor}"
+    );
+}
+
+/// I-040 (visit_param_pat fix): TypeResolver が `x?: T` を `Option<T>` として
+/// scope に登録することで、本体内の `if (x)` が `if let Some(x) = x` に narrowing
+/// される。逆に `x: T = value` (default-only) では本体内で `x` は `T` として登録
+/// される (default expansion stmt が unwrap するため)。
+#[test]
+fn test_optional_param_narrows_to_if_let_in_body() {
+    let input = r#"
+function f(name: string, prefix?: string): string {
+    if (prefix) {
+        return prefix;
+    }
+    return name;
+}
+"#;
+    let output = transpile(input).unwrap();
+    assert!(
+        output.contains("if let Some(prefix) = prefix"),
+        "optional param `prefix` must narrow via `if let Some(...)`, got:\n{output}"
+    );
+}
+
+#[test]
+fn test_default_param_keeps_unwrapped_type_in_body() {
+    let input = r#"
+function f(x: number = 5): number {
+    return x + 1;
+}
+"#;
+    let output = transpile(input).unwrap();
+    // After `let x = x.unwrap_or(5.0)` expansion, body sees x as f64 not Option<f64>.
+    // No `if let Some(x) = x` narrowing should be inserted; arithmetic must compile.
+    assert!(
+        output.contains("x + 1.0") || output.contains("x + 1_f64"),
+        "default param `x` must be treated as f64 in body (post-expansion), got:\n{output}"
+    );
+    assert!(
+        !output.contains("Some(x + 1"),
+        "default param body must not double-wrap return value, got:\n{output}"
+    );
+}
+
+/// I-040 S7: anonymous type literal method (`{ m(y?: number): void }`) の optional
+/// param が `Option<T>` にラップされる。`resolve_method_info` 経由で IR に到達するパス
+/// を end-to-end で検証する。
+#[test]
+fn test_type_literal_method_optional_param_compiles() {
+    let input = r#"
+type Container = { compute(x: number, y?: number): number };
+function runit(c: Container): number {
+    return c.compute(1);
+}
+"#;
+    let output = transpile(input).unwrap();
+    assert!(
+        output.contains("y: Option<f64>"),
+        "type literal method optional param must be Option<f64>, got:\n{output}"
+    );
+}
+
+/// I-040: `Partial<{ name?: T }>` で `Option<Option<T>>` にならず単一 `Option<T>` になる。
+#[test]
+fn test_partial_of_optional_field_no_double_wrap() {
+    let input = r#"
+type Base = { name?: string };
+type P = Partial<Base>;
+function runit(p: P): string {
+    return "hi";
+}
+"#;
+    let output = transpile(input).unwrap();
+    assert!(
+        !output.contains("Option<Option<"),
+        "Partial<{{ name?: T }}> must not produce Option<Option<_>>, got:\n{output}"
+    );
+}
+
+/// I-040 / callable interface: `(y?: number): void` の optional param は `Option<T>`。
+/// trait 宣言と const callable の caller の両方を検証する (caller は call_0 ディスパッチ
+/// + None auto-fill が機能することを保証)。
+#[test]
+fn test_callable_interface_optional_param_compiles() {
+    let input = r#"
+interface Handler {
+    (x: number, y?: number): void;
+}
+const h: Handler = (x: number, y?: number): void => {};
+function runit(): void {
+    h(1);
+}
+"#;
+    let output = transpile(input).unwrap();
+    assert!(
+        output.contains("fn call_0(&self, x: f64, y: Option<f64>)"),
+        "callable interface optional param must be Option<f64>, got:\n{output}"
+    );
+    assert!(
+        output.contains("h.call_0(1.0, None)") || output.contains("h.call_0(1_f64, None)"),
+        "callable interface caller must dispatch to call_0 and fill None, got:\n{output}"
+    );
+}
+
+/// I-040: generic fn type alias (`type Callback<T> = (x: T, y?: T) => T`) でも
+/// optional param が `Option<T>` 化され、caller で fill-None が機能する。
+#[test]
+fn test_generic_fn_type_alias_optional_param_compiles() {
+    let input = r#"
+type Callback<T> = (x: T, y?: T) => T;
+function runit(f: Callback<number>): number {
+    return f(1);
+}
+"#;
+    let output = transpile(input).unwrap();
+    assert!(
+        output.contains("Option<"),
+        "generic fn type alias optional param must produce Option<_>, got:\n{output}"
+    );
+    assert!(
+        output.contains("f(1.0, None)") || output.contains("f(1_f64, None)"),
+        "caller of generic fn type alias must fill None for omitted optional, got:\n{output}"
+    );
+}

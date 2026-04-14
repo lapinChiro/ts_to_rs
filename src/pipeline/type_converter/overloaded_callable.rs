@@ -91,21 +91,16 @@ fn compute_widest_params(
         // Unify types at this position
         let unified_type = unify_types(&types_at_pos, synthetic);
 
-        // Wrap in Option if not present in all overloads or optional in any
-        let ty = if !present_in_all || optional_in_any {
-            match &unified_type {
-                // Avoid double-wrapping Option<Option<T>>
-                RustType::Option(_) => unified_type,
-                _ => RustType::Option(Box::new(unified_type)),
-            }
-        } else {
-            unified_type
-        };
+        // Wrap in Option<T> if the param is absent or optional in any overload.
+        // `wrap_if_optional` is idempotent, so `T | null` (already Option) doesn't
+        // become `Option<Option<T>>`.
+        let optional = !present_in_all || optional_in_any;
+        let ty = unified_type.wrap_if_optional(optional);
 
         widest_params.push(ParamDef {
             name,
             ty,
-            optional: !present_in_all || optional_in_any,
+            optional,
             has_default: false,
         });
     }
@@ -168,11 +163,9 @@ fn compute_union_return(
             // All were Unit after filtering (shouldn't happen since unique.len() > 1)
             (None, false)
         } else if member_types.len() == 1 {
-            // Only one non-void type → wrap in Option (void overload means "might not return")
-            (
-                Some(RustType::Option(Box::new(member_types[0].clone()))),
-                false,
-            )
+            // Only one non-void type → wrap in Option (void overload means "might not return").
+            // Use `wrap_optional` for idempotency so an already-Option return (rare) stays single-wrapped.
+            (Some(member_types[0].clone().wrap_optional()), false)
         } else {
             let enum_name = synthetic.register_union(&member_types);
             (
