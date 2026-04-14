@@ -322,7 +322,7 @@ impl<'a> Transformer<'a> {
                 });
             }
 
-            // Read access: safe bounds-checked indexing (I-319, I-138).
+            // Read access: safe bounds-checked indexing (I-319, I-138, I-022).
             //
             // When the enclosing context expects `Option<T>` (return, assignment,
             // call arg, ternary branch — all propagated by TypeResolver), emit
@@ -339,9 +339,10 @@ impl<'a> Transformer<'a> {
             // `Option<Option<T>>`-expected cases (no flatten) while collapsing the
             // common TS `(T | undefined)[]` → `T | undefined` flattening pattern.
             //
-            // Nullish coalescing (`arr[i] ?? default`) is NOT covered here —
-            // `propagate_expected` has no Bin arm, so the LHS span carries no
-            // expected type. Tracked as I-022.
+            // Nullish coalescing (`arr[i] ?? default`) is covered via
+            // `resolve_bin_expr`'s NC arm (I-022): it propagates `Option<T>` to
+            // the LHS span so this member access reads `Some(Option(_))` as the
+            // expected type and emits the `.get().cloned()` (no-unwrap) form.
             let safe_index = convert_index_to_usize(index);
             let expected = self
                 .tctx

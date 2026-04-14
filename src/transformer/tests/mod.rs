@@ -216,3 +216,89 @@ fn test_build_option_unwrap_ident_uses_unwrap_or_else() {
     );
     assert_unwrap_or_else(&result);
 }
+
+// -- build_option_or_option tests (I-022) --
+
+/// Asserts the result is `.or(value)` with the RHS as a direct argument (no closure).
+fn assert_or(result: &Expr) {
+    match result {
+        Expr::MethodCall { method, args, .. } => {
+            assert_eq!(method, "or");
+            assert_eq!(args.len(), 1);
+            assert!(
+                !matches!(&args[0], Expr::Closure { .. }),
+                ".or should receive the value directly, not a closure"
+            );
+        }
+        other => panic!("expected MethodCall, got {:?}", other),
+    }
+}
+
+/// Asserts the result is `.or_else(|| value)` with a zero-arg closure wrapping the RHS.
+fn assert_or_else(result: &Expr) {
+    match result {
+        Expr::MethodCall { method, args, .. } => {
+            assert_eq!(method, "or_else");
+            assert_eq!(args.len(), 1);
+            match &args[0] {
+                Expr::Closure { params, .. } => {
+                    assert!(params.is_empty(), "closure should have no parameters");
+                }
+                other => panic!("expected Closure argument, got {:?}", other),
+            }
+        }
+        other => panic!("expected MethodCall, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_build_option_or_option_number_lit_uses_or() {
+    let result = build_option_or_option(Expr::Ident("a".to_string()), Expr::NumberLit(0.0));
+    assert_or(&result);
+}
+
+#[test]
+fn test_build_option_or_option_int_lit_uses_or() {
+    let result = build_option_or_option(Expr::Ident("a".to_string()), Expr::IntLit(42));
+    assert_or(&result);
+}
+
+#[test]
+fn test_build_option_or_option_bool_lit_uses_or() {
+    let result = build_option_or_option(Expr::Ident("a".to_string()), Expr::BoolLit(false));
+    assert_or(&result);
+}
+
+#[test]
+fn test_build_option_or_option_string_lit_uses_or_else() {
+    // String literals require allocation (`.to_string()` in wrapping context),
+    // so the RHS must be evaluated lazily to match TS `??` semantics.
+    let result = build_option_or_option(
+        Expr::Ident("a".to_string()),
+        Expr::StringLit("fallback".to_string()),
+    );
+    assert_or_else(&result);
+}
+
+#[test]
+fn test_build_option_or_option_ident_uses_or_else() {
+    // Identifier values may be non-Copy (e.g., String variable). Lazy eval
+    // avoids unconditional move.
+    let result = build_option_or_option(Expr::Ident("a".to_string()), Expr::Ident("b".to_string()));
+    assert_or_else(&result);
+}
+
+#[test]
+fn test_build_option_or_option_method_call_uses_or_else() {
+    // Method calls may have side effects (e.g., fetch default from DB). Lazy
+    // eval preserves TS `??` short-circuit semantics.
+    let result = build_option_or_option(
+        Expr::Ident("a".to_string()),
+        Expr::MethodCall {
+            object: Box::new(Expr::Ident("obj".to_string())),
+            method: "get_default".to_string(),
+            args: vec![],
+        },
+    );
+    assert_or_else(&result);
+}

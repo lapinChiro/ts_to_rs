@@ -11,7 +11,7 @@ fn withFallback(name: Option<String>) -> String {
 }
 
 fn firstAvailable(a: Option<String>, b: Option<String>, c: String) -> String {
-    a.unwrap_or_else(|| b).unwrap_or_else(|| c)
+    a.or_else(|| b).unwrap_or_else(|| c)
 }
 
 fn processConfig(timeout: Option<f64>) -> f64 {
@@ -20,7 +20,7 @@ fn processConfig(timeout: Option<f64>) -> f64 {
 }
 
 fn getOrDefault(items: Vec<String>, index: f64) -> String {
-    items.get(index as usize).cloned().unwrap()
+    items.get(index as usize).cloned().unwrap_or_else(|| "missing".to_string())
 }
 
 fn ensureDefault(x: Option<f64>) -> f64 {

@@ -12,31 +12,64 @@ When creating a new PRD in `backlog/`.
 
 ## Actions
 
-### 0. Batch Check
+### 0. Problem Space Analysis (最優先・最重要・絶対遵守)
+
+**本ステップは全ての PRD で必須。スキップ・省略・後回し不可。**
+
+`.claude/rules/problem-space-analysis.md` に従い、機能の問題空間を enumerate する。
+Discovery より前、設計より前、実装より前に必ず実施する。
+
+1. **入力次元を列挙する**: 機能の出力を決定する独立次元を「省略なしで」列挙する。
+   - 変換系機能の典型: AST shape / TS type / outer context / TS strict 設定。
+   - 各次元の variant を SWC AST / RustType / 既存コンテキスト列挙から網羅する。
+2. **組合せマトリクスを作成する**: 全次元の直積を表形式で enumerate し、
+   各セルに以下を記録する:
+   - Ideal Rust 出力 (不明なら「要調査」マーク)
+   - 現状の出力 (実装確認 or 経験推定)
+   - 判定: ✓ (現状 OK) / ✗ (修正必要) / NA (unreachable, 理由付き) / 要調査
+   - Scope 判断: 本 PRD / 別 PRD / 後回し (理由必須)
+3. **未確定セルを Discovery に回す**: 判定「要調査」のセルを Discovery で解消する。
+   全セルに ✓ / ✗ / NA 判定が付くまで Discovery を終わらせない。
+4. **PRD 本体に `Problem Space` セクションとして記録する**: マトリクスをそのまま
+   PRD に転記。後続の設計・実装・テストは本マトリクスから導出する。
+
+**禁止事項**:
+- マトリクスを作らずに Discovery に進むこと。
+- 「代表的な組合せのみ」「よくあるケースのみ」でマトリクスを省略すること。
+- 「頻度が低い」「稀」を理由にセルを省略すること (頻度は問題空間の尺度ではない)。
+- 組合せ爆発を理由に「サブセットのみ」と割り切ること (scope-out するなら別 PRD 化、
+  しないなら全カバー)。
+
+### 1. Batch Check
 
 Once the target item is determined, check `TODO` for items that should be batched together:
 
 - Items on the **same code path** (addressable by modifying the same functions/modules)
 - Items with **explicit overlap/relation** (cross-referenced with 🔗, etc.)
 - Items with the **same abstract pattern** (e.g., multiple `TsTypeOperator` variant support)
+- **Items that share the same problem space matrix** (Step 0 で同じ次元にマップされる defect は
+  同一 PRD に統合する。個別 fix すると問題空間の網羅が崩れる)
 
 If applicable items exist, include them in the PRD scope. Do not force-combine items on independent code paths.
 
-### 1. Discovery
+### 2. Discovery
 
 Before writing the PRD:
 
-1. Ask the user at least 2 clarification questions:
+1. **First** resolve all "要調査" cells in the Problem Space matrix (Step 0) — ask
+   the user what the ideal Rust output should be for each unknown cell.
+2. Ask the user at least 2 additional clarification questions:
    - Why build this now? (motivation/priority confirmation)
    - What defines success? (completion criteria alignment)
    - Are there constraints? (technical constraints, compatibility with existing features, etc.)
-2. Draft the PRD only after receiving answers
+3. Draft the PRD only after all Problem Space cells have determined ideal outputs
+   and the user has answered motivation/success/constraint questions.
 
-### 2. Impact Area Code Review
+### 3. Impact Area Code Review
 
 **Before writing the Task List**, review the production code and test code in the impact area. This catches broken windows and design issues before they propagate into the new implementation.
 
-#### 2a. Production Code Quality Review
+#### 3a. Production Code Quality Review
 
 Read all files in the impact area and evaluate:
 
@@ -57,7 +90,7 @@ Produce an issue table:
 
 Issues found must be either fixed in the PRD's task list or recorded in TODO with justification for deferral.
 
-#### 2b. Test Coverage Review
+#### 3b. Test Coverage Review
 
 Review existing tests in the impact area using the test techniques from `.claude/rules/testing.md`:
 
@@ -78,7 +111,7 @@ Produce a gap table:
 
 Include **all** identified gaps (both production code issues and test gaps) in the PRD's task list, regardless of severity. No gap is too small to test — incomplete coverage is a broken window.
 
-### 3. PRD Drafting
+### 4. PRD Drafting
 
 Follow this template:
 
@@ -88,6 +121,46 @@ Follow this template:
 ## Background
 
 Why this feature is needed. Current problems or issues caused by its absence.
+
+## Problem Space (必須・最上位セクション)
+
+`.claude/rules/problem-space-analysis.md` に従い、機能の問題空間を完全に enumerate する。
+本セクションが不完全な PRD は起票・実装を認めない。
+
+### 入力次元 (Dimensions)
+
+機能の出力を決定する独立次元を列挙する。省略なし。
+
+- **次元 A (例: LHS AST shape)**: Lit / Ident / Member(Computed) / Member(Ident) / Call /
+  OptChain / TsAs / TsNonNull / TsTypeAssertion / Arrow / Fn / Cond / Await / Unary /
+  Bin / New / Paren / Seq / Array / Object / Tpl / ...
+- **次元 B (例: LHS TS type)**: Option<T> / T(primitive) / Any / Unknown / TypeVar /
+  Vec<T> / Vec<Option<T>> / HashMap / Tuple / Struct Named / Enum Named / Fn / ...
+- **次元 C (例: outer context)**: return / var decl+annotation / var decl no-annotation /
+  assign target / call arg / destructuring default / class field init / ternary branch /
+  match arm body / spread / template literal expr / await operand / ...
+
+### 組合せマトリクス
+
+全次元の直積を表形式で記述する。
+
+| # | A | B | C | Ideal 出力 | 現状 | 判定 | Scope |
+|---|---|---|---|-----------|------|------|-------|
+| 1 | Lit | String | return | `x.to_string()` | `x.to_string()` | ✓ | — |
+| 2 | Member(Computed) | Vec<T> | return | `.get(i).cloned().unwrap_or_else(\|\| d)` | panic | ✗ | 本 PRD |
+| 3 | TsAs | Option<T> | return | `inner.unwrap_or_else(\|\| d)` | compile error | ✗ | 別 PRD (I-NNN) |
+| ... | ... | ... | ... | ... | ... | ... | ... |
+
+判定凡例: ✓ (現状 OK) / ✗ (修正必要) / NA (unreachable, 理由付き) / 要調査 (Discovery で解消)
+
+### Matrix Completeness Audit
+
+実装完了宣言前に以下を全チェック:
+- [ ] 全次元の variant を SWC AST / RustType 定義から網羅列挙した
+- [ ] 未カバーセル・「多分 OK」セルが残っていない
+- [ ] 「稀」「低頻度」を理由にした省略がない
+- [ ] review agent が指摘する可能性のある edge を先回り enumerate した
+- [ ] 全セルに test (unit / integration / E2E) が対応している
 
 ## Goal
 
@@ -167,6 +240,10 @@ Overview of tests to add/modify. Includes:
 
 Conditions for this PRD's work to be considered "complete". Include quality checks (clippy, fmt, test).
 
+**Matrix completeness requirement (最上位完了条件)**: Problem Space マトリクスの全セルに対する
+テストが存在し、各セルの実出力が ideal 仕様と一致すること。1 セルでも未カバー、または
+「多分 OK」で済ませたセルがあれば PRD は未完成。
+
 **Impact estimates (error count reduction) must be verified by tracing actual code paths for at least 3 representative error instances.** Label-based estimation (counting by error category name) is prohibited. Each traced instance must confirm that the proposed fix resolves the specific failure point in the execution path.
 ```
 
@@ -180,6 +257,11 @@ Conditions for this PRD's work to be considered "complete". Include quality chec
 
 ## Prohibited
 
+- **Skipping Problem Space Analysis (Step 0)** — 全 PRD で最優先・必須・例外なし。
+  問題空間マトリクスなしに Discovery/設計/実装に進むことは `problem-space-analysis.md`
+  違反であり、PRD としての有効性がない。
+- **Declaring PRD complete with incomplete matrix** — 「reported defect が fix され
+  tests pass」では完了ではない。全セル ideal 仕様一致 + lock-in test が完了条件。
 - Skipping Discovery (clarification questions) and writing a PRD
 - **Skipping the impact area code review** — every PRD must include both a production code quality review (DRY, orthogonality, cohesion, coupling, doc comments) AND a systematic test coverage review using test techniques before writing the task list
 - Writing vague completion criteria ("works properly", "can be used without issues", etc.)

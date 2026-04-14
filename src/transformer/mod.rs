@@ -883,6 +883,45 @@ pub(crate) fn build_option_unwrap_with_default(
     }
 }
 
+/// Builds an `Option::or` or `Option::or_else` expression for an Option LHS +
+/// Option RHS (nullish coalescing chain case).
+///
+/// Uses `or` (eager) only for cheap Copy literals (numbers, bools, unit).
+/// Everything else uses `or_else` (lazy) to avoid:
+/// - Eager evaluation of side-effecting RHS expressions (correctness — TS `??`
+///   is lazy, not evaluating RHS when LHS is non-nullish)
+/// - Unnecessary allocation when LHS is Some
+/// - Unconditional move of non-Copy values (ownership safety)
+///
+/// Unlike [`build_option_unwrap_with_default`] which produces `T` (unwrapped),
+/// this returns `Option<T>` — the LHS's Option layer is preserved so an outer
+/// `??` in a chain (`a ?? b ?? c`) can terminate with `.unwrap_or[_else]()`.
+///
+/// Used exclusively by [`Transformer::convert_bin_expr`]'s NullishCoalescing arm
+/// when both LHS and RHS produce `Option<T>` (I-022).
+pub(crate) fn build_option_or_option(
+    lhs: crate::ir::Expr,
+    rhs: crate::ir::Expr,
+) -> crate::ir::Expr {
+    if rhs.is_copy_literal() {
+        crate::ir::Expr::MethodCall {
+            object: Box::new(lhs),
+            method: "or".to_string(),
+            args: vec![rhs],
+        }
+    } else {
+        crate::ir::Expr::MethodCall {
+            object: Box::new(lhs),
+            method: "or_else".to_string(),
+            args: vec![crate::ir::Expr::Closure {
+                params: vec![],
+                return_type: None,
+                body: crate::ir::ClosureBody::Expr(Box::new(rhs)),
+            }],
+        }
+    }
+}
+
 /// Builds an `init()` function from accumulated top-level expression statements.
 ///
 /// TypeScript modules can have top-level expressions that run once when the module

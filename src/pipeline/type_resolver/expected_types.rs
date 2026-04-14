@@ -432,6 +432,35 @@ impl<'a> TypeResolver<'a> {
                     .insert(alt_span, expected.clone());
                 self.propagate_expected(&cond.alt, expected);
             }
+            // Nullish coalescing within an `Option<T>`-expected context (chain
+            // case): propagate `Option<T>` to both LHS and RHS so every inner
+            // operand — including runtime-nullable forms like `Vec<Option<T>>`
+            // index access — emits Option-preserving IR (`.get().cloned()` /
+            // `.get().cloned().flatten()`) rather than a premature `.unwrap()`.
+            //
+            // Without this arm, `arr[i] ?? arr[j] ?? "default"` (chain) would
+            // lower `arr[j]` with `expected = String` → `.unwrap()` form →
+            // runtime panic on empty array instead of TS-equivalent fallback.
+            // I-022.
+            //
+            // Non-chain context (outer expected is non-Option `T`): the
+            // `resolve_bin_expr` NC arm handles LHS/RHS propagation with its
+            // own unified logic (LHS gets `Option<T>`, RHS gets `T`).
+            ast::Expr::Bin(bin)
+                if bin.op == ast::BinaryOp::NullishCoalescing
+                    && matches!(expected, RustType::Option(_)) =>
+            {
+                let lhs_span = Span::from_swc(bin.left.span());
+                self.result
+                    .expected_types
+                    .insert(lhs_span, expected.clone());
+                self.propagate_expected(&bin.left, expected);
+                let rhs_span = Span::from_swc(bin.right.span());
+                self.result
+                    .expected_types
+                    .insert(rhs_span, expected.clone());
+                self.propagate_expected(&bin.right, expected);
+            }
             _ => {}
         }
     }

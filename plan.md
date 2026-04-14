@@ -13,14 +13,38 @@
 
 | 指標 | 値 |
 |------|-----|
-| Hono bench clean | 113/158 (71.5%) |
-| Hono bench errors | 59 |
-| cargo test (lib) | 2454 pass |
+| Hono bench clean | 114/158 (72.2%) |
+| Hono bench errors | 58 |
+| cargo test (lib) | 2484 pass |
 | cargo test (integration) | 122 pass |
 | cargo test (compile) | 3 pass |
 | cargo test (E2E) | 91 pass |
 | clippy | 0 warnings |
 | fmt | 0 diffs |
+
+**I-022 完了による bench 変動**: clean 113/158 (71.5%) → 114/158 (72.2%) (+0.7pp)、errors
+59 → 58 (-1; OBJECT_LITERAL_NO_TYPE 28 → 27)。I-022 の LHS Option expected propagation が
+下流の expected type 伝播にも波及し、副次的に OBJECT_LITERAL_NO_TYPE 1 件を解消。
+`nullish-coalescing` fixture の Tier 1 silent drop (`arr[i] ?? default` が空配列で panic)
+と chain `a ?? b ?? c` の compile error を構造的に解消:
+- `resolve_bin_expr` NC arm を **統一 arm** 化 (LHS Option / 非 Option を同一ロジックで処理)。
+  LHS span に `Option<inner>` expected を常に propagate し、RHS span に `inner` (= NC 最終型)
+  を propagate。`convert_member_expr` は LHS が Vec<T> の場合 `.get(i).cloned()` / Vec<Option<T>>
+  の場合 `.get(i).cloned().flatten()` を自動選択。
+- `produces_option_result` に `Some`/`None`/`.or`/`.or_else` 認識を追加 (IR-shape secondary signal)
+- `convert_bin_expr` NC arm が `is_option_right` を判定し、RHS も Option の chain case で
+  新規 helper `build_option_or_option` 経由 `.or_else(|| rhs)` を emit
+- `/check_job` review で Vec<Option<T>> + NC の silent bug (LHS Option arm が LHS propagation
+  を skip していた) を検出し、統一 arm 化で構造的に解消。
+- `/check_job deep` review で **chain + Vec<Option<T>>** の silent panic を検出:
+  `arr[i] ?? arr[j] ?? "default"` で inner NC の RHS (`arr[j]`) が span expected = String を
+  受けて `.unwrap()` 形を emit → `.or_else` closure 内で panic → `"default"` に到達せず。
+  `propagate_expected` に `Bin(NullishCoalescing)` arm を追加し、outer Option 文脈を inner NC
+  の LHS/RHS 両方へ propagate。`resolve_bin_expr` は既に設定された Option RHS を preserve。
+  これにより inner の両辺が `.flatten()` 形になり、chain 全体で Option を保持して終端で
+  `.unwrap_or_else` が fallback を生成。
+- 残課題: `??=` (NullishAssign) の narrowing/shadowing 未対応 → 🔗 I-142 で連続着手。
+  `nullish-coalescing` fixture skip は I-142 完了まで維持。
 
 **I-138 完了による bench 変動**: 変動なし (clean 71.5% / errors 59 維持)。I-040 と同様、Hono には
 該当 Vec index Option-context パターンが bench に現出していなかった。pre-existing Tier 1 silent
@@ -31,7 +55,7 @@ nullable ケース (`.flatten()` 条件付き emit) + optional chaining 経由 (
 - 1 周目: Vec<Option<T>> edge case の型ずれ → `.flatten()` 追加
 - 2 周目: flatten 条件の過剰適用リスク (`expected=Option<Option<T>>`) → `elem_ty == Option<expected_inner>` 厳密マッチへ精緻化
 - 3 周目: optional chaining Computed 経路が同一不変量違反 → `convert_opt_chain_expr` にも flatten 条件付き emit 追加
-Scope narrow: "nullish coalescing LHS" は `propagate_expected` Bin arm 不在のため I-022 に委譲。
+Scope narrow: "nullish coalescing LHS" は I-022 で解消済 (本 commit)。
 別発見 (別 PRD 対応): I-140 (type alias target 非格納による Option 検出欠落)、I-141 (array literal
 要素型が Option<Vec<T>> expected 経由で非伝播)。
 
@@ -232,24 +256,23 @@ SWC leaf collection に対応がないため `wrap_body_returns` でスキップ
 
 ## 次のタスク
 
-### [I-022] `??` 演算子の LHS 型処理欠落 (次の着手イシュー)
+### [I-142] `??=` (NullishAssign) statement-level shadowing rewrite (次の着手イシュー)
 
-**背景**: I-138 scope 判断で切り離した nullish coalescing 関連の silent bug を含む。
-`arr[i] ?? default` で LHS が static 型 T に解決されて `convert_bin_expr` の
-`is_option=false` 分岐で短絡し、**default が silent drop** される Tier 1 defect と、
-ネスト `??` の compile error (既存 `nullish-coalescing` fixture skip 原因) を含む。
+**背景**: `val ??= 0` の現行変換 (`val.get_or_insert_with(|| 0.0)`) は (1) TS の narrowing
+意味論を捨てる Tier 1 silent、(2) `let val` が `let mut` にならず borrow error を招く
+compile defect、(3) `&mut T` 戻り値 discard の 3 重 defect を抱える。compile_test
+`nullish-coalescing` fixture `ensureDefault` の skip 残り原因。
 
-**修正方針概要** (詳細は I-022 TODO entry 参照):
-- `propagate_expected` に NullishCoalescing arm 追加 (LHS span に Option<T> expected 伝播)
-- `convert_bin_expr` の is_option 判定に `produces_option_result(&left)` を secondary signal 追加
-- RHS=Option<T> ケースは `.or()` 相当の新規 helper で emit
+**修正方針概要**: `let x = e; x ??= d;` の statement sequence pattern を検出し
+`let x = e.unwrap_or(d);` の shadowing let に fuse。field/index update (`obj.x ??= d` 等)
+は別 concern として I-142 scope 外。
 
-**位置付け**: I-138 完了 (T3 で拡張された `produces_option_result` を secondary signal
-として活用可能) を前提にした L1 Reliability Foundation 相当の silent bug 修正。
+**位置付け**: I-022 (本 commit で完了) と合わせて Phase A Step 5 の `nullish-coalescing`
+unskip 前提。PRD 起票して着手する。
 
 ---
 
-Phase A Step 3 以降は I-022 完了後に着手する。
+Phase A Step 3 以降は I-142 完了後に着手する。
 
 ---
 
@@ -265,15 +288,16 @@ skip 解消後は新たな skip 追加を原則禁止とし、回帰検出を自
 - Step 1 (RC-13): `union-fallback`, `ternary`, `ternary-union` unskip + `external-type-struct` with-builtins unskip
 - Step 2: `array-builtin-methods` unskip + `closures` の I-011 filter 参照セマンティクス解消
 - **I-138 (pre-Step-3)**: Vec index read access の Option<T> context 対応 (Tier 1 silent bug 解消)
+- **I-022 (pre-Step-3)**: `??` 演算子 LHS 型処理 + chain case 対応 (Tier 1 silent drop 解消 + chain compile error 解消)
 
 **永続 skip (2件):** `callable-interface-generic-arity-mismatch` (意図的 error-case), `indexed-access-type` (マルチファイル用、別テストでカバー)
 
-**残: 14 fixture / 14 イシュー** (+ pre-Step-3: I-022)
+**残: 14 fixture / 13 イシュー** (+ pre-Step-3: I-142)
 
 #### 次の Step
 
 ```
-I-022 (?? silent drop + ネスト型不一致) ←── 次はここ (pre-Step-3)
+I-142 (??= shadowing rewrite) ←── 次はここ (pre-Step-3)
   ↓
 Step 3 (Box::new + Option)
   ↓                                  Step 6 (string + intersection)
@@ -313,12 +337,13 @@ Step 7 (builtin impl)
 
 | イシュー | 修正箇所 | 内容 |
 |----------|---------|------|
-| I-022 | `binary.rs:45-60` | ネスト `??` の中間結果型を `Option<T>` → `T` に unwrap |
+| I-022 | `binary.rs:46-60`, `expressions.rs:512-535`, `member_access.rs:345-368` | `??` 演算子: LHS runtime nullability 伝播 + chain case `.or()`/`.or_else()` + `arr[i] ?? default` silent drop 解消 |
+| I-142 | `assignments.rs:25-33` + statement-level rewrite | `??=` NullishAssign: `let x = e; x ??= d;` → `let x = e.unwrap_or(d);` shadowing rewrite + narrowing |
 | I-026 | 型 assertion 変換 | `as unknown as T` の中間 `unknown` を消去して直接キャスト |
 | I-029 | null/any 変換 | `null as any` → `None` が `Box<dyn Trait>` 文脈で型不一致 |
 | I-030 | `build_any_enum_variants()` (`any_narrowing.rs:85`) | any-narrowing enum の値代入で型強制 |
 
-- unskip: `nullish-coalescing`, `type-assertion`, `trait-coercion`, `any-type-narrowing`
+- unskip: `nullish-coalescing` (I-022 + I-142 両方完了後), `type-assertion`, `trait-coercion`, `any-type-narrowing`
 
 ---
 

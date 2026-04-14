@@ -192,7 +192,21 @@ fn test_opt_chain_method_call_maps_to_rust_name() {
 }
 
 #[test]
-fn test_convert_nullish_coalescing_non_option_returns_left() {
+fn test_convert_nullish_coalescing_non_option_statically_short_circuits() {
+    // `function f(x: string, y: string) { x ?? y; }` — expression-statement context.
+    // Both operands have TS static type `string` (never null in strict mode).
+    //
+    // Expected behavior (I-022 design):
+    // - `resolve_bin_expr` NC arm propagates `Option<String>` expected to LHS span.
+    // - `convert_expr(x)` with `Option<String>` expected wraps the bare `Ident("x")`
+    //   in `Some(_)` via the Option-wrap branch of `convert_expr_with_expected`.
+    // - `convert_bin_expr` NC arm then sees `produces_option_result(Some(x)) = true`
+    //   → `is_option_left = true` → skips the short-circuit.
+    // - RHS `y` is resolved with expected `String` (non-Option) → bare `Ident("y")`.
+    // - Result: `Some(x).unwrap_or_else(|| y)`.
+    //
+    // Semantically equivalent to `x` (Some always unwraps to x), just verbose.
+    // The `or_else` closure form is used because `y` is an Ident (non-copy literal).
     let f = TctxFixture::from_source("function f(x: string, y: string) { x ?? y; }");
     let tctx = f.tctx();
     let swc_expr = extract_fn_body_expr_stmt(f.module(), 0, 0);
@@ -200,7 +214,28 @@ fn test_convert_nullish_coalescing_non_option_returns_left() {
     let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
         .convert_expr(&swc_expr)
         .unwrap();
-    assert_eq!(result, Expr::Ident("x".to_string()));
+    match &result {
+        Expr::MethodCall {
+            object,
+            method,
+            args,
+        } => {
+            assert_eq!(method, "unwrap_or_else");
+            assert!(
+                matches!(
+                    object.as_ref(),
+                    Expr::FnCall {
+                        target: CallTarget::BuiltinVariant(crate::ir::BuiltinVariant::Some),
+                        args: some_args,
+                    } if some_args.len() == 1 && matches!(&some_args[0], Expr::Ident(n) if n == "x")
+                ),
+                "expected Some(x) receiver, got {object:?}"
+            );
+            assert_eq!(args.len(), 1);
+            assert!(matches!(&args[0], Expr::Closure { .. }));
+        }
+        _ => panic!("expected MethodCall with unwrap_or_else, got {result:?}"),
+    }
 }
 
 #[test]
@@ -365,5 +400,390 @@ fn test_convert_nullish_coalescing_rhs_string_gets_to_string_when_lhs_is_option_
         }
     } else {
         panic!("expected MethodCall, got: {result:?}");
+    }
+}
+
+// ── I-022: convert_bin_expr NC arm — Vec index LHS + chain ──
+
+#[test]
+fn test_convert_nc_vec_index_lhs_emits_unwrap_or_else_with_string_default() {
+    // `function f(arr: string[], i: number): string { return arr[i] ?? "m"; }`
+    // Expected IR: `arr.get(i as usize).cloned().unwrap_or_else(|| "m".to_string())`
+    // - LHS `arr[i]` gets `Option<String>` expected via resolve_bin_expr NC arm
+    //   → convert_member_expr emits `.get().cloned()` (no unwrap).
+    // - is_option_left = true (produces_option_result).
+    // - RHS "m" with String expected → ".to_string()" (non-copy → unwrap_or_else).
+    let f = TctxFixture::from_source(
+        "function f(arr: string[], i: number): string { return arr[i] ?? \"m\"; }",
+    );
+    let tctx = f.tctx();
+    let swc_expr = extract_fn_body_return_expr(f.module(), 0, 0);
+    let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_expr(&swc_expr)
+        .unwrap();
+
+    // Outer: unwrap_or_else with closure returning "m".to_string()
+    match &result {
+        Expr::MethodCall {
+            object,
+            method,
+            args,
+        } => {
+            assert_eq!(method, "unwrap_or_else");
+            assert_eq!(args.len(), 1);
+            // RHS: `|| "m".to_string()`
+            match &args[0] {
+                Expr::Closure {
+                    body: ClosureBody::Expr(body_expr),
+                    ..
+                } => {
+                    assert!(
+                        matches!(body_expr.as_ref(), Expr::MethodCall { method: m, .. } if m == "to_string"),
+                        "expected .to_string() closure body, got {body_expr:?}"
+                    );
+                }
+                other => panic!("expected Closure RHS, got {other:?}"),
+            }
+            // LHS: `arr.get(i as usize).cloned()` — Vec index form
+            match object.as_ref() {
+                Expr::MethodCall {
+                    object: get_recv,
+                    method: m,
+                    args: _,
+                } if m == "cloned" => match get_recv.as_ref() {
+                    Expr::MethodCall {
+                        method: inner_m,
+                        args: inner_args,
+                        ..
+                    } => {
+                        assert_eq!(inner_m, "get");
+                        assert_eq!(inner_args.len(), 1);
+                    }
+                    other => panic!("expected .get() inner, got {other:?}"),
+                },
+                other => panic!("expected .cloned() on .get(), got {other:?}"),
+            }
+        }
+        other => panic!("expected MethodCall unwrap_or_else, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_convert_nc_vec_index_lhs_with_ident_default_lazy() {
+    // `function f(arr: string[], i: number, d: string): string { return arr[i] ?? d; }`
+    // RHS is Ident (non-copy), so unwrap_or_else lazy form.
+    let f = TctxFixture::from_source(
+        "function f(arr: string[], i: number, d: string): string { return arr[i] ?? d; }",
+    );
+    let tctx = f.tctx();
+    let swc_expr = extract_fn_body_return_expr(f.module(), 0, 0);
+    let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_expr(&swc_expr)
+        .unwrap();
+
+    match &result {
+        Expr::MethodCall { method, args, .. } => {
+            assert_eq!(method, "unwrap_or_else");
+            assert_eq!(args.len(), 1);
+            match &args[0] {
+                Expr::Closure {
+                    body: ClosureBody::Expr(body_expr),
+                    ..
+                } => {
+                    assert_eq!(body_expr.as_ref(), &Expr::Ident("d".to_string()));
+                }
+                other => panic!("expected Closure wrapping Ident(d), got {other:?}"),
+            }
+        }
+        other => panic!("expected MethodCall unwrap_or_else, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_convert_nc_chain_option_option_string_emits_or_else_chain() {
+    // `function f(a: string | null, b: string | null, c: string): string {
+    //      return a ?? b ?? c;
+    //  }`
+    // Parsed as `(a ?? b) ?? c`. Expected IR:
+    //   a.or_else(|| b).unwrap_or_else(|| c)
+    // - Inner NC: LHS a (Option), RHS b (Option) → .or_else (chain preserves Option).
+    // - Outer NC: LHS `a.or_else(|| b)` (Option), RHS c (non-Option) → .unwrap_or_else.
+    let f = TctxFixture::from_source(
+        "function f(a: string | null, b: string | null, c: string): string { \
+         return a ?? b ?? c; }",
+    );
+    let tctx = f.tctx();
+    let swc_expr = extract_fn_body_return_expr(f.module(), 0, 0);
+    let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_expr(&swc_expr)
+        .unwrap();
+
+    // Outer: unwrap_or_else
+    match &result {
+        Expr::MethodCall {
+            object,
+            method,
+            args,
+        } => {
+            assert_eq!(method, "unwrap_or_else", "outer NC must terminate Option");
+            assert_eq!(args.len(), 1);
+            match &args[0] {
+                Expr::Closure {
+                    body: ClosureBody::Expr(body_expr),
+                    ..
+                } => {
+                    assert_eq!(body_expr.as_ref(), &Expr::Ident("c".to_string()));
+                }
+                other => panic!("expected outer closure wrapping Ident(c), got {other:?}"),
+            }
+            // Inner: or_else on `a`
+            match object.as_ref() {
+                Expr::MethodCall {
+                    object: inner_recv,
+                    method: inner_m,
+                    args: inner_args,
+                } => {
+                    assert_eq!(inner_m, "or_else", "inner NC must preserve Option");
+                    assert_eq!(inner_args.len(), 1);
+                    assert_eq!(inner_recv.as_ref(), &Expr::Ident("a".to_string()));
+                    match &inner_args[0] {
+                        Expr::Closure {
+                            body: ClosureBody::Expr(inner_body),
+                            ..
+                        } => {
+                            assert_eq!(inner_body.as_ref(), &Expr::Ident("b".to_string()));
+                        }
+                        other => {
+                            panic!("expected inner closure wrapping Ident(b), got {other:?}")
+                        }
+                    }
+                }
+                other => panic!("expected inner .or_else(|| b), got {other:?}"),
+            }
+        }
+        other => panic!("expected outer MethodCall, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_convert_nc_chain_all_option_emits_or_else_only() {
+    // `function f(a: string | null, b: string | null): string | null {
+    //      return a ?? b;
+    //  }`
+    // Both sides Option<String>, outer return also Option<String>.
+    // Expected: `a.or_else(|| b)` (Option preserved, no unwrap).
+    let f = TctxFixture::from_source(
+        "function f(a: string | null, b: string | null): string | null { return a ?? b; }",
+    );
+    let tctx = f.tctx();
+    let swc_expr = extract_fn_body_return_expr(f.module(), 0, 0);
+    let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_expr(&swc_expr)
+        .unwrap();
+
+    match &result {
+        Expr::MethodCall { method, .. } => {
+            assert_eq!(
+                method, "or_else",
+                "chain with both Option and Option return should emit .or_else, got {method}"
+            );
+        }
+        other => panic!("expected MethodCall .or_else, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_convert_nc_option_lhs_with_non_option_rhs_emits_unwrap_or_else() {
+    // Baseline: `name ?? "anonymous"` where name: Option<String>. Existing behavior
+    // must be preserved (pre-I-022 snapshot unchanged for this case).
+    let f = TctxFixture::from_source(
+        "function withFallback(name: string | undefined): string { return name ?? \"anonymous\"; }",
+    );
+    let tctx = f.tctx();
+    let swc_expr = extract_fn_body_return_expr(f.module(), 0, 0);
+    let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_expr(&swc_expr)
+        .unwrap();
+
+    match &result {
+        Expr::MethodCall { object, method, .. } => {
+            assert_eq!(method, "unwrap_or_else");
+            assert_eq!(object.as_ref(), &Expr::Ident("name".to_string()));
+        }
+        other => panic!("expected name.unwrap_or_else, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_convert_nc_vec_of_option_lhs_uses_flatten_and_unwrap_or_else() {
+    // `function f(items: (string | null)[], i: number): string {
+    //      return items[i] ?? "default";
+    //  }`
+    // items: Vec<Option<String>>. items[i]: TS static type is `string | null`
+    // (Option<String>) with element nullability. Runtime: `items.get(i).cloned()`
+    // yields `Option<Option<String>>` which must be `.flatten()` to `Option<String>`.
+    //
+    // Pre-I-022 emitted `.get(i).cloned().unwrap()` (panic on empty array) followed
+    // by `.unwrap_or_else(|| "default".to_string())` on the unwrapped `Option<String>`
+    // — the `.unwrap()` panics on empty array BEFORE reaching the fallback, violating
+    // TS semantics (`items[i] ?? "default"` → "default" on empty). I-022 unified NC
+    // arm propagates `Option<String>` to LHS span so convert_member_expr emits
+    // `.flatten()` form, preserving Option through the chain.
+    let f = TctxFixture::from_source(
+        "function f(items: (string | null)[], i: number): string { \
+         return items[i] ?? \"default\"; }",
+    );
+    let tctx = f.tctx();
+    let swc_expr = extract_fn_body_return_expr(f.module(), 0, 0);
+    let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_expr(&swc_expr)
+        .unwrap();
+
+    // Outer: unwrap_or_else (closure returning "default".to_string())
+    match &result {
+        Expr::MethodCall {
+            object,
+            method,
+            args,
+        } => {
+            assert_eq!(method, "unwrap_or_else");
+            assert_eq!(args.len(), 1);
+            assert!(matches!(&args[0], Expr::Closure { .. }));
+            // Inner receiver must be `.flatten()` preserving Option (NOT `.unwrap()`)
+            match object.as_ref() {
+                Expr::MethodCall {
+                    object: flatten_recv,
+                    method: flatten_m,
+                    args: flatten_args,
+                } => {
+                    assert_eq!(
+                        flatten_m, "flatten",
+                        "expected .flatten() to collapse Option<Option<T>>, got {flatten_m}"
+                    );
+                    assert!(flatten_args.is_empty());
+                    // Receiver of flatten must be `.cloned()` on `.get(i)`
+                    match flatten_recv.as_ref() {
+                        Expr::MethodCall {
+                            object: cloned_recv,
+                            method: cloned_m,
+                            ..
+                        } if cloned_m == "cloned" => match cloned_recv.as_ref() {
+                            Expr::MethodCall {
+                                method: get_m,
+                                args: get_args,
+                                ..
+                            } => {
+                                assert_eq!(get_m, "get");
+                                assert_eq!(get_args.len(), 1);
+                            }
+                            other => panic!("expected .get() inner, got {other:?}"),
+                        },
+                        other => panic!("expected .cloned() before .flatten(), got {other:?}"),
+                    }
+                }
+                other => panic!(
+                    "expected .flatten() receiver (NOT .unwrap() which would panic on empty array), got {other:?}"
+                ),
+            }
+        }
+        other => panic!("expected outer MethodCall unwrap_or_else, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_convert_nc_chain_vec_of_option_inner_rhs_also_flattens() {
+    // `function f(items: (string|null)[], i: number, j: number): string {
+    //      return items[i] ?? items[j] ?? "default";
+    //  }`
+    // Regression test for /check_job deep review finding: inner NC RHS
+    // (`items[j]`) must emit `.flatten()` (Option-preserving) under chain
+    // context, NOT `.unwrap()` (which would panic in `.or_else()` closure
+    // before reaching terminal "default").
+    //
+    // Required propagate_expected Bin(NC) arm addition + resolve_bin_expr
+    // preserve-chain-Option check to make inner RHS span receive Option<String>
+    // expected instead of String (inner_val) in chain context.
+    //
+    // Expected output:
+    //   items.get(i).cloned().flatten()
+    //        .or_else(|| items.get(j).cloned().flatten())
+    //        .unwrap_or_else(|| "default".to_string())
+    let f = TctxFixture::from_source(
+        "function f(items: (string | null)[], i: number, j: number): string { \
+         return items[i] ?? items[j] ?? \"default\"; }",
+    );
+    let tctx = f.tctx();
+    let swc_expr = extract_fn_body_return_expr(f.module(), 0, 0);
+    let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_expr(&swc_expr)
+        .unwrap();
+
+    // Outer: unwrap_or_else (terminal, converts Option<String> → String).
+    let (outer_recv, outer_method) = match &result {
+        Expr::MethodCall { object, method, .. } => (object.as_ref(), method.as_str()),
+        other => panic!("expected outer MethodCall, got {other:?}"),
+    };
+    assert_eq!(outer_method, "unwrap_or_else");
+
+    // Inner: or_else (chain-preserving).
+    let (inner_recv, inner_method, inner_args) = match outer_recv {
+        Expr::MethodCall {
+            object,
+            method,
+            args,
+        } => (object.as_ref(), method.as_str(), args),
+        other => panic!("expected inner MethodCall (.or_else), got {other:?}"),
+    };
+    assert_eq!(
+        inner_method, "or_else",
+        "chain inner NC must emit .or_else (Option-preserving), got {inner_method}"
+    );
+
+    // Inner LHS: items[i] → .flatten() (Vec<Option<T>> access).
+    match inner_recv {
+        Expr::MethodCall { method, .. } => {
+            assert_eq!(method, "flatten", "inner LHS must use .flatten()");
+        }
+        other => panic!("expected inner LHS MethodCall, got {other:?}"),
+    }
+
+    // Inner RHS closure: items[j] → .flatten() (NOT .unwrap(), which would panic).
+    match &inner_args[0] {
+        Expr::Closure {
+            body: ClosureBody::Expr(body_expr),
+            ..
+        } => match body_expr.as_ref() {
+            Expr::MethodCall { method, .. } => {
+                assert_eq!(
+                    method, "flatten",
+                    "inner RHS in chain must use .flatten() (not .unwrap() which panics on empty array), got {method}"
+                );
+            }
+            other => panic!("expected inner RHS to be MethodCall, got {other:?}"),
+        },
+        other => panic!("expected inner RHS Closure, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_convert_nc_option_lhs_with_copy_lit_rhs_emits_unwrap_or() {
+    // Baseline: `x ?? 0` where x: Option<f64>. Number literal is copy → eager
+    // unwrap_or. Preserves pre-I-022 snapshot for `withDefault`.
+    let f = TctxFixture::from_source(
+        "function withDefault(x: number | null): number { return x ?? 0; }",
+    );
+    let tctx = f.tctx();
+    let swc_expr = extract_fn_body_return_expr(f.module(), 0, 0);
+    let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
+        .convert_expr(&swc_expr)
+        .unwrap();
+
+    match &result {
+        Expr::MethodCall { method, args, .. } => {
+            assert_eq!(method, "unwrap_or");
+            assert_eq!(args.len(), 1);
+            assert!(matches!(&args[0], Expr::NumberLit(v) if *v == 0.0));
+        }
+        other => panic!("expected x.unwrap_or(0.0), got {other:?}"),
     }
 }

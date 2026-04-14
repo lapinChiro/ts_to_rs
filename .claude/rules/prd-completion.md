@@ -6,6 +6,9 @@ When reporting PRD work as "complete".
 
 ## Constraints
 
+- **Problem Space matrix 全セルカバー** が最上位完了条件 (`problem-space-analysis.md` 参照)。
+  reported defect 修正 + test pass は完了条件の一部に過ぎない。matrix の全セルが ideal
+  仕様に一致し、全セルに lock-in test が存在しなければ未完成
 - A PRD is not complete unless **all completion criteria** are met
 - If some criteria are unmet, do one of the following:
   1. Meet the unmet criteria before reporting completion

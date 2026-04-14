@@ -10,9 +10,15 @@ use ts_to_rs::pipeline::transpile_single;
 
 #[test]
 fn ts_null_literal_in_option_context_renders_as_bare_none() {
-    // `?? null` は nullish coalescing で `unwrap_or(None)` に lower される。
-    // I-379 の `is_copy_literal: true` により `unwrap_or_else(|| None)` ではなく
-    // eager な `unwrap_or(None)` を選択する (idiomatic 改善)。
+    // `Option<String> ?? null` は I-022 以降、chain case として `.or(None)` に
+    // lower される (LHS も RHS も Option<T>、結果も Option<T>)。
+    // I-379 の `is_copy_literal: true` により `or_else(|| None)` ではなく eager な
+    // `or(None)` を選択する (idiomatic 改善)。
+    //
+    // Pre-I-022 は `unwrap_or(None)` を emit していたが、これは
+    // `Option<String>::unwrap_or(self, default: String) -> String` に `None` を
+    // 渡す型不一致の compile error を含んでおり、chain-preserving な `.or(None)`
+    // が semantic として正しい (I-022 で構造的解消)。
     let ts_source = r#"
 function f(c: { req: { header: (n: string) => string | undefined } }): string | null {
     return c.req.header("x") ?? null;
@@ -20,12 +26,16 @@ function f(c: { req: { header: (n: string) => string | undefined } }): string | 
 "#;
     let rust = transpile_single(ts_source).expect("transpile must succeed");
     assert!(
-        rust.contains("unwrap_or(None)"),
-        "expected `unwrap_or(None)` (eager), got:\n{rust}"
+        rust.contains(".or(None)"),
+        "expected `.or(None)` (eager, Option-preserving chain), got:\n{rust}"
     );
     assert!(
-        !rust.contains("unwrap_or_else(|| None)"),
-        "must NOT emit lazy `unwrap_or_else(|| None)`, got:\n{rust}"
+        !rust.contains("or_else(|| None)"),
+        "must NOT emit lazy `or_else(|| None)` for copy-literal None, got:\n{rust}"
+    );
+    assert!(
+        !rust.contains("Some(None)"),
+        "must NOT wrap `None` in `Some(_)`, got:\n{rust}"
     );
 }
 

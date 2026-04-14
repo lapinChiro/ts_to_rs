@@ -350,18 +350,31 @@ impl<'a> Transformer<'a> {
 /// Returns true when `expr` is structurally known to produce `Option<T>`.
 ///
 /// Used by [`Transformer::convert_expr_with_expected`] as a secondary wrap-skip
-/// heuristic: the expected type is `Option<T>`, but `TypeResolver` may have
-/// failed to propagate an `Option<T>` type through chained method calls (common
-/// in `transpile_collecting` without builtin signatures). Checking the generated
-/// IR directly catches remapped calls such as `TS .find()` which always emits an
-/// `.iter().cloned().find(...)` chain terminated by `Iterator::find` (returns
-/// `Option<Self::Item>` by contract).
+/// heuristic and by [`Transformer::convert_bin_expr`] as a secondary `is_option`
+/// signal for `??` operands: the expected type is `Option<T>`, but `TypeResolver`
+/// may have failed to propagate an `Option<T>` type through chained method calls
+/// (common in `transpile_collecting` without builtin signatures). Checking the
+/// generated IR directly catches remapped calls such as `TS .find()` which always
+/// emits an `.iter().cloned().find(...)` chain terminated by `Iterator::find`
+/// (returns `Option<Self::Item>` by contract).
 ///
 /// Keep the predicate narrow: only list Rust API method names that *unconditionally*
 /// return `Option<T>` (by value, not `Option<&T>`) when invoked on any receiver
 /// that reaches them. Methods such as `first`/`last` return `Option<&T>` and must
 /// not be added here — their expected-type unification is different.
-fn produces_option_result(expr: &Expr) -> bool {
+pub(crate) fn produces_option_result(expr: &Expr) -> bool {
+    // Explicit Option constructors: `Some(x)` and `None`. Emitted by
+    // `convert_expr_with_expected` when wrapping a non-Option expression into
+    // an `Option<T>`-expected context; also emitted by user-written `Some(_)`
+    // through `BuiltinVariant` dispatch. These are definitively Option-producing.
+    match expr {
+        Expr::FnCall {
+            target: CallTarget::BuiltinVariant(crate::ir::BuiltinVariant::Some),
+            ..
+        } => return true,
+        Expr::BuiltinVariantValue(crate::ir::BuiltinVariant::None) => return true,
+        _ => {}
+    }
     let Expr::MethodCall {
         object,
         method,
@@ -383,7 +396,10 @@ fn produces_option_result(expr: &Expr) -> bool {
         // `Option::cloned` lifts it to `Option<T>` by value, matching the
         // `Option<T>` expected-type contract. Arity-gate `get` to a single
         // argument to avoid matching hypothetical multi-arg `get` methods
-        // from unrelated APIs.
+        // from unrelated APIs. Note: `HashMap::get(k)` returns `Option<&V>` as
+        // well, but the transformer emits a different IR shape for HashMap
+        // indexed access, so this `.get(i).cloned()` pattern is exclusively
+        // the Vec index form at the current call site.
         "cloned" => {
             args.is_empty()
                 && matches!(
@@ -396,6 +412,18 @@ fn produces_option_result(expr: &Expr) -> bool {
         // to `Option<T>`. Only recognize when the receiver is itself an Option-producing
         // IR (recursive check), ensuring the chain terminates in a known Option pattern.
         "flatten" => args.is_empty() && produces_option_result(object),
+        // `Option::or(other)` / `Option::or_else(closure)` — Rust API contract:
+        // receiver of type `Option<T>` returns `Option<T>`. Emitted by
+        // `build_option_or_option` for the `??` chain case (I-022). Require the
+        // receiver to be Option-producing recursively, mirroring the `.flatten()`
+        // pattern — this prevents misidentifying unrelated `.or()` / `.or_else()`
+        // method calls on non-Option types.
+        "or" => args.len() == 1 && produces_option_result(object),
+        "or_else" => {
+            args.len() == 1
+                && matches!(&args[0], Expr::Closure { .. })
+                && produces_option_result(object)
+        }
         _ => false,
     }
 }
@@ -544,6 +572,125 @@ mod produces_option_result_tests {
         let cloned = mc(get, "cloned", vec![]);
         let flatten = mc(cloned, "flatten", vec![ident("arg")]);
         assert!(!produces_option_result(&flatten));
+    }
+
+    // ── I-022: Option constructors + `.or()` / `.or_else()` chain ──
+
+    #[test]
+    fn test_some_variant_is_option_producing() {
+        // Some(x) — emitted by convert_expr_with_expected when wrapping a non-Option
+        // expression into an Option<T> expected context. Definitively Option.
+        let some = Expr::FnCall {
+            target: CallTarget::BuiltinVariant(crate::ir::BuiltinVariant::Some),
+            args: vec![ident("x")],
+        };
+        assert!(produces_option_result(&some));
+    }
+
+    #[test]
+    fn test_none_value_is_option_producing() {
+        // None literal — emitted for undefined / null in Option<T> expected context.
+        let none = Expr::BuiltinVariantValue(crate::ir::BuiltinVariant::None);
+        assert!(produces_option_result(&none));
+    }
+
+    #[test]
+    fn test_ok_variant_is_not_option_producing() {
+        // Ok(x) / Err(x) return Result<T, E>, not Option<T>. Must not be flagged.
+        let ok = Expr::FnCall {
+            target: CallTarget::BuiltinVariant(crate::ir::BuiltinVariant::Ok),
+            args: vec![ident("x")],
+        };
+        assert!(!produces_option_result(&ok));
+        let err = Expr::FnCall {
+            target: CallTarget::BuiltinVariant(crate::ir::BuiltinVariant::Err),
+            args: vec![ident("x")],
+        };
+        assert!(!produces_option_result(&err));
+    }
+
+    #[test]
+    fn test_or_with_option_receiver_is_option() {
+        // Some(x).or(y) — receiver is Option-producing, .or returns Option<T>.
+        let some = Expr::FnCall {
+            target: CallTarget::BuiltinVariant(crate::ir::BuiltinVariant::Some),
+            args: vec![ident("x")],
+        };
+        let expr = mc(some, "or", vec![ident("y")]);
+        assert!(produces_option_result(&expr));
+    }
+
+    #[test]
+    fn test_or_with_non_option_receiver_is_not_option() {
+        // Ident.or(x) — receiver is bare Ident, not Option-producing. Prevents
+        // false-positive on unrelated `.or()` methods on non-Option types.
+        let expr = mc(ident("obj"), "or", vec![ident("y")]);
+        assert!(!produces_option_result(&expr));
+    }
+
+    #[test]
+    fn test_or_wrong_arity_is_not_option() {
+        // Some(x).or() — zero-arg. Rust Option::or takes one arg. Not flagged.
+        let some = Expr::FnCall {
+            target: CallTarget::BuiltinVariant(crate::ir::BuiltinVariant::Some),
+            args: vec![ident("x")],
+        };
+        let expr = mc(some, "or", vec![]);
+        assert!(!produces_option_result(&expr));
+    }
+
+    #[test]
+    fn test_or_else_with_closure_and_option_receiver_is_option() {
+        // Some(x).or_else(|| y) — closure arg + Option-producing receiver.
+        let some = Expr::FnCall {
+            target: CallTarget::BuiltinVariant(crate::ir::BuiltinVariant::Some),
+            args: vec![ident("x")],
+        };
+        let closure = Expr::Closure {
+            params: vec![],
+            return_type: None,
+            body: ClosureBody::Expr(Box::new(ident("y"))),
+        };
+        let expr = mc(some, "or_else", vec![closure]);
+        assert!(produces_option_result(&expr));
+    }
+
+    #[test]
+    fn test_or_else_without_closure_is_not_option() {
+        // Some(x).or_else(y) — non-closure arg. Not Rust Option::or_else contract.
+        let some = Expr::FnCall {
+            target: CallTarget::BuiltinVariant(crate::ir::BuiltinVariant::Some),
+            args: vec![ident("x")],
+        };
+        let expr = mc(some, "or_else", vec![ident("y")]);
+        assert!(!produces_option_result(&expr));
+    }
+
+    #[test]
+    fn test_or_else_with_non_option_receiver_is_not_option() {
+        // Ident.or_else(|| y) — bare Ident receiver. Not flagged.
+        let closure = Expr::Closure {
+            params: vec![],
+            return_type: None,
+            body: ClosureBody::Expr(Box::new(ident("y"))),
+        };
+        let expr = mc(ident("obj"), "or_else", vec![closure]);
+        assert!(!produces_option_result(&expr));
+    }
+
+    #[test]
+    fn test_or_else_chained_with_cloned_get_receiver_is_option() {
+        // arr.get(0).cloned().or_else(|| y) — the real NC chain shape. Receiver
+        // is `.get().cloned()` (Option-producing). Must be flagged.
+        let get = mc(ident("arr"), "get", vec![Expr::IntLit(0)]);
+        let cloned = mc(get, "cloned", vec![]);
+        let closure = Expr::Closure {
+            params: vec![],
+            return_type: None,
+            body: ClosureBody::Expr(Box::new(ident("y"))),
+        };
+        let expr = mc(cloned, "or_else", vec![closure]);
+        assert!(produces_option_result(&expr));
     }
 }
 

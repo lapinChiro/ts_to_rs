@@ -117,6 +117,31 @@ fn extract_fn_body_var_init(module: &ast::Module, fn_index: usize, stmt_index: u
     }
 }
 
+/// Extract the argument expression of a `return` statement from a function body.
+fn extract_fn_body_return_expr(
+    module: &ast::Module,
+    fn_index: usize,
+    stmt_index: usize,
+) -> ast::Expr {
+    let fn_decl = match &module.body[fn_index] {
+        ModuleItem::Stmt(Stmt::Decl(Decl::Fn(f))) => f,
+        _ => panic!("expected function declaration at module index {fn_index}"),
+    };
+    let body = fn_decl
+        .function
+        .body
+        .as_ref()
+        .expect("function has no body");
+    match &body.stmts[stmt_index] {
+        ast::Stmt::Return(ret) => *ret
+            .arg
+            .as_ref()
+            .expect("return statement has no argument")
+            .clone(),
+        _ => panic!("expected return statement at stmt index {stmt_index}"),
+    }
+}
+
 /// Register a struct with the given name and `f64` fields.
 fn register_f64_struct(reg: &mut TypeRegistry, name: &str, fields: &[&str]) {
     reg.register(

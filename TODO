@@ -51,12 +51,71 @@ OBJECT_LITERAL_NO_TYPE 全体で 27件（最終実行: 2026-04-13）。I-004/I-0
 
 - **[I-020]** **クロージャ返却の Box::new ラップ漏れ** — `needs_trait_box_coercion`（`src/transformer/expressions/mod.rs:288`）のカバー不足。compile_test skip: `closures`, `functions`
 - **[I-021]** **DU switch のデストラクチャ変数 rewrite 不完全** — `is_du_field_binding`（`src/pipeline/type_resolution.rs:209`）スコープ検出。compile_test skip: `discriminated-union`
-- **[I-022]** **`??` 演算子の LHS 型処理欠落 (silent semantic change 含む)** — 以下 2 系統の defect が存在:
-  1. **Silent drop pattern (Tier 1)**: `arr[i] ?? default` で LHS `arr[i]` が static 型 `T` (not Option) に解決され、`convert_bin_expr` (`src/transformer/expressions/binary.rs:45-60`) の `is_option=false` 分岐で短絡し **default が silent drop** される。さらに `arr.get(i).cloned().unwrap()` を返すため空 Vec で panic し、TS `undefined ?? default` → `default` の意味論と乖離する。
-  2. **ネスト `??` の型不一致 (compile error)**: 中間結果型が不整合で compile_test skip: `nullish-coalescing`
-  - **Root cause**: (a) `propagate_expected` (`src/pipeline/type_resolver/expected_types.rs:307-437`) の match arm に `Bin(NullishCoalescing)` が不在で LHS span に Option<T> expected が伝播しない、(b) `convert_bin_expr` の is_option 判定が `get_expr_type` (TypeResolver の expr_types) のみを参照し IR 構造的判定 (`produces_option_result(&left)`) を行わない、(c) RHS も Option<T> の場合 (`arr[i] ?? maybeUndef`) は `.unwrap_or` ではなく `.or()` 相当が必要。
-  - **解決方針**: (a) `propagate_expected` に NullishCoalescing arm 追加 (outer expected を Option<T> にラップして LHS に propagate、RHS には outer expected をそのまま伝播)、(b) `convert_bin_expr` NullishCoalescing arm で `produces_option_result(&left)` を is_option secondary signal として活用、(c) RHS が Option<T> の場合は `build_option_or_option` (新規) で `.or()` emit、それ以外は既存 `build_option_unwrap_with_default` を維持。
-  - **次イシュー**: I-138 完了後に着手 (plan.md 参照)。compile_test skip: `nullish-coalescing`。Tier 1 silent semantic change (silent drop) 含むため L1 Reliability Foundation 相当
+- **[I-142]** **`??=` (NullishAssign) が type narrowing / shadowing を考慮せず silent semantic change** — `val ??= 0` (`assignments.rs:25-33`) が `val.get_or_insert_with(|| 0.0)` に変換される。以下 3 つの defect:
+  1. **型 narrowing 欠落 (Tier 1 silent)**: TS では `??=` 後に variable が non-nullable に narrowing される (`let val: number | null; val ??= 0; /* val: number */`)。Rust 出力は `val: Option<f64>` のままで、downstream の `return val` が `Option<f64>` を返し関数 signature (`f64`) と型不一致で compile error。
+  2. **mutability 欠落 (compile error)**: `let val = x;` (immutable) に対して `get_or_insert_with` (`&mut Option<T>` required) を呼ぶため `cannot borrow as mutable` compile error。
+  3. **`get_or_insert_with` の戻り値 `&mut T` が expression statement で discard される** — `val.get_or_insert_with(...)` 単独文で値が捨てられ、unused_must_use lint は無いがコード上の意図が不明瞭。
+  - **Root cause**: `convert_assign_expr` (`src/transformer/expressions/assignments.rs:25-33`) が `??=` を純粋な expression rewrite としてしか扱わず、statement-level shadowing rewrite が未実装。TS の「`??=` 後の narrowing」セマンティクスが Rust の「variable の型は不変」と衝突するため、`let val = x; val ??= def;` → `let val = x.unwrap_or(def);` への statement sequence rewrite が必要。
+  - **解決方針 (structural)**: (a) 新 IR variant `Stmt::NullishAssign { target, default }` を追加 (or expression-side の `convert_assign_expr` NullishAssign arm 廃止 + statement 変換 side で pattern 検出)、(b) `convert_stmts` (または `convert_block` 相当) で `Stmt::Let { name, init } + Stmt::Expr(NullishAssign { target: Ident(name), default })` 連続 pattern を検出し、`let name = init.unwrap_or(default);` の shadowing let に fuse、(c) field update (`obj.x ??= d`) / index update (`arr[i] ??= d`) は別 concern として I-142 scope 外 (将来の別 PRD)、(d) pattern non-detection 時 (target が別変数で定義されている等) は fallback として `if target.is_none() { target = Some(default); }` を emit し mutability を要求。
+  - **依存関係**: I-022 (`??` structural fix) 完了済。本項目の完了で plan.md Step 5 `nullish-coalescing` skip 解除条件が揃う。
+  - **scope note**: 現状 `convert_assign_expr` NullishAssign arm の出力は (1) narrowing 欠落で return 型不一致 + (2) `let` が `let mut` にならず borrow 不可の 2 重 defect。2 点とも同一 root cause (statement-level rewrite 未実装) に帰着するため、単一 PRD で structural に解消する。compile_test skip: `nullish-coalescing`。Tier 1 silent semantic change (narrowing 欠落) を含むため L1 Reliability Foundation 相当
+- **[I-143]** **`??` 演算子の完全仕様化 + 問題空間網羅 (I-022 follow-up, meta-PRD)** — I-022 は reported defect (Vec<T>/Vec<Option<T>> silent drop + chain compile error) を解消したが、**問題空間の網羅は保証されていない**。複数の `/check_job deep deep` review で追加 defect が発見され、以下の **未解決セル** が残存。本 PRD は `problem-space-analysis.md` に従い `??` の完全問題空間マトリクスを起票段階で enumerate し、全セルに対し ideal 出力を定義 + lock-in test を実装することで構造的に解消する。
+
+  **未解決セル一覧 (具体 defect)**:
+
+  1. **[I-143-a] TsAs LHS (`(x as T) ?? d`) で compile error** — `convert_expr` が Option<T> 期待で LHS を `Some(x)` に wrap し、inner x の Rust 型は既に `Option<String>` のため結果 `Option<Option<String>>` に対し `.unwrap_or_else(|| d: String)` を適用 → 型不一致 compile error (E0308 x 2)。
+     - **再現 TS**: `function f(x: string | null, d: string): string { return (x as string) ?? d; }`
+     - **現行 Rust 出力**: `Some(x).unwrap_or_else(|| d)` where `x: Option<String>` → compile error。
+     - **Ideal 出力**: `x.unwrap_or_else(|| d)` (TsAs を no-op として扱い、inner の Option 型で NC を展開)。
+     - **Root cause**: `resolve_expr` の TsAs arm (`src/pipeline/type_resolver/expressions.rs:47-67`) が asserted type を返し、inner の runtime nullability を捨てる。NC arm は asserted type を信じて LHS に Option wrap を propagate。TsAs は静的型アサーションのみで runtime 挙動を変えないため、NC semantic とは無関係。
+     - **修正方針 (structural)**: (a) resolve_bin_expr NC arm で bin.left が TsAs/TsTypeAssertion の場合、inner expr の type を使う (peek-through)、または (b) resolve_expr TsAs arm で inner の raw type を保持する辅助 channel を設ける。🔗 I-026 (as unknown as T)、I-029 (null as any) と cast ロジック共有可能。
+     - **影響**: pre-I-022 は silent drop (Tier 1)、post-I-022 は compile error (Tier 2)。Tier hierarchy 上は改善だが ideal 出力は compilable + semantic 等価。
+
+  2. **[I-143-b] `any`/`unknown` LHS + 異なる型 RHS で compile error** — `any ?? T` で `Some(x)` wrap 後、`Option<Value>::unwrap_or_else(|| T)` 型不一致。
+     - **再現 TS**: `function f(x: any, d: string): string { return x ?? d; }`
+     - **現行 Rust 出力**: `Some(x).unwrap_or_else(|| d)` where `x: serde_json::Value` → 型不一致 compile error。
+     - **Ideal 出力**: `if x.is_null() { d } else { serde_json::from_value(x).unwrap() }` 相当の runtime null check (Value セマンティクス尊重)。または保守的には `x` の pass-through (pre-I-022 動作)。
+     - **Root cause**: Any は serde_json::Value で Option ではない。Option<Any> wrap で型システム上の不整合が生まれる。`resolve_bin_expr` NC arm の unified 処理が Any を特殊扱いしていない。
+     - **修正方針 (structural)**: NC arm の LHS propagation で Any/Unknown を runtime-null-check-aware emission に切り替える。🔗 I-050 (any/unknown 残課題) umbrella 内で統合検討。
+     - **発見経緯**: `/check_job deep deep` subagent 指摘。
+
+  3. **[I-143-c] Arrow 関数 untyped parameter + NC** — `const f = (x: any) => x ?? "d"` で I-143-b と同じ compile error。また arrow body の propagate_expected 経路 (`fn_exprs.rs:202-213`) に `current_fn_return_type` が None のとき propagate が fire しない副作用。
+     - **修正方針**: I-143-b と同一 root cause (Any 処理)。統合解決。
+
+  4. **[I-143-d] リテラル LHS (`"foo" ?? "bar"`) で verbose 出力** — 意味論は正しいが Rust コード品質が低い。
+     - **再現 TS**: `const r: string = "foo" ?? "bar";`
+     - **現行 Rust 出力**: `Some("foo".to_string()).unwrap_or_else(|| "bar".to_string())` (dead code 含む)。
+     - **Ideal 出力**: `"foo".to_string()` (statically non-null LHS は短絡)。
+     - **Root cause**: `resolve_bin_expr` NC arm の unified 処理が「runtime-nullable ではない LHS」を区別せず一律 Option<T> を propagate。`convert_bin_expr` NC arm の短絡条件 `!is_option_left && left_type.is_some()` で `produces_option_result(Some(x)) = true` のため短絡が fire しない。
+     - **修正方針 (structural)**: `resolve_bin_expr` NC arm で `is_runtime_nullable_ast` 判定 (Member Computed / OptChain / 特定の builtin Call) を追加し、runtime-nullable な LHS のみ Option<T> を propagate。非 runtime-nullable な LHS は inner 型を propagate → `convert_bin_expr` の短絡が正しく fire。
+     - **影響**: Tier 3 (local cosmetic)、semantic 等価だが ideal 性で deficit。
+
+  5. **[I-143-e] Spread syntax RHS 内 NC (`[...(arr ?? [])]`) の expected 型伝播欠落** — spread 内 NC に Vec<T> 期待が伝播せず、空 array literal の要素型推論が不完全。
+     - **再現 TS**: `function f(arr: string[] | null): string[] { return [...(arr ?? [])]; }`
+     - **現行 Rust 出力**: 要調査 (未実測)、空 Vec literal が `vec![]` 単体で outer Vec<T> 指定に依存し型推論エラーになる可能性。
+     - **Root cause**: `propagate_expected` の Array arm (`expected_types.rs:397-415`) は `ast::ExprOrSpread.spread` フラグを見ず要素に element 型を伝播する。spread の場合は element ではなく outer Vec 型を渡すべき。
+     - **修正方針**: Array arm に spread 分岐追加 + 内部 NC への伝播整合。
+     - **発見経緯**: `/check_job deep deep` subagent 指摘。
+
+  6. **[I-143-f] match arm body / switch case body 内 NC に expected 型伝播なし** — `switch(x) { case "a": return y ?? "d"; }` の arm body expression が outer return 型を受けない可能性。
+     - **再現 TS**: match/switch arm 内での NC 使用。
+     - **Root cause**: `propagate_expected` に Match arm body 経路なし。return 等から arm 内部への expected 型伝播が不完全。
+     - **修正方針**: match arm body propagation 基盤整備 (broader than NC、別 concern として切り出し可)。
+     - **発見経緯**: `/check_job deep deep` subagent 指摘、未実測。
+
+  7. **[I-143-g] Option<Option<T>> LHS の二重 Option 処理** — 稀ケースだが mapped type 経由で発生可能。
+     - **現行挙動**: LHS inner が Option<T> のとき `.unwrap_or_else` 適用で層が不整合になる可能性。
+     - **修正方針**: 多重 Option 層の `.flatten` 適用検討。I-138 の flatten ロジックと統合。
+
+  8. **[I-143-h] `is_copy_literal` 判定の enum unit variant 漏れ** — `Direction::Up` 等 ZST enum variant が copy literal 判定から漏れ、`or_else(|| Direction::Up)` (lazy) になる。`or(Direction::Up)` (eager) が idiomatic。
+     - **Root cause**: `is_copy_literal` (`src/ir/expr.rs:558-572`) が explicit variant list で enum を含まない。
+     - **修正方針**: `Expr::EnumVariant { args: [] }` を copy-literal に追加。影響は cosmetic。
+
+  - **本 PRD のスコープ**: 上記 8 セル (I-143-a 〜 I-143-h) + `/check_problem` / matrix audit で追加発見されるセルを、**`problem-space-analysis.md` に従った完全マトリクス enumerate** で処理する。個別セルを部分 fix せず、`??` 全体の問題空間を一度に網羅する。
+  - **前提**: I-142 (`??=` NullishAssign) 完了済 (または並行)。`problem-space-analysis.md` 遵守。
+  - **優先度**: I-022 で reported Tier 1 silent は解消済のため、本 PRD は Tier 2 (compile error) + Tier 3 (cosmetic) のまとめ処理。Hono bench 影響は限定的と見込まれるが、「理想実装」の観点で必要。
+  - **起票時点**: 2026-04-14 (I-022 完了後)
+
 - **[I-023]** **try/catch + return で unreachable code** — ブロック構造見直し。`src/transformer/statements/error_handling.rs:14-144`。compile_test skip: `async-await`
 - **[I-024]** **Option\<T\> 変数の truthy narrowing 未対応** — `if (x)` where `x: Option<T>` が `if x {` のまま生成される。`if let Some(x) = x` に変換すべき。`try_generate_narrowing_match`（`src/transformer/statements/control_flow.rs:250`）が `complement_pattern == "None" && is_swap` のみ処理し、truthy（`is_swap=false`）パスが未処理。compile_test skip: `functions`
 - **[I-025]** **Option\<T\> 戻り値の暗黙 None 未返却** — if else 欠落。compile_test skip: `keyword-types`, `void-type`

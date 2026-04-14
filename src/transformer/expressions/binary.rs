@@ -42,18 +42,37 @@ impl<'a> Transformer<'a> {
             return Ok(self.convert_in_operator(bin));
         }
 
-        // `x ?? y` → `x.unwrap_or(y)` / `x.unwrap_or_else(|| y)` (Option) or `x` (non-Option)
+        // `x ?? y` emission (I-022):
+        // - LHS Option + RHS non-Option  → `x.unwrap_or(y)` / `x.unwrap_or_else(|| y)`
+        // - LHS Option + RHS Option      → `x.or(y)` / `x.or_else(|| y)` (chain case)
+        // - LHS definitively non-Option  → short-circuit return LHS (TS: `??` is no-op)
+        //
+        // `is_option_left` combines the TS-inferred type with a structural IR check
+        // via `produces_option_result`, catching `arr[i]` (emitted as `.get().cloned()`
+        // via `resolve_bin_expr` LHS span propagation) and wrapped `Some(_)` literals.
         if bin.op == ast::BinaryOp::NullishCoalescing {
-            let left_type = self.get_expr_type(&bin.left);
-            let is_option = left_type.is_some_and(|ty| matches!(ty, RustType::Option(_)));
-
             // Cat A: ?? left operand — type is resolved separately for Option detection
             let left = self.convert_expr(&bin.left)?;
-            if !is_option && left_type.is_some() {
-                // Non-Option type: nullish coalescing is a no-op, return left as-is
+            let left_type = self.get_expr_type(&bin.left);
+            let is_option_left = left_type.is_some_and(|ty| matches!(ty, RustType::Option(_)))
+                || super::produces_option_result(&left);
+
+            // Short-circuit: LHS is definitively non-Option (known static type + no
+            // Option-producing IR shape). TS `??` with non-null LHS evaluates to LHS.
+            if !is_option_left && left_type.is_some() {
                 return Ok(left);
             }
+
             let right = self.convert_expr(&bin.right)?;
+            let right_type = self.get_expr_type(&bin.right);
+            let is_option_right = right_type.is_some_and(|ty| matches!(ty, RustType::Option(_)))
+                || super::produces_option_result(&right);
+
+            // RHS is also Option<T> (chain `a ?? b ?? c` inner case): preserve Option
+            // via `.or()` / `.or_else()` so outer `??` can terminate with unwrap_or.
+            if is_option_right {
+                return Ok(crate::transformer::build_option_or_option(left, right));
+            }
             return Ok(crate::transformer::build_option_unwrap_with_default(
                 left, right,
             ));

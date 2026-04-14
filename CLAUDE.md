@@ -106,6 +106,7 @@ Coverage threshold ratchet: when measured coverage exceeds threshold by 2+ point
 ## Code of Conduct
 
 - **Ideal implementation primacy** — 本プロジェクトの最上位目標は「理想的な TS→Rust トランスパイラの獲得」。ベンチ数値は defect 発見のシグナルであり最適化ターゲットではない。Structural fix > interim patch。詳細は `.claude/rules/ideal-implementation-primacy.md`
+- **Problem space analysis (最上位 PRD ルール・絶対遵守)** — PRD 作成時は最初に機能の問題空間を網羅 enumerate する。TODO に書かれた defect のみを scope にするのは禁止 (defect は氷山の一角)。入力次元の組合せマトリクスを作成し、全セルに ideal 出力を定義、全セルに test を対応させ、matrix 完全カバーを完了条件に含める。詳細は `.claude/rules/problem-space-analysis.md`
 - **Uncertainty-driven investigation** — 不確定要素は一級市民として TODO に `[INV-N]` 形式で記録し、影響範囲が絞れるまで調査を尽くしてから実装に進む。`todo-prioritization.md` Step 0 参照
 - **No unilateral conversion feasibility judgments** — "difficult in Rust" is never a valid reason to defer or deprioritize. Applies across all phases: TODO, plan.md, PRD. See `.claude/rules/conversion-feasibility.md`
 - **Strict PRD completion criteria** — see `.claude/rules/prd-completion.md`
