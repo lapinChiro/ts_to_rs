@@ -9,18 +9,23 @@
 
 ---
 
-## 現在の状態 (2026-04-13)
+## 現在の状態 (2026-04-14)
 
 | 指標 | 値 |
 |------|-----|
-| Hono bench clean | 114/158 (72.2%) |
-| Hono bench errors | 58 |
-| cargo test (lib) | 2393 pass |
-| cargo test (integration) | 99 pass |
+| Hono bench clean | 113/158 (71.5%) |
+| Hono bench errors | 59 |
+| cargo test (lib) | 2430 pass |
+| cargo test (integration) | 101 pass |
 | cargo test (compile) | 3 pass |
 | cargo test (E2E) | 89 pass |
 | clippy | 0 warnings |
 | fmt | 0 diffs |
+
+**Step 2 完了による bench 変動**: clean 72.2% → 71.5% (-0.7pp)、error 58 → 59 (+1) は
+OBJECT_LITERAL_NO_TYPE。strictNullChecks 有効化で `T | undefined` / optional param が正しく
+抽出されるようになり、Hono 側の generic 型注釈要求が顕在化した（silent semantic change ではなく、
+既存の defect が表面化したシグナル）。Phase B (RC-11 expected type 伝播) 範囲で解消予定。
 
 ---
 
@@ -70,6 +75,63 @@ Hono 後退ゼロ確認済。
   (`transformer/expressions/data_literals.rs:90`)。`StructInit` IR に
   `enum_ty: Option<UserTypeRef>` を追加して構造化すべき（TODO I-074）。
 
+### Step 2 (RC-2) で確立した設計方針
+
+#### 1. remapped methods は TS signature 依存の arg 変換を回避する
+
+`methods::is_remapped_method(name)` を共有判定として持ち、`map_method_call` が書き換える
+メソッド（`startsWith`, `endsWith`, `filter`, `find`, `slice`, `substring`, ...）の呼び出しでは:
+
+- 転送器側 (`convert_call_expr`): `method_sig` を `None` にして param_types 由来の
+  fill-None / Box::new / trait coercion を抑制
+- TypeResolver 側 (`set_call_arg_expected_types`): 末尾 optional 引数を drop してから
+  expected type を伝播（required 引数の Fn 型伝播は維持）
+
+これにより、TS の `Array.filter(predicate, thisArg?)` のような signature が Rust の
+`Iterator::filter(closure)` に書き換わる際に、`Some(arg)` ラップや末尾 `None` 挿入が
+発生しなくなる。
+
+**引継ぎ**: `map_method_call` に新しい remap ケースを追加する際は必ず
+`REMAPPED_METHODS` const にも同名を追記する。単体テスト
+`test_remapped_methods_match_map_method_call_arms` と
+`test_non_remapped_common_methods_passthrough` が両方向の整合性を検証するため、
+片方だけ更新するとビルドが失敗する。
+
+#### 2. 構造的 wrap-skip: `produces_option_result`
+
+`convert_expr_with_expected` の `Option<T>` wrap 判定に構造的 fallback を追加。
+内部式が `Iterator::find(predicate)` / `Vec::pop()` の method call（Rust 契約で
+常に `Option<T>` を by-value 返す）なら TypeResolver が Unknown を返した場合でも
+ラップをスキップする。`transpile_collecting` (builtins なし) で
+`const doubled = nums.map(...)` の型が unknown になり、`doubled.find(...)` の
+返り値型解決が連鎖破綻するケースに対する最小の安全対策。
+
+**引継ぎ**: 将来拡張する場合、`Option<&T>` を返すメソッド（`Vec::first`/`last`/
+`get`、`HashMap::get` 等）は追加してはならない（expected `Option<T>` との型整合性が
+異なり、silent に wrap-skip するとコンパイルエラーではなく意味論ずれを招く）。
+bool 返しや element by-value 返しのメソッドも追加不可。
+
+#### 3. extract-types tool の strictNullChecks 必須化
+
+`tools/extract-types/src/index.ts` の 3 つの program 構築で `strictNullChecks: true`
+を固定。非strict では `T | undefined` が `T` に潰される（`Array.find` の `S | undefined`
+返り値、`message?: string` の optional param 等）。`isOptional` 判定は
+`paramDecl.questionToken` を優先（`param.flags & SymbolFlags.Optional` が callable
+signature parameter で false を返すため）。
+
+**引継ぎ**: builtin JSON を再生成する際は必ず strictNullChecks 有効で実行。
+`ParamDef.optional = true` かつ `type: T | undefined` は二重ラップ（`Option<Option<T>>`）
+を招くため、`extractSignature` で optional 検出時は `stripUndefined` を適用する。
+
+#### 4. FieldAccess receiver の括弧付与
+
+`generator::expressions::needs_parens_as_receiver` に `Expr::Deref` / `Expr::Ref` を
+追加。Rust では `.` が `*`/`&` より強く結合するため、`(*x).field` を明示括弧なしに
+書くと `*(x.field)` に誤解釈される。
+
+**引継ぎ**: IR で `FieldAccess { object: <prefix op> }` を構築する際は、generator が
+括弧を補うことを前提にしてよい（transformer で手動ラップ不要）。
+
 ### union return wrapping の実行順序 (RC-13 PRD で確立)
 
 `convert_fn_decl` 内の処理順序は以下でなければならない:
@@ -85,6 +147,22 @@ SWC leaf collection に対応がないため `wrap_body_returns` でスキップ
 
 ---
 
+## 次のタスク
+
+### [I-040] TS optional parameter の Rust `Option<T>` 統一ラップ
+
+PRD: [`backlog/optional-param-option-wrap.md`](backlog/optional-param-option-wrap.md)
+
+**背景**: Step 2 レビュー中に発見した pre-existing defect。TS `?:` optional parameter が IR Method / RustType::Fn / Registry MethodSignature の **7 経路** で `Option<T>` にラップされず、ユーザー定義 interface / class / callable / fn 型エイリアスで生成される Rust が compile error になる（例: `interface F { bar(y?: number) }` → `fn bar(&self, y: f64)`、caller `f.bar(1)` が E0061）。
+
+**修正方針**: `RustType::wrap_if_optional` を単一の収束点として導入し、全 9 経路 (正常 2 + 異常 7) をそのヘルパー経由に統一。DRY 違反も同時解消。
+
+**完了条件**: 全 8 種の入力 (interface method / class method / ctor / callable / embedded fn / fn type alias / type literal / private method) で optional param が `Option<T>` にラップされ、Rust 出力が compile success。
+
+Phase A / Phase B に先立って完了させる。
+
+---
+
 ## 開発ロードマップ
 
 ### Phase A: コンパイルテスト skip 解消
@@ -95,40 +173,23 @@ skip 解消後は新たな skip 追加を原則禁止とし、回帰検出を自
 **完了済み:**
 - Step 0: `basic-types` unskip
 - Step 1 (RC-13): `union-fallback`, `ternary`, `ternary-union` unskip + `external-type-struct` with-builtins unskip
+- Step 2: `array-builtin-methods` unskip + `closures` の I-011 filter 参照セマンティクス解消
 
 **永続 skip (2件):** `callable-interface-generic-arity-mismatch` (意図的 error-case), `indexed-access-type` (マルチファイル用、別テストでカバー)
 
-**残: 15 fixture / 15 イシュー**
+**残: 14 fixture / 14 イシュー**
 
 #### 次の Step
 
 ```
-Step 2 (Tier 1: RC-2 iterator) ←── 次はここ
-  ↓
-Step 3 (Box::new + Option)         Step 6 (string + intersection)
-  ↓                                  type-narrowing は Step 1 + 6 で完全解消
-Step 4 (control flow + DU)
+Step 3 (Box::new + Option) ←── 次はここ
+  ↓                                  Step 6 (string + intersection)
+Step 4 (control flow + DU)           type-narrowing は Step 1 + 6 で完全解消
   ↓
 Step 5 (type conversion + null)
   ↓
 Step 7 (builtin impl)
 ```
-
----
-
-**Step 2: RC-2 iterator メソッドの所有権** — Tier 1、methods.rs
-
-PRD: `backlog/step2-iter-closure-ref-semantics.md`
-
-| イシュー | 修正箇所 | 内容 |
-|----------|---------|------|
-| I-011 | `methods.rs` — `deref_closure_params` 新設 | `IrFolder` で closure body 内の param ident を `Deref` ラップ。`filter`/`find` のみ適用（Rust API が `&Self::Item` を渡すため） |
-| I-012 | `extractor.ts:274` + `call_resolution.rs` | (1) extract tool の `sig.getReturnType()` を AST node 経由に修正し JSON 再生成 (2) TypeResolver に `Vec` method の intrinsic return type fallback 追加 |
-
-- unskip: `array-builtin-methods`
-- 部分解消: `closures`（I-020 残）
-
----
 
 **Step 3: クロージャ Box 化 + Option 暗黙返却** — Tier 2、レバレッジ最大（4 fixture）
 
@@ -201,8 +262,8 @@ PRD: `backlog/step2-iter-closure-ref-semantics.md`
 | ~~ternary~~ | ~~Step 1~~ | — |
 | ~~ternary-union~~ | ~~Step 1~~ | — |
 | ~~external-type-struct (with-builtins)~~ | ~~Step 1~~ | — |
-| array-builtin-methods | **Step 2** | — |
-| closures | Step 3 | Step 2 (I-011) |
+| ~~array-builtin-methods~~ | ~~Step 2~~ | — |
+| closures | Step 3 | ~~Step 2 (I-011)~~ |
 | keyword-types | Step 3 | — |
 | void-type | Step 3 | — |
 | functions | Step 4 | Step 3 (I-020, I-024) |

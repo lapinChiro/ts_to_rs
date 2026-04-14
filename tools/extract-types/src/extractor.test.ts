@@ -213,6 +213,96 @@ describe("overloads", () => {
   });
 });
 
+describe("optional params and `T | undefined`", () => {
+  // Step 2 (RC-2) guarantees: the Rust loader (external_types::convert_union_type)
+  // converts `T | undefined` into `Option<T>`. If extraction either drops the
+  // `| undefined` member or fails to set `optional: true`, the downstream conversion
+  // either generates a less precise type (dropping optionality) or double-wraps
+  // (if both the union AND the `optional` flag are present). The tests below
+  // pin the contracts that keep the Rust loader's conversion lossless.
+
+  it("detects optional params in interface method signatures via questionToken", () => {
+    // `param.flags & ts.SymbolFlags.Optional` is NOT set for callable-signature
+    // parameters declared with `?`. Step 2's extractor falls back to the AST
+    // declaration's questionToken so these params are correctly flagged.
+    const result = extract(`
+      interface Foo {
+        bar(required: string, position?: number): boolean;
+      }
+    `);
+    const foo = getInterface(result, "Foo");
+    const sig = foo.methods["bar"].signatures[0];
+    expect(sig.params).toHaveLength(2);
+    expect(sig.params[0]).toMatchObject({ name: "required", type: { kind: "string" } });
+    expect(sig.params[0].optional).toBeUndefined();
+    expect(sig.params[1]).toMatchObject({
+      name: "position",
+      type: { kind: "number" },
+      optional: true,
+    });
+  });
+
+  it("strips `| undefined` from optional param types so the Rust loader wraps only once", () => {
+    // If extraction left `position` as `{ union [undefined, number] }` AND
+    // emitted `optional: true`, the Rust side would apply Option twice, yielding
+    // `Option<Option<f64>>`. Step 2's extractor calls stripUndefined for optional
+    // params so the union collapses to its non-undefined member.
+    const result = extract(`
+      interface Foo {
+        bar(position?: number): void;
+      }
+    `);
+    const sig = getInterface(result, "Foo").methods["bar"].signatures[0];
+    expect(sig.params[0].type).toEqual({ kind: "number" });
+  });
+
+  it("preserves `T | undefined` return types as explicit unions (find/pop pattern)", () => {
+    // TypeScript's checker simplifies `S | undefined` back to `S` for generic
+    // interface method return types when strictNullChecks is off. With
+    // strictNullChecks on (enabled at the program level in production), the
+    // union is preserved. extractSignature relies on `sig.getReturnType()` and
+    // must therefore see the union — verify via a generic method.
+    const result = extract(`
+      interface MyArray<T> {
+        find<S extends T>(predicate: (value: T) => value is S): S | undefined;
+        pop(): T | undefined;
+      }
+    `);
+    const arr = getInterface(result, "MyArray");
+    const findRet = arr.methods["find"]!.signatures[0]!.return_type!;
+    expect(findRet.kind).toBe("union");
+    if (findRet.kind === "union") {
+      const kinds = findRet.members.map((m) => m.kind).sort();
+      expect(kinds).toEqual(["named", "undefined"]);
+    }
+    const popRet = arr.methods["pop"]!.signatures[0]!.return_type!;
+    expect(popRet.kind).toBe("union");
+    if (popRet.kind === "union") {
+      const kinds = popRet.members.map((m) => m.kind).sort();
+      expect(kinds).toEqual(["named", "undefined"]);
+    }
+  });
+
+  it("keeps `T | undefined` from a non-optional param as a union (no strip)", () => {
+    // stripUndefined must ONLY fire on optional params. A non-optional param
+    // with an explicit `| undefined` type must retain the union so the Rust
+    // loader produces `Option<T>` at the parameter site.
+    const result = extract(`
+      interface Foo {
+        bar(maybe: string | undefined): void;
+      }
+    `);
+    const sig = getInterface(result, "Foo").methods["bar"].signatures[0];
+    const ty = sig.params[0].type;
+    expect(sig.params[0].optional).toBeUndefined();
+    expect(ty.kind).toBe("union");
+    if (ty.kind === "union") {
+      const kinds = ty.members.map((m) => m.kind).sort();
+      expect(kinds).toEqual(["string", "undefined"]);
+    }
+  });
+});
+
 describe("lib.dom.d.ts integration", { timeout: 30_000 }, () => {
   it("extracts Response with inherited Body methods", () => {
     const program = createProgramFromSource("export {};", [

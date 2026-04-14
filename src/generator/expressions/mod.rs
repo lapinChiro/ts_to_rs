@@ -60,9 +60,21 @@ fn float_literal_for_method(expr: &Expr) -> Option<String> {
     }
 }
 
-/// Returns `true` if the expression needs parentheses when used as the receiver
-/// of a method call or field access (i.e., before `.method()` or `.field`).
-fn needs_parens_as_receiver(expr: &Expr) -> bool {
+/// Returns `true` if the expression needs parentheses when used as the subject
+/// of a postfix operator.
+///
+/// Rust's postfix operators — `.method()`, `.field`, `[index]`, `.await`, `?` —
+/// all bind tighter than every prefix / infix operator. When the subject is an
+/// expression that parses looser (prefix `*`/`&`, binary ops, casts, assignment,
+/// `if`/`if let` blocks), explicit parens are required to bind the postfix op
+/// to the whole subject rather than to just a sub-expression.
+///
+/// Examples:
+/// - `*x.field` parses as `*(x.field)`; `(*x).field` is needed to deref first.
+/// - `&x[0]` parses as `&(x[0])`; `(&x)[0]` is needed to borrow first.
+/// - `*x.await` parses as `*(x.await)`; `(*x).await` is needed.
+/// - `-5.0.abs()` parses as `-(5.0.abs())`; `(-5.0).abs()` is needed.
+fn needs_parens_before_postfix(expr: &Expr) -> bool {
     matches!(
         expr,
         Expr::BinaryOp { .. }
@@ -71,6 +83,8 @@ fn needs_parens_as_receiver(expr: &Expr) -> bool {
             | Expr::Assign { .. }
             | Expr::If { .. }
             | Expr::IfLet { .. }
+            | Expr::Deref(..)
+            | Expr::Ref(..)
     )
 }
 
@@ -161,7 +175,7 @@ pub(super) fn generate_expr(expr: &Expr) -> String {
             // CallTarget::UserAssocFn { .. } }`. The generator no longer needs to
             // detect uppercase receivers; all `Expr::MethodCall` here are guaranteed
             // to be value-receiver method calls.
-            if needs_parens_as_receiver(object) {
+            if needs_parens_before_postfix(object) {
                 format!("({obj_str}).{method}({args_str})")
             } else {
                 format!("{obj_str}.{method}({args_str})")
@@ -229,7 +243,7 @@ pub(super) fn generate_expr(expr: &Expr) -> String {
         Expr::FieldAccess { object, field } => {
             let obj_str = generate_expr(object);
             let field = escape_ident(field);
-            if needs_parens_as_receiver(object) {
+            if needs_parens_before_postfix(object) {
                 format!("({obj_str}).{field}")
             } else {
                 format!("{obj_str}.{field}")
@@ -320,7 +334,14 @@ pub(super) fn generate_expr(expr: &Expr) -> String {
             args,
             use_debug,
         } => generate_macro_call(name, args, use_debug),
-        Expr::Await(expr) => format!("{}.await", generate_expr(expr)),
+        Expr::Await(inner) => {
+            let inner_str = generate_expr(inner);
+            if needs_parens_before_postfix(inner) {
+                format!("({inner_str}).await")
+            } else {
+                format!("{inner_str}.await")
+            }
+        }
         Expr::Index { object, index } => {
             // Index values must be usize in Rust; emit integer literals without .0,
             // and cast variable expressions with `as usize`.
@@ -331,7 +352,12 @@ pub(super) fn generate_expr(expr: &Expr) -> String {
                 Expr::Range { .. } => generate_expr(index),
                 _ => format!("{} as usize", generate_expr(index)),
             };
-            format!("{}[{index_str}]", generate_expr(object))
+            let obj_str = generate_expr(object);
+            if needs_parens_before_postfix(object) {
+                format!("({obj_str})[{index_str}]")
+            } else {
+                format!("{obj_str}[{index_str}]")
+            }
         }
         Expr::Cast { expr, target } => {
             format!("{} as {}", generate_expr(expr), generate_type(target))

@@ -258,20 +258,31 @@ function extractSignature(
   const params: ExternalParam[] = sig.parameters.map((param) => {
     const paramType = checker.getTypeOfSymbol(param);
     const paramDecl = param.getDeclarations()?.[0];
-    const isOptional = !!(param.flags & ts.SymbolFlags.Optional);
+    // `param.flags & ts.SymbolFlags.Optional` returns false for callable-signature
+    // parameters declared with `?`. Inspect the declaration's questionToken as the
+    // primary check so optional parameters in interface methods (e.g.
+    // `startsWith(s: string, position?: number)`) are detected correctly.
+    const declOptional =
+      paramDecl !== undefined &&
+      ts.isParameter(paramDecl) &&
+      paramDecl.questionToken !== undefined;
+    const isOptional = declOptional || !!(param.flags & ts.SymbolFlags.Optional);
     const isRest =
       paramDecl !== undefined &&
       ts.isParameter(paramDecl) &&
       paramDecl.dotDotDotToken !== undefined;
+    // For optional params, strip `| undefined` from the resolved type so the
+    // Rust loader applies a single `Option<T>` wrap (driven by `optional: true`).
+    // Without stripping, the Rust loader would see both the union and the
+    // optional flag and double-wrap to `Option<Option<T>>`.
+    const effectiveType = isOptional ? stripUndefined(paramType, checker) : paramType;
     return {
       name: param.getName(),
-      type: convertType(paramType, checker),
+      type: convertType(effectiveType, checker),
       ...(isOptional ? { optional: true } : {}),
       ...(isRest ? { rest: true } : {}),
     };
   });
-
-  const returnType = sig.getReturnType();
 
   // Extract signature-level type parameters from the AST declaration.
   // Used for method-level generics like `then<TResult1, TResult2>(...)` so that
@@ -283,6 +294,8 @@ function extractSignature(
       })
     | undefined;
   const typeParams = extractTypeParams(sigDecl?.typeParameters, checker);
+
+  const returnType = sig.getReturnType();
 
   return {
     ...(typeParams.length > 0 ? { type_params: typeParams } : {}),

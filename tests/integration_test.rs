@@ -183,6 +183,61 @@ fn test_instanceof_builtin_with_builtins() {
 
 // ── Custom tests (non-macro: require specialized assertions) ───────────
 
+/// Step 2 (RC-2): `throw new Error(msg)` must produce `Err(msg.to_string())`,
+/// not `Err(Some(msg).to_string())`.
+///
+/// With strict-null-checks in the extract tool, the `Error` constructor's
+/// `message?: string` param resolves to `Option<String>`, so the TypeResolver
+/// propagates `Option<String>` as the expected type for `msg`. `convert_expr`
+/// then wraps the string arg as `Some(msg)`. In the throw flow the message is
+/// lifted out of the constructor and passed directly to `.to_string()` —
+/// `Some(String)::to_string()` produces `"Some(msg)"` at runtime (silent
+/// semantic change) and `Option::<String>::to_string()` is not even defined
+/// (compile error). `extract_error_message` strips the outer `Some(...)`
+/// specifically for this case.
+#[test]
+fn test_throw_new_error_strips_some_wrap_with_builtins() {
+    let input = r#"
+function throwError(msg: string): never {
+  throw new Error(msg);
+}
+"#;
+    let (output, _unsupported) = transpile_with_builtins(input).unwrap();
+    assert!(
+        output.contains("Err(msg.to_string())"),
+        "expected `Err(msg.to_string())` without Some-wrap, got:\n{output}"
+    );
+    assert!(
+        !output.contains("Some(msg)"),
+        "Some-wrap must be stripped from throw new Error arg, got:\n{output}"
+    );
+}
+
+#[test]
+fn test_throw_new_error_string_literal_no_double_to_string() {
+    // Regression for the full convert_expr → extract_error_message → to_string
+    // chain on a literal arg: expected Option<String> triggers
+    // `convert_lit` to append `.to_string()` under the Some, AND the outer Some
+    // wrap. Stripping only Some leaves `"x".to_string()`, then
+    // convert_throw_stmt appends another `.to_string()` producing
+    // `"x".to_string().to_string()`. extract_error_message now strips the
+    // redundant inner `.to_string()` as well.
+    let input = r#"
+function fail(): never {
+  throw new Error("static");
+}
+"#;
+    let (output, _unsupported) = transpile_with_builtins(input).unwrap();
+    assert!(
+        output.contains("Err(\"static\".to_string())"),
+        "expected single `.to_string()` on literal arg, got:\n{output}"
+    );
+    assert!(
+        !output.contains(".to_string().to_string()"),
+        "redundant double `.to_string()` must be stripped, got:\n{output}"
+    );
+}
+
 #[test]
 fn test_callable_interface_generic_arity_mismatch_errors() {
     let input =

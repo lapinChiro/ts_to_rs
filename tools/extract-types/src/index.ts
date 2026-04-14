@@ -98,6 +98,11 @@ function createLibProgram(libs: string[]): ts.Program {
     lib: libFiles,
     noEmit: true,
     skipLibCheck: false,
+    // strictNullChecks preserves `T | undefined` unions in extracted signatures.
+    // Without it, the TypeScript checker simplifies return types such as
+    // `find(): T | undefined` back to just `T`, which would prevent the Rust
+    // loader from producing `Option<T>`.
+    strictNullChecks: true,
   };
 
   const host = ts.createCompilerHost(compilerOptions);
@@ -139,6 +144,9 @@ function createProjectProgram(configPath: string): ts.Program {
   return ts.createProgram(parsedConfig.fileNames, {
     ...parsedConfig.options,
     noEmit: true,
+    // See createLibProgram: strictNullChecks preserves `T | undefined`.
+    // Overrides the project's setting to guarantee consistent extraction.
+    strictNullChecks: true,
   });
 }
 
@@ -148,6 +156,8 @@ function createFilesProgram(files: string[]): ts.Program {
     target: ts.ScriptTarget.ES2024,
     noEmit: true,
     skipLibCheck: false,
+    // See createLibProgram: strictNullChecks preserves `T | undefined`.
+    strictNullChecks: true,
   });
 }
 

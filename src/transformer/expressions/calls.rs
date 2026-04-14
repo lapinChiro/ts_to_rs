@@ -208,12 +208,21 @@ impl<'a> Transformer<'a> {
                     let object = self.convert_expr(&member.obj)?;
                     // Look up method signature via unified TypeRegistry method
                     // (handles Vec→Array, String, Named, DynTrait + select_overload)
-                    let method_sig = self.get_expr_type(&member.obj).and_then(|ty| {
-                        let sigs = self.reg().lookup_method_sigs(ty, &method)?;
-                        let (_, sig) =
-                            crate::registry::select_overload(&sigs, call.args.len(), &[]);
-                        Some(sig.clone())
-                    });
+                    // For methods remapped by map_method_call (e.g. startsWith, find),
+                    // skip the TS-signature lookup entirely: the remap replaces the
+                    // callee with a Rust API of different arity, so propagating TS
+                    // param types would produce spurious Some() wraps or None fills.
+                    let is_remapped = super::methods::is_remapped_method(method.as_str());
+                    let method_sig = if is_remapped {
+                        None
+                    } else {
+                        self.get_expr_type(&member.obj).and_then(|ty| {
+                            let sigs = self.reg().lookup_method_sigs(ty, &method)?;
+                            let (_, sig) =
+                                crate::registry::select_overload(&sigs, call.args.len(), &[]);
+                            Some(sig.clone())
+                        })
+                    };
                     let method_params = method_sig.as_ref().map(|sig| sig.params.as_slice());
                     // For methods that map_method_call transforms to Rust APIs expecting
                     // &str / impl Pattern, suppress .to_string() on string literal args.

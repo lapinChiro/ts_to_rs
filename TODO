@@ -23,8 +23,6 @@ OBJECT_LITERAL_NO_TYPE 全体で 27件（最終実行: 2026-04-13）。I-004/I-0
 ### RC-2 残り: 所有権・借用モデル
 
 - **[I-010]** **Generic に Clone bound 未付与** — body 解析で `T: Clone` 自動付与が必要。`monomorphize_type_params`（`src/ts_type_info/resolve/typedef.rs:397-443`）は制約変換のみで Clone bound の自動挿入なし。I-392 (callable interface) では対応範囲外
-- **[I-011]** **filter/find クロージャの参照型ミスマッチ** — `build_iter_method_call`（`src/transformer/expressions/methods.rs:35-63`）が `.iter().cloned()` で `&T` → `T` 変換後、`strip_closure_type_annotations` でクロージャ型注釈を除去。Copy 型は偶然動作するが non-Copy で型エラー。compile_test skip: `array-builtin-methods`, `closures`
-- **[I-012]** **find の Option 二重ラップ** — `.iter().cloned().find(fn)` が `Option<T>` を返すが、surrounding context（`return Some(...)` 等）が再度 `Some()` でラップ。`RustType::wrap_optional` は IR レベルで二重化を防止するが、expression 生成レベルでは未対応。compile_test skip: `array-builtin-methods`
 
 ### RC-5: abstract class 変換パスの欠陥
 

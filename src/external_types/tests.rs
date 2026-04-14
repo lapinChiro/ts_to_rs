@@ -819,10 +819,15 @@ fn test_builtin_response_has_constructor() {
             let sig = &sigs[0];
             assert_eq!(sig.params.len(), 2, "Response constructor has 2 params");
             assert_eq!(sig.params[1].name, "init");
-            // init param type should be Named("ResponseInit")
+            // init is `init?: ResponseInit` → `ResponseInit | undefined` → `Option<ResponseInit>`.
+            // strictNullChecks in the extract tool preserves the undefined member so the
+            // union→Option conversion runs; previously the undefined was collapsed.
             match &sig.params[1].ty {
-                RustType::Named { name, .. } => assert_eq!(name, "ResponseInit"),
-                other => panic!("expected Named(ResponseInit), got {other:?}"),
+                RustType::Option(inner) => match inner.as_ref() {
+                    RustType::Named { name, .. } => assert_eq!(name, "ResponseInit"),
+                    other => panic!("expected Option(Named(ResponseInit)), got Option({other:?})"),
+                },
+                other => panic!("expected Option(Named(ResponseInit)), got {other:?}"),
             }
         }
         _ => panic!("expected Struct"),

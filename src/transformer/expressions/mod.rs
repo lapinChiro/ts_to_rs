@@ -21,7 +21,7 @@ mod data_literals;
 mod functions;
 mod literals;
 pub(crate) mod member_access;
-mod methods;
+pub(crate) mod methods;
 pub(crate) mod patterns;
 mod type_resolution;
 use assignments::convert_update_expr;
@@ -80,6 +80,16 @@ impl<'a> Transformer<'a> {
                         ..
                     }
                 ) {
+                    return Ok(inner_result);
+                }
+                // Structural wrap-skip: the generated IR may itself be a call to
+                // a Rust API that always returns `Option<T>`. In that case wrapping
+                // would produce `Option<Option<T>>`. This runs after conversion so
+                // it correctly detects remapped calls (e.g. TS `.find()` → the
+                // `.iter().cloned().find(...)` chain terminated by `find`) even
+                // when TypeResolver could not resolve the object type precisely
+                // (e.g. in the no-builtins `transpile_collecting` path).
+                if produces_option_result(&inner_result) {
                     return Ok(inner_result);
                 }
                 return Ok(Expr::FnCall {
@@ -334,6 +344,111 @@ impl<'a> Transformer<'a> {
         }
 
         true
+    }
+}
+
+/// Returns true when `expr` is structurally known to produce `Option<T>`.
+///
+/// Used by [`Transformer::convert_expr_with_expected`] as a secondary wrap-skip
+/// heuristic: the expected type is `Option<T>`, but `TypeResolver` may have
+/// failed to propagate an `Option<T>` type through chained method calls (common
+/// in `transpile_collecting` without builtin signatures). Checking the generated
+/// IR directly catches remapped calls such as `TS .find()` which always emits an
+/// `.iter().cloned().find(...)` chain terminated by `Iterator::find` (returns
+/// `Option<Self::Item>` by contract).
+///
+/// Keep the predicate narrow: only list Rust API method names that *unconditionally*
+/// return `Option<T>` (by value, not `Option<&T>`) when invoked on any receiver
+/// that reaches them. Methods such as `first`/`last` return `Option<&T>` and must
+/// not be added here — their expected-type unification is different.
+fn produces_option_result(expr: &Expr) -> bool {
+    let Expr::MethodCall { method, args, .. } = expr else {
+        return false;
+    };
+    match method.as_str() {
+        // `Iterator::find(predicate)` — target of TS `.find()` remapping and any
+        // direct user call that falls through to the generic iterator API.
+        "find" => args.len() == 1,
+        // `Vec::pop()` — zero-arg method, always returns `Option<T>` by value.
+        // TS `Array.pop()` maps through the passthrough arm to this signature.
+        "pop" => args.is_empty(),
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod produces_option_result_tests {
+    use super::*;
+    use crate::ir::{BinOp, ClosureBody, Param};
+
+    fn ident(n: &str) -> Expr {
+        Expr::Ident(n.to_string())
+    }
+
+    fn mc(obj: Expr, method: &str, args: Vec<Expr>) -> Expr {
+        Expr::MethodCall {
+            object: Box::new(obj),
+            method: method.to_string(),
+            args,
+        }
+    }
+
+    #[test]
+    fn test_find_method_call_is_option() {
+        // arr.find(|x| *x > 0)
+        let closure = Expr::Closure {
+            params: vec![Param {
+                name: "x".to_string(),
+                ty: None,
+            }],
+            return_type: None,
+            body: ClosureBody::Expr(Box::new(Expr::BinaryOp {
+                left: Box::new(Expr::Deref(Box::new(ident("x")))),
+                op: BinOp::Gt,
+                right: Box::new(Expr::NumberLit(0.0)),
+            })),
+        };
+        assert!(produces_option_result(&mc(
+            ident("arr"),
+            "find",
+            vec![closure]
+        )));
+    }
+
+    #[test]
+    fn test_pop_zero_args_is_option() {
+        assert!(produces_option_result(&mc(ident("v"), "pop", vec![])));
+    }
+
+    #[test]
+    fn test_pop_with_args_is_not_option() {
+        // Not a Vec::pop() — some custom one-arg method named `pop`. Unknown return.
+        assert!(!produces_option_result(&mc(
+            ident("v"),
+            "pop",
+            vec![Expr::NumberLit(0.0)]
+        )));
+    }
+
+    #[test]
+    fn test_find_wrong_arity_is_not_option() {
+        // `find` with zero args is not `Iterator::find`.
+        assert!(!produces_option_result(&mc(ident("arr"), "find", vec![])));
+    }
+
+    #[test]
+    fn test_non_method_call_is_not_option() {
+        assert!(!produces_option_result(&ident("x")));
+        assert!(!produces_option_result(&Expr::NumberLit(0.0)));
+    }
+
+    #[test]
+    fn test_first_and_last_are_not_option() {
+        // Vec::first/last return Option<&T>, not Option<T> — must NOT be flagged
+        // because unifying `Option<&T>` with an expected `Option<T>` is a different
+        // shape and would skip wrap incorrectly.
+        assert!(!produces_option_result(&mc(ident("v"), "first", vec![])));
+        assert!(!produces_option_result(&mc(ident("v"), "last", vec![])));
     }
 }
 

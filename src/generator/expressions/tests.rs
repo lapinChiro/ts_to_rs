@@ -166,6 +166,73 @@ fn test_generate_expr_field_access() {
 }
 
 #[test]
+fn test_generate_expr_field_access_deref_receiver_adds_parens() {
+    // `.` binds tighter than prefix `*`, so `*x.name` parses as `*(x.name)`.
+    // For a dereffed receiver we must emit `(*x).name` to access the field
+    // on the dereffed value. This is the generator contract that Step 2's
+    // `deref_closure_params` relies on to produce compilable output.
+    let expr = Expr::FieldAccess {
+        object: Box::new(Expr::Deref(Box::new(Expr::Ident("x".to_string())))),
+        field: "name".to_string(),
+    };
+    assert_eq!(generate_expr(&expr), "(*x).name");
+}
+
+#[test]
+fn test_generate_expr_field_access_ref_receiver_adds_parens() {
+    // `&x.name` parses as `&(x.name)` — borrow the field, not the struct.
+    // For a borrow-wrapped receiver we must emit `(&x).name`.
+    let expr = Expr::FieldAccess {
+        object: Box::new(Expr::Ref(Box::new(Expr::Ident("x".to_string())))),
+        field: "name".to_string(),
+    };
+    assert_eq!(generate_expr(&expr), "(&x).name");
+}
+
+#[test]
+fn test_generate_expr_method_call_deref_receiver_adds_parens() {
+    // `*x.method()` parses as `*(x.method())` — deref the result, not the receiver.
+    // For a dereffed receiver we must emit `(*x).method()`.
+    let expr = Expr::MethodCall {
+        object: Box::new(Expr::Deref(Box::new(Expr::Ident("x".to_string())))),
+        method: "len".to_string(),
+        args: vec![],
+    };
+    assert_eq!(generate_expr(&expr), "(*x).len()");
+}
+
+#[test]
+fn test_generate_expr_index_deref_receiver_adds_parens() {
+    // `*x[0]` parses as `*(x[0])` — deref the element, not the receiver.
+    // For a dereffed receiver we must emit `(*x)[0]`. This matters when
+    // deref_closure_params wraps a param that is then indexed inside the body.
+    let expr = Expr::Index {
+        object: Box::new(Expr::Deref(Box::new(Expr::Ident("x".to_string())))),
+        index: Box::new(Expr::NumberLit(0.0)),
+    };
+    assert_eq!(generate_expr(&expr), "(*x)[0]");
+}
+
+#[test]
+fn test_generate_expr_index_ref_receiver_adds_parens() {
+    let expr = Expr::Index {
+        object: Box::new(Expr::Ref(Box::new(Expr::Ident("x".to_string())))),
+        index: Box::new(Expr::NumberLit(0.0)),
+    };
+    assert_eq!(generate_expr(&expr), "(&x)[0]");
+}
+
+#[test]
+fn test_generate_expr_await_deref_receiver_adds_parens() {
+    // `*x.await` parses as `*(x.await)` — deref the awaited value. To await
+    // a dereffed future we must emit `(*x).await`.
+    let expr = Expr::Await(Box::new(Expr::Deref(Box::new(Expr::Ident(
+        "x".to_string(),
+    )))));
+    assert_eq!(generate_expr(&expr), "(*x).await");
+}
+
+#[test]
 fn test_generate_expr_format_macro_no_args() {
     let expr = Expr::FormatMacro {
         template: "hello".to_string(),

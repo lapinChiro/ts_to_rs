@@ -162,7 +162,9 @@ fn test_convert_expr_array_filter_to_iter_filter_collect() {
     let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
         .convert_expr(&expr)
         .unwrap();
-    // arr.filter((x: number) => x > 0) → arr.iter().cloned().filter(|x| x > 0).collect()
+    // arr.filter((x: number) => x > 0) → arr.iter().cloned().filter(|x| *x > 0).collect()
+    // Rust's Iterator::filter passes &Self::Item to the predicate, so param refs
+    // are wrapped in Deref to match TS by-value semantics.
     assert_eq!(
         result,
         Expr::MethodCall {
@@ -184,7 +186,7 @@ fn test_convert_expr_array_filter_to_iter_filter_collect() {
                     }],
                     return_type: None,
                     body: ClosureBody::Expr(Box::new(Expr::BinaryOp {
-                        left: Box::new(Expr::Ident("x".to_string())),
+                        left: Box::new(Expr::Deref(Box::new(Expr::Ident("x".to_string())))),
                         op: BinOp::Gt,
                         right: Box::new(Expr::NumberLit(0.0)),
                     })),
@@ -204,7 +206,8 @@ fn test_convert_expr_array_find_to_iter_find() {
     let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
         .convert_expr(&expr)
         .unwrap();
-    // arr.find((x: number) => x > 0) → arr.iter().cloned().find(|x| x > 0)
+    // arr.find((x: number) => x > 0) → arr.iter().cloned().find(|x| *x > 0)
+    // Rust's Iterator::find passes &Self::Item to the predicate — param refs are dereffed.
     assert_eq!(
         result,
         Expr::MethodCall {
@@ -225,7 +228,7 @@ fn test_convert_expr_array_find_to_iter_find() {
                 }],
                 return_type: None,
                 body: ClosureBody::Expr(Box::new(Expr::BinaryOp {
-                    left: Box::new(Expr::Ident("x".to_string())),
+                    left: Box::new(Expr::Deref(Box::new(Expr::Ident("x".to_string())))),
                     op: BinOp::Gt,
                     right: Box::new(Expr::NumberLit(0.0)),
                 })),

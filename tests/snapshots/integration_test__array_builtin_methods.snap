@@ -3,10 +3,10 @@ source: tests/integration_test.rs
 expression: output
 ---
 fn processNumbers(nums: Vec<f64>) -> Vec<f64> {
-    nums.iter().cloned().map(|x| x * 2.0).collect::<Vec<_>>().iter().cloned().filter(|x| x > 4.0).collect::<Vec<_>>()
+    nums.iter().cloned().map(|x| x * 2.0).collect::<Vec<_>>().iter().cloned().filter(|x| *x > 4.0).collect::<Vec<_>>()
 }
 
 fn getFirstPositive(nums: Vec<f64>) -> Option<f64> {
     let doubled = nums.iter().cloned().map(|x| x * 2.0).collect::<Vec<_>>();
-    Some(doubled.iter().cloned().find(|x| x > 0.0))
+    doubled.iter().cloned().find(|x| *x > 0.0)
 }

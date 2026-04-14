@@ -127,9 +127,8 @@ fn test_all_fixtures_compile() {
         //   - f64.toFixed(2): JS 固有メソッドの Rust 変換が未対応（TODO: format!("{:.N}", v) に変換）
         //   - StringOrF64 の Display 未実装: println! で enum を表示するには Display trait が必要
         "type-narrowing",
-        // array-builtin-methods: filter/find closure receives &f64 but compares with f64 (I-217),
-        // and find() returns Option<f64> but return wraps in Some() causing double-wrap (I-265).
-        "array-builtin-methods",
+        // (array-builtin-methods: I-011 deref_closure_params + I-012 find return type preservation
+        // により解消。Step 2 PRD 完了)
         // instanceof-builtin: any-narrowing generates enum variants Date(Date), Error(Error), RegExp(RegExp).
         // With builtins loaded, struct definitions are generated (I-270). However, method calls
         // (e.g., x.toISOString()) require impl blocks which are not yet generated (I-270c).
@@ -145,8 +144,7 @@ fn test_all_fixtures_compile() {
         // (basic-types: コンパイル通過確認済み。skip 解除)
         // async-await: try/catch + return generates unreachable code after labeled block (I-330).
         "async-await",
-        // closures: returned closure missing Box::new() wrap (I-321),
-        // filter closure &f64 vs f64 mismatch (I-217).
+        // closures: returned closure missing Box::new() wrap (I-321). (I-217 resolved by Step 2)
         "closures",
         // discriminated-union: match body uses `event.x` instead of destructured binding `x` (I-322).
         "discriminated-union",
@@ -232,7 +230,7 @@ fn test_all_fixtures_compile_with_builtins() {
         "any-type-narrowing",
         // (ternary-union: I-009 union return wrap で解消。skip 解除)
         "type-narrowing",
-        "array-builtin-methods",
+        // (array-builtin-methods: I-011 + I-012 解消により with-builtins でも通過)
         // instanceof-builtin: method impl blocks not generated (I-270c).
         "instanceof-builtin",
         // (external-type-struct: I-007 Display 生成で解消。skip 解除)

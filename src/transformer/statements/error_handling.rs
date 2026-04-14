@@ -158,21 +158,55 @@ impl<'a> Transformer<'a> {
     }
 
     /// Extracts the error message expression from a `throw` argument.
+    ///
+    /// For `throw new Error(msg)` the message arg is lifted out of the
+    /// constructor call. The TS signature of `Error` declares
+    /// `message?: string`, which after strict-null-checks extraction resolves
+    /// to `Option<String>`. TypeResolver therefore propagates `Option<String>`
+    /// as the expected type for the arg, causing `convert_expr` to:
+    ///
+    /// 1. Wrap string-literal args with `.to_string()` (via `convert_lit` for
+    ///    expected `String` inside the Option's inner type)
+    /// 2. Wrap the whole result in `Some(...)`
+    ///
+    /// The extracted expression is then passed to an outer `.to_string()` call
+    /// in [`Self::convert_throw_stmt`]. Both the `Some(...)` wrap and the
+    /// inner `.to_string()` are meaningless in that context — stripping them
+    /// yields a single, clean `expr.to_string()` at the call site rather than
+    /// `Some(expr).to_string()` (compile error) or
+    /// `expr.to_string().to_string()` (ugly but valid).
     fn extract_error_message(&mut self, expr: &ast::Expr) -> Expr {
-        match expr {
-            ast::Expr::New(new_expr) => {
-                if let Some(args) = &new_expr.args {
-                    if let Some(first) = args.first() {
-                        if let Ok(e) = self.convert_expr(&first.expr) {
-                            return e;
-                        }
-                    }
-                }
-                Expr::StringLit("unknown error".to_string())
-            }
-            other => self
-                .convert_expr(other)
-                .unwrap_or_else(|_| Expr::StringLit("unknown error".to_string())),
+        let raw = match expr {
+            ast::Expr::New(new_expr) => new_expr
+                .args
+                .as_ref()
+                .and_then(|args| args.first())
+                .and_then(|first| self.convert_expr(&first.expr).ok()),
+            other => self.convert_expr(other).ok(),
+        };
+        let Some(raw) = raw else {
+            return Expr::StringLit("unknown error".to_string());
+        };
+        // Strip outer `Some(...)` introduced by the `Option<String>` expected
+        // type. `convert_expr` only constructs `Some` via `BuiltinVariant::Some`
+        // with exactly one arg, so matching that shape is precise.
+        let stripped_some = match raw {
+            Expr::FnCall {
+                target: CallTarget::BuiltinVariant(crate::ir::BuiltinVariant::Some),
+                mut args,
+            } if args.len() == 1 => args.swap_remove(0),
+            other => other,
+        };
+        // Strip a redundant trailing `.to_string()` call — `convert_throw_stmt`
+        // will append its own `.to_string()` unconditionally, so keeping an
+        // inner one produces `"x".to_string().to_string()`.
+        match stripped_some {
+            Expr::MethodCall {
+                object,
+                method,
+                args,
+            } if method == "to_string" && args.is_empty() => *object,
+            other => other,
         }
     }
 }

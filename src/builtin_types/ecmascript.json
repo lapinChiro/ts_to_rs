@@ -93,7 +93,91 @@
           "name": "TNext"
         }
       ],
-      "fields": [],
+      "fields": [
+        {
+          "name": "return",
+          "type": {
+            "kind": "function",
+            "params": [
+              {
+                "kind": "union",
+                "members": [
+                  {
+                    "kind": "undefined"
+                  },
+                  {
+                    "kind": "named",
+                    "name": "TReturn"
+                  }
+                ]
+              }
+            ],
+            "return_type": {
+              "kind": "union",
+              "members": [
+                {
+                  "kind": "named",
+                  "name": "IteratorYieldResult",
+                  "type_args": [
+                    {
+                      "kind": "named",
+                      "name": "T"
+                    }
+                  ]
+                },
+                {
+                  "kind": "named",
+                  "name": "IteratorReturnResult",
+                  "type_args": [
+                    {
+                      "kind": "named",
+                      "name": "TReturn"
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          "optional": true
+        },
+        {
+          "name": "throw",
+          "type": {
+            "kind": "function",
+            "params": [
+              {
+                "kind": "any"
+              }
+            ],
+            "return_type": {
+              "kind": "union",
+              "members": [
+                {
+                  "kind": "named",
+                  "name": "IteratorYieldResult",
+                  "type_args": [
+                    {
+                      "kind": "named",
+                      "name": "T"
+                    }
+                  ]
+                },
+                {
+                  "kind": "named",
+                  "name": "IteratorReturnResult",
+                  "type_args": [
+                    {
+                      "kind": "named",
+                      "name": "TReturn"
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          "optional": true
+        }
+      ],
       "methods": {
         "next": {
           "signatures": [
@@ -120,85 +204,6 @@
                     ]
                   },
                   "rest": true
-                }
-              ],
-              "return_type": {
-                "kind": "union",
-                "members": [
-                  {
-                    "kind": "named",
-                    "name": "IteratorYieldResult",
-                    "type_args": [
-                      {
-                        "kind": "named",
-                        "name": "T"
-                      }
-                    ]
-                  },
-                  {
-                    "kind": "named",
-                    "name": "IteratorReturnResult",
-                    "type_args": [
-                      {
-                        "kind": "named",
-                        "name": "TReturn"
-                      }
-                    ]
-                  }
-                ]
-              }
-            }
-          ]
-        },
-        "return": {
-          "signatures": [
-            {
-              "params": [
-                {
-                  "name": "value",
-                  "type": {
-                    "kind": "named",
-                    "name": "TReturn"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "union",
-                "members": [
-                  {
-                    "kind": "named",
-                    "name": "IteratorYieldResult",
-                    "type_args": [
-                      {
-                        "kind": "named",
-                        "name": "T"
-                      }
-                    ]
-                  },
-                  {
-                    "kind": "named",
-                    "name": "IteratorReturnResult",
-                    "type_args": [
-                      {
-                        "kind": "named",
-                        "name": "TReturn"
-                      }
-                    ]
-                  }
-                ]
-              }
-            }
-          ]
-        },
-        "throw": {
-          "signatures": [
-            {
-              "params": [
-                {
-                  "name": "e",
-                  "type": {
-                    "kind": "any"
-                  }
                 }
               ],
               "return_type": {
@@ -496,7 +501,91 @@
           "name": "TNext"
         }
       ],
-      "fields": [],
+      "fields": [
+        {
+          "name": "return",
+          "type": {
+            "kind": "function",
+            "params": [
+              {
+                "kind": "union",
+                "members": [
+                  {
+                    "kind": "undefined"
+                  },
+                  {
+                    "kind": "named",
+                    "name": "TReturn"
+                  }
+                ]
+              }
+            ],
+            "return_type": {
+              "kind": "union",
+              "members": [
+                {
+                  "kind": "named",
+                  "name": "IteratorYieldResult",
+                  "type_args": [
+                    {
+                      "kind": "named",
+                      "name": "T"
+                    }
+                  ]
+                },
+                {
+                  "kind": "named",
+                  "name": "IteratorReturnResult",
+                  "type_args": [
+                    {
+                      "kind": "named",
+                      "name": "TReturn"
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          "optional": true
+        },
+        {
+          "name": "throw",
+          "type": {
+            "kind": "function",
+            "params": [
+              {
+                "kind": "any"
+              }
+            ],
+            "return_type": {
+              "kind": "union",
+              "members": [
+                {
+                  "kind": "named",
+                  "name": "IteratorYieldResult",
+                  "type_args": [
+                    {
+                      "kind": "named",
+                      "name": "T"
+                    }
+                  ]
+                },
+                {
+                  "kind": "named",
+                  "name": "IteratorReturnResult",
+                  "type_args": [
+                    {
+                      "kind": "named",
+                      "name": "TReturn"
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          "optional": true
+        }
+      ],
       "methods": {
         "next": {
           "signatures": [
@@ -523,85 +612,6 @@
                     ]
                   },
                   "rest": true
-                }
-              ],
-              "return_type": {
-                "kind": "union",
-                "members": [
-                  {
-                    "kind": "named",
-                    "name": "IteratorYieldResult",
-                    "type_args": [
-                      {
-                        "kind": "named",
-                        "name": "T"
-                      }
-                    ]
-                  },
-                  {
-                    "kind": "named",
-                    "name": "IteratorReturnResult",
-                    "type_args": [
-                      {
-                        "kind": "named",
-                        "name": "TReturn"
-                      }
-                    ]
-                  }
-                ]
-              }
-            }
-          ]
-        },
-        "return": {
-          "signatures": [
-            {
-              "params": [
-                {
-                  "name": "value",
-                  "type": {
-                    "kind": "named",
-                    "name": "TReturn"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "union",
-                "members": [
-                  {
-                    "kind": "named",
-                    "name": "IteratorYieldResult",
-                    "type_args": [
-                      {
-                        "kind": "named",
-                        "name": "T"
-                      }
-                    ]
-                  },
-                  {
-                    "kind": "named",
-                    "name": "IteratorReturnResult",
-                    "type_args": [
-                      {
-                        "kind": "named",
-                        "name": "TReturn"
-                      }
-                    ]
-                  }
-                ]
-              }
-            }
-          ]
-        },
-        "throw": {
-          "signatures": [
-            {
-              "params": [
-                {
-                  "name": "e",
-                  "type": {
-                    "kind": "any"
-                  }
                 }
               ],
               "return_type": {
@@ -714,7 +724,8 @@
                   "name": "end",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -765,7 +776,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -788,13 +800,15 @@
                   "name": "start",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 },
                 {
                   "name": "end",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -845,7 +859,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -896,11 +911,20 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
-                "kind": "number"
+                "kind": "union",
+                "members": [
+                  {
+                    "kind": "undefined"
+                  },
+                  {
+                    "kind": "number"
+                  }
+                ]
               }
             }
           ]
@@ -940,7 +964,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -984,7 +1009,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -1007,7 +1033,8 @@
                   "name": "fromIndex",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -1024,7 +1051,8 @@
                   "name": "separator",
                   "type": {
                     "kind": "string"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -1047,7 +1075,8 @@
                   "name": "fromIndex",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -1091,7 +1120,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -1416,7 +1446,8 @@
                   "name": "offset",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -1433,13 +1464,15 @@
                   "name": "start",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 },
                 {
                   "name": "end",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -1490,7 +1523,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -1518,7 +1552,8 @@
                     "return_type": {
                       "kind": "number"
                     }
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -1542,13 +1577,15 @@
                   "name": "begin",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 },
                 {
                   "name": "end",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -1596,7 +1633,8 @@
                   "type": {
                     "kind": "named",
                     "name": "NumberFormatOptions"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -1702,7 +1740,8 @@
                   "name": "fromIndex",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -1790,13 +1829,15 @@
               "name": "byteOffset",
               "type": {
                 "kind": "number"
-              }
+              },
+              "optional": true
             },
             {
               "name": "length",
               "type": {
                 "kind": "number"
-              }
+              },
+              "optional": true
             }
           ],
           "return_type": {
@@ -1823,13 +1864,15 @@
               "name": "byteOffset",
               "type": {
                 "kind": "number"
-              }
+              },
+              "optional": true
             },
             {
               "name": "length",
               "type": {
                 "kind": "number"
-              }
+              },
+              "optional": true
             }
           ],
           "return_type": {
@@ -1949,7 +1992,80 @@
           "name": "T"
         }
       ],
-      "fields": [],
+      "fields": [
+        {
+          "name": "return",
+          "type": {
+            "kind": "function",
+            "params": [
+              {
+                "kind": "any"
+              }
+            ],
+            "return_type": {
+              "kind": "union",
+              "members": [
+                {
+                  "kind": "named",
+                  "name": "IteratorYieldResult",
+                  "type_args": [
+                    {
+                      "kind": "named",
+                      "name": "T"
+                    }
+                  ]
+                },
+                {
+                  "kind": "named",
+                  "name": "IteratorReturnResult",
+                  "type_args": [
+                    {
+                      "kind": "any"
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          "optional": true
+        },
+        {
+          "name": "throw",
+          "type": {
+            "kind": "function",
+            "params": [
+              {
+                "kind": "any"
+              }
+            ],
+            "return_type": {
+              "kind": "union",
+              "members": [
+                {
+                  "kind": "named",
+                  "name": "IteratorYieldResult",
+                  "type_args": [
+                    {
+                      "kind": "named",
+                      "name": "T"
+                    }
+                  ]
+                },
+                {
+                  "kind": "named",
+                  "name": "IteratorReturnResult",
+                  "type_args": [
+                    {
+                      "kind": "any"
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          "optional": true
+        }
+      ],
       "methods": {
         "next": {
           "signatures": [
@@ -2003,82 +2119,6 @@
               }
             }
           ]
-        },
-        "return": {
-          "signatures": [
-            {
-              "params": [
-                {
-                  "name": "value",
-                  "type": {
-                    "kind": "any"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "union",
-                "members": [
-                  {
-                    "kind": "named",
-                    "name": "IteratorYieldResult",
-                    "type_args": [
-                      {
-                        "kind": "named",
-                        "name": "T"
-                      }
-                    ]
-                  },
-                  {
-                    "kind": "named",
-                    "name": "IteratorReturnResult",
-                    "type_args": [
-                      {
-                        "kind": "any"
-                      }
-                    ]
-                  }
-                ]
-              }
-            }
-          ]
-        },
-        "throw": {
-          "signatures": [
-            {
-              "params": [
-                {
-                  "name": "e",
-                  "type": {
-                    "kind": "any"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "union",
-                "members": [
-                  {
-                    "kind": "named",
-                    "name": "IteratorYieldResult",
-                    "type_args": [
-                      {
-                        "kind": "named",
-                        "name": "T"
-                      }
-                    ]
-                  },
-                  {
-                    "kind": "named",
-                    "name": "IteratorReturnResult",
-                    "type_args": [
-                      {
-                        "kind": "any"
-                      }
-                    ]
-                  }
-                ]
-              }
-            }
-          ]
         }
       },
       "constructors": []
@@ -2089,14 +2129,30 @@
         {
           "name": "localeMatcher",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "undefined"
+              },
+              {
+                "kind": "string"
+              }
+            ]
           },
           "optional": true
         },
         {
           "name": "style",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "undefined"
+              },
+              {
+                "kind": "string"
+              }
+            ]
           },
           "optional": true
         },
@@ -2110,14 +2166,30 @@
         {
           "name": "currencyDisplay",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "undefined"
+              },
+              {
+                "kind": "string"
+              }
+            ]
           },
           "optional": true
         },
         {
           "name": "useGrouping",
           "type": {
-            "kind": "boolean"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "undefined"
+              },
+              {
+                "kind": "boolean"
+              }
+            ]
           },
           "optional": true
         },
@@ -2166,21 +2238,45 @@
         {
           "name": "compactDisplay",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "undefined"
+              },
+              {
+                "kind": "string"
+              }
+            ]
           },
           "optional": true
         },
         {
           "name": "notation",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "undefined"
+              },
+              {
+                "kind": "string"
+              }
+            ]
           },
           "optional": true
         },
         {
           "name": "signDisplay",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "undefined"
+              },
+              {
+                "kind": "string"
+              }
+            ]
           },
           "optional": true
         },
@@ -2194,14 +2290,30 @@
         {
           "name": "unitDisplay",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "undefined"
+              },
+              {
+                "kind": "string"
+              }
+            ]
           },
           "optional": true
         },
         {
           "name": "currencySign",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "undefined"
+              },
+              {
+                "kind": "string"
+              }
+            ]
           },
           "optional": true
         }
@@ -2248,13 +2360,15 @@
                   "name": "begin",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 },
                 {
                   "name": "end",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -2368,7 +2482,8 @@
                   "name": "end",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -2419,7 +2534,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -2442,13 +2558,15 @@
                   "name": "start",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 },
                 {
                   "name": "end",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -2499,7 +2617,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -2550,11 +2669,20 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
-                "kind": "number"
+                "kind": "union",
+                "members": [
+                  {
+                    "kind": "undefined"
+                  },
+                  {
+                    "kind": "number"
+                  }
+                ]
               }
             }
           ]
@@ -2594,7 +2722,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -2638,7 +2767,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -2661,7 +2791,8 @@
                   "name": "fromIndex",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -2678,7 +2809,8 @@
                   "name": "separator",
                   "type": {
                     "kind": "string"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -2701,7 +2833,8 @@
                   "name": "fromIndex",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -2745,7 +2878,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -3070,7 +3204,8 @@
                   "name": "offset",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -3087,13 +3222,15 @@
                   "name": "start",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 },
                 {
                   "name": "end",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -3144,7 +3281,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -3172,7 +3310,8 @@
                     "return_type": {
                       "kind": "number"
                     }
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -3196,13 +3335,15 @@
                   "name": "begin",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 },
                 {
                   "name": "end",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -3250,7 +3391,8 @@
                   "type": {
                     "kind": "named",
                     "name": "NumberFormatOptions"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -3356,7 +3498,8 @@
                   "name": "fromIndex",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -3444,13 +3587,15 @@
               "name": "byteOffset",
               "type": {
                 "kind": "number"
-              }
+              },
+              "optional": true
             },
             {
               "name": "length",
               "type": {
                 "kind": "number"
-              }
+              },
+              "optional": true
             }
           ],
           "return_type": {
@@ -3477,13 +3622,15 @@
               "name": "byteOffset",
               "type": {
                 "kind": "number"
-              }
+              },
+              "optional": true
             },
             {
               "name": "length",
               "type": {
                 "kind": "number"
-              }
+              },
+              "optional": true
             }
           ],
           "return_type": {
@@ -3658,7 +3805,8 @@
                   "name": "end",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -3709,7 +3857,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -3732,13 +3881,15 @@
                   "name": "start",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 },
                 {
                   "name": "end",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -3789,7 +3940,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -3840,11 +3992,20 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
-                "kind": "number"
+                "kind": "union",
+                "members": [
+                  {
+                    "kind": "undefined"
+                  },
+                  {
+                    "kind": "number"
+                  }
+                ]
               }
             }
           ]
@@ -3884,7 +4045,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -3928,7 +4090,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -3951,7 +4114,8 @@
                   "name": "fromIndex",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -3968,7 +4132,8 @@
                   "name": "separator",
                   "type": {
                     "kind": "string"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -3991,7 +4156,8 @@
                   "name": "fromIndex",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -4035,7 +4201,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -4360,7 +4527,8 @@
                   "name": "offset",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -4377,13 +4545,15 @@
                   "name": "start",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 },
                 {
                   "name": "end",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -4434,7 +4604,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -4462,7 +4633,8 @@
                     "return_type": {
                       "kind": "number"
                     }
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -4486,13 +4658,15 @@
                   "name": "begin",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 },
                 {
                   "name": "end",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -4540,7 +4714,8 @@
                   "type": {
                     "kind": "named",
                     "name": "NumberFormatOptions"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -4646,7 +4821,8 @@
                   "name": "fromIndex",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -4734,13 +4910,15 @@
               "name": "byteOffset",
               "type": {
                 "kind": "number"
-              }
+              },
+              "optional": true
             },
             {
               "name": "length",
               "type": {
                 "kind": "number"
-              }
+              },
+              "optional": true
             }
           ],
           "return_type": {
@@ -4767,13 +4945,15 @@
               "name": "byteOffset",
               "type": {
                 "kind": "number"
-              }
+              },
+              "optional": true
             },
             {
               "name": "length",
               "type": {
                 "kind": "number"
-              }
+              },
+              "optional": true
             }
           ],
           "return_type": {
@@ -4948,7 +5128,8 @@
                   "name": "end",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -4999,7 +5180,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -5022,13 +5204,15 @@
                   "name": "start",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 },
                 {
                   "name": "end",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -5079,7 +5263,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -5130,11 +5315,20 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
-                "kind": "number"
+                "kind": "union",
+                "members": [
+                  {
+                    "kind": "undefined"
+                  },
+                  {
+                    "kind": "number"
+                  }
+                ]
               }
             }
           ]
@@ -5174,7 +5368,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -5218,7 +5413,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -5241,7 +5437,8 @@
                   "name": "fromIndex",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -5258,7 +5455,8 @@
                   "name": "separator",
                   "type": {
                     "kind": "string"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -5281,7 +5479,8 @@
                   "name": "fromIndex",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -5325,7 +5524,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -5650,7 +5850,8 @@
                   "name": "offset",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -5667,13 +5868,15 @@
                   "name": "start",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 },
                 {
                   "name": "end",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -5724,7 +5927,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -5752,7 +5956,8 @@
                     "return_type": {
                       "kind": "number"
                     }
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -5776,13 +5981,15 @@
                   "name": "begin",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 },
                 {
                   "name": "end",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -5830,7 +6037,8 @@
                   "type": {
                     "kind": "named",
                     "name": "NumberFormatOptions"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -5936,7 +6144,8 @@
                   "name": "fromIndex",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -6024,13 +6233,15 @@
               "name": "byteOffset",
               "type": {
                 "kind": "number"
-              }
+              },
+              "optional": true
             },
             {
               "name": "length",
               "type": {
                 "kind": "number"
-              }
+              },
+              "optional": true
             }
           ],
           "return_type": {
@@ -6057,13 +6268,15 @@
               "name": "byteOffset",
               "type": {
                 "kind": "number"
-              }
+              },
+              "optional": true
             },
             {
               "name": "length",
               "type": {
                 "kind": "number"
-              }
+              },
+              "optional": true
             }
           ],
           "return_type": {
@@ -6238,7 +6451,8 @@
                   "name": "end",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -6289,7 +6503,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -6312,13 +6527,15 @@
                   "name": "start",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 },
                 {
                   "name": "end",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -6369,7 +6586,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -6420,11 +6638,20 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
-                "kind": "number"
+                "kind": "union",
+                "members": [
+                  {
+                    "kind": "undefined"
+                  },
+                  {
+                    "kind": "number"
+                  }
+                ]
               }
             }
           ]
@@ -6464,7 +6691,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -6508,7 +6736,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -6531,7 +6760,8 @@
                   "name": "fromIndex",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -6548,7 +6778,8 @@
                   "name": "separator",
                   "type": {
                     "kind": "string"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -6571,7 +6802,8 @@
                   "name": "fromIndex",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -6615,7 +6847,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -6940,7 +7173,8 @@
                   "name": "offset",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -6957,13 +7191,15 @@
                   "name": "start",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 },
                 {
                   "name": "end",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -7014,7 +7250,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -7042,7 +7279,8 @@
                     "return_type": {
                       "kind": "number"
                     }
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -7066,13 +7304,15 @@
                   "name": "begin",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 },
                 {
                   "name": "end",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -7120,7 +7360,8 @@
                   "type": {
                     "kind": "named",
                     "name": "NumberFormatOptions"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -7226,7 +7467,8 @@
                   "name": "fromIndex",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -7314,13 +7556,15 @@
               "name": "byteOffset",
               "type": {
                 "kind": "number"
-              }
+              },
+              "optional": true
             },
             {
               "name": "length",
               "type": {
                 "kind": "number"
-              }
+              },
+              "optional": true
             }
           ],
           "return_type": {
@@ -7347,13 +7591,15 @@
               "name": "byteOffset",
               "type": {
                 "kind": "number"
-              }
+              },
+              "optional": true
             },
             {
               "name": "length",
               "type": {
                 "kind": "number"
-              }
+              },
+              "optional": true
             }
           ],
           "return_type": {
@@ -7528,7 +7774,8 @@
                   "name": "end",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -7579,7 +7826,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -7602,13 +7850,15 @@
                   "name": "start",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 },
                 {
                   "name": "end",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -7659,7 +7909,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -7710,11 +7961,20 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
-                "kind": "number"
+                "kind": "union",
+                "members": [
+                  {
+                    "kind": "undefined"
+                  },
+                  {
+                    "kind": "number"
+                  }
+                ]
               }
             }
           ]
@@ -7754,7 +8014,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -7798,7 +8059,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -7821,7 +8083,8 @@
                   "name": "fromIndex",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -7838,7 +8101,8 @@
                   "name": "separator",
                   "type": {
                     "kind": "string"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -7861,7 +8125,8 @@
                   "name": "fromIndex",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -7905,7 +8170,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -8230,7 +8496,8 @@
                   "name": "offset",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -8247,13 +8514,15 @@
                   "name": "start",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 },
                 {
                   "name": "end",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -8304,7 +8573,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -8332,7 +8602,8 @@
                     "return_type": {
                       "kind": "number"
                     }
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -8356,13 +8627,15 @@
                   "name": "begin",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 },
                 {
                   "name": "end",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -8410,7 +8683,8 @@
                   "type": {
                     "kind": "named",
                     "name": "NumberFormatOptions"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -8516,7 +8790,8 @@
                   "name": "fromIndex",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -8604,13 +8879,15 @@
               "name": "byteOffset",
               "type": {
                 "kind": "number"
-              }
+              },
+              "optional": true
             },
             {
               "name": "length",
               "type": {
                 "kind": "number"
-              }
+              },
+              "optional": true
             }
           ],
           "return_type": {
@@ -8637,13 +8914,15 @@
               "name": "byteOffset",
               "type": {
                 "kind": "number"
-              }
+              },
+              "optional": true
             },
             {
               "name": "length",
               "type": {
                 "kind": "number"
-              }
+              },
+              "optional": true
             }
           ],
           "return_type": {
@@ -8818,7 +9097,8 @@
                   "name": "end",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -8869,7 +9149,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -8892,13 +9173,15 @@
                   "name": "start",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 },
                 {
                   "name": "end",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -8949,7 +9232,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -9000,11 +9284,20 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
-                "kind": "number"
+                "kind": "union",
+                "members": [
+                  {
+                    "kind": "undefined"
+                  },
+                  {
+                    "kind": "number"
+                  }
+                ]
               }
             }
           ]
@@ -9044,7 +9337,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -9088,7 +9382,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -9111,7 +9406,8 @@
                   "name": "fromIndex",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -9128,7 +9424,8 @@
                   "name": "separator",
                   "type": {
                     "kind": "string"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -9151,7 +9448,8 @@
                   "name": "fromIndex",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -9195,7 +9493,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -9520,7 +9819,8 @@
                   "name": "offset",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -9537,13 +9837,15 @@
                   "name": "start",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 },
                 {
                   "name": "end",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -9594,7 +9896,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -9622,7 +9925,8 @@
                     "return_type": {
                       "kind": "number"
                     }
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -9646,13 +9950,15 @@
                   "name": "begin",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 },
                 {
                   "name": "end",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -9700,7 +10006,8 @@
                   "type": {
                     "kind": "named",
                     "name": "NumberFormatOptions"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -9806,7 +10113,8 @@
                   "name": "fromIndex",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -9894,13 +10202,15 @@
               "name": "byteOffset",
               "type": {
                 "kind": "number"
-              }
+              },
+              "optional": true
             },
             {
               "name": "length",
               "type": {
                 "kind": "number"
-              }
+              },
+              "optional": true
             }
           ],
           "return_type": {
@@ -9927,13 +10237,15 @@
               "name": "byteOffset",
               "type": {
                 "kind": "number"
-              }
+              },
+              "optional": true
             },
             {
               "name": "length",
               "type": {
                 "kind": "number"
-              }
+              },
+              "optional": true
             }
           ],
           "return_type": {
@@ -10108,7 +10420,8 @@
                   "name": "end",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -10159,7 +10472,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -10182,13 +10496,15 @@
                   "name": "start",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 },
                 {
                   "name": "end",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -10239,7 +10555,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -10290,11 +10607,20 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
-                "kind": "number"
+                "kind": "union",
+                "members": [
+                  {
+                    "kind": "undefined"
+                  },
+                  {
+                    "kind": "number"
+                  }
+                ]
               }
             }
           ]
@@ -10334,7 +10660,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -10378,7 +10705,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -10401,7 +10729,8 @@
                   "name": "fromIndex",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -10418,7 +10747,8 @@
                   "name": "separator",
                   "type": {
                     "kind": "string"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -10441,7 +10771,8 @@
                   "name": "fromIndex",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -10485,7 +10816,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -10810,7 +11142,8 @@
                   "name": "offset",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -10827,13 +11160,15 @@
                   "name": "start",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 },
                 {
                   "name": "end",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -10884,7 +11219,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -10912,7 +11248,8 @@
                     "return_type": {
                       "kind": "number"
                     }
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -10936,13 +11273,15 @@
                   "name": "begin",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 },
                 {
                   "name": "end",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -10990,7 +11329,8 @@
                   "type": {
                     "kind": "named",
                     "name": "NumberFormatOptions"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -11096,7 +11436,8 @@
                   "name": "fromIndex",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -11184,13 +11525,15 @@
               "name": "byteOffset",
               "type": {
                 "kind": "number"
-              }
+              },
+              "optional": true
             },
             {
               "name": "length",
               "type": {
                 "kind": "number"
-              }
+              },
+              "optional": true
             }
           ],
           "return_type": {
@@ -11217,13 +11560,15 @@
               "name": "byteOffset",
               "type": {
                 "kind": "number"
-              }
+              },
+              "optional": true
             },
             {
               "name": "length",
               "type": {
                 "kind": "number"
-              }
+              },
+              "optional": true
             }
           ],
           "return_type": {
@@ -11398,7 +11743,8 @@
                   "name": "end",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -11449,7 +11795,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -11472,13 +11819,15 @@
                   "name": "start",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 },
                 {
                   "name": "end",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -11529,7 +11878,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -11580,11 +11930,20 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
-                "kind": "number"
+                "kind": "union",
+                "members": [
+                  {
+                    "kind": "undefined"
+                  },
+                  {
+                    "kind": "number"
+                  }
+                ]
               }
             }
           ]
@@ -11624,7 +11983,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -11668,7 +12028,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -11691,7 +12052,8 @@
                   "name": "fromIndex",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -11708,7 +12070,8 @@
                   "name": "separator",
                   "type": {
                     "kind": "string"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -11731,7 +12094,8 @@
                   "name": "fromIndex",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -11775,7 +12139,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -12100,7 +12465,8 @@
                   "name": "offset",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -12117,13 +12483,15 @@
                   "name": "start",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 },
                 {
                   "name": "end",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -12174,7 +12542,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -12202,7 +12571,8 @@
                     "return_type": {
                       "kind": "number"
                     }
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -12226,13 +12596,15 @@
                   "name": "begin",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 },
                 {
                   "name": "end",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -12280,7 +12652,8 @@
                   "type": {
                     "kind": "named",
                     "name": "NumberFormatOptions"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -12386,7 +12759,8 @@
                   "name": "fromIndex",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -12474,13 +12848,15 @@
               "name": "byteOffset",
               "type": {
                 "kind": "number"
-              }
+              },
+              "optional": true
             },
             {
               "name": "length",
               "type": {
                 "kind": "number"
-              }
+              },
+              "optional": true
             }
           ],
           "return_type": {
@@ -12507,13 +12883,15 @@
               "name": "byteOffset",
               "type": {
                 "kind": "number"
-              }
+              },
+              "optional": true
             },
             {
               "name": "length",
               "type": {
                 "kind": "number"
-              }
+              },
+              "optional": true
             }
           ],
           "return_type": {
@@ -12667,8 +13045,17 @@
                 {
                   "name": "littleEndian",
                   "type": {
-                    "kind": "boolean"
-                  }
+                    "kind": "union",
+                    "members": [
+                      {
+                        "kind": "undefined"
+                      },
+                      {
+                        "kind": "boolean"
+                      }
+                    ]
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -12690,8 +13077,17 @@
                 {
                   "name": "littleEndian",
                   "type": {
-                    "kind": "boolean"
-                  }
+                    "kind": "union",
+                    "members": [
+                      {
+                        "kind": "undefined"
+                      },
+                      {
+                        "kind": "boolean"
+                      }
+                    ]
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -12730,8 +13126,17 @@
                 {
                   "name": "littleEndian",
                   "type": {
-                    "kind": "boolean"
-                  }
+                    "kind": "union",
+                    "members": [
+                      {
+                        "kind": "undefined"
+                      },
+                      {
+                        "kind": "boolean"
+                      }
+                    ]
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -12753,8 +13158,17 @@
                 {
                   "name": "littleEndian",
                   "type": {
-                    "kind": "boolean"
-                  }
+                    "kind": "union",
+                    "members": [
+                      {
+                        "kind": "undefined"
+                      },
+                      {
+                        "kind": "boolean"
+                      }
+                    ]
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -12793,8 +13207,17 @@
                 {
                   "name": "littleEndian",
                   "type": {
-                    "kind": "boolean"
-                  }
+                    "kind": "union",
+                    "members": [
+                      {
+                        "kind": "undefined"
+                      },
+                      {
+                        "kind": "boolean"
+                      }
+                    ]
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -12816,8 +13239,17 @@
                 {
                   "name": "littleEndian",
                   "type": {
-                    "kind": "boolean"
-                  }
+                    "kind": "union",
+                    "members": [
+                      {
+                        "kind": "undefined"
+                      },
+                      {
+                        "kind": "boolean"
+                      }
+                    ]
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -12845,8 +13277,17 @@
                 {
                   "name": "littleEndian",
                   "type": {
-                    "kind": "boolean"
-                  }
+                    "kind": "union",
+                    "members": [
+                      {
+                        "kind": "undefined"
+                      },
+                      {
+                        "kind": "boolean"
+                      }
+                    ]
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -12874,8 +13315,17 @@
                 {
                   "name": "littleEndian",
                   "type": {
-                    "kind": "boolean"
-                  }
+                    "kind": "union",
+                    "members": [
+                      {
+                        "kind": "undefined"
+                      },
+                      {
+                        "kind": "boolean"
+                      }
+                    ]
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -12926,8 +13376,17 @@
                 {
                   "name": "littleEndian",
                   "type": {
-                    "kind": "boolean"
-                  }
+                    "kind": "union",
+                    "members": [
+                      {
+                        "kind": "undefined"
+                      },
+                      {
+                        "kind": "boolean"
+                      }
+                    ]
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -12955,8 +13414,17 @@
                 {
                   "name": "littleEndian",
                   "type": {
-                    "kind": "boolean"
-                  }
+                    "kind": "union",
+                    "members": [
+                      {
+                        "kind": "undefined"
+                      },
+                      {
+                        "kind": "boolean"
+                      }
+                    ]
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -13007,8 +13475,17 @@
                 {
                   "name": "littleEndian",
                   "type": {
-                    "kind": "boolean"
-                  }
+                    "kind": "union",
+                    "members": [
+                      {
+                        "kind": "undefined"
+                      },
+                      {
+                        "kind": "boolean"
+                      }
+                    ]
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -13036,8 +13513,17 @@
                 {
                   "name": "littleEndian",
                   "type": {
-                    "kind": "boolean"
-                  }
+                    "kind": "union",
+                    "members": [
+                      {
+                        "kind": "undefined"
+                      },
+                      {
+                        "kind": "boolean"
+                      }
+                    ]
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -13059,8 +13545,17 @@
                 {
                   "name": "littleEndian",
                   "type": {
-                    "kind": "boolean"
-                  }
+                    "kind": "union",
+                    "members": [
+                      {
+                        "kind": "undefined"
+                      },
+                      {
+                        "kind": "boolean"
+                      }
+                    ]
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -13083,8 +13578,17 @@
                 {
                   "name": "littleEndian",
                   "type": {
-                    "kind": "boolean"
-                  }
+                    "kind": "union",
+                    "members": [
+                      {
+                        "kind": "undefined"
+                      },
+                      {
+                        "kind": "boolean"
+                      }
+                    ]
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -13114,8 +13618,17 @@
                 {
                   "name": "littleEndian",
                   "type": {
-                    "kind": "boolean"
-                  }
+                    "kind": "union",
+                    "members": [
+                      {
+                        "kind": "undefined"
+                      },
+                      {
+                        "kind": "boolean"
+                      }
+                    ]
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -13144,8 +13657,17 @@
                 {
                   "name": "littleEndian",
                   "type": {
-                    "kind": "boolean"
-                  }
+                    "kind": "union",
+                    "members": [
+                      {
+                        "kind": "undefined"
+                      },
+                      {
+                        "kind": "boolean"
+                      }
+                    ]
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -13167,8 +13689,17 @@
                 {
                   "name": "littleEndian",
                   "type": {
-                    "kind": "boolean"
-                  }
+                    "kind": "union",
+                    "members": [
+                      {
+                        "kind": "undefined"
+                      },
+                      {
+                        "kind": "boolean"
+                      }
+                    ]
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -13196,8 +13727,17 @@
                 {
                   "name": "littleEndian",
                   "type": {
-                    "kind": "boolean"
-                  }
+                    "kind": "union",
+                    "members": [
+                      {
+                        "kind": "undefined"
+                      },
+                      {
+                        "kind": "boolean"
+                      }
+                    ]
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -13229,13 +13769,15 @@
               "name": "byteOffset",
               "type": {
                 "kind": "number"
-              }
+              },
+              "optional": true
             },
             {
               "name": "byteLength",
               "type": {
                 "kind": "number"
-              }
+              },
+              "optional": true
             }
           ],
           "return_type": {
@@ -13275,63 +13817,87 @@
                 {
                   "name": "onfulfilled",
                   "type": {
-                    "kind": "function",
-                    "params": [
+                    "kind": "union",
+                    "members": [
                       {
-                        "kind": "named",
-                        "name": "T"
-                      }
-                    ],
-                    "return_type": {
-                      "kind": "union",
-                      "members": [
-                        {
-                          "kind": "named",
-                          "name": "TResult1"
-                        },
-                        {
-                          "kind": "named",
-                          "name": "PromiseLike",
-                          "type_args": [
+                        "kind": "undefined"
+                      },
+                      {
+                        "kind": "null"
+                      },
+                      {
+                        "kind": "function",
+                        "params": [
+                          {
+                            "kind": "named",
+                            "name": "T"
+                          }
+                        ],
+                        "return_type": {
+                          "kind": "union",
+                          "members": [
                             {
                               "kind": "named",
                               "name": "TResult1"
+                            },
+                            {
+                              "kind": "named",
+                              "name": "PromiseLike",
+                              "type_args": [
+                                {
+                                  "kind": "named",
+                                  "name": "TResult1"
+                                }
+                              ]
                             }
                           ]
                         }
-                      ]
-                    }
-                  }
+                      }
+                    ]
+                  },
+                  "optional": true
                 },
                 {
                   "name": "onrejected",
                   "type": {
-                    "kind": "function",
-                    "params": [
+                    "kind": "union",
+                    "members": [
                       {
-                        "kind": "any"
-                      }
-                    ],
-                    "return_type": {
-                      "kind": "union",
-                      "members": [
-                        {
-                          "kind": "named",
-                          "name": "TResult2"
-                        },
-                        {
-                          "kind": "named",
-                          "name": "PromiseLike",
-                          "type_args": [
+                        "kind": "undefined"
+                      },
+                      {
+                        "kind": "null"
+                      },
+                      {
+                        "kind": "function",
+                        "params": [
+                          {
+                            "kind": "any"
+                          }
+                        ],
+                        "return_type": {
+                          "kind": "union",
+                          "members": [
                             {
                               "kind": "named",
                               "name": "TResult2"
+                            },
+                            {
+                              "kind": "named",
+                              "name": "PromiseLike",
+                              "type_args": [
+                                {
+                                  "kind": "named",
+                                  "name": "TResult2"
+                                }
+                              ]
                             }
                           ]
                         }
-                      ]
-                    }
-                  }
+                      }
+                    ]
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -13368,32 +13934,44 @@
                 {
                   "name": "onrejected",
                   "type": {
-                    "kind": "function",
-                    "params": [
+                    "kind": "union",
+                    "members": [
                       {
-                        "kind": "any"
-                      }
-                    ],
-                    "return_type": {
-                      "kind": "union",
-                      "members": [
-                        {
-                          "kind": "named",
-                          "name": "TResult"
-                        },
-                        {
-                          "kind": "named",
-                          "name": "PromiseLike",
-                          "type_args": [
+                        "kind": "undefined"
+                      },
+                      {
+                        "kind": "null"
+                      },
+                      {
+                        "kind": "function",
+                        "params": [
+                          {
+                            "kind": "any"
+                          }
+                        ],
+                        "return_type": {
+                          "kind": "union",
+                          "members": [
                             {
                               "kind": "named",
                               "name": "TResult"
+                            },
+                            {
+                              "kind": "named",
+                              "name": "PromiseLike",
+                              "type_args": [
+                                {
+                                  "kind": "named",
+                                  "name": "TResult"
+                                }
+                              ]
                             }
                           ]
                         }
-                      ]
-                    }
-                  }
+                      }
+                    ]
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -13425,12 +14003,24 @@
                 {
                   "name": "onfinally",
                   "type": {
-                    "kind": "function",
-                    "params": [],
-                    "return_type": {
-                      "kind": "void"
-                    }
-                  }
+                    "kind": "union",
+                    "members": [
+                      {
+                        "kind": "undefined"
+                      },
+                      {
+                        "kind": "null"
+                      },
+                      {
+                        "kind": "function",
+                        "params": [],
+                        "return_type": {
+                          "kind": "void"
+                        }
+                      }
+                    ]
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -13542,63 +14132,87 @@
                 {
                   "name": "onfulfilled",
                   "type": {
-                    "kind": "function",
-                    "params": [
+                    "kind": "union",
+                    "members": [
                       {
-                        "kind": "named",
-                        "name": "T"
-                      }
-                    ],
-                    "return_type": {
-                      "kind": "union",
-                      "members": [
-                        {
-                          "kind": "named",
-                          "name": "TResult1"
-                        },
-                        {
-                          "kind": "named",
-                          "name": "PromiseLike",
-                          "type_args": [
+                        "kind": "undefined"
+                      },
+                      {
+                        "kind": "null"
+                      },
+                      {
+                        "kind": "function",
+                        "params": [
+                          {
+                            "kind": "named",
+                            "name": "T"
+                          }
+                        ],
+                        "return_type": {
+                          "kind": "union",
+                          "members": [
                             {
                               "kind": "named",
                               "name": "TResult1"
+                            },
+                            {
+                              "kind": "named",
+                              "name": "PromiseLike",
+                              "type_args": [
+                                {
+                                  "kind": "named",
+                                  "name": "TResult1"
+                                }
+                              ]
                             }
                           ]
                         }
-                      ]
-                    }
-                  }
+                      }
+                    ]
+                  },
+                  "optional": true
                 },
                 {
                   "name": "onrejected",
                   "type": {
-                    "kind": "function",
-                    "params": [
+                    "kind": "union",
+                    "members": [
                       {
-                        "kind": "any"
-                      }
-                    ],
-                    "return_type": {
-                      "kind": "union",
-                      "members": [
-                        {
-                          "kind": "named",
-                          "name": "TResult2"
-                        },
-                        {
-                          "kind": "named",
-                          "name": "PromiseLike",
-                          "type_args": [
+                        "kind": "undefined"
+                      },
+                      {
+                        "kind": "null"
+                      },
+                      {
+                        "kind": "function",
+                        "params": [
+                          {
+                            "kind": "any"
+                          }
+                        ],
+                        "return_type": {
+                          "kind": "union",
+                          "members": [
                             {
                               "kind": "named",
                               "name": "TResult2"
+                            },
+                            {
+                              "kind": "named",
+                              "name": "PromiseLike",
+                              "type_args": [
+                                {
+                                  "kind": "named",
+                                  "name": "TResult2"
+                                }
+                              ]
                             }
                           ]
                         }
-                      ]
-                    }
-                  }
+                      }
+                    ]
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -13632,7 +14246,15 @@
         {
           "name": "description",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "undefined"
+              },
+              {
+                "kind": "string"
+              }
+            ]
           },
           "readonly": true
         }
@@ -13751,12 +14373,24 @@
             {
               "name": "values",
               "type": {
-                "kind": "array",
-                "element": {
-                  "kind": "named",
-                  "name": "T"
-                }
-              }
+                "kind": "union",
+                "members": [
+                  {
+                    "kind": "undefined"
+                  },
+                  {
+                    "kind": "null"
+                  },
+                  {
+                    "kind": "array",
+                    "element": {
+                      "kind": "named",
+                      "name": "T"
+                    }
+                  }
+                ]
+              },
+              "optional": true
             }
           ],
           "return_type": {
@@ -13861,8 +14495,16 @@
                 }
               ],
               "return_type": {
-                "kind": "named",
-                "name": "V"
+                "kind": "union",
+                "members": [
+                  {
+                    "kind": "undefined"
+                  },
+                  {
+                    "kind": "named",
+                    "name": "V"
+                  }
+                ]
               }
             }
           ]
@@ -13940,21 +14582,33 @@
             {
               "name": "entries",
               "type": {
-                "kind": "array",
-                "element": {
-                  "kind": "tuple",
-                  "elements": [
-                    {
-                      "kind": "named",
-                      "name": "K"
-                    },
-                    {
-                      "kind": "named",
-                      "name": "V"
+                "kind": "union",
+                "members": [
+                  {
+                    "kind": "undefined"
+                  },
+                  {
+                    "kind": "null"
+                  },
+                  {
+                    "kind": "array",
+                    "element": {
+                      "kind": "tuple",
+                      "elements": [
+                        {
+                          "kind": "named",
+                          "name": "K"
+                        },
+                        {
+                          "kind": "named",
+                          "name": "V"
+                        }
+                      ]
                     }
-                  ]
-                }
-              }
+                  }
+                ]
+              },
+              "optional": true
             }
           ],
           "return_type": {
@@ -14139,7 +14793,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -14238,12 +14893,24 @@
             {
               "name": "values",
               "type": {
-                "kind": "array",
-                "element": {
-                  "kind": "named",
-                  "name": "T"
-                }
-              }
+                "kind": "union",
+                "members": [
+                  {
+                    "kind": "undefined"
+                  },
+                  {
+                    "kind": "null"
+                  },
+                  {
+                    "kind": "array",
+                    "element": {
+                      "kind": "named",
+                      "name": "T"
+                    }
+                  }
+                ]
+              },
+              "optional": true
             }
           ],
           "return_type": {
@@ -14267,21 +14934,33 @@
             {
               "name": "iterable",
               "type": {
-                "kind": "named",
-                "name": "Iterable",
-                "type_args": [
+                "kind": "union",
+                "members": [
+                  {
+                    "kind": "undefined"
+                  },
+                  {
+                    "kind": "null"
+                  },
                   {
                     "kind": "named",
-                    "name": "T"
-                  },
-                  {
-                    "kind": "any"
-                  },
-                  {
-                    "kind": "any"
+                    "name": "Iterable",
+                    "type_args": [
+                      {
+                        "kind": "named",
+                        "name": "T"
+                      },
+                      {
+                        "kind": "any"
+                      },
+                      {
+                        "kind": "any"
+                      }
+                    ]
                   }
                 ]
-              }
+              },
+              "optional": true
             }
           ],
           "return_type": {
@@ -14304,7 +14983,80 @@
           "name": "T"
         }
       ],
-      "fields": [],
+      "fields": [
+        {
+          "name": "return",
+          "type": {
+            "kind": "function",
+            "params": [
+              {
+                "kind": "any"
+              }
+            ],
+            "return_type": {
+              "kind": "union",
+              "members": [
+                {
+                  "kind": "named",
+                  "name": "IteratorReturnResult",
+                  "type_args": [
+                    {
+                      "kind": "any"
+                    }
+                  ]
+                },
+                {
+                  "kind": "named",
+                  "name": "IteratorYieldResult",
+                  "type_args": [
+                    {
+                      "kind": "named",
+                      "name": "T"
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          "optional": true
+        },
+        {
+          "name": "throw",
+          "type": {
+            "kind": "function",
+            "params": [
+              {
+                "kind": "any"
+              }
+            ],
+            "return_type": {
+              "kind": "union",
+              "members": [
+                {
+                  "kind": "named",
+                  "name": "IteratorReturnResult",
+                  "type_args": [
+                    {
+                      "kind": "any"
+                    }
+                  ]
+                },
+                {
+                  "kind": "named",
+                  "name": "IteratorYieldResult",
+                  "type_args": [
+                    {
+                      "kind": "named",
+                      "name": "T"
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          "optional": true
+        }
+      ],
       "methods": {
         "next": {
           "signatures": [
@@ -14330,82 +15082,6 @@
                     ]
                   },
                   "rest": true
-                }
-              ],
-              "return_type": {
-                "kind": "union",
-                "members": [
-                  {
-                    "kind": "named",
-                    "name": "IteratorReturnResult",
-                    "type_args": [
-                      {
-                        "kind": "any"
-                      }
-                    ]
-                  },
-                  {
-                    "kind": "named",
-                    "name": "IteratorYieldResult",
-                    "type_args": [
-                      {
-                        "kind": "named",
-                        "name": "T"
-                      }
-                    ]
-                  }
-                ]
-              }
-            }
-          ]
-        },
-        "return": {
-          "signatures": [
-            {
-              "params": [
-                {
-                  "name": "value",
-                  "type": {
-                    "kind": "any"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "union",
-                "members": [
-                  {
-                    "kind": "named",
-                    "name": "IteratorReturnResult",
-                    "type_args": [
-                      {
-                        "kind": "any"
-                      }
-                    ]
-                  },
-                  {
-                    "kind": "named",
-                    "name": "IteratorYieldResult",
-                    "type_args": [
-                      {
-                        "kind": "named",
-                        "name": "T"
-                      }
-                    ]
-                  }
-                ]
-              }
-            }
-          ]
-        },
-        "throw": {
-          "signatures": [
-            {
-              "params": [
-                {
-                  "name": "e",
-                  "type": {
-                    "kind": "any"
-                  }
                 }
               ],
               "return_type": {
@@ -14527,7 +15203,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -14549,8 +15226,16 @@
                 }
               ],
               "return_type": {
-                "kind": "named",
-                "name": "V"
+                "kind": "union",
+                "members": [
+                  {
+                    "kind": "undefined"
+                  },
+                  {
+                    "kind": "named",
+                    "name": "V"
+                  }
+                ]
               }
             }
           ]
@@ -14699,21 +15384,33 @@
             {
               "name": "entries",
               "type": {
-                "kind": "array",
-                "element": {
-                  "kind": "tuple",
-                  "elements": [
-                    {
-                      "kind": "named",
-                      "name": "K"
-                    },
-                    {
-                      "kind": "named",
-                      "name": "V"
+                "kind": "union",
+                "members": [
+                  {
+                    "kind": "undefined"
+                  },
+                  {
+                    "kind": "null"
+                  },
+                  {
+                    "kind": "array",
+                    "element": {
+                      "kind": "tuple",
+                      "elements": [
+                        {
+                          "kind": "named",
+                          "name": "K"
+                        },
+                        {
+                          "kind": "named",
+                          "name": "V"
+                        }
+                      ]
                     }
-                  ]
-                }
-              }
+                  }
+                ]
+              },
+              "optional": true
             }
           ],
           "return_type": {
@@ -14759,30 +15456,42 @@
             {
               "name": "iterable",
               "type": {
-                "kind": "named",
-                "name": "Iterable",
-                "type_args": [
+                "kind": "union",
+                "members": [
                   {
-                    "kind": "tuple",
-                    "elements": [
+                    "kind": "undefined"
+                  },
+                  {
+                    "kind": "null"
+                  },
+                  {
+                    "kind": "named",
+                    "name": "Iterable",
+                    "type_args": [
                       {
-                        "kind": "named",
-                        "name": "K"
+                        "kind": "tuple",
+                        "elements": [
+                          {
+                            "kind": "named",
+                            "name": "K"
+                          },
+                          {
+                            "kind": "named",
+                            "name": "V"
+                          }
+                        ]
                       },
                       {
-                        "kind": "named",
-                        "name": "V"
+                        "kind": "any"
+                      },
+                      {
+                        "kind": "any"
                       }
                     ]
-                  },
-                  {
-                    "kind": "any"
-                  },
-                  {
-                    "kind": "any"
                   }
                 ]
-              }
+              },
+              "optional": true
             }
           ],
           "return_type": {
@@ -14809,7 +15518,80 @@
           "name": "T"
         }
       ],
-      "fields": [],
+      "fields": [
+        {
+          "name": "return",
+          "type": {
+            "kind": "function",
+            "params": [
+              {
+                "kind": "any"
+              }
+            ],
+            "return_type": {
+              "kind": "union",
+              "members": [
+                {
+                  "kind": "named",
+                  "name": "IteratorReturnResult",
+                  "type_args": [
+                    {
+                      "kind": "any"
+                    }
+                  ]
+                },
+                {
+                  "kind": "named",
+                  "name": "IteratorYieldResult",
+                  "type_args": [
+                    {
+                      "kind": "named",
+                      "name": "T"
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          "optional": true
+        },
+        {
+          "name": "throw",
+          "type": {
+            "kind": "function",
+            "params": [
+              {
+                "kind": "any"
+              }
+            ],
+            "return_type": {
+              "kind": "union",
+              "members": [
+                {
+                  "kind": "named",
+                  "name": "IteratorReturnResult",
+                  "type_args": [
+                    {
+                      "kind": "any"
+                    }
+                  ]
+                },
+                {
+                  "kind": "named",
+                  "name": "IteratorYieldResult",
+                  "type_args": [
+                    {
+                      "kind": "named",
+                      "name": "T"
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          "optional": true
+        }
+      ],
       "methods": {
         "next": {
           "signatures": [
@@ -14835,82 +15617,6 @@
                     ]
                   },
                   "rest": true
-                }
-              ],
-              "return_type": {
-                "kind": "union",
-                "members": [
-                  {
-                    "kind": "named",
-                    "name": "IteratorReturnResult",
-                    "type_args": [
-                      {
-                        "kind": "any"
-                      }
-                    ]
-                  },
-                  {
-                    "kind": "named",
-                    "name": "IteratorYieldResult",
-                    "type_args": [
-                      {
-                        "kind": "named",
-                        "name": "T"
-                      }
-                    ]
-                  }
-                ]
-              }
-            }
-          ]
-        },
-        "return": {
-          "signatures": [
-            {
-              "params": [
-                {
-                  "name": "value",
-                  "type": {
-                    "kind": "any"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "union",
-                "members": [
-                  {
-                    "kind": "named",
-                    "name": "IteratorReturnResult",
-                    "type_args": [
-                      {
-                        "kind": "any"
-                      }
-                    ]
-                  },
-                  {
-                    "kind": "named",
-                    "name": "IteratorYieldResult",
-                    "type_args": [
-                      {
-                        "kind": "named",
-                        "name": "T"
-                      }
-                    ]
-                  }
-                ]
-              }
-            }
-          ]
-        },
-        "throw": {
-          "signatures": [
-            {
-              "params": [
-                {
-                  "name": "e",
-                  "type": {
-                    "kind": "any"
-                  }
                 }
               ],
               "return_type": {
@@ -14974,7 +15680,8 @@
               "name": "message",
               "type": {
                 "kind": "string"
-              }
+              },
+              "optional": true
             }
           ],
           "return_type": {
@@ -14988,7 +15695,8 @@
               "name": "message",
               "type": {
                 "kind": "string"
-              }
+              },
+              "optional": true
             }
           ],
           "return_type": {
@@ -15029,7 +15737,8 @@
               "name": "message",
               "type": {
                 "kind": "string"
-              }
+              },
+              "optional": true
             }
           ],
           "return_type": {
@@ -15070,7 +15779,8 @@
               "name": "message",
               "type": {
                 "kind": "string"
-              }
+              },
+              "optional": true
             }
           ],
           "return_type": {
@@ -15084,7 +15794,8 @@
               "name": "message",
               "type": {
                 "kind": "string"
-              }
+              },
+              "optional": true
             }
           ],
           "return_type": {
@@ -15125,7 +15836,8 @@
               "name": "message",
               "type": {
                 "kind": "string"
-              }
+              },
+              "optional": true
             }
           ],
           "return_type": {
@@ -15139,7 +15851,8 @@
               "name": "message",
               "type": {
                 "kind": "string"
-              }
+              },
+              "optional": true
             }
           ],
           "return_type": {
@@ -15180,7 +15893,8 @@
               "name": "message",
               "type": {
                 "kind": "string"
-              }
+              },
+              "optional": true
             }
           ],
           "return_type": {
@@ -15194,7 +15908,8 @@
               "name": "message",
               "type": {
                 "kind": "string"
-              }
+              },
+              "optional": true
             }
           ],
           "return_type": {
@@ -15235,7 +15950,8 @@
               "name": "message",
               "type": {
                 "kind": "string"
-              }
+              },
+              "optional": true
             }
           ],
           "return_type": {
@@ -15249,7 +15965,8 @@
               "name": "message",
               "type": {
                 "kind": "string"
-              }
+              },
+              "optional": true
             }
           ],
           "return_type": {
@@ -15290,7 +16007,8 @@
               "name": "message",
               "type": {
                 "kind": "string"
-              }
+              },
+              "optional": true
             }
           ],
           "return_type": {
@@ -15304,7 +16022,8 @@
               "name": "message",
               "type": {
                 "kind": "string"
-              }
+              },
+              "optional": true
             }
           ],
           "return_type": {
@@ -16042,7 +16761,8 @@
                     "return_type": {
                       "kind": "any"
                     }
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -16076,7 +16796,8 @@
                     "return_type": {
                       "kind": "any"
                     }
-                  }
+                  },
+                  "optional": true
                 },
                 {
                   "name": "space",
@@ -16084,13 +16805,17 @@
                     "kind": "union",
                     "members": [
                       {
+                        "kind": "undefined"
+                      },
+                      {
                         "kind": "string"
                       },
                       {
                         "kind": "number"
                       }
                     ]
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -16108,19 +16833,31 @@
                 {
                   "name": "replacer",
                   "type": {
-                    "kind": "array",
-                    "element": {
-                      "kind": "union",
-                      "members": [
-                        {
-                          "kind": "string"
-                        },
-                        {
-                          "kind": "number"
+                    "kind": "union",
+                    "members": [
+                      {
+                        "kind": "undefined"
+                      },
+                      {
+                        "kind": "null"
+                      },
+                      {
+                        "kind": "array",
+                        "element": {
+                          "kind": "union",
+                          "members": [
+                            {
+                              "kind": "string"
+                            },
+                            {
+                              "kind": "number"
+                            }
+                          ]
                         }
-                      ]
-                    }
-                  }
+                      }
+                    ]
+                  },
+                  "optional": true
                 },
                 {
                   "name": "space",
@@ -16128,13 +16865,17 @@
                     "kind": "union",
                     "members": [
                       {
+                        "kind": "undefined"
+                      },
+                      {
                         "kind": "string"
                       },
                       {
                         "kind": "number"
                       }
                     ]
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -16225,9 +16966,17 @@
                 }
               ],
               "return_type": {
-                "kind": "named",
-                "name": "RegExpExecArray",
-                "type_args": []
+                "kind": "union",
+                "members": [
+                  {
+                    "kind": "null"
+                  },
+                  {
+                    "kind": "named",
+                    "name": "RegExpExecArray",
+                    "type_args": []
+                  }
+                ]
               }
             }
           ]
@@ -16263,7 +17012,8 @@
                   "name": "flags",
                   "type": {
                     "kind": "string"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -16313,7 +17063,8 @@
               "name": "flags",
               "type": {
                 "kind": "string"
-              }
+              },
+              "optional": true
             }
           ],
           "return_type": {
@@ -16344,7 +17095,8 @@
               "name": "flags",
               "type": {
                 "kind": "string"
-              }
+              },
+              "optional": true
             }
           ],
           "return_type": {
@@ -16441,7 +17193,8 @@
                   "name": "options",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -16455,7 +17208,15 @@
             {
               "params": [],
               "return_type": {
-                "kind": "string"
+                "kind": "union",
+                "members": [
+                  {
+                    "kind": "undefined"
+                  },
+                  {
+                    "kind": "string"
+                  }
+                ]
               }
             }
           ]
@@ -16553,7 +17314,8 @@
                   "name": "separator",
                   "type": {
                     "kind": "string"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -16580,7 +17342,15 @@
             {
               "params": [],
               "return_type": {
-                "kind": "string"
+                "kind": "union",
+                "members": [
+                  {
+                    "kind": "undefined"
+                  },
+                  {
+                    "kind": "string"
+                  }
+                ]
               }
             }
           ]
@@ -16593,13 +17363,15 @@
                   "name": "start",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 },
                 {
                   "name": "end",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -16630,7 +17402,8 @@
                     "return_type": {
                       "kind": "number"
                     }
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -16655,7 +17428,8 @@
                   "name": "deleteCount",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -16734,7 +17508,8 @@
                   "name": "fromIndex",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -16757,7 +17532,8 @@
                   "name": "fromIndex",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -16806,7 +17582,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -16842,7 +17619,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -16882,7 +17660,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -16922,7 +17701,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -16968,7 +17748,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -17021,7 +17802,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -17061,7 +17843,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -17361,12 +18144,21 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
-                "kind": "named",
-                "name": "S"
+                "kind": "union",
+                "members": [
+                  {
+                    "kind": "undefined"
+                  },
+                  {
+                    "kind": "named",
+                    "name": "S"
+                  }
+                ]
               }
             },
             {
@@ -17398,11 +18190,20 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
-                "kind": "string"
+                "kind": "union",
+                "members": [
+                  {
+                    "kind": "undefined"
+                  },
+                  {
+                    "kind": "string"
+                  }
+                ]
               }
             }
           ]
@@ -17438,7 +18239,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -17461,13 +18263,15 @@
                   "name": "start",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 },
                 {
                   "name": "end",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -17498,7 +18302,8 @@
                   "name": "end",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -17579,7 +18384,8 @@
                   "name": "fromIndex",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -17641,7 +18447,8 @@
                   "type": {
                     "kind": "named",
                     "name": "This"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -17674,7 +18481,8 @@
                   "type": {
                     "kind": "named",
                     "name": "D"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -17722,7 +18530,8 @@
                   "name": "separator",
                   "type": {
                     "kind": "string"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -17739,13 +18548,15 @@
                   "name": "start",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 },
                 {
                   "name": "end",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -17817,6 +18628,9 @@
                     "kind": "union",
                     "members": [
                       {
+                        "kind": "undefined"
+                      },
+                      {
                         "kind": "string"
                       },
                       {
@@ -17826,14 +18640,16 @@
                         }
                       }
                     ]
-                  }
+                  },
+                  "optional": true
                 },
                 {
                   "name": "options",
                   "type": {
                     "kind": "named",
                     "name": "DateTimeFormatOptions"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -17847,6 +18663,9 @@
                   "type": {
                     "kind": "union",
                     "members": [
+                      {
+                        "kind": "undefined"
+                      },
                       {
                         "kind": "string"
                       },
@@ -17870,14 +18689,16 @@
                         }
                       }
                     ]
-                  }
+                  },
+                  "optional": true
                 },
                 {
                   "name": "options",
                   "type": {
                     "kind": "named",
                     "name": "DateTimeFormatOptions"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -17902,6 +18723,9 @@
                     "kind": "union",
                     "members": [
                       {
+                        "kind": "undefined"
+                      },
+                      {
                         "kind": "string"
                       },
                       {
@@ -17911,14 +18735,16 @@
                         }
                       }
                     ]
-                  }
+                  },
+                  "optional": true
                 },
                 {
                   "name": "options",
                   "type": {
                     "kind": "named",
                     "name": "DateTimeFormatOptions"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -17932,6 +18758,9 @@
                   "type": {
                     "kind": "union",
                     "members": [
+                      {
+                        "kind": "undefined"
+                      },
                       {
                         "kind": "string"
                       },
@@ -17955,14 +18784,16 @@
                         }
                       }
                     ]
-                  }
+                  },
+                  "optional": true
                 },
                 {
                   "name": "options",
                   "type": {
                     "kind": "named",
                     "name": "DateTimeFormatOptions"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -17987,6 +18818,9 @@
                     "kind": "union",
                     "members": [
                       {
+                        "kind": "undefined"
+                      },
+                      {
                         "kind": "string"
                       },
                       {
@@ -17996,14 +18830,16 @@
                         }
                       }
                     ]
-                  }
+                  },
+                  "optional": true
                 },
                 {
                   "name": "options",
                   "type": {
                     "kind": "named",
                     "name": "DateTimeFormatOptions"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -18017,6 +18853,9 @@
                   "type": {
                     "kind": "union",
                     "members": [
+                      {
+                        "kind": "undefined"
+                      },
                       {
                         "kind": "string"
                       },
@@ -18040,14 +18879,16 @@
                         }
                       }
                     ]
-                  }
+                  },
+                  "optional": true
                 },
                 {
                   "name": "options",
                   "type": {
                     "kind": "named",
                     "name": "DateTimeFormatOptions"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -18311,7 +19152,8 @@
                   "name": "ms",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -18334,7 +19176,8 @@
                   "name": "ms",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -18357,13 +19200,15 @@
                   "name": "sec",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 },
                 {
                   "name": "ms",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -18386,13 +19231,15 @@
                   "name": "sec",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 },
                 {
                   "name": "ms",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -18415,19 +19262,22 @@
                   "name": "min",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 },
                 {
                   "name": "sec",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 },
                 {
                   "name": "ms",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -18450,19 +19300,22 @@
                   "name": "min",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 },
                 {
                   "name": "sec",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 },
                 {
                   "name": "ms",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -18519,7 +19372,8 @@
                   "name": "date",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -18542,7 +19396,8 @@
                   "name": "date",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -18565,13 +19420,15 @@
                   "name": "month",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 },
                 {
                   "name": "date",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -18594,13 +19451,15 @@
                   "name": "month",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 },
                 {
                   "name": "date",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -18637,7 +19496,8 @@
                   "name": "key",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -18695,31 +19555,36 @@
               "name": "date",
               "type": {
                 "kind": "number"
-              }
+              },
+              "optional": true
             },
             {
               "name": "hours",
               "type": {
                 "kind": "number"
-              }
+              },
+              "optional": true
             },
             {
               "name": "minutes",
               "type": {
                 "kind": "number"
-              }
+              },
+              "optional": true
             },
             {
               "name": "seconds",
               "type": {
                 "kind": "number"
-              }
+              },
+              "optional": true
             },
             {
               "name": "ms",
               "type": {
                 "kind": "number"
-              }
+              },
+              "optional": true
             }
           ],
           "return_type": {
@@ -18780,7 +19645,15 @@
         {
           "name": "caseFirst",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "undefined"
+              },
+              {
+                "kind": "string"
+              }
+            ]
           },
           "optional": true
         },
@@ -18794,7 +19667,15 @@
         {
           "name": "hourCycle",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "undefined"
+              },
+              {
+                "kind": "string"
+              }
+            ]
           },
           "optional": true
         },
@@ -18808,7 +19689,15 @@
         {
           "name": "numeric",
           "type": {
-            "kind": "boolean"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "undefined"
+              },
+              {
+                "kind": "boolean"
+              }
+            ]
           },
           "optional": true
         },
@@ -18884,7 +19773,8 @@
               "type": {
                 "kind": "named",
                 "name": "LocaleOptions"
-              }
+              },
+              "optional": true
             }
           ],
           "return_type": {
@@ -18914,7 +19804,15 @@
         {
           "name": "caseFirst",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "undefined"
+              },
+              {
+                "kind": "string"
+              }
+            ]
           },
           "optional": true
         },
@@ -18928,7 +19826,15 @@
         {
           "name": "hourCycle",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "undefined"
+              },
+              {
+                "kind": "string"
+              }
+            ]
           },
           "optional": true
         },
@@ -18949,7 +19855,15 @@
         {
           "name": "numeric",
           "type": {
-            "kind": "boolean"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "undefined"
+              },
+              {
+                "kind": "boolean"
+              }
+            ]
           },
           "optional": true
         },
@@ -18977,84 +19891,180 @@
         {
           "name": "localeMatcher",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "undefined"
+              },
+              {
+                "kind": "string"
+              }
+            ]
           },
           "optional": true
         },
         {
           "name": "weekday",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "undefined"
+              },
+              {
+                "kind": "string"
+              }
+            ]
           },
           "optional": true
         },
         {
           "name": "era",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "undefined"
+              },
+              {
+                "kind": "string"
+              }
+            ]
           },
           "optional": true
         },
         {
           "name": "year",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "undefined"
+              },
+              {
+                "kind": "string"
+              }
+            ]
           },
           "optional": true
         },
         {
           "name": "month",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "undefined"
+              },
+              {
+                "kind": "string"
+              }
+            ]
           },
           "optional": true
         },
         {
           "name": "day",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "undefined"
+              },
+              {
+                "kind": "string"
+              }
+            ]
           },
           "optional": true
         },
         {
           "name": "hour",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "undefined"
+              },
+              {
+                "kind": "string"
+              }
+            ]
           },
           "optional": true
         },
         {
           "name": "minute",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "undefined"
+              },
+              {
+                "kind": "string"
+              }
+            ]
           },
           "optional": true
         },
         {
           "name": "second",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "undefined"
+              },
+              {
+                "kind": "string"
+              }
+            ]
           },
           "optional": true
         },
         {
           "name": "timeZoneName",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "undefined"
+              },
+              {
+                "kind": "string"
+              }
+            ]
           },
           "optional": true
         },
         {
           "name": "formatMatcher",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "undefined"
+              },
+              {
+                "kind": "string"
+              }
+            ]
           },
           "optional": true
         },
         {
           "name": "hour12",
           "type": {
-            "kind": "boolean"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "undefined"
+              },
+              {
+                "kind": "boolean"
+              }
+            ]
           },
           "optional": true
         },
@@ -19075,7 +20085,15 @@
         {
           "name": "dayPeriod",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "undefined"
+              },
+              {
+                "kind": "string"
+              }
+            ]
           },
           "optional": true
         },
@@ -19089,21 +20107,45 @@
         {
           "name": "dateStyle",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "undefined"
+              },
+              {
+                "kind": "string"
+              }
+            ]
           },
           "optional": true
         },
         {
           "name": "timeStyle",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "undefined"
+              },
+              {
+                "kind": "string"
+              }
+            ]
           },
           "optional": true
         },
         {
           "name": "hourCycle",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "undefined"
+              },
+              {
+                "kind": "string"
+              }
+            ]
           },
           "optional": true
         }
@@ -19168,7 +20210,8 @@
                   "name": "options",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -19182,8 +20225,16 @@
             {
               "params": [],
               "return_type": {
-                "kind": "named",
-                "name": "T"
+                "kind": "union",
+                "members": [
+                  {
+                    "kind": "undefined"
+                  },
+                  {
+                    "kind": "named",
+                    "name": "T"
+                  }
+                ]
               }
             }
           ]
@@ -19287,7 +20338,8 @@
                   "name": "separator",
                   "type": {
                     "kind": "string"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -19315,8 +20367,16 @@
             {
               "params": [],
               "return_type": {
-                "kind": "named",
-                "name": "T"
+                "kind": "union",
+                "members": [
+                  {
+                    "kind": "undefined"
+                  },
+                  {
+                    "kind": "named",
+                    "name": "T"
+                  }
+                ]
               }
             }
           ]
@@ -19329,13 +20389,15 @@
                   "name": "start",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 },
                 {
                   "name": "end",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -19369,7 +20431,8 @@
                     "return_type": {
                       "kind": "number"
                     }
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -19396,7 +20459,8 @@
                   "name": "deleteCount",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -19480,7 +20544,8 @@
                   "name": "fromIndex",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -19504,7 +20569,8 @@
                   "name": "fromIndex",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -19555,7 +20621,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -19593,7 +20660,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -19635,7 +20703,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -19677,7 +20746,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -19725,7 +20795,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -19780,7 +20851,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -19822,7 +20894,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -20151,12 +21224,21 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
-                "kind": "named",
-                "name": "S"
+                "kind": "union",
+                "members": [
+                  {
+                    "kind": "undefined"
+                  },
+                  {
+                    "kind": "named",
+                    "name": "S"
+                  }
+                ]
               }
             },
             {
@@ -20190,12 +21272,21 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
-                "kind": "named",
-                "name": "T"
+                "kind": "union",
+                "members": [
+                  {
+                    "kind": "undefined"
+                  },
+                  {
+                    "kind": "named",
+                    "name": "T"
+                  }
+                ]
               }
             }
           ]
@@ -20233,7 +21324,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -20257,13 +21349,15 @@
                   "name": "start",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 },
                 {
                   "name": "end",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -20296,7 +21390,8 @@
                   "name": "end",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -20382,7 +21477,8 @@
                   "name": "fromIndex",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -20446,7 +21542,8 @@
                   "type": {
                     "kind": "named",
                     "name": "This"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -20479,7 +21576,8 @@
                   "type": {
                     "kind": "named",
                     "name": "D"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -20500,7 +21598,8 @@
               "name": "arrayLength",
               "type": {
                 "kind": "number"
-              }
+              },
+              "optional": true
             }
           ],
           "return_type": {
@@ -20613,7 +21712,8 @@
                   "name": "argArray",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -20833,7 +21933,8 @@
               "name": "value",
               "type": {
                 "kind": "any"
-              }
+              },
+              "optional": true
             }
           ],
           "return_type": {
@@ -20865,7 +21966,8 @@
               "name": "value",
               "type": {
                 "kind": "any"
-              }
+              },
+              "optional": true
             }
           ],
           "return_type": {
@@ -20887,7 +21989,8 @@
                   "name": "radix",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -20904,7 +22007,8 @@
                   "name": "fractionDigits",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -20921,7 +22025,8 @@
                   "name": "fractionDigits",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -20938,7 +22043,8 @@
                   "name": "precision",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -20967,6 +22073,9 @@
                     "kind": "union",
                     "members": [
                       {
+                        "kind": "undefined"
+                      },
+                      {
                         "kind": "string"
                       },
                       {
@@ -20976,14 +22085,16 @@
                         }
                       }
                     ]
-                  }
+                  },
+                  "optional": true
                 },
                 {
                   "name": "options",
                   "type": {
                     "kind": "named",
                     "name": "NumberFormatOptions"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -20997,6 +22108,9 @@
                   "type": {
                     "kind": "union",
                     "members": [
+                      {
+                        "kind": "undefined"
+                      },
                       {
                         "kind": "string"
                       },
@@ -21020,14 +22134,16 @@
                         }
                       }
                     ]
-                  }
+                  },
+                  "optional": true
                 },
                 {
                   "name": "options",
                   "type": {
                     "kind": "named",
                     "name": "NumberFormatOptions"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -21044,7 +22160,8 @@
               "name": "value",
               "type": {
                 "kind": "any"
-              }
+              },
+              "optional": true
             }
           ],
           "return_type": {
@@ -21145,7 +22262,8 @@
                   "name": "position",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -21168,7 +22286,8 @@
                   "name": "position",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -21206,6 +22325,9 @@
                     "kind": "union",
                     "members": [
                       {
+                        "kind": "undefined"
+                      },
+                      {
                         "kind": "string"
                       },
                       {
@@ -21215,14 +22337,16 @@
                         }
                       }
                     ]
-                  }
+                  },
+                  "optional": true
                 },
                 {
                   "name": "options",
                   "type": {
                     "kind": "named",
                     "name": "CollatorOptions"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -21242,6 +22366,9 @@
                   "type": {
                     "kind": "union",
                     "members": [
+                      {
+                        "kind": "undefined"
+                      },
                       {
                         "kind": "string"
                       },
@@ -21265,14 +22392,16 @@
                         }
                       }
                     ]
-                  }
+                  },
+                  "optional": true
                 },
                 {
                   "name": "options",
                   "type": {
                     "kind": "named",
                     "name": "CollatorOptions"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -21303,9 +22432,17 @@
                 }
               ],
               "return_type": {
-                "kind": "named",
-                "name": "RegExpMatchArray",
-                "type_args": []
+                "kind": "union",
+                "members": [
+                  {
+                    "kind": "null"
+                  },
+                  {
+                    "kind": "named",
+                    "name": "RegExpMatchArray",
+                    "type_args": []
+                  }
+                ]
               }
             },
             {
@@ -21320,17 +22457,33 @@
                       }
                     ],
                     "return_type": {
-                      "kind": "named",
-                      "name": "RegExpMatchArray",
-                      "type_args": []
+                      "kind": "union",
+                      "members": [
+                        {
+                          "kind": "null"
+                        },
+                        {
+                          "kind": "named",
+                          "name": "RegExpMatchArray",
+                          "type_args": []
+                        }
+                      ]
                     }
                   }
                 }
               ],
               "return_type": {
-                "kind": "named",
-                "name": "RegExpMatchArray",
-                "type_args": []
+                "kind": "union",
+                "members": [
+                  {
+                    "kind": "null"
+                  },
+                  {
+                    "kind": "named",
+                    "name": "RegExpMatchArray",
+                    "type_args": []
+                  }
+                ]
               }
             }
           ]
@@ -21555,13 +22708,15 @@
                   "name": "start",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 },
                 {
                   "name": "end",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -21594,7 +22749,8 @@
                   "name": "limit",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -21615,7 +22771,15 @@
                         "kind": "string"
                       },
                       {
-                        "kind": "number"
+                        "kind": "union",
+                        "members": [
+                          {
+                            "kind": "undefined"
+                          },
+                          {
+                            "kind": "number"
+                          }
+                        ]
                       }
                     ],
                     "return_type": {
@@ -21630,7 +22794,8 @@
                   "name": "limit",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -21656,7 +22821,8 @@
                   "name": "end",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -21685,6 +22851,9 @@
                     "kind": "union",
                     "members": [
                       {
+                        "kind": "undefined"
+                      },
+                      {
                         "kind": "string"
                       },
                       {
@@ -21694,7 +22863,8 @@
                         }
                       }
                     ]
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -21708,6 +22878,9 @@
                   "type": {
                     "kind": "union",
                     "members": [
+                      {
+                        "kind": "undefined"
+                      },
                       {
                         "kind": "string"
                       },
@@ -21731,7 +22904,8 @@
                         }
                       }
                     ]
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -21760,6 +22934,9 @@
                     "kind": "union",
                     "members": [
                       {
+                        "kind": "undefined"
+                      },
+                      {
                         "kind": "string"
                       },
                       {
@@ -21769,7 +22946,8 @@
                         }
                       }
                     ]
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -21783,6 +22961,9 @@
                   "type": {
                     "kind": "union",
                     "members": [
+                      {
+                        "kind": "undefined"
+                      },
                       {
                         "kind": "string"
                       },
@@ -21806,7 +22987,8 @@
                         }
                       }
                     ]
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -21839,7 +23021,8 @@
                   "name": "length",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -21870,7 +23053,15 @@
                 }
               ],
               "return_type": {
-                "kind": "number"
+                "kind": "union",
+                "members": [
+                  {
+                    "kind": "undefined"
+                  },
+                  {
+                    "kind": "number"
+                  }
+                ]
               }
             }
           ]
@@ -21889,7 +23080,8 @@
                   "name": "position",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -21912,7 +23104,8 @@
                   "name": "endPosition",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -21942,7 +23135,8 @@
                   "name": "form",
                   "type": {
                     "kind": "string"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -21982,7 +23176,8 @@
                   "name": "position",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -22176,7 +23371,8 @@
                   "name": "fillString",
                   "type": {
                     "kind": "string"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -22199,7 +23395,8 @@
                   "name": "fillString",
                   "type": {
                     "kind": "string"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -22283,7 +23480,8 @@
               "name": "value",
               "type": {
                 "kind": "any"
-              }
+              },
+              "optional": true
             }
           ],
           "return_type": {
@@ -22300,7 +23498,80 @@
           "name": "T"
         }
       ],
-      "fields": [],
+      "fields": [
+        {
+          "name": "return",
+          "type": {
+            "kind": "function",
+            "params": [
+              {
+                "kind": "any"
+              }
+            ],
+            "return_type": {
+              "kind": "union",
+              "members": [
+                {
+                  "kind": "named",
+                  "name": "IteratorReturnResult",
+                  "type_args": [
+                    {
+                      "kind": "any"
+                    }
+                  ]
+                },
+                {
+                  "kind": "named",
+                  "name": "IteratorYieldResult",
+                  "type_args": [
+                    {
+                      "kind": "named",
+                      "name": "T"
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          "optional": true
+        },
+        {
+          "name": "throw",
+          "type": {
+            "kind": "function",
+            "params": [
+              {
+                "kind": "any"
+              }
+            ],
+            "return_type": {
+              "kind": "union",
+              "members": [
+                {
+                  "kind": "named",
+                  "name": "IteratorReturnResult",
+                  "type_args": [
+                    {
+                      "kind": "any"
+                    }
+                  ]
+                },
+                {
+                  "kind": "named",
+                  "name": "IteratorYieldResult",
+                  "type_args": [
+                    {
+                      "kind": "named",
+                      "name": "T"
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          "optional": true
+        }
+      ],
       "methods": {
         "next": {
           "signatures": [
@@ -22326,82 +23597,6 @@
                     ]
                   },
                   "rest": true
-                }
-              ],
-              "return_type": {
-                "kind": "union",
-                "members": [
-                  {
-                    "kind": "named",
-                    "name": "IteratorReturnResult",
-                    "type_args": [
-                      {
-                        "kind": "any"
-                      }
-                    ]
-                  },
-                  {
-                    "kind": "named",
-                    "name": "IteratorYieldResult",
-                    "type_args": [
-                      {
-                        "kind": "named",
-                        "name": "T"
-                      }
-                    ]
-                  }
-                ]
-              }
-            }
-          ]
-        },
-        "return": {
-          "signatures": [
-            {
-              "params": [
-                {
-                  "name": "value",
-                  "type": {
-                    "kind": "any"
-                  }
-                }
-              ],
-              "return_type": {
-                "kind": "union",
-                "members": [
-                  {
-                    "kind": "named",
-                    "name": "IteratorReturnResult",
-                    "type_args": [
-                      {
-                        "kind": "any"
-                      }
-                    ]
-                  },
-                  {
-                    "kind": "named",
-                    "name": "IteratorYieldResult",
-                    "type_args": [
-                      {
-                        "kind": "named",
-                        "name": "T"
-                      }
-                    ]
-                  }
-                ]
-              }
-            }
-          ]
-        },
-        "throw": {
-          "signatures": [
-            {
-              "params": [
-                {
-                  "name": "e",
-                  "type": {
-                    "kind": "any"
-                  }
                 }
               ],
               "return_type": {
@@ -22522,7 +23717,8 @@
                   "name": "options",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -22536,7 +23732,15 @@
             {
               "params": [],
               "return_type": {
-                "kind": "string"
+                "kind": "union",
+                "members": [
+                  {
+                    "kind": "undefined"
+                  },
+                  {
+                    "kind": "string"
+                  }
+                ]
               }
             }
           ]
@@ -22634,7 +23838,8 @@
                   "name": "separator",
                   "type": {
                     "kind": "string"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -22661,7 +23866,15 @@
             {
               "params": [],
               "return_type": {
-                "kind": "string"
+                "kind": "union",
+                "members": [
+                  {
+                    "kind": "undefined"
+                  },
+                  {
+                    "kind": "string"
+                  }
+                ]
               }
             }
           ]
@@ -22674,13 +23887,15 @@
                   "name": "start",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 },
                 {
                   "name": "end",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -22711,7 +23926,8 @@
                     "return_type": {
                       "kind": "number"
                     }
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -22736,7 +23952,8 @@
                   "name": "deleteCount",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -22815,7 +24032,8 @@
                   "name": "fromIndex",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -22838,7 +24056,8 @@
                   "name": "fromIndex",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -22887,7 +24106,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -22923,7 +24143,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -22963,7 +24184,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -23003,7 +24225,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -23049,7 +24272,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -23102,7 +24326,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -23142,7 +24367,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -23442,12 +24668,21 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
-                "kind": "named",
-                "name": "S"
+                "kind": "union",
+                "members": [
+                  {
+                    "kind": "undefined"
+                  },
+                  {
+                    "kind": "named",
+                    "name": "S"
+                  }
+                ]
               }
             },
             {
@@ -23479,11 +24714,20 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
-                "kind": "string"
+                "kind": "union",
+                "members": [
+                  {
+                    "kind": "undefined"
+                  },
+                  {
+                    "kind": "string"
+                  }
+                ]
               }
             }
           ]
@@ -23519,7 +24763,8 @@
                   "name": "thisArg",
                   "type": {
                     "kind": "any"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -23542,13 +24787,15 @@
                   "name": "start",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 },
                 {
                   "name": "end",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -23579,7 +24826,8 @@
                   "name": "end",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -23660,7 +24908,8 @@
                   "name": "fromIndex",
                   "type": {
                     "kind": "number"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -23722,7 +24971,8 @@
                   "type": {
                     "kind": "named",
                     "name": "This"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -23755,7 +25005,8 @@
                   "type": {
                     "kind": "named",
                     "name": "D"
-                  }
+                  },
+                  "optional": true
                 }
               ],
               "return_type": {
@@ -23777,49 +25028,105 @@
         {
           "name": "usage",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "undefined"
+              },
+              {
+                "kind": "string"
+              }
+            ]
           },
           "optional": true
         },
         {
           "name": "localeMatcher",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "undefined"
+              },
+              {
+                "kind": "string"
+              }
+            ]
           },
           "optional": true
         },
         {
           "name": "numeric",
           "type": {
-            "kind": "boolean"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "undefined"
+              },
+              {
+                "kind": "boolean"
+              }
+            ]
           },
           "optional": true
         },
         {
           "name": "caseFirst",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "undefined"
+              },
+              {
+                "kind": "string"
+              }
+            ]
           },
           "optional": true
         },
         {
           "name": "sensitivity",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "undefined"
+              },
+              {
+                "kind": "string"
+              }
+            ]
           },
           "optional": true
         },
         {
           "name": "collation",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "undefined"
+              },
+              {
+                "kind": "string"
+              }
+            ]
           },
           "optional": true
         },
         {
           "name": "ignorePunctuation",
           "type": {
-            "kind": "boolean"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "undefined"
+              },
+              {
+                "kind": "boolean"
+              }
+            ]
           },
           "optional": true
         }

@@ -217,7 +217,32 @@ impl<'a> TypeResolver<'a> {
                         _ => None,
                     };
                     method_name.and_then(|name| {
-                        self.lookup_method_params(inner_ty, &name, args.len(), &[])
+                        let sigs = self.registry.lookup_method_sigs(inner_ty, &name)?;
+                        let (_, sig) = select_overload(&sigs, args.len(), &[]);
+                        // For remapped methods (see `methods::is_remapped_method`),
+                        // drop trailing optional params so their `Option<T>` types
+                        // are not propagated as expected types onto arguments.
+                        // The Rust APIs those calls are rewritten into have
+                        // different signatures; propagating would wrap args in
+                        // spurious `Some(...)` and cause the transformer to
+                        // fill missing optional args with `None`. Required params
+                        // (e.g. the predicate of `filter`) still receive their
+                        // Fn-typed expected type so closure params resolve.
+                        let params_slice: &[crate::registry::ParamDef] =
+                            if crate::transformer::expressions::methods::is_remapped_method(&name) {
+                                let required_end = sig
+                                    .params
+                                    .iter()
+                                    .rposition(|p| !p.optional)
+                                    .map(|i| i + 1)
+                                    .unwrap_or(0);
+                                &sig.params[..required_end]
+                            } else {
+                                sig.params.as_slice()
+                            };
+                        let params: Vec<RustType> =
+                            params_slice.iter().map(|p| p.ty.clone()).collect();
+                        Some((params, sig.has_rest))
                     })
                 } else {
                     None
@@ -322,6 +347,10 @@ impl<'a> TypeResolver<'a> {
 
     /// Resolves the return type of a method call, selecting the best overload
     /// based on argument count and types.
+    ///
+    /// When no method signatures are registered (builtins not loaded), falls
+    /// back to the intrinsic return types for well-known `Vec<T>` methods —
+    /// see [`intrinsic_vec_method_return_type`].
     pub(super) fn resolve_method_return_type(
         &self,
         obj_type: &RustType,
@@ -337,7 +366,14 @@ impl<'a> TypeResolver<'a> {
                     .map(ResolvedType::Known)
                     .unwrap_or(ResolvedType::Unknown)
             }
-            None => ResolvedType::Unknown,
+            None => {
+                if let RustType::Vec(element) = obj_type {
+                    if let Some(ret) = intrinsic_vec_method_return_type(element, method_name) {
+                        return ResolvedType::Known(ret);
+                    }
+                }
+                ResolvedType::Unknown
+            }
         }
     }
 
@@ -454,6 +490,22 @@ impl<'a> TypeResolver<'a> {
         // Restore constraints
         self.type_param_constraints = prev;
         result
+    }
+}
+
+/// Intrinsic return type for well-known `Vec<T>` methods, used as a fallback
+/// when no builtin signatures are loaded (e.g., `transpile_collecting`).
+///
+/// Covers only methods where the Rust return type differs from a direct pass-through
+/// and would otherwise cause incorrect expected-type inference (e.g., `Option` wrap
+/// for `find`, `bool` for membership checks). Other methods fall back to `Unknown`
+/// and rely on post-hoc type inference in the transformer.
+fn intrinsic_vec_method_return_type(element: &RustType, method: &str) -> Option<RustType> {
+    match method {
+        // Always return Option<T> (by value) regardless of element type.
+        "find" | "pop" => Some(RustType::Option(Box::new(element.clone()))),
+        "some" | "every" | "includes" => Some(RustType::Bool),
+        _ => None,
     }
 }
 
@@ -595,6 +647,58 @@ fn unify_type(
 mod tests {
     use super::*;
     use crate::ir::TypeParam;
+
+    // ── intrinsic_vec_method_return_type ───────────────────────────
+
+    #[test]
+    fn test_intrinsic_vec_find_returns_option_of_element() {
+        let ret = intrinsic_vec_method_return_type(&RustType::F64, "find");
+        assert_eq!(ret, Some(RustType::Option(Box::new(RustType::F64))));
+    }
+
+    #[test]
+    fn test_intrinsic_vec_pop_returns_option_of_element() {
+        let ret = intrinsic_vec_method_return_type(&RustType::String, "pop");
+        assert_eq!(ret, Some(RustType::Option(Box::new(RustType::String))));
+    }
+
+    #[test]
+    fn test_intrinsic_vec_some_returns_bool() {
+        assert_eq!(
+            intrinsic_vec_method_return_type(&RustType::F64, "some"),
+            Some(RustType::Bool)
+        );
+    }
+
+    #[test]
+    fn test_intrinsic_vec_every_returns_bool() {
+        assert_eq!(
+            intrinsic_vec_method_return_type(&RustType::String, "every"),
+            Some(RustType::Bool)
+        );
+    }
+
+    #[test]
+    fn test_intrinsic_vec_includes_returns_bool() {
+        assert_eq!(
+            intrinsic_vec_method_return_type(&RustType::F64, "includes"),
+            Some(RustType::Bool)
+        );
+    }
+
+    #[test]
+    fn test_intrinsic_vec_unknown_method_returns_none() {
+        assert_eq!(
+            intrinsic_vec_method_return_type(&RustType::F64, "mysteryMethod"),
+            None
+        );
+        // Other Rust-side methods (map/filter/push) also fall back to Unknown
+        // so the transformer can still assign proper types via its own logic.
+        assert_eq!(
+            intrinsic_vec_method_return_type(&RustType::F64, "map"),
+            None
+        );
+    }
 
     fn named(n: &str) -> RustType {
         RustType::Named {

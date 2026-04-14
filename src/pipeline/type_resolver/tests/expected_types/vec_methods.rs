@@ -209,6 +209,90 @@ fn test_vec_filter_callback_with_real_builtins() {
     );
 }
 
+// ── Step 2 (RC-2): remapped-method optional-param stripping ─────────────
+
+/// Step 2 structural invariant: for methods remapped by `map_method_call`, the
+/// TypeResolver MUST NOT propagate `Option<T>` expected types onto trailing
+/// optional arguments. Violating this re-introduces the spurious `Some(arg)`
+/// wraps (e.g. `s.slice(Some(1.0) as i64..Some(3.0) as i64)`) and trailing
+/// `None` fills (e.g. `s.starts_with("hello", None)`) that Step 2 resolved.
+#[test]
+fn test_remapped_method_optional_param_is_not_propagated_as_expected() {
+    // `startsWith(searchString: string, position?: number): boolean`
+    // Calling with BOTH args — `position` would otherwise receive
+    // `Option<F64>` as the expected type from the TS signature. Step 2 strips
+    // trailing optional params for remapped methods so `position`'s arg gets
+    // no expected type propagated (no `Some(0.0)` wrap at the call site).
+    let res = resolve_with_builtins(
+        r#"
+        function test(s: string) {
+            s.startsWith("hi", 0);
+        }
+        "#,
+    );
+    let has_option_expected = res
+        .expected_types
+        .values()
+        .any(|t| matches!(t, RustType::Option(_)));
+    assert!(
+        !has_option_expected,
+        "remapped startsWith must NOT propagate `Option<F64>` expected to the \
+         optional `position` arg. Got expected types: {:?}",
+        res.expected_types.values().collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_non_remapped_builtin_method_optional_param_still_propagates() {
+    // Reverse direction: `Array.fill(value, start?, end?)` is NOT in
+    // REMAPPED_METHODS (falls through to passthrough in map_method_call), so
+    // its optional `start`/`end` params MUST still propagate their `Option<F64>`
+    // expected types. This guards against accidentally widening the optional
+    // stripping to all method calls (which would break legitimate user calls
+    // that rely on Option<T>-driven arg wrapping at the call site).
+    let res = resolve_with_builtins(
+        r#"
+        function test(arr: number[]) {
+            arr.fill(0, 0, 5);
+        }
+        "#,
+    );
+    let has_option_expected = res
+        .expected_types
+        .values()
+        .any(|t| matches!(t, RustType::Option(_)));
+    assert!(
+        has_option_expected,
+        "non-remapped Array.fill must propagate `Option<F64>` expected to its \
+         optional `start`/`end` args. Expected types: {:?}",
+        res.expected_types.values().collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_remapped_method_required_fn_param_still_propagated() {
+    // filter(predicate, thisArg?) — predicate is required and must still receive
+    // its Fn-typed expected type so closure param types resolve inside the body.
+    let res = resolve_with_builtins(
+        r#"
+        interface Item { active: boolean }
+        function test(arr: Item[]) {
+            arr.filter(item => item.active);
+        }
+        "#,
+    );
+    let has_fn_expected = res
+        .expected_types
+        .values()
+        .any(|t| matches!(t, RustType::Fn { .. }));
+    assert!(
+        has_fn_expected,
+        "remapped filter should still propagate its required predicate param's \
+         Fn type so the closure param is inferred. Trailing optional thisArg \
+         is dropped but required params survive."
+    );
+}
+
 // I-290: Member callee arg resolution order (T5)
 
 #[test]

@@ -48,4 +48,26 @@ function main(): void {
     const sortCheck = unsorted.some((x: number): boolean => x === 1);
     console.log("sort contains 1:", sortCheck);
     console.log("sort length:", unsorted.length);
+
+    // find: returns T | undefined in TS, Option<T> in Rust
+    const firstOver3 = nums.find((x: number): boolean => x > 3);
+    if (firstOver3 !== undefined) {
+        console.log("find >3:", firstOver3);
+    } else {
+        console.log("find >3: none");
+    }
+    const firstOver100 = nums.find((x: number): boolean => x > 100);
+    if (firstOver100 !== undefined) {
+        console.log("find >100:", firstOver100);
+    } else {
+        console.log("find >100: none");
+    }
+
+    // filter with captured variable (threshold) — verifies filter closure
+    // receives &T (Rust Iterator::filter semantics) but body uses T by value
+    const threshold: number = 2;
+    const above = nums.filter((x: number): boolean => x > threshold);
+    console.log("filter >threshold length:", above.length);
+    const aboveSum = above.reduce((acc: number, x: number): number => acc + x, 0);
+    console.log("filter >threshold sum:", aboveSum);
 }

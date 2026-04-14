@@ -50,5 +50,5 @@ fn processValues(values: Vec<f64>) -> Vec<f64> {
 }
 
 fn filterAbove(values: Vec<f64>, threshold: f64) -> Vec<f64> {
-    values.iter().cloned().filter(|x| x > threshold).collect::<Vec<_>>()
+    values.iter().cloned().filter(|x| *x > threshold).collect::<Vec<_>>()
 }

@@ -18,7 +18,7 @@ fn getTitles(items: Vec<TodoItem>) -> Vec<String> {
 }
 
 fn getActiveTodos(items: Vec<TodoItem>) -> Vec<TodoItem> {
-    items.iter().cloned().filter(|item| !item.done).collect::<Vec<_>>()
+    items.iter().cloned().filter(|item| !(*item).done).collect::<Vec<_>>()
 }
 
 fn printTodos(items: Vec<TodoItem>) {
