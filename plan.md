@@ -219,7 +219,31 @@ SWC leaf collection に対応がないため `wrap_body_returns` でスキップ
 
 ## 次のタスク
 
-Phase A (compile_test skip 解消) の Step 3 に着手する。
+### [I-138] Vec index read access の Option<T> context 対応
+
+PRD: [`backlog/vec-index-option-context-unwrap.md`](backlog/vec-index-option-context-unwrap.md)
+
+**背景**: TS `arr[i]` (Vec index read access) が Rust に変換される際、無条件に
+`.get(i).cloned().unwrap()` を生成し、Option<T> expected context (return / 変数代入 /
+関数引数) で外側の `Some(...)` ラップと二重化される。結果 `Some(arr.get(0).cloned().unwrap())`
+は compile 成功するが空 Vec で runtime panic し、TS の `undefined` 返却と乖離する
+**Tier 1 silent semantic change**。
+
+**修正方針**: `convert_member_expr_inner` (`src/transformer/expressions/member_access.rs:283-284`)
+に expected_type 判定を追加し、Option<T> context で `.unwrap()` なしの
+`build_safe_index_expr` を emit。`produces_option_result` (`src/transformer/expressions/mod.rs:364`)
+に `.get(i).cloned()` pattern を追加して外側の Some wrap を skip。
+
+**完了条件**: Option return / assignment / call arg / nullish coalescing 全 context で
+`arr[i]` が `.get(i).cloned()` (Option<T>) を直接使用し、`Some(...unwrap())` 二重化が
+発生しない。非 Option context は現状維持。tsx と Rust の runtime stdout 一致を E2E で検証。
+
+Phase A Step 3 に先立って完了させる (L1 Reliability Foundation / Tier 1 silent
+semantic change 優先)。
+
+---
+
+Phase A Step 3 以降は I-138 完了後に着手する。
 
 ---
 
