@@ -440,6 +440,13 @@ fn test_e2e_null_undefined_value_ts_rust_stdout_match() {
 }
 
 #[test]
+fn test_e2e_vec_index_option_return_ts_rust_stdout_match() {
+    // I-138: Vec index read `arr[0]` in Option<T> context emits `.get(0).cloned()`
+    // so empty Vec yields None (TS `undefined`) instead of panicking via `.unwrap()`.
+    run_e2e_test("vec_index_option_return");
+}
+
+#[test]
 fn test_e2e_closures_ts_rust_stdout_match() {
     run_e2e_test("closures");
 }

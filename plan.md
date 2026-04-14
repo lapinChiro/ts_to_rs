@@ -15,12 +15,25 @@
 |------|-----|
 | Hono bench clean | 113/158 (71.5%) |
 | Hono bench errors | 59 |
-| cargo test (lib) | 2447 pass |
-| cargo test (integration) | 112 pass |
+| cargo test (lib) | 2454 pass |
+| cargo test (integration) | 122 pass |
 | cargo test (compile) | 3 pass |
-| cargo test (E2E) | 90 pass |
+| cargo test (E2E) | 91 pass |
 | clippy | 0 warnings |
 | fmt | 0 diffs |
+
+**I-138 完了による bench 変動**: 変動なし (clean 71.5% / errors 59 維持)。I-040 と同様、Hono には
+該当 Vec index Option-context パターンが bench に現出していなかった。pre-existing Tier 1 silent
+semantic bug (空 Vec で panic vs TS undefined) を `convert_member_expr_inner` 単点修正で構造的に
+解消し、`return / assignment / call arg / ternary branch` の 4 context + `Vec<Option<T>>` nested
+nullable ケース (`.flatten()` 条件付き emit) + optional chaining 経由 (`obj?.[i]`) を統一カバー。
+`/check_job` / `/check_problem` 計 3 周のレビューで発見した課題:
+- 1 周目: Vec<Option<T>> edge case の型ずれ → `.flatten()` 追加
+- 2 周目: flatten 条件の過剰適用リスク (`expected=Option<Option<T>>`) → `elem_ty == Option<expected_inner>` 厳密マッチへ精緻化
+- 3 周目: optional chaining Computed 経路が同一不変量違反 → `convert_opt_chain_expr` にも flatten 条件付き emit 追加
+Scope narrow: "nullish coalescing LHS" は `propagate_expected` Bin arm 不在のため I-022 に委譲。
+別発見 (別 PRD 対応): I-140 (type alias target 非格納による Option 検出欠落)、I-141 (array literal
+要素型が Option<Vec<T>> expected 経由で非伝播)。
 
 **I-040 完了による bench 変動**: 変動なし (clean 71.5% / errors 59 維持)。本 PRD は pre-existing
 defect 修正で、Hono には該当 optional param パターンが実際には少なく bench に現出していなかった。
@@ -219,31 +232,24 @@ SWC leaf collection に対応がないため `wrap_body_returns` でスキップ
 
 ## 次のタスク
 
-### [I-138] Vec index read access の Option<T> context 対応
+### [I-022] `??` 演算子の LHS 型処理欠落 (次の着手イシュー)
 
-PRD: [`backlog/vec-index-option-context-unwrap.md`](backlog/vec-index-option-context-unwrap.md)
+**背景**: I-138 scope 判断で切り離した nullish coalescing 関連の silent bug を含む。
+`arr[i] ?? default` で LHS が static 型 T に解決されて `convert_bin_expr` の
+`is_option=false` 分岐で短絡し、**default が silent drop** される Tier 1 defect と、
+ネスト `??` の compile error (既存 `nullish-coalescing` fixture skip 原因) を含む。
 
-**背景**: TS `arr[i]` (Vec index read access) が Rust に変換される際、無条件に
-`.get(i).cloned().unwrap()` を生成し、Option<T> expected context (return / 変数代入 /
-関数引数) で外側の `Some(...)` ラップと二重化される。結果 `Some(arr.get(0).cloned().unwrap())`
-は compile 成功するが空 Vec で runtime panic し、TS の `undefined` 返却と乖離する
-**Tier 1 silent semantic change**。
+**修正方針概要** (詳細は I-022 TODO entry 参照):
+- `propagate_expected` に NullishCoalescing arm 追加 (LHS span に Option<T> expected 伝播)
+- `convert_bin_expr` の is_option 判定に `produces_option_result(&left)` を secondary signal 追加
+- RHS=Option<T> ケースは `.or()` 相当の新規 helper で emit
 
-**修正方針**: `convert_member_expr_inner` (`src/transformer/expressions/member_access.rs:283-284`)
-に expected_type 判定を追加し、Option<T> context で `.unwrap()` なしの
-`build_safe_index_expr` を emit。`produces_option_result` (`src/transformer/expressions/mod.rs:364`)
-に `.get(i).cloned()` pattern を追加して外側の Some wrap を skip。
-
-**完了条件**: Option return / assignment / call arg / nullish coalescing 全 context で
-`arr[i]` が `.get(i).cloned()` (Option<T>) を直接使用し、`Some(...unwrap())` 二重化が
-発生しない。非 Option context は現状維持。tsx と Rust の runtime stdout 一致を E2E で検証。
-
-Phase A Step 3 に先立って完了させる (L1 Reliability Foundation / Tier 1 silent
-semantic change 優先)。
+**位置付け**: I-138 完了 (T3 で拡張された `produces_option_result` を secondary signal
+として活用可能) を前提にした L1 Reliability Foundation 相当の silent bug 修正。
 
 ---
 
-Phase A Step 3 以降は I-138 完了後に着手する。
+Phase A Step 3 以降は I-022 完了後に着手する。
 
 ---
 
@@ -258,15 +264,18 @@ skip 解消後は新たな skip 追加を原則禁止とし、回帰検出を自
 - Step 0: `basic-types` unskip
 - Step 1 (RC-13): `union-fallback`, `ternary`, `ternary-union` unskip + `external-type-struct` with-builtins unskip
 - Step 2: `array-builtin-methods` unskip + `closures` の I-011 filter 参照セマンティクス解消
+- **I-138 (pre-Step-3)**: Vec index read access の Option<T> context 対応 (Tier 1 silent bug 解消)
 
 **永続 skip (2件):** `callable-interface-generic-arity-mismatch` (意図的 error-case), `indexed-access-type` (マルチファイル用、別テストでカバー)
 
-**残: 14 fixture / 14 イシュー**
+**残: 14 fixture / 14 イシュー** (+ pre-Step-3: I-022)
 
 #### 次の Step
 
 ```
-Step 3 (Box::new + Option) ←── 次はここ
+I-022 (?? silent drop + ネスト型不一致) ←── 次はここ (pre-Step-3)
+  ↓
+Step 3 (Box::new + Option)
   ↓                                  Step 6 (string + intersection)
 Step 4 (control flow + DU)           type-narrowing は Step 1 + 6 で完全解消
   ↓

@@ -578,3 +578,231 @@ function runit(f: Callback<number>): number {
         "caller of generic fn type alias must fill None for omitted optional, got:\n{output}"
     );
 }
+
+// ── I-138: Vec index read access の Option<T> context 対応 ──
+
+/// I-138: `fn f() -> Option<T> { return arr[0]; }` は `arr.get(0).cloned()`
+/// (Option<T>) を直接 tail 式として emit し、`Some(arr.get(0).cloned().unwrap())`
+/// の二重化 (空 Vec で panic する Tier 1 silent semantic change) を発生させない。
+#[test]
+fn test_vec_index_in_option_return_context_emits_get_cloned() {
+    let input = r#"
+function first(items: string[]): string | undefined {
+    return items[0];
+}
+"#;
+    let output = transpile(input).unwrap();
+    assert!(
+        output.contains("items.get(0).cloned()"),
+        "Vec index in Option return context must emit `.get(0).cloned()` without unwrap, got:\n{output}"
+    );
+    assert!(
+        !output.contains(".get(0).cloned().unwrap()"),
+        "Vec index in Option return context must NOT emit `.unwrap()`, got:\n{output}"
+    );
+    assert!(
+        !output.contains("Some(items.get(0)"),
+        "Vec index in Option return context must NOT be wrapped in `Some(...)`, got:\n{output}"
+    );
+}
+
+/// I-138: `let x: Option<T> = arr[0];` 同様に `arr.get(0).cloned()` を直接使用する。
+#[test]
+fn test_vec_index_in_option_assignment_context_emits_get_cloned() {
+    let input = r#"
+function runit(arr: string[]): void {
+    const x: string | undefined = arr[0];
+}
+"#;
+    let output = transpile(input).unwrap();
+    assert!(
+        output.contains("arr.get(0).cloned()"),
+        "Vec index in Option assignment context must emit `.get(0).cloned()` without unwrap, got:\n{output}"
+    );
+    assert!(
+        !output.contains(".get(0).cloned().unwrap()"),
+        "Vec index in Option assignment context must NOT emit `.unwrap()`, got:\n{output}"
+    );
+    assert!(
+        !output.contains("Some(arr.get(0)"),
+        "Vec index in Option assignment context must NOT be wrapped in `Some(...)`, got:\n{output}"
+    );
+}
+
+/// I-138: `consumer(arr[0])` where `consumer(s?: string)` — call arg context も
+/// expected=Option<String> が propagate され `arr.get(0).cloned()` を直接渡す。
+#[test]
+fn test_vec_index_in_option_call_arg_context_emits_get_cloned() {
+    let input = r#"
+function consumer(s?: string): void {}
+function runit(arr: string[]): void {
+    consumer(arr[0]);
+}
+"#;
+    let output = transpile(input).unwrap();
+    assert!(
+        output.contains("consumer(arr.get(0).cloned())"),
+        "Vec index as call arg to Option<T> param must emit `.get(0).cloned()` directly, got:\n{output}"
+    );
+    assert!(
+        !output.contains(".get(0).cloned().unwrap()"),
+        "Vec index as call arg must NOT emit `.unwrap()`, got:\n{output}"
+    );
+    assert!(
+        !output.contains("Some(arr.get(0)"),
+        "Vec index as call arg must NOT be wrapped in `Some(...)`, got:\n{output}"
+    );
+}
+
+/// I-138: `cond ? arr[0] : undefined` の cons branch も既存 `propagate_expected::Cond`
+/// 経由で expected=Option<String> が伝播し、`arr.get(0).cloned()` を emit する。
+#[test]
+fn test_vec_index_in_option_ternary_branch_emits_get_cloned() {
+    let input = r#"
+function firstOrNone(cond: boolean, arr: string[]): string | undefined {
+    return cond ? arr[0] : undefined;
+}
+"#;
+    let output = transpile(input).unwrap();
+    assert!(
+        output.contains("arr.get(0).cloned()"),
+        "Vec index in ternary cons branch (Option expected) must emit `.get(0).cloned()`, got:\n{output}"
+    );
+    assert!(
+        !output.contains(".get(0).cloned().unwrap()"),
+        "Vec index in ternary cons branch must NOT emit `.unwrap()`, got:\n{output}"
+    );
+    assert!(
+        !output.contains("Some(arr.get(0)"),
+        "Vec index in ternary cons branch must NOT be wrapped in `Some(...)`, got:\n{output}"
+    );
+}
+
+/// I-138: 非 Option context (`fn f() -> T { return arr[0]; }`) では現行の
+/// `.get(0).cloned().unwrap()` emission を維持する (回帰防止)。
+#[test]
+fn test_vec_index_in_non_option_context_keeps_unwrap() {
+    let input = r#"
+function firstStr(items: string[]): string {
+    return items[0];
+}
+"#;
+    let output = transpile(input).unwrap();
+    assert!(
+        output.contains("items.get(0).cloned().unwrap()"),
+        "Vec index in non-Option context must keep `.unwrap()` emission, got:\n{output}"
+    );
+}
+
+/// I-138: 変数 index (`items[i]`) でも同じ経路を通り、Option context で
+/// `items.get(i as usize).cloned()` が emit される (リテラル限定のロジック回帰防止)。
+#[test]
+fn test_vec_variable_index_in_option_return_context_emits_get_cloned() {
+    let input = r#"
+function nth(items: string[], i: number): string | undefined {
+    return items[i];
+}
+"#;
+    let output = transpile(input).unwrap();
+    assert!(
+        output.contains("items.get(i as usize).cloned()"),
+        "Vec index with variable in Option context must emit `.get(i as usize).cloned()` without unwrap, got:\n{output}"
+    );
+    assert!(
+        !output.contains(".cloned().unwrap()"),
+        "Vec index with variable in Option context must NOT emit `.unwrap()`, got:\n{output}"
+    );
+    assert!(
+        !output.contains("Some(items.get("),
+        "Vec index with variable in Option context must NOT be wrapped in `Some(...)`, got:\n{output}"
+    );
+}
+
+/// I-138: Vec<Option<T>> (nested nullable) index in Option<T> context は
+/// `.get(i).cloned()` = Option<Option<T>> になるため `.flatten()` で Option<T> に
+/// 集約する必要がある。TS `(T | undefined)[]` の `arr[i]` は `T | undefined`
+/// (TS が undefined を自動 flatten) と一致する。
+#[test]
+fn test_vec_of_option_index_in_option_context_emits_flatten() {
+    let input = r#"
+function firstOpt(items: (string | undefined)[]): string | undefined {
+    return items[0];
+}
+"#;
+    let output = transpile(input).unwrap();
+    assert!(
+        output.contains("items.get(0).cloned().flatten()"),
+        "Vec<Option<T>> index in Option context must emit `.get(0).cloned().flatten()` to collapse Option<Option<T>> to Option<T>, got:\n{output}"
+    );
+    assert!(
+        !output.contains(".cloned().unwrap()"),
+        "Vec<Option<T>> index in Option context must NOT emit `.unwrap()`, got:\n{output}"
+    );
+    assert!(
+        !output.contains("Some(items.get("),
+        "Vec<Option<T>> index must NOT be wrapped in `Some(...)`, got:\n{output}"
+    );
+}
+
+/// I-138 (deep review): Vec<Vec<T>> index in Option<Vec<T>> context. Vec element
+/// is NOT `Option<_>` — `elem_is_option` is false, so `.flatten()` must NOT be
+/// applied (would type-error). Verifies the guard on flatten application.
+#[test]
+fn test_vec_of_vec_index_in_option_context_no_flatten() {
+    let input = r#"
+function firstRow(matrix: string[][]): string[] | undefined {
+    return matrix[0];
+}
+"#;
+    let output = transpile(input).unwrap();
+    assert!(
+        output.contains("matrix.get(0).cloned()"),
+        "Vec<Vec<T>> index in Option<Vec<T>> context must emit `.get(0).cloned()`, got:\n{output}"
+    );
+    assert!(
+        !output.contains(".flatten()"),
+        "Vec<Vec<T>> index (elem is Vec, not Option) must NOT emit `.flatten()`, got:\n{output}"
+    );
+    assert!(
+        !output.contains(".cloned().unwrap()"),
+        "Vec<Vec<T>> index in Option context must NOT emit `.unwrap()`, got:\n{output}"
+    );
+}
+
+/// I-138 (deep review): `Vec<Option<Vec<T>>>` index in `Option<Vec<T>>` context.
+/// elem_ty = `Option<Vec<T>>`, expected_inner = `Vec<T>`. The refined flatten
+/// condition (`elem_ty == Option<expected_inner>`) applies — emits `.flatten()`
+/// correctly, collapsing `Option<Option<Vec<T>>>` to `Option<Vec<T>>`.
+#[test]
+fn test_vec_of_option_of_vec_index_emits_flatten() {
+    let input = r#"
+function firstRowOpt(items: (string[] | undefined)[]): string[] | undefined {
+    return items[0];
+}
+"#;
+    let output = transpile(input).unwrap();
+    assert!(
+        output.contains("items.get(0).cloned().flatten()"),
+        "Vec<Option<Vec<T>>> in Option<Vec<T>> context must emit `.flatten()`, got:\n{output}"
+    );
+}
+
+/// I-138 (deep review): Optional chaining `obj?.[i]` on `Option<Vec<Option<T>>>`.
+/// Same flatten invariant as direct member access: closure body
+/// `.get(i).cloned()` yields `Option<Option<T>>` inside `and_then`, mapping
+/// to `Option<Option<T>>` at the outer level — but expected is `Option<T>`.
+/// `.flatten()` on the closure body collapses to `Option<T>`, and `and_then`
+/// preserves that shape.
+#[test]
+fn test_opt_chain_vec_of_option_index_emits_flatten() {
+    let input = r#"
+function f(items: (string | undefined)[] | undefined): string | undefined {
+    return items?.[0];
+}
+"#;
+    let output = transpile(input).unwrap();
+    assert!(
+        output.contains(".get(0).cloned().flatten()"),
+        "Optional chaining `obj?.[i]` on Option<Vec<Option<T>>> must emit `.flatten()` in closure body, got:\n{output}"
+    );
+}

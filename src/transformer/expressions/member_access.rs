@@ -4,6 +4,7 @@ use anyhow::{anyhow, Result};
 use swc_ecma_ast as ast;
 
 use crate::ir::{ClosureBody, Expr, MatchArm, Param, Pattern, RustType, Stmt};
+use crate::pipeline::type_resolution::Span;
 use crate::registry::{FieldDef, TypeDef};
 
 use super::methods::map_method_call;
@@ -27,7 +28,12 @@ pub(crate) fn convert_index_to_usize(index: Expr) -> Expr {
 /// Builds a safe index expression: `object.get(index).cloned()`.
 ///
 /// The `index` argument must already be converted via [`convert_index_to_usize`].
-/// Returns `Option<T>` instead of panicking on out-of-bounds access.
+/// Returns `Option<T>` by value (bounded out-of-bounds). Used in Option<T>
+/// expected contexts (return, assignment, call arg, ternary branch, optional
+/// chaining) where the caller unifies with `Option<T>` directly.
+///
+/// The emitted pattern is recognized by `produces_option_result` so that the
+/// surrounding `convert_expr_with_expected` skips wrapping in `Some(...)`.
 pub(crate) fn build_safe_index_expr(object: Expr, index: Expr) -> Expr {
     Expr::MethodCall {
         object: Box::new(Expr::MethodCall {
@@ -42,11 +48,14 @@ pub(crate) fn build_safe_index_expr(object: Expr, index: Expr) -> Expr {
 
 /// Builds a safe index expression with unwrap: `object.get(index).cloned().unwrap()`.
 ///
-/// Used for read contexts where `T` (not `Option<T>`) is expected.
-/// The `.get().cloned()` documents the potential for out-of-bounds access;
-/// `.unwrap()` bridges the type gap until proper `Option<T>` propagation is implemented.
+/// Used in read contexts where `T` (not `Option<T>`) is expected. The
+/// `.get().cloned()` prefix retains bounded indexing semantics; `.unwrap()`
+/// then panics on out-of-bounds access, matching the TS `arr[i]` runtime
+/// TypeError when used as a non-nullable `T`.
 ///
-/// NOT used in optional chaining contexts — those need `Option<T>` for `.and_then()`.
+/// Call sites are selected by [`Transformer::convert_member_expr`] based on the
+/// span's expected type (Option<T> → [`build_safe_index_expr`], otherwise this
+/// helper).
 pub(crate) fn build_safe_index_expr_unwrapped(object: Expr, index: Expr) -> Expr {
     Expr::MethodCall {
         object: Box::new(build_safe_index_expr(object, index)),
@@ -136,9 +145,44 @@ impl<'a> Transformer<'a> {
                         // Use .get() for safe bounds-checked access (I-316).
                         // Direct indexing (_v[i]) panics on out-of-bounds;
                         // TS returns undefined, which maps to None.
+                        //
+                        // I-138: `Option<Vec<Option<T>>>` via `obj?.[i]` produces
+                        // `Option<Option<T>>` at the `and_then` output level, which
+                        // mismatches an `Option<T>` expected context. Append
+                        // `.flatten()` to the closure body when the Vec's element
+                        // type is itself `Option<X>` matching the outer expected
+                        // inner type — the same invariant as `convert_member_expr_inner`'s
+                        // T4 branch, applied at the optional-chaining emission site.
                         let index = self.convert_expr(&computed.expr)?;
                         let safe_index = convert_index_to_usize(index);
-                        build_safe_index_expr(Expr::Ident("_v".to_string()), safe_index)
+                        let base = build_safe_index_expr(Expr::Ident("_v".to_string()), safe_index);
+                        let opt_chain_expected = self
+                            .tctx
+                            .type_resolution
+                            .expected_type(Span::from_swc(opt_chain.span));
+                        let elem_ty = obj_type.and_then(|t| match t {
+                            RustType::Option(inner) => match inner.as_ref() {
+                                RustType::Vec(v) => Some(v.as_ref()),
+                                _ => None,
+                            },
+                            _ => None,
+                        });
+                        let needs_flatten = matches!(
+                            (opt_chain_expected, elem_ty),
+                            (
+                                Some(RustType::Option(exp_inner)),
+                                Some(RustType::Option(elem_inner)),
+                            ) if elem_inner.as_ref() == exp_inner.as_ref()
+                        );
+                        if needs_flatten {
+                            Expr::MethodCall {
+                                object: Box::new(base),
+                                method: "flatten".to_string(),
+                                args: vec![],
+                            }
+                        } else {
+                            base
+                        }
                     }
                     _ => return Err(anyhow!("unsupported optional chaining property")),
                 };
@@ -278,9 +322,49 @@ impl<'a> Transformer<'a> {
                 });
             }
 
-            // Read access: safe bounds-checked indexing (I-319)
-            // arr[0] → arr.get(0).cloned().unwrap()
+            // Read access: safe bounds-checked indexing (I-319, I-138).
+            //
+            // When the enclosing context expects `Option<T>` (return, assignment,
+            // call arg, ternary branch — all propagated by TypeResolver), emit
+            // `arr.get(i).cloned()` directly. Otherwise emit the `.unwrap()` form
+            // so the output type matches the `T` expected by the caller. This
+            // single expected-type query is the sole context-aware branch in
+            // Vec index emission; outer `Some(...)` wrapping is skipped by
+            // `produces_option_result` detecting the `.get().cloned()` pattern.
+            //
+            // `Vec<Option<T>>` + expected `Option<T>` edge case: `.get(i).cloned()`
+            // would yield `Option<Option<T>>`. Append `.flatten()` only when the
+            // produced type is exactly one `Option` level deeper than expected —
+            // i.e., `elem_ty == Option<expected_inner>`. This preserves valid
+            // `Option<Option<T>>`-expected cases (no flatten) while collapsing the
+            // common TS `(T | undefined)[]` → `T | undefined` flattening pattern.
+            //
+            // Nullish coalescing (`arr[i] ?? default`) is NOT covered here —
+            // `propagate_expected` has no Bin arm, so the LHS span carries no
+            // expected type. Tracked as I-022.
             let safe_index = convert_index_to_usize(index);
+            let expected = self
+                .tctx
+                .type_resolution
+                .expected_type(Span::from_swc(member.span));
+            if let Some(RustType::Option(expected_inner)) = expected {
+                let base = build_safe_index_expr(object, safe_index);
+                let needs_flatten = matches!(
+                    self.get_expr_type(&member.obj),
+                    Some(RustType::Vec(v)) if matches!(
+                        v.as_ref(),
+                        RustType::Option(vi) if vi.as_ref() == expected_inner.as_ref()
+                    )
+                );
+                if needs_flatten {
+                    return Ok(Expr::MethodCall {
+                        object: Box::new(base),
+                        method: "flatten".to_string(),
+                        args: vec![],
+                    });
+                }
+                return Ok(base);
+            }
             return Ok(build_safe_index_expr_unwrapped(object, safe_index));
         }
 

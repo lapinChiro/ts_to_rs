@@ -51,7 +51,12 @@ OBJECT_LITERAL_NO_TYPE 全体で 27件（最終実行: 2026-04-13）。I-004/I-0
 
 - **[I-020]** **クロージャ返却の Box::new ラップ漏れ** — `needs_trait_box_coercion`（`src/transformer/expressions/mod.rs:288`）のカバー不足。compile_test skip: `closures`, `functions`
 - **[I-021]** **DU switch のデストラクチャ変数 rewrite 不完全** — `is_du_field_binding`（`src/pipeline/type_resolution.rs:209`）スコープ検出。compile_test skip: `discriminated-union`
-- **[I-022]** **`??` チェーンの型不一致** — ネスト `??` の中間結果型。`src/transformer/expressions/binary.rs:45-60`。compile_test skip: `nullish-coalescing`
+- **[I-022]** **`??` 演算子の LHS 型処理欠落 (silent semantic change 含む)** — 以下 2 系統の defect が存在:
+  1. **Silent drop pattern (Tier 1)**: `arr[i] ?? default` で LHS `arr[i]` が static 型 `T` (not Option) に解決され、`convert_bin_expr` (`src/transformer/expressions/binary.rs:45-60`) の `is_option=false` 分岐で短絡し **default が silent drop** される。さらに `arr.get(i).cloned().unwrap()` を返すため空 Vec で panic し、TS `undefined ?? default` → `default` の意味論と乖離する。
+  2. **ネスト `??` の型不一致 (compile error)**: 中間結果型が不整合で compile_test skip: `nullish-coalescing`
+  - **Root cause**: (a) `propagate_expected` (`src/pipeline/type_resolver/expected_types.rs:307-437`) の match arm に `Bin(NullishCoalescing)` が不在で LHS span に Option<T> expected が伝播しない、(b) `convert_bin_expr` の is_option 判定が `get_expr_type` (TypeResolver の expr_types) のみを参照し IR 構造的判定 (`produces_option_result(&left)`) を行わない、(c) RHS も Option<T> の場合 (`arr[i] ?? maybeUndef`) は `.unwrap_or` ではなく `.or()` 相当が必要。
+  - **解決方針**: (a) `propagate_expected` に NullishCoalescing arm 追加 (outer expected を Option<T> にラップして LHS に propagate、RHS には outer expected をそのまま伝播)、(b) `convert_bin_expr` NullishCoalescing arm で `produces_option_result(&left)` を is_option secondary signal として活用、(c) RHS が Option<T> の場合は `build_option_or_option` (新規) で `.or()` emit、それ以外は既存 `build_option_unwrap_with_default` を維持。
+  - **次イシュー**: I-138 完了後に着手 (plan.md 参照)。compile_test skip: `nullish-coalescing`。Tier 1 silent semantic change (silent drop) 含むため L1 Reliability Foundation 相当
 - **[I-023]** **try/catch + return で unreachable code** — ブロック構造見直し。`src/transformer/statements/error_handling.rs:14-144`。compile_test skip: `async-await`
 - **[I-024]** **Option\<T\> 変数の truthy narrowing 未対応** — `if (x)` where `x: Option<T>` が `if x {` のまま生成される。`if let Some(x) = x` に変換すべき。`try_generate_narrowing_match`（`src/transformer/statements/control_flow.rs:250`）が `complement_pattern == "None" && is_swap` のみ処理し、truthy（`is_swap=false`）パスが未処理。compile_test skip: `functions`
 - **[I-025]** **Option\<T\> 戻り値の暗黙 None 未返却** — if else 欠落。compile_test skip: `keyword-types`, `void-type`
@@ -286,67 +291,8 @@ OBJECT_LITERAL_NO_TYPE 全体で 27件（最終実行: 2026-04-13）。I-004/I-0
 
   **発見経緯**: I-040 PRD の `/check_problem` Deep Review で TypeResolver fix 後に consumer(x) の compile error が露出。I-040 fix 前は silent semantic loss (x が非 Option 扱いで通過) だった。I-040 fix により silent → compile-error 表面化、次は transformer 側の `.unwrap()` 挿入が必要
 
-- **[I-138]** **Vec index の `return items[0]` が `Some(items.get(0).cloned().unwrap())` に二重化される**
-
-  **症状 (再現 TS)**:
-  ```ts
-  function first(items: string[]): string | undefined {
-      return items[0];
-  }
-  ```
-
-  **現在の Rust 出力**:
-  ```rust
-  fn first(items: Vec<String>) -> Option<String> {
-      Some(items.get(0).cloned().unwrap())
-  }
-  ```
-
-  **問題**:
-  1. `items.get(0).cloned()` 自体が `Option<String>` を返すので、この式は TS の
-     `string | undefined` → Rust `Option<String>` と完璧に一致している
-  2. しかし `.unwrap()` で強制 unwrap し、再度 `Some(...)` でラップするため、
-     empty vec の場合に runtime panic する
-  3. TS 側は「空なら undefined 返し」の意味論だったため、変換後の panic は
-     silent semantic change (Rust が compile するが runtime 挙動が異なる)
-
-  **期待出力**:
-  ```rust
-  fn first(items: Vec<String>) -> Option<String> {
-      items.get(0).cloned()  // 直接 Option<String> を返す
-  }
-  ```
-
-  **根本原因**:
-  1. `convert_member_expr` (Vec index access) が `items.get(0).cloned().unwrap()` を無条件生成
-     (Vec 要素型で安全側の unwrap)
-  2. return context では expected return_type `Option<String>` だが、`items[0]` の
-     Rust 型が `String` (unwrap 後) なので、`wrap_in_some` が適用されて `Some(String)` に
-  3. 結果 `Some(items.get(0).cloned().unwrap())` — 二重 Option 化される意味論損失
-
-  **修正方針 (A 案, 推奨)**: expected type が Option<T> で、Vec index access が
-  generated された場合、`.unwrap()` + `Some(...)` を skip して `.get(i).cloned()` の
-  Option<T> を直接使う。構造的には Vec index の変換ロジックが expected context を
-  見て unwrap するか Option で返すかを選択する。
-
-  **修正方針 (B 案)**: Vec index access を常に `.get(i).cloned()` (Option 返し) に
-  し、context に応じて caller 側で unwrap/Some ラップを決定。影響範囲大 (全 Vec
-  index access site)
-
-  **テスト戦略**:
-  1. integration test: `function first(items: T[]): T | undefined { return items[0]; }` が
-     `items.get(0).cloned()` を生成し、`Some(...unwrap())` にならないこと
-  2. integration test (boundary): 空 Vec 時の runtime 動作 (panic せず None 返し) E2E 検証
-
-  **依存関係**: 🔗 I-024 (Option narrowing) と同系統の "expected context が Option
-  の場合、中間 unwrap を skip" パターン。🔗 I-012 (find の二重 Option ラップ) とも近接
-
-  **優先度**: L2 (silent semantic change: Rust compile 成功、runtime 挙動変化 = Tier 1 準拠)
-
-  **発見経緯**: I-040 PRD `/check_problem` Deep Review で `functions` fixture の
-  compile 状態を確認中に判明。I-024 解消で一部 narrowing が動作するようになったが、
-  この defect は independent で remaining
-
+- **[I-141]** **`propagate_expected::Array` が `Option<Vec<T>>` expected を非認識** — `src/pipeline/type_resolver/expected_types.rs:396-415` の Array arm は `RustType::Vec(_)` と `RustType::Tuple(_)` のみを match し、`Option<Vec<T>>` (call arg 等で expected が Option wrap) は fall-through。結果: `f(["x"])` where `f` が `Option<Vec<Option<String>>>` を期待する場合、`Some(vec!["x"])` (element 未 Some wrap) が emit され `expected Option<String> found &str` の compile error。**再現**: `function f(items: (string | undefined)[] | undefined): void {} f(["x"])` → generated Rust: `f(Some(vec!["x"]))` (要素 "x" が Some(_.to_string()) に変換されない)。**修正方針**: `propagate_expected::Array` arm に Option wrap 剥がし追加 (`Option<Vec<T>>` → Vec 要素に expected T を propagate)。**影響箇所**: call arg / return / assignment 全 context で Option<Vec<...>> 受け渡し時の array literal emission。**優先度**: L3 (pre-existing、Hono で該当パターンの出現頻度は低いが type-aware emission の基盤)。**発見経緯**: I-138 `/check_problem` deep review で optional chaining 用 E2E test 追加時に compile error 観測
+- **[I-140]** **Type alias の target が TypeRegistry に非格納 — `Named` 経由 Option 認識の普遍的欠落** — `type MaybeStr = string | undefined` は `registry/collection.rs:35-40` で空 `TypeDef::new_struct` として登録され、alias target (`Option<String>`) が失われる。影響: `matches!(expected, Some(RustType::Option(_)))` パターンでの Option 検出が alias 経由では全て失敗する。現行影響箇所: (a) `convert_member_expr_inner` T4 (I-138) — Vec index Option context が alias 経由で検出不可 → silent の代わりに compile-error (Tier 2) 留まり、(b) `control_flow.rs:160` / `loops.rs:26` の `if let` / `while let` 生成、(c) `calls.rs:168` の Option 引数 unwrap 判定。**再現**: `type MaybeStr = string | undefined; fn f(items: string[]): MaybeStr { return items[0]; }` → 出力 `items.get(0).cloned().unwrap()` で MaybeStr = Option<String> と型不一致 compile error。**修正方針**: `TypeDef::TypeAlias { target: RustType, type_params: Vec<TypeParam> }` variant 追加 + `registry/collection.rs` で alias 登録を 2-pass 化 (phase 1 placeholder、phase 2 target fill) + `TypeRegistry::resolve_alias(&self, ty: &RustType) -> RustType` helper 提供 + 既存 `matches!(_, Option(_))` 箇所を helper 経由に置換。影響範囲は「alias 経由 Option 検出が必要な全 site」で、I-138 を含む広範な改善につながる。**優先度**: L3 (pre-existing Tier 2 compile-error、broad scope、TS で alias 利用は一般的)。**発見経緯**: I-138 PRD `/check_job` Deep Review 2 周目で alias 経由 Vec index Option コンテキストの silent-ではない compile error を検知
 - **[I-041]** **type alias 由来の callable type が trait 化されない** — `type Handler = { (x: string): string }` は `is_interface: false` のため `classify_callable_interface` で `NonCallable`。現在は `type_aliases.rs` の `Box<dyn Fn>` path が適用される。trait 化には `type_aliases.rs` の `TsTypeLiteralInfo` → `Item::Trait` 変換パスが必要
 - **[I-042]** **typeof qualified name（typeof A.B.C）** — 0 エラー削減。高コスト・低 ROI
 - **[I-043]** **intersection 内の複数 union 分配** — 意図的制約。需要発生時に対応

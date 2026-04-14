@@ -49,7 +49,7 @@ fn identity<T>(value: T) -> T {
 }
 
 fn first(items: Vec<String>) -> Option<String> {
-    Some(items.get(0).cloned().unwrap())
+    items.get(0).cloned()
 }
 
 fn findIndex(arr: Vec<f64>, target: f64) -> f64 {

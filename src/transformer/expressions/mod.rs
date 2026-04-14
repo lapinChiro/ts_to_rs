@@ -362,7 +362,13 @@ impl<'a> Transformer<'a> {
 /// that reaches them. Methods such as `first`/`last` return `Option<&T>` and must
 /// not be added here — their expected-type unification is different.
 fn produces_option_result(expr: &Expr) -> bool {
-    let Expr::MethodCall { method, args, .. } = expr else {
+    let Expr::MethodCall {
+        object,
+        method,
+        args,
+        ..
+    } = expr
+    else {
         return false;
     };
     match method.as_str() {
@@ -372,6 +378,24 @@ fn produces_option_result(expr: &Expr) -> bool {
         // `Vec::pop()` — zero-arg method, always returns `Option<T>` by value.
         // TS `Array.pop()` maps through the passthrough arm to this signature.
         "pop" => args.is_empty(),
+        // `<obj>.get(<idx>).cloned()` — Vec index read form emitted by
+        // `build_safe_index_expr` (I-138). `Vec::get` returns `Option<&T>`, and
+        // `Option::cloned` lifts it to `Option<T>` by value, matching the
+        // `Option<T>` expected-type contract. Arity-gate `get` to a single
+        // argument to avoid matching hypothetical multi-arg `get` methods
+        // from unrelated APIs.
+        "cloned" => {
+            args.is_empty()
+                && matches!(
+                    object.as_ref(),
+                    Expr::MethodCall { method: m, args: a, .. } if m == "get" && a.len() == 1
+                )
+        }
+        // `<option-producing>.flatten()` — Vec<Option<T>> index form. `.get(i).cloned()`
+        // on `Vec<Option<T>>` yields `Option<Option<T>>`, which `.flatten()` collapses
+        // to `Option<T>`. Only recognize when the receiver is itself an Option-producing
+        // IR (recursive check), ensuring the chain terminates in a known Option pattern.
+        "flatten" => args.is_empty() && produces_option_result(object),
         _ => false,
     }
 }
@@ -449,6 +473,77 @@ mod produces_option_result_tests {
         // shape and would skip wrap incorrectly.
         assert!(!produces_option_result(&mc(ident("v"), "first", vec![])));
         assert!(!produces_option_result(&mc(ident("v"), "last", vec![])));
+    }
+
+    // ── I-138: `.get(idx).cloned()` Vec index read pattern ──
+
+    #[test]
+    fn test_get_cloned_is_option_producing() {
+        // arr.get(0).cloned() — Vec index read emitted by build_safe_index_expr.
+        // Returns Option<T> by value (cloned lifts &T → T), so treating as Option-producing
+        // prevents outer Some wrap from convert_expr_with_expected.
+        let inner = mc(ident("arr"), "get", vec![Expr::IntLit(0)]);
+        let outer = mc(inner, "cloned", vec![]);
+        assert!(produces_option_result(&outer));
+    }
+
+    #[test]
+    fn test_cloned_alone_is_not_option() {
+        // x.cloned() with non-.get() receiver — cloned() on Iterator returns
+        // Iterator<Item = T>, not Option<T>. Must not be flagged.
+        assert!(!produces_option_result(&mc(ident("x"), "cloned", vec![])));
+    }
+
+    #[test]
+    fn test_get_without_cloned_is_not_option() {
+        // map.get(key) on HashMap returns Option<&V>, not Option<V> by value.
+        // build_safe_index_expr never emits bare .get() (always followed by .cloned()),
+        // so bare .get() must not be flagged.
+        let expr = mc(ident("map"), "get", vec![ident("key")]);
+        assert!(!produces_option_result(&expr));
+    }
+
+    #[test]
+    fn test_get_cloned_with_multi_args_is_not_option() {
+        // .get(a, b).cloned() — hypothetical multi-arg get (doesn't exist on Vec/HashMap).
+        // Guard the arity check to avoid false positives on unrelated 2-arg methods named `get`.
+        let inner = mc(
+            ident("custom"),
+            "get",
+            vec![Expr::IntLit(0), Expr::IntLit(1)],
+        );
+        let outer = mc(inner, "cloned", vec![]);
+        assert!(!produces_option_result(&outer));
+    }
+
+    #[test]
+    fn test_get_cloned_flatten_is_option_producing() {
+        // arr.get(0).cloned().flatten() — Vec<Option<T>> index read form (I-138).
+        // .flatten() collapses Option<Option<T>> to Option<T>; receiver must be
+        // Option-producing itself (recursive check).
+        let get = mc(ident("arr"), "get", vec![Expr::IntLit(0)]);
+        let cloned = mc(get, "cloned", vec![]);
+        let flatten = mc(cloned, "flatten", vec![]);
+        assert!(produces_option_result(&flatten));
+    }
+
+    #[test]
+    fn test_flatten_on_non_option_is_not_option() {
+        // x.flatten() where x is a bare Ident — receiver is not Option-producing,
+        // so the chain terminates outside the known pattern. Must not be flagged
+        // to avoid false-positive wrap skips on unrelated `flatten` method calls.
+        let flatten = mc(ident("x"), "flatten", vec![]);
+        assert!(!produces_option_result(&flatten));
+    }
+
+    #[test]
+    fn test_flatten_with_args_is_not_option() {
+        // .flatten(arg) — zero-arg arity gate. Hypothetical overloads should not
+        // be flagged.
+        let get = mc(ident("arr"), "get", vec![Expr::IntLit(0)]);
+        let cloned = mc(get, "cloned", vec![]);
+        let flatten = mc(cloned, "flatten", vec![ident("arg")]);
+        assert!(!produces_option_result(&flatten));
     }
 }
 
