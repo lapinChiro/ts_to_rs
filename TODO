@@ -18,7 +18,7 @@ Tier 内の記載順序が優先度。根本原因を共有するイシューは
 - **[I-005]** **型注釈なしオブジェクトリテラル** — OBJECT_LITERAL_NO_TYPE の一部。匿名構造体自動生成
 - **[I-006]** **`.map()` callback 戻り値型の伝播** — OBJECT_LITERAL_NO_TYPE の一部。`propagate_expected` が `Expr::Call` 未処理
 
-OBJECT_LITERAL_NO_TYPE 全体で 27件（最終実行: 2026-04-13）。I-004/I-005/I-006 のサブ分類件数は要再調査。
+OBJECT_LITERAL_NO_TYPE 全体で 28件（最終実行: 2026-04-17）。I-004/I-005/I-006 のサブ分類件数は要再調査。
 
 ### RC-2 残り: 所有権・借用モデル
 
@@ -480,7 +480,7 @@ OBJECT_LITERAL_NO_TYPE 全体で 27件（最終実行: 2026-04-13）。I-004/I-0
 
 ## 保留
 
-- **[I-126]** コンパイルテストのスキップ解消 — 各原因の修正が前提。残 12 fixture（Step 0-1 で 5 解消、Step 3 で void-type 解消、nullish-coalescing は pre-Step-3 で解消。詳細は `plan.md` Phase A 参照）
+- **[I-126]** コンパイルテストのスキップ解消 — 各原因の修正が前提。skip 14 fixture + permanent 2 (effective 12 + 設計制約 2)。Step 0-1 で 5 解消、Step 3 で void-type 解消、nullish-coalescing は pre-Step-3 で解消。詳細は `plan.md` Phase A 参照
 - **[I-127]** HTTP E2E テスト基盤 + fetch 変換 — I-017 が前提
 
 ## スコープ外

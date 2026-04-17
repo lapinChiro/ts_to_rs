@@ -67,11 +67,11 @@ FieldAccess (`obj.field ??= d`) と Index (`cache[key] ??= d`) の `??=` を str
 
 ### 次の作業 (spec-first workflow 適用)
 
-| 優先度 | PRD | 内容 |
-|--------|-----|------|
-| 1 | I-144 | control-flow narrowing analyzer |
-| 2 | Phase A Step 4 | 制御フロー (I-023 try/catch) + DU (I-021) |
-| 3 | I-050-b | Ident → Value coercion (TypeResolver 精度向上が前提) |
+| 優先度 | PRD | 内容 | 根拠 |
+|--------|-----|------|------|
+| 1 | Phase A Step 4 | I-023 (try/catch unreachable) + I-021 (DU) | I-023 は CFG 不要の trivial fix (error_handling.rs local)。I-144 との overlap ゼロ。2 fixture 確実 unskip、~100 行 |
+| 2 | I-144 | control-flow narrowing analyzer | I-024 complex / D-1 DRY / I-142 Cell #14 を構造的に解消。~800-1000 行、直接 fixture unskip は 0 だが将来の narrowing 基盤 |
+| 3 | I-050-b | Ident → Value coercion | TypeResolver 精度向上が前提 |
 I-142 残 defect (C-1〜C-9 + D-1) は新 framework 適用後に個別 sub-PRD として処理する。
 
 ---
@@ -294,7 +294,7 @@ skip 解消後は新たな skip 追加を原則禁止とし、回帰検出を自
 
 **永続 skip (2件):** `callable-interface-generic-arity-mismatch` (意図的 error-case), `indexed-access-type` (マルチファイル用、別テストでカバー)
 
-**残: 12 fixture** (+ I-144 起票済)
+**残: 14 fixture** (effective 12 + 設計制約 2; + I-144 起票済)
 
 #### 次の Step
 
@@ -398,6 +398,8 @@ Step 7 (builtin impl)
 | intersection-empty-object | Step 6 | — |
 | type-narrowing | Step 6 | Step 1 (I-007) |
 | instanceof-builtin | Step 7 | — |
+| vec-method-expected-type | — | builtins なし mode で expected 未伝播 (設計制約) |
+| external-type-struct (no-builtins) | — | builtins 必要 (設計制約、with-builtins は Step 1 で解消済) |
 
 ### Phase B: RC-11 expected type 伝播 (OBJECT_LITERAL_NO_TYPE 27件)
 

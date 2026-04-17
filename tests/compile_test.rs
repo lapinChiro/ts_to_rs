@@ -153,7 +153,7 @@ fn test_all_fixtures_compile() {
         // (ternary: I-009 union return wrap で解消。skip 解除)
         // functions: Vec<String> index move (I-319). (I-020 Box wrap は Step 3 で解消)
         "functions",
-        // keyword-types: I-025 implicit None は解消。残: I-260 (`return undefined` on void fn → `None` instead of `return;`)。
+        // keyword-types: I-025 implicit None は解消。残: I-146 (`return undefined` on void fn → `None` instead of `return;`)。
         "keyword-types",
         // (nullish-coalescing: I-022 + I-142 で解消。skip 解除)
         // string-methods: slice/indexOf/split/charAt/repeat conversion bugs (I-329).

@@ -1,12 +1,34 @@
-use std::collections::HashMap;
-fn getOrSet(cache: HashMap<String, String>, key: String) -> String {
-    let mut cache = cache;
-    cache
-        .entry(key.clone())
-        .or_insert_with(|| "default:".to_string() + &key)
-        .clone()
+#![allow(dead_code, unused_variables, unused_imports, unused_assignments)]
+#![deny(unused_mut, unreachable_code)]
+use serde::{Serialize, Deserialize};
+fn doSomething() {
+    let x: f64 = 1.0;
 }
 
-fn main() {
-    println!("ok");
+fn runCallback(cb: Box<dyn Fn(f64)>) {
+    cb(42.0);
+}
+
+type MaybeVoid = Option<String>;
+
+fn maybeReturn(flag: bool) -> Option<String> {
+    if flag {
+        return Some("hello".to_string());
+    }
+    None
+}
+
+async fn runAsync() {
+    println!("done");
+}
+
+fn printAll(items: Vec<String>) {
+    for item in items {
+        println!("{}", item);
+    }
+}
+
+struct EventHandler {
+    onClick: Box<dyn Fn(String)>,
+    onClose: Box<dyn Fn()>,
 }
