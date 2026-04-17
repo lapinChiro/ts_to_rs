@@ -921,3 +921,8 @@ fn test_e2e_cell_sdcdf_smoke() {
 fn test_e2e_cell_i050a() {
     run_cell_e2e_tests("i050a");
 }
+
+#[test]
+fn test_e2e_cell_step3() {
+    run_cell_e2e_tests("step3");
+}

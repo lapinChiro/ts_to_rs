@@ -41,7 +41,7 @@ fn sum(nums: Vec<f64>) -> f64 {
 }
 
 fn multiplier(factor: f64) -> Box<dyn Fn(f64) -> f64> {
-    |x: f64| -> f64 { x * factor }
+    Box::new(|x: f64| -> f64 { x * factor })
 }
 
 fn identity<T>(value: T) -> T {

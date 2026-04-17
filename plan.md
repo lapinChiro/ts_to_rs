@@ -17,8 +17,8 @@
 | Hono bench errors | 63 |
 | cargo test (lib) | 2532 pass |
 | cargo test (integration) | 122 pass |
-| cargo test (compile) | 3 pass |
-| cargo test (E2E) | 93 pass |
+| cargo test (compile) | 3 pass (+ void-type unskip) |
+| cargo test (E2E) | 94 pass |
 | clippy | 0 warnings |
 | fmt | 0 diffs |
 
@@ -48,6 +48,12 @@ scope-out (TypeResolver の IR 型乖離問題)。
 
 shadow-let + fusion + expression-context `get_or_insert_with` による structural rewrite。
 残 defect (C-1〜C-9 + D-1) は [引継ぎドキュメント](doc/handoff/I-142-step4-followup.md) に移管。
+
+**Phase A Step 3: Box wrap + implicit None** (2026-04-17, closed)
+
+I-020 (closure tail → `Box::new(...)` wrap) + I-025 (Option return → implicit `None`) を実装。
+`void-type` fixture unskip。`closures` は I-048 (所有権推論: move/FnMut) が残存、
+`keyword-types` は I-260 (`return undefined` on void fn) が残存。4 cell E2E green。
 
 **以前の完了**: I-022 (`??` 演算子)、I-138 (Vec index Option)、I-040 (optional param 統一)
 
@@ -310,7 +316,7 @@ skip 解消後は新たな skip 追加を原則禁止とし、回帰検出を自
 
 **永続 skip (2件):** `callable-interface-generic-arity-mismatch` (意図的 error-case), `indexed-access-type` (マルチファイル用、別テストでカバー)
 
-**残: 13 fixture / 13 イシュー** (+ pre-Step-3: I-142-b / I-142-c / I-144 起票済)
+**残: 12 fixture** (+ pre-Step-3: I-142-b / I-142-c / I-144 起票済)
 
 #### 次の Step
 
@@ -319,29 +325,25 @@ I-142-b (FieldAccess ??=) ──┐
 I-142-c (Index ??=)         ├── Ident LHS は I-142 で完了。次は member/index path 設計
 I-144 (CF narrowing)        ┘
   ↓
-Step 3 (Box::new + Option)
-  ↓                                  Step 6 (string + intersection)
-Step 4 (control flow + DU)           type-narrowing は Step 1 + 6 で完全解消
-  ↓
+Step 4 (control flow + DU)           Step 6 (string + intersection)
+  ↓                                  type-narrowing は Step 1 + 6 で完全解消
 Step 5 (type conversion + null)
   ↓
 Step 7 (builtin impl)
 ```
 
-I-142-b (FieldAccess `obj.x ??= d`)、I-142-c (Index `arr[i] ??= d`)、I-144
-(control-flow narrowing analyzer; I-024/I-025
-と共有基盤)。
+**Step 3: クロージャ Box 化 + Option 暗黙返却** — **完了** (2026-04-17)
 
-**Step 3: クロージャ Box 化 + Option 暗黙返却** — Tier 2、レバレッジ最大（4 fixture）
+| イシュー | 状態 | 内容 |
+|----------|------|------|
+| I-020 | **部分解消** | return/tail の closure → `Box::new(...)` wrap (`wrap_closures_in_box` 再帰 walk)。残: let-init 経路 + Option<Fn> inner (I-147) |
+| I-025 | **解消** | `append_implicit_none_if_needed`: if/while/for 末尾に implicit `None` |
+| I-024 | **基本動作確認済** | `if (x)` truthy narrowing は既に動作。complex case は I-144 |
 
-| イシュー | 修正箇所 | 内容 |
-|----------|---------|------|
-| I-020 | `needs_trait_box_coercion()` (`expressions/mod.rs:288`) | クロージャ式 → `Box<dyn Fn>` の `Box::new()` ラップ追加 |
-| I-025 | control_flow 周辺 | `Option<T>` 戻り値の if 文に暗黙 `else { None }` を補完 |
-| I-024 | `try_generate_narrowing_match()` (`control_flow.rs:250`) | `if (x)` where `x: Option<T>` → `if let Some(x) = x` の truthy パス対応 |
-
-- unskip: `closures`（Step 2 と合わせて完全解消）, `keyword-types`, `void-type`
-- 部分解消: `functions`（I-024 解消で残エラー消滅を要確認）
+- unskip: `void-type`
+- `closures` は I-048 (所有権推論: move/FnMut) が残存、skip 維持
+- `keyword-types` は I-146 (`return undefined` on void fn) が残存、skip 維持
+- `functions` は I-319 (Vec index move) が残存、skip 維持
 
 ---
 
@@ -407,10 +409,10 @@ I-142-b (FieldAccess `obj.x ??= d`)、I-142-c (Index `arr[i] ??= d`)、I-144
 | ~~ternary-union~~ | ~~Step 1~~ | — |
 | ~~external-type-struct (with-builtins)~~ | ~~Step 1~~ | — |
 | ~~array-builtin-methods~~ | ~~Step 2~~ | — |
-| closures | Step 3 | ~~Step 2 (I-011)~~ |
-| keyword-types | Step 3 | — |
-| void-type | Step 3 | — |
-| functions | Step 4 | Step 3 (I-020, I-024) |
+| closures | I-048 (所有権推論) | I-020 Box wrap 解消済、残: move/FnMut |
+| keyword-types | I-146 | I-025 implicit None 解消済、残: `return undefined` on void |
+| ~~void-type~~ | ~~Step 3~~ | — |
+| functions | I-319 (Vec index move) | I-020 Box wrap 解消済 |
 | async-await | Step 4 | — |
 | discriminated-union | Step 4 | — |
 | ~~nullish-coalescing~~ | ~~pre-Step-3 (I-022 + I-142)~~ | — |

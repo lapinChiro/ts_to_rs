@@ -21,10 +21,10 @@ fn useGreeting(greeting: String, name: String) -> String {
 
 fn makeCounter() -> Box<dyn Fn() -> f64> {
     let mut count = 0.0;
-    || -> f64 {
+    Box::new(|| -> f64 {
     count = count + 1.0;
     count
-}
+})
 }
 
 fn makeLabel(base: f64, label: String, x: f64) -> String {
@@ -42,7 +42,7 @@ pub struct Processor {
 }
 
 fn makeGreeter(greeting: String) -> Box<dyn Fn(String) -> String> {
-    |name: String| -> String { format!("{}, {}", greeting, name) }
+    Box::new(|name: String| -> String { format!("{}, {}", greeting, name) })
 }
 
 fn processValues(values: Vec<f64>) -> Vec<f64> {

@@ -19,6 +19,7 @@ use crate::transformer::{
 };
 
 pub(crate) use helpers::convert_last_return_to_tail;
+use helpers::{append_implicit_none_if_needed, wrap_closures_in_box};
 
 /// Converts a snake_case name to PascalCase.
 ///
@@ -200,6 +201,14 @@ impl<'a> Transformer<'a> {
         };
 
         convert_last_return_to_tail(&mut body);
+
+        // I-025: append implicit `None` when return type is Option<T> and body
+        // ends with a control-flow statement that may fall through without returning.
+        append_implicit_none_if_needed(&mut body, return_type.as_ref());
+
+        // I-020: wrap closures in Box::new(...) when return type is Fn / Box<dyn Fn(...)>.
+        // Walks entire body recursively (return + tail + nested blocks).
+        body = wrap_closures_in_box(body, return_type.as_ref());
 
         let mut_rebindings = mark_mut_params_from_body(&body, &params, &self.mut_method_names);
         if !mut_rebindings.is_empty() {

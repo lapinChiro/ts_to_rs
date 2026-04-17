@@ -16,6 +16,7 @@ fn maybeReturn(flag: bool) -> Option<String> {
     if flag {
         return Some("hello".to_string());
     }
+    None
 }
 
 async fn runAsync() {

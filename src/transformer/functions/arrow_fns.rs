@@ -155,6 +155,12 @@ impl<'a> Transformer<'a> {
             };
             convert_last_return_to_tail(&mut fn_body);
 
+            // I-025: append implicit None for Option<T> return (arrow block body)
+            super::helpers::append_implicit_none_if_needed(&mut fn_body, ret.as_ref());
+
+            // I-020: wrap closures in Box::new (arrow block body)
+            fn_body = super::helpers::wrap_closures_in_box(fn_body, ret.as_ref());
+
             // Union return wrapping: if the return type is a synthetic union enum,
             // wrap return/tail expressions in the appropriate variant constructor.
             if let Some(RustType::Named { ref name, .. }) = ret {

@@ -38,6 +38,163 @@ pub(crate) fn convert_last_return_to_tail(body: &mut Vec<Stmt>) {
     }
 }
 
+/// Wraps closure expressions in `Box::new(...)` throughout a function body when
+/// the return type is `Box<dyn Fn(...)>`.
+///
+/// Recursively walks the body to handle closures in all positions:
+/// - `return || { ... }` → `return Box::new(|| { ... })`
+/// - `|| { ... }` (tail) → `Box::new(|| { ... })`
+/// - `if cond { return || { ... } } else { || { ... } }` → both wrapped
+///
+/// Only wraps `Expr::Closure` — other expressions (Ident, FnCall) are assumed
+/// to already have the correct Box type. (I-020)
+///
+/// Mirrors the recursive structure of [`wrap_returns_in_ok`].
+pub(crate) fn wrap_closures_in_box(body: Vec<Stmt>, return_type: Option<&RustType>) -> Vec<Stmt> {
+    let Some(return_type) = return_type else {
+        return body;
+    };
+    // Generator renders RustType::Fn as `Box<dyn Fn(...) -> R>` in return position,
+    // so the IR return_type is Fn { params, return_type }, not StdCollection { Box, [DynTrait] }.
+    let needs_box = matches!(
+        return_type,
+        RustType::Fn { .. }
+            | RustType::StdCollection {
+                kind: crate::ir::StdCollectionKind::Box,
+                ..
+            }
+    );
+    if !needs_box {
+        return body;
+    }
+    body.into_iter().map(wrap_stmt_closure_in_box).collect()
+}
+
+/// Wraps a closure expression in `Box::new(...)`.
+fn box_wrap_closure(expr: Expr) -> Expr {
+    if !matches!(expr, Expr::Closure { .. }) {
+        return expr;
+    }
+    Expr::FnCall {
+        target: crate::ir::CallTarget::ExternalPath(vec!["Box".to_string(), "new".to_string()]),
+        args: vec![expr],
+    }
+}
+
+/// Recursively wraps closure expressions in return/tail positions with `Box::new(...)`.
+fn wrap_stmt_closure_in_box(stmt: Stmt) -> Stmt {
+    match stmt {
+        Stmt::Return(Some(expr)) => Stmt::Return(Some(box_wrap_closure(expr))),
+        Stmt::TailExpr(expr) => Stmt::TailExpr(box_wrap_closure(expr)),
+        Stmt::If {
+            condition,
+            then_body,
+            else_body,
+        } => Stmt::If {
+            condition,
+            then_body: then_body
+                .into_iter()
+                .map(wrap_stmt_closure_in_box)
+                .collect(),
+            else_body: else_body.map(|b| b.into_iter().map(wrap_stmt_closure_in_box).collect()),
+        },
+        Stmt::While {
+            label,
+            condition,
+            body,
+        } => Stmt::While {
+            label,
+            condition,
+            body: body.into_iter().map(wrap_stmt_closure_in_box).collect(),
+        },
+        Stmt::WhileLet {
+            label,
+            pattern,
+            expr,
+            body,
+        } => Stmt::WhileLet {
+            label,
+            pattern,
+            expr,
+            body: body.into_iter().map(wrap_stmt_closure_in_box).collect(),
+        },
+        Stmt::ForIn {
+            label,
+            var,
+            iterable,
+            body,
+        } => Stmt::ForIn {
+            label,
+            var,
+            iterable,
+            body: body.into_iter().map(wrap_stmt_closure_in_box).collect(),
+        },
+        Stmt::Loop { label, body } => Stmt::Loop {
+            label,
+            body: body.into_iter().map(wrap_stmt_closure_in_box).collect(),
+        },
+        Stmt::Match { expr, arms } => Stmt::Match {
+            expr,
+            arms: arms
+                .into_iter()
+                .map(|arm| MatchArm {
+                    body: arm.body.into_iter().map(wrap_stmt_closure_in_box).collect(),
+                    ..arm
+                })
+                .collect(),
+        },
+        Stmt::IfLet {
+            pattern,
+            expr,
+            then_body,
+            else_body,
+        } => Stmt::IfLet {
+            pattern,
+            expr,
+            then_body: then_body
+                .into_iter()
+                .map(wrap_stmt_closure_in_box)
+                .collect(),
+            else_body: else_body.map(|b| b.into_iter().map(wrap_stmt_closure_in_box).collect()),
+        },
+        Stmt::LabeledBlock { label, body } => Stmt::LabeledBlock {
+            label,
+            body: body.into_iter().map(wrap_stmt_closure_in_box).collect(),
+        },
+        other => other,
+    }
+}
+
+/// Appends `None` as a tail expression when the return type is `Option<T>` and the
+/// body's last statement is a control-flow construct without an else branch.
+///
+/// Handles: `if` without else, `for`, `while`, `for-of` — all of which may exit
+/// without returning a value, requiring an implicit `None` in Rust. (I-025)
+pub(crate) fn append_implicit_none_if_needed(body: &mut Vec<Stmt>, return_type: Option<&RustType>) {
+    let Some(return_type) = return_type else {
+        return;
+    };
+    if !matches!(return_type, RustType::Option(_)) {
+        return;
+    }
+    let needs_none = body.last().is_some_and(|last| {
+        matches!(
+            last,
+            Stmt::If {
+                else_body: None,
+                ..
+            } | Stmt::While { .. }
+                | Stmt::WhileLet { .. }
+                | Stmt::ForIn { .. }
+        )
+    });
+    if needs_none {
+        body.push(Stmt::TailExpr(Expr::BuiltinVariantValue(
+            crate::ir::BuiltinVariant::None,
+        )));
+    }
+}
+
 /// Scans function body for mutations (assignments, mutating method calls, closure captures)
 /// and inserts `let mut name = name;` rebinding statements for affected parameters.
 ///

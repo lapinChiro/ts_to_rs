@@ -144,25 +144,23 @@ fn test_all_fixtures_compile() {
         // (basic-types: コンパイル通過確認済み。skip 解除)
         // async-await: try/catch + return generates unreachable code after labeled block (I-330).
         "async-await",
-        // closures: returned closure missing Box::new() wrap (I-321). (I-217 resolved by Step 2)
+        // closures: Box wrap (I-020) 解消済。残: closure capture move/FnMut (I-048 所有権推論)。
         "closures",
         // discriminated-union: match body uses `event.x` instead of destructured binding `x` (I-322).
         "discriminated-union",
         // (I-273 fixed: generic-class removed from skip list)
         // (I-325 fixed: object-destructuring removed from skip list)
         // (ternary: I-009 union return wrap で解消。skip 解除)
-        // functions: returned closure missing Box::new() (I-321),
-        // Vec<String> index move (I-319).
+        // functions: Vec<String> index move (I-319). (I-020 Box wrap は Step 3 で解消)
         "functions",
-        // keyword-types: `undefined` return type generates `None` for `()` return (I-260).
+        // keyword-types: I-025 implicit None は解消。残: I-260 (`return undefined` on void fn → `None` instead of `return;`)。
         "keyword-types",
         // (nullish-coalescing: I-022 + I-142 で解消。skip 解除)
         // string-methods: slice/indexOf/split/charAt/repeat conversion bugs (I-329).
         "string-methods",
         // type-assertion: `as unknown as T` and union assertion type mismatch.
         "type-assertion",
-        // void-type: `string | void` → `Option<String>` if without else branch (E0317).
-        "void-type",
+        // (void-type: I-025 implicit None で解消。Step 3 skip 解除)
         // (async-class-method: P4.2 で Promise unwrap 実装完了。skip 解除)
         // (callable-interface, call-signature-rest, interface-mixed,
         // callable-interface-param-rename, callable-interface-inner:
@@ -246,7 +244,7 @@ fn test_all_fixtures_compile_with_builtins() {
         // (nullish-coalescing: I-022 + I-142 で解消。skip 解除)
         "string-methods",
         "type-assertion",
-        "void-type",
+        // (void-type: Step 3 skip 解除)
         // (async-class-method: P4.2 で Promise unwrap 実装完了。skip 解除)
         // (callable-interface, call-signature-rest, interface-mixed,
         // callable-interface-param-rename: P8.2 統合チェックポイントで復帰完了)
