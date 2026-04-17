@@ -17,222 +17,51 @@
 | Hono bench errors | 63 |
 | cargo test (lib) | 2532 pass |
 | cargo test (integration) | 122 pass |
-| cargo test (compile) | 3 pass (incl. nullish-coalescing unskipped) |
-| cargo test (E2E) | 91 pass |
+| cargo test (compile) | 3 pass |
+| cargo test (E2E) | 93 pass |
 | clippy | 0 warnings |
 | fmt | 0 diffs |
 
-**直近の作業**: I-SDCDF (Spec-Driven Conversion Development Framework) **Phase 1 完了**。
+### 直近の完了作業
 
-**SDCDF Phase 1 成果物** (2026-04-17):
-- [I-SDCDF PRD](backlog/I-SDCDF-spec-driven-framework.md) — PRD 起票済
-- `.claude/rules/spec-first-prd.md` — 2-stage workflow rule (Alpha draft)
-- `doc/grammar/ast-variants.md` — SWC AST variant catalog (17 enum, Tier 1/2/3 分類)
-- `doc/grammar/rust-type-variants.md` — IR RustType variant catalog (18+13+12 variant)
-- `doc/grammar/emission-contexts.md` — Emission context catalog (51 context)
-- `scripts/observe-tsc.sh` — tsc/tsx observation helper (動作確認済)
-- `/prd-template` skill — Step 0a (matrix-driven 判定) + reference doc 参照を追加
-- `/check_job` command — Spec/Implementation stage dispatch を追加
+**I-SDCDF: Spec-Driven Conversion Development Framework** (2026-04-17, closed)
 
-**SDCDF Phase 2 成果物** (2026-04-17):
-- `tests/e2e/scripts/<prd-id>/<cell-id>.ts` layout 確立 (smoke test: `sdcdf-smoke/`)
-- `run_cell_e2e_tests(prd_id)` / `run_cell_e2e_test(prd_id, cell_id)` — parametric runner
-- `scripts/record-cell-oracle.sh` — oracle 記録 helper (動作確認済)
-- E2E: 92 pass (既存 91 + sdcdf-smoke 1)
+PRD の開発プロセスを implementation-first → specification-first に転換する
+framework を Phase 1-4 で完走。Pilot (I-050-a) で **Spec gap = 0** を達成し、
+rule を Beta 昇格。今後の全 matrix-driven PRD に必須適用。
 
-**SDCDF Phase 3 Pilot (I-050-a) 成果物** (2026-04-17):
-- `backlog/I-050-a-any-coercion-primitive-let-return.md` — sub-PRD (Literal only)
-- `src/transformer/expressions/mod.rs` — Any coercion: Lit → `serde_json::Value::from()`
-- `src/transformer/statements/mod.rs` — return/let-init で expected_override=Any 伝播
-- `tests/e2e/scripts/i050a/` — 6 cell fixtures (3 source × 2 context、Lit only)
-- Ident coercion は I-050-b に scope-out (TypeResolver の IR 型乖離問題)
+成果物:
+- `.claude/rules/spec-first-prd.md` (Beta) — 2-stage workflow rule
+- `doc/grammar/{ast-variants,rust-type-variants,emission-contexts}.md` (Beta) — reference docs
+- `scripts/observe-tsc.sh`, `scripts/record-cell-oracle.sh` — helper scripts
+- `/prd-template` skill + `/check_job` command — spec-first 統合
+- `tests/e2e/scripts/<prd-id>/<cell-id>.ts` — per-cell E2E layout + parametric runner
+- 計画詳細: plan.prd.md (v4 承認済、framework 導入完了により git history に archive)
 
-**SDCDF Phase 4 Rollout** (2026-04-17):
-- Pilot 成功: **Spec gap = 0**, Implementation gap = 1 (doc 更新のみ、修正済)
-- `spec-first-prd.md` rule: Alpha → **Beta** 昇格 (正式 rule)
-- Reference docs 3 本: Alpha → **Beta** 昇格
-- **今後の全 matrix-driven PRD に spec-first workflow を必須適用**
-- I-SDCDF PRD: **完了 (closed)**
+**I-050-a: Any coercion primitive Lit → Value** (2026-04-17, closed)
 
-**次の作業** (spec-first workflow 適用):
-1. **I-050-b** — Ident → Value coercion (TypeResolver 精度向上が前提)
-2. **I-142-b** — FieldAccess `obj.x ??= d`
-3. **I-142-c** — Index `arr[i] ??= d`
-4. **I-144** — control-flow narrowing analyzer
-5. **Phase A Step 3** — クロージャ Box + Option 暗黙返却
+SDCDF Pilot。primitive Lit (Str/Num/Bool) → `serde_json::Value::from()` coercion を
+let-init + return context で実装。6 cell E2E green。Ident coercion は I-050-b に
+scope-out (TypeResolver の IR 型乖離問題)。
 
-**引継ぎ / プロセス転換**:
-- [I-142 Step 4 follow-up 引継ぎ](doc/handoff/I-142-step4-followup.md) — I-142
-  close 時点で accept された既知 defect の詳細 inventory + 新 framework 適用時の
-  着手順序。
-- [plan.prd.md](plan.prd.md) — v4 最終計画 **承認済** (2026-04-17)。
+**I-142: `??=` NullishAssign Ident LHS** (closed、Step 1-3 完了)
 
-I-142 の残 defect は、新 framework PRD の pilot application として再着手する方針。
-同じ bottom-up / intuition-driven approach で Step 4 を実施しても同オーダーの新規
-defect 発見が再現する確度が高いため、先にプロセス側を structural に fix する。
+shadow-let + fusion + expression-context `get_or_insert_with` による structural rewrite。
+残 defect (C-1〜C-9 + D-1) は [引継ぎドキュメント](doc/handoff/I-142-step4-followup.md) に移管。
 
-Step 3 は Step 2 完了後の `/check_job` 敵対的自己レビューで発見された未解決
-defect 群 (D-1〜D-7) を解消する。INV-Step3-1/-2/-3 の調査を先行し
-(`report/i142-step3-inv{1,2,3}-*.md`)、仕様駆動で実装:
+**以前の完了**: I-022 (`??` 演算子)、I-138 (Vec index Option)、I-040 (optional param 統一)
 
-- **D-1**: `pre_check_narrowing_reset` + 再帰 AST scanner
-  (`has_narrowing_reset_in_stmts` / `stmt_has_reset` / `expr_has_reset`) を
-  追加。closure / nested-fn body を scan 境界として skip (TS の flow-sensitive
-  narrowing 境界と一致、INV-Step3-1 で確認)。呼び出し箇所: `convert_stmt_list`
-  / switch case body (`convert_switch_case_body` helper 新設) / 関数 expression /
-  arrow / class method / class 静的ブロック。Cell #14 lock-in test を
-  `UnsupportedSyntaxError("nullish-assign with narrowing-reset (I-144)")`
-  surface assert に書き換え (linear / inner-if / for-of loop / closure-safe
-  の 4 パターン)。
-- **D-2**: Problem Space matrix の RHS 次元を 4 class (Copy lit / non-Copy lit /
-  side-effect expr / transparent TS wrapper) に正規化。Class C (Call/BinOp/Cond)
-  / Class D (TsAs/TsNonNull/Paren) の parameterized lock-in test を追加。Seq /
-  yield / throw / Spread RHS は TS syntax または現行 ts_to_rs 制約で UnsupportedSyntaxError
-  surface を lock-in (I-114 / I-143 follow-up で structural fix 予定)。
-- **D-3**: `convert_assign_expr` の NullishAssign arm で `convert_expr(&assign.right)`
-  を ShadowLet arm 内に局所化。Identity / BlockedByI050 の場合 RHS を convert
-  しない (TS 意味論: LHS non-null なら RHS は評価されない — 意味論的にも正しい)。
-- **D-4**: `pick_strategy` を `_` fallback なしの exhaustive match に改造 +
-  全 variant 網羅の table test 追加 (5 test)。RustType 新 variant 追加時は
-  compile-time gate + test fail の二重 gate。
-- **D-5**: Cell #10 `.clone()` conservative emission に `// INTERIM (I-048):`
-  コメント + 根拠追記。
-- **D-6**: Cell #11/#12 の `let encoded;` unresolved test に TypeResolver の
-  非 flow-sensitive 性質の根拠と、I-144 完了時の fragility 注意を記載。
-- **D-7**: `transform_module_collecting_with_context` pub fn +
-  `TctxFixture::transform_collecting` helper 追加。全 cell test を同一 fixture
-  経由に統一。
+### 次の作業 (spec-first workflow 適用)
 
-**Bench 変動**: clean 111/158 (70.3%) **維持**、error instances 62 → 63 (+1)。
-増分は `utils/concurrent.ts:12` の OBJECT_LITERAL_NO_TYPE (destructuring param
-default `= {}` に関連)。**この +1 の帰属は未特定** (Step 4 INV-Step4-2 で bisection
-調査予定 — D-3 RHS convert skip の副作用か pre-existing noise かを実証)。
-`nullish-assign with narrowing-reset (I-144)` kind は Hono bench に出現なし
-(Hono は該当パターン未使用)。
+| 優先度 | PRD | 内容 |
+|--------|-----|------|
+| 1 | I-050-b | Ident → Value coercion (TypeResolver 精度向上が前提) |
+| 2 | I-142-b | FieldAccess `obj.x ??= d` |
+| 3 | I-142-c | Index `arr[i] ??= d` |
+| 4 | I-144 | control-flow narrowing analyzer |
+| 5 | Phase A Step 3 | クロージャ Box + Option 暗黙返却 |
 
-**I-142 close 時点の既知 defect summary** (詳細は
-[`doc/handoff/I-142-step4-followup.md`](doc/handoff/I-142-step4-followup.md)):
-
-- **C-1 / C-2 (🔴 correctness)**: narrowing-reset scanner の false-positive
-  (compound ops / UpdateExpr)、closure body test が silent compile error を
-  lock-in している疑い。
-- **C-3 / C-4 (🔴 test coverage)**: scanner 再帰 branch + 非-reset ケースで 22+
-  variant が lock-in test 不在。
-- **C-5 / C-6 (🟡)**: D-2 Class D の残 4 variant + Seq RHS assertion weak。
-- **C-7 (🟡 matrix gap)**: `Option<Any>` cell が未 enumerate。
-- **C-8 / C-9 (🟡)**: Interim patch 条件不備 + +1 OBJECT_LITERAL_NO_TYPE の帰属
-  未特定。
-- **D-1 (🟢 design)**: `pre_check_narrowing_reset` call site 分散。
-
-これらは I-142 PRD では解消せず、新 framework PRD の pilot 対象として処理する
-方針 ([`plan.prd.md`](plan.prd.md) 参照)。
-
-**Scope 訂正 (Step 1 → Step 2)**:
-
-- Step 1 時点: 「Ident LHS = 本 PRD」と宣言したが実態は Option<T> LHS のみ解消。
-  Any / non-nullable / unresolved の expression 経路は silent に compile error 生成。
-- Step 2 訂正: 「**Ident LHS × {Option / non-nullable / unresolved} = 本 PRD、
-  Any LHS は I-050 Any coercion umbrella 依存、narrowing-reset は I-144 依存、
-  FieldAccess / Index LHS は I-142-b/c 依存**」に再定義。各 blocked cell に
-  compile-error lock-in test を追加し、依存 PRD 完了時の自動更新を強制。
-
-`nullish-coalescing` fixture の compile_test skip を両 (no-builtins /
-with-builtins) とも除去済 (Step 1 時点で達成済)。
-
-**I-142 完了による bench 変動**: clean 114/158 (72.2%) → 111/158 (70.3%) (-1.9pp)、
-errors 58 → 62 (+4)。**変動内訳は silent bug の visibility 向上**:
-- **+3 `nullish-assign on member/index target (I-142-b/c)`**: `context.ts:367
-  (this.#req ??= new HonoRequest(...))`, `adapter/lambda-edge/handler.ts:8
-  (globalThis.crypto ??= crypto)`, `router/reg-exp-router/router.ts:21
-  (wildcardRegExpCache[path] ??= new RegExp(...))`。pre-I-142 はこれらの member/index
-  LHS を `obj.x.get_or_insert_with(|| d)` として silent に誤訳し、下流で compile error
-  を招いていた。I-142 は scope 外 (I-142-b/c PRD で対応) として明示的に `unsupported`
-  で surface する。
-- **+1 `nullish-assign on unresolved type`** (`utils/url.ts:256: encoded ??= /[%+]/.test(url)`):
-  TypeResolver が `let encoded` (型注釈なし + 複数の string/undef 代入経由) を解決できず、
-  I-142 は silent に誤訳せず explicit error を emit。pre-existing TypeResolver 限界
-  (flow-sensitive 型推論の未実装; I-144 で構造的に改善予定)。
-- Plan.md pre-I-142 の「Hono 内 `??=` 出現 0 件」記述は実態と相違していた。実測では
-  **Hono に 10 件の `??=`** が存在し、5 件 (Ident LHS) は本 PRD で structural 修正、
-  5 件 (member/index + unresolved) は I-142-b/c/I-144 で継続。5 件の Ident LHS 修正は
-  pre-I-142 では silent compile error を生んでいた可能性があり、bench には
-  現在もこれらの下流エラーは (surface error に置き換わって) 継続するが、意味論上は
-  structural fix が達成されている。
-
-**I-142 実装のキーモジュール** (Step 2 時点):
-- `src/transformer/statements/nullish_assign.rs` (新規): `NullishAssignStrategy` enum
-  + `pick_strategy(lhs_type: &RustType)` 純関数による **LHS 型分岐の single source of
-  truth 化**。stmt / expr 両経路が同一 strategy を参照 (Problem Space matrix の
-  single encoding)。`try_convert_nullish_assign_stmt` は Option → shadow-let、
-  Any → `UnsupportedSyntaxError(I-050)`、non-nullable → no-op、unresolved →
-  `UnsupportedSyntaxError` を emit。`fuse_nullish_assign_shadow_lets` (3 つの
-  safety 条件で chain / mutable / shadow-output 重複を防止) も同モジュール。
-- `src/transformer/expressions/assignments.rs`: NullishAssign arm を `pick_strategy`
-  経由の LHS 型分岐に再設計。Option: `*x.get_or_insert_with(|| d)` (Copy) /
-  `.clone()` (!Copy)。non-nullable: `x` (Copy) / `x.clone()` (!Copy) の identity
-  emit。Any: `UnsupportedSyntaxError("nullish-assign on Any LHS (I-050)")`。
-  unresolved: stmt と対称に `UnsupportedSyntaxError("nullish-assign on unresolved
-  type")`。Member / Index は `UnsupportedSyntaxError(I-142-b/c)`。
-- `src/pipeline/type_resolver/expressions.rs`: `??=` のために LHS ident の型を span に
-  記録する `record_assign_target_ident_type` を追加。inner T を RHS に expected type
-  として伝播 (string literal → `.to_string()` coerce 等)。
-- `src/ir/types.rs::RustType::is_copy_type`: Copy-ness の構造的判定。Named / TypeVar /
-  DynTrait / Any は保守的に false。Primitive / Ref / Tuple<all Copy> / Option<Copy>
-  は true。
-- `src/transformer/statements/mutability.rs`: `MUTATING_METHODS` に `get_or_insert_with`
-  を追加 (expression-context emission が `let x` を `let mut x` に upgrade させる)。
-
-**I-142 Step 2 新設 PRD**:
-- `backlog/I-050-any-coercion-umbrella.md`: Any ↔ {T} の全 context coercion を
-  umbrella 化。I-142 Cell #5/#9 / I-143-b / I-029 / I-030 が本 umbrella に依存。
-  Problem Space matrix (Source 次元 × Context 次元 × AST shape 次元) を起票段階で
-  enumerate。下位 PRD (I-050-a, -b, ...) は context 軸で分割予定。
-
-**I-022 完了による bench 変動**: clean 113/158 (71.5%) → 114/158 (72.2%) (+0.7pp)、errors
-59 → 58 (-1; OBJECT_LITERAL_NO_TYPE 28 → 27)。I-022 の LHS Option expected propagation が
-下流の expected type 伝播にも波及し、副次的に OBJECT_LITERAL_NO_TYPE 1 件を解消。
-`nullish-coalescing` fixture の Tier 1 silent drop (`arr[i] ?? default` が空配列で panic)
-と chain `a ?? b ?? c` の compile error を構造的に解消:
-- `resolve_bin_expr` NC arm を **統一 arm** 化 (LHS Option / 非 Option を同一ロジックで処理)。
-  LHS span に `Option<inner>` expected を常に propagate し、RHS span に `inner` (= NC 最終型)
-  を propagate。`convert_member_expr` は LHS が Vec<T> の場合 `.get(i).cloned()` / Vec<Option<T>>
-  の場合 `.get(i).cloned().flatten()` を自動選択。
-- `produces_option_result` に `Some`/`None`/`.or`/`.or_else` 認識を追加 (IR-shape secondary signal)
-- `convert_bin_expr` NC arm が `is_option_right` を判定し、RHS も Option の chain case で
-  新規 helper `build_option_or_option` 経由 `.or_else(|| rhs)` を emit
-- `/check_job` review で Vec<Option<T>> + NC の silent bug (LHS Option arm が LHS propagation
-  を skip していた) を検出し、統一 arm 化で構造的に解消。
-- `/check_job deep` review で **chain + Vec<Option<T>>** の silent panic を検出:
-  `arr[i] ?? arr[j] ?? "default"` で inner NC の RHS (`arr[j]`) が span expected = String を
-  受けて `.unwrap()` 形を emit → `.or_else` closure 内で panic → `"default"` に到達せず。
-  `propagate_expected` に `Bin(NullishCoalescing)` arm を追加し、outer Option 文脈を inner NC
-  の LHS/RHS 両方へ propagate。`resolve_bin_expr` は既に設定された Option RHS を preserve。
-  これにより inner の両辺が `.flatten()` 形になり、chain 全体で Option を保持して終端で
-  `.unwrap_or_else` が fallback を生成。
-- 残課題: `??=` (NullishAssign) の narrowing/shadowing 未対応 → 🔗 I-142 で連続着手。
-  `nullish-coalescing` fixture skip は I-142 完了まで維持。
-
-**I-138 完了による bench 変動**: 変動なし (clean 71.5% / errors 59 維持)。I-040 と同様、Hono には
-該当 Vec index Option-context パターンが bench に現出していなかった。pre-existing Tier 1 silent
-semantic bug (空 Vec で panic vs TS undefined) を `convert_member_expr_inner` 単点修正で構造的に
-解消し、`return / assignment / call arg / ternary branch` の 4 context + `Vec<Option<T>>` nested
-nullable ケース (`.flatten()` 条件付き emit) + optional chaining 経由 (`obj?.[i]`) を統一カバー。
-`/check_job` / `/check_problem` 計 3 周のレビューで発見した課題:
-- 1 周目: Vec<Option<T>> edge case の型ずれ → `.flatten()` 追加
-- 2 周目: flatten 条件の過剰適用リスク (`expected=Option<Option<T>>`) → `elem_ty == Option<expected_inner>` 厳密マッチへ精緻化
-- 3 周目: optional chaining Computed 経路が同一不変量違反 → `convert_opt_chain_expr` にも flatten 条件付き emit 追加
-Scope narrow: "nullish coalescing LHS" は I-022 で解消済 (本 commit)。
-別発見 (別 PRD 対応): I-140 (type alias target 非格納による Option 検出欠落)、I-141 (array literal
-要素型が Option<Vec<T>> expected 経由で非伝播)。
-
-**I-040 完了による bench 変動**: 変動なし (clean 71.5% / errors 59 維持)。本 PRD は pre-existing
-defect 修正で、Hono には該当 optional param パターンが実際には少なく bench に現出していなかった。
-変換器内部では 10 経路の Option ラップが統一され、DRY 違反と silent loss の両方を構造的に解消。
-
-**Step 2 完了による bench 変動**: clean 72.2% → 71.5% (-0.7pp)、error 58 → 59 (+1) は
-OBJECT_LITERAL_NO_TYPE。strictNullChecks 有効化で `T | undefined` / optional param が正しく
-抽出されるようになり、Hono 側の generic 型注釈要求が顕在化した（silent semantic change ではなく、
-既存の defect が表面化したシグナル）。Phase B (RC-11 expected type 伝播) 範囲で解消予定。
+I-142 残 defect (C-1〜C-9 + D-1) は新 framework 適用後に個別 sub-PRD として処理する。
 
 ---
 

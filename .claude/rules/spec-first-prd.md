@@ -8,8 +8,8 @@ Non-matrix PRD (infra, refactor, bug fix) には適用しない。
 判定基準: PRD が `problem-space-analysis.md` の入力次元 (AST shape / TS type / emission context)
 を持つなら matrix-driven。
 
-本ルールは `plan.prd.md` の Root Cause 1-4 から derive された。
-PRD 番号: I-SDCDF (`backlog/I-SDCDF-spec-driven-framework.md`)。
+本ルールは I-SDCDF PRD の Root Cause 1-4 分析から derive された (plan.prd.md v4、
+git history 参照)。
 
 ## Core Principle
 
