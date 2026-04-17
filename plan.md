@@ -13,16 +13,59 @@
 
 | 指標 | 値 |
 |------|-----|
-| Hono bench clean | 111/158 (70.3%) |
-| Hono bench errors | 63 |
-| cargo test (lib) | 2532 pass |
+| Hono bench clean | 112/158 (70.9%) |
+| Hono bench errors | 62 |
+| cargo test (lib) | 2566 pass |
 | cargo test (integration) | 122 pass |
-| cargo test (compile) | 3 pass (+ void-type unskip) |
+| cargo test (compile) | 3 pass (async-await + discriminated-union unskip) |
 | cargo test (E2E) | 95 pass |
 | clippy | 0 warnings |
 | fmt | 0 diffs |
 
 ### 直近の完了作業
+
+**Phase A Step 4: I-023 + I-021** (2026-04-17, closed)
+
+`async-await` と `discriminated-union` fixture の skip 解消。2 つの独立した root cause を
+structural に解決:
+
+- **I-023 (try/catch unreachable)**: `convert_try_stmt` に `'try_block` labeled block の
+  `!`-type 検出を追加。Try body が常に return し throw / outer break / outer continue
+  rewrite を伴わない場合、`_try_result` / labeled block / `if let Err` / `unreachable!()`
+  の machinery を全て drop し try body を inline emit。`unreachable_code` lint violation
+  を構造的に排除。併せて `TryBodyRewrite::rewrite` を `Stmt::Match` / `IfLet` / `WhileLet` /
+  `LabeledBlock (non-try_block)` まで exhaustive に recurse させ (Critical review で発見した
+  hidden throw silent-drop 問題の根本修正)、`ends_with_return` も `Stmt::Match` (全 arm 終端)
+  と `Stmt::IfLet { else_body: Some }` を認識するよう拡張。
+- **I-021 (DU field binding)**: `resolve_expr_inner::Tpl` に `tpl.exprs` recursion を追加
+  して inner expression の `expr_types` を populate。加えて `du_analysis.rs` の walker を
+  **全 AST variant exhaustive** に拡張し、Transformer 側 (`switch.rs`) の重複 walker を
+  削除して single source of truth に統合。Array / Object / Unary / Await / OptChain /
+  TsAs 系 / Seq / TaggedTpl / New / While / For / Switch / Try / Throw / Labeled まで
+  カバーする matrix を lock-in テスト。副次改善として unit variant を
+  `Pattern::UnitStruct` で emit (idiomatic な `Status::Active` 出力)。
+
+成果物:
+- 16 cell 以上のマトリクス (expression context × DU variant × statement context)
+- DU walker に scope-aware shadowing tracking を追加 (I-148 同 PRD 内で解消、Tier 1 silent 排除)
+- 34 新規 unit test (du_analysis: 15 + 8 variant coverage + 6 shadowing lock-in + 5 follow-up) + 5 新規 unit test (try/catch noreturn + nested throw regression)
+- E2E fixture 拡張 (`tests/e2e/scripts/discriminated_union.ts` に template literal context + shadow 回避再代入、`tests/e2e/scripts/async_await.ts` に try/catch noreturn + nested throw regression)
+- `TryBodyRewrite::throw_count: usize` → `has_throw: bool` 変更 (boolean blindness inverse の解消、3 field 対称化)
+- PRD: `backlog/phase-a-step-4-du-and-try-catch.md` (完了後 delete、git history に archive)
+
+Follow-up TODO (本 PRD 完了時に新規登録、各項目 empirical trace / 再現 TS / 修正方針まで記載済):
+
+| TODO | 分類 | Tier / 優先度 | 概要 |
+|------|------|--------------|------|
+| I-149 | review insight / pre-existing latent | L4 | async error propagation PRD (I-049/I-078/I-127) 完了時に I-023 short-circuit 再監査必須 |
+| I-150 | review insight / pre-existing | L3 / Tier 2 | `resolve_new_expr` が未登録 class の args を visit せず、DU field access inside `new Error(...)` without builtins で compile error (empirical 再現済) |
+| I-151 | review insight / design integrity | L4 | `try_convert_tagged_enum_switch::is_unit_variant` の `unwrap_or(false)` fallback は registry inconsistency に brittle、safer は `return Ok(None)` |
+| I-152 | review insight / design integrity | L4 | `pub(crate) mod du_analysis` が pipeline boundary を弱化。walker を `ast_utils` neutral module に移設 or re-export に絞るべき |
+| I-153 | review insight / pre-existing Tier 1 | L1 | switch case body の nested bare `break` が outer loop を誤 break する silent (`'switch:` labeled block は Rust 側で bare break target にならないため)、switch emission の pre-rewrite で structural fix すべき。問題空間 matrix 設計が必要 |
+| I-154 | review insight / rarity | L4 | `'try_block` 固定 label が user labeled block と衝突し得る hygiene 欠落、`__ts_try_block` 等に変更 |
+| I-155 | review insight / defense-in-depth | L4 | `TryBodyRewrite::rewrite` が body-bearing expression (Block/Match/If in Stmt::Expr/TailExpr/Return/Let::init) 内の throw を見ない。現時点 reachability なしだが将来 regression source |
+| I-156 | SDCDF 完了条件残 / oracle grounding 欠 | L3 | Phase A Step 4 PRD の "per-cell E2E fixture" 要件が未対応 (既存 fixture 拡張で代替)。16 cell 以上の DU context + 6 shadowing cell について `tests/e2e/scripts/phase-a-step-4/<cell-id>.ts` を作成し runtime stdout 一致 oracle を確立すべき |
+| I-157 | review insight / defense-in-depth | L4 | `Stmt::Match` の exhaustiveness が IR 型で表現されず、`ends_with_return` が implicit assumption で判断。`has_wildcard: bool` tag 等の型強化を検討 |
 
 **I-SDCDF: Spec-Driven Conversion Development Framework** (2026-04-17, closed)
 
@@ -69,9 +112,9 @@ FieldAccess (`obj.field ??= d`) と Index (`cache[key] ??= d`) の `??=` を str
 
 | 優先度 | PRD | 内容 | 根拠 |
 |--------|-----|------|------|
-| 1 | Phase A Step 4 | I-023 (try/catch unreachable) + I-021 (DU) | I-023 は CFG 不要の trivial fix (error_handling.rs local)。I-144 との overlap ゼロ。2 fixture 確実 unskip、~100 行 |
-| 2 | I-144 | control-flow narrowing analyzer | I-024 complex / D-1 DRY / I-142 Cell #14 を構造的に解消。~800-1000 行、直接 fixture unskip は 0 だが将来の narrowing 基盤 |
-| 3 | I-050-b | Ident → Value coercion | TypeResolver 精度向上が前提 |
+| 1 | I-144 | control-flow narrowing analyzer | I-024 complex / D-1 DRY / I-142 Cell #14 を構造的に解消。~800-1000 行、直接 fixture unskip は 0 だが将来の narrowing 基盤 |
+| 2 | I-050-b | Ident → Value coercion | TypeResolver 精度向上が前提 |
+| 3 | Phase A Step 5 | I-026 / I-029 / I-030 型変換 + null セマンティクス | `type-assertion`, `trait-coercion`, `any-type-narrowing` unskip |
 I-142 残 defect (C-1〜C-9 + D-1) は新 framework 適用後に個別 sub-PRD として処理する。
 
 ---
@@ -245,6 +288,58 @@ optional ラップ規則を適用する必要がある:
 integration test で確認する。`resolve_call_expr` は callee を `resolve_expr` で visit して
 expr_types[callee_span] を populate するため、Ident callee でも `get_expr_type` が機能する。
 
+### Phase A Step 4 で確立した設計方針
+
+#### 1. DU field access walker は single source of truth (`du_analysis::collect_du_field_accesses_from_stmts`)
+
+`src/pipeline/type_resolver/du_analysis.rs` の `collect_du_field_accesses_from_stmts` が
+switch 内 `obj.field` 形式のアクセス収集の唯一の entry point。TypeResolver (`detect_du_switch_bindings`
+での `DuFieldBinding` 登録) と Transformer (`switch.rs::try_convert_tagged_enum_switch` の
+`needed_fields` 計算) の両方が同一関数を call する。`doc/grammar/ast-variants.md` の Tier 1 Expr /
+Stmt 全 variant を exhaustive に match し、Arrow/Fn body のみ I-048 scope-out として意図的にスキップ
+(追加時は variant 網羅を保つこと)。
+
+**引継ぎ**: 新規 AST variant 追加時は本 walker にも arm 追加必須 (walker が exhaustive match のため
+build fail でリマインダーが出る)。同 walker の scope-aware shadowing tracking (`walk_stmts` +
+`stmt_declares_name` + `pat_binds_name` + `for_head_binds_name`) は `obj_var` 同名の binding 導入で
+descendant 収集を抑止する構造。新しい binding 導入 construct (TS 仕様拡張) が増えたら本 tracking にも
+反映必須。
+
+#### 2. `resolve_expr_inner::Tpl` / `TaggedTpl` は children を必ず visit する
+
+`src/pipeline/type_resolver/expressions.rs` の `Tpl` arm は `tpl.exprs` を全て `resolve_expr`
+で visit して inner expression の `expr_types` entry を populate する。これにより downstream
+(`is_du_field_binding` check 等) が inner の Ident 型を lookup 可能になる。`TaggedTpl` も同様に
+tag + tpl.exprs を visit (本体の return 型は Unknown)。
+
+**引継ぎ**: Expression で body-bearing な variant (Block / Match / If / IfLet) を新規追加する際は、
+children visit の完全性を verify する (span-based lookup が silent に fail しないため)。
+
+#### 3. `TryBodyRewrite::rewrite` は break-to-try_block の source を全て exhaustive に capture する
+
+`src/transformer/statements/error_handling.rs` の try body rewriter は 3 種類の break source を capture:
+(a) `Stmt::Return(Some(Err(...)))` → throw rewrite (`has_throw` flag 立て + `_try_result = Err; break 'try_block`)、
+(b) bare `Stmt::Break { None }` at loop_depth == 0 → `needs_break_flag` + flag 立て、
+(c) bare `Stmt::Continue { None }` at loop_depth == 0 → `needs_continue_flag` + flag 立て。
+
+`Stmt::If` / `ForIn` / `While` / `Loop` / `IfLet` / `WhileLet` / `Match (arm bodies)` /
+`LabeledBlock (label != "try_block")` 全てに再帰し、hidden throw/break が skip されないようにする
+(Phase A Step 4 deep /check_job で検出した Critical bug の根本 fix)。
+
+**引継ぎ**: IR `Stmt` に body-bearing variant を追加する場合は `TryBodyRewrite::rewrite` の recurse
+先を必ず更新。また `ends_with_return` も対応 variant を認識させる (現状は Return / If(both) / IfLet(both) /
+Match(all arms))。
+
+#### 4. I-023 short-circuit は labeled block が `!`-typed と判定できる時のみ発動
+
+`convert_try_stmt` 内の `if try_ends_with_return && !has_break_to_try_block` 条件は、**labeled
+block が Rust 型 `!` になる場合のみ** machinery (`_try_result`/`LabeledBlock`/`if let Err`/
+`unreachable!()`) を全て drop する。throw があれば block 型は `()` になるため machinery 必要、
+I-023 short-circuit は抑止される (has_throw が true のため)。
+
+**引継ぎ**: async error propagation PRD (I-049/I-078/I-127 系) が導入されたら、async 文脈の
+catch body drop は semantic 失われるため I-149 に従い再設計必須。
+
 ### union return wrapping の実行順序 (RC-13 PRD で確立)
 
 `convert_fn_decl` 内の処理順序は以下でなければならない:
@@ -294,16 +389,15 @@ skip 解消後は新たな skip 追加を原則禁止とし、回帰検出を自
 
 **永続 skip (2件):** `callable-interface-generic-arity-mismatch` (意図的 error-case), `indexed-access-type` (マルチファイル用、別テストでカバー)
 
-**残: 14 fixture** (effective 12 + 設計制約 2; + I-144 起票済)
+**残: 12 fixture** (effective 10 + 設計制約 2; + I-144 起票済)
 
 #### 次の Step
 
 ```
 I-144 (CF narrowing)
   ↓
-Step 4 (control flow + DU)           Step 6 (string + intersection)
-  ↓                                  type-narrowing は Step 1 + 6 で完全解消
-Step 5 (type conversion + null)
+Step 5 (type conversion + null)      Step 6 (string + intersection)
+                                     type-narrowing は Step 1 + 6 で完全解消
   ↓
 Step 7 (builtin impl)
 ```
@@ -323,15 +417,15 @@ Step 7 (builtin impl)
 
 ---
 
-**Step 4: 制御フロー + DU** — Tier 2、独立した 2 修正
+**Step 4: 制御フロー + DU** — **完了** (2026-04-17)
 
-| イシュー | 修正箇所 | 内容 |
-|----------|---------|------|
-| I-023 | `convert_try_stmt()` (`error_handling.rs:96-138`) | try/catch 両方に return がある場合の unreachable code 除去 |
-| I-021 | `is_du_field_binding()` (`type_resolution.rs:209`) | match body でデストラクチャ変数を使うべき箇所が `event.x` のまま |
+| イシュー | 状態 | 内容 |
+|----------|------|------|
+| I-023 | **解消** | `convert_try_stmt` に `!`-typed labeled block 検出を追加し、try body が常時 return + throw/break/continue なしのケースで machinery を drop して body を inline emit |
+| I-021 | **解消** | `resolve_expr_inner::Tpl` に recursion 追加 + DU field access walker を統合して全 AST variant exhaustive に拡張 + unit variant pattern を `Pattern::UnitStruct` 化 |
 
 - unskip: `async-await`, `discriminated-union`
-- `functions` 完全解消（Step 3 と合わせて）
+- `functions` は I-319 (Vec index move) が残存、skip 維持
 
 ---
 
@@ -388,8 +482,8 @@ Step 7 (builtin impl)
 | keyword-types | I-146 | I-025 implicit None 解消済、残: `return undefined` on void |
 | ~~void-type~~ | ~~Step 3~~ | — |
 | functions | I-319 (Vec index move) | I-020 Box wrap 解消済 |
-| async-await | Step 4 | — |
-| discriminated-union | Step 4 | — |
+| ~~async-await~~ | ~~Step 4~~ | — |
+| ~~discriminated-union~~ | ~~Step 4~~ | — |
 | ~~nullish-coalescing~~ | ~~pre-Step-3 (I-022 + I-142)~~ | — |
 | type-assertion | Step 5 | — |
 | trait-coercion | Step 5 | — |

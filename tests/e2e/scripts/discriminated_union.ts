@@ -20,6 +20,28 @@ function get_dimension(s: Shape): number {
     }
 }
 
+// I-021 Tpl: DU field access inside a template literal must still resolve
+// via the destructured match binding (not raw `s.radius`).
+function describe_shape(s: Shape): string {
+    switch (s.kind) {
+        case "circle":
+            return `circle with r=${s.radius}`;
+        case "square":
+            return `square with s=${s.side}`;
+    }
+}
+
+// I-021 Tpl: nested contexts — template + binary + call arg all exercising
+// the walker's Tpl + Bin + Call paths.
+function describe_with_suffix(s: Shape, suffix: string): string {
+    switch (s.kind) {
+        case "circle":
+            return `dim=${Math.abs(s.radius)}${suffix}`;
+        case "square":
+            return `dim=${Math.abs(s.side)}${suffix}`;
+    }
+}
+
 function main(): void {
     const c1: Shape = { kind: "circle", radius: 5 };
     const c2: Shape = { kind: "circle", radius: 5 };
@@ -46,4 +68,17 @@ function main(): void {
     // standalone field access
     const c5: Shape = { kind: "circle", radius: 42 };
     console.log("radius:", c5.radius);
+
+    // I-021 Tpl: DU field inside template literal.
+    // Use fresh bindings for each call to avoid move-after-use in Rust output
+    // (a separate ownership concern tracked by I-048).
+    const c6: Shape = { kind: "circle", radius: 1.5 };
+    const sq5: Shape = { kind: "square", side: 2.5 };
+    console.log(describe_shape(c6));
+    console.log(describe_shape(sq5));
+
+    const c7: Shape = { kind: "circle", radius: 1.5 };
+    const sq6: Shape = { kind: "square", side: 2.5 };
+    console.log(describe_with_suffix(c7, "cm"));
+    console.log(describe_with_suffix(sq6, "m"));
 }

@@ -41,23 +41,23 @@ impl Status {
 fn handleEvent(event: Event) -> String {
     match &event {
         Event::Click { x, .. } => {
-            return format!("clicked at {}", event.x);
+            return format!("clicked at {}", x.clone());
         }
         Event::Hover { y, .. } => {
-            return format!("hovered at {}", event.y);
+            return format!("hovered at {}", y.clone());
         }
     }
 }
 
 fn describeStatus(status: Status) -> String {
     match &status {
-        Status::Active { .. } => {
+        Status::Active => {
             return "active".to_string();
         }
-        Status::Inactive { .. } => {
+        Status::Inactive => {
             return "inactive".to_string();
         }
-        Status::Pending { .. } => {
+        Status::Pending => {
             return "pending".to_string();
         }
     }

@@ -59,110 +59,12 @@ fn build_combined_guard(discriminant: &Expr, patterns: Vec<Expr>) -> Expr {
     })
 }
 
-/// switch arm body 内で `obj_var.field` 形式のフィールドアクセスを収集する。
-///
-/// `tag_field`（discriminant フィールド）はスキップする。
-fn collect_du_field_accesses(stmts: &[ast::Stmt], obj_var: &str, tag_field: &str) -> Vec<String> {
-    let mut fields = Vec::new();
-    for stmt in stmts {
-        collect_du_field_accesses_from_stmt(stmt, obj_var, tag_field, &mut fields);
-    }
-    fields.sort();
-    fields.dedup();
-    fields
-}
-
-fn collect_du_field_accesses_from_stmt(
-    stmt: &ast::Stmt,
-    obj_var: &str,
-    tag_field: &str,
-    fields: &mut Vec<String>,
-) {
-    match stmt {
-        ast::Stmt::Expr(expr_stmt) => {
-            collect_du_field_accesses_from_expr(&expr_stmt.expr, obj_var, tag_field, fields);
-        }
-        ast::Stmt::Return(ret) => {
-            if let Some(arg) = &ret.arg {
-                collect_du_field_accesses_from_expr(arg, obj_var, tag_field, fields);
-            }
-        }
-        ast::Stmt::Decl(ast::Decl::Var(var_decl)) => {
-            for decl in &var_decl.decls {
-                if let Some(init) = &decl.init {
-                    collect_du_field_accesses_from_expr(init, obj_var, tag_field, fields);
-                }
-            }
-        }
-        ast::Stmt::If(if_stmt) => {
-            collect_du_field_accesses_from_expr(&if_stmt.test, obj_var, tag_field, fields);
-            collect_du_field_accesses_from_stmt(&if_stmt.cons, obj_var, tag_field, fields);
-            if let Some(alt) = &if_stmt.alt {
-                collect_du_field_accesses_from_stmt(alt, obj_var, tag_field, fields);
-            }
-        }
-        ast::Stmt::Block(block) => {
-            for s in &block.stmts {
-                collect_du_field_accesses_from_stmt(s, obj_var, tag_field, fields);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn collect_du_field_accesses_from_expr(
-    expr: &ast::Expr,
-    obj_var: &str,
-    tag_field: &str,
-    fields: &mut Vec<String>,
-) {
-    match expr {
-        ast::Expr::Member(member) => {
-            // Check if this is obj_var.field
-            if let ast::Expr::Ident(ident) = member.obj.as_ref() {
-                if ident.sym.as_ref() == obj_var {
-                    if let ast::MemberProp::Ident(prop) = &member.prop {
-                        let field_name = prop.sym.to_string();
-                        if field_name != tag_field {
-                            fields.push(field_name);
-                        }
-                    }
-                }
-            }
-            // Also recurse into obj in case of nested access
-            collect_du_field_accesses_from_expr(&member.obj, obj_var, tag_field, fields);
-        }
-        ast::Expr::Bin(bin) => {
-            collect_du_field_accesses_from_expr(&bin.left, obj_var, tag_field, fields);
-            collect_du_field_accesses_from_expr(&bin.right, obj_var, tag_field, fields);
-        }
-        ast::Expr::Unary(unary) => {
-            collect_du_field_accesses_from_expr(&unary.arg, obj_var, tag_field, fields);
-        }
-        ast::Expr::Call(call) => {
-            if let ast::Callee::Expr(callee) = &call.callee {
-                collect_du_field_accesses_from_expr(callee, obj_var, tag_field, fields);
-            }
-            for arg in &call.args {
-                collect_du_field_accesses_from_expr(&arg.expr, obj_var, tag_field, fields);
-            }
-        }
-        ast::Expr::Paren(paren) => {
-            collect_du_field_accesses_from_expr(&paren.expr, obj_var, tag_field, fields);
-        }
-        ast::Expr::Tpl(tpl) => {
-            for expr in &tpl.exprs {
-                collect_du_field_accesses_from_expr(expr, obj_var, tag_field, fields);
-            }
-        }
-        ast::Expr::Cond(cond) => {
-            collect_du_field_accesses_from_expr(&cond.test, obj_var, tag_field, fields);
-            collect_du_field_accesses_from_expr(&cond.cons, obj_var, tag_field, fields);
-            collect_du_field_accesses_from_expr(&cond.alt, obj_var, tag_field, fields);
-        }
-        _ => {}
-    }
-}
+// DU field access collection is delegated to
+// `crate::pipeline::type_resolver::du_analysis::collect_du_field_accesses_from_stmts`,
+// which is the single source of truth for DU switch scanning. See that function
+// for the full AST coverage spec (all `Expr` and `Stmt` variants exhaustively
+// matched per `doc/grammar/ast-variants.md`).
+use crate::pipeline::type_resolver::du_analysis::collect_du_field_accesses_from_stmts;
 
 /// Converts a `switch` statement to a `match` expression or fall-through pattern.
 ///
@@ -451,16 +353,29 @@ impl<'a> Transformer<'a> {
                 };
 
                 if let Some(variant_name) = string_values.get(&str_value) {
-                    // Struct-variant pattern with no initial bindings. Bindings are
-                    // filled in below based on field accesses scanned in the body.
-                    pending_patterns.push(Pattern::Struct {
-                        ctor: crate::ir::PatternCtor::UserEnumVariant {
-                            enum_ty: crate::ir::UserTypeRef::new(enum_name.clone()),
-                            variant: variant_name.clone(),
-                        },
-                        fields: vec![],
-                        rest: true,
-                    });
+                    // Emit `Pattern::UnitStruct` for variants without fields —
+                    // the `{ .. }` struct-pattern shape is valid but unidiomatic
+                    // for unit variants (e.g., `Status::Active` not `Status::Active { .. }`).
+                    // For data variants, emit `Pattern::Struct { rest: true }` so
+                    // needed_fields can be filled in below.
+                    let is_unit_variant = variant_fields
+                        .get(variant_name)
+                        .map(|fields| fields.is_empty())
+                        .unwrap_or(false);
+                    let ctor = crate::ir::PatternCtor::UserEnumVariant {
+                        enum_ty: crate::ir::UserTypeRef::new(enum_name.clone()),
+                        variant: variant_name.clone(),
+                    };
+                    let pattern = if is_unit_variant {
+                        Pattern::UnitStruct { ctor }
+                    } else {
+                        Pattern::Struct {
+                            ctor,
+                            fields: vec![],
+                            rest: true,
+                        }
+                    };
+                    pending_patterns.push(pattern);
                 } else {
                     return Ok(None); // Unknown variant → fallback
                 }
@@ -474,7 +389,7 @@ impl<'a> Transformer<'a> {
             // Scan body for field accesses on the DU variable (e.g., s.radius)
             // and collect field names to bind in the match pattern
             let needed_fields = if let Some(ref var_name) = obj_var_name {
-                collect_du_field_accesses(&case.cons, var_name, &field_name)
+                collect_du_field_accesses_from_stmts(&case.cons, var_name, &field_name)
             } else {
                 Vec::new()
             };

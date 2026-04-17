@@ -27,15 +27,8 @@ async fn processData() -> String {
 }
 
 async fn safeFetch() -> f64 {
-    let mut _try_result: Result<(), String> = Ok(());
-    'try_block: {
-        let result = fetchNumber().await;
-        return result;
-    }
-    if let Err(e) = _try_result {
-        return -1.0;
-    }
-    unreachable!();
+    let result = fetchNumber().await;
+    result
 }
 
 async fn delayedAdd(a: f64, b: f64) -> f64 {

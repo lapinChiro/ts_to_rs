@@ -38,7 +38,28 @@ impl<'a> TypeResolver<'a> {
             ast::Expr::Lit(ast::Lit::Null(_)) => {
                 ResolvedType::Known(RustType::Option(Box::new(RustType::Any)))
             }
-            ast::Expr::Tpl(_) => ResolvedType::Known(RustType::String),
+            ast::Expr::Tpl(tpl) => {
+                // Template literal: recursively resolve each interpolated expression
+                // so `expr_types` contains entries for inner sub-expressions.
+                // Without this, downstream lookups (e.g. `is_du_field_binding`
+                // checking `get_expr_type(&event)` inside `` `${event.x}` ``)
+                // return Unknown and fall through to raw member access emission.
+                for expr in &tpl.exprs {
+                    self.resolve_expr(expr);
+                }
+                ResolvedType::Known(RustType::String)
+            }
+            ast::Expr::TaggedTpl(tagged) => {
+                // Tagged template: recurse into tag and interpolated exprs for
+                // consistency with Tpl. The tag's return type is not analyzed
+                // here (converter treats TaggedTpl as unsupported — I-110), so
+                // the overall type is Unknown.
+                self.resolve_expr(&tagged.tag);
+                for expr in &tagged.tpl.exprs {
+                    self.resolve_expr(expr);
+                }
+                ResolvedType::Unknown
+            }
             ast::Expr::Bin(bin) => self.resolve_bin_expr(bin),
             ast::Expr::Member(member) => self.resolve_member_expr(member),
             ast::Expr::Call(call) => self.resolve_call_expr(call),

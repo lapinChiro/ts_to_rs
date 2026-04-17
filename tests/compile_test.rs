@@ -142,12 +142,13 @@ fn test_all_fixtures_compile() {
         // type parameter T (E0091). Mapped type with non-identity value type loses T usage (I-314).
         "intersection-empty-object",
         // (basic-types: コンパイル通過確認済み。skip 解除)
-        // async-await: try/catch + return generates unreachable code after labeled block (I-330).
-        "async-await",
+        // (async-await: Phase A Step 4 で I-023 解消。skip 解除 — try body 常時 return +
+        // throw 無しのケースで `!`-typed labeled block を検出し machinery を drop)
         // closures: Box wrap (I-020) 解消済。残: closure capture move/FnMut (I-048 所有権推論)。
         "closures",
-        // discriminated-union: match body uses `event.x` instead of destructured binding `x` (I-322).
-        "discriminated-union",
+        // (discriminated-union: Phase A Step 4 で I-021 解消。skip 解除 — template literal
+        // 内の DU field access を `x.clone()` に rewrite + unit variant pattern を
+        // `Pattern::UnitStruct` に変更)
         // (I-273 fixed: generic-class removed from skip list)
         // (I-325 fixed: object-destructuring removed from skip list)
         // (ternary: I-009 union return wrap で解消。skip 解除)
@@ -236,9 +237,9 @@ fn test_all_fixtures_compile_with_builtins() {
         // (I-273 fixed: generic-class removed from skip list)
         // (I-325 fixed: object-destructuring removed from skip list)
         // (ternary: I-009 union return wrap で解消。skip 解除)
-        "async-await",
+        // (async-await: Phase A Step 4 で I-023 解消。skip 解除)
         "closures",
-        "discriminated-union",
+        // (discriminated-union: Phase A Step 4 で I-021 解消。skip 解除)
         "functions",
         "keyword-types",
         // (nullish-coalescing: I-022 + I-142 で解消。skip 解除)
