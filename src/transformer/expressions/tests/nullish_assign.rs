@@ -674,36 +674,44 @@ fn d2_seq_rhs_surfaces_unsupported() {
 }
 
 #[test]
-fn out_of_scope_field_access_lhs_surfaces_unsupported() {
-    // D-7: unified on `TctxFixture::transform_collecting`.
+fn field_access_lhs_emits_get_or_insert() {
+    // I-142-b: FieldAccess ??= emits get_or_insert_with (expression context)
     let src = r#"
-        interface Box { v: number | null; }
-        function f(b: Box): number { return (b.v ??= 0); }
+        interface Cfg { v?: number; }
+        function f(b: Cfg): number { return (b.v ??= 0); }
     "#;
-    let f = TctxFixture::from_source(src);
-    let (_items, unsupported) = f.transform_collecting(src);
+    let (rust, unsupported) = crate::transpile_collecting(src).unwrap();
     assert!(
-        unsupported
+        !unsupported
             .iter()
-            .any(|u| u.kind.contains("nullish-assign on member/index target")),
-        "FieldAccess LHS must surface I-142-b unsupported, got: {:?}",
+            .any(|u| u.kind.contains("nullish-assign")),
+        "FieldAccess ??= must not produce nullish-assign unsupported, got: {:?}",
         unsupported
+    );
+    assert!(
+        rust.contains("get_or_insert_with"),
+        "FieldAccess ??= must emit get_or_insert_with, got:\n{rust}",
     );
 }
 
 #[test]
-fn out_of_scope_index_lhs_surfaces_unsupported() {
-    // D-7: unified on `TctxFixture::transform_collecting`.
+fn index_lhs_emits_entry_or_insert() {
+    // I-142-c: Index ??= on Record emits entry().or_insert_with()
     let src = r#"
-        function f(arr: (number | null)[]): number { return (arr[0] ??= 0); }
+        function f(cache: Record<string, string>, key: string): string {
+            return (cache[key] ??= "default");
+        }
     "#;
-    let f = TctxFixture::from_source(src);
-    let (_items, unsupported) = f.transform_collecting(src);
+    let (rust, unsupported) = crate::transpile_collecting(src).unwrap();
     assert!(
-        unsupported
+        !unsupported
             .iter()
-            .any(|u| u.kind.contains("nullish-assign on member/index target")),
-        "Index LHS must surface I-142-c unsupported, got: {:?}",
+            .any(|u| u.kind.contains("nullish-assign")),
+        "Index ??= must not produce nullish-assign unsupported, got: {:?}",
         unsupported
+    );
+    assert!(
+        rust.contains("entry") && rust.contains("or_insert_with"),
+        "Index ??= must emit entry().or_insert_with(), got:\n{rust}",
     );
 }

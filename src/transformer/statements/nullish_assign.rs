@@ -172,58 +172,119 @@ impl<'a> Transformer<'a> {
         if assign.op != ast::AssignOp::NullishAssign {
             return Ok(None);
         }
-        let ident = match &assign.left {
-            ast::AssignTarget::Simple(ast::SimpleAssignTarget::Ident(i)) => i,
-            // Member / Index LHS (`obj.x ??= d`, `arr[i] ??= d`) are out of
-            // scope for I-142. Return None so the normal expression path
-            // surfaces the existing behavior (expression-context arm will
-            // emit an UnsupportedSyntaxError).
-            _ => return Ok(None),
-        };
+        // Dispatch on LHS shape: Ident uses shadow-let, Member uses direct
+        // field/index mutation (I-142-b/c).
+        match &assign.left {
+            ast::AssignTarget::Simple(ast::SimpleAssignTarget::Ident(ident)) => {
+                let name = ident.id.sym.to_string();
+                let lhs_type = self
+                    .get_type_for_var(&name, ident.id.span)
+                    .cloned()
+                    .ok_or_else(|| {
+                        UnsupportedSyntaxError::new(
+                            "nullish-assign on unresolved type",
+                            assign.span,
+                        )
+                    })?;
 
-        let name = ident.id.sym.to_string();
-        // Resolve LHS type before converting RHS so error cases short-circuit.
-        let lhs_type = self
-            .get_type_for_var(&name, ident.id.span)
-            .cloned()
-            .ok_or_else(|| {
-                UnsupportedSyntaxError::new("nullish-assign on unresolved type", assign.span)
-            })?;
+                let stmts = match pick_strategy(&lhs_type) {
+                    NullishAssignStrategy::ShadowLet => {
+                        let right_ir = self.convert_expr(&assign.right)?;
+                        vec![Stmt::Let {
+                            mutable: false,
+                            name: name.clone(),
+                            ty: None,
+                            init: Some(build_option_unwrap_with_default(
+                                Expr::Ident(name),
+                                right_ir,
+                            )),
+                        }]
+                    }
+                    NullishAssignStrategy::Identity => vec![],
+                    NullishAssignStrategy::BlockedByI050 => {
+                        return Err(UnsupportedSyntaxError::new(
+                            "nullish-assign on Any LHS (I-050 Any coercion umbrella)",
+                            assign.span,
+                        )
+                        .into());
+                    }
+                };
+                Ok(Some(stmts))
+            }
+            ast::AssignTarget::Simple(ast::SimpleAssignTarget::Member(member)) => {
+                // I-142-b/c: FieldAccess / Index LHS.
+                // Resolve field type via TypeResolver (recorded at member span).
+                let member_expr = ast::Expr::Member(member.clone());
+                let lhs_type = self.get_expr_type(&member_expr).cloned().ok_or_else(|| {
+                    UnsupportedSyntaxError::new(
+                        "nullish-assign on unresolved member type",
+                        assign.span,
+                    )
+                })?;
+                let strategy = pick_strategy(&lhs_type);
+                match strategy {
+                    NullishAssignStrategy::ShadowLet => {
+                        let target = self.convert_member_expr_for_write(member)?;
+                        let right_ir = self.convert_expr(&assign.right)?;
 
-        let stmts = match pick_strategy(&lhs_type) {
-            // Cells #1–3, #13: Option<T> — shadow-let via unwrap_or /
-            // unwrap_or_else. RHS is converted here (after the strategy
-            // decision) so that blocked strategies can short-circuit without
-            // paying for RHS conversion.
-            NullishAssignStrategy::ShadowLet => {
-                let right_ir = self.convert_expr(&assign.right)?;
-                vec![Stmt::Let {
-                    mutable: false,
-                    name: name.clone(),
-                    ty: None,
-                    init: Some(build_option_unwrap_with_default(
-                        Expr::Ident(name),
-                        right_ir,
-                    )),
-                }]
+                        // Index on HashMap → entry().or_insert_with(|| d)
+                        let stmts = if let Expr::Index {
+                            object: ref container,
+                            index: ref key,
+                        } = target
+                        {
+                            let closure = Expr::Closure {
+                                params: vec![],
+                                return_type: None,
+                                body: crate::ir::ClosureBody::Expr(Box::new(right_ir)),
+                            };
+                            let key_for_entry = Expr::MethodCall {
+                                object: Box::new(*key.clone()),
+                                method: "clone".to_string(),
+                                args: vec![],
+                            };
+                            vec![Stmt::Expr(Expr::MethodCall {
+                                object: Box::new(Expr::MethodCall {
+                                    object: container.clone(),
+                                    method: "entry".to_string(),
+                                    args: vec![key_for_entry],
+                                }),
+                                method: "or_insert_with".to_string(),
+                                args: vec![closure],
+                            })]
+                        } else {
+                            // FieldAccess → if target.is_none() { target = Some(d); }
+                            vec![Stmt::If {
+                                condition: Expr::MethodCall {
+                                    object: Box::new(target.clone()),
+                                    method: "is_none".to_string(),
+                                    args: vec![],
+                                },
+                                then_body: vec![Stmt::Expr(Expr::Assign {
+                                    target: Box::new(target),
+                                    value: Box::new(Expr::FnCall {
+                                        target: crate::ir::CallTarget::BuiltinVariant(
+                                            crate::ir::BuiltinVariant::Some,
+                                        ),
+                                        args: vec![right_ir],
+                                    }),
+                                })],
+                                else_body: None,
+                            }]
+                        };
+                        Ok(Some(stmts))
+                    }
+                    NullishAssignStrategy::Identity => Ok(Some(vec![])),
+                    NullishAssignStrategy::BlockedByI050 => Err(UnsupportedSyntaxError::new(
+                        "nullish-assign on Any LHS (I-050 Any coercion umbrella)",
+                        assign.span,
+                    )
+                    .into()),
+                }
             }
-            // Cell #4: non-nullable `T` — `??=` is dead code at runtime. Emit
-            // nothing; the prior `let` stays as written. TS treats this as
-            // dead; Rust simply omits the no-op.
-            NullishAssignStrategy::Identity => vec![],
-            // Cell #5: Any — runtime null check + RHS coercion to
-            // `serde_json::Value` requires the I-050 Any coercion umbrella.
-            // Until I-050 lands, surface this cell as unsupported rather than
-            // emit silently-broken Rust.
-            NullishAssignStrategy::BlockedByI050 => {
-                return Err(UnsupportedSyntaxError::new(
-                    "nullish-assign on Any LHS (I-050 Any coercion umbrella)",
-                    assign.span,
-                )
-                .into());
-            }
-        };
-        Ok(Some(stmts))
+            // Other targets (SuperProp, etc.) — fall through to expression path
+            _ => Ok(None),
+        }
     }
 }
 

@@ -26,6 +26,8 @@ const MUTATING_METHODS: &[&str] = &[
     "truncate",
     "retain",
     "get_or_insert_with",
+    "or_insert_with",
+    "entry",
 ];
 
 /// Post-processes a statement list to mark immutable variables as `let mut`
@@ -168,7 +170,9 @@ fn extract_root_ident(expr: &Expr) -> Option<&str> {
     loop {
         match current {
             Expr::Ident(name) => return Some(name),
-            Expr::FieldAccess { object, .. } | Expr::Index { object, .. } => {
+            Expr::FieldAccess { object, .. }
+            | Expr::Index { object, .. }
+            | Expr::MethodCall { object, .. } => {
                 current = object;
             }
             _ => return None,

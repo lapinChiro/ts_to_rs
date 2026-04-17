@@ -43,11 +43,10 @@ impl<'a> Transformer<'a> {
         //   runtime null check + RHS coercion — surfaced as unsupported
         //   until the I-050 Any coercion umbrella PRD lands.
         //
-        // `FieldAccess` / `Index` LHS are reserved for separate PRDs
-        // (I-142-b / I-142-c) — they need distinct designs (borrow-check +
-        // match rewrite for fields, entry API for indexed containers) and
-        // are surfaced as unsupported here rather than silently emitting
-        // broken `get_or_insert_with` calls on a non-`Option` receiver.
+        // `FieldAccess` LHS uses `get_or_insert_with` (same as Ident) or
+        // `if is_none { assign Some(d) }` (stmt). `Index` LHS (HashMap) uses
+        // `entry().or_insert_with()` — dispatched before `pick_strategy`
+        // because HashMap ??= is key-existence, not Option null. (I-142-b/c)
         //
         // D-3: RHS conversion is strategy-local. `Identity` and `BlockedByI050`
         // never observe the RHS (dead at runtime / surfaced before emission),
@@ -57,43 +56,96 @@ impl<'a> Transformer<'a> {
         // of the inner `??=` entirely when `x` is non-null. Only `ShadowLet`
         // converts the RHS.
         if assign.op == ast::AssignOp::NullishAssign {
-            let ast::AssignTarget::Simple(ast::SimpleAssignTarget::Ident(ident)) = &assign.left
-            else {
-                return Err(UnsupportedSyntaxError::new(
-                    "nullish-assign on member/index target (I-142-b/c)",
-                    assign.span(),
-                )
-                .into());
+            // Resolve LHS type for strategy dispatch. Ident uses scoped var
+            // type; Member uses TypeResolver's expr_types (populated by the
+            // I-142-b/c TypeResolver extension above).
+            let lhs_type = match &assign.left {
+                ast::AssignTarget::Simple(ast::SimpleAssignTarget::Ident(ident)) => self
+                    .get_type_for_var(&ident.id.sym, ident.id.span)
+                    .ok_or_else(|| {
+                        UnsupportedSyntaxError::new(
+                            "nullish-assign on unresolved type",
+                            assign.span(),
+                        )
+                    })?,
+                ast::AssignTarget::Simple(ast::SimpleAssignTarget::Member(member)) => self
+                    .get_expr_type(&ast::Expr::Member(member.clone()))
+                    .ok_or_else(|| {
+                        UnsupportedSyntaxError::new(
+                            "nullish-assign on unresolved member type",
+                            assign.span(),
+                        )
+                    })?,
+                _ => {
+                    return Err(UnsupportedSyntaxError::new(
+                        "unsupported nullish-assign target",
+                        assign.span(),
+                    )
+                    .into())
+                }
             };
-            // Dispatch on the LHS type via the shared strategy table. Missing
-            // type info (unresolved) is symmetric with the stmt path: it
-            // surfaces as unsupported rather than silently falling through.
-            let lhs_type = self
-                .get_type_for_var(&ident.id.sym, ident.id.span)
-                .ok_or_else(|| {
-                    UnsupportedSyntaxError::new("nullish-assign on unresolved type", assign.span())
-                })?;
+
+            // I-142-c: Index on HashMap → entry().or_insert_with() bypasses
+            // pick_strategy because HashMap ??= is key-existence, not Option null.
+            if let Expr::Index {
+                ref object,
+                ref index,
+            } = target
+            {
+                let right = self.convert_expr(&assign.right)?;
+                let is_copy = lhs_type.is_copy_type();
+                let closure = Expr::Closure {
+                    params: vec![],
+                    return_type: None,
+                    body: ClosureBody::Expr(Box::new(right)),
+                };
+                // Clone the key for entry() because HashMap::entry takes
+                // ownership, but the RHS closure may also reference the key
+                // (e.g., `cache[key] ??= "prefix:" + key`).
+                let key_for_entry = Expr::MethodCall {
+                    object: Box::new(*index.clone()),
+                    method: "clone".to_string(),
+                    args: vec![],
+                };
+                let entry_call = Expr::MethodCall {
+                    object: Box::new(Expr::MethodCall {
+                        object: object.clone(),
+                        method: "entry".to_string(),
+                        args: vec![key_for_entry],
+                    }),
+                    method: "or_insert_with".to_string(),
+                    args: vec![closure],
+                };
+                return Ok(if is_copy {
+                    Expr::Deref(Box::new(entry_call))
+                } else {
+                    Expr::MethodCall {
+                        object: Box::new(entry_call),
+                        method: "clone".to_string(),
+                        args: vec![],
+                    }
+                });
+            }
+
             let strategy = pick_strategy(lhs_type);
             match strategy {
                 NullishAssignStrategy::ShadowLet => {
-                    // Inner `T` of `Option<T>` decides Copy-ness of the deref
-                    // path. Resolve to a `bool` *before* calling
-                    // `convert_expr` so the `lhs_type` shared borrow is
-                    // released before the `&mut self` re-borrow.
                     let is_copy_inner = match lhs_type {
                         RustType::Option(inner) => inner.is_copy_type(),
                         _ => unreachable!("ShadowLet strategy is only picked for Option<T>"),
                     };
                     let right = self.convert_expr(&assign.right)?;
+                    let closure = Expr::Closure {
+                        params: vec![],
+                        return_type: None,
+                        body: ClosureBody::Expr(Box::new(right)),
+                    };
                     let method_call = Expr::MethodCall {
                         object: Box::new(target),
                         method: "get_or_insert_with".to_string(),
-                        args: vec![Expr::Closure {
-                            params: vec![],
-                            return_type: None,
-                            body: ClosureBody::Expr(Box::new(right)),
-                        }],
+                        args: vec![closure],
                     };
+
                     return Ok(if is_copy_inner {
                         Expr::Deref(Box::new(method_call))
                     } else {

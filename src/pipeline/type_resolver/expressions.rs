@@ -129,6 +129,44 @@ impl<'a> TypeResolver<'a> {
                             if let ast::Expr::Ident(ident) = member.obj.as_ref() {
                                 self.mark_var_mutable(ident.sym.as_ref());
                             }
+                            // I-142-b/c: resolve field/index type for ??= so
+                            // the Transformer can read it via get_expr_type and
+                            // dispatch on pick_strategy.
+                            if assign.op == ast::AssignOp::NullishAssign {
+                                let obj_type = self.resolve_expr(&member.obj);
+                                if let ResolvedType::Known(ref ty) = obj_type {
+                                    // For named fields: use resolve_member_type.
+                                    // For computed index (HashMap): extract value type.
+                                    let field_type = match &member.prop {
+                                        ast::MemberProp::Computed(_) => {
+                                            // HashMap<K, V> → value type is V
+                                            match ty {
+                                                RustType::StdCollection {
+                                                    kind: crate::ir::StdCollectionKind::HashMap,
+                                                    args,
+                                                } if args.len() == 2 => {
+                                                    ResolvedType::Known(args[1].clone())
+                                                }
+                                                _ => self.resolve_member_type(ty, &member.prop),
+                                            }
+                                        }
+                                        _ => self.resolve_member_type(ty, &member.prop),
+                                    };
+                                    if let ResolvedType::Known(ref ft) = field_type {
+                                        let member_span = Span::from_swc(member.span());
+                                        self.result
+                                            .expr_types
+                                            .insert(member_span, ResolvedType::Known(ft.clone()));
+                                        if let RustType::Option(inner) = ft {
+                                            let rhs_span = Span::from_swc(assign.right.span());
+                                            self.result
+                                                .expected_types
+                                                .insert(rhs_span, (**inner).clone());
+                                            self.propagate_expected(&assign.right, inner);
+                                        }
+                                    }
+                                }
+                            }
                         }
                         _ => {}
                     }

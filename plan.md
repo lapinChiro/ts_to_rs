@@ -18,7 +18,7 @@
 | cargo test (lib) | 2532 pass |
 | cargo test (integration) | 122 pass |
 | cargo test (compile) | 3 pass (+ void-type unskip) |
-| cargo test (E2E) | 94 pass |
+| cargo test (E2E) | 95 pass |
 | clippy | 0 warnings |
 | fmt | 0 diffs |
 
@@ -53,7 +53,15 @@ shadow-let + fusion + expression-context `get_or_insert_with` による structur
 
 I-020 (closure tail → `Box::new(...)` wrap) + I-025 (Option return → implicit `None`) を実装。
 `void-type` fixture unskip。`closures` は I-048 (所有権推論: move/FnMut) が残存、
-`keyword-types` は I-260 (`return undefined` on void fn) が残存。4 cell E2E green。
+`keyword-types` は I-146 (`return undefined` on void fn) が残存。4 cell E2E green。
+
+**I-142-b+c: FieldAccess/Index `??=`** (2026-04-17, closed)
+
+FieldAccess (`obj.field ??= d`) と Index (`cache[key] ??= d`) の `??=` を structural に
+実装。FieldAccess は `if is_none / get_or_insert_with` emission、Index は HashMap
+`entry().or_insert_with()` emission。TypeResolver に Member ??= 型解決を拡張。
+3 cell E2E green。Hono 3 件は TypeResolver の private field / globalThis 解決限界で未解消
+(後続調査)。
 
 **以前の完了**: I-022 (`??` 演算子)、I-138 (Vec index Option)、I-040 (optional param 統一)
 
@@ -61,12 +69,9 @@ I-020 (closure tail → `Box::new(...)` wrap) + I-025 (Option return → implici
 
 | 優先度 | PRD | 内容 |
 |--------|-----|------|
-| 1 | I-050-b | Ident → Value coercion (TypeResolver 精度向上が前提) |
-| 2 | I-142-b | FieldAccess `obj.x ??= d` |
-| 3 | I-142-c | Index `arr[i] ??= d` |
-| 4 | I-144 | control-flow narrowing analyzer |
-| 5 | Phase A Step 3 | クロージャ Box + Option 暗黙返却 |
-
+| 1 | I-144 | control-flow narrowing analyzer |
+| 2 | Phase A Step 4 | 制御フロー (I-023 try/catch) + DU (I-021) |
+| 3 | I-050-b | Ident → Value coercion (TypeResolver 精度向上が前提) |
 I-142 残 defect (C-1〜C-9 + D-1) は新 framework 適用後に個別 sub-PRD として処理する。
 
 ---
@@ -257,45 +262,18 @@ SWC leaf collection に対応がないため `wrap_body_returns` でスキップ
 
 ## 次のタスク
 
-### 候補 (優先度順)
-
-1. **[I-050]** **Any coercion umbrella** (新規、`backlog/I-050-any-coercion-umbrella.md`) —
-   `serde_json::Value` ⇄ {T} の全 context coercion 基盤。下位 PRD 群 (I-050-a/b/...)
-   を context 軸で分割予定。依存する下流: I-142 Cell #5/#9 / I-143-b / I-029 / I-030。
-   umbrella は design 母体であり、下位 PRD を先に起票してから実装に着手する。
-2. **[I-142-b]** FieldAccess `obj.x ??= d` — I-142 で surface した 2 件 (`context.ts:367`,
-   `adapter/lambda-edge/handler.ts:8`) の structural 解消。Discovery で emission 方針
-   (match / get_or_insert_with + `&mut` borrow) を決定。
-3. **[I-142-c]** Index `arr[i] ??= d` — I-142 で surface した 3 件 (`router/reg-exp-router`,
-   `validator/validator.ts`, `utils/url.ts`)。HashMap entry API / Vec index write の
-   型駆動分岐を設計。
-4. **[I-144]** control-flow narrowing analyzer (umbrella: I-024 / I-025 / I-142 Cell #14) —
-   flow-sensitive narrowing の共通基盤。`utils/url.ts:256` の unresolved type 問題も含む。
-5. **Phase A Step 3** (クロージャ Box + Option 暗黙返却) — I-020, I-024, I-025 (I-144 と
-   共有)。3 fixture (`closures`, `keyword-types`, `void-type`) の unskip。
-
-上記 I-142-b / I-142-c / I-144 / I-050 下位 PRD は TODO / backlog に起票済。
-いずれも silent semantic change を `ideal-implementation-primacy.md` に従って
-構造的に解消する PRD。
+「現在の状態」セクションの「次の作業」テーブル参照。
 
 ### I-142 の依存 / lock-in 状態
 
 ```
 I-142 Cell 分類
-  ├── #1〜#4, #7, #8, #11, #13  — 本 PRD で structural 解消 (Step 1)
-  ├── #6, #10, #12              — 本 PRD Step 2 で structural 解消
-  ├── #5, #9                    — I-050 依存、compile-error lock-in test 追加
-  ├── #14 (narrowing-reset)     — I-144 依存、lock-in test 追加
-  └── FieldAccess / Index       — I-142-b / I-142-c 依存
+  ├── #1〜#4, #7, #8, #11, #13  — Step 1 で structural 解消
+  ├── #6, #10, #12              — Step 2 で structural 解消
+  ├── #5, #9                    — I-050 依存、compile-error lock-in test
+  ├── #14 (narrowing-reset)     — I-144 依存、lock-in test
+  └── FieldAccess / Index       — I-142-b+c で解消済 (2026-04-17)
 ```
-
-lock-in test は `tests/integration/transformer/expressions/tests/nullish_assign.rs`
-に配置。依存 PRD 完了時に自動で失敗するため silent 劣化不可。
-
----
-
-Phase A Step 3 以降は I-050 / I-142-b/c / I-144 の着手順を Discovery で決定して
-から進む。
 
 ---
 
@@ -316,14 +294,12 @@ skip 解消後は新たな skip 追加を原則禁止とし、回帰検出を自
 
 **永続 skip (2件):** `callable-interface-generic-arity-mismatch` (意図的 error-case), `indexed-access-type` (マルチファイル用、別テストでカバー)
 
-**残: 12 fixture** (+ pre-Step-3: I-142-b / I-142-c / I-144 起票済)
+**残: 12 fixture** (+ I-144 起票済)
 
 #### 次の Step
 
 ```
-I-142-b (FieldAccess ??=) ──┐
-I-142-c (Index ??=)         ├── Ident LHS は I-142 で完了。次は member/index path 設計
-I-144 (CF narrowing)        ┘
+I-144 (CF narrowing)
   ↓
 Step 4 (control flow + DU)           Step 6 (string + intersection)
   ↓                                  type-narrowing は Step 1 + 6 で完全解消
@@ -365,8 +341,7 @@ Step 7 (builtin impl)
 |----------|---------|------|
 | ~~I-022~~ | ~~解消済~~ | ~~`??` 演算子 LHS Option 処理 + chain case (pre-Step-3 で完了)~~ |
 | ~~I-142~~ | ~~解消済~~ | ~~`??=` Ident LHS shadow-let rewrite (pre-Step-3 で完了)~~ |
-| I-142-b | `assignments.rs` + `nullish_assign.rs` | `obj.x ??= d` (FieldAccess LHS) の match + assign / `get_or_insert_with(&mut)` emission |
-| I-142-c | `assignments.rs` + `nullish_assign.rs` | `arr[i] ??= d` (Index LHS) の HashMap entry API / Vec index write 型駆動分岐 |
+| ~~I-142-b+c~~ | ~~解消済~~ | ~~FieldAccess/Index LHS `??=` (2026-04-17 完了)~~ |
 | I-026 | 型 assertion 変換 | `as unknown as T` の中間 `unknown` を消去して直接キャスト |
 | I-029 | null/any 変換 | `null as any` → `None` が `Box<dyn Trait>` 文脈で型不一致 |
 | I-030 | `build_any_enum_variants()` (`any_narrowing.rs:85`) | any-narrowing enum の値代入で型強制 |
