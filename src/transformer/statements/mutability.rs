@@ -8,9 +8,24 @@ use std::collections::HashSet;
 use crate::ir::{ClosureBody, Expr, Stmt};
 
 /// Mutating methods that require `&mut self` on the receiver.
+///
+/// `get_or_insert_with` is `&mut self` on `Option<T>` and is emitted by the
+/// `??=` expression-context path (I-142). A `let x: Option<T>` whose only
+/// observed mutation is `x.get_or_insert_with(|| d)` must be upgraded to
+/// `let mut x` — otherwise Rust rejects the call.
 const MUTATING_METHODS: &[&str] = &[
-    "reverse", "sort", "sort_by", "drain", "push", "pop", "remove", "insert", "clear", "truncate",
+    "reverse",
+    "sort",
+    "sort_by",
+    "drain",
+    "push",
+    "pop",
+    "remove",
+    "insert",
+    "clear",
+    "truncate",
     "retain",
+    "get_or_insert_with",
 ];
 
 /// Post-processes a statement list to mark immutable variables as `let mut`
@@ -484,6 +499,36 @@ mod tests {
         assert!(
             matches!(&stmts[0], Stmt::Let { mutable: false, .. }),
             "unknown method should not mark receiver as mutable"
+        );
+    }
+
+    #[test]
+    fn test_mark_mutated_vars_get_or_insert_with_marks_let_mut() {
+        // `Option::get_or_insert_with` is `&mut self` — the owning `let x`
+        // must be upgraded to `let mut x`. Covers I-142 expression-context
+        // emission (`*x.get_or_insert_with(|| d)` and
+        // `x.get_or_insert_with(|| d).clone()`).
+        let mut stmts = vec![
+            Stmt::Let {
+                mutable: false,
+                name: "x".to_string(),
+                ty: None,
+                init: Some(Expr::Ident("param".to_string())),
+            },
+            Stmt::Expr(Expr::Deref(Box::new(Expr::MethodCall {
+                object: Box::new(Expr::Ident("x".to_string())),
+                method: "get_or_insert_with".to_string(),
+                args: vec![Expr::Closure {
+                    params: vec![],
+                    return_type: None,
+                    body: ClosureBody::Expr(Box::new(Expr::NumberLit(0.0))),
+                }],
+            }))),
+        ];
+        mark_mutated_vars(&mut stmts, &HashSet::new());
+        assert!(
+            matches!(&stmts[0], Stmt::Let { mutable: true, name, .. } if name == "x"),
+            "get_or_insert_with must be recognised as mutating"
         );
     }
 

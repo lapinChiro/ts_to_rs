@@ -75,7 +75,12 @@ impl<'a> TypeResolver<'a> {
                         let lhs_type = match simple {
                             ast::SimpleAssignTarget::Ident(ident) => {
                                 self.mark_var_mutable(ident.id.sym.as_ref());
-                                self.lookup_var(ident.id.sym.as_ref())
+                                // I-142: record LHS type at the ident's span so
+                                // downstream ??= handling in the Transformer can
+                                // read it. Plain `=` also benefits from this for
+                                // consistency (assign-target idents previously
+                                // had no expr_types entry even for plain `=`).
+                                self.record_assign_target_ident_type(ident)
                             }
                             ast::SimpleAssignTarget::Member(member) => {
                                 // Mark the object variable as mutable
@@ -98,10 +103,27 @@ impl<'a> TypeResolver<'a> {
                         }
                     }
                 } else {
-                    // Compound assignments (+=, -=, etc.) still need mutability marking
+                    // Compound assignments (+=, -=, ??=, etc.) mark the target
+                    // mutable. `??=` (I-142) additionally needs the LHS type
+                    // recorded at the ident's span and inner-T expected-type
+                    // propagation onto the RHS — other compound ops (`+=`,
+                    // `-=`, …) do not read the LHS type from expr_types, so
+                    // we leave their historical no-op behavior untouched to
+                    // avoid rippling expected-type side effects through
+                    // unrelated code paths.
                     match assign.left.as_simple() {
                         Some(ast::SimpleAssignTarget::Ident(ident)) => {
                             self.mark_var_mutable(ident.id.sym.as_ref());
+                            if assign.op == ast::AssignOp::NullishAssign {
+                                let lhs_type = self.record_assign_target_ident_type(ident);
+                                if let ResolvedType::Known(RustType::Option(inner)) = &lhs_type {
+                                    let rhs_span = Span::from_swc(assign.right.span());
+                                    self.result
+                                        .expected_types
+                                        .insert(rhs_span, (**inner).clone());
+                                    self.propagate_expected(&assign.right, inner);
+                                }
+                            }
                         }
                         Some(ast::SimpleAssignTarget::Member(member)) => {
                             if let ast::Expr::Ident(ident) = member.obj.as_ref() {

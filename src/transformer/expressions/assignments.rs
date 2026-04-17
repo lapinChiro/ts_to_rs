@@ -1,10 +1,12 @@
 //! Assignment and update expression conversion.
 
 use anyhow::{anyhow, Result};
+use swc_common::Spanned;
 use swc_ecma_ast as ast;
 
-use crate::ir::{BinOp, ClosureBody, Expr, Stmt};
-use crate::transformer::Transformer;
+use crate::ir::{BinOp, ClosureBody, Expr, RustType, Stmt};
+use crate::transformer::statements::nullish_assign::{pick_strategy, NullishAssignStrategy};
+use crate::transformer::{Transformer, UnsupportedSyntaxError};
 
 impl<'a> Transformer<'a> {
     /// Converts an assignment expression (`target = value`) to `Expr::Assign`.
@@ -19,20 +21,129 @@ impl<'a> Transformer<'a> {
             },
             _ => return Err(anyhow!("unsupported assignment target pattern")),
         };
-        let right = self.convert_expr(&assign.right)?;
 
-        // ??= (nullish coalescing assignment): x ??= y → x.get_or_insert_with(|| y)
+        // ??= (NullishAssign) — expression-context path (I-142).
+        //
+        // Statement-context `x ??= d;` is intercepted earlier in
+        // `convert_stmt` by `try_convert_nullish_assign_stmt` and rewritten to
+        // a shadow-let that preserves TS's post-`??=` narrowing. We only get
+        // here when `x ??= d` appears inside a larger expression (call arg,
+        // return value, ternary branch, condition, etc.), where the value of
+        // the `??=` expression is observed.
+        //
+        // LHS-type dispatch goes through `pick_strategy` so that the Problem
+        // Space matrix is encoded in exactly one place (see
+        // `backlog/I-142-nullish-assign-shadow-let.md`):
+        //
+        // - `Option<T>` (`ShadowLet`): emit `*x.get_or_insert_with(|| d)`
+        //   (Copy) or `x.get_or_insert_with(|| d).clone()` (!Copy).
+        // - non-nullable `T` (`Identity`): `??=` is dead code at runtime →
+        //   emit just `target` (Copy) or `target.clone()` (!Copy).
+        // - `Any` (`BlockedByI050`): requires `serde_json::Value`-aware
+        //   runtime null check + RHS coercion — surfaced as unsupported
+        //   until the I-050 Any coercion umbrella PRD lands.
+        //
+        // `FieldAccess` / `Index` LHS are reserved for separate PRDs
+        // (I-142-b / I-142-c) — they need distinct designs (borrow-check +
+        // match rewrite for fields, entry API for indexed containers) and
+        // are surfaced as unsupported here rather than silently emitting
+        // broken `get_or_insert_with` calls on a non-`Option` receiver.
+        //
+        // D-3: RHS conversion is strategy-local. `Identity` and `BlockedByI050`
+        // never observe the RHS (dead at runtime / surfaced before emission),
+        // so converting it up front would be dead work *and* could introduce
+        // side-effect IR (expr-type recording, mutability marking) that TS
+        // semantics don't perform — in `x ??= (y ??= z)` TS skips evaluation
+        // of the inner `??=` entirely when `x` is non-null. Only `ShadowLet`
+        // converts the RHS.
         if assign.op == ast::AssignOp::NullishAssign {
-            return Ok(Expr::MethodCall {
-                object: Box::new(target),
-                method: "get_or_insert_with".to_string(),
-                args: vec![Expr::Closure {
-                    params: vec![],
-                    return_type: None,
-                    body: ClosureBody::Expr(Box::new(right)),
-                }],
-            });
+            let ast::AssignTarget::Simple(ast::SimpleAssignTarget::Ident(ident)) = &assign.left
+            else {
+                return Err(UnsupportedSyntaxError::new(
+                    "nullish-assign on member/index target (I-142-b/c)",
+                    assign.span(),
+                )
+                .into());
+            };
+            // Dispatch on the LHS type via the shared strategy table. Missing
+            // type info (unresolved) is symmetric with the stmt path: it
+            // surfaces as unsupported rather than silently falling through.
+            let lhs_type = self
+                .get_type_for_var(&ident.id.sym, ident.id.span)
+                .ok_or_else(|| {
+                    UnsupportedSyntaxError::new("nullish-assign on unresolved type", assign.span())
+                })?;
+            let strategy = pick_strategy(lhs_type);
+            match strategy {
+                NullishAssignStrategy::ShadowLet => {
+                    // Inner `T` of `Option<T>` decides Copy-ness of the deref
+                    // path. Resolve to a `bool` *before* calling
+                    // `convert_expr` so the `lhs_type` shared borrow is
+                    // released before the `&mut self` re-borrow.
+                    let is_copy_inner = match lhs_type {
+                        RustType::Option(inner) => inner.is_copy_type(),
+                        _ => unreachable!("ShadowLet strategy is only picked for Option<T>"),
+                    };
+                    let right = self.convert_expr(&assign.right)?;
+                    let method_call = Expr::MethodCall {
+                        object: Box::new(target),
+                        method: "get_or_insert_with".to_string(),
+                        args: vec![Expr::Closure {
+                            params: vec![],
+                            return_type: None,
+                            body: ClosureBody::Expr(Box::new(right)),
+                        }],
+                    };
+                    return Ok(if is_copy_inner {
+                        Expr::Deref(Box::new(method_call))
+                    } else {
+                        Expr::MethodCall {
+                            object: Box::new(method_call),
+                            method: "clone".to_string(),
+                            args: vec![],
+                        }
+                    });
+                }
+                NullishAssignStrategy::Identity => {
+                    // `??=` on a non-nullable LHS is dead: the assign branch
+                    // never fires and (D-3) the RHS is *intentionally* not
+                    // converted so its side effects don't leak into IR. Emit
+                    // the identity (with `.clone()` when `T: !Copy` so the
+                    // expression yields an owned value rather than moving out
+                    // of `ident`, matching the prior `.clone()` suffix of the
+                    // ShadowLet path).
+                    //
+                    // INTERIM (I-048): the unconditional `.clone()` is
+                    // conservative — an allocating copy is emitted even when
+                    // the surrounding flow doesn't use `ident` again and a
+                    // move would suffice. A precise move-vs-clone decision
+                    // requires the ownership-inference umbrella (I-048); until
+                    // it lands, we clone to keep the emission compile-safe.
+                    let is_copy = lhs_type.is_copy_type();
+                    return Ok(if is_copy {
+                        target
+                    } else {
+                        Expr::MethodCall {
+                            object: Box::new(target),
+                            method: "clone".to_string(),
+                            args: vec![],
+                        }
+                    });
+                }
+                NullishAssignStrategy::BlockedByI050 => {
+                    return Err(UnsupportedSyntaxError::new(
+                        "nullish-assign on Any LHS (I-050 Any coercion umbrella)",
+                        assign.span(),
+                    )
+                    .into());
+                }
+            }
         }
+
+        // Non-??= path: for compound assignment (=, +=, -=, *=, /=) and plain
+        // `=`, the RHS is always observed. Convert it lazily here so the ??=
+        // strategy arms above can skip it when dead.
+        let right = self.convert_expr(&assign.right)?;
 
         // For compound assignment (+=, -=, *=, /=), desugar to target = target op value
         let value = match assign.op {

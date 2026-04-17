@@ -8,6 +8,7 @@ mod error_handling;
 mod helpers;
 mod loops;
 pub(crate) mod mutability;
+pub(crate) mod nullish_assign;
 mod spread;
 mod switch;
 
@@ -19,6 +20,7 @@ use crate::pipeline::type_converter::convert_type_for_position;
 use crate::transformer::Transformer;
 use crate::transformer::{extract_pat_ident_name, TypePosition};
 use mutability::mark_mutated_vars;
+use nullish_assign::fuse_nullish_assign_shadow_lets;
 
 /// Converts an SWC [`ast::Stmt`] into an IR [`Stmt`].
 ///
@@ -48,7 +50,15 @@ impl<'a> Transformer<'a> {
                 if let Some(stmts) = self.try_expand_spread_return(ret)? {
                     return Ok(stmts);
                 }
-                let expr = ret.arg.as_ref().map(|e| self.convert_expr(e)).transpose()?;
+                // I-050: pass return_type as expected_override only when it is
+                // Any (serde_json::Value), to trigger concrete→Value coercion.
+                // For other return types, rely on TypeResolver's expected_type.
+                let any_override = return_type.filter(|t| matches!(t, RustType::Any));
+                let expr = ret
+                    .arg
+                    .as_ref()
+                    .map(|e| self.convert_expr_with_expected(e, any_override))
+                    .transpose()?;
                 Ok(vec![Stmt::Return(expr)])
             }
             ast::Stmt::Decl(ast::Decl::Var(var_decl)) => {
@@ -66,6 +76,13 @@ impl<'a> Transformer<'a> {
             ast::Stmt::If(if_stmt) => self.convert_if_stmt(if_stmt, return_type),
             ast::Stmt::Expr(expr_stmt) => {
                 if let Some(stmts) = self.try_expand_spread_expr_stmt(expr_stmt)? {
+                    return Ok(stmts);
+                }
+                // I-142: intercept `x ??= d;` (Ident LHS) to preserve TS
+                // narrowing via shadow-let. Other `??=` shapes fall through
+                // to `convert_expr`, which handles expression-context paths
+                // or reports unsupported.
+                if let Some(stmts) = self.try_convert_nullish_assign_stmt(&expr_stmt.expr)? {
                     return Ok(stmts);
                 }
                 let expr = self.convert_expr(&expr_stmt.expr)?;
@@ -146,10 +163,13 @@ impl<'a> Transformer<'a> {
             // mutations (reassignment, field assignment, mutating method call) are detected.
             let mutable = false;
 
+            // I-050: when the declared type is Any (serde_json::Value), pass it
+            // as expected_override to trigger concrete→Value coercion.
+            let any_init_override = ty.as_ref().filter(|t| matches!(t, RustType::Any));
             let init = declarator
                 .init
                 .as_ref()
-                .map(|e| self.convert_expr(e))
+                .map(|e| self.convert_expr_with_expected(e, any_init_override))
                 .transpose()?;
 
             stmts.push(Stmt::Let {
@@ -169,10 +189,24 @@ impl<'a> Transformer<'a> {
         return_type: Option<&RustType>,
     ) -> Result<Vec<Stmt>> {
         let mut result = Vec::new();
-        for stmt in stmts {
+        for (i, stmt) in stmts.iter().enumerate() {
+            // I-142 D-1: surface `<ident> ??= d; ... <ident> = v;`
+            // narrowing-reset patterns as UnsupportedSyntaxError *before*
+            // emitting the shadow-let that would produce a silent compile
+            // error later. `remaining` covers the same Rust lexical scope the
+            // shadow-let would span; nested blocks are scanned recursively
+            // (closures excluded) by the scanner. See D-1 in
+            // `backlog/I-142-nullish-assign-shadow-let.md`.
+            self.pre_check_narrowing_reset(stmt, &stmts[i + 1..])?;
             let converted = self.convert_stmt(stmt, return_type)?;
             result.extend(converted);
         }
+        // I-142: collapse `let x = init; let x = x.unwrap_or[_else](...);`
+        // pairs emitted by `try_convert_nullish_assign_stmt` into a single
+        // fused `let x = init.unwrap_or[_else](...);`. Must run before
+        // `mark_mutated_vars` so the (cosmetic) fused form is the final
+        // shape the mutation-inference pass inspects.
+        fuse_nullish_assign_shadow_lets(&mut result);
         mark_mutated_vars(&mut result, &self.mut_method_names);
         Ok(result)
     }

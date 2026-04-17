@@ -9,6 +9,7 @@ mod fn_exprs;
 mod literals;
 mod math_number;
 mod member_access;
+mod nullish_assign;
 mod object_spread_side_effects;
 mod objects;
 mod optional_chaining;

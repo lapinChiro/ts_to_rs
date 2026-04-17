@@ -155,6 +155,30 @@ impl<'a> TypeResolver<'a> {
             }
         }
     }
+
+    /// Records the declared type of an assignment-target identifier at its
+    /// SWC span in `expr_types` and returns the resolved type.
+    ///
+    /// Unlike an `Expr::Ident` used as a value, the `BindingIdent` inside an
+    /// `AssignTarget` is not visited by `resolve_expr`, so its span otherwise
+    /// carries no entry. I-142's `??=` handler reads the LHS type from the
+    /// ident's span to decide between shadow-let and `get_or_insert_with`, so
+    /// this bridge closes the gap for every assignment (plain `=` already
+    /// stored it via `lookup_var`, compound `??=`/`+=`/... did not).
+    pub(super) fn record_assign_target_ident_type(
+        &mut self,
+        ident: &swc_ecma_ast::BindingIdent,
+    ) -> ResolvedType {
+        let ty = self.lookup_var(ident.id.sym.as_ref());
+        if matches!(ty, ResolvedType::Known(_)) {
+            let span = crate::pipeline::type_resolution::Span::from_swc(ident.id.span);
+            self.result
+                .expr_types
+                .entry(span)
+                .or_insert_with(|| ty.clone());
+        }
+        ty
+    }
 }
 
 #[cfg(test)]

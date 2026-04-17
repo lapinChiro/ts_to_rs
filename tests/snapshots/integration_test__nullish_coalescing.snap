@@ -24,7 +24,6 @@ fn getOrDefault(items: Vec<String>, index: f64) -> String {
 }
 
 fn ensureDefault(x: Option<f64>) -> f64 {
-    let val = x;
-    val.get_or_insert_with(|| 0.0);
+    let val = x.unwrap_or(0.0);
     val
 }

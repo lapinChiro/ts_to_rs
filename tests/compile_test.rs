@@ -156,9 +156,7 @@ fn test_all_fixtures_compile() {
         "functions",
         // keyword-types: `undefined` return type generates `None` for `()` return (I-260).
         "keyword-types",
-        // nullish-coalescing: `??` chain generates type mismatch (I-326),
-        // Vec index move for string (I-319).
-        "nullish-coalescing",
+        // (nullish-coalescing: I-022 + I-142 で解消。skip 解除)
         // string-methods: slice/indexOf/split/charAt/repeat conversion bugs (I-329).
         "string-methods",
         // type-assertion: `as unknown as T` and union assertion type mismatch.
@@ -245,7 +243,7 @@ fn test_all_fixtures_compile_with_builtins() {
         "discriminated-union",
         "functions",
         "keyword-types",
-        "nullish-coalescing",
+        // (nullish-coalescing: I-022 + I-142 で解消。skip 解除)
         "string-methods",
         "type-assertion",
         "void-type",

@@ -12,7 +12,19 @@ When creating a new PRD in `backlog/`.
 
 ## Actions
 
-### 0. Problem Space Analysis (最優先・最重要・絶対遵守)
+### 0a. Matrix-Driven 判定 (Spec-First Gate)
+
+**本 PRD は matrix-driven か?** 以下のいずれかに該当すれば matrix-driven:
+- 入力次元に AST shape / TS type / emission context を持つ
+- `problem-space-analysis.md` の直積マトリクスを構成する
+
+**matrix-driven の場合**: `.claude/rules/spec-first-prd.md` の 2-stage workflow を適用する。
+- **Spec stage** (実装前): grammar-derived matrix + tsc observation + E2E fixture (red) + checklist
+- **Implementation stage** (spec approved 後): spec 準拠の実装のみ
+
+**non-matrix-driven の場合** (infra, refactor, bug fix): 従来通り Step 0 以降に進む。
+
+### 0b. Problem Space Analysis (最優先・最重要・絶対遵守)
 
 **本ステップは全ての PRD で必須。スキップ・省略・後回し不可。**
 
@@ -21,7 +33,11 @@ Discovery より前、設計より前、実装より前に必ず実施する。
 
 1. **入力次元を列挙する**: 機能の出力を決定する独立次元を「省略なしで」列挙する。
    - 変換系機能の典型: AST shape / TS type / outer context / TS strict 設定。
-   - 各次元の variant を SWC AST / RustType / 既存コンテキスト列挙から網羅する。
+   - 各次元の variant を **reference doc から網羅チェック** する:
+     - AST shape: `doc/grammar/ast-variants.md` の全 Tier 1/2 variant を確認
+     - TS type: `doc/grammar/rust-type-variants.md` の全 18 RustType variant を確認
+     - Context: `doc/grammar/emission-contexts.md` の全 51 context を確認
+   - reference doc に存在する variant を「思いつかなかった」で漏らすことを防ぐ。
 2. **組合せマトリクスを作成する**: 全次元の直積を表形式で enumerate し、
    各セルに以下を記録する:
    - Ideal Rust 出力 (不明なら「要調査」マーク)
@@ -47,7 +63,7 @@ Once the target item is determined, check `TODO` for items that should be batche
 - Items on the **same code path** (addressable by modifying the same functions/modules)
 - Items with **explicit overlap/relation** (cross-referenced with 🔗, etc.)
 - Items with the **same abstract pattern** (e.g., multiple `TsTypeOperator` variant support)
-- **Items that share the same problem space matrix** (Step 0 で同じ次元にマップされる defect は
+- **Items that share the same problem space matrix** (Step 0b で同じ次元にマップされる defect は
   同一 PRD に統合する。個別 fix すると問題空間の網羅が崩れる)
 
 If applicable items exist, include them in the PRD scope. Do not force-combine items on independent code paths.
@@ -56,13 +72,17 @@ If applicable items exist, include them in the PRD scope. Do not force-combine i
 
 Before writing the PRD:
 
-1. **First** resolve all "要調査" cells in the Problem Space matrix (Step 0) — ask
+1. **First** resolve all "要調査" cells in the Problem Space matrix (Step 0b) — ask
    the user what the ideal Rust output should be for each unknown cell.
-2. Ask the user at least 2 additional clarification questions:
+2. **(Matrix-driven PRD のみ) tsc observation**: ✗ および 要調査 のセルに対して
+   TS fixture を作成し `scripts/observe-tsc.sh` で tsc / tsx の挙動を観測する。
+   Ideal Rust 出力は「tsc observation の runtime stdout を Rust でも再現する」
+   を原則とする。観測結果を PRD に記録する。
+3. Ask the user at least 2 additional clarification questions:
    - Why build this now? (motivation/priority confirmation)
    - What defines success? (completion criteria alignment)
    - Are there constraints? (technical constraints, compatibility with existing features, etc.)
-3. Draft the PRD only after all Problem Space cells have determined ideal outputs
+4. Draft the PRD only after all Problem Space cells have determined ideal outputs
    and the user has answered motivation/success/constraint questions.
 
 ### 3. Impact Area Code Review
@@ -257,7 +277,7 @@ Conditions for this PRD's work to be considered "complete". Include quality chec
 
 ## Prohibited
 
-- **Skipping Problem Space Analysis (Step 0)** — 全 PRD で最優先・必須・例外なし。
+- **Skipping Problem Space Analysis (Step 0b)** — 全 PRD で最優先・必須・例外なし。
   問題空間マトリクスなしに Discovery/設計/実装に進むことは `problem-space-analysis.md`
   違反であり、PRD としての有効性がない。
 - **Declaring PRD complete with incomplete matrix** — 「reported defect が fix され

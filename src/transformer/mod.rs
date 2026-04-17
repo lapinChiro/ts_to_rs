@@ -261,6 +261,28 @@ pub fn transform_module_collecting(
     Ok((all, unsupported))
 }
 
+/// Transforms an SWC [`Module`] with a pre-built [`TransformContext`], collecting
+/// unsupported syntax instead of aborting.
+///
+/// Used by tests (e.g., `TctxFixture::transform_collecting`) that need both
+/// TypeResolver-populated type information *and* the list of
+/// [`UnsupportedSyntaxError`]s. Unlike [`transform_module_collecting`], which
+/// builds a bare `TransformContext` from just a [`TypeRegistry`], this variant
+/// reuses the caller's context so features driven by TypeResolver output
+/// (narrowing, `get_type_for_var`, etc.) are available — e.g., I-142 Cell #5 /
+/// #9 / #14 which need `any`/`number | null` parameter types to resolve before
+/// the transformer's `pick_strategy` / `pre_check_narrowing_reset` hooks run.
+///
+/// The public-API parallel to [`transform_module_with_context`].
+pub fn transform_module_collecting_with_context(
+    module: &Module,
+    ctx: &context::TransformContext<'_>,
+    synthetic: &mut SyntheticTypeRegistry,
+) -> Result<(Vec<Item>, Vec<UnsupportedSyntaxError>)> {
+    let mut t = Transformer::for_module(ctx, synthetic);
+    t.transform_module_collecting(module)
+}
+
 // --- Transformer methods for module-level transformation ---
 
 impl<'a> Transformer<'a> {

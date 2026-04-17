@@ -170,6 +170,37 @@ fn collect_du_field_accesses_from_expr(
 /// - If any case has a non-empty body without `break` (fall-through with code), generates
 ///   a `LabeledBlock` + flag pattern.
 impl<'a> Transformer<'a> {
+    /// Converts the `cons` of a `switch` case into IR statements, filtering out
+    /// terminators per the caller's policy and running the I-142 D-1
+    /// narrowing-reset pre-check on each retained statement.
+    ///
+    /// `drop_continue = true` filters both `break` and `continue` (the normal
+    /// clean-match / fall-through cases where `continue` escapes the switch).
+    /// `drop_continue = false` keeps `continue` (used in the labeled-block
+    /// fall-through emission path where `continue` carries meaning).
+    fn convert_switch_case_body(
+        &mut self,
+        cons: &[ast::Stmt],
+        return_type: Option<&RustType>,
+        drop_continue: bool,
+    ) -> Result<Vec<Stmt>> {
+        let mut result = Vec::new();
+        for (i, stmt) in cons.iter().enumerate() {
+            if matches!(stmt, ast::Stmt::Break(_)) {
+                continue;
+            }
+            if drop_continue && matches!(stmt, ast::Stmt::Continue(_)) {
+                continue;
+            }
+            // The shadow-let's lexical scope is the case body itself, so the
+            // remaining slice is the case's own tail — no leakage into sibling
+            // cases or the code after the switch.
+            self.pre_check_narrowing_reset(stmt, &cons[i + 1..])?;
+            result.extend(self.convert_stmt(stmt, return_type)?);
+        }
+        Ok(result)
+    }
+
     /// Converts a `switch` statement to IR match or if-else chain.
     pub(super) fn convert_switch_stmt(
         &mut self,
@@ -312,15 +343,7 @@ impl<'a> Transformer<'a> {
 
                 // Non-empty body: flush all pending patterns as separate arms with this body.
                 for pat in pending.drain(..) {
-                    let body: Vec<Stmt> = case
-                        .cons
-                        .iter()
-                        .filter(|s| !matches!(s, ast::Stmt::Break(_) | ast::Stmt::Continue(_)))
-                        .map(|s| self.convert_stmt(s, return_type))
-                        .collect::<Result<Vec<_>>>()?
-                        .into_iter()
-                        .flatten()
-                        .collect();
+                    let body = self.convert_switch_case_body(&case.cons, return_type, true)?;
 
                     arms.push(MatchArm {
                         patterns: vec![pat],
@@ -331,30 +354,14 @@ impl<'a> Transformer<'a> {
             } else {
                 // default case — also flush any pending patterns
                 for pat in pending.drain(..) {
-                    let body: Vec<Stmt> = case
-                        .cons
-                        .iter()
-                        .filter(|s| !matches!(s, ast::Stmt::Break(_) | ast::Stmt::Continue(_)))
-                        .map(|s| self.convert_stmt(s, return_type))
-                        .collect::<Result<Vec<_>>>()?
-                        .into_iter()
-                        .flatten()
-                        .collect();
+                    let body = self.convert_switch_case_body(&case.cons, return_type, true)?;
                     arms.push(MatchArm {
                         patterns: vec![pat],
                         guard: None,
                         body,
                     });
                 }
-                let body: Vec<Stmt> = case
-                    .cons
-                    .iter()
-                    .filter(|s| !matches!(s, ast::Stmt::Break(_) | ast::Stmt::Continue(_)))
-                    .map(|s| self.convert_stmt(s, return_type))
-                    .collect::<Result<Vec<_>>>()?
-                    .into_iter()
-                    .flatten()
-                    .collect();
+                let body = self.convert_switch_case_body(&case.cons, return_type, true)?;
 
                 arms.push(MatchArm {
                     patterns: vec![Pattern::Wildcard],
@@ -497,15 +504,7 @@ impl<'a> Transformer<'a> {
 
             // TypeResolver's DU field binding detection (is_du_field_binding)
             // handles field variable resolution, so no explicit scope needed.
-            let body = case
-                .cons
-                .iter()
-                .filter(|s| !matches!(s, ast::Stmt::Break(_) | ast::Stmt::Continue(_)))
-                .map(|s| self.convert_stmt(s, return_type))
-                .collect::<Result<Vec<_>>>()?
-                .into_iter()
-                .flatten()
-                .collect();
+            let body = self.convert_switch_case_body(&case.cons, return_type, true)?;
 
             if case.test.is_none() {
                 pending_patterns.push(Pattern::Wildcard);
@@ -590,15 +589,7 @@ impl<'a> Transformer<'a> {
                 pending_patterns.push(Pattern::Wildcard);
             }
 
-            let body = case
-                .cons
-                .iter()
-                .filter(|s| !matches!(s, ast::Stmt::Break(_) | ast::Stmt::Continue(_)))
-                .map(|s| self.convert_stmt(s, return_type))
-                .collect::<Result<Vec<_>>>()?
-                .into_iter()
-                .flatten()
-                .collect();
+            let body = self.convert_switch_case_body(&case.cons, return_type, true)?;
 
             arms.push(MatchArm {
                 patterns: std::mem::take(&mut pending_patterns),
@@ -642,15 +633,7 @@ impl<'a> Transformer<'a> {
             }
 
             // Non-empty body: create an arm with all accumulated patterns
-            let body = case
-                .cons
-                .iter()
-                .filter(|s| !matches!(s, ast::Stmt::Break(_) | ast::Stmt::Continue(_)))
-                .map(|s| self.convert_stmt(s, return_type))
-                .collect::<Result<Vec<_>>>()?
-                .into_iter()
-                .flatten()
-                .collect();
+            let body = self.convert_switch_case_body(&case.cons, return_type, true)?;
 
             if case.test.is_none() {
                 pending_patterns.push(Pattern::Wildcard);
@@ -708,15 +691,10 @@ impl<'a> Transformer<'a> {
                 .last()
                 .is_some_and(|s| matches!(s, ast::Stmt::Break(_)));
 
-            let body: Vec<Stmt> = case
-                .cons
-                .iter()
-                .filter(|s| !matches!(s, ast::Stmt::Break(_)))
-                .map(|s| self.convert_stmt(s, return_type))
-                .collect::<Result<Vec<_>>>()?
-                .into_iter()
-                .flatten()
-                .collect();
+            // Labeled-block fallthrough emission preserves `continue` (it
+            // carries control flow to the next case body); only `break` is
+            // dropped.
+            let body = self.convert_switch_case_body(&case.cons, return_type, false)?;
 
             if let Some(test) = &case.test {
                 // case val: ...

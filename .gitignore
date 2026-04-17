@@ -9,6 +9,6 @@ tools/extract-types/node_modules/
 tools/extract-types/dist/
 .ts_to_rs/
 tests/fixtures/*.input.rs
-tests/e2e/scripts/*.rs
+tests/e2e/scripts/**/*.rs
 scripts/__pycache__/
 *.rlib

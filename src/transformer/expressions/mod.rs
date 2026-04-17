@@ -37,9 +37,12 @@ impl<'a> Transformer<'a> {
 
     /// Converts an expression with an explicit expected type override.
     ///
-    /// Private helper: only used by `convert_expr` for Option<T> unwrap recursion
-    /// (to avoid infinite loop from reading the same Option<T> span).
-    fn convert_expr_with_expected(
+    /// Callers:
+    /// - `convert_expr` (default: no override, reads TypeResolver expected_type)
+    /// - `convert_stmt` Return arm (override = return_type when Any, I-050)
+    /// - `convert_var_decl` (override = declared type when Any, I-050)
+    /// - Internal recursion for Option<T> unwrap (avoids re-reading same span)
+    pub(crate) fn convert_expr_with_expected(
         &mut self,
         expr: &ast::Expr,
         expected_override: Option<&RustType>,
@@ -158,6 +161,34 @@ impl<'a> Transformer<'a> {
                 return Ok(Expr::FnCall {
                     // `Box::new(...)` is a std call, not a user type reference.
                     target: CallTarget::ExternalPath(vec!["Box".to_string(), "new".to_string()]),
+                    args: vec![result],
+                });
+            }
+        }
+
+        // Any coercion: concrete literal → serde_json::Value::from(...)
+        // When the caller explicitly requests Any (via expected_override) and the
+        // source expression is a primitive literal, wrap in Value::from(). I-050-a.
+        //
+        // Only triggers on:
+        // - expected_override = Some(Any) (explicit caller request from return/let-init)
+        // - Expr is a Lit (Str/Num/Bool) — always safe to coerce
+        //
+        // Ident coercion is deferred to a future sub-PRD: TypeResolver's expr_type
+        // for idents can diverge from the actual IR type (e.g., `input as string`
+        // is typed as String by TypeResolver but remains Value in IR), causing
+        // false-positive coercion.
+        if let Some(RustType::Any) = expected_override {
+            if matches!(
+                expr,
+                ast::Expr::Lit(ast::Lit::Str(_) | ast::Lit::Num(_) | ast::Lit::Bool(_))
+            ) {
+                return Ok(Expr::FnCall {
+                    target: CallTarget::ExternalPath(vec![
+                        "serde_json".to_string(),
+                        "Value".to_string(),
+                        "from".to_string(),
+                    ]),
                     args: vec![result],
                 });
             }

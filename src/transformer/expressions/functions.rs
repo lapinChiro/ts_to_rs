@@ -124,7 +124,9 @@ impl<'a> Transformer<'a> {
             Some(block) => {
                 let mut sub_t = self.spawn_nested_scope();
                 let mut stmts = expansion_stmts;
-                for stmt in &block.stmts {
+                for (i, stmt) in block.stmts.iter().enumerate() {
+                    // I-142 D-1: function-expression body is a fresh scope.
+                    sub_t.pre_check_narrowing_reset(stmt, &block.stmts[i + 1..])?;
                     stmts.extend(sub_t.convert_stmt(stmt, return_type.as_ref())?);
                 }
                 convert_last_return_to_tail(&mut stmts);
@@ -284,7 +286,9 @@ impl<'a> Transformer<'a> {
                 ast::BlockStmtOrExpr::BlockStmt(block) => {
                     let mut sub_t = self.spawn_nested_scope();
                     let mut stmts = Vec::new();
-                    for stmt in &block.stmts {
+                    for (i, stmt) in block.stmts.iter().enumerate() {
+                        // I-142 D-1: arrow-expression body is a fresh scope.
+                        sub_t.pre_check_narrowing_reset(stmt, &block.stmts[i + 1..])?;
                         stmts.extend(sub_t.convert_stmt(stmt, return_type.as_ref())?);
                     }
                     convert_last_return_to_tail(&mut stmts);
@@ -301,7 +305,9 @@ impl<'a> Transformer<'a> {
                 }
                 ast::BlockStmtOrExpr::BlockStmt(block) => {
                     let mut sub_t = self.spawn_nested_scope();
-                    for stmt in &block.stmts {
+                    for (i, stmt) in block.stmts.iter().enumerate() {
+                        // I-142 D-1: arrow body in expansion-stmt path.
+                        sub_t.pre_check_narrowing_reset(stmt, &block.stmts[i + 1..])?;
                         body_stmts.extend(sub_t.convert_stmt(stmt, return_type.as_ref())?);
                     }
                     convert_last_return_to_tail(&mut body_stmts);

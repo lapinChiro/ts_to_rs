@@ -266,6 +266,46 @@ impl RustType {
     pub fn is_promise(&self) -> bool {
         matches!(self, RustType::Named { name, type_args } if name == "Promise" && type_args.len() == 1)
     }
+
+    /// Structurally conservative check for whether a type implements `Copy`.
+    ///
+    /// Returns true only when the IR can prove `Copy` implementation purely
+    /// from the type structure. Returns false for any type whose `Copy`-ness
+    /// depends on external context — user-defined types (`Named`), type
+    /// parameters (`TypeVar`), trait objects (`DynTrait`), and runtime-typed
+    /// values (`Any` / `serde_json::Value`).
+    ///
+    /// Used by expression-context `??=` emission (I-142) to decide between
+    /// `*x.get_or_insert_with(|| d)` (the `&mut T` deref yields `T` by copy
+    /// when `T: Copy`) and `x.get_or_insert_with(|| d).clone()` (the `&mut T`
+    /// is cloned to avoid a move). Picking wrong emits broken code, not a
+    /// silent semantic change — Rust's compiler rejects a `*` on `&mut T` for
+    /// non-`Copy` `T`. Conservative (false) is the safe default.
+    pub fn is_copy_type(&self) -> bool {
+        match self {
+            // Primitives + unit are Copy
+            RustType::Unit | RustType::F64 | RustType::Bool => true,
+            RustType::Primitive(_) => true,
+            // References are always Copy regardless of the pointee
+            RustType::Ref(_) => true,
+            // Never inhabits no values, but is Copy
+            RustType::Never => true,
+            // Container-like types: Copy iff all components are Copy
+            RustType::Option(inner) => inner.is_copy_type(),
+            RustType::Tuple(elems) => elems.iter().all(RustType::is_copy_type),
+            // Not Copy: heap-allocated / interior-mutable / trait-object / generic
+            RustType::String
+            | RustType::Vec(_)
+            | RustType::Result { .. }
+            | RustType::Any
+            | RustType::Fn { .. }
+            | RustType::DynTrait(_)
+            | RustType::QSelf { .. }
+            | RustType::StdCollection { .. }
+            | RustType::Named { .. }
+            | RustType::TypeVar { .. } => false,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -367,6 +407,85 @@ mod tests {
             tv.clone().wrap_if_optional(true),
             RustType::Option(Box::new(tv))
         );
+    }
+
+    // -- is_copy_type tests (I-142) --
+
+    #[test]
+    fn is_copy_type_true_for_primitives() {
+        assert!(RustType::Unit.is_copy_type());
+        assert!(RustType::F64.is_copy_type());
+        assert!(RustType::Bool.is_copy_type());
+        assert!(RustType::Never.is_copy_type());
+        assert!(RustType::Primitive(PrimitiveIntKind::I32).is_copy_type());
+        assert!(RustType::Primitive(PrimitiveIntKind::Usize).is_copy_type());
+        assert!(RustType::Primitive(PrimitiveIntKind::F32).is_copy_type());
+    }
+
+    #[test]
+    fn is_copy_type_false_for_non_copy_leaves() {
+        assert!(!RustType::String.is_copy_type());
+        assert!(!RustType::Any.is_copy_type());
+        assert!(!RustType::Vec(Box::new(RustType::F64)).is_copy_type());
+    }
+
+    #[test]
+    fn is_copy_type_ref_is_always_copy() {
+        // &T is Copy regardless of T
+        assert!(RustType::Ref(Box::new(RustType::String)).is_copy_type());
+        assert!(RustType::Ref(Box::new(RustType::Vec(Box::new(RustType::F64)))).is_copy_type());
+    }
+
+    #[test]
+    fn is_copy_type_option_delegates_to_inner() {
+        assert!(RustType::Option(Box::new(RustType::F64)).is_copy_type());
+        assert!(RustType::Option(Box::new(RustType::Bool)).is_copy_type());
+        assert!(!RustType::Option(Box::new(RustType::String)).is_copy_type());
+        assert!(!RustType::Option(Box::new(RustType::Vec(Box::new(RustType::F64)))).is_copy_type());
+    }
+
+    #[test]
+    fn is_copy_type_tuple_delegates_to_all_elements() {
+        assert!(RustType::Tuple(vec![RustType::F64, RustType::Bool]).is_copy_type());
+        assert!(!RustType::Tuple(vec![RustType::F64, RustType::String]).is_copy_type());
+        // Empty tuple is `()` which is Copy
+        assert!(RustType::Tuple(vec![]).is_copy_type());
+    }
+
+    #[test]
+    fn is_copy_type_false_for_generics_and_trait_objects() {
+        // User-defined types: cannot prove Copy structurally
+        assert!(!RustType::Named {
+            name: "Foo".to_string(),
+            type_args: vec![],
+        }
+        .is_copy_type());
+        // TypeVar: depends on external bound
+        assert!(!RustType::TypeVar {
+            name: "T".to_string(),
+        }
+        .is_copy_type());
+        // DynTrait: trait objects are !Sized → !Copy
+        assert!(!RustType::DynTrait("Greeter".to_string()).is_copy_type());
+    }
+
+    #[test]
+    fn is_copy_type_false_for_fn_and_result_and_std_collections() {
+        assert!(!RustType::Fn {
+            params: vec![],
+            return_type: Box::new(RustType::Unit),
+        }
+        .is_copy_type());
+        assert!(!RustType::Result {
+            ok: Box::new(RustType::F64),
+            err: Box::new(RustType::String),
+        }
+        .is_copy_type());
+        assert!(!RustType::StdCollection {
+            kind: StdCollectionKind::HashMap,
+            args: vec![RustType::String, RustType::F64],
+        }
+        .is_copy_type());
     }
 }
 

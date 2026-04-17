@@ -135,4 +135,28 @@ impl TctxFixture {
         let output = crate::generator::generate(&items);
         (items, output)
     }
+
+    /// TS ソースを変換し、IR と [`UnsupportedSyntaxError`] のリストを返す。
+    ///
+    /// `transform` が不支援項目でパニックするのに対し、本メソッドは
+    /// `transform_module_collecting_with_context` を呼ぶため、テストは
+    /// `UnsupportedSyntaxError` の `kind` / `byte_pos` を観察できる。
+    /// I-142 Cell #5 / #9 / #14 (blocked-by-I-050 / I-144) のような
+    /// surface-as-unsupported cell の lock-in に使用する。
+    pub fn transform_collecting(
+        &self,
+        source: &str,
+    ) -> (
+        Vec<crate::ir::Item>,
+        Vec<crate::transformer::UnsupportedSyntaxError>,
+    ) {
+        let module = crate::parser::parse_typescript(source).unwrap();
+        let mut synthetic = crate::pipeline::SyntheticTypeRegistry::new();
+        crate::transformer::transform_module_collecting_with_context(
+            &module,
+            &self.tctx(),
+            &mut synthetic,
+        )
+        .unwrap()
+    }
 }

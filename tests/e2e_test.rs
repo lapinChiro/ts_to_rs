@@ -71,6 +71,8 @@ fn execute_e2e(name: &str) -> E2eResult {
 }
 
 /// Transpiles and executes a single TS script with custom options.
+///
+/// `name` can be a flat name (e.g. "hello") or a subdir path (e.g. "sdcdf-smoke/let-init-string-lit").
 fn execute_e2e_with_options(name: &str, opts: &E2eOptions) -> E2eResult {
     let script_path = format!("{SCRIPTS_DIR}/{name}.ts");
     let ts_source = fs::read_to_string(&script_path)
@@ -165,6 +167,34 @@ fn execute_e2e_with_options(name: &str, opts: &E2eOptions) -> E2eResult {
     }
 }
 
+/// Compares two outputs line-by-line, returning a diff string on mismatch.
+///
+/// Returns `None` if outputs match, `Some(diff)` otherwise.
+fn compare_lines(ts_output: &str, rust_output: &str) -> Option<String> {
+    let rust_lines: Vec<&str> = rust_output.lines().collect();
+    let ts_lines: Vec<&str> = ts_output.lines().collect();
+
+    if rust_lines == ts_lines {
+        return None;
+    }
+
+    let mut diff = String::new();
+    let max_lines = rust_lines.len().max(ts_lines.len());
+    for i in 0..max_lines {
+        let rs_line = rust_lines.get(i).unwrap_or(&"<missing>");
+        let ts_line = ts_lines.get(i).unwrap_or(&"<missing>");
+        if rs_line != ts_line {
+            diff.push_str(&format!(
+                "  line {}: TS={:?}  Rust={:?}\n",
+                i + 1,
+                ts_line,
+                rs_line
+            ));
+        }
+    }
+    Some(diff)
+}
+
 /// Compares two outputs line-by-line, panicking with a diff on mismatch.
 fn assert_lines_match(
     name: &str,
@@ -173,24 +203,7 @@ fn assert_lines_match(
     rust_output: &str,
     rs_source: &str,
 ) {
-    let rust_lines: Vec<&str> = rust_output.lines().collect();
-    let ts_lines: Vec<&str> = ts_output.lines().collect();
-
-    if rust_lines != ts_lines {
-        let mut diff = String::new();
-        let max_lines = rust_lines.len().max(ts_lines.len());
-        for i in 0..max_lines {
-            let rs_line = rust_lines.get(i).unwrap_or(&"<missing>");
-            let ts_line = ts_lines.get(i).unwrap_or(&"<missing>");
-            if rs_line != ts_line {
-                diff.push_str(&format!(
-                    "  line {}: TS={:?}  Rust={:?}\n",
-                    i + 1,
-                    ts_line,
-                    rs_line
-                ));
-            }
-        }
+    if let Some(diff) = compare_lines(ts_output, rust_output) {
         panic!(
             "{stream} mismatch for '{name}':\n{diff}\nTS {stream}:\n{ts_output}\nRust {stream}:\n{rust_output}\nGenerated Rust:\n{rs_source}"
         );
@@ -341,6 +354,74 @@ fn run_e2e_multi_file_test(name: &str) {
 
     let ts_stdout = String::from_utf8_lossy(&ts_output.stdout);
     assert_lines_match(name, "stdout", &ts_stdout, &rust_stdout, &full_main);
+}
+
+/// Runs all per-cell E2E tests in a PRD subdirectory.
+///
+/// Discovers all `.ts` files in `tests/e2e/scripts/{prd_id}/`, runs each as
+/// an independent E2E test (TS stdout vs Rust stdout comparison), and reports
+/// all failures at the end.
+///
+/// This is the SDCDF per-cell E2E runner (Phase 2 artifact).
+fn run_cell_e2e_tests(prd_id: &str) {
+    let _guard = E2E_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = format!("{SCRIPTS_DIR}/{prd_id}");
+
+    let mut entries: Vec<_> = fs::read_dir(&dir)
+        .unwrap_or_else(|e| panic!("failed to read dir {dir}: {e}"))
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "ts"))
+        .collect();
+    entries.sort_by_key(|e| e.file_name());
+
+    assert!(!entries.is_empty(), "no .ts cell fixtures found in {dir}");
+
+    let mut failures: Vec<String> = Vec::new();
+
+    for entry in &entries {
+        let stem = entry
+            .path()
+            .file_stem()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let cell_name = format!("{prd_id}/{stem}");
+
+        let result = execute_e2e(&cell_name);
+
+        if let Some(diff) = compare_lines(&result.ts_stdout, &result.rust_stdout) {
+            failures.push(format!(
+                "FAIL {cell_name}:\n{diff}  TS stdout:\n{}\n  Rust stdout:\n{}\n  Generated Rust:\n{}",
+                result.ts_stdout, result.rust_stdout, result.rs_source
+            ));
+        }
+    }
+
+    if !failures.is_empty() {
+        panic!(
+            "{} of {} cell tests failed for PRD '{prd_id}':\n\n{}",
+            failures.len(),
+            entries.len(),
+            failures.join("\n---\n")
+        );
+    }
+}
+
+/// Runs a single per-cell E2E test by PRD id and cell id.
+///
+/// Equivalent to `run_e2e_test` but for cell fixtures in PRD subdirectories.
+#[allow(dead_code)]
+fn run_cell_e2e_test(prd_id: &str, cell_id: &str) {
+    let _guard = E2E_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let cell_name = format!("{prd_id}/{cell_id}");
+    let result = execute_e2e(&cell_name);
+    assert_lines_match(
+        &cell_name,
+        "stdout",
+        &result.ts_stdout,
+        &result.rust_stdout,
+        &result.rs_source,
+    );
 }
 
 /// Runs an E2E test comparing both stdout and stderr.
@@ -826,4 +907,17 @@ fn test_e2e_callable_interface_ts_rust_stdout_match() {
 #[test]
 fn test_e2e_optional_params_ts_rust_stdout_match() {
     run_e2e_test("optional_params");
+}
+
+// --- SDCDF per-cell E2E tests ---
+// PRD subdirectory tests use `run_cell_e2e_tests` (batch) or `run_cell_e2e_test` (single).
+
+#[test]
+fn test_e2e_cell_sdcdf_smoke() {
+    run_cell_e2e_tests("sdcdf-smoke");
+}
+
+#[test]
+fn test_e2e_cell_i050a() {
+    run_cell_e2e_tests("i050a");
 }
