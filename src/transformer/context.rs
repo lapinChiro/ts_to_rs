@@ -166,7 +166,7 @@ function check(x: string | number): string {
 }"#;
         let f = TctxFixture::from_source(source);
         assert!(
-            !f.tctx().type_resolution.narrowing_events.is_empty(),
+            !f.tctx().type_resolution.narrow_events.is_empty(),
             "TypeResolver should detect typeof narrowing"
         );
 

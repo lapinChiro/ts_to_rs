@@ -8,6 +8,7 @@ pub(crate) mod any_narrowing;
 pub mod external_struct_generator;
 pub mod module_graph;
 pub mod module_resolver;
+pub mod narrowing_analyzer;
 pub(crate) mod narrowing_patterns;
 pub mod output_writer;
 pub mod placement;

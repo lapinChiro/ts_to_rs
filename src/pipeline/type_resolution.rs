@@ -8,6 +8,7 @@
 use std::collections::HashMap;
 
 use crate::ir::RustType;
+use crate::pipeline::narrowing_analyzer::NarrowEvent;
 
 use super::ResolvedType;
 
@@ -37,22 +38,6 @@ impl Span {
 pub struct VarId {
     pub name: String,
     pub declared_at: Span,
-}
-
-/// Records that a variable's type is narrowed within a specific scope.
-///
-/// For example, `if (typeof x === "string") { ... }` generates a `NarrowingEvent`
-/// where `x` is narrowed to `String` within the then-block's scope.
-#[derive(Debug, Clone)]
-pub struct NarrowingEvent {
-    /// Start byte position of the scope where narrowing is active.
-    pub scope_start: u32,
-    /// End byte position of the scope where narrowing is active.
-    pub scope_end: u32,
-    /// The variable being narrowed.
-    pub var_name: String,
-    /// The narrowed type (replaces the variable's original type in this scope).
-    pub narrowed_type: RustType,
 }
 
 /// Records that a variable is a destructured field binding in a DU match arm.
@@ -108,11 +93,12 @@ pub struct FileTypeResolution {
     /// - Function call argument: the parameter type
     pub expected_types: HashMap<Span, RustType>,
 
-    /// Narrowing events: scoped type overrides for variables.
+    /// Narrowing events: scoped type overrides, resets, and closure captures.
     ///
-    /// When checking variable types, narrowing events override the variable's
-    /// declared type within the event's scope range.
-    pub narrowing_events: Vec<NarrowingEvent>,
+    /// `NarrowEvent::Narrow` entries override a variable's declared type
+    /// within the event's scope range. `Reset` / `ClosureCapture` entries
+    /// are consumed by the I-144 CFG analyzer for emission-hint decisions.
+    pub narrow_events: Vec<NarrowEvent>,
 
     /// Variable mutability: whether each variable needs `let mut`.
     ///
@@ -150,7 +136,7 @@ impl FileTypeResolution {
         Self {
             expr_types: HashMap::new(),
             expected_types: HashMap::new(),
-            narrowing_events: Vec::new(),
+            narrow_events: Vec::new(),
             var_mutability: HashMap::new(),
             du_field_bindings: Vec::new(),
             any_enum_overrides: Vec::new(),
@@ -174,13 +160,17 @@ impl FileTypeResolution {
     ///
     /// Returns the innermost (most specific) narrowing that applies,
     /// or `None` if no narrowing is active for this variable at this position.
+    ///
+    /// Only consults [`NarrowEvent::Narrow`] variants; `Reset` /
+    /// `ClosureCapture` events carry no type and are skipped.
     pub fn narrowed_type(&self, var_name: &str, position: u32) -> Option<&RustType> {
-        self.narrowing_events
+        self.narrow_events
             .iter()
-            .rfind(|e| {
-                e.var_name == var_name && e.scope_start <= position && position < e.scope_end
+            .filter_map(NarrowEvent::as_narrow)
+            .rfind(|n| {
+                n.var_name == var_name && n.scope_start <= position && position < n.scope_end
             })
-            .map(|e| &e.narrowed_type)
+            .map(|n| n.narrowed_type)
     }
 
     /// Gets the mutability for a variable.
@@ -254,9 +244,10 @@ mod tests {
 
     #[test]
     fn test_narrowed_type_returns_innermost_scope() {
+        use crate::pipeline::narrowing_analyzer::{NarrowTrigger, PrimaryTrigger};
         let mut resolution = FileTypeResolution::empty();
         // Outer narrowing: x is StringOrF64 in range [10, 50)
-        resolution.narrowing_events.push(NarrowingEvent {
+        resolution.narrow_events.push(NarrowEvent::Narrow {
             scope_start: 10,
             scope_end: 50,
             var_name: "x".to_string(),
@@ -264,13 +255,15 @@ mod tests {
                 name: "StringOrF64".to_string(),
                 type_args: vec![],
             },
+            trigger: NarrowTrigger::Primary(PrimaryTrigger::Truthy),
         });
         // Inner narrowing: x is String in range [20, 40)
-        resolution.narrowing_events.push(NarrowingEvent {
+        resolution.narrow_events.push(NarrowEvent::Narrow {
             scope_start: 20,
             scope_end: 40,
             var_name: "x".to_string(),
             narrowed_type: RustType::String,
+            trigger: NarrowTrigger::Primary(PrimaryTrigger::TypeofGuard("string".to_string())),
         });
 
         // At position 15 (outer only): StringOrF64
@@ -292,17 +285,76 @@ mod tests {
 
     #[test]
     fn test_narrowed_type_different_variables() {
+        use crate::pipeline::narrowing_analyzer::{NarrowTrigger, PrimaryTrigger};
         let mut resolution = FileTypeResolution::empty();
-        resolution.narrowing_events.push(NarrowingEvent {
+        resolution.narrow_events.push(NarrowEvent::Narrow {
             scope_start: 10,
             scope_end: 50,
             var_name: "x".to_string(),
             narrowed_type: RustType::String,
+            trigger: NarrowTrigger::Primary(PrimaryTrigger::TypeofGuard("string".to_string())),
         });
 
         // x is narrowed, y is not
         assert!(resolution.narrowed_type("x", 25).is_some());
         assert!(resolution.narrowed_type("y", 25).is_none());
+    }
+
+    #[test]
+    fn test_narrowed_type_skips_reset_events() {
+        use crate::pipeline::narrowing_analyzer::ResetCause;
+        let mut resolution = FileTypeResolution::empty();
+        // A Reset event in scope must NOT be returned by `narrowed_type`.
+        resolution.narrow_events.push(NarrowEvent::Reset {
+            var_name: "x".to_string(),
+            position: 20,
+            cause: ResetCause::NullAssign,
+        });
+        assert!(resolution.narrowed_type("x", 20).is_none());
+    }
+
+    #[test]
+    fn test_narrowed_type_skips_closure_capture_events() {
+        // M-4: `ClosureCapture` variant must also be excluded from
+        // `narrowed_type()` lookups — it carries no scope, only capture
+        // metadata.
+        let mut resolution = FileTypeResolution::empty();
+        resolution.narrow_events.push(NarrowEvent::ClosureCapture {
+            var_name: "x".to_string(),
+            closure_span: Span { lo: 10, hi: 50 },
+            outer_narrow: RustType::String,
+        });
+        assert!(resolution.narrowed_type("x", 30).is_none());
+    }
+
+    #[test]
+    fn test_narrowed_type_mixed_variants_returns_only_narrow() {
+        use crate::pipeline::narrowing_analyzer::{NarrowTrigger, PrimaryTrigger, ResetCause};
+        let mut resolution = FileTypeResolution::empty();
+        // Interleaved variants: a Narrow event should still be returned even
+        // when Reset / ClosureCapture entries precede/follow it in the Vec.
+        resolution.narrow_events.push(NarrowEvent::Reset {
+            var_name: "x".to_string(),
+            position: 5,
+            cause: ResetCause::DirectAssign,
+        });
+        resolution.narrow_events.push(NarrowEvent::Narrow {
+            var_name: "x".to_string(),
+            scope_start: 10,
+            scope_end: 30,
+            narrowed_type: RustType::F64,
+            trigger: NarrowTrigger::Primary(PrimaryTrigger::Truthy),
+        });
+        resolution.narrow_events.push(NarrowEvent::ClosureCapture {
+            var_name: "x".to_string(),
+            closure_span: Span { lo: 15, hi: 25 },
+            outer_narrow: RustType::F64,
+        });
+
+        assert!(matches!(
+            resolution.narrowed_type("x", 20),
+            Some(RustType::F64)
+        ));
     }
 
     #[test]

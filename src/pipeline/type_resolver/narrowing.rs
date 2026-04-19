@@ -1,7 +1,7 @@
 //! Narrowing detection for TypeResolver.
 //!
 //! Detects type narrowing guards in `if` conditions (typeof, instanceof, null checks)
-//! and records [`NarrowingEvent`]s for the Transformer.
+//! and records [`NarrowEvent::Narrow`] entries for the Transformer.
 //!
 //! Records both **positive** narrowing (the type the variable IS in the guarded scope)
 //! and **complement** narrowing (the type the variable is in the opposite scope,
@@ -11,25 +11,39 @@ use swc_common::Spanned;
 use swc_ecma_ast as ast;
 
 use super::*;
+use crate::pipeline::narrowing_analyzer::{
+    NarrowEvent, NarrowTrigger, NullCheckKind, PrimaryTrigger,
+};
 use crate::pipeline::narrowing_patterns;
-use crate::pipeline::type_resolution::{NarrowingEvent, Span};
+use crate::pipeline::type_resolution::Span;
 
-/// Returns true if the statement always exits the enclosing scope
-/// (return, throw, break, continue).
+/// Classifies a binary operator + RHS shape into the [`NullCheckKind`]
+/// variant that represents the check precisely.
 ///
-/// For block statements, checks the last statement recursively.
-/// For if statements, both branches must always exit.
-pub(super) fn block_always_exits(stmt: &ast::Stmt) -> bool {
-    match stmt {
-        ast::Stmt::Return(_) | ast::Stmt::Throw(_) => true,
-        ast::Stmt::Break(_) | ast::Stmt::Continue(_) => true,
-        ast::Stmt::Block(block) => block.stmts.last().is_some_and(block_always_exits),
-        ast::Stmt::If(if_stmt) => {
-            let cons_exits = block_always_exits(&if_stmt.cons);
-            let alt_exits = if_stmt.alt.as_ref().is_some_and(|s| block_always_exits(s));
-            cons_exits && alt_exits
-        }
-        _ => false,
+/// - Loose equality (`==` / `!=`) always maps to the `EqNull` / `NotEqNull`
+///   variants because JS coerces `null` and `undefined` together under loose
+///   comparison.
+/// - Strict equality (`===` / `!==`) distinguishes `null` from `undefined`
+///   based on the RHS (caller-supplied): strict variants are populated only
+///   when the RHS is the `undefined` identifier.
+///
+/// # Panics
+///
+/// Panics if `op` is not a null-check operator (`==` / `!=` / `===` / `!==`).
+/// Callers must verify the operator before invoking this helper — this is a
+/// structural contract and a silent wrong-value fallback would mask bugs.
+fn classify_null_check(op: ast::BinaryOp, rhs_is_undefined: bool) -> NullCheckKind {
+    match (op, rhs_is_undefined) {
+        (ast::BinaryOp::EqEq, _) => NullCheckKind::EqNull,
+        (ast::BinaryOp::NotEq, _) => NullCheckKind::NotEqNull,
+        (ast::BinaryOp::EqEqEq, false) => NullCheckKind::EqEqEqNull,
+        (ast::BinaryOp::EqEqEq, true) => NullCheckKind::EqEqEqUndefined,
+        (ast::BinaryOp::NotEqEq, false) => NullCheckKind::NotEqEqNull,
+        (ast::BinaryOp::NotEqEq, true) => NullCheckKind::NotEqEqUndefined,
+        other => unreachable!(
+            "classify_null_check called with non-null-check operator {:?}",
+            other.0
+        ),
     }
 }
 
@@ -64,7 +78,9 @@ fn variant_matches_typeof(data: &RustType, typeof_str: &str) -> bool {
 }
 
 impl<'a> TypeResolver<'a> {
-    /// Detects narrowing guards in `if` conditions and records [`NarrowingEvent`]s.
+    /// Detects narrowing guards in `if` conditions and records
+    /// [`NarrowEvent::Narrow`] entries with the corresponding
+    /// [`NarrowTrigger`].
     ///
     /// Records both positive and complement narrowing events:
     /// - **Positive**: The type that the variable IS in the guarded scope
@@ -97,18 +113,23 @@ impl<'a> TypeResolver<'a> {
 
                 // typeof narrowing
                 if is_eq || is_neq {
-                    if let Some((var_name, narrowed_type)) = self.extract_typeof_narrowing(bin) {
+                    if let Some((var_name, narrowed_type, type_str)) =
+                        self.extract_typeof_narrowing(bin)
+                    {
                         // === → positive in consequent, !== → positive in alternate
                         let positive_span = if is_eq { Some(cons_span) } else { alt_span };
                         // Complement goes to the opposite scope
                         let complement_span = if is_eq { alt_span } else { Some(cons_span) };
 
                         if let Some(span) = positive_span {
-                            self.result.narrowing_events.push(NarrowingEvent {
+                            self.result.narrow_events.push(NarrowEvent::Narrow {
                                 scope_start: span.lo,
                                 scope_end: span.hi,
                                 var_name: var_name.clone(),
                                 narrowed_type: narrowed_type.clone(),
+                                trigger: NarrowTrigger::Primary(PrimaryTrigger::TypeofGuard(
+                                    type_str.clone(),
+                                )),
                             });
                         }
 
@@ -117,11 +138,14 @@ impl<'a> TypeResolver<'a> {
                             if let Some(complement) =
                                 self.compute_complement_type(&var_name, &narrowed_type)
                             {
-                                self.result.narrowing_events.push(NarrowingEvent {
+                                self.result.narrow_events.push(NarrowEvent::Narrow {
                                     scope_start: span.lo,
                                     scope_end: span.hi,
                                     var_name,
                                     narrowed_type: complement,
+                                    trigger: NarrowTrigger::Primary(PrimaryTrigger::TypeofGuard(
+                                        type_str,
+                                    )),
                                 });
                             }
                         }
@@ -132,16 +156,20 @@ impl<'a> TypeResolver<'a> {
 
                 // null/undefined narrowing
                 if is_eq || is_neq {
-                    if let Some((var_name, narrowed_type)) = self.extract_null_check_narrowing(bin)
+                    if let Some((var_name, narrowed_type, null_kind)) =
+                        self.extract_null_check_narrowing(bin)
                     {
                         // !== null → consequent, === null → alternate
                         let target_span = if is_neq { Some(cons_span) } else { alt_span };
                         if let Some(span) = target_span {
-                            self.result.narrowing_events.push(NarrowingEvent {
+                            self.result.narrow_events.push(NarrowEvent::Narrow {
                                 scope_start: span.lo,
                                 scope_end: span.hi,
                                 var_name,
                                 narrowed_type,
+                                trigger: NarrowTrigger::Primary(PrimaryTrigger::NullCheck(
+                                    null_kind,
+                                )),
                             });
                         }
                         // No complement for null check: the opposite scope has Option<T> which
@@ -155,16 +183,20 @@ impl<'a> TypeResolver<'a> {
                         (bin.left.as_ref(), bin.right.as_ref())
                     {
                         let var_name = var_ident.sym.to_string();
+                        let class_name = class_ident.sym.to_string();
                         let narrowed_type = RustType::Named {
-                            name: class_ident.sym.to_string(),
+                            name: class_name.clone(),
                             type_args: vec![],
                         };
 
-                        self.result.narrowing_events.push(NarrowingEvent {
+                        self.result.narrow_events.push(NarrowEvent::Narrow {
                             scope_start: cons_span.lo,
                             scope_end: cons_span.hi,
                             var_name: var_name.clone(),
                             narrowed_type: narrowed_type.clone(),
+                            trigger: NarrowTrigger::Primary(PrimaryTrigger::InstanceofGuard(
+                                class_name.clone(),
+                            )),
                         });
 
                         // Complement narrowing in else
@@ -172,11 +204,14 @@ impl<'a> TypeResolver<'a> {
                             if let Some(complement) =
                                 self.compute_complement_type(&var_name, &narrowed_type)
                             {
-                                self.result.narrowing_events.push(NarrowingEvent {
+                                self.result.narrow_events.push(NarrowEvent::Narrow {
                                     scope_start: span.lo,
                                     scope_end: span.hi,
                                     var_name,
                                     narrowed_type: complement,
+                                    trigger: NarrowTrigger::Primary(
+                                        PrimaryTrigger::InstanceofGuard(class_name),
+                                    ),
                                 });
                             }
                         }
@@ -187,11 +222,12 @@ impl<'a> TypeResolver<'a> {
             ast::Expr::Ident(ident) => {
                 let var_name = ident.sym.to_string();
                 if let ResolvedType::Known(RustType::Option(inner)) = self.lookup_var(&var_name) {
-                    self.result.narrowing_events.push(NarrowingEvent {
+                    self.result.narrow_events.push(NarrowEvent::Narrow {
                         scope_start: cons_span.lo,
                         scope_end: cons_span.hi,
                         var_name,
                         narrowed_type: inner.as_ref().clone(),
+                        trigger: NarrowTrigger::Primary(PrimaryTrigger::Truthy),
                     });
                     // No complement for truthy: else has Option<T> which is correct
                 }
@@ -223,18 +259,23 @@ impl<'a> TypeResolver<'a> {
                 // typeof early return: if (typeof x === "string") { return; }
                 // → x is NOT string after → complement type
                 if is_eq || is_neq {
-                    if let Some((var_name, positive_type)) = self.extract_typeof_narrowing(bin) {
+                    if let Some((var_name, positive_type, type_str)) =
+                        self.extract_typeof_narrowing(bin)
+                    {
                         let complement_after = if is_eq {
                             self.compute_complement_type(&var_name, &positive_type)
                         } else {
                             Some(positive_type)
                         };
                         if let Some(narrowed_type) = complement_after {
-                            self.result.narrowing_events.push(NarrowingEvent {
+                            self.result.narrow_events.push(NarrowEvent::Narrow {
                                 scope_start: if_end,
                                 scope_end: block_end,
                                 var_name,
                                 narrowed_type,
+                                trigger: NarrowTrigger::EarlyReturnComplement(
+                                    PrimaryTrigger::TypeofGuard(type_str),
+                                ),
                             });
                         }
                         return;
@@ -244,13 +285,17 @@ impl<'a> TypeResolver<'a> {
                 // null check early return: if (x === null) { return; }
                 // → x is non-null after → unwrapped Option
                 if is_eq {
-                    if let Some((var_name, unwrapped_type)) = self.extract_null_check_narrowing(bin)
+                    if let Some((var_name, unwrapped_type, null_kind)) =
+                        self.extract_null_check_narrowing(bin)
                     {
-                        self.result.narrowing_events.push(NarrowingEvent {
+                        self.result.narrow_events.push(NarrowEvent::Narrow {
                             scope_start: if_end,
                             scope_end: block_end,
                             var_name,
                             narrowed_type: unwrapped_type,
+                            trigger: NarrowTrigger::EarlyReturnComplement(
+                                PrimaryTrigger::NullCheck(null_kind),
+                            ),
                         });
                         return;
                     }
@@ -263,18 +308,22 @@ impl<'a> TypeResolver<'a> {
                         (bin.left.as_ref(), bin.right.as_ref())
                     {
                         let var_name = var_ident.sym.to_string();
+                        let class_name = class_ident.sym.to_string();
                         let positive_type = RustType::Named {
-                            name: class_ident.sym.to_string(),
+                            name: class_name.clone(),
                             type_args: vec![],
                         };
                         if let Some(complement) =
                             self.compute_complement_type(&var_name, &positive_type)
                         {
-                            self.result.narrowing_events.push(NarrowingEvent {
+                            self.result.narrow_events.push(NarrowEvent::Narrow {
                                 scope_start: if_end,
                                 scope_end: block_end,
                                 var_name,
                                 narrowed_type: complement,
+                                trigger: NarrowTrigger::EarlyReturnComplement(
+                                    PrimaryTrigger::InstanceofGuard(class_name),
+                                ),
                             });
                         }
                     }
@@ -286,11 +335,12 @@ impl<'a> TypeResolver<'a> {
                     let var_name = ident.sym.to_string();
                     if let ResolvedType::Known(RustType::Option(inner)) = self.lookup_var(&var_name)
                     {
-                        self.result.narrowing_events.push(NarrowingEvent {
+                        self.result.narrow_events.push(NarrowEvent::Narrow {
                             scope_start: if_end,
                             scope_end: block_end,
                             var_name,
                             narrowed_type: inner.as_ref().clone(),
+                            trigger: NarrowTrigger::EarlyReturnComplement(PrimaryTrigger::Truthy),
                         });
                     }
                 }
@@ -301,8 +351,8 @@ impl<'a> TypeResolver<'a> {
         }
     }
 
-    fn extract_typeof_narrowing(&self, bin: &ast::BinExpr) -> Option<(String, RustType)> {
-        // typeof x === "string" → (x, String)
+    fn extract_typeof_narrowing(&self, bin: &ast::BinExpr) -> Option<(String, RustType, String)> {
+        // typeof x === "string" → (x, String, "string")
         let (typeof_expr, type_str) = narrowing_patterns::extract_typeof_and_string(bin)?;
         let var_name = match typeof_expr {
             ast::Expr::Ident(ident) => ident.sym.to_string(),
@@ -316,11 +366,13 @@ impl<'a> TypeResolver<'a> {
             // "object"/"function": need to look up the variable's type to find the
             // matching variant's data type in the union enum
             "object" | "function" => {
-                return self.resolve_typeof_narrowed_type_from_var(&var_name, &type_str);
+                let (name, ty) =
+                    self.resolve_typeof_narrowed_type_from_var(&var_name, &type_str)?;
+                return Some((name, ty, type_str));
             }
             _ => return None,
         };
-        Some((var_name, narrowed_type))
+        Some((var_name, narrowed_type, type_str))
     }
 
     /// Resolves the narrowed type for typeof "object"/"function" by looking up
@@ -434,12 +486,21 @@ impl<'a> TypeResolver<'a> {
         }
     }
 
-    fn extract_null_check_narrowing(&self, bin: &ast::BinExpr) -> Option<(String, RustType)> {
+    fn extract_null_check_narrowing(
+        &self,
+        bin: &ast::BinExpr,
+    ) -> Option<(String, RustType, NullCheckKind)> {
         // x !== null / x !== undefined → remove Option wrapper from x's type
-        let var_expr = if narrowing_patterns::is_null_or_undefined(&bin.right) {
-            bin.left.as_ref()
+        let (var_expr, rhs_is_undefined) = if narrowing_patterns::is_null_or_undefined(&bin.right) {
+            (
+                bin.left.as_ref(),
+                narrowing_patterns::is_undefined_ident(&bin.right),
+            )
         } else if narrowing_patterns::is_null_or_undefined(&bin.left) {
-            bin.right.as_ref()
+            (
+                bin.right.as_ref(),
+                narrowing_patterns::is_undefined_ident(&bin.left),
+            )
         } else {
             return None;
         };
@@ -452,9 +513,11 @@ impl<'a> TypeResolver<'a> {
         // Get current type and unwrap Option
         let current_type = self.lookup_var(&var_name);
         match current_type {
-            ResolvedType::Known(RustType::Option(inner)) => {
-                Some((var_name, inner.as_ref().clone()))
-            }
+            ResolvedType::Known(RustType::Option(inner)) => Some((
+                var_name,
+                inner.as_ref().clone(),
+                classify_null_check(bin.op, rhs_is_undefined),
+            )),
             _ => None,
         }
     }

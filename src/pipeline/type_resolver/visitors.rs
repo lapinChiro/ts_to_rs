@@ -683,7 +683,7 @@ impl<'a> TypeResolver<'a> {
     }
 
     fn visit_if_stmt(&mut self, if_stmt: &ast::IfStmt) {
-        use super::narrowing::block_always_exits;
+        use crate::pipeline::narrowing_patterns::stmt_always_exits;
 
         // Resolve test expression type
         let test_span = Span::from_swc(if_stmt.test.span());
@@ -695,7 +695,7 @@ impl<'a> TypeResolver<'a> {
 
         // Early return narrowing: if the then-block always exits and there's no else,
         // the complement type is valid for the rest of the enclosing block.
-        if if_stmt.alt.is_none() && block_always_exits(&if_stmt.cons) {
+        if if_stmt.alt.is_none() && stmt_always_exits(&if_stmt.cons) {
             if let Some(block_end) = self.current_block_end {
                 let if_end = if_stmt.cons.span().hi.0;
                 self.detect_early_return_narrowing(&if_stmt.test, if_end, block_end);

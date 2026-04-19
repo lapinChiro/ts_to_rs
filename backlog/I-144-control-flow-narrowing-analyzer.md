@@ -1,6 +1,6 @@
 # I-144: Control-flow narrowing analyzer (CFG-based type narrowing infrastructure)
 
-**Status**: Spec stage **v2 revised** (matrix structure revised、Review Checklist #1-#4 [✅]、#5 は T1 で実施)
+**Status**: Implementation stage 進行中 — **T0-T4 完了** (2026-04-19)、T5 着手可能
 **Matrix-driven**: ✅ Yes (Trigger × LHS type × Reset cause × Flow context × **Read context** × Emission)
 **SDCDF 2-stage workflow 適用**: 必須
 **起票日**: 2026-04-19
@@ -17,6 +17,8 @@
   (R3) E 変数 count off-by-one → E5 rollback で 12 に再統一。
   (R4) Policy A NLL 前提が未記述 → Phase 3b に **borrow lifetime 要件 + explicit block scope fallback** 節を追加。
   (R5) F4 loop body / F6 try body / R4 `&&=` / R5 `??=` narrowed の regression ✓ fixture 欠落 — T1 completion criterion (9 ✗ + 3 ✓ 代表) 内だが coverage 強化案として T3 着手後に補充検討 (scope out、lock-in test はこれら cell には既存 snapshot)。
+- **T3 実装完了 (2026-04-19)**: `src/pipeline/narrowing_analyzer/` 新設 (events.rs 360 + classifier.rs 908 + mod.rs 227 + 5 分割 test file 計 2253 行)。scope-aware classifier (VarDecl L-to-R / closure param / block decl shadow) + branch/sequential merge combinator + peel-aware wrapper + unreachable stmt prune + closure/fn/class/object-method descent (outer ident → `ClosureReassign`)。`??=` 各 site に `EmissionHint` (ShadowLet / GetOrInsertWith) を hint-only で算出。`/check_job` × 4 round (deep / deep deep × 3) + `/check_problem` で計 42 defect 発見 → 全解消。
+- **T4 実装完了 (2026-04-19)**: `NarrowingEvent` struct を `NarrowEvent::{Narrow, Reset, ClosureCapture}` enum に migrate、`FileTypeResolution::narrow_events` rename、`NarrowEventRef` borrowed view + `as_narrow()` / `var_name()` accessor 追加、`PrimaryTrigger` + `NarrowTrigger` 2-layer 型で nested `EarlyReturnComplement` を構造的排除。全 consumer (`type_resolver/narrowing.rs`, `visitors.rs`, Transformer) を borrowed view 経由に統一。`block_always_exits` 削除 → `stmt_always_exits` (narrowing_patterns.rs) を single source of truth 化、共通 peel 関数 + 22 unit test 集約。
 
 ## Background
 
@@ -748,35 +750,62 @@ TDD: RED → GREEN → REFACTOR 順。Phase 間は SDCDF spec stage / implementa
 
 ### Implementation Stage (Spec approved 後)
 
-#### T3: `NarrowingAnalyzer` 基盤実装 (Phase 1)
+#### T3: `NarrowingAnalyzer` 基盤実装 (Phase 1) ✅ 完了 (2026-04-19)
 
-- **Work**:
-  - `src/pipeline/narrowing_analyzer.rs` 新規
-  - `NarrowEvent` / `ResetCause` / `NarrowTrigger` / `EmissionHint` enum 定義 (Sub-matrix 3/5 から derive)
-  - `RcContext` enum 定義 (RC1-RC8、`emission-contexts.md` と整合)
-  - CFG basic-block 分解アルゴリズム実装 (関数本体を block に分解)
-  - Per-block narrow state 計算 (entry/exit 伝播、loop fixpoint 考慮)
-  - Unit test: analyzer 単体 (matrix Sub-matrix 1-5 全 cell 相当、~60 test)
-- **Completion criteria**:
-  - Module 実装完了
-  - Unit test 全 pass
-  - 既存 pipeline test regression 0
-- **Depends on**: Spec approved (T0-T2 完了)
+- **Work** (完了):
+  - `src/pipeline/narrowing_analyzer/` 新設 (events.rs 360 + classifier.rs 908 + mod.rs 227 行)
+  - `NarrowEvent` / `ResetCause` / `NarrowTrigger` / `PrimaryTrigger` / `EmissionHint` /
+    `RcContext` enum 定義 (`events.rs`、Sub-matrix 3/5 から derive、RC1-RC8 は
+    `emission-contexts.md` と整合)
+  - Scope-aware classifier (`classifier.rs`): VarDecl L-to-R shadow / closure param shadow /
+    block-level decl shadow / branch merge (`merge_branches`、invalidating 優先 +
+    preserving source order 決定) / sequential merge (`merge_sequential`、invalidating
+    short-circuit) / peel-aware wrapper handling (Paren + 6 TS wrapper: TsAs /
+    TsTypeAssertion / TsNonNull / TsConstAssertion / TsSatisfies / TsInstantiation) /
+    unreachable stmt pruning (`stmt_always_exits` via `narrowing_patterns`) / closure /
+    fn decl / class method / ctor / prop init / static block / object method / getter /
+    setter descent (outer ident mutation → `ResetCause::ClosureReassign`)
+  - `??=` 各 site に対し後続 sibling を classify し `EmissionHint` (`ShadowLet` /
+    `GetOrInsertWith`) を hint-only 算出 (mod.rs `analyze_function` / `classify_nullish_assign`)
+  - Unit test 5 file 分割 (cohesion 基軸): `types_and_combinators.rs` (301 行) +
+    `hints_flat.rs` (450) + `hints_nested.rs` (546) + `scope_and_exprs.rs` (354) +
+    `closures.rs` (602)、計 2253 行
+- **Completion criteria** (達成):
+  - [x] Module 実装完了、5 file に cohesion 基軸で分割 (全 file < 1000 行)
+  - [x] Unit test 全 pass (2771 lib pass、+179 from baseline)
+  - [x] 既存 pipeline test regression 0
+  - [x] `/check_job` × 4 round (deep / deep deep × 3) + `/check_problem` で計 42 defect 解消
+- **Depends on**: Spec approved (T0-T2 完了) ✅
 
-#### T4: `NarrowingEvent` → `NarrowEvent` 拡張 (Phase 1b、breaking change)
+#### T4: `NarrowingEvent` → `NarrowEvent` 拡張 (Phase 1b、breaking change) ✅ 完了 (2026-04-19)
 
-- **Work**:
+- **Work** (完了):
   - `src/pipeline/type_resolution.rs` の `NarrowingEvent` struct を `NarrowEvent` enum に migrate
   - 既存 `FileTypeResolution::narrowing_events: Vec<NarrowingEvent>` を
     `narrow_events: Vec<NarrowEvent>` に rename + type change
-  - Variant 追加: `Narrow{}` (既存 migrate)、`Reset{}`、`ClosureCapture{}`、`CondBranch{}`
-  - **破壊的変更**: `get_type_for_var` 等 consumer の call site を一括更新
-    (Transformer の narrow 取得 API 経由に統一)
-- **Completion criteria**:
-  - enum migration 完了
-  - 全 consumer call site 更新完了
-  - 既存 narrowing 機能 (typeof/instanceof) regression 0
-- **Depends on**: T3
+  - Variant: `Narrow{ var_name, scope_start, scope_end, narrowed_type, trigger }` /
+    `Reset{ var_name, position, cause }` / `ClosureCapture{ var_name, closure_span, outer_narrow }`
+  - `NarrowEventRef` borrowed view + `as_narrow() -> Option<NarrowEventRef<'_>>` /
+    `var_name() -> &str` accessor 追加 (legacy struct field assertion を natural に維持)
+  - `PrimaryTrigger` + `NarrowTrigger` 2-layer 型: `NarrowTrigger::Primary(PrimaryTrigger)` /
+    `NarrowTrigger::EarlyReturnComplement(PrimaryTrigger)` — nested `EarlyReturnComplement` を
+    型レベルで構造排除。`primary()` / `is_early_return_complement()` accessor 提供
+  - 全 consumer 更新: `type_resolver/narrowing.rs` (`detect_narrowing_guard` /
+    `detect_early_return_narrowing` が `NarrowEvent::Narrow` を emit)、`visitors.rs` の
+    `stmt_always_exits` import 更新、Transformer の narrow 取得 API を borrowed view 経由に統一
+  - `block_always_exits` (type_resolver/narrowing.rs) 削除 → `stmt_always_exits`
+    (narrowing_patterns.rs) を single source of truth 化、共通 peel 関数 +
+    22 unit test (`narrowing_patterns::tests`) 集約
+  - Test file 分割: `type_resolver/tests/narrowing/` に `legacy_events.rs` (629) +
+    `trigger_completeness.rs` (372) の 2 file cohesion 分割、`narrow_views` helper で
+    enum-variant destructuring を抽象化
+- **Completion criteria** (達成):
+  - [x] enum migration 完了、`NarrowingEvent` struct 残存 0 (grep 確認)
+  - [x] 全 consumer call site 更新完了
+  - [x] 既存 narrowing 機能 (typeof/instanceof/null check/early-return complement) regression 0
+  - [x] `block_always_exits` / `stmt_always_exits` DRY 違反解消 (`/check_problem` で発見)
+  - [x] narrowing 関連 rustdoc で 0 warning (intra-doc link 修正後)
+- **Depends on**: T3 ✅
 
 #### T5: 既存 `narrowing.rs` を CFG analyzer 経由に移行 (Phase 2)
 
