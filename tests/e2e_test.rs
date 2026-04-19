@@ -13,6 +13,14 @@ use test_helpers::{strip_internal_use_statements, TempFile};
 const SCRIPTS_DIR: &str = "tests/e2e/scripts";
 
 /// Path to the Rust runner Cargo project.
+///
+/// `src/main.rs` inside this directory is a write-only artifact (I-161, same
+/// pattern as I-145 for compile-check): each E2E test invocation writes full
+/// content via `write_with_advancing_mtime` (internally `fs::write`), so the
+/// file is re-created on every run. It is `.gitignore`d. Fresh-clone state
+/// (file absent) is supported because `fs::write` creates the file when absent.
+/// Multi-file E2E tests additionally write `src/<stem>.rs` via `TempFile` which
+/// auto-cleans on drop.
 const RUST_RUNNER_DIR: &str = "tests/e2e/rust-runner";
 
 /// Path to the locally-installed tsx binary.

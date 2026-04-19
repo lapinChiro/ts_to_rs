@@ -655,3 +655,36 @@ fn test_resolve_type_params_in_type_non_named_unchanged() {
         RustType::Any
     );
 }
+
+// ============ I-150: `resolve_new_expr` unregistered class args visit ============
+
+#[test]
+fn test_resolve_new_expr_unregistered_class_visits_args() {
+    // I-150: When `new UnknownClass(expr)` has an unregistered class, the
+    // resolver's else branch must still visit `expr` so that `expr_types`
+    // entries are populated for downstream lookups (DU field binding,
+    // truthy narrowing, etc.). Without this, user TS code like
+    // `throw new Error("..." + s.field)` under no-builtin mode produces
+    // compile error E0609 because `expr_types[s]` is unpopulated.
+    //
+    // Symmetric with `resolve_call_expr` which always visits args.
+    let source = "\
+        function f(a: number, b: number): void {\n\
+            new UnknownClass(a + b);\n\
+        }\n\
+    ";
+    let resolution = super::resolve(source);
+
+    // Find span positions for `a` and `b` identifiers used as operands inside
+    // the new expression arg. Both must be registered in expr_types.
+    let has_a_type = resolution
+        .expr_types
+        .values()
+        .any(|t| matches!(t, ResolvedType::Known(RustType::F64)));
+    assert!(
+        has_a_type,
+        "I-150: `a + b` (arg of `new UnknownClass(...)`) operands must be \
+         visited and registered in expr_types. Current expr_types: {:?}",
+        resolution.expr_types
+    );
+}

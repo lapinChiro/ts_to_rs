@@ -15,8 +15,8 @@
 |------|-----|
 | Hono bench clean | 112/158 (70.9%) |
 | Hono bench errors | 62 |
-| cargo test (lib) | 2591 pass |
-| cargo test (integration) | 122 pass |
+| cargo test (lib) | 2592 pass (I-150 で +1) |
+| cargo test (integration) | 122 pass (i150-du-new-error fixture 追加、snapshot 1 件更新: keyword_types) |
 | cargo test (compile) | 3 pass |
 | cargo test (E2E) | 97 pass |
 | clippy | 0 warnings |
@@ -33,7 +33,8 @@
 
 | PRD | 日付 | サマリ |
 |-----|------|--------|
-| **I-153 + I-154 batch** | 2026-04-19 | switch case body 内 nested bare `break` silent redirect の structural 解消 + 4 internal label (`switch/try_block/do_while/do_while_loop`) を `__ts_` prefix に統一 + 3-entry lint + A-fix (`ast::Stmt::Block` support)。empirical verify: TSX stdout `50/550/55` = Rust stdout `50/550/55` (pre-fix Rust=`0/550/55`)。追加 test: walker unit 19 / block 3 / lint 4 / per-cell E2E i153 13 + i154 3。詳細: [`backlog/I-153-switch-nested-break-label-hygiene.md`](backlog/I-153-switch-nested-break-label-hygiene.md)、report: [`report/i153-switch-nested-break-empirical.md`](report/i153-switch-nested-break-empirical.md) |
+| **I-145 / I-142 Step 4 C-8 / I-150 batch (pre-I-144 cleanup)** | 2026-04-19 | (1) `tests/compile-check/src/lib.rs` を `.gitignore` 追加して artifact tracking 解消、(2) TODO I-048 entry に Cell #10 `.clone()` INTERIM の removal criterion 追加、(3) `resolve_new_expr` 未登録 class else branch に args visit loop 追加 (`resolve_call_expr` と symmetric 化)。unit test +1、integration fixture +1。`keyword-types` snapshot 更新 (副産物: `"..." + x` concat → `format!("{}{}", ..., x)` emission 改善)。詳細は各 PRD が git history で archive |
+| **I-153 + I-154 batch** | 2026-04-19 | switch case body 内 nested bare `break` silent redirect の structural 解消 + 4 internal label (`switch/try_block/do_while/do_while_loop`) を `__ts_` prefix に統一 + 3-entry lint + A-fix (`ast::Stmt::Block` support)。empirical verify: TSX stdout `50/550/55` = Rust stdout `50/550/55` (pre-fix Rust=`0/550/55`)。追加 test: walker unit 19 / block 3 / lint 4 / per-cell E2E i153 13 + i154 3。report: [`report/i153-switch-nested-break-empirical.md`](report/i153-switch-nested-break-empirical.md) |
 | **INV-Step4-1** | 2026-04-19 | I-142 Step 4 C-2 empirical 再分類: rustc E0308 検知の L3 Tier 2 compile error と確認 (L1 silent ではない)。I-144 CFG narrowing で structural 解消予定。report: [`report/i142-step4-inv1-closure-compile.md`](report/i142-step4-inv1-closure-compile.md) |
 | **Phase A Step 4: I-023 + I-021** | 2026-04-17 | `async-await` / `discriminated-union` fixture unskip。try body `!`-typed detection + DU walker single source of truth 化 + scope-aware shadowing。Follow-up I-149〜I-157 を TODO に登録 |
 | **I-SDCDF (Spec-Driven Conversion Dev Framework)** | 2026-04-17 | implementation-first → specification-first への process 転換。Beta 昇格、全 matrix-driven PRD に必須適用。rule: [`.claude/rules/spec-first-prd.md`](.claude/rules/spec-first-prd.md)、reference: `doc/grammar/` |
@@ -54,15 +55,13 @@
 |--------|-------|-----|------|------|
 | 1 | **L2 Struct** | **I-144** umbrella | control-flow narrowing analyzer (I-024 complex / I-025 Option return / I-142 Cell #14 / I-142 Step 4 C-1+C-2 吸収) | C-1 scanner false-positive / C-2 closure body shadow-let 不整合は CFG narrowing で structural 解消。既存 `NarrowingEvent` infra (`pipeline/type_resolution.rs:42-56`) 拡張。scope ~800-1000 行 |
 | 2 | L3 | **Phase A Step 5** (I-026 / I-029 / I-030) | 型 assertion / null as any / any-narrowing enum 変換 | `type-assertion`, `trait-coercion`, `any-type-narrowing` unskip (3 fixture 直接削減) |
-| 3 | L3 | I-142 Step 4 C-5〜C-9 残余 | I-144 に吸収されない小規模 follow-up (`doc/handoff/I-142-step4-followup.md` 参照) | C-9 INV-Step4-2 は git bisect 要、user 操作待ち |
+| 3 | L3 | I-142 Step 4 C-5〜C-7 / C-9 残余 | I-144 非吸収の small cleanup (C-8 は 2026-04-19 完了済、他は `doc/handoff/I-142-step4-followup.md` 参照) | C-9 INV-Step4-2 は git bisect 要、user 操作待ち |
 | 4 | L3 | **I-158** | Non-loop labeled stmt (`L: { ... }` / `L: switch(...)`) support | TS valid syntax の gap。I-153 完了により emission model 安定、依存解消済 |
 | 5 | L3 | **I-159** | 内部 emission 変数の user namespace 衝突 (I-154 の variable 版) | `_try_result` / `_fall` / `_try_break` 等を `__ts_` prefix に統一 + 変数宣言 lint |
 | 6 | L3 | I-143 meta-PRD | `??` 演算子の問題空間完全マトリクス + 8 未解決セル | I-143-a〜h 未着手。I-144 後の topology で一部 (I-143-b any ?? T) は I-050 依存 |
 | 7 | L3 | I-140 | TypeDef::Alias variant 追加 | `type MaybeStr = string \| undefined` alias 経由 Option 認識失敗 |
-| 8 | L3 | I-150 | `resolve_new_expr` 未登録 class args visit | no-builtin 経路 compile error (empirical 確認済) |
-| 9 | L3 | I-050-b | Ident → Value coercion | TypeResolver expr_type と IR 型乖離解消が前提 |
-| 10 | L4 | I-145 | `tests/compile-check/src/lib.rs` gitignore 化 | 毎 commit artifact diff |
-| 11 | L4 | I-160 | Walker defense-in-depth (Expr-embedded Stmt::Break) | 現時点 reachability なし |
+| 8 | L3 | I-050-b | Ident → Value coercion | TypeResolver expr_type と IR 型乖離解消が前提 |
+| 9 | L4 | I-160 | Walker defense-in-depth (Expr-embedded Stmt::Break) | 現時点 reachability なし |
 
 **注**: 本テーブルは着手順。各 PRD で `prd-template` skill + `.claude/rules/problem-space-analysis.md`
 + `.claude/rules/spec-first-prd.md` を適用する。

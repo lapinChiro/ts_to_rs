@@ -10,6 +10,11 @@ use ts_to_rs::{transpile_collecting, transpile_with_builtins};
 mod test_helpers;
 
 /// Path to the fixed Cargo project used for compile checking.
+///
+/// `src/lib.rs` inside this directory is a write-only artifact (I-145): each
+/// test invocation writes full content via `fs::write`, so the file is
+/// re-created on every run. It is `.gitignore`d. Fresh-clone state (file
+/// absent) is supported because `fs::write` creates the file when absent.
 const COMPILE_CHECK_DIR: &str = "tests/compile-check";
 
 /// Mutex to serialize compile tests (they share the same compile-check project).

@@ -803,7 +803,13 @@ impl<'a> TypeResolver<'a> {
                 self.type_param_constraints = prev;
             }
 
-            // Resolve argument expressions (needed for type arg inference)
+            // Resolve argument expressions. Dual role:
+            // (1) populate `expr_types[arg.span]` for downstream lookups (DU field
+            //     binding check, truthy narrowing on ident args, call arg
+            //     resolution chains), and
+            // (2) provide resolved types for `infer_new_expr_type_args` below when
+            //     no explicit type args are given.
+            // Symmetric with the unregistered `else` branch below (I-150).
             if let Some(args) = &new_expr.args {
                 for arg in args {
                     self.resolve_expr(&arg.expr);
@@ -822,6 +828,20 @@ impl<'a> TypeResolver<'a> {
                 type_args: inferred_type_args,
             })
         } else {
+            // I-150: Symmetric with the registered branch above and
+            // `resolve_call_expr` (call_resolution.rs). Visit argument expressions
+            // so that their `expr_types` entries are populated, enabling downstream
+            // lookups (e.g., DU field binding check in member_access.rs, truthy
+            // narrowing on ident args). Without this, `new UnknownClass(expr)`
+            // leaves `expr_types[expr.span]` unpopulated; the transformer then
+            // falls back to non-structured emission, producing compile error
+            // E0609 for DU field access inside `new Error("..." + s.field)` in
+            // no-builtin mode.
+            if let Some(args) = &new_expr.args {
+                for arg in args {
+                    self.resolve_expr(&arg.expr);
+                }
+            }
             ResolvedType::Unknown
         }
     }

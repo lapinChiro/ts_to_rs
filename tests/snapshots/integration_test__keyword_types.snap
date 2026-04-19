@@ -1,5 +1,6 @@
 ---
 source: tests/integration_test.rs
+assertion_line: 105
 expression: output
 ---
 fn acceptAny(x: serde_json::Value) -> serde_json::Value {
@@ -32,5 +33,5 @@ struct Flexible {
 }
 
 fn assertNever(x: std::convert::Infallible) -> Result<std::convert::Infallible, String> {
-    Err(("Unexpected value: ".to_string() + &x).to_string())
+    Err(format!("{}{}", "Unexpected value: ", x).to_string())
 }

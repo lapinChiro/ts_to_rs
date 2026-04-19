@@ -1,11 +1,12 @@
 # TODO
 
-PRD 化前のイシュー一覧。優先度は `todo-prioritization.md` の L1〜L4 レベルで決定し、Tier に反映。
+未解決イシュー一覧。優先度は `.claude/rules/todo-prioritization.md` の L1〜L4 レベルで決定し、Tier に反映。
 Tier 内の記載順序が優先度。根本原因を共有するイシューはクラスタとしてバッチ対応する。
 
 - 各項目には **安定 ID**（`I-001` 等）を付与。新規追加時は最終 ID + 1 を採番
-- 件数は Hono ベンチマーク実測値（最終実行: 2026-04-19、112/158 クリーン、62 エラー。I-153 完了後 bench は不変）
+- 件数は Hono ベンチマーク実測値（最終実行: 2026-04-19、112/158 クリーン、62 エラー）
 - compile_test skip との対応は `plan.md` Phase A 参照
+- 完了項目は本ファイルから削除し、`plan.md`「直近の完了作業」および git history で追跡する
 
 ---
 
@@ -15,10 +16,6 @@ Tier 内の記載順序が優先度。根本原因を共有するイシューは
 該当する項目。他の Tier より先に処理する。
 
 **現状: 該当項目なし** (2026-04-19 時点)。
-
-直近に解消:
-- ~~**I-153 + I-154 batch**~~ — **完了** (2026-04-19、`backlog/I-153-switch-nested-break-label-hygiene.md` close 済)。switch case body 内 nested bare `break` silent redirect を structural 解消 + 4 internal label (`switch/try_block/do_while/do_while_loop`) の `__ts_` prefix hygiene 統一 + 3-entry lint + A-fix (ast::Stmt::Block support)。empirical verify: TSX `f(1,true)=50` = Rust `50`。詳細は plan.md 「直近の完了作業」参照
-- ~~**I-142 Step 4 follow-up C-2**~~ — **empirical 再分類済** (2026-04-19、`report/i142-step4-inv1-closure-compile.md`): rustc が E0308 で検知する L3 Tier 2 compile error であり L1 silent ではない。I-144 CFG narrowing で structural 解消予定
 
 ---
 
@@ -31,9 +28,7 @@ Tier 内の記載順序が優先度。根本原因を共有するイシューは
 - **[I-005]** **型注釈なしオブジェクトリテラル** — OBJECT_LITERAL_NO_TYPE の一部。匿名構造体自動生成
 - **[I-006]** **`.map()` callback 戻り値型の伝播** — OBJECT_LITERAL_NO_TYPE の一部。`propagate_expected` が `Expr::Call` 未処理
 
-OBJECT_LITERAL_NO_TYPE 全体で 28件（最終実行: 2026-04-17）。I-004/I-005/I-006 のサブ分類件数は要再調査。
-
-Phase A Step 4 (2026-04-17) 完了により `async-await` と `discriminated-union` fixture の skip を解消。残 compile_test skip は 10 fixture + 設計制約 2 (effective 10)。
+OBJECT_LITERAL_NO_TYPE 全体で 28件（2026-04-19 bench 実測）。I-004/I-005/I-006 のサブ分類件数は要再調査。
 
 ### RC-2 残り: 所有権・借用モデル
 
@@ -64,11 +59,7 @@ Phase A Step 4 (2026-04-17) 完了により `async-await` と `discriminated-uni
 
 ### compile_test skip 原因（plan.md Phase A Step 2〜7）
 
-- **[I-020]** **クロージャ返却の Box::new ラップ漏れ** — **return/tail は解消済** (Step 3: `wrap_closures_in_box` で body 再帰 walk)。**残存**: (1) let-init 経路 (`let f: Box<dyn Fn> = || ...`) は `convert_var_decl` → `convert_expr` で expected が propagate されず Box wrap 未発動。(2) `Option<Box<dyn Fn>>` return の `Some(closure)` 内部の closure が Box wrap 欠落 (I-147)。compile_test skip: `closures` (I-048 所有権推論: move/FnMut が残存), `functions` (I-319 Vec index move が残存)
-- ~~**[I-021]** **DU switch のデストラクチャ変数 rewrite 不完全**~~ — **解消済** (2026-04-17, Phase A Step 4)。`resolve_expr_inner::Tpl` の inner expression recursion 欠落 (template literal 内の `expr_types` populate 不全) が root cause。併せて DU field access walker を `du_analysis.rs` 単一 source に統合し、全 AST variant (Array / Object / Unary / Await / OptChain / TsAs 系 / Seq / TaggedTpl / New / While / For / Switch / Try / Throw / Labeled) exhaustive に拡張。副次改善として unit variant pattern を `Pattern::UnitStruct` 化
-- **[I-145]** **compile-check write-artifact tracking 整理** [L4] — `tests/compile-check/src/lib.rs` が git tracked ながら compile_test 実行時に上書きされる書き換えアーティファクト。commit のたびに無意味な diff 発生。修正方針: `.gitignore` に追加 + 初期内容が必要なら `tests/compile-check/src/lib.rs.template` + 初回 setup script 経由で生成。I-142 Step 2 で顕在化。
-- **[I-142-b]** ~~**`obj.x ??= d` (FieldAccess LHS NullishAssign)**~~ — **解消済** (2026-04-17)。FieldAccess LHS は `if is_none { assign Some(d) }` (stmt) / `get_or_insert_with` (expr) を emit。Hono 内 2 件 (`this.#req`, `globalThis.crypto`) は TypeResolver の private field / global scope 解決限界で未解消 (後続調査)
-- **[I-142-c]** ~~**`map[k] ??= d` (Index/HashMap LHS NullishAssign)**~~ — **解消済** (2026-04-17)。HashMap Index LHS は `entry(key.clone()).or_insert_with(|| d)` を emit。TypeResolver に HashMap computed index value type 解決を追加。`extract_root_ident` に MethodCall chain 対応 + `or_insert_with`/`entry` を MUTATING_METHODS に追加。Hono 1 件 (`wildcardRegExpCache[path]`) は TypeResolver の module-level scope 解決限界で未解消 (後続調査)
+- **[I-020]** **クロージャ返却 Box::new wrap 漏れ (残 let-init 経路)** — return/tail は解消済 (Step 3 で `wrap_closures_in_box` 導入)。**残存**: (1) let-init 経路 (`let f: Box<dyn Fn> = || ...`) は `convert_var_decl` → `convert_expr` で expected propagate されず Box wrap 未発動。(2) `Option<Box<dyn Fn>>` return の `Some(closure)` 内部 closure の Box wrap 欠落 (I-147)
 - **[I-144]** **control-flow narrowing analyzer (umbrella: I-024 truthy narrowing / I-025 Option return / I-142 narrowing-reset)** — I-024 (`if (x)` where `x: Option<T>` → `if let Some(x) = x`)、I-025 (Option return 暗黙 None)、I-142 の narrowing-reset (`x ??= 0; x = y;` の再 Option 化) が共通して control-flow graph ベースの型 narrowing を要求する。個別に fix するより共通基盤を実装するのが structural。
   - **I-142 Cell #14 lock-in test (🔴 critical — 現状 broken Rust を "正しい" として assert)**: `src/transformer/expressions/tests/nullish_assign.rs::cell14_narrowing_reset_emits_shadow_blocked_by_i144` が現状 `let mut x = x.unwrap_or(0.0);` または `let x = x.unwrap_or(0.0);` の emission を assert しているが、**後続の `x = null;` が compile error を起こす状態を lock-in している** (`let x: f64` に `= None` を代入できない)。I-142 Step 3 D-1 で、この test は「narrowing-reset 検出時に `UnsupportedSyntaxError("nullish-assign with narrowing-reset (I-144)")` を surface する」に書き換えられる予定 (interim surface)。
   - **I-144 完了時の test 更新義務**: 本 PRD 完了時、上記 test を **structural narrowing-reset emission** (shadow-let を使わず `let mut x: Option<f64> = x;` + `x.get_or_insert_with(|| 0.0);` 経路 — x の型は Option<f64> のまま維持し、後続の `x = None` が compile 成功する形) の substring assertion に置き換える必要がある。test 削除は禁止。併せて `nullish-coalescing` fixture に narrowing-reset パターン追加 + E2E script 追加。I-142 Step 3 D-1 の interim surface を structural emission に昇格する形。
@@ -131,12 +122,9 @@ Phase A Step 4 (2026-04-17) 完了により `async-await` と `discriminated-uni
 
   - **本 PRD のスコープ**: 上記 8 セル (I-143-a 〜 I-143-h) + `/check_problem` / matrix audit で追加発見されるセルを、**`problem-space-analysis.md` に従った完全マトリクス enumerate** で処理する。個別セルを部分 fix せず、`??` 全体の問題空間を一度に網羅する。
   - **前提**: I-142 (`??=` NullishAssign) 完了済 (または並行)。`problem-space-analysis.md` 遵守。
-  - **優先度**: I-022 で reported Tier 1 silent は解消済のため、本 PRD は Tier 2 (compile error) + Tier 3 (cosmetic) のまとめ処理。Hono bench 影響は限定的と見込まれるが、「理想実装」の観点で必要。
-  - **起票時点**: 2026-04-14 (I-022 完了後)
+  - **優先度**: 本 PRD は Tier 2 (compile error) + Tier 3 (cosmetic) のまとめ処理 (I-022 で reported Tier 1 silent は解消済)。Hono bench 影響は限定的だが「理想実装」の観点で必要
 
-- ~~**[I-023]** **try/catch + return で unreachable code**~~ — **解消済** (2026-04-17, Phase A Step 4)。`convert_try_stmt` に `!`-typed labeled block 検出を追加 (try body 常時 return + throw/break/continue rewrite 皆無を `try_ends_with_return && !has_break_to_try_block` で判定)。一致するケースで `_try_result` / labeled block / `if let Err` / `unreachable!()` machinery を drop して try body を inline emit
 - **[I-024]** **Option\<T\> 変数の truthy narrowing** — 基本ケース (`if (x)` where `x: Option<T>` → `if let Some(x) = x`) は **動作確認済** (2026-04-17 probe)。compile_test skip: `functions` (I-020 let-init + I-319 が主因)。complex case (multi-block narrowing-reset, typeof guards) は I-144 で構造的に対応
-- **[I-025]** ~~**Option\<T\> 戻り値の暗黙 None 未返却**~~ — **解消済** (Step 3: `append_implicit_none_if_needed`)。if without else / while / for loop の末尾に implicit `None` tail expression を追加。compile_test: `void-type` unskip 済。`keyword-types` は I-146 (`return undefined` on void fn) が残存
 - **[I-026]** **as unknown as T 二段キャスト** — 中間 unknown 消失。compile_test skip: `type-assertion`
 - **[I-028]** **intersection の未使用型パラメータ（E0091）** — `src/pipeline/type_converter/intersections.rs:132-145`。compile_test skip: `intersection-empty-object`
 - **[I-029]** **null as any の非 Option 代入** — compile_test skip: `trait-coercion`
@@ -146,39 +134,9 @@ Phase A Step 4 (2026-04-17) 完了により `async-await` と `discriminated-uni
 - **[I-071]** **ビルトイン型のメソッド impl 生成** — 🔗 I-051。compile_test skip: `instanceof-builtin`
 - **[I-146]** **`return undefined` on void fn が `None` を返す** — `function returnsUndefined(): undefined { return undefined; }` → `fn returnsUndefined() { None }` (compile error: `()` に `Option` を返せない)。TS の `undefined` return type は `()` に変換されるべきだが、`return undefined` が `None` に変換されるため不一致。修正方針: return type が `Unit` (`()`) の場合、`return undefined` を `return;` (empty return) に変換。compile_test skip: `keyword-types`
 - **[I-147]** **`Option<Box<dyn Fn>>` return の `Some(closure)` 内 closure が Box wrap 欠落** — `function f(): Fn | undefined { if (flag) return () => x + 1; }` → `return Some(|| x + 1)` (compile error: `Some(closure)` ≠ `Some(Box<dyn Fn>)`)。`wrap_closures_in_box` は `Stmt::Return(Some(Expr::Closure))` のみ wrap し、`Stmt::Return(Some(FnCall { target: Some, args: [Closure] }))` は未走査。修正方針: `box_wrap_closure` を FnCall(Some, [closure]) のケースにも拡張
-- ~~**[I-148]** **DU field walker が `obj_var` shadowing を考慮しない**~~ — **解消済** (2026-04-17, Phase A Step 4 deep /check_job フィードバック反映)。`collect_du_field_accesses_from_stmts` に scope-aware shadowing tracking を導入: `walk_stmts` で sibling 間の VarDecl shadowing を累積、`For.init` / `ForIn.left` / `ForOf.left` / `CatchClause.param` の binding で body scope を shadow 判定、shadowed なら descendant の collection を抑止。Rust の lexical scope 契約に準拠 (一度 shadow が発生した scope では un-shadow 不可)。6 新規 lock-in test を `tests/du_analysis.rs` に追加
 - **[I-149]** **I-023 short-circuit の catch body drop は async error propagation PRD 導入時に再監査必須** — `src/transformer/statements/error_handling.rs::convert_try_stmt` の noreturn short-circuit は現行の "Promise<T> を非 Result で変換する" モデル下では silent semantic change なし (現行 converter は try body 非 throw で catch runtime 到達不能)。ただし将来 `Promise<T>` → `Result<T, _>` 変換を導入する PRD (I-049 / I-078 / I-127 系) が完了すると、catch body drop で runtime error が silent に失われる。**修正方針**: async error propagation PRD 導入時に本 short-circuit を (a) async 文脈では無効化するか (b) catch body を async closure 経由で保持する方式に切替。**依存**: I-049 (エラー型戦略)、I-078 (async void)、I-127 (fetch)。**優先度**: L4 (現状顕在化なし、依存 PRD 完了時にトリガー)。**発見経緯**: Phase A Step 4 `/check_job` review
-- **[I-150]** **`resolve_new_expr` が未登録 class の args を `resolve_expr` で visit しない (Tier 2 compile error、empirical 確認済)** — `src/pipeline/type_resolver/expressions.rs::resolve_new_expr` (746-826 行) は `new_expr.callee` が `Ident` かつ `self.registry.get(&class_name)` が `None` を返す (例: `Error` が builtin 未ロード時に未登録) 場合、早期 `ResolvedType::Unknown` を返し args を visit しない (args visit loop は 807-811 行の registered block 内にのみ存在)。**empirical 再現** (2026-04-17 手動 verify):
-  ```ts
-  type Shape = { kind: "circle"; radius: number } | { kind: "square"; side: number };
-  function f(s: Shape): string {
-      switch (s.kind) {
-          case "circle": throw new Error("radius=" + s.radius);
-          case "square": return "s=" + s.side;
-      }
-  }
-  ```
-  `ts_to_rs --no-builtin-types` で出力される Rust は `return Err(("radius=".to_string() + &s.radius).to_string())`。rustc が `error[E0609]: no field 'radius' on type 'Shape'` で fail。`ts_to_rs` (builtin あり) では `Error` が registry に乗るため args visit が走り `radius.clone()` が正しく emit され compile 通過。
-  **Regression 分析**: Phase A Step 4 での walker 統合 (I-021) は `ast::Expr::New` の args を collect するようになったため `du_field_bindings` に `radius` が登録される。しかし Transformer の `member_access.rs::convert_member_access` は `get_expr_type(&member.obj)` が `Named("Shape")` を返すことを前提に DU 分岐に入る (`is_du_field_binding` check はその先)。`resolve_new_expr` が args を visit しないと `get_expr_type(&s)` は None を返し、DU 分岐に入らず general `resolve_member_access` に fall through して raw `s.radius` を emit。つまり I-021 walker 完全性が活きない部分的 fallback 状態。
-  **修正方針**: `resolve_new_expr` 下部 (line 824 付近、`else { ResolvedType::Unknown }` arm) に args visit を追加:
-  ```rust
-  } else {
-      if let Some(args) = &new_expr.args {
-          for arg in args {
-              self.resolve_expr(&arg.expr);
-          }
-      }
-      ResolvedType::Unknown
-  }
-  ```
-  `resolve_call_expr` の Ident callee path で registry 未登録でも args visit する symmetric な挙動に揃える。
-  **テスト追加**: `src/pipeline/type_resolver/tests/` に "DU field access inside `new Error(...)` without builtins should populate expr_types for inner ident" を verify する unit test、および compile_test に相当する E2E を追加 (fixture `tests/e2e/scripts/du_new_expr_arg.ts` 新規)。
-  **優先度**: L3 (Tier 2 compile error、Hono では `throw new Error(...)` を case body 内で書く pattern の頻度が低いため bench 影響は現行ゼロだが、user 記述次第で顕在化)。
-  **発見経緯**: Phase A Step 4 `/check_job` deep review type-design audit + 手動 trace (reviewer 指摘の "downstream 完全性" verify で2026-04-17 に再現確認)
-- **[I-151]** **`try_convert_tagged_enum_switch` の `is_unit_variant = variant_fields.get(v).map(..).unwrap_or(false)` が registry inconsistency に brittle** — `src/transformer/statements/switch.rs:356-378`。`string_values` にあり `variant_fields` に無い variant (registry 構築側 inconsistency) のとき、現在は `unwrap_or(false)` で Struct pattern `V { .. }` を emit する。Pre-my-PRD と同一動作で regression はないが、registry 側が future invariant を守らなければ silent semantic mismatch を招く。**修正方針**: `unwrap_or(false)` を `unwrap_or_else(|| { return Ok(None); })` 相当 (情報不足時は normal switch fallback) に変更、もしくは registry で `variants` と `variant_fields` の同期 invariant を assertion / type レベルで enforce。**優先度**: L4 (現状顕在化なし、pre-existing 挙動保持)。**発見経緯**: Phase A Step 4 `/check_job` deep review の type-design audit
-- ~~**[I-153]** switch emission の nested bare `break` silent redirect~~ — **完了** (2026-04-19、`backlog/I-153-switch-nested-break-label-hygiene.md` close 済)。`src/transformer/statements/switch.rs` に `rewrite_nested_bare_break_in_stmts` walker 追加 (14 IR Stmt variant exhaustive match) + 5 switch emission path (DU / typeof / string-enum / clean-match / fallthrough) で conditional `'__ts_switch:` labeled block wrap。empirical: TSX `f(1,true)=50` = Rust `50` (`report/i153-switch-nested-break-empirical.md`)。13 per-cell E2E fixture (`tests/e2e/scripts/i153/`) + 19 unit test で matrix 完全 lock-in。併せて A-fix (ast::Stmt::Block support、`convert_stmt` に arm 追加 + `is_case_terminated` Block peek-through)。I-154 batch 処理
-- ~~**[I-154]** `'try_block` label が user label と衝突する risk~~ — **完了** (2026-04-19、I-153 PRD 内で batch 処理)。4 internal label を `__ts_` prefix 統一 (`switch` → `__ts_switch`、`try_block` → `__ts_try_block`、`do_while` → `__ts_do_while`、`do_while_loop` → `__ts_do_while_loop`)。3-entry lint (`Stmt::Labeled` 宣言 / `Stmt::Break` 参照 / `Stmt::Continue` 参照) + defense-in-depth lint @ `convert_labeled_stmt` で user label の `__ts_*` prefix 使用を構造的に block。3 user-collision E2E fixture (`tests/e2e/scripts/i154/user-{try_block,do_while,do_while_loop}-label.ts`) で正常動作検証済
-- **[I-155]** **`TryBodyRewrite::rewrite` が body-bearing Expression (Block/Match/If in Stmt::Expr/TailExpr/Return/Let::init) に非再帰 (defense-in-depth)** — 現時点では throw が `Stmt::Return(Some(Err(...)))` 以外の位置に現れる path がないため silent change 未発生だが、将来 `throw expression` 対応や TailExpr に Err が置かれるパイプライン拡張で regression source になりうる。`src/transformer/statements/error_handling.rs::TryBodyRewrite::rewrite` の fallback arm (`other => result.push(other)`) に取り込まれる stmts (`Stmt::Let`, `Stmt::Expr`, `Stmt::TailExpr`, `Stmt::Return(Some)`) の expression 内部に `Expr::Block(body)` / `Expr::Match { arms }` / `Expr::If { then_body, else_body }` が含まれていれば、それらの body 内 `Stmt::Return(Some(Err(...)))` は不可視。**修正方針**: Expression walker (`fn visit_expr_for_throws`) を追加し、`Expr::Block` / `Expr::Match` / `Expr::If` / `Expr::IfLet` の body を recursive に scan、`Stmt::Return(Some(Expr::FnCall { target: BuiltinVariant::Err, .. }))` を検出したら `has_throw = true` を set。ただし break 'try_block への rewrite は expression 文脈では意味を成さないため、`has_throw` flag の正確化のみを目的とする (短絡判定の sound 化)。**優先度**: L4 (defense-in-depth、現時点 reachability なし)。**発見経緯**: Phase A Step 4 deep /check_job
+- **[I-151]** **`try_convert_tagged_enum_switch` の `is_unit_variant = variant_fields.get(v).map(..).unwrap_or(false)` が registry inconsistency に brittle** — `src/transformer/statements/switch.rs:502-510`。`string_values` にあり `variant_fields` に無い variant (registry 構築側 inconsistency) のとき、現在は `unwrap_or(false)` で Struct pattern `V { .. }` を emit する。Pre-existing 挙動で regression はないが、registry 側が future invariant を守らなければ silent semantic mismatch を招く。**修正方針**: `unwrap_or(false)` を `unwrap_or_else(|| { return Ok(None); })` 相当 (情報不足時は normal switch fallback) に変更、もしくは registry で `variants` と `variant_fields` の同期 invariant を assertion / type レベルで enforce。**優先度**: L4 (現状顕在化なし)。**発見経緯**: Phase A Step 4 `/check_job` deep review の type-design audit
+- **[I-155]** **`TryBodyRewrite::rewrite` が body-bearing Expression (Block/Match/If in Stmt::Expr/TailExpr/Return/Let::init) に非再帰 (defense-in-depth)** — 現時点では throw が `Stmt::Return(Some(Err(...)))` 以外の位置に現れる path がないため silent change 未発生だが、将来 `throw expression` 対応や TailExpr に Err が置かれるパイプライン拡張で regression source になりうる。`src/transformer/statements/error_handling.rs::TryBodyRewrite::rewrite` (L295) の fallback arm (`other => result.push(other)`) に取り込まれる stmts (`Stmt::Let`, `Stmt::Expr`, `Stmt::TailExpr`, `Stmt::Return(Some)`) の expression 内部に `Expr::Block(body)` / `Expr::Match { arms }` / `Expr::If { then_body, else_body }` が含まれていれば、それらの body 内 `Stmt::Return(Some(Err(...)))` は不可視。**修正方針**: Expression walker (`fn visit_expr_for_throws`) を追加し、`Expr::Block` / `Expr::Match` / `Expr::If` / `Expr::IfLet` の body を recursive に scan、`Stmt::Return(Some(Expr::FnCall { target: BuiltinVariant::Err, .. }))` を検出したら `has_throw = true` を set。ただし `break '__ts_try_block` への rewrite は expression 文脈では意味を成さないため、`has_throw` flag の正確化のみを目的とする (短絡判定の sound 化)。**優先度**: L4 (defense-in-depth、現時点 reachability なし)。🔗 I-160 (I-153 walker 同型の defense-in-depth)。**発見経緯**: Phase A Step 4 deep /check_job
 - **[I-156]** **Phase A Step 4 PRD matrix に対して per-cell E2E fixture (`tests/e2e/scripts/phase-a-step-4/<cell-id>.ts`) が未作成** — `backlog/phase-a-step-4-du-and-try-catch.md` (close 済) の Spec-Stage Review Checklist の "E2E readiness" 項で、DU field access の各 expression context (16 cell 以上) に対する per-cell E2E fixture を `tests/e2e/scripts/phase-a-step-4/` 配下に配置することが要件として記載されていたが、実装時に既存 fixture (`tests/e2e/scripts/discriminated_union.ts` + `async_await.ts`) の拡張で代替した (`spec-first-prd.md` の Transitional 条項に依拠)。結果、以下 context の matrix cell で lock-in は unit test (`src/pipeline/type_resolver/tests/du_analysis.rs`) に留まり、**runtime stdout一致による oracle grounding が欠落**:
   - Array literal inside case body (`return [s.radius];`)
   - Object literal inside case body (`return { r: s.radius };`)
@@ -197,7 +155,7 @@ Phase A Step 4 (2026-04-17) 完了により `async-await` と `discriminated-uni
   - Assign target (member LHS, `s.radius = 0`)
   - Shadowing 6 variant (for-of / for-in / catch param / VarDecl shadow / C-style for init / variable binding before use)
   **修正方針**: `tests/e2e/scripts/phase-a-step-4/` ディレクトリを作成、上記 cell ごとに独立 TS fixture を配置 (1 fixture 1 cell)、`scripts/record-cell-oracle.sh` で tsc 出力を oracle として記録、`tests/e2e_test.rs` に parametric runner を追加。各 cell で "Rust 生成結果の stdout が tsc/tsx 出力と一致" を assert。**優先度**: L3 (SDCDF 完了条件の一部、unit test で AST walker 検証は済だが runtime 等価性の oracle grounding が未確保)。**発見経緯**: Phase A Step 4 `/check_problem` 振り返りで PRD 要件対応の穴を確認
-- **[I-157]** **`Stmt::Match` の exhaustiveness が IR 型レベルで表現されていない (ends_with_return の implicit assumption)** — `src/transformer/statements/error_handling.rs::ends_with_return` の `Stmt::Match` arm (244-249 行) は `arms.iter().all(|a| ends_with_return(&a.body))` で "全 arm body が return 終端なら exhaustive かつ終端" と判断するが、IR の `Stmt::Match { arms: Vec<MatchArm> }` は non-exhaustive match (wildcard 欠落、partial variant coverage) を物理的に表現可能な型構造。現状は "Transformer が exhaustive match のみ emit + Rust compiler の exhaustiveness check" の間接保証に依存しており、型レベルで担保されていない。Transformer 内で将来 non-exhaustive match を emit する経路が追加された場合、`ends_with_return` が誤判定し I-023 short-circuit が silent に catch body を drop する risk。**修正方針**: (a) 最小変更: `Stmt::Match` の module-level doc に "Transformer は必ず exhaustive match (wildcard 含む or 全 variant 列挙) を生成する" contract を明記、(b) 中規模: `Stmt::Match` に `has_wildcard: bool` field を追加し `ends_with_return` で `has_wildcard && arms.iter().all(...)` を要求、(c) 構造変更: `NonEmptyVec<MatchArm>` + 末尾 arm を wildcard に限定する tagged enum。**優先度**: L4 (現時点 silent path なし、defense-in-depth)。**発見経緯**: Phase A Step 4 deep /check_job type-design audit
+- **[I-157]** **`Stmt::Match` の exhaustiveness が IR 型レベルで表現されていない (ends_with_return の implicit assumption)** — `src/transformer/statements/error_handling.rs::ends_with_return` (L250) の `Stmt::Match` arm (L263-266) は `arms.iter().all(|a| ends_with_return(&a.body))` で "全 arm body が return 終端なら exhaustive かつ終端" と判断するが、IR の `Stmt::Match { arms: Vec<MatchArm> }` は non-exhaustive match (wildcard 欠落、partial variant coverage) を物理的に表現可能な型構造。現状は "Transformer が exhaustive match のみ emit + Rust compiler の exhaustiveness check" の間接保証に依存しており、型レベルで担保されていない。Transformer 内で将来 non-exhaustive match を emit する経路が追加された場合、`ends_with_return` が誤判定し I-023 short-circuit が silent に catch body を drop する risk。**修正方針**: (a) 最小変更: `Stmt::Match` の module-level doc に "Transformer は必ず exhaustive match (wildcard 含む or 全 variant 列挙) を生成する" contract を明記、(b) 中規模: `Stmt::Match` に `has_wildcard: bool` field を追加し `ends_with_return` で `has_wildcard && arms.iter().all(...)` を要求、(c) 構造変更: `NonEmptyVec<MatchArm>` + 末尾 arm を wildcard に限定する tagged enum。**優先度**: L4 (現時点 silent path なし、defense-in-depth)。**発見経緯**: Phase A Step 4 deep /check_job type-design audit
 - **[I-152]** **`du_analysis` pub(crate) visibility は pipeline boundary を弱化する** — `src/pipeline/type_resolver/mod.rs:8` で `du_analysis` を `pub(crate)` 公開し、Transformer (`src/transformer/statements/switch.rs`) が TypeResolver 配下の module を直接 import している。**pipeline-integrity.md** の dependency direction (Transformer → IR ← Generator) および TypeResolver は FileTypeResolution immutable data 経由のみ Transformer に供給する精神と不整合。`collect_du_field_accesses_from_stmts` は stateless pure walker であり、「TypeResolver の internal」ではなく「共有 AST utility」として位置すべき。**修正方針**: (a) 最小変更: `pub(crate) use du_analysis::collect_du_field_accesses_from_stmts` で関数のみ re-export し module 自体は `pub(super)` に戻す、または (b) 構造変更: `src/ast_utils/du_field_walk.rs` 等 neutral な module へ切り出し TypeResolver と Transformer が共に pure helper として import。**優先度**: L4 (design integrity、現在の structural gap は functional には影響なし)。**発見経緯**: Phase A Step 4 `/check_job` deep review の type-design audit
 - **[I-158]** **Non-loop labeled stmt の support (`L: { ... }` / `L: switch(...) {}`)** — 現状 `convert_labeled_stmt` (`src/transformer/statements/loops.rs:295`) が non-loop body (Block / Switch) を `UnsupportedSyntaxError("label on non-loop statement")` で reject。TS は `L: { break L; }` / `L: switch(x) { case 1: break L; }` を valid とする。project purpose「全 valid TS → 等価 Rust」上の gap。
 
@@ -232,8 +190,8 @@ Phase A Step 4 (2026-04-17) 完了により `async-await` と `discriminated-uni
   - **emission site 一覧** (2026-04-19 grep):
     - `_try_result` — `error_handling.rs:93` (try-catch body)
     - `_try_break` — `error_handling.rs:108` (try body 内 bare break)
-    - `_try_continue` — `error_handling.rs:115` (try body 内 bare continue)
-    - `_fall` — `switch.rs:732` (fallthrough path)
+    - `_try_continue` — `error_handling.rs:116` (try body 内 bare continue)
+    - `_fall` — `switch.rs:738` (fallthrough path)
     - `_finally_guard` — `error_handling.rs:25` (finally emission、scopeguard)
     - `_old` — `assignments.rs:312` (postfix i++ emission)
     - `_e` — `error_handling.rs:59` (catch param default)
@@ -491,13 +449,20 @@ Phase A Step 4 (2026-04-17) 完了により `async-await` と `discriminated-uni
 - **[I-046]** **カウンタベース命名の順序依存性** — `src/pipeline/synthetic_registry/mod.rs:28-31`。`struct_counter` / `synthetic_counter` の値はファイル処理順に依存。dedup ヒット時は同一名を返すため構造的同値性は保たれるが、初回登録の名前がビルドごとに異なりうる。現時点で実害なし。incremental compilation やキャッシュ導入時に問題化する可能性
 - **[I-047]** **API 表面積の最小化** — `pub fn` → `pub(crate) fn`
 - **[I-048]** **所有権推論（全体設計）** — 全 clone → ライフタイム分析。RC-2 の根本解決
+  - **Interim consumers (I-048 完了時に置換必要な conservative `.clone()` emission)**:
+    - `src/transformer/expressions/assignments.rs` の NullishAssign arm の
+      `Identity` strategy — Cell #10 (non-nullable !Copy LHS × Expr context)。
+      現行は無条件 `.clone()`。I-048 の move-vs-clone 動的選択が landed したら、
+      後続 `ident` 使用の有無で move を選択 (allocation 削減)。
+      **置換確認用 lock-in test**: `cell10_non_nullable_non_copy_expr_emits_clone`
+      を「ideal output (move / clone 動的選択)」に書き換えること。
+      背景: I-142 PRD の Step 3 D-5 / Step 4 C-8 参照。
 - **[I-049]** **エラー型戦略** — String 固定 → thiserror/anyhow
-- **[I-050]** **Any coercion umbrella PRD 起票済** (`backlog/I-050-any-coercion-umbrella.md`) — `serde_json::Value` ⇄ {String/f64/bool/Option/Vec/Named struct/enum} の全 context coercion を umbrella 化。依存する下流: I-142 Cell #5/#9, I-143-b, I-029, I-030。typeof/instanceof 未使用 Any も本 umbrella で扱う
-  - **I-050-a 完了** (2026-04-17): primitive Lit (Str/Num/Bool) → Value coercion (let-init + return context)。`convert_expr_with_expected` に `serde_json::Value::from()` wrap 追加。E2E 6 cell green
-  - **I-050-b 未着手**: Ident → Value coercion。TypeResolver の expr_type が TS semantic 型を返し IR 型と乖離するケース (`as` cast 経由等) の解消が前提。I-050-a Pilot で発見された scope-out 項目
-  - **I-142 lock-in test (blocked surface)**: I-142 Cell #5 (stmt) / Cell #9 (expr) は本 umbrella 依存で blocked。`src/transformer/expressions/tests/nullish_assign.rs::cell5_any_lhs_stmt_is_blocked_by_i050` と `cell9_any_lhs_expr_is_blocked_by_i050` が `kind` に `"nullish-assign on Any LHS (I-050"` を含む `UnsupportedSyntaxError` を assert (emission 本体は `src/transformer/statements/nullish_assign.rs::pick_strategy` の `RustType::Any => NullishAssignStrategy::BlockedByI050` と `convert_assign_expr` の対称 arm)。
-  - **I-050 完了時の test 更新義務**: 上記 2 lock-in test は「blocked surface」を pin しているだけで ideal 出力を assert していない。I-050 下位 PRD (特に `??= RHS` context を含む下位 PRD) 完了時は、本 test を **ideal 出力** (Cell #5: `if x.is_null() { x = Value::from("def"); }` 相当、Cell #9: `{ if x.is_null() { x = Value::from("def"); } x.clone() }` 相当) の substring assertion に置き換える。test 削除は禁止。併せて `pick_strategy` の `BlockedByI050` strategy を削除し、Any 専用 `AnyRuntimeCheck` strategy に置き換える (現 enum variant は interim; 設計は I-050 umbrella の主要 design point)。`nullish-coalescing` fixture に `any` LHS ケース追加 + E2E script 追加。
-  - **I-143-b (`any ?? T`) も同 umbrella 依存**: `Option<Value>::unwrap_or_else(|| T)` 型不一致を runtime-null-check-aware emission で解消する時、本 umbrella の `coerce_to_any` / `coerce_from_any` helper を共有。
+- **[I-050]** **Any coercion umbrella** (`backlog/I-050-any-coercion-umbrella.md`) — `serde_json::Value` ⇄ {String/f64/bool/Option/Vec/Named struct/enum} の全 context coercion を umbrella 化。下位 PRD:
+  - **I-050-b**: Ident → Value coercion。TypeResolver の expr_type が TS semantic 型を返し IR 型と乖離するケース (`as` cast 経由等) の解消が前提
+  - **I-142 blocked cells**: Cell #5 (stmt) / Cell #9 (expr) が本 umbrella 依存で blocked surface。lock-in test (`cell5_any_lhs_stmt_is_blocked_by_i050` / `cell9_any_lhs_expr_is_blocked_by_i050`) が `UnsupportedSyntaxError` を assert (emission: `pick_strategy` の `RustType::Any => NullishAssignStrategy::BlockedByI050`)
+  - **完了時の test 更新義務**: 上記 blocked lock-in test を ideal 出力 (Cell #5: `if x.is_null() { x = Value::from("def"); }` / Cell #9: `{ if x.is_null() { x = Value::from("def"); } x.clone() }`) の substring assertion に置換、`BlockedByI050` strategy を `AnyRuntimeCheck` に置換、`nullish-coalescing` fixture に `any` LHS ケース追加
+  - **I-143-b 統合**: `any ?? T` の `Option<Value>::unwrap_or_else(|| T)` 型不一致も本 umbrella の `coerce_to_any` / `coerce_from_any` helper で解消
 - **[I-051]** **フィールド名の IR サニタイズ不一致** — I-071 で顕在化見込み
 - **[I-052]** **builtin types と user-defined types の名前衝突** — CLI デフォルトで builtin types を読み込む。Web Streams API の `Transformer` interface 等がユーザー定義と名前衝突すると `TypeRegistry::merge` でマージされ不正な判定。`merge_with_builtin_preservation`（`src/registry/mod.rs:709`）で部分対策あるが不完全。根本対策: ユーザー定義がビルトインを上書きするマージ戦略が必要
 - **[I-053]** **Promise unwrap + Unit 除去パターンの DRY 化** — `.map(|ty| ty.unwrap_promise()).and_then(...)` パターンが 3 箇所に存在。コンテキスト差により共有すると結合度が上がるため現時点では許容。`RustType::unwrap_promise_to_return_type()` method として統合を検討
@@ -603,7 +568,7 @@ Phase A Step 4 (2026-04-17) 完了により `async-await` と `discriminated-uni
 
 ## 保留
 
-- **[I-126]** コンパイルテストのスキップ解消 — 各原因の修正が前提。skip 14 fixture + permanent 2 (effective 12 + 設計制約 2)。Step 0-1 で 5 解消、Step 3 で void-type 解消、nullish-coalescing は pre-Step-3 で解消。詳細は `plan.md` Phase A 参照
+- **[I-126]** コンパイルテストのスキップ解消 — 各原因の修正が前提。effective residual 10 fixture + 設計制約 4 (2026-04-19 時点)。詳細は `plan.md` Phase A 参照
 - **[I-127]** HTTP E2E テスト基盤 + fetch 変換 — I-017 が前提
 
 ## スコープ外
