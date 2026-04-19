@@ -122,7 +122,7 @@ impl<'a> Transformer<'a> {
             let catch_ends_with_return = ends_with_return(&catch_body);
 
             result.push(Stmt::LabeledBlock {
-                label: "try_block".to_string(),
+                label: "__ts_try_block".to_string(),
                 body: expanded_body,
             });
 
@@ -304,7 +304,7 @@ impl TryBodyRewrite {
                         value: Box::new(expr.clone()),
                     }));
                     result.push(Stmt::Break {
-                        label: Some("try_block".to_string()),
+                        label: Some("__ts_try_block".to_string()),
                         value: None,
                     });
                 }
@@ -319,7 +319,7 @@ impl TryBodyRewrite {
                         value: Box::new(Expr::BoolLit(true)),
                     }));
                     result.push(Stmt::Break {
-                        label: Some("try_block".to_string()),
+                        label: Some("__ts_try_block".to_string()),
                         value: None,
                     });
                 }
@@ -331,7 +331,7 @@ impl TryBodyRewrite {
                         value: Box::new(Expr::BoolLit(true)),
                     }));
                     result.push(Stmt::Break {
-                        label: Some("try_block".to_string()),
+                        label: Some("__ts_try_block".to_string()),
                         value: None,
                     });
                 }
@@ -433,7 +433,7 @@ impl TryBodyRewrite {
                 // inner try to our outer `_try_result`, leaking exceptions
                 // past the inner catch.
                 Stmt::LabeledBlock { label, body } => {
-                    if label == "try_block" {
+                    if label == "__ts_try_block" {
                         result.push(Stmt::LabeledBlock { label, body });
                     } else {
                         result.push(Stmt::LabeledBlock {

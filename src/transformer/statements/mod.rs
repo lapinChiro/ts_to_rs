@@ -18,9 +18,32 @@ use swc_ecma_ast as ast;
 use crate::ir::{RustType, Stmt};
 use crate::pipeline::type_converter::convert_type_for_position;
 use crate::transformer::Transformer;
-use crate::transformer::{extract_pat_ident_name, TypePosition};
+use crate::transformer::{extract_pat_ident_name, TypePosition, UnsupportedSyntaxError};
 use mutability::mark_mutated_vars;
 use nullish_assign::fuse_nullish_assign_shadow_lets;
+
+/// I-154: The `__ts_` prefix namespace is reserved for ts_to_rs internal label
+/// emission (`__ts_switch`, `__ts_try_block`, `__ts_do_while`, `__ts_do_while_loop`).
+/// User labels starting with `__ts_` are rejected at all 3 label-introducing /
+/// label-referencing sites (`Stmt::Labeled` declaration, labeled `Stmt::Break`,
+/// labeled `Stmt::Continue`) to prevent silent collision with internal labels.
+///
+/// SWC parser accepts `break undefined_label;` (tsx catches it with "Undefined label"
+/// syntax error, but SWC does not). Without lint on labeled break/continue, user
+/// code writing `break __ts_switch;` (even unintentionally) would silently target
+/// our internal labeled block.
+///
+/// Returns `Err(UnsupportedSyntaxError)` if `label_name` starts with `__ts_`.
+pub(crate) fn check_ts_internal_label_namespace(label: &ast::Ident) -> Result<()> {
+    if label.sym.as_ref().starts_with("__ts_") {
+        return Err(UnsupportedSyntaxError::new(
+            "label names starting with `__ts_` are reserved for ts_to_rs internal emission",
+            label.span,
+        )
+        .into());
+    }
+    Ok(())
+}
 
 /// Converts an SWC [`ast::Stmt`] into an IR [`Stmt`].
 ///
@@ -96,14 +119,25 @@ impl<'a> Transformer<'a> {
                 Err(_) => self.convert_for_stmt_as_loop(for_stmt, return_type),
             },
             ast::Stmt::Break(break_stmt) => {
+                // I-154: reject `break __ts_X;` references (see `check_ts_internal_label_namespace`).
+                if let Some(label) = &break_stmt.label {
+                    check_ts_internal_label_namespace(label)?;
+                }
                 let label = break_stmt.label.as_ref().map(|l| l.sym.to_string());
                 Ok(vec![Stmt::Break { label, value: None }])
             }
             ast::Stmt::Continue(cont_stmt) => {
+                // I-154: reject `continue __ts_X;` references.
+                if let Some(label) = &cont_stmt.label {
+                    check_ts_internal_label_namespace(label)?;
+                }
                 let label = cont_stmt.label.as_ref().map(|l| l.sym.to_string());
                 Ok(vec![Stmt::Continue { label }])
             }
             ast::Stmt::Labeled(labeled_stmt) => {
+                // I-154: reject `__ts_X: <body>` declarations
+                // (also checked inside convert_labeled_stmt, but early-fail here).
+                check_ts_internal_label_namespace(&labeled_stmt.label)?;
                 Ok(vec![self.convert_labeled_stmt(labeled_stmt, return_type)?])
             }
             ast::Stmt::DoWhile(do_while) => Ok(vec![self.convert_do_while_stmt(
@@ -117,6 +151,14 @@ impl<'a> Transformer<'a> {
             }
             ast::Stmt::Switch(switch_stmt) => self.convert_switch_stmt(switch_stmt, return_type),
             ast::Stmt::ForIn(for_in) => Ok(vec![self.convert_for_in_stmt(for_in, return_type)?]),
+            // I-153 T0: Bare `{ ... }` block stmt (e.g., `case 1: { const x = 1; return x; }`).
+            // TS allows block stmts at any stmt position. Flatten into the parent's
+            // stmt sequence; enclosing Rust scope (match arm / fn body / if body) already
+            // provides a `{ }` Rust block. Valid TS with block-scoped `const`/`let` keeps
+            // equivalent semantics because parent scope contains the vars only until the
+            // enclosing Rust block ends. Block-scope violations (`{ const x = 1; } x;`)
+            // are ill-formed TS (tsc errors) and out of scope per project purpose.
+            ast::Stmt::Block(block) => self.convert_stmt_list(&block.stmts, return_type),
             ast::Stmt::Decl(ast::Decl::TsInterface(_) | ast::Decl::TsTypeAlias(_)) => Ok(vec![]),
             ast::Stmt::Empty(_) => Ok(vec![]),
             _ => Err(anyhow!("unsupported statement: {:?}", stmt)),

@@ -339,7 +339,7 @@ fn test_generate_labeled_block_simple_body_outputs_labeled_block() {
         params: vec![],
         return_type: None,
         body: vec![Stmt::LabeledBlock {
-            label: "try_block".to_string(),
+            label: "__ts_try_block".to_string(),
             body: vec![Stmt::Expr(Expr::FnCall {
                 target: CallTarget::Free("do_something".to_string()),
                 args: vec![],
@@ -348,7 +348,7 @@ fn test_generate_labeled_block_simple_body_outputs_labeled_block() {
     };
     let expected = "\
 fn f() {
-    'try_block: {
+    '__ts_try_block: {
         do_something();
     }
 }";
@@ -366,7 +366,7 @@ fn test_generate_break_with_label_and_value_outputs_break_label_value() {
         params: vec![],
         return_type: None,
         body: vec![Stmt::Break {
-            label: Some("try_block".to_string()),
+            label: Some("__ts_try_block".to_string()),
             value: Some(Expr::FnCall {
                 target: CallTarget::BuiltinVariant(crate::ir::BuiltinVariant::Err),
                 args: vec![Expr::MethodCall {
@@ -379,7 +379,7 @@ fn test_generate_break_with_label_and_value_outputs_break_label_value() {
     };
     let expected = "\
 fn f() {
-    break 'try_block Err(\"error\".to_string());
+    break '__ts_try_block Err(\"error\".to_string());
 }";
     assert_eq!(generate(&[item]), expected);
 }

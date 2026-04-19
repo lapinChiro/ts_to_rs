@@ -259,3 +259,76 @@ fn test_convert_stmt_for_loop_multiple_declarators() {
         other => panic!("expected Let for len, got {:?}", other),
     }
 }
+
+// ============ I-154 T6: `__ts_` prefix label namespace lint tests ============
+//
+// User labels starting with `__ts_` are reserved for ts_to_rs internal emission
+// (`__ts_switch`, `__ts_try_block`, `__ts_do_while`, `__ts_do_while_loop`).
+// The lint fires at 3 entry points: labeled stmt declaration, labeled break,
+// labeled continue.
+
+#[test]
+fn i154_labeled_stmt_rejects_ts_internal_prefix() {
+    let src = "function f() { __ts_foo: while (true) { break; } }";
+    let result = crate::transpile_collecting(src);
+    assert!(
+        result.is_err() || {
+            if let Ok((_rust, unsupported)) = &result {
+                unsupported.iter().any(|u| u.kind.contains("__ts_"))
+            } else {
+                false
+            }
+        },
+        "expected UnsupportedSyntaxError for `__ts_foo:` labeled stmt, got {result:?}"
+    );
+}
+
+#[test]
+fn i154_labeled_break_rejects_ts_internal_prefix() {
+    // SWC accepts undefined labels; tsx would reject with "Undefined label"
+    // syntax error, but we lint directly to prevent collision with internal labels.
+    let src = "function f() { for (;;) { break __ts_switch; } }";
+    let result = crate::transpile_collecting(src);
+    assert!(
+        result.is_err() || {
+            if let Ok((_rust, unsupported)) = &result {
+                unsupported.iter().any(|u| u.kind.contains("__ts_"))
+            } else {
+                false
+            }
+        },
+        "expected UnsupportedSyntaxError for `break __ts_switch;`, got {result:?}"
+    );
+}
+
+#[test]
+fn i154_labeled_continue_rejects_ts_internal_prefix() {
+    let src = "function f() { for (;;) { continue __ts_do_while; } }";
+    let result = crate::transpile_collecting(src);
+    assert!(
+        result.is_err() || {
+            if let Ok((_rust, unsupported)) = &result {
+                unsupported.iter().any(|u| u.kind.contains("__ts_"))
+            } else {
+                false
+            }
+        },
+        "expected UnsupportedSyntaxError for `continue __ts_do_while;`, got {result:?}"
+    );
+}
+
+#[test]
+fn i154_non_prefixed_user_labels_accepted() {
+    // Sanity: ordinary user labels should NOT trigger the lint.
+    let src = "function f() { outer: for (;;) { break outer; } }";
+    let result = crate::transpile_collecting(src);
+    match result {
+        Ok((_, unsupported)) => {
+            assert!(
+                !unsupported.iter().any(|u| u.kind.contains("__ts_")),
+                "non-prefixed user label should not trigger the lint: {unsupported:?}"
+            );
+        }
+        Err(e) => panic!("non-prefixed user label should not error: {e}"),
+    }
+}

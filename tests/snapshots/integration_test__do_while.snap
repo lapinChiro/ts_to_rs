@@ -1,5 +1,6 @@
 ---
 source: tests/integration_test.rs
+assertion_line: 85
 expression: output
 ---
 fn countdown(n: f64) -> f64 {
@@ -65,15 +66,15 @@ fn multiplyUntilOverflow(a: f64, b: f64, limit: f64) -> f64 {
 fn sumPositiveOnly(values: Vec<f64>) -> f64 {
     let mut i = 0.0;
     let mut total = 0.0;
-    'do_while_loop: loop {
-        'do_while: {
+    '__ts_do_while_loop: loop {
+        '__ts_do_while: {
             if values.get(i as usize).cloned().unwrap() < 0.0 {
                 {
     let _old = i;
     i = i + 1.0;
     _old
 };
-                break 'do_while;
+                break '__ts_do_while;
             }
             total = total + values.get(i as usize).cloned().unwrap();
             {
@@ -83,7 +84,7 @@ fn sumPositiveOnly(values: Vec<f64>) -> f64 {
 };
         }
         if !(i < values.len() as f64) {
-            break 'do_while_loop;
+            break '__ts_do_while_loop;
         }
     }
     total

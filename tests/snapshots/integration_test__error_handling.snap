@@ -1,5 +1,6 @@
 ---
 source: tests/integration_test.rs
+assertion_line: 69
 expression: output
 ---
 pub fn validateAge(age: f64) -> Result<String, String> {
@@ -22,7 +23,7 @@ pub fn safeDivide(a: f64, b: f64) -> Result<f64, String> {
 
 fn withTryCatch() {
     let mut _try_result: Result<(), String> = Ok(());
-    'try_block: {
+    '__ts_try_block: {
         riskyOperation();
     }
     if let Err(e) = _try_result {
@@ -42,7 +43,7 @@ fn withTryCatchFinally() {
     println!("done");
 });
     let mut _try_result: Result<(), String> = Ok(());
-    'try_block: {
+    '__ts_try_block: {
         riskyOperation();
     }
     if let Err(e) = _try_result {
@@ -52,10 +53,10 @@ fn withTryCatchFinally() {
 
 fn withThrowInTryCatch(x: f64) {
     let mut _try_result: Result<(), String> = Ok(());
-    'try_block: {
+    '__ts_try_block: {
         if x < 0.0 {
             _try_result = Err("negative".to_string());
-            break 'try_block;
+            break '__ts_try_block;
         }
         println!("ok");
     }
@@ -68,10 +69,10 @@ fn withBreakInTryCatch(items: Vec<f64>) {
     for item in items {
         let mut _try_result: Result<(), String> = Ok(());
         let mut _try_break = false;
-        'try_block: {
+        '__ts_try_block: {
             if item < 0.0 {
                 _try_break = true;
-                break 'try_block;
+                break '__ts_try_block;
             }
             riskyOperation();
         }

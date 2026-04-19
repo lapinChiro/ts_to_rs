@@ -19,7 +19,7 @@ fn test_convert_stmt_list_try_catch_expands_to_let_block_if() {
     assert!(matches!(&result[0], Stmt::Let { name, .. } if name == "_try_result"));
     match &result[1] {
         Stmt::LabeledBlock { label, body } => {
-            assert_eq!(label, "try_block");
+            assert_eq!(label, "__ts_try_block");
             assert_eq!(body.len(), 1, "try body should have 1 stmt");
         }
         _ => panic!("expected LabeledBlock, got {:?}", result[1]),
@@ -205,7 +205,7 @@ fn test_convert_try_catch_throw_nested_in_switch_arm_emits_full_machinery() {
     assert!(
         inner_if_then
             .iter()
-            .any(|s| matches!(s, Stmt::Break { label: Some(l), .. } if l == "try_block")),
+            .any(|s| matches!(s, Stmt::Break { label: Some(l), .. } if l == "__ts_try_block")),
         "throw inside switch arm must rewrite into break 'try_block, got: {inner_if_then:?}"
     );
 }
@@ -474,7 +474,7 @@ fn test_convert_try_catch_basic_expands_to_let_labeledblock_if() {
     // 2. 'try_block: { risky(); }
     match &result[1] {
         Stmt::LabeledBlock { label, body } => {
-            assert_eq!(label, "try_block");
+            assert_eq!(label, "__ts_try_block");
             assert_eq!(body.len(), 1, "expected 1 stmt in try body");
             assert!(
                 matches!(&body[0], Stmt::Expr(Expr::FnCall { target, .. }) if matches!(target, CallTarget::Free(__n) if __n == "risky")),
@@ -545,7 +545,7 @@ fn test_convert_try_catch_throw_in_body_expands_to_assign_break() {
             }
             // Second: break 'try_block;
             assert!(
-                matches!(&body[1], Stmt::Break { label: Some(l), value: None } if l == "try_block"),
+                matches!(&body[1], Stmt::Break { label: Some(l), value: None } if l == "__ts_try_block"),
                 "expected break 'try_block, got {:?}",
                 body[1]
             );
@@ -621,7 +621,7 @@ fn test_convert_try_catch_finally_expands_all() {
 
     // 3. labeled block
     assert!(
-        matches!(&result[2], Stmt::LabeledBlock { label, .. } if label == "try_block"),
+        matches!(&result[2], Stmt::LabeledBlock { label, .. } if label == "__ts_try_block"),
         "expected LabeledBlock, got {:?}",
         result[2]
     );

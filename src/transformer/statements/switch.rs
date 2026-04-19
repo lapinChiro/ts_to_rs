@@ -11,15 +11,19 @@ use crate::ir::{BinOp, Expr, MatchArm, Pattern, RustType, Stmt};
 use crate::transformer::Transformer;
 
 /// Checks whether a case body is terminated (break, return, throw, or continue).
+///
+/// Peeks through `ast::Stmt::Block` wrappers (I-153 T0): `case 1: { return 1; }`
+/// is terminated by the inner return, even though the surface-level last stmt is
+/// a block. Without this, the switch emission would take the fallthrough path
+/// unnecessarily.
 fn is_case_terminated(stmts: &[ast::Stmt]) -> bool {
-    stmts.last().is_some_and(|s| {
-        matches!(
-            s,
-            ast::Stmt::Break(_)
-                | ast::Stmt::Return(_)
-                | ast::Stmt::Throw(_)
-                | ast::Stmt::Continue(_)
-        )
+    stmts.last().is_some_and(|s| match s {
+        ast::Stmt::Break(_)
+        | ast::Stmt::Return(_)
+        | ast::Stmt::Throw(_)
+        | ast::Stmt::Continue(_) => true,
+        ast::Stmt::Block(block) => is_case_terminated(&block.stmts),
+        _ => false,
     })
 }
 
@@ -65,6 +69,141 @@ fn build_combined_guard(discriminant: &Expr, patterns: Vec<Expr>) -> Expr {
 // for the full AST coverage spec (all `Expr` and `Stmt` variants exhaustively
 // matched per `doc/grammar/ast-variants.md`).
 use crate::pipeline::type_resolver::du_analysis::collect_du_field_accesses_from_stmts;
+
+/// I-153: Recursively rewrites nested bare `Stmt::Break { label: None, value: None }`
+/// in switch case body into labeled breaks targeting the switch's labeled block.
+///
+/// # Descent policy (exhaustive over 14 IR `Stmt` variants)
+///
+/// - **Descent** (same-switch scope): `Stmt::If.{then_body, else_body}`,
+///   `Stmt::IfLet.{then_body, else_body}`, `Stmt::Match.arms[*].body`.
+/// - **Skip** (inner emission 所掌): `Stmt::LabeledBlock { body, .. }` — inner
+///   emissions (nested switch / try / do-while) already routed their own breaks
+///   to their own labels. Outer walker must not re-target them.
+/// - **Non-descent** (loop boundary): `Stmt::While / WhileLet / ForIn / Loop` —
+///   inner `break` correctly targets inner loop in both TS and Rust.
+/// - **Leaf**: `Stmt::Let / Continue / Return / Expr / TailExpr` (Rust AST 上
+///   `Stmt::Break` は Expr の中に埋め込まれない、empirical 確認済) +
+///   labeled `Stmt::Break { label: Some(_), .. }` or `Stmt::Break { value: Some(_), .. }`
+///   は pass-through。
+///
+/// Returns `true` if any rewrite occurred (used by switch emission paths to decide
+/// whether the whole `Stmt::Match` needs to be wrapped in a `Stmt::LabeledBlock`).
+pub(super) fn rewrite_nested_bare_break_in_stmts(stmts: &mut [Stmt], switch_label: &str) -> bool {
+    let mut rewritten = false;
+    for stmt in stmts.iter_mut() {
+        rewritten |= rewrite_nested_bare_break_in_stmt(stmt, switch_label);
+    }
+    rewritten
+}
+
+fn rewrite_nested_bare_break_in_stmt(stmt: &mut Stmt, switch_label: &str) -> bool {
+    match stmt {
+        // ============ DESCENT (non-loop, non-fn 境界) ============
+        Stmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            let mut r = rewrite_nested_bare_break_in_stmts(then_body, switch_label);
+            if let Some(eb) = else_body {
+                r |= rewrite_nested_bare_break_in_stmts(eb, switch_label);
+            }
+            r
+        }
+        Stmt::IfLet {
+            then_body,
+            else_body,
+            ..
+        } => {
+            let mut r = rewrite_nested_bare_break_in_stmts(then_body, switch_label);
+            if let Some(eb) = else_body {
+                r |= rewrite_nested_bare_break_in_stmts(eb, switch_label);
+            }
+            r
+        }
+        Stmt::Match { arms, .. } => {
+            // Must visit every arm (no short-circuit), hence the explicit loop
+            // rather than `.any(...)` which stops at the first `true`.
+            let mut any_rewrite = false;
+            for arm in arms.iter_mut() {
+                any_rewrite |= rewrite_nested_bare_break_in_stmts(&mut arm.body, switch_label);
+            }
+            any_rewrite
+        }
+
+        // ============ SKIP (inner emission 所掌尊重) ============
+        // Nested `Stmt::LabeledBlock` (e.g., `__ts_switch` from inner switch,
+        // `__ts_try_block` from try, `__ts_do_while` from do-while) already has
+        // its own bare break rewriting applied. User labels (future I-158) also
+        // must be respected — user's `break L` inside such a block targets the
+        // user's label, not our switch.
+        Stmt::LabeledBlock { .. } => false,
+
+        // ============ LEAF: bare break → labeled break ============
+        Stmt::Break {
+            label: None,
+            value: None,
+        } => {
+            *stmt = Stmt::Break {
+                label: Some(switch_label.to_string()),
+                value: None,
+            };
+            true
+        }
+
+        // ============ NON-DESCENT (loop 境界、inner break は inner loop を正しく target) ============
+        Stmt::While { .. } | Stmt::WhileLet { .. } | Stmt::ForIn { .. } | Stmt::Loop { .. } => {
+            false
+        }
+
+        // ============ LEAF (break を含まない、または既 labeled break) ============
+        // - `Stmt::Let`: init Expr に Stmt::Break は埋め込まれない (empirical)
+        // - `Stmt::Break { label: Some(_), .. }` / `{ value: Some(_), .. }`: labeled break / break-with-value は pass-through
+        // - `Stmt::Continue`: continue は TS/Rust で同 semantics (enclosing loop)
+        // - `Stmt::Return / Expr / TailExpr`: Expr に Stmt::Break 非埋め込み (empirical)
+        Stmt::Let { .. }
+        | Stmt::Break { .. }
+        | Stmt::Continue { .. }
+        | Stmt::Return(_)
+        | Stmt::Expr(_)
+        | Stmt::TailExpr(_) => false,
+    }
+}
+
+/// I-153: The internal label used by ts_to_rs for switch-escape emission.
+///
+/// Reserved under the `__ts_` namespace (see `check_ts_internal_label_namespace` in
+/// the transformer module). User labels starting with `__ts_` are rejected at
+/// `convert_labeled_stmt` entry, so collision with user code is impossible.
+pub(crate) const TS_INTERNAL_SWITCH_LABEL: &str = "__ts_switch";
+
+/// I-153: Conditionally wraps a `Stmt::Match` produced by a clean-match switch path
+/// in a `Stmt::LabeledBlock` when any arm body contains a nested bare break that
+/// was rewritten to `break '__ts_switch`.
+///
+/// The wrap is conditional to avoid emitting an unused label (Rust warns on
+/// `unused_labels`). When no rewrite is needed, the original `Stmt::Match` is
+/// returned unchanged.
+fn wrap_match_with_switch_label_if_needed(arms: Vec<MatchArm>, match_expr: Expr) -> Vec<Stmt> {
+    let mut arms = arms;
+    let mut rewritten = false;
+    for arm in arms.iter_mut() {
+        rewritten |= rewrite_nested_bare_break_in_stmts(&mut arm.body, TS_INTERNAL_SWITCH_LABEL);
+    }
+    let match_stmt = Stmt::Match {
+        expr: match_expr,
+        arms,
+    };
+    if rewritten {
+        vec![Stmt::LabeledBlock {
+            label: TS_INTERNAL_SWITCH_LABEL.to_string(),
+            body: vec![match_stmt],
+        }]
+    } else {
+        vec![match_stmt]
+    }
+}
 
 /// Converts a `switch` statement to a `match` expression or fall-through pattern.
 ///
@@ -288,10 +427,12 @@ impl<'a> Transformer<'a> {
         // no case matched, regardless of source position.
         move_wildcard_arm_to_end(&mut arms);
 
-        Ok(Some(vec![Stmt::Match {
-            expr: Expr::Ident(var_name),
+        // I-153: conditionally wrap in `'__ts_switch:` labeled block if any arm body
+        // has nested bare breaks that need to target the switch (not an outer loop).
+        Ok(Some(wrap_match_with_switch_label_if_needed(
             arms,
-        }]))
+            Expr::Ident(var_name),
+        )))
     }
 
     /// discriminated union の tag フィールドに対する switch を enum match に変換する。
@@ -434,10 +575,10 @@ impl<'a> Transformer<'a> {
 
         move_wildcard_arm_to_end(&mut arms);
 
-        Ok(Some(vec![Stmt::Match {
-            expr: match_expr,
-            arms,
-        }]))
+        // I-153: conditional labeled-block wrap (same rationale as typeof switch).
+        Ok(Some(wrap_match_with_switch_label_if_needed(
+            arms, match_expr,
+        )))
     }
 
     /// Converts a switch on a string enum (non-tagged) into a match with enum variant patterns.
@@ -515,10 +656,11 @@ impl<'a> Transformer<'a> {
 
         move_wildcard_arm_to_end(&mut arms);
 
-        Ok(Some(vec![Stmt::Match {
-            expr: discriminant,
+        // I-153: conditional labeled-block wrap (string-enum switch path).
+        Ok(Some(wrap_match_with_switch_label_if_needed(
             arms,
-        }]))
+            discriminant,
+        )))
     }
 
     /// Converts a switch with no code fall-through into a clean `Stmt::Match`.
@@ -577,10 +719,8 @@ impl<'a> Transformer<'a> {
         // Move wildcard (default) arm to the end (same rationale as try_convert_typeof_switch)
         move_wildcard_arm_to_end(&mut arms);
 
-        Ok(vec![Stmt::Match {
-            expr: discriminant,
-            arms,
-        }])
+        // I-153: conditional labeled-block wrap (clean-match path).
+        Ok(wrap_match_with_switch_label_if_needed(arms, discriminant))
     }
 
     /// Converts a switch with code fall-through into a labeled block + flag pattern.
@@ -609,7 +749,12 @@ impl<'a> Transformer<'a> {
             // Labeled-block fallthrough emission preserves `continue` (it
             // carries control flow to the next case body); only `break` is
             // dropped.
-            let body = self.convert_switch_case_body(&case.cons, return_type, false)?;
+            let mut body = self.convert_switch_case_body(&case.cons, return_type, false)?;
+
+            // I-153: rewrite nested bare breaks in case body to target `'__ts_switch`.
+            // The arm-end break is appended below (already labeled), so the walker only
+            // affects genuinely nested breaks (inside if / block / try-catch / IfLet / Match arms).
+            rewrite_nested_bare_break_in_stmts(&mut body, TS_INTERNAL_SWITCH_LABEL);
 
             if let Some(test) = &case.test {
                 // case val: ...
@@ -628,7 +773,7 @@ impl<'a> Transformer<'a> {
                 let mut then_body = body;
                 if ends_with_break {
                     then_body.push(Stmt::Break {
-                        label: Some("switch".to_string()),
+                        label: Some(TS_INTERNAL_SWITCH_LABEL.to_string()),
                         value: None,
                     });
                 } else {
@@ -651,7 +796,7 @@ impl<'a> Transformer<'a> {
         }
 
         Ok(vec![Stmt::LabeledBlock {
-            label: "switch".to_string(),
+            label: TS_INTERNAL_SWITCH_LABEL.to_string(),
             body: block_body,
         }])
     }

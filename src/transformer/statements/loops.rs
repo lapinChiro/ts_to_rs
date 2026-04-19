@@ -247,11 +247,17 @@ impl<'a> Transformer<'a> {
     }
 
     /// Converts a labeled statement by attaching the label to the inner loop.
+    ///
+    /// I-154 Part E.1: defense-in-depth lint — the `__ts_` namespace is reserved
+    /// for ts_to_rs internal emission. Caller (`convert_stmt::Labeled` arm) also
+    /// runs this check, but keeping it here ensures future callers / refactors
+    /// remain safe.
     pub(super) fn convert_labeled_stmt(
         &mut self,
         labeled: &ast::LabeledStmt,
         return_type: Option<&RustType>,
     ) -> Result<Stmt> {
+        crate::transformer::statements::check_ts_internal_label_namespace(&labeled.label)?;
         let label_name = labeled.label.sym.to_string();
         match labeled.body.as_ref() {
             ast::Stmt::While(while_stmt) => {
@@ -343,11 +349,15 @@ impl<'a> Transformer<'a> {
         if needs_labeled_block {
             // The outer loop needs a label so that `break` inside the LabeledBlock
             // can target it (Rust E0695: unlabeled break inside labeled block).
-            let effective_loop_label = loop_label.unwrap_or("do_while_loop");
+            // I-154: use `__ts_` prefix namespace for internal labels (hygiene).
+            // User labels starting with `__ts_` are rejected at
+            // `check_ts_internal_label_namespace`, so collision with user code is
+            // structurally impossible.
+            let effective_loop_label = loop_label.unwrap_or("__ts_do_while_loop");
 
             rewrite_do_while_body(
                 &mut body_stmts,
-                "do_while",
+                "__ts_do_while",
                 loop_label,
                 effective_loop_label,
                 0,
@@ -369,7 +379,7 @@ impl<'a> Transformer<'a> {
                 label: Some(effective_loop_label.to_string()),
                 body: vec![
                     Stmt::LabeledBlock {
-                        label: "do_while".to_string(),
+                        label: "__ts_do_while".to_string(),
                         body: body_stmts,
                     },
                     break_check,

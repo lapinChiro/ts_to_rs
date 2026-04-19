@@ -931,3 +931,17 @@ fn test_e2e_cell_step3() {
 fn test_e2e_cell_i142bc() {
     run_cell_e2e_tests("i142bc");
 }
+
+#[test]
+fn test_e2e_cell_i153() {
+    // I-153: switch case body nested bare break rewrite + label hygiene.
+    // Each cell fixture verifies TSX stdout = Rust stdout for a matrix cell.
+    run_cell_e2e_tests("i153");
+}
+
+#[test]
+fn test_e2e_cell_i154() {
+    // I-154: user labels colliding with ts_to_rs internal label names
+    // (`try_block`, `do_while`, etc.) must still work independently after rename.
+    run_cell_e2e_tests("i154");
+}

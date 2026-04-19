@@ -1,5 +1,130 @@
 use super::*;
 
+// I-153 T0: `ast::Stmt::Block` support (flatten into parent scope).
+// TS allows block statements at any statement position (e.g., `case 1: { stmts }`,
+// `function f() { { stmts } }`). Currently `convert_stmt` lacks a Block arm and
+// rejects with `unsupported statement: Block(...)`. The fix flattens the block
+// contents into the parent via `convert_stmt_list`, preserving semantics for
+// valid TS (Rust's enclosing match arm / function body provides block scope).
+
+#[test]
+fn test_convert_block_stmt_flattens_into_parent() {
+    // Bare block at function body level.
+    let stmts = parse_fn_body("function f() { { const x = 1; return x; } }");
+    let result = {
+        let f = TctxFixture::new();
+        let tctx = f.tctx();
+        let mut synthetic = SyntheticTypeRegistry::new();
+        Transformer::for_module(&tctx, &mut synthetic).convert_stmt_list(&stmts, None)
+    }
+    .unwrap();
+    // Expect 2 flattened statements (Let + Return), not a single wrapper.
+    assert_eq!(
+        result.len(),
+        2,
+        "block should flatten to parent, got {result:?}"
+    );
+    assert!(matches!(result[0], Stmt::Let { .. }));
+    assert!(matches!(result[1], Stmt::Return(_)));
+}
+
+#[test]
+fn test_convert_block_stmt_in_switch_case_flattens() {
+    // Block inside switch case body (the common `no-case-declarations` pattern).
+    let stmts = parse_fn_body(
+        r#"function f(x: number): string {
+            switch (x) {
+                case 1: {
+                    const y = x;
+                    return "one";
+                }
+                default:
+                    return "other";
+            }
+        }"#,
+    );
+    let result = {
+        let f = TctxFixture::new();
+        let tctx = f.tctx();
+        let mut synthetic = SyntheticTypeRegistry::new();
+        Transformer::for_module(&tctx, &mut synthetic).convert_stmt_list(&stmts, None)
+    }
+    .unwrap();
+    // Expect a Match (switch) with the block contents flattened into its arm body.
+    assert_eq!(result.len(), 1, "expected single Match, got {result:?}");
+    match &result[0] {
+        Stmt::Match { arms, .. } => {
+            assert_eq!(arms.len(), 2, "expected case + default arms, got {arms:?}");
+            // First arm body should have >= 2 stmts (Let + Return), flattened from block.
+            assert!(
+                arms[0].body.len() >= 2,
+                "case body should contain flattened block contents, got {:?}",
+                arms[0].body
+            );
+        }
+        other => panic!("expected Match, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_convert_block_stmt_nested_break_preserved_for_i153_walker() {
+    // Block containing a nested bare break: verifies the block flatten
+    // preserves the break stmt so I-153's walker can rewrite it later.
+    let stmts = parse_fn_body(
+        r#"function f(x: number, cond: boolean) {
+            for (;;) {
+                switch (x) {
+                    case 1: {
+                        if (cond) break;
+                        return;
+                    }
+                    default:
+                        return;
+                }
+            }
+        }"#,
+    );
+    let result = {
+        let f = TctxFixture::new();
+        let tctx = f.tctx();
+        let mut synthetic = SyntheticTypeRegistry::new();
+        Transformer::for_module(&tctx, &mut synthetic).convert_stmt_list(&stmts, None)
+    }
+    .unwrap();
+    // Ensure conversion succeeded (no unsupported error) and produced a Loop wrapping Match.
+    // `for (;;)` without init/test/update converts to Stmt::Loop (not ForIn).
+    // The nested bare `break` inside block inside if inside case body is preserved
+    // for I-153 walker (T2/T3) to rewrite later — T0 only verifies conversion succeeds.
+    assert_eq!(result.len(), 1);
+    let loop_body = match &result[0] {
+        Stmt::Loop { body, .. } => body,
+        other => panic!("expected Loop, got {other:?}"),
+    };
+    assert!(
+        loop_body
+            .iter()
+            .any(|s| matches!(s, Stmt::Match { .. } | Stmt::LabeledBlock { .. })),
+        "loop-body should contain Match or LabeledBlock(Match), got {loop_body:?}"
+    );
+    // The block inside `case 1: { if (cond) break; return; }` should flatten such that
+    // the `if`/`return` become direct match arm body stmts.
+    if let Some(Stmt::Match { arms, .. }) =
+        loop_body.iter().find(|s| matches!(s, Stmt::Match { .. }))
+    {
+        let case1_arm = &arms[0];
+        assert!(
+            case1_arm.body.len() >= 2,
+            "case 1 arm body should have if + return (flattened from block), got {:?}",
+            case1_arm.body
+        );
+        assert!(
+            matches!(case1_arm.body[0], Stmt::If { .. }),
+            "case 1 arm body[0] should be If, got {:?}",
+            case1_arm.body[0]
+        );
+    }
+}
+
 #[test]
 fn test_convert_stmt_if_no_else() {
     let stmts = parse_fn_body("function f() { if (true) { return 1; } }");
@@ -54,7 +179,7 @@ fn test_convert_stmt_while() {
 }
 
 /// Helper: extract (LabeledBlock body, break_check) from a do-while Loop with continue.
-/// Asserts: Loop { label, body: [LabeledBlock("do_while", body), If { break 'label }] }
+/// Asserts: Loop { label, body: [LabeledBlock("__ts_do_while", body), If { break 'label }] }
 fn assert_do_while_with_continue(stmt: &Stmt) -> (&Vec<Stmt>, &Stmt) {
     match stmt {
         Stmt::Loop { label, body } => {
@@ -73,7 +198,10 @@ fn assert_do_while_with_continue(stmt: &Stmt) -> (&Vec<Stmt>, &Stmt) {
                     label: block_label,
                     body,
                 } => {
-                    assert_eq!(block_label, "do_while", "block label should be 'do_while'");
+                    assert_eq!(
+                        block_label, "__ts_do_while",
+                        "block label should be 'do_while'"
+                    );
                     // Verify break check targets the loop label
                     match break_check {
                         Stmt::If {
@@ -169,7 +297,7 @@ fn test_do_while_continue_rewritten_to_break_label() {
             assert_eq!(
                 then_body,
                 &vec![Stmt::Break {
-                    label: Some("do_while".to_string()),
+                    label: Some("__ts_do_while".to_string()),
                     value: None,
                 }],
                 "continue should be rewritten to break 'do_while"
@@ -194,10 +322,10 @@ fn test_do_while_break_rewritten_when_continue_present() {
     }
     .unwrap();
     assert_eq!(result.len(), 1);
-    // Loop should have label "do_while_loop" (auto-generated)
+    // Loop should have label "__ts_do_while_loop" (auto-generated)
     match &result[0] {
         Stmt::Loop { label, .. } => {
-            assert_eq!(label, &Some("do_while_loop".to_string()));
+            assert_eq!(label, &Some("__ts_do_while_loop".to_string()));
         }
         other => panic!("expected Loop, got: {other:?}"),
     }
@@ -208,7 +336,7 @@ fn test_do_while_break_rewritten_when_continue_present() {
             assert_eq!(
                 then_body,
                 &vec![Stmt::Break {
-                    label: Some("do_while".to_string()),
+                    label: Some("__ts_do_while".to_string()),
                     value: None,
                 }],
                 "continue should be rewritten to break 'do_while"
@@ -222,7 +350,7 @@ fn test_do_while_break_rewritten_when_continue_present() {
             assert_eq!(
                 then_body,
                 &vec![Stmt::Break {
-                    label: Some("do_while_loop".to_string()),
+                    label: Some("__ts_do_while_loop".to_string()),
                     value: None,
                 }],
                 "break should be rewritten to break 'do_while_loop"
@@ -296,7 +424,7 @@ fn test_do_while_nested_do_while_continues_independent() {
     assert_eq!(
         inner_body,
         &vec![Stmt::Break {
-            label: Some("do_while".to_string()),
+            label: Some("__ts_do_while".to_string()),
             value: None,
         }],
         "inner continue should be rewritten to break 'do_while"
@@ -306,7 +434,7 @@ fn test_do_while_nested_do_while_continues_independent() {
     assert_eq!(
         outer_body[1],
         Stmt::Break {
-            label: Some("do_while".to_string()),
+            label: Some("__ts_do_while".to_string()),
             value: None,
         },
         "outer continue should be rewritten to break 'do_while"
@@ -341,7 +469,7 @@ fn test_do_while_labeled_in_labeled_stmt() {
             assert_eq!(
                 then_body,
                 &vec![Stmt::Break {
-                    label: Some("do_while".to_string()),
+                    label: Some("__ts_do_while".to_string()),
                     value: None,
                 }],
                 "continue outer should be rewritten to break 'do_while"
