@@ -669,9 +669,27 @@ TODO `[I-048]` 現行:
   を参照 (相互リンク)。
 - I-048 実装時の test 更新義務が明文化。
 
-### C-9 (🟡 investigation debt) +1 OBJECT_LITERAL_NO_TYPE (`utils/concurrent.ts:12`) の根本原因未特定
+### C-9 (🟡 investigation debt → ✅ **消失確認で close**、2026-04-19)
 
-**現状の記録** (plan.md / PRD Step 3 完了条件):
+**最終 status** (2026-04-19):
+- Hono bench 実測 (`/tmp/hono-bench-errors.json`): total errors **62**、`concurrent.ts` 関連 **0 件**
+- INV-Step4-2 が対象としていた `+1 OBJECT_LITERAL_NO_TYPE on utils/concurrent.ts:12` の
+  regression は **既に消失**。I-142 Step 4 以降の後続作業 (I-153/I-154 batch 他) で間接的に
+  解消された模様。
+- 根本原因 commit 特定 (bisection) は historical interest のみで実益なく、user git 操作コスト
+  に見合わない → **bisection 不実施で close**。
+
+**close 理由の traceability**:
+- 観測時点 (2026-04-15 I-142 Step 3 完了時): bench errors 63、`concurrent.ts:12` に
+  OBJECT_LITERAL_NO_TYPE 1 件
+- 確認時点 (2026-04-19 I-145/I-150/I-161 batch commit 前): bench errors 62、
+  `concurrent.ts` grep 0 件 → 再発時は本 handoff doc を refer して前回 observation 参照
+
+---
+
+**以下、当時の調査計画記録** (close 済、reference のみ):
+
+**当時の現状の記録** (plan.md / PRD Step 3 完了条件):
 > error instances 62 → 63 (+1 OBJECT_LITERAL_NO_TYPE: `utils/concurrent.ts:12` —
 > 本 PRD 範囲外の pre-existing latency、destructuring param default `= {}` 関連)
 

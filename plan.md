@@ -55,7 +55,7 @@
 |--------|-------|-----|------|------|
 | 1 | **L2 Struct** | **I-144** umbrella | control-flow narrowing analyzer (I-024 complex / I-025 Option return / I-142 Cell #14 / I-142 Step 4 C-1+C-2 吸収) | C-1 scanner false-positive / C-2 closure body shadow-let 不整合は CFG narrowing で structural 解消。既存 `NarrowingEvent` infra (`pipeline/type_resolution.rs:42-56`) 拡張。scope ~800-1000 行 |
 | 2 | L3 | **Phase A Step 5** (I-026 / I-029 / I-030) | 型 assertion / null as any / any-narrowing enum 変換 | `type-assertion`, `trait-coercion`, `any-type-narrowing` unskip (3 fixture 直接削減) |
-| 3 | L3 | I-142 Step 4 C-5〜C-7 / C-9 残余 | I-144 非吸収の small cleanup (C-8 は 2026-04-19 完了済、他は `doc/handoff/I-142-step4-followup.md` 参照) | C-9 INV-Step4-2 は git bisect 要、user 操作待ち |
+| 3 | L3 | I-142 Step 4 C-5〜C-7 残余 | I-144 非吸収の small cleanup (C-8 は 2026-04-19 完了済、C-9 は regression 消失で close、他は `doc/handoff/I-142-step4-followup.md` 参照) | — |
 | 4 | L3 | **I-158** | Non-loop labeled stmt (`L: { ... }` / `L: switch(...)`) support | TS valid syntax の gap。I-153 完了により emission model 安定、依存解消済 |
 | 5 | L3 | **I-159** | 内部 emission 変数の user namespace 衝突 (I-154 の variable 版) | `_try_result` / `_fall` / `_try_break` 等を `__ts_` prefix に統一 + 変数宣言 lint |
 | 6 | L3 | I-143 meta-PRD | `??` 演算子の問題空間完全マトリクス + 8 未解決セル | I-143-a〜h 未着手。I-144 後の topology で一部 (I-143-b any ?? T) は I-050 依存 |
@@ -77,7 +77,7 @@
 ### INV 状態
 
 - INV-Step4-1: ✅ 完了 (`report/i142-step4-inv1-closure-compile.md`)
-- INV-Step4-2: ⏸ user git 操作待ち (commit bisection 要)
+- INV-Step4-2: ✅ **消失確認で close** (2026-04-19、observation 対象だった `utils/concurrent.ts:12` の OBJECT_LITERAL_NO_TYPE regression が現 bench で検出されず。bisection 不要、`doc/handoff/I-142-step4-followup.md` C-9 section に empirical 解消記録)
 - I-153 問題空間: ✅ 完了 (`report/i153-switch-nested-break-empirical.md`)
 
 ---
