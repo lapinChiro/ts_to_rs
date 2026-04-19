@@ -953,3 +953,15 @@ fn test_e2e_cell_i154() {
     // (`try_block`, `do_while`, etc.) must still work independently after rename.
     run_cell_e2e_tests("i154");
 }
+
+// I-144 SDCDF Spec-Stage T1 artifact: per-cell E2E fixtures committed in RED
+// state. The suite is `#[ignore]` until Implementation stage (T6) rewires
+// `??=` emission through the CFG analyzer so closure-capture / compound-arith
+// / narrowing-reset cells compile and match TS runtime. `scripts/record-cell-
+// oracle.sh` captured the TS reference output in `*.expected` alongside each
+// `.ts` fixture for human review; the runner itself recomputes TS stdout live.
+#[test]
+#[ignore = "I-144 T1 red state — unignore at T6 when emission is rewired"]
+fn test_e2e_cell_i144() {
+    run_cell_e2e_tests("i144");
+}

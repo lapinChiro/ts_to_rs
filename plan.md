@@ -18,17 +18,23 @@
 | cargo test (lib) | 2592 pass |
 | cargo test (integration) | 122 pass |
 | cargo test (compile) | 3 pass |
-| cargo test (E2E) | 97 pass |
+| cargo test (E2E) | 97 pass + 14 i144 fixtures (`#[ignore]`、9 RED ✗ + 5 GREEN ✓ regression lock-in) |
 | clippy | 0 warnings |
 | fmt | 0 diffs |
 
 ### 進行中作業
 
-- **I-144 Spec stage v2** (2026-04-19): `backlog/I-144-control-flow-narrowing-analyzer.md` (914 行)
-  - Spec Stage Review Checklist #1-#4 [✅]、#5 (E2E readiness) は T1 で実施予定
+- **I-144 Spec stage v2.2 approved** (2026-04-19): `backlog/I-144-control-flow-narrowing-analyzer.md`
+  - Spec Stage Review Checklist #1-#5 [✅] 全完了、T2 で 2 回の adversarial review (v2.1→v2.2) で 12 defect 発見 → 11 件解消 + 1 件 scope out
   - 26 observation fixture (`tests/observations/i144/*.ts`)、`report/i144-spec-observations.md` (557 行)
   - 6 次元 matrix (T × L × R × F × **RC** × E)、Sub-matrix 5 で RC × narrow state → Emission 決定
-  - 次 action: T1 per-cell E2E fixture (red state) 作成 → T2 Spec Stage 承認 → Implementation stage (T3-T10)
+  - **T1 完了** (2026-04-19): 14 per-cell E2E fixture (`tests/e2e/scripts/i144/`、9 RED ✗ + 5 GREEN ✓ regression lock-in: null-check / closure-no-reassign / RC1-RC8 survey / F4 loop / R5 nullish-noop)、
+    `test_e2e_cell_i144` (#[ignore])、report: [`report/i144-t1-red-state.md`](report/i144-t1-red-state.md)。
+    T1 empirical で 3 件の pre-existing defect 発見 (I-161 `&&=`/`||=` / I-162 class no-ctor / I-050 synthetic union coercion)、regression fixture 2 件削除して TODO 起票
+  - **T2 完了** (2026-04-19): v2.2 で E5 を単一 variant に確定 (CFG dominator 収束) +
+    **E10 を primitive + composite `Option<Union<T,U>>` に拡張** (matches! guard 合成) +
+    **Phase 3b "Closure Reassign Emission Policy"** (Policy A FnMut + NLL / Policy B Rc\<RefCell\>、escape 検出切替)
+  - 次 action: **T3 Implementation stage 着手** (`src/pipeline/narrowing_analyzer.rs` 新規、~400-600 行)
 
 ### 直近の完了作業
 
@@ -61,7 +67,7 @@
 
 | 優先度 | レベル | PRD | 内容 | 根拠 |
 |--------|-------|-----|------|------|
-| 1 | **L2 Struct** | **I-144** umbrella (Spec v2 完了、T1 着手待ち) | control-flow narrowing analyzer (I-024 / I-025 / I-142 Cell #14 / C-1 / C-2a-c / C-3 / C-4 / D-1 吸収) | C-2 は C-2a/b/c/d に sub-category 化、C-2d のみ scope out。RC 次元と JS coerce_default table 導入で silent semantic change 防止。scope ~800-1000 行 |
+| 1 | **L2 Struct** | **I-144** umbrella (Spec v2.2 approved、T3 Implementation 着手準備完了) | control-flow narrowing analyzer (I-024 / I-025 / I-142 Cell #14 / C-1 / C-2a-c / C-3 / C-4 / D-1 吸収) | T0/T1/T2 完了、14 per-cell E2E fixture (9 RED ✗ + 5 GREEN ✓)、T1 empirical で R4/F6 を別 PRD scope (I-161 / I-149) に再分類。Dual verdict (TS / Rust) framework 化。scope ~800-1000 行 |
 | 2 | L3 | **Phase A Step 5** (I-026 / I-029 / I-030) | 型 assertion / null as any / any-narrowing enum 変換 | `type-assertion`, `trait-coercion`, `any-type-narrowing` unskip (3 fixture 直接削減) |
 | 3 | L3 | I-142 Step 4 C-5〜C-7 残余 | I-144 非吸収の small cleanup (C-8 は 2026-04-19 完了済、C-9 は regression 消失で close、他は `doc/handoff/I-142-step4-followup.md` 参照) | — |
 | 4 | L3 | **I-158** | Non-loop labeled stmt (`L: { ... }` / `L: switch(...)`) support | TS valid syntax の gap。I-153 完了により emission model 安定、依存解消済 |
@@ -95,19 +101,19 @@
 「次の作業」テーブル priority 1 (I-144) の着手前調査事項。詳細な問題空間と修正方針は
 PRD 起票時に SDCDF spec stage で確定する。
 
-### I-144 umbrella: control-flow narrowing analyzer (Spec v2 完了、T1 着手待ち)
+### I-144 umbrella: control-flow narrowing analyzer (Spec v2.2 approved、T3 着手準備完了)
 
-**Status**: Spec stage **v2 revised** — PRD `backlog/I-144-control-flow-narrowing-analyzer.md` (914 行)、
-`report/i144-spec-observations.md` (557 行)、26 observation fixture。
-Spec-Stage Adversarial Review Checklist #1-#4 [✅]、#5 (E2E readiness) は T1 で実施。
+**Status**: Spec stage **v2.2 approved** — PRD `backlog/I-144-control-flow-narrowing-analyzer.md`、
+`report/i144-spec-observations.md` (557 行)、26 observation fixture + 14 per-cell E2E fixture
+(`tests/e2e/scripts/i144/`)。Spec-Stage Adversarial Review Checklist #1-#5 [✅] 全完了。
 
-**v2 revise の要旨** (2026-04-19): v1 self-review で E 次元の conflate 判明:
-- E 次元が「Rust AST pattern」と「使用状況 cluster」を混同 → 純化 (E1/E2a/E2b/E2c/E3/E4/E5/E6/E7/E8/E9/E10)
-- **RC (Read Context) 次元新設**: narrow 変数の使用 context で emission が決まる (RC1-RC8、`emission-contexts.md` 準拠)
-- T 次元拡張: T3c (`!==null`) / T9 (Negation) / T10 (Compound `&&`/`||`) / T11 (Early-throw) / T12 (Short-circuit)
-- **JS coerce_default table**: null/undefined の JS coerce を type-specific に表化 (silent semantic change 防止)
-- **C-2 sub-category 化**: C-2a (`??=` + closure capture) / C-2b (closure reassign + arith read) / C-2c (closure reassign + string concat) / C-2d (return signature、scope out)
-- **Sub-matrix 5 新設**: RC × narrow state (alive/stale) × LHS → Emission E AST pattern
+**v2 → v2.2 revise の要旨** (2026-04-19):
+- v2: E 次元を Rust AST pattern に純化、RC (Read Context) 次元新設 (RC1-RC8、`emission-contexts.md` 準拠)、
+  T 次元拡張 (T3c/T9/T10/T11/T12)、JS coerce_default table 追加、C-2 を a/b/c/d に sub-category 化、Sub-matrix 5 新設
+- v2.1: T2 adversarial review で D1-D7 発見、D3 (E4 match 矛盾 → E5a/b 分割) + D4 (Closure Reassign Policy 未 pin) を主要解消
+- v2.2: 2 回目 review で R1-R5 発見、E5a/b を単一 E5 に rollback (CFG dominator 収束)、
+  E10 を composite `Option<Union<T,U>>` matches! guard に拡張、Policy A に NLL borrow lifetime 要件明記
+- **T1 empirical** (Dual verdict framework 化): R4 (`&&=`) / F6 (try body) が observation ✓ だったが Rust emission RED → I-161 / I-149 別 PRD scope に再分類
 
 **吸収対象** (いずれも I-144 完了で解消):
 
@@ -119,11 +125,17 @@ Spec-Stage Adversarial Review Checklist #1-#4 [✅]、#5 (E2E readiness) は T1 
 - I-142 Step 4 C-3 + C-4 (scanner test coverage、廃止により moot)
 - I-142 Step 4 D-1 (scanner call site DRY、廃止により moot)
 
-**Task list** (T0 完了、T1-T10 pending):
+**別 PRD scope に分離** (T1 empirical):
+
+- **I-161** `&&=` / `||=` 基本 emission 欠陥 (R4 cell)
+- **I-149** try/catch narrow + reassign emission 崩壊 (F6 cell)
+- **I-050** synthetic union coercion at call sites (typeof/instanceof regression fixture 不能)
+
+**Task list** (T0-T2 完了、T3-T10 pending):
 - T0 Discovery ✅ — 26 fixture、要調査 0 件
-- T1 Per-cell E2E fixture (red state) ← **次 action**
-- T2 Spec-Stage Review Checklist 完走 (#5 green 化)
-- T3-T10 Implementation stage (CFG analyzer 実装 → emission 連動 → scanner 廃止)
+- T1 Per-cell E2E fixture (red state) ✅ — 14 fixture (9 RED ✗ + 5 GREEN ✓ regression)、report: [`report/i144-t1-red-state.md`](report/i144-t1-red-state.md)
+- T2 Spec-Stage Review Checklist ✅ — v2.2 revise (E5 単一化 + E10 composite 拡張 + Policy A NLL)
+- T3-T10 Implementation stage (CFG analyzer 実装 → emission 連動 → scanner 廃止) ← **次 action (T3)**
 
 **実装規模**: ~800-1000 行。`pipeline/narrowing_analyzer.rs` (新規) + 既存
 `type_resolver/narrowing.rs` 統合 + `NarrowingEvent` struct → `NarrowEvent` enum migration +
