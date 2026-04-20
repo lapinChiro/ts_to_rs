@@ -9,30 +9,31 @@
 
 ---
 
-## 現在の状態 (2026-04-20)
+## 現在の状態 (2026-04-21)
 
 | 指標 | 値 |
 |------|-----|
 | Hono bench clean | 112/158 (70.9%) |
 | Hono bench errors | 62 |
-| cargo test (lib) | 2831 pass |
+| cargo test (lib) | 2857 pass |
 | cargo test (integration) | 122 pass |
 | cargo test (compile) | 3 pass |
-| cargo test (E2E) | 108 pass + 4 i144 fixtures `#[ignore]` (phase 別 reason: T6-3 × 2 / T6-4 × 1 / T6-5 × 1。cell-14 / cell-c1 / cell-c2a / cell-c2b / cell-c2c / multifn-isolation + regression 5 = 計 11 un-ignored + 既存 97) |
+| cargo test (E2E) | 112 pass + 2 i144 fixtures `#[ignore]` (phase 別 reason: T6-4 × 1 / T6-5 × 1。cell-14 / cell-c1 / cell-c2a / cell-c2b / cell-c2c / cell-t4d / cell-i024 / multifn-isolation + regression 5 + T6-3 regression t4c/t4e = 計 15 un-ignored + 既存 97) |
 | clippy | 0 warnings |
 | fmt | 0 diffs |
 
 ### 進行中作業
 
 - **I-144 Implementation stage 進行中** — PRD: [`backlog/I-144-control-flow-narrowing-analyzer.md`](backlog/I-144-control-flow-narrowing-analyzer.md)、phase 分割: [`plan.t6.md`](plan.t6.md)
-  - **完了 sub-phase** (〜2026-04-20、実装詳細は git log 参照):
+  - **完了 sub-phase** (〜2026-04-21、実装詳細は git log 参照):
     T0-T2 Spec stage (Spec v2.2 approved、Dual verdict framework 確立) /
     T3+T4 analyzer 基盤 + `NarrowEvent` enum / T5 narrow guard 検出を `narrowing_analyzer/guards.rs` に統合 /
     T6-1 pipeline wiring + interim scanner 完全削除 + `??=` EmissionHint dispatch /
     T6-2 `helpers/coerce_default` + closure-reassign narrow suppression + E2b stale read emission /
-    **I-169 T6-2 follow-up**: closure-capture scope precision (`NarrowEvent::ClosureCapture.enclosing_fn_body` + position-aware accessors + candidate-limited shadow-tracking walker を `closure_captures.rs` に独立)
-  - **Foundation 確立済** (T6-3 以降の前提): `??=` EmissionHint dispatch、closure-capture 検出 (14 variant 網羅)、multi-fn scope isolation、14 per-cell E2E (cell-14 / c1 / c2a / c2b / c2c + multi-fn isolation + 5 baseline regression GREEN、残 4 phase 別 ignore)
-  - **次 action**: **T6-3 truthy predicate E10** — cell-t4d (`if (x)` on F64 → `x != 0.0 && !x.is_nan()`) と cell-i024 (Option<Union<T,U>> → `matches!` guard per variant) GREEN 化。以降 T6-4 (compound OptChain narrow) / T6-5 (multi-exit implicit None) / T6-6 (quality gate + PRD close) は `plan.t6.md` 参照
+    **I-169 T6-2 follow-up**: closure-capture scope precision (`NarrowEvent::ClosureCapture.enclosing_fn_body` + position-aware accessors + candidate-limited shadow-tracking walker を `closure_captures.rs` に独立) /
+    **T6-3** truthy predicate E10 (`helpers/truthy.rs` + `try_generate_option_truthy_complement_match` + `wrap_in_synthetic_union_variant` + return_wrap double-wrap guard + `ir_body_always_exits` Match 対応)、`/check_job` 2 round + `/check_problem` で 15 defect 全 structural 対応済 (Spec Revision Log + Sub-matrix T4a/T4c/T4d/T4e ✓ 反映 + H-3 mixed-union integration test lock-in + 発見した周辺 defect は I-050-c 拡充 / I-171 新規起票で track)
+  - **Foundation 確立済** (T6-4 以降の前提): `??=` EmissionHint dispatch、closure-capture 検出 (14 variant 網羅)、multi-fn scope isolation、primitive/composite truthy predicate emission、Option<Union> call-arg coercion、14 per-cell E2E (cell-14 / c1 / c2a / c2b / c2c / t4d / i024 + multi-fn isolation + 5 baseline regression GREEN、残 2 phase 別 ignore)
+  - **次 action**: **T6-4 compound OptChain narrow** — cell-t7 (`x?.v !== undefined` → x non-null narrow) GREEN 化。以降 T6-5 (multi-exit implicit None) / T6-6 (quality gate + PRD close) は `plan.t6.md` 参照
   - **吸収対象 defect** (I-144 完了で一括解消): I-024 / I-025 / I-142 Cell #14 / I-142 Step 4 C-1 / C-2a-c / C-3 / C-4 / D-1
   - **T1 empirical で別 PRD 分離**: I-161 (`&&=` / `||=` 基本 emission)、I-149 (try/catch narrow emission 崩壊)、I-050 (synthetic union coerce)
 
@@ -43,6 +44,7 @@
 
 | PRD | 日付 | サマリ (1-3 行) |
 |-----|------|-----------------|
+| **I-144 T6-3 (truthy predicate E10 + Option<Union> call-arg coercion + review 2 round 全対応)** | 2026-04-21 | `helpers/truthy.rs` で F64 NaN 含む全 primitive truthy/falsy predicate を中央化 (`x != 0.0 && !x.is_nan()`)、`convert_if_stmt` fallback で primitive の `if (x)` / `if (!x)` を predicate wrap、`!x` early-return on Option<T> を `try_generate_option_truthy_complement_match` で consolidated match 化 (composite Union variant: `match x { Some(V(v)) if <v truthy> => V(v), _ => exit }`、non-primitive variant は guard なし always-truthy arm)、`wrap_in_synthetic_union_variant` で call-site primitive literal 引数を Union variant に自動 wrap (`f("hi")` → `f(Some(F64OrString::String(...)))`)、`return_wrap::wrap_leaf` に同一 enum double-wrap guard 追加、`ir_body_always_exits` に Stmt::Match 全 arm exit 判定追加。`/check_job` 2 round + `/check_problem` で 15 defect (H-1 Paren / H-2 naming / H-3 non-primitive variant / M-1 Spec Revision Log / M-2 wrap unit tests / M-3 return_wrap regression / M-4 truthy exhaustive None / M-5 T4c/T4e E2E / L-1/L-2 review insight / R2-C1 Sub-matrix / R2-C2 Spec Log / R2-C3 H-3 integration / R2-I1 Match exits / R2-I2 命名統一 / R2-I3 unused param) 全 structural 対応。周辺 defect は I-050-c 拡充 / I-171 新規起票で track。cell-t4d / cell-i024 GREEN + cell-regression-t4c/t4e regression lock-in + integration test H-3 mixed-union。lib +19 test (2857)、Hono bench 非後退 (112/158, 62) |
 | **I-144 T6-2 follow-up (I-169 closure-capture scope precision)** | 2026-04-20 | `NarrowEvent::ClosureCapture.enclosing_fn_body` で multi-fn scope isolation、`analyze_function(body, params)` に拡張して param-as-candidate 対応、`closure_captures.rs` を独立 module 化 (candidate-limited + shadow-tracking walker)。14 closure boundary variant 網羅 + 27 matrix cell 全判定。/check_job 連鎖 review で全 defect 解消、I-170 (hoisting) は future TODO |
 | **I-144 T6-2 (coerce_default helper + narrow-stale emission)** | 2026-04-20 | `helpers/coerce_default.rs` で JS coerce table ((F64, RC1Arith)→0.0 / (F64, RC6StringInterp)→"null") を T6-2 scope 限定実装。narrow guard suppress + arith/string-concat coerce wrap で cell-c2b / cell-c2c GREEN |
 | **I-144 T6-1 (pipeline wiring + scanner retirement + ??= EmissionHint dispatch)** | 2026-04-20 | `FileTypeResolution.emission_hints` + 5 entry point wiring、`try_convert_nullish_assign_stmt` を EmissionHint dispatch に書換、interim scanner 完全削除 (-440 行)。cell-14 / cell-c1 / cell-c2a GREEN |
@@ -60,7 +62,7 @@
 
 | 優先度 | レベル | PRD | 内容 | 根拠 |
 |--------|-------|-----|------|------|
-| 1 | **L2 Struct** | **I-144** umbrella (Spec v2.2 approved、**T3/T4/T5/T6-1/T6-2 完了** 2026-04-20、T6-3 着手可能) | control-flow narrowing analyzer (I-024 / I-025 / I-142 Cell #14 / C-1 / C-2a-c / C-3 / C-4 / D-1 吸収) | T6-2 で `helpers::coerce_default` helper + closure-reassign narrow suppression + E2b/RC6 stale read emission を確立、cell-c2b / cell-c2c GREEN (RC1 arith → `unwrap_or(0.0)` / RC6 string concat → `map(\|v\|.to_string()).unwrap_or_else(\|\|"null")`)。次 T6-3 で truthy predicate E10 (cell-t4d / cell-i024 GREEN 化、primitive NaN + composite Option<Union<T,U>>)、続いて T6-4 〜 T6-6 で残 2 cell + quality gate (詳細: `plan.t6.md`) |
+| 1 | **L2 Struct** | **I-144** umbrella (Spec v2.2 approved、**T3/T4/T5/T6-1/T6-2/T6-3 完了** 2026-04-20、T6-4 着手可能) | control-flow narrowing analyzer (I-024 / I-025 / I-142 Cell #14 / C-1 / C-2a-c / C-3 / C-4 / D-1 吸収) | T6-3 で truthy predicate E10 (`helpers/truthy.rs` + `try_generate_option_truthy_complement_match` + `wrap_in_synthetic_union_variant`) を確立、cell-t4d (F64 NaN) / cell-i024 (composite Option<Union> via consolidated match + call-arg coercion) GREEN。次 T6-4 で compound OptChain narrow (cell-t7)、続いて T6-5 〜 T6-6 で残 1 cell + quality gate (詳細: `plan.t6.md`) |
 | 2 | L3 | **Phase A Step 5** (I-026 / I-029 / I-030) | 型 assertion / null as any / any-narrowing enum 変換 | `type-assertion`, `trait-coercion`, `any-type-narrowing` unskip (3 fixture 直接削減) |
 | 3 | L3 | I-142 Step 4 C-5〜C-7 残余 | I-144 非吸収の small cleanup (C-8 は 2026-04-19 完了済、C-9 は regression 消失で close、他は `doc/handoff/I-142-step4-followup.md` 参照) | — |
 | 4 | L3 | **I-158** | Non-loop labeled stmt (`L: { ... }` / `L: switch(...)`) support | TS valid syntax の gap。I-153 完了により emission model 安定、依存解消済 |

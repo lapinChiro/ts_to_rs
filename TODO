@@ -468,7 +468,83 @@ OBJECT_LITERAL_NO_TYPE 全体で 28件（2026-04-20 bench 実測、T6-2 / I-169 
   - **I-142 blocked cells**: Cell #5 (stmt) / Cell #9 (expr) が本 umbrella 依存で blocked surface。lock-in test (`cell5_any_lhs_stmt_is_blocked_by_i050` / `cell9_any_lhs_expr_is_blocked_by_i050`) が `UnsupportedSyntaxError` を assert (emission: `pick_strategy` の `RustType::Any => NullishAssignStrategy::BlockedByI050`)
   - **完了時の test 更新義務**: 上記 blocked lock-in test を ideal 出力 (Cell #5: `if x.is_null() { x = Value::from("def"); }` / Cell #9: `{ if x.is_null() { x = Value::from("def"); } x.clone() }`) の substring assertion に置換、`BlockedByI050` strategy を `AnyRuntimeCheck` に置換、`nullish-coalescing` fixture に `any` LHS ケース追加
   - **I-143-b 統合**: `any ?? T` の `Option<Value>::unwrap_or_else(|| T)` 型不一致も本 umbrella の `coerce_to_any` / `coerce_from_any` helper で解消
-  - **Synthetic union coercion at call sites** (I-144 T1 T1 empirical 2026-04-19): `function f(x: string \| number)` に対する call 側 `f("hi")` / `f(3)` で literal → synthetic `F64OrString::String(_)` / `F64OrString::F64(_)` 変換 emission が欠落。user visible 場所: (a) function call arg、(b) `const x: string \| number = "hi"` 変数初期化。`convert_expr_with_expected` の expected type が synthetic enum 時の wrap logic を `coerce_to_synthetic_union` helper として umbrella 内に追加すべき。I-144 regression ✓ fixture (`cell-regression-typeof-union-narrow` / `cell-regression-instanceof-narrow`) が本 defect で blocked となり E2E lock-in 不能 (snapshot test 側で narrow emission は担保済、runtime verify は本 defect 解消後に改めて追加)
+  - **[I-050-c] Synthetic union coercion** (I-144 T1 empirical 2026-04-19、T6-3 で literal 分のみ partial fix): `string | number | Named | Date | ...` 等の TS union を Rust 側 synthetic enum (`F64OrString`, `StringOrTag` 等) に変換した後、**値式を variant constructor で wrap する自動 coercion** が context 別に欠落している。Any umbrella (I-050-a/b) と並列の sub-PRD として位置付ける。
+
+    **Scope breakdown** (emission context × expr 種別 の matrix):
+
+    | Context ↓ / Expr → | Lit Num/Str/Bool | Ident (typed T) | UnaryExpr(Neg, Lit) | MethodCall / Expr 一般 | BigInt literal | Object literal |
+    |-------------------|-----|-----|-----|-----|-----|-----|
+    | Call arg (`f(e)` on fn taking Union) | **✅ T6-3 (2026-04-20)** | ✗ | ✗ | ✗ | ✗ | ✗ |
+    | Return value (`return e` from fn returning Union) | ✅ 既存 (return_wrap priority 2 literal inference) | ✅ 既存 (priority 3 expr_type lookup) | ✗ | ✗ 部分 (priority 3 型一致時のみ) | ✗ | ✗ |
+    | Var/const 初期化 (`const x: Union = e`) | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+    | Array element (`const arr: Union[] = [e]`) | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+
+    **完了分の実装詳細 (T6-3 call arg literal)**:
+    - 位置: `src/transformer/expressions/literals.rs::wrap_in_synthetic_union_variant` (line 138-179)
+    - 契機: `convert_lit` の Num/Str/Bool arm 内から呼出 (line 25-84)
+    - 呼出条件: `expected` が `RustType::Named { name, type_args: [] }` かつ `reg.get(name)` が `TypeDef::Enum` かつ `string_values` empty かつ `tag_field` none
+    - reverse lookup: `crate::pipeline::synthetic_registry::variant_name_for_type(literal_ty)` で期待 variant 名を算出、variants に存在すれば `Expr::FnCall { target: CallTarget::UserEnumVariantCtor, args: [wrapped_inner] }` を emit
+    - 単体テスト: `wrap_in_synthetic_union_variant_tests` 11 case (全分岐 + F64/String/Bool positive)
+    - regression: E2E `cell-i024-truthy-option-complex` + `cell-regression-t4c/t4e`
+
+    **残 scope 1: Non-literal call args / var-init / array-element**
+    - **再現 TS (call arg Ident)**: `function f(x: string | number | null): void { ... } const s: string = "hi"; f(s);`
+    - **現行 Rust 出力 (broken)**: `f(Some(s))` — expected `Option<F64OrString>`, produced `Option<String>` → `error[E0308]: mismatched types`
+    - **Ideal 出力**: `f(Some(F64OrString::String(s)))`
+    - **Root cause (構造的)**: `convert_expr_with_expected` (`src/transformer/expressions/mod.rs:45-198`) は Option<T> 期待時に内側の `T` 期待で recursive 呼出 (line 64-70) し、`T = Named { Union }` で base match arm (Ident は line 106-120、Bin は 122 など) に落ちる。base match 後の post-processing (line 158-195) は trait coercion / Any literal coercion のみで、synthetic union wrap は **後処理されない**。literal arm だけ `convert_lit` 内で先行 wrap されている状態。
+    - **修正方針 (structural)**: `convert_expr_with_expected` の match 結果 `result` を得た後 (line 156 直後 = post-match section) に新しい post-processing を追加。疑似 code:
+      ```rust
+      // After base match:
+      let result_ty = self.get_expr_type(expr);
+      if let Some(wrapped) = wrap_in_synthetic_union_variant_if_applicable(
+          self.reg(), expected, result_ty, result
+      ) { return Ok(wrapped); }
+      ```
+      `wrap_in_synthetic_union_variant` は現在 literal 用のため Expr + 既知 literal_ty を受け取る。非 literal 汎用化するには **RustType 推論を inner へ query** する (TypeResolver `expr_type`) か、**引数型を `literal_ty: Option<&RustType>` に緩和**する。後者が清潔で DRY。
+    - **DRY 担保**: `wrap_in_synthetic_union_variant` を `pub(crate)` に昇格 + `transformer/helpers/` へ移動し、(a) convert_lit 経路、(b) convert_expr_with_expected post-match 経路、(c) return_wrap::wrap_leaf priority 3 経路 の 3 か所で共有。return_wrap 側は `variant_name_for_type` convention + 既存 `variant_for(&ty)` の両方を dispatch (現在は後者のみ)。
+    - **修正箇所**:
+      - `src/transformer/expressions/mod.rs:156` 付近に post-match wrap hook
+      - `src/transformer/expressions/literals.rs:138` の helper を `helpers/coerce_union.rs` (新規 module) へ移設 + 公開度昇格
+      - `src/transformer/return_wrap.rs::wrap_leaf` priority 3-4 の間に helper 合流 pass を追加
+      - `src/transformer/statements/variables.rs` (var/const 初期化、要 probe) に expected_type を取得する path を追加 (現在 expected_type 未 propagate なら TypeResolver 側 `expected_types` map の拡張)
+      - `src/transformer/expressions/data_literals.rs` (Array literal 変換、要 probe) に expected element type propagation
+
+    **残 scope 2: Return value non-literal expr の fallback 欠落 (Hono bench 1 件残存)**
+    - **再現 TS (Hono `adapter/aws-lambda/handler.ts:116`)**: `function getRequestContext(event: ALBEvent | ApiGatewayEvent | ...): ALBRequestContext | ApiGatewayRequestContext | ApiGatewayRequestContextV2 { return event.requestContext; }` — union 4 variant 以上、各 variant の requestContext フィールドが対応する RequestContext type を返す。
+    - **現行 Rust 出力**: `return_wrap::wrap_leaf` priority 5 hard error `cannot determine return variant at byte 3228..3248 for union ALBRequestContextOrApiGatewayRequestContextOrApiGatewayR...` を emit (conversion error、コード生成失敗)。
+    - **Root cause**: `wrap_leaf` priority 3 (`src/transformer/return_wrap.rs:169-173`) は `expr_type` (TypeResolver) と `ctx.variant_by_type` (enum 定義時点の variant 型マップ) を exact-match で照合。MemberExpr (`event.requestContext`) の `expr_type` は Member の field type を解決するが、member base (`event`) が Union の場合 field access 時に narrowing が走らず、結果として `expr_type` が `serde_json::Value` / `Unknown` 等に fall through し `variant_for` が `None` を返す。fallback (priority 4: 単一非 Option variant) も Union 4 variant で動かず priority 5 error。
+    - **修正方針 (structural)**: (a) priority 3 の後段に variant_name_for_type convention 経由の reverse lookup pass (下位 scope 1 と共有 helper)、(b) MemberExpr of Union の narrowing を `resolve_member_expr` で per-variant に展開 → この変更は I-143-a TsAs 対応と共通の「Union over MemberExpr」基盤、別 PRD 起票候補。
+    - **完了基準**: Hono bench の OTHER `cannot determine return variant` 1 件解消、priority 5 が起動しない状態を regression test で lock-in。
+
+    **残 scope 3: Literal var 初期化 (`const x: string | number = "hi"`)**
+    - **再現 TS**: `const v: string | number = 42;` → Rust `let v: F64OrString = 42.0;` 型不一致。
+    - **Ideal 出力**: `let v: F64OrString = F64OrString::F64(42.0);`
+    - **Root cause**: `convert_var_decl` (`src/transformer/statements/variables.rs` 要 probe) は declared type を RustType に変換し `Stmt::Let { ty, init }` を emit するが、init expression は `convert_expr(init)` で expected_type 未伝達。TypeResolver 側 `propagate_expected` はどこまで var init を covering するか要 empirical 確認。
+    - **修正方針**: (a) TypeResolver `expected_types` に var-init span を propagate (既存あれば確認のみ)、(b) `convert_var_decl` から `convert_expr_with_expected(init, Some(declared_ty))` を呼出 (一部既存の想定、要 probe)、(c) 上記 scope 1 で整備する post-match wrap hook が自動で発火。
+
+    **残 scope 4: BigInt / Object literal / negative literal の variant wrap**
+    - **BigInt** (`123n` が synthetic union の `I128` variant に入るケース): `variant_name_for_type(Primitive(I128)) = "I128"` convention に従って wrap。修正規模 small (`convert_lit` の BigInt arm に同 helper 呼出を追加)。
+    - **Object literal** (`f({ label: "x" })` on fn taking `string | Tag`): `convert_object_lit` (要 probe) が expected type を Tag に narrow した後、Tag 生成後に synthetic union wrap が必要。T6-3 の H-3 E2E lock-in はこの欠落で block 済、integration test (`test_try_generate_option_truthy_complement_match_h3_mixed_union_emits_guard_only_for_primitives`) で代替。
+    - **Negative literal** (`f(-5)` = Unary(Neg, Num)): 現状 Unary arm (`convert_unary_expr`) は operand を `convert_expr` で expected 伝達せず変換。上記 scope 1 の post-match hook で自動吸収される想定 (UnaryExpr の result type は F64 なので convention match)。
+
+    **完了条件 / test 責務 (umbrella 横断)**:
+    - 単体 test: `wrap_in_synthetic_union_variant` 汎用版 (literal + non-literal) で各 scope の expected vs result type 組合せを網羅
+    - integration test: TS → Rust pipeline で各 scope の代表 case が coerce され compile する (現行 `test_try_generate_option_truthy_complement_match_h3_mixed_union_emits_guard_only_for_primitives` の拡張)
+    - E2E lock-in: T6-3 H-3 E2E (`cell-regression-h3-mixed-union-truthy.ts` 形式) を un-ignore + runtime verify、I-144 `cell-regression-typeof-union-narrow` / `cell-regression-instanceof-narrow` の E2E runtime verify 追加
+    - Hono bench: `cannot determine return variant` 0 件 (clean rate 非後退が必要条件ではなく、conversion error 解消が目的)
+    - I-144 PRD Sub-matrix 1 T4a/T4c-T4e の regression ✓ セルに「call-site coercion は I-050-c 完了後に E2E lock-in」ノート記載済 (本 entry 完了で annotation を外す)
+
+    **依存 / 関連**:
+    - 🔗 **I-050-a** (primitive Lit → Value coercion、完了): 同じ `convert_expr_with_expected` post-match hook 機構を参考。
+    - 🔗 **I-050-b** (Ident → Value coercion、未着手): Any 版の Ident coercion と同じ root cause (TypeResolver expr_type 精度)。本 scope 1 の Ident 対応と併せて修正で DRY。
+    - 🔗 **I-143-b** (`any ?? T` の型不一致): 本 scope 1 の Ident 対応経路で自動吸収される可能性あり (要検証)。
+    - 🔗 **I-143-a** (TsAs + NC): MemberExpr peek-through / Union narrow 基盤 (scope 2 の Union over Member) と共通基盤。
+    - 🔗 **I-056** (TypeDef::Alias): Union alias `type MaybeStr = string | undefined` が直接扱えるようになると本 entry の Name resolution が単純化。
+
+    **I-144 regression blocked cells** (本 entry 完了で un-ignore / 実装):
+    - `cell-regression-typeof-union-narrow` / `cell-regression-instanceof-narrow` (snapshot test は narrow emission を担保済、E2E runtime verify を追加)
+    - T6-3 H-3 non-primitive variant E2E (integration test → E2E 置換)
+    - I-144 Sub-matrix 1 T4a 行の「✓ T6-3 consolidated match」annotation から call-site coercion caveat を削除
 - **[I-051]** **フィールド名の IR サニタイズ不一致** — I-071 で顕在化見込み
 - **[I-052]** **builtin types と user-defined types の名前衝突** — CLI デフォルトで builtin types を読み込む。Web Streams API の `Transformer` interface 等がユーザー定義と名前衝突すると `TypeRegistry::merge` でマージされ不正な判定。`merge_with_builtin_preservation`（`src/registry/mod.rs:709`）で部分対策あるが不完全。根本対策: ユーザー定義がビルトインを上書きするマージ戦略が必要
 - **[I-053]** **Promise unwrap + Unit 除去パターンの DRY 化** — `.map(|ty| ty.unwrap_promise()).and_then(...)` パターンが 3 箇所に存在。コンテキスト差により共有すると結合度が上がるため現時点では許容。`RustType::unwrap_promise_to_return_type()` method として統合を検討
@@ -560,6 +636,60 @@ latent imprecision として TODO 化する。
 - **[I-167]** **Block-scoped narrow + block-scoped closure-reassign 対応** [L4] — I-144 T6-2 (I-169 2026-04-20 完了後) の candidate 集合は「関数 body top-level let/const/var decl + params」に限定。`if (cond) { let x; if (x === null) return; const reset = () => { x = null; }; return x + 1; }` のように block scope 内で完結する narrow + closure の場合、block-scoped `let x` は candidate に含まれず、narrow 抑制が発動しない → 現行は match-shadow emit で E0308 compile error。**根本修正方針**: candidate 収集を block 階層対応に拡張 (scope stack model)。`collect_top_level_decl_idents` を `collect_scope_tree_decl_idents(stmts, nesting_level)` に置換、各 block 単位で candidates を enumerate。`NarrowEvent::ClosureCapture` には `scope_start: u32, scope_end: u32` を追加し、「closure 宣言 block 以降の同 block 内」にのみ suppression を発動。**影響範囲**: `src/pipeline/narrowing_analyzer/closure_captures.rs` (I-169 (2026-04-20 完了) で新設済) の candidate 収集拡張、ClosureCapture variant schema。推定 ~500 LOC。**発生頻度**: 現行 Hono では block-scoped narrow + closure-reassign は検出されず。I-144 T6 cells にも無し。**Resolution target**: I-166 と同時期、または binding identity (I-165) 後の精度改善 wave。🔗 I-165 / I-166
 
 - **[I-170]** **`classify_reset_in_stmts` が fn/class decl hoisting を無視する source-order iteration (pre-existing imprecision)** [L4] — `src/pipeline/narrowing_analyzer/classifier.rs::classify_reset_in_stmts` (L152-203) は stmts を source-order で iterate し、fn/class decl `Stmt::Decl::Fn(f) if f.ident.sym.as_ref() == ident` / `Stmt::Decl::Class(c) if c.ident.sym.as_ref() == ident` を見つけた時点で `return acc;` で shadow short-circuit する。しかし JS/TS の `function x()` decl は enclosing scope top に hoist される (Stmt::Decl::Class も ES2015 semantic で TDZ 越え)。source-order で先に現れる arrow/fn expression が shadow ident を reference しているときに、classify が hoisting を無視して outer ident の reassign を誤検出する。**再現**: `function outer() { let x: number | null = 5; function inner() { const reset = () => { x = null; }; reset(); function x() { return 10; } } }` で inner の arrow は TS semantic 的に inner の `function x()` (hoisted) を reassign する。outer の x は無関与だが、classify は source-order で arrow を先に classify → `Some(ClosureReassign)` → fn decl で short-circuit (shadow) → return acc = `Some(ClosureReassign)` → outer 誤発火。I-169 T6-2 follow-up で inherited、hoisting 非対応は I-144 T3 classifier 由来。**根本修正方針**: classify_reset_in_stmts を 2-pass に変更: (1) 全 stmts を先に scan して fn/class decl name shadow の有無を判定、(2) shadow 有なら全 body を skip (early return None)、shadow 無なら従来通り source-order classify。block-level Stmt::Decl::Var の hoisting は不要 (TDZ でアクセス不能)。**影響範囲**: `src/pipeline/narrowing_analyzer/classifier.rs::classify_reset_in_stmts`。推定 ~30 LOC + hoisting test 5 件追加。**発生頻度**: hoisting + shadow + arrow reference 先行の組合せは稀。Hono では検出されず (2026-04-20 bench)、I-144 T6 cell にも該当なし。**Resolution target**: I-165 と同時期 (binding identity の副産物として解消可能) または independent 着手。🔗 I-165
+- **[I-171]** **`if (!x)` 汎用 truthy/falsy 変換 (non-Ident LHS + non-exit body + else branch)** [L3] — T6-3 で `!Ident` on `Option<T>` early-return のみ `try_generate_option_truthy_complement_match` で consolidated match emission 対応。以下の pattern 群は全て fall-through で `if !<non-bool> {}` を emit → Rust `error[E0600]: cannot apply unary operator !` で Tier 2 compile error。**empirical verification 2026-04-21** (`/tmp/t63-investigate/pattern-{b,d,e,f,g,h,j,k}.ts`) で各 pattern が compile error であることを確認。
+
+  **問題空間 (4 dim matrix)** — Spec-first PRD 起票時に完全 enumerate:
+    - **LHS shape (6 variant)**: `!Ident` / `!Paren(Ident)` (T6-3 済) / `!MemberExpr` / `!OptChainExpr` / `!TsAs` / `!BinExpr` / `!UnaryExpr(!x 再帰)` / `!LogicalAnd` / `!Lit(null/bool/num/str)`
+    - **LHS type (5 variant)**: `Option<T>` / primitive (F64/String/Bool/int) / Named (struct) / Vec / Fn など非 truthy 可能型
+    - **Body shape (3 variant)**: always-exit (T6-3 済) / non-exit (e.g., `console.log`) / mixed (early-return + fall-through)
+    - **Else branch (2 variant)**: absent / present
+
+  **empirical verified defect patterns** (2026-04-21 `/tmp/t63-investigate/`):
+    1. **Pattern b: `!u.v` (Member LHS on Option)** — TS `function f(u: {v: string | null}): string { if (!u.v) return "none"; return u.v; }` → Rust `fn f(u: FU) -> String { if !u.v { return "none".to_string(); } u.v }` (`!Option<String>` + `u.v` return type mismatch). **Ideal**: `if u.v.is_none() { return "none".to_string(); } u.v.unwrap()` + narrow event で `u.v: String` として後続 return で利用 (narrow materialization)。
+    2. **Pattern d: `!x?.v` (OptChain LHS)** — TS `function f(x: V | null): string { if (!x?.v) return "none"; return x.v; }` → Rust `if !x.as_ref().map(|_v| _v.v) { ... }` (`!Option<&String>`)。**Ideal**: OptChain truthy semantic は JS で `x?.v` が `undefined` (x==null) or `v` → `!` は `x.is_none() || !<inner truthy of v>` に展開。
+    3. **Pattern e (`!null`)**: TS `if (!null) return "ok";` → Rust `if !None { ... }` (`!None` は Rust 無効)。**Ideal**: `!null` は JS 定数 `true` → `if true {}` に constant fold (または条件除去)。**Pattern e (`!false`)**: Rust `!false` は valid で semantic 一致 → OK。
+    4. **Pattern f: `!(x + 1)` (BinExpr LHS on F64)** — TS `function f(x: number): string { if (!(x + 1)) return "falsy"; return "truthy"; }` → Rust `if !(x + 1.0) { ... }` (`!f64` は Rust bit-NOT で f64 非対応)。**Ideal**: BinExpr 結果に `truthy_predicate_for_expr` を適用 → `(x + 1.0) == 0.0 || (x + 1.0).is_nan()` (tmp binding で重複評価回避)。
+    5. **Pattern g: `!!x` (double negation)** — TS `if (!!x) return ...;` on `Option<F64>` → Rust `if !(!x) { ... }` (`!Option<f64>`)。**Ideal**: JS `!!x` は truthy 判定そのもの → `matches!(x, Some(v) if v != 0.0 && !v.is_nan())` 等の primitive/composite truthy に変換。
+    6. **Pattern h: `!(x && y)` (logical AND inner)** — TS `if (!(x && y)) return ...;` on `Option<F64>, Option<String>` → Rust `if !(x && y) { ... }` (`&&` on non-bool + `!Option`)。**Ideal**: De Morgan 展開 + 各辺 truthy 合成 → `if !<x truthy> || !<y truthy> { ... }`。
+    7. **Pattern j: `if (!x) <non-exit body>` on Option** — TS `function f(x: number | null): string { if (!x) console.log("falsy"); return "" + x; }` → Rust `if !x { println!("falsy"); }` (`!Option<f64>`)。T6-3 の `ir_body_always_exits` guard で consolidated match が bypass される。**Ideal**: non-exit の場合 consolidated match ではなく predicate 形式 `if x.is_none() || !<inner truthy> { ... }`。narrow materialization は不可 (body 後 narrow できない) ため、後続の `"" + x` は別途 coerce (I-050-c scope)。
+    8. **Pattern k: `if (!x) ... else ...` on Option** — TS `function f(x: number | null): string { if (!x) return "falsy"; else return "truthy:" + x; }` → Rust `if !x { ... } else { ... }`。T6-3 の `else_body.is_none()` guard で bypass。**Ideal**: `match x { Some(v) if <v truthy> => { else_body で narrow 済 x 利用 }, _ => { then_body } }` (T6-3 consolidated match の else 対応拡張)。
+    9. **Pattern c: `!(x as any)` (TsAs LHS)**: `!(x as any)` on unknown → `!serde_json::Value` は無効。**Root cause**: `convert_unary_expr` が operand を TsAs peek-through せず変換。**Ideal**: TsAs を no-op とし inner の raw type で truthy 判定 (I-143-a と共通 MemberExpr peek-through 基盤)。
+
+  **root cause cluster 分類**:
+    - **Cluster A (scope expansion)**: pattern j, k。T6-3 `try_generate_option_truthy_complement_match` の guard (`else_body.is_none()` + `ir_body_always_exits`) を relax + 複数 emit 形式 (consolidated match / predicate / else-match) の dispatch を追加。
+    - **Cluster B (non-Ident LHS)**: pattern b, d, f, g, h。T6-3 の `ast::Expr::Ident(ident) = unwrap_parens(unary.arg)` 制約を拡張し、Member/OptChain/BinExpr/UnaryExpr/LogicalAnd 各 shape に応じた truthy 合成を dispatch。`truthy_predicate_for_expr(expr, ty)` 汎用 helper 新設 (現行 `truthy_predicate(name, ty)` は Ident 限定で expr 一般に対応できない)。
+    - **Cluster C (constant folding / peek-through)**: pattern e, c。`!null` は constant fold、TsAs は peek-through。
+    - **narrow_analyzer 側の拡張** (cluster A/B 共通): `src/pipeline/narrowing_analyzer/guards.rs::detect_early_return_narrowing` (L312-325) の Bang arm は現在 `ast::Expr::Ident` のみ受け付ける。MemberExpr / OptChain LHS の narrow complement も同様に push する必要あり (scope は field path-keyed narrow → 設計は I-143-a 系との整合要)。
+
+  **修正対象**:
+    - `src/transformer/statements/control_flow.rs` — `try_generate_option_truthy_complement_match` (L167-203) を (a) else_body 対応 / (b) non-exit body predicate fallback 対応 / (c) non-Ident LHS 対応に拡張。`convert_if_stmt` L119 の dispatch guard を 3 形式 (consolidated match / predicate / match-else) に分離。
+    - `src/transformer/helpers/truthy.rs` — `truthy_predicate_for_expr(expr: Expr, ty: &RustType, tmp_binder: &mut TempBinder) -> Expr` 新設。BinExpr/UnaryExpr 結果の重複評価を tmp binding で回避する mechanism 含む。
+    - `src/pipeline/narrowing_analyzer/guards.rs` — `detect_early_return_narrowing` Bang arm (L312) で MemberExpr / OptChainExpr を accept、narrow event の scope を field path-keyed に拡張 (I-165 VarId 基盤が前提)。
+    - `src/transformer/expressions/binary.rs::convert_unary_expr` — TsAs peek-through を operand に適用。
+
+  **Spec-first PRD 要件** (matrix-driven、SDCDF Beta 必須):
+    - **Problem Space matrix**: LHS shape × LHS type × body shape × else branch の 4 dim 網羅 (本 entry の 9 pattern は氷山の一角、matrix 完成時に新パターン発覚予想)
+    - **tsc observation**: 各 cell で TS runtime stdout を oracle として記録 (今回の empirical confirmation は Tier 2 Rust compile error のみ、TS runtime behavior は未検証)
+    - **E2E per-cell fixture**: 全 ✗ cell (9+ pattern) に red 状態 fixture + expected output
+    - **Dual verdict (TS/Rust)**: `.claude/rules/spec-first-prd.md` 準拠
+
+  **test 責務**:
+    - Unit test: `truthy_predicate_for_expr` 全 Expr shape × RustType 網羅
+    - Integration test: TS → IR pipeline で各 pattern の expected emission shape を assert
+    - E2E: 各 pattern の runtime stdout 一致を lock-in
+    - Hono bench: 本 entry 完了で特定 TS pattern の fall-through を解消 (現行 Hono では empirical に 0 件だが、将来更新時の regression prevention に資する)
+
+  **発生頻度 (empirical 2026-04-20)**: 現行 Hono bench で `if (!<non-Ident>)` は検出されず、直接 blocker なし。ただし `ideal-implementation-primacy.md` により「frequency < correctness」であり、structural fix 必須。
+
+  **依存 / 関連**:
+    - 🔗 **I-143-a** (TsAs + NC): Pattern c (TsAs LHS) と MemberExpr peek-through の共通基盤
+    - 🔗 **I-050-c** (Synthetic union coercion): Pattern j/k の non-exit 後 narrow 不発 case で後続 Union coerce を提供
+    - 🔗 **I-165** (Per-binding identity `VarId`): Pattern b/d の field path-keyed narrow の identity 基盤
+    - 🔗 **I-161** (`&&=` / `||=`): 同じ `truthy_predicate_for_expr` helper を共有可能
+    - 🔗 T6-3 完了 (前提、本 entry 起票時点で済)
+
+  **Resolution target**: I-144 T6 全 phase 完了後 (T6-6 以降)、Phase A Step 5/6/7 と並行または前段で着手。現時点は L3 (拡大する技術的負債) 位置付け。silent semantic 0 件のため **T6-3 完了 barrier にはならない**。
+
 - **[I-168]** **`NarrowEvent::Reset` event を `narrowed_type` query が消費するよう統合 (pre-existing imprecision)** [L4] — `src/pipeline/type_resolution.rs::narrowed_type` (I-169 2026-04-20 完了後も) は `NarrowEvent::as_narrow().filter_map()` で `Narrow` variant のみ参照し、`Reset { cause: NullAssign \| DirectAssign \| ClosureReassign \| LoopBoundary, position }` は無視。結果、`let x: T | null = 5; if (x === null) return; x = null; return x + 1;` のような reset-after-narrow pattern で `x + 1` position への `narrowed_type` query が reset を無視して narrow 維持を返す (pre-I-144 from the era of narrowing.rs)。I-144 T6-2 以前から存在する imprecision で、I-144 は新規 narrow 機構を追加したが reset 消費は変更せず。**再現**: shadow-let emission path (I-142) が既存 scanner で reset を拾っていたため T6-1 以前は surface していたが、T6-1 で scanner 廃止 + analyzer ??= 限定処理に変更して以降、reset 検出は `??=` site のみ。linear reset (`x = null;`) は narrow 全域に影響する case で `narrowed_type` が古い narrow を返す silent imprecision 疑い。ただし emission 挙動としては narrowed_type が F64 返しても該当 var は実際 `Option<F64>` のため Rust 上は E0308 compile error (silent semantic change ではなく Tier 2)。**根本修正方針**: `narrowed_type(name, position)` を以下に変更: (1) 該当 var の Narrow event を scope で filter、(2) Narrow scope 内で同 var の invalidating Reset event (`cause.invalidates_narrow()` が true) が `narrow.scope_start ≤ reset.position ≤ query.position` を満たすなら Reset 後は narrow を返さない。**影響範囲**: `src/pipeline/type_resolution.rs::narrowed_type`。推定 ~100 LOC + 大量 narrow test 再検証 (既存 narrow test の期待値が Reset 境界で変わる可能性) ~500 LOC 修正。**発生頻度** (2026-04-20 empirical probe): Hono src の TS 330 file で linear `x = null;` / `x = undefined;` 形式の bare assignment は 8 件のみ (base.ts 1, hooks/index.ts 4, intrinsic-element/components.ts 1, client.ts 1, combine/index.ts 1)。うち null-check + 同一 var reset が同一 fn scope 内に共存する「真の linear narrow-then-reset」は 0 件 (client.ts `setJsxNode = null` は `unmount()` method 内で render/hydrate 別 method の narrow と cross-scope、I-169 ClosureCapture suppression で既に handle)。現 Hono で I-168 の silent imprecision が顕在化するケース無し → L4 維持。ただし将来的に Hono 更新や別 codebase で emerge した場合に escalate 可能。**Resolution target**: I-165 と同時期、または independent な narrow mechanism refactor PRD。🔗 I-165 / I-166 / I-170 (binding identity + CFG の基盤を共有することで整合性を保てる)
 
 ### その他

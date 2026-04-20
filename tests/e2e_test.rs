@@ -1026,18 +1026,32 @@ fn test_e2e_cell_i144_c2c_closure_reassign_string_concat() {
     run_cell_e2e_test("i144", "cell-c2c-closure-reassign-string-concat");
 }
 
-// T6-3 pending: E10 truthy predicate (primitive NaN + composite
-// `Option<Union<T, U>>`).
+// T6-3 complete: E10 truthy predicate (primitive NaN + composite
+// `Option<Union<T, U>>` via consolidated match emission).
 #[test]
-#[ignore = "I-144 T6-3: E10 truthy NaN guard for primitive number"]
 fn test_e2e_cell_i144_t4d_truthy_number_nan() {
     run_cell_e2e_test("i144", "cell-t4d-truthy-number-nan");
 }
 #[test]
-#[ignore = "I-144 T6-3: E10 composite truthy predicate for Option<Union>"]
 fn test_e2e_cell_i144_i024_truthy_option_complex() {
     run_cell_e2e_test("i144", "cell-i024-truthy-option-complex");
 }
+// T6-3 regression (T4c/T4e): primitive-String / primitive-Bool truthy emission
+// via the same `try_generate_primitive_truthy_condition` path as cell-t4d.
+#[test]
+fn test_e2e_cell_i144_regression_t4c_truthy_primitive_string() {
+    run_cell_e2e_test("i144", "cell-regression-t4c-truthy-primitive-string");
+}
+#[test]
+fn test_e2e_cell_i144_regression_t4e_truthy_primitive_bool() {
+    run_cell_e2e_test("i144", "cell-regression-t4e-truthy-primitive-bool");
+}
+// T6-3 regression (H-3): composite Option<Union> truthy where the union mixes
+// primitive and non-primitive variants is locked in by a unit test on
+// `build_union_variant_truthy_arms` (see control_flow tests module) because
+// the E2E path is currently blocked by an unrelated call-arg / return Union
+// coercion gap for non-literal expressions. Unit-level lock-in directly
+// validates the match-arm shape independent of that separate defect.
 
 // T6-4 pending: compound OptChain narrow (`x?.v !== undefined` narrows x).
 #[test]

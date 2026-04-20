@@ -1,6 +1,6 @@
 # I-144: Control-flow narrowing analyzer (CFG-based type narrowing infrastructure)
 
-**Status**: Implementation stage 進行中 — **T0-T5 + T6-1 + T6-2 + I-169 T6-2 follow-up 完了** (2026-04-20)、T6-3 着手可能 (phase 分割 plan は `plan.t6.md`)
+**Status**: Implementation stage 進行中 — **T0-T5 + T6-1 + T6-2 + I-169 T6-2 follow-up + T6-3 完了** (T6-3: 2026-04-21)、T6-4 着手可能 (phase 分割 plan は `plan.t6.md`)
 **Matrix-driven**: ✅ Yes (Trigger × LHS type × Reset cause × Flow context × **Read context** × Emission)
 **SDCDF 2-stage workflow 適用**: 必須
 **起票日**: 2026-04-19
@@ -179,7 +179,7 @@ Sub-matrix 5 の RC × 状態マッピングで決定する。
 | E7 | DU struct pattern | `Shape::Circle { radius, .. } => ...` | DU switch case (既存) |
 | E8 | Union variant bind | `Union::String(s) => ...` | union typeof narrow (既存) |
 | E9 | Passthrough (no emission change) | narrow 維持で型同一、binding 変更不要 | `let mut x = 0; x += 1;` |
-| E10 | Type-specific truthy predicate | **Primitive**: `!x.is_empty()` (String) / `x != 0.0 && !x.is_nan()` (F64) / `x` (Bool). **Composite `Option<Union<T, U>>`**: `matches!(x, Some(v) if <inner predicate per variant>)` — Option `None` は false、Some(inner) は inner variant 別 truthy。例: `!x` on `Option<String \| number>` → `!matches!(&x, Some(F64OrString::String(s)) if !s.is_empty()) && !matches!(&x, Some(F64OrString::F64(n)) if *n != 0.0 && !n.is_nan())` | T4c/T4d/T4e primitive + T4a composite (I-024) truthy narrow 述語 |
+| E10 | Type-specific truthy predicate | **Primitive** `if (x)` context: `!x.is_empty()` (String) / `x != 0.0 && !x.is_nan()` (F64) / `x` (Bool) / `x != 0` (integer primitive). Falsy (`if (!x)`) は De Morgan 反転。**Composite `Option<Union<T, U>>` + early-return context** (`if (!x) <exit>`): 実装採用形は **consolidated match** — `let x = match x { Some(Union::V(v)) if <v truthy> => Union::V(v), ..., _ => <exit> };` で truthy check + Option unwrap + 外側 narrow への Union 再構築を 1 match に集約。Non-primitive variant payload (Named / Vec / Tuple 等) は JS で常に truthy のため guard なしで `Some(Union::V(v)) => Union::V(v)` を emit。例 `!x` on `Option<string \| number>`: `let x = match x { Some(F64OrString::String(v)) if !v.is_empty() => F64OrString::String(v), Some(F64OrString::F64(v)) if v != 0.0 && !v.is_nan() => F64OrString::F64(v), _ => return "none".to_string() };` | T4c/T4d/T4e primitive + T4a composite (I-024) truthy narrow 述語 |
 
 #### 次元 RC (Read Context / narrow 変数の使用 context) ← v2 新設
 
@@ -231,11 +231,11 @@ narrow 発生位置の control-flow 構造:
 | T2 instanceof | - | ✓ 既存 | ✓ any-enum | NA | NA | NA | NA | Named: ✓ |
 | T3a `x==null` | ✓ 既存 | ✓ (observed T3b cf.) | ✓ 既存 | NA | NA | NA | NA | NA |
 | T3b `x===undefined` | ✓ observed (narrow→T) | ✓ observed (union variant narrow) | ✓ any-enum `is_undefined` | NA | NA | NA | NA | NA |
-| T4a if truthy Option | **✗ I-024 complex case** | - | - | - | - | - | - | - |
+| T4a if truthy Option | ✓ T6-3 (cell-i024 consolidated match: `let x = match x { Some(Enum::V(v)) if <v truthy> => Enum::V(v), _ => <exit> }`) | - | - | - | - | - | - | - |
 | T4b if truthy Any | - | - | ✓ any-enum (I-030 scope) | - | - | - | - | - |
-| T4c if truthy String | - | - | - | ✓ predicate `!x.is_empty()` | - | - | - | - |
-| T4d if truthy Number | - | - | - | - | **Enhance predicate** (`!= 0.0 && !is_nan()`) | - | - | - |
-| T4e if truthy Bool | - | - | - | - | - | ✓ 既存 | - | - |
+| T4c if truthy String | - | - | - | ✓ T6-3 predicate `!x.is_empty()` (cell-regression-t4c) | - | - | - | - |
+| T4d if truthy Number | - | - | - | - | ✓ T6-3 predicate `x != 0.0 && !x.is_nan()` (cell-t4d) | - | - | - |
+| T4e if truthy Bool | - | - | - | - | - | ✓ T6-3 identity (cell-regression-t4e) | - | - |
 | T4f if truthy Array | - | - | - | - | - | - | - | NA (TS 常に truthy — const-fold 別 PRD) |
 | T6 `??=` | **✗ I-142 Cell #14** | - | **✗ I-142 Cell #5/9 (I-050 依存)** | - | - | - | - | - |
 | T7 OptChain | **Enhance** (compound narrow via `x?.v !== undefined` → x non-null) | - | - | - | - | - | - | - |
@@ -700,6 +700,48 @@ TS の narrow が closure reassign 等で stale 化したとき、runtime の nu
 
 ---
 
+## Spec Revision Log
+
+Implementation stage で発見された spec の曖昧性や変更を `.claude/rules/spec-first-prd.md`
+"Implementation → Spec 逆戻り" 手順に従って記録する。
+
+### T6-3 E10 composite emission: `matches! || matches!` → consolidated `match`
+
+- **Date**: 2026-04-20
+- **Stage**: Implementation (T6-3)
+- **Discovery context**: cell-i024 (`if (!x) return "none"` on `string | number | null`)
+  実装時に、`matches!(x, Some(Union::V1(v)) if ...) || matches!(x, Some(Union::V2(v)) if ...)`
+  形式は predicate 式として正しい truthy 判定を出力するが、**narrow 状態を外側スコープに
+  materialize できない** ことが判明。predicate ONLY 形式だと後続コードで x は依然
+  `Option<Union>` のままで、`if (typeof x === "string") return "s:" + x;` の既存 typeof
+  narrow path が `Option<Union>` を剥がさず `match x { Some(Enum::String(s)) => ..., ... }`
+  を生成できない。
+- **Decision**: E10 composite を **consolidated match** 形式に変更:
+  ```rust
+  let x = match x {
+      Some(Enum::V1(v)) if <v1 truthy> => Enum::V1(v),
+      Some(Enum::V2(v)) if <v2 truthy> => Enum::V2(v),
+      _ => <exit>,
+  };
+  ```
+  この 1 match で (a) composite truthy predicate、(b) Option unwrap、(c) 外側 `x` への
+  Union 再 bind を同時に達成する。後続 typeof narrow は narrowed `x: Union` を素直に
+  match 可能。
+- **NA justification for predicate form**: `matches! || matches!` 形式は `if` 文の
+  condition としては正しいが、narrow materialization が不可能。consolidated match は
+  let-binding で narrow を外側スコープに伝播できる唯一の Rust 慣用 form。
+- **Matrix impact**: Sub-matrix 1 T4a × L1 cell を `✓ T6-3 consolidated match` に更新。
+  E10 行定義を consolidated match 記述に差し替え (primitive 単体の場合は従来の predicate
+  wrap `if x != 0.0 && !x.is_nan()`、Option<Union> の場合は consolidated match)。
+- **Non-primitive variant 拡張 (H-3 fix)**: `string | number | { name: string }` 等の
+  mixed union で Named (object) variant は JS 常に truthy。consolidated match 内で
+  `Some(Enum::ObjVariant(v)) => Enum::ObjVariant(v)` (guard なし) を emit する規約を
+  追加。E10 行定義に明記。
+- **Regression test**: cell-i024 (Primitive × 2 variant) の E2E + H-3 (Primitive +
+  Named variant) の integration test (`test_try_generate_option_truthy_complement_match_h3_mixed_union_emits_guard_only_for_primitives`) で lock-in。
+
+---
+
 ## Task List
 
 TDD: RED → GREEN → REFACTOR 順。Phase 間は SDCDF spec stage / implementation stage 境界。
@@ -958,20 +1000,64 @@ T6-1 に畳み込み (scanner 関数 + call site を同時削除、broken-window
   - clippy 0 / fmt 0 / Hono bench 非後退
 - **Depends on**: T6-1 ✅
 
-#### T6-3: Truthy predicate E10 (primitive NaN + composite `Option<Union<T,U>>`)
+#### T6-3: Truthy predicate E10 (primitive NaN + composite `Option<Union<T,U>>`) — ✅ 完了 (2026-04-20)
 
-- **Work**:
-  - Truthy emission 箇所を probe-4/5/6 で特定、`src/transformer/helpers/truthy.rs` 等に集約
-  - `F64` truthy → `x != 0.0 && !x.is_nan()` (T4d)
-  - `Option<Union<T,U>>` truthy → variant 別 `matches!(x, Some(Union::V(v)) if <inner truthy>) || ...`
-    (I-024 E10 composite)
-  - `!x` early-return complement narrow の composite case 対応 (必要なら guards.rs 拡張)
-  - cell-t4d / cell-i024 E2E un-ignore
-- **Completion criteria**:
-  - cell-t4d / cell-i024 E2E GREEN
-  - Truthy predicate unit test が全 RustType variant を網羅
-  - 既 GREEN cell regression 0
-- **Depends on**: T6-2
+- **Work (実装採用形)**:
+  - `src/transformer/helpers/truthy.rs` 新設 — primitive truthy/falsy predicate を中央化
+    (F64 → `x != 0.0 && !x.is_nan()`, String → `!x.is_empty()`, Bool → identity,
+    integer primitive → `x != 0`)。falsy は De Morgan 反転
+  - `statements/helpers.rs::generate_truthiness_condition` / `generate_falsy_condition`
+    を helper への thin delegate に migrate (DRY 化)
+  - `convert_if_stmt` fallback path に `try_generate_primitive_truthy_condition` 追加 —
+    bare `if (x)` / `if (!x)` on F64/String/Bool/Primitive(int) を predicate wrap
+    (`unwrap_parens` で `if ((x))` / `if (!(x))` も同経路)
+  - `convert_if_stmt` に `try_generate_option_truthy_complement_match` 追加 —
+    `if (!x) <exit>` on `Option<T>` を consolidated match emission
+    (`let x = match x { <truthy arms> => ..., _ => <exit> }`)。
+    inner type 別に分岐: Primitive → `Some(v) if <v truthy> => v`, Named (synthetic
+    Union) → per-variant arm (primitive variant は truthy guard, non-primitive は
+    guard なし)。inner binding は arm-local `__ts_union_inner`
+  - `expressions/literals.rs` に `wrap_in_synthetic_union_variant` 追加 —
+    expected type が synthetic union の Named 型のとき primitive literal を variant
+    constructor で自動 wrap (`f("hi")` on `Option<F64OrString>` →
+    `f(Some(F64OrString::String("hi".to_string())))`)。TypeRegistry +
+    `variant_name_for_type` convention で reverse lookup
+  - `return_wrap::wrap_leaf` priority 0 guard 追加 —
+    expr が同一 enum への UserEnumVariantCtor call なら再 wrap せず返す
+    (`convert_lit` の pre-wrap と return_wrap の衝突による `Enum::V(Enum::V(inner))`
+    double-wrap を structural 防止)
+  - `ir_body_always_exits` に `Stmt::Match` 全 arm exit 判定 + 空 Match 防御を追加
+    (T6-4/T6-5 で match ベース emission が導入される際の silent bug 予防、/check_job
+    R2-I1)
+  - E2E un-ignore: cell-t4d-truthy-number-nan / cell-i024-truthy-option-complex +
+    regression cell-regression-t4c-truthy-primitive-string /
+    cell-regression-t4e-truthy-primitive-bool
+- **Completion criteria (すべて達成)**:
+  - [x] cell-t4d / cell-i024 E2E GREEN
+  - [x] Truthy predicate unit test が全 RustType variant を網羅 (supported primitive
+        は per-variant 値 assert、unsupported は None 返しを exhaustive 一括テスト)
+  - [x] wrap_in_synthetic_union_variant 全分岐 (expected=None / 非 Named / type_args
+        非空 / registry miss / 非 enum / string literal enum / discriminated enum /
+        variant miss / F64/String/Bool hit) を unit test 網羅
+  - [x] return_wrap priority 0 guard の regression test (same-enum absorb +
+        different-enum fall-through) 追加
+  - [x] `ir_body_always_exits` の全 stmt shape (Return/Break/Continue/If/IfLet/Match/
+        空) unit test 6 case 追加
+  - [x] H-3 mixed-union non-primitive variant emission の integration test lock-in
+        (`test_try_generate_option_truthy_complement_match_h3_mixed_union_emits_guard_only_for_primitives`)。E2E lock-in は call-arg Union coercion gap (I-050-c track) の解消後
+  - [x] 既 GREEN cell regression 0 (i144 cell 全 13 pass)
+  - [x] clippy 0 / fmt 0 / Hono bench 非後退 (clean 112/158, errors 62)
+  - [x] `/check_job` × 2 round + `/check_problem` で 15 defect 全 structural 対応
+        (詳細: Spec Revision Log + R2 round 追加項目 + 周辺 defect を I-050-c 拡充 /
+        I-171 新規起票で track、ad-hoc patch 0 件)
+- **Depends on**: T6-2 ✅
+- **発見された周辺 defect** (本 PRD scope 外、別 TODO/PRD で track):
+  - **I-050-c (TODO)**: synthetic union coercion の非 literal expr (Ident / UnaryExpr /
+    Call / Member 等) / return value / var-init / array-element 対応。T6-3 は literal
+    (Num/Str/Bool) のみ完了、残を I-050 umbrella 内 sub-PRD 化。
+  - **I-171 (TODO)**: `if (!x)` 汎用 truthy/falsy 変換 — non-Ident LHS (Member / OptChain
+    / BinExpr / LogicalAnd / UnaryExpr / Lit)、non-exit body、else branch など 9 pattern
+    の Tier 2 compile error。独立 matrix-driven PRD として起票 target。
 
 #### T6-4: Compound OptChain narrow detection (T7 GREEN 化)
 

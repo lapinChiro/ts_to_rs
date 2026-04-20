@@ -9,5 +9,12 @@
 //!   appropriate `.unwrap_or(...)` / `.map(...).unwrap_or_else(...)`
 //!   default so post-narrow-stale reads (e.g., closure-reassign aftermath)
 //!   reproduce JS runtime semantics (`null + 1 = 1`, `"v=" + null = "v=null"`).
+//! - **`truthy`** — JS truthy / falsy predicate table (I-144 T6-3 E10):
+//!   builds per-`RustType` predicate expressions (`F64` → `x != 0.0 &&
+//!   !x.is_nan()` etc.) used by `convert_if_stmt` fallback when the
+//!   test is a bare identifier on a primitive, and by
+//!   `try_generate_narrowing_match` when generating composite
+//!   Option<Union> truthy guards.
 
 pub(crate) mod coerce_default;
+pub(crate) mod truthy;

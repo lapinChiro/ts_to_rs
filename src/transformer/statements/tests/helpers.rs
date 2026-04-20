@@ -77,14 +77,26 @@ fn test_extract_conditional_assignment_nested_parens_unwraps() {
 // ─── generate_truthiness_condition / generate_falsy_condition ────────
 
 #[test]
-fn test_generate_truthiness_condition_f64_generates_not_eq_zero() {
+fn test_generate_truthiness_condition_f64_generates_ne_zero_and_not_nan() {
+    // I-144 T6-3 E10: F64 truthy must exclude both 0.0 AND NaN (JS parity).
     let result = generate_truthiness_condition("val", &RustType::F64);
     assert_eq!(
         result,
         Expr::BinaryOp {
-            left: Box::new(Expr::Ident("val".to_string())),
-            op: BinOp::NotEq,
-            right: Box::new(Expr::NumberLit(0.0)),
+            left: Box::new(Expr::BinaryOp {
+                left: Box::new(Expr::Ident("val".to_string())),
+                op: BinOp::NotEq,
+                right: Box::new(Expr::NumberLit(0.0)),
+            }),
+            op: BinOp::LogicalAnd,
+            right: Box::new(Expr::UnaryOp {
+                op: UnOp::Not,
+                operand: Box::new(Expr::MethodCall {
+                    object: Box::new(Expr::Ident("val".to_string())),
+                    method: "is_nan".to_string(),
+                    args: vec![],
+                }),
+            }),
         }
     );
 }
@@ -113,23 +125,44 @@ fn test_generate_truthiness_condition_bool_generates_ident() {
 
 #[test]
 fn test_generate_falsy_condition_is_inverse_of_truthiness() {
-    // For F64: truthiness is `!= 0.0`, falsy is `== 0.0`
+    // For F64 (I-144 T6-3 E10):
+    //   truthy: `v != 0.0 && !v.is_nan()`
+    //   falsy:  `v == 0.0 || v.is_nan()` (De Morgan)
     let truth_f64 = generate_truthiness_condition("v", &RustType::F64);
     let falsy_f64 = generate_falsy_condition("v", &RustType::F64);
     assert_eq!(
         truth_f64,
         Expr::BinaryOp {
-            left: Box::new(Expr::Ident("v".to_string())),
-            op: BinOp::NotEq,
-            right: Box::new(Expr::NumberLit(0.0)),
+            left: Box::new(Expr::BinaryOp {
+                left: Box::new(Expr::Ident("v".to_string())),
+                op: BinOp::NotEq,
+                right: Box::new(Expr::NumberLit(0.0)),
+            }),
+            op: BinOp::LogicalAnd,
+            right: Box::new(Expr::UnaryOp {
+                op: UnOp::Not,
+                operand: Box::new(Expr::MethodCall {
+                    object: Box::new(Expr::Ident("v".to_string())),
+                    method: "is_nan".to_string(),
+                    args: vec![],
+                }),
+            }),
         }
     );
     assert_eq!(
         falsy_f64,
         Expr::BinaryOp {
-            left: Box::new(Expr::Ident("v".to_string())),
-            op: BinOp::Eq,
-            right: Box::new(Expr::NumberLit(0.0)),
+            left: Box::new(Expr::BinaryOp {
+                left: Box::new(Expr::Ident("v".to_string())),
+                op: BinOp::Eq,
+                right: Box::new(Expr::NumberLit(0.0)),
+            }),
+            op: BinOp::LogicalOr,
+            right: Box::new(Expr::MethodCall {
+                object: Box::new(Expr::Ident("v".to_string())),
+                method: "is_nan".to_string(),
+                args: vec![],
+            }),
         }
     );
 

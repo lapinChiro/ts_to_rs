@@ -7,10 +7,13 @@ use anyhow::Result;
 use swc_ecma_ast as ast;
 
 use super::helpers::{
-    extract_conditional_assignment, generate_truthiness_condition, ConditionalAssignment,
+    extract_conditional_assignment, generate_truthiness_condition, unwrap_parens,
+    ConditionalAssignment,
 };
-use crate::ir::{BinOp, Expr, MatchArm, Pattern, RustType, Stmt};
+use crate::ir::{BinOp, CallTarget, Expr, MatchArm, Pattern, PatternCtor, RustType, Stmt};
+use crate::pipeline::synthetic_registry::SyntheticTypeKind;
 use crate::transformer::expressions::patterns::extract_narrowing_guards;
+use crate::transformer::helpers::truthy;
 use crate::transformer::Transformer;
 
 impl<'a> Transformer<'a> {
@@ -109,12 +112,231 @@ impl<'a> Transformer<'a> {
             None
         };
 
-        let condition = self.convert_expr(&if_stmt.test)?;
+        // I-144 T6-3 (cell-i024): `if (!x) <exit>` on `Option<T>` emitted as a
+        // consolidated match that combines the composite truthy predicate with
+        // the non-null narrow materialization. Must run before the primitive
+        // fallback because `!x` on Option<Union> has no valid predicate form.
+        if else_body.is_none() {
+            if let Some(stmts) =
+                self.try_generate_option_truthy_complement_match(&if_stmt.test, &then_body)?
+            {
+                return Ok(stmts);
+            }
+        }
+
+        let condition =
+            if let Some(pred) = self.try_generate_primitive_truthy_condition(&if_stmt.test) {
+                pred
+            } else {
+                self.convert_expr(&if_stmt.test)?
+            };
         Ok(vec![Stmt::If {
             condition,
             then_body,
             else_body,
         }])
+    }
+
+    /// Emits a consolidated `match` for `if (!x) <early-exit>` on
+    /// `Option<T>`.
+    ///
+    /// This is the T6-3 core for cell-i024. Replaces the naive fallback
+    /// `if !x { <exit> }` (invalid Rust for `Option<T>`) with:
+    ///
+    /// ```text
+    /// let x = match x {
+    ///     <truthy Some arms>  => <rebound value>,
+    ///     _ => { <exit body> }
+    /// };
+    /// ```
+    ///
+    /// The arm shape depends on `T`:
+    /// - `T = F64 | String | Bool | integer`: single `Some(v) if <v truthy> => v`.
+    /// - `T = Named` (synthetic union with primitive variants): one
+    ///   `Some(Enum::Variant(v)) if <v truthy> => Enum::Variant(v)` per variant.
+    /// - `T = Named` (non-synthetic or variant without primitive data): single
+    ///   `Some(v) => v` (all `Some` values are JS-truthy for non-primitive
+    ///   payloads: objects, arrays, functions).
+    ///
+    /// Returns `None` (fall through to existing emission) when:
+    /// - `test` is not `!ident`.
+    /// - `ident` has no resolved type or is not `Option<T>`.
+    /// - `then_body` does not always exit (return/throw/break/continue).
+    ///   The non-exit case is semantically a no-op narrow on failure, which
+    ///   the existing Option if-let path handles correctly.
+    fn try_generate_option_truthy_complement_match(
+        &self,
+        test: &ast::Expr,
+        then_body: &[Stmt],
+    ) -> Result<Option<Vec<Stmt>>> {
+        let ast::Expr::Unary(unary) = unwrap_parens(test) else {
+            return Ok(None);
+        };
+        if unary.op != ast::UnaryOp::Bang {
+            return Ok(None);
+        }
+        let ast::Expr::Ident(ident) = unwrap_parens(unary.arg.as_ref()) else {
+            return Ok(None);
+        };
+        let var_name = ident.sym.to_string();
+        let Some(var_ty) = self.get_type_for_var(&var_name, ident.span) else {
+            return Ok(None);
+        };
+        let RustType::Option(inner) = var_ty else {
+            return Ok(None);
+        };
+        if !ir_body_always_exits(then_body) {
+            return Ok(None);
+        }
+
+        let arms = self.build_option_truthy_match_arms(&var_name, inner, then_body)?;
+        let Some(arms) = arms else {
+            return Ok(None);
+        };
+
+        let match_expr = Expr::Match {
+            expr: Box::new(Expr::Ident(var_name.clone())),
+            arms,
+        };
+        Ok(Some(vec![Stmt::Let {
+            mutable: false,
+            name: var_name,
+            ty: None,
+            init: Some(match_expr),
+        }]))
+    }
+
+    /// Builds match arms for the composite Option truthy complement emission.
+    ///
+    /// The final arm (`_ => <exit_body>`) is appended unconditionally by the
+    /// caller. This method returns the positive (truthy) arms only.
+    /// Returns `None` when the inner type is not supported (e.g. Vec, Fn,
+    /// Tuple) — the caller falls back to the existing emission so we do not
+    /// introduce a silent semantic change for cases the PRD does not cover.
+    fn build_option_truthy_match_arms(
+        &self,
+        var_name: &str,
+        inner: &RustType,
+        exit_body: &[Stmt],
+    ) -> Result<Option<Vec<MatchArm>>> {
+        let exit_arm = MatchArm {
+            patterns: vec![Pattern::Wildcard],
+            guard: None,
+            body: exit_body.to_vec(),
+        };
+
+        let positive_arms: Option<Vec<MatchArm>> = match inner {
+            RustType::F64 | RustType::String | RustType::Bool | RustType::Primitive(_) => {
+                let guard = truthy::truthy_predicate(var_name, inner);
+                Some(vec![MatchArm {
+                    patterns: vec![Pattern::some_binding(var_name)],
+                    guard,
+                    body: vec![Stmt::TailExpr(Expr::Ident(var_name.to_string()))],
+                }])
+            }
+            RustType::Named { name, type_args } if type_args.is_empty() => {
+                self.build_union_variant_truthy_arms(name)
+            }
+            _ => None,
+        };
+
+        let Some(mut arms) = positive_arms else {
+            return Ok(None);
+        };
+        arms.push(exit_arm);
+        Ok(Some(arms))
+    }
+
+    /// For a synthetic union enum `enum_name`, emits one arm per variant:
+    ///
+    /// `Some(Enum::Variant(v)) if <v truthy> => Enum::Variant(v)` for
+    /// primitive payloads, or the same pattern without a guard for
+    /// non-primitive (always-truthy) payloads.
+    ///
+    /// Returns `None` when the union is not registered as a synthetic
+    /// `UnionEnum`, or when any variant lacks a `data` RustType. The outer
+    /// variable name is not threaded here — the per-arm inner binding is
+    /// arm-local (`__ts_union_inner`) and cannot collide with outer
+    /// identifiers regardless of the caller's choice of `var_name`.
+    fn build_union_variant_truthy_arms(&self, enum_name: &str) -> Option<Vec<MatchArm>> {
+        let def = self.synthetic.get(enum_name)?;
+        if def.kind != SyntheticTypeKind::UnionEnum {
+            return None;
+        }
+        let crate::ir::Item::Enum { variants, .. } = &def.item else {
+            return None;
+        };
+        // `__ts_` prefix follows the internal-var convention established in
+        // I-154. Arm-local scope guarantees no collision with outer bindings
+        // even when user code happens to use the same identifier.
+        const INNER_BIND: &str = "__ts_union_inner";
+        let enum_ref = crate::ir::UserTypeRef::new(enum_name.to_string());
+
+        let mut arms = Vec::with_capacity(variants.len());
+        for variant in variants {
+            let variant_ty = variant.data.as_ref()?;
+            let guard = if is_supported_variant_truthy_type(variant_ty) {
+                truthy::truthy_predicate(INNER_BIND, variant_ty)
+            } else {
+                // Non-primitive variant payload (Named struct, Vec, Tuple, Fn,
+                // etc.) — JS treats all object references as truthy. Emit the
+                // arm without a guard so `Some(Union::V(v))` unconditionally
+                // materializes the narrow.
+                None
+            };
+            let pattern = Pattern::TupleStruct {
+                ctor: PatternCtor::Builtin(crate::ir::BuiltinVariant::Some),
+                fields: vec![Pattern::TupleStruct {
+                    ctor: PatternCtor::UserEnumVariant {
+                        enum_ty: enum_ref.clone(),
+                        variant: variant.name.clone(),
+                    },
+                    fields: vec![Pattern::binding(INNER_BIND)],
+                }],
+            };
+            let body_expr = Expr::FnCall {
+                target: CallTarget::UserEnumVariantCtor {
+                    enum_ty: enum_ref.clone(),
+                    variant: variant.name.clone(),
+                },
+                args: vec![Expr::Ident(INNER_BIND.to_string())],
+            };
+            arms.push(MatchArm {
+                patterns: vec![pattern],
+                guard,
+                body: vec![Stmt::TailExpr(body_expr)],
+            });
+        }
+        Some(arms)
+    }
+
+    /// Emits a JS truthy/falsy predicate expression when the test is a bare
+    /// identifier (or its negation) on a primitive RustType.
+    ///
+    /// This is the T6-3 E10 entry point for `if (x)` / `if (!x)` on
+    /// `F64` / `String` / `Bool` / integer primitives where the naive
+    /// `if x { ... }` Rust emission would fail type checking (`expected
+    /// bool, found f64`). Option/Named types return `None` so the caller
+    /// delegates to the existing `if let Some(..) = ..` narrow path.
+    ///
+    /// Paren wrapping is unwrapped structurally so `if ((x))` / `if (!(x))`
+    /// exercise the same path as `if (x)` / `if (!x)`.
+    fn try_generate_primitive_truthy_condition(&self, test: &ast::Expr) -> Option<Expr> {
+        match unwrap_parens(test) {
+            ast::Expr::Ident(ident) => {
+                let ty = self.get_type_for_var(ident.sym.as_ref(), ident.span)?;
+                crate::transformer::helpers::truthy::truthy_predicate(ident.sym.as_ref(), ty)
+            }
+            ast::Expr::Unary(u) if u.op == ast::UnaryOp::Bang => {
+                if let ast::Expr::Ident(ident) = unwrap_parens(u.arg.as_ref()) {
+                    let ty = self.get_type_for_var(ident.sym.as_ref(), ident.span)?;
+                    crate::transformer::helpers::truthy::falsy_predicate(ident.sym.as_ref(), ty)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
     }
 
     /// Converts an `if` statement with a conditional assignment.
@@ -400,11 +622,31 @@ impl<'a> Transformer<'a> {
     }
 }
 
+/// Whether a variant's `data` RustType requires a JS-truthy guard
+/// (`!= 0.0 && !.is_nan()`, `!.is_empty()`, etc.) in the composite match.
+///
+/// Primitives (`F64`, `String`, `Bool`, `Primitive(int)`) can be falsy at
+/// runtime, so the per-variant arm needs a guard to exclude falsy values.
+/// Non-primitive payloads (`Named` struct, `Vec`, `Tuple`, `Fn`, etc.) are
+/// always truthy in JS (every object reference is truthy), so the arm emits
+/// without a guard and matches any `Some(Enum::Variant(_))` of that variant.
+fn is_supported_variant_truthy_type(ty: &RustType) -> bool {
+    matches!(
+        ty,
+        RustType::F64 | RustType::String | RustType::Bool | RustType::Primitive(_)
+    )
+}
+
 /// Returns `true` if an IR statement body always exits its enclosing scope.
 ///
 /// Checks for return, break, continue. Throw is converted to `Stmt::Return(Err(...))`
 /// by `convert_throw_stmt`, so it's automatically covered by the `Return` check.
-fn ir_body_always_exits(body: &[Stmt]) -> bool {
+///
+/// Nested control-flow (`If` / `IfLet` / `Match`) is transitively
+/// "always-exit" when every branch is always-exit. Empty `Match.arms` cannot
+/// be always-exit because the match produces no statements; the non-empty
+/// requirement is enforced explicitly.
+pub(super) fn ir_body_always_exits(body: &[Stmt]) -> bool {
     body.last().is_some_and(|stmt| match stmt {
         Stmt::Return { .. } => true,
         Stmt::Break { .. } | Stmt::Continue { .. } => true,
@@ -418,6 +660,9 @@ fn ir_body_always_exits(body: &[Stmt]) -> bool {
             else_body: Some(else_body),
             ..
         } => ir_body_always_exits(then_body) && ir_body_always_exits(else_body),
+        Stmt::Match { arms, .. } => {
+            !arms.is_empty() && arms.iter().all(|arm| ir_body_always_exits(&arm.body))
+        }
         _ => false,
     })
 }

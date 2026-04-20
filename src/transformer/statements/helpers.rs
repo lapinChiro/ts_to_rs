@@ -5,7 +5,8 @@
 
 use swc_ecma_ast as ast;
 
-use crate::ir::{BinOp, Expr, RustType, UnOp};
+use crate::ir::{Expr, RustType, UnOp};
+use crate::transformer::helpers::truthy;
 
 /// Represents a conditional assignment extracted from a condition expression.
 ///
@@ -135,48 +136,39 @@ fn is_comparison_op(op: ast::BinaryOp) -> bool {
 
 /// Generates a truthiness check expression for a given type.
 ///
-/// Returns `None` for Option types (which use `if let` / `while let` instead).
+/// Delegates to [`truthy::truthy_predicate`] for supported primitives
+/// (`F64` / `String` / `Bool` / integer primitives) and falls back to a
+/// bare identifier for unsupported types.
+///
+/// # Fallback contract
+///
+/// The `Expr::Ident(var_name)` fallback produces `if var { ... }` which is
+/// a Rust type error for all non-`Bool` types. This is an intentional
+/// _compile-time fence_: callers that hit the fallback with a non-`Bool`
+/// type will discover the gap via `rustc`, rather than silently
+/// generating incorrect behaviour. The fallback is expected only in the
+/// two existing call sites:
+///
+/// 1. [`crate::transformer::statements::control_flow::Transformer::convert_if_with_conditional_assignment`]:
+///    enters only for `if (x = expr)` where `x` has an already-resolved
+///    type — primitives are handled by [`truthy::truthy_predicate`] and
+///    richer types use dedicated narrow paths earlier in `convert_if_stmt`.
+/// 2. `generate_falsy_condition` loop-break uses (see below).
+///
+/// Do NOT widen this fallback to emit `.is_some()` or similar guesses —
+/// that would introduce silent semantic changes (Tier 1) instead of
+/// surfacing gaps as compile errors.
 pub(super) fn generate_truthiness_condition(var_name: &str, ty: &RustType) -> Expr {
-    match ty {
-        RustType::F64 => Expr::BinaryOp {
-            left: Box::new(Expr::Ident(var_name.to_string())),
-            op: BinOp::NotEq,
-            right: Box::new(Expr::NumberLit(0.0)),
-        },
-        RustType::String => Expr::UnaryOp {
-            op: UnOp::Not,
-            operand: Box::new(Expr::MethodCall {
-                object: Box::new(Expr::Ident(var_name.to_string())),
-                method: "is_empty".to_string(),
-                args: vec![],
-            }),
-        },
-        RustType::Bool => Expr::Ident(var_name.to_string()),
-        // Fallback for unknown types: use the variable as-is (may need manual fixing)
-        _ => Expr::Ident(var_name.to_string()),
-    }
+    truthy::truthy_predicate(var_name, ty).unwrap_or_else(|| Expr::Ident(var_name.to_string()))
 }
 
-/// Generates a falsy check condition (the inverse of truthiness) for loop break.
+/// Generates a falsy check condition (De Morgan inverse of truthiness).
+///
+/// Used for loop break conditions. Shares the compile-time fence contract
+/// described on [`generate_truthiness_condition`].
 pub(super) fn generate_falsy_condition(var_name: &str, ty: &RustType) -> Expr {
-    match ty {
-        RustType::F64 => Expr::BinaryOp {
-            left: Box::new(Expr::Ident(var_name.to_string())),
-            op: BinOp::Eq,
-            right: Box::new(Expr::NumberLit(0.0)),
-        },
-        RustType::String => Expr::MethodCall {
-            object: Box::new(Expr::Ident(var_name.to_string())),
-            method: "is_empty".to_string(),
-            args: vec![],
-        },
-        RustType::Bool => Expr::UnaryOp {
-            op: UnOp::Not,
-            operand: Box::new(Expr::Ident(var_name.to_string())),
-        },
-        _ => Expr::UnaryOp {
-            op: UnOp::Not,
-            operand: Box::new(Expr::Ident(var_name.to_string())),
-        },
-    }
+    truthy::falsy_predicate(var_name, ty).unwrap_or_else(|| Expr::UnaryOp {
+        op: UnOp::Not,
+        operand: Box::new(Expr::Ident(var_name.to_string())),
+    })
 }

@@ -143,6 +143,25 @@ pub(crate) fn wrap_leaf(
         .map(|(lo, hi)| format!("byte {lo}..{hi}"))
         .unwrap_or_else(|| "unknown location".to_string());
 
+    // 0. Already wrapped: the leaf is a `Ctx::Enum::Variant(inner)` call for the
+    // same enum (e.g., convert_lit pre-wrapped a primitive literal via the
+    // T6-3 `wrap_in_synthetic_union_variant` path for Option<Union> call-arg
+    // coercion, then the same function returns that Union from another site).
+    // Skipping avoids `Enum::V(Enum::V(inner))` double-wrap (I-144 T6-3 guard).
+    if let Expr::FnCall {
+        target:
+            crate::ir::CallTarget::UserEnumVariantCtor {
+                enum_ty: already_enum,
+                ..
+            },
+        ..
+    } = &ir_expr
+    {
+        if already_enum.as_str() == ctx.enum_name {
+            return Ok(ir_expr);
+        }
+    }
+
     // 1. Polymorphic None: `return null/undefined/None`
     if is_none_expr(&ir_expr) {
         return match ctx.unique_option_variant() {
@@ -714,6 +733,69 @@ mod tests {
             }
             _ => panic!("expected FnCall, got {result:?}"),
         }
+    }
+
+    #[test]
+    fn wrap_leaf_priority0_already_wrapped_same_enum_returns_as_is() {
+        // Priority 0 guard (I-144 T6-3): if the leaf is already a ctor call for
+        // the target enum, do NOT double-wrap. This happens when
+        // `convert_lit` pre-wraps a primitive via the Option<Union> call-arg
+        // coercion path and then the same function returns that Union from a
+        // different site; without this guard we would emit
+        // `F64OrString::F64(F64OrString::F64(inner))`.
+        let ctx = ReturnWrapContext {
+            enum_name: "F64OrString".to_string(),
+            variant_by_type: vec![
+                (RustType::F64, "F64".to_string()),
+                (RustType::String, "String".to_string()),
+            ],
+        };
+        let pre_wrapped = Expr::FnCall {
+            target: crate::ir::CallTarget::UserEnumVariantCtor {
+                enum_ty: crate::ir::UserTypeRef::new("F64OrString".to_string()),
+                variant: "F64".to_string(),
+            },
+            args: vec![Expr::NumberLit(5.0)],
+        };
+        let result = wrap_leaf(pre_wrapped.clone(), None, None, &ctx).unwrap();
+        assert_eq!(
+            result, pre_wrapped,
+            "already-wrapped expr for same enum must be returned unchanged"
+        );
+    }
+
+    #[test]
+    fn wrap_leaf_priority0_different_enum_falls_through_to_inference() {
+        // If the pre-wrapped ctor call is for a DIFFERENT enum than the target,
+        // the guard deliberately falls through so inference / type-resolver
+        // priorities can still attempt to (correctly or incorrectly) wrap it.
+        // This test locks in that fall-through behaviour — a future change
+        // that treats any UserEnumVariantCtor as "do not re-wrap" would break
+        // this contract.
+        let ctx = ReturnWrapContext {
+            enum_name: "F64OrString".to_string(),
+            variant_by_type: vec![
+                (RustType::F64, "F64".to_string()),
+                (RustType::String, "String".to_string()),
+            ],
+        };
+        let other_enum_expr = Expr::FnCall {
+            target: crate::ir::CallTarget::UserEnumVariantCtor {
+                enum_ty: crate::ir::UserTypeRef::new("OtherEnum".to_string()),
+                variant: "A".to_string(),
+            },
+            args: vec![Expr::NumberLit(5.0)],
+        };
+        // With no type info and no literal-inference match (FnCall is not a
+        // Lit), the function falls through to priority 4 "single non-Option
+        // fallback". The `F64OrString` context has two variants → fallback is
+        // not single → priority 5 error. Verify the error path (this means
+        // the priority-0 guard did NOT absorb the expr).
+        let result = wrap_leaf(other_enum_expr, None, None, &ctx);
+        assert!(
+            result.is_err(),
+            "different-enum wrapped expr must NOT be absorbed by the priority-0 guard"
+        );
     }
 
     #[test]

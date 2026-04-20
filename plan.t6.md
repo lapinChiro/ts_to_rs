@@ -52,11 +52,11 @@ PRD Task section の T6 "Work" item (Step 6-1 scanner 短絡 + Step 6-2 emission
 ## Phase 構造 (6 sub-phase)
 
 ```
-T6-1: Pipeline wiring + scanner retirement + ??= dispatch (3 cell GREEN)
+T6-1 ✅: Pipeline wiring + scanner retirement + ??= dispatch (3 cell GREEN)
    ↓
-T6-2: coerce_default helper + E2b stale read emission (2 cell GREEN)
+T6-2 ✅: coerce_default helper + E2b stale read emission (2 cell GREEN)
    ↓
-T6-3: Truthy predicate E10 (primitive NaN + composite Option<Union>) (2 cell GREEN)
+T6-3 ✅: Truthy predicate E10 (primitive NaN + composite Option<Union>) (2 cell GREEN)
    ↓
 T6-4: Compound OptChain narrow detection (1 cell GREEN)
    ↓
@@ -421,18 +421,28 @@ T6-2 着手時に以下を probe (実装着手前):
 
 ---
 
-## Phase T6-3: Truthy predicate E10 (primitive NaN + composite Option<Union>)
+## Phase T6-3: Truthy predicate E10 (primitive NaN + composite Option<Union>) ✅ 完了 (2026-04-21)
+
+**完了サマリ** (詳細は backlog/I-144 T6-3 section 参照):
+- 実装: `helpers/truthy.rs` 新設 + `try_generate_primitive_truthy_condition` + `try_generate_option_truthy_complement_match` (Primitive/Union/non-primitive always-truthy arm) + `wrap_in_synthetic_union_variant` (call-arg Literal coercion) + `return_wrap::wrap_leaf` priority 0 guard + `ir_body_always_exits` Match 対応
+- 対応: `/check_job` × 2 round + `/check_problem` で 15 defect 全 structural 対応 (H-1〜M-5 + R2-C1〜R2-I3)
+- PRD 更新: Sub-matrix T4a/T4c/T4d/T4e を ✓ T6-3 に反映 + Spec Revision Log 追加 (matches! → consolidated match 決定記録)
+- テスト: lib +19 test (wrap_in_synthetic_union_variant 11 / truthy exhaustive + primitive int falsy / return_wrap priority 0 × 2 / ir_body_always_exits / H-3 integration)、E2E +2 (cell-regression-t4c / t4e) + 2 un-ignore (cell-t4d / cell-i024)
+- 周辺 defect: I-050-c 拡充 (non-literal Union coercion) + I-171 新規起票 (`if (!x)` 全経路対応) で track
+
+**旧原版**: 以下は Spec stage の着手前計画。完了後の実装採用形は backlog/I-144 T6-3 section。
 
 **目的**: `if (x)` / `if (!x)` の truthy predicate emission を E10 対応 (primitive NaN
 + composite Option<Union>)。
 
-**GREEN 化する cell (2)**:
+**GREEN 化した cell (2)**:
 - `cell-t4d-truthy-number-nan` (T4d): `if (x)` on `number` → 現状 `x != 0.0` のみ、
   ideal `x != 0.0 && !x.is_nan()`
 - `cell-i024-truthy-option-complex` (I-024): `if (!x) return "none"` on
   `string | number | null` → early-return complement narrow + composite truthy 述語
-  (E10) で `matches!(x, Some(StringOrF64::String(s)) if !s.is_empty()) ||
-  matches!(x, Some(StringOrF64::F64(n)) if *n != 0.0 && !n.is_nan())` 相当
+  (E10) — 実装は consolidated match emission (`let x = match x { Some(V(v)) if
+  <v truthy> => V(v), _ => return "none".to_string() }`) で truthy check + Option
+  unwrap + Union narrow materialization を 1 match に集約
 
 ### 設計 (T6-3)
 
@@ -484,12 +494,14 @@ T6-2 着手時に以下を probe (実装着手前):
 
 **推定 total**: ±400 LOC
 
-### 完了条件 (T6-3)
+### 完了条件 (T6-3) ✅ 全達成
 
-- [ ] cell-t4d / cell-i024 E2E PASS
-- [ ] truthy predicate unit test が全 RustType variant × truthy cell を網羅
-- [ ] regression 0 (T6-1/T6-2 cell + baseline 全 pass)
-- [ ] clippy / fmt / Hono bench 非後退
+- [x] cell-t4d / cell-i024 E2E PASS
+- [x] truthy predicate unit test が全 RustType variant × truthy cell を網羅 (primitive
+      positive 値 assert + non-primitive exhaustive None 返し)
+- [x] regression 0 (T6-1/T6-2 cell + baseline 全 pass、i144 cell 13 pass)
+- [x] clippy 0 / fmt 0 / Hono bench 非後退 (clean 112/158, errors 62)
+- [x] review 2 round + check_problem で 15 defect structural 対応、ad-hoc patch 0 件
 
 ---
 
