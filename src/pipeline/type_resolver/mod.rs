@@ -10,7 +10,7 @@ mod expected_types;
 mod expressions;
 mod fn_exprs;
 mod helpers;
-mod narrowing;
+mod narrow_context;
 mod visitors;
 
 use helpers::*;

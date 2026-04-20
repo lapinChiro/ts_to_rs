@@ -1,10 +1,10 @@
-//! Event types produced by [`super::NarrowingAnalyzer`].
+//! Event types produced by the [`narrowing_analyzer`](super) module.
 //!
 //! This module contains the **data-type backbone** of the analyzer — the
 //! facts the analyzer records about a function's narrowing state and the
 //! emission strategies it recommends. It has no behavior: all inference
 //! logic lives in [`super::classifier`]; all orchestration in
-//! [`super`] (`NarrowingAnalyzer`).
+//! [`super`] (`analyze_function` + guard detection).
 //!
 //! # Semantic layering
 //!
@@ -27,7 +27,7 @@ use crate::pipeline::type_resolution::Span;
 
 /// Structured record of a narrowing-related fact about a variable.
 ///
-/// Produced by [`super::NarrowingAnalyzer`] and consumed by the Transformer
+/// Produced by [guard detection](super::detect_narrowing_guard) and consumed by the Transformer
 /// through `FileTypeResolution::narrow_events`.
 ///
 /// # Variants

@@ -1,4 +1,5 @@
-//! Reset-cause classification for [`super::NarrowingAnalyzer`].
+//! Reset-cause classification for the
+//! [`narrowing_analyzer`](super) module.
 //!
 //! Free functions that walk the AST and report whether a given variable
 //! `ident` is mutated (and how) by a statement, expression, or scope body.
@@ -21,8 +22,9 @@
 //!   per-branch or per-stmt causes into the final classification.
 //!
 //! All functions are `pub(super)` so the parent module's
-//! [`super::NarrowingAnalyzer`] can invoke them, but no analyzer state is
-//! threaded through — the classifier is **stateless**.
+//! [`analyze_function`](super::analyze_function) can invoke them, but
+//! no analyzer state is threaded through — the classifier is
+//! **stateless**.
 
 use swc_ecma_ast as ast;
 

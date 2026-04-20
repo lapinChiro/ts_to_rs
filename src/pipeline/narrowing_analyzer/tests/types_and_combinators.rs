@@ -1,11 +1,12 @@
-//! Pure data-type & combinator tests for [`super::super::NarrowingAnalyzer`].
+//! Pure data-type & combinator tests for the `narrowing_analyzer`
+//! module.
 //!
-//! Covers `ResetCause::invalidates_narrow`, `NarrowEvent` variant
-//! accessors, `NarrowingAnalyzer` construction, and the
-//! `classifier::merge_branches` / `merge_sequential` combinators in
-//! isolation from AST fixtures.
+//! Covers [`ResetCause::invalidates_narrow`], [`NarrowEvent`] variant
+//! accessors, and the `classifier::merge_branches` /
+//! `merge_sequential` combinators in isolation from AST fixtures.
 
 use super::*;
+use crate::ir::RustType;
 
 mod reset_cause {
     use super::*;
@@ -127,31 +128,6 @@ mod narrow_event_accessors {
     fn narrow_trigger_is_early_return_complement_false_for_primary_variant() {
         let t = NarrowTrigger::Primary(PrimaryTrigger::Truthy);
         assert!(!t.is_early_return_complement());
-    }
-}
-
-mod analyzer_construction {
-    use super::*;
-
-    #[test]
-    fn new_has_no_var_types() {
-        let a = NarrowingAnalyzer::new();
-        assert!(a.var_type("anything").is_none());
-    }
-
-    #[test]
-    fn default_matches_new() {
-        let a: NarrowingAnalyzer = NarrowingAnalyzer::default();
-        assert!(a.var_type("x").is_none());
-    }
-
-    #[test]
-    fn with_var_types_returns_seeded_type() {
-        let mut map = std::collections::HashMap::new();
-        map.insert("x".to_string(), RustType::F64);
-        let a = NarrowingAnalyzer::with_var_types(map);
-        assert!(matches!(a.var_type("x"), Some(RustType::F64)));
-        assert!(a.var_type("y").is_none());
     }
 }
 

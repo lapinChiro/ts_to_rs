@@ -380,11 +380,8 @@ mod non_target_stmts {
 
     #[test]
     fn empty_body_produces_no_hints() {
-        // Covers both `emission_hints` and `events` being empty — distinct
-        // from `assert_no_hint` which asserts only the former.
         let r = analyze_first_fn(r"function f(): void {}");
         assert!(r.emission_hints.is_empty());
-        assert!(r.events.is_empty());
     }
 }
 
@@ -419,7 +416,7 @@ function f(x: number | null): number {
             })
             .expect("`??=` stmt must exist");
 
-        let r = NarrowingAnalyzer::new().analyze_function(body);
+        let r = crate::pipeline::narrowing_analyzer::analyze_function(body);
         assert!(
             r.emission_hints.contains_key(&expected_start),
             "hint should be keyed at `??=` stmt span start {expected_start}, got {:?}",

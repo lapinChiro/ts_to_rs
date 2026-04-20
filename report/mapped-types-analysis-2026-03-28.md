@@ -8,7 +8,7 @@
 
 ## 現状
 
-Mapped type (`{ [K in keyof T]: V }`) の変換は `src/ts_type_info/resolve/mod.rs:272-302` の `resolve_mapped` 関数で行われる。
+Mapped type (`{ [K in keyof T]: V }`) の変換は `src/ts_type_info/resolve/mod.rs:269-302` の `resolve_mapped` 関数で行われる。
 
 - **Identity 検出**: `{ [K in keyof T]: T[K] }` → `T` に簡約（symbol filter noop 対応済み）
 - **非 identity**: `HashMap<String, V>` にフォールバック
@@ -77,7 +77,7 @@ type JSONParsed<T extends ReadonlyArray<unknown>> = { [K in keyof T]: JSONParsed
 
 ## 関連
 
-- コード: `src/ts_type_info/resolve/mod.rs:272-302` (`resolve_mapped`)
-- identity 簡約: `src/ts_type_info/resolve/mod.rs:331+` (`try_simplify_identity_mapped`)
+- コード: `src/ts_type_info/resolve/mod.rs:269-302` (`resolve_mapped`)
+- identity 簡約: `src/ts_type_info/resolve/mod.rs:330+` (`try_simplify_identity_mapped`)
 - intersection 内: `src/pipeline/type_converter/intersections.rs:342` (`try_simplify_identity_mapped_type`)
 - Hono ソース: `utils/types.ts`, `types.ts`, `client/types.ts`, `validator/utils.ts`

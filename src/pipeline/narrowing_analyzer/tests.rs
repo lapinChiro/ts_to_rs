@@ -1,8 +1,14 @@
-//! Unit tests for [`NarrowingAnalyzer`].
+//! Unit tests for the `narrowing_analyzer` module's `??=` emission-hint
+//! classifier and guard-detection entry points.
 //!
 //! Coverage targets the Problem Space matrix cells enumerated in
 //! `backlog/I-144-control-flow-narrowing-analyzer.md`:
 //!
+//! - Sub-matrix 1 (Trigger × LHS type), `guards` sub-module: typeof /
+//!   instanceof / null check / truthy / early-return complement
+//!   detection, driven against a mock [`NarrowTypeContext`] so the
+//!   trait boundary and complement-sub-union registration are covered
+//!   in isolation from the resolver pipeline.
 //! - Sub-matrix 2 (LHS × Reset cause): one test per reset class × mutation
 //!   shape, verifying the classifier distinguishes narrow-preserving resets
 //!   (arithmetic / update / `??=`-on-narrow / pass-by-mutation / method call
@@ -29,7 +35,7 @@ use crate::parser::parse_typescript;
 fn analyze_first_fn(source: &str) -> AnalysisResult {
     let module = parse_typescript(source).expect("fixture must parse");
     let fn_body = find_first_fn_body(&module).expect("fixture must declare a function");
-    NarrowingAnalyzer::new().analyze_function(fn_body)
+    super::analyze_function(fn_body)
 }
 
 fn find_first_fn_body(module: &ast::Module) -> Option<&ast::BlockStmt> {
@@ -89,6 +95,7 @@ fn assert_no_hint(source: &str) {
 // -----------------------------------------------------------------------------
 
 mod closures;
+mod guards;
 mod hints_flat;
 mod hints_nested;
 mod scope_and_exprs;

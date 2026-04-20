@@ -1,6 +1,6 @@
 # I-144: Control-flow narrowing analyzer (CFG-based type narrowing infrastructure)
 
-**Status**: Implementation stage 進行中 — **T0-T4 完了** (2026-04-19)、T5 着手可能
+**Status**: Implementation stage 進行中 — **T0-T5 完了** (2026-04-20)、T6 着手可能
 **Matrix-driven**: ✅ Yes (Trigger × LHS type × Reset cause × Flow context × **Read context** × Emission)
 **SDCDF 2-stage workflow 適用**: 必須
 **起票日**: 2026-04-19
@@ -617,7 +617,10 @@ return type widening が必要で interprocedural 分析要となるため別 PR
 | `src/pipeline/narrowing_analyzer.rs` | CFG-based narrow analyzer (新規) | 新規 ~400-600 行 |
 | `src/pipeline/type_resolution.rs` | `NarrowingEvent` 定義 | **破壊的変更**: struct → enum migration、全 consumer を一括更新。`narrowing_events` field は `narrow_events: Vec<NarrowEvent>` に rename |
 | `src/pipeline/type_resolver/mod.rs` | TypeResolver 本体 | CFG analyzer 呼び出し追加 |
-| `src/pipeline/type_resolver/narrowing.rs` | typeof/instanceof detection | CFG analyzer sub-routine に移行 |
+| ~~`src/pipeline/type_resolver/narrowing.rs`~~ | typeof/instanceof detection | **削除済** (T5、2026-04-20)、`narrowing_analyzer/guards.rs` に移管 |
+| `src/pipeline/narrowing_analyzer/guards.rs` | typeof/instanceof/null/truthy + early-return complement | 新規 (T5、~430 行) |
+| `src/pipeline/narrowing_analyzer/type_context.rs` | `NarrowTypeContext` trait | 新規 (T5、~70 行) |
+| `src/pipeline/type_resolver/narrow_context.rs` | `NarrowTypeContext` for `TypeResolver` impl | 新規 (T5、~40 行) |
 | `src/transformer/statements/nullish_assign.rs` | `??=` shadow-let emission | CFG analyzer 連動に書換、interim scanner 削除 |
 | `src/transformer/statements/mod.rs` / `switch.rs` / `classes/members.rs` / `expressions/functions.rs` | scanner call site | 削除 (`pre_check_narrowing_reset` call) |
 | `src/transformer/statements/tests/nullish_assign.rs` 等 | interim surface test | structural emission test に書換 |
@@ -807,17 +810,55 @@ TDD: RED → GREEN → REFACTOR 順。Phase 間は SDCDF spec stage / implementa
   - [x] narrowing 関連 rustdoc で 0 warning (intra-doc link 修正後)
 - **Depends on**: T3 ✅
 
-#### T5: 既存 `narrowing.rs` を CFG analyzer 経由に移行 (Phase 2)
+#### T5: 既存 `narrowing.rs` を CFG analyzer 経由に移行 (Phase 2) ✅ 完了 (2026-04-20)
 
-- **Work**:
-  - `type_resolver/narrowing.rs::detect_narrowing_guard` を `NarrowingAnalyzer` の
-    sub-routine に refactor
-  - typeof/instanceof/null check detection を CFG analyzer 内部に集約
-  - 既存 scope-based NarrowingEvent 生成を `NarrowEvent::Narrow` 経由に統合
-- **Completion criteria**:
-  - 既存 narrowing unit test 全 pass (DRY による regression 0)
-  - typeof/instanceof fixture / E2E 全 pass
-- **Depends on**: T4
+- **Work** (完了):
+  - `type_resolver/narrowing.rs` (524 行) を削除、narrow guard 検出を
+    `src/pipeline/narrowing_analyzer/guards.rs` (430 行) に移植
+  - `NarrowTypeContext` trait を新設 (`narrowing_analyzer/type_context.rs`、4 method:
+    `lookup_var` / `synthetic_enum_variants` / `register_sub_union` / `push_narrow_event`)
+    で registry access + event push を抽象化
+  - `TypeResolver` が `NarrowTypeContext` 実装 (`type_resolver/narrow_context.rs`、
+    scope stack + synthetic registry + result.narrow_events への薄い adapter)
+  - Visitor は `crate::pipeline::narrowing_analyzer::{detect_narrowing_guard,
+    detect_early_return_narrowing}` free fn を直接呼出し (`type_resolver/visitors.rs:694`)
+  - 移植した detection logic: `detect_narrowing_guard` / `detect_early_return_narrowing` /
+    `extract_typeof_narrowing` / `extract_null_check_narrowing` / `compute_complement_type` /
+    `resolve_typeof_narrowed_type_from_var` / `classify_null_check` /
+    `typeof_to_variant_name` / `variant_matches_typeof`
+  - Trait boundary 専用 unit test 19 件を `narrowing_analyzer/tests/guards.rs` に追加
+    (MockNarrowTypeContext 経由で registry-less に検証、EC: typeof 3+ variant 時の
+    sub-union register、2-variant 時の bare type、typeof `!==` 反転 dispatch、
+    typeof "object" synthetic enum variant lookup、null check complement 抑止、
+    `x === null` alt branch narrow、NullCheckKind decision table 6 variant、
+    truthy non-option no-op、compound `&&` 双方 recurse、unresolved var silent skip、
+    early-return null/bang-truthy/typeof complement/instanceof complement/empty range)
+  - **Dead code 除去 (T3/T4 残置)**: `NarrowingAnalyzer` struct / `new()` / `Default` impl /
+    `var_types` field / `with_var_types()` / `var_type()` / `AnalysisResult.events` field を
+    削除、`??=` 分析を `narrowing_analyzer::analyze_function` + private free fn
+    (`analyze_stmt_list` / `recurse_into_nested_stmts` / `classify_nullish_assign`) に統一
+    (guards.rs の free fn style と整合、YAGNI 準拠)
+  - **Hono bench non-regression empirical verify** (2026-04-20): clean 112/158 → 112/158
+    (0)、errors 62 → 62 (0)、compile 157/158 → 157/158 (0)。T5 pure refactor として
+    意味論的 drift ゼロを確認
+  - `narrowing_analyzer.rs` に `guards` + `type_context` module 登録、
+    `detect_narrowing_guard` / `detect_early_return_narrowing` / `NarrowTypeContext` を
+    pub re-export
+  - test/narrowing_analyzer/tests.rs の sub-module list に `guards` を追加
+- **Completion criteria** (達成):
+  - [x] 既存 narrowing unit test 全 pass (regression 0; `type_resolver/tests/narrowing/`
+        legacy_events + trigger_completeness は無変更で 2771 → 2787 lib pass)
+  - [x] typeof / instanceof / null check / truthy / early-return complement の全
+        fixture / E2E 全 pass
+  - [x] `narrowing_analyzer` が narrow 検出の single source of truth に (narrowing.rs
+        削除により二重実装解消)
+  - [x] T3/T4 残置 dead code (`NarrowingAnalyzer` struct / `var_types` / `AnalysisResult.events`)
+        を除去して free fn 統一 (YAGNI + guards.rs の style と整合)
+  - [x] clippy 0 warn / fmt 0 diff / cargo test 全 pass (lib 2787 / integration 122 /
+        compile 3 / E2E 97 + 14 i144 fixture `#[ignore]`)
+  - [x] Hono bench non-regression empirical verified (clean 112/158 / errors 62 / compile
+        157/158、全て T5 前後変動なし)
+- **Depends on**: T4 ✅
 
 #### T6: Interim scanner 短絡 + Transformer emission 連動 (Phase 3、v2 で T6/T7 合流)
 
@@ -1005,7 +1046,9 @@ Trace 結果を PRD 完了時に plan.md 記録。
 - `plan.md`「次の作業」priority 1 + 「先行調査まとめ」section
 - `doc/handoff/I-142-step4-followup.md` (C-1〜C-9 詳細、本 PRD で C-1/C-2/C-3/C-4/D-1 解消)
 - `report/i142-step4-inv1-closure-compile.md` (C-2 empirical 確認)
-- `src/pipeline/type_resolver/narrowing.rs` (既存 narrowing 実装)
+- `src/pipeline/narrowing_analyzer/guards.rs` (narrow guard 検出、T5 で `type_resolver/narrowing.rs` から移管)
+- `src/pipeline/narrowing_analyzer/type_context.rs` (`NarrowTypeContext` trait)
+- `src/pipeline/type_resolver/narrow_context.rs` (`NarrowTypeContext` for `TypeResolver` impl)
 - `src/transformer/statements/nullish_assign.rs:129` (廃止対象 interim scanner)
 - `.claude/rules/spec-first-prd.md` (SDCDF 2-stage workflow)
 - `.claude/rules/problem-space-analysis.md` (matrix enumerate 必須ルール)

@@ -683,6 +683,9 @@ impl<'a> TypeResolver<'a> {
     }
 
     fn visit_if_stmt(&mut self, if_stmt: &ast::IfStmt) {
+        use crate::pipeline::narrowing_analyzer::{
+            detect_early_return_narrowing, detect_narrowing_guard,
+        };
         use crate::pipeline::narrowing_patterns::stmt_always_exits;
 
         // Resolve test expression type
@@ -691,14 +694,14 @@ impl<'a> TypeResolver<'a> {
         self.result.expr_types.insert(test_span, test_type);
 
         // Detect narrowing guards (positive + complement in else)
-        self.detect_narrowing_guard(&if_stmt.test, &if_stmt.cons, if_stmt.alt.as_deref());
+        detect_narrowing_guard(&if_stmt.test, &if_stmt.cons, if_stmt.alt.as_deref(), self);
 
         // Early return narrowing: if the then-block always exits and there's no else,
         // the complement type is valid for the rest of the enclosing block.
         if if_stmt.alt.is_none() && stmt_always_exits(&if_stmt.cons) {
             if let Some(block_end) = self.current_block_end {
                 let if_end = if_stmt.cons.span().hi.0;
-                self.detect_early_return_narrowing(&if_stmt.test, if_end, block_end);
+                detect_early_return_narrowing(&if_stmt.test, if_end, block_end, self);
             }
         }
 
