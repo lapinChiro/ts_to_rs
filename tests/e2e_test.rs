@@ -993,6 +993,13 @@ fn test_e2e_cell_i144_rc_narrow_read_contexts() {
     run_cell_e2e_test("i144", "cell-regression-rc-narrow-read-contexts");
 }
 
+// I-169 T6-2 follow-up GREEN lockin (matrix cell #3 / P1 multi-fn isolation):
+// `g`'s narrow must fire independently from `f`'s closure-reassign event.
+#[test]
+fn test_e2e_cell_i144_multifn_same_var_isolation() {
+    run_cell_e2e_test("i144", "cell-regression-multifn-same-var-isolation");
+}
+
 // T6-1 GREEN fixtures: ??= EmissionHint dispatch + scanner retirement.
 #[test]
 fn test_e2e_cell_i144_14_narrowing_reset_structural() {
@@ -1007,15 +1014,14 @@ fn test_e2e_cell_i144_c2a_nullish_assign_closure_capture() {
     run_cell_e2e_test("i144", "cell-c2a-nullish-assign-closure-capture");
 }
 
-// T6-2 pending: E2b `x.unwrap_or(coerce_default(T))` emission at
-// narrow-stale reads after a captured closure reassigns the outer var.
+// T6-2 GREEN (2026-04-20): closure-reassign suppresses narrow shadow-let,
+// stale reads coerce via the `helpers::coerce_default` JS table
+// (`null + 1 = 1`, `"v=" + null = "v=null"`).
 #[test]
-#[ignore = "I-144 T6-2: E2b stale read emission + coerce_default helper"]
 fn test_e2e_cell_i144_c2b_closure_reassign_arith_read() {
     run_cell_e2e_test("i144", "cell-c2b-closure-reassign-arith-read");
 }
 #[test]
-#[ignore = "I-144 T6-2: E2b stale read emission + coerce_default helper"]
 fn test_e2e_cell_i144_c2c_closure_reassign_string_concat() {
     run_cell_e2e_test("i144", "cell-c2c-closure-reassign-string-concat");
 }

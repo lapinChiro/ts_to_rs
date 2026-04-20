@@ -7,6 +7,7 @@ pub mod classes;
 pub mod context;
 pub mod expressions;
 pub mod functions;
+pub(crate) mod helpers;
 pub(crate) mod return_wrap;
 pub mod statements;
 pub(crate) mod type_position;

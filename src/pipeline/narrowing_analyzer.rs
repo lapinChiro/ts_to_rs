@@ -75,6 +75,7 @@
 //! matrix, Sub-matrix 1-5, Phase 3b closure reassign emission policy.
 
 mod classifier;
+mod closure_captures;
 mod events;
 mod guards;
 mod type_context;
@@ -99,10 +100,11 @@ pub use type_context::NarrowTypeContext;
 
 /// Result of [`analyze_function`].
 ///
-/// Currently carries only `??=` emission hints. Narrow events from
-/// guard detection flow straight into `FileTypeResolution::narrow_events`
-/// through [`NarrowTypeContext::push_narrow_event`] and do not pass
-/// through this struct.
+/// Carries `??=` emission hints (T6-1) and closure-capture events (T6-2).
+/// Other narrow events from guard detection flow straight into
+/// `FileTypeResolution::narrow_events` through
+/// [`NarrowTypeContext::push_narrow_event`] and do not pass through this
+/// struct.
 #[derive(Debug, Default, Clone)]
 pub struct AnalysisResult {
     /// Emission strategy hints keyed by `??=` statement start position
@@ -110,16 +112,51 @@ pub struct AnalysisResult {
     ///
     /// Consumed by `Transformer::try_convert_nullish_assign_stmt` at T6.
     pub emission_hints: HashMap<u32, EmissionHint>,
+    /// `NarrowEvent::ClosureCapture` events derived by walking the function
+    /// body for closures that reassign outer idents (T6-2).
+    ///
+    /// Consumed by `Transformer` to suppress narrow shadow-let emission for
+    /// captured idents and to coerce subsequent reads via the JS
+    /// `coerce_default` table.
+    pub closure_captures: Vec<NarrowEvent>,
 }
 
-/// Analyzes a function body, returning `??=` emission hints.
+/// Analyzes a function body, returning `??=` emission hints and closure
+/// capture events.
+///
+/// `params` carries the function's parameter patterns so they participate
+/// in the outer candidate set for closure-capture detection (I-169 P3
+/// fix: param-declared vars are first-class candidates alongside body
+/// top-level decls).
 ///
 /// Stateless: consumers call this as a free function per function
 /// body without instantiating any analyzer.
 #[must_use]
-pub fn analyze_function(body: &ast::BlockStmt) -> AnalysisResult {
+pub fn analyze_function(body: &ast::BlockStmt, params: &[&ast::Pat]) -> AnalysisResult {
     let mut result = AnalysisResult::default();
     analyze_stmt_list(&body.stmts, &mut result);
+    // I-169 T6-2 follow-up: collect closure-capture events with scope-aware
+    // candidate enumeration + walker shadow tracking. `enclosing_fn_body`
+    // is set to the function body's span so downstream
+    // `is_var_closure_reassigned(name, position)` queries filter events by
+    // function-scope membership (multi-fn isolation P1).
+    let candidates = closure_captures::collect_outer_candidates(params, &body.stmts);
+    let pairs =
+        closure_captures::collect_closure_capture_pairs_for_candidates(&body.stmts, &candidates);
+    let enclosing = crate::pipeline::type_resolution::Span::from_swc(body.span);
+    result.closure_captures = pairs
+        .into_iter()
+        .map(|(var_name, span)| NarrowEvent::ClosureCapture {
+            var_name,
+            closure_span: crate::pipeline::type_resolution::Span::from_swc(span),
+            enclosing_fn_body: enclosing,
+            // outer_narrow is a placeholder. The Transformer does not consult
+            // it for narrow suppression; future phases (Phase 3b emission
+            // policy) may resolve the actual narrowed type via a richer
+            // analyzer.
+            outer_narrow: crate::ir::RustType::Any,
+        })
+        .collect();
     result
 }
 

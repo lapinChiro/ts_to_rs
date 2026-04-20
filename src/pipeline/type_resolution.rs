@@ -177,7 +177,18 @@ impl FileTypeResolution {
     ///
     /// Only consults [`NarrowEvent::Narrow`] variants; `Reset` /
     /// `ClosureCapture` events carry no type and are skipped.
+    ///
+    /// I-144 T6-2 closure-reassign suppression (I-169 follow-up: position-
+    /// aware): when `var_name` is reassigned inside any closure body whose
+    /// `enclosing_fn_body` contains `position`, the narrow is suppressed
+    /// and `None` is returned. Callers fall back to the variable's declared
+    /// `Option<T>` type, which matches the Transformer's narrow-guard
+    /// suppression so reads see a consistent type and the `coerce_default`
+    /// wrapper can be applied at arithmetic / string-concat sites.
     pub fn narrowed_type(&self, var_name: &str, position: u32) -> Option<&RustType> {
+        if self.is_var_closure_reassigned(var_name, position) {
+            return None;
+        }
         self.narrow_events
             .iter()
             .filter_map(NarrowEvent::as_narrow)
@@ -224,6 +235,32 @@ impl FileTypeResolution {
     /// compatibility with paths the analyzer does not yet cover.
     pub fn emission_hint(&self, stmt_lo: u32) -> Option<EmissionHint> {
         self.emission_hints.get(&stmt_lo).copied()
+    }
+
+    /// Returns `true` iff some closure body in the same function as `position`
+    /// reassigns `var_name` (I-144 T6-2 `NarrowEvent::ClosureCapture`,
+    /// I-169 follow-up: position-aware via `enclosing_fn_body`).
+    ///
+    /// Used by the Transformer to suppress narrow shadow-let emission for
+    /// `var_name` so the variable stays `Option<T>` and the closure body can
+    /// continue to assign `null` / `undefined` to it. Subsequent T-expected
+    /// reads are wrapped via the `coerce_default` table to reproduce JS
+    /// runtime semantics (`null + 1 = 1`, `"v=" + null = "v=null"`).
+    ///
+    /// `position` filters events by `enclosing_fn_body` membership so a
+    /// closure-reassign in function `f` does not affect narrow queries in
+    /// a sibling function `g` (multi-fn scope isolation, I-169 P1 fix).
+    pub fn is_var_closure_reassigned(&self, var_name: &str, position: u32) -> bool {
+        self.narrow_events.iter().any(|e| match e {
+            NarrowEvent::ClosureCapture {
+                var_name: v,
+                enclosing_fn_body,
+                ..
+            } => {
+                v == var_name && enclosing_fn_body.lo <= position && position < enclosing_fn_body.hi
+            }
+            _ => false,
+        })
     }
 }
 
@@ -340,23 +377,28 @@ mod tests {
     #[test]
     fn test_narrowed_type_skips_closure_capture_events() {
         // M-4: `ClosureCapture` variant must also be excluded from
-        // `narrowed_type()` lookups — it carries no scope, only capture
-        // metadata.
+        // `narrowed_type()` lookups — it carries no Narrow scope, only
+        // capture metadata. Also exercises the I-169 enclosing_fn_body
+        // suppression: query at position 30 falls inside enclosing_fn_body
+        // [0, 100), so suppression activates and `narrowed_type` returns
+        // None (no Narrow event present anyway).
         let mut resolution = FileTypeResolution::empty();
         resolution.narrow_events.push(NarrowEvent::ClosureCapture {
             var_name: "x".to_string(),
             closure_span: Span { lo: 10, hi: 50 },
+            enclosing_fn_body: Span { lo: 0, hi: 100 },
             outer_narrow: RustType::String,
         });
         assert!(resolution.narrowed_type("x", 30).is_none());
     }
 
     #[test]
-    fn test_narrowed_type_mixed_variants_returns_only_narrow() {
+    fn test_narrowed_type_returned_with_interleaved_reset_only() {
         use crate::pipeline::narrowing_analyzer::{NarrowTrigger, PrimaryTrigger, ResetCause};
         let mut resolution = FileTypeResolution::empty();
-        // Interleaved variants: a Narrow event should still be returned even
-        // when Reset / ClosureCapture entries precede/follow it in the Vec.
+        // Reset event preceding Narrow must NOT suppress the narrow lookup —
+        // only ClosureCapture for the same var (T6-2 suppression rule)
+        // suppresses; Reset events are skipped by `as_narrow().filter_map`.
         resolution.narrow_events.push(NarrowEvent::Reset {
             var_name: "x".to_string(),
             position: 5,
@@ -369,14 +411,108 @@ mod tests {
             narrowed_type: RustType::F64,
             trigger: NarrowTrigger::Primary(PrimaryTrigger::Truthy),
         });
-        resolution.narrow_events.push(NarrowEvent::ClosureCapture {
-            var_name: "x".to_string(),
-            closure_span: Span { lo: 15, hi: 25 },
-            outer_narrow: RustType::F64,
-        });
 
         assert!(matches!(
             resolution.narrowed_type("x", 20),
+            Some(RustType::F64)
+        ));
+    }
+
+    #[test]
+    fn test_narrowed_type_suppressed_when_closure_reassign_present() {
+        // I-144 T6-2: a `ClosureCapture` event for the same var causes
+        // `narrowed_type` to return `None` so the variable's declared
+        // `Option<T>` type is read at narrow-stale sites and the
+        // Transformer can apply the `coerce_default` wrapper.
+        use crate::pipeline::narrowing_analyzer::{NarrowTrigger, PrimaryTrigger};
+        let mut resolution = FileTypeResolution::empty();
+        resolution.narrow_events.push(NarrowEvent::Narrow {
+            var_name: "x".to_string(),
+            scope_start: 10,
+            scope_end: 30,
+            narrowed_type: RustType::F64,
+            trigger: NarrowTrigger::Primary(PrimaryTrigger::Truthy),
+        });
+        resolution.narrow_events.push(NarrowEvent::ClosureCapture {
+            var_name: "x".to_string(),
+            closure_span: Span { lo: 15, hi: 25 },
+            enclosing_fn_body: Span { lo: 0, hi: 100 },
+            outer_narrow: RustType::F64,
+        });
+
+        assert!(resolution.narrowed_type("x", 20).is_none());
+        // A different variable's narrow is unaffected.
+        resolution.narrow_events.push(NarrowEvent::Narrow {
+            var_name: "y".to_string(),
+            scope_start: 10,
+            scope_end: 30,
+            narrowed_type: RustType::String,
+            trigger: NarrowTrigger::Primary(PrimaryTrigger::Truthy),
+        });
+        assert!(resolution.narrowed_type("y", 20).is_some());
+    }
+
+    #[test]
+    fn is_var_closure_reassigned_respects_enclosing_fn_body_scope() {
+        // I-169 P1: position outside enclosing_fn_body span must not match
+        // the event — even when var_name matches.
+        let mut resolution = FileTypeResolution::empty();
+        resolution.narrow_events.push(NarrowEvent::ClosureCapture {
+            var_name: "x".to_string(),
+            closure_span: Span { lo: 20, hi: 40 },
+            // Event is observable only for positions in [10, 50).
+            enclosing_fn_body: Span { lo: 10, hi: 50 },
+            outer_narrow: RustType::F64,
+        });
+        // Inside scope → true
+        assert!(resolution.is_var_closure_reassigned("x", 15));
+        assert!(resolution.is_var_closure_reassigned("x", 30));
+        assert!(resolution.is_var_closure_reassigned("x", 49));
+        // Boundary `hi` is exclusive → 50 NOT matched
+        assert!(!resolution.is_var_closure_reassigned("x", 50));
+        // Below `lo` → false (sibling-fn case: position before this fn)
+        assert!(!resolution.is_var_closure_reassigned("x", 9));
+        // Above `hi` → false (sibling-fn case: position after this fn)
+        assert!(!resolution.is_var_closure_reassigned("x", 100));
+        // Different var_name → always false regardless of position
+        assert!(!resolution.is_var_closure_reassigned("y", 30));
+    }
+
+    #[test]
+    fn narrowed_type_suppress_only_fires_inside_enclosing_fn_body() {
+        // I-169 P1 (matrix cell #3): when two Narrow events for `x` exist
+        // in different functions and one has a ClosureCapture event, the
+        // other's narrow must NOT be suppressed.
+        use crate::pipeline::narrowing_analyzer::{NarrowTrigger, PrimaryTrigger};
+        let mut resolution = FileTypeResolution::empty();
+        // Function f at [0, 100): has Narrow event + ClosureCapture event.
+        resolution.narrow_events.push(NarrowEvent::Narrow {
+            var_name: "x".to_string(),
+            scope_start: 10,
+            scope_end: 90,
+            narrowed_type: RustType::F64,
+            trigger: NarrowTrigger::Primary(PrimaryTrigger::Truthy),
+        });
+        resolution.narrow_events.push(NarrowEvent::ClosureCapture {
+            var_name: "x".to_string(),
+            closure_span: Span { lo: 30, hi: 50 },
+            enclosing_fn_body: Span { lo: 0, hi: 100 },
+            outer_narrow: RustType::F64,
+        });
+        // Function g at [200, 300): has Narrow event, NO ClosureCapture.
+        resolution.narrow_events.push(NarrowEvent::Narrow {
+            var_name: "x".to_string(),
+            scope_start: 210,
+            scope_end: 290,
+            narrowed_type: RustType::F64,
+            trigger: NarrowTrigger::Primary(PrimaryTrigger::Truthy),
+        });
+
+        // Query inside f (position 60): suppress → None
+        assert!(resolution.narrowed_type("x", 60).is_none());
+        // Query inside g (position 250): narrow fires normally → Some
+        assert!(matches!(
+            resolution.narrowed_type("x", 250),
             Some(RustType::F64)
         ));
     }

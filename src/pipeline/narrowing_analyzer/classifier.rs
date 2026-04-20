@@ -1,4 +1,4 @@
-//! Reset-cause classification for the
+//! Per-ident reset-cause classification for the
 //! [`narrowing_analyzer`](super) module.
 //!
 //! Free functions that walk the AST and report whether a given variable
@@ -22,9 +22,20 @@
 //!   per-branch or per-stmt causes into the final classification.
 //!
 //! All functions are `pub(super)` so the parent module's
-//! [`analyze_function`](super::analyze_function) can invoke them, but
-//! no analyzer state is threaded through — the classifier is
-//! **stateless**.
+//! [`analyze_function`](super::analyze_function) and the
+//! [`super::closure_captures`] sub-module (which uses
+//! [`classify_closure_body_for_outer_ident`] / [`ArrowOrFnBody`] for
+//! per-candidate closure-body classification) can invoke them. No
+//! analyzer state is threaded through — the classifier is **stateless**.
+//!
+//! # Module split (I-169 T6-2 follow-up)
+//!
+//! The closure-capture-pair collection logic that briefly lived here
+//! (T6-2 prototype) was moved to [`super::closure_captures`] in the
+//! I-169 follow-up. That module hosts the candidate-limited +
+//! shadow-tracking walker that emits `NarrowEvent::ClosureCapture` events.
+//! `classifier` retains the per-ident classification primitives that
+//! `closure_captures` calls into.
 
 use swc_ecma_ast as ast;
 
@@ -765,7 +776,7 @@ fn classify_reset_in_assign_lhs(target: &ast::AssignTarget, ident: &str) -> Opti
 /// Both variants wrap immutable references so the enum is `Copy`; callers
 /// pass by value without worrying about consumption.
 #[derive(Copy, Clone)]
-enum ArrowOrFnBody<'a> {
+pub(super) enum ArrowOrFnBody<'a> {
     Block(&'a [ast::Stmt]),
     Expr(&'a ast::Expr),
 }
@@ -783,7 +794,7 @@ enum ArrowOrFnBody<'a> {
 /// when the closure runs. Defaults are classified **before** the body so
 /// the resulting cause is escalated to
 /// [`ResetCause::ClosureReassign`] together with any body-detected cause.
-fn classify_closure_body_for_outer_ident(
+pub(super) fn classify_closure_body_for_outer_ident(
     params: &[&ast::Pat],
     body: ArrowOrFnBody<'_>,
     ident: &str,

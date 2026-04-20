@@ -416,7 +416,7 @@ function f(x: number | null): number {
             })
             .expect("`??=` stmt must exist");
 
-        let r = crate::pipeline::narrowing_analyzer::analyze_function(body);
+        let r = crate::pipeline::narrowing_analyzer::analyze_function(body, &[]);
         assert!(
             r.emission_hints.contains_key(&expected_start),
             "hint should be keyed at `??=` stmt span start {expected_start}, got {:?}",

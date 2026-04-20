@@ -1,12 +1,16 @@
 //! Binary and unary expression conversion.
 
 use anyhow::{anyhow, Result};
+use swc_common::Spanned;
 use swc_ecma_ast as ast;
 
 use crate::ir::{BinOp, Expr, RustType, UnOp};
 
 use super::literals::{is_string_like, is_string_type};
 use super::patterns::typeof_to_string;
+use crate::transformer::helpers::coerce_default::{
+    build_option_coerce_to_string, build_option_coerce_to_t,
+};
 use crate::transformer::Transformer;
 
 impl<'a> Transformer<'a> {
@@ -109,12 +113,33 @@ impl<'a> Transformer<'a> {
             if (left_known_non_string && !left_is_string)
                 || (right_known_non_string && left_is_string)
             {
+                // I-144 T6-2: coerce closure-reassigned Option<T> args to String
+                // via the JS coerce_default table (`null` → `"null"`).
+                let left = self.maybe_coerce_for_string_concat(&bin.left, left);
+                let right = self.maybe_coerce_for_string_concat(&bin.right, right);
                 return Ok(Expr::FormatMacro {
                     template: "{}{}".to_string(),
                     args: vec![left, right],
                 });
             }
         }
+
+        // I-144 T6-2: arithmetic context (`+`/`-`/`*`/`/`/`%`) — when an Ident
+        // operand refers to a closure-reassigned `Option<T>` var, wrap with the
+        // JS coerce_default value (`null` → `0.0` for `F64`) so post-stale
+        // reads reproduce JS runtime semantics (`null + 1 = 1`).
+        let (left, right) = if matches!(
+            op,
+            BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod
+        ) && !is_string_context
+        {
+            (
+                self.maybe_coerce_for_arith(&bin.left, left),
+                self.maybe_coerce_for_arith(&bin.right, right),
+            )
+        } else {
+            (left, right)
+        };
 
         // In string concat context:
         // - LHS StringLit needs .to_string() (Rust: &str can't use + operator directly)
@@ -152,6 +177,38 @@ impl<'a> Transformer<'a> {
             op,
             right: Box::new(right),
         })
+    }
+
+    /// I-144 T6-2: if `ast_expr` is an `Ident` referring to a closure-reassigned
+    /// `Option<T>` variable (narrow suppressed), wrap `ir_expr` with the
+    /// JS coerce_default value via `unwrap_or` so an arithmetic read site
+    /// reproduces JS runtime semantics. Otherwise returns `ir_expr` unchanged.
+    fn maybe_coerce_for_arith(&self, ast_expr: &ast::Expr, ir_expr: Expr) -> Expr {
+        let ast::Expr::Ident(id) = ast_expr else {
+            return ir_expr;
+        };
+        if !self.is_var_closure_reassigned(id.sym.as_ref(), ast_expr.span().lo.0) {
+            return ir_expr;
+        }
+        let Some(RustType::Option(inner)) = self.get_expr_type(ast_expr) else {
+            return ir_expr;
+        };
+        build_option_coerce_to_t(ir_expr.clone(), inner).unwrap_or(ir_expr)
+    }
+
+    /// I-144 T6-2: same as [`maybe_coerce_for_arith`] but emits the string-context
+    /// coerce shape (`x.map(|v| v.to_string()).unwrap_or_else(|| "null".to_string())`).
+    fn maybe_coerce_for_string_concat(&self, ast_expr: &ast::Expr, ir_expr: Expr) -> Expr {
+        let ast::Expr::Ident(id) = ast_expr else {
+            return ir_expr;
+        };
+        if !self.is_var_closure_reassigned(id.sym.as_ref(), ast_expr.span().lo.0) {
+            return ir_expr;
+        }
+        let Some(RustType::Option(inner)) = self.get_expr_type(ast_expr) else {
+            return ir_expr;
+        };
+        build_option_coerce_to_string(ir_expr.clone(), inner).unwrap_or(ir_expr)
     }
 
     /// Converts a unary expression (`!x`, `-x`, `typeof x`) to IR.

@@ -46,9 +46,12 @@ impl<'a> Transformer<'a> {
                     .map(|alt| self.convert_block_or_stmt(alt, return_type))
                     .transpose()?;
 
-                if let Some(stmts) =
-                    self.try_generate_narrowing_match(guard, &then_body, &else_body)?
-                {
+                if let Some(stmts) = self.try_generate_narrowing_match(
+                    guard,
+                    &then_body,
+                    &else_body,
+                    if_stmt.span.lo.0,
+                )? {
                     return Ok(stmts);
                 }
                 return Ok(vec![self.generate_if_let(guard, then_body, else_body)]);
@@ -252,6 +255,7 @@ impl<'a> Transformer<'a> {
         guard: &crate::transformer::expressions::patterns::NarrowingGuard,
         then_body: &[Stmt],
         else_body: &Option<Vec<Stmt>>,
+        guard_position: u32,
     ) -> Result<Option<Vec<Stmt>>> {
         let complement_pattern = match self.resolve_complement_pattern(guard) {
             Some(p) => p,
@@ -302,6 +306,25 @@ impl<'a> Transformer<'a> {
             // Option early return with === null: `let var = match var { None => { exit }, Some(v) => v };`
             // Only when is_swap (=== null): the null handler exits, and Some(v) extracts the value.
             // Truthy `if (x) { return; }` has is_swap=false: the Some arm exits, None has no value.
+            //
+            // T6-2 closure-reassign suppression (I-144 Sub-matrix 5 RC1/RC6 stale):
+            // when an inner closure reassigns `var`, the outer narrow shadow-let
+            // would bind `var` to a local `T` while the closure body needs to
+            // reassign through `Option<T>` (E0308). Emit `if var.is_none()
+            // { exit }` instead so `var` stays `Option<T>` and subsequent
+            // T-expected reads coerce via `helpers::coerce_default`.
+            if self.is_var_closure_reassigned(&var_name, guard_position) {
+                let condition = Expr::MethodCall {
+                    object: Box::new(Expr::Ident(var_name.clone())),
+                    method: "is_none".to_string(),
+                    args: vec![],
+                };
+                return Ok(Some(vec![Stmt::If {
+                    condition,
+                    then_body: complement_body,
+                    else_body: None,
+                }]));
+            }
             let none_arm = MatchArm {
                 patterns: vec![Pattern::none()],
                 guard: None,

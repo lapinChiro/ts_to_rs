@@ -123,7 +123,9 @@ impl<'a> TypeResolver<'a> {
 
         // Visit body
         if let Some(body) = &fn_decl.function.body {
-            self.collect_emission_hints(body);
+            let param_pats: Vec<&ast::Pat> =
+                fn_decl.function.params.iter().map(|p| &p.pat).collect();
+            self.collect_emission_hints(body, &param_pats);
             self.visit_block_stmt(body);
         }
 
@@ -466,7 +468,15 @@ impl<'a> TypeResolver<'a> {
                                 self.visit_param_pat(&param.pat);
                             }
                         }
-                        self.collect_emission_hints(body);
+                        let param_pats: Vec<&ast::Pat> = ctor
+                            .params
+                            .iter()
+                            .filter_map(|p| match p {
+                                ast::ParamOrTsParamProp::Param(param) => Some(&param.pat),
+                                ast::ParamOrTsParamProp::TsParamProp(_) => None,
+                            })
+                            .collect();
+                        self.collect_emission_hints(body, &param_pats);
                         for stmt in &body.stmts {
                             self.visit_stmt(stmt);
                         }
@@ -521,7 +531,8 @@ impl<'a> TypeResolver<'a> {
                 self.visit_param_pat(&param.pat);
             }
             let prev_return_type = self.setup_fn_return_type(function.return_type.as_deref());
-            self.collect_emission_hints(body);
+            let param_pats: Vec<&ast::Pat> = function.params.iter().map(|p| &p.pat).collect();
+            self.collect_emission_hints(body, &param_pats);
             for stmt in &body.stmts {
                 self.visit_stmt(stmt);
             }

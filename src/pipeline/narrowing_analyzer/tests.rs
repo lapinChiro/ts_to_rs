@@ -34,17 +34,28 @@ use crate::parser::parse_typescript;
 /// of the **first** function declaration at the top level.
 fn analyze_first_fn(source: &str) -> AnalysisResult {
     let module = parse_typescript(source).expect("fixture must parse");
-    let fn_body = find_first_fn_body(&module).expect("fixture must declare a function");
-    super::analyze_function(fn_body)
+    let (fn_body, params) =
+        find_first_fn_body_and_params(&module).expect("fixture must declare a function");
+    let param_pats: Vec<&ast::Pat> = params.iter().map(|p| &p.pat).collect();
+    super::analyze_function(fn_body, &param_pats)
 }
 
-fn find_first_fn_body(module: &ast::Module) -> Option<&ast::BlockStmt> {
+fn find_first_fn_body_and_params(module: &ast::Module) -> Option<(&ast::BlockStmt, &[ast::Param])> {
     for item in &module.body {
         if let ast::ModuleItem::Stmt(ast::Stmt::Decl(ast::Decl::Fn(fn_decl))) = item {
-            return fn_decl.function.body.as_ref();
+            if let Some(body) = fn_decl.function.body.as_ref() {
+                return Some((body, &fn_decl.function.params));
+            }
         }
     }
     None
+}
+
+/// Body-only convenience wrapper used by tests that only need the
+/// function body span (e.g. the `??=` stmt-position cross-check in
+/// `hints_flat`).
+fn find_first_fn_body(module: &ast::Module) -> Option<&ast::BlockStmt> {
+    find_first_fn_body_and_params(module).map(|(body, _)| body)
 }
 
 /// Returns the single emission hint produced by the analyzer, panicking if
@@ -94,6 +105,7 @@ fn assert_no_hint(source: &str) {
 // Test module groupings (split for per-file cohesion and line-count compliance)
 // -----------------------------------------------------------------------------
 
+mod closure_capture_events;
 mod closures;
 mod guards;
 mod hints_flat;

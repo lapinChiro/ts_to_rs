@@ -68,13 +68,31 @@ pub enum NarrowEvent {
     ///
     /// Emitted when the closure either reads or reassigns a variable that is
     /// narrowed in the enclosing scope. Consumers drive the Phase 3b emission
-    /// policy (Policy A FnMut vs Policy B `Rc<RefCell<_>>`) from this event.
+    /// policy (Policy A FnMut vs Policy B `Rc<RefCell<_>>`) from this event,
+    /// and use [`enclosing_fn_body`](Self::ClosureCapture::enclosing_fn_body)
+    /// for position-aware narrow suppression queries.
     ClosureCapture {
         /// Variable captured by the closure.
         var_name: String,
         /// Span of the closure expression.
         closure_span: Span,
+        /// Span of the enclosing function body where this capture event was
+        /// detected.
+        ///
+        /// Defines the position range (`[lo, hi)`) within which this event is
+        /// observable for narrow suppression queries
+        /// (`FileTypeResolution::is_var_closure_reassigned`,
+        /// `FileTypeResolution::narrowed_type`). The analyzer
+        /// (`analyze_function(body, params)`) populates this with the function
+        /// body's span passed to it. Multi-function scope isolation (I-169 P1)
+        /// is structurally guaranteed by this field: a query at a position
+        /// outside `enclosing_fn_body` does not match this event.
+        enclosing_fn_body: Span,
         /// Narrowed type of the variable in the outer scope at capture time.
+        ///
+        /// Currently a `RustType::Any` placeholder populated by I-169 T6-2
+        /// follow-up. Phase 3b (closure reassign emission policy) may resolve
+        /// it to the actual outer narrow type later.
         outer_narrow: RustType,
     },
 }

@@ -59,6 +59,7 @@ mod narrow_event_accessors {
         let e = NarrowEvent::ClosureCapture {
             var_name: "z".into(),
             closure_span: Span { lo: 10, hi: 20 },
+            enclosing_fn_body: Span { lo: 0, hi: 100 },
             outer_narrow: RustType::String,
         };
         assert_eq!(e.var_name(), "z");
@@ -99,6 +100,7 @@ mod narrow_event_accessors {
         let e = NarrowEvent::ClosureCapture {
             var_name: "x".into(),
             closure_span: Span { lo: 0, hi: 0 },
+            enclosing_fn_body: Span { lo: 0, hi: 0 },
             outer_narrow: RustType::Bool,
         };
         assert!(e.as_narrow().is_none());

@@ -517,3 +517,158 @@ fn test_convert_expr_unary_plus_unknown_returns_identity() {
         .unwrap();
     assert_eq!(result, Expr::Ident("x".to_string()));
 }
+
+// ------------------------------------------------------------------
+// I-169 T6-2 follow-up structural snapshot (D-5): closure-reassign
+// narrow-stale read coerce via `helpers::coerce_default`.
+// ------------------------------------------------------------------
+
+/// Converts the given source (must define a single `function f(...) { ... }`)
+/// and returns the last IR tail-expr or return expression from the body.
+/// Used by the structural snapshot tests below.
+fn transform_fn_last_value(source: &str) -> Expr {
+    use crate::ir::Stmt as IrStmt;
+    let f = TctxFixture::from_source(source);
+    let tctx = f.tctx();
+    let fn_decl = match &f.module().body[0] {
+        ModuleItem::Stmt(Stmt::Decl(Decl::Fn(fd))) => fd,
+        _ => panic!("expected fn decl"),
+    };
+    let body_stmts = &fn_decl.function.body.as_ref().unwrap().stmts;
+    let result = {
+        let mut synthetic = SyntheticTypeRegistry::new();
+        Transformer::for_module(&tctx, &mut synthetic).convert_stmt_list(body_stmts, None)
+    }
+    .expect("transform failed");
+    let last = result.last().expect("body produced no stmts").clone();
+    match last {
+        IrStmt::TailExpr(e) => e,
+        IrStmt::Return(Some(e)) => e,
+        other => panic!("expected tail expr or return, got {other:?}"),
+    }
+}
+
+#[test]
+fn arith_coerce_when_closure_reassigned_option_lhs() {
+    // Matrix cell C3 / I-144 T6-2: `x + 1` where `x` is closure-reassigned
+    // Option<f64> must emit `x.unwrap_or(0.0) + 1.0`.
+    let result = transform_fn_last_value(
+        r#"
+        function f(): number {
+            let x: number | null = 5;
+            if (x === null) return -1;
+            const reset = () => { x = null; };
+            reset();
+            return x + 1;
+        }
+        "#,
+    );
+    match result {
+        Expr::BinaryOp { left, op, right } => {
+            assert_eq!(op, BinOp::Add);
+            assert!(matches!(*right, Expr::NumberLit(n) if n == 1.0));
+            match *left {
+                Expr::MethodCall {
+                    object,
+                    method,
+                    args,
+                } => {
+                    assert_eq!(method, "unwrap_or");
+                    assert!(matches!(*object, Expr::Ident(n) if n == "x"));
+                    assert_eq!(args.len(), 1);
+                    assert!(matches!(args[0], Expr::NumberLit(n) if n == 0.0));
+                }
+                other => panic!("expected MethodCall(unwrap_or) as LHS, got {other:?}"),
+            }
+        }
+        other => panic!("expected BinaryOp, got {other:?}"),
+    }
+}
+
+#[test]
+fn string_concat_coerce_when_closure_reassigned_option() {
+    // Matrix cell C4 / I-144 T6-2: `"v=" + x` where `x` is closure-reassigned
+    // Option<f64> must emit the FormatMacro string-coerce shape
+    // `format!("{}{}", "v=", x.map(|v| v.to_string()).unwrap_or_else(|| "null".to_string()))`.
+    let result = transform_fn_last_value(
+        r#"
+        function f(): string {
+            let x: number | null = 5;
+            if (x === null) return "no";
+            const reset = () => { x = null; };
+            reset();
+            return "v=" + x;
+        }
+        "#,
+    );
+    match result {
+        Expr::FormatMacro { template, args } => {
+            assert_eq!(template, "{}{}");
+            assert_eq!(args.len(), 2);
+            assert!(matches!(&args[0], Expr::StringLit(s) if s == "v="));
+            // args[1] should be x.map(|v| v.to_string()).unwrap_or_else(|| "null".to_string())
+            match &args[1] {
+                Expr::MethodCall {
+                    object: outer_obj,
+                    method,
+                    args: outer_args,
+                } => {
+                    assert_eq!(method, "unwrap_or_else");
+                    assert_eq!(outer_args.len(), 1);
+                    match outer_obj.as_ref() {
+                        Expr::MethodCall {
+                            object,
+                            method,
+                            args,
+                        } => {
+                            assert_eq!(method, "map");
+                            assert!(matches!(object.as_ref(), Expr::Ident(n) if n == "x"));
+                            assert_eq!(args.len(), 1);
+                        }
+                        other => panic!("expected inner MethodCall(map), got {other:?}"),
+                    }
+                }
+                other => panic!("expected MethodCall(unwrap_or_else) as arg[1], got {other:?}"),
+            }
+        }
+        other => panic!("expected FormatMacro, got {other:?}"),
+    }
+}
+
+#[test]
+fn arith_coerce_does_not_fire_for_non_option_closure_reassigned_var() {
+    // I-169 matrix cell #18 (B5 rest param NA) negative-path lockin:
+    // a rest param (`Vec<T>`) reassigned inside a closure IS emitted as a
+    // `ClosureCapture` event by the analyzer, but the Transformer's
+    // `maybe_coerce_for_arith` guard (`matches!(ty, RustType::Option(_))`)
+    // must filter it out so no `unwrap_or(...)` wrap is injected — the
+    // read site should remain the plain ident access.
+    //
+    // The TS fixture uses `xs.length` (MemberAccess, not arithmetic) so
+    // the arith hook isn't even consulted; this test instead exercises
+    // an arithmetic read of the rest-param-like `Vec<T>` by summing an
+    // element into an accumulator. Concretely: `xs[0] + 1`. Under the
+    // T6-2 coerce rules, `xs[0]` resolves to `Option<f64>` (via I-138
+    // Vec index Option), NOT `xs` itself; and `xs` as a candidate has
+    // type `Vec<f64>`, not `Option<_>`. Reading `xs` bare (`return xs;`)
+    // as the tail expression exercises the Vec-in-Option-context guard
+    // path: no coerce must be applied to `xs`.
+    let result = transform_fn_last_value(
+        r#"
+        function f(...xs: number[]): number[] {
+            const reset = () => { xs = []; };
+            reset();
+            return xs;
+        }
+        "#,
+    );
+    // Expected: plain Ident("xs") (no unwrap_or wrap because xs is Vec<f64>,
+    // not Option<T>, so the `matches!(ty, RustType::Option(_))` guard in
+    // maybe_coerce_for_arith / maybe_coerce_for_string_concat filters it out).
+    match result {
+        Expr::Ident(name) => assert_eq!(name, "xs"),
+        other => panic!(
+            "expected plain Ident(\"xs\") with no coerce wrap for Vec<T> closure-reassigned var, got {other:?}"
+        ),
+    }
+}

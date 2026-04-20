@@ -70,6 +70,23 @@ impl<'a> Transformer<'a> {
         self.tctx.type_resolution.emission_hint(stmt_lo)
     }
 
+    /// Returns `true` iff some closure body in the same function as `position`
+    /// reassigns `var_name` (I-144 T6-2 `NarrowEvent::ClosureCapture`,
+    /// I-169 follow-up: position-aware via `enclosing_fn_body`).
+    ///
+    /// Thin wrapper over
+    /// [`FileTypeResolution::is_var_closure_reassigned`](crate::pipeline::type_resolution::FileTypeResolution::is_var_closure_reassigned).
+    /// Used by `try_generate_narrowing_match` (passes `if_stmt.span.lo.0`)
+    /// to suppress shadow-let emission and by `convert_bin_expr`
+    /// (passes operand `ast_expr.span().lo.0`) to inject `coerce_default`
+    /// wrappers at narrow-stale read sites. Position membership against
+    /// `enclosing_fn_body` ensures multi-fn scope isolation.
+    pub(crate) fn is_var_closure_reassigned(&self, var_name: &str, position: u32) -> bool {
+        self.tctx
+            .type_resolution
+            .is_var_closure_reassigned(var_name, position)
+    }
+
     /// Named 型のフィールド型を TypeRegistry から解決する。
     ///
     /// ジェネリック型の場合、`type_args` を使ってインスタンス化した TypeDef からフィールド型を解決する。

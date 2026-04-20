@@ -195,7 +195,8 @@ impl<'a> TypeResolver<'a> {
         // Walk body
         match &*arrow.body {
             ast::BlockStmtOrExpr::BlockStmt(block) => {
-                self.collect_emission_hints(block);
+                let param_pats: Vec<&ast::Pat> = arrow.params.iter().collect();
+                self.collect_emission_hints(block, &param_pats);
                 for stmt in &block.stmts {
                     self.visit_stmt(stmt);
                 }
@@ -249,7 +250,9 @@ impl<'a> TypeResolver<'a> {
         }
 
         if let Some(body) = &fn_expr.function.body {
-            self.collect_emission_hints(body);
+            let param_pats: Vec<&ast::Pat> =
+                fn_expr.function.params.iter().map(|p| &p.pat).collect();
+            self.collect_emission_hints(body, &param_pats);
             for stmt in &body.stmts {
                 self.visit_stmt(stmt);
             }
