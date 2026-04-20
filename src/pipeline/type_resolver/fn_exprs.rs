@@ -195,6 +195,7 @@ impl<'a> TypeResolver<'a> {
         // Walk body
         match &*arrow.body {
             ast::BlockStmtOrExpr::BlockStmt(block) => {
+                self.collect_emission_hints(block);
                 for stmt in &block.stmts {
                     self.visit_stmt(stmt);
                 }
@@ -248,6 +249,7 @@ impl<'a> TypeResolver<'a> {
         }
 
         if let Some(body) = &fn_expr.function.body {
+            self.collect_emission_hints(body);
             for stmt in &body.stmts {
                 self.visit_stmt(stmt);
             }

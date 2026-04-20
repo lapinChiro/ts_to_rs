@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 
 use crate::ir::RustType;
-use crate::pipeline::narrowing_analyzer::NarrowEvent;
+use crate::pipeline::narrowing_analyzer::{EmissionHint, NarrowEvent};
 
 use super::ResolvedType;
 
@@ -128,6 +128,19 @@ pub struct FileTypeResolution {
     /// reads this to expand spreads into individual field accesses, avoiding the need
     /// to re-resolve type parameter constraints or Option unwrapping.
     pub spread_fields: HashMap<Span, Vec<(String, RustType)>>,
+
+    /// Per-`??=` emission hints produced by
+    /// [`crate::pipeline::narrowing_analyzer::analyze_function`].
+    ///
+    /// Keyed by the LHS identifier's start byte position
+    /// (`ident.id.span.lo.0` where `ident` is the `??=` assignment's bare
+    /// `Ident` LHS — same key the analyzer writes from
+    /// `classifier::extract_nullish_assign_ident_stmt`). Consumed by
+    /// `Transformer::try_convert_nullish_assign_stmt` to pick between
+    /// E1 shadow-let and E2a `get_or_insert_with` emission depending on
+    /// whether the narrow would be invalidated by a later reset, loop
+    /// iteration, or closure reassign.
+    pub emission_hints: HashMap<u32, EmissionHint>,
 }
 
 impl FileTypeResolution {
@@ -141,6 +154,7 @@ impl FileTypeResolution {
             du_field_bindings: Vec::new(),
             any_enum_overrides: Vec::new(),
             spread_fields: HashMap::new(),
+            emission_hints: HashMap::new(),
         }
     }
 
@@ -200,6 +214,16 @@ impl FileTypeResolution {
         self.du_field_bindings
             .iter()
             .any(|b| b.var_name == var_name && b.scope_start <= position && position < b.scope_end)
+    }
+
+    /// Returns the emission hint for a `??=` statement keyed by its start
+    /// byte position (`stmt.span.lo.0`).
+    ///
+    /// `None` when no analyzer output exists for the site — the Transformer
+    /// then falls back to the default E1 shadow-let strategy for backward
+    /// compatibility with paths the analyzer does not yet cover.
+    pub fn emission_hint(&self, stmt_lo: u32) -> Option<EmissionHint> {
+        self.emission_hints.get(&stmt_lo).copied()
     }
 }
 
@@ -410,5 +434,34 @@ mod tests {
             declared_at: Span { lo: 10, hi: 15 },
         };
         assert_eq!(resolution.is_mutable(&unknown_var), None);
+    }
+
+    #[test]
+    fn test_emission_hint_returns_stored_hint() {
+        // I-144 T6-1: the `??=` emission-hint lookup returns the value stored
+        // by `TypeResolver::collect_emission_hints` when the key matches.
+        let mut resolution = FileTypeResolution::empty();
+        resolution
+            .emission_hints
+            .insert(100, EmissionHint::ShadowLet);
+        resolution
+            .emission_hints
+            .insert(200, EmissionHint::GetOrInsertWith);
+
+        assert_eq!(resolution.emission_hint(100), Some(EmissionHint::ShadowLet));
+        assert_eq!(
+            resolution.emission_hint(200),
+            Some(EmissionHint::GetOrInsertWith)
+        );
+    }
+
+    #[test]
+    fn test_emission_hint_returns_none_for_missing_key() {
+        // Absent key means the analyzer did not produce a hint for the site
+        // (e.g., the `??=` sits in a context `analyze_function` does not
+        // cover, or the key does not correspond to a `??=` site at all).
+        // The Transformer falls back to the default E1 shadow-let path.
+        let resolution = FileTypeResolution::empty();
+        assert_eq!(resolution.emission_hint(42), None);
     }
 }

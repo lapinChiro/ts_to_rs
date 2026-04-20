@@ -211,14 +211,18 @@ fn wrap_match_with_switch_label_if_needed(arms: Vec<MatchArm>, match_expr: Expr)
 /// - If any case has a non-empty body without `break` (fall-through with code), generates
 ///   a `LabeledBlock` + flag pattern.
 impl<'a> Transformer<'a> {
-    /// Converts the `cons` of a `switch` case into IR statements, filtering out
-    /// terminators per the caller's policy and running the I-142 D-1
-    /// narrowing-reset pre-check on each retained statement.
+    /// Converts the `cons` of a `switch` case into IR statements, filtering
+    /// out terminators per the caller's policy.
     ///
     /// `drop_continue = true` filters both `break` and `continue` (the normal
     /// clean-match / fall-through cases where `continue` escapes the switch).
     /// `drop_continue = false` keeps `continue` (used in the labeled-block
     /// fall-through emission path where `continue` carries meaning).
+    ///
+    /// `??=` emission within case bodies is driven by the CFG-analyzer
+    /// hints populated by `TypeResolver::collect_emission_hints` on the
+    /// enclosing function body, so this method does not participate in that
+    /// dispatch directly (I-144 T6-1 retired the per-case pre-check).
     fn convert_switch_case_body(
         &mut self,
         cons: &[ast::Stmt],
@@ -226,17 +230,13 @@ impl<'a> Transformer<'a> {
         drop_continue: bool,
     ) -> Result<Vec<Stmt>> {
         let mut result = Vec::new();
-        for (i, stmt) in cons.iter().enumerate() {
+        for stmt in cons {
             if matches!(stmt, ast::Stmt::Break(_)) {
                 continue;
             }
             if drop_continue && matches!(stmt, ast::Stmt::Continue(_)) {
                 continue;
             }
-            // The shadow-let's lexical scope is the case body itself, so the
-            // remaining slice is the case's own tail — no leakage into sibling
-            // cases or the code after the switch.
-            self.pre_check_narrowing_reset(stmt, &cons[i + 1..])?;
             result.extend(self.convert_stmt(stmt, return_type)?);
         }
         Ok(result)

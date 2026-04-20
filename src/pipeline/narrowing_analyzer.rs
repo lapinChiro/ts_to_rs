@@ -62,8 +62,12 @@
 //!   `FileTypeResolution::narrow_events` through
 //!   [`NarrowTypeContext::push_narrow_event`].
 //!
-//! - **T6-T7**: `pre_check_narrowing_reset` / `has_narrowing_reset_in_stmts`
-//!   are retired; call sites consult [`AnalysisResult::emission_hints`].
+//! - **T6**: The legacy `pre_check_narrowing_reset` + `has_narrowing_reset_in_stmts`
+//!   transformer scanner is retired. `Transformer::try_convert_nullish_assign_stmt`
+//!   consults [`AnalysisResult::emission_hints`] (populated by
+//!   [`TypeResolver::collect_emission_hints`](crate::pipeline::type_resolver::TypeResolver))
+//!   to pick between [`EmissionHint::ShadowLet`] (E1) and
+//!   [`EmissionHint::GetOrInsertWith`] (E2a) at each `??=` site.
 //!
 //! # Design reference
 //!

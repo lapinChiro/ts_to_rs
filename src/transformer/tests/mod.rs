@@ -217,6 +217,88 @@ fn test_build_option_unwrap_ident_uses_unwrap_or_else() {
     assert_unwrap_or_else(&result);
 }
 
+// -- build_option_get_or_insert_with tests (I-144 T6-1) --
+//
+// Unlike `build_option_unwrap_with_default`, `get_or_insert_with` is
+// *always* lazy (TS `??=` is lazy too) so every call — regardless of the
+// default's Copy-ness — must wrap the default in a zero-arg closure.
+// These tests lock that invariant in so a future "optimization" that
+// eagerly inlines a Copy literal cannot regress TS side-effect semantics
+// (e.g. `x ??= expensive()` where `x` is already `Some`).
+
+/// Asserts the result is `.get_or_insert_with(|| default)` with a zero-arg
+/// closure and a single argument (the closure itself).
+fn assert_get_or_insert_with(result: &Expr) {
+    match result {
+        Expr::MethodCall { method, args, .. } => {
+            assert_eq!(method, "get_or_insert_with");
+            assert_eq!(args.len(), 1);
+            match &args[0] {
+                Expr::Closure {
+                    params,
+                    return_type,
+                    body,
+                } => {
+                    assert!(params.is_empty(), "closure should have no parameters");
+                    assert!(return_type.is_none(), "closure should have no return type");
+                    assert!(
+                        matches!(body, crate::ir::ClosureBody::Expr(_)),
+                        "closure body should be a single expression"
+                    );
+                }
+                other => panic!("expected Closure argument, got {:?}", other),
+            }
+        }
+        other => panic!("expected MethodCall, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_build_option_get_or_insert_with_number_lit_wraps_in_closure() {
+    // Even a Copy literal is wrapped in a closure — lazy is always safe,
+    // eager would change TS `??=` semantics for side-effecting RHS.
+    let result =
+        build_option_get_or_insert_with(Expr::Ident("x".to_string()), Expr::NumberLit(0.0));
+    assert_get_or_insert_with(&result);
+}
+
+#[test]
+fn test_build_option_get_or_insert_with_string_lit_wraps_in_closure() {
+    let result = build_option_get_or_insert_with(
+        Expr::Ident("x".to_string()),
+        Expr::StringLit("null".to_string()),
+    );
+    assert_get_or_insert_with(&result);
+}
+
+#[test]
+fn test_build_option_get_or_insert_with_fn_call_wraps_in_closure() {
+    let result = build_option_get_or_insert_with(
+        Expr::Ident("x".to_string()),
+        Expr::FnCall {
+            target: CallTarget::Free("compute_default".to_string()),
+            args: vec![],
+        },
+    );
+    assert_get_or_insert_with(&result);
+}
+
+#[test]
+fn test_build_option_get_or_insert_with_preserves_target_as_object() {
+    // The target expression must be the MethodCall receiver unmodified, so
+    // field / index accesses (I-142-b/c) route correctly even though T6-1
+    // only exercises the Ident shape.
+    let result =
+        build_option_get_or_insert_with(Expr::Ident("x".to_string()), Expr::NumberLit(0.0));
+    match &result {
+        Expr::MethodCall { object, .. } => match object.as_ref() {
+            Expr::Ident(name) => assert_eq!(name, "x"),
+            other => panic!("expected Ident target, got {:?}", other),
+        },
+        other => panic!("expected MethodCall, got {:?}", other),
+    }
+}
+
 // -- build_option_or_option tests (I-022) --
 
 /// Asserts the result is `.or(value)` with the RHS as a direct argument (no closure).

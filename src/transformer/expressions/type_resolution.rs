@@ -6,6 +6,7 @@ use swc_common::Spanned;
 use swc_ecma_ast as ast;
 
 use crate::ir::RustType;
+use crate::pipeline::narrowing_analyzer::EmissionHint;
 use crate::pipeline::type_resolution::Span;
 use crate::pipeline::ResolvedType;
 use crate::registry::TypeDef;
@@ -54,6 +55,19 @@ impl<'a> Transformer<'a> {
             ResolvedType::Known(ty) => Some(ty),
             ResolvedType::Unknown => None,
         }
+    }
+
+    /// Returns the emission hint for a `??=` statement keyed by its start
+    /// byte position.
+    ///
+    /// Thin wrapper over
+    /// [`FileTypeResolution::emission_hint`](crate::pipeline::type_resolution::FileTypeResolution::emission_hint)
+    /// populated by [`TypeResolver::collect_emission_hints`](crate::pipeline::type_resolver::TypeResolver)
+    /// during function-body traversal. `None` means the analyzer has no
+    /// hint for this site — the Transformer falls back to the default
+    /// E1 shadow-let path.
+    pub(crate) fn get_emission_hint(&self, stmt_lo: u32) -> Option<EmissionHint> {
+        self.tctx.type_resolution.emission_hint(stmt_lo)
     }
 
     /// Named 型のフィールド型を TypeRegistry から解決する。

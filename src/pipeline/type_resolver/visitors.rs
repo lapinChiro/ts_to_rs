@@ -123,6 +123,7 @@ impl<'a> TypeResolver<'a> {
 
         // Visit body
         if let Some(body) = &fn_decl.function.body {
+            self.collect_emission_hints(body);
             self.visit_block_stmt(body);
         }
 
@@ -465,6 +466,7 @@ impl<'a> TypeResolver<'a> {
                                 self.visit_param_pat(&param.pat);
                             }
                         }
+                        self.collect_emission_hints(body);
                         for stmt in &body.stmts {
                             self.visit_stmt(stmt);
                         }
@@ -519,6 +521,7 @@ impl<'a> TypeResolver<'a> {
                 self.visit_param_pat(&param.pat);
             }
             let prev_return_type = self.setup_fn_return_type(function.return_type.as_deref());
+            self.collect_emission_hints(body);
             for stmt in &body.stmts {
                 self.visit_stmt(stmt);
             }

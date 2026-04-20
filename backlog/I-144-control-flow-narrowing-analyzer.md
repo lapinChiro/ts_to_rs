@@ -1,6 +1,6 @@
 # I-144: Control-flow narrowing analyzer (CFG-based type narrowing infrastructure)
 
-**Status**: Implementation stage 進行中 — **T0-T5 完了** (2026-04-20)、T6 着手可能
+**Status**: Implementation stage 進行中 — **T0-T5 + T6-1 完了** (2026-04-20)、T6-2 着手可能 (phase 分割 plan は `plan.t6.md`)
 **Matrix-driven**: ✅ Yes (Trigger × LHS type × Reset cause × Flow context × **Read context** × Emission)
 **SDCDF 2-stage workflow 適用**: 必須
 **起票日**: 2026-04-19
@@ -19,6 +19,14 @@
   (R5) F4 loop body / F6 try body / R4 `&&=` / R5 `??=` narrowed の regression ✓ fixture 欠落 — T1 completion criterion (9 ✗ + 3 ✓ 代表) 内だが coverage 強化案として T3 着手後に補充検討 (scope out、lock-in test はこれら cell には既存 snapshot)。
 - **T3 実装完了 (2026-04-19)**: `src/pipeline/narrowing_analyzer/` 新設 (events.rs 360 + classifier.rs 908 + mod.rs 227 + 5 分割 test file 計 2253 行)。scope-aware classifier (VarDecl L-to-R / closure param / block decl shadow) + branch/sequential merge combinator + peel-aware wrapper + unreachable stmt prune + closure/fn/class/object-method descent (outer ident → `ClosureReassign`)。`??=` 各 site に `EmissionHint` (ShadowLet / GetOrInsertWith) を hint-only で算出。`/check_job` × 4 round (deep / deep deep × 3) + `/check_problem` で計 42 defect 発見 → 全解消。
 - **T4 実装完了 (2026-04-19)**: `NarrowingEvent` struct を `NarrowEvent::{Narrow, Reset, ClosureCapture}` enum に migrate、`FileTypeResolution::narrow_events` rename、`NarrowEventRef` borrowed view + `as_narrow()` / `var_name()` accessor 追加、`PrimaryTrigger` + `NarrowTrigger` 2-layer 型で nested `EarlyReturnComplement` を構造的排除。全 consumer (`type_resolver/narrowing.rs`, `visitors.rs`, Transformer) を borrowed view 経由に統一。`block_always_exits` 削除 → `stmt_always_exits` (narrowing_patterns.rs) を single source of truth 化、共通 peel 関数 + 22 unit test 集約。
+- **T5 実装完了 (2026-04-20)**: `type_resolver/narrowing.rs` (524 行) 削除、narrow guard 検出を `narrowing_analyzer/guards.rs` に集約、`NarrowTypeContext` trait で registry access を抽象化、trait boundary 専用 unit test 19 件を追加。
+- **T6-1 実装完了 (2026-04-20)**: Pipeline wiring + scanner 完全削除 + ??= EmissionHint dispatch (当初 T6 を T6-1〜T6-6 に phase 分割、`plan.t6.md` 参照)。
+  **追加新設**: `FileTypeResolution.emission_hints: HashMap<u32, EmissionHint>` field + accessor `emission_hint(stmt_lo)`、`TypeResolver::collect_emission_hints` helper (独立 module `emission_hints.rs`)、5 entry point (fn decl / method / ctor / arrow BlockStmt / fn expr) から `analyze_function` を call、Transformer の `get_emission_hint` accessor + `build_option_get_or_insert_with` IR helper (always-lazy 形で `x.get_or_insert_with(\|\| d)` 固定、TS `??=` lazy semantics に合わせる)。
+  **dispatch 書換**: `try_convert_nullish_assign_stmt` の Ident LHS + ShadowLet strategy arm を `Some(GetOrInsertWith) → E2a / _ → E1 shadow-let` の pattern match に変更。
+  **scanner 完全削除**: `pre_check_narrowing_reset` + `has_narrowing_reset_in_stmts` + `stmt_has_reset` + `expr_has_reset` + ヘルパ 4 種 (vardecl_init_has_reset / for_head_binds_ident / pat_binds_ident / prop_has_reset) + 8 call site、計 -440 行。T6 / T7 を統合して一括削除 (broken-window 防止)。
+  **test 書換**: cell14_* 4 tests を共通 helper `assert_cell14_emits_get_or_insert_with` 経由の structural emission assertion に統一、`test_e2e_cell_i144` 集約 1 関数を per-cell 14 関数に分割 (baseline GREEN 5 + T6-1 GREEN 3 un-ignore / 残 6 phase 別 ignore)。cell-14 fixture の `String(v)` を template literal `${v}` に書換 (I-163 pre-existing defect 回避)。
+  **Deep deep review 追加 fix**: `build_option_get_or_insert_with` unit test 4 件 + `emission_hint` accessor unit test 2 件 + 4 entry point regression lock-in (method / ctor / arrow BlockStmt / fn expr に対して `collect_emission_hints` 呼出し削除を guard)、doc drift 3 件修正 (FileTypeResolution.emission_hints field doc key 記述 / nullish_assign.rs module doc / switch.rs `convert_switch_case_body` doc)。pre-existing defect は TODO 起票 (I-163 `String()` callable / I-164 static block TypeResolver 未 visit)。
+  **Quality gate**: lib 2797 pass (+10)、integration 122 / compile 3 / E2E 105 + 6 ignored、clippy 0 / fmt 0 diff、Hono bench 変動 0 (clean 112/158 / errors 62 / compile 157/158 不変)。
 
 ## Background
 
@@ -860,79 +868,156 @@ TDD: RED → GREEN → REFACTOR 順。Phase 間は SDCDF spec stage / implementa
         157/158、全て T5 前後変動なし)
 - **Depends on**: T4 ✅
 
-#### T6: Interim scanner 短絡 + Transformer emission 連動 (Phase 3、v2 で T6/T7 合流)
+#### T6-1: Pipeline wiring + scanner 完全削除 + ??= EmissionHint dispatch ✅ 完了 (2026-04-20)
 
-**v2 で T6 と T7 を合流**: 旧 T6 (emission 変更) 実装中は旧 scanner が UnsupportedSyntaxError を
-surface 続け新 emission が test で green 化しない。scanner 短絡を先行実施。
+**Scope 決定** (2026-04-20): 当初 T6 を Step 6-1 (scanner 短絡) + Step 6-2 (emission 連動) の
+2 step 構成で定義したが、9 cell ✗ 全 green 化は完了条件として scope が大きいため、
+`plan.t6.md` に従って T6-1 〜 T6-6 の 6 sub-phase に分割。T6-1 は pipeline foundation +
+ShadowLet/GetOrInsertWith dispatch のみ (Cell #14 / C-1 / C-2a の 3 cell GREEN 化)。T7 は
+T6-1 に畳み込み (scanner 関数 + call site を同時削除、broken-window 防止)。
 
-- **Work (Step 6-1: scanner 短絡)**:
-  - `pre_check_narrowing_reset` / `has_narrowing_reset_in_stmts` の call site を CFG analyzer 出力の
-    `EmissionHint` 参照に置換 (関数本体は残置、本 commit で無効化のみ)
-  - 6 call site (`statements/mod.rs:200`, `switch.rs:100`, `classes/members.rs:205/334/382`,
-    `expressions/functions.rs:129/291/310`) を `EmissionHint` 参照 or `false` 固定に変更
-- **Work (Step 6-2: emission 連動)**:
-  - `transformer/statements/nullish_assign.rs::try_convert_nullish_assign_stmt` を
-    `EmissionHint` + `RcContext` 参照に書換:
-    - `(ShadowLet, RC1)` → E1 shadow-let
-    - `(E2aGetOrInsert, RC3 stmt)` → E2a `x.get_or_insert_with(|| d)`
-    - `(E2bUnwrapOr, RC1 stale)` → E2b `x.unwrap_or(coerce_default(T))`
-    - `(IfLetSome, RC1/RC7 alive)` → E3 `if let Some(x) = x`
-  - `convert_assign_expr::NullishAssign` expression-context arm も同様
-  - **JS coerce_default helper** 実装: `src/transformer/helpers/coerce_default.rs`
-    (T 型 → Rust literal expr, e.g. `F64 → 0.0, String → "null"`)
-  - C-2a/b/c 各 empirical 再現 TS を green 化 verify
+- **Work (完了)**:
+  - `FileTypeResolution.emission_hints: HashMap<u32, EmissionHint>` field + accessor
+    `emission_hint(stmt_lo)` 新設 (`src/pipeline/type_resolution.rs`)
+  - `TypeResolver::collect_emission_hints(body: &BlockStmt)` helper を独立 module
+    `src/pipeline/type_resolver/emission_hints.rs` に新設、`narrowing_analyzer::analyze_function`
+    を call して `self.result.emission_hints.extend(...)`
+  - 5 entry point から呼び出し: `visit_fn_decl` (visitors.rs:126) / `visit_method_function`
+    (visitors.rs:524) / `visit_class_body` の `Constructor` arm (visitors.rs:469) /
+    `resolve_arrow_expr` の `BlockStmt` 分岐 (fn_exprs.rs:198) / `resolve_fn_expr`
+    (fn_exprs.rs:252)
+  - Transformer に `get_emission_hint(&self, stmt_lo: u32) -> Option<EmissionHint>`
+    accessor (`src/transformer/expressions/type_resolution.rs`) + `build_option_get_or_insert_with`
+    IR helper (`src/transformer/mod.rs`) を新設。後者は always-lazy 形で
+    `x.get_or_insert_with(|| d)` を emit (TS `??=` lazy semantics 遵守、Copy lit も closure wrap)
+  - `try_convert_nullish_assign_stmt` を EmissionHint dispatch に書換 (Ident LHS +
+    ShadowLet strategy arm 内で `match self.get_emission_hint(ident.id.span.lo.0)`、
+    `Some(GetOrInsertWith) → E2a` / `_ → E1 shadow-let`)
+  - **Interim scanner 完全削除** (T7 統合): `pre_check_narrowing_reset` + `has_narrowing_reset_in_stmts`
+    + `stmt_has_reset` + `expr_has_reset` + helpers 4 種 (vardecl_init_has_reset /
+    for_head_binds_ident / pat_binds_ident / prop_has_reset) + 8 call site
+    (statements/mod.rs / switch.rs / classes/members.rs × 3 / expressions/functions.rs × 3)
+    を削除、計 -440 行
+  - cell14_* 4 tests を structural emission assertion に書換 (共通 helper
+    `assert_cell14_emits_get_or_insert_with` 経由で linear null / inner-if / for-of body /
+    closure body reassign 全 cell を `.get_or_insert_with(|| 0.0)` emission + error 無しで assert)
+  - `test_e2e_cell_i144` 集約 1 関数を per-cell 14 関数に分割、baseline GREEN 5 + T6-1
+    GREEN 3 = 8 cell un-ignore、残 6 cell は phase 別 `#[ignore = "I-144 T6-N: ..."]` reason で明示
+  - cell-14 fixture の `String(v)` 呼出しを template literal `${v}` に書換 (I-163
+    pre-existing transpiler defect 回避、cell-i025 と同 pattern)
+  - Doc 更新: `narrowing_analyzer.rs` module doc (T6 retirement 記述)、`nullish_assign.rs`
+    module doc (EmissionHint dual dispatch 表記)、`transformer/mod.rs` の
+    `transform_module_collecting_with_context` doc、`switch.rs` の `convert_switch_case_body` doc
+- **Work (Deep deep review で追加実施、2026-04-20)**:
+  - `build_option_get_or_insert_with` unit test 4 件 (Copy lit / String lit / FnCall /
+    target preservation) を `src/transformer/tests/mod.rs` に追加、lazy-closure invariant を lock-in
+  - `FileTypeResolution::emission_hint` accessor unit test 2 件 (Some / None 分岐) を
+    `src/pipeline/type_resolution.rs::tests` に追加
+  - 4 entry point regression lock-in: `collect_emission_hints_wired_into_class_method_body` /
+    `_constructor_body` / `_arrow_block_body` / `_fn_expr_body` を
+    `src/transformer/expressions/tests/nullish_assign.rs` に追加、5 entry point のうち
+    非 fn-decl 4 entry が `collect_emission_hints` 呼出し削除で silent regression しないことを guard
+  - Doc drift 修正: `FileTypeResolution.emission_hints` field doc の key 説明を
+    `ident.id.span.lo.0` (LHS ident span low) に訂正 / `nullish_assign.rs` module doc を
+    dual dispatch 表記に更新 / `switch.rs` `convert_switch_case_body` doc を T6-1 後形式に更新
+  - Pre-existing defect を TODO 起票: I-163 (`String()` callable が user-struct 化する defect、
+    cell-14 fixture で再現) / I-164 (static block body が TypeResolver で未 visit、regression
+    なしだが将来対応候補)
+- **Completion criteria** (達成):
+  - [x] Cell #14 / C-1 / C-2a の E2E GREEN (`test_e2e_cell_i144_14_narrowing_reset_structural` /
+        `_c1_compound_arith_preserves_narrow` / `_c2a_nullish_assign_closure_capture` 全 pass)
+  - [x] Scanner 関数完全削除、grep で残存 0 確認 (transformer/ 以下に `pre_check_narrowing_reset` /
+        `has_narrowing_reset_in_stmts` 0 hits)
+  - [x] cell14_* 4 tests を structural assertion に置換 (E2a `.get_or_insert_with(|| 0.0)`
+        emission + "narrowing-reset" error 無しを assert)
+  - [x] lib 2797 pass (+10 from 2787 baseline) / integration 122 / compile 3 / E2E 105 + 6 ignored
+  - [x] clippy 0 warn / fmt 0 diff / Hono bench 非後退 (clean 112/158 / errors 62 / compile
+        157/158、T6-1 前後変動なし)
+  - [x] `/check_job deep` + `/check_job deep deep` + `/check_problem` review で発見した defect
+        (test coverage / doc drift / pre-existing defect) を全解消 (pre-existing は TODO 起票)
+- **Depends on**: T5 ✅
+
+#### T6-2: `coerce_default` helper + E2b stale read emission (C-2b / C-2c GREEN 化)
+
+- **Work**:
+  - `src/transformer/helpers/` module 新設 (`mod.rs` + `coerce_default.rs`)
+  - `coerce_default(inner_ty: &RustType, rc: RcContext) -> Expr` 実装 — JS coerce_default
+    table (RC1 arithmetic F64 → `0.0` / RC6 StringInterp → `"null".to_string()` を初期 scope)
+  - 分類器拡張 or TypeResolver scope 切断で closure-reassign 後の narrow stale 状態を
+    Transformer に伝達 (probe-1/2/3 で設計選択確定: `NarrowEvent::ClosureCapture` emit vs
+    narrow event scope_end 調整)
+  - Transformer 側で RC1 arithmetic / RC6 string concat の read site に `x.unwrap_or(coerce_default(T))`
+    を emit、既存 expected_type coerce 経路と合流
+  - cell-c2b / cell-c2c E2E un-ignore
 - **Completion criteria**:
-  - I-144 E2E fixture (matrix ✗ cell) 全 green
-  - C-2a/b/c の empirical 再現 TS が E0308 を出さず正常 compile
-  - JS coerce_default が table 通り適用されていることを unit test で verify
-  - I-142 Cell #14 lock-in test を structural assertion に書換 (E2a 採用確認)
-- **Depends on**: T5
+  - cell-c2b / cell-c2c E2E GREEN
+  - `coerce_default` unit test が (RC1 F64, RC6 String) 網羅 (YAGNI: T6-2 scope に必要な RC のみ)
+  - T6-1 cell regression 0
+  - clippy 0 / fmt 0 / Hono bench 非後退
+- **Depends on**: T6-1 ✅
 
-#### T7: Interim scanner 完全削除 (Phase 4)
+#### T6-3: Truthy predicate E10 (primitive NaN + composite `Option<Union<T,U>>`)
 
 - **Work**:
-  - `pre_check_narrowing_reset` 関数削除 (`nullish_assign.rs:129`)
-  - `has_narrowing_reset_in_stmts` + `expr_has_reset` + `stmt_has_reset` 削除
-  - 関連 unit test (`cell14_narrowing_reset_*`) を structural emission 期待に書換
-  - Dead code / unused import cleanup
+  - Truthy emission 箇所を probe-4/5/6 で特定、`src/transformer/helpers/truthy.rs` 等に集約
+  - `F64` truthy → `x != 0.0 && !x.is_nan()` (T4d)
+  - `Option<Union<T,U>>` truthy → variant 別 `matches!(x, Some(Union::V(v)) if <inner truthy>) || ...`
+    (I-024 E10 composite)
+  - `!x` early-return complement narrow の composite case 対応 (必要なら guards.rs 拡張)
+  - cell-t4d / cell-i024 E2E un-ignore
 - **Completion criteria**:
-  - Scanner 関数完全削除、grep で残存 0 確認
-  - 全 test 全 pass
-  - clippy 0 warn
-- **Depends on**: T6
+  - cell-t4d / cell-i024 E2E GREEN
+  - Truthy predicate unit test が全 RustType variant を網羅
+  - 既 GREEN cell regression 0
+- **Depends on**: T6-2
 
-#### T8: 吸収対象 defect の regression lock-in
+#### T6-4: Compound OptChain narrow detection (T7 GREEN 化)
 
 - **Work**:
-  - I-024 (truthy narrowing complex case) の test 追加
-  - I-025 (Option return implicit None complex case) の test 追加
-  - I-142 Step 4 C-1 / C-2 の regression test (compound arith narrow 維持 / closure reassign
-    emission) 追加
-  - `functions` compile_test fixture (I-319 以外の narrow 関連) 検証
+  - `guards.rs::extract_null_check_narrowing` に OptChain LHS 対応追加
+    (`BinExpr(NotEqEqUndefined, OptChainExpr { base: x, chain: .prop }, Undefined)` を x の
+    非 null narrow として発火)
+  - guards.rs OptChain null check unit test 追加
+  - cell-t7 E2E un-ignore
 - **Completion criteria**:
-  - I-024 / I-025 / I-142 Step 4 C-1 / C-2 対応 test 全 pass
-  - `functions` fixture compile 成功条件が narrow 関連に限定されれば unskip 可能性 verify
-- **Depends on**: T7
+  - cell-t7 E2E GREEN
+  - 既 GREEN cell regression 0
+- **Depends on**: T6-3
 
-#### T9: Quality gate + Hono bench verification
-
-- **Work**:
-  - `cargo test --lib / --test '*'` 全 pass
-  - `cargo clippy` 0 warn / `cargo fmt` 0 diff
-  - `./scripts/hono-bench.sh` 実測、errors 62 非増加 verify
-  - Bench 変動があれば category 別分析 (narrow 精度向上で追加 error/compile 改善あるか)
-- **Completion criteria**: 全 quality gate pass、bench 非後退
-- **Depends on**: T8
-
-#### T10: `/check_job` Implementation Stage review
+#### T6-5: Multi-exit Option return implicit None emission (I-025 GREEN 化)
 
 - **Work**:
-  - Implementation stage 用 `/check_job` で第三者 review
-  - Defect 分類 (Grammar gap / Oracle gap / Spec gap / Implementation gap / Review insight)
-  - Spec gap = 0 および Implementation gap = 0 を目指す
-  - 発見 defect を fix または別 TODO 化
-- **Completion criteria**: review で Spec gap = 0 + Implementation gap = 0
-- **Depends on**: T9
+  - Option return tail injection の現状実装箇所を probe-7 で特定
+  - 複数 exit path (all-fall-off branch) の末尾に implicit `None` を inject
+  - cell-i025 E2E un-ignore
+- **Completion criteria**:
+  - cell-i025 E2E GREEN
+  - 既 GREEN cell regression 0
+- **Depends on**: T6-4
+
+#### T6-6: Quality gate + regression lock-in + `/check_job` Implementation stage review + PRD close
+
+元 T8 / T9 / T10 を統合。
+
+- **Work**:
+  - 吸収対象 (I-024 / I-025 / I-142 Cell #14 / C-1 / C-2a-c / C-3 / C-4 / D-1) の
+    snapshot / unit regression 追加
+  - `functions` compile_test fixture (I-319 以外の narrow 関連) 検証、unskip 可能性確認
+  - `cargo test` 全 pass / `cargo clippy --all-targets --all-features -- -D warnings` 0 warn /
+    `cargo fmt --all --check` 0 diff
+  - `./scripts/hono-bench.sh` 実測、errors 62 非増加 verify + category 別分析
+  - `/check_job` Implementation Stage review で Spec gap = 0 + Implementation gap = 0
+  - PRD close 処理: `backlog/I-144-...` を git history に archive、plan.md を完了済に移行、
+    吸収対象 TODO entry 削除、設計判断 archive (`doc/handoff/design-decisions.md`) に
+    CFG analyzer / NarrowTypeContext trait / EmissionHint dispatch / coerce_default table 等を追記
+- **Completion criteria**: PRD 全 Completion Criteria (13 項目) 達成
+- **Depends on**: T6-5
+
+> **Note**: 元 T7 (scanner 完全削除) / T8 (regression lock-in) / T9 (quality gate) / T10
+> (`/check_job` Implementation review) は T6 phase 分割時に再配分済:
+> T7 → T6-1 に統合 (scanner 関数と call site を同時削除して broken-window 防止)、
+> T8 / T9 / T10 → T6-6 に統合 (phase ごとに quality gate を完走するため最終 T6-6 で PRD
+> 全体 Completion Criteria を verify する単一 task に集約)。
 
 ---
 

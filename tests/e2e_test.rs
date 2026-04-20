@@ -954,14 +954,95 @@ fn test_e2e_cell_i154() {
     run_cell_e2e_tests("i154");
 }
 
-// I-144 SDCDF Spec-Stage T1 artifact: per-cell E2E fixtures committed in RED
-// state. The suite is `#[ignore]` until Implementation stage (T6) rewires
-// `??=` emission through the CFG analyzer so closure-capture / compound-arith
-// / narrowing-reset cells compile and match TS runtime. `scripts/record-cell-
-// oracle.sh` captured the TS reference output in `*.expected` alongside each
-// `.ts` fixture for human review; the runner itself recomputes TS stdout live.
+// -----------------------------------------------------------------------------
+// I-144 per-cell E2E fixtures (`tests/e2e/scripts/i144/`).
+//
+// SDCDF Spec-Stage T1 artifact: one fixture per Problem Space matrix cell so
+// phase-by-phase progress (T6-1 through T6-5) can un-ignore specific cells as
+// the implementation lands. The aggregate harness `run_cell_e2e_tests("i144")`
+// used in T1 was replaced by the per-cell functions below at T6-1 so that a
+// fixture still RED in a later phase does not mask a cell the current phase
+// made GREEN.
+//
+// Each function's `#[ignore]` reason (when present) names the phase that will
+// turn it GREEN. `scripts/record-cell-oracle.sh` wrote `.expected` files
+// alongside each `.ts` fixture for human review; the runner recomputes TS
+// stdout live.
+// -----------------------------------------------------------------------------
+
+// Baseline GREEN fixtures: these lock in existing narrowing behavior and
+// must not regress as the I-144 analyzer replaces the legacy scanner.
 #[test]
-#[ignore = "I-144 T1 red state — unignore at T6 when emission is rewired"]
-fn test_e2e_cell_i144() {
-    run_cell_e2e_tests("i144");
+fn test_e2e_cell_i144_closure_no_reassign_keeps_e1() {
+    run_cell_e2e_test("i144", "cell-regression-closure-no-reassign-keeps-e1");
+}
+#[test]
+fn test_e2e_cell_i144_f4_loop_body_narrow_preserves() {
+    run_cell_e2e_test("i144", "cell-regression-f4-loop-body-narrow-preserves");
+}
+#[test]
+fn test_e2e_cell_i144_null_check_narrow() {
+    run_cell_e2e_test("i144", "cell-regression-null-check-narrow");
+}
+#[test]
+fn test_e2e_cell_i144_r5_nullish_on_narrowed_is_noop() {
+    run_cell_e2e_test("i144", "cell-regression-r5-nullish-on-narrowed-is-noop");
+}
+#[test]
+fn test_e2e_cell_i144_rc_narrow_read_contexts() {
+    run_cell_e2e_test("i144", "cell-regression-rc-narrow-read-contexts");
+}
+
+// T6-1 GREEN fixtures: ??= EmissionHint dispatch + scanner retirement.
+#[test]
+fn test_e2e_cell_i144_14_narrowing_reset_structural() {
+    run_cell_e2e_test("i144", "cell-14-narrowing-reset-structural");
+}
+#[test]
+fn test_e2e_cell_i144_c1_compound_arith_preserves_narrow() {
+    run_cell_e2e_test("i144", "cell-c1-compound-arith-preserves-narrow");
+}
+#[test]
+fn test_e2e_cell_i144_c2a_nullish_assign_closure_capture() {
+    run_cell_e2e_test("i144", "cell-c2a-nullish-assign-closure-capture");
+}
+
+// T6-2 pending: E2b `x.unwrap_or(coerce_default(T))` emission at
+// narrow-stale reads after a captured closure reassigns the outer var.
+#[test]
+#[ignore = "I-144 T6-2: E2b stale read emission + coerce_default helper"]
+fn test_e2e_cell_i144_c2b_closure_reassign_arith_read() {
+    run_cell_e2e_test("i144", "cell-c2b-closure-reassign-arith-read");
+}
+#[test]
+#[ignore = "I-144 T6-2: E2b stale read emission + coerce_default helper"]
+fn test_e2e_cell_i144_c2c_closure_reassign_string_concat() {
+    run_cell_e2e_test("i144", "cell-c2c-closure-reassign-string-concat");
+}
+
+// T6-3 pending: E10 truthy predicate (primitive NaN + composite
+// `Option<Union<T, U>>`).
+#[test]
+#[ignore = "I-144 T6-3: E10 truthy NaN guard for primitive number"]
+fn test_e2e_cell_i144_t4d_truthy_number_nan() {
+    run_cell_e2e_test("i144", "cell-t4d-truthy-number-nan");
+}
+#[test]
+#[ignore = "I-144 T6-3: E10 composite truthy predicate for Option<Union>"]
+fn test_e2e_cell_i144_i024_truthy_option_complex() {
+    run_cell_e2e_test("i144", "cell-i024-truthy-option-complex");
+}
+
+// T6-4 pending: compound OptChain narrow (`x?.v !== undefined` narrows x).
+#[test]
+#[ignore = "I-144 T6-4: compound OptChain null-check narrow detection"]
+fn test_e2e_cell_i144_t7_optchain_compound_narrow() {
+    run_cell_e2e_test("i144", "cell-t7-optchain-compound-narrow");
+}
+
+// T6-5 pending: multi-exit Option return implicit None tail injection.
+#[test]
+#[ignore = "I-144 T6-5: multi-exit Option return implicit None emission"]
+fn test_e2e_cell_i144_i025_option_return_implicit_none_complex() {
+    run_cell_e2e_test("i144", "cell-i025-option-return-implicit-none-complex");
 }

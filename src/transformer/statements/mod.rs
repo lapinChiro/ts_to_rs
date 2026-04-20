@@ -231,15 +231,7 @@ impl<'a> Transformer<'a> {
         return_type: Option<&RustType>,
     ) -> Result<Vec<Stmt>> {
         let mut result = Vec::new();
-        for (i, stmt) in stmts.iter().enumerate() {
-            // I-142 D-1: surface `<ident> ??= d; ... <ident> = v;`
-            // narrowing-reset patterns as UnsupportedSyntaxError *before*
-            // emitting the shadow-let that would produce a silent compile
-            // error later. `remaining` covers the same Rust lexical scope the
-            // shadow-let would span; nested blocks are scanned recursively
-            // (closures excluded) by the scanner. See D-1 in
-            // `backlog/I-142-nullish-assign-shadow-let.md`.
-            self.pre_check_narrowing_reset(stmt, &stmts[i + 1..])?;
+        for stmt in stmts {
             let converted = self.convert_stmt(stmt, return_type)?;
             result.extend(converted);
         }

@@ -6,6 +6,7 @@
 
 mod call_resolution;
 pub(crate) mod du_analysis;
+mod emission_hints;
 mod expected_types;
 mod expressions;
 mod fn_exprs;

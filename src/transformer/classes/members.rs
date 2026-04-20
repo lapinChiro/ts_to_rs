@@ -194,15 +194,11 @@ impl<'a> Transformer<'a> {
         // Sub-Transformer for constructor body.
         // TypeResolver handles parameter types via scope_stack.
         let mut sub_t = self.spawn_nested_scope();
-        for (i, stmt) in stmts.iter().enumerate() {
+        for stmt in stmts {
             if let Some((field_name, value_expr)) = try_extract_this_assignment(stmt) {
                 let value = sub_t.convert_expr(value_expr)?;
                 fields.push((field_name, value));
             } else {
-                // I-142 D-1: the constructor body is a lexical scope; ??= on
-                // an Ident declared here would shadow it, and a later
-                // reassignment in the same scope resets the narrow.
-                sub_t.pre_check_narrowing_reset(stmt, &stmts[i + 1..])?;
                 other_stmts.extend(sub_t.convert_stmt(stmt, None)?);
             }
         }
@@ -328,10 +324,7 @@ impl<'a> Transformer<'a> {
             Some(block) => {
                 let mut sub_t = self.spawn_nested_scope();
                 let mut stmts = default_expansion_stmts;
-                for (i, stmt) in block.stmts.iter().enumerate() {
-                    // I-142 D-1: method body is a fresh scope; surface
-                    // narrowing-reset before emitting the shadow-let.
-                    sub_t.pre_check_narrowing_reset(stmt, &block.stmts[i + 1..])?;
+                for stmt in &block.stmts {
                     stmts.extend(sub_t.convert_stmt(stmt, return_type.as_ref())?);
                 }
                 convert_last_return_to_tail(&mut stmts);
@@ -377,9 +370,7 @@ impl<'a> Transformer<'a> {
     /// (`has_self: false`) and non-pub.
     pub(super) fn convert_static_block(&mut self, sb: &ast::StaticBlock) -> Result<Method> {
         let mut stmts = Vec::new();
-        for (i, stmt) in sb.body.stmts.iter().enumerate() {
-            // I-142 D-1: static block is a fresh scope.
-            self.pre_check_narrowing_reset(stmt, &sb.body.stmts[i + 1..])?;
+        for stmt in &sb.body.stmts {
             stmts.extend(self.convert_stmt(stmt, None)?);
         }
         Ok(Method {

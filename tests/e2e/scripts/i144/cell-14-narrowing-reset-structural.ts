@@ -12,7 +12,10 @@ function narrowingReset(x: number | null): number | null {
 }
 
 function show(v: number | null): string {
-    return v === null ? "null" : String(v);
+    // Template literal avoids the `String(v)` callable → synthetic-struct
+    // issue that is orthogonal to I-144 narrowing (same pattern as
+    // cell-i025-option-return-implicit-none-complex).
+    return v === null ? "null" : `${v}`;
 }
 
 function main(): void {

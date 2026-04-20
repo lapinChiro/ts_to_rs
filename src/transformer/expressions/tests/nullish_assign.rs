@@ -386,26 +386,45 @@ fn cell13_option_rhs_chain_in_stmt_nests_unwrap_or_else() {
 }
 
 // -----------------------------------------------------------------------------
-// Cell #14: narrowing-reset — BLOCKED by I-144 (control-flow narrowing).
+// Cell #14: narrowing-reset — structural emission via I-144 CFG analyzer.
 //
-// `x ??= 0;` narrows `x: T` for the Rust shadow-let. A subsequent `x = null;`
-// re-widens in TypeScript but the Rust `let x: T` cannot accept `None` — that
-// path would emit a silent compile error.
+// `x ??= 0;` followed by a narrow-invalidating mutation (direct reassign,
+// null reassign, loop-body rebind, closure-body reassign) must emit
+// `x.get_or_insert_with(|| 0.0);` (E2a) instead of the E1 shadow-let that
+// would not typecheck once `x` is reassigned to `None` or to a value whose
+// type differs from the narrowed inner T.
 //
-// I-142 Step 3 D-1 surfaces this pattern as
-// `UnsupportedSyntaxError("nullish-assign with narrowing-reset (I-144)")`
-// *before* the shadow-let is emitted. The structural fix (emit `let mut x:
-// Option<T>` + `x.get_or_insert_with(...)` when a reset is detected, so
-// subsequent `x = None` compiles) belongs to the I-144 narrowing analyzer
-// umbrella.
+// The analyzer lives in `pipeline::narrowing_analyzer::analyze_function`
+// (T3/T4/T5); `try_convert_nullish_assign_stmt` (T6-1) dispatches on
+// `EmissionHint::ShadowLet` vs `EmissionHint::GetOrInsertWith` to pick the
+// emission.
 // -----------------------------------------------------------------------------
 
+/// Asserts the `??=` site emits `.get_or_insert_with(|| ...)` (E2a, Option
+/// preserved) instead of a shadow-let `let x = x.unwrap_or(...)` (E1).
+fn assert_cell14_emits_get_or_insert_with(src: &str, scenario: &str) {
+    let (rust, unsupported) = crate::transpile_collecting(src).unwrap();
+    assert!(
+        !unsupported
+            .iter()
+            .any(|u| u.kind.contains("narrowing-reset")),
+        "{scenario}: narrowing-reset must NOT surface as unsupported (structural fix), got: {unsupported:?}"
+    );
+    assert!(
+        rust.contains("x.get_or_insert_with(|| 0.0)"),
+        "{scenario}: must emit E2a `x.get_or_insert_with(|| 0.0)`, got:\n{rust}"
+    );
+    assert!(
+        !rust.contains("let x = x.unwrap_or("),
+        "{scenario}: must NOT emit E1 shadow-let (the narrow-invalidating sibling \
+         makes it ill-typed), got:\n{rust}"
+    );
+}
+
 #[test]
-fn cell14_narrowing_reset_surfaces_unsupported_blocked_by_i144() {
-    // Base case: linear reset (`x ??= 0; x = null;`). D-7: use
-    // `TctxFixture::transform_collecting` — the TypeResolver populates
-    // `Option<f64>` for the parameter, which `pre_check_narrowing_reset`
-    // needs to pick the `ShadowLet` strategy and kick off its reset scan.
+fn cell14_linear_null_reassign_emits_get_or_insert_with() {
+    // Base case: linear reset (`x ??= 0; x = null;`). Analyzer detects
+    // `ResetCause::NullAssign` → `EmissionHint::GetOrInsertWith`.
     let src = r#"
         function narrowingReset(x: number | null): number | null {
             x ??= 0;
@@ -413,21 +432,13 @@ fn cell14_narrowing_reset_surfaces_unsupported_blocked_by_i144() {
             return x;
         }
     "#;
-    let f = TctxFixture::from_source(src);
-    let (_items, unsupported) = f.transform_collecting(src);
-    assert!(
-        unsupported.iter().any(|u| u
-            .kind
-            .contains("nullish-assign with narrowing-reset (I-144)")),
-        "Cell #14 linear reset must surface I-144 unsupported, got: {:?}",
-        unsupported
-    );
+    assert_cell14_emits_get_or_insert_with(src, "linear null reassign");
 }
 
 #[test]
-fn cell14_narrowing_reset_detects_inner_if_block() {
-    // Conditional reset (`if (cond) { x = null; }`) — scanner must descend
-    // into the nested if-consequent.
+fn cell14_inner_if_block_null_reassign_emits_get_or_insert_with() {
+    // Conditional reset (`if (cond) { x = null; }`) — analyzer must descend
+    // into the nested if-consequent and merge branches conservatively.
     let src = r#"
         function condReset(x: number | null, cond: boolean): number {
             x ??= 0;
@@ -435,21 +446,13 @@ fn cell14_narrowing_reset_detects_inner_if_block() {
             return 0;
         }
     "#;
-    let f = TctxFixture::from_source(src);
-    let (_items, unsupported) = f.transform_collecting(src);
-    assert!(
-        unsupported.iter().any(|u| u
-            .kind
-            .contains("nullish-assign with narrowing-reset (I-144)")),
-        "Cell #14 inner-if reset must surface I-144 unsupported, got: {:?}",
-        unsupported
-    );
+    assert_cell14_emits_get_or_insert_with(src, "inner-if null reassign");
 }
 
 #[test]
-fn cell14_narrowing_reset_detects_loop_body_reassign() {
-    // for-of body reassigns shadowed ident — scanner must descend into loop
-    // body.
+fn cell14_loop_body_reassign_emits_get_or_insert_with() {
+    // for-of body reassigns shadowed ident — analyzer must descend into the
+    // loop body (the reassign runs ≥ 0 times, conservatively invalidating).
     let src = r#"
         function loopReset(x: number | null, arr: (number | null)[]): number {
             x ??= 0;
@@ -457,51 +460,109 @@ fn cell14_narrowing_reset_detects_loop_body_reassign() {
             return 0;
         }
     "#;
-    let f = TctxFixture::from_source(src);
-    let (_items, unsupported) = f.transform_collecting(src);
-    assert!(
-        unsupported.iter().any(|u| u
-            .kind
-            .contains("nullish-assign with narrowing-reset (I-144)")),
-        "Cell #14 for-of body reset must surface I-144 unsupported, got: {:?}",
-        unsupported
-    );
+    assert_cell14_emits_get_or_insert_with(src, "for-of body reassign");
 }
 
 #[test]
-fn cell14_closure_body_reassign_does_not_surface_reset() {
-    // Closure / nested-function bodies are scan boundaries (TS does not track
-    // mutations through closure calls — INV-Step3-1 cases 03/05). So a
-    // reassignment of `x` inside a closure body MUST NOT trigger the reset
-    // surface; the shadow-let must be emitted normally.
-    //
-    // The closure is bound and then called, both as statement-level
-    // references — the scanner walks the `Ident` callee and `Call` args but
-    // must not descend into the closure body, even when the closure is held
-    // by a local variable.
+fn cell14_closure_body_reassign_emits_get_or_insert_with() {
+    // Closure reassign is the C-2a case: the closure body is NOT a scan
+    // boundary for the CFG analyzer (unlike the legacy T6-preceding scanner).
+    // When a closure captures the outer narrowed var and reassigns it, the
+    // ideal emission is E2a `get_or_insert_with` so the captured
+    // `Option<T>` is preserved and the closure body `x = 1` / `x = null`
+    // compiles.
     let src = r#"
-        function closureOk(x: number | null): number {
+        function closureReassign(x: number | null): number {
             x ??= 0;
             const reassign = () => { x = 1; };
             reassign();
-            return x;
+            return 0;
         }
     "#;
-    let (rust, unsupported) = crate::transpile_collecting(src).unwrap();
-    // Must NOT surface a narrowing-reset error — the closure body is outside
-    // the scan boundary.
-    assert!(
-        !unsupported
-            .iter()
-            .any(|u| u.kind.contains("narrowing-reset")),
-        "closure-body reassign must not surface narrowing-reset, got: {:?}",
-        unsupported
-    );
-    // Shadow-let must be emitted normally for the outer `x ??= 0`.
-    assert!(
-        rust.contains("let x = x.unwrap_or(0.0)") || rust.contains("x.unwrap_or(0.0)"),
-        "closure-body reassign must keep shadow-let emission, got:\n{rust}"
-    );
+    assert_cell14_emits_get_or_insert_with(src, "closure-body reassign");
+}
+
+// -----------------------------------------------------------------------------
+// I-144 T6-1 entry-point regression lock-in.
+//
+// `TypeResolver::collect_emission_hints` is wired in at five function-like
+// body visitors (fn decl / method / constructor / arrow-BlockStmt / fn expr).
+// The cell14_* tests above exercise only the fn-decl entry point. Each of
+// the remaining four entry points is guarded by a dedicated test below so
+// that accidentally dropping the `collect_emission_hints(body)` call from
+// any of them fails immediately rather than silently regressing to E1
+// shadow-let + broken compile.
+// -----------------------------------------------------------------------------
+
+#[test]
+fn collect_emission_hints_wired_into_class_method_body() {
+    // `visit_method_function` entry point — class method body hosting `??=`
+    // + narrow-invalidating reset must emit E2a.
+    let src = r#"
+        class C {
+            run(x: number | null): number | null {
+                x ??= 0;
+                x = null;
+                return x;
+            }
+        }
+    "#;
+    assert_cell14_emits_get_or_insert_with(src, "class method body");
+}
+
+#[test]
+fn collect_emission_hints_wired_into_constructor_body() {
+    // Constructor entry point — `visit_class_body`'s `Constructor` arm
+    // invokes `collect_emission_hints` before walking body stmts. A `??=` +
+    // reset inside the constructor must pick E2a just like a free function.
+    let src = r#"
+        class C {
+            constructor(x: number | null) {
+                x ??= 0;
+                x = null;
+            }
+        }
+    "#;
+    assert_cell14_emits_get_or_insert_with(src, "constructor body");
+}
+
+#[test]
+fn collect_emission_hints_wired_into_arrow_block_body() {
+    // `resolve_arrow_expr` BlockStmt branch — the arrow's block body must be
+    // analyzed independently from any enclosing function so its own `??=`
+    // sites get hints.
+    let src = r#"
+        const run = (x: number | null): number | null => {
+            x ??= 0;
+            x = null;
+            return x;
+        };
+    "#;
+    assert_cell14_emits_get_or_insert_with(src, "arrow BlockStmt body");
+}
+
+#[test]
+fn collect_emission_hints_wired_into_fn_expr_body() {
+    // `resolve_fn_expr` entry point. Top-level `const run = function() {...}`
+    // is not transpiled at all by the current pipeline (`transform_decl`
+    // skips function-expression initializers for module-level vars), so the
+    // fn-expr sits inside a wrapper function here. The outer `wrapper` has
+    // no `??=` of its own, so any `get_or_insert_with` in the output can
+    // only have come from the fn-expr body's analyzer hints. Outer
+    // `analyze_function` stops at the var-decl boundary, so the fn-expr
+    // body's `??=` hint is populated only if `resolve_fn_expr` calls
+    // `collect_emission_hints` on the fn-expr body itself.
+    let src = r#"
+        function wrapper(): boolean {
+            const run = function(x: number | null): number | null {
+                x ??= 0;
+                x = null;
+                return x;
+            };
+            return run(5) === null;
+        }
+    "#;
+    assert_cell14_emits_get_or_insert_with(src, "fn expr body");
 }
 
 // -----------------------------------------------------------------------------

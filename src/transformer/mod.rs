@@ -269,9 +269,10 @@ pub fn transform_module_collecting(
 /// [`UnsupportedSyntaxError`]s. Unlike [`transform_module_collecting`], which
 /// builds a bare `TransformContext` from just a [`TypeRegistry`], this variant
 /// reuses the caller's context so features driven by TypeResolver output
-/// (narrowing, `get_type_for_var`, etc.) are available — e.g., I-142 Cell #5 /
-/// #9 / #14 which need `any`/`number | null` parameter types to resolve before
-/// the transformer's `pick_strategy` / `pre_check_narrowing_reset` hooks run.
+/// (narrowing, `get_type_for_var`, `get_emission_hint`, etc.) are available —
+/// e.g., I-142 Cell #5 / #9 / #14 which need `any` / `number | null` parameter
+/// types to resolve before the transformer's `pick_strategy` / `??=`
+/// emission-hint dispatch runs.
 ///
 /// The public-API parallel to [`transform_module_with_context`].
 pub fn transform_module_collecting_with_context(
@@ -902,6 +903,35 @@ pub(crate) fn build_option_unwrap_with_default(
                 body: crate::ir::ClosureBody::Expr(Box::new(default_ir)),
             }],
         }
+    }
+}
+
+/// Builds `x.get_or_insert_with(|| default)` for `??=` emission when the
+/// outer `Option<T>` must be preserved across a subsequent narrow-invalidating
+/// mutation (direct reassign, null reassign, loop boundary, or closure
+/// reassign — see [`EmissionHint::GetOrInsertWith`]).
+///
+/// Unlike [`build_option_unwrap_with_default`], which produces a bare `T`
+/// suitable for shadow-let binding, this preserves the `Option<T>` shape so
+/// that follow-up mutations (`x = None`, `for const v of ...` rebinding, or
+/// a closure body reassigning the captured ident) can continue to typecheck.
+/// The default is wrapped in a zero-arg closure regardless of Copy-ness: the
+/// `get_or_insert_with` API is always lazy.
+///
+/// [`EmissionHint::GetOrInsertWith`]:
+///     crate::pipeline::narrowing_analyzer::EmissionHint::GetOrInsertWith
+pub(crate) fn build_option_get_or_insert_with(
+    target: crate::ir::Expr,
+    default_ir: crate::ir::Expr,
+) -> crate::ir::Expr {
+    crate::ir::Expr::MethodCall {
+        object: Box::new(target),
+        method: "get_or_insert_with".to_string(),
+        args: vec![crate::ir::Expr::Closure {
+            params: vec![],
+            return_type: None,
+            body: crate::ir::ClosureBody::Expr(Box::new(default_ir)),
+        }],
     }
 }
 

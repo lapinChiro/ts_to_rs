@@ -1,4 +1,5 @@
-//! Structural conversion of `x ??= d` (TS `NullishAssign`) to IR (I-142).
+//! Structural conversion of `x ??= d` (TS `NullishAssign`) to IR (I-142,
+//! extended at I-144 T6-1 for CFG-analyzer-driven emission dispatch).
 //!
 //! TS `x ??= d` is a compound operator with two observable effects:
 //!
@@ -6,27 +7,45 @@
 //! 2. **Narrowing**: after evaluation, `x` is narrowed from `T | null | undefined`
 //!    to `T` in the enclosing flow.
 //!
-//! A naive translation to `x.get_or_insert_with(|| d)` drops the narrowing
-//! (return expressions that expect `T` see `&mut T` or `Option<T>` and fail to
-//! compile) and requires `x` to be `let mut`, even though the surrounding Rust
-//! has no imperative mutation to trigger `mark_mutated_vars`.
+//! Mapping this to a single Rust pattern is impossible because the narrowing
+//! effect must be preserved **only when** the narrow survives subsequent
+//! control flow. This module therefore dispatches between two emissions
+//! based on the [`EmissionHint`] produced by
+//! [`crate::pipeline::narrowing_analyzer::analyze_function`] (see I-144 T6-1):
 //!
-//! This module intercepts `x ??= d;` in statement context and rewrites it to a
-//! Rust shadow-let (`let x = x.unwrap_or[_else](|| d);`), which preserves the
-//! narrowing by rebinding `x` to the unwrapped type for the rest of the block.
-//! A follow-up fusion pass collapses `let x = init; let x = x.unwrap_or[_else]
-//! (|| d);` to a single `let x = init.unwrap_or[_else](|| d);` where safe,
-//! eliminating the cosmetic double-let.
+//! - **E1 shadow-let** (`let x = x.unwrap_or[_else](|| d);`): selected when
+//!   the narrow survives — no later reset, no null reassign, no closure
+//!   reassign, no loop-boundary rebind. Rebinds `x` to `T` so return
+//!   expressions and subsequent arithmetic can treat `x` as unwrapped.
+//!   A follow-up fusion pass collapses
+//!   `let x = init; let x = x.unwrap_or[_else](|| d);` to a single
+//!   `let x = init.unwrap_or[_else](|| d);` where safe.
+//! - **E2a `get_or_insert_with`** (`x.get_or_insert_with(|| d);`): selected
+//!   when the analyzer detects a narrow-invalidating sibling ([`ResetCause`]
+//!   `invalidates_narrow() == true`). Keeps `x` as `Option<T>` so the later
+//!   `x = None` / closure reassign / loop-boundary rebind typechecks.
+//!
+//! Absent analyzer output (fallback) the default is E1 shadow-let, matching
+//! the pre-analyzer emission.
 //!
 //! Expression-context `??=` (inside call args / return value / conditions) is
-//! handled separately in [`convert_assign_expr`] via `get_or_insert_with` with
-//! deref-or-clone wrapping based on `is_copy_type`.
+//! handled separately in [`convert_assign_expr`] via `get_or_insert_with`
+//! with deref-or-clone wrapping based on `is_copy_type`; it does **not**
+//! consult the analyzer because the expression value must always be an
+//! unwrapped `T`.
+//!
+//! [`EmissionHint`]: crate::pipeline::narrowing_analyzer::EmissionHint
+//! [`ResetCause`]: crate::pipeline::narrowing_analyzer::ResetCause
 
 use anyhow::Result;
 use swc_ecma_ast as ast;
 
 use crate::ir::{Expr, RustType, Stmt};
-use crate::transformer::{build_option_unwrap_with_default, Transformer, UnsupportedSyntaxError};
+use crate::pipeline::narrowing_analyzer::EmissionHint;
+use crate::transformer::{
+    build_option_get_or_insert_with, build_option_unwrap_with_default, Transformer,
+    UnsupportedSyntaxError,
+};
 
 /// Emission strategy for `x ??= d` derived from the LHS type.
 ///
@@ -94,62 +113,6 @@ pub(crate) fn pick_strategy(lhs_type: &RustType) -> NullishAssignStrategy {
 }
 
 impl<'a> Transformer<'a> {
-    /// Pre-check hook run by block-iteration sites before converting each
-    /// statement (D-1).
-    ///
-    /// When `stmt` is a statement-level `x ??= d;` with an `Ident` LHS whose
-    /// type triggers [`NullishAssignStrategy::ShadowLet`], the emitted Rust
-    /// shadow-let (`let x = x.unwrap_or*(...)`) rebinds `x` to the narrowed
-    /// inner type for the rest of the Rust lexical scope. If the surrounding
-    /// TypeScript scope subsequently reassigns `x` (e.g., `x = null;` or
-    /// `if (cond) { x = v; }`), TS re-widens the binding but the generated
-    /// Rust cannot — the shadowed `let x: T` does not accept `None` or a
-    /// union-typed value, producing a silent compile error.
-    ///
-    /// This pre-check scans `remaining_in_block` (the statements following
-    /// `stmt` within the same block, including nested `if` / loop / switch
-    /// bodies but *excluding* closure / nested-fn bodies, per
-    /// `report/i142-step3-inv1-narrowing-reset.md`). If a re-assignment to the
-    /// same ident is detected, the method returns an `Err` carrying
-    /// `UnsupportedSyntaxError("nullish-assign with narrowing-reset (I-144)")`
-    /// so the compile error becomes an explicit unsupported-syntax surface.
-    ///
-    /// This is an **interim** surface: the structural fix (control-flow graph
-    /// analysis that can choose a `let mut` + `get_or_insert_with` emission
-    /// path when a reset is detected) belongs to the I-144 narrowing analyzer
-    /// umbrella. Until I-144 lands, surfacing rather than silently emitting
-    /// broken Rust satisfies the Tier-1 priority in
-    /// `conversion-correctness-priority.md`.
-    ///
-    /// Block-iteration callers (`convert_stmt_list`, switch-case handling,
-    /// class-method bodies, fn-expression bodies) must invoke this method with
-    /// the correct `remaining_in_block` slice. Single-stmt contexts (no
-    /// following siblings) pass an empty slice, in which case this method is a
-    /// no-op.
-    pub(crate) fn pre_check_narrowing_reset(
-        &self,
-        stmt: &ast::Stmt,
-        remaining_in_block: &[ast::Stmt],
-    ) -> Result<()> {
-        let Some((ident_name, span)) = extract_nullish_assign_ident_stmt(stmt) else {
-            return Ok(());
-        };
-        let Some(lhs_type) = self.get_type_for_var(ident_name, span) else {
-            return Ok(());
-        };
-        if pick_strategy(lhs_type) != NullishAssignStrategy::ShadowLet {
-            return Ok(());
-        }
-        if has_narrowing_reset_in_stmts(remaining_in_block, ident_name) {
-            return Err(UnsupportedSyntaxError::new(
-                "nullish-assign with narrowing-reset (I-144)",
-                span,
-            )
-            .into());
-        }
-        Ok(())
-    }
-
     /// Intercepts `x ??= d;` at statement level and produces a shadow-let
     /// rewrite that preserves TS's narrowing semantics.
     ///
@@ -190,15 +153,30 @@ impl<'a> Transformer<'a> {
                 let stmts = match pick_strategy(&lhs_type) {
                     NullishAssignStrategy::ShadowLet => {
                         let right_ir = self.convert_expr(&assign.right)?;
-                        vec![Stmt::Let {
-                            mutable: false,
-                            name: name.clone(),
-                            ty: None,
-                            init: Some(build_option_unwrap_with_default(
-                                Expr::Ident(name),
-                                right_ir,
-                            )),
-                        }]
+                        // I-144 T6-1: dispatch on narrowing analyzer's hint.
+                        // `GetOrInsertWith` preserves the outer `Option<T>` so a
+                        // later narrow-invalidating mutation (null reassign, loop
+                        // boundary, closure reassign) still typechecks.
+                        // Absent analyzer output (pre-analyzer paths or when the
+                        // stmt is not a same-scope `??=`) the default is E1
+                        // shadow-let, which matches the pre-analyzer emission.
+                        match self.get_emission_hint(ident.id.span.lo.0) {
+                            Some(EmissionHint::GetOrInsertWith) => {
+                                vec![Stmt::Expr(build_option_get_or_insert_with(
+                                    Expr::Ident(name),
+                                    right_ir,
+                                ))]
+                            }
+                            _ => vec![Stmt::Let {
+                                mutable: false,
+                                name: name.clone(),
+                                ty: None,
+                                init: Some(build_option_unwrap_with_default(
+                                    Expr::Ident(name),
+                                    right_ir,
+                                )),
+                            }],
+                        }
                     }
                     NullishAssignStrategy::Identity => vec![],
                     NullishAssignStrategy::BlockedByI050 => {
@@ -398,312 +376,6 @@ fn fuse_pair_at(stmts: &mut Vec<Stmt>, i: usize) {
     };
     **object = first_init;
     *shadow_ty = None;
-}
-
-// -----------------------------------------------------------------------------
-// D-1: Narrowing-reset scanner
-//
-// Detects whether a following sequence of TS statements contains a re-assignment
-// to a given identifier that would invalidate the shadow-let emitted for
-// `<ident> ??= <default>`. The scan descends into nested blocks (if/for/while/
-// switch/try/block) but skips closures and nested-fn bodies, matching TS's
-// flow-sensitive narrowing boundaries — see
-// `report/i142-step3-inv1-narrowing-reset.md`.
-// -----------------------------------------------------------------------------
-
-/// If `stmt` is `<ident> ??= <rhs>;` with a bare-identifier LHS, returns
-/// `Some((name, span))`. Otherwise returns `None`.
-///
-/// Member / index LHS shapes are out of `pre_check_narrowing_reset`'s scope
-/// (they are surfaced as I-142-b / I-142-c unsupported elsewhere) and return
-/// `None` here so the pre-check is a no-op for them.
-fn extract_nullish_assign_ident_stmt(stmt: &ast::Stmt) -> Option<(&str, swc_common::Span)> {
-    let ast::Stmt::Expr(expr_stmt) = stmt else {
-        return None;
-    };
-    let ast::Expr::Assign(assign) = expr_stmt.expr.as_ref() else {
-        return None;
-    };
-    if assign.op != ast::AssignOp::NullishAssign {
-        return None;
-    }
-    let ast::AssignTarget::Simple(ast::SimpleAssignTarget::Ident(ident)) = &assign.left else {
-        return None;
-    };
-    Some((ident.id.sym.as_ref(), ident.id.span))
-}
-
-/// Returns `true` if any statement in `stmts` (or any of its transitively
-/// reachable nested non-closure blocks) contains a re-assignment to `ident`.
-fn has_narrowing_reset_in_stmts(stmts: &[ast::Stmt], ident: &str) -> bool {
-    stmts.iter().any(|s| stmt_has_reset(s, ident))
-}
-
-/// Walks a single statement looking for re-assignments to `ident`.
-fn stmt_has_reset(stmt: &ast::Stmt, ident: &str) -> bool {
-    match stmt {
-        ast::Stmt::Block(b) => has_narrowing_reset_in_stmts(&b.stmts, ident),
-        ast::Stmt::Expr(e) => expr_has_reset(&e.expr, ident),
-        ast::Stmt::If(if_stmt) => {
-            expr_has_reset(&if_stmt.test, ident)
-                || stmt_has_reset(&if_stmt.cons, ident)
-                || if_stmt
-                    .alt
-                    .as_ref()
-                    .is_some_and(|alt| stmt_has_reset(alt, ident))
-        }
-        ast::Stmt::While(w) => expr_has_reset(&w.test, ident) || stmt_has_reset(&w.body, ident),
-        ast::Stmt::DoWhile(d) => stmt_has_reset(&d.body, ident) || expr_has_reset(&d.test, ident),
-        ast::Stmt::For(f) => {
-            let init_hit = f.init.as_ref().is_some_and(|init| match init {
-                ast::VarDeclOrExpr::VarDecl(v) => vardecl_init_has_reset(v, ident),
-                ast::VarDeclOrExpr::Expr(e) => expr_has_reset(e, ident),
-            });
-            init_hit
-                || f.test.as_ref().is_some_and(|t| expr_has_reset(t, ident))
-                || f.update.as_ref().is_some_and(|u| expr_has_reset(u, ident))
-                || stmt_has_reset(&f.body, ident)
-        }
-        ast::Stmt::ForOf(fo) => {
-            for_head_binds_ident(&fo.left, ident)
-                || expr_has_reset(&fo.right, ident)
-                || stmt_has_reset(&fo.body, ident)
-        }
-        ast::Stmt::ForIn(fi) => {
-            for_head_binds_ident(&fi.left, ident)
-                || expr_has_reset(&fi.right, ident)
-                || stmt_has_reset(&fi.body, ident)
-        }
-        ast::Stmt::Switch(sw) => {
-            expr_has_reset(&sw.discriminant, ident)
-                || sw.cases.iter().any(|c| {
-                    c.test.as_ref().is_some_and(|t| expr_has_reset(t, ident))
-                        || has_narrowing_reset_in_stmts(&c.cons, ident)
-                })
-        }
-        ast::Stmt::Try(t) => {
-            has_narrowing_reset_in_stmts(&t.block.stmts, ident)
-                || t.handler
-                    .as_ref()
-                    .is_some_and(|h| has_narrowing_reset_in_stmts(&h.body.stmts, ident))
-                || t.finalizer
-                    .as_ref()
-                    .is_some_and(|f| has_narrowing_reset_in_stmts(&f.stmts, ident))
-        }
-        ast::Stmt::Labeled(l) => stmt_has_reset(&l.body, ident),
-        ast::Stmt::Return(r) => r.arg.as_ref().is_some_and(|e| expr_has_reset(e, ident)),
-        ast::Stmt::Throw(t) => expr_has_reset(&t.arg, ident),
-        ast::Stmt::Decl(ast::Decl::Var(v)) => vardecl_init_has_reset(v, ident),
-        // Function / class / TS-only decls don't reset outer bindings.
-        ast::Stmt::Decl(_) => false,
-        ast::Stmt::With(w) => expr_has_reset(&w.obj, ident) || stmt_has_reset(&w.body, ident),
-        ast::Stmt::Break(_)
-        | ast::Stmt::Continue(_)
-        | ast::Stmt::Empty(_)
-        | ast::Stmt::Debugger(_) => false,
-    }
-}
-
-/// Returns true if any initializer in `var_decl` mentions a reassignment to
-/// `ident` (variable declarations themselves shadow rather than reset the outer
-/// binding — TS scoping — so the declaration itself is not a reset).
-fn vardecl_init_has_reset(var_decl: &ast::VarDecl, ident: &str) -> bool {
-    var_decl
-        .decls
-        .iter()
-        .any(|d| d.init.as_ref().is_some_and(|e| expr_has_reset(e, ident)))
-}
-
-/// Returns true if a `for-of` / `for-in` loop head binds the *outer* `ident`
-/// (not a fresh `let`/`const`/`var` binding). `for (x of arr)` on an
-/// already-declared outer `x` reassigns `x` on every iteration and therefore
-/// counts as a narrowing-reset.
-fn for_head_binds_ident(head: &ast::ForHead, ident: &str) -> bool {
-    match head {
-        // `for (let x of arr)` / `for (const x of arr)` / `for (var x of arr)` —
-        // these introduce *new* bindings at the loop scope, so they do not reset
-        // the outer `ident`. Exception: `var` is function-scoped; if it binds
-        // to the same name as our shadow it does reset the outer. Treat `var x`
-        // of an already-shadowed ident as reset.
-        ast::ForHead::VarDecl(v) => {
-            v.kind == ast::VarDeclKind::Var
-                && v.decls.iter().any(|d| {
-                    matches!(
-                        &d.name,
-                        ast::Pat::Ident(id) if id.id.sym.as_ref() == ident
-                    )
-                })
-        }
-        // `for (x of arr)` — no declaration keyword, so this reassigns the
-        // outer `x`. That's a reset if the outer `x` is our shadowed ident.
-        ast::ForHead::Pat(pat) => match pat.as_ref() {
-            ast::Pat::Ident(id) => id.id.sym.as_ref() == ident,
-            // Destructuring heads never bind the exact `ident` name alone;
-            // conservatively walk them.
-            ast::Pat::Array(_) | ast::Pat::Object(_) | ast::Pat::Rest(_) => {
-                pat_binds_ident(pat, ident)
-            }
-            ast::Pat::Assign(a) => {
-                pat_binds_ident(&a.left, ident) || expr_has_reset(&a.right, ident)
-            }
-            _ => false,
-        },
-        ast::ForHead::UsingDecl(_) => false,
-    }
-}
-
-/// Walks a pattern looking for a bare `Ident(ident)` binding.
-fn pat_binds_ident(pat: &ast::Pat, ident: &str) -> bool {
-    match pat {
-        ast::Pat::Ident(id) => id.id.sym.as_ref() == ident,
-        ast::Pat::Array(arr) => arr
-            .elems
-            .iter()
-            .any(|e| e.as_ref().is_some_and(|p| pat_binds_ident(p, ident))),
-        ast::Pat::Object(obj) => obj.props.iter().any(|p| match p {
-            ast::ObjectPatProp::KeyValue(kv) => pat_binds_ident(&kv.value, ident),
-            ast::ObjectPatProp::Assign(a) => a.key.sym.as_ref() == ident,
-            ast::ObjectPatProp::Rest(r) => pat_binds_ident(&r.arg, ident),
-        }),
-        ast::Pat::Rest(r) => pat_binds_ident(&r.arg, ident),
-        ast::Pat::Assign(a) => pat_binds_ident(&a.left, ident),
-        _ => false,
-    }
-}
-
-/// Walks an expression looking for `<ident> = ...`, `<ident> ??=|+=|-=|... ...`,
-/// or `<ident>++` / `<ident>--`.
-///
-/// Closures (`Arrow`, `Fn`, `Class`) are **not** descended into — mutations
-/// inside them don't affect the outer scope's narrow per TS's control-flow
-/// analysis (confirmed in `inv1-narrowing-reset.md` cases 03 and 05).
-fn expr_has_reset(expr: &ast::Expr, ident: &str) -> bool {
-    match expr {
-        // Assignment to the ident (any op — `=`, `+=`, `??=`, `||=`, ...).
-        ast::Expr::Assign(assign) => {
-            let lhs_hit = matches!(
-                &assign.left,
-                ast::AssignTarget::Simple(ast::SimpleAssignTarget::Ident(id))
-                    if id.id.sym.as_ref() == ident
-            );
-            lhs_hit || expr_has_reset(&assign.right, ident)
-        }
-        // `x++` / `x--` — reassigns `x` to `x ± 1`, narrow may survive for `f64`
-        // but we conservatively surface reset because the post-shadow type may
-        // not match (e.g., if the inner `T` is non-numeric, `++` is a type error
-        // anyway). Conservative surface is preferred over silent compile error.
-        ast::Expr::Update(up) => {
-            matches!(up.arg.as_ref(), ast::Expr::Ident(id) if id.sym.as_ref() == ident)
-        }
-        // Closure boundaries — do not descend.
-        ast::Expr::Arrow(_) | ast::Expr::Fn(_) | ast::Expr::Class(_) => false,
-        ast::Expr::Bin(b) => expr_has_reset(&b.left, ident) || expr_has_reset(&b.right, ident),
-        ast::Expr::Unary(u) => expr_has_reset(&u.arg, ident),
-        ast::Expr::Cond(c) => {
-            expr_has_reset(&c.test, ident)
-                || expr_has_reset(&c.cons, ident)
-                || expr_has_reset(&c.alt, ident)
-        }
-        ast::Expr::Paren(p) => expr_has_reset(&p.expr, ident),
-        ast::Expr::Seq(s) => s.exprs.iter().any(|e| expr_has_reset(e, ident)),
-        ast::Expr::Call(c) => {
-            let callee_hit = match &c.callee {
-                ast::Callee::Expr(e) => expr_has_reset(e, ident),
-                ast::Callee::Super(_) | ast::Callee::Import(_) => false,
-            };
-            callee_hit || c.args.iter().any(|a| expr_has_reset(&a.expr, ident))
-        }
-        ast::Expr::New(n) => {
-            expr_has_reset(&n.callee, ident)
-                || n.args
-                    .as_ref()
-                    .is_some_and(|args| args.iter().any(|a| expr_has_reset(&a.expr, ident)))
-        }
-        ast::Expr::Member(m) => {
-            expr_has_reset(&m.obj, ident)
-                || match &m.prop {
-                    ast::MemberProp::Computed(c) => expr_has_reset(&c.expr, ident),
-                    ast::MemberProp::Ident(_) | ast::MemberProp::PrivateName(_) => false,
-                }
-        }
-        ast::Expr::SuperProp(sp) => match &sp.prop {
-            ast::SuperProp::Computed(c) => expr_has_reset(&c.expr, ident),
-            ast::SuperProp::Ident(_) => false,
-        },
-        ast::Expr::Array(arr) => arr.elems.iter().any(|e| {
-            e.as_ref()
-                .is_some_and(|eos| expr_has_reset(&eos.expr, ident))
-        }),
-        ast::Expr::Object(obj) => obj.props.iter().any(|p| match p {
-            ast::PropOrSpread::Spread(s) => expr_has_reset(&s.expr, ident),
-            ast::PropOrSpread::Prop(prop) => prop_has_reset(prop, ident),
-        }),
-        ast::Expr::Tpl(t) => t.exprs.iter().any(|e| expr_has_reset(e, ident)),
-        ast::Expr::TaggedTpl(tt) => {
-            expr_has_reset(&tt.tag, ident) || tt.tpl.exprs.iter().any(|e| expr_has_reset(e, ident))
-        }
-        ast::Expr::Await(a) => expr_has_reset(&a.arg, ident),
-        ast::Expr::Yield(y) => y.arg.as_ref().is_some_and(|a| expr_has_reset(a, ident)),
-        ast::Expr::OptChain(oc) => match &*oc.base {
-            ast::OptChainBase::Member(m) => {
-                expr_has_reset(&m.obj, ident)
-                    || match &m.prop {
-                        ast::MemberProp::Computed(c) => expr_has_reset(&c.expr, ident),
-                        _ => false,
-                    }
-            }
-            ast::OptChainBase::Call(c) => {
-                expr_has_reset(&c.callee, ident)
-                    || c.args.iter().any(|a| expr_has_reset(&a.expr, ident))
-            }
-        },
-        // TS wrapper variants — peek through to inner.
-        ast::Expr::TsAs(a) => expr_has_reset(&a.expr, ident),
-        ast::Expr::TsTypeAssertion(a) => expr_has_reset(&a.expr, ident),
-        ast::Expr::TsNonNull(a) => expr_has_reset(&a.expr, ident),
-        ast::Expr::TsConstAssertion(a) => expr_has_reset(&a.expr, ident),
-        ast::Expr::TsSatisfies(a) => expr_has_reset(&a.expr, ident),
-        ast::Expr::TsInstantiation(a) => expr_has_reset(&a.expr, ident),
-        // Leaf / non-assign variants.
-        ast::Expr::Ident(_)
-        | ast::Expr::This(_)
-        | ast::Expr::Lit(_)
-        | ast::Expr::MetaProp(_)
-        | ast::Expr::Invalid(_)
-        | ast::Expr::JSXMember(_)
-        | ast::Expr::JSXNamespacedName(_)
-        | ast::Expr::JSXEmpty(_)
-        | ast::Expr::JSXElement(_)
-        | ast::Expr::JSXFragment(_)
-        | ast::Expr::PrivateName(_) => false,
-    }
-}
-
-/// Dispatches `ast::Prop` variants for `expr_has_reset` traversal of
-/// object-literal properties.
-fn prop_has_reset(prop: &ast::Prop, ident: &str) -> bool {
-    match prop {
-        ast::Prop::Shorthand(id) => {
-            // `{ x }` shorthand is a **read** of `x`, not a reassignment. Don't
-            // treat it as a reset. This branch exists so we don't accidentally
-            // recurse into an `Ident` below.
-            let _ = id;
-            false
-        }
-        ast::Prop::KeyValue(kv) => {
-            // Computed key can contain an assignment expression.
-            let key_hit = match &kv.key {
-                ast::PropName::Computed(c) => expr_has_reset(&c.expr, ident),
-                _ => false,
-            };
-            key_hit || expr_has_reset(&kv.value, ident)
-        }
-        ast::Prop::Assign(a) => expr_has_reset(&a.value, ident),
-        ast::Prop::Getter(_) | ast::Prop::Setter(_) | ast::Prop::Method(_) => {
-            // Getter/setter/method bodies are closure-like; skip.
-            false
-        }
-    }
 }
 
 #[cfg(test)]
