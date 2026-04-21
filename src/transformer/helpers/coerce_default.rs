@@ -12,35 +12,28 @@
 //! | `F64`      | RC6 string concat / interp | `"null"`       | `x.map(\|v\| v.to_string()).unwrap_or_else(...)` |
 //!
 //! T6-2 scope intentionally limits implementation to the (F64, RC1) and
-//! (F64, RC6) cells required by Cell C-2b / C-2c. Other (type, RC) cells
-//! return `None` and will be filled in by later T6 phases (T6-3 truthy
-//! predicate / T6-4 OptChain narrow / T6-5 implicit None) or by future
-//! umbrella PRDs (I-050 Any coercion).
+//! (F64, RC6) cells required by Cell C-2b / C-2c. Each read context is
+//! exposed as a dedicated builder (`build_option_coerce_to_t` /
+//! `build_option_coerce_to_string`) rather than a single dispatch function
+//! — the emission shapes are structurally different (scalar default vs
+//! `map`/`unwrap_or_else` chain), so a shared dispatch enum would add no
+//! cohesion and would violate YAGNI until at least three RC contexts
+//! share an emission shape.
 
 use crate::ir::{ClosureBody, Expr, Param, RustType};
-use crate::pipeline::narrowing_analyzer::RcContext;
 use crate::transformer::build_option_unwrap_with_default;
-
-/// Returns the JS `coerce_default(null, ...)` value for `(inner_ty, rc)`
-/// as an IR expression.
-///
-/// `None` for combinations not in the T6-2 implementation scope; callers
-/// fall through to the un-wrapped read in that case.
-pub(crate) fn coerce_default_value(inner_ty: &RustType, rc: RcContext) -> Option<Expr> {
-    match (inner_ty, rc) {
-        (RustType::F64, RcContext::ExpectT) => Some(Expr::NumberLit(0.0)),
-        _ => None,
-    }
-}
 
 /// Wraps `option_expr: Option<inner_ty>` for an Expect-T (RC1) read site
 /// such as an arithmetic operand, emitting
-/// `option_expr.unwrap_or(coerce_default_value(inner_ty, ExpectT))`.
+/// `option_expr.unwrap_or(<JS coerce default>)`.
 ///
-/// Returns `None` when the (type, RC) cell has no coerce default in the
-/// T6-2 scope so the caller can fall through to the unmodified expression.
+/// Returns `None` when `inner_ty` is not in the T6-2 scope (currently `F64`
+/// only) so the caller can fall through to the unmodified expression.
 pub(crate) fn build_option_coerce_to_t(option_expr: Expr, inner_ty: &RustType) -> Option<Expr> {
-    let default = coerce_default_value(inner_ty, RcContext::ExpectT)?;
+    let default = match inner_ty {
+        RustType::F64 => Expr::NumberLit(0.0),
+        _ => return None,
+    };
     Some(build_option_unwrap_with_default(option_expr, default))
 }
 
@@ -92,21 +85,6 @@ pub(crate) fn build_option_coerce_to_string(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn coerce_default_value_f64_expect_t_is_zero() {
-        let v = coerce_default_value(&RustType::F64, RcContext::ExpectT);
-        assert!(matches!(v, Some(Expr::NumberLit(n)) if n == 0.0));
-    }
-
-    #[test]
-    fn coerce_default_value_unsupported_combinations_return_none() {
-        // T6-2 scope: only (F64, ExpectT). Others are not yet populated.
-        assert!(coerce_default_value(&RustType::F64, RcContext::StringInterp).is_none());
-        assert!(coerce_default_value(&RustType::F64, RcContext::Boolean).is_none());
-        assert!(coerce_default_value(&RustType::String, RcContext::ExpectT).is_none());
-        assert!(coerce_default_value(&RustType::Bool, RcContext::ExpectT).is_none());
-    }
 
     #[test]
     fn build_option_coerce_to_t_emits_unwrap_or_zero_for_f64() {
@@ -202,5 +180,61 @@ mod tests {
         let x = Expr::Ident("x".to_string());
         assert!(build_option_coerce_to_string(x.clone(), &RustType::String).is_none());
         assert!(build_option_coerce_to_string(x, &RustType::Bool).is_none());
+    }
+
+    /// Exhaustively exercises every non-`F64` `RustType` variant to lock in
+    /// the T6-2 scope contract: both builders return `None` so callers fall
+    /// through to the un-wrapped read. Required by `testing.md`
+    /// (type-partition exhaustiveness) and PRD Completion Criterion 5
+    /// ("全 RustType variant × RC verify"). When a future phase adds a new
+    /// (type, RC) cell to the coerce table, the corresponding variant
+    /// leaves this list and gets a positive assertion.
+    #[test]
+    fn build_option_coerce_exhaustive_unsupported_types_return_none() {
+        use crate::ir::PrimitiveIntKind;
+        let samples: std::vec::Vec<RustType> = vec![
+            RustType::String,
+            RustType::Bool,
+            RustType::Primitive(PrimitiveIntKind::I32),
+            RustType::Primitive(PrimitiveIntKind::Usize),
+            RustType::Vec(Box::new(RustType::F64)),
+            RustType::Tuple(vec![RustType::F64, RustType::String]),
+            RustType::Fn {
+                params: vec![],
+                return_type: Box::new(RustType::F64),
+            },
+            RustType::DynTrait("MyTrait".to_string()),
+            RustType::Any,
+            RustType::Unit,
+            RustType::Never,
+            RustType::Ref(Box::new(RustType::F64)),
+            RustType::Result {
+                ok: Box::new(RustType::F64),
+                err: Box::new(RustType::String),
+            },
+            RustType::Option(Box::new(RustType::F64)),
+            RustType::Named {
+                name: "UserStruct".into(),
+                type_args: vec![],
+            },
+            RustType::Named {
+                name: "UserEnum".into(),
+                type_args: vec![RustType::F64],
+            },
+            RustType::TypeVar {
+                name: "T".to_string(),
+            },
+        ];
+        for ty in samples {
+            let x = Expr::Ident("x".to_string());
+            assert!(
+                build_option_coerce_to_t(x.clone(), &ty).is_none(),
+                "build_option_coerce_to_t({ty:?}) must be None outside T6-2 F64 scope"
+            );
+            assert!(
+                build_option_coerce_to_string(x, &ty).is_none(),
+                "build_option_coerce_to_string({ty:?}) must be None outside T6-2 F64 scope"
+            );
+        }
     }
 }

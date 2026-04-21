@@ -385,9 +385,7 @@ mod tests {
         let mut resolution = FileTypeResolution::empty();
         resolution.narrow_events.push(NarrowEvent::ClosureCapture {
             var_name: "x".to_string(),
-            closure_span: Span { lo: 10, hi: 50 },
             enclosing_fn_body: Span { lo: 0, hi: 100 },
-            outer_narrow: RustType::String,
         });
         assert!(resolution.narrowed_type("x", 30).is_none());
     }
@@ -435,9 +433,7 @@ mod tests {
         });
         resolution.narrow_events.push(NarrowEvent::ClosureCapture {
             var_name: "x".to_string(),
-            closure_span: Span { lo: 15, hi: 25 },
             enclosing_fn_body: Span { lo: 0, hi: 100 },
-            outer_narrow: RustType::F64,
         });
 
         assert!(resolution.narrowed_type("x", 20).is_none());
@@ -459,10 +455,8 @@ mod tests {
         let mut resolution = FileTypeResolution::empty();
         resolution.narrow_events.push(NarrowEvent::ClosureCapture {
             var_name: "x".to_string(),
-            closure_span: Span { lo: 20, hi: 40 },
             // Event is observable only for positions in [10, 50).
             enclosing_fn_body: Span { lo: 10, hi: 50 },
-            outer_narrow: RustType::F64,
         });
         // Inside scope → true
         assert!(resolution.is_var_closure_reassigned("x", 15));
@@ -495,9 +489,7 @@ mod tests {
         });
         resolution.narrow_events.push(NarrowEvent::ClosureCapture {
             var_name: "x".to_string(),
-            closure_span: Span { lo: 30, hi: 50 },
             enclosing_fn_body: Span { lo: 0, hi: 100 },
-            outer_narrow: RustType::F64,
         });
         // Function g at [200, 300): has Narrow event, NO ClosureCapture.
         resolution.narrow_events.push(NarrowEvent::Narrow {

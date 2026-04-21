@@ -55,16 +55,16 @@ use swc_ecma_ast as ast;
 use super::classifier::{classify_closure_body_for_outer_ident, ArrowOrFnBody};
 use super::events::ResetCause;
 
-/// `(var_name, closure_span)` pair returned by
+/// Captured outer ident name returned by
 /// [`collect_closure_capture_pairs_for_candidates`].
 ///
-/// A pair is recorded whenever an outer-declared ident in the candidate set
+/// A name is recorded whenever an outer-declared ident in the candidate set
 /// is reassigned inside a callable boundary (arrow / fn expr / nested fn
 /// decl / class member / object method / getter / setter / static block /
 /// class prop init). Used by the Transformer (I-144 T6-2 follow-up) to
 /// suppress narrow shadow-let emission for the captured ident so the
 /// variable stays `Option<T>` and the closure body can still reassign it.
-pub(super) type ClosureCapturePair = (String, swc_common::Span);
+pub(super) type ClosureCapturedName = String;
 
 // -----------------------------------------------------------------------------
 // Public entry: candidate enumeration + walker driver
@@ -89,7 +89,7 @@ pub(super) fn collect_outer_candidates(
     out
 }
 
-/// Walks `stmts` and emits a [`ClosureCapturePair`] for every closure
+/// Walks `stmts` and emits a [`ClosureCapturedName`] for every closure
 /// boundary inside the body that reassigns one of the outer `candidates`,
 /// respecting nested-scope shadowing.
 ///
@@ -98,7 +98,7 @@ pub(super) fn collect_outer_candidates(
 pub(super) fn collect_closure_capture_pairs_for_candidates(
     stmts: &[ast::Stmt],
     candidates: &HashSet<String>,
-) -> Vec<ClosureCapturePair> {
+) -> Vec<ClosureCapturedName> {
     let mut out = Vec::new();
     let mut active = candidates.clone();
     walk_stmts(stmts, &mut active, &mut out);
@@ -207,7 +207,7 @@ fn remove_pat_idents(pat: &ast::Pat, active: &mut HashSet<String>) {
 fn walk_stmts(
     stmts: &[ast::Stmt],
     active: &mut HashSet<String>,
-    out: &mut Vec<ClosureCapturePair>,
+    out: &mut Vec<ClosureCapturedName>,
 ) {
     let saved = active.clone();
     for stmt in stmts {
@@ -216,7 +216,7 @@ fn walk_stmts(
     *active = saved;
 }
 
-fn walk_stmt(stmt: &ast::Stmt, active: &mut HashSet<String>, out: &mut Vec<ClosureCapturePair>) {
+fn walk_stmt(stmt: &ast::Stmt, active: &mut HashSet<String>, out: &mut Vec<ClosureCapturedName>) {
     match stmt {
         ast::Stmt::Block(b) => walk_stmts(&b.stmts, active, out),
         ast::Stmt::Expr(e) => walk_expr(&e.expr, active, out),
@@ -345,7 +345,7 @@ fn apply_for_head_shadow(head: &ast::ForHead, active: &mut HashSet<String>) {
     }
 }
 
-fn walk_decl(decl: &ast::Decl, active: &mut HashSet<String>, out: &mut Vec<ClosureCapturePair>) {
+fn walk_decl(decl: &ast::Decl, active: &mut HashSet<String>, out: &mut Vec<ClosureCapturedName>) {
     match decl {
         ast::Decl::Var(v) => {
             // We **do not** remove VarDecl names from `active` here.
@@ -389,7 +389,6 @@ fn walk_decl(decl: &ast::Decl, active: &mut HashSet<String>, out: &mut Vec<Closu
                 let params: Vec<&ast::Pat> =
                     fn_decl.function.params.iter().map(|p| &p.pat).collect();
                 walk_closure_boundary(
-                    fn_decl.function.span,
                     &params,
                     ArrowOrFnBody::Block(&body.stmts),
                     Some(fn_decl.ident.sym.as_ref()),
@@ -417,7 +416,7 @@ fn walk_class_body(
     members: &[ast::ClassMember],
     class_self_name: Option<&str>,
     active: &HashSet<String>,
-    out: &mut Vec<ClosureCapturePair>,
+    out: &mut Vec<ClosureCapturedName>,
 ) {
     for member in members {
         match member {
@@ -425,7 +424,6 @@ fn walk_class_body(
                 if let Some(body) = &m.function.body {
                     let params: Vec<&ast::Pat> = m.function.params.iter().map(|p| &p.pat).collect();
                     walk_closure_boundary(
-                        m.function.span,
                         &params,
                         ArrowOrFnBody::Block(&body.stmts),
                         class_self_name,
@@ -438,7 +436,6 @@ fn walk_class_body(
                 if let Some(body) = &m.function.body {
                     let params: Vec<&ast::Pat> = m.function.params.iter().map(|p| &p.pat).collect();
                     walk_closure_boundary(
-                        m.function.span,
                         &params,
                         ArrowOrFnBody::Block(&body.stmts),
                         class_self_name,
@@ -458,7 +455,6 @@ fn walk_class_body(
                         })
                         .collect();
                     walk_closure_boundary(
-                        ctor.span,
                         &params,
                         ArrowOrFnBody::Block(&body.stmts),
                         class_self_name,
@@ -473,7 +469,6 @@ fn walk_class_body(
                 // cell #14 / A9). Wrap as an Expr-bodied boundary.
                 if let Some(value) = &prop.value {
                     walk_closure_boundary(
-                        prop.span,
                         &[],
                         ArrowOrFnBody::Expr(value),
                         class_self_name,
@@ -485,7 +480,6 @@ fn walk_class_body(
             ast::ClassMember::PrivateProp(prop) => {
                 if let Some(value) = &prop.value {
                     walk_closure_boundary(
-                        prop.span,
                         &[],
                         ArrowOrFnBody::Expr(value),
                         class_self_name,
@@ -496,7 +490,6 @@ fn walk_class_body(
             }
             ast::ClassMember::StaticBlock(sb) => {
                 walk_closure_boundary(
-                    sb.span,
                     &[],
                     ArrowOrFnBody::Block(&sb.body.stmts),
                     class_self_name,
@@ -507,7 +500,6 @@ fn walk_class_body(
             ast::ClassMember::AutoAccessor(acc) => {
                 if let Some(value) = &acc.value {
                     walk_closure_boundary(
-                        acc.span,
                         &[],
                         ArrowOrFnBody::Expr(value),
                         class_self_name,
@@ -521,7 +513,7 @@ fn walk_class_body(
     }
 }
 
-fn walk_expr(expr: &ast::Expr, active: &mut HashSet<String>, out: &mut Vec<ClosureCapturePair>) {
+fn walk_expr(expr: &ast::Expr, active: &mut HashSet<String>, out: &mut Vec<ClosureCapturedName>) {
     match expr {
         ast::Expr::Arrow(arrow) => {
             let params: Vec<&ast::Pat> = arrow.params.iter().collect();
@@ -529,7 +521,7 @@ fn walk_expr(expr: &ast::Expr, active: &mut HashSet<String>, out: &mut Vec<Closu
                 ast::BlockStmtOrExpr::BlockStmt(b) => ArrowOrFnBody::Block(&b.stmts),
                 ast::BlockStmtOrExpr::Expr(e) => ArrowOrFnBody::Expr(e),
             };
-            walk_closure_boundary(arrow.span, &params, body, None, active, out);
+            walk_closure_boundary(&params, body, None, active, out);
         }
         ast::Expr::Fn(fn_expr) => {
             if let Some(body) = &fn_expr.function.body {
@@ -537,7 +529,6 @@ fn walk_expr(expr: &ast::Expr, active: &mut HashSet<String>, out: &mut Vec<Closu
                     fn_expr.function.params.iter().map(|p| &p.pat).collect();
                 let self_name = fn_expr.ident.as_ref().map(|i| i.sym.as_ref());
                 walk_closure_boundary(
-                    fn_expr.function.span,
                     &params,
                     ArrowOrFnBody::Block(&body.stmts),
                     self_name,
@@ -562,7 +553,6 @@ fn walk_expr(expr: &ast::Expr, active: &mut HashSet<String>, out: &mut Vec<Closu
                                 let params: Vec<&ast::Pat> =
                                     mp.function.params.iter().map(|p| &p.pat).collect();
                                 walk_closure_boundary(
-                                    mp.function.span,
                                     &params,
                                     ArrowOrFnBody::Block(&body.stmts),
                                     None,
@@ -574,7 +564,6 @@ fn walk_expr(expr: &ast::Expr, active: &mut HashSet<String>, out: &mut Vec<Closu
                         ast::Prop::Getter(g) => {
                             if let Some(body) = &g.body {
                                 walk_closure_boundary(
-                                    g.span,
                                     &[],
                                     ArrowOrFnBody::Block(&body.stmts),
                                     None,
@@ -587,7 +576,6 @@ fn walk_expr(expr: &ast::Expr, active: &mut HashSet<String>, out: &mut Vec<Closu
                             if let Some(body) = &s.body {
                                 let pats: [&ast::Pat; 1] = [&*s.param];
                                 walk_closure_boundary(
-                                    s.span,
                                     &pats,
                                     ArrowOrFnBody::Block(&body.stmts),
                                     None,
@@ -701,20 +689,19 @@ fn walk_expr(expr: &ast::Expr, active: &mut HashSet<String>, out: &mut Vec<Closu
 /// Crosses a closure boundary (arrow / fn / method / ctor / static block /
 /// getter / setter): computes the boundary-shadow-aware
 /// `boundary_active`, classifies each remaining candidate against the
-/// closure body for an invalidating reassign, emits matching pairs, and
-/// recursively walks the body with `boundary_active` so nested closures
-/// inherit the corrected scope.
+/// closure body for an invalidating reassign, emits matching captured
+/// names, and recursively walks the body with `boundary_active` so nested
+/// closures inherit the corrected scope.
 ///
 /// `self_name` carries the closure's own name (fn expr / class self) when
 /// applicable so it is excluded from `boundary_active` along with params
 /// and body top-level decls.
 fn walk_closure_boundary(
-    closure_span: swc_common::Span,
     params: &[&ast::Pat],
     body: ArrowOrFnBody<'_>,
     self_name: Option<&str>,
     outer_active: &HashSet<String>,
-    out: &mut Vec<ClosureCapturePair>,
+    out: &mut Vec<ClosureCapturedName>,
 ) {
     let mut boundary_active = outer_active.clone();
     if let Some(name) = self_name {
@@ -748,13 +735,13 @@ fn walk_closure_boundary(
         }
     }
 
-    // Emit pairs for the candidates still active after boundary shadow.
+    // Emit captured names for candidates still active after boundary shadow.
     for ident in &boundary_active {
         if matches!(
             classify_closure_body_for_outer_ident(params, body, ident),
             Some(ResetCause::ClosureReassign)
         ) {
-            out.push((ident.clone(), closure_span));
+            out.push(ident.clone());
         }
     }
 

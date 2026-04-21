@@ -23,8 +23,10 @@
 //! The resulting hint map is globally keyed by `stmt.span.lo.0`, which is
 //! unique across the file, so merging from multiple calls never conflicts.
 //!
-//! See `backlog/I-144-control-flow-narrowing-analyzer.md` (T6-1 / T6-2) for
-//! the pipeline integration rationale.
+//! See `doc/handoff/design-decisions.md` section "Control-flow narrowing
+//! analyzer (I-144)" for the pipeline integration rationale (T6-1 / T6-2).
+//! The archived I-144 PRD lives in git history as
+//! `backlog/I-144-control-flow-narrowing-analyzer.md`.
 
 use swc_ecma_ast as ast;
 

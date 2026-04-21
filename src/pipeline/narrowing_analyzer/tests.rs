@@ -1,8 +1,10 @@
 //! Unit tests for the `narrowing_analyzer` module's `??=` emission-hint
 //! classifier and guard-detection entry points.
 //!
-//! Coverage targets the Problem Space matrix cells enumerated in
-//! `backlog/I-144-control-flow-narrowing-analyzer.md`:
+//! Coverage targets the Problem Space matrix cells enumerated in the
+//! I-144 PRD (closed 2026-04-21, archived in git history as
+//! `backlog/I-144-control-flow-narrowing-analyzer.md`; settled design
+//! lives in `doc/handoff/design-decisions.md`):
 //!
 //! - Sub-matrix 1 (Trigger × LHS type), `guards` sub-module: typeof /
 //!   instanceof / null check / truthy / early-return complement

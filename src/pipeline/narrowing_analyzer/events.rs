@@ -19,8 +19,8 @@
 //! - [`ResetCause`] classifies the nature of a mutation that may or may
 //!   not invalidate a narrow (arithmetic / update are preserving; direct
 //!   or null assignments are invalidating).
-//! - [`EmissionHint`] / [`RcContext`] hint the Transformer toward the
-//!   right Rust AST pattern at each narrow-related site.
+//! - [`EmissionHint`] hints the Transformer toward the right Rust AST pattern
+//!   at each narrow-related site.
 
 use crate::ir::RustType;
 use crate::pipeline::type_resolution::Span;
@@ -67,15 +67,13 @@ pub enum NarrowEvent {
     /// A closure captures the outer narrow for `var_name`.
     ///
     /// Emitted when the closure either reads or reassigns a variable that is
-    /// narrowed in the enclosing scope. Consumers drive the Phase 3b emission
-    /// policy (Policy A FnMut vs Policy B `Rc<RefCell<_>>`) from this event,
-    /// and use [`enclosing_fn_body`](Self::ClosureCapture::enclosing_fn_body)
+    /// narrowed in the enclosing scope. Consumers drive narrow suppression
+    /// (`FileTypeResolution::is_var_closure_reassigned`) from this event,
+    /// using [`enclosing_fn_body`](Self::ClosureCapture::enclosing_fn_body)
     /// for position-aware narrow suppression queries.
     ClosureCapture {
         /// Variable captured by the closure.
         var_name: String,
-        /// Span of the closure expression.
-        closure_span: Span,
         /// Span of the enclosing function body where this capture event was
         /// detected.
         ///
@@ -88,12 +86,6 @@ pub enum NarrowEvent {
         /// is structurally guaranteed by this field: a query at a position
         /// outside `enclosing_fn_body` does not match this event.
         enclosing_fn_body: Span,
-        /// Narrowed type of the variable in the outer scope at capture time.
-        ///
-        /// Currently a `RustType::Any` placeholder populated by I-169 T6-2
-        /// follow-up. Phase 3b (closure reassign emission policy) may resolve
-        /// it to the actual outer narrow type later.
-        outer_narrow: RustType,
     },
 }
 
@@ -156,14 +148,32 @@ pub struct NarrowEventRef<'a> {
 /// Primary (non-composite) narrow trigger.
 ///
 /// Every narrow event originates from exactly one primary trigger —
-/// typeof / instanceof / null-check / truthy / ??= / opt-chain invariant /
-/// DU switch. A *composite* trigger such as an early-return complement
-/// wraps a [`PrimaryTrigger`] as its underlying cause. Splitting the
-/// primary case out as its own enum makes this structure explicit at the
-/// type level: nested [`NarrowTrigger::EarlyReturnComplement`] is
-/// unrepresentable.
+/// typeof / instanceof / null-check / truthy / opt-chain invariant.
+/// A *composite* trigger such as an early-return complement wraps a
+/// [`PrimaryTrigger`] as its underlying cause. Splitting the primary
+/// case out as its own enum makes this structure explicit at the type
+/// level: nested [`NarrowTrigger::EarlyReturnComplement`] is unrepresentable.
 ///
-/// Maps to Problem Space dimension T (T1-T10 in the PRD).
+/// # Scope
+///
+/// Maps to the subset of Problem Space dimension T that flows through
+/// [`NarrowEvent::Narrow`]. Two T-dimension triggers are intentionally
+/// handled by **separate architectures** and therefore have no variant
+/// in this enum:
+///
+/// - **T6 `??=` narrowing** is driven by
+///   [`EmissionHint`](crate::pipeline::narrowing_analyzer::EmissionHint)
+///   dispatch at the Transformer (per `??=` site chooses ShadowLet vs
+///   GetOrInsertWith emission), not by a narrow event. The analyzer's
+///   [`ResetCause::NullishAssignOnNarrow`] covers the reset-side of
+///   `??=` on an already-narrowed ident (no-op predicate elide).
+/// - **T8 DU switch-case narrowing** is driven by the
+///   `pipeline::type_resolver::du_analysis` module (internal to the resolver
+///   pipeline — link omitted because the module is `pub(crate)`), which
+///   emits tag-based match patterns directly in the Transformer.
+///
+/// If a future PRD migrates either to the narrowing_analyzer pipeline,
+/// the corresponding variant should be added here with its populator.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PrimaryTrigger {
     /// `typeof x === "string"` (T1). Payload is the typeof string literal.
@@ -176,21 +186,11 @@ pub enum PrimaryTrigger {
     NullCheck(NullCheckKind),
     /// `if (x)` / `if (!x)` truthy check (T4a-f, T9).
     Truthy,
-    /// `x ??= d` at a statement where `x` was nullable before the op (T6).
-    ///
-    /// Currently unused: populated by T6 when the Transformer wires in
-    /// analyzer-sourced emission hints at `??=` sites.
-    NullishAssign,
     /// `x?.prop !== undefined` — OptChain non-null invariant (T7, T12).
     ///
     /// Narrows the **base** of the OptChain (`x`) from `Option<T>` to `T`.
     /// Populated by `guards::extract_optchain_null_check_narrowing` (T6-4).
     OptChainInvariant,
-    /// `switch (s.kind) { case "...": }` (T8). Payload is the discriminant tag.
-    ///
-    /// Currently unused: populated by T5 once DU switch-case narrowing is
-    /// migrated from `du_analysis`.
-    DiscriminatedUnion(String),
 }
 
 /// Why a narrow was introduced, including whether it came from an
@@ -215,23 +215,6 @@ pub enum NarrowTrigger {
     /// Carries the original primary guard so downstream consumers can still
     /// reason about the specific shape that produced the complement.
     EarlyReturnComplement(PrimaryTrigger),
-}
-
-impl NarrowTrigger {
-    /// Returns the underlying [`PrimaryTrigger`], regardless of whether the
-    /// narrow was direct or a complement.
-    #[must_use]
-    pub fn primary(&self) -> &PrimaryTrigger {
-        match self {
-            Self::Primary(p) | Self::EarlyReturnComplement(p) => p,
-        }
-    }
-
-    /// Returns `true` iff this trigger is an early-return complement.
-    #[must_use]
-    pub fn is_early_return_complement(&self) -> bool {
-        matches!(self, Self::EarlyReturnComplement(_))
-    }
 }
 
 /// Shape of a null / undefined check.
@@ -299,10 +282,27 @@ impl ResetCause {
     }
 }
 
-/// Rust AST pattern selected for emission at a given narrow-related site.
+/// Rust AST pattern selected for emission at a `??=` site.
 ///
-/// Maps to Problem Space dimension E (E1-E10 in the PRD). See Sub-matrix 3/5
-/// for the state → strategy mapping.
+/// Scope-limited to the two strategies the analyzer currently dispatches for
+/// the T6 `??=` emission pipeline (`try_convert_nullish_assign_stmt`):
+///
+/// - [`ShadowLet`](Self::ShadowLet) — E1 `let x = x.unwrap_or(d);`, narrow
+///   remains alive for the rest of the enclosing block.
+/// - [`GetOrInsertWith`](Self::GetOrInsertWith) — E2a
+///   `x.get_or_insert_with(|| d);`, keeps `x: Option<T>` so subsequent
+///   resets / closure reassigns remain valid.
+///
+/// Problem Space dimension E covers 12 emission patterns (E1-E10 +
+/// variants); the remaining ten (E2b `unwrap_or(coerce_default)`, E3
+/// `if let Some`, E4 `match` exhaustive, E5 implicit `None`, E6 any-narrow
+/// enum, E7 DU struct pattern, E8 union variant, E9 passthrough, E10 truthy
+/// predicate, plus the `NullishAssignStrategy::{Identity,BlockedByI050}`
+/// dispatch arms) are emitted directly by the Transformer (helpers /
+/// pattern visitors) without flowing through this hint, so they have no
+/// variant here (enumerating them as dead `Currently unused` variants
+/// violates YAGNI). If a future PRD migrates an emission path to analyzer
+/// dispatch, the corresponding variant is added here with its populator.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EmissionHint {
     /// E1: `let x = x.unwrap_or(d);`.
@@ -316,63 +316,4 @@ pub enum EmissionHint {
     /// closure reassign, logical compound, loop boundary) would invalidate a
     /// shadow-let. `x` stays `Option<T>` to preserve TS runtime semantics.
     GetOrInsertWith,
-    /// E2b: `let v = x.unwrap_or(coerce_default(T));`.
-    ///
-    /// Currently unused: populated by T6 at narrow-stale reads (RC1 Expect-T
-    /// after a closure reassign) using the JS coerce_default table.
-    UnwrapOrCoerced,
-    /// E2c: `x.as_ref().map(|v| ...)` — keep Option for direct manipulation.
-    /// Currently unused (populated by T6).
-    OptionPassthrough,
-    /// E3: `if let Some(x) = x { ... }`. Currently unused (populated by T6).
-    IfLetSome,
-    /// E4: `match x { Some(v) => ..., None => ... }`. Currently unused
-    /// (populated by T6).
-    MatchExhaustive,
-    /// E5: implicit `None` at reachable fall-off (I-025 structural fix).
-    /// Currently unused (populated by T6).
-    ImplicitNone,
-    /// E6: any-narrowing enum variant match (I-030). Currently unused
-    /// (populated by T6).
-    AnyNarrowEnum,
-    /// E7 / E8: DU struct pattern / union variant binding. Currently unused
-    /// (populated by T6).
-    VariantBinding,
-    /// E9: passthrough — emission unchanged. Currently unused
-    /// (populated by T6).
-    Passthrough,
-    /// E10: type-specific truthy predicate (`!x.is_empty()`, `matches!`).
-    /// Currently unused (populated by T6).
-    TruthyPredicate,
-    /// `??=` on non-`Option` T — statement is dead code, emit nothing.
-    /// Currently unused (populated by T6 alongside `pick_strategy`).
-    Identity,
-    /// `??=` on `Any` — blocked by I-050 Any coercion umbrella. Currently
-    /// unused (populated by T6).
-    BlockedByI050,
-}
-
-/// Context in which a narrow variable is read.
-///
-/// Mirrors Sub-matrix 5 (`emission-contexts.md` cluster). Currently
-/// unused in production code — populated by T6 when the Transformer wires
-/// in analyzer-sourced read context classification.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum RcContext {
-    /// Direct inner-T read (arithmetic, comparison, return expression, ...).
-    ExpectT,
-    /// `Option<T>` read (nullish coalescing LHS/RHS, OptChain receiver).
-    ExpectOption,
-    /// Mutation target (`=`, `??=`, `+=`, ...).
-    Mutation,
-    /// Boolean / truthy read (`if (x)`, logical operand).
-    Boolean,
-    /// Match discriminant (`switch (x)` scrutinee).
-    MatchDiscriminant,
-    /// String interpolation / concat.
-    StringInterp,
-    /// Callback body — narrow visibility governed by F8 closure rules.
-    CallbackCapture,
-    /// Passthrough (paren, expression statement).
-    Passthrough,
 }

@@ -15,6 +15,13 @@
 //!   test is a bare identifier on a primitive, and by
 //!   `try_generate_narrowing_match` when generating composite
 //!   Option<Union> truthy guards.
+//! - **`option_builders`** — Option-shape IR builders (I-022 / I-144
+//!   T6-1): `build_option_unwrap_with_default` (`unwrap_or` / `unwrap_or_else`
+//!   eager/lazy dispatch), `build_option_get_or_insert_with` (`??=` with
+//!   preserved Option layer), `build_option_or_option` (Option-typed `??`
+//!   chain). Three cohesive builders consolidated into `helpers/` at T6-6
+//!   (previously inlined in `transformer/mod.rs` pre-existing broken window).
 
 pub(crate) mod coerce_default;
+pub(crate) mod option_builders;
 pub(crate) mod truthy;

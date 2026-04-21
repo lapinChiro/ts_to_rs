@@ -11,8 +11,8 @@
 //! The implementation is split by concern into private submodules:
 //!
 //! - **`events`** — data-type backbone ([`NarrowEvent`], [`NarrowTrigger`],
-//!   [`PrimaryTrigger`], [`NullCheckKind`], [`ResetCause`], [`EmissionHint`],
-//!   [`RcContext`]). No behavior.
+//!   [`PrimaryTrigger`], [`NullCheckKind`], [`ResetCause`], [`EmissionHint`]).
+//!   No behavior.
 //! - **`classifier`** — stateless functions that walk the AST and classify
 //!   mutations, merge branch outcomes, and descend into closure /
 //!   class / object boundaries.
@@ -71,8 +71,15 @@
 //!
 //! # Design reference
 //!
-//! `backlog/I-144-control-flow-narrowing-analyzer.md` — Problem Space
-//! matrix, Sub-matrix 1-5, Phase 3b closure reassign emission policy.
+//! I-144 PRD (closed 2026-04-21, archived in git history as
+//! `backlog/I-144-control-flow-narrowing-analyzer.md`) and its settled
+//! design decisions live in [`doc/handoff/design-decisions.md`] under
+//! section "Control-flow narrowing analyzer (I-144)": Problem Space
+//! matrix (Sub-matrix 1-5), Phase 3b closure reassign emission policy,
+//! 2-channel architecture (NarrowEvent vs EmissionHint vs du_analysis),
+//! coerce_default table.
+//!
+//! [`doc/handoff/design-decisions.md`]: ../../doc/handoff/design-decisions.md
 
 mod classifier;
 mod closure_captures;
@@ -89,7 +96,7 @@ use swc_ecma_ast as ast;
 // import path.
 pub use events::{
     EmissionHint, NarrowEvent, NarrowEventRef, NarrowTrigger, NullCheckKind, PrimaryTrigger,
-    RcContext, ResetCause,
+    ResetCause,
 };
 pub use guards::{detect_early_return_narrowing, detect_narrowing_guard};
 pub use type_context::NarrowTypeContext;
@@ -105,7 +112,7 @@ pub use type_context::NarrowTypeContext;
 /// `FileTypeResolution::narrow_events` through
 /// [`NarrowTypeContext::push_narrow_event`] and do not pass through this
 /// struct.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default)]
 pub struct AnalysisResult {
     /// Emission strategy hints keyed by `??=` statement start position
     /// (`stmt.span.lo.0`).
@@ -141,20 +148,14 @@ pub fn analyze_function(body: &ast::BlockStmt, params: &[&ast::Pat]) -> Analysis
     // `is_var_closure_reassigned(name, position)` queries filter events by
     // function-scope membership (multi-fn isolation P1).
     let candidates = closure_captures::collect_outer_candidates(params, &body.stmts);
-    let pairs =
+    let captured =
         closure_captures::collect_closure_capture_pairs_for_candidates(&body.stmts, &candidates);
     let enclosing = crate::pipeline::type_resolution::Span::from_swc(body.span);
-    result.closure_captures = pairs
+    result.closure_captures = captured
         .into_iter()
-        .map(|(var_name, span)| NarrowEvent::ClosureCapture {
+        .map(|var_name| NarrowEvent::ClosureCapture {
             var_name,
-            closure_span: crate::pipeline::type_resolution::Span::from_swc(span),
             enclosing_fn_body: enclosing,
-            // outer_narrow is a placeholder. The Transformer does not consult
-            // it for narrow suppression; future phases (Phase 3b emission
-            // policy) may resolve the actual narrowed type via a richer
-            // analyzer.
-            outer_narrow: crate::ir::RustType::Any,
         })
         .collect();
     result

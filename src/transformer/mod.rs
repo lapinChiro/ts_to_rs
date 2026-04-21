@@ -8,9 +8,15 @@ pub mod context;
 pub mod expressions;
 pub mod functions;
 pub(crate) mod helpers;
+mod injections;
 pub(crate) mod return_wrap;
 pub mod statements;
+mod ts_enum;
 pub(crate) mod type_position;
+
+pub(crate) use helpers::option_builders::{
+    build_option_get_or_insert_with, build_option_or_option, build_option_unwrap_with_default,
+};
 pub(crate) use type_position::{wrap_trait_for_position, TypePosition};
 
 use anyhow::Result;
@@ -20,7 +26,7 @@ use swc_ecma_ast::{Decl, ImportSpecifier, Module, ModuleDecl, ModuleItem, Stmt};
 
 use std::collections::HashMap;
 
-use crate::ir::{EnumValue, EnumVariant, Item, Visibility};
+use crate::ir::{Item, Visibility};
 use crate::pipeline::SyntheticTypeRegistry;
 use crate::registry::TypeRegistry;
 use crate::transformer::classes::ClassInfo;
@@ -316,8 +322,8 @@ impl<'a> Transformer<'a> {
             items.push(build_init_fn(init_stmts));
         }
 
-        inject_regex_import_if_needed(&mut items);
-        inject_js_typeof_if_needed(&mut items);
+        injections::inject_regex_import_if_needed(&mut items);
+        injections::inject_js_typeof_if_needed(&mut items);
         Ok(items)
     }
 
@@ -382,8 +388,8 @@ impl<'a> Transformer<'a> {
             items.push(build_init_fn(init_stmts));
         }
 
-        inject_regex_import_if_needed(&mut items);
-        inject_js_typeof_if_needed(&mut items);
+        injections::inject_regex_import_if_needed(&mut items);
+        injections::inject_js_typeof_if_needed(&mut items);
         Ok((items, unsupported))
     }
 
@@ -626,7 +632,7 @@ impl<'a> Transformer<'a> {
             }
             Decl::Var(var_decl) => self.convert_var_decl_module_level(var_decl, vis, resilient),
             Decl::TsEnum(ts_enum) => {
-                let items = convert_ts_enum(ts_enum, vis)?;
+                let items = ts_enum::convert_ts_enum(ts_enum, vis)?;
                 Ok((items, vec![]))
             }
             Decl::TsModule(ts_module) => {
@@ -662,84 +668,6 @@ impl<'a> Transformer<'a> {
     }
 } // end impl Transformer (module-level transformation)
 
-/// Converts a TS enum declaration into an IR [`Item::Enum`].
-///
-/// Handles numeric enums (auto-incrementing and explicit values) and string enums.
-fn convert_ts_enum(ts_enum: &swc_ecma_ast::TsEnumDecl, vis: Visibility) -> Result<Vec<Item>> {
-    let name = crate::ir::sanitize_rust_type_name(&ts_enum.id.sym);
-    let mut variants = Vec::new();
-
-    for member in &ts_enum.members {
-        let variant_name = match &member.id {
-            swc_ecma_ast::TsEnumMemberId::Ident(ident) => ident.sym.to_string(),
-            swc_ecma_ast::TsEnumMemberId::Str(s) => s.value.to_string_lossy().into_owned(),
-        };
-
-        let value = member.init.as_ref().and_then(|init| match init.as_ref() {
-            swc_ecma_ast::Expr::Lit(swc_ecma_ast::Lit::Num(n)) => {
-                Some(EnumValue::Number(n.value as i64))
-            }
-            swc_ecma_ast::Expr::Lit(swc_ecma_ast::Lit::Str(s)) => {
-                Some(EnumValue::Str(s.value.to_string_lossy().into_owned()))
-            }
-            swc_ecma_ast::Expr::Unary(unary) if unary.op == swc_ecma_ast::UnaryOp::Minus => {
-                if let swc_ecma_ast::Expr::Lit(swc_ecma_ast::Lit::Num(n)) = unary.arg.as_ref() {
-                    Some(EnumValue::Number(-(n.value as i64)))
-                } else {
-                    None
-                }
-            }
-            swc_ecma_ast::Expr::Bin(bin) => format_bin_expr(bin).map(EnumValue::Expr),
-            _ => None,
-        });
-
-        variants.push(EnumVariant {
-            name: variant_name,
-            value,
-            data: None,
-            fields: vec![],
-        });
-    }
-
-    Ok(vec![Item::Enum {
-        vis,
-        name,
-        type_params: vec![],
-        serde_tag: None,
-        variants,
-    }])
-}
-
-/// Formats a binary expression AST node as a Rust expression string.
-///
-/// Supports numeric literals and binary operators (e.g., `1 << 0`, `1 | 2`).
-/// Returns `None` for unsupported operands.
-fn format_bin_expr(bin: &swc_ecma_ast::BinExpr) -> Option<String> {
-    let left = format_simple_expr(&bin.left)?;
-    let right = format_simple_expr(&bin.right)?;
-    let op = match bin.op {
-        swc_ecma_ast::BinaryOp::LShift => "<<",
-        swc_ecma_ast::BinaryOp::RShift => ">>",
-        swc_ecma_ast::BinaryOp::BitOr => "|",
-        swc_ecma_ast::BinaryOp::BitAnd => "&",
-        swc_ecma_ast::BinaryOp::BitXor => "^",
-        swc_ecma_ast::BinaryOp::Add => "+",
-        swc_ecma_ast::BinaryOp::Sub => "-",
-        swc_ecma_ast::BinaryOp::Mul => "*",
-        _ => return None,
-    };
-    Some(format!("{left} {op} {right}"))
-}
-
-/// Formats a simple expression (numeric literal or nested binary) as a string.
-fn format_simple_expr(expr: &swc_ecma_ast::Expr) -> Option<String> {
-    match expr {
-        swc_ecma_ast::Expr::Lit(swc_ecma_ast::Lit::Num(n)) => Some(format!("{}", n.value as i64)),
-        swc_ecma_ast::Expr::Bin(bin) => format_bin_expr(bin),
-        _ => None,
-    }
-}
-
 /// Returns a human-readable kind name for a module-level item.
 fn format_module_item_kind(item: &ModuleItem) -> String {
     match item {
@@ -766,215 +694,6 @@ fn format_decl_kind(decl: &Decl) -> String {
     }
 }
 
-/// Injects a `js_typeof` helper function if any item contains `Expr::RuntimeTypeof`.
-///
-/// The helper maps `serde_json::Value` variants to JavaScript typeof strings at runtime,
-/// preserving TypeScript's `typeof` semantics for dynamically-typed values.
-fn inject_js_typeof_if_needed(items: &mut Vec<Item>) {
-    if !items_contain_runtime_typeof(items) {
-        return;
-    }
-    items.push(Item::RawCode(
-        r#"fn js_typeof(val: &serde_json::Value) -> &'static str {
-    match val {
-        serde_json::Value::String(_) => "string",
-        serde_json::Value::Number(_) => "number",
-        serde_json::Value::Bool(_) => "boolean",
-        serde_json::Value::Null => "undefined",
-        _ => "object",
-    }
-}"#
-        .to_string(),
-    ));
-}
-
-/// `Expr::RuntimeTypeof` が任意の項目内に存在するかを構造的に検出する visitor。
-///
-/// I-377 以前は `expr_contains_runtime_typeof` / `stmts_contain_runtime_typeof` /
-/// `items_contain_runtime_typeof` の 3 つの手書き再帰関数で実装されており、
-/// `Expr::Closure` / `Expr::StructInit` / `Expr::Match` などの variant を
-/// `_ => false` で黙殺していた（latent バグ: closure 内の RuntimeTypeof が
-/// 未検出になり `js_typeof` helper が注入されない）。`IrVisitor` 化により全
-/// variant が `walk_*` で走査されるため、この抜けが構造的に解消される。
-#[derive(Default)]
-struct RuntimeTypeofDetector {
-    found: bool,
-}
-
-impl crate::ir::visit::IrVisitor for RuntimeTypeofDetector {
-    fn visit_expr(&mut self, expr: &crate::ir::Expr) {
-        if self.found {
-            return;
-        }
-        if matches!(expr, crate::ir::Expr::RuntimeTypeof { .. }) {
-            self.found = true;
-            return;
-        }
-        crate::ir::visit::walk_expr(self, expr);
-    }
-}
-
-fn items_contain_runtime_typeof(items: &[Item]) -> bool {
-    use crate::ir::visit::IrVisitor;
-    let mut detector = RuntimeTypeofDetector::default();
-    for item in items {
-        detector.visit_item(item);
-        if detector.found {
-            return true;
-        }
-    }
-    false
-}
-
-fn inject_regex_import_if_needed(items: &mut Vec<Item>) {
-    if items_contain_regex(items) {
-        items.insert(
-            0,
-            Item::Use {
-                vis: Visibility::Private,
-                path: "regex".to_string(),
-                names: vec!["Regex".to_string()],
-            },
-        );
-    }
-}
-
-/// `Expr::Regex` が任意の項目内に存在するかを構造的に検出する visitor。
-///
-/// `RuntimeTypeofDetector` と同じ理由で `IrVisitor` 化されている：以前の手書き
-/// `expr_contains_regex` / `stmts_contain_regex` は `Expr::Closure` や
-/// `Expr::IfLet` 内の Regex を検出できなかった（`_ => false` で黙殺）。
-#[derive(Default)]
-struct RegexDetector {
-    found: bool,
-}
-
-impl crate::ir::visit::IrVisitor for RegexDetector {
-    fn visit_expr(&mut self, expr: &crate::ir::Expr) {
-        if self.found {
-            return;
-        }
-        if matches!(expr, crate::ir::Expr::Regex { .. }) {
-            self.found = true;
-            return;
-        }
-        crate::ir::visit::walk_expr(self, expr);
-    }
-}
-
-fn items_contain_regex(items: &[Item]) -> bool {
-    use crate::ir::visit::IrVisitor;
-    let mut detector = RegexDetector::default();
-    for item in items {
-        detector.visit_item(item);
-        if detector.found {
-            return true;
-        }
-    }
-    false
-}
-
-/// Builds an `unwrap_or` or `unwrap_or_else` expression for an Option field with a default value.
-///
-/// Uses `unwrap_or` (eager) only for cheap Copy literals (numbers, bools, unit).
-/// Everything else uses `unwrap_or_else` (lazy) to avoid:
-/// - Eager evaluation of side-effecting expressions (correctness)
-/// - Unnecessary String/struct allocation when Option is Some (performance)
-/// - Unconditional move of non-Copy values (ownership safety)
-///
-/// This is the single source of truth for Option unwrap-with-default generation,
-/// used by destructuring defaults, function parameter defaults, and `??` operator.
-pub(crate) fn build_option_unwrap_with_default(
-    field_access: crate::ir::Expr,
-    default_ir: crate::ir::Expr,
-) -> crate::ir::Expr {
-    if default_ir.is_copy_literal() {
-        crate::ir::Expr::MethodCall {
-            object: Box::new(field_access),
-            method: "unwrap_or".to_string(),
-            args: vec![default_ir],
-        }
-    } else {
-        crate::ir::Expr::MethodCall {
-            object: Box::new(field_access),
-            method: "unwrap_or_else".to_string(),
-            args: vec![crate::ir::Expr::Closure {
-                params: vec![],
-                return_type: None,
-                body: crate::ir::ClosureBody::Expr(Box::new(default_ir)),
-            }],
-        }
-    }
-}
-
-/// Builds `x.get_or_insert_with(|| default)` for `??=` emission when the
-/// outer `Option<T>` must be preserved across a subsequent narrow-invalidating
-/// mutation (direct reassign, null reassign, loop boundary, or closure
-/// reassign — see [`EmissionHint::GetOrInsertWith`]).
-///
-/// Unlike [`build_option_unwrap_with_default`], which produces a bare `T`
-/// suitable for shadow-let binding, this preserves the `Option<T>` shape so
-/// that follow-up mutations (`x = None`, `for const v of ...` rebinding, or
-/// a closure body reassigning the captured ident) can continue to typecheck.
-/// The default is wrapped in a zero-arg closure regardless of Copy-ness: the
-/// `get_or_insert_with` API is always lazy.
-///
-/// [`EmissionHint::GetOrInsertWith`]:
-///     crate::pipeline::narrowing_analyzer::EmissionHint::GetOrInsertWith
-pub(crate) fn build_option_get_or_insert_with(
-    target: crate::ir::Expr,
-    default_ir: crate::ir::Expr,
-) -> crate::ir::Expr {
-    crate::ir::Expr::MethodCall {
-        object: Box::new(target),
-        method: "get_or_insert_with".to_string(),
-        args: vec![crate::ir::Expr::Closure {
-            params: vec![],
-            return_type: None,
-            body: crate::ir::ClosureBody::Expr(Box::new(default_ir)),
-        }],
-    }
-}
-
-/// Builds an `Option::or` or `Option::or_else` expression for an Option LHS +
-/// Option RHS (nullish coalescing chain case).
-///
-/// Uses `or` (eager) only for cheap Copy literals (numbers, bools, unit).
-/// Everything else uses `or_else` (lazy) to avoid:
-/// - Eager evaluation of side-effecting RHS expressions (correctness — TS `??`
-///   is lazy, not evaluating RHS when LHS is non-nullish)
-/// - Unnecessary allocation when LHS is Some
-/// - Unconditional move of non-Copy values (ownership safety)
-///
-/// Unlike [`build_option_unwrap_with_default`] which produces `T` (unwrapped),
-/// this returns `Option<T>` — the LHS's Option layer is preserved so an outer
-/// `??` in a chain (`a ?? b ?? c`) can terminate with `.unwrap_or[_else]()`.
-///
-/// Used exclusively by [`Transformer::convert_bin_expr`]'s NullishCoalescing arm
-/// when both LHS and RHS produce `Option<T>` (I-022).
-pub(crate) fn build_option_or_option(
-    lhs: crate::ir::Expr,
-    rhs: crate::ir::Expr,
-) -> crate::ir::Expr {
-    if rhs.is_copy_literal() {
-        crate::ir::Expr::MethodCall {
-            object: Box::new(lhs),
-            method: "or".to_string(),
-            args: vec![rhs],
-        }
-    } else {
-        crate::ir::Expr::MethodCall {
-            object: Box::new(lhs),
-            method: "or_else".to_string(),
-            args: vec![crate::ir::Expr::Closure {
-                params: vec![],
-                return_type: None,
-                body: crate::ir::ClosureBody::Expr(Box::new(rhs)),
-            }],
-        }
-    }
-}
-
 /// Builds an `init()` function from accumulated top-level expression statements.
 ///
 /// TypeScript modules can have top-level expressions that run once when the module
@@ -997,121 +716,3 @@ fn build_init_fn(stmts: Vec<crate::ir::Stmt>) -> Item {
 pub(crate) mod test_fixtures;
 #[cfg(test)]
 mod tests;
-
-#[cfg(test)]
-mod detector_tests {
-    use super::*;
-    use crate::ir::{BinOp, CallTarget, ClosureBody, Expr, Param, RustType, Stmt, Visibility};
-
-    fn fn_item(body: Vec<Stmt>) -> Item {
-        Item::Fn {
-            vis: Visibility::Private,
-            attributes: vec![],
-            is_async: false,
-            name: "f".to_string(),
-            type_params: vec![],
-            params: vec![],
-            return_type: None,
-            body,
-        }
-    }
-
-    /// `RuntimeTypeof` nested inside a closure body must be detected.
-    ///
-    /// 以前の手書き `expr_contains_runtime_typeof` は `Expr::Closure` arm を
-    /// `_ => false` で黙殺しており、この入力では false を返していた（latent bug）。
-    /// `RuntimeTypeofDetector: IrVisitor` 化により `walk_expr` 経由で
-    /// Closure 内部が走査され、正しく true を返す。
-    #[test]
-    fn runtime_typeof_detected_inside_closure_body() {
-        let closure_expr = Expr::Closure {
-            params: vec![Param {
-                name: "x".to_string(),
-                ty: Some(RustType::Any),
-            }],
-            return_type: None,
-            body: ClosureBody::Expr(Box::new(Expr::RuntimeTypeof {
-                operand: Box::new(Expr::Ident("x".to_string())),
-            })),
-        };
-        let item = fn_item(vec![Stmt::TailExpr(closure_expr)]);
-        assert!(
-            items_contain_runtime_typeof(&[item]),
-            "RuntimeTypeof inside a closure body must be detected"
-        );
-    }
-
-    /// `RuntimeTypeof` nested inside a `Match` arm body must be detected.
-    #[test]
-    fn runtime_typeof_detected_inside_match_arm() {
-        let item = fn_item(vec![Stmt::Match {
-            expr: Expr::Ident("x".to_string()),
-            arms: vec![crate::ir::MatchArm {
-                patterns: vec![crate::ir::Pattern::Wildcard],
-                guard: None,
-                body: vec![Stmt::TailExpr(Expr::RuntimeTypeof {
-                    operand: Box::new(Expr::Ident("x".to_string())),
-                })],
-            }],
-        }]);
-        assert!(
-            items_contain_runtime_typeof(&[item]),
-            "RuntimeTypeof inside a match arm must be detected"
-        );
-    }
-
-    /// Items without `RuntimeTypeof` must return false.
-    #[test]
-    fn runtime_typeof_absent_returns_false() {
-        let item = fn_item(vec![Stmt::TailExpr(Expr::BinaryOp {
-            left: Box::new(Expr::Ident("x".to_string())),
-            op: BinOp::Add,
-            right: Box::new(Expr::IntLit(1)),
-        })]);
-        assert!(!items_contain_runtime_typeof(&[item]));
-    }
-
-    /// `Regex` nested inside a closure body must be detected.
-    ///
-    /// 以前の手書き `expr_contains_regex` は Closure arm を `_ => false` で
-    /// 黙殺していた（latent bug）。
-    #[test]
-    fn regex_detected_inside_closure_body() {
-        let closure_expr = Expr::Closure {
-            params: vec![],
-            return_type: None,
-            body: ClosureBody::Expr(Box::new(Expr::Regex {
-                pattern: "abc".to_string(),
-                global: false,
-                sticky: false,
-            })),
-        };
-        let item = fn_item(vec![Stmt::TailExpr(closure_expr)]);
-        assert!(
-            items_contain_regex(&[item]),
-            "Regex inside a closure body must be detected"
-        );
-    }
-
-    /// Items without `Regex` must return false.
-    #[test]
-    fn regex_absent_returns_false() {
-        let item = fn_item(vec![Stmt::Expr(Expr::FnCall {
-            target: CallTarget::Free("f".to_string()),
-            args: vec![],
-        })]);
-        assert!(!items_contain_regex(&[item]));
-    }
-
-    /// FnCall args are walked.
-    #[test]
-    fn runtime_typeof_detected_inside_fncall_args() {
-        let item = fn_item(vec![Stmt::Expr(Expr::FnCall {
-            target: CallTarget::Free("wrap".to_string()),
-            args: vec![Expr::RuntimeTypeof {
-                operand: Box::new(Expr::Ident("x".to_string())),
-            }],
-        })]);
-        assert!(items_contain_runtime_typeof(&[item]));
-    }
-}

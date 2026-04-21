@@ -499,7 +499,10 @@ fn early_return_null_check_narrows_fallthrough_scope() {
     assert_eq!(ctx.events.len(), 1);
     let ev = ctx.events[0].as_narrow().unwrap();
     assert!(matches!(ev.narrowed_type, RustType::String));
-    assert!(ev.trigger.is_early_return_complement());
+    assert!(matches!(
+        ev.trigger,
+        NarrowTrigger::EarlyReturnComplement(_)
+    ));
     assert_eq!(ev.scope_start, if_end);
     assert_eq!(ev.scope_end, block_end);
 }

@@ -58,9 +58,7 @@ mod narrow_event_accessors {
     fn var_name_for_closure_capture_variant() {
         let e = NarrowEvent::ClosureCapture {
             var_name: "z".into(),
-            closure_span: Span { lo: 10, hi: 20 },
             enclosing_fn_body: Span { lo: 0, hi: 100 },
-            outer_narrow: RustType::String,
         };
         assert_eq!(e.var_name(), "z");
     }
@@ -99,37 +97,9 @@ mod narrow_event_accessors {
     fn as_narrow_returns_none_for_closure_capture_variant() {
         let e = NarrowEvent::ClosureCapture {
             var_name: "x".into(),
-            closure_span: Span { lo: 0, hi: 0 },
             enclosing_fn_body: Span { lo: 0, hi: 0 },
-            outer_narrow: RustType::Bool,
         };
         assert!(e.as_narrow().is_none());
-    }
-
-    // --- NarrowTrigger accessor methods ---
-
-    #[test]
-    fn narrow_trigger_primary_of_primary_variant_returns_inner() {
-        let t = NarrowTrigger::Primary(PrimaryTrigger::Truthy);
-        assert!(matches!(t.primary(), PrimaryTrigger::Truthy));
-    }
-
-    #[test]
-    fn narrow_trigger_primary_of_early_return_complement_returns_inner_trigger() {
-        let t = NarrowTrigger::EarlyReturnComplement(PrimaryTrigger::TypeofGuard("string".into()));
-        assert!(matches!(t.primary(), PrimaryTrigger::TypeofGuard(s) if s == "string"));
-    }
-
-    #[test]
-    fn narrow_trigger_is_early_return_complement_true_for_complement_variant() {
-        let t = NarrowTrigger::EarlyReturnComplement(PrimaryTrigger::Truthy);
-        assert!(t.is_early_return_complement());
-    }
-
-    #[test]
-    fn narrow_trigger_is_early_return_complement_false_for_primary_variant() {
-        let t = NarrowTrigger::Primary(PrimaryTrigger::Truthy);
-        assert!(!t.is_early_return_complement());
     }
 }
 
