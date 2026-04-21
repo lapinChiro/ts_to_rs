@@ -183,8 +183,8 @@ pub enum PrimaryTrigger {
     NullishAssign,
     /// `x?.prop !== undefined` — OptChain non-null invariant (T7, T12).
     ///
-    /// Currently unused: populated by T5 once compound `x?.p !== undefined`
-    /// detection is folded into the narrowing analyzer.
+    /// Narrows the **base** of the OptChain (`x`) from `Option<T>` to `T`.
+    /// Populated by `guards::extract_optchain_null_check_narrowing` (T6-4).
     OptChainInvariant,
     /// `switch (s.kind) { case "...": }` (T8). Payload is the discriminant tag.
     ///

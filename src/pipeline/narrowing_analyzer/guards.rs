@@ -1,5 +1,5 @@
-//! Narrow guard detection: typeof / instanceof / null check / truthy +
-//! early-return complement.
+//! Narrow guard detection: typeof / instanceof / null check / OptChain /
+//! truthy + early-return complement.
 //!
 //! These were originally methods on `TypeResolver`
 //! (`pipeline::type_resolver::narrowing`) and are now the canonical
@@ -58,6 +58,9 @@ use super::type_context::NarrowTypeContext;
 /// - `x instanceof Foo` (positive in cons, complement in alt)
 /// - `x == null` / `x != null` / `x === null` / ... (only positive side
 ///   recorded; the negative side's `Option<T>` is correct as-is)
+/// - `x?.v !== undefined` / `x?.v !== null` — OptChain non-null invariant:
+///   narrows the **base** (`x`) from `Option<T>` to `T` (positive side
+///   only, same asymmetry as bare null check)
 /// - Truthy `if (x)` on `Option<T>` (positive in cons only)
 /// - Compound `a && b` (recurses on both legs; no complement, per
 ///   De Morgan)
@@ -145,6 +148,23 @@ pub fn detect_narrowing_guard<C: NarrowTypeContext>(
                     // No complement for null check: the opposite scope has Option<T> which
                     // is correct in Rust (if-let else naturally handles None).
                 }
+                // OptChain null check: x?.v !== undefined → narrow base (x) to non-null.
+                // Checked after bare-ident null check to avoid double-processing when
+                // the condition is simply `x !== undefined` (bare Ident, not OptChain).
+                else if let Some((var_name, narrowed_type)) =
+                    extract_optchain_null_check_narrowing(bin, ctx)
+                {
+                    let target_span = if is_neq { Some(cons_span) } else { alt_span };
+                    if let Some(span) = target_span {
+                        ctx.push_narrow_event(NarrowEvent::Narrow {
+                            scope_start: span.lo,
+                            scope_end: span.hi,
+                            var_name,
+                            narrowed_type,
+                            trigger: NarrowTrigger::Primary(PrimaryTrigger::OptChainInvariant),
+                        });
+                    }
+                }
             }
 
             // x instanceof Foo
@@ -218,6 +238,9 @@ pub fn detect_narrowing_guard<C: NarrowTypeContext>(
 ///
 /// - `typeof x === "..."` → opposite-variant complement
 /// - `x === null` → `x` is `T` (non-null) after the exit
+/// - `x?.v === undefined` → `x` is `T` (non-null) after the exit
+///   (OptChain invariant: if `x` were null, `x?.v === undefined`
+///   would be true, triggering the exit)
 /// - `x instanceof Foo` → complement variants after the exit
 /// - `!x` → `x` is `T` (non-null) after the exit
 pub fn detect_early_return_narrowing<C: NarrowTypeContext>(
@@ -275,6 +298,22 @@ pub fn detect_early_return_narrowing<C: NarrowTypeContext>(
                         trigger: NarrowTrigger::EarlyReturnComplement(PrimaryTrigger::NullCheck(
                             null_kind,
                         )),
+                    });
+                    return;
+                }
+                // OptChain early return: if (x?.v === undefined) { return; }
+                // → x is non-null after (if x were null, chain → undefined → exited)
+                if let Some((var_name, unwrapped_type)) =
+                    extract_optchain_null_check_narrowing(bin, ctx)
+                {
+                    ctx.push_narrow_event(NarrowEvent::Narrow {
+                        scope_start: if_end,
+                        scope_end: block_end,
+                        var_name,
+                        narrowed_type: unwrapped_type,
+                        trigger: NarrowTrigger::EarlyReturnComplement(
+                            PrimaryTrigger::OptChainInvariant,
+                        ),
                     });
                     return;
                 }
@@ -531,6 +570,42 @@ fn compute_complement_type<C: NarrowTypeContext>(
     }
 }
 
+/// Extracts the non-nullish side and `undefined` discriminant from a
+/// binary comparison that has `null` or `undefined` on one side.
+///
+/// Returns `(non_null_expr, rhs_is_undefined)` where:
+/// - `non_null_expr` is the expression on the other side of
+///   `null`/`undefined`
+/// - `rhs_is_undefined` is `true` when the null-side is the
+///   `undefined` identifier (not `null` literal)
+///
+/// Handles both orderings: `x !== null` and `null !== x`.
+fn extract_non_nullish_side(bin: &ast::BinExpr) -> Option<(&ast::Expr, bool)> {
+    if narrowing_patterns::is_null_or_undefined(&bin.right) {
+        Some((
+            bin.left.as_ref(),
+            narrowing_patterns::is_undefined_ident(&bin.right),
+        ))
+    } else if narrowing_patterns::is_null_or_undefined(&bin.left) {
+        Some((
+            bin.right.as_ref(),
+            narrowing_patterns::is_undefined_ident(&bin.left),
+        ))
+    } else {
+        None
+    }
+}
+
+/// Looks up a variable in `ctx` and unwraps `Option<T>` to `T`.
+///
+/// Returns `None` if the variable is not `Option<_>`.
+fn unwrap_option_type<C: NarrowTypeContext>(var_name: &str, ctx: &C) -> Option<RustType> {
+    match ctx.lookup_var(var_name) {
+        ResolvedType::Known(RustType::Option(inner)) => Some(inner.as_ref().clone()),
+        _ => None,
+    }
+}
+
 /// Extracts a null-check narrowing triple from a binary comparison.
 ///
 /// Handles both `x === null` / `x !== null` and the reversed
@@ -541,34 +616,47 @@ fn extract_null_check_narrowing<C: NarrowTypeContext>(
     bin: &ast::BinExpr,
     ctx: &C,
 ) -> Option<(String, RustType, NullCheckKind)> {
-    // x !== null / x !== undefined → remove Option wrapper from x's type
-    let (var_expr, rhs_is_undefined) = if narrowing_patterns::is_null_or_undefined(&bin.right) {
-        (
-            bin.left.as_ref(),
-            narrowing_patterns::is_undefined_ident(&bin.right),
-        )
-    } else if narrowing_patterns::is_null_or_undefined(&bin.left) {
-        (
-            bin.right.as_ref(),
-            narrowing_patterns::is_undefined_ident(&bin.left),
-        )
-    } else {
-        return None;
-    };
+    let (var_expr, rhs_is_undefined) = extract_non_nullish_side(bin)?;
 
     let var_name = match var_expr {
         ast::Expr::Ident(ident) => ident.sym.to_string(),
         _ => return None,
     };
 
-    // Get current type and unwrap Option
-    let current_type = ctx.lookup_var(&var_name);
-    match current_type {
-        ResolvedType::Known(RustType::Option(inner)) => Some((
-            var_name,
-            inner.as_ref().clone(),
-            classify_null_check(bin.op, rhs_is_undefined),
-        )),
-        _ => None,
-    }
+    let inner = unwrap_option_type(&var_name, ctx)?;
+    Some((
+        var_name,
+        inner,
+        classify_null_check(bin.op, rhs_is_undefined),
+    ))
+}
+
+/// Extracts an OptChain-based null-check narrowing from a binary
+/// comparison.
+///
+/// Matches `x?.prop !== undefined` (and reversed `undefined !== x?.prop`)
+/// and returns the **base** identifier of the OptChain (e.g., `x` from
+/// `x?.v`) and the unwrapped `Option<T>` payload type.
+///
+/// **Invariant**: if `x?.prop !== undefined` is true, `x` must be
+/// non-null — when `x` is null/undefined the optional chain
+/// short-circuits to `undefined`, which fails the `!==` check. This
+/// allows narrowing the base from `Option<T>` to `T` in the positive
+/// scope.
+///
+/// Does **not** return [`NullCheckKind`] — callers always use
+/// [`PrimaryTrigger::OptChainInvariant`] which carries no null-check
+/// classification payload (the distinction between strict/loose and
+/// null/undefined is irrelevant for OptChain base narrowing).
+fn extract_optchain_null_check_narrowing<C: NarrowTypeContext>(
+    bin: &ast::BinExpr,
+    ctx: &C,
+) -> Option<(String, RustType)> {
+    let (chain_expr, _rhs_is_undefined) = extract_non_nullish_side(bin)?;
+
+    let base_ident = narrowing_patterns::extract_optchain_base_ident(chain_expr)?;
+    let var_name = base_ident.sym.to_string();
+
+    let inner = unwrap_option_type(&var_name, ctx)?;
+    Some((var_name, inner))
 }

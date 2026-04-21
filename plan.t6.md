@@ -58,7 +58,7 @@ T6-2 ✅: coerce_default helper + E2b stale read emission (2 cell GREEN)
    ↓
 T6-3 ✅: Truthy predicate E10 (primitive NaN + composite Option<Union>) (2 cell GREEN)
    ↓
-T6-4: Compound OptChain narrow detection (1 cell GREEN)
+T6-4 ✅: Compound OptChain narrow detection (1 cell GREEN)
    ↓
 T6-5: Multi-exit Option return implicit None emission (1 cell GREEN)
    ↓
@@ -505,12 +505,21 @@ T6-2 着手時に以下を probe (実装着手前):
 
 ---
 
-## Phase T6-4: Compound OptChain narrow (`x?.v !== undefined` → x non-null)
+## Phase T6-4: Compound OptChain narrow (`x?.v !== undefined` → x non-null) ✅ 完了 (2026-04-21)
+
+**完了サマリ** (詳細は backlog/I-144 T6-4 section 参照):
+- 実装: `narrowing_patterns.rs` に `extract_optchain_base_ident` (DRY 共有ヘルパー)、`guards.rs` に `extract_optchain_null_check_narrowing` + `extract_non_nullish_side` / `unwrap_option_type` (DRY helper 抽出)。`detect_narrowing_guard` + `detect_early_return_narrowing` に OptChain パス追加。`transformer/expressions/patterns.rs::extract_narrowing_guard` に OptChain LHS 対応追加。`PrimaryTrigger::OptChainInvariant` doc 更新。
+- テスト: unit +22 (narrowing_patterns 6 / guards 11 / patterns 6)、E2E cell-t7 GREEN + #[ignore] 解除
+- Hono bench: clean 113/158 (+1)、errors 60 (-2)
+- `/check_job` deep review: H-1〜H-5 (doc comment / DRY / dead code / PRD drift) + M-1〜M-2 全修正、Spec gap = 0 / Implementation gap = 0
+- `/check_problem`: bench OBJECT_LITERAL_NO_TYPE +1 は改善副産物 (net -2)、PRD Completion Criteria item 7/12 を ⏳ に修正 (I-025 pending T6-5)
+
+**旧原版**: 以下は着手前計画。完了後の実装採用形は backlog/I-144 T6-4 section。
 
 **目的**: `x?.prop !== undefined` pattern を narrow trigger として検出し、x を non-null に
 narrow。guards.rs 拡張のみで emission 変更はほぼ不要の想定。
 
-**GREEN 化する cell (1)**:
+**GREEN 化した cell (1)**:
 - `cell-t7-optchain-compound-narrow` (T7)
 
 ### 設計 (T6-4)
@@ -532,11 +541,15 @@ narrow。guards.rs 拡張のみで emission 変更はほぼ不要の想定。
 
 **推定 total**: ±100 LOC
 
-### 完了条件 (T6-4)
+### 完了条件 (T6-4) ✅ 全達成
 
-- [ ] cell-t7 E2E PASS
-- [ ] guards.rs OptChain null check unit test 追加
-- [ ] regression 0 / clippy / fmt / Hono bench 非後退
+- [x] cell-t7 E2E PASS
+- [x] guards.rs OptChain null check unit test 追加 (10 tests: neq/eq/reversed/non-option/deep-chain/null-rhs/precedence/early-return/compound-and)
+- [x] narrowing_patterns.rs extract_optchain_base_ident unit test 追加 (6 tests)
+- [x] patterns.rs extract_narrowing_guard OptChain test 追加 (6 tests)
+- [x] regression 0 (lib 2877 / integration 122 / compile 3 / E2E 113)
+- [x] clippy 0 / fmt 0
+- [x] Hono bench 改善 (113/158 clean +1, errors 60 -2)
 
 ---
 

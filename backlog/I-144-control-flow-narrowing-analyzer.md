@@ -1059,17 +1059,25 @@ T6-1 に畳み込み (scanner 関数 + call site を同時削除、broken-window
     / BinExpr / LogicalAnd / UnaryExpr / Lit)、non-exit body、else branch など 9 pattern
     の Tier 2 compile error。独立 matrix-driven PRD として起票 target。
 
-#### T6-4: Compound OptChain narrow detection (T7 GREEN 化)
+#### T6-4: Compound OptChain narrow detection (T7 GREEN 化) ✅ 完了 (2026-04-21)
 
-- **Work**:
-  - `guards.rs::extract_null_check_narrowing` に OptChain LHS 対応追加
-    (`BinExpr(NotEqEqUndefined, OptChainExpr { base: x, chain: .prop }, Undefined)` を x の
-    非 null narrow として発火)
-  - guards.rs OptChain null check unit test 追加
-  - cell-t7 E2E un-ignore
-- **Completion criteria**:
+- **Work (完了)**:
+  - `narrowing_patterns.rs` に `extract_optchain_base_ident` を DRY 共有ヘルパーとして新設
+    (base ident 抽出: `x?.v` → `x`、deep chain / call / computed 対応)
+  - `guards.rs` に `extract_optchain_null_check_narrowing` を新設 (OptChain 専用、bare-ident
+    `extract_null_check_narrowing` とは分離)。`extract_non_nullish_side` + `unwrap_option_type`
+    を共通 helper 化して DRY 解消
+  - `detect_narrowing_guard` に OptChain パス追加 (bare-ident null check の `else if` として、
+    `PrimaryTrigger::OptChainInvariant` で event 発行)
+  - `detect_early_return_narrowing` に `is_eq` 分岐内で OptChain 対応追加
+  - `transformer/expressions/patterns.rs::extract_narrowing_guard` に OptChain LHS 対応追加
+    → `NarrowingGuard::NonNullish` 抽出で既存 `if let Some(x) = x` 生成パスを活用
+  - unit test +22 (narrowing_patterns 6 / guards 11 / patterns 6)
+  - cell-t7 E2E un-ignore → GREEN
+- **Completion criteria** ✅:
   - cell-t7 E2E GREEN
-  - 既 GREEN cell regression 0
+  - 既 GREEN cell regression 0 (lib 2878 / integration 122 / compile 3 / E2E 113)
+  - Hono bench 改善: clean 113/158 (+1), errors 60 (-2)
 - **Depends on**: T6-3
 
 #### T6-5: Multi-exit Option return implicit None emission (I-025 GREEN 化)
@@ -1163,12 +1171,12 @@ lock-in されていることを T10 で confirm。
 5. ✅ `coerce_default` helper が JS coerce table 準拠で実装、unit test で全 RustType variant × RC verify
 6. ✅ Interim scanner (`pre_check_narrowing_reset` + `has_narrowing_reset_in_stmts`) 廃止、
    関連 call site 全削除
-7. ✅ Matrix ✗ cell (C-1, C-2a, C-2b, C-2c, I-024, I-025, I-142 Cell #14, T4d, T7) の E2E 全 green
+7. ⏳ Matrix ✗ cell (C-1, C-2a, C-2b, C-2c, I-024, ~~I-025~~, I-142 Cell #14, T4d, T7) の E2E 全 green — **T6-4 時点: 8/9 GREEN** (I-025 は T6-5 pending)
 8. ✅ Matrix ✓ cell (既存 narrowing 動作) regression 0
 9. ✅ `cargo test` (lib/integration/compile/E2E) 全 pass
 10. ✅ `cargo clippy` 0 warn / `cargo fmt` 0 diff
-11. ✅ Hono bench non-regression (errors 62 維持以上、改善があれば category 別分析)
-12. ✅ 吸収対象 (I-024/I-025/I-142 Cell #14/C-1/C-2a-c/C-3/C-4/D-1) 解消確認、TODO entry 削除
+11. ✅ Hono bench non-regression (errors 62 維持以上、改善があれば category 別分析) — T6-4: 60 errors (改善)
+12. ⏳ 吸収対象 (I-024/I-025/I-142 Cell #14/C-1/C-2a-c/C-3/C-4/D-1) 解消確認、TODO entry 削除 — I-025 は T6-5 pending
 13. ✅ `/check_job` Implementation Stage で Spec gap = 0 + Implementation gap = 0
 
 **Matrix completeness requirement**: Sub-matrix 1, 2, 3, 4, **5** (v2 新設) の全 cell に対する test

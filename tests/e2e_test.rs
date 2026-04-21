@@ -1053,9 +1053,8 @@ fn test_e2e_cell_i144_regression_t4e_truthy_primitive_bool() {
 // coercion gap for non-literal expressions. Unit-level lock-in directly
 // validates the match-arm shape independent of that separate defect.
 
-// T6-4 pending: compound OptChain narrow (`x?.v !== undefined` narrows x).
+// T6-4: compound OptChain narrow (`x?.v !== undefined` narrows x).
 #[test]
-#[ignore = "I-144 T6-4: compound OptChain null-check narrow detection"]
 fn test_e2e_cell_i144_t7_optchain_compound_narrow() {
     run_cell_e2e_test("i144", "cell-t7-optchain-compound-narrow");
 }

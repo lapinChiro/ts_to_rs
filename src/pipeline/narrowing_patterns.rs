@@ -87,6 +87,38 @@ fn peel_wrappers(expr: &ast::Expr) -> &ast::Expr {
     }
 }
 
+/// Extracts the outermost base identifier from an [`ast::OptChainExpr`].
+///
+/// - `x?.v`     → `x`
+/// - `x?.a?.b`  → `x` (recursively peels nested OptChain)
+/// - `x?.f()`   → `x`
+/// - `(a + b)?.v` → `None` (base is not a bare ident)
+///
+/// Used by both the narrowing analyzer (guard detection) and the
+/// transformer (if-let guard extraction) so the base-ident extraction
+/// logic is DRY.
+pub(crate) fn extract_optchain_base_ident(expr: &ast::Expr) -> Option<&ast::Ident> {
+    match expr {
+        ast::Expr::OptChain(oc) => extract_optchain_base_ident_inner(oc),
+        _ => None,
+    }
+}
+
+fn extract_optchain_base_ident_inner(opt_chain: &ast::OptChainExpr) -> Option<&ast::Ident> {
+    match &*opt_chain.base {
+        ast::OptChainBase::Member(m) => match m.obj.as_ref() {
+            ast::Expr::Ident(ident) => Some(ident),
+            ast::Expr::OptChain(inner) => extract_optchain_base_ident_inner(inner),
+            _ => None,
+        },
+        ast::OptChainBase::Call(c) => match c.callee.as_ref() {
+            ast::Expr::Ident(ident) => Some(ident),
+            ast::Expr::OptChain(inner) => extract_optchain_base_ident_inner(inner),
+            _ => None,
+        },
+    }
+}
+
 /// Returns `true` iff `stmt` is guaranteed to exit the enclosing
 /// block-level scope (via `return` / `throw` / `break` / `continue`) on
 /// every control-flow path.
@@ -413,5 +445,53 @@ mod tests {
     fn test_stmt_always_exits_expr_stmt_false() {
         let stmt = parse_first_stmt("console.log(1);");
         assert!(!stmt_always_exits(&stmt));
+    }
+
+    // === extract_optchain_base_ident ===
+
+    #[test]
+    fn test_optchain_base_ident_simple_member() {
+        // x?.v → base is "x"
+        let expr = parse_expr("x?.v");
+        let ident = extract_optchain_base_ident(&expr).expect("should extract base ident");
+        assert_eq!(ident.sym.as_ref(), "x");
+    }
+
+    #[test]
+    fn test_optchain_base_ident_deep_chain() {
+        // x?.a?.b → base is "x"
+        let expr = parse_expr("x?.a?.b");
+        let ident = extract_optchain_base_ident(&expr).expect("should extract base ident");
+        assert_eq!(ident.sym.as_ref(), "x");
+    }
+
+    #[test]
+    fn test_optchain_base_ident_call() {
+        // x?.f() → base is "x"
+        let expr = parse_expr("x?.f()");
+        let ident = extract_optchain_base_ident(&expr).expect("should extract base ident");
+        assert_eq!(ident.sym.as_ref(), "x");
+    }
+
+    #[test]
+    fn test_optchain_base_ident_computed() {
+        // x?.[0] → base is "x"
+        let expr = parse_expr("x?.[0]");
+        let ident = extract_optchain_base_ident(&expr).expect("should extract base ident");
+        assert_eq!(ident.sym.as_ref(), "x");
+    }
+
+    #[test]
+    fn test_optchain_base_ident_non_ident_base_returns_none() {
+        // (a + b)?.v → base is not an ident
+        let expr = parse_expr("(a + b)?.v");
+        assert!(extract_optchain_base_ident(&expr).is_none());
+    }
+
+    #[test]
+    fn test_optchain_base_ident_non_optchain_returns_none() {
+        // x.v (regular member, not OptChain) → None
+        let expr = parse_expr("x.v");
+        assert!(extract_optchain_base_ident(&expr).is_none());
     }
 }

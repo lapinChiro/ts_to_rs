@@ -776,12 +776,23 @@ pub(crate) fn extract_narrowing_guard(condition: &ast::Expr) -> Option<Narrowing
                 (None, false)
             };
             if is_nullish {
-                if let Some(ast::Expr::Ident(ident)) = var_expr {
-                    return Some(NarrowingGuard::NonNullish {
-                        var_name: ident.sym.to_string(),
-                        var_span: ident.span,
-                        is_neq,
-                    });
+                if let Some(var) = var_expr {
+                    // Bare ident: x !== null
+                    if let ast::Expr::Ident(ident) = var {
+                        return Some(NarrowingGuard::NonNullish {
+                            var_name: ident.sym.to_string(),
+                            var_span: ident.span,
+                            is_neq,
+                        });
+                    }
+                    // OptChain: x?.v !== undefined → narrow base ident (x)
+                    if let Some(base_ident) = narrowing_patterns::extract_optchain_base_ident(var) {
+                        return Some(NarrowingGuard::NonNullish {
+                            var_name: base_ident.sym.to_string(),
+                            var_span: base_ident.span,
+                            is_neq,
+                        });
+                    }
                 }
             }
 
@@ -898,6 +909,63 @@ mod tests {
         assert!(
             extract_narrowing_guard(&parse_expr(r#""hello""#)).is_none(),
             "string literal should not produce a guard"
+        );
+    }
+
+    #[test]
+    fn test_extract_narrowing_guard_optchain_neq_undefined_returns_non_nullish() {
+        // x?.v !== undefined → NonNullish with base ident "x"
+        let expr = parse_expr("x?.v !== undefined");
+        let guard = extract_narrowing_guard(&expr).expect("should extract NonNullish guard");
+        assert!(
+            matches!(&guard, NarrowingGuard::NonNullish { var_name, is_neq, .. }
+                if var_name == "x" && *is_neq),
+            "expected NonNullish for OptChain x?.v !== undefined, got: {guard:?}"
+        );
+    }
+
+    #[test]
+    fn test_extract_narrowing_guard_optchain_eq_undefined_returns_non_nullish() {
+        // x?.v === undefined → NonNullish with is_neq=false
+        let expr = parse_expr("x?.v === undefined");
+        let guard = extract_narrowing_guard(&expr).expect("should extract NonNullish guard");
+        assert!(
+            matches!(&guard, NarrowingGuard::NonNullish { var_name, is_neq, .. }
+                if var_name == "x" && !*is_neq),
+            "expected NonNullish(is_neq=false) for x?.v === undefined, got: {guard:?}"
+        );
+    }
+
+    #[test]
+    fn test_extract_narrowing_guard_optchain_reversed_order() {
+        // undefined !== x?.v �� NonNullish
+        let expr = parse_expr("undefined !== x?.v");
+        let guard = extract_narrowing_guard(&expr).expect("should extract NonNullish guard");
+        assert!(
+            matches!(&guard, NarrowingGuard::NonNullish { var_name, is_neq, .. }
+                if var_name == "x" && *is_neq),
+            "expected NonNullish for reversed undefined !== x?.v, got: {guard:?}"
+        );
+    }
+
+    #[test]
+    fn test_extract_narrowing_guard_optchain_deep_chain() {
+        // x?.a?.b !== undefined → NonNullish with outermost base "x"
+        let expr = parse_expr("x?.a?.b !== undefined");
+        let guard = extract_narrowing_guard(&expr).expect("should extract NonNullish guard");
+        assert!(
+            matches!(&guard, NarrowingGuard::NonNullish { var_name, .. } if var_name == "x"),
+            "expected NonNullish with base 'x' for deep chain, got: {guard:?}"
+        );
+    }
+
+    #[test]
+    fn test_extract_narrowing_guard_optchain_non_ident_base_returns_none() {
+        // (a + b)?.v !== undefined → no guard (base is not an ident)
+        let expr = parse_expr("(a + b)?.v !== undefined");
+        assert!(
+            extract_narrowing_guard(&expr).is_none(),
+            "non-ident OptChain base should not produce a guard"
         );
     }
 }
