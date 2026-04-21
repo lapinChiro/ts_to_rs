@@ -22,7 +22,7 @@
 | clippy | 0 warnings |
 | fmt | 0 diffs |
 
-**Note (2026-04-21)**: T6-4/T6-5 commit message は Hono bench 113/158 clean / 60 errors を報告したが、T6-6 empirical 再測 (clean rebuild × 複数 run) では 112/158 / 62 errors が stable な値。T6-4/T6-5 一時的 113/60 は HashMap iteration order 由来の非決定性による lucky draw (`src/pipeline/type_resolution.rs` の 5 箇所で `std::collections::HashMap` default RandomState 使用)。**T6-5 前後の net change = 0** (T6-5 の実装は bench を変えない pure refactor)。pre-existing 非決定性を I-172 として新規 TODO 起票、I-144 scope 外で別 PRD 扱い。
+**Note (2026-04-21)**: T6-4/T6-5 commit message は Hono bench 113/158 clean / 60 errors を報告したが、T6-6 empirical 再測 (clean rebuild × 複数 run) では 112/158 / 62 errors が stable な値。同一 HEAD + 同一ソースで bench に ±1 clean / ±2 errors の non-deterministic variance が発生。**I-144 前後の stable 値 net change = 0 errors**。当初 HashMap iteration order を疑ったが empirical 調査で否定 (`expr_types.get(&span)` 等は lookup only で emission 非影響)。候補 root cause は `std::fs::read_dir` の platform-dependent order / bench script の `find | xargs cp` / `module_graph` の cross-module resolution のいずれか (要調査)。pre-existing 非決定性を I-172 として TODO 起票、I-144 scope 外で別 PRD 扱い。
 
 ### 進行中作業
 
@@ -35,46 +35,62 @@
 
 | PRD | 日付 | サマリ (1-3 行) |
 |-----|------|-----------------|
-| **I-144 T6-6 (PRD close + IMPL-1〜7 structural fix + transformer/mod.rs refactor)** | 2026-04-21 | T0-T5 + T6-1〜T6-5 の集成として PRD 完了。`/check_job` × 5 + `/check_problem` × 2 = 7 連鎖 review で 11 implementation / documentation / broken-window / YAGNI gap を発見 → 全 structural fix: **IMPL-1** `PrimaryTrigger::{NullishAssign, DiscriminatedUnion}` 2 dead variants 削除、**IMPL-2** `RcContext` enum 全削除 (8 → 0)、**IMPL-3** `EmissionHint` 11 dead variants 削除 (13 → 2)、**IMPL-4** `NarrowEvent::ClosureCapture.outer_narrow` dead field 削除、**IMPL-5** `NarrowTrigger::primary()` + `is_early_return_complement()` 2 dead accessor methods + 4 dead-only tests 削除、**IMPL-6** `transformer/mod.rs` 1117 LOC broken window 解消 — 3 cohesive sub-module 分割 (`helpers/option_builders.rs` / `injections.rs` / `ts_enum.rs`) で 718 LOC、**IMPL-7** `NarrowEvent::ClosureCapture.closure_span: Span` dead field + `ClosureCapturePair` tuple の Span component を削除 (`walk_closure_boundary` の closure_span 引数を 14 call site + 1 定義で削除、`AnalysisResult` の dead `Clone` derive も削除)、**DEEP-GAP 1** 3 source file の stale backlog ref を design-decisions.md 参照に更新、**DEEP-GAP 3** `PrimaryTrigger` 公開 doc の private module への broken intra-doc link 修正、**DEEP-GAP 4** `coerce_default.rs` の 17 RustType variant 全網羅 exhaustive test 追加 (PRD Completion Criterion 5 充足)。YAGNI 厳守方針を `doc/handoff/design-decisions.md` section 1 に明文化: Problem Space matrix dimension の全 cell を enum variant として実装することは YAGNI 違反、actually-dispatched cell のみ実装、未実装 cell は TODO / PRD で track。吸収対象 (I-024/I-025/I-142 Cell #14/C-1/C-2a-c/C-3/C-4/D-1) を TODO から削除、backlog/I-144 + plan.t6.md を archive、design-decisions.md に 8-section archive 追記。Quality gate: lib 2880 / integration 122 / compile 3 / E2E 114 (0 ignored) / clippy 0 / fmt 0 / Hono bench 112/158 (62 errors、I-144 net ±0) / rustdoc 0 I-144 由来 warning / transformer/mod.rs 1000 LOC threshold 遵守達成 |
-| **I-144 T6-5 (multi-exit implicit None emission)** | 2026-04-21 | `append_implicit_none_if_needed` をパターンマッチ heuristic (if-no-else / while / for 限定) から `ir_body_always_exits` + `TailExpr` 判定に構造的書き換え。`ir_body_always_exits` を `pub(crate)` に昇格、`control_flow` module を `pub(crate)` 化。全 fall-through パターンを原理的にカバー。cell-i025 GREEN (multi-branch if-else with nested fall-through)。I-144 全 9 matrix ✗ cell GREEN 達成、E2E `#[ignore]` = 0。lib +9 test (2887)、Hono bench 非後退 (113/158, 60) |
-| **I-144 T6-4 (compound OptChain narrow detection)** | 2026-04-21 | `extract_optchain_null_check_narrowing` + `extract_optchain_base_ident` (DRY: `narrowing_patterns.rs` 共有) で `x?.v !== undefined` pattern を narrow trigger として検出、base ident x を `Option<T>` → `T` に narrow。`PrimaryTrigger::OptChainInvariant` 活用、both `detect_narrowing_guard` (consequent/alternate) + `detect_early_return_narrowing` (fall-through complement) 対応。patterns.rs の `extract_narrowing_guard` にも同パターン統合 → `if let Some(x) = x` 生成パスを活用。cell-t7 GREEN。lib +22 test (2878)、Hono bench +1 clean (113/158, 60 errors) |
-| **I-144 T6-3 (truthy predicate E10 + Option<Union> call-arg coercion + review 2 round 全対応)** | 2026-04-21 | `helpers/truthy.rs` で F64 NaN 含む全 primitive truthy/falsy predicate を中央化 (`x != 0.0 && !x.is_nan()`)、`convert_if_stmt` fallback で primitive の `if (x)` / `if (!x)` を predicate wrap、`!x` early-return on Option<T> を `try_generate_option_truthy_complement_match` で consolidated match 化 (composite Union variant: `match x { Some(V(v)) if <v truthy> => V(v), _ => exit }`、non-primitive variant は guard なし always-truthy arm)、`wrap_in_synthetic_union_variant` で call-site primitive literal 引数を Union variant に自動 wrap (`f("hi")` → `f(Some(F64OrString::String(...)))`)、`return_wrap::wrap_leaf` に同一 enum double-wrap guard 追加、`ir_body_always_exits` に Stmt::Match 全 arm exit 判定追加。`/check_job` 2 round + `/check_problem` で 15 defect (H-1 Paren / H-2 naming / H-3 non-primitive variant / M-1 Spec Revision Log / M-2 wrap unit tests / M-3 return_wrap regression / M-4 truthy exhaustive None / M-5 T4c/T4e E2E / L-1/L-2 review insight / R2-C1 Sub-matrix / R2-C2 Spec Log / R2-C3 H-3 integration / R2-I1 Match exits / R2-I2 命名統一 / R2-I3 unused param) 全 structural 対応。周辺 defect は I-050-c 拡充 / I-171 新規起票で track。cell-t4d / cell-i024 GREEN + cell-regression-t4c/t4e regression lock-in + integration test H-3 mixed-union。lib +19 test (2857)、Hono bench 非後退 (112/158, 62) |
-| **I-144 T6-2 follow-up (I-169 closure-capture scope precision)** | 2026-04-20 | `NarrowEvent::ClosureCapture.enclosing_fn_body` で multi-fn scope isolation、`analyze_function(body, params)` に拡張して param-as-candidate 対応、`closure_captures.rs` を独立 module 化 (candidate-limited + shadow-tracking walker)。14 closure boundary variant 網羅 + 27 matrix cell 全判定。/check_job 連鎖 review で全 defect 解消、I-170 (hoisting) は future TODO |
-| **I-144 T6-2 (coerce_default helper + narrow-stale emission)** | 2026-04-20 | `helpers/coerce_default.rs` で JS coerce table ((F64, RC1Arith)→0.0 / (F64, RC6StringInterp)→"null") を T6-2 scope 限定実装。narrow guard suppress + arith/string-concat coerce wrap で cell-c2b / cell-c2c GREEN |
-| **I-144 T6-1 (pipeline wiring + scanner retirement + ??= EmissionHint dispatch)** | 2026-04-20 | `FileTypeResolution.emission_hints` + 5 entry point wiring、`try_convert_nullish_assign_stmt` を EmissionHint dispatch に書換、interim scanner 完全削除 (-440 行)。cell-14 / cell-c1 / cell-c2a GREEN |
-| **I-144 T5 (narrow guard 検出を narrowing_analyzer に統合)** | 2026-04-20 | `type_resolver/narrowing.rs` 削除、`narrowing_analyzer/guards.rs` に集約、`NarrowTypeContext` trait で registry access 抽象化 |
-| **I-144 T3+T4 (CFG narrowing analyzer 基盤 + NarrowEvent migration)** | 2026-04-19 | `pipeline/narrowing_analyzer/` 新設、`NarrowingEvent` struct を `NarrowEvent` enum に migrate、scope-aware classifier + branch/sequential merge combinator |
-| **I-153 + I-154 batch** | 2026-04-19 | switch case body nested `break` silent redirect の structural 解消 + internal label を `__ts_` prefix に統一。report: [`report/i153-switch-nested-break-empirical.md`](report/i153-switch-nested-break-empirical.md) |
-| **以前の完了 (< 2026-04-19)** | — | I-SDCDF (spec-first framework、beta)、I-050-a (SDCDF Pilot)、Phase A Step 3/4 (I-020 部分/I-023/I-021)、I-145 / I-150 batch、INV-Step4-1、I-142 (`??=`) / I-142-b+c、I-022 (`??`) / I-138 / I-040 / I-392 ほか。いずれも git log で参照可能 |
+| **File line-count reduction refactor (8 files)** | 2026-04-21 | 1000 LOC 超過 8 file を cohesion-driven split (21 files changed, +1964 / −8767 LOC net)。Phase 1 test files (build_registry 1123→6 / control_flow 1095→7 / generator/tests 1068→8 / switch 1028→7 / generator/expressions/tests 1019→8) + Phase 2 production files (registry/collection 1524→8 sub-dir with placeholder/decl/class/resolvers/type_literals/const_values/callable / ts_type_info/mod 1045→3 files helpers+tests / transformer/expressions/methods 1267→3 sub-dir mod+closures+tests)。visibility `pub(in crate::registry)` で original `pub(super)` scope を厳密保持。`check-file-lines.sh` OK、quality gate 全 pass、Hono bench 非後退。post-review で `map_method_call` 411 LOC 単一 match decomposition を I-174 として起票 (L4)。計画詳細は git log 参照 |
+| **I-144 (control-flow narrowing analyzer umbrella)** | 2026-04-19〜04-21 | CFG-based narrowing analyzer PRD (umbrella: I-024 / I-025 / I-142 Cell #14 / C-1 / C-2a-c / C-3 / C-4 / D-1 吸収) を 9 sub-phase (T0-T6-6) で完了。T0-T2 SDCDF Spec stage (matrix-driven + Dual verdict framework) + T3-T5 analyzer 基盤 (`pipeline/narrowing_analyzer/` + `NarrowEvent` enum + `NarrowTypeContext` trait) + T6-1〜T6-5 emission 実装 (EmissionHint dispatch / coerce_default / truthy E10 / OptChain compound narrow / implicit None tail) + T6-6 close で 7 連鎖 review 11 structural fix (IMPL-1〜7 YAGNI dead variant/field 除去 + `transformer/mod.rs` 1117→718 LOC cohesion 分割)。matrix 全 9 ✗ cell GREEN。設計判断は `doc/handoff/design-decisions.md` section「Control-flow narrowing analyzer (I-144)」8-section archive、sub-phase 実装詳細は git log 参照 |
+| **I-153 + I-154 batch + 以前の完了** | 2026-04-19 以前 | I-153 / I-154: switch case body nested `break` silent redirect の structural 解消 + internal label `__ts_` prefix 統一 (`report/i153-switch-nested-break-empirical.md`)。以前: I-SDCDF (spec-first framework、beta)、I-050-a (SDCDF Pilot)、Phase A Step 3/4 (I-020 部分/I-023/I-021)、I-145 / I-150 batch、INV-Step4-1、I-142 (`??=`) / I-142-b+c、I-022 (`??`) / I-138 / I-040 / I-392 ほか。git log で参照可能 |
 
 ### 次の作業 (I-144 完了後 2026-04-21、spec-first workflow 適用)
 
 **優先順位は `.claude/rules/todo-prioritization.md` (L1 > L2 > L3 > L4) および
 `.claude/rules/ideal-implementation-primacy.md` (silent semantic change を最優先) に従う。**
 
-**Tier 0 (L1 silent) 該当なし**。**Tier 1 (L2 Struct) 該当なし** (I-144 完了で解消)。次の最優先は L3 Phase A Step 5。
+**Tier 0 (L1 silent) 該当なし**。**Tier 1 (L2 Struct) 該当なし** (I-144 完了で解消)。
+
+**着手順の導出原則**:
+1. I-144 Dual verdict framework で `TS ✓ / Rust ✗` として分離された narrow-related compile error は I-144 context が fresh なうちに優先 (I-161 / I-162 / I-171)
+2. Phase A roadmap (Step 5 → Step 6 → Step 7) で compile_test skip 直接削減
+3. Phase B (RC-11 OBJECT_LITERAL_NO_TYPE 28件 = Hono 全 error の 45%) は Phase A 完了後
+4. L4 latent items (runtime 同一 / reachability なし) は notes 欄に退避
 
 | 優先度 | レベル | PRD | 内容 | 根拠 |
 |--------|-------|-----|------|------|
-| 1 | L3 | **Phase A Step 5** (I-026 / I-029 / I-030) | 型 assertion / null as any / any-narrowing enum 変換 | `type-assertion`, `trait-coercion`, `any-type-narrowing` unskip (3 fixture 直接削減) |
-| 2 | L3 | I-142 Step 4 C-5〜C-7 残余 | I-144 非吸収の small cleanup (C-8 は 2026-04-19 完了済、C-9 は regression 消失で close、他は `doc/handoff/I-142-step4-followup.md` 参照) | — |
-| 3 | L3 | **I-158** | Non-loop labeled stmt (`L: { ... }` / `L: switch(...)`) support | TS valid syntax の gap。I-153 完了により emission model 安定、依存解消済 |
-| 4 | L3 | **I-159** | 内部 emission 変数の user namespace 衝突 (I-154 の variable 版) | `_try_result` / `_fall` / `_try_break` 等を `__ts_` prefix に統一 + 変数宣言 lint |
-| 5 | L3 | I-143 meta-PRD | `??` 演算子の問題空間完全マトリクス + 8 未解決セル | I-143-a〜h 未着手。I-144 後の topology で一部 (I-143-b any ?? T) は I-050 依存 |
-| 6 | L3 | I-140 | TypeDef::Alias variant 追加 | `type MaybeStr = string \| undefined` alias 経由 Option 認識失敗 |
-| 7 | L3 | I-050-b | Ident → Value coercion | TypeResolver expr_type と IR 型乖離解消が前提 |
-| 8 | L4 | I-160 | Walker defense-in-depth (Expr-embedded Stmt::Break) | 現時点 reachability なし |
-| 9 | L4 | I-166 | CFG-based closure call point narrow precision (I-144 post) | 現 narrow stale は「closure 宣言」を境界とする保守近似。実際は closure *call* 以降のみ stale。runtime 動作同一、Rust 精度のみ向上の L4 |
+| 1 | L3 | **I-161 + I-171 batch** | `&&=` / `\|\|=` compound logical assignment + `if (!x)` 汎用 truthy (non-Ident LHS / non-exit body / else branch、9 pattern) | I-144 T1 `cell-regression-r4` + T6-3 residual の compile error。両者とも `truthy_predicate_for_expr` 汎用 helper を共有、I-144 narrow context 温存の継続 |
+| 2 | L3 | **I-162** | class without explicit constructor → `Self::new()` 自動合成 | I-144 T2 instanceof narrow の Rust 側 E2E lock-in が本 defect で block。`class Dog {}` → `struct Dog {}` 止まりで `Dog::new()` 不在で E0599 |
+| 3 | L3 | **Phase A Step 5** (I-026 / I-029 / I-030) | 型 assertion / null as any / any-narrowing enum 変換 | `type-assertion`, `trait-coercion`, `any-type-narrowing` unskip (3 fixture 直接削減) |
+| 4 | L3 | **I-015** | Hono types.rs `Input['out']` indexed access 解決失敗 (E0405) | `src/ts_type_info/resolve/indexed_access.rs:271`。Hono types.rs で 1 件だが dir compile blocker |
+| 5 | L3 | **I-158 + I-159 batch** | Non-loop labeled stmt + 内部 emission 変数 user namespace hygiene | I-154 変数版 + I-153 labeled block 対応。I-158 が I-153 emission と interaction のため I-158 先行推奨 |
+| 6 | L3 | **Phase A Step 6** (I-028 / I-033 / I-034) | intersection 未使用型パラメータ (E0091) + charAt/repeat/toFixed method 変換 | `string-methods`, `intersection-empty-object`, `type-narrowing` unskip |
+| 7 | L3 | **I-143 meta-PRD** | `??` 演算子の問題空間完全マトリクス + 8 未解決セル (a〜h) | I-143-a〜h 未着手。I-143-b (`any ?? T`) は I-050 依存、他は独立 |
+| 8 | L3 | **I-142 Step 4 C-5 / C-6 + Phase A Step 7 (I-071)** | I-144 非吸収の small cleanup (C-7 は I-050 依存) + `instanceof-builtin` unskip 用 builtin 型 impl 生成 | C-5/C-6 は test quality 改善 (handoff doc)、I-071 は Phase A 最終 step (1 fixture unskip) |
+| 9 | L3 | **Phase B (RC-11)** (I-003 / I-004 / I-005 / I-006) | expected type 伝播の不完全性 (OBJECT_LITERAL_NO_TYPE 28件) | Hono 全 error の 45%、Phase A 完了後の最大インパクト category |
 
 **注**: 本テーブルは着手順。各 PRD で `prd-template` skill + `.claude/rules/problem-space-analysis.md`
 + `.claude/rules/spec-first-prd.md` を適用する。
 
+### 次点 / L4 deferred (上記 table 外)
+
+table に入らなかった L3 / L4 items:
+
+- **I-013 + I-014 batch** (L3、RC-5 abstract class 変換パス欠陥) — class inheritance 系、抱え込み依存が強いため独立 PRD 着手時に整備
+- **I-140** (L3、TypeDef::Alias variant 追加) — `type MaybeStr = string \| undefined` alias 経由の Option 認識。I-134 / I-056 と batch 可能
+- **I-050 umbrella** (L3、Any coercion) — I-143-b + I-050-b + I-050-c が依存。structural 母体として設計維持
+- **I-146** (L3、`return undefined` on void fn) — `keyword-types` unskip の残条件
+- **I-048** (L3、所有権推論) — RC-2 根本解決、`closures` / `functions` unskip の残条件、修正規模大
+- **I-074** (L4、`Item::StructInit` broken window) — pipeline-integrity 違反、PRD 化候補
+- **I-160** (L4、Walker defense-in-depth Expr-embedded Stmt::Break) — 現時点 reachability なし
+- **I-165 / I-166 / I-167 / I-170** (L4 narrow precision umbrella) — I-144 後の latent imprecision、runtime 動作同一、Rust 精度のみ向上
+- **I-168** (L4、`NarrowEvent::Reset` event 未消費) — Hono で顕在化なし pre-existing imprecision
+- **I-172 / I-173** (L4、bench 非決定性 + E2E parallel flakiness) — test / bench infra、別 PRD
+
 ### Batching 検討 (2026-04-21)
 
-- I-144 + I-142 Step 4 C-1〜C-4+D-1: ✅ **完了** (I-144 で一括吸収済)
-- I-158 + I-159: batch 検討 (namespace hygiene 系、I-154 と同系。ただし I-158 が I-153 emission model と interaction するため I-158 先行推奨)
-- I-143 + I-050-b: batch 検討 (I-143-b は I-050 Any coercion 依存)
-- I-140 + I-134: type alias 関連、DRY 可能性
+- ✅ **完了**: I-144 + I-142 Step 4 C-1〜C-4+D-1 (I-144 で一括吸収)
+- **I-161 + I-171**: narrow-related truthy compile error。`truthy_predicate_for_expr` 汎用 helper + `if (!x)` 経路拡張を共有基盤として構築 (新規 batch proposal)
+- **I-158 + I-159**: namespace hygiene 系 (I-154 と同系)。I-158 先行推奨 (I-153 emission との interaction)
+- **I-143 + I-050-b + I-050-c**: `??` / Any / Synthetic union coercion が共通 `resolve_expr` / `propagate_expected` 基盤を持つ
+- **I-140 + I-134 + I-056**: type alias 関連、`TypeDef::Alias` variant 新設で DRY 可能
+- **I-013 + I-014**: abstract class 変換パス (強依存、`generate_child_of_abstract()` 拡張)
+- **I-165 / I-166 / I-167 / I-170**: narrow precision umbrella (`VarId` binding identity + CFG analysis の基盤を共有)
 - **I-050 umbrella** (`backlog/I-050-any-coercion-umbrella.md`) は design 母体として存続
 
 ### INV 状態
@@ -155,7 +171,7 @@ intersection-empty-object, closures, functions, keyword-types, string-methods, t
 ```
 I-144 (L2 struct、CF narrowing)      ✅ 完了 2026-04-21 (I-024/I-025/I-142 Cell #14/C-1〜C-4/D-1 吸収)
   ↓
-Step 5 (type conversion + null)       I-142 Step 4 C-5〜C-9 残余処理 (並行可能)
+Step 5 (type conversion + null)       I-142 Step 4 C-5〜C-7 残余処理 (C-8 / C-9 完了済、並行可能)
   ↓ I-158 / I-159 (hygiene follow-ups、並行可能)
 Step 6 (string + intersection)        type-narrowing は Step 1 + 6 で完全解消
   ↓
@@ -217,7 +233,7 @@ Step 7 (builtin impl)
 
 Phase A 完了後、Hono ベンチマーク最大カテゴリ（全エラーの 45%）に着手。
 I-004 (imported 関数), I-005 (匿名構造体), I-006 (.map callback) を対象とする。
-(件数: 2026-04-17 bench 実測 62 errors 中 28 件)
+(件数: 2026-04-21 T6-6 後 bench 実測 62 errors 中 28 件、I-144 前後で変動なし)
 
 ---
 
