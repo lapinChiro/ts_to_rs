@@ -1080,15 +1080,23 @@ T6-1 に畳み込み (scanner 関数 + call site を同時削除、broken-window
   - Hono bench 改善: clean 113/158 (+1), errors 60 (-2)
 - **Depends on**: T6-3
 
-#### T6-5: Multi-exit Option return implicit None emission (I-025 GREEN 化)
+#### T6-5: Multi-exit Option return implicit None emission (I-025 GREEN 化) ✅ 完了 (2026-04-21)
 
-- **Work**:
-  - Option return tail injection の現状実装箇所を probe-7 で特定
-  - 複数 exit path (all-fall-off branch) の末尾に implicit `None` を inject
-  - cell-i025 E2E un-ignore
-- **Completion criteria**:
+- **Work (完了)**:
+  - probe-7: `append_implicit_none_if_needed` (functions/helpers.rs:168) がパターンマッチ
+    heuristic (if-no-else / while / for の 4 variant 限定) で cell-i025 のパターン
+    (if-with-else where inner branches fall through) を検出不能と特定
+  - `append_implicit_none_if_needed` を `ir_body_always_exits` + `TailExpr` 判定に構造的
+    書き換え: heuristic 4 variant → 原理的な「全パスが exit するか」判定に一般化
+  - `ir_body_always_exits` を `pub(crate)` に昇格、`control_flow` module を `pub(crate)` 化
+  - unit test +9 (if-without-else / if-with-else-fall-through / all-return / TailExpr /
+    empty / non-Option / no-return / while / let-binding)
+  - cell-i025 E2E un-ignore → GREEN
+- **Completion criteria** ✅:
   - cell-i025 E2E GREEN
-  - 既 GREEN cell regression 0
+  - 既 GREEN cell regression 0 (lib 2887 / integration 122 / compile 3 / E2E 114 + 0 ignored)
+  - Hono bench 非後退 (113/158, 60 errors, 変動 0)
+  - **I-144 全 9 matrix ✗ cell GREEN 達成**
 - **Depends on**: T6-4
 
 #### T6-6: Quality gate + regression lock-in + `/check_job` Implementation stage review + PRD close
@@ -1171,12 +1179,12 @@ lock-in されていることを T10 で confirm。
 5. ✅ `coerce_default` helper が JS coerce table 準拠で実装、unit test で全 RustType variant × RC verify
 6. ✅ Interim scanner (`pre_check_narrowing_reset` + `has_narrowing_reset_in_stmts`) 廃止、
    関連 call site 全削除
-7. ⏳ Matrix ✗ cell (C-1, C-2a, C-2b, C-2c, I-024, ~~I-025~~, I-142 Cell #14, T4d, T7) の E2E 全 green — **T6-4 時点: 8/9 GREEN** (I-025 は T6-5 pending)
+7. ✅ Matrix ✗ cell (C-1, C-2a, C-2b, C-2c, I-024, I-025, I-142 Cell #14, T4d, T7) の E2E 全 green — **T6-5 完了: 9/9 GREEN**
 8. ✅ Matrix ✓ cell (既存 narrowing 動作) regression 0
 9. ✅ `cargo test` (lib/integration/compile/E2E) 全 pass
 10. ✅ `cargo clippy` 0 warn / `cargo fmt` 0 diff
-11. ✅ Hono bench non-regression (errors 62 維持以上、改善があれば category 別分析) — T6-4: 60 errors (改善)
-12. ⏳ 吸収対象 (I-024/I-025/I-142 Cell #14/C-1/C-2a-c/C-3/C-4/D-1) 解消確認、TODO entry 削除 — I-025 は T6-5 pending
+11. ✅ Hono bench non-regression (errors 62 維持以上、改善があれば category 別分析) — T6-5: 60 errors (改善)
+12. ✅ 吸収対象 (I-024/I-025/I-142 Cell #14/C-1/C-2a-c/C-3/C-4/D-1) 解消確認 — 全 cell E2E GREEN で empirical 確認済。TODO entry 削除は T6-6 で実施
 13. ✅ `/check_job` Implementation Stage で Spec gap = 0 + Implementation gap = 0
 
 **Matrix completeness requirement**: Sub-matrix 1, 2, 3, 4, **5** (v2 新設) の全 cell に対する test

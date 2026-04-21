@@ -2,7 +2,7 @@
 //!
 //! Converts SWC statement nodes into the IR [`Stmt`] representation.
 
-mod control_flow;
+pub(crate) mod control_flow;
 mod destructuring;
 mod error_handling;
 mod helpers;

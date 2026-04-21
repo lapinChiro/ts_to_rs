@@ -60,7 +60,7 @@ T6-3 ✅: Truthy predicate E10 (primitive NaN + composite Option<Union>) (2 cell
    ↓
 T6-4 ✅: Compound OptChain narrow detection (1 cell GREEN)
    ↓
-T6-5: Multi-exit Option return implicit None emission (1 cell GREEN)
+T6-5 ✅: Multi-exit Option return implicit None emission (1 cell GREEN)
    ↓
 T6-6: Quality gate + regression lock-in + /check_job review + PRD close
 ```
@@ -553,12 +553,16 @@ narrow。guards.rs 拡張のみで emission 変更はほぼ不要の想定。
 
 ---
 
-## Phase T6-5: Multi-exit Option return implicit None emission (I-025 complex)
+## Phase T6-5: Multi-exit Option return implicit None emission (I-025 complex) ✅ 完了 (2026-04-21)
+
+**完了サマリ**: `append_implicit_none_if_needed` をパターンマッチ heuristic (if-no-else / while / for の 4 variant 限定) から `ir_body_always_exits` + `TailExpr` 判定に構造的書き換え。`ir_body_always_exits` を `pub(crate)` に昇格 (DRY: functions/ からも使用可能に)。unit test +9。cell-i025 GREEN → I-144 全 9 matrix ✗ cell GREEN 達成。
+
+**旧原版**: 以下は着手前計画。
 
 **目的**: 複数 exit path を持つ Option 返り値関数で、全 fall-off path に implicit `None`
 を tail injection。
 
-**GREEN 化する cell (1)**:
+**GREEN 化した cell (1)**:
 - `cell-i025-option-return-implicit-none-complex` (I-025)
 
 ### 設計 (T6-5)
@@ -583,10 +587,12 @@ inject。複数 branch の場合、各 branch の末尾で同処理が必要。
 
 **推定 total**: ±150 LOC
 
-### 完了条件 (T6-5)
+### 完了条件 (T6-5) ✅ 全達成
 
-- [ ] cell-i025 E2E PASS
-- [ ] regression 0 / clippy / fmt / Hono bench 非後退
+- [x] cell-i025 E2E PASS
+- [x] regression 0 (lib 2887 / integration 122 / compile 3 / E2E 114 + 0 ignored)
+- [x] clippy 0 / fmt 0
+- [x] Hono bench 非後退 (113/158, 60 errors, 変動 0)
 
 ---
 

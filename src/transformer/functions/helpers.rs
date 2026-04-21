@@ -165,30 +165,35 @@ fn wrap_stmt_closure_in_box(stmt: Stmt) -> Stmt {
     }
 }
 
-/// Appends `None` as a tail expression when the return type is `Option<T>` and the
-/// body's last statement is a control-flow construct without an else branch.
+/// Appends `None` as a tail expression when the return type is `Option<T>` and
+/// the body does not already produce a definite return value on every path.
 ///
-/// Handles: `if` without else, `for`, `while`, `for-of` — all of which may exit
-/// without returning a value, requiring an implicit `None` in Rust. (I-025)
+/// A body is considered "definite" when it ends with a `TailExpr` (the value
+/// IS the return) or when [`ir_body_always_exits`] reports that every path
+/// exits via `return` / `break` / `continue`.  All other endings (if-without-
+/// else, if-with-else where some branches fall through, while, for, plain
+/// expression statements, let bindings, empty body) need an explicit `None`
+/// appended so Rust's type checker sees a value of type `Option<T>`.
+///
+/// This supersedes the previous pattern-matching heuristic (if-no-else /
+/// while / for) which missed cases like if-with-else where inner branches
+/// can fall through (I-025 cell-i025).
 pub(crate) fn append_implicit_none_if_needed(body: &mut Vec<Stmt>, return_type: Option<&RustType>) {
+    use crate::transformer::statements::control_flow::ir_body_always_exits;
+
     let Some(return_type) = return_type else {
         return;
     };
     if !matches!(return_type, RustType::Option(_)) {
         return;
     }
-    let needs_none = body.last().is_some_and(|last| {
-        matches!(
-            last,
-            Stmt::If {
-                else_body: None,
-                ..
-            } | Stmt::While { .. }
-                | Stmt::WhileLet { .. }
-                | Stmt::ForIn { .. }
-        )
-    });
-    if needs_none {
+
+    // Body already produces a definite value — no implicit None needed.
+    let has_definite_value = body
+        .last()
+        .is_some_and(|last| matches!(last, Stmt::TailExpr(_)) || ir_body_always_exits(body));
+
+    if !has_definite_value {
         body.push(Stmt::TailExpr(Expr::BuiltinVariantValue(
             crate::ir::BuiltinVariant::None,
         )));

@@ -1059,9 +1059,8 @@ fn test_e2e_cell_i144_t7_optchain_compound_narrow() {
     run_cell_e2e_test("i144", "cell-t7-optchain-compound-narrow");
 }
 
-// T6-5 pending: multi-exit Option return implicit None tail injection.
+// T6-5: multi-exit Option return implicit None tail injection.
 #[test]
-#[ignore = "I-144 T6-5: multi-exit Option return implicit None emission"]
 fn test_e2e_cell_i144_i025_option_return_implicit_none_complex() {
     run_cell_e2e_test("i144", "cell-i025-option-return-implicit-none-complex");
 }

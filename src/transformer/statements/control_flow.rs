@@ -646,7 +646,7 @@ fn is_supported_variant_truthy_type(ty: &RustType) -> bool {
 /// "always-exit" when every branch is always-exit. Empty `Match.arms` cannot
 /// be always-exit because the match produces no statements; the non-empty
 /// requirement is enforced explicitly.
-pub(super) fn ir_body_always_exits(body: &[Stmt]) -> bool {
+pub(crate) fn ir_body_always_exits(body: &[Stmt]) -> bool {
     body.last().is_some_and(|stmt| match stmt {
         Stmt::Return { .. } => true,
         Stmt::Break { .. } | Stmt::Continue { .. } => true,

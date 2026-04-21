@@ -278,3 +278,135 @@ fn test_param_rebinding_for_control_flow_mutation() {
         "mutation inside if-body should trigger parameter rebinding"
     );
 }
+
+// --- append_implicit_none_if_needed tests ---
+
+fn none_expr() -> Expr {
+    Expr::BuiltinVariantValue(crate::ir::BuiltinVariant::None)
+}
+
+#[test]
+fn implicit_none_appended_for_if_without_else() {
+    let mut body = vec![Stmt::If {
+        condition: Expr::BoolLit(true),
+        then_body: vec![Stmt::Return(Some(Expr::NumberLit(1.0)))],
+        else_body: None,
+    }];
+    append_implicit_none_if_needed(&mut body, Some(&RustType::Option(Box::new(RustType::F64))));
+    assert_eq!(body.len(), 2);
+    assert_eq!(body[1], Stmt::TailExpr(none_expr()));
+}
+
+#[test]
+fn implicit_none_appended_for_if_with_else_where_branches_fall_through() {
+    // Both branches have inner ifs that may not return — the key cell-i025 case.
+    let mut body = vec![Stmt::If {
+        condition: Expr::BoolLit(true),
+        then_body: vec![Stmt::If {
+            condition: Expr::BoolLit(true),
+            then_body: vec![Stmt::Return(Some(Expr::NumberLit(1.0)))],
+            else_body: None,
+        }],
+        else_body: Some(vec![Stmt::If {
+            condition: Expr::BoolLit(true),
+            then_body: vec![Stmt::Return(Some(Expr::NumberLit(2.0)))],
+            else_body: None,
+        }]),
+    }];
+    append_implicit_none_if_needed(&mut body, Some(&RustType::Option(Box::new(RustType::F64))));
+    assert_eq!(
+        body.len(),
+        2,
+        "None should be appended after if-else with fall-through branches"
+    );
+    assert_eq!(body[1], Stmt::TailExpr(none_expr()));
+}
+
+#[test]
+fn implicit_none_not_appended_when_all_paths_return() {
+    let mut body = vec![Stmt::If {
+        condition: Expr::BoolLit(true),
+        then_body: vec![Stmt::Return(Some(Expr::NumberLit(1.0)))],
+        else_body: Some(vec![Stmt::Return(Some(Expr::NumberLit(2.0)))]),
+    }];
+    append_implicit_none_if_needed(&mut body, Some(&RustType::Option(Box::new(RustType::F64))));
+    assert_eq!(
+        body.len(),
+        1,
+        "should NOT append None when all paths return"
+    );
+}
+
+#[test]
+fn implicit_none_not_appended_when_tail_expr_present() {
+    let mut body = vec![Stmt::TailExpr(Expr::MethodCall {
+        object: Box::new(Expr::Ident("x".to_string())),
+        method: "clone".to_string(),
+        args: vec![],
+    })];
+    append_implicit_none_if_needed(&mut body, Some(&RustType::Option(Box::new(RustType::F64))));
+    assert_eq!(body.len(), 1, "should NOT append None when TailExpr exists");
+}
+
+#[test]
+fn implicit_none_appended_for_empty_body() {
+    let mut body: Vec<Stmt> = vec![];
+    append_implicit_none_if_needed(&mut body, Some(&RustType::Option(Box::new(RustType::F64))));
+    assert_eq!(body.len(), 1, "empty Option body should get None");
+    assert_eq!(body[0], Stmt::TailExpr(none_expr()));
+}
+
+#[test]
+fn implicit_none_skipped_for_non_option_return() {
+    let mut body = vec![Stmt::If {
+        condition: Expr::BoolLit(true),
+        then_body: vec![Stmt::Return(Some(Expr::NumberLit(1.0)))],
+        else_body: None,
+    }];
+    append_implicit_none_if_needed(&mut body, Some(&RustType::F64));
+    assert_eq!(
+        body.len(),
+        1,
+        "should NOT append None for non-Option return type"
+    );
+}
+
+#[test]
+fn implicit_none_skipped_for_no_return_type() {
+    let mut body = vec![Stmt::If {
+        condition: Expr::BoolLit(true),
+        then_body: vec![Stmt::Return(Some(Expr::NumberLit(1.0)))],
+        else_body: None,
+    }];
+    append_implicit_none_if_needed(&mut body, None);
+    assert_eq!(
+        body.len(),
+        1,
+        "should NOT append None when return type is absent"
+    );
+}
+
+#[test]
+fn implicit_none_appended_for_while_loop() {
+    let mut body = vec![Stmt::While {
+        label: None,
+        condition: Expr::BoolLit(true),
+        body: vec![Stmt::Return(Some(Expr::NumberLit(1.0)))],
+    }];
+    append_implicit_none_if_needed(&mut body, Some(&RustType::Option(Box::new(RustType::F64))));
+    assert_eq!(body.len(), 2, "while loop should get trailing None");
+    assert_eq!(body[1], Stmt::TailExpr(none_expr()));
+}
+
+#[test]
+fn implicit_none_appended_for_let_binding_at_end() {
+    let mut body = vec![Stmt::Let {
+        mutable: false,
+        name: "x".to_string(),
+        ty: None,
+        init: Some(Expr::NumberLit(1.0)),
+    }];
+    append_implicit_none_if_needed(&mut body, Some(&RustType::Option(Box::new(RustType::F64))));
+    assert_eq!(body.len(), 2, "let binding at end should get trailing None");
+    assert_eq!(body[1], Stmt::TailExpr(none_expr()));
+}
