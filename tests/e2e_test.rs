@@ -1064,3 +1064,350 @@ fn test_e2e_cell_i144_t7_optchain_compound_narrow() {
 fn test_e2e_cell_i144_i025_option_return_implicit_none_complex() {
     run_cell_e2e_test("i144", "cell-i025-option-return-implicit-none-complex");
 }
+
+// -----------------------------------------------------------------------------
+// I-161 + I-171 batch (backlog/I-161-I-171-truthy-emission-batch.md).
+// SDCDF Spec-Stage T1 artifact: per-cell E2E fixtures derived from the Problem
+// Space matrix. All ✗ cells start RED (`#[ignore]`) and become GREEN as the
+// implementation in T2-T6 lands. The lock-in regression fixture for T6-3 (from
+// I-144) must stay GREEN throughout the batch.
+// -----------------------------------------------------------------------------
+
+// T6-3 regression lock-in (Ident + Option<primitive> + always-exit): existing
+// `try_generate_option_truthy_complement_match` must keep emitting the
+// consolidated match.
+#[test]
+fn test_e2e_cell_i161_i171_regression_t6_3_ident_option() {
+    run_cell_e2e_test("i161-i171", "cell-regression-t6-3-ident-option");
+}
+
+// Matrix A cells (I-161 `&&=` / `||=` structural fix). All RED until T3.
+#[test]
+#[ignore = "I-161 A-2 RED — unignore at T3 (AndAssign desugar for narrowed F64)"]
+fn test_e2e_cell_i161_a2_and_f64_narrow() {
+    run_cell_e2e_test("i161-i171", "cell-a2-and-f64-narrow");
+}
+#[test]
+#[ignore = "I-161 A-5 RED — unignore at T3 (AndAssign desugar for Option<F64>)"]
+fn test_e2e_cell_i161_a5_and_option_f64() {
+    run_cell_e2e_test("i161-i171", "cell-a5-and-option-f64");
+}
+#[test]
+#[ignore = "I-161 A-5s RED — unignore at T3 (AndAssign desugar for Option<String>)"]
+fn test_e2e_cell_i161_a5s_and_option_string() {
+    run_cell_e2e_test("i161-i171", "cell-a5s-and-option-string");
+}
+#[test]
+#[ignore = "I-161 O-5 RED — unignore at T3 (OrAssign desugar for Option<F64>)"]
+fn test_e2e_cell_i161_o5_or_option_f64() {
+    run_cell_e2e_test("i161-i171", "cell-o5-or-option-f64");
+}
+#[test]
+#[ignore = "I-161 A-3 RED — unignore at T3 (AndAssign desugar for String)"]
+fn test_e2e_cell_i161_a3_and_string_empty() {
+    run_cell_e2e_test("i161-i171", "cell-a3-and-string-empty");
+}
+#[test]
+#[ignore = "I-161 A-Member RED — unignore at T3 (Member LHS desugar)"]
+fn test_e2e_cell_i161_a_member_and() {
+    run_cell_e2e_test("i161-i171", "cell-a-member-and");
+}
+#[test]
+#[ignore = "I-161 A-Expr RED — unignore at T3 (expression-context AndAssign)"]
+fn test_e2e_cell_i161_a_expr_context() {
+    run_cell_e2e_test("i161-i171", "cell-a-expr-context");
+}
+#[test]
+#[ignore = "I-161 A-6 RED — unignore at T3 (Option<synthetic union> per-variant)"]
+fn test_e2e_cell_i161_a6_and_option_union() {
+    run_cell_e2e_test("i161-i171", "cell-a6-and-option-union");
+}
+
+// Matrix B cells (I-171 Layer 1 `!<expr>` type-aware dispatch). All RED until T4.
+#[test]
+#[ignore = "I-171 B-T2 RED — unignore at T4 (!F64 falsy predicate)"]
+fn test_e2e_cell_i171_b_bang_f64_in_ret() {
+    run_cell_e2e_test("i161-i171", "cell-b-bang-f64-in-ret");
+}
+#[test]
+#[ignore = "I-171 B-T3 RED — unignore at T4 (!String falsy predicate)"]
+fn test_e2e_cell_i171_b_bang_string_in_ret() {
+    run_cell_e2e_test("i161-i171", "cell-b-bang-string-in-ret");
+}
+#[test]
+#[ignore = "I-171 B-T5 RED — unignore at T4 (!Option<F64> falsy predicate)"]
+fn test_e2e_cell_i171_b_bang_option_number_in_ret() {
+    run_cell_e2e_test("i161-i171", "cell-b-bang-option-number-in-ret");
+}
+#[test]
+#[ignore = "I-171 B.1.21 RED — unignore at T4 (!<BinExpr> tmp-bind + falsy predicate)"]
+fn test_e2e_cell_i171_b_bang_bin_expr() {
+    run_cell_e2e_test("i161-i171", "cell-b-bang-bin-expr");
+}
+#[test]
+#[ignore = "I-171 B.1.19 RED — unignore at T4 (double negation truthy fold)"]
+fn test_e2e_cell_i171_b_bang_double_option() {
+    run_cell_e2e_test("i161-i171", "cell-b-bang-double-option");
+}
+#[test]
+#[ignore = "I-171 B.1.23 RED — unignore at T4 (De Morgan on !(x && y))"]
+fn test_e2e_cell_i171_b_bang_logical_and() {
+    run_cell_e2e_test("i161-i171", "cell-b-bang-logical-and");
+}
+#[test]
+#[ignore = "I-171 B.1.17 RED — unignore at T4 (!<TsAs> peek-through)"]
+fn test_e2e_cell_i171_b_bang_tsas() {
+    run_cell_e2e_test("i161-i171", "cell-b-bang-tsas");
+}
+
+// Matrix C cells (I-171 Layer 2 if-stmt narrow emission). All RED until T5.
+#[test]
+#[ignore = "I-171 C-4 RED — unignore at T5 (non-exit body predicate form)"]
+fn test_e2e_cell_i171_c4_if_bang_non_exit() {
+    run_cell_e2e_test("i161-i171", "cell-c4-if-bang-non-exit");
+}
+#[test]
+#[ignore = "I-171 C-5 RED — unignore at T5 (else branch consolidated match)"]
+fn test_e2e_cell_i171_c5_if_bang_else() {
+    run_cell_e2e_test("i161-i171", "cell-c5-if-bang-else");
+}
+#[test]
+#[ignore = "I-171 C-15 RED — unignore at T5 (Member LHS Layer 1 fix, narrow out-of-scope by I-165)"]
+fn test_e2e_cell_i171_c15_if_bang_member_exit() {
+    run_cell_e2e_test("i161-i171", "cell-c15-if-bang-member-exit");
+}
+
+// -----------------------------------------------------------------------------
+// Supplementary Matrix coverage (spec-stage review gap closure 2026-04-22):
+// Each cell listed as "runtime GREEN currently" exercises a current emission
+// that happens to be valid Rust (e.g. `bool && bool`) but still undergoes
+// structural desugar in T3 for uniformity. The E2E test locks in runtime
+// equivalence; unit/snapshot tests in T3-T5 verify the new emission shape.
+// -----------------------------------------------------------------------------
+
+// Matrix A supplementary cells (A-1 / A-4 / A-7 / A-8).
+#[test]
+fn test_e2e_cell_i161_a1_and_bool() {
+    // runtime GREEN (Rust `bool && bool` = valid, matches TS semantics).
+    // T3 will change emission to `if x { x = y; }`; runtime remains GREEN.
+    run_cell_e2e_test("i161-i171", "cell-a1-and-bool");
+}
+#[test]
+#[ignore = "I-161 A-4 RED — unignore at T3 (int truthy predicate, `!arr.len()` semantic fix)"]
+fn test_e2e_cell_i161_a4_and_int() {
+    run_cell_e2e_test("i161-i171", "cell-a4-and-int");
+}
+#[test]
+#[ignore = "I-161 A-7 RED — unignore at T3 (Option<Named> is_some predicate)"]
+fn test_e2e_cell_i161_a7_and_option_named() {
+    run_cell_e2e_test("i161-i171", "cell-a7-and-option-named");
+}
+#[test]
+#[ignore = "I-161 A-8 RED — unignore at T3 (always-truthy const-fold)"]
+fn test_e2e_cell_i161_a8_and_always_truthy() {
+    run_cell_e2e_test("i161-i171", "cell-a8-and-always-truthy");
+}
+
+// Matrix O supplementary cells (O-1, O-2, O-3, O-5s, O-6, O-7, O-8).
+#[test]
+fn test_e2e_cell_i161_o1_or_bool() {
+    // runtime GREEN (Rust `bool || bool` = valid); T3 desugars for uniformity.
+    run_cell_e2e_test("i161-i171", "cell-o1-or-bool");
+}
+#[test]
+#[ignore = "I-161 O-2 RED — unignore at T3 (F64 falsy predicate)"]
+fn test_e2e_cell_i161_o2_or_f64() {
+    run_cell_e2e_test("i161-i171", "cell-o2-or-f64");
+}
+#[test]
+#[ignore = "I-161 O-3 RED — unignore at T3 (String is_empty falsy predicate)"]
+fn test_e2e_cell_i161_o3_or_string() {
+    run_cell_e2e_test("i161-i171", "cell-o3-or-string");
+}
+#[test]
+#[ignore = "I-161 O-5s RED — unignore at T3 (Option<String> map_or falsy)"]
+fn test_e2e_cell_i161_o5s_or_option_string() {
+    run_cell_e2e_test("i161-i171", "cell-o5s-or-option-string");
+}
+#[test]
+#[ignore = "I-161 O-6 RED — unignore at T3 (Option<synthetic union> per-variant falsy)"]
+fn test_e2e_cell_i161_o6_or_option_union() {
+    run_cell_e2e_test("i161-i171", "cell-o6-or-option-union");
+}
+#[test]
+#[ignore = "I-161 O-7 RED — unignore at T3 (Option<Named> is_none predicate)"]
+fn test_e2e_cell_i161_o7_or_option_named() {
+    run_cell_e2e_test("i161-i171", "cell-o7-or-option-named");
+}
+#[test]
+#[ignore = "I-161 O-8 RED — unignore at T3 (always-truthy const-fold no-op)"]
+fn test_e2e_cell_i161_o8_or_always_truthy() {
+    run_cell_e2e_test("i161-i171", "cell-o8-or-always-truthy");
+}
+
+// Matrix B supplementary cells (B-T4 / B-T6 / B-T7 / B-T8 Named / B-T8 Vec).
+#[test]
+#[ignore = "I-171 B-T4 RED — unignore at T4 (int falsy predicate, `!arr.len()` semantic fix)"]
+fn test_e2e_cell_i171_b_bang_int() {
+    run_cell_e2e_test("i161-i171", "cell-b-bang-int");
+}
+#[test]
+#[ignore = "I-171 B-T6 RED — unignore at T4 (Option<synthetic union> falsy match)"]
+fn test_e2e_cell_i171_b_bang_option_union() {
+    run_cell_e2e_test("i161-i171", "cell-b-bang-option-union");
+}
+#[test]
+#[ignore = "I-171 B-T7 RED — unignore at T4 (Option<Named> is_none)"]
+fn test_e2e_cell_i171_b_bang_option_named() {
+    run_cell_e2e_test("i161-i171", "cell-b-bang-option-named");
+}
+#[test]
+#[ignore = "I-171 B-T8 Named RED — unignore at T4 (const-fold to `false`)"]
+fn test_e2e_cell_i171_b_bang_named() {
+    run_cell_e2e_test("i161-i171", "cell-b-bang-named");
+}
+#[test]
+#[ignore = "I-171 B-T8 Vec RED — unignore at T4 (const-fold to `false`)"]
+fn test_e2e_cell_i171_b_bang_vec() {
+    run_cell_e2e_test("i161-i171", "cell-b-bang-vec");
+}
+
+// Matrix C supplementary cells (C-7 const-fold, C-11-C-14 peek-through, C-16,
+// C-17, C-18, C-19, C-23, C-24).
+#[test]
+#[ignore = "I-171 C-7 RED — unignore at T5 (const-fold `!null`)"]
+fn test_e2e_cell_i171_c7_const_fold_null() {
+    run_cell_e2e_test("i161-i171", "cell-c7-const-fold-null");
+}
+#[test]
+#[ignore = "I-171 C-11 RED — unignore at T5 (Paren peek-through)"]
+fn test_e2e_cell_i171_c11_peek_paren() {
+    run_cell_e2e_test("i161-i171", "cell-c11-peek-paren");
+}
+#[test]
+#[ignore = "I-171 C-12 RED — unignore at T5 (TsAs peek-through)"]
+fn test_e2e_cell_i171_c12_peek_tsas() {
+    run_cell_e2e_test("i161-i171", "cell-c12-peek-tsas");
+}
+#[test]
+#[ignore = "I-171 C-13 RED — unignore at T5 (TsNonNull peek-through)"]
+fn test_e2e_cell_i171_c13_peek_nonnull() {
+    run_cell_e2e_test("i161-i171", "cell-c13-peek-nonnull");
+}
+#[test]
+#[ignore = "I-171 C-14 RED — unignore at T5 (`!!x` double negation truthy fold)"]
+fn test_e2e_cell_i171_c14_peek_unary() {
+    run_cell_e2e_test("i161-i171", "cell-c14-peek-unary");
+}
+#[test]
+#[ignore = "I-171 C-16 RED — unignore at T5 (OptChain Layer 1 only, narrow OOS by I-143-a+I-165)"]
+fn test_e2e_cell_i171_c16_if_bang_optchain() {
+    run_cell_e2e_test("i161-i171", "cell-c16-if-bang-optchain");
+}
+#[test]
+#[ignore = "I-171 C-17 RED — unignore at T5 (Bin arith tmp-bind)"]
+fn test_e2e_cell_i171_c17_if_bang_bin_arith() {
+    run_cell_e2e_test("i161-i171", "cell-c17-if-bang-bin-arith");
+}
+#[test]
+#[ignore = "I-171 C-18 RED — unignore at T5 (LogicalAnd De Morgan)"]
+fn test_e2e_cell_i171_c18_if_bang_logical_and() {
+    run_cell_e2e_test("i161-i171", "cell-c18-if-bang-logical-and");
+}
+#[test]
+#[ignore = "I-171 C-19 RED — unignore at T5 (Call tmp-bind)"]
+fn test_e2e_cell_i171_c19_if_bang_call() {
+    run_cell_e2e_test("i161-i171", "cell-c19-if-bang-call");
+}
+#[test]
+#[ignore = "I-171 C-23 RED — unignore at T5 (LogicalOr De Morgan)"]
+fn test_e2e_cell_i171_c23_if_bang_logical_or() {
+    run_cell_e2e_test("i161-i171", "cell-c23-if-bang-logical-or");
+}
+#[test]
+#[ignore = "I-171 C-24 RED — unignore at T5 (always-truthy operand const-fold)"]
+fn test_e2e_cell_i171_c24_if_bang_always_truthy() {
+    run_cell_e2e_test("i161-i171", "cell-c24-if-bang-always-truthy");
+}
+
+// -----------------------------------------------------------------------------
+// v4 adversarial review gap closure (2026-04-22):
+// 8 additional Matrix B shape cells + 1 C-16b OptChain base narrow +
+// 5 T7 classifier interaction regression fixtures.
+// -----------------------------------------------------------------------------
+
+// Matrix B.1 additional shape cells.
+#[test]
+#[ignore = "I-171 B.1.28 RED — unignore at T4 (NullishCoalescing operand tmp-bind)"]
+fn test_e2e_cell_i171_b_bang_nc() {
+    run_cell_e2e_test("i161-i171", "cell-b-bang-nc");
+}
+#[test]
+#[ignore = "I-171 B.1.30 RED — unignore at T4 (Cond ternary operand tmp-bind)"]
+fn test_e2e_cell_i171_b_bang_cond() {
+    run_cell_e2e_test("i161-i171", "cell-b-bang-cond");
+}
+#[test]
+#[ignore = "I-171 B.1.32 RED — unignore at T4 (Await operand tmp-bind)"]
+fn test_e2e_cell_i171_b_bang_await() {
+    run_cell_e2e_test("i161-i171", "cell-b-bang-await");
+}
+#[test]
+#[ignore = "I-171 B.1.33 RED — unignore at T4 (Assign operand tmp-bind)"]
+fn test_e2e_cell_i171_b_bang_assign() {
+    run_cell_e2e_test("i161-i171", "cell-b-bang-assign");
+}
+#[test]
+#[ignore = "I-171 B.1.35 RED — unignore at T4 (This operand self-field falsy)"]
+fn test_e2e_cell_i171_b_bang_this() {
+    run_cell_e2e_test("i161-i171", "cell-b-bang-this");
+}
+#[test]
+#[ignore = "I-171 B.1.36 RED — unignore at T4 (Update operand tmp-bind)"]
+fn test_e2e_cell_i171_b_bang_update() {
+    run_cell_e2e_test("i161-i171", "cell-b-bang-update");
+}
+#[test]
+#[ignore = "I-171 B.1.37g RED — unignore at T4 (TsTypeAssertion peek-through)"]
+fn test_e2e_cell_i171_b_bang_tstypeassertion() {
+    run_cell_e2e_test("i161-i171", "cell-b-bang-tstypeassertion");
+}
+#[test]
+#[ignore = "I-171 B.1.37i RED — unignore at T4 (TsConstAssertion peek-through)"]
+fn test_e2e_cell_i171_b_bang_tsconstassertion() {
+    run_cell_e2e_test("i161-i171", "cell-b-bang-tsconstassertion");
+}
+
+// Matrix C-16b: OptChain base narrow (in-scope, T6 P3b extension).
+#[test]
+#[ignore = "I-171 C-16b RED — unignore at T6 P3b (guards.rs OptChain base narrow extension)"]
+fn test_e2e_cell_i171_c16b_optchain_base_narrow() {
+    run_cell_e2e_test("i161-i171", "cell-c16b-optchain-base-narrow");
+}
+
+// T7 regression cells (classifier × narrow × logical assign interaction).
+#[test]
+#[ignore = "I-161 T7-1 RED — unignore at T7 (&&= on narrowed F64, R4 re-host)"]
+fn test_e2e_cell_i161_t7_1_and_narrow_f64() {
+    run_cell_e2e_test("i161-i171", "cell-t7-1-and-narrow-f64");
+}
+#[test]
+#[ignore = "I-161 T7-2 RED — unignore at T7 (||= on narrowed F64)"]
+fn test_e2e_cell_i161_t7_2_or_narrow_f64() {
+    run_cell_e2e_test("i161-i171", "cell-t7-2-or-narrow-f64");
+}
+#[test]
+#[ignore = "I-161 T7-3 RED — unignore at T7 (&&= + closure reassign interaction)"]
+fn test_e2e_cell_i161_t7_3_and_closure_reassign() {
+    run_cell_e2e_test("i161-i171", "cell-t7-3-and-closure-reassign");
+}
+#[test]
+#[ignore = "I-161 T7-4 RED — unignore at T7 (||= then ??= chain)"]
+fn test_e2e_cell_i161_t7_4_or_then_nc() {
+    run_cell_e2e_test("i161-i171", "cell-t7-4-or-then-nc");
+}
+#[test]
+#[ignore = "I-161 T7-5 RED — unignore at T7 (&&= on narrowed synthetic union + string RHS)"]
+fn test_e2e_cell_i161_t7_5_and_narrow_union_rhs() {
+    run_cell_e2e_test("i161-i171", "cell-t7-5-and-narrow-union-rhs");
+}
