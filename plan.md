@@ -9,24 +9,48 @@
 
 ---
 
-## 現在の状態 (2026-04-21)
+## 現在の状態 (2026-04-22)
 
 | 指標 | 値 |
 |------|-----|
 | Hono bench clean | 112/158 (70.9%) |
 | Hono bench errors | 62 |
-| cargo test (lib) | 2880 pass |
+| cargo test (lib) | 3025 pass (I-161 T2+T3 で +145: helper 44 + T3-TR 7 + compound_logical_assign 95 + narrow-binding-mut subset) |
 | cargo test (integration) | 122 pass |
 | cargo test (compile) | 3 pass |
-| cargo test (E2E) | 114 pass + 0 i144 fixtures `#[ignore]` (I-144 全 17 cell un-ignored: cell-14 / c1 / c2a / c2b / c2c / t4d / i024 / t7 / i025 + multifn-isolation + regression 5 + T6-3 regression t4c/t4e + 既存 97) |
+| cargo test (E2E) | 117 pass + 57 `#[ignore]` (I-161/I-171 T1 で登録した 60 cell のうち 3 GREEN + i144 regression 既存 97、I-161 narrow-scope cells は I-177 依存で `#[ignore]` 継続) |
 | clippy | 0 warnings |
 | fmt | 0 diffs |
 
 **Note (2026-04-21)**: T6-4/T6-5 commit message は Hono bench 113/158 clean / 60 errors を報告したが、T6-6 empirical 再測 (clean rebuild × 複数 run) では 112/158 / 62 errors が stable な値。同一 HEAD + 同一ソースで bench に ±1 clean / ±2 errors の non-deterministic variance が発生。**I-144 前後の stable 値 net change = 0 errors**。当初 HashMap iteration order を疑ったが empirical 調査で否定 (`expr_types.get(&span)` 等は lookup only で emission 非影響)。候補 root cause は `std::fs::read_dir` の platform-dependent order / bench script の `find | xargs cp` / `module_graph` の cross-module resolution のいずれか (要調査)。pre-existing 非決定性を I-172 として TODO 起票、I-144 scope 外で別 PRD 扱い。
 
+**Note (2026-04-22 T3)**: I-161 T3 完了時点で Hono bench 再測、clean 112/158 / errors 62 で pre-T3 と完全一致 (regression 0)。I-161 は narrow-related compile error (`&&=`/`||=` on non-bool LHS) の structural fix であり、Hono 現 bench の error category (OBJECT_LITERAL_NO_TYPE 28 + OTHER 15 + CALL_TARGET 4 + ...) には該当しないため数値無変動が ideal-implementation-primacy.md 通りの想定挙動。
+
 ### 進行中作業
 
-**I-161 + I-171 batch PRD** (2026-04-22〜) — Spec stage 完了、Implementation stage (T2-T8) 着手待ち。`backlog/I-161-I-171-truthy-emission-batch.md` (926 行) + `report/i161-i171-t1-red-state.md` (v6、329 行) + 26 tsc observations + 60 E2E fixtures (3 GREEN + 57 `#[ignore]` RED) + test harness 登録 60 test function。Spec-Stage Adversarial Review Checklist 5/5 [x] (v1→v6 の 6 round 累積 gap closure)、Critical / Important / Document 計 12 件の issue 全対応 (うち Critical = TypeResolver AndAssign/OrAssign expected propagation 不在を empirical verify + T3-TR design 組込、Document = I-175 / I-176 TODO 起票)。T2 (helper 実装) 以降で段階的に `#[ignore]` を解除していく
+**I-161 + I-171 batch PRD** (2026-04-22〜) — Spec stage 完了、T2 (共有 helper) + T3 (I-161 `&&=`/`||=` desugar) 完了、T4-T8 着手待ち。`backlog/I-161-I-171-truthy-emission-batch.md` + `report/i161-i171-t1-red-state.md` (v6) + 26 tsc observations + 60 E2E fixtures + test harness 登録 60 test function。
+
+**T3 完了範囲 (2026-04-22)**:
+- T3-TR: TypeResolver `AndAssign`/`OrAssign` expected propagation 追加 (`src/pipeline/type_resolver/expressions.rs` + `rhs_expected_for_compound` helper + 7 unit test)
+- T3 本体: `convert_assign_expr` AndAssign/OrAssign arm を conditional-assign desugar に置換、stmt-context 用 `try_convert_compound_logical_assign_stmt` intercept + expr-context block form + narrow-binding mutability post-pass (`mutability.rs::mark_mutated_narrow_bindings`)
+- T2 helper: `truthy_predicate_for_expr` / `falsy_predicate_for_expr` / `TempBinder` / `is_always_truthy_type` / `try_constant_fold_bang` / `peek_through_type_assertions` (+ 44 helper unit test)
+- Matrix A/O primary 84 + A.5 expr-context cross + Tier 2 NA + blocked LHS error-path = **95 unit test** (`src/transformer/statements/tests/compound_logical_assign/`)
+- Quality gate 全 pass: cargo test 3025、clippy 0 warnings、fmt 0 diffs、file-lines OK、E2E 117/117 (regression 0)、Hono bench 112/158 clean / 62 errors (regression 0)
+
+**T3 scope 分割 (完全性保持のため新 PRD 分岐)**:
+- **I-177 (新 PRD、narrow emission v2)**: I-144 T6-3 inherited の shadow-mutation-propagation 欠陥を structural fix する prerequisite PRD。I-161 narrow-alive cells (Matrix A.4 全行、A-6/O-6 narrow-scope pattern、T7-1/T7-2/T7-3/T7-5 narrow interaction regression) は I-177 完了後の本 PRD T3-N / T7-N sub-task で回帰。TODO 参照 🔗 I-177。
+- **I-178 (新 PRD、spec-first-prd Checklist 拡張)**: `spec-first-prd.md` Spec-Stage Adversarial Review Checklist に 6 項目目「Matrix/Design integrity」を追加する framework 改善。I-161 SG-2 empirical lesson 由来。TODO 参照 🔗 I-178。
+
+**PRD spec 訂正 (2026-04-22)**: SG-1 (Matrix A-5 / O-5 / B.2 T5 の `*v` → `v` 訂正、`is_some_and(|v: T|...)` は T by-value ABI)、SG-2 (Matrix ideal column と Design section emission form の統一、Matrix A-6/O-5/O-5s/O-6 を predicate helper 形に更新)、SG-3 (Matrix A.4 narrow × compound assign sub-matrix 追加、I-177 依存で cell 別 deferred annotation)。
+
+T4 (I-171 Layer 1) / T5 (Layer 2) / T6 (broken window fix + E2E un-ignore) / T7 (classifier 相互検証) / T8 (全 quality gate) の順で継続。narrow-scope 関連は I-177 完了後に T3-N / T7-N として回帰。
+
+**次着手判断 (2026-04-22)**: **T4 から直接続行可**。I-177 / I-178 を T4 前に先行実施する合理的理由なし (empirical 分析):
+- T4 (`convert_unary_expr` Bang arm): `!<operand>` は operand 評価のみで write-through なし、narrow-mutation と直交。narrow-alive operand の effective 型は既存 `get_expr_type` で narrow 適用済で取得可能。I-177 非依存。
+- T5 (`try_generate_option_truthy_complement_match` 拡張): 大半の cell (C-4 / C-7〜C-10 / C-11〜C-14 / C-15 / C-16a / C-17〜C-19 / C-23 / C-24) は narrow-mutation 非依存。C-5 else branch / C-16b OptChain base narrow の body-mutation 連動 cell は T3 と同じ cell-level scope 管理 (I-177 依存 `#[ignore]`) で進行。
+- T6 / T7 / T8: 同様に cell-level scope 管理で non-narrow scope 全量完了可能。
+- I-177 volume は narrow emission v2 structural fix 本体 (~600-1000 LOC) で cell 数に依存せず固定。先送りで volume 増加なし。
+- I-178 は 5 LOC markdown + retro-review log 追加で数分の作業、T8 完了後〜次の新規 PRD Spec stage 起票前 の window で slot-in 推奨 (I-177 Spec stage で Matrix/Design integrity Checklist 6 項目目が適用されると更に効果的。ただし T4 blocker ではない)。
 
 ### 直近の完了作業
 
@@ -54,15 +78,17 @@
 
 | 優先度 | レベル | PRD | 内容 | 根拠 |
 |--------|-------|-----|------|------|
-| — | L3 | **I-161 + I-171 batch** | 進行中 (Spec stage 完了 2026-04-22、Implementation stage 着手待ち)。上記「進行中作業」参照 | — |
-| 1 | L3 | **I-162** | class without explicit constructor → `Self::new()` 自動合成 | I-144 T2 instanceof narrow の Rust 側 E2E lock-in が本 defect で block。`class Dog {}` → `struct Dog {}` 止まりで `Dog::new()` 不在で E0599 |
-| 2 | L3 | **Phase A Step 5** (I-026 / I-029 / I-030) | 型 assertion / null as any / any-narrowing enum 変換 | `type-assertion`, `trait-coercion`, `any-type-narrowing` unskip (3 fixture 直接削減) |
-| 3 | L3 | **I-015** | Hono types.rs `Input['out']` indexed access 解決失敗 (E0405) | `src/ts_type_info/resolve/indexed_access.rs:271`。Hono types.rs で 1 件だが dir compile blocker |
-| 4 | L3 | **I-158 + I-159 batch** | Non-loop labeled stmt + 内部 emission 変数 user namespace hygiene | I-154 変数版 + I-153 labeled block 対応。I-158 が I-153 emission と interaction のため I-158 先行推奨 |
-| 5 | L3 | **Phase A Step 6** (I-028 / I-033 / I-034) | intersection 未使用型パラメータ (E0091) + charAt/repeat/toFixed method 変換 | `string-methods`, `intersection-empty-object`, `type-narrowing` unskip |
-| 6 | L3 | **I-143 meta-PRD** | `??` 演算子の問題空間完全マトリクス + 8 未解決セル (a〜h) | I-143-a〜h 未着手。I-143-b (`any ?? T`) は I-050 依存、他は独立 |
-| 7 | L3 | **I-142 Step 4 C-5 / C-6 + Phase A Step 7 (I-071)** | I-144 非吸収の small cleanup (C-7 は I-050 依存) + `instanceof-builtin` unskip 用 builtin 型 impl 生成 | C-5/C-6 は test quality 改善 (handoff doc)、I-071 は Phase A 最終 step (1 fixture unskip) |
-| 8 | L3 | **Phase B (RC-11)** (I-003 / I-004 / I-005 / I-006) | expected type 伝播の不完全性 (OBJECT_LITERAL_NO_TYPE 28件) | Hono 全 error の 45%、Phase A 完了後の最大インパクト category |
+| — | L3 | **I-161 + I-171 batch** | 進行中: T2 (helper) + T3 (`&&=`/`||=` desugar、non-narrow scope) 完了 2026-04-22。T4 (Bang arm type-aware) 着手待ち。narrow-scope cells は I-177 完了後に回帰 | 上記「進行中作業」参照 |
+| 1 | **L2** | **I-177 (新、narrow emission v2)** | I-144 T6-3 inherited の shadow-mutation-propagation 欠陥を structural fix。`if let Some(x) = x { body }` 形式が body mutation を outer `Option<T>` に propagate しない pre-existing defect。I-161 narrow cells (A.4 / A-6 / O-6 / T7-*) の prerequisite | I-161 T3 実装で latent defect が runtime 誤動作として顕在化。Design Foundation (narrow emission 基盤) のため L2 格上げ |
+| 2 | L3 | **I-162** | class without explicit constructor → `Self::new()` 自動合成 | I-144 T2 instanceof narrow の Rust 側 E2E lock-in が本 defect で block。`class Dog {}` → `struct Dog {}` 止まりで `Dog::new()` 不在で E0599 |
+| 3 | L3 | **Phase A Step 5** (I-026 / I-029 / I-030) | 型 assertion / null as any / any-narrowing enum 変換 | `type-assertion`, `trait-coercion`, `any-type-narrowing` unskip (3 fixture 直接削減) |
+| 4 | L3 | **I-178 (新、spec-first-prd Checklist 拡張)** | Spec-Stage Adversarial Review Checklist に 6 項目目「Matrix/Design integrity」追加 (framework 改善) | I-161 SG-2 empirical lesson 由来 (Matrix ideal column と Design section emission shape 乖離の silent PRD inconsistency 検出力不足) |
+| 5 | L3 | **I-015** | Hono types.rs `Input['out']` indexed access 解決失敗 (E0405) | `src/ts_type_info/resolve/indexed_access.rs:271`。Hono types.rs で 1 件だが dir compile blocker |
+| 6 | L3 | **I-158 + I-159 batch** | Non-loop labeled stmt + 内部 emission 変数 user namespace hygiene | I-154 変数版 + I-153 labeled block 対応。I-158 が I-153 emission と interaction のため I-158 先行推奨 |
+| 7 | L3 | **Phase A Step 6** (I-028 / I-033 / I-034) | intersection 未使用型パラメータ (E0091) + charAt/repeat/toFixed method 変換 | `string-methods`, `intersection-empty-object`, `type-narrowing` unskip |
+| 8 | L3 | **I-143 meta-PRD** | `??` 演算子の問題空間完全マトリクス + 8 未解決セル (a〜h) | I-143-a〜h 未着手。I-143-b (`any ?? T`) は I-050 依存、他は独立 |
+| 9 | L3 | **I-142 Step 4 C-5 / C-6 + Phase A Step 7 (I-071)** | I-144 非吸収の small cleanup (C-7 は I-050 依存) + `instanceof-builtin` unskip 用 builtin 型 impl 生成 | C-5/C-6 は test quality 改善 (handoff doc)、I-071 は Phase A 最終 step (1 fixture unskip) |
+| 10 | L3 | **Phase B (RC-11)** (I-003 / I-004 / I-005 / I-006) | expected type 伝播の不完全性 (OBJECT_LITERAL_NO_TYPE 28件) | Hono 全 error の 45%、Phase A 完了後の最大インパクト category |
 
 **注**: 本テーブルは着手順。各 PRD で `prd-template` skill + `.claude/rules/problem-space-analysis.md`
 + `.claude/rules/spec-first-prd.md` を適用する。

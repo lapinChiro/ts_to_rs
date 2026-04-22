@@ -192,6 +192,59 @@ impl<'a> Transformer<'a> {
             }
         }
 
+        // I-161: `&&=` / `||=` expression-context desugar.
+        //
+        // Stmt-context `x &&= y;` is intercepted earlier in `convert_stmt` by
+        // `try_convert_compound_logical_assign_stmt` and rewritten to a bare
+        // `Stmt::If { cond, then_body: [assign], .. }`. We only get here when
+        // the compound logical assign appears inside a larger expression, so
+        // we emit a block-expression that performs the conditional assign
+        // and yields the current LHS value as the tail.
+        //
+        // The per-type dispatch lives in `desugar_compound_logical_assign_expr`
+        // (see `src/transformer/statements/compound_logical_assign.rs`) so
+        // the Problem Space matrix is encoded in exactly one place.
+        if matches!(
+            assign.op,
+            ast::AssignOp::AndAssign | ast::AssignOp::OrAssign
+        ) {
+            let lhs_type = match &assign.left {
+                ast::AssignTarget::Simple(ast::SimpleAssignTarget::Ident(ident)) => self
+                    .get_type_for_var(&ident.id.sym, ident.id.span)
+                    .cloned()
+                    .ok_or_else(|| {
+                        UnsupportedSyntaxError::new(
+                            "compound logical assign on unresolved ident type",
+                            assign.span(),
+                        )
+                    })?,
+                ast::AssignTarget::Simple(ast::SimpleAssignTarget::Member(member)) => self
+                    .get_expr_type(&ast::Expr::Member(member.clone()))
+                    .cloned()
+                    .ok_or_else(|| {
+                        UnsupportedSyntaxError::new(
+                            "compound logical assign on unresolved member type",
+                            assign.span(),
+                        )
+                    })?,
+                _ => {
+                    return Err(UnsupportedSyntaxError::new(
+                        "unsupported compound logical assign target",
+                        assign.span(),
+                    )
+                    .into());
+                }
+            };
+            let right = self.convert_expr(&assign.right)?;
+            return self.desugar_compound_logical_assign_expr(
+                target,
+                right,
+                &lhs_type,
+                assign.op,
+                assign.span(),
+            );
+        }
+
         // Non-??= path: for compound assignment (=, +=, -=, *=, /=) and plain
         // `=`, the RHS is always observed. Convert it lazily here so the ??=
         // strategy arms above can skip it when dead.
@@ -250,16 +303,8 @@ impl<'a> Transformer<'a> {
                 op: BinOp::Shr,
                 right: Box::new(right),
             },
-            ast::AssignOp::AndAssign => Expr::BinaryOp {
-                left: Box::new(target.clone()),
-                op: BinOp::LogicalAnd,
-                right: Box::new(right),
-            },
-            ast::AssignOp::OrAssign => Expr::BinaryOp {
-                left: Box::new(target.clone()),
-                op: BinOp::LogicalOr,
-                right: Box::new(right),
-            },
+            // `AndAssign` / `OrAssign` are handled above by the I-161
+            // desugar path and never reach this match arm.
             ast::AssignOp::ZeroFillRShiftAssign => Expr::BinaryOp {
                 left: Box::new(target.clone()),
                 op: BinOp::UShr,

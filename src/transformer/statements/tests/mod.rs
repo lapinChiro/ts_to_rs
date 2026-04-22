@@ -1,3 +1,4 @@
+mod compound_logical_assign;
 mod control_flow;
 mod destructuring;
 mod error_handling;

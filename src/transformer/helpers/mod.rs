@@ -21,7 +21,12 @@
 //!   preserved Option layer), `build_option_or_option` (Option-typed `??`
 //!   chain). Three cohesive builders consolidated into `helpers/` at T6-6
 //!   (previously inlined in `transformer/mod.rs` pre-existing broken window).
+//! - **`peek_through`** — Runtime-no-op AST wrapper unwrapping (I-171 T2):
+//!   `peek_through_type_assertions` strips `Paren` / `TsAs` / `TsNonNull` /
+//!   `TsTypeAssertion` / `TsConstAssertion` so downstream matching on
+//!   runtime shape is independent of syntactic type-only wrapping.
 
 pub(crate) mod coerce_default;
 pub(crate) mod option_builders;
+pub(crate) mod peek_through;
 pub(crate) mod truthy;

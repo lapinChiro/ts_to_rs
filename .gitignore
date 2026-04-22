@@ -20,3 +20,5 @@ tests/fixtures/*.input.rs
 tests/e2e/scripts/**/*.rs
 scripts/__pycache__/
 *.rlib
+# Claude Code CLI runtime state (per-session lock, not project source).
+.claude/scheduled_tasks.lock

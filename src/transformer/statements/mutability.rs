@@ -5,7 +5,7 @@
 
 use std::collections::HashSet;
 
-use crate::ir::{ClosureBody, Expr, Stmt};
+use crate::ir::{ClosureBody, Expr, Pattern, Stmt};
 
 /// Mutating methods that require `&mut self` on the receiver.
 ///
@@ -69,6 +69,300 @@ pub(super) fn mark_mutated_vars(stmts: &mut [Stmt], extra_mut_methods: &HashSet<
                 *mutable = true;
             }
         }
+    }
+
+    // I-161 P5: narrow-binding mutability.
+    //
+    // `if let Some(x) = x { x = 3.0; }` / `match x { Some(x) => { x = 3.0; } }`
+    // introduces a *new* (shadow) binding for `x` inside the pattern. The
+    // `Stmt::Let` loop above only flips the outer `let` binding, but the
+    // inner Pattern::Binding is a separate Rust-level binding that must also
+    // be `mut` when the arm body reassigns it (I-161 compound logical assign
+    // inside narrow scope triggers this universally).
+    //
+    // Walks all nested control-flow (`If` / `IfLet` / `Match` / `While` /
+    // `WhileLet` / `Loop` / `LabeledBlock` / `ForIn`) so arbitrarily deep
+    // narrow pattern bindings are handled.
+    mark_mutated_narrow_bindings(stmts, extra_mut_methods);
+}
+
+/// Post-processes `Stmt::IfLet` / `Stmt::Match` / `Expr::IfLet` / `Expr::Match`
+/// narrow-pattern bindings: each `Pattern::Binding { name, is_mut: false, .. }`
+/// that the arm body reassigns is flipped to `is_mut: true`.
+///
+/// Without this flip, emissions like
+/// `if let Some(x) = x { if <pred> { x = y; } }` (I-161 `&&=` inside narrow
+/// scope) fail with `E0384 cannot assign twice to immutable variable`.
+fn mark_mutated_narrow_bindings(stmts: &mut [Stmt], extra_mut_methods: &HashSet<String>) {
+    for stmt in stmts.iter_mut() {
+        match stmt {
+            Stmt::IfLet {
+                pattern,
+                expr,
+                then_body,
+                else_body,
+            } => {
+                let mut then_mut = HashSet::new();
+                collect_mutated_vars(then_body, &mut then_mut, extra_mut_methods);
+                mark_pattern_bindings_mut(pattern, &then_mut);
+                // Expr may contain nested control flow (e.g., a match inside
+                // the test position) — walk it for its own narrow bindings.
+                mark_mutated_narrow_bindings_in_expr(expr, extra_mut_methods);
+                mark_mutated_narrow_bindings(then_body, extra_mut_methods);
+                if let Some(els) = else_body {
+                    mark_mutated_narrow_bindings(els, extra_mut_methods);
+                }
+            }
+            Stmt::Match { expr, arms } => {
+                mark_mutated_narrow_bindings_in_expr(expr, extra_mut_methods);
+                for arm in arms.iter_mut() {
+                    let mut arm_mut = HashSet::new();
+                    collect_mutated_vars(&arm.body, &mut arm_mut, extra_mut_methods);
+                    for pat in arm.patterns.iter_mut() {
+                        mark_pattern_bindings_mut(pat, &arm_mut);
+                    }
+                    if let Some(guard) = &mut arm.guard {
+                        mark_mutated_narrow_bindings_in_expr(guard, extra_mut_methods);
+                    }
+                    mark_mutated_narrow_bindings(&mut arm.body, extra_mut_methods);
+                }
+            }
+            Stmt::If {
+                condition,
+                then_body,
+                else_body,
+            } => {
+                mark_mutated_narrow_bindings_in_expr(condition, extra_mut_methods);
+                mark_mutated_narrow_bindings(then_body, extra_mut_methods);
+                if let Some(els) = else_body {
+                    mark_mutated_narrow_bindings(els, extra_mut_methods);
+                }
+            }
+            Stmt::While {
+                condition, body, ..
+            } => {
+                mark_mutated_narrow_bindings_in_expr(condition, extra_mut_methods);
+                mark_mutated_narrow_bindings(body, extra_mut_methods);
+            }
+            Stmt::WhileLet {
+                pattern,
+                expr,
+                body,
+                ..
+            } => {
+                let mut body_mut = HashSet::new();
+                collect_mutated_vars(body, &mut body_mut, extra_mut_methods);
+                mark_pattern_bindings_mut(pattern, &body_mut);
+                mark_mutated_narrow_bindings_in_expr(expr, extra_mut_methods);
+                mark_mutated_narrow_bindings(body, extra_mut_methods);
+            }
+            Stmt::ForIn { iterable, body, .. } => {
+                mark_mutated_narrow_bindings_in_expr(iterable, extra_mut_methods);
+                mark_mutated_narrow_bindings(body, extra_mut_methods);
+            }
+            Stmt::Loop { body, .. } | Stmt::LabeledBlock { body, .. } => {
+                mark_mutated_narrow_bindings(body, extra_mut_methods);
+            }
+            Stmt::Let {
+                init: Some(expr), ..
+            }
+            | Stmt::Expr(expr)
+            | Stmt::TailExpr(expr)
+            | Stmt::Return(Some(expr)) => {
+                mark_mutated_narrow_bindings_in_expr(expr, extra_mut_methods);
+            }
+            Stmt::Let { init: None, .. }
+            | Stmt::Return(None)
+            | Stmt::Break { value: None, .. }
+            | Stmt::Continue { .. } => {}
+            Stmt::Break {
+                value: Some(expr), ..
+            } => {
+                mark_mutated_narrow_bindings_in_expr(expr, extra_mut_methods);
+            }
+        }
+    }
+}
+
+/// Walks an `Expr` to flip narrow bindings inside `Expr::IfLet` / `Expr::Match`
+/// / closure bodies / blocks.
+fn mark_mutated_narrow_bindings_in_expr(expr: &mut Expr, extra_mut_methods: &HashSet<String>) {
+    match expr {
+        Expr::IfLet {
+            pattern,
+            expr: scrutinee,
+            then_expr,
+            else_expr,
+        } => {
+            let tmp = vec![Stmt::Expr((**then_expr).clone())];
+            let mut then_mut = HashSet::new();
+            collect_mutated_vars(&tmp, &mut then_mut, extra_mut_methods);
+            mark_pattern_bindings_mut(pattern, &then_mut);
+            mark_mutated_narrow_bindings_in_expr(scrutinee, extra_mut_methods);
+            mark_mutated_narrow_bindings_in_expr(then_expr, extra_mut_methods);
+            mark_mutated_narrow_bindings_in_expr(else_expr, extra_mut_methods);
+        }
+        Expr::Match {
+            expr: scrutinee,
+            arms,
+        } => {
+            mark_mutated_narrow_bindings_in_expr(scrutinee, extra_mut_methods);
+            for arm in arms.iter_mut() {
+                let mut arm_mut = HashSet::new();
+                collect_mutated_vars(&arm.body, &mut arm_mut, extra_mut_methods);
+                for pat in arm.patterns.iter_mut() {
+                    mark_pattern_bindings_mut(pat, &arm_mut);
+                }
+                if let Some(g) = &mut arm.guard {
+                    mark_mutated_narrow_bindings_in_expr(g, extra_mut_methods);
+                }
+                mark_mutated_narrow_bindings(&mut arm.body, extra_mut_methods);
+            }
+        }
+        Expr::Block(stmts) => {
+            mark_mutated_narrow_bindings(stmts, extra_mut_methods);
+        }
+        Expr::If {
+            condition,
+            then_expr,
+            else_expr,
+        } => {
+            mark_mutated_narrow_bindings_in_expr(condition, extra_mut_methods);
+            mark_mutated_narrow_bindings_in_expr(then_expr, extra_mut_methods);
+            mark_mutated_narrow_bindings_in_expr(else_expr, extra_mut_methods);
+        }
+        Expr::Closure { body, .. } => match body {
+            crate::ir::ClosureBody::Block(body_stmts) => {
+                mark_mutated_narrow_bindings(body_stmts, extra_mut_methods);
+            }
+            crate::ir::ClosureBody::Expr(e) => {
+                mark_mutated_narrow_bindings_in_expr(e, extra_mut_methods);
+            }
+        },
+        // Recurse into sub-expressions.
+        Expr::BinaryOp { left, right, .. } => {
+            mark_mutated_narrow_bindings_in_expr(left, extra_mut_methods);
+            mark_mutated_narrow_bindings_in_expr(right, extra_mut_methods);
+        }
+        Expr::UnaryOp { operand, .. } => {
+            mark_mutated_narrow_bindings_in_expr(operand, extra_mut_methods);
+        }
+        Expr::FnCall { args, .. } => {
+            for a in args.iter_mut() {
+                mark_mutated_narrow_bindings_in_expr(a, extra_mut_methods);
+            }
+        }
+        Expr::MethodCall { object, args, .. } => {
+            mark_mutated_narrow_bindings_in_expr(object, extra_mut_methods);
+            for a in args.iter_mut() {
+                mark_mutated_narrow_bindings_in_expr(a, extra_mut_methods);
+            }
+        }
+        Expr::Assign { target, value } => {
+            mark_mutated_narrow_bindings_in_expr(target, extra_mut_methods);
+            mark_mutated_narrow_bindings_in_expr(value, extra_mut_methods);
+        }
+        Expr::FieldAccess { object, .. } => {
+            mark_mutated_narrow_bindings_in_expr(object, extra_mut_methods);
+        }
+        Expr::Index { object, index } => {
+            mark_mutated_narrow_bindings_in_expr(object, extra_mut_methods);
+            mark_mutated_narrow_bindings_in_expr(index, extra_mut_methods);
+        }
+        Expr::Range { start, end } => {
+            if let Some(s) = start {
+                mark_mutated_narrow_bindings_in_expr(s, extra_mut_methods);
+            }
+            if let Some(e) = end {
+                mark_mutated_narrow_bindings_in_expr(e, extra_mut_methods);
+            }
+        }
+        Expr::Await(inner) | Expr::Deref(inner) | Expr::Ref(inner) => {
+            mark_mutated_narrow_bindings_in_expr(inner, extra_mut_methods);
+        }
+        Expr::Vec { elements } | Expr::Tuple { elements } => {
+            for e in elements.iter_mut() {
+                mark_mutated_narrow_bindings_in_expr(e, extra_mut_methods);
+            }
+        }
+        Expr::MacroCall { args, .. } | Expr::FormatMacro { args, .. } => {
+            for a in args.iter_mut() {
+                mark_mutated_narrow_bindings_in_expr(a, extra_mut_methods);
+            }
+        }
+        Expr::Cast { expr: inner, .. } => {
+            mark_mutated_narrow_bindings_in_expr(inner, extra_mut_methods);
+        }
+        Expr::Matches {
+            expr: scrutinee, ..
+        } => {
+            mark_mutated_narrow_bindings_in_expr(scrutinee, extra_mut_methods);
+        }
+        Expr::StructInit { fields, base, .. } => {
+            for (_, f) in fields.iter_mut() {
+                mark_mutated_narrow_bindings_in_expr(f, extra_mut_methods);
+            }
+            if let Some(b) = base {
+                mark_mutated_narrow_bindings_in_expr(b, extra_mut_methods);
+            }
+        }
+        Expr::RuntimeTypeof { operand } => {
+            mark_mutated_narrow_bindings_in_expr(operand, extra_mut_methods);
+        }
+        // Leaf / literal-like.
+        Expr::NumberLit(_)
+        | Expr::IntLit(_)
+        | Expr::BoolLit(_)
+        | Expr::StringLit(_)
+        | Expr::Ident(_)
+        | Expr::Unit
+        | Expr::EnumVariant { .. }
+        | Expr::PrimitiveAssocConst { .. }
+        | Expr::StdConst(_)
+        | Expr::BuiltinVariantValue(_)
+        | Expr::RawCode(_)
+        | Expr::Regex { .. } => {}
+    }
+}
+
+/// Flips `Pattern::Binding { is_mut: false, .. }` to `is_mut: true` when the
+/// binding name is in the mutation set. Recurses into nested patterns.
+fn mark_pattern_bindings_mut(pattern: &mut Pattern, mutated: &HashSet<String>) {
+    match pattern {
+        Pattern::Binding {
+            name,
+            is_mut,
+            subpat,
+        } => {
+            if mutated.contains(name.as_str()) {
+                *is_mut = true;
+            }
+            if let Some(inner) = subpat {
+                mark_pattern_bindings_mut(inner, mutated);
+            }
+        }
+        Pattern::TupleStruct { fields, .. } => {
+            for f in fields.iter_mut() {
+                mark_pattern_bindings_mut(f, mutated);
+            }
+        }
+        Pattern::Struct { fields, .. } => {
+            for (_, p) in fields.iter_mut() {
+                mark_pattern_bindings_mut(p, mutated);
+            }
+        }
+        Pattern::Or(pats) | Pattern::Tuple(pats) => {
+            for p in pats.iter_mut() {
+                mark_pattern_bindings_mut(p, mutated);
+            }
+        }
+        Pattern::Ref { inner, .. } => {
+            mark_pattern_bindings_mut(inner, mutated);
+        }
+        Pattern::Wildcard
+        | Pattern::Literal(_)
+        | Pattern::UnitStruct { .. }
+        | Pattern::Range { .. } => {}
     }
 }
 

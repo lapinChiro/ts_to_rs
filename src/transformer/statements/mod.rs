@@ -2,6 +2,7 @@
 //!
 //! Converts SWC statement nodes into the IR [`Stmt`] representation.
 
+pub(crate) mod compound_logical_assign;
 pub(crate) mod control_flow;
 mod destructuring;
 mod error_handling;
@@ -106,6 +107,16 @@ impl<'a> Transformer<'a> {
                 // to `convert_expr`, which handles expression-context paths
                 // or reports unsupported.
                 if let Some(stmts) = self.try_convert_nullish_assign_stmt(&expr_stmt.expr)? {
+                    return Ok(stmts);
+                }
+                // I-161: intercept `x &&= y;` / `x ||= y;` to emit the stmt
+                // form `if <pred> { x = wrap?(y); }` directly. Expression-
+                // context occurrences (call arg / ternary branch / return /
+                // etc.) fall through to `convert_assign_expr`'s block-form
+                // desugar.
+                if let Some(stmts) =
+                    self.try_convert_compound_logical_assign_stmt(&expr_stmt.expr)?
+                {
                     return Ok(stmts);
                 }
                 let expr = self.convert_expr(&expr_stmt.expr)?;
