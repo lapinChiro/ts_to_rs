@@ -30,6 +30,16 @@
 
 ### 進行中作業
 
+#### テスト基盤強化
+
+- High: E2E の共有状態がまだ残っています。tests/e2e_test.rs:291 と tests/e2e_test.rs:558 で {name}_exec.ts / main_exec.ts を fixture directory に固定名で書いています。runner は分離されましたが、TS
+    実行用一時ファイルは共有 path のままなので、同一 fixture の同時実行や aggregate/per-cell の重複有効化で削除・上書き race が起き得ます。check_job.md の「妥協なし」基準では、runner-local か unique
+    temp path に寄せるべきです。
+- Medium: tests/e2e_test.rs:1 が 1640 LOC まで増え、既知課題 TODO:687 の 1000 LOC policy 違反を悪化させています。現行 scripts/check-file-lines.sh:1 は src/ しか見ないため検出されませんが、
+    CLAUDE.md 上の project-wide 方針とは不整合です。E2E harness と test cases を分割し、可能なら line check の対象を tests にも広げる必要があります。
+
+#### 開発
+
 **I-161 + I-171 batch PRD** (2026-04-22〜) — Spec stage 完了、T2 (共有 helper) + T3 (I-161 `&&=`/`||=` desugar) + **T4 (I-171 Layer 1 Bang arm)** 完了。T5-T8 着手待ち。`backlog/I-161-I-171-truthy-emission-batch.md` + `report/i161-i171-t1-red-state.md` (v6) + 26 tsc observations + 60 E2E fixtures + test harness 登録 60 test function。
 
 **T4 完了範囲 (2026-04-23、/check_job deep deep review 後の最終状態)**:
