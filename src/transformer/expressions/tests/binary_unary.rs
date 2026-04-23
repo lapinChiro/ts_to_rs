@@ -56,19 +56,17 @@ fn test_convert_expr_binary_strict_equals() {
 
 #[test]
 fn test_convert_expr_unary_not_bool_literal() {
+    // I-171 B.1.5: `!true` const-folds to `BoolLit(false)` (Matrix B.1.5
+    // const-fold for boolean literal). Pre-I-171 emission was the raw
+    // `UnaryOp { Not, BoolLit(true) }` which Rust also accepts but loses
+    // the opportunity to simplify at the AST layer.
     let f = TctxFixture::new();
     let tctx = f.tctx();
     let expr = parse_expr("!true;");
     let result = Transformer::for_module(&tctx, &mut SyntheticTypeRegistry::new())
         .convert_expr(&expr)
         .unwrap();
-    assert_eq!(
-        result,
-        Expr::UnaryOp {
-            op: UnOp::Not,
-            operand: Box::new(Expr::BoolLit(true)),
-        }
-    );
+    assert_eq!(result, Expr::BoolLit(false));
 }
 
 #[test]

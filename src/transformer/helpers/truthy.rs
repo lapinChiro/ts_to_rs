@@ -331,7 +331,14 @@ fn dispatch_predicate(
     }
 }
 
-/// Primitive predicate with tmp-binding for non-pure operands.
+/// Primitive predicate with tmp-binding only when the predicate reads the
+/// operand more than once (currently only `F64` — `<op> == 0.0 || <op>.is_nan()`).
+///
+/// `Bool` / `String` / `Primitive(int)` predicates each reference the operand
+/// exactly once, so even for side-effect-prone operands a direct emission is
+/// semantically correct (the operand is evaluated once and its value feeds
+/// directly into the single predicate slot). Wrapping those in a tmp-binding
+/// block would only add emission noise without changing runtime behavior.
 fn predicate_primitive_with_tmp(
     operand: &Expr,
     ty: &RustType,
@@ -344,7 +351,8 @@ fn predicate_primitive_with_tmp(
             Polarity::Falsy => falsy_predicate_primitive(op, ty),
         }
     };
-    if is_pure_operand(operand) {
+    let duplicates_operand = matches!(ty, RustType::F64);
+    if !duplicates_operand || is_pure_operand(operand) {
         build(operand)
     } else {
         let name = binder.fresh("op");

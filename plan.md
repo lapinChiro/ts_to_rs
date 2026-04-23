@@ -9,16 +9,16 @@
 
 ---
 
-## 現在の状態 (2026-04-22)
+## 現在の状態 (2026-04-23)
 
 | 指標 | 値 |
 |------|-----|
-| Hono bench clean | 112/158 (70.9%) |
-| Hono bench errors | 62 |
-| cargo test (lib) | 3025 pass (I-161 T2+T3 で +145: helper 44 + T3-TR 7 + compound_logical_assign 95 + narrow-binding-mut subset) |
+| Hono bench clean | 111/158 (70.3%) |
+| Hono bench errors | 63 |
+| cargo test (lib) | 3085 pass (I-171 T4 で +60: bang_dispatch 46 + bang_assign_dispatch 14 に split、T4 /check_job deep deep + /check_problem review で IG-3/IG-4/IG-5/IG-6 critical bug 修正 + TG-2/3/4 test 拡張 込) |
 | cargo test (integration) | 122 pass |
 | cargo test (compile) | 3 pass |
-| cargo test (E2E) | 117 pass + 57 `#[ignore]` (I-161/I-171 T1 で登録した 60 cell のうち 3 GREEN + i144 regression 既存 97、I-161 narrow-scope cells は I-177 依存で `#[ignore]` 継続) |
+| cargo test (E2E) | 132 pass + 42 `#[ignore]` (T4 で 15 cell empirical GREEN 化、I-144 regression 既存 + I-161/I-171 A/O/B/C 残 cell) |
 | clippy | 0 warnings |
 | fmt | 0 diffs |
 
@@ -26,31 +26,49 @@
 
 **Note (2026-04-22 T3)**: I-161 T3 完了時点で Hono bench 再測、clean 112/158 / errors 62 で pre-T3 と完全一致 (regression 0)。I-161 は narrow-related compile error (`&&=`/`||=` on non-bool LHS) の structural fix であり、Hono 現 bench の error category (OBJECT_LITERAL_NO_TYPE 28 + OTHER 15 + CALL_TARGET 4 + ...) には該当しないため数値無変動が ideal-implementation-primacy.md 通りの想定挙動。
 
+**Note (2026-04-23 T4、I-172 再顕在化)**: I-171 T4 完了時点で Hono bench 再測、**T4 差分 empirical 検証** (pre-T4 binary.rs/truthy.rs を git show で取り出し release build) も含めて **111/158 clean / 63 errors** に stable 化。T3 commit (cba5f62) の 112/62 vs T4 commit の 111/63 は pre-T4 ソースでも同じ 111/63 を再現するため T4 regression 0 を empirical 確認済。I-172 の ±1 clean / ±2 errors variance が今回再顕在化した事実のみ記録。category diff (OBJECT_LITERAL_NO_TYPE 28→27 / OTHER 15→17) の 2 件 "compound logical assign on unresolved X" は T3 の `UnsupportedSyntaxError` categorization shift。
+
 ### 進行中作業
 
-**I-161 + I-171 batch PRD** (2026-04-22〜) — Spec stage 完了、T2 (共有 helper) + T3 (I-161 `&&=`/`||=` desugar) 完了、T4-T8 着手待ち。`backlog/I-161-I-171-truthy-emission-batch.md` + `report/i161-i171-t1-red-state.md` (v6) + 26 tsc observations + 60 E2E fixtures + test harness 登録 60 test function。
+**I-161 + I-171 batch PRD** (2026-04-22〜) — Spec stage 完了、T2 (共有 helper) + T3 (I-161 `&&=`/`||=` desugar) + **T4 (I-171 Layer 1 Bang arm)** 完了。T5-T8 着手待ち。`backlog/I-161-I-171-truthy-emission-batch.md` + `report/i161-i171-t1-red-state.md` (v6) + 26 tsc observations + 60 E2E fixtures + test harness 登録 60 test function。
+
+**T4 完了範囲 (2026-04-23、/check_job deep deep review 後の最終状態)**:
+- `convert_unary_expr` Bang arm を type-aware dispatch `convert_bang_expr` に分離 (`src/transformer/expressions/binary.rs`)
+- 5 layer dispatch: (1) peek-through (Paren/TsAs/TsNonNull/TsTypeAssertion/TsConstAssertion), (2) `try_constant_fold_bang` literal + Arrow/Fn const-fold, (3) double-neg `!!<e>` → `truthy_predicate_for_expr` + **literal 経路 recursive const-fold** (IG-1 fix、`try_constant_fold_bang(inner) = Some(BoolLit(b))` なら `BoolLit(!b)` 返却、TypeResolver 非依存で decidable)、(3b) De Morgan on `Bin(LogicalAnd/LogicalOr)` at AST layer、(3c) Assign desugar `{ let tmp=rhs; x=tmp; <falsy(tmp)> }`、(4) general `falsy_predicate_for_expr`、(5) fallback raw `!<operand>` (Any/TypeVar explicit error surface)
+- T2 helper structural fix: `predicate_primitive_with_tmp` を **ref-count-aware** に改修。`Bool`/`String`/`Primitive(int)` predicate は operand 1 回参照のみのため tmp bind 不要、**F64 のみ** (`<op> == 0.0 || <op>.is_nan()` 2 ref) tmp bind 発動。既存 snapshot regression (noise 削減)
+- E2E empirical verify: I-171 B cell 20 un-ignore → **15 GREEN 化** (cell-b-bang-{f64-in-ret / string-in-ret / option-number-in-ret / bin-expr / double-option / tsas / int / option-named / named / vec / nc / cond / this / tstypeassertion / tsconstassertion})。残 5 cell は pre-existing defect blocker (cell-b-bang-logical-and: I-177 narrow / cell-b-bang-option-union: I-179 NaN→synthetic union coercion / cell-b-bang-assign/update: I-181 tuple destructuring + ternary `&str`/`String` / cell-b-bang-await: I-180 async-main e2e harness) として blocker annotation 付き re-ignore。T4 emission は全 5 cell で semantically correct (empirical 読み合わせ済)
+- **Layer 3c Assign desugar structural 再設計 (IG-3 / IG-4 / IG-5 — deep deep review 後の追加 fix) + Layer 3 double-neg recurse (IG-6 — /check_problem で追加発見)**:
+  - **IG-3**: tmp の type annotation を LHS 型に修正 (`rhs_ty` → `lhs_ty` via `assign_target_type(&AssignTarget)` helper)。TypeResolver の expected-type wrap で `Some(...)` 化された `value` IR と matching する `Option<T>` annotation が正しく emit される。Pre-fix: `let tmp: f64 = Some(5.0)` E0308 → Post-fix: `let tmp: Option<f64> = Some(5.0)` clean
+  - **IG-4**: 非 Copy LHS で `x = tmp.clone()` を emit、tmp を predicate 用に保持 (`is_copy_type()` 判定)。Copy LHS (`f64`/`bool`/`int`/`Option<f64>`/Copy tuple) は bare `x = tmp`。Pre-fix: String LHS で E0382 use-after-move → Post-fix: `.clone()` で tmp 存続
+  - **IG-5**: AST op check (`assign_expr.op != Assign`) を IR shape check に置換。arithmetic/bitwise compound (`+=`/`-=`/`*=`/`/=`/`%=`/bitwise) は `convert_assign_expr` で `Expr::Assign { target, BinaryOp(target, op, rhs) }` に normalise されるため Layer 3c で正しく desugar (`!(x += v) = !<new x>`)。`&&=`/`||=`/`??=` は non-Assign IR (If/Block) を emit するため destructure fail で自然 skip (conditional semantics 保持)
+  - **TypeResolver 拡張 (structural 前提条件)**: arithmetic/bitwise compound assign の LHS ident を `record_assign_target_ident_type` で `expr_types` に記録 (従来は Logical compound のみ)。expected-type propagation は既存 set 維持、LHS 型 lookup のみ拡大。I-175 expected-type coercion gap は継続 (orthogonal)
+  - **IG-6 (/check_problem で追加発見)**: Layer 3 double-neg で inner operand が `Assign` / `Bin(LogicalAnd/LogicalOr)` の場合、direct `truthy_predicate_for_expr` 経路は無効 Rust (`<Assign>.method()` / `<Option<T> && Option<U>>`) を emit する。`needs_bang_recurse` 判定を追加、該当 shape では `convert_bang_expr(&inner.arg)` を recurse して outer `Not` で wrap。Layer 3b De Morgan / Layer 3c Assign desugar が先に発動し、outer Not と合わさって正しい truthy 意味論 (`!<Block>` / `!(<a falsy> || <b falsy>)`) を emit
+  - **Empirical compile verify**: `/tmp/bang_probe/{option_lhs,string_lhs,option_string_lhs,compound_add,double_neg_assign,double_neg_logical}.rs` で pre-fix 出力の E0308/E0382 + post-fix 出力の clean compile & runtime 正解 (TS と一致) を確認
+- T2 helper structural fix: `predicate_primitive_with_tmp` を **ref-count-aware** に改修 (F64 のみ 2-ref で tmp bind)
+- E2E empirical verify: I-171 B cell 20 un-ignore → **15 GREEN 化**。残 5 cell は pre-existing defect blocker (I-177/I-179/I-180/I-181) として blocker annotation 付き re-ignore。T4 emission は全 5 cell で semantically correct
+- Unit test: **60 case** を 2 module に cohesion split:
+  - `bang_dispatch.rs` (46 case): Layer 2 const-fold 12 + peek-through 6 + Layer 3 double-neg 5 (IG-1 literal fold 4 追加 + untyped fallback 1) + Layer 3b De Morgan 2 + Layer 5 fallback 1 + B.1 shape dispatch 18 (Member/OptChain/Unary -+typeof/Bin arith/comp/bitwise/InstanceOf/In/NC/Call/Cond/New/Await/Array/Tpl/This/Update) + その他 2
+  - `bang_assign_dispatch.rs` (14 case): Layer 3c Assign desugar primitive f64 + arithmetic compound (IG-5 regression) + logical compound skip + Option<F64> (IG-3 regression) + String (IG-4 regression) + Option<String> (IG-3+IG-4 combo) + Named struct always-truthy + unresolved target fallback + typed double-neg Option<F64>/Option<String> (TG-4) + **IG-6 regression 4 case** (double-neg on Assign → Layer 3c inversion / LogicalAnd → De Morgan inversion / LogicalOr → De Morgan inversion / arithmetic compound `+=` × double-neg)
+- 44 T2 truthy helper test と合わせ **104 dispatch case** (PRD 目標 ~95 以上を達成)
+- SI-1 PRD Matrix 更新: backlog/I-161-I-171 Matrix B の 5 blocker cell (B.1.19 IG-1 / B.1.23 / B.1.32 / B.1.33 / B.1.36 / B-T6) に Dual verdict + B.1.8 NaN AST 到達不能 note + B.1.16 OptChain implementation equivalence note を追加
+- Quality gate 全 pass: cargo test **3085** lib + 122 integration + 3 compile + 132 E2E + 42 ignored、clippy 0 warnings、fmt 0 diffs、file-lines OK (bang_dispatch.rs 857 + bang_assign_dispatch.rs 518 各 ≤ 1000)、Hono bench 111/158 / 63 errors (T4 full regression 0 empirical 検証、TypeResolver 拡張も既存処理 non-regression 確認)
 
 **T3 完了範囲 (2026-04-22)**:
 - T3-TR: TypeResolver `AndAssign`/`OrAssign` expected propagation 追加 (`src/pipeline/type_resolver/expressions.rs` + `rhs_expected_for_compound` helper + 7 unit test)
 - T3 本体: `convert_assign_expr` AndAssign/OrAssign arm を conditional-assign desugar に置換、stmt-context 用 `try_convert_compound_logical_assign_stmt` intercept + expr-context block form + narrow-binding mutability post-pass (`mutability.rs::mark_mutated_narrow_bindings`)
 - T2 helper: `truthy_predicate_for_expr` / `falsy_predicate_for_expr` / `TempBinder` / `is_always_truthy_type` / `try_constant_fold_bang` / `peek_through_type_assertions` (+ 44 helper unit test)
 - Matrix A/O primary 84 + A.5 expr-context cross + Tier 2 NA + blocked LHS error-path = **95 unit test** (`src/transformer/statements/tests/compound_logical_assign/`)
-- Quality gate 全 pass: cargo test 3025、clippy 0 warnings、fmt 0 diffs、file-lines OK、E2E 117/117 (regression 0)、Hono bench 112/158 clean / 62 errors (regression 0)
 
 **T3 scope 分割 (完全性保持のため新 PRD 分岐)**:
-- **I-177 (新 PRD、narrow emission v2)**: I-144 T6-3 inherited の shadow-mutation-propagation 欠陥を structural fix する prerequisite PRD。I-161 narrow-alive cells (Matrix A.4 全行、A-6/O-6 narrow-scope pattern、T7-1/T7-2/T7-3/T7-5 narrow interaction regression) は I-177 完了後の本 PRD T3-N / T7-N sub-task で回帰。TODO 参照 🔗 I-177。
+- **I-177 (新 PRD、narrow emission v2)**: I-144 T6-3 inherited の shadow-mutation-propagation 欠陥を structural fix する prerequisite PRD。I-161 narrow-alive cells + I-171 C-15n/C-16n narrow-scope cells + T4 で発見の cell-b-bang-logical-and の prerequisite。TODO 参照 🔗 I-177。
 - **I-178 (新 PRD、spec-first-prd Checklist 拡張)**: `spec-first-prd.md` Spec-Stage Adversarial Review Checklist に 6 項目目「Matrix/Design integrity」を追加する framework 改善。I-161 SG-2 empirical lesson 由来。TODO 参照 🔗 I-178。
+- **I-179 (新 TODO、synthetic union literal coercion at call args、T4 empirical 発見)**: `f(NaN)` call 時に `NaN` literal が `F64OrString::F64(f64::NAN)` として wrap されず raw `f64::NAN` で emit、Option<synthetic union> expected 型と mismatch。cell-b-bang-option-union E2E blocker。
+- **I-180 (新 TODO、e2e harness async-main execution semantics、T4 empirical 発見)**: TS top-level `main();` + `async function main()` が tsx 実行で stdout 2 倍出力、fixture .expected と不一致。cell-b-bang-await E2E blocker。
+- **I-181 (新 TODO、tuple destructuring `.get(N)` + ternary `&str`/`String`、T4 empirical 発見)**: `const [a,b] = fn()` が tuple return に対し `.get(0).cloned().unwrap()` (array indexing syntax) で emit + 三項演算子 `"falsy"`/`"truthy"` が `&str` のまま `(String, f64)` に渡り型不一致。cell-b-bang-assign/update E2E blocker。
 
 **PRD spec 訂正 (2026-04-22)**: SG-1 (Matrix A-5 / O-5 / B.2 T5 の `*v` → `v` 訂正、`is_some_and(|v: T|...)` は T by-value ABI)、SG-2 (Matrix ideal column と Design section emission form の統一、Matrix A-6/O-5/O-5s/O-6 を predicate helper 形に更新)、SG-3 (Matrix A.4 narrow × compound assign sub-matrix 追加、I-177 依存で cell 別 deferred annotation)。
 
-T4 (I-171 Layer 1) / T5 (Layer 2) / T6 (broken window fix + E2E un-ignore) / T7 (classifier 相互検証) / T8 (全 quality gate) の順で継続。narrow-scope 関連は I-177 完了後に T3-N / T7-N として回帰。
-
-**次着手判断 (2026-04-22)**: **T4 から直接続行可**。I-177 / I-178 を T4 前に先行実施する合理的理由なし (empirical 分析):
-- T4 (`convert_unary_expr` Bang arm): `!<operand>` は operand 評価のみで write-through なし、narrow-mutation と直交。narrow-alive operand の effective 型は既存 `get_expr_type` で narrow 適用済で取得可能。I-177 非依存。
-- T5 (`try_generate_option_truthy_complement_match` 拡張): 大半の cell (C-4 / C-7〜C-10 / C-11〜C-14 / C-15 / C-16a / C-17〜C-19 / C-23 / C-24) は narrow-mutation 非依存。C-5 else branch / C-16b OptChain base narrow の body-mutation 連動 cell は T3 と同じ cell-level scope 管理 (I-177 依存 `#[ignore]`) で進行。
-- T6 / T7 / T8: 同様に cell-level scope 管理で non-narrow scope 全量完了可能。
-- I-177 volume は narrow emission v2 structural fix 本体 (~600-1000 LOC) で cell 数に依存せず固定。先送りで volume 増加なし。
-- I-178 は 5 LOC markdown + retro-review log 追加で数分の作業、T8 完了後〜次の新規 PRD Spec stage 起票前 の window で slot-in 推奨 (I-177 Spec stage で Matrix/Design integrity Checklist 6 項目目が適用されると更に効果的。ただし T4 blocker ではない)。
+T5 (Layer 2 `try_generate_option_truthy_complement_match` 拡張) / T6 (broken window fix P1-P4 + E2E un-ignore) / T7 (classifier 相互検証) / T8 (全 quality gate + PRD 完了処理) の順で継続。narrow-scope 関連は I-177 完了後に T3-N / T7-N として回帰。
 
 ### 直近の完了作業
 
@@ -78,7 +96,7 @@ T4 (I-171 Layer 1) / T5 (Layer 2) / T6 (broken window fix + E2E un-ignore) / T7 
 
 | 優先度 | レベル | PRD | 内容 | 根拠 |
 |--------|-------|-----|------|------|
-| — | L3 | **I-161 + I-171 batch** | 進行中: T2 (helper) + T3 (`&&=`/`||=` desugar、non-narrow scope) 完了 2026-04-22。T4 (Bang arm type-aware) 着手待ち。narrow-scope cells は I-177 完了後に回帰 | 上記「進行中作業」参照 |
+| — | L3 | **I-161 + I-171 batch** | 進行中: T2 (helper) + T3 (`&&=`/`||=` desugar、non-narrow scope) + **T4 (Bang arm type-aware dispatch、2026-04-23 完了、15 E2E GREEN 化)** 完了。T5 (Layer 2 `try_generate_option_truthy_complement_match` 拡張) 着手待ち。narrow-scope cells は I-177 完了後に回帰 | 上記「進行中作業」参照 |
 | 1 | **L2** | **I-177 (新、narrow emission v2)** | I-144 T6-3 inherited の shadow-mutation-propagation 欠陥を structural fix。`if let Some(x) = x { body }` 形式が body mutation を outer `Option<T>` に propagate しない pre-existing defect。I-161 narrow cells (A.4 / A-6 / O-6 / T7-*) の prerequisite | I-161 T3 実装で latent defect が runtime 誤動作として顕在化。Design Foundation (narrow emission 基盤) のため L2 格上げ |
 | 2 | L3 | **I-162** | class without explicit constructor → `Self::new()` 自動合成 | I-144 T2 instanceof narrow の Rust 側 E2E lock-in が本 defect で block。`class Dog {}` → `struct Dog {}` 止まりで `Dog::new()` 不在で E0599 |
 | 3 | L3 | **Phase A Step 5** (I-026 / I-029 / I-030) | 型 assertion / null as any / any-narrowing enum 変換 | `type-assertion`, `trait-coercion`, `any-type-narrowing` unskip (3 fixture 直接削減) |

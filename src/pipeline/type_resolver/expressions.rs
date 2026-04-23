@@ -164,8 +164,17 @@ impl<'a> TypeResolver<'a> {
                     match assign.left.as_simple() {
                         Some(ast::SimpleAssignTarget::Ident(ident)) => {
                             self.mark_var_mutable(ident.id.sym.as_ref());
+                            // Record LHS type for ALL compound assignments
+                            // (including `+=`/`-=`/bitwise) so downstream
+                            // `convert_bang_expr` Layer 3c can resolve the
+                            // assignment target's storage type regardless of
+                            // whether expected-type propagation fires. Without
+                            // this, `!(x += v)` Layer 3c returns `None`, and
+                            // Layer 4's generic fallback emits
+                            // `let tmp: T = (x = x + v)` — an E0308 mismatch
+                            // because Rust assign evaluates to `()`.
+                            let lhs_type = self.record_assign_target_ident_type(ident);
                             if is_propagating_op {
-                                let lhs_type = self.record_assign_target_ident_type(ident);
                                 if let ResolvedType::Known(ty) = &lhs_type {
                                     if let Some(expected_ty) =
                                         rhs_expected_for_compound(&assign.op, ty)

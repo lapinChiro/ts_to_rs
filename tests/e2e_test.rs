@@ -1125,37 +1125,39 @@ fn test_e2e_cell_i161_a6_and_option_union() {
 
 // Matrix B cells (I-171 Layer 1 `!<expr>` type-aware dispatch). All RED until T4.
 #[test]
-#[ignore = "I-171 B-T2 RED — unignore at T4 (!F64 falsy predicate)"]
+// GREEN at T4
 fn test_e2e_cell_i171_b_bang_f64_in_ret() {
     run_cell_e2e_test("i161-i171", "cell-b-bang-f64-in-ret");
 }
 #[test]
-#[ignore = "I-171 B-T3 RED — unignore at T4 (!String falsy predicate)"]
+// GREEN at T4
 fn test_e2e_cell_i171_b_bang_string_in_ret() {
     run_cell_e2e_test("i161-i171", "cell-b-bang-string-in-ret");
 }
 #[test]
-#[ignore = "I-171 B-T5 RED — unignore at T4 (!Option<F64> falsy predicate)"]
+// GREEN at T4
 fn test_e2e_cell_i171_b_bang_option_number_in_ret() {
     run_cell_e2e_test("i161-i171", "cell-b-bang-option-number-in-ret");
 }
 #[test]
-#[ignore = "I-171 B.1.21 RED — unignore at T4 (!<BinExpr> tmp-bind + falsy predicate)"]
+// GREEN at T4
 fn test_e2e_cell_i171_b_bang_bin_expr() {
     run_cell_e2e_test("i161-i171", "cell-b-bang-bin-expr");
 }
 #[test]
-#[ignore = "I-171 B.1.19 RED — unignore at T4 (double negation truthy fold)"]
+// GREEN at T4
 fn test_e2e_cell_i171_b_bang_double_option() {
     run_cell_e2e_test("i161-i171", "cell-b-bang-double-option");
 }
 #[test]
-#[ignore = "I-171 B.1.23 RED — unignore at T4 (De Morgan on !(x && y))"]
+#[ignore = "I-171 B.1.23 RED — T4 Bang-arm De Morgan emission is correct, but fixture \
+           requires narrow materialisation of x/y after `if (!(x && y)) return;` for \
+           post-return `${x}:${y}` usage. Narrow-scope blocker → I-177 (narrow emission v2)."]
 fn test_e2e_cell_i171_b_bang_logical_and() {
     run_cell_e2e_test("i161-i171", "cell-b-bang-logical-and");
 }
 #[test]
-#[ignore = "I-171 B.1.17 RED — unignore at T4 (!<TsAs> peek-through)"]
+// GREEN at T4
 fn test_e2e_cell_i171_b_bang_tsas() {
     run_cell_e2e_test("i161-i171", "cell-b-bang-tsas");
 }
@@ -1247,27 +1249,31 @@ fn test_e2e_cell_i161_o8_or_always_truthy() {
 
 // Matrix B supplementary cells (B-T4 / B-T6 / B-T7 / B-T8 Named / B-T8 Vec).
 #[test]
-#[ignore = "I-171 B-T4 RED — unignore at T4 (int falsy predicate, `!arr.len()` semantic fix)"]
+// GREEN at T4
 fn test_e2e_cell_i171_b_bang_int() {
     run_cell_e2e_test("i161-i171", "cell-b-bang-int");
 }
 #[test]
-#[ignore = "I-171 B-T6 RED — unignore at T4 (Option<synthetic union> falsy match)"]
+#[ignore = "I-171 B-T6 RED — T4 Bang-arm per-variant falsy match emission is correct, \
+           but fixture `f(NaN)` call fails because `NaN` literal isn't wrapped as \
+           `F64OrString::F64(f64::NAN)` at the call site (synthetic-union-constructor \
+           coercion missing). Blocker → I-179 (synthetic union lit coercion at call args). \
+           NaN handling inside the match is verified via unit tests."]
 fn test_e2e_cell_i171_b_bang_option_union() {
     run_cell_e2e_test("i161-i171", "cell-b-bang-option-union");
 }
 #[test]
-#[ignore = "I-171 B-T7 RED — unignore at T4 (Option<Named> is_none)"]
+// GREEN at T4
 fn test_e2e_cell_i171_b_bang_option_named() {
     run_cell_e2e_test("i161-i171", "cell-b-bang-option-named");
 }
 #[test]
-#[ignore = "I-171 B-T8 Named RED — unignore at T4 (const-fold to `false`)"]
+// GREEN at T4
 fn test_e2e_cell_i171_b_bang_named() {
     run_cell_e2e_test("i161-i171", "cell-b-bang-named");
 }
 #[test]
-#[ignore = "I-171 B-T8 Vec RED — unignore at T4 (const-fold to `false`)"]
+// GREEN at T4
 fn test_e2e_cell_i171_b_bang_vec() {
     run_cell_e2e_test("i161-i171", "cell-b-bang-vec");
 }
@@ -1338,42 +1344,55 @@ fn test_e2e_cell_i171_c24_if_bang_always_truthy() {
 
 // Matrix B.1 additional shape cells.
 #[test]
-#[ignore = "I-171 B.1.28 RED — unignore at T4 (NullishCoalescing operand tmp-bind)"]
+// GREEN at T4
 fn test_e2e_cell_i171_b_bang_nc() {
     run_cell_e2e_test("i161-i171", "cell-b-bang-nc");
 }
 #[test]
-#[ignore = "I-171 B.1.30 RED — unignore at T4 (Cond ternary operand tmp-bind)"]
+// GREEN at T4
 fn test_e2e_cell_i171_b_bang_cond() {
     run_cell_e2e_test("i161-i171", "cell-b-bang-cond");
 }
 #[test]
-#[ignore = "I-171 B.1.32 RED — unignore at T4 (Await operand tmp-bind)"]
+#[ignore = "I-171 B.1.32 RED — T4 Bang-arm tmp-bind on awaited F64 is correct, but \
+           fixture TS top-level `main();` call produces duplicated stdout under tsx \
+           (4 lines vs fixture's 2). Blocker → I-180 (E2E harness async-main execution \
+           semantics). Bang-arm await dispatch is covered by unit tests."]
 fn test_e2e_cell_i171_b_bang_await() {
     run_cell_e2e_test("i161-i171", "cell-b-bang-await");
 }
 #[test]
-#[ignore = "I-171 B.1.33 RED — unignore at T4 (Assign operand tmp-bind)"]
+#[ignore = "I-171 B.1.33 RED — T4 Bang-arm Assign desugar emission is correct \
+           (`{ let tmp = rhs; x = tmp; falsy(tmp) }`), but fixture exercises \
+           pre-existing emission defects: (1) tuple destructuring `[l, x] = f()` \
+           lowers to `f().get(N).cloned().unwrap()` (array syntax, not tuple), \
+           (2) ternary with string literals returns `&str` where `(String, f64)` is \
+           expected. Blocker → I-181 (tuple destructuring + ternary &str/String \
+           coercion). Assign desugar itself covered by unit tests."]
 fn test_e2e_cell_i171_b_bang_assign() {
     run_cell_e2e_test("i161-i171", "cell-b-bang-assign");
 }
 #[test]
-#[ignore = "I-171 B.1.35 RED — unignore at T4 (This operand self-field falsy)"]
+// GREEN at T4
 fn test_e2e_cell_i171_b_bang_this() {
     run_cell_e2e_test("i161-i171", "cell-b-bang-this");
 }
 #[test]
-#[ignore = "I-171 B.1.36 RED — unignore at T4 (Update operand tmp-bind)"]
+#[ignore = "I-171 B.1.36 RED — T4 Bang-arm tmp-bind on Update (postfix `i++`) is \
+           correct (`{ let _old = i; i = i+1; _old }`), but fixture exercises the \
+           same pre-existing tuple-destructuring + ternary `&str`/`String` emission \
+           defects as cell-b-bang-assign. Blocker → I-181. Update dispatch itself \
+           covered by unit tests."]
 fn test_e2e_cell_i171_b_bang_update() {
     run_cell_e2e_test("i161-i171", "cell-b-bang-update");
 }
 #[test]
-#[ignore = "I-171 B.1.37g RED — unignore at T4 (TsTypeAssertion peek-through)"]
+// GREEN at T4
 fn test_e2e_cell_i171_b_bang_tstypeassertion() {
     run_cell_e2e_test("i161-i171", "cell-b-bang-tstypeassertion");
 }
 #[test]
-#[ignore = "I-171 B.1.37i RED — unignore at T4 (TsConstAssertion peek-through)"]
+// GREEN at T4
 fn test_e2e_cell_i171_b_bang_tsconstassertion() {
     run_cell_e2e_test("i161-i171", "cell-b-bang-tsconstassertion");
 }

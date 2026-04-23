@@ -1,5 +1,7 @@
 mod arrays;
 mod arrows;
+mod bang_assign_dispatch;
+mod bang_dispatch;
 mod binary_unary;
 mod builtins;
 mod calls;
