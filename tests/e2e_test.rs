@@ -88,6 +88,10 @@ impl E2eRunnerInstance {
         self.manifest_dir.join("src")
     }
 
+    fn ts_exec_dir(&self) -> PathBuf {
+        self.manifest_dir.join("ts-exec")
+    }
+
     fn main_rs_path(&self) -> PathBuf {
         self.src_dir().join("main.rs")
     }
@@ -111,6 +115,66 @@ impl E2eRunnerInstance {
         fs::write(self.main_rs_path(), main_rs)
             .unwrap_or_else(|e| panic!("failed to write runner main.rs: {e}"));
     }
+
+    fn prepare_single_file_ts_exec(&self, source_path: &Path, ts_source: &str) -> TempFile {
+        let source_dir = source_path
+            .parent()
+            .unwrap_or_else(|| Path::new(SCRIPTS_DIR));
+        let exec_dir = self.reset_ts_exec_dir("single");
+        copy_ts_fixture_files(source_dir, &exec_dir)
+            .unwrap_or_else(|e| panic!("failed to copy TS fixture files: {e}"));
+        let stem = source_path
+            .file_stem()
+            .unwrap_or_else(|| {
+                panic!(
+                    "TS fixture path has no file stem: {}",
+                    source_path.display()
+                )
+            })
+            .to_string_lossy();
+        let exec_path = exec_dir.join(format!("{stem}_exec.ts"));
+        TempFile::new(
+            exec_path.display().to_string(),
+            &format!("{ts_source}\nmain();\n"),
+        )
+    }
+
+    fn prepare_multi_file_ts_exec(&self, source_dir: &Path, main_ts: &str) -> TempFile {
+        let exec_dir = self.reset_ts_exec_dir("multi");
+        copy_ts_fixture_files(source_dir, &exec_dir)
+            .unwrap_or_else(|e| panic!("failed to copy TS fixture files: {e}"));
+        let exec_path = exec_dir.join("main_exec.ts");
+        TempFile::new(
+            exec_path.display().to_string(),
+            &format!("{main_ts}\nmain();\n"),
+        )
+    }
+
+    fn reset_ts_exec_dir(&self, scope: &str) -> PathBuf {
+        let exec_dir = self.ts_exec_dir().join(scope);
+        if exec_dir.exists() {
+            fs::remove_dir_all(&exec_dir).unwrap_or_else(|e| {
+                panic!("failed to cleanup TS exec dir {}: {e}", exec_dir.display())
+            });
+        }
+        fs::create_dir_all(&exec_dir)
+            .unwrap_or_else(|e| panic!("failed to create TS exec dir {}: {e}", exec_dir.display()));
+        exec_dir
+    }
+}
+
+fn copy_ts_fixture_files(source_dir: &Path, destination_dir: &Path) -> std::io::Result<()> {
+    fs::create_dir_all(destination_dir)?;
+    for entry in fs::read_dir(source_dir)? {
+        let entry = entry?;
+        let source = entry.path();
+        if source.extension().is_none_or(|ext| ext != "ts") {
+            continue;
+        }
+        let destination = destination_dir.join(entry.file_name());
+        fs::copy(source, destination)?;
+    }
+    Ok(())
 }
 
 struct E2eRunnerPool {
@@ -287,8 +351,9 @@ fn execute_e2e_with_runner(runner: &E2eRunnerLease, name: &str, opts: &E2eOption
     );
 
     // Step 3: Run TS via locally-installed tsx
-    let ts_exec_source = format!("{ts_source}\nmain();\n");
-    let ts_exec_guard = TempFile::new(format!("{SCRIPTS_DIR}/{name}_exec.ts"), &ts_exec_source);
+    let ts_exec_guard = runner
+        .runner()
+        .prepare_single_file_ts_exec(Path::new(&script_path), &ts_source);
 
     let mut ts_cmd = Command::new(TSX_BIN);
     ts_cmd.arg(ts_exec_guard.path());
@@ -405,6 +470,50 @@ fn test_cleanup_generated_runner_sources_removes_stale_modules_but_keeps_main() 
     assert!(src_dir.join("main.rs").exists());
     assert!(!src_dir.join("alpha.rs").exists());
     assert!(!src_dir.join("beta.rs").exists());
+}
+
+#[test]
+fn test_single_file_ts_exec_path_is_runner_local() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let fixture_dir = temp.path().join("fixtures");
+    fs::create_dir_all(&fixture_dir).expect("create fixture dir");
+    fs::write(fixture_dir.join("case.ts"), "function main() {}\n").expect("write fixture");
+    let runner = E2eRunnerInstance {
+        manifest_dir: temp.path().join("runner"),
+        target_dir: temp.path().join("target"),
+    };
+
+    let exec_guard =
+        runner.prepare_single_file_ts_exec(&fixture_dir.join("case.ts"), "function main() {}\n");
+    let exec_path = Path::new(exec_guard.path());
+
+    assert!(exec_path.starts_with(runner.manifest_dir.join("ts-exec")));
+    assert!(!exec_path.starts_with(&fixture_dir));
+}
+
+#[test]
+fn test_multi_file_ts_exec_copies_fixture_files_to_runner_local_dir() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let fixture_dir = temp.path().join("multi").join("case");
+    fs::create_dir_all(&fixture_dir).expect("create fixture dir");
+    fs::write(
+        fixture_dir.join("main.ts"),
+        "import { value } from './dep';\nfunction main() {}\n",
+    )
+    .expect("write main");
+    fs::write(fixture_dir.join("dep.ts"), "export const value = 1;\n").expect("write dep");
+    let runner = E2eRunnerInstance {
+        manifest_dir: temp.path().join("runner"),
+        target_dir: temp.path().join("target"),
+    };
+
+    let exec_guard = runner.prepare_multi_file_ts_exec(&fixture_dir, "function main() {}\n");
+    let exec_path = Path::new(exec_guard.path());
+    let exec_dir = exec_path.parent().expect("exec parent");
+
+    assert!(exec_path.starts_with(runner.manifest_dir.join("ts-exec")));
+    assert!(!exec_path.starts_with(&fixture_dir));
+    assert!(exec_dir.join("dep.ts").exists());
 }
 
 #[test]
@@ -554,10 +663,9 @@ fn run_e2e_multi_file_test(name: &str) {
 
     // Run TS (tsx resolves relative imports automatically)
     let main_ts = fs::read_to_string(format!("{dir}/main.ts")).unwrap();
-    let ts_exec_guard = TempFile::new(
-        format!("{dir}/main_exec.ts"),
-        &format!("{main_ts}\nmain();\n"),
-    );
+    let ts_exec_guard = runner
+        .runner()
+        .prepare_multi_file_ts_exec(Path::new(&dir), &main_ts);
 
     let ts_output = Command::new(TSX_BIN)
         .arg(ts_exec_guard.path())
