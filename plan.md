@@ -18,7 +18,7 @@
 | cargo test (lib) | 3085 pass (I-171 T4 で +60: bang_dispatch 46 + bang_assign_dispatch 14 に split、T4 /check_job deep deep + /check_problem review で IG-3/IG-4/IG-5/IG-6 critical bug 修正 + TG-2/3/4 test 拡張 込) |
 | cargo test (integration) | 122 pass |
 | cargo test (compile) | 3 pass |
-| cargo test (E2E) | 132 pass + 42 `#[ignore]` (T4 で 15 cell empirical GREEN 化、I-144 regression 既存 + I-161/I-171 A/O/B/C 残 cell) |
+| cargo test (E2E) | 136 pass + 42 `#[ignore]` (existing 132 runtime E2E + 4 harness isolation/helper tests; default parallel `cargo test --test e2e_test` stable after isolated runner pool fix) |
 | clippy | 0 warnings |
 | fmt | 0 diffs |
 
@@ -124,7 +124,7 @@ table に入らなかった L3 / L4 items:
 - **I-160** (L4、Walker defense-in-depth Expr-embedded Stmt::Break) — 現時点 reachability なし
 - **I-165 / I-166 / I-167 / I-170** (L4 narrow precision umbrella) — I-144 後の latent imprecision、runtime 動作同一、Rust 精度のみ向上
 - **I-168** (L4、`NarrowEvent::Reset` event 未消費) — Hono で顕在化なし pre-existing imprecision
-- **I-172 / I-173** (L4、bench 非決定性 + E2E parallel flakiness) — test / bench infra、別 PRD
+- **I-172** (L4、bench 非決定性) — test / bench infra、別 PRD
 
 ### Batching 検討 (2026-04-21)
 

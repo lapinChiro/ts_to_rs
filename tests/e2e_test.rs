@@ -1,8 +1,9 @@
 use std::fs;
+use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::Mutex;
-use std::time::{Duration, SystemTime};
+use std::sync::{Condvar, Mutex, OnceLock};
 
+use tempfile::{Builder, TempDir};
 use ts_to_rs::transpile;
 
 #[path = "test_helpers.rs"]
@@ -12,47 +13,196 @@ use test_helpers::{strip_internal_use_statements, TempFile};
 /// Path to the E2E scripts directory.
 const SCRIPTS_DIR: &str = "tests/e2e/scripts";
 
-/// Path to the Rust runner Cargo project.
-///
-/// `src/main.rs` inside this directory is a write-only artifact (I-161, same
-/// pattern as I-145 for compile-check): each E2E test invocation writes full
-/// content via `write_with_advancing_mtime` (internally `fs::write`), so the
-/// file is re-created on every run. It is `.gitignore`d. Fresh-clone state
-/// (file absent) is supported because `fs::write` creates the file when absent.
-/// Multi-file E2E tests additionally write `src/<stem>.rs` via `TempFile` which
-/// auto-cleans on drop.
-const RUST_RUNNER_DIR: &str = "tests/e2e/rust-runner";
+/// Template project copied into per-runner temp directories.
+const RUST_RUNNER_TEMPLATE_DIR: &str = "tests/e2e/rust-runner";
 
 /// Path to the locally-installed tsx binary.
 const TSX_BIN: &str = "tests/e2e/node_modules/.bin/tsx";
 
-/// Mutex to serialize E2E tests (they share the same rust-runner project).
-static E2E_LOCK: Mutex<()> = Mutex::new(());
+const E2E_RUNNER_POOL_ENV: &str = "TS_TO_RS_E2E_RUNNERS";
+static E2E_RUNNER_POOL: OnceLock<E2eRunnerPool> = OnceLock::new();
 
-/// Tracks the last mtime set on rust-runner source files.
-///
-/// Cargo detects source changes via mtime comparison. On WSL2's ext4, rapid
-/// consecutive writes can share the same mtime (nanosecond resolution but
-/// batched updates), causing cargo to skip rebuilds. This tracks the last
-/// mtime we set, ensuring each write gets a strictly later mtime.
-static LAST_MTIME: Mutex<Option<SystemTime>> = Mutex::new(None);
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RunnerInstancePaths {
+    manifest_dir: String,
+    target_dir: String,
+}
 
-/// Writes content to a file and ensures its mtime is strictly newer than any
-/// previous call, so cargo's fingerprint check always detects the change.
-fn write_with_advancing_mtime(path: &str, content: &str) {
-    fs::write(path, content).unwrap_or_else(|e| panic!("failed to write {path}: {e}"));
-    let mut last = LAST_MTIME.lock().unwrap();
-    let prev = last.unwrap_or(SystemTime::UNIX_EPOCH);
-    // Use the later of "now" or "previous mtime + 1s" to guarantee monotonic increase
-    // without accumulating unbounded future offsets.
-    let next = SystemTime::now().max(prev + Duration::from_secs(1));
-    *last = Some(next);
-    let file = fs::File::options()
-        .write(true)
-        .open(path)
-        .unwrap_or_else(|e| panic!("failed to open {path} for mtime update: {e}"));
-    file.set_modified(next)
-        .unwrap_or_else(|e| panic!("failed to set mtime on {path}: {e}"));
+fn resolve_runner_pool_size(
+    available_override: Option<usize>,
+    env_override: Option<&str>,
+) -> usize {
+    let available = available_override.unwrap_or(1).max(1);
+    let default_size = available.clamp(1, 4);
+    match env_override {
+        Some(raw) => raw
+            .trim()
+            .parse::<usize>()
+            .ok()
+            .filter(|n| *n > 0)
+            .map(|n| n.min(available))
+            .unwrap_or(default_size),
+        None => default_size,
+    }
+}
+
+fn runner_instance_paths_for(base_dir: &str, slot: usize) -> RunnerInstancePaths {
+    let slot_root = Path::new(base_dir).join(format!("runner-{slot}"));
+    RunnerInstancePaths {
+        manifest_dir: slot_root.join("rust-runner").display().to_string(),
+        target_dir: slot_root.join("target").display().to_string(),
+    }
+}
+
+fn cleanup_generated_runner_sources(src_dir: &Path) -> std::io::Result<()> {
+    fs::create_dir_all(src_dir)?;
+    for entry in fs::read_dir(src_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        let is_generated_rs = path.extension().is_some_and(|ext| ext == "rs")
+            && path.file_name().is_some_and(|name| name != "main.rs");
+        if is_generated_rs {
+            fs::remove_file(path)?;
+        }
+    }
+    Ok(())
+}
+
+fn copy_runner_template_file(relative_path: &str, destination_dir: &Path) -> std::io::Result<()> {
+    let source = Path::new(RUST_RUNNER_TEMPLATE_DIR).join(relative_path);
+    let destination = destination_dir.join(relative_path);
+    if let Some(parent) = destination.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::copy(source, destination)?;
+    Ok(())
+}
+
+struct E2eRunnerInstance {
+    manifest_dir: PathBuf,
+    target_dir: PathBuf,
+}
+
+impl E2eRunnerInstance {
+    fn src_dir(&self) -> PathBuf {
+        self.manifest_dir.join("src")
+    }
+
+    fn main_rs_path(&self) -> PathBuf {
+        self.src_dir().join("main.rs")
+    }
+
+    fn reset_single_file_main(&self, rs_source: &str) {
+        cleanup_generated_runner_sources(&self.src_dir())
+            .unwrap_or_else(|e| panic!("failed to cleanup runner src dir: {e}"));
+        fs::write(self.main_rs_path(), rs_source)
+            .unwrap_or_else(|e| panic!("failed to write runner main.rs: {e}"));
+    }
+
+    fn reset_multi_file_sources(&self, main_rs: &str, modules: &[(String, String)]) {
+        let src_dir = self.src_dir();
+        cleanup_generated_runner_sources(&src_dir)
+            .unwrap_or_else(|e| panic!("failed to cleanup runner src dir: {e}"));
+        for (stem, source) in modules {
+            let mod_path = src_dir.join(format!("{stem}.rs"));
+            fs::write(&mod_path, source)
+                .unwrap_or_else(|e| panic!("failed to write {}: {e}", mod_path.display()));
+        }
+        fs::write(self.main_rs_path(), main_rs)
+            .unwrap_or_else(|e| panic!("failed to write runner main.rs: {e}"));
+    }
+}
+
+struct E2eRunnerPool {
+    _root: TempDir,
+    runners: Vec<E2eRunnerInstance>,
+    available: Mutex<Vec<usize>>,
+    condvar: Condvar,
+}
+
+impl E2eRunnerPool {
+    fn global() -> &'static Self {
+        E2E_RUNNER_POOL.get_or_init(Self::new)
+    }
+
+    fn new() -> Self {
+        let root = Builder::new()
+            .prefix("ts_to_rs_e2e_runner_pool_")
+            .tempdir()
+            .unwrap_or_else(|e| panic!("failed to create e2e runner pool dir: {e}"));
+        let pool_size = resolve_runner_pool_size(
+            std::thread::available_parallelism().ok().map(|n| n.get()),
+            std::env::var(E2E_RUNNER_POOL_ENV).ok().as_deref(),
+        );
+        let mut runners = Vec::with_capacity(pool_size);
+        let root_str = root.path().display().to_string();
+        for slot in 0..pool_size {
+            let paths = runner_instance_paths_for(&root_str, slot);
+            let manifest_dir = PathBuf::from(&paths.manifest_dir);
+            fs::create_dir_all(manifest_dir.join("src")).unwrap_or_else(|e| {
+                panic!(
+                    "failed to create runner manifest dir {}: {e}",
+                    manifest_dir.display()
+                )
+            });
+            copy_runner_template_file("Cargo.toml", &manifest_dir)
+                .unwrap_or_else(|e| panic!("failed to copy runner Cargo.toml: {e}"));
+            copy_runner_template_file("Cargo.lock", &manifest_dir)
+                .unwrap_or_else(|e| panic!("failed to copy runner Cargo.lock: {e}"));
+            copy_runner_template_file("src/main.rs", &manifest_dir)
+                .unwrap_or_else(|e| panic!("failed to copy runner main.rs: {e}"));
+            runners.push(E2eRunnerInstance {
+                manifest_dir,
+                target_dir: PathBuf::from(paths.target_dir),
+            });
+        }
+        Self {
+            _root: root,
+            runners,
+            available: Mutex::new((0..pool_size).rev().collect()),
+            condvar: Condvar::new(),
+        }
+    }
+
+    fn acquire(&'static self) -> E2eRunnerLease {
+        let mut available = self.available.lock().unwrap_or_else(|e| e.into_inner());
+        loop {
+            if let Some(slot) = available.pop() {
+                return E2eRunnerLease { pool: self, slot };
+            }
+            available = self
+                .condvar
+                .wait(available)
+                .unwrap_or_else(|e| e.into_inner());
+        }
+    }
+
+    fn runner(&self, slot: usize) -> &E2eRunnerInstance {
+        &self.runners[slot]
+    }
+}
+
+struct E2eRunnerLease {
+    pool: &'static E2eRunnerPool,
+    slot: usize,
+}
+
+impl E2eRunnerLease {
+    fn runner(&self) -> &E2eRunnerInstance {
+        self.pool.runner(self.slot)
+    }
+}
+
+impl Drop for E2eRunnerLease {
+    fn drop(&mut self) {
+        let mut available = self
+            .pool
+            .available
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        available.push(self.slot);
+        self.pool.condvar.notify_one();
+    }
 }
 
 /// Result of running a single E2E script on both TS and Rust sides.
@@ -75,13 +225,19 @@ struct E2eOptions<'a> {
 
 /// Transpiles and executes a single TS script, returning both TS and Rust outputs.
 fn execute_e2e(name: &str) -> E2eResult {
-    execute_e2e_with_options(name, &E2eOptions::default())
+    let runner = E2eRunnerPool::global().acquire();
+    execute_e2e_with_runner(&runner, name, &E2eOptions::default())
 }
 
 /// Transpiles and executes a single TS script with custom options.
 ///
 /// `name` can be a flat name (e.g. "hello") or a subdir path (e.g. "sdcdf-smoke/let-init-string-lit").
 fn execute_e2e_with_options(name: &str, opts: &E2eOptions) -> E2eResult {
+    let runner = E2eRunnerPool::global().acquire();
+    execute_e2e_with_runner(&runner, name, opts)
+}
+
+fn execute_e2e_with_runner(runner: &E2eRunnerLease, name: &str, opts: &E2eOptions) -> E2eResult {
     let script_path = format!("{SCRIPTS_DIR}/{name}.ts");
     let ts_source = fs::read_to_string(&script_path)
         .unwrap_or_else(|e| panic!("failed to read {script_path}: {e}"));
@@ -91,14 +247,14 @@ fn execute_e2e_with_options(name: &str, opts: &E2eOptions) -> E2eResult {
         transpile(&ts_source).unwrap_or_else(|e| panic!("transpile failed for '{name}': {e}"));
     let rs_source = strip_internal_use_statements(&rs_source);
 
-    // Step 2: Write Rust source and run
-    let main_path = format!("{RUST_RUNNER_DIR}/src/main.rs");
-    write_with_advancing_mtime(&main_path, &rs_source);
+    // Step 2: Write Rust source and run in a runner-local manifest/target dir.
+    runner.runner().reset_single_file_main(&rs_source);
 
     let mut rust_cmd = Command::new("cargo");
     rust_cmd
         .args(["run", "--quiet"])
-        .current_dir(RUST_RUNNER_DIR);
+        .current_dir(&runner.runner().manifest_dir)
+        .env("CARGO_TARGET_DIR", &runner.runner().target_dir);
     for (k, v) in &opts.env {
         rust_cmd.env(k, v);
     }
@@ -218,9 +374,68 @@ fn assert_lines_match(
     }
 }
 
+#[test]
+fn test_resolve_runner_pool_size_caps_to_four_by_default() {
+    assert_eq!(resolve_runner_pool_size(Some(8), None), 4);
+    assert_eq!(resolve_runner_pool_size(Some(3), None), 3);
+}
+
+#[test]
+fn test_runner_instance_paths_are_isolated_per_slot() {
+    let p0 = runner_instance_paths_for("/tmp/e2e-root", 0);
+    let p1 = runner_instance_paths_for("/tmp/e2e-root", 1);
+
+    assert_ne!(p0.manifest_dir, p1.manifest_dir);
+    assert_ne!(p0.target_dir, p1.target_dir);
+    assert!(p0.manifest_dir.ends_with("runner-0/rust-runner"));
+    assert!(p1.manifest_dir.ends_with("runner-1/rust-runner"));
+}
+
+#[test]
+fn test_cleanup_generated_runner_sources_removes_stale_modules_but_keeps_main() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let src_dir = temp.path().join("src");
+    fs::create_dir_all(&src_dir).expect("create src");
+    fs::write(src_dir.join("main.rs"), "fn main() {}\n").expect("write main");
+    fs::write(src_dir.join("alpha.rs"), "pub fn alpha() {}\n").expect("write alpha");
+    fs::write(src_dir.join("beta.rs"), "pub fn beta() {}\n").expect("write beta");
+
+    cleanup_generated_runner_sources(&src_dir).expect("cleanup generated sources");
+
+    assert!(src_dir.join("main.rs").exists());
+    assert!(!src_dir.join("alpha.rs").exists());
+    assert!(!src_dir.join("beta.rs").exists());
+}
+
+#[test]
+fn test_parallel_e2e_runner_isolation_smoke() {
+    let (hello, arithmetic) = std::thread::scope(|scope| {
+        let hello = scope.spawn(|| execute_e2e("hello"));
+        let arithmetic = scope.spawn(|| execute_e2e("arithmetic"));
+        (
+            hello.join().expect("hello join"),
+            arithmetic.join().expect("arithmetic join"),
+        )
+    });
+
+    assert_lines_match(
+        "hello",
+        "stdout",
+        &hello.ts_stdout,
+        &hello.rust_stdout,
+        &hello.rs_source,
+    );
+    assert_lines_match(
+        "arithmetic",
+        "stdout",
+        &arithmetic.ts_stdout,
+        &arithmetic.rust_stdout,
+        &arithmetic.rs_source,
+    );
+}
+
 /// Runs an E2E test comparing stdout only (existing behavior).
 fn run_e2e_test(name: &str) {
-    let _guard = E2E_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let result = execute_e2e(name);
     assert_lines_match(
         name,
@@ -233,7 +448,6 @@ fn run_e2e_test(name: &str) {
 
 /// Runs an E2E test with stdin input.
 fn run_e2e_test_with_stdin(name: &str, stdin_input: &str) {
-    let _guard = E2E_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let opts = E2eOptions {
         stdin: Some(stdin_input),
         ..Default::default()
@@ -250,7 +464,6 @@ fn run_e2e_test_with_stdin(name: &str, stdin_input: &str) {
 
 /// Runs an E2E test with extra environment variables.
 fn run_e2e_test_with_env(name: &str, env: &[(&str, &str)]) {
-    let _guard = E2E_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let opts = E2eOptions {
         env: env.to_vec(),
         ..Default::default()
@@ -271,7 +484,7 @@ fn run_e2e_test_with_env(name: &str, env: &[(&str, &str)]) {
 /// writes them to `tests/e2e/rust-runner/src/`, and compares stdout.
 /// `main.ts` → `src/main.rs`, other files → `src/<name>.rs` with `mod` declarations.
 fn run_e2e_multi_file_test(name: &str) {
-    let _guard = E2E_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let runner = E2eRunnerPool::global().acquire();
     let dir = format!("{SCRIPTS_DIR}/multi/{name}");
 
     // Collect all .ts files
@@ -283,7 +496,7 @@ fn run_e2e_multi_file_test(name: &str) {
     entries.sort_by_key(|e| e.file_name());
 
     let mut mod_names: Vec<String> = Vec::new();
-    let mut mod_guards: Vec<TempFile> = Vec::new();
+    let mut generated_modules: Vec<(String, String)> = Vec::new();
     let mut main_rs = String::new();
 
     for entry in &entries {
@@ -309,10 +522,8 @@ fn run_e2e_multi_file_test(name: &str) {
         if stem == "main" {
             main_rs = rs_source;
         } else {
-            let mod_path = format!("{RUST_RUNNER_DIR}/src/{stem}.rs");
-            write_with_advancing_mtime(&mod_path, &rs_source);
-            mod_guards.push(TempFile::guard(mod_path));
-            mod_names.push(stem);
+            mod_names.push(stem.clone());
+            generated_modules.push((stem, rs_source));
         }
     }
 
@@ -320,18 +531,17 @@ fn run_e2e_multi_file_test(name: &str) {
     let mod_decls: String = mod_names.iter().map(|m| format!("mod {m};\n")).collect();
     let full_main = format!("{mod_decls}{main_rs}");
 
-    let main_path = format!("{RUST_RUNNER_DIR}/src/main.rs");
-    write_with_advancing_mtime(&main_path, &full_main);
+    runner
+        .runner()
+        .reset_multi_file_sources(&full_main, &generated_modules);
 
     // Run Rust
     let rust_output = Command::new("cargo")
         .args(["run", "--quiet"])
-        .current_dir(RUST_RUNNER_DIR)
+        .current_dir(&runner.runner().manifest_dir)
+        .env("CARGO_TARGET_DIR", &runner.runner().target_dir)
         .output()
         .expect("failed to execute cargo run");
-
-    // Drop module guards before assert to clean up even on failure
-    drop(mod_guards);
 
     assert!(
         rust_output.status.success(),
@@ -372,7 +582,7 @@ fn run_e2e_multi_file_test(name: &str) {
 ///
 /// This is the SDCDF per-cell E2E runner (Phase 2 artifact).
 fn run_cell_e2e_tests(prd_id: &str) {
-    let _guard = E2E_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let runner = E2eRunnerPool::global().acquire();
     let dir = format!("{SCRIPTS_DIR}/{prd_id}");
 
     let mut entries: Vec<_> = fs::read_dir(&dir)
@@ -395,7 +605,7 @@ fn run_cell_e2e_tests(prd_id: &str) {
             .into_owned();
         let cell_name = format!("{prd_id}/{stem}");
 
-        let result = execute_e2e(&cell_name);
+        let result = execute_e2e_with_runner(&runner, &cell_name, &E2eOptions::default());
 
         if let Some(diff) = compare_lines(&result.ts_stdout, &result.rust_stdout) {
             failures.push(format!(
@@ -420,7 +630,6 @@ fn run_cell_e2e_tests(prd_id: &str) {
 /// Equivalent to `run_e2e_test` but for cell fixtures in PRD subdirectories.
 #[allow(dead_code)]
 fn run_cell_e2e_test(prd_id: &str, cell_id: &str) {
-    let _guard = E2E_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let cell_name = format!("{prd_id}/{cell_id}");
     let result = execute_e2e(&cell_name);
     assert_lines_match(
@@ -434,7 +643,6 @@ fn run_cell_e2e_test(prd_id: &str, cell_id: &str) {
 
 /// Runs an E2E test comparing both stdout and stderr.
 fn run_e2e_test_with_stderr(name: &str) {
-    let _guard = E2E_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let result = execute_e2e(name);
     assert_lines_match(
         name,
