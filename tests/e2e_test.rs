@@ -1478,19 +1478,64 @@ fn test_e2e_cell_i171_b_bang_tsas() {
     run_cell_e2e_test("i161-i171", "cell-b-bang-tsas");
 }
 
-// Matrix C cells (I-171 Layer 2 if-stmt narrow emission). All RED until T5.
+// Matrix C cells (I-171 Layer 2 if-stmt narrow emission).
+// GREEN at T4 / T5 unless a pre-existing upstream defect blocks the fixture.
 #[test]
-#[ignore = "I-171 C-4 RED — unignore at T5 (non-exit body predicate form)"]
+// GREEN at T4 (Layer 1 falsy_predicate emits valid Rust; no narrow needed
+// because the body is non-exit, so the post-if scope keeps `x: Option<T>`).
 fn test_e2e_cell_i171_c4_if_bang_non_exit() {
     run_cell_e2e_test("i161-i171", "cell-c4-if-bang-non-exit");
 }
 #[test]
-#[ignore = "I-171 C-5 RED — unignore at T5 (else branch consolidated match)"]
+// GREEN at T5 (else-branch consolidated match: `match x { Some(x) if truthy
+// => else_body, _ => then_body }` shadows `x` to the narrow `f64` inside the
+// else_body arm).
 fn test_e2e_cell_i171_c5_if_bang_else() {
     run_cell_e2e_test("i161-i171", "cell-c5-if-bang-else");
 }
 #[test]
-#[ignore = "I-171 C-15 RED — unignore at T5 (Member LHS Layer 1 fix, narrow out-of-scope by I-165)"]
+// GREEN at T5 deep-fix (post-/check_job adversarial review): the
+// "then-always-exits + else-non-exit" sub-case of C-5 must materialise
+// post-if narrow. The bare ElseBranch shape (`Stmt::Match` without let
+// wrap) leaves `x: Option<f64>` post-if and breaks `x + 1` (E0369). The
+// EarlyReturnFromExitWithElse shape wraps the match in `let x = ...;`
+// and tail-emits the narrowed value so `x + 1` post-if compiles.
+fn test_e2e_cell_i171_c5b_then_exit_else_non_exit() {
+    run_cell_e2e_test("i161-i171", "cell-c5b-then-exit-else-non-exit");
+}
+#[test]
+// GREEN at T5 deep-deep-fix (post-/check_job deep deep review): symmetric
+// `=== null` early-return + non-exit-else extension. Without
+// Deep-Deep-Fix-1 (visitors.rs narrow event for else-present case) +
+// Deep-Deep-Deep-Fix-1 (try_generate_narrowing_match Let-wrap branch for
+// `complement_is_none + is_swap + then_exit + else_non_exit`), the
+// emission either lost post-if narrow (Option<T> return ✓ but primitive
+// arithmetic ✗) or introduced an Option<Option<T>> mismatch (Some-wrap
+// fired but IR didn't materialise narrow).
+fn test_e2e_cell_i171_c5c_null_check_then_exit_else_non_exit() {
+    run_cell_e2e_test("i161-i171", "cell-c5c-null-check-then-exit-else-non-exit");
+}
+#[test]
+// GREEN at T5 deep-deep-deep-deep-fix (post-/check_job 4th-iteration deep
+// deep review): Bang `!x` × Option<Named other> + Option<Vec> + post-narrow
+// access. PRD Matrix C-3 enumerated this as "✓ T6-3" but the implementation
+// returned None for non-synthetic-union Named, falling back to Layer 1
+// predicate form which did NOT shadow x to inner type post-if. The fix
+// extends `build_option_truthy_match_arms` with an "always-truthy" path
+// covering Named non-synthetic / Vec / Fn / Tuple / StdCollection /
+// DynTrait / Ref via single Some(x) arm without truthy guard.
+fn test_e2e_cell_i171_c5d_bang_option_named_narrow() {
+    run_cell_e2e_test("i161-i171", "cell-c5d-bang-option-named-narrow");
+}
+#[test]
+#[ignore = "I-171 C-15 RED — Layer 1 emission inside `f` is correct \
+           (`if !u.v.as_ref().is_some_and(|v| !v.is_empty()) { return; }` \
+           compiles), but `main()` instantiates `_TypeLit0 { v: ... }` while \
+           `f` declares param type `FU`. Synthetic `{ v: string | null }` \
+           inline type and the registered `FU` interface are not unified at \
+           call sites — pre-existing synthetic-type-unification gap, distinct \
+           from Layer 2 (T5 emission inside `f` covered by unit test \
+           `convert_stmts` runs)."]
 fn test_e2e_cell_i171_c15_if_bang_member_exit() {
     run_cell_e2e_test("i161-i171", "cell-c15-if-bang-member-exit");
 }
@@ -1597,57 +1642,86 @@ fn test_e2e_cell_i171_b_bang_vec() {
 // Matrix C supplementary cells (C-7 const-fold, C-11-C-14 peek-through, C-16,
 // C-17, C-18, C-19, C-23, C-24).
 #[test]
-#[ignore = "I-171 C-7 RED — unignore at T5 (const-fold `!null`)"]
+// GREEN at T5 (`!null` Layer 1 const-folds to `BoolLit(true)`; Layer 2
+// dead-code elim inlines the then-body, eliminating the `if true { ... }`
+// wrapper).
 fn test_e2e_cell_i171_c7_const_fold_null() {
     run_cell_e2e_test("i161-i171", "cell-c7-const-fold-null");
 }
 #[test]
-#[ignore = "I-171 C-11 RED — unignore at T5 (Paren peek-through)"]
+// GREEN at T4/T5 (Paren peek-through worked since pre-T5 via the existing
+// `unwrap_parens`; T5's `peek_through_type_assertions` swap is a superset).
 fn test_e2e_cell_i171_c11_peek_paren() {
     run_cell_e2e_test("i161-i171", "cell-c11-peek-paren");
 }
 #[test]
-#[ignore = "I-171 C-12 RED — unignore at T5 (TsAs peek-through)"]
+// GREEN at T5 (TsAs peek-through routes `!(x as T)` through the consolidated-
+// match narrow path so post-if `x` is materialised as the narrow `f64`).
 fn test_e2e_cell_i171_c12_peek_tsas() {
     run_cell_e2e_test("i161-i171", "cell-c12-peek-tsas");
 }
 #[test]
-#[ignore = "I-171 C-13 RED — unignore at T5 (TsNonNull peek-through)"]
+// GREEN at T5 (TsNonNull peek-through; same path as C-12).
 fn test_e2e_cell_i171_c13_peek_nonnull() {
     run_cell_e2e_test("i161-i171", "cell-c13-peek-nonnull");
 }
 #[test]
-#[ignore = "I-171 C-14 RED — unignore at T5 (`!!x` double negation truthy fold)"]
+// GREEN at T4 (`!!x` Layer 3 double-neg lowers to truthy_predicate_for_expr;
+// fixture body is exit so no narrow materialisation is needed post-if).
 fn test_e2e_cell_i171_c14_peek_unary() {
     run_cell_e2e_test("i161-i171", "cell-c14-peek-unary");
 }
 #[test]
-#[ignore = "I-171 C-16 RED — unignore at T5 (OptChain Layer 1 only, narrow OOS by I-143-a+I-165)"]
+#[ignore = "I-171 C-16 RED — Layer 1 emission `if { let _tmp = x.as_ref() \
+           .and_then(|_v| _v.v); !_tmp.as_ref().is_some_and(...) }` is the \
+           correct shape, but the `_v.v` field access inside the `and_then` \
+           closure moves out of `&_TypeLit0` (Rust E0507). Pre-existing \
+           OptChain lowering defect (independent of Layer 1/2): the closure \
+           must clone or borrow the field. T5 Layer 2 dispatch is verified \
+           via unit tests; full E2E unblocks once the OptChain field-access \
+           closure is fixed."]
 fn test_e2e_cell_i171_c16_if_bang_optchain() {
     run_cell_e2e_test("i161-i171", "cell-c16-if-bang-optchain");
 }
 #[test]
-#[ignore = "I-171 C-17 RED — unignore at T5 (Bin arith tmp-bind)"]
+// GREEN at T4 (Bin arith feeds Layer 4 with tmp-bind; fixture body is exit
+// and post-if uses the original `x: f64` (not Option), so no narrow needed).
 fn test_e2e_cell_i171_c17_if_bang_bin_arith() {
     run_cell_e2e_test("i161-i171", "cell-c17-if-bang-bin-arith");
 }
 #[test]
-#[ignore = "I-171 C-18 RED — unignore at T5 (LogicalAnd De Morgan)"]
+#[ignore = "I-171 C-18 RED — Layer 1 De Morgan emits the correct shape \
+           `if !x.is_some_and(...) || !y.as_ref().is_some_and(...)`, but \
+           the post-if uses `format!(\"ok:{}:{}\", x, y)` which requires \
+           `x: f64` / `y: String` (narrow materialised). Compound-test \
+           narrow materialisation for `!(a && b)` requires CFG-level \
+           narrow propagation that overlaps the I-177 narrow-emission-v2 \
+           PRD scope. Verdict TS ✓ / Rust ✓ Layer 1 emission / E2E ✗ \
+           (I-177 dependency). Layer 1 De Morgan covered by T4 unit tests."]
 fn test_e2e_cell_i171_c18_if_bang_logical_and() {
     run_cell_e2e_test("i161-i171", "cell-c18-if-bang-logical-and");
 }
 #[test]
-#[ignore = "I-171 C-19 RED — unignore at T5 (Call tmp-bind)"]
+// GREEN at T4 (Call result feeds Layer 4 with tmp-bind on `Option<f64>`).
 fn test_e2e_cell_i171_c19_if_bang_call() {
     run_cell_e2e_test("i161-i171", "cell-c19-if-bang-call");
 }
 #[test]
-#[ignore = "I-171 C-23 RED — unignore at T5 (LogicalOr De Morgan)"]
+#[ignore = "I-171 C-23 RED — Layer 1 De Morgan emits the correct shape \
+           `if !x.is_some_and(...) && !y.as_ref().is_some_and(...)`, but \
+           post-if `x ?? \"null\"` lowers to `x.unwrap_or_else(|| \"null\")` \
+           where the closure returns `&str` while `x: Option<f64>` requires \
+           `|| -> f64`. Pre-existing NC-coercion gap for `Option<P> ?? \
+           <other-type>` (synthetic-union coercion missing — the `??` should \
+           lift both sides to `Option<F64OrString>` first). Distinct from \
+           Layer 1/2 De Morgan, which is covered by T4 unit tests."]
 fn test_e2e_cell_i171_c23_if_bang_logical_or() {
     run_cell_e2e_test("i161-i171", "cell-c23-if-bang-logical-or");
 }
 #[test]
-#[ignore = "I-171 C-24 RED — unignore at T5 (always-truthy operand const-fold)"]
+// GREEN at T5 (`!arr` (arr: Vec) Layer 4 falsy_predicate returns
+// `BoolLit(false)` for always-truthy types; Layer 2 dead-code elim drops
+// the `if false { ... }` wrapper).
 fn test_e2e_cell_i171_c24_if_bang_always_truthy() {
     run_cell_e2e_test("i161-i171", "cell-c24-if-bang-always-truthy");
 }
@@ -1715,7 +1789,16 @@ fn test_e2e_cell_i171_b_bang_tsconstassertion() {
 
 // Matrix C-16b: OptChain base narrow (in-scope, T6 P3b extension).
 #[test]
-#[ignore = "I-171 C-16b RED — unignore at T6 P3b (guards.rs OptChain base narrow extension)"]
+#[ignore = "I-171 C-16b RED — TWO blockers must be resolved before this can \
+           GREEN: (1) T6 P3b — guards.rs Bang arm needs an OptChain case so \
+           `extract_optchain_base_ident` pushes `NarrowEvent::Narrow` for \
+           the base ident and post-if `x.v` resolves against the narrowed \
+           `_TypeLit0` (not the outer `Option<_TypeLit0>`); (2) pre-existing \
+           OptChain field-access closure defect — the if-cond emission \
+           lowers `x?.v` to `x.as_ref().and_then(|_v| _v.v)` where `_v.v` \
+           moves out of `&_TypeLit0` (Rust E0507). T6 P3b alone will not \
+           unblock E2E because the if-cond compile error precedes the \
+           post-if narrow check. Both fixes are tracked separately."]
 fn test_e2e_cell_i171_c16b_optchain_base_narrow() {
     run_cell_e2e_test("i161-i171", "cell-c16b-optchain-base-narrow");
 }

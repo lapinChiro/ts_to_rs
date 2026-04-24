@@ -94,6 +94,27 @@ fn convert_single_stmt_resolved(
     stmts.remove(0)
 }
 
+/// Helper: convert all statements in a function body and return the IR list.
+///
+/// Used by tests that need to observe const-fold dead-code elimination
+/// (`if true { ... }` collapsing to its then-body) where the resulting IR
+/// is no longer guaranteed to be a single statement.
+fn convert_stmts(
+    stmts: &[ast::Stmt],
+    reg: &TypeRegistry,
+    return_type: Option<&RustType>,
+) -> Vec<Stmt> {
+    let (mg, res) = TctxFixture::empty_context_parts();
+    let tctx = TransformContext::new(&mg, reg, &res, Path::new("test.ts"));
+    let mut synthetic = SyntheticTypeRegistry::new();
+    let mut t = Transformer::for_module(&tctx, &mut synthetic);
+    let mut out = Vec::new();
+    for s in stmts {
+        out.extend(t.convert_stmt(s, return_type).unwrap());
+    }
+    out
+}
+
 /// Helper: parse TS source containing a function and return its body statements.
 fn parse_fn_body(source: &str) -> Vec<ast::Stmt> {
     let module = parse_typescript(source).expect("parse failed");

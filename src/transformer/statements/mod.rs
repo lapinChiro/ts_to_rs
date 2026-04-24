@@ -10,6 +10,7 @@ mod helpers;
 mod loops;
 pub(crate) mod mutability;
 pub(crate) mod nullish_assign;
+mod option_truthy_complement;
 mod spread;
 mod switch;
 

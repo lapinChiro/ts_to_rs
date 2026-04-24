@@ -710,9 +710,29 @@ impl<'a> TypeResolver<'a> {
         // Detect narrowing guards (positive + complement in else)
         detect_narrowing_guard(&if_stmt.test, &if_stmt.cons, if_stmt.alt.as_deref(), self);
 
-        // Early return narrowing: if the then-block always exits and there's no else,
-        // the complement type is valid for the rest of the enclosing block.
-        if if_stmt.alt.is_none() && stmt_always_exits(&if_stmt.cons) {
+        // Early return narrowing: post-if scope sees the *complement* of
+        // `if_stmt.test` whenever the then-block always exits AND post-if
+        // remains reachable through the else-side path.
+        //
+        // The then-exit branch contributes nothing to post-if scope (it
+        // either returns or unwinds), so the only path that flows past the
+        // `if` is the one matching the test-complement. That gives a sound
+        // narrow regardless of whether an `else` block syntactically exists,
+        // as long as the else side is non-exit (else-side always-exit makes
+        // post-if unreachable, and union-with-else-non-exit gives no useful
+        // narrow).
+        //
+        // Two reachability cases satisfy the rule:
+        //   (a) `if (test) <exit>;`          → no else, then exits
+        //   (b) `if (test) <exit>; else <non-exit>;` → else exists & non-exit
+        //
+        // Without case (b), post-if narrow is silently lost in IR-shadow
+        // emissions like `OptionTruthyShape::EarlyReturnFromExitWithElse`,
+        // breaking type-driven coercions (e.g. wrapping a narrowed `T` back
+        // into the `Option<T>` return type at `return x;`).
+        let then_exits = stmt_always_exits(&if_stmt.cons);
+        let else_exits = if_stmt.alt.as_deref().is_some_and(stmt_always_exits);
+        if then_exits && !else_exits {
             if let Some(block_end) = self.current_block_end {
                 let if_end = if_stmt.cons.span().hi.0;
                 detect_early_return_narrowing(&if_stmt.test, if_end, block_end, self);
