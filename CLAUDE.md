@@ -107,7 +107,7 @@ Coverage threshold ratchet: when measured coverage exceeds threshold by 2+ point
 
 - **Ideal implementation primacy** — 本プロジェクトの最上位目標は「理想的な TS→Rust トランスパイラの獲得」。ベンチ数値は defect 発見のシグナルであり最適化ターゲットではない。Structural fix > interim patch。詳細は `.claude/rules/ideal-implementation-primacy.md`
 - **Problem space analysis (最上位 PRD ルール・絶対遵守)** — PRD 作成時は最初に機能の問題空間を網羅 enumerate する。TODO に書かれた defect のみを scope にするのは禁止 (defect は氷山の一角)。入力次元の組合せマトリクスを作成し、全セルに ideal 出力を定義、全セルに test を対応させ、matrix 完全カバーを完了条件に含める。詳細は `.claude/rules/problem-space-analysis.md`
-- **Spec-first PRD workflow (SDCDF)** — matrix-driven PRD は Spec stage (grammar-derived matrix + tsc observation + E2E fixture) → Implementation stage の 2-stage workflow で開発する。`doc/grammar/` の reference doc を variant 列挙の source of truth とし、外部 oracle (tsc/tsx) で ideal output を grounding する。詳細は `.claude/rules/spec-first-prd.md`
+- **Spec-first PRD workflow (SDCDF)** — matrix-driven PRD は Spec stage (grammar-derived matrix + tsc observation + E2E fixture) → Implementation stage の 2-stage workflow で開発する。`doc/grammar/` の reference doc を variant 列挙の source of truth とし、外部 oracle (tsc/tsx) で ideal output を grounding する。Spec stage 完了 verification は [`spec-stage-adversarial-checklist.md`](.claude/rules/spec-stage-adversarial-checklist.md) の **10-rule checklist 全項目** を pass、Implementation stage 完了 verification は [`check-job-review-layers.md`](.claude/rules/check-job-review-layers.md) の **4-layer review** を `/check_job` 初回 invocation で全実施。発見 defect は [`post-implementation-defect-classification.md`](.claude/rules/post-implementation-defect-classification.md) の **5 category** に trace ベースで分類。詳細は `.claude/rules/spec-first-prd.md`
 - **Uncertainty-driven investigation** — 不確定要素は一級市民として TODO に `[INV-N]` 形式で記録し、影響範囲が絞れるまで調査を尽くしてから実装に進む。`todo-prioritization.md` Step 0 参照
 - **No unilateral conversion feasibility judgments** — "difficult in Rust" is never a valid reason to defer or deprioritize. Applies across all phases: TODO, plan.md, PRD. See `.claude/rules/conversion-feasibility.md`
 - **Strict PRD completion criteria** — see `.claude/rules/prd-completion.md`
@@ -118,6 +118,12 @@ Coverage threshold ratchet: when measured coverage exceeds threshold by 2+ point
 - **Git operation restrictions**: Only the user performs `git commit` / `push` / `merge`. Claude only proposes commit messages
 - **Questions with decision criteria**: Present options, pros/cons, and recommendations. No vague "Is this OK?" questions. Decide yourself when possible
 - **Verification principle**: Define verification items and expected results before execution. No post-hoc judgments
+- **Command output verification**: cargo test / clippy / fmt 等の出力は full content を Read して確認する。tail / 浅い filter は禁止 — see `.claude/rules/command-output-verification.md`
+- **Conversion correctness priority**: 変換問題は Tier 1 (silent semantic change、最優先) > Tier 2 (compile error) > Tier 3 (unsupported syntax) で分類して優先処理。詳細は `.claude/rules/conversion-correctness-priority.md`
+- **Type fallback safety**: 型 fallback (Any / wider union / HashMap) 導入 PRD は 3-step safety analysis で silent semantic change 不在を verify — see `.claude/rules/type-fallback-safety.md`
+- **Pipeline integrity**: IR は構造化データで保持、transformer → generator の pipeline 方向を逆流させない。詳細は `.claude/rules/pipeline-integrity.md`
+- **Design integrity**: 設計時は higher-level consistency / DRY / orthogonality / coupling の 4 観点で第三者視点 review — see `.claude/rules/design-integrity.md`
+- **Cargo dependencies**: Cargo.toml 編集時は最新 version を verify、`=` pinning 禁止 — see `.claude/rules/dependencies.md`
 - **Debugging**: Hypothesize root cause before next fix attempt. Never repeat the same fix twice
 - **Deferred recording**: Record out-of-scope issues in `TODO` — see `.claude/rules/todo-entry-standards.md`
 - **Document sync**: When changing code, update plan.md, README.md, CLAUDE.md, doc comments if they become inaccurate
@@ -126,23 +132,42 @@ Coverage threshold ratchet: when measured coverage exceeds threshold by 2+ point
 
 ## Workflow
 
+### Skills (procedural)
+
 | Trigger | Skill |
 |---------|-------|
+| Session 開始 (plan.md 確認 + 作業継続) | /start (command) |
 | New feature or bug fix | /tdd |
 | Work completion (before commit) | /quality-check |
+| Thorough review after work completion (matrix-driven PRD) | /check_job (4-layer framework: Mechanical / Empirical / Structural cross-axis / Adversarial trade-off、初回 invocation で全実施) |
 | After feature addition | /refactoring-check |
-| **PRD (backlog/ task) completion** | /backlog-management (TODO update → backlog deletion → plan.md cleanup → next PRD) |
+| **PRD (backlog/ task) completion** | /backlog-management (TODO update → backlog deletion → plan.md cleanup → next PRD) または /end (command, commit message 提案まで) |
 | End of development session | /todo-audit |
 | backlog/ operations | /backlog-management |
 | Work request with empty backlog/ | /backlog-replenishment |
 | PRD creation | /prd-template |
 | Work request with empty TODO | /todo-replenishment |
 | Investigation tasks | /investigation |
-| TODO review (periodic / after major additions) | /todo-grooming |
+| TODO review (periodic / after major additions) | /todo-grooming or /refresh_todo_and_plan (command, light touch) |
 | Conversion correctness audit | /correctness-audit |
-| Hono conversion loop | /hono-cycle (single) or `/loop 0 /hono-cycle` (continuous) |
-| Rule creation or modification | /rule-writing, /rule-maintenance |
+| Hono conversion loop | /hono-cycle (single) or `/loop 0 /hono-cycle` (continuous)。light bench-only は /bench (command) |
+| Rule / skill / command creation or modification | /rule-writing (rules), /rule-maintenance (rules), /skill-writing (skills), /command-writing (commands) |
 | Large-scale refactoring (10+ sigs, 5+ files) | /large-scale-refactor |
+| GitHub Actions log analysis | /analyze-ga-log |
+
+### Commands (slash invocation, light wrapper / prompt)
+
+| Command | 目的 |
+|---------|------|
+| /start | session 開始時の plan.md 確認 + 作業継続 |
+| /end | PRD 完了処理 + commit message 提案 (実体は /backlog-management skill + pre-commit-doc-sync rule) |
+| /check_job | matrix-driven PRD の 4-layer review (Spec / Implementation stage 自動判別) |
+| /check_problem | 残課題の振り返り (`/check_job` Layer 4 と機能近接、軽量 review) |
+| /semantic_review | Tier 1 silent semantic change の専用 review (`type-fallback-safety.md` 適用) |
+| /refresh_report | report/ ディレクトリの最新化 |
+| /refresh_todo_and_plan | TODO + plan.md の最新化 (light、structural は /todo-grooming skill) |
+| /bench | Hono ベンチ取得 + TODO 影響分析 (TDD まで進めない場合は本 command、進める場合は /hono-cycle skill) |
+| /step-by-step | 調査 → PRD → 開発 → 確認 の guide (汎用 vague trigger、明確な lifecycle stage がある場合は専用 skill 推奨) |
 
 ## Proactive Improvement Principle
 

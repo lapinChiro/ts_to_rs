@@ -5,11 +5,11 @@ paths:
 
 # Dependency Version Management
 
-## Trigger
+## When to Apply
 
 When adding or updating dependencies in `Cargo.toml`.
 
-## Actions
+## Constraints
 
 1. Verify the latest version of the dependency being added/updated
 2. Specify the latest version
@@ -20,3 +20,9 @@ When adding or updating dependencies in `Cargo.toml`.
 
 - Specifying an older version without justification
 - Pinning versions with `=` (allow compatible ranges)
+
+## Related Rules
+
+| Rule | Relation |
+|------|----------|
+| [pipeline-integrity.md](pipeline-integrity.md) | Cargo.toml は pipeline の前提条件 (build-time integrity) |

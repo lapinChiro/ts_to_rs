@@ -50,3 +50,19 @@ The criterion is "Can we start Discovery (clarification questions) for this item
 - Treating "needs design" or "needs investigation" as hold reasons — these should be resolved in Discovery and do not block PRD creation
 - Inferring implicit reasons and judging items without stated hold reasons as "not PRD-eligible"
 - Judging as not PRD-eligible because "Rust has no direct syntax equivalent" — if no conversion method is found, interview the user
+
+## Verification
+
+- backlog/ に new PRD file が ≥1 件追加されている
+- 該当 TODO entry が削除されている (PRD 化したものは TODO に重複しない)
+- plan.md「次の作業」table または prerequisite chain に new PRD が insert 済
+- 各 PRD で `/prd-template` skill の Discovery + Problem Space + Spec stage workflow を full pass
+
+## Related Rules / Skills / Commands
+
+| Type | Reference | Relation |
+|------|-----------|----------|
+| Rule | [todo-prioritization.md](../../rules/todo-prioritization.md) | TODO 優先度判定 (PRD 化対象の選定で適用) |
+| Rule | [conversion-feasibility.md](../../rules/conversion-feasibility.md) | "Rust expression is difficult" を理由にした deferral 禁止 |
+| Skill | [prd-template](../prd-template/SKILL.md) | PRD 起票本体 (本 skill の下流) |
+| Skill | [backlog-management](../backlog-management/SKILL.md) | backlog 整合性管理 (本 skill 完了後に invoke) |

@@ -85,3 +85,16 @@ Even when completing PRDs consecutively, **execute this procedure for each PRD**
 - Items in `backlog/` do not have duplicates in `TODO`
 - No completed items remain in `TODO` (TODO IDs targeted by completed PRDs are deleted)
 - Phase transition criteria and benchmark numbers in `TODO` match reality
+
+## Related Rules / Skills / Commands
+
+| Type | Reference | Relation |
+|------|-----------|----------|
+| Rule | [todo-prioritization.md](../../rules/todo-prioritization.md) | TODO 優先度判定 (本 skill が plan.md insertion 順を決める時の base) |
+| Rule | [todo-entry-standards.md](../../rules/todo-entry-standards.md) | TODO 項目記載 format (本 skill の "TODO update" step で適用) |
+| Rule | [prd-completion.md](../../rules/prd-completion.md) | PRD 完了基準 (本 skill が "PRD 完了処理" の前提として check) |
+| Rule | [pre-commit-doc-sync.md](../../rules/pre-commit-doc-sync.md) | commit message 作成前の document update sequence |
+| Skill | [backlog-replenishment](../backlog-replenishment/SKILL.md) | backlog 空時の補充 (本 skill の cleanup 後に発動) |
+| Skill | [todo-audit](../todo-audit/SKILL.md) | TODO 状態監査 (本 skill が PRD close 後に invoke) |
+| Skill | [prd-template](../prd-template/SKILL.md) | 次 PRD の起票 (本 skill が "Next PRD" step で参照) |
+| Command | [/end](../../commands/end.md) | PRD 完了処理 + commit message 提案の trigger (本 skill が実体) |

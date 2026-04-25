@@ -45,4 +45,12 @@ When adding new items to TODO or modifying existing items.
 - Referring to "this function" or "this process" without file path or line number
 - Keeping completed PRD items in "PRD created → backlog/..." format (delete them)
 - **Assumption を fact として TODO に記載すること** (`「〜と思われる」「おそらく〜」は Investigation Debt Entry に格納する`)
-- **調査債務が存在する状態で PRD 起票に進むこと** (`ideal-implementation-primacy.md` / `todo-prioritization.md` Step 0 違反)
+- **調査債務が存在する状態で PRD 起票に進むこと** ([`ideal-implementation-primacy.md`](ideal-implementation-primacy.md) / [`todo-prioritization.md`](todo-prioritization.md) Step 0 違反)
+
+## Related Rules
+
+| Rule | Relation |
+|------|----------|
+| [todo-prioritization.md](todo-prioritization.md) | Step 0 (Investigation Debt) trigger rule (本ルールが INV 項目の format を spec) |
+| [ideal-implementation-primacy.md](ideal-implementation-primacy.md) | 調査債務放置の禁止 (最上位原則 由来) |
+| [problem-space-analysis.md](problem-space-analysis.md) | 本 PRD 外に切り出したセルを TODO 化する際の参照先 |

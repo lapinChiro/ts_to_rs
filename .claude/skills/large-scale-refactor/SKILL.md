@@ -85,3 +85,16 @@ Execute tasks from `tasks.md` in order, top to bottom.
 - `tasks.md` exists and contains "Analysis", "Design", "Implementation Tasks", and "Review Results" sections
 - All task checkboxes are `[x]`
 - Final verification step execution results are recorded
+
+## Related Rules / Skills / Commands
+
+| Type | Reference | Relation |
+|------|-----------|----------|
+| Rule | [design-integrity.md](../../rules/design-integrity.md) | Design step での 4 観点 review (cohesion / DRY / orthogonality / coupling) |
+| Rule | [pipeline-integrity.md](../../rules/pipeline-integrity.md) | refactor 対象が pipeline boundary を跨ぐ場合の整合性 |
+| Rule | [incremental-commit.md](../../rules/incremental-commit.md) | phase 完了 commit 原則 (本 skill は phase 単位 commit) |
+| Rule | [bulk-edit-safety.md](../../rules/bulk-edit-safety.md) | bulk edit 適用時の dry-run procedure |
+| Rule | [command-output-verification.md](../../rules/command-output-verification.md) | refactor 後の cargo check / test 出力 verify |
+| Skill | [refactoring-check](../refactoring-check/SKILL.md) | feature 後の refactor 候補抽出 (本 skill より periodic、軽量) |
+| Skill | [quality-check](../quality-check/SKILL.md) | refactor 完了 verification |
+| Skill | [tdd](../tdd/SKILL.md) | refactor 内で test 追加が必要な場合の procedure |

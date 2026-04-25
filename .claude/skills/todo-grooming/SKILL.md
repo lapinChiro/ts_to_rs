@@ -106,3 +106,14 @@ Report grooming results to the user in this format:
 - All PRD-eligible section item descriptions match current codebase
 - All priority changes have explicit reasoning
 - `[skill-feedback:*]` tagged items have been analyzed for patterns and a disposition determined
+
+## Related Rules / Skills / Commands
+
+| Type | Reference | Relation |
+|------|-----------|----------|
+| Rule | [todo-prioritization.md](../../rules/todo-prioritization.md) | priority 判定の base (本 skill が priority 並べ替えで適用) |
+| Rule | [todo-entry-standards.md](../../rules/todo-entry-standards.md) | item format の verify 観点 |
+| Rule | [ideal-implementation-primacy.md](../../rules/ideal-implementation-primacy.md) | priority 判定の最上位原則 |
+| Skill | [todo-audit](../todo-audit/SKILL.md) | post-development audit (本 skill より event-driven、軽量) |
+| Skill | [backlog-management](../backlog-management/SKILL.md) | grooming 後の backlog 整合性管理 |
+| Command | [/refresh_todo_and_plan](../../commands/refresh_todo_and_plan.md) | TODO + plan.md 最新化の light trigger (本 skill の structural form) |

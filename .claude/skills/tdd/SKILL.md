@@ -55,3 +55,14 @@ See `.claude/rules/testing.md` "E2E Tests" section for decision criteria and wri
 - Test code diffs exist before implementation code diffs (verifiable via git history)
 - All tests follow the `test_<target>_<condition>_<expected_result>` naming convention
 - For conversion feature changes, corresponding E2E test script diffs exist
+
+## Related Rules / Skills / Commands
+
+| Type | Reference | Relation |
+|------|-----------|----------|
+| Rule | [testing.md](../../rules/testing.md) | test placement / naming / decision techniques (本 skill の核) |
+| Rule | [command-output-verification.md](../../rules/command-output-verification.md) | RED / GREEN 段階の `cargo test` 出力 verify |
+| Rule | [conversion-correctness-priority.md](../../rules/conversion-correctness-priority.md) | E2E test で Tier 1 silent semantic change を捕捉 |
+| Skill | [quality-check](../quality-check/SKILL.md) | TDD 完了後の最終 verification |
+| Skill | [prd-template](../prd-template/SKILL.md) | matrix-driven PRD では各 cell に test を対応させる |
+| Skill | [hono-cycle](../hono-cycle/SKILL.md) | Step 5 で本 skill を invoke |

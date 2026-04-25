@@ -72,3 +72,12 @@ Apply changes detected in Steps 1-3 to `TODO`. Follow `.claude/rules/todo-entry-
 - Code `todo!()` macros have corresponding items in `TODO`
 - Evidence of checking whether hold item prerequisites were resolved by completed tasks
 - Existing item cross-references and descriptions are consistent with current state
+
+## Related Rules / Skills / Commands
+
+| Type | Reference | Relation |
+|------|-----------|----------|
+| Rule | [todo-entry-standards.md](../../rules/todo-entry-standards.md) | TODO 項目記載 format (`[I-NNN]` / `[INV-N]` 等) |
+| Rule | [todo-prioritization.md](../../rules/todo-prioritization.md) | priority 判定 (本 audit が priority labelling を verify) |
+| Skill | [todo-grooming](../todo-grooming/SKILL.md) | 5-step periodic grooming (本 audit より broad scope) |
+| Skill | [backlog-management](../backlog-management/SKILL.md) | TODO ↔ backlog ↔ plan.md の整合性管理 |

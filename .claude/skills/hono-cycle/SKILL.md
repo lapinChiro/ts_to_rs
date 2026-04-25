@@ -24,7 +24,9 @@ When the user runs `/hono-cycle`, or when auto-executed via `/loop`.
 
 Report directory mode results as the primary metric. If there's a difference from single-file mode, include both.
 
-## Cycle Steps
+## Actions
+
+Single cycle = Step 1 (re-bench) → Step 2 (error analysis) → Step 3 (TODO grooming) → Step 4 (PRD creation) → Step 5 (TDD implementation) → Step 6 (re-conversion verify)。各 step は前 step の完了を前提に sequential 実行する。
 
 Execute the following 6 steps in order. Confirm each step's completion before proceeding.
 
@@ -75,7 +77,8 @@ Execute the following 6 steps in order. Confirm each step's completion before pr
 1. Select the top PRD-eligible item from TODO
 2. Consider whether related items can be batched (same root cause, same module fix)
 3. Create a PRD per `/prd-template` format
-   - Skip Discovery clarification questions (reason: inefficient to run Discovery every loop iteration. Steps 1-3 provide sufficient information for autonomous judgment)
+   - **Non-matrix-driven PRD のみ** Skip Discovery clarification questions (reason: inefficient to run Discovery every loop iteration. Steps 1-3 provide sufficient information for autonomous judgment)
+   - **Matrix-driven PRD は Discovery 必須** ([`spec-first-prd.md`](../../rules/spec-first-prd.md) Stage 1 violation を防ぐ)。Spec stage 完了 verification は [`spec-stage-adversarial-checklist.md`](../../rules/spec-stage-adversarial-checklist.md) の 10-rule を必須適用
    - Always include "confirm error resolution in Hono re-conversion" as a completion criterion
 4. Place PRD in `backlog/` and update `plan.md`
 
@@ -114,3 +117,24 @@ Interrupt the cycle and report to the user if any of the following apply:
 - Reporting cycle completion without passing quality check
 - Auto-executing git commit / push (only the user does this)
 - Implementing multiple PRDs simultaneously in one cycle (complete one PRD at a time)
+
+## Verification
+
+- bench-history.jsonl に new entry が追加されている (Step 1 実施 evidence)
+- TODO の bench-derived 件数が `kind` 実測値で update 済 (Step 3 実施 evidence)
+- backlog/ に new PRD が存在し plan.md に insert 済 (Step 4 実施 evidence)
+- /quality-check skill を pass している (Step 5 完了 verification)
+- Step 6 の re-conversion で対象 error category が解消されている (cycle 完了の核心 evidence)
+
+## Related Rules / Skills / Commands
+
+| Type | Reference | Relation |
+|------|-----------|----------|
+| Rule | [todo-prioritization.md](../../rules/todo-prioritization.md) | Step 3 priority grooming で適用 |
+| Rule | [ideal-implementation-primacy.md](../../rules/ideal-implementation-primacy.md) | bench 数値を optimization target にしない原則 (Step 1 で base 値記録のみ) |
+| Rule | [spec-first-prd.md](../../rules/spec-first-prd.md) | matrix-driven PRD は Step 4 で Discovery 必須 (Discovery skip は non-matrix のみ) |
+| Skill | [todo-grooming](../todo-grooming/SKILL.md) | Step 3 priority grooming の本体 |
+| Skill | [prd-template](../prd-template/SKILL.md) | Step 4 PRD 起票 |
+| Skill | [tdd](../tdd/SKILL.md) | Step 5 TDD 実装 |
+| Skill | [quality-check](../quality-check/SKILL.md) | Step 6 quality check |
+| Command | [/bench](../../commands/bench.md) | bench 取得のみで TDD まで進めない light version (本 skill の subset) |

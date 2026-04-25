@@ -18,3 +18,10 @@ Skip if the file does not exist. Do not modify if no update is needed.
 - Proposing a commit message without updating documents
 - Deferring document updates across multiple commits ("will update later in batch")
 - Including document changes unrelated to the code changes in the same commit (only update documents corresponding to the code changes)
+
+## Related Rules
+
+| Rule | Relation |
+|------|----------|
+| [incremental-commit.md](incremental-commit.md) | Phase 単位 commit の前段で本ルールを適用 |
+| [prd-completion.md](prd-completion.md) | PRD close 時の document update (TODO 削除 / plan.md 更新) |

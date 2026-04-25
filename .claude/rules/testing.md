@@ -6,11 +6,11 @@ paths:
 
 # Testing Conventions
 
-## Trigger
+## When to Apply
 
 When creating or modifying test code.
 
-## Actions
+## Constraints
 
 Follow these conventions for test placement and writing:
 
@@ -131,3 +131,12 @@ When creating a PRD, a test coverage review of the impact area is **mandatory** 
 - Using `unwrap()` / `expect()` in library code
 - Completing conversion feature changes without writing E2E tests
 - **Creating a PRD without reviewing existing test coverage** in the impact area using the techniques above
+
+## Related Rules
+
+| Rule | Relation |
+|------|----------|
+| [pipeline-integrity.md](pipeline-integrity.md) | Test placement (unit / integration / E2E) と pipeline 構成の整合 |
+| [check-job-review-layers.md](check-job-review-layers.md) | Layer 1 (Mechanical) で test name 形式 / bug-affirming test 等を verify |
+| [problem-space-analysis.md](problem-space-analysis.md) | Test は問題空間マトリクスの全 cell から導出 (本ルール test design techniques と相補) |
+| [spec-stage-adversarial-checklist.md](spec-stage-adversarial-checklist.md) | Rule "E2E readiness" で per-cell E2E fixture 準備を verify |

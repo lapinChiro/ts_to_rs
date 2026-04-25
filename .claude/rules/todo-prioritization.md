@@ -10,11 +10,9 @@ When prioritizing TODO or backlog items, reordering plan.md batches, or selectin
 
 Always address root causes, not surface symptoms. Prioritize based on the nature of the root cause (design flaw, reliability risk, etc.), not the visible symptom (compile error, unsupported syntax, etc.).
 
-**Primary goal**: 本プロジェクトの最上位目標は「理想的な TS→Rust トランスパイラの獲得」。
-優先度判定は `ideal-implementation-primacy.md` に従属する。ベンチ数値は defect 発見の
-シグナルであり、最適化ターゲットではない。
+**Primary goal**: 本ルールは [`ideal-implementation-primacy.md`](ideal-implementation-primacy.md) に subordinate (最上位原則 / patch vs structural / metric positioning は同 file 参照)。
 
-## 判断フロー (概観)
+## Decision Flow (Overview)
 
 ```
 ┌────────────────────────────────────────────────────────────┐
@@ -49,14 +47,15 @@ Always address root causes, not surface symptoms. Prioritize based on the nature
 └────────────────────────────────────────────────────────────┘
 ```
 
-## 関連ルール
+## Related Rules
 
-| ルール | 役割 |
-|---|---|
-| `ideal-implementation-primacy.md` | 最上位原則 (理想実装優先、patch vs structural) |
-| `todo-entry-standards.md` | TODO 項目の記載フォーマット (通常 + INV) |
-| `conversion-correctness-priority.md` | L1 判定の基準 (silent semantic change の分類) |
-| `conversion-feasibility.md` | 「難しい」を理由にした降格の禁止 |
+| Rule | Relation |
+|------|----------|
+| [ideal-implementation-primacy.md](ideal-implementation-primacy.md) | 最上位原則 (本ルールが subordinate)。理想実装優先、patch vs structural の base |
+| [todo-entry-standards.md](todo-entry-standards.md) | TODO 項目の記載フォーマット (通常 + INV)。Step 0 (Investigation Debt) の format spec |
+| [conversion-correctness-priority.md](conversion-correctness-priority.md) | L1 判定の基準 (silent semantic change = Tier 1 の分類) |
+| [conversion-feasibility.md](conversion-feasibility.md) | 「難しい」を理由にした降格の禁止 |
+| [problem-space-analysis.md](problem-space-analysis.md) | Step 1 root cause clustering の理論的根拠 (matrix で問題空間 enumerate) |
 
 ## Step 0: Uncertainty-Driven Investigation Check (前置ステップ)
 
@@ -104,8 +103,8 @@ Classify each cluster into one of 4 levels. Priority order: L1 > L2 > L3 > L4.
 **If left unaddressed, all other development output becomes untrustworthy.**
 
 Criteria (any of):
-- **S1 (Silent semantic change)**: Code compiles but behaves differently from TypeScript. Tests may not detect it
-- **Test infrastructure compromise**: Tests pass but quality is not guaranteed (e.g., E2E stdout comparison polluted by S1 bugs)
+- **Tier 1 (Silent semantic change)**: Code compiles but behaves differently from TypeScript. Tests may not detect it. (Tier 分類は [`conversion-correctness-priority.md`](conversion-correctness-priority.md) 参照)
+- **Test infrastructure compromise**: Tests pass but quality is not guaranteed (e.g., E2E stdout comparison polluted by Tier 1 bugs)
 
 ### L2: Design Foundation
 

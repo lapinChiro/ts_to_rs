@@ -9,7 +9,7 @@
 
 ## Core Principle
 
-This project aims to build a **perfect TypeScript → Rust transpiler**. Judging any TS pattern as "impossible to convert" is equivalent to denying the project's feasibility. "Difficult" is never a reason to defer — it is a trigger for deeper design investigation.
+本ルールは [`ideal-implementation-primacy.md`](ideal-implementation-primacy.md) に subordinate。"Difficult" は defer の理由にならず、deeper design investigation の trigger とする。
 
 ## Constraints
 
@@ -30,3 +30,12 @@ This project aims to build a **perfect TypeScript → Rust transpiler**. Judging
 - Directly porting TS-specific constraint workarounds to Rust and judging "cannot be ported" — if the constraint doesn't exist in Rust, the code is unnecessary
 - Using "difficult in Rust" or "high cost" as grounds for lowering TODO priority, deferring items, or excluding from plan.md
 - Describing any TS feature as "difficult to express in Rust" in TODO, plan.md, or PRD without providing concrete conversion strategy candidates
+
+## Related Rules
+
+| Rule | Relation |
+|------|----------|
+| [ideal-implementation-primacy.md](ideal-implementation-primacy.md) | 最上位原則 (本ルールが subordinate)。理想実装の達成可能性を構造的に保証 |
+| [todo-prioritization.md](todo-prioritization.md) | "難しい" を理由にした降格の禁止が prioritization rule に integrate |
+| [conversion-correctness-priority.md](conversion-correctness-priority.md) | 変換問題の Tier 分類 (実現性が低い ≠ 不要、Tier 1 silent semantic change が最優先) |
+| [type-fallback-safety.md](type-fallback-safety.md) | 型 fallback 導入時の安全性分析 (対応不能のとき安全な fallback 選択の base) |

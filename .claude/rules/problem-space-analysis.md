@@ -131,14 +131,17 @@ PRD 完了宣言前に、以下の自問を文書化する:
   別 PRD に分割、しないなら全カバー)。
 - 「PRD 完了後に次のレビューで判明する」を受け入れること (それは本ルールの失敗)。
 
-## 関連ルール
+## Related Rules
 
-- `ideal-implementation-primacy.md`: 本ルールはその最上位原則の **実装手段**。
-  「理想的な transpiler」は問題空間の網羅なしに達成不可能。
-- `prd-completion.md`: 完了条件にマトリクス全カバーを含める。
-- `prd-template` skill: Step 0 で本ルールを適用する (Discovery の前)。
-- `conversion-correctness-priority.md`: マトリクス各セルで Tier 判定を行う。
-- `todo-entry-standards.md`: 本 PRD 外に切り出したセルを TODO 化する際の記載標準。
+| Rule | Relation |
+|------|----------|
+| [ideal-implementation-primacy.md](ideal-implementation-primacy.md) | 最上位原則 (本ルールが **実装手段**)。理想的な transpiler は問題空間の網羅なしに達成不可能 |
+| [prd-completion.md](prd-completion.md) | 完了条件にマトリクス全カバーを含める (本ルール → 完了条件への連携) |
+| [spec-first-prd.md](spec-first-prd.md) | matrix-driven PRD lifecycle で本ルールを Stage 1 で適用 |
+| [spec-stage-adversarial-checklist.md](spec-stage-adversarial-checklist.md) | Rule 10 (Cross-axis matrix completeness) の理論的根拠が本ルール |
+| [check-job-review-layers.md](check-job-review-layers.md) | Layer 3 (Structural cross-axis) の理論的根拠が本ルール |
+| [conversion-correctness-priority.md](conversion-correctness-priority.md) | マトリクス各セルで Tier 判定を行う |
+| [todo-entry-standards.md](todo-entry-standards.md) | 本 PRD 外に切り出したセルを TODO 化する際の記載標準 |
 
 ## Rationale
 

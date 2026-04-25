@@ -43,3 +43,14 @@ On errors:
 
 - All commands completed with exit code 0
 - Full output of each output file has been reviewed via the Read tool
+
+## Related Rules / Skills / Commands
+
+| Type | Reference | Relation |
+|------|-----------|----------|
+| Rule | [command-output-verification.md](../../rules/command-output-verification.md) | output review 手順 (full content read) — 本 skill の核 |
+| Rule | [testing.md](../../rules/testing.md) | test 実行結果の review |
+| Skill | [tdd](../tdd/SKILL.md) | TDD 完了時に本 skill を invoke |
+| Skill | [large-scale-refactor](../large-scale-refactor/SKILL.md) | refactor phase 完了時に本 skill を invoke |
+| Skill | [hono-cycle](../hono-cycle/SKILL.md) | Step 6 で本 skill を invoke |
+| Skill | [backlog-management](../backlog-management/SKILL.md) | PRD close 前に本 skill を invoke |

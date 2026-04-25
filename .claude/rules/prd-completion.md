@@ -25,3 +25,15 @@ When reporting PRD work as "complete".
 ## Rationale
 
 PRD completion criteria serve as prerequisites for subsequent PRDs. Reporting completion with unmet criteria breaks subsequent PRD assumptions, causing silent cascading impacts. The later these issues are discovered, the higher the correction cost.
+
+本ルールは [`ideal-implementation-primacy.md`](ideal-implementation-primacy.md) に subordinate (理想実装の達成 = matrix 全セルが仕様通り、patch による完了基準ずらし禁止)。
+
+## Related Rules
+
+| Rule | Relation |
+|------|----------|
+| [ideal-implementation-primacy.md](ideal-implementation-primacy.md) | 最上位原則 (本ルールが subordinate)。Patch vs structural fix の base |
+| [problem-space-analysis.md](problem-space-analysis.md) | Matrix 全セルカバー条件の methodology (本ルールが参照) |
+| [spec-first-prd.md](spec-first-prd.md) | Matrix-driven PRD lifecycle で本ルールを適用 |
+| [spec-stage-adversarial-checklist.md](spec-stage-adversarial-checklist.md) | Spec stage 完了 verification (matrix 全セル ideal output 記載) |
+| [check-job-review-layers.md](check-job-review-layers.md) | Implementation stage 完了 verification (4-layer review) |

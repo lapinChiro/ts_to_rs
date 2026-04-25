@@ -60,3 +60,13 @@ If the fallback is safe, document in the code:
 - Returning `RustType::Any` as a "quick fix" without documenting why it's safe
 - Assuming "it was an error before, so any output is an improvement" without verifying that the approximate output doesn't silently change behavior of SURROUNDING correctly-converted code
 - Using `serde_json::Value` in contexts where it could silently satisfy type constraints via trait implementations (e.g., `impl Display for Value` produces JSON representation, not TypeScript's string coercion)
+
+## Related Rules
+
+| Rule | Relation |
+|------|----------|
+| [conversion-correctness-priority.md](conversion-correctness-priority.md) | Tier 1 silent semantic change の防止が本ルールの目的 (Tier 分類が prerequisite) |
+| [ideal-implementation-primacy.md](ideal-implementation-primacy.md) | 最上位原則 (silent semantic change 禁止が本ルール由来) |
+| [conversion-feasibility.md](conversion-feasibility.md) | 「難しい」を理由にした unsafe fallback の禁止 |
+| [spec-first-prd.md](spec-first-prd.md) | matrix-driven PRD の Design section で本ルールを適用 |
+| [problem-space-analysis.md](problem-space-analysis.md) | matrix の各 cell で fallback 安全性を verify |

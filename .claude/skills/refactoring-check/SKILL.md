@@ -38,3 +38,13 @@ When feature addition/change work is complete.
 - Evidence exists of reviewing code in the impact area upon work completion
 - Recorded items include specific problems and reasoning
 - No duplication with existing `backlog/` or `plan.md` entries
+
+## Related Rules / Skills / Commands
+
+| Type | Reference | Relation |
+|------|-----------|----------|
+| Rule | [design-integrity.md](../../rules/design-integrity.md) | refactor 候補判定の base (cohesion / DRY / orthogonality / coupling) |
+| Rule | [todo-entry-standards.md](../../rules/todo-entry-standards.md) | refactor 候補を TODO 起票する format |
+| Skill | [large-scale-refactor](../large-scale-refactor/SKILL.md) | 抽出した refactor 候補のうち大規模なものは本 skill で実施 |
+| Skill | [correctness-audit](../correctness-audit/SKILL.md) | conversion correctness 観点の review (本 skill より深い、periodic) |
+| Skill | [investigation](../investigation/SKILL.md) | refactor 候補の詳細調査 |

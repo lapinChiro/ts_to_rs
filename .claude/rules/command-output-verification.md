@@ -15,3 +15,11 @@ When verifying output of build/test commands such as `cargo test`, `cargo clippy
 - Running the same command twice with different output filters (test execution is time-consuming and this is inefficient)
 - Using `tail` to get output end (line count is unpredictable and necessary information may be lost)
 - Judging output as "looks fine" without reviewing it
+
+## Related Rules
+
+| Rule | Relation |
+|------|----------|
+| [bulk-edit-safety.md](bulk-edit-safety.md) | Bulk edit 後の verify 手順で本ルールを適用 |
+| [check-job-review-layers.md](check-job-review-layers.md) | Layer 1 (Mechanical) の verify artifact (cargo test / clippy / fmt 出力) で本ルールに準拠 |
+| [testing.md](testing.md) | Test 実行結果 verify と test placement の整合 |

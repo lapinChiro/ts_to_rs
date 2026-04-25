@@ -16,3 +16,11 @@ When performing work consisting of multiple phases (Phase A, Phase B, etc.) or m
 - Running `git checkout -- <dir>` with uncommitted changes (uncommitted changes from other phases get swept in)
 - Bundling multiple phases' changes into a single commit (all phases are lost on reset)
 - Proceeding to the next phase without creating a `[WIP]` commit
+
+## Related Rules
+
+| Rule | Relation |
+|------|----------|
+| [pre-commit-doc-sync.md](pre-commit-doc-sync.md) | Commit message 作成前の document update 手順 |
+| [bulk-edit-safety.md](bulk-edit-safety.md) | Bulk edit を phase 単位で commit する原則 |
+| [command-output-verification.md](command-output-verification.md) | 各 phase 完了時の `cargo check` / `cargo test` verify |

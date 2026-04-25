@@ -20,9 +20,11 @@ When creating a new PRD in `backlog/`.
 
 **matrix-driven の場合**: `.claude/rules/spec-first-prd.md` の 2-stage workflow を適用する。
 - **Spec stage** (実装前): grammar-derived matrix + tsc observation + E2E fixture (red) + checklist
+- **Spec stage 完了 verification**: `.claude/rules/spec-stage-adversarial-checklist.md` の **10-rule checklist を全項目 verify** (1 rule = Matrix completeness / 2 = Oracle grounding / 3 = NA justification / 4 = Grammar consistency / 5 = E2E readiness / 6 = Matrix/Design integrity / 7 = Control-flow exit sub-case / 8 = Cross-cutting invariant enumeration / 9 = Dispatch-arm sub-case alignment / 10 = Cross-axis matrix completeness)。1 つでも未達なら Implementation stage 移行不可。
 - **Implementation stage** (spec approved 後): spec 準拠の実装のみ
+- **Implementation stage 完了 verification**: `/check_job` 起動で `.claude/rules/check-job-review-layers.md` の 4-layer (Mechanical / Empirical / Structural cross-axis / Adversarial trade-off) を初回 invocation で全実施。発見 defect は `.claude/rules/post-implementation-defect-classification.md` の 5 category (Grammar gap / Oracle gap / Spec gap / Implementation gap / Review insight) に trace ベースで分類。
 
-**non-matrix-driven の場合** (infra, refactor, bug fix): 従来通り Step 0 以降に進む。
+**non-matrix-driven の場合** (infra, refactor, bug fix): 従来通り Step 0 以降に進む。Spec stage / Implementation stage の dual review framework は適用外。
 
 ### 0b. Problem Space Analysis (最優先・最重要・絶対遵守)
 
@@ -173,14 +175,9 @@ Why this feature is needed. Current problems or issues caused by its absence.
 
 判定凡例: ✓ (現状 OK) / ✗ (修正必要) / NA (unreachable, 理由付き) / 要調査 (Discovery で解消)
 
-### Matrix Completeness Audit
+### Spec-Stage Adversarial Review Checklist
 
-実装完了宣言前に以下を全チェック:
-- [ ] 全次元の variant を SWC AST / RustType 定義から網羅列挙した
-- [ ] 未カバーセル・「多分 OK」セルが残っていない
-- [ ] 「稀」「低頻度」を理由にした省略がない
-- [ ] review agent が指摘する可能性のある edge を先回り enumerate した
-- [ ] 全セルに test (unit / integration / E2E) が対応している
+Spec stage 完了 verification は `.claude/rules/spec-stage-adversarial-checklist.md` の **10-rule checklist** を本 PRD の `## Spec Review` section に転記して全項目 verification する (DRY のため checklist 内容は本 skill に再記載しない、rule file が single source of truth)。10-rule に 1 つでも未達があれば Implementation stage 移行不可。
 
 ## Goal
 
@@ -295,3 +292,34 @@ Conditions for this PRD's work to be considered "complete". Include quality chec
 - Writing vague task work descriptions, completion criteria, or dependencies (specifically name target files, functions, and types)
 - Estimating error count reduction based solely on error category labels without tracing actual code paths for representative instances (at least 3). The estimate must be grounded in confirmed execution path analysis, not hypothetical pattern matching
 - Starting implementation without classifying ALL error instances in the target category by root cause. When fixing N errors in a category, first classify every instance into sub-categories by root cause (e.g., "9 from merge bug, 9 from missing return type, 9 from fallback pattern"), then address root causes in priority order. Lesson: I-267 was initially scoped as "return statement ~10 instances" based on label estimation, but individual source-level tracing revealed the dominant root cause was a TypeRegistry merge bug (9 instances), not return statement propagation
+
+## Verification
+
+- `backlog/<prd-id>.md` が存在し、template の必須 section (Background / Problem Space / Goal / Scope / Design / Task List / Test Plan / Completion Criteria) 全て含む
+- Step 0a (matrix-driven 判定) の結論が PRD 冒頭に明記されている
+- Step 0b (Problem Space) の matrix が全 cell に判定 (✓/✗/NA/要調査) を持つ (空セル 0)
+- (matrix-driven の場合) `spec-stage-adversarial-checklist.md` 10-rule 全項目を本 PRD 内で verification 済
+- Step 3 (Impact Area Code Review) で production code + test coverage の review 結果が PRD に記載されている
+- Discovery (Step 2) で user に対し motivation / success / constraint の 3 種 hearing が完了
+- TODO の関連 entry が 🔗 link 等で本 PRD と連結
+
+## Related Rules / Skills / Commands
+
+| Type | Reference | Relation |
+|------|-----------|----------|
+| Rule | [problem-space-analysis.md](../../rules/problem-space-analysis.md) | Step 0b の matrix construction methodology (single source of truth) |
+| Rule | [spec-first-prd.md](../../rules/spec-first-prd.md) | matrix-driven PRD lifecycle (Stage 1/2 workflow) |
+| Rule | [spec-stage-adversarial-checklist.md](../../rules/spec-stage-adversarial-checklist.md) | Spec stage 完了 verification (10-rule checklist、本 skill が参照) |
+| Rule | [check-job-review-layers.md](../../rules/check-job-review-layers.md) | Implementation stage 完了 verification (4-layer review、`/check_job` で適用) |
+| Rule | [post-implementation-defect-classification.md](../../rules/post-implementation-defect-classification.md) | Implementation review で発見 defect の 5 category 分類 |
+| Rule | [design-integrity.md](../../rules/design-integrity.md) | Design Integrity Review (Step 3 の base) |
+| Rule | [type-fallback-safety.md](../../rules/type-fallback-safety.md) | Semantic Safety Analysis (型 fallback PRD で必須) |
+| Rule | [testing.md](../../rules/testing.md) | Test Coverage Review (Step 3b) で適用する test technique |
+| Rule | [conversion-correctness-priority.md](../../rules/conversion-correctness-priority.md) | Tier 1 silent semantic change の判定 |
+| Rule | [todo-entry-standards.md](../../rules/todo-entry-standards.md) | Out-of-scope items を TODO 起票する際の format |
+| Skill | [tdd](../tdd/SKILL.md) | PRD 起票後の Implementation stage で TDD 適用 |
+| Skill | [backlog-management](../backlog-management/SKILL.md) | PRD 完了時の post-processing |
+| Skill | [investigation](../investigation/SKILL.md) | 設計前の調査 (report/ への保存) |
+| Command | [/check_job](../../commands/check_job.md) | Spec stage / Implementation stage の review trigger |
+| Command | [/start](../../commands/start.md) | session 開始 (本 skill の Step 0 から再開) |
+| Command | [/end](../../commands/end.md) | PRD close 時の trigger |

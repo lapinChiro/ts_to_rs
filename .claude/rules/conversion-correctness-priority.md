@@ -23,17 +23,21 @@ Rationale: Generating Rust code with different semantics has no value. Compile e
 
 ## PRD Design Requirement
 
-Every PRD that changes type resolution or introduces type fallbacks must include a **semantic safety analysis** section that:
-
-1. Lists all affected output patterns (function returns, field types, variable types)
-2. Classifies each as Safe (compile error or identical behavior) or UNSAFE (silent semantic change)
-3. Proves that no UNSAFE pattern exists, or redesigns to eliminate it
-
-See `type-fallback-safety.md` for the detailed analysis procedure.
+型 resolution / type fallback を導入する PRD は **semantic safety analysis** を必須とする。詳細手順は [`type-fallback-safety.md`](type-fallback-safety.md) 参照 (本ルールは Tier 分類を提供、安全性分析の 3-step procedure は同 file 参照)。
 
 ## Prohibited
 
 - Prioritizing compile error fixes over silent semantic changes because "it's low effort"
 - Deprioritizing compile errors over unsupported syntax because "the impact scope is wide"
 - Determining priority by discovery order or ID order without evaluating problem severity (silent > compile error > unsupported)
-- Introducing type fallbacks (Any, wider union, HashMap) without performing the 3-step safety analysis defined in `type-fallback-safety.md`
+- Introducing type fallbacks (Any, wider union, HashMap) without performing the 3-step safety analysis defined in [`type-fallback-safety.md`](type-fallback-safety.md)
+
+## Related Rules
+
+| Rule | Relation |
+|------|----------|
+| [ideal-implementation-primacy.md](ideal-implementation-primacy.md) | 最上位原則 (Tier 1 silent semantic change の最優先化が本ルールの origin) |
+| [type-fallback-safety.md](type-fallback-safety.md) | 型 fallback 導入時の 3-step safety analysis (本ルール PRD Design Requirement の detailed methodology) |
+| [todo-prioritization.md](todo-prioritization.md) | L1 Reliability Foundation 判定で本ルールの Tier 1 を参照 |
+| [conversion-feasibility.md](conversion-feasibility.md) | 「難しい」を理由にした Tier 1 降格の禁止 |
+| [check-job-review-layers.md](check-job-review-layers.md) | Layer 2 (Empirical) で発見された silent semantic change を Tier 1 として分類 |

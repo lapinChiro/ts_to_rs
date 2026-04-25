@@ -26,12 +26,19 @@ When existing code issues are found during the check:
 
 ## Decision Criteria
 
-- Development effort, cost, or scope of impact are **not** valid grounds for design decisions
-- The only criterion is "is this the theoretically most ideal implementation?"
-- If the current implementation diverges from ideal, decide whether to fix it in this PRD or record in TODO
+設計判断の唯一の基準は理想実装。詳細は [`ideal-implementation-primacy.md`](ideal-implementation-primacy.md) 参照 (本ルールが subordinate)。Cost / effort / scope は判断基準として禁止。現実装が ideal と乖離している場合は本 PRD scope で fix するか TODO 起票を選択する。
 
 ## Prohibited
 
 - Limiting impact analysis to only the target module
 - Choosing a non-ideal design because "the effort is large" or "the impact scope is wide"
 - Discovering existing broken windows but neither recording nor fixing them
+
+## Related Rules
+
+| Rule | Relation |
+|------|----------|
+| [ideal-implementation-primacy.md](ideal-implementation-primacy.md) | 最上位原則 (本ルールが subordinate)。Decision Criteria の base |
+| [prd-design-review.md](prd-design-review.md) | PRD 設計セクション作成後の review (cohesion / 責務分離 / DRY)、本ルールと相補 |
+| [problem-space-analysis.md](problem-space-analysis.md) | 設計対象の問題空間 enumerate methodology |
+| [pipeline-integrity.md](pipeline-integrity.md) | Pipeline 整合性 (parser → transformer → generator) の制約 |

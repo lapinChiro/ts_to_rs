@@ -41,3 +41,17 @@ user-invocable: true
 - WebFetch での取得（Azure Blob Storage の SAS URL は 403 になる）
 - ログ全体を一度に Read しようとする（サイズ制限に引っかかる）
 - エラー行だけ見て周辺コンテキストを確認しない
+
+## Verification
+
+- log file が `/tmp/<workflow-name>-<run-id>.log` に保存されている
+- 失敗 step / job ごとに ID + サマリ + 詳細 + 対処方針 4 項目が記録されている
+- 周辺 context (失敗行の前後 ~20 行) を Read で確認した evidence あり
+
+## Related Rules / Skills / Commands
+
+| Type | Reference | Relation |
+|------|-----------|----------|
+| Rule | [command-output-verification.md](../../rules/command-output-verification.md) | log 出力 review 手順 (full content read、tail 禁止) |
+| Skill | [investigation](../investigation/SKILL.md) | 同種の情報収集 → report/ 保存 procedure (analyze-ga-log は CI log specialised version) |
+| Skill | [todo-audit](../todo-audit/SKILL.md) | log 解析で発見した defect を TODO 化する場合の format |

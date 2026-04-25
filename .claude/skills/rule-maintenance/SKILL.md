@@ -61,3 +61,18 @@ When reviewing or updating rules/skills:
 - Completing rule updates without checking review perspectives
 - Writing new rules or skills in Japanese (translate to English before saving)
 - Leaving Japanese text untranslated when updating a rule/skill file
+
+## Verification
+
+- 該当 rule の change が user 確認済 (削除の場合は明示承認 evidence)
+- 既存の `Related Rules` table の cross-reference が新 state で整合 (rename / split 等で stale link が発生していない)
+- CLAUDE.md Code of Conduct の rule reference が更新 / 追加されている (新 rule 追加時)
+- 21 rule + 18 skill + 9 command の `Related ...` table を grep で全 link 解決確認 (dead link 0)
+- (`paths:` frontmatter 持ち rule の場合) 該当 path で auto-load される動作 verify
+
+## Related Rules / Skills / Commands
+
+| Type | Reference | Relation |
+|------|-----------|----------|
+| Skill | [rule-writing](../rule-writing/SKILL.md) | rule 作成 procedure (本 skill が invoke) |
+| Rule | All `.claude/rules/*.md` (21 files) | maintenance 対象 (各 rule の `Related Rules` table の整合性 verify を含む) |

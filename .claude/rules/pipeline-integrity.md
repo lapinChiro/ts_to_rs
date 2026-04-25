@@ -23,3 +23,11 @@ When adding or modifying code related to the conversion pipeline (parser → tra
 - Calling generator functions like `crate::generator::types::generate_type` from within the transformer
 - Storing pre-formatted strings like `"T: Bound"` in `Vec<String>` and treating them as IR (use structs instead)
 - Implementing a new method (e.g., `instantiate`) with only unit tests and no integration tests for the conversion pipeline
+
+## Related Rules
+
+| Rule | Relation |
+|------|----------|
+| [design-integrity.md](design-integrity.md) | Pipeline architecture の higher-level design consistency |
+| [testing.md](testing.md) | Integration test の placement (`tests/*.rs`) と本ルールの "integration tests for usage sites" 要件 |
+| [dependencies.md](dependencies.md) | Cargo.toml の build-time pipeline 前提条件 |

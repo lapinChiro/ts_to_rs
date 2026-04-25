@@ -27,3 +27,11 @@ The following steps **must** be executed:
 - Using regex for Rust syntax-level decisions (function body start positions, match statement detection, etc.)
 - Judging output as "looks fine" without reviewing the transformation script's output
 - Building exclusion lists using `grep` patterns only (misses notation variations like `reg: &TypeRegistry` vs `reg: &crate::registry::TypeRegistry` — visually verify all actual signatures)
+
+## Related Rules
+
+| Rule | Relation |
+|------|----------|
+| [command-output-verification.md](command-output-verification.md) | Bulk edit 後の `cargo check` / `cargo test` 出力 verification 手順 |
+| [incremental-commit.md](incremental-commit.md) | Bulk edit を phase 単位で commit する原則 |
+| [pipeline-integrity.md](pipeline-integrity.md) | Bulk edit 対象が pipeline boundary を跨ぐ場合の整合性確認 |

@@ -30,3 +30,20 @@ When the user requests an investigation or analysis.
 - Composing reports from speculation or generalities only (support with specific code locations, file names, and line numbers)
 - Reporting verbally only without creating a report file
 - Creating a report without documenting the base commit
+
+## Verification
+
+- `report/<topic>.md` が作成され base commit が文書化されている
+- 報告 file 内の全 finding が具体的 code location (`file:line`) で裏付けられている
+- 投資判断系 (assumption ベース) 項目が `[INV-N]` format で TODO に起票されている (該当する場合)
+- user 提示の summary は report 完了後に行う (verbal-only 報告でない)
+
+## Related Rules / Skills / Commands
+
+| Type | Reference | Relation |
+|------|-----------|----------|
+| Rule | [todo-entry-standards.md](../../rules/todo-entry-standards.md) | 調査結果から TODO 起票する場合の format (特に `[INV-N]` 形式) |
+| Skill | [analyze-ga-log](../analyze-ga-log/SKILL.md) | GitHub Actions log 専用調査 (本 skill の specialization) |
+| Skill | [correctness-audit](../correctness-audit/SKILL.md) | conversion correctness 専用調査 (本 skill の specialization) |
+| Skill | [refactoring-check](../refactoring-check/SKILL.md) | 調査結果を refactor 候補化 |
+| Command | [/refresh_report](../../commands/refresh_report.md) | report/ 最新化 trigger (本 skill の output 整理) |
