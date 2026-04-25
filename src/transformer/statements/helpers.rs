@@ -6,7 +6,10 @@
 use swc_ecma_ast as ast;
 
 use crate::ir::{Expr, RustType, UnOp};
-use crate::transformer::helpers::truthy;
+use crate::pipeline::synthetic_registry::SyntheticTypeRegistry;
+use crate::transformer::helpers::truthy::{
+    falsy_predicate_for_expr, truthy_predicate_for_expr, TempBinder,
+};
 
 /// Represents a conditional assignment extracted from a condition expression.
 ///
@@ -136,39 +139,46 @@ fn is_comparison_op(op: ast::BinaryOp) -> bool {
 
 /// Generates a truthiness check expression for a given type.
 ///
-/// Delegates to [`truthy::truthy_predicate`] for supported primitives
-/// (`F64` / `String` / `Bool` / integer primitives) and falls back to a
-/// bare identifier for unsupported types.
+/// Delegates to [`truthy_predicate_for_expr`] (I-171 T2 expr-level API)
+/// so the full RustType matrix is covered: primitives, `Option<T>`,
+/// `Option<synthetic union>`, and always-truthy types
+/// (`Vec` / `Named` / `Fn` / `Tuple` / `StdCollection` / `DynTrait` / `Ref`).
 ///
 /// # Fallback contract
 ///
-/// The `Expr::Ident(var_name)` fallback produces `if var { ... }` which is
-/// a Rust type error for all non-`Bool` types. This is an intentional
-/// _compile-time fence_: callers that hit the fallback with a non-`Bool`
-/// type will discover the gap via `rustc`, rather than silently
-/// generating incorrect behaviour. The fallback is expected only in the
-/// two existing call sites:
-///
-/// 1. [`crate::transformer::statements::control_flow::Transformer::convert_if_with_conditional_assignment`]:
-///    enters only for `if (x = expr)` where `x` has an already-resolved
-///    type — primitives are handled by [`truthy::truthy_predicate`] and
-///    richer types use dedicated narrow paths earlier in `convert_if_stmt`.
-/// 2. `generate_falsy_condition` loop-break uses (see below).
-///
-/// Do NOT widen this fallback to emit `.is_some()` or similar guesses —
-/// that would introduce silent semantic changes (Tier 1) instead of
-/// surfacing gaps as compile errors.
-pub(super) fn generate_truthiness_condition(var_name: &str, ty: &RustType) -> Expr {
-    truthy::truthy_predicate(var_name, ty).unwrap_or_else(|| Expr::Ident(var_name.to_string()))
+/// The `Expr::Ident(var_name)` fallback fires only when
+/// `truthy_predicate_for_expr` returns `None`, which today means
+/// `Any` / `TypeVar` / `Unit` / `Never` / `Result` / `QSelf`. For these
+/// types `if var { ... }` is a Rust type error (compile-time fence) —
+/// gaps surface via `rustc` instead of silently generating incorrect
+/// behaviour. Do NOT widen this fallback to emit `.is_some()` or similar
+/// guesses; that would introduce silent semantic changes (Tier 1).
+pub(super) fn generate_truthiness_condition(
+    var_name: &str,
+    ty: &RustType,
+    synthetic: &SyntheticTypeRegistry,
+) -> Expr {
+    let mut binder = TempBinder::new();
+    let operand = Expr::Ident(var_name.to_string());
+    truthy_predicate_for_expr(&operand, ty, synthetic, &mut binder)
+        .unwrap_or_else(|| Expr::Ident(var_name.to_string()))
 }
 
 /// Generates a falsy check condition (De Morgan inverse of truthiness).
 ///
 /// Used for loop break conditions. Shares the compile-time fence contract
 /// described on [`generate_truthiness_condition`].
-pub(super) fn generate_falsy_condition(var_name: &str, ty: &RustType) -> Expr {
-    truthy::falsy_predicate(var_name, ty).unwrap_or_else(|| Expr::UnaryOp {
-        op: UnOp::Not,
-        operand: Box::new(Expr::Ident(var_name.to_string())),
+pub(super) fn generate_falsy_condition(
+    var_name: &str,
+    ty: &RustType,
+    synthetic: &SyntheticTypeRegistry,
+) -> Expr {
+    let mut binder = TempBinder::new();
+    let operand = Expr::Ident(var_name.to_string());
+    falsy_predicate_for_expr(&operand, ty, synthetic, &mut binder).unwrap_or_else(|| {
+        Expr::UnaryOp {
+            op: UnOp::Not,
+            operand: Box::new(Expr::Ident(var_name.to_string())),
+        }
     })
 }

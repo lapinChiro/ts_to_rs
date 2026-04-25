@@ -80,3 +80,53 @@ fn narrowing_match_suppressed_when_closure_reassign_present() {
         "match-shadow `let x = match x {{ ... }}` must be suppressed, got {result:?}"
     );
 }
+
+/// Pre-existing positive boundary lock-in: `if (x !== null) { body; return; }`
+/// (early-return on `!== null`) **without** closure-reassign must emit the
+/// standard `if let Some(x) = x { body }` shadow form via
+/// [`Self::generate_if_let`]. Locks in the pre-T7 / pre-I-177-D `!== null`
+/// emission path so future architectural refactors (notably I-177-D
+/// `narrowed_type` suppression scope refactor) preserve the standard
+/// narrow path when no closure-reassign is in effect.
+#[test]
+fn narrowing_match_uses_if_let_for_neq_null_early_return_without_closure_reassign() {
+    let source = r#"
+        function f(): number {
+            let x: number | null = 5;
+            if (x !== null) {
+                x &&= 3;
+                return x;
+            }
+            return -1;
+        }
+    "#;
+    let f = TctxFixture::from_source(source);
+    let tctx = f.tctx();
+    let fn_decl = match &f.module().body[0] {
+        ModuleItem::Stmt(ast::Stmt::Decl(Decl::Fn(fd))) => fd,
+        _ => panic!("expected fn decl"),
+    };
+    let body_stmts = &fn_decl.function.body.as_ref().unwrap().stmts;
+    let result = {
+        let mut synthetic = SyntheticTypeRegistry::new();
+        Transformer::for_module(&tctx, &mut synthetic).convert_stmt_list(body_stmts, None)
+    }
+    .unwrap();
+
+    // Expected: `if let Some(x) = x { ... }` (or wrapped as `Stmt::IfLet`).
+    assert!(
+        result.iter().any(|s| matches!(s, Stmt::IfLet { .. })),
+        "without closure-reassign, narrow must emit if-let shadow, got {result:?}"
+    );
+    // No `is_some` predicate fallback when narrow is alive.
+    assert!(
+        !result.iter().any(|s| matches!(
+            s,
+            Stmt::If {
+                condition: Expr::MethodCall { method, .. },
+                ..
+            } if method == "is_some"
+        )),
+        "narrow-alive case must NOT fall back to predicate form, got {result:?}"
+    );
+}

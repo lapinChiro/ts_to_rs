@@ -1789,43 +1789,68 @@ fn test_e2e_cell_i171_b_bang_tsconstassertion() {
 
 // Matrix C-16b: OptChain base narrow (in-scope, T6 P3b extension).
 #[test]
-#[ignore = "I-171 C-16b RED — TWO blockers must be resolved before this can \
-           GREEN: (1) T6 P3b — guards.rs Bang arm needs an OptChain case so \
-           `extract_optchain_base_ident` pushes `NarrowEvent::Narrow` for \
-           the base ident and post-if `x.v` resolves against the narrowed \
-           `_TypeLit0` (not the outer `Option<_TypeLit0>`); (2) pre-existing \
-           OptChain field-access closure defect — the if-cond emission \
-           lowers `x?.v` to `x.as_ref().and_then(|_v| _v.v)` where `_v.v` \
-           moves out of `&_TypeLit0` (Rust E0507). T6 P3b alone will not \
-           unblock E2E because the if-cond compile error precedes the \
-           post-if narrow check. Both fixes are tracked separately."]
+#[ignore = "I-171 C-16b RED — T6 P3b (2026-04-25) closed the post-if narrow \
+           gap: `extract_optchain_base_ident` now pushes \
+           `NarrowEvent::Narrow` for the base ident on `if (!x?.v) return;` \
+           and post-if `x.v` resolves against narrowed `_TypeLit0` rather \
+           than `Option<_TypeLit0>`. Empirical (post-fix): `x.v.unwrap_or_else(...)` \
+           emits with `x` typed `_TypeLit0`. \
+           E2E still RED on three pre-existing defects ORTHOGONAL to T6 P3b: \
+           (a) OptChain field-access closure E0507 — if-cond emission lowers \
+           `x?.v` to `x.as_ref().and_then(|_v| _v.v)` where `_v.v` moves out \
+           of `&_TypeLit0`; (b) struct-literal expected-type coercion gap — \
+           `{ v: \"hi\" }` emits `_TypeLit0 { v: \"hi\" }` (&str) where the \
+           field is `Option<String>` (I-175 family); (c) `?? \"\"` lowering \
+           on `Option<String>` emits `unwrap_or_else(|| \"\")` returning \
+           `&str` for an `Option<String>` receiver. Tracked as I-177 (a) / \
+           I-175 (b) / I-181-like (c) follow-up — re-unignore when those \
+           close."]
 fn test_e2e_cell_i171_c16b_optchain_base_narrow() {
     run_cell_e2e_test("i161-i171", "cell-c16b-optchain-base-narrow");
 }
 
 // T7 regression cells (classifier × narrow × logical assign interaction).
 #[test]
-#[ignore = "I-161 T7-1 RED — unignore at T7 (&&= on narrowed F64, R4 re-host)"]
 fn test_e2e_cell_i161_t7_1_and_narrow_f64() {
     run_cell_e2e_test("i161-i171", "cell-t7-1-and-narrow-f64");
 }
 #[test]
-#[ignore = "I-161 T7-2 RED — unignore at T7 (||= on narrowed F64)"]
 fn test_e2e_cell_i161_t7_2_or_narrow_f64() {
     run_cell_e2e_test("i161-i171", "cell-t7-2-or-narrow-f64");
 }
 #[test]
-#[ignore = "I-161 T7-3 RED — unignore at T7 (&&= + closure reassign interaction)"]
+#[ignore = "I-161 T7-3 RED — narrow × `&&=` × closure-reassign の architectural \
+           IR/TypeResolver cohesion gap、I-177-D 完了で GREEN 化見込み。\
+           T7 review iteration (2026-04-25) で `try_generate_narrowing_match` \
+           に NonNullish !== closure-reassign suppression branch を追加する \
+           workaround patch を試行したが、deep deep /check_job adversarial \
+           review で Scenario A regression (`return x` body without `??` で \
+           E0308 mismatch) が判明し、`ideal-implementation-primacy.md` の \
+           interim patch 条件未充足 + structural fix を patch に降格していると \
+           判断し revert (2026-04-25)。本 cell の root cause は \
+           `FileTypeResolution::narrowed_type(var, position)` の closure-reassign \
+           suppression scope が enclosing fn body 全体で broad すぎ、cons-span \
+           内 (if-body 内、narrow が valid な scope) も含めて narrow を \
+           suppress すること (TODO I-177-D 参照)。pre-T7 / post-revert emission: \
+           `if let Some(mut x) = x { if x.is_some_and(...) { x = Some(3.0); } \
+           reset(); return x.unwrap_or_else(...); }` → IR shadow x: T と \
+           TypeResolver Option<T> view 不整合で `x &&= 3` desugar / \
+           `?? -1` lowering が Option-shape を query して shadow と mismatch \
+           (E0599 / E0282 / E0308 chain) + 加えて `let mut reset = || { x = None; }` \
+           による closure-mutable-capture E0506 borrow conflict。\
+           **Resolution**: I-177-D (TypeResolver suppression scope refactor、案 C: \
+           cons-span 内 narrow 保持 + LET-WRAP scope のみ suppress) で IR shadow \
+           form と TypeResolver narrow が agree するため `x &&= 3` も `?? -1` も \
+           同じ shadow context で works → E0599 chain 解消。closure-mutable-capture \
+           E0506 は I-048 (所有権推論) で別途解消。両方完了後に re-unignore。"]
 fn test_e2e_cell_i161_t7_3_and_closure_reassign() {
     run_cell_e2e_test("i161-i171", "cell-t7-3-and-closure-reassign");
 }
 #[test]
-#[ignore = "I-161 T7-4 RED — unignore at T7 (||= then ??= chain)"]
 fn test_e2e_cell_i161_t7_4_or_then_nc() {
     run_cell_e2e_test("i161-i171", "cell-t7-4-or-then-nc");
 }
 #[test]
-#[ignore = "I-161 T7-5 RED — unignore at T7 (&&= on narrowed synthetic union + string RHS)"]
 fn test_e2e_cell_i161_t7_5_and_narrow_union_rhs() {
     run_cell_e2e_test("i161-i171", "cell-t7-5-and-narrow-union-rhs");
 }

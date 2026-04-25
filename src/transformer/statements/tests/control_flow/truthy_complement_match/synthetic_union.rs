@@ -85,9 +85,7 @@ function describe(x: string | Tag | null): string {
             args,
         } = init
         else {
-            panic!(
-                "shadow let init must be `Enum::Variant(...)` ctor call, got {init:?}"
-            );
+            panic!("shadow let init must be `Enum::Variant(...)` ctor call, got {init:?}");
         };
         assert_eq!(
             variant, expected_variant,

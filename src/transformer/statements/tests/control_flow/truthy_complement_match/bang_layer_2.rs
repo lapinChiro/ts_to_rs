@@ -51,7 +51,10 @@ function f(x: number | null): string {
         panic!("Some(...) must contain a binding, got {:?}", fields[0]);
     };
     assert_eq!(name, "x", "binding must shadow outer var name `x`");
-    assert!(arms[0].guard.is_some(), "Some arm must carry a truthy guard");
+    assert!(
+        arms[0].guard.is_some(),
+        "Some arm must carry a truthy guard"
+    );
 
     // Wildcard arm: no binding, no guard.
     assert!(matches!(arms[1].patterns[0], Pattern::Wildcard));
@@ -331,14 +334,11 @@ function h(x: number | null): number | null {
     let last_stmt = &body[body.len() - 1];
     let ret_expr = match last_stmt {
         Stmt::Return(Some(e)) | Stmt::TailExpr(e) => e,
-        other => panic!(
-            "expected last stmt to be `return <expr>` or `<expr>` tail, got {other:?}"
-        ),
+        other => panic!("expected last stmt to be `return <expr>` or `<expr>` tail, got {other:?}"),
     };
     let lowered = format!("{ret_expr:?}");
     assert!(
-        lowered.contains("Some")
-            && (lowered.contains("Ident(\"x\")") || lowered.contains("\"x\"")),
+        lowered.contains("Some") && (lowered.contains("Ident(\"x\")") || lowered.contains("\"x\"")),
         "return expression must wrap `x` in `Some(...)` (TypeResolver narrow + IR shadow + \
          Some-wrap coerce cohesion check). Got: {ret_expr:?}"
     );
@@ -379,7 +379,13 @@ function f(x: number | null): number {
         .iter()
         .find(|s| {
             matches!(s, Stmt::If { .. })
-                || matches!(s, Stmt::Let { init: Some(Expr::Match { .. }), .. })
+                || matches!(
+                    s,
+                    Stmt::Let {
+                        init: Some(Expr::Match { .. }),
+                        ..
+                    }
+                )
         })
         .expect("expected an If or Let-Match in the function body");
     assert!(

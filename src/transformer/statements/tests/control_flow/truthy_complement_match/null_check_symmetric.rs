@@ -106,7 +106,13 @@ function f(x: number | null): number {
         .iter()
         .find(|s| {
             matches!(s, Stmt::If { .. })
-                || matches!(s, Stmt::Let { init: Some(Expr::Match { .. }), .. })
+                || matches!(
+                    s,
+                    Stmt::Let {
+                        init: Some(Expr::Match { .. }),
+                        ..
+                    }
+                )
         })
         .expect("expected an If or Let-Match in the function body");
     assert!(

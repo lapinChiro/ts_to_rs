@@ -41,6 +41,7 @@ use crate::ir::RustType;
 use crate::pipeline::narrowing_patterns;
 use crate::pipeline::type_resolution::Span;
 use crate::pipeline::ResolvedType;
+use crate::transformer::helpers::peek_through::peek_through_type_assertions;
 
 use super::events::{NarrowEvent, NarrowTrigger, NullCheckKind, PrimaryTrigger};
 use super::type_context::NarrowTypeContext;
@@ -348,8 +349,20 @@ pub fn detect_early_return_narrowing<C: NarrowTypeContext>(
             }
         }
         // Negated truthy: if (!x) { return; } → x is non-null after
+        //
+        // Peek-through (P3a): outer wrappers like `as` / `!` / `<T>` /
+        // `as const` / parens are runtime-no-op. `if (!(x as T))` must
+        // narrow `x` identically to `if (!x)`.
+        //
+        // OptChain (P3b): `if (!x?.v) { return; }` also narrows the base
+        // `x` from `Option<T>` to `T` after the exit. The invariant is
+        // symmetric to `x?.v !== undefined` (T6-4): if `x` were null /
+        // undefined, `x?.v` short-circuits to `undefined`, `!undefined`
+        // is true, so the early-exit fires; reaching the fall-through
+        // therefore proves `x` is non-null.
         ast::Expr::Unary(unary) if unary.op == ast::UnaryOp::Bang => {
-            if let ast::Expr::Ident(ident) = unary.arg.as_ref() {
+            let peeled = peek_through_type_assertions(unary.arg.as_ref());
+            if let ast::Expr::Ident(ident) = peeled {
                 let var_name = ident.sym.to_string();
                 if let ResolvedType::Known(RustType::Option(inner)) = ctx.lookup_var(&var_name) {
                     ctx.push_narrow_event(NarrowEvent::Narrow {
@@ -358,6 +371,20 @@ pub fn detect_early_return_narrowing<C: NarrowTypeContext>(
                         var_name,
                         narrowed_type: inner.as_ref().clone(),
                         trigger: NarrowTrigger::EarlyReturnComplement(PrimaryTrigger::Truthy),
+                    });
+                }
+            } else if let Some(base_ident) = narrowing_patterns::extract_optchain_base_ident(peeled)
+            {
+                let var_name = base_ident.sym.to_string();
+                if let Some(inner) = unwrap_option_type(&var_name, ctx) {
+                    ctx.push_narrow_event(NarrowEvent::Narrow {
+                        scope_start: if_end,
+                        scope_end: block_end,
+                        var_name,
+                        narrowed_type: inner,
+                        trigger: NarrowTrigger::EarlyReturnComplement(
+                            PrimaryTrigger::OptChainInvariant,
+                        ),
                     });
                 }
             }

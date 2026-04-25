@@ -7,11 +7,11 @@ use anyhow::Result;
 use swc_ecma_ast as ast;
 
 use super::helpers::{
-    extract_conditional_assignment, generate_truthiness_condition, unwrap_parens,
-    ConditionalAssignment,
+    extract_conditional_assignment, generate_truthiness_condition, ConditionalAssignment,
 };
 use crate::ir::{BinOp, Expr, MatchArm, Pattern, RustType, Stmt};
 use crate::transformer::expressions::patterns::extract_narrowing_guards;
+use crate::transformer::helpers::peek_through::peek_through_type_assertions;
 use crate::transformer::Transformer;
 
 impl<'a> Transformer<'a> {
@@ -183,14 +183,25 @@ impl<'a> Transformer<'a> {
     // modules within a crate), so callers in this file invoke it as
     // `self.try_generate_option_truthy_complement_match(...)` unchanged.
 
+    /// Tries to generate a primitive truthy / falsy predicate for the simple
+    /// `if (x)` and `if (!x)` shapes.
+    ///
+    /// Both the outer test and the Bang inner operand are peeled with
+    /// [`peek_through_type_assertions`] so syntactic wrappers
+    /// (`Paren` / `TsAs` / `TsNonNull` / `TsTypeAssertion` / `TsConstAssertion`)
+    /// transparently dispatch to the same primitive emission as the bare
+    /// identifier (Matrix C-11 / C-12 / C-13 — `if (x as T)`, `if (!(x!))`,
+    /// `if ((x))` etc.). Without peek-through these forms would fall through
+    /// to the generic `convert_expr` path and emit non-bool primitive
+    /// conditions in places that require a `bool`.
     fn try_generate_primitive_truthy_condition(&self, test: &ast::Expr) -> Option<Expr> {
-        match unwrap_parens(test) {
+        match peek_through_type_assertions(test) {
             ast::Expr::Ident(ident) => {
                 let ty = self.get_type_for_var(ident.sym.as_ref(), ident.span)?;
                 crate::transformer::helpers::truthy::truthy_predicate(ident.sym.as_ref(), ty)
             }
             ast::Expr::Unary(u) if u.op == ast::UnaryOp::Bang => {
-                if let ast::Expr::Ident(ident) = unwrap_parens(u.arg.as_ref()) {
+                if let ast::Expr::Ident(ident) = peek_through_type_assertions(u.arg.as_ref()) {
                     let ty = self.get_type_for_var(ident.sym.as_ref(), ident.span)?;
                     crate::transformer::helpers::truthy::falsy_predicate(ident.sym.as_ref(), ty)
                 } else {
@@ -251,7 +262,7 @@ impl<'a> Transformer<'a> {
                 else_body,
             }]),
             Some(ty) => {
-                let condition = generate_truthiness_condition(&ca.var_name, ty);
+                let condition = generate_truthiness_condition(&ca.var_name, ty, self.synthetic);
                 let let_stmt = Stmt::Let {
                     mutable: false,
                     name: ca.var_name.clone(),
@@ -442,17 +453,9 @@ impl<'a> Transformer<'a> {
         // `return var;` against an `Option<T>` return type
         // (TypeResolver expects narrow `T`, IR provides `Option<T>` →
         // `Some(var)` wrap → `Option<Option<T>>` mismatch).
-        let then_exits =
-            !then_body.is_empty() && ir_body_always_exits(then_body);
-        let else_exits = else_body
-            .as_ref()
-            .is_some_and(|b| ir_body_always_exits(b));
-        if complement_is_none
-            && is_swap
-            && else_body.is_some()
-            && then_exits
-            && !else_exits
-        {
+        let then_exits = !then_body.is_empty() && ir_body_always_exits(then_body);
+        let else_exits = else_body.as_ref().is_some_and(|b| ir_body_always_exits(b));
+        if complement_is_none && is_swap && else_body.is_some() && then_exits && !else_exits {
             // T6-2 closure-reassign suppression: same rationale as the
             // bare-early-return form above. When the inner closure
             // reassigns `var`, the outer narrow shadow-let would bind
@@ -549,7 +552,6 @@ impl<'a> Transformer<'a> {
         }
     }
 }
-
 
 /// Returns `true` if an IR statement body always exits its enclosing scope.
 ///

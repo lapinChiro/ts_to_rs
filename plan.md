@@ -9,16 +9,16 @@
 
 ---
 
-## 現在の状態 (2026-04-24)
+## 現在の状態 (2026-04-25)
 
 | 指標 | 値 |
 |------|-----|
-| Hono bench clean | 111/158 (70.3%) |
-| Hono bench errors | 63 |
-| cargo test (lib) | 3106 pass (I-171 T5 + post-T5 /check_job fix + deep /check_job fix + deep deep /check_job fix + 4th-iteration deep deep /check_job fix + /check_problem audit fix で +21: control_flow `const_fold_dead_code_elim` 6 + `truthy_complement_match` T5 lock-in 14 (3-form dispatch / peek-through / synthetic-union × 各 form / always-truthy / Some-wrap-coerce / null-check Let-wrap / **Bang closure-reassign suppression** / **null-check closure-reassign suppression** を含む、cohesion-driven sub-folder split: mod 232 + bang_layer_2 418 + synthetic_union 232 + null_check_symmetric 117 LOC) + 既存テスト input 修正 1; T4 baseline 3085 から +21) |
+| Hono bench clean | 111/158 (70.3%) (post-T7-revert 実測、T6 完了時 112/158 から I-172 ±1 clean noise variance、T7 fix が Hono に作用する pattern 不在のため revert と無関係) |
+| Hono bench errors | 63 (post-T7-revert 実測、T6 完了時 62 から I-172 ±1 errors noise variance) |
+| cargo test (lib) | 3121 pass (T5 baseline 3106 から +15: T6 P3a/P3b 新規 narrow analyzer test 5 + T6 P1 helpers test 7 + T7-6 narrow × incompatible RHS error-path 2 + T7 positive boundary lock-in 1 (`narrowing_match_uses_if_let_for_neq_null_early_return_without_closure_reassign`、closure-reassign 不在で `!== null + early-return` が if-let-Some shadow を emit する pre-T7 / pre-I-177-D 状態の lock-in)。T7 で試行した workaround patch (NonNullish !== closure-reassign suppression branch + 関連 lock-in test 3 件) は **deep deep `/check_job` で発見した Scenario A regression を回避するため revert (2026-04-25)**、architectural fix を I-177-D PRD に委譲。T6 で P1 (`generate_truthiness_condition`/`generate_falsy_condition` を `truthy_predicate_for_expr` 経由全型網羅化) + P2 (`try_generate_primitive_truthy_condition` peek-through) + P3a (Bang arm peek-through) + P3b (Bang arm OptChain narrow event push) + P4 (test 拡張) を実装、`narrowing_analyzer/tests/guards.rs` を folder-module 分割 (mod.rs 471 + early_return.rs 569) |
 | cargo test (integration) | 122 pass |
 | cargo test (compile) | 3 pass |
-| cargo test (E2E) | 151 pass + 32 `#[ignore]` (T4 baseline 136+42 から +15 GREEN / -10 ignored; T5 で C-4/C-5/C-7/C-11/C-12/C-13/C-14/C-17/C-19/C-24 の 10 cell un-ignore、c5/c12/c13 は T5 fix で GREEN 化、c4/c7/c11/c14/c17/c19/c24 は T4 baseline で既に valid Rust emission を出していたが PRD 上 T5 cell として `#[ignore]` 状態のまま残っていたものを un-ignore。deep /check_job fix で cell-c5b (C-5 sub-case: then-exit + else-non-exit narrow materialization for Bang) を新規追加 GREEN、deep deep /check_job fix で cell-c5c (=== null + then-exit + else-non-exit + Option<T> return 同 sub-case) を新規追加 GREEN、4th-iteration deep deep /check_job fix で cell-c5d (Bang × Option<Named other> + Option<Vec> always-truthy narrow materialization、PRD C-3 ideal vs implementation gap 解消) を新規追加 GREEN) |
+| cargo test (E2E) | 155 pass + 28 `#[ignore]` (T5 baseline 151+32 から +4 GREEN / -4 ignored; T7 で T7-1/T7-2/T7-4/T7-5 の 4 cell un-ignore (`&&=` / `\|\|=` × narrow F64 / 連鎖 / synthetic union、closure-reassign 不在で T7 fix 不発火、un-ignore は valid)。T7-3 (`&&=` × closure-reassign × narrow-suppression) は T7 workaround patch revert で pre-T7 RED 状態 (IR/TypeResolver cohesion gap + closure-mutable-capture E0506)、I-177-D で architectural fix 予定のため re-ignore、annotation を I-177-D dependency 反映に更新) |
 | clippy | 0 warnings |
 | fmt | 0 diffs |
 
@@ -30,7 +30,54 @@
 
 ### 進行中作業
 
-**I-161 + I-171 batch PRD** (2026-04-22〜) — Spec stage 完了、T2 (共有 helper) + T3 (I-161 `&&=`/`||=` desugar) + T4 (I-171 Layer 1 Bang arm) + **T5 (I-171 Layer 2 if-stmt narrow emission)** 完了。T6-T8 着手待ち。`backlog/I-161-I-171-truthy-emission-batch.md` + `report/i161-i171-t1-red-state.md` (v6) + 26 tsc observations + 60 E2E fixtures + test harness 登録 60 test function。
+なし (I-161 + I-171 batch PRD は 2026-04-25 T8 で close 済、下記「直近の完了作業」table 参照)。次の作業は本 file 末尾「次の作業」section 参照。
+
+_(T2-T7 完了範囲 + T8 close の詳細は git history (commits ぶら下がり) + `doc/handoff/design-decisions.md` の "I-161 + I-171 batch" section に集約。本 plan.md からは要約のみ「直近の完了作業」table に記載)_
+
+<details><summary>T2-T7 完了範囲 (folded、archive 用、2026-04-25 close 時点)</summary>
+
+**T7 完了範囲 (2026-04-25 revert 後の最終状態)**:
+
+T7 PRD は当初の deliverable「classifier × emission cohesion verification」を達成。T7-3 cell で IR/TypeResolver lane coherence の architectural gap を empirically 発見し、root cause として `FileTypeResolution::narrowed_type` の closure-reassign suppression scope が enclosing fn body 全体に broad すぎる事実を trace 特定。**workaround patch は deep deep `/check_job` で発見した Scenario A regression を回避するため revert 実施 (2026-04-25)**、architectural fix は I-177-D PRD に委譲。
+
+- T7-1〜T7-5 E2E fixture empirical 検証 (5 cell):
+  - **T7-1 (`&&=` on narrowed F64、R4 re-host)**: ✓ GREEN — closure-reassign 不在、narrow 維持、`&&=` で 5 → 3 に再代入
+  - **T7-2 (`||=` on narrowed F64)**: ✓ GREEN — closure-reassign 不在、truthy x で `||=` no-op
+  - **T7-3 (`&&=` × closure-reassign × narrow-suppression)**: ⚠ RED ignored, **I-177-D dependency** — pre-T7 / post-revert emission `if let Some(mut x) = x { if x.is_some_and(...) { x = Some(3.0); } reset(); return x.unwrap_or_else(...); }` は IR shadow x: T と TypeResolver Option<T> view 不整合で E0599/E0282/E0308 chain + closure-mutable-capture E0506。I-177-D (TypeResolver suppression scope refactor、案 C) で IR shadow form と TypeResolver narrow が agree → cohesion 解消の見込み
+  - **T7-4 (`||=` then `??=` chain)**: ✓ GREEN — 連鎖適用が正しく compose
+  - **T7-5 (`&&=` on narrowed synthetic union, string RHS)**: ✓ GREEN — synthetic-union coercion 正常
+- **Cohesion gap empirical 発見と documented finding** (T7 PRD 当初 deliverable):
+  - 既存 closure-reassign suppression: path 2 (`=== null` early-return) と path 3 (`=== null` + non-exit else) のみ実装、`!== null` 早期 return × closure-reassign は素通し
+  - Symptom: `if (x !== null) { x &&= 3; reset(); return x ?? -1; }` (closure reset = () => x = null) で `if let Some(mut x) = x` shadow が発火、内部 `x &&= 3` は TypeResolver の `Option<f64>` view を query して Option-shape 化、shadow `f64` と miss-match → E0599/E0282/E0308 chain
+  - Architectural root cause (T7 で trace 特定): `FileTypeResolution::narrowed_type(var, position)` の `is_var_closure_reassigned` suppression scope が `enclosing_fn_body` (fn body 全 span) で broad すぎ、本来 narrow 保持が valid な if-body (cons-span) 内も含めて narrow を抑制。本来の意図は LET-WRAP shadow が closure の outer Option<T> reassign を破壊するのを防ぐこと、cons-span 内 suppress は overreach
+- **Workaround patch attempt + revert 経緯 (T7 review iteration)**:
+  - Initial fix: `try_generate_narrowing_match` に NonNullish !== closure-reassign suppression branch (sub-case (a) `if x.is_some() { body }` + sub-case (b) `if x.is_some() { body+exit; } rest;`) を追加
+  - Initial /check_job: Truthy guard 誤発火 (silent semantic change risk for `Some(0.0)` etc.) を発見、guard variant pattern-match で structural restrict
+  - Deep /check_job: INV-2 path 3 symmetric coverage 欠落を発見、sub-case (b) 追加で symmetric coverage 復元
+  - Deep deep /check_job: sub-case (b) test 不完全 + **Scenario A regression** (`return x` body without `??` × closure-reassign で E0308 mismatch) を発見。pre-T7 shadow form は ✓ だったが post-T7 patch で ✗ に regress
+  - User judgement (2026-04-25): patch は `ideal-implementation-primacy.md` interim patch 条件 (2)(4) 未充足 + structural fix を patch に降格 + Scenario A regression を knowingly commit する事態を回避 → **revert 実施**、I-177-D architectural fix に委譲
+- **Revert 実施内容 (2026-04-25)**:
+  - 削除: `try_generate_narrowing_match` の T7 closure-reassign suppression branch (~80 LOC) + `then_exits`/`else_exits` の hoisting
+  - 削除: 3 件の T7 lock-in test (`narrowing_match_suppressed_for_neq_null_early_return_when_closure_reassign_present` / `..._with_else_then_exit_...` / `narrowing_match_does_not_use_predicate_form_for_truthy_when_closure_reassign_present`)
+  - 維持: T6 P1-P4 全て (T7 と独立) / T7-1/2/4/5 un-ignore / T7-6 unit test 2 件 / `narrowing_match_uses_if_let_for_neq_null_early_return_without_closure_reassign` (pre-T7 boundary lock-in)
+  - Annotation 更新: T7-3 ignore annotation を I-177-D dependency 反映に更新 (現実装は pre-T7 shadow form)
+- T7-6 unit test 2 case (`error_path.rs`、`narrow_incompatible_rhs_f64_and_string_does_not_intercept` + `..._or_string_...`): narrow × incompatible RHS の dispatch が **TypeResolver lane を侵さず** desugar IR を well-formed に emit して rustc に type 不一致を委譲することを lock-in (Tier 2 compile fail 確保、Tier 1 silent miscompile 防止)。T7 fix と独立で revert 影響なし
+- Report: `report/i161-i171-t7-classifier-emission-cohesion.md` を「cohesion gap 検出 + I-177-D 起票で close、fix は I-177-D で実施」体裁に更新 (gap verification 成果は documented finding として保持、revert 経緯 + Scenario A regression trace + body shape × emission form の trade-off matrix を記録)
+- **Framework rule 化** (revert に伴う後続作業、TODO 起票済): T7 三度の `/check_job` iteration で発見された 4 件の defect (Truthy 誤発火 / INV-2 / sub-case test / Scenario A regression) は全て「次元 A × 次元 B の直積 enumeration 不足」に帰着し、process / design / architectural の 3 層に root cause を整理:
+  - **Architectural** (TODO `[I-177-D]`): `narrowed_type` suppression scope refactor (案 C 推奨)
+  - **Design** (TODO `[I-178-5]` Rule 10): Cross-axis matrix completeness (spec stage 側)
+  - **Process** (TODO `[I-183]`): `/check_job` 4 層化 framework (mechanical / empirical / structural / adversarial、implementation stage 側)
+- Quality gate 全 pass: cargo test **3121** lib (T7 lock-in test 3 件削除で -3) + 122 integration + 3 compile + **155** E2E + 28 ignored、clippy 0 warnings、fmt 0 diffs、file-lines OK、Hono bench revert 前 112/62 → revert 後 111/63 (I-172 ±1 clean / ±2 errors known noise band 内、category diff `OBJECT_LITERAL_NO_TYPE 28→27 / OTHER 15→17` は I-172 の categorization shift と同一 pattern、T7 fix が Hono に作用する pattern (closure-reassign + `!== null` + early-return) は Hono に存在しないため structural regression は構造的に不可能、観測値 variance は I-172 由来)
+
+**T6 完了範囲 (2026-04-25)**:
+- **P1 (`generate_truthiness_condition` / `generate_falsy_condition` 全型網羅化)**: helpers.rs の fallback を `truthy_predicate_for_expr` (I-171 T2 expr-level API) 経由に置換。Option<T> / Vec / Named struct / Fn / Tuple / StdCollection / DynTrait / Ref / always-truthy 全て対応。Any / TypeVar / Unit / Never / Result / QSelf は compile-time fence (`Expr::Ident(name)`) で rustc に委譲。callee に `&SyntheticTypeRegistry` 引数追加、loops.rs / control_flow.rs callsite 2 箇所更新
+- **P2 (`try_generate_primitive_truthy_condition` peek-through)**: control_flow.rs の outer/inner unwrap を `unwrap_parens` → `peek_through_type_assertions` に置換。Matrix C-11/C-12/C-13 (`if (x as T)` / `if (!(x!))`) で primitive predicate emission が正しく発火
+- **P3a (`detect_early_return_narrowing` Bang arm peek-through)**: guards.rs の Bang arm operand 取得を `unary.arg.as_ref()` → `peek_through_type_assertions(unary.arg.as_ref())` に置換。`if (!(x as T)) return;` で narrow event push (`if (!x) return;` と完全 symmetric)
+- **P3b (Bang arm OptChain case 新規追加)**: `if (!x?.v) return;` で base `x` を `Option<T>` → `T` narrow。OptChain invariant: `x` が null なら `x?.v` short-circuit → undefined → !undefined = true → exit 発火、fall-through は x non-null を保証。`narrowing_patterns::extract_optchain_base_ident` 経由で base 取得、`unwrap_option_type` で inner 抽出、`PrimaryTrigger::OptChainInvariant` で event push (T6-4 `x?.v !== undefined` の symmetric)
+- **P4 (test 拡張)**: helpers.rs に non-primitive 7 case (Option<F64>/Vec/Named struct/Option<Named>/Vec falsy/Any fallback/TypeVar fallback)、`narrowing_analyzer/tests/guards/early_return.rs` に T6 P3a/P3b 5 case (TsAs / TsNonNull peek-through / OptChain narrow / OptChain+Paren cohesion / OptChain non-Option no-op)
+- File-line refactor: `narrowing_analyzer/tests/guards.rs` (1041 LOC) を folder-module 化 → `guards/mod.rs` (471 LOC) + `guards/early_return.rs` (569 LOC)。MockCtx + helpers を `pub(super)` で sub-module から共有
+- E2E un-ignore: cell-c16b は P3b で post-if `x.v` field access が narrowed `_TypeLit0` 型で resolve されることを empirical 確認。残 3 件の orthogonal blocker (E0507 OptChain field-access closure / I-175 struct-literal expected-type coercion / I-181-like `?? ""` Option<String> closure 戻り値型) で re-ignore、annotation 最新化
+- Quality gate 全 pass: cargo test **3118** lib + 122 integration + 3 compile + **151** E2E + 32 ignored、clippy 0 warnings、fmt 0 diffs、file-lines OK、Hono bench 112/158 / 62 errors (T5 baseline 111/63 から +1 clean / -1 errors、I-172 ±1 noise band 内、structural regression 0)
 
 **T5 完了範囲 (2026-04-24)**:
 - `convert_if_stmt` の Layer 2 dispatch を再構成 (`src/transformer/statements/control_flow.rs`):
@@ -112,12 +159,9 @@
 
 **PRD spec 訂正 (2026-04-22)**: SG-1 (Matrix A-5 / O-5 / B.2 T5 の `*v` → `v` 訂正、`is_some_and(|v: T|...)` は T by-value ABI)、SG-2 (Matrix ideal column と Design section emission form の統一、Matrix A-6/O-5/O-5s/O-6 を predicate helper 形に更新)、SG-3 (Matrix A.4 narrow × compound assign sub-matrix 追加、I-177 依存で cell 別 deferred annotation)。
 
-**T6/T7/T8 残作業の sequencing**:
-- **T6** (broken window fix P1-P4 + remaining E2E un-ignore for upstream-defect-gated cells when those defects close)
-- **T7** (classifier 相互検証)
-- **T8** (全 quality gate + PRD 完了処理 = batch close)
+**T8 close 経緯 (2026-04-25)**: T6 P1-P4 (broken window fix) + T7 (cohesion verification、workaround patch revert で I-177-D 委譲) + T8 (PRD batch close = TODO entry 削除 + design-decisions.md archive + plan.md restructure + backlog file 削除) で完了。narrow-scope 関連 (Matrix A.4 / A-6 / O-6 / T7-3 / C-15n / C-16b 等) は **I-177 / I-177-D 完了後** に I-177 PRD 内 sub-task として個別 close する設計。
 
-T8 完了で I-161+I-171 batch を close した後、上記「次の作業」prerequisite chain (I-178 framework → I-177 Tier 0) に進む。narrow-scope 関連 (Matrix A.4 / A-6 / O-6 / T7-* / C-15n / C-16b 等) は **I-177 完了後** に T3-N / T7-N sub-task として I-161+I-171 PRD に回帰し、別途 close する。
+</details>
 
 ### 直近の完了作業
 
@@ -126,6 +170,7 @@ T8 完了で I-161+I-171 batch を close した後、上記「次の作業」pre
 
 | PRD | 日付 | サマリ (1-3 行) |
 |-----|------|-----------------|
+| **I-161 + I-171 batch (`&&=`/`||=` desugar + Bang truthy emission)** | 2026-04-22〜04-25 | narrow-scope `&&=`/`||=` の Tier 2 compile error + `if (!x)` 汎用 Bang truthy emission を structural fix する batch PRD。8 task で T2 (共有 helper `truthy_predicate_for_expr` / `peek_through_type_assertions`) + T3 (I-161 logical assign desugar) + T4 (I-171 Layer 1 Bang dispatch、5 layer + IG-1〜IG-6 fix、60 unit case) + T5 (I-171 Layer 2 if-stmt narrow emission、`OptionTruthyShape` 3-form + const-fold dead-code elim、Matrix C 10 cell GREEN) + T6 (broken window fix P1-P4 + Bang OptChain narrow event push、guards.rs folder split) + T7 (classifier × emission cohesion 検証で T7-3 cell の architectural cohesion gap = `narrowed_type` suppression scope の overbreadth を発見、workaround patch attempt + 三度の `/check_job` iteration で 4 件 defect 発見、Scenario A regression 判明で **revert 実施**、architectural fix を I-177-D に委譲) + T8 (close)。設計判断は `doc/handoff/design-decisions.md` の "I-161 + I-171 batch" section に archive。三度の review iteration の framework lesson (直積 enumeration 不足 + review 深度の iteration 依存) は I-178-5 (Cross-axis matrix completeness rule) + I-183 (`/check_job` 4 層化 framework) として TODO 起票。最終 quality gate: cargo test 3121 lib + 122 integration + 3 compile + 155 E2E + 28 ignored、clippy 0 / fmt 0 / file-lines OK、Hono bench 111/63 (T6 完了時 112/62 から I-172 ±1 noise variance、T7 fix が Hono に作用しない pattern のため structural regression 不可能)。詳細は git log 参照 |
 | **File line-count reduction refactor (8 files)** | 2026-04-21 | 1000 LOC 超過 8 file を cohesion-driven split (21 files changed, +1964 / −8767 LOC net)。Phase 1 test files (build_registry 1123→6 / control_flow 1095→7 / generator/tests 1068→8 / switch 1028→7 / generator/expressions/tests 1019→8) + Phase 2 production files (registry/collection 1524→8 sub-dir with placeholder/decl/class/resolvers/type_literals/const_values/callable / ts_type_info/mod 1045→3 files helpers+tests / transformer/expressions/methods 1267→3 sub-dir mod+closures+tests)。visibility `pub(in crate::registry)` で original `pub(super)` scope を厳密保持。`check-file-lines.sh` OK、quality gate 全 pass、Hono bench 非後退。post-review で `map_method_call` 411 LOC 単一 match decomposition を I-174 として起票 (L4)。計画詳細は git log 参照 |
 | **I-144 (control-flow narrowing analyzer umbrella)** | 2026-04-19〜04-21 | CFG-based narrowing analyzer PRD (umbrella: I-024 / I-025 / I-142 Cell #14 / C-1 / C-2a-c / C-3 / C-4 / D-1 吸収) を 9 sub-phase (T0-T6-6) で完了。T0-T2 SDCDF Spec stage (matrix-driven + Dual verdict framework) + T3-T5 analyzer 基盤 (`pipeline/narrowing_analyzer/` + `NarrowEvent` enum + `NarrowTypeContext` trait) + T6-1〜T6-5 emission 実装 (EmissionHint dispatch / coerce_default / truthy E10 / OptChain compound narrow / implicit None tail) + T6-6 close で 7 連鎖 review 11 structural fix (IMPL-1〜7 YAGNI dead variant/field 除去 + `transformer/mod.rs` 1117→718 LOC cohesion 分割)。matrix 全 9 ✗ cell GREEN。設計判断は `doc/handoff/design-decisions.md` section「Control-flow narrowing analyzer (I-144)」8-section archive、sub-phase 実装詳細は git log 参照 |
 | **I-153 + I-154 batch + 以前の完了** | 2026-04-19 以前 | I-153 / I-154: switch case body nested `break` silent redirect の structural 解消 + internal label `__ts_` prefix 統一 (`report/i153-switch-nested-break-empirical.md`)。以前: I-SDCDF (spec-first framework、beta)、I-050-a (SDCDF Pilot)、Phase A Step 3/4 (I-020 部分/I-023/I-021)、I-145 / I-150 batch、INV-Step4-1、I-142 (`??=`) / I-142-b+c、I-022 (`??`) / I-138 / I-040 / I-392 ほか。git log で参照可能 |
@@ -139,25 +184,27 @@ T8 完了で I-161+I-171 batch を close した後、上記「次の作業」pre
 
 **Tier 0 (L1 silent semantic change)**: I-177 promote (2026-04-24) — narrow emission mutation propagation 欠陥が I-161 T3 完了で silent runtime 誤動作として顕在化、umbrella PRD として 3 sub-item (I-177-A/B/C) 集約済。I-178 完了後に着手。
 
-**実行順序 (prerequisite chain)**:
+**実行順序 (prerequisite chain、I-161+I-171 batch close 後 2026-04-25 更新)**:
 
 ```
-進行中 I-161+I-171 batch
-  └─ T6 (broken window fix P1-P4 + narrow_analyzer 拡張)
-       └─ T7 (classifier 相互検証)
-            └─ T8 (PRD 完了処理 = batch close)
-                 │
-                 ▼
-      [I-178 framework prerequisite]  ← Tier 0 起票前のゲート
-                 │
-                 ▼
-      [I-177 Tier 0 (L1 silent semantic change)]
-                 │
-                 ▼
-      I-162 → Phase A Step 5 → I-015 → I-158+I-159 → Phase A Step 6 → ...
+[I-178 framework prerequisite]  ← Tier 0 起票前のゲート (Rule 6/7/8/9 + Rule 10 = 5 rule 拡張)
+       │
+       ▼
+[I-183 review プロセス 4 層化 framework]  ← implementation stage 側 framework
+       │
+       ▼
+[I-177-D Tier 1 architectural (TypeResolver suppression scope refactor、T7-3 cohesion gap 本体)]
+       │
+       ▼
+[I-177 Tier 0 (L1 silent semantic change、mutation propagation 本体 + sub-items A/B/C)]
+       │
+       ▼
+I-162 → Phase A Step 5 → I-015 → I-158+I-159 → Phase A Step 6 → ...
 ```
 
-**T6 前作業の検討結果 (2026-04-24)**: I-178 は **I-177 PRD 起票時の framework prerequisite** であり T6 の prerequisite ではない。T6/T7/T8 は既存 I-161+I-171 PRD の closure (broken window fix + 既存 PRD 完了処理) で新規 matrix-driven PRD design なし、I-178 framework rule 適用対象外。よって T6/T7/T8 を通常通り進めて I-161+I-171 を close → I-178 → I-177 の順で着手する。**Strict tier priority だけなら I-177 (Tier 0) を最優先すべきだが、(a) T6/T7/T8 は短期で batch close 可能、(b) I-177 を先行すると I-161+I-171 の T6-T8 が context-switch で中断、(c) I-177 PRD 起票自体に I-178 が prerequisite、の 3 点から上記 sequencing を採用**。
+**I-178 / I-183 の framework rule prerequisite (2026-04-25 update)**: I-178 (5-rule 拡張) + I-183 (`/check_job` 4 層化) は **I-177-D / I-177 PRD 起票時の framework prerequisite**。I-178 spec stage rule + I-183 implementation stage rule で matrix-driven PRD 品質を構造的に保証する。
+
+**I-177-D vs I-177 mutation 本体 の順序 (2026-04-25 update)**: I-177-D (suppression scope refactor) を I-177 mutation 本体より **先行** で実施。I-177-D は I-177 sub-items A/B/C の architectural root cause も同時解消する可能性があるため、I-177 全体の structural fix を I-177-D で先行確立した後、残 work を I-177 mutation 本体で実施する設計。
 
 **着手順の導出原則** (上記 prerequisite chain 後の通常順序):
 1. I-144 Dual verdict framework で `TS ✓ / Rust ✗` として分離された narrow-related compile error は I-144 context が fresh なうちに優先 (I-161 / I-162 / I-171)
@@ -167,7 +214,6 @@ T8 完了で I-161+I-171 batch を close した後、上記「次の作業」pre
 
 | 優先度 | レベル | PRD | 内容 | 根拠 |
 |--------|-------|-----|------|------|
-| — (進行中) | L3 | **I-161 + I-171 batch** | T2 (helper) + T3 (`&&=`/`||=` desugar、non-narrow scope) + T4 (Bang arm type-aware dispatch、15 E2E GREEN) + **T5 (Layer 2 `try_generate_option_truthy_complement_match` 拡張、2026-04-24 完了、10 Matrix C cell GREEN)** 完了。残: **T6** (broken window fix P1-P4 + narrow_analyzer 拡張) → **T7** (classifier 相互検証) → **T8** (PRD 完了処理)。narrow-scope cells (A.4 / A-6 / O-6 / T7-* / C-15n / C-16b) は I-177 完了後に T3-N / T7-N として回帰 | 上記「進行中作業」参照 |
 | **0a (Tier 0 prerequisite、framework gate)** | L3 | **I-178 (spec-first-prd Checklist 4-rule 拡張)** | Spec-Stage Adversarial Review Checklist に 6/7/8/9 項目目を追加 (framework 改善 umbrella): Matrix/Design integrity (I-161 SG-2) + Body-exit sub-case completeness (RC-A) + Cross-cutting invariant enumeration (RC-B) + Implementation-aware sub-case enumeration (RC-A 拡張) | I-171 T5 6-iteration の Spec gap re-detection root cause を framework rule として正式化。**I-177 が新規 umbrella PRD (3 sub-item) として matrix-driven Spec stage 設計を要するため、I-178 framework 完了が I-177 起票の prerequisite**。framework 適用なしに I-177 を起票すると同 root cause の再発を構造的に防げない |
 | **0b (Tier 0)** | **L1** | **I-177 (narrow emission v2 umbrella、L1 promoted 2026-04-24)** | I-144 T6-3 inherited の shadow-mutation-propagation 欠陥を structural fix。silent runtime 誤動作 (Tier 0)。**集約 sub-item 3 件 (2026-04-24)**: I-177-A (typeof/instanceof/OptChain × `then_exit + else_non_exit` × post-narrow) / I-177-B (`collect_expr_leaf_types` query 順序 inconsistency) / I-177-C (`!== null` + (F, T) symmetric / Truthy `if (x)` symmetric) | I-161 T3 実装で latent defect が **runtime 誤動作** として顕在化、`conversion-correctness-priority.md` Tier 1 silent semantic change 該当 → L1 promote (旧 L2)。I-161 narrow cells (A.4 / A-6 / O-6 / T7-*) + I-171 INV-2 違反 cells の prerequisite。**I-178 完了後に I-178 強化済 framework で起票** |
 | 1 | L3 | **I-162** | class without explicit constructor → `Self::new()` 自動合成 | I-144 T2 instanceof narrow の Rust 側 E2E lock-in が本 defect で block。`class Dog {}` → `struct Dog {}` 止まりで `Dog::new()` 不在で E0599 |

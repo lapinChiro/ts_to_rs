@@ -30,7 +30,7 @@ impl<'a> Transformer<'a> {
                 body,
             }]),
             Some(ty) => {
-                let falsy_condition = generate_falsy_condition(&ca.var_name, ty);
+                let falsy_condition = generate_falsy_condition(&ca.var_name, ty, self.synthetic);
                 let mut loop_body = vec![
                     Stmt::Let {
                         mutable: false,

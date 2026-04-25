@@ -111,10 +111,7 @@ pub(super) fn extract_let_match_arms<'a>(
 /// form is a bare `Stmt::Match` without an outer let wrap.
 pub(super) fn extract_match_stmt_arms(body: &[Stmt], idx: usize) -> &[crate::ir::MatchArm] {
     let Stmt::Match { arms, .. } = &body[idx] else {
-        panic!(
-            "expected `Stmt::Match` at body[{idx}], got {:?}",
-            body[idx]
-        );
+        panic!("expected `Stmt::Match` at body[{idx}], got {:?}", body[idx]);
     };
     arms
 }
@@ -124,15 +121,10 @@ pub(super) fn extract_match_stmt_arms(body: &[Stmt], idx: usize) -> &[crate::ir:
 /// Used by the EarlyReturnFromExitWithElse lock-in tests where the
 /// `Some(x)` arm runs the user else_body then tail-emits the narrowed
 /// value to feed the outer let.
-pub(super) fn assert_arm_body_ends_with_tail_ident(
-    arm: &crate::ir::MatchArm,
-    expected_name: &str,
-) {
+pub(super) fn assert_arm_body_ends_with_tail_ident(arm: &crate::ir::MatchArm, expected_name: &str) {
     let last = arm.body.last().expect("arm body must not be empty");
     let Stmt::TailExpr(Expr::Ident(tail_name)) = last else {
-        panic!(
-            "arm body must end with `TailExpr(Ident({expected_name}))`, got {last:?}"
-        );
+        panic!("arm body must end with `TailExpr(Ident({expected_name}))`, got {last:?}");
     };
     assert_eq!(tail_name, expected_name);
 }

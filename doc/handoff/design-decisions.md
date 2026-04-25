@@ -554,6 +554,171 @@ authority。
 
 ---
 
+## I-161 + I-171 batch (`&&=`/`||=` desugar + Bang truthy emission、closed 2026-04-25)
+
+`if (x !== null) { x &&= 3; }` 等 narrow-scope `&&=` / `||=` の Tier 2 compile error
+(E0308 mismatched types) と `if (!x)` 汎用 Bang truthy emission を structural fix
+する batch PRD。8 task (T1-T8) で T2-T7 完了 + T8 close。詳細は git history。
+
+### 1. `truthy_predicate_for_expr` / `falsy_predicate_for_expr` (expr-level API、I-171 T2)
+
+`truthy_predicate(name, ty)` (I-144 T6-3 で導入された Ident 限定 + primitive 限定)
+を generalize し、任意の `Expr` operand × 全 `RustType` variant に対応する expr-level
+helper を新設。dispatch は `predicate_primitive_with_tmp` (Bool/F64/String/int) /
+`predicate_option` (Option<T>) / `const_truthiness_with_side_effect`
+(always-truthy types) の 3 路に分割。`Option<synthetic union>` は per-variant
+`matches!` chain (Some(U::V(_)) if truthy)、`Option<Named other>` は `is_some()`
+shortcut。`is_pure_operand` で Ident/Lit 等は tmp-bind skip、Call/BinaryOp 等は
+`TempBinder`-vended `__ts_tmp_op_<n>` で single-evaluation 保証。
+
+**設計判断**: `predicate_primitive_with_tmp` は ref-count-aware (T4 IG-2 fix):
+F64 だけが predicate body で 2 回 operand を読む (`<op> != 0.0 && !<op>.is_nan()`)
+ため tmp-bind 必須、Bool/String/int は 1 回のみ参照で tmp-bind 不要。snapshot
+noise を抑える structural decision。
+
+`is_always_truthy_type(ty, synthetic)` helper は Vec/Fn/Tuple/StdCollection/
+DynTrait/Ref/Named-non-synthetic を真と判定、`!<always-truthy>` const-fold +
+synthetic union enum 判定 (synthetic registry lookup) で synthetic union を除外。
+
+### 2. `peek_through_type_assertions` (runtime-no-op wrapper 統合、I-171 T2)
+
+TS の `as T` / `!` / `<T>` / `as const` / `(...)` は全て runtime-no-op (型 check 影響のみ)。
+`unwrap_parens` (Paren のみ) を generalize した recursive helper。`!(x as T)` /
+`if (x!)` / `((x))` 等 wrapper 越しの shape 判定で identical な narrow / emission
+を保証。
+
+**設計判断 (T6 P2/P3a)**: control_flow.rs の `try_generate_primitive_truthy_condition`
++ guards.rs の `detect_early_return_narrowing` Bang arm を `unwrap_parens` →
+`peek_through_type_assertions` に移行、syntactic variants が emission gap を
+作らない invariant を確立。peek-through は runtime-no-op wrapper のみ unwrap、
+`Bang` / `Assign` / `Bin` 等 observable な wrapper は保持 (peek-through 後の
+shape match で別 dispatch lane が発火)。
+
+### 3. Bang Layer 1 (`convert_unary_expr`) の 5-layer dispatch (I-171 T4)
+
+Bang `!x` 変換を以下 5 layer の優先順位で dispatch (`convert_bang_expr` 関数):
+
+1. **Peek-through** (Paren/TsAs/TsNonNull/TsTypeAssertion/TsConstAssertion 後の
+   inner で再 dispatch、`!(x as T)` 等を再帰)
+2. **`try_constant_fold_bang`** (`!null`/`!undefined`/`!arrow`/`!fn`/`!always-truthy-ident`
+   等を `Expr::BoolLit(b)` に const-fold)
+3. **Double-neg `!!<e>`** (= `truthy_predicate_for_expr` ; literal const-fold は
+   再帰 `try_constant_fold_bang(inner)` 経由で TypeResolver 非依存に decidable)
+3b. **De Morgan on `Bin(LogicalAnd/LogicalOr)`** (`!(a && b)` → `!a || !b`)
+3c. **Assign desugar** (`!(x = rhs)` → `{ let tmp: <lhs_ty> = rhs; x = tmp [.clone()]; <falsy(tmp)> }`、
+   tmp に LHS 型を annotation することで TypeResolver の expected-type wrap (`Some(...)`)
+   と整合、非 Copy LHS は `.clone()` で tmp を保持)
+4. **General `falsy_predicate_for_expr`** (5 layer fallback)
+5. **Fallback raw `!<operand>`** (Any/TypeVar の compile-time fence、explicit error
+   surface)
+
+**設計判断 (IG-3/IG-4/IG-5/IG-6 — deep deep review fix)**: tmp の type annotation
+は LHS 型 (RHS 型ではない、TypeResolver の Some-wrap と整合)。非 Copy LHS は
+`x = tmp.clone()` で tmp を保持 (`is_copy_type()` 判定)。Layer 3c は AST op check
+ではなく **IR shape check** で `Expr::Assign` を識別、`+=`/`-=` 等 arithmetic
+compound は normalised IR shape で desugar、`&&=`/`||=`/`??=` は non-Assign IR
+(If/Block) を emit するため自然 skip (conditional semantics 保持)。Double-neg
+recurse (IG-6) で inner operand が `Assign`/`LogicalAnd`/`LogicalOr` の場合
+`convert_bang_expr(inner)` を recurse して outer `Not` で wrap、Layer 3b/3c が
+先発火 + outer Not で正しい truthy 意味論を emit。
+
+### 4. Bang Layer 2 (`try_generate_option_truthy_complement_match`) の 3-form 統一 (I-171 T5)
+
+`if (!x) <body> [else <else_body>]` on `Option<T>` を `OptionTruthyShape` enum で
+3-form に統一して emit:
+
+1. **EarlyReturn** (else 不在 + then always-exit):
+   `let x = match x { Some(x) if truthy => x, _ => { exit_body } };` —
+   post-if narrow を outer let rebinding で materialize (T6-3 由来)。
+2. **EarlyReturnFromExitWithElse** (else 存在 + then always-exit + else 非 exit):
+   `let x = match x { Some(x) if truthy => { else_body; x }, _ => { exit_body } };` —
+   post-if reachable only via else 経由 narrow を outer let に rebind
+   (T5 SG-T5-DEEP1 retroactive)。
+3. **ElseBranch** (else 存在 + 上記以外):
+   `match x { Some(x) if truthy => { else_body }, _ => { then_body } }` —
+   narrow を `Some(x)` arm にスコープ。
+
+**設計判断**: `OptionTruthyShape` enum で shape を pre-classify、`build_option_truthy_match_arms`
+が shape 情報を受け取って primitive arm / synthetic union per-variant arm /
+always-truthy single-arm を一元生成 (DRY)。`is_always_truthy_type` で Named
+non-synthetic / Vec / Fn / Tuple / StdCollection / DynTrait / Ref に対し
+`Some(x) => <body>` 単一 arm without truthy guard を emit、post-narrow access
+(`x.field` / `x.method()`) を可能化 (T5 SG-T5-FRESH1 fix)。
+
+`convert_if_stmt` 末尾に **const-fold dead-code elimination** を追加: condition
+が `Expr::BoolLit(true)` → then_body 直返却、`Expr::BoolLit(false)` → else_body
+or 空 stmt list。Layer 1 const-fold が emit した `BoolLit` を Layer 2 で
+if-wrapper ごと除去、PRD 「ideal output」基準に整合 (`if true { ... }` 残骸 /
+unreachable post-if コード根絶)。
+
+### 5. T7 cohesion verification (cohesion gap 検出 + I-177-D 起票で委譲、revert 含む)
+
+T7 PRD task は「classifier × emission cohesion 検証」が deliverable。実装 deliverable:
+
+- **5 E2E cells (T7-1〜T7-5)** + **T7-6 unit test** で empirical 検証実施
+- **T7-3 cell で architectural cohesion gap を発見**: `FileTypeResolution::narrowed_type(var, position)`
+  の closure-reassign suppression scope が enclosing fn body 全体で broad すぎ、
+  cons-span 内 (if-body 内、narrow が valid な scope) も含めて narrow を suppress
+  → IR shadow form (cons-span 内 x: T) と TypeResolver Option<T> view の不整合 →
+  `convert_assign_expr` for `x &&= 3` 等 Option-shape body ops が IR shadow と
+  mismatch (E0599 chain)
+- **三度の `/check_job` iteration で 4 件 defect 発見** (Truthy 誤発火 / INV-2
+  path 3 symmetric 欠落 / sub-case (b) test 不完全 / Scenario A regression):
+  workaround patch (predicate form `if x.is_some() { body }`) を試行、各 iteration
+  で発見した defect を順次修正
+- **Scenario A regression** (`return x` body without `??` × closure-reassign で
+  E0308 mismatch) は構造的 trade-off (pre-T7 shadow form は narrow-T-shape ✓ /
+  Option-shape ✗、post-T7 patch (predicate form) は narrow-T-shape ✗ /
+  Option-shape ✓、どちらの form でも一部 body shape が破綻) で **patch では解消
+  不能** と判定
+- **`ideal-implementation-primacy.md` の interim patch 条件** (1) PRD 起票 ✓ /
+  (2) `// INTERIM:` annotation ✗ / (3) silent semantic change なし ✓ / (4) removal
+  criteria ✗ のうち (2)(4) 未充足 + structural fix の patch 降格に該当 → **revert 実施**
+- **architectural fix を I-177-D PRD に委譲**: `narrowed_type` suppression scope
+  refactor (案 C: cons-span 内 narrow 保持 + post-if scope のみ suppress) で
+  IR shadow form と TypeResolver narrow が agree → narrow-T-shape body と
+  Option-shape body 両方で works → trade-off 構造解消
+
+**設計判断 (revert の根拠)**: T7 PRD の本来の deliverable は cohesion verification
+であり fix は副産物。fix が patch であると判明したら fix を撤去して documented
+finding として残すのが正しい。revert で git history が clean に保たれ、
+architectural fix を I-177-D で structural に解消することで `ideal-implementation-primacy.md`
+完全準拠を達成。
+
+**T7 三度の `/check_job` iteration の framework lesson** (本 PRD scope 外、
+TODO `[I-178-5]` Rule 10 + `[I-183]` `/check_job` 4 層化 framework として起票):
+defect の連続発見 root cause は (a) 直積 enumeration 不足 (解決軸内の coverage
+は意識しているが直交軸を見ていない) + (b) review 深度の iteration 依存 (initial
+review が mechanical only)。
+
+### 6. 関連 issue / 後続 PRD
+
+- **I-177**: narrow emission v2 umbrella (mutation propagation defect、T6-3
+  inherited) + sub-items A/B/C (typeof/instanceof/OptChain × post-narrow / query
+  順序 / symmetric direction) + sub-item D (suppression scope refactor、T7
+  architectural fix の本体)
+- **I-178-5**: spec-first-prd Checklist Rule 10 (Cross-axis matrix completeness)
+- **I-183**: `/check_job` 4 層化 framework rule (mechanical / empirical /
+  structural cross-axis / adversarial trade-off)
+- **I-179 / I-180 / I-181**: I-171 T4 で発見の orthogonal blocker (synthetic union
+  literal coercion / E2E async-main / tuple destructuring)
+
+### 参照
+
+- PRD archive (closed 2026-04-25, retrievable via git history):
+  `backlog/I-161-I-171-truthy-emission-batch.md`
+- T1 red-state report: `report/i161-i171-t1-red-state.md`
+- T7 cohesion report: `report/i161-i171-t7-classifier-emission-cohesion.md`
+  (cohesion gap trace + revert 経緯 + body shape × emission form trade-off matrix)
+- 実装 module: `src/transformer/helpers/truthy.rs` (expr-level API) +
+  `src/transformer/helpers/peek_through.rs` (wrapper unwrap) +
+  `src/transformer/expressions/binary.rs` (Layer 1 Bang dispatch) +
+  `src/transformer/statements/option_truthy_complement.rs` (Layer 2 if-stmt
+  consolidated match) + `src/pipeline/narrowing_analyzer/guards.rs` (Bang arm
+  peek-through + OptChain narrow event)
+
+---
+
 ## 残存 broken window
 
 ### `Item::StructInit::name: String` に display-formatted `"Enum::Variant"` 形式が格納

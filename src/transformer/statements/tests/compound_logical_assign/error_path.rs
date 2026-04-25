@@ -209,3 +209,126 @@ fn blocked_result_and_assign_returns_err() {
     );
     assert!(result.is_err());
 }
+
+// --- T7-6: narrow × incompatible RHS type error-path ------------------------
+//
+// PRD T7-6: `let x: number | null = 5; if (x !== null) { x &&= "text"; }`.
+//
+// The TS source is a TypeScript type error (cannot assign `string` to `number`).
+// SWC parses it, so the IR pipeline still runs. The desugar layer does NOT
+// type-check RHS vs LHS-inner type — we rely on TypeResolver expected-type
+// propagation (T3-TR) to flag the mismatch in upstream contexts, and on
+// rustc to surface the residual mismatch in the emitted Rust.
+//
+// The empirical contract is therefore: **the desugar produces well-formed IR
+// without aborting**, and the type error surfaces at compile time, not as a
+// silent miscompile (Tier 1) and not as an `UnsupportedSyntaxError`. This is
+// the cohesion contract for narrow × logical-assign × type-incompatible RHS:
+// the dispatch is structural-only and stays out of TypeResolver's lane.
+
+/// `f64 LHS &&= string RHS` desugar succeeds at the IR layer; the
+/// type mismatch is intentionally deferred to rustc.
+#[test]
+fn narrow_incompatible_rhs_f64_and_string_does_not_intercept() {
+    let synth = SyntheticTypeRegistry::new();
+    let result = desugar_compound_logical_assign_stmts(
+        &synth,
+        ident_target(),
+        Expr::StringLit("text".to_string()),
+        &RustType::F64,
+        AssignOp::AndAssign,
+        DUMMY_SP,
+    );
+    assert!(
+        result.is_ok(),
+        "narrow × incompatible RHS must NOT be intercepted at the desugar; \
+         the type mismatch surfaces at rustc (Tier 2 compile error, not Tier 1 \
+         silent miscompile, and not Tier 3 UnsupportedSyntaxError). got: {result:?}"
+    );
+    // Sanity: the emitted IR is the standard `if <truthy(x)> { x = <rhs>; }`
+    // shape — no special handling, no type coercion, no None pattern.
+    let stmts = result.unwrap();
+    assert_eq!(stmts.len(), 1);
+    let Stmt::If {
+        condition,
+        then_body,
+        else_body,
+    } = &stmts[0]
+    else {
+        panic!("expected Stmt::If, got {:?}", stmts[0]);
+    };
+    assert!(
+        else_body.is_none(),
+        "narrow × incompatible RHS &&= must emit a single-branch If, not else"
+    );
+    assert!(
+        matches!(
+            condition,
+            Expr::BinaryOp {
+                op: BinOp::LogicalAnd,
+                ..
+            }
+        ),
+        "F64 truthy predicate must be `<x> != 0.0 && !<x>.is_nan()` LogicalAnd, \
+         got {condition:?}"
+    );
+    // `then_body` should contain the bare assignment with the (incompatible) RHS.
+    // The string RHS travels through unmodified — rustc rejects the assign.
+    assert_eq!(then_body.len(), 1);
+    assert!(
+        matches!(
+            &then_body[0],
+            Stmt::Expr(Expr::Assign { value, .. })
+                if matches!(value.as_ref(), Expr::StringLit(s) if s == "text")
+        ),
+        "RHS string literal must travel unmodified to the assign; got {:?}",
+        then_body[0]
+    );
+}
+
+/// Symmetric `f64 LHS ||= string RHS`: same contract — defer to rustc.
+#[test]
+fn narrow_incompatible_rhs_f64_or_string_does_not_intercept() {
+    let synth = SyntheticTypeRegistry::new();
+    let result = desugar_compound_logical_assign_stmts(
+        &synth,
+        ident_target(),
+        Expr::StringLit("text".to_string()),
+        &RustType::F64,
+        AssignOp::OrAssign,
+        DUMMY_SP,
+    );
+    assert!(
+        result.is_ok(),
+        "||= cohesion contract: incompatible RHS surfaces at rustc, not at desugar"
+    );
+    let stmts = result.unwrap();
+    assert_eq!(stmts.len(), 1);
+    let Stmt::If {
+        condition,
+        then_body,
+        ..
+    } = &stmts[0]
+    else {
+        panic!("expected Stmt::If, got {:?}", stmts[0]);
+    };
+    // `||=` desugars to `if <falsy(x)> { x = <rhs>; }` — the F64 falsy
+    // predicate is `<x> == 0.0 || <x>.is_nan()` (LogicalOr).
+    assert!(
+        matches!(
+            condition,
+            Expr::BinaryOp {
+                op: BinOp::LogicalOr,
+                ..
+            }
+        ),
+        "F64 falsy predicate must be `<x> == 0.0 || <x>.is_nan()` LogicalOr, \
+         got {condition:?}"
+    );
+    assert_eq!(then_body.len(), 1);
+    assert!(matches!(
+        &then_body[0],
+        Stmt::Expr(Expr::Assign { value, .. })
+            if matches!(value.as_ref(), Expr::StringLit(s) if s == "text")
+    ));
+}
