@@ -72,7 +72,16 @@ pub fn resolve_typedef(
 
     let result = resolve_typedef_inner(def, reg, synthetic);
 
-    // Apply monomorphization substitutions to synthetic items created during resolution
+    // Apply monomorphization substitutions across all items currently in the
+    // registry. NOTE: `apply_substitutions_to_items` iterates *all* entries in
+    // `synthetic.types`, not only ones created during this call. This is safe
+    // in production because `resolve_typedef` is invoked from `build_registry`
+    // with a fresh `SyntheticTypeRegistry::new()` whose types are empty before
+    // the call (see `registry/collection/decl.rs`). If a future code path were
+    // to invoke `resolve_typedef` on a `fork_dedup_state` synthetic that
+    // inherits parent types (post-I-177-E semantics), the substitutions could
+    // mutate inherited entries and corrupt them on merge-back. Tracked as a
+    // defense-in-depth concern in TODO `[I-177-G]`.
     if let Ok((_, ref mono_subs)) = result {
         synthetic.apply_substitutions_to_items(mono_subs);
     }

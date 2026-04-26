@@ -774,6 +774,24 @@ fn test_e2e_hello_ts_rust_stdout_match() {
 }
 
 #[test]
+fn test_e2e_i177_e_synthetic_fork_narrow_cohesion() {
+    // I-177-E (Plan η Step 1.5): TypeResolver synthetic fork inheritance fix.
+    // Empirical lock-in for the synthetic fork bug — see
+    // `tests/e2e/scripts/i177-e-synthetic-fork-narrow-cohesion.ts` head comment for
+    // the full pre-/post-fix behavior contrast.
+    run_e2e_test("i177-e-synthetic-fork-narrow-cohesion");
+}
+
+#[test]
+fn test_e2e_i177_f_arrow_fn_expr_narrow_cohesion() {
+    // I-177-F (Plan η Step 2.5): resolve_arrow_expr / resolve_fn_expr body
+    // traversal cohesion fix. Empirical lock-in for arrow form / fn-expression
+    // form post-narrow EarlyReturnComplement event population —
+    // see fixture head comment.
+    run_e2e_test("i177-f-arrow-fn-expr-narrow-cohesion");
+}
+
+#[test]
 fn test_e2e_arithmetic_ts_rust_stdout_match() {
     run_e2e_test("arithmetic");
 }

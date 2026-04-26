@@ -477,9 +477,12 @@ impl<'a> TypeResolver<'a> {
                             })
                             .collect();
                         self.collect_emission_hints(body, &param_pats);
-                        for stmt in &body.stmts {
-                            self.visit_stmt(stmt);
-                        }
+                        // I-177-F (extended): constructor body も `visit_block_stmt` 経由で walk
+                        // し `current_block_end` を set する (visit_fn_decl / resolve_arrow_expr /
+                        // resolve_fn_expr と symmetric)。直接 stmt iterate にすると
+                        // `detect_early_return_narrowing` が constructor body 内 if-stmt に対し
+                        // EarlyReturnComplement narrow event を push しない。
+                        self.visit_block_stmt(body);
                         self.leave_scope();
                     }
                 }
@@ -533,9 +536,9 @@ impl<'a> TypeResolver<'a> {
             let prev_return_type = self.setup_fn_return_type(function.return_type.as_deref());
             let param_pats: Vec<&ast::Pat> = function.params.iter().map(|p| &p.pat).collect();
             self.collect_emission_hints(body, &param_pats);
-            for stmt in &body.stmts {
-                self.visit_stmt(stmt);
-            }
+            // I-177-F (extended): class method body も `visit_block_stmt` 経由で walk
+            // (visit_fn_decl と symmetric、Cross-axis cohesion 完成)。
+            self.visit_block_stmt(body);
             self.current_fn_return_type = prev_return_type;
             self.restore_type_param_constraints(prev_method_state);
             self.leave_scope();

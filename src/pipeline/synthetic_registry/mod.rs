@@ -37,7 +37,7 @@ pub struct SyntheticTypeRegistry {
 }
 
 /// A synthetic type definition.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SyntheticTypeDef {
     /// The generated Rust type name.
     pub name: String,
@@ -48,7 +48,7 @@ pub struct SyntheticTypeDef {
 }
 
 /// Classification of synthetic types.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum SyntheticTypeKind {
     /// A union type enum (e.g., `string | number` → `F64OrString`).
     UnionEnum,
@@ -453,15 +453,35 @@ impl SyntheticTypeRegistry {
         self.struct_counter = self.struct_counter.max(other.struct_counter);
     }
 
-    /// Creates a new registry that inherits deduplication state from `self`.
+    /// Creates a new registry that inherits state from `self`.
     ///
-    /// The returned registry has no types registered, but knows the dedup signatures
-    /// and counters from `self`. This prevents duplicate generation when a second pass
-    /// (e.g., TypeResolver) processes the same file that already had synthetic types
-    /// generated in a first pass (e.g., TypeCollector).
+    /// All persistent state (`types`, dedup signatures, counters) is cloned;
+    /// `type_param_scope` is reset because it is per-pass mutable state. This means
+    /// the fork can query any type registered in `self` (e.g., builtin synthetic
+    /// union types) via [`get`](Self::get) or `synthetic_enum_variants(name)`
+    /// (the [`NarrowTypeContext`](crate::pipeline::narrowing_analyzer::NarrowTypeContext)
+    /// hook used by typeof / instanceof / OptChain narrow guard detection).
+    /// Subsequent `register_union` / `register_struct` /
+    /// `register_intersection_enum` calls add new entries to the fork without
+    /// affecting `self`.
+    ///
+    /// **Round-trip note**: when the fork is later merged back into `self` via
+    /// [`merge`](Self::merge), the fork's clones of `self`'s types overwrite
+    /// themselves idempotently (same name → same content), so no data is lost or
+    /// duplicated. Only entries newly registered in the fork are net additions.
+    ///
+    /// **History (I-177-E, 2026-04-26)**: previously the fork started with empty
+    /// `types` (`BTreeMap::new()`), which caused
+    /// [`compute_complement_type`](crate::pipeline::narrowing_analyzer::guards)
+    /// to silently fail for any synthetic union type whose dedup signature was
+    /// inherited from a builtin / parent (because `register_union` returns
+    /// existing name on dedup hit without re-adding variants to `types`). This
+    /// dropped post-narrow `EarlyReturnComplement` events, manifesting as
+    /// `cannot determine return variant` hard errors in return-wrap and silent
+    /// type widening at narrow-stale read sites.
     pub fn fork_dedup_state(&self) -> Self {
         Self {
-            types: BTreeMap::new(),
+            types: self.types.clone(),
             union_dedup: self.union_dedup.clone(),
             struct_dedup: self.struct_dedup.clone(),
             intersection_enum_dedup: self.intersection_enum_dedup.clone(),

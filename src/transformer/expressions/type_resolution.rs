@@ -2,59 +2,39 @@
 //!
 //! - `get_expr_type`: FileTypeResolution から式の型を取得する
 //! - `resolve_field_type`: TypeRegistry から構造体フィールドの宣言型を取得する
-use swc_common::Spanned;
 use swc_ecma_ast as ast;
 
 use crate::ir::RustType;
 use crate::pipeline::narrowing_analyzer::EmissionHint;
-use crate::pipeline::type_resolution::Span;
-use crate::pipeline::ResolvedType;
 use crate::registry::TypeDef;
 use crate::transformer::Transformer;
 
 impl<'a> Transformer<'a> {
     /// FileTypeResolution から変数名と Span で型を取得する。
     ///
-    /// `get_expr_type` の Ident 特化版。NarrowingGuard のように AST Expr への参照を
-    /// 持たないが変数名と Span を持つ場合に使用する。
+    /// `get_expr_type` の Ident 特化版 (NarrowingGuard のように AST Expr への参照を
+    /// 持たないが変数名と Span を持つ場合に使用する)。
+    /// Canonical precedence (`narrowed_type` 優先 → `expr_type` fallback) は
+    /// [`FileTypeResolution::resolve_var_type`](crate::pipeline::type_resolution::FileTypeResolution::resolve_var_type)
+    /// が保有する (I-177-B canonical primitive)。本 method はその thin wrapper。
     pub(crate) fn get_type_for_var(
         &self,
         name: &str,
         span: swc_common::Span,
     ) -> Option<&'a RustType> {
-        if let Some(narrowed) = self.tctx.type_resolution.narrowed_type(name, span.lo.0) {
-            return Some(narrowed);
-        }
-        match self.tctx.type_resolution.expr_type(Span::from_swc(span)) {
-            ResolvedType::Known(ty) => Some(ty),
-            ResolvedType::Unknown => None,
-        }
+        self.tctx.type_resolution.resolve_var_type(name, span)
     }
 
     /// FileTypeResolution から式の型を取得する。Unknown なら None。
     ///
-    /// TypeResolver が事前に解決した型のみを返す。
+    /// Canonical precedence (Ident は `narrowed_type` 優先、それ以外は `expr_type`
+    /// のみ) は
+    /// [`FileTypeResolution::resolve_expr_type`](crate::pipeline::type_resolution::FileTypeResolution::resolve_expr_type)
+    /// が保有する (I-177-B canonical primitive)。本 method はその thin wrapper。
     /// any_enum_override は TypeResolver の declare_var 時に既に適用済みのため、
     /// ここでのフォールバックは不要。
     pub(crate) fn get_expr_type(&self, expr: &ast::Expr) -> Option<&'a RustType> {
-        // Ident 式の場合、narrowed_type を優先参照（型ナローイング後の型）
-        if let ast::Expr::Ident(ident) = expr {
-            if let Some(narrowed) = self
-                .tctx
-                .type_resolution
-                .narrowed_type(ident.sym.as_ref(), ident.span.lo.0)
-            {
-                return Some(narrowed);
-            }
-        }
-        match self
-            .tctx
-            .type_resolution
-            .expr_type(Span::from_swc(expr.span()))
-        {
-            ResolvedType::Known(ty) => Some(ty),
-            ResolvedType::Unknown => None,
-        }
+        self.tctx.type_resolution.resolve_expr_type(expr)
     }
 
     /// Returns the emission hint for a `??=` statement keyed by its start

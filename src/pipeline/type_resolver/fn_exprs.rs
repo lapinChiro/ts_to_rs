@@ -193,13 +193,16 @@ impl<'a> TypeResolver<'a> {
         }
 
         // Walk body
+        //
+        // I-177-F: BlockStmt body は `visit_block_stmt` 経由で walk して
+        // `current_block_end` を set する (visit_fn_decl と symmetric)。
+        // 直接 stmt iterate にすると `detect_early_return_narrowing` が
+        // post-if scope に EarlyReturnComplement narrow event を push しない。
         match &*arrow.body {
             ast::BlockStmtOrExpr::BlockStmt(block) => {
                 let param_pats: Vec<&ast::Pat> = arrow.params.iter().collect();
                 self.collect_emission_hints(block, &param_pats);
-                for stmt in &block.stmts {
-                    self.visit_stmt(stmt);
-                }
+                self.visit_block_stmt(block);
             }
             ast::BlockStmtOrExpr::Expr(expr) => {
                 // Propagate return type as expected type to expression body
@@ -249,13 +252,13 @@ impl<'a> TypeResolver<'a> {
             self.visit_param_pat(&param.pat);
         }
 
+        // I-177-F: fn-expression body も `visit_block_stmt` 経由で walk
+        // (resolve_arrow_expr と symmetric、visit_fn_decl と同 traversal pattern)。
         if let Some(body) = &fn_expr.function.body {
             let param_pats: Vec<&ast::Pat> =
                 fn_expr.function.params.iter().map(|p| &p.pat).collect();
             self.collect_emission_hints(body, &param_pats);
-            for stmt in &body.stmts {
-                self.visit_stmt(stmt);
-            }
+            self.visit_block_stmt(body);
         }
 
         let return_type = self.cleanup_fn_scope(FnScopeState {
