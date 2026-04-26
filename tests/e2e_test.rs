@@ -1270,6 +1270,42 @@ fn test_e2e_cell_i154() {
     run_cell_e2e_tests("i154");
 }
 
+#[test]
+#[ignore = "I-177-D 案 C 完了済 (TypeResolver narrowed_type の trigger-kind dispatch \
+            refactor) だが、本 5 fixture は全て E0503 closure-mutable-capture borrow \
+            conflict (Rust 借用チェッカーの構造的制約) で compile fail する。\
+            \n\n\
+            Generated Rust pattern (例: cell-nullcheck-primary-narrow-with-closure-read):\n\
+              let mut reset = || { x = None; };  // mutable borrow of outer x starts\n\
+              if let Some(x) = x { last = x; }   // E0503: use of borrowed x\n\
+              reset();\n\
+            \n\
+            Root cause: TS の closure pattern (`const reset = () => { x = null; }`) を\n\
+            Rust の `let mut reset = || { ... }` に変換すると、closure が outer x を\n\
+            mutable borrow し、後続の `if let Some(x) = x { ... }` shadow read と\n\
+            conflict する。case-C TypeResolver narrow 保持は cohesion 達成済だが、\n\
+            E2E GREEN-ify は I-048 (closure ownership 推論、Rc<RefCell<>> wrap または\n\
+            move closure 採用) 完了で達成される。\n\
+            \n\
+            I-177-D 完了 verification は本 fixture の代わりに以下で行う:\n\
+              - 10 unit tests (src/pipeline/type_resolution.rs::tests, narrowed_type_*) \n\
+                で case-C dispatch を direct verify (matrix cells #2,6,10,14,18 GREEN + \n\
+                #4,8,12,16,20 suppress preserved)\n\
+              - 既存 closure-reassign 系 17 cells/tests の byte-exact 非後退 \n\
+                (cargo test 全 pass, Phase 0 audit inventory 維持)\n\
+              - Hono pre/post bench で error count diff = 0\n\
+            \n\
+            本 fixture は I-048 完了後の GREEN-ify scaffold として保持。\n\
+            I-048 完了時に ignore annotation を解除して GREEN 化を verify。"]
+fn test_e2e_cell_i177_d() {
+    // I-177-D 案 C 5 fixture (cell-{typeof,instanceof,nullcheck,truthy,optchain}-
+    // primary-narrow-with-closure-read): Primary narrow + closure-reassign + body
+    // read-only pattern。case-C TypeResolver narrow 保持を E2E で観測する scaffold
+    // だが、E0503 closure-mutable-capture borrow conflict (I-048 dependency) で
+    // 現状 RED 維持。
+    run_cell_e2e_tests("i177-d");
+}
+
 // -----------------------------------------------------------------------------
 // I-144 per-cell E2E fixtures (`tests/e2e/scripts/i144/`).
 //
@@ -1819,30 +1855,37 @@ fn test_e2e_cell_i161_t7_2_or_narrow_f64() {
     run_cell_e2e_test("i161-i171", "cell-t7-2-or-narrow-f64");
 }
 #[test]
-#[ignore = "I-161 T7-3 RED — narrow × `&&=` × closure-reassign の architectural \
-           IR/TypeResolver cohesion gap、I-177-D 完了で GREEN 化見込み。\
-           T7 review iteration (2026-04-25) で `try_generate_narrowing_match` \
-           に NonNullish !== closure-reassign suppression branch を追加する \
-           workaround patch を試行したが、deep deep /check_job adversarial \
-           review で Scenario A regression (`return x` body without `??` で \
-           E0308 mismatch) が判明し、`ideal-implementation-primacy.md` の \
-           interim patch 条件未充足 + structural fix を patch に降格していると \
-           判断し revert (2026-04-25)。本 cell の root cause は \
-           `FileTypeResolution::narrowed_type(var, position)` の closure-reassign \
-           suppression scope が enclosing fn body 全体で broad すぎ、cons-span \
-           内 (if-body 内、narrow が valid な scope) も含めて narrow を \
-           suppress すること (TODO I-177-D 参照)。pre-T7 / post-revert emission: \
-           `if let Some(mut x) = x { if x.is_some_and(...) { x = Some(3.0); } \
-           reset(); return x.unwrap_or_else(...); }` → IR shadow x: T と \
-           TypeResolver Option<T> view 不整合で `x &&= 3` desugar / \
-           `?? -1` lowering が Option-shape を query して shadow と mismatch \
-           (E0599 / E0282 / E0308 chain) + 加えて `let mut reset = || { x = None; }` \
-           による closure-mutable-capture E0506 borrow conflict。\
-           **Resolution**: I-177-D (TypeResolver suppression scope refactor、案 C: \
-           cons-span 内 narrow 保持 + LET-WRAP scope のみ suppress) で IR shadow \
-           form と TypeResolver narrow が agree するため `x &&= 3` も `?? -1` も \
-           同じ shadow context で works → E0599 chain 解消。closure-mutable-capture \
-           E0506 は I-048 (所有権推論) で別途解消。両方完了後に re-unignore。"]
+#[ignore = "I-161 T7-3 RED — narrow × `&&=` × closure-reassign × body mutation の \
+           複合 architectural defect。T7 review iteration (2026-04-25) で \
+           `try_generate_narrowing_match` に NonNullish !== closure-reassign suppression \
+           branch を追加する workaround patch を試行したが、deep deep /check_job \
+           adversarial review で Scenario A regression (`return x` body without `??` \
+           で E0308 mismatch) が判明し、`ideal-implementation-primacy.md` の interim \
+           patch 条件未充足 + structural fix を patch に降格していると判断し revert \
+           (2026-04-25)。\
+           \n\n\
+           **本 cell が GREEN-ify するには 3 つの architectural fix が必要**:\n\
+           \n\
+           1. **I-177-D (完了 2026-04-26)**: TypeResolver `narrowed_type` suppression \
+           scope の trigger-kind dispatch refactor (案 C)。Primary trigger × \
+           closure-reassign で narrow 保持を達成し、IR shadow form (`if let Some(mut x) \
+           = x { ... }`) と TypeResolver narrow の cohesion を確立。\
+           E0599 / E0282 / E0308 chain (= IR shadow x:T と TypeResolver Option<T> view \
+           の不整合) を架構的に解消。**部分 fix 完了**。\n\
+           \n\
+           2. **I-177 mutation propagation 本体 (PRD 3、未着手)**: 内部 shadow `x: T` \
+           の mutation (`x &&= 3`) が outer `Option<T>` に propagate しない silent \
+           semantic change の本体 fix。案 A (mutation-ref `match &mut x`) または \
+           案 B (writeback `x.take()`) で T7-3 runtime correctness (Rust output -1 ≡ \
+           TS output -1) を達成する。**未着手**。\n\
+           \n\
+           3. **I-048 (PRD 6、closure ownership 推論、未着手)**: \
+           `let mut reset = || { x = None; }` による closure-mutable-capture E0506 \
+           borrow conflict を解消する (Rc<RefCell<>> wrap または move closure 採用)。\
+           **未着手**。\n\
+           \n\
+           上記 3 fix が全て完了した時点で本 cell GREEN-ify、ignore 解除可能。\
+           現状は I-177-D のみ完了で残 2 fix 待ち。"]
 fn test_e2e_cell_i161_t7_3_and_closure_reassign() {
     run_cell_e2e_test("i161-i171", "cell-t7-3-and-closure-reassign");
 }

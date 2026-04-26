@@ -9,16 +9,16 @@
 
 ---
 
-## 現在の状態 (2026-04-25 post I-178+I-183 batch close)
+## 現在の状態 (2026-04-26 post I-177-D PRD 1 close)
 
 | 指標 | 値 |
 |------|-----|
 | Hono bench clean | 111/158 (70.3%) |
 | Hono bench errors | 63 |
-| cargo test (lib) | 3121 pass / 0 fail |
+| cargo test (lib) | 3131 pass / 0 fail |
 | cargo test (integration) | 122 pass |
 | cargo test (compile) | 3 pass |
-| cargo test (E2E) | 155 pass + 28 `#[ignore]` |
+| cargo test (E2E) | 155 pass + 29 `#[ignore]` |
 | clippy | 0 warnings |
 | fmt | 0 diffs |
 
@@ -26,7 +26,25 @@
 
 ### 進行中作業
 
-なし。次の作業は本 file「次の作業」section 参照。
+なし。次の作業は本 file「次の作業」section 参照 (Plan η Step 2 = PRD 2 I-177-B 起票・実装)。
+
+**Plan η (2026-04-26 user 確定): I-177 umbrella + I-048 を 1 PRD = 1 architectural concern で順次 close する 6 PRDs serial 構成**:
+
+```
+Phase 0: empirical audit (silent change quantification、完了 2026-04-26、report/I-177-step0-audit/)
+   ↓
+PRD 1 (I-177-D): TypeResolver narrowed_type suppression scope refactor (案 C、**完了 2026-04-26**)
+   ↓
+PRD 2 (I-177-B): collect_expr_leaf_types query 順序 fix (~10 LOC、non-matrix-driven) ← 次の作業
+   ↓
+PRD 3 (I-177 mutation propagation 本体): F1/F3 body mutation propagation (Tier 0 silent semantic change、案 A vs 案 B 確定)
+   ↓
+PRD 4 (I-177-A): else_block_pattern Let-wrap 化 + I-194 typeof if-block elision (拡張可)
+   ↓
+PRD 5 (I-177-C): symmetric XOR early-return detection
+   ↓
+PRD 6 (I-048): closure ownership 推論 (T7-3 完全 GREEN-ify)
+```
 
 ### 直近の完了作業
 
@@ -34,8 +52,9 @@
 
 | PRD | 日付 | 残課題 / 後続への影響 |
 |-----|------|---------------------|
-| **I-178 + I-183 + Rule corpus optimization batch** | 2026-04-25 | matrix-driven PRD framework (10-rule checklist + 4-layer review + 5-category defect classification) を整備、`.claude/rules/` 21 file + `.claude/skills/` 18 skill + `.claude/commands/` 9 command + CLAUDE.md に reference graph を確立。**次の I-177-D / I-177 で新 framework を初適用**。Tier 3-4 deferral として [I-184]〜[I-193] (10 件) を TODO 起票 |
-| **I-161 + I-171 batch (`&&=`/`||=` desugar + Bang truthy emission)** | 2026-04-22〜04-25 | narrow-related compile error の structural fix。**T7 で `narrowed_type` suppression scope の architectural cohesion gap を発見** → I-177-D PRD に委譲。narrow-scope mutation propagation 欠陥が runtime 誤動作として顕在化 → I-177 (Tier 0 L1) として umbrella 化、3 sub-item (A/B/C) 集約 |
+| **I-177-D (TypeResolver `narrowed_type` suppression scope refactor、案 C、Plan η Step 1)** | 2026-04-26 | trigger-kind-based dispatch refactor (Primary 非 suppress / EarlyReturnComplement 維持 suppress) で I-161 T7 cohesion gap を architectural に解消。**Plan η framework の最初の適用**: prd-template skill + spec-stage-adversarial-checklist 10-rule + check-job-review-layers 4-layer + post-implementation-defect-classification 5-category を初実戦投入し、`/check_job` 2 度の review iteration で findings 全 fix。Tier 3-4 deferral として **I-194** (typeof if-block elision、I-177-A scope 拡張候補) / **I-195** (struct field literal coerce) / **I-196** (framework dimension 拡張) / **I-197** (test 名 prefix audit) を TODO 起票。T7 i177-d 5 E2E fixtures は post-I-048 + post-I-177-A + post-I-162 の合成 dependency により ignore scaffold で保持、T7-3 ignore annotation を 3-fix dependency (I-177-D / I-177 main / I-048) 明記に update。**次の作業**: PRD 2 (I-177-B) で `collect_expr_leaf_types` query 順序 fix |
+| **I-178 + I-183 + Rule corpus optimization batch** | 2026-04-25 | matrix-driven PRD framework (10-rule checklist + 4-layer review + 5-category defect classification) を整備、`.claude/rules/` 21 file + `.claude/skills/` 18 skill + `.claude/commands/` 9 command + CLAUDE.md に reference graph を確立。Tier 3-4 deferral として [I-184]〜[I-193] (10 件) を TODO 起票 |
+| **I-161 + I-171 batch (`&&=`/`||=` desugar + Bang truthy emission)** | 2026-04-22〜04-25 | narrow-related compile error の structural fix。**T7 で `narrowed_type` suppression scope の architectural cohesion gap を発見** → I-177-D PRD で解消済 (2026-04-26)。narrow-scope mutation propagation 欠陥が runtime 誤動作として顕在化 → I-177 (Tier 0 L1) として umbrella 化、3 sub-item (A/B/C) 集約 |
 
 ---
 
@@ -43,19 +62,37 @@
 
 **優先順位は [`.claude/rules/todo-prioritization.md`](.claude/rules/todo-prioritization.md) (L1 > L2 > L3 > L4) および [`.claude/rules/ideal-implementation-primacy.md`](.claude/rules/ideal-implementation-primacy.md) (silent semantic change を最優先) に従う。**
 
-### 実行順序 (prerequisite chain)
+### 実行順序 (prerequisite chain、Plan η 確定 2026-04-26)
 
 ```
-[I-177-D Tier 1 architectural (TypeResolver suppression scope refactor、案 C)]
+[PRD 1: I-177-D — TypeResolver suppression scope refactor、案 C] (完了 2026-04-26)
        │
        ▼
-[I-177 Tier 0 (L1 silent semantic change、mutation propagation 本体 + sub-items A/B/C)]
+[PRD 2: I-177-B (~10 LOC) — collect_expr_leaf_types query 順序 fix、non-matrix-driven] ← 次の作業
+       │
+       ▼
+[PRD 3: I-177 mutation propagation 本体 (Tier 0 silent semantic change) — F1/F3 body mutation、案 A vs 案 B 確定]
+       │
+       ▼
+[PRD 4: I-177-A — else_block_pattern Let-wrap (+ I-194 typeof if-block elision 拡張可)]
+       │
+       ▼
+[PRD 5: I-177-C — symmetric XOR early-return detection]
+       │
+       ▼
+[PRD 6: I-048 — closure ownership 推論 (T7-3 完全 GREEN-ify)]
        │
        ▼
 I-162 → Phase A Step 5 → I-015 → I-158+I-159 → Phase A Step 6 → ...
 ```
 
-**I-177-D を I-177 mutation 本体より先行**: I-177-D は I-177 sub-items A/B/C の architectural root cause も同時解消する可能性があるため、structural fix を I-177-D で先行確立後、残 work を I-177 mutation 本体で実施。
+**PRD 凝集度原則 (2026-04-26 user 確定)**: 凝集度高 + 適切な粒度。1 PRD = 1 architectural concern。
+
+- **PRD 2 (I-177-B、次の作業)**: `collect_expr_leaf_types` (`return_wrap.rs:419`) の query 順序を `narrowed_type → expr_type` に修正、Transformer 一般 path との整合性回復。~10 LOC。non-matrix-driven (light spec)。
+- **PRD 3 (I-177 mutation propagation 本体)**: F1/F3 narrow body 内 mutation の outer Option<T> propagation (Tier 0 silent semantic change)。matrix-driven、~600-1000 LOC + ~200 refactor。案 A (mutation-ref `match &mut x`) vs 案 B (writeback `x.take()`) を spec stage で empirical 確定。
+- **PRD 4 (I-177-A)**: `try_generate_narrowing_match` else_block_pattern bare match → Let-wrap 化、post-if narrow materialization。~20-30 LOC。**I-194 (typeof if-block elision) を scope 拡張候補として検討** (Phase 0 audit で発見の Transformer IR emission gap)。
+- **PRD 5 (I-177-C)**: `visit_if_stmt` (then XOR else) 拡張 + guards.rs symmetric direction handling。~10-15 LOC。
+- **PRD 6 (I-048)**: closure capture mode 推論 (move/FnMut/Fn)、T7-3 E0506 解消、closures/functions fixture unblock。大規模、要 spec stage 詳細化。
 
 ### 着手順の導出原則
 
@@ -68,8 +105,11 @@ I-162 → Phase A Step 5 → I-015 → I-158+I-159 → Phase A Step 6 → ...
 
 | 優先度 | レベル | PRD | 内容 | 根拠 |
 |--------|-------|-----|------|------|
-| **0a (Tier 0)** | **L1** | **I-177-D (architectural prerequisite for I-177、TypeResolver suppression scope refactor、案 C)** | `narrowed_type` の closure-reassign suppression scope を enclosing fn body 全体 → post-if 限定に refactor。T7-3 cohesion gap (IR shadow form と TypeResolver Option<T> view の不整合) の structural 解消。I-177 sub-items A/B/C の architectural root cause も同時解消候補 | I-161 T7 で empirical 発見の architectural defect、I-177 起票前の prerequisite。新 framework (`spec-stage-adversarial-checklist.md` 10-rule + `check-job-review-layers.md` 4-layer) の最初の trial 兼任 |
-| **0b (Tier 0)** | **L1** | **I-177 (narrow emission v2 umbrella、L1 promoted 2026-04-24)** | I-144 T6-3 inherited の shadow-mutation-propagation 欠陥を structural fix。silent runtime 誤動作 (Tier 0)。**集約 sub-item 3 件**: I-177-A (typeof/instanceof/OptChain × `then_exit + else_non_exit` × post-narrow) / I-177-B (`collect_expr_leaf_types` query 順序 inconsistency) / I-177-C (`!== null` + (F, T) symmetric / Truthy `if (x)` symmetric) | I-161 T3 実装で latent defect が **runtime 誤動作** として顕在化、`conversion-correctness-priority.md` Tier 1 silent semantic change 該当 → L1 promote (旧 L2)。**I-177-D 完了後に sub-items A/B/C の自然解消有無を再評価して残 work を実施** |
+| **0 (Tier 1)** | **L4** | **PRD 2: I-177-B (`collect_expr_leaf_types` query 順序 fix)** | `return_wrap.rs:419` の query 順序を `narrowed_type → expr_type` に変更し Transformer 一般 path との整合性回復 (~10 LOC、non-matrix-driven) | I-177-D 完了で TypeResolver-IR cohesion 確立、本 PRD で return-wrap path も同 strategy に統一して narrow framework cohesion 完成 |
+| **0a (Tier 0)** | **L1** | **PRD 3: I-177 mutation propagation 本体 (narrow emission v2、L1 silent semantic change)** | I-144 T6-3 inherited の shadow-mutation-propagation 欠陥を structural fix。F1/F3 narrow body 内 mutation の outer Option<T> propagation を案 A (mutation-ref `match &mut x`) vs 案 B (writeback `x.take()`) で確定 | I-161 T3 実装で latent defect が runtime 誤動作として顕在化、Tier 0 silent semantic change 該当。matrix-driven、~600-1000 LOC + ~200 refactor |
+| **0b (Tier 1)** | **L3** | **PRD 4: I-177-A (else_block_pattern Let-wrap 化)** | typeof/instanceof/OptChain × `then_exit + else_non_exit` × post-narrow primitive use の bare match → Let-wrap 化、INV-2 違反解消 (~20-30 LOC)。**I-194 (typeof if-block elision) を scope 拡張候補として検討** | I-171 T5 で発見、Plan η Step 4 |
+| **0c (Tier 1)** | **L3** | **PRD 5: I-177-C (symmetric XOR early-return detection)** | `visit_if_stmt` (then XOR else) 拡張 + guards.rs symmetric direction handling (~10-15 LOC) | Plan η Step 5、narrow framework 対称性完成 |
+| **0d (Tier 1)** | **L3** | **PRD 6: I-048 (closure ownership 推論)** | closure capture mode (move/FnMut/Fn) 推論。T7-3 E0506 解消、closures/functions fixture unblock。大規模、要 spec stage 詳細化 | Plan η Step 6、`closures` / `functions` fixture unskip、T7-3 完全 GREEN-ify |
 | 1 | L3 | **I-162** | class without explicit constructor → `Self::new()` 自動合成 | I-144 T2 instanceof narrow の Rust 側 E2E lock-in が本 defect で block。`class Dog {}` → `struct Dog {}` 止まりで `Dog::new()` 不在で E0599 |
 | 2 | L3 | **Phase A Step 5** (I-026 / I-029 / I-030) | 型 assertion / null as any / any-narrowing enum 変換 | `type-assertion`, `trait-coercion`, `any-type-narrowing` unskip (3 fixture 直接削減) |
 | 3 | L3 | **I-015** | Hono types.rs `Input['out']` indexed access 解決失敗 (E0405) | `src/ts_type_info/resolve/indexed_access.rs:271`。Hono types.rs で 1 件だが dir compile blocker |
@@ -87,7 +127,6 @@ I-162 → Phase A Step 5 → I-015 → I-158+I-159 → Phase A Step 6 → ...
 - **I-140** (L3、TypeDef::Alias variant 追加) — `type MaybeStr = string \| undefined` alias 経由の Option 認識。I-134 / I-056 と batch 可能
 - **I-050 umbrella** (L3、Any coercion) — I-143-b + I-050-b + I-050-c が依存。structural 母体として設計維持
 - **I-146** (L3、`return undefined` on void fn) — `keyword-types` unskip の残条件
-- **I-048** (L3、所有権推論) — RC-2 根本解決、`closures` / `functions` unskip の残条件、修正規模大
 - **I-074** (L4、`Item::StructInit` broken window) — pipeline-integrity 違反、PRD 化候補
 - **I-160** (L4、Walker defense-in-depth Expr-embedded Stmt::Break) — 現時点 reachability なし
 - **I-165 / I-166 / I-167 / I-170** (L4 narrow precision umbrella) — I-144 後の latent imprecision、runtime 動作同一、Rust 精度のみ向上

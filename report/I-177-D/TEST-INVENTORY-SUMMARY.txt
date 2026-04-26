@@ -1,0 +1,140 @@
+================================================================================
+I-177-D CLOSURE-REASSIGN TEST INVENTORY - QUICK REFERENCE
+================================================================================
+
+TOTAL TESTS FOUND: 13
+  - 6 active unit tests (narrowing.rs, bang_layer_2.rs, null_check_symmetric.rs, binary_unary.rs)
+  - 3 E2E cells (1 ignored T7-3 RED + 2 green closure-reassign)
+  - 3 deleted T7 lock-in tests (CONFIRMED deleted via grep + git log)
+  - 1 mixed-union H-3 test (supporting, not closure-reassign specific)
+
+================================================================================
+CRITICAL FINDINGS
+================================================================================
+
+1. DELETED TESTS CONFIRMED (2026-04-25 T7 Revert):
+   ✓ narrowing_match_suppressed_for_neq_null_early_return_when_closure_reassign_present
+   ✓ narrowing_match_suppressed_for_neq_null_with_else_then_exit_when_closure_reassign_present
+   ✓ narrowing_match_does_not_use_predicate_form_for_truthy_when_closure_reassign_present
+   (All 3 verified NOT PRESENT in current codebase)
+
+2. LIKELY IMPACT: 1 test requires expected output update
+   - src/transformer/statements/tests/control_flow/narrowing.rs:14
+   - narrowing_match_suppressed_when_closure_reassign_present
+   - Current: expects predicate form `if x.is_none() { return }`
+   - Post-I-177-D: may expect Let-wrap match (if cons-span narrow materialized)
+
+3. NO-CHANGE TESTS: 5 unit tests unaffected
+   - All related to fallthrough behavior or coerce logic
+   - Suppression scope change doesn't affect their assertions
+
+================================================================================
+TEST LOCATIONS
+================================================================================
+
+UNIT TESTS:
+
+1. src/transformer/statements/tests/control_flow/narrowing.rs:14
+   fn narrowing_match_suppressed_when_closure_reassign_present()
+   ✓ Suppression active, early-return, === null guard
+   STATUS: LIKELY REQUIRES UPDATE
+
+2. src/transformer/statements/tests/control_flow/narrowing.rs:92
+   fn narrowing_match_uses_if_let_for_neq_null_early_return_without_closure_reassign()
+   ✓ No closure-reassign, if-let expected
+   STATUS: NO CHANGE
+
+3. src/transformer/statements/tests/control_flow/truthy_complement_match/bang_layer_2.rs:360
+   fn bang_with_closure_reassign_falls_through_to_predicate_form()
+   ✓ Bang !x suppression, Layer 1 fallthrough
+   STATUS: NO CHANGE
+
+4. src/transformer/statements/tests/control_flow/truthy_complement_match/null_check_symmetric.rs:89
+   fn null_check_then_exit_else_non_exit_with_closure_reassign_falls_through()
+   ✓ === null suppression, then-exit+else-non-exit, Layer 1 fallthrough
+   STATUS: NO CHANGE
+
+5. src/transformer/expressions/tests/binary_unary.rs:550
+   fn arith_coerce_when_closure_reassigned_option_lhs()
+   ✓ Coerce consequence test (unwrap_or), not suppression mechanism
+   STATUS: NO CHANGE
+
+6. src/transformer/expressions/tests/binary_unary.rs:587
+   fn string_concat_coerce_when_closure_reassigned_option()
+   ✓ Coerce consequence test (format!), not suppression mechanism
+   STATUS: NO CHANGE
+
+7. src/transformer/expressions/tests/binary_unary.rs:637
+   fn arith_coerce_does_not_fire_for_non_option_closure_reassigned_var()
+   ✓ Vec<T> filter test, coerce doesn't apply
+   STATUS: NO CHANGE
+
+E2E TEST CELLS:
+
+8. tests/e2e_test.rs:1337
+   test_e2e_cell_i144_c2b_closure_reassign_arith_read
+   ✓ GREEN - coerce path validation
+   STATUS: NO CHANGE
+
+9. tests/e2e_test.rs:1341
+   test_e2e_cell_i144_c2c_closure_reassign_string_concat
+   ✓ GREEN - coerce path validation
+   STATUS: NO CHANGE
+
+10. tests/e2e_test.rs:1846
+    test_e2e_cell_i161_t7_3_and_closure_reassign
+    ✗ IGNORED (T7-3 RED) - root cause = broad scope suppression
+    STATUS: EXPECTED GREEN after I-177-D
+
+================================================================================
+IMPACT MATRIX
+================================================================================
+
+SUPPRESSION SCOPE CHANGE: fn body → post-if (cons-span inner retains narrow)
+
+Test 1: narrowing_match_suppressed_when_closure_reassign_present
+  Current expected: predicate form (narrow NOT materialized in fn body)
+  Post-I-177-D:    let-match form? (narrow IS materialized in cons-span)
+  Certainty:       LIKELY (depends on Case C implementation)
+  Action:          VERIFY & UPDATE if needed
+
+Tests 2-7: Unaffected
+  Reason: Either test non-suppression paths or test coerce consequence logic
+  Action: Monitor for regression, but no expected update needed
+
+Test 10: t7-3 E2E cell
+  Current: IGNORED (E0599/E0282/E0308 chain due to IR/TypeResolver mismatch)
+  Expected: GREEN (suppression scope fix resolves coherence gap)
+  Action: Unignore after I-177-D complete (may still need I-048 for E0506)
+
+================================================================================
+VALIDATION CHECKLIST
+================================================================================
+
+Pre-Implementation:
+  [ ] Confirm Case C implementation plan for cons-span scope
+  [ ] Determine if cons-span inner narrow materialization happens
+  [ ] Document test #1 current expected output in detail
+
+Implementation Phase:
+  [ ] Run all 7 unit tests with refactored narrowed_type()
+  [ ] Check test #1 assertion (predicate vs let-match)
+  [ ] Update assertion if emission form changes
+  [ ] Verify tests #2-7 still PASS
+
+Post-Implementation:
+  [ ] Re-run full test suite (3121+ tests)
+  [ ] Confirm 3 deleted tests still absent
+  [ ] Check if E2E test #10 can be unignored
+  [ ] Document any additional fixes needed (e.g., I-048 for E0506)
+
+================================================================================
+ESTIMATED EFFORT
+================================================================================
+
+Test updates: ~1 unit test (test #1)
+Test assertions: ~20+ (per TODO estimate)
+Time estimate: 2-4 hours for testing + assertion updates (post-implementation)
+Risk: LOW - deletions are already done; main risk is getting test #1 expectation right
+
+================================================================================

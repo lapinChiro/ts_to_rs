@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 
 use crate::ir::RustType;
-use crate::pipeline::narrowing_analyzer::{EmissionHint, NarrowEvent};
+use crate::pipeline::narrowing_analyzer::{EmissionHint, NarrowEvent, NarrowTrigger};
 
 use super::ResolvedType;
 
@@ -178,24 +178,75 @@ impl FileTypeResolution {
     /// Only consults [`NarrowEvent::Narrow`] variants; `Reset` /
     /// `ClosureCapture` events carry no type and are skipped.
     ///
-    /// I-144 T6-2 closure-reassign suppression (I-169 follow-up: position-
-    /// aware): when `var_name` is reassigned inside any closure body whose
-    /// `enclosing_fn_body` contains `position`, the narrow is suppressed
-    /// and `None` is returned. Callers fall back to the variable's declared
-    /// `Option<T>` type, which matches the Transformer's narrow-guard
-    /// suppression so reads see a consistent type and the `coerce_default`
-    /// wrapper can be applied at arithmetic / string-concat sites.
+    /// # Closure-reassign suppression (I-144 T6-2 + I-177-D 案 C)
+    ///
+    /// When a closure reassigns `var_name` (detected via
+    /// [`NarrowEvent::ClosureCapture`] with matching `enclosing_fn_body`),
+    /// suppression is dispatched on the matching narrow event's
+    /// [`NarrowTrigger`]:
+    ///
+    /// - **`Primary` narrow** (e.g. `if (x !== null) { /* cons-span */ }`):
+    ///   not suppressed. The Transformer emits an IR shadow form (typically
+    ///   `if let Some(x) = x { ... }` or a typeof variant pattern) that
+    ///   rebinds `x` to the narrow type within the cons-span. Preserving
+    ///   the narrow keeps the TypeResolver view consistent with the IR
+    ///   shadow so type-driven emission decisions (e.g. operator desugar,
+    ///   `??` lowering) at narrow-typed sites do not produce E0599 / E0282
+    ///   / E0308 mismatches against the shadow (I-161 T7 cohesion gap
+    ///   resolved at compile-error level). 案 C does **not** address two
+    ///   related concerns that surface in body-mutation + closure-call
+    ///   patterns (e.g. T7-3 `if (x !== null) { x &&= 3; reset(); return x ?? -1; }`):
+    ///
+    ///   1. **Mutation propagation** (deferred to I-177 mutation propagation
+    ///      本体): inside the IR shadow, `x &&= 3` mutates the inner
+    ///      shadow binding only. After a closure call (`reset()`) that
+    ///      mutates the outer `Option<T>` to `None`, the inner shadow
+    ///      retains the pre-closure-call value. Reading `x ?? -1` returns
+    ///      the inner shadow's value rather than the post-closure outer
+    ///      `None`, producing a silent semantic change vs TS runtime.
+    ///   2. **Closure-mutable-capture borrow conflict** (deferred to I-048):
+    ///      `let mut reset = || { x = None; };` mutably borrows outer `x`,
+    ///      conflicting with the subsequent `if let Some(x) = x` move /
+    ///      borrow (E0503 / E0506).
+    ///
+    ///   T7-3 GREEN-ify therefore depends on I-177-D (this fix, completed) +
+    ///   I-177 mutation propagation 本体 + I-048 closure ownership inference.
+    /// - **`EarlyReturnComplement` narrow** (e.g.
+    ///   `if (x === null) return; /* post-if */`): suppressed (returns
+    ///   `None`). Post-if scope can be invalidated at runtime by a closure
+    ///   call that reassigns `var_name`, so callers fall back to the
+    ///   variable's declared `Option<T>` type and the
+    ///   [`Transformer`](crate::transformer)'s `coerce_default` wrapper
+    ///   reproduces JS runtime semantics (`null + 1 = 1`,
+    ///   `"v=" + null = "v=null"`).
+    ///
+    /// `position` filters [`NarrowEvent::ClosureCapture`] events by
+    /// `enclosing_fn_body` membership so a closure-reassign in function
+    /// `f` does not affect narrow queries in a sibling function `g`
+    /// (multi-fn scope isolation, I-169 P1 invariant).
     pub fn narrowed_type(&self, var_name: &str, position: u32) -> Option<&RustType> {
-        if self.is_var_closure_reassigned(var_name, position) {
-            return None;
-        }
-        self.narrow_events
+        // Find innermost matching narrow event (rfind = rightmost in Vec).
+        let narrow = self
+            .narrow_events
             .iter()
             .filter_map(NarrowEvent::as_narrow)
             .rfind(|n| {
                 n.var_name == var_name && n.scope_start <= position && position < n.scope_end
-            })
-            .map(|n| n.narrowed_type)
+            })?;
+
+        // Trigger-kind-based suppression dispatch (I-177-D 案 C).
+        //
+        // Primary trigger: keep narrow active even when closure-reassign exists.
+        // EarlyReturnComplement: suppress on closure-reassign (preserve
+        // coerce_default workaround in post-if scope).
+        let should_suppress = matches!(narrow.trigger, NarrowTrigger::EarlyReturnComplement(_))
+            && self.is_var_closure_reassigned(var_name, position);
+
+        if should_suppress {
+            return None;
+        }
+
+        Some(narrow.narrowed_type)
     }
 
     /// Gets the mutability for a variable.
@@ -418,10 +469,19 @@ mod tests {
 
     #[test]
     fn test_narrowed_type_suppressed_when_closure_reassign_present() {
-        // I-144 T6-2: a `ClosureCapture` event for the same var causes
-        // `narrowed_type` to return `None` so the variable's declared
-        // `Option<T>` type is read at narrow-stale sites and the
-        // Transformer can apply the `coerce_default` wrapper.
+        // I-144 T6-2 + I-177-D: a `ClosureCapture` event for the same var
+        // causes `narrowed_type` to return `None` for `EarlyReturnComplement`
+        // narrows so the variable's declared `Option<T>` type is read at
+        // narrow-stale sites and the Transformer can apply the
+        // `coerce_default` wrapper. Primary narrows (e.g.
+        // `if (x !== null) { /* cons-span */ }`) are NOT suppressed under
+        // I-177-D 案 C, since the IR shadow form rebinds `x` to the narrow
+        // type within the `if` body and the closure call only mutates the
+        // outer `Option<T>` after cons-span exit.
+        //
+        // This test pins the EarlyReturnComplement suppression invariant
+        // (matrix cell #16: `Truthy` × EarlyReturnComplement × closure-
+        // reassign present → None) which I-177-D preserves.
         use crate::pipeline::narrowing_analyzer::{NarrowTrigger, PrimaryTrigger};
         let mut resolution = FileTypeResolution::empty();
         resolution.narrow_events.push(NarrowEvent::Narrow {
@@ -429,7 +489,7 @@ mod tests {
             scope_start: 10,
             scope_end: 30,
             narrowed_type: RustType::F64,
-            trigger: NarrowTrigger::Primary(PrimaryTrigger::Truthy),
+            trigger: NarrowTrigger::EarlyReturnComplement(PrimaryTrigger::Truthy),
         });
         resolution.narrow_events.push(NarrowEvent::ClosureCapture {
             var_name: "x".to_string(),
@@ -437,13 +497,14 @@ mod tests {
         });
 
         assert!(resolution.narrowed_type("x", 20).is_none());
-        // A different variable's narrow is unaffected.
+        // A different variable's narrow is unaffected (no closure-capture
+        // event for `y`, so even an EarlyReturnComplement narrow stays alive).
         resolution.narrow_events.push(NarrowEvent::Narrow {
             var_name: "y".to_string(),
             scope_start: 10,
             scope_end: 30,
             narrowed_type: RustType::String,
-            trigger: NarrowTrigger::Primary(PrimaryTrigger::Truthy),
+            trigger: NarrowTrigger::EarlyReturnComplement(PrimaryTrigger::Truthy),
         });
         assert!(resolution.narrowed_type("y", 20).is_some());
     }
@@ -473,10 +534,16 @@ mod tests {
     }
 
     #[test]
-    fn narrowed_type_suppress_only_fires_inside_enclosing_fn_body() {
-        // I-169 P1 (matrix cell #3): when two Narrow events for `x` exist
-        // in different functions and one has a ClosureCapture event, the
-        // other's narrow must NOT be suppressed.
+    fn test_narrowed_type_suppress_only_fires_inside_enclosing_fn_body() {
+        // I-169 P1 (matrix cell #3) + I-177-D 案 C INV-2: when two
+        // EarlyReturnComplement Narrow events for `x` exist in different
+        // functions and only one has a ClosureCapture event, the other's
+        // narrow must NOT be suppressed (multi-fn scope isolation).
+        //
+        // Uses EarlyReturnComplement trigger so the suppression dispatch
+        // path (case-C: suppress only `EarlyReturnComplement` + closure-
+        // reassign) actually fires inside f, allowing this test to verify
+        // that the suppression boundary is the correct fn body span.
         use crate::pipeline::narrowing_analyzer::{NarrowTrigger, PrimaryTrigger};
         let mut resolution = FileTypeResolution::empty();
         // Function f at [0, 100): has Narrow event + ClosureCapture event.
@@ -485,7 +552,7 @@ mod tests {
             scope_start: 10,
             scope_end: 90,
             narrowed_type: RustType::F64,
-            trigger: NarrowTrigger::Primary(PrimaryTrigger::Truthy),
+            trigger: NarrowTrigger::EarlyReturnComplement(PrimaryTrigger::Truthy),
         });
         resolution.narrow_events.push(NarrowEvent::ClosureCapture {
             var_name: "x".to_string(),
@@ -497,7 +564,7 @@ mod tests {
             scope_start: 210,
             scope_end: 290,
             narrowed_type: RustType::F64,
-            trigger: NarrowTrigger::Primary(PrimaryTrigger::Truthy),
+            trigger: NarrowTrigger::EarlyReturnComplement(PrimaryTrigger::Truthy),
         });
 
         // Query inside f (position 60): suppress → None
@@ -591,5 +658,340 @@ mod tests {
         // The Transformer falls back to the default E1 shadow-let path.
         let resolution = FileTypeResolution::empty();
         assert_eq!(resolution.emission_hint(42), None);
+    }
+
+    // ============================================================
+    // I-177-D: trigger-kind-based suppression dispatch tests
+    // ============================================================
+    //
+    // 案 C (PRD I-177-D): closure-reassign suppression は narrow event の
+    // trigger 種別で dispatch する。
+    //
+    // - Primary narrow (`if (x !== null) { /* cons-span */ }` 内): suppression
+    //   対象外。narrow を保持して IR shadow form (`if let Some(x) = x { ... }`)
+    //   と TypeResolver narrow の cohesion を確立する。
+    // - EarlyReturnComplement narrow (`if (x === null) return; /* post-if */`):
+    //   suppression 維持。post-if scope は closure call で runtime に narrow が
+    //   invalidate されうる構造のため、`coerce_default` workaround を発動させる。
+    //
+    // 以下の 10 test は matrix cells #2, 6, 10, 14, 18 (主 fix) +
+    // #4, 8, 12, 16, 20 (suppress preserve) を direct 検証する。
+
+    // ----- 主 fix cells: Primary trigger × closure-reassign × narrow scope内 query →
+    //       case-C で Some(narrow) を返す (案 C 効果)。 -----
+
+    #[test]
+    fn test_narrowed_type_primary_typeof_with_closure_reassign_keeps_narrow() {
+        // Matrix cell #2: Primary(TypeofGuard) + closure-reassign present →
+        // case-C で narrow 維持 (Some(String))。
+        use crate::pipeline::narrowing_analyzer::{NarrowTrigger, PrimaryTrigger};
+        let mut resolution = FileTypeResolution::empty();
+        resolution.narrow_events.push(NarrowEvent::Narrow {
+            var_name: "x".to_string(),
+            scope_start: 10,
+            scope_end: 50,
+            narrowed_type: RustType::String,
+            trigger: NarrowTrigger::Primary(PrimaryTrigger::TypeofGuard("string".to_string())),
+        });
+        resolution.narrow_events.push(NarrowEvent::ClosureCapture {
+            var_name: "x".to_string(),
+            enclosing_fn_body: Span { lo: 0, hi: 100 },
+        });
+        assert!(matches!(
+            resolution.narrowed_type("x", 25),
+            Some(RustType::String)
+        ));
+    }
+
+    #[test]
+    fn test_narrowed_type_primary_instanceof_with_closure_reassign_keeps_narrow() {
+        // Matrix cell #6: Primary(InstanceofGuard) + closure-reassign present →
+        // case-C で narrow 維持 (Some(Named { name: "Foo" }))。
+        use crate::pipeline::narrowing_analyzer::{NarrowTrigger, PrimaryTrigger};
+        let mut resolution = FileTypeResolution::empty();
+        resolution.narrow_events.push(NarrowEvent::Narrow {
+            var_name: "x".to_string(),
+            scope_start: 10,
+            scope_end: 50,
+            narrowed_type: RustType::Named {
+                name: "Foo".to_string(),
+                type_args: vec![],
+            },
+            trigger: NarrowTrigger::Primary(PrimaryTrigger::InstanceofGuard("Foo".to_string())),
+        });
+        resolution.narrow_events.push(NarrowEvent::ClosureCapture {
+            var_name: "x".to_string(),
+            enclosing_fn_body: Span { lo: 0, hi: 100 },
+        });
+        assert!(matches!(
+            resolution.narrowed_type("x", 25),
+            Some(RustType::Named { name, .. }) if name == "Foo"
+        ));
+    }
+
+    #[test]
+    fn test_narrowed_type_primary_nullcheck_with_closure_reassign_keeps_narrow() {
+        // Matrix cell #10: Primary(NullCheck NotEqEqNull) + closure-reassign present →
+        // case-C で narrow 維持 (Some(F64))。T7-3 と同型 pattern (body read-only)。
+        use crate::pipeline::narrowing_analyzer::{NarrowTrigger, NullCheckKind, PrimaryTrigger};
+        let mut resolution = FileTypeResolution::empty();
+        resolution.narrow_events.push(NarrowEvent::Narrow {
+            var_name: "x".to_string(),
+            scope_start: 10,
+            scope_end: 50,
+            narrowed_type: RustType::F64,
+            trigger: NarrowTrigger::Primary(PrimaryTrigger::NullCheck(NullCheckKind::NotEqEqNull)),
+        });
+        resolution.narrow_events.push(NarrowEvent::ClosureCapture {
+            var_name: "x".to_string(),
+            enclosing_fn_body: Span { lo: 0, hi: 100 },
+        });
+        assert!(matches!(
+            resolution.narrowed_type("x", 25),
+            Some(RustType::F64)
+        ));
+    }
+
+    #[test]
+    fn test_narrowed_type_primary_truthy_with_closure_reassign_keeps_narrow() {
+        // Matrix cell #14: Primary(Truthy) + closure-reassign present →
+        // case-C で narrow 維持 (Some(F64))。
+        use crate::pipeline::narrowing_analyzer::{NarrowTrigger, PrimaryTrigger};
+        let mut resolution = FileTypeResolution::empty();
+        resolution.narrow_events.push(NarrowEvent::Narrow {
+            var_name: "x".to_string(),
+            scope_start: 10,
+            scope_end: 50,
+            narrowed_type: RustType::F64,
+            trigger: NarrowTrigger::Primary(PrimaryTrigger::Truthy),
+        });
+        resolution.narrow_events.push(NarrowEvent::ClosureCapture {
+            var_name: "x".to_string(),
+            enclosing_fn_body: Span { lo: 0, hi: 100 },
+        });
+        assert!(matches!(
+            resolution.narrowed_type("x", 25),
+            Some(RustType::F64)
+        ));
+    }
+
+    #[test]
+    fn test_narrowed_type_primary_optchain_with_closure_reassign_keeps_narrow() {
+        // Matrix cell #18: Primary(OptChainInvariant) + closure-reassign present →
+        // case-C で narrow 維持 (Some(Named { name: "Config" }))。
+        use crate::pipeline::narrowing_analyzer::{NarrowTrigger, PrimaryTrigger};
+        let mut resolution = FileTypeResolution::empty();
+        resolution.narrow_events.push(NarrowEvent::Narrow {
+            var_name: "c".to_string(),
+            scope_start: 10,
+            scope_end: 50,
+            narrowed_type: RustType::Named {
+                name: "Config".to_string(),
+                type_args: vec![],
+            },
+            trigger: NarrowTrigger::Primary(PrimaryTrigger::OptChainInvariant),
+        });
+        resolution.narrow_events.push(NarrowEvent::ClosureCapture {
+            var_name: "c".to_string(),
+            enclosing_fn_body: Span { lo: 0, hi: 100 },
+        });
+        assert!(matches!(
+            resolution.narrowed_type("c", 25),
+            Some(RustType::Named { name, .. }) if name == "Config"
+        ));
+    }
+
+    // ----- Suppress preserve cells: EarlyReturnComplement trigger × closure-reassign
+    //       × narrow scope内 query → suppression 維持で None を返す (regression lock-in)。 -----
+
+    #[test]
+    fn test_narrowed_type_early_return_typeof_with_closure_reassign_suppresses() {
+        // Matrix cell #4: EarlyReturnComplement(TypeofGuard) + closure-reassign →
+        // suppression 維持 (None)。post-if scope の coerce_default 発動を保証。
+        //
+        // Twin assertion: sibling var `y` の同 trigger narrow を ClosureCapture
+        // 不在で push し `Some(narrow)` を返すことを確認。これにより `x` の
+        // None が「suppression 動作の結果」であって「narrow event 不在」では
+        // ないことを構造的に証明する。
+        use crate::pipeline::narrowing_analyzer::{NarrowTrigger, PrimaryTrigger};
+        let mut resolution = FileTypeResolution::empty();
+        resolution.narrow_events.push(NarrowEvent::Narrow {
+            var_name: "x".to_string(),
+            scope_start: 10,
+            scope_end: 50,
+            narrowed_type: RustType::String,
+            trigger: NarrowTrigger::EarlyReturnComplement(PrimaryTrigger::TypeofGuard(
+                "string".to_string(),
+            )),
+        });
+        resolution.narrow_events.push(NarrowEvent::ClosureCapture {
+            var_name: "x".to_string(),
+            enclosing_fn_body: Span { lo: 0, hi: 100 },
+        });
+        assert!(resolution.narrowed_type("x", 25).is_none());
+        // Sibling var without ClosureCapture: same EarlyReturnComplement trigger,
+        // narrow stays alive → distinguishes suppression from absence of event.
+        resolution.narrow_events.push(NarrowEvent::Narrow {
+            var_name: "y".to_string(),
+            scope_start: 10,
+            scope_end: 50,
+            narrowed_type: RustType::String,
+            trigger: NarrowTrigger::EarlyReturnComplement(PrimaryTrigger::TypeofGuard(
+                "string".to_string(),
+            )),
+        });
+        assert!(matches!(
+            resolution.narrowed_type("y", 25),
+            Some(RustType::String)
+        ));
+    }
+
+    #[test]
+    fn test_narrowed_type_early_return_instanceof_with_closure_reassign_suppresses() {
+        // Matrix cell #8: EarlyReturnComplement(InstanceofGuard) + closure-reassign →
+        // suppression 維持 (None)。Twin assertion で suppression 由来の None を確証。
+        use crate::pipeline::narrowing_analyzer::{NarrowTrigger, PrimaryTrigger};
+        let mut resolution = FileTypeResolution::empty();
+        resolution.narrow_events.push(NarrowEvent::Narrow {
+            var_name: "x".to_string(),
+            scope_start: 10,
+            scope_end: 50,
+            narrowed_type: RustType::Named {
+                name: "Foo".to_string(),
+                type_args: vec![],
+            },
+            trigger: NarrowTrigger::EarlyReturnComplement(PrimaryTrigger::InstanceofGuard(
+                "Foo".to_string(),
+            )),
+        });
+        resolution.narrow_events.push(NarrowEvent::ClosureCapture {
+            var_name: "x".to_string(),
+            enclosing_fn_body: Span { lo: 0, hi: 100 },
+        });
+        assert!(resolution.narrowed_type("x", 25).is_none());
+        // Sibling var: same trigger, no ClosureCapture → narrow alive.
+        resolution.narrow_events.push(NarrowEvent::Narrow {
+            var_name: "y".to_string(),
+            scope_start: 10,
+            scope_end: 50,
+            narrowed_type: RustType::Named {
+                name: "Foo".to_string(),
+                type_args: vec![],
+            },
+            trigger: NarrowTrigger::EarlyReturnComplement(PrimaryTrigger::InstanceofGuard(
+                "Foo".to_string(),
+            )),
+        });
+        assert!(matches!(
+            resolution.narrowed_type("y", 25),
+            Some(RustType::Named { name, .. }) if name == "Foo"
+        ));
+    }
+
+    #[test]
+    fn test_narrowed_type_early_return_nullcheck_with_closure_reassign_suppresses() {
+        // Matrix cell #12: EarlyReturnComplement(NullCheck EqEqEqNull) + closure-reassign →
+        // suppression 維持 (None)。c2b/c2c-like pattern で coerce_default 発動を保証。
+        // Twin assertion で suppression 由来の None を確証。
+        use crate::pipeline::narrowing_analyzer::{NarrowTrigger, NullCheckKind, PrimaryTrigger};
+        let mut resolution = FileTypeResolution::empty();
+        resolution.narrow_events.push(NarrowEvent::Narrow {
+            var_name: "x".to_string(),
+            scope_start: 10,
+            scope_end: 50,
+            narrowed_type: RustType::F64,
+            trigger: NarrowTrigger::EarlyReturnComplement(PrimaryTrigger::NullCheck(
+                NullCheckKind::EqEqEqNull,
+            )),
+        });
+        resolution.narrow_events.push(NarrowEvent::ClosureCapture {
+            var_name: "x".to_string(),
+            enclosing_fn_body: Span { lo: 0, hi: 100 },
+        });
+        assert!(resolution.narrowed_type("x", 25).is_none());
+        // Sibling var: same trigger, no ClosureCapture → narrow alive.
+        resolution.narrow_events.push(NarrowEvent::Narrow {
+            var_name: "y".to_string(),
+            scope_start: 10,
+            scope_end: 50,
+            narrowed_type: RustType::F64,
+            trigger: NarrowTrigger::EarlyReturnComplement(PrimaryTrigger::NullCheck(
+                NullCheckKind::EqEqEqNull,
+            )),
+        });
+        assert!(matches!(
+            resolution.narrowed_type("y", 25),
+            Some(RustType::F64)
+        ));
+    }
+
+    #[test]
+    fn test_narrowed_type_early_return_truthy_with_closure_reassign_suppresses() {
+        // Matrix cell #16: EarlyReturnComplement(Truthy) + closure-reassign →
+        // suppression 維持 (None)。Twin assertion で suppression 由来の None を確証。
+        use crate::pipeline::narrowing_analyzer::{NarrowTrigger, PrimaryTrigger};
+        let mut resolution = FileTypeResolution::empty();
+        resolution.narrow_events.push(NarrowEvent::Narrow {
+            var_name: "x".to_string(),
+            scope_start: 10,
+            scope_end: 50,
+            narrowed_type: RustType::F64,
+            trigger: NarrowTrigger::EarlyReturnComplement(PrimaryTrigger::Truthy),
+        });
+        resolution.narrow_events.push(NarrowEvent::ClosureCapture {
+            var_name: "x".to_string(),
+            enclosing_fn_body: Span { lo: 0, hi: 100 },
+        });
+        assert!(resolution.narrowed_type("x", 25).is_none());
+        // Sibling var: same trigger, no ClosureCapture → narrow alive.
+        resolution.narrow_events.push(NarrowEvent::Narrow {
+            var_name: "y".to_string(),
+            scope_start: 10,
+            scope_end: 50,
+            narrowed_type: RustType::F64,
+            trigger: NarrowTrigger::EarlyReturnComplement(PrimaryTrigger::Truthy),
+        });
+        assert!(matches!(
+            resolution.narrowed_type("y", 25),
+            Some(RustType::F64)
+        ));
+    }
+
+    #[test]
+    fn test_narrowed_type_early_return_optchain_with_closure_reassign_suppresses() {
+        // Matrix cell #20: EarlyReturnComplement(OptChainInvariant) + closure-reassign →
+        // suppression 維持 (None)。Twin assertion で suppression 由来の None を確証。
+        use crate::pipeline::narrowing_analyzer::{NarrowTrigger, PrimaryTrigger};
+        let mut resolution = FileTypeResolution::empty();
+        resolution.narrow_events.push(NarrowEvent::Narrow {
+            var_name: "c".to_string(),
+            scope_start: 10,
+            scope_end: 50,
+            narrowed_type: RustType::Named {
+                name: "Config".to_string(),
+                type_args: vec![],
+            },
+            trigger: NarrowTrigger::EarlyReturnComplement(PrimaryTrigger::OptChainInvariant),
+        });
+        resolution.narrow_events.push(NarrowEvent::ClosureCapture {
+            var_name: "c".to_string(),
+            enclosing_fn_body: Span { lo: 0, hi: 100 },
+        });
+        assert!(resolution.narrowed_type("c", 25).is_none());
+        // Sibling var: same trigger, no ClosureCapture → narrow alive.
+        resolution.narrow_events.push(NarrowEvent::Narrow {
+            var_name: "d".to_string(),
+            scope_start: 10,
+            scope_end: 50,
+            narrowed_type: RustType::Named {
+                name: "Config".to_string(),
+                type_args: vec![],
+            },
+            trigger: NarrowTrigger::EarlyReturnComplement(PrimaryTrigger::OptChainInvariant),
+        });
+        assert!(matches!(
+            resolution.narrowed_type("d", 25),
+            Some(RustType::Named { name, .. }) if name == "Config"
+        ));
     }
 }
