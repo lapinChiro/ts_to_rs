@@ -1,0 +1,1 @@
+ERROR: nullish-assign to read-only getter (Tier 2 honest error、TS TypeError throw)

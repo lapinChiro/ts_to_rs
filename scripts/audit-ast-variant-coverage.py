@@ -431,6 +431,18 @@ def main() -> int:
         action="store_true",
         help="Codebase 全体の `_` arm を I-203 用 report として出力 (本 PRD scope 外も含む)",
     )
+    parser.add_argument(
+        "--files",
+        nargs="*",
+        type=str,
+        default=None,
+        help=(
+            "新 PRD の Impact Area file (relative path from repo root) を listing し、"
+            "これらの file 内 `_` arm violations を out-of-scope detection として "
+            "report (RC-8 / Rule 11 d-5 適用)。指定 file は PRD 2.7 SCOPE_FILES と "
+            "等価扱い (scope-equivalent verification)。"
+        ),
+    )
     args = parser.parse_args()
 
     if not AST_VARIANTS_MD.exists():
@@ -450,6 +462,17 @@ def main() -> int:
     all_arms: list[MatchArm] = []
     for rust_file in SRC_DIR.rglob("*.rs"):
         all_arms.extend(parse_rust_file(rust_file))
+
+    # RC-8 / Rule 11 (d-5): --files で指定された PRD Impact Area file を scope に追加
+    # (PRD 2.7 SCOPE_FILES と等価扱い、新 PRD の pre-draft audit)
+    effective_scope_files: frozenset[str] = PRD_2_7_SCOPE_FILES
+    if args.files:
+        effective_scope_files = frozenset(PRD_2_7_SCOPE_FILES | set(args.files))
+        if args.verbose:
+            print(
+                f"[scope] additional --files: {sorted(args.files)}",
+                file=sys.stderr,
+            )
 
     # PRD 2.7 scope enum ごとに sync 検証
     all_in_scope: list[str] = []
@@ -481,7 +504,7 @@ def main() -> int:
             doc_classifications[enum_name],
             scope_arms,
             scope_wildcards,
-            PRD_2_7_SCOPE_FILES,
+            effective_scope_files,
         )
         all_in_scope.extend(in_scope)
         all_out_scope.extend(out_scope)

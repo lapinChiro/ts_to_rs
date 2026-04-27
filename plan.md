@@ -9,7 +9,7 @@
 
 ---
 
-## 現在の状態 (2026-04-27 post I-184 close)
+## 現在の状態 (2026-04-28 post I-205 Spec stage v7 final)
 
 | 指標 | 値 |
 |------|-----|
@@ -28,9 +28,22 @@
 
 **PRD 2.7 (I-198 + I-199 + I-200 cohesive batch) 完了 (2026-04-27)** — Implementation stage T1〜T15 全 task + formal `/check_job` 4-layer review + 9 課題本質 fix (F1〜F10) 完了。詳細は下記「直近の完了作業」table 参照。
 
-**次着手: PRD 2.8 (I-201-A、AutoAccessor 単体 Tier 1 化、decorator なし subset、L3、user 承認 2026-04-27)**。`accessor x: T = init` を `struct field + fn x() -> &T + fn set_x(&mut self, v: T)` に完全変換、ast-variants.md AutoAccessor entry を Tier 2 → Tier 1 (decorator なし subset) 昇格。1 architectural concern = "AutoAccessor (decorator なし) class member emission completeness"。Decorator interaction 完全変換は PRD 7 (I-201-B、post-PRD 6) で別途達成。
+**Spec stage 完了 (2026-04-28): I-205 v7 final (Class member access dispatch with getter/setter methodology framework)**。
+PRD 2.8 (I-201-A) Spec stage 検討中に **既存 class Method Getter/Setter call site emission framework** の **Tier 2 broken window + L2 Design Foundation defect** を発見 (compile error E0507 / E0609、silent semantic divergence)。PRD 2.8 / PRD 2.9 / PRD 7 (I-201-B) 全 prerequisite framework として I-205 を起票、PRD 2.7 self-applied integration pattern で **framework v1.3 → v1.4 → v1.5 → v1.6 連続 revision** を first-class adopter として self-applied verify 完了。3 度の review iteration (initial → deep → deep deep) で **33 findings + 11 RC clusters resolution**、**rule-audit symmetry principle 確立**。
 
-**`/start` で seamless 続行可能**: PRD 2.8 を `prd-template` skill 適用で Spec stage 起票 → Implementation。本 session で確立した framework (Rule 3/4/10/11/12 + audit script CI 化) を first-class adopter として PRD 2.8 自身に self-applied verify。
+**主要成果**:
+- I-205 PRD: 1661 lines、Spec stage v7 final、matrix ~120+ cells、6 invariants (INV-1〜6)、Spec → Impl Dispatch Arm Mapping section
+- TS-0〜TS-5 全 Spec Stage Tasks 完了
+- 5 dedicated test files: 3 SWC parser tests (10 passed) + i205_invariants_test.rs (6 ignored stubs) + i205_helper_test.rs (4 ignored stubs)
+- 34 E2E fixtures + 34 expected files (red 状態 lock-in、Implementation Stage T14 で green 化)
+- framework 改修: `spec-stage-adversarial-checklist.md` v1.6 (Rule 1 (1-4) Orthogonality merge legitimacy + Rule 11 (d-6) Architectural concern relevance + Rule 8 (8-c) audit + Rule 11 (d-6) audit) + `prd-completion.md` Tier-transition compliance + `prd-template` skill (Step 3-pre/3-pre-2/4-template/4.5)
+- audit script extensions: `audit-prd-rule10-compliance.py` に 9 new verify functions (Rule 1/2/5/6/8/11/13 + orthogonality consistency + Rule 11 (d-6) + Invariants test contracts) + `audit-ast-variant-coverage.py` に `--files` flag
+
+**次着手: I-205 Implementation Stage Tasks T1〜T15 (新規 session で実装着手、`/start` で seamless 続行可能)**。
+
+T1 (doc update) → T2 (MethodSignature/TsMethodInfo kind field) → T3 (collect_class_info propagate + Rule 11 d-1 fix) → T4 (TsTypeLit kind propagate) → T5 (Read context dispatch + B7 traversal helper) → T6 (Write context dispatch) → T7 (UpdateExpr setter desugar) → T8 (compound assign desugar) → T9 (logical compound integration) → T10 (this.x dispatch) → T11 (static accessor dispatch) → T12 (Getter body .clone() insertion) → T13 (B6/B7 corner cells Tier 2 reclassify) → T14 (E2E fixtures green-ify、34 #[ignore] 解除) → T15 (`/check_job` 4-layer review + 13-rule self-applied verify)。
+
+PRD 2.8 (I-201-A) は I-205 完了後に再開、I-205 framework foundation を leverage。
 
 **Plan η update (2026-04-26 post I-177-B empirical investigation)**: I-177-B 実装中の empirical verification で **TypeResolver-Synthetic registry integration の pre-existing latent bug** を発見 (`SyntheticTypeRegistry::fork_dedup_state` が `union_dedup` を継承しつつ `types: BTreeMap::new()` で fork、builtin pre-registered union 型を使う narrow guard で `compute_complement_type` が None を返し、post-narrow scope の EarlyReturnComplement event が push されない silent failure)。Plan η chain に **Step 1.5 = I-177-E (synthetic fork inheritance fix)** を I-177-B prerequisite として挿入し close。
 
@@ -49,9 +62,11 @@ PRD 2.5 (I-177-F): resolve_arrow_expr / resolve_fn_expr / class constructor / cl
    ↓
 PRD 2.7 (I-198 + I-199 + I-200 cohesive batch): framework Rule 改修 (Rule 3/4/10/11/12) + TypeResolver coverage extension (StaticBlock + Prop::Method/Getter/Setter body resolve + AutoAccessor Tier 2 error reported) + ast-variants.md Prop/PropOrSpread/Decorator section 新規追加 + audit scripts CI 化、**完了 2026-04-27** (Implementation Revision 1 PropOrSpread Grammar gap fix + Revision 2 cell 15 Prop::Assign critical Spec gap fix、3162 lib pass + 18 new unit tests + 19 audit self-tests、Hono 0 regression)
    ↓
-PRD 2.8 (I-201-A): AutoAccessor 単体 Tier 1 化 (decorator なし subset、`accessor x: T = init` → `struct field + getter/setter pair`、L3、user 承認 2026-04-27) ← **次着手**
+PRD 2.75 (I-205): Class member access dispatch with getter/setter methodology framework (PRD 2.8/2.9/I-201-B prerequisite、L2 Design Foundation、Tier 2 broken framework → Tier 1 完全変換、Spec stage v7 final 完了 2026-04-28、framework v1.3 → v1.6 self-applied integration、Implementation Stage T1-T15 ← **次着手**)
    ↓
-PRD 2.9 (I-202): Object literal `Prop::Method` / `Prop::Getter` / `Prop::Setter` Tier 1 化 (Transformer 完全 emission、L3、user 承認 2026-04-27)
+PRD 2.8 (I-201-A): AutoAccessor 単体 Tier 1 化 (decorator なし subset、`accessor x: T = init` → `struct field + getter/setter pair`、L3、user 承認 2026-04-27、I-205 framework leverage)
+   ↓
+PRD 2.9 (I-202): Object literal `Prop::Method` / `Prop::Getter` / `Prop::Setter` Tier 1 化 (Transformer 完全 emission、L3、user 承認 2026-04-27、I-205 framework leverage)
    ↓
 PRD 3 (I-177 mutation propagation 本体): F1/F3 body mutation propagation (Tier 0 silent semantic change、L1、案 A vs 案 B 確定)
    ↓
@@ -103,10 +118,10 @@ PRD 7 (I-201-B): Decorator framework 完全変換 (TC39 Stage 3、AutoAccessor +
 [PRD 2.7: I-198 + I-199 + I-200 cohesive batch — framework Rule 改修 (Rule 3/4/10/11/12) + TypeResolver coverage extension + ast-variants.md Prop/PropOrSpread/Decorator section 新規追加 + audit scripts CI 化] (完了 2026-04-27)
        │
        ▼
-[PRD 2.8: I-201-A] ← **次着手**
+[PRD 2.75: I-205 — Class member access dispatch with getter/setter methodology framework (PRD 2.8/2.9/I-201-B prerequisite、Tier 2 broken framework → Tier 1 完全変換、L2、Spec stage v7 final 完了 2026-04-28、Implementation Stage T1〜T15 ← **次着手** in 新規 session)]
        │
        ▼
-[PRD 2.8: I-201-A — AutoAccessor 単体 Tier 1 化 (decorator なし subset)] (L3、user 承認 2026-04-27)
+[PRD 2.8: I-201-A — AutoAccessor 単体 Tier 1 化 (decorator なし subset、I-205 framework leverage)] (L3、user 承認 2026-04-27)
        │
        ▼
 [PRD 2.9: I-202 — Object literal Prop::Method/Getter/Setter Tier 1 化 (Transformer 完全 emission)] (L3、user 承認 2026-04-27)

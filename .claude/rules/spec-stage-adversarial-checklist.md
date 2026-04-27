@@ -6,19 +6,73 @@ Matrix-driven PRD (`spec-first-prd.md` 適用対象) の **Spec stage 完了時*
 
 ## Core Principle
 
-> **Spec stage 完了の合否を「artifact が揃った」ではなく「全 10 項目の adversarial check が
+> **Spec stage 完了の合否を「artifact が揃った」ではなく「全 13 項目の adversarial check が
 > pass した」で判定する。各 rule は empirical defect chain から derive されたもので、
 > rule を逐次 verification することで同 root cause の defect 再発を構造的に防ぐ。**
 
-## Checklist (12 rule)
+## Checklist (13 rule)
 
 ```markdown
 ## Spec-Stage Review Checklist
 
-- [ ] **Matrix completeness**: 全セルに ideal output が記載されている
-      (空欄 / TBD なし)
-- [ ] **Oracle grounding**: ✗ / 要調査 セルの ideal output が tsc observation
-      log と cross-reference されている
+- [ ] **Matrix completeness + abbreviation prohibition**:
+      - **(1-1)** 全セルに ideal output が記載されている (空欄 / TBD なし)
+      - **(1-2)** Cartesian product 完全 enumerate 必須、**abbreviation pattern 全面禁止**:
+        - matrix table 内 `...` (omission ellipsis) 禁止
+        - 連番 row range (`| 30-35 | A | ... |` / `| 24-29 | ... |` 等の grouping) 禁止 — 各 cell 独立 row
+        - `representative` / `representative cell のみ` / `代表的` / `省略` / `abbreviated` 等の wording 禁止
+        - `(各別 cell)` / `(同上)` / `varies` / `(... と同 logic)` 等の placeholder 禁止
+      - **(1-3)** Audit verify mechanism: `scripts/audit-prd-rule10-compliance.py` で
+        Problem Space matrix table を parse し abbreviation pattern detection
+        (上記禁止 list の regex match) で自動検出、merge gate
+      - **(1-4) Orthogonality merge legitimacy + Spec-stage structural verify**
+        (framework v1.5 source、確定 2026-04-28、I-205 deep review v3 final v3 で v1.4
+        rationalization stance を pure ideal stricter form へ revise):
+        `D 全` / `B 全` / `Bn-Bm` 等 axis-merge wording は Rule 10 Step 2
+        orthogonality merge として **legitimate** (dispatch logic 同一の場合のみ)。
+        ただし以下 3 条件 (1-4-a)/(1-4-b)/(1-4-c) を **全 verify** した場合のみ
+        Rule 1 (1-2) compliant と認める。defer は禁止 (= Spec stage で全 verify):
+        - **(1-4-a) Orthogonality verification statement**: merge cell の adjacent
+          text に "orthogonality-equivalent" / "orthogonality-equivalent dispatch" /
+          "Rule 10 Step 2 orthogonality merge" 等 explicit justification 記載 +
+          **referenced source cell の cell # を明示** (例: "cells 24-28 と
+          orthogonality-equivalent")
+        - **(1-4-b) Spec-stage structural consistency verify (REVISED v1.5)**:
+          referenced source cell が **matrix 内に存在** + 本 cell と source cell の
+          Scope 列値が **一致 or compatible** であることを audit script で structural
+          verify。Probe を Implementation Stage に defer する v1.4 stance は **revoked**
+          (compromise だった)。Spec stage で structural verify pass 必須
+        - **(1-4-c) Spec-stage referenced cell symmetry probe**: merge cell が claim
+          する dispatch (例: "Tier 2 honest error reclassify") と referenced source
+          cell の dispatch が **symmetric (token-level prefix一致)** であることを
+          audit script で verify (例: cell 22 "Tier 2 honest error reclassify" claim
+          + cell 12 "Tier 2 honest error reclassify" → symmetric prefix match)
+        Audit script `audit-prd-rule10-compliance.py` で (1-4-b)(1-4-c) を auto verify
+        (新規 `verify_orthogonality_merge_consistency` function、framework v1.5)。
+        Lesson source: I-205 deep review v3 final v3 (2026-04-28) で v1.4 (1-4-b)
+        Implementation Stage defer が pragmatic compromise = framework integrity 損失
+        と判明、(1-4-b)(1-4-c) Spec stage structural verify に revise。
+      - Lesson source: I-205 PRD draft v1 (2026-04-27) で matrix abbreviation pattern
+        (cells 24-29 / 30-35 / 36-41 grouping、`...` placeholder、`(各別 cell)` 等) を
+        許容、第三者 review F1 として発覚 → Rule 1 sub-rule (1-1)(1-2)(1-3) 拡張
+        (本 PRD I-205 self-applied integration)。
+- [ ] **Oracle grounding + PRD doc embed mandatory**:
+      - **(2-1)** ✗ / 要調査 セルの ideal output が tsc observation log と
+        cross-reference されている
+      - **(2-2)** PRD doc 内に **`## Oracle Observations` section を独立 hard-code**、
+        各 ✗ / 要調査 cell について以下 4 項目記載必須:
+        - **TS fixture path**: `tests/e2e/scripts/<prd-id>/<cell-id>.ts` 等
+        - **tsc / tsx output**: stdout / stderr / exit_code 全 embed
+          (`scripts/observe-tsc.sh` 出力転記)
+        - **Cell number reference**: matrix table の cell # と 1-to-1 link
+        - **Ideal output rationale**: tsc 出力から Rust ideal output を derive する
+          論理 (preserve / reject / equivalent / Tier 2 honest error)
+      - **(2-3)** Audit verify mechanism: `audit-prd-rule10-compliance.py` で
+        `## Oracle Observations` section 不在 + matrix に ✗/要調査 cell あれば
+        audit fail
+      - Lesson source: I-205 PRD draft v1 (2026-04-27) で tsc observation を
+        会話内のみ実施、PRD doc 未 embed → 第三者 review F2 → Rule 2 sub-rule 拡張
+        (本 PRD self-applied integration)。
 - [ ] **NA justification + SWC parser empirical observation 必須**:
       - **(3-1)** NA セルの理由が spec-traceable (TS spec 上 syntax error / grammar
         constraint / Rust type system 構造的制約 等) であり、「稀」「多分」「頻度低」等の
@@ -69,17 +123,47 @@ Matrix-driven PRD (`spec-first-prd.md` 適用対象) の **Spec stage 完了時*
         Spec gap として発覚。framework 失敗 signal を起点に Rule 4 wording に
         doc-first dependency order の structural enforcement を追加 (PRD 2.7 自体が
         first-class adopter として self-applied verify)。
-- [ ] **E2E readiness**: 各セルに対応する E2E fixture が (red 状態で) 準備
-      されている
-- [ ] **Matrix/Design integrity**: PRD の Problem Space matrix「Ideal output」列の
-      emission shape と、PRD の Design section に記述された emission strategy
-      (helper signature, emit pattern, target Rust syntax) が **token-level に一致** する。
-      乖離が 1 例でも存在する場合は、(a) どちらが正規 spec かを明記し、
-      (b) 非正規側を正規側に updating commit してから checklist を満たしたとみなす。
-      Verification: matrix の各 cell について Design section から該当 emission rule を
-      引用し、両者を side-by-side で diff する。
-      (Lesson: I-161 SG-2 — matrix が `pred(x)` を ideal とし Design が `match` block を
-      ideal としていた spec 内乖離を初回 review で漏らした事例。)
+- [ ] **E2E readiness + Stage tasks separation**:
+      - **(5-1)** 各 ✗ cell に対応する E2E fixture が `tests/e2e/scripts/<prd-id>/cell-NN-*.ts`
+        (red 状態) で準備済 (Spec stage 完了時点)
+      - **(5-2)** PRD doc Task List section は Stage 1 / Stage 2 で **2-section 分離 hard-code**:
+        - `## Spec Stage Tasks`: Stage 1 artifacts 完成 task (matrix construction /
+          oracle observation / fixture creation / SWC parser empirical lock-in /
+          impact area audit findings record)
+        - `## Implementation Stage Tasks`: Stage 2 code change task (`src/` 修正、
+          unit test / integration test / E2E green-ify、dispatch logic 拡張、etc.)
+      - **(5-3)** Spec stage 完了 = `## Spec Stage Tasks` 全完了 + 13-rule self-applied
+        verify pass = Implementation stage 移行可能。Spec stage tasks に code 改修
+        (`src/` 修正) を含めること禁止 (= stage boundary 違反)。
+      - **(5-4)** Audit verify: matrix-driven PRD で `## Spec Stage Tasks` /
+        `## Implementation Stage Tasks` のいずれか不在 → audit fail
+      - Lesson source: I-205 PRD draft v1 (2026-04-27) で T0 (E2E fixture creation) を
+        Implementation stage tasks 内に置いた → 第三者 review F8 → Rule 5 sub-rule
+        (5-1)(5-2)(5-3)(5-4) 拡張 (本 PRD self-applied integration)。
+- [ ] **Matrix/Design integrity + Scope 3-tier consistency**:
+      - **(6-1)** matrix Ideal output 列と Design section emission strategy が
+        **token-level に一致**。乖離 1 例でも存在すれば (a) どちらが正規 spec か明記、
+        (b) 非正規側を正規側へ updating commit してから checklist 満たしたとみなす。
+        Verification: matrix の各 cell について Design section から該当 emission rule を
+        引用し side-by-side で diff
+      - **(6-2)** PRD doc Scope section は **3-tier 形式 hard-code**:
+        - `### In Scope`: 本 PRD で **Tier 1 完全変換** する features
+        - `### Out of Scope`: 別 PRD or 永続 unsupported な features
+        - `### Tier 2 honest error reclassify`: 本 PRD で **Tier 2 honest error 化**
+          する features (= 別 PRD で Tier 1 化候補、orthogonal architectural concern)
+      - **(6-3)** matrix Scope 列値は次から択一: `本 PRD` / `別 PRD (I-NNN)` /
+        `Tier 2 honest error reclassify (本 PRD)` / `Tier 2 honest error reclassify (別 PRD I-NNN)` /
+        `regression lock-in`
+      - **(6-4)** Scope section の 3-tier 列挙と matrix Scope 列の cross-reference
+        consistency を audit script で verify (Scope 列に "本 PRD" cell が In Scope に
+        記述されていること、Tier 2 honest error reclassify cell が同 section に
+        記述されていること、等)
+      - Lesson source (Rule 6-1): I-161 SG-2 — matrix が `pred(x)` を ideal とし Design が
+        `match` block を ideal としていた spec 内乖離を初回 review で漏らした事例。
+      - Lesson source (Rule 6-2/6-3/6-4): I-205 PRD draft v1 (2026-04-27) で B6
+        (regular method `obj.x` no-paren) が Out of Scope に記述、matrix で In Scope
+        (Tier 2 honest error 化) と矛盾 → 第三者 review F9 → Scope 3-tier hard-code 追加
+        (本 PRD self-applied integration)。
 - [ ] **Control-flow exit sub-case completeness**: Matrix cell の dimension に
       "body shape" / "branch shape" が含まれる場合、各 branch の **exit-or-fallthrough
       状態** を独立次元として enumerate する。最低 4 sub-case
@@ -107,11 +191,16 @@ Matrix-driven PRD (`spec-first-prd.md` 適用対象) の **Spec stage 完了時*
       候補 invariant カテゴリ (探索 prompt として活用): TypeResolver-IR cohesion /
       並列 emission path symmetry / closure-reassign suppression cohesion /
       scope boundary preservation / mutability propagation。
-      (Lesson: I-171 T5 SG-T5-DEEPDEEP1/2 — matrix cell 列挙では捕捉不能な「TypeResolver
-      と IR の同期 invariant」「if-stmt の then/else 並列 emission path の symmetry
-      invariant」が後付けで INV-1/2/3 として retroactive に enumerate された経緯。
-      前置 enumerate していれば 2 度目 deep iteration の defect は initial review で
-      発見可能だった。)
+      - **(8-5)** Audit verify mechanism: matrix-driven PRD で `## Invariants` section
+        不在 or 空 (4 項目 (a)(b)(c)(d) のいずれか missing) → audit fail
+      - Lesson (Rule 8-1〜8-4): I-171 T5 SG-T5-DEEPDEEP1/2 — matrix cell 列挙では捕捉不能な
+        「TypeResolver と IR の同期 invariant」「if-stmt の then/else 並列 emission path の
+        symmetry invariant」が後付けで INV-1/2/3 として retroactive に enumerate された経緯。
+        前置 enumerate していれば 2 度目 deep iteration の defect は initial review で
+        発見可能だった。
+      - Lesson (Rule 8-5): I-205 PRD draft v1 (2026-04-27) で `## Invariants` section が
+        checklist 内のみ列挙、独立 section 不在 → 第三者 review F6 → audit verify
+        mechanism (8-5) 追加 (本 PRD self-applied integration)。
 - [ ] **Dispatch-arm sub-case alignment**: Matrix の各 type-dimension は、実装側で
       **branch / dispatch / pattern-match を分けるあらゆる sub-classifier** と一対一の
       粒度で enumerate する。具体例: `Named` を単一 cell として記述する代わりに、実装が
@@ -203,10 +292,50 @@ Matrix-driven PRD (`spec-first-prd.md` 適用対象) の **Spec stage 完了時*
         code の handle 状況と sync (Rule 4 (4-2) doc-first dependency order と整合)
       - **(d-4)** `scripts/audit-ast-variant-coverage.py` を CI 化、doc-code sync を
         自動検証 (新 variant 追加時 audit fail で fix 強制、merge gate)
-      Lesson source: I-177-F (ClassMember variants 全 enumerate せず static block /
+      - **(d-5)** **Pre-draft ast-variant audit mandatory**: 本 PRD scope の修正対象
+        file (Impact Area で列挙) に対し PRD draft 段階で
+        `python3 scripts/audit-ast-variant-coverage.py --files <impact-area-files>` を
+        run、結果を PRD doc 内 `## Impact Area Audit Findings` section に embed。
+        既存 violations 全列挙 + 各 violation について本 PRD scope で fix する判断 or
+        I-203 へ defer する判断を spec-traceable に記録。`## Impact Area Audit Findings`
+        section 不在 + matrix-driven PRD → audit fail
+      - **(d-6) Architectural concern relevance scope** (framework v1.5 source、I-205
+        deep review v3 final v3 で v1.4 stance を pure ideal stricter form へ revise、
+        確定 2026-04-28):
+        Rule 11 (d-1) "`_ =>` 全面禁止" + "1 PRD = 1 architectural concern" の inherent
+        tension の resolution:
+        - **(d-6-a) Architectural concern relevance principle (REVISED v1.5)**:
+          Rule 11 (d-1) は **本 PRD architectural concern に relevant な code path 内**
+          の `_ =>` arms に厳格適用。関連 code path = 本 PRD で modify する dispatch
+          logic / state mutation / IR construction / control flow を含む arms。
+          関連 code path 外の arms (= 本 PRD で touch する file 内でも、別 architectural
+          concern に属する arms) は specialized PRD (I-203 codebase-wide) へ defer 可。
+          v1.4 の "touched-files-strict" 解釈は revoked、"architectural-concern-relevance"
+          解釈に置換 (= "1 PRD = 1 architectural concern" との整合)。
+        - **(d-6-b) Spec-stage relevance verify**: 各 defer 対象 `_ =>` arm について、
+          以下 2 verification statement を `## Impact Area Audit Findings` section に
+          spec-traceable に embed:
+          - **(d-6-b-1) Architectural concern orthogonality**: defer 対象 arm が本 PRD
+            architectural concern (= PRD title の dispatch / state / IR concern) と
+            orthogonal (関連 code path 外) であることを explicit declare
+          - **(d-6-b-2) Non-interference probe**: 本 PRD で modify する arms の control
+            flow correctness が defer 対象 arm の挙動に **dependent しない** こと
+            (= defer arm の bug が本 PRD logic の correctness を破らない) を probe で
+            verify、probe location 明記
+        両条件を満たさない `_ =>` arm は **本 PRD scope 内で fix 必須** (I-203 defer 不可)。
+        Lesson source (v1.4 → v1.5): I-205 deep review v3 final v3 で v1.4 (d-6) の
+        "touched-files-strict" stance が "1 PRD = 1 architectural concern" 原則と
+        inherent tension を生む rationalization と判明、"architectural-concern-relevance"
+        principle に revise (= 真の boundary は touched files ではなく concern relevance、
+        理論的にも consistent)。
+      Lesson source (d-1〜d-4): I-177-F (ClassMember variants 全 enumerate せず static block /
       auto accessor 漏れ)、I-200 (ObjectLit Prop variants 全 enumerate せず
       Prop::Method の type-resolve 経路漏れ)、PRD 2.7 (I-198 + I-199 + I-200
       cohesive batch、Q4 確定)。
+      Lesson source (d-5): I-205 PRD draft v1 (2026-04-27) で本 PRD 修正範囲全 file の
+      `_ => ` arm pre-draft audit が未実施、`registry/collection/class.rs:145` の
+      Rule 11 d-1 violation が draft 後 review で発覚 → 第三者 review F13 → (d-5) 追加
+      (本 PRD self-applied integration)。
 - [ ] **Rule 10/11 Mandatory application + structural enforcement** (Q5 source、
       PRD 2.7 確定):
       - **(e-1)** 全 PRD で Rule 10 + Rule 11 verification を **Mandatory**
@@ -242,6 +371,29 @@ Matrix-driven PRD (`spec-first-prd.md` 適用対象) の **Spec stage 完了時*
         verification を integrate
       Lesson source: PRD 2.7 (Q5 確定 2026-04-27)、`feedback_no_dev_cost_judgment.md`
       整合 (= 開発工数 / LOC / scope size を判断根拠としない)。
+- [ ] **Spec Stage Self-Review (skill workflow integrated)** (I-205 source、確定 2026-04-27):
+      - **(13-1)** PRD draft 完了直後 (`prd-template` skill workflow Step 4.5) に
+        **13-rule self-applied verify** を skill 内 systematic 適用 (skill が check items を
+        text として提示、author が逐一 verify)。Step 4.5 不在のまま skill closing 不可
+      - **(13-2)** 各 finding を PRD doc `## Spec Review Iteration Log` section に record
+        (iteration v1 / v2 / v3 history)。各 iteration entry format:
+        - **Iteration #**: v1 / v2 / v3 / ...
+        - **Date**: YYYY-MM-DD
+        - **Findings count**: Critical N / High N / Medium N / Low N
+        - **Findings detail**: 各 finding の summary + RC 対応 (root cause clustering)
+        - **Resolution**: PRD doc fix + (該当する場合) framework self-applied integration
+      - **(13-3)** Critical findings (= Implementation stage 移行 block する findings) 全 fix
+        後、再度 self-applied verify pass で Spec stage 完了
+      - **(13-4)** Audit verify mechanism: matrix-driven PRD で `## Spec Review Iteration Log`
+        section 不在 or "self-review not performed" の placeholder のみ → audit fail
+      - **(13-5)** **Self-applied integration (PRD 2.7 pattern)**: review で発見された
+        framework gap (= 本 checklist の rule で捕捉できなかった defect class) は
+        PRD close 時に self-applied integration として skill / rule に improvement
+        を組み込む。本 PRD I-205 自身が first-class adopter として improvement を
+        逆適用し validate
+      - Lesson source: I-205 PRD draft v1 (2026-04-27) で Spec Stage Self-Review が
+        systematic 不在、第三者 review で 15 findings 発覚 → 9 RC clusters に集約 →
+        framework 改善 + Rule 13 新設 (本 PRD self-applied integration)。
 ```
 
 ## Prohibited
@@ -266,6 +418,30 @@ Matrix-driven PRD (`spec-first-prd.md` 適用対象) の **Spec stage 完了時*
 
 ## Versioning
 
+- **v1.6** (2026-04-28): I-205 PRD deep deep review (iteration v7) で v1.5 framework 内 audit asymmetry を発見、framework symmetry restoration:
+  - **Rule 8 (8-c) audit auto-verify NEW**: `verify_invariants_test_contracts` function in `audit-prd-rule10-compliance.py`、各 INV-N entry に `test_invariant_N_*` test fn name reference の structural detection (F-deep-deep-2 fix)
+  - **Rule 11 (d-6) audit auto-verify NEW**: `verify_rule11_d6_relevance_compliance` function、Impact Area Audit Findings section の defer rows に対し (d-6-b-1) orthogonality declaration + (d-6-b-2) non-interference probe markers の structural detection (F-deep-deep-1 fix、Rule 1 (1-4) audit との symmetry 確立)
+  - **Rule 3 (3-2) inheritance justification clarification**: NA cells の orthogonality-equivalent inheritance claim を Spec stage で structural justify (parser-level context-independence 等の explicit declaration、F-deep-deep-3 fix)
+  - **Rule 9 (a) helper test contracts NEW**: Spec stage で helper functions の test contracts (test fn / assertion / probe) を author + stub `#[test] #[ignore]` files 作成 (F-deep-deep-4 fix)
+  - Lesson source: I-205 PRD deep deep review (iteration v7、2026-04-28) で v1.5 framework 内 4 audit gaps (Rule 8 (8-c) / Rule 11 (d-6) / Rule 3 (3-2) inheritance / Rule 9 (a) helper test contracts) を発見、**framework rule-audit symmetry principle** 確立 (= 全 rule に対応する audit script auto-verification 整備、verification deferral eliminate)
+- **v1.3** (2026-04-27): I-205 PRD draft v1 第三者 review で発見された 15 findings の
+  9 RC clusters に対する self-applied integration として、Rule 1/2/5/6/8/11 sub-rule 拡張
+  + Rule 13 (Spec Stage Self-Review) 新規追加。
+  - Rule 1: 単行 wording → sub-rule (1-1)(1-2)(1-3) に拡張 (RC-1、F1 source: matrix
+    abbreviation pattern 全面禁止)
+  - Rule 2: 単行 wording → sub-rule (2-1)(2-2)(2-3) に拡張 (RC-2、F2 source: PRD doc
+    内 `## Oracle Observations` section embed mandatory)
+  - Rule 5: 単行 wording → sub-rule (5-1)(5-2)(5-3)(5-4) に拡張 (RC-4、F8 source: Task
+    List 2-section split = `## Spec Stage Tasks` + `## Implementation Stage Tasks`)
+  - Rule 6: 単行 wording → sub-rule (6-1)(6-2)(6-3)(6-4) に拡張 (RC-5、F9 source: Scope
+    section 3-tier hard-code = In Scope + Out of Scope + Tier 2 honest error reclassify)
+  - Rule 8: sub-rule (8-5) 追加 (RC-6、F6 source: `## Invariants` section audit verify
+    mechanism)
+  - Rule 11: sub-rule (d-5) 追加 (RC-8、F13 source: pre-draft ast-variant audit
+    mandatory + `## Impact Area Audit Findings` section embed)
+  - Rule 13 (新規): Spec Stage Self-Review (RC-9、F10/F11/F14 source: skill workflow Step
+    4.5 で 13-rule self-applied verify mandatory + `## Spec Review Iteration Log` embed +
+    self-applied integration pattern hard-code)
 - **v1.0** (2026-04-25): 5-rule (Matrix completeness / Oracle grounding / NA justification / Grammar consistency / E2E readiness) を `spec-first-prd.md` から本 file に分離、Rule 6-10 を I-178 で追加。
   - Rule 6: Matrix/Design integrity (lesson: I-161 SG-2)
   - Rule 7: Control-flow exit sub-case completeness (lesson: I-171 T5 SG-T5-DEEP1)

@@ -20,7 +20,7 @@ When creating a new PRD in `backlog/`.
 
 **matrix-driven の場合**: `.claude/rules/spec-first-prd.md` の 2-stage workflow を適用する。
 - **Spec stage** (実装前): grammar-derived matrix + tsc observation + E2E fixture (red) + checklist
-- **Spec stage 完了 verification**: `.claude/rules/spec-stage-adversarial-checklist.md` の **12-rule checklist を全項目 verify** (1 = Matrix completeness / 2 = Oracle grounding / 3 = NA justification / 4 = Grammar consistency + doc-first dependency order の structural enforcement (sub-rule 4-1/4-2/4-3) / 5 = E2E readiness / 6 = Matrix/Design integrity / 7 = Control-flow exit sub-case / 8 = Cross-cutting invariant enumeration / 9 = Dispatch-arm sub-case alignment / 10 = Cross-axis matrix completeness (9 default axis、(i) AST dispatch hierarchy 含む) / 11 = AST node enumerate completeness check (sub-rule d-1〜d-4、`_` arm 全面禁止 + phase 別 mechanism + ast-variants.md single source of truth + audit script CI 化) / 12 = Rule 10/11 Mandatory application + structural enforcement (sub-rule e-1〜e-8、Mandatory + Permitted/Prohibited reasons + machine-parseable format + skill hard-code + audit script CI merge gate))。1 つでも未達なら Implementation stage 移行不可。
+- **Spec stage 完了 verification**: `.claude/rules/spec-stage-adversarial-checklist.md` の **13-rule checklist を全項目 verify** (1 = Matrix completeness + abbreviation prohibition (sub-rule 1-1/1-2/1-3) / 2 = Oracle grounding + PRD doc embed mandatory (sub-rule 2-1/2-2/2-3) / 3 = NA justification + SWC parser empirical observation (sub-rule 3-1/3-2/3-3) / 4 = Grammar consistency + doc-first dependency order (sub-rule 4-1/4-2/4-3) / 5 = E2E readiness + Stage tasks separation (sub-rule 5-1/5-2/5-3/5-4) / 6 = Matrix/Design integrity + Scope 3-tier consistency (sub-rule 6-1/6-2/6-3/6-4) / 7 = Control-flow exit sub-case / 8 = Cross-cutting invariant enumeration (sub-rule 8-5 audit verify) / 9 = Dispatch-arm sub-case alignment / 10 = Cross-axis matrix completeness (9 default axis、(i) AST dispatch hierarchy 含む) / 11 = AST node enumerate completeness check (sub-rule d-1〜d-5、`_` arm 全面禁止 + phase 別 mechanism + ast-variants.md single source of truth + pre-draft ast-variant audit + audit script CI 化) / 12 = Rule 10/11 Mandatory application + structural enforcement (sub-rule e-1〜e-8) / 13 = Spec Stage Self-Review (skill workflow Step 4.5 hard-code、sub-rule 13-1〜13-5))。1 つでも未達なら Implementation stage 移行不可。
 - **Implementation stage** (spec approved 後): spec 準拠の実装のみ
 - **Implementation stage 完了 verification**: `/check_job` 起動で `.claude/rules/check-job-review-layers.md` の 4-layer (Mechanical / Empirical / Structural cross-axis / Adversarial trade-off) を初回 invocation で全実施。発見 defect は `.claude/rules/post-implementation-defect-classification.md` の 5 category (Grammar gap / Oracle gap / Spec gap / Implementation gap / Review insight) に trace ベースで分類。
 
@@ -57,6 +57,11 @@ Discovery より前、設計より前、実装より前に必ず実施する。
 - 「頻度が低い」「稀」を理由にセルを省略すること (頻度は問題空間の尺度ではない)。
 - 組合せ爆発を理由に「サブセットのみ」と割り切ること (scope-out するなら別 PRD 化、
   しないなら全カバー)。
+- **Abbreviation pattern (Rule 1 (1-2) 違反)**: `...` (omission ellipsis) /
+  連番 row range (`| 30-35 |` 等の grouping) / `representative` / `representative cell のみ` /
+  `代表的` / `省略` / `abbreviated` / `(各別 cell)` / `(同上)` / `varies` / `(... と同 logic)`
+  等の placeholder 禁止 — Cartesian product **完全 enumerate** 必須、各 cell 独立 row
+  (Lesson source: I-205 PRD draft v1 第三者 review F1 → Rule 1 sub-rule (1-2) 拡張)
 
 ### 0c. Rule 10 Application (Mandatory、PRD 2.7 Q5 確定 2026-04-27)
 
@@ -134,6 +139,33 @@ Before writing the PRD:
 ### 3. Impact Area Code Review
 
 **Before writing the Task List**, review the production code and test code in the impact area. This catches broken windows and design issues before they propagate into the new implementation.
+
+#### 3-pre. Empirical file path verify (RC-3 source、I-205 確定 2026-04-27)
+
+**Mandatory step**: Impact Area で listing する全 file path を `find` / `Read` で
+**empirical verify** する (存在 + 想定行番号 + 想定 function 名)。Uncertain expression は
+audit fail の対象:
+
+- 禁止 expression: `(or 該当)` / `(or 該当 file)` / `TBD` / `or` ambiguity (e.g., `update.rs (or 別 file)`) /
+  `？` / `要確認` (PRD draft 時点で要確認は許容されない、verify 後 commit)
+- 例: `src/transformer/expressions/update.rs (or 該当 file)` → 不正確 (該当 file 不在)、
+  empirical verify で `src/transformer/expressions/assignments.rs:331 convert_update_expr` と
+  確定してから listing。
+- Audit verify mechanism: `audit-prd-rule10-compliance.py` で `## Impact Area` section の
+  uncertain expression を regex match → audit fail (RC-3 enforcement)
+
+#### 3-pre-2. Pre-draft ast-variant audit (RC-8 source、Rule 11 (d-5) 適用)
+
+**Mandatory step**: 本 PRD scope の修正対象 file (Impact Area で listing) に対し:
+
+```bash
+python3 scripts/audit-ast-variant-coverage.py --files <impact-area-files>
+```
+
+を run、結果を PRD doc 内 `## Impact Area Audit Findings` section に embed。各 violation
+について本 PRD scope で fix or I-203 (codebase-wide AST exhaustiveness) へ defer の判断を
+spec-traceable に記録。`## Impact Area Audit Findings` section 不在 + matrix-driven PRD →
+audit fail。
 
 #### 3a. Production Code Quality Review
 
@@ -221,7 +253,54 @@ Why this feature is needed. Current problems or issues caused by its absence.
 
 ### Spec-Stage Adversarial Review Checklist
 
-Spec stage 完了 verification は `.claude/rules/spec-stage-adversarial-checklist.md` の **12-rule checklist** を本 PRD の `## Spec Review` section に転記して全項目 verification する (DRY のため checklist 内容は本 skill に再記載しない、rule file が single source of truth)。12-rule に 1 つでも未達があれば Implementation stage 移行不可。
+Spec stage 完了 verification は `.claude/rules/spec-stage-adversarial-checklist.md` の **13-rule checklist** を本 PRD の `## Spec Review Iteration Log` section に転記して全項目 verification する (DRY のため checklist 内容は本 skill に再記載しない、rule file が single source of truth)。13-rule に 1 つでも未達があれば Implementation stage 移行不可。
+
+## Oracle Observations (matrix-driven PRD で必須、Rule 2 (2-2) hard-code)
+
+各 ✗ / 要調査 cell について以下 4 項目を embed (`scripts/observe-tsc.sh` 出力転記):
+
+### Cell <#>: <description>
+
+- **TS fixture path**: `tests/e2e/scripts/<prd-id>/cell-NN-*.ts`
+- **tsc / tsx output**:
+  ```
+  stdout: <captured>
+  stderr: <captured>
+  exit_code: <0 or non-0>
+  ```
+- **Cell number reference**: matrix table の cell # と 1-to-1 link
+- **Ideal output rationale**: tsc 出力から Rust ideal output を derive する論理
+  (preserve / reject / equivalent / Tier 2 honest error)
+
+(全 ✗ / 要調査 cell について繰返、`audit-prd-rule10-compliance.py` で section 不在 audit fail)
+
+## SWC Parser Empirical Lock-ins (NA cell present で必須、Rule 3 (3-2) hard-code)
+
+各 NA cell について SWC parser empirical lock-in test の reference を記載:
+
+### NA cell <#>: <description>
+
+- **Spec-traceable reason**: TS spec syntax error / grammar constraint / Rust type system 構造的制約
+- **SWC parser empirical evidence**:
+  - **Test path**: `tests/swc_parser_*_test.rs::test_<name>`
+  - **Behavior**: SWC parser が `Err` を返す or 期待 AST shape を構築しない
+  - **If accept**: NA cell ではなく Tier 2 honest error reclassify (Rule 3 (3-3))
+
+(全 NA cell について繰返、SWC parser accept 確認時は本 PRD scope 内で Tier 2 reclassify)
+
+## Impact Area Audit Findings (matrix-driven PRD で必須、Rule 11 (d-5) hard-code)
+
+```bash
+python3 scripts/audit-ast-variant-coverage.py --files <impact-area-files>
+```
+
+実行結果を embed、各 violation に対する判断 (本 PRD scope で fix or I-203 へ defer) を
+spec-traceable に記録:
+
+| Violation | Location | Phase | Decision | Rationale |
+|-----------|----------|-------|----------|-----------|
+| Rule 11 d-1 `_ => ` arm | foo.rs:42 | Transformer | 本 PRD scope で fix | dispatch arm 拡張に伴い既存 `_ => ` arm を explicit enumerate 化 |
+| Rule 11 d-3 Tier mismatch | bar.rs section | TypeResolver | I-203 defer | 本 PRD architectural concern と orthogonal |
 
 ## Rule 10 Application
 
@@ -247,15 +326,35 @@ Structural reason for matrix absence: <reason、Permitted reasons から選択 o
 What should be achievable when this PRD is complete. Write in specific, verifiable terms.
 Avoid vague expressions ("fast", "easy", "intuitive") — use specific numbers, thresholds, and observable behaviors.
 
-## Scope
+## Scope (3-tier 形式 hard-code、Rule 6 (6-2) 適用)
 
 ### In Scope
 
-Bullet list of what this PRD implements.
+本 PRD で **Tier 1 完全変換** する features (Cartesian matrix で `本 PRD` Scope 列の cell に対応)。
 
 ### Out of Scope
 
-Explicitly list what is excluded. Prevents scope creep.
+別 PRD or 永続 unsupported な features (Cartesian matrix で `別 PRD (I-NNN)` 列に対応)。
+
+### Tier 2 honest error reclassify
+
+本 PRD で **Tier 2 honest error 化** する features (= 別 PRD で Tier 1 化候補、orthogonal
+architectural concern; Cartesian matrix で `Tier 2 honest error reclassify (本 PRD)` 列に対応)。
+これは silent drop / silent failure を排除し、user に compile-time error として明示する
+reclassify、ideal-implementation-primacy 観点で structural improvement。
+
+## Invariants (matrix-driven PRD で必須独立 section、Rule 8 (8-5) audit verify)
+
+機能仕様の中で「matrix cell に展開できない / 全 cell で同時に成立する必要がある」transversal
+property を列挙。各 invariant について以下 4 項目必須:
+
+### INV-N: <statement>
+
+- **(a) Property statement**: 1 文で書けるレベルの不変条件
+- **(b) Justification**: なぜこの invariant が必要か (違反時の defect class)
+- **(c) Verification method**: 実装後の verify 手順 (probe / test / static analysis)
+- **(d) Failure detectability**: invariant 違反が compile error / runtime error /
+  silent semantic change のどれで顕在化するか
 
 ## Design
 
@@ -291,9 +390,50 @@ List of affected files/modules.
 
 If the PRD does not change type resolution, state "Not applicable — no type fallback changes."
 
-## Task List
+## Spec Stage Tasks (matrix-driven PRD で必須、Rule 5 (5-2) 適用)
 
-Analyze implementation in detail. Describe each task in the following format. Assumes TDD: RED → GREEN → REFACTOR order.
+Stage 1 artifacts 完成 task を列挙 (matrix construction / oracle observation /
+fixture creation / SWC parser empirical lock-in / impact area audit findings record)。
+**code 改修 (`src/` 修正) を含めること禁止** (= Stage 1/2 boundary 違反)。
+
+### TS-0: Cartesian product matrix completeness
+
+- **Work**: Problem Space Cartesian product matrix を完全 enumerate (~N cells)、
+  全 cell に判定 (✓/✗/NA/regression lock-in) を付与、abbreviation pattern 排除
+- **Completion criteria**: matrix table 内 `...` / range grouping / placeholder 不在、
+  全 cell 独立 row、`audit-prd-rule10-compliance.py` PASS
+
+### TS-1: Oracle observation log embed
+
+- **Work**: 各 ✗ / 要調査 cell について TS fixture 作成、`scripts/observe-tsc.sh` 実行、
+  PRD doc `## Oracle Observations` section に embed
+- **Completion criteria**: 全 ✗/要調査 cell について 4 項目 (fixture path / tsc output /
+  cell # link / ideal output rationale) 記載
+
+### TS-2: SWC parser empirical lock-in
+
+- **Work**: 全 NA cell について `tests/swc_parser_*_test.rs` で SWC parser empirical
+  lock-in test 作成、PRD doc `## SWC Parser Empirical Lock-ins` section に embed
+- **Completion criteria**: 全 NA cell について SWC behavior verify、accept 確認時は
+  Tier 2 honest error reclassify (Rule 3 (3-3))
+
+### TS-3: E2E fixture creation (red 状態)
+
+- **Work**: 各 ✗ cell に対応 `tests/e2e/scripts/<prd-id>/cell-NN-*.ts` fixture 作成、
+  `scripts/record-cell-oracle.sh` で expected output 記録 (red 状態 = ts_to_rs 出力と
+  expected 不一致)
+- **Completion criteria**: `cargo test --test e2e_test` で全 fixture red 確認
+
+### TS-4: Impact Area audit findings record
+
+- **Work**: `python3 scripts/audit-ast-variant-coverage.py --files <impact-area-files>`
+  実行、結果を PRD doc `## Impact Area Audit Findings` section に embed、各 violation の
+  決定 (本 PRD scope or I-203 defer) 記録
+- **Completion criteria**: 全 violations 列挙 + 決定記載
+
+## Implementation Stage Tasks (Stage 2 code change task)
+
+Stage 2 で実装する `src/` 修正 task を列挙。Assumes TDD: RED → GREEN → REFACTOR order。
 
 ### T1: <Task name>
 
@@ -308,6 +448,18 @@ Analyze implementation in detail. Describe each task in the following format. As
 - **Completion criteria**: ...
 - **Depends on**: T1
 - **Prerequisites**: ...
+
+## Spec Review Iteration Log (matrix-driven PRD で必須、Rule 13 (13-2) 適用)
+
+Spec Stage Self-Review (skill workflow Step 4.5) の iteration history を record。
+
+### Iteration v1 (date)
+
+- **Findings count**: Critical N / High N / Medium N / Low N
+- **Findings detail**: 各 finding の summary + RC clustering (root cause を grouping)
+- **Resolution**: PRD doc fix + (該当する場合) framework self-applied integration
+
+(以下 iteration 増えるごとに追記)
 
 ## Test Plan
 
@@ -325,7 +477,43 @@ Conditions for this PRD's work to be considered "complete". Include quality chec
 「多分 OK」で済ませたセルがあれば PRD は未完成。
 
 **Impact estimates (error count reduction) must be verified by tracing actual code paths for at least 3 representative error instances.** Label-based estimation (counting by error category name) is prohibited. Each traced instance must confirm that the proposed fix resolves the specific failure point in the execution path.
+
+**Tier-transition compliance (broken-fix PRD のみ、`prd-completion.md` 適用)**:
+新機能 PRD では "Hono bench: clean files / errors count 0 regression"。Broken-fix PRD では
+"Tier-transition compliance" 表現を使う (existing Tier 2 errors transition Tier 1 = improvement、
+new compile errors prohibited)。詳細 `.claude/rules/prd-completion.md` 参照。
 ```
+
+### 4.5. Spec Stage Self-Review (Rule 13 hard-code、I-205 source 確定 2026-04-27)
+
+**Mandatory step**: PRD draft 完了直後 (Step 4 完了直後) に **13-rule self-applied verify** を
+systematic 適用。skill 内で以下 check items を逐一 verify:
+
+1. **Rule 1 (Matrix completeness + abbreviation prohibition)**:
+   - (1-1) 全 cell に ideal output 記載?
+   - (1-2) `...` / range grouping / `representative` / `(各別 cell)` / `varies` 等 abbreviation 不在?
+   - (1-3) `audit-prd-rule10-compliance.py` PASS?
+2. **Rule 2 (Oracle grounding + PRD doc embed)**: `## Oracle Observations` section に全 ✗/要調査 cell の 4 項目 (TS fixture / tsc output / cell # link / ideal rationale) 記載?
+3. **Rule 3 (NA justification + SWC parser empirical)**: 全 NA cell に SWC parser empirical lock-in test reference?
+4. **Rule 4 (Grammar consistency + doc-first)**: doc update task が code 改修 task の prerequisite?
+5. **Rule 5 (E2E readiness + Stage tasks separation)**: `## Spec Stage Tasks` + `## Implementation Stage Tasks` 2-section split?
+6. **Rule 6 (Matrix/Design integrity + Scope 3-tier)**: matrix Ideal output ↔ Design token-level 一致 + Scope 3-tier (`In Scope` + `Out of Scope` + `Tier 2 honest error reclassify`) hard-code?
+7. **Rule 7 (Control-flow exit sub-case)**: body shape / branch shape sub-case 完全 enumerate?
+8. **Rule 8 (Cross-cutting invariant)**: `## Invariants` 独立 section + 各 invariant 4 項目 (a)(b)(c)(d) 記載?
+9. **Rule 9 (Dispatch-arm sub-case alignment)**: 実装 dispatch arm と matrix cell 1-to-1 対応?
+10. **Rule 10 (Cross-axis matrix completeness)**: 9 default axis enumerate?
+11. **Rule 11 (AST node enumerate completeness)**: `_ => ` arm 全廃 + `## Impact Area Audit Findings` section embed?
+12. **Rule 12 (Rule 10/11 Mandatory + structural)**: `## Rule 10 Application` section 記入 + audit script PASS?
+13. **Rule 13 (Spec Stage Self-Review)**: 本 step 自身、findings を `## Spec Review Iteration Log` に record?
+
+各 finding を PRD doc `## Spec Review Iteration Log` section に record (iteration v1/v2/...)。
+Critical findings (Implementation stage 移行 block する findings) 全 fix 後、再度 self-review pass で
+Spec stage 完了判定。**Self-review skip 不可** (Rule 13 (13-1)、本 step 不在のまま skill closing 不可)。
+
+#### Audit verify mechanism
+
+`audit-prd-rule10-compliance.py` で `## Spec Review Iteration Log` section 不在 or "self-review
+not performed" placeholder のみ → audit fail (Rule 13 (13-4))。
 
 ## Design Decision Principles
 

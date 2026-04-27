@@ -1,0 +1,1 @@
+ERROR: compound assign read of write-only property (Tier 2 honest error、TS undefined+5=NaN)

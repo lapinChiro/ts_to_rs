@@ -2077,3 +2077,212 @@ fn test_e2e_cell_prd27_15_prop_assign_na() {
 fn test_e2e_cell_prd27_17_transformer_convert_object_lit_error() {
     run_cell_e2e_test("prd-2.7", "cell-17-transformer-convert-object-lit-error");
 }
+// === appending I-205 tests to e2e_test.rs ===
+// I-205 Spec stage TS-3 task: per-cell E2E red state lock-in tests
+// Spec stage 完了時点で red 状態 (ts_to_rs 出力 ≠ expected)、
+// Implementation Stage T14 で全 fixture green-ify 後 #[ignore] 解除予定。
+// 計 34 cells (TS-1 oracle observation × TS-3 fixture symmetric)。
+
+#[test]
+#[ignore = "I-205 Spec stage red state lock-in、Implementation Stage T14 で green 化予定 (cell 02)"]
+fn test_e2e_cell_i205_02_getter_only_number_read() {
+    run_cell_e2e_test("i-205", "cell-02-getter-only-number-read");
+}
+
+#[test]
+#[ignore = "I-205 Spec stage red state lock-in、Implementation Stage T14 で green 化予定 (cell 03)"]
+fn test_e2e_cell_i205_03_getter_only_string_read() {
+    run_cell_e2e_test("i-205", "cell-03-getter-only-string-read");
+}
+
+#[test]
+#[ignore = "I-205 Spec stage red state lock-in、Implementation Stage T14 で green 化予定 (cell 04)"]
+fn test_e2e_cell_i205_04_setter_only_read_undefined() {
+    run_cell_e2e_test("i-205", "cell-04-setter-only-read-undefined");
+}
+
+#[test]
+#[ignore = "I-205 Spec stage red state lock-in、Implementation Stage T14 で green 化予定 (cell 05)"]
+fn test_e2e_cell_i205_05_getter_setter_string_read() {
+    run_cell_e2e_test("i-205", "cell-05-getter-setter-string-read");
+}
+
+#[test]
+#[ignore = "I-205 Spec stage red state lock-in、Implementation Stage T14 で green 化予定 (cell 06)"]
+fn test_e2e_cell_i205_06_auto_accessor_no_decorator() {
+    run_cell_e2e_test("i-205", "cell-06-auto-accessor-no-decorator");
+}
+
+#[test]
+#[ignore = "I-205 Spec stage red state lock-in、Implementation Stage T14 で green 化予定 (cell 07)"]
+fn test_e2e_cell_i205_07_method_as_fn_reference() {
+    run_cell_e2e_test("i-205", "cell-07-method-as-fn-reference");
+}
+
+#[test]
+#[ignore = "I-205 Spec stage red state lock-in、Implementation Stage T14 で green 化予定 (cell 08)"]
+fn test_e2e_cell_i205_08_inherited_getter() {
+    run_cell_e2e_test("i-205", "cell-08-inherited-getter");
+}
+
+#[test]
+#[ignore = "I-205 Spec stage red state lock-in、Implementation Stage T14 で green 化予定 (cell 09)"]
+fn test_e2e_cell_i205_09_static_getter() {
+    run_cell_e2e_test("i-205", "cell-09-static-getter");
+}
+
+#[test]
+#[ignore = "I-205 Spec stage red state lock-in、Implementation Stage T14 で green 化予定 (cell 12)"]
+fn test_e2e_cell_i205_12_getter_only_write_typeerror() {
+    run_cell_e2e_test("i-205", "cell-12-getter-only-write-typeerror");
+}
+
+#[test]
+#[ignore = "I-205 Spec stage red state lock-in、Implementation Stage T14 で green 化予定 (cell 13)"]
+fn test_e2e_cell_i205_13_setter_only_write() {
+    run_cell_e2e_test("i-205", "cell-13-setter-only-write");
+}
+
+#[test]
+#[ignore = "I-205 Spec stage red state lock-in、Implementation Stage T14 で green 化予定 (cell 14)"]
+fn test_e2e_cell_i205_14_getter_setter_write_body_logic() {
+    run_cell_e2e_test("i-205", "cell-14-getter-setter-write-body-logic");
+}
+
+#[test]
+#[ignore = "I-205 Spec stage red state lock-in、Implementation Stage T14 で green 化予定 (cell 18)"]
+fn test_e2e_cell_i205_18_static_setter_write() {
+    run_cell_e2e_test("i-205", "cell-18-static-setter-write");
+}
+
+#[test]
+#[ignore = "I-205 Spec stage red state lock-in、Implementation Stage T14 で green 化予定 (cell 21)"]
+fn test_e2e_cell_i205_21_compound_assign_getter_setter() {
+    run_cell_e2e_test("i-205", "cell-21-compound-assign-getter-setter");
+}
+
+#[test]
+#[ignore = "I-205 Spec stage red state lock-in、Implementation Stage T14 で green 化予定 (cell 22)"]
+fn test_e2e_cell_i205_22_compound_assign_read_only_typeerror() {
+    run_cell_e2e_test("i-205", "cell-22-compound-assign-read-only-typeerror");
+}
+
+#[test]
+#[ignore = "I-205 Spec stage red state lock-in、Implementation Stage T14 で green 化予定 (cell 23)"]
+fn test_e2e_cell_i205_23_setter_only_compound_undefined_nan() {
+    run_cell_e2e_test("i-205", "cell-23-setter-only-compound-undefined-nan");
+}
+
+#[test]
+#[ignore = "I-205 Spec stage red state lock-in、Implementation Stage T14 で green 化予定 (cell 25)"]
+fn test_e2e_cell_i205_25_compound_assign_method() {
+    run_cell_e2e_test("i-205", "cell-25-compound-assign-method");
+}
+
+#[test]
+#[ignore = "I-205 Spec stage red state lock-in、Implementation Stage T14 で green 化予定 (cell 26)"]
+fn test_e2e_cell_i205_26_compound_assign_inherited() {
+    run_cell_e2e_test("i-205", "cell-26-compound-assign-inherited");
+}
+
+#[test]
+#[ignore = "I-205 Spec stage red state lock-in、Implementation Stage T14 で green 化予定 (cell 27)"]
+fn test_e2e_cell_i205_27_compound_assign_static() {
+    run_cell_e2e_test("i-205", "cell-27-compound-assign-static");
+}
+
+#[test]
+#[ignore = "I-205 Spec stage red state lock-in、Implementation Stage T14 で green 化予定 (cell 36)"]
+fn test_e2e_cell_i205_36_nullish_assign_field_option() {
+    run_cell_e2e_test("i-205", "cell-36-nullish-assign-field-option");
+}
+
+#[test]
+#[ignore = "I-205 Spec stage red state lock-in、Implementation Stage T14 で green 化予定 (cell 37)"]
+fn test_e2e_cell_i205_37_nullish_assign_getter_only_typeerror() {
+    run_cell_e2e_test("i-205", "cell-37-nullish-assign-getter-only-typeerror");
+}
+
+#[test]
+#[ignore = "I-205 Spec stage red state lock-in、Implementation Stage T14 で green 化予定 (cell 38)"]
+fn test_e2e_cell_i205_38_nullish_assign_option() {
+    run_cell_e2e_test("i-205", "cell-38-nullish-assign-option");
+}
+
+#[test]
+#[ignore = "I-205 Spec stage red state lock-in、Implementation Stage T14 で green 化予定 (cell 39)"]
+fn test_e2e_cell_i205_39_and_assign_bool() {
+    run_cell_e2e_test("i-205", "cell-39-and-assign-bool");
+}
+
+#[test]
+#[ignore = "I-205 Spec stage red state lock-in、Implementation Stage T14 で green 化予定 (cell 40)"]
+fn test_e2e_cell_i205_40_or_assign_bool() {
+    run_cell_e2e_test("i-205", "cell-40-or-assign-bool");
+}
+
+#[test]
+#[ignore = "I-205 Spec stage red state lock-in、Implementation Stage T14 で green 化予定 (cell 43)"]
+fn test_e2e_cell_i205_43_postfix_increment() {
+    run_cell_e2e_test("i-205", "cell-43-postfix-increment");
+}
+
+#[test]
+#[ignore = "I-205 Spec stage red state lock-in、Implementation Stage T14 で green 化予定 (cell 44)"]
+fn test_e2e_cell_i205_44_increment_string_nan() {
+    run_cell_e2e_test("i-205", "cell-44-increment-string-nan");
+}
+
+#[test]
+#[ignore = "I-205 Spec stage red state lock-in、Implementation Stage T14 で green 化予定 (cell 47)"]
+fn test_e2e_cell_i205_47_destructure_getter_tier2() {
+    run_cell_e2e_test("i-205", "cell-47-destructure-getter-tier2");
+}
+
+#[test]
+#[ignore = "I-205 Spec stage red state lock-in、Implementation Stage T14 で green 化予定 (cell 60)"]
+fn test_e2e_cell_i205_60_internal_this_getter_only() {
+    run_cell_e2e_test("i-205", "cell-60-internal-this-getter-only");
+}
+
+#[test]
+#[ignore = "I-205 Spec stage red state lock-in、Implementation Stage T14 で green 化予定 (cell 61)"]
+fn test_e2e_cell_i205_61_internal_this_getter_setter() {
+    run_cell_e2e_test("i-205", "cell-61-internal-this-getter-setter");
+}
+
+#[test]
+#[ignore = "I-205 Spec stage red state lock-in、Implementation Stage T14 で green 化予定 (cell 63)"]
+fn test_e2e_cell_i205_63_internal_compound_borrow_temp() {
+    run_cell_e2e_test("i-205", "cell-63-internal-compound-borrow-temp");
+}
+
+#[test]
+#[ignore = "I-205 Spec stage red state lock-in、Implementation Stage T14 で green 化予定 (cell 64)"]
+fn test_e2e_cell_i205_64_internal_increment_borrow_temp() {
+    run_cell_e2e_test("i-205", "cell-64-internal-increment-borrow-temp");
+}
+
+#[test]
+#[ignore = "I-205 Spec stage red state lock-in、Implementation Stage T14 で green 化予定 (cell 70)"]
+fn test_e2e_cell_i205_70_getter_body_clone_string() {
+    run_cell_e2e_test("i-205", "cell-70-getter-body-clone-string");
+}
+
+#[test]
+#[ignore = "I-205 Spec stage red state lock-in、Implementation Stage T14 で green 化予定 (cell 71)"]
+fn test_e2e_cell_i205_71_getter_body_copy_no_clone() {
+    run_cell_e2e_test("i-205", "cell-71-getter-body-copy-no-clone");
+}
+
+#[test]
+#[ignore = "I-205 Spec stage red state lock-in、Implementation Stage T14 で green 化予定 (cell 72)"]
+fn test_e2e_cell_i205_72_getter_body_vec_clone() {
+    run_cell_e2e_test("i-205", "cell-72-getter-body-vec-clone");
+}
+
+#[test]
+#[ignore = "I-205 Spec stage red state lock-in、Implementation Stage T14 で green 化予定 (cell 74)"]
+fn test_e2e_cell_i205_74_getter_body_option_non_copy() {
+    run_cell_e2e_test("i-205", "cell-74-getter-body-option-non-copy");
+}
