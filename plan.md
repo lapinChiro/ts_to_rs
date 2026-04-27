@@ -26,7 +26,15 @@
 
 ### 進行中作業
 
-なし。次の作業は本 file「次の作業」section 参照 (Plan η Step 3 = PRD 3 I-177 mutation propagation 本体)。
+**I-198 + I-199 + I-200 cohesive batch (PRD 2.7、Plan η Optional pre-Step 3、user 承認 2026-04-27)** Spec stage 進行中。Architectural concern = "framework Rule 10 拡張 + 拡張による coverage gap detection 完成" (1 PRD = 1 architectural concern)。
+
+本 batch close 後、**I-201-A (AutoAccessor 単体 Tier 1 化、decorator なし subset、L3) → I-202 (Object literal Prop::Method/Getter/Setter Tier 1 化、L3) → PRD 3 (I-177 mutation propagation 本体、L1 Tier 0)** の順で進む。**Decorator framework 完全変換 (I-201-B、L1 silent semantic change)** は PRD 3 / 4 / 5 / 6 close 後の next-priority L1 (両者とも L1 だが reachability 軸で PRD 3 先行が暫定 default、Hono decorator 使用状況 audit で再評価可能、user 承認 2026-04-27 audit 結果 driven の re-plan)。
+
+**Audit 知見 (2026-04-27)**: ts_to_rs では decorator 自体が完全に未実装 = silent drop 状態 (`grep "Decorator\|decorator" src/` 結果空、`doc/grammar/ast-variants.md` に Decorator entry 不在)。元 I-201 (AutoAccessor + decorator interaction) を I-201-A (AutoAccessor 単体、decorator なし subset、L3) + I-201-B (Decorator framework 全体、L1 silent semantic change) に分割 (1 PRD = 1 architectural concern 厳格適用)。
+
+**Q4 確定 (2026-04-27)**: Rule 10(d) "AST node enumerate completeness check" の真の ideal を確定 — `_ => ` arm 全面禁止 + 共通 macro `unsupported_arm!()` + ast-variants.md を single source of truth + audit script CI 化。新規 code 適用は PRD 2.7 内 (I-199 / I-200 + audit script 作成)、既存 codebase 全体への application は **I-203 (Codebase-wide AST match exhaustiveness compliance)** として (d) 構造分離 pattern で別 PRD 起票。I-203 priority は audit 結果 driven (silent drop 含むなら L1、含まないなら L3)。
+
+**Q5 確定 (2026-04-27)**: Rule 10 全体の Mandatory 化 + structural enforcement を確定 — 全 PRD で Rule 10 verification を Mandatory + matrix 不在の structural reason 明示 (Permitted reason 例示 + Prohibited keywords 明示禁止 list) + Cross-axis 軸独立 enumerate + machine-parseable format + **`prd-template` skill hard-code** + **`scripts/audit-prd-rule10-compliance.py` 新規作成 + CI 化 + merge gate**。人間判断介在 0、妥協の逃げ道 structural 排除。本 PRD 2.7 内で完結 (Q4 と Q5 の rule 改修 + skill / audit script を同時 update)。
 
 **Plan η update (2026-04-26 post I-177-B empirical investigation)**: I-177-B 実装中の empirical verification で **TypeResolver-Synthetic registry integration の pre-existing latent bug** を発見 (`SyntheticTypeRegistry::fork_dedup_state` が `union_dedup` を継承しつつ `types: BTreeMap::new()` で fork、builtin pre-registered union 型を使う narrow guard で `compute_complement_type` が None を返し、post-narrow scope の EarlyReturnComplement event が push されない silent failure)。Plan η chain に **Step 1.5 = I-177-E (synthetic fork inheritance fix)** を I-177-B prerequisite として挿入し close。
 
@@ -43,13 +51,21 @@ PRD 2 (I-177-B): collect_expr_leaf_types query 順序 fix + leaf type resolution
    ↓
 PRD 2.5 (I-177-F): resolve_arrow_expr / resolve_fn_expr / class constructor / class method body の visit_block_stmt 経由統一 (~4 LOC production + 4 unit test + 1 E2E、**完了 2026-04-26**、I-177-B callable arrow form `#[ignore]` 解除)
    ↓
-PRD 3 (I-177 mutation propagation 本体): F1/F3 body mutation propagation (Tier 0 silent semantic change、案 A vs 案 B 確定) ← 次の作業
+PRD 2.7 (I-198 + I-199 + I-200 cohesive batch): framework Rule 10 拡張 (新 sub-rule (i) AST node enumerate completeness check) + TypeResolver coverage extension (StaticBlock + Prop::Method/Getter/Setter body resolve + AutoAccessor (b) Tier 2 error report 化) + ast-variants.md Prop section 新規追加 ← 進行中 (Spec stage、user 承認 2026-04-27)
+   ↓
+PRD 2.8 (I-201-A): AutoAccessor 単体 Tier 1 化 (decorator なし subset、`accessor x: T = init` → `struct field + getter/setter pair`、L3、user 承認 2026-04-27)
+   ↓
+PRD 2.9 (I-202): Object literal `Prop::Method` / `Prop::Getter` / `Prop::Setter` Tier 1 化 (Transformer 完全 emission、L3、user 承認 2026-04-27)
+   ↓
+PRD 3 (I-177 mutation propagation 本体): F1/F3 body mutation propagation (Tier 0 silent semantic change、L1、案 A vs 案 B 確定)
    ↓
 PRD 4 (I-177-A): else_block_pattern Let-wrap 化 + I-194 typeof if-block elision (拡張可)
    ↓
 PRD 5 (I-177-C): symmetric XOR early-return detection
    ↓
 PRD 6 (I-048): closure ownership 推論 (T7-3 完全 GREEN-ify)
+   ↓
+PRD 7 (I-201-B): Decorator framework 完全変換 (TC39 Stage 3、AutoAccessor + class + method + property + parameter 全 application 共通、L1 silent semantic change、user 承認 2026-04-27、PRD 3 後の next-priority L1 = reachability 軸で PRD 3 先行 + I-201-A foundation を leverage)
 ```
 
 **Plan η Step 1.5 (I-177-E) 起票根拠**: I-177-B 実装中の empirical verification (CLI 経由の `function h(...)` typeof + post-if return scenario) で hard error が解消されない事象を逐次 dbg trace し、`compute_complement_type` の `synthetic_enum_variants` query が builtin pre-registered union signature に対し None を返す pattern を確定。`fork_dedup_state` の `types: BTreeMap::new()` を `types: self.types.clone()` に修正することで構造的に解消。本 PRD は I-177-B PRD 起票時 problem space に未認識だった prerequisite で、Plan η framework の 1 PRD = 1 architectural concern 原則に従い独立 PRD として起票。
@@ -87,7 +103,16 @@ PRD 6 (I-048): closure ownership 推論 (T7-3 完全 GREEN-ify)
 [PRD 2.5: I-177-F — resolve_arrow_expr / resolve_fn_expr block_end traversal cohesion] (完了 2026-04-26)
        │
        ▼
-[PRD 3: I-177 mutation propagation 本体 (Tier 0 silent semantic change) — F1/F3 body mutation、案 A vs 案 B 確定] ← 次の作業
+[PRD 2.7: I-198 + I-199 + I-200 cohesive batch — framework Rule 10 拡張 + TypeResolver coverage extension + ast-variants.md Prop section 新規追加] ← 進行中 (Spec stage、user 承認 2026-04-27)
+       │
+       ▼
+[PRD 2.8: I-201-A — AutoAccessor 単体 Tier 1 化 (decorator なし subset)] (L3、user 承認 2026-04-27)
+       │
+       ▼
+[PRD 2.9: I-202 — Object literal Prop::Method/Getter/Setter Tier 1 化 (Transformer 完全 emission)] (L3、user 承認 2026-04-27)
+       │
+       ▼
+[PRD 3: I-177 mutation propagation 本体 (Tier 0 silent semantic change、L1) — F1/F3 body mutation、案 A vs 案 B 確定]
        │
        ▼
 [PRD 4: I-177-A — else_block_pattern Let-wrap (+ I-194 typeof if-block elision 拡張可)]
@@ -99,6 +124,9 @@ PRD 6 (I-048): closure ownership 推論 (T7-3 完全 GREEN-ify)
 [PRD 6: I-048 — closure ownership 推論 (T7-3 完全 GREEN-ify)]
        │
        ▼
+[PRD 7: I-201-B — Decorator framework 完全変換 (TC39 Stage 3、L1 silent semantic change)] (user 承認 2026-04-27、PRD 3 後の next-priority L1 = reachability 軸 + I-201-A foundation leverage)
+       │
+       ▼
 I-162 → Phase A Step 5 → I-015 → I-158+I-159 → Phase A Step 6 → ...
 ```
 
@@ -107,10 +135,15 @@ I-162 → Phase A Step 5 → I-015 → I-158+I-159 → Phase A Step 6 → ...
 - **PRD 1.5 (I-177-E、完了)**: TypeResolver synthetic fork inheritance gap fix。`fork_dedup_state` を `union_dedup` 継承 + `types` 空 fork → 全 state clone 形式へ修正。
 - **PRD 2 (I-177-B、完了)**: `collect_expr_leaf_types` (`return_wrap.rs:419`) の query 順序を `narrowed_type → expr_type` に修正、Transformer 一般 path との整合性回復。canonical primitive `FileTypeResolution::resolve_var_type` / `resolve_expr_type` を追加し 3 site (`get_type_for_var` / `get_expr_type` / `collect_expr_leaf_types`) を統一。~75 LOC + 5 unit test。
 - **PRD 2.5 (I-177-F、完了)**: `resolve_arrow_expr` / `resolve_fn_expr` / `visit_class_decl` constructor / `visit_method_function` の 4 site の body 直接 stmt iterate を `visit_block_stmt` 経由に統一し `current_block_end` を全 fn body 形式で set (`visit_fn_decl` と完全 symmetric)。production change 4 行 + 4 unit test + 1 E2E。I-177-B の callable arrow form `#[ignore]` 解除完了。**`/check_job deep deep` audit (2026-04-26) で class method / constructor 漏れを発見 → 本 PRD scope に編入 (初版 PRD scope の Cross-axis 直交軸 audit 不足が判明、I-198 framework 改善 TODO に lesson reflect 済)。**
-- **PRD 3 (I-177 mutation propagation 本体、次の作業)**: F1/F3 narrow body 内 mutation の outer Option<T> propagation (Tier 0 silent semantic change)。matrix-driven、~600-1000 LOC + ~200 refactor。案 A (mutation-ref `match &mut x`) vs 案 B (writeback `x.take()`) を spec stage で empirical 確定。
+- **PRD 2.7 (I-198 + I-199 + I-200 cohesive batch、進行中 Spec stage)**: framework Rule 10 拡張 (Q4: 新 sub-rule (d) AST node enumerate completeness check = `_` arm 全面禁止 + 共通 macro `unsupported_arm!()` + ast-variants.md single source of truth、Q5: Rule 10 全体 Mandatory 化 + matrix 不在の structural reason 明示 + machine-parseable format + Anti-pattern 明示禁止 list) + structural enforcement mechanism (`prd-template` skill hard-code + `scripts/audit-ast-variant-coverage.py` 新規作成 + `scripts/audit-prd-rule10-compliance.py` 新規作成 + CI 化 + merge gate) + TypeResolver coverage extension (StaticBlock visit 追加 + Prop::Method / Getter / Setter body resolve 経路追加 + AutoAccessor (b) Tier 2 error report 化で silent drop 排除) + `doc/grammar/ast-variants.md` Prop section 新規追加 (Grammar gap fix)。1 architectural concern = "framework Rule 10 拡張 + 拡張による coverage gap detection 完成 + structural enforcement"。**Q3 (Prop::Assign) は本 PRD 内 NA cell + lock-in test で triple ideal 自動達成、別 PRD 不要**。**既存 codebase 全体の `_` arm refactor (I-203) と AutoAccessor 完全 Tier 1 化 (I-201-A) と decorator framework (I-201-B) と object literal Tier 1 化 (I-202) は (d) 構造分離 pattern で別 PRD 化**。
+- **PRD 2.8 (I-201-A、user 承認 2026-04-27)**: AutoAccessor 単体 Tier 1 化 (decorator なし subset、`accessor x: T = init` → `struct field + fn x() -> &T + fn set_x(&mut self, v: T)`、L3)。1 architectural concern = "AutoAccessor (decorator なし) class member emission completeness"。`doc/grammar/ast-variants.md` の AutoAccessor entry を Tier 2 → Tier 1 (decorator なし subset) に昇格。Decorator interaction 完全変換は PRD 7 (I-201-B) で別途達成 (1 PRD = 1 architectural concern 厳格適用)。
+- **PRD 2.9 (I-202、user 承認 2026-04-27)**: Object literal `Prop::Method` / `Prop::Getter` / `Prop::Setter` Tier 1 化 (Transformer 完全 emission、L3)。post PRD 2.7 で Transformer convert_object_lit は Tier 2 honest error 状態、本 PRD で Tier 1 完全変換に拡張。1 architectural concern = "Object literal getter/setter/method emission completeness" (decorator なし、object literal context、I-201-A の class context と orthogonal)。
+- **PRD 3 (I-177 mutation propagation 本体、L1 Tier 0)**: F1/F3 narrow body 内 mutation の outer Option<T> propagation (Tier 0 silent semantic change)。matrix-driven。案 A (mutation-ref `match &mut x`) vs 案 B (writeback `x.take()`) を spec stage で empirical 確定。
 - **PRD 4 (I-177-A)**: `try_generate_narrowing_match` else_block_pattern bare match → Let-wrap 化、post-if narrow materialization。~20-30 LOC。**I-194 (typeof if-block elision) を scope 拡張候補として検討** (Phase 0 audit で発見の Transformer IR emission gap)。
 - **PRD 5 (I-177-C)**: `visit_if_stmt` (then XOR else) 拡張 + guards.rs symmetric direction handling。~10-15 LOC。
-- **PRD 6 (I-048)**: closure capture mode 推論 (move/FnMut/Fn)、T7-3 E0506 解消、closures/functions fixture unblock。大規模、要 spec stage 詳細化。
+- **PRD 6 (I-048)**: closure capture mode 推論 (move/FnMut/Fn)、T7-3 E0506 解消、closures/functions fixture unblock。要 spec stage 詳細化。
+- **PRD 7 (I-201-B、user 承認 2026-04-27、L1 silent semantic change)**: Decorator framework 完全変換 (TC39 Stage 3、AutoAccessor + class + method + property + parameter 全 application 共通)。**Audit (2026-04-27) で ts_to_rs は decorator 自体が完全未実装 = silent drop 状態と判明** (= Tier 1 silent semantic change = L1 Reliability Foundation)。1 architectural concern = "Decorator framework full coverage"。PRD 3 と両 L1 だが reachability 軸 (PRD 3 = narrow 機能を使う全 TS code 広域 / I-201-B = decorator 含む TS code 局所、Hono 使用状況要 audit) で PRD 3 先行が暫定 default。I-201-A (AutoAccessor 単体 emission strategy) を foundation として leverage。要 spec stage 詳細化 (decorator hook semantic = init/get/set/addInitializer の Rust 等価表現確立)。
+- **I-203 (Codebase-wide AST match exhaustiveness compliance、user 承認 2026-04-27、audit driven priority)**: PRD 2.7 で確定する Rule 10(d) 真の ideal (`_ => ` arm 全面禁止 + 共通 macro `unsupported_arm!()` + doc-code sync audit script + CI 化) の **既存 codebase 全体への application**。1 architectural concern = "Codebase-wide AST match exhaustiveness compliance"、(d) 構造分離 pattern で PRD 2.7 と独立。priority = audit 結果 driven (silent drop 含むなら L1、含まないなら L3)。実施: PRD 2.7 batch close 後の早期 audit、結果次第で PRD chain 内位置確定 (L1 = PRD 3 / I-201-B reachability 軸比較、L3 = PRD 7 後 deferred)。
 
 ### 着手順の導出原則
 
@@ -124,10 +157,15 @@ I-162 → Phase A Step 5 → I-015 → I-158+I-159 → Phase A Step 6 → ...
 | 優先度 | レベル | PRD | 内容 | 根拠 |
 |--------|-------|-----|------|------|
 | 0 (完了) | L4 | **PRD 1.5 + PRD 2 + PRD 2.5: I-177-E + I-177-B + I-177-F batch (synthetic fork + leaf type cohesion + arrow/fn-expr block_end)** | I-177-E: fork_dedup_state を全 state clone 化。I-177-B: canonical primitive を 3 site 統一 (DRY 完全解消)。I-177-F: resolve_arrow_expr / resolve_fn_expr の body traversal を visit_block_stmt 経由に統一、current_block_end を arrow / fn-expr 内でも set | 2026-04-26 完了。I-177-D + 本 batch で TypeResolver-IR cohesion + Synthetic registry cohesion + leaf type lookup cohesion + body traversal cohesion を確立 |
-| **0a (Tier 0)** | **L1** | **PRD 3: I-177 mutation propagation 本体 (narrow emission v2、L1 silent semantic change)** | I-144 T6-3 inherited の shadow-mutation-propagation 欠陥を structural fix。F1/F3 narrow body 内 mutation の outer Option<T> propagation を案 A (mutation-ref `match &mut x`) vs 案 B (writeback `x.take()`) で確定 | I-161 T3 実装で latent defect が runtime 誤動作として顕在化、Tier 0 silent semantic change 該当。matrix-driven、~600-1000 LOC + ~200 refactor |
+| **進行中 (Spec stage)** | **L3** | **PRD 2.7: I-198 + I-199 + I-200 cohesive batch (framework Rule 10 拡張 + TypeResolver coverage extension + ast-variants.md Prop section 追加)** | I-198: spec-stage-adversarial-checklist Rule 10 に新 sub-rule (i) AST node enumerate completeness check 追加 + non-matrix-driven PRD への適用拡張。I-199: visit_class_decl の StaticBlock visit 追加 + AutoAccessor (b) Tier 2 error report 化 (silent drop 排除)。I-200: ObjectLit Prop::Method / Getter / Setter body resolve 経路追加。doc/grammar/ast-variants.md に Prop section 新規追加 (Grammar gap fix) | user 承認 2026-04-27 (Plan η Optional pre-Step 3 batch)。framework reinforced により後続全 PRD の structural quality 向上 (high leverage)。matrix-driven、Rule 10 拡張部は doc 改修 + I-199/I-200 部は ~50-80 LOC |
+| **次優先 1 (post-PRD 2.7)** | **L3** | **PRD 2.8: I-201-A — AutoAccessor 単体 Tier 1 化 (decorator なし subset)** | TS 5.0+ stable AutoAccessor 構文 (`accessor x: T = init`) の decorator なし subset を Rust に完全変換 (`struct field + fn x() -> &T + fn set_x(&mut self, v: T)`)。ast-variants.md AutoAccessor entry を Tier 2 → Tier 1 (decorator なし subset) 昇格。Decorator interaction は PRD 7 (I-201-B) で別途達成 | user 承認 2026-04-27 (PRD 2.7 (d) 構造分離方針 + audit 2026-04-27 で decorator framework 未実装が判明、I-201 を I-201-A/I-201-B に分割)。1 PRD = 1 architectural concern 厳格適用 |
+| **次優先 2 (post-PRD 2.8)** | **L3** | **PRD 2.9: I-202 — Object literal Prop::Method/Getter/Setter Tier 1 化** | post PRD 2.7 で Transformer convert_object_lit は Tier 2 honest error 状態、本 PRD で Tier 1 完全変換に拡張 (object literal の anonymous struct 表現 strategy 確立) | user 承認 2026-04-27 (Q2 (d) 構造分離方針)。class context (I-201-A) と orthogonal な architectural concern = "Object literal getter/setter/method emission completeness" |
+| **0a (Tier 0)** | **L1** | **PRD 3: I-177 mutation propagation 本体 (narrow emission v2、L1 silent semantic change)** | I-144 T6-3 inherited の shadow-mutation-propagation 欠陥を structural fix。F1/F3 narrow body 内 mutation の outer Option<T> propagation を案 A (mutation-ref `match &mut x`) vs 案 B (writeback `x.take()`) で確定 | I-161 T3 実装で latent defect が runtime 誤動作として顕在化、Tier 0 silent semantic change 該当。matrix-driven |
 | **0b (Tier 1)** | **L3** | **PRD 4: I-177-A (else_block_pattern Let-wrap 化)** | typeof/instanceof/OptChain × `then_exit + else_non_exit` × post-narrow primitive use の bare match → Let-wrap 化、INV-2 違反解消 (~20-30 LOC)。**I-194 (typeof if-block elision) を scope 拡張候補として検討** | I-171 T5 で発見、Plan η Step 4 |
 | **0c (Tier 1)** | **L3** | **PRD 5: I-177-C (symmetric XOR early-return detection)** | `visit_if_stmt` (then XOR else) 拡張 + guards.rs symmetric direction handling (~10-15 LOC) | Plan η Step 5、narrow framework 対称性完成 |
-| **0d (Tier 1)** | **L3** | **PRD 6: I-048 (closure ownership 推論)** | closure capture mode (move/FnMut/Fn) 推論。T7-3 E0506 解消、closures/functions fixture unblock。大規模、要 spec stage 詳細化 | Plan η Step 6、`closures` / `functions` fixture unskip、T7-3 完全 GREEN-ify |
+| **0d (Tier 1)** | **L3** | **PRD 6: I-048 (closure ownership 推論)** | closure capture mode (move/FnMut/Fn) 推論。T7-3 E0506 解消、closures/functions fixture unblock。要 spec stage 詳細化 | Plan η Step 6、`closures` / `functions` fixture unskip、T7-3 完全 GREEN-ify |
+| **次優先 (Tier 1、post-PRD 6)** | **L1** | **PRD 7: I-201-B — Decorator framework 完全変換 (TC39 Stage 3、L1 silent semantic change)** | ts_to_rs では decorator 自体が完全未実装 = silent drop 状態 (audit 2026-04-27)。decorator semantic (init/get/set/addInitializer hook) の Rust 等価表現確立、AutoAccessor + class + method + property + parameter 全 application 共通 framework 構築 | user 承認 2026-04-27 (audit 結果 driven)。PRD 3 と両 L1 だが reachability 軸 (PRD 3 広域 / I-201-B 局所) で PRD 3 先行が暫定 default、Hono decorator 使用状況 audit で再評価可能。I-201-A foundation を leverage |
+| **audit driven (post-PRD 2.7)** | **L1 候補 / L3** | **I-203: Codebase-wide AST match exhaustiveness compliance (Rule 10(d) compliance、既存 `_` arm 全 audit + explicit enumerate fix)** | PRD 2.7 で確定する Rule 10(d) 真の ideal (`_` arm 全面禁止 + 共通 macro `unsupported_arm!()` + doc-code sync audit script) の既存 codebase 全体 application。silent drop 候補が含まれるかを audit で確定し priority reclassify | user 承認 2026-04-27 ((d) 構造分離 pattern)。PRD 2.7 batch close 後の早期 audit 実施、結果次第で PRD chain 内位置確定 (L1 = PRD 3 / I-201-B reachability 軸比較、L3 = PRD 7 後 deferred) |
 | 1 | L3 | **I-162** | class without explicit constructor → `Self::new()` 自動合成 | I-144 T2 instanceof narrow の Rust 側 E2E lock-in が本 defect で block。`class Dog {}` → `struct Dog {}` 止まりで `Dog::new()` 不在で E0599 |
 | 2 | L3 | **Phase A Step 5** (I-026 / I-029 / I-030) | 型 assertion / null as any / any-narrowing enum 変換 | `type-assertion`, `trait-coercion`, `any-type-narrowing` unskip (3 fixture 直接削減) |
 | 3 | L3 | **I-015** | Hono types.rs `Input['out']` indexed access 解決失敗 (E0405) | `src/ts_type_info/resolve/indexed_access.rs:271`。Hono types.rs で 1 件だが dir compile blocker |
@@ -151,8 +189,11 @@ I-162 → Phase A Step 5 → I-015 → I-158+I-159 → Phase A Step 6 → ...
 - **I-168** (L4、`NarrowEvent::Reset` event 未消費) — Hono で顕在化なし pre-existing imprecision
 - **I-172** (L4、bench 非決定性) — test / bench infra、別 PRD
 - **I-177-G** (L4、`apply_substitutions_to_items` round-trip mutation safety、defense-in-depth) — 現状 reachability なし、I-177-E fork inheritance fix で顕在化候補に。I-177-E + I-177-B batch close 由来 (2026-04-26)
-- **I-198** (L3 候補、Cross-axis matrix completeness for non-matrix-driven PRDs、framework Rule 10 拡張) — Severity reinforced (5 度の Spec gap chain detection)。I-184〜I-193 + I-196 + I-199 + I-200 framework improvement umbrella の指揮 entry
-- **I-199 + I-200 batch (L4、TypeResolver coverage extension)** — I-199 (static block + AutoAccessor coverage) + I-200 (object literal method body resolve 経路) — I-177-F の symmetric architectural concern、両者「TypeResolver coverage extension」の同 architectural concern として batch 化推奨。Plan η Optional pre-Step 3 候補 (I-199 + I-200 batch + I-198 framework reinforced を batch close 検討可)
+- **I-198 + I-199 + I-200 batch** — **PRD 2.7 として進行中 (Spec stage、user 承認 2026-04-27)**。本 deferred section から進行中作業へ昇格。
+- **I-201-A (AutoAccessor 単体 Tier 1 化、decorator なし subset)** — **PRD 2.8 として next-priority 1 (L3、user 承認 2026-04-27)**。本 deferred section から next-priority へ昇格。
+- **I-202 (Object literal Prop::Method/Getter/Setter Tier 1 化)** — **PRD 2.9 として next-priority 2 (L3、user 承認 2026-04-27)**。本 deferred section から next-priority へ昇格。
+- **I-201-B (Decorator framework 完全変換、TC39 Stage 3)** — **PRD 7 として post-PRD 6 next-priority (L1 silent semantic change、user 承認 2026-04-27)**。audit 2026-04-27 で decorator framework 未実装 = silent drop 状態が判明、L1 priority。本 deferred section から PRD chain へ昇格。
+- **I-203 (Codebase-wide AST match exhaustiveness compliance — 既存 `_` arm 全 audit + explicit enumerate fix)** — **PRD 2.7 完了後の早期 audit 実施 (audit driven priority、L1 候補 = silent drop 含む / L3 = silent drop 不在)、user 承認 2026-04-27**。Rule 10(d) 真の ideal の codebase-wide application、(d) 構造分離 pattern で本 entry に分離。audit 結果次第で PRD chain 内挿入位置確定 (L1 確定なら PRD 3 / I-201-B と reachability 軸比較、L3 確定なら PRD 7 後 deferred)。
 
 ### Batching 検討
 
