@@ -1,16 +1,19 @@
 /target
+# I-184: test fixture subprojects は published library ではないため Cargo.lock を
+# tracked にする (dependency reproducibility、CI fresh-clone state での pool init
+# `fs::copy` 読込み元として動作)。
+#
+# `src/` 配下の handling は subproject の access pattern により asymmetric:
+# - compile-check は **template-buffer pattern**: 各 test が template 直下の
+#   `src/lib.rs` を `fs::write` で上書き (毎 test working tree が汚れる)。
+#   → 生成 `.rs` を `*.rs` で ignore、`.keep` で `src/` dir を保持。
+# - e2e/rust-runner は **pool pattern** (`E2eRunnerPool`): 各 test は per-runner
+#   temp dir に write、template `src/main.rs` は read-only skeleton (pool init で
+#   `fs::copy` 読込み元のみ)。
+#   → `src/main.rs` を stub として tracked、ignore entry 不要。
 tests/compile-check/target/
-tests/compile-check/Cargo.lock
-# I-145: compile_test が毎回 `fs::write` で書き換える artifact。
-# git tracked 不要。fresh clone 後も `cargo test --test compile_test` が
-# `fs::write` により auto-generate するため preparatory script 不要。
-tests/compile-check/src/lib.rs
+tests/compile-check/src/*.rs
 tests/e2e/rust-runner/target/
-tests/e2e/rust-runner/Cargo.lock
-# I-161 (I-145 と同型): E2E runner が各 test 実行で `write_with_advancing_mtime`
-# (内部 `fs::write`) により書き換える artifact。fresh clone 後も E2E test 実行で
-# auto-generate されるため preparatory script 不要。
-tests/e2e/rust-runner/src/main.rs
 tests/e2e/node_modules/
 tests/e2e/scripts/*_exec.ts
 tools/extract-types/node_modules/

@@ -590,8 +590,9 @@ fn run_e2e_test_with_env(name: &str, env: &[(&str, &str)]) {
 /// Runs a multi-file E2E test.
 ///
 /// Transpiles all `.ts` files in `tests/e2e/scripts/multi/{name}/`,
-/// writes them to `tests/e2e/rust-runner/src/`, and compares stdout.
-/// `main.ts` → `src/main.rs`, other files → `src/<name>.rs` with `mod` declarations.
+/// writes them to the per-runner temp dir's `src/` (acquired from the runner pool),
+/// and compares stdout. `main.ts` → `src/main.rs`, other files → `src/<name>.rs`
+/// with `mod` declarations.
 fn run_e2e_multi_file_test(name: &str) {
     let runner = E2eRunnerPool::global().acquire();
     let dir = format!("{SCRIPTS_DIR}/multi/{name}");

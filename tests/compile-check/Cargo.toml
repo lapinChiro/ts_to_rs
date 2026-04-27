@@ -4,6 +4,12 @@ version = "0.0.0"
 edition = "2021"
 
 # NOTE: Keep dependencies in sync with tests/e2e/rust-runner/Cargo.toml
+# NOTE: To regenerate Cargo.lock, run `cargo test --test compile_test` once
+# from the workspace root. The test auto-creates `src/lib.rs` (gitignored
+# write-only buffer; see backlog/I-184) and `cargo check` regenerates Cargo.lock
+# as a side effect. Direct `cargo generate-lockfile` from this directory fails
+# with "no targets specified" because src/lib.rs is intentionally absent in the
+# repo — this is the template-buffer pattern's inherent trade-off.
 [dependencies]
 regex = "1.12"
 scopeguard = "1.2"

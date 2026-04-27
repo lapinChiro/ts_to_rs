@@ -13,8 +13,10 @@ mod test_helpers;
 ///
 /// `src/lib.rs` inside this directory is a write-only artifact (I-145): each
 /// test invocation writes full content via `fs::write`, so the file is
-/// re-created on every run. It is `.gitignore`d. Fresh-clone state (file
-/// absent) is supported because `fs::write` creates the file when absent.
+/// re-created on every run. The file itself is `.gitignore`d (`src/*.rs`),
+/// while the `src/` directory is git-tracked via `src/.keep` so that
+/// `fs::write` can create the file on fresh clone (`fs::write` creates the
+/// file when absent but does not create parent directories).
 const COMPILE_CHECK_DIR: &str = "tests/compile-check";
 
 /// Mutex to serialize compile tests (they share the same compile-check project).
