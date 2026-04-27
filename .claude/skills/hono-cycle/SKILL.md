@@ -78,7 +78,7 @@ Execute the following 6 steps in order. Confirm each step's completion before pr
 2. Consider whether related items can be batched (same root cause, same module fix)
 3. Create a PRD per `/prd-template` format
    - **Non-matrix-driven PRD のみ** Skip Discovery clarification questions (reason: inefficient to run Discovery every loop iteration. Steps 1-3 provide sufficient information for autonomous judgment)
-   - **Matrix-driven PRD は Discovery 必須** ([`spec-first-prd.md`](../../rules/spec-first-prd.md) Stage 1 violation を防ぐ)。Spec stage 完了 verification は [`spec-stage-adversarial-checklist.md`](../../rules/spec-stage-adversarial-checklist.md) の 10-rule を必須適用
+   - **Matrix-driven PRD は Discovery 必須** ([`spec-first-prd.md`](../../rules/spec-first-prd.md) Stage 1 violation を防ぐ)。Spec stage 完了 verification は [`spec-stage-adversarial-checklist.md`](../../rules/spec-stage-adversarial-checklist.md) の 12-rule を必須適用
    - Always include "confirm error resolution in Hono re-conversion" as a completion criterion
 4. Place PRD in `backlog/` and update `plan.md`
 

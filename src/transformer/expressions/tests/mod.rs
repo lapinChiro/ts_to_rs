@@ -16,6 +16,7 @@ mod object_spread_side_effects;
 mod objects;
 mod optional_chaining;
 mod optional_semantics;
+mod prd_2_7;
 mod regex;
 mod strings;
 mod ternary;

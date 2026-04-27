@@ -341,4 +341,49 @@ cargo fmt --all --check    # フォーマットチェック
 cargo llvm-cov --ignore-filename-regex 'main\.rs' --fail-under-lines 89  # カバレッジ計測
 cargo llvm-cov --html      # HTML レポート（target/llvm-cov/html/）
 ./scripts/hono-bench.sh    # Hono 変換率ベンチマーク
+
+# PRD 2.7 audit scripts (CI で自動実行)
+pip install --user tree-sitter tree-sitter-rust pyyaml  # 依存 install
+python3 scripts/audit-ast-variant-coverage.py           # Rule 11 compliance
+python3 scripts/audit-prd-rule10-compliance.py          # Rule 10/12 + Rule 4 (4-3)
 ```
+
+### CI required checks (branch protection 手順)
+
+CI workflow (`.github/workflows/ci.yml`) には以下 step が定義されている。
+これらを GitHub branch protection で **required check** として設定することで、
+PR merge 前に必須 pass を強制する (PRD 2.7 Q4 + Q5 + Q6 で確立した structural
+enforcement、merge gate)。
+
+必須 required checks:
+- `Format check`
+- `Clippy`
+- `Test with coverage`
+- `Audit AST variant coverage (PRD 2.7 Rule 11 compliance)`
+- `Audit PRD Rule 10/11/12 + Rule 4 (4-3) compliance`
+
+設定手順 (admin permission 必要):
+
+```bash
+# repo admin が一度だけ実施 (GitHub CLI 経由)
+gh api -X PUT repos/<owner>/<repo>/branches/main/protection \
+  --input - <<'JSON'
+{
+  "required_status_checks": {
+    "strict": true,
+    "contexts": [
+      "Check"
+    ]
+  },
+  "enforce_admins": false,
+  "required_pull_request_reviews": null,
+  "restrictions": null
+}
+JSON
+```
+
+または GitHub UI: Settings → Branches → Branch protection rules → main →
+"Require status checks to pass before merging" → "Check" を選択。
+
+`Check` job は CI workflow 内の全 step を含むため、上記 5 audit step が
+PR merge 前に全 pass することが strictly enforced される。

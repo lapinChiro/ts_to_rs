@@ -1,8 +1,9 @@
-# PRD 2.7: I-198 + I-199 + I-200 cohesive batch — framework Rule 10 拡張 + TypeResolver coverage extension + structural enforcement
+# PRD 2.7: I-198 + I-199 + I-200 cohesive batch — framework Rule 改修 (Rule 3/4/10/11/12) + TypeResolver coverage extension + structural enforcement
 
-**Status**: Spec stage 進行中 (Discovery 完了 2026-04-27、user 承認 Q1〜Q5)
-**Plan η position**: Optional pre-Step 3 batch (PRD 2.7、PRD 2.8 (I-201-A) と PRD 3 の前)
-**Architectural concern**: "framework Rule 10 拡張 + 拡張による coverage gap detection 完成 + structural enforcement"
+**Status**: **CLOSED 2026-04-27** (Implementation stage T1〜T15 全 task + formal `/check_job` 4-layer review (initial invocation、9 課題発見) + 9 課題本質 fix (F1〜F10) + Implementation Revision 1 (PropOrSpread Grammar gap) + Revision 2 (cell 15 Prop::Assign critical Spec gap) self-applied integration + Spec gap chain trajectory **5 → 3 → 0 → 1 → 0 → 1 → 0** completion)
+**Archive role**: framework lesson source (Q4/Q5/Q6 + Implementation Revision 1/2 + 9-finding Action Items 全 history)、Plan η chain reference (= PRD 2.8/2.9/3 start point)、後続 PRD で Rule 3/4/10/11/12 + audit script CI 化 mechanism を first-class adopter として self-applied 適用する際の引用源
+**Plan η position**: Optional pre-Step 3 batch (PRD 2.7 完了後 → PRD 2.8 (I-201-A) → PRD 2.9 (I-202) → PRD 3 ...)
+**Architectural concern**: "framework Rule 改修 (Rule 3/4/10/11/12) + 拡張による coverage gap detection 完成 + structural enforcement"
 **1 PRD = 1 architectural concern**: ✓
 
 ---
@@ -108,7 +109,7 @@ ast::Expr::Object(obj) => {
 | 12 | **Prop::Method** body | A2 / **B3 (暗黙 silent drop)** / C3 Section 不在 | — | **TypeResolver: visit_method_function 同等の処理 (function-level scope + visit_block_stmt + return type setup)** + Prop section に Tier 1 (TypeResolver visit only) 記載。Transformer 完全 emission は **I-202** (別 PRD、L3) で達成 | **✗ 要 fix** | **本 PRD (I-200 TypeResolver visit)** + I-202 (Transformer emission) |
 | 13 | **Prop::Getter** body | A2 / B3 / C3 | — | 同上 (visit_method_function 同等処理) | ✗ 要 fix | 本 PRD + I-202 |
 | 14 | **Prop::Setter** body | A2 / B3 / C3 | — | 同上 | ✗ 要 fix | 本 PRD + I-202 |
-| 15 | **Prop::Assign** | A2 / B3 / C3 | — | **TypeResolver (expressions.rs): `unreachable!()` macro 呼び出し (NA cell、SWC parser reject 前提の bug detection mechanism) + Transformer (data_literals.rs): 同 `unreachable!()` (= `UnsupportedSyntaxError` ではない、actual unreachable で reach したら SWC parser 仕様変更 = bug)** + Prop section に NA reason 明示 + **SWC parser empirical regression lock-in test** (Test 20、cell 15 reachability empirical verify) | **✗ 要 fix (count++ defensive coding 排除 + doc + test、C3 修正 2026-04-27)** | **本 PRD (Q3 triple ideal 自動達成)** |
+| 15 | **Prop::Assign** | A2 / B3 / C3 | — | **Implementation Revision 2 (2026-04-27、critical Spec gap fix)**: 当初 NA 認識 + `unreachable!()` 設計だったが、SWC parser empirical observation (`tests/swc_parser_object_literal_prop_assign_test.rs`) で `{ x = expr }` を `Prop::Assign` として **accept** することを確認、`unreachable!()` precondition violation。Tier 2 honest error 化: **TypeResolver (expressions.rs): no-op (静的解析 phase abort 不可) + Transformer (data_literals.rs 3 site: `convert_object_lit` + `convert_discriminated_union_object_lit` + `try_convert_as_hashmap`): `UnsupportedSyntaxError::new("Prop::Assign", ap.span)` 経由 honest error report** + Prop section に Tier 2 (honest error) 明示 + **SWC parser empirical regression lock-in test** (Test 20、SWC parser accept 確認 + 対称 destructuring default は valid 確認) | **✗ 要 fix (Implementation Revision 2、SWC parser empirical で当初 NA 認識を覆し、framework 失敗 signal)** | **本 PRD (Q3 + Implementation Revision 2)** |
 | **TypeResolver expressions.rs:367-369 暗黙 silent drop** ||||||
 | 16 | `_ => { total_explicit_props += 1; }` (TypeResolver expressions.rs:367-369、暗黙 silent drop) | A2 / B3 | E1 → E3 | **`_` arm 削除 + 全 Prop variant explicit enumerate** (handle 済 KeyValue/Shorthand/Spread + Prop::Method/Getter/Setter は body visit 追加 (cell 12-14、I-200) + Prop::Assign は `unreachable!()` (C3、cell 15)) | ✗ 要 fix | **本 PRD (Q4 Rule 10(d) application)** |
 | **Transformer convert_object_lit (data_literals.rs:259-263)** ||||||
@@ -123,6 +124,7 @@ ast::Expr::Object(obj) => {
 | 23 | Prop section 新規追加 | C3 → C1/C2 | — | **Prop section 新規追加** (全 7 variant: KeyValue / Shorthand / Method / Getter / Setter / Assign の Tier 分類 + spec-traceable NA reason for Prop::Assign) | ✗ 要 fix | 本 PRD |
 | 24 | AutoAccessor entry update | C2 → C2 (Q1 (b) 状態化) | — | AutoAccessor entry を **Tier 2 (Unsupported, Transformer で `UnsupportedSyntaxError::new("AutoAccessor", aa.span)` 経由 honest error report 既実装、I-201-A/B で完全 Tier 1 化予定)** に明示更新 | ✗ 要 fix (doc update のみ、code は既実装) | 本 PRD |
 | 25 | Decorator entry 新規追加 (audit driven) | C3 → C2 | — | **Decorator entry 新規追加** (Tier 2 Unsupported、I-201-B で Tier 1 化予定) | ✗ 要 fix (audit driven) | 本 PRD |
+| 25.5 | **PropOrSpread section 新規追加** (Implementation stage Revision 1、2026-04-27 T11 実施中発見、Grammar gap fix) | C3 (section 不在) → C1 (Tier 1 Handled) | — | **PropOrSpread section 新規追加** (= Prop section の parent enum、Tier 1 Handled = Spread / Prop(Box<Prop>) の 2 variant、両者既実装で Tier 1 trivial coverage)。section 12 として ObjectPatProp (section 11) の直後に挿入、既存 Prop を section 13 に shift、PropName-Decorator を section 14-20 に shift。matrix cell 16-17 の dispatch enum hierarchy (parent PropOrSpread → child Prop) を doc に reflect、T9/T10 改修対象 file の dispatch arm を audit script (T5) で verify 可能化 | ✗ 要 fix (Implementation stage Revision 1、本 PRD scope 内 fix 完了 2026-04-27) | 本 PRD (T11 scope 内、Spec への逆戻り発動 record は Defect Classification section の Implementation stage Revision 1 entry) |
 | **既存 `UnsupportedSyntaxError` mechanism の format 統一 + 適用拡張 (C1 修正 2026-04-27、新規 macro 作成は不要)** ||||||
 | 26 | `UnsupportedSyntaxError` format 統一 + 適用拡張 | — | — | **既存 `UnsupportedSyntaxError::new(kind, span)` (`src/transformer/mod.rs:193-219` 定義) を全 Transformer Tier 2 variant arm で統一適用 + 一部 module の `anyhow!()` 経由 format 不整合 (`data_literals.rs:259-263`) を `UnsupportedSyntaxError` に統一**。新規 macro `unsupported_arm!()` 作成は不要 (= DRY 違反、既存 mechanism と機能重複)。 | ✗ 要 fix (format 統一 + 適用拡張) | 本 PRD (C1 + C6 修正) |
 | **TypeResolver `_` arm の明示 no-op 化 (C4 修正 2026-04-27、Rule 10(d-2) phase 別役割分担)** ||||||
@@ -177,16 +179,17 @@ ast::Expr::Object(obj) => {
 ```yaml
 Matrix-driven: yes
 Rule 10 axes enumerated:
-  - Layer A: AST node iterate target (ClassMember / Prop)
-  - Layer B: variant 現状処理 (visited / silent drop / 暗黙 silent drop / 経路不在)
-  - Layer C: ast-variants.md spec (Tier 1 / Tier 2 / Section 不在)
-  - Layer D: Rule 10 適用範囲 (matrix-driven only / 全 PRD Mandatory)
-  - Layer E: enforcement mechanism (doc only / skill hard-code / audit script + CI)
+  - "Layer A: AST node iterate target (ClassMember / PropOrSpread / Prop)"
+  - "Layer B: variant 現状処理 (visited / silent drop / 暗黙 silent drop / 経路不在)"
+  - "Layer C: ast-variants.md spec (Tier 1 / Tier 2 / Section 不在)"
+  - "Layer D: Rule 10 適用範囲 (matrix-driven only / 全 PRD Mandatory)"
+  - "Layer E: enforcement mechanism (doc only / skill hard-code / audit script + CI)"
 Cross-axis orthogonal direction enumerated: yes
-  - (I) 逆問題視点: structural enforcement の対立 = 人間判断介在 (= Anti-pattern として明示禁止)
-  - (II) 実装 dispatch trace: ClassMember + Prop variant の全 dispatch
-  - (III) 影響伝搬 chain: silent drop → 進捗評価 ground truth 失墜 → ideal 違反
-Structural reason for matrix absence: N/A (matrix-driven PRD)
+Cross-axis orthogonal directions:
+  - "(I) 逆問題視点: structural enforcement の対立 = 人間判断介在 (= Anti-pattern として明示禁止)"
+  - "(II) 実装 dispatch trace: ClassMember + PropOrSpread + Prop variant の全 dispatch"
+  - "(III) 影響伝搬 chain: silent drop → 進捗評価 ground truth 失墜 → ideal 違反"
+Structural reason for matrix absence: "N/A (matrix-driven PRD)"
 ```
 
 ---
@@ -1007,16 +1010,17 @@ silent drop 解消による conversion 結果変化を以下 mechanism で struc
 ```yaml
 Matrix-driven: yes
 Rule 10 axes enumerated:
-  - Layer A: AST node iterate target (ClassMember / Prop)
-  - Layer B: variant 現状処理 (visited / silent drop / 暗黙 silent drop / 経路不在)
-  - Layer C: ast-variants.md spec (Tier 1 / Tier 2 / Section 不在)
-  - Layer D: Rule 10 適用範囲 (matrix-driven only / 全 PRD Mandatory)
-  - Layer E: enforcement mechanism (doc only / skill hard-code / audit script + CI)
+  - "Layer A: AST node iterate target (ClassMember / PropOrSpread / Prop)"
+  - "Layer B: variant 現状処理 (visited / silent drop / 暗黙 silent drop / 経路不在)"
+  - "Layer C: ast-variants.md spec (Tier 1 / Tier 2 / Section 不在)"
+  - "Layer D: Rule 10 適用範囲 (matrix-driven only / 全 PRD Mandatory)"
+  - "Layer E: enforcement mechanism (doc only / skill hard-code / audit script + CI)"
 Cross-axis orthogonal direction enumerated: yes
-  - (I) 逆問題視点: structural enforcement の対立 = 人間判断介在 (= Anti-pattern として明示禁止)
-  - (II) 実装 dispatch trace: ClassMember + Prop variant の全 dispatch
-  - (III) 影響伝搬 chain: silent drop → 進捗評価 ground truth 失墜 → ideal 違反
-Structural reason for matrix absence: N/A (matrix-driven PRD)
+Cross-axis orthogonal directions:
+  - "(I) 逆問題視点: structural enforcement の対立 = 人間判断介在 (= Anti-pattern として明示禁止)"
+  - "(II) 実装 dispatch trace: ClassMember + PropOrSpread + Prop variant の全 dispatch"
+  - "(III) 影響伝搬 chain: silent drop → 進捗評価 ground truth 失墜 → ideal 違反"
+Structural reason for matrix absence: "N/A (matrix-driven PRD)"
 ```
 
 ### 8 default check axis NA reason (Action 2 修正 2026-04-27、Rule 10 三度目 review で明示化)
@@ -1095,16 +1099,47 @@ Structural reason for matrix absence: N/A (matrix-driven PRD)
 - `scripts/audit-prd-rule10-compliance.py` (T6) で Task List dependency chain auto verify 追加
 - 本 PRD 自体が Rule 4 改修の first-class adopter (T11 を T8/T9/T10 prerequisite に位置付け、self-evidence)
 
-### 全体 summary (Spec stage Discovery → 1 度目 → 2 度目 → 3 度目 trajectory)
+### Implementation stage で発見した defect (Spec への逆戻り発動 record、`spec-first-prd.md` 「Spec への逆戻り」)
 
-| Stage | Spec gap | Implementation gap | Review insight |
-|-------|---------|-------------------|----------------|
-| Spec stage Discovery (Q1-Q5) | 5 (framework signal) | 0 | 6 |
-| 1 度目 review | 3 (= C1, C2, C5) | 3 (= C3, C4, C6) | 6 (= M1-M6) |
-| 2 度目 review | 0 | 6 (= D1-D6) | 1 (= D9) |
-| **3 度目 review (`/check_job`)** | **1 (= Action 1、framework 失敗 signal)** | **0** | **3 (= Action 2-4)** |
+#### Revision 1 (T11 実施中、2026-04-27)
 
-→ Spec gap chain は **5 → 3 → 0 → 1** の trajectory。3 度目 review で +1 = 1 度目 + 2 度目 で発見されなかった Rule 4 application の Spec gap が `/check_job` 4-layer 相当の Spec stage 10-rule full verification で初めて検出。**framework 改善検討 (Q6) で本 PRD scope に integrate** することで再帰的に Rule 4 改修を達成、本 PRD 自体が改修後 Rule 4 の first-class adopter として self-applied verify。
+- **Trigger**: T11 (`doc/grammar/ast-variants.md` update) 実施中、Prop section 新規追加と並行して T9/T10 改修対象 file (`expressions.rs::ast::Expr::Object`、`data_literals.rs::convert_object_lit`) の dispatch enum を audit。`for prop in object_lit.props { match prop { ... } }` の最外層 match 対象が **`PropOrSpread` enum** (parent) であり、`Prop` enum (child) は `PropOrSpread::Prop(Box<Prop>)` 経由でアクセスされることを発見。
+- **Defect category (`post-implementation-defect-classification.md` 5 category)**: **Grammar gap** (= reference doc に entry がない variant が関与する defect)
+- **Spec gap detail**: 当初 PRD spec の matrix cell 16 wording で「全 Prop variant explicit enumerate (handle 済 KeyValue/Shorthand/**Spread** + ...)」と記載され、`PropOrSpread::Spread` variant を `Prop` variant と同 dispatch level で混在記述していた (= dispatch hierarchy parent/child の不徹底)。matrix cell 自体は正しい intent (= 全 dispatch arm explicit) を持つが、ast-variants.md に PropOrSpread section 不在 = **doc 側 single source of truth 違反 (Q4 violation = Rule 10(d-3))**。
+- **Resolution (本 PRD 2.7 scope に編入)**:
+  - **`doc/grammar/ast-variants.md` update** (T11 実施分、追加完了 2026-04-27): 新 section 12 "PropOrSpread" 追加 (Tier 1 Handled = Spread / Prop の 2 variant、両 variant 既実装で Tier 1 trivial coverage)、既存 Prop section を section 13 に shift、PropName-Decorator section を 14-20 に shift
+  - **Matrix cell 追加 (本 doc Problem Space 組合せマトリクス、cell 25.5 として cell 25 Decorator entry の後に挿入)**: 新 cell "PropOrSpread section 新規追加" を Layer C 補完判定として追加
+  - **Audit script (T5) precise**: `audit-ast-variant-coverage.py` の audit 対象 enum に `PropOrSpread` 含む = section 不在の enum を audit script が検出可能 (= Rule 10(d-3) 完全性、本 Revision 1 type の Grammar gap が future PRD で再発しない構造的 mechanism)
+  - **Dispatch implementation (T9/T10)**: `expressions.rs::ast::Expr::Object` arm の最外層 match で `PropOrSpread::Spread(spread) => { /* visit spread.expr */ }` + `PropOrSpread::Prop(prop) => match &**prop { ... }` を explicit enumerate (`_` arm 不在、Rule 10(d-1) compliance)、`data_literals.rs::convert_object_lit` も同様
+- **Impact on architectural concern**: 本 PRD architectural concern「framework Rule 改修 + 拡張による coverage gap detection 完成 + structural enforcement」の "拡張による coverage gap detection 完成" 部分の natural extension。PropOrSpread section 追加は本 PRD scope の延長で、architectural concern を violate しない (= 1 PRD = 1 architectural concern 維持)。
+- **Lesson source for framework**: 当初 spec stage で **dispatch hierarchy (parent/child enum)** の cross-axis enumeration が不十分だった = `spec-stage-adversarial-checklist.md` Rule 10 (Cross-axis matrix completeness) の application 不徹底。本 lesson を T2 update 時の Rule 10 sub-rule (e) axis enumeration default check に追加検討 (= 候補追加 axis: "(j) AST dispatch hierarchy: parent enum + child enum の各 layer を独立 axis として enumerate")。
+
+#### Revision 2 (T12 実施中、2026-04-27、critical Spec gap fix)
+
+- **Trigger**: T12 (SWC parser empirical regression lock-in test、cell 15 reachability empirical verify) 実施中、`tests/swc_parser_object_literal_prop_assign_test.rs` の最初 run で `{ x = expr }` を SWC parser が **accept** する事実を発見。当初 PRD spec の cell 15 NA 認識 (= "SWC parser reject 前提" + `unreachable!()` macro) の precondition violation。
+- **Defect category**: **Spec gap** (= reference doc + oracle から derivable だったが matrix で NA と誤認識、= **framework 失敗 signal**)
+- **Spec gap detail**: PRD 起票時に SWC parser に対する empirical observation を skip し、TS spec の "TS では parse error" を SWC parser behavior の assumption として採用していた。実際は SWC parser は寛容 parsing で `Prop::Assign` を accept (= TS spec 違反 syntax を AST に含める)、`unreachable!()` の precondition が actual に satisfy されない。これは silent semantic change risk (= ts_to_rs が invalid syntax を silent に別 form に誤変換する可能性) を内包する critical defect。
+- **Resolution (本 PRD 2.7 scope に編入、Implementation Revision 2 として fix 完了 2026-04-27)**:
+  - **`expressions.rs` (TypeResolver)**: `Prop::Assign(_) => unreachable!(...)` → `Prop::Assign(_) => { total_explicit_props += 1; }` (静的解析 phase abort 不可、no-op で type info 記録のみ)
+  - **`data_literals.rs` (Transformer 3 site)**: `convert_object_lit` + `convert_discriminated_union_object_lit` + `try_convert_as_hashmap` の `Prop::Assign(_) => unreachable!(...)` を `Prop::Assign(assign_prop) => return Err(UnsupportedSyntaxError::new("Prop::Assign", assign_prop.span).into())` に変更 (Tier 2 honest error、Q4 application format 統一)
+  - **`doc/grammar/ast-variants.md`**: Prop section の Assign entry を NA section → Tier 2 Unsupported に reclassify、honest error reporting via `UnsupportedSyntaxError` 明示
+  - **`tests/swc_parser_object_literal_prop_assign_test.rs`**: lock-in test の expectation を reverse (= SWC parser accept verify + destructuring default 別経路 valid 確認)
+  - **Matrix cell 15**: NA → Tier 2 (honest error) に reclassify、ideal output wording を update
+- **Lesson source for framework**: NA cell justification は **SWC parser empirical observation 必須** (= TS spec "should reject" を assumption として採用しない、SWC parser actual behavior を実 source code で empirical 確認)。`spec-stage-adversarial-checklist.md` Rule 3 (NA justification) wording に "SWC parser empirical observation 必須" を追加検討 (post-PRD 2.7 follow-up)。
+- **Severity**: **Critical (= framework 失敗 signal)**。本 Revision 2 を未発見のままで close すると `unreachable!()` の precondition violation が production code に残り、SWC parser 経由で reach した時点で panic crash (= silent ではないが Tier 2 honest error と本来の design 意図の violation)。本 PRD 2.7 self-applied verify mechanism (T13 = audit-prd-rule10-compliance.py) は本 Revision 2 を **未検出** (= matrix cell の reachability empirical verify は audit script の scope 外、SWC parser empirical observation は test runtime のみ verify)。framework 改善余地として "matrix cell の SWC parser empirical observation を spec stage 必須化" を `spec-stage-adversarial-checklist.md` に追加検討。
+
+### 全体 summary (Spec stage Discovery → 1 度目 → 2 度目 → 3 度目 → Implementation Revisions trajectory)
+
+| Stage | Spec gap | Implementation gap | Grammar gap | Review insight |
+|-------|---------|-------------------|-------------|----------------|
+| Spec stage Discovery (Q1-Q5) | 5 (framework signal) | 0 | 0 | 6 |
+| 1 度目 review | 3 (= C1, C2, C5) | 3 (= C3, C4, C6) | 0 | 6 (= M1-M6) |
+| 2 度目 review | 0 | 6 (= D1-D6) | 0 | 1 (= D9) |
+| **3 度目 review (`/check_job`)** | **1 (= Action 1、framework 失敗 signal)** | **0** | **0** | **3 (= Action 2-4)** |
+| **Implementation stage Revision 1 (T11 実施中)** | **0** | **0** | **1 (= PropOrSpread section 不在、本 PRD scope 内 fix 完了)** | **1 (Rule 10 axis 候補追加 lesson)** |
+| **Implementation stage Revision 2 (T12 実施中)** | **1 (= cell 15 NA 誤認識、critical framework 失敗 signal)** | **0** | **0** | **1 (Rule 3 NA justification SWC empirical 必須 lesson)** |
+
+→ Spec gap chain は **5 → 3 → 0 → 1 → 0 → 1 → 0** の trajectory (Implementation stage Revision 2 で critical Spec gap 1 件発見、本 PRD scope 内 fix 完了 + 後続 `/check_job` 4-layer review F1 で framework integration 完成 = Spec gap 0 reset)。3 度目 review で +1 = Rule 4 application Spec gap が `/check_job` 4-layer 相当の Spec stage 10-rule full verification で初めて検出 → Q6 framework 改修で再発防止 mechanism 確立。Implementation stage Revision 1 (T11) で Grammar gap 1 件発見 (= PropOrSpread section 不在) → 本 PRD scope 内 fix。**Implementation stage Revision 2 (T12) で critical Spec gap 1 件発見 (= cell 15 NA 誤認識、SWC parser empirical observation skip) → 本 PRD scope 内 fix (Tier 2 honest error 化、ast-variants.md update、lock-in test reverse)**。本 critical Spec gap は当初 spec stage 10-rule + 3 度 `/check_job` review でも検出されず Implementation stage で初めて empirical 顕在化 → **本 PRD `/check_job` 4-layer review (Implementation stage 初回 invocation) で発見 → F1 fix で `spec-stage-adversarial-checklist.md` Rule 3 wording に sub-rule (3-1)/(3-2)/(3-3) (SWC parser empirical observation 必須) を追加完了 (Versioning v1.2)、本 PRD 自体が Rule 3 改修の first-class adopter として self-applied integration achievement、framework 失敗 signal の structural fix completion**。
 
 **Spec gap detail (3 度目 review、framework 失敗 signal)**:
 - Defect: 本 PRD draft 時の T11 Depends on T8/T9/T10 = doc を code 後 sync 設計

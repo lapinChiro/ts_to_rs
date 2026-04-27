@@ -118,6 +118,53 @@ PRD 完了宣言前に、以下の自問を文書化する:
 4. 同時に「なぜこのセルを最初の enumerate で見落としたか」を振り返り、次元の
    列挙基準を補強する。
 
+## Non-Matrix-Driven PRD への適用 (PRD 2.7 確定 2026-04-27)
+
+Non-matrix-driven PRD (infra, refactor, bug fix) であっても、本ルールの cross-axis
+enumeration 概念は適用される。
+
+### Why apply to non-matrix-driven PRDs
+
+matrix を構築しない PRD でも、機能の影響を受ける code path が存在する以上、その path
+を決定する **dimension** は存在する (= 機能依存しない一般的な設計上の dimension、
+例: "対象 file がどの module category にあるか" / "対称な処理 path の有無" / "影響範囲が
+single layer か multi layer か" 等)。matrix を構築しないという判断は **その dimension を
+enumerate しない判断ではない** (= cross-axis enumeration は spec stage 時の design
+verification として独立に必要)。
+
+`spec-stage-adversarial-checklist.md` Rule 12 (Rule 10/11 Mandatory application +
+structural enforcement) が全 PRD (matrix-driven / non-matrix-driven 区別なし) に
+Rule 10 verification を Mandatory 化しているため、本ルールも non-matrix-driven PRD へ
+spec extension を行う必要がある。
+
+### How to apply
+
+1. **Cross-axis 直交軸 enumeration**: 解決軸の対立軸 / 対称ケース / context 軸 を
+   independent dimension として PRD doc に列挙
+   (`spec-stage-adversarial-checklist.md` Rule 10 axis enumeration 3 prompt = 逆問題視点 /
+   実装 dispatch trace / 影響伝搬 chain を non-matrix-driven PRD でも適用)
+2. **Structural reason for matrix absence**: matrix を構築しない理由を **Permitted
+   reasons** (本 PRD 2.7 で確定) から選択し、PRD doc の `## Rule 10 Application`
+   section に machine-parseable format で明示:
+   - `infra で AST input dimension irrelevant` (matrix-driven 概念が機能しない infra
+     task、例: CI workflow update / build script 改修)
+   - `refactor で機能 emission decision なし` (機能変化を導入しない refactor、例:
+     module 分割 / 命名 update)
+   - `pure doc 改修` (実装を伴わない documentation 改修)
+3. **Prohibited reasons の不在 verify**: 「scope 小」「light spec」「pragmatic」「~LOC」
+   「短時間」「manageable」「effort 大」「実装 trivial」「quick」「easy」「simple」等
+   Anti-pattern keyword (`feedback_no_dev_cost_judgment.md` 違反) が `Structural reason
+   for matrix absence` に含まれない (`scripts/audit-prd-rule10-compliance.py` で
+   auto verify、CI merge gate)
+
+### Lesson source
+
+PRD 2.7 (I-198 + I-199 + I-200 cohesive batch、Q5 確定 2026-04-27)。本ルール (matrix-driven
+PRD のみ適用と従来 wording) と Rule 12 (Mandatory application + structural enforcement、
+全 PRD 適用) の gap を解消するため、non-matrix-driven PRD への structural extension を
+本ルールに記載。本 spec extension により、matrix を構築しない PRD でも cross-axis 直交軸を
+独立 enumerate する spec stage verification が必須化される。
+
 ## Prohibited
 
 - **問題空間の enumerate をスキップして Discovery / 設計 / 実装に進むこと**。

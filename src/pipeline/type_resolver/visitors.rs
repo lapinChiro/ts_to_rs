@@ -492,7 +492,38 @@ impl<'a> TypeResolver<'a> {
                 ast::ClassMember::PrivateProp(pp) => {
                     self.visit_class_prop_init(pp.value.as_deref(), pp.type_ann.as_deref());
                 }
-                _ => {}
+                ast::ClassMember::StaticBlock(sb) => {
+                    // PRD 2.7 (I-199): StaticBlock body を visit_block_stmt 経由で walk
+                    // (I-177-F と symmetric: enter_scope → collect_emission_hints →
+                    // visit_block_stmt → leave_scope)。直接 stmt iterate にすると
+                    // typeof / instanceof narrow event が static block 内で push されず
+                    // silent type widening を引き起こす (cell 6 empirical 顕在化)。
+                    self.enter_scope();
+                    let param_pats: Vec<&ast::Pat> = Vec::new();
+                    self.collect_emission_hints(&sb.body, &param_pats);
+                    self.visit_block_stmt(&sb.body);
+                    self.leave_scope();
+                }
+                ast::ClassMember::AutoAccessor(_) => {
+                    // PRD 2.7 (Q1 (b), cell 7): TypeResolver = 明示 no-op
+                    // (Rule 11 (d-2)、静的解析 phase で UnsupportedSyntaxError 呼出 不可)。
+                    // Transformer (`src/transformer/classes/mod.rs:165-171` 既実装) で
+                    // UnsupportedSyntaxError 経由 honest error return。完全 Tier 1 化は
+                    // I-201-A (decorator なし subset) + I-201-B (decorator framework) で
+                    // 別 PRD 達成。`doc/grammar/ast-variants.md` ClassMember section 参照。
+                }
+                ast::ClassMember::TsIndexSignature(_) => {
+                    // Tier 2 filter out (型 only、runtime effect なし、no-op で正)。
+                    // `doc/grammar/ast-variants.md` ClassMember Tier 2 entry
+                    // "index signature (filter out)" 参照。
+                }
+                ast::ClassMember::Empty(_) => {
+                    // Tier 2 no-op (空 member、no-op で正)。
+                    // `doc/grammar/ast-variants.md` ClassMember Tier 2 entry
+                    // "空メンバー (no-op)" 参照。
+                } // No `_ => ...` arm — PRD 2.7 Rule 11 (d-1) compliance
+                  // (`spec-stage-adversarial-checklist.md`)。新 ClassMember variant
+                  // 追加時に compile error で全 dispatch fix を強制。
             }
         }
         self.restore_type_param_constraints(prev_state);
@@ -541,6 +572,29 @@ impl<'a> TypeResolver<'a> {
             self.visit_block_stmt(body);
             self.current_fn_return_type = prev_return_type;
             self.restore_type_param_constraints(prev_method_state);
+            self.leave_scope();
+        }
+    }
+
+    /// Visits an object-literal Prop::Method function body (PRD 2.7 I-200).
+    ///
+    /// Class method (`visit_method_function`) と同等の function-level scope +
+    /// `visit_block_stmt` 経由 walk を行うが、object literal context では
+    /// class-level `this` binding / class type params なし。typeof/instanceof
+    /// narrow event を method body 内で正しく push するために必要 (cell 12)。
+    pub(super) fn visit_prop_method_function(&mut self, function: &ast::Function) {
+        if let Some(body) = &function.body {
+            self.enter_scope();
+            let prev_state = self.push_type_param_constraints(function.type_params.as_deref());
+            for param in &function.params {
+                self.visit_param_pat(&param.pat);
+            }
+            let prev_return_type = self.setup_fn_return_type(function.return_type.as_deref());
+            let param_pats: Vec<&ast::Pat> = function.params.iter().map(|p| &p.pat).collect();
+            self.collect_emission_hints(body, &param_pats);
+            self.visit_block_stmt(body);
+            self.current_fn_return_type = prev_return_type;
+            self.restore_type_param_constraints(prev_state);
             self.leave_scope();
         }
     }

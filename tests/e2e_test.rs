@@ -1916,3 +1916,164 @@ fn test_e2e_cell_i161_t7_4_or_then_nc() {
 fn test_e2e_cell_i161_t7_5_and_narrow_union_rhs() {
     run_cell_e2e_test("i161-i171", "cell-t7-5-and-narrow-union-rhs");
 }
+
+// -----------------------------------------------------------------------------
+// PRD 2.7 (I-198 + I-199 + I-200 cohesive batch) per-cell E2E fixtures.
+//
+// `tests/e2e/scripts/prd-2.7/` 内の 9 fixture のうち、TS / Rust 両側で runtime
+// 出力が比較可能な 3 fixture (cell 6 / 10 / 11) を E2E test 化。
+// 残り 6 fixture (cell 7 / 12 / 13 / 14 / 15 / 17) は ts_to_rs が
+// UnsupportedSyntaxError を返す or NA = parse error のため runtime 比較不能、
+// 別 unit test (transformer/expressions/tests/) で UnsupportedSyntaxError /
+// SWC parser empirical regression を verify する。
+// -----------------------------------------------------------------------------
+
+// cell 6: StaticBlock body 内の typeof narrow event push (I-199 新規)
+#[test]
+#[ignore = "PRD 2.7 T8 改修 (TypeResolver visit_class_body の StaticBlock arm 追加 + \
+            visit_block_stmt 経由 walk + scope 管理) は完了し、TypeResolver layer の \
+            narrow event push 経路は cohesion 達成済。\n\
+            \n\
+            ただし Transformer 側の StaticBlock emission strategy に既存 broken window \
+            (compile error E0015 const fn / E0308 string→enum variant coerce / E0423 \
+            const 代入) があり、generated Rust が runtime 比較不能 (cargo build fail)。\n\
+            \n\
+            これは PRD 2.7 architectural concern (framework Rule 改修 + TypeResolver \
+            coverage extension) と異なる concern (= Transformer StaticBlock emission \
+            strategy 改修) で、1 PRD = 1 architectural concern 原則により本 PRD scope 外。\n\
+            \n\
+            T8 完了 verification は本 fixture の代わりに:\n\
+              - unit tests (src/pipeline/type_resolver/tests/、StaticBlock body の \
+                narrow event push 経路 direct verify、別途 T12 で追加)\n\
+              - audit-ast-variant-coverage.py で本 PRD 2.7 scope file が pass\n\
+              - visit_class_body の `_ => {}` 黙殺が explicit enumerate に置換済 \
+                (Rule 11 (d-1) compliance)\n\
+            \n\
+            **別 PRD 起票済 (post-PRD 2.7、TODO `[I-204]` 登録済 2026-04-27)**: I-204 = \
+            Transformer StaticBlock emission strategy 全面改修 (const fn / mutable static / \
+            literal coerce / if-else preservation)。本 fixture は I-204 完了時に `#[ignore]` \
+            解除して GREEN 化を verify する scaffold として保持 (TODO `[I-204]` の \
+            Resolution target に本 fixture path 明記)。"]
+fn test_e2e_cell_prd27_06_static_block_typeof_narrow() {
+    run_cell_e2e_test("prd-2.7", "cell-06-static-block-typeof-narrow");
+}
+
+// cell 10: Prop::KeyValue regression lock-in
+#[test]
+fn test_e2e_cell_prd27_10_prop_keyvalue_regression() {
+    run_cell_e2e_test("prd-2.7", "cell-10-prop-keyvalue-regression");
+}
+
+// cell 11: Prop::Shorthand regression lock-in
+#[test]
+fn test_e2e_cell_prd27_11_prop_shorthand_regression() {
+    run_cell_e2e_test("prd-2.7", "cell-11-prop-shorthand-regression");
+}
+
+// cell 7: AutoAccessor honest error
+#[test]
+#[ignore = "PRD 2.7 cell 7 (AutoAccessor) は Transformer Tier 2 honest error \
+            (UnsupportedSyntaxError(\"AutoAccessor\")) → conversion fail = Rust runtime \
+            実行不能。E2E layer (TS / Rust stdout byte-exact compare) では runtime check \
+            不能のため `#[ignore]`。\n\
+            \n\
+            Behavioral lock-in は unit test で完成済:\n\
+              - `src/pipeline/type_resolver/tests/prd_2_7.rs::test_auto_accessor_typeresolver_no_op_no_panic`\n\
+              - `src/transformer/expressions/tests/prd_2_7.rs::test_auto_accessor_emits_unsupported_syntax_error`\n\
+            \n\
+            完全 Tier 1 化 (decorator なし subset) は **I-201-A** で達成、本 fixture は \
+            I-201-A 完了時に `#[ignore]` 解除して GREEN 化を verify する scaffold として保持。"]
+fn test_e2e_cell_prd27_07_auto_accessor_honest_error() {
+    run_cell_e2e_test("prd-2.7", "cell-07-auto-accessor-honest-error");
+}
+
+// cell 12: Prop::Method typeof narrow body
+#[test]
+#[ignore = "PRD 2.7 cell 12 (Prop::Method) は Transformer Tier 2 honest error \
+            (UnsupportedSyntaxError(\"Prop::Method\")) → conversion fail。E2E runtime \
+            check 不能のため `#[ignore]`。\n\
+            \n\
+            Behavioral lock-in は unit test で完成済:\n\
+              - `src/pipeline/type_resolver/tests/prd_2_7.rs::test_prop_method_body_typeof_narrow_pushes_string_event` \
+                (TypeResolver visit_prop_method_function 経由 narrow event push)\n\
+              - `src/transformer/expressions/tests/prd_2_7.rs::test_prop_method_emits_unsupported_syntax_error`\n\
+            \n\
+            完全 Tier 1 化は **I-202** (Object literal Prop::Method/Getter/Setter Tier 1 \
+            化、Transformer 完全 emission) で達成、本 fixture は I-202 完了時に \
+            `#[ignore]` 解除して GREEN 化を verify する scaffold として保持。"]
+fn test_e2e_cell_prd27_12_prop_method_typeof_narrow() {
+    run_cell_e2e_test("prd-2.7", "cell-12-prop-method-typeof-narrow");
+}
+
+// cell 13: Prop::Getter typeof narrow body
+#[test]
+#[ignore = "PRD 2.7 cell 13 (Prop::Getter) は Transformer Tier 2 honest error \
+            (UnsupportedSyntaxError(\"Prop::Getter\")) → conversion fail。E2E runtime \
+            check 不能のため `#[ignore]`。\n\
+            \n\
+            Behavioral lock-in は unit test で完成済:\n\
+              - `src/pipeline/type_resolver/tests/prd_2_7.rs::test_prop_getter_body_typeof_narrow_pushes_string_event`\n\
+              - `src/transformer/expressions/tests/prd_2_7.rs::test_prop_getter_emits_unsupported_syntax_error`\n\
+            \n\
+            完全 Tier 1 化は **I-202** で達成、本 fixture は I-202 完了時に `#[ignore]` \
+            解除して GREEN 化を verify する scaffold として保持。"]
+fn test_e2e_cell_prd27_13_prop_getter_typeof_narrow() {
+    run_cell_e2e_test("prd-2.7", "cell-13-prop-getter-typeof-narrow");
+}
+
+// cell 14: Prop::Setter typeof narrow body
+#[test]
+#[ignore = "PRD 2.7 cell 14 (Prop::Setter) は Transformer Tier 2 honest error \
+            (UnsupportedSyntaxError(\"Prop::Setter\")) → conversion fail。E2E runtime \
+            check 不能のため `#[ignore]`。\n\
+            \n\
+            Behavioral lock-in は unit test で完成済:\n\
+              - `src/pipeline/type_resolver/tests/prd_2_7.rs::test_prop_setter_body_typeof_narrow_pushes_string_event` \
+                (param_pat visit + visit_block_stmt walk 経由 narrow event push)\n\
+              - `src/transformer/expressions/tests/prd_2_7.rs::test_prop_setter_emits_unsupported_syntax_error`\n\
+            \n\
+            完全 Tier 1 化は **I-202** で達成、本 fixture は I-202 完了時に `#[ignore]` \
+            解除して GREEN 化を verify する scaffold として保持。"]
+fn test_e2e_cell_prd27_14_prop_setter_typeof_narrow() {
+    run_cell_e2e_test("prd-2.7", "cell-14-prop-setter-typeof-narrow");
+}
+
+// cell 15: Prop::Assign NA (Implementation Revision 2 で Tier 2 honest error reclassify)
+#[test]
+#[ignore = "PRD 2.7 cell 15 (Prop::Assign、Implementation Revision 2) は Transformer \
+            Tier 2 honest error (UnsupportedSyntaxError(\"Prop::Assign\"))。当初 NA + \
+            `unreachable!()` 設計を SWC parser empirical observation で覆し reclassify。\n\
+            \n\
+            **Permanent #[ignore]** (= Tier 1 化されない、TS spec で parse error の syntax \
+            を SWC parser が寛容 parsing で accept する事実を ts_to_rs では明確に reject \
+            するのが ideal、Tier 1 化計画なし)。\n\
+            \n\
+            Behavioral / structural lock-in は他 layer で完成済:\n\
+              - `tests/swc_parser_object_literal_prop_assign_test.rs` (3 tests、SWC parser \
+                accept 確認 + 対称 destructuring default は valid 確認、structural assumption lock-in)\n\
+              - `src/pipeline/type_resolver/tests/prd_2_7.rs::test_prop_assign_typeresolver_no_op_no_panic` \
+                (+ corollary)\n\
+              - `src/transformer/expressions/tests/prd_2_7.rs::test_prop_assign_emits_unsupported_syntax_error` \
+                (+ discriminated union context corollary)\n\
+            \n\
+            本 fixture は historical record + Tier 2 honest error の TS source 例として保持。"]
+fn test_e2e_cell_prd27_15_prop_assign_na() {
+    run_cell_e2e_test("prd-2.7", "cell-15-prop-assign-na");
+}
+
+// cell 17: convert_object_lit error format 統一
+#[test]
+#[ignore = "PRD 2.7 cell 17 (convert_object_lit error format 統一、`_` arm 削除 + \
+            UnsupportedSyntaxError 経由 format unification) は Transformer Tier 2 honest \
+            error → conversion fail = E2E runtime check 不能。\n\
+            \n\
+            Behavioral lock-in は unit test で完成済:\n\
+              - `src/transformer/expressions/tests/prd_2_7.rs::test_unsupported_prop_resolves_to_line_col_message` \
+                (`resolve_unsupported()` 経由 line:col format end-to-end verify)\n\
+            \n\
+            完全 Tier 1 化は **I-202** で達成 (= cell 17 の input が cell 12-14 の合成、\
+            method/getter/setter を含む object literal の Tier 1 emission)、本 fixture は \
+            I-202 完了時に `#[ignore]` 解除して GREEN 化を verify する scaffold として保持。"]
+fn test_e2e_cell_prd27_17_transformer_convert_object_lit_error() {
+    run_cell_e2e_test("prd-2.7", "cell-17-transformer-convert-object-lit-error");
+}

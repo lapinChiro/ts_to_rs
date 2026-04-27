@@ -41,3 +41,25 @@ jobs:
 
       - name: Test with coverage
         run: cargo llvm-cov --ignore-filename-regex 'main\.rs' --fail-under-lines 90
+
+      # PRD 2.7 (Q4 + Q5 + Q6) audit scripts: structural enforcement of
+      # `spec-stage-adversarial-checklist.md` Rule 10 / 11 / 12 + Rule 4 (4-3).
+      # Both audit steps are merge gates (failure blocks PR merge).
+      - name: Install audit script dependencies (Python)
+        run: pip install --user tree-sitter tree-sitter-rust pyyaml
+
+      - name: Audit script self-test (precision verify)
+        run: python3 scripts/test_audit_ast_variant_coverage.py
+
+      - name: Audit AST variant coverage (PRD 2.7 Rule 11 compliance)
+        run: python3 scripts/audit-ast-variant-coverage.py
+
+      # I-203 detection report (codebase-wide `_` arm + Tier mismatch)。
+      # 本 step は warning 出力 only (exit 0)、I-203 priority reclassify input を
+      # CI で auto-tracked、stderr / actions log に Tier 2 phase mismatch + Prop::Assign
+      # NA mismatch 等の详细を継続収集。
+      - name: I-203 detection report (codebase-wide audit)
+        run: python3 scripts/audit-ast-variant-coverage.py --codebase-wide --verbose 2>&1 || true
+
+      - name: Audit PRD Rule 10/11/12 + Rule 4 (4-3) compliance
+        run: python3 scripts/audit-prd-rule10-compliance.py

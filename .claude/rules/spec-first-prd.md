@@ -163,7 +163,7 @@ tsc observation (Stage 1 artifact #2) は **TS 側の runtime semantic のみ** 
 | Rule | Relation |
 |------|----------|
 | [problem-space-analysis.md](problem-space-analysis.md) | 本ルールの前提。matrix 構築の detailed methodology |
-| [spec-stage-adversarial-checklist.md](spec-stage-adversarial-checklist.md) | Stage 1 完了 verification (10-rule checklist) |
+| [spec-stage-adversarial-checklist.md](spec-stage-adversarial-checklist.md) | Stage 1 完了 verification (12-rule checklist) |
 | [check-job-review-layers.md](check-job-review-layers.md) | Stage 2 完了 verification (4-layer review framework) |
 | [post-implementation-defect-classification.md](post-implementation-defect-classification.md) | Stage 2 review 結果の defect 5 category 分類 |
 | [ideal-implementation-primacy.md](ideal-implementation-primacy.md) | 最上位原則。本ルールは subordinate |

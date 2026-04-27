@@ -9,6 +9,7 @@ mod destructuring_types;
 mod du_analysis;
 mod expected_types;
 mod narrowing;
+mod prd_2_7;
 
 pub(super) fn resolve(source: &str) -> FileTypeResolution {
     let files = parse_files(vec![(PathBuf::from("test.ts"), source.to_string())]).unwrap();

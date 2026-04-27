@@ -312,7 +312,53 @@ PRD の入力次元 (AST shape) を列挙する際、本カタログの全 varia
 
 ---
 
-## 12. PropName (プロパティ名)
+## 12. PropOrSpread (オブジェクトリテラル要素 wrapper)
+
+オブジェクトリテラル `ObjectLit::props: Vec<PropOrSpread>` が直接保持する parent enum。
+`PropOrSpread::Spread` (スプレッド要素) と `PropOrSpread::Prop(Box<Prop>)` (通常プロパティ
+への delegate、section 13 = Prop 参照) の 2 variant。dispatch は `expressions.rs` (TypeResolver)
+および `data_literals.rs::convert_object_lit` (Transformer) の object literal iteration loop で
+最外層 match として行われる。
+
+### Tier 1 — Handled
+
+| Variant | 処理 |
+|---------|------|
+| `Spread` | `{ ...expr }` スプレッド (TypeResolver: 内部 expr を resolve_expr で walk; Transformer: struct merge / HashMap extend、`convert_object_lit` 既実装) |
+| `Prop(Box<Prop>)` | 通常プロパティへの delegate (= section 13 の Prop enum を内部 dispatch、Box 経由) |
+
+NA / Tier 2 variant なし (= 2 variant trivial enum、両方 Tier 1 Handled)。
+
+---
+
+## 13. Prop (オブジェクトリテラルプロパティ)
+
+オブジェクトリテラル (`{ ... }`) 内の各プロパティ。`PropOrSpread::Prop(Box<Prop>)` (section 12)
+経由でアクセスされる child enum。`ObjectPatProp` (オブジェクトパターンプロパティ、section 11)
+と対称関係 (前者 = literal context、後者 = pattern context)。
+
+### Tier 1 — Handled
+
+| Variant | 処理 |
+|---------|------|
+| `KeyValue` | `key: value` 形式 (TypeResolver: 値 type-resolve、Transformer: struct field assign or HashMap entry) |
+| `Shorthand` | `{ x }` 短縮形 (= `{ x: x }`) (TypeResolver: var lookup、Transformer: struct field assign) |
+| `Method` (TypeResolver visit only) | `{ method() {...} }` (TypeResolver: method body `visit_block_stmt` 経由 walk + function-level scope; Transformer 完全 Tier 1 化は **I-202** で実施、現状 Tier 2 error report) |
+| `Getter` (TypeResolver visit only) | `{ get name() {...} }` (TypeResolver: body `visit_block_stmt` 経由 walk; Transformer 完全 Tier 1 化は同上 **I-202**) |
+| `Setter` (TypeResolver visit only) | `{ set name(v) {...} }` (TypeResolver: param_pat visit + body `visit_block_stmt` 経由 walk; Transformer 完全 Tier 1 化は同上 **I-202**) |
+
+### Tier 2 — Unsupported
+
+| Variant | 備考 |
+|---------|------|
+| `Method` (Transformer) | Tier 2 (Unsupported, honest error reported via `UnsupportedSyntaxError::new("Prop::Method", method.span())`)、I-202 で Tier 1 化予定 (object literal の anonymous struct + impl emission strategy 確立) |
+| `Getter` (Transformer) | Tier 2 (Unsupported, honest error reported via `UnsupportedSyntaxError::new("Prop::Getter", getter.span())`)、I-202 で Tier 1 化予定 |
+| `Setter` (Transformer) | Tier 2 (Unsupported, honest error reported via `UnsupportedSyntaxError::new("Prop::Setter", setter.span())`)、I-202 で Tier 1 化予定 |
+| `Assign` | Tier 2 (Unsupported, honest error reported via `UnsupportedSyntaxError::new("Prop::Assign", assign_prop.span)`)。**PRD 2.7 Implementation Revision 2 (2026-04-27、critical Spec gap fix)**: 当初 NA 認識だったが SWC parser empirical observation (`tests/swc_parser_object_literal_prop_assign_test.rs`) で `{ x = expr }` を `Prop::Assign` として accept することを確認。TS spec では object literal context で parse error だが SWC parser は寛容 parsing で accept = ts_to_rs では明確に reject (= TS 互換 honest error)。destructuring default context (`({ x = 1 } = obj)`) は別経路で `ObjectPatProp::Assign` (section 11) として handle |
+
+---
+
+## 14. PropName (プロパティ名)
 
 | Variant | Status | 備考 |
 |---------|--------|------|
@@ -324,7 +370,7 @@ PRD の入力次元 (AST shape) を列挙する際、本カタログの全 varia
 
 ---
 
-## 13. MemberProp (メンバーアクセスプロパティ)
+## 15. MemberProp (メンバーアクセスプロパティ)
 
 **全 variant handled** (Tier 1 complete):
 
@@ -336,7 +382,7 @@ PRD の入力次元 (AST shape) を列挙する際、本カタログの全 varia
 
 ---
 
-## 14. ClassMember (クラスメンバー)
+## 16. ClassMember (クラスメンバー)
 
 ### Tier 1 — Handled
 
@@ -355,11 +401,11 @@ PRD の入力次元 (AST shape) を列挙する際、本カタログの全 varia
 |---------|------|
 | `TsIndexSignature` | index signature (filter out) |
 | `Empty` | 空メンバー (no-op) |
-| `AutoAccessor` | JS auto accessor |
+| `AutoAccessor` | TS 5.0+ stable AutoAccessor (`accessor x: T = init`)。**Tier 2 honest error reported via `UnsupportedSyntaxError::new("AutoAccessor", aa.span)`** (`src/transformer/classes/mod.rs:165-171` 既実装)。完全 Tier 1 化は **I-201-A** (decorator なし subset、`accessor x: T = init` → `struct field + fn x() -> &T + fn set_x(&mut self, v: T)` strategy、L3) + **I-201-B** (decorator framework、`@dec accessor x` の hook 統合、L1 silent semantic change) で別 PRD 達成予定 |
 
 ---
 
-## 15. ModuleDecl (モジュール宣言)
+## 17. ModuleDecl (モジュール宣言)
 
 ### Tier 1 — Handled
 
@@ -382,7 +428,7 @@ PRD の入力次元 (AST shape) を列挙する際、本カタログの全 varia
 
 ---
 
-## 16. TsType (TypeScript 型)
+## 18. TsType (TypeScript 型)
 
 ### Tier 1 — Handled
 
@@ -416,7 +462,7 @@ PRD の入力次元 (AST shape) を列挙する際、本カタログの全 varia
 
 ---
 
-## 17. TsTypeElement (型要素)
+## 19. TsTypeElement (型要素)
 
 ### Tier 1 — Handled
 
@@ -434,3 +480,20 @@ PRD の入力次元 (AST shape) を列挙する際、本カタログの全 varia
 |---------|------|
 | `TsGetterSignature` | getter signature |
 | `TsSetterSignature` | setter signature |
+
+---
+
+## 20. Decorator (デコレータ、TC39 Stage 3 / TS 5.0+ stable)
+
+class / method / property / parameter / accessor 修飾子 (`@dec`)。SWC AST では各 host
+node の `decorators: Vec<Decorator>` field として保持される (`Class::decorators`,
+`ClassMethod::function::decorators`, `ClassProp::decorators`, `PrivateMethod::decorators`,
+`PrivateProp::decorators`, `TsParamProp::decorators`, `AutoAccessor::decorators`,
+`Param::decorators` 等)。
+
+### Tier 2 — Unsupported
+
+| Variant | 備考 |
+|---------|------|
+| `Decorator` (`@dec`) | ts_to_rs では **完全未実装 = silent drop 状態** (audit 2026-04-27、`grep "decorator\|Decorator\|decorators" src/` 結果 0 件、詳細: [`report/PRD-2.7-decorator-dispatch-audit.md`](../../report/PRD-2.7-decorator-dispatch-audit.md))。SWC AST `decorators` field を一切 touch せず、TS 側 decorator hook (init / get / set / addInitializer) の effect が Rust 出力で emit されない (= **Tier 1 silent semantic change**、`conversion-correctness-priority.md` Tier 1)。完全 Tier 1 化は **I-201-B** (TC39 Stage 3、AutoAccessor + class + method + property + parameter 全 application 共通 framework、L1) で別 PRD 達成予定。AutoAccessor (decorator なし subset) は I-201-A で先行 Tier 1 化、I-201-B が I-201-A foundation を leverage |
+

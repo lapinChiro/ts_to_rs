@@ -72,7 +72,42 @@ impl<'a> Transformer<'a> {
                         let value = self.convert_expr(&ast::Expr::Ident(ident.clone()))?;
                         fields.push((key, value));
                     }
-                    _ => {}
+                    // PRD 2.7 (cell 12-14): Method/Getter/Setter は Tier 2 honest error
+                    // (UnsupportedSyntaxError 経由)。完全 Tier 1 化は I-202。
+                    // Discriminated union variant の field 抽出 context でも同様 (= TS
+                    // 側で valid syntax だが ts_to_rs では struct emission 不能)。
+                    ast::Prop::Method(method_prop) => {
+                        return Err(crate::transformer::UnsupportedSyntaxError::new(
+                            "Prop::Method",
+                            method_prop.function.span,
+                        )
+                        .into())
+                    }
+                    ast::Prop::Getter(getter_prop) => {
+                        return Err(crate::transformer::UnsupportedSyntaxError::new(
+                            "Prop::Getter",
+                            getter_prop.span,
+                        )
+                        .into())
+                    }
+                    ast::Prop::Setter(setter_prop) => {
+                        return Err(crate::transformer::UnsupportedSyntaxError::new(
+                            "Prop::Setter",
+                            setter_prop.span,
+                        )
+                        .into())
+                    }
+                    ast::Prop::Assign(assign_prop) => {
+                        // PRD 2.7 Implementation Revision 2 (2026-04-27): SWC parser
+                        // empirical で `{ x = expr }` を Prop::Assign として accept する事
+                        // 確認、Tier 2 honest error (TS spec 上 parse error だが SWC は
+                        // 寛容 parsing、ts_to_rs は明確に reject)。
+                        return Err(crate::transformer::UnsupportedSyntaxError::new(
+                            "Prop::Assign",
+                            assign_prop.span,
+                        )
+                        .into());
+                    } // No `_` arm — PRD 2.7 Rule 11 (d-1) compliance.
                 }
             }
         }
@@ -129,7 +164,21 @@ impl<'a> Transformer<'a> {
                             elements: vec![key, value],
                         });
                     }
-                    _ => return Ok(None),
+                    // PRD 2.7 (Implementation /check_job F2 fix 2026-04-27): 全 unsupported
+                    // variant を Ok(None) で fallback (= struct emission path 経由で
+                    // `convert_object_lit` が `UnsupportedSyntaxError` を返す統一 design)。
+                    // caller boundary で error vs fallback の judge を context-free 化、
+                    // Q4 Rule 11 (d-2) phase 別役割分担 + design integrity 整合
+                    // (= "HashMap conversion 不能" context は無条件 fallback、honest error
+                    // は struct emission path に concentration)。Prop::Assign は struct
+                    // emission path で `UnsupportedSyntaxError::new("Prop::Assign", span)`
+                    // 経由 honest error 化 (Implementation Revision 2)。
+                    ast::Prop::Shorthand(_)
+                    | ast::Prop::Method(_)
+                    | ast::Prop::Getter(_)
+                    | ast::Prop::Setter(_)
+                    | ast::Prop::Assign(_) => return Ok(None),
+                    // No `_` arm — PRD 2.7 Rule 11 (d-1) compliance.
                 },
                 ast::PropOrSpread::Spread(_) => return Ok(None),
             }
@@ -256,11 +305,39 @@ impl<'a> Transformer<'a> {
                         let value = self.convert_expr(&ast::Expr::Ident(ident.clone()))?;
                         events.push(PropEvent::Explicit { key, value });
                     }
-                    _ => {
-                        return Err(anyhow!(
-                        "unsupported object literal property (only key-value pairs and shorthand)"
-                    ))
+                    // PRD 2.7 (cell 12-14, T10): Method/Getter/Setter は Tier 2 honest
+                    // error report (UnsupportedSyntaxError 経由、format 統一)。完全
+                    // Tier 1 化は I-202 (object literal Tier 1 化) で別 PRD 達成予定。
+                    ast::Prop::Method(method_prop) => {
+                        return Err(crate::transformer::UnsupportedSyntaxError::new(
+                            "Prop::Method",
+                            method_prop.function.span,
+                        )
+                        .into())
                     }
+                    ast::Prop::Getter(getter_prop) => {
+                        return Err(crate::transformer::UnsupportedSyntaxError::new(
+                            "Prop::Getter",
+                            getter_prop.span,
+                        )
+                        .into())
+                    }
+                    ast::Prop::Setter(setter_prop) => {
+                        return Err(crate::transformer::UnsupportedSyntaxError::new(
+                            "Prop::Setter",
+                            setter_prop.span,
+                        )
+                        .into())
+                    }
+                    ast::Prop::Assign(assign_prop) => {
+                        // PRD 2.7 Implementation Revision 2 (2026-04-27): SWC parser
+                        // empirical で Prop::Assign を accept、Tier 2 honest error。
+                        return Err(crate::transformer::UnsupportedSyntaxError::new(
+                            "Prop::Assign",
+                            assign_prop.span,
+                        )
+                        .into());
+                    } // No `_` arm — PRD 2.7 Rule 11 (d-1) compliance.
                 },
                 ast::PropOrSpread::Spread(spread_elem) => {
                     let spread_expr = self.convert_expr(&spread_elem.expr)?;

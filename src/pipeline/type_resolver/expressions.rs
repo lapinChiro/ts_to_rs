@@ -364,9 +364,54 @@ impl<'a> TypeResolver<'a> {
                                     explicit_fields.push((name, rust_ty));
                                 }
                             }
-                            _ => {
+                            ast::Prop::Method(method_prop) => {
+                                // PRD 2.7 (I-200, cell 12): visit_method_function 同等処理で
+                                // method body を walk、typeof/instanceof narrow event を push。
+                                // Transformer 側の完全 emission (Tier 1 化) は I-202 で別 PRD。
                                 total_explicit_props += 1;
+                                let span = Span::from_swc(method_prop.function.span);
+                                self.visit_prop_method_function(&method_prop.function);
+                                self.result.expr_types.insert(span, ResolvedType::Unknown);
                             }
+                            ast::Prop::Getter(getter_prop) => {
+                                // PRD 2.7 (I-200, cell 13): getter body を visit_block_stmt
+                                // 経由で walk。Transformer 完全 emission は I-202。
+                                total_explicit_props += 1;
+                                let span = Span::from_swc(getter_prop.span);
+                                if let Some(body) = &getter_prop.body {
+                                    self.enter_scope();
+                                    let param_pats: Vec<&ast::Pat> = Vec::new();
+                                    self.collect_emission_hints(body, &param_pats);
+                                    self.visit_block_stmt(body);
+                                    self.leave_scope();
+                                }
+                                self.result.expr_types.insert(span, ResolvedType::Unknown);
+                            }
+                            ast::Prop::Setter(setter_prop) => {
+                                // PRD 2.7 (I-200, cell 14): setter body を param_pat visit +
+                                // visit_block_stmt 経由で walk。Transformer 完全 emission は I-202。
+                                total_explicit_props += 1;
+                                let span = Span::from_swc(setter_prop.span);
+                                if let Some(body) = &setter_prop.body {
+                                    self.enter_scope();
+                                    self.visit_param_pat(&setter_prop.param);
+                                    let param_pats: Vec<&ast::Pat> = vec![&setter_prop.param];
+                                    self.collect_emission_hints(body, &param_pats);
+                                    self.visit_block_stmt(body);
+                                    self.leave_scope();
+                                }
+                                self.result.expr_types.insert(span, ResolvedType::Unknown);
+                            }
+                            ast::Prop::Assign(_) => {
+                                // PRD 2.7 Implementation Revision 2 (2026-04-27、critical
+                                // Spec gap fix): 当初 NA 認識だったが SWC parser empirical
+                                // observation で `{ x = expr }` を `Prop::Assign` として
+                                // accept することを確認。TS spec では parse error だが SWC
+                                // parser は accept、ts_to_rs では Tier 2 honest error
+                                // (UnsupportedSyntaxError) として処理。TypeResolver は no-op。
+                                total_explicit_props += 1;
+                            } // No `_ => ...` arm — PRD 2.7 Rule 11 (d-1) compliance.
+                              // 新 Prop variant 追加時に compile error で全 dispatch fix を強制。
                         },
                         ast::PropOrSpread::Spread(spread) => {
                             let span = Span::from_swc(spread.expr.span());
