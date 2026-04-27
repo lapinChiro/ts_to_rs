@@ -127,6 +127,8 @@ ast::Expr::Object(obj) => {
 | 26 | `UnsupportedSyntaxError` format 統一 + 適用拡張 | — | — | **既存 `UnsupportedSyntaxError::new(kind, span)` (`src/transformer/mod.rs:193-219` 定義) を全 Transformer Tier 2 variant arm で統一適用 + 一部 module の `anyhow!()` 経由 format 不整合 (`data_literals.rs:259-263`) を `UnsupportedSyntaxError` に統一**。新規 macro `unsupported_arm!()` 作成は不要 (= DRY 違反、既存 mechanism と機能重複)。 | ✗ 要 fix (format 統一 + 適用拡張) | 本 PRD (C1 + C6 修正) |
 | **TypeResolver `_` arm の明示 no-op 化 (C4 修正 2026-04-27、Rule 10(d-2) phase 別役割分担)** ||||||
 | 27 | TypeResolver Tier 2 variant の no-op arm | — | — | **TypeResolver (静的解析 phase) は abort 不可、Tier 2 variant arm は明示 no-op (reason comment 付き empty arm) で Rule 10(d-2) compliance 達成**。Transformer (変換 phase) は `UnsupportedSyntaxError` で error return 必須 (cell 26 と integrate)。 | ✗ 要 fix (Rule 10(d-2) wording 改良) | 本 PRD (C4 修正) |
+| **Rule 4 doc-first dependency order の structural enforcement (Q6 修正 2026-04-27、3 度目 `/check_job` review で発見した Spec gap × 1 件の framework 改善検討)** ||||||
+| 28 | Rule 4 wording 拡張: doc-first dependency order の structural enforcement | C1-C3 / D1-D2 / E1-E3 | E3 真の ideal | **`spec-stage-adversarial-checklist.md` Rule 4 wording 拡張**: PRD 内 doc update task は code 改修 task の **prerequisite** として位置付ける必須 dependency 制約 (= single source of truth の structural 維持)。逆方向 dependency (= doc が code 後 sync) は Rule 4 違反。`scripts/audit-prd-rule10-compliance.py` で Task List dependency chain を parse し、doc update task ID が code 改修 task ID の Depends on に存在することを auto verify (= structural enforcement、人手判断介在排除)。 | ✗ 要 fix (Rule 4 framework 改修、Q6) | 本 PRD (Q6、本 PRD draft 自体の Rule 4 violation = T11 dependency が C1 修正前 wording で残存していた self-evidence、3 度目 review で検出) |
 
 判定凡例: ✓ (現状 OK、regression lock-in test) / ✗ (修正必要、本 PRD scope) / NA (unreachable + reason 明示) / 別 PRD (I-201-A / I-201-B / I-202 / I-203)
 
@@ -143,16 +145,32 @@ ast::Expr::Object(obj) => {
 
 `spec-stage-adversarial-checklist.md` の 10-rule を本 PRD 内で全項目 verification:
 
-- [ ] **Rule 1: Matrix completeness**: 上記 27 cell (cell 1-25 + cell 26 (`UnsupportedSyntaxError` 統一) + cell 27 (TypeResolver `_` arm 明示 no-op 化)、D3 修正 2026-04-27) に ideal output を全記載 ✓
-- [ ] **Rule 2: Oracle grounding**: 各 ✗ cell の ideal output が **audit 結果 / SWC AST 定義 / TC39 spec / `feedback_no_dev_cost_judgment.md`** で grounding ✓
-- [ ] **Rule 3: NA justification**: cell 15 (Prop::Assign) の NA reason は **TS spec で object literal context で parse error** という spec-traceable reason ✓
-- [ ] **Rule 4: Grammar consistency**: ast-variants.md の Prop section / AutoAccessor entry / Decorator entry を本 PRD で update する (cell 23-25) ✓
-- [ ] **Rule 5: E2E readiness**: TypeResolver coverage 部分の per-cell unit test (cell 6 / 7 / 12-14) + Transformer integration test + audit script test を準備 (Test Plan section 参照)
-- [ ] **Rule 6: Matrix/Design integrity**: matrix の Ideal output と Design section の emission strategy が token-level に一致 (Design Section で確認)
-- [ ] **Rule 7: Control-flow exit sub-case completeness**: 本 PRD は AST traversal coverage で control-flow exit dimension は orthogonal、NA
-- [ ] **Rule 8: Cross-cutting invariant enumeration**: 上記 INV-1〜INV-4 を明示 ✓
-- [ ] **Rule 9: Dispatch-arm sub-case alignment**: 本 PRD core 自体が「dispatch-arm sub-case alignment の structural enforcement」(Q4 + Q5)、self-applied ✓
-- [ ] **Rule 10: Cross-axis matrix completeness**: 5 layer (A-E) で 8 default check axis を application、structural reason 明示済 ✓
+- [x] **Rule 1: Matrix completeness**: 全 27 cell (cell 1-25 + cell 26 (`UnsupportedSyntaxError` 統一) + cell 27 (TypeResolver `_` arm 明示 no-op 化)、D3 修正 2026-04-27) に ideal output 記載 + 判定 (✓/✗/NA) + Scope 確定。空欄 / TBD なし。
+- [x] **Rule 2: Oracle grounding**: 各 ✗ cell の ideal output が以下 source で grounding:
+  - cell 6/10/11/15 = tsc/tsx runtime stdout (`record-cell-oracle.sh` で 9 件 `.expected` 記録済 2026-04-27)
+  - cell 7/12-14/17 = Tier 2 honest error の Transformer behavior (= existing `UnsupportedSyntaxError` mechanism + 既実装 `classes/mod.rs:165-171`)
+  - cell 18-22 = `spec-stage-adversarial-checklist.md` Rule 10 wording の logical consistency + Q4/Q5 確定事項
+  - cell 23-25 = SWC AST 定義 + TC39 spec (Decorator) + `feedback_no_dev_cost_judgment.md` (prohibited keyword list)
+  - cell 26-27 = phase 別役割分担 (TypeResolver static analysis abort 不可 / Transformer 変換 phase) の `pipeline-integrity.md` 整合
+- [x] **Rule 3: NA justification**: cell 15 (Prop::Assign) NA reason: 「TS spec で object literal context で parse error、destructuring default context (`ObjectAssignmentPattern`) 限定」(spec-traceable: TS lang spec + SWC parser empirical verify via Test 20)。
+- [x] **Rule 4: Grammar consistency**: ast-variants.md の Prop section (現状不在 = Grammar gap) / AutoAccessor entry (現状 Tier 2、本 PRD で Q1 (b) 状態化明示) / Decorator entry (現状不在 = Grammar gap) を本 PRD T11 (= **T8/T9/T10 prerequisite として doc-first**、Action 1 修正 2026-04-27) で update。matrix に reference doc 未記載 variant が存在しない state を T11 完了で達成。
+- [x] **Rule 5: E2E readiness**: T0 (Spec stage 内 task) で 9 fixture (cell 6/7/10/11/12/13/14/15/17) + 9 .expected 準備済 2026-04-27 (red 状態 sample verify: cell 6 で silent semantic change + E0423 compile error 顕在化、Implementation stage で T8 改修後 green 化)。
+- [x] **Rule 6: Matrix/Design integrity**: matrix Ideal output と Design section emission strategy が token-level に一致 (cell 6 visit_block_stmt 経由 / cell 7 TypeResolver no-op + Transformer UnsupportedSyntaxError / cell 12-14 visit_method_function 同等処理 / cell 15 unreachable!() / cell 17 全 Prop variant explicit + UnsupportedSyntaxError 統一)。Design Section の 3.1 / 3.2 / 3.3 で side-by-side 確認可能。
+- [x] **Rule 7: Control-flow exit sub-case completeness — NA (justification 明示)**: 本 PRD scope = **AST traversal coverage** (= TypeResolver / Transformer match 文の dispatch arm completeness) で、control-flow exit dimension (then_exits × else_exits = T/T, T/F, F/T, F/F の 4 sub-case) は **runtime narrow framework の dimension**。本 PRD の static AST traversal とは **構造的 orthogonal** (= AST traversal は parse-time / static-analysis、control-flow exit は runtime narrow emission の dimension)。NA reason は spec-traceable (= AST shape vs control flow の独立性)。
+- [x] **Rule 8: Cross-cutting invariant enumeration**: INV-1〜INV-4 を独立 section ("Cross-cutting Invariants") で明示、各 INV について 4 必須項目を全記載:
+  - INV-1: doc-code sync (Property: ast-variants.md ↔ code Tier 分類完全 sync / Justification: doc-code drift で進捗評価が ground truth でなくなる + 新 variant 追加時 silent miss risk / Verification: scripts/audit-ast-variant-coverage.py CI 化 / Failure detectability: CI fail audit error)
+  - INV-2: 全 enum match 文 `_` arm 不在 (Property: Rust exhaustiveness check 期待状態 / Justification: silent drop の structural 排除 + AST evolution 安全性 / Verification: Rust compile error + audit script `_ =>` detect / Failure detectability: compile error + audit fail)
+  - INV-3: 全 PRD doc Rule 10 application section 完全性 (Property: section 存在 + structural reason に prohibited keywords 不在 / Justification: 妥協の逃げ道排除 + 進捗評価 ground truth / Verification: scripts/audit-prd-rule10-compliance.py CI 化 / Failure detectability: CI fail = PRD merge 不能)
+  - INV-4: prd-template skill 起動時 Rule 10 section 必須記入 (Property: skill workflow 内 verification step 不可避 / Justification: PRD 起票時の Rule 10 application 必須化 / Verification: skill instruction 内 audit script invocation step / Failure detectability: skill execution failure = PRD draft 不可)
+- [x] **Rule 9: Dispatch-arm sub-case alignment — Spec→Impl + Impl→Spec 双方向 verify**:
+  - **Spec→Impl**: matrix cell 1-9 (ClassMember 9 variant) ↔ visit_class_body の 9 arm = **1-to-1 確認** (post-T8 改修後)、matrix cell 10-15 (Prop 6 variant) ↔ ast::Expr::Object inner match の 6 arm = **1-to-1 確認** (post-T9 改修後)、Transformer convert_object_lit の Prop 6 arm = **1-to-1 確認** (post-T10 改修後)
+  - **Impl→Spec**: T8/T9/T10 実装中に新 dispatch arm を発見した場合、`spec-first-prd.md` の「Spec への逆戻り」手順を発動 (= matrix cell 追加 + ideal output 確定 + ast-variants.md update)
+  - 本 PRD core 自体が dispatch-arm sub-case alignment の structural enforcement (Q4 + Q5)、self-applied first-class adopter
+- [x] **Rule 10: Cross-axis matrix completeness — 3 step procedure + 8 default axis applicability 完全 enumerate**:
+  - **Step 1 Axis enumeration**: 5 layer (A-E) + Cross-axis 3 prompt (I 逆問題 / II 実装 dispatch trace / III 影響伝搬 chain)
+  - **Step 2 Orthogonality verification**: Layer A (AST node iterate target) と Layer B (variant 現状処理) が独立 (= variant 自体と現状処理が orthogonal) / Layer C (doc spec) と Layer D (rule 適用範囲) が独立 / Layer E (enforcement mechanism) は他 4 layer の cross-cutting axis として独立
+  - **Step 3 Cartesian product expansion**: 27 cell に展開 (matrix 全 cell 完全 enumerate)
+  - **8 default axis applicability**: (a) Layer A applicable / (b) matrix cell 1-15 applicable / (c)-(g) NA (= AST traversal coverage と orthogonal、上記 "## Rule 10 Application" section の table 参照、Action 2 修正 2026-04-27 で全 NA reason explicit 化) / (h) Rule 7 で NA 明示済
 
 ### Rule 10 Application (Q5 mandatory section)
 
@@ -202,6 +220,8 @@ Structural reason for matrix absence: N/A (matrix-driven PRD)
 11. **regression lock-in tests + SWC parser empirical test (cell 15) を全 ✓ NA cell に配置**
 
 12. **Hono bench 0 regression** (clean 111 / errors 63 unchanged)、cargo test 全 pass、clippy 0 warning、fmt 0 diff
+
+13. **`spec-stage-adversarial-checklist.md` Rule 4 wording 拡張 (Q6、Action 5 修正 2026-04-27)**: doc update task が code 改修 task の prerequisite という **doc-first dependency order を structural enforcement** + `scripts/audit-prd-rule10-compliance.py` で Task List dependency chain を auto verify (= 人手判断介在排除、本 PRD draft 自体の Rule 4 violation を 3 度目 review で発見した Spec gap の framework 改善検討の本質対応)
 
 ---
 
@@ -276,6 +296,23 @@ Structural reason for matrix absence: N/A (matrix-driven PRD)
       - **(e-6)**: `prd-template` skill に Rule 10 application 必須 section を hard-code (空のまま skill 終了不可)
       - **(e-7)**: `scripts/audit-prd-rule10-compliance.py` を CI 化 + merge gate (PRD doc parse + Rule 10 application section + prohibited keywords 不在 verify)
       - **(e-8)**: `/check_job` Layer 3 (Structural cross-axis) に Rule 10 application verification を integrate
+```
+
+##### 1.2.5 `spec-stage-adversarial-checklist.md` Rule 4 wording 拡張 (Q6、Action 5 修正 2026-04-27)
+
+Rule 4 を以下のように拡張 (元 wording 「matrix に reference doc に未記載の variant が存在しない (存在すれば reference doc を先に更新)」に追加):
+
+```markdown
+- [ ] **Grammar consistency + doc-first dependency order の structural enforcement (Q6 修正 2026-04-27)**:
+      - **(4-1)** matrix に reference doc に未記載の variant が存在しない (存在すれば reference doc を先に更新)
+      - **(4-2、新規追加 Q6)**: PRD 内 doc update task (= ast-variants.md / 関連 reference doc 更新 task) は **code 改修 task (= TypeResolver / Transformer / Generator 改修 task) の prerequisite** として位置付ける必須 dependency 制約。code 改修が doc を ground truth として参照する **単方向 dependency** (= doc-first)、doc を code 後に sync する **逆方向 dependency** は **Rule 4 違反** (= single source of truth の structural 違反、Q4 整合)。
+      - **(4-3、新規追加 Q6)** Verification mechanism: `scripts/audit-prd-rule10-compliance.py` (T6) で Task List section を parse し、以下を auto verify:
+        - PRD doc 内 task の Depends on / Prerequisites を抽出
+        - doc update task ID (= ast-variants.md / 関連 reference doc 更新を含む task) を identify
+        - code 改修 task ID (= src/ 配下の Rust source 改修を含む task) を identify
+        - 各 code 改修 task の Prerequisites に doc update task ID が存在することを check (= doc-first verify)
+        - 不在時 audit fail (CI fail = PRD merge 不能)
+      - **Lesson source**: PRD 2.7 draft 自体で T11 (`ast-variants.md` update) が T8/T9/T10 (code 改修) の **後** に位置していた = Q4 (single source of truth、INV-1) 違反。1 度目 review + 2 度目 review で未検出、3 度目 `/check_job` review (2026-04-27) で初めて Spec gap として発覚。framework 失敗 signal を起点に Rule 4 wording に doc-first dependency order の structural enforcement を追加 (本 PRD 自体が first-class adopter)。
 ```
 
 ##### 1.3 `prd-template` skill update
@@ -672,11 +709,14 @@ silent drop 解消による conversion 結果変化を以下 mechanism で struc
 - **Depends on**: T0
 - **Prerequisites**: なし
 
-### T2: `spec-stage-adversarial-checklist.md` Rule 10 全面 update
+### T2: `spec-stage-adversarial-checklist.md` Rule 10 + Rule 4 全面 update (Action 5 修正 2026-04-27 で Q6 統合)
 
-- **Work**: Rule 10 に sub-rule (d) AST node enumerate completeness check + sub-rule (e) Mandatory 化 + structural reason 明示を追加。Anti-pattern keywords list (= `feedback_no_dev_cost_judgment.md` 参照) を明示禁止 list 化。
-- **Completion criteria**: rule doc update 完了、sub-rule (d) + (e) が precise wording で記載、Lesson source (I-177-F / I-200 + 5 度 Spec gap chain) を明記。
-- **Depends on**: T1 (macro 定義が rule 内例示で参照される)
+- **Work**:
+  1. **Rule 10 拡張** (Q4 + Q5): sub-rule (d) AST node enumerate completeness check (`_` arm 全面禁止 + 既存 `UnsupportedSyntaxError` 統一 + audit script CI 化) + sub-rule (e) Mandatory 化 + structural reason 明示 (Permitted reasons + Prohibited keywords list、`feedback_no_dev_cost_judgment.md` 整合)
+  2. **Rule 4 拡張** (Q6、Action 5 修正 2026-04-27、新規追加): sub-rule (4-1) (元 wording 維持) + sub-rule (4-2) doc-first dependency order の structural enforcement (= PRD 内 doc update task が code 改修 task の prerequisite) + sub-rule (4-3) audit script による Task List dependency chain auto verify (= 人手判断介在排除)
+  3. **Lesson source 全 record**: Rule 10 = I-177-F + I-200 + 5 度 Spec gap chain (Q1-Q5 source) / Rule 4 = PRD 2.7 draft 自体の T11 dependency violation (3 度目 review で発覚した Spec gap、Q6 source、本 PRD self-evidence)
+- **Completion criteria**: rule doc update 完了、sub-rule (d) + (e) (Rule 10) + sub-rule (4-1)〜(4-3) (Rule 4) が precise wording で記載、全 Lesson source 明記。
+- **Depends on**: T1 (`UnsupportedSyntaxError` 既存 mechanism format が rule 内例示で参照される)
 - **Prerequisites**: なし
 
 ### T3: `prd-template` skill update (Rule 10 application 必須 section hard-code、M4 修正 2026-04-27)
@@ -738,7 +778,13 @@ silent drop 解消による conversion 結果変化を以下 mechanism で struc
   5. `Matrix-driven: yes` の場合、`Rule 10 axes enumerated` list が 1 件以上 + `Cross-axis orthogonal direction enumerated: yes` を要求
   6. `Matrix-driven: no` の場合、`Structural reason for matrix absence` が以下 prohibited keywords substring (case-insensitive) を含まないか check:
      - `scope 小`, `scope 狭`, `scope 限`, `light spec`, `pragmatic`, `LOC`, `loc`, `短時間`, `短期間`, `manageable`, `effort 大`, `実装 trivial`, `quick`, `easy`, `simple` (本 list は本 PRD で確定、`feedback_no_dev_cost_judgment.md` 整合)
-  7. 不一致時 audit fail (exit code 非 0)、PRD file path + 違反 reason を stderr に出力
+  7. **Rule 4 doc-first dependency order auto verify (Action 5 修正 2026-04-27 で Q6 統合)**:
+     - PRD doc 内 `## Task List` section を parse、各 `### TN: <title>` heading + `- **Depends on**: <list>` + `- **Prerequisites**: <list>` を抽出
+     - **doc update task identify**: title or Work field に `ast-variants.md` / `doc/grammar/` / `reference doc` 等 doc update keyword を含む task ID を識別
+     - **code 改修 task identify**: title or Work field に `src/` path / `TypeResolver` / `Transformer` / `Generator` / `convert_*` / `visit_*` / `resolve_*` 等 code 改修 keyword を含む task ID を識別
+     - **doc-first verify**: 各 code 改修 task の Prerequisites or Depends on に doc update task ID が存在することを check (= 単方向 dependency: doc → code)
+     - 不在時 audit fail (= Rule 4 violation、PRD merge 不能)、stderr に "Rule 4 violation: code task `<TN>` lacks prerequisite doc update task `<TM>`" 形式で出力
+  8. 不一致時 audit fail (exit code 非 0)、PRD file path + 違反 reason を stderr に出力
 - **Completion criteria**: script 動作確認、self-test pass (本 PRD doc で audit pass + test fixture PRD doc (`tests/audit-prd-fixtures/` 等に good/bad sample 配置) で audit pass / fail 各々 verify)。
 - **Depends on**: T2, T3 (Rule 10 wording + skill format 確定後に audit logic 設計)
 - **Prerequisites**: `pyyaml` 等の yaml parse library install
@@ -778,7 +824,7 @@ silent drop 解消による conversion 結果変化を以下 mechanism で struc
   4. `_` arm 削除
 - **Completion criteria**: 改修完了、cargo build pass、unit tests (StaticBlock body の typeof narrow event push 確認 + AutoAccessor / TsIndexSignature / Empty の明示 no-op 確認 + class method/constructor の regression + cell 27 verify = 全 Tier 2 variant arm が `_ => ` ではなく explicit empty arm + reason comment 付き) 全 pass、audit-ast-variant-coverage.py が本 file で audit pass。
 - **Depends on**: T1, T5, **T1.5 (Decorator dispatch audit 結果次第で T8 scope 拡大、`class_decl.class.decorators` field の handle 追加が必要な場合あり、D6 修正 2026-04-27)**
-- **Prerequisites**: なし
+- **Prerequisites**: **T11 (`ast-variants.md` の ClassMember section が ground truth、本 task は doc に従って code を sync、Action 1 修正 2026-04-27 doc-first dependency order)**
 
 ### T9: TypeResolver `expressions.rs::ast::Expr::Object` の改修 (I-200 + Rule 10(d) application、C3 統合)
 
@@ -790,7 +836,7 @@ silent drop 解消による conversion 結果変化を以下 mechanism で struc
   5. `_` arm 削除 (Rule 10(d-1) compliance)
 - **Completion criteria**: 改修完了、cargo build pass、unit tests (Prop::Method body の typeof narrow event push 確認 + Prop::Getter/Setter body の similar 確認 + Prop::KeyValue/Shorthand の regression + Prop::Assign は SWC parser 経由で実は AST に含まれないことを Test 20 で confirm) 全 pass、`audit-ast-variant-coverage.py` が本 file で audit pass。
 - **Depends on**: T1, T5
-- **Prerequisites**: なし (visit_method_function は existing function、re-use 可能。generic 化が必要なら T9 内で実施)
+- **Prerequisites**: **T11 (`ast-variants.md` の Prop section が ground truth、本 task は doc に従って code を sync、Action 1 修正 2026-04-27 doc-first dependency order)**、visit_method_function は existing function、re-use 可能
 
 ### T10: Transformer `convert_object_lit` の改修 (Q4 application)
 
@@ -801,16 +847,19 @@ silent drop 解消による conversion 結果変化を以下 mechanism で struc
   4. `_` arm 削除 (Rule 10(d-1) compliance)
 - **Completion criteria**: 改修完了、cargo build pass、unit tests (Prop::Method/Getter/Setter で `UnsupportedSyntaxError` Err return 確認 + Prop::Assign で `unreachable!()` panic 確認 (test では `#[should_panic]` 等で verify) + 既存 KeyValue/Shorthand/Spread の regression + format 統一 (= 全 Tier 2 error message に "[unsupported]" or 同等 format prefix) 確認) 全 pass。
 - **Depends on**: T1
-- **Prerequisites**: なし
+- **Prerequisites**: **T11 (`ast-variants.md` の Prop section が ground truth、本 task は doc に従って code を sync、Action 1 修正 2026-04-27 doc-first dependency order)**
 
-### T11: `doc/grammar/ast-variants.md` update
+### T11: `doc/grammar/ast-variants.md` update — **doc-first single source of truth (Action 1 修正 2026-04-27、Rule 4 compliance + Q4 整合)**
 
 - **Work**:
-  1. Prop section 新規追加 (全 7 variant Tier 分類)
-  2. AutoAccessor entry update (Tier 2 honest error reported、I-201-A/B 言及)
-  3. Decorator entry 新規追加 (Tier 2、I-201-B 言及)
-- **Completion criteria**: doc update 完了、audit-ast-variant-coverage.py が本 file で audit pass (= code との sync 確認)。
-- **Depends on**: T8, T9, T10 (code 側の handle 状況確定後に doc sync)
+  1. Prop section 新規追加 (全 7 variant Tier 分類: KeyValue / Shorthand / Method / Getter / Setter / Assign + Tier 1 Handled / Tier 2 Unsupported / NA 区分)
+  2. AutoAccessor entry update (Tier 2 honest error reported via `UnsupportedSyntaxError::new("AutoAccessor", aa.span)`、I-201-A/B で完全 Tier 1 化予定 言及)
+  3. Decorator entry 新規追加 (Tier 2 Unsupported、I-201-B で Tier 1 化予定 言及、T1.5 audit 結果反映)
+- **Position rationale (Action 1 修正)**: 元 PRD draft で T11 Depends on T8/T9/T10 = code 後 doc sync の設計だった (3 度目 `/check_job` review で Rule 4 violation = Spec gap 検出)。`spec-stage-adversarial-checklist.md` Rule 4 「matrix に reference doc に未記載の variant が存在しない (存在すれば reference doc を先に更新)」 + 本 PRD Q4 (= ast-variants.md が single source of truth、INV-1) と整合するため、T11 を T8/T9/T10 の **prerequisite** に位置付け、doc が ground truth として code 改修の reference となる順序に修正。
+- **Completion criteria**: doc update 完了、本 file が以下条件 pass:
+  - 全 enum section の Tier 1 / Tier 2 / NA 区分が完全 enumerate (= reference doc 完全性、後続 T8/T9/T10 で本 doc を ground truth として code 改修)
+  - `audit-ast-variant-coverage.py` script の self-test fixture (T5 完了後) で本 doc が valid Tier 分類を持つことを verify (post-T5 Implementation 時の cross-check)
+- **Depends on**: T2 (Rule 10 wording 確定後 Tier 分類 logic を doc に反映), T1.5 (Decorator dispatch audit 結果次第で Decorator entry 内容確定)
 - **Prerequisites**: なし
 
 ### T12: regression lock-in tests + new feature tests + SWC parser empirical test
@@ -899,13 +948,25 @@ silent drop 解消による conversion 結果変化を以下 mechanism で struc
 | 22 | `audit-prd-rule10-compliance.py self-test (本 PRD doc)` | 本 PRD doc で Rule 10 Application section が存在 + structural reason の prohibited keywords 不在で pass |
 | 23 | `audit-ast-variant-coverage.py I-203 audit report` | 既存 codebase 全体の `_` arm 使用箇所 detection report 生成 (I-203 PRD の audit driven priority 判定 input) |
 
-### E2E fixtures (T12)
+### E2E fixtures (T12 + T0、Action 3 修正 2026-04-27 で全 cell 1-to-1 mapping 完全化)
 
-| # | Fixture path | Description |
-|---|--------------|-------------|
-| 24 | `tests/e2e/scripts/prd-2.7/static-block-typeof-narrow.ts` | StaticBlock 内 typeof narrow の golden output (expected: cargo run でnarrow 経路通過、stdout match) |
-| 25 | `tests/e2e/scripts/prd-2.7/object-literal-method-typeof-narrow.ts` | Prop::Method body 内 typeof narrow (TypeResolver visit 確認、Transformer は I-202 待ちで `UnsupportedSyntaxError::new("Prop::Method", span)` 経由 Err return) |
-| 26 | `tests/e2e/scripts/prd-2.7/auto-accessor-honest-error.ts` | AutoAccessor を含む TS source、Transformer で honest error 出力確認 |
+各 ✗ cell + 関連 cell に対応する E2E fixture の 1-to-1 mapping。T0 で作成済の 9 fixture (`tests/e2e/scripts/prd-2.7/cell-NN-...ts` + `.expected`) を Test entry に明示:
+
+| # | Cell | Fixture path | Description | Type |
+|---|------|--------------|-------------|------|
+| 24 | 6 | `tests/e2e/scripts/prd-2.7/cell-06-static-block-typeof-narrow.ts` | StaticBlock body 内 local 変数 typeof narrow が visit_block_stmt 経由 walk で narrow event push される、生成 Rust が narrow-aware emission (`if let / match`) で stdout `default-string-narrowed` を出力 (post-T8 改修後、cargo run vs tsc 一致) | E2E (cargo run vs tsc 一致) |
+| 25 | 7 | `tests/e2e/scripts/prd-2.7/cell-07-auto-accessor-honest-error.ts` | AutoAccessor を含む TS source の cargo run で Transformer が `UnsupportedSyntaxError::new("AutoAccessor", aa.span)` 経由 honest error を返す (= 既実装、format 統一後の verify) | Tier 2 honest error (E2E 不可、stderr verify) |
+| 26 | 10 | `tests/e2e/scripts/prd-2.7/cell-10-prop-keyvalue-regression.ts` | 既存 Prop::KeyValue handle の regression lock-in、cargo run vs tsc stdout 完全一致 (post-改修で behavior 不変) | E2E regression lock-in |
+| 27 | 11 | `tests/e2e/scripts/prd-2.7/cell-11-prop-shorthand-regression.ts` | 既存 Prop::Shorthand handle の regression lock-in、cargo run vs tsc stdout 完全一致 | E2E regression lock-in |
+| 28 | 12 | `tests/e2e/scripts/prd-2.7/cell-12-prop-method-typeof-narrow.ts` | Prop::Method body 内 typeof narrow (TypeResolver visit 確認、Transformer は I-202 待ちで `UnsupportedSyntaxError::new("Prop::Method", span)` 経由 Err return)、format 統一後の error message verify | Tier 2 honest error (stderr verify) |
+| 29 | 13 | `tests/e2e/scripts/prd-2.7/cell-13-prop-getter-typeof-narrow.ts` | Prop::Getter body 内 typeof narrow (TypeResolver visit + Transformer Tier 2 honest error format 統一) | Tier 2 honest error (stderr verify) |
+| 30 | 14 | `tests/e2e/scripts/prd-2.7/cell-14-prop-setter-typeof-narrow.ts` | Prop::Setter body 内 typeof narrow (TypeResolver visit + Transformer Tier 2 honest error format 統一) | Tier 2 honest error (stderr verify) |
+| 31 | 15 | `tests/e2e/scripts/prd-2.7/cell-15-prop-assign-na.ts` | Prop::Assign NA cell の spec-traceable evidence (destructuring default の valid example + comment で structural reason 明記)、SWC parser empirical reject は Test 20 で別途 verify | Spec-traceable evidence (NA) |
+| 32 | 17 | `tests/e2e/scripts/prd-2.7/cell-17-transformer-convert-object-lit-error.ts` | Transformer convert_object_lit の `_ => Err(anyhow!())` を `UnsupportedSyntaxError` 経由に format 統一後の verify | Tier 2 honest error (stderr verify) |
+
+**T0 (Spec stage、red 状態)**: 全 9 fixture + .expected 作成済 (2026-04-27)。Implementation stage で T8/T9/T10 改修後に各 fixture が green 化 (cell 6/10/11) または stderr format 統一 (cell 7/12/13/14/17) または NA 維持 (cell 15)。
+
+**E2E test runner integration**: `tests/e2e_test.rs` に各 fixture の test 関数 (`run_e2e_test("prd-2.7/cell-06-static-block-typeof-narrow")` 等) を Implementation stage T12 で追加。Tier 2 honest error cell (cell 7/12/13/14/17) は stderr + exit code verify を `assert_unsupported_syntax!` 等の helper で integrate (要 helper 追加 or `tests/integration_test.rs` 経由 verify)。
 
 ### Hono bench regression check (T14)
 
@@ -958,6 +1019,27 @@ Cross-axis orthogonal direction enumerated: yes
 Structural reason for matrix absence: N/A (matrix-driven PRD)
 ```
 
+### 8 default check axis NA reason (Action 2 修正 2026-04-27、Rule 10 三度目 review で明示化)
+
+`spec-stage-adversarial-checklist.md` Rule 10 の **8 default check axis** のうち、本 PRD scope (= AST traversal coverage) で applicable / NA を明示:
+
+| # | Axis | 状態 | Reason |
+|---|------|------|--------|
+| (a) | Trigger condition (operator / syntax-form) | **Applicable** | Layer A (AST node iterate target = ClassMember / Prop) として enumerate 済 |
+| (b) | Operand type variants | **Applicable** | matrix cell 1-15 で各 variant individually enumerate 済 |
+| (c) | Guard variant (typeof / equality / instanceof / truthy) | **NA** | 本 PRD は AST traversal coverage (= dispatch arm completeness)、guard variant は runtime narrow framework の dimension で本 PRD scope orthogonal |
+| (d) | Body shape (block / expr / single-stmt / empty) | **NA** | 同上、本 PRD は static AST traversal、body shape は runtime emission dimension で orthogonal |
+| (e) | Closure-reassign 有無 | **NA** | 本 PRD は visit 経路追加 + dispatch arm coverage、closure-reassign は runtime mutation propagation dimension で orthogonal (PRD 3 = I-177 mutation propagation で扱う) |
+| (f) | Early-return 有無 | **NA** | 同上、early-return は narrow emission dimension (PRD 4 = I-177-A で扱う) |
+| (g) | Outer emission context (return / assign target / call arg / branch arm) | **NA** | 本 PRD は TypeResolver visit 経路 + Transformer Tier 2 honest error の dispatch coverage、outer emission context は Transformer Tier 1 完全 emission strategy の dimension (= I-202 別 PRD で object literal context 完全 emission を扱う) |
+| (h) | Control-flow exit (4 sub-case) | **NA** | Rule 7 で明示 (= AST traversal coverage は control-flow exit dimension と orthogonal) |
+
+**Cross-axis 直交軸 (8 default + 機能依存)**:
+- 機能依存 axis (本 PRD 固有): Layer C (doc spec status) / Layer D (rule 適用範囲) / Layer E (enforcement mechanism、structural enforcement vs 人間判断介在)
+- 8 default axis のうち applicable な (a) + (b) は Layer A + matrix cell に integrate
+
+→ **本 PRD scope は AST traversal coverage で 5 axis (c-g) が naturally NA**、各々の NA reason は spec-traceable (= 本 PRD は static analysis の dispatch coverage、runtime narrow / mutation / emission strategy は別 PRD で扱う orthogonal concern)。
+
 ---
 
 ## Defect Classification (Self-applied、D9 修正 2026-04-27)
@@ -998,15 +1080,37 @@ Structural reason for matrix absence: N/A (matrix-driven PRD)
 
 → 2 度目 review で発見した defect は全て Implementation gap (= 修正大規模時の sync 漏れ)。Spec gap が 0 = framework reinforced による spec 完成度の向上を確認。
 
-### 全体 summary (Spec stage Discovery → 1 度目 → 2 度目 trajectory)
+### 3 度目 review (`/check_job` Spec stage 10-rule 全項目 verification、2026-04-27) で発見した defect
+
+| Category | Count | Defects | 修正 |
+|----------|-------|---------|------|
+| Grammar gap | 0 | — | — |
+| Oracle gap | 0 | — | — |
+| **Spec gap** | **1 (= Action 1)** | Action 1: T11 (`ast-variants.md` update) Depends on T8/T9/T10 = doc を code 後 sync = `spec-stage-adversarial-checklist.md` Rule 4 violation + Q4 (single source of truth、INV-1) 違反 | T11 Depends on を T2/T1.5 に変更 + T8/T9/T10 Prerequisites に T11 追加 (doc-first dependency order)、framework 改善検討として Q6 (Rule 4 拡張) を本 PRD scope に integrate |
+| Implementation gap | 0 | — | — |
+| Review insight | 3 (Action 2-4) | Rule 10 8-axis NA reason explicit 化 / Test entry 24-26 → 24-32 で 1-to-1 mapping 完全化 / Spec Review Checklist Rule 7-10 wording precise verification 詳細化 | 全 fix 済 |
+
+→ **Spec gap × 1 件 発見** = framework 失敗 signal (= 本 PRD draft + 1 度目 + 2 度目 review で Rule 4 application 不足が 3 度漏れた)。**framework 改善検討 (Q6) を本 PRD scope に integrate** することで本質的解決:
+- `spec-stage-adversarial-checklist.md` Rule 4 wording 拡張 (sub-rule (4-2) doc-first dependency order + (4-3) audit script auto verify)
+- `scripts/audit-prd-rule10-compliance.py` (T6) で Task List dependency chain auto verify 追加
+- 本 PRD 自体が Rule 4 改修の first-class adopter (T11 を T8/T9/T10 prerequisite に位置付け、self-evidence)
+
+### 全体 summary (Spec stage Discovery → 1 度目 → 2 度目 → 3 度目 trajectory)
 
 | Stage | Spec gap | Implementation gap | Review insight |
 |-------|---------|-------------------|----------------|
 | Spec stage Discovery (Q1-Q5) | 5 (framework signal) | 0 | 6 |
 | 1 度目 review | 3 (= C1, C2, C5) | 3 (= C3, C4, C6) | 6 (= M1-M6) |
-| **2 度目 review** | **0** | **6 (= D1-D6)** | **1 (= D9)** |
+| 2 度目 review | 0 | 6 (= D1-D6) | 1 (= D9) |
+| **3 度目 review (`/check_job`)** | **1 (= Action 1、framework 失敗 signal)** | **0** | **3 (= Action 2-4)** |
 
-→ Spec gap chain は **5 → 3 → 0** で reduce、framework 改修 (Rule 10(d) + Mandatory 化) の structural enforcement が始発で機能していることを confirm。Implementation gap は修正大規模時の sync 漏れで本質的に避け難いが、本 PRD 自体への audit script (T5 + T6) 適用後の merge gate で自動検出可能。
+→ Spec gap chain は **5 → 3 → 0 → 1** の trajectory。3 度目 review で +1 = 1 度目 + 2 度目 で発見されなかった Rule 4 application の Spec gap が `/check_job` 4-layer 相当の Spec stage 10-rule full verification で初めて検出。**framework 改善検討 (Q6) で本 PRD scope に integrate** することで再帰的に Rule 4 改修を達成、本 PRD 自体が改修後 Rule 4 の first-class adopter として self-applied verify。
+
+**Spec gap detail (3 度目 review、framework 失敗 signal)**:
+- Defect: 本 PRD draft 時の T11 Depends on T8/T9/T10 = doc を code 後 sync 設計
+- Trace: `spec-stage-adversarial-checklist.md` Rule 4 entry 確認 ✓ + Q4 (single source of truth) 確認 ✓、両者の整合 verification を PRD draft + 1 度目 + 2 度目 review で実施せず → enumerate 漏れ = Spec gap
+- Framework 改善検討: Rule 4 wording に "doc-first dependency order の structural enforcement + audit script auto verify" を追加 (Q6)、本 PRD scope に integrate (1 PRD = 1 architectural concern の "framework Rule 改修" cohesive concern 内、Q4/Q5/Q6 の 3 rule 改修を統合)
+- Self-evidence: 本 PRD 自体が Rule 4 改修の first-class adopter として、T11 の dependency 修正 + Rule 4 application section の追加で self-applied verify
 
 ---
 
@@ -1016,7 +1120,8 @@ Structural reason for matrix absence: N/A (matrix-driven PRD)
 - **Q2 (Object literal Prop::Method/Getter/Setter)**: (a) Symmetric resolve (TypeResolver visit only、本 PRD) + Transformer 完全 emission を I-202 で別 PRD 化 ((d) 構造分離)
 - **Q3 (Prop::Assign)**: NA cell + lock-in test (triple ideal 自動達成、本 PRD 内完結、別 PRD 不要)
 - **Q4 (Rule 10(d) AST node enumerate completeness check)**: `_` arm 全面禁止 + 既存 `UnsupportedSyntaxError` mechanism (`src/transformer/mod.rs:193-219`) を Transformer Tier 2 variant arm で統一適用 (C1 修正 2026-04-27、新規 macro 作成は不要 = DRY 違反回避) + TypeResolver は明示 no-op (Rule 10(d-2) phase 別役割分担、C4 修正) + NA cell は `unreachable!()` (C3 修正) + ast-variants.md single source of truth + audit script CI 化 (本 PRD)。既存 codebase 全体の `_` arm refactor は I-203 で別 PRD 化 ((d) 構造分離)
-- **Q5 (Rule 10 Mandatory 化)**: 全 PRD Mandatory + structural reason 明示 (Permitted reasons + Prohibited keywords list) + Cross-axis 軸独立 enumerate + machine-parseable format + skill hard-code + audit script CI merge gate (本 PRD)。人間判断介在 0、妥協の逃げ道 structural 排除
+- **Q5 (Rule 10 Mandatory 化)**: 全 PRD Mandatory + structural reason 明示 (Permitted reasons + Prohibited keywords list) + Cross-axis 軸独立 enumerate + machine-parseable format + skill hard-code + audit script CI merge gate (本 PRD)。人間判断介在 0、妥協の逃げ 道 structural 排除
+- **Q6 (Rule 4 doc-first dependency order、Action 5 修正 2026-04-27、3 度目 `/check_job` review で発見した Spec gap × 1 件の framework 改善検討の本質対応)**: `spec-stage-adversarial-checklist.md` Rule 4 wording 拡張で **doc update task が code 改修 task の prerequisite** という dependency order を structural enforcement。元 PRD draft 時に T11 (`ast-variants.md` update) が T8/T9/T10 (code 改修) の **後** に位置していた = single source of truth (Q4) 違反 = Rule 4 違反 = Spec gap が 3 度目 review で発覚。本 self-evidence を起点に Rule 4 改修を本 PRD scope に integrate (= 1 PRD = 1 architectural concern の "framework Rule 改修" cohesive concern 内、Q4/Q5 と integrate)、`audit-prd-rule10-compliance.py` で Task List dependency chain auto verify を含む。
 
 ---
 
